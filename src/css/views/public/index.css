@@ -1,15 +1,33 @@
+/* =========================================================
+   ONION SUPPORT — PUBLIC HOME
+   Archivo: /src/css/views/public/index.css
+
+   LANDING PÚBLICA · PRODUCCIÓN · CONSOLIDADO 10/10
+
+   Contrato:
+   - .main-content es el ÚNICO scroll host real.
+   - La scrollbar nativa se oculta; .public-home-scrollbar es el rail visual.
+   - Sin !important.
+   - Sin bloques "final/fix/remate" apilados.
+   - Sin estilos legacy de templates que ya no existen.
+   - Responsive fluido: desktop, tablet y móvil.
+   - Compatible con el JS actual de /src/views/public/home/index.js.
+   - Compatible con la CSP actual y variables CSS dinámicas.
+========================================================= */
+
+
+/* =========================================================
+   1. DOCUMENT / SCROLL CONTRACT
+========================================================= */
+
 body.public-home-screen,
 body.auth-screen.public-home-screen {
   min-block-size: 100%;
-  margin: 0 !important;
-  overflow: hidden !important;
+  margin: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
   background: #030712;
   color: #eef6ff;
-}
-
-body.public-home-no-scroll,
-body.public-home-menu-open {
-  overflow: hidden;
 }
 
 html,
@@ -23,24 +41,33 @@ body.public-home-screen .app-shell {
 
 body.public-home-screen #app-shell,
 body.public-home-screen .app-shell {
+  block-size: 100vh;
+  block-size: 100svh;
   block-size: 100dvh;
   max-block-size: 100dvh;
-  overflow: hidden !important;
+  overflow: hidden;
 }
 
+/*
+   ÚNICO scroll real de la landing.
+   El core ya define .main-content como fixed; aquí sólo cerramos
+   el contrato específico de la home pública.
+*/
 body.public-home-screen #app-shell > .main-content,
 body.public-home-screen .app-shell > .main-content,
 body.public-home-screen .main-content {
-  position: relative;
+  inset: 0;
+  block-size: 100vh;
+  block-size: 100svh;
   block-size: 100dvh;
   max-block-size: 100dvh;
   min-block-size: 0;
-  overflow-y: scroll !important;
-  overflow-x: hidden !important;
+  overflow-y: auto;
+  overflow-x: hidden;
   overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
   scrollbar-gutter: auto;
   scrollbar-width: none;
-  scrollbar-color: transparent transparent;
   -ms-overflow-style: none;
 }
 
@@ -50,35 +77,18 @@ body.public-home-screen .main-content::-webkit-scrollbar {
   display: none;
   inline-size: 0;
   block-size: 0;
-  background: transparent;
 }
 
-body.public-home-screen #app-shell > .main-content::-webkit-scrollbar-track,
-body.public-home-screen .app-shell > .main-content::-webkit-scrollbar-track,
-body.public-home-screen .main-content::-webkit-scrollbar-track {
-  display: none;
-  inline-size: 0;
-  block-size: 0;
-  background: transparent;
+/* Bloqueo real del scroll interno cuando el menú móvil está abierto. */
+body.public-home-menu-open .main-content,
+body.public-home-no-scroll .main-content {
+  overflow-y: hidden;
 }
 
-body.public-home-screen #app-shell > .main-content::-webkit-scrollbar-thumb,
-body.public-home-screen .app-shell > .main-content::-webkit-scrollbar-thumb,
-body.public-home-screen .main-content::-webkit-scrollbar-thumb {
-  display: none;
-  inline-size: 0;
-  block-size: 0;
-  background: transparent;
-}
 
-body.public-home-screen #app-shell > .main-content::-webkit-scrollbar-thumb:hover,
-body.public-home-screen .app-shell > .main-content::-webkit-scrollbar-thumb:hover,
-body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
-  display: none;
-  inline-size: 0;
-  block-size: 0;
-  background: transparent;
-}
+/* =========================================================
+   2. PUBLIC AUTH SHELL OVERRIDES
+========================================================= */
 
 .public-auth-shell--home {
   --public-home-bg: #030712;
@@ -86,37 +96,49 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   --public-home-surface: rgb(8 18 34 / .78);
   --public-home-surface-strong: rgb(9 22 42 / .92);
   --public-home-card: rgb(9 20 38 / .76);
-  --public-home-card-hover: rgb(13 30 56 / .9);
+  --public-home-card-hover: rgb(13 30 56 / .90);
+
   --public-home-text: #eaf4ff;
   --public-home-text-strong: #ffffff;
   --public-home-text-soft: #b8c8dd;
   --public-home-text-muted: #8090a8;
+
   --public-home-accent: #1394ff;
   --public-home-accent-2: #34d4ff;
   --public-home-accent-3: #0b61ff;
   --public-home-success: #25d366;
   --public-home-danger: #ff5c75;
+
   --public-home-border: rgb(255 255 255 / .12);
-  --public-home-border-strong: rgb(75 184 255 / .4);
-  --public-home-shadow: 0 34px 110px rgb(0 0 0 / .52), 0 14px 44px rgb(19 148 255 / .12);
+  --public-home-border-strong: rgb(75 184 255 / .40);
+  --public-home-shadow:
+    0 34px 110px rgb(0 0 0 / .52),
+    0 14px 44px rgb(19 148 255 / .12);
+
   --public-home-radius-sm: 14px;
   --public-home-radius-md: 20px;
   --public-home-radius-lg: 28px;
   --public-home-radius-xl: 38px;
+
   --public-home-nav-height: 92px;
   --public-home-scroll-offset: 118px;
   --public-home-scroll-progress: 0;
+  --public-home-scroll-progress-percent: 0%;
+
   --public-home-shell-max: 1460px;
   --public-home-page-gutter: clamp(18px, 4vw, 72px);
+
   --public-home-brand-mark-size: 48px;
   --public-home-brand-logo-size: 34px;
   --public-home-brand-gap: 12px;
   --public-home-brand-name-size: clamp(20px, 2vw, 30px);
   --public-home-brand-subtitle-size: 11px;
+
   position: relative;
   display: block;
   inline-size: 100%;
-  min-block-size: 100vh;
+  min-block-size: 100%;
+  block-size: auto;
   padding: 0;
   overflow: visible;
   color: var(--public-home-text);
@@ -130,6 +152,12 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   box-sizing: border-box;
 }
 
+/* La landing pinta su propio background; anulamos el decorado del auth shell. */
+.public-auth-shell--home::before,
+.public-auth-shell--home::after {
+  content: none;
+}
+
 .public-auth-shell--home > .public-auth-background {
   display: none;
 }
@@ -138,20 +166,37 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   display: block;
   inline-size: 100%;
   block-size: auto;
-  min-block-size: 100vh;
+  min-block-size: 100%;
   max-block-size: none;
   overflow: visible;
 }
 
+
+/* =========================================================
+   3. ROOT / GLOBAL HOME
+========================================================= */
+
 .public-home {
   position: relative;
   isolation: isolate;
-  min-block-size: 100vh;
-  overflow: hidden;
+  min-block-size: 100%;
+  overflow-x: clip;
+  overflow-y: visible;
   color: var(--public-home-text);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
   background:
-    radial-gradient(circle at var(--public-home-pointer-x, 74%) var(--public-home-pointer-y, 18%), rgb(19 148 255 / .18), transparent 30%),
+    radial-gradient(
+      circle at var(--public-home-pointer-x, 74%) var(--public-home-pointer-y, 18%),
+      rgb(19 148 255 / .18),
+      transparent 30%
+    ),
     linear-gradient(135deg, #030712 0%, #071121 48%, #02040a 100%);
 }
 
@@ -173,8 +218,29 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
 
 .public-home ::selection {
   color: #ffffff;
-  background: rgb(19 148 255 / .5);
+  background: rgb(19 148 255 / .50);
 }
+
+.public-home [hidden] {
+  display: none;
+}
+
+.public-home a:focus-visible,
+.public-home button:focus-visible,
+.public-home input:focus-visible,
+.public-home select:focus-visible,
+.public-home textarea:focus-visible,
+.public-home summary:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 4px rgb(19 148 255 / .24),
+    0 0 0 1px rgb(52 212 255 / .52);
+}
+
+
+/* =========================================================
+   4. ICONS
+========================================================= */
 
 .public-home-icon {
   display: block;
@@ -197,10 +263,15 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   stroke: none;
 }
 
+
+/* =========================================================
+   5. GLOBAL BACKGROUND
+========================================================= */
+
 .public-home-background {
   position: fixed;
   inset: 0;
-  z-index: -2;
+  z-index: 0;
   pointer-events: none;
   overflow: hidden;
   background:
@@ -231,7 +302,7 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   inset-inline-end: -110px;
   inline-size: 470px;
   block-size: 470px;
-  background: rgb(52 212 255 / .2);
+  background: rgb(52 212 255 / .20);
 }
 
 .public-home-bg-orb--three {
@@ -265,23 +336,223 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   background-size: 96px 96px, 132px 132px;
 }
 
+
+/* =========================================================
+   6. CUSTOM SCROLLBAR
+   Visual solamente: el scroll real sigue viviendo en .main-content.
+========================================================= */
+
+.public-home-scrollbar {
+  --public-home-scrollbar-top: calc(var(--public-home-nav-height) + 14px);
+  --public-home-scrollbar-bottom: 18px;
+  --public-home-scrollbar-thumb-size: 86px;
+  --public-home-scrollbar-thumb-top: 0px;
+  --public-home-scrollbar-thumb-center: 0px;
+
+  position: fixed;
+  inset-block-start: var(--public-home-scrollbar-top);
+  inset-block-end: var(--public-home-scrollbar-bottom);
+  inset-inline-end: 9px;
+  z-index: 90;
+
+  inline-size: 14px;
+  overflow: hidden;
+
+  border: 1px solid rgb(91 218 255 / .34);
+  border-radius: 999px;
+
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / .045), rgb(255 255 255 / .015)),
+    rgb(1 7 16 / .88);
+
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / .045),
+    0 0 26px rgb(19 148 255 / .18),
+    inset 0 1px 0 rgb(255 255 255 / .16),
+    inset 0 -1px 0 rgb(0 0 0 / .38);
+
+  opacity: .96;
+  pointer-events: auto;
+  cursor: pointer;
+  touch-action: none;
+
+  backdrop-filter: blur(14px) saturate(1.12);
+  -webkit-backdrop-filter: blur(14px) saturate(1.12);
+
+  transition:
+    inline-size .18s ease,
+    opacity .18s ease,
+    border-color .18s ease,
+    box-shadow .18s ease,
+    transform .18s ease;
+}
+
+.public-home-scrollbar::before {
+  content: "";
+  position: absolute;
+  inset-inline: 3px;
+  inset-block-start: 3px;
+
+  block-size: var(--public-home-scroll-progress-percent, 0%);
+  max-block-size: calc(100% - 6px);
+
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      180deg,
+      rgb(168 242 255 / .68),
+      rgb(52 212 255 / .44) 38%,
+      rgb(19 148 255 / .72)
+    );
+
+  box-shadow:
+    0 0 18px rgb(52 212 255 / .28),
+    inset 0 1px 0 rgb(255 255 255 / .36);
+
+  opacity: .38;
+  pointer-events: none;
+  transition: block-size .08s linear, opacity .18s ease;
+}
+
+.public-home-scrollbar-thumb {
+  position: absolute;
+  inset-inline: 2px;
+  inset-block-start: var(--public-home-scrollbar-thumb-top, 0px);
+  z-index: 2;
+
+  display: block;
+  block-size: var(--public-home-scrollbar-thumb-size, 86px);
+
+  border: 1px solid rgb(214 250 255 / .44);
+  border-radius: 999px;
+
+  background:
+    radial-gradient(circle at 50% 16%, rgb(255 255 255 / .92), transparent 21%),
+    linear-gradient(180deg, #d9fbff 0%, #7aeaff 18%, #1394ff 58%, #075cff 100%);
+
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / .10),
+    0 0 24px rgb(168 242 255 / .72),
+    0 0 54px rgb(19 148 255 / .48),
+    inset 0 1px 0 rgb(255 255 255 / .78),
+    inset 0 -12px 22px rgb(0 32 94 / .34);
+
+  transform: translate3d(0, 0, 0);
+
+  transition:
+    inset-block-start .055s linear,
+    block-size .12s ease,
+    filter .18s ease,
+    box-shadow .18s ease;
+}
+
+.public-home-scrollbar-thumb::before,
+.public-home-scrollbar-thumb::after {
+  content: "";
+  position: absolute;
+  inset-inline: 3px;
+  pointer-events: none;
+}
+
+.public-home-scrollbar-thumb::before {
+  inset-block-start: 10px;
+  block-size: 2px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / .72);
+  box-shadow:
+    0 8px 0 rgb(255 255 255 / .32),
+    0 16px 0 rgb(255 255 255 / .20);
+}
+
+.public-home-scrollbar-thumb::after {
+  inset-block-end: 9px;
+  block-size: 8px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / .72), transparent);
+  opacity: .62;
+}
+
+.public-home.is-footer-visible .public-home-scrollbar {
+  opacity: .48;
+}
+
+.public-home.is-scrollbar-dragging .public-home-scrollbar {
+  inline-size: 18px;
+  border-color: rgb(168 242 255 / .82);
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / .08),
+    0 0 38px rgb(52 212 255 / .46),
+    0 0 90px rgb(19 148 255 / .32),
+    inset 0 1px 0 rgb(255 255 255 / .28);
+  transform: translateX(-1px);
+}
+
+.public-home.is-scrollbar-dragging .public-home-scrollbar::before {
+  opacity: .62;
+}
+
+.public-home.is-scrollbar-dragging .public-home-scrollbar-thumb {
+  cursor: grabbing;
+  filter: saturate(1.18) brightness(1.08);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .public-home-scrollbar:hover {
+    inline-size: 18px;
+    border-color: rgb(168 242 255 / .82);
+    box-shadow:
+      0 0 0 1px rgb(255 255 255 / .08),
+      0 0 38px rgb(52 212 255 / .46),
+      0 0 90px rgb(19 148 255 / .32),
+      inset 0 1px 0 rgb(255 255 255 / .28);
+    transform: translateX(-1px);
+  }
+
+  .public-home-scrollbar:hover::before {
+    opacity: .62;
+  }
+
+  .public-home-scrollbar:hover .public-home-scrollbar-thumb {
+    cursor: grab;
+    filter: saturate(1.18) brightness(1.08);
+  }
+}
+
+
+/* =========================================================
+   7. NAVIGATION
+========================================================= */
+
 .public-home-nav {
   position: fixed;
   inset-block-start: 0;
   inset-inline: 0;
   z-index: 70;
+
   inline-size: 100%;
   min-block-size: var(--public-home-nav-height);
   padding: 18px var(--public-home-page-gutter);
+
   border-block-end: 1px solid rgb(255 255 255 / .10);
   background: rgb(3 7 18 / .82);
+
   box-shadow: 0 18px 54px rgb(0 0 0 / .34);
   backdrop-filter: blur(24px) saturate(1.22);
   -webkit-backdrop-filter: blur(24px) saturate(1.22);
+
+  transition:
+    transform .28s ease,
+    opacity .22s ease,
+    visibility .22s ease,
+    background .22s ease,
+    box-shadow .22s ease;
 }
 
-.public-home-nav-progress {
-  display: none;
+.public-home-nav.is-scrolled {
+  background: rgb(3 7 18 / .92);
+  box-shadow:
+    0 18px 58px rgb(0 0 0 / .42),
+    0 1px 0 rgb(52 212 255 / .06);
 }
 
 .public-home-nav-inner {
@@ -289,14 +560,17 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   align-items: center;
   justify-content: space-between;
   gap: 24px;
+
   inline-size: min(100%, var(--public-home-shell-max));
   margin-inline: auto;
 }
 
-.public-home-brand {
+.public-home-brand,
+.public-home-footer-brand {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--public-home-brand-gap);
+  min-block-size: var(--public-home-brand-mark-size);
   min-inline-size: max-content;
   color: var(--public-home-text-strong);
 }
@@ -305,23 +579,31 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   position: relative;
   display: inline-grid;
   place-items: center;
-  flex: 0 0 auto;
-  inline-size: 48px;
-  block-size: 48px;
+  flex: 0 0 var(--public-home-brand-mark-size);
+
+  inline-size: var(--public-home-brand-mark-size);
+  block-size: var(--public-home-brand-mark-size);
+  aspect-ratio: 1 / 1;
+
+  overflow: hidden;
   border: 1px solid rgb(255 255 255 / .16);
   border-radius: 18px;
-  overflow: hidden;
+
   background:
     radial-gradient(circle at 30% 18%, rgb(255 255 255 / .36), transparent 32%),
     linear-gradient(135deg, var(--public-home-accent), var(--public-home-accent-3));
-  box-shadow: 0 14px 34px rgb(19 148 255 / .26), inset 0 1px 0 rgb(255 255 255 / .22);
+
+  box-shadow:
+    0 14px 34px rgb(19 148 255 / .26),
+    inset 0 1px 0 rgb(255 255 255 / .22);
 }
 
 .public-home-brand-mark::after {
   content: "";
   position: absolute;
   inset: -40%;
-  background: linear-gradient(45deg, transparent 42%, rgb(255 255 255 / .28), transparent 58%);
+  background:
+    linear-gradient(45deg, transparent 42%, rgb(255 255 255 / .28), transparent 58%);
   transform: translateX(-40%);
 }
 
@@ -329,8 +611,11 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   position: relative;
   z-index: 1;
   display: block;
-  inline-size: 34px;
-  block-size: 34px;
+
+  inline-size: var(--public-home-brand-logo-size);
+  block-size: var(--public-home-brand-logo-size);
+  aspect-ratio: 1 / 1;
+
   object-fit: contain;
   filter: drop-shadow(0 8px 16px rgb(0 0 0 / .25));
 }
@@ -345,20 +630,19 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   display: inline-flex;
   align-items: baseline;
   color: #ffffff;
-  font-size: clamp(20px, 2vw, 30px);
+  font-size: var(--public-home-brand-name-size);
   font-weight: 950;
   letter-spacing: -.045em;
 }
 
 .public-home-brand-name strong,
-.public-home-title span,
-.public-home-terminal-row .is-blue {
+.public-home-title span {
   color: var(--public-home-accent);
 }
 
 .public-home-brand-subtitle {
   color: var(--public-home-text-soft);
-  font-size: 11px;
+  font-size: var(--public-home-brand-subtitle-size);
   font-weight: 850;
   letter-spacing: .055em;
   text-transform: uppercase;
@@ -383,13 +667,16 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   position: relative;
   display: inline-flex;
   align-items: center;
+
   min-block-size: 42px;
   padding: 0 10px;
+
   color: var(--public-home-text-soft);
   font-size: 15px;
   font-weight: 780;
   letter-spacing: -.018em;
-  transition: color .2s ease, text-shadow .2s ease;
+
+  transition: color .2s ease, text-shadow .2s ease, background .2s ease;
 }
 
 .public-home-nav-link::after {
@@ -397,11 +684,14 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   position: absolute;
   inset-inline: 10px;
   inset-block-end: 2px;
+
   block-size: 2px;
   border-radius: 999px;
+
   background: linear-gradient(90deg, var(--public-home-accent), var(--public-home-accent-2));
   opacity: 0;
   transform: scaleX(.36);
+
   transition: opacity .2s ease, transform .2s ease;
 }
 
@@ -429,16 +719,25 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+
   min-block-size: 44px;
   padding: 0 16px;
+
   border: 1px solid rgb(255 255 255 / .13);
   border-radius: 14px;
+
   color: var(--public-home-text-soft);
   background: rgb(255 255 255 / .035);
+
   font-size: 14px;
   font-weight: 860;
   letter-spacing: -.012em;
-  transition: color .2s ease, border-color .2s ease, background .2s ease, transform .2s ease;
+
+  transition:
+    color .2s ease,
+    border-color .2s ease,
+    background .2s ease,
+    transform .2s ease;
 }
 
 .public-home-login-link:hover {
@@ -453,25 +752,39 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
 .public-home-price-link {
   position: relative;
   isolation: isolate;
+
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
+
   min-block-size: 48px;
   padding: 0 20px;
+
   overflow: hidden;
   border: 1px solid rgb(255 255 255 / .16);
   border-radius: 16px;
+
   color: #ffffff;
   background:
     radial-gradient(circle at 30% 0%, rgb(255 255 255 / .34), transparent 34%),
     linear-gradient(135deg, var(--public-home-accent), var(--public-home-accent-3));
-  box-shadow: 0 18px 38px rgb(19 148 255 / .28), inset 0 1px 0 rgb(255 255 255 / .22);
+
+  box-shadow:
+    0 18px 38px rgb(19 148 255 / .28),
+    inset 0 1px 0 rgb(255 255 255 / .22);
+
   font-weight: 920;
   letter-spacing: -.018em;
   text-shadow: 0 1px 1px rgb(0 0 0 / .18);
   cursor: pointer;
-  transition: transform .18s ease, filter .2s ease, box-shadow .2s ease;
+
+  transition:
+    transform .18s ease,
+    filter .2s ease,
+    box-shadow .2s ease,
+    border-color .2s ease,
+    background .2s ease;
 }
 
 .public-home-nav-cta::before,
@@ -481,8 +794,11 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   position: absolute;
   inset: -60% -30%;
   z-index: -1;
-  background: linear-gradient(115deg, transparent 38%, rgb(255 255 255 / .24), transparent 62%);
+
+  background:
+    linear-gradient(115deg, transparent 38%, rgb(255 255 255 / .24), transparent 62%);
   transform: translateX(-60%);
+
   transition: transform .55s ease;
 }
 
@@ -491,7 +807,9 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
 .public-home-price-link:hover {
   transform: translateY(-2px);
   filter: saturate(1.12);
-  box-shadow: 0 22px 48px rgb(19 148 255 / .36), inset 0 1px 0 rgb(255 255 255 / .28);
+  box-shadow:
+    0 22px 48px rgb(19 148 255 / .36),
+    inset 0 1px 0 rgb(255 255 255 / .28);
 }
 
 .public-home-nav-cta:hover::before,
@@ -514,13 +832,16 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
 }
 
 .public-home-nav-toggle {
-  display: none;
   position: relative;
+  display: none;
   flex: 0 0 auto;
+
   inline-size: 48px;
   block-size: 48px;
+
   border: 1px solid rgb(255 255 255 / .14);
   border-radius: 16px;
+
   color: #ffffff;
   background: rgb(255 255 255 / .055);
   cursor: pointer;
@@ -554,6 +875,27 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   transform: scale(1) rotate(0deg);
 }
 
+.public-home.is-footer-visible .public-home-nav,
+.public-home-nav.is-footer-visible {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate3d(0, calc(-1 * var(--public-home-nav-height) - 18px), 0);
+}
+
+body.public-home-menu-open .public-home.is-footer-visible .public-home-nav,
+body.public-home-menu-open .public-home-nav.is-footer-visible {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translate3d(0, 0, 0);
+}
+
+
+/* =========================================================
+   8. CONTENT / SECTION SYSTEM
+========================================================= */
+
 .public-home-content {
   position: relative;
   z-index: 1;
@@ -572,9 +914,11 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   display: grid;
   justify-items: center;
   gap: 16px;
+
   max-inline-size: 900px;
   margin-inline: auto;
   margin-block-end: clamp(32px, 5vw, 62px);
+
   text-align: center;
 }
 
@@ -609,85 +953,88 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   text-transform: uppercase;
 }
 
+.public-home-services,
+.public-home-method,
+.public-home-prices,
+.public-home-contact,
+.public-home-faq {
+  padding-block: clamp(74px, 10vw, 136px);
+}
+
+
+/* =========================================================
+   9. HERO
+========================================================= */
+
 .public-home-hero {
   inline-size: 100%;
   max-inline-size: none;
-  min-block-size: calc(100vh - var(--public-home-nav-height));
-  padding: clamp(78px, 8vw, 124px) clamp(18px, 4vw, 72px) clamp(64px, 7vw, 112px);
+
+  min-block-size: calc(100svh - var(--public-home-nav-height));
+
+  padding:
+    clamp(10px, 2vw, 28px)
+    var(--public-home-page-gutter)
+    clamp(46px, 5.6vw, 86px);
+
+  overflow: clip;
+  background: transparent;
 }
 
 .public-home-hero-bg {
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background:
-    radial-gradient(circle at 72% 18%, rgb(19 148 255 / .22), transparent 34%),
-    radial-gradient(circle at 12% 12%, rgb(52 212 255 / .10), transparent 30%),
-    linear-gradient(90deg, rgb(3 7 18 / 1) 0%, rgb(3 7 18 / .98) 42%, rgb(3 10 20 / .96) 100%);
+  display: none;
 }
 
 .public-home-hero-grid {
   display: grid;
-  grid-template-columns: minmax(0, .98fr) minmax(420px, .92fr);
+  grid-template-columns: minmax(0, 1.05fr) minmax(430px, .72fr);
   align-items: center;
-  gap: clamp(34px, 5vw, 92px);
-  inline-size: min(100%, 1460px);
-  min-block-size: min(760px, calc(100vh - 210px));
+  gap: clamp(30px, 4vw, 76px);
+
+  inline-size: min(100%, var(--public-home-shell-max));
+  min-block-size: min(650px, calc(100svh - 124px));
+
   margin-inline: auto;
 }
 
 .public-home-hero-copy {
   position: relative;
   z-index: 2;
+
   display: grid;
   justify-items: start;
-  gap: clamp(18px, 2.2vw, 28px);
-}
+  gap: clamp(20px, 2.35vw, 34px);
 
-.public-home-kicker {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  margin: 0;
-  padding: 9px 13px;
-  border: 1px solid rgb(75 184 255 / .22);
-  border-radius: 999px;
-  color: var(--public-home-accent-2);
-  background: rgb(19 148 255 / .08);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / .08);
-  font-size: 13px;
-  font-weight: 920;
-  letter-spacing: .055em;
-  line-height: 1.2;
-  text-transform: uppercase;
-}
-
-.public-home-kicker .public-home-icon {
-  inline-size: 17px;
-  block-size: 17px;
+  min-inline-size: 0;
 }
 
 .public-home-title {
-  max-inline-size: 880px;
+  max-inline-size: 980px;
   margin: 0;
+  padding-block: .07em .09em;
+
   color: #ffffff;
   font-size: clamp(54px, 7.4vw, 118px);
   font-weight: 1000;
-  line-height: .86;
-  letter-spacing: -.088em;
+  line-height: .98;
+  letter-spacing: -.078em;
   text-transform: uppercase;
   text-wrap: balance;
 }
 
 .public-home-title span {
   display: block;
-  text-shadow: 0 0 32px rgb(19 148 255 / .28), 0 0 72px rgb(19 148 255 / .14);
+  margin-block-start: .12em;
+
+  text-shadow:
+    0 0 32px rgb(19 148 255 / .28),
+    0 0 72px rgb(19 148 255 / .14);
 }
 
 .public-home-hero-text {
-  max-inline-size: 740px;
+  max-inline-size: 760px;
   margin: 0;
+
   color: var(--public-home-text);
   font-size: clamp(17px, 1.7vw, 21px);
   font-weight: 650;
@@ -711,13 +1058,20 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
 .public-home-button--secondary {
   border-color: rgb(75 184 255 / .30);
   color: #ffffff;
-  background: linear-gradient(180deg, rgb(255 255 255 / .055), rgb(255 255 255 / .025)), rgb(5 14 27 / .74);
-  box-shadow: 0 18px 38px rgb(0 0 0 / .20), inset 0 1px 0 rgb(255 255 255 / .10);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / .055), rgb(255 255 255 / .025)),
+    rgb(5 14 27 / .74);
+
+  box-shadow:
+    0 18px 38px rgb(0 0 0 / .20),
+    inset 0 1px 0 rgb(255 255 255 / .10);
 }
 
 .public-home-button--secondary:hover {
   border-color: rgb(75 184 255 / .58);
-  background: linear-gradient(180deg, rgb(19 148 255 / .16), rgb(19 148 255 / .06)), rgb(5 14 27 / .84);
+  background:
+    linear-gradient(180deg, rgb(19 148 255 / .16), rgb(19 148 255 / .06)),
+    rgb(5 14 27 / .84);
   transform: translateY(-2px);
 }
 
@@ -726,6 +1080,7 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   align-items: center;
   flex-wrap: wrap;
   gap: 14px 22px;
+
   margin: 0;
   padding: 0;
   list-style: none;
@@ -735,6 +1090,7 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   display: inline-flex;
   align-items: center;
   gap: 9px;
+
   color: var(--public-home-text);
   font-size: 15px;
   font-weight: 820;
@@ -743,10 +1099,13 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
 .public-home-trust-icon {
   display: grid;
   place-items: center;
+
   inline-size: 34px;
   block-size: 34px;
+
   border: 1px solid rgb(75 184 255 / .18);
   border-radius: 12px;
+
   color: var(--public-home-accent);
   background: rgb(19 148 255 / .08);
 }
@@ -756,299 +1115,495 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   block-size: 18px;
 }
 
-.public-home-hero-visual {
-  position: relative;
-  min-block-size: clamp(560px, 60vw, 720px);
+.public-home-trust-item--blue,
+.public-home-trust-item--blue > span:last-child {
+  color: var(--public-home-accent);
+  text-shadow: 0 0 24px rgb(19 148 255 / .30);
 }
 
-.public-home-profile-card {
+.public-home-trust-item--blue .public-home-trust-icon {
+  color: var(--public-home-accent-2);
+  border-color: rgb(75 184 255 / .36);
+  background: rgb(19 148 255 / .14);
+}
+
+
+/* =========================================================
+   10. PROFESSIONAL PROFILE CARD
+========================================================= */
+
+.public-home-hero-visual,
+.public-home-hero-visual--profile {
+  position: relative;
+  justify-self: end;
+
+  inline-size: min(100%, 580px);
+  max-inline-size: 580px;
+  min-inline-size: 0;
+  min-block-size: clamp(654px, 44vw, 716px);
+
+  perspective: 1200px;
+}
+
+.public-home-profile-card--command {
   position: absolute;
   inset: 0;
+
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: 52px minmax(0, 1fr) 54px;
+
+  inline-size: 100%;
+  min-inline-size: 0;
+
   overflow: hidden;
-  border: 1px solid rgb(255 255 255 / .13);
-  border-radius: clamp(28px, 4vw, 48px);
+
+  border: 1px solid rgb(75 184 255 / .34);
+  border-radius: clamp(28px, 3vw, 38px);
+
   color: var(--public-home-text);
+
   background:
-    radial-gradient(circle at var(--card-pointer-x, 62%) var(--card-pointer-y, 16%), rgb(19 148 255 / .34), transparent 34%),
-    radial-gradient(circle at 72% 78%, rgb(52 212 255 / .14), transparent 32%),
-    linear-gradient(135deg, rgb(10 24 44 / .92), rgb(3 6 14 / .98));
-  box-shadow: var(--public-home-shadow), inset 0 1px 0 rgb(255 255 255 / .12);
+    radial-gradient(
+      circle at var(--card-pointer-x, 30%) var(--card-pointer-y, 14%),
+      rgb(52 212 255 / .21),
+      transparent 30%
+    ),
+    radial-gradient(circle at 94% 20%, rgb(19 148 255 / .22), transparent 34%),
+    radial-gradient(circle at 18% 92%, rgb(52 212 255 / .10), transparent 36%),
+    linear-gradient(145deg, rgb(10 25 46 / .98), rgb(3 8 18 / .99) 64%, rgb(2 5 12 / .99));
+
+  box-shadow:
+    0 36px 110px rgb(0 0 0 / .54),
+    0 0 90px rgb(19 148 255 / .18),
+    inset 0 1px 0 rgb(255 255 255 / .16);
+
   transform: translateZ(0);
 }
 
-.public-home-profile-card::before {
+.public-home-profile-card--command::before,
+.public-home-profile-card--command::after {
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background:
-    linear-gradient(90deg, transparent 0 40%, rgb(52 212 255 / .15) 41%, transparent 42% 100%),
-    linear-gradient(180deg, rgb(255 255 255 / .08), transparent 48%);
-  opacity: .66;
 }
 
-.public-home-profile-card::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: .24;
+.public-home-profile-card--command::before {
+  opacity: .58;
+  background:
+    linear-gradient(
+      90deg,
+      transparent 0 44%,
+      rgb(52 212 255 / .15) 45%,
+      transparent 47% 100%
+    ),
+    linear-gradient(180deg, rgb(255 255 255 / .10), transparent 40%);
+}
+
+.public-home-profile-card--command::after {
+  opacity: .20;
   background:
     linear-gradient(90deg, rgb(255 255 255 / .045) 1px, transparent 1px),
     linear-gradient(180deg, rgb(255 255 255 / .04) 1px, transparent 1px);
-  background-size: 64px 64px;
+  background-size: 56px 56px;
+  mask-image: radial-gradient(circle at 50% 22%, black, transparent 82%);
+  -webkit-mask-image: radial-gradient(circle at 50% 22%, black, transparent 82%);
 }
 
-.public-home-profile-top,
-.public-home-profile-body,
-.public-home-profile-bottom {
+.public-home-profile-card--command .public-home-profile-top,
+.public-home-profile-card--command .public-home-profile-command,
+.public-home-profile-card--command .public-home-profile-bottom {
   position: relative;
   z-index: 2;
+  min-inline-size: 0;
 }
 
 .public-home-profile-top {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-block-size: 58px;
-  padding-inline: 22px;
-  border-block-end: 1px solid rgb(255 255 255 / .08);
+
+  min-block-size: 52px;
+  padding-inline: 20px;
+
+  border-block-end: 1px solid rgb(255 255 255 / .09);
+  background: linear-gradient(180deg, rgb(255 255 255 / .05), transparent);
 }
 
-.public-home-profile-top span {
-  display: block;
-  inline-size: 10px;
-  block-size: 10px;
+.public-home-profile-top > span {
+  inline-size: 9px;
+  block-size: 9px;
   border-radius: 999px;
   background: var(--public-home-accent-2);
 }
 
-.public-home-profile-top span:nth-child(2) {
+.public-home-profile-top > span:nth-child(2) {
   background: var(--public-home-accent);
 }
 
-.public-home-profile-top span:nth-child(3) {
+.public-home-profile-top > span:nth-child(3) {
   background: var(--public-home-success);
 }
 
 .public-home-profile-top strong {
   margin-inline-start: auto;
+  max-inline-size: 58%;
+
+  overflow: hidden;
   color: #ffffff;
-  font-size: 13px;
+
+  font-size: 11px;
   font-weight: 1000;
-  letter-spacing: .12em;
+  letter-spacing: .14em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.public-home-profile-body {
+.public-home-profile-command {
   display: grid;
-  grid-template-columns: minmax(190px, .72fr) minmax(0, 1fr);
-  align-items: stretch;
-  gap: clamp(20px, 3vw, 34px);
-  padding: clamp(24px, 4vw, 42px);
+  grid-template-rows: auto auto auto;
+  align-content: start;
+  gap: 16px;
+
+  min-block-size: 0;
+  padding: clamp(18px, 1.75vw, 24px);
+  overflow: visible;
 }
 
-.public-home-profile-media,
-.public-home-profile-copy,
-.public-home-profile-metrics > div {
-  border: 1px solid rgb(75 184 255 / .22);
+.public-home-command-hero,
+.public-home-command-stat,
+.public-home-command-checklist {
+  border: 1px solid rgb(75 184 255 / .28);
   background:
-    radial-gradient(circle at 40% 0%, rgb(19 148 255 / .18), transparent 44%),
-    linear-gradient(180deg, rgb(255 255 255 / .065), rgb(255 255 255 / .02)),
-    rgb(7 16 30 / .68);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / .08);
+    radial-gradient(circle at 42% 0%, rgb(52 212 255 / .13), transparent 44%),
+    linear-gradient(180deg, rgb(255 255 255 / .07), rgb(255 255 255 / .025)),
+    rgb(7 18 34 / .72);
+
+  box-shadow:
+    0 18px 50px rgb(0 0 0 / .26),
+    inset 0 1px 0 rgb(255 255 255 / .12);
+
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
 }
 
-.public-home-profile-media {
+.public-home-command-hero {
   position: relative;
+  z-index: 4;
+
   display: grid;
-  align-items: end;
-  min-block-size: 420px;
+  grid-template-columns: minmax(172px, 196px) minmax(0, 1fr);
+  align-items: stretch;
+  gap: clamp(16px, 1.6vw, 22px);
+
+  min-block-size: 264px;
+  min-inline-size: 0;
+  padding: 18px;
+
   overflow: hidden;
   border-radius: 28px;
 }
 
-.public-home-profile-media::before {
-  content: "";
-  position: absolute;
-  inset: 18px 18px auto auto;
-  inline-size: 86px;
-  block-size: 86px;
-  border: 1px solid rgb(52 212 255 / .32);
-  border-radius: 999px;
-  background: radial-gradient(circle, rgb(52 212 255 / .22), transparent 66%);
-  box-shadow: 0 0 54px rgb(52 212 255 / .18);
+.public-home-command-portrait {
+  position: relative;
+  display: block;
+
+  min-block-size: 228px;
+  min-inline-size: 0;
+
+  overflow: hidden;
+
+  border: 1px solid rgb(75 184 255 / .34);
+  border-radius: 22px;
+
+  background: linear-gradient(180deg, rgb(6 20 38 / .96), rgb(2 7 16 / .98));
+
+  box-shadow:
+    0 18px 44px rgb(0 0 0 / .34),
+    inset 0 1px 0 rgb(255 255 255 / .12);
 }
 
-.public-home-profile-photo-frame {
+.public-home-command-photo {
   position: absolute;
   inset: 0;
-  display: grid;
-  align-items: end;
-  overflow: hidden;
-}
-
-.public-home-profile-photo-frame::after {
-  content: "";
-  position: absolute;
-  inset: auto 0 0;
-  block-size: 42%;
-  background: linear-gradient(180deg, transparent, rgb(2 6 14 / .84));
-}
-
-.public-home-profile-photo {
-  position: relative;
   z-index: 1;
+
   display: block;
   inline-size: 100%;
   block-size: 100%;
+
   object-fit: cover;
-  object-position: center bottom;
-  filter: saturate(1.03) contrast(1.04) drop-shadow(0 24px 36px rgb(0 0 0 / .34));
+  object-position: center center;
+
+  filter:
+    saturate(1.06)
+    contrast(1.05)
+    drop-shadow(0 24px 34px rgb(0 0 0 / .35));
 }
 
-.public-home-profile-verified {
-  position: relative;
-  z-index: 2;
-  justify-self: start;
-  margin: 20px;
-  padding: 8px 11px;
-  border: 1px solid rgb(52 212 255 / .26);
-  border-radius: 999px;
-  color: #ffffff;
-  background: rgb(5 14 27 / .78);
-  box-shadow: 0 12px 34px rgb(0 0 0 / .28), inset 0 1px 0 rgb(255 255 255 / .10);
-  font-size: 12px;
-  font-weight: 950;
-  letter-spacing: .04em;
-  text-transform: uppercase;
+.public-home-command-copy,
+.public-home-command-copy * {
+  min-inline-size: 0;
 }
 
-.public-home-profile-copy {
+.public-home-command-copy {
   display: grid;
   align-content: center;
-  gap: 18px;
-  padding: clamp(24px, 3.4vw, 36px);
-  border-radius: 28px;
+  justify-items: start;
+  gap: 10px;
+
+  padding-block: 2px;
+  overflow: hidden;
 }
 
-.public-home-profile-eyebrow {
+.public-home-command-copy .public-home-profile-eyebrow {
   margin: 0;
+  overflow: hidden;
+
   color: var(--public-home-accent-2);
-  font-size: 12px;
-  font-weight: 950;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-}
 
-.public-home-profile-copy h2 {
-  max-inline-size: 12ch;
-  margin: 0;
-  color: #ffffff;
-  font-size: clamp(38px, 4.4vw, 64px);
+  font-size: 11px;
   font-weight: 1000;
-  line-height: .88;
-  letter-spacing: -.075em;
+  letter-spacing: .095em;
+  line-height: 1.1;
+
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.public-home-command-copy h2 {
+  display: grid;
+  gap: 2px;
+
+  max-inline-size: 100%;
+  margin: 0;
+
+  color: #ffffff;
+  font-size: clamp(40px, 2.55vw, 50px);
+  font-weight: 1000;
+  line-height: .86;
+  letter-spacing: -.07em;
   text-transform: uppercase;
 }
 
-.public-home-profile-role {
-  max-inline-size: 42ch;
-  margin: 0;
-  color: var(--public-home-text-soft);
-  font-size: clamp(14px, 1.4vw, 16px);
-  font-weight: 650;
-  line-height: 1.55;
+.public-home-command-copy h2 span {
+  display: block;
+  max-inline-size: 100%;
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
 }
 
-.public-home-profile-metrics {
+.public-home-command-copy p:not(.public-home-profile-eyebrow) {
+  max-inline-size: 32ch;
+  margin: 0;
+
+  color: var(--public-home-text-soft);
+
+  font-size: clamp(13px, .92vw, 14px);
+  font-weight: 720;
+  line-height: 1.44;
+}
+
+.public-home-command-tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+
+  max-inline-size: 100%;
+  overflow: hidden;
+}
+
+.public-home-command-tags span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+
+  min-block-size: 28px;
+  padding-inline: 9px;
+
+  overflow: hidden;
+
+  border: 1px solid rgb(75 184 255 / .24);
+  border-radius: 999px;
+
+  color: var(--public-home-text);
+  background: rgb(19 148 255 / .09);
+
+  font-size: 11px;
+  font-weight: 880;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.public-home-command-tags .public-home-icon {
+  flex: 0 0 auto;
+  inline-size: 14px;
+  block-size: 14px;
+  color: var(--public-home-accent-2);
+}
+
+.public-home-command-stats {
+  position: relative;
+  z-index: 3;
+  isolation: isolate;
+
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 14px;
+
+  min-inline-size: 0;
 }
 
-.public-home-profile-metrics > div {
+.public-home-command-stat {
+  position: relative;
+
   display: grid;
-  gap: 5px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 4px 12px;
+
   min-block-size: 104px;
-  padding: 18px;
+  min-inline-size: 0;
+  padding: 16px 18px;
+
+  overflow: hidden;
   border-radius: 20px;
 }
 
-.public-home-profile-metrics strong {
+.public-home-command-stat > span {
+  grid-column: 1;
+  grid-row: 1;
+
+  overflow: hidden;
+
+  color: var(--public-home-accent-2);
+
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: .055em;
+  line-height: 1.1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.public-home-command-stat strong {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+
   color: var(--public-home-accent);
-  font-size: clamp(34px, 4vw, 52px);
+
+  font-size: clamp(42px, 3.15vw, 56px);
   font-weight: 1000;
-  line-height: .9;
-  letter-spacing: -.07em;
+  line-height: .86;
+  letter-spacing: -.075em;
+  text-shadow: 0 0 28px rgb(19 148 255 / .24);
+  white-space: nowrap;
 }
 
-.public-home-profile-metrics span {
-  color: var(--public-home-text);
-  font-size: 13px;
+.public-home-command-stat small {
+  grid-column: 1;
+  grid-row: 2;
+
+  max-inline-size: 15ch;
+
+  color: #ffffff;
+
+  font-size: 12px;
   font-weight: 880;
-  line-height: 1.25;
+  line-height: 1.16;
 }
 
-.public-home-profile-points {
+.public-home-command-checklist {
+  position: relative;
+  z-index: 2;
+
   display: grid;
-  gap: 10px;
+  align-content: center;
+  gap: 8px;
+
+  min-block-size: 106px;
   margin: 0;
-  padding: 0;
+  padding: 15px 18px;
+
+  overflow: hidden;
+  border-radius: 20px;
   list-style: none;
 }
 
-.public-home-profile-points li {
-  display: flex;
-  align-items: center;
+.public-home-command-checklist li {
+  display: grid;
+  grid-template-columns: 17px minmax(0, 1fr);
+  align-items: start;
   gap: 9px;
+
   color: var(--public-home-text-soft);
-  font-size: 13px;
-  font-weight: 760;
-  line-height: 1.35;
+
+  font-size: 12px;
+  font-weight: 780;
+  line-height: 1.26;
 }
 
-.public-home-profile-points .public-home-icon {
+.public-home-command-checklist li > span:first-child {
+  display: inline-grid;
+  place-items: center;
+
   inline-size: 17px;
   block-size: 17px;
+
   color: var(--public-home-accent-2);
+}
+
+.public-home-command-checklist .public-home-icon {
+  inline-size: 14px;
+  block-size: 14px;
 }
 
 .public-home-profile-bottom {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
-  min-block-size: 58px;
-  padding-inline: 24px;
-  border-block-start: 1px solid rgb(255 255 255 / .08);
-  color: var(--public-home-text-soft);
-  font-size: 13px;
-  font-weight: 950;
+  gap: 10px;
+
+  min-block-size: 54px;
+  padding-inline: clamp(20px, 2.4vw, 28px);
+
+  overflow: hidden;
+  border-block-start: 1px solid rgb(255 255 255 / .07);
+
+  background: linear-gradient(180deg, transparent, rgb(2 6 14 / .34));
 }
 
 .public-home-profile-bottom span {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
+
+  min-inline-size: 0;
+  overflow: hidden;
+
+  color: var(--public-home-text-soft);
+
+  font-size: 11px;
+  font-weight: 880;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .public-home-profile-bottom .public-home-icon {
-  inline-size: 17px;
-  block-size: 17px;
+  flex: 0 0 auto;
+  inline-size: 14px;
+  block-size: 14px;
   color: var(--public-home-accent-2);
 }
 
-.public-home-services,
-.public-home-method,
-.public-home-prices,
-.public-home-contact,
-.public-home-faq {
-  padding-block: clamp(74px, 10vw, 136px);
-}
+
+/* =========================================================
+   11. SERVICES
+========================================================= */
 
 .public-home-service-grid {
   display: grid;
@@ -1061,12 +1616,18 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
 .public-home-faq-item {
   position: relative;
   overflow: hidden;
+
   border: 1px solid var(--public-home-border);
   border-radius: var(--public-home-radius-lg);
+
   background:
     linear-gradient(180deg, rgb(255 255 255 / .075), rgb(255 255 255 / .025)),
     var(--public-home-card);
-  box-shadow: 0 20px 54px rgb(0 0 0 / .24), inset 0 1px 0 rgb(255 255 255 / .09);
+
+  box-shadow:
+    0 20px 54px rgb(0 0 0 / .24),
+    inset 0 1px 0 rgb(255 255 255 / .09);
+
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
 }
@@ -1077,8 +1638,11 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   position: absolute;
   inset-inline: 12%;
   inset-block-start: 0;
+
   block-size: 1px;
-  background: linear-gradient(90deg, transparent, rgb(75 184 255 / .52), transparent);
+
+  background:
+    linear-gradient(90deg, transparent, rgb(75 184 255 / .52), transparent);
   opacity: .72;
 }
 
@@ -1086,32 +1650,52 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   display: grid;
   align-content: start;
   gap: 14px;
+
   min-block-size: 236px;
   padding: 26px;
-  transition: transform .2s ease, border-color .2s ease, background .2s ease, box-shadow .2s ease;
+
+  transition:
+    transform .2s ease,
+    border-color .2s ease,
+    background .2s ease,
+    box-shadow .2s ease;
 }
 
 .public-home-service-card:hover,
 .public-home-price-card:hover {
   transform: translateY(-5px);
   border-color: var(--public-home-border-strong);
+
   background:
-    radial-gradient(circle at 20% 0%, rgb(19 148 255 / .16), transparent 34%),
+    radial-gradient(
+      circle at var(--card-pointer-x, 20%) var(--card-pointer-y, 0%),
+      rgb(19 148 255 / .16),
+      transparent 34%
+    ),
     var(--public-home-card-hover);
-  box-shadow: 0 26px 68px rgb(0 0 0 / .32), 0 0 0 1px rgb(75 184 255 / .08), inset 0 1px 0 rgb(255 255 255 / .12);
+
+  box-shadow:
+    0 26px 68px rgb(0 0 0 / .32),
+    0 0 0 1px rgb(75 184 255 / .08),
+    inset 0 1px 0 rgb(255 255 255 / .12);
 }
 
 .public-home-service-icon {
   display: grid;
   place-items: center;
+
   inline-size: 56px;
   block-size: 56px;
+
   border: 1px solid rgb(75 184 255 / .24);
   border-radius: 18px;
+
   color: var(--public-home-accent);
+
   background:
     radial-gradient(circle at 30% 0%, rgb(52 212 255 / .20), transparent 36%),
     rgb(19 148 255 / .08);
+
   box-shadow: inset 0 1px 0 rgb(255 255 255 / .10);
 }
 
@@ -1140,141 +1724,10 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   line-height: 1.55;
 }
 
-.public-home-price-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-}
 
-.public-home-price-card {
-  display: grid;
-  align-content: start;
-  gap: 18px;
-  min-block-size: 392px;
-  padding: 30px;
-  transition: transform .2s ease, border-color .2s ease, background .2s ease, box-shadow .2s ease;
-}
-
-.public-home-price-card--featured {
-  border-color: rgb(75 184 255 / .46);
-  background:
-    radial-gradient(circle at 50% 0%, rgb(19 148 255 / .22), transparent 34%),
-    linear-gradient(180deg, rgb(255 255 255 / .09), rgb(255 255 255 / .03)),
-    var(--public-home-card-hover);
-  box-shadow: 0 28px 78px rgb(0 0 0 / .32), 0 0 70px rgb(19 148 255 / .12), inset 0 1px 0 rgb(255 255 255 / .12);
-}
-
-.public-home-price-badge {
-  justify-self: start;
-  display: inline-flex;
-  align-items: center;
-  min-block-size: 30px;
-  padding: 0 12px;
-  border: 1px solid rgb(75 184 255 / .28);
-  border-radius: 999px;
-  color: var(--public-home-accent-2);
-  background: rgb(19 148 255 / .10);
-  font-size: 12px;
-  font-weight: 950;
-  text-transform: uppercase;
-  letter-spacing: .045em;
-}
-
-.public-home-price-points {
-  display: grid;
-  gap: 11px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.public-home-price-points li {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  color: var(--public-home-text);
-  font-size: 14px;
-  font-weight: 720;
-  line-height: 1.35;
-}
-
-.public-home-price-points li > span:first-child {
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  inline-size: 22px;
-  block-size: 22px;
-  border-radius: 999px;
-  color: var(--public-home-accent-2);
-  background: rgb(52 212 255 / .10);
-}
-
-.public-home-price-points .public-home-icon {
-  inline-size: 14px;
-  block-size: 14px;
-}
-
-.public-home-price-link {
-  align-self: end;
-  justify-self: start;
-  margin-block-start: auto;
-  min-block-size: 46px;
-  padding-inline: 18px;
-  font-size: 14px;
-}
-
-.public-home-faq-list {
-  display: grid;
-  gap: 12px;
-  max-inline-size: 900px;
-  margin-inline: auto;
-}
-
-.public-home-faq-item {
-  padding: 0;
-}
-
-.public-home-faq-item summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  min-block-size: 70px;
-  padding: 20px 24px;
-  color: #ffffff;
-  cursor: pointer;
-  font-size: 18px;
-  font-weight: 950;
-  letter-spacing: -.03em;
-  list-style: none;
-}
-
-.public-home-faq-item summary::-webkit-details-marker {
-  display: none;
-}
-
-.public-home-faq-item summary::after {
-  content: "+";
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  inline-size: 30px;
-  block-size: 30px;
-  border: 1px solid rgb(75 184 255 / .24);
-  border-radius: 999px;
-  color: var(--public-home-accent-2);
-  background: rgb(19 148 255 / .08);
-  transition: transform .2s ease, background .2s ease;
-}
-
-.public-home-faq-item[open] summary::after {
-  transform: rotate(45deg);
-  background: rgb(19 148 255 / .16);
-}
-
-.public-home-faq-item p {
-  padding: 0 24px 22px;
-}
+/* =========================================================
+   12. METHOD
+========================================================= */
 
 .public-home-method-grid {
   display: grid;
@@ -1287,27 +1740,52 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   display: grid;
   align-content: start;
   gap: 16px;
+
   min-block-size: 300px;
   padding: clamp(24px, 3vw, 34px);
+
   overflow: hidden;
+
   border: 1px solid rgb(255 255 255 / .10);
   border-radius: var(--public-home-radius-lg);
+
   background:
-    radial-gradient(circle at var(--card-pointer-x, 50%) var(--card-pointer-y, 0%), rgb(19 148 255 / .18), transparent 40%),
+    radial-gradient(
+      circle at var(--card-pointer-x, 50%) var(--card-pointer-y, 0%),
+      rgb(19 148 255 / .18),
+      transparent 40%
+    ),
     linear-gradient(180deg, rgb(255 255 255 / .055), rgb(255 255 255 / .02)),
     rgb(7 16 30 / .68);
-  box-shadow: 0 20px 54px rgb(0 0 0 / .24), inset 0 1px 0 rgb(255 255 255 / .08);
-  transition: transform .2s ease, border-color .2s ease, background .2s ease, box-shadow .2s ease;
+
+  box-shadow:
+    0 20px 54px rgb(0 0 0 / .24),
+    inset 0 1px 0 rgb(255 255 255 / .08);
+
+  transition:
+    transform .2s ease,
+    border-color .2s ease,
+    background .2s ease,
+    box-shadow .2s ease;
 }
 
 .public-home-method-card:hover {
   transform: translateY(-5px);
   border-color: rgb(75 184 255 / .34);
+
   background:
-    radial-gradient(circle at var(--card-pointer-x, 50%) var(--card-pointer-y, 0%), rgb(19 148 255 / .24), transparent 42%),
+    radial-gradient(
+      circle at var(--card-pointer-x, 50%) var(--card-pointer-y, 0%),
+      rgb(19 148 255 / .24),
+      transparent 42%
+    ),
     linear-gradient(180deg, rgb(255 255 255 / .07), rgb(255 255 255 / .025)),
     rgb(9 20 38 / .78);
-  box-shadow: 0 30px 72px rgb(0 0 0 / .30), 0 12px 34px rgb(19 148 255 / .10), inset 0 1px 0 rgb(255 255 255 / .12);
+
+  box-shadow:
+    0 30px 72px rgb(0 0 0 / .30),
+    0 12px 34px rgb(19 148 255 / .10),
+    inset 0 1px 0 rgb(255 255 255 / .12);
 }
 
 .public-home-method-number {
@@ -1320,10 +1798,13 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
 .public-home-method-icon {
   display: grid;
   place-items: center;
+
   inline-size: 58px;
   block-size: 58px;
+
   border: 1px solid rgb(75 184 255 / .26);
   border-radius: 18px;
+
   color: var(--public-home-accent-2);
   background: rgb(19 148 255 / .09);
 }
@@ -1350,6 +1831,172 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   line-height: 1.58;
 }
 
+
+/* =========================================================
+   13. PRICES
+========================================================= */
+
+.public-home-price-grid {
+  display: grid;
+  grid-template-columns: minmax(0, .92fr) minmax(0, 1.18fr) minmax(0, .92fr);
+  align-items: stretch;
+  gap: clamp(18px, 2.2vw, 30px);
+}
+
+.public-home-price-card {
+  display: grid;
+  align-content: start;
+  gap: 18px;
+
+  min-block-size: 408px;
+  padding: 30px;
+
+  transition:
+    transform .2s ease,
+    border-color .2s ease,
+    background .2s ease,
+    box-shadow .2s ease;
+}
+
+.public-home-price-card--featured {
+  z-index: 2;
+  min-block-size: clamp(472px, 34vw, 548px);
+  padding: clamp(36px, 3.2vw, 48px);
+
+  border-color: rgb(75 184 255 / .46);
+  border-radius: 34px;
+
+  background:
+    radial-gradient(circle at 50% 0%, rgb(19 148 255 / .22), transparent 34%),
+    linear-gradient(180deg, rgb(255 255 255 / .09), rgb(255 255 255 / .03)),
+    var(--public-home-card-hover);
+
+  box-shadow:
+    0 34px 92px rgb(0 0 0 / .38),
+    0 0 92px rgb(19 148 255 / .18),
+    inset 0 1px 0 rgb(255 255 255 / .14);
+}
+
+.public-home-price-badge {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+
+  min-block-size: 34px;
+  padding-inline: 15px;
+
+  border: 1px solid rgb(75 184 255 / .28);
+  border-radius: 999px;
+
+  color: var(--public-home-accent-2);
+  background: rgb(19 148 255 / .10);
+
+  font-size: 13px;
+  font-weight: 950;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+
+.public-home-price-card--featured h3 {
+  max-inline-size: 15ch;
+  font-size: clamp(28px, 2.75vw, 36px);
+  line-height: 1;
+}
+
+.public-home-price-card--featured p:not(.public-home-price-eyebrow) {
+  max-inline-size: 34ch;
+  font-size: 16px;
+  line-height: 1.62;
+}
+
+.public-home-price-points {
+  display: grid;
+  gap: 11px;
+
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.public-home-price-card--featured .public-home-price-points {
+  gap: 14px;
+}
+
+.public-home-price-points li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+
+  color: var(--public-home-text);
+
+  font-size: 14px;
+  font-weight: 720;
+  line-height: 1.35;
+}
+
+.public-home-price-card--featured .public-home-price-points li {
+  gap: 12px;
+  font-size: 16px;
+  line-height: 1.38;
+}
+
+.public-home-price-points li > span:first-child {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+
+  inline-size: 22px;
+  block-size: 22px;
+
+  border-radius: 999px;
+
+  color: var(--public-home-accent-2);
+  background: rgb(52 212 255 / .10);
+}
+
+.public-home-price-card--featured .public-home-price-points li > span:first-child {
+  inline-size: 26px;
+  block-size: 26px;
+}
+
+.public-home-price-points .public-home-icon {
+  inline-size: 14px;
+  block-size: 14px;
+}
+
+.public-home-price-link {
+  align-self: end;
+  justify-self: start;
+
+  margin-block-start: auto;
+  min-block-size: 46px;
+  padding-inline: 18px;
+
+  font-size: 14px;
+}
+
+.public-home-price-card--featured .public-home-price-link {
+  min-block-size: 56px;
+  padding-inline: 24px;
+  border-radius: 18px;
+  font-size: 16px;
+}
+
+@media (min-width: 1041px) {
+  .public-home-price-card--featured {
+    transform: translateY(-14px) scale(1.035);
+  }
+
+  .public-home-price-card--featured:hover {
+    transform: translateY(-18px) scale(1.04);
+  }
+}
+
+
+/* =========================================================
+   14. CONTACT
+========================================================= */
+
 .public-home-contact {
   padding-block-start: clamp(54px, 8vw, 104px);
 }
@@ -1359,19 +2006,31 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: clamp(24px, 4vw, 54px);
+
   padding: clamp(28px, 4.8vw, 58px);
+
   border: 1px solid rgb(75 184 255 / .24);
   border-radius: var(--public-home-radius-xl);
+
   background:
-    radial-gradient(circle at var(--card-pointer-x, 70%) var(--card-pointer-y, 20%), rgb(19 148 255 / .22), transparent 38%),
+    radial-gradient(
+      circle at var(--card-pointer-x, 70%) var(--card-pointer-y, 20%),
+      rgb(19 148 255 / .22),
+      transparent 38%
+    ),
     linear-gradient(135deg, rgb(10 24 44 / .88), rgb(3 6 14 / .96));
-  box-shadow: var(--public-home-shadow), inset 0 1px 0 rgb(255 255 255 / .10);
+
+  box-shadow:
+    var(--public-home-shadow),
+    inset 0 1px 0 rgb(255 255 255 / .10);
 }
 
 .public-home-contact-panel h2 {
   max-inline-size: 720px;
   margin: 10px 0 0;
+
   color: #ffffff;
+
   font-size: clamp(34px, 5vw, 70px);
   font-weight: 1000;
   line-height: .94;
@@ -1381,7 +2040,9 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
 .public-home-contact-panel p:not(.public-home-price-eyebrow) {
   max-inline-size: 58ch;
   margin: 18px 0 0;
+
   color: var(--public-home-text-soft);
+
   font-size: clamp(15px, 1.6vw, 18px);
   font-weight: 610;
   line-height: 1.58;
@@ -1393,26 +2054,105 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   min-inline-size: min(100%, 280px);
 }
 
+
+/* =========================================================
+   15. FAQ
+========================================================= */
+
+.public-home-faq-list {
+  display: grid;
+  gap: 12px;
+
+  inline-size: 100%;
+  max-inline-size: 960px;
+  margin-inline: auto;
+}
+
+.public-home-faq-item {
+  padding: 0;
+}
+
+.public-home-faq-item summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+
+  min-block-size: 70px;
+  padding: 20px 24px;
+
+  color: #ffffff;
+  cursor: pointer;
+
+  font-size: 18px;
+  font-weight: 950;
+  letter-spacing: -.03em;
+  list-style: none;
+}
+
+.public-home-faq-item summary::-webkit-details-marker {
+  display: none;
+}
+
+.public-home-faq-item summary::after {
+  content: "+";
+
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+
+  inline-size: 30px;
+  block-size: 30px;
+
+  border: 1px solid rgb(75 184 255 / .24);
+  border-radius: 999px;
+
+  color: var(--public-home-accent-2);
+  background: rgb(19 148 255 / .08);
+
+  transition: transform .2s ease, background .2s ease;
+}
+
+.public-home-faq-item[open] summary::after {
+  transform: rotate(45deg);
+  background: rgb(19 148 255 / .16);
+}
+
+.public-home-faq-item p {
+  padding: 0 24px 22px;
+}
+
+.public-home-faq-item:not([open]) p {
+  display: none;
+}
+
+
+/* =========================================================
+   16. FOOTER
+========================================================= */
+
 .public-home-footer {
   position: relative;
   z-index: 1;
-  border-block-start: 1px solid rgb(255 255 255 / .10);
-  background: linear-gradient(180deg, rgb(8 16 30 / .82), rgb(3 6 14 / .94));
+
+  padding-inline: var(--public-home-page-gutter);
+
+  border-block-start: 1px solid rgb(75 184 255 / .12);
+
+  background:
+    radial-gradient(circle at 14% 0%, rgb(19 148 255 / .16), transparent 32%),
+    linear-gradient(180deg, rgb(6 14 28 / .92), rgb(2 5 12 / .98));
 }
 
 .public-home-footer-inner {
   display: grid;
-  grid-template-columns: minmax(260px, .8fr) 1fr minmax(260px, .8fr);
+  grid-template-columns: minmax(270px, .88fr) minmax(0, 1.1fr) minmax(270px, .88fr);
   align-items: center;
   gap: 24px;
+
   inline-size: min(100%, var(--public-home-shell-max));
   margin-inline: auto;
-  padding: clamp(26px, 4vw, 42px) 0;
-}
-
-.public-home-footer-brand {
-  display: flex;
-  align-items: center;
+  padding-block: clamp(26px, 4vw, 42px);
 }
 
 .public-home-footer-links {
@@ -1446,14 +2186,29 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+
   min-block-size: 38px;
-  padding: 0 12px;
+  padding-inline: 12px;
+
   border: 1px solid rgb(255 255 255 / .10);
   border-radius: 999px;
+
   color: var(--public-home-text);
   background: rgb(255 255 255 / .035);
+
   font-size: 13px;
   font-weight: 820;
+
+  transition:
+    color .2s ease,
+    border-color .2s ease,
+    background .2s ease;
+}
+
+.public-home-footer-contact a:hover {
+  color: #ffffff;
+  border-color: rgb(75 184 255 / .34);
+  background: rgb(19 148 255 / .08);
 }
 
 .public-home-footer-contact .public-home-icon {
@@ -1467,10 +2222,13 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+
   inline-size: min(100%, var(--public-home-shell-max));
   margin-inline: auto;
-  padding: 16px 0 24px;
+  padding-block: 16px 24px;
+
   border-block-start: 1px solid rgb(255 255 255 / .07);
+
   color: var(--public-home-text-muted);
   font-size: 12px;
   font-weight: 650;
@@ -1480,28 +2238,44 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   margin: 0;
 }
 
+
+/* =========================================================
+   17. FLOATING WHATSAPP
+========================================================= */
+
 .public-home-floating-whatsapp {
   position: fixed;
-  inset-inline-end: clamp(18px, 3vw, 34px);
+  inset-inline-end: clamp(22px, 3vw, 34px);
   inset-block-end: clamp(18px, 3vw, 34px);
   z-index: 80;
+
   display: grid;
   place-items: center;
+
   inline-size: 62px;
   block-size: 62px;
+
   border: 1px solid rgb(255 255 255 / .16);
   border-radius: 999px;
+
   color: #ffffff;
+
   background:
     radial-gradient(circle at 30% 0%, rgb(255 255 255 / .28), transparent 36%),
     linear-gradient(135deg, #25d366, #16a34a);
-  box-shadow: 0 18px 44px rgb(37 211 102 / .32), inset 0 1px 0 rgb(255 255 255 / .20);
+
+  box-shadow:
+    0 18px 44px rgb(37 211 102 / .32),
+    inset 0 1px 0 rgb(255 255 255 / .20);
+
   transition: transform .2s ease, box-shadow .2s ease;
 }
 
 .public-home-floating-whatsapp:hover {
   transform: translateY(-4px) scale(1.03);
-  box-shadow: 0 24px 58px rgb(37 211 102 / .40), inset 0 1px 0 rgb(255 255 255 / .24);
+  box-shadow:
+    0 24px 58px rgb(37 211 102 / .40),
+    inset 0 1px 0 rgb(255 255 255 / .24);
 }
 
 .public-home-floating-whatsapp .public-home-icon {
@@ -1509,12 +2283,22 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   block-size: 30px;
 }
 
+
+/* =========================================================
+   18. REVEAL / MOTION
+========================================================= */
+
 .public-home [data-public-home-reveal],
 .public-home [data-reveal] {
   opacity: 0;
   transform: translateY(22px);
-  transition: opacity .62s ease, transform .62s cubic-bezier(.2, .8, .2, 1);
-  transition-delay: calc(var(--public-home-reveal-index, 0) * 45ms);
+
+  transition:
+    opacity .62s ease,
+    transform .62s cubic-bezier(.2, .8, .2, 1);
+
+  transition-delay:
+    calc(var(--public-home-reveal-index, 0) * 45ms);
 }
 
 .public-home.is-ready [data-public-home-reveal].is-visible,
@@ -1530,31 +2314,48 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
 }
 
 @keyframes public-home-fade-in {
-  from { opacity: .001; }
-  to { opacity: 1; }
+  from {
+    opacity: .001;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
-.public-home a:focus-visible,
-.public-home button:focus-visible,
-.public-home input:focus-visible,
-.public-home select:focus-visible,
-.public-home textarea:focus-visible,
-.public-home summary:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 4px rgb(19 148 255 / .24), 0 0 0 1px rgb(52 212 255 / .52);
-}
 
-.public-home [hidden] {
-  display: none;
-}
+/* =========================================================
+   19. RESPONSIVE — TABLET / MOBILE NAV
+========================================================= */
 
 @media (max-width: 1240px) {
   .public-home-hero-grid {
-    grid-template-columns: minmax(0, 1fr) minmax(380px, .82fr);
+    grid-template-columns: minmax(0, 1fr) minmax(400px, .70fr);
+    gap: clamp(24px, 3vw, 52px);
   }
 
-  .public-home-stack-card {
-    grid-template-columns: repeat(3, 74px) 1fr;
+  .public-home-hero-visual,
+  .public-home-hero-visual--profile {
+    inline-size: min(100%, 548px);
+    max-inline-size: 548px;
+    min-block-size: clamp(650px, 52vw, 704px);
+  }
+
+  .public-home-command-hero {
+    grid-template-columns: minmax(156px, 176px) minmax(0, 1fr);
+    min-block-size: 258px;
+  }
+
+  .public-home-command-portrait {
+    min-block-size: 222px;
+  }
+
+  .public-home-command-copy h2 {
+    font-size: clamp(36px, 3.4vw, 46px);
+  }
+
+  .public-home-command-stat strong {
+    font-size: clamp(40px, 4vw, 52px);
   }
 }
 
@@ -1577,26 +2378,42 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
     inset-block-start: var(--public-home-nav-height);
     inset-inline: clamp(12px, 3vw, 24px);
     z-index: 75;
+
     display: grid;
     justify-items: stretch;
     gap: 18px;
+
     padding: 20px;
+
     border: 1px solid rgb(255 255 255 / .13);
     border-radius: 24px;
+
     background:
       radial-gradient(circle at 80% 0%, rgb(19 148 255 / .18), transparent 38%),
       rgb(5 12 24 / .96);
-    box-shadow: 0 28px 82px rgb(0 0 0 / .50), inset 0 1px 0 rgb(255 255 255 / .10);
+
+    box-shadow:
+      0 28px 82px rgb(0 0 0 / .50),
+      inset 0 1px 0 rgb(255 255 255 / .10);
+
     backdrop-filter: blur(24px) saturate(1.18);
     -webkit-backdrop-filter: blur(24px) saturate(1.18);
+
     opacity: 0;
+    visibility: hidden;
     pointer-events: none;
+
     transform: translateY(-14px) scale(.98);
-    transition: opacity .22s ease, transform .22s ease;
+
+    transition:
+      opacity .22s ease,
+      visibility .22s ease,
+      transform .22s ease;
   }
 
   .public-home.is-menu-open .public-home-nav-panel {
     opacity: 1;
+    visibility: visible;
     pointer-events: auto;
     transform: translateY(0) scale(1);
   }
@@ -1621,7 +2438,8 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
   }
 
   .public-home-nav-link:hover,
-  .public-home-nav-link.is-active {
+  .public-home-nav-link.is-active,
+  .public-home-nav-link[aria-current="page"] {
     background: rgb(19 148 255 / .10);
   }
 
@@ -1629,12 +2447,41 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
     display: none;
   }
 
+  .public-home-hero {
+    padding-block-start: clamp(22px, 4vw, 44px);
+  }
+
   .public-home-hero-grid {
     grid-template-columns: 1fr;
   }
 
-  .public-home-hero-visual {
-    min-block-size: 560px;
+  /*
+     En tablet la card deja de ser absoluta:
+     crece por contenido y eliminamos alturas mágicas.
+  */
+  .public-home-hero-visual,
+  .public-home-hero-visual--profile {
+    justify-self: center;
+    inline-size: min(100%, 660px);
+    max-inline-size: 660px;
+    min-block-size: 0;
+  }
+
+  .public-home-profile-card--command {
+    position: relative;
+    inset: auto;
+  }
+
+  .public-home-command-hero {
+    grid-template-columns: minmax(178px, 206px) minmax(0, 1fr);
+  }
+
+  .public-home-command-copy h2 {
+    font-size: clamp(40px, 6vw, 56px);
+  }
+
+  .public-home-service-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .public-home-price-grid,
@@ -1648,1100 +2495,6 @@ body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
 
   .public-home-contact-actions {
     inline-size: 100%;
-  }
-
-  .public-home-footer-inner {
-    grid-template-columns: 1fr;
-    justify-items: center;
-    text-align: center;
-  }
-
-  .public-home-footer-contact {
-    justify-content: center;
-  }
-
-  .public-home-footer-bottom {
-    flex-direction: column;
-    text-align: center;
-  }
-}
-
-@media (max-width: 860px) {
-  .public-home-service-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .public-home-profile-body {
-    grid-template-columns: 1fr;
-  }
-
-  .public-home-profile-media {
-    min-block-size: 420px;
-  }
-
-  .public-home-command-body {
-    grid-template-columns: 1fr;
-  }
-
-  .public-home-command-side {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .public-home-stack-card {
-    grid-column: auto;
-    grid-template-columns: repeat(3, 70px);
-    justify-content: center;
-    text-align: center;
-  }
-
-  .public-home-stack-card strong {
-    grid-column: 1 / -1;
-  }
-}
-
-@media (max-width: 720px) {
-  .public-auth-shell--home {
-    --public-home-nav-height: 78px;
-    --public-home-scroll-offset: 96px;
-  }
-
-  .public-home-nav {
-    padding-inline: 14px;
-  }
-
-  .public-home-brand-mark {
-    inline-size: 42px;
-    block-size: 42px;
-    border-radius: 15px;
-  }
-
-  .public-home-brand-logo {
-    inline-size: 30px;
-    block-size: 30px;
-  }
-
-  .public-home-brand-name {
-    font-size: 20px;
-  }
-
-  .public-home-brand-subtitle {
-    display: none;
-  }
-
-  .public-home-hero {
-    min-block-size: auto;
-    padding-block-start: 42px;
-  }
-
-  .public-home-title {
-    font-size: clamp(44px, 14vw, 74px);
-    line-height: .88;
-  }
-
-  .public-home-hero-actions,
-  .public-home-button {
-    inline-size: 100%;
-  }
-
-  .public-home-trust-list {
-    display: grid;
-    grid-template-columns: 1fr;
-    inline-size: 100%;
-  }
-
-  .public-home-hero-visual {
-    min-block-size: 520px;
-  }
-
-  .public-home-profile-card {
-    border-radius: 30px;
-  }
-
-  .public-home-profile-body {
-    padding: 20px;
-  }
-
-  .public-home-profile-copy {
-    padding: 22px;
-  }
-
-  .public-home-profile-metrics {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .public-home-profile-bottom {
-    align-items: flex-start;
-    flex-direction: column;
-    justify-content: center;
-  }
-
-  .public-home-command {
-    border-radius: 30px;
-  }
-
-  .public-home-command-body {
-    padding: 20px;
-  }
-
-  .public-home-command-side {
-    grid-template-columns: 1fr;
-  }
-
-  .public-home-mini-card {
-    min-block-size: auto;
-  }
-
-  .public-home-command-main {
-    min-block-size: 260px;
-  }
-
-  .public-home-stack-card {
-    display: none;
-  }
-
-  .public-home-section-head h2 {
-    font-size: clamp(34px, 11vw, 50px);
-  }
-
-  .public-home-service-card,
-  .public-home-price-card {
-    padding: 22px;
-  }
-
-  .public-home-floating-whatsapp {
-    inline-size: 56px;
-    block-size: 56px;
-  }
-}
-
-@media (max-width: 460px) {
-  .public-home-section,
-  .public-home-hero {
-    padding-inline: 14px;
-  }
-
-  .public-home-nav-panel {
-    inset-inline: 10px;
-  }
-
-  .public-home-kicker {
-    align-items: flex-start;
-    border-radius: 16px;
-    line-height: 1.35;
-  }
-
-  .public-home-hero-text {
-    font-size: 15px;
-  }
-
-  .public-home-profile-top strong,
-  .public-home-profile-bottom,
-  .public-home-command-top strong,
-  .public-home-command-bottom {
-    font-size: 11px;
-  }
-
-  .public-home-profile-metrics {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .public-home *,
-  .public-home *::before,
-  .public-home *::after {
-    scroll-behavior: auto;
-    animation-duration: .001ms;
-    animation-iteration-count: 1;
-    transition-duration: .001ms;
-  }
-
-  .public-home [data-public-home-reveal],
-  .public-home [data-reveal] {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-/* =========================================================
-   ONION SUPPORT 2026.16 - HERO SHOWCASE FINAL 10/10
-   Consolidado único sobre la base actual:
-   - Visual derecho rediseñado desde cero sin cortes ni overflow.
-   - Métricas alineadas, legibles y 1:1 con la estética azul/glass.
-   - Hero subido y equilibrado con el header.
-   - Scroll real y scroll custom siempre visibles.
-   - Responsive calibrado para desktop, tablet y móvil.
-========================================================= */
-
-body.public-home-screen #app-shell > .main-content,
-body.public-home-screen .app-shell > .main-content,
-body.public-home-screen .main-content {
-  scrollbar-gutter: stable both-edges;
-  scrollbar-width: auto;
-  scrollbar-color: #34d4ff rgb(2 6 14 / .98);
-}
-
-body.public-home-screen #app-shell > .main-content::-webkit-scrollbar,
-body.public-home-screen .app-shell > .main-content::-webkit-scrollbar,
-body.public-home-screen .main-content::-webkit-scrollbar {
-  display: block !important;
-  inline-size: 15px;
-  block-size: 15px;
-  background: rgb(2 6 14 / .98);
-}
-
-body.public-home-screen #app-shell > .main-content::-webkit-scrollbar-track,
-body.public-home-screen .app-shell > .main-content::-webkit-scrollbar-track,
-body.public-home-screen .main-content::-webkit-scrollbar-track {
-  background:
-    linear-gradient(180deg, rgb(1 5 12 / 1), rgb(4 15 29 / 1)),
-    rgb(2 6 14 / 1);
-  border-inline-start: 1px solid rgb(75 184 255 / .16);
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / .025);
-}
-
-body.public-home-screen #app-shell > .main-content::-webkit-scrollbar-thumb,
-body.public-home-screen .app-shell > .main-content::-webkit-scrollbar-thumb,
-body.public-home-screen .main-content::-webkit-scrollbar-thumb {
-  min-block-size: 76px;
-  border: 3px solid rgb(2 6 14 / 1);
-  border-radius: 999px;
-  background:
-    linear-gradient(180deg, #7aeaff 0%, #34d4ff 24%, #1394ff 62%, #0b61ff 100%);
-  box-shadow:
-    0 0 22px rgb(52 212 255 / .46),
-    inset 0 1px 0 rgb(255 255 255 / .44);
-}
-
-body.public-home-screen #app-shell > .main-content::-webkit-scrollbar-thumb:hover,
-body.public-home-screen .app-shell > .main-content::-webkit-scrollbar-thumb:hover,
-body.public-home-screen .main-content::-webkit-scrollbar-thumb:hover {
-  background:
-    linear-gradient(180deg, #a8f2ff 0%, #55ddff 24%, #1da2ff 62%, #1270ff 100%);
-}
-
-.public-home {
-  min-block-size: 100%;
-  overflow-x: clip;
-  overflow-y: visible;
-}
-
-.public-home-scrollbar {
-  --public-home-scrollbar-top: calc(var(--public-home-nav-height) + 14px);
-  --public-home-scrollbar-bottom: 18px;
-  --public-home-scrollbar-thumb-size: clamp(74px, 18vh, 148px);
-  --public-home-scrollbar-thumb-top: 0px;
-
-  position: fixed;
-  inset-block-start: var(--public-home-scrollbar-top);
-  inset-block-end: var(--public-home-scrollbar-bottom);
-  inset-inline-start: 8px;
-  inset-inline-end: auto;
-  z-index: 90;
-  inline-size: 13px;
-  overflow: hidden;
-  border: 1px solid rgb(91 218 255 / .42);
-  border-radius: 999px;
-  background:
-    radial-gradient(circle at 50% 0%, rgb(122 234 255 / .28), transparent 36%),
-    linear-gradient(180deg, rgb(19 148 255 / .20), rgb(52 212 255 / .08)),
-    rgb(2 6 14 / .88);
-  box-shadow:
-    0 0 0 1px rgb(255 255 255 / .055),
-    0 0 28px rgb(19 148 255 / .30),
-    inset 0 1px 0 rgb(255 255 255 / .20);
-  opacity: .96;
-  pointer-events: auto;
-  cursor: pointer;
-  touch-action: none;
-  backdrop-filter: blur(14px) saturate(1.12);
-  -webkit-backdrop-filter: blur(14px) saturate(1.12);
-  transition:
-    inline-size .18s ease,
-    opacity .18s ease,
-    border-color .18s ease,
-    background .18s ease,
-    box-shadow .18s ease,
-    transform .18s ease;
-}
-
-.public-home-scrollbar-thumb {
-  position: absolute;
-  inset-inline: 2px;
-  inset-block-start: var(--public-home-scrollbar-thumb-top, 0px);
-  display: block;
-  block-size: var(--public-home-scrollbar-thumb-size);
-  border-radius: 999px;
-  background:
-    radial-gradient(circle at 50% 18%, rgb(255 255 255 / .82), transparent 24%),
-    linear-gradient(180deg, #a8f2ff 0%, #55ddff 20%, #1394ff 58%, #0b61ff 100%);
-  box-shadow:
-    0 0 18px rgb(122 234 255 / .62),
-    0 0 42px rgb(19 148 255 / .42),
-    inset 0 1px 0 rgb(255 255 255 / .62),
-    inset 0 -8px 18px rgb(0 34 92 / .32);
-  transform: translate3d(0, 0, 0);
-  transition:
-    inset-block-start .08s linear,
-    inset-inline .18s ease,
-    box-shadow .18s ease,
-    filter .18s ease,
-    background .18s ease;
-}
-
-.public-home-scrollbar:hover,
-.public-home.is-scrollbar-dragging .public-home-scrollbar {
-  inline-size: 17px;
-  border-color: rgb(168 242 255 / .76);
-  background:
-    radial-gradient(circle at 50% 0%, rgb(168 242 255 / .38), transparent 36%),
-    linear-gradient(180deg, rgb(52 212 255 / .30), rgb(19 148 255 / .13)),
-    rgb(2 8 18 / .94);
-  box-shadow:
-    0 0 0 1px rgb(255 255 255 / .09),
-    0 0 34px rgb(52 212 255 / .42),
-    0 0 82px rgb(19 148 255 / .30),
-    inset 0 1px 0 rgb(255 255 255 / .28);
-  opacity: 1;
-  transform: translateX(1px);
-}
-
-.public-home-scrollbar:hover .public-home-scrollbar-thumb,
-.public-home.is-scrollbar-dragging .public-home-scrollbar-thumb {
-  inset-inline: 2px;
-  cursor: grab;
-  filter: saturate(1.2) brightness(1.08);
-  box-shadow:
-    0 0 22px rgb(168 242 255 / .76),
-    0 0 58px rgb(52 212 255 / .52),
-    0 0 96px rgb(19 148 255 / .36),
-    inset 0 1px 0 rgb(255 255 255 / .72),
-    inset 0 -10px 20px rgb(0 34 92 / .34);
-}
-
-.public-home.is-scrollbar-dragging .public-home-scrollbar,
-.public-home.is-scrollbar-dragging .public-home-scrollbar-thumb {
-  cursor: grabbing;
-}
-
-.public-home-nav {
-  padding-inline: var(--public-home-page-gutter) !important;
-  transition:
-    transform .28s ease,
-    opacity .22s ease,
-    visibility .22s ease,
-    background .22s ease,
-    box-shadow .22s ease;
-  will-change: transform, opacity;
-}
-
-.public-home-nav-inner,
-.public-home-footer-inner,
-.public-home-footer-bottom {
-  inline-size: min(100%, var(--public-home-shell-max)) !important;
-  margin-inline: auto !important;
-  padding-inline: 0 !important;
-}
-
-.public-home-section {
-  inline-size: min(100%, var(--public-home-shell-max));
-  padding-inline: var(--public-home-page-gutter);
-}
-
-/* ================= HERO FINAL ================= */
-
-.public-home-hero {
-  min-block-size: calc(100svh - var(--public-home-nav-height)) !important;
-  padding-block-start: clamp(10px, 2vw, 28px) !important;
-  padding-block-end: clamp(46px, 5.6vw, 86px) !important;
-  overflow: hidden;
-}
-
-.public-home-hero-bg {
-  background:
-    radial-gradient(circle at 72% 18%, rgb(19 148 255 / .22), transparent 34%),
-    radial-gradient(circle at 12% 12%, rgb(52 212 255 / .10), transparent 30%),
-    linear-gradient(90deg, rgb(3 7 18 / 1) 0%, rgb(3 7 18 / .98) 42%, rgb(3 10 20 / .96) 100%) !important;
-}
-
-.public-home-hero-grid {
-  grid-template-columns: minmax(0, 1.05fr) minmax(430px, .72fr) !important;
-  align-items: center !important;
-  gap: clamp(30px, 4vw, 76px) !important;
-  inline-size: min(100%, var(--public-home-shell-max)) !important;
-  min-block-size: min(650px, calc(100svh - 124px)) !important;
-  margin-inline: auto !important;
-}
-
-.public-home-hero-copy {
-  gap: clamp(20px, 2.35vw, 34px);
-  min-inline-size: 0;
-}
-
-.public-home-title {
-  max-inline-size: 980px;
-  padding-block: .07em .09em;
-  line-height: .98;
-  letter-spacing: -.078em;
-}
-
-.public-home-title span {
-  display: block;
-  margin-block-start: .12em;
-  color: var(--public-home-accent) !important;
-  text-shadow:
-    0 0 32px rgb(19 148 255 / .28),
-    0 0 72px rgb(19 148 255 / .14);
-}
-
-.public-home-hero-text {
-  max-inline-size: 760px;
-}
-
-.public-home-trust-item--blue,
-.public-home-trust-item--blue span:last-child {
-  color: var(--public-home-accent) !important;
-  text-shadow: 0 0 24px rgb(19 148 255 / .30);
-}
-
-.public-home-trust-item--blue .public-home-trust-icon {
-  color: var(--public-home-accent-2) !important;
-  border-color: rgb(75 184 255 / .36) !important;
-  background: rgb(19 148 255 / .14) !important;
-}
-
-/* ================= VISUAL DERECHO: SHOWCASE COMMAND 10/10 ================= */
-
-.public-home-hero-visual,
-.public-home-hero-visual--profile {
-  position: relative;
-  justify-self: end;
-  inline-size: min(100%, 548px) !important;
-  max-inline-size: 548px !important;
-  min-inline-size: 0;
-  min-block-size: clamp(548px, 38vw, 604px) !important;
-  perspective: 1200px;
-}
-
-.public-home-profile-card--command {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  grid-template-rows: 52px minmax(0, 1fr) 54px;
-  inline-size: 100%;
-  max-inline-size: 100%;
-  min-inline-size: 0;
-  overflow: hidden;
-  border: 1px solid rgb(75 184 255 / .34);
-  border-radius: clamp(28px, 3vw, 38px);
-  color: var(--public-home-text);
-  background:
-    radial-gradient(circle at var(--card-pointer-x, 30%) var(--card-pointer-y, 14%), rgb(52 212 255 / .21), transparent 30%),
-    radial-gradient(circle at 94% 20%, rgb(19 148 255 / .22), transparent 34%),
-    radial-gradient(circle at 18% 92%, rgb(52 212 255 / .10), transparent 36%),
-    linear-gradient(145deg, rgb(10 25 46 / .98), rgb(3 8 18 / .99) 64%, rgb(2 5 12 / .99));
-  box-shadow:
-    0 36px 110px rgb(0 0 0 / .54),
-    0 0 90px rgb(19 148 255 / .18),
-    inset 0 1px 0 rgb(255 255 255 / .16);
-  transform: translateZ(0);
-}
-
-.public-home-profile-card--command::before,
-.public-home-profile-card--command::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.public-home-profile-card--command::before {
-  opacity: .58;
-  background:
-    linear-gradient(90deg, transparent 0 44%, rgb(52 212 255 / .15) 45%, transparent 47% 100%),
-    linear-gradient(180deg, rgb(255 255 255 / .10), transparent 40%);
-}
-
-.public-home-profile-card--command::after {
-  opacity: .20;
-  background:
-    linear-gradient(90deg, rgb(255 255 255 / .045) 1px, transparent 1px),
-    linear-gradient(180deg, rgb(255 255 255 / .04) 1px, transparent 1px);
-  background-size: 56px 56px;
-  mask-image: radial-gradient(circle at 50% 22%, black, transparent 82%);
-  -webkit-mask-image: radial-gradient(circle at 50% 22%, black, transparent 82%);
-}
-
-.public-home-profile-card--command .public-home-profile-top,
-.public-home-profile-card--command .public-home-profile-command,
-.public-home-profile-card--command .public-home-profile-bottom {
-  position: relative;
-  z-index: 2;
-  min-inline-size: 0;
-}
-
-.public-home-profile-card--command .public-home-profile-top {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-block-size: 52px;
-  padding-inline: 20px;
-  border-block-end: 1px solid rgb(255 255 255 / .09);
-  background: linear-gradient(180deg, rgb(255 255 255 / .05), transparent);
-}
-
-.public-home-profile-card--command .public-home-profile-top span {
-  inline-size: 9px;
-  block-size: 9px;
-  border-radius: 999px;
-}
-
-.public-home-profile-card--command .public-home-profile-top span:nth-child(1) { background: var(--public-home-accent-2); }
-.public-home-profile-card--command .public-home-profile-top span:nth-child(2) { background: var(--public-home-accent); }
-.public-home-profile-card--command .public-home-profile-top span:nth-child(3) { background: var(--public-home-success); }
-
-.public-home-profile-card--command .public-home-profile-top strong {
-  margin-inline-start: auto;
-  max-inline-size: 58%;
-  overflow: hidden;
-  color: #ffffff;
-  font-size: 11px;
-  font-weight: 1000;
-  letter-spacing: .14em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.public-home-profile-command {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto auto;
-  gap: 14px;
-  min-block-size: 0;
-  padding: clamp(16px, 1.7vw, 22px);
-  overflow: hidden;
-}
-
-.public-home-command-hero,
-.public-home-command-stat,
-.public-home-command-checklist {
-  border: 1px solid rgb(75 184 255 / .28);
-  background:
-    radial-gradient(circle at 42% 0%, rgb(52 212 255 / .13), transparent 44%),
-    linear-gradient(180deg, rgb(255 255 255 / .07), rgb(255 255 255 / .025)),
-    rgb(7 18 34 / .72);
-  box-shadow:
-    0 18px 50px rgb(0 0 0 / .26),
-    inset 0 1px 0 rgb(255 255 255 / .12);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-}
-
-.public-home-command-hero {
-  display: grid;
-  grid-template-columns: minmax(150px, 176px) minmax(0, 1fr);
-  align-items: stretch;
-  gap: 18px;
-  min-block-size: 250px;
-  min-inline-size: 0;
-  padding: 18px;
-  overflow: hidden;
-  border-radius: 28px;
-}
-
-.public-home-command-portrait {
-  position: relative;
-  display: block;
-  min-block-size: 214px;
-  min-inline-size: 0;
-  overflow: hidden;
-  border: 1px solid rgb(75 184 255 / .34);
-  border-radius: 24px;
-  background:
-    linear-gradient(180deg, rgb(6 20 38 / .96), rgb(2 7 16 / .98));
-  box-shadow:
-    0 18px 44px rgb(0 0 0 / .34),
-    inset 0 1px 0 rgb(255 255 255 / .12);
-}
-
-.public-home-command-aura {
-  display: none !important;
-}
-
-.public-home-command-photo {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  display: block;
-  inline-size: 100%;
-  block-size: 100%;
-  padding: 0;
-  object-fit: cover;
-  object-position: center center;
-  transform: none;
-  transform-origin: center center;
-  filter:
-    saturate(1.06)
-    contrast(1.05)
-    drop-shadow(0 24px 34px rgb(0 0 0 / .35));
-}
-
-.public-home-command-badge {
-  display: none !important;
-}
-
-.public-home-command-badge strong,
-.public-home-command-badge span {
-  display: none !important;
-}
-
-.public-home-command-badge strong {
-  display: none !important;
-}
-
-.public-home-command-badge span {
-  color: var(--public-home-accent-2);
-  font-size: 10px;
-  font-weight: 950;
-  letter-spacing: .05em;
-  text-transform: uppercase;
-}
-
-.public-home-command-copy,
-.public-home-command-copy * {
-  min-inline-size: 0;
-}
-
-.public-home-command-copy {
-  display: grid;
-  align-content: center;
-  justify-items: start;
-  gap: 11px;
-  overflow: hidden;
-}
-
-.public-home-command-copy .public-home-profile-eyebrow {
-  margin: 0;
-  overflow: hidden;
-  color: var(--public-home-accent-2);
-  font-size: 11px;
-  font-weight: 1000;
-  letter-spacing: .095em;
-  line-height: 1.1;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.public-home-command-copy h2 {
-  display: grid;
-  gap: 2px;
-  max-inline-size: 100%;
-  margin: 0;
-  color: #ffffff;
-  font-size: clamp(36px, 2.7vw, 46px);
-  font-weight: 1000;
-  line-height: .86;
-  letter-spacing: -.07em;
-  text-transform: uppercase;
-}
-
-.public-home-command-copy h2 span {
-  display: block;
-  max-inline-size: 100%;
-  overflow: hidden;
-  text-overflow: clip;
-  white-space: nowrap;
-}
-
-.public-home-command-copy p:not(.public-home-profile-eyebrow) {
-  max-inline-size: 31ch;
-  margin: 0;
-  color: var(--public-home-text-soft);
-  font-size: clamp(13px, .98vw, 14px);
-  font-weight: 720;
-  line-height: 1.46;
-}
-
-.public-home-command-tags {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 7px;
-  max-inline-size: 100%;
-  overflow: hidden;
-}
-
-.public-home-command-tags span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-block-size: 28px;
-  padding: 0 9px;
-  overflow: hidden;
-  border: 1px solid rgb(75 184 255 / .24);
-  border-radius: 999px;
-  color: var(--public-home-text);
-  background: rgb(19 148 255 / .09);
-  font-size: 11px;
-  font-weight: 880;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.public-home-command-tags .public-home-icon {
-  flex: 0 0 auto;
-  inline-size: 14px;
-  block-size: 14px;
-  color: var(--public-home-accent-2);
-}
-
-.public-home-command-stats {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  min-inline-size: 0;
-}
-
-.public-home-command-stat {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 4px 12px;
-  min-block-size: 92px;
-  min-inline-size: 0;
-  padding: 14px 16px;
-  overflow: hidden;
-  border-radius: 20px;
-}
-
-.public-home-command-stat > span {
-  grid-column: 1;
-  grid-row: 1;
-  overflow: hidden;
-  color: var(--public-home-accent-2);
-  font-size: 11px;
-  font-weight: 950;
-  letter-spacing: .055em;
-  line-height: 1.1;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.public-home-command-stat strong {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  align-self: center;
-  color: var(--public-home-accent);
-  font-size: clamp(38px, 3.25vw, 50px);
-  font-weight: 1000;
-  line-height: .86;
-  letter-spacing: -.075em;
-  text-shadow: 0 0 28px rgb(19 148 255 / .24);
-  white-space: nowrap;
-}
-
-.public-home-command-stat small {
-  grid-column: 1;
-  grid-row: 2;
-  max-inline-size: 15ch;
-  color: #ffffff;
-  font-size: 12px;
-  font-weight: 880;
-  line-height: 1.16;
-}
-
-.public-home-command-checklist {
-  display: grid;
-  align-content: center;
-  gap: 8px;
-  min-block-size: 96px;
-  margin: 0;
-  padding: 14px 16px;
-  overflow: hidden;
-  border-radius: 20px;
-  list-style: none;
-}
-
-.public-home-command-checklist li {
-  display: grid;
-  grid-template-columns: 17px minmax(0, 1fr);
-  align-items: start;
-  gap: 9px;
-  color: var(--public-home-text-soft);
-  font-size: 12px;
-  font-weight: 780;
-  line-height: 1.26;
-}
-
-.public-home-command-checklist li > span:first-child {
-  display: inline-grid;
-  place-items: center;
-  inline-size: 17px;
-  block-size: 17px;
-  color: var(--public-home-accent-2);
-}
-
-.public-home-command-checklist .public-home-icon {
-  inline-size: 14px;
-  block-size: 14px;
-}
-
-.public-home-profile-card--command .public-home-profile-bottom {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-block-size: 54px;
-  padding-inline: clamp(20px, 2.4vw, 28px);
-  overflow: hidden;
-  border-block-start: 1px solid rgb(255 255 255 / .07);
-  background: linear-gradient(180deg, transparent, rgb(2 6 14 / .34));
-}
-
-.public-home-profile-card--command .public-home-profile-bottom span {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-inline-size: 0;
-  overflow: hidden;
-  color: var(--public-home-text-soft);
-  font-size: 11px;
-  font-weight: 880;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.public-home-profile-card--command .public-home-profile-bottom .public-home-icon {
-  flex: 0 0 auto;
-  inline-size: 14px;
-  block-size: 14px;
-  color: var(--public-home-accent-2);
-}
-
-/* ================= PRECIOS / FAQ / FOOTER ================= */
-
-.public-home-price-grid {
-  grid-template-columns: minmax(0, .92fr) minmax(0, 1.18fr) minmax(0, .92fr);
-  align-items: stretch;
-  gap: clamp(18px, 2.2vw, 30px);
-}
-
-.public-home-price-card {
-  min-block-size: 408px;
-}
-
-.public-home-price-card--featured {
-  z-index: 2;
-  min-block-size: clamp(472px, 34vw, 548px);
-  padding: clamp(36px, 3.2vw, 48px);
-  border-radius: 34px;
-  transform: translateY(-14px) scale(1.035);
-  box-shadow:
-    0 34px 92px rgb(0 0 0 / .38),
-    0 0 92px rgb(19 148 255 / .18),
-    inset 0 1px 0 rgb(255 255 255 / .14);
-}
-
-.public-home-price-card--featured:hover {
-  transform: translateY(-18px) scale(1.04);
-}
-
-.public-home-price-card--featured .public-home-price-badge {
-  min-block-size: 34px;
-  padding-inline: 15px;
-  font-size: 13px;
-}
-
-.public-home-price-card--featured h3 {
-  max-inline-size: 15ch;
-  font-size: clamp(28px, 2.75vw, 36px);
-  line-height: 1;
-}
-
-.public-home-price-card--featured p:not(.public-home-price-eyebrow) {
-  max-inline-size: 34ch;
-  font-size: 16px;
-  line-height: 1.62;
-}
-
-.public-home-price-card--featured .public-home-price-points {
-  gap: 14px;
-}
-
-.public-home-price-card--featured .public-home-price-points li {
-  gap: 12px;
-  font-size: 16px;
-  line-height: 1.38;
-}
-
-.public-home-price-card--featured .public-home-price-points li > span:first-child {
-  inline-size: 26px;
-  block-size: 26px;
-}
-
-.public-home-price-card--featured .public-home-price-link {
-  min-block-size: 56px;
-  padding-inline: 24px;
-  border-radius: 18px;
-  font-size: 16px;
-}
-
-.public-home-faq-list {
-  inline-size: 100%;
-  max-inline-size: 960px;
-}
-
-.public-home-faq-item:not([open]) p {
-  display: none;
-}
-
-.public-home-footer {
-  padding-inline: var(--public-home-page-gutter) !important;
-  border-block-start: 1px solid rgb(75 184 255 / .12);
-  background:
-    radial-gradient(circle at 14% 0%, rgb(19 148 255 / .16), transparent 32%),
-    linear-gradient(180deg, rgb(6 14 28 / .92), rgb(2 5 12 / .98));
-}
-
-.public-home-footer-inner {
-  grid-template-columns: minmax(270px, .88fr) minmax(0, 1.1fr) minmax(270px, .88fr);
-  padding-block: clamp(26px, 4vw, 42px) !important;
-}
-
-.public-home-footer-bottom {
-  padding-block: 16px 24px !important;
-}
-
-.public-home-brand,
-.public-home-footer-brand {
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: var(--public-home-brand-gap) !important;
-  min-block-size: var(--public-home-brand-mark-size) !important;
-  min-inline-size: max-content;
-  color: var(--public-home-text-strong);
-}
-
-.public-home-brand-mark,
-.public-home-nav .public-home-brand-mark,
-.public-home-footer-brand .public-home-brand-mark {
-  flex: 0 0 var(--public-home-brand-mark-size) !important;
-  inline-size: var(--public-home-brand-mark-size) !important;
-  block-size: var(--public-home-brand-mark-size) !important;
-  aspect-ratio: 1 / 1;
-  border-radius: 18px;
-}
-
-.public-home-brand-logo,
-.public-home-nav .public-home-brand-logo,
-.public-home-footer-brand .public-home-brand-logo {
-  inline-size: var(--public-home-brand-logo-size) !important;
-  block-size: var(--public-home-brand-logo-size) !important;
-  aspect-ratio: 1 / 1;
-  object-fit: contain;
-}
-
-.public-home-brand-copy,
-.public-home-footer-brand .public-home-brand-copy {
-  display: grid !important;
-  gap: 2px;
-  line-height: 1;
-}
-
-.public-home-brand-name,
-.public-home-footer-brand .public-home-brand-name {
-  font-size: var(--public-home-brand-name-size) !important;
-  font-weight: 950;
-  letter-spacing: -.045em;
-}
-
-.public-home-brand-subtitle,
-.public-home-footer-brand .public-home-brand-subtitle {
-  font-size: var(--public-home-brand-subtitle-size) !important;
-  font-weight: 850;
-  letter-spacing: .055em;
-  text-transform: uppercase;
-}
-
-.public-home.is-footer-visible .public-home-nav,
-.public-home-nav.is-footer-visible {
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  transform: translate3d(0, calc(-1 * var(--public-home-nav-height) - 18px), 0);
-}
-
-body.public-home-menu-open .public-home.is-footer-visible .public-home-nav,
-body.public-home-menu-open .public-home-nav.is-footer-visible {
-  opacity: 1;
-  visibility: visible;
-  pointer-events: auto;
-  transform: translate3d(0, 0, 0);
-}
-
-/* ================= RESPONSIVE FINAL ================= */
-
-@media (max-width: 1240px) {
-  .public-home-hero-grid {
-    grid-template-columns: minmax(0, 1fr) minmax(400px, .70fr) !important;
-    gap: clamp(24px, 3vw, 52px) !important;
-  }
-
-  .public-home-hero-visual,
-  .public-home-hero-visual--profile {
-    max-inline-size: 520px !important;
-    min-block-size: clamp(540px, 43vw, 590px) !important;
-  }
-
-  .public-home-command-hero {
-    grid-template-columns: minmax(138px, 160px) minmax(0, 1fr);
-    gap: 16px;
-    min-block-size: 238px;
-  }
-
-  .public-home-command-copy h2 {
-    font-size: clamp(34px, 2.55vw, 42px);
-  }
-
-  .public-home-command-stat strong {
-    font-size: clamp(36px, 3vw, 46px);
-  }
-}
-
-@media (max-width: 1040px) {
-  .public-home-hero {
-    padding-block-start: clamp(22px, 4vw, 44px) !important;
-  }
-
-  .public-home-hero-grid,
-  .public-home-price-grid,
-  .public-home-method-grid {
-    grid-template-columns: 1fr !important;
-  }
-
-  .public-home-hero-copy {
-    justify-items: start;
-  }
-
-  .public-home-hero-visual,
-  .public-home-hero-visual--profile {
-    justify-self: center;
-    inline-size: min(100%, 660px) !important;
-    max-inline-size: 660px !important;
-    min-block-size: 600px !important;
-  }
-
-  .public-home-command-hero {
-    grid-template-columns: minmax(168px, 196px) minmax(0, 1fr);
-  }
-
-  .public-home-command-copy h2 {
-    font-size: clamp(40px, 6vw, 56px);
-  }
-
-  .public-home-price-card--featured,
-  .public-home-price-card--featured:hover {
-    transform: none;
   }
 
   .public-home-footer-inner {
@@ -2767,7 +2520,10 @@ body.public-home-menu-open .public-home-nav.is-footer-visible {
 
 @media (max-width: 720px) {
   .public-auth-shell--home {
+    --public-home-nav-height: 78px;
+    --public-home-scroll-offset: 96px;
     --public-home-page-gutter: 14px;
+
     --public-home-brand-mark-size: 42px;
     --public-home-brand-logo-size: 30px;
     --public-home-brand-gap: 10px;
@@ -2775,18 +2531,40 @@ body.public-home-menu-open .public-home-nav.is-footer-visible {
     --public-home-brand-subtitle-size: 10px;
   }
 
+  .public-home-nav {
+    padding-inline: 14px;
+  }
+
+  .public-home-brand-mark {
+    border-radius: 15px;
+  }
+
+  .public-home-brand-subtitle {
+    display: none;
+  }
+
   .public-home-scrollbar {
     inset-inline-end: 5px;
-    inline-size: 6px;
-    opacity: .88;
+    inline-size: 8px;
+  }
+
+  .public-home.is-scrollbar-dragging .public-home-scrollbar {
+    inline-size: 11px;
+  }
+
+  .public-home-scrollbar-thumb::before,
+  .public-home-scrollbar-thumb::after {
+    display: none;
   }
 
   .public-home-hero {
-    padding-block-start: 28px !important;
-    padding-block-end: 62px !important;
+    min-block-size: auto;
+    padding-block-start: 28px;
+    padding-block-end: 62px;
   }
 
   .public-home-title {
+    font-size: clamp(44px, 14vw, 74px);
     line-height: 1.02;
     letter-spacing: -.07em;
   }
@@ -2795,24 +2573,41 @@ body.public-home-menu-open .public-home-nav.is-footer-visible {
     margin-block-start: .08em;
   }
 
-  .public-home-nav .public-home-brand-subtitle,
-  .public-home-footer-brand .public-home-brand-subtitle,
-  .public-home-footer .public-home-brand-subtitle {
-    display: none !important;
+  .public-home-hero-text {
+    font-size: 15px;
   }
 
+  .public-home-hero-actions,
+  .public-home-button {
+    inline-size: 100%;
+  }
+
+  .public-home-trust-list {
+    display: grid;
+    grid-template-columns: 1fr;
+    inline-size: 100%;
+  }
+
+  /*
+     Móvil completamente fluido:
+     nada de min-height 780/800px ni card absoluta.
+  */
   .public-home-hero-visual,
   .public-home-hero-visual--profile {
-    min-block-size: 785px !important;
+    inline-size: 100%;
+    max-inline-size: 660px;
+    min-block-size: 0;
   }
 
   .public-home-profile-card--command {
+    position: relative;
+    inset: auto;
     border-radius: 30px;
   }
 
   .public-home-profile-command {
     gap: 12px;
-    padding: 14px !important;
+    padding: 14px;
   }
 
   .public-home-command-hero {
@@ -2832,6 +2627,10 @@ body.public-home-menu-open .public-home-nav.is-footer-visible {
 
   .public-home-command-copy h2 {
     font-size: clamp(38px, 12vw, 54px);
+  }
+
+  .public-home-command-copy p:not(.public-home-profile-eyebrow) {
+    max-inline-size: 36ch;
   }
 
   .public-home-command-tags {
@@ -2855,6 +2654,19 @@ body.public-home-menu-open .public-home-nav.is-footer-visible {
 
   .public-home-command-stat small {
     font-size: 11px;
+  }
+
+  .public-home-section-head h2 {
+    font-size: clamp(34px, 11vw, 50px);
+  }
+
+  .public-home-service-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .public-home-service-card,
+  .public-home-price-card {
+    padding: 22px;
   }
 
   .public-home-price-card--featured {
@@ -2881,7 +2693,6 @@ body.public-home-menu-open .public-home-nav.is-footer-visible {
     padding: 18px;
     font-size: 16px;
     line-height: 1.2;
-    word-break: normal;
   }
 
   .public-home-faq-item p {
@@ -2904,14 +2715,15 @@ body.public-home-menu-open .public-home-nav.is-footer-visible {
     justify-content: center;
     inline-size: min(100%, 320px);
   }
+
+  .public-home-floating-whatsapp {
+    inset-inline-end: 22px;
+    inline-size: 56px;
+    block-size: 56px;
+  }
 }
 
 @media (max-width: 460px) {
-  .public-home-hero-visual,
-  .public-home-hero-visual--profile {
-    min-block-size: 760px !important;
-  }
-
   .public-home-command-portrait {
     min-block-size: 276px;
   }
@@ -2924,7 +2736,7 @@ body.public-home-menu-open .public-home-nav.is-footer-visible {
     min-block-size: 96px;
   }
 
-  .public-home-profile-card--command .public-home-profile-bottom {
+  .public-home-profile-bottom {
     gap: 8px;
     padding: 14px 18px;
   }
@@ -2935,11 +2747,6 @@ body.public-home-menu-open .public-home-nav.is-footer-visible {
 }
 
 @media (max-width: 370px) {
-  .public-home-hero-visual,
-  .public-home-hero-visual--profile {
-    min-block-size: 790px !important;
-  }
-
   .public-home-command-portrait {
     min-block-size: 248px;
   }
@@ -2953,546 +2760,24 @@ body.public-home-menu-open .public-home-nav.is-footer-visible {
   }
 }
 
-/* =========================================================
-   ONION SUPPORT 2026.19 - REMATE DEFINITIVO PRODUCTIVO
-   Ajustes cerrados:
-   - Scroll visual SIEMPRE a la derecha.
-   - Sin carril fantasma a la izquierda.
-   - Card profesional sin solapes entre foto, bloque hero y métricas.
-   - Layout estable en desktop/tablet/móvil.
-========================================================= */
-
-body.public-home-screen #app-shell > .main-content,
-body.public-home-screen .app-shell > .main-content,
-body.public-home-screen .main-content {
-  scrollbar-gutter: stable !important;
-  scrollbar-width: thin !important;
-  scrollbar-color: #34d4ff rgb(2 6 14 / .98) !important;
-}
-
-body.public-home-screen #app-shell > .main-content::-webkit-scrollbar,
-body.public-home-screen .app-shell > .main-content::-webkit-scrollbar,
-body.public-home-screen .main-content::-webkit-scrollbar {
-  inline-size: 13px !important;
-  block-size: 13px !important;
-}
-
-body.public-home-screen #app-shell > .main-content::-webkit-scrollbar-track,
-body.public-home-screen .app-shell > .main-content::-webkit-scrollbar-track,
-body.public-home-screen .main-content::-webkit-scrollbar-track {
-  border-inline-start: 1px solid rgb(75 184 255 / .16) !important;
-  border-inline-end: 0 !important;
-}
-
-.public-home-scrollbar {
-  inset-inline-start: auto !important;
-  inset-inline-end: 8px !important;
-  inline-size: 13px !important;
-  transform-origin: center right !important;
-}
-
-.public-home-scrollbar:hover,
-.public-home.is-scrollbar-dragging .public-home-scrollbar {
-  inline-size: 17px !important;
-  transform: translateX(-1px) !important;
-}
-
-.public-home-scrollbar-thumb {
-  inset-inline: 2px !important;
-}
-
-.public-home.is-footer-visible .public-home-scrollbar {
-  opacity: .48;
-}
-
-@media (min-width: 721px) {
-  .public-home-hero-visual,
-  .public-home-hero-visual--profile {
-    inline-size: min(100%, 580px) !important;
-    max-inline-size: 580px !important;
-    min-block-size: clamp(654px, 44vw, 716px) !important;
-  }
-
-  .public-home-profile-card--command {
-    grid-template-rows: 52px minmax(0, 1fr) 54px !important;
-  }
-
-  .public-home-profile-command {
-    display: grid !important;
-    grid-template-rows: auto auto auto !important;
-    align-content: start !important;
-    gap: 16px !important;
-    min-block-size: 0 !important;
-    padding: clamp(18px, 1.75vw, 24px) !important;
-    overflow: visible !important;
-  }
-
-  .public-home-command-hero {
-    position: relative !important;
-    z-index: 4 !important;
-    grid-template-columns: minmax(172px, 196px) minmax(0, 1fr) !important;
-    gap: clamp(16px, 1.6vw, 22px) !important;
-    min-block-size: 264px !important;
-    padding: 18px !important;
-    overflow: hidden !important;
-  }
-
-  .public-home-command-portrait {
-    min-block-size: 228px !important;
-    border-radius: 22px !important;
-  }
-
-  .public-home-command-photo {
-    object-fit: cover !important;
-    object-position: center center !important;
-  }
-
-  .public-home-command-copy {
-    align-content: center !important;
-    gap: 10px !important;
-    padding-block: 2px !important;
-  }
-
-  .public-home-command-copy h2 {
-    font-size: clamp(40px, 2.55vw, 50px) !important;
-    line-height: .86 !important;
-  }
-
-  .public-home-command-copy p:not(.public-home-profile-eyebrow) {
-    max-inline-size: 32ch !important;
-    font-size: clamp(13px, .92vw, 14px) !important;
-    line-height: 1.44 !important;
-  }
-
-  .public-home-command-tags {
-    gap: 7px !important;
-  }
-
-  .public-home-command-tags span {
-    min-block-size: 28px !important;
-    padding-inline: 9px !important;
-  }
-
-  .public-home-command-stats {
-    position: relative !important;
-    z-index: 3 !important;
-    display: grid !important;
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    gap: 14px !important;
-    margin-block-start: 0 !important;
-    isolation: isolate !important;
-  }
-
-  .public-home-command-stat {
-    position: relative !important;
-    z-index: 1 !important;
-    min-block-size: 104px !important;
-    padding: 16px 18px !important;
-    border-radius: 20px !important;
-    transform: none !important;
-  }
-
-  .public-home-command-stat strong {
-    font-size: clamp(42px, 3.15vw, 56px) !important;
-  }
-
-  .public-home-command-checklist {
-    position: relative !important;
-    z-index: 2 !important;
-    min-block-size: 106px !important;
-    padding: 15px 18px !important;
-    transform: none !important;
-  }
-}
-
-@media (min-width: 721px) and (max-width: 1240px) {
-  .public-home-hero-visual,
-  .public-home-hero-visual--profile {
-    inline-size: min(100%, 548px) !important;
-    max-inline-size: 548px !important;
-    min-block-size: clamp(650px, 52vw, 704px) !important;
-  }
-
-  .public-home-command-hero {
-    grid-template-columns: minmax(156px, 176px) minmax(0, 1fr) !important;
-    min-block-size: 258px !important;
-  }
-
-  .public-home-command-portrait {
-    min-block-size: 222px !important;
-  }
-
-  .public-home-command-copy h2 {
-    font-size: clamp(36px, 3.4vw, 46px) !important;
-  }
-
-  .public-home-command-stat strong {
-    font-size: clamp(40px, 4vw, 52px) !important;
-  }
-}
-
-@media (min-width: 721px) and (max-width: 1040px) {
-  .public-home-hero-visual,
-  .public-home-hero-visual--profile {
-    inline-size: min(100%, 660px) !important;
-    max-inline-size: 660px !important;
-    min-block-size: 680px !important;
-  }
-
-  .public-home-command-hero {
-    grid-template-columns: minmax(178px, 206px) minmax(0, 1fr) !important;
-  }
-}
-
-@media (max-width: 720px) {
-  .public-home-scrollbar {
-    inset-inline-start: auto !important;
-    inset-inline-end: 5px !important;
-    inline-size: 7px !important;
-  }
-
-  .public-home-scrollbar:hover,
-  .public-home.is-scrollbar-dragging .public-home-scrollbar {
-    inline-size: 10px !important;
-    transform: translateX(-1px) !important;
-  }
-
-  .public-home-hero-visual,
-  .public-home-hero-visual--profile {
-    min-block-size: 800px !important;
-  }
-
-  .public-home-profile-command {
-    overflow: visible !important;
-  }
-
-  .public-home-command-stats {
-    margin-block-start: 0 !important;
-  }
-}
-
-@media (max-width: 460px) {
-  .public-home-hero-visual,
-  .public-home-hero-visual--profile {
-    min-block-size: 780px !important;
-  }
-}
-
 
 /* =========================================================
-   ONION SUPPORT 2026.19 - FIX SCROLLBAR SYNC
-   El rail vive siempre a la derecha y el pulgar lee las
-   variables actualizadas por JS directamente desde el rail.
+   20. REDUCED MOTION
 ========================================================= */
 
-.public-home-scrollbar {
-  inset-inline-start: auto !important;
-  inset-inline-end: 8px !important;
-  pointer-events: auto !important;
-}
-
-.public-home-scrollbar-thumb {
-  inset-block-start: var(--public-home-scrollbar-thumb-top, 0px) !important;
-  block-size: var(--public-home-scrollbar-thumb-size, clamp(74px, 18vh, 148px)) !important;
-  transition:
-    inset-block-start .06s linear,
-    block-size .12s ease,
-    inset-inline .18s ease,
-    box-shadow .18s ease,
-    filter .18s ease,
-    background .18s ease !important;
-}
-
-.public-home-scrollbar:hover .public-home-scrollbar-thumb,
-.public-home.is-scrollbar-dragging .public-home-scrollbar-thumb {
-  inset-block-start: var(--public-home-scrollbar-thumb-top, 0px) !important;
-}
-
-
-/* =========================================================
-   ONION SUPPORT 2026.20 - RIGHT SCROLL LOCATOR
-   Rail premium a la derecha con localizador real de posición.
-   - El track deja de parecer una barra llena.
-   - El progreso se ve como relleno suave.
-   - El pulgar es más corto, brillante y claramente ubicado.
-   - Al hover/drag aparece porcentaje para saber dónde estás.
-========================================================= */
-
-.public-home-scrollbar {
-  --public-home-scrollbar-thumb-center: 0px;
-
-  inset-inline-start: auto !important;
-  inset-inline-end: 9px !important;
-  inline-size: 14px !important;
-  overflow: visible !important;
-  border-color: rgb(91 218 255 / .34) !important;
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / .045), rgb(255 255 255 / .015)),
-    rgb(1 7 16 / .88) !important;
-  box-shadow:
-    0 0 0 1px rgb(255 255 255 / .045),
-    0 0 26px rgb(19 148 255 / .18),
-    inset 0 1px 0 rgb(255 255 255 / .16),
-    inset 0 -1px 0 rgb(0 0 0 / .38) !important;
-}
-
-.public-home-scrollbar::before {
-  content: "";
-  position: absolute;
-  inset-inline: 3px;
-  inset-block-start: 3px;
-  block-size: var(--public-home-scroll-progress-percent, 0%);
-  min-block-size: 10px;
-  max-block-size: calc(100% - 6px);
-  border-radius: 999px;
-  background:
-    linear-gradient(180deg, rgb(168 242 255 / .68), rgb(52 212 255 / .44) 38%, rgb(19 148 255 / .72));
-  box-shadow:
-    0 0 18px rgb(52 212 255 / .28),
-    inset 0 1px 0 rgb(255 255 255 / .36);
-  opacity: .78;
-  pointer-events: none;
-  transition: block-size .08s linear, opacity .18s ease, box-shadow .18s ease;
-}
-
-.public-home-scrollbar::after {
-  content: attr(data-scroll-percent);
-  position: absolute;
-  inset-inline-end: calc(100% + 12px);
-  inset-block-start: var(--public-home-scrollbar-thumb-center, 0px);
-  z-index: 3;
-  min-inline-size: 42px;
-  padding: 5px 8px 6px;
-  border: 1px solid rgb(91 218 255 / .34);
-  border-radius: 999px;
-  color: #eaffff;
-  background:
-    radial-gradient(circle at 30% 0%, rgb(122 234 255 / .22), transparent 46%),
-    rgb(4 14 28 / .88);
-  box-shadow:
-    0 14px 34px rgb(0 0 0 / .34),
-    0 0 24px rgb(52 212 255 / .22),
-    inset 0 1px 0 rgb(255 255 255 / .16);
-  font-size: 10px;
-  font-weight: 1000;
-  letter-spacing: .04em;
-  line-height: 1;
-  text-align: center;
-  opacity: .72;
-  pointer-events: none;
-  transform: translateY(-50%) translateX(2px) scale(.94);
-  transform-origin: center right;
-  transition:
-    inset-block-start .08s linear,
-    opacity .18s ease,
-    transform .18s ease,
-    border-color .18s ease,
-    box-shadow .18s ease;
-}
-
-.public-home-scrollbar-thumb {
-  z-index: 2 !important;
-  inset-inline: 2px !important;
-  inset-block-start: var(--public-home-scrollbar-thumb-top, 0px) !important;
-  block-size: var(--public-home-scrollbar-thumb-size, 96px) !important;
-  min-block-size: 68px !important;
-  max-block-size: 28% !important;
-  border: 1px solid rgb(214 250 255 / .44);
-  background:
-    radial-gradient(circle at 50% 16%, rgb(255 255 255 / .92), transparent 21%),
-    linear-gradient(180deg, #d9fbff 0%, #7aeaff 18%, #1394ff 58%, #075cff 100%) !important;
-  box-shadow:
-    0 0 0 1px rgb(255 255 255 / .10),
-    0 0 24px rgb(168 242 255 / .72),
-    0 0 54px rgb(19 148 255 / .48),
-    inset 0 1px 0 rgb(255 255 255 / .78),
-    inset 0 -12px 22px rgb(0 32 94 / .34) !important;
-}
-
-.public-home-scrollbar-thumb::before,
-.public-home-scrollbar-thumb::after {
-  content: "";
-  position: absolute;
-  inset-inline: 3px;
-  pointer-events: none;
-}
-
-.public-home-scrollbar-thumb::before {
-  inset-block-start: 10px;
-  block-size: 2px;
-  border-radius: 999px;
-  background: rgb(255 255 255 / .72);
-  box-shadow:
-    0 8px 0 rgb(255 255 255 / .32),
-    0 16px 0 rgb(255 255 255 / .20);
-}
-
-.public-home-scrollbar-thumb::after {
-  inset-block-end: 9px;
-  block-size: 8px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, transparent, rgb(255 255 255 / .72), transparent);
-  opacity: .62;
-}
-
-.public-home-scrollbar:hover,
-.public-home.is-scrollbar-dragging .public-home-scrollbar {
-  inline-size: 18px !important;
-  border-color: rgb(168 242 255 / .82) !important;
-  background:
-    radial-gradient(circle at 50% 0%, rgb(168 242 255 / .18), transparent 38%),
-    linear-gradient(180deg, rgb(9 26 48 / .96), rgb(2 8 18 / .96)) !important;
-  box-shadow:
-    0 0 0 1px rgb(255 255 255 / .08),
-    0 0 38px rgb(52 212 255 / .46),
-    0 0 90px rgb(19 148 255 / .32),
-    inset 0 1px 0 rgb(255 255 255 / .28) !important;
-  transform: translateX(-1px) !important;
-}
-
-.public-home-scrollbar:hover::before,
-.public-home.is-scrollbar-dragging .public-home-scrollbar::before {
-  opacity: .95;
-  box-shadow:
-    0 0 22px rgb(122 234 255 / .44),
-    0 0 54px rgb(19 148 255 / .30),
-    inset 0 1px 0 rgb(255 255 255 / .48);
-}
-
-.public-home-scrollbar:hover::after,
-.public-home.is-scrollbar-dragging .public-home-scrollbar::after {
-  opacity: 1;
-  transform: translateY(-50%) translateX(0) scale(1);
-  border-color: rgb(168 242 255 / .68);
-  box-shadow:
-    0 16px 38px rgb(0 0 0 / .38),
-    0 0 34px rgb(52 212 255 / .36),
-    inset 0 1px 0 rgb(255 255 255 / .24);
-}
-
-.public-home-scrollbar:hover .public-home-scrollbar-thumb,
-.public-home.is-scrollbar-dragging .public-home-scrollbar-thumb {
-  inset-inline: 2px !important;
-  filter: saturate(1.18) brightness(1.08) !important;
-}
-
-@media (max-width: 720px) {
-  .public-home-scrollbar {
-    inset-inline-end: 5px !important;
-    inline-size: 8px !important;
+@media (prefers-reduced-motion: reduce) {
+  .public-home *,
+  .public-home *::before,
+  .public-home *::after {
+    scroll-behavior: auto;
+    animation-duration: .001ms;
+    animation-iteration-count: 1;
+    transition-duration: .001ms;
   }
 
-  .public-home-scrollbar:hover,
-  .public-home.is-scrollbar-dragging .public-home-scrollbar {
-    inline-size: 11px !important;
+  .public-home [data-public-home-reveal],
+  .public-home [data-reveal] {
+    opacity: 1;
+    transform: none;
   }
-
-  .public-home-scrollbar::after {
-    display: none !important;
-  }
-
-  .public-home-scrollbar-thumb {
-    min-block-size: 58px !important;
-  }
-}
-
-
-/* =========================================================
-   ONION SUPPORT 2026.22 - HERO BG PASSTHROUGH
-   - Sin porcentaje flotante.
-   - Rail a la derecha.
-   - Pulgar localizador real sincronizado con cualquier scroll host.
-========================================================= */
-
-.public-home-scrollbar {
-  inset-inline-start: auto !important;
-  inset-inline-end: 9px !important;
-  inline-size: 14px !important;
-  overflow: hidden !important;
-  cursor: pointer !important;
-}
-
-.public-home-scrollbar::after {
-  content: "" !important;
-  display: none !important;
-}
-
-.public-home-scrollbar::before {
-  opacity: .38 !important;
-  block-size: var(--public-home-scroll-progress-percent, 0%) !important;
-  min-block-size: 0 !important;
-  max-block-size: calc(100% - 6px) !important;
-}
-
-.public-home-scrollbar-thumb {
-  position: absolute !important;
-  inset-inline: 2px !important;
-  inset-block-start: var(--public-home-scrollbar-thumb-top, 0px) !important;
-  block-size: var(--public-home-scrollbar-thumb-size, 86px) !important;
-  min-block-size: 58px !important;
-  max-block-size: 24% !important;
-  transform: translate3d(0, 0, 0) !important;
-  transition:
-    inset-block-start .055s linear,
-    block-size .12s ease,
-    filter .18s ease,
-    box-shadow .18s ease !important;
-}
-
-.public-home-scrollbar:hover,
-.public-home.is-scrollbar-dragging .public-home-scrollbar {
-  inline-size: 18px !important;
-  transform: translateX(-1px) !important;
-}
-
-.public-home-scrollbar:hover::before,
-.public-home.is-scrollbar-dragging .public-home-scrollbar::before {
-  opacity: .62 !important;
-}
-
-@media (max-width: 720px) {
-  .public-home-scrollbar {
-    inset-inline-end: 5px !important;
-    inline-size: 8px !important;
-  }
-
-  .public-home-scrollbar:hover,
-  .public-home.is-scrollbar-dragging .public-home-scrollbar {
-    inline-size: 11px !important;
-  }
-}
-
-
-/* =========================================================
-   ONION SUPPORT 2026.22 - HERO BG PASSTHROUGH
-   - El bloque hero ya no pinta un fondo propio.
-   - El contenido queda sobre el background global de la página.
-   - Mantiene scroll derecho real v21 intacto.
-========================================================= */
-
-.public-home-hero,
-.public-home-section.public-home-hero {
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
-.public-home-hero::before,
-.public-home-hero::after,
-.public-home-section.public-home-hero::before,
-.public-home-section.public-home-hero::after {
-  background: none !important;
-  box-shadow: none !important;
-}
-
-.public-home-hero-bg {
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-  background: none !important;
-  box-shadow: none !important;
-  pointer-events: none !important;
-}
-
-.public-home-hero-grid {
-  background: transparent !important;
 }

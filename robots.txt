@@ -1,11 +1,13 @@
 User-agent: *
 Allow: /
 
+# Autenticación y recuperación de cuenta
 Disallow: /login
 Disallow: /password-request
 Disallow: /password-reset
 Disallow: /activate-account
 
+# Área privada
 Disallow: /dashboard
 Disallow: /incidencias
 Disallow: /facturas
@@ -16,15 +18,15 @@ Disallow: /cuenta
 Disallow: /ajustes
 Disallow: /@*
 
+# Endpoints y recursos internos
 Disallow: /api/
 Disallow: /.auth/
-Disallow: /.well-known/
 Disallow: /docs/
 Disallow: /config/
+
+# Directorios técnicos
 Disallow: /node_modules/
 Disallow: /.git/
 Disallow: /.github/
 Disallow: /.vscode/
 Disallow: /.idea/
-
-Sitemap: https://onionsupport.com/sitemap.xml

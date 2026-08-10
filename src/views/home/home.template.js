@@ -3,23 +3,14 @@
    Archivo: /src/views/home/home.template.js
 
    Responsabilidad:
-   - Pintar HTML puro de Inicio.
-   - Usar datos ya preparados por index.js/home.api.js.
-   - Mantener todo el texto visible en castellano.
-   - No pintar el botón Crear incidencia.
-   - Avatar a la izquierda desde estructura.
-   - Sin DOM API.
-   - Sin escuchadores.
-   - Sin Auth.
-   - Sin Router.
-   - Sin HTTP.
-   - Sin Store.
-   - Sin storage.
-   - Sin CSS inline.
-   - Sin handlers inline.
+   - Renderizar HTML puro de Inicio desde un ViewModel estable.
+   - Mantener clases y estructura consumidas por /src/css/views/home/index.css.
+   - Mantener navegación/acciones declarativas para index.js.
+   - Sin DOM API, listeners, Auth, Router, HTTP, Store ni Storage.
+   - Sin CSS ni handlers inline.
 ========================================================= */
 
-export const HOME_TEMPLATE_VERSION = "home.template.inicio.v6.es.no-cta";
+export const HOME_TEMPLATE_VERSION = "home.template.inicio.v7.production";
 
 const ACTIONS = Object.freeze({
   RETRY: "retry",
@@ -27,7 +18,7 @@ const ACTIONS = Object.freeze({
 });
 
 const DEFAULT_ROUTES = Object.freeze({
-  home: "/",
+  home: "/dashboard",
   incidencias: "/incidencias",
   facturas: "/facturas",
   clientes: "/clientes",
@@ -52,6 +43,7 @@ const STATUS_LABELS = Object.freeze({
   paid: "Pagada",
   unpaid: "Pendiente",
   pending_payment: "Pendiente",
+  partial: "Parcial",
   overdue: "Vencida",
   issued: "Emitida",
   draft: "Borrador",
@@ -65,9 +57,42 @@ const STATUS_LABELS = Object.freeze({
   disabled: "Inactivo",
 });
 
+const SVG_COMMON =
+  `aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"`;
+
+const ICONS = Object.freeze({
+  ticket: `<svg ${SVG_COMMON}><path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z"/><path d="M13 5v14"/></svg>`,
+  invoice: `<svg ${SVG_COMMON}><path d="M6 2h12v20l-3-2-3 2-3-2-3 2Z"/><path d="M9 8h6"/><path d="M9 12h6"/><path d="M9 16h4"/></svg>`,
+  client: `<svg ${SVG_COMMON}><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/></svg>`,
+  users: `<svg ${SVG_COMMON}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg>`,
+  activity: `<svg ${SVG_COMMON}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`,
+  euro: `<svg ${SVG_COMMON}><path d="M4 10h10"/><path d="M4 14h9"/><path d="M19 5a7.7 7.7 0 0 0-5.2-2C8.4 3 4 7 4 12s4.4 9 9.8 9a7.7 7.7 0 0 0 5.2-2"/></svg>`,
+  alert: `<svg ${SVG_COMMON}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
+  arrowRight: `<svg ${SVG_COMMON}><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>`,
+  clock: `<svg ${SVG_COMMON}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`,
+});
+
+const NUMBER_FORMATTER = new Intl.NumberFormat("es-ES");
+const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("es-ES", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+const MONEY_FORMATTERS = new Map();
+
 /* =========================================================
-   AYUDANTES BASE
+   BASICS
 ========================================================= */
+
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
 
 function cleanText(value = "", fallback = "") {
   const output = String(value ?? "")
@@ -78,16 +103,14 @@ function cleanText(value = "", fallback = "") {
   return output || fallback;
 }
 
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
+/*
+   CRÍTICO:
+   No usar values.flat(Infinity).
+   Los arrays de incidencias/facturas son valores completos. Aplanarlos hace
+   que first() devuelva el primer registro y safeArray() termine en [].
+*/
 function first(...values) {
-  for (const value of values.flat(Infinity)) {
+  for (const value of values) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
@@ -97,6 +120,14 @@ function first(...values) {
   }
 
   return null;
+}
+
+function number(value, fallback = 0) {
+  if (value === null || value === undefined || value === "") return fallback;
+  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function escapeHtml(value = "") {
@@ -123,38 +154,61 @@ function normalizeKey(value = "") {
     .slice(0, 80);
 }
 
-function number(value = 0, fallback = 0) {
-  const output = Number(value);
-  return Number.isFinite(output) ? output : fallback;
-}
-
 function hasAmount(value = null) {
   const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed !== 0;
+  return Number.isFinite(parsed);
 }
 
 /* =========================================================
-   FORMATO
+   FORMATTERS
 ========================================================= */
 
 function formatNumber(value = 0) {
   try {
-    return new Intl.NumberFormat("es-ES").format(number(value, 0));
+    return NUMBER_FORMATTER.format(number(value, 0));
   } catch {
     return String(number(value, 0));
   }
 }
 
-function formatMoney(value = 0, currency = "EUR") {
-  try {
-    return new Intl.NumberFormat("es-ES", {
-      style: "currency",
-      currency: cleanText(currency, "EUR"),
-      maximumFractionDigits: 2,
-    }).format(number(value, 0));
-  } catch {
-    return `${number(value, 0).toFixed(2).replace(".", ",")} €`;
+function getMoneyFormatter(currency = "EUR") {
+  const code = cleanText(currency, "EUR").toUpperCase();
+
+  if (!MONEY_FORMATTERS.has(code)) {
+    try {
+      MONEY_FORMATTERS.set(
+        code,
+        new Intl.NumberFormat("es-ES", {
+          style: "currency",
+          currency: code,
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })
+      );
+    } catch {
+      MONEY_FORMATTERS.set(code, null);
+    }
   }
+
+  return {
+    code,
+    formatter: MONEY_FORMATTERS.get(code),
+  };
+}
+
+function formatMoney(value = 0, currency = "EUR") {
+  const amount = number(value, 0);
+  const { code, formatter } = getMoneyFormatter(currency);
+
+  if (formatter) {
+    try {
+      return formatter.format(amount);
+    } catch {
+      // fallback below
+    }
+  }
+
+  return `${amount.toFixed(2).replace(".", ",")} ${code}`;
 }
 
 function toDate(value = "") {
@@ -165,8 +219,8 @@ function toDate(value = "") {
   }
 
   if (typeof value === "number" && Number.isFinite(value)) {
-    const numericDate = new Date(value);
-    return Number.isNaN(numericDate.getTime()) ? null : numericDate;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
   }
 
   const time = Date.parse(value);
@@ -175,17 +229,10 @@ function toDate(value = "") {
 
 function formatDate(value = "") {
   const date = toDate(value);
-
   if (!date) return "Sin fecha";
 
   try {
-    return new Intl.DateTimeFormat("es-ES", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(date);
+    return DATE_TIME_FORMATTER.format(date);
   } catch {
     return date.toLocaleString("es-ES");
   }
@@ -205,23 +252,18 @@ function initialsFrom(value = "") {
 
 function normalizeStatus(value = "") {
   const raw = cleanText(value, "");
-  const key = normalizeKey(raw);
-
-  return STATUS_LABELS[key] || raw || "Sin estado";
+  return STATUS_LABELS[normalizeKey(raw)] || raw || "Sin estado";
 }
 
 function visibleText(value = "", fallback = "") {
   const text = cleanText(value, "");
-
   if (!text) return fallback;
 
-  const key = normalizeKey(text);
-
-  return STATUS_LABELS[key] || text;
+  return STATUS_LABELS[normalizeKey(text)] || text;
 }
 
 /* =========================================================
-   SEGURIDAD DE URLS
+   URL SAFETY
 ========================================================= */
 
 function safeImageSrc(value = "") {
@@ -261,31 +303,12 @@ function safeRoute(value = "", fallback = "/") {
   return route;
 }
 
-/* =========================================================
-   ICONOS
-========================================================= */
-
 function icon(name = "activity") {
-  const common =
-    `aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"`;
-
-  const icons = {
-    ticket: `<svg ${common}><path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z"/><path d="M13 5v14"/></svg>`,
-    invoice: `<svg ${common}><path d="M6 2h12v20l-3-2-3 2-3-2-3 2Z"/><path d="M9 8h6"/><path d="M9 12h6"/><path d="M9 16h4"/></svg>`,
-    client: `<svg ${common}><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/></svg>`,
-    users: `<svg ${common}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/></svg>`,
-    activity: `<svg ${common}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`,
-    euro: `<svg ${common}><path d="M4 10h10"/><path d="M4 14h9"/><path d="M19 5a7.7 7.7 0 0 0-5.2-2C8.4 3 4 7 4 12s4.4 9 9.8 9a7.7 7.7 0 0 0 5.2-2"/></svg>`,
-    alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
-    arrowRight: `<svg ${common}><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>`,
-    clock: `<svg ${common}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>`,
-  };
-
-  return icons[name] || icons.activity;
+  return ICONS[name] || ICONS.activity;
 }
 
 /* =========================================================
-   MODELO DE VISTA
+   VIEW MODEL
 ========================================================= */
 
 function buildVm(input = {}) {
@@ -301,18 +324,31 @@ function buildVm(input = {}) {
     "user"
   ).toLowerCase();
 
-  const admin = dashboard.admin === true || normalizeKey(role) === "admin" || normalizeKey(user.role) === "admin";
+  const admin =
+    dashboard.admin === true ||
+    normalizeKey(role) === "admin" ||
+    normalizeKey(user.role) === "admin";
 
   const routes = {
     ...DEFAULT_ROUTES,
     ...(isObject(data.routes) ? data.routes : {}),
   };
 
-  const tickets = safeArray(first(dashboard.tickets, dashboard.incidencias, []));
-  const facturas = safeArray(first(dashboard.facturas, dashboard.invoices, []));
-  const clientes = admin ? safeArray(first(dashboard.clientes, dashboard.clients, [])) : [];
-  const users = admin ? safeArray(first(dashboard.users, dashboard.usuarios, [])) : [];
-  const activity = safeArray(first(dashboard.activity, dashboard.actividad, dashboard.movimientos, []));
+  const incidencias = safeArray(
+    first(dashboard.incidencias, dashboard.tickets, [])
+  );
+  const facturas = safeArray(
+    first(dashboard.facturas, dashboard.invoices, [])
+  );
+  const clientes = admin
+    ? safeArray(first(dashboard.clientes, dashboard.clients, []))
+    : [];
+  const usuarios = admin
+    ? safeArray(first(dashboard.usuarios, dashboard.users, []))
+    : [];
+  const activity = safeArray(
+    first(dashboard.activity, dashboard.actividad, dashboard.movimientos, [])
+  );
 
   const displayName = cleanText(
     first(
@@ -339,14 +375,17 @@ function buildVm(input = {}) {
   );
 
   const currency = cleanText(
-    first(summary.currency, summary.moneda, facturas[0]?.currency, facturas[0]?.moneda),
+    first(
+      summary.currency,
+      summary.moneda,
+      facturas[0]?.currency,
+      facturas[0]?.moneda,
+      "EUR"
+    ),
     "EUR"
-  );
+  ).toUpperCase();
 
   return {
-    dashboard,
-    summary,
-
     user: {
       ...user,
       displayName,
@@ -366,11 +405,9 @@ function buildVm(input = {}) {
 
     role,
     admin,
-
-    tickets,
+    incidencias,
     facturas,
     activity,
-
     routes,
 
     loading: data.loading === true,
@@ -378,10 +415,20 @@ function buildVm(input = {}) {
     stale: dashboard.stale === true,
 
     counts: {
-      tickets: number(first(summary.tickets, summary.incidencias, tickets.length, 0), 0),
-      facturas: number(first(summary.facturas, summary.invoices, facturas.length, 0), 0),
-      clientes: admin ? number(first(summary.clientes, summary.clients, clientes.length, 0), 0) : 0,
-      users: admin ? number(first(summary.users, summary.usuarios, users.length, 0), 0) : 0,
+      incidencias: number(
+        first(summary.incidencias, summary.tickets, incidencias.length, 0),
+        0
+      ),
+      facturas: number(
+        first(summary.facturas, summary.invoices, facturas.length, 0),
+        0
+      ),
+      clientes: admin
+        ? number(first(summary.clientes, summary.clients, clientes.length, 0), 0)
+        : 0,
+      usuarios: admin
+        ? number(first(summary.usuarios, summary.users, usuarios.length, 0), 0)
+        : 0,
       paidTotal,
       currency,
     },
@@ -389,7 +436,7 @@ function buildVm(input = {}) {
 }
 
 /* =========================================================
-   PIEZAS PEQUEÑAS
+   SMALL PARTS
 ========================================================= */
 
 function avatar(user = {}) {
@@ -408,10 +455,7 @@ function avatar(user = {}) {
           ? `<img src="${attr(image)}" alt="${attr(name)}" loading="eager" decoding="async" fetchpriority="high" referrerpolicy="no-referrer" draggable="false">`
           : ""
       }
-
-      <span class="home-avatar-initials" aria-hidden="${image ? "true" : "false"}">
-        ${escapeHtml(initials)}
-      </span>
+      <span class="home-avatar-initials" aria-hidden="${image ? "true" : "false"}">${escapeHtml(initials)}</span>
     </span>
   `;
 }
@@ -427,7 +471,11 @@ function loadingCards(count = 4) {
   `).join("");
 }
 
-function emptyState(title = "Sin datos", text = "No hay información disponible.", iconName = "activity") {
+function emptyState(
+  title = "Sin datos",
+  text = "No hay información disponible.",
+  iconName = "activity"
+) {
   return `
     <div class="home-empty-state">
       <span class="home-empty-state-icon" aria-hidden="true">${icon(iconName)}</span>
@@ -439,22 +487,17 @@ function emptyState(title = "Sin datos", text = "No hay información disponible.
 
 function errorBanner(message = "") {
   const text = cleanText(message, "");
-
   if (!text) return "";
 
   return `
     <div class="home-alert home-alert--error" role="alert">
       <span class="home-alert-icon" aria-hidden="true">${icon("alert")}</span>
       <span>${escapeHtml(text)}</span>
-
       <button
         type="button"
         class="home-btn home-btn--ghost"
         data-home-action="${ACTIONS.RETRY}"
-        data-action="${ACTIONS.RETRY}"
-      >
-        Reintentar
-      </button>
+      >Reintentar</button>
     </div>
   `;
 }
@@ -473,7 +516,6 @@ function staleBanner(stale = false) {
 function actionButton({
   label = "",
   route = "/",
-  action = ACTIONS.NAVIGATE,
   iconName = "arrowRight",
   className = "home-link-button",
   ariaLabel = "",
@@ -484,10 +526,8 @@ function actionButton({
     <button
       type="button"
       class="${attr(className)}"
-      data-home-action="${attr(action)}"
-      data-action="${attr(action)}"
+      data-home-action="${ACTIONS.NAVIGATE}"
       data-route="${attr(href)}"
-      data-href="${attr(href)}"
       aria-label="${attr(ariaLabel || label)}"
     >
       <span>${escapeHtml(label)}</span>
@@ -497,7 +537,7 @@ function actionButton({
 }
 
 /* =========================================================
-   CABECERA
+   HEADER
 ========================================================= */
 
 function header(vm) {
@@ -505,17 +545,13 @@ function header(vm) {
     <header class="home-header home-header--clean" data-home-section="header">
       <div class="home-header-main">
         ${avatar(vm.user)}
-
         <div class="home-header-copy">
           <h1 class="home-title">Hola, ${escapeHtml(vm.user.displayName)}</h1>
-
-          <p class="home-subtitle">
-            ${
-              vm.admin
-                ? "Resumen operativo de incidencias, facturas, clientes y usuarios."
-                : "Resumen de tus incidencias y facturas."
-            }
-          </p>
+          <p class="home-subtitle">${
+            vm.admin
+              ? "Resumen operativo de incidencias, facturas, clientes y usuarios."
+              : "Resumen de tus incidencias y facturas."
+          }</p>
         </div>
       </div>
     </header>
@@ -523,7 +559,7 @@ function header(vm) {
 }
 
 /* =========================================================
-   ESTADÍSTICAS
+   STATS
 ========================================================= */
 
 function statCard({ label, value, text, iconName, route, modifier }) {
@@ -531,18 +567,15 @@ function statCard({ label, value, text, iconName, route, modifier }) {
   const key = normalizeKey(modifier || label || "stat");
 
   return `
-    <article class="home-stat-card home-stat-card--${attr(key)}" data-home-stat="${attr(key)}" data-route="${attr(href)}">
+    <article class="home-stat-card home-stat-card--${attr(key)}" data-home-stat="${attr(key)}">
       <button
         type="button"
         class="home-stat-card-button"
         data-home-action="${ACTIONS.NAVIGATE}"
-        data-action="${ACTIONS.NAVIGATE}"
         data-route="${attr(href)}"
-        data-href="${attr(href)}"
         aria-label="${attr(label)}"
       >
         <span class="home-stat-icon" aria-hidden="true">${icon(iconName)}</span>
-
         <span class="home-stat-content">
           <span class="home-stat-label">${escapeHtml(label)}</span>
           <strong class="home-stat-value">${escapeHtml(formatNumber(value))}</strong>
@@ -565,7 +598,7 @@ function stats(vm) {
   const cards = [
     {
       label: "Incidencias",
-      value: vm.counts.tickets,
+      value: vm.counts.incidencias,
       text: "Incidencias visibles en el panel.",
       iconName: "ticket",
       route: vm.routes.incidencias,
@@ -593,7 +626,7 @@ function stats(vm) {
       },
       {
         label: "Usuarios",
-        value: vm.counts.users,
+        value: vm.counts.usuarios,
         text: "Usuarios activos o registrados.",
         iconName: "users",
         route: vm.routes.usuarios,
@@ -610,16 +643,16 @@ function stats(vm) {
 }
 
 /* =========================================================
-   ACTIVIDAD
+   ACTIVITY
 ========================================================= */
 
 function activityIcon(type = "") {
-  const normalized = normalizeKey(type);
+  const key = normalizeKey(type);
 
-  if (normalized.includes("invoice") || normalized.includes("factura")) return "invoice";
-  if (normalized.includes("ticket") || normalized.includes("incidencia")) return "ticket";
-  if (normalized.includes("client") || normalized.includes("cliente")) return "client";
-  if (normalized.includes("user") || normalized.includes("usuario")) return "users";
+  if (key.includes("invoice") || key.includes("factura")) return "invoice";
+  if (key.includes("ticket") || key.includes("incidencia")) return "ticket";
+  if (key.includes("client") || key.includes("cliente")) return "client";
+  if (key.includes("user") || key.includes("usuario")) return "users";
 
   return "activity";
 }
@@ -629,7 +662,14 @@ function activityItem(item = {}) {
   const type = normalizeKey(first(source.type, source.tipo, "activity"));
 
   const title = visibleText(
-    first(source.title, source.titulo, source.subject, source.asunto, source.name, source.nombre),
+    first(
+      source.title,
+      source.titulo,
+      source.subject,
+      source.asunto,
+      source.name,
+      source.nombre
+    ),
     "Actividad registrada"
   );
 
@@ -639,17 +679,22 @@ function activityItem(item = {}) {
     statusText || "Actualización registrada."
   );
 
-  const date = first(source.date, source.fecha, source.updatedAt, source.createdAt, source.creadoEn, "");
+  const date = first(
+    source.date,
+    source.fecha,
+    source.updatedAt,
+    source.createdAt,
+    source.creadoEn,
+    ""
+  );
 
   return `
     <li class="home-activity-item home-activity-item--${attr(type)}">
       <span class="home-activity-icon" aria-hidden="true">${icon(activityIcon(type))}</span>
-
       <span class="home-activity-body">
         <strong>${escapeHtml(title)}</strong>
         <span>${escapeHtml(bodyText)}</span>
       </span>
-
       <time datetime="${attr(date || "")}">${escapeHtml(formatDate(date))}</time>
     </li>
   `;
@@ -666,36 +711,74 @@ function activity(vm) {
           <h2>Últimos movimientos</h2>
         </div>
       </div>
-
       ${
         items.length
           ? `<ul class="home-activity-list">${items.map(activityItem).join("")}</ul>`
-          : emptyState("Sin actividad reciente", "Todavía no hay movimientos visibles en el inicio.", "activity")
+          : emptyState(
+              "Sin actividad reciente",
+              "Todavía no hay movimientos visibles en el inicio.",
+              "activity"
+            )
       }
     </section>
   `;
 }
 
 /* =========================================================
-   FACTURAS
+   INVOICES
 ========================================================= */
 
 function invoiceItem(invoice = {}) {
   const source = isObject(invoice) ? invoice : {};
 
   const id = cleanText(
-    first(source.invoiceId, source.facturaId, source.id, source.title, source.titulo),
+    first(
+      source.facturaId,
+      source.invoiceId,
+      source.id,
+      source.numeroFacturaLegal,
+      source.invoiceNumber
+    ),
     "Factura"
   );
 
   const title = visibleText(
-    first(source.title, source.titulo, source.name, source.nombre, source.concepto),
+    first(
+      source.title,
+      source.titulo,
+      source.name,
+      source.nombre,
+      source.concepto,
+      source.numeroFacturaLegal,
+      source.invoiceNumber
+    ),
     "Factura disponible para consulta."
   );
 
-  const status = normalizeStatus(first(source.status, source.estado, source.paid ? "paid" : "issued"));
-  const amount = first(source.paidAmount, source.totalPaid, source.total, source.amount, source.importe, 0);
-  const currency = cleanText(first(source.currency, source.moneda), "EUR");
+  const status = normalizeStatus(
+    first(
+      source.paymentStatus,
+      source.estadoPago,
+      source.status,
+      source.estado,
+      source.paid ? "paid" : "issued"
+    )
+  );
+
+  const amount = first(
+    source.total,
+    source.totalFactura,
+    source.invoiceAmount,
+    source.amount,
+    source.importe,
+    source.paidAmount,
+    0
+  );
+
+  const currency = cleanText(
+    first(source.currency, source.moneda, "EUR"),
+    "EUR"
+  );
 
   return `
     <li class="home-invoice-item" data-home-invoice="${attr(id)}">
@@ -703,10 +786,9 @@ function invoiceItem(invoice = {}) {
         <strong>${escapeHtml(title)}</strong>
         <span>${escapeHtml(status)}</span>
       </span>
-
-      <span class="home-invoice-amount">
-        ${hasAmount(amount) || source.paid ? escapeHtml(formatMoney(amount, currency)) : "—"}
-      </span>
+      <span class="home-invoice-amount">${
+        hasAmount(amount) ? escapeHtml(formatMoney(amount, currency)) : "—"
+      }</span>
     </li>
   `;
 }
@@ -722,7 +804,6 @@ function invoices(vm) {
           <p class="home-panel-kicker">Facturación</p>
           <h2>Facturas</h2>
         </div>
-
         ${actionButton({
           label: "Ver facturas",
           route,
@@ -734,20 +815,26 @@ function invoices(vm) {
 
       <div class="home-billing-total">
         <span>Importe total pagado</span>
-        <strong>${escapeHtml(formatMoney(vm.counts.paidTotal, vm.counts.currency))}</strong>
+        <strong>${escapeHtml(
+          formatMoney(vm.counts.paidTotal, vm.counts.currency)
+        )}</strong>
       </div>
 
       ${
         items.length
           ? `<ul class="home-invoice-list">${items.map(invoiceItem).join("")}</ul>`
-          : emptyState("Sin facturas visibles", "Cuando haya facturas disponibles aparecerán aquí.", "invoice")
+          : emptyState(
+              "Sin facturas visibles",
+              "Cuando haya facturas disponibles aparecerán aquí.",
+              "invoice"
+            )
       }
     </section>
   `;
 }
 
 /* =========================================================
-   ESTADOS
+   STATES / MAIN TEMPLATE
 ========================================================= */
 
 export function renderHomeLoadingState(input = {}) {
@@ -757,7 +844,11 @@ export function renderHomeLoadingState(input = {}) {
   });
 }
 
-export function renderHomeErrorState(message = "No se pudo cargar el inicio.") {
+export function renderHomeErrorState(
+  message = "No se pudo cargar el inicio."
+) {
+  const safeMessage = cleanText(message, "No se pudo cargar el inicio.");
+
   return `
     <section
       class="home-view-root home-view-root--error"
@@ -765,25 +856,27 @@ export function renderHomeErrorState(message = "No se pudo cargar el inicio.") {
       data-home-template-version="${attr(HOME_TEMPLATE_VERSION)}"
       aria-busy="false"
     >
-      ${errorBanner(message)}
-
+      ${errorBanner(safeMessage)}
       <section class="home-panel">
-        ${emptyState("No se pudo cargar el inicio", message, "alert")}
+        ${emptyState("No se pudo cargar el inicio", safeMessage, "alert")}
       </section>
     </section>
   `;
 }
 
-/* =========================================================
-   PLANTILLA PRINCIPAL
-========================================================= */
-
 export function renderHomeTemplate(input = {}) {
   const vm = buildVm(input);
 
+  const stateClasses = [
+    vm.admin ? "home-view-root--admin" : "home-view-root--user",
+    vm.loading ? "is-loading" : "",
+    vm.error ? "has-error" : "",
+    vm.stale ? "is-stale" : "",
+  ].filter(Boolean).join(" ");
+
   return `
     <section
-      class="home-view-root ${vm.admin ? "home-view-root--admin" : "home-view-root--user"} ${vm.loading ? "is-loading" : ""} ${vm.error ? "has-error" : ""} ${vm.stale ? "is-stale" : ""}"
+      class="home-view-root ${stateClasses}"
       data-home-scope="true"
       data-home-template-version="${attr(HOME_TEMPLATE_VERSION)}"
       data-home-role="${vm.admin ? "admin" : "user"}"
@@ -794,7 +887,6 @@ export function renderHomeTemplate(input = {}) {
       ${staleBanner(vm.stale)}
       ${header(vm)}
       ${stats(vm)}
-
       <section class="home-grid" data-home-section="main-grid">
         ${activity(vm)}
         ${invoices(vm)}
@@ -803,22 +895,15 @@ export function renderHomeTemplate(input = {}) {
   `;
 }
 
-/* =========================================================
-   EXPORTS COMPATIBLES
-========================================================= */
-
-export const renderHomeViewTemplate = renderHomeTemplate;
-export const renderHomeDashboardTemplate = renderHomeTemplate;
-export const renderHome = renderHomeTemplate;
-export const renderDashboard = renderHomeTemplate;
-
 export function getHomeTemplateSnapshot() {
   return {
     version: HOME_TEMPLATE_VERSION,
     actions: ACTIONS,
     policy: {
       templateOnly: true,
-      noImports: true,
+      noArrayFlatten: true,
+      cachedIntlFormatters: true,
+      staticIconRegistry: true,
       noDomApi: true,
       noListeners: true,
       noAuth: true,
@@ -828,7 +913,6 @@ export function getHomeTemplateSnapshot() {
       noStorage: true,
       noCssInline: true,
       noInlineHandlers: true,
-      noCreateIncidenciaButton: true,
       visibleTextLanguage: "es",
     },
   };

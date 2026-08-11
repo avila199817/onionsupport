@@ -3,6 +3,8 @@
 # Producción: SPA estática + landing pública indexable
 # Canonical SEO: https://onionsupport.com/
 # Área privada: noindex / nofollow
+# Checkout: última fuente autoritativa (main / rama PR interna)
+# Evita desplegar snapshots obsoletos al reintentar ejecuciones
 # =========================================================
 
 name: Azure Static Web Apps CI/CD
@@ -73,13 +75,40 @@ jobs:
       SWA_API_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E }}
 
     steps:
-      - name: Checkout
+      - name: Checkout authoritative source
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || 'main' }}
           fetch-depth: 1
           submodules: false
           lfs: false
           persist-credentials: false
+
+      - name: Resolve checked out revision
+        id: revision
+        run: |
+          set -euo pipefail
+
+          checked_sha="$(git rev-parse HEAD)"
+          checked_branch="$(git branch --show-current || true)"
+
+          echo "sha=${checked_sha}" >> "${GITHUB_OUTPUT}"
+
+          echo "Event SHA: ${GITHUB_SHA}"
+          echo "Checked-out SHA: ${checked_sha}"
+          echo "Checked-out branch: ${checked_branch:-detached}"
+
+          if [[ -f "robots.txt" ]]; then
+            echo "robots.txt SHA256: $(sha256sum robots.txt | awk '{print $1}')"
+            printf "robots.txt primera línea: "
+            head -n 1 robots.txt || true
+          fi
+
+          if [[ -f "sitemap.xml" ]]; then
+            echo "sitemap.xml SHA256: $(sha256sum sitemap.xml | awk '{print $1}')"
+            printf "sitemap.xml primera línea: "
+            head -n 1 sitemap.xml || true
+          fi
 
       - name: Validate deploy contract
         run: |
@@ -263,9 +292,11 @@ jobs:
           ]
 
           if robots_text.lstrip().startswith("<"):
+              first_line = robots_text.lstrip().splitlines()[0][:180]
               add_error(
                   robots_path,
-                  "robots.txt contiene XML/HTML. Debe ser texto plano del protocolo robots."
+                  "robots.txt contiene XML/HTML. Debe ser texto plano del protocolo robots. "
+                  f"Primera línea detectada: {first_line!r}"
               )
 
           required_robots = [
@@ -949,7 +980,7 @@ jobs:
           for check in "${checks[@]}"; do
             path="${check%%|*}"
             marker="${check#*|}"
-            url="${base}${path}?deploy_check=${GITHUB_SHA}"
+            url="${base}${path}?deploy_check=${{ steps.revision.outputs.sha }}"
 
             echo "Verificando ${url}"
 
@@ -993,7 +1024,7 @@ jobs:
           verify_200_with_marker() {
             local path="$1"
             local marker="$2"
-            local url="${base}${path}?deploy_check=${GITHUB_SHA}"
+            local url="${base}${path}?deploy_check=${{ steps.revision.outputs.sha }}"
             local body="/tmp/swa-seo-${RANDOM}.body"
 
             echo "Verificando SEO ${url}"
@@ -1027,7 +1058,7 @@ jobs:
           verify_200_with_marker "/sitemap.xml" "<urlset"
           verify_200_with_marker "/" "rel=\"canonical\""
 
-          robots_url="${base}/robots.txt?deploy_check=${GITHUB_SHA}"
+          robots_url="${base}/robots.txt?deploy_check=${{ steps.revision.outputs.sha }}"
           robots_body="$(curl -L -sS \
             --retry 6 \
             --retry-delay 10 \
@@ -1041,7 +1072,7 @@ jobs:
             failed=1
           fi
 
-          sitemap_url="${base}/sitemap.xml?deploy_check=${GITHUB_SHA}"
+          sitemap_url="${base}/sitemap.xml?deploy_check=${{ steps.revision.outputs.sha }}"
           sitemap_body="$(curl -L -sS \
             --retry 6 \
             --retry-delay 10 \
@@ -1078,7 +1109,7 @@ jobs:
           failed=0
 
           for route in "${routes[@]}"; do
-            url="${base}${route}?route_check=${GITHUB_SHA}"
+            url="${base}${route}?route_check=${{ steps.revision.outputs.sha }}"
 
             echo "Verificando ruta SPA ${url}"
 

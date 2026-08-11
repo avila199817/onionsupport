@@ -30,3 +30,6 @@ Disallow: /.git/
 Disallow: /.github/
 Disallow: /.vscode/
 Disallow: /.idea/
+
+# Sitemap público
+Sitemap: https://onionsupport.com/sitemap.xml

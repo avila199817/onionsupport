@@ -1,3 +1,10 @@
+# =========================================================
+# ONION SUPPORT — AZURE STATIC WEB APPS CI/CD
+# Producción: SPA estática + landing pública indexable
+# Canonical SEO: https://onionsupport.com/
+# Área privada: noindex / nofollow
+# =========================================================
+
 name: Azure Static Web Apps CI/CD
 
 run-name: SWA · ${{ github.event_name }} · ${{ github.head_ref || github.ref_name || 'manual' }}
@@ -31,7 +38,7 @@ env:
   API_LOCATION: ""
   OUTPUT_LOCATION: ""
   PRODUCTION_BRANCH: "main"
-  PUBLIC_SITE_URL: "https://www.onionsupport.com"
+  PUBLIC_SITE_URL: "https://onionsupport.com"
   DEPLOY_COOLDOWN_SECONDS: "45"
   DEPLOY_RETRY_SECONDS: "75"
   PRODUCTION_VERIFY_DELAY_SECONDS: "25"
@@ -88,6 +95,7 @@ jobs:
             "staticwebapp.config.json"
             "site.webmanifest"
             "robots.txt"
+            "sitemap.xml"
             "favicon.ico"
 
             "src/main.js"
@@ -132,7 +140,6 @@ jobs:
           done
 
           removed_files=(
-            "sitemap.xml"
             "BingSiteAuth.xml"
             "manifest.json"
             "sw.js"
@@ -210,17 +217,338 @@ jobs:
             fi
           done
 
-          if grep -Fq "sitemap.xml" index.html site.webmanifest robots.txt 2>/dev/null; then
-            echo "::error title=Referencia obsoleta::No debe quedar sitemap.xml en index.html, site.webmanifest ni robots.txt."
-            exit 1
-          fi
-
           if grep -Fq "BingSiteAuth.xml" index.html site.webmanifest robots.txt 2>/dev/null; then
             echo "::error title=Referencia obsoleta::No debe quedar BingSiteAuth.xml en index.html, site.webmanifest ni robots.txt."
             exit 1
           fi
 
           echo "Contrato mínimo de archivos OK."
+
+      - name: Validate SEO contract
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+          from html.parser import HTMLParser
+          from urllib.parse import urlsplit
+          import json
+          import os
+          import sys
+          import xml.etree.ElementTree as ET
+
+          base = os.environ["PUBLIC_SITE_URL"].rstrip("/")
+          expected_home = f"{base}/"
+          expected_sitemap = f"{base}/sitemap.xml"
+          canonical_host = urlsplit(expected_home).netloc
+
+          errors = []
+
+          def add_error(path, message):
+              errors.append((str(path), message))
+
+          def contains_directive(lines, expected):
+              expected = expected.strip().lower()
+              return any(line.strip().lower() == expected for line in lines)
+
+          # -------------------------------------------------
+          # robots.txt
+          # -------------------------------------------------
+          robots_path = Path("robots.txt")
+          robots_text = robots_path.read_text(encoding="utf-8")
+          robots_lines = [
+              line.strip()
+              for line in robots_text.splitlines()
+              if line.strip() and not line.lstrip().startswith("#")
+          ]
+
+          if robots_text.lstrip().startswith("<"):
+              add_error(
+                  robots_path,
+                  "robots.txt contiene XML/HTML. Debe ser texto plano del protocolo robots."
+              )
+
+          required_robots = [
+              "User-agent: *",
+              "Allow: /",
+              "Disallow: /login",
+              "Disallow: /password-request",
+              "Disallow: /password-reset",
+              "Disallow: /activate-account",
+              "Disallow: /dashboard",
+              "Disallow: /incidencias",
+              "Disallow: /facturas",
+              "Disallow: /clientes",
+              "Disallow: /usuarios",
+              "Disallow: /servidor",
+              "Disallow: /cuenta",
+              "Disallow: /ajustes",
+              "Disallow: /@*",
+              "Disallow: /api/",
+              "Disallow: /.auth/",
+              f"Sitemap: {expected_sitemap}",
+          ]
+
+          for directive in required_robots:
+              if not contains_directive(robots_lines, directive):
+                  add_error(
+                      robots_path,
+                      f"Falta directiva SEO obligatoria: {directive}"
+                  )
+
+          # -------------------------------------------------
+          # sitemap.xml
+          # -------------------------------------------------
+          sitemap_path = Path("sitemap.xml")
+
+          try:
+              tree = ET.parse(sitemap_path)
+              root = tree.getroot()
+          except ET.ParseError as error:
+              add_error(sitemap_path, f"XML inválido: {error}")
+              root = None
+
+          sitemap_urls = []
+
+          if root is not None:
+              expected_root = "{http://www.sitemaps.org/schemas/sitemap/0.9}urlset"
+
+              if root.tag != expected_root:
+                  add_error(
+                      sitemap_path,
+                      "La raíz debe ser urlset con namespace http://www.sitemaps.org/schemas/sitemap/0.9."
+                  )
+
+              namespace = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+              sitemap_urls = [
+                  (node.text or "").strip()
+                  for node in root.findall("sm:url/sm:loc", namespace)
+                  if (node.text or "").strip()
+              ]
+
+              if not sitemap_urls:
+                  add_error(sitemap_path, "El sitemap no contiene ninguna URL <loc>.")
+
+              if len(sitemap_urls) != len(set(sitemap_urls)):
+                  add_error(sitemap_path, "El sitemap contiene URLs duplicadas.")
+
+              if expected_home not in sitemap_urls:
+                  add_error(
+                      sitemap_path,
+                      f"Debe incluir la URL canónica principal: {expected_home}"
+                  )
+
+              private_prefixes = (
+                  "/login",
+                  "/password-request",
+                  "/password-reset",
+                  "/activate-account",
+                  "/dashboard",
+                  "/incidencias",
+                  "/facturas",
+                  "/clientes",
+                  "/usuarios",
+                  "/servidor",
+                  "/cuenta",
+                  "/ajustes",
+                  "/@",
+                  "/api/",
+                  "/.auth/",
+                  "/docs/",
+                  "/config/",
+              )
+
+              for loc in sitemap_urls:
+                  parsed = urlsplit(loc)
+                  path = parsed.path or "/"
+
+                  if parsed.scheme != "https":
+                      add_error(sitemap_path, f"URL no HTTPS en sitemap: {loc}")
+
+                  if parsed.netloc != canonical_host:
+                      add_error(
+                          sitemap_path,
+                          f"Host no canónico en sitemap: {loc}. Esperado: {canonical_host}"
+                      )
+
+                  if parsed.query or parsed.fragment:
+                      add_error(
+                          sitemap_path,
+                          f"El sitemap no debe publicar query strings ni fragmentos: {loc}"
+                      )
+
+                  if any(
+                      path == prefix.rstrip("/") or path.startswith(prefix)
+                      for prefix in private_prefixes
+                  ):
+                      add_error(
+                          sitemap_path,
+                          f"Ruta privada/noindex incluida en sitemap: {loc}"
+                      )
+
+          # -------------------------------------------------
+          # index.html SEO
+          # -------------------------------------------------
+          class SeoParser(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.canonicals = []
+                  self.meta_robots = []
+
+              def handle_starttag(self, tag, attrs):
+                  attrs = {k.lower(): (v or "") for k, v in (attrs or [])}
+                  tag = tag.lower()
+
+                  if tag == "link":
+                      rel = {token.lower() for token in attrs.get("rel", "").split()}
+                      if "canonical" in rel:
+                          self.canonicals.append(attrs.get("href", "").strip())
+
+                  if tag == "meta":
+                      name = attrs.get("name", "").strip().lower()
+                      if name in {"robots", "googlebot"}:
+                          self.meta_robots.append(
+                              (name, attrs.get("content", "").strip().lower())
+                          )
+
+          index_path = Path("index.html")
+          index_text = index_path.read_text(encoding="utf-8")
+          parser = SeoParser()
+          parser.feed(index_text)
+
+          if parser.canonicals != [expected_home]:
+              add_error(
+                  index_path,
+                  f"Canonical inválido. Esperado exactamente uno: {expected_home}"
+              )
+
+          robots_meta = {
+              name: content
+              for name, content in parser.meta_robots
+          }
+
+          for name in ("robots", "googlebot"):
+              content = robots_meta.get(name, "")
+              directives = {
+                  token.strip()
+                  for token in content.split(",")
+                  if token.strip()
+              }
+
+              if not {"index", "follow"}.issubset(directives):
+                  add_error(
+                      index_path,
+                      f"Meta {name} debe permitir index, follow en la landing pública."
+                  )
+
+          # -------------------------------------------------
+          # staticwebapp.config.json SEO
+          # -------------------------------------------------
+          config_path = Path("staticwebapp.config.json")
+          config = json.loads(config_path.read_text(encoding="utf-8"))
+
+          exclusions = set(
+              config.get("navigationFallback", {}).get("exclude", [])
+          )
+
+          for required_exclusion in ("/robots.txt", "/sitemap.xml"):
+              if required_exclusion not in exclusions:
+                  add_error(
+                      config_path,
+                      f"navigationFallback.exclude debe contener {required_exclusion}"
+                  )
+
+          routes = config.get("routes", [])
+
+          def find_route(route_name):
+              for route in routes:
+                  if route.get("route") == route_name:
+                      return route
+              return None
+
+          root_route = find_route("/")
+
+          if not root_route:
+              add_error(config_path, "Falta la ruta pública /.")
+          else:
+              root_xrobots = (
+                  root_route.get("headers", {})
+                  .get("X-Robots-Tag", "")
+                  .lower()
+              )
+
+              if "index" not in root_xrobots or "follow" not in root_xrobots:
+                  add_error(
+                      config_path,
+                      "La ruta / debe enviar X-Robots-Tag: index, follow."
+                  )
+
+          for public_asset in ("/robots.txt", "/sitemap.xml"):
+              route = find_route(public_asset)
+
+              if not route:
+                  add_error(
+                      config_path,
+                      f"Falta configuración explícita para {public_asset}."
+                  )
+                  continue
+
+              if int(route.get("statusCode", 200)) >= 400:
+                  add_error(
+                      config_path,
+                      f"{public_asset} no puede estar configurado como error HTTP."
+                  )
+
+          private_routes = (
+              "/login",
+              "/password-request",
+              "/password-reset*",
+              "/activate-account*",
+              "/dashboard*",
+              "/@*",
+              "/incidencias*",
+              "/facturas*",
+              "/clientes*",
+              "/usuarios*",
+              "/servidor*",
+              "/cuenta*",
+              "/ajustes*",
+          )
+
+          for private_route in private_routes:
+              route = find_route(private_route)
+
+              if not route:
+                  add_error(
+                      config_path,
+                      f"Falta contrato noindex para ruta privada: {private_route}"
+                  )
+                  continue
+
+              xrobots = (
+                  route.get("headers", {})
+                  .get("X-Robots-Tag", "")
+                  .lower()
+              )
+
+              if "noindex" not in xrobots:
+                  add_error(
+                      config_path,
+                      f"La ruta privada {private_route} debe enviar X-Robots-Tag: noindex."
+                  )
+
+          if errors:
+              for path, message in errors:
+                  print(
+                      f"::error file={path},title=Contrato SEO inválido::{message}"
+                  )
+              sys.exit(1)
+
+          print(
+              f"Contrato SEO OK. Canonical={expected_home} · "
+              f"Sitemap URLs={len(sitemap_urls)}"
+          )
+          PY
 
       - name: Validate local public references
         run: |
@@ -652,6 +980,85 @@ jobs:
             echo "::warning title=Verificación de producción incompleta::El deploy terminó, pero algún archivo aún no se sirve o no coincide. Puede ser propagación/cache o token apuntando a otra SWA."
           else
             echo "Producción sirve los módulos SPA requeridos."
+          fi
+
+      - name: Verify production SEO files non blocking
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+
+          base="${PUBLIC_SITE_URL%/}"
+          failed=0
+
+          verify_200_with_marker() {
+            local path="$1"
+            local marker="$2"
+            local url="${base}${path}?deploy_check=${GITHUB_SHA}"
+            local body="/tmp/swa-seo-${RANDOM}.body"
+
+            echo "Verificando SEO ${url}"
+
+            status="$(curl -L -sS -o "${body}" -w "%{http_code}" \
+              --retry 8 \
+              --retry-delay 10 \
+              --retry-all-errors \
+              "${url}" || true)"
+
+            if [[ "${status}" != "200" ]]; then
+              echo "::warning title=SEO no publicado::${path} respondió HTTP ${status}."
+              head -c 700 "${body}" 2>/dev/null || true
+              echo
+              failed=1
+              rm -f "${body}"
+              return
+            fi
+
+            if ! grep -Fq "${marker}" "${body}"; then
+              echo "::warning title=SEO inesperado::${path} respondió 200, pero no contiene '${marker}'."
+              head -c 700 "${body}" || true
+              echo
+              failed=1
+            fi
+
+            rm -f "${body}"
+          }
+
+          verify_200_with_marker "/robots.txt" "User-agent: *"
+          verify_200_with_marker "/sitemap.xml" "<urlset"
+          verify_200_with_marker "/" "rel=\"canonical\""
+
+          robots_url="${base}/robots.txt?deploy_check=${GITHUB_SHA}"
+          robots_body="$(curl -L -sS \
+            --retry 6 \
+            --retry-delay 10 \
+            --retry-all-errors \
+            "${robots_url}" || true)"
+
+          expected_sitemap="Sitemap: ${base}/sitemap.xml"
+
+          if [[ "${robots_body}" != *"${expected_sitemap}"* ]]; then
+            echo "::warning title=robots.txt sin sitemap::No contiene '${expected_sitemap}'."
+            failed=1
+          fi
+
+          sitemap_url="${base}/sitemap.xml?deploy_check=${GITHUB_SHA}"
+          sitemap_body="$(curl -L -sS \
+            --retry 6 \
+            --retry-delay 10 \
+            --retry-all-errors \
+            "${sitemap_url}" || true)"
+
+          expected_loc="<loc>${base}/</loc>"
+
+          if [[ "${sitemap_body}" != *"${expected_loc}"* ]]; then
+            echo "::warning title=Sitemap sin canonical::No contiene '${expected_loc}'."
+            failed=1
+          fi
+
+          if [[ "${failed}" == "1" ]]; then
+            echo "::warning title=Verificación SEO incompleta::El deploy terminó, pero robots/sitemap/canonical aún no coinciden en producción. Puede ser propagación o caché."
+          else
+            echo "SEO de producción verificado: robots.txt, sitemap.xml y canonical."
           fi
 
       - name: Verify production SPA routes non blocking

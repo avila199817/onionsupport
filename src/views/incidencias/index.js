@@ -2,14 +2,23 @@
    Onion Support - Incidencias Index
    Archivo: /src/views/incidencias/index.js
 
-   Contrato productivo:
+   PRODUCTIVO · MODAL DETAIL 10/10 · V13
+
+   Contrato:
    - Controlador de la vista Incidencias.
    - Sin fetch propio: todas las llamadas salen por incidencias.api.js.
    - Crear incidencia con adjuntos reales File/Blob.
-   - Antes de submit re-lee el input file vivo y lo fusiona con memoria.
-   - Admin: crear incidencia 1:1 para targetUserId real de Cosmos.
-   - No inventa targetClienteId/clienteId.
-   - Mantiene modal en isla propia para no destruir estado del listado.
+   - Admin: crear incidencia para targetUserId real.
+   - Modal en isla propia para no destruir estado del listado.
+   - Detail modal compatible con incidencias.template.modal.js V15.
+   - Protege borradores del detalle antes de cerrar.
+   - Focus trap real para create/detail.
+   - Restaura el foco al elemento que abrió el modal.
+   - Escape cierra primero preview; luego modal.
+   - Preserva comentarios multilínea mientras se escribe.
+   - Evita re-subir adjuntos si una actualización falla después del upload.
+   - Advierte ante refresh/cierre de pestaña con borrador sin enviar.
+   - No aplana arrays de dominio con first().
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -50,10 +59,14 @@ import {
   renderIncidenciasDetailModal,
   DETAIL_ACTIONS,
   validateDetailUpdate,
+  getDetailTemplateSnapshot,
 } from "./incidencias.template.modal.js";
 
-export const INCIDENCIAS_INDEX_VERSION = "incidencias.index.productivo.no-flicker.v12";
-export const INCIDENCIAS_VIEW_VERSION = INCIDENCIAS_INDEX_VERSION;
+export const INCIDENCIAS_INDEX_VERSION =
+  "incidencias.index.productivo.modal-10x10.v13";
+
+export const INCIDENCIAS_VIEW_VERSION =
+  INCIDENCIAS_INDEX_VERSION;
 
 const DEFAULT_VISIBLE_LIMIT = 20;
 const DEFAULT_SORT_ORDER = "desc";
@@ -62,15 +75,43 @@ const USER_SEARCH_MIN_LENGTH = 2;
 const USER_SEARCH_LIMIT = 8;
 const USER_SEARCH_DEBOUNCE_MS = 220;
 
-const ROUTER_EVENT_HANDLED_KEY = "__onionRouterHandled";
+const ROUTER_EVENT_HANDLED_KEY =
+  "__onionRouterHandled";
 
-const MODAL_HOST_SELECTOR = "[data-incidencias-modal-host='true']";
-const CREATE_ROOT_SELECTOR = "[data-incidencias-create-root='true']";
-const DETAIL_ROOT_SELECTOR = "[data-incidencias-modal-root='true']";
-const CREATE_MODAL_PANEL_SELECTOR = "[data-incidencias-create-modal-panel='true']";
-const DETAIL_MODAL_PANEL_SELECTOR = "[data-incidencias-modal-panel='true']";
-const CREATE_MODAL_OVERLAY_SELECTOR = "[data-incidencias-create-modal-overlay='true']";
-const DETAIL_MODAL_OVERLAY_SELECTOR = "[data-incidencias-modal-overlay='true']";
+const MODAL_HOST_SELECTOR =
+  "[data-incidencias-modal-host='true']";
+
+const CREATE_ROOT_SELECTOR =
+  "[data-incidencias-create-root='true']";
+
+const DETAIL_ROOT_SELECTOR =
+  "[data-incidencias-modal-root='true']";
+
+const CREATE_MODAL_PANEL_SELECTOR =
+  "[data-incidencias-create-modal-panel='true']";
+
+const DETAIL_MODAL_PANEL_SELECTOR =
+  "[data-incidencias-modal-panel='true']";
+
+const CREATE_MODAL_OVERLAY_SELECTOR =
+  "[data-incidencias-create-modal-overlay='true']";
+
+const DETAIL_MODAL_OVERLAY_SELECTOR =
+  "[data-incidencias-modal-overlay='true']";
+
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "area[href]",
+  "button:not([disabled])",
+  "input:not([disabled]):not([type='hidden'])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "iframe",
+  "audio[controls]",
+  "video[controls]",
+  "[contenteditable='true']",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
 
 const INSTANCES = new WeakMap();
 let lastInstance = null;
@@ -80,28 +121,56 @@ let lastInstance = null;
 ========================================================= */
 
 function isBrowser() {
-  return typeof window !== "undefined" && typeof document !== "undefined";
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
 }
 
 function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+  );
 }
 
 function isDomNode(value = null) {
-  return Boolean(typeof Node !== "undefined" && value && value instanceof Node);
+  return Boolean(
+    typeof Node !== "undefined" &&
+      value &&
+      value instanceof Node
+  );
 }
 
 function isBlob(value) {
-  return typeof Blob !== "undefined" && value instanceof Blob;
+  return Boolean(
+    typeof Blob !== "undefined" &&
+      value instanceof Blob
+  );
 }
 
 function isFile(value) {
-  return typeof File !== "undefined" && value instanceof File;
+  return Boolean(
+    typeof File !== "undefined" &&
+      value instanceof File
+  );
 }
 
 function isFileLike(value = null) {
-  if (!value || typeof value !== "object") return false;
-  if (isFile(value) || isBlob(value)) return true;
+  if (
+    !value ||
+    typeof value !== "object"
+  ) {
+    return false;
+  }
+
+  if (
+    isFile(value) ||
+    isBlob(value)
+  ) {
+    return true;
+  }
 
   return Boolean(
     typeof value.name === "string" &&
@@ -115,7 +184,9 @@ function isFileLike(value = null) {
 }
 
 function safeArray(value) {
-  if (Array.isArray(value)) return value;
+  if (Array.isArray(value)) {
+    return value;
+  }
 
   if (
     value &&
@@ -133,25 +204,70 @@ function safeArray(value) {
   return [];
 }
 
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
+function safeObject(
+  value,
+  fallback = {}
+) {
+  return isObject(value)
+    ? value
+    : fallback;
 }
 
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+function cleanText(
+  value = "",
+  fallback = ""
+) {
+  const output =
+    String(value ?? "")
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
   return output || fallback;
 }
 
+function multilineValue(
+  value = ""
+) {
+  return String(value ?? "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n");
+}
+
+/*
+   Importante:
+   NO usar flat(Infinity) aquí.
+   Arrays de adjuntos/historial/comentarios son valores completos.
+*/
 function first(...values) {
-  for (const value of values.flat(Infinity)) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && !value.length) continue;
-    if (isObject(value) && !Object.keys(value).length) continue;
+  for (const value of values) {
+    if (
+      value === undefined ||
+      value === null
+    ) {
+      continue;
+    }
+
+    if (
+      typeof value === "string" &&
+      value.trim() === ""
+    ) {
+      continue;
+    }
+
+    if (
+      Array.isArray(value) &&
+      value.length === 0
+    ) {
+      continue;
+    }
+
+    if (
+      isObject(value) &&
+      Object.keys(value).length === 0
+    ) {
+      continue;
+    }
 
     return value;
   }
@@ -165,41 +281,107 @@ function redact(value = "") {
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=)([^&#\s]+)/gi,
       "$1***"
     )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+    .replace(
+      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+      "$1***"
+    )
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
 }
 
 function normalizeRole(value = "") {
   if (Array.isArray(value)) {
-    const roles = value.map(normalizeRole).filter(Boolean);
-    if (roles.includes("admin")) return "admin";
-    if (roles.includes("user")) return "user";
+    const roles =
+      value
+        .map(normalizeRole)
+        .filter(Boolean);
+
+    if (roles.includes("admin")) {
+      return "admin";
+    }
+
+    if (roles.includes("user")) {
+      return "user";
+    }
+
     return "";
   }
 
-  const role = cleanText(value, "").toLowerCase();
+  const role =
+    cleanText(value, "")
+      .toLowerCase();
 
-  if (["admin", "administrator", "administrador", "owner", "superadmin"].includes(role)) return "admin";
-  if (["user", "usuario", "client", "cliente"].includes(role)) return "user";
+  if (
+    [
+      "admin",
+      "administrator",
+      "administrador",
+      "owner",
+      "superadmin",
+      "super_admin",
+      "root",
+    ].includes(role)
+  ) {
+    return "admin";
+  }
+
+  if (
+    [
+      "user",
+      "usuario",
+      "client",
+      "cliente",
+    ].includes(role)
+  ) {
+    return "user";
+  }
 
   return role || "";
 }
 
-function normalizeSortOrder(value = "") {
-  const order = cleanText(value, DEFAULT_SORT_ORDER).toLowerCase();
+function normalizeSortOrder(
+  value = ""
+) {
+  const order =
+    cleanText(
+      value,
+      DEFAULT_SORT_ORDER
+    ).toLowerCase();
 
-  if (["asc", "ascending", "menor", "menor_mayor", "menor-a-mayor", "menor_a_mayor", "oldest"].includes(order)) {
+  if (
+    [
+      "asc",
+      "ascending",
+      "menor",
+      "menor_mayor",
+      "menor-a-mayor",
+      "menor_a_mayor",
+      "oldest",
+    ].includes(order)
+  ) {
     return "asc";
   }
 
   return "desc";
 }
 
-function getNextSortOrder(value = DEFAULT_SORT_ORDER) {
-  return normalizeSortOrder(value) === "asc" ? "desc" : "asc";
+function getNextSortOrder(
+  value = DEFAULT_SORT_ORDER
+) {
+  return (
+    normalizeSortOrder(value) === "asc"
+      ? "desc"
+      : "asc"
+  );
 }
 
-function safeError(error = null, fallback = "No se pudieron cargar las incidencias.") {
+function safeError(
+  error = null,
+  fallback =
+    "No se pudieron cargar las incidencias."
+) {
   return cleanText(
     error?.message ||
       error?.data?.message ||
@@ -211,104 +393,251 @@ function safeError(error = null, fallback = "No se pudieron cargar las incidenci
 }
 
 function getTicketId(item = {}) {
-  const raw = safeObject(item);
+  const raw =
+    safeObject(item);
 
   return cleanText(
-    first(raw.ticketId, raw.incidenciaId, raw.id, raw.code, raw.numero, raw.ticketCode),
+    first(
+      raw.ticketId,
+      raw.incidenciaId,
+      raw.id,
+      raw.code,
+      raw.numero,
+      raw.ticketCode
+    ),
     ""
   );
 }
 
-function shouldPreserveExisting(value) {
-  if (value === undefined || value === null) return true;
-  if (typeof value === "string" && value.trim() === "") return true;
-  if (Array.isArray(value) && value.length === 0) return true;
-  if (isObject(value) && !Object.keys(value).length) return true;
+function shouldPreserveExisting(
+  value
+) {
+  if (
+    value === undefined ||
+    value === null
+  ) {
+    return true;
+  }
+
+  if (
+    typeof value === "string" &&
+    value.trim() === ""
+  ) {
+    return true;
+  }
+
+  if (
+    Array.isArray(value) &&
+    value.length === 0
+  ) {
+    return true;
+  }
+
+  if (
+    isObject(value) &&
+    Object.keys(value).length === 0
+  ) {
+    return true;
+  }
 
   return false;
 }
 
-function mergeTicketData(current = {}, next = {}) {
-  const base = safeObject(current, {});
-  const incoming = safeObject(next, {});
-  const output = { ...base };
+function mergeTicketData(
+  current = {},
+  next = {}
+) {
+  const base =
+    safeObject(current, {});
 
-  for (const [key, value] of Object.entries(incoming)) {
-    const previous = output[key];
+  const incoming =
+    safeObject(next, {});
 
-    if (isObject(previous) && isObject(value)) {
-      output[key] = mergeTicketData(previous, value);
+  const output = {
+    ...base,
+  };
+
+  for (
+    const [key, value]
+    of Object.entries(incoming)
+  ) {
+    const previous =
+      output[key];
+
+    if (
+      isObject(previous) &&
+      isObject(value)
+    ) {
+      output[key] =
+        mergeTicketData(
+          previous,
+          value
+        );
+
       continue;
     }
 
-    output[key] = shouldPreserveExisting(value) && previous !== undefined && previous !== null
-      ? previous
-      : value;
+    output[key] =
+      (
+        shouldPreserveExisting(value) &&
+        previous !== undefined &&
+        previous !== null
+      )
+        ? previous
+        : value;
   }
 
   return output;
 }
 
-function ticketSortTime(item = {}) {
-  const raw = safeObject(item);
-  const timestamp = Date.parse(
-    first(
-      raw.lastActivityAt,
-      raw.updatedAt,
-      raw.modifiedAt,
-      raw.closedAt,
-      raw.createdAt,
-      raw.lifecycle?.lastActivityAt,
-      raw.lifecycle?.updatedAt,
-      raw.lifecycle?.closedAt,
-      raw.lifecycle?.createdAt,
-      0
-    )
-  );
+function ticketSortTime(
+  item = {}
+) {
+  const raw =
+    safeObject(item);
 
-  return Number.isFinite(timestamp) ? timestamp : 0;
+  const timestamp =
+    Date.parse(
+      first(
+        raw.lastActivityAt,
+        raw.updatedAt,
+        raw.modifiedAt,
+        raw.closedAt,
+        raw.createdAt,
+
+        raw.lifecycle?.lastActivityAt,
+        raw.lifecycle?.updatedAt,
+        raw.lifecycle?.closedAt,
+        raw.lifecycle?.createdAt,
+
+        0
+      )
+    );
+
+  return Number.isFinite(timestamp)
+    ? timestamp
+    : 0;
 }
 
-function upsertByTicketId(items = [], item = null) {
-  const next = safeObject(item, null);
-  if (!next) return safeArray(items);
+function upsertByTicketId(
+  items = [],
+  item = null
+) {
+  const next =
+    safeObject(
+      item,
+      null
+    );
 
-  const id = getTicketId(next);
-  if (!id) return safeArray(items);
-
-  const map = new Map();
-  const existing = safeArray(items).find((current) => getTicketId(current) === id) || null;
-
-  map.set(id, existing ? mergeTicketData(existing, next) : next);
-
-  for (const current of safeArray(items)) {
-    const currentId = getTicketId(current);
-    if (!currentId || map.has(currentId)) continue;
-    map.set(currentId, current);
+  if (!next) {
+    return safeArray(items);
   }
 
-  return [...map.values()].sort((a, b) => {
-    const diff = ticketSortTime(b) - ticketSortTime(a);
-    if (diff !== 0) return diff;
+  const id =
+    getTicketId(next);
 
-    return getTicketId(b).localeCompare(getTicketId(a), "es", {
-      numeric: true,
-      sensitivity: "base",
+  if (!id) {
+    return safeArray(items);
+  }
+
+  const map =
+    new Map();
+
+  const existing =
+    safeArray(items)
+      .find(
+        (current) =>
+          getTicketId(current) === id
+      ) || null;
+
+  map.set(
+    id,
+    existing
+      ? mergeTicketData(
+          existing,
+          next
+        )
+      : next
+  );
+
+  for (
+    const current
+    of safeArray(items)
+  ) {
+    const currentId =
+      getTicketId(current);
+
+    if (
+      !currentId ||
+      map.has(currentId)
+    ) {
+      continue;
+    }
+
+    map.set(
+      currentId,
+      current
+    );
+  }
+
+  return [...map.values()]
+    .sort((a, b) => {
+      const diff =
+        ticketSortTime(b) -
+        ticketSortTime(a);
+
+      if (diff !== 0) {
+        return diff;
+      }
+
+      return getTicketId(b)
+        .localeCompare(
+          getTicketId(a),
+          "es",
+          {
+            numeric: true,
+            sensitivity: "base",
+          }
+        );
     });
-  });
 }
 
 function nextFrame(callback) {
-  if (!isBrowser()) return 0;
-  if (typeof window.requestAnimationFrame === "function") return window.requestAnimationFrame(callback);
-  return window.setTimeout(callback, 0);
+  if (!isBrowser()) {
+    return 0;
+  }
+
+  if (
+    typeof window.requestAnimationFrame ===
+    "function"
+  ) {
+    return window.requestAnimationFrame(
+      callback
+    );
+  }
+
+  return window.setTimeout(
+    callback,
+    0
+  );
 }
 
 function cancelFrame(id = 0) {
-  if (!id || !isBrowser()) return false;
+  if (
+    !id ||
+    !isBrowser()
+  ) {
+    return false;
+  }
 
   try {
-    if (typeof window.cancelAnimationFrame === "function") window.cancelAnimationFrame(id);
+    if (
+      typeof window.cancelAnimationFrame ===
+      "function"
+    ) {
+      window.cancelAnimationFrame(id);
+    }
+
     window.clearTimeout?.(id);
     return true;
   } catch {
@@ -316,57 +645,216 @@ function cancelFrame(id = 0) {
   }
 }
 
+function isElementVisible(
+  element = null
+) {
+  if (
+    !element ||
+    !isBrowser()
+  ) {
+    return false;
+  }
+
+  try {
+    if (
+      element.hidden ||
+      element.getAttribute?.("aria-hidden") ===
+        "true"
+    ) {
+      return false;
+    }
+
+    const style =
+      window.getComputedStyle?.(element);
+
+    if (
+      style?.display === "none" ||
+      style?.visibility === "hidden"
+    ) {
+      return false;
+    }
+
+    return (
+      element.getClientRects?.().length > 0
+    );
+  } catch {
+    return true;
+  }
+}
+
+function focusableElements(
+  root = null
+) {
+  if (
+    !root ||
+    !isBrowser()
+  ) {
+    return [];
+  }
+
+  try {
+    return Array.from(
+      root.querySelectorAll(
+        FOCUSABLE_SELECTOR
+      )
+    ).filter((node) => {
+      if (
+        node.disabled ||
+        node.getAttribute?.("aria-disabled") ===
+          "true"
+      ) {
+        return false;
+      }
+
+      return isElementVisible(node);
+    });
+  } catch {
+    return [];
+  }
+}
+
+/* =========================================================
+   DETAIL TEMPLATE LIMITS
+========================================================= */
+
+function getDetailLimits() {
+  try {
+    const snapshot =
+      getDetailTemplateSnapshot?.();
+
+    const limits =
+      safeObject(
+        snapshot?.limits,
+        {}
+      );
+
+    return {
+      maxCommentLength:
+        Number(
+          limits.maxCommentLength
+        ) || 4000,
+
+      maxPendingFiles:
+        Number(
+          limits.maxPendingFiles
+        ) || 10,
+
+      maxPendingFileSize:
+        Number(
+          limits.maxPendingFileSize
+        ) ||
+        100 * 1024 * 1024,
+    };
+  } catch {
+    return {
+      maxCommentLength: 4000,
+      maxPendingFiles: 10,
+      maxPendingFileSize:
+        100 * 1024 * 1024,
+    };
+  }
+}
+
+const DETAIL_LIMITS =
+  Object.freeze(
+    getDetailLimits()
+  );
+
 /* =========================================================
    CORE / AUTH
 ========================================================= */
 
 function getState() {
   try {
-    return AppCore.getState?.() || AppCore.state || {};
+    return (
+      AppCore.getState?.() ||
+      AppCore.state ||
+      {}
+    );
   } catch {
-    return AppCore.state || {};
+    return (
+      AppCore.state ||
+      {}
+    );
   }
 }
 
 function getCurrentUser() {
-  const state = getState();
+  const state =
+    getState();
 
   try {
-    return AppCore.getCurrentUser?.() || state.user || state.currentUser || null;
+    return (
+      AppCore.getCurrentUser?.() ||
+      state.user ||
+      state.currentUser ||
+      null
+    );
   } catch {
-    return state.user || state.currentUser || null;
+    return (
+      state.user ||
+      state.currentUser ||
+      null
+    );
   }
 }
 
 function getCurrentRole() {
-  const state = getState();
-  const user = safeObject(getCurrentUser(), {});
+  const state =
+    getState();
 
-  return normalizeRole(
-    first(
-      AppCore.getCurrentRole?.(),
-      state.role,
-      state.rol,
-      state.roles,
-      user.role,
-      user.rol,
-      user.roles,
-      ""
-    )
-  ) || "user";
+  const user =
+    safeObject(
+      getCurrentUser(),
+      {}
+    );
+
+  return (
+    normalizeRole(
+      first(
+        AppCore.getCurrentRole?.(),
+        state.role,
+        state.rol,
+        state.roles,
+
+        user.role,
+        user.rol,
+        user.roles,
+
+        ""
+      )
+    ) ||
+    "user"
+  );
 }
 
 function isAdmin() {
-  return getCurrentRole() === "admin";
+  return (
+    getCurrentRole() === "admin"
+  );
 }
 
 function getRoutes() {
   return {
-    incidencias: ROUTES.incidencias || "/incidencias",
-    facturas: ROUTES.facturas || "/facturas",
-    clientes: ROUTES.clientes || "/clientes",
-    usuarios: ROUTES.usuarios || "/usuarios",
-    servidor: ROUTES.servidor || "/servidor",
+    incidencias:
+      ROUTES.incidencias ||
+      "/incidencias",
+
+    facturas:
+      ROUTES.facturas ||
+      "/facturas",
+
+    clientes:
+      ROUTES.clientes ||
+      "/clientes",
+
+    usuarios:
+      ROUTES.usuarios ||
+      "/usuarios",
+
+    servidor:
+      ROUTES.servidor ||
+      "/servidor",
   };
 }
 
@@ -377,6 +865,7 @@ function getRoutes() {
 function getCreateDefaults() {
   return {
     ...getCreateFormDefaults(),
+
     targetClienteId: "",
     source: "panel_admin",
     status: "open",
@@ -384,82 +873,170 @@ function getCreateDefaults() {
   };
 }
 
-function readField(form = null, name = "") {
-  if (!form || !name) return "";
+function readField(
+  form = null,
+  name = ""
+) {
+  if (
+    !form ||
+    !name
+  ) {
+    return "";
+  }
 
-  const field = form.querySelector?.(`[data-field="${name}"], [name="${name}"]`);
-  if (!field) return "";
+  const field =
+    form.querySelector?.(
+      `[data-field="${name}"], [name="${name}"]`
+    );
 
-  return cleanText(field.value, "");
+  if (!field) {
+    return "";
+  }
+
+  return cleanText(
+    field.value,
+    ""
+  );
 }
 
-function filesFromInput(input = null) {
+function filesFromInput(
+  input = null
+) {
   try {
-    return Array.from(input?.files || []).filter(isFileLike);
+    return Array.from(
+      input?.files ||
+      []
+    ).filter(isFileLike);
   } catch {
     return [];
   }
 }
 
-function filesFromForm(form = null) {
-  if (!form) return [];
+function filesFromForm(
+  form = null
+) {
+  if (!form) {
+    return [];
+  }
 
-  const input = form.querySelector?.(`[data-field="attachments"], input[name="attachments"], input[type="file"]`);
+  const input =
+    form.querySelector?.(
+      `[data-field="attachments"], input[name="attachments"], input[type="file"]`
+    );
+
   return filesFromInput(input);
 }
 
-function dedupeFiles(files = []) {
-  const map = new Map();
+function dedupeFiles(
+  files = []
+) {
+  const map =
+    new Map();
 
-  for (const file of safeArray(files).flat()) {
-    if (!isFileLike(file)) continue;
+  for (
+    const file
+    of safeArray(files).flat()
+  ) {
+    if (!isFileLike(file)) {
+      continue;
+    }
 
-    const key = [file.name || "archivo", file.size || 0, file.lastModified || 0, file.type || ""].join("::");
-    if (!map.has(key)) map.set(key, file);
+    const key =
+      [
+        file.name ||
+          "archivo",
+
+        file.size ||
+          0,
+
+        file.lastModified ||
+          0,
+
+        file.type ||
+          "",
+      ].join("::");
+
+    if (!map.has(key)) {
+      map.set(
+        key,
+        file
+      );
+    }
   }
 
   return [...map.values()];
 }
 
-function fileIndexFromNode(node = null) {
-  const value = node?.dataset?.removeAttachment || node?.dataset?.fileIndex || "";
-  const index = Number(value);
+function fileIndexFromNode(
+  node = null
+) {
+  const value =
+    node?.dataset?.removeAttachment ||
+    node?.dataset?.fileIndex ||
+    "";
 
-  return Number.isFinite(index) ? index : -1;
-}
+  const index =
+    Number(value);
 
-function ensureCreateFormFiles(formNode = null) {
-  const liveFiles = filesFromForm(formNode);
-
-  if (liveFiles.length) {
-    return dedupeFiles([
-      ...safeArray(formNode?.__onionCreateFiles || []),
-      ...liveFiles,
-    ]);
-  }
-
-  return [];
+  return Number.isFinite(index)
+    ? index
+    : -1;
 }
 
 /* =========================================================
    INSTANCE REGISTRY
 ========================================================= */
 
-function storeInstance(host = null, controller = null) {
-  if (!host || !controller) return false;
-  INSTANCES.set(host, controller);
-  lastInstance = controller;
+function storeInstance(
+  host = null,
+  controller = null
+) {
+  if (
+    !host ||
+    !controller
+  ) {
+    return false;
+  }
+
+  INSTANCES.set(
+    host,
+    controller
+  );
+
+  lastInstance =
+    controller;
+
   return true;
 }
 
-function clearInstance(host = null, controller = null) {
-  if (host && INSTANCES.get(host) === controller) INSTANCES.delete(host);
-  if (lastInstance === controller) lastInstance = null;
+function clearInstance(
+  host = null,
+  controller = null
+) {
+  if (
+    host &&
+    INSTANCES.get(host) ===
+      controller
+  ) {
+    INSTANCES.delete(host);
+  }
+
+  if (
+    lastInstance === controller
+  ) {
+    lastInstance = null;
+  }
+
   return true;
 }
 
-function destroyPrevious(host = null) {
-  const previous = host ? INSTANCES.get(host) : null;
+function destroyPrevious(
+  host = null
+) {
+  const previous =
+    host
+      ? INSTANCES.get(host)
+      : null;
 
   if (previous?.destroy) {
     try {
@@ -476,14 +1053,25 @@ function destroyPrevious(host = null) {
    CONTROLLER
 ========================================================= */
 
-function createIncidenciasController(host = null, context = {}) {
-  const cached = hydrateIncidenciasFromCache();
+function createIncidenciasController(
+  host = null,
+  context = {}
+) {
+  const cached =
+    hydrateIncidenciasFromCache();
 
   let destroyed = false;
   let mounted = false;
 
-  let items = safeArray(cached.items);
-  let total = Number(cached.total || items.length) || items.length;
+  let items =
+    safeArray(cached.items);
+
+  let total =
+    Number(
+      cached.total ||
+      items.length
+    ) ||
+    items.length;
 
   let loading = false;
   let refreshing = false;
@@ -493,8 +1081,12 @@ function createIncidenciasController(host = null, context = {}) {
   let error = "";
   let filter = "all";
   let search = "";
-  let sortOrder = DEFAULT_SORT_ORDER;
-  let visibleLimit = DEFAULT_VISIBLE_LIMIT;
+  let sortOrder =
+    DEFAULT_SORT_ORDER;
+
+  let visibleLimit =
+    DEFAULT_VISIBLE_LIMIT;
+
   let openingTicketId = "";
 
   let renderFrame = 0;
@@ -506,15 +1098,26 @@ function createIncidenciasController(host = null, context = {}) {
   let userSearchSeq = 0;
   let userSearchTimer = 0;
 
+  /*
+     Elemento al que devolvemos el foco al cerrar el modal.
+     No guardamos selectores ni IDs sensibles; sólo referencia DOM viva.
+  */
+  let modalReturnFocus = null;
+
   const createModal = {
     open: false,
     submitting: false,
     dragActive: false,
+
     serverError: "",
     successMessage: "",
     createdTicketId: "",
+
     errors: {},
-    form: getCreateDefaults(),
+
+    form:
+      getCreateDefaults(),
+
     userSearch: {
       query: "",
       loading: false,
@@ -528,28 +1131,263 @@ function createIncidenciasController(host = null, context = {}) {
   const detailModal = {
     open: false,
     detail: null,
+
     submitting: false,
+
     commentDraft: "",
     pendingFiles: [],
+
     feedbackMessage: "",
     feedbackType: "info",
+
     openingAttachmentId: "",
     downloadingAttachmentId: "",
+
     previewFile: null,
   };
 
-  function ownsNode(node = null) {
-    if (!node) return false;
-    return Boolean(host?.contains?.(node) || modalHost?.contains?.(node));
+  /* =======================================================
+     MODAL STATE
+  ======================================================= */
+
+  function ownsNode(
+    node = null
+  ) {
+    if (!node) {
+      return false;
+    }
+
+    return Boolean(
+      host?.contains?.(node) ||
+      modalHost?.contains?.(node)
+    );
   }
+
+  function detailHasDraft() {
+    return Boolean(
+      multilineValue(
+        detailModal.commentDraft
+      ).trim() ||
+      safeArray(
+        detailModal.pendingFiles
+      ).length
+    );
+  }
+
+  function rememberModalReturnFocus() {
+    if (!isBrowser()) {
+      return false;
+    }
+
+    if (modalsOpen()) {
+      return false;
+    }
+
+    const active =
+      document.activeElement;
+
+    if (
+      active &&
+      active !== document.body &&
+      active !== document.documentElement &&
+      !modalHost?.contains?.(active)
+    ) {
+      modalReturnFocus =
+        active;
+    }
+
+    return true;
+  }
+
+  function restoreModalReturnFocus() {
+    if (!isBrowser()) {
+      modalReturnFocus = null;
+      return false;
+    }
+
+    const target =
+      modalReturnFocus;
+
+    modalReturnFocus = null;
+
+    if (
+      !target ||
+      !target.isConnected ||
+      typeof target.focus !== "function"
+    ) {
+      return false;
+    }
+
+    nextFrame(() => {
+      try {
+        target.focus({
+          preventScroll: true,
+        });
+      } catch {
+        try {
+          target.focus();
+        } catch {
+          // noop
+        }
+      }
+    });
+
+    return true;
+  }
+
+  function confirmDiscardDetailDraft() {
+    if (
+      !detailHasDraft()
+    ) {
+      return true;
+    }
+
+    if (!isBrowser()) {
+      return false;
+    }
+
+    try {
+      return window.confirm(
+        "Tienes una actualización sin enviar. Si cierras ahora, perderás el comentario o los archivos seleccionados. ¿Quieres descartarla?"
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  function currentModalPanel() {
+    if (
+      !modalHost?.isConnected
+    ) {
+      return null;
+    }
+
+    if (detailModal.open) {
+      return modalHost.querySelector(
+        DETAIL_MODAL_PANEL_SELECTOR
+      );
+    }
+
+    if (createModal.open) {
+      return modalHost.querySelector(
+        CREATE_MODAL_PANEL_SELECTOR
+      );
+    }
+
+    return null;
+  }
+
+  function trapFocus(event) {
+    if (
+      event?.key !== "Tab" ||
+      !modalsOpen()
+    ) {
+      return false;
+    }
+
+    const panel =
+      currentModalPanel();
+
+    if (!panel) {
+      return false;
+    }
+
+    const focusables =
+      focusableElements(panel);
+
+    if (!focusables.length) {
+      event.preventDefault();
+
+      try {
+        panel.focus({
+          preventScroll: true,
+        });
+      } catch {
+        panel.focus?.();
+      }
+
+      return true;
+    }
+
+    const firstNode =
+      focusables[0];
+
+    const lastNode =
+      focusables[
+        focusables.length - 1
+      ];
+
+    const active =
+      document.activeElement;
+
+    if (
+      !panel.contains(active)
+    ) {
+      event.preventDefault();
+
+      (
+        event.shiftKey
+          ? lastNode
+          : firstNode
+      ).focus?.();
+
+      return true;
+    }
+
+    if (
+      event.shiftKey &&
+      active === firstNode
+    ) {
+      event.preventDefault();
+      lastNode.focus?.();
+      return true;
+    }
+
+    if (
+      !event.shiftKey &&
+      active === lastNode
+    ) {
+      event.preventDefault();
+      firstNode.focus?.();
+      return true;
+    }
+
+    return false;
+  }
+
+  function onBeforeUnload(event) {
+    if (
+      !detailModal.open ||
+      !detailHasDraft() ||
+      detailModal.submitting
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    event.returnValue = "";
+  }
+
+  /* =======================================================
+     PAYLOADS
+  ======================================================= */
 
   function payload(extra = {}) {
     return {
-      user: getCurrentUser(),
-      role: getCurrentRole(),
-      admin: isAdmin(),
-      routes: getRoutes(),
-      context: safeObject(context),
+      user:
+        getCurrentUser(),
+
+      role:
+        getCurrentRole(),
+
+      admin:
+        isAdmin(),
+
+      routes:
+        getRoutes(),
+
+      context:
+        safeObject(context),
 
       items,
       total,
@@ -566,7 +1404,10 @@ function createIncidenciasController(host = null, context = {}) {
       visibleLimit,
       openingTicketId,
 
-      stats: computeIncidenciasStats(items),
+      stats:
+        computeIncidenciasStats(
+          items
+        ),
 
       createModal,
       detailModal,
@@ -575,16 +1416,146 @@ function createIncidenciasController(host = null, context = {}) {
     };
   }
 
-  function viewPayload(extra = {}) {
+  function filteredItems() {
+    let output =
+      safeArray(items);
+
+    const q =
+      cleanText(
+        search,
+        ""
+      ).toLowerCase();
+
+    if (q) {
+      output =
+        output.filter((item) => {
+          const haystack =
+            [
+              item.ticketId,
+              item.id,
+
+              item.subject,
+              item.asunto,
+              item.title,
+
+              item.message,
+              item.description,
+              item.descripcion,
+
+              item.name,
+              item.displayName,
+              item.email,
+              item.username,
+
+              item.category,
+              item.categoria,
+              item.tipo,
+
+              item.priority,
+              item.status,
+            ]
+              .filter(Boolean)
+              .join(" ")
+              .toLowerCase();
+
+          return haystack.includes(q);
+        });
+    }
+
+    if (
+      filter &&
+      filter !== "all"
+    ) {
+      output =
+        output.filter((item) => {
+          const status =
+            cleanText(
+              first(
+                item.status,
+                item.estado
+              ),
+              ""
+            ).toLowerCase();
+
+          const priority =
+            cleanText(
+              first(
+                item.priority,
+                item.prioridad
+              ),
+              ""
+            ).toLowerCase();
+
+          if (filter === "open") {
+            return [
+              "open",
+              "pending",
+              "in_progress",
+            ].includes(status);
+          }
+
+          if (filter === "closed") {
+            return [
+              "closed",
+              "resolved",
+            ].includes(status);
+          }
+
+          if (filter === "urgent") {
+            return [
+              "urgent",
+              "high",
+            ].includes(priority);
+          }
+
+          return true;
+        });
+    }
+
+    output =
+      [...output].sort(
+        (a, b) => {
+          const diff =
+            ticketSortTime(b) -
+            ticketSortTime(a);
+
+          return (
+            normalizeSortOrder(
+              sortOrder
+            ) === "asc"
+              ? -diff
+              : diff
+          );
+        }
+      );
+
+    return output.slice(
+      0,
+      visibleLimit
+    );
+  }
+
+  function viewPayload(
+    extra = {}
+  ) {
     return payload({
+      /*
+         El listado recibe sólo las filas visibles.
+         Stats/total siguen calculándose sobre `items` completo.
+      */
+      items:
+        filteredItems(),
+
       createModal: {
         ...createModal,
         open: false,
       },
+
       detailModal: {
         ...detailModal,
         open: false,
       },
+
       ...extra,
     });
   }
@@ -592,49 +1563,113 @@ function createIncidenciasController(host = null, context = {}) {
   function createModalPayload() {
     return {
       ...createModal,
-      admin: isAdmin(),
-      role: getCurrentRole(),
+
+      admin:
+        isAdmin(),
+
+      role:
+        getCurrentRole(),
     };
   }
 
   function detailModalPayload() {
     return {
       ...detailModal,
-      admin: isAdmin(),
-      role: getCurrentRole(),
+
+      admin:
+        isAdmin(),
+
+      role:
+        getCurrentRole(),
     };
   }
 
   function modalsOpen() {
-    return createModal.open || detailModal.open;
+    return Boolean(
+      createModal.open ||
+      detailModal.open
+    );
   }
 
   function syncBodyModalClass() {
-    if (!isBrowser()) return false;
+    if (!isBrowser()) {
+      return false;
+    }
 
     try {
-      document.body?.classList.toggle("modal-open", modalsOpen());
-      document.body?.classList.toggle("incidencias-modal-open", modalsOpen());
-      document.body?.classList.toggle("incidencias-create-open", createModal.open);
-      document.body?.classList.toggle("incidencias-detail-open", detailModal.open);
+      document.body?.classList.toggle(
+        "modal-open",
+        modalsOpen()
+      );
+
+      document.body?.classList.toggle(
+        "incidencias-modal-open",
+        modalsOpen()
+      );
+
+      document.body?.classList.toggle(
+        "incidencias-create-open",
+        createModal.open
+      );
+
+      document.body?.classList.toggle(
+        "incidencias-detail-open",
+        detailModal.open
+      );
+
+      document.body?.classList.toggle(
+        "incidencias-detail-dirty",
+        detailModal.open &&
+          detailHasDraft()
+      );
+
       return true;
     } catch {
       return false;
     }
   }
 
+  /* =======================================================
+     MODAL HOST / FOCUS
+  ======================================================= */
+
   function ensureModalHost() {
-    if (!isBrowser()) return null;
+    if (!isBrowser()) {
+      return null;
+    }
 
-    if (modalHost?.isConnected) return modalHost;
+    if (
+      modalHost?.isConnected
+    ) {
+      return modalHost;
+    }
 
-    modalHost = document.querySelector(MODAL_HOST_SELECTOR) || document.createElement("div");
-    modalHost.setAttribute("data-incidencias-modal-host", "true");
-    modalHost.setAttribute("data-owner", INCIDENCIAS_VIEW_VERSION);
+    modalHost =
+      document.querySelector(
+        MODAL_HOST_SELECTOR
+      ) ||
+      document.createElement("div");
 
-    if (!modalHost.isConnected) document.body.appendChild(modalHost);
+    modalHost.setAttribute(
+      "data-incidencias-modal-host",
+      "true"
+    );
 
-    if (mounted && !modalHostBound) {
+    modalHost.setAttribute(
+      "data-owner",
+      INCIDENCIAS_VIEW_VERSION
+    );
+
+    if (!modalHost.isConnected) {
+      document.body.appendChild(
+        modalHost
+      );
+    }
+
+    if (
+      mounted &&
+      !modalHostBound
+    ) {
       bindTarget(modalHost);
       modalHostBound = true;
     }
@@ -643,10 +1678,15 @@ function createIncidenciasController(host = null, context = {}) {
   }
 
   function removeModalHost() {
-    if (!modalHost) return false;
+    if (!modalHost) {
+      return false;
+    }
 
     try {
-      if (modalHostBound) unbindTarget(modalHost);
+      if (modalHostBound) {
+        unbindTarget(modalHost);
+      }
+
       modalHost.replaceChildren();
       modalHost.remove();
     } catch {
@@ -655,21 +1695,49 @@ function createIncidenciasController(host = null, context = {}) {
 
     modalHost = null;
     modalHostBound = false;
+
     return true;
   }
 
-  function focusAfterRender(selector = "", root = modalHost || host) {
-    if (!selector || !root) return false;
+  function focusAfterRender(
+    selector = "",
+    root = modalHost || host
+  ) {
+    if (
+      !selector ||
+      !root
+    ) {
+      return false;
+    }
 
     try {
-      const node = root.querySelector(selector);
-      if (!node) return false;
+      const node =
+        root.querySelector(
+          selector
+        );
 
-      node.focus({ preventScroll: true });
+      if (!node) {
+        return false;
+      }
 
-      if (typeof node.setSelectionRange === "function") {
-        const end = String(node.value || "").length;
-        node.setSelectionRange(end, end);
+      node.focus({
+        preventScroll: true,
+      });
+
+      if (
+        typeof node.setSelectionRange ===
+        "function"
+      ) {
+        const end =
+          String(
+            node.value ||
+            ""
+          ).length;
+
+        node.setSelectionRange(
+          end,
+          end
+        );
       }
 
       return true;
@@ -678,42 +1746,113 @@ function createIncidenciasController(host = null, context = {}) {
     }
   }
 
-  function activeElementInside(root = null) {
-    if (!isBrowser() || !root) return null;
+  function activeElementInside(
+    root = null
+  ) {
+    if (
+      !isBrowser() ||
+      !root
+    ) {
+      return null;
+    }
 
-    const active = document.activeElement;
-    if (!active || active === document.body || active === document.documentElement) return null;
+    const active =
+      document.activeElement;
+
+    if (
+      !active ||
+      active === document.body ||
+      active === document.documentElement
+    ) {
+      return null;
+    }
 
     try {
-      return root.contains(active) ? active : null;
+      return root.contains(active)
+        ? active
+        : null;
     } catch {
       return null;
     }
   }
 
-  function cloneTemplateRoot(html = "", selector = "") {
-    if (!html || !selector || !isBrowser()) return null;
+  function cloneTemplateRoot(
+    html = "",
+    selector = ""
+  ) {
+    if (
+      !html ||
+      !selector ||
+      !isBrowser()
+    ) {
+      return null;
+    }
 
     try {
-      const template = document.createElement("template");
-      template.innerHTML = String(html).trim();
-      return template.content.querySelector(selector);
+      const template =
+        document.createElement(
+          "template"
+        );
+
+      template.innerHTML =
+        String(html).trim();
+
+      return template.content
+        .querySelector(
+          selector
+        );
     } catch {
       return null;
     }
   }
 
-  function syncAttributes(target = null, source = null) {
-    if (!target || !source) return false;
+  function syncAttributes(
+    target = null,
+    source = null
+  ) {
+    if (
+      !target ||
+      !source
+    ) {
+      return false;
+    }
 
     try {
-      for (const attribute of Array.from(target.attributes || [])) {
-        if (!source.hasAttribute(attribute.name)) target.removeAttribute(attribute.name);
+      for (
+        const attribute
+        of Array.from(
+          target.attributes ||
+          []
+        )
+      ) {
+        if (
+          !source.hasAttribute(
+            attribute.name
+          )
+        ) {
+          target.removeAttribute(
+            attribute.name
+          );
+        }
       }
 
-      for (const attribute of Array.from(source.attributes || [])) {
-        if (target.getAttribute(attribute.name) !== attribute.value) {
-          target.setAttribute(attribute.name, attribute.value);
+      for (
+        const attribute
+        of Array.from(
+          source.attributes ||
+          []
+        )
+      ) {
+        if (
+          target.getAttribute(
+            attribute.name
+          ) !==
+          attribute.value
+        ) {
+          target.setAttribute(
+            attribute.name,
+            attribute.value
+          );
         }
       }
 
@@ -723,18 +1862,58 @@ function createIncidenciasController(host = null, context = {}) {
     }
   }
 
-  function replacePart(currentRoot = null, nextRoot = null, selector = "", options = {}) {
-    if (!currentRoot || !nextRoot || !selector) return false;
+  function replacePart(
+    currentRoot = null,
+    nextRoot = null,
+    selector = "",
+    options = {}
+  ) {
+    if (
+      !currentRoot ||
+      !nextRoot ||
+      !selector
+    ) {
+      return false;
+    }
 
-    const current = currentRoot.querySelector(selector);
-    const next = nextRoot.querySelector(selector);
+    const current =
+      currentRoot.querySelector(
+        selector
+      );
 
-    if (!current && !next) return true;
-    if (!current && next) return false;
+    const next =
+      nextRoot.querySelector(
+        selector
+      );
 
-    const active = activeElementInside(current);
-    if (active && options.preserveFocus !== false) {
-      syncAttributes(current, next || current);
+    if (
+      !current &&
+      !next
+    ) {
+      return true;
+    }
+
+    if (
+      !current &&
+      next
+    ) {
+      return false;
+    }
+
+    const active =
+      activeElementInside(
+        current
+      );
+
+    if (
+      active &&
+      options.preserveFocus !== false
+    ) {
+      syncAttributes(
+        current,
+        next || current
+      );
+
       return true;
     }
 
@@ -743,44 +1922,131 @@ function createIncidenciasController(host = null, context = {}) {
       return true;
     }
 
-    current.replaceWith(next.cloneNode(true));
+    current.replaceWith(
+      next.cloneNode(true)
+    );
+
     return true;
   }
 
-  function syncInputValue(currentRoot = null, nextRoot = null, selector = "") {
-    if (!currentRoot || !nextRoot || !selector) return false;
+  function syncInputValue(
+    currentRoot = null,
+    nextRoot = null,
+    selector = ""
+  ) {
+    if (
+      !currentRoot ||
+      !nextRoot ||
+      !selector
+    ) {
+      return false;
+    }
 
-    const current = currentRoot.querySelector(selector);
-    const next = nextRoot.querySelector(selector);
-    if (!current || !next) return false;
+    const current =
+      currentRoot.querySelector(
+        selector
+      );
+
+    const next =
+      nextRoot.querySelector(
+        selector
+      );
+
+    if (
+      !current ||
+      !next
+    ) {
+      return false;
+    }
 
     try {
-      if (current.type === "file") return true;
+      if (
+        current.type === "file"
+      ) {
+        return true;
+      }
 
-      const active = activeElementInside(currentRoot);
-      if (active === current) return true;
+      const active =
+        activeElementInside(
+          currentRoot
+        );
 
-      current.value = next.value;
-      syncAttributes(current, next);
+      if (
+        active === current
+      ) {
+        return true;
+      }
+
+      current.value =
+        next.value;
+
+      syncAttributes(
+        current,
+        next
+      );
+
       return true;
     } catch {
       return false;
     }
   }
 
-  function syncCreateAlerts(currentRoot = null, nextRoot = null) {
-    const currentBody = currentRoot?.querySelector?.(".inc-create-body");
-    const nextBody = nextRoot?.querySelector?.(".inc-create-body");
-    if (!currentBody || !nextBody) return false;
+  /* =======================================================
+     CREATE MODAL PATCHING
+  ======================================================= */
+
+  function syncCreateAlerts(
+    currentRoot = null,
+    nextRoot = null
+  ) {
+    const currentBody =
+      currentRoot?.querySelector?.(
+        ".inc-create-body"
+      );
+
+    const nextBody =
+      nextRoot?.querySelector?.(
+        ".inc-create-body"
+      );
+
+    if (
+      !currentBody ||
+      !nextBody
+    ) {
+      return false;
+    }
 
     try {
-      currentBody.querySelectorAll(":scope > .inc-create-alert").forEach((node) => node.remove());
+      currentBody
+        .querySelectorAll(
+          ":scope > .inc-create-alert"
+        )
+        .forEach(
+          (node) =>
+            node.remove()
+        );
 
-      const form = currentBody.querySelector(".inc-create-form");
-      const nextAlerts = Array.from(nextBody.querySelectorAll(":scope > .inc-create-alert"));
+      const form =
+        currentBody.querySelector(
+          ".inc-create-form"
+        );
 
-      for (const alert of nextAlerts) {
-        currentBody.insertBefore(alert.cloneNode(true), form || currentBody.firstChild);
+      const nextAlerts =
+        Array.from(
+          nextBody.querySelectorAll(
+            ":scope > .inc-create-alert"
+          )
+        );
+
+      for (
+        const alert
+        of nextAlerts
+      ) {
+        currentBody.insertBefore(
+          alert.cloneNode(true),
+          form ||
+            currentBody.firstChild
+        );
       }
 
       return true;
@@ -789,116 +2055,46 @@ function createIncidenciasController(host = null, context = {}) {
     }
   }
 
-  function syncCreateLoadingOverlay(currentRoot = null, nextRoot = null) {
-    const currentPanel = currentRoot?.querySelector?.(CREATE_MODAL_PANEL_SELECTOR);
-    const nextPanel = nextRoot?.querySelector?.(CREATE_MODAL_PANEL_SELECTOR);
-    if (!currentPanel || !nextPanel) return false;
+  function syncCreateLoadingOverlay(
+    currentRoot = null,
+    nextRoot = null
+  ) {
+    const currentPanel =
+      currentRoot?.querySelector?.(
+        CREATE_MODAL_PANEL_SELECTOR
+      );
 
-    try {
-      currentPanel.querySelectorAll(":scope > .inc-create-loading-overlay").forEach((node) => node.remove());
+    const nextPanel =
+      nextRoot?.querySelector?.(
+        CREATE_MODAL_PANEL_SELECTOR
+      );
 
-      const nextOverlay = nextPanel.querySelector(":scope > .inc-create-loading-overlay");
-      if (nextOverlay) currentPanel.appendChild(nextOverlay.cloneNode(true));
-
-      return true;
-    } catch {
+    if (
+      !currentPanel ||
+      !nextPanel
+    ) {
       return false;
     }
-  }
-
-  function patchCreateModalDom(createHtml = "", options = {}) {
-    if (!createHtml || !modalHost?.isConnected || options.fullRender === true) return false;
-
-    const currentRoot = modalHost.querySelector(CREATE_ROOT_SELECTOR);
-    const nextRoot = cloneTemplateRoot(createHtml, CREATE_ROOT_SELECTOR);
-
-    if (!currentRoot || !nextRoot) return false;
 
     try {
-      const currentPanel = currentRoot.querySelector(CREATE_MODAL_PANEL_SELECTOR);
-      const nextPanel = nextRoot.querySelector(CREATE_MODAL_PANEL_SELECTOR);
-      const currentForm = currentRoot.querySelector(".inc-create-form");
-      const nextForm = nextRoot.querySelector(".inc-create-form");
-      const currentBlock = currentRoot.querySelector(".inc-create-block--target");
-      const nextBlock = nextRoot.querySelector(".inc-create-block--target");
+      currentPanel
+        .querySelectorAll(
+          ":scope > .inc-create-loading-overlay"
+        )
+        .forEach(
+          (node) =>
+            node.remove()
+        );
 
-      syncAttributes(currentRoot, nextRoot);
-      syncAttributes(currentPanel, nextPanel);
-      syncAttributes(currentForm, nextForm);
-      syncAttributes(currentBlock, nextBlock);
+      const nextOverlay =
+        nextPanel.querySelector(
+          ":scope > .inc-create-loading-overlay"
+        );
 
-      syncCreateAlerts(currentRoot, nextRoot);
-
-      for (const selector of [
-        ".inc-create-selected-user-slot",
-        ".inc-create-user-search-slot",
-        ".inc-create-target-error-slot",
-        ".inc-create-files-card",
-        ".inc-create-actions",
-      ]) {
-        replacePart(currentRoot, nextRoot, selector, { preserveFocus: false });
-      }
-
-      for (const field of [
-        "targetUserSearch",
-        "subject",
-        "category",
-        "priority",
-        "description",
-      ]) {
-        replacePart(currentRoot, nextRoot, `[data-create-field="${field}"]`);
-      }
-
-      for (const field of [
-        "source",
-        "status",
-        "targetUserId",
-        "targetClienteId",
-        "targetUserName",
-        "targetUserEmail",
-        "targetUserAvatar",
-      ]) {
-        syncInputValue(currentRoot, nextRoot, `[data-field="${field}"]`);
-      }
-
-      syncCreateLoadingOverlay(currentRoot, nextRoot);
-
-      if (options.focusSelector) focusAfterRender(options.focusSelector, currentRoot);
-
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  function syncDetailLoadingOverlay(currentRoot = null, nextRoot = null) {
-    const currentPanel = currentRoot?.querySelector?.(DETAIL_MODAL_PANEL_SELECTOR);
-    const nextPanel = nextRoot?.querySelector?.(DETAIL_MODAL_PANEL_SELECTOR);
-    if (!currentPanel || !nextPanel) return false;
-
-    try {
-      currentPanel.querySelectorAll(":scope > .incidencias-modal-loading-overlay").forEach((node) => node.remove());
-
-      const nextOverlay = nextPanel.querySelector(":scope > .incidencias-modal-loading-overlay");
-      if (nextOverlay) currentPanel.insertBefore(nextOverlay.cloneNode(true), currentPanel.firstChild);
-
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  function syncDetailTextarea(currentRoot = null, nextRoot = null) {
-    const selector = "[data-detail-field='comment'], [data-field='comment']";
-    const current = currentRoot?.querySelector?.(selector);
-    const next = nextRoot?.querySelector?.(selector);
-    if (!current || !next) return false;
-
-    try {
-      syncAttributes(current, next);
-
-      if (document.activeElement !== current) {
-        current.value = next.value;
+      if (nextOverlay) {
+        currentPanel.appendChild(
+          nextOverlay.cloneNode(true)
+        );
       }
 
       return true;
@@ -907,201 +2103,778 @@ function createIncidenciasController(host = null, context = {}) {
     }
   }
 
-  function patchDetailModalDom(detailHtml = "", options = {}) {
-    if (!detailHtml || !modalHost?.isConnected || options.fullRender === true) return false;
+  function patchCreateModalDom(
+    createHtml = "",
+    options = {}
+  ) {
+    if (
+      !createHtml ||
+      !modalHost?.isConnected ||
+      options.fullRender === true
+    ) {
+      return false;
+    }
 
-    const currentRoot = modalHost.querySelector(DETAIL_ROOT_SELECTOR);
-    const nextRoot = cloneTemplateRoot(detailHtml, DETAIL_ROOT_SELECTOR);
+    const currentRoot =
+      modalHost.querySelector(
+        CREATE_ROOT_SELECTOR
+      );
 
-    if (!currentRoot || !nextRoot) return false;
+    const nextRoot =
+      cloneTemplateRoot(
+        createHtml,
+        CREATE_ROOT_SELECTOR
+      );
 
-    const currentTicketId = cleanText(currentRoot.dataset?.ticketId, "");
-    const nextTicketId = cleanText(nextRoot.dataset?.ticketId, "");
-
-    if (currentTicketId && nextTicketId && currentTicketId !== nextTicketId) return false;
+    if (
+      !currentRoot ||
+      !nextRoot
+    ) {
+      return false;
+    }
 
     try {
-      const currentPanel = currentRoot.querySelector(DETAIL_MODAL_PANEL_SELECTOR);
-      const nextPanel = nextRoot.querySelector(DETAIL_MODAL_PANEL_SELECTOR);
-      const currentBody = currentRoot.querySelector(".incidencias-modal-body");
-      const nextBody = nextRoot.querySelector(".incidencias-modal-body");
+      const currentPanel =
+        currentRoot.querySelector(
+          CREATE_MODAL_PANEL_SELECTOR
+        );
 
-      syncAttributes(currentRoot, nextRoot);
-      syncAttributes(currentPanel, nextPanel);
-      syncAttributes(currentBody, nextBody);
+      const nextPanel =
+        nextRoot.querySelector(
+          CREATE_MODAL_PANEL_SELECTOR
+        );
 
-      syncDetailLoadingOverlay(currentRoot, nextRoot);
+      const currentForm =
+        currentRoot.querySelector(
+          ".inc-create-form"
+        );
 
-      for (const selector of [
-        "[data-modal-feedback-slot='true']",
-        "[data-modal-preview-slot='true']",
-        ".incidencias-modal-meta-grid",
-        ".incidencias-modal-description-section",
-        ".incidencias-modal-contact-section",
-        "[data-modal-files-slot='true']",
-        "[data-modal-history-slot='true']",
-        "[data-modal-footer='true']",
-      ]) {
-        replacePart(currentRoot, nextRoot, selector, { preserveFocus: false });
+      const nextForm =
+        nextRoot.querySelector(
+          ".inc-create-form"
+        );
+
+      const currentBlock =
+        currentRoot.querySelector(
+          ".inc-create-block--target"
+        );
+
+      const nextBlock =
+        nextRoot.querySelector(
+          ".inc-create-block--target"
+        );
+
+      syncAttributes(
+        currentRoot,
+        nextRoot
+      );
+
+      syncAttributes(
+        currentPanel,
+        nextPanel
+      );
+
+      syncAttributes(
+        currentForm,
+        nextForm
+      );
+
+      syncAttributes(
+        currentBlock,
+        nextBlock
+      );
+
+      syncCreateAlerts(
+        currentRoot,
+        nextRoot
+      );
+
+      for (
+        const selector
+        of [
+          ".inc-create-selected-user-slot",
+          ".inc-create-user-search-slot",
+          ".inc-create-target-error-slot",
+          ".inc-create-files-card",
+          ".inc-create-actions",
+        ]
+      ) {
+        replacePart(
+          currentRoot,
+          nextRoot,
+          selector,
+          {
+            preserveFocus: false,
+          }
+        );
       }
 
-      syncDetailTextarea(currentRoot, nextRoot);
-
-      for (const selector of [
-        ".incidencias-modal-composer-head",
-        ".incidencias-modal-composer-foot",
-        ".incidencias-modal-dropzone",
-        "[data-modal-pending-files='true']",
-      ]) {
-        replacePart(currentRoot, nextRoot, selector, { preserveFocus: false });
+      for (
+        const field
+        of [
+          "targetUserSearch",
+          "subject",
+          "category",
+          "priority",
+          "description",
+        ]
+      ) {
+        replacePart(
+          currentRoot,
+          nextRoot,
+          `[data-create-field="${field}"]`
+        );
       }
 
-      const currentInput = currentRoot.querySelector("[data-detail-field='attachments'], [data-field='attachments']");
-      const nextInput = nextRoot.querySelector("[data-detail-field='attachments'], [data-field='attachments']");
-      if (currentInput && nextInput) syncAttributes(currentInput, nextInput);
+      for (
+        const field
+        of [
+          "source",
+          "status",
+          "targetUserId",
+          "targetClienteId",
+          "targetUserName",
+          "targetUserEmail",
+          "targetUserAvatar",
+        ]
+      ) {
+        syncInputValue(
+          currentRoot,
+          nextRoot,
+          `[data-field="${field}"]`
+        );
+      }
 
-      if (options.focusSelector) focusAfterRender(options.focusSelector, currentRoot);
+      syncCreateLoadingOverlay(
+        currentRoot,
+        nextRoot
+      );
+
+      if (options.focusSelector) {
+        focusAfterRender(
+          options.focusSelector,
+          currentRoot
+        );
+      }
 
       return true;
     } catch {
       return false;
     }
   }
+
+  /* =======================================================
+     DETAIL MODAL PATCHING
+  ======================================================= */
+
+  function syncDetailLoadingOverlay(
+    currentRoot = null,
+    nextRoot = null
+  ) {
+    const currentPanel =
+      currentRoot?.querySelector?.(
+        DETAIL_MODAL_PANEL_SELECTOR
+      );
+
+    const nextPanel =
+      nextRoot?.querySelector?.(
+        DETAIL_MODAL_PANEL_SELECTOR
+      );
+
+    if (
+      !currentPanel ||
+      !nextPanel
+    ) {
+      return false;
+    }
+
+    try {
+      currentPanel
+        .querySelectorAll(
+          ":scope > .incidencias-modal-loading-overlay"
+        )
+        .forEach(
+          (node) =>
+            node.remove()
+        );
+
+      const nextOverlay =
+        nextPanel.querySelector(
+          ":scope > .incidencias-modal-loading-overlay"
+        );
+
+      if (nextOverlay) {
+        currentPanel.insertBefore(
+          nextOverlay.cloneNode(true),
+          currentPanel.firstChild
+        );
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function syncDetailTextarea(
+    currentRoot = null,
+    nextRoot = null
+  ) {
+    const selector =
+      "[data-detail-field='comment'], [data-field='comment']";
+
+    const current =
+      currentRoot?.querySelector?.(
+        selector
+      );
+
+    const next =
+      nextRoot?.querySelector?.(
+        selector
+      );
+
+    if (
+      !current ||
+      !next
+    ) {
+      return false;
+    }
+
+    try {
+      syncAttributes(
+        current,
+        next
+      );
+
+      if (
+        document.activeElement !==
+        current
+      ) {
+        current.value =
+          next.value;
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function patchDetailModalDom(
+    detailHtml = "",
+    options = {}
+  ) {
+    if (
+      !detailHtml ||
+      !modalHost?.isConnected ||
+      options.fullRender === true
+    ) {
+      return false;
+    }
+
+    const currentRoot =
+      modalHost.querySelector(
+        DETAIL_ROOT_SELECTOR
+      );
+
+    const nextRoot =
+      cloneTemplateRoot(
+        detailHtml,
+        DETAIL_ROOT_SELECTOR
+      );
+
+    if (
+      !currentRoot ||
+      !nextRoot
+    ) {
+      return false;
+    }
+
+    const currentTicketId =
+      cleanText(
+        currentRoot.dataset?.ticketId,
+        ""
+      );
+
+    const nextTicketId =
+      cleanText(
+        nextRoot.dataset?.ticketId,
+        ""
+      );
+
+    if (
+      currentTicketId &&
+      nextTicketId &&
+      currentTicketId !==
+        nextTicketId
+    ) {
+      return false;
+    }
+
+    try {
+      const currentPanel =
+        currentRoot.querySelector(
+          DETAIL_MODAL_PANEL_SELECTOR
+        );
+
+      const nextPanel =
+        nextRoot.querySelector(
+          DETAIL_MODAL_PANEL_SELECTOR
+        );
+
+      const currentBody =
+        currentRoot.querySelector(
+          ".incidencias-modal-body"
+        );
+
+      const nextBody =
+        nextRoot.querySelector(
+          ".incidencias-modal-body"
+        );
+
+      const currentComposer =
+        currentRoot.querySelector(
+          "[data-modal-composer='true']"
+        );
+
+      const nextComposer =
+        nextRoot.querySelector(
+          "[data-modal-composer='true']"
+        );
+
+      syncAttributes(
+        currentRoot,
+        nextRoot
+      );
+
+      syncAttributes(
+        currentPanel,
+        nextPanel
+      );
+
+      syncAttributes(
+        currentBody,
+        nextBody
+      );
+
+      syncAttributes(
+        currentComposer,
+        nextComposer
+      );
+
+      syncDetailLoadingOverlay(
+        currentRoot,
+        nextRoot
+      );
+
+      for (
+        const selector
+        of [
+          "[data-modal-feedback-slot='true']",
+          "[data-modal-preview-slot='true']",
+          ".incidencias-modal-meta-grid",
+          ".incidencias-modal-description-section",
+          ".incidencias-modal-contact-section",
+          "[data-modal-files-slot='true']",
+          "[data-modal-history-slot='true']",
+        ]
+      ) {
+        replacePart(
+          currentRoot,
+          nextRoot,
+          selector,
+          {
+            preserveFocus: false,
+          }
+        );
+      }
+
+      syncDetailTextarea(
+        currentRoot,
+        nextRoot
+      );
+
+      for (
+        const selector
+        of [
+          ".incidencias-modal-composer-head",
+          ".incidencias-modal-composer-foot",
+          ".incidencias-modal-dropzone",
+          "[data-modal-pending-files='true']",
+          "[data-modal-footer='true']",
+        ]
+      ) {
+        replacePart(
+          currentRoot,
+          nextRoot,
+          selector,
+          {
+            preserveFocus: false,
+          }
+        );
+      }
+
+      const currentInput =
+        currentRoot.querySelector(
+          "[data-detail-field='attachments'], [data-field='attachments']"
+        );
+
+      const nextInput =
+        nextRoot.querySelector(
+          "[data-detail-field='attachments'], [data-field='attachments']"
+        );
+
+      if (
+        currentInput &&
+        nextInput
+      ) {
+        syncAttributes(
+          currentInput,
+          nextInput
+        );
+      }
+
+      if (options.focusSelector) {
+        focusAfterRender(
+          options.focusSelector,
+          currentRoot
+        );
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /* =======================================================
+     RENDER
+  ======================================================= */
 
   function cancelScheduledRender() {
-    if (!renderFrame) return false;
+    if (!renderFrame) {
+      return false;
+    }
+
     cancelFrame(renderFrame);
     renderFrame = 0;
+
     return true;
   }
 
   function cancelScheduledModalRender() {
-    if (!modalFrame) return false;
+    if (!modalFrame) {
+      return false;
+    }
+
     cancelFrame(modalFrame);
     modalFrame = 0;
+
     return true;
   }
 
-  function renderModalsNow(options = {}) {
-    if (destroyed || !isBrowser()) return false;
+  function renderModalsNow(
+    options = {}
+  ) {
+    if (
+      destroyed ||
+      !isBrowser()
+    ) {
+      return false;
+    }
 
-    const target = ensureModalHost();
-    if (!target) return false;
+    const target =
+      ensureModalHost();
 
-    const createHtml = createModal.open ? renderIncidenciasCreateModal(createModalPayload()) : "";
-    const detailHtml = detailModal.open ? renderIncidenciasDetailModal(detailModalPayload()) : "";
-    const hasCreateRoot = Boolean(target.querySelector(CREATE_ROOT_SELECTOR));
-    const hasDetailRoot = Boolean(target.querySelector(DETAIL_ROOT_SELECTOR));
-    const canPatchCreate = Boolean(createHtml && hasCreateRoot && !detailHtml);
-    const canPatchDetail = Boolean(detailHtml && hasDetailRoot && !createHtml);
+    if (!target) {
+      return false;
+    }
 
-    if (canPatchCreate && patchCreateModalDom(createHtml, options)) {
+    const createHtml =
+      createModal.open
+        ? renderIncidenciasCreateModal(
+            createModalPayload()
+          )
+        : "";
+
+    const detailHtml =
+      detailModal.open
+        ? renderIncidenciasDetailModal(
+            detailModalPayload()
+          )
+        : "";
+
+    const hasCreateRoot =
+      Boolean(
+        target.querySelector(
+          CREATE_ROOT_SELECTOR
+        )
+      );
+
+    const hasDetailRoot =
+      Boolean(
+        target.querySelector(
+          DETAIL_ROOT_SELECTOR
+        )
+      );
+
+    const canPatchCreate =
+      Boolean(
+        createHtml &&
+        hasCreateRoot &&
+        !detailHtml
+      );
+
+    const canPatchDetail =
+      Boolean(
+        detailHtml &&
+        hasDetailRoot &&
+        !createHtml
+      );
+
+    if (
+      canPatchCreate &&
+      patchCreateModalDom(
+        createHtml,
+        options
+      )
+    ) {
       syncBodyModalClass();
       return true;
     }
 
-    if (canPatchDetail && patchDetailModalDom(detailHtml, options)) {
+    if (
+      canPatchDetail &&
+      patchDetailModalDom(
+        detailHtml,
+        options
+      )
+    ) {
       syncBodyModalClass();
       return true;
     }
 
-    target.innerHTML = `${createHtml}${detailHtml}`;
+    target.innerHTML =
+      `${createHtml}${detailHtml}`;
+
     syncBodyModalClass();
 
-    if (options.focusSelector) focusAfterRender(options.focusSelector, target);
+    if (options.focusSelector) {
+      focusAfterRender(
+        options.focusSelector,
+        target
+      );
+    }
 
     return true;
   }
 
-  function renderModals(options = {}) {
-    if (options.immediate === true) return renderModalsNow(options);
-    if (modalFrame) return true;
+  function renderModals(
+    options = {}
+  ) {
+    if (
+      options.immediate === true
+    ) {
+      return renderModalsNow(
+        options
+      );
+    }
 
-    modalFrame = nextFrame(() => {
-      modalFrame = 0;
-      renderModalsNow(options);
-    });
+    if (modalFrame) {
+      return true;
+    }
+
+    modalFrame =
+      nextFrame(() => {
+        modalFrame = 0;
+        renderModalsNow(options);
+      });
 
     return true;
   }
 
-  function renderNow(options = {}) {
-    if (destroyed || !host) return false;
+  function renderNow(
+    options = {}
+  ) {
+    if (
+      destroyed ||
+      !host
+    ) {
+      return false;
+    }
 
     cancelScheduledRender();
 
-    host.innerHTML = renderIncidenciasTemplate(viewPayload());
+    host.innerHTML =
+      renderIncidenciasTemplate(
+        viewPayload()
+      );
 
-    if (!options.skipModals) renderModalsNow();
+    if (!options.skipModals) {
+      renderModalsNow();
+    }
 
     return true;
   }
 
-  function render(options = {}) {
-    if (options.immediate === true) return renderNow(options);
-    if (renderFrame) return true;
+  function render(
+    options = {}
+  ) {
+    if (
+      options.immediate === true
+    ) {
+      return renderNow(options);
+    }
 
-    renderFrame = nextFrame(() => {
-      renderFrame = 0;
-      renderNow(options);
-    });
+    if (renderFrame) {
+      return true;
+    }
+
+    renderFrame =
+      nextFrame(() => {
+        renderFrame = 0;
+        renderNow(options);
+      });
 
     return true;
   }
 
   function renderLoading() {
-    if (!host) return false;
-    host.innerHTML = renderIncidenciasLoadingState(payload());
+    if (!host) {
+      return false;
+    }
+
+    host.innerHTML =
+      renderIncidenciasLoadingState(
+        payload()
+      );
+
     renderModalsNow();
+
     return true;
   }
 
-  function renderError(message = "") {
-    if (!host) return false;
-    host.innerHTML = renderIncidenciasErrorState(message);
+  function renderError(
+    message = ""
+  ) {
+    if (!host) {
+      return false;
+    }
+
+    host.innerHTML =
+      renderIncidenciasErrorState(
+        message
+      );
+
     renderModalsNow();
+
     return true;
   }
+
+  /* =======================================================
+     LOAD
+  ======================================================= */
 
   function clearUserSearchTimer() {
-    if (!userSearchTimer) return false;
-    try { window.clearTimeout(userSearchTimer); } catch {}
+    if (!userSearchTimer) {
+      return false;
+    }
+
+    try {
+      window.clearTimeout(
+        userSearchTimer
+      );
+    } catch {
+      // noop
+    }
+
     userSearchTimer = 0;
     return true;
   }
 
-  async function load(options = {}) {
-    const seq = ++loadSeq;
-    const silent = options.silent === true;
-    const force = options.force === true;
-    const hasItems = items.length > 0;
+  async function load(
+    options = {}
+  ) {
+    const seq =
+      ++loadSeq;
+
+    const silent =
+      options.silent === true;
+
+    const force =
+      options.force === true;
+
+    const hasItems =
+      items.length > 0;
 
     error = "";
 
     if (!silent) {
-      loading = !hasItems;
-      refreshing = force && hasItems;
-      if (loading) renderLoading();
-      else render();
+      loading =
+        !hasItems;
+
+      refreshing =
+        force &&
+        hasItems;
+
+      if (loading) {
+        renderLoading();
+      } else {
+        render();
+      }
     }
 
     try {
-      const response = await listIncidencias({ returnStaleOnError: true, force });
+      const response =
+        await listIncidencias({
+          returnStaleOnError: true,
+          force,
+        });
 
-      if (destroyed || seq !== loadSeq) return response;
+      if (
+        destroyed ||
+        seq !== loadSeq
+      ) {
+        return response;
+      }
 
-      items = safeArray(response.items);
-      total = Number(response.total || items.length) || items.length;
-      error = response.stale ? cleanText(response.error?.message, "") : "";
+      items =
+        safeArray(
+          response.items
+        );
+
+      total =
+        Number(
+          response.total ||
+          items.length
+        ) ||
+        items.length;
+
+      error =
+        response.stale
+          ? cleanText(
+              response.error?.message,
+              ""
+            )
+          : "";
+
       loading = false;
       refreshing = false;
 
       render();
+
       return response;
     } catch (loadError) {
-      if (destroyed || seq !== loadSeq) return null;
+      if (
+        destroyed ||
+        seq !== loadSeq
+      ) {
+        return null;
+      }
 
-      error = safeError(loadError);
+      error =
+        safeError(loadError);
+
       loading = false;
       refreshing = false;
 
@@ -1115,15 +2888,23 @@ function createIncidenciasController(host = null, context = {}) {
     }
   }
 
+  /* =======================================================
+     CREATE MODAL
+  ======================================================= */
+
   function resetCreateModal() {
     createModal.open = false;
     createModal.submitting = false;
     createModal.dragActive = false;
+
     createModal.serverError = "";
     createModal.successMessage = "";
     createModal.createdTicketId = "";
+
     createModal.errors = {};
-    createModal.form = getCreateDefaults();
+    createModal.form =
+      getCreateDefaults();
+
     createModal.userSearch = {
       query: "",
       loading: false,
@@ -1134,157 +2915,324 @@ function createIncidenciasController(host = null, context = {}) {
     };
   }
 
-  function openCreateModal() {
+  function openCreateModal(
+    openerNode = null
+  ) {
+    rememberModalReturnFocus();
+
+    if (
+      openerNode?.isConnected &&
+      !modalHost?.contains?.(openerNode)
+    ) {
+      modalReturnFocus =
+        openerNode;
+    }
+
     creating = false;
     resetCreateModal();
     createModal.open = true;
 
     renderModals({
       immediate: true,
-      focusSelector: isAdmin() ? "[data-create-user-search-input]" : "[data-field='subject']",
+
+      focusSelector:
+        isAdmin()
+          ? "[data-create-user-search-input]"
+          : "[data-field='subject']",
     });
 
     return true;
   }
 
   function closeCreateModal() {
-    if (createModal.submitting) return false;
+    if (
+      createModal.submitting
+    ) {
+      return false;
+    }
 
     creating = false;
+
     clearUserSearchTimer();
     userSearchSeq += 1;
+
     resetCreateModal();
-    renderModals({ immediate: true });
+
+    renderModals({
+      immediate: true,
+    });
+
+    restoreModalReturnFocus();
 
     return true;
   }
 
-  function patchCreateFormFromField(field = null) {
-    if (!field) return false;
+  function patchCreateFormFromField(
+    field = null
+  ) {
+    if (!field) {
+      return false;
+    }
 
-    const name = cleanText(field.dataset?.field || field.name, "");
-    if (!name || name === "attachments" || name === "targetUserSearch") return false;
+    const name =
+      cleanText(
+        field.dataset?.field ||
+        field.name,
+        ""
+      );
+
+    if (
+      !name ||
+      name === "attachments" ||
+      name === "targetUserSearch"
+    ) {
+      return false;
+    }
 
     createModal.form = {
       ...createModal.form,
       [name]: field.value,
     };
 
-    if (createModal.errors[name]) {
-      const next = { ...createModal.errors };
+    if (
+      createModal.errors[name]
+    ) {
+      const next = {
+        ...createModal.errors,
+      };
+
       delete next[name];
       createModal.errors = next;
     }
 
     createModal.serverError = "";
+
     return true;
   }
 
-  async function runUserSearch(query = "") {
-    const q = cleanText(query, "");
-    const seq = ++userSearchSeq;
+  async function runUserSearch(
+    query = ""
+  ) {
+    const q =
+      cleanText(query, "");
 
-    createModal.userSearch.query = q;
+    const seq =
+      ++userSearchSeq;
 
-    if (q.length < USER_SEARCH_MIN_LENGTH) {
+    createModal.userSearch.query =
+      q;
+
+    if (
+      q.length <
+      USER_SEARCH_MIN_LENGTH
+    ) {
       createModal.userSearch.loading = false;
       createModal.userSearch.error = "";
       createModal.userSearch.results = [];
       createModal.userSearch.empty = false;
-      renderModals({ immediate: true, focusSelector: "[data-create-user-search-input]" });
+
+      renderModals({
+        immediate: true,
+        focusSelector:
+          "[data-create-user-search-input]",
+      });
+
       return [];
     }
 
     createModal.userSearch.loading = true;
     createModal.userSearch.error = "";
     createModal.userSearch.empty = false;
-    renderModals({ immediate: true, focusSelector: "[data-create-user-search-input]" });
+
+    renderModals({
+      immediate: true,
+      focusSelector:
+        "[data-create-user-search-input]",
+    });
 
     try {
-      const results = await searchIncidenciaUsers(q, {
-        limit: USER_SEARCH_LIMIT,
-      });
+      const results =
+        await searchIncidenciaUsers(
+          q,
+          {
+            limit:
+              USER_SEARCH_LIMIT,
+          }
+        );
 
-      if (destroyed || seq !== userSearchSeq) return [];
+      if (
+        destroyed ||
+        seq !== userSearchSeq
+      ) {
+        return [];
+      }
 
       createModal.userSearch.loading = false;
-      createModal.userSearch.results = safeArray(results);
-      createModal.userSearch.empty = q.length >= USER_SEARCH_MIN_LENGTH && !results.length;
+      createModal.userSearch.results =
+        safeArray(results);
+
+      createModal.userSearch.empty =
+        q.length >=
+          USER_SEARCH_MIN_LENGTH &&
+        !results.length;
+
       createModal.userSearch.error = "";
 
-      renderModals({ immediate: true, focusSelector: "[data-create-user-search-input]" });
+      renderModals({
+        immediate: true,
+        focusSelector:
+          "[data-create-user-search-input]",
+      });
+
       return results;
     } catch (searchError) {
-      if (destroyed || seq !== userSearchSeq) return [];
+      if (
+        destroyed ||
+        seq !== userSearchSeq
+      ) {
+        return [];
+      }
 
       createModal.userSearch.loading = false;
       createModal.userSearch.results = [];
       createModal.userSearch.empty = false;
-      createModal.userSearch.error = safeError(searchError, "No se pudo buscar usuarios.");
 
-      renderModals({ immediate: true, focusSelector: "[data-create-user-search-input]" });
+      createModal.userSearch.error =
+        safeError(
+          searchError,
+          "No se pudo buscar usuarios."
+        );
+
+      renderModals({
+        immediate: true,
+        focusSelector:
+          "[data-create-user-search-input]",
+      });
+
       return [];
     }
   }
 
-  function handleUserSearch(query = "") {
-    const q = cleanText(query, "");
-    createModal.userSearch.query = q;
+  function handleUserSearch(
+    query = ""
+  ) {
+    const q =
+      cleanText(query, "");
+
+    createModal.userSearch.query =
+      q;
 
     clearUserSearchTimer();
 
-    if (q.length < USER_SEARCH_MIN_LENGTH) {
+    if (
+      q.length <
+      USER_SEARCH_MIN_LENGTH
+    ) {
       userSearchSeq += 1;
+
       createModal.userSearch.loading = false;
       createModal.userSearch.error = "";
       createModal.userSearch.results = [];
       createModal.userSearch.empty = false;
-      renderModals({ immediate: true, focusSelector: "[data-create-user-search-input]" });
+
+      renderModals({
+        immediate: true,
+        focusSelector:
+          "[data-create-user-search-input]",
+      });
+
       return true;
     }
 
     createModal.userSearch.loading = true;
-    renderModals({ immediate: true, focusSelector: "[data-create-user-search-input]" });
 
-    userSearchTimer = window.setTimeout(() => {
-      userSearchTimer = 0;
-      void runUserSearch(q);
-    }, USER_SEARCH_DEBOUNCE_MS);
+    renderModals({
+      immediate: true,
+      focusSelector:
+        "[data-create-user-search-input]",
+    });
+
+    userSearchTimer =
+      window.setTimeout(() => {
+        userSearchTimer = 0;
+        void runUserSearch(q);
+      }, USER_SEARCH_DEBOUNCE_MS);
 
     return true;
   }
 
-  function selectCreateUser(node = null) {
-    if (!node) return false;
+  function selectCreateUser(
+    node = null
+  ) {
+    if (!node) {
+      return false;
+    }
 
-    const targetUserId = cleanText(node.dataset?.userId || node.dataset?.targetUserId || "", "");
-    const targetClienteId = cleanText(
-      node.dataset?.userClienteId ||
+    const targetUserId =
+      cleanText(
+        node.dataset?.userId ||
+        node.dataset?.targetUserId ||
+        "",
+        ""
+      );
+
+    const targetClienteId =
+      cleanText(
+        node.dataset?.userClienteId ||
         node.dataset?.clienteId ||
         node.dataset?.targetClienteId ||
         "",
-      ""
-    );
-    const targetUserName = cleanText(node.dataset?.userName || node.dataset?.name || node.textContent || "", "");
-    const targetUserEmail = cleanText(node.dataset?.userEmail || node.dataset?.email || "", "");
-    const targetUserAvatar = cleanText(node.dataset?.userAvatar || node.dataset?.avatar || "", "");
+        ""
+      );
 
-    if (!targetUserId) return false;
+    const targetUserName =
+      cleanText(
+        node.dataset?.userName ||
+        node.dataset?.name ||
+        node.textContent ||
+        "",
+        ""
+      );
+
+    const targetUserEmail =
+      cleanText(
+        node.dataset?.userEmail ||
+        node.dataset?.email ||
+        "",
+        ""
+      );
+
+    const targetUserAvatar =
+      cleanText(
+        node.dataset?.userAvatar ||
+        node.dataset?.avatar ||
+        "",
+        ""
+      );
+
+    if (!targetUserId) {
+      return false;
+    }
 
     const selectedUser = {
       userId: targetUserId,
       id: targetUserId,
+
       targetClienteId,
       clienteId: targetClienteId,
+
       name: targetUserName,
       displayName: targetUserName,
+
       email: targetUserEmail,
+
       avatar: targetUserAvatar,
       avatarUrl: targetUserAvatar,
     };
 
     createModal.form = {
       ...createModal.form,
+
       targetUserId,
       targetClienteId,
       targetUserName,
@@ -1295,12 +3243,18 @@ function createIncidenciasController(host = null, context = {}) {
     createModal.errors = {
       ...createModal.errors,
     };
+
     delete createModal.errors.targetUserId;
     delete createModal.errors.targetUser;
 
     createModal.userSearch = {
       ...createModal.userSearch,
-      query: targetUserName || targetUserEmail || targetUserId,
+
+      query:
+        targetUserName ||
+        targetUserEmail ||
+        targetUserId,
+
       loading: false,
       error: "",
       results: [],
@@ -1310,13 +3264,19 @@ function createIncidenciasController(host = null, context = {}) {
 
     createModal.serverError = "";
 
-    renderModals({ immediate: true, focusSelector: "[data-field='subject']" });
+    renderModals({
+      immediate: true,
+      focusSelector:
+        "[data-field='subject']",
+    });
+
     return true;
   }
 
   function clearCreateUser() {
     createModal.form = {
       ...createModal.form,
+
       targetUserId: "",
       targetClienteId: "",
       targetUserName: "",
@@ -1333,95 +3293,247 @@ function createIncidenciasController(host = null, context = {}) {
       empty: false,
     };
 
-    renderModals({ immediate: true, focusSelector: "[data-create-user-search-input]" });
+    renderModals({
+      immediate: true,
+      focusSelector:
+        "[data-create-user-search-input]",
+    });
+
     return true;
   }
 
-  function addCreateAttachments(files = []) {
-    const incoming = dedupeFiles(files);
+  function addCreateAttachments(
+    files = []
+  ) {
+    const incoming =
+      dedupeFiles(files);
 
-    if (!incoming.length) return false;
+    if (!incoming.length) {
+      return false;
+    }
 
-    createModal.form.attachments = dedupeFiles([
-      ...safeArray(createModal.form.attachments),
-      ...incoming,
-    ]);
+    createModal.form.attachments =
+      dedupeFiles([
+        ...safeArray(
+          createModal.form.attachments
+        ),
+        ...incoming,
+      ]);
 
-    if (createModal.errors.attachments) {
-      const next = { ...createModal.errors };
+    if (
+      createModal.errors.attachments
+    ) {
+      const next = {
+        ...createModal.errors,
+      };
+
       delete next.attachments;
       createModal.errors = next;
     }
 
     createModal.serverError = "";
-    renderModals({ immediate: true });
+
+    renderModals({
+      immediate: true,
+    });
+
     return true;
   }
 
-  function removeCreateAttachment(index = -1) {
-    if (index < 0) return false;
+  function removeCreateAttachment(
+    index = -1
+  ) {
+    if (index < 0) {
+      return false;
+    }
 
-    createModal.form.attachments = safeArray(createModal.form.attachments).filter((_, currentIndex) => currentIndex !== index);
-    renderModals({ immediate: true });
+    createModal.form.attachments =
+      safeArray(
+        createModal.form.attachments
+      ).filter(
+        (_, currentIndex) =>
+          currentIndex !== index
+      );
+
+    renderModals({
+      immediate: true,
+    });
+
     return true;
   }
 
-  function readCreateForm(formNode = null) {
-    if (!formNode) return createModal.form;
+  function readCreateForm(
+    formNode = null
+  ) {
+    if (!formNode) {
+      return createModal.form;
+    }
 
-    const liveFiles = filesFromForm(formNode);
+    const liveFiles =
+      filesFromForm(formNode);
 
     if (liveFiles.length) {
-      createModal.form.attachments = dedupeFiles([
-        ...safeArray(createModal.form.attachments),
-        ...liveFiles,
-      ]);
+      createModal.form.attachments =
+        dedupeFiles([
+          ...safeArray(
+            createModal.form.attachments
+          ),
+          ...liveFiles,
+        ]);
     }
 
     createModal.form = {
       ...createModal.form,
-      subject: readField(formNode, "subject") || createModal.form.subject,
-      category: readField(formNode, "category") || createModal.form.category,
-      priority: readField(formNode, "priority") || createModal.form.priority,
-      description: readField(formNode, "description") || createModal.form.description,
-      source: readField(formNode, "source") || createModal.form.source || "panel_admin",
-      status: readField(formNode, "status") || createModal.form.status || "open",
-      targetUserId: readField(formNode, "targetUserId") || createModal.form.targetUserId,
-      targetClienteId: readField(formNode, "targetClienteId") || createModal.form.targetClienteId,
-      targetUserName: readField(formNode, "targetUserName") || createModal.form.targetUserName,
-      targetUserEmail: readField(formNode, "targetUserEmail") || createModal.form.targetUserEmail,
-      targetUserAvatar: readField(formNode, "targetUserAvatar") || createModal.form.targetUserAvatar,
+
+      subject:
+        readField(
+          formNode,
+          "subject"
+        ) ||
+        createModal.form.subject,
+
+      category:
+        readField(
+          formNode,
+          "category"
+        ) ||
+        createModal.form.category,
+
+      priority:
+        readField(
+          formNode,
+          "priority"
+        ) ||
+        createModal.form.priority,
+
+      description:
+        readField(
+          formNode,
+          "description"
+        ) ||
+        createModal.form.description,
+
+      source:
+        readField(
+          formNode,
+          "source"
+        ) ||
+        createModal.form.source ||
+        "panel_admin",
+
+      status:
+        readField(
+          formNode,
+          "status"
+        ) ||
+        createModal.form.status ||
+        "open",
+
+      targetUserId:
+        readField(
+          formNode,
+          "targetUserId"
+        ) ||
+        createModal.form.targetUserId,
+
+      targetClienteId:
+        readField(
+          formNode,
+          "targetClienteId"
+        ) ||
+        createModal.form.targetClienteId,
+
+      targetUserName:
+        readField(
+          formNode,
+          "targetUserName"
+        ) ||
+        createModal.form.targetUserName,
+
+      targetUserEmail:
+        readField(
+          formNode,
+          "targetUserEmail"
+        ) ||
+        createModal.form.targetUserEmail,
+
+      targetUserAvatar:
+        readField(
+          formNode,
+          "targetUserAvatar"
+        ) ||
+        createModal.form.targetUserAvatar,
     };
 
     return createModal.form;
   }
 
-  async function submitCreate(formNode = null) {
-    if (createModal.submitting) return false;
+  async function submitCreate(
+    formNode = null
+  ) {
+    if (
+      createModal.submitting
+    ) {
+      return false;
+    }
 
-    readCreateForm(formNode);
+    readCreateForm(
+      formNode
+    );
 
-    const validation = validateCreateForm(createModal.form);
+    const validation =
+      safeObject(
+        validateCreateForm(
+          createModal.form
+        ),
+        {}
+      );
 
-    createModal.errors = validation.errors;
+    createModal.errors =
+      safeObject(
+        validation.errors,
+        {}
+      );
+
     createModal.form = {
       ...createModal.form,
-      ...validation.form,
-      attachments: dedupeFiles(createModal.form.attachments),
+      ...safeObject(
+        validation.form,
+        {}
+      ),
+
+      attachments:
+        dedupeFiles(
+          createModal.form.attachments
+        ),
     };
 
-    if (isAdmin() && !createModal.form.targetUserId) {
+    if (
+      isAdmin() &&
+      !createModal.form.targetUserId
+    ) {
       createModal.errors = {
         ...createModal.errors,
-        targetUserId: "Selecciona el usuario afectado antes de crear la incidencia.",
+
+        targetUserId:
+          "Selecciona el usuario afectado antes de crear la incidencia.",
       };
     }
 
-    if (Object.keys(createModal.errors).length > 0 || !validation.valid) {
+    if (
+      Object.keys(
+        createModal.errors
+      ).length > 0 ||
+      !validation.valid
+    ) {
       renderModals({
         immediate: true,
+
         focusSelector:
-          createModal.errors.targetUserId || createModal.errors.targetUser
+          (
+            createModal.errors.targetUserId ||
+            createModal.errors.targetUser
+          )
             ? "[data-create-user-search-input]"
             : createModal.errors.subject
               ? "[data-field='subject']"
@@ -1435,546 +3547,1536 @@ function createIncidenciasController(host = null, context = {}) {
 
     creating = true;
     createModal.submitting = true;
+
     createModal.serverError = "";
     createModal.successMessage = "";
     createModal.createdTicketId = "";
 
-    renderModals({ immediate: true });
+    renderModals({
+      immediate: true,
+    });
 
     try {
-      const attachments = dedupeFiles(createModal.form.attachments);
+      const attachments =
+        dedupeFiles(
+          createModal.form.attachments
+        );
 
-      const created = await createIncidencia({
-        ...createModal.form,
-        attachments,
-        files: attachments,
-        adjuntos: attachments,
-      });
+      const created =
+        await createIncidencia({
+          ...createModal.form,
+
+          attachments,
+          files: attachments,
+          adjuntos: attachments,
+        });
 
       if (created) {
-        items = upsertByTicketId(items, created);
-        total = Math.max(total, items.length);
+        items =
+          upsertByTicketId(
+            items,
+            created
+          );
+
+        total =
+          Math.max(
+            total,
+            items.length
+          );
       }
 
       creating = false;
+
       resetCreateModal();
-      renderModals({ immediate: true });
+
+      renderModals({
+        immediate: true,
+      });
+
+      restoreModalReturnFocus();
       render();
 
       return true;
     } catch (createError) {
       creating = false;
       createModal.submitting = false;
-      createModal.serverError = safeError(createError, "No se pudo crear la incidencia.");
 
-      renderModals({ immediate: true, focusSelector: "[data-field='subject']" });
+      createModal.serverError =
+        safeError(
+          createError,
+          "No se pudo crear la incidencia."
+        );
+
+      renderModals({
+        immediate: true,
+        focusSelector:
+          "[data-field='subject']",
+      });
+
       return false;
     }
   }
 
+  /* =======================================================
+     DETAIL MODAL
+  ======================================================= */
+
   function resetDetailModal() {
     detailModal.open = false;
     detailModal.detail = null;
+
     detailModal.submitting = false;
+
     detailModal.commentDraft = "";
     detailModal.pendingFiles = [];
+
     detailModal.feedbackMessage = "";
     detailModal.feedbackType = "info";
+
     detailModal.openingAttachmentId = "";
     detailModal.downloadingAttachmentId = "";
+
     detailModal.previewFile = null;
+
+    openingTicketId = "";
   }
 
-  function closeDetailModal() {
-    if (detailModal.submitting) return false;
+  function closeDetailModal(
+    options = {}
+  ) {
+    if (
+      detailModal.submitting
+    ) {
+      return false;
+    }
+
+    const force =
+      options.force === true;
+
+    if (
+      !force &&
+      detailHasDraft() &&
+      !confirmDiscardDetailDraft()
+    ) {
+      focusAfterRender(
+        "[data-field='comment']",
+        modalHost
+      );
+
+      return false;
+    }
+
     resetDetailModal();
-    renderModals({ immediate: true });
+
+    renderModals({
+      immediate: true,
+    });
+
+    restoreModalReturnFocus();
+
     return true;
   }
 
-  async function openDetail(ticketId = "") {
-    const id = cleanText(ticketId, "");
-    if (!id) return false;
+  async function openDetail(
+    ticketId = "",
+    openerNode = null
+  ) {
+    const id =
+      cleanText(
+        ticketId,
+        ""
+      );
 
-    const local = items.find((item) => getTicketId(item) === id) || null;
+    if (!id) {
+      return false;
+    }
+
+    rememberModalReturnFocus();
+
+    if (
+      openerNode?.isConnected &&
+      !modalHost?.contains?.(openerNode)
+    ) {
+      modalReturnFocus =
+        openerNode;
+    }
+
+    const local =
+      items.find(
+        (item) =>
+          getTicketId(item) === id
+      ) ||
+      null;
+
     openingTicketId = id;
 
     if (local) {
       detailModal.open = true;
       detailModal.detail = local;
+
       detailModal.submitting = false;
       detailModal.commentDraft = "";
       detailModal.pendingFiles = [];
+
       detailModal.feedbackMessage = "";
       detailModal.feedbackType = "info";
+
+      detailModal.openingAttachmentId = "";
+      detailModal.downloadingAttachmentId = "";
+
       detailModal.previewFile = null;
 
-      render({ skipModals: true });
-      renderModals({ immediate: true, focusSelector: DETAIL_MODAL_PANEL_SELECTOR });
+      render({
+        skipModals: true,
+      });
+
+      renderModals({
+        immediate: true,
+        focusSelector:
+          DETAIL_MODAL_PANEL_SELECTOR,
+      });
     } else {
       render();
     }
 
     try {
-      const detail = await loadIncidenciaDetail(id);
+      const detail =
+        await loadIncidenciaDetail(
+          id
+        );
 
-      if (destroyed || openingTicketId !== id) return false;
+      if (
+        destroyed ||
+        openingTicketId !== id
+      ) {
+        return false;
+      }
 
-      const mergedDetail = detail ? mergeTicketData(local || {}, detail) : local;
+      const mergedDetail =
+        detail
+          ? mergeTicketData(
+              local || {},
+              detail
+            )
+          : local;
 
-      detailModal.open = Boolean(mergedDetail);
-      detailModal.detail = mergedDetail;
+      detailModal.open =
+        Boolean(mergedDetail);
+
+      detailModal.detail =
+        mergedDetail;
+
       detailModal.submitting = false;
       detailModal.commentDraft = "";
       detailModal.pendingFiles = [];
+
       detailModal.feedbackMessage = "";
       detailModal.feedbackType = "info";
+
+      detailModal.openingAttachmentId = "";
+      detailModal.downloadingAttachmentId = "";
       detailModal.previewFile = null;
 
-      if (mergedDetail) items = upsertByTicketId(items, mergedDetail);
+      if (mergedDetail) {
+        items =
+          upsertByTicketId(
+            items,
+            mergedDetail
+          );
+      }
 
       openingTicketId = "";
-      render({ skipModals: true });
-      renderModals({ immediate: true, focusSelector: DETAIL_MODAL_PANEL_SELECTOR });
+
+      render({
+        skipModals: true,
+      });
+
+      renderModals({
+        immediate: true,
+        focusSelector:
+          DETAIL_MODAL_PANEL_SELECTOR,
+      });
 
       return true;
     } catch (detailError) {
-      if (destroyed || openingTicketId !== id) return false;
+      if (
+        destroyed ||
+        openingTicketId !== id
+      ) {
+        return false;
+      }
 
       openingTicketId = "";
 
       if (local) {
-        detailModal.feedbackMessage = safeError(detailError, "No se pudo actualizar el detalle.");
-        detailModal.feedbackType = "error";
-        render({ skipModals: true });
-        renderModals({ immediate: true, focusSelector: DETAIL_MODAL_PANEL_SELECTOR });
+        detailModal.feedbackMessage =
+          safeError(
+            detailError,
+            "No se pudo actualizar el detalle."
+          );
+
+        detailModal.feedbackType =
+          "error";
+
+        render({
+          skipModals: true,
+        });
+
+        renderModals({
+          immediate: true,
+          focusSelector:
+            DETAIL_MODAL_PANEL_SELECTOR,
+        });
+
         return false;
       }
 
-      error = safeError(detailError, "No se pudo abrir el detalle.");
+      resetDetailModal();
+
+      error =
+        safeError(
+          detailError,
+          "No se pudo abrir el detalle."
+        );
+
       render();
+      restoreModalReturnFocus();
+
       return false;
     }
   }
 
-  function patchDetailComment(field = null) {
-    detailModal.commentDraft = cleanText(field?.value || "", "");
+  function patchDetailComment(
+    field = null
+  ) {
+    detailModal.commentDraft =
+      multilineValue(
+        field?.value ||
+        ""
+      );
 
-    if (detailModal.feedbackMessage) {
+    if (
+      detailModal.feedbackMessage
+    ) {
       detailModal.feedbackMessage = "";
       detailModal.feedbackType = "info";
     }
 
+    syncBodyModalClass();
+
+    /*
+       Actualiza contador, feedback y data-has-draft como máximo
+       una vez por frame, sin reemplazar el textarea activo.
+    */
+    renderModals();
+
     return true;
   }
 
-  function addDetailPendingFiles(files = []) {
-    const incoming = dedupeFiles(files);
-    if (!incoming.length) return false;
+  function validateIncomingDetailFiles(
+    incoming = []
+  ) {
+    const files =
+      dedupeFiles(incoming);
 
-    detailModal.pendingFiles = dedupeFiles([
-      ...safeArray(detailModal.pendingFiles),
-      ...incoming,
-    ]);
-
-    if (detailModal.feedbackMessage) {
-      detailModal.feedbackMessage = "";
-      detailModal.feedbackType = "info";
+    if (!files.length) {
+      return {
+        valid: false,
+        files: [],
+        message: "",
+      };
     }
 
-    renderModals({ immediate: true, focusSelector: "[data-field='comment']" });
+    const tooLarge =
+      files.find(
+        (file) =>
+          Number(file?.size || 0) >
+          DETAIL_LIMITS.maxPendingFileSize
+      );
+
+    if (tooLarge) {
+      return {
+        valid: false,
+        files: [],
+        message:
+          `El archivo ${cleanText(tooLarge.name, "seleccionado")} supera el tamaño máximo permitido.`,
+      };
+    }
+
+    const combined =
+      dedupeFiles([
+        ...safeArray(
+          detailModal.pendingFiles
+        ),
+        ...files,
+      ]);
+
+    if (
+      combined.length >
+      DETAIL_LIMITS.maxPendingFiles
+    ) {
+      return {
+        valid: false,
+        files: [],
+        message:
+          `No puedes adjuntar más de ${DETAIL_LIMITS.maxPendingFiles} archivos en una actualización.`,
+      };
+    }
+
+    return {
+      valid: true,
+      files: combined,
+      message: "",
+    };
+  }
+
+  function addDetailPendingFiles(
+    files = []
+  ) {
+    const validation =
+      validateIncomingDetailFiles(
+        files
+      );
+
+    if (!validation.valid) {
+      if (validation.message) {
+        detailModal.feedbackMessage =
+          validation.message;
+
+        detailModal.feedbackType =
+          "error";
+
+        renderModals({
+          immediate: true,
+          focusSelector:
+            "[data-field='comment']",
+        });
+      }
+
+      return false;
+    }
+
+    detailModal.pendingFiles =
+      validation.files;
+
+    detailModal.feedbackMessage = "";
+    detailModal.feedbackType = "info";
+
+    renderModals({
+      immediate: true,
+      focusSelector:
+        "[data-field='comment']",
+    });
+
     return true;
   }
 
-  function removeDetailPendingFile(index = -1) {
-    if (index < 0) return false;
+  function removeDetailPendingFile(
+    index = -1
+  ) {
+    if (index < 0) {
+      return false;
+    }
 
-    detailModal.pendingFiles = safeArray(detailModal.pendingFiles).filter((_, currentIndex) => currentIndex !== index);
-    renderModals({ immediate: true, focusSelector: "[data-field='comment']" });
+    detailModal.pendingFiles =
+      safeArray(
+        detailModal.pendingFiles
+      ).filter(
+        (_, currentIndex) =>
+          currentIndex !== index
+      );
+
+    renderModals({
+      immediate: true,
+      focusSelector:
+        "[data-field='comment']",
+    });
+
     return true;
   }
 
   async function submitDetailUpdate() {
-    if (detailModal.submitting) return false;
-
-    const ticketId = getTicketId(detailModal.detail);
-    const validation = validateDetailUpdate({
-      comment: detailModal.commentDraft,
-      pendingFiles: detailModal.pendingFiles,
-    });
-
-    if (!ticketId) return false;
-
-    if (!validation.valid) {
-      detailModal.feedbackMessage = validation.message;
-      detailModal.feedbackType = "error";
-      renderModals({ immediate: true, focusSelector: "[data-field='comment']" });
+    if (
+      detailModal.submitting
+    ) {
       return false;
     }
+
+    const ticketId =
+      getTicketId(
+        detailModal.detail
+      );
+
+    const validation =
+      validateDetailUpdate({
+        comment:
+          detailModal.commentDraft,
+
+        pendingFiles:
+          detailModal.pendingFiles,
+      });
+
+    if (!ticketId) {
+      return false;
+    }
+
+    if (!validation.valid) {
+      detailModal.feedbackMessage =
+        validation.message;
+
+      detailModal.feedbackType =
+        "error";
+
+      renderModals({
+        immediate: true,
+        focusSelector:
+          "[data-field='comment']",
+      });
+
+      return false;
+    }
+
+    /*
+       Snapshot inmutable del intento:
+       - si upload termina bien y luego falla el comentario,
+         vaciamos pendingFiles para evitar duplicar el upload al reintentar.
+       - el comentario permanece para permitir reintento.
+    */
+    const commentSnapshot =
+      multilineValue(
+        detailModal.commentDraft
+      ).trim();
+
+    const filesSnapshot =
+      dedupeFiles(
+        detailModal.pendingFiles
+      );
 
     detailModal.submitting = true;
     detailModal.feedbackMessage = "";
     detailModal.feedbackType = "info";
-    renderModals({ immediate: true });
+
+    renderModals({
+      immediate: true,
+    });
+
+    let nextDetail =
+      detailModal.detail;
+
+    let uploaded = false;
+    let commented = false;
+    let reopened = false;
+    let phase = "start";
 
     try {
-      let nextDetail = detailModal.detail;
+      if (filesSnapshot.length) {
+        phase = "upload";
 
-      if (detailModal.pendingFiles.length) {
-        nextDetail = await uploadIncidenciaAttachments(ticketId, detailModal.pendingFiles, { status: "open" }) || nextDetail;
+        const uploadResult =
+          await uploadIncidenciaAttachments(
+            ticketId,
+            filesSnapshot,
+            {
+              status: "open",
+            }
+          );
+
+        nextDetail =
+          mergeTicketData(
+            nextDetail || {},
+            uploadResult || {}
+          );
+
+        uploaded = true;
+
+        /*
+           El servidor ya recibió estos ficheros.
+           Se quitan inmediatamente del retry-state.
+        */
+        detailModal.pendingFiles = [];
+        detailModal.detail = nextDetail;
+
+        items =
+          upsertByTicketId(
+            items,
+            nextDetail
+          );
+
+        render({
+          skipModals: true,
+        });
+
+        renderModals({
+          immediate: true,
+        });
       }
 
-      if (detailModal.commentDraft) {
-        nextDetail = await commentIncidencia(ticketId, detailModal.commentDraft, { status: "open" }) || nextDetail;
-      } else if (detailModal.pendingFiles.length) {
-        nextDetail = await reopenIncidencia(ticketId) || nextDetail;
+      if (commentSnapshot) {
+        phase = "comment";
+
+        const commentResult =
+          await commentIncidencia(
+            ticketId,
+            commentSnapshot,
+            {
+              status: "open",
+            }
+          );
+
+        nextDetail =
+          mergeTicketData(
+            nextDetail || {},
+            commentResult || {}
+          );
+
+        commented = true;
+      } else if (
+        filesSnapshot.length
+      ) {
+        phase = "reopen";
+
+        const reopenResult =
+          await reopenIncidencia(
+            ticketId
+          );
+
+        nextDetail =
+          mergeTicketData(
+            nextDetail || {},
+            reopenResult || {}
+          );
+
+        reopened = true;
       }
 
-      nextDetail = mergeTicketData(detailModal.detail || {}, nextDetail || {});
+      phase = "complete";
+
+      nextDetail =
+        mergeTicketData(
+          detailModal.detail || {},
+          nextDetail || {}
+        );
 
       detailModal.submitting = false;
       detailModal.detail = nextDetail;
+
       detailModal.commentDraft = "";
       detailModal.pendingFiles = [];
-      detailModal.feedbackMessage = "Incidencia actualizada correctamente.";
-      detailModal.feedbackType = "success";
 
-      items = upsertByTicketId(items, nextDetail);
+      detailModal.feedbackMessage =
+        "Incidencia actualizada correctamente.";
 
-      render({ skipModals: true });
-      renderModals({ immediate: true, focusSelector: DETAIL_MODAL_PANEL_SELECTOR });
+      detailModal.feedbackType =
+        "success";
+
+      items =
+        upsertByTicketId(
+          items,
+          nextDetail
+        );
+
+      render({
+        skipModals: true,
+      });
+
+      renderModals({
+        immediate: true,
+        focusSelector:
+          DETAIL_MODAL_PANEL_SELECTOR,
+      });
+
       return true;
     } catch (updateError) {
       detailModal.submitting = false;
-      detailModal.feedbackMessage = safeError(updateError, "No se pudo actualizar la incidencia.");
-      detailModal.feedbackType = "error";
-      renderModals({ immediate: true, focusSelector: "[data-field='comment']" });
+
+      /*
+         Conservamos cualquier resultado confirmado.
+      */
+      detailModal.detail =
+        mergeTicketData(
+          detailModal.detail || {},
+          nextDetail || {}
+        );
+
+      items =
+        upsertByTicketId(
+          items,
+          detailModal.detail
+        );
+
+      let fallback =
+        "No se pudo actualizar la incidencia.";
+
+      if (
+        uploaded &&
+        !commented &&
+        phase === "comment"
+      ) {
+        fallback =
+          "Los archivos se subieron correctamente, pero no se pudo publicar el comentario. Puedes reintentar el comentario sin volver a adjuntar los archivos.";
+      } else if (
+        uploaded &&
+        !reopened &&
+        phase === "reopen"
+      ) {
+        fallback =
+          "Los archivos se subieron correctamente, pero no se pudo reabrir la incidencia. Los archivos no se volverán a subir al reintentar.";
+      }
+
+      detailModal.feedbackMessage =
+        safeError(
+          updateError,
+          fallback
+        );
+
+      detailModal.feedbackType =
+        "error";
+
+      render({
+        skipModals: true,
+      });
+
+      renderModals({
+        immediate: true,
+        focusSelector:
+          "[data-field='comment']",
+      });
+
       return false;
     }
   }
 
-  function getAttachmentById(attachmentId = "") {
-    const id = cleanText(attachmentId, "");
-    const attachments = safeArray(first(detailModal.detail?.attachments, detailModal.detail?.files, detailModal.detail?.adjuntos, []));
+  /* =======================================================
+     ATTACHMENTS
+  ======================================================= */
 
-    return attachments.find((file) => cleanText(first(file.id, file.attachmentId, file.fileId), "") === id) || null;
+  function getAttachmentById(
+    attachmentId = ""
+  ) {
+    const id =
+      cleanText(
+        attachmentId,
+        ""
+      );
+
+    const attachments =
+      safeArray(
+        first(
+          detailModal.detail?.attachments,
+          detailModal.detail?.files,
+          detailModal.detail?.adjuntos,
+          []
+        )
+      );
+
+    return (
+      attachments.find(
+        (file) =>
+          cleanText(
+            first(
+              file.id,
+              file.attachmentId,
+              file.fileId
+            ),
+            ""
+          ) === id
+      ) ||
+      null
+    );
   }
 
-  async function openAttachment(attachmentId = "") {
-    const id = cleanText(attachmentId, "");
-    const ticketId = getTicketId(detailModal.detail);
+  async function openAttachment(
+    attachmentId = ""
+  ) {
+    const id =
+      cleanText(
+        attachmentId,
+        ""
+      );
 
-    if (!id || !ticketId) return false;
+    const ticketId =
+      getTicketId(
+        detailModal.detail
+      );
 
-    detailModal.openingAttachmentId = id;
-    renderModals({ immediate: true });
+    if (
+      !id ||
+      !ticketId
+    ) {
+      return false;
+    }
+
+    detailModal.openingAttachmentId =
+      id;
+
+    renderModals({
+      immediate: true,
+    });
 
     try {
-      const file = await openIncidenciaAttachment({ ticketId, attachmentId: id });
+      const file =
+        await openIncidenciaAttachment({
+          ticketId,
+          attachmentId: id,
+        });
 
       detailModal.previewFile = {
-        ...safeObject(getAttachmentById(id)),
+        ...safeObject(
+          getAttachmentById(id)
+        ),
+
         ...safeObject(file),
+
         id,
         attachmentId: id,
       };
-      detailModal.openingAttachmentId = "";
-      renderModals({ immediate: true });
+
+      detailModal.openingAttachmentId =
+        "";
+
+      renderModals({
+        immediate: true,
+      });
+
       return true;
     } catch (attachmentError) {
-      detailModal.openingAttachmentId = "";
-      detailModal.feedbackMessage = safeError(attachmentError, "No se pudo abrir el adjunto.");
-      detailModal.feedbackType = "error";
-      renderModals({ immediate: true });
+      detailModal.openingAttachmentId =
+        "";
+
+      detailModal.feedbackMessage =
+        safeError(
+          attachmentError,
+          "No se pudo abrir el adjunto."
+        );
+
+      detailModal.feedbackType =
+        "error";
+
+      renderModals({
+        immediate: true,
+      });
+
       return false;
     }
   }
 
-  async function downloadAttachment(attachmentId = "") {
-    const id = cleanText(attachmentId, "");
-    const ticketId = getTicketId(detailModal.detail);
-    const attachment = getAttachmentById(id);
+  async function downloadAttachment(
+    attachmentId = ""
+  ) {
+    const id =
+      cleanText(
+        attachmentId,
+        ""
+      );
 
-    if (!id || !ticketId) return false;
+    const ticketId =
+      getTicketId(
+        detailModal.detail
+      );
 
-    detailModal.downloadingAttachmentId = id;
-    renderModals({ immediate: true });
+    const attachment =
+      getAttachmentById(id);
+
+    if (
+      !id ||
+      !ticketId
+    ) {
+      return false;
+    }
+
+    detailModal.downloadingAttachmentId =
+      id;
+
+    renderModals({
+      immediate: true,
+    });
 
     try {
       await downloadIncidenciaAttachment({
         ticketId,
         attachmentId: id,
-        filename: cleanText(first(attachment?.name, attachment?.filename), ""),
+
+        filename:
+          cleanText(
+            first(
+              attachment?.name,
+              attachment?.filename
+            ),
+            ""
+          ),
       });
 
-      detailModal.downloadingAttachmentId = "";
-      renderModals({ immediate: true });
+      detailModal.downloadingAttachmentId =
+        "";
+
+      renderModals({
+        immediate: true,
+      });
+
       return true;
     } catch (downloadError) {
-      detailModal.downloadingAttachmentId = "";
-      detailModal.feedbackMessage = safeError(downloadError, "No se pudo descargar el adjunto.");
-      detailModal.feedbackType = "error";
-      renderModals({ immediate: true });
+      detailModal.downloadingAttachmentId =
+        "";
+
+      detailModal.feedbackMessage =
+        safeError(
+          downloadError,
+          "No se pudo descargar el adjunto."
+        );
+
+      detailModal.feedbackType =
+        "error";
+
+      renderModals({
+        immediate: true,
+      });
+
       return false;
     }
   }
 
   function closePreview() {
-    detailModal.previewFile = null;
-    renderModals({ immediate: true });
+    detailModal.previewFile =
+      null;
+
+    renderModals({
+      immediate: true,
+      focusSelector:
+        "[data-modal-files-slot='true'] button",
+    });
+
     return true;
   }
 
   async function downloadPreview() {
-    const file = safeObject(detailModal.previewFile, null);
-    if (!file) return false;
+    const file =
+      safeObject(
+        detailModal.previewFile,
+        null
+      );
 
-    return downloadAttachment(cleanText(first(file.id, file.attachmentId), ""));
-  }
-
-  function filteredItems() {
-    let output = safeArray(items);
-
-    const q = cleanText(search, "").toLowerCase();
-    if (q) {
-      output = output.filter((item) => {
-        const haystack = [
-          item.ticketId,
-          item.id,
-          item.subject,
-          item.asunto,
-          item.title,
-          item.message,
-          item.description,
-          item.descripcion,
-          item.name,
-          item.displayName,
-          item.email,
-          item.username,
-          item.category,
-          item.categoria,
-          item.tipo,
-          item.priority,
-          item.status,
-        ].filter(Boolean).join(" ").toLowerCase();
-
-        return haystack.includes(q);
-      });
+    if (!file) {
+      return false;
     }
 
-    if (filter && filter !== "all") {
-      output = output.filter((item) => {
-        const status = cleanText(first(item.status, item.estado), "").toLowerCase();
-        const priority = cleanText(first(item.priority, item.prioridad), "").toLowerCase();
-
-        if (filter === "open") return ["open", "pending", "in_progress"].includes(status);
-        if (filter === "closed") return ["closed", "resolved"].includes(status);
-        if (filter === "urgent") return ["urgent", "high"].includes(priority);
-
-        return true;
-      });
-    }
-
-    output = [...output].sort((a, b) => {
-      const diff = ticketSortTime(b) - ticketSortTime(a);
-      return normalizeSortOrder(sortOrder) === "asc" ? -diff : diff;
-    });
-
-    return output.slice(0, visibleLimit);
+    return downloadAttachment(
+      cleanText(
+        first(
+          file.id,
+          file.attachmentId
+        ),
+        ""
+      )
+    );
   }
 
-  function renderWithFilteredItems(options = {}) {
-    const previousItems = items;
-    const visible = filteredItems();
+  /* =======================================================
+     LIST CONTROLS
+  ======================================================= */
 
-    // El template recibe items visibles, pero mantenemos total real.
-    const payloadItems = items;
-    items = visible;
+  function renderWithFilteredItems(
+    options = {}
+  ) {
+    /*
+       viewPayload() ya aplica filteredItems().
+       No mutamos `items` temporalmente; evita condiciones de carrera
+       con requestAnimationFrame.
+    */
     render(options);
-    items = payloadItems || previousItems;
+    return true;
+  }
+
+  function setSearch(
+    value = ""
+  ) {
+    search =
+      cleanText(
+        value,
+        ""
+      );
+
+    visibleLimit =
+      DEFAULT_VISIBLE_LIMIT;
+
+    renderWithFilteredItems();
 
     return true;
   }
 
-  function setSearch(value = "") {
-    search = cleanText(value, "");
-    visibleLimit = DEFAULT_VISIBLE_LIMIT;
-    renderWithFilteredItems();
-    return true;
-  }
+  function setFilter(
+    value = "all"
+  ) {
+    filter =
+      cleanText(
+        value,
+        "all"
+      ) ||
+      "all";
 
-  function setFilter(value = "all") {
-    filter = cleanText(value, "all") || "all";
-    visibleLimit = DEFAULT_VISIBLE_LIMIT;
+    visibleLimit =
+      DEFAULT_VISIBLE_LIMIT;
+
     renderWithFilteredItems();
+
     return true;
   }
 
   function clearFilters() {
     filter = "all";
     search = "";
-    visibleLimit = DEFAULT_VISIBLE_LIMIT;
+
+    visibleLimit =
+      DEFAULT_VISIBLE_LIMIT;
+
     renderWithFilteredItems();
+
     return true;
   }
 
   function toggleSortOrder() {
-    sortOrder = getNextSortOrder(sortOrder);
+    sortOrder =
+      getNextSortOrder(
+        sortOrder
+      );
+
     renderWithFilteredItems();
+
     return true;
   }
 
   function loadMore() {
     loadingMore = true;
-    visibleLimit += DEFAULT_VISIBLE_LIMIT;
+
+    visibleLimit +=
+      DEFAULT_VISIBLE_LIMIT;
+
     renderWithFilteredItems();
+
     loadingMore = false;
+
     return true;
   }
 
   async function refresh() {
-    return load({ force: true, silent: false });
+    return load({
+      force: true,
+      silent: false,
+    });
   }
 
-  async function handleAction(action = "", node = null) {
-    const type = cleanText(action, "");
-    if (!type) return false;
+  /* =======================================================
+     ACTIONS
+  ======================================================= */
 
-    if (type === INCIDENCIAS_ACTIONS.REFRESH) return refresh();
-    if (type === INCIDENCIAS_ACTIONS.CREATE_OPEN) return openCreateModal();
-    if (type === INCIDENCIAS_ACTIONS.FILTER) return setFilter(node?.dataset?.filter || "all");
-    if (type === INCIDENCIAS_ACTIONS.SORT_TOGGLE) return toggleSortOrder();
-    if (type === INCIDENCIAS_ACTIONS.CLEAR_FILTERS) return clearFilters();
-    if (type === INCIDENCIAS_ACTIONS.CLEAR_SEARCH) return setSearch("");
-    if (type === INCIDENCIAS_ACTIONS.OPEN_DETAIL) return openDetail(node?.dataset?.ticketId || node?.dataset?.incidenciaId || "");
-    if (type === INCIDENCIAS_ACTIONS.LOAD_MORE) return loadMore();
+  async function copyTicketId(
+    ticketId = ""
+  ) {
+    const id =
+      cleanText(
+        ticketId,
+        ""
+      );
 
-    if (type === CREATE_ACTIONS.CLOSE) return closeCreateModal();
-    if (type === CREATE_ACTIONS.SUBMIT) return submitCreate(node?.closest?.("form"));
-    if (type === CREATE_ACTIONS.USER_SELECT) return selectCreateUser(node);
-    if (type === CREATE_ACTIONS.USER_CLEAR) return clearCreateUser();
-    if (type === CREATE_ACTIONS.ATTACHMENT_REMOVE) return removeCreateAttachment(fileIndexFromNode(node));
+    if (
+      !id ||
+      !isBrowser()
+    ) {
+      return false;
+    }
 
-    if (type === DETAIL_ACTIONS.CLOSE) return closeDetailModal();
-    if (type === DETAIL_ACTIONS.COPY_ID) return copyTicketId(node?.dataset?.ticketId || "");
-    if (type === DETAIL_ACTIONS.COMMENT_SUBMIT) return submitDetailUpdate();
-    if (type === DETAIL_ACTIONS.PENDING_FILE_REMOVE) return removeDetailPendingFile(fileIndexFromNode(node));
-    if (type === DETAIL_ACTIONS.ATTACHMENT_OPEN) return openAttachment(node?.dataset?.attachmentId || "");
-    if (type === DETAIL_ACTIONS.ATTACHMENT_DOWNLOAD) return downloadAttachment(node?.dataset?.attachmentId || "");
-    if (type === DETAIL_ACTIONS.PREVIEW_CLOSE) return closePreview();
-    if (type === DETAIL_ACTIONS.PREVIEW_DOWNLOAD) return downloadPreview();
+    try {
+      await navigator.clipboard
+        ?.writeText?.(id);
+
+      if (detailModal.open) {
+        detailModal.feedbackMessage =
+          "ID de incidencia copiado.";
+
+        detailModal.feedbackType =
+          "success";
+
+        renderModals({
+          immediate: true,
+        });
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function handleAction(
+    action = "",
+    node = null
+  ) {
+    const type =
+      cleanText(
+        action,
+        ""
+      );
+
+    if (!type) {
+      return false;
+    }
+
+    if (
+      type ===
+      INCIDENCIAS_ACTIONS.REFRESH
+    ) {
+      return refresh();
+    }
+
+    if (
+      type ===
+      INCIDENCIAS_ACTIONS.CREATE_OPEN
+    ) {
+      return openCreateModal(
+        node
+      );
+    }
+
+    if (
+      type ===
+      INCIDENCIAS_ACTIONS.FILTER
+    ) {
+      return setFilter(
+        node?.dataset?.filter ||
+        "all"
+      );
+    }
+
+    if (
+      type ===
+      INCIDENCIAS_ACTIONS.SORT_TOGGLE
+    ) {
+      return toggleSortOrder();
+    }
+
+    if (
+      type ===
+      INCIDENCIAS_ACTIONS.CLEAR_FILTERS
+    ) {
+      return clearFilters();
+    }
+
+    if (
+      type ===
+      INCIDENCIAS_ACTIONS.CLEAR_SEARCH
+    ) {
+      return setSearch("");
+    }
+
+    if (
+      type ===
+      INCIDENCIAS_ACTIONS.OPEN_DETAIL
+    ) {
+      return openDetail(
+        node?.dataset?.ticketId ||
+        node?.dataset?.incidenciaId ||
+        "",
+        node
+      );
+    }
+
+    if (
+      type ===
+      INCIDENCIAS_ACTIONS.LOAD_MORE
+    ) {
+      return loadMore();
+    }
+
+    if (
+      type ===
+      CREATE_ACTIONS.CLOSE
+    ) {
+      return closeCreateModal();
+    }
+
+    if (
+      type ===
+      CREATE_ACTIONS.SUBMIT
+    ) {
+      return submitCreate(
+        node?.closest?.("form")
+      );
+    }
+
+    if (
+      type ===
+      CREATE_ACTIONS.USER_SELECT
+    ) {
+      return selectCreateUser(node);
+    }
+
+    if (
+      type ===
+      CREATE_ACTIONS.USER_CLEAR
+    ) {
+      return clearCreateUser();
+    }
+
+    if (
+      type ===
+      CREATE_ACTIONS.ATTACHMENT_REMOVE
+    ) {
+      return removeCreateAttachment(
+        fileIndexFromNode(node)
+      );
+    }
+
+    if (
+      type ===
+      DETAIL_ACTIONS.CLOSE
+    ) {
+      return closeDetailModal();
+    }
+
+    if (
+      type ===
+      DETAIL_ACTIONS.COPY_ID
+    ) {
+      return copyTicketId(
+        node?.dataset?.ticketId ||
+        ""
+      );
+    }
+
+    if (
+      type ===
+      DETAIL_ACTIONS.COMMENT_SUBMIT
+    ) {
+      return submitDetailUpdate();
+    }
+
+    if (
+      type ===
+      DETAIL_ACTIONS.PENDING_FILE_REMOVE
+    ) {
+      return removeDetailPendingFile(
+        fileIndexFromNode(node)
+      );
+    }
+
+    if (
+      type ===
+      DETAIL_ACTIONS.ATTACHMENT_OPEN
+    ) {
+      return openAttachment(
+        node?.dataset?.attachmentId ||
+        ""
+      );
+    }
+
+    if (
+      type ===
+      DETAIL_ACTIONS.ATTACHMENT_DOWNLOAD
+    ) {
+      return downloadAttachment(
+        node?.dataset?.attachmentId ||
+        ""
+      );
+    }
+
+    if (
+      type ===
+      DETAIL_ACTIONS.PREVIEW_CLOSE
+    ) {
+      return closePreview();
+    }
+
+    if (
+      type ===
+      DETAIL_ACTIONS.PREVIEW_DOWNLOAD
+    ) {
+      return downloadPreview();
+    }
 
     return false;
   }
 
-  function actionFrom(node = null) {
+  function actionFrom(
+    node = null
+  ) {
     return cleanText(
       node?.dataset?.incidenciasAction ||
-        node?.dataset?.createAction ||
-        node?.dataset?.detailAction ||
-        node?.dataset?.action ||
-        "",
+      node?.dataset?.createAction ||
+      node?.dataset?.detailAction ||
+      node?.dataset?.action ||
+      "",
       ""
     );
   }
 
+  /* =======================================================
+     EVENTS
+  ======================================================= */
+
   function onClick(event) {
-    const target = event.target?.nodeType === 3 ? event.target.parentElement : event.target;
-    if (!target?.closest) return;
+    const target =
+      event.target?.nodeType === 3
+        ? event.target.parentElement
+        : event.target;
 
-    const actionNode = target.closest("[data-incidencias-action], [data-create-action], [data-detail-action], [data-action]");
+    if (!target?.closest) {
+      return;
+    }
 
-    if (actionNode && ownsNode(actionNode)) {
-      const action = actionFrom(actionNode);
+    const actionNode =
+      target.closest(
+        "[data-incidencias-action], [data-create-action], [data-detail-action], [data-action]"
+      );
+
+    if (
+      actionNode &&
+      ownsNode(actionNode)
+    ) {
+      const action =
+        actionFrom(actionNode);
 
       if (action) {
         event.preventDefault();
         event.stopPropagation();
-        event[ROUTER_EVENT_HANDLED_KEY] = true;
-        void handleAction(action, actionNode);
+
+        event[
+          ROUTER_EVENT_HANDLED_KEY
+        ] = true;
+
+        void handleAction(
+          action,
+          actionNode
+        );
+
         return;
       }
     }
 
-    const row = target.closest("[data-ticket-row='true']");
+    const row =
+      target.closest(
+        "[data-ticket-row='true']"
+      );
 
-    if (row && host?.contains(row)) {
+    if (
+      row &&
+      host?.contains(row)
+    ) {
       event.preventDefault();
       event.stopPropagation();
-      event[ROUTER_EVENT_HANDLED_KEY] = true;
-      void openDetail(row.dataset.ticketId || row.dataset.incidenciaId || "");
+
+      event[
+        ROUTER_EVENT_HANDLED_KEY
+      ] = true;
+
+      void openDetail(
+        row.dataset.ticketId ||
+        row.dataset.incidenciaId ||
+        "",
+        row
+      );
+
       return;
     }
 
-    const createOverlay = target.closest(CREATE_MODAL_OVERLAY_SELECTOR);
-    const createPanel = target.closest(CREATE_MODAL_PANEL_SELECTOR);
+    const createOverlay =
+      target.closest(
+        CREATE_MODAL_OVERLAY_SELECTOR
+      );
 
-    if (createOverlay && !createPanel && target === createOverlay) {
+    const createPanel =
+      target.closest(
+        CREATE_MODAL_PANEL_SELECTOR
+      );
+
+    if (
+      createOverlay &&
+      !createPanel &&
+      target === createOverlay
+    ) {
       closeCreateModal();
       return;
     }
 
-    const detailOverlay = target.closest(DETAIL_MODAL_OVERLAY_SELECTOR);
-    const detailPanel = target.closest(DETAIL_MODAL_PANEL_SELECTOR);
+    const detailOverlay =
+      target.closest(
+        DETAIL_MODAL_OVERLAY_SELECTOR
+      );
 
-    if (detailOverlay && !detailPanel && target === detailOverlay) closeDetailModal();
+    const detailPanel =
+      target.closest(
+        DETAIL_MODAL_PANEL_SELECTOR
+      );
+
+    if (
+      detailOverlay &&
+      !detailPanel &&
+      target === detailOverlay
+    ) {
+      closeDetailModal();
+    }
   }
 
   function onInput(event) {
-    const target = event.target;
-    const field = cleanText(target?.dataset?.field || target?.dataset?.incidenciasField || target?.dataset?.detailField || "", "");
-    if (!field || !ownsNode(target)) return;
+    const target =
+      event.target;
+
+    const field =
+      cleanText(
+        target?.dataset?.field ||
+        target?.dataset?.incidenciasField ||
+        target?.dataset?.detailField ||
+        "",
+        ""
+      );
+
+    if (
+      !field ||
+      !ownsNode(target)
+    ) {
+      return;
+    }
 
     if (field === "search") {
-      setSearch(target.value || "");
+      setSearch(
+        target.value ||
+        ""
+      );
+
       return;
     }
 
-    if (field === "targetUserSearch") {
-      handleUserSearch(target.value || "");
+    if (
+      field ===
+      "targetUserSearch"
+    ) {
+      handleUserSearch(
+        target.value ||
+        ""
+      );
+
       return;
     }
 
-    if (createModal.open) patchCreateFormFromField(target);
-    if (detailModal.open && field === "comment") patchDetailComment(target);
+    if (createModal.open) {
+      patchCreateFormFromField(
+        target
+      );
+    }
+
+    if (
+      detailModal.open &&
+      field === "comment"
+    ) {
+      patchDetailComment(
+        target
+      );
+    }
   }
 
   function onChange(event) {
-    const target = event.target;
-    const field = cleanText(target?.dataset?.field || target?.dataset?.detailField || "", "");
-    if (!field || !ownsNode(target)) return;
+    const target =
+      event.target;
 
-    if (createModal.open && field === "attachments") {
-      addCreateAttachments(filesFromInput(target));
-      try { target.value = ""; } catch {}
+    const field =
+      cleanText(
+        target?.dataset?.field ||
+        target?.dataset?.detailField ||
+        "",
+        ""
+      );
+
+    if (
+      !field ||
+      !ownsNode(target)
+    ) {
       return;
     }
 
-    if (detailModal.open && field === "attachments") {
-      addDetailPendingFiles(filesFromInput(target));
-      try { target.value = ""; } catch {}
+    if (
+      createModal.open &&
+      field === "attachments"
+    ) {
+      addCreateAttachments(
+        filesFromInput(target)
+      );
+
+      try {
+        target.value = "";
+      } catch {
+        // noop
+      }
+
       return;
     }
 
-    if (createModal.open) patchCreateFormFromField(target);
+    if (
+      detailModal.open &&
+      field === "attachments"
+    ) {
+      addDetailPendingFiles(
+        filesFromInput(target)
+      );
+
+      try {
+        target.value = "";
+      } catch {
+        // noop
+      }
+
+      return;
+    }
+
+    if (createModal.open) {
+      patchCreateFormFromField(
+        target
+      );
+    }
   }
 
   function onSubmit(event) {
-    const form = event.target?.closest?.("form");
-    if (!form || !ownsNode(form)) return;
+    const form =
+      event.target?.closest?.(
+        "form"
+      );
 
-    if (form.matches("#incidencias-create-form, [data-incidencias-create-form='true']")) {
+    if (
+      !form ||
+      !ownsNode(form)
+    ) {
+      return;
+    }
+
+    if (
+      form.matches(
+        "#incidencias-create-form, [data-incidencias-create-form='true']"
+      )
+    ) {
       event.preventDefault();
       event.stopPropagation();
-      event[ROUTER_EVENT_HANDLED_KEY] = true;
+
+      event[
+        ROUTER_EVENT_HANDLED_KEY
+      ] = true;
+
       void submitCreate(form);
     }
   }
 
   function onKeydown(event) {
-    if (!ownsNode(event.target)) return;
+    if (!ownsNode(event.target)) {
+      return;
+    }
 
-    if (event.key === "Escape") {
+    if (
+      event.key === "Tab" &&
+      modalsOpen()
+    ) {
+      trapFocus(event);
+      return;
+    }
+
+    if (
+      event.key === "Escape"
+    ) {
       if (createModal.open) {
         event.preventDefault();
         closeCreateModal();
@@ -1983,115 +5085,307 @@ function createIncidenciasController(host = null, context = {}) {
 
       if (detailModal.open) {
         event.preventDefault();
+
+        /*
+           UX:
+           Escape cierra primero la preview de archivo.
+           Segundo Escape cierra el modal (con protección de borrador).
+        */
+        if (
+          detailModal.previewFile
+        ) {
+          closePreview();
+          return;
+        }
+
         closeDetailModal();
         return;
       }
     }
 
-    if (event.key !== "Enter" && event.key !== " ") return;
+    if (
+      event.key !== "Enter" &&
+      event.key !== " "
+    ) {
+      return;
+    }
 
-    const row = event.target?.closest?.("[data-ticket-row='true']");
-    if (!row || !host?.contains(row)) return;
+    const row =
+      event.target?.closest?.(
+        "[data-ticket-row='true']"
+      );
+
+    if (
+      !row ||
+      !host?.contains(row)
+    ) {
+      return;
+    }
 
     event.preventDefault();
     event.stopPropagation();
-    event[ROUTER_EVENT_HANDLED_KEY] = true;
-    void openDetail(row.dataset.ticketId || row.dataset.incidenciaId || "");
+
+    event[
+      ROUTER_EVENT_HANDLED_KEY
+    ] = true;
+
+    void openDetail(
+      row.dataset.ticketId ||
+      row.dataset.incidenciaId ||
+      "",
+      row
+    );
   }
 
-  function getDropzone(target = null) {
-    const dropzone = target?.closest?.("[data-dropzone]") || null;
-    if (!dropzone || !ownsNode(dropzone)) return null;
+  function getDropzone(
+    target = null
+  ) {
+    const dropzone =
+      target?.closest?.(
+        "[data-dropzone]"
+      ) ||
+      null;
 
-    const kind = cleanText(dropzone.dataset?.dropzone, "");
-    if (kind === "attachments" && createModal.open) return { dropzone, kind: "create" };
-    if (kind === "detail-attachments" && detailModal.open) return { dropzone, kind: "detail" };
+    if (
+      !dropzone ||
+      !ownsNode(dropzone)
+    ) {
+      return null;
+    }
+
+    const kind =
+      cleanText(
+        dropzone.dataset?.dropzone,
+        ""
+      );
+
+    if (
+      kind === "attachments" &&
+      createModal.open
+    ) {
+      return {
+        dropzone,
+        kind: "create",
+      };
+    }
+
+    if (
+      kind === "detail-attachments" &&
+      detailModal.open
+    ) {
+      return {
+        dropzone,
+        kind: "detail",
+      };
+    }
+
     return null;
   }
 
   function onDragOver(event) {
-    const zone = getDropzone(event.target);
-    if (!zone) return;
+    const zone =
+      getDropzone(
+        event.target
+      );
+
+    if (!zone) {
+      return;
+    }
 
     event.preventDefault();
 
-    if (zone.kind !== "create") return;
+    if (
+      zone.kind !== "create"
+    ) {
+      return;
+    }
 
-    if (!createModal.dragActive) {
+    if (
+      !createModal.dragActive
+    ) {
       createModal.dragActive = true;
-      renderModals({ immediate: true });
+
+      renderModals({
+        immediate: true,
+      });
     }
   }
 
   function onDragLeave(event) {
-    const zone = getDropzone(event.target);
-    if (!zone || zone.kind !== "create") return;
+    const zone =
+      getDropzone(
+        event.target
+      );
 
-    const related = event.relatedTarget;
-    if (related && zone.dropzone.contains(related)) return;
-
-    createModal.dragActive = false;
-    renderModals({ immediate: true });
-  }
-
-  function onDrop(event) {
-    const zone = getDropzone(event.target);
-    if (!zone) return;
-
-    event.preventDefault();
-
-    const files = Array.from(event.dataTransfer?.files || []).filter(isFileLike);
-
-    if (zone.kind === "create") {
-      createModal.dragActive = false;
-      addCreateAttachments(files);
+    if (
+      !zone ||
+      zone.kind !== "create"
+    ) {
       return;
     }
 
-    addDetailPendingFiles(files);
-  }
+    const related =
+      event.relatedTarget;
 
-  function bindTarget(target = null) {
-    target?.addEventListener?.("click", onClick);
-    target?.addEventListener?.("input", onInput);
-    target?.addEventListener?.("change", onChange);
-    target?.addEventListener?.("submit", onSubmit);
-    target?.addEventListener?.("keydown", onKeydown);
-    target?.addEventListener?.("dragover", onDragOver);
-    target?.addEventListener?.("dragleave", onDragLeave);
-    target?.addEventListener?.("drop", onDrop);
-    return true;
-  }
-
-  function unbindTarget(target = null) {
-    target?.removeEventListener?.("click", onClick);
-    target?.removeEventListener?.("input", onInput);
-    target?.removeEventListener?.("change", onChange);
-    target?.removeEventListener?.("submit", onSubmit);
-    target?.removeEventListener?.("keydown", onKeydown);
-    target?.removeEventListener?.("dragover", onDragOver);
-    target?.removeEventListener?.("dragleave", onDragLeave);
-    target?.removeEventListener?.("drop", onDrop);
-    return true;
-  }
-
-  async function copyTicketId(ticketId = "") {
-    const id = cleanText(ticketId, "");
-    if (!id || !isBrowser()) return false;
-
-    try {
-      await navigator.clipboard?.writeText?.(id);
-      return true;
-    } catch {
-      return false;
+    if (
+      related &&
+      zone.dropzone.contains(
+        related
+      )
+    ) {
+      return;
     }
+
+    createModal.dragActive = false;
+
+    renderModals({
+      immediate: true,
+    });
   }
+
+  function onDrop(event) {
+    const zone =
+      getDropzone(
+        event.target
+      );
+
+    if (!zone) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const files =
+      Array.from(
+        event.dataTransfer?.files ||
+        []
+      ).filter(isFileLike);
+
+    if (
+      zone.kind === "create"
+    ) {
+      createModal.dragActive = false;
+
+      addCreateAttachments(
+        files
+      );
+
+      return;
+    }
+
+    addDetailPendingFiles(
+      files
+    );
+  }
+
+  function bindTarget(
+    target = null
+  ) {
+    target?.addEventListener?.(
+      "click",
+      onClick
+    );
+
+    target?.addEventListener?.(
+      "input",
+      onInput
+    );
+
+    target?.addEventListener?.(
+      "change",
+      onChange
+    );
+
+    target?.addEventListener?.(
+      "submit",
+      onSubmit
+    );
+
+    target?.addEventListener?.(
+      "keydown",
+      onKeydown
+    );
+
+    target?.addEventListener?.(
+      "dragover",
+      onDragOver
+    );
+
+    target?.addEventListener?.(
+      "dragleave",
+      onDragLeave
+    );
+
+    target?.addEventListener?.(
+      "drop",
+      onDrop
+    );
+
+    return true;
+  }
+
+  function unbindTarget(
+    target = null
+  ) {
+    target?.removeEventListener?.(
+      "click",
+      onClick
+    );
+
+    target?.removeEventListener?.(
+      "input",
+      onInput
+    );
+
+    target?.removeEventListener?.(
+      "change",
+      onChange
+    );
+
+    target?.removeEventListener?.(
+      "submit",
+      onSubmit
+    );
+
+    target?.removeEventListener?.(
+      "keydown",
+      onKeydown
+    );
+
+    target?.removeEventListener?.(
+      "dragover",
+      onDragOver
+    );
+
+    target?.removeEventListener?.(
+      "dragleave",
+      onDragLeave
+    );
+
+    target?.removeEventListener?.(
+      "drop",
+      onDrop
+    );
+
+    return true;
+  }
+
+  /* =======================================================
+     CONTROLLER PUBLIC
+  ======================================================= */
 
   const controller = {
-    version: INCIDENCIAS_VIEW_VERSION,
+    version:
+      INCIDENCIAS_VIEW_VERSION,
 
     mount() {
-      if (destroyed || mounted || !host) return controller;
+      if (
+        destroyed ||
+        mounted ||
+        !host
+      ) {
+        return controller;
+      }
 
       mounted = true;
       destroyed = false;
@@ -2099,87 +5393,247 @@ function createIncidenciasController(host = null, context = {}) {
       bindTarget(host);
       ensureModalHost();
 
-      const hasCache = items.length > 0;
+      if (isBrowser()) {
+        window.addEventListener(
+          "beforeunload",
+          onBeforeUnload
+        );
+      }
+
+      const hasCache =
+        items.length > 0;
 
       if (hasCache) {
         loading = false;
         refreshing = false;
         error = "";
+
         renderNow();
       } else {
         loading = true;
         refreshing = false;
         error = "";
+
         renderLoading();
       }
 
-      void load({ silent: true, source: "incidencias.mount.background" });
+      void load({
+        silent: true,
+        source:
+          "incidencias.mount.background",
+      });
+
       return controller;
     },
 
     destroy() {
       destroyed = true;
       mounted = false;
+
       loadSeq += 1;
       userSearchSeq += 1;
+
       clearUserSearchTimer();
+
       cancelScheduledRender();
       cancelScheduledModalRender();
+
+      if (isBrowser()) {
+        window.removeEventListener(
+          "beforeunload",
+          onBeforeUnload
+        );
+      }
+
       unbindTarget(host);
+
+      /*
+         Destroy/unmount es una decisión del Router.
+         No mostramos confirm() durante destrucción del árbol.
+      */
       resetCreateModal();
       resetDetailModal();
+
       removeModalHost();
       syncBodyModalClass();
-      clearInstance(host, controller);
+
+      modalReturnFocus = null;
+
+      clearInstance(
+        host,
+        controller
+      );
+
       return true;
     },
 
-    unmount() { return this.destroy(); },
-    cleanup() { return this.destroy(); },
-    dispose() { return this.destroy(); },
+    unmount() {
+      return this.destroy();
+    },
+
+    cleanup() {
+      return this.destroy();
+    },
+
+    dispose() {
+      return this.destroy();
+    },
 
     refresh,
     reload: refresh,
+
     openCreateModal,
     closeCreateModal,
 
+    openDetail,
+    closeDetailModal,
+
     getSnapshot() {
       return {
-        version: INCIDENCIAS_VIEW_VERSION,
+        version:
+          INCIDENCIAS_VIEW_VERSION,
+
         mounted,
         destroyed,
+
         loading,
         refreshing,
         creating,
         loadingMore,
+
         total,
-        count: items.length,
+        count:
+          items.length,
+
+        visibleCount:
+          filteredItems().length,
+
         visibleLimit,
         filter,
-        searchLength: search.length,
+
+        searchLength:
+          search.length,
+
         sortOrder,
-        createModalOpen: createModal.open,
-        detailModalOpen: detailModal.open,
-        modalHost: Boolean(modalHost?.isConnected),
+
+        createModalOpen:
+          createModal.open,
+
+        detailModalOpen:
+          detailModal.open,
+
+        detailDraft:
+          detailHasDraft(),
+
+        detailSubmitting:
+          detailModal.submitting,
+
+        detailPreviewOpen:
+          Boolean(
+            detailModal.previewFile
+          ),
+
+        modalHost:
+          Boolean(
+            modalHost?.isConnected
+          ),
+
         modalHostBound,
+
+        focusTrap: true,
+        restoresModalFocus: true,
+        protectsDetailDraft: true,
+
         userSearch: {
-          queryLength: createModal.userSearch.query.length,
-          loading: createModal.userSearch.loading,
-          results: createModal.userSearch.results.length,
-          empty: createModal.userSearch.empty,
-          hasError: Boolean(createModal.userSearch.error),
-          hasSelectedUser: Boolean(createModal.form.targetUserId),
+          queryLength:
+            createModal.userSearch.query.length,
+
+          loading:
+            createModal.userSearch.loading,
+
+          results:
+            createModal.userSearch.results.length,
+
+          empty:
+            createModal.userSearch.empty,
+
+          hasError:
+            Boolean(
+              createModal.userSearch.error
+            ),
+
+          hasSelectedUser:
+            Boolean(
+              createModal.form.targetUserId
+            ),
         },
-        createAttachments: safeArray(createModal.form.attachments).length,
-        createFilesAreReal: safeArray(createModal.form.attachments).every(isFileLike),
-        openingTicketId: openingTicketId ? "***" : "",
-        role: getCurrentRole(),
-        admin: isAdmin(),
-        error: redact(error),
+
+        createAttachments:
+          safeArray(
+            createModal.form.attachments
+          ).length,
+
+        createFilesAreReal:
+          safeArray(
+            createModal.form.attachments
+          ).every(isFileLike),
+
+        detailAttachmentsPending:
+          safeArray(
+            detailModal.pendingFiles
+          ).length,
+
+        openingTicketId:
+          openingTicketId
+            ? "***"
+            : "",
+
+        role:
+          getCurrentRole(),
+
+        admin:
+          isAdmin(),
+
+        error:
+          redact(error),
+
+        detailLimits: {
+          ...DETAIL_LIMITS,
+        },
+
         blob: {
-          createField: "attachments",
-          submitRereadsLiveFileInput: true,
-          sendsFilesAliases: ["attachments", "files", "adjuntos"],
+          createField:
+            "attachments",
+
+          submitRereadsLiveFileInput:
+            true,
+
+          sendsFilesAliases: [
+            "attachments",
+            "files",
+            "adjuntos",
+          ],
+
+          detailAvoidsDuplicateRetryUpload:
+            true,
+        },
+
+        policy: {
+          noFetch: true,
+          noStorage: true,
+
+          modalIsland: true,
+          focusTrap: true,
+          focusRestore: true,
+          dirtyCloseProtection: true,
+          beforeUnloadProtection: true,
+
+          detailMultilinePreserved: true,
+          detailUploadLimitsEarly: true,
+          detailPartialSuccessAware: true,
+
+          filteredListNoStateMutation: true,
+          firstDoesNotFlattenArrays: true,
         },
       };
     },
@@ -2196,37 +5650,66 @@ function createIncidenciasController(host = null, context = {}) {
    VIEW ENTRY
 ========================================================= */
 
-export async function IncidenciasView(host = null, context = {}) {
-  if (!isDomNode(host)) return null;
+export async function IncidenciasView(
+  host = null,
+  context = {}
+) {
+  if (!isDomNode(host)) {
+    return null;
+  }
 
   destroyPrevious(host);
-  const controller = createIncidenciasController(host, context);
-  storeInstance(host, controller);
+
+  const controller =
+    createIncidenciasController(
+      host,
+      context
+    );
+
+  storeInstance(
+    host,
+    controller
+  );
+
   return controller.mount();
 }
 
-export const IncidenciasIndex = IncidenciasView;
+export const IncidenciasIndex =
+  IncidenciasView;
 
 export function destroy() {
   try {
-    return Boolean(lastInstance?.destroy?.());
+    return Boolean(
+      lastInstance?.destroy?.()
+    );
   } catch {
     return false;
   }
 }
 
 export function getSnapshot() {
-  if (lastInstance?.getSnapshot) return lastInstance.getSnapshot();
+  if (
+    lastInstance?.getSnapshot
+  ) {
+    return lastInstance.getSnapshot();
+  }
 
   return {
-    version: INCIDENCIAS_VIEW_VERSION,
+    version:
+      INCIDENCIAS_VIEW_VERSION,
+
     mounted: false,
     hasInstance: false,
-    role: getCurrentRole(),
-    admin: isAdmin(),
+
+    role:
+      getCurrentRole(),
+
+    admin:
+      isAdmin(),
   };
 }
 
-export const getDebugSnapshot = getSnapshot;
+export const getDebugSnapshot =
+  getSnapshot;
 
 export default IncidenciasView;

@@ -8,6 +8,7 @@
    - Deduplicar cargas concurrentes del Home.
    - Tolerar fallos parciales sin ocultar los dominios disponibles.
    - Exponer totales remotos aunque las listas del Home estén limitadas.
+   - Solicitar estadísticas globales de facturación sin cargar toda la colección.
    - Sin DOM, Router, Store, Storage ni fetch propio.
    - HTTP directo sólo para contadores admin mínimos (1 fila + total remoto).
 ========================================================= */
@@ -18,7 +19,8 @@ import Http from "../../core/http.js";
 import IncidenciasApi from "../incidencias/incidencias.api.js";
 import FacturasApi from "../facturas/facturas.api.js";
 
-export const HOME_API_VERSION = "home.api.domain-aggregator.v7.production";
+export const HOME_API_VERSION =
+  "home.api.domain-aggregator.v8.global-invoice-stats";
 
 export const HOME_TIMEOUT_MS = 15_000;
 export const HOME_LIST_LIMIT = 8;
@@ -137,9 +139,10 @@ function number(value, fallback = 0) {
     const hasDot = text.includes(".");
 
     if (hasComma && hasDot) {
-      text = text.lastIndexOf(",") > text.lastIndexOf(".")
-        ? text.replace(/\./g, "").replace(/,/g, ".")
-        : text.replace(/,/g, "");
+      text =
+        text.lastIndexOf(",") > text.lastIndexOf(".")
+          ? text.replace(/\./g, "").replace(/,/g, ".")
+          : text.replace(/,/g, "");
     } else if (hasComma) {
       text = text.replace(/,/g, ".");
     }
@@ -173,7 +176,10 @@ function redact(value = "") {
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
 }
 
 function normalizeRole(value = "") {
@@ -194,7 +200,17 @@ function normalizeRole(value = "") {
     .replace(/[^\w]+/g, "_")
     .replace(/^_+|_+$/g, "");
 
-  if (["admin", "administrator", "administrador", "superadmin", "super_admin", "root", "owner"].includes(role)) {
+  if (
+    [
+      "admin",
+      "administrator",
+      "administrador",
+      "superadmin",
+      "super_admin",
+      "root",
+      "owner",
+    ].includes(role)
+  ) {
     return "admin";
   }
 
@@ -320,9 +336,9 @@ function cacheAgeMs() {
 function cacheMatches(key = currentContext().key) {
   return Boolean(
     cacheState.dashboard &&
-    cacheState.key &&
-    key &&
-    cacheState.key === key
+      cacheState.key &&
+      key &&
+      cacheState.key === key
   );
 }
 
@@ -417,7 +433,12 @@ function totalFromPayload(value = null, fallback = 0, depth = 0) {
     best = Math.max(best, number(value[key], 0));
   }
 
-  for (const nested of [value.meta, value.pagination, value.paging, value.pageInfo]) {
+  for (const nested of [
+    value.meta,
+    value.pagination,
+    value.paging,
+    value.pageInfo,
+  ]) {
     if (!isObject(nested)) continue;
 
     for (const key of TOTAL_KEYS) {
@@ -444,7 +465,9 @@ function collectionFromResponse(response = null, fallbackTotal = 0) {
     total: Math.max(items.length, totalFromPayload(response, fallbackTotal)),
     stale: object.stale === true,
     error: object.error || null,
-    stats: safeObject(first(object.statsAllMatched, object.stats, object.meta?.stats, {})),
+    stats: safeObject(
+      first(object.statsAllMatched, object.stats, object.meta?.stats, {})
+    ),
   };
 }
 
@@ -482,19 +505,30 @@ async function loadFacturasForHome(options = {}) {
     limit: HOME_LIST_LIMIT,
     sort: "date_desc",
     direction: "desc",
-    includeStats: true,
     returnStaleOnError: options.returnStaleOnError !== false,
+
+    /*
+       Permitimos opciones de dominio (filtros/timeout/orden) pero las
+       estadísticas globales son obligatorias para que el Home no calcule
+       el importe pagado únicamente con las 8 facturas visibles.
+    */
     ...safeObject(options.facturasOptions),
+
+    includeStats: true,
+    includeStatsAll: true,
   });
 
   return collectionFromResponse(response);
 }
 
-async function loadAdminCount(endpoint = "", {
-  timeout = HOME_TIMEOUT_MS,
-  source = "views.home.count",
-  query = {},
-} = {}) {
+async function loadAdminCount(
+  endpoint = "",
+  {
+    timeout = HOME_TIMEOUT_MS,
+    source = "views.home.count",
+    query = {},
+  } = {}
+) {
   const response = await Http.get(endpoint, {
     timeout,
     source,
@@ -586,7 +620,14 @@ function invoicePaid(invoice = {}) {
     invoice.paid === true ||
       invoice.isPaid === true ||
       invoice.pagada === true ||
-      ["paid", "pagada", "pagado", "completed", "complete", "settled"].includes(status)
+      [
+        "paid",
+        "pagada",
+        "pagado",
+        "completed",
+        "complete",
+        "settled",
+      ].includes(status)
   );
 }
 
@@ -641,7 +682,8 @@ function paidTotalFromStats(stats = {}, invoices = []) {
   }
 
   return safeArray(invoices).reduce(
-    (sum, invoice) => sum + (invoicePaid(invoice) ? invoiceAmount(invoice) : 0),
+    (sum, invoice) =>
+      sum + (invoicePaid(invoice) ? invoiceAmount(invoice) : 0),
     0
   );
 }
@@ -753,11 +795,23 @@ function buildDashboard({
     usuarios,
 
     summary: {
-      tickets: Math.max(incidencias.length, number(incidenciasResult?.total, 0)),
-      incidencias: Math.max(incidencias.length, number(incidenciasResult?.total, 0)),
+      tickets: Math.max(
+        incidencias.length,
+        number(incidenciasResult?.total, 0)
+      ),
+      incidencias: Math.max(
+        incidencias.length,
+        number(incidenciasResult?.total, 0)
+      ),
 
-      facturas: Math.max(facturas.length, number(facturasResult?.total, 0)),
-      invoices: Math.max(facturas.length, number(facturasResult?.total, 0)),
+      facturas: Math.max(
+        facturas.length,
+        number(facturasResult?.total, 0)
+      ),
+      invoices: Math.max(
+        facturas.length,
+        number(facturasResult?.total, 0)
+      ),
 
       clientes: context.admin
         ? Math.max(clientes.length, number(clientesResult?.total, 0))
@@ -837,7 +891,8 @@ async function fetchDashboard(options = {}, context = currentContext()) {
   if (primaryFailures.length === 2) {
     const error = new Error("No se pudo cargar el resumen del Home.");
     error.status = primaryFailures[0]?.error?.status || null;
-    error.code = primaryFailures[0]?.error?.code || "HOME_PRIMARY_LOAD_FAILED";
+    error.code =
+      primaryFailures[0]?.error?.code || "HOME_PRIMARY_LOAD_FAILED";
     error.details = primaryFailures.map((result) => result.error);
     throw error;
   }
@@ -947,7 +1002,9 @@ export function getHomeCacheState() {
     hydrated: cacheMatches(context.key),
     fresh: isCacheFresh(),
     key: cacheMatches(context.key) ? cacheState.key : "",
-    ageMs: cacheMatches(context.key) ? cacheAgeMs() : Number.POSITIVE_INFINITY,
+    ageMs: cacheMatches(context.key)
+      ? cacheAgeMs()
+      : Number.POSITIVE_INFINITY,
     ttlMs: HOME_CACHE_TTL_MS,
     lastLoadedAt: cacheState.loadedAtMs
       ? new Date(cacheState.loadedAtMs).toISOString()
@@ -981,6 +1038,7 @@ export function getHomeApiSnapshot() {
       domainAggregator: true,
       reuseIncidenciasApi: true,
       reuseFacturasApi: true,
+      globalInvoiceStats: true,
       adminCountQueries: true,
       adminCountLimit: HOME_ADMIN_COUNT_LIMIT,
       directHttpOnlyForAdminCounts: true,

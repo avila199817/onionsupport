@@ -2,17 +2,29 @@
    Onion Support - Incidencias Detail Template
    Archivo: /src/views/incidencias/incidencias.template.modal.js
 
-   MODAL DETALLE · SPA SAFE · CSS 1:1 HEADER FIJO · 10/10
+   PRODUCTIVO · MODAL DETALLE 10/10 · V15
 
-   - HTML puro: sin DOM, sin listeners, sin HTTP, sin Store.
-   - 1:1 con detail.css: header fijo y scroll real en body.
-   - Contrato estable para index.js: DETAIL_ACTIONS + data-detail-action.
-   - Compatible con incidencias.api.js y DTOs Cosmos tickets.
-   - Blindado: no aplana arrays de attachments/history/comments.
+   Responsabilidad:
+   - Renderizar HTML puro del detalle de una incidencia.
+   - Sin DOM, listeners, HTTP, Store, Router ni Storage.
+   - Contrato estable con index.js mediante DETAIL_ACTIONS.
+   - Compatible con DTOs legacy/v2/v3 de tickets/incidencias.
+   - Mantener arrays de attachments/history/comments intactos.
+   - Header fijo + body scroll mediante detail.css.
+   - CTA de actualización junto al composer, no después del historial.
+   - No inventar técnico cuando no existe asignación real.
+   - Preview inline únicamente para imagen/PDF.
+   - Límites de comentario/adjuntos visibles para el usuario.
+   - Semántica explícita cuando una actualización reabre la incidencia.
+
+   IMPORTANTE:
+   - Este archivo NO implementa focus trap ni confirmación de borrador.
+     Eso corresponde al controlador /src/views/incidencias/index.js.
+   - Este archivo NO cambia contratos HTTP.
 ========================================================= */
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.css-1a1.header-fixed.v14";
+  "incidencias.template.modal.production.v15";
 
 export const DETAIL_ACTIONS = Object.freeze({
   CLOSE: "detail-close",
@@ -33,25 +45,26 @@ export const DETAIL_ACTIONS = Object.freeze({
 
 const MODAL_ID = "incidencias-detail-modal-root";
 const PANEL_ID = "incidencias-detail-modal-panel";
+const TITLE_ID = "incidencias-modal-title";
+const DESCRIPTION_ID = "incidencias-modal-description";
+const COMMENT_ID = "incidencias-modal-comment-input";
+const ATTACHMENTS_INPUT_ID = "incidencias-modal-attachments-input";
 
 const DEFAULT_CURRENCY = "EUR";
 const MAX_COMMENT_LENGTH = 4000;
 const MAX_PENDING_FILES = 10;
 const MAX_PENDING_FILE_SIZE = 100 * 1024 * 1024;
 
-const FIXED_TECHNICIAN = Object.freeze({
-  userId: "ON-20260218164977",
-  name: "Cristian Ávila Luque",
-  email: "cristian@onionsupport.com",
-  avatarUrl: "https://onionassets.blob.core.windows.net/avatars/ON-20260218164977/avatar.png",
-});
-
 /* =========================================================
    BASICS
 ========================================================= */
 
 function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+  );
 }
 
 function safeObject(value, fallback = {}) {
@@ -98,8 +111,8 @@ function cleanMultiline(value = "", fallback = "") {
 }
 
 /*
-  No aplanar arrays. El modal trabaja con attachments/history/comments.
-  Aplanar aquí convierte arrays válidos en su primer objeto y rompe safeArray().
+   NO aplanar arrays.
+   attachments/history/comments son valores completos.
 */
 function first(...values) {
   for (const value of values) {
@@ -107,6 +120,7 @@ function first(...values) {
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
     if (isObject(value) && Object.keys(value).length === 0) continue;
+
     return value;
   }
 
@@ -114,8 +128,23 @@ function first(...values) {
 }
 
 function number(value = 0, fallback = 0) {
-  if (value === null || value === undefined || value === "") return fallback;
-  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return fallback;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value)
+      ? value
+      : fallback;
+  }
+
+  if (typeof value === "boolean" || typeof value === "object") {
+    return fallback;
+  }
 
   if (typeof value === "string") {
     let clean = value
@@ -124,7 +153,9 @@ function number(value = 0, fallback = 0) {
       .replace(/[^\d.,+\-\s]/g, "")
       .replace(/\s+/g, "");
 
-    if (!clean || clean === "-" || clean === "+") return fallback;
+    if (!clean || clean === "-" || clean === "+") {
+      return fallback;
+    }
 
     const hasComma = clean.includes(",");
     const hasDot = clean.includes(".");
@@ -132,19 +163,29 @@ function number(value = 0, fallback = 0) {
     if (hasComma && hasDot) {
       const lastComma = clean.lastIndexOf(",");
       const lastDot = clean.lastIndexOf(".");
-      clean = lastComma > lastDot
-        ? clean.replace(/\./g, "").replace(/,/g, ".")
-        : clean.replace(/,/g, "");
+
+      clean =
+        lastComma > lastDot
+          ? clean
+              .replace(/\./g, "")
+              .replace(/,/g, ".")
+          : clean.replace(/,/g, "");
     } else if (hasComma) {
       clean = clean.replace(/,/g, ".");
     }
 
     const parsed = Number(clean);
-    return Number.isFinite(parsed) ? parsed : fallback;
+
+    return Number.isFinite(parsed)
+      ? parsed
+      : fallback;
   }
 
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+
+  return Number.isFinite(parsed)
+    ? parsed
+    : fallback;
 }
 
 function escapeHtml(value = "") {
@@ -164,8 +205,18 @@ function htmlAttrs(attrs = {}) {
   return Object.entries(safeObject(attrs))
     .map(([key, value]) => {
       if (!key) return "";
-      if (value === false || value === null || value === undefined) return "";
-      if (value === true) return escapeHtml(key);
+      if (
+        value === false ||
+        value === null ||
+        value === undefined
+      ) {
+        return "";
+      }
+
+      if (value === true) {
+        return escapeHtml(key);
+      }
+
       return `${escapeHtml(key)}="${escapeHtml(value)}"`;
     })
     .filter(Boolean)
@@ -192,12 +243,19 @@ function normalizeKey(value = "") {
 
 function safeUrl(value = "") {
   const raw = cleanText(value, "");
+
   if (!raw) return "";
   if (raw.startsWith("//")) return "";
   if (/[\r\n\t\\]/.test(raw)) return "";
   if (/^(javascript|data|vbscript|file):/i.test(raw)) return "";
-  if (/^blob:/i.test(raw)) return raw;
-  if (raw.startsWith("/")) return raw.replace(/\/{2,}/g, "/");
+
+  if (/^blob:/i.test(raw)) {
+    return raw;
+  }
+
+  if (raw.startsWith("/")) {
+    return raw.replace(/\/{2,}/g, "/");
+  }
 
   if (/^https?:\/\//i.test(raw)) {
     try {
@@ -215,7 +273,13 @@ function firstUrl(...values) {
 
   while (queue.length) {
     const value = queue.shift();
-    if (value === undefined || value === null) continue;
+
+    if (
+      value === undefined ||
+      value === null
+    ) {
+      continue;
+    }
 
     if (isObject(value)) {
       queue.unshift(
@@ -238,11 +302,15 @@ function firstUrl(...values) {
         value.profile?.avatar,
         value.profile?.picture
       );
+
       continue;
     }
 
     const url = safeUrl(value);
-    if (url) return url;
+
+    if (url) {
+      return url;
+    }
   }
 
   return "";
@@ -252,8 +320,15 @@ function hashText(value = "") {
   const text = cleanText(value, "");
   let hash = 0;
 
-  for (let index = 0; index < text.length; index += 1) {
-    hash = ((hash << 5) - hash) + text.charCodeAt(index);
+  for (
+    let index = 0;
+    index < text.length;
+    index += 1
+  ) {
+    hash =
+      ((hash << 5) - hash) +
+      text.charCodeAt(index);
+
     hash |= 0;
   }
 
@@ -266,27 +341,62 @@ function initialsFrom(value = "") {
       .split(/\s+/)
       .filter(Boolean)
       .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase() || "")
+      .map(
+        (part) =>
+          part[0]?.toUpperCase() || ""
+      )
       .join("")
       .slice(0, 2) || "ON"
   );
 }
 
-function safeFilename(value = "", fallback = "archivo") {
-  const raw = cleanText(value, fallback).split(/[\\/]/).pop();
+function safeFilename(
+  value = "",
+  fallback = "archivo"
+) {
+  const raw = cleanText(
+    value,
+    fallback
+  )
+    .split(/[\\/]/)
+    .pop();
 
-  return raw
-    .replace(/[\0\r\n\t]/g, "")
-    .replace(/[/:*?"<>|]+/g, "_")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 160) || fallback;
+  return (
+    raw
+      .replace(/[\0\r\n\t]/g, "")
+      .replace(/[/:*?"<>|]+/g, "_")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 160) ||
+    fallback
+  );
 }
 
 function fileExtension(value = "") {
-  const name = cleanText(value, "").toLowerCase();
-  const index = name.lastIndexOf(".");
-  return index > 0 ? name.slice(index) : "";
+  const name = cleanText(
+    value,
+    ""
+  ).toLowerCase();
+
+  const index =
+    name.lastIndexOf(".");
+
+  return index > 0
+    ? name.slice(index)
+    : "";
+}
+
+function formatLimitBytes(
+  value = MAX_PENDING_FILE_SIZE
+) {
+  const mb =
+    number(value, 0) /
+    1024 /
+    1024;
+
+  return Number.isInteger(mb)
+    ? `${mb} MB`
+    : `${mb.toFixed(1)} MB`;
 }
 
 /* =========================================================
@@ -309,7 +419,10 @@ function icon(name = "") {
     alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
   };
 
-  return icons[name] || icons.file;
+  return (
+    icons[name] ||
+    icons.file
+  );
 }
 
 /* =========================================================
@@ -318,71 +431,200 @@ function icon(name = "") {
 
 function formatBytes(bytes = 0) {
   const value = number(bytes, 0);
-  if (!value || value <= 0) return "";
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-  if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
-  return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`;
+
+  if (!value || value <= 0) {
+    return "";
+  }
+
+  if (value < 1024) {
+    return `${value} B`;
+  }
+
+  if (
+    value <
+    1024 * 1024
+  ) {
+    return `${(
+      value / 1024
+    ).toFixed(1)} KB`;
+  }
+
+  if (
+    value <
+    1024 * 1024 * 1024
+  ) {
+    return `${(
+      value /
+      1024 /
+      1024
+    ).toFixed(1)} MB`;
+  }
+
+  return `${(
+    value /
+    1024 /
+    1024 /
+    1024
+  ).toFixed(1)} GB`;
 }
 
-function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
+function formatMoney(
+  value = 0,
+  currency = DEFAULT_CURRENCY
+) {
   try {
-    return new Intl.NumberFormat("es-ES", {
-      style: "currency",
-      currency: cleanText(currency, DEFAULT_CURRENCY).toUpperCase(),
-      maximumFractionDigits: 2,
-    }).format(number(value, 0));
+    return new Intl.NumberFormat(
+      "es-ES",
+      {
+        style: "currency",
+        currency: cleanText(
+          currency,
+          DEFAULT_CURRENCY
+        ).toUpperCase(),
+        maximumFractionDigits: 2,
+      }
+    ).format(
+      number(value, 0)
+    );
   } catch {
-    return `${number(value, 0).toFixed(2)} €`;
+    return `${number(
+      value,
+      0
+    ).toFixed(2)} €`;
   }
 }
 
 function formatDate(value = "") {
-  const raw = first(value, "");
-  if (!raw) return "—";
+  const raw = first(
+    value,
+    ""
+  );
 
-  const date = new Date(raw);
-  if (!Number.isFinite(date.getTime())) return cleanText(raw, "—");
+  if (!raw) {
+    return "—";
+  }
+
+  const date =
+    new Date(raw);
+
+  if (
+    !Number.isFinite(
+      date.getTime()
+    )
+  ) {
+    return cleanText(
+      raw,
+      "—"
+    );
+  }
 
   try {
-    return new Intl.DateTimeFormat("es-ES", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(date);
+    return new Intl.DateTimeFormat(
+      "es-ES",
+      {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }
+    ).format(date);
   } catch {
     return date.toISOString();
   }
 }
 
-function formatRelativeDate(value = "") {
-  const raw = first(value, "");
-  if (!raw) return "—";
+function formatRelativeDate(
+  value = ""
+) {
+  const raw = first(
+    value,
+    ""
+  );
 
-  const date = new Date(raw);
-  const ms = date.getTime();
-  if (!Number.isFinite(ms)) return cleanText(raw, "—");
+  if (!raw) {
+    return "—";
+  }
 
-  const diff = Math.abs(Date.now() - ms);
-  const minute = 60 * 1000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
+  const date =
+    new Date(raw);
 
-  if (diff < minute) return "ahora";
-  if (diff < hour) return `hace ${Math.max(1, Math.round(diff / minute))} min`;
-  if (diff < day) return `hace ${Math.max(1, Math.round(diff / hour))} h`;
-  if (diff < 7 * day) return `hace ${Math.max(1, Math.round(diff / day))} d`;
+  const ms =
+    date.getTime();
+
+  if (
+    !Number.isFinite(ms)
+  ) {
+    return cleanText(
+      raw,
+      "—"
+    );
+  }
+
+  const diff =
+    Math.abs(
+      Date.now() - ms
+    );
+
+  const minute =
+    60 * 1000;
+
+  const hour =
+    60 * minute;
+
+  const day =
+    24 * hour;
+
+  if (diff < minute) {
+    return "ahora";
+  }
+
+  if (diff < hour) {
+    return `hace ${Math.max(
+      1,
+      Math.round(
+        diff / minute
+      )
+    )} min`;
+  }
+
+  if (diff < day) {
+    return `hace ${Math.max(
+      1,
+      Math.round(
+        diff / hour
+      )
+    )} h`;
+  }
+
+  if (diff < 7 * day) {
+    return `hace ${Math.max(
+      1,
+      Math.round(
+        diff / day
+      )
+    )} d`;
+  }
 
   return formatDate(raw);
 }
 
 function toTimestamp(value = "") {
-  const raw = first(value, "");
-  if (!raw) return 0;
-  const ms = new Date(raw).getTime();
-  return Number.isFinite(ms) ? ms : 0;
+  const raw = first(
+    value,
+    ""
+  );
+
+  if (!raw) {
+    return 0;
+  }
+
+  const ms =
+    new Date(raw).getTime();
+
+  return Number.isFinite(ms)
+    ? ms
+    : 0;
 }
 
 /* =========================================================
@@ -390,244 +632,1100 @@ function toTimestamp(value = "") {
 ========================================================= */
 
 function getRaw(detail = {}) {
-  return safeObject(detail?.raw, detail);
+  return safeObject(
+    detail?.raw,
+    detail
+  );
 }
 
 function getTicketId(detail = {}) {
-  const raw = getRaw(detail);
-  return cleanText(first(detail.ticketId, detail.incidenciaId, detail.id, raw.ticketId, raw.incidenciaId, raw.id, raw.code, raw.numero), "");
+  const raw =
+    getRaw(detail);
+
+  return cleanText(
+    first(
+      detail.ticketId,
+      detail.incidenciaId,
+      detail.id,
+      raw.ticketId,
+      raw.incidenciaId,
+      raw.id,
+      raw.code,
+      raw.numero
+    ),
+    ""
+  );
 }
 
 function getTitle(detail = {}) {
-  const raw = getRaw(detail);
-  return cleanText(first(detail.subject, detail.asunto, detail.title, raw.subject, raw.asunto, raw.title), "Sin asunto");
+  const raw =
+    getRaw(detail);
+
+  return cleanText(
+    first(
+      detail.subject,
+      detail.asunto,
+      detail.title,
+      raw.subject,
+      raw.asunto,
+      raw.title
+    ),
+    "Sin asunto"
+  );
 }
 
-function getDescription(detail = {}) {
-  const raw = getRaw(detail);
-  return cleanMultiline(first(detail.description, detail.descripcion, detail.message, detail.preview, raw.description, raw.descripcion, raw.message, raw.preview), "Sin descripción.");
+function getDescription(
+  detail = {}
+) {
+  const raw =
+    getRaw(detail);
+
+  return cleanMultiline(
+    first(
+      detail.description,
+      detail.descripcion,
+      detail.message,
+      detail.preview,
+      raw.description,
+      raw.descripcion,
+      raw.message,
+      raw.preview
+    ),
+    "Sin descripción."
+  );
 }
 
 function getStatus(detail = {}) {
-  const raw = getRaw(detail);
-  const status = normalizeKey(first(detail.status, detail.estado, raw.status, raw.estado, "open"));
+  const raw =
+    getRaw(detail);
+
+  const status =
+    normalizeKey(
+      first(
+        detail.status,
+        detail.estado,
+        raw.status,
+        raw.estado,
+        "open"
+      )
+    );
+
   const map = {
     open: "open",
     opened: "open",
     abierta: "open",
     abierto: "open",
+
     pending: "pending",
     pendiente: "pending",
+
     in_progress: "progress",
     inprogress: "progress",
     progress: "progress",
     proceso: "progress",
     en_proceso: "progress",
+
     resolved: "resolved",
     resuelta: "resolved",
     resuelto: "resolved",
+
     closed: "closed",
     cerrada: "closed",
     cerrado: "closed",
   };
-  return map[status] || status || "open";
+
+  return (
+    map[status] ||
+    status ||
+    "open"
+  );
 }
 
-function statusLabel(status = "") {
-  return {
-    open: "Abierta",
-    pending: "Pendiente",
-    progress: "En proceso",
-    resolved: "Resuelta",
-    closed: "Cerrada",
-  }[status] || cleanText(status, "Abierta");
+function statusLabel(
+  status = ""
+) {
+  return (
+    {
+      open: "Abierta",
+      pending: "Pendiente",
+      progress: "En proceso",
+      resolved: "Resuelta",
+      closed: "Cerrada",
+    }[status] ||
+    cleanText(
+      status,
+      "Abierta"
+    )
+  );
 }
 
-function statusClass(status = "") {
-  return status === "progress" ? "in-progress" : status || "open";
+function statusClass(
+  status = ""
+) {
+  return status === "progress"
+    ? "in-progress"
+    : status || "open";
 }
 
-function getPriority(detail = {}) {
-  const raw = getRaw(detail);
-  const priority = normalizeKey(first(detail.priority, detail.prioridad, detail.severity, raw.priority, raw.prioridad, raw.severity, "medium"));
+function statusWillReopen(
+  status = ""
+) {
+  return [
+    "closed",
+    "resolved",
+  ].includes(
+    normalizeKey(status)
+  );
+}
+
+function getPriority(
+  detail = {}
+) {
+  const raw =
+    getRaw(detail);
+
+  const priority =
+    normalizeKey(
+      first(
+        detail.priority,
+        detail.prioridad,
+        detail.severity,
+        raw.priority,
+        raw.prioridad,
+        raw.severity,
+        "medium"
+      )
+    );
+
   const map = {
     low: "low",
     baja: "low",
+
     medium: "medium",
     media: "medium",
     normal: "medium",
+
     high: "high",
     alta: "high",
+
     urgent: "urgent",
     urgente: "urgent",
+
     critical: "critical",
     critica: "critical",
     critico: "critical",
   };
-  return map[priority] || priority || "medium";
+
+  return (
+    map[priority] ||
+    priority ||
+    "medium"
+  );
 }
 
-function priorityLabel(priority = "") {
-  return {
-    low: "Baja",
-    medium: "Media",
-    high: "Alta",
-    urgent: "Urgente",
-    critical: "Crítica",
-  }[priority] || cleanText(priority, "Media");
+function priorityLabel(
+  priority = ""
+) {
+  return (
+    {
+      low: "Baja",
+      medium: "Media",
+      high: "Alta",
+      urgent: "Urgente",
+      critical: "Crítica",
+    }[priority] ||
+    cleanText(
+      priority,
+      "Media"
+    )
+  );
 }
 
-function priorityClass(priority = "") {
-  return priority || "medium";
+function priorityClass(
+  priority = ""
+) {
+  return (
+    priority ||
+    "medium"
+  );
 }
 
-function getCategory(detail = {}) {
-  const raw = getRaw(detail);
-  return cleanText(first(detail.category, detail.categoria, detail.tipo, detail.type, raw.category, raw.categoria, raw.tipo, raw.type), "General");
+function getCategory(
+  detail = {}
+) {
+  const raw =
+    getRaw(detail);
+
+  return cleanText(
+    first(
+      detail.category,
+      detail.categoria,
+      detail.tipo,
+      detail.type,
+      raw.category,
+      raw.categoria,
+      raw.tipo,
+      raw.type
+    ),
+    "General"
+  );
 }
 
-function getClientName(detail = {}) {
-  const raw = getRaw(detail);
-  const requester = safeObject(first(detail.requesterSnapshot, detail.cliente, detail.receptor, detail.user, raw.requesterSnapshot, raw.cliente, raw.receptor, raw.user, {}));
+function getRequester(
+  detail = {}
+) {
+  const raw =
+    getRaw(detail);
 
-  return cleanText(first(detail.displayName, detail.name, detail.nombre, detail.clientName, detail.clienteNombre, requester.displayName, requester.name, requester.nombre, raw.displayName, raw.name, raw.nombre, raw.email, getTicketId(detail)), "Usuario");
+  return safeObject(
+    first(
+      detail.requesterSnapshot,
+      detail.cliente,
+      detail.receptor,
+      detail.user,
+      raw.requesterSnapshot,
+      raw.cliente,
+      raw.receptor,
+      raw.user,
+      {}
+    )
+  );
 }
 
-function getClientEmail(detail = {}) {
-  const raw = getRaw(detail);
-  const requester = safeObject(first(detail.requesterSnapshot, detail.cliente, detail.receptor, detail.user, raw.requesterSnapshot, raw.cliente, raw.receptor, raw.user, {}));
-  return cleanText(first(detail.email, detail.emailLower, detail.userEmail, detail.clienteEmail, requester.email, requester.emailLower, raw.email, raw.emailLower), "");
+function getClientName(
+  detail = {}
+) {
+  const raw =
+    getRaw(detail);
+
+  const requester =
+    getRequester(detail);
+
+  return cleanText(
+    first(
+      detail.displayName,
+      detail.name,
+      detail.nombre,
+      detail.clientName,
+      detail.clienteNombre,
+
+      requester.displayName,
+      requester.name,
+      requester.nombre,
+
+      raw.displayName,
+      raw.name,
+      raw.nombre,
+      raw.email,
+
+      getTicketId(detail)
+    ),
+    "Usuario"
+  );
 }
 
-function getClientPhone(detail = {}) {
-  const raw = getRaw(detail);
-  const requester = safeObject(first(detail.requesterSnapshot, detail.cliente, detail.receptor, detail.user, raw.requesterSnapshot, raw.cliente, raw.receptor, raw.user, {}));
-  return cleanText(first(detail.phone, detail.telefono, requester.phone, requester.telefono, raw.phone, raw.telefono), "");
+function getClientEmail(
+  detail = {}
+) {
+  const raw =
+    getRaw(detail);
+
+  const requester =
+    getRequester(detail);
+
+  return cleanText(
+    first(
+      detail.email,
+      detail.emailLower,
+      detail.userEmail,
+      detail.clienteEmail,
+
+      requester.email,
+      requester.emailLower,
+
+      raw.email,
+      raw.emailLower
+    ),
+    ""
+  );
 }
 
-function getClientAvatar(detail = {}) {
-  const raw = getRaw(detail);
-  return firstUrl(detail.avatarUrl, detail.avatar, detail.userAvatarUrl, detail.userAvatar, detail.clienteAvatarUrl, detail.clienteAvatar, detail.requesterSnapshot, detail.cliente, detail.receptor, detail.user, raw.avatarUrl, raw.avatar, raw.requesterSnapshot, raw.cliente, raw.receptor, raw.user);
+function getClientPhone(
+  detail = {}
+) {
+  const raw =
+    getRaw(detail);
+
+  const requester =
+    getRequester(detail);
+
+  return cleanText(
+    first(
+      detail.phone,
+      detail.telefono,
+
+      requester.phone,
+      requester.telefono,
+
+      raw.phone,
+      raw.telefono
+    ),
+    ""
+  );
 }
 
-function getTechnicianName(detail = {}) {
-  const raw = getRaw(detail);
-  const assignment = safeObject(first(detail.assignment, raw.assignment, {}));
-  const technician = safeObject(first(detail.tecnico, detail.assignedTo, detail.technician, assignment.technician, raw.tecnico, raw.assignedTo, raw.technician, {}));
-  return cleanText(first(detail.assignedToName, detail.technicianName, detail.tecnicoName, assignment.assignedToName, technician.displayName, technician.name, technician.nombre), FIXED_TECHNICIAN.name);
+function getClientAvatar(
+  detail = {}
+) {
+  const raw =
+    getRaw(detail);
+
+  return firstUrl(
+    detail.avatarUrl,
+    detail.avatar,
+    detail.userAvatarUrl,
+    detail.userAvatar,
+    detail.clienteAvatarUrl,
+    detail.clienteAvatar,
+
+    detail.requesterSnapshot,
+    detail.cliente,
+    detail.receptor,
+    detail.user,
+
+    raw.avatarUrl,
+    raw.avatar,
+    raw.requesterSnapshot,
+    raw.cliente,
+    raw.receptor,
+    raw.user
+  );
 }
 
-function getTechnicianEmail(detail = {}) {
-  const raw = getRaw(detail);
-  const assignment = safeObject(first(detail.assignment, raw.assignment, {}));
-  const technician = safeObject(first(detail.tecnico, detail.assignedTo, detail.technician, assignment.technician, raw.tecnico, raw.assignedTo, raw.technician, {}));
-  return cleanText(first(detail.assignedToEmail, detail.technicianEmail, detail.tecnicoEmail, assignment.assignedToEmail, technician.email, technician.emailLower), FIXED_TECHNICIAN.email);
+function getAssignment(
+  detail = {}
+) {
+  const raw =
+    getRaw(detail);
+
+  return safeObject(
+    first(
+      detail.assignment,
+      raw.assignment,
+      {}
+    )
+  );
 }
 
-function getTechnicianAvatar(detail = {}) {
-  const raw = getRaw(detail);
-  const assignment = safeObject(first(detail.assignment, raw.assignment, {}));
-  return firstUrl(detail.assignedToAvatarUrl, detail.assignedToAvatar, detail.technicianAvatarUrl, detail.technicianAvatar, detail.tecnicoAvatarUrl, detail.tecnicoAvatar, detail.agentAvatarUrl, detail.agentAvatar, assignment.assignedToAvatarUrl, assignment.assignedToAvatar, assignment.technicianAvatarUrl, assignment.technicianAvatar, assignment.avatarUrl, assignment.avatar, assignment.technician, detail.tecnico, detail.assignedTo, detail.technician, raw.tecnico, raw.assignedTo, raw.technician, FIXED_TECHNICIAN.avatarUrl);
+function getTechnicianObject(
+  detail = {}
+) {
+  const raw =
+    getRaw(detail);
+
+  const assignment =
+    getAssignment(detail);
+
+  return safeObject(
+    first(
+      detail.tecnico,
+      detail.assignedTo,
+      detail.technician,
+      assignment.technician,
+
+      raw.tecnico,
+      raw.assignedTo,
+      raw.technician,
+
+      {}
+    )
+  );
 }
 
-function getInvoiceTotal(detail = {}) {
-  const raw = getRaw(detail);
-  return number(first(detail.invoiceTotal, detail.invoicesTotal, detail.facturasTotal, detail.importeFacturas, detail.facturaTotal, detail.facturaImporte, detail.importeFactura, detail.totalFactura, detail.invoiceAmount, detail.amount, detail.linkedInvoices?.total, detail.linkedInvoices?.amount, detail.billing?.total, detail.billing?.amount, raw.invoiceTotal, raw.facturaTotal, raw.linkedInvoices?.total, 0), 0);
+function getTechnicianName(
+  detail = {}
+) {
+  const assignment =
+    getAssignment(detail);
+
+  const technician =
+    getTechnicianObject(detail);
+
+  return cleanText(
+    first(
+      detail.assignedToName,
+      detail.technicianName,
+      detail.tecnicoName,
+
+      assignment.assignedToName,
+
+      technician.displayName,
+      technician.name,
+      technician.nombre
+    ),
+    ""
+  );
 }
 
-function getCurrency(detail = {}) {
-  const raw = getRaw(detail);
-  return cleanText(first(detail.currency, detail.moneda, detail.facturaCurrency, detail.facturaMoneda, raw.currency, raw.moneda, DEFAULT_CURRENCY), DEFAULT_CURRENCY).toUpperCase();
+function getTechnicianEmail(
+  detail = {}
+) {
+  const assignment =
+    getAssignment(detail);
+
+  const technician =
+    getTechnicianObject(detail);
+
+  return cleanText(
+    first(
+      detail.assignedToEmail,
+      detail.technicianEmail,
+      detail.tecnicoEmail,
+
+      assignment.assignedToEmail,
+
+      technician.email,
+      technician.emailLower
+    ),
+    ""
+  );
 }
 
-function getInvoiceLabel(detail = {}) {
-  const raw = getRaw(detail);
-  const invoiceId = cleanText(first(detail.numeroFacturaLegal, detail.numeroFactura, detail.invoiceNumber, detail.facturaId, detail.invoiceId, raw.numeroFacturaLegal, raw.numeroFactura, raw.invoiceNumber, raw.facturaId, raw.invoiceId), "");
-  const total = getInvoiceTotal(detail);
+function getTechnicianAvatar(
+  detail = {}
+) {
+  const raw =
+    getRaw(detail);
 
-  if (!invoiceId && total <= 0) return "Sin factura vinculada";
-  if (invoiceId && total > 0) return `${invoiceId} · ${formatMoney(total, getCurrency(detail))}`;
-  if (invoiceId) return invoiceId;
-  return formatMoney(total, getCurrency(detail));
+  const assignment =
+    getAssignment(detail);
+
+  return firstUrl(
+    detail.assignedToAvatarUrl,
+    detail.assignedToAvatar,
+    detail.technicianAvatarUrl,
+    detail.technicianAvatar,
+    detail.tecnicoAvatarUrl,
+    detail.tecnicoAvatar,
+    detail.agentAvatarUrl,
+    detail.agentAvatar,
+
+    assignment.assignedToAvatarUrl,
+    assignment.assignedToAvatar,
+    assignment.technicianAvatarUrl,
+    assignment.technicianAvatar,
+    assignment.avatarUrl,
+    assignment.avatar,
+    assignment.technician,
+
+    detail.tecnico,
+    detail.assignedTo,
+    detail.technician,
+
+    raw.tecnico,
+    raw.assignedTo,
+    raw.technician
+  );
 }
 
-function getCreatedAt(detail = {}) {
-  const raw = getRaw(detail);
-  return first(detail.createdAt, raw.createdAt, detail.lifecycle?.createdAt, raw.lifecycle?.createdAt, null);
+function hasAssignedTechnician(
+  detail = {}
+) {
+  return Boolean(
+    getTechnicianName(detail) ||
+    getTechnicianEmail(detail) ||
+    getTechnicianAvatar(detail)
+  );
 }
 
-function getUpdatedAt(detail = {}) {
-  const raw = getRaw(detail);
-  return first(detail.lastActivityAt, detail.updatedAt, raw.lastActivityAt, raw.updatedAt, detail.lifecycle?.lastActivityAt, detail.lifecycle?.updatedAt, getCreatedAt(detail), null);
+function getInvoiceTotal(
+  detail = {}
+) {
+  const raw =
+    getRaw(detail);
+
+  return number(
+    first(
+      detail.invoiceTotal,
+      detail.invoicesTotal,
+      detail.facturasTotal,
+      detail.importeFacturas,
+      detail.facturaTotal,
+      detail.facturaImporte,
+      detail.importeFactura,
+      detail.totalFactura,
+      detail.invoiceAmount,
+      detail.amount,
+
+      detail.linkedInvoices?.total,
+      detail.linkedInvoices?.amount,
+
+      detail.billing?.total,
+      detail.billing?.amount,
+
+      raw.invoiceTotal,
+      raw.facturaTotal,
+      raw.linkedInvoices?.total,
+
+      0
+    ),
+    0
+  );
 }
 
-function normalizeAttachment(file = {}, index = 0) {
-  const raw = safeObject(file);
-  const id = cleanText(first(raw.attachmentId, raw.id, raw.fileId, `att_${index}`), `att_${index}`);
-  const name = safeFilename(first(raw.name, raw.filename, raw.fileName, raw.originalName, `Adjunto ${index + 1}`), `Adjunto ${index + 1}`);
-  const contentType = cleanText(first(raw.contentType, raw.mimeType, raw.mimetype, raw.type), "");
-  const url = firstUrl(raw.viewUrl, raw.openUrl, raw.url, raw.blobUrl, raw.publicUrl, raw.signedUrl, raw.downloadUrl);
+function getCurrency(
+  detail = {}
+) {
+  const raw =
+    getRaw(detail);
+
+  return cleanText(
+    first(
+      detail.currency,
+      detail.moneda,
+      detail.facturaCurrency,
+      detail.facturaMoneda,
+      raw.currency,
+      raw.moneda,
+      DEFAULT_CURRENCY
+    ),
+    DEFAULT_CURRENCY
+  ).toUpperCase();
+}
+
+function getInvoiceLabel(
+  detail = {}
+) {
+  const raw =
+    getRaw(detail);
+
+  const invoiceId =
+    cleanText(
+      first(
+        detail.numeroFacturaLegal,
+        detail.numeroFactura,
+        detail.invoiceNumber,
+        detail.facturaId,
+        detail.invoiceId,
+
+        raw.numeroFacturaLegal,
+        raw.numeroFactura,
+        raw.invoiceNumber,
+        raw.facturaId,
+        raw.invoiceId
+      ),
+      ""
+    );
+
+  const total =
+    getInvoiceTotal(detail);
+
+  if (
+    !invoiceId &&
+    total <= 0
+  ) {
+    return "Sin factura vinculada";
+  }
+
+  if (
+    invoiceId &&
+    total > 0
+  ) {
+    return `${invoiceId} · ${formatMoney(
+      total,
+      getCurrency(detail)
+    )}`;
+  }
+
+  if (invoiceId) {
+    return invoiceId;
+  }
+
+  return formatMoney(
+    total,
+    getCurrency(detail)
+  );
+}
+
+function getCreatedAt(
+  detail = {}
+) {
+  const raw =
+    getRaw(detail);
+
+  return first(
+    detail.createdAt,
+    raw.createdAt,
+    detail.lifecycle?.createdAt,
+    raw.lifecycle?.createdAt,
+    null
+  );
+}
+
+function getUpdatedAt(
+  detail = {}
+) {
+  const raw =
+    getRaw(detail);
+
+  return first(
+    detail.lastActivityAt,
+    detail.updatedAt,
+
+    raw.lastActivityAt,
+    raw.updatedAt,
+
+    detail.lifecycle?.lastActivityAt,
+    detail.lifecycle?.updatedAt,
+
+    getCreatedAt(detail),
+    null
+  );
+}
+
+/* =========================================================
+   ATTACHMENTS
+========================================================= */
+
+function normalizeAttachment(
+  file = {},
+  index = 0
+) {
+  const raw =
+    safeObject(file);
+
+  const id =
+    cleanText(
+      first(
+        raw.attachmentId,
+        raw.id,
+        raw.fileId,
+        `att_${index}`
+      ),
+      `att_${index}`
+    );
+
+  const name =
+    safeFilename(
+      first(
+        raw.name,
+        raw.filename,
+        raw.fileName,
+        raw.originalName,
+        `Adjunto ${index + 1}`
+      ),
+      `Adjunto ${index + 1}`
+    );
+
+  const contentType =
+    cleanText(
+      first(
+        raw.contentType,
+        raw.mimeType,
+        raw.mimetype,
+        raw.type
+      ),
+      ""
+    );
+
+  const url =
+    firstUrl(
+      raw.viewUrl,
+      raw.openUrl,
+      raw.url,
+      raw.blobUrl,
+      raw.publicUrl,
+      raw.signedUrl,
+      raw.downloadUrl
+    );
 
   return {
     ...raw,
+
     id,
     attachmentId: id,
+
     name,
     filename: name,
     fileName: name,
+
     contentType,
     mimeType: contentType,
     mimetype: contentType,
-    type: contentType || cleanText(raw.type, ""),
-    size: number(first(raw.size, raw.sizeBytes), 0),
-    sizeBytes: number(first(raw.sizeBytes, raw.size), 0),
+    type:
+      contentType ||
+      cleanText(raw.type, ""),
+
+    size:
+      number(
+        first(
+          raw.size,
+          raw.sizeBytes
+        ),
+        0
+      ),
+
+    sizeBytes:
+      number(
+        first(
+          raw.sizeBytes,
+          raw.size
+        ),
+        0
+      ),
+
     url,
-    viewUrl: firstUrl(raw.viewUrl, raw.openUrl, url),
-    openUrl: firstUrl(raw.openUrl, raw.viewUrl, url),
-    downloadUrl: firstUrl(raw.downloadUrl, url),
-    signedUrl: firstUrl(raw.signedUrl, url),
-    blobUrl: firstUrl(raw.blobUrl, url),
-    publicUrl: firstUrl(raw.publicUrl, url),
-    uploadedAt: first(raw.uploadedAt, raw.createdAt, null),
+    viewUrl:
+      firstUrl(
+        raw.viewUrl,
+        raw.openUrl,
+        url
+      ),
+
+    openUrl:
+      firstUrl(
+        raw.openUrl,
+        raw.viewUrl,
+        url
+      ),
+
+    downloadUrl:
+      firstUrl(
+        raw.downloadUrl,
+        url
+      ),
+
+    signedUrl:
+      firstUrl(
+        raw.signedUrl,
+        url
+      ),
+
+    blobUrl:
+      firstUrl(
+        raw.blobUrl,
+        url
+      ),
+
+    publicUrl:
+      firstUrl(
+        raw.publicUrl,
+        url
+      ),
+
+    uploadedAt:
+      first(
+        raw.uploadedAt,
+        raw.createdAt,
+        null
+      ),
   };
 }
 
-function getAttachments(detail = {}) {
-  const raw = getRaw(detail);
-  return safeArray(first(detail.attachments, detail.files, detail.adjuntos, raw.attachments, raw.files, raw.adjuntos, []))
+function getAttachments(
+  detail = {}
+) {
+  const raw =
+    getRaw(detail);
+
+  return safeArray(
+    first(
+      detail.attachments,
+      detail.files,
+      detail.adjuntos,
+
+      raw.attachments,
+      raw.files,
+      raw.adjuntos,
+
+      []
+    )
+  )
     .map(normalizeAttachment)
-    .filter((file) => file.attachmentId || file.name);
+    .filter(
+      (file) =>
+        file.attachmentId ||
+        file.name
+    );
 }
 
-function normalizeTimelineEntry(item = {}, index = 0) {
-  const raw = safeObject(item);
-  const rawKind = normalizeKey(first(raw.kind, raw.type, raw.action, raw.event, "event"));
-  const isComment = rawKind === "comment" || rawKind === "comentario";
-  const isCreated = ["created", "create", "ticket_created", "incidencia_creada"].includes(rawKind);
+function getAttachmentId(
+  file = {}
+) {
+  return cleanText(
+    first(
+      file.attachmentId,
+      file.id,
+      file.fileId
+    ),
+    ""
+  );
+}
+
+function getAttachmentUrl(
+  file = {}
+) {
+  return firstUrl(
+    file.viewUrl,
+    file.openUrl,
+    file.url,
+    file.blobUrl,
+    file.publicUrl,
+    file.signedUrl,
+    file.downloadUrl
+  );
+}
+
+function isImageLikeAttachment(
+  file = {}
+) {
+  const type =
+    cleanText(
+      first(
+        file.contentType,
+        file.type,
+        file.mimeType,
+        file.mimetype
+      ),
+      ""
+    ).toLowerCase();
+
+  const name =
+    cleanText(
+      first(
+        file.filename,
+        file.fileName,
+        file.name
+      ),
+      ""
+    ).toLowerCase();
+
+  return (
+    type.startsWith("image/") ||
+    /\.(png|jpe?g|webp|gif|bmp|avif|heic|heif)$/i.test(
+      name
+    )
+  );
+}
+
+function isPdfLikeAttachment(
+  file = {}
+) {
+  const type =
+    cleanText(
+      first(
+        file.contentType,
+        file.type,
+        file.mimeType,
+        file.mimetype
+      ),
+      ""
+    ).toLowerCase();
+
+  const name =
+    cleanText(
+      first(
+        file.filename,
+        file.fileName,
+        file.name
+      ),
+      ""
+    ).toLowerCase();
+
+  return (
+    type.includes(
+      "application/pdf"
+    ) ||
+    name.endsWith(".pdf")
+  );
+}
+
+/* =========================================================
+   TIMELINE
+========================================================= */
+
+function normalizeTimelineEntry(
+  item = {},
+  index = 0
+) {
+  const raw =
+    safeObject(item);
+
+  const rawKind =
+    normalizeKey(
+      first(
+        raw.kind,
+        raw.type,
+        raw.action,
+        raw.event,
+        "event"
+      )
+    );
+
+  const isComment =
+    rawKind === "comment" ||
+    rawKind === "comentario";
+
+  const isCreated =
+    [
+      "created",
+      "create",
+      "ticket_created",
+      "incidencia_creada",
+    ].includes(rawKind);
 
   return {
-    id: cleanText(first(raw.id, raw.commentId, raw.eventId, `entry_${index}`), `entry_${index}`),
-    kind: isComment ? "comment" : "event",
-    type: isCreated ? "created" : rawKind || "update",
-    title: cleanText(first(raw.title, raw.label), isComment ? "Comentario" : isCreated ? "Incidencia creada" : "Actualización"),
-    body: cleanMultiline(first(raw.body, raw.message, raw.text, raw.comment, raw.description, raw.descripcion, raw.summary, raw.title), "Actualización registrada."),
-    author: cleanText(first(raw.author, raw.byName, raw.createdByName, raw.userName, raw.name, raw.by?.name, raw.createdBy?.name, raw.role), isComment ? "Usuario" : "Sistema"),
-    createdAt: first(raw.createdAt, raw.date, raw.timestamp, raw.updatedAt, null),
+    id:
+      cleanText(
+        first(
+          raw.id,
+          raw.commentId,
+          raw.eventId,
+          `entry_${index}`
+        ),
+        `entry_${index}`
+      ),
+
+    kind:
+      isComment
+        ? "comment"
+        : "event",
+
+    type:
+      isCreated
+        ? "created"
+        : rawKind || "update",
+
+    title:
+      cleanText(
+        first(
+          raw.title,
+          raw.label
+        ),
+        isComment
+          ? "Comentario"
+          : isCreated
+            ? "Incidencia creada"
+            : "Actualización"
+      ),
+
+    body:
+      cleanMultiline(
+        first(
+          raw.body,
+          raw.message,
+          raw.text,
+          raw.comment,
+          raw.description,
+          raw.descripcion,
+          raw.summary,
+          raw.title
+        ),
+        "Actualización registrada."
+      ),
+
+    author:
+      cleanText(
+        first(
+          raw.author,
+          raw.byName,
+          raw.createdByName,
+          raw.userName,
+          raw.name,
+          raw.by?.name,
+          raw.createdBy?.name,
+          raw.role
+        ),
+        isComment
+          ? "Usuario"
+          : "Sistema"
+      ),
+
+    createdAt:
+      first(
+        raw.createdAt,
+        raw.date,
+        raw.timestamp,
+        raw.updatedAt,
+        null
+      ),
   };
 }
 
-function getTimeline(detail = {}) {
-  const raw = getRaw(detail);
-  const direct = safeArray(first(detail.timeline, raw.timeline, []));
-  if (direct.length) return direct.map(normalizeTimelineEntry).sort((a, b) => toTimestamp(b.createdAt) - toTimestamp(a.createdAt));
+function getTimeline(
+  detail = {}
+) {
+  const raw =
+    getRaw(detail);
 
-  const history = safeArray(first(detail.history, detail.events, raw.history, raw.events, []));
-  const comments = safeArray(first(detail.comments, detail.notes, detail.messages, raw.comments, raw.notes, raw.messages, []));
+  const direct =
+    safeArray(
+      first(
+        detail.timeline,
+        raw.timeline,
+        []
+      )
+    );
+
+  if (direct.length) {
+    return direct
+      .map(normalizeTimelineEntry)
+      .sort(
+        (a, b) =>
+          toTimestamp(b.createdAt) -
+          toTimestamp(a.createdAt)
+      );
+  }
+
+  const history =
+    safeArray(
+      first(
+        detail.history,
+        detail.events,
+        raw.history,
+        raw.events,
+        []
+      )
+    );
+
+  const comments =
+    safeArray(
+      first(
+        detail.comments,
+        detail.notes,
+        detail.messages,
+        raw.comments,
+        raw.notes,
+        raw.messages,
+        []
+      )
+    );
 
   return [
-    ...history.map((entry, index) => normalizeTimelineEntry(entry, index)),
-    ...comments.map((entry, index) => normalizeTimelineEntry({ ...safeObject(entry), kind: "comment", type: "comment" }, index)),
-  ].sort((a, b) => toTimestamp(b.createdAt) - toTimestamp(a.createdAt));
+    ...history.map(
+      (entry, index) =>
+        normalizeTimelineEntry(
+          entry,
+          index
+        )
+    ),
+
+    ...comments.map(
+      (entry, index) =>
+        normalizeTimelineEntry(
+          {
+            ...safeObject(entry),
+            kind: "comment",
+            type: "comment",
+          },
+          index
+        )
+    ),
+  ].sort(
+    (a, b) =>
+      toTimestamp(b.createdAt) -
+      toTimestamp(a.createdAt)
+  );
 }
 
 /* =========================================================
@@ -635,22 +1733,92 @@ function getTimeline(detail = {}) {
 ========================================================= */
 
 function buildVm(input = {}) {
-  const data = safeObject(input);
-  const detail = safeObject(first(data.detail, data.ticket, data.incidencia, data.item, data.data, {}), {});
-  const ticketId = getTicketId(detail);
+  const data =
+    safeObject(input);
+
+  const detail =
+    safeObject(
+      first(
+        data.detail,
+        data.ticket,
+        data.incidencia,
+        data.item,
+        data.data,
+        {}
+      ),
+      {}
+    );
+
+  const ticketId =
+    getTicketId(detail);
+
+  const status =
+    getStatus(detail);
+
+  const commentDraft =
+    cleanMultiline(
+      data.commentDraft,
+      ""
+    );
+
+  const pendingFiles =
+    safeArray(
+      data.pendingFiles
+    );
 
   return {
-    open: data.open === true && Boolean(ticketId),
+    open:
+      data.open === true &&
+      Boolean(ticketId),
+
     detail,
     ticketId,
-    submitting: data.submitting === true,
-    commentDraft: cleanMultiline(data.commentDraft, ""),
-    pendingFiles: safeArray(data.pendingFiles),
-    feedbackMessage: cleanText(data.feedbackMessage, ""),
-    feedbackType: cleanText(data.feedbackType, "info"),
-    openingAttachmentId: cleanText(data.openingAttachmentId, ""),
-    downloadingAttachmentId: cleanText(data.downloadingAttachmentId, ""),
-    previewFile: safeObject(data.previewFile, null),
+    status,
+
+    submitting:
+      data.submitting === true,
+
+    commentDraft,
+    pendingFiles,
+
+    hasDraft:
+      Boolean(
+        commentDraft ||
+        pendingFiles.length
+      ),
+
+    requiresReopen:
+      statusWillReopen(status),
+
+    feedbackMessage:
+      cleanText(
+        data.feedbackMessage,
+        ""
+      ),
+
+    feedbackType:
+      cleanText(
+        data.feedbackType,
+        "info"
+      ),
+
+    openingAttachmentId:
+      cleanText(
+        data.openingAttachmentId,
+        ""
+      ),
+
+    downloadingAttachmentId:
+      cleanText(
+        data.downloadingAttachmentId,
+        ""
+      ),
+
+    previewFile:
+      safeObject(
+        data.previewFile,
+        null
+      ),
   };
 }
 
@@ -658,34 +1826,78 @@ function buildVm(input = {}) {
    SMALL PARTIALS
 ========================================================= */
 
-function disabledAttrs(disabled = false, busy = false) {
+function disabledAttrs(
+  disabled = false,
+  busy = false
+) {
   return htmlAttrs({
-    disabled: Boolean(disabled),
-    "aria-disabled": disabled ? "true" : false,
-    "aria-busy": busy ? "true" : false,
+    disabled:
+      Boolean(disabled),
+
+    "aria-disabled":
+      disabled
+        ? "true"
+        : false,
+
+    "aria-busy":
+      busy
+        ? "true"
+        : false,
   });
 }
 
-function renderInlineSpinner(label = "") {
-  return `<span class="incidencias-modal-inline-spinner"><span aria-hidden="true"></span>${escapeHtml(label)}</span>`;
+function renderInlineSpinner(
+  label = ""
+) {
+  return `
+    <span class="incidencias-modal-inline-spinner">
+      <span aria-hidden="true"></span>
+      ${escapeHtml(label)}
+    </span>
+  `;
 }
 
-function shortTicketId(value = "") {
-  const id = cleanText(value, "");
-  if (!id) return "ID";
-  if (id.length <= 18) return id;
+function shortTicketId(
+  value = ""
+) {
+  const id =
+    cleanText(value, "");
 
-  const parts = id.split(/[\s:_-]+/).filter(Boolean);
-  const last = parts.at(-1) || "";
+  if (!id) {
+    return "ID";
+  }
 
-  if (/^\d{6,}$/.test(last)) return `#${last.slice(-8)}`;
+  if (id.length <= 18) {
+    return id;
+  }
 
-  return `${id.slice(0, 7)}…${id.slice(-6)}`;
+  const parts =
+    id
+      .split(/[\s:_-]+/)
+      .filter(Boolean);
+
+  const last =
+    parts.at(-1) || "";
+
+  if (/^\d{6,}$/.test(last)) {
+    return `#${last.slice(-8)}`;
+  }
+
+  return `${id.slice(
+    0,
+    7
+  )}…${id.slice(-6)}`;
 }
 
-function renderTicketIdChip(ticketId = "", vm = {}) {
-  const fullId = cleanText(ticketId, "");
-  const label = shortTicketId(fullId);
+function renderTicketIdChip(
+  ticketId = "",
+  vm = {}
+) {
+  const fullId =
+    cleanText(ticketId, "");
+
+  const label =
+    shortTicketId(fullId);
 
   return `
     <button
@@ -693,296 +1905,1183 @@ function renderTicketIdChip(ticketId = "", vm = {}) {
       data-detail-action="${DETAIL_ACTIONS.COPY_ID}"
       data-ticket-id="${attr(fullId)}"
       class="incidencias-modal-id-chip"
-      title="${attr(fullId ? `Copiar ID: ${fullId}` : "ID de incidencia no disponible")}"
-      aria-label="${attr(fullId ? `Copiar ID ${fullId}` : "ID de incidencia") }"
-      ${disabledAttrs(vm.submitting, vm.submitting)}
+      title="${attr(
+        fullId
+          ? `Copiar ID: ${fullId}`
+          : "ID de incidencia no disponible"
+      )}"
+      aria-label="${attr(
+        fullId
+          ? `Copiar ID ${fullId}`
+          : "ID de incidencia"
+      )}"
+      ${disabledAttrs(
+        vm.submitting,
+        vm.submitting
+      )}
     >
-      <span class="incidencias-modal-id-chip-text">${escapeHtml(label)}</span>
+      <span class="incidencias-modal-id-chip-text">
+        ${escapeHtml(label)}
+      </span>
     </button>
   `;
 }
 
-function renderChip(label = "", modifier = "neutral") {
-  const safeLabel = cleanText(label, "—");
-  const safeModifier = normalizeKey(modifier) || "neutral";
+function renderChip(
+  label = "",
+  modifier = "neutral"
+) {
+  const safeLabel =
+    cleanText(
+      label,
+      "—"
+    );
 
-  return `<span class="incidencias-modal-chip incidencias-modal-chip--${attr(safeModifier)}" title="${attr(safeLabel)}">${escapeHtml(safeLabel)}</span>`;
-}
-
-function renderAvatar(detail = {}) {
-  const name = getClientName(detail);
-  const email = getClientEmail(detail);
-  const avatarUrl = getClientAvatar(detail);
-  const tone = hashText(`${name}:${email}:${getTicketId(detail)}`) % 10;
+  const safeModifier =
+    normalizeKey(modifier) ||
+    "neutral";
 
   return `
-    <div class="incidencias-modal-avatar" title="${attr(name)}">
-      <div class="${joinClasses("incidencias-modal-avatar-frame", avatarUrl ? "" : "incidencias-modal-avatar-frame--fallback")}" data-modal-avatar-frame="true" data-has-avatar="${avatarUrl ? "true" : "false"}" data-fallback="${avatarUrl ? "false" : "true"}" data-avatar-tone="${attr(String(tone))}">
-        ${avatarUrl ? `<img src="${attr(avatarUrl)}" alt="${attr(name)}" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false" data-modal-avatar-img="true">` : ""}
-        <span class="incidencias-modal-avatar-fallback">${escapeHtml(initialsFrom(name))}</span>
+    <span
+      class="incidencias-modal-chip incidencias-modal-chip--${attr(safeModifier)}"
+      title="${attr(safeLabel)}"
+    >${escapeHtml(safeLabel)}</span>
+  `;
+}
+
+function renderAvatar(
+  detail = {}
+) {
+  const name =
+    getClientName(detail);
+
+  const email =
+    getClientEmail(detail);
+
+  const avatarUrl =
+    getClientAvatar(detail);
+
+  const tone =
+    hashText(
+      `${name}:${email}:${getTicketId(detail)}`
+    ) % 10;
+
+  return `
+    <div
+      class="incidencias-modal-avatar"
+      title="${attr(name)}"
+    >
+      <div
+        class="${joinClasses(
+          "incidencias-modal-avatar-frame",
+          avatarUrl
+            ? ""
+            : "incidencias-modal-avatar-frame--fallback"
+        )}"
+        data-modal-avatar-frame="true"
+        data-has-avatar="${avatarUrl ? "true" : "false"}"
+        data-fallback="${avatarUrl ? "false" : "true"}"
+        data-avatar-tone="${attr(String(tone))}"
+      >
+        ${
+          avatarUrl
+            ? `
+              <img
+                src="${attr(avatarUrl)}"
+                alt="${attr(name)}"
+                loading="lazy"
+                decoding="async"
+                referrerpolicy="no-referrer"
+                draggable="false"
+                data-modal-avatar-img="true"
+              >
+            `
+            : ""
+        }
+
+        <span class="incidencias-modal-avatar-fallback">
+          ${escapeHtml(initialsFrom(name))}
+        </span>
       </div>
     </div>
   `;
 }
 
-function renderTechnicianValue(detail = {}) {
-  const name = getTechnicianName(detail);
-  const email = getTechnicianEmail(detail);
-  const avatarUrl = getTechnicianAvatar(detail);
-  const tone = hashText(`${name}:${email}`) % 10;
+function renderTechnicianValue(
+  detail = {}
+) {
+  if (!hasAssignedTechnician(detail)) {
+    return `
+      <span
+        class="incidencias-modal-technician-inline incidencias-modal-technician-inline--unassigned"
+        data-modal-technician="true"
+        data-technician-assigned="false"
+      >
+        <span
+          class="incidencias-modal-technician-avatar incidencias-modal-technician-avatar--fallback"
+          data-modal-technician-avatar-frame="true"
+          data-has-avatar="false"
+          data-fallback="true"
+          aria-hidden="true"
+        >
+          <span>—</span>
+        </span>
+
+        <span class="incidencias-modal-technician-copy">
+          <strong>Sin técnico asignado</strong>
+          <small>Pendiente de asignación</small>
+        </span>
+      </span>
+    `;
+  }
+
+  const name =
+    getTechnicianName(detail) ||
+    "Técnico asignado";
+
+  const email =
+    getTechnicianEmail(detail);
+
+  const avatarUrl =
+    getTechnicianAvatar(detail);
+
+  const tone =
+    hashText(
+      `${name}:${email}`
+    ) % 10;
 
   return `
-    <span class="incidencias-modal-technician-inline" data-modal-technician="true">
-      <span class="${joinClasses("incidencias-modal-technician-avatar", avatarUrl ? "" : "incidencias-modal-technician-avatar--fallback")}" data-modal-technician-avatar-frame="true" data-has-avatar="${avatarUrl ? "true" : "false"}" data-fallback="${avatarUrl ? "false" : "true"}" data-avatar-tone="${attr(String(tone))}">
-        ${avatarUrl ? `<img src="${attr(avatarUrl)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false" data-modal-technician-avatar-img="true">` : ""}
+    <span
+      class="incidencias-modal-technician-inline"
+      data-modal-technician="true"
+      data-technician-assigned="true"
+    >
+      <span
+        class="${joinClasses(
+          "incidencias-modal-technician-avatar",
+          avatarUrl
+            ? ""
+            : "incidencias-modal-technician-avatar--fallback"
+        )}"
+        data-modal-technician-avatar-frame="true"
+        data-has-avatar="${avatarUrl ? "true" : "false"}"
+        data-fallback="${avatarUrl ? "false" : "true"}"
+        data-avatar-tone="${attr(String(tone))}"
+      >
+        ${
+          avatarUrl
+            ? `
+              <img
+                src="${attr(avatarUrl)}"
+                alt=""
+                loading="lazy"
+                decoding="async"
+                referrerpolicy="no-referrer"
+                draggable="false"
+                data-modal-technician-avatar-img="true"
+              >
+            `
+            : ""
+        }
+
         <span>${escapeHtml(initialsFrom(name))}</span>
       </span>
-      <span class="incidencias-modal-technician-copy"><strong>${escapeHtml(name)}</strong>${email ? `<small>${escapeHtml(email)}</small>` : ""}</span>
+
+      <span class="incidencias-modal-technician-copy">
+        <strong>${escapeHtml(name)}</strong>
+        ${
+          email
+            ? `<small>${escapeHtml(email)}</small>`
+            : ""
+        }
+      </span>
     </span>
   `;
 }
 
-function renderMetaField(label = "", value = "", options = {}) {
-  return `<div class="incidencias-modal-meta-card"><span>${escapeHtml(label)}</span>${options.html ? value : `<strong>${escapeHtml(cleanText(value, "—"))}</strong>`}</div>`;
+function renderMetaField(
+  label = "",
+  value = "",
+  options = {}
+) {
+  const html =
+    options.html === true;
+
+  return `
+    <div class="incidencias-modal-meta-card">
+      <span>${escapeHtml(label)}</span>
+      ${
+        html
+          ? value
+          : `<strong>${escapeHtml(
+              cleanText(
+                value,
+                "—"
+              )
+            )}</strong>`
+      }
+    </div>
+  `;
 }
 
-function renderFeedbackBox(vm = {}) {
-  const message = cleanText(vm.feedbackMessage, "");
-  if (!message) return "";
+function renderFeedbackBox(
+  vm = {}
+) {
+  const message =
+    cleanText(
+      vm.feedbackMessage,
+      ""
+    );
 
-  const type = normalizeKey(vm.feedbackType || "info");
-  const title = type === "error" ? "No se ha podido completar la acción" : type === "success" ? "Acción completada" : type === "warning" ? "Aviso" : "Información";
+  if (!message) {
+    return "";
+  }
 
-  return `<div class="incidencias-modal-feedback incidencias-modal-feedback--${attr(type)}" role="${type === "error" ? "alert" : "status"}" data-modal-feedback="true"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(message)}</span></div>`;
+  const type =
+    normalizeKey(
+      vm.feedbackType ||
+      "info"
+    );
+
+  const title =
+    type === "error"
+      ? "No se ha podido completar la acción"
+      : type === "success"
+        ? "Acción completada"
+        : type === "warning"
+          ? "Aviso"
+          : "Información";
+
+  return `
+    <div
+      class="incidencias-modal-feedback incidencias-modal-feedback--${attr(type)}"
+      role="${type === "error" ? "alert" : "status"}"
+      aria-live="${type === "error" ? "assertive" : "polite"}"
+      data-modal-feedback="true"
+    >
+      <strong>${escapeHtml(title)}</strong>
+      <span>${escapeHtml(message)}</span>
+    </div>
+  `;
 }
 
-function renderLoadingOverlay(label = "Procesando...") {
-  return `<div class="incidencias-modal-loading-overlay" aria-live="polite" aria-busy="true"><div class="incidencias-modal-loading-box"><span aria-hidden="true"></span><strong>${escapeHtml(label)}</strong></div></div>`;
+function renderLoadingOverlay(
+  label = "Procesando..."
+) {
+  return `
+    <div
+      class="incidencias-modal-loading-overlay"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <div class="incidencias-modal-loading-box">
+        <span aria-hidden="true"></span>
+        <strong>${escapeHtml(label)}</strong>
+      </div>
+    </div>
+  `;
 }
 
 /* =========================================================
    COMPOSER / PENDING FILES
 ========================================================= */
 
-function renderPendingFiles(vm = {}) {
-  const files = safeArray(vm.pendingFiles);
+function renderPendingFiles(
+  vm = {}
+) {
+  const files =
+    safeArray(
+      vm.pendingFiles
+    );
 
   if (!files.length) {
-    return `<div class="incidencias-modal-pending-empty" data-modal-pending-files="true">No has seleccionado archivos nuevos.</div>`;
+    return `
+      <div
+        class="incidencias-modal-pending-empty"
+        data-modal-pending-files="true"
+      >
+        No has seleccionado archivos nuevos.
+      </div>
+    `;
   }
 
   return `
-    <div class="incidencias-modal-pending-list" data-modal-pending-files="true">
-      ${files.map((file, index) => {
-        const name = safeFilename(file.name || `archivo_${index + 1}`, `archivo_${index + 1}`);
-        const meta = [cleanText(file.type, ""), formatBytes(file.size)].filter(Boolean).join(" · ");
+    <div
+      class="incidencias-modal-pending-list"
+      data-modal-pending-files="true"
+      aria-label="Archivos nuevos seleccionados"
+    >
+      ${files
+        .map(
+          (file, index) => {
+            const name =
+              safeFilename(
+                file?.name ||
+                  `archivo_${index + 1}`,
+                `archivo_${index + 1}`
+              );
 
-        return `
-          <div class="incidencias-modal-pending-file" data-file-index="${attr(String(index))}">
-            <div><strong>${escapeHtml(name)}</strong><span>${escapeHtml(meta || "Archivo preparado")}</span></div>
-            <button type="button" data-detail-action="${DETAIL_ACTIONS.PENDING_FILE_REMOVE}" data-file-index="${attr(String(index))}" data-remove-attachment="${attr(String(index))}" ${disabledAttrs(vm.submitting, vm.submitting)}>Quitar</button>
-          </div>
-        `;
-      }).join("")}
+            const meta =
+              [
+                cleanText(
+                  file?.type,
+                  ""
+                ),
+                formatBytes(
+                  file?.size
+                ),
+              ]
+                .filter(Boolean)
+                .join(" · ");
+
+            return `
+              <div
+                class="incidencias-modal-pending-file"
+                data-file-index="${attr(String(index))}"
+              >
+                <div>
+                  <strong>${escapeHtml(name)}</strong>
+                  <span>${escapeHtml(meta || "Archivo preparado")}</span>
+                </div>
+
+                <button
+                  type="button"
+                  data-detail-action="${DETAIL_ACTIONS.PENDING_FILE_REMOVE}"
+                  data-file-index="${attr(String(index))}"
+                  data-remove-attachment="${attr(String(index))}"
+                  aria-label="${attr(`Quitar ${name}`)}"
+                  ${disabledAttrs(
+                    vm.submitting,
+                    vm.submitting
+                  )}
+                >Quitar</button>
+              </div>
+            `;
+          }
+        )
+        .join("")}
     </div>
   `;
 }
 
-function renderComposer(vm = {}) {
-  const disabled = disabledAttrs(vm.submitting, vm.submitting);
+function submitButtonLabel(
+  vm = {}
+) {
+  if (vm.submitting) {
+    return "Actualizando...";
+  }
+
+  return vm.requiresReopen
+    ? "Enviar actualización y reabrir"
+    : "Enviar actualización";
+}
+
+function renderSubmitButton(
+  vm = {}
+) {
+  const label =
+    submitButtonLabel(vm);
 
   return `
-    <section class="incidencias-modal-composer" data-modal-composer="true">
+    <button
+      type="button"
+      data-detail-action="${DETAIL_ACTIONS.COMMENT_SUBMIT}"
+      data-ticket-id="${attr(vm.ticketId)}"
+      data-reopens-ticket="${vm.requiresReopen ? "true" : "false"}"
+      ${disabledAttrs(
+        vm.submitting,
+        vm.submitting
+      )}
+      class="incidencias-modal-submit-btn"
+    >
+      ${
+        vm.submitting
+          ? renderInlineSpinner(
+              "Actualizando..."
+            )
+          : escapeHtml(label)
+      }
+    </button>
+  `;
+}
+
+function renderComposer(
+  vm = {}
+) {
+  const disabled =
+    disabledAttrs(
+      vm.submitting,
+      vm.submitting
+    );
+
+  const reopenCopy =
+    vm.requiresReopen
+      ? "Esta incidencia está cerrada o resuelta. Al enviar, volverá a estado abierta."
+      : "La actualización se añadirá al historial de la incidencia.";
+
+  return `
+    <section
+      class="incidencias-modal-composer"
+      data-modal-composer="true"
+      data-modal-has-draft="${vm.hasDraft ? "true" : "false"}"
+      data-modal-requires-reopen="${vm.requiresReopen ? "true" : "false"}"
+      aria-labelledby="incidencias-modal-composer-title"
+    >
       <div class="incidencias-modal-composer-head">
-        <div class="incidencias-modal-composer-icon" aria-hidden="true">${icon("plus")}</div>
-        <div class="incidencias-modal-composer-copy"><h3>Añadir comentario y adjuntos</h3><span>Redacta la actualización y adjunta archivos en este mismo bloque.</span></div>
+        <div
+          class="incidencias-modal-composer-icon"
+          aria-hidden="true"
+        >${icon("plus")}</div>
+
+        <div class="incidencias-modal-composer-copy">
+          <h3 id="incidencias-modal-composer-title">
+            Añadir actualización
+          </h3>
+          <span>
+            Escribe un comentario y, si lo necesitas, adjunta archivos de soporte.
+          </span>
+        </div>
       </div>
 
-      <textarea id="incidencias-modal-comment-input" data-detail-field="comment" data-field="comment" name="comment" maxlength="${attr(String(MAX_COMMENT_LENGTH))}" placeholder="Ejemplo: He probado de nuevo y adjunto captura..." ${disabled} class="incidencias-modal-comment-textarea">${escapeHtml(vm.commentDraft)}</textarea>
+      <textarea
+        id="${COMMENT_ID}"
+        data-detail-field="comment"
+        data-field="comment"
+        name="comment"
+        maxlength="${attr(String(MAX_COMMENT_LENGTH))}"
+        placeholder="Ejemplo: He probado de nuevo y adjunto una captura..."
+        aria-describedby="incidencias-modal-comment-help"
+        ${disabled}
+        class="incidencias-modal-comment-textarea"
+      >${escapeHtml(vm.commentDraft)}</textarea>
 
-      <div class="incidencias-modal-composer-foot" data-modal-composer-foot="true"><span>Al pulsar “Actualizar incidencia”, se enviará esta información y la incidencia volverá a estado abierta.</span><strong>${escapeHtml(`${vm.commentDraft.length}/${MAX_COMMENT_LENGTH}`)}</strong></div>
+      <div
+        id="incidencias-modal-comment-help"
+        class="incidencias-modal-composer-foot"
+        data-modal-composer-foot="true"
+      >
+        <span>${escapeHtml(reopenCopy)}</span>
+        <strong>${escapeHtml(
+          `${vm.commentDraft.length}/${MAX_COMMENT_LENGTH}`
+        )}</strong>
+      </div>
 
-      <label for="incidencias-modal-attachments-input" class="incidencias-modal-dropzone" data-dropzone="detail-attachments" data-modal-dropzone="true">
-        <input id="incidencias-modal-attachments-input" type="file" data-detail-field="attachments" data-field="attachments" name="attachments" multiple ${disabled}>
-        <span>Seleccionar archivos</span><small>Imágenes, PDFs y documentos de soporte</small>
+      <label
+        for="${ATTACHMENTS_INPUT_ID}"
+        class="incidencias-modal-dropzone"
+        data-dropzone="detail-attachments"
+        data-modal-dropzone="true"
+      >
+        <input
+          id="${ATTACHMENTS_INPUT_ID}"
+          type="file"
+          data-detail-field="attachments"
+          data-field="attachments"
+          name="attachments"
+          multiple
+          aria-describedby="incidencias-modal-attachments-help"
+          ${disabled}
+        >
+
+        <span>Seleccionar archivos</span>
+
+        <small id="incidencias-modal-attachments-help">
+          Imágenes, PDFs y documentos · Máximo ${MAX_PENDING_FILES} archivos · ${formatLimitBytes(MAX_PENDING_FILE_SIZE)} por archivo
+        </small>
       </label>
 
       ${renderPendingFiles(vm)}
+
+      <footer
+        class="incidencias-modal-footer incidencias-modal-footer--composer"
+        data-modal-footer="true"
+        data-modal-footer-placement="composer"
+      >
+        ${renderSubmitButton(vm)}
+      </footer>
     </section>
   `;
 }
 
 /* =========================================================
-   ATTACHMENTS / PREVIEW
+   ATTACHMENT CARDS
 ========================================================= */
 
-function getAttachmentId(file = {}) {
-  return cleanText(first(file.attachmentId, file.id, file.fileId), "");
-}
+function getAttachmentBusyMeta(
+  file = {},
+  vm = {}
+) {
+  const attachmentId =
+    getAttachmentId(file);
 
-function getAttachmentUrl(file = {}) {
-  return firstUrl(file.viewUrl, file.openUrl, file.url, file.blobUrl, file.publicUrl, file.signedUrl, file.downloadUrl);
-}
-
-function isImageLikeAttachment(file = {}) {
-  const type = cleanText(first(file.contentType, file.type, file.mimeType, file.mimetype), "").toLowerCase();
-  const name = cleanText(first(file.filename, file.fileName, file.name), "").toLowerCase();
-  return type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|avif|heic|heif)$/i.test(name);
-}
-
-function isPdfLikeAttachment(file = {}) {
-  const type = cleanText(first(file.contentType, file.type, file.mimeType, file.mimetype), "").toLowerCase();
-  const name = cleanText(first(file.filename, file.fileName, file.name), "").toLowerCase();
-  return type.includes("application/pdf") || name.endsWith(".pdf");
-}
-
-function getAttachmentBusyMeta(file = {}, vm = {}) {
-  const attachmentId = getAttachmentId(file);
   return {
     attachmentId,
-    isOpening: Boolean(attachmentId && vm.openingAttachmentId === attachmentId),
-    isDownloading: Boolean(attachmentId && vm.downloadingAttachmentId === attachmentId),
+
+    isOpening:
+      Boolean(
+        attachmentId &&
+        vm.openingAttachmentId ===
+          attachmentId
+      ),
+
+    isDownloading:
+      Boolean(
+        attachmentId &&
+        vm.downloadingAttachmentId ===
+          attachmentId
+      ),
   };
 }
 
-function renderAttachmentPreviewSquare(file = {}, vm = {}) {
-  const busy = getAttachmentBusyMeta(file, vm);
-  const isImage = isImageLikeAttachment(file);
-  const isPdf = isPdfLikeAttachment(file);
-  const url = isImage ? getAttachmentUrl(file) : "";
-  const name = safeFilename(first(file.name, file.filename, file.fileName), "archivo");
-  const disabled = vm.submitting || busy.isOpening || !busy.attachmentId;
+function renderAttachmentPreviewSquare(
+  file = {},
+  vm = {}
+) {
+  const busy =
+    getAttachmentBusyMeta(
+      file,
+      vm
+    );
 
-  if (!isImage || !url) {
+  const isImage =
+    isImageLikeAttachment(file);
+
+  const isPdf =
+    isPdfLikeAttachment(file);
+
+  const url =
+    isImage
+      ? getAttachmentUrl(file)
+      : "";
+
+  const name =
+    safeFilename(
+      first(
+        file.name,
+        file.filename,
+        file.fileName
+      ),
+      "archivo"
+    );
+
+  const disabled =
+    vm.submitting ||
+    busy.isOpening ||
+    !busy.attachmentId;
+
+  if (
+    !isImage ||
+    !url
+  ) {
+    const ext =
+      fileExtension(name)
+        .replace(".", "")
+        .slice(0, 4)
+        .toUpperCase();
+
     return `
-      <button type="button" data-detail-action="${DETAIL_ACTIONS.ATTACHMENT_OPEN}" data-attachment-id="${attr(busy.attachmentId)}" class="incidencias-modal-file-square" aria-label="Ver ${attr(name)}" ${disabledAttrs(disabled, busy.isOpening)}>
-        <span>${escapeHtml(isPdf ? "PDF" : fileExtension(name).replace(".", "").slice(0, 3).toUpperCase() || "DOC")}</span>
+      <button
+        type="button"
+        data-detail-action="${DETAIL_ACTIONS.ATTACHMENT_OPEN}"
+        data-attachment-id="${attr(busy.attachmentId)}"
+        class="incidencias-modal-file-square"
+        aria-label="${attr(`Ver ${name}`)}"
+        ${disabledAttrs(
+          disabled,
+          busy.isOpening
+        )}
+      >
+        <span>${escapeHtml(
+          isPdf
+            ? "PDF"
+            : ext || "DOC"
+        )}</span>
       </button>
     `;
   }
 
   return `
-    <button type="button" data-detail-action="${DETAIL_ACTIONS.ATTACHMENT_OPEN}" data-attachment-id="${attr(busy.attachmentId)}" class="${joinClasses("incidencias-modal-image-thumb-wrap", busy.isOpening ? "is-loading" : "")}" aria-label="Ampliar ${attr(name)}" data-modal-thumb-frame="true" data-thumb-error="false" ${disabledAttrs(disabled, busy.isOpening)}>
-      <img src="${attr(url)}" alt="${attr(name)}" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false" class="incidencias-modal-image-thumb" data-modal-thumb-img="true">
-      <span class="incidencias-modal-image-thumb-fallback">IMG</span>
-      <span class="incidencias-modal-image-open-badge">${busy.isOpening ? "Abriendo..." : "Ver"}</span>
+    <button
+      type="button"
+      data-detail-action="${DETAIL_ACTIONS.ATTACHMENT_OPEN}"
+      data-attachment-id="${attr(busy.attachmentId)}"
+      class="${joinClasses(
+        "incidencias-modal-image-thumb-wrap",
+        busy.isOpening
+          ? "is-loading"
+          : ""
+      )}"
+      aria-label="${attr(`Ampliar ${name}`)}"
+      data-modal-thumb-frame="true"
+      data-thumb-error="false"
+      ${disabledAttrs(
+        disabled,
+        busy.isOpening
+      )}
+    >
+      <img
+        src="${attr(url)}"
+        alt="${attr(name)}"
+        loading="lazy"
+        decoding="async"
+        referrerpolicy="no-referrer"
+        draggable="false"
+        class="incidencias-modal-image-thumb"
+        data-modal-thumb-img="true"
+      >
+
+      <span class="incidencias-modal-image-thumb-fallback">
+        IMG
+      </span>
+
+      <span class="incidencias-modal-image-open-badge">
+        ${
+          busy.isOpening
+            ? "Abriendo..."
+            : "Ver"
+        }
+      </span>
     </button>
   `;
 }
 
-function renderAttachmentActionButtons(file = {}, vm = {}) {
-  const busy = getAttachmentBusyMeta(file, vm);
-  const name = safeFilename(first(file.name, file.filename, file.fileName), "archivo");
-  const noId = !busy.attachmentId;
+function renderAttachmentActionButtons(
+  file = {},
+  vm = {}
+) {
+  const busy =
+    getAttachmentBusyMeta(
+      file,
+      vm
+    );
+
+  const name =
+    safeFilename(
+      first(
+        file.name,
+        file.filename,
+        file.fileName
+      ),
+      "archivo"
+    );
+
+  const noId =
+    !busy.attachmentId;
 
   return `
     <div class="incidencias-modal-attachment-actions">
-      <button type="button" data-detail-action="${DETAIL_ACTIONS.ATTACHMENT_OPEN}" data-attachment-id="${attr(busy.attachmentId)}" ${disabledAttrs(noId || busy.isOpening || vm.submitting, busy.isOpening)} class="incidencias-modal-view-btn" aria-label="Ver ${attr(name)}">
-        ${busy.isOpening ? renderInlineSpinner("Abriendo...") : `<span class="incidencias-modal-action-icon">${icon("eye")}</span><span>Ver</span>`}
+      <button
+        type="button"
+        data-detail-action="${DETAIL_ACTIONS.ATTACHMENT_OPEN}"
+        data-attachment-id="${attr(busy.attachmentId)}"
+        ${disabledAttrs(
+          noId ||
+          busy.isOpening ||
+          vm.submitting,
+          busy.isOpening
+        )}
+        class="incidencias-modal-view-btn"
+        aria-label="${attr(`Ver ${name}`)}"
+      >
+        ${
+          busy.isOpening
+            ? renderInlineSpinner(
+                "Abriendo..."
+              )
+            : `
+              <span class="incidencias-modal-action-icon">
+                ${icon("eye")}
+              </span>
+              <span>Ver</span>
+            `
+        }
       </button>
-      <button type="button" data-detail-action="${DETAIL_ACTIONS.ATTACHMENT_DOWNLOAD}" data-attachment-id="${attr(busy.attachmentId)}" ${disabledAttrs(noId || busy.isDownloading || vm.submitting, busy.isDownloading)} class="incidencias-modal-download-btn" aria-label="Descargar ${attr(name)}">
-        ${busy.isDownloading ? renderInlineSpinner("Bajando...") : `<span class="incidencias-modal-action-icon">${icon("download")}</span><span>Descargar</span>`}
+
+      <button
+        type="button"
+        data-detail-action="${DETAIL_ACTIONS.ATTACHMENT_DOWNLOAD}"
+        data-attachment-id="${attr(busy.attachmentId)}"
+        ${disabledAttrs(
+          noId ||
+          busy.isDownloading ||
+          vm.submitting,
+          busy.isDownloading
+        )}
+        class="incidencias-modal-download-btn"
+        aria-label="${attr(`Descargar ${name}`)}"
+      >
+        ${
+          busy.isDownloading
+            ? renderInlineSpinner(
+                "Bajando..."
+              )
+            : `
+              <span class="incidencias-modal-action-icon">
+                ${icon("download")}
+              </span>
+              <span>Descargar</span>
+            `
+        }
       </button>
     </div>
   `;
 }
 
-function renderAttachments(vm = {}) {
-  const files = getAttachments(vm.detail);
+function renderAttachments(
+  vm = {}
+) {
+  const files =
+    getAttachments(
+      vm.detail
+    );
 
   return `
-    <div class="incidencias-modal-files-block incidencias-modal-files-block--compact" data-modal-files-block="true">
-      <section class="incidencias-modal-current-files" data-modal-current-files="true">
-        <div class="incidencias-modal-section-head"><h3>Documentos actuales</h3><span>${escapeHtml(String(files.length))} adjunto${files.length === 1 ? "" : "s"}</span></div>
+    <div
+      class="incidencias-modal-files-block incidencias-modal-files-block--compact"
+      data-modal-files-block="true"
+    >
+      <section
+        class="incidencias-modal-current-files"
+        data-modal-current-files="true"
+        aria-labelledby="incidencias-modal-files-title"
+      >
+        <div class="incidencias-modal-section-head">
+          <h3 id="incidencias-modal-files-title">
+            Documentos actuales
+          </h3>
+
+          <span>
+            ${escapeHtml(String(files.length))}
+            adjunto${files.length === 1 ? "" : "s"}
+          </span>
+        </div>
+
         ${
           !files.length
-            ? `<div class="incidencias-modal-empty-box">No hay archivos adjuntos en esta incidencia.</div>`
-            : `<div class="incidencias-modal-attachments-grid">${files.map((file) => {
-                const id = getAttachmentId(file);
-                const name = safeFilename(first(file.name, file.filename, file.fileName), "Archivo");
-                const meta = [cleanText(first(file.contentType, file.type, file.mimeType, file.mimetype), ""), formatBytes(file.size), file.uploadedAt ? formatDate(file.uploadedAt) : ""].filter(Boolean).join(" · ");
+            ? `
+              <div class="incidencias-modal-empty-box">
+                No hay archivos adjuntos en esta incidencia.
+              </div>
+            `
+            : `
+              <div class="incidencias-modal-attachments-grid">
+                ${files
+                  .map((file) => {
+                    const id =
+                      getAttachmentId(file);
 
-                return `<article class="incidencias-modal-attachment-card" data-attachment-id="${attr(id)}"><div class="incidencias-modal-attachment-row">${renderAttachmentPreviewSquare(file, vm)}<div class="incidencias-modal-attachment-copy"><strong>${escapeHtml(name)}</strong><span>${escapeHtml(meta || "Archivo adjunto")}</span></div>${renderAttachmentActionButtons(file, vm)}</div></article>`;
-              }).join("")}</div>`
+                    const name =
+                      safeFilename(
+                        first(
+                          file.name,
+                          file.filename,
+                          file.fileName
+                        ),
+                        "Archivo"
+                      );
+
+                    const meta =
+                      [
+                        cleanText(
+                          first(
+                            file.contentType,
+                            file.type,
+                            file.mimeType,
+                            file.mimetype
+                          ),
+                          ""
+                        ),
+
+                        formatBytes(
+                          file.size
+                        ),
+
+                        file.uploadedAt
+                          ? formatDate(
+                              file.uploadedAt
+                            )
+                          : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" · ");
+
+                    return `
+                      <article
+                        class="incidencias-modal-attachment-card"
+                        data-attachment-id="${attr(id)}"
+                      >
+                        <div class="incidencias-modal-attachment-row">
+                          ${renderAttachmentPreviewSquare(file, vm)}
+
+                          <div class="incidencias-modal-attachment-copy">
+                            <strong>${escapeHtml(name)}</strong>
+                            <span>${escapeHtml(meta || "Archivo adjunto")}</span>
+                          </div>
+
+                          ${renderAttachmentActionButtons(file, vm)}
+                        </div>
+                      </article>
+                    `;
+                  })
+                  .join("")}
+              </div>
+            `
         }
       </section>
     </div>
   `;
 }
 
-function renderAttachmentPreview(vm = {}) {
-  const file = safeObject(vm.previewFile, null);
-  const url = firstUrl(file?.url, file?.viewUrl, file?.openUrl, file?.downloadUrl, file?.signedUrl, file?.blobUrl, file?.publicUrl);
+/* =========================================================
+   ATTACHMENT PREVIEW
+========================================================= */
 
-  if (!file || !url) return "";
+function renderAttachmentPreview(
+  vm = {}
+) {
+  const file =
+    safeObject(
+      vm.previewFile,
+      null
+    );
 
-  const filename = safeFilename(first(file.filename, file.fileName, file.name), "Documento");
-  const type = cleanText(first(file.contentType, file.type, file.mimeType, file.mimetype), "");
-  const size = formatBytes(file.size);
-  const image = isImageLikeAttachment(file);
-  const pdf = isPdfLikeAttachment(file);
-  const meta = [type || "Vista previa", size].filter(Boolean).join(" · ");
+  const url =
+    firstUrl(
+      file?.url,
+      file?.viewUrl,
+      file?.openUrl,
+      file?.downloadUrl,
+      file?.signedUrl,
+      file?.blobUrl,
+      file?.publicUrl
+    );
+
+  if (
+    !file ||
+    !url
+  ) {
+    return "";
+  }
+
+  const filename =
+    safeFilename(
+      first(
+        file.filename,
+        file.fileName,
+        file.name
+      ),
+      "Documento"
+    );
+
+  const type =
+    cleanText(
+      first(
+        file.contentType,
+        file.type,
+        file.mimeType,
+        file.mimetype
+      ),
+      ""
+    );
+
+  const size =
+    formatBytes(
+      file.size
+    );
+
+  const image =
+    isImageLikeAttachment(file);
+
+  const pdf =
+    isPdfLikeAttachment(file);
+
+  const inlinePreview =
+    image || pdf;
+
+  const meta =
+    [
+      type ||
+        (
+          inlinePreview
+            ? "Vista previa"
+            : "Documento"
+        ),
+      size,
+    ]
+      .filter(Boolean)
+      .join(" · ");
 
   return `
-    <section class="incidencias-modal-preview" data-modal-preview="true">
+    <section
+      class="incidencias-modal-preview"
+      data-modal-preview="true"
+      data-preview-kind="${
+        image
+          ? "image"
+          : pdf
+            ? "pdf"
+            : "document"
+      }"
+      aria-labelledby="incidencias-modal-preview-title"
+    >
       <div class="incidencias-modal-preview-head">
-        <div class="incidencias-modal-preview-copy"><strong>${escapeHtml(filename)}</strong><span>${escapeHtml(meta || "Documento preparado")}</span></div>
+        <div class="incidencias-modal-preview-copy">
+          <strong id="incidencias-modal-preview-title">
+            ${escapeHtml(filename)}
+          </strong>
+
+          <span>
+            ${escapeHtml(meta || "Documento preparado")}
+          </span>
+        </div>
+
         <div class="incidencias-modal-preview-actions">
-          ${!image ? `<button type="button" data-detail-action="${DETAIL_ACTIONS.PREVIEW_DOWNLOAD}" class="incidencias-modal-preview-btn">Descargar</button>` : ""}
-          <button type="button" data-detail-action="${DETAIL_ACTIONS.PREVIEW_CLOSE}" class="incidencias-modal-preview-btn" aria-label="Cerrar vista previa">Cerrar vista</button>
+          ${
+            !image
+              ? `
+                <button
+                  type="button"
+                  data-detail-action="${DETAIL_ACTIONS.PREVIEW_DOWNLOAD}"
+                  class="incidencias-modal-preview-btn"
+                >Descargar</button>
+              `
+              : ""
+          }
+
+          <button
+            type="button"
+            data-detail-action="${DETAIL_ACTIONS.PREVIEW_CLOSE}"
+            class="incidencias-modal-preview-btn"
+            aria-label="Cerrar vista previa"
+          >Cerrar vista</button>
         </div>
       </div>
-      <div class="${joinClasses("incidencias-modal-preview-frame", image ? "is-image" : "", pdf ? "is-pdf" : "")}">
-        ${image ? `<img src="${attr(url)}" alt="${attr(filename)}" class="incidencias-modal-preview-image" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : `<iframe src="${attr(url)}" title="${attr(filename)}" class="incidencias-modal-preview-iframe" loading="lazy" referrerpolicy="no-referrer"></iframe>`}
-      </div>
-      ${!image && !pdf ? `<p class="incidencias-modal-preview-note">Si el navegador no puede previsualizar este tipo de archivo, usa “Descargar”.</p>` : ""}
+
+      ${
+        image
+          ? `
+            <div class="incidencias-modal-preview-frame is-image">
+              <img
+                src="${attr(url)}"
+                alt="${attr(filename)}"
+                class="incidencias-modal-preview-image"
+                loading="lazy"
+                decoding="async"
+                referrerpolicy="no-referrer"
+                draggable="false"
+              >
+            </div>
+          `
+          : pdf
+            ? `
+              <div class="incidencias-modal-preview-frame is-pdf">
+                <iframe
+                  src="${attr(url)}"
+                  title="${attr(filename)}"
+                  class="incidencias-modal-preview-iframe"
+                  loading="lazy"
+                  referrerpolicy="no-referrer"
+                ></iframe>
+              </div>
+            `
+            : `
+              <div class="incidencias-modal-empty-box">
+                Este tipo de archivo no se previsualiza dentro del panel.
+                Utiliza “Descargar” para abrirlo con una aplicación compatible.
+              </div>
+            `
+      }
     </section>
   `;
 }
 
 /* =========================================================
-   CONTENT / TIMELINE
+   CONTENT
 ========================================================= */
 
-function renderDescription(detail = {}) {
-  return `<section class="incidencias-modal-description-section"><div class="incidencias-modal-section-head"><h3>Descripción</h3></div><p class="incidencias-modal-description">${escapeHtml(getDescription(detail))}</p></section>`;
-}
-
-function renderContactBlock(detail = {}) {
-  const email = getClientEmail(detail);
-  const phone = getClientPhone(detail);
-  if (!email && !phone) return "";
-
-  return `<section class="incidencias-modal-contact-section"><div class="incidencias-modal-section-head"><h3>Contacto</h3></div><div class="incidencias-modal-contact-grid">${email ? renderMetaField("Email", email) : ""}${phone ? renderMetaField("Teléfono", phone) : ""}</div></section>`;
-}
-
-function renderTimeline(detail = {}) {
-  const timeline = getTimeline(detail);
-  if (!timeline.length) return `<div class="incidencias-timeline-empty">Sin actividad</div>`;
-
+function renderDescription(
+  detail = {}
+) {
   return `
-    <div class="incidencias-timeline-list">
-      ${timeline.map((entry) => {
-        const kind = cleanText(entry.kind, "event");
-        const type = cleanText(entry.type, "update");
-        const isComment = kind === "comment";
-        const isCreated = type === "created";
-        const title = cleanText(entry.title, isComment ? "Comentario" : isCreated ? "Incidencia creada" : "Actualización");
-        const body = cleanMultiline(entry.body, "Actualización registrada.");
+    <section
+      class="incidencias-modal-description-section"
+      aria-labelledby="incidencias-modal-description-title"
+    >
+      <div class="incidencias-modal-section-head">
+        <h3 id="incidencias-modal-description-title">
+          Descripción
+        </h3>
+      </div>
 
-        return `<article class="${joinClasses("incidencias-timeline-card", isComment ? "is-comment" : "", isCreated ? "is-created" : "")}"><div class="incidencias-timeline-accent"></div><div class="incidencias-timeline-main"><div class="incidencias-timeline-title-row"><strong class="incidencias-timeline-title">${escapeHtml(title)}</strong><span class="incidencias-timeline-kind">${escapeHtml(isComment ? "Comentario" : isCreated ? "Sistema" : "Cambio")}</span></div><p class="incidencias-timeline-body">${escapeHtml(body)}</p></div><div class="incidencias-timeline-meta"><strong>${escapeHtml(cleanText(entry.author, "Sistema"))}</strong><span>${escapeHtml(formatDate(entry.createdAt))}</span></div></article>`;
-      }).join("")}
-    </div>
+      <p
+        id="${DESCRIPTION_ID}"
+        class="incidencias-modal-description"
+      >${escapeHtml(getDescription(detail))}</p>
+    </section>
   `;
 }
 
-function renderFooter(vm = {}) {
+function renderContactBlock(
+  detail = {}
+) {
+  const email =
+    getClientEmail(detail);
+
+  const phone =
+    getClientPhone(detail);
+
+  if (
+    !email &&
+    !phone
+  ) {
+    return "";
+  }
+
   return `
-    <footer class="incidencias-modal-footer" data-modal-footer="true">
-      <button type="button" data-detail-action="${DETAIL_ACTIONS.COMMENT_SUBMIT}" data-ticket-id="${attr(vm.ticketId)}" ${disabledAttrs(vm.submitting, vm.submitting)} class="incidencias-modal-submit-btn">
-        ${vm.submitting ? renderInlineSpinner("Actualizando...") : "Actualizar incidencia"}
-      </button>
-    </footer>
+    <section
+      class="incidencias-modal-contact-section"
+      aria-labelledby="incidencias-modal-contact-title"
+    >
+      <div class="incidencias-modal-section-head">
+        <h3 id="incidencias-modal-contact-title">
+          Contacto
+        </h3>
+      </div>
+
+      <div class="incidencias-modal-contact-grid">
+        ${
+          email
+            ? renderMetaField(
+                "Email",
+                email
+              )
+            : ""
+        }
+
+        ${
+          phone
+            ? renderMetaField(
+                "Teléfono",
+                phone
+              )
+            : ""
+        }
+      </div>
+    </section>
+  `;
+}
+
+function renderTimeline(
+  detail = {}
+) {
+  const timeline =
+    getTimeline(detail);
+
+  if (!timeline.length) {
+    return `
+      <div class="incidencias-timeline-empty">
+        Sin actividad
+      </div>
+    `;
+  }
+
+  return `
+    <div class="incidencias-timeline-list">
+      ${timeline
+        .map((entry) => {
+          const kind =
+            cleanText(
+              entry.kind,
+              "event"
+            );
+
+          const type =
+            cleanText(
+              entry.type,
+              "update"
+            );
+
+          const isComment =
+            kind === "comment";
+
+          const isCreated =
+            type === "created";
+
+          const title =
+            cleanText(
+              entry.title,
+              isComment
+                ? "Comentario"
+                : isCreated
+                  ? "Incidencia creada"
+                  : "Actualización"
+            );
+
+          const body =
+            cleanMultiline(
+              entry.body,
+              "Actualización registrada."
+            );
+
+          return `
+            <article
+              class="${joinClasses(
+                "incidencias-timeline-card",
+                isComment
+                  ? "is-comment"
+                  : "",
+                isCreated
+                  ? "is-created"
+                  : ""
+              )}"
+            >
+              <div class="incidencias-timeline-accent"></div>
+
+              <div class="incidencias-timeline-main">
+                <div class="incidencias-timeline-title-row">
+                  <strong class="incidencias-timeline-title">
+                    ${escapeHtml(title)}
+                  </strong>
+
+                  <span class="incidencias-timeline-kind">
+                    ${escapeHtml(
+                      isComment
+                        ? "Comentario"
+                        : isCreated
+                          ? "Sistema"
+                          : "Cambio"
+                    )}
+                  </span>
+                </div>
+
+                <p class="incidencias-timeline-body">
+                  ${escapeHtml(body)}
+                </p>
+              </div>
+
+              <div class="incidencias-timeline-meta">
+                <strong>
+                  ${escapeHtml(
+                    cleanText(
+                      entry.author,
+                      "Sistema"
+                    )
+                  )}
+                </strong>
+
+                <span>
+                  ${escapeHtml(
+                    formatDate(
+                      entry.createdAt
+                    )
+                  )}
+                </span>
+              </div>
+            </article>
+          `;
+        })
+        .join("")}
+    </div>
   `;
 }
 
@@ -990,69 +3089,221 @@ function renderFooter(vm = {}) {
    TEMPLATE
 ========================================================= */
 
-export function renderIncidenciasDetailModal(input = {}) {
-  const vm = buildVm(input);
-  if (!vm.open) return "";
+export function renderIncidenciasDetailModal(
+  input = {}
+) {
+  const vm =
+    buildVm(input);
 
-  const detail = vm.detail;
-  const ticketId = vm.ticketId;
-  const status = getStatus(detail);
-  const priority = getPriority(detail);
-  const title = getTitle(detail);
-  const clientName = getClientName(detail);
-  const clientEmail = getClientEmail(detail);
-  const category = getCategory(detail);
-  const createdAt = formatDate(getCreatedAt(detail));
-  const updatedAgo = formatRelativeDate(getUpdatedAt(detail));
-  const attachments = getAttachments(detail);
+  if (!vm.open) {
+    return "";
+  }
+
+  const detail =
+    vm.detail;
+
+  const ticketId =
+    vm.ticketId;
+
+  const status =
+    vm.status;
+
+  const priority =
+    getPriority(detail);
+
+  const title =
+    getTitle(detail);
+
+  const clientName =
+    getClientName(detail);
+
+  const clientEmail =
+    getClientEmail(detail);
+
+  const category =
+    getCategory(detail);
+
+  const createdAt =
+    formatDate(
+      getCreatedAt(detail)
+    );
+
+  const updatedAgo =
+    formatRelativeDate(
+      getUpdatedAt(detail)
+    );
+
+  const attachments =
+    getAttachments(detail);
 
   return `
-    <section id="${MODAL_ID}" class="incidencias-modal-root" data-incidencias-modal-root="true" data-template-version="${attr(INCIDENCIAS_MODAL_TEMPLATE_VERSION)}" data-ticket-id="${attr(ticketId)}" data-open="true" data-submitting="${vm.submitting ? "true" : "false"}">
-      <div class="incidencias-modal-overlay" data-incidencias-modal-overlay="true">
-        <div id="${PANEL_ID}" class="${joinClasses("incidencias-modal-panel", vm.submitting ? "is-submitting" : "")}" role="dialog" aria-modal="true" aria-labelledby="incidencias-modal-title" tabindex="-1" data-incidencias-modal-panel="true">
-          ${vm.submitting ? renderLoadingOverlay("Actualizando incidencia...") : ""}
+    <section
+      id="${MODAL_ID}"
+      class="incidencias-modal-root"
+      data-incidencias-modal-root="true"
+      data-template-version="${attr(INCIDENCIAS_MODAL_TEMPLATE_VERSION)}"
+      data-ticket-id="${attr(ticketId)}"
+      data-open="true"
+      data-submitting="${vm.submitting ? "true" : "false"}"
+      data-has-draft="${vm.hasDraft ? "true" : "false"}"
+      data-requires-reopen="${vm.requiresReopen ? "true" : "false"}"
+    >
+      <div
+        class="incidencias-modal-overlay"
+        data-incidencias-modal-overlay="true"
+      >
+        <div
+          id="${PANEL_ID}"
+          class="${joinClasses(
+            "incidencias-modal-panel",
+            vm.submitting
+              ? "is-submitting"
+              : ""
+          )}"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="${TITLE_ID}"
+          aria-describedby="${DESCRIPTION_ID}"
+          tabindex="-1"
+          data-incidencias-modal-panel="true"
+        >
+          ${
+            vm.submitting
+              ? renderLoadingOverlay(
+                  "Actualizando incidencia..."
+                )
+              : ""
+          }
 
-          <header class="incidencias-modal-header" data-modal-header="true">
-            <div class="incidencias-modal-hero" data-modal-hero="true">
+          <header
+            class="incidencias-modal-header"
+            data-modal-header="true"
+          >
+            <div
+              class="incidencias-modal-hero"
+              data-modal-hero="true"
+            >
               ${renderAvatar(detail)}
+
               <div class="incidencias-modal-hero-content">
-                <div class="incidencias-modal-hero-chips" data-modal-header-chips="true">
+                <div
+                  class="incidencias-modal-hero-chips"
+                  data-modal-header-chips="true"
+                >
                   ${renderTicketIdChip(ticketId, vm)}
-                  ${renderChip(statusLabel(status), `status-${statusClass(status)}`)}
-                  ${renderChip(priorityLabel(priority), `priority-${priorityClass(priority)}`)}
-                  ${renderChip(category, "category")}
+
+                  ${renderChip(
+                    statusLabel(status),
+                    `status-${statusClass(status)}`
+                  )}
+
+                  ${renderChip(
+                    priorityLabel(priority),
+                    `priority-${priorityClass(priority)}`
+                  )}
+
+                  ${renderChip(
+                    category,
+                    "category"
+                  )}
                 </div>
-                <h2 id="incidencias-modal-title" class="incidencias-modal-title" title="${attr(title)}">${escapeHtml(title)}</h2>
-                <span class="incidencias-modal-updated" data-modal-updated="true">${escapeHtml(clientName)}${clientEmail ? ` · ${escapeHtml(clientEmail)}` : ""} · Última actualización ${escapeHtml(updatedAgo)}</span>
+
+                <h2
+                  id="${TITLE_ID}"
+                  class="incidencias-modal-title"
+                  title="${attr(title)}"
+                >${escapeHtml(title)}</h2>
+
+                <span
+                  class="incidencias-modal-updated"
+                  data-modal-updated="true"
+                >
+                  ${escapeHtml(clientName)}
+                  ${
+                    clientEmail
+                      ? ` · ${escapeHtml(clientEmail)}`
+                      : ""
+                  }
+                  · Última actualización ${escapeHtml(updatedAgo)}
+                </span>
               </div>
             </div>
 
-            <button type="button" data-detail-action="${DETAIL_ACTIONS.CLOSE}" aria-label="Cerrar modal" ${disabledAttrs(vm.submitting, vm.submitting)} class="incidencias-modal-close-btn">${icon("close")}</button>
+            <button
+              type="button"
+              data-detail-action="${DETAIL_ACTIONS.CLOSE}"
+              aria-label="Cerrar modal"
+              ${disabledAttrs(
+                vm.submitting,
+                vm.submitting
+              )}
+              class="incidencias-modal-close-btn"
+            >${icon("close")}</button>
           </header>
 
-          <main class="incidencias-modal-body" data-modal-body="true">
-            <div data-modal-feedback-slot="true">${renderFeedbackBox(vm)}</div>
-            <div data-modal-preview-slot="true">${renderAttachmentPreview(vm)}</div>
+          <main
+            class="incidencias-modal-body"
+            data-modal-body="true"
+          >
+            <div
+              data-modal-feedback-slot="true"
+              aria-live="polite"
+            >
+              ${renderFeedbackBox(vm)}
+            </div>
+
+            <div data-modal-preview-slot="true">
+              ${renderAttachmentPreview(vm)}
+            </div>
 
             <div class="incidencias-modal-meta-grid">
-              ${renderMetaField("Técnico", renderTechnicianValue(detail), { html: true })}
-              ${renderMetaField("Factura", getInvoiceLabel(detail))}
-              ${renderMetaField("Creada", createdAt)}
-              ${renderMetaField("Adjuntos", String(attachments.length))}
+              ${renderMetaField(
+                "Técnico",
+                renderTechnicianValue(detail),
+                { html: true }
+              )}
+
+              ${renderMetaField(
+                "Factura",
+                getInvoiceLabel(detail)
+              )}
+
+              ${renderMetaField(
+                "Creada",
+                createdAt
+              )}
+
+              ${renderMetaField(
+                "Adjuntos",
+                String(attachments.length)
+              )}
             </div>
 
             ${renderDescription(detail)}
+
             ${renderContactBlock(detail)}
 
-            <div data-modal-files-slot="true">${renderAttachments(vm)}</div>
-            <div data-modal-composer-slot="true">${renderComposer(vm)}</div>
+            <div data-modal-files-slot="true">
+              ${renderAttachments(vm)}
+            </div>
 
-            <section class="incidencias-modal-history-section" data-modal-history-slot="true">
-              <div class="incidencias-modal-section-head"><h3>Historial y actividad</h3></div>
+            <div data-modal-composer-slot="true">
+              ${renderComposer(vm)}
+            </div>
+
+            <section
+              class="incidencias-modal-history-section"
+              data-modal-history-slot="true"
+              aria-labelledby="incidencias-modal-history-title"
+            >
+              <div class="incidencias-modal-section-head">
+                <h3 id="incidencias-modal-history-title">
+                  Historial y actividad
+                </h3>
+              </div>
+
               ${renderTimeline(detail)}
             </section>
-
-            ${renderFooter(vm)}
           </main>
         </div>
       </div>
@@ -1068,37 +3319,103 @@ export function renderIncidenciasDetailModalClosed() {
    HELPERS FOR INDEX.JS
 ========================================================= */
 
-export function getDetailCommentValue(formLike = {}) {
-  return cleanMultiline(first(formLike.comment, formLike.message, formLike.text, formLike.body, ""), "");
+export function getDetailCommentValue(
+  formLike = {}
+) {
+  return cleanMultiline(
+    first(
+      formLike.comment,
+      formLike.message,
+      formLike.text,
+      formLike.body,
+      ""
+    ),
+    ""
+  );
 }
 
-export function validateDetailUpdate({ comment = "", pendingFiles = [] } = {}) {
-  const message = cleanMultiline(comment, "");
-  const files = safeArray(pendingFiles);
+export function validateDetailUpdate({
+  comment = "",
+  pendingFiles = [],
+} = {}) {
+  const message =
+    cleanMultiline(
+      comment,
+      ""
+    );
 
-  if (!message && !files.length) {
-    return { valid: false, message: "Añade una actualización o selecciona al menos un archivo." };
+  const files =
+    safeArray(
+      pendingFiles
+    );
+
+  if (
+    !message &&
+    !files.length
+  ) {
+    return {
+      valid: false,
+      message:
+        "Añade una actualización o selecciona al menos un archivo.",
+    };
   }
 
-  if (message && message.length < 4) {
-    return { valid: false, message: "Añade un poco más de detalle antes de enviar la actualización." };
+  if (
+    message &&
+    message.length < 4
+  ) {
+    return {
+      valid: false,
+      message:
+        "Añade un poco más de detalle antes de enviar la actualización.",
+    };
   }
 
-  if (message.length > MAX_COMMENT_LENGTH) {
-    return { valid: false, message: `El comentario no puede superar ${MAX_COMMENT_LENGTH} caracteres.` };
+  if (
+    message.length >
+    MAX_COMMENT_LENGTH
+  ) {
+    return {
+      valid: false,
+      message:
+        `El comentario no puede superar ${MAX_COMMENT_LENGTH} caracteres.`,
+    };
   }
 
-  if (files.length > MAX_PENDING_FILES) {
-    return { valid: false, message: `No puedes adjuntar más de ${MAX_PENDING_FILES} archivos en una actualización.` };
+  if (
+    files.length >
+    MAX_PENDING_FILES
+  ) {
+    return {
+      valid: false,
+      message:
+        `No puedes adjuntar más de ${MAX_PENDING_FILES} archivos en una actualización.`,
+    };
   }
 
   for (const file of files) {
-    if (number(file?.size, 0) > MAX_PENDING_FILE_SIZE) {
-      return { valid: false, message: `El archivo ${safeFilename(file?.name, "seleccionado")} supera el tamaño máximo permitido.` };
+    if (
+      number(
+        file?.size,
+        0
+      ) >
+      MAX_PENDING_FILE_SIZE
+    ) {
+      return {
+        valid: false,
+        message:
+          `El archivo ${safeFilename(
+            file?.name,
+            "seleccionado"
+          )} supera el tamaño máximo permitido de ${formatLimitBytes(MAX_PENDING_FILE_SIZE)}.`,
+      };
     }
   }
 
-  return { valid: true, message: "" };
+  return {
+    valid: true,
+    message: "",
+  };
 }
 
 /* =========================================================
@@ -1107,38 +3424,71 @@ export function validateDetailUpdate({ comment = "", pendingFiles = [] } = {}) {
 
 export function getDetailTemplateSnapshot() {
   return {
-    version: INCIDENCIAS_MODAL_TEMPLATE_VERSION,
-    actions: DETAIL_ACTIONS,
-    fields: ["comment", "attachments"],
+    version:
+      INCIDENCIAS_MODAL_TEMPLATE_VERSION,
+
+    actions:
+      DETAIL_ACTIONS,
+
+    fields: [
+      "comment",
+      "attachments",
+    ],
+
     limits: {
-      maxCommentLength: MAX_COMMENT_LENGTH,
-      maxPendingFiles: MAX_PENDING_FILES,
-      maxPendingFileSize: MAX_PENDING_FILE_SIZE,
+      maxCommentLength:
+        MAX_COMMENT_LENGTH,
+
+      maxPendingFiles:
+        MAX_PENDING_FILES,
+
+      maxPendingFileSize:
+        MAX_PENDING_FILE_SIZE,
     },
+
     policy: {
       templateOnly: true,
       spaIslandCompatible: true,
       detailActionsStable: true,
       dataFieldCompatibility: true,
+
       noArrayFlatten: true,
       requesterAliasCompatibility: true,
-      technicianAvatarAliasCompatibility: true,
+
+      technicianUsesRealAssignmentOnly: true,
+      noFixedTechnicianFallback: true,
+
       attachmentAliasCompatibility: true,
       timelineAliasCompatibility: true,
       invoiceAliasCompatibility: true,
-      previewSupport: true,
+
+      previewImage: true,
+      previewPdf: true,
+      previewOtherDocumentsInline: false,
+
+      submitActionNearComposer: true,
+      explicitReopenCopy: true,
+      visibleUploadLimits: true,
+      exposesDirtyState: true,
+
       noAuth: true,
       noRouter: true,
       noHttp: true,
       noStore: true,
+      noStorage: true,
       noDomApi: true,
       noListeners: true,
     },
   };
 }
 
-export const getSnapshot = getDetailTemplateSnapshot;
-export const renderDetailModal = renderIncidenciasDetailModal;
-export const renderDetailModalClosed = renderIncidenciasDetailModalClosed;
+export const getSnapshot =
+  getDetailTemplateSnapshot;
+
+export const renderDetailModal =
+  renderIncidenciasDetailModal;
+
+export const renderDetailModalClosed =
+  renderIncidenciasDetailModalClosed;
 
 export default renderIncidenciasDetailModal;

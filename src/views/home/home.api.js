@@ -2,15 +2,19 @@
    Onion Support - Home API
    Archivo: /src/views/home/home.api.js
 
+   PRODUCTIVO · FACTURACIÓN GLOBAL CANÓNICA
+
    Responsabilidad:
    - Agregar el dashboard de Inicio desde APIs de dominio existentes.
    - Mantener UN único cache de Home en memoria, aislado por usuario/rol.
    - Deduplicar cargas concurrentes del Home.
-   - Tolerar fallos parciales sin ocultar los dominios disponibles.
-   - Exponer totales remotos aunque las listas del Home estén limitadas.
-   - Solicitar estadísticas globales de facturación sin cargar toda la colección.
+   - Tolerar fallos parciales sin ocultar dominios disponibles.
+   - Cargar sólo las últimas facturas necesarias para la UI.
+   - Obtener estadísticas GLOBALES desde GET /api/facturas/stats.
+   - NO calcular el total facturado sumando las facturas visibles.
+   - NO depender de includeStatsAll del endpoint de listado.
    - Sin DOM, Router, Store, Storage ni fetch propio.
-   - HTTP directo sólo para contadores admin mínimos (1 fila + total remoto).
+   - HTTP directo sólo para contadores admin mínimos.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -20,7 +24,7 @@ import IncidenciasApi from "../incidencias/incidencias.api.js";
 import FacturasApi from "../facturas/facturas.api.js";
 
 export const HOME_API_VERSION =
-  "home.api.domain-aggregator.v8.global-invoice-stats";
+  "home.api.domain-aggregator.v9.invoice-stats-endpoint";
 
 export const HOME_TIMEOUT_MS = 15_000;
 export const HOME_LIST_LIMIT = 8;
@@ -103,9 +107,8 @@ function cleanText(value = "", fallback = "") {
 }
 
 /*
-   No aplanar arrays aquí.
-   Un array de facturas/incidencias es un valor válido completo, no una lista
-   de candidatos. Aplanarlo convertiría el listado en su primer elemento.
+   No aplanar arrays.
+   Un array de facturas/incidencias es un valor válido completo.
 */
 function first(...values) {
   for (const value of values) {
@@ -153,6 +156,12 @@ function number(value, fallback = 0) {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function optionalNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = number(value, Number.NaN);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function now() {
@@ -448,6 +457,7 @@ function totalFromPayload(value = null, fallback = 0, depth = 0) {
 
   for (const key of WRAPPER_KEYS) {
     const nested = value[key];
+
     if (isObject(nested)) {
       best = Math.max(best, totalFromPayload(nested, best, depth + 1));
     }
@@ -465,10 +475,112 @@ function collectionFromResponse(response = null, fallbackTotal = 0) {
     total: Math.max(items.length, totalFromPayload(response, fallbackTotal)),
     stale: object.stale === true,
     error: object.error || null,
-    stats: safeObject(
-      first(object.statsAllMatched, object.stats, object.meta?.stats, {})
-    ),
   };
+}
+
+/* =========================================================
+   INVOICE STATS READERS
+========================================================= */
+
+function invoiceCountFromStats(stats = {}) {
+  const source = safeObject(stats);
+
+  return Math.max(
+    0,
+    number(
+      first(
+        source.invoiceCount,
+        source.countTotal,
+        source.totalCount,
+        source.count,
+        0
+      ),
+      0
+    )
+  );
+}
+
+function totalInvoicedFromStats(stats = {}) {
+  const source = safeObject(stats);
+
+  return optionalNumber(
+    first(
+      source.totalAmount,
+      source.grossAmount,
+      source.totalFacturado,
+      source.totalImporte,
+      source.invoiceAmount,
+      source.amount,
+      null
+    )
+  );
+}
+
+function paidTotalFromStats(stats = {}) {
+  const source = safeObject(stats);
+
+  return optionalNumber(
+    first(
+      source.paidAmount,
+      source.paidTotal,
+      source.totalPagado,
+      source.totalPaid,
+      source.importePagado,
+      source.amountPaid,
+      null
+    )
+  );
+}
+
+function outstandingFromStats(stats = {}) {
+  const source = safeObject(stats);
+
+  const direct = optionalNumber(
+    first(
+      source.outstandingAmount,
+      source.outstandingTotal,
+      null
+    )
+  );
+
+  if (direct !== null) return direct;
+
+  const pending = optionalNumber(
+    first(
+      source.pendingAmount,
+      source.pendingTotal,
+      source.totalPendiente,
+      null
+    )
+  );
+
+  const overdue = optionalNumber(
+    first(
+      source.overdueAmount,
+      source.overdueTotal,
+      source.totalVencido,
+      null
+    )
+  );
+
+  if (pending === null && overdue === null) return null;
+  return number(pending, 0) + number(overdue, 0);
+}
+
+function currencyFromStats(stats = {}, invoices = []) {
+  const source = safeObject(stats);
+
+  return cleanText(
+    first(
+      source.currency,
+      source.moneda,
+      safeArray(source.byCurrency)[0]?.currency,
+      invoices[0]?.currency,
+      invoices[0]?.moneda,
+      "EUR"
+    ),
+    "EUR"
+  ).toUpperCase();
 }
 
 /* =========================================================
@@ -495,30 +607,88 @@ async function loadIncidenciasForHome(options = {}) {
     },
   });
 
-  return collectionFromResponse(response);
+  return {
+    ...collectionFromResponse(response),
+    stats: {},
+    warnings: [],
+  };
 }
 
 async function loadFacturasForHome(options = {}) {
-  const response = await FacturasApi.listFacturas({
-    timeout: options.timeout || HOME_TIMEOUT_MS,
-    page: 1,
-    limit: HOME_LIST_LIMIT,
-    sort: "date_desc",
-    direction: "desc",
-    returnStaleOnError: options.returnStaleOnError !== false,
+  const domainOptions = safeObject(options.facturasOptions);
+  const statsOptions = safeObject(options.facturasStatsOptions);
 
-    /*
-       Permitimos opciones de dominio (filtros/timeout/orden) pero las
-       estadísticas globales son obligatorias para que el Home no calcule
-       el importe pagado únicamente con las 8 facturas visibles.
-    */
-    ...safeObject(options.facturasOptions),
+  /*
+     Listado y estadísticas globales salen en paralelo.
+     El listado NO necesita calcular estadísticas porque /stats es la
+     fuente canónica del Home.
+  */
+  const [listResult, statsResult] = await Promise.allSettled([
+    FacturasApi.listFacturas({
+      timeout: options.timeout || HOME_TIMEOUT_MS,
+      page: 1,
+      limit: HOME_LIST_LIMIT,
+      sort: "date_desc",
+      direction: "desc",
+      returnStaleOnError: options.returnStaleOnError !== false,
+      ...domainOptions,
 
-    includeStats: true,
-    includeStatsAll: true,
-  });
+      // Forzado al final: Home no depende de stats del listado.
+      includeStats: false,
+      includeStatsAll: false,
+    }),
 
-  return collectionFromResponse(response);
+    FacturasApi.loadFacturasStats({
+      timeout: options.timeout || HOME_TIMEOUT_MS,
+      ...statsOptions,
+    }),
+  ]);
+
+  if (listResult.status === "rejected" && isUnauthorizedError(listResult.reason)) {
+    throw listResult.reason;
+  }
+
+  if (statsResult.status === "rejected" && isUnauthorizedError(statsResult.reason)) {
+    throw statsResult.reason;
+  }
+
+  if (listResult.status === "rejected" && statsResult.status === "rejected") {
+    throw listResult.reason || statsResult.reason;
+  }
+
+  const collection =
+    listResult.status === "fulfilled"
+      ? collectionFromResponse(listResult.value)
+      : {
+          items: [],
+          total: 0,
+          stale: false,
+          error: listResult.reason || null,
+        };
+
+  const stats =
+    statsResult.status === "fulfilled"
+      ? safeObject(statsResult.value)
+      : {};
+
+  const warnings = [];
+
+  if (listResult.status === "rejected") {
+    warnings.push(normalizeError("facturas_list", listResult.reason));
+  }
+
+  if (statsResult.status === "rejected") {
+    warnings.push(normalizeError("facturas_stats", statsResult.reason));
+  }
+
+  return {
+    ...collection,
+    stats,
+    statsAvailable:
+      statsResult.status === "fulfilled" &&
+      totalInvoicedFromStats(stats) !== null,
+    warnings,
+  };
 }
 
 async function loadAdminCount(
@@ -547,6 +717,7 @@ async function loadAdminCount(
     stale: safeObject(response).stale === true,
     error: safeObject(response).error || null,
     stats: {},
+    warnings: [],
   };
 }
 
@@ -578,8 +749,10 @@ async function loadDomain(domain = "home", loader = null) {
       items: safeArray(result.items),
       total: Math.max(safeArray(result.items).length, number(result.total, 0)),
       stats: safeObject(result.stats),
+      statsAvailable: result.statsAvailable === true,
       stale: result.stale === true,
       error: result.error ? normalizeError(domain, result.error) : null,
+      warnings: safeArray(result.warnings),
     };
   } catch (error) {
     if (isUnauthorizedError(error)) throw error;
@@ -589,8 +762,10 @@ async function loadDomain(domain = "home", loader = null) {
       items: [],
       total: 0,
       stats: {},
+      statsAvailable: false,
       stale: false,
       error: normalizeError(domain, error),
+      warnings: [],
     };
   }
 }
@@ -602,90 +777,6 @@ async function loadDomain(domain = "home", loader = null) {
 function dateValue(value = "") {
   const time = Date.parse(value);
   return Number.isFinite(time) ? time : 0;
-}
-
-function invoicePaid(invoice = {}) {
-  const status = cleanText(
-    first(
-      invoice.paymentStatus,
-      invoice.estadoPago,
-      invoice.status,
-      invoice.estado,
-      ""
-    ),
-    ""
-  ).toLowerCase();
-
-  return Boolean(
-    invoice.paid === true ||
-      invoice.isPaid === true ||
-      invoice.pagada === true ||
-      [
-        "paid",
-        "pagada",
-        "pagado",
-        "completed",
-        "complete",
-        "settled",
-      ].includes(status)
-  );
-}
-
-function invoiceAmount(invoice = {}) {
-  return number(
-    first(
-      invoice.total,
-      invoice.totalAmount,
-      invoice.amount,
-      invoice.importe,
-      invoice.importeTotal,
-      invoice.totalFactura,
-      invoice.invoiceAmount,
-      invoice.summary?.total,
-      0
-    ),
-    0
-  );
-}
-
-function invoiceCurrency(invoice = {}) {
-  return cleanText(
-    first(
-      invoice.currency,
-      invoice.moneda,
-      invoice.summary?.currency,
-      "EUR"
-    ),
-    "EUR"
-  ).toUpperCase();
-}
-
-function paidTotalFromStats(stats = {}, invoices = []) {
-  const source = safeObject(stats);
-
-  const candidate = first(
-    source.paidTotal,
-    source.totalPaid,
-    source.totalPagado,
-    source.importePagado,
-    source.paidAmount,
-    source.amountPaid,
-    source.totals?.paid,
-    source.totals?.paidAmount,
-    source.totales?.pagado,
-    source.totales?.importePagado,
-    null
-  );
-
-  if (candidate !== null) {
-    return number(candidate, 0);
-  }
-
-  return safeArray(invoices).reduce(
-    (sum, invoice) =>
-      sum + (invoicePaid(invoice) ? invoiceAmount(invoice) : 0),
-    0
-  );
 }
 
 function buildActivity({ incidencias = [], facturas = [] } = {}) {
@@ -756,8 +847,17 @@ function buildDashboard({
   const clientes = context.admin ? safeArray(clientesResult?.items) : [];
   const usuarios = context.admin ? safeArray(usuariosResult?.items) : [];
 
+  const invoiceStats = safeObject(facturasResult?.stats);
+  const statsInvoiceCount = invoiceCountFromStats(invoiceStats);
+
+  const totalInvoiced = totalInvoicedFromStats(invoiceStats);
+  const paidTotal = paidTotalFromStats(invoiceStats);
+  const outstandingAmount = outstandingFromStats(invoiceStats);
+  const currency = currencyFromStats(invoiceStats, facturas);
+
   const loadedAt = nowIso();
   const domainWarnings = safeArray(warnings).filter(Boolean);
+
   const stale = [
     incidenciasResult,
     facturasResult,
@@ -765,17 +865,11 @@ function buildDashboard({
     usuariosResult,
   ].some((result) => result?.stale === true);
 
-  const paidTotal = paidTotalFromStats(facturasResult?.stats, facturas);
-  const currency = cleanText(
-    first(
-      facturasResult?.stats?.currency,
-      facturasResult?.stats?.moneda,
-      facturas[0]?.currency,
-      facturas[0]?.moneda,
-      "EUR"
-    ),
-    "EUR"
-  ).toUpperCase();
+  const invoiceCount = Math.max(
+    facturas.length,
+    number(facturasResult?.total, 0),
+    statsInvoiceCount
+  );
 
   return {
     role: context.role,
@@ -794,6 +888,9 @@ function buildDashboard({
     users: usuarios,
     usuarios,
 
+    invoiceStats,
+    facturasStats: invoiceStats,
+
     summary: {
       tickets: Math.max(
         incidencias.length,
@@ -804,14 +901,8 @@ function buildDashboard({
         number(incidenciasResult?.total, 0)
       ),
 
-      facturas: Math.max(
-        facturas.length,
-        number(facturasResult?.total, 0)
-      ),
-      invoices: Math.max(
-        facturas.length,
-        number(facturasResult?.total, 0)
-      ),
+      facturas: invoiceCount,
+      invoices: invoiceCount,
 
       clientes: context.admin
         ? Math.max(clientes.length, number(clientesResult?.total, 0))
@@ -827,8 +918,25 @@ function buildDashboard({
         ? Math.max(usuarios.length, number(usuariosResult?.total, 0))
         : 0,
 
+      /*
+         CANÓNICO:
+         totalInvoiced/totalAmount vienen exclusivamente de /api/facturas/stats.
+         Nunca de la suma de las 8 facturas visibles.
+      */
+      totalInvoiced,
+      totalAmount: totalInvoiced,
+      grossAmount: totalInvoiced,
+      totalFacturado: totalInvoiced,
+
+      // Se conservan para otras posibles vistas/compatibilidad.
       paidTotal,
+      paidAmount: paidTotal,
+      outstandingAmount,
+
       currency,
+      invoiceStatsAvailable:
+        facturasResult?.statsAvailable === true &&
+        totalInvoiced !== null,
     },
 
     activity: buildActivity({
@@ -860,14 +968,12 @@ async function fetchDashboard(options = {}, context = currentContext()) {
     items: [],
     total: 0,
     stats: {},
+    statsAvailable: false,
     stale: false,
     error: null,
+    warnings: [],
   });
 
-  /*
-     Todos los dominios necesarios salen en paralelo.
-     El Home no debe esperar a incidencias/facturas para empezar clientes/usuarios.
-  */
   const [
     incidenciasResult,
     facturasResult,
@@ -885,7 +991,7 @@ async function fetchDashboard(options = {}, context = currentContext()) {
   ]);
 
   const primaryFailures = [incidenciasResult, facturasResult].filter(
-    (result) => result.error && result.items.length === 0
+    (result) => result.error && result.items.length === 0 && !Object.keys(result.stats).length
   );
 
   if (primaryFailures.length === 2) {
@@ -899,9 +1005,13 @@ async function fetchDashboard(options = {}, context = currentContext()) {
 
   const warnings = [
     incidenciasResult.error,
+    ...safeArray(incidenciasResult.warnings),
     facturasResult.error,
+    ...safeArray(facturasResult.warnings),
     clientesResult.error,
+    ...safeArray(clientesResult.warnings),
     usuariosResult.error,
+    ...safeArray(usuariosResult.warnings),
   ].filter(Boolean);
 
   return buildDashboard({
@@ -930,10 +1040,6 @@ export async function loadHomeDashboard(options = {}) {
     return cachedDashboard({ stale: false });
   }
 
-  /*
-     Incluso un refresh manual reutiliza una carga ya en curso del mismo usuario.
-     Lanzar dos agregaciones idénticas en paralelo sólo añade coste y carreras.
-  */
   if (cacheState.inFlight && cacheState.inFlightKey === requestKey) {
     return cacheState.inFlight;
   }
@@ -946,10 +1052,6 @@ export async function loadHomeDashboard(options = {}) {
     try {
       const dashboard = await fetchDashboard(options, context);
 
-      /*
-         Si cambió usuario/rol o se limpió el cache durante la petición,
-         descartamos el resultado para no mezclar sesiones.
-      */
       if (
         cacheState.epoch !== requestEpoch ||
         currentContext().key !== requestKey
@@ -1038,16 +1140,25 @@ export function getHomeApiSnapshot() {
       domainAggregator: true,
       reuseIncidenciasApi: true,
       reuseFacturasApi: true,
-      globalInvoiceStats: true,
+
+      invoiceListLimited: true,
+      invoiceListLimit: HOME_LIST_LIMIT,
+      invoiceStatsDedicatedEndpoint: true,
+      invoiceStatsCanonical: true,
+      noInvoiceVisibleRowsAggregation: true,
+      includeStatsAllRequired: false,
+
       adminCountQueries: true,
       adminCountLimit: HOME_ADMIN_COUNT_LIMIT,
       directHttpOnlyForAdminCounts: true,
+
       inMemoryHomeCache: true,
       ttlCache: true,
       inFlightDedupe: true,
       staleOnError: true,
       userScopedCache: true,
       sessionRaceGuard: true,
+
       noFetch: true,
       noStore: true,
       noStorage: true,

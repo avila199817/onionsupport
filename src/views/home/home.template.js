@@ -2,15 +2,20 @@
    Onion Support - Plantilla de Inicio
    Archivo: /src/views/home/home.template.js
 
+   PRODUCTIVO · TOTAL FACTURADO GLOBAL
+
    Responsabilidad:
    - Renderizar HTML puro de Inicio desde un ViewModel estable.
-   - Mantener clases y estructura consumidas por /src/css/views/home/index.css.
+   - Mantener clases/estructura consumidas por /src/css/views/home/index.css.
    - Mantener navegación/acciones declarativas para index.js.
+   - Mostrar el TOTAL FACTURADO global recibido desde Home API.
+   - NO confundir facturado con pagado.
    - Sin DOM API, listeners, Auth, Router, HTTP, Store ni Storage.
    - Sin CSS ni handlers inline.
 ========================================================= */
 
-export const HOME_TEMPLATE_VERSION = "home.template.inicio.v7.production";
+export const HOME_TEMPLATE_VERSION =
+  "home.template.inicio.v8.total-invoiced.production";
 
 const ACTIONS = Object.freeze({
   RETRY: "retry",
@@ -105,9 +110,7 @@ function cleanText(value = "", fallback = "") {
 
 /*
    CRÍTICO:
-   No usar values.flat(Infinity).
-   Los arrays de incidencias/facturas son valores completos. Aplanarlos hace
-   que first() devuelva el primer registro y safeArray() termine en [].
+   No usar flat(Infinity). Los arrays son valores completos.
 */
 function first(...values) {
   for (const value of values) {
@@ -128,6 +131,12 @@ function number(value, fallback = 0) {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function optionalNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function escapeHtml(value = "") {
@@ -155,8 +164,7 @@ function normalizeKey(value = "") {
 }
 
 function hasAmount(value = null) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed);
+  return optionalNumber(value) !== null;
 }
 
 /* =========================================================
@@ -209,6 +217,14 @@ function formatMoney(value = 0, currency = "EUR") {
   }
 
   return `${amount.toFixed(2).replace(".", ",")} ${code}`;
+}
+
+function formatBillingAmount(value, currency = "EUR", available = true) {
+  if (!available || optionalNumber(value) === null) {
+    return "No disponible";
+  }
+
+  return formatMoney(value, currency);
 }
 
 function toDate(value = "") {
@@ -273,7 +289,11 @@ function safeImageSrc(value = "") {
   if (raw.startsWith("//")) return "";
   if (/[\r\n\t\\]/.test(raw)) return "";
   if (/^(javascript|vbscript|file):/i.test(raw)) return "";
-  if (/[?&#](?:token|access_token|refresh_token|password|secret|sig|signature|jwt|authorization)=/i.test(raw)) {
+  if (
+    /[?&#](?:token|access_token|refresh_token|password|secret|sig|signature|jwt|authorization)=/i.test(
+      raw
+    )
+  ) {
     return "";
   }
 
@@ -296,7 +316,11 @@ function safeRoute(value = "", fallback = "/") {
   if (!route.startsWith("/")) return fallback;
   if (route.startsWith("//")) return fallback;
   if (/[\r\n\t\\]/.test(route)) return fallback;
-  if (/[?&#](?:token|access_token|refresh_token|password|secret|sig|signature|jwt|authorization)=/i.test(route)) {
+  if (
+    /[?&#](?:token|access_token|refresh_token|password|secret|sig|signature|jwt|authorization)=/i.test(
+      route
+    )
+  ) {
     return fallback;
   }
 
@@ -337,15 +361,19 @@ function buildVm(input = {}) {
   const incidencias = safeArray(
     first(dashboard.incidencias, dashboard.tickets, [])
   );
+
   const facturas = safeArray(
     first(dashboard.facturas, dashboard.invoices, [])
   );
+
   const clientes = admin
     ? safeArray(first(dashboard.clientes, dashboard.clients, []))
     : [];
+
   const usuarios = admin
     ? safeArray(first(dashboard.usuarios, dashboard.users, []))
     : [];
+
   const activity = safeArray(
     first(dashboard.activity, dashboard.actividad, dashboard.movimientos, [])
   );
@@ -362,16 +390,29 @@ function buildVm(input = {}) {
     "Usuario"
   );
 
-  const paidTotal = number(
+  /*
+     CANÓNICO:
+     El total se recibe ya calculado por /api/facturas/stats.
+     No se suma el array facturas.
+  */
+  const totalInvoiced = optionalNumber(
+    first(
+      summary.totalInvoiced,
+      summary.totalAmount,
+      summary.grossAmount,
+      summary.totalFacturado,
+      null
+    )
+  );
+
+  const paidTotal = optionalNumber(
     first(
       summary.paidTotal,
+      summary.paidAmount,
       summary.totalPaid,
       summary.totalPagado,
-      summary.importePagado,
-      summary.paid,
-      0
-    ),
-    0
+      null
+    )
   );
 
   const currency = cleanText(
@@ -384,6 +425,10 @@ function buildVm(input = {}) {
     ),
     "EUR"
   ).toUpperCase();
+
+  const invoiceStatsAvailable =
+    summary.invoiceStatsAvailable === true &&
+    totalInvoiced !== null;
 
   return {
     user: {
@@ -419,18 +464,25 @@ function buildVm(input = {}) {
         first(summary.incidencias, summary.tickets, incidencias.length, 0),
         0
       ),
+
       facturas: number(
         first(summary.facturas, summary.invoices, facturas.length, 0),
         0
       ),
+
       clientes: admin
         ? number(first(summary.clientes, summary.clients, clientes.length, 0), 0)
         : 0,
+
       usuarios: admin
         ? number(first(summary.usuarios, summary.users, usuarios.length, 0), 0)
         : 0,
+
+      totalInvoiced,
+      totalAmount: totalInvoiced,
       paidTotal,
       currency,
+      invoiceStatsAvailable,
     },
   };
 }
@@ -595,6 +647,14 @@ function stats(vm) {
     `;
   }
 
+  const billedText = vm.counts.invoiceStatsAvailable
+    ? `Facturado: ${formatBillingAmount(
+        vm.counts.totalInvoiced,
+        vm.counts.currency,
+        true
+      )}`
+    : "Facturado: no disponible";
+
   const cards = [
     {
       label: "Incidencias",
@@ -607,7 +667,7 @@ function stats(vm) {
     {
       label: "Facturas",
       value: vm.counts.facturas,
-      text: `Pagado: ${formatMoney(vm.counts.paidTotal, vm.counts.currency)}`,
+      text: billedText,
       iconName: "euro",
       route: vm.routes.facturas,
       modifier: "facturas",
@@ -674,6 +734,7 @@ function activityItem(item = {}) {
   );
 
   const statusText = normalizeStatus(first(source.status, source.estado, ""));
+
   const bodyText = visibleText(
     first(source.text, source.description, source.descripcion, ""),
     statusText || "Actualización registrada."
@@ -797,6 +858,12 @@ function invoices(vm) {
   const items = vm.facturas.slice(0, 5);
   const route = safeRoute(vm.routes.facturas, "/facturas");
 
+  const billedAmount = formatBillingAmount(
+    vm.counts.totalInvoiced,
+    vm.counts.currency,
+    vm.counts.invoiceStatsAvailable
+  );
+
   return `
     <section class="home-panel home-panel--invoices" data-home-section="invoices">
       <div class="home-panel-header">
@@ -813,11 +880,13 @@ function invoices(vm) {
         })}
       </div>
 
-      <div class="home-billing-total">
-        <span>Importe total pagado</span>
-        <strong>${escapeHtml(
-          formatMoney(vm.counts.paidTotal, vm.counts.currency)
-        )}</strong>
+      <div
+        class="home-billing-total"
+        data-home-billing-total="invoiced"
+        data-home-billing-source="api-facturas-stats"
+      >
+        <span>Importe total facturado</span>
+        <strong>${escapeHtml(billedAmount)}</strong>
       </div>
 
       ${
@@ -872,7 +941,9 @@ export function renderHomeTemplate(input = {}) {
     vm.loading ? "is-loading" : "",
     vm.error ? "has-error" : "",
     vm.stale ? "is-stale" : "",
-  ].filter(Boolean).join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return `
     <section
@@ -901,6 +972,9 @@ export function getHomeTemplateSnapshot() {
     actions: ACTIONS,
     policy: {
       templateOnly: true,
+      invoiceTotalMeaning: "total_invoiced",
+      invoiceStatsSource: "/api/facturas/stats",
+      neverAggregateVisibleInvoiceRows: true,
       noArrayFlatten: true,
       cachedIntlFormatters: true,
       staticIconRegistry: true,

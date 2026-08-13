@@ -9,9 +9,10 @@
    - Resolver aliases legacy declarados en routes.js.
    - Mantener /password-reset?token=... como token route pública.
    - Permitir que la vista reciba el token sólo en memoria.
-   - NO copiar tokens a AppCore.state ni a data-* del DOM.
+   - NO copiar tokens a AppCore.state, history.state ni data-* del DOM.
    - Validar slug real del usuario autenticado.
    - Respetar la URL actual tras restore de sesión.
+   - Cancelar transiciones obsoletas y evitar commits tardíos.
    - Renderizar vista con swap atómico.
    - Actualizar history.
    - Actualizar shell/chrome básico.
@@ -41,7 +42,7 @@ import {
 import * as Routes from "./routes.js";
 
 export const ROUTER_VERSION =
-  "router.minimal.v8-reset-safe";
+  "router.minimal.v9-transition-safe";
 
 const PUBLIC_HOME_PATH = "/";
 
@@ -51,7 +52,8 @@ const PRIVATE_HOME_PATH =
   ROUTES.dashboard ||
   "/dashboard";
 
-const HOME_PATH = PUBLIC_HOME_PATH;
+const HOME_PATH =
+  PUBLIC_HOME_PATH;
 
 const LOGIN_PATH =
   ROUTES.login ||
@@ -69,15 +71,48 @@ const ROUTER_EVENT_HANDLED_KEY =
 const LEGACY_RESET_TOKEN_PATH =
   /^\/(?:reset-password|password-reset)\/confirm\/([^/?#]+)(?:\/)?$/i;
 
+const LEGACY_RESET_TOKEN_REDACT =
+  /(\/(?:reset-password|password-reset)\/confirm\/)([^/?#\s]+)/gi;
+
+const DEFAULT_SENSITIVE_QUERY_PARAMS =
+  [
+    "access_token",
+    "accessToken",
+    "refresh_token",
+    "refreshToken",
+    "id_token",
+    "idToken",
+    "token",
+    "code",
+    "secret",
+    "session",
+    "sessionId",
+    "session_id",
+    "password",
+    "pwd",
+    "key",
+    "sig",
+    "signature",
+    "jwt",
+    "authorization",
+    "reset_token",
+    "resetToken",
+    "activation_token",
+    "activationToken",
+  ];
+
 const SENSITIVE_QUERY_KEYS =
   new Set(
-    (
-      Array.isArray(
-        SENSITIVE_QUERY_PARAMS
-      )
-        ? SENSITIVE_QUERY_PARAMS
-        : []
-    )
+    [
+      ...(
+        Array.isArray(
+          SENSITIVE_QUERY_PARAMS
+        )
+          ? SENSITIVE_QUERY_PARAMS
+          : []
+      ),
+      ...DEFAULT_SENSITIVE_QUERY_PARAMS,
+    ]
       .map(
         (key) =>
           normalizeKey(key)
@@ -97,6 +132,8 @@ let renderTask = null;
 let pendingSeq = 0;
 let pendingPath = "";
 
+let activeTransition = null;
+
 const disposers = [];
 
 /* =========================================================
@@ -113,8 +150,8 @@ function isBrowser() {
 function isObject(value) {
   return Boolean(
     value &&
-      typeof value === "object" &&
-      !Array.isArray(value)
+    typeof value === "object" &&
+    !Array.isArray(value)
   );
 }
 
@@ -167,7 +204,7 @@ function redactLegacyResetToken(
   return String(
     value ?? ""
   ).replace(
-    /(\/(?:reset-password|password-reset)\/confirm\/)([^/?#\s]+)/gi,
+    LEGACY_RESET_TOKEN_REDACT,
     "$1***"
   );
 }
@@ -181,7 +218,7 @@ function redact(
       ""
     )
       .replace(
-        /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=)([^&#\s]+)/gi,
+        /([?&#](?:access_token|accessToken|refresh_token|refreshToken|id_token|idToken|token|code|secret|session|sessionId|session_id|password|pwd|key|sig|signature|jwt|authorization|reset_token|resetToken|activation_token|activationToken)=)([^&#\s]+)/gi,
         "$1***"
       )
       .replace(
@@ -219,11 +256,7 @@ function readState() {
     // fallback abajo
   }
 
-  return isObject(
-    AppCore?.state
-  )
-    ? AppCore.state
-    : {};
+  return {};
 }
 
 function writeState(
@@ -246,19 +279,108 @@ function writeState(
       return true;
     }
   } catch {
-    // fallback abajo
+    // noop
   }
 
-  try {
-    Object.assign(
-      AppCore.state || {},
-      patch
-    );
+  /*
+    No mutamos AppCore.state directamente.
+    Core es la única autoridad de escritura del estado global.
+  */
+  return false;
+}
 
-    return true;
-  } catch {
+/* =========================================================
+   IDEMPOTENT DOM HELPERS
+========================================================= */
+
+function setAttributeIfChanged(
+  element = null,
+  name = "",
+  value = ""
+) {
+  if (
+    !element ||
+    !name
+  ) {
     return false;
   }
+
+  const next =
+    String(value);
+
+  if (
+    element.getAttribute(
+      name
+    ) === next
+  ) {
+    return false;
+  }
+
+  element.setAttribute(
+    name,
+    next
+  );
+
+  return true;
+}
+
+function setDatasetIfChanged(
+  element = null,
+  key = "",
+  value = ""
+) {
+  if (
+    !element?.dataset ||
+    !key
+  ) {
+    return false;
+  }
+
+  const next =
+    String(value);
+
+  if (
+    element.dataset[key] ===
+    next
+  ) {
+    return false;
+  }
+
+  element.dataset[key] =
+    next;
+
+  return true;
+}
+
+function setClassState(
+  element = null,
+  className = "",
+  enabled = false
+) {
+  if (
+    !element?.classList ||
+    !className
+  ) {
+    return false;
+  }
+
+  const next =
+    enabled === true;
+
+  if (
+    element.classList.contains(
+      className
+    ) === next
+  ) {
+    return false;
+  }
+
+  element.classList.toggle(
+    className,
+    next
+  );
+
+  return true;
 }
 
 /* =========================================================
@@ -472,13 +594,10 @@ function normalizeHash(
 function splitPath(
   path = HOME_PATH
 ) {
-  let raw =
+  let pathname =
     routePathFromInput(
       path
     );
-
-  let pathname =
-    raw;
 
   let search = "";
   let hash = "";
@@ -591,8 +710,7 @@ function browserPath() {
 function currentPublicPath() {
   /*
     En navegador la URL es la fuente de verdad.
-    Esto permite que un token route siga funcionando aunque
-    AppCore.state almacene sólo una versión sanitizada.
+    AppCore.state sólo conserva una copia sanitizada.
   */
   if (isBrowser()) {
     return browserPath();
@@ -605,11 +723,12 @@ function currentPublicPath() {
 }
 
 function currentCanonicalPath() {
+  const state =
+    readState();
+
   return normalizePathname(
-    readState()
-      .canonicalPath ||
-    readState()
-      .route ||
+    state.canonicalPath ||
+    state.route ||
     HOME_PATH
   );
 }
@@ -647,14 +766,11 @@ function withSearchHashFrom(
 function isLegacyResetTokenPath(
   path = HOME_PATH
 ) {
-  const pathname =
-    publicPathname(
-      path
-    );
-
   return (
     LEGACY_RESET_TOKEN_PATH.test(
-      pathname
+      publicPathname(
+        path
+      )
     )
   );
 }
@@ -686,6 +802,94 @@ function canonicalLookupPath(
   return normalizePathname(
     pathname
   );
+}
+
+function getScopedInfo(
+  path = HOME_PATH
+) {
+  try {
+    return getUserScopedRouteInfo(
+      path
+    );
+  } catch {
+    const clean =
+      normalizePathname(
+        path
+      );
+
+    if (
+      !clean.startsWith(
+        USER_HOME_PREFIX
+      )
+    ) {
+      return {
+        scoped: false,
+        home: false,
+        slug: "",
+        restPath:
+          clean,
+        canonicalPath:
+          clean,
+        lookupPath:
+          clean,
+      };
+    }
+
+    const rest =
+      clean.slice(
+        USER_HOME_PREFIX.length
+      );
+
+    const [
+      slugSegment = "",
+      ...segments
+    ] =
+      rest.split("/");
+
+    const slug =
+      normalizeUserSlug(
+        slugSegment
+      );
+
+    if (!slug) {
+      return {
+        scoped: false,
+        home: false,
+        slug: "",
+        restPath:
+          clean,
+        canonicalPath:
+          clean,
+        lookupPath:
+          clean,
+      };
+    }
+
+    const restPath =
+      segments.length
+        ? normalizePathname(
+            `/${segments.join("/")}`
+          )
+        : HOME_PATH;
+
+    return {
+      scoped: true,
+
+      home:
+        restPath ===
+        HOME_PATH,
+
+      slug,
+
+      restPath,
+
+      canonicalPath:
+        restPath,
+
+      lookupPath:
+        restPath,
+    };
+  }
 }
 
 function canonicalPathFromPublicPath(
@@ -729,6 +933,10 @@ function canonicalPathFromPublicPath(
   );
 }
 
+/* =========================================================
+   SENSITIVE PATHS
+========================================================= */
+
 function queryHasSensitiveKey(
   search = ""
 ) {
@@ -763,7 +971,7 @@ function queryHasSensitiveKey(
     }
   } catch {
     return (
-      /[?&](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
+      /[?&](?:access_token|accessToken|refresh_token|refreshToken|id_token|idToken|token|code|secret|session|sessionId|session_id|password|pwd|key|sig|signature|jwt|authorization|reset_token|resetToken|activation_token|activationToken)=/i.test(
         value
       )
     );
@@ -785,7 +993,7 @@ function hashHasSensitiveValue(
   }
 
   return (
-    /[#&?](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token)=/i.test(
+    /[#&?](?:access_token|accessToken|refresh_token|refreshToken|id_token|idToken|token|code|secret|session|sessionId|session_id|password|pwd|key|sig|signature|jwt|authorization|reset_token|resetToken|activation_token|activationToken)=/i.test(
       value
     )
   );
@@ -905,6 +1113,10 @@ function stateSafePublicPath(
 
   return publicPath;
 }
+
+/* =========================================================
+   HREF / BLOCK POLICY
+========================================================= */
 
 function isUnsafeHref(
   href = ""
@@ -1085,6 +1297,7 @@ function getInFlightAuthPromise() {
 
   const candidate =
     session.restorePromise ||
+    session.loginPromise ||
     session.mePromise ||
     session.refreshPromise ||
     null;
@@ -1105,9 +1318,11 @@ function isAuthResolving() {
 
   return Boolean(
     session.restoring ||
+    session.loggingIn ||
     session.checking ||
     session.refreshing ||
     session.restorePromise ||
+    session.loginPromise ||
     session.mePromise ||
     session.refreshPromise
   );
@@ -1235,90 +1450,6 @@ function getCurrentUserSlug() {
    USER SCOPE
 ========================================================= */
 
-function getScopedInfo(
-  path = HOME_PATH
-) {
-  try {
-    return getUserScopedRouteInfo(
-      path
-    );
-  } catch {
-    const clean =
-      normalizePathname(
-        path
-      );
-
-    if (
-      !clean.startsWith(
-        USER_HOME_PREFIX
-      )
-    ) {
-      return {
-        scoped:
-          false,
-
-        home:
-          false,
-
-        slug:
-          "",
-
-        restPath:
-          clean,
-
-        canonicalPath:
-          clean,
-
-        lookupPath:
-          clean,
-      };
-    }
-
-    const rest =
-      clean.slice(
-        USER_HOME_PREFIX
-          .length
-      );
-
-    const [
-      slugSegment = "",
-      ...segments
-    ] =
-      rest.split("/");
-
-    const slug =
-      normalizeUserSlug(
-        slugSegment
-      );
-
-    const restPath =
-      segments.length
-        ? normalizePathname(
-            `/${segments.join("/")}`
-          )
-        : HOME_PATH;
-
-    return {
-      scoped:
-        Boolean(slug),
-
-      home:
-        restPath ===
-        HOME_PATH,
-
-      slug,
-
-      restPath,
-
-      canonicalPath:
-        restPath,
-
-      lookupPath:
-        restPath,
-    };
-  }
-}
-
 function getUserSlugFromPath(
   path = HOME_PATH
 ) {
@@ -1436,6 +1567,25 @@ function getRouteByCanonicalPath(
       path
     );
 
+  try {
+    if (
+      isFunction(
+        Routes.getRouteByPath
+      )
+    ) {
+      const route =
+        Routes.getRouteByPath(
+          canonical
+        );
+
+      if (route) {
+        return route;
+      }
+    }
+  } catch {
+    // fallback abajo
+  }
+
   return (
     getRoutes()
       .find(
@@ -1498,19 +1648,18 @@ function getRouteMatch(
       pathname
     );
 
-  /*
-    routes.js es la autoridad de lookup:
-    aquí se resuelven /@slug y los aliases legacy.
-  */
   const lookupPath =
     canonicalLookupPath(
       pathname
     );
 
-  let route =
+  const blocked =
     isBlockedPath(
       publicPath
-    )
+    );
+
+  let route =
+    blocked
       ? null
       : getRouteByCanonicalPath(
           lookupPath
@@ -1528,14 +1677,19 @@ function getRouteMatch(
       ? normalizePathname(
           route.path
         )
-      : lookupPath;
+      : (
+          lookupPath ||
+          normalizePathname(
+            pathname
+          )
+        );
 
   return {
     route,
 
     /*
-      publicPath puede contener token, pero permanece únicamente
-      en memoria durante el render.
+      Puede contener token.
+      Sólo vive en memoria durante la transición.
     */
     publicPath,
 
@@ -1554,10 +1708,7 @@ function getRouteMatch(
 
     scoped,
 
-    blocked:
-      isBlockedPath(
-        publicPath
-      ),
+    blocked,
 
     alias:
       !scoped.scoped &&
@@ -1609,14 +1760,9 @@ function getCurrentRoute() {
 function isPublicAuthRoute(
   path = HOME_PATH
 ) {
-  const route =
-    getRoute(
-      path
-    );
-
   return (
-    route?.public ===
-    true
+    getRoute(path)
+      ?.public === true
   );
 }
 
@@ -1714,29 +1860,6 @@ function redirectParamFromCurrentLocation() {
   }
 }
 
-function normalizePostLoginTarget(
-  fallback =
-    getDefaultHome()
-) {
-  const target =
-    redirectParamFromCurrentLocation();
-
-  if (
-    isValidPostLoginTarget(
-      target
-    )
-  ) {
-    return normalizeNavigationTarget(
-      target
-    );
-  }
-
-  return normalizeNavigationTarget(
-    fallback ||
-    getDefaultHome()
-  );
-}
-
 function normalizeNavigationTarget(
   path = HOME_PATH,
   options = {}
@@ -1786,6 +1909,29 @@ function normalizeNavigationTarget(
   return publicPath;
 }
 
+function normalizePostLoginTarget(
+  fallback =
+    getDefaultHome()
+) {
+  const target =
+    redirectParamFromCurrentLocation();
+
+  if (
+    isValidPostLoginTarget(
+      target
+    )
+  ) {
+    return normalizeNavigationTarget(
+      target
+    );
+  }
+
+  return normalizeNavigationTarget(
+    fallback ||
+    getDefaultHome()
+  );
+}
+
 function privateSlugRedirect(
   match = {}
 ) {
@@ -1795,12 +1941,7 @@ function privateSlugRedirect(
   if (
     !routeIsPrivate(
       route
-    )
-  ) {
-    return "";
-  }
-
-  if (
+    ) ||
     !isAuthenticated()
   ) {
     return "";
@@ -1874,9 +2015,7 @@ function checkAccess(
 
   if (!route) {
     return {
-      allowed:
-        false,
-
+      allowed: false,
       reason:
         "not-found",
     };
@@ -1892,8 +2031,7 @@ function checkAccess(
       isAuthenticated()
     ) {
       return {
-        allowed:
-          false,
+        allowed: false,
 
         reason:
           "guest-only",
@@ -1906,9 +2044,7 @@ function checkAccess(
     }
 
     return {
-      allowed:
-        true,
-
+      allowed: true,
       reason:
         "public",
     };
@@ -1918,8 +2054,7 @@ function checkAccess(
     !isAuthenticated()
   ) {
     return {
-      allowed:
-        false,
+      allowed: false,
 
       reason:
         "not-authenticated",
@@ -1938,17 +2073,14 @@ function checkAccess(
     !isAdmin()
   ) {
     return {
-      allowed:
-        false,
-
+      allowed: false,
       reason:
         "admin-required",
     };
   }
 
   return {
-    allowed:
-      true,
+    allowed: true,
 
     reason:
       routeRequiresAdmin(
@@ -1957,6 +2089,187 @@ function checkAccess(
         ? "admin"
         : "authenticated",
   };
+}
+
+/* =========================================================
+   TRANSITION CANCELLATION
+========================================================= */
+
+function abortActiveTransition(
+  reason =
+    "router-transition-superseded"
+) {
+  const transition =
+    activeTransition;
+
+  if (!transition) {
+    return false;
+  }
+
+  try {
+    transition.abort(
+      reason
+    );
+  } catch {
+    // noop
+  }
+
+  return true;
+}
+
+function createTransition(
+  seq = renderSeq,
+  externalSignal = null
+) {
+  if (
+    typeof AbortController ===
+    "undefined"
+  ) {
+    const transition = {
+      seq,
+
+      signal:
+        externalSignal ||
+        null,
+
+      abort:
+        () => false,
+
+      cleanup:
+        () => {},
+
+      isCurrent:
+        () =>
+          seq ===
+          renderSeq &&
+          !externalSignal
+            ?.aborted,
+    };
+
+    activeTransition =
+      transition;
+
+    return transition;
+  }
+
+  const controller =
+    new AbortController();
+
+  let externalListener =
+    null;
+
+  const abort =
+    (reason = undefined) => {
+      if (
+        controller.signal.aborted
+      ) {
+        return false;
+      }
+
+      try {
+        controller.abort(
+          reason
+        );
+      } catch {
+        try {
+          controller.abort();
+        } catch {
+          return false;
+        }
+      }
+
+      return true;
+    };
+
+  if (
+    externalSignal
+  ) {
+    if (
+      externalSignal.aborted
+    ) {
+      abort(
+        externalSignal.reason
+      );
+    } else if (
+      isFunction(
+        externalSignal
+          .addEventListener
+      )
+    ) {
+      externalListener =
+        () => {
+          abort(
+            externalSignal.reason
+          );
+        };
+
+      externalSignal.addEventListener(
+        "abort",
+        externalListener,
+        {
+          once: true,
+        }
+      );
+    }
+  }
+
+  const transition = {
+    seq,
+
+    signal:
+      controller.signal,
+
+    abort,
+
+    isCurrent:
+      () =>
+        seq ===
+          renderSeq &&
+        !controller.signal
+          .aborted,
+
+    cleanup:
+      () => {
+        if (
+          externalSignal &&
+          externalListener &&
+          isFunction(
+            externalSignal
+              .removeEventListener
+          )
+        ) {
+          try {
+            externalSignal
+              .removeEventListener(
+                "abort",
+                externalListener
+              );
+          } catch {
+            // noop
+          }
+        }
+
+        externalListener =
+          null;
+      },
+  };
+
+  activeTransition =
+    transition;
+
+  return transition;
+}
+
+function transitionIsCurrent(
+  transition = null
+) {
+  return Boolean(
+    transition &&
+    isFunction(
+      transition.isCurrent
+    ) &&
+    transition.isCurrent()
+  );
 }
 
 /* =========================================================
@@ -1969,30 +2282,26 @@ function ensureInitialHistoryState() {
   }
 
   try {
-    if (
-      !window.history.state
-    ) {
-      const current =
-        browserPath();
+    const current =
+      browserPath();
 
-      window.history.replaceState(
-        {
-          router:
-            true,
+    /*
+      Siempre reescribimos history.state con versión mínima y saneada.
+      Así una recarga no puede conservar state antiguo con token.
+      La URL visible permanece intacta.
+    */
+    window.history.replaceState(
+      {
+        router: true,
 
-          /*
-            El history state usa versión sanitizada.
-            La URL visible conserva el token porque el navegador lo necesita.
-          */
-          path:
-            stateSafePublicPath(
-              current
-            ),
-        },
-        "",
-        current
-      );
-    }
+        path:
+          stateSafePublicPath(
+            current
+          ),
+      },
+      "",
+      current
+    );
 
     return true;
   } catch {
@@ -2004,13 +2313,10 @@ function writeHistory(
   publicPath = HOME_PATH,
   options = {}
 ) {
-  if (!isBrowser()) {
-    return false;
-  }
-
   if (
+    !isBrowser() ||
     options.skipHistory ===
-    true
+      true
   ) {
     return false;
   }
@@ -2041,9 +2347,7 @@ function writeHistory(
       method
     ](
       {
-        router:
-          true,
-
+        router: true,
         path:
           statePath,
       },
@@ -2085,18 +2389,30 @@ function setHidden(
   const value =
     Boolean(hidden);
 
+  let changed = false;
+
   try {
-    element.hidden =
-      value;
-
-    element.setAttribute(
-      "aria-hidden",
+    if (
+      element.hidden !==
       value
-        ? "true"
-        : "false"
-    );
+    ) {
+      element.hidden =
+        value;
 
-    return true;
+      changed = true;
+    }
+
+    changed =
+      setAttributeIfChanged(
+        element,
+        "aria-hidden",
+        value
+          ? "true"
+          : "false"
+      ) ||
+      changed;
+
+    return changed;
   } catch {
     return false;
   }
@@ -2112,73 +2428,150 @@ function forceVisible(
   }
 
   try {
-    element.hidden =
-      false;
+    let changed = false;
 
-    element.removeAttribute(
-      "hidden"
-    );
+    if (
+      element.hidden ===
+      true
+    ) {
+      element.hidden =
+        false;
 
-    element.removeAttribute(
-      "inert"
-    );
+      changed = true;
+    }
 
-    element.setAttribute(
-      "aria-hidden",
-      "false"
-    );
-
-    element.dataset.routeMode =
-      mode;
-
-    element.dataset.shell =
-      "visible";
-
-    element.dataset.shellState =
-      "ready";
-
-    element.dataset.appReady =
-      "true";
-
-    element.dataset.appLoading =
-      "false";
-
-    element.dataset.chrome =
-      chrome;
-
-    element.classList.remove(
-      "is-hidden",
-      "app-hidden",
-      "shell-hidden",
-      "route-hidden",
-      "chrome-hidden"
-    );
-
-    element.classList.add(
-      "is-visible"
-    );
-
-    element.style
-      .removeProperty(
-        "display"
+    if (
+      element.hasAttribute(
+        "hidden"
+      )
+    ) {
+      element.removeAttribute(
+        "hidden"
       );
 
-    element.style
-      .removeProperty(
-        "visibility"
+      changed = true;
+    }
+
+    if (
+      element.hasAttribute(
+        "inert"
+      )
+    ) {
+      element.removeAttribute(
+        "inert"
       );
 
-    element.style
-      .removeProperty(
-        "opacity"
-      );
+      changed = true;
+    }
 
-    element.style
-      .removeProperty(
-        "pointer-events"
-      );
+    changed =
+      setAttributeIfChanged(
+        element,
+        "aria-hidden",
+        "false"
+      ) ||
+      changed;
 
-    return true;
+    changed =
+      setDatasetIfChanged(
+        element,
+        "routeMode",
+        mode
+      ) ||
+      changed;
+
+    changed =
+      setDatasetIfChanged(
+        element,
+        "shell",
+        "visible"
+      ) ||
+      changed;
+
+    changed =
+      setDatasetIfChanged(
+        element,
+        "shellState",
+        "ready"
+      ) ||
+      changed;
+
+    changed =
+      setDatasetIfChanged(
+        element,
+        "appReady",
+        "true"
+      ) ||
+      changed;
+
+    changed =
+      setDatasetIfChanged(
+        element,
+        "appLoading",
+        "false"
+      ) ||
+      changed;
+
+    changed =
+      setDatasetIfChanged(
+        element,
+        "chrome",
+        chrome
+      ) ||
+      changed;
+
+    for (
+      const className
+      of [
+        "is-hidden",
+        "app-hidden",
+        "shell-hidden",
+        "route-hidden",
+        "chrome-hidden",
+      ]
+    ) {
+      changed =
+        setClassState(
+          element,
+          className,
+          false
+        ) ||
+        changed;
+    }
+
+    changed =
+      setClassState(
+        element,
+        "is-visible",
+        true
+      ) ||
+      changed;
+
+    for (
+      const property
+      of [
+        "display",
+        "visibility",
+        "opacity",
+        "pointer-events",
+      ]
+    ) {
+      if (
+        element.style
+          ?.getPropertyValue(
+            property
+          )
+      ) {
+        element.style
+          .removeProperty(
+            property
+          );
+
+        changed = true;
+      }
+    }
+
+    return changed;
   } catch {
     return false;
   }
@@ -2201,8 +2594,14 @@ function clearTableHead() {
   );
 
   try {
-    tableHeadContainer
-      ?.replaceChildren();
+    if (
+      tableHeadContainer
+        ?.childNodes
+        ?.length
+    ) {
+      tableHeadContainer
+        .replaceChildren();
+    }
   } catch {
     // noop
   }
@@ -2245,40 +2644,62 @@ function setShell(
       body,
     ].filter(Boolean)
   ) {
-    root.dataset.routeMode =
-      mode;
+    setDatasetIfChanged(
+      root,
+      "routeMode",
+      mode
+    );
 
-    root.dataset.shell =
-      "visible";
+    setDatasetIfChanged(
+      root,
+      "shell",
+      "visible"
+    );
 
-    root.dataset.shellState =
-      "ready";
+    setDatasetIfChanged(
+      root,
+      "shellState",
+      "ready"
+    );
 
-    root.dataset.appReady =
-      "true";
+    setDatasetIfChanged(
+      root,
+      "appReady",
+      "true"
+    );
 
-    root.dataset.appLoading =
-      "false";
+    setDatasetIfChanged(
+      root,
+      "appLoading",
+      "false"
+    );
 
-    root.dataset.chrome =
-      chrome;
+    setDatasetIfChanged(
+      root,
+      "chrome",
+      chrome
+    );
 
-    root.classList.toggle(
+    setClassState(
+      root,
       "route-auth",
       publicRoute
     );
 
-    root.classList.toggle(
+    setClassState(
+      root,
       "route-app",
       !publicRoute
     );
 
-    root.classList.toggle(
+    setClassState(
+      root,
       "chrome-hidden",
       publicRoute
     );
 
-    root.classList.toggle(
+    setClassState(
+      root,
       "chrome-visible",
       !publicRoute
     );
@@ -2327,18 +2748,26 @@ function setShell(
       topbar,
     ].filter(Boolean)
   ) {
-    element.dataset.routeMode =
-      mode;
+    setDatasetIfChanged(
+      element,
+      "routeMode",
+      mode
+    );
 
-    element.dataset.chrome =
-      chrome;
+    setDatasetIfChanged(
+      element,
+      "chrome",
+      chrome
+    );
 
-    element.classList.toggle(
+    setClassState(
+      element,
       "is-hidden",
       publicRoute
     );
 
-    element.classList.toggle(
+    setClassState(
+      element,
       "is-visible",
       !publicRoute
     );
@@ -2364,10 +2793,20 @@ function setDocumentTitle(
       ""
     );
 
-  document.title =
+  const next =
     title
       ? `${title} · ${APP_TITLE}`
       : APP_TITLE;
+
+  if (
+    document.title ===
+    next
+  ) {
+    return false;
+  }
+
+  document.title =
+    next;
 
   return true;
 }
@@ -2439,7 +2878,8 @@ function setActiveMenu(
       Boolean(
         (
           key &&
-          itemKey === key
+          itemKey ===
+            key
         ) ||
         (
           canonicalPath &&
@@ -2453,24 +2893,28 @@ function setActiveMenu(
         )
       );
 
-    item.classList.toggle(
+    setClassState(
+      item,
       "is-active",
       active
     );
 
-    item.classList.toggle(
+    setClassState(
+      item,
       "is-pending",
       active &&
       pending
     );
 
     if (active) {
-      item.setAttribute(
+      setAttributeIfChanged(
+        item,
         "aria-current",
         "page"
       );
 
-      item.setAttribute(
+      setAttributeIfChanged(
+        item,
         "data-route-pending",
         pending
           ? "true"
@@ -2552,28 +2996,32 @@ function setElementBusy(
     return false;
   }
 
-  try {
-    element.setAttribute(
-      "aria-busy",
-      busy
-        ? "true"
-        : "false"
-    );
+  const value =
+    busy === true;
 
-    element.classList.toggle(
-      "is-route-pending",
-      busy
-    );
+  setAttributeIfChanged(
+    element,
+    "aria-busy",
+    value
+      ? "true"
+      : "false"
+  );
 
-    element.dataset.routePending =
-      busy
-        ? "true"
-        : "false";
+  setClassState(
+    element,
+    "is-route-pending",
+    value
+  );
 
-    return true;
-  } catch {
-    return false;
-  }
+  setDatasetIfChanged(
+    element,
+    "routePending",
+    value
+      ? "true"
+      : "false"
+  );
+
+  return true;
 }
 
 function setRoutePending(
@@ -2637,31 +3085,50 @@ function setRoutePending(
       body,
     ].filter(Boolean)
   ) {
-    root.classList.add(
-      "route-pending"
+    setClassState(
+      root,
+      "route-pending",
+      true
     );
 
-    root.classList.add(
-      "is-route-pending"
+    setClassState(
+      root,
+      "is-route-pending",
+      true
     );
 
-    root.dataset.routePending =
-      "true";
+    setDatasetIfChanged(
+      root,
+      "routePending",
+      "true"
+    );
 
-    root.dataset.routePendingPath =
-      safePublicPath;
+    setDatasetIfChanged(
+      root,
+      "routePendingPath",
+      safePublicPath
+    );
 
-    root.dataset.routePendingCanonicalPath =
-      canonicalPath;
+    setDatasetIfChanged(
+      root,
+      "routePendingCanonicalPath",
+      canonicalPath
+    );
 
-    root.dataset.routePendingView =
-      viewKey;
+    setDatasetIfChanged(
+      root,
+      "routePendingView",
+      viewKey
+    );
 
-    root.dataset.routePendingSource =
+    setDatasetIfChanged(
+      root,
+      "routePendingSource",
       cleanText(
         options.source,
         "router"
-      );
+      )
+    );
   }
 
   for (
@@ -2741,12 +3208,16 @@ function clearRoutePending(
       body,
     ].filter(Boolean)
   ) {
-    root.classList.remove(
-      "route-pending"
+    setClassState(
+      root,
+      "route-pending",
+      false
     );
 
-    root.classList.remove(
-      "is-route-pending"
+    setClassState(
+      root,
+      "is-route-pending",
+      false
     );
 
     delete root
@@ -2803,7 +3274,7 @@ function clearRoutePending(
 }
 
 /* =========================================================
-   RENDER
+   RENDER HOST / CLEANUP
 ========================================================= */
 
 function viewRoot() {
@@ -2830,6 +3301,17 @@ function cleanupView(
   view = null
 ) {
   if (
+    isFunction(view)
+  ) {
+    try {
+      view();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  if (
     !view ||
     !isObject(view)
   ) {
@@ -2852,7 +3334,6 @@ function cleanupView(
         )
       ) {
         view[method]();
-
         return true;
       }
     } catch {
@@ -2868,7 +3349,6 @@ function removeNode(
 ) {
   try {
     element?.remove?.();
-
     return true;
   } catch {
     return false;
@@ -2986,33 +3466,58 @@ function activateRouteHost(
       "inert"
     );
 
-    host.setAttribute(
+    setAttributeIfChanged(
+      host,
       "aria-hidden",
       "false"
     );
 
-    host.setAttribute(
+    setAttributeIfChanged(
+      host,
       "aria-busy",
       "false"
     );
 
-    host.dataset.routeHostState =
-      "ready";
-
-    host.dataset.routeMode =
-      mode;
-
-    host.dataset.chrome =
-      chrome;
-
-    host.classList.remove(
-      "is-hidden",
-      "is-preparing"
+    setDatasetIfChanged(
+      host,
+      "routeHostState",
+      "ready"
     );
 
-    host.classList.add(
+    setDatasetIfChanged(
+      host,
+      "routeMode",
+      mode
+    );
+
+    setDatasetIfChanged(
+      host,
+      "chrome",
+      chrome
+    );
+
+    setClassState(
+      host,
+      "is-hidden",
+      false
+    );
+
+    setClassState(
+      host,
+      "is-preparing",
+      false
+    );
+
+    setClassState(
+      host,
       "is-visible",
-      "is-ready"
+      true
+    );
+
+    setClassState(
+      host,
+      "is-ready",
+      true
     );
 
     return true;
@@ -3147,6 +3652,10 @@ function renderFallback(
   return section;
 }
 
+/* =========================================================
+   COMMIT STATE / HISTORY
+========================================================= */
+
 function setRouteState(
   match = {}
 ) {
@@ -3222,7 +3731,7 @@ function beginTransition(
 
   /*
     History conserva la URL real.
-    El objeto state de history usa una versión sanitizada.
+    history.state usa siempre una versión sanitizada.
   */
   writeHistory(
     match.publicPath ||
@@ -3233,10 +3742,15 @@ function beginTransition(
   return state;
 }
 
+/* =========================================================
+   ROUTE RENDER
+========================================================= */
+
 async function renderRoute(
   match = {},
   options = {},
-  seq = renderSeq
+  seq = renderSeq,
+  transition = null
 ) {
   const route =
     match.route;
@@ -3250,21 +3764,9 @@ async function renderRoute(
   const root =
     viewRoot();
 
-  setRoutePending(
-    match,
-    options,
-    seq
-  );
-
   if (!root) {
-    clearRoutePending(
-      seq
-    );
-
     return {
-      ok:
-        false,
-
+      ok: false,
       reason:
         "missing-root",
     };
@@ -3299,14 +3801,8 @@ async function renderRoute(
       nextHost
     );
   } catch {
-    clearRoutePending(
-      seq
-    );
-
     return {
-      ok:
-        false,
-
+      ok: false,
       reason:
         "mount-host-failed",
     };
@@ -3325,7 +3821,8 @@ async function renderRoute(
 
     /*
       ÚNICO punto donde la vista recibe el publicPath completo.
-      No se guarda en DOM ni state global.
+      También recibe AbortSignal de la transición; las vistas que
+      no lo consuman siguen protegidas por renderSeq.
     */
     const result =
       await route.render(
@@ -3352,16 +3849,27 @@ async function renderRoute(
           source:
             "router",
 
+          signal:
+            transition
+              ?.signal ||
+            null,
+
           isCurrentRender:
             () =>
               seq ===
-              renderSeq,
+                renderSeq &&
+              transitionIsCurrent(
+                transition
+              ),
         }
       );
 
     if (
       seq !==
-      renderSeq
+        renderSeq ||
+      !transitionIsCurrent(
+        transition
+      )
     ) {
       cleanupView(
         result
@@ -3372,14 +3880,14 @@ async function renderRoute(
       );
 
       return {
-        ok:
-          false,
-
-        skipped:
-          true,
+        ok: false,
+        skipped: true,
 
         reason:
-          "stale-render",
+          transition?.signal
+            ?.aborted
+            ? "aborted-render"
+            : "stale-render",
       };
     }
 
@@ -3412,10 +3920,32 @@ async function renderRoute(
         result
       );
     } else if (
+      isFunction(result) ||
       isObject(result)
     ) {
       nextView =
         result;
+    }
+
+    if (
+      !transitionIsCurrent(
+        transition
+      )
+    ) {
+      cleanupView(
+        nextView
+      );
+
+      removeNode(
+        nextHost
+      );
+
+      return {
+        ok: false,
+        skipped: true,
+        reason:
+          "stale-before-commit",
+      };
     }
 
     const committed =
@@ -3438,13 +3968,8 @@ async function renderRoute(
         nextHost
       );
 
-      clearRoutePending(
-        seq
-      );
-
       return {
-        ok:
-          false,
+        ok: false,
 
         reason:
           "commit-failed",
@@ -3494,16 +4019,9 @@ async function renderRoute(
       }
     );
 
-    clearRoutePending(
-      seq
-    );
-
     return {
-      ok:
-        true,
-
-      found:
-        true,
+      ok: true,
+      found: true,
 
       route,
 
@@ -3522,21 +4040,24 @@ async function renderRoute(
   } catch (error) {
     if (
       seq !==
-      renderSeq
+        renderSeq ||
+      !transitionIsCurrent(
+        transition
+      )
     ) {
       removeNode(
         nextHost
       );
 
       return {
-        ok:
-          false,
-
-        skipped:
-          true,
+        ok: false,
+        skipped: true,
 
         reason:
-          "stale-error",
+          transition?.signal
+            ?.aborted
+            ? "aborted-error"
+            : "stale-error",
       };
     }
 
@@ -3551,8 +4072,10 @@ async function renderRoute(
         nextHost,
         {
           route,
+
           nextView:
             null,
+
           previousView,
           previousHost,
         }
@@ -3583,13 +4106,8 @@ async function renderRoute(
       );
     }
 
-    clearRoutePending(
-      seq
-    );
-
     return {
-      ok:
-        false,
+      ok: false,
 
       error,
 
@@ -3605,8 +4123,23 @@ async function renderRoute(
 function renderNotFound(
   match = {},
   options = {},
-  seq = renderSeq
+  seq = renderSeq,
+  transition = null
 ) {
+  if (
+    transition &&
+    !transitionIsCurrent(
+      transition
+    )
+  ) {
+    return {
+      ok: false,
+      skipped: true,
+      reason:
+        "stale-not-found",
+    };
+  }
+
   const state =
     beginTransition(
       {
@@ -3622,30 +4155,15 @@ function renderNotFound(
       options
     );
 
-  setRoutePending(
-    match,
-    options,
-    seq
-  );
-
   const root =
     viewRoot();
 
   if (!root) {
-    clearRoutePending(
-      seq
-    );
-
     return {
-      ok:
-        false,
-
-      found:
-        false,
-
+      ok: false,
+      found: false,
       reason:
         "missing-root",
-
       renderSeq:
         seq,
     };
@@ -3661,7 +4179,6 @@ function renderNotFound(
     createRouteHost(
       {
         ...match,
-
         route:
           null,
       },
@@ -3678,6 +4195,24 @@ function renderNotFound(
     nextHost
   );
 
+  if (
+    transition &&
+    !transitionIsCurrent(
+      transition
+    )
+  ) {
+    removeNode(
+      nextHost
+    );
+
+    return {
+      ok: false,
+      skipped: true,
+      reason:
+        "stale-not-found",
+    };
+  }
+
   commitRouteHost(
     nextHost,
     {
@@ -3692,16 +4227,9 @@ function renderNotFound(
     }
   );
 
-  clearRoutePending(
-    seq
-  );
-
   return {
-    ok:
-      true,
-
-    found:
-      false,
+    ok: true,
+    found: false,
 
     canonicalPath:
       state.canonicalPath,
@@ -3722,34 +4250,37 @@ function renderForbidden(
   reason =
     "forbidden",
   options = {},
-  seq = renderSeq
+  seq = renderSeq,
+  transition = null
 ) {
+  if (
+    transition &&
+    !transitionIsCurrent(
+      transition
+    )
+  ) {
+    return {
+      ok: false,
+      skipped: true,
+      reason:
+        "stale-forbidden",
+    };
+  }
+
   const state =
     beginTransition(
       match,
       options
     );
 
-  setRoutePending(
-    match,
-    options,
-    seq
-  );
-
   const root =
     viewRoot();
 
   if (!root) {
-    clearRoutePending(
-      seq
-    );
-
     return {
-      ok:
-        false,
+      ok: false,
 
-      forbidden:
-        true,
+      forbidden: true,
 
       reason:
         "missing-root",
@@ -3781,6 +4312,24 @@ function renderForbidden(
     nextHost
   );
 
+  if (
+    transition &&
+    !transitionIsCurrent(
+      transition
+    )
+  ) {
+    removeNode(
+      nextHost
+    );
+
+    return {
+      ok: false,
+      skipped: true,
+      reason:
+        "stale-forbidden",
+    };
+  }
+
   commitRouteHost(
     nextHost,
     {
@@ -3796,16 +4345,10 @@ function renderForbidden(
     }
   );
 
-  clearRoutePending(
-    seq
-  );
-
   return {
-    ok:
-      true,
+    ok: true,
 
-    forbidden:
-      true,
+    forbidden: true,
 
     reason,
 
@@ -3822,6 +4365,10 @@ function renderForbidden(
       seq,
   };
 }
+
+/* =========================================================
+   EXECUTION
+========================================================= */
 
 async function redirectTo(
   path = HOME_PATH,
@@ -3840,12 +4387,8 @@ async function redirectTo(
     depth >= 5
   ) {
     return {
-      ok:
-        false,
-
-      skipped:
-        true,
-
+      ok: false,
+      skipped: true,
       reason:
         "redirect-loop",
 
@@ -3878,8 +4421,20 @@ async function executeRender(
   path = HOME_PATH,
   options = {}
 ) {
+  /*
+    Una nueva transición invalida la anterior antes de hacer trabajo.
+  */
+  abortActiveTransition();
+
   const seq =
     ++renderSeq;
+
+  const transition =
+    createTransition(
+      seq,
+      options.signal ||
+      null
+    );
 
   let match =
     getRouteMatch(
@@ -3892,171 +4447,199 @@ async function executeRender(
     seq
   );
 
-  if (
-    hasSensitiveQuery(
-      match.publicPath
-    ) &&
-    !routeAllowsSensitiveQuery(
-      match.route
-    )
-  ) {
-    const cleanPath =
-      stripSensitiveQuery(
+  try {
+    if (
+      hasSensitiveQuery(
         match.publicPath
-      );
+      ) &&
+      !routeAllowsSensitiveQuery(
+        match.route
+      )
+    ) {
+      const cleanPath =
+        stripSensitiveQuery(
+          match.publicPath
+        );
+
+      if (
+        cleanPath !==
+        match.publicPath
+      ) {
+        return redirectTo(
+          cleanPath,
+          options,
+          "scrub-sensitive-query"
+        );
+      }
+    }
 
     if (
-      cleanPath !==
-      match.publicPath
+      match.blocked
     ) {
-      return redirectTo(
-        cleanPath,
-        options,
-        "scrub-sensitive-query"
-      );
+      return isAuthenticated()
+        ? renderNotFound(
+            match,
+            options,
+            seq,
+            transition
+          )
+        : redirectTo(
+            LOGIN_PATH,
+            options,
+            "blocked-login"
+          );
     }
-  }
 
-  if (
-    match.blocked
-  ) {
-    return isAuthenticated()
-      ? renderNotFound(
-          match,
-          options,
-          seq
-        )
-      : redirectTo(
-          LOGIN_PATH,
-          options,
-          "blocked-login"
-        );
-  }
-
-  await waitForAuthIfNeeded(
-    match.route
-  );
-
-  if (
-    seq !==
-    renderSeq
-  ) {
-    return {
-      ok:
-        false,
-
-      skipped:
-        true,
-
-      reason:
-        "stale",
-    };
-  }
-
-  match =
-    getRouteMatch(
-      path
+    await waitForAuthIfNeeded(
+      match.route
     );
 
-  setRoutePending(
-    match,
-    options,
-    seq
-  );
-
-  if (
-    hasSensitiveQuery(
-      match.publicPath
-    ) &&
-    !routeAllowsSensitiveQuery(
-      match.route
-    )
-  ) {
-    const cleanPath =
-      stripSensitiveQuery(
-        match.publicPath
-      );
-
     if (
-      cleanPath !==
-      match.publicPath
+      !transitionIsCurrent(
+        transition
+      )
     ) {
-      return redirectTo(
-        cleanPath,
-        options,
-        "scrub-sensitive-query"
-      );
-    }
-  }
-
-  if (
-    !match.route
-  ) {
-    return isAuthenticated()
-      ? renderNotFound(
-          match,
-          options,
-          seq
-        )
-      : redirectTo(
-          LOGIN_PATH,
-          options,
-          "not-found-login"
-        );
-  }
-
-  const access =
-    checkAccess(
-      match
-    );
-
-  if (
-    !access.allowed
-  ) {
-    if (
-      access.redirectTo
-    ) {
-      return redirectTo(
-        access.redirectTo,
-        options,
-        access.reason ||
-        "guard-redirect"
-      );
+      return {
+        ok: false,
+        skipped: true,
+        reason:
+          transition.signal
+            ?.aborted
+            ? "aborted"
+            : "stale",
+      };
     }
 
-    return renderForbidden(
+    /*
+      Auth pudo cambiar durante la espera.
+      Re-resolvemos ruta y guard con estado fresco.
+    */
+    match =
+      getRouteMatch(
+        path
+      );
+
+    setRoutePending(
       match,
-      access.reason ||
-      "forbidden",
       options,
       seq
     );
-  }
 
-  const slugRedirect =
-    options
-      .keepCanonicalHome ===
-      true
-      ? ""
-      : privateSlugRedirect(
-          match
+    if (
+      hasSensitiveQuery(
+        match.publicPath
+      ) &&
+      !routeAllowsSensitiveQuery(
+        match.route
+      )
+    ) {
+      const cleanPath =
+        stripSensitiveQuery(
+          match.publicPath
         );
 
-  if (
-    slugRedirect
-  ) {
-    return redirectTo(
-      slugRedirect,
-      options,
-      "user-scope"
-    );
-  }
+      if (
+        cleanPath !==
+        match.publicPath
+      ) {
+        return redirectTo(
+          cleanPath,
+          options,
+          "scrub-sensitive-query"
+        );
+      }
+    }
 
-  return renderRoute(
-    match,
-    options,
-    seq
-  );
+    if (
+      !match.route
+    ) {
+      return isAuthenticated()
+        ? renderNotFound(
+            match,
+            options,
+            seq,
+            transition
+          )
+        : redirectTo(
+            LOGIN_PATH,
+            options,
+            "not-found-login"
+          );
+    }
+
+    const access =
+      checkAccess(
+        match
+      );
+
+    if (
+      !access.allowed
+    ) {
+      if (
+        access.redirectTo
+      ) {
+        return redirectTo(
+          access.redirectTo,
+          options,
+          access.reason ||
+          "guard-redirect"
+        );
+      }
+
+      return renderForbidden(
+        match,
+        access.reason ||
+        "forbidden",
+        options,
+        seq,
+        transition
+      );
+    }
+
+    const slugRedirect =
+      options
+        .keepCanonicalHome ===
+        true
+        ? ""
+        : privateSlugRedirect(
+            match
+          );
+
+    if (
+      slugRedirect
+    ) {
+      return redirectTo(
+        slugRedirect,
+        options,
+        "user-scope"
+      );
+    }
+
+    return await renderRoute(
+      match,
+      options,
+      seq,
+      transition
+    );
+  } finally {
+    /*
+      Sólo la transición propietaria puede limpiar su pending.
+      Si ya existe otra, clearRoutePending() rechaza por seq.
+    */
+    clearRoutePending(
+      seq
+    );
+
+    transition.cleanup();
+
+    if (
+      activeTransition ===
+      transition
+    ) {
+      activeTransition =
+        null;
+    }
+  }
 }
 
 function render(
@@ -4064,13 +4647,11 @@ function render(
   options = {}
 ) {
   const task =
-    Promise.resolve(
-      executeRender(
-        path,
-        isObject(options)
-          ? options
-          : {}
-      )
+    executeRender(
+      path,
+      isObject(options)
+        ? options
+        : {}
     );
 
   renderTask =
@@ -4190,6 +4771,19 @@ function shouldSkipSameNavigation(
       target
     );
 
+  /*
+    Si otra ruta está pendiente, navegar a la URL visible actual
+    debe cancelar esa transición en vez de ignorar el click.
+  */
+  if (
+    renderTask &&
+    pendingPath &&
+    pendingPath !==
+      normalizedTarget
+  ) {
+    return false;
+  }
+
   return (
     normalizedTarget ===
     currentPublicPath()
@@ -4212,12 +4806,8 @@ function navigate(
     )
   ) {
     return Promise.resolve({
-      ok:
-        true,
-
-      skipped:
-        true,
-
+      ok: true,
+      skipped: true,
       reason:
         "ignored-href",
     });
@@ -4234,6 +4824,10 @@ function navigate(
       target
     );
 
+  /*
+    Doble click / doble navigate al mismo destino pendiente:
+    compartimos la misma Promise, no lanzamos otra transición.
+  */
   if (
     renderTask &&
     pendingPath &&
@@ -4274,12 +4868,8 @@ function navigate(
     );
 
     return Promise.resolve({
-      ok:
-        true,
-
-      skipped:
-        true,
-
+      ok: true,
+      skipped: true,
       reason:
         "same-route",
 
@@ -4290,17 +4880,6 @@ function navigate(
         match.canonicalPath,
     });
   }
-
-  const match =
-    getRouteMatch(
-      normalizedTarget
-    );
-
-  setRoutePending(
-    match,
-    options,
-    renderSeq + 1
-  );
 
   return render(
     normalizedTarget,
@@ -4423,8 +5002,11 @@ function onClick(
 
   if (
     !href ||
-    targetAttr ===
-      "_blank"
+    (
+      targetAttr &&
+      targetAttr !==
+        "_self"
+    )
   ) {
     return;
   }
@@ -4513,23 +5095,16 @@ function onDom(
 
 function attachToCore() {
   try {
-    AppCore.Router =
-      Router;
-
-    AppCore.router =
-      Router;
-
-    AppCore.registerModule?.(
-      "router",
-      Router,
-      {
-        overwrite:
-          true,
-      }
-    );
-
-    AppCore.modules
-      ?.register?.(
+    /*
+      Registro único.
+      AppCore.Router / AppCore.router ya son aliases del registry.
+    */
+    if (
+      isFunction(
+        AppCore?.registerModule
+      )
+    ) {
+      AppCore.registerModule(
         "router",
         Router,
         {
@@ -4537,6 +5112,10 @@ function attachToCore() {
             true,
         }
       );
+    } else {
+      AppCore.Router =
+        Router;
+    }
   } catch {
     // noop
   }
@@ -4595,6 +5174,30 @@ function bind() {
 }
 
 function unbind() {
+  /*
+    Invalida cualquier render pendiente antes de desmontar.
+    Sin esto, una vista lenta podría terminar después de destroy().
+  */
+  ++renderSeq;
+
+  abortActiveTransition(
+    "router-unbind"
+  );
+
+  if (
+    activeTransition
+  ) {
+    try {
+      activeTransition
+        .cleanup?.();
+    } catch {
+      // noop
+    }
+
+    activeTransition =
+      null;
+  }
+
   while (
     disposers.length
   ) {
@@ -4606,7 +5209,11 @@ function unbind() {
   }
 
   destroyActiveView();
-  clearRoutePending();
+
+  /*
+    seq=0 fuerza cleanup del estado pending actual.
+  */
+  clearRoutePending(0);
 
   bound =
     false;
@@ -4706,7 +5313,7 @@ function safeMatchForDebug(
 }
 
 function getSnapshot() {
-  return {
+  return Object.freeze({
     version:
       ROUTER_VERSION,
 
@@ -4727,6 +5334,11 @@ function getSnapshot() {
     rendering:
       Boolean(
         renderTask
+      ),
+
+    transitionInFlight:
+      Boolean(
+        activeTransition
       ),
 
     pending:
@@ -4769,49 +5381,64 @@ function getSnapshot() {
       ),
 
     routes:
-      getRoutes()
-        .map(
-          (route) => ({
-            path:
-              route.path,
+      Object.freeze(
+        getRoutes()
+          .map(
+            (route) => ({
+              path:
+                route.path,
 
-            name:
-              route.name,
+              name:
+                route.name,
 
-            title:
-              route.title,
+              title:
+                route.title,
 
-            public:
-              route.public,
+              public:
+                route.public,
 
-            guestOnly:
-              route.guestOnly,
+              guestOnly:
+                route.guestOnly,
 
-            tokenRoute:
-              route.tokenRoute,
+              tokenRoute:
+                route.tokenRoute,
 
-            adminOnly:
-              route.adminOnly,
+              adminOnly:
+                route.adminOnly,
 
-            viewKey:
-              route.viewKey,
-          })
-        ),
+              viewKey:
+                route.viewKey,
+            })
+          )
+      ),
 
-    policy: {
-      sensitivePublicPathInState:
-        false,
+    policy:
+      Object.freeze({
+        sensitivePublicPathInState:
+          false,
 
-      sensitivePublicPathInDom:
-        false,
+        sensitivePublicPathInDom:
+          false,
 
-      tokenPassedToViewInMemory:
-        true,
+        sensitivePublicPathInHistoryState:
+          false,
 
-      legacyResetAlias:
-        true,
-    },
-  };
+        tokenPassedToViewInMemory:
+          true,
+
+        transitionAbort:
+          true,
+
+        staleCommitProtection:
+          true,
+
+        samePendingNavigationDedup:
+          true,
+
+        legacyResetAlias:
+          true,
+      }),
+  });
 }
 
 function debug(

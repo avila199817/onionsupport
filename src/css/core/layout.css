@@ -2,37 +2,27 @@
    ONION SUPPORT — LAYOUT SYSTEM
    Archivo: /src/css/core/layout.css
 
-   FINAL LAYOUT SYSTEM · PRIVATE SPA · EXTREME 10/10
-   SHELL · STACKING · SCROLL · MOUNTS · RESPONSIVE
-   REVISION: sidebar state sync / calibrated shell motion / mobile rail offset / no horizontal escape
+   LAYOUT SYSTEM · PRIVATE SPA · HARDENED / LEAN
 
    Responsabilidad:
-   - Layout, stacking, scroll, shell y responsive.
-   - Sidebar/topbar tienen mounts propios.
-   - Main queda por debajo de sidebar/topbar.
-   - .main-content es el scroll container real.
-   - El scroll NO empieza debajo/por detrás del topbar.
-   - #app-content sólo compensa tablehead dinámico.
-   - Layout controla el offset horizontal del sidebar.
-   - Sidebar.css NO debe desplazar main/topbar/tablehead.
-   - Layout NO controla search.
-   - Layout NO pinta glass de búsqueda.
-   - Todo lo relacionado con search vive en topbar.css.
+   - Contrato geométrico del shell.
+   - Offset de Sidebar para main/tablehead.
+   - Main como scroll container real.
+   - Tablehead fijo con offset dinámico.
+   - Capas de mounts sin duplicar el CSS visual de Sidebar/Topbar.
+   - Rutas sin chrome a viewport completo.
+   - Contenedores/utilidades de layout compartidas.
+   - Responsive y preferencias de accesibilidad.
 
-   Reglas:
-   - Sin :root.
-   - Sin [data-theme="light"].
-   - Sin paletas locales duplicadas.
-   - Sin reset global duplicado.
-   - Sin z-index plano para todos los hijos.
-   - Sin lógica visual de sidebar.
-   - Sin lógica visual de topbar.
-   - Sin lógica visual de search.
+   Fuera de este archivo:
+   - Visual Sidebar -> /src/css/layout/sidebar.css
+   - Visual Topbar/search -> /src/css/layout/topbar.css
+   - Visual Loader -> /src/css/core/loader.css
 ========================================================= */
 
 
 /* =========================================================
-   DOCUMENT / BODY LAYOUT CONTRACT
+   DOCUMENT / BODY CONTRACT
 ========================================================= */
 
 html,
@@ -41,11 +31,10 @@ body {
   min-inline-size: 320px;
   max-inline-size: 100%;
 
-  min-block-size: 100%;
   block-size: 100%;
+  min-block-size: 100%;
 
   margin: 0;
-  box-sizing: border-box;
 }
 
 html {
@@ -60,214 +49,255 @@ html {
 body {
   --layout-bg-z: 0;
   --layout-main-z: 1;
-  --layout-tablehead-z: var(--z-tablehead, 24);
-  --layout-topbar-mount-z: var(--z-topbar, 30);
-  --layout-sidebar-mount-z: var(--z-sidebar, 40);
-  --layout-sidebar-tooltip-safe-z: calc(var(--z-tooltip, 70) + 20);
-  --layout-loader-z: var(--z-loader, 2147483000);
 
-  --layout-sidebar-motion-duration: .46s;
-  --layout-sidebar-motion-duration-mobile: .40s;
-  --layout-sidebar-motion-ease: cubic-bezier(.22, 1, .24, 1);
+  --layout-tablehead-z:
+    var(--z-tablehead, 24);
 
-  --layout-safe-top: var(--app-safe-top, env(safe-area-inset-top, 0px));
-  --layout-safe-right: var(--app-safe-right, env(safe-area-inset-right, 0px));
-  --layout-safe-bottom: var(--app-safe-bottom, env(safe-area-inset-bottom, 0px));
-  --layout-safe-left: var(--app-safe-left, env(safe-area-inset-left, 0px));
+  --layout-topbar-mount-z:
+    var(--z-topbar, 30);
 
-  --layout-main-inset-top: var(--app-offset-topbar, var(--topbar-height, 58px));
-  --layout-main-inset-left: var(--app-sidebar-current-width, var(--sidebar-width, 260px));
+  --layout-sidebar-mount-z:
+    var(--z-sidebar, 40);
 
-  --layout-content-max: var(--content-max, 1360px);
-  --layout-content-narrow: var(--content-narrow, 1120px);
-  --layout-content-wide: var(--content-wide, 1520px);
+  --layout-loader-z:
+    var(--z-loader, 2147483000);
 
-  --layout-scrollbar-track: var(--scrollbar-track, transparent);
-  --layout-scrollbar-thumb: var(--scrollbar-thumb, rgba(255,255,255,.20));
-  --layout-scrollbar-thumb-hover: var(--scrollbar-thumb-hover, rgba(255,255,255,.34));
+  --layout-sidebar-motion-duration: .32s;
+  --layout-sidebar-motion-duration-mobile: .26s;
 
-  --app-sidebar-current-width: var(--sidebar-width, 260px);
+  --layout-sidebar-motion-ease:
+    cubic-bezier(.22, .86, .24, 1);
+
+  --layout-safe-top:
+    var(
+      --app-safe-top,
+      env(safe-area-inset-top, 0px)
+    );
+
+  --layout-safe-right:
+    var(
+      --app-safe-right,
+      env(safe-area-inset-right, 0px)
+    );
+
+  --layout-safe-bottom:
+    var(
+      --app-safe-bottom,
+      env(safe-area-inset-bottom, 0px)
+    );
+
+  --layout-safe-left:
+    var(
+      --app-safe-left,
+      env(safe-area-inset-left, 0px)
+    );
+
+  /*
+    variables.css ya incluye safe-area dentro de --app-offset-topbar.
+  */
+  --layout-main-inset-top:
+    var(
+      --app-offset-topbar,
+      calc(
+        var(--topbar-height, 58px) +
+        var(--layout-safe-top)
+      )
+    );
+
+  --layout-main-inset-left:
+    var(
+      --app-sidebar-current-width,
+      var(--sidebar-width, 260px)
+    );
+
+  --layout-content-max:
+    var(--content-max, 1360px);
+
+  --layout-content-narrow:
+    var(--content-narrow, 1120px);
+
+  --layout-content-wide:
+    var(--content-wide, 1520px);
+
+  --layout-scrollbar-track:
+    var(--scrollbar-track, transparent);
+
+  --layout-scrollbar-thumb:
+    var(
+      --scrollbar-thumb,
+      rgba(255, 255, 255, .20)
+    );
+
+  --layout-scrollbar-thumb-hover:
+    var(
+      --scrollbar-thumb-hover,
+      rgba(255, 255, 255, .34)
+    );
+
+  --app-sidebar-current-width:
+    var(--sidebar-width, 260px);
+
   --app-offset-tablehead: 0px;
 
   overflow: hidden;
 
   overscroll-behavior: none;
 
-  background: var(--body-bg);
-  color: var(--text);
+  background:
+    var(--body-bg);
 
-  font-family: var(--font-family);
+  color:
+    var(--text);
+
+  font-family:
+    var(--font-family);
 }
 
 
 /* =========================================================
-   BODY GLOBAL STATES
+   SIDEBAR WIDTH AUTHORITY
+   SidebarUI v3 sincroniza body/html.
+   No hace falta inspeccionar el DOM con :has().
 ========================================================= */
 
-body.loading,
-body.app-loading,
-body.app-booting,
-body[data-app-state="loading"],
-body[data-app-state="booting"] {
-  overflow: hidden;
-  overscroll-behavior: none;
+body:is(
+  .sidebar-open,
+  [data-sidebar-state="open"],
+  [data-sidebar-open="true"]
+) {
+  --app-sidebar-current-width:
+    var(--sidebar-width, 260px);
 }
 
-html.is-scroll-locked,
-html[data-scroll-locked="true"],
-body.is-scroll-locked,
-body[data-scroll-locked="true"] {
-  overflow: hidden !important;
-  overscroll-behavior: none !important;
+body:is(
+  .sidebar-collapsed,
+  [data-sidebar-state="collapsed"],
+  [data-sidebar-open="false"]
+) {
+  --app-sidebar-current-width:
+    var(--sidebar-collapsed, 72px);
 }
 
-body.is-resizing,
-body[data-layout-resizing="true"] {
-  pointer-events: none;
-}
-
-body.is-resizing *,
-body[data-layout-resizing="true"] * {
-  transition: none !important;
-}
-
-
-/* =========================================================
-   SIDEBAR WIDTH STATE
-   Contract:
-   - JS puede usar body.sidebar-open / body.sidebar-collapsed.
-   - CSS también detecta el root real con :has().
-   - En móvil el rail collapsed visible reserva su ancho.
-========================================================= */
-
-body.sidebar-open,
-body[data-sidebar-state="open"],
-body[data-sidebar-open="true"] {
-  --app-sidebar-current-width: var(--sidebar-width, 260px);
-}
-
-body.sidebar-collapsed,
-body[data-sidebar-state="collapsed"],
-body[data-sidebar-open="false"] {
-  --app-sidebar-current-width: var(--sidebar-collapsed, 72px);
-}
-
-body.sidebar-hidden,
-body[data-sidebar-state="hidden"],
-body[data-sidebar-hidden="true"] {
+body:is(
+  .sidebar-hidden,
+  [data-sidebar-state="hidden"],
+  [data-sidebar-hidden="true"]
+) {
   --app-sidebar-current-width: 0px;
 }
 
-@supports selector(body:has(.sidebar)) {
-  body:has(#sidebar-mount .sidebar.is-open),
-  body:has(#sidebar-mount .sidebar[data-open="true"]),
-  body:has(#sidebar-mount .sidebar[data-sidebar-state="open"]),
-  body:has([data-sidebar-mount] .sidebar.is-open),
-  body:has([data-sidebar-mount] .sidebar[data-open="true"]),
-  body:has([data-sidebar-mount] .sidebar[data-sidebar-state="open"]) {
-    --app-sidebar-current-width: var(--sidebar-width, 260px);
-  }
-
-  body:has(#sidebar-mount .sidebar.is-collapsed),
-  body:has(#sidebar-mount .sidebar[data-open="false"]),
-  body:has(#sidebar-mount .sidebar[data-sidebar-state="collapsed"]),
-  body:has([data-sidebar-mount] .sidebar.is-collapsed),
-  body:has([data-sidebar-mount] .sidebar[data-open="false"]),
-  body:has([data-sidebar-mount] .sidebar[data-sidebar-state="collapsed"]) {
-    --app-sidebar-current-width: var(--sidebar-collapsed, 72px);
-  }
-
-  body:has(#sidebar-mount .sidebar[hidden]),
-  body:has(#sidebar-mount .sidebar.is-hidden),
-  body:has(#sidebar-mount .sidebar[aria-hidden="true"]),
-  body:has([data-sidebar-mount] .sidebar[hidden]),
-  body:has([data-sidebar-mount] .sidebar.is-hidden),
-  body:has([data-sidebar-mount] .sidebar[aria-hidden="true"]) {
-    --app-sidebar-current-width: 0px;
-  }
-}
-
 
 /* =========================================================
-   APP ROOT / SHELL
+   APP SHELL
 ========================================================= */
 
-.layout,
-.app-shell,
-#app-shell {
+:where(
+  .layout,
+  .app-shell,
+  #app-shell
+) {
   position: relative;
-  box-sizing: border-box;
-  isolation: isolate;
-
-  display: flex;
-  flex-direction: column;
 
   inline-size: 100%;
-  max-inline-size: 100%;
   min-inline-size: 0;
-
-  min-block-size: 100vh;
-  min-block-size: 100svh;
-  min-block-size: 100dvh;
+  max-inline-size: 100%;
 
   block-size: 100vh;
   block-size: 100svh;
   block-size: 100dvh;
 
+  min-block-size: 100vh;
+  min-block-size: 100svh;
+  min-block-size: 100dvh;
+
+  display: flex;
+  flex-direction: column;
+
   overflow: hidden;
+
+  isolation: isolate;
 
   background:
     var(--gradient-overlay),
     var(--app-noise),
     var(--body-bg);
 
-  color: var(--text);
+  color:
+    var(--text);
 
   transition:
-    background var(--duration-slow) var(--ease-standard),
-    color var(--duration-normal) var(--ease-standard),
-    opacity var(--duration-normal) var(--ease-standard),
-    visibility var(--duration-normal) var(--ease-standard);
+    opacity
+      var(--duration-normal)
+      var(--ease-standard),
+    visibility
+      var(--duration-normal)
+      var(--ease-standard);
 }
 
-.layout::before,
-.app-shell::before,
-#app-shell::before {
+:where(
+  .layout,
+  .app-shell,
+  #app-shell
+)::before {
   content: "";
 
   position: absolute;
   inset: 0;
-  z-index: var(--layout-bg-z);
+  z-index:
+    var(--layout-bg-z);
 
   pointer-events: none;
 
   background:
     linear-gradient(
-      color-mix(in srgb, var(--text-strong), transparent 98.8%) 1px,
+      color-mix(
+        in srgb,
+        var(--text-strong),
+        transparent 98.8%
+      ) 1px,
       transparent 1px
     ),
     linear-gradient(
       90deg,
-      color-mix(in srgb, var(--text-strong), transparent 98.8%) 1px,
+      color-mix(
+        in srgb,
+        var(--text-strong),
+        transparent 98.8%
+      ) 1px,
       transparent 1px
     );
 
-  background-size: 40px 40px;
+  background-size:
+    40px 40px;
 
   opacity: .10;
 
-  mask-image: linear-gradient(180deg, rgba(0,0,0,.16), transparent 82%);
-  -webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,.16), transparent 82%);
+  mask-image:
+    linear-gradient(
+      180deg,
+      rgba(0, 0, 0, .16),
+      transparent 82%
+    );
+
+  -webkit-mask-image:
+    linear-gradient(
+      180deg,
+      rgba(0, 0, 0, .16),
+      transparent 82%
+    );
 }
 
 /*
-   Importante:
-   No usar `.layout > *` / `#app-shell > *` con `position: relative`.
-   Ese selector tiene demasiada especificidad cuando incluye #app-shell y rompe
-   `.main-content { position: fixed; }`, desplazando el main el ancho del sidebar.
+  No aplicar position:relative indiscriminadamente a los hijos
+  directos de #app-shell: .main-content necesita seguir fixed.
 */
-:where(.layout, .app-shell, #app-shell)
-  > :where(:not(
+:where(
+  .layout,
+  .app-shell,
+  #app-shell
+)
+> :where(
+  :not(
     .main-content,
     .table-head,
     #sidebar-mount,
@@ -276,114 +306,109 @@ body[data-sidebar-hidden="true"] {
     [data-topbar-mount],
     #app-loader,
     [data-app-loader]
-  )) {
+  )
+) {
   position: relative;
 }
 
 
 /* =========================================================
-   MOUNT LAYERS · SIDEBAR / TOPBAR
+   MOUNT LAYERS
+   La geometría visual final pertenece a sidebar.css/topbar.css.
 ========================================================= */
 
-#sidebar-mount,
-[data-sidebar-mount] {
+:where(
+  #sidebar-mount,
+  [data-sidebar-mount]
+) {
   position: fixed;
-  box-sizing: border-box;
-  inset-block: 0;
+
+  inset-block-start: 0;
   inset-inline-start: 0;
 
   inline-size: 0;
   block-size: 0;
 
-  z-index: var(--layout-sidebar-mount-z);
+  z-index:
+    var(--layout-sidebar-mount-z);
 
   overflow: visible;
 
   pointer-events: none;
-
-  contain: none;
   isolation: isolate;
 }
 
-#sidebar-mount > *,
-[data-sidebar-mount] > * {
-  pointer-events: auto;
-}
-
-#sidebar-mount .sidebar,
-[data-sidebar-mount] .sidebar {
-  z-index: var(--z-sidebar, 40);
-}
-
-#sidebar-mount .sidebar [data-tooltip]::before,
-#sidebar-mount .sidebar [data-tooltip]::after,
-[data-sidebar-mount] .sidebar [data-tooltip]::before,
-[data-sidebar-mount] .sidebar [data-tooltip]::after {
-  z-index: var(--layout-sidebar-tooltip-safe-z);
-}
-
-#topbar-mount,
-[data-topbar-mount] {
-  position: fixed;
-  box-sizing: border-box;
-  inset-block-start: 0;
-  inset-inline-start: var(--layout-main-inset-left);
-  inset-inline-end: 0;
-
-  inline-size: auto;
-  width: auto;
-  max-inline-size: none;
-  max-width: none;
-  block-size: 0;
-
-  z-index: var(--layout-topbar-mount-z);
-
-  overflow: visible;
+:where(
+  #topbar-mount,
+  [data-topbar-mount]
+) {
+  z-index:
+    var(--layout-topbar-mount-z);
 
   pointer-events: none;
-
-  contain: none;
-  isolation: isolate;
-
-  transition:
-    inset-inline-start var(--layout-sidebar-motion-duration) var(--layout-sidebar-motion-ease);
 }
 
-#topbar-mount > *,
-[data-topbar-mount] > * {
+:where(
+  #sidebar-mount,
+  [data-sidebar-mount],
+  #topbar-mount,
+  [data-topbar-mount]
+)
+> * {
   pointer-events: auto;
+}
+
+:where(
+  #sidebar-mount,
+  [data-sidebar-mount],
+  #topbar-mount,
+  [data-topbar-mount]
+)[hidden] {
+  display: none !important;
 }
 
 
 /* =========================================================
-   BOOT / READY STATES
+   BOOT / READY
+   Nota:
+   aria-hidden="false" NO implica ready.
+   index.html lo tiene ya en false durante boot.
 ========================================================= */
 
-html.app-booting #app-shell,
-html.app-loading #app-shell,
-body.app-booting #app-shell,
-body.app-loading #app-shell,
-html[data-app-state="booting"] #app-shell,
-body[data-app-state="booting"] #app-shell,
-html[data-app-state="loading"] #app-shell,
-body[data-app-state="loading"] #app-shell,
-#app-shell[aria-hidden="true"],
-#app-shell[data-shell="booting"],
-#app-shell[data-shell-state="booting"],
-#app-shell[data-shell-interactive="false"][aria-busy="true"] {
+:is(
+  html,
+  body
+):is(
+  .app-booting,
+  .app-loading,
+  [data-app-state="booting"],
+  [data-app-state="loading"]
+)
+#app-shell,
+#app-shell:is(
+  [aria-hidden="true"],
+  [data-shell="booting"],
+  [data-shell-state="booting"],
+  [data-shell-interactive="false"][aria-busy="true"]
+) {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
 }
 
-html.app-ready #app-shell,
-body.app-ready #app-shell,
-html[data-app-state="ready"] #app-shell,
-body[data-app-state="ready"] #app-shell,
-#app-shell[aria-hidden="false"],
-#app-shell[data-shell="ready"],
-#app-shell[data-shell-state="ready"],
-#app-shell[data-shell-interactive="true"] {
+:is(
+  html,
+  body
+):is(
+  .app-ready,
+  [data-app-state="ready"]
+)
+#app-shell,
+#app-shell:is(
+  [data-shell="ready"],
+  [data-shell-state="ready"],
+  [data-shell-interactive="true"]
+) {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
@@ -393,118 +418,85 @@ body[data-app-state="ready"] #app-shell,
   cursor: wait;
 }
 
-html.app-ready #app-shell,
-body.app-ready #app-shell {
+:is(
+  html,
+  body
+):is(
+  .app-ready,
+  [data-app-state="ready"]
+)
+#app-shell {
   cursor: auto;
 }
 
 
 /* =========================================================
-   APP LOADER LAYER
+   LOADER STACKING ONLY
 ========================================================= */
 
-#app-loader,
-[data-app-loader] {
-  position: fixed;
-  box-sizing: border-box;
-  inset: 0;
-  z-index: var(--layout-loader-z);
-
-  display: grid;
-  place-items: center;
-
-  background: var(--loader-bg, var(--main-bg));
-  color: var(--loader-text, var(--text));
-
-  pointer-events: auto;
-
-  transition:
-    opacity var(--loader-duration-fade, var(--duration-normal)) var(--ease-standard),
-    visibility var(--loader-duration-fade, var(--duration-normal)) var(--ease-standard);
-}
-
-#app-loader[hidden],
-#app-loader.is-hidden,
-#app-loader[data-state="hidden"],
-[data-app-loader][hidden],
-[data-app-loader].is-hidden,
-[data-app-loader][data-state="hidden"] {
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
+:where(
+  #app-loader,
+  [data-app-loader]
+) {
+  z-index:
+    var(--layout-loader-z);
 }
 
 
 /* =========================================================
-   SHELL HIDDEN / AUTH-LIKE ROUTES
+   CHROME-HIDDEN / AUTH-LIKE ROUTES
 ========================================================= */
 
-body.route-shell-hidden,
-body.auth-screen,
-html[data-route-mode="auth"],
-html[data-route-mode="auth"] body,
-body[data-route-mode="auth"] {
+:is(
+  body.route-shell-hidden,
+  body.auth-screen,
+  body[data-route-mode="auth"],
+  html[data-route-mode="auth"] body,
+  body[data-chrome="hidden"]:not([data-route-mode="boot"]),
+  html[data-chrome="hidden"]:not([data-route-mode="boot"]) body
+) {
   --app-sidebar-current-width: 0px;
   --app-offset-topbar: 0px;
   --app-offset-tablehead: 0px;
+
   --layout-main-inset-top: 0px;
   --layout-main-inset-left: 0px;
 }
 
-body.route-shell-hidden #sidebar-mount,
-body.route-shell-hidden [data-sidebar-mount],
-body.route-shell-hidden #topbar-mount,
-body.route-shell-hidden [data-topbar-mount],
-body.route-shell-hidden .sidebar,
-body.route-shell-hidden .topbar,
-body.auth-screen #sidebar-mount,
-body.auth-screen [data-sidebar-mount],
-body.auth-screen #topbar-mount,
-body.auth-screen [data-topbar-mount],
-body.auth-screen .sidebar,
-body.auth-screen .topbar,
-html[data-route-mode="auth"] #sidebar-mount,
-html[data-route-mode="auth"] [data-sidebar-mount],
-html[data-route-mode="auth"] #topbar-mount,
-html[data-route-mode="auth"] [data-topbar-mount],
-html[data-route-mode="auth"] .sidebar,
-html[data-route-mode="auth"] .topbar,
-body[data-route-mode="auth"] #sidebar-mount,
-body[data-route-mode="auth"] [data-sidebar-mount],
-body[data-route-mode="auth"] #topbar-mount,
-body[data-route-mode="auth"] [data-topbar-mount],
-body[data-route-mode="auth"] .sidebar,
-body[data-route-mode="auth"] .topbar {
+:is(
+  body.route-shell-hidden,
+  body.auth-screen,
+  body[data-route-mode="auth"],
+  html[data-route-mode="auth"] body,
+  body[data-chrome="hidden"]:not([data-route-mode="boot"]),
+  html[data-chrome="hidden"]:not([data-route-mode="boot"]) body
+)
+:is(
+  #sidebar-mount,
+  [data-sidebar-mount],
+  #topbar-mount,
+  [data-topbar-mount],
+  .sidebar,
+  .topbar,
+  .table-head,
+  #table-head
+) {
   display: none !important;
 }
 
-body.route-shell-hidden #app-shell > .main-content,
-body.auth-screen #app-shell > .main-content,
-html[data-route-mode="auth"] #app-shell > .main-content,
-body[data-route-mode="auth"] #app-shell > .main-content,
-body.route-shell-hidden .app-shell > .main-content,
-body.auth-screen .app-shell > .main-content,
-html[data-route-mode="auth"] .app-shell > .main-content,
-body[data-route-mode="auth"] .app-shell > .main-content,
-body.route-shell-hidden .layout > .main-content,
-body.auth-screen .layout > .main-content,
-html[data-route-mode="auth"] .layout > .main-content,
-body[data-route-mode="auth"] .layout > .main-content,
-body.route-shell-hidden .main-content,
-body.auth-screen .main-content,
-html[data-route-mode="auth"] .main-content,
-body[data-route-mode="auth"] .main-content {
-  inset-block-start: 0;
-  inset-inline-start: 0;
-  inset-inline-end: 0;
-  inset-block-end: 0;
-
-  margin: 0;
+:is(
+  body.route-shell-hidden,
+  body.auth-screen,
+  body[data-route-mode="auth"],
+  html[data-route-mode="auth"] body,
+  body[data-chrome="hidden"]:not([data-route-mode="boot"]),
+  html[data-chrome="hidden"]:not([data-route-mode="boot"]) body
+)
+.main-content {
+  inset: 0;
 
   inline-size: auto;
-  width: auto;
   max-inline-size: none;
-  max-width: none;
 
   block-size: 100vh;
   block-size: 100svh;
@@ -514,34 +506,60 @@ body[data-route-mode="auth"] .main-content {
   min-block-size: 100svh;
   min-block-size: 100dvh;
 
-  overflow-y: auto;
+  margin: 0;
+
   overflow-x: hidden;
+  overflow-y: auto;
 }
 
-body.route-shell-hidden .table-head,
-body.route-shell-hidden #table-head,
-body.route-shell-hidden [data-tablehead],
-body.route-shell-hidden [data-tablehead-container],
-body.auth-screen .table-head,
-body.auth-screen #table-head,
-body.auth-screen [data-tablehead],
-body.auth-screen [data-tablehead-container],
-html[data-route-mode="auth"] .table-head,
-html[data-route-mode="auth"] #table-head,
-html[data-route-mode="auth"] [data-tablehead],
-html[data-route-mode="auth"] [data-tablehead-container],
-body[data-route-mode="auth"] .table-head,
-body[data-route-mode="auth"] #table-head,
-body[data-route-mode="auth"] [data-tablehead],
-body[data-route-mode="auth"] [data-tablehead-container] {
-  display: none !important;
+:is(
+  body.route-shell-hidden,
+  body.auth-screen,
+  body[data-route-mode="auth"],
+  html[data-route-mode="auth"] body,
+  body[data-chrome="hidden"]:not([data-route-mode="boot"]),
+  html[data-chrome="hidden"]:not([data-route-mode="boot"]) body
+)
+#app-content {
+  min-block-size: 100vh;
+  min-block-size: 100svh;
+  min-block-size: 100dvh;
+
+  padding: 0;
+
+  overflow: visible;
 }
 
-body.route-shell-hidden #app-content,
-body.auth-screen #app-content,
-html[data-route-mode="auth"] #app-content,
-body[data-route-mode="auth"] #app-content {
-  padding-block-start: 0;
+:is(
+  body.route-shell-hidden,
+  body.auth-screen,
+  body[data-route-mode="auth"],
+  html[data-route-mode="auth"] body,
+  body[data-chrome="hidden"]:not([data-route-mode="boot"]),
+  html[data-chrome="hidden"]:not([data-route-mode="boot"]) body
+)
+:is(
+  #view-container,
+  .content-wrapper
+) {
+  inline-size: 100%;
+
+  min-block-size: 100vh;
+  min-block-size: 100svh;
+  min-block-size: 100dvh;
+}
+
+:is(
+  body.route-shell-hidden,
+  body.auth-screen,
+  body[data-route-mode="auth"],
+  html[data-route-mode="auth"] body,
+  body[data-chrome="hidden"]:not([data-route-mode="boot"]),
+  html[data-chrome="hidden"]:not([data-route-mode="boot"]) body
+)
+.content-wrapper {
+  padding: 0;
+  gap: 0;
 }
 
 
@@ -549,12 +567,13 @@ body[data-route-mode="auth"] #app-content {
    GENERIC CONTAINERS
 ========================================================= */
 
-.container,
-.container-fluid,
-.container-narrow,
-.container-wide {
+:where(
+  .container,
+  .container-fluid,
+  .container-narrow,
+  .container-wide
+) {
   position: relative;
-  box-sizing: border-box;
 
   inline-size: 100%;
   min-inline-size: 0;
@@ -562,101 +581,135 @@ body[data-route-mode="auth"] #app-content {
 }
 
 .container {
-  max-inline-size: var(--layout-content-max);
+  max-inline-size:
+    var(--layout-content-max);
+
   margin-inline: auto;
-  padding-inline: var(--content-padding-inline);
+
+  padding-inline:
+    var(--content-padding-inline);
 }
 
 .container-fluid {
   max-inline-size: none;
+
   margin-inline: 0;
-  padding-inline: var(--content-padding-inline);
+
+  padding-inline:
+    var(--content-padding-inline);
 }
 
 .container-narrow {
-  max-inline-size: var(--layout-content-narrow);
+  max-inline-size:
+    var(--layout-content-narrow);
+
   margin-inline: auto;
-  padding-inline: var(--content-padding-inline);
+
+  padding-inline:
+    var(--content-padding-inline);
 }
 
 .container-wide {
-  max-inline-size: var(--layout-content-wide);
+  max-inline-size:
+    var(--layout-content-wide);
+
   margin-inline: auto;
-  padding-inline: var(--content-padding-inline);
+
+  padding-inline:
+    var(--content-padding-inline);
 }
 
 
 /* =========================================================
-   MAIN CONTENT AREA
+   MAIN CONTENT · SCROLL AUTHORITY
 ========================================================= */
 
-#app-shell > .main-content,
-.app-shell > .main-content,
-.layout > .main-content,
 .main-content {
   position: fixed;
-  box-sizing: border-box;
-  z-index: var(--layout-main-z);
-  isolation: isolate;
 
-  inset-block-start: var(--layout-main-inset-top);
+  z-index:
+    var(--layout-main-z);
+
+  inset-block-start:
+    var(--layout-main-inset-top);
+
   inset-block-end: 0;
-  inset-inline-start: var(--layout-main-inset-left);
+
+  inset-inline-start:
+    var(--layout-main-inset-left);
+
   inset-inline-end: 0;
+
+  inline-size: auto;
+  min-inline-size: 0;
+  max-inline-size: none;
+
+  min-block-size: 0;
 
   display: flex;
   flex-direction: column;
 
-  inline-size: auto;
-  width: auto;
-  max-inline-size: none;
-  max-width: none;
-
-  min-inline-size: 0;
-  min-block-size: 0;
-
-  block-size: auto;
-
   margin: 0;
 
-  overflow-y: auto;
   overflow-x: hidden;
+  overflow-y: auto;
 
   overscroll-behavior: contain;
+
   -webkit-overflow-scrolling: touch;
 
+  isolation: isolate;
+
   background: transparent;
-  color: var(--text);
+  color:
+    var(--text);
 
   scrollbar-width: thin;
   scrollbar-gutter: stable;
-  scrollbar-color: var(--layout-scrollbar-thumb) var(--layout-scrollbar-track);
+
+  scrollbar-color:
+    var(--layout-scrollbar-thumb)
+    var(--layout-scrollbar-track);
 
   transition:
-    inset-inline-start var(--layout-sidebar-motion-duration) var(--layout-sidebar-motion-ease),
-    opacity var(--duration-normal) var(--ease-standard);
+    inset-inline-start
+      var(--layout-sidebar-motion-duration)
+      var(--layout-sidebar-motion-ease);
 }
 
 .main-content::-webkit-scrollbar {
-  inline-size: var(--scrollbar-size);
-  block-size: var(--scrollbar-size);
+  inline-size:
+    var(--scrollbar-size);
+
+  block-size:
+    var(--scrollbar-size);
 }
 
 .main-content::-webkit-scrollbar-track {
-  background: var(--layout-scrollbar-track);
+  background:
+    var(--layout-scrollbar-track);
 }
 
 .main-content::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: var(--radius-pill);
+  border:
+    2px solid transparent;
 
-  background: var(--layout-scrollbar-thumb);
-  background-clip: padding-box;
+  border-radius:
+    var(--radius-pill);
+
+  background:
+    var(--layout-scrollbar-thumb);
+
+  background-clip:
+    padding-box;
 }
 
 .main-content::-webkit-scrollbar-thumb:hover {
-  background: var(--layout-scrollbar-thumb-hover);
-  background-clip: padding-box;
+  background:
+    var(--layout-scrollbar-thumb-hover);
+
+  background-clip:
+    padding-box;
 }
 
 
@@ -666,26 +719,34 @@ body[data-route-mode="auth"] #app-content {
 
 #app-content {
   position: relative;
-  box-sizing: border-box;
-  isolation: isolate;
-
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
 
   inline-size: 100%;
   min-inline-size: 0;
   max-inline-size: 100%;
+
   min-block-size: 100%;
+
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
 
   margin: 0;
 
-  padding-block-start: var(--app-offset-tablehead);
-  padding-inline-end: var(--layout-safe-right);
-  padding-block-end: var(--layout-safe-bottom);
-  padding-inline-start: var(--layout-safe-left);
+  padding-block-start:
+    var(--app-offset-tablehead);
+
+  padding-inline-end:
+    var(--layout-safe-right);
+
+  padding-block-end:
+    var(--layout-safe-bottom);
+
+  padding-inline-start:
+    var(--layout-safe-left);
 
   overflow: visible;
+
+  isolation: isolate;
 }
 
 #app-content::before {
@@ -700,82 +761,121 @@ body[data-route-mode="auth"] #app-content {
   background:
     radial-gradient(
       circle at 18% 0%,
-      color-mix(in srgb, var(--accent), transparent 96%),
+      color-mix(
+        in srgb,
+        var(--accent),
+        transparent 96%
+      ),
       transparent 24%
     ),
     radial-gradient(
       circle at 100% 0%,
-      color-mix(in srgb, var(--info), transparent 97%),
+      color-mix(
+        in srgb,
+        var(--info),
+        transparent 97%
+      ),
       transparent 24%
     );
 
   opacity: .70;
 }
 
-#app-content > :where(:not(
-  .table-head,
-  #app-loader,
-  [data-app-loader]
-)) {
+#app-content
+> :where(
+  :not(
+    .table-head,
+    #app-loader,
+    [data-app-loader]
+  )
+) {
   position: relative;
   z-index: 1;
 }
 
 
 /* =========================================================
-   TABLE HEAD / SECONDARY FIXED BAR
+   TABLEHEAD
 ========================================================= */
 
-#app-shell > .table-head,
-.app-shell > .table-head,
-.layout > .table-head,
 .table-head {
   position: fixed;
-  box-sizing: border-box;
 
-  inset-block-start: var(--layout-main-inset-top);
-  inset-inline-start: var(--layout-main-inset-left);
+  inset-block-start:
+    var(--layout-main-inset-top);
+
+  inset-inline-start:
+    var(--layout-main-inset-left);
+
   inset-inline-end: 0;
-  inline-size: auto;
-  width: auto;
-  max-inline-size: none;
-  max-width: none;
 
-  block-size: var(--tablehead-height);
-  min-block-size: var(--tablehead-height);
+  inline-size: auto;
+  max-inline-size: none;
+
+  block-size:
+    var(--tablehead-height);
+
+  min-block-size:
+    var(--tablehead-height);
 
   display: flex;
   align-items: center;
 
-  padding-inline: var(--content-padding-inline);
+  padding-inline:
+    var(--content-padding-inline);
 
   overflow: visible;
 
-  border-block-end: 1px solid var(--panel-border);
+  border-block-end:
+    1px solid
+    var(--panel-border);
 
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--text-strong), transparent 98%),
+      color-mix(
+        in srgb,
+        var(--text-strong),
+        transparent 98%
+      ),
       transparent 68%
     ),
     var(--panel-bg);
 
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--text-strong), transparent 97%),
-    0 8px 18px color-mix(in srgb, var(--text), transparent 94%);
+    inset
+      0 1px 0
+      color-mix(
+        in srgb,
+        var(--text-strong),
+        transparent 97%
+      ),
+    0 8px 18px
+      color-mix(
+        in srgb,
+        var(--text),
+        transparent 94%
+      );
 
-  backdrop-filter: var(--blur-md);
-  -webkit-backdrop-filter: var(--blur-md);
+  backdrop-filter:
+    var(--blur-md);
 
-  z-index: var(--layout-tablehead-z);
+  -webkit-backdrop-filter:
+    var(--blur-md);
+
+  z-index:
+    var(--layout-tablehead-z);
 
   transition:
-    inset-inline-start var(--layout-sidebar-motion-duration) var(--layout-sidebar-motion-ease),
-    background var(--duration-normal) var(--ease-standard),
-    border-color var(--duration-normal) var(--ease-standard),
-    box-shadow var(--duration-normal) var(--ease-standard),
-    opacity var(--duration-fast) var(--ease-standard);
+    inset-inline-start
+      var(--layout-sidebar-motion-duration)
+      var(--layout-sidebar-motion-ease),
+    border-color
+      var(--duration-normal)
+      var(--ease-standard),
+    background-color
+      var(--duration-normal)
+      var(--ease-standard);
 }
 
 .table-head::before {
@@ -789,7 +889,11 @@ body[data-route-mode="auth"] #app-content {
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--text-strong), transparent 98%),
+      color-mix(
+        in srgb,
+        var(--text-strong),
+        transparent 98%
+      ),
       transparent 42%
     );
 
@@ -801,57 +905,63 @@ body[data-route-mode="auth"] #app-content {
   z-index: 1;
 }
 
-.table-head[hidden],
-.table-head.is-hidden,
-.table-head[data-state="hidden"] {
+.table-head:is(
+  [hidden],
+  .is-hidden,
+  [data-state="hidden"]
+) {
   display: none !important;
 }
-
-@supports selector(.table-head:has(#tablehead-container:empty)) {
-  .table-head:has(#tablehead-container:empty) {
-    display: none !important;
-  }
-}
-
-@supports selector(.main-content:has(.table-head)) {
-  .main-content:has(> .table-head:not([hidden]) #tablehead-container:not(:empty)) {
-    --app-offset-tablehead: var(--tablehead-height);
-  }
-
-  .main-content:has(> .table-head[hidden]),
-  .main-content:has(> .table-head #tablehead-container:empty) {
-    --app-offset-tablehead: 0px;
-  }
-}
-
-.main-content[data-tablehead-active="true"],
-body[data-tablehead-active="true"] .main-content {
-  --app-offset-tablehead: var(--tablehead-height);
-}
-
-.main-content[data-tablehead-active="false"],
-body[data-tablehead-active="false"] .main-content {
-  --app-offset-tablehead: 0px;
-}
-
-
-/* =========================================================
-   TABLE HEAD SLOT CONTAINER
-========================================================= */
 
 #tablehead-container {
   position: relative;
   z-index: 1;
 
-  display: flex;
-  align-items: center;
-
   inline-size: 100%;
   min-inline-size: 0;
+
+  display: flex;
+  align-items: center;
 }
 
 #tablehead-container:empty {
   display: none;
+}
+
+/*
+  Fallback declarativo:
+  Router puede usar data-tablehead-active.
+*/
+.main-content[data-tablehead-active="true"],
+body[data-tablehead-active="true"]
+.main-content {
+  --app-offset-tablehead:
+    var(--tablehead-height);
+}
+
+.main-content[data-tablehead-active="false"],
+body[data-tablehead-active="false"]
+.main-content {
+  --app-offset-tablehead: 0px;
+}
+
+/*
+  Si no existe flag JS, el DOM real sigue siendo suficiente.
+  :has() queda localizado aquí y no se usa para sincronizar Sidebar.
+*/
+@supports selector(
+  .main-content:has(
+    > .table-head:not([hidden])
+    > #tablehead-container:not(:empty)
+  )
+) {
+  .main-content:has(
+    > .table-head:not([hidden])
+    > #tablehead-container:not(:empty)
+  ) {
+    --app-offset-tablehead:
+      var(--tablehead-height);
+  }
 }
 
 
@@ -861,15 +971,14 @@ body[data-tablehead-active="false"] .main-content {
 
 #view-container {
   position: relative;
-  box-sizing: border-box;
-  isolation: auto;
-
-  display: block;
 
   inline-size: 100%;
   min-inline-size: 0;
   max-inline-size: 100%;
+
   min-block-size: 0;
+
+  display: block;
 
   overflow: visible;
 }
@@ -878,8 +987,14 @@ body[data-tablehead-active="false"] .main-content {
   cursor: wait;
 }
 
-html.app-ready #view-container,
-body.app-ready #view-container {
+:is(
+  html,
+  body
+):is(
+  .app-ready,
+  [data-app-state="ready"]
+)
+#view-container {
   cursor: auto;
 }
 
@@ -890,26 +1005,33 @@ body.app-ready #view-container {
 
 .content-wrapper {
   position: relative;
-  box-sizing: border-box;
-
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
 
   inline-size: 100%;
   min-inline-size: 0;
   max-inline-size: 100%;
+
   min-block-size: 0;
 
-  padding: var(--content-padding-block) var(--content-padding-inline);
-  gap: var(--space-md);
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+
+  padding:
+    var(--content-padding-block)
+    var(--content-padding-inline);
+
+  gap:
+    var(--space-md);
 
   background: transparent;
 }
 
 .content-wrapper.compact {
-  padding: var(--space-sm);
-  gap: var(--space-sm);
+  padding:
+    var(--space-sm);
+
+  gap:
+    var(--space-sm);
 }
 
 .content-wrapper.flush {
@@ -921,64 +1043,73 @@ body.app-ready #view-container {
   align-items: center;
 }
 
-.content-wrapper.centered > * {
+.content-wrapper:is(
+  .centered,
+  .narrow
+)
+> * {
   inline-size: 100%;
   min-inline-size: 0;
-  max-inline-size: var(--layout-content-narrow);
+  max-inline-size:
+    var(--layout-content-narrow);
 }
 
-.content-wrapper.narrow > * {
-  inline-size: 100%;
-  min-inline-size: 0;
-  max-inline-size: var(--layout-content-narrow);
+.content-wrapper.narrow > *,
+.content-wrapper.wide > * {
   margin-inline: auto;
 }
 
 .content-wrapper.wide > * {
   inline-size: 100%;
   min-inline-size: 0;
-  max-inline-size: var(--layout-content-wide);
-  margin-inline: auto;
+  max-inline-size:
+    var(--layout-content-wide);
 }
 
 
 /* =========================================================
-   PANEL CONTENT
+   PANEL CONTENT / MODES
 ========================================================= */
 
 .panel-content {
   position: relative;
-  box-sizing: border-box;
   z-index: 1;
-
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
 
   inline-size: 100%;
   min-inline-size: 0;
   max-inline-size: 100%;
+
   min-block-size: 0;
+
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
 
   opacity: 1;
   transform: none;
 
   transition:
-    opacity .20s var(--ease-emphasis),
-    transform .20s var(--ease-emphasis);
-
-  backface-visibility: hidden;
+    opacity
+      .20s
+      var(--ease-emphasis),
+    transform
+      .20s
+      var(--ease-emphasis);
 }
 
-.panel-content[data-animate="enter"]:not(.ready),
-.panel-content.is-entering {
+.panel-content:is(
+  [data-animate="enter"]:not(.ready),
+  .is-entering
+) {
   opacity: 0;
-  transform: translateY(6px);
+  transform:
+    translateY(6px);
 }
 
 .panel-content.ready {
   opacity: 1;
-  transform: translateY(0);
+  transform:
+    translateY(0);
 }
 
 .panel-content > * {
@@ -986,26 +1117,24 @@ body.app-ready #view-container {
 }
 
 .panel-content[data-view] {
-  scroll-margin-block-start: calc(
-    var(--app-offset-tablehead) + var(--space-md)
-  );
+  scroll-margin-block-start:
+    calc(
+      var(--app-offset-tablehead) +
+      var(--space-md)
+    );
 }
-
-
-/* =========================================================
-   PANEL MODES
-========================================================= */
 
 .panel-content.table-mode {
   padding: 0;
   overflow: hidden;
 }
 
-.panel-content.table-mode .content-wrapper {
-  flex: 1 1 auto;
-
-  min-block-size: 0;
+.panel-content.table-mode
+.content-wrapper {
   min-inline-size: 0;
+  min-block-size: 0;
+
+  flex: 1 1 auto;
 
   padding: 0;
   gap: 0;
@@ -1013,33 +1142,30 @@ body.app-ready #view-container {
   overflow: hidden;
 }
 
-.panel-content.dashboard {
+.panel-content.dashboard,
+.panel-content.form-mode {
   overflow: visible;
 }
 
 .dashboard-container {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-
-  min-block-size: 0;
   min-inline-size: 0;
+  min-block-size: 0;
   max-inline-size: 100%;
 
-  box-sizing: border-box;
-}
-
-.panel-content.form-mode {
-  overflow: visible;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
 }
 
 .panel-content.centered {
   align-items: center;
 }
 
-.panel-content.centered > .content-wrapper {
+.panel-content.centered
+> .content-wrapper {
   inline-size: 100%;
-  max-inline-size: var(--layout-content-narrow);
+  max-inline-size:
+    var(--layout-content-narrow);
 }
 
 
@@ -1047,169 +1173,187 @@ body.app-ready #view-container {
    TABLE SCROLL AREA
 ========================================================= */
 
-.panel-content.table-mode .table-container,
 .table-container {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+
   scrollbar-width: thin;
   scrollbar-gutter: stable;
-  scrollbar-color: var(--layout-scrollbar-thumb) var(--layout-scrollbar-track);
 
-  box-sizing: border-box;
-
-  max-inline-size: 100%;
+  scrollbar-color:
+    var(--layout-scrollbar-thumb)
+    var(--layout-scrollbar-track);
 }
 
-.panel-content.table-mode .table-container {
-  flex: 1 1 auto;
-
+.panel-content.table-mode
+.table-container {
   min-inline-size: 0;
   min-block-size: 0;
 
-  overflow-y: auto;
-  overflow-x: auto;
+  flex: 1 1 auto;
+
+  overflow: auto;
 
   overscroll-behavior: contain;
-  scroll-behavior: smooth;
+
   -webkit-overflow-scrolling: touch;
 }
 
-.table-container {
-  min-inline-size: 0;
-}
-
 .table-container::-webkit-scrollbar {
-  inline-size: var(--scrollbar-size);
-  block-size: var(--scrollbar-size);
+  inline-size:
+    var(--scrollbar-size);
+
+  block-size:
+    var(--scrollbar-size);
 }
 
 .table-container::-webkit-scrollbar-track {
-  background: var(--layout-scrollbar-track);
+  background:
+    var(--layout-scrollbar-track);
 }
 
 .table-container::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: var(--radius-pill);
+  border:
+    2px solid transparent;
 
-  background: var(--layout-scrollbar-thumb);
-  background-clip: padding-box;
+  border-radius:
+    var(--radius-pill);
+
+  background:
+    var(--layout-scrollbar-thumb);
+
+  background-clip:
+    padding-box;
 }
 
 .table-container::-webkit-scrollbar-thumb:hover {
-  background: var(--layout-scrollbar-thumb-hover);
-  background-clip: padding-box;
+  background:
+    var(--layout-scrollbar-thumb-hover);
+
+  background-clip:
+    padding-box;
 }
 
 
 /* =========================================================
-   PAGE HEADER
+   PAGE / SECTION HEADERS
 ========================================================= */
 
-.page-header {
+.page-header,
+.section-header {
+  min-inline-size: 0;
+
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
 
-  gap: var(--space-md);
-  flex-wrap: wrap;
+  gap:
+    var(--space-md);
 
+  flex-wrap: wrap;
+}
+
+.page-header-main,
+.section-header-main {
   min-inline-size: 0;
+
+  display: grid;
 }
 
 .page-header-main {
-  display: grid;
   gap: 4px;
-
-  min-inline-size: 0;
-}
-
-.page-header-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-
-  gap: var(--space-sm);
-  flex-wrap: wrap;
-
-  min-inline-size: 0;
-}
-
-.page-title {
-  margin: 0;
-
-  color: var(--text-strong);
-
-  font-size: var(--font-2xl);
-  line-height: var(--line-snug);
-  font-weight: var(--weight-bold);
-  letter-spacing: var(--letter-tight);
-
-  text-wrap: balance;
-}
-
-.page-subtitle {
-  margin: 0;
-
-  max-inline-size: 72ch;
-
-  color: var(--text-dim);
-
-  font-size: var(--font-md);
-  line-height: var(--line-normal);
-}
-
-
-/* =========================================================
-   SECTION HEADER
-========================================================= */
-
-.section-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-
-  gap: var(--space-md);
-  flex-wrap: wrap;
-
-  min-inline-size: 0;
 }
 
 .section-header-main {
-  display: grid;
   gap: 3px;
-
-  min-inline-size: 0;
 }
 
+.page-header-actions,
 .section-actions {
+  min-inline-size: 0;
+
   display: flex;
   align-items: center;
   justify-content: flex-end;
 
-  gap: var(--space-sm);
-  flex-wrap: wrap;
+  gap:
+    var(--space-sm);
 
-  min-inline-size: 0;
+  flex-wrap: wrap;
 }
 
+.page-title,
 .section-title {
   margin: 0;
 
-  color: var(--section-title-color, var(--text-strong));
+  color:
+    var(--text-strong);
 
-  font-size: var(--section-title-size, var(--font-xl));
-  line-height: var(--line-snug);
-  font-weight: var(--section-title-weight, var(--weight-bold));
-  letter-spacing: var(--letter-tight);
+  line-height:
+    var(--line-snug);
+
+  font-weight:
+    var(--weight-bold);
+
+  letter-spacing:
+    var(--letter-tight);
 }
 
+.page-title {
+  font-size:
+    var(--font-2xl);
+}
+
+.section-title {
+  color:
+    var(
+      --section-title-color,
+      var(--text-strong)
+    );
+
+  font-size:
+    var(
+      --section-title-size,
+      var(--font-xl)
+    );
+
+  font-weight:
+    var(
+      --section-title-weight,
+      var(--weight-bold)
+    );
+}
+
+.page-subtitle,
 .section-subtitle {
   margin: 0;
 
   max-inline-size: 72ch;
 
-  color: var(--section-subtitle-color, var(--text-dim));
+  color:
+    var(--text-dim);
 
-  font-size: var(--section-subtitle-size, var(--font-sm));
-  line-height: var(--line-normal);
+  line-height:
+    var(--line-normal);
+}
+
+.page-subtitle {
+  font-size:
+    var(--font-md);
+}
+
+.section-subtitle {
+  color:
+    var(
+      --section-subtitle-color,
+      var(--text-dim)
+    );
+
+  font-size:
+    var(
+      --section-subtitle-size,
+      var(--font-sm)
+    );
 }
 
 
@@ -1220,22 +1364,34 @@ body.app-ready #view-container {
 .panel-surface,
 .card-surface {
   position: relative;
-  isolation: isolate;
 
   min-inline-size: 0;
 
   overflow: hidden;
 
-  border: 1px solid var(--panel-border);
-  border-radius: var(--panel-radius);
+  isolation: isolate;
 
-  background: var(--panel-bg);
-  color: var(--text);
+  border:
+    1px solid
+    var(--panel-border);
 
-  box-shadow: var(--panel-shadow);
+  border-radius:
+    var(--panel-radius);
 
-  backdrop-filter: var(--blur-md);
-  -webkit-backdrop-filter: var(--blur-md);
+  background:
+    var(--panel-bg);
+
+  color:
+    var(--text);
+
+  box-shadow:
+    var(--panel-shadow);
+
+  backdrop-filter:
+    var(--blur-md);
+
+  -webkit-backdrop-filter:
+    var(--blur-md);
 }
 
 .panel-surface::before,
@@ -1251,7 +1407,11 @@ body.app-ready #view-container {
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--text-strong), transparent 98%),
+      color-mix(
+        in srgb,
+        var(--text-strong),
+        transparent 98%
+      ),
       transparent 42%
     );
 
@@ -1259,42 +1419,62 @@ body.app-ready #view-container {
 }
 
 .card-surface {
-  border-color: var(--card-border);
-  border-radius: var(--card-radius);
-  background: var(--card-bg);
-  box-shadow: var(--card-shadow);
+  border-color:
+    var(--card-border);
+
+  border-radius:
+    var(--card-radius);
+
+  background:
+    var(--card-bg);
+
+  box-shadow:
+    var(--card-shadow);
 }
 
-.panel-surface.padded,
-.card-surface.padded {
-  padding: var(--space-md);
+:is(
+  .panel-surface,
+  .card-surface
+).padded {
+  padding:
+    var(--space-md);
 }
 
-.panel-surface.padded-lg,
-.card-surface.padded-lg {
-  padding: var(--space-lg);
+:is(
+  .panel-surface,
+  .card-surface
+).padded-lg {
+  padding:
+    var(--space-lg);
 }
 
-.panel-surface.padded-xl,
-.card-surface.padded-xl {
-  padding: var(--space-xl);
+:is(
+  .panel-surface,
+  .card-surface
+).padded-xl {
+  padding:
+    var(--space-xl);
 }
 
-.panel-surface.flush,
-.card-surface.flush {
+:is(
+  .panel-surface,
+  .card-surface
+).flush {
   padding: 0;
 }
 
 
 /* =========================================================
-   GRID SYSTEM
+   GRID
 ========================================================= */
 
 .grid {
-  display: grid;
-  gap: var(--space-md);
-
   min-inline-size: 0;
+
+  display: grid;
+
+  gap:
+    var(--space-md);
 }
 
 .grid > * {
@@ -1302,51 +1482,93 @@ body.app-ready #view-container {
 }
 
 .grid.gap-xs {
-  gap: var(--space-xs);
+  gap:
+    var(--space-xs);
 }
 
 .grid.gap-sm {
-  gap: var(--space-sm);
+  gap:
+    var(--space-sm);
 }
 
 .grid.gap-lg {
-  gap: var(--space-lg);
+  gap:
+    var(--space-lg);
 }
 
 .grid.gap-xl {
-  gap: var(--space-xl);
+  gap:
+    var(--space-xl);
 }
 
 .grid.cols-1 {
-  grid-template-columns: 1fr;
+  grid-template-columns:
+    1fr;
 }
 
 .grid.cols-2 {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns:
+    repeat(
+      2,
+      minmax(0, 1fr)
+    );
 }
 
 .grid.cols-3 {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns:
+    repeat(
+      3,
+      minmax(0, 1fr)
+    );
 }
 
 .grid.cols-4 {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns:
+    repeat(
+      4,
+      minmax(0, 1fr)
+    );
 }
 
 .grid.cols-5 {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns:
+    repeat(
+      5,
+      minmax(0, 1fr)
+    );
 }
 
 .grid.cols-auto {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  grid-template-columns:
+    repeat(
+      auto-fit,
+      minmax(
+        min(100%, 260px),
+        1fr
+      )
+    );
 }
 
 .grid.cols-auto-sm {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+  grid-template-columns:
+    repeat(
+      auto-fit,
+      minmax(
+        min(100%, 210px),
+        1fr
+      )
+    );
 }
 
 .grid.cols-auto-lg {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  grid-template-columns:
+    repeat(
+      auto-fit,
+      minmax(
+        min(100%, 320px),
+        1fr
+      )
+    );
 }
 
 
@@ -1355,60 +1577,71 @@ body.app-ready #view-container {
 ========================================================= */
 
 .stack {
+  min-inline-size: 0;
+
   display: flex;
   flex-direction: column;
 
-  gap: var(--space-md);
-
-  min-inline-size: 0;
+  gap:
+    var(--space-md);
 }
 
 .stack.gap-xs {
-  gap: var(--space-xs);
+  gap:
+    var(--space-xs);
 }
 
 .stack.gap-sm {
-  gap: var(--space-sm);
+  gap:
+    var(--space-sm);
 }
 
 .stack.gap-lg {
-  gap: var(--space-lg);
+  gap:
+    var(--space-lg);
 }
 
 .stack.gap-xl {
-  gap: var(--space-xl);
+  gap:
+    var(--space-xl);
 }
 
 .cluster {
+  min-inline-size: 0;
+
   display: flex;
   align-items: center;
 
-  gap: var(--space-sm);
-  flex-wrap: wrap;
+  gap:
+    var(--space-sm);
 
-  min-inline-size: 0;
+  flex-wrap: wrap;
 }
 
 .cluster.start {
-  justify-content: flex-start;
+  justify-content:
+    flex-start;
 }
 
 .cluster.center {
-  justify-content: center;
+  justify-content:
+    center;
 }
 
 .cluster.end {
-  justify-content: flex-end;
+  justify-content:
+    flex-end;
 }
 
 .split {
+  min-inline-size: 0;
+
   display: flex;
   align-items: center;
   justify-content: space-between;
 
-  gap: var(--space-md);
-
-  min-inline-size: 0;
+  gap:
+    var(--space-md);
 }
 
 .split > * {
@@ -1426,13 +1659,30 @@ body.app-ready #view-container {
   display: grid;
   place-items: center;
 
-  padding: var(--space-xl);
+  padding:
+    var(--space-xl);
 
-  border: 1px dashed var(--state-empty-border, var(--border-default));
-  border-radius: var(--state-card-radius, var(--card-radius-lg));
+  border:
+    1px dashed
+    var(
+      --state-empty-border,
+      var(--border-default)
+    );
 
-  background: var(--state-empty-bg, var(--surface-glass));
-  color: var(--text-muted);
+  border-radius:
+    var(
+      --state-card-radius,
+      var(--card-radius-lg)
+    );
+
+  background:
+    var(
+      --state-empty-bg,
+      var(--surface-glass)
+    );
+
+  color:
+    var(--text-muted);
 
   text-align: center;
 }
@@ -1443,20 +1693,32 @@ body.app-ready #view-container {
   display: grid;
 
   justify-items: center;
-  gap: var(--space-sm);
+
+  gap:
+    var(--space-sm);
 }
 
 .empty-state-icon {
-  inline-size: var(--state-icon-size, 42px);
-  block-size: var(--state-icon-size, 42px);
+  inline-size:
+    var(--state-icon-size, 42px);
+
+  block-size:
+    var(--state-icon-size, 42px);
 
   display: grid;
   place-items: center;
 
-  border-radius: var(--state-icon-radius, 16px);
+  border-radius:
+    var(--state-icon-radius, 16px);
 
-  background: var(--surface-glass);
-  color: var(--state-empty-icon, var(--info));
+  background:
+    var(--surface-glass);
+
+  color:
+    var(
+      --state-empty-icon,
+      var(--info)
+    );
 
   font-size: 22px;
 }
@@ -1464,82 +1726,30 @@ body.app-ready #view-container {
 .empty-state-title {
   margin: 0;
 
-  color: var(--text-strong);
+  color:
+    var(--text-strong);
 
-  font-size: var(--font-xl);
-  line-height: var(--line-snug);
-  font-weight: var(--weight-bold);
+  font-size:
+    var(--font-xl);
+
+  line-height:
+    var(--line-snug);
+
+  font-weight:
+    var(--weight-bold);
 }
 
 .empty-state-text {
   margin: 0;
 
-  color: var(--text-dim);
+  color:
+    var(--text-dim);
 
-  font-size: var(--font-sm);
-  line-height: var(--line-relaxed);
-}
+  font-size:
+    var(--font-sm);
 
-
-/* =========================================================
-   AUTH SCREEN HARDENING
-========================================================= */
-
-body.auth-screen .layout,
-body.auth-screen .app-shell,
-body.auth-screen #app-shell,
-html[data-route-mode="auth"] .layout,
-html[data-route-mode="auth"] .app-shell,
-html[data-route-mode="auth"] #app-shell,
-body[data-route-mode="auth"] .layout,
-body[data-route-mode="auth"] .app-shell,
-body[data-route-mode="auth"] #app-shell {
-  min-block-size: 100vh;
-  min-block-size: 100svh;
-  min-block-size: 100dvh;
-
-  block-size: 100vh;
-  block-size: 100svh;
-  block-size: 100dvh;
-
-  overflow: hidden;
-}
-
-body.auth-screen #app-content,
-html[data-route-mode="auth"] #app-content,
-body[data-route-mode="auth"] #app-content {
-  min-block-size: 100vh;
-  min-block-size: 100svh;
-  min-block-size: 100dvh;
-
-  padding: 0;
-
-  overflow: visible;
-}
-
-body.auth-screen #view-container,
-html[data-route-mode="auth"] #view-container,
-body[data-route-mode="auth"] #view-container {
-  inline-size: 100%;
-
-  min-block-size: 100vh;
-  min-block-size: 100svh;
-  min-block-size: 100dvh;
-
-  overflow: visible;
-}
-
-body.auth-screen .content-wrapper,
-html[data-route-mode="auth"] .content-wrapper,
-body[data-route-mode="auth"] .content-wrapper {
-  inline-size: 100%;
-
-  min-block-size: 100vh;
-  min-block-size: 100svh;
-  min-block-size: 100dvh;
-
-  padding: 0;
-  gap: 0;
+  line-height:
+    var(--line-relaxed);
 }
 
 
@@ -1556,220 +1766,174 @@ body[data-route-mode="auth"] .content-wrapper {
 
   overflow: auto;
 
-  background: var(--body-bg);
-  color: var(--text);
+  background:
+    var(--body-bg);
+
+  color:
+    var(--text);
 }
 
 .noscript-box {
   max-inline-size: 720px;
 
-  margin: 64px auto;
-  padding: var(--space-xl);
+  margin:
+    64px auto;
 
-  border: 1px solid var(--card-border);
-  border-radius: var(--card-radius-lg);
+  padding:
+    var(--space-xl);
 
-  background: var(--card-bg);
-  box-shadow: var(--shadow-lg);
+  border:
+    1px solid
+    var(--card-border);
+
+  border-radius:
+    var(--card-radius-lg);
+
+  background:
+    var(--card-bg);
+
+  box-shadow:
+    var(--shadow-lg);
 }
 
 .noscript-box h1 {
-  margin: 0 0 var(--space-sm);
+  margin:
+    0 0 var(--space-sm);
 
-  color: var(--text-strong);
+  color:
+    var(--text-strong);
 
-  font-size: var(--font-2xl);
-  line-height: var(--line-snug);
+  font-size:
+    var(--font-2xl);
+
+  line-height:
+    var(--line-snug);
 }
 
 .noscript-box p {
   margin: 0;
 
-  color: var(--text-muted);
+  color:
+    var(--text-muted);
 
-  line-height: var(--line-relaxed);
+  line-height:
+    var(--line-relaxed);
 }
 
 
 /* =========================================================
-   RESPONSIVE · DESKTOP DOWN
+   RESPONSIVE
 ========================================================= */
 
 @media (max-width: 1280px) {
   .grid.cols-5 {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns:
+      repeat(
+        4,
+        minmax(0, 1fr)
+      );
   }
 
   .grid.cols-4 {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns:
+      repeat(
+        3,
+        minmax(0, 1fr)
+      );
   }
 }
-
-
-/* =========================================================
-   RESPONSIVE · LARGE TABLET
-========================================================= */
 
 @media (max-width: 1080px) {
-  .grid.cols-5,
-  .grid.cols-4 {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .page-header,
-  .section-header {
-    align-items: flex-start;
+  :is(
+    .grid.cols-5,
+    .grid.cols-4
+  ) {
+    grid-template-columns:
+      repeat(
+        2,
+        minmax(0, 1fr)
+      );
   }
 }
-
-
-/* =========================================================
-   RESPONSIVE · TABLET
-========================================================= */
 
 @media (max-width: 900px) {
   body {
-    --layout-sidebar-motion-duration: var(--layout-sidebar-motion-duration-mobile);
-    --layout-mobile-rail-width: var(--sidebar-mobile-collapsed-width, 60px);
+    --layout-sidebar-motion-duration:
+      var(
+        --layout-sidebar-motion-duration-mobile
+      );
+
+    --layout-mobile-rail-width:
+      var(
+        --sidebar-mobile-collapsed-width,
+        60px
+      );
   }
 
-  body,
-  body.sidebar-collapsed,
-  body.sidebar-open,
-  body[data-sidebar-state="open"],
-  body[data-sidebar-state="collapsed"],
-  body[data-sidebar-open="true"],
-  body[data-sidebar-open="false"] {
-    --app-sidebar-current-width: var(--layout-mobile-rail-width) !important;
+  /*
+    Mobile: Sidebar abierto es drawer superpuesto.
+    Main/Topbar/Tablehead sólo reservan el rail.
+  */
+  body:is(
+    .sidebar-open,
+    .sidebar-collapsed,
+    [data-sidebar-state="open"],
+    [data-sidebar-state="collapsed"],
+    [data-sidebar-open="true"],
+    [data-sidebar-open="false"]
+  ) {
+    --app-sidebar-current-width:
+      var(--layout-mobile-rail-width);
   }
 
-  body.sidebar-hidden,
-  body[data-sidebar-state="hidden"],
-  body[data-sidebar-hidden="true"],
-  body.route-shell-hidden,
-  body.auth-screen,
-  html[data-route-mode="auth"] body,
-  body[data-route-mode="auth"] {
-    --app-sidebar-current-width: 0px !important;
-    --layout-main-inset-left: 0px;
+  body:is(
+    .sidebar-hidden,
+    [data-sidebar-state="hidden"],
+    [data-sidebar-hidden="true"]
+  ) {
+    --app-sidebar-current-width: 0px;
   }
 
-  @supports selector(body:has(.sidebar)) {
-    body:has(#sidebar-mount .sidebar),
-    body:has(#sidebar-mount .sidebar.is-open),
-    body:has(#sidebar-mount .sidebar.is-collapsed),
-    body:has(#sidebar-mount .sidebar[data-open="true"]),
-    body:has(#sidebar-mount .sidebar[data-open="false"]),
-    body:has(#sidebar-mount .sidebar[data-sidebar-state="open"]),
-    body:has(#sidebar-mount .sidebar[data-sidebar-state="collapsed"]),
-    body:has([data-sidebar-mount] .sidebar),
-    body:has([data-sidebar-mount] .sidebar.is-open),
-    body:has([data-sidebar-mount] .sidebar.is-collapsed),
-    body:has([data-sidebar-mount] .sidebar[data-open="true"]),
-    body:has([data-sidebar-mount] .sidebar[data-open="false"]),
-    body:has([data-sidebar-mount] .sidebar[data-sidebar-state="open"]),
-    body:has([data-sidebar-mount] .sidebar[data-sidebar-state="collapsed"]) {
-      --app-sidebar-current-width: var(--layout-mobile-rail-width) !important;
-    }
-
-    body:has(#sidebar-mount .sidebar[hidden]),
-    body:has(#sidebar-mount .sidebar.is-hidden),
-    body:has(#sidebar-mount .sidebar[aria-hidden="true"]),
-    body:has([data-sidebar-mount] .sidebar[hidden]),
-    body:has([data-sidebar-mount] .sidebar.is-hidden),
-    body:has([data-sidebar-mount] .sidebar[aria-hidden="true"]) {
-      --app-sidebar-current-width: 0px !important;
-      --layout-main-inset-left: 0px;
-    }
-
-    body.route-shell-hidden,
-    body.auth-screen,
-    html[data-route-mode="auth"] body,
-    body[data-route-mode="auth"] {
-      --app-sidebar-current-width: 0px !important;
-      --layout-main-inset-left: 0px;
-    }
+  body:is(
+    .sidebar-open,
+    [data-sidebar-state="open"],
+    [data-sidebar-open="true"]
+  )
+  :is(
+    #sidebar-mount,
+    [data-sidebar-mount]
+  ) {
+    z-index:
+      var(--z-overlay, 60);
   }
 
-  body.sidebar-open #sidebar-mount,
-  body.sidebar-open [data-sidebar-mount],
-  body[data-sidebar-state="open"] #sidebar-mount,
-  body[data-sidebar-state="open"] [data-sidebar-mount],
-  body[data-sidebar-open="true"] #sidebar-mount,
-  body[data-sidebar-open="true"] [data-sidebar-mount] {
-    z-index: var(--z-overlay, 80);
-  }
-
-  @supports selector(body:has(.sidebar)) {
-    body:has(#sidebar-mount .sidebar.is-open) #sidebar-mount,
-    body:has(#sidebar-mount .sidebar[data-open="true"]) #sidebar-mount,
-    body:has(#sidebar-mount .sidebar[data-sidebar-state="open"]) #sidebar-mount,
-    body:has([data-sidebar-mount] .sidebar.is-open) [data-sidebar-mount],
-    body:has([data-sidebar-mount] .sidebar[data-open="true"]) [data-sidebar-mount],
-    body:has([data-sidebar-mount] .sidebar[data-sidebar-state="open"]) [data-sidebar-mount] {
-      z-index: var(--z-overlay, 80);
-    }
-  }
-
-  #topbar-mount,
-  [data-topbar-mount],
-  body.sidebar-collapsed #topbar-mount,
-  body.sidebar-collapsed [data-topbar-mount],
-  body.sidebar-open #topbar-mount,
-  body.sidebar-open [data-topbar-mount],
-  body[data-sidebar-state="collapsed"] #topbar-mount,
-  body[data-sidebar-state="collapsed"] [data-topbar-mount],
-  body[data-sidebar-state="open"] #topbar-mount,
-  body[data-sidebar-state="open"] [data-topbar-mount],
-  body[data-sidebar-open="false"] #topbar-mount,
-  body[data-sidebar-open="false"] [data-topbar-mount],
-  body[data-sidebar-open="true"] #topbar-mount,
-  body[data-sidebar-open="true"] [data-topbar-mount] {
-    inset-inline-start: var(--layout-main-inset-left);
-  }
-
-  .main-content,
-  body.sidebar-collapsed .main-content,
-  body.sidebar-open .main-content,
-  body[data-sidebar-state="collapsed"] .main-content,
-  body[data-sidebar-state="open"] .main-content,
-  body[data-sidebar-open="false"] .main-content,
-  body[data-sidebar-open="true"] .main-content {
-    inset-inline-start: var(--layout-main-inset-left);
-    inset-inline-end: 0;
-
-    margin: 0;
-
-    inline-size: auto;
-    width: auto;
-    max-inline-size: none;
-    max-width: none;
-  }
-
-  .table-head,
-  body.sidebar-collapsed .table-head,
-  body.sidebar-open .table-head,
-  body[data-sidebar-state="collapsed"] .table-head,
-  body[data-sidebar-state="open"] .table-head,
-  body[data-sidebar-open="false"] .table-head,
-  body[data-sidebar-open="true"] .table-head {
-    inset-inline-start: var(--layout-main-inset-left);
-  }
-
-  .container,
-  .container-fluid,
-  .container-narrow,
-  .container-wide {
-    padding-inline: var(--tablet-content-padding, var(--content-padding-inline));
+  :where(
+    .container,
+    .container-fluid,
+    .container-narrow,
+    .container-wide
+  ) {
+    padding-inline:
+      var(
+        --tablet-content-padding,
+        var(--content-padding-inline)
+      );
   }
 
   .content-wrapper {
-    padding: var(--tablet-content-padding, var(--space-md));
+    padding:
+      var(
+        --tablet-content-padding,
+        var(--space-md)
+      );
   }
 
   .split {
-    align-items: flex-start;
-    flex-direction: column;
+    align-items:
+      flex-start;
+
+    flex-direction:
+      column;
   }
 
   .split > * {
@@ -1777,23 +1941,18 @@ body[data-route-mode="auth"] .content-wrapper {
   }
 }
 
-
-/* =========================================================
-   RESPONSIVE · SMALL TABLET
-========================================================= */
-
 @media (max-width: 768px) {
-  .main-content {
-    inset-block-start: var(--app-offset-topbar);
-  }
-
+  /*
+    En viewport compacto el tablehead secundario desaparece.
+  */
   .table-head {
     display: none !important;
   }
 
   .main-content,
   .main-content[data-tablehead-active="true"],
-  body[data-tablehead-active="true"] .main-content {
+  body[data-tablehead-active="true"]
+  .main-content {
     --app-offset-tablehead: 0px;
   }
 
@@ -1802,147 +1961,164 @@ body[data-route-mode="auth"] .content-wrapper {
   }
 
   .content-wrapper {
-    padding: var(--space-sm);
-    gap: var(--space-sm);
+    padding:
+      var(--space-sm);
+
+    gap:
+      var(--space-sm);
   }
 
   .content-wrapper.compact {
-    padding: var(--space-xs);
-    gap: var(--space-xs);
+    padding:
+      var(--space-xs);
+
+    gap:
+      var(--space-xs);
   }
 
-  .grid.cols-3,
-  .grid.cols-4,
-  .grid.cols-5 {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  :is(
+    .grid.cols-3,
+    .grid.cols-4,
+    .grid.cols-5
+  ) {
+    grid-template-columns:
+      repeat(
+        2,
+        minmax(0, 1fr)
+      );
   }
 
   .page-title {
-    font-size: var(--font-xl);
-  }
-
-  body.auth-screen .main-content,
-  body.auth-screen #app-content,
-  body.auth-screen #view-container,
-  body.auth-screen .content-wrapper,
-  html[data-route-mode="auth"] .main-content,
-  html[data-route-mode="auth"] #app-content,
-  html[data-route-mode="auth"] #view-container,
-  html[data-route-mode="auth"] .content-wrapper,
-  body[data-route-mode="auth"] .main-content,
-  body[data-route-mode="auth"] #app-content,
-  body[data-route-mode="auth"] #view-container,
-  body[data-route-mode="auth"] .content-wrapper {
-    min-block-size: 100vh;
-    min-block-size: 100svh;
-    min-block-size: 100dvh;
+    font-size:
+      var(--font-xl);
   }
 }
 
-
-/* =========================================================
-   RESPONSIVE · MOBILE
-========================================================= */
-
 @media (max-width: 640px) {
-  .container,
-  .container-fluid,
-  .container-narrow,
-  .container-wide {
-    padding-inline: var(--space-xs);
+  :where(
+    .container,
+    .container-fluid,
+    .container-narrow,
+    .container-wide
+  ) {
+    padding-inline:
+      var(--space-xs);
   }
 
-  .page-header,
-  .section-header {
-    gap: var(--space-sm);
+  :is(
+    .page-header,
+    .section-header
+  ) {
+    gap:
+      var(--space-sm);
   }
 
-  .page-header-actions,
-  .section-actions {
+  :is(
+    .page-header-actions,
+    .section-actions
+  ) {
     inline-size: 100%;
-    justify-content: flex-start;
+
+    justify-content:
+      flex-start;
   }
 
   .page-title {
-    font-size: var(--font-xl);
+    font-size:
+      var(--font-xl);
   }
 
-  .page-subtitle,
-  .section-subtitle {
-    font-size: var(--font-sm);
+  :is(
+    .page-subtitle,
+    .section-subtitle
+  ) {
+    font-size:
+      var(--font-sm);
   }
 
   .content-wrapper {
-    padding: var(--space-xs);
-    gap: var(--space-xs);
+    padding:
+      var(--space-xs);
+
+    gap:
+      var(--space-xs);
   }
 
-  .grid.cols-2,
-  .grid.cols-3,
-  .grid.cols-4,
-  .grid.cols-5 {
-    grid-template-columns: 1fr;
+  :is(
+    .grid.cols-2,
+    .grid.cols-3,
+    .grid.cols-4,
+    .grid.cols-5
+  ) {
+    grid-template-columns:
+      1fr;
   }
 
   .empty-state {
-    min-block-size: 180px;
-    padding: var(--space-lg);
-  }
+    min-block-size:
+      180px;
 
-  body.auth-screen .content-wrapper,
-  html[data-route-mode="auth"] .content-wrapper,
-  body[data-route-mode="auth"] .content-wrapper {
-    padding: 0;
-    gap: 0;
+    padding:
+      var(--space-lg);
   }
 }
-
-
-/* =========================================================
-   RESPONSIVE · SMALL MOBILE
-========================================================= */
 
 @media (max-width: 420px) {
   .content-wrapper {
-    padding: var(--space-2xs);
-    gap: var(--space-xs);
+    padding:
+      var(--space-2xs);
+
+    gap:
+      var(--space-xs);
   }
 
   .page-title {
-    font-size: var(--font-lg);
+    font-size:
+      var(--font-lg);
   }
 
   .empty-state {
-    min-block-size: 160px;
-    padding: var(--space-md);
+    min-block-size:
+      160px;
+
+    padding:
+      var(--space-md);
   }
 }
 
 @media (max-width: 380px) {
   body {
-    --layout-mobile-rail-width: var(--sidebar-mobile-collapsed-width, 56px);
+    --layout-mobile-rail-width:
+      var(
+        --sidebar-mobile-collapsed-width,
+        56px
+      );
   }
 }
 
 
 /* =========================================================
-   REDUCED TRANSPARENCY
+   USER PREFERENCES
 ========================================================= */
 
 @media (prefers-reduced-transparency: reduce) {
-  .layout,
-  .app-shell,
-  #app-shell,
-  .table-head,
-  .panel-surface,
-  .card-surface {
+  :where(
+    .layout,
+    .app-shell,
+    #app-shell,
+    .table-head,
+    .panel-surface,
+    .card-surface
+  ) {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
 
-  .layout::before,
-  .app-shell::before,
-  #app-shell::before,
+  :where(
+    .layout,
+    .app-shell,
+    #app-shell
+  )::before,
   #app-content::before,
   .table-head::before,
   .panel-surface::before,
@@ -1951,63 +2127,52 @@ body[data-route-mode="auth"] .content-wrapper {
   }
 }
 
-
-/* =========================================================
-   REDUCED MOTION
-========================================================= */
-
 @media (prefers-reduced-motion: reduce) {
-  .layout,
-  .app-shell,
-  #app-shell,
-  .main-content,
-  .table-head,
-  .panel-content,
-  .panel-surface,
-  .card-surface,
-  #sidebar-mount,
-  [data-sidebar-mount],
-  #topbar-mount,
-  [data-topbar-mount],
-  #app-loader,
-  [data-app-loader] {
-    transition: none !important;
+  :where(
+    .layout,
+    .app-shell,
+    #app-shell,
+    .main-content,
+    .table-head,
+    .panel-content,
+    .panel-surface,
+    .card-surface
+  ) {
+    transition:
+      none !important;
   }
 
-  .panel-content,
-  .panel-content[data-animate="enter"]:not(.ready),
-  .panel-content.is-entering {
+  .panel-content:is(
+    [data-animate="enter"]:not(.ready),
+    .is-entering
+  ) {
     opacity: 1 !important;
     transform: none !important;
   }
-
-  .panel-content.table-mode .table-container {
-    scroll-behavior: auto;
-  }
 }
 
-
-/* =========================================================
-   FORCED COLORS
-========================================================= */
-
 @media (forced-colors: active) {
-  .layout,
-  .app-shell,
-  #app-shell,
-  .main-content,
-  #app-content,
-  .table-head,
-  .panel-surface,
-  .card-surface,
-  .empty-state,
-  .noscript-box {
-    forced-color-adjust: auto;
+  :where(
+    .layout,
+    .app-shell,
+    #app-shell,
+    .main-content,
+    #app-content,
+    .table-head,
+    .panel-surface,
+    .card-surface,
+    .empty-state,
+    .noscript-box
+  ) {
+    forced-color-adjust:
+      auto;
   }
 
-  .layout::before,
-  .app-shell::before,
-  #app-shell::before,
+  :where(
+    .layout,
+    .app-shell,
+    #app-shell
+  )::before,
   #app-content::before,
   .table-head::before,
   .panel-surface::before,
@@ -2015,13 +2180,18 @@ body[data-route-mode="auth"] .content-wrapper {
     display: none !important;
   }
 
-  .table-head,
-  .panel-surface,
-  .card-surface,
-  .empty-state,
-  .noscript-box {
-    border-color: CanvasText;
-    box-shadow: none;
+  :where(
+    .table-head,
+    .panel-surface,
+    .card-surface,
+    .empty-state,
+    .noscript-box
+  ) {
+    border-color:
+      CanvasText;
+
+    box-shadow:
+      none;
   }
 }
 
@@ -2038,21 +2208,24 @@ body[data-route-mode="auth"] .content-wrapper {
 
     overflow: visible !important;
 
-    background: #ffffff !important;
-    color: #000000 !important;
+    background:
+      #fff !important;
+
+    color:
+      #000 !important;
   }
 
-  .layout,
-  .app-shell,
-  #app-shell,
-  .main-content,
-  #app-content,
-  #view-container,
-  .content-wrapper,
-  .panel-content {
+  :where(
+    .layout,
+    .app-shell,
+    #app-shell,
+    .main-content,
+    #app-content,
+    #view-container,
+    .content-wrapper,
+    .panel-content
+  ) {
     position: static !important;
-
-    display: block !important;
 
     inset: auto !important;
 
@@ -2062,20 +2235,28 @@ body[data-route-mode="auth"] .content-wrapper {
     block-size: auto !important;
     min-block-size: 0 !important;
 
-    overflow: visible !important;
+    display: block !important;
 
     margin: 0 !important;
     padding: 0 !important;
 
-    background: transparent !important;
-    color: #000000 !important;
+    overflow: visible !important;
 
-    box-shadow: none !important;
+    background:
+      transparent !important;
+
+    color:
+      #000 !important;
+
+    box-shadow:
+      none !important;
   }
 
-  .layout::before,
-  .app-shell::before,
-  #app-shell::before,
+  :where(
+    .layout,
+    .app-shell,
+    #app-shell
+  )::before,
   #app-content::before,
   .table-head::before,
   .panel-surface::before,
@@ -2083,29 +2264,39 @@ body[data-route-mode="auth"] .content-wrapper {
     display: none !important;
   }
 
-  #sidebar-mount,
-  [data-sidebar-mount],
-  #topbar-mount,
-  [data-topbar-mount],
-  .sidebar,
-  .topbar,
-  .table-head,
-  #app-loader,
-  [data-app-loader] {
+  :where(
+    #sidebar-mount,
+    [data-sidebar-mount],
+    #topbar-mount,
+    [data-topbar-mount],
+    .sidebar,
+    .topbar,
+    .table-head,
+    #app-loader,
+    [data-app-loader]
+  ) {
     display: none !important;
   }
 
-  .panel-surface,
-  .card-surface,
-  .empty-state,
-  .noscript-box {
-    break-inside: avoid;
+  :where(
+    .panel-surface,
+    .card-surface,
+    .empty-state,
+    .noscript-box
+  ) {
+    break-inside:
+      avoid;
 
-    border: 1px solid #dddddd !important;
+    border:
+      1px solid #ddd !important;
 
-    background: #ffffff !important;
-    color: #000000 !important;
+    background:
+      #fff !important;
 
-    box-shadow: none !important;
+    color:
+      #000 !important;
+
+    box-shadow:
+      none !important;
   }
 }

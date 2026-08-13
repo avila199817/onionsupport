@@ -34,7 +34,7 @@ import {
 } from "../../core/config.js";
 
 export const AUTH_VERSION =
-  "auth.minimal.v6-hardened";
+  "auth.minimal.v6.1-first-hotfix";
 
 const ROOT_PATH = "/";
 
@@ -152,6 +152,32 @@ function cleanText(
     output ||
     fallback
   );
+}
+
+function first(...values) {
+  for (
+    const value
+    of values
+  ) {
+    if (
+      value === undefined ||
+      value === null
+    ) {
+      continue;
+    }
+
+    if (
+      typeof value ===
+        "string" &&
+      value.trim() === ""
+    ) {
+      continue;
+    }
+
+    return value;
+  }
+
+  return null;
 }
 
 function redact(

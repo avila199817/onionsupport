@@ -3,58 +3,186 @@
    Archivo: /src/app/loader.js
 
    Responsabilidad:
-   - Controlar únicamente #app-loader.
+   - Ser la autoridad única sobre #app-loader.
+   - Mantener un contrato DOM/ARIA/dataset consistente.
+   - Evitar escrituras DOM redundantes durante el boot.
+   - Exponer una API pequeña, estable e idempotente.
    - Sin Auth, Router, Store, fetch, storage, timers ni eventos.
 ========================================================= */
 
-export const LOADER_VERSION = "app.loader.minimal.v2";
+export const LOADER_VERSION =
+  "app.loader.minimal.v3-hardened";
 
-const LOADER_ID = "app-loader";
+const LOADER_ID =
+  "app-loader";
 
-const LOADER_STATES = Object.freeze({
-  BOOTING: "booting",
-  READY: "ready",
-  FATAL: "fatal",
-  HIDDEN: "hidden",
-});
+export const LOADER_STATES =
+  Object.freeze({
+    BOOTING: "booting",
+    READY: "ready",
+    FATAL: "fatal",
+    HIDDEN: "hidden",
+  });
+
+const LOADER_STATE_ALIASES =
+  Object.freeze({
+    boot: LOADER_STATES.BOOTING,
+    booting: LOADER_STATES.BOOTING,
+    loading: LOADER_STATES.BOOTING,
+
+    ready: LOADER_STATES.READY,
+    done: LOADER_STATES.READY,
+    complete: LOADER_STATES.READY,
+    completed: LOADER_STATES.READY,
+
+    fatal: LOADER_STATES.FATAL,
+    error: LOADER_STATES.FATAL,
+    failed: LOADER_STATES.FATAL,
+    fail: LOADER_STATES.FATAL,
+
+    hidden: LOADER_STATES.HIDDEN,
+    hide: LOADER_STATES.HIDDEN,
+    closed: LOADER_STATES.HIDDEN,
+    none: LOADER_STATES.HIDDEN,
+  });
 
 /* =========================================================
    BASICS
 ========================================================= */
 
 function isBrowser() {
-  return typeof window !== "undefined" && typeof document !== "undefined";
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
 }
 
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+function cleanText(
+  value = "",
+  fallback = ""
+) {
+  const output =
+    String(value ?? "")
+      .replace(
+        /[\r\n\t]/g,
+        " "
+      )
+      .replace(
+        /\s+/g,
+        " "
+      )
+      .trim();
 
-  return output || fallback;
+  return (
+    output ||
+    fallback
+  );
 }
 
-function normalizeState(value = LOADER_STATES.BOOTING) {
-  const state = cleanText(value, LOADER_STATES.BOOTING).toLowerCase();
+function normalizeState(
+  value = LOADER_STATES.BOOTING
+) {
+  const key =
+    cleanText(
+      value,
+      LOADER_STATES.BOOTING
+    )
+      .toLowerCase();
 
-  if (["booting", "boot", "loading"].includes(state)) {
-    return LOADER_STATES.BOOTING;
+  return (
+    LOADER_STATE_ALIASES[
+      key
+    ] ||
+    LOADER_STATES.BOOTING
+  );
+}
+
+/* =========================================================
+   DOM HELPERS
+========================================================= */
+
+function setAttributeIfChanged(
+  node,
+  name,
+  value
+) {
+  if (!node) {
+    return false;
   }
 
-  if (["ready", "done", "complete", "completed"].includes(state)) {
-    return LOADER_STATES.READY;
+  const next =
+    String(value);
+
+  if (
+    node.getAttribute(
+      name
+    ) === next
+  ) {
+    return false;
   }
 
-  if (["fatal", "error", "failed", "fail"].includes(state)) {
-    return LOADER_STATES.FATAL;
+  node.setAttribute(
+    name,
+    next
+  );
+
+  return true;
+}
+
+function setDatasetIfChanged(
+  node,
+  key,
+  value
+) {
+  if (!node?.dataset) {
+    return false;
   }
 
-  if (["hidden", "hide", "closed", "none"].includes(state)) {
-    return LOADER_STATES.HIDDEN;
+  const next =
+    String(value);
+
+  if (
+    node.dataset[key] ===
+    next
+  ) {
+    return false;
   }
 
-  return LOADER_STATES.BOOTING;
+  node.dataset[key] =
+    next;
+
+  return true;
+}
+
+function setClassState(
+  node,
+  className,
+  enabled
+) {
+  if (!node?.classList) {
+    return false;
+  }
+
+  const shouldHave =
+    enabled === true;
+
+  const has =
+    node.classList.contains(
+      className
+    );
+
+  if (
+    has === shouldHave
+  ) {
+    return false;
+  }
+
+  node.classList.toggle(
+    className,
+    shouldHave
+  );
+
+  return true;
 }
 
 /* =========================================================
@@ -62,41 +190,208 @@ function normalizeState(value = LOADER_STATES.BOOTING) {
 ========================================================= */
 
 export function getLoaderElement() {
-  if (!isBrowser()) return null;
-  return document.getElementById(LOADER_ID);
-}
+  if (!isBrowser()) {
+    return null;
+  }
 
-export function isLoaderVisible() {
-  const loader = getLoaderElement();
-
-  return Boolean(
-    loader &&
-      loader.hidden !== true &&
-      loader.getAttribute("aria-hidden") !== "true"
+  return (
+    document.getElementById(
+      LOADER_ID
+    )
   );
 }
 
-function writeLoader(visible = false, state = LOADER_STATES.BOOTING) {
-  const loader = getLoaderElement();
+export function getLoaderState() {
+  const loader =
+    getLoaderElement();
 
-  if (!loader) return false;
+  if (!loader) {
+    return "missing";
+  }
 
-  const normalized = normalizeState(state);
-  const show = Boolean(visible) && normalized !== LOADER_STATES.HIDDEN;
-  const finalState = show ? normalized : LOADER_STATES.HIDDEN;
-  const busy = show && finalState === LOADER_STATES.BOOTING;
+  const datasetState =
+    cleanText(
+      loader.dataset
+        ?.loaderState,
+      ""
+    );
+
+  if (datasetState) {
+    return normalizeState(
+      datasetState
+    );
+  }
+
+  if (
+    loader.hidden === true ||
+    loader.getAttribute(
+      "aria-hidden"
+    ) === "true" ||
+    loader.classList
+      ?.contains(
+        "is-hidden"
+      )
+  ) {
+    return (
+      LOADER_STATES.HIDDEN
+    );
+  }
+
+  return (
+    LOADER_STATES.BOOTING
+  );
+}
+
+export function isLoaderVisible() {
+  const loader =
+    getLoaderElement();
+
+  if (!loader) {
+    return false;
+  }
+
+  return Boolean(
+    loader.hidden !== true &&
+    loader.getAttribute(
+      "aria-hidden"
+    ) !== "true" &&
+    !loader.classList
+      ?.contains(
+        "is-hidden"
+      )
+  );
+}
+
+/* =========================================================
+   CANONICAL WRITE
+========================================================= */
+
+function writeLoader(
+  visible = false,
+  state = LOADER_STATES.BOOTING
+) {
+  const loader =
+    getLoaderElement();
+
+  if (!loader) {
+    return false;
+  }
+
+  const normalized =
+    normalizeState(
+      state
+    );
+
+  const show =
+    Boolean(visible) &&
+    normalized !==
+      LOADER_STATES.HIDDEN;
+
+  const finalState =
+    show
+      ? normalized
+      : LOADER_STATES.HIDDEN;
+
+  const busy =
+    show &&
+    finalState ===
+      LOADER_STATES.BOOTING;
+
+  const ariaHidden =
+    show
+      ? "false"
+      : "true";
+
+  const ariaBusy =
+    busy
+      ? "true"
+      : "false";
 
   try {
-    loader.hidden = !show;
+    /*
+      Idempotencia:
+      si ya estamos exactamente en el estado pedido,
+      no tocamos el DOM otra vez.
+    */
+    const alreadyCanonical =
+      loader.hidden ===
+        !show &&
+      loader.classList.contains(
+        "is-visible"
+      ) === show &&
+      loader.classList.contains(
+        "is-hidden"
+      ) === !show &&
+      loader.dataset
+        ?.loaderVisible ===
+        (
+          show
+            ? "true"
+            : "false"
+        ) &&
+      loader.dataset
+        ?.loaderState ===
+        finalState &&
+      loader.getAttribute(
+        "aria-hidden"
+      ) ===
+        ariaHidden &&
+      loader.getAttribute(
+        "aria-busy"
+      ) ===
+        ariaBusy;
 
-    loader.classList.toggle("is-visible", show);
-    loader.classList.toggle("is-hidden", !show);
+    if (
+      alreadyCanonical
+    ) {
+      return true;
+    }
 
-    loader.dataset.loaderVisible = show ? "true" : "false";
-    loader.dataset.loaderState = finalState;
+    if (
+      loader.hidden !==
+      !show
+    ) {
+      loader.hidden =
+        !show;
+    }
 
-    loader.setAttribute("aria-hidden", show ? "false" : "true");
-    loader.setAttribute("aria-busy", busy ? "true" : "false");
+    setClassState(
+      loader,
+      "is-visible",
+      show
+    );
+
+    setClassState(
+      loader,
+      "is-hidden",
+      !show
+    );
+
+    setDatasetIfChanged(
+      loader,
+      "loaderVisible",
+      show
+        ? "true"
+        : "false"
+    );
+
+    setDatasetIfChanged(
+      loader,
+      "loaderState",
+      finalState
+    );
+
+    setAttributeIfChanged(
+      loader,
+      "aria-hidden",
+      ariaHidden
+    );
+
+    setAttributeIfChanged(
+      loader,
+      "aria-busy",
+      ariaBusy
+    );
 
     return true;
   } catch {
@@ -108,14 +403,26 @@ function writeLoader(visible = false, state = LOADER_STATES.BOOTING) {
    PUBLIC API
 ========================================================= */
 
-export function showLoader(state = LOADER_STATES.BOOTING) {
-  return writeLoader(true, state);
+export function showLoader(
+  state = LOADER_STATES.BOOTING
+) {
+  return writeLoader(
+    true,
+    state
+  );
 }
 
 export function hideLoader() {
-  return writeLoader(false, LOADER_STATES.HIDDEN);
+  return writeLoader(
+    false,
+    LOADER_STATES.HIDDEN
+  );
 }
 
+/*
+  Compatibilidad:
+  main.js usa este alias como segunda opción defensiva.
+*/
 export function forceHideLoader() {
   return hideLoader();
 }
@@ -125,24 +432,40 @@ export function forceHideLoader() {
 ========================================================= */
 
 export function getLoaderSnapshot() {
-  const loader = getLoaderElement();
+  const loader =
+    getLoaderElement();
 
-  return {
-    version: LOADER_VERSION,
-    exists: Boolean(loader),
-    visible: isLoaderVisible(),
-    state: loader?.dataset?.loaderState || (loader ? "unknown" : "missing"),
-  };
+  return Object.freeze({
+    version:
+      LOADER_VERSION,
+
+    exists:
+      Boolean(loader),
+
+    visible:
+      isLoaderVisible(),
+
+    state:
+      getLoaderState(),
+
+    busy:
+      loader
+        ?.getAttribute(
+          "aria-busy"
+        ) === "true",
+  });
 }
 
 /* =========================================================
    DEFAULT EXPORT
 ========================================================= */
 
-export default {
+export default Object.freeze({
   LOADER_VERSION,
+  LOADER_STATES,
 
   getLoaderElement,
+  getLoaderState,
   isLoaderVisible,
 
   showLoader,
@@ -150,4 +473,4 @@ export default {
   forceHideLoader,
 
   getLoaderSnapshot,
-};
+});

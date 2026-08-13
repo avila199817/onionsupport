@@ -10,8 +10,9 @@
    - Parsear JSON/text/blob/arrayBuffer.
    - Descargar blobs/documentos.
    - Clasificar errores auth sin navegar.
-   - Refresh automático controlado ante access token expirado.
+   - Refresh automático single-flight ante access token expirado.
    - Retry único de la request original tras refresh OK.
+   - Timeout + AbortSignal externo sin carreras.
    - Soporte PDF/blob 1:1 contra backend.
    - Sin Router.
    - Sin Toast.
@@ -31,213 +32,425 @@ import {
   isPrivateApiPath as configIsPrivateApiPath,
 } from "./config.js";
 
-export const HTTP_VERSION = "core.http.refresh.blob.v5";
+export const HTTP_VERSION =
+  "core.http.refresh.blob.v6-hardened";
 
-export const AUTH_ENDPOINTS = CONFIG_AUTH_ENDPOINTS;
+export const AUTH_ENDPOINTS =
+  CONFIG_AUTH_ENDPOINTS;
 
-const DEFAULT_TIMEOUT_MS = Number(config?.api?.timeout || 30000) || 30000;
-const DEFAULT_API_BASE = getApiBase();
+const DEFAULT_TIMEOUT_MS =
+  Number(
+    config?.api?.timeout ||
+    30000
+  ) ||
+  30000;
 
-const BODYLESS_METHODS = new Set(["GET", "HEAD"]);
-const VALID_METHODS = new Set(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]);
+const DEFAULT_API_BASE =
+  getApiBase();
 
-const BINARY_RESPONSE_TYPES = new Set([
-  "blob",
-  "arraybuffer",
-  "array-buffer",
-]);
+const BODYLESS_METHODS =
+  new Set([
+    "GET",
+    "HEAD",
+  ]);
 
-const SENSITIVE_KEYS = new Set(
-  (Array.isArray(SENSITIVE_QUERY_PARAMS) ? SENSITIVE_QUERY_PARAMS : [])
-    .map((key) => normalizeKey(key))
-    .filter(Boolean)
-);
+const VALID_METHODS =
+  new Set([
+    "GET",
+    "HEAD",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "OPTIONS",
+  ]);
 
-const NON_REFRESHABLE_AUTH_CODES = new Set([
-  "INVALID_CREDENTIALS",
-  "BAD_CREDENTIALS",
-  "LOGIN_FAILED",
-  "MFA_REQUIRED",
-  "2FA_REQUIRED",
-  "OTP_REQUIRED",
+const BINARY_RESPONSE_TYPES =
+  new Set([
+    "blob",
+    "arraybuffer",
+    "array-buffer",
+  ]);
 
-  "SESSION_REVOKED",
-  "SESSION_INVALID",
-  "SESSION_NOT_FOUND",
-  "REFRESH_TOKEN_REVOKED",
-  "REFRESH_TOKEN_INVALID",
-  "REFRESH_TOKEN_EXPIRED",
-
-  "USER_DISABLED",
-  "USER_DESACTIVADO",
-  "USUARIO_DESACTIVADO",
-  "USER_DELETED",
-  "USER_ARCHIVED",
-  "USER_BLOCKED",
-  "USER_BANNED",
-  "USER_SUSPENDED",
-]);
-
-let appCore = null;
-let refreshPromise = null;
-let lastRefreshAt = null;
-let lastRefreshError = null;
-
-const stats = {
-  total: 0,
-  success: 0,
-  error: 0,
-  refresh: 0,
-  refreshSuccess: 0,
-  refreshError: 0,
-  retryAfterRefresh: 0,
-  lastMethod: "",
-  lastUrl: "",
-  lastStatus: null,
-  lastError: null,
-};
+const LEGACY_RESET_TOKEN_PATH =
+  /(\/(?:reset-password|password-reset)\/confirm\/)([^/?#\s]+)/gi;
 
 /* =========================================================
    BASICS
 ========================================================= */
 
 function isBrowser() {
-  return typeof window !== "undefined" && typeof document !== "undefined";
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
 }
 
 function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
 }
 
 function isPlainObject(value) {
-  if (!isObject(value)) return false;
+  if (!isObject(value)) {
+    return false;
+  }
 
   try {
-    const proto = Object.getPrototypeOf(value);
-    return proto === Object.prototype || proto === null;
+    const proto =
+      Object.getPrototypeOf(
+        value
+      );
+
+    return (
+      proto === Object.prototype ||
+      proto === null
+    );
   } catch {
     return false;
   }
 }
 
 function isFunction(value) {
-  return typeof value === "function";
+  return (
+    typeof value === "function"
+  );
 }
 
 function isBlob(value) {
-  return typeof Blob !== "undefined" && value instanceof Blob;
+  return (
+    typeof Blob !== "undefined" &&
+    value instanceof Blob
+  );
 }
 
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+function cleanText(
+  value = "",
+  fallback = ""
+) {
+  const output =
+    String(value ?? "")
+      .replace(
+        /[\r\n\t]/g,
+        " "
+      )
+      .replace(
+        /\s+/g,
+        " "
+      )
+      .trim();
 
-  return output || fallback;
+  return (
+    output ||
+    fallback
+  );
 }
 
-function normalizeKey(value = "") {
-  return cleanText(value, "")
-    .replace(/[-_\s]/g, "")
+function normalizeKey(
+  value = ""
+) {
+  return cleanText(
+    value,
+    ""
+  )
+    .replace(
+      /[-_\s]/g,
+      ""
+    )
     .toLowerCase();
 }
 
-function normalizeCode(value = "") {
-  return cleanText(value, "")
-    .replace(/[\s-]+/g, "_")
+function normalizeCode(
+  value = ""
+) {
+  return cleanText(
+    value,
+    ""
+  )
+    .replace(
+      /[\s-]+/g,
+      "_"
+    )
     .toUpperCase();
 }
 
 function first(...values) {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
+  for (
+    const value
+    of values
+  ) {
+    if (
+      value === undefined ||
+      value === null
+    ) {
+      continue;
+    }
+
+    if (
+      typeof value ===
+        "string" &&
+      value.trim() === ""
+    ) {
+      continue;
+    }
+
     return value;
   }
 
   return null;
 }
 
-function redact(value = "") {
-  let text = cleanText(value, "");
+function nowIso() {
+  return (
+    new Date()
+      .toISOString()
+  );
+}
+
+/* =========================================================
+   SECURITY / REDACTION
+========================================================= */
+
+const SENSITIVE_KEYS =
+  new Set(
+    (
+      Array.isArray(
+        SENSITIVE_QUERY_PARAMS
+      )
+        ? SENSITIVE_QUERY_PARAMS
+        : []
+    )
+      .map(normalizeKey)
+      .filter(Boolean)
+  );
+
+function redact(
+  value = ""
+) {
+  let text =
+    cleanText(
+      value,
+      ""
+    );
+
+  if (!text) {
+    return "";
+  }
+
+  text =
+    text.replace(
+      LEGACY_RESET_TOKEN_PATH,
+      "$1***"
+    );
 
   try {
-    const url = new URL(text, "https://onionsupport.local");
+    const url =
+      new URL(
+        text,
+        "https://onionsupport.local"
+      );
 
-    for (const key of [...url.searchParams.keys()]) {
-      if (SENSITIVE_KEYS.has(normalizeKey(key))) {
-        url.searchParams.set(key, "***");
+    for (
+      const key
+      of [
+        ...url
+          .searchParams
+          .keys(),
+      ]
+    ) {
+      if (
+        SENSITIVE_KEYS.has(
+          normalizeKey(
+            key
+          )
+        )
+      ) {
+        url.searchParams.set(
+          key,
+          "***"
+        );
       }
     }
 
-    text = /^https?:\/\//i.test(text)
-      ? url.toString()
-      : `${url.pathname}${url.search}${url.hash}`;
+    text =
+      /^https?:\/\//i.test(
+        text
+      )
+        ? url.toString()
+        : `${url.pathname}${url.search}${url.hash}`;
   } catch {
-    text = text.replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=)([^&#\s]+)/gi,
-      "$1***"
-    );
+    text =
+      text.replace(
+        /([?&#](?:access_token|accessToken|refresh_token|refreshToken|id_token|idToken|token|code|secret|session|sessionId|session_id|password|pwd|key|sig|signature|jwt|authorization|reset_token|resetToken|activation_token|activationToken|sas)=)([^&#\s]+)/gi,
+        "$1***"
+      );
   }
 
   return text
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
+    .replace(
+      LEGACY_RESET_TOKEN_PATH,
+      "$1***"
+    )
+    .replace(
+      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+      "$1***"
+    )
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
 }
 
-function sanitizeData(value, depth = 0) {
-  if (depth > 5) return null;
+function sanitizeData(
+  value,
+  depth = 0
+) {
+  if (
+    depth > 5
+  ) {
+    return null;
+  }
 
-  if (value === undefined) return undefined;
-  if (value === null) return null;
+  if (
+    value === undefined
+  ) {
+    return undefined;
+  }
 
-  const type = typeof value;
+  if (
+    value === null
+  ) {
+    return null;
+  }
 
-  if (type === "string") return redact(value).slice(0, 1200);
-  if (type === "number" || type === "boolean") return value;
-  if (type === "function" || type === "symbol" || type === "bigint") return undefined;
+  const type =
+    typeof value;
 
-  if (isBlob(value)) {
+  if (
+    type === "string"
+  ) {
+    return redact(
+      value
+    ).slice(
+      0,
+      1200
+    );
+  }
+
+  if (
+    type === "number" ||
+    type === "boolean"
+  ) {
+    return value;
+  }
+
+  if (
+    type === "function" ||
+    type === "symbol" ||
+    type === "bigint"
+  ) {
+    return undefined;
+  }
+
+  if (
+    isBlob(value)
+  ) {
     return {
-      type: value.type || "",
-      size: value.size || 0,
+      type:
+        value.type ||
+        "",
+
+      size:
+        value.size ||
+        0,
+
       blob: true,
     };
   }
 
-  if (Array.isArray(value)) {
+  if (
+    Array.isArray(value)
+  ) {
     return value
-      .slice(0, 100)
-      .map((item) => sanitizeData(item, depth + 1))
-      .filter((item) => item !== undefined);
+      .slice(
+        0,
+        100
+      )
+      .map(
+        (item) =>
+          sanitizeData(
+            item,
+            depth + 1
+          )
+      )
+      .filter(
+        (item) =>
+          item !==
+          undefined
+      );
   }
 
-  if (!isPlainObject(value)) return null;
+  if (
+    !isPlainObject(value)
+  ) {
+    return null;
+  }
 
   const output = {};
 
-  for (const [key, child] of Object.entries(value)) {
+  for (
+    const [
+      key,
+      child,
+    ]
+    of Object.entries(
+      value
+    )
+  ) {
     if (
-      SENSITIVE_KEYS.has(normalizeKey(key)) ||
-      /(token|authorization|cookie|password|pwd|secret|credential|jwt|bearer|refresh|access|api[_-]?key|connection[_-]?string|sas|session[_-]?id|^_rid$|^_self$|^_etag$|^_attachments$|^_ts$)/i.test(key)
+      SENSITIVE_KEYS.has(
+        normalizeKey(
+          key
+        )
+      ) ||
+      /(token|authorization|cookie|password|pwd|secret|credential|jwt|bearer|refresh|access|api[_-]?key|connection[_-]?string|sas|session[_-]?id|^_rid$|^_self$|^_etag$|^_attachments$|^_ts$)/i.test(
+        key
+      )
     ) {
-      output[key] = child ? "***" : null;
+      output[key] =
+        child
+          ? "***"
+          : null;
+
       continue;
     }
 
-    const clean = sanitizeData(child, depth + 1);
+    const clean =
+      sanitizeData(
+        child,
+        depth + 1
+      );
 
-    if (clean !== undefined) {
-      output[key] = clean;
+    if (
+      clean !== undefined
+    ) {
+      output[key] =
+        clean;
     }
   }
 
   return output;
 }
 
-function nowIso() {
-  return new Date().toISOString();
+export function redactHttpText(
+  value = ""
+) {
+  return redact(
+    value
+  );
 }
 
 /* =========================================================
@@ -245,93 +458,244 @@ function nowIso() {
 ========================================================= */
 
 function getApiOrigin() {
-  return DEFAULT_API_BASE || getApiBase();
+  return (
+    DEFAULT_API_BASE ||
+    getApiBase()
+  );
 }
 
-function endpointToPath(endpoint = "/") {
-  const raw = cleanText(endpoint, "");
+function endpointToPath(
+  endpoint = "/"
+) {
+  const raw =
+    cleanText(
+      endpoint,
+      ""
+    );
 
-  if (!raw) return "";
+  if (!raw) {
+    return "";
+  }
 
   try {
-    const parsed = new URL(raw, getApiOrigin());
-    const normalizedPath = normalizeEndpointPath(parsed.pathname) || parsed.pathname || "/";
-    return `${normalizedPath}${parsed.search}`;
+    const parsed =
+      new URL(
+        raw,
+        getApiOrigin()
+      );
+
+    const normalizedPath =
+      normalizeEndpointPath(
+        parsed.pathname
+      ) ||
+      parsed.pathname ||
+      "/";
+
+    return (
+      `${normalizedPath}${parsed.search}`
+    );
   } catch {
     try {
-      return endpointPathFromUrlLike(raw) || "";
+      return (
+        endpointPathFromUrlLike(
+          raw
+        ) ||
+        ""
+      );
     } catch {
       return "";
     }
   }
 }
 
-function endpointPathOnly(endpoint = "/") {
+function endpointPathOnly(
+  endpoint = "/"
+) {
   try {
-    const pathWithQuery = endpointToPath(endpoint);
-    const pathname = pathWithQuery.split("?")[0].split("#")[0];
-    return normalizeEndpointPath(pathname) || "";
+    const pathWithQuery =
+      endpointToPath(
+        endpoint
+      );
+
+    const pathname =
+      pathWithQuery
+        .split("?")[0]
+        .split("#")[0];
+
+    return (
+      normalizeEndpointPath(
+        pathname
+      ) ||
+      ""
+    );
   } catch {
     return "";
   }
 }
 
-function appendQuery(url = "", query = null) {
-  const parsed = new URL(url);
+function appendQuery(
+  url = "",
+  query = null
+) {
+  const parsed =
+    new URL(
+      url
+    );
 
-  if (isPlainObject(query)) {
-    for (const [key, value] of Object.entries(query)) {
-      if (SENSITIVE_KEYS.has(normalizeKey(key))) continue;
-      if (value === undefined || value === null || value === "") continue;
+  if (
+    isPlainObject(query)
+  ) {
+    for (
+      const [
+        key,
+        value,
+      ]
+      of Object.entries(
+        query
+      )
+    ) {
+      if (
+        SENSITIVE_KEYS.has(
+          normalizeKey(
+            key
+          )
+        )
+      ) {
+        continue;
+      }
 
-      if (Array.isArray(value)) {
-        for (const item of value) {
-          if (item !== undefined && item !== null && item !== "") {
-            parsed.searchParams.append(key, String(item));
+      if (
+        value === undefined ||
+        value === null ||
+        value === ""
+      ) {
+        continue;
+      }
+
+      if (
+        Array.isArray(value)
+      ) {
+        for (
+          const item
+          of value
+        ) {
+          if (
+            item !== undefined &&
+            item !== null &&
+            item !== ""
+          ) {
+            parsed
+              .searchParams
+              .append(
+                key,
+                String(item)
+              );
           }
         }
 
         continue;
       }
 
-      parsed.searchParams.set(key, String(value));
+      parsed
+        .searchParams
+        .set(
+          key,
+          String(value)
+        );
     }
   }
 
-  for (const key of [...parsed.searchParams.keys()]) {
-    if (SENSITIVE_KEYS.has(normalizeKey(key))) {
-      parsed.searchParams.delete(key);
+  for (
+    const key
+    of [
+      ...parsed
+        .searchParams
+        .keys(),
+    ]
+  ) {
+    if (
+      SENSITIVE_KEYS.has(
+        normalizeKey(
+          key
+        )
+      )
+    ) {
+      parsed
+        .searchParams
+        .delete(
+          key
+        );
     }
   }
 
   return parsed.toString();
 }
 
-export function buildApiUrl(endpoint = "/", options = {}) {
-  const path = endpointToPath(endpoint);
+export function buildApiUrl(
+  endpoint = "/",
+  options = {}
+) {
+  const path =
+    endpointToPath(
+      endpoint
+    );
 
-  if (!path) return "";
+  if (!path) {
+    return "";
+  }
 
-  const base = getApiOrigin().replace(/\/+$/g, "");
-  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  const base =
+    getApiOrigin()
+      .replace(
+        /\/+$/g,
+        ""
+      );
 
-  return appendQuery(`${base}${cleanPath}`, options.query || options.params || null);
-}
+  const cleanPath =
+    path.startsWith("/")
+      ? path
+      : `/${path}`;
 
-export function redactHttpText(value = "") {
-  return redact(value);
+  return appendQuery(
+    `${base}${cleanPath}`,
+    options.query ||
+    options.params ||
+    null
+  );
 }
 
 /* =========================================================
-   TOKEN
+   TOKEN / CORE
 ========================================================= */
 
-function cleanToken(value = "") {
-  const token = cleanText(value, "").replace(/^Bearer\s+/i, "");
+function cleanToken(
+  value = ""
+) {
+  const token =
+    cleanText(
+      value,
+      ""
+    ).replace(
+      /^Bearer\s+/i,
+      ""
+    );
 
-  if (!token) return "";
-  if (/\s/.test(token)) return "";
-  if (token.length > 8192) return "";
+  if (!token) {
+    return "";
+  }
+
+  if (
+    /\s/.test(token)
+  ) {
+    return "";
+  }
+
+  if (
+    token.length >
+    8192
+  ) {
+    return "";
+  }
 
   if (
     [
@@ -342,7 +706,9 @@ function cleanToken(value = "") {
       "[object object]",
       "{}",
       "[]",
-    ].includes(token.toLowerCase())
+    ].includes(
+      token.toLowerCase()
+    )
   ) {
     return "";
   }
@@ -350,11 +716,19 @@ function cleanToken(value = "") {
   return token;
 }
 
+let appCore = null;
+
 function readCoreState() {
-  if (!appCore) return null;
+  if (!appCore) {
+    return null;
+  }
 
   try {
-    if (isFunction(appCore.getState)) {
+    if (
+      isFunction(
+        appCore.getState
+      )
+    ) {
       return appCore.getState({
         includeToken: true,
       });
@@ -363,13 +737,22 @@ function readCoreState() {
     // fallback abajo
   }
 
-  return isObject(appCore.state) ? appCore.state : null;
+  return isObject(
+    appCore.state
+  )
+    ? appCore.state
+    : null;
 }
 
 export function getAccessToken() {
-  const state = readCoreState();
+  const state =
+    readCoreState();
 
-  if (!isObject(state)) return "";
+  if (
+    !isObject(state)
+  ) {
+    return "";
+  }
 
   return cleanToken(
     first(
@@ -381,11 +764,18 @@ export function getAccessToken() {
   );
 }
 
-export function setAccessToken(token = "") {
-  const value = cleanToken(token);
+export function setAccessToken(
+  token = ""
+) {
+  const value =
+    cleanToken(
+      token
+    );
 
   try {
-    appCore?.setToken?.(value || null);
+    appCore
+      ?.setToken
+      ?.(value || null);
   } catch {
     // noop
   }
@@ -395,7 +785,9 @@ export function setAccessToken(token = "") {
 
 export function clearAuthTokens() {
   try {
-    appCore?.setToken?.(null);
+    appCore
+      ?.setToken
+      ?.(null);
   } catch {
     // noop
   }
@@ -403,25 +795,30 @@ export function clearAuthTokens() {
   return true;
 }
 
-export function setAuthTokens(payload = {}) {
-  const token = cleanToken(
-    first(
-      payload?.token,
-      payload?.accessToken,
-      payload?.access_token,
-      payload?.data?.token,
-      payload?.data?.accessToken,
-      payload?.data?.access_token,
-      payload?.payload?.token,
-      payload?.payload?.accessToken,
-      payload?.result?.token,
-      payload?.result?.accessToken,
-      ""
-    )
-  );
+export function setAuthTokens(
+  payload = {}
+) {
+  const token =
+    cleanToken(
+      first(
+        payload?.token,
+        payload?.accessToken,
+        payload?.access_token,
+        payload?.data?.token,
+        payload?.data?.accessToken,
+        payload?.data?.access_token,
+        payload?.payload?.token,
+        payload?.payload?.accessToken,
+        payload?.result?.token,
+        payload?.result?.accessToken,
+        ""
+      )
+    );
 
   if (token) {
-    setAccessToken(token);
+    setAccessToken(
+      token
+    );
   }
 
   return {
@@ -431,12 +828,23 @@ export function setAuthTokens(payload = {}) {
   };
 }
 
-function applyAuthPayload(payload = {}) {
-  const tokens = setAuthTokens(payload);
+function applyAuthPayload(
+  payload = {}
+) {
+  const tokens =
+    setAuthTokens(
+      payload
+    );
 
   try {
-    if (isFunction(appCore?.applySession)) {
-      appCore.applySession(payload);
+    if (
+      isFunction(
+        appCore?.applySession
+      )
+    ) {
+      appCore.applySession(
+        payload
+      );
     }
   } catch {
     // noop
@@ -445,51 +853,86 @@ function applyAuthPayload(payload = {}) {
   return tokens;
 }
 
-function clearCoreSessionIfFinal(error = null) {
-  if (!shouldClearSessionForAuthError(error)) return false;
-
-  try {
-    if (isFunction(appCore?.clearSession)) {
-      appCore.clearSession();
-      return true;
-    }
-  } catch {
-    // fallback abajo
-  }
-
-  clearAuthTokens();
-  return true;
-}
-
 /* =========================================================
    AUTH POLICY
 ========================================================= */
 
-function endpointIsPublic(endpoint = "") {
-  const path = endpointPathOnly(endpoint);
+const NON_REFRESHABLE_AUTH_CODES =
+  new Set([
+    "INVALID_CREDENTIALS",
+    "BAD_CREDENTIALS",
+    "LOGIN_FAILED",
+    "MFA_REQUIRED",
+    "2FA_REQUIRED",
+    "OTP_REQUIRED",
 
-  if (!path) return false;
+    "SESSION_REVOKED",
+    "SESSION_INVALID",
+    "SESSION_NOT_FOUND",
+    "REFRESH_TOKEN_REVOKED",
+    "REFRESH_TOKEN_INVALID",
+    "REFRESH_TOKEN_EXPIRED",
+
+    "USER_DISABLED",
+    "USER_DESACTIVADO",
+    "USUARIO_DESACTIVADO",
+    "USER_DELETED",
+    "USER_ARCHIVED",
+    "USER_BLOCKED",
+    "USER_BANNED",
+    "USER_SUSPENDED",
+  ]);
+
+function endpointIsPublic(
+  endpoint = ""
+) {
+  const path =
+    endpointPathOnly(
+      endpoint
+    );
+
+  if (!path) {
+    return false;
+  }
 
   try {
-    return configIsPublicApiPath(path) === true;
+    return (
+      configIsPublicApiPath(
+        path
+      ) === true
+    );
   } catch {
     return false;
   }
 }
 
-function endpointIsPrivate(endpoint = "") {
-  const path = endpointPathOnly(endpoint);
+function endpointIsPrivate(
+  endpoint = ""
+) {
+  const path =
+    endpointPathOnly(
+      endpoint
+    );
 
-  if (!path) return false;
+  if (!path) {
+    return false;
+  }
 
   try {
-    return configIsPrivateApiPath(path) === true;
+    return (
+      configIsPrivateApiPath(
+        path
+      ) === true
+    );
   } catch {
     return false;
   }
 }
 
-function shouldUseAuth(endpoint = "", options = {}) {
+function shouldUseAuth(
+  endpoint = "",
+  options = {}
+) {
   if (
     options.auth === false ||
     options.public === true ||
@@ -499,22 +942,163 @@ function shouldUseAuth(endpoint = "", options = {}) {
     return false;
   }
 
-  if (options.auth === true) {
+  if (
+    options.auth === true
+  ) {
     return true;
   }
 
-  if (endpointIsPrivate(endpoint)) {
+  if (
+    endpointIsPrivate(
+      endpoint
+    )
+  ) {
     return true;
   }
 
-  if (endpointIsPublic(endpoint)) {
+  if (
+    endpointIsPublic(
+      endpoint
+    )
+  ) {
+    return false;
+  }
+
+  /*
+    Endpoints no clasificados se consideran privados.
+    Mantiene el comportamiento existente fail-closed.
+  */
+  return true;
+}
+
+function isRefreshEndpoint(
+  endpoint = ""
+) {
+  const path =
+    endpointPathOnly(
+      endpoint
+    );
+
+  return Boolean(
+    path &&
+    path ===
+      endpointPathOnly(
+        AUTH_ENDPOINTS.refresh
+      )
+  );
+}
+
+export function isAuthError(
+  error = null
+) {
+  const status =
+    Number(
+      error?.status ||
+      error?.statusCode ||
+      0
+    );
+
+  return (
+    status === 401 ||
+    status === 403
+  );
+}
+
+export function shouldClearSessionForAuthError(
+  error = null
+) {
+  const status =
+    Number(
+      error?.status ||
+      error?.statusCode ||
+      0
+    );
+
+  const code =
+    normalizeCode(
+      error?.code ||
+      error?.payload?.code ||
+      error?.payload?.error ||
+      ""
+    );
+
+  if (
+    isRefreshEndpoint(
+      error?.endpoint ||
+      ""
+    ) &&
+    (
+      status === 401 ||
+      status === 403
+    )
+  ) {
+    return true;
+  }
+
+  return (
+    NON_REFRESHABLE_AUTH_CODES.has(
+      code
+    )
+  );
+}
+
+export function isRefreshableAuthError(
+  error = null
+) {
+  const status =
+    Number(
+      error?.status ||
+      error?.statusCode ||
+      0
+    );
+
+  const code =
+    normalizeCode(
+      error?.code ||
+      error?.payload?.code ||
+      error?.payload?.error ||
+      ""
+    );
+
+  if (
+    status !== 401
+  ) {
+    return false;
+  }
+
+  if (
+    isRefreshEndpoint(
+      error?.endpoint ||
+      ""
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    shouldClearSessionForAuthError(
+      error
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    NON_REFRESHABLE_AUTH_CODES.has(
+      code
+    )
+  ) {
     return false;
   }
 
   return true;
 }
 
-function shouldAutoRefresh(endpoint = "", options = {}, error = null) {
+function shouldAutoRefresh(
+  endpoint = "",
+  options = {},
+  error = null
+) {
   if (
     options.noAutoRefresh === true ||
     options.skipRefresh === true ||
@@ -525,43 +1109,157 @@ function shouldAutoRefresh(endpoint = "", options = {}, error = null) {
     return false;
   }
 
-  if (isRefreshEndpoint(endpoint)) return false;
-  if (!shouldUseAuth(endpoint, options)) return false;
+  if (
+    isRefreshEndpoint(
+      endpoint
+    )
+  ) {
+    return false;
+  }
 
-  return isRefreshableAuthError(error);
+  if (
+    !shouldUseAuth(
+      endpoint,
+      options
+    )
+  ) {
+    return false;
+  }
+
+  return (
+    isRefreshableAuthError(
+      error
+    )
+  );
+}
+
+function shouldClearSessionForRequest(
+  endpoint = "",
+  options = {},
+  error = null
+) {
+  /*
+    Un error de login/password-reset/activate-account no debe borrar
+    una sesión existente sólo por reutilizar un código auth del backend.
+
+    Sólo limpiamos sesión automáticamente cuando:
+    - era una request autenticada; o
+    - falló el propio endpoint de refresh.
+  */
+  if (
+    !shouldUseAuth(
+      endpoint,
+      options
+    ) &&
+    !isRefreshEndpoint(
+      endpoint
+    )
+  ) {
+    return false;
+  }
+
+  return (
+    shouldClearSessionForAuthError(
+      error
+    )
+  );
+}
+
+function clearCoreSessionIfFinal(
+  endpoint = "",
+  options = {},
+  error = null
+) {
+  if (
+    !shouldClearSessionForRequest(
+      endpoint,
+      options,
+      error
+    )
+  ) {
+    return false;
+  }
+
+  try {
+    if (
+      isFunction(
+        appCore?.clearSession
+      )
+    ) {
+      appCore.clearSession();
+      return true;
+    }
+  } catch {
+    // fallback abajo
+  }
+
+  clearAuthTokens();
+
+  return true;
 }
 
 /* =========================================================
    HEADERS / BODY
 ========================================================= */
 
-function headersFrom(input = null) {
+function headersFrom(
+  input = null
+) {
   const headers = {};
 
-  if (!input) return headers;
+  if (!input) {
+    return headers;
+  }
 
-  if (typeof Headers !== "undefined" && input instanceof Headers) {
-    input.forEach((value, key) => {
-      headers[key] = value;
-    });
+  if (
+    typeof Headers !==
+      "undefined" &&
+    input instanceof Headers
+  ) {
+    input.forEach(
+      (value, key) => {
+        headers[key] =
+          value;
+      }
+    );
 
     return headers;
   }
 
-  if (Array.isArray(input)) {
-    for (const item of input) {
-      if (!Array.isArray(item) || item.length < 2) continue;
+  if (
+    Array.isArray(input)
+  ) {
+    for (
+      const item
+      of input
+    ) {
+      if (
+        !Array.isArray(
+          item
+        ) ||
+        item.length < 2
+      ) {
+        continue;
+      }
 
-      const key = cleanText(item[0], "");
-      const value = item[1];
+      const key =
+        cleanText(
+          item[0],
+          ""
+        );
 
-      if (key) headers[key] = value;
+      if (key) {
+        headers[key] =
+          item[1];
+      }
     }
 
     return headers;
   }
 
-  if (isObject(input)) {
+  if (
+    isObject(input)
+  ) {
     return {
       ...input,
     };
@@ -570,33 +1268,83 @@ function headersFrom(input = null) {
   return headers;
 }
 
-function hasHeader(headers = {}, name = "") {
-  const target = cleanText(name, "").toLowerCase();
+function hasHeader(
+  headers = {},
+  name = ""
+) {
+  const target =
+    cleanText(
+      name,
+      ""
+    ).toLowerCase();
 
-  return Object.keys(headers).some((key) => key.toLowerCase() === target);
+  return Object.keys(
+    headers
+  ).some(
+    (key) =>
+      key.toLowerCase() ===
+      target
+  );
 }
 
-function setHeader(headers = {}, name = "", value = "") {
-  const target = cleanText(name, "");
+function setHeader(
+  headers = {},
+  name = "",
+  value = ""
+) {
+  const target =
+    cleanText(
+      name,
+      ""
+    );
 
-  if (!target) return headers;
+  if (!target) {
+    return headers;
+  }
 
-  for (const key of Object.keys(headers)) {
-    if (key.toLowerCase() === target.toLowerCase()) {
-      headers[key] = value;
+  for (
+    const key
+    of Object.keys(
+      headers
+    )
+  ) {
+    if (
+      key.toLowerCase() ===
+      target.toLowerCase()
+    ) {
+      headers[key] =
+        value;
+
       return headers;
     }
   }
 
-  headers[target] = value;
+  headers[target] =
+    value;
+
   return headers;
 }
 
-function deleteHeader(headers = {}, name = "") {
-  const target = cleanText(name, "").toLowerCase();
+function deleteHeader(
+  headers = {},
+  name = ""
+) {
+  const target =
+    cleanText(
+      name,
+      ""
+    ).toLowerCase();
 
-  for (const key of Object.keys(headers)) {
-    if (key.toLowerCase() === target) {
+  for (
+    const key
+    of Object.keys(
+      headers
+    )
+  ) {
+    if (
+      key.toLowerCase() ===
+      target
+    ) {
       delete headers[key];
     }
   }
@@ -604,253 +1352,290 @@ function deleteHeader(headers = {}, name = "") {
   return headers;
 }
 
-function getResponseType(options = {}) {
-  return cleanText(options.responseType, "").toLowerCase();
+function getResponseType(
+  options = {}
+) {
+  return cleanText(
+    options.responseType,
+    ""
+  ).toLowerCase();
 }
 
-function isBinaryResponse(options = {}) {
-  return BINARY_RESPONSE_TYPES.has(getResponseType(options));
+function isBinaryResponse(
+  options = {}
+) {
+  return (
+    BINARY_RESPONSE_TYPES.has(
+      getResponseType(
+        options
+      )
+    )
+  );
 }
 
-function buildDefaultAccept(options = {}) {
-  const responseType = getResponseType(options);
+function buildDefaultAccept(
+  options = {}
+) {
+  const responseType =
+    getResponseType(
+      options
+    );
 
-  if (responseType === "blob") {
-    return "application/pdf, application/octet-stream, */*";
+  if (
+    responseType === "blob"
+  ) {
+    return (
+      "application/pdf, application/octet-stream, */*"
+    );
   }
 
-  if (responseType === "arraybuffer" || responseType === "array-buffer") {
-    return "application/octet-stream, application/pdf, */*";
+  if (
+    responseType ===
+      "arraybuffer" ||
+    responseType ===
+      "array-buffer"
+  ) {
+    return (
+      "application/octet-stream, application/pdf, */*"
+    );
   }
 
-  return "application/json, text/plain, */*";
+  return (
+    "application/json, text/plain, */*"
+  );
 }
 
-function isBodyInit(value) {
-  if (value === undefined || value === null) return false;
+function isBodyInit(
+  value
+) {
+  if (
+    value === undefined ||
+    value === null
+  ) {
+    return false;
+  }
 
-  if (typeof FormData !== "undefined" && value instanceof FormData) return true;
-  if (typeof URLSearchParams !== "undefined" && value instanceof URLSearchParams) return true;
-  if (typeof Blob !== "undefined" && value instanceof Blob) return true;
-  if (typeof ArrayBuffer !== "undefined" && value instanceof ArrayBuffer) return true;
-  if (typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView?.(value)) return true;
-  if (typeof value === "string") return true;
+  if (
+    typeof FormData !==
+      "undefined" &&
+    value instanceof FormData
+  ) {
+    return true;
+  }
 
-  return false;
+  if (
+    typeof URLSearchParams !==
+      "undefined" &&
+    value instanceof URLSearchParams
+  ) {
+    return true;
+  }
+
+  if (
+    typeof Blob !==
+      "undefined" &&
+    value instanceof Blob
+  ) {
+    return true;
+  }
+
+  if (
+    typeof ArrayBuffer !==
+      "undefined" &&
+    value instanceof ArrayBuffer
+  ) {
+    return true;
+  }
+
+  if (
+    typeof ArrayBuffer !==
+      "undefined" &&
+    ArrayBuffer.isView
+      ?.(value)
+  ) {
+    return true;
+  }
+
+  return (
+    typeof value ===
+    "string"
+  );
 }
 
-function normalizeBody(body = undefined, headers = {}) {
-  if (body === undefined || body === null) {
+function normalizeBody(
+  body = undefined,
+  headers = {}
+) {
+  if (
+    body === undefined ||
+    body === null
+  ) {
     return {
-      body: undefined,
+      body:
+        undefined,
+
       headers,
     };
   }
 
-  if (isBodyInit(body)) {
+  if (
+    isBodyInit(body)
+  ) {
     return {
       body,
       headers,
     };
   }
 
-  if (isPlainObject(body) || Array.isArray(body)) {
-    if (!hasHeader(headers, "Content-Type")) {
-      setHeader(headers, "Content-Type", "application/json");
+  if (
+    isPlainObject(body) ||
+    Array.isArray(body)
+  ) {
+    if (
+      !hasHeader(
+        headers,
+        "Content-Type"
+      )
+    ) {
+      setHeader(
+        headers,
+        "Content-Type",
+        "application/json"
+      );
     }
 
     return {
-      body: JSON.stringify(body),
+      body:
+        JSON.stringify(
+          body
+        ),
+
       headers,
     };
   }
 
-  if (!hasHeader(headers, "Content-Type")) {
-    setHeader(headers, "Content-Type", "text/plain;charset=UTF-8");
-  }
-
-  return {
-    body: String(body),
-    headers,
-  };
-}
-
-function buildFetchOptions(endpoint = "", options = {}) {
-  const method = cleanText(options.method, "GET").toUpperCase();
-
-  if (!VALID_METHODS.has(method)) {
-    throw createHttpError({
-      code: "HTTP_METHOD_INVALID",
-      message: `Método HTTP no permitido: ${method}`,
-      endpoint,
-    });
-  }
-
-  const headers = headersFrom(options.headers);
-
-  if (!hasHeader(headers, "Accept")) {
-    setHeader(headers, "Accept", buildDefaultAccept(options));
-  }
-
-  if (shouldUseAuth(endpoint, options)) {
-    const token = getAccessToken();
-
-    if (token) {
-      setHeader(headers, "Authorization", `Bearer ${token}`);
-    } else {
-      deleteHeader(headers, "Authorization");
-    }
-  } else {
-    deleteHeader(headers, "Authorization");
-  }
-
-  let body = undefined;
-
-  if (!BODYLESS_METHODS.has(method)) {
-    const normalized = normalizeBody(options.body, headers);
-    body = normalized.body;
-  }
-
-  return {
-    method,
-    headers,
-    body,
-    credentials: options.credentials || "include",
-    cache: options.cache || "no-store",
-    mode: options.mode || "cors",
-    redirect: options.redirect || "follow",
-  };
-}
-
-/* =========================================================
-   RESPONSE
-========================================================= */
-
-function contentTypeOf(response) {
-  try {
-    return response.headers.get("content-type") || "";
-  } catch {
-    return "";
-  }
-}
-
-function dispositionFilename(response) {
-  try {
-    const disposition = response.headers.get("content-disposition") || "";
-
-    const utf8 = disposition.match(/filename\*=UTF-8''([^;]+)/i);
-
-    if (utf8?.[1]) {
-      return decodeURIComponent(utf8[1]).replace(/["]/g, "");
-    }
-
-    const ascii = disposition.match(/filename="?([^";]+)"?/i);
-
-    if (ascii?.[1]) {
-      return ascii[1].replace(/["]/g, "");
-    }
-  } catch {
-    // noop
-  }
-
-  return "";
-}
-
-async function parseResponse(response, options = {}) {
-  const method = cleanText(options.method, "GET").toUpperCase();
-
-  if (response.status === 204 || response.status === 205 || method === "HEAD") {
-    return null;
-  }
-
-  const responseType = getResponseType(options);
-
-  if (responseType === "blob") return response.blob();
-  if (responseType === "arraybuffer" || responseType === "array-buffer") return response.arrayBuffer();
-  if (responseType === "text") return response.text();
-
-  const contentType = contentTypeOf(response).toLowerCase();
-
-  if (contentType.includes("application/json") || contentType.includes("+json")) {
-    const text = await response.text();
-
-    if (!text) return null;
-
-    try {
-      return JSON.parse(text);
-    } catch {
-      return text;
-    }
-  }
-
   if (
-    contentType.startsWith("text/") ||
-    contentType.includes("xml") ||
-    contentType.includes("html")
+    !hasHeader(
+      headers,
+      "Content-Type"
+    )
   ) {
-    return response.text();
+    setHeader(
+      headers,
+      "Content-Type",
+      "text/plain;charset=UTF-8"
+    );
   }
 
-  try {
-    return await response.blob();
-  } catch {
-    return response.text();
-  }
-}
+  return {
+    body:
+      String(body),
 
-async function parseErrorPayload(response) {
-  const contentType = contentTypeOf(response).toLowerCase();
-
-  try {
-    const text = await response.text();
-
-    if (!text) return null;
-
-    if (contentType.includes("application/json") || contentType.includes("+json")) {
-      try {
-        return JSON.parse(text);
-      } catch {
-        return text.slice(0, 1200);
-      }
-    }
-
-    return text.slice(0, 1200);
-  } catch {
-    return null;
-  }
+    headers,
+  };
 }
 
 /* =========================================================
    ERRORS
 ========================================================= */
 
-function extractErrorCode(payload = null, response = null) {
-  if (isObject(payload)) {
-    const explicit = normalizeCode(
-      first(
-        payload.code,
-        payload.errorCode,
-        payload.error_code,
-        payload.error,
-        payload.name,
-        ""
-      )
-    );
+function extractErrorCode(
+  payload = null,
+  response = null
+) {
+  if (
+    isObject(payload)
+  ) {
+    const explicit =
+      normalizeCode(
+        first(
+          payload.code,
+          payload.errorCode,
+          payload.error_code,
+          payload.error,
+          payload.name,
+          ""
+        )
+      );
 
-    if (explicit) return explicit;
+    if (explicit) {
+      return explicit;
+    }
   }
 
-  if (response?.status === 401) return "UNAUTHORIZED";
-  if (response?.status === 403) return "FORBIDDEN";
-  if (response?.status === 404) return "NOT_FOUND";
-  if (response?.status === 429) return "TOO_MANY_REQUESTS";
-  if (response?.status >= 500) return "SERVER_ERROR";
+  if (
+    response?.status ===
+    400
+  ) {
+    return "BAD_REQUEST";
+  }
+
+  if (
+    response?.status ===
+    401
+  ) {
+    return "UNAUTHORIZED";
+  }
+
+  if (
+    response?.status ===
+    403
+  ) {
+    return "FORBIDDEN";
+  }
+
+  if (
+    response?.status ===
+    404
+  ) {
+    return "NOT_FOUND";
+  }
+
+  if (
+    response?.status ===
+    408
+  ) {
+    return "REQUEST_TIMEOUT";
+  }
+
+  if (
+    response?.status ===
+    409
+  ) {
+    return "CONFLICT";
+  }
+
+  if (
+    response?.status ===
+    422
+  ) {
+    return "UNPROCESSABLE_ENTITY";
+  }
+
+  if (
+    response?.status ===
+    429
+  ) {
+    return "TOO_MANY_REQUESTS";
+  }
+
+  if (
+    response?.status >=
+    500
+  ) {
+    return "SERVER_ERROR";
+  }
 
   return "HTTP_ERROR";
 }
 
-function extractErrorMessage(payload = null, fallback = "Error HTTP") {
-  if (isObject(payload)) {
+function extractErrorMessage(
+  payload = null,
+  fallback = "Error HTTP"
+) {
+  if (
+    isObject(payload)
+  ) {
     return cleanText(
       first(
         payload.message,
@@ -861,11 +1646,23 @@ function extractErrorMessage(payload = null, fallback = "Error HTTP") {
         ""
       ),
       fallback
-    ).slice(0, 1200);
+    ).slice(
+      0,
+      1200
+    );
   }
 
-  if (typeof payload === "string") {
-    return cleanText(payload, fallback).slice(0, 1200);
+  if (
+    typeof payload ===
+    "string"
+  ) {
+    return cleanText(
+      payload,
+      fallback
+    ).slice(
+      0,
+      1200
+    );
   }
 
   return fallback;
@@ -882,52 +1679,665 @@ function createHttpError({
   response = null,
   cause = null,
 } = {}) {
-  const error = new Error(cleanText(message, "Error HTTP"));
+  const error =
+    new Error(
+      cleanText(
+        message,
+        "Error HTTP"
+      )
+    );
 
-  error.name = "HttpError";
-  error.code = normalizeCode(code);
-  error.status = Number(status || response?.status || 0);
-  error.statusCode = error.status;
-  error.endpoint = redact(endpoint);
-  error.url = redact(url);
-  error.method = cleanText(method, "");
-  error.payload = sanitizeData(payload);
-  error.data = error.payload;
-  error.response = response || null;
-  error.cause = cause || null;
+  error.name =
+    "HttpError";
+
+  error.code =
+    normalizeCode(
+      code
+    );
+
+  error.status =
+    Number(
+      status ||
+      response?.status ||
+      0
+    );
+
+  error.statusCode =
+    error.status;
+
+  error.endpoint =
+    redact(
+      endpoint
+    );
+
+  error.url =
+    redact(
+      url
+    );
+
+  error.method =
+    cleanText(
+      method,
+      ""
+    );
+
+  error.payload =
+    sanitizeData(
+      payload
+    );
+
+  error.data =
+    error.payload;
+
+  error.response =
+    response ||
+    null;
+
+  error.cause =
+    cause ||
+    null;
 
   return error;
 }
 
-function isRefreshEndpoint(endpoint = "") {
-  const path = endpointPathOnly(endpoint);
-  return path && path === endpointPathOnly(AUTH_ENDPOINTS.refresh);
+/* =========================================================
+   FETCH OPTIONS
+========================================================= */
+
+function buildFetchOptions(
+  endpoint = "",
+  options = {}
+) {
+  const method =
+    cleanText(
+      options.method,
+      "GET"
+    ).toUpperCase();
+
+  if (
+    !VALID_METHODS.has(
+      method
+    )
+  ) {
+    throw createHttpError({
+      code:
+        "HTTP_METHOD_INVALID",
+
+      message:
+        `Método HTTP no permitido: ${method}`,
+
+      endpoint,
+    });
+  }
+
+  const headers =
+    headersFrom(
+      options.headers
+    );
+
+  if (
+    !hasHeader(
+      headers,
+      "Accept"
+    )
+  ) {
+    setHeader(
+      headers,
+      "Accept",
+      buildDefaultAccept(
+        options
+      )
+    );
+  }
+
+  if (
+    shouldUseAuth(
+      endpoint,
+      options
+    )
+  ) {
+    const token =
+      getAccessToken();
+
+    if (token) {
+      setHeader(
+        headers,
+        "Authorization",
+        `Bearer ${token}`
+      );
+    } else {
+      deleteHeader(
+        headers,
+        "Authorization"
+      );
+    }
+  } else {
+    deleteHeader(
+      headers,
+      "Authorization"
+    );
+  }
+
+  let body =
+    undefined;
+
+  if (
+    !BODYLESS_METHODS.has(
+      method
+    )
+  ) {
+    const normalized =
+      normalizeBody(
+        options.body,
+        headers
+      );
+
+    body =
+      normalized.body;
+  }
+
+  const output = {
+    method,
+    headers,
+    body,
+
+    credentials:
+      options.credentials ||
+      "include",
+
+    cache:
+      options.cache ||
+      "no-store",
+
+    mode:
+      options.mode ||
+      "cors",
+
+    redirect:
+      options.redirect ||
+      "follow",
+  };
+
+  if (
+    typeof options.keepalive ===
+    "boolean"
+  ) {
+    output.keepalive =
+      options.keepalive;
+  }
+
+  if (
+    options.referrerPolicy
+  ) {
+    output.referrerPolicy =
+      options.referrerPolicy;
+  }
+
+  return output;
 }
 
-export function isAuthError(error = null) {
-  const status = Number(error?.status || error?.statusCode || 0);
-  return status === 401 || status === 403;
+/* =========================================================
+   RESPONSE
+========================================================= */
+
+function contentTypeOf(
+  response
+) {
+  try {
+    return (
+      response.headers.get(
+        "content-type"
+      ) ||
+      ""
+    );
+  } catch {
+    return "";
+  }
 }
 
-export function isRefreshableAuthError(error = null) {
-  const status = Number(error?.status || error?.statusCode || 0);
-  const code = normalizeCode(error?.code || error?.payload?.code || error?.payload?.error || "");
+function dispositionFilename(
+  response
+) {
+  try {
+    const disposition =
+      response.headers.get(
+        "content-disposition"
+      ) ||
+      "";
 
-  if (status !== 401) return false;
-  if (isRefreshEndpoint(error?.endpoint || "")) return false;
-  if (shouldClearSessionForAuthError(error)) return false;
-  if (NON_REFRESHABLE_AUTH_CODES.has(code)) return false;
+    const utf8 =
+      disposition.match(
+        /filename\*=UTF-8''([^;]+)/i
+      );
 
-  return true;
+    if (
+      utf8?.[1]
+    ) {
+      return decodeURIComponent(
+        utf8[1]
+      ).replace(
+        /["]/g,
+        ""
+      );
+    }
+
+    const ascii =
+      disposition.match(
+        /filename="?([^";]+)"?/i
+      );
+
+    if (
+      ascii?.[1]
+    ) {
+      return ascii[1]
+        .replace(
+          /["]/g,
+          ""
+        );
+    }
+  } catch {
+    // noop
+  }
+
+  return "";
 }
 
-export function shouldClearSessionForAuthError(error = null) {
-  const status = Number(error?.status || error?.statusCode || 0);
-  const code = normalizeCode(error?.code || error?.payload?.code || error?.payload?.error || "");
+async function parseJsonText(
+  response
+) {
+  const text =
+    await response.text();
 
-  if (isRefreshEndpoint(error?.endpoint || "") && status === 401) return true;
+  if (!text) {
+    return null;
+  }
 
-  return NON_REFRESHABLE_AUTH_CODES.has(code);
+  try {
+    return JSON.parse(
+      text
+    );
+  } catch {
+    return text;
+  }
+}
+
+async function parseResponse(
+  response,
+  options = {}
+) {
+  const method =
+    cleanText(
+      options.method,
+      "GET"
+    ).toUpperCase();
+
+  if (
+    response.status === 204 ||
+    response.status === 205 ||
+    method === "HEAD"
+  ) {
+    return null;
+  }
+
+  const responseType =
+    getResponseType(
+      options
+    );
+
+  if (
+    responseType ===
+    "blob"
+  ) {
+    return response.blob();
+  }
+
+  if (
+    responseType ===
+      "arraybuffer" ||
+    responseType ===
+      "array-buffer"
+  ) {
+    return response.arrayBuffer();
+  }
+
+  if (
+    responseType ===
+    "text"
+  ) {
+    return response.text();
+  }
+
+  if (
+    responseType ===
+    "json"
+  ) {
+    return parseJsonText(
+      response
+    );
+  }
+
+  const contentType =
+    contentTypeOf(
+      response
+    ).toLowerCase();
+
+  if (
+    contentType.includes(
+      "application/json"
+    ) ||
+    contentType.includes(
+      "+json"
+    )
+  ) {
+    return parseJsonText(
+      response
+    );
+  }
+
+  if (
+    contentType.startsWith(
+      "text/"
+    ) ||
+    contentType.includes(
+      "xml"
+    ) ||
+    contentType.includes(
+      "html"
+    )
+  ) {
+    return response.text();
+  }
+
+  try {
+    return await response.blob();
+  } catch {
+    return response.text();
+  }
+}
+
+async function parseErrorPayload(
+  response
+) {
+  const contentType =
+    contentTypeOf(
+      response
+    ).toLowerCase();
+
+  try {
+    const text =
+      await response.text();
+
+    if (!text) {
+      return null;
+    }
+
+    if (
+      contentType.includes(
+        "application/json"
+      ) ||
+      contentType.includes(
+        "+json"
+      )
+    ) {
+      try {
+        return JSON.parse(
+          text
+        );
+      } catch {
+        return text.slice(
+          0,
+          1200
+        );
+      }
+    }
+
+    return text.slice(
+      0,
+      1200
+    );
+  } catch {
+    return null;
+  }
+}
+
+/* =========================================================
+   ABORT / TIMEOUT
+========================================================= */
+
+function normalizeTimeout(
+  value = DEFAULT_TIMEOUT_MS
+) {
+  const parsed =
+    Number(value);
+
+  if (
+    !Number.isFinite(
+      parsed
+    ) ||
+    parsed <= 0
+  ) {
+    return DEFAULT_TIMEOUT_MS;
+  }
+
+  return Math.max(
+    1000,
+    parsed
+  );
+}
+
+function createRequestAbort({
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  externalSignal = null,
+} = {}) {
+  if (
+    typeof AbortController ===
+    "undefined"
+  ) {
+    return {
+      signal:
+        externalSignal ||
+        undefined,
+
+      timedOut:
+        () => false,
+
+      externallyAborted:
+        () =>
+          Boolean(
+            externalSignal
+              ?.aborted
+          ),
+
+      cleanup:
+        () => {},
+    };
+  }
+
+  const controller =
+    new AbortController();
+
+  let timeoutReached =
+    false;
+
+  let externalReached =
+    false;
+
+  let timer = null;
+  let externalListener =
+    null;
+
+  const abortFromExternal =
+    () => {
+      externalReached =
+        true;
+
+      try {
+        controller.abort(
+          externalSignal
+            ?.reason
+        );
+      } catch {
+        try {
+          controller.abort();
+        } catch {
+          // noop
+        }
+      }
+    };
+
+  if (
+    externalSignal
+  ) {
+    if (
+      externalSignal.aborted
+    ) {
+      abortFromExternal();
+    } else if (
+      isFunction(
+        externalSignal
+          .addEventListener
+      )
+    ) {
+      externalListener =
+        abortFromExternal;
+
+      externalSignal.addEventListener(
+        "abort",
+        externalListener,
+        {
+          once: true,
+        }
+      );
+    }
+  }
+
+  if (
+    !controller.signal.aborted
+  ) {
+    timer =
+      setTimeout(
+        () => {
+          timeoutReached =
+            true;
+
+          try {
+            controller.abort();
+          } catch {
+            // noop
+          }
+        },
+        normalizeTimeout(
+          timeoutMs
+        )
+      );
+  }
+
+  return {
+    signal:
+      controller.signal,
+
+    timedOut:
+      () =>
+        timeoutReached,
+
+    externallyAborted:
+      () =>
+        externalReached ||
+        Boolean(
+          externalSignal
+            ?.aborted
+        ),
+
+    cleanup:
+      () => {
+        if (timer) {
+          clearTimeout(
+            timer
+          );
+
+          timer = null;
+        }
+
+        if (
+          externalSignal &&
+          externalListener &&
+          isFunction(
+            externalSignal
+              .removeEventListener
+          )
+        ) {
+          try {
+            externalSignal
+              .removeEventListener(
+                "abort",
+                externalListener
+              );
+          } catch {
+            // noop
+          }
+        }
+
+        externalListener =
+          null;
+      },
+  };
+}
+
+/* =========================================================
+   STATS
+========================================================= */
+
+let refreshPromise = null;
+let lastRefreshAt = null;
+let lastRefreshError = null;
+
+const stats = {
+  total: 0,
+  success: 0,
+  error: 0,
+
+  aborted: 0,
+  timeout: 0,
+  networkError: 0,
+
+  refresh: 0,
+  refreshSuccess: 0,
+  refreshError: 0,
+  retryAfterRefresh: 0,
+
+  lastMethod: "",
+  lastUrl: "",
+  lastStatus: null,
+  lastError: null,
+};
+
+function setLastErrorStat(
+  normalized,
+  endpoint,
+  options
+) {
+  stats.lastError = {
+    code:
+      normalized.code,
+
+    status:
+      normalized.status,
+
+    message:
+      redact(
+        normalized.message
+      ),
+
+    endpoint:
+      redact(
+        endpoint
+      ),
+
+    binary:
+      isBinaryResponse(
+        options
+      ),
+  };
 }
 
 /* =========================================================
@@ -935,99 +2345,143 @@ export function shouldClearSessionForAuthError(error = null) {
 ========================================================= */
 
 function ensureFetch() {
-  if (typeof fetch !== "function") {
+  if (
+    typeof fetch !==
+    "function"
+  ) {
     throw createHttpError({
-      code: "FETCH_UNAVAILABLE",
-      message: "fetch() no está disponible.",
+      code:
+        "FETCH_UNAVAILABLE",
+
+      message:
+        "fetch() no está disponible.",
     });
   }
 
   return fetch;
 }
 
-function createAbortController(timeoutMs = DEFAULT_TIMEOUT_MS) {
-  if (typeof AbortController === "undefined") {
-    return {
-      controller: null,
-      timer: null,
-    };
-  }
-
-  const timeout = Math.max(1000, Number(timeoutMs || DEFAULT_TIMEOUT_MS));
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => {
-    try {
-      controller.abort();
-    } catch {
-      // noop
-    }
-  }, timeout);
-
-  return {
-    controller,
-    timer,
-  };
-}
-
-async function fetchParsed(endpoint = "/", options = {}) {
-  const url = buildApiUrl(endpoint, options);
+async function fetchParsed(
+  endpoint = "/",
+  options = {}
+) {
+  const url =
+    buildApiUrl(
+      endpoint,
+      options
+    );
 
   if (!url) {
     throw createHttpError({
-      code: "HTTP_ENDPOINT_INVALID",
-      message: "Endpoint API inválido.",
+      code:
+        "HTTP_ENDPOINT_INVALID",
+
+      message:
+        "Endpoint API inválido.",
+
       endpoint,
     });
   }
 
-  const method = cleanText(options.method, "GET").toUpperCase();
+  const method =
+    cleanText(
+      options.method,
+      "GET"
+    ).toUpperCase();
 
-  const fetchOptions = buildFetchOptions(endpoint, {
-    ...options,
-    method,
-  });
+  const fetchOptions =
+    buildFetchOptions(
+      endpoint,
+      {
+        ...options,
+        method,
+      }
+    );
 
-  const abort = createAbortController(
-    Number(options.timeout || options.timeoutMs || DEFAULT_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS
-  );
+  const requestAbort =
+    createRequestAbort({
+      timeoutMs:
+        options.timeout ??
+        options.timeoutMs ??
+        DEFAULT_TIMEOUT_MS,
 
-  if (abort.controller) {
-    fetchOptions.signal = options.signal || abort.controller.signal;
-  } else if (options.signal) {
-    fetchOptions.signal = options.signal;
+      externalSignal:
+        options.signal ||
+        null,
+    });
+
+  if (
+    requestAbort.signal
+  ) {
+    fetchOptions.signal =
+      requestAbort.signal;
   }
 
   stats.total += 1;
-  stats.lastMethod = method;
-  stats.lastUrl = redact(url);
-  stats.lastStatus = null;
-  stats.lastError = null;
+  stats.lastMethod =
+    method;
+  stats.lastUrl =
+    redact(
+      url
+    );
+  stats.lastStatus =
+    null;
+  stats.lastError =
+    null;
 
   try {
-    const response = await ensureFetch()(url, fetchOptions);
+    const response =
+      await ensureFetch()(
+        url,
+        fetchOptions
+      );
 
-    stats.lastStatus = response.status;
+    stats.lastStatus =
+      response.status;
 
-    if (!response.ok) {
-      const errorPayload = await parseErrorPayload(response);
+    if (
+      !response.ok
+    ) {
+      const errorPayload =
+        await parseErrorPayload(
+          response
+        );
 
       throw createHttpError({
-        code: extractErrorCode(errorPayload, response),
-        message: extractErrorMessage(errorPayload, `HTTP ${response.status}`),
-        status: response.status,
+        code:
+          extractErrorCode(
+            errorPayload,
+            response
+          ),
+
+        message:
+          extractErrorMessage(
+            errorPayload,
+            `HTTP ${response.status}`
+          ),
+
+        status:
+          response.status,
+
         endpoint,
         url,
         method,
-        payload: errorPayload,
+
+        payload:
+          errorPayload,
+
         response,
       });
     }
 
-    const data = await parseResponse(response, {
-      ...options,
-      method,
-    });
+    const data =
+      await parseResponse(
+        response,
+        {
+          ...options,
+          method,
+        }
+      );
 
     stats.success += 1;
 
@@ -1038,34 +2492,87 @@ async function fetchParsed(endpoint = "/", options = {}) {
       method,
     };
   } catch (error) {
-    const normalized = error?.name === "HttpError"
-      ? error
-      : createHttpError({
-          code: error?.name === "AbortError" ? "HTTP_TIMEOUT" : "NETWORK_ERROR",
-          message:
-            error?.name === "AbortError"
-              ? "La solicitud ha tardado demasiado."
-              : error?.message || "No se pudo conectar con la API.",
-          endpoint,
-          url,
-          method,
-          cause: error,
-        });
+    let normalized =
+      error?.name ===
+      "HttpError"
+        ? error
+        : null;
+
+    if (!normalized) {
+      const aborted =
+        requestAbort
+          .externallyAborted();
+
+      const timedOut =
+        requestAbort
+          .timedOut();
+
+      if (timedOut) {
+        stats.timeout += 1;
+
+        normalized =
+          createHttpError({
+            code:
+              "HTTP_TIMEOUT",
+
+            message:
+              "La solicitud ha tardado demasiado.",
+
+            endpoint,
+            url,
+            method,
+            cause:
+              error,
+          });
+      } else if (aborted) {
+        stats.aborted += 1;
+
+        normalized =
+          createHttpError({
+            code:
+              "HTTP_ABORTED",
+
+            message:
+              "La solicitud fue cancelada.",
+
+            endpoint,
+            url,
+            method,
+            cause:
+              error,
+          });
+      } else {
+        stats.networkError += 1;
+
+        normalized =
+          createHttpError({
+            code:
+              "NETWORK_ERROR",
+
+            message:
+              error?.message ||
+              "No se pudo conectar con la API.",
+
+            endpoint,
+            url,
+            method,
+            cause:
+              error,
+          });
+      }
+    }
 
     stats.error += 1;
-    stats.lastError = {
-      code: normalized.code,
-      status: normalized.status,
-      message: redact(normalized.message),
-      endpoint: redact(endpoint),
-      binary: isBinaryResponse(options),
-    };
+
+    setLastErrorStat(
+      normalized,
+      endpoint,
+      options
+    );
 
     throw normalized;
   } finally {
-    if (abort.timer) {
-      clearTimeout(abort.timer);
-    }
+    requestAbort.cleanup();
   }
 }
 
@@ -1073,79 +2580,184 @@ async function fetchParsed(endpoint = "/", options = {}) {
    REFRESH / RETRY
 ========================================================= */
 
-async function runRefresh(body = {}, options = {}) {
-  if (refreshPromise) return refreshPromise;
+async function runRefresh(
+  body = {},
+  options = {}
+) {
+  if (
+    refreshPromise
+  ) {
+    return refreshPromise;
+  }
 
   stats.refresh += 1;
-  lastRefreshError = null;
+  lastRefreshError =
+    null;
 
-  refreshPromise = (async () => {
-    try {
-      const result = await fetchParsed(AUTH_ENDPOINTS.refresh, {
-        ...options,
-        method: "POST",
-        body: isPlainObject(body) ? body : {},
-        public: true,
-        auth: false,
-        noAuthHeader: true,
-        noAutoRefresh: true,
-        __internalRefresh: true,
-        source: options.source || "core.http.refresh",
-      });
+  refreshPromise =
+    (async () => {
+      try {
+        const result =
+          await fetchParsed(
+            AUTH_ENDPOINTS.refresh,
+            {
+              ...options,
 
-      applyAuthPayload(result.data || {});
+              method:
+                "POST",
 
-      stats.refreshSuccess += 1;
-      lastRefreshAt = nowIso();
-      lastRefreshError = null;
+              body:
+                isPlainObject(
+                  body
+                )
+                  ? body
+                  : {},
 
-      return result.data;
-    } catch (error) {
-      stats.refreshError += 1;
+              public: true,
+              auth: false,
+              noAuthHeader: true,
+              noAutoRefresh: true,
+              __internalRefresh:
+                true,
 
-      lastRefreshError = {
-        code: error?.code || "REFRESH_FAILED",
-        status: error?.status || error?.statusCode || null,
-        message: redact(error?.message || "No se pudo renovar la sesión."),
-        at: nowIso(),
-      };
+              source:
+                options.source ||
+                "core.http.refresh",
+            }
+          );
 
-      clearCoreSessionIfFinal(error);
+        applyAuthPayload(
+          result.data ||
+          {}
+        );
 
-      throw error;
-    } finally {
-      refreshPromise = null;
-    }
-  })();
+        stats.refreshSuccess +=
+          1;
+
+        lastRefreshAt =
+          nowIso();
+
+        lastRefreshError =
+          null;
+
+        return result.data;
+      } catch (error) {
+        stats.refreshError +=
+          1;
+
+        lastRefreshError = {
+          code:
+            error?.code ||
+            "REFRESH_FAILED",
+
+          status:
+            error?.status ||
+            error?.statusCode ||
+            null,
+
+          message:
+            redact(
+              error?.message ||
+              "No se pudo renovar la sesión."
+            ),
+
+          at:
+            nowIso(),
+        };
+
+        /*
+          Refresh 401/403 o código final de sesión:
+          limpiamos Core una sola vez.
+        */
+        clearCoreSessionIfFinal(
+          AUTH_ENDPOINTS.refresh,
+          {
+            auth: false,
+            public: true,
+          },
+          error
+        );
+
+        throw error;
+      } finally {
+        refreshPromise =
+          null;
+      }
+    })();
 
   return refreshPromise;
 }
 
-async function fetchParsedWithRefresh(endpoint = "/", options = {}) {
+async function fetchParsedWithRefresh(
+  endpoint = "/",
+  options = {}
+) {
   try {
-    return await fetchParsed(endpoint, options);
+    return await fetchParsed(
+      endpoint,
+      options
+    );
   } catch (error) {
-    if (!shouldAutoRefresh(endpoint, options, error)) {
-      clearCoreSessionIfFinal(error);
+    if (
+      !shouldAutoRefresh(
+        endpoint,
+        options,
+        error
+      )
+    ) {
+      clearCoreSessionIfFinal(
+        endpoint,
+        options,
+        error
+      );
+
       throw error;
     }
 
-    await runRefresh({}, {
-      timeout: options.refreshTimeout || options.timeout || options.timeoutMs || DEFAULT_TIMEOUT_MS,
-      source: "core.http.auto-refresh",
-    });
+    await runRefresh(
+      {},
+      {
+        timeout:
+          options.refreshTimeout ??
+          options.timeout ??
+          options.timeoutMs ??
+          DEFAULT_TIMEOUT_MS,
 
-    stats.retryAfterRefresh += 1;
+        source:
+          "core.http.auto-refresh",
+      }
+    );
 
-    return fetchParsed(endpoint, {
-      ...options,
-      __retryAfterRefresh: true,
-    });
+    stats.retryAfterRefresh +=
+      1;
+
+    return fetchParsed(
+      endpoint,
+      {
+        ...options,
+
+        /*
+          Garantiza exactamente un retry.
+          buildFetchOptions relee el token del Core,
+          por lo que usa el access token renovado.
+        */
+        __retryAfterRefresh:
+          true,
+      }
+    );
   }
 }
 
-export async function request(endpoint = "/", options = {}) {
-  const result = await fetchParsedWithRefresh(endpoint, options);
+export async function request(
+  endpoint = "/",
+  options = {}
+) {
+  const result =
+    await fetchParsedWithRefresh(
+      endpoint,
+      options
+    );
+
   return result.data;
 }
 
@@ -1153,223 +2765,453 @@ export async function request(endpoint = "/", options = {}) {
    METHODS
 ========================================================= */
 
-export function get(endpoint = "/", options = {}) {
-  return request(endpoint, {
-    ...options,
-    method: "GET",
-  });
+export function get(
+  endpoint = "/",
+  options = {}
+) {
+  return request(
+    endpoint,
+    {
+      ...options,
+      method: "GET",
+    }
+  );
 }
 
-export function post(endpoint = "/", body = undefined, options = {}) {
-  return request(endpoint, {
-    ...options,
-    method: "POST",
-    body,
-  });
+export function post(
+  endpoint = "/",
+  body = undefined,
+  options = {}
+) {
+  return request(
+    endpoint,
+    {
+      ...options,
+      method: "POST",
+      body,
+    }
+  );
 }
 
-export function put(endpoint = "/", body = undefined, options = {}) {
-  return request(endpoint, {
-    ...options,
-    method: "PUT",
-    body,
-  });
+export function put(
+  endpoint = "/",
+  body = undefined,
+  options = {}
+) {
+  return request(
+    endpoint,
+    {
+      ...options,
+      method: "PUT",
+      body,
+    }
+  );
 }
 
-export function patch(endpoint = "/", body = undefined, options = {}) {
-  return request(endpoint, {
-    ...options,
-    method: "PATCH",
-    body,
-  });
+export function patch(
+  endpoint = "/",
+  body = undefined,
+  options = {}
+) {
+  return request(
+    endpoint,
+    {
+      ...options,
+      method: "PATCH",
+      body,
+    }
+  );
 }
 
-export function del(endpoint = "/", options = {}) {
-  return request(endpoint, {
-    ...options,
-    method: "DELETE",
-  });
+export function del(
+  endpoint = "/",
+  options = {}
+) {
+  return request(
+    endpoint,
+    {
+      ...options,
+      method: "DELETE",
+    }
+  );
 }
 
-export { del as delete };
+export {
+  del as delete,
+};
 
 /* =========================================================
    AUTH ENDPOINT HELPERS
 ========================================================= */
 
-export function login(payload = {}, options = {}) {
-  return post(AUTH_ENDPOINTS.login, payload, {
-    ...options,
-    public: true,
-    auth: false,
-    noAuthHeader: true,
-    noAutoRefresh: true,
-  });
+export function login(
+  payload = {},
+  options = {}
+) {
+  return post(
+    AUTH_ENDPOINTS.login,
+    payload,
+    {
+      ...options,
+
+      public: true,
+      auth: false,
+      noAuthHeader: true,
+      noAutoRefresh: true,
+    }
+  );
 }
 
-export function logout(options = {}) {
-  return post(AUTH_ENDPOINTS.logout, {}, {
-    ...options,
-    auth: true,
-    noAutoRefresh: true,
-  });
+export function logout(
+  options = {}
+) {
+  return post(
+    AUTH_ENDPOINTS.logout,
+    {},
+    {
+      ...options,
+
+      auth: true,
+      noAutoRefresh: true,
+    }
+  );
 }
 
-export function logoutAll(options = {}) {
-  return post(AUTH_ENDPOINTS.logoutAll, {}, {
-    ...options,
-    auth: true,
-    noAutoRefresh: true,
-  });
+export function logoutAll(
+  options = {}
+) {
+  return post(
+    AUTH_ENDPOINTS.logoutAll,
+    {},
+    {
+      ...options,
+
+      auth: true,
+      noAutoRefresh: true,
+    }
+  );
 }
 
-export function me(options = {}) {
-  return get(AUTH_ENDPOINTS.me, {
-    ...options,
-    auth: true,
-  });
+export function me(
+  options = {}
+) {
+  return get(
+    AUTH_ENDPOINTS.me,
+    {
+      ...options,
+      auth: true,
+    }
+  );
 }
 
-export function refreshSession(body = {}, options = {}) {
-  return runRefresh(body, {
-    ...options,
-    public: true,
-    auth: false,
-    noAuthHeader: true,
-    noAutoRefresh: true,
-  });
+export function refreshSession(
+  body = {},
+  options = {}
+) {
+  return runRefresh(
+    body,
+    {
+      ...options,
+
+      public: true,
+      auth: false,
+      noAuthHeader: true,
+      noAutoRefresh: true,
+    }
+  );
 }
 
-export function activateAccount(payload = {}, options = {}) {
-  return post(AUTH_ENDPOINTS.activateAccount, payload, {
-    ...options,
-    public: true,
-    auth: false,
-    noAuthHeader: true,
-    noAutoRefresh: true,
-  });
+export function activateAccount(
+  payload = {},
+  options = {}
+) {
+  return post(
+    AUTH_ENDPOINTS.activateAccount,
+    payload,
+    {
+      ...options,
+
+      public: true,
+      auth: false,
+      noAuthHeader: true,
+      noAutoRefresh: true,
+    }
+  );
 }
 
-export function requestPasswordReset(payload = {}, options = {}) {
-  return post(AUTH_ENDPOINTS.requestPasswordReset, payload, {
-    ...options,
-    public: true,
-    auth: false,
-    noAuthHeader: true,
-    noAutoRefresh: true,
-  });
+export function requestPasswordReset(
+  payload = {},
+  options = {}
+) {
+  return post(
+    AUTH_ENDPOINTS.requestPasswordReset,
+    payload,
+    {
+      ...options,
+
+      public: true,
+      auth: false,
+      noAuthHeader: true,
+      noAutoRefresh: true,
+    }
+  );
 }
 
-export function confirmPasswordReset(payload = {}, options = {}) {
-  return post(AUTH_ENDPOINTS.confirmPasswordReset, payload, {
-    ...options,
-    public: true,
-    auth: false,
-    noAuthHeader: true,
-    noAutoRefresh: true,
-  });
+export function confirmPasswordReset(
+  payload = {},
+  options = {}
+) {
+  return post(
+    AUTH_ENDPOINTS.confirmPasswordReset,
+    payload,
+    {
+      ...options,
+
+      public: true,
+      auth: false,
+      noAuthHeader: true,
+      noAutoRefresh: true,
+    }
+  );
 }
 
 /* =========================================================
    BLOBS / DOWNLOADS
 ========================================================= */
 
-function safeFileName(value = "", fallback = "descarga") {
-  const name = cleanText(value, fallback)
-    .replace(/[\\/:*?"<>|#]+/g, "_")
-    .replace(/\s+/g, "_")
-    .replace(/_+/g, "_")
-    .replace(/^[-_.]+|[-_.]+$/g, "")
-    .slice(0, 180);
+function safeFileName(
+  value = "",
+  fallback = "descarga"
+) {
+  const name =
+    cleanText(
+      value,
+      fallback
+    )
+      .replace(
+        /[\\/:*?"<>|#]+/g,
+        "_"
+      )
+      .replace(
+        /\s+/g,
+        "_"
+      )
+      .replace(
+        /_+/g,
+        "_"
+      )
+      .replace(
+        /^[-_.]+|[-_.]+$/g,
+        ""
+      )
+      .slice(
+        0,
+        180
+      );
 
-  return name || fallback;
-}
-
-export async function blob(endpoint = "/", options = {}) {
-  return request(endpoint, {
-    ...options,
-    method: options.method || "GET",
-    responseType: "blob",
-  });
-}
-
-export async function arrayBuffer(endpoint = "/", options = {}) {
-  return request(endpoint, {
-    ...options,
-    method: options.method || "GET",
-    responseType: "arrayBuffer",
-  });
-}
-
-export async function downloadBlob(endpoint = "/", options = {}) {
-  const result = await fetchParsedWithRefresh(endpoint, {
-    ...options,
-    method: options.method || "GET",
-    responseType: "blob",
-  });
-
-  const data = result.data;
-  const filename = safeFileName(
-    dispositionFilename(result.response) || options.filename || "descarga",
-    "descarga"
+  return (
+    name ||
+    fallback
   );
+}
 
-  const contentType = contentTypeOf(result.response);
+export async function blob(
+  endpoint = "/",
+  options = {}
+) {
+  return request(
+    endpoint,
+    {
+      ...options,
 
-  if (!(data instanceof Blob)) {
-    throw createHttpError({
-      code: "HTTP_BLOB_RESPONSE_INVALID",
-      message: "La respuesta de descarga no es un Blob válido.",
+      method:
+        options.method ||
+        "GET",
+
+      responseType:
+        "blob",
+    }
+  );
+}
+
+export async function arrayBuffer(
+  endpoint = "/",
+  options = {}
+) {
+  return request(
+    endpoint,
+    {
+      ...options,
+
+      method:
+        options.method ||
+        "GET",
+
+      responseType:
+        "arrayBuffer",
+    }
+  );
+}
+
+export async function downloadBlob(
+  endpoint = "/",
+  options = {}
+) {
+  const result =
+    await fetchParsedWithRefresh(
       endpoint,
-      url: result.url,
-      method: result.method,
-      payload: data,
-      response: result.response,
+      {
+        ...options,
+
+        method:
+          options.method ||
+          "GET",
+
+        responseType:
+          "blob",
+      }
+    );
+
+  const data =
+    result.data;
+
+  const filename =
+    safeFileName(
+      dispositionFilename(
+        result.response
+      ) ||
+      options.filename ||
+      "descarga",
+      "descarga"
+    );
+
+  const contentType =
+    contentTypeOf(
+      result.response
+    );
+
+  if (
+    typeof Blob ===
+      "undefined" ||
+    !(data instanceof Blob)
+  ) {
+    throw createHttpError({
+      code:
+        "HTTP_BLOB_RESPONSE_INVALID",
+
+      message:
+        "La respuesta de descarga no es un Blob válido.",
+
+      endpoint,
+
+      url:
+        result.url,
+
+      method:
+        result.method,
+
+      payload:
+        data,
+
+      response:
+        result.response,
     });
   }
 
-  if (options.autoDownload !== false && isBrowser()) {
-    const objectUrl = URL.createObjectURL(data);
-    const link = document.createElement("a");
+  if (
+    options.autoDownload !==
+      false &&
+    isBrowser()
+  ) {
+    const objectUrl =
+      URL.createObjectURL(
+        data
+      );
 
-    link.href = objectUrl;
-    link.download = filename;
-    link.rel = "noopener";
+    const link =
+      document.createElement(
+        "a"
+      );
 
-    document.body.appendChild(link);
+    link.href =
+      objectUrl;
+
+    link.download =
+      filename;
+
+    link.rel =
+      "noopener";
+
+    document.body.appendChild(
+      link
+    );
+
     link.click();
     link.remove();
 
-    setTimeout(() => {
-      URL.revokeObjectURL(objectUrl);
-    }, 1000);
+    setTimeout(
+      () => {
+        try {
+          URL.revokeObjectURL(
+            objectUrl
+          );
+        } catch {
+          // noop
+        }
+      },
+      1000
+    );
   }
 
   return {
     ok: true,
-    blob: data,
+
+    blob:
+      data,
+
     filename,
+
     contentType,
-    size: data.size || null,
-    response: result.response,
-    url: result.url,
+
+    size:
+      data.size ||
+      null,
+
+    response:
+      result.response,
+
+    url:
+      result.url,
   };
 }
 
-export const download = downloadBlob;
-export const downloadFactura = downloadBlob;
+export const download =
+  downloadBlob;
+
+export const downloadFactura =
+  downloadBlob;
 
 /* =========================================================
    INSTALL / SNAPSHOT
 ========================================================= */
 
-export function install(core = null) {
-  appCore = core || appCore;
+export function install(
+  core = null
+) {
+  appCore =
+    core ||
+    appCore;
 
   try {
-    appCore?.registerModule?.("http", Http, {
-      overwrite: true,
-    });
+    appCore
+      ?.registerModule
+      ?.(
+        "http",
+        Http,
+        {
+          overwrite: true,
+        }
+      );
   } catch {
     // noop
   }
@@ -1378,56 +3220,132 @@ export function install(core = null) {
 }
 
 export function getSnapshot() {
-  return {
-    version: HTTP_VERSION,
-    apiBase: getApiOrigin(),
-    installed: Boolean(appCore),
-    hasToken: Boolean(getAccessToken()),
-    endpoints: AUTH_ENDPOINTS,
-    stats: {
-      total: stats.total,
-      success: stats.success,
-      error: stats.error,
-      refresh: stats.refresh,
-      refreshSuccess: stats.refreshSuccess,
-      refreshError: stats.refreshError,
-      retryAfterRefresh: stats.retryAfterRefresh,
-      lastMethod: stats.lastMethod,
-      lastUrl: redact(stats.lastUrl),
-      lastStatus: stats.lastStatus,
-      lastError: sanitizeData(stats.lastError),
-    },
-    refresh: {
-      inFlight: Boolean(refreshPromise),
-      lastRefreshAt,
-      lastRefreshError: sanitizeData(lastRefreshError),
-    },
-    policy: {
-      singleClient: true,
-      configDriven: true,
-      credentialsInclude: true,
-      autoRefresh: true,
-      retryAfterRefreshOnce: true,
-      binaryErrorsParsedAsJsonOrText: true,
-      downloadUsesBackendFilename: true,
-      noRouter: true,
-      noToast: true,
-      noStore: true,
-      noServices: true,
-      noStorage: true,
-    },
-  };
+  return Object.freeze({
+    version:
+      HTTP_VERSION,
+
+    apiBase:
+      getApiOrigin(),
+
+    installed:
+      Boolean(
+        appCore
+      ),
+
+    hasToken:
+      Boolean(
+        getAccessToken()
+      ),
+
+    endpoints:
+      AUTH_ENDPOINTS,
+
+    stats:
+      Object.freeze({
+        total:
+          stats.total,
+
+        success:
+          stats.success,
+
+        error:
+          stats.error,
+
+        aborted:
+          stats.aborted,
+
+        timeout:
+          stats.timeout,
+
+        networkError:
+          stats.networkError,
+
+        refresh:
+          stats.refresh,
+
+        refreshSuccess:
+          stats.refreshSuccess,
+
+        refreshError:
+          stats.refreshError,
+
+        retryAfterRefresh:
+          stats.retryAfterRefresh,
+
+        lastMethod:
+          stats.lastMethod,
+
+        lastUrl:
+          redact(
+            stats.lastUrl
+          ),
+
+        lastStatus:
+          stats.lastStatus,
+
+        lastError:
+          sanitizeData(
+            stats.lastError
+          ),
+      }),
+
+    refresh:
+      Object.freeze({
+        inFlight:
+          Boolean(
+            refreshPromise
+          ),
+
+        lastRefreshAt,
+
+        lastRefreshError:
+          sanitizeData(
+            lastRefreshError
+          ),
+      }),
+
+    policy:
+      Object.freeze({
+        singleClient: true,
+        configDriven: true,
+        credentialsInclude: true,
+
+        autoRefresh: true,
+        singleFlightRefresh: true,
+        retryAfterRefreshOnce: true,
+
+        timeout: true,
+        externalAbortSignal: true,
+        distinguishesAbortFromTimeout: true,
+
+        binaryErrorsParsedAsJsonOrText:
+          true,
+
+        downloadUsesBackendFilename:
+          true,
+
+        noRouter: true,
+        noToast: true,
+        noStore: true,
+        noServices: true,
+        noStorage: true,
+      }),
+  });
 }
 
-export const getDebugSnapshot = getSnapshot;
-export const snapshot = getSnapshot;
+export const getDebugSnapshot =
+  getSnapshot;
+
+export const snapshot =
+  getSnapshot;
 
 /* =========================================================
    API
 ========================================================= */
 
 export const Http = {
-  version: HTTP_VERSION,
+  version:
+    HTTP_VERSION,
 
   AUTH_ENDPOINTS,
 
@@ -1441,7 +3359,8 @@ export const Http = {
   post,
   put,
   patch,
-  delete: del,
+  delete:
+    del,
   del,
 
   login,

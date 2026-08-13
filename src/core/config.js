@@ -9,7 +9,12 @@
    - Roles únicos: admin / user.
    - Home interna: /.
    - Home visible autenticada: /@{user.slug}.
-   - Endpoints auth mínimos.
+   - Endpoints auth alineados con backend productivo.
+   - Reset password:
+       frontend request  -> /password-request
+       frontend confirm  -> /password-reset?token=...
+       backend request   -> /api/auth/reset-password-request
+       backend confirm   -> /api/auth/reset-password-confirm
    - Denylist técnica centralizada.
    - Helpers puros de path/ruta/API.
    - Sin runtime.
@@ -19,7 +24,7 @@
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
-export const CONFIG_VERSION = "core.config.minimal.v2";
+export const CONFIG_VERSION = "core.config.production.v3-reset-contract";
 
 /* =========================================================
    CONSTANTES BASE
@@ -163,11 +168,19 @@ export const AUTH_ENDPOINTS = Object.freeze({
   activate: "/api/auth/activate-account",
   activateAccount: "/api/auth/activate-account",
 
-  requestPasswordReset: "/api/auth/password-request",
-  confirmPasswordReset: "/api/auth/password-reset",
+  /*
+    Contrato productivo de recuperación:
+    - solicitud del correo
+    - confirmación de nueva contraseña
+  */
+  requestPasswordReset: "/api/auth/reset-password-request",
+  confirmPasswordReset: "/api/auth/reset-password-confirm",
 
-  passwordRequest: "/api/auth/password-request",
-  passwordReset: "/api/auth/password-reset",
+  /*
+    Aliases mantenidos por compatibilidad con módulos existentes.
+  */
+  passwordRequest: "/api/auth/reset-password-request",
+  passwordReset: "/api/auth/reset-password-confirm",
 });
 
 export const PUBLIC_API_PATHS = Object.freeze([
@@ -833,6 +846,7 @@ export function getConfigSnapshot() {
       noHomeRoute: true,
       noMfaOtp: true,
       minimal: true,
+      resetPasswordContractAligned: true,
     },
   };
 }

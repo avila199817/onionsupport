@@ -1,5 +1,4 @@
 /* =========================================================
-
    Onion Support - Routes
    Archivo: /src/router/routes.js
 
@@ -19,7 +18,6 @@
    - Sin storage.
    - Sin Toast.
    - Sin shell.
-   
 ========================================================= */
 
 import {
@@ -1006,9 +1004,7 @@ const VIEW_LOADERS =
 
     "password-request":
       () =>
-        import(
-          "../views/public/password-reset/index.js"
-        ).then(
+        import("../views/public/password-reset/index.js").then(
           (module) =>
             pickView(
               module,
@@ -1022,9 +1018,7 @@ const VIEW_LOADERS =
 
     "password-reset":
       () =>
-        import(
-          "../views/public/password-reset/index.js"
-        ).then(
+        import("../views/public/password-reset/index.js").then(
           (module) =>
             pickView(
               module,
@@ -1783,8 +1777,7 @@ const ROUTE_DEFINITIONS =
       title:
         "Recuperar acceso",
 
-      viewKey:
-        "password-request",
+      viewKey: "password-request",
 
       public:
         true,
@@ -1803,8 +1796,7 @@ const ROUTE_DEFINITIONS =
       title:
         "Nueva contraseña",
 
-      viewKey:
-        "password-reset",
+      viewKey: "password-reset",
 
       public:
         true,

@@ -5,13 +5,16 @@
    Responsabilidad:
    - Tabla mínima de rutas SPA.
    - Vistas lazy.
-   - Cachear módulos de vista cargados.
+   - Cachear imports y vistas resueltas.
+   - Deduplicar imports compartidos entre viewKeys.
    - Exponer preload de vistas para navegación rápida.
    - Resolver /@{slug} hacia ruta interna privada.
    - Marcar rutas públicas, privadas, admin y token routes.
    - Rutas públicas viven en /src/views/public/*.
    - Resolver aliases legacy de password reset SIN exponer el token.
    - Mantener como ruta canónica /password-reset?token=...
+   - Cooperar con AbortSignal del Router sin introducir Auth/guards.
+   - Lookups O(1) por path/name/viewKey.
    - Sin Auth.
    - Sin guards.
    - Sin history.
@@ -34,122 +37,129 @@ import {
 } from "../core/config.js";
 
 export const ROUTES_VERSION =
-  "routes.minimal.v7-reset-alias";
+  "routes.minimal.v8-lazy-indexed";
 
 /* =========================================================
    PATHS / NAMES
 ========================================================= */
 
-export const ROUTE_PATHS = Object.freeze({
-  PUBLIC_HOME: "/",
-  HOME:
-    ROUTES.privateHome ||
-    ROUTES.dashboard ||
-    "/dashboard",
+export const ROUTE_PATHS =
+  Object.freeze({
+    PUBLIC_HOME:
+      "/",
 
-  INCIDENCIAS:
-    ROUTES.incidencias ||
-    "/incidencias",
+    HOME:
+      ROUTES.privateHome ||
+      ROUTES.dashboard ||
+      "/dashboard",
 
-  FACTURAS:
-    ROUTES.facturas ||
-    "/facturas",
+    INCIDENCIAS:
+      ROUTES.incidencias ||
+      "/incidencias",
 
-  CLIENTES:
-    ROUTES.clientes ||
-    "/clientes",
+    FACTURAS:
+      ROUTES.facturas ||
+      "/facturas",
 
-  USUARIOS:
-    ROUTES.usuarios ||
-    "/usuarios",
+    CLIENTES:
+      ROUTES.clientes ||
+      "/clientes",
 
-  SERVIDOR:
-    ROUTES.servidor ||
-    "/servidor",
+    USUARIOS:
+      ROUTES.usuarios ||
+      "/usuarios",
 
-  CUENTA:
-    ROUTES.cuenta ||
-    "/cuenta",
+    SERVIDOR:
+      ROUTES.servidor ||
+      "/servidor",
 
-  AJUSTES:
-    ROUTES.ajustes ||
-    "/ajustes",
+    CUENTA:
+      ROUTES.cuenta ||
+      "/cuenta",
 
-  LOGIN:
-    ROUTES.login ||
-    "/login",
+    AJUSTES:
+      ROUTES.ajustes ||
+      "/ajustes",
 
-  PASSWORD_REQUEST:
-    ROUTES.passwordRequest ||
-    "/password-request",
+    LOGIN:
+      ROUTES.login ||
+      "/login",
 
-  PASSWORD_RESET:
-    ROUTES.passwordReset ||
-    "/password-reset",
+    PASSWORD_REQUEST:
+      ROUTES.passwordRequest ||
+      "/password-request",
 
-  ACTIVATE_ACCOUNT:
-    ROUTES.activateAccount ||
-    "/activate-account",
-});
+    PASSWORD_RESET:
+      ROUTES.passwordReset ||
+      "/password-reset",
 
-export const ROUTE_NAMES = Object.freeze({
-  PUBLIC_HOME:
-    "public-home",
+    ACTIVATE_ACCOUNT:
+      ROUTES.activateAccount ||
+      "/activate-account",
+  });
 
-  HOME:
-    "home",
+export const ROUTE_NAMES =
+  Object.freeze({
+    PUBLIC_HOME:
+      "public-home",
 
-  INCIDENCIAS:
-    "incidencias",
+    HOME:
+      "home",
 
-  FACTURAS:
-    "facturas",
+    INCIDENCIAS:
+      "incidencias",
 
-  CLIENTES:
-    "clientes",
+    FACTURAS:
+      "facturas",
 
-  USUARIOS:
-    "usuarios",
+    CLIENTES:
+      "clientes",
 
-  SERVIDOR:
-    "servidor",
+    USUARIOS:
+      "usuarios",
 
-  CUENTA:
-    "cuenta",
+    SERVIDOR:
+      "servidor",
 
-  AJUSTES:
-    "ajustes",
+    CUENTA:
+      "cuenta",
 
-  LOGIN:
-    "login",
+    AJUSTES:
+      "ajustes",
 
-  PASSWORD_REQUEST:
-    "password-request",
+    LOGIN:
+      "login",
 
-  PASSWORD_RESET:
-    "password-reset",
+    PASSWORD_REQUEST:
+      "password-request",
 
-  ACTIVATE_ACCOUNT:
-    "activate-account",
-});
+    PASSWORD_RESET:
+      "password-reset",
 
-export const VALID_ROLES = Object.freeze(
-  Array.isArray(ALLOWED_ROLES) &&
-  ALLOWED_ROLES.length
-    ? [
-        ...new Set(
-          ALLOWED_ROLES.map(
-            (role) =>
-              String(role)
-                .toLowerCase()
-          )
-        ),
-      ]
-    : [
-        "admin",
-        "user",
-      ]
-);
+    ACTIVATE_ACCOUNT:
+      "activate-account",
+  });
+
+export const VALID_ROLES =
+  Object.freeze(
+    Array.isArray(
+      ALLOWED_ROLES
+    ) &&
+    ALLOWED_ROLES.length
+      ? [
+          ...new Set(
+            ALLOWED_ROLES.map(
+              (role) =>
+                String(role)
+                  .toLowerCase()
+            )
+          ),
+        ]
+      : [
+          "admin",
+          "user",
+        ]
+  );
 
 export const ADMIN_ROLES =
   Object.freeze([
@@ -216,9 +226,9 @@ function isObject(
 ) {
   return Boolean(
     value &&
-      typeof value ===
-        "object" &&
-      !Array.isArray(value)
+    typeof value ===
+      "object" &&
+    !Array.isArray(value)
   );
 }
 
@@ -313,7 +323,9 @@ function normalizePathList(
       : []
   ) {
     const clean =
-      normalizePath(path);
+      normalizePath(
+        path
+      );
 
     if (!clean) {
       continue;
@@ -339,11 +351,15 @@ function normalizePathList(
       continue;
     }
 
-    seen.add(clean);
+    seen.add(
+      clean
+    );
   }
 
   return Object.freeze(
-    [...seen]
+    [
+      ...seen,
+    ]
   );
 }
 
@@ -352,13 +368,14 @@ function pathInList(
   paths = []
 ) {
   const clean =
-    normalizePath(path);
+    normalizePath(
+      path
+    );
 
-  return paths.some(
-    (item) =>
-      normalizePath(
-        item
-      ) === clean
+  return (
+    paths.includes(
+      clean
+    )
   );
 }
 
@@ -373,7 +390,9 @@ function tokenRoutePathsFromConfig() {
       ? PROTECTED_PUBLIC_TOKEN_ROUTES
       : []
   ) {
-    if (item?.path) {
+    if (
+      item?.path
+    ) {
       paths.push(
         item.path
       );
@@ -476,6 +495,49 @@ function resolveRenderer(
   );
 }
 
+function createAbortError(
+  reason =
+    "route-view-aborted"
+) {
+  try {
+    return new DOMException(
+      reason,
+      "AbortError"
+    );
+  } catch {
+    const error =
+      new Error(
+        reason
+      );
+
+    error.name =
+      "AbortError";
+
+    error.code =
+      "ROUTE_VIEW_ABORTED";
+
+    return error;
+  }
+}
+
+function throwIfAborted(
+  signal = null
+) {
+  if (
+    signal?.aborted !==
+    true
+  ) {
+    return false;
+  }
+
+  throw createAbortError(
+    cleanText(
+      signal.reason,
+      "route-view-aborted"
+    )
+  );
+}
+
 /* =========================================================
    PUBLIC / TOKEN ROUTES
 ========================================================= */
@@ -507,10 +569,14 @@ function matchAliasBase(
   alias = ""
 ) {
   const cleanPath =
-    normalizePath(path);
+    normalizePath(
+      path
+    );
 
   const cleanAlias =
-    normalizePath(alias);
+    normalizePath(
+      alias
+    );
 
   return (
     cleanPath ===
@@ -525,7 +591,9 @@ function resolvePublicAliasPath(
   path = "/"
 ) {
   const clean =
-    normalizePath(path);
+    normalizePath(
+      path
+    );
 
   /*
     Exactos primero.
@@ -572,12 +640,15 @@ export function isRouteAlias(
   path = "/"
 ) {
   const clean =
-    normalizePath(path);
+    normalizePath(
+      path
+    );
 
   return (
     resolvePublicAliasPath(
       clean
-    ) !== clean
+    ) !==
+    clean
   );
 }
 
@@ -632,10 +703,13 @@ export function getUserScopedRouteInfo(
         scoped: false,
         home: false,
         slug: "",
+
         restPath:
           clean,
+
         canonicalPath:
           clean,
+
         lookupPath:
           clean,
       };
@@ -662,10 +736,13 @@ export function getUserScopedRouteInfo(
         scoped: false,
         home: false,
         slug: "",
+
         restPath:
           clean,
+
         canonicalPath:
           clean,
+
         lookupPath:
           clean,
       };
@@ -680,12 +757,18 @@ export function getUserScopedRouteInfo(
 
     return {
       scoped: true,
+
       home:
-        restPath === "/",
+        restPath ===
+        "/",
+
       slug,
+
       restPath,
+
       canonicalPath:
         restPath,
+
       lookupPath:
         restPath,
     };
@@ -696,7 +779,9 @@ export function resolveRouteLookupPath(
   path = "/"
 ) {
   const clean =
-    normalizePath(path);
+    normalizePath(
+      path
+    );
 
   if (!clean) {
     return "";
@@ -842,7 +927,9 @@ export function isHomePath(
   path = "/"
 ) {
   const clean =
-    normalizePath(path);
+    normalizePath(
+      path
+    );
 
   return (
     clean ===
@@ -856,198 +943,283 @@ export function isHomePath(
 }
 
 /* =========================================================
-   VIEW LOADERS
+   VIEW SPECS / MODULE LOADERS
+
+   moduleKey permite que dos viewKeys que viven en el mismo módulo
+   compartan UNA sola Promise de import.
+
+   Caso real:
+   - password-request
+   - password-reset
+   ambos viven en:
+   /src/views/public/password-reset/index.js
 ========================================================= */
 
-const VIEW_LOADERS =
+const VIEW_SPECS =
   Object.freeze({
     "public-home":
-      () =>
-        import(
-          "../views/public/home/index.js"
-        ).then(
-          (module) =>
-            pickView(
-              module,
-              [
-                "PublicHomeView",
-              ]
-            )
-        ),
+      Object.freeze({
+        moduleKey:
+          "public-home",
+
+        loadModule:
+          () =>
+            import(
+              "../views/public/home/index.js"
+            ),
+
+        names:
+          Object.freeze([
+            "PublicHomeView",
+          ]),
+      }),
 
     home:
-      () =>
-        import(
-          "../views/home/index.js"
-        ).then(
-          (module) =>
-            pickView(
-              module,
-              [
-                "HomeView",
-              ]
-            )
-        ),
+      Object.freeze({
+        moduleKey:
+          "home",
+
+        loadModule:
+          () =>
+            import(
+              "../views/home/index.js"
+            ),
+
+        names:
+          Object.freeze([
+            "HomeView",
+          ]),
+      }),
 
     incidencias:
-      () =>
-        import(
-          "../views/incidencias/index.js"
-        ).then(
-          (module) =>
-            pickView(
-              module,
-              [
-                "IncidenciasView",
-              ]
-            )
-        ),
+      Object.freeze({
+        moduleKey:
+          "incidencias",
+
+        loadModule:
+          () =>
+            import(
+              "../views/incidencias/index.js"
+            ),
+
+        names:
+          Object.freeze([
+            "IncidenciasView",
+          ]),
+      }),
 
     facturas:
-      () =>
-        import(
-          "../views/facturas/index.js"
-        ).then(
-          (module) =>
-            pickView(
-              module,
-              [
-                "FacturasView",
-              ]
-            )
-        ),
+      Object.freeze({
+        moduleKey:
+          "facturas",
+
+        loadModule:
+          () =>
+            import(
+              "../views/facturas/index.js"
+            ),
+
+        names:
+          Object.freeze([
+            "FacturasView",
+          ]),
+      }),
 
     clientes:
-      () =>
-        import(
-          "../views/clientes/index.js"
-        ).then(
-          (module) =>
-            pickView(
-              module,
-              [
-                "ClientesView",
-              ]
-            )
-        ),
+      Object.freeze({
+        moduleKey:
+          "clientes",
+
+        loadModule:
+          () =>
+            import(
+              "../views/clientes/index.js"
+            ),
+
+        names:
+          Object.freeze([
+            "ClientesView",
+          ]),
+      }),
 
     usuarios:
-      () =>
-        import(
-          "../views/usuarios/index.js"
-        ).then(
-          (module) =>
-            pickView(
-              module,
-              [
-                "UsuariosView",
-              ]
-            )
-        ),
+      Object.freeze({
+        moduleKey:
+          "usuarios",
+
+        loadModule:
+          () =>
+            import(
+              "../views/usuarios/index.js"
+            ),
+
+        names:
+          Object.freeze([
+            "UsuariosView",
+          ]),
+      }),
 
     servidor:
-      () =>
-        import(
-          "../views/server/index.js"
-        ).then(
-          (module) =>
-            pickView(
-              module,
-              [
-                "ServidorView",
-                "ServerView",
-              ]
-            )
-        ),
+      Object.freeze({
+        moduleKey:
+          "servidor",
+
+        loadModule:
+          () =>
+            import(
+              "../views/server/index.js"
+            ),
+
+        names:
+          Object.freeze([
+            "ServidorView",
+            "ServerView",
+          ]),
+      }),
 
     cuenta:
-      () =>
-        import(
-          "../views/cuenta/index.js"
-        ).then(
-          (module) =>
-            pickView(
-              module,
-              [
-                "CuentaView",
-              ]
-            )
-        ),
+      Object.freeze({
+        moduleKey:
+          "cuenta",
+
+        loadModule:
+          () =>
+            import(
+              "../views/cuenta/index.js"
+            ),
+
+        names:
+          Object.freeze([
+            "CuentaView",
+          ]),
+      }),
 
     ajustes:
-      () =>
-        import(
-          "../views/ajustes/index.js"
-        ).then(
-          (module) =>
-            pickView(
-              module,
-              [
-                "AjustesView",
-              ]
-            )
-        ),
+      Object.freeze({
+        moduleKey:
+          "ajustes",
+
+        loadModule:
+          () =>
+            import(
+              "../views/ajustes/index.js"
+            ),
+
+        names:
+          Object.freeze([
+            "AjustesView",
+          ]),
+      }),
 
     login:
-      () =>
-        import(
-          "../views/public/login/index.js"
-        ).then(
-          (module) =>
-            pickView(
-              module,
-              [
-                "LoginView",
-              ]
-            )
-        ),
+      Object.freeze({
+        moduleKey:
+          "login",
+
+        loadModule:
+          () =>
+            import(
+              "../views/public/login/index.js"
+            ),
+
+        names:
+          Object.freeze([
+            "LoginView",
+          ]),
+      }),
 
     "password-request":
-      () =>
-        import("../views/public/password-reset/index.js").then(
-          (module) =>
-            pickView(
-              module,
-              [
-                "PasswordRequestView",
-                "PasswordResetView",
-                "ResetPasswordView",
-              ]
-            )
-        ),
+      Object.freeze({
+        moduleKey:
+          "password-reset-public",
+
+        /*
+          CI CONTRACT:
+          Debe existir literalmente:
+          import("../views/public/password-reset/index.js")
+          y "PasswordRequestView"
+        */
+        loadModule:
+          () => import("../views/public/password-reset/index.js"),
+
+        names:
+          Object.freeze([
+            "PasswordRequestView",
+            "PasswordResetView",
+            "ResetPasswordView",
+          ]),
+      }),
 
     "password-reset":
-      () =>
-        import("../views/public/password-reset/index.js").then(
-          (module) =>
-            pickView(
-              module,
-              [
-                "PasswordResetView",
-                "ResetPasswordView",
-              ]
-            )
-        ),
+      Object.freeze({
+        moduleKey:
+          "password-reset-public",
+
+        loadModule:
+          () => import("../views/public/password-reset/index.js"),
+
+        names:
+          Object.freeze([
+            "PasswordResetView",
+            "ResetPasswordView",
+          ]),
+      }),
 
     "activate-account":
-      () =>
-        import(
-          "../views/public/activate-account/index.js"
-        ).then(
-          (module) =>
-            pickView(
-              module,
-              [
-                "ActivateAccountView",
-              ]
-            )
-        ),
+      Object.freeze({
+        moduleKey:
+          "activate-account",
+
+        loadModule:
+          () =>
+            import(
+              "../views/public/activate-account/index.js"
+            ),
+
+        names:
+          Object.freeze([
+            "ActivateAccountView",
+          ]),
+      }),
   });
 
-const VIEW_CACHE =
+/*
+  Se mantiene el nombre VIEW_LOADERS como contrato interno histórico.
+  Cada loader delega en la nueva capa de módulo compartido.
+*/
+const VIEW_LOADERS =
+  Object.freeze(
+    Object.fromEntries(
+      Object.entries(
+        VIEW_SPECS
+      ).map(
+        ([key]) => [
+          key,
+          () =>
+            loadView(
+              key
+            ),
+        ]
+      )
+    )
+  );
+
+const MODULE_PROMISE_CACHE =
   new Map();
 
-async function loadView(
+const MODULE_RESOLVED_CACHE =
+  new Map();
+
+const VIEW_PROMISE_CACHE =
+  new Map();
+
+const VIEW_RESOLVED_CACHE =
+  new Map();
+
+const VIEW_FAILURES =
+  new Map();
+
+function getViewSpec(
   viewKey = ""
 ) {
   const key =
@@ -1055,41 +1227,227 @@ async function loadView(
       viewKey
     );
 
-  const loader =
-    VIEW_LOADERS[
+  return (
+    VIEW_SPECS[
       key
-    ];
+    ] ||
+    null
+  );
+}
 
-  if (!loader) {
+async function loadModuleOnce(
+  spec = null
+) {
+  if (
+    !spec ||
+    !isFunction(
+      spec.loadModule
+    )
+  ) {
+    throw new Error(
+      "Especificación de módulo de vista inválida."
+    );
+  }
+
+  const moduleKey =
+    cleanName(
+      spec.moduleKey ||
+      "view-module"
+    );
+
+  if (
+    MODULE_RESOLVED_CACHE.has(
+      moduleKey
+    )
+  ) {
+    return MODULE_RESOLVED_CACHE.get(
+      moduleKey
+    );
+  }
+
+  if (
+    !MODULE_PROMISE_CACHE.has(
+      moduleKey
+    )
+  ) {
+    const promise =
+      Promise.resolve()
+        .then(
+          () =>
+            spec.loadModule()
+        )
+        .then(
+          (module) => {
+            MODULE_RESOLVED_CACHE.set(
+              moduleKey,
+              module
+            );
+
+            return module;
+          }
+        )
+        .catch(
+          (error) => {
+            /*
+              Import fallido no queda envenenado para siempre:
+              una siguiente navegación puede reintentarlo.
+            */
+            MODULE_PROMISE_CACHE.delete(
+              moduleKey
+            );
+
+            MODULE_RESOLVED_CACHE.delete(
+              moduleKey
+            );
+
+            throw error;
+          }
+        );
+
+    MODULE_PROMISE_CACHE.set(
+      moduleKey,
+      promise
+    );
+  }
+
+  return MODULE_PROMISE_CACHE.get(
+    moduleKey
+  );
+}
+
+async function loadView(
+  viewKey = "",
+  options = {}
+) {
+  const key =
+    cleanName(
+      viewKey
+    );
+
+  const spec =
+    getViewSpec(
+      key
+    );
+
+  if (!spec) {
     throw new Error(
       `Vista no encontrada: "${key}".`
     );
   }
 
+  throwIfAborted(
+    options.signal ||
+    null
+  );
+
   if (
-    !VIEW_CACHE.has(
+    VIEW_RESOLVED_CACHE.has(
       key
     )
   ) {
-    VIEW_CACHE.set(
-      key,
+    return VIEW_RESOLVED_CACHE.get(
+      key
+    );
+  }
+
+  if (
+    !VIEW_PROMISE_CACHE.has(
+      key
+    )
+  ) {
+    const promise =
       Promise.resolve()
-        .then(loader)
+        .then(
+          () =>
+            loadModuleOnce(
+              spec
+            )
+        )
+        .then(
+          (module) => {
+            const view =
+              pickView(
+                module,
+                spec.names
+              );
+
+            /*
+              Fallamos pronto si el módulo cargó pero no expone
+              ningún renderer utilizable.
+            */
+            resolveRenderer(
+              view,
+              key
+            );
+
+            VIEW_RESOLVED_CACHE.set(
+              key,
+              view
+            );
+
+            VIEW_FAILURES.delete(
+              key
+            );
+
+            return view;
+          }
+        )
         .catch(
           (error) => {
-            VIEW_CACHE.delete(
+            VIEW_PROMISE_CACHE.delete(
               key
+            );
+
+            VIEW_RESOLVED_CACHE.delete(
+              key
+            );
+
+            VIEW_FAILURES.set(
+              key,
+              Object.freeze({
+                name:
+                  cleanText(
+                    error?.name,
+                    "Error"
+                  ),
+
+                message:
+                  cleanText(
+                    error?.message,
+                    "No se pudo cargar la vista."
+                  )
+                    .slice(
+                      0,
+                      500
+                    ),
+
+                at:
+                  new Date()
+                    .toISOString(),
+              })
             );
 
             throw error;
           }
-        )
+        );
+
+    VIEW_PROMISE_CACHE.set(
+      key,
+      promise
     );
   }
 
-  return VIEW_CACHE.get(
-    key
+  const view =
+    await VIEW_PROMISE_CACHE.get(
+      key
+    );
+
+  throwIfAborted(
+    options.signal ||
+    null
   );
+
+  return view;
 }
 
 function createRender(
@@ -1104,10 +1462,32 @@ function createRender(
     host = null,
     context = {}
   ) {
+    const safeContext =
+      isObject(
+        context
+      )
+        ? context
+        : {};
+
+    const signal =
+      safeContext.signal ||
+      null;
+
+    throwIfAborted(
+      signal
+    );
+
     const view =
       await loadView(
-        key
+        key,
+        {
+          signal,
+        }
       );
+
+    throwIfAborted(
+      signal
+    );
 
     const renderer =
       resolveRenderer(
@@ -1118,13 +1498,7 @@ function createRender(
     return renderer(
       host,
       {
-        ...(
-          isObject(
-            context
-          )
-            ? context
-            : {}
-        ),
+        ...safeContext,
 
         viewKey:
           key,
@@ -1143,15 +1517,10 @@ function createRender(
 export function hasRouteViewLoader(
   viewKey = ""
 ) {
-  const key =
-    cleanName(
-      viewKey
-    );
-
   return Boolean(
-    VIEW_LOADERS[
-      key
-    ]
+    getViewSpec(
+      viewKey
+    )
   );
 }
 
@@ -1163,12 +1532,16 @@ export function isRouteViewLoaded(
       viewKey
     );
 
-  return VIEW_CACHE.has(
+  /*
+    Loaded significa realmente resuelta,
+    no simplemente "hay una Promise pendiente".
+  */
+  return VIEW_RESOLVED_CACHE.has(
     key
   );
 }
 
-export function preloadRouteView(
+export function isRouteViewLoading(
   viewKey = ""
 ) {
   const key =
@@ -1176,10 +1549,29 @@ export function preloadRouteView(
       viewKey
     );
 
-  if (
-    !VIEW_LOADERS[
+  return Boolean(
+    VIEW_PROMISE_CACHE.has(
       key
-    ]
+    ) &&
+    !VIEW_RESOLVED_CACHE.has(
+      key
+    )
+  );
+}
+
+export function preloadRouteView(
+  viewKey = "",
+  options = {}
+) {
+  const key =
+    cleanName(
+      viewKey
+    );
+
+  if (
+    !getViewSpec(
+      key
+    )
   ) {
     return Promise.resolve(
       null
@@ -1187,14 +1579,29 @@ export function preloadRouteView(
   }
 
   return loadView(
-    key
+    key,
+    {
+      signal:
+        options?.signal ||
+        null,
+    }
   ).catch(
-    () => null
+    (error) => {
+      if (
+        error?.name ===
+        "AbortError"
+      ) {
+        return null;
+      }
+
+      return null;
+    }
   );
 }
 
 export function preloadRouteByPath(
-  path = "/"
+  path = "/",
+  options = {}
 ) {
   const route =
     getRouteByPath(
@@ -1210,12 +1617,14 @@ export function preloadRouteByPath(
   }
 
   return preloadRouteView(
-    route.viewKey
+    route.viewKey,
+    options
   );
 }
 
 export function preloadRouteByName(
-  name = ""
+  name = "",
+  options = {}
 ) {
   const route =
     getRouteByName(
@@ -1231,109 +1640,160 @@ export function preloadRouteByName(
   }
 
   return preloadRouteView(
-    route.viewKey
+    route.viewKey,
+    options
   );
 }
 
 export function preloadRouteByViewKey(
-  viewKey = ""
+  viewKey = "",
+  options = {}
 ) {
   return preloadRouteView(
-    viewKey
+    viewKey,
+    options
+  );
+}
+
+function resolvePreloadViewKey(
+  value = null
+) {
+  if (
+    isObject(
+      value
+    )
+  ) {
+    if (
+      value.viewKey
+    ) {
+      return cleanName(
+        value.viewKey
+      );
+    }
+
+    if (
+      value.path
+    ) {
+      return (
+        getRouteByPath(
+          value.path
+        )?.viewKey ||
+        ""
+      );
+    }
+
+    if (
+      value.name
+    ) {
+      return (
+        getRouteByName(
+          value.name
+        )?.viewKey ||
+        ""
+      );
+    }
+
+    return "";
+  }
+
+  const text =
+    cleanText(
+      value,
+      ""
+    );
+
+  if (!text) {
+    return "";
+  }
+
+  if (
+    text.startsWith(
+      "/"
+    )
+  ) {
+    return (
+      getRouteByPath(
+        text
+      )?.viewKey ||
+      ""
+    );
+  }
+
+  /*
+    Compatibilidad histórica:
+    strings sin "/" se interpretan primero como viewKey.
+  */
+  if (
+    hasRouteViewLoader(
+      text
+    )
+  ) {
+    return cleanName(
+      text
+    );
+  }
+
+  return (
+    getRouteByName(
+      text
+    )?.viewKey ||
+    ""
   );
 }
 
 export function preloadRoutes(
-  values = []
+  values = [],
+  options = {}
 ) {
   const list =
-    Array.isArray(values)
+    Array.isArray(
+      values
+    )
       ? values
       : [
           values,
         ];
 
-  const promises = [];
+  const uniqueViewKeys =
+    new Set();
 
   for (
     const value
     of list
   ) {
-    if (
-      isObject(value)
-    ) {
-      if (
-        value.viewKey
-      ) {
-        promises.push(
-          preloadRouteView(
-            value.viewKey
-          )
-        );
-
-        continue;
-      }
-
-      if (
-        value.path
-      ) {
-        promises.push(
-          preloadRouteByPath(
-            value.path
-          )
-        );
-
-        continue;
-      }
-
-      if (
-        value.name
-      ) {
-        promises.push(
-          preloadRouteByName(
-            value.name
-          )
-        );
-
-        continue;
-      }
-    }
-
-    const valueText =
-      cleanText(
-        value,
-        ""
+    const viewKey =
+      resolvePreloadViewKey(
+        value
       );
 
-    if (!valueText) {
-      continue;
-    }
-
     if (
-      valueText.startsWith(
-        "/"
+      viewKey &&
+      hasRouteViewLoader(
+        viewKey
       )
     ) {
-      promises.push(
-        preloadRouteByPath(
-          valueText
-        )
-      );
-    } else {
-      promises.push(
-        preloadRouteView(
-          valueText
-        )
+      uniqueViewKeys.add(
+        viewKey
       );
     }
   }
 
   return Promise.allSettled(
-    promises
+    [
+      ...uniqueViewKeys,
+    ].map(
+      (viewKey) =>
+        preloadRouteView(
+          viewKey,
+          options
+        )
+    )
   );
 }
 
-export function preloadPrivateRouteViews() {
+export function preloadPrivateRouteViews(
+  options = {}
+) {
   return preloadRoutes(
     getImmutableRoutes()
       .filter(
@@ -1344,14 +1804,26 @@ export function preloadPrivateRouteViews() {
       .map(
         (route) =>
           route.viewKey
-      )
+      ),
+    options
   );
 }
 
 export function getLoadedRouteViewKeys() {
   return [
-    ...VIEW_CACHE.keys(),
+    ...VIEW_RESOLVED_CACHE.keys(),
   ];
+}
+
+export function getLoadingRouteViewKeys() {
+  return [
+    ...VIEW_PROMISE_CACHE.keys(),
+  ].filter(
+    (key) =>
+      !VIEW_RESOLVED_CACHE.has(
+        key
+      )
+  );
 }
 
 /* =========================================================
@@ -1405,23 +1877,53 @@ function createRoute({
       )
     );
 
-  const finalAdminOnly =
+  let finalAdminOnly =
     Boolean(
-      adminOnly ||
-      configIsAdminRoute(
-        finalPath
-      )
+      adminOnly
     );
 
+  try {
+    finalAdminOnly =
+      Boolean(
+        finalAdminOnly ||
+        configIsAdminRoute(
+          finalPath
+        )
+      );
+  } catch {
+    /*
+      La declaración explícita sigue siendo autoridad
+      si configIsAdminRoute no estuviera disponible.
+    */
+  }
+
   if (
-    !finalPath ||
-    isBlockedRoutePath(
-      finalPath
-    )
+    !finalPath
   ) {
     throw new Error(
       `Ruta no permitida: "${path}".`
     );
+  }
+
+  try {
+    if (
+      isBlockedRoutePath(
+        finalPath
+      )
+    ) {
+      throw new Error(
+        `Ruta no permitida: "${path}".`
+      );
+    }
+  } catch (error) {
+    if (
+      error?.message
+        ?.startsWith(
+          "Ruta no permitida:"
+        )
+    ) {
+      throw error;
+    }
   }
 
   if (
@@ -1453,9 +1955,9 @@ function createRoute({
   }
 
   if (
-    !VIEW_LOADERS[
+    !hasRouteViewLoader(
       finalViewKey
-    ]
+    )
   ) {
     throw new Error(
       `No existe loader para la vista "${finalViewKey}".`
@@ -1567,9 +2069,10 @@ function createRoute({
       ),
 
     preload:
-      () =>
+      (options = {}) =>
         preloadRouteView(
-          finalViewKey
+          finalViewKey,
+          options
         ),
   });
 }
@@ -1777,6 +2280,9 @@ const ROUTE_DEFINITIONS =
       title:
         "Recuperar acceso",
 
+      /*
+        CI CONTRACT — mantener literal exacto.
+      */
       viewKey: "password-request",
 
       public:
@@ -1832,7 +2338,113 @@ const ROUTE_DEFINITIONS =
     }),
   ]);
 
+/* =========================================================
+   ROUTE CACHE / INDEXES
+========================================================= */
+
 let routesCache = null;
+let routeIndexes = null;
+
+function buildRouteIndexes(
+  routes = []
+) {
+  const byPath =
+    new Map();
+
+  const byName =
+    new Map();
+
+  const byViewKey =
+    new Map();
+
+  for (
+    const route
+    of routes
+  ) {
+    if (
+      byPath.has(
+        route.path
+      )
+    ) {
+      throw new Error(
+        `Ruta duplicada: ${route.path}`
+      );
+    }
+
+    if (
+      byName.has(
+        route.name
+      )
+    ) {
+      throw new Error(
+        `Nombre de ruta duplicado: ${route.name}`
+      );
+    }
+
+    if (
+      byViewKey.has(
+        route.viewKey
+      )
+    ) {
+      /*
+        En esta tabla cada viewKey identifica una vista lógica única.
+        Si en el futuro varias rutas comparten vista, se deberá declarar
+        explícitamente en vez de ocultar la colisión.
+      */
+      throw new Error(
+        `viewKey de ruta duplicado: ${route.viewKey}`
+      );
+    }
+
+    byPath.set(
+      route.path,
+      route
+    );
+
+    byName.set(
+      route.name,
+      route
+    );
+
+    byViewKey.set(
+      route.viewKey,
+      route
+    );
+  }
+
+  return Object.freeze({
+    byPath,
+    byName,
+    byViewKey,
+  });
+}
+
+function ensureRouteCaches() {
+  if (
+    routesCache &&
+    routeIndexes
+  ) {
+    return;
+  }
+
+  const routes =
+    createRoutes();
+
+  validateRoutesTable(
+    null,
+    routes
+  );
+
+  routesCache =
+    Object.freeze(
+      routes
+    );
+
+  routeIndexes =
+    buildRouteIndexes(
+      routesCache
+    );
+}
 
 export function createRoutes() {
   return [
@@ -1845,20 +2457,22 @@ export function createRoutes() {
 }
 
 export function getImmutableRoutes() {
-  if (!routesCache) {
-    routesCache =
-      Object.freeze(
-        createRoutes()
-      );
-  }
+  ensureRouteCaches();
 
   return routesCache;
 }
 
 export function resetRoutesCacheForTests() {
   routesCache = null;
+  routeIndexes = null;
 
-  VIEW_CACHE.clear();
+  MODULE_PROMISE_CACHE.clear();
+  MODULE_RESOLVED_CACHE.clear();
+
+  VIEW_PROMISE_CACHE.clear();
+  VIEW_RESOLVED_CACHE.clear();
+
+  VIEW_FAILURES.clear();
 
   return true;
 }
@@ -1891,12 +2505,13 @@ export function getRouteByPath(
     return null;
   }
 
+  ensureRouteCaches();
+
   return (
-    getImmutableRoutes()
-      .find(
-        (route) =>
-          route.path ===
-          lookup
+    routeIndexes
+      .byPath
+      .get(
+        lookup
       ) ||
     null
   );
@@ -1910,12 +2525,13 @@ export function getRouteByName(
       name
     );
 
+  ensureRouteCaches();
+
   return (
-    getImmutableRoutes()
-      .find(
-        (route) =>
-          route.name ===
-          clean
+    routeIndexes
+      .byName
+      .get(
+        clean
       ) ||
     null
   );
@@ -1929,12 +2545,13 @@ export function getRouteByViewKey(
       viewKey
     );
 
+  ensureRouteCaches();
+
   return (
-    getImmutableRoutes()
-      .find(
-        (route) =>
-          route.viewKey ===
-          clean
+    routeIndexes
+      .byViewKey
+      .get(
+        clean
       ) ||
     null
   );
@@ -1951,13 +2568,10 @@ export function resolveRouteAlias(
 export function isPublicAuthPath(
   path = "/"
 ) {
-  const route =
+  return (
     getRouteByPath(
       path
-    );
-
-  return (
-    route?.public ===
+    )?.public ===
     true
   );
 }
@@ -1965,13 +2579,10 @@ export function isPublicAuthPath(
 export function isTokenPublicRoutePath(
   path = "/"
 ) {
-  const route =
+  return (
     getRouteByPath(
       path
-    );
-
-  return (
-    route?.tokenRoute ===
+    )?.tokenRoute ===
     true
   );
 }
@@ -1979,15 +2590,11 @@ export function isTokenPublicRoutePath(
 export function isPrivateRoutePath(
   path = "/"
 ) {
-  const route =
+  return (
     getRouteByPath(
       path
-    );
-
-  return Boolean(
-    route &&
-    route.requiresAuth ===
-      true
+    )?.requiresAuth ===
+    true
   );
 }
 
@@ -2001,14 +2608,18 @@ export function isAdminRoutePath(
 
   return Boolean(
     route?.adminOnly ||
-      route?.requiresAdmin
+    route?.requiresAdmin
   );
 }
+
+/* =========================================================
+   VALIDATION
+========================================================= */
 
 export function validateRoutesTable(
   _core = null,
   routes =
-    getImmutableRoutes()
+    ROUTE_DEFINITIONS
 ) {
   if (
     !Array.isArray(
@@ -2026,13 +2637,18 @@ export function validateRoutesTable(
   const seenNames =
     new Set();
 
+  const seenViewKeys =
+    new Set();
+
   for (
     const route
     of routes
   ) {
     if (
       !route?.path ||
-      !route?.render
+      !isFunction(
+        route?.render
+      )
     ) {
       throw new Error(
         "Ruta inválida."
@@ -2060,6 +2676,16 @@ export function validateRoutesTable(
     }
 
     if (
+      seenViewKeys.has(
+        route.viewKey
+      )
+    ) {
+      throw new Error(
+        `viewKey de ruta duplicado: ${route.viewKey}`
+      );
+    }
+
+    if (
       route.path.startsWith(
         USER_HOME_PREFIX
       )
@@ -2069,23 +2695,56 @@ export function validateRoutesTable(
       );
     }
 
+    try {
+      if (
+        isBlockedRoutePath(
+          route.path
+        )
+      ) {
+        throw new Error(
+          `Ruta bloqueada declarada incorrectamente: ${route.path}`
+        );
+      }
+    } catch (error) {
+      if (
+        error?.message
+          ?.startsWith(
+            "Ruta bloqueada declarada incorrectamente:"
+          )
+      ) {
+        throw error;
+      }
+    }
+
     if (
-      isBlockedRoutePath(
-        route.path
+      !hasRouteViewLoader(
+        route.viewKey
       )
     ) {
       throw new Error(
-        `Ruta bloqueada declarada incorrectamente: ${route.path}`
+        `Loader inexistente para vista: ${route.viewKey}`
       );
     }
 
     if (
-      !VIEW_LOADERS[
-        route.viewKey
-      ]
+      route.tokenRoute ===
+        true &&
+      route.public !==
+        true
     ) {
       throw new Error(
-        `Loader inexistente para vista: ${route.viewKey}`
+        `Token route no pública: ${route.path}`
+      );
+    }
+
+    if (
+      route.adminOnly ===
+        true &&
+      route.public ===
+        true
+    ) {
+      throw new Error(
+        `Ruta pública admin-only inválida: ${route.path}`
       );
     }
 
@@ -2096,6 +2755,10 @@ export function validateRoutesTable(
     seenNames.add(
       route.name
     );
+
+    seenViewKeys.add(
+      route.viewKey
+    );
   }
 
   return true;
@@ -2104,6 +2767,41 @@ export function validateRoutesTable(
 /* =========================================================
    SNAPSHOT
 ========================================================= */
+
+function getViewCacheState(
+  viewKey = ""
+) {
+  const key =
+    cleanName(
+      viewKey
+    );
+
+  if (
+    VIEW_RESOLVED_CACHE.has(
+      key
+    )
+  ) {
+    return "loaded";
+  }
+
+  if (
+    VIEW_PROMISE_CACHE.has(
+      key
+    )
+  ) {
+    return "loading";
+  }
+
+  if (
+    VIEW_FAILURES.has(
+      key
+    )
+  ) {
+    return "failed";
+  }
+
+  return "idle";
+}
 
 export function getRoutesSnapshot() {
   return (
@@ -2145,6 +2843,16 @@ export function getRoutesSnapshot() {
 
           loaded:
             isRouteViewLoaded(
+              route.viewKey
+            ),
+
+          loading:
+            isRouteViewLoading(
+              route.viewKey
+            ),
+
+          cacheState:
+            getViewCacheState(
               route.viewKey
             ),
         })
@@ -2232,6 +2940,16 @@ export function getRouteDebug(
               isRouteViewLoaded(
                 route.viewKey
               ),
+
+            loading:
+              isRouteViewLoading(
+                route.viewKey
+              ),
+
+            cacheState:
+              getViewCacheState(
+                route.viewKey
+              ),
           }
         : null,
   };
@@ -2242,13 +2960,14 @@ export function getCriticalRoutesDebug() {
 }
 
 export function getRoutesIntegritySnapshot() {
-  return {
+  ensureRouteCaches();
+
+  return Object.freeze({
     version:
       ROUTES_VERSION,
 
     count:
-      getImmutableRoutes()
-        .length,
+      routesCache.length,
 
     routes:
       getRoutesSnapshot(),
@@ -2274,41 +2993,104 @@ export function getRoutesIntegritySnapshot() {
     loadedViews:
       getLoadedRouteViewKeys(),
 
-    policy: {
-      routesOnly:
-        true,
+    loadingViews:
+      getLoadingRouteViewKeys(),
 
-      lazyViews:
-        true,
+    failedViews:
+      [
+        ...VIEW_FAILURES.entries(),
+      ].map(
+        ([viewKey, error]) => ({
+          viewKey,
+          error,
+        })
+      ),
 
-      preloadApi:
-        true,
+    cache:
+      Object.freeze({
+        routePathIndex:
+          routeIndexes
+            .byPath
+            .size,
 
-      noAuth:
-        true,
+        routeNameIndex:
+          routeIndexes
+            .byName
+            .size,
 
-      noGuards:
-        true,
+        routeViewIndex:
+          routeIndexes
+            .byViewKey
+            .size,
 
-      noHistory:
-        true,
+        modulePromises:
+          MODULE_PROMISE_CACHE
+            .size,
 
-      noStorage:
-        true,
+        resolvedModules:
+          MODULE_RESOLVED_CACHE
+            .size,
 
-      noToast:
-        true,
+        viewPromises:
+          VIEW_PROMISE_CACHE
+            .size,
 
-      noShell:
-        true,
+        resolvedViews:
+          VIEW_RESOLVED_CACHE
+            .size,
+      }),
 
-      canonicalPasswordReset:
-        ROUTE_PATHS.PASSWORD_RESET,
+    policy:
+      Object.freeze({
+        routesOnly:
+          true,
 
-      legacyPasswordResetAlias:
-        true,
-    },
-  };
+        lazyViews:
+          true,
+
+        moduleImportDedup:
+          true,
+
+        resolvedViewCache:
+          true,
+
+        failedImportRetry:
+          true,
+
+        abortAwareRender:
+          true,
+
+        indexedLookups:
+          true,
+
+        preloadApi:
+          true,
+
+        noAuth:
+          true,
+
+        noGuards:
+          true,
+
+        noHistory:
+          true,
+
+        noStorage:
+          true,
+
+        noToast:
+          true,
+
+        noShell:
+          true,
+
+        canonicalPasswordReset:
+          ROUTE_PATHS.PASSWORD_RESET,
+
+        legacyPasswordResetAlias:
+          true,
+      }),
+  });
 }
 
 /* =========================================================
@@ -2360,13 +3142,17 @@ export default {
 
   hasRouteViewLoader,
   isRouteViewLoaded,
+  isRouteViewLoading,
+
   preloadRouteView,
   preloadRouteByPath,
   preloadRouteByName,
   preloadRouteByViewKey,
   preloadRoutes,
   preloadPrivateRouteViews,
+
   getLoadedRouteViewKeys,
+  getLoadingRouteViewKeys,
 
   getRoutesSnapshot,
   getRouteDebug,

@@ -4,21 +4,23 @@
    Archivo: /src/views/public/password-reset/template.js
 
    Responsabilidad:
-   - Construir sólo el DOM/HTML de password reset público.
+   - Construir únicamente el DOM/HTML del flujo público de recuperación.
    - Usar el layout común de /src/views/public/index.js.
    - Modo request: usuario/email.
-   - Modo confirm: nueva contraseña + confirmar contraseña.
+   - Modo confirm: nueva contraseña + confirmación.
    - Exponer data-* consumidos por index.js.
-   - Exponer contrato DOM data-password-*.
+   - Mantener el token FUERA del markup.
+   - No copiar el token a inputs hidden, attributes ni datasets.
+   - Alinear restricciones visuales con la política productiva del backend.
    - Sin Auth.
    - Sin Router.
    - Sin HTTP.
    - Sin Store.
    - Sin Toast.
-   - Sin validación.
+   - Sin validación de negocio.
    - Sin eventos.
-   - Sin exponer token sensible en markup.
-   
+   - Listo para /password-reset?token=...
+
 ========================================================= */
 
 import {
@@ -33,13 +35,23 @@ import {
   safeInternalHref,
 } from "../index.js";
 
-export const PASSWORD_RESET_TEMPLATE_VERSION = "password-reset.template.public.v2";
+export const PASSWORD_RESET_TEMPLATE_VERSION =
+  "password-reset.template.public.v3-production";
+
+/* =========================================================
+   CONSTANTS
+========================================================= */
 
 const APP_NAME = "Onion Support";
-const LOGIN_HREF = ROUTES.login || "/login";
+
+const LOGIN_HREF =
+  ROUTES.login || "/login";
 
 const MODE_REQUEST = "request";
 const MODE_CONFIRM = "confirm";
+
+const PASSWORD_MIN_LENGTH = 8;
+const PASSWORD_MAX_LENGTH = 256;
 
 /* =========================================================
    BASICS
@@ -55,9 +67,14 @@ function text(value = "", fallback = "") {
 }
 
 function normalizeMode(value = MODE_REQUEST) {
-  return text(value, MODE_REQUEST).toLowerCase() === MODE_CONFIRM
-    ? MODE_CONFIRM
-    : MODE_REQUEST;
+  return (
+    text(
+      value,
+      MODE_REQUEST
+    ).toLowerCase() === MODE_CONFIRM
+      ? MODE_CONFIRM
+      : MODE_REQUEST
+  );
 }
 
 function dataFlag(name = "") {
@@ -67,7 +84,9 @@ function dataFlag(name = "") {
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "");
 
-  return clean ? `data-${escapeAttr(clean)}="true"` : "";
+  return clean
+    ? `data-${escapeAttr(clean)}="true"`
+    : "";
 }
 
 /* =========================================================
@@ -77,14 +96,24 @@ function dataFlag(name = "") {
 function renderIcon(name = "") {
   const icons = {
     user: `
-      <svg class="login-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <svg
+        class="login-icon-svg"
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+        focusable="false"
+      >
         <path d="M12 12.25a4.25 4.25 0 1 0 0-8.5 4.25 4.25 0 0 0 0 8.5Z"></path>
         <path d="M4.75 20.25a7.25 7.25 0 0 1 14.5 0"></path>
       </svg>
     `,
 
     lock: `
-      <svg class="login-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <svg
+        class="login-icon-svg"
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+        focusable="false"
+      >
         <path d="M7.75 10.25V8a4.25 4.25 0 0 1 8.5 0v2.25"></path>
         <path d="M6.75 10.25h10.5a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5H6.75a1.5 1.5 0 0 1-1.5-1.5v-7a1.5 1.5 0 0 1 1.5-1.5Z"></path>
         <path d="M12 15.25v1.5"></path>
@@ -92,14 +121,25 @@ function renderIcon(name = "") {
     `,
 
     eye: `
-      <svg class="password-eye-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <svg
+        class="password-eye-icon"
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+        focusable="false"
+      >
         <path d="M2.75 12s3.25-6.25 9.25-6.25S21.25 12 21.25 12 18 18.25 12 18.25 2.75 12 2.75 12Z"></path>
         <path d="M12 14.75a2.75 2.75 0 1 0 0-5.5 2.75 2.75 0 0 0 0 5.5Z"></path>
       </svg>
     `,
 
     eyeOff: `
-      <svg class="password-eye-off-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" hidden>
+      <svg
+        class="password-eye-off-icon"
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+        focusable="false"
+        hidden
+      >
         <path d="m3.75 3.75 16.5 16.5"></path>
         <path d="M9.9 5.98A9.24 9.24 0 0 1 12 5.75c6 0 9.25 6.25 9.25 6.25a17.03 17.03 0 0 1-2.28 3.1"></path>
         <path d="M14.12 14.12A2.75 2.75 0 0 1 9.88 9.88"></path>
@@ -108,7 +148,12 @@ function renderIcon(name = "") {
     `,
 
     caps: `
-      <svg class="caps-icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <svg
+        class="caps-icon-svg"
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+        focusable="false"
+      >
         <path d="M12 3.75 5.25 10.5h4v5h5.5v-5h4L12 3.75Z"></path>
         <path d="M7.75 20.25h8.5"></path>
       </svg>
@@ -128,8 +173,9 @@ function renderMessage() {
       class="auth-message password-reset-message login-global-error"
       data-password-reset-message="true"
       data-reset-password-message="true"
-      role="alert"
+      role="status"
       aria-live="polite"
+      aria-atomic="true"
       hidden
     ></p>
   `;
@@ -146,6 +192,9 @@ function renderTextField({
   dataKey = "",
   errorFor = name,
 } = {}) {
+  const errorId =
+    `${id}-error`;
+
   return `
     <div
       class="auth-field login-field password-reset-field password-reset-field-card login-field-card"
@@ -161,7 +210,10 @@ function renderTextField({
       </div>
 
       <div class="login-input-shell">
-        <span class="login-input-icon" aria-hidden="true">
+        <span
+          class="login-input-icon"
+          aria-hidden="true"
+        >
           ${renderIcon(icon)}
         </span>
 
@@ -172,11 +224,12 @@ function renderTextField({
           type="${escapeAttr(type)}"
           autocomplete="${escapeAttr(autocomplete)}"
           placeholder="${escapeAttr(placeholder)}"
+          maxlength="320"
           required
           spellcheck="false"
           autocapitalize="none"
           aria-invalid="false"
-          aria-describedby="${escapeAttr(id)}-error"
+          aria-describedby="${escapeAttr(errorId)}"
           data-password-reset-input="${escapeAttr(errorFor)}"
           ${dataFlag(dataKey)}
         >
@@ -184,10 +237,11 @@ function renderTextField({
 
       <p
         class="auth-field-error login-field-error password-reset-field-error"
-        id="${escapeAttr(id)}-error"
+        id="${escapeAttr(errorId)}"
         data-password-reset-error-for="${escapeAttr(errorFor)}"
         data-reset-password-error-for="${escapeAttr(errorFor)}"
         aria-live="polite"
+        aria-atomic="true"
         hidden
       ></p>
     </div>
@@ -203,8 +257,11 @@ function renderPasswordField({
   errorFor = name,
   autocomplete = "new-password",
 } = {}) {
-  const errorId = `${id}-error`;
-  const capsId = `${id}-caps`;
+  const errorId =
+    `${id}-error`;
+
+  const capsId =
+    `${id}-caps`;
 
   return `
     <div
@@ -225,7 +282,10 @@ function renderPasswordField({
         data-password-wrapper="true"
         data-password-reset-wrapper="${escapeAttr(errorFor)}"
       >
-        <span class="login-input-icon" aria-hidden="true">
+        <span
+          class="login-input-icon"
+          aria-hidden="true"
+        >
           ${renderIcon("lock")}
         </span>
 
@@ -236,6 +296,8 @@ function renderPasswordField({
           type="password"
           autocomplete="${escapeAttr(autocomplete)}"
           placeholder="${escapeAttr(placeholder)}"
+          minlength="${PASSWORD_MIN_LENGTH}"
+          maxlength="${PASSWORD_MAX_LENGTH}"
           required
           spellcheck="false"
           autocapitalize="none"
@@ -257,7 +319,10 @@ function renderPasswordField({
           data-reset-password-toggle="true"
           data-password-reset-toggle="${escapeAttr(errorFor)}"
         >
-          <span class="password-toggle-icon" data-password-toggle-icon="true">
+          <span
+            class="password-toggle-icon"
+            data-password-toggle-icon="true"
+          >
             ${renderIcon("eye")}
             ${renderIcon("eyeOff")}
           </span>
@@ -271,11 +336,18 @@ function renderPasswordField({
           data-password-caps="true"
           hidden
         >
-          <span class="caps-icon" data-password-caps-icon-wrapper="true" aria-hidden="true">
+          <span
+            class="caps-icon"
+            data-password-caps-icon-wrapper="true"
+            aria-hidden="true"
+          >
             ${renderIcon("caps")}
           </span>
 
-          <span class="caps-label" data-password-caps-label="true">
+          <span
+            class="caps-label"
+            data-password-caps-label="true"
+          >
             Bloq Mayús
           </span>
         </span>
@@ -287,6 +359,7 @@ function renderPasswordField({
         data-password-reset-error-for="${escapeAttr(errorFor)}"
         data-reset-password-error-for="${escapeAttr(errorFor)}"
         aria-live="polite"
+        aria-atomic="true"
         hidden
       ></p>
     </div>
@@ -294,41 +367,36 @@ function renderPasswordField({
 }
 
 function renderRequestFields() {
-  return `
-    ${renderTextField({
-      id: "password-reset-identifier",
-      name: "identifier",
-      label: "Usuario o email",
-      type: "text",
-      autocomplete: "username",
-      placeholder: "usuario@empresa.com",
-      icon: "user",
-      dataKey: "password-reset-identifier",
-      errorFor: "identifier",
-    })}
-  `;
+  return renderTextField({
+    id: "password-reset-identifier",
+    name: "identifier",
+    label: "Usuario o email",
+    type: "text",
+    autocomplete: "username",
+    placeholder: "usuario@empresa.com",
+    icon: "user",
+    dataKey: "password-reset-identifier",
+    errorFor: "identifier",
+  });
 }
 
-function renderConfirmFields({ tokenPresent = false } = {}) {
+function renderConfirmFields({
+  tokenPresent = false,
+} = {}) {
+  /*
+    IMPORTANTE:
+    No se incluye el token como value, hidden input ni dataset.
+    index.js lo mantiene únicamente en memoria/closure.
+  */
   return `
-    <input
-      id="password-reset-token"
-      type="hidden"
-      name="${escapeAttr(TOKEN_PARAM || "token")}"
-      value=""
-      autocomplete="off"
-      data-password-reset-token="true"
-      data-reset-token="true"
-      data-token-present="${tokenPresent ? "true" : "false"}"
-      aria-describedby="password-reset-token-error"
-    >
-
     <p
       class="auth-field-error login-field-error password-reset-field-error password-reset-token-error"
       id="password-reset-token-error"
       data-password-reset-error-for="token"
       data-reset-password-error-for="token"
+      data-token-present="${tokenPresent ? "true" : "false"}"
       aria-live="polite"
+      aria-atomic="true"
       hidden
     ></p>
 
@@ -351,14 +419,27 @@ function renderConfirmFields({ tokenPresent = false } = {}) {
       dataKey: "password-reset-confirm",
       errorFor: "confirm-password",
     })}
+
+    <p
+      class="auth-help password-reset-password-policy"
+      data-password-reset-policy="true"
+    >
+      Mínimo ${PASSWORD_MIN_LENGTH} caracteres, con al menos una letra y un número.
+    </p>
   `;
 }
 
 function renderBackLink() {
-  const loginHref = safeInternalHref(LOGIN_HREF, "/login");
+  const loginHref =
+    safeInternalHref(
+      LOGIN_HREF,
+      "/login"
+    );
 
   return `
-    <p class="auth-links password-reset-links login-links">
+    <p
+      class="auth-links password-reset-links login-links"
+    >
       <a
         class="auth-link login-link password-reset-link"
         href="${escapeAttr(loginHref)}"
@@ -376,25 +457,54 @@ function renderBackLink() {
    TEMPLATE
 ========================================================= */
 
-export function getPasswordResetTemplate(options = {}) {
-  const mode = normalizeMode(options.mode);
-  const isConfirm = mode === MODE_CONFIRM;
-  const tokenPresent = options.tokenPresent === true;
+export function getPasswordResetTemplate(
+  options = {}
+) {
+  const mode =
+    normalizeMode(
+      options.mode
+    );
 
-  const title = isConfirm ? "Nueva contraseña" : "Recuperar acceso";
+  const isConfirm =
+    mode === MODE_CONFIRM;
 
-  const subtitle = isConfirm
-    ? "Define una nueva contraseña para tu cuenta."
-    : "Introduce tu usuario o email y te enviaremos las instrucciones.";
+  const tokenPresent =
+    options.tokenPresent === true;
 
-  const submitLabel = isConfirm ? "Cambiar contraseña" : "Enviar enlace";
-  const loadingLabel = isConfirm ? "Cambiando..." : "Enviando...";
+  const title =
+    isConfirm
+      ? "Nueva contraseña"
+      : "Recuperar acceso";
+
+  const subtitle =
+    isConfirm
+      ? "Define una nueva contraseña para tu cuenta."
+      : "Introduce tu usuario o email y te enviaremos las instrucciones.";
+
+  const submitLabel =
+    isConfirm
+      ? "Cambiar contraseña"
+      : "Enviar enlace";
+
+  const loadingLabel =
+    isConfirm
+      ? "Cambiando..."
+      : "Enviando...";
 
   return renderPublicShell({
-    view: isConfirm ? "password-reset" : "password-request",
-    appName: APP_NAME,
-    header: false,
-    ariaLabelledBy: "password-reset-title",
+    view:
+      isConfirm
+        ? "password-reset"
+        : "password-request",
+
+    appName:
+      APP_NAME,
+
+    header:
+      false,
+
+    ariaLabelledBy:
+      "password-reset-title",
 
     body: `
       <section
@@ -403,17 +513,33 @@ export function getPasswordResetTemplate(options = {}) {
         data-password-reset-template-version="${escapeAttr(PASSWORD_RESET_TEMPLATE_VERSION)}"
         data-password-reset-mode="${escapeAttr(mode)}"
       >
-        <div class="login-orb login-orb-primary" aria-hidden="true"></div>
-        <div class="login-orb login-orb-secondary" aria-hidden="true"></div>
-        <div class="login-grid-glow" aria-hidden="true"></div>
+        <div
+          class="login-orb login-orb-primary"
+          aria-hidden="true"
+        ></div>
+
+        <div
+          class="login-orb login-orb-secondary"
+          aria-hidden="true"
+        ></div>
+
+        <div
+          class="login-grid-glow"
+          aria-hidden="true"
+        ></div>
 
         <section
           class="login-card-panel password-reset-card-panel"
           aria-labelledby="password-reset-title"
         >
-          <div class="login-card-sheen" aria-hidden="true"></div>
+          <div
+            class="login-card-sheen"
+            aria-hidden="true"
+          ></div>
 
-          <header class="login-card-header password-reset-card-header">
+          <header
+            class="login-card-header password-reset-card-header"
+          >
             <h2
               class="login-card-title password-reset-title"
               id="password-reset-title"
@@ -421,7 +547,9 @@ export function getPasswordResetTemplate(options = {}) {
               ${escapeHtml(title)}
             </h2>
 
-            <p class="login-card-subtitle password-reset-subtitle">
+            <p
+              class="login-card-subtitle password-reset-subtitle"
+            >
               ${escapeHtml(subtitle)}
             </p>
           </header>
@@ -440,7 +568,9 @@ export function getPasswordResetTemplate(options = {}) {
           >
             ${
               isConfirm
-                ? renderConfirmFields({ tokenPresent })
+                ? renderConfirmFields({
+                    tokenPresent,
+                  })
                 : renderRequestFields()
             }
 
@@ -463,14 +593,42 @@ export function getPasswordResetTemplate(options = {}) {
   });
 }
 
-export function createPasswordResetTemplate(options = {}) {
-  const template = document.createElement("template");
+export function createPasswordResetTemplate(
+  options = {}
+) {
+  if (
+    typeof document === "undefined"
+  ) {
+    throw new Error(
+      "[PasswordResetTemplate] document no disponible."
+    );
+  }
 
-  template.innerHTML = getPasswordResetTemplate(options).trim();
+  const template =
+    document.createElement(
+      "template"
+    );
 
-  return template.content.firstElementChild;
+  template.innerHTML =
+    getPasswordResetTemplate(
+      options
+    ).trim();
+
+  const root =
+    template
+      .content
+      .firstElementChild;
+
+  if (!root) {
+    throw new Error(
+      "[PasswordResetTemplate] no se pudo construir el DOM."
+    );
+  }
+
+  return root;
 }
 
-export const PasswordResetTemplate = createPasswordResetTemplate;
+export const PasswordResetTemplate =
+  createPasswordResetTemplate;
 
 export default createPasswordResetTemplate;

@@ -1,121 +1,279 @@
 /* =========================================================
-   Onion SPA - Cuenta Index
-   Archivo: src/views/cuenta/index.js
+   Onion Support - Cuenta Index
+   Archivo: /src/views/cuenta/index.js
 
-   Cuenta controller slim / no-flicker.
-   - Montaje SPA directo.
-   - Sin Store.
-   - Sin storage.
-   - Sin fetch propio.
-   - Sin Router paralelo.
-   - Sin re-render inútil.
-   - Sin limpiar el host en remount interno.
+   PRODUCTIVO · API BOUNDARY · SELF ACCOUNT CONTROLLER · V5
+
+   Arquitectura:
+   - cuenta.api.js      = HTTP + contrato backend + modelo canónico
+   - cuenta.template.js = HTML puro
+   - index.js           = estado UI + DOM + acciones
+
+   Backend actual:
+   - GET    /api/auth/me
+   - POST   /api/auth/change-password
+   - POST   /api/auth/deactivate/self
+   - POST   /api/users/avatar
+   - DELETE /api/users/avatar
+   - GET    /api/users/sessions
+
+   No existe update self para:
+   - nombre
+   - teléfono
+   - darkMode
+   - privacyMode
+   - lang
+
+   Reglas:
+   - Sin Http/fetch/storage.
+   - Sin /api/users/:id.
+   - Sin payload aliases inventados.
+   - Sin cache global paralela del perfil.
+   - No guardar passwords en state/snapshot.
+   - Acciones self-update no soportadas se bloquean en UI
+     sin llamar siquiera al API legacy 405.
 ========================================================= */
 
-import * as CuentaTemplate from "./cuenta.template.js";
-import * as CuentaApiModule from "./cuenta.api.js";
+import {
+  CUENTA_API_VERSION,
+  CUENTA_SELF_UPDATE_SUPPORTED,
+  CUENTA_PASSWORD_POLICY,
+  CUENTA_AVATAR_POLICY,
 
-export const CUENTA_INDEX_VERSION = "cuenta.index.slim.v4.no-flicker";
-export const CUENTA_VIEW_VERSION = CUENTA_INDEX_VERSION;
+  normalizeCuentaDetail,
+  hydrateCuentaFromCache,
 
-const SOURCE = "cuenta.view";
-const ACTION_SELECTOR = "[data-cuenta-action], [data-action]";
-const FIELD_SELECTOR = "[data-cuenta-field], [data-field]";
-const ROUTER_EVENT_HANDLED_KEY = "__onionRouterHandled";
+  loadCuenta as loadCuentaApi,
 
-const INSTANCES = new WeakMap();
+  validateCuentaPasswordPayload,
+  changePassword as changePasswordApi,
 
-const REFRESH_ACTIONS = new Set(["refresh-cuenta", "reload-cuenta", "refresh", "reload"]);
-const SAVE_ACTIONS = new Set(["save-cuenta", "save", "save-profile", "save-perfil"]);
-const THEME_ACTIONS = new Set(["toggle-theme", "change-theme", "update-theme", "set-theme"]);
-const LANGUAGE_ACTIONS = new Set(["change-language", "update-language", "set-language"]);
-const PASSWORD_ACTIONS = new Set(["change-password", "update-password", "save-password"]);
-const UPLOAD_AVATAR_ACTIONS = new Set(["upload-avatar", "upload-cuenta-avatar"]);
-const DELETE_AVATAR_ACTIONS = new Set(["delete-avatar", "delete-cuenta-avatar", "remove-avatar"]);
+  validateCuentaAvatarFile,
+  uploadCuentaAvatar as uploadCuentaAvatarApi,
+  deleteCuentaAvatar as deleteCuentaAvatarApi,
+
+  loadCuentaSessions as loadCuentaSessionsApi,
+
+  deactivateCuenta as deactivateCuentaApi,
+
+  getCuentaApiSnapshot,
+} from "./cuenta.api.js";
+
+import {
+  CUENTA_TEMPLATE_VERSION,
+  renderCuentaTemplate,
+  renderErrorState,
+} from "./cuenta.template.js";
+
+/* =========================================================
+   META / CONFIG
+========================================================= */
+
+export const CUENTA_INDEX_VERSION =
+  "cuenta.index.api-boundary.v5.self-account";
+
+export const CUENTA_VIEW_VERSION =
+  CUENTA_INDEX_VERSION;
+
+export const CUENTA_INDEX_SOURCE =
+  "views.cuenta.index";
+
+export {
+  CUENTA_API_VERSION,
+  CUENTA_TEMPLATE_VERSION,
+  CUENTA_SELF_UPDATE_SUPPORTED,
+  CUENTA_PASSWORD_POLICY,
+  CUENTA_AVATAR_POLICY,
+};
+
+const ACTION_SELECTOR =
+  "[data-cuenta-action], [data-action]";
+
+const FIELD_SELECTOR =
+  "[data-cuenta-field], [data-field]";
+
+const ROUTER_EVENT_HANDLED_KEY =
+  "__onionRouterHandled";
+
+const INSTANCES =
+  new WeakMap();
+
+const REFRESH_ACTIONS =
+  new Set([
+    "refresh-cuenta",
+    "reload-cuenta",
+    "refresh",
+    "reload",
+  ]);
+
+const UNSUPPORTED_SAVE_ACTIONS =
+  new Set([
+    "save-cuenta",
+    "save",
+    "save-profile",
+    "save-perfil",
+  ]);
+
+const UNSUPPORTED_THEME_ACTIONS =
+  new Set([
+    "toggle-theme",
+    "change-theme",
+    "update-theme",
+    "set-theme",
+  ]);
+
+const UNSUPPORTED_LANGUAGE_ACTIONS =
+  new Set([
+    "change-language",
+    "update-language",
+    "set-language",
+  ]);
+
+const UNSUPPORTED_PRIVACY_ACTIONS =
+  new Set([
+    "toggle-privacy",
+    "change-privacy",
+    "update-privacy",
+    "set-privacy",
+    "save-privacy",
+  ]);
+
+const PASSWORD_ACTIONS =
+  new Set([
+    "change-password",
+    "update-password",
+    "save-password",
+  ]);
+
+const UPLOAD_AVATAR_ACTIONS =
+  new Set([
+    "upload-avatar",
+    "upload-cuenta-avatar",
+  ]);
+
+const DELETE_AVATAR_ACTIONS =
+  new Set([
+    "delete-avatar",
+    "delete-cuenta-avatar",
+    "remove-avatar",
+  ]);
+
+const LOAD_SESSIONS_ACTIONS =
+  new Set([
+    "load-sessions",
+    "load-cuenta-sessions",
+    "refresh-sessions",
+  ]);
+
+const DEACTIVATE_ACTIONS =
+  new Set([
+    "deactivate-account",
+    "deactivate-cuenta",
+    "deactivate-self",
+  ]);
+
+const UNSUPPORTED_SELF_UPDATE_MESSAGE =
+  "El backend actual todavía no permite guardar nombre, teléfono, apariencia, idioma o privacidad desde Cuenta.";
 
 let lastInstance = null;
-let sharedLoadPromise = null;
-
-const cuentaMemory = {
-  item: null,
-  key: "",
-  loaded: false,
-  loadedAt: 0,
-};
 
 /* =========================================================
    BASICS
 ========================================================= */
 
 function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+  );
 }
 
 function isFunction(value) {
-  return typeof value === "function";
+  return (
+    typeof value === "function"
+  );
 }
 
 function isDomNode(value) {
-  return Boolean(value && value.nodeType === 1 && isFunction(value.querySelectorAll));
+  return Boolean(
+    value &&
+      value.nodeType === 1 &&
+      isFunction(
+        value.querySelectorAll
+      )
+  );
 }
 
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
+function safeObject(
+  value,
+  fallback = {}
+) {
+  return isObject(value)
+    ? value
+    : fallback;
 }
 
-function cleanText(value = "", fallback = "") {
-  const text = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return text || fallback;
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
 }
 
-function normalizeKey(value = "") {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
+function cleanText(
+  value = "",
+  fallback = ""
+) {
+  const text =
+    String(value ?? "")
+      .replace(
+        /[\r\n\t]/g,
+        " "
+      )
+      .replace(
+        /\s+/g,
+        " "
+      )
+      .trim();
 
-function normalizeBoolean(value, fallback = false) {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "number") return value !== 0;
-
-  const key = normalizeKey(value);
-
-  if (["true", "1", "yes", "y", "si", "on", "dark", "enabled", "active", "activo", "activa"].includes(key)) {
-    return true;
-  }
-
-  if (["false", "0", "no", "n", "off", "light", "disabled", "inactive", "inactivo", "inactiva"].includes(key)) {
-    return false;
-  }
-
-  return Boolean(fallback);
-}
-
-function normalizeLang(value = "es") {
-  const key = normalizeKey(value);
-
-  if (["en", "eng", "english", "en_us", "en_gb"].includes(key)) return "en";
-  if (["ca", "cat", "catala", "catalan", "ca_es"].includes(key)) return "ca";
-
-  return "es";
+  return (
+    text ||
+    fallback
+  );
 }
 
 function first(...values) {
-  const stack = values.flat(Infinity);
+  for (
+    const value of
+    values.flat(Infinity)
+  ) {
+    if (
+      value === undefined ||
+      value === null
+    ) {
+      continue;
+    }
 
-  for (const value of stack) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
-    if (isObject(value) && Object.keys(value).length === 0) continue;
+    if (
+      typeof value === "string" &&
+      value.trim() === ""
+    ) {
+      continue;
+    }
+
+    if (
+      Array.isArray(value) &&
+      value.length === 0
+    ) {
+      continue;
+    }
+
+    if (
+      isObject(value) &&
+      Object.keys(value).length === 0
+    ) {
+      continue;
+    }
 
     return value;
   }
@@ -124,29 +282,26 @@ function first(...values) {
 }
 
 function hasContent(value) {
-  return isObject(value) && Object.keys(value).length > 0;
+  return (
+    isObject(value) &&
+    Object.keys(value)
+      .length > 0
+  );
 }
 
-function hasOwn(object, key) {
-  return Object.prototype.hasOwnProperty.call(Object(object), key);
-}
-
-function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function safeError(error, fallback = "No se pudo procesar la cuenta.") {
+function safeError(
+  error = null,
+  fallback =
+    "No se pudo procesar la cuenta."
+) {
   return cleanText(
     first(
-      error?.message,
       error?.data?.message,
       error?.payload?.message,
+      error?.response?.data
+        ?.message,
       error?.response?.message,
+      error?.message,
       error?.error,
       error?.code,
       fallback
@@ -155,986 +310,2320 @@ function safeError(error, fallback = "No se pudo procesar la cuenta.") {
   );
 }
 
-function signature(value) {
-  try {
-    return JSON.stringify(value ?? null);
-  } catch {
-    return String(value ?? "");
-  }
-}
-
-/* =========================================================
-   TEMPLATE / API
-========================================================= */
-
-function getTemplateModule() {
-  return CuentaTemplate.default || CuentaTemplate;
-}
-
-function getTemplateMethod(name) {
-  const template = getTemplateModule();
-  const method = CuentaTemplate[name] || template?.[name];
-
-  return isFunction(method) ? method.bind(template) : null;
-}
-
-function renderCuentaTemplate(payload = {}) {
-  const renderer =
-    getTemplateMethod("renderCuentaTemplate") ||
-    getTemplateMethod("renderCuentaViewTemplate");
-
-  if (!renderer) {
-    throw new Error("CUENTA_TEMPLATE_RENDERER_MISSING");
-  }
-
-  return renderer(payload);
-}
-
-function renderErrorState(message = "No se pudo cargar la cuenta.") {
-  const renderer = getTemplateMethod("renderErrorState");
-
-  if (renderer) return renderer(message);
-
-  return `
-    <section class="cuenta-state cuenta-error-state">
-      <h3 class="cuenta-state-title">No se pudo cargar la cuenta</h3>
-      <p class="cuenta-state-text">${escapeHtml(message)}</p>
-      <button
-        type="button"
-        class="cuenta-btn cuenta-btn--primary"
-        data-action="refresh-cuenta"
-        data-cuenta-action="refresh-cuenta"
-      >
-        Reintentar
-      </button>
-    </section>
-  `;
-}
-
-function getCuentaApi() {
-  return CuentaApiModule.CuentaApi || CuentaApiModule.default || CuentaApiModule;
-}
-
-function getApiMethod(name) {
-  const api = getCuentaApi();
-  const method = CuentaApiModule[name] || api?.[name];
-
-  return isFunction(method) ? method.bind(api) : null;
-}
-
-/* =========================================================
-   MEMORY
-========================================================= */
-
-function getCuentaKey(item = null) {
-  const source = safeObject(item);
-
+function safeErrorCode(
+  error = null
+) {
   return cleanText(
     first(
-      source.userId,
-      source.uid,
-      source.sub,
-      source.id,
-      source.email,
-      source.emailLower,
-      source.username,
-      source.usernameLower,
-      source.slug,
+      error?.code,
+      error?.error,
+      error?.data?.code,
+      error?.payload?.code,
+      error?.response?.code,
       ""
     ),
     ""
-  ).toLowerCase();
+  );
 }
 
-function clearCuentaMemory() {
-  cuentaMemory.item = null;
-  cuentaMemory.key = "";
-  cuentaMemory.loaded = false;
-  cuentaMemory.loadedAt = 0;
-  sharedLoadPromise = null;
+function signature(value) {
+  try {
+    return JSON.stringify(
+      value ?? null
+    );
+  } catch {
+    return String(
+      value ?? ""
+    );
+  }
+}
+
+function now() {
+  return Date.now();
+}
+
+/* =========================================================
+   EVENTS
+========================================================= */
+
+function emitCuentaEvent(
+  name = "",
+  detail = {}
+) {
+  const eventName =
+    cleanText(
+      name,
+      ""
+    );
+
+  if (
+    !eventName ||
+    typeof window ===
+      "undefined" ||
+    typeof CustomEvent ===
+      "undefined"
+  ) {
+    return false;
+  }
+
+  try {
+    window.dispatchEvent(
+      new CustomEvent(
+        eventName,
+        {
+          detail,
+        }
+      )
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/* =========================================================
+   DOM HELPERS
+========================================================= */
+
+function closestFrom(
+  target,
+  selector
+) {
+  const node =
+    target?.nodeType === 3
+      ? target.parentElement
+      : target;
+
+  return (
+    node?.closest?.(
+      selector
+    ) ||
+    null
+  );
+}
+
+function getActionName(
+  node = null
+) {
+  return cleanText(
+    first(
+      node?.dataset
+        ?.cuentaAction,
+      node?.dataset
+        ?.action,
+      node?.getAttribute?.(
+        "data-cuenta-action"
+      ),
+      node?.getAttribute?.(
+        "data-action"
+      ),
+      ""
+    ),
+    ""
+  );
+}
+
+function getFieldName(
+  node = null
+) {
+  return cleanText(
+    first(
+      node?.dataset
+        ?.cuentaField,
+      node?.dataset
+        ?.field,
+      node?.name,
+      ""
+    ),
+    ""
+  );
+}
+
+function getFieldValue(
+  node = null
+) {
+  if (!node) {
+    return "";
+  }
+
+  if (
+    node.type === "checkbox"
+  ) {
+    return Boolean(
+      node.checked
+    );
+  }
+
+  if (
+    node.type === "radio"
+  ) {
+    return node.checked
+      ? node.value
+      : undefined;
+  }
+
+  if (
+    node.type === "file"
+  ) {
+    return (
+      node.files?.[0] ||
+      null
+    );
+  }
+
+  return node.value;
+}
+
+function readField(
+  host = null,
+  fieldName = ""
+) {
+  const name =
+    cleanText(
+      fieldName,
+      ""
+    );
+
+  if (
+    !host ||
+    !name
+  ) {
+    return "";
+  }
+
+  const escapedName =
+    typeof CSS !== "undefined" &&
+    isFunction(CSS.escape)
+      ? CSS.escape(name)
+      : name.replace(
+          /["\\]/g,
+          "\\$&"
+        );
+
+  const node =
+    host.querySelector?.(
+      `[data-cuenta-field="${escapedName}"], [data-field="${escapedName}"], [name="${escapedName}"]`
+    );
+
+  return getFieldValue(
+    node
+  );
+}
+
+function clearSensitiveInputs(
+  host = null
+) {
+  if (!host) {
+    return false;
+  }
+
+  for (
+    const name of [
+      "currentPassword",
+      "newPassword",
+      "confirmPassword",
+      "deactivatePassword",
+      "password",
+    ]
+  ) {
+    let nodes = [];
+
+    try {
+      nodes = [
+        ...host.querySelectorAll(
+          `[data-cuenta-field="${name}"], [data-field="${name}"], [name="${name}"]`
+        ),
+      ];
+    } catch {
+      nodes = [];
+    }
+
+    for (
+      const node of nodes
+    ) {
+      try {
+        if (
+          node?.type ===
+          "password"
+        ) {
+          node.value = "";
+        }
+      } catch {
+        // noop
+      }
+    }
+  }
 
   return true;
 }
 
-function setCuentaMemory(item = null, { loaded = true } = {}) {
-  if (!hasContent(item)) return cuentaMemory.item;
-
-  cuentaMemory.item = item;
-  cuentaMemory.key = getCuentaKey(item);
-  cuentaMemory.loaded = Boolean(loaded);
-
-  if (loaded) {
-    cuentaMemory.loadedAt = Date.now();
+function resolveAvatarFile(
+  host = null,
+  input = null
+) {
+  if (
+    input &&
+    typeof input === "object" &&
+    typeof input.type === "string" &&
+    Number.isFinite(
+      Number(input.size)
+    ) &&
+    !isFunction(
+      input.matches
+    )
+  ) {
+    return input;
   }
 
-  return cuentaMemory.item;
-}
+  const node =
+    input?.matches?.(
+      'input[type="file"]'
+    )
+      ? input
+      : host?.querySelector?.(
+          'input[type="file"][data-cuenta-field="avatar"], input[type="file"][data-field="avatar"], input[type="file"][name="avatar"]'
+        );
 
-function hydrateCuentaMemory() {
-  const hydrate = getApiMethod("hydrateCuentaFromCache");
-  let hydrated = null;
-
-  try {
-    hydrated = hydrate?.() || null;
-  } catch {
-    hydrated = null;
-  }
-
-  if (!hasContent(hydrated)) {
-    return cuentaMemory.item;
-  }
-
-  const hydratedKey = getCuentaKey(hydrated);
-
-  if (hydratedKey && cuentaMemory.key && hydratedKey !== cuentaMemory.key) {
-    clearCuentaMemory();
-  }
-
-  if (!hasContent(cuentaMemory.item)) {
-    setCuentaMemory(hydrated, { loaded: false });
-  }
-
-  return cuentaMemory.item;
-}
-
-async function fetchCuenta({ force = false, silent = false, source = `${SOURCE}.load` } = {}) {
-  const loadCuenta = getApiMethod("loadCuenta");
-
-  if (!loadCuenta) {
-    throw new Error("cuenta.api.js no expone loadCuenta().");
-  }
-
-  if (!force && sharedLoadPromise) {
-    return sharedLoadPromise;
-  }
-
-  const promise = Promise.resolve(
-    loadCuenta({
-      force,
-      silent,
-      source,
-    })
+  return (
+    node?.files?.[0] ||
+    null
   );
+}
 
-  if (!force) {
-    sharedLoadPromise = promise;
-  }
-
+function clearHost(
+  host = null
+) {
   try {
-    return await promise;
-  } finally {
-    if (sharedLoadPromise === promise) {
-      sharedLoadPromise = null;
+    host?.replaceChildren?.();
+  } catch {
+    if (host) {
+      host.textContent = "";
     }
   }
 }
 
 /* =========================================================
-   DOM
+   CANONICAL RESULT
 ========================================================= */
 
-function closestFrom(target, selector) {
-  const node = target?.nodeType === 3 ? target.parentElement : target;
-  return node?.closest?.(selector) || null;
-}
+function canonicalItem(
+  value = null,
+  fallback = {}
+) {
+  if (!value) {
+    return null;
+  }
 
-function getActionName(node = null) {
-  return cleanText(
-    node?.dataset?.cuentaAction ||
-      node?.dataset?.action ||
-      node?.getAttribute?.("data-cuenta-action") ||
-      node?.getAttribute?.("data-action") ||
-      "",
-    ""
+  return normalizeCuentaDetail(
+    value,
+    fallback
   );
 }
 
-function getFieldName(node = null) {
-  return cleanText(
-    node?.dataset?.cuentaField ||
-      node?.dataset?.field ||
-      node?.name ||
-      "",
-    ""
+function resultItem(
+  result = null,
+  fallback = {}
+) {
+  if (!result) {
+    return null;
+  }
+
+  const nested =
+    first(
+      result?.item,
+      result?.user,
+      result?.account,
+      result?.profile,
+      result?.cuenta,
+      result
+    );
+
+  return canonicalItem(
+    nested,
+    fallback
   );
-}
-
-function getFieldValue(node = null) {
-  if (!node) return "";
-  if (node.type === "checkbox") return Boolean(node.checked);
-  if (node.type === "radio") return node.checked ? node.value : undefined;
-  if (node.type === "file") return node.files?.[0] || null;
-
-  return node.value;
-}
-
-function readForm(host = null) {
-  const form = {};
-
-  if (!host) return form;
-
-  host.querySelectorAll(FIELD_SELECTOR).forEach((field) => {
-    const name = getFieldName(field);
-    if (!name) return;
-
-    const value = getFieldValue(field);
-    if (value === undefined) return;
-
-    form[name] = value;
-  });
-
-  return form;
-}
-
-function syncNativeControlVisual(field = null) {
-  if (!field || field.type !== "checkbox") return;
-
-  const area = field.closest?.(".cuenta-switch-area");
-  const switchNode = area?.querySelector?.(".cuenta-switch");
-  const stateNode = area?.querySelector?.(".cuenta-control-state");
-  const name = getFieldName(field);
-
-  switchNode?.classList?.toggle("is-checked", Boolean(field.checked));
-
-  if (!stateNode) return;
-
-  if (name === "darkMode") {
-    stateNode.textContent = field.checked ? "Dark" : "Light";
-    return;
-  }
-
-  stateNode.textContent = field.checked ? "Activo" : "Estándar";
-}
-
-function clearHost(host = null) {
-  try {
-    host?.replaceChildren?.();
-  } catch {
-    if (host) host.textContent = "";
-  }
-}
-
-/* =========================================================
-   PAYLOADS
-========================================================= */
-
-function buildCuentaPayload(form = {}) {
-  const source = safeObject(form);
-  const payload = {};
-
-  if (hasOwn(source, "name")) {
-    payload.name = cleanText(source.name, "");
-  }
-
-  if (hasOwn(source, "phone")) {
-    payload.phone = cleanText(source.phone, "");
-    payload.telefono = payload.phone;
-    payload.mobile = payload.phone;
-  }
-
-  if (hasOwn(source, "privacyMode")) {
-    payload.privacyMode = normalizeBoolean(source.privacyMode, false);
-  }
-
-  if (hasOwn(source, "darkMode")) {
-    const darkMode = normalizeBoolean(source.darkMode, false);
-    const theme = darkMode ? "dark" : "light";
-
-    payload.darkMode = darkMode;
-    payload.theme = theme;
-    payload.mode = theme;
-    payload.appearance = theme;
-  }
-
-  if (hasOwn(source, "lang")) {
-    const lang = normalizeLang(source.lang);
-
-    payload.lang = lang;
-    payload.language = lang;
-    payload.locale = lang;
-  }
-
-  return payload;
-}
-
-function buildPasswordPayload(form = {}) {
-  return {
-    currentPassword: String(form.currentPassword ?? ""),
-    newPassword: String(form.newPassword ?? ""),
-    confirmPassword: String(form.confirmPassword ?? ""),
-  };
-}
-
-function validatePasswordPayload(payload = {}) {
-  const currentPassword = String(payload.currentPassword || "");
-  const newPassword = String(payload.newPassword || "");
-  const confirmPassword = String(payload.confirmPassword || "");
-
-  if (!currentPassword || !newPassword || !confirmPassword) {
-    return "Completa los tres campos de contraseña.";
-  }
-
-  if (newPassword !== confirmPassword) {
-    return "La nueva contraseña no coincide.";
-  }
-
-  if (newPassword.length < 10) {
-    return "La contraseña debe tener al menos 10 caracteres.";
-  }
-
-  if (!/[a-z]/.test(newPassword)) return "La contraseña debe incluir una minúscula.";
-  if (!/[A-Z]/.test(newPassword)) return "La contraseña debe incluir una mayúscula.";
-  if (!/\d/.test(newPassword)) return "La contraseña debe incluir un número.";
-  if (!/[^A-Za-z\d]/.test(newPassword)) return "La contraseña debe incluir un símbolo.";
-
-  return "";
-}
-
-function pickItem(result = null) {
-  const nested = first(
-    result?.item,
-    result?.user,
-    result?.usuario,
-    result?.account,
-    result?.profile,
-    result?.cuenta,
-    result?.data?.item,
-    result?.data?.user,
-    result?.data?.account,
-    null
-  );
-
-  if (hasContent(nested)) return nested;
-  if (hasContent(result) && !("ok" in result && "success" in result)) return result;
-
-  return null;
 }
 
 /* =========================================================
    CONTROLLER
 ========================================================= */
 
-function destroyPrevious(host = null) {
-  const previous = host ? INSTANCES.get(host) : null;
+function destroyPrevious(
+  host = null
+) {
+  const previous =
+    host
+      ? INSTANCES.get(
+          host
+        )
+      : null;
 
-  if (!previous?.destroy) return false;
+  if (
+    !previous?.destroy
+  ) {
+    return false;
+  }
 
-  previous.destroy({ keepDom: true, remount: true });
+  previous.destroy({
+    keepDom: true,
+    remount: true,
+  });
+
   return true;
 }
 
-function createCuentaController(host = null, context = {}) {
+function createCuentaController(
+  host = null,
+  context = {}
+) {
   let destroyed = false;
   let mounted = false;
   let bound = false;
 
   let item = null;
-  let form = {};
 
   let loading = false;
   let refreshing = false;
   let saving = false;
 
+  let sessions = [];
+  let sessionsLoaded = false;
+  let sessionsLoading = false;
+  let sessionsError = "";
+
+  let authRefreshRequired = false;
+  let deactivated = false;
+
   let lastError = "";
+  let lastErrorCode = "";
   let lastSuccess = "";
+
   let lastHTML = "";
   let lastRenderAt = 0;
   let mountedFrom = "empty";
+
   let loadSeq = 0;
+  let actionSeq = 0;
+  let loadPromise = null;
 
-  function makeState(extra = {}) {
-    const extraView = safeObject(extra.view);
+  const localContext = {
+    ...safeObject(
+      context
+    ),
+  };
 
+  /* =======================================================
+     STATE
+  ======================================================= */
+
+  function capabilities() {
     return {
-      loading: extra.loading ?? loading,
-      refreshing: extra.refreshing ?? refreshing,
-      saving: extra.saving ?? saving,
-      error: extra.error ?? lastError,
-      item: extra.item ?? item,
-      view: {
-        ...extraView,
-        form: {
-          ...form,
-          ...safeObject(extraView.form),
-        },
-        successMessage: extra.successMessage ?? lastSuccess,
+      readSelf: true,
+
+      updateSelfProfile:
+        false,
+
+      updateSelfTheme:
+        false,
+
+      updateSelfPrivacy:
+        false,
+
+      updateSelfLanguage:
+        false,
+
+      changePassword:
+        true,
+
+      avatarUpload:
+        true,
+
+      avatarDelete:
+        true,
+
+      sessionsRead:
+        true,
+
+      deactivateSelf:
+        true,
+    };
+  }
+
+  function makeState(
+    extra = {}
+  ) {
+    return {
+      loading:
+        extra.loading ??
+        loading,
+
+      refreshing:
+        extra.refreshing ??
+        refreshing,
+
+      saving:
+        extra.saving ??
+        saving,
+
+      error:
+        extra.error ??
+        lastError,
+
+      errorCode:
+        extra.errorCode ??
+        lastErrorCode,
+
+      item:
+        extra.item ??
+        item,
+
+      sessions: {
+        items:
+          sessions,
+
+        loaded:
+          sessionsLoaded,
+
+        loading:
+          sessionsLoading,
+
+        error:
+          sessionsError,
+
+        count:
+          sessions.length,
       },
+
+      capabilities:
+        capabilities(),
+
+      selfUpdateSupported:
+        CUENTA_SELF_UPDATE_SUPPORTED,
+
+      authRefreshRequired,
+      deactivated,
+
+      view: {
+        capabilities:
+          capabilities(),
+
+        selfUpdateSupported:
+          CUENTA_SELF_UPDATE_SUPPORTED,
+
+        successMessage:
+          extra.successMessage ??
+          lastSuccess,
+
+        /*
+          Deliberadamente no hay form persistido.
+          Passwords y archivos nunca se copian al state.
+        */
+        form: {},
+      },
+
       action: {
-        saving: extra.saving ?? saving,
+        saving:
+          extra.saving ??
+          saving,
+
+        sessionsLoading,
       },
     };
   }
 
-  function setHostFlags() {
-    if (!host) return;
+  function getSnapshot() {
+    const apiSnapshot =
+      getCuentaApiSnapshot();
 
-    const busy = loading || refreshing || saving;
+    return {
+      version:
+        CUENTA_VIEW_VERSION,
 
-    try {
-      host.dataset.view = "cuenta";
-      host.dataset.cuentaController = CUENTA_VIEW_VERSION;
-      host.dataset.cuentaMounted = mounted ? "true" : "false";
-      host.dataset.cuentaLoading = loading ? "true" : "false";
-      host.dataset.cuentaRefreshing = refreshing ? "true" : "false";
-      host.dataset.cuentaSaving = saving ? "true" : "false";
-      host.setAttribute("aria-busy", busy ? "true" : "false");
-    } catch {}
+      apiVersion:
+        CUENTA_API_VERSION,
+
+      templateVersion:
+        CUENTA_TEMPLATE_VERSION,
+
+      mounted,
+      destroyed,
+
+      loading,
+      refreshing,
+      saving,
+
+      hasHost:
+        Boolean(host),
+
+      hasItem:
+        hasContent(item),
+
+      mountedFrom,
+
+      lastError,
+      lastErrorCode,
+      lastSuccess,
+      lastRenderAt,
+
+      authRefreshRequired,
+      deactivated,
+
+      sessions: {
+        loaded:
+          sessionsLoaded,
+
+        loading:
+          sessionsLoading,
+
+        count:
+          sessions.length,
+
+        error:
+          sessionsError,
+      },
+
+      capabilities:
+        capabilities(),
+
+      item: item
+        ? {
+            userId:
+              item.userId
+                ? "***"
+                : "",
+
+            id:
+              item.id
+                ? "***"
+                : "",
+
+            username:
+              item.username ||
+              "",
+
+            email:
+              item.email
+                ? "***"
+                : "",
+
+            role:
+              item.role ||
+              "",
+
+            status:
+              item.status ||
+              "",
+
+            hasAvatar:
+              item.hasAvatar ===
+              true,
+          }
+        : null,
+
+      architecture: {
+        apiBoundary: true,
+
+        directHttp: false,
+        rawFetch: false,
+        storage: false,
+
+        globalProfileCache:
+          false,
+
+        canonicalModelFromApi:
+          true,
+
+        adminUsersRoute:
+          false,
+
+        selfUpdateNetwork:
+          false,
+
+        unsupportedActionsBlockedInController:
+          true,
+
+        passwordStoredInState:
+          false,
+
+        fileStoredInState:
+          false,
+
+        sessionsOnDemand:
+          true,
+      },
+
+      api:
+        apiSnapshot
+          ? {
+              version:
+                apiSnapshot.version,
+
+              capabilities:
+                apiSnapshot
+                  .capabilities,
+            }
+          : null,
+    };
   }
 
-  function render(extra = {}) {
-    if (destroyed || !host) return false;
+  /* =======================================================
+     RENDER
+  ======================================================= */
+
+  function setHostFlags() {
+    if (!host) {
+      return;
+    }
+
+    const busy =
+      loading ||
+      refreshing ||
+      saving ||
+      sessionsLoading;
+
+    try {
+      host.dataset.view =
+        "cuenta";
+
+      host.dataset.cuentaController =
+        CUENTA_VIEW_VERSION;
+
+      host.dataset.cuentaApi =
+        CUENTA_API_VERSION;
+
+      host.dataset.cuentaMounted =
+        mounted
+          ? "true"
+          : "false";
+
+      host.dataset.cuentaLoading =
+        loading
+          ? "true"
+          : "false";
+
+      host.dataset.cuentaRefreshing =
+        refreshing
+          ? "true"
+          : "false";
+
+      host.dataset.cuentaSaving =
+        saving
+          ? "true"
+          : "false";
+
+      host.dataset.cuentaSelfUpdate =
+        "false";
+
+      host.dataset.cuentaAuthRefreshRequired =
+        authRefreshRequired
+          ? "true"
+          : "false";
+
+      host.dataset.cuentaDeactivated =
+        deactivated
+          ? "true"
+          : "false";
+
+      host.setAttribute(
+        "aria-busy",
+        busy
+          ? "true"
+          : "false"
+      );
+    } catch {
+      // noop
+    }
+  }
+
+  function render(
+    extra = {}
+  ) {
+    if (
+      destroyed ||
+      !host
+    ) {
+      return false;
+    }
 
     setHostFlags();
 
     let html = "";
 
     try {
-      html = renderCuentaTemplate({
-        item: extra.item ?? item,
-        state: makeState(extra),
-      });
+      html =
+        renderCuentaTemplate({
+          item:
+            extra.item ??
+            item,
+
+          state:
+            makeState(
+              extra
+            ),
+        });
     } catch (error) {
-      html = renderErrorState(safeError(error, "No se pudo renderizar la cuenta."));
+      html =
+        renderErrorState(
+          safeError(
+            error,
+            "No se pudo renderizar la cuenta."
+          )
+        );
     }
 
-    if (html === lastHTML || (!lastHTML && host.innerHTML === html)) {
+    if (
+      html === lastHTML ||
+      (
+        !lastHTML &&
+        host.innerHTML === html
+      )
+    ) {
       lastHTML = html;
-      lastRenderAt = Date.now();
+      lastRenderAt = now();
+
       return false;
     }
 
-    host.innerHTML = html;
+    host.innerHTML =
+      html;
+
     lastHTML = html;
-    lastRenderAt = Date.now();
+    lastRenderAt = now();
 
     return true;
   }
 
-  function fail(error, fallback) {
+  function setFeedback({
+    error = "",
+    errorCode = "",
+    success = "",
+    paint = true,
+  } = {}) {
+    lastError =
+      cleanText(
+        error,
+        ""
+      );
+
+    lastErrorCode =
+      cleanText(
+        errorCode,
+        ""
+      );
+
+    lastSuccess =
+      cleanText(
+        success,
+        ""
+      );
+
+    if (paint) {
+      render();
+    }
+
+    return {
+      error:
+        lastError,
+
+      errorCode:
+        lastErrorCode,
+
+      success:
+        lastSuccess,
+    };
+  }
+
+  function clearFeedback({
+    paint = false,
+  } = {}) {
+    return setFeedback({
+      error: "",
+      errorCode: "",
+      success: "",
+      paint,
+    });
+  }
+
+  function fail(
+    error,
+    fallback =
+      "No se pudo procesar la cuenta."
+  ) {
     loading = false;
     refreshing = false;
     saving = false;
-    lastError = safeError(error, fallback);
-    lastSuccess = "";
 
-    render({ error: lastError });
+    setFeedback({
+      error:
+        safeError(
+          error,
+          fallback
+        ),
+
+      errorCode:
+        safeErrorCode(
+          error
+        ),
+
+      success: "",
+      paint: true,
+    });
 
     return null;
   }
 
-  function commit(nextItem = null, { loaded = true, merge = null } = {}) {
-    const picked = pickItem(nextItem);
-
-    if (hasContent(picked)) {
-      item = picked;
-    } else if (hasContent(merge)) {
-      item = {
-        ...safeObject(item),
-        ...merge,
-      };
+  function commit(
+    nextItem = null
+  ) {
+    if (
+      !nextItem
+    ) {
+      return item;
     }
 
-    if (hasContent(item)) {
-      setCuentaMemory(item, { loaded });
+    const next =
+      canonicalItem(
+        nextItem,
+        item ||
+        {}
+      );
+
+    if (
+      hasContent(next)
+    ) {
+      item = next;
     }
 
     return item;
   }
 
-  async function load(options = {}) {
-    const seq = ++loadSeq;
-    const force = options.force === true || options.forceRefresh === true;
-    const silent = options.silent === true;
-    const paint = options.paint === true || !silent;
-    const hadItem = hasContent(item);
+  /* =======================================================
+     LOAD
+  ======================================================= */
 
-    lastError = "";
-    lastSuccess = "";
+  async function load(
+    options = {}
+  ) {
+    if (destroyed) {
+      return null;
+    }
+
+    const force =
+      options.force ===
+        true ||
+      options.forceRefresh ===
+        true;
+
+    const silent =
+      options.silent ===
+      true;
+
+    if (
+      loadPromise &&
+      !force
+    ) {
+      return loadPromise;
+    }
+
+    const seq =
+      ++loadSeq;
+
+    const hadItem =
+      hasContent(item);
+
+    clearFeedback({
+      paint: false,
+    });
 
     if (!silent) {
-      loading = !hadItem;
-      refreshing = force && hadItem;
-      saving = false;
+      loading =
+        !hadItem;
+
+      refreshing =
+        hadItem;
+
       render();
     }
 
-    try {
-      const result = await fetchCuenta({
-        force,
-        silent,
-        source: cleanText(options.source, force ? `${SOURCE}.refresh` : `${SOURCE}.load`),
-      });
+    let task = null;
 
-      if (destroyed || seq !== loadSeq) {
-        return result || null;
+    task = (async () => {
+      try {
+        const result =
+          await loadCuentaApi({
+            force,
+          });
+
+        if (
+          destroyed ||
+          seq !== loadSeq
+        ) {
+          return result ||
+            null;
+        }
+
+        const before =
+          signature(item);
+
+        commit(result);
+
+        loading = false;
+        refreshing = false;
+
+        const changed =
+          before !==
+          signature(item);
+
+        if (
+          !silent ||
+          changed ||
+          !hadItem
+        ) {
+          render();
+        }
+
+        emitCuentaEvent(
+          force
+            ? "cuenta:refreshed"
+            : "cuenta:loaded",
+
+          {
+            source:
+              CUENTA_INDEX_SOURCE,
+
+            userId:
+              item?.userId ||
+              "",
+
+            force,
+          }
+        );
+
+        return item;
+      } catch (error) {
+        if (
+          destroyed ||
+          seq !== loadSeq
+        ) {
+          return null;
+        }
+
+        loading = false;
+        refreshing = false;
+
+        lastError =
+          safeError(
+            error,
+            "No se pudo cargar la cuenta."
+          );
+
+        lastErrorCode =
+          safeErrorCode(
+            error
+          );
+
+        lastSuccess = "";
+
+        if (
+          !silent ||
+          !hasContent(item)
+        ) {
+          render();
+        }
+
+        return null;
+      } finally {
+        if (
+          loadPromise ===
+          task
+        ) {
+          loadPromise =
+            null;
+        }
       }
+    })();
 
-      const before = signature(item);
-
-      commit(result, { loaded: true });
-
-      loading = false;
-      refreshing = false;
-      saving = false;
-      lastError = cleanText(result?.error, "");
-
-      const changed = signature(item) !== before;
-
-      if (paint || (!hadItem && hasContent(item)) || (!silent && changed)) {
-        render({ error: lastError });
-      }
-
-      return item;
-    } catch (error) {
-      if (destroyed || seq !== loadSeq) return null;
-
-      loading = false;
-      refreshing = false;
-      saving = false;
-      lastError = safeError(error, "No se pudo cargar la cuenta.");
-      lastSuccess = "";
-
-      if (!silent || !hasContent(item)) {
-        render({ error: lastError });
-      }
-
-      return null;
+    if (!force) {
+      loadPromise = task;
     }
+
+    return task;
   }
 
   async function refresh() {
     return load({
       force: true,
       silent: false,
-      paint: true,
-      source: `${SOURCE}.refresh`,
     });
   }
 
-  async function saveCuenta() {
-    const updateCuenta = getApiMethod("updateCuenta");
+  /* =======================================================
+     UNSUPPORTED SELF UPDATES
+  ======================================================= */
 
-    form = readForm(host);
+  function rejectSelfUpdate(
+    capability =
+      "profile"
+  ) {
+    const label = {
+      profile:
+        "perfil",
 
-    if (!updateCuenta) {
-      return fail("cuenta.api.js no expone updateCuenta().", "No se pudo guardar la cuenta.");
-    }
+      theme:
+        "apariencia",
 
-    const payload = buildCuentaPayload(form);
+      language:
+        "idioma",
 
-    if (!Object.keys(payload).length) {
-      lastError = "";
-      lastSuccess = "No hay cambios para guardar.";
-      render({ successMessage: lastSuccess });
-      return item;
-    }
+      privacy:
+        "privacidad",
+    }[capability] ||
+    "cuenta";
 
-    saving = true;
-    loading = false;
-    refreshing = false;
-    lastError = "";
-    lastSuccess = "";
-    render();
+    setFeedback({
+      error:
+        `${UNSUPPORTED_SELF_UPDATE_MESSAGE} No se ha enviado ningún cambio de ${label}.`,
 
-    try {
-      const result = await updateCuenta(payload, { source: `${SOURCE}.save` });
+      errorCode:
+        "CUENTA_SELF_UPDATE_NOT_SUPPORTED",
 
-      commit(result, { loaded: true, merge: payload });
+      success: "",
+      paint: true,
+    });
 
-      saving = false;
-      lastError = "";
-      lastSuccess = "Cambios guardados correctamente.";
+    emitCuentaEvent(
+      "cuenta:update:unsupported",
+      {
+        source:
+          CUENTA_INDEX_SOURCE,
 
-      render({ successMessage: lastSuccess });
-      return item;
-    } catch (error) {
-      return fail(error, "No se pudo guardar la cuenta.");
-    }
+        capability:
+          label,
+
+        code:
+          "CUENTA_SELF_UPDATE_NOT_SUPPORTED",
+      }
+    );
+
+    return false;
   }
 
-  async function updateTheme() {
-    const updateCuentaTheme = getApiMethod("updateCuentaTheme");
-    const updateCuenta = getApiMethod("updateCuenta");
-
-    form = readForm(host);
-
-    const darkMode = normalizeBoolean(form.darkMode, false);
-    const payload = buildCuentaPayload({ ...form, darkMode });
-
-    if (!updateCuentaTheme && !updateCuenta) {
-      return fail("cuenta.api.js no expone updateCuentaTheme() ni updateCuenta().", "No se pudo actualizar la apariencia.");
-    }
-
-    saving = true;
-    loading = false;
-    refreshing = false;
-    lastError = "";
-    lastSuccess = "";
-    render();
-
-    try {
-      const result = updateCuentaTheme
-        ? await updateCuentaTheme(darkMode, { source: `${SOURCE}.theme` })
-        : await updateCuenta(payload, { source: `${SOURCE}.theme` });
-
-      commit(result, { loaded: true, merge: payload });
-
-      saving = false;
-      lastError = "";
-      lastSuccess = "Apariencia actualizada correctamente.";
-
-      render({ successMessage: lastSuccess });
-      return item;
-    } catch (error) {
-      return fail(error, "No se pudo actualizar la apariencia.");
-    }
+  function saveCuenta() {
+    return rejectSelfUpdate(
+      "profile"
+    );
   }
 
-  async function updateLanguage() {
-    const updateCuentaLanguage = getApiMethod("updateCuentaLanguage");
-    const updateCuenta = getApiMethod("updateCuenta");
-
-    form = readForm(host);
-
-    const lang = normalizeLang(form.lang);
-    const payload = buildCuentaPayload({ ...form, lang });
-
-    if (!updateCuentaLanguage && !updateCuenta) {
-      return fail("cuenta.api.js no expone updateCuentaLanguage() ni updateCuenta().", "No se pudo actualizar el idioma.");
-    }
-
-    saving = true;
-    loading = false;
-    refreshing = false;
-    lastError = "";
-    lastSuccess = "";
-    render();
-
-    try {
-      const result = updateCuentaLanguage
-        ? await updateCuentaLanguage(lang, { source: `${SOURCE}.language` })
-        : await updateCuenta(payload, { source: `${SOURCE}.language` });
-
-      commit(result, { loaded: true, merge: payload });
-
-      saving = false;
-      lastError = "";
-      lastSuccess = "Idioma actualizado correctamente.";
-
-      render({ successMessage: lastSuccess });
-      return item;
-    } catch (error) {
-      return fail(error, "No se pudo actualizar el idioma.");
-    }
+  function updateTheme() {
+    return rejectSelfUpdate(
+      "theme"
+    );
   }
 
-  async function changePassword() {
-    const changePasswordApi =
-      getApiMethod("changePassword") ||
-      getApiMethod("updatePassword") ||
-      getApiMethod("savePassword");
+  function updateLanguage() {
+    return rejectSelfUpdate(
+      "language"
+    );
+  }
 
-    form = readForm(host);
+  function updatePrivacy() {
+    return rejectSelfUpdate(
+      "privacy"
+    );
+  }
 
-    const payload = buildPasswordPayload(form);
-    const validationError = validatePasswordPayload(payload);
+  /* =======================================================
+     PASSWORD
+  ======================================================= */
 
-    if (validationError) {
-      lastError = validationError;
-      lastSuccess = "";
-      render({ error: lastError });
+  function readPasswordPayload() {
+    return {
+      currentPassword:
+        String(
+          readField(
+            host,
+            "currentPassword"
+          ) ??
+          ""
+        ),
+
+      newPassword:
+        String(
+          readField(
+            host,
+            "newPassword"
+          ) ??
+          ""
+        ),
+
+      confirmPassword:
+        String(
+          readField(
+            host,
+            "confirmPassword"
+          ) ??
+          ""
+        ),
+    };
+  }
+
+  async function changePassword(
+    explicitPayload = null
+  ) {
+    if (
+      destroyed ||
+      saving
+    ) {
       return false;
     }
 
-    if (!changePasswordApi) {
-      fail("cuenta.api.js no expone changePassword().", "No se pudo cambiar la contraseña.");
+    const payload =
+      isObject(
+        explicitPayload
+      )
+        ? {
+            currentPassword:
+              String(
+                explicitPayload
+                  .currentPassword ??
+                ""
+              ),
+
+            newPassword:
+              String(
+                explicitPayload
+                  .newPassword ??
+                ""
+              ),
+
+            confirmPassword:
+              String(
+                explicitPayload
+                  .confirmPassword ??
+                ""
+              ),
+          }
+        : readPasswordPayload();
+
+    const validation =
+      validateCuentaPasswordPayload(
+        payload
+      );
+
+    if (!validation.ok) {
+      clearSensitiveInputs(
+        host
+      );
+
+      setFeedback({
+        error:
+          validation.message ||
+          "Contraseña inválida.",
+
+        errorCode:
+          validation.code ||
+          "INVALID_PASSWORD",
+
+        success: "",
+        paint: true,
+      });
+
       return false;
     }
 
+    const seq =
+      ++actionSeq;
+
     saving = true;
-    loading = false;
-    refreshing = false;
-    lastError = "";
-    lastSuccess = "";
+
+    clearFeedback({
+      paint: false,
+    });
+
+    /*
+      El password vive únicamente en `payload`.
+      No se copia a state ni al payload de render.
+    */
     render();
 
     try {
-      const result = await changePasswordApi(payload, { source: `${SOURCE}.password` });
-      const nextItem = pickItem(result);
+      const result =
+        await changePasswordApi(
+          payload,
+          {
+            source:
+              `${CUENTA_INDEX_SOURCE}.password`,
+          }
+        );
 
-      if (hasContent(nextItem)) {
-        commit(nextItem, { loaded: true });
+      if (
+        destroyed ||
+        seq !== actionSeq
+      ) {
+        return false;
       }
 
-      form = {
-        ...form,
-        currentPassword: "",
-        newPassword: "",
-        confirmPassword: "",
-      };
+      const nextItem =
+        resultItem(
+          result,
+          item ||
+          {}
+        );
+
+      if (
+        hasContent(
+          nextItem
+        )
+      ) {
+        commit(
+          nextItem
+        );
+      }
+
+      authRefreshRequired =
+        result
+          ?.authRefreshRequired ===
+        true;
 
       saving = false;
-      lastError = "";
-      lastSuccess = "Contraseña actualizada correctamente.";
 
-      render({
-        successMessage: lastSuccess,
-        view: { form },
+      clearSensitiveInputs(
+        host
+      );
+
+      setFeedback({
+        error: "",
+        errorCode: "",
+
+        success:
+          authRefreshRequired
+            ? "Contraseña actualizada. La sesión debe renovarse para seguir operando con la nueva credencial."
+            : "Contraseña actualizada correctamente.",
+
+        paint: true,
       });
+
+      emitCuentaEvent(
+        "cuenta:password:changed",
+        {
+          source:
+            CUENTA_INDEX_SOURCE,
+
+          authRefreshRequired,
+        }
+      );
+
+      if (
+        authRefreshRequired
+      ) {
+        emitCuentaEvent(
+          "cuenta:auth-refresh-required",
+          {
+            source:
+              CUENTA_INDEX_SOURCE,
+
+            reason:
+              "password_changed",
+          }
+        );
+      }
 
       return true;
     } catch (error) {
-      fail(error, "No se pudo cambiar la contraseña.");
-      return false;
+      if (
+        destroyed ||
+        seq !== actionSeq
+      ) {
+        return false;
+      }
+
+      clearSensitiveInputs(
+        host
+      );
+
+      return Boolean(
+        fail(
+          error,
+          "No se pudo cambiar la contraseña."
+        )
+      );
+    } finally {
+      /*
+        Defense-in-depth:
+        el objeto efímero deja de ser referenciado al salir.
+        Nunca entra en getSnapshot().
+      */
     }
   }
 
-  async function uploadAvatar(node = null) {
-    const uploadCuentaAvatar = getApiMethod("uploadCuentaAvatar");
+  /* =======================================================
+     AVATAR
+  ======================================================= */
 
-    if (!uploadCuentaAvatar) {
-      return fail("cuenta.api.js no expone uploadCuentaAvatar().", "No se pudo subir el avatar.");
+  async function uploadAvatar(
+    input = null
+  ) {
+    if (
+      destroyed ||
+      saving
+    ) {
+      return null;
     }
 
-    const input = node?.matches?.('input[type="file"]')
-      ? node
-      : host?.querySelector?.('input[type="file"][data-cuenta-field="avatar"], input[type="file"][data-field="avatar"]');
+    const file =
+      resolveAvatarFile(
+        host,
+        input
+      );
 
-    const file = input?.files?.[0] || null;
+    const validation =
+      validateCuentaAvatarFile(
+        file
+      );
 
-    if (!file) {
-      return fail("Selecciona una imagen de avatar.", "Selecciona una imagen de avatar.");
+    if (!validation.ok) {
+      setFeedback({
+        error:
+          validation.message ||
+          "Avatar inválido.",
+
+        errorCode:
+          validation.code ||
+          "INVALID_AVATAR",
+
+        success: "",
+        paint: true,
+      });
+
+      return null;
     }
+
+    const seq =
+      ++actionSeq;
 
     saving = true;
-    loading = false;
-    refreshing = false;
-    lastError = "";
-    lastSuccess = "";
+
+    clearFeedback({
+      paint: false,
+    });
+
     render();
 
     try {
-      const result = await uploadCuentaAvatar(file, { source: `${SOURCE}.avatar.upload` });
+      const result =
+        await uploadCuentaAvatarApi(
+          file,
+          {
+            source:
+              `${CUENTA_INDEX_SOURCE}.avatar.upload`,
+          }
+        );
 
-      commit(result, { loaded: true });
+      if (
+        destroyed ||
+        seq !== actionSeq
+      ) {
+        return null;
+      }
+
+      commit(result);
 
       saving = false;
-      lastError = "";
-      lastSuccess = "Avatar actualizado correctamente.";
 
-      render({ successMessage: lastSuccess });
+      setFeedback({
+        error: "",
+        errorCode: "",
+
+        success:
+          "Avatar actualizado correctamente.",
+
+        paint: true,
+      });
+
+      emitCuentaEvent(
+        "cuenta:avatar:updated",
+        {
+          source:
+            CUENTA_INDEX_SOURCE,
+
+          hasAvatar:
+            item?.hasAvatar ===
+            true,
+        }
+      );
+
       return item;
     } catch (error) {
-      return fail(error, "No se pudo subir el avatar.");
+      if (
+        destroyed ||
+        seq !== actionSeq
+      ) {
+        return null;
+      }
+
+      return fail(
+        error,
+        "No se pudo subir el avatar."
+      );
     }
   }
 
   async function deleteAvatar() {
-    const deleteCuentaAvatar = getApiMethod("deleteCuentaAvatar");
-
-    if (!deleteCuentaAvatar) {
-      return fail("cuenta.api.js no expone deleteCuentaAvatar().", "No se pudo eliminar el avatar.");
+    if (
+      destroyed ||
+      saving
+    ) {
+      return null;
     }
 
+    const seq =
+      ++actionSeq;
+
     saving = true;
-    loading = false;
-    refreshing = false;
-    lastError = "";
-    lastSuccess = "";
+
+    clearFeedback({
+      paint: false,
+    });
+
     render();
 
     try {
-      const result = await deleteCuentaAvatar({ source: `${SOURCE}.avatar.delete` });
+      const result =
+        await deleteCuentaAvatarApi({
+          source:
+            `${CUENTA_INDEX_SOURCE}.avatar.delete`,
+        });
 
-      commit(result, { loaded: true });
+      if (
+        destroyed ||
+        seq !== actionSeq
+      ) {
+        return null;
+      }
+
+      commit(result);
 
       saving = false;
-      lastError = "";
-      lastSuccess = "Avatar eliminado correctamente.";
 
-      render({ successMessage: lastSuccess });
+      setFeedback({
+        error: "",
+        errorCode: "",
+
+        success:
+          "Avatar eliminado correctamente.",
+
+        paint: true,
+      });
+
+      emitCuentaEvent(
+        "cuenta:avatar:deleted",
+        {
+          source:
+            CUENTA_INDEX_SOURCE,
+
+          hasAvatar: false,
+        }
+      );
+
       return item;
     } catch (error) {
-      return fail(error, "No se pudo eliminar el avatar.");
+      if (
+        destroyed ||
+        seq !== actionSeq
+      ) {
+        return null;
+      }
+
+      return fail(
+        error,
+        "No se pudo eliminar el avatar."
+      );
     }
   }
 
-  async function handleAction(action = "", node = null) {
-    const type = cleanText(action, "");
+  /* =======================================================
+     SESSIONS
+  ======================================================= */
 
-    if (!type) return false;
-    if (REFRESH_ACTIONS.has(type)) return Boolean(await refresh());
-    if (SAVE_ACTIONS.has(type)) return Boolean(await saveCuenta());
-    if (THEME_ACTIONS.has(type)) return Boolean(await updateTheme());
-    if (LANGUAGE_ACTIONS.has(type)) return Boolean(await updateLanguage());
-    if (PASSWORD_ACTIONS.has(type)) return Boolean(await changePassword());
-    if (UPLOAD_AVATAR_ACTIONS.has(type)) return Boolean(await uploadAvatar(node));
-    if (DELETE_AVATAR_ACTIONS.has(type)) return Boolean(await deleteAvatar());
+  async function loadSessions({
+    force = false,
+  } = {}) {
+    if (
+      destroyed ||
+      sessionsLoading
+    ) {
+      return sessions;
+    }
+
+    if (
+      sessionsLoaded &&
+      !force
+    ) {
+      return sessions;
+    }
+
+    sessionsLoading = true;
+    sessionsError = "";
+
+    render();
+
+    try {
+      const result =
+        await loadCuentaSessionsApi({
+          source:
+            `${CUENTA_INDEX_SOURCE}.sessions`,
+        });
+
+      if (destroyed) {
+        return [];
+      }
+
+      sessions =
+        safeArray(
+          result?.sessions
+        );
+
+      sessionsLoaded = true;
+      sessionsLoading = false;
+
+      render();
+
+      emitCuentaEvent(
+        "cuenta:sessions:loaded",
+        {
+          source:
+            CUENTA_INDEX_SOURCE,
+
+          count:
+            sessions.length,
+        }
+      );
+
+      return sessions;
+    } catch (error) {
+      if (destroyed) {
+        return [];
+      }
+
+      sessionsLoading = false;
+
+      sessionsError =
+        safeError(
+          error,
+          "No se pudieron cargar las sesiones."
+        );
+
+      render();
+
+      return [];
+    }
+  }
+
+  /* =======================================================
+     DEACTIVATE SELF
+  ======================================================= */
+
+  function readDeactivatePassword() {
+    return String(
+      first(
+        readField(
+          host,
+          "deactivatePassword"
+        ),
+
+        readField(
+          host,
+          "password"
+        ),
+
+        ""
+      ) ??
+      ""
+    );
+  }
+
+  async function deactivateAccount(
+    explicitPayload = null
+  ) {
+    if (
+      destroyed ||
+      saving
+    ) {
+      return false;
+    }
+
+    const password =
+      isObject(
+        explicitPayload
+      )
+        ? String(
+            explicitPayload
+              .password ??
+            ""
+          )
+        : readDeactivatePassword();
+
+    if (!password.trim()) {
+      clearSensitiveInputs(
+        host
+      );
+
+      setFeedback({
+        error:
+          "Introduce tu contraseña para confirmar la desactivación.",
+
+        errorCode:
+          "PASSWORD_REQUIRED",
+
+        success: "",
+        paint: true,
+      });
+
+      return false;
+    }
+
+    const seq =
+      ++actionSeq;
+
+    saving = true;
+
+    clearFeedback({
+      paint: false,
+    });
+
+    render();
+
+    try {
+      const result =
+        await deactivateCuentaApi(
+          {
+            password,
+          },
+          {
+            source:
+              `${CUENTA_INDEX_SOURCE}.deactivate`,
+          }
+        );
+
+      if (
+        destroyed ||
+        seq !== actionSeq
+      ) {
+        return false;
+      }
+
+      const nextItem =
+        resultItem(
+          result,
+          {
+            ...safeObject(
+              item
+            ),
+
+            active: false,
+            enabled: false,
+            disabled: true,
+            status: "disabled",
+          }
+        );
+
+      if (
+        hasContent(
+          nextItem
+        )
+      ) {
+        commit(
+          nextItem
+        );
+      }
+
+      deactivated =
+        result?.deactivated ===
+        true;
+
+      authRefreshRequired =
+        result?.loggedOut ===
+          true ||
+        deactivated;
+
+      saving = false;
+
+      clearSensitiveInputs(
+        host
+      );
+
+      setFeedback({
+        error: "",
+        errorCode: "",
+
+        success:
+          result?.alreadyDisabled
+            ? "La cuenta ya estaba desactivada."
+            : "Cuenta desactivada correctamente.",
+
+        paint: true,
+      });
+
+      emitCuentaEvent(
+        "cuenta:deactivated",
+        {
+          source:
+            CUENTA_INDEX_SOURCE,
+
+          deactivated,
+
+          alreadyDisabled:
+            result
+              ?.alreadyDisabled ===
+            true,
+
+          loggedOut:
+            result?.loggedOut ===
+            true,
+        }
+      );
+
+      emitCuentaEvent(
+        "cuenta:auth-refresh-required",
+        {
+          source:
+            CUENTA_INDEX_SOURCE,
+
+          reason:
+            "account_deactivated",
+        }
+      );
+
+      return true;
+    } catch (error) {
+      if (
+        destroyed ||
+        seq !== actionSeq
+      ) {
+        return false;
+      }
+
+      clearSensitiveInputs(
+        host
+      );
+
+      fail(
+        error,
+        "No se pudo desactivar la cuenta."
+      );
+
+      return false;
+    }
+  }
+
+  /* =======================================================
+     ACTION ROUTER
+  ======================================================= */
+
+  async function handleAction(
+    action = "",
+    node = null
+  ) {
+    const type =
+      cleanText(
+        action,
+        ""
+      );
+
+    if (!type) {
+      return false;
+    }
+
+    if (
+      REFRESH_ACTIONS.has(
+        type
+      )
+    ) {
+      return Boolean(
+        await refresh()
+      );
+    }
+
+    if (
+      UNSUPPORTED_SAVE_ACTIONS.has(
+        type
+      )
+    ) {
+      return saveCuenta();
+    }
+
+    if (
+      UNSUPPORTED_THEME_ACTIONS.has(
+        type
+      )
+    ) {
+      return updateTheme();
+    }
+
+    if (
+      UNSUPPORTED_LANGUAGE_ACTIONS.has(
+        type
+      )
+    ) {
+      return updateLanguage();
+    }
+
+    if (
+      UNSUPPORTED_PRIVACY_ACTIONS.has(
+        type
+      )
+    ) {
+      return updatePrivacy();
+    }
+
+    if (
+      PASSWORD_ACTIONS.has(
+        type
+      )
+    ) {
+      return Boolean(
+        await changePassword()
+      );
+    }
+
+    if (
+      UPLOAD_AVATAR_ACTIONS.has(
+        type
+      )
+    ) {
+      return Boolean(
+        await uploadAvatar(
+          node
+        )
+      );
+    }
+
+    if (
+      DELETE_AVATAR_ACTIONS.has(
+        type
+      )
+    ) {
+      return Boolean(
+        await deleteAvatar()
+      );
+    }
+
+    if (
+      LOAD_SESSIONS_ACTIONS.has(
+        type
+      )
+    ) {
+      await loadSessions({
+        force:
+          type ===
+          "refresh-sessions",
+      });
+
+      return true;
+    }
+
+    if (
+      DEACTIVATE_ACTIONS.has(
+        type
+      )
+    ) {
+      return Boolean(
+        await deactivateAccount()
+      );
+    }
 
     return false;
   }
 
+  /* =======================================================
+     DOM EVENTS
+  ======================================================= */
+
   function onClick(event) {
-    if (destroyed) return;
+    if (destroyed) {
+      return;
+    }
 
-    const node = closestFrom(event.target, ACTION_SELECTOR);
+    const node =
+      closestFrom(
+        event.target,
+        ACTION_SELECTOR
+      );
 
-    if (!node || !host?.contains?.(node)) return;
-    if (node.disabled || node.getAttribute("aria-disabled") === "true") return;
+    if (
+      !node ||
+      !host?.contains?.(
+        node
+      )
+    ) {
+      return;
+    }
 
-    const action = getActionName(node);
+    if (
+      node.disabled ||
+      node.getAttribute?.(
+        "aria-disabled"
+      ) === "true"
+    ) {
+      return;
+    }
 
-    if (!action) return;
+    const action =
+      getActionName(
+        node
+      );
 
-    event.preventDefault();
-    event.stopPropagation();
-    event[ROUTER_EVENT_HANDLED_KEY] = true;
+    if (!action) {
+      return;
+    }
 
-    void handleAction(action, node);
-  }
+    event.preventDefault?.();
+    event.stopPropagation?.();
 
-  function onInput(event) {
-    if (destroyed) return;
+    try {
+      event[
+        ROUTER_EVENT_HANDLED_KEY
+      ] = true;
+    } catch {
+      // noop
+    }
 
-    const field = closestFrom(event.target, FIELD_SELECTOR);
-
-    if (!field || !host?.contains?.(field)) return;
-
-    form = readForm(host);
-    lastSuccess = "";
-  }
-
-  function onChange(event) {
-    if (destroyed) return;
-
-    const field = closestFrom(event.target, FIELD_SELECTOR);
-
-    if (!field || !host?.contains?.(field)) return;
-
-    form = readForm(host);
-    lastSuccess = "";
-    syncNativeControlVisual(field);
+    void handleAction(
+      action,
+      node
+    );
   }
 
   function onSubmit(event) {
-    const formNode = event.target?.closest?.("form");
+    const formNode =
+      event.target
+        ?.closest?.("form");
 
-    if (!formNode || !host?.contains?.(formNode)) return;
+    if (
+      !formNode ||
+      !host?.contains?.(
+        formNode
+      )
+    ) {
+      return;
+    }
 
-    event.preventDefault();
-    event.stopPropagation();
-    event[ROUTER_EVENT_HANDLED_KEY] = true;
+    event.preventDefault?.();
+    event.stopPropagation?.();
 
-    void saveCuenta();
+    try {
+      event[
+        ROUTER_EVENT_HANDLED_KEY
+      ] = true;
+    } catch {
+      // noop
+    }
+
+    /*
+      No asumimos que "submit" = guardar perfil.
+      Si el form declara una acción, se respeta.
+      Sin acción, guardar perfil sigue no soportado.
+    */
+    const action =
+      cleanText(
+        first(
+          formNode.dataset
+            ?.cuentaAction,
+          formNode.dataset
+            ?.action,
+          ""
+        ),
+        ""
+      );
+
+    if (action) {
+      void handleAction(
+        action,
+        formNode
+      );
+
+      return;
+    }
+
+    saveCuenta();
   }
 
   function bind() {
-    if (bound || !host) return false;
+    if (
+      bound ||
+      !host
+    ) {
+      return false;
+    }
 
-    host.addEventListener("click", onClick);
-    host.addEventListener("input", onInput);
-    host.addEventListener("change", onChange);
-    host.addEventListener("submit", onSubmit);
+    host.addEventListener(
+      "click",
+      onClick
+    );
+
+    host.addEventListener(
+      "submit",
+      onSubmit
+    );
 
     bound = true;
+
     return true;
   }
 
   function unbind() {
-    if (!bound || !host) return false;
+    if (
+      !bound ||
+      !host
+    ) {
+      return false;
+    }
 
-    host.removeEventListener("click", onClick);
-    host.removeEventListener("input", onInput);
-    host.removeEventListener("change", onChange);
-    host.removeEventListener("submit", onSubmit);
+    host.removeEventListener(
+      "click",
+      onClick
+    );
+
+    host.removeEventListener(
+      "submit",
+      onSubmit
+    );
 
     bound = false;
+
     return true;
   }
 
-  function getInitialItem(options = {}) {
-    const contextItem = first(options.item, options.cuenta, context.item, context.cuenta, null);
+  /* =======================================================
+     MOUNT / DESTROY
+  ======================================================= */
 
-    if (hasContent(contextItem)) {
-      mountedFrom = "context";
-      return setCuentaMemory(contextItem, { loaded: false });
+  function getInitialItem(
+    options = {}
+  ) {
+    const contextItem =
+      first(
+        options.item,
+        options.cuenta,
+        localContext.item,
+        localContext.cuenta,
+        null
+      );
+
+    if (
+      hasContent(
+        contextItem
+      )
+    ) {
+      const normalized =
+        canonicalItem(
+          contextItem,
+          {}
+        );
+
+      if (
+        hasContent(
+          normalized
+        )
+      ) {
+        mountedFrom =
+          "context";
+
+        return normalized;
+      }
     }
 
-    const hydrated = hydrateCuentaMemory();
+    try {
+      const hydrated =
+        hydrateCuentaFromCache();
 
-    if (hasContent(hydrated)) {
-      mountedFrom = cuentaMemory.loaded ? "memory.loaded" : "memory.hydrated";
-      return hydrated;
+      if (
+        hasContent(
+          hydrated
+        )
+      ) {
+        mountedFrom =
+          "auth-core";
+
+        return hydrated;
+      }
+    } catch {
+      // load real debajo
     }
 
-    mountedFrom = "empty";
+    mountedFrom =
+      "empty";
+
     return null;
   }
 
-  function shouldLoadOnMount(options = {}) {
-    if (options.force === true || options.forceRefresh === true) return true;
-    if (options.refreshOnMount === true) return true;
-    if (!hasContent(item)) return true;
-    if (!cuentaMemory.loaded) return true;
+  function shouldLoadOnMount(
+    options = {}
+  ) {
+    if (
+      options.force === true ||
+      options.forceRefresh ===
+        true ||
+      options.refreshOnMount ===
+        true
+    ) {
+      return true;
+    }
 
-    return false;
+    /*
+      Incluso con Auth hidratado hacemos /api/auth/me
+      en background para obtener el contrato completo.
+    */
+    return true;
   }
 
-  function mount(options = {}) {
-    if (destroyed || !host) return controller;
-    if (mounted) return controller;
+  function mount(
+    options = {}
+  ) {
+    if (
+      destroyed ||
+      !host
+    ) {
+      return controller;
+    }
+
+    if (mounted) {
+      return controller;
+    }
 
     mounted = true;
     bind();
 
-    item = getInitialItem(safeObject(options));
-    form = safeObject(options.form);
+    item =
+      getInitialItem(
+        safeObject(options)
+      );
 
-    loading = !hasContent(item);
+    loading =
+      !hasContent(item);
+
     refreshing = false;
     saving = false;
-    lastError = "";
-    lastSuccess = "";
+
+    sessions = [];
+    sessionsLoaded = false;
+    sessionsLoading = false;
+    sessionsError = "";
+
+    authRefreshRequired = false;
+    deactivated = false;
+
+    clearFeedback({
+      paint: false,
+    });
 
     render();
 
-    if (shouldLoadOnMount(options)) {
-      const force = options.force === true || options.forceRefresh === true;
-      const silent = hasContent(item) && !force;
+    if (
+      shouldLoadOnMount(
+        options
+      )
+    ) {
+      const force =
+        options.force === true ||
+        options.forceRefresh ===
+          true;
+
+      const silent =
+        hasContent(item) &&
+        !force;
 
       void load({
         force,
         silent,
-        paint: force,
-        source: silent ? `${SOURCE}.mount.background` : `${SOURCE}.mount.initial`,
       });
     }
 
     return controller;
   }
 
-  function destroy({ keepDom = false } = {}) {
-    if (destroyed) return true;
+  function resetPresentation() {
+    item = null;
 
-    destroyed = true;
-    mounted = false;
     loading = false;
     refreshing = false;
     saving = false;
+
+    sessions = [];
+    sessionsLoaded = false;
+    sessionsLoading = false;
+    sessionsError = "";
+
+    authRefreshRequired = false;
+    deactivated = false;
+
+    clearFeedback({
+      paint: false,
+    });
+
+    lastHTML = "";
+
+    if (
+      mounted &&
+      !destroyed
+    ) {
+      render();
+    }
+
+    return true;
+  }
+
+  function destroy({
+    keepDom = false,
+  } = {}) {
+    if (destroyed) {
+      return true;
+    }
+
+    destroyed = true;
+    mounted = false;
+
+    loading = false;
+    refreshing = false;
+    saving = false;
+
+    sessionsLoading = false;
+
     loadSeq += 1;
+    actionSeq += 1;
+
+    loadPromise = null;
+
+    clearSensitiveInputs(
+      host
+    );
 
     unbind();
 
     if (!keepDom) {
-      clearHost(host);
+      clearHost(
+        host
+      );
+
       lastHTML = "";
     }
 
-    if (host && INSTANCES.get(host) === controller) {
-      INSTANCES.delete(host);
+    if (
+      host &&
+      INSTANCES.get(
+        host
+      ) === controller
+    ) {
+      INSTANCES.delete(
+        host
+      );
     }
 
-    if (lastInstance === controller) {
+    if (
+      lastInstance ===
+      controller
+    ) {
       lastInstance = null;
     }
 
@@ -1142,43 +2631,98 @@ function createCuentaController(host = null, context = {}) {
   }
 
   const controller = {
-    version: CUENTA_VIEW_VERSION,
+    version:
+      CUENTA_VIEW_VERSION,
+
+    apiVersion:
+      CUENTA_API_VERSION,
+
+    templateVersion:
+      CUENTA_TEMPLATE_VERSION,
 
     mount,
-    destroy,
-    unmount: destroy,
-    cleanup: destroy,
-    dispose: destroy,
 
+    destroy,
+    unmount:
+      destroy,
+    cleanup:
+      destroy,
+    dispose:
+      destroy,
+
+    load,
     refresh,
-    reload: refresh,
+    reload:
+      refresh,
 
     saveCuenta,
-    save: saveCuenta,
-    saveProfile: saveCuenta,
-    savePerfil: saveCuenta,
-    updateProfile: saveCuenta,
-    updatePerfil: saveCuenta,
-    updateCuenta: saveCuenta,
+    save:
+      saveCuenta,
+    saveProfile:
+      saveCuenta,
+    savePerfil:
+      saveCuenta,
+    updateProfile:
+      saveCuenta,
+    updatePerfil:
+      saveCuenta,
+    updateCuenta:
+      saveCuenta,
 
     updateTheme,
-    updateCuentaTheme: updateTheme,
-    setTheme: updateTheme,
-    setCuentaTheme: updateTheme,
+    updateCuentaTheme:
+      updateTheme,
+    setTheme:
+      updateTheme,
+    setCuentaTheme:
+      updateTheme,
 
     updateLanguage,
-    updateCuentaLanguage: updateLanguage,
-    setLanguage: updateLanguage,
-    setCuentaLanguage: updateLanguage,
+    updateCuentaLanguage:
+      updateLanguage,
+    setLanguage:
+      updateLanguage,
+    setCuentaLanguage:
+      updateLanguage,
+
+    updatePrivacy,
+    updateCuentaPrivacy:
+      updatePrivacy,
+    setPrivacy:
+      updatePrivacy,
+    setCuentaPrivacy:
+      updatePrivacy,
 
     changePassword,
-    updatePassword: changePassword,
-    savePassword: changePassword,
+    updatePassword:
+      changePassword,
+    savePassword:
+      changePassword,
 
     uploadAvatar,
-    uploadCuentaAvatar: uploadAvatar,
+    uploadCuentaAvatar:
+      uploadAvatar,
+
     deleteAvatar,
-    deleteCuentaAvatar: deleteAvatar,
+    deleteCuentaAvatar:
+      deleteAvatar,
+
+    loadSessions,
+    loadCuentaSessions:
+      loadSessions,
+    refreshSessions() {
+      return loadSessions({
+        force: true,
+      });
+    },
+
+    deactivateAccount,
+    deactivateCuenta:
+      deactivateAccount,
+
+    clearFeedback,
+
+    resetPresentation,
 
     getItem() {
       return item;
@@ -1188,37 +2732,19 @@ function createCuentaController(host = null, context = {}) {
       return item;
     },
 
-    getState() {
-      return this.getSnapshot();
+    getSessions() {
+      return [
+        ...sessions,
+      ];
     },
 
-    getSnapshot() {
-      return {
-        version: CUENTA_VIEW_VERSION,
-        mounted,
-        destroyed,
-        loading,
-        refreshing,
-        saving,
-        hasHost: Boolean(host),
-        hasItem: hasContent(item),
-        mountedFrom,
-        lastError,
-        lastSuccess,
-        lastRenderAt,
-        memory: {
-          loaded: cuentaMemory.loaded,
-          loadedAt: cuentaMemory.loadedAt,
-          hasItem: hasContent(cuentaMemory.item),
-          userKey: cuentaMemory.key ? "***" : "",
-          inFlight: Boolean(sharedLoadPromise),
-        },
-      };
-    },
+    getState:
+      getSnapshot,
 
-    getDebugSnapshot() {
-      return this.getSnapshot();
-    },
+    getSnapshot,
+
+    getDebugSnapshot:
+      getSnapshot,
   };
 
   return controller;
@@ -1228,158 +2754,490 @@ function createCuentaController(host = null, context = {}) {
    VIEW ENTRY
 ========================================================= */
 
-export function CuentaView(host = null, context = {}) {
-  if (!isDomNode(host)) return null;
+export function CuentaView(
+  host = null,
+  context = {}
+) {
+  if (
+    !isDomNode(host)
+  ) {
+    return null;
+  }
 
-  destroyPrevious(host);
+  destroyPrevious(
+    host
+  );
 
-  const controller = createCuentaController(host, safeObject(context));
+  const controller =
+    createCuentaController(
+      host,
+      safeObject(
+        context
+      )
+    );
 
-  INSTANCES.set(host, controller);
-  lastInstance = controller;
+  INSTANCES.set(
+    host,
+    controller
+  );
 
-  return controller.mount(safeObject(context));
+  lastInstance =
+    controller;
+
+  return controller.mount(
+    safeObject(
+      context
+    )
+  );
 }
 
-export const CuentaIndex = CuentaView;
+export const CuentaIndex =
+  CuentaView;
 
-export const View = CuentaView;
-export const view = CuentaView;
-export const component = CuentaView;
-export const page = CuentaView;
+export const View =
+  CuentaView;
 
-export const mount = CuentaView;
-export const init = CuentaView;
-export const bootstrap = CuentaView;
-export const render = CuentaView;
+export const view =
+  CuentaView;
+
+export const component =
+  CuentaView;
+
+export const page =
+  CuentaView;
+
+export const mount =
+  CuentaView;
+
+export const init =
+  CuentaView;
+
+export const bootstrap =
+  CuentaView;
+
+export const render =
+  CuentaView;
+
+/* =========================================================
+   GLOBAL INSTANCE WRAPPERS
+========================================================= */
 
 export function destroy() {
   try {
-    return Boolean(lastInstance?.destroy?.());
+    return Boolean(
+      lastInstance
+        ?.destroy?.()
+    );
   } catch {
     return false;
   }
 }
 
-export const unmount = destroy;
-export const cleanup = destroy;
-export const dispose = destroy;
+export const unmount =
+  destroy;
+
+export const cleanup =
+  destroy;
+
+export const dispose =
+  destroy;
 
 export function refresh() {
   try {
-    return lastInstance?.refresh?.() || null;
+    return (
+      lastInstance
+        ?.refresh?.() ||
+      null
+    );
   } catch {
     return null;
   }
 }
 
-export const reload = refresh;
-export const loadCuenta = refresh;
-export const refreshCuenta = refresh;
+export const reload =
+  refresh;
 
+export const loadCuenta =
+  refresh;
+
+export const refreshCuenta =
+  refresh;
+
+/*
+  Compatibilidad:
+  estos wrappers YA NO ejecutan ningún update self.
+*/
 export function saveCuenta() {
   try {
-    return lastInstance?.saveCuenta?.() || null;
+    return (
+      lastInstance
+        ?.saveCuenta?.() ??
+      false
+    );
   } catch {
-    return null;
+    return false;
   }
 }
 
-export const save = saveCuenta;
-export const saveProfile = saveCuenta;
-export const savePerfil = saveCuenta;
-export const updateProfile = saveCuenta;
-export const updatePerfil = saveCuenta;
-export const updateCuenta = saveCuenta;
+export const save =
+  saveCuenta;
+
+export const saveProfile =
+  saveCuenta;
+
+export const savePerfil =
+  saveCuenta;
+
+export const updateProfile =
+  saveCuenta;
+
+export const updatePerfil =
+  saveCuenta;
+
+export const updateCuenta =
+  saveCuenta;
 
 export function updateTheme() {
   try {
-    return lastInstance?.updateTheme?.() || null;
+    return (
+      lastInstance
+        ?.updateTheme?.() ??
+      false
+    );
   } catch {
-    return null;
+    return false;
   }
 }
 
-export const updateCuentaTheme = updateTheme;
-export const setTheme = updateTheme;
-export const setCuentaTheme = updateTheme;
+export const updateCuentaTheme =
+  updateTheme;
+
+export const setTheme =
+  updateTheme;
+
+export const setCuentaTheme =
+  updateTheme;
 
 export function updateLanguage() {
   try {
-    return lastInstance?.updateLanguage?.() || null;
+    return (
+      lastInstance
+        ?.updateLanguage?.() ??
+      false
+    );
   } catch {
-    return null;
+    return false;
   }
 }
 
-export const updateCuentaLanguage = updateLanguage;
-export const setLanguage = updateLanguage;
-export const setCuentaLanguage = updateLanguage;
+export const updateCuentaLanguage =
+  updateLanguage;
 
-export function changePassword() {
+export const setLanguage =
+  updateLanguage;
+
+export const setCuentaLanguage =
+  updateLanguage;
+
+export function updatePrivacy() {
   try {
-    return lastInstance?.changePassword?.() || null;
+    return (
+      lastInstance
+        ?.updatePrivacy?.() ??
+      false
+    );
   } catch {
-    return null;
+    return false;
   }
 }
 
-export const updatePassword = changePassword;
-export const savePassword = changePassword;
+export const updateCuentaPrivacy =
+  updatePrivacy;
 
-export function uploadAvatar(node = null) {
+export const setPrivacy =
+  updatePrivacy;
+
+export const setCuentaPrivacy =
+  updatePrivacy;
+
+export function changePassword(
+  payload = null
+) {
   try {
-    return lastInstance?.uploadAvatar?.(node) || null;
+    return (
+      lastInstance
+        ?.changePassword?.(
+          payload
+        ) ||
+      null
+    );
   } catch {
     return null;
   }
 }
 
-export const uploadCuentaAvatar = uploadAvatar;
+export const updatePassword =
+  changePassword;
+
+export const savePassword =
+  changePassword;
+
+export function uploadAvatar(
+  input = null
+) {
+  try {
+    return (
+      lastInstance
+        ?.uploadAvatar?.(
+          input
+        ) ||
+      null
+    );
+  } catch {
+    return null;
+  }
+}
+
+export const uploadCuentaAvatar =
+  uploadAvatar;
 
 export function deleteAvatar() {
   try {
-    return lastInstance?.deleteAvatar?.() || null;
+    return (
+      lastInstance
+        ?.deleteAvatar?.() ||
+      null
+    );
   } catch {
     return null;
   }
 }
 
-export const deleteCuentaAvatar = deleteAvatar;
+export const deleteCuentaAvatar =
+  deleteAvatar;
+
+export function loadSessions(
+  options = {}
+) {
+  try {
+    return (
+      lastInstance
+        ?.loadSessions?.(
+          options
+        ) ||
+      null
+    );
+  } catch {
+    return null;
+  }
+}
+
+export const loadCuentaSessions =
+  loadSessions;
+
+export function refreshSessions() {
+  return loadSessions({
+    force: true,
+  });
+}
+
+export function deactivateAccount(
+  payload = null
+) {
+  try {
+    return (
+      lastInstance
+        ?.deactivateAccount?.(
+          payload
+        ) ||
+      null
+    );
+  } catch {
+    return null;
+  }
+}
+
+export const deactivateCuenta =
+  deactivateAccount;
 
 export function getItem() {
   try {
-    return lastInstance?.getItem?.() || cuentaMemory.item || null;
+    return (
+      lastInstance
+        ?.getItem?.() ||
+      null
+    );
   } catch {
-    return cuentaMemory.item || null;
+    return null;
   }
 }
 
-export const getCuenta = getItem;
+export const getCuenta =
+  getItem;
 
+export function getSessions() {
+  try {
+    return (
+      lastInstance
+        ?.getSessions?.() ||
+      []
+    );
+  } catch {
+    return [];
+  }
+}
+
+/*
+  Ya no hay "cache" de perfil en el index.
+  Se conserva el nombre para logout/remounts antiguos.
+*/
 export function clearCuentaViewCache() {
-  return clearCuentaMemory();
+  try {
+    lastInstance
+      ?.resetPresentation?.();
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function getSnapshot() {
-  if (lastInstance?.getSnapshot) {
-    return lastInstance.getSnapshot();
+  if (
+    lastInstance
+      ?.getSnapshot
+  ) {
+    return lastInstance
+      .getSnapshot();
   }
 
+  const api =
+    getCuentaApiSnapshot();
+
   return {
-    version: CUENTA_VIEW_VERSION,
+    version:
+      CUENTA_VIEW_VERSION,
+
+    apiVersion:
+      CUENTA_API_VERSION,
+
+    templateVersion:
+      CUENTA_TEMPLATE_VERSION,
+
     mounted: false,
-    hasInstance: false,
-    memory: {
-      loaded: cuentaMemory.loaded,
-      loadedAt: cuentaMemory.loadedAt,
-      hasItem: hasContent(cuentaMemory.item),
-      userKey: cuentaMemory.key ? "***" : "",
-      inFlight: Boolean(sharedLoadPromise),
+    destroyed: false,
+
+    loading: false,
+    refreshing: false,
+    saving: false,
+
+    hasHost: false,
+    hasItem: false,
+
+    mountedFrom:
+      "none",
+
+    lastError: "",
+    lastErrorCode: "",
+    lastSuccess: "",
+    lastRenderAt: 0,
+
+    authRefreshRequired:
+      false,
+
+    deactivated:
+      false,
+
+    sessions: {
+      loaded: false,
+      loading: false,
+      count: 0,
+      error: "",
     },
+
+    capabilities: {
+      readSelf: true,
+
+      updateSelfProfile:
+        false,
+
+      updateSelfTheme:
+        false,
+
+      updateSelfPrivacy:
+        false,
+
+      updateSelfLanguage:
+        false,
+
+      changePassword:
+        true,
+
+      avatarUpload:
+        true,
+
+      avatarDelete:
+        true,
+
+      sessionsRead:
+        true,
+
+      deactivateSelf:
+        true,
+    },
+
+    item: null,
+
+    architecture: {
+      apiBoundary: true,
+
+      directHttp: false,
+      rawFetch: false,
+      storage: false,
+
+      globalProfileCache:
+        false,
+
+      canonicalModelFromApi:
+        true,
+
+      adminUsersRoute:
+        false,
+
+      selfUpdateNetwork:
+        false,
+
+      unsupportedActionsBlockedInController:
+        true,
+
+      passwordStoredInState:
+        false,
+
+      fileStoredInState:
+        false,
+
+      sessionsOnDemand:
+        true,
+    },
+
+    api:
+      api
+        ? {
+            version:
+              api.version,
+
+            capabilities:
+              api.capabilities,
+          }
+        : null,
   };
 }
 
-export const getDebugSnapshot = getSnapshot;
+export const getDebugSnapshot =
+  getSnapshot;
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default CuentaView;

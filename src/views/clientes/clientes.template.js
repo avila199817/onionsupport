@@ -2,14 +2,21 @@
    Onion Support - Clientes Template
    Archivo: /src/views/clientes/clientes.template.js
 
-   CSS 1:1 · PRODUCTIVO
-   - Vista Clientes alineada con el patrón visual/DOM de Incidencias.
-   - Template puro: sin HTTP, sin DOM directo, sin Store, sin Router.
-   - Sin modales, sin <style>, sin style="", sin handlers inline.
-   - Acepta items/clientes/clients/rows/results/data.items/etc.
+   PRODUCTIVO · TEMPLATE PURO · CONTRATO CLIENTES V3
+
+   Responsabilidad:
+   - Renderizar exclusivamente la vista/listado de Clientes.
+   - Consumir el modelo canónico entregado por clientes.api.js/index.js.
+   - No hacer HTTP, no tocar Auth, Store, Router, DOM ni localStorage.
+   - No reinterpretar el dominio con una segunda capa de aliases masiva.
+   - Mantener el DOM/clases/data-* compatibles con el CSS y controlador.
+   - Filtrar, ordenar y aplicar visibleLimit únicamente en presentación.
+   - Escapar todo contenido dinámico y restringir URLs de avatar.
 ========================================================= */
 
-export const CLIENTES_TEMPLATE_VERSION = "clientes.template.css-1-1.incidencias-aligned.v3.table-contact-links";
+export const CLIENTES_TEMPLATE_VERSION =
+  "clientes.template.backend-contract.v4";
+
 export const CLIENTES_TABLE_TEMPLATE_VERSION = CLIENTES_TEMPLATE_VERSION;
 export const CLIENTES_VIEW_TEMPLATE_VERSION = CLIENTES_TEMPLATE_VERSION;
 
@@ -85,13 +92,18 @@ export const CLIENTES_TABLE_COLUMNS = Object.freeze([
 ]);
 
 /* =========================================================
-   HELPERS
+   SAFE HELPERS
 ========================================================= */
 
-const isObj = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
-const obj = (value, fallback = {}) => (isObj(value) ? value : fallback);
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
 
-function arr(value) {
+function safeObject(value, fallback = {}) {
+  return isObject(value) ? value : fallback;
+}
+
+function safeArray(value) {
   if (Array.isArray(value)) return value;
 
   if (
@@ -110,7 +122,7 @@ function arr(value) {
   return [];
 }
 
-function txt(value = "", fallback = "") {
+function cleanText(value = "", fallback = "") {
   const output = String(value ?? "")
     .replace(/[\r\n\t]/g, " ")
     .replace(/\s+/g, " ")
@@ -119,51 +131,43 @@ function txt(value = "", fallback = "") {
   return output || fallback;
 }
 
-/*
-  No se aplanan arrays: si llega { items: [...] }, aplanarlo convertiría
-  el array en el primer cliente y rompería el listado.
-*/
 function first(...values) {
   for (const value of values) {
     if (value === null || value === undefined) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
-    if (isObj(value) && Object.keys(value).length === 0) continue;
-
+    if (isObject(value) && Object.keys(value).length === 0) continue;
     return value;
   }
 
   return null;
 }
 
-function num(value = 0, fallback = 0) {
+function number(value = 0, fallback = 0) {
   if (value === null || value === undefined || value === "") return fallback;
-
   if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
 
   if (typeof value === "string") {
-    let clean = value
+    let normalized = value
       .trim()
       .replace(/[€$£¥%]/g, "")
       .replace(/[^\d.,+\-\s]/g, "")
       .replace(/\s+/g, "");
 
-    if (!clean || clean === "-" || clean === "+") return fallback;
+    if (!normalized || normalized === "+" || normalized === "-") return fallback;
 
-    const hasComma = clean.includes(",");
-    const hasDot = clean.includes(".");
+    const comma = normalized.lastIndexOf(",");
+    const dot = normalized.lastIndexOf(".");
 
-    if (hasComma && hasDot) {
-      const lastComma = clean.lastIndexOf(",");
-      const lastDot = clean.lastIndexOf(".");
-      clean = lastComma > lastDot
-        ? clean.replace(/\./g, "").replace(/,/g, ".")
-        : clean.replace(/,/g, "");
-    } else if (hasComma) {
-      clean = clean.replace(/,/g, ".");
+    if (comma >= 0 && dot >= 0) {
+      normalized = comma > dot
+        ? normalized.replace(/\./g, "").replace(/,/g, ".")
+        : normalized.replace(/,/g, "");
+    } else if (comma >= 0) {
+      normalized = normalized.replace(/,/g, ".");
     }
 
-    const parsed = Number(clean);
+    const parsed = Number(normalized);
     return Number.isFinite(parsed) ? parsed : fallback;
   }
 
@@ -172,10 +176,10 @@ function num(value = 0, fallback = 0) {
 }
 
 function clamp(value = 0, min = 0, max = 1) {
-  return Math.min(Math.max(num(value, min), min), max);
+  return Math.min(Math.max(number(value, min), min), max);
 }
 
-function esc(value = "") {
+function escapeHtml(value = "") {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -184,11 +188,18 @@ function esc(value = "") {
     .replace(/'/g, "&#39;");
 }
 
-const at = (value = "") => esc(txt(value, ""));
-const cls = (...values) => values.flat(Infinity).map((value) => txt(value, "")).filter(Boolean).join(" ");
+const attr = (value = "") => escapeHtml(cleanText(value, ""));
 
-function key(value = "") {
-  return txt(value, "")
+function joinClasses(...values) {
+  return values
+    .flat(Infinity)
+    .map((value) => cleanText(value, ""))
+    .filter(Boolean)
+    .join(" ");
+}
+
+function normalizeKey(value = "") {
+  return cleanText(value, "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -197,8 +208,8 @@ function key(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
-function searchKey(value = "") {
-  return txt(value, "")
+function normalizeSearch(value = "") {
+  return cleanText(value, "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -207,28 +218,35 @@ function searchKey(value = "") {
     .trim();
 }
 
-function htmlAttrs(attrs = {}) {
-  return Object.entries(obj(attrs))
+function htmlAttrs(attributes = {}) {
+  return Object.entries(safeObject(attributes))
     .map(([name, value]) => {
       if (!name || value === false || value === null || value === undefined) return "";
-      if (value === true) return esc(name);
-      return `${esc(name)}="${esc(value)}"`;
+      if (value === true) return escapeHtml(name);
+      return `${escapeHtml(name)}="${escapeHtml(value)}"`;
     })
     .filter(Boolean)
     .join(" ");
 }
 
-function safeUrl(value = "") {
-  const raw = txt(value, "");
+function safeAvatarUrl(value = "") {
+  const raw = cleanText(value, "");
 
   if (!raw || raw.startsWith("//") || /[\r\n\t\\]/.test(raw)) return "";
-  if (/^(javascript|data|vbscript|file):/i.test(raw) && !raw.startsWith("data:image/")) return "";
-  if (raw.startsWith("data:image/")) return raw;
+  if (/^(javascript|data|vbscript|file):/i.test(raw)) return "";
   if (/^blob:/i.test(raw)) return raw;
   if (raw.startsWith("/")) return raw.replace(/\/{2,}/g, "/");
   if (raw.startsWith("./") || raw.startsWith("../")) return raw;
 
-  if (/^https:\/\//i.test(raw) || /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(raw)) {
+  if (/^https:\/\//i.test(raw)) {
+    try {
+      return new URL(raw).href;
+    } catch {
+      return "";
+    }
+  }
+
+  if (/^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(raw)) {
     try {
       return new URL(raw).href;
     } catch {
@@ -239,42 +257,8 @@ function safeUrl(value = "") {
   return "";
 }
 
-function firstUrl(...values) {
-  for (const value of values) {
-    if (value === null || value === undefined) continue;
-
-    if (isObj(value)) {
-      const nested = firstUrl(
-        value.avatarUrl,
-        value.avatar,
-        value.picture,
-        value.photoUrl,
-        value.photoURL,
-        value.imageUrl,
-        value.logoUrl,
-        value.logo,
-        value.profile?.avatarUrl,
-        value.profile?.avatar,
-        value.profile?.picture,
-        value.raw?.avatarUrl,
-        value.raw?.avatar,
-        value.raw?.picture,
-        value.raw?.logoUrl
-      );
-
-      if (nested) return nested;
-      continue;
-    }
-
-    const url = safeUrl(value);
-    if (url) return url;
-  }
-
-  return "";
-}
-
-function hash(value = "") {
-  const source = txt(value, "onion");
+function hashText(value = "") {
+  const source = cleanText(value, "onion");
   let output = 2166136261;
 
   for (let index = 0; index < source.length; index += 1) {
@@ -291,13 +275,13 @@ function hash(value = "") {
 }
 
 function initials(value = "") {
-  return txt(value, "")
+  return cleanText(value, "")
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() || "")
     .join("")
-    .slice(0, 2) || "ON";
+    .slice(0, 2) || "CL";
 }
 
 /* =========================================================
@@ -305,7 +289,9 @@ function initials(value = "") {
 ========================================================= */
 
 function icon(name = "") {
-  const common = `aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
+  const common =
+    `aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
+
   const icons = {
     users: `<svg ${common}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
     refresh: `<svg ${common}><path d="M21 12a9 9 0 0 0-15-6.7L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 15 6.7l3-2.7"/><path d="M21 21v-5h-5"/></svg>`,
@@ -330,9 +316,9 @@ function icon(name = "") {
 
 function formatNumber(value = 0) {
   try {
-    return new Intl.NumberFormat("es-ES").format(num(value, 0));
+    return new Intl.NumberFormat("es-ES").format(number(value, 0));
   } catch {
-    return String(num(value, 0));
+    return String(number(value, 0));
   }
 }
 
@@ -340,11 +326,11 @@ function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
   try {
     return new Intl.NumberFormat("es-ES", {
       style: "currency",
-      currency: txt(currency, DEFAULT_CURRENCY).toUpperCase(),
+      currency: cleanText(currency, DEFAULT_CURRENCY).toUpperCase(),
       maximumFractionDigits: 2,
-    }).format(num(value, 0));
+    }).format(number(value, 0));
   } catch {
-    return `${num(value, 0).toFixed(2).replace(".", ",")} €`;
+    return `${number(value, 0).toFixed(2).replace(".", ",")} €`;
   }
 }
 
@@ -352,15 +338,15 @@ function toTimestamp(value = null) {
   if (!value) return 0;
 
   if (value instanceof Date) {
-    const ms = value.getTime();
-    return Number.isFinite(ms) ? ms : 0;
+    const timestamp = value.getTime();
+    return Number.isFinite(timestamp) ? timestamp : 0;
   }
 
   if (typeof value === "number" && Number.isFinite(value)) {
     return value > 9_999_999_999 ? value : value * 1000;
   }
 
-  const raw = txt(value, "");
+  const raw = cleanText(value, "");
   if (!raw) return 0;
 
   const numeric = Number(raw);
@@ -368,22 +354,13 @@ function toTimestamp(value = null) {
     return numeric > 9_999_999_999 ? numeric : numeric * 1000;
   }
 
-  const esMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:,\s*|\s+)?(?:(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
-  if (esMatch) {
-    const [, dd, mm, yyyy, hh = "0", min = "0", ss = "0"] = esMatch;
-    const date = new Date(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(min), Number(ss));
-    const ms = date.getTime();
-    return Number.isFinite(ms) ? ms : 0;
-  }
-
-  const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
-  const ms = date.getTime();
-  return Number.isFinite(ms) ? ms : 0;
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function formatDate(value = null) {
-  const ts = toTimestamp(value);
-  if (!ts) return "—";
+  const timestamp = toTimestamp(value);
+  if (!timestamp) return "—";
 
   try {
     return new Intl.DateTimeFormat("es-ES", {
@@ -392,67 +369,80 @@ function formatDate(value = null) {
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
-    }).format(new Date(ts));
+    }).format(new Date(timestamp));
   } catch {
-    return new Date(ts).toISOString();
+    return new Date(timestamp).toISOString();
   }
 }
 
 function formatShortDate(value = null) {
-  const ts = toTimestamp(value);
-  if (!ts) return "—";
+  const timestamp = toTimestamp(value);
+  if (!timestamp) return "—";
 
   try {
     return new Intl.DateTimeFormat("es-ES", {
       day: "2-digit",
       month: "short",
       year: "numeric",
-    }).format(new Date(ts));
+    }).format(new Date(timestamp));
   } catch {
-    return new Date(ts).toISOString().slice(0, 10);
+    return new Date(timestamp).toISOString().slice(0, 10);
   }
 }
 
 function formatRelativeDate(value = null) {
-  const ts = toTimestamp(value);
-  if (!ts) return "Sin actividad";
+  const timestamp = toTimestamp(value);
+  if (!timestamp) return "Sin actividad";
 
-  const diffMs = ts - Date.now();
-  const diffMin = Math.round(diffMs / 60000);
-  const absMin = Math.abs(diffMin);
+  const diffMinutes = Math.round((timestamp - Date.now()) / 60_000);
+  const absoluteMinutes = Math.abs(diffMinutes);
 
-  if (absMin < 1) return "Ahora mismo";
-  if (absMin < 60) return diffMin > 0 ? `En ${absMin} min` : `Hace ${absMin} min`;
+  if (absoluteMinutes < 1) return "Ahora mismo";
+  if (absoluteMinutes < 60) {
+    return diffMinutes > 0
+      ? `En ${absoluteMinutes} min`
+      : `Hace ${absoluteMinutes} min`;
+  }
 
-  const diffHours = Math.round(absMin / 60);
-  if (diffHours < 24) return diffMin > 0 ? `En ${diffHours} h` : `Hace ${diffHours} h`;
+  const hours = Math.round(absoluteMinutes / 60);
+  if (hours < 24) return diffMinutes > 0 ? `En ${hours} h` : `Hace ${hours} h`;
 
-  const diffDays = Math.round(diffHours / 24);
-  if (diffDays <= 7) {
-    return diffMin > 0
-      ? `En ${diffDays} día${diffDays === 1 ? "" : "s"}`
-      : `Hace ${diffDays} día${diffDays === 1 ? "" : "s"}`;
+  const days = Math.round(hours / 24);
+  if (days <= 7) {
+    return diffMinutes > 0
+      ? `En ${days} día${days === 1 ? "" : "s"}`
+      : `Hace ${days} día${days === 1 ? "" : "s"}`;
   }
 
   return formatShortDate(value);
 }
 
 function normalizeSort(value = "") {
-  const order = key(value || DEFAULT_SORT_ORDER);
-  if (["asc", "ascending", "oldest", "antiguos", "menor", "menor_mayor", "menor_a_mayor"].includes(order)) return "asc";
+  const order = normalizeKey(value || DEFAULT_SORT_ORDER);
+
+  if (["asc", "ascending", "oldest", "antiguos"].includes(order)) {
+    return "asc";
+  }
+
   return "desc";
 }
 
-const nextSort = (value = DEFAULT_SORT_ORDER) => (normalizeSort(value) === "asc" ? "desc" : "asc");
-const sortLabel = (value = DEFAULT_SORT_ORDER) => (normalizeSort(value) === "asc" ? "Fecha ↑" : "Fecha ↓");
+function nextSort(value = DEFAULT_SORT_ORDER) {
+  return normalizeSort(value) === "asc" ? "desc" : "asc";
+}
+
+function sortLabel(value = DEFAULT_SORT_ORDER) {
+  return normalizeSort(value) === "asc" ? "Fecha ↑" : "Fecha ↓";
+}
 
 /* =========================================================
-   DATA GETTERS
+   CANONICAL CLIENT PROJECTION
 ========================================================= */
 
-function unwrap(value = {}) {
-  const item = obj(value, {});
-  return obj(
+function unwrapCliente(value = {}) {
+  const item = safeObject(value);
+
+  return safeObject(
     first(
       item.cliente,
       item.client,
@@ -470,184 +460,592 @@ function unwrap(value = {}) {
   );
 }
 
-const rawOf = (item = {}) => obj(unwrap(item).raw, {});
+function normalizeEmail(value = "") {
+  const email = cleanText(value, "").toLowerCase();
+  if (!email || !email.includes("@")) return "";
+  return email;
+}
 
-function getId(item = {}) {
-  const r = unwrap(item);
-  const raw = rawOf(item);
-  return txt(
+function normalizeClienteType(value = "") {
+  const type = normalizeKey(value);
+
+  if (["empresa", "company", "business", "b2b", "autonomo"].includes(type)) {
+    return "empresa";
+  }
+
+  if (["particular", "persona", "individual", "b2c"].includes(type)) {
+    return "particular";
+  }
+
+  return "cliente";
+}
+
+function normalizeClienteStatus(value = "", source = {}) {
+  const status = normalizeKey(first(value, source.status, source.estado, source.state, ""));
+
+  if (["pending", "pendiente", "new", "nuevo", "invited"].includes(status)) {
+    return "pending";
+  }
+
+  if (["blocked", "bloqueado", "suspended", "locked"].includes(status)) {
+    return "blocked";
+  }
+
+  if (["inactive", "inactivo", "disabled", "archived", "deleted"].includes(status)) {
+    return "inactive";
+  }
+
+  if (["vip", "premium"].includes(status)) return "vip";
+
+  if (source.active === false || source.enabled === false || source.disabled === true) {
+    return "inactive";
+  }
+
+  return "active";
+}
+
+function statusBucket(item = {}) {
+  const status = normalizeClienteStatus(item.status, item);
+
+  if (status === "pending") return "pending";
+  if (status === "blocked" || status === "inactive") return "blocked";
+  return "active";
+}
+
+export function normalizeClienteModel(item = {}) {
+  const source = unwrapCliente(item);
+  const raw = safeObject(source.raw, source);
+  const contacto = safeObject(first(source.contacto, raw.contacto, {}));
+  const direccion = safeObject(first(source.direccion, source.address, raw.direccion, raw.address, {}));
+
+  const clienteId = cleanText(
     first(
-      r.clienteId,
-      r.clientId,
-      r.customerId,
-      r.id,
-      r.uid,
-      r._id,
-      r.code,
-      r.codigo,
-      r.nif,
-      r.cif,
-      r.email,
+      source.clienteId,
+      source.clientId,
+      source.customerId,
+      source.id,
+      source._id,
+      source.uid,
       raw.clienteId,
       raw.clientId,
       raw.customerId,
       raw.id,
-      raw.uid,
       raw._id,
-      raw.code,
-      raw.codigo,
-      raw.nif,
-      raw.cif,
-      raw.email,
+      raw.uid,
       ""
     ),
     ""
   );
-}
 
-function getCode(item = {}) {
-  const r = unwrap(item);
-  const raw = rawOf(item);
-  return txt(
-    first(
-      r.code,
-      r.codigo,
-      r.clienteCode,
-      r.clienteId,
-      r.clientId,
-      r.id,
-      r.nif,
-      r.cif,
-      raw.code,
-      raw.codigo,
-      raw.clienteCode,
-      raw.clienteId,
-      raw.clientId,
-      raw.id,
-      raw.nif,
-      raw.cif,
-      "CLI-SIN-ID"
-    ),
-    "CLI-SIN-ID"
+  const userId = cleanText(
+    first(source.userId, raw.userId, source.usuarioId, raw.usuarioId, ""),
+    ""
   );
-}
 
-function getName(item = {}) {
-  const r = unwrap(item);
-  const raw = rawOf(item);
-  const firstName = txt(first(r.firstName, r.nombre, raw.firstName, raw.nombre), "");
-  const lastName = txt(first(r.lastName, r.apellidos, raw.lastName, raw.apellidos), "");
-  const composed = txt(`${firstName} ${lastName}`, "");
-
-  return txt(
+  const nombreFiscal = cleanText(
     first(
-      r.razonSocial,
-      r.businessName,
-      r.companyName,
-      r.empresa,
-      r.fullName,
-      r.displayName,
-      r.name,
-      r.nombre,
-      composed,
-      r.email,
+      source.nombreFiscal,
+      source.razonSocial,
+      source.businessName,
+      source.companyName,
+      source.displayName,
+      source.name,
+      source.nombre,
+      raw.nombreFiscal,
       raw.razonSocial,
-      raw.businessName,
-      raw.companyName,
-      raw.empresa,
-      raw.fullName,
       raw.displayName,
       raw.name,
-      raw.nombre,
-      raw.email,
+      clienteId,
       "Cliente"
     ),
     "Cliente"
   );
+
+  const contactoNombre = cleanText(
+    first(
+      source.contactoNombre,
+      source.nombreContacto,
+      contacto.nombre,
+      contacto.name,
+      raw.contactoNombre,
+      nombreFiscal,
+      ""
+    ),
+    ""
+  );
+
+  const email = normalizeEmail(
+    first(
+      source.email,
+      source.emailLower,
+      source.contactoEmail,
+      source.contactEmail,
+      contacto.email,
+      contacto.emailLower,
+      raw.email,
+      raw.contactoEmail,
+      ""
+    )
+  );
+
+  const phone = cleanText(
+    first(
+      source.phone,
+      source.telefono,
+      source.contactoPhone,
+      contacto.phone,
+      contacto.telefono,
+      raw.phone,
+      raw.telefono,
+      raw.contactoPhone,
+      ""
+    ),
+    ""
+  );
+
+  const nif = cleanText(
+    first(source.nif, source.cif, source.taxId, raw.nif, raw.cif, raw.taxId, ""),
+    ""
+  ).toUpperCase();
+
+  const city = cleanText(
+    first(
+      source.city,
+      source.ciudad,
+      direccion.city,
+      direccion.ciudad,
+      raw.city,
+      raw.ciudad,
+      ""
+    ),
+    ""
+  );
+
+  const tipo = normalizeClienteType(first(source.tipo, source.type, raw.tipo, raw.type, ""));
+  const status = normalizeClienteStatus(first(source.status, source.estado, raw.status, raw.estado, ""), source);
+
+  const avatar = safeAvatarUrl(
+    first(
+      source.avatar,
+      source.avatarUrl,
+      source.photoUrl,
+      source.picture,
+      raw.avatar,
+      raw.avatarUrl,
+      raw.photoUrl,
+      raw.picture,
+      ""
+    )
+  );
+
+  const createdAt = first(source.createdAt, raw.createdAt, null);
+  const updatedAt = first(source.updatedAt, source.lastActivityAt, raw.updatedAt, raw.lastActivityAt, createdAt, null);
+
+  const totalAmount = number(
+    first(source.totalAmount, source.totalImporte, source.facturasTotal, raw.totalAmount, raw.totalImporte, 0),
+    0
+  );
+
+  return {
+    ...source,
+    raw,
+
+    id: clienteId,
+    clienteId,
+    clientId: clienteId,
+    customerId: clienteId,
+    userId,
+
+    code: cleanText(first(source.code, source.codigo, clienteId), clienteId || "CLI-SIN-ID"),
+    codigo: cleanText(first(source.codigo, source.code, clienteId), clienteId || "CLI-SIN-ID"),
+
+    nombreFiscal,
+    razonSocial: cleanText(first(source.razonSocial, nombreFiscal), nombreFiscal),
+    displayName: cleanText(first(source.displayName, nombreFiscal), nombreFiscal),
+    name: cleanText(first(source.name, nombreFiscal), nombreFiscal),
+    nombre: cleanText(first(source.nombre, nombreFiscal), nombreFiscal),
+
+    contactoNombre,
+    nombreContacto: contactoNombre,
+    contacto: {
+      ...contacto,
+      nombre: contactoNombre,
+      name: contactoNombre,
+      email,
+      emailLower: email,
+      phone,
+      telefono: phone,
+    },
+
+    email,
+    emailLower: email,
+    phone,
+    telefono: phone,
+
+    nif,
+    cif: nif,
+    taxId: nif,
+
+    direccion: {
+      ...direccion,
+      ciudad: city,
+      city,
+    },
+    address: {
+      ...direccion,
+      ciudad: city,
+      city,
+    },
+    city,
+    ciudad: city,
+
+    tipo,
+    type: tipo,
+
+    status,
+    estado: status,
+    active: status === "active" || status === "vip",
+    blocked: status === "blocked",
+    vip: status === "vip",
+
+    avatar,
+    avatarUrl: avatar,
+
+    createdAt,
+    updatedAt,
+    lastActivityAt: first(source.lastActivityAt, updatedAt, createdAt, null),
+
+    totalAmount,
+  };
+}
+
+function getClienteId(item = {}) {
+  return cleanText(normalizeClienteModel(item).clienteId, "");
+}
+
+function getClienteCode(item = {}) {
+  const current = normalizeClienteModel(item);
+  return cleanText(first(current.code, current.codigo, current.clienteId, "CLI-SIN-ID"), "CLI-SIN-ID");
+}
+
+function getClienteName(item = {}) {
+  return cleanText(normalizeClienteModel(item).nombreFiscal, "Cliente");
+}
+
+function getClienteEmail(item = {}) {
+  return normalizeClienteModel(item).email;
+}
+
+function getClientePhone(item = {}) {
+  return cleanText(normalizeClienteModel(item).phone, "");
+}
+
+function getClienteCity(item = {}) {
+  return cleanText(normalizeClienteModel(item).city, "");
+}
+
+function getClienteNif(item = {}) {
+  return cleanText(normalizeClienteModel(item).nif, "").toUpperCase();
+}
+
+function getClienteType(item = {}) {
+  return normalizeClienteModel(item).tipo;
+}
+
+function getClienteTypeLabel(item = {}) {
+  const type = getClienteType(item);
+
+  if (type === "empresa") return "Empresa";
+  if (type === "particular") return "Particular";
+  return "Cliente";
+}
+
+function getClienteStatus(item = {}) {
+  return normalizeClienteModel(item).status;
+}
+
+function getClienteStatusLabel(itemOrStatus = {}) {
+  const status = typeof itemOrStatus === "string"
+    ? normalizeClienteStatus(itemOrStatus)
+    : getClienteStatus(itemOrStatus);
+
+  const labels = {
+    active: "Activo",
+    vip: "VIP",
+    pending: "Pendiente",
+    blocked: "Bloqueado",
+    inactive: "Inactivo",
+  };
+
+  return labels[status] || "Activo";
+}
+
+function getClienteCreatedAt(item = {}) {
+  return normalizeClienteModel(item).createdAt;
+}
+
+function getClienteUpdatedAt(item = {}) {
+  const current = normalizeClienteModel(item);
+  return first(current.lastActivityAt, current.updatedAt, current.createdAt, null);
+}
+
+function getClienteAmount(item = {}) {
+  return number(normalizeClienteModel(item).totalAmount, 0);
+}
+
+function getClienteAvatar(item = {}) {
+  return normalizeClienteModel(item).avatar;
 }
 
 function getClienteInitials(item = {}) {
-  const r = unwrap(item);
-  const raw = rawOf(item);
+  const current = normalizeClienteModel(item);
+  const name = cleanText(first(current.contactoNombre, current.nombreFiscal), "");
 
-  const firstName = txt(
-    first(
-      r.firstName,
-      r.nombrePropio,
-      r.profile?.firstName,
-      r.profile?.nombrePropio,
-      raw.firstName,
-      raw.nombrePropio,
-      raw.profile?.firstName,
-      raw.profile?.nombrePropio
-    ),
-    ""
-  );
+  if (name && !name.includes("@")) return initials(name);
 
-  const lastName = txt(
-    first(
-      r.lastName,
-      r.apellidos,
-      r.surname,
-      r.profile?.lastName,
-      r.profile?.apellidos,
-      r.profile?.surname,
-      raw.lastName,
-      raw.apellidos,
-      raw.surname,
-      raw.profile?.lastName,
-      raw.profile?.apellidos,
-      raw.profile?.surname
-    ),
-    ""
-  );
+  const emailLocal = current.email.split("@")[0] || "";
+  if (emailLocal) return initials(emailLocal.replace(/[._+\-\d]+/g, " "));
 
-  if (firstName && lastName) return `${firstName[0] || ""}${lastName[0] || ""}`.toUpperCase() || "CL";
-
-  const displayName = txt(
-    first(
-      r.fullName,
-      r.displayName,
-      r.name,
-      r.nombreCompleto,
-      raw.fullName,
-      raw.displayName,
-      raw.name,
-      raw.nombreCompleto,
-      getName(item)
-    ),
-    ""
-  );
-
-  const cleanDisplay = displayName.includes("@") ? "" : displayName;
-  const parts = cleanDisplay.split(/\s+/).filter(Boolean);
-
-  if (parts.length >= 2) return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || "CL";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase() || "CL";
-
-  const emailLocal = getEmail(item).split("@")[0] || "";
-  const emailParts = emailLocal.split(/[._+\-\d]+/).filter(Boolean);
-
-  if (emailParts.length >= 2) return `${emailParts[0]?.[0] || ""}${emailParts[1]?.[0] || ""}`.toUpperCase() || "CL";
-  if (emailParts.length === 1) return emailParts[0].slice(0, 2).toUpperCase() || "CL";
-
-  return initials(first(getCode(item), getId(item), "CL"));
+  return initials(first(current.code, current.clienteId, "CL"));
 }
 
-function getEmail(item = {}) {
-  const r = unwrap(item);
-  const raw = rawOf(item);
-  return txt(first(r.email, r.mail, r.emailLower, r.contactEmail, r.billingEmail, r.facturacionEmail, raw.email, raw.mail, raw.emailLower, raw.contactEmail, raw.billingEmail, raw.facturacionEmail, ""), "").toLowerCase();
+function clienteSortTime(item = {}) {
+  return toTimestamp(getClienteUpdatedAt(item)) || toTimestamp(getClienteCreatedAt(item));
 }
 
-function getPhone(item = {}) {
-  const r = unwrap(item);
-  const raw = rawOf(item);
-  return txt(first(r.phone, r.telefono, r.mobile, r.movil, r.phoneNumber, raw.phone, raw.telefono, raw.mobile, raw.movil, raw.phoneNumber, ""), "");
+export function normalizeClientesCollection(items = []) {
+  const map = new Map();
+  let anonymousIndex = 0;
+
+  for (const value of safeArray(items)) {
+    if (!isObject(value)) continue;
+
+    const normalized = normalizeClienteModel(value);
+    const id = normalized.clienteId;
+    const key = id || `anonymous:${anonymousIndex++}`;
+
+    if (map.has(key)) {
+      const previous = map.get(key);
+      map.set(key, normalizeClienteModel({
+        ...previous,
+        ...normalized,
+        raw: {
+          ...safeObject(previous.raw),
+          ...safeObject(normalized.raw),
+        },
+      }));
+    } else {
+      map.set(key, normalized);
+    }
+  }
+
+  return [...map.values()].sort((a, b) => {
+    const diff = clienteSortTime(b) - clienteSortTime(a);
+    if (diff !== 0) return diff;
+
+    return getClienteName(a).localeCompare(getClienteName(b), "es", {
+      numeric: true,
+      sensitivity: "base",
+    });
+  });
 }
+
+/* =========================================================
+   VIEW MODEL
+========================================================= */
+
+function envelopeObjects(payload = null, maxDepth = 6) {
+  const output = [];
+  const queue = [{ value: payload, depth: 0 }];
+  const seen = new Set();
+
+  while (queue.length) {
+    const { value, depth } = queue.shift();
+    if (!isObject(value) || seen.has(value) || depth > maxDepth) continue;
+
+    seen.add(value);
+    output.push(value);
+
+    for (const key of ["data", "payload", "result", "response", "body"]) {
+      if (isObject(value[key])) {
+        queue.push({ value: value[key], depth: depth + 1 });
+      }
+    }
+  }
+
+  return output;
+}
+
+function resolveItems(input = {}) {
+  if (Array.isArray(input)) return input;
+
+  for (const source of envelopeObjects(input)) {
+    for (const key of ["items", "clientes", "clients", "customers", "rows", "results"]) {
+      if (Array.isArray(source[key])) return source[key];
+    }
+  }
+
+  return [];
+}
+
+function normalizeFilter(value = "all") {
+  const filter = normalizeKey(value || "all") || "all";
+  return FILTERS.some((item) => item.key === filter) ? filter : "all";
+}
+
+function clienteSearchText(item = {}) {
+  const current = normalizeClienteModel(item);
+
+  return normalizeSearch([
+    current.clienteId,
+    current.userId,
+    current.code,
+    current.nombreFiscal,
+    current.contactoNombre,
+    current.email,
+    current.phone,
+    current.city,
+    current.nif,
+    current.tipo,
+    current.status,
+  ].join(" "));
+}
+
+function filterAndSort(items = [], { filter = "all", search = "", sortOrder = DEFAULT_SORT_ORDER } = {}) {
+  const normalizedFilter = normalizeFilter(filter);
+  const query = normalizeSearch(search);
+  const terms = query.split(/\s+/).filter(Boolean);
+  const order = normalizeSort(sortOrder);
+
+  return normalizeClientesCollection(items)
+    .filter((item) => {
+      if (normalizedFilter !== "all" && statusBucket(item) !== normalizedFilter) {
+        return false;
+      }
+
+      if (!terms.length) return true;
+
+      const haystack = clienteSearchText(item);
+      return terms.every((term) => haystack.includes(term));
+    })
+    .sort((a, b) => {
+      const diff = order === "asc"
+        ? clienteSortTime(a) - clienteSortTime(b)
+        : clienteSortTime(b) - clienteSortTime(a);
+
+      if (diff !== 0) return diff;
+
+      return getClienteName(a).localeCompare(getClienteName(b), "es", {
+        numeric: true,
+        sensitivity: "base",
+      });
+    });
+}
+
+function filterCounts(items = []) {
+  const counts = { all: 0, active: 0, pending: 0, blocked: 0 };
+
+  for (const item of normalizeClientesCollection(items)) {
+    const bucket = statusBucket(item);
+    counts.all += 1;
+    counts[bucket] += 1;
+  }
+
+  return counts;
+}
+
+function computeStats(items = [], incoming = {}) {
+  const normalized = normalizeClientesCollection(items);
+  const counts = filterCounts(normalized);
+  const source = safeObject(incoming);
+
+  const calculatedAmount = normalized.reduce(
+    (total, item) => total + getClienteAmount(item),
+    0
+  );
+
+  const calculatedLastUpdate = normalized.reduce(
+    (latest, item) => Math.max(latest, clienteSortTime(item)),
+    0
+  );
+
+  return {
+    total: normalized.length,
+    activeCount: counts.active,
+    pendingCount: counts.pending,
+    blockedCount: counts.blocked,
+    vipCount: normalized.filter((item) => getClienteStatus(item) === "vip").length,
+    totalAmount: number(first(source.totalAmount, source.invoiceTotal, calculatedAmount), calculatedAmount),
+    invoiceTotal: number(first(source.invoiceTotal, source.totalAmount, calculatedAmount), calculatedAmount),
+    lastUpdateTs: number(first(source.lastUpdateTs, calculatedLastUpdate), calculatedLastUpdate),
+  };
+}
+
+function buildVm(input = {}) {
+  const data = safeObject(input);
+  const items = normalizeClientesCollection(resolveItems(data));
+  const filter = normalizeFilter(first(data.filter, data.status, data.state?.filter, "all"));
+  const search = cleanText(first(data.search, data.query, data.q, data.state?.search, ""), "");
+  const sortOrder = normalizeSort(first(data.sortOrder, data.order, data.state?.sortOrder, DEFAULT_SORT_ORDER));
+  const filteredItems = filterAndSort(items, { filter, search, sortOrder });
+  const visibleLimit = clamp(
+    first(data.visibleLimit, data.limit, data.state?.visibleLimit, DEFAULT_VISIBLE_ROWS),
+    1,
+    1000
+  );
+  const visibleItems = filteredItems.slice(0, visibleLimit);
+  const reportedTotal = Math.max(0, number(first(data.total, data.remoteCount, data.totalCount, items.length), items.length));
+  const total = items.length;
+
+  return {
+    data,
+    route: cleanText(first(data.route, data.routes?.clientes, DEFAULT_ROUTE), DEFAULT_ROUTE),
+    admin: Boolean(data.admin || data.role === "admin"),
+
+    items,
+    filteredItems,
+    visibleItems,
+    total,
+    reportedTotal,
+    filteredTotal: filteredItems.length,
+    visibleCount: visibleItems.length,
+    visibleLimit,
+    remainingCount: Math.max(0, filteredItems.length - visibleItems.length),
+    hasMore: filteredItems.length > visibleItems.length,
+
+    loading: data.loading === true,
+    refreshing: data.refreshing === true,
+    creating: data.creating === true,
+    loadingMore: data.loadingMore === true,
+    error: cleanText(first(data.error, data.state?.error, ""), ""),
+
+    filter,
+    search,
+    sortOrder,
+    sortLabel: sortLabel(sortOrder),
+    nextSortOrder: nextSort(sortOrder),
+    nextSortLabel: sortLabel(nextSort(sortOrder)),
+    filterCounts: filterCounts(items),
+    stats: computeStats(items, data.stats),
+    openingClienteId: cleanText(first(data.openingClienteId, data.openingClientId, ""), ""),
+
+    diagnostics: {
+      templateVersion: CLIENTES_TEMPLATE_VERSION,
+      extractedItems: items.length,
+      reportedTotal,
+      totalMismatch: reportedTotal !== items.length,
+      canonicalBoundary: true,
+      backendPagination: false,
+    },
+  };
+}
+
+/* =========================================================
+   ROW RENDERERS
+========================================================= */
 
 function formatPhone(value = "") {
-  const raw = txt(value, "");
+  const raw = cleanText(value, "");
   if (!raw) return "";
 
   const digits = raw.replace(/[^\d]/g, "");
@@ -659,547 +1057,142 @@ function formatPhone(value = "") {
   if (digits.length === 11 && digits.startsWith("34")) {
     prefix = "+34 ";
     national = digits.slice(2);
-  } else if (raw.trim().startsWith("+34") && digits.length >= 11) {
+  } else if (raw.startsWith("+34") && digits.length >= 11) {
     prefix = "+34 ";
     national = digits.slice(-9);
   }
 
-  if (national.length === 9) return `${prefix}${national.slice(0, 3)} ${national.slice(3, 6)} ${national.slice(6)}`;
+  if (national.length === 9) {
+    return `${prefix}${national.slice(0, 3)} ${national.slice(3, 6)} ${national.slice(6)}`;
+  }
+
   return raw;
 }
 
 function mailtoHref(email = "") {
-  const safeEmail = txt(email, "").toLowerCase();
-  return safeEmail && safeEmail.includes("@") ? `mailto:${encodeURIComponent(safeEmail).replace(/%40/g, "@").replace(/%2E/g, ".")}` : "";
+  const value = normalizeEmail(email);
+  return value
+    ? `mailto:${encodeURIComponent(value).replace(/%40/g, "@").replace(/%2E/g, ".")}`
+    : "";
 }
 
 function telHref(phone = "") {
-  const raw = txt(phone, "");
+  const raw = cleanText(phone, "");
   if (!raw) return "";
 
-  const keepPlus = raw.trim().startsWith("+");
   const digits = raw.replace(/[^\d]/g, "");
   if (!digits) return "";
 
-  return `tel:${keepPlus ? "+" : ""}${digits}`;
+  return `tel:${raw.startsWith("+") ? "+" : ""}${digits}`;
 }
-
-function getLocation(item = {}) {
-  const r = unwrap(item);
-  const raw = rawOf(item);
-  return txt(
-    first(
-      r.city,
-      r.ciudad,
-      r.location?.city,
-      r.location?.ciudad,
-      r.address?.city,
-      r.address?.ciudad,
-      r.direccion?.city,
-      r.direccion?.ciudad,
-      raw.city,
-      raw.ciudad,
-      raw.location?.city,
-      raw.location?.ciudad,
-      raw.address?.city,
-      raw.address?.ciudad,
-      raw.direccion?.city,
-      raw.direccion?.ciudad,
-      ""
-    ),
-    ""
-  );
-}
-
-function getNif(item = {}) {
-  const r = unwrap(item);
-  const raw = rawOf(item);
-  return txt(first(r.nif, r.cif, r.taxId, r.vat, r.documentId, raw.nif, raw.cif, raw.taxId, raw.vat, raw.documentId, ""), "").toUpperCase();
-}
-
-function getAvatar(item = {}) {
-  const r = unwrap(item);
-  return firstUrl(r, r.profile, r.raw);
-}
-
-function getType(item = {}) {
-  const r = unwrap(item);
-  const raw = rawOf(item);
-  return key(first(r.tipo, r.type, r.kind, r.segment, r.category, raw.tipo, raw.type, raw.kind, raw.segment, raw.category, "cliente"));
-}
-
-function getTypeLabel(item = {}) {
-  const value = getType(item);
-  const labels = {
-    empresa: "Empresa",
-    company: "Empresa",
-    autonomo: "Autónomo",
-    freelance: "Autónomo",
-    particular: "Particular",
-    persona: "Particular",
-    cliente: "Cliente",
-  };
-
-  return labels[value] || txt(value.replace(/_/g, " "), "Cliente").replace(/^./, (letter) => letter.toUpperCase());
-}
-
-function getStatusRaw(item = {}) {
-  const r = unwrap(item);
-  const raw = rawOf(item);
-  const explicit = first(r.status, r.estado, r.state, r.statusKey, raw.status, raw.estado, raw.state, raw.statusKey);
-
-  if (explicit !== null && explicit !== undefined && explicit !== "") return key(explicit);
-
-  const active = first(r.active, r.isActive, r.enabled, raw.active, raw.isActive, raw.enabled);
-  if (active === false) return "blocked";
-  if (active === true) return "active";
-
-  return "active";
-}
-
-function statusKey(item = {}) {
-  const status = getStatusRaw(item);
-
-  if (["pending", "pendiente", "new", "nuevo", "invited", "invitation_pending", "unverified", "sin_validar"].includes(status)) return "pending";
-  if (["blocked", "bloqueado", "bloqueada", "inactive", "inactivo", "inactiva", "disabled", "suspended", "deleted", "archived", "banned"].includes(status)) return "blocked";
-  if (["vip", "premium"].includes(status)) return "active";
-  if (getType(item) === "vip" || unwrap(item).vip === true || unwrap(item).isVip === true) return "active";
-
-  return "active";
-}
-
-function statusLabel(itemOrStatus = {}) {
-  const status = typeof itemOrStatus === "string" ? key(itemOrStatus) : statusKey(itemOrStatus);
-  const labels = {
-    active: "Activo",
-    pending: "Pendiente",
-    blocked: "Bloqueado",
-  };
-
-  return labels[status] || txt(status.replace(/_/g, " "), "Activo").replace(/^./, (letter) => letter.toUpperCase());
-}
-
-function getCreated(item = {}) {
-  const r = unwrap(item);
-  const raw = rawOf(item);
-  return first(r.createdAt, r.created, r.registeredAt, r.altaAt, r.fechaAlta, r.createdOn, raw.createdAt, raw.created, raw.registeredAt, raw.altaAt, raw.fechaAlta, raw.createdOn, "");
-}
-
-function getUpdated(item = {}) {
-  const r = unwrap(item);
-  const raw = rawOf(item);
-  return first(r.lastActivityAt, r.updatedAt, r.modifiedAt, r.lastInvoiceAt, r.lastTicketAt, r.lastContactAt, r.createdAt, raw.lastActivityAt, raw.updatedAt, raw.modifiedAt, raw.lastInvoiceAt, raw.lastTicketAt, raw.lastContactAt, raw.createdAt, "");
-}
-
-function getAmount(item = {}) {
-  const r = unwrap(item);
-  const raw = rawOf(item);
-  return num(first(r.totalAmount, r.totalImporte, r.facturasTotal, r.invoicesTotal, r.amount, r.importe, raw.totalAmount, raw.totalImporte, raw.facturasTotal, raw.invoicesTotal, raw.amount, raw.importe, 0), 0);
-}
-
-function sortTime(item = {}) {
-  const ts = toTimestamp(getUpdated(item)) || toTimestamp(getCreated(item));
-  return Number.isFinite(ts) ? ts : 0;
-}
-
-export function normalizeClienteModel(item = {}) {
-  const raw = obj(item, {});
-  const id = getId(raw);
-  const email = getEmail(raw);
-  const name = getName(raw);
-  const status = getStatusRaw(raw);
-  const type = getType(raw);
-
-  return {
-    ...raw,
-    raw,
-
-    id: id || email,
-    uid: first(raw.uid, id, email, ""),
-    clienteId: first(raw.clienteId, raw.clientId, id, email, ""),
-    clientId: first(raw.clientId, raw.clienteId, id, email, ""),
-    customerId: first(raw.customerId, id, email, ""),
-
-    code: getCode(raw),
-    codigo: getCode(raw),
-
-    fullName: name,
-    displayName: txt(first(raw.displayName, raw.fullName, raw.name, raw.nombre, name), name),
-    name,
-    nombre: txt(first(raw.nombre, raw.name, name), name),
-    razonSocial: txt(first(raw.razonSocial, raw.businessName, raw.companyName, name), name),
-
-    email,
-    phone: getPhone(raw),
-    telefono: getPhone(raw),
-    city: getLocation(raw),
-    ciudad: getLocation(raw),
-    nif: getNif(raw),
-    cif: getNif(raw),
-
-    status,
-    estado: status,
-    type,
-    tipo: type,
-
-    createdAt: first(raw.createdAt, raw.created, raw.registeredAt, raw.altaAt, raw.fechaAlta, ""),
-    updatedAt: first(raw.updatedAt, raw.modifiedAt, raw.lastActivityAt, raw.lastContactAt, raw.createdAt, ""),
-    lastActivityAt: first(raw.lastActivityAt, raw.updatedAt, raw.modifiedAt, raw.lastContactAt, raw.createdAt, ""),
-
-    totalAmount: getAmount(raw),
-  };
-}
-
-export function normalizeClientesCollection(items = []) {
-  const map = new Map();
-
-  for (const item of arr(items)) {
-    if (!isObj(item)) continue;
-
-    const normalized = normalizeClienteModel(item);
-    const id = getId(normalized) || getEmail(normalized) || getCode(normalized);
-    if (!id) continue;
-
-    const previous = map.get(id) || {};
-    map.set(id, { ...previous, ...normalized });
-  }
-
-  return [...map.values()].sort((a, b) => {
-    const diff = sortTime(b) - sortTime(a);
-    if (diff !== 0) return diff;
-
-    return getName(a).localeCompare(getName(b), "es", {
-      numeric: true,
-      sensitivity: "base",
-    });
-  });
-}
-
-/* =========================================================
-   ENVELOPE / VIEW MODEL
-========================================================= */
-
-function envelopeObjects(payload = null, maxDepth = 8) {
-  const queue = [{ value: payload, depth: 0 }];
-  const seen = new Set();
-  const output = [];
-
-  while (queue.length) {
-    const { value, depth } = queue.shift();
-    if (!isObj(value) || seen.has(value) || depth > maxDepth) continue;
-
-    seen.add(value);
-    output.push(value);
-
-    for (const keyName of ["data", "payload", "response", "result", "results", "body"]) {
-      if (isObj(value[keyName])) queue.push({ value: value[keyName], depth: depth + 1 });
-    }
-  }
-
-  return output;
-}
-
-function getResolvedItems(input = {}) {
-  if (Array.isArray(input)) return input;
-
-  for (const source of envelopeObjects(input)) {
-    const candidate = first(
-      source.items,
-      source.clientes,
-      source.clients,
-      source.customers,
-      source.rows,
-      source.results,
-      source.documents,
-      source.resources,
-      source.data?.items,
-      source.data?.clientes,
-      source.data?.clients,
-      source.data?.rows,
-      source.data?.results
-    );
-
-    if (Array.isArray(candidate)) return candidate;
-  }
-
-  return [];
-}
-
-function resolveRemoteTotal(input = {}, items = []) {
-  for (const source of envelopeObjects(input)) {
-    const total = first(
-      source.total,
-      source.remoteCount,
-      source.totalCount,
-      source.count,
-      source.totalItems,
-      source.totalResults,
-      source.data?.total,
-      source.data?.remoteCount,
-      source.data?.totalCount,
-      source.data?.count
-    );
-
-    const parsed = num(total, -1);
-    if (parsed >= 0) return Math.max(parsed, arr(items).length);
-  }
-
-  return arr(items).length;
-}
-
-function normalizeFilter(value = "all") {
-  const filter = key(value || "all") || "all";
-  return FILTERS.some((item) => item.key === filter) ? filter : "all";
-}
-
-function getSearch(input = {}) {
-  return txt(first(input.search, input.query, input.q, input.filters?.search, input.state?.search, ""), "");
-}
-
-function matchesFilter(item = {}, filter = "all") {
-  if (filter === "all") return true;
-  return statusKey(item) === filter;
-}
-
-function haystack(item = {}) {
-  return searchKey([
-    getId(item),
-    getCode(item),
-    getName(item),
-    getEmail(item),
-    getPhone(item),
-    getLocation(item),
-    getNif(item),
-    getTypeLabel(item),
-    statusLabel(item),
-  ].join(" "));
-}
-
-function matchesSearch(item = {}, query = "") {
-  const term = searchKey(query);
-  if (!term) return true;
-
-  const source = haystack(item);
-  return term.split(/\s+/).filter(Boolean).every((part) => source.includes(part));
-}
-
-function filterAndSort(items = [], input = {}) {
-  const filter = normalizeFilter(first(input.filter, input.status, input.state?.filter, "all"));
-  const search = getSearch(input);
-  const order = normalizeSort(first(input.sortOrder, input.order, input.state?.sortOrder, DEFAULT_SORT_ORDER));
-
-  const filtered = normalizeClientesCollection(items).filter((item) => matchesFilter(item, filter) && matchesSearch(item, search));
-
-  return filtered.sort((a, b) => {
-    const diff = order === "asc" ? sortTime(a) - sortTime(b) : sortTime(b) - sortTime(a);
-    if (diff !== 0) return diff;
-
-    return getName(a).localeCompare(getName(b), "es", {
-      numeric: true,
-      sensitivity: "base",
-    });
-  });
-}
-
-function filterCounts(items = []) {
-  const base = { all: 0, active: 0, pending: 0, blocked: 0 };
-
-  for (const item of normalizeClientesCollection(items)) {
-    const status = statusKey(item);
-    base.all += 1;
-    if (base[status] !== undefined) base[status] += 1;
-  }
-
-  return base;
-}
-
-function mergeStats(items = [], incoming = {}) {
-  const normalized = normalizeClientesCollection(items);
-  const counts = filterCounts(normalized);
-  const stats = obj(incoming, {});
-
-  let totalAmount = 0;
-  let lastUpdateTs = 0;
-
-  for (const item of normalized) {
-    totalAmount += getAmount(item);
-    lastUpdateTs = Math.max(lastUpdateTs, sortTime(item));
-  }
-
-  return {
-    total: Math.max(num(first(stats.total, stats.count, normalized.length), normalized.length), normalized.length),
-    activeCount: num(first(stats.activeCount, stats.active, counts.active), counts.active),
-    pendingCount: num(first(stats.pendingCount, stats.pending, counts.pending), counts.pending),
-    blockedCount: num(first(stats.blockedCount, stats.blocked, counts.blocked), counts.blocked),
-    vipCount: num(first(stats.vipCount, stats.vip, counts.vip), counts.vip),
-    totalAmount: num(first(stats.totalAmount, stats.invoiceTotal, stats.amount, totalAmount), totalAmount),
-    invoiceTotal: num(first(stats.invoiceTotal, stats.totalAmount, totalAmount), totalAmount),
-    lastUpdateTs: num(first(stats.lastUpdateTs, stats.lastUpdateAt ? toTimestamp(stats.lastUpdateAt) : 0, lastUpdateTs), lastUpdateTs),
-  };
-}
-
-function buildVm(input = {}) {
-  const data = obj(input, {});
-  const rawItems = getResolvedItems(data);
-  const items = normalizeClientesCollection(rawItems);
-  const filter = normalizeFilter(first(data.filter, data.status, data.state?.filter, "all"));
-  const search = getSearch(data);
-  const sortOrder = normalizeSort(first(data.sortOrder, data.order, data.state?.sortOrder, DEFAULT_SORT_ORDER));
-  const filtered = filterAndSort(items, { ...data, filter, search, sortOrder });
-  const visibleLimit = clamp(first(data.visibleLimit, data.limit, data.state?.visibleLimit, DEFAULT_VISIBLE_ROWS), 1, 1000);
-  const visibleItems = filtered.slice(0, visibleLimit);
-  const total = resolveRemoteTotal(data, items);
-  const stats = mergeStats(items, data.stats);
-
-  return {
-    data,
-    route: txt(first(data.route, data.routes?.clientes, DEFAULT_ROUTE), DEFAULT_ROUTE),
-    admin: Boolean(data.admin || data.role === "admin"),
-    items,
-    filteredItems: filtered,
-    visibleItems,
-    total,
-    filteredTotal: filtered.length,
-    visibleCount: visibleItems.length,
-    visibleLimit,
-    remainingCount: Math.max(0, filtered.length - visibleItems.length),
-    hasMore: filtered.length > visibleItems.length,
-    loading: data.loading === true,
-    refreshing: data.refreshing === true,
-    creating: data.creating === true,
-    loadingMore: data.loadingMore === true,
-    error: txt(first(data.error, data.state?.error, ""), ""),
-    filter,
-    search,
-    sortOrder,
-    sortLabel: sortLabel(sortOrder),
-    nextSortOrder: nextSort(sortOrder),
-    nextSortLabel: sortLabel(nextSort(sortOrder)),
-    filterCounts: filterCounts(items),
-    stats,
-    openingClienteId: txt(first(data.openingClienteId, data.openingClientId, ""), ""),
-    diagnostics: {
-      totalGreaterThanItems: total > 0 && items.length === 0,
-      extractedItems: items.length,
-      templateVersion: CLIENTES_TEMPLATE_VERSION,
-    },
-  };
-}
-
-/* =========================================================
-   ROWS
-========================================================= */
 
 function renderAvatar(item = {}) {
-  const name = getName(item);
-  const src = getAvatar(item);
-  const tone = hash(`${getId(item)}:${name}`) % AVATAR_TONE_COUNT;
+  const name = getClienteName(item);
+  const src = getClienteAvatar(item);
+  const tone = hashText(`${getClienteId(item)}:${name}`) % AVATAR_TONE_COUNT;
 
   return `
-    <span class="clientes-avatar${src ? " has-image" : " is-fallback"} clientes-avatar-tone-${at(String(tone))}" data-avatar-tone="${at(String(tone))}" data-has-avatar="${src ? "true" : "false"}" data-fallback="${src ? "false" : "true"}" aria-hidden="true">
-      ${src ? `<img class="clientes-avatar-img" src="${at(src)}" alt="" width="48" height="48" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}
-      <span class="clientes-avatar-fallback">${esc(getClienteInitials(item))}</span>
+    <span
+      class="clientes-avatar${src ? " has-image" : " is-fallback"} clientes-avatar-tone-${attr(String(tone))}"
+      data-avatar-tone="${attr(String(tone))}"
+      data-has-avatar="${src ? "true" : "false"}"
+      data-fallback="${src ? "false" : "true"}"
+      aria-hidden="true"
+    >
+      ${src ? `<img class="clientes-avatar-img" src="${attr(src)}" alt="" width="48" height="48" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}
+      <span class="clientes-avatar-fallback">${escapeHtml(getClienteInitials(item))}</span>
     </span>
   `;
 }
 
 function renderStatusChip(item = {}) {
-  const status = statusKey(item);
+  const bucket = statusBucket(item);
+  const label = getClienteStatusLabel(item);
 
   return `
-    <span class="clientes-status-chip clientes-status-chip--${at(status)} is-${at(status)}" data-status-chip="${at(status)}" data-status="${at(status)}">
+    <span class="clientes-status-chip clientes-status-chip--${attr(bucket)} is-${attr(bucket)}" data-status-chip="${attr(bucket)}" data-status="${attr(bucket)}">
       <span class="clientes-status-dot" aria-hidden="true"></span>
-      <span>${esc(statusLabel(status))}</span>
-    </span>
-  `;
-}
-
-function renderTypeChip(item = {}) {
-  const type = getType(item);
-
-  return `
-    <span class="clientes-type-chip clientes-type-chip--${at(type)}" data-client-type="${at(type)}">
-      ${esc(getTypeLabel(item))}
+      <span>${escapeHtml(label)}</span>
     </span>
   `;
 }
 
 function renderAmountChip(item = {}) {
-  const amount = getAmount(item);
+  const amount = getClienteAmount(item);
   const state = amount > 0 ? "positive" : "idle";
 
   return `
-    <span class="clientes-importe-chip clientes-amount-chip clientes-amount-chip--${at(state)}" data-importe-status="${at(state)}" data-amount-status="${at(state)}">
+    <span class="clientes-importe-chip clientes-amount-chip clientes-amount-chip--${attr(state)}" data-importe-status="${attr(state)}" data-amount-status="${attr(state)}">
       ${state !== "idle" ? icon("euro") : ""}
-      <span>${esc(formatMoney(amount, DEFAULT_CURRENCY))}</span>
+      <span>${escapeHtml(formatMoney(amount, DEFAULT_CURRENCY))}</span>
     </span>
   `;
 }
 
 function renderContactLine(item = {}) {
-  const email = getEmail(item);
-  const rawPhone = getPhone(item);
+  const email = getClienteEmail(item);
+  const rawPhone = getClientePhone(item);
   const phone = formatPhone(rawPhone);
-  const mailHref = mailtoHref(email);
-  const phoneHref = telHref(rawPhone);
 
-  if (!email && !phone) return `<span class="clientes-contact-empty">Sin contacto</span>`;
+  if (!email && !phone) {
+    return `<span class="clientes-contact-empty">Sin contacto</span>`;
+  }
 
   return `
     <span class="clientes-contact-line">
-      ${email ? `<a class="clientes-email clientes-contact-link" href="${at(mailHref)}" data-action="" data-clientes-action="" aria-label="Enviar correo a ${at(email)}">${icon("mail")}<span>${esc(email)}</span></a>` : ""}
+      ${email ? `<a class="clientes-email clientes-contact-link" href="${attr(mailtoHref(email))}" data-action="" data-clientes-action="" aria-label="Enviar correo a ${attr(email)}">${icon("mail")}<span>${escapeHtml(email)}</span></a>` : ""}
       ${email && phone ? `<span class="clientes-client-separator">·</span>` : ""}
-      ${phone ? `<a class="clientes-phone clientes-contact-link" href="${at(phoneHref)}" data-action="" data-clientes-action="" aria-label="Llamar a ${at(phone)}">${icon("phone")}<span>${esc(phone)}</span></a>` : ""}
+      ${phone ? `<a class="clientes-phone clientes-contact-link" href="${attr(telHref(rawPhone))}" data-action="" data-clientes-action="" aria-label="Llamar a ${attr(phone)}">${icon("phone")}<span>${escapeHtml(phone)}</span></a>` : ""}
     </span>
   `;
 }
 
 function renderRow(item = {}, vm = {}) {
-  const id = getId(item);
-  const status = statusKey(item);
-  const email = getEmail(item);
-  const location = getLocation(item);
-  const nif = getNif(item);
-  const isOpening = vm.openingClienteId && vm.openingClienteId === id;
+  const current = normalizeClienteModel(item);
+  const id = current.clienteId;
+  const bucket = statusBucket(current);
+  const email = current.email;
+  const city = current.city;
+  const nif = current.nif;
+  const isOpening = Boolean(id && vm.openingClienteId === id);
+  const interactive = Boolean(id);
 
   return `
     <tr
-      class="clientes-row clientes-row--clickable clientes-row--${at(status)}${isOpening ? " is-loading" : ""}"
+      class="clientes-row${interactive ? " clientes-row--clickable" : ""} clientes-row--${attr(bucket)}${isOpening ? " is-loading" : ""}"
       data-client-row="true"
       data-cliente-row="true"
-      data-detail-target="true"
-      data-client-id="${at(id)}"
-      data-cliente-id="${at(id)}"
-      data-clientes-action="${CLIENTES_ACTIONS.OPEN_DETAIL}"
-      data-action="${CLIENTES_ACTIONS.OPEN_DETAIL}"
-      tabindex="0"
-      role="button"
-      aria-label="Abrir cliente ${at(getName(item))}"
+      data-detail-target="${interactive ? "true" : "false"}"
+      data-client-id="${attr(id)}"
+      data-cliente-id="${attr(id)}"
+      ${interactive ? `data-clientes-action="${CLIENTES_ACTIONS.OPEN_DETAIL}" data-action="${CLIENTES_ACTIONS.OPEN_DETAIL}" tabindex="0" role="button" aria-label="Abrir cliente ${attr(current.nombreFiscal)}"` : `aria-disabled="true"`}
       ${htmlAttrs({ "aria-busy": isOpening ? "true" : false })}
     >
       <td class="clientes-cell clientes-cell--main" data-column="main">
         <div class="clientes-main">
-          ${renderAvatar(item)}
+          ${renderAvatar(current)}
           <div class="clientes-main-copy">
             <div class="clientes-ticket-line clientes-client-line-top">
-              <span class="clientes-code clientes-ticket-id">${esc(getCode(item) || "Sin ID")}</span>
-              <span class="clientes-category-pill">${esc(getTypeLabel(item))}</span>
+              <span class="clientes-code clientes-ticket-id">${escapeHtml(getClienteCode(current))}</span>
+              <span class="clientes-category-pill">${escapeHtml(getClienteTypeLabel(current))}</span>
             </div>
-            <div class="clientes-name clientes-ticket-subject">${esc(getName(item))}</div>
-            <div class="clientes-description clientes-ticket-description">${esc([email, nif || location].filter(Boolean).join(" · ") || "Sin datos fiscales")}</div>
+            <div class="clientes-name clientes-ticket-subject">${escapeHtml(current.nombreFiscal)}</div>
+            <div class="clientes-description clientes-ticket-description">${escapeHtml([email, nif || city].filter(Boolean).join(" · ") || "Sin datos fiscales")}</div>
             <div class="clientes-client-line">
-              ${location ? `<span class="clientes-location">${esc(location)}</span>` : `<span class="clientes-location is-empty">Sin ciudad</span>`}
+              ${city ? `<span class="clientes-location">${escapeHtml(city)}</span>` : `<span class="clientes-location is-empty">Sin ciudad</span>`}
             </div>
             <div class="clientes-row-badges">
-              ${nif ? `<span class="clientes-nif-chip">${esc(nif)}</span>` : ""}
+              ${nif ? `<span class="clientes-nif-chip">${escapeHtml(nif)}</span>` : ""}
             </div>
           </div>
         </div>
       </td>
-      <td class="clientes-cell clientes-cell--status" data-column="status">${renderStatusChip(item)}</td>
-      <td class="clientes-cell clientes-cell--date clientes-cell--created" data-column="created"><span class="clientes-date-inline clientes-date" title="${at(formatDate(getCreated(item)))}">${esc(formatShortDate(getCreated(item)))}</span></td>
-      <td class="clientes-cell clientes-cell--email clientes-cell--contact" data-column="contact">${renderContactLine(item)}</td>
-      <td class="clientes-cell clientes-cell--amount clientes-cell--importe" data-column="amount">${renderAmountChip(item)}</td>
+      <td class="clientes-cell clientes-cell--status" data-column="status">${renderStatusChip(current)}</td>
+      <td class="clientes-cell clientes-cell--date clientes-cell--created" data-column="created">
+        <span class="clientes-date-inline clientes-date" title="${attr(formatDate(current.createdAt))}">${escapeHtml(formatShortDate(current.createdAt))}</span>
+      </td>
+      <td class="clientes-cell clientes-cell--email clientes-cell--contact" data-column="contact">${renderContactLine(current)}</td>
+      <td class="clientes-cell clientes-cell--amount clientes-cell--importe" data-column="amount">${renderAmountChip(current)}</td>
     </tr>
   `;
 }
@@ -1208,11 +1201,14 @@ function renderRow(item = {}, vm = {}) {
    HEADER / FILTERS
 ========================================================= */
 
-const spinner = (label = "Cargando...") => `<span class="clientes-spinner" aria-hidden="true"></span><span>${esc(label)}</span>`;
+const spinner = (label = "Cargando...") =>
+  `<span class="clientes-spinner" aria-hidden="true"></span><span>${escapeHtml(label)}</span>`;
 
 function renderHeader(vm = {}) {
   const stats = vm.stats;
-  const updatedAt = stats.lastUpdateTs ? new Date(stats.lastUpdateTs).toISOString() : "";
+  const updatedAt = stats.lastUpdateTs
+    ? new Date(stats.lastUpdateTs).toISOString()
+    : "";
 
   return `
     <section class="clientes-hero" data-clientes-hero="true">
@@ -1221,27 +1217,72 @@ function renderHeader(vm = {}) {
           <h1 class="clientes-title clientes-page-title">Centro de control de clientes</h1>
           <p class="clientes-subtitle clientes-page-subtitle">Consulta clientes, revisa altas, facturación y contactos desde un único panel.</p>
         </div>
+
         <div class="clientes-hero-actions">
-          <button type="button" id="clientes-create-btn" class="clientes-btn clientes-btn--create clientes-btn--primary" data-clientes-action="${CLIENTES_ACTIONS.CREATE_OPEN}" data-action="${CLIENTES_ACTIONS.CREATE_OPEN}" ${htmlAttrs({ disabled: vm.creating || vm.loading, "aria-disabled": vm.creating || vm.loading ? "true" : false, "aria-busy": vm.creating ? "true" : false })}>
-            ${vm.creating ? spinner("Creando...") : `${icon("plus")}<span>Nuevo cliente</span>`}
-          </button>
-          <button type="button" id="clientes-refresh-btn" class="clientes-btn${vm.refreshing ? " is-loading" : ""}" data-clientes-action="${CLIENTES_ACTIONS.REFRESH}" data-action="${CLIENTES_ACTIONS.REFRESH}" ${htmlAttrs({ disabled: vm.refreshing || vm.loading, "aria-disabled": vm.refreshing || vm.loading ? "true" : false, "aria-busy": vm.refreshing ? "true" : false })}>
+          ${vm.admin ? `
+            <button
+              type="button"
+              id="clientes-create-btn"
+              class="clientes-btn clientes-btn--create clientes-btn--primary"
+              data-clientes-action="${CLIENTES_ACTIONS.CREATE_OPEN}"
+              data-action="${CLIENTES_ACTIONS.CREATE_OPEN}"
+              ${htmlAttrs({
+                disabled: vm.creating || vm.loading,
+                "aria-disabled": vm.creating || vm.loading ? "true" : false,
+                "aria-busy": vm.creating ? "true" : false,
+              })}
+            >
+              ${vm.creating ? spinner("Creando...") : `${icon("plus")}<span>Nuevo cliente</span>`}
+            </button>
+          ` : ""}
+
+          <button
+            type="button"
+            id="clientes-refresh-btn"
+            class="clientes-btn${vm.refreshing ? " is-loading" : ""}"
+            data-clientes-action="${CLIENTES_ACTIONS.REFRESH}"
+            data-action="${CLIENTES_ACTIONS.REFRESH}"
+            ${htmlAttrs({
+              disabled: vm.refreshing || vm.loading,
+              "aria-disabled": vm.refreshing || vm.loading ? "true" : false,
+              "aria-busy": vm.refreshing ? "true" : false,
+            })}
+          >
             ${vm.refreshing ? spinner("Actualizando...") : `${icon("refresh")}<span>Actualizar</span>`}
           </button>
         </div>
       </div>
 
       <div class="clientes-hero-meta">
-        <span class="clientes-meta-pill" data-meta="total">${icon("users")}<span>${esc(`${formatNumber(vm.total)} clientes registrados`)}</span></span>
-        <span class="clientes-meta-pill" data-meta="updated">${icon("refresh")}<span>${updatedAt ? esc(`Última actualización · ${formatRelativeDate(updatedAt)}`) : "Sin actualizaciones recientes"}</span></span>
-        <span class="clientes-meta-pill" data-meta="amount">${icon("euro")}<span>${esc(formatMoney(stats.totalAmount, DEFAULT_CURRENCY))}</span></span>
+        <span class="clientes-meta-pill" data-meta="total">${icon("users")}<span>${escapeHtml(`${formatNumber(vm.total)} clientes registrados`)}</span></span>
+        <span class="clientes-meta-pill" data-meta="updated">${icon("refresh")}<span>${updatedAt ? escapeHtml(`Última actualización · ${formatRelativeDate(updatedAt)}`) : "Sin actualizaciones recientes"}</span></span>
+        <span class="clientes-meta-pill" data-meta="amount">${icon("euro")}<span>${escapeHtml(formatMoney(stats.totalAmount, DEFAULT_CURRENCY))}</span></span>
       </div>
 
       <div class="clientes-stats">
-        <article class="clientes-stat-card clientes-stat-card--total" data-stat="total"><div class="clientes-stat-label">Clientes</div><div class="clientes-stat-value">${esc(formatNumber(stats.total))}</div><div class="clientes-stat-text">Registros totales visibles.</div></article>
-        <article class="clientes-stat-card clientes-stat-card--active" data-stat="active"><div class="clientes-stat-label">Activos</div><div class="clientes-stat-value">${esc(formatNumber(stats.activeCount))}</div><div class="clientes-stat-text">Clientes operativos.</div></article>
-        <article class="clientes-stat-card clientes-stat-card--pending" data-stat="pending"><div class="clientes-stat-label">Pendientes</div><div class="clientes-stat-value">${esc(formatNumber(stats.pendingCount))}</div><div class="clientes-stat-text">Altas o validaciones pendientes.</div></article>
-        <article class="clientes-stat-card clientes-stat-card--blocked" data-stat="blocked"><div class="clientes-stat-label">Bloqueados</div><div class="clientes-stat-value">${esc(formatNumber(stats.blockedCount))}</div><div class="clientes-stat-text">Cuentas restringidas o inactivas.</div></article>
+        <article class="clientes-stat-card clientes-stat-card--total" data-stat="total">
+          <div class="clientes-stat-label">Clientes</div>
+          <div class="clientes-stat-value">${escapeHtml(formatNumber(stats.total))}</div>
+          <div class="clientes-stat-text">Registros totales visibles.</div>
+        </article>
+
+        <article class="clientes-stat-card clientes-stat-card--active" data-stat="active">
+          <div class="clientes-stat-label">Activos</div>
+          <div class="clientes-stat-value">${escapeHtml(formatNumber(stats.activeCount))}</div>
+          <div class="clientes-stat-text">Clientes operativos.</div>
+        </article>
+
+        <article class="clientes-stat-card clientes-stat-card--pending" data-stat="pending">
+          <div class="clientes-stat-label">Pendientes</div>
+          <div class="clientes-stat-value">${escapeHtml(formatNumber(stats.pendingCount))}</div>
+          <div class="clientes-stat-text">Altas o validaciones pendientes.</div>
+        </article>
+
+        <article class="clientes-stat-card clientes-stat-card--blocked" data-stat="blocked">
+          <div class="clientes-stat-label">Bloqueados</div>
+          <div class="clientes-stat-value">${escapeHtml(formatNumber(stats.blockedCount))}</div>
+          <div class="clientes-stat-text">Cuentas restringidas o inactivas.</div>
+        </article>
       </div>
     </section>
   `;
@@ -1251,7 +1292,20 @@ function renderSearch(vm = {}) {
   return `
     <div class="clientes-search" role="search" aria-label="Buscar clientes">
       <span class="clientes-search-icon" aria-hidden="true">${icon("search")}</span>
-      <input id="clientes-search-input" class="clientes-search-input" type="search" value="${at(vm.search)}" placeholder="Buscar cliente, email, NIF..." autocomplete="off" spellcheck="false" data-clientes-search-input="true" data-clientes-field="search" data-field="search" data-search-input="clientes" aria-label="Buscar clientes por nombre, email, NIF o identificador">
+      <input
+        id="clientes-search-input"
+        class="clientes-search-input"
+        type="search"
+        value="${attr(vm.search)}"
+        placeholder="Buscar cliente, email, NIF..."
+        autocomplete="off"
+        spellcheck="false"
+        data-clientes-search-input="true"
+        data-clientes-field="search"
+        data-field="search"
+        data-search-input="clientes"
+        aria-label="Buscar clientes por nombre, email, NIF o identificador"
+      >
       ${vm.search ? `<button type="button" class="clientes-search-clear" data-clientes-action="${CLIENTES_ACTIONS.CLEAR_SEARCH}" data-action="${CLIENTES_ACTIONS.CLEAR_SEARCH}" aria-label="Limpiar búsqueda">${icon("close")}</button>` : ""}
     </div>
   `;
@@ -1266,12 +1320,41 @@ function renderFilters(vm = {}) {
       <div class="clientes-filter-pills" role="tablist" aria-label="Filtrar clientes">
         ${FILTERS.map((filter) => {
           const active = filter.key === vm.filter;
-          return `<button type="button" role="tab" class="clientes-filter-pill${active ? " is-active" : ""}" data-clientes-action="${CLIENTES_ACTIONS.FILTER}" data-action="${CLIENTES_ACTIONS.FILTER}" data-filter="${at(filter.key)}" aria-selected="${active ? "true" : "false"}" aria-pressed="${active ? "true" : "false"}"><span>${esc(filter.label)}</span><strong>${esc(formatNumber(vm.filterCounts?.[filter.key] || 0))}</strong></button>`;
+
+          return `
+            <button
+              type="button"
+              role="tab"
+              class="clientes-filter-pill${active ? " is-active" : ""}"
+              data-clientes-action="${CLIENTES_ACTIONS.FILTER}"
+              data-action="${CLIENTES_ACTIONS.FILTER}"
+              data-filter="${attr(filter.key)}"
+              aria-selected="${active ? "true" : "false"}"
+              aria-pressed="${active ? "true" : "false"}"
+            >
+              <span>${escapeHtml(filter.label)}</span>
+              <strong>${escapeHtml(formatNumber(vm.filterCounts[filter.key] || 0))}</strong>
+            </button>
+          `;
         }).join("")}
       </div>
+
       <div class="clientes-sort-pills" data-clientes-sort-pills="true">
-        <button type="button" class="clientes-sort-pill is-active" data-clientes-action="${CLIENTES_ACTIONS.SORT_TOGGLE}" data-action="${CLIENTES_ACTIONS.SORT_TOGGLE}" data-sort-order="${at(order)}" data-next-sort-order="${at(next)}" aria-pressed="true" aria-label="Cambiar orden a ${at(sortLabel(next))}" title="Cambiar orden a ${at(sortLabel(next))}">${icon("calendar")}<span>${esc(sortLabel(order))}</span></button>
+        <button
+          type="button"
+          class="clientes-sort-pill is-active"
+          data-clientes-action="${CLIENTES_ACTIONS.SORT_TOGGLE}"
+          data-action="${CLIENTES_ACTIONS.SORT_TOGGLE}"
+          data-sort-order="${attr(order)}"
+          data-next-sort-order="${attr(next)}"
+          aria-pressed="true"
+          aria-label="Cambiar orden a ${attr(sortLabel(next))}"
+          title="Cambiar orden a ${attr(sortLabel(next))}"
+        >
+          ${icon("calendar")}<span>${escapeHtml(sortLabel(order))}</span>
+        </button>
       </div>
+
       ${renderSearch(vm)}
     </div>
   `;
@@ -1282,23 +1365,30 @@ function renderFilters(vm = {}) {
 ========================================================= */
 
 function renderColgroup() {
-  return `<colgroup>${CLIENTES_TABLE_COLUMNS.map((column) => `<col class="${at(column.colClass)}">`).join("")}</colgroup>`;
+  return `<colgroup>${CLIENTES_TABLE_COLUMNS.map((column) => `<col class="${attr(column.colClass)}">`).join("")}</colgroup>`;
 }
 
 function renderThead() {
-  return `<thead><tr>${CLIENTES_TABLE_COLUMNS.map((column) => `<th class="${at(column.thClass)}" scope="col" data-column="${at(column.key)}">${esc(column.label)}</th>`).join("")}</tr></thead>`;
+  return `<thead><tr>${CLIENTES_TABLE_COLUMNS.map((column) => `<th class="${attr(column.thClass)}" scope="col" data-column="${attr(column.key)}">${escapeHtml(column.label)}</th>`).join("")}</tr></thead>`;
 }
 
 function renderTableLoading(rows = DEFAULT_VISIBLE_ROWS) {
-  const count = Math.max(4, num(rows, DEFAULT_VISIBLE_ROWS));
+  const count = Math.max(4, number(rows, DEFAULT_VISIBLE_ROWS));
 
   return `
     <div class="clientes-table-wrap is-loading" data-clientes-table-wrap="true">
       <div class="clientes-table-loading" aria-hidden="true">
         <div class="clientes-table-shell">
-          <table class="clientes-table clientes-table--no-actions clientes-table--scale-110" role="table" aria-label="Cargando clientes" data-table-columns="${at(String(CLIENTES_TABLE_COLUMNS.length))}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}">
-            ${renderColgroup()}${renderThead()}
-            <tbody>${Array.from({ length: count }).map((_, index) => `<tr class="clientes-row clientes-row--skeleton" aria-hidden="true" data-skeleton-row="${index + 1}">${CLIENTES_TABLE_COLUMNS.map((column) => `<td class="${at(column.cellClass)}" data-column="${at(column.key)}"><span class="clientes-skeleton clientes-skeleton--${at(column.key)}"></span></td>`).join("")}</tr>`).join("")}</tbody>
+          <table class="clientes-table clientes-table--no-actions clientes-table--scale-110" role="table" aria-label="Cargando clientes" data-table-columns="${attr(String(CLIENTES_TABLE_COLUMNS.length))}" data-table-actions="false" data-table-scale="${attr(TABLE_SCALE)}">
+            ${renderColgroup()}
+            ${renderThead()}
+            <tbody>
+              ${Array.from({ length: count }).map((_, index) => `
+                <tr class="clientes-row clientes-row--skeleton" aria-hidden="true" data-skeleton-row="${index + 1}">
+                  ${CLIENTES_TABLE_COLUMNS.map((column) => `<td class="${attr(column.cellClass)}" data-column="${attr(column.key)}"><span class="clientes-skeleton clientes-skeleton--${attr(column.key)}"></span></td>`).join("")}
+                </tr>
+              `).join("")}
+            </tbody>
           </table>
         </div>
       </div>
@@ -1307,34 +1397,38 @@ function renderTableLoading(rows = DEFAULT_VISIBLE_ROWS) {
 }
 
 function renderRefreshOverlay() {
-  return `<div class="clientes-refresh-overlay" aria-live="polite" aria-busy="true"><span class="clientes-inline-loading"><span class="clientes-inline-spinner" aria-hidden="true"></span><span>Actualizando clientes...</span></span></div>`;
+  return `
+    <div class="clientes-refresh-overlay" aria-live="polite" aria-busy="true">
+      <span class="clientes-inline-loading">
+        <span class="clientes-inline-spinner" aria-hidden="true"></span>
+        <span>Actualizando clientes...</span>
+      </span>
+    </div>
+  `;
 }
 
 function renderEmpty(vm = {}) {
   const hasError = Boolean(vm.error);
   const filtering = vm.filter !== "all" || Boolean(vm.search);
-  const mismatch = vm.total > 0 && !vm.visibleItems.length && !filtering && !hasError;
+
   const title = hasError
     ? "No se pudieron cargar los clientes"
     : filtering
       ? "No hay clientes con esos filtros"
-      : mismatch
-        ? "Hay clientes, pero no llegaron filas al listado"
-        : "Todavía no hay clientes";
+      : "Todavía no hay clientes";
+
   const text = hasError
     ? vm.error
     : filtering
       ? "Prueba a limpiar la búsqueda o cambia el filtro activo para volver al historial completo."
-      : mismatch
-        ? "La API está entregando total, pero no está entregando ningún array de filas compatible."
-        : "Cuando haya clientes registrados aparecerán aquí con su estado, alta, contacto y facturación asociada.";
+      : "Cuando haya clientes registrados aparecerán aquí con su estado, alta, contacto y facturación asociada.";
 
   return `
-    <div class="clientes-empty${mismatch ? " is-data-mismatch" : ""}" data-clientes-empty="true">
-      <div class="clientes-empty-icon" aria-hidden="true">${hasError || mismatch ? icon("alert") : icon("users")}</div>
-      <h3>${esc(title)}</h3>
-      <p>${esc(text)}</p>
-      ${hasError || mismatch ? `<button type="button" class="clientes-btn" data-clientes-action="${CLIENTES_ACTIONS.REFRESH}" data-action="${CLIENTES_ACTIONS.REFRESH}">${icon("refresh")}<span>Reintentar</span></button>` : filtering ? `<button type="button" class="clientes-btn" data-clientes-action="${CLIENTES_ACTIONS.CLEAR_FILTERS}" data-action="${CLIENTES_ACTIONS.CLEAR_FILTERS}">${icon("close")}<span>Limpiar filtros</span></button>` : ""}
+    <div class="clientes-empty" data-clientes-empty="true">
+      <div class="clientes-empty-icon" aria-hidden="true">${hasError ? icon("alert") : icon("users")}</div>
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(text)}</p>
+      ${hasError ? `<button type="button" class="clientes-btn" data-clientes-action="${CLIENTES_ACTIONS.REFRESH}" data-action="${CLIENTES_ACTIONS.REFRESH}">${icon("refresh")}<span>Reintentar</span></button>` : filtering ? `<button type="button" class="clientes-btn" data-clientes-action="${CLIENTES_ACTIONS.CLEAR_FILTERS}" data-action="${CLIENTES_ACTIONS.CLEAR_FILTERS}">${icon("close")}<span>Limpiar filtros</span></button>` : ""}
     </div>
   `;
 }
@@ -1345,13 +1439,30 @@ function renderFeedFooter(vm = {}) {
   }
 
   if (!vm.hasMore) {
-    return `<div class="clientes-feed-end" data-clientes-feed-end="true" data-clientes-load-more="false"><span class="clientes-feed-end-text">Has visto todos los clientes disponibles.</span></div>`;
+    return `
+      <div class="clientes-feed-end" data-clientes-feed-end="true" data-clientes-load-more="false">
+        <span class="clientes-feed-end-text">Has visto todos los clientes disponibles.</span>
+      </div>
+    `;
   }
 
   return `
     <div class="clientes-feed-more" data-clientes-feed-more="true">
-      <button type="button" class="clientes-load-more-btn${vm.loadingMore ? " is-loading" : ""}" data-clientes-action="${CLIENTES_ACTIONS.LOAD_MORE}" data-action="${CLIENTES_ACTIONS.LOAD_MORE}" data-clientes-load-more-button="true" ${htmlAttrs({ disabled: vm.loadingMore, "aria-disabled": vm.loadingMore ? "true" : false, "aria-busy": vm.loadingMore ? "true" : false })}>
-        ${vm.loadingMore ? spinner("Cargando más clientes...") : `${icon("chevronDown")}<span>Mostrar más</span><span class="clientes-load-more-count">${esc(`${formatNumber(vm.remainingCount)} restantes`)}</span>`}
+      <button
+        type="button"
+        class="clientes-load-more-btn${vm.loadingMore ? " is-loading" : ""}"
+        data-clientes-action="${CLIENTES_ACTIONS.LOAD_MORE}"
+        data-action="${CLIENTES_ACTIONS.LOAD_MORE}"
+        data-clientes-load-more-button="true"
+        ${htmlAttrs({
+          disabled: vm.loadingMore,
+          "aria-disabled": vm.loadingMore ? "true" : false,
+          "aria-busy": vm.loadingMore ? "true" : false,
+        })}
+      >
+        ${vm.loadingMore
+          ? spinner("Cargando más clientes...")
+          : `${icon("chevronDown")}<span>Mostrar más</span><span class="clientes-load-more-count">${escapeHtml(`${formatNumber(vm.remainingCount)} restantes`)}</span>`}
       </button>
       <div class="clientes-feed-sentinel" data-clientes-load-more="true" data-clientes-infinite-sentinel="true" data-load-more-sentinel="true" aria-hidden="true"></div>
     </div>
@@ -1363,8 +1474,17 @@ function renderTable(vm = {}) {
 
   return `
     <div class="clientes-table-shell">
-      <table class="clientes-table clientes-table--no-actions clientes-table--scale-110" role="table" aria-label="Listado de clientes" data-table-columns="${at(String(CLIENTES_TABLE_COLUMNS.length))}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" data-sort-order="${at(vm.sortOrder)}">
-        ${renderColgroup()}${renderThead()}
+      <table
+        class="clientes-table clientes-table--no-actions clientes-table--scale-110"
+        role="table"
+        aria-label="Listado de clientes"
+        data-table-columns="${attr(String(CLIENTES_TABLE_COLUMNS.length))}"
+        data-table-actions="false"
+        data-table-scale="${attr(TABLE_SCALE)}"
+        data-sort-order="${attr(vm.sortOrder)}"
+      >
+        ${renderColgroup()}
+        ${renderThead()}
         <tbody>${vm.visibleItems.map((item) => renderRow(item, vm)).join("")}</tbody>
       </table>
     </div>
@@ -1376,7 +1496,11 @@ function renderHistory(vm = {}) {
   const initialLoading = vm.loading && !vm.visibleItems.length;
   const refreshing = vm.refreshing && vm.visibleItems.length;
   const activeLabel = FILTERS.find((filter) => filter.key === vm.filter)?.label || "Todos";
-  const criteria = [vm.filter !== "all" ? activeLabel : "", vm.search ? `búsqueda “${vm.search}”` : ""].filter(Boolean);
+  const criteria = [
+    vm.filter !== "all" ? activeLabel : "",
+    vm.search ? `búsqueda “${vm.search}”` : "",
+  ].filter(Boolean);
+
   const subtitle = initialLoading
     ? "Cargando clientes..."
     : vm.filter !== "all" || vm.search
@@ -1386,40 +1510,86 @@ function renderHistory(vm = {}) {
   return `
     <section class="clientes-history" data-clientes-scroll-host="true" data-clientes-scroll-mode="infinite">
       <div class="clientes-history-head" data-clientes-history-head="true">
-        <div class="clientes-history-copy"><h2 class="clientes-history-title">Historial de clientes</h2><p class="clientes-history-subtitle">${esc(subtitle)}</p></div>
-        <button type="button" class="clientes-btn clientes-btn--export" data-clientes-action="${CLIENTES_ACTIONS.EXPORT}" data-action="${CLIENTES_ACTIONS.EXPORT}" ${htmlAttrs({ disabled: !vm.items.length, "aria-disabled": !vm.items.length ? "true" : false })}>${icon("chevronDown")}<span>Exportar</span></button>
+        <div class="clientes-history-copy">
+          <h2 class="clientes-history-title">Historial de clientes</h2>
+          <p class="clientes-history-subtitle">${escapeHtml(subtitle)}</p>
+        </div>
+
+        <button
+          type="button"
+          class="clientes-btn clientes-btn--export"
+          data-clientes-action="${CLIENTES_ACTIONS.EXPORT}"
+          data-action="${CLIENTES_ACTIONS.EXPORT}"
+          ${htmlAttrs({
+            disabled: !vm.items.length,
+            "aria-disabled": !vm.items.length ? "true" : false,
+          })}
+        >
+          ${icon("chevronDown")}<span>Exportar</span>
+        </button>
+
         ${renderFilters(vm)}
       </div>
-      ${initialLoading ? renderTableLoading(DEFAULT_VISIBLE_ROWS) : `<div class="clientes-table-wrap${refreshing ? " is-refreshing" : ""}" data-clientes-table-wrap="true" data-clientes-scroll-mode="infinite">${refreshing ? renderRefreshOverlay() : ""}${renderTable(vm)}</div>`}
+
+      ${initialLoading
+        ? renderTableLoading(DEFAULT_VISIBLE_ROWS)
+        : `
+          <div class="clientes-table-wrap${refreshing ? " is-refreshing" : ""}" data-clientes-table-wrap="true" data-clientes-scroll-mode="infinite">
+            ${refreshing ? renderRefreshOverlay() : ""}
+            ${renderTable(vm)}
+          </div>
+        `}
     </section>
   `;
 }
 
 /* =========================================================
-   EXPORTS
+   PUBLIC RENDERERS
 ========================================================= */
 
 export function renderClientesLoadingState(input = {}) {
-  const vm = buildVm({ ...obj(input), loading: true });
+  const vm = buildVm({ ...safeObject(input), loading: true });
 
   return `
-    <section class="clientes-view-root clientes-view-root--loading is-loading" data-clientes-scope="true" data-template-version="${at(CLIENTES_TEMPLATE_VERSION)}" data-total="${at(String(vm.total))}" data-visible="${at(String(vm.visibleCount))}" data-filter="${at(vm.filter)}" data-sort-order="${at(vm.sortOrder)}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" aria-busy="true">
-      ${renderHeader(vm)}${renderHistory(vm)}
+    <section
+      class="clientes-view-root clientes-view-root--loading is-loading"
+      data-clientes-scope="true"
+      data-template-version="${attr(CLIENTES_TEMPLATE_VERSION)}"
+      data-total="${attr(String(vm.total))}"
+      data-visible="${attr(String(vm.visibleCount))}"
+      data-filter="${attr(vm.filter)}"
+      data-sort-order="${attr(vm.sortOrder)}"
+      data-table-actions="false"
+      data-table-scale="${attr(TABLE_SCALE)}"
+      aria-busy="true"
+    >
+      ${renderHeader(vm)}
+      ${renderHistory(vm)}
     </section>
   `;
 }
 
 export function renderClientesErrorState(input = {}) {
-  const data = typeof input === "string" ? { error: input } : obj(input, {});
-  const message = txt(first(data.error, data.message, "No se pudieron cargar los clientes."), "No se pudieron cargar los clientes.");
+  const data = typeof input === "string" ? { error: input } : safeObject(input);
+  const message = cleanText(
+    first(data.error, data.message, "No se pudieron cargar los clientes."),
+    "No se pudieron cargar los clientes."
+  );
 
   return `
-    <section class="clientes-view-root clientes-view-root--error has-error" data-clientes-scope="true" data-template-version="${at(CLIENTES_TEMPLATE_VERSION)}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" aria-busy="false">
+    <section
+      class="clientes-view-root clientes-view-root--error has-error"
+      data-clientes-scope="true"
+      data-template-version="${attr(CLIENTES_TEMPLATE_VERSION)}"
+      data-table-actions="false"
+      data-table-scale="${attr(TABLE_SCALE)}"
+      aria-busy="false"
+    >
       <section class="clientes-error" role="alert">
         <div class="clientes-error-icon" aria-hidden="true">${icon("alert")}</div>
         <div class="clientes-error-copy">
           <h3 class="clientes-error-title">No se pudo renderizar la vista de clientes</h3>
-          <p class="clientes-error-text">${esc(message)}</p>
+          <p class="clientes-error-text">${escapeHtml(message)}</p>
         </div>
         <button type="button" class="clientes-btn" data-clientes-action="${CLIENTES_ACTIONS.REFRESH}" data-action="${CLIENTES_ACTIONS.REFRESH}">${icon("refresh")}<span>Reintentar</span></button>
       </section>
@@ -1437,7 +1607,14 @@ export function renderErrorState(input = {}) {
 
 export function renderAccessDeniedState() {
   return `
-    <section class="clientes-view-root clientes-view-root--forbidden has-error" data-clientes-scope="true" data-template-version="${at(CLIENTES_TEMPLATE_VERSION)}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" aria-busy="false">
+    <section
+      class="clientes-view-root clientes-view-root--forbidden has-error"
+      data-clientes-scope="true"
+      data-template-version="${attr(CLIENTES_TEMPLATE_VERSION)}"
+      data-table-actions="false"
+      data-table-scale="${attr(TABLE_SCALE)}"
+      aria-busy="false"
+    >
       <section class="clientes-error clientes-error--forbidden" role="alert">
         <div class="clientes-error-icon" aria-hidden="true">${icon("shield")}</div>
         <div class="clientes-error-copy">
@@ -1457,9 +1634,35 @@ export function renderClientesTemplate(input = {}) {
   }
 
   return `
-    <section class="${cls("clientes-view-root", vm.loading ? "is-loading" : "", vm.refreshing ? "is-refreshing" : "", vm.creating ? "is-creating" : "", vm.error ? "has-error" : "")}" data-clientes-scope="true" data-template-version="${at(CLIENTES_TEMPLATE_VERSION)}" data-route="${at(vm.route)}" data-total="${at(String(vm.total))}" data-visible="${at(String(vm.visibleCount))}" data-filter="${at(vm.filter)}" data-search-active="${vm.search ? "true" : "false"}" data-sort-order="${at(vm.sortOrder)}" data-loading="${vm.loading ? "true" : "false"}" data-refreshing="${vm.refreshing ? "true" : "false"}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" data-items-extracted="${at(String(vm.items.length))}" data-total-greater-than-items="${vm.diagnostics.totalGreaterThanItems ? "true" : "false"}" aria-busy="${vm.loading || vm.refreshing ? "true" : "false"}">
-      ${vm.error ? `<div class="clientes-alert" role="alert">${icon("alert")}<span>${esc(vm.error)}</span></div>` : ""}
-      ${renderHeader(vm)}${renderHistory(vm)}
+    <section
+      class="${joinClasses(
+        "clientes-view-root",
+        vm.loading ? "is-loading" : "",
+        vm.refreshing ? "is-refreshing" : "",
+        vm.creating ? "is-creating" : "",
+        vm.error ? "has-error" : ""
+      )}"
+      data-clientes-scope="true"
+      data-template-version="${attr(CLIENTES_TEMPLATE_VERSION)}"
+      data-route="${attr(vm.route)}"
+      data-total="${attr(String(vm.total))}"
+      data-visible="${attr(String(vm.visibleCount))}"
+      data-filter="${attr(vm.filter)}"
+      data-search-active="${vm.search ? "true" : "false"}"
+      data-sort-order="${attr(vm.sortOrder)}"
+      data-loading="${vm.loading ? "true" : "false"}"
+      data-refreshing="${vm.refreshing ? "true" : "false"}"
+      data-table-actions="false"
+      data-table-scale="${attr(TABLE_SCALE)}"
+      data-items-extracted="${attr(String(vm.items.length))}"
+      data-reported-total="${attr(String(vm.reportedTotal))}"
+      data-total-mismatch="${vm.diagnostics.totalMismatch ? "true" : "false"}"
+      data-total-greater-than-items="${vm.reportedTotal > vm.items.length ? "true" : "false"}"
+      aria-busy="${vm.loading || vm.refreshing ? "true" : "false"}"
+    >
+      ${vm.error ? `<div class="clientes-alert" role="alert">${icon("alert")}<span>${escapeHtml(vm.error)}</span></div>` : ""}
+      ${renderHeader(vm)}
+      ${renderHistory(vm)}
     </section>
   `;
 }
@@ -1476,12 +1679,18 @@ export const renderEmptyState = renderClientesTemplate;
 export const renderCards = renderClientesTemplate;
 export const renderTableTemplate = renderClientesTemplate;
 
+/* =========================================================
+   SNAPSHOT
+========================================================= */
+
 export function getClientesTemplateSnapshot(input = {}) {
   const vm = buildVm(input);
 
   return {
     version: CLIENTES_TEMPLATE_VERSION,
     total: vm.total,
+    reportedTotal: vm.reportedTotal,
+    totalMismatch: vm.diagnostics.totalMismatch,
     extractedItems: vm.items.length,
     visibleCount: vm.visibleCount,
     filteredTotal: vm.filteredTotal,
@@ -1491,6 +1700,19 @@ export function getClientesTemplateSnapshot(input = {}) {
     columns: CLIENTES_TABLE_COLUMNS.map((column) => column.key),
     actions: { ...CLIENTES_ACTIONS },
     tableScale: TABLE_SCALE,
+    policy: Object.freeze({
+      templateOnly: true,
+      canonicalClientProjection: true,
+      backendPagination: false,
+      noHttp: true,
+      noDom: true,
+      noStore: true,
+      noRouter: true,
+      noAuth: true,
+      noDataImageAvatar: true,
+      escapedDynamicContent: true,
+      createAdminOnly: true,
+    }),
   };
 }
 

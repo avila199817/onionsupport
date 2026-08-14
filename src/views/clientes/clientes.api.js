@@ -2,24 +2,19 @@
    Onion Support - Clientes API
    Archivo: /src/views/clientes/clientes.api.js
 
-   PRODUCTIVO · 1:1 INCIDENCIAS · HTTP ÚNICO · 10/10
+   PRODUCTIVO · CONTRATO BACKEND REAL · HTTP ÚNICO
 
-   Contrato productivo:
-   - Centraliza TODAS las llamadas HTTP de Clientes.
-   - Adaptador frontend para /api/clientes.
-   - Sin window.fetch propio.
-   - Sin AppCore obligatorio.
-   - Sin DOM, Router, Store externo ni módulos fantasma.
-   - Listado completo con continuation token.
-   - Cache interno en memoria + localStorage opcional.
-   - Dedupe de peticiones concurrentes.
-   - Protección anti-race soft.
-   - No aplanar arrays en first(): conserva items/rows/clientes.
-   - Compatible 1:1 con index.js y template.js de Clientes.
-   - API pública alineada con incidencias.api.js:
-     hydrateClientesFromCache, listClientes, loadClientes,
-     loadClienteDetail, createCliente, updateCliente, deleteCliente,
-     computeClientesStats, getClientesApiSnapshot.
+   Responsabilidad:
+   - Ser el único adaptador HTTP de la vista Clientes.
+   - Ajustarse al backend productivo actual de /api/clientes.
+   - GET /api/clientes          -> listado completo.
+   - GET /api/clientes/:id      -> detalle (admin).
+   - POST /api/clientes         -> crear/sincronizar (admin).
+   - Mantener cache de lectura y dedupe de cargas.
+   - No inventar paginación, continuation tokens ni mutaciones
+     que el backend todavía no expone.
+   - No convertir la respuesta mínima de POST en un cliente falso.
+   - Sin fetch propio, DOM, Router ni Auth paralelos.
 ========================================================= */
 
 import Http from "../../core/http.js";
@@ -29,19 +24,24 @@ import Http from "../../core/http.js";
 ========================================================= */
 
 export const CLIENTES_API_VERSION =
-  "clientes.api.incidencias-aligned.v2.http-single.no-array-flatten";
+  "clientes.api.backend-contract.v3";
 
 export const CLIENTES_ENDPOINT = "/api/clientes";
-export const CLIENTES_FETCH_LIMIT = 250;
-export const CLIENTES_MAX_LIMIT = 500;
-export const CLIENTES_MAX_PAGES = 20;
-export const CLIENTES_CACHE_KEY = "onion.support.clientes.api.cache.v2";
+export const CLIENTES_CACHE_KEY = "onion.support.clientes.api.cache.v3";
 export const CLIENTES_CACHE_TTL_MS = 60_000;
 
 export const CLIENTES_TIMEOUT = 15_000;
-export const CLIENTES_DETAIL_TIMEOUT = 25_000;
+export const CLIENTES_DETAIL_TIMEOUT = 20_000;
 export const CLIENTES_MUTATION_TIMEOUT = 25_000;
+
+/*
+  Compatibilidad con consumidores existentes.
+  El backend actual devuelve el listado completo y no pagina.
+*/
+export const CLIENTES_FETCH_LIMIT = 250;
 export const CLIENTES_LIST_LIMIT = CLIENTES_FETCH_LIMIT;
+export const CLIENTES_MAX_LIMIT = 500;
+export const CLIENTES_MAX_PAGES = 1;
 
 let lastLoadToken = 0;
 
@@ -108,10 +108,8 @@ function cleanText(value = "", fallback = "") {
 }
 
 /*
-  IMPORTANTE:
-  No usar values.flat(Infinity).
-  Si backend devuelve { items: [...] }, aplanar puede convertir
-  el array en el primer cliente y romper el listado completo.
+  No aplanar arrays: { clientes: [...] } y { items: [...] }
+  son envelopes válidos y deben conservar la colección completa.
 */
 function first(...values) {
   for (const value of values) {
@@ -119,7 +117,6 @@ function first(...values) {
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
     if (isObject(value) && Object.keys(value).length === 0) continue;
-
     return value;
   }
 
@@ -128,17 +125,10 @@ function first(...values) {
 
 function number(value = 0, fallback = 0) {
   if (value === null || value === undefined || value === "") return fallback;
-
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : fallback;
-  }
+  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function clamp(value = 0, min = 0, max = 1) {
-  return Math.min(Math.max(number(value, min), min), max);
 }
 
 function normalizeKey(value = "") {
@@ -151,10 +141,21 @@ function normalizeKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
+function normalizeSearch(value = "") {
+  return cleanText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9@._+\-\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function normalizeEmail(value = "") {
   const email = cleanText(value, "").toLowerCase();
 
   if (!email) return "";
+
   if (
     [
       "null",
@@ -182,14 +183,18 @@ function firstEmail(...values) {
   return "";
 }
 
-function normalizeSearch(value = "") {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9@._+\-\s]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+function normalizeClienteType(value = "") {
+  const type = normalizeKey(value);
+
+  if (["empresa", "company", "business", "b2b", "autonomo"].includes(type)) {
+    return "empresa";
+  }
+
+  if (["particular", "persona", "individual", "b2c"].includes(type)) {
+    return "particular";
+  }
+
+  return "";
 }
 
 function safeError(error = null, fallback = "No se pudieron cargar los clientes.") {
@@ -208,6 +213,13 @@ function safeError(error = null, fallback = "No se pudieron cargar los clientes.
   );
 }
 
+function createContractError(code = "CLIENTES_CONTRACT_ERROR", message = code, status = 400) {
+  const error = new Error(message);
+  error.code = code;
+  error.status = status;
+  return error;
+}
+
 function nextLoadToken() {
   lastLoadToken += 1;
   return lastLoadToken;
@@ -218,11 +230,557 @@ function isActiveLoadToken(token) {
 }
 
 /* =========================================================
+   MODEL
+========================================================= */
+
+function getRaw(item = {}) {
+  return safeObject(item?.raw, safeObject(item));
+}
+
+function normalizeStatusValue(value = "", source = {}) {
+  const explicit = normalizeKey(
+    first(value, source.status, source.estado, source.state, "")
+  );
+
+  if (["inactive", "inactivo", "disabled", "archived", "deleted"].includes(explicit)) {
+    return "inactive";
+  }
+
+  if (["blocked", "bloqueado", "suspended", "locked"].includes(explicit)) {
+    return "blocked";
+  }
+
+  if (["pending", "pendiente", "new", "nuevo", "invited"].includes(explicit)) {
+    return "pending";
+  }
+
+  if (["vip", "premium"].includes(explicit)) {
+    return "vip";
+  }
+
+  if (source.active === false || source.enabled === false || source.disabled === true) {
+    return "inactive";
+  }
+
+  return "active";
+}
+
+function normalizeClienteModel(item = {}) {
+  const raw = safeObject(item);
+  const contacto = safeObject(first(raw.contacto, raw.contact, raw.profile, {}));
+  const direccion = safeObject(first(raw.direccion, raw.address, raw.location, {}));
+
+  const clienteId = cleanText(
+    first(
+      raw.clienteId,
+      raw.clientId,
+      raw.customerId,
+      raw.id,
+      raw._id,
+      raw.uid,
+      ""
+    ),
+    ""
+  );
+
+  const userId = cleanText(
+    first(raw.userId, raw.usuarioId, raw.ownerUserId, raw.user?.userId, raw.user?.id, ""),
+    ""
+  );
+
+  const tipo = normalizeClienteType(
+    first(raw.tipo, raw.type, raw.clienteTipo, raw.segmento, "")
+  ) || cleanText(first(raw.tipo, raw.type, "cliente"), "cliente");
+
+  const nombreFiscal = cleanText(
+    first(
+      raw.nombreFiscal,
+      raw.razonSocial,
+      raw.businessName,
+      raw.companyName,
+      raw.displayName,
+      raw.name,
+      raw.nombre,
+      contacto.nombre,
+      clienteId,
+      "Cliente"
+    ),
+    "Cliente"
+  );
+
+  const nombreContacto = cleanText(
+    first(
+      raw.nombreContacto,
+      raw.contactoNombre,
+      contacto.nombre,
+      contacto.name,
+      contacto.displayName,
+      nombreFiscal,
+      ""
+    ),
+    ""
+  );
+
+  const email = firstEmail(
+    raw.email,
+    raw.emailLower,
+    raw.contactoEmail,
+    raw.contactEmail,
+    contacto.email,
+    contacto.emailLower,
+    ""
+  );
+
+  const phone = cleanText(
+    first(
+      raw.phone,
+      raw.telefono,
+      raw.contactoPhone,
+      contacto.phone,
+      contacto.telefono,
+      ""
+    ),
+    ""
+  );
+
+  const nif = cleanText(
+    first(raw.nif, raw.cif, raw.taxId, raw.vatNumber, ""),
+    ""
+  ).toUpperCase();
+
+  const city = cleanText(
+    first(raw.city, raw.ciudad, direccion.ciudad, direccion.city, ""),
+    ""
+  );
+
+  const avatar = cleanText(
+    first(raw.avatar, raw.avatarUrl, raw.photoUrl, raw.picture, ""),
+    ""
+  );
+
+  const status = normalizeStatusValue(
+    first(raw.status, raw.estado, raw.state, ""),
+    raw
+  );
+
+  const active = status === "active" || status === "vip";
+  const createdAt = first(raw.createdAt, raw.created_at, raw.fechaCreacion, null);
+  const updatedAt = first(raw.updatedAt, raw.updated_at, raw.modifiedAt, createdAt, null);
+
+  const invoicesCount = number(
+    first(raw.invoicesCount, raw.facturasCount, raw.invoiceCount, raw.stats?.facturasCount, 0),
+    0
+  );
+
+  const ticketsCount = number(
+    first(raw.ticketsCount, raw.incidenciasCount, raw.ticketCount, raw.stats?.ticketsCount, 0),
+    0
+  );
+
+  const totalAmount = number(
+    first(raw.totalAmount, raw.totalImporte, raw.facturasTotal, raw.stats?.totalFacturado, 0),
+    0
+  );
+
+  const normalizedAddress = {
+    ...direccion,
+    calle: cleanText(first(direccion.calle, direccion.street, raw.calle, ""), ""),
+    cp: cleanText(first(direccion.cp, direccion.postalCode, raw.cp, ""), ""),
+    ciudad: city,
+    city,
+    provincia: cleanText(first(direccion.provincia, direccion.province, raw.provincia, ""), ""),
+    pais: cleanText(first(direccion.pais, direccion.country, raw.pais, ""), ""),
+  };
+
+  const normalizedContact = {
+    ...contacto,
+    nombre: nombreContacto,
+    name: nombreContacto,
+    email,
+    emailLower: email,
+    phone,
+    telefono: phone,
+  };
+
+  return {
+    ...raw,
+    raw,
+
+    id: clienteId,
+    _id: cleanText(first(raw._id, clienteId), clienteId),
+    uid: cleanText(first(raw.uid, clienteId), clienteId),
+    clienteId,
+    clientId: cleanText(first(raw.clientId, clienteId), clienteId),
+    customerId: cleanText(first(raw.customerId, clienteId), clienteId),
+    userId,
+
+    code: cleanText(first(raw.code, raw.codigo, clienteId, nif, email), "CLI-SIN-ID"),
+    codigo: cleanText(first(raw.codigo, raw.code, clienteId, nif, email), "CLI-SIN-ID"),
+
+    tipo,
+    type: tipo,
+    clienteTipo: tipo,
+    segment: tipo,
+
+    nombreFiscal,
+    razonSocial: cleanText(first(raw.razonSocial, nombreFiscal), nombreFiscal),
+    businessName: cleanText(first(raw.businessName, nombreFiscal), nombreFiscal),
+    companyName: cleanText(first(raw.companyName, nombreFiscal), nombreFiscal),
+    displayName: cleanText(first(raw.displayName, nombreFiscal), nombreFiscal),
+    fullName: cleanText(first(raw.fullName, nombreFiscal), nombreFiscal),
+    name: cleanText(first(raw.name, nombreFiscal), nombreFiscal),
+    nombre: cleanText(first(raw.nombre, nombreFiscal), nombreFiscal),
+
+    nombreContacto,
+    contactoNombre: nombreContacto,
+    contacto: normalizedContact,
+
+    email,
+    emailLower: email,
+    mail: email,
+    contactEmail: email,
+    billingEmail: firstEmail(raw.billingEmail, raw.emailFacturacion, email),
+
+    phone,
+    telefono: phone,
+    mobile: cleanText(first(raw.mobile, raw.movil, phone), phone),
+
+    nif,
+    cif: cleanText(first(raw.cif, nif), nif),
+    taxId: cleanText(first(raw.taxId, nif), nif),
+
+    direccion: normalizedAddress,
+    address: normalizedAddress,
+    city,
+    ciudad: city,
+
+    avatar,
+    avatarUrl: cleanText(first(raw.avatarUrl, avatar), avatar),
+    photoUrl: cleanText(first(raw.photoUrl, avatar), avatar),
+    picture: cleanText(first(raw.picture, avatar), avatar),
+    hasAvatar: Boolean(avatar),
+
+    status,
+    estado: status,
+    state: status,
+    active,
+    isActive: active,
+    enabled: active,
+    blocked: status === "blocked",
+    vip: status === "vip",
+    isVip: status === "vip",
+
+    createdAt,
+    updatedAt,
+    lastActivityAt: first(raw.lastActivityAt, updatedAt, createdAt, null),
+    lastContactAt: first(raw.lastContactAt, null),
+    lastInvoiceAt: first(raw.lastInvoiceAt, null),
+    lastTicketAt: first(raw.lastTicketAt, null),
+
+    invoicesCount,
+    facturasCount: invoicesCount,
+    invoiceCount: invoicesCount,
+
+    ticketsCount,
+    incidenciasCount: ticketsCount,
+    ticketCount: ticketsCount,
+
+    totalAmount,
+    totalImporte: totalAmount,
+    facturasTotal: totalAmount,
+  };
+}
+
+function getClienteStableId(item = {}) {
+  const raw = getRaw(item);
+
+  return cleanText(
+    first(
+      item.clienteId,
+      item.clientId,
+      item.customerId,
+      item.id,
+      item._id,
+      item.uid,
+      raw.clienteId,
+      raw.clientId,
+      raw.customerId,
+      raw.id,
+      raw._id,
+      raw.uid,
+      ""
+    ),
+    ""
+  );
+}
+
+function getSortTimestamp(item = {}) {
+  const value = first(
+    item.lastActivityAt,
+    item.updatedAt,
+    item.createdAt,
+    item.raw?.lastActivityAt,
+    item.raw?.updatedAt,
+    item.raw?.createdAt,
+    0
+  );
+
+  const parsedDate = Date.parse(value);
+  if (Number.isFinite(parsedDate)) return parsedDate;
+
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) {
+    return numeric > 9_999_999_999 ? numeric : numeric * 1000;
+  }
+
+  return 0;
+}
+
+function compareClientesNewestFirst(a = {}, b = {}) {
+  const diff = getSortTimestamp(b) - getSortTimestamp(a);
+  if (diff !== 0) return diff;
+
+  return getClienteStableId(a).localeCompare(getClienteStableId(b), "es", {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function dedupeClientes(items = []) {
+  const map = new Map();
+  let anonymousIndex = 0;
+
+  for (const value of safeArray(items)) {
+    if (!isObject(value)) continue;
+
+    const normalized = normalizeClienteModel(value);
+    const id = getClienteStableId(normalized) || `anonymous:${anonymousIndex++}`;
+
+    if (map.has(id)) {
+      const previous = map.get(id);
+      map.set(id, normalizeClienteModel({
+        ...previous,
+        ...normalized,
+        raw: {
+          ...safeObject(previous?.raw),
+          ...safeObject(normalized?.raw),
+        },
+      }));
+      continue;
+    }
+
+    map.set(id, normalized);
+  }
+
+  return [...map.values()].sort(compareClientesNewestFirst);
+}
+
+function normalizeClientesCollection(items = []) {
+  return dedupeClientes(items);
+}
+
+function findClienteById(items = [], id = "") {
+  const target = cleanText(id, "").toLowerCase();
+  if (!target) return null;
+
+  return safeArray(items).find((item) => {
+    const normalized = normalizeClienteModel(item);
+    const candidates = [
+      normalized.clienteId,
+      normalized.clientId,
+      normalized.customerId,
+      normalized.id,
+      normalized._id,
+      normalized.uid,
+      normalized.nif,
+      normalized.email,
+    ];
+
+    return candidates.some((candidate) => cleanText(candidate, "").toLowerCase() === target);
+  }) || null;
+}
+
+function statusBucket(item = {}) {
+  const status = normalizeStatusValue(
+    first(item.status, item.estado, item.state, ""),
+    item
+  );
+
+  if (status === "vip") return "vip";
+  if (status === "pending") return "pending";
+  if (["blocked", "inactive"].includes(status)) return "blocked";
+  return "active";
+}
+
+function clienteSearchText(item = {}) {
+  const current = normalizeClienteModel(item);
+
+  return normalizeSearch([
+    current.clienteId,
+    current.userId,
+    current.code,
+    current.nombreFiscal,
+    current.nombreContacto,
+    current.email,
+    current.phone,
+    current.city,
+    current.nif,
+    current.tipo,
+    current.status,
+  ].join(" "));
+}
+
+function filterClientes(items = [], { filter = "all", search = "", query = "", q = "" } = {}) {
+  const normalizedFilter = normalizeKey(filter || "all");
+  const needle = normalizeSearch(first(search, query, q, ""));
+  const terms = needle.split(" ").filter(Boolean);
+
+  return safeArray(items).filter((item) => {
+    if (normalizedFilter !== "all" && statusBucket(item) !== normalizedFilter) {
+      return false;
+    }
+
+    if (!terms.length) return true;
+
+    const haystack = clienteSearchText(item);
+    return terms.every((term) => haystack.includes(term));
+  });
+}
+
+function computeClientesStats(items = []) {
+  return safeArray(items).reduce(
+    (acc, item) => {
+      const current = normalizeClienteModel(item);
+      const bucket = statusBucket(current);
+
+      acc.total += 1;
+      if (bucket === "active") acc.activeCount += 1;
+      if (bucket === "pending") acc.pendingCount += 1;
+      if (bucket === "blocked") acc.blockedCount += 1;
+      if (bucket === "vip") acc.vipCount += 1;
+
+      acc.invoicesCount += number(current.invoicesCount, 0);
+      acc.ticketsCount += number(current.ticketsCount, 0);
+      acc.totalAmount += number(current.totalAmount, 0);
+
+      return acc;
+    },
+    {
+      total: 0,
+      activeCount: 0,
+      pendingCount: 0,
+      blockedCount: 0,
+      vipCount: 0,
+      invoicesCount: 0,
+      ticketsCount: 0,
+      totalAmount: 0,
+    }
+  );
+}
+
+/* =========================================================
+   RESPONSE READERS
+========================================================= */
+
+function envelopeObjects(payload = null, maxDepth = 6) {
+  const output = [];
+  const queue = [{ value: payload, depth: 0 }];
+  const seen = new Set();
+
+  while (queue.length) {
+    const { value, depth } = queue.shift();
+
+    if (!isObject(value) || seen.has(value) || depth > maxDepth) continue;
+
+    seen.add(value);
+    output.push(value);
+
+    for (const key of ["data", "payload", "result", "response", "body", "value"]) {
+      if (isObject(value[key])) {
+        queue.push({ value: value[key], depth: depth + 1 });
+      }
+    }
+  }
+
+  return output;
+}
+
+function pickItems(payload = null) {
+  if (Array.isArray(payload)) return payload;
+
+  for (const source of envelopeObjects(payload)) {
+    for (const key of ["clientes", "items", "rows", "clients", "customers", "results"]) {
+      if (Array.isArray(source[key])) return source[key];
+    }
+  }
+
+  return [];
+}
+
+function pickDetail(payload = null) {
+  if (!payload) return null;
+  if (Array.isArray(payload)) return payload[0] || null;
+
+  for (const source of envelopeObjects(payload)) {
+    for (const key of ["cliente", "client", "customer", "item", "detail", "record"]) {
+      if (isObject(source[key])) return source[key];
+    }
+  }
+
+  const direct = safeObject(payload, null);
+  if (!direct) return null;
+
+  return (
+    direct.clienteId ||
+    direct.id ||
+    direct.userId ||
+    direct.nombreFiscal
+  )
+    ? direct
+    : null;
+}
+
+function normalizeListResponse(response = null) {
+  const items = normalizeClientesCollection(pickItems(response));
+
+  return {
+    ...safeObject(response),
+    ok: safeObject(response)?.ok !== false,
+    success: safeObject(response)?.ok !== false,
+    items,
+    clientes: items,
+    clients: items,
+    customers: items,
+    rows: items,
+    results: items,
+    total: items.length,
+    totalCount: items.length,
+    remoteCount: items.length,
+    count: items.length,
+    returned: items.length,
+    hasMore: false,
+    continuationToken: null,
+    nextContinuationToken: null,
+  };
+}
+
+function normalizeDetailResponse(response = null) {
+  const detail = pickDetail(response);
+  return detail ? normalizeClienteModel(detail) : null;
+}
+
+/* =========================================================
    STORAGE / STATE
 ========================================================= */
 
 function isStorageAvailable() {
-  return isBrowser() && Boolean(window.localStorage);
+  if (!isBrowser()) return false;
+
+  try {
+    return Boolean(window.localStorage);
+  } catch {
+    return false;
+  }
 }
 
 function readCachePayload() {
@@ -233,9 +791,20 @@ function readCachePayload() {
     if (!raw) return null;
 
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : null;
+    return isObject(parsed) ? parsed : null;
   } catch {
     return null;
+  }
+}
+
+function removeCachePayload() {
+  if (!isStorageAvailable()) return false;
+
+  try {
+    window.localStorage.removeItem(CLIENTES_CACHE_KEY);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -246,7 +815,7 @@ function writeCachePayload() {
     const payload = {
       version: CLIENTES_API_VERSION,
       items: clientesState.items,
-      remoteCount: clientesState.remoteCount,
+      remoteCount: clientesState.items.length,
       lastSyncAt: clientesState.lastSyncAt || Date.now(),
       cachedAt: Date.now(),
     };
@@ -259,10 +828,12 @@ function writeCachePayload() {
 }
 
 function hydrateStateFromCache({ freshOnly = true } = {}) {
+  if (clientesState.loaded && clientesState.items.length) return true;
+
   const payload = readCachePayload();
   if (!payload) return false;
 
-  const cachedAt = Number(payload.cachedAt || payload.lastSyncAt || 0);
+  const cachedAt = number(payload.cachedAt || payload.lastSyncAt, 0);
   const age = cachedAt ? Date.now() - cachedAt : Number.POSITIVE_INFINITY;
 
   if (freshOnly && age > CLIENTES_CACHE_TTL_MS) return false;
@@ -271,7 +842,7 @@ function hydrateStateFromCache({ freshOnly = true } = {}) {
   if (!items.length) return false;
 
   clientesState.items = items;
-  clientesState.remoteCount = Math.max(items.length, number(payload.remoteCount, items.length));
+  clientesState.remoteCount = items.length;
   clientesState.lastSyncAt = number(payload.lastSyncAt, cachedAt || Date.now());
   clientesState.hydrated = true;
   clientesState.loaded = true;
@@ -286,14 +857,14 @@ export function hydrateClientesFromCache(options = {}) {
     freshOnly: options.freshOnly !== false && options.stale !== true,
   });
 
-  const items = safeArray(clientesState.items);
+  const items = [...clientesState.items];
   const lastSyncAt = number(clientesState.lastSyncAt, 0);
   const ageMs = lastSyncAt ? Math.max(0, Date.now() - lastSyncAt) : Number.POSITIVE_INFINITY;
   const ttlMs = number(options.ttlMs ?? options.cacheTtlMs, CLIENTES_CACHE_TTL_MS);
 
   return {
     ok: Boolean(clientesState.loaded || clientesState.hydrated || items.length),
-    cached: true,
+    cached: Boolean(items.length),
     stale: !lastSyncAt || ageMs > ttlMs,
     items,
     clientes: items,
@@ -301,9 +872,9 @@ export function hydrateClientesFromCache(options = {}) {
     customers: items,
     rows: items,
     results: items,
-    total: Math.max(number(clientesState.remoteCount, items.length), items.length),
-    totalCount: Math.max(number(clientesState.remoteCount, items.length), items.length),
-    remoteCount: Math.max(number(clientesState.remoteCount, items.length), items.length),
+    total: items.length,
+    totalCount: items.length,
+    remoteCount: items.length,
     count: items.length,
     loadedAt: lastSyncAt ? new Date(lastSyncAt).toISOString() : null,
     lastSyncAt,
@@ -311,27 +882,13 @@ export function hydrateClientesFromCache(options = {}) {
     refreshing: clientesState.refreshing,
     error: clientesState.error,
     cache: {
-      hydrated: Boolean(clientesState.hydrated || items.length),
+      hydrated: clientesState.hydrated,
       ageMs,
       ttlMs,
       fresh: Boolean(lastSyncAt) && ageMs <= ttlMs,
       key: CLIENTES_CACHE_KEY,
     },
   };
-}
-
-function getInflightLoad() {
-  return clientesState.inflightLoad || null;
-}
-
-function setInflightLoad(task = null) {
-  clientesState.inflightLoad = task || null;
-  return clientesState.inflightLoad;
-}
-
-function clearInflightLoad() {
-  clientesState.inflightLoad = null;
-  return true;
 }
 
 function setLoading(value = false) {
@@ -355,10 +912,13 @@ function clearError() {
 }
 
 function setItems(items = [], { remoteCount = null } = {}) {
-  const list = dedupeClientes(normalizeClientesCollection(items));
+  const list = normalizeClientesCollection(items);
   clientesState.items = list;
   clientesStore = list;
-  clientesState.remoteCount = Math.max(list.length, number(remoteCount, clientesState.remoteCount || list.length));
+  clientesState.remoteCount = Math.max(
+    list.length,
+    number(remoteCount, list.length)
+  );
   return list;
 }
 
@@ -386,46 +946,56 @@ function setHydrated(value = true) {
   return clientesState.hydrated;
 }
 
-function getClientesStore() {
-  return clientesStore;
+function getInflightLoad() {
+  return clientesState.inflightLoad || null;
+}
+
+function setInflightLoad(task = null) {
+  clientesState.inflightLoad = task || null;
+  return clientesState.inflightLoad;
+}
+
+function clearInflightLoad(task = null) {
+  if (!task || clientesState.inflightLoad === task) {
+    clientesState.inflightLoad = null;
+  }
+
+  return true;
 }
 
 function replaceClientesStore(items = []) {
-  clientesStore = dedupeClientes(normalizeClientesCollection(items));
-  clientesState.items = clientesStore;
-  clientesState.remoteCount = Math.max(clientesStore.length, clientesState.remoteCount);
-  return clientesStore;
+  const list = normalizeClientesCollection(items);
+  clientesStore = list;
+  clientesState.items = list;
+  clientesState.remoteCount = Math.max(clientesState.remoteCount, list.length);
+  return list;
 }
 
 function upsertClienteStore(item = {}) {
   const normalized = normalizeClienteModel(item);
   const id = getClienteStableId(normalized);
 
-  if (!id) {
-    clientesStore = dedupeClientes([...clientesStore, normalized]);
-    clientesState.items = clientesStore;
-    return normalized;
-  }
+  if (!id) return normalized;
 
-  const current = dedupeClientes(clientesStore);
+  const current = [...clientesStore];
   const index = current.findIndex((row) => getClienteStableId(row) === id);
 
   if (index >= 0) {
-    current[index] = {
+    current[index] = normalizeClienteModel({
       ...current[index],
       ...normalized,
       raw: {
         ...safeObject(current[index]?.raw),
         ...safeObject(normalized?.raw),
       },
-    };
+    });
   } else {
     current.unshift(normalized);
   }
 
-  clientesStore = dedupeClientes(current);
+  clientesStore = normalizeClientesCollection(current);
   clientesState.items = clientesStore;
-  clientesState.remoteCount = Math.max(clientesStore.length, clientesState.remoteCount);
+  clientesState.remoteCount = Math.max(clientesState.remoteCount, clientesStore.length);
 
   return normalized;
 }
@@ -436,761 +1006,41 @@ function removeClienteStore(id = "") {
 
   const before = clientesStore.length;
 
-  clientesStore = clientesStore.filter((item) => {
-    const stableId = getClienteStableId(item).toLowerCase();
-    return stableId !== target;
-  });
+  clientesStore = clientesStore.filter(
+    (item) => getClienteStableId(item).toLowerCase() !== target
+  );
 
   clientesState.items = clientesStore;
-  clientesState.remoteCount = Math.max(0, clientesState.remoteCount - Math.max(0, before - clientesStore.length));
+  clientesState.remoteCount = clientesStore.length;
 
   return before !== clientesStore.length;
 }
 
-/* =========================================================
-   MODEL
-========================================================= */
-
-function getRaw(item = {}) {
-  return safeObject(item?.raw, {});
-}
-
-function normalizeRoleLike(value = "") {
-  const role = normalizeKey(value || "");
-
-  if (["admin", "administrator", "administrador", "owner", "root"].includes(role)) return "admin";
-  if (["empresa", "company", "business", "b2b"].includes(role)) return "empresa";
-  if (["particular", "persona", "individual", "b2c"].includes(role)) return "particular";
-
-  return role || "cliente";
-}
-
-function normalizeStatusValue(value = "", source = {}) {
-  const explicit = first(value, source.status, source.estado, source.state, source.accountStatus, source.clientStatus);
-
-  if (explicit !== null && explicit !== undefined && explicit !== "") {
-    const status = normalizeKey(explicit);
-
-    if (["active", "activo", "activa", "enabled", "habilitado", "habilitada", "ok"].includes(status)) return "active";
-    if (["pending", "pendiente", "new", "nuevo", "invited", "invitado", "invitada"].includes(status)) return "pending";
-    if (["vip", "premium"].includes(status)) return "vip";
-    if (["blocked", "bloqueado", "bloqueada", "suspended", "locked", "restricted"].includes(status)) return "blocked";
-    if (["disabled", "inactive", "inactivo", "inactiva", "archived"].includes(status)) return "inactive";
-
-    return status || "active";
-  }
-
-  if (source.vip === true || source.isVip === true || source.premium === true) return "vip";
-  if (source.active === false || source.isActive === false || source.enabled === false || source.disabled === true) return "inactive";
-  if (source.blocked === true) return "blocked";
-
-  return "active";
-}
-
-function normalizeClienteModel(item = {}) {
-  const raw = safeObject(item);
-  const profile = safeObject(first(raw.profile, raw.cliente, raw.client, raw.customer, {}));
-  const address = safeObject(first(raw.address, raw.direccion, raw.location, raw.ubicacion, profile.address, profile.direccion, {}));
-
-  const firstName = cleanText(first(raw.firstName, raw.nombre, profile.firstName, profile.nombre), "");
-  const lastName = cleanText(first(raw.lastName, raw.apellidos, profile.lastName, profile.apellidos), "");
-  const composedName = [firstName, lastName].filter(Boolean).join(" ");
-
-  const email = firstEmail(
-    raw.email,
-    raw.emailLower,
-    raw.mail,
-    raw.contactEmail,
-    raw.billingEmail,
-    raw.facturacionEmail,
-    profile.email,
-    profile.emailLower,
-    profile.mail
-  );
-
-  const nif = cleanText(first(raw.nif, raw.cif, raw.taxId, raw.vat, raw.documentId, profile.nif, profile.cif), "").toUpperCase();
-
-  const clienteId = cleanText(
-    first(
-      raw.clienteId,
-      raw.clientId,
-      raw.customerId,
-      raw.id,
-      raw._id,
-      raw.uid,
-      raw.sub,
-      raw.code,
-      raw.codigo,
-      profile.clienteId,
-      profile.clientId,
-      profile.id,
-      profile.uid,
-      nif,
-      email
-    ),
-    ""
-  );
-
-  const name = cleanText(
-    first(
-      raw.razonSocial,
-      raw.businessName,
-      raw.companyName,
-      raw.empresa,
-      raw.fullName,
-      raw.displayName,
-      raw.name,
-      raw.nombreCompleto,
-      composedName,
-      raw.nombre,
-      profile.razonSocial,
-      profile.businessName,
-      profile.companyName,
-      profile.fullName,
-      profile.displayName,
-      profile.name,
-      email,
-      clienteId
-    ),
-    "Cliente"
-  );
-
-  const type = normalizeRoleLike(first(raw.tipo, raw.type, raw.kind, raw.segment, raw.category, profile.tipo, profile.type, "cliente"));
-  const status = normalizeStatusValue(first(raw.status, raw.estado, raw.state), raw);
-  const phone = cleanText(first(raw.phone, raw.telefono, raw.mobile, raw.movil, profile.phone, profile.telefono, profile.mobile), "");
-  const city = cleanText(first(raw.city, raw.ciudad, raw.locationCity, address.city, address.ciudad, profile.city, profile.ciudad), "");
-  const avatar = cleanText(first(raw.avatarUrl, raw.avatar, raw.photoUrl, raw.photoURL, raw.picture, raw.imageUrl, profile.avatarUrl, profile.avatar, profile.photoUrl, profile.picture), "");
-
-  const createdAt = first(raw.createdAt, raw.created_at, raw.fechaCreacion, raw.registeredAt, raw.created, raw.lifecycle?.createdAt, raw.audit?.createdAt, null);
-  const updatedAt = first(raw.updatedAt, raw.updated_at, raw.modifiedAt, raw.lastModifiedAt, raw.lastActivityAt, raw.lastInvoiceAt, raw.lastTicketAt, raw.lastContactAt, raw.lifecycle?.updatedAt, raw.audit?.updatedAt, createdAt, null);
-  const lastActivityAt = first(raw.lastActivityAt, raw.lastInvoiceAt, raw.lastTicketAt, raw.lastContactAt, updatedAt, createdAt, null);
-
-  const invoicesCount = number(first(raw.invoicesCount, raw.facturasCount, raw.invoiceCount, raw.stats?.invoicesCount, raw.stats?.facturasCount), 0);
-  const ticketsCount = number(first(raw.ticketsCount, raw.incidenciasCount, raw.ticketCount, raw.stats?.ticketsCount, raw.stats?.incidenciasCount), 0);
-  const totalAmount = number(first(raw.totalAmount, raw.totalImporte, raw.facturasTotal, raw.invoicesTotal, raw.amount, raw.stats?.totalAmount, raw.stats?.facturasTotal), 0);
-
-  return {
-    ...raw,
-    raw,
-
-    id: clienteId,
-    _id: cleanText(first(raw._id, clienteId), clienteId),
-    uid: cleanText(first(raw.uid, clienteId), clienteId),
-    clienteId,
-    clientId: cleanText(first(raw.clientId, raw.clienteId, clienteId), clienteId),
-    customerId: cleanText(first(raw.customerId, clienteId), clienteId),
-
-    code: cleanText(first(raw.code, raw.codigo, clienteId, nif, email), clienteId || nif || email || "CLI-SIN-ID"),
-    codigo: cleanText(first(raw.codigo, raw.code, clienteId, nif, email), clienteId || nif || email || "CLI-SIN-ID"),
-
-    fullName: name,
-    displayName: name,
-    name,
-    nombre: cleanText(first(raw.nombre, raw.name, name), name),
-    razonSocial: cleanText(first(raw.razonSocial, raw.businessName, raw.companyName, name), name),
-    businessName: cleanText(first(raw.businessName, raw.razonSocial, raw.companyName, name), name),
-    companyName: cleanText(first(raw.companyName, raw.businessName, raw.razonSocial, name), name),
-    firstName,
-    lastName,
-    apellidos: lastName,
-
-    email,
-    emailLower: email,
-    mail: email,
-    contactEmail: cleanText(first(raw.contactEmail, email), email),
-    billingEmail: cleanText(first(raw.billingEmail, raw.facturacionEmail, email), email),
-
-    phone,
-    telefono: phone,
-    mobile: cleanText(first(raw.mobile, raw.movil, phone), phone),
-    movil: cleanText(first(raw.movil, raw.mobile, phone), phone),
-
-    nif,
-    cif: cleanText(first(raw.cif, nif), nif),
-    taxId: cleanText(first(raw.taxId, nif), nif),
-    vat: cleanText(first(raw.vat, nif), nif),
-
-    role: type,
-    rol: type,
-    type,
-    tipo: type,
-    kind: normalizeKey(first(raw.kind, type, "")),
-    segment: normalizeKey(first(raw.segment, type, "")),
-    category: normalizeKey(first(raw.category, type, "")),
-
-    status,
-    estado: status,
-    state: status,
-    active: status === "active" || status === "vip",
-    isActive: status === "active" || status === "vip",
-    enabled: status === "active" || status === "vip",
-    blocked: status === "blocked",
-    vip: status === "vip" || raw.vip === true || raw.isVip === true,
-    isVip: status === "vip" || raw.vip === true || raw.isVip === true,
-
-    city,
-    ciudad: city,
-    locationCity: city,
-    location: {
-      ...safeObject(raw.location),
-      city,
-      ciudad: city,
-    },
-    address: {
-      ...address,
-      city,
-      ciudad: city,
-    },
-    direccion: {
-      ...address,
-      city,
-      ciudad: city,
-    },
-
-    avatar,
-    avatarUrl: avatar,
-    photoUrl: cleanText(first(raw.photoUrl, avatar), avatar),
-    picture: cleanText(first(raw.picture, avatar), avatar),
-    hasAvatar: Boolean(avatar),
-
-    createdAt,
-    updatedAt,
-    lastActivityAt,
-    lastContactAt: first(raw.lastContactAt, lastActivityAt, null),
-    lastInvoiceAt: first(raw.lastInvoiceAt, null),
-    lastTicketAt: first(raw.lastTicketAt, null),
-
-    invoicesCount,
-    facturasCount: invoicesCount,
-    invoiceCount: invoicesCount,
-
-    ticketsCount,
-    incidenciasCount: ticketsCount,
-    ticketCount: ticketsCount,
-
-    totalAmount,
-    totalImporte: totalAmount,
-    facturasTotal: totalAmount,
-    invoicesTotal: totalAmount,
-
-    meta: {
-      ...safeObject(raw.meta),
-      frontendReady: true,
-      apiVersion: CLIENTES_API_VERSION,
-      hasEmail: Boolean(email),
-      hasPhone: Boolean(phone),
-      hasCity: Boolean(city),
-      hasNif: Boolean(nif),
-      status,
-      type,
-    },
-  };
-}
-
-function getClienteStableId(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  return cleanText(
-    first(
-      item.clienteId,
-      item.clientId,
-      item.customerId,
-      item.id,
-      item._id,
-      item.uid,
-      item.code,
-      item.codigo,
-      item.nif,
-      item.cif,
-      item.email,
-      raw.clienteId,
-      raw.clientId,
-      raw.customerId,
-      raw.id,
-      raw._id,
-      raw.uid,
-      raw.code,
-      raw.codigo,
-      raw.nif,
-      raw.cif,
-      raw.email,
-      ""
-    ),
-    ""
-  );
-}
-
-function getSortTimestamp(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  const value = first(
-    item.lastActivityAt,
-    item.updatedAt,
-    item.lastInvoiceAt,
-    item.lastTicketAt,
-    item.lastContactAt,
-    item.createdAt,
-    raw.lastActivityAt,
-    raw.updatedAt,
-    raw.lastInvoiceAt,
-    raw.lastTicketAt,
-    raw.lastContactAt,
-    raw.createdAt,
-    0
-  );
-
-  const parsedDate = Date.parse(value);
-  if (Number.isFinite(parsedDate)) return parsedDate;
-
-  const numeric = Number(value);
-  if (Number.isFinite(numeric)) return numeric > 9_999_999_999 ? numeric : numeric * 1000;
-
-  return 0;
-}
-
-function compareClientesNewestFirst(a = {}, b = {}) {
-  const diff = getSortTimestamp(b) - getSortTimestamp(a);
-  if (diff !== 0) return diff;
-
-  return getClienteStableId(a).localeCompare(getClienteStableId(b), "es", {
-    numeric: true,
-    sensitivity: "base",
-  });
-}
-
-function dedupeClientes(items = []) {
-  const map = new Map();
-  let anonymousIndex = 0;
-
-  for (const value of safeArray(items)) {
-    if (!isObject(value)) continue;
-
-    const normalized = normalizeClienteModel(value);
-    const id = getClienteStableId(normalized) || `anonymous:${anonymousIndex++}`;
-
-    if (map.has(id)) {
-      map.set(id, {
-        ...map.get(id),
-        ...normalized,
-        raw: {
-          ...safeObject(map.get(id)?.raw),
-          ...safeObject(normalized.raw),
-        },
-      });
-      continue;
-    }
-
-    map.set(id, normalized);
-  }
-
-  return [...map.values()].sort(compareClientesNewestFirst);
-}
-
-function normalizeClientesCollection(items = []) {
-  return dedupeClientes(safeArray(items));
-}
-
-function findClienteById(items = [], id = "") {
-  const target = cleanText(id, "");
-  if (!target) return null;
-
-  const targetLower = target.toLowerCase();
-
-  return safeArray(items).find((item = {}) => {
-    const raw = safeObject(item?.raw);
-    const candidates = [
-      item.clienteId,
-      item.clientId,
-      item.customerId,
-      item.id,
-      item._id,
-      item.uid,
-      item.code,
-      item.codigo,
-      item.nif,
-      item.cif,
-      item.email,
-      raw.clienteId,
-      raw.clientId,
-      raw.customerId,
-      raw.id,
-      raw._id,
-      raw.uid,
-      raw.code,
-      raw.codigo,
-      raw.nif,
-      raw.cif,
-      raw.email,
-    ];
-
-    return candidates.some((candidate) => cleanText(candidate, "").toLowerCase() === targetLower);
-  }) || null;
-}
-
-function statusBucket(item = {}) {
-  const status = normalizeStatusValue(first(item.status, item.estado, item.state), item);
-
-  if (status === "vip") return "vip";
-  if (["pending", "pendiente", "new", "nuevo"].includes(status)) return "pending";
-  if (["blocked", "inactive", "disabled", "archived", "deleted"].includes(status)) return "blocked";
-
-  return "active";
-}
-
-function clienteSearchText(item = {}) {
-  return normalizeSearch(
-    [
-      item.clienteId,
-      item.clientId,
-      item.customerId,
-      item.id,
-      item.code,
-      item.codigo,
-      item.name,
-      item.nombre,
-      item.razonSocial,
-      item.businessName,
-      item.companyName,
-      item.email,
-      item.phone,
-      item.telefono,
-      item.city,
-      item.ciudad,
-      item.nif,
-      item.cif,
-      item.type,
-      item.tipo,
-      item.segment,
-      item.status,
-      item.estado,
-    ].join(" ")
-  );
-}
-
-function filterClientes(items = [], { filter = "all", search = "", query = "", q = "" } = {}) {
-  const normalizedFilter = normalizeKey(filter || "all");
-  const needle = normalizeSearch(first(search, query, q, ""));
-  const terms = needle.split(" ").filter(Boolean);
-
-  return safeArray(items).filter((item) => {
-    if (normalizedFilter !== "all" && statusBucket(item) !== normalizedFilter) {
-      return false;
-    }
-
-    if (!terms.length) return true;
-
-    const haystack = clienteSearchText(item);
-    return terms.every((term) => haystack.includes(term));
-  });
-}
-
-function computeClientesStats(items = []) {
-  return safeArray(items).reduce(
-    (acc, item) => {
-      acc.total += 1;
-
-      const bucket = statusBucket(item);
-
-      if (bucket === "active") acc.activeCount += 1;
-      if (bucket === "pending") acc.pendingCount += 1;
-      if (bucket === "blocked") acc.blockedCount += 1;
-      if (bucket === "vip") acc.vipCount += 1;
-
-      acc.invoicesCount += number(item.invoicesCount, 0);
-      acc.ticketsCount += number(item.ticketsCount, 0);
-      acc.totalAmount += number(item.totalAmount, 0);
-
-      return acc;
-    },
-    {
-      total: 0,
-      activeCount: 0,
-      pendingCount: 0,
-      blockedCount: 0,
-      vipCount: 0,
-      invoicesCount: 0,
-      ticketsCount: 0,
-      totalAmount: 0,
-    }
-  );
-}
-
-/* =========================================================
-   ENVELOPE READERS
-========================================================= */
-
-function envelopeObjects(payload = null, maxDepth = 8) {
-  const output = [];
-  const queue = [{ value: payload, depth: 0 }];
-  const seen = new Set();
-
-  while (queue.length) {
-    const { value, depth } = queue.shift();
-
-    if (!isObject(value) || seen.has(value) || depth > maxDepth) continue;
-
-    seen.add(value);
-    output.push(value);
-
-    for (const key of ["data", "payload", "result", "response", "body", "value"]) {
-      if (isObject(value[key])) queue.push({ value: value[key], depth: depth + 1 });
-    }
-  }
-
-  return output;
-}
-
-function pickItems(payload = null) {
-  if (Array.isArray(payload)) return payload;
-
-  for (const source of envelopeObjects(payload)) {
-    for (const key of [
-      "items",
-      "rows",
-      "clients",
-      "clientes",
-      "customers",
-      "results",
-      "records",
-      "docs",
-      "documents",
-      "list",
-      "value",
-    ]) {
-      if (Array.isArray(source[key])) return source[key];
-    }
-  }
-
-  return [];
-}
-
-function pickTotal(payload = null, fallback = 0) {
-  const candidates = [];
-
-  for (const source of envelopeObjects(payload)) {
-    candidates.push(
-      source.total,
-      source.totalCount,
-      source.remoteCount,
-      source.count,
-      source.pagination?.total,
-      source.pagination?.totalCount,
-      source.meta?.total,
-      source.meta?.totalCount,
-      source.pageInfo?.total,
-      source.pageInfo?.totalCount
-    );
-  }
-
-  for (const value of candidates) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
-  }
-
-  return Math.max(0, number(fallback, 0));
-}
-
-function pickContinuationToken(payload = null) {
-  for (const source of envelopeObjects(payload)) {
-    const token = cleanText(
-      first(
-        source.continuationToken,
-        source.nextContinuationToken,
-        source.nextToken,
-        source.ct,
-        source.pagination?.continuationToken,
-        source.pagination?.nextContinuationToken,
-        source.pagination?.nextToken,
-        source.pagination?.ct,
-        source.pageInfo?.continuationToken,
-        source.pageInfo?.nextContinuationToken,
-        source.pageInfo?.nextToken,
-        source.pageInfo?.ct
-      ),
-      ""
-    );
-
-    if (token) return token;
-  }
-
-  return "";
-}
-
-function pickHasMore(payload = null) {
-  for (const source of envelopeObjects(payload)) {
-    const value = first(source.hasMore, source.more, source.pagination?.hasMore, source.pageInfo?.hasMore);
-
-    if (value === true || value === false) return value;
-    if (typeof value === "string") return ["true", "1", "yes", "si", "sí"].includes(value.toLowerCase());
-  }
-
-  return Boolean(pickContinuationToken(payload));
-}
-
-function looksLikeCliente(value = null) {
-  const item = safeObject(value, null);
-  if (!item) return false;
-
-  return Boolean(
-    item.clienteId ||
-      item.clientId ||
-      item.customerId ||
-      item.id ||
-      item._id ||
-      item.uid ||
-      item.code ||
-      item.codigo ||
-      item.nif ||
-      item.cif ||
-      item.email ||
-      item.name ||
-      item.nombre ||
-      item.razonSocial ||
-      item.businessName ||
-      item.companyName
-  );
-}
-
-function pickDetail(payload = null) {
-  if (!payload) return null;
-  if (Array.isArray(payload)) return payload.find(looksLikeCliente) || payload[0] || null;
-  if (looksLikeCliente(payload)) return payload;
-
-  for (const source of envelopeObjects(payload)) {
-    for (const key of [
-      "client",
-      "cliente",
-      "customer",
-      "item",
-      "detail",
-      "record",
-      "resource",
-      "data",
-    ]) {
-      if (looksLikeCliente(source[key])) return source[key];
-    }
-  }
-
-  return null;
-}
-
-function mergeListResponses(responses = []) {
-  const pages = safeArray(responses).filter((page) => page !== null && page !== undefined);
-  const items = normalizeClientesCollection(pages.flatMap(pickItems));
-  const total = Math.max(items.length, ...pages.map((page) => pickTotal(page, 0)), 0);
-  const last = pages.at(-1) || {};
-
-  return {
-    ...safeObject(last),
-    ok: true,
-    success: true,
-    total,
-    totalCount: total,
-    remoteCount: total,
-    count: items.length,
-    returned: items.length,
-    items,
-    clients: items,
-    clientes: items,
-    customers: items,
-    rows: items,
-    results: items,
-    hasMore: pickHasMore(last),
-    continuationToken: pickContinuationToken(last) || null,
-    nextContinuationToken: pickContinuationToken(last) || null,
-  };
-}
-
-function normalizeListResponse(response = null) {
-  const items = normalizeClientesCollection(pickItems(response));
-  const remoteCount = Math.max(items.length, pickTotal(response, items.length));
-
-  return {
-    ...safeObject(response),
-    ok: true,
-    success: true,
-    total: remoteCount,
-    totalCount: remoteCount,
-    remoteCount,
-    count: items.length,
-    returned: items.length,
-    items,
-    clients: items,
-    clientes: items,
-    customers: items,
-    rows: items,
-    results: items,
-    hasMore: pickHasMore(response),
-    continuationToken: pickContinuationToken(response) || null,
-    nextContinuationToken: pickContinuationToken(response) || null,
-  };
-}
-
-function normalizeDetailResponse(response = null) {
-  const detail = pickDetail(response);
-  return detail ? normalizeClienteModel(detail) : null;
+function invalidateReadCache() {
+  clientesState.loaded = false;
+  clientesState.hydrated = false;
+  clientesState.lastSyncAt = 0;
+  removeCachePayload();
+  return true;
 }
 
 /* =========================================================
    HTTP
 ========================================================= */
 
-function cleanQueryValue(value) {
-  if (value === undefined || value === null || value === "") return undefined;
-  if (typeof value === "boolean") return value;
-  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
-
-  const text = cleanText(value, "");
-  return text || undefined;
-}
-
-function buildListQuery({
-  limit = CLIENTES_FETCH_LIMIT,
-  ct = "",
-  continuationToken = "",
-  includeTotal = true,
-  sortBy = "updatedAt",
-  sortDir = "DESC",
-  search = "",
-  q = "",
-  filters = {},
-} = {}) {
-  const query = {
-    limit: clamp(limit, 1, CLIENTES_MAX_LIMIT),
-    includeTotal: Boolean(includeTotal),
-    sortBy: cleanText(sortBy, "updatedAt"),
-    sortDir: cleanText(sortDir, "DESC").toUpperCase(),
-  };
-
-  const token = cleanText(first(ct, continuationToken), "");
-  const finalSearch = cleanText(first(search, q), "");
-
-  if (token) query.ct = token;
-  if (finalSearch) {
-    query.search = finalSearch;
-    query.q = finalSearch;
-  }
-
-  for (const [key, value] of Object.entries(safeObject(filters))) {
-    const cleanKey = cleanText(key, "");
-    const cleanValue = cleanQueryValue(value);
-
-    if (!cleanKey || cleanValue === undefined) continue;
-    query[cleanKey] = cleanValue;
-  }
-
-  return query;
-}
-
 async function httpRequest(method = "GET", endpoint = "", body = null, options = {}) {
   const verb = cleanText(method, "GET").toUpperCase();
   const path = cleanText(endpoint, "");
 
   if (!path) {
-    throw new Error("CLIENTES_ENDPOINT_REQUIRED");
+    throw createContractError(
+      "CLIENTES_ENDPOINT_REQUIRED",
+      "Falta el endpoint de Clientes.",
+      500
+    );
   }
 
-  const timeout = number(options.timeout, 15000);
+  const timeout = number(options.timeout, CLIENTES_TIMEOUT);
   const query = safeObject(options.query || options.params);
   const headers = safeObject(options.headers);
   const source = cleanText(options.source, "views.clientes.api");
@@ -1213,7 +1063,6 @@ async function httpRequest(method = "GET", endpoint = "", body = null, options =
 
   if (verb === "DELETE") {
     const remove = Http?.delete || Http?.del;
-
     if (isFunction(remove)) {
       return remove.call(Http, path, { timeout, query, headers, source });
     }
@@ -1231,23 +1080,11 @@ async function httpRequest(method = "GET", endpoint = "", body = null, options =
     });
   }
 
-  if (verb === "PUT") {
-    return httpRequest("PATCH", path, body, options);
-  }
-
-  if (verb === "PATCH") {
-    return httpRequest("POST", path, body, options);
-  }
-
-  throw new Error(`CLIENTES_HTTP_${verb}_UNAVAILABLE`);
-}
-
-async function fetchClientesPageRequest(options = {}) {
-  return httpRequest("GET", CLIENTES_ENDPOINT, null, {
-    timeout: number(options.timeout, CLIENTES_TIMEOUT),
-    query: buildListQuery(options),
-    source: "views.clientes.api.list.page",
-  });
+  throw createContractError(
+    `CLIENTES_HTTP_${verb}_UNAVAILABLE`,
+    `El cliente HTTP no expone ${verb} para Clientes.`,
+    500
+  );
 }
 
 /* =========================================================
@@ -1255,44 +1092,24 @@ async function fetchClientesPageRequest(options = {}) {
 ========================================================= */
 
 export async function fetchClientesRequest(options = {}) {
-  hydrateStateFromCache({ freshOnly: true });
-
-  const pages = [];
-  const seenTokens = new Set();
-  let continuationToken = cleanText(first(options.ct, options.continuationToken), "");
-  let page = 0;
-
-  do {
-    if (continuationToken) {
-      if (seenTokens.has(continuationToken)) break;
-      seenTokens.add(continuationToken);
+  const response = await httpRequest(
+    "GET",
+    CLIENTES_ENDPOINT,
+    null,
+    {
+      timeout: number(options.timeout, CLIENTES_TIMEOUT),
+      source: cleanText(options.source, "views.clientes.api.list"),
     }
+  );
 
-    page += 1;
-
-    const response = await fetchClientesPageRequest({
-      ...options,
-      ct: continuationToken,
-      includeTotal: page === 1 ? options.includeTotal !== false : false,
-    });
-
-    pages.push(response);
-
-    const nextToken = pickContinuationToken(response);
-    const hasMore = pickHasMore(response);
-
-    if (!hasMore || !nextToken || nextToken === continuationToken) break;
-
-    continuationToken = nextToken;
-  } while (page < clamp(options.maxPages || CLIENTES_MAX_PAGES, 1, CLIENTES_MAX_PAGES));
-
-  return normalizeListResponse(mergeListResponses(pages));
+  return normalizeListResponse(response);
 }
 
 export async function loadClientes(options = {}) {
-  const activeInflight = getInflightLoad();
+  hydrateStateFromCache({ freshOnly: true });
 
-  if (activeInflight && !options.force) {
+  const activeInflight = getInflightLoad();
+  if (activeInflight && options.force !== true) {
     return activeInflight;
   }
 
@@ -1300,20 +1117,22 @@ export async function loadClientes(options = {}) {
   const hadItems = clientesState.items.length > 0;
 
   setLoading(!hadItems);
-  setRefreshing(Boolean(hadItems));
+  setRefreshing(hadItems);
   clearError();
 
-  const task = fetchClientesRequest(options)
+  let task = null;
+
+  task = fetchClientesRequest(options)
     .then((response) => {
       if (!isActiveLoadToken(token)) {
         return getClientesStoreSnapshot();
       }
 
       const items = setItems(response.items, {
-        remoteCount: response.remoteCount || response.totalCount || response.total,
+        remoteCount: response.items.length,
       });
 
-      setRemoteCount(response.remoteCount || response.totalCount || response.total || items.length);
+      setRemoteCount(items.length);
       touchLastSyncAt();
       setLoaded(true);
       setHydrated(true);
@@ -1327,9 +1146,11 @@ export async function loadClientes(options = {}) {
         clients: items,
         customers: items,
         rows: items,
-        total: clientesState.remoteCount,
-        totalCount: clientesState.remoteCount,
-        remoteCount: clientesState.remoteCount,
+        results: items,
+        total: items.length,
+        totalCount: items.length,
+        remoteCount: items.length,
+        count: items.length,
         lastSyncAt: clientesState.lastSyncAt,
       };
     })
@@ -1344,12 +1165,12 @@ export async function loadClientes(options = {}) {
       if (isActiveLoadToken(token)) {
         setLoading(false);
         setRefreshing(false);
-        clearInflightLoad();
       }
+
+      clearInflightLoad(task);
     });
 
   setInflightLoad(task);
-
   return task;
 }
 
@@ -1371,7 +1192,13 @@ export async function refreshClientes(options = {}) {
 
 export async function getClienteByIdRequest(id = "", options = {}) {
   const clienteId = cleanText(id, "");
-  if (!clienteId) throw new Error("CLIENTE_ID_REQUIRED");
+
+  if (!clienteId) {
+    throw createContractError(
+      "CLIENTE_ID_REQUIRED",
+      "Falta el identificador del cliente."
+    );
+  }
 
   const response = await httpRequest(
     "GET",
@@ -1379,25 +1206,28 @@ export async function getClienteByIdRequest(id = "", options = {}) {
     null,
     {
       timeout: number(options.timeout, CLIENTES_DETAIL_TIMEOUT),
-      source: "views.clientes.api.detail",
+      source: cleanText(options.source, "views.clientes.api.detail"),
     }
   );
 
   const detail = normalizeDetailResponse(response);
 
-  if (!detail) {
-    throw new Error("CLIENTE_DETAIL_INVALID_RESPONSE");
+  if (!detail || !getClienteStableId(detail)) {
+    throw createContractError(
+      "CLIENTE_DETAIL_INVALID_RESPONSE",
+      "El backend no devolvió un cliente válido.",
+      502
+    );
   }
 
   upsertClienteStore(detail);
-
   return detail;
 }
 
 export async function getClienteById(id = "", options = {}) {
-  const cached = getClienteByIdStore(id);
+  const cached = findClienteById(clientesStore, id);
 
-  if (cached && !options.force) {
+  if (cached && options.force !== true) {
     return cached;
   }
 
@@ -1410,162 +1240,210 @@ export const loadClienteDetail = getClienteByIdRequest;
 export const getCliente = getClienteById;
 
 /* =========================================================
-   MUTATIONS
+   CREATE CONTRACT
 ========================================================= */
 
-function normalizeMutationPayload(payload = {}) {
-  const current = normalizeClienteModel(payload);
+function buildCreateClienteBody(payload = {}) {
+  const source = safeObject(payload);
+  const contacto = safeObject(source.contacto);
+  const direccion = safeObject(source.direccion);
 
-  const output = {
-    ...safeObject(payload),
+  const userId = cleanText(
+    first(source.userId, source.targetUserId, source.usuarioId, ""),
+    ""
+  );
 
-    clienteId: current.clienteId,
-    clientId: current.clientId,
-    customerId: current.customerId,
+  const tipo = normalizeClienteType(
+    first(source.tipo, source.clienteTipo, source.segmento, source.type, "")
+  );
 
-    name: current.name,
-    nombre: current.nombre,
-    displayName: current.displayName,
-    fullName: current.fullName,
-    razonSocial: current.razonSocial,
+  const nombreFiscal = cleanText(
+    first(
+      source.nombreFiscal,
+      source.razonSocial,
+      source.businessName,
+      source.companyName,
+      source.displayName,
+      source.name,
+      ""
+    ),
+    ""
+  ).slice(0, 150);
 
-    email: current.email,
-    emailLower: current.emailLower,
-    mail: current.mail,
+  const body = {
+    userId,
+    tipo,
+    nombreFiscal,
+    nif: cleanText(first(source.nif, source.cif, source.taxId, source.vatNumber, ""), "")
+      .toUpperCase()
+      .slice(0, 20),
 
-    phone: current.phone,
-    telefono: current.telefono,
-    mobile: current.mobile,
+    calle: cleanText(first(source.calle, direccion.calle, direccion.street, ""), "")
+      .slice(0, 150),
+    cp: cleanText(first(source.cp, source.postalCode, direccion.cp, direccion.postalCode, ""), "")
+      .slice(0, 10),
+    ciudad: cleanText(first(source.ciudad, source.city, direccion.ciudad, direccion.city, ""), "")
+      .slice(0, 100),
+    provincia: cleanText(first(source.provincia, source.province, direccion.provincia, direccion.province, ""), "")
+      .slice(0, 100),
+    pais: cleanText(first(source.pais, source.country, direccion.pais, direccion.country, "España"), "España")
+      .slice(0, 100),
 
-    nif: current.nif,
-    cif: current.cif,
-    taxId: current.taxId,
+    contactoNombre: cleanText(
+      first(
+        source.contactoNombre,
+        source.nombreContacto,
+        contacto.nombre,
+        contacto.name,
+        nombreFiscal,
+        ""
+      ),
+      nombreFiscal
+    ).slice(0, 150),
 
-    type: current.type,
-    tipo: current.tipo,
-    role: current.role,
-    rol: current.rol,
+    contactoEmail: firstEmail(
+      source.contactoEmail,
+      source.email,
+      contacto.email,
+      source.targetUserEmail,
+      ""
+    ).slice(0, 150),
 
-    status: current.status,
-    estado: current.estado,
-    active: current.active,
-    enabled: current.enabled,
-
-    city: current.city,
-    ciudad: current.ciudad,
-    address: current.address,
-    direccion: current.direccion,
-
-    source: cleanText(payload.source, "admin_panel"),
-    origen: cleanText(payload.origen, "admin_panel"),
-    updatedFrom: cleanText(payload.updatedFrom, "clientes_admin"),
+    contactoPhone: cleanText(
+      first(
+        source.contactoPhone,
+        source.phone,
+        source.telefono,
+        contacto.phone,
+        contacto.telefono,
+        source.targetUserPhone,
+        ""
+      ),
+      ""
+    ).slice(0, 30),
   };
 
-  for (const key of Object.keys(output)) {
-    if (output[key] === undefined) delete output[key];
+  if (!body.userId) {
+    throw createContractError(
+      "CLIENTE_USER_ID_REQUIRED",
+      "Selecciona un usuario real antes de crear el cliente."
+    );
   }
 
-  return output;
+  if (!body.tipo) {
+    throw createContractError(
+      "CLIENTE_TYPE_INVALID",
+      "El tipo de cliente debe ser particular o empresa."
+    );
+  }
+
+  if (!body.nombreFiscal) {
+    throw createContractError(
+      "CLIENTE_FISCAL_NAME_REQUIRED",
+      "El nombre fiscal es obligatorio."
+    );
+  }
+
+  return body;
 }
 
 export async function createCliente(payload = {}, options = {}) {
-  const body = normalizeMutationPayload({
-    ...payload,
-    createdFrom: first(payload.createdFrom, "clientes_create_admin"),
-  });
+  const body = buildCreateClienteBody(payload);
 
-  const response = await httpRequest("POST", CLIENTES_ENDPOINT, body, {
-    timeout: number(options.timeout, CLIENTES_MUTATION_TIMEOUT),
-    source: "views.clientes.api.create",
-  });
+  const response = await httpRequest(
+    "POST",
+    CLIENTES_ENDPOINT,
+    body,
+    {
+      timeout: number(options.timeout, CLIENTES_MUTATION_TIMEOUT),
+      source: cleanText(options.source, "views.clientes.api.create"),
+    }
+  );
 
-  const detail = normalizeDetailResponse(response) || normalizeClienteModel(response?.data || response?.payload || response);
+  const ack = safeObject(response);
 
-  if (detail && getClienteStableId(detail)) {
-    upsertClienteStore(detail);
-    touchLastSyncAt();
-    writeCachePayload();
+  if (ack.ok === false) {
+    throw createContractError(
+      "CLIENTE_CREATE_REJECTED",
+      safeError(response, "El backend rechazó la creación del cliente."),
+      number(response?.status, 400)
+    );
   }
 
-  return detail || response;
+  const clienteId = cleanText(
+    first(ack.clienteId, ack.id, ack.data?.clienteId, ack.data?.id, ""),
+    ""
+  );
+
+  if (!clienteId) {
+    throw createContractError(
+      "CLIENTE_CREATE_INVALID_RESPONSE",
+      "El backend no devolvió el identificador del cliente creado.",
+      502
+    );
+  }
+
+  /*
+    POST /api/clientes devuelve un ACK mínimo:
+    { ok, clienteId, userId, synced }.
+
+    No lo insertamos en store como si fuese el detalle completo.
+    El controlador puede pedir GET /:id y después refrescar el listado.
+  */
+  invalidateReadCache();
+
+  return {
+    ...ack,
+    ok: true,
+    clienteId,
+    id: clienteId,
+    userId: cleanText(first(ack.userId, body.userId), body.userId),
+    synced: ack.synced === true,
+  };
 }
 
 export const createClienteRequest = createCliente;
 
-export async function updateCliente(id = "", payload = {}, options = {}) {
-  const clienteId = cleanText(first(id, payload.id, payload.clienteId, payload.clientId), "");
-  if (!clienteId) throw new Error("CLIENTE_ID_REQUIRED");
+/* =========================================================
+   UNSUPPORTED MUTATIONS
+========================================================= */
 
-  const body = normalizeMutationPayload(payload);
+function unsupportedMutation(method = "PATCH") {
+  const verb = cleanText(method, "PATCH").toUpperCase();
 
-  const response = await httpRequest(
-    first(options.method, "PATCH"),
-    `${CLIENTES_ENDPOINT}/${encodeURIComponent(clienteId)}`,
-    body,
-    {
-      timeout: number(options.timeout, CLIENTES_MUTATION_TIMEOUT),
-      source: "views.clientes.api.update",
-    }
+  return createContractError(
+    `CLIENTES_${verb}_NOT_SUPPORTED`,
+    `${verb} /api/clientes/:id no forma parte del contrato productivo actual.`,
+    405
   );
+}
 
-  const detail = normalizeDetailResponse(response) || normalizeClienteModel(response?.data || response?.payload || response);
-
-  if (detail && getClienteStableId(detail)) {
-    upsertClienteStore(detail);
-    touchLastSyncAt();
-    writeCachePayload();
-  }
-
-  return detail || response;
+/*
+  Se mantienen los exports para no romper imports antiguos, pero fallan
+  antes de hacer red. Nunca se convierte PATCH en POST ni PUT en PATCH.
+*/
+export async function updateCliente() {
+  throw unsupportedMutation("PATCH");
 }
 
 export const updateClienteRequest = updateCliente;
 
-export async function patchCliente(id = "", payload = {}, options = {}) {
-  return updateCliente(id, payload, {
-    ...options,
-    method: "PATCH",
-  });
+export async function patchCliente() {
+  throw unsupportedMutation("PATCH");
 }
 
-export async function putCliente(id = "", payload = {}, options = {}) {
-  return updateCliente(id, payload, {
-    ...options,
-    method: "PUT",
-  });
+export async function putCliente() {
+  throw unsupportedMutation("PUT");
 }
 
-export async function deleteCliente(id = "", options = {}) {
-  const clienteId = cleanText(id, "");
-  if (!clienteId) throw new Error("CLIENTE_ID_REQUIRED");
-
-  const response = await httpRequest(
-    "DELETE",
-    `${CLIENTES_ENDPOINT}/${encodeURIComponent(clienteId)}`,
-    null,
-    {
-      timeout: number(options.timeout, CLIENTES_MUTATION_TIMEOUT),
-      source: "views.clientes.api.delete",
-    }
-  );
-
-  removeClienteStore(clienteId);
-  touchLastSyncAt();
-  writeCachePayload();
-
-  return {
-    ...safeObject(response),
-    ok: true,
-    deleted: true,
-    id: clienteId,
-    clienteId,
-  };
+export async function deleteCliente() {
+  throw unsupportedMutation("DELETE");
 }
 
 export const deleteClienteRequest = deleteCliente;
 
 /* =========================================================
-   STORE / SNAPSHOT EXPORTS
+   STORE / SNAPSHOT
 ========================================================= */
 
 export function getClienteByIdStore(id = "") {
@@ -1573,25 +1451,27 @@ export function getClienteByIdStore(id = "") {
 }
 
 export function getClientesStoreSnapshot() {
+  const items = [...clientesState.items];
+
   return {
     version: CLIENTES_API_VERSION,
-    items: [...clientesState.items],
-    clientes: [...clientesState.items],
-    clients: [...clientesState.items],
-    customers: [...clientesState.items],
-    rows: [...clientesState.items],
+    items,
+    clientes: items,
+    clients: items,
+    customers: items,
+    rows: items,
     store: [...clientesStore],
     remoteCount: clientesState.remoteCount,
     total: clientesState.remoteCount,
     totalCount: clientesState.remoteCount,
-    count: clientesState.items.length,
+    count: items.length,
     loading: clientesState.loading,
     refreshing: clientesState.refreshing,
     loaded: clientesState.loaded,
     hydrated: clientesState.hydrated,
     error: clientesState.error,
     lastSyncAt: clientesState.lastSyncAt,
-    stats: computeClientesStats(clientesState.items),
+    stats: computeClientesStats(items),
   };
 }
 
@@ -1602,30 +1482,35 @@ export function getClientesStateSnapshot() {
 export function getClientesApiSnapshot() {
   const snapshot = getClientesStoreSnapshot();
   const lastSyncAt = number(clientesState.lastSyncAt, 0);
-  const ageMs = lastSyncAt ? Math.max(0, Date.now() - lastSyncAt) : Number.POSITIVE_INFINITY;
+  const ageMs = lastSyncAt
+    ? Math.max(0, Date.now() - lastSyncAt)
+    : Number.POSITIVE_INFINITY;
 
   return {
     ...snapshot,
-    version: CLIENTES_API_VERSION,
     endpoint: CLIENTES_ENDPOINT,
-    loading: clientesState.loading,
+    cacheAgeMs: ageMs,
     cached: Boolean(clientesState.loaded || clientesState.hydrated || clientesState.items.length),
     lastLoadedAt: lastSyncAt ? new Date(lastSyncAt).toISOString() : null,
-    cacheAgeMs: ageMs,
     inFlight: Boolean(clientesState.inflightLoad),
-    lastError: clientesState.error ? { message: clientesState.error, code: "CLIENTES_ERROR" } : null,
-    bugfix: {
-      noArrayFlattenInFirst: true,
-      recursiveListAliases: true,
-      keepsBackendItems: true,
-      continuationTokenSafe: true,
-    },
-    contract: {
-      list: "listClientes(options) => { items, total, count, cached, stale }",
-      detail: "loadClienteDetail(id) / getClienteByIdRequest(id)",
-      mutations: "createCliente / updateCliente / deleteCliente",
-      http: "core/http.js only",
-    },
+    lastError: clientesState.error
+      ? { message: clientesState.error, code: "CLIENTES_ERROR" }
+      : null,
+    backendContract: Object.freeze({
+      list: "GET /api/clientes",
+      detail: "GET /api/clientes/:id",
+      create: "POST /api/clientes",
+      update: false,
+      delete: false,
+      pagination: false,
+    }),
+    safeguards: Object.freeze({
+      singleHttpLayer: true,
+      noMethodMasquerading: true,
+      noFakeCreateDetail: true,
+      createPayloadWhitelisted: true,
+      listUsesSingleRequest: true,
+    }),
   };
 }
 
@@ -1656,22 +1541,20 @@ export function hasClientes() {
 }
 
 export function clearClientesCache() {
+  nextLoadToken();
+
   clientesState.items = [];
   clientesState.remoteCount = 0;
+  clientesState.loading = false;
+  clientesState.refreshing = false;
   clientesState.loaded = false;
   clientesState.hydrated = false;
   clientesState.error = "";
   clientesState.lastSyncAt = 0;
+  clientesState.inflightLoad = null;
   clientesStore = [];
 
-  if (isStorageAvailable()) {
-    try {
-      window.localStorage.removeItem(CLIENTES_CACHE_KEY);
-    } catch {
-      // noop
-    }
-  }
-
+  removeCachePayload();
   return true;
 }
 
@@ -1694,7 +1577,6 @@ export {
   upsertClienteStore,
   removeClienteStore,
 
-
   normalizeClienteModel,
   normalizeClientesCollection,
   dedupeClientes,
@@ -1709,9 +1591,8 @@ export {
    DEFAULT EXPORT
 ========================================================= */
 
-export default {
+export default Object.freeze({
   version: CLIENTES_API_VERSION,
-
   endpoint: CLIENTES_ENDPOINT,
 
   loadClientes,
@@ -1731,6 +1612,7 @@ export default {
 
   createCliente,
   createClienteRequest,
+
   updateCliente,
   updateClienteRequest,
   patchCliente,
@@ -1758,4 +1640,4 @@ export default {
   computeClientesStats,
   loadClientesStats,
   statusBucket,
-};
+});

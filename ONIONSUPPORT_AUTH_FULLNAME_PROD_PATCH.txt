@@ -1,0 +1,1133 @@
+/*
+===============================================================================
+ONION SUPPORT · AUTH FULL NAME / USER ENVELOPE · PROD PATCH
+===============================================================================
+
+MUY IMPORTANTE
+--------------
+ESTE TXT ES UN SCRIPT NODE DE DESPLIEGUE CONTROLADO.
+
+NO PEGAR ESTE CONTENIDO DENTRO DE:
+  src/features/auth/index.js
+
+USO CORRECTO EN CODESPACES
+--------------------------
+1) Renombra este archivo a:
+     patch-auth-fullname-prod.cjs
+
+2) Ponlo en la RAÍZ del repo Onion Support.
+
+3) Ejecuta:
+     node patch-auth-fullname-prod.cjs --dry-run
+
+4) Si termina en "DRY RUN OK":
+     node patch-auth-fullname-prod.cjs
+
+5) Revisa el diff, commit y push con los comandos que imprime al final.
+
+OBJETIVO
+--------
+Corregir el bug de identidad por el que el Home puede terminar mostrando:
+
+  Hola, Usuario
+
+aunque el backend haya devuelto el usuario real.
+
+CAUSA
+-----
+El Auth actual puede confundir el envelope exterior de login/me/refresh con el
+usuario real si ese envelope expone role/roles/slug. Al hacerlo, AppCore recibe
+un objeto sin los campos de presentación del usuario real y termina cayendo en
+el fallback "Usuario".
+
+CAMBIO
+------
+- Prioriza payload.user/currentUser/usuario/me/account.
+- role/roles por sí solos dejan de convertir un envelope en usuario.
+- Mantiene compatibilidad con payload directo = usuario.
+- Mantiene compatibilidad legacy con profile si realmente tiene forma de user.
+- No toca Core, HTTP, Home, Sidebar, Router ni backend.
+- No cambia contratos de login, refresh o /me salvo la extracción de usuario.
+
+BASE EXACTA VALIDADA
+--------------------
+Repo:
+  avila199817/onionsupport
+
+Archivo:
+  src/features/auth/index.js
+
+Blob Git esperado:
+  dc4187909317f54db31fe7621fa8b455dee22c5f
+
+Versión actual esperada:
+  auth.minimal.v6.1-first-hotfix
+
+Versión resultante:
+  auth.minimal.v6.2-user-envelope-hotfix
+
+SEGURIDAD DEL SCRIPT
+--------------------
+- Dry-run real: no escribe.
+- Idempotente.
+- Verifica blob SHA de Git.
+- Verifica coincidencias exactas de los bloques.
+- Aborta ante mezcla parcial o drift.
+- Backup dentro de .git/onionsupport-backups/ (no ensucia git status).
+- Escritura atómica.
+- node --check ANTES de sustituir el archivo.
+- git diff --check DESPUÉS de aplicar.
+- Assertions de invariantes finales.
+- Nunca hace commit ni push automáticamente.
+
+===============================================================================
+*/
+
+"use strict";
+
+const fs = require("node:fs");
+const path = require("node:path");
+const crypto = require("node:crypto");
+const { execFileSync, spawnSync } = require("node:child_process");
+
+const EXPECTED_GIT_BLOB_SHA =
+  "dc4187909317f54db31fe7621fa8b455dee22c5f";
+
+const TARGET_REL =
+  "src/features/auth/index.js";
+
+const OLD_VERSION =
+  'export const AUTH_VERSION =\n  "auth.minimal.v6.1-first-hotfix";';
+
+const NEW_VERSION =
+  'export const AUTH_VERSION =\n  "auth.minimal.v6.2-user-envelope-hotfix";';
+
+const OLD_LOOKS_LIKE_USER = `function looksLikeUser(
+  value = null
+) {
+  if (
+    !isObject(value)
+  ) {
+    return false;
+  }
+
+  return Boolean(
+    value.id ||
+    value.userId ||
+    value.username ||
+    value.slug ||
+    value.lookup?.slug ||
+    value.profile?.slug ||
+    value.role ||
+    value.rol ||
+    Array.isArray(
+      value.roles
+    )
+  );
+}`;
+
+const NEW_LOOKS_LIKE_USER = `function looksLikeUser(
+  value = null
+) {
+  if (
+    !isObject(value)
+  ) {
+    return false;
+  }
+
+  /*
+    IMPORTANTE:
+    Un envelope de Auth puede exponer role / roles / slug en raíz y,
+    simultáneamente, contener el usuario real dentro de user/currentUser.
+
+    Si existe un contenedor explícito de usuario, este objeto NO debe
+    clasificarse como usuario por sus campos derivados de sesión/routing.
+  */
+  const hasEmbeddedUser =
+    isObject(
+      value.user
+    ) ||
+    isObject(
+      value.currentUser
+    ) ||
+    isObject(
+      value.usuario
+    ) ||
+    isObject(
+      value.me
+    ) ||
+    isObject(
+      value.account
+    );
+
+  if (
+    hasEmbeddedUser
+  ) {
+    return false;
+  }
+
+  /*
+    Identidad fuerte:
+    cualquiera de estos campos identifica de forma razonable a una cuenta
+    aunque el payload directo no incluya todos los campos de presentación.
+  */
+  const strongIdentity =
+    cleanText(
+      first(
+        value.id,
+        value.userId,
+        value.uid,
+        value.sub,
+        value.username,
+        value.userName,
+        value.user_name,
+        value.email,
+        value.emailLower,
+        value.email_lower,
+        value.lookup?.emailLower,
+        value.lookup?.email_lower,
+        ""
+      ),
+      ""
+    );
+
+  if (
+    strongIdentity
+  ) {
+    return true;
+  }
+
+  const slug =
+    cleanText(
+      first(
+        value.slug,
+        value.lookup?.slug,
+        value.profile?.slug,
+        value.routing?.slug,
+        ""
+      ),
+      ""
+    );
+
+  const displayName =
+    cleanText(
+      first(
+        value.displayName,
+        value.fullName,
+        value.name,
+        value.nombre,
+        value.profile?.displayName,
+        value.profile?.publicName,
+        value.profile?.name,
+        ""
+      ),
+      ""
+    );
+
+  const role =
+    normalizeRole(
+      first(
+        value.role,
+        value.rol,
+        value.roles,
+        ""
+      )
+    );
+
+  const hasAccountSignals =
+    value.active !== undefined ||
+    value.enabled !== undefined ||
+    value.disabled !== undefined ||
+    value.status !== undefined ||
+    value.estado !== undefined ||
+    value.permissions !== undefined ||
+    value.permisos !== undefined ||
+    value.clienteId !== undefined ||
+    value.tenantId !== undefined;
+
+  /*
+    role/roles NO bastan por sí solos.
+    slug o nombre sí pueden completar una forma de usuario cuando aparecen
+    junto a señales propias de cuenta.
+  */
+  return Boolean(
+    (
+      slug &&
+      (
+        role ||
+        displayName ||
+        hasAccountSignals
+      )
+    ) ||
+    (
+      displayName &&
+      (
+        role ||
+        hasAccountSignals
+      )
+    )
+  );
+}`;
+
+const OLD_EXTRACT_USER = `function extractUser(
+  payload = {}
+) {
+  if (
+    looksLikeUser(
+      payload
+    )
+  ) {
+    return payload;
+  }
+
+  const user =
+    pick(
+      payload,
+      [
+        "user",
+        "currentUser",
+        "usuario",
+        "me",
+        "account",
+        "profile",
+      ]
+    );
+
+  return looksLikeUser(
+    user
+  )
+    ? user
+    : null;
+}`;
+
+const NEW_EXTRACT_USER = `function extractUser(
+  payload = {}
+) {
+  if (
+    !isObject(payload)
+  ) {
+    return null;
+  }
+
+  /*
+    PRIORIDAD CANÓNICA:
+    primero extraemos el usuario explícito del envelope.
+
+    Esto es crítico para los contratos productivos de Onion Support:
+    login / me / refresh pueden tener role, roles, slug, routing, etc.
+    también en el nivel superior, pero el perfil autoritativo está en user.
+  */
+  const explicitUser =
+    pick(
+      payload,
+      [
+        "user",
+        "currentUser",
+        "usuario",
+        "me",
+        "account",
+      ]
+    );
+
+  if (
+    looksLikeUser(
+      explicitUser
+    )
+  ) {
+    return explicitUser;
+  }
+
+  /*
+    Compatibilidad:
+    algunos contratos legacy pueden exponer un objeto profile como usuario.
+    Sólo lo aceptamos si realmente tiene forma de usuario; no por existir.
+  */
+  const profileUser =
+    pick(
+      payload,
+      [
+        "profile",
+      ]
+    );
+
+  if (
+    looksLikeUser(
+      profileUser
+    )
+  ) {
+    return profileUser;
+  }
+
+  /*
+    Último fallback:
+    soporta respuestas donde el propio payload ES el usuario.
+
+    Se evalúa al final para impedir que un envelope con role/roles/slugs
+    derivados eclipse a payload.user.
+  */
+  return looksLikeUser(
+    payload
+  )
+    ? payload
+    : null;
+}`;
+
+function out(kind, message) {
+  console.log(`[${kind}] ${message}`);
+}
+
+function fail(message) {
+  console.error(`\n[ERROR] ${message}\n`);
+  process.exitCode = 1;
+}
+
+function countOccurrences(text, needle) {
+  if (!needle) return 0;
+
+  let count = 0;
+  let offset = 0;
+
+  while (true) {
+    const index = text.indexOf(needle, offset);
+
+    if (index === -1) {
+      break;
+    }
+
+    count += 1;
+    offset = index + needle.length;
+  }
+
+  return count;
+}
+
+function gitBlobSha(buffer) {
+  const header =
+    Buffer.from(
+      `blob ${buffer.length}\0`,
+      "utf8"
+    );
+
+  return crypto
+    .createHash("sha1")
+    .update(header)
+    .update(buffer)
+    .digest("hex");
+}
+
+function sha256(buffer) {
+  return crypto
+    .createHash("sha256")
+    .update(buffer)
+    .digest("hex");
+}
+
+function runGit(repoRoot, args, options = {}) {
+  return execFileSync(
+    "git",
+    args,
+    {
+      cwd: repoRoot,
+      encoding:
+        options.encoding ?? "utf8",
+      stdio:
+        options.stdio ??
+        ["ignore", "pipe", "pipe"],
+      maxBuffer:
+        64 * 1024 * 1024,
+    }
+  );
+}
+
+function repoRoot() {
+  try {
+    return runGit(
+      process.cwd(),
+      [
+        "rev-parse",
+        "--show-toplevel",
+      ]
+    ).trim();
+  } catch {
+    throw new Error(
+      "Ejecuta este script dentro del repositorio Git de Onion Support."
+    );
+  }
+}
+
+function assertCleanBaseShape(source) {
+  const counts = {
+    oldVersion:
+      countOccurrences(
+        source,
+        OLD_VERSION
+      ),
+
+    newVersion:
+      countOccurrences(
+        source,
+        NEW_VERSION
+      ),
+
+    oldLooks:
+      countOccurrences(
+        source,
+        OLD_LOOKS_LIKE_USER
+      ),
+
+    newLooks:
+      countOccurrences(
+        source,
+        NEW_LOOKS_LIKE_USER
+      ),
+
+    oldExtract:
+      countOccurrences(
+        source,
+        OLD_EXTRACT_USER
+      ),
+
+    newExtract:
+      countOccurrences(
+        source,
+        NEW_EXTRACT_USER
+      ),
+  };
+
+  const alreadyApplied =
+    counts.oldVersion === 0 &&
+    counts.newVersion === 1 &&
+    counts.oldLooks === 0 &&
+    counts.newLooks === 1 &&
+    counts.oldExtract === 0 &&
+    counts.newExtract === 1;
+
+  if (alreadyApplied) {
+    return {
+      alreadyApplied: true,
+      counts,
+    };
+  }
+
+  const pristineExpected =
+    counts.oldVersion === 1 &&
+    counts.newVersion === 0 &&
+    counts.oldLooks === 1 &&
+    counts.newLooks === 0 &&
+    counts.oldExtract === 1 &&
+    counts.newExtract === 0;
+
+  if (!pristineExpected) {
+    throw new Error(
+      [
+        "El archivo no coincide con la base esperada ni con el resultado final.",
+        "No se toca nada para evitar una mezcla parcial.",
+        `Conteos: ${JSON.stringify(counts)}`,
+      ].join("\n")
+    );
+  }
+
+  return {
+    alreadyApplied: false,
+    counts,
+  };
+}
+
+function buildPatchedSource(source) {
+  let next = source;
+
+  next = next.replace(
+    OLD_VERSION,
+    NEW_VERSION
+  );
+
+  next = next.replace(
+    OLD_LOOKS_LIKE_USER,
+    NEW_LOOKS_LIKE_USER
+  );
+
+  next = next.replace(
+    OLD_EXTRACT_USER,
+    NEW_EXTRACT_USER
+  );
+
+  return next;
+}
+
+function assertFinalSource(source) {
+  const required = [
+    NEW_VERSION,
+    NEW_LOOKS_LIKE_USER,
+    NEW_EXTRACT_USER,
+    "export const Auth =",
+    "export default Auth;",
+    'import { AppCore } from "../../core/index.js";',
+    'import Http from "../../core/http.js";',
+  ];
+
+  const forbidden = [
+    OLD_VERSION,
+    OLD_LOOKS_LIKE_USER,
+    OLD_EXTRACT_USER,
+    "ONION SUPPORT · HOTFIX FULL NAME / USER ENVELOPE",
+    'const fs = require("node:fs")',
+  ];
+
+  for (const token of required) {
+    const count =
+      countOccurrences(
+        source,
+        token
+      );
+
+    if (count !== 1) {
+      throw new Error(
+        `Invariante final incumplida. Se esperaba 1 coincidencia de:\n${token}\nEncontradas: ${count}`
+      );
+    }
+  }
+
+  for (const token of forbidden) {
+    if (
+      source.includes(
+        token
+      )
+    ) {
+      throw new Error(
+        `Invariante final incumplida. El resultado conserva un bloque prohibido:\n${token}`
+      );
+    }
+  }
+
+  /*
+    Guardas semánticas de la corrección:
+    - envelope explícito bloquea la clasificación del exterior;
+    - role no es identidad fuerte;
+    - explicitUser se evalúa antes que payload;
+    - profile queda como fallback controlado.
+  */
+  const semanticGuards = [
+    "const hasEmbeddedUser =",
+    "if (\n    hasEmbeddedUser\n  ) {\n    return false;",
+    "const explicitUser =",
+    "const profileUser =",
+    "return looksLikeUser(\n    payload\n  )",
+    "value.profile?.publicName",
+  ];
+
+  for (const guard of semanticGuards) {
+    if (!source.includes(guard)) {
+      throw new Error(
+        `Falta una guarda semántica obligatoria:\n${guard}`
+      );
+    }
+  }
+
+  const explicitIndex =
+    source.indexOf(
+      "const explicitUser ="
+    );
+
+  const fallbackPayloadIndex =
+    source.indexOf(
+      "return looksLikeUser(\n    payload\n  )"
+    );
+
+  if (
+    explicitIndex < 0 ||
+    fallbackPayloadIndex < 0 ||
+    explicitIndex >= fallbackPayloadIndex
+  ) {
+    throw new Error(
+      "El usuario explícito no queda priorizado frente al fallback del payload."
+    );
+  }
+}
+
+function syntaxCheck(filePath) {
+  const result =
+    spawnSync(
+      process.execPath,
+      [
+        "--check",
+        filePath,
+      ],
+      {
+        encoding: "utf8",
+      }
+    );
+
+  if (result.status !== 0) {
+    throw new Error(
+      [
+        `node --check falló sobre ${filePath}`,
+        result.stderr || result.stdout || "",
+      ].join("\n")
+    );
+  }
+}
+
+function timestamp() {
+  const d =
+    new Date();
+
+  const pad =
+    (value) =>
+      String(value)
+        .padStart(2, "0");
+
+  return [
+    d.getFullYear(),
+    pad(d.getMonth() + 1),
+    pad(d.getDate()),
+    "-",
+    pad(d.getHours()),
+    pad(d.getMinutes()),
+    pad(d.getSeconds()),
+  ].join("");
+}
+
+function backupPath(root) {
+  const dir =
+    path.join(
+      root,
+      ".git",
+      "onionsupport-backups"
+    );
+
+  fs.mkdirSync(
+    dir,
+    {
+      recursive: true,
+    }
+  );
+
+  return path.join(
+    dir,
+    `auth-index.before-fullname-${timestamp()}.js`
+  );
+}
+
+function writeAtomic(target, content) {
+  const dir =
+    path.dirname(
+      target
+    );
+
+  const temp =
+    path.join(
+      dir,
+      `.${path.basename(target)}.auth-fullname-${process.pid}-${Date.now()}.tmp.js`
+    );
+
+  try {
+    fs.writeFileSync(
+      temp,
+      content,
+      {
+        encoding: "utf8",
+        flag: "wx",
+      }
+    );
+
+    /*
+      Validamos el archivo candidato ANTES del rename.
+    */
+    syntaxCheck(
+      temp
+    );
+
+    fs.renameSync(
+      temp,
+      target
+    );
+  } catch (error) {
+    try {
+      if (
+        fs.existsSync(
+          temp
+        )
+      ) {
+        fs.unlinkSync(
+          temp
+        );
+      }
+    } catch {
+      // noop
+    }
+
+    throw error;
+  }
+}
+
+function gitDiffCheck(root) {
+  const result =
+    spawnSync(
+      "git",
+      [
+        "diff",
+        "--check",
+        "--",
+        TARGET_REL,
+      ],
+      {
+        cwd: root,
+        encoding: "utf8",
+      }
+    );
+
+  if (result.status !== 0) {
+    throw new Error(
+      [
+        "git diff --check detectó un problema.",
+        result.stdout || "",
+        result.stderr || "",
+      ].join("\n")
+    );
+  }
+}
+
+function parseArgs() {
+  const allowed =
+    new Set([
+      "--dry-run",
+      "--help",
+      "-h",
+    ]);
+
+  for (
+    const arg
+    of process.argv.slice(2)
+  ) {
+    if (
+      arg.startsWith("-") &&
+      !allowed.has(arg)
+    ) {
+      throw new Error(
+        `Argumento no reconocido: ${arg}`
+      );
+    }
+  }
+
+  return {
+    dryRun:
+      process.argv.includes(
+        "--dry-run"
+      ),
+
+    help:
+      process.argv.includes(
+        "--help"
+      ) ||
+      process.argv.includes(
+        "-h"
+      ),
+  };
+}
+
+function showHelp() {
+  console.log(`
+Uso:
+  node patch-auth-fullname-prod.cjs --dry-run
+  node patch-auth-fullname-prod.cjs
+
+Este script modifica únicamente:
+  ${TARGET_REL}
+
+No hace commit ni push.
+`);
+}
+
+function main() {
+  const args =
+    parseArgs();
+
+  if (
+    args.help
+  ) {
+    showHelp();
+    return;
+  }
+
+  const root =
+    repoRoot();
+
+  const target =
+    path.join(
+      root,
+      TARGET_REL
+    );
+
+  out(
+    "INFO",
+    `Repo: ${root}`
+  );
+
+  out(
+    "INFO",
+    `Target: ${TARGET_REL}`
+  );
+
+  out(
+    "INFO",
+    `Modo: ${args.dryRun ? "DRY RUN" : "APLICACIÓN REAL"}`
+  );
+
+  if (
+    !fs.existsSync(
+      target
+    )
+  ) {
+    throw new Error(
+      `No existe ${TARGET_REL}`
+    );
+  }
+
+  const beforeBuffer =
+    fs.readFileSync(
+      target
+    );
+
+  const before =
+    beforeBuffer
+      .toString(
+        "utf8"
+      );
+
+  const shape =
+    assertCleanBaseShape(
+      before
+    );
+
+  if (
+    shape.alreadyApplied
+  ) {
+    assertFinalSource(
+      before
+    );
+
+    syntaxCheck(
+      target
+    );
+
+    out(
+      "OK",
+      "El hotfix ya está aplicado de forma completa e idempotente."
+    );
+
+    out(
+      "OK",
+      "node --check: OK"
+    );
+
+    return;
+  }
+
+  const actualBlobSha =
+    gitBlobSha(
+      beforeBuffer
+    );
+
+  out(
+    "INFO",
+    `Git blob SHA actual: ${actualBlobSha}`
+  );
+
+  out(
+    "INFO",
+    `SHA-256 actual: ${sha256(beforeBuffer).slice(0, 20)}…`
+  );
+
+  if (
+    actualBlobSha !==
+    EXPECTED_GIT_BLOB_SHA
+  ) {
+    throw new Error(
+      [
+        "SHA de seguridad distinto al esperado.",
+        `Esperado: ${EXPECTED_GIT_BLOB_SHA}`,
+        `Actual:   ${actualBlobSha}`,
+        "El script aborta para no pisar cambios no revisados.",
+      ].join("\n")
+    );
+  }
+
+  const next =
+    buildPatchedSource(
+      before
+    );
+
+  if (
+    next === before
+  ) {
+    throw new Error(
+      "El parche no produjo ningún cambio."
+    );
+  }
+
+  assertFinalSource(
+    next
+  );
+
+  /*
+    Validación sintáctica previa sin tocar el target.
+  */
+  const previewTemp =
+    path.join(
+      root,
+      ".git",
+      `auth-fullname-preview-${process.pid}-${Date.now()}.js`
+    );
+
+  try {
+    fs.writeFileSync(
+      previewTemp,
+      next,
+      "utf8"
+    );
+
+    syntaxCheck(
+      previewTemp
+    );
+  } finally {
+    try {
+      fs.unlinkSync(
+        previewTemp
+      );
+    } catch {
+      // noop
+    }
+  }
+
+  out(
+    "OK",
+    "Resultado candidato: invariantes OK."
+  );
+
+  out(
+    "OK",
+    "Resultado candidato: node --check OK."
+  );
+
+  if (
+    args.dryRun
+  ) {
+    console.log(`
+==============================================
+DRY RUN OK
+==============================================
+No se ha modificado ningún archivo.
+
+Cambios que se aplicarían:
+- AUTH_VERSION -> auth.minimal.v6.2-user-envelope-hotfix
+- looksLikeUser() endurecido
+- extractUser() prioriza payload.user/currentUser/usuario/me/account
+- profile queda como fallback validado
+- payload exterior queda como último fallback
+
+Para aplicar:
+  node patch-auth-fullname-prod.cjs
+`);
+
+    return;
+  }
+
+  const backup =
+    backupPath(
+      root
+    );
+
+  fs.copyFileSync(
+    target,
+    backup,
+    fs.constants.COPYFILE_EXCL
+  );
+
+  out(
+    "OK",
+    `Backup seguro: ${path.relative(root, backup)}`
+  );
+
+  writeAtomic(
+    target,
+    next
+  );
+
+  const finalSource =
+    fs.readFileSync(
+      target,
+      "utf8"
+    );
+
+  assertFinalSource(
+    finalSource
+  );
+
+  syntaxCheck(
+    target
+  );
+
+  gitDiffCheck(
+    root
+  );
+
+  out(
+    "OK",
+    "Archivo escrito de forma atómica."
+  );
+
+  out(
+    "OK",
+    "Invariantes finales: OK."
+  );
+
+  out(
+    "OK",
+    "node --check: OK."
+  );
+
+  out(
+    "OK",
+    "git diff --check: OK."
+  );
+
+  console.log(`
+==============================================
+AUTH FULL NAME HOTFIX APLICADO
+==============================================
+
+Ahora revisa:
+
+  git diff -- src/features/auth/index.js
+
+Después:
+
+  git status --short
+
+Si el diff es correcto:
+
+  git add src/features/auth/index.js
+  git commit -m "Fix auth user envelope identity extraction"
+  git push origin main
+
+Después del deploy:
+  1) inicia sesión;
+  2) abre /@cristian;
+  3) Ctrl+F5 si no estás en incógnito;
+  4) verifica que Home/Sidebar ya no caigan en "Usuario".
+
+NOTA:
+El 401 de /api/auth/refresh en incógnito es un asunto separado del
+bug de identidad y no lo modifica este hotfix.
+`);
+}
+
+try {
+  main();
+} catch (error) {
+  fail(
+    error?.stack ||
+    error?.message ||
+    String(error)
+  );
+}

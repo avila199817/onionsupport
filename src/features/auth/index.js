@@ -1,95 +1,1323 @@
-/*
-===============================================================================
-ONION SUPPORT · HOTFIX FULL NAME / USER ENVELOPE
-===============================================================================
+/* =========================================================
+   Onion Support - Auth
+   Archivo: /src/features/auth/index.js
 
-OBJETIVO
--------
-Corregir de forma quirúrgica:
+   Responsabilidad:
+   - Auth mínimo de la SPA.
+   - Login/logout/restore/refresh/me.
+   - Sesión actual delegada en AppCore.
+   - HTTP delegado en core/http.js.
+   - Home visible autenticada: /@{user.slug}.
+   - Restaurar sesión tras refresh del navegador usando cookie httpOnly.
+   - Evitar carreras de Auth al cerrar sesión.
+   - Evitar escrituras duplicadas entre Auth / Core / HTTP.
+   - Sin Router.
+   - Sin Toast.
+   - Sin Store.
+   - Sin Storage.
+   - Sin fetch propio.
+   - Sin eventos internos.
+   - Sin 2FA/MFA/OTP.
+   - Sin lógica de vistas.
+========================================================= */
 
-  src/features/auth/index.js
+import { AppCore } from "../../core/index.js";
+import Http from "../../core/http.js";
 
-Problema corregido:
-- Los payloads de login / me / refresh contienen un usuario real dentro de
-  payload.user, pero algunos envelopes también exponen role / roles / slug.
-- La versión actual de extractUser() evalúa primero looksLikeUser(payload).
-- Como looksLikeUser() acepta role/roles como prueba suficiente, puede tratar
-  el envelope completo como si fuera el usuario.
-- AppCore recibe entonces un objeto sin displayName/name/fullName en raíz y
-  termina usando el fallback "Usuario".
+import {
+  AUTH_ENDPOINTS,
+  ROUTES,
+  USER_HOME_PREFIX,
+  ALLOWED_ROLES,
+  buildUserHomeRoute,
+  normalizeUserSlug,
+} from "../../core/config.js";
 
-Este hotfix:
-1. Prioriza SIEMPRE los contenedores explícitos de usuario:
-   user, currentUser, usuario, me y account.
-2. Endurece looksLikeUser() para que role/roles por sí solos NO conviertan
-   un envelope de autenticación en un usuario.
-3. Mantiene compatibilidad con payloads donde el propio payload sea el usuario.
-4. Mantiene compatibilidad con profile sólo cuando profile realmente tiene
-   forma de usuario.
-5. No toca Core, Home, Sidebar, HTTP, Router ni backend.
-6. No modifica login/refresh/me salvo la extracción/normalización del usuario.
-7. Hace backup, valida coincidencias únicas y escribe de forma atómica.
+export const AUTH_VERSION =
+  "auth.minimal.v6.1-first-hotfix";
 
-FUENTE CALIBRADA
-----------------
-Repositorio:
-  avila199817/onionsupport
+const ROOT_PATH = "/";
 
-Archivo:
-  src/features/auth/index.js
+const LEGACY_RESET_TOKEN_PATH =
+  /(\/(?:reset-password|password-reset)\/confirm\/)([^/?#\s]+)/gi;
 
-Blob SHA de GitHub revisado:
-  dc4187909317f54db31fe7621fa8b455dee22c5f
+const VALID_ROLES =
+  new Set(
+    (
+      Array.isArray(ALLOWED_ROLES) &&
+      ALLOWED_ROLES.length
+        ? ALLOWED_ROLES
+        : ["admin", "user"]
+    ).map(
+      (role) =>
+        String(role)
+          .toLowerCase()
+    )
+  );
 
-Versión original detectada:
-  auth.minimal.v6.1-first-hotfix
+const AUTH_ROUTES =
+  Object.freeze({
+    login:
+      ROUTES.login ||
+      "/login",
 
-Versión de este hotfix:
-  auth.minimal.v6.2-user-envelope-hotfix
+    passwordRequest:
+      ROUTES.passwordRequest ||
+      "/password-request",
 
-USO
----
-1. Guarda ESTE TXT como:
-     patch-auth-fullname.cjs
+    passwordReset:
+      ROUTES.passwordReset ||
+      "/password-reset",
 
-2. Desde la raíz del repo:
-     node patch-auth-fullname.cjs --dry-run
+    activateAccount:
+      ROUTES.activateAccount ||
+      "/activate-account",
+  });
 
-3. Si el dry-run termina en OK:
-     node patch-auth-fullname.cjs
+const AUTH_HOME =
+  Object.freeze({
+    canonical:
+      ROOT_PATH,
 
-4. Después despliega el frontend y fuerza una recarga completa del navegador.
+    userPrefix:
+      USER_HOME_PREFIX ||
+      "/@",
+  });
 
-También puedes indicar una ruta distinta:
-     node patch-auth-fullname.cjs /ruta/al/src/features/auth/index.js --dry-run
-     node patch-auth-fullname.cjs /ruta/al/src/features/auth/index.js
+/* =========================================================
+   SESSION STATE
+========================================================= */
 
-NOTA
-----
-El script NO toca el archivo si:
-- no encuentra exactamente una copia de los bloques esperados;
-- detecta una mezcla parcial entre versión antigua y hotfix;
-- no puede verificar el resultado final.
+const sessionState = {
+  loggingIn: false,
+  restoring: false,
+  refreshing: false,
+  checking: false,
 
-===============================================================================
-*/
+  loginPromise: null,
+  restorePromise: null,
+  refreshPromise: null,
+  mePromise: null,
 
-"use strict";
+  generation: 0,
+  activeFlows: 0,
 
-const fs = require("node:fs");
-const path = require("node:path");
-const crypto = require("node:crypto");
+  lastLoginAt: null,
+  lastRestoreAt: null,
+  lastRefreshAt: null,
+  lastMeAt: null,
+  lastLogoutAt: null,
 
-const EXPECTED_GITHUB_BLOB_SHA =
-  "dc4187909317f54db31fe7621fa8b455dee22c5f";
+  lastError: null,
+};
 
-const OLD_VERSION =
-  'export const AUTH_VERSION =\n  "auth.minimal.v6.1-first-hotfix";';
+const activeFlowControllers =
+  new Set();
 
-const NEW_VERSION =
-  'export const AUTH_VERSION =\n  "auth.minimal.v6.2-user-envelope-hotfix";';
+/* =========================================================
+   BASICS
+========================================================= */
 
-const OLD_LOOKS_LIKE_USER = `function looksLikeUser(
+function isObject(value) {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
+}
+
+function isFunction(value) {
+  return (
+    typeof value === "function"
+  );
+}
+
+function cleanText(
+  value = "",
+  fallback = ""
+) {
+  const output =
+    String(value ?? "")
+      .replace(
+        /[\r\n\t]/g,
+        " "
+      )
+      .replace(
+        /\s+/g,
+        " "
+      )
+      .trim();
+
+  return (
+    output ||
+    fallback
+  );
+}
+
+function first(...values) {
+  for (
+    const value
+    of values
+  ) {
+    if (
+      value === undefined ||
+      value === null
+    ) {
+      continue;
+    }
+
+    if (
+      typeof value ===
+        "string" &&
+      value.trim() === ""
+    ) {
+      continue;
+    }
+
+    return value;
+  }
+
+  return null;
+}
+
+function redact(
+  value = ""
+) {
+  return cleanText(
+    value,
+    ""
+  )
+    .replace(
+      LEGACY_RESET_TOKEN_PATH,
+      "$1***"
+    )
+    .replace(
+      /([?&#](?:access_token|accessToken|refresh_token|refreshToken|id_token|idToken|token|code|secret|session|sessionId|session_id|password|pwd|key|sig|signature|jwt|authorization|reset_token|resetToken|activation_token|activationToken)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(
+      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+      "$1***"
+    )
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
+}
+
+function safeError(
+  error = null,
+  type = "auth"
+) {
+  if (!error) {
+    return null;
+  }
+
+  return {
+    type,
+
+    name:
+      cleanText(
+        error?.name,
+        "Error"
+      ),
+
+    message:
+      redact(
+        error?.message ||
+        String(error)
+      ),
+
+    status:
+      error?.status ||
+      error?.statusCode ||
+      error?.response?.status ||
+      null,
+
+    code:
+      cleanText(
+        error?.code ||
+        error?.error ||
+        "",
+        ""
+      ) ||
+      null,
+
+    canRefresh:
+      isRefreshableAuthError(
+        error
+      ),
+
+    shouldClearSession:
+      shouldClearSessionForAuthError(
+        error
+      ),
+  };
+}
+
+function safePayload(
+  value,
+  depth = 0
+) {
+  if (
+    depth > 5
+  ) {
+    return null;
+  }
+
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return value;
+  }
+
+  if (
+    typeof value ===
+    "string"
+  ) {
+    return redact(
+      value
+    );
+  }
+
+  if (
+    typeof value ===
+      "number" ||
+    typeof value ===
+      "boolean"
+  ) {
+    return value;
+  }
+
+  if (
+    typeof value ===
+      "function" ||
+    typeof value ===
+      "symbol" ||
+    typeof value ===
+      "bigint"
+  ) {
+    return undefined;
+  }
+
+  if (
+    Array.isArray(value)
+  ) {
+    return value
+      .slice(
+        0,
+        100
+      )
+      .map(
+        (item) =>
+          safePayload(
+            item,
+            depth + 1
+          )
+      );
+  }
+
+  if (
+    !isObject(value)
+  ) {
+    return null;
+  }
+
+  const output = {};
+
+  for (
+    const [
+      key,
+      child,
+    ]
+    of Object.entries(
+      value
+    )
+  ) {
+    if (
+      /(token|refresh|password|secret|authorization|jwt|cookie|sessionid|session_id|code|sig|signature)/i.test(
+        key
+      )
+    ) {
+      output[key] =
+        child
+          ? "***"
+          : null;
+
+      continue;
+    }
+
+    const clean =
+      safePayload(
+        child,
+        depth + 1
+      );
+
+    if (
+      clean !== undefined
+    ) {
+      output[key] =
+        clean;
+    }
+  }
+
+  return output;
+}
+
+/* =========================================================
+   FLOW GENERATION / ABORT
+========================================================= */
+
+function currentGeneration() {
+  return Number(
+    sessionState.generation ||
+    0
+  );
+}
+
+function invalidateFlows() {
+  sessionState.generation =
+    currentGeneration() + 1;
+
+  return sessionState.generation;
+}
+
+function flowIsCurrent(
+  generation
+) {
+  return (
+    generation ===
+    currentGeneration()
+  );
+}
+
+function syncActiveFlowCount() {
+  sessionState.activeFlows =
+    activeFlowControllers.size;
+}
+
+function createFlowAbort(
+  externalSignal = null
+) {
+  if (
+    typeof AbortController ===
+    "undefined"
+  ) {
+    return {
+      signal:
+        externalSignal ||
+        undefined,
+
+      cleanup:
+        () => {},
+
+      abort:
+        () => false,
+    };
+  }
+
+  const controller =
+    new AbortController();
+
+  let externalListener =
+    null;
+
+  const abort =
+    (reason = undefined) => {
+      if (
+        controller.signal.aborted
+      ) {
+        return false;
+      }
+
+      try {
+        controller.abort(
+          reason
+        );
+      } catch {
+        try {
+          controller.abort();
+        } catch {
+          return false;
+        }
+      }
+
+      return true;
+    };
+
+  if (
+    externalSignal
+  ) {
+    if (
+      externalSignal.aborted
+    ) {
+      abort(
+        externalSignal.reason
+      );
+    } else if (
+      isFunction(
+        externalSignal
+          .addEventListener
+      )
+    ) {
+      externalListener =
+        () => {
+          abort(
+            externalSignal.reason
+          );
+        };
+
+      externalSignal.addEventListener(
+        "abort",
+        externalListener,
+        {
+          once: true,
+        }
+      );
+    }
+  }
+
+  activeFlowControllers.add(
+    controller
+  );
+
+  syncActiveFlowCount();
+
+  const cleanup =
+    () => {
+      activeFlowControllers.delete(
+        controller
+      );
+
+      syncActiveFlowCount();
+
+      if (
+        externalSignal &&
+        externalListener &&
+        isFunction(
+          externalSignal
+            .removeEventListener
+        )
+      ) {
+        try {
+          externalSignal
+            .removeEventListener(
+              "abort",
+              externalListener
+            );
+        } catch {
+          // noop
+        }
+      }
+
+      externalListener =
+        null;
+    };
+
+  return {
+    signal:
+      controller.signal,
+
+    cleanup,
+
+    abort,
+  };
+}
+
+function abortActiveFlows() {
+  for (
+    const controller
+    of [
+      ...activeFlowControllers,
+    ]
+  ) {
+    try {
+      if (
+        !controller.signal.aborted
+      ) {
+        controller.abort(
+          "auth-session-invalidated"
+        );
+      }
+    } catch {
+      try {
+        controller.abort();
+      } catch {
+        // noop
+      }
+    }
+  }
+
+  return true;
+}
+
+function withFlowSignal(
+  options = {},
+  signal = undefined
+) {
+  return {
+    ...options,
+    signal,
+  };
+}
+
+/* =========================================================
+   CORE / HTTP
+========================================================= */
+
+function coreState(
+  options = {}
+) {
+  try {
+    if (
+      isFunction(
+        AppCore?.getState
+      )
+    ) {
+      return AppCore.getState(
+        options
+      );
+    }
+  } catch {
+    // fallback abajo
+  }
+
+  return isObject(
+    AppCore?.state
+  )
+    ? AppCore.state
+    : {};
+}
+
+function installHttp() {
+  try {
+    Http.install?.(
+      AppCore
+    );
+  } catch {
+    // noop
+  }
+
+  return Http;
+}
+
+function isRefreshableAuthError(
+  error = null
+) {
+  try {
+    return (
+      Http
+        .isRefreshableAuthError
+        ?.(error) === true
+    );
+  } catch {
+    return false;
+  }
+}
+
+function shouldClearSessionForAuthError(
+  error = null
+) {
+  try {
+    return (
+      Http
+        .shouldClearSessionForAuthError
+        ?.(error) === true
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isHttpAuthError(
+  error = null
+) {
+  try {
+    return (
+      Http
+        .isAuthError
+        ?.(error) === true
+    );
+  } catch {
+    const status =
+      Number(
+        error?.status ||
+        error?.statusCode ||
+        0
+      );
+
+    return (
+      status === 401 ||
+      status === 403
+    );
+  }
+}
+
+/* =========================================================
+   TOKEN / ROLE / USER
+========================================================= */
+
+function stripBearer(
+  value = ""
+) {
+  return cleanText(
+    value,
+    ""
+  ).replace(
+    /^Bearer\s+/i,
+    ""
+  );
+}
+
+function tokenOk(
+  value = ""
+) {
+  const token =
+    stripBearer(
+      value
+    );
+
+  if (!token) {
+    return false;
+  }
+
+  if (
+    /\s/.test(
+      token
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    token.length >
+    8192
+  ) {
+    return false;
+  }
+
+  return ![
+    "null",
+    "undefined",
+    "false",
+    "true",
+    "[object object]",
+    "{}",
+    "[]",
+  ].includes(
+    token.toLowerCase()
+  );
+}
+
+function cleanToken(
+  value = ""
+) {
+  const token =
+    stripBearer(
+      value
+    );
+
+  return tokenOk(
+    token
+  )
+    ? token
+    : "";
+}
+
+function normalizeRole(
+  value = ""
+) {
+  if (
+    Array.isArray(value)
+  ) {
+    const roles =
+      value
+        .map(
+          normalizeRole
+        )
+        .filter(Boolean);
+
+    if (
+      roles.includes(
+        "admin"
+      )
+    ) {
+      return "admin";
+    }
+
+    if (
+      roles.includes(
+        "user"
+      )
+    ) {
+      return "user";
+    }
+
+    return "";
+  }
+
+  const role =
+    cleanText(
+      value,
+      ""
+    ).toLowerCase();
+
+  return VALID_ROLES.has(
+    role
+  )
+    ? role
+    : "";
+}
+
+function roleOrUser(
+  value = ""
+) {
+  return (
+    normalizeRole(
+      value
+    ) ||
+    "user"
+  );
+}
+
+function normalizeUser(
+  user = null
+) {
+  if (
+    !isObject(user)
+  ) {
+    return null;
+  }
+
+  try {
+    if (
+      isFunction(
+        AppCore?.normalizeUser
+      )
+    ) {
+      const normalized =
+        AppCore.normalizeUser(
+          user
+        );
+
+      if (
+        !normalized ||
+        normalized.usable ===
+          false
+      ) {
+        return null;
+      }
+
+      return normalized;
+    }
+  } catch {
+    // noop
+  }
+
+  return null;
+}
+
+function publicUser(
+  user = null
+) {
+  const normalized =
+    normalizeUser(
+      user
+    );
+
+  if (!normalized) {
+    return null;
+  }
+
+  try {
+    if (
+      isFunction(
+        AppCore?.publicUser
+      )
+    ) {
+      return AppCore.publicUser(
+        normalized
+      );
+    }
+  } catch {
+    // fallback abajo
+  }
+
+  return {
+    id:
+      normalized.id ||
+      normalized.userId ||
+      null,
+
+    userId:
+      normalized.userId ||
+      normalized.id ||
+      null,
+
+    username:
+      normalized.username ||
+      null,
+
+    slug:
+      normalized.slug ||
+      null,
+
+    displayName:
+      normalized.displayName ||
+      normalized.username ||
+      "Usuario",
+
+    role:
+      normalized.role ||
+      "user",
+
+    rol:
+      normalized.role ||
+      "user",
+
+    roles:
+      Array.isArray(
+        normalized.roles
+      )
+        ? [
+            ...normalized.roles,
+          ]
+        : [
+            normalized.role ||
+            "user",
+          ],
+
+    avatarUrl:
+      normalized.avatarUrl ||
+      "",
+  };
+}
+
+function getUserSlugFromUser(
+  user = null
+) {
+  if (
+    !isObject(user)
+  ) {
+    return "";
+  }
+
+  return normalizeUserSlug(
+    user.slug ||
+    user.lookup?.slug ||
+    user.profile?.slug ||
+    user.routing?.slug ||
+    user.username ||
+    user.userId ||
+    user.id ||
+    ""
+  );
+}
+
+function buildUserHomePath(
+  user = null
+) {
+  const target =
+    user === null
+      ? getCurrentUser()
+      : user;
+
+  const slug =
+    isObject(target)
+      ? getUserSlugFromUser(
+          target
+        )
+      : normalizeUserSlug(
+          target
+        );
+
+  try {
+    return (
+      buildUserHomeRoute(
+        slug
+      ) ||
+      ROOT_PATH
+    );
+  } catch {
+    return slug
+      ? `${AUTH_HOME.userPrefix}${slug}`
+      : ROOT_PATH;
+  }
+}
+
+/* =========================================================
+   AUTH CONTEXT
+========================================================= */
+
+function readAuthContext() {
+  const state =
+    coreState({
+      includeToken: true,
+    });
+
+  const token =
+    cleanToken(
+      first(
+        state.token,
+        state.accessToken,
+        state.access_token,
+        Http.getAccessToken?.(),
+        ""
+      )
+    );
+
+  const user =
+    normalizeUser(
+      first(
+        state.user,
+        state.currentUser,
+        state.session?.user,
+        null
+      )
+    );
+
+  const session =
+    isObject(
+      state.session
+    )
+      ? state.session
+      : (
+          isObject(
+            state.sessionData
+          )
+            ? state.sessionData
+            : null
+        );
+
+  const role =
+    user
+      ? roleOrUser(
+          first(
+            user.role,
+            user.rol,
+            user.roles,
+            ""
+          )
+        )
+      : "";
+
+  const roles =
+    token &&
+    user &&
+    role
+      ? [role]
+      : [];
+
+  const userSlug =
+    user
+      ? getUserSlugFromUser(
+          user
+        )
+      : "";
+
+  const homePath =
+    user
+      ? buildUserHomePath(
+          user
+        )
+      : ROOT_PATH;
+
+  const permissions =
+    user &&
+    Array.isArray(
+      user.permissions ||
+      user.permisos
+    )
+      ? [
+          ...(
+            user.permissions ||
+            user.permisos
+          ),
+        ]
+      : [];
+
+  const hasRefreshToken =
+    Boolean(
+      state.hasRefreshToken ===
+        true ||
+      session?.persistent ===
+        true ||
+      session?.restoreOnBoot ===
+        true
+    );
+
+  return {
+    token,
+    user,
+    session,
+
+    authenticated:
+      Boolean(
+        token &&
+        user
+      ),
+
+    role,
+    roles,
+
+    userSlug,
+    homePath,
+    permissions,
+
+    hasToken:
+      Boolean(token),
+
+    hasUser:
+      Boolean(user),
+
+    hasSession:
+      Boolean(session),
+
+    hasRefreshToken,
+  };
+}
+
+/* =========================================================
+   USER / SESSION READ
+========================================================= */
+
+function getToken() {
+  return (
+    readAuthContext()
+      .token
+  );
+}
+
+function getAccessToken() {
+  return getToken();
+}
+
+function hasValidToken() {
+  return (
+    readAuthContext()
+      .hasToken
+  );
+}
+
+function getRefreshToken() {
+  /*
+    Refresh token HttpOnly:
+    nunca se expone a JavaScript.
+  */
+  return "";
+}
+
+function getCurrentUser() {
+  return (
+    readAuthContext()
+      .user
+  );
+}
+
+function getUser() {
+  return getCurrentUser();
+}
+
+function getProfile() {
+  return getCurrentUser();
+}
+
+function getCurrentSession() {
+  return (
+    readAuthContext()
+      .session
+  );
+}
+
+function getSession() {
+  return getCurrentSession();
+}
+
+function getUserSlug() {
+  return (
+    readAuthContext()
+      .userSlug
+  );
+}
+
+function buildUserHomePathFromSlug(
+  slug = ""
+) {
+  return buildUserHomePath(
+    slug
+  );
+}
+
+function getDefaultHome() {
+  return (
+    readAuthContext()
+      .homePath
+  );
+}
+
+function getPostLoginTarget() {
+  const context =
+    readAuthContext();
+
+  return context.authenticated
+    ? context.homePath
+    : ROOT_PATH;
+}
+
+function getRole() {
+  return (
+    readAuthContext()
+      .role
+  );
+}
+
+function getRoles() {
+  return (
+    readAuthContext()
+      .roles
+  );
+}
+
+function isAuthenticated() {
+  return (
+    readAuthContext()
+      .authenticated
+  );
+}
+
+function isAdmin() {
+  const context =
+    readAuthContext();
+
+  return Boolean(
+    context.authenticated &&
+    context.role === "admin"
+  );
+}
+
+function hasRole(
+  role = ""
+) {
+  const required =
+    normalizeRole(
+      role
+    );
+
+  const context =
+    readAuthContext();
+
+  if (
+    !required ||
+    !context.authenticated
+  ) {
+    return false;
+  }
+
+  if (
+    context.role ===
+    "admin"
+  ) {
+    return true;
+  }
+
+  return context.roles.includes(
+    required
+  );
+}
+
+function requireRole(
+  role = ""
+) {
+  if (
+    hasRole(role)
+  ) {
+    return true;
+  }
+
+  const error =
+    new Error(
+      "No tienes permisos para acceder a este recurso."
+    );
+
+  error.code =
+    "AUTH_FORBIDDEN";
+
+  error.status =
+    403;
+
+  throw error;
+}
+
+function getPermissions() {
+  return (
+    readAuthContext()
+      .permissions
+  );
+}
+
+function getAuthHeader() {
+  const token =
+    getToken();
+
+  return token
+    ? {
+        Authorization:
+          `Bearer ${token}`,
+      }
+    : {};
+}
+
+function hasRefreshToken() {
+  return (
+    readAuthContext()
+      .hasRefreshToken
+  );
+}
+
+/* =========================================================
+   PAYLOAD
+========================================================= */
+
+function payloadSources(
+  payload = {}
+) {
+  if (
+    !isObject(payload)
+  ) {
+    return [];
+  }
+
+  return [
+    payload,
+
+    isObject(payload.data)
+      ? payload.data
+      : null,
+
+    isObject(payload.payload)
+      ? payload.payload
+      : null,
+
+    isObject(payload.result)
+      ? payload.result
+      : null,
+
+    isObject(payload.auth)
+      ? payload.auth
+      : null,
+
+    isObject(payload.session)
+      ? payload.session
+      : null,
+
+    isObject(payload.sessionData)
+      ? payload.sessionData
+      : null,
+  ].filter(Boolean);
+}
+
+function looksLikeUser(
   value = null
 ) {
   if (
@@ -111,152 +1339,55 @@ const OLD_LOOKS_LIKE_USER = `function looksLikeUser(
       value.roles
     )
   );
-}`;
+}
 
-const NEW_LOOKS_LIKE_USER = `function looksLikeUser(
-  value = null
+function pick(
+  payload = {},
+  names = []
 ) {
-  if (
-    !isObject(value)
-  ) {
-    return false;
-  }
-
-  /*
-    IMPORTANTE:
-    Un envelope de Auth puede exponer role / roles / slug en raíz y,
-    simultáneamente, contener el usuario real dentro de user/currentUser.
-
-    Si existe un contenedor explícito de usuario, este objeto NO debe
-    clasificarse como usuario por sus campos derivados de sesión/routing.
-  */
-  const hasEmbeddedUser =
-    isObject(
-      value.user
-    ) ||
-    isObject(
-      value.currentUser
-    ) ||
-    isObject(
-      value.usuario
-    ) ||
-    isObject(
-      value.me
-    ) ||
-    isObject(
-      value.account
-    );
-
-  if (
-    hasEmbeddedUser
-  ) {
-    return false;
-  }
-
-  /*
-    Identidad fuerte:
-    cualquiera de estos campos identifica de forma razonable a una cuenta
-    aunque el payload directo no incluya todos los campos de presentación.
-  */
-  const strongIdentity =
-    cleanText(
-      first(
-        value.id,
-        value.userId,
-        value.uid,
-        value.sub,
-        value.username,
-        value.userName,
-        value.user_name,
-        value.email,
-        value.emailLower,
-        value.email_lower,
-        value.lookup?.emailLower,
-        value.lookup?.email_lower,
-        ""
-      ),
-      ""
-    );
-
-  if (
-    strongIdentity
-  ) {
-    return true;
-  }
-
-  const slug =
-    cleanText(
-      first(
-        value.slug,
-        value.lookup?.slug,
-        value.profile?.slug,
-        value.routing?.slug,
-        ""
-      ),
-      ""
-    );
-
-  const displayName =
-    cleanText(
-      first(
-        value.displayName,
-        value.fullName,
-        value.name,
-        value.nombre,
-        value.profile?.displayName,
-        value.profile?.publicName,
-        value.profile?.name,
-        ""
-      ),
-      ""
-    );
-
-  const role =
-    normalizeRole(
-      first(
-        value.role,
-        value.rol,
-        value.roles,
-        ""
-      )
-    );
-
-  const hasAccountSignals =
-    value.active !== undefined ||
-    value.enabled !== undefined ||
-    value.disabled !== undefined ||
-    value.status !== undefined ||
-    value.estado !== undefined ||
-    value.permissions !== undefined ||
-    value.permisos !== undefined ||
-    value.clienteId !== undefined ||
-    value.tenantId !== undefined;
-
-  /*
-    role/roles NO bastan por sí solos.
-    slug o nombre sí pueden completar una forma de usuario cuando aparecen
-    junto a señales propias de cuenta.
-  */
-  return Boolean(
-    (
-      slug &&
-      (
-        role ||
-        displayName ||
-        hasAccountSignals
-      )
-    ) ||
-    (
-      displayName &&
-      (
-        role ||
-        hasAccountSignals
-      )
+  for (
+    const source
+    of payloadSources(
+      payload
     )
-  );
-}`;
+  ) {
+    for (
+      const name
+      of names
+    ) {
+      const value =
+        source?.[name];
 
-const OLD_EXTRACT_USER = `function extractUser(
+      if (
+        value !== undefined &&
+        value !== null &&
+        value !== ""
+      ) {
+        return value;
+      }
+    }
+  }
+
+  return null;
+}
+
+function extractToken(
+  payload = {}
+) {
+  return cleanToken(
+    pick(
+      payload,
+      [
+        "token",
+        "accessToken",
+        "access_token",
+      ]
+    ) ||
+    ""
+  );
+}
+
+function extractUser(
   payload = {}
 ) {
   if (
@@ -285,1137 +1416,1432 @@ const OLD_EXTRACT_USER = `function extractUser(
   )
     ? user
     : null;
-}`;
+}
 
-const NEW_EXTRACT_USER = `function extractUser(
+function extractSession(
   payload = {}
 ) {
-  if (
-    !isObject(payload)
-  ) {
-    return null;
-  }
-
-  /*
-    PRIORIDAD CANÓNICA:
-    primero extraemos el usuario explícito del envelope.
-
-    Esto es crítico para los contratos productivos de Onion Support:
-    login / me / refresh pueden tener role, roles, slug, routing, etc.
-    también en el nivel superior, pero el perfil autoritativo está en user.
-  */
-  const explicitUser =
+  const session =
     pick(
       payload,
       [
-        "user",
-        "currentUser",
-        "usuario",
-        "me",
-        "account",
+        "session",
+        "sessionData",
+        "currentSession",
       ]
     );
 
-  if (
-    looksLikeUser(
-      explicitUser
-    )
-  ) {
-    return explicitUser;
-  }
-
-  /*
-    Compatibilidad:
-    algunos contratos legacy pueden exponer un objeto profile como usuario.
-    Sólo lo aceptamos si realmente tiene forma de usuario; no por existir.
-  */
-  const profileUser =
-    pick(
-      payload,
-      [
-        "profile",
-      ]
-    );
-
-  if (
-    looksLikeUser(
-      profileUser
-    )
-  ) {
-    return profileUser;
-  }
-
-  /*
-    Último fallback:
-    soporta respuestas donde el propio payload ES el usuario.
-
-    Se evalúa al final para impedir que un envelope con role/roles/slugs
-    derivados eclipse a payload.user.
-  */
-  return looksLikeUser(
-    payload
+  return isObject(
+    session
   )
-    ? payload
+    ? session
     : null;
-}`;
-
-function countOccurrences(text, needle) {
-  if (!needle) return 0;
-
-  let count = 0;
-  let offset = 0;
-
-  while (true) {
-    const index = text.indexOf(needle, offset);
-    if (index === -1) break;
-
-    count += 1;
-    offset = index + needle.length;
-  }
-
-  return count;
 }
 
-function gitBlobSha(buffer) {
-  const header = Buffer.from(`blob ${buffer.length}\0`, "utf8");
+function normalizeAuthPayload(
+  payload = {},
+  options = {}
+) {
+  const source =
+    isObject(payload)
+      ? payload
+      : {};
 
-  return crypto
-    .createHash("sha1")
-    .update(header)
-    .update(buffer)
-    .digest("hex");
-}
+  const current =
+    options.allowCurrentToken ===
+      true ||
+    options.allowCurrentUser ===
+      true
+      ? readAuthContext()
+      : null;
 
-function timestamp() {
-  const date = new Date();
-
-  const pad = (value) =>
-    String(value).padStart(2, "0");
-
-  return [
-    date.getFullYear(),
-    pad(date.getMonth() + 1),
-    pad(date.getDate()),
-    "-",
-    pad(date.getHours()),
-    pad(date.getMinutes()),
-    pad(date.getSeconds()),
-  ].join("");
-}
-
-function fail(message) {
-  console.error(`\n[ERROR] ${message}\n`);
-  process.exitCode = 1;
-}
-
-function ok(message) {
-  console.log(`[OK] ${message}`);
-}
-
-function info(message) {
-  console.log(`[INFO] ${message}`);
-}
-
-function warn(message) {
-  console.warn(`[WARN] ${message}`);
-}
-
-function parseArgs(argv) {
-  const args = argv.slice(2);
-
-  const dryRun =
-    args.includes("--dry-run");
-
-  const strictSha =
-    args.includes("--strict-sha");
-
-  const positional =
-    args.filter(
-      (arg) =>
-        !arg.startsWith("--")
+  const token =
+    extractToken(
+      source
+    ) ||
+    (
+      options.allowCurrentToken ===
+        true
+        ? current?.token ||
+          ""
+        : ""
     );
 
-  return {
-    dryRun,
-    strictSha,
-    target:
-      positional[0] ||
-      path.join(
-        process.cwd(),
-        "src",
-        "features",
-        "auth",
-        "index.js"
-      ),
-  };
-}
-
-function normalizeLf(value) {
-  return String(value)
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n");
-}
-
-function restoreEol(value, eol) {
-  if (eol === "\r\n") {
-    return value.replace(/\n/g, "\r\n");
-  }
-
-  return value;
-}
-
-function validateFinalSource(sourceLf) {
-  const checks = {
-    oldVersion:
-      countOccurrences(
-        sourceLf,
-        OLD_VERSION
-      ),
-
-    newVersion:
-      countOccurrences(
-        sourceLf,
-        NEW_VERSION
-      ),
-
-    oldLooks:
-      countOccurrences(
-        sourceLf,
-        OLD_LOOKS_LIKE_USER
-      ),
-
-    newLooks:
-      countOccurrences(
-        sourceLf,
-        NEW_LOOKS_LIKE_USER
-      ),
-
-    oldExtract:
-      countOccurrences(
-        sourceLf,
-        OLD_EXTRACT_USER
-      ),
-
-    newExtract:
-      countOccurrences(
-        sourceLf,
-        NEW_EXTRACT_USER
-      ),
-  };
-
-  const valid =
-    checks.oldVersion === 0 &&
-    checks.newVersion === 1 &&
-    checks.oldLooks === 0 &&
-    checks.newLooks === 1 &&
-    checks.oldExtract === 0 &&
-    checks.newExtract === 1;
-
-  return {
-    valid,
-    checks,
-  };
-}
-
-function runCompatibilityAssertions() {
-  /*
-    Réplica mínima y aislada de la política nueva.
-    No importa módulos del frontend ni necesita DOM.
-  */
-
-  const isObjectLocal = (value) =>
-    Boolean(
-      value &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-    );
-
-  const cleanTextLocal = (
-    value = "",
-    fallback = ""
-  ) => {
-    const output =
-      String(value ?? "")
-        .replace(/[\r\n\t]/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-
-    return output || fallback;
-  };
-
-  const firstLocal = (...values) => {
-    for (const value of values) {
-      if (
-        value === undefined ||
-        value === null
-      ) {
-        continue;
-      }
-
-      if (
-        typeof value === "string" &&
-        value.trim() === ""
-      ) {
-        continue;
-      }
-
-      return value;
-    }
-
-    return null;
-  };
-
-  const normalizeRoleLocal = (
-    value = ""
-  ) => {
-    if (Array.isArray(value)) {
-      const roles =
-        value
-          .map(normalizeRoleLocal)
-          .filter(Boolean);
-
-      if (roles.includes("admin")) {
-        return "admin";
-      }
-
-      if (roles.includes("user")) {
-        return "user";
-      }
-
-      return "";
-    }
-
-    const role =
-      cleanTextLocal(
-        value,
-        ""
-      ).toLowerCase();
-
-    return [
-      "admin",
-      "user",
-    ].includes(role)
-      ? role
-      : "";
-  };
-
-  const looksLikeUserLocal = (
-    value = null
-  ) => {
-    if (!isObjectLocal(value)) {
-      return false;
-    }
-
-    const hasEmbeddedUser =
-      isObjectLocal(value.user) ||
-      isObjectLocal(value.currentUser) ||
-      isObjectLocal(value.usuario) ||
-      isObjectLocal(value.me) ||
-      isObjectLocal(value.account);
-
-    if (hasEmbeddedUser) {
-      return false;
-    }
-
-    const strongIdentity =
-      cleanTextLocal(
-        firstLocal(
-          value.id,
-          value.userId,
-          value.uid,
-          value.sub,
-          value.username,
-          value.userName,
-          value.user_name,
-          value.email,
-          value.emailLower,
-          value.email_lower,
-          value.lookup?.emailLower,
-          value.lookup?.email_lower,
-          ""
-        ),
-        ""
-      );
-
-    if (strongIdentity) {
-      return true;
-    }
-
-    const slug =
-      cleanTextLocal(
-        firstLocal(
-          value.slug,
-          value.lookup?.slug,
-          value.profile?.slug,
-          value.routing?.slug,
-          ""
-        ),
-        ""
-      );
-
-    const displayName =
-      cleanTextLocal(
-        firstLocal(
-          value.displayName,
-          value.fullName,
-          value.name,
-          value.nombre,
-          value.profile?.displayName,
-          value.profile?.publicName,
-          value.profile?.name,
-          ""
-        ),
-        ""
-      );
-
-    const role =
-      normalizeRoleLocal(
-        firstLocal(
-          value.role,
-          value.rol,
-          value.roles,
-          ""
-        )
-      );
-
-    const hasAccountSignals =
-      value.active !== undefined ||
-      value.enabled !== undefined ||
-      value.disabled !== undefined ||
-      value.status !== undefined ||
-      value.estado !== undefined ||
-      value.permissions !== undefined ||
-      value.permisos !== undefined ||
-      value.clienteId !== undefined ||
-      value.tenantId !== undefined;
-
-    return Boolean(
-      (
-        slug &&
-        (
-          role ||
-          displayName ||
-          hasAccountSignals
-        )
+  const user =
+    normalizeUser(
+      extractUser(
+        source
       ) ||
       (
-        displayName &&
-        (
-          role ||
-          hasAccountSignals
-        )
+        options.allowCurrentUser ===
+          true
+          ? current?.user ||
+            null
+          : null
       )
     );
+
+  const session =
+    extractSession(
+      source
+    );
+
+  const role =
+    user
+      ? roleOrUser(
+          first(
+            user.role,
+            user.rol,
+            user.roles,
+            ""
+          )
+        )
+      : "";
+
+  const homePath =
+    user
+      ? buildUserHomePath(
+          user
+        )
+      : ROOT_PATH;
+
+  return {
+    token,
+    accessToken:
+      token,
+    access_token:
+      token,
+
+    user,
+    currentUser:
+      user,
+
+    session,
+    sessionData:
+      session,
+
+    authenticated:
+      Boolean(
+        token &&
+        user
+      ),
+
+    hasToken:
+      Boolean(token),
+
+    hasUser:
+      Boolean(user),
+
+    hasSession:
+      Boolean(session),
+
+    hasRefreshToken:
+      source.hasRefreshToken ===
+      true,
+
+    role:
+      role ||
+      null,
+
+    rol:
+      role ||
+      null,
+
+    roles:
+      role
+        ? [role]
+        : [],
+
+    userSlug:
+      user
+        ? getUserSlugFromUser(
+            user
+          ) ||
+          null
+        : null,
+
+    homePath,
+
+    defaultHome:
+      homePath,
+
+    postLoginTarget:
+      token &&
+      user
+        ? homePath
+        : null,
   };
+}
 
-  const payloadSourcesLocal = (
-    payload = {}
-  ) => {
-    if (!isObjectLocal(payload)) {
-      return [];
-    }
+/* =========================================================
+   CORE STATE WRITE
+========================================================= */
 
-    return [
-      payload,
-      isObjectLocal(payload.data)
-        ? payload.data
-        : null,
-      isObjectLocal(payload.payload)
-        ? payload.payload
-        : null,
-      isObjectLocal(payload.result)
-        ? payload.result
-        : null,
-      isObjectLocal(payload.auth)
-        ? payload.auth
-        : null,
-      isObjectLocal(payload.session)
-        ? payload.session
-        : null,
-      isObjectLocal(payload.sessionData)
-        ? payload.sessionData
-        : null,
-    ].filter(Boolean);
-  };
-
-  const pickLocal = (
-    payload = {},
-    names = []
-  ) => {
-    for (
-      const source
-      of payloadSourcesLocal(payload)
+function writeCoreState(
+  patch = {}
+) {
+  try {
+    if (
+      isFunction(
+        AppCore?.setState
+      )
     ) {
-      for (const name of names) {
-        const value =
-          source?.[name];
-
-        if (
-          value !== undefined &&
-          value !== null &&
-          value !== ""
-        ) {
-          return value;
+      AppCore.setState(
+        patch,
+        {
+          source: "auth",
         }
+      );
+
+      return true;
+    }
+  } catch {
+    // fallback abajo
+  }
+
+  return false;
+}
+
+function applySession(
+  payload = {},
+  options = {}
+) {
+  const normalized =
+    normalizeAuthPayload(
+      payload,
+      options
+    );
+
+  const hasAuthData =
+    Boolean(
+      normalized.token ||
+      normalized.user ||
+      normalized.session ||
+      normalized.hasRefreshToken
+    );
+
+  if (hasAuthData) {
+    try {
+      if (
+        isFunction(
+          AppCore?.applySession
+        )
+      ) {
+        AppCore.applySession(
+          normalized
+        );
+      } else {
+        writeCoreState(
+          normalized
+        );
       }
-    }
-
-    return null;
-  };
-
-  const extractUserLocal = (
-    payload = {}
-  ) => {
-    if (!isObjectLocal(payload)) {
-      return null;
-    }
-
-    const explicitUser =
-      pickLocal(
-        payload,
-        [
-          "user",
-          "currentUser",
-          "usuario",
-          "me",
-          "account",
-        ]
+    } catch {
+      writeCoreState(
+        normalized
       );
+    }
+  }
 
+  return getPublicAuthResult();
+}
+
+function clearSession(
+  options = {}
+) {
+  if (
+    options.invalidate !==
+    false
+  ) {
+    invalidateFlows();
+    abortActiveFlows();
+  }
+
+  let clearedByCore =
+    false;
+
+  try {
     if (
-      looksLikeUserLocal(
-        explicitUser
+      isFunction(
+        AppCore?.clearSession
       )
     ) {
-      return explicitUser;
+      AppCore.clearSession();
+      clearedByCore =
+        true;
     }
+  } catch {
+    clearedByCore =
+      false;
+  }
 
-    const profileUser =
-      pickLocal(
-        payload,
-        [
-          "profile",
-        ]
-      );
+  if (!clearedByCore) {
+    writeCoreState({
+      token: null,
+      accessToken: null,
+      access_token: null,
 
-    if (
-      looksLikeUserLocal(
-        profileUser
-      )
-    ) {
-      return profileUser;
-    }
+      user: null,
+      currentUser: null,
+      session: null,
+      sessionData: null,
 
-    return looksLikeUserLocal(
-      payload
-    )
-      ? payload
-      : null;
-  };
+      authenticated: false,
+      hasToken: false,
+      hasUser: false,
+      hasSession: false,
+      hasRefreshToken: false,
 
-  const adminUser = {
-    id: "ON-ADMIN",
-    userId: "ON-ADMIN",
-    username: "cristian",
-    slug: "cristian",
-    displayName: "Cristian Ávila Luque",
-    role: "admin",
-    roles: ["admin"],
-    active: true,
-  };
+      role: null,
+      rol: null,
+      roles: [],
 
-  const standardUser = {
-    id: "ON-USER",
-    userId: "ON-USER",
-    username: "harandou",
-    slug: "harandou",
-    name: "Javier Harandou",
-    role: "user",
-    roles: ["user"],
-    active: true,
-  };
+      userSlug: null,
+      homePath: ROOT_PATH,
+      defaultHome: ROOT_PATH,
+      postLoginTarget: null,
+    });
 
-  const cases = [
-    {
-      name:
-        "login envelope admin",
-      payload: {
-        ok: true,
-        authenticated: true,
-        role: "admin",
-        rol: "admin",
-        roles: ["admin"],
-        userSlug: "cristian",
-        homePath: "/@cristian",
-        user: adminUser,
-        currentUser: adminUser,
-      },
-      expected:
-        adminUser,
-    },
-
-    {
-      name:
-        "me envelope con slug/role en raíz",
-      payload: {
-        ok: true,
-        authenticated: true,
-        role: "admin",
-        roles: ["admin"],
-        slug: "cristian",
-        homePath: "/@cristian",
-        user: adminUser,
-      },
-      expected:
-        adminUser,
-    },
-
-    {
-      name:
-        "refresh envelope",
-      payload: {
-        ok: true,
-        authenticated: true,
-        status: "refreshed",
-        user: standardUser,
-        routing: {
-          slug: "harandou",
-          homePath: "/@harandou",
-        },
-      },
-      expected:
-        standardUser,
-    },
-
-    {
-      name:
-        "usuario directo",
-      payload:
-        standardUser,
-      expected:
-        standardUser,
-    },
-
-    {
-      name:
-        "role-only NO es usuario",
-      payload: {
-        ok: true,
-        authenticated: true,
-        role: "admin",
-        roles: ["admin"],
-      },
-      expected:
-        null,
-    },
-  ];
-
-  for (const test of cases) {
-    const actual =
-      extractUserLocal(
-        test.payload
-      );
-
-    if (
-      actual !==
-      test.expected
-    ) {
-      throw new Error(
-        `Assertion fallida: ${test.name}`
-      );
+    try {
+      Http
+        .clearAuthTokens
+        ?.();
+    } catch {
+      // noop
     }
   }
 
   return true;
 }
 
-function main() {
-  const {
-    dryRun,
-    strictSha,
-    target,
-  } = parseArgs(process.argv);
-
-  const absoluteTarget =
-    path.resolve(target);
-
-  info(
-    `Objetivo: ${absoluteTarget}`
-  );
+function syncAuthState() {
+  const context =
+    readAuthContext();
 
   if (
-    !fs.existsSync(
-      absoluteTarget
-    )
+    !context.token ||
+    !context.user
   ) {
-    return fail(
-      "No existe el archivo objetivo."
-    );
+    return false;
   }
-
-  let originalBuffer;
 
   try {
-    originalBuffer =
-      fs.readFileSync(
-        absoluteTarget
-      );
-  } catch (error) {
-    return fail(
-      `No se pudo leer el archivo: ${error.message}`
-    );
-  }
-
-  const originalText =
-    originalBuffer.toString(
-      "utf8"
-    );
-
-  const detectedEol =
-    originalText.includes("\r\n")
-      ? "\r\n"
-      : "\n";
-
-  const sourceLf =
-    normalizeLf(
-      originalText
-    );
-
-  /*
-    Verificamos tanto el blob del checkout tal cual como el contenido
-    normalizado a LF, para no penalizar un checkout Windows con CRLF.
-  */
-  const rawBlobSha =
-    gitBlobSha(
-      originalBuffer
-    );
-
-  const lfBuffer =
-    Buffer.from(
-      sourceLf,
-      "utf8"
-    );
-
-  const lfBlobSha =
-    gitBlobSha(
-      lfBuffer
-    );
-
-  const matchesReviewedBlob =
-    rawBlobSha ===
-      EXPECTED_GITHUB_BLOB_SHA ||
-    lfBlobSha ===
-      EXPECTED_GITHUB_BLOB_SHA;
-
-  info(
-    `Git blob SHA actual (raw): ${rawBlobSha}`
-  );
-
-  if (
-    rawBlobSha !==
-    lfBlobSha
-  ) {
-    info(
-      `Git blob SHA normalizado LF: ${lfBlobSha}`
-    );
-  }
-
-  if (
-    matchesReviewedBlob
-  ) {
-    ok(
-      "El archivo coincide con el blob de GitHub revisado."
-    );
-  } else {
-    const message =
-      "El SHA no coincide con el blob revisado. " +
-      "Se continuará únicamente si los bloques contractuales coinciden de forma exacta y única.";
-
-    if (strictSha) {
-      return fail(
-        `${message} --strict-sha impide continuar.`
-      );
-    }
-
-    warn(message);
-  }
-
-  const before = {
-    oldVersion:
-      countOccurrences(
-        sourceLf,
-        OLD_VERSION
-      ),
-
-    newVersion:
-      countOccurrences(
-        sourceLf,
-        NEW_VERSION
-      ),
-
-    oldLooks:
-      countOccurrences(
-        sourceLf,
-        OLD_LOOKS_LIKE_USER
-      ),
-
-    newLooks:
-      countOccurrences(
-        sourceLf,
-        NEW_LOOKS_LIKE_USER
-      ),
-
-    oldExtract:
-      countOccurrences(
-        sourceLf,
-        OLD_EXTRACT_USER
-      ),
-
-    newExtract:
-      countOccurrences(
-        sourceLf,
-        NEW_EXTRACT_USER
-      ),
-  };
-
-  info(
-    `Coincidencias antes: ${JSON.stringify(before)}`
-  );
-
-  const alreadyPatched =
-    before.oldVersion === 0 &&
-    before.newVersion === 1 &&
-    before.oldLooks === 0 &&
-    before.newLooks === 1 &&
-    before.oldExtract === 0 &&
-    before.newExtract === 1;
-
-  if (
-    alreadyPatched
-  ) {
-    ok(
-      "El hotfix ya está aplicado. No se modifica nada."
-    );
-
-    try {
-      runCompatibilityAssertions();
-      ok(
-        "Matriz de compatibilidad del hotfix: OK."
-      );
-    } catch (error) {
-      return fail(
-        `Falló la matriz de compatibilidad: ${error.message}`
-      );
-    }
-
-    return;
-  }
-
-  const pristineExpectedShape =
-    before.oldVersion === 1 &&
-    before.newVersion === 0 &&
-    before.oldLooks === 1 &&
-    before.newLooks === 0 &&
-    before.oldExtract === 1 &&
-    before.newExtract === 0;
-
-  if (
-    !pristineExpectedShape
-  ) {
-    return fail(
-      "El archivo no está ni en el estado original esperado ni completamente parcheado. " +
-      "Se aborta para evitar una modificación parcial o sobre una versión distinta."
-    );
-  }
-
-  /*
-    Primero validamos la política nueva de forma aislada.
-  */
-  try {
-    runCompatibilityAssertions();
-    ok(
-      "Matriz de compatibilidad previa: OK."
-    );
-  } catch (error) {
-    return fail(
-      `Falló la matriz de compatibilidad previa: ${error.message}`
-    );
-  }
-
-  let patchedLf =
-    sourceLf;
-
-  patchedLf =
-    patchedLf.replace(
-      OLD_VERSION,
-      NEW_VERSION
-    );
-
-  patchedLf =
-    patchedLf.replace(
-      OLD_LOOKS_LIKE_USER,
-      NEW_LOOKS_LIKE_USER
-    );
-
-  patchedLf =
-    patchedLf.replace(
-      OLD_EXTRACT_USER,
-      NEW_EXTRACT_USER
-    );
-
-  const validation =
-    validateFinalSource(
-      patchedLf
-    );
-
-  if (
-    !validation.valid
-  ) {
-    return fail(
-      `Validación del resultado fallida: ${JSON.stringify(validation.checks)}`
-    );
-  }
-
-  ok(
-    "Validación estructural del resultado: OK."
-  );
-
-  const beforeLines =
-    sourceLf.split("\n").length;
-
-  const afterLines =
-    patchedLf.split("\n").length;
-
-  info(
-    `Líneas antes: ${beforeLines}`
-  );
-
-  info(
-    `Líneas después: ${afterLines}`
-  );
-
-  const changed =
-    patchedLf !==
-    sourceLf;
-
-  if (!changed) {
-    return fail(
-      "No se detectaron cambios aunque el archivo parecía parcheable."
-    );
-  }
-
-  if (dryRun) {
-    ok(
-      "DRY RUN completado. El archivo NO ha sido escrito."
-    );
-
-    console.log(
-      "\nCambios que se aplicarían:"
-    );
-
-    console.log(
-      "  1) AUTH_VERSION -> auth.minimal.v6.2-user-envelope-hotfix"
-    );
-
-    console.log(
-      "  2) looksLikeUser() deja de aceptar role/roles como identidad suficiente."
-    );
-
-    console.log(
-      "  3) extractUser() prioriza payload.user/currentUser antes del envelope."
-    );
-
-    console.log(
-      "  4) Se mantiene fallback para usuario directo y profile legacy válido."
-    );
-
-    return;
-  }
-
-  const backupPath =
-    `${absoluteTarget}.bak-${timestamp()}`;
-
-  try {
-    fs.copyFileSync(
-      absoluteTarget,
-      backupPath,
-      fs.constants.COPYFILE_EXCL
-    );
-  } catch (error) {
-    return fail(
-      `No se pudo crear el backup: ${error.message}`
-    );
-  }
-
-  ok(
-    `Backup creado: ${backupPath}`
-  );
-
-  const patchedText =
-    restoreEol(
-      patchedLf,
-      detectedEol
-    );
-
-  const directory =
-    path.dirname(
-      absoluteTarget
-    );
-
-  const tempPath =
-    path.join(
-      directory,
-      `.${path.basename(absoluteTarget)}.onion-hotfix-${process.pid}-${Date.now()}.tmp`
-    );
-
-  try {
-    fs.writeFileSync(
-      tempPath,
-      patchedText,
-      {
-        encoding: "utf8",
-        flag: "wx",
-      }
-    );
-
-    /*
-      Validación del archivo temporal ANTES del rename.
-    */
-    const tempLf =
-      normalizeLf(
-        fs.readFileSync(
-          tempPath,
-          "utf8"
-        )
-      );
-
-    const tempValidation =
-      validateFinalSource(
-        tempLf
-      );
-
     if (
-      !tempValidation.valid
+      isFunction(
+        AppCore?.applySession
+      )
     ) {
-      throw new Error(
-        `El temporal no supera la validación: ${JSON.stringify(tempValidation.checks)}`
-      );
-    }
+      AppCore.applySession({
+        token:
+          context.token,
 
-    fs.renameSync(
-      tempPath,
-      absoluteTarget
-    );
-  } catch (error) {
-    try {
-      if (
-        fs.existsSync(
-          tempPath
-        )
-      ) {
-        fs.unlinkSync(
-          tempPath
-        );
-      }
-    } catch {
-      // noop
-    }
+        user:
+          context.user,
 
-    return fail(
-      `No se pudo escribir el hotfix: ${error.message}. Backup disponible en ${backupPath}`
-    );
+        session:
+          context.session,
+
+        hasRefreshToken:
+          context.hasRefreshToken,
+      });
+
+      return true;
+    }
+  } catch {
+    // noop
   }
 
-  /*
-    Verificación final leyendo lo realmente guardado en disco.
-  */
-  let finalLf;
+  return false;
+}
 
-  try {
-    finalLf =
-      normalizeLf(
-        fs.readFileSync(
-          absoluteTarget,
-          "utf8"
-        )
-      );
-  } catch (error) {
-    return fail(
-      `El archivo se escribió pero no pudo releerse: ${error.message}`
-    );
+/* =========================================================
+   RESULT / SNAPSHOT
+========================================================= */
+
+function getPublicAuthResult(
+  payload = {}
+) {
+  const context =
+    readAuthContext();
+
+  return {
+    ok:
+      payload.ok !== false,
+
+    authenticated:
+      context.authenticated,
+
+    skippedRefresh:
+      payload.skippedRefresh ===
+      true,
+
+    reason:
+      cleanText(
+        payload.reason,
+        ""
+      ) ||
+      null,
+
+    user:
+      context.authenticated
+        ? publicUser(
+            context.user
+          )
+        : null,
+
+    currentUser:
+      context.authenticated
+        ? publicUser(
+            context.user
+          )
+        : null,
+
+    session:
+      context.authenticated
+        ? context.session
+        : null,
+
+    sessionData:
+      context.authenticated
+        ? context.session
+        : null,
+
+    hasToken:
+      context.hasToken,
+
+    hasUser:
+      context.hasUser,
+
+    hasSession:
+      context.hasSession,
+
+    hasRefreshToken:
+      context.hasRefreshToken,
+
+    userSlug:
+      context.user
+        ? context.userSlug ||
+          null
+        : null,
+
+    homePath:
+      context.homePath,
+
+    defaultHome:
+      context.homePath,
+
+    postLoginTarget:
+      context.authenticated
+        ? context.homePath
+        : null,
+
+    role:
+      context.authenticated
+        ? context.role ||
+          null
+        : null,
+
+    roles:
+      context.authenticated
+        ? [
+            ...context.roles,
+          ]
+        : [],
+
+    token: null,
+    accessToken: null,
+    access_token: null,
+    refreshToken: null,
+    refresh_token: null,
+  };
+}
+
+function getAuthModuleSnapshot() {
+  const result =
+    getPublicAuthResult();
+
+  return Object.freeze({
+    version:
+      AUTH_VERSION,
+
+    ...result,
+
+    isAdmin:
+      result.authenticated &&
+      result.role ===
+        "admin",
+
+    routes:
+      AUTH_ROUTES,
+
+    home:
+      AUTH_HOME,
+
+    endpoints:
+      Object.freeze({
+        login:
+          AUTH_ENDPOINTS.login,
+
+        me:
+          AUTH_ENDPOINTS.me,
+
+        refresh:
+          AUTH_ENDPOINTS.refresh,
+
+        logout:
+          AUTH_ENDPOINTS.logout,
+      }),
+
+    session:
+      Object.freeze({
+        loggingIn:
+          sessionState.loggingIn,
+
+        restoring:
+          sessionState.restoring,
+
+        refreshing:
+          sessionState.refreshing,
+
+        checking:
+          sessionState.checking,
+
+        activeFlows:
+          sessionState.activeFlows,
+
+        generation:
+          sessionState.generation,
+
+        lastLoginAt:
+          sessionState.lastLoginAt,
+
+        lastRestoreAt:
+          sessionState.lastRestoreAt,
+
+        lastRefreshAt:
+          sessionState.lastRefreshAt,
+
+        lastMeAt:
+          sessionState.lastMeAt,
+
+        lastLogoutAt:
+          sessionState.lastLogoutAt,
+
+        lastError:
+          sessionState.lastError,
+      }),
+  });
+}
+
+/* =========================================================
+   RESTORE POLICY
+========================================================= */
+
+function shouldAttemptRefresh(
+  options = {}
+) {
+  if (
+    options.skipRefresh ===
+      true ||
+    options.noRefresh ===
+      true
+  ) {
+    return false;
   }
-
-  const finalValidation =
-    validateFinalSource(
-      finalLf
-    );
 
   if (
-    !finalValidation.valid
+    options.forceRefresh ===
+      true ||
+    options.forceRestore ===
+      true
   ) {
-    return fail(
-      `La verificación final falló: ${JSON.stringify(finalValidation.checks)}. ` +
-      `Restaura el backup: ${backupPath}`
-    );
+    return true;
   }
+
+  if (
+    options.restoreOnBoot ===
+      true ||
+    options.persistent ===
+      true ||
+    options.silent ===
+      true
+  ) {
+    return true;
+  }
+
+  if (
+    cleanText(
+      options.credentials,
+      ""
+    ).toLowerCase() ===
+      "include"
+  ) {
+    return true;
+  }
+
+  return hasValidToken();
+}
+
+/* =========================================================
+   FLOWS
+========================================================= */
+
+function cleanLoginCredentials(
+  credentials = {}
+) {
+  const output =
+    isObject(
+      credentials
+    )
+      ? {
+          ...credentials,
+        }
+      : {};
+
+  delete output.remember;
+  delete output.rememberMe;
+  delete output.remember_me;
+  delete output.persist;
+  delete output.persistent;
+
+  return output;
+}
+
+async function login(
+  credentials = {},
+  options = {}
+) {
+  if (
+    sessionState.loginPromise
+  ) {
+    return sessionState.loginPromise;
+  }
+
+  const generation =
+    currentGeneration();
+
+  sessionState.loggingIn =
+    true;
+
+  const flow =
+    createFlowAbort(
+      options.signal ||
+      null
+    );
+
+  sessionState.loginPromise =
+    (async () => {
+      try {
+        const raw =
+          await Http.login(
+            cleanLoginCredentials(
+              credentials
+            ),
+            withFlowSignal(
+              options,
+              flow.signal
+            )
+          );
+
+        if (
+          !flowIsCurrent(
+            generation
+          )
+        ) {
+          return getPublicAuthResult({
+            ok: false,
+            reason:
+              "stale-login",
+          });
+        }
+
+        let result =
+          applySession(
+            raw ||
+            {},
+            {
+              allowCurrentToken:
+                false,
+
+              allowCurrentUser:
+                false,
+            }
+          );
+
+        /*
+          Si login devuelve token pero no usuario,
+          /me completa la sesión.
+          No intentamos refresh de un token recién emitido.
+        */
+        if (
+          !result.authenticated &&
+          result.hasToken
+        ) {
+          try {
+            result =
+              await fetchMe({
+                ...options,
+
+                noAutoRefresh:
+                  true,
+
+                source:
+                  "Auth.login.me",
+              });
+          } catch (error) {
+            if (
+              isHttpAuthError(
+                error
+              )
+            ) {
+              clearSession();
+            }
+
+            throw error;
+          }
+        }
+
+        sessionState.lastError =
+          null;
+
+        sessionState.lastLoginAt =
+          Date.now();
+
+        return getPublicAuthResult({
+          ok:
+            result.ok !==
+            false,
+        });
+      } catch (error) {
+        sessionState.lastError =
+          safeError(
+            error,
+            "login"
+          );
+
+        throw error;
+      } finally {
+        sessionState.loggingIn =
+          false;
+
+        sessionState.loginPromise =
+          null;
+
+        flow.cleanup();
+      }
+    })();
+
+  return sessionState.loginPromise;
+}
+
+async function fetchMe(
+  options = {}
+) {
+  if (
+    sessionState.mePromise
+  ) {
+    return sessionState.mePromise;
+  }
+
+  const generation =
+    currentGeneration();
+
+  sessionState.checking =
+    true;
+
+  const flow =
+    createFlowAbort(
+      options.signal ||
+      null
+    );
+
+  sessionState.mePromise =
+    (async () => {
+      try {
+        const raw =
+          await Http.me(
+            withFlowSignal(
+              options,
+              flow.signal
+            )
+          );
+
+        if (
+          !flowIsCurrent(
+            generation
+          )
+        ) {
+          return getPublicAuthResult({
+            ok: false,
+            reason:
+              "stale-me",
+          });
+        }
+
+        const result =
+          applySession(
+            raw ||
+            {},
+            {
+              allowCurrentToken:
+                true,
+
+              allowCurrentUser:
+                false,
+            }
+          );
+
+        sessionState.lastError =
+          null;
+
+        sessionState.lastMeAt =
+          Date.now();
+
+        return result;
+      } catch (error) {
+        sessionState.lastError =
+          safeError(
+            error,
+            "me"
+          );
+
+        if (
+          flowIsCurrent(
+            generation
+          ) &&
+          shouldClearSessionForAuthError(
+            error
+          )
+        ) {
+          clearSession();
+        }
+
+        throw error;
+      } finally {
+        sessionState.checking =
+          false;
+
+        sessionState.mePromise =
+          null;
+
+        flow.cleanup();
+      }
+    })();
+
+  return sessionState.mePromise;
+}
+
+async function refreshSession(
+  options = {}
+) {
+  if (
+    sessionState.refreshPromise
+  ) {
+    return sessionState.refreshPromise;
+  }
+
+  const generation =
+    currentGeneration();
+
+  sessionState.refreshing =
+    true;
+
+  const flow =
+    createFlowAbort(
+      options.signal ||
+      null
+    );
+
+  sessionState.refreshPromise =
+    (async () => {
+      try {
+        /*
+          core/http.js ya aplica el payload de refresh al Core.
+          Auth NO lo vuelve a escribir.
+        */
+        await Http.refreshSession(
+          isObject(
+            options.body
+          )
+            ? options.body
+            : {},
+          withFlowSignal(
+            options,
+            flow.signal
+          )
+        );
+
+        if (
+          !flowIsCurrent(
+            generation
+          )
+        ) {
+          return getPublicAuthResult({
+            ok: false,
+            reason:
+              "stale-refresh",
+          });
+        }
+
+        let result =
+          getPublicAuthResult();
+
+        /*
+          Refresh puede devolver sólo access token.
+          Si falta usuario, /me completa la sesión.
+          Evitamos un segundo auto-refresh: acabamos de refrescar.
+        */
+        if (
+          !result.authenticated &&
+          result.hasToken
+        ) {
+          try {
+            result =
+              await fetchMe({
+                ...options,
+
+                noAutoRefresh:
+                  true,
+
+                source:
+                  "Auth.refreshSession.me",
+              });
+          } catch (error) {
+            if (
+              isHttpAuthError(
+                error
+              )
+            ) {
+              clearSession();
+            }
+
+            throw error;
+          }
+        }
+
+        sessionState.lastError =
+          null;
+
+        sessionState.lastRefreshAt =
+          Date.now();
+
+        return result;
+      } catch (error) {
+        sessionState.lastError =
+          safeError(
+            error,
+            "refresh"
+          );
+
+        if (
+          flowIsCurrent(
+            generation
+          ) &&
+          shouldClearSessionForAuthError(
+            error
+          )
+        ) {
+          clearSession();
+        }
+
+        throw error;
+      } finally {
+        sessionState.refreshing =
+          false;
+
+        sessionState.refreshPromise =
+          null;
+
+        flow.cleanup();
+      }
+    })();
+
+  return sessionState.refreshPromise;
+}
+
+async function restoreSession(
+  options = {}
+) {
+  if (
+    sessionState.restorePromise
+  ) {
+    return sessionState.restorePromise;
+  }
+
+  const generation =
+    currentGeneration();
+
+  sessionState.restoring =
+    true;
+
+  sessionState.restorePromise =
+    (async () => {
+      try {
+        if (
+          isAuthenticated()
+        ) {
+          sessionState.lastError =
+            null;
+
+          return getPublicAuthResult();
+        }
+
+        /*
+          Si existe access token, Auth controla explícitamente:
+          /me -> refresh -> /me.
+          Desactivamos auto-refresh sólo en esta primera /me para
+          no tener dos autoridades decidiendo el mismo restore.
+        */
+        if (
+          hasValidToken()
+        ) {
+          try {
+            return await fetchMe({
+              ...options,
+
+              noAutoRefresh:
+                true,
+
+              source:
+                "Auth.restoreSession.me",
+            });
+          } catch (error) {
+            if (
+              !flowIsCurrent(
+                generation
+              )
+            ) {
+              return getPublicAuthResult({
+                ok: false,
+                reason:
+                  "stale-restore",
+              });
+            }
+
+            if (
+              !isRefreshableAuthError(
+                error
+              )
+            ) {
+              if (
+                shouldClearSessionForAuthError(
+                  error
+                )
+              ) {
+                clearSession();
+              }
+
+              return getPublicAuthResult({
+                ok: false,
+                reason:
+                  "me-failed",
+              });
+            }
+          }
+        }
+
+        if (
+          !shouldAttemptRefresh(
+            options
+          )
+        ) {
+          sessionState.lastError =
+            null;
+
+          return getPublicAuthResult({
+            ok: false,
+
+            skippedRefresh:
+              true,
+
+            reason:
+              "refresh-not-requested",
+          });
+        }
+
+        try {
+          const result =
+            await refreshSession({
+              ...options,
+
+              source:
+                "Auth.restoreSession.refresh",
+            });
+
+          if (
+            !flowIsCurrent(
+              generation
+            )
+          ) {
+            return getPublicAuthResult({
+              ok: false,
+              reason:
+                "stale-restore",
+            });
+          }
+
+          sessionState.lastError =
+            null;
+
+          return result;
+        } catch (error) {
+          if (
+            !flowIsCurrent(
+              generation
+            )
+          ) {
+            return getPublicAuthResult({
+              ok: false,
+              reason:
+                "stale-restore",
+            });
+          }
+
+          sessionState.lastError =
+            safeError(
+              error,
+              "restore"
+            );
+
+          if (
+            shouldClearSessionForAuthError(
+              error
+            )
+          ) {
+            clearSession();
+          }
+
+          return getPublicAuthResult({
+            ok: false,
+            reason:
+              "refresh-failed",
+          });
+        }
+      } finally {
+        sessionState.restoring =
+          false;
+
+        sessionState.restorePromise =
+          null;
+
+        sessionState.lastRestoreAt =
+          Date.now();
+      }
+    })();
+
+  return sessionState.restorePromise;
+}
+
+async function logout(
+  options = {}
+) {
+  /*
+    Invalida y aborta login/me/refresh antes de esperar red.
+
+    Http.logout() se invoca antes de limpiar Core para que la request
+    capture el Authorization actual en su construcción síncrona.
+  */
+  invalidateFlows();
+  abortActiveFlows();
+
+  let remoteLogout =
+    null;
 
   try {
-    runCompatibilityAssertions();
-  } catch (error) {
-    return fail(
-      `La verificación funcional aislada falló tras escribir: ${error.message}. ` +
-      `Restaura el backup: ${backupPath}`
+    remoteLogout =
+      Http.logout(
+        options
+      );
+  } catch {
+    remoteLogout =
+      null;
+  }
+
+  clearSession({
+    invalidate: false,
+  });
+
+  if (
+    remoteLogout
+  ) {
+    try {
+      await remoteLogout;
+    } catch {
+      // logout remoto best-effort
+    }
+  }
+
+  sessionState.lastError =
+    null;
+
+  sessionState.lastLogoutAt =
+    Date.now();
+
+  return true;
+}
+
+/* =========================================================
+   PUBLIC FLOWS
+========================================================= */
+
+function tokenFromPayload(
+  payload = {}
+) {
+  if (
+    typeof payload ===
+    "string"
+  ) {
+    return cleanText(
+      payload,
+      ""
     );
   }
 
-  const finalBuffer =
-    fs.readFileSync(
-      absoluteTarget
-    );
+  if (
+    !isObject(payload)
+  ) {
+    return "";
+  }
 
-  ok(
-    "Hotfix aplicado correctamente."
-  );
-
-  ok(
-    "Matriz login/me/refresh/direct-user: OK."
-  );
-
-  info(
-    `Nuevo Git blob SHA local: ${gitBlobSha(finalBuffer)}`
-  );
-
-  console.log(
-    "\nResumen:"
-  );
-
-  console.log(
-    "  - Backend: sin cambios."
-  );
-
-  console.log(
-    "  - Cosmos DB: sin cambios."
-  );
-
-  console.log(
-    "  - Home/Sidebar/Core/HTTP: sin cambios."
-  );
-
-  console.log(
-    "  - Auth: extracción de usuario corregida."
-  );
-
-  console.log(
-    `  - Backup: ${backupPath}`
-  );
-
-  console.log(
-    "\nSiguiente paso recomendado:"
-  );
-
-  console.log(
-    "  Despliega el frontend, cierra sesión, vuelve a iniciar sesión y haz una recarga completa."
+  return cleanText(
+    payload.token ||
+    payload.resetToken ||
+    payload.activationToken ||
+    payload.activation_token ||
+    payload.reset_token ||
+    "",
+    ""
   );
 }
 
-main();
+function validateActivationToken(
+  payload = {}
+) {
+  const token =
+    tokenFromPayload(
+      payload
+    );
+
+  return Promise.resolve({
+    ok:
+      Boolean(token),
+
+    valid:
+      Boolean(token),
+  });
+}
+
+function validateResetPasswordToken(
+  payload = {}
+) {
+  const token =
+    tokenFromPayload(
+      payload
+    );
+
+  return Promise.resolve({
+    ok:
+      Boolean(token),
+
+    valid:
+      Boolean(token),
+  });
+}
+
+async function activateAccount(
+  payload = {},
+  options = {}
+) {
+  return Http.activateAccount(
+    payload,
+    options
+  );
+}
+
+async function requestPasswordReset(
+  payload = {},
+  options = {}
+) {
+  return Http.requestPasswordReset(
+    payload,
+    options
+  );
+}
+
+async function confirmResetPassword(
+  payload = {},
+  options = {}
+) {
+  const raw =
+    await Http.confirmPasswordReset(
+      payload,
+      options
+    );
+
+  /*
+    Reset correcto NO implica sesión autenticada.
+    Sólo aplicamos sesión si el backend devolviera explícitamente
+    token + usuario válidos.
+  */
+  const normalized =
+    normalizeAuthPayload(
+      raw ||
+      {},
+      {
+        allowCurrentToken:
+          false,
+
+        allowCurrentUser:
+          false,
+      }
+    );
+
+  if (
+    normalized.authenticated
+  ) {
+    return applySession(
+      normalized,
+      {
+        allowCurrentToken:
+          false,
+
+        allowCurrentUser:
+          false,
+      }
+    );
+  }
+
+  return safePayload(
+    raw
+  );
+}
+
+/* =========================================================
+   INIT
+========================================================= */
+
+function init() {
+  installHttp();
+
+  /*
+    Un único registro canónico.
+    Los aliases AppCore.Auth / AppCore.auth leen del mismo registry.
+  */
+  try {
+    if (
+      isFunction(
+        AppCore?.registerModule
+      )
+    ) {
+      AppCore.registerModule(
+        "auth",
+        Auth,
+        {
+          overwrite: true,
+        }
+      );
+    } else {
+      AppCore.Auth =
+        Auth;
+    }
+  } catch {
+    // noop
+  }
+
+  return Auth;
+}
+
+/* =========================================================
+   API
+========================================================= */
+
+export const Auth = {
+  version:
+    AUTH_VERSION,
+
+  AUTH_ENDPOINTS,
+  AUTH_ROUTES,
+  AUTH_HOME,
+
+  session:
+    sessionState,
+
+  init,
+
+  login,
+  logout,
+
+  restoreSession,
+  refreshSession,
+
+  fetchMe,
+  me:
+    fetchMe,
+
+  getUser,
+  getCurrentUser,
+  getProfile,
+
+  getSession,
+  getCurrentSession,
+
+  getToken,
+  getAccessToken,
+  getRefreshToken,
+  hasValidToken,
+
+  isAuthenticated,
+
+  getRole,
+  getRoles,
+
+  getCurrentRole:
+    getRole,
+
+  getCurrentRoles:
+    getRoles,
+
+  getPermissions,
+
+  isAdmin,
+
+  isCurrentUserAdmin:
+    isAdmin,
+
+  hasRole,
+  requireRole,
+
+  normalizeUser,
+  normalizeAuthPayload,
+
+  getUserSlug,
+  buildUserHomePath,
+  buildUserHomePathFromSlug,
+  getDefaultHome,
+  getPostLoginTarget,
+
+  applySession,
+  clearSession,
+  syncAuthState,
+
+  getAuthHeader,
+
+  activateAccount,
+  validateActivationToken,
+
+  requestPasswordReset,
+  confirmResetPassword,
+  validateResetPasswordToken,
+
+  getAuthModuleSnapshot,
+
+  getSnapshot:
+    getAuthModuleSnapshot,
+
+  getDebugSnapshot:
+    getAuthModuleSnapshot,
+
+  snapshot:
+    getAuthModuleSnapshot,
+};
+
+export default Auth;

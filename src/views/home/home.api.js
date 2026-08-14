@@ -1,176 +1,197 @@
+/* =========================================================
+   Onion Support - Home API
+   Archivo: /src/views/home/home.api.js
+
+   PRODUCTIVO · FACTURACIÓN GLOBAL CANÓNICA
+
+   Responsabilidad:
+   - Agregar el dashboard de Inicio desde APIs de dominio existentes.
+   - Mantener UN único cache de Home en memoria, aislado por usuario/rol.
+   - Deduplicar cargas concurrentes del Home.
+   - Tolerar fallos parciales sin ocultar dominios disponibles.
+   - Cargar sólo las últimas facturas necesarias para la UI.
+   - Obtener estadísticas GLOBALES desde GET /api/facturas/stats.
+   - NO calcular el total facturado sumando las facturas visibles.
+   - NO depender de includeStatsAll del endpoint de listado.
+   - Sin DOM, Router, Store, Storage ni fetch propio.
+   - HTTP directo sólo para contadores admin mínimos.
+========================================================= */
+
+import { AppCore } from "../../core/index.js";
+import Http from "../../core/http.js";
+
+import IncidenciasApi from "../incidencias/incidencias.api.js";
+import FacturasApi from "../facturas/facturas.api.js";
+
+export const HOME_API_VERSION =
+  "home.api.domain-aggregator.v9.invoice-stats-endpoint";
+
+export const HOME_TIMEOUT_MS = 15_000;
+export const HOME_LIST_LIMIT = 8;
+export const HOME_ADMIN_COUNT_LIMIT = 1;
+export const HOME_CACHE_TTL_MS = 60_000;
+
+export const HOME_ENDPOINTS = Object.freeze({
+  clientes: "/api/clientes",
+  usuarios: "/api/users",
+});
+
+const LIST_KEYS = Object.freeze([
+  "items",
+  "rows",
+  "results",
+  "records",
+  "docs",
+  "documents",
+  "value",
+  "list",
+  "tickets",
+  "incidencias",
+  "facturas",
+  "invoices",
+  "clientes",
+  "clients",
+  "users",
+  "usuarios",
+]);
+
+const WRAPPER_KEYS = Object.freeze([
+  "data",
+  "payload",
+  "result",
+  "response",
+  "body",
+]);
+
+const TOTAL_KEYS = Object.freeze([
+  "total",
+  "totalCount",
+  "remoteCount",
+  "totalMatched",
+  "count",
+]);
+
+const cacheState = {
+  dashboard: null,
+  key: "",
+  loadedAtMs: 0,
+  lastError: null,
+  inFlight: null,
+  inFlightKey: "",
+  epoch: 0,
+};
+
+/* =========================================================
+   BASICS
+========================================================= */
+
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function safeObject(value, fallback = {}) {
+  return isObject(value) ? value : fallback;
+}
+
+function cleanText(value = "", fallback = "") {
+  const output = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return output || fallback;
+}
+
 /*
-===============================================================================
-ONION SUPPORT · HOME CONTEXT / CACHE / ROLE HARDENING
-===============================================================================
-
-OBJETIVO
--------
-Afinar de forma quirúrgica:
-
-  src/views/home/home.api.js
-
-ORDEN DE LA CADENA
-------------------
-Ya hemos endurecido:
-  1) Auth      -> extracción correcta del usuario real
-  2) Core      -> identidad pública canónica
-  3) HTTP      -> refresh / retry / token
-
-El siguiente boundary crítico es Home API porque decide:
-- qué usuario se usa para construir el dashboard;
-- qué rol habilita datos de admin;
-- con qué identidad se aísla la cache;
-- cuándo se permite cargar el Home.
-
-PUNTOS DEL CÓDIGO ACTUAL QUE SE ENDURECEN
------------------------------------------
-A) normalizeRole() acepta aliases administrativos:
-     administrator
-     administrador
-     superadmin
-     super_admin
-     root
-     owner
-
-   Pero el contrato canónico de Onion Support es únicamente:
-     admin
-     user
-
-   Home no debe inventar equivalencias de privilegio distintas de Core/Auth.
-
-B) getCurrentUserId() puede usar email como identidad de cache.
-   La cache del Home sólo necesita una clave técnica estable; no necesita PII
-   adicional si Core ya expone id/userId/username/slug.
-
-C) getCurrentUser() puede devolver el usuario bruto.
-   Después del hardening de Core, Home debe preferir AppCore.publicUser() como
-   boundary canónico de identidad.
-
-D) currentContext() no modela explícitamente authenticated.
-   Un estado residual con user/role no debería activar cargas admin.
-
-E) loadHomeDashboard() puede iniciar cargas aunque falte una identidad
-   autenticada completa. Se añade guard fail-closed antes de tocar dominios.
-
-CAMBIOS
--------
-1. HOME_API_VERSION:
-     home.api.domain-aggregator.v9.invoice-stats-endpoint
-   ->
-     home.api.domain-aggregator.v10.identity-cache-hardened
-
-2. normalizeRole():
-   - sólo reconoce admin/user;
-   - arrays siguen soportados;
-   - no promociona root/owner/administrator/superadmin.
-
-3. getCurrentUser():
-   - obtiene candidato desde Core;
-   - lo pasa por AppCore.publicUser() cuando está disponible;
-   - fallback seguro al candidato original.
-
-4. getCurrentRole():
-   - prioriza rol canónico de Core/usuario;
-   - sólo admin/user;
-   - fallback "user" únicamente dentro de contexto autenticado.
-
-5. getCurrentUserId():
-   - userId / id / uid / sub / slug / username;
-   - ELIMINA email como clave de cache.
-
-6. currentContext():
-   añade:
-     authenticated
-     cacheable
-   y sólo genera key cuando:
-     authenticated && role && userId
-
-7. loadHomeDashboard():
-   antes de usar cache o llamar dominios exige:
-     authenticated
-     user
-     userId
-     role
-     key
-
-   Si falta algo:
-     HOME_AUTH_CONTEXT_INVALID (401)
-
-8. commitCache():
-   nunca conserva en cache un dashboard sin scope autenticado válido.
-
-NO TOCA
--------
-- Facturación global /api/facturas/stats;
-- lógica de sumas;
-- incidencias;
-- clientes;
-- usuarios;
-- endpoints;
-- HTTP;
-- Auth;
-- Core;
-- Router;
-- DOM;
-- Home template;
-- backend;
-- Cosmos DB.
-
-FUENTE CALIBRADA
-----------------
-Repositorio:
-  avila199817/onionsupport
-
-Archivo:
-  src/views/home/home.api.js
-
-Blob SHA de GitHub revisado:
-  7d15bbbbe2bacbc384ed891cbbbe5900759da693
-
-Versión original:
-  home.api.domain-aggregator.v9.invoice-stats-endpoint
-
-Versión nueva:
-  home.api.domain-aggregator.v10.identity-cache-hardened
-
-USO
----
-1. Guarda ESTE TXT como:
-     patch-home-api-context.cjs
-
-2. Desde la raíz:
-     node patch-home-api-context.cjs --dry-run
-
-3. Si termina en OK:
-     node patch-home-api-context.cjs
-
-4. Opcional, SHA exacto:
-     node patch-home-api-context.cjs --strict-sha --dry-run
-
-===============================================================================
+   No aplanar arrays.
+   Un array de facturas/incidencias es un valor válido completo.
 */
+function first(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    if (isObject(value) && Object.keys(value).length === 0) continue;
 
-"use strict";
+    return value;
+  }
 
-const fs =
-  require("node:fs");
+  return null;
+}
 
-const path =
-  require("node:path");
+function number(value, fallback = 0) {
+  if (value === null || value === undefined || value === "") return fallback;
+  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
+  if (typeof value === "boolean") return value ? 1 : 0;
+  if (typeof value === "object") return fallback;
 
-const crypto =
-  require("node:crypto");
+  if (typeof value === "string") {
+    let text = value
+      .trim()
+      .replace(/[€$£¥%]/g, "")
+      .replace(/[^\d.,+\-\s]/g, "")
+      .replace(/\s+/g, "");
 
-const EXPECTED_GITHUB_BLOB_SHA =
-  "7d15bbbbe2bacbc384ed891cbbbe5900759da693";
+    if (!text || text === "+" || text === "-") return fallback;
 
-const OLD_VERSION =
-  'export const HOME_API_VERSION =\n  "home.api.domain-aggregator.v9.invoice-stats-endpoint";';
+    const hasComma = text.includes(",");
+    const hasDot = text.includes(".");
 
-const NEW_VERSION =
-  'export const HOME_API_VERSION =\n  "home.api.domain-aggregator.v10.identity-cache-hardened";';
+    if (hasComma && hasDot) {
+      text =
+        text.lastIndexOf(",") > text.lastIndexOf(".")
+          ? text.replace(/\./g, "").replace(/,/g, ".")
+          : text.replace(/,/g, "");
+    } else if (hasComma) {
+      text = text.replace(/,/g, ".");
+    }
 
-const OLD_NORMALIZE_ROLE = `function normalizeRole(value = "") {
+    const parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function optionalNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = number(value, Number.NaN);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function now() {
+  return Date.now();
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function safeId(value = "") {
+  return cleanText(value, "")
+    .replace(/[\r\n\t]/g, "")
+    .slice(0, 180);
+}
+
+function redact(value = "") {
+  return String(value ?? "")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
+}
+
+function normalizeRole(value = "") {
   if (Array.isArray(value)) {
     const roles = value.map(normalizeRole).filter(Boolean);
 
@@ -183,9 +204,9 @@ const OLD_NORMALIZE_ROLE = `function normalizeRole(value = "") {
   const role = cleanText(value, "")
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\\u0300-\\u036f]/g, "")
-    .replace(/[\\s-]+/g, "_")
-    .replace(/[^\\w]+/g, "_")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^\w]+/g, "_")
     .replace(/^_+|_+$/g, "");
 
   if (
@@ -207,60 +228,41 @@ const OLD_NORMALIZE_ROLE = `function normalizeRole(value = "") {
   }
 
   return "";
-}`;
+}
 
-const NEW_NORMALIZE_ROLE = `function normalizeRole(value = "") {
-  if (Array.isArray(value)) {
-    const roles =
-      value
-        .map(normalizeRole)
-        .filter(Boolean);
+function errorStatus(error = null) {
+  return number(
+    first(
+      error?.status,
+      error?.statusCode,
+      error?.response?.status,
+      error?.data?.status,
+      error?.payload?.status,
+      null
+    ),
+    0
+  );
+}
 
-    if (
-      roles.includes(
-        "admin"
-      )
-    ) {
-      return "admin";
-    }
+function isUnauthorizedError(error = null) {
+  return errorStatus(error) === 401;
+}
 
-    if (
-      roles.includes(
-        "user"
-      )
-    ) {
-      return "user";
-    }
+function normalizeError(domain = "home", error = null) {
+  return {
+    domain: cleanText(domain, "home"),
+    message: redact(error?.message || "No se pudo cargar el recurso."),
+    status: errorStatus(error) || null,
+    code: cleanText(error?.code, "") || null,
+    at: nowIso(),
+  };
+}
 
-    return "";
-  }
+/* =========================================================
+   CURRENT APP CONTEXT
+========================================================= */
 
-  const role =
-    cleanText(
-      value,
-      ""
-    ).toLowerCase();
-
-  /*
-    Contrato canónico único de Onion Support.
-    Home no eleva aliases legacy a privilegios administrativos.
-  */
-  if (
-    role === "admin"
-  ) {
-    return "admin";
-  }
-
-  if (
-    role === "user"
-  ) {
-    return "user";
-  }
-
-  return "";
-}`;
-
-const OLD_CONTEXT_BLOCK = `function getCoreState() {
+function getCoreState() {
   try {
     return AppCore.getState?.() || AppCore.state || {};
   } catch {
@@ -327,226 +329,64 @@ function currentContext() {
     admin: role === "admin",
     user,
     userId,
-    key: \`${role}:${userId}\`,
+    key: `${role}:${userId}`,
   };
-}`;
-
-const NEW_CONTEXT_BLOCK = `function getCoreState() {
-  try {
-    return (
-      AppCore.getState?.() ||
-      AppCore.state ||
-      {}
-    );
-  } catch {
-    return (
-      AppCore.state ||
-      {}
-    );
-  }
 }
 
-function isAuthenticatedContext() {
-  const state =
-    getCoreState();
+/* =========================================================
+   HOME CACHE
+========================================================= */
 
-  if (
-    typeof state.authenticated ===
-    "boolean"
-  ) {
-    return (
-      state.authenticated ===
-      true
-    );
-  }
-
-  try {
-    return (
-      AppCore
-        .isAuthenticated
-        ?.() === true
-    );
-  } catch {
-    return false;
-  }
+function cacheAgeMs() {
+  if (!cacheState.loadedAtMs) return Number.POSITIVE_INFINITY;
+  return Math.max(0, now() - cacheState.loadedAtMs);
 }
 
-function getCurrentUser() {
-  const state =
-    getCoreState();
-
-  let candidate =
-    null;
-
-  try {
-    candidate =
-      AppCore
-        .getCurrentUser
-        ?.() ||
-      state.user ||
-      state.currentUser ||
-      null;
-  } catch {
-    candidate =
-      state.user ||
-      state.currentUser ||
-      null;
-  }
-
-  if (
-    !isObject(candidate)
-  ) {
-    return null;
-  }
-
-  /*
-    Core es el boundary canónico de identidad.
-    Home no necesita Cosmos/raw profile ni campos privados.
-  */
-  try {
-    if (
-      typeof AppCore.publicUser ===
-      "function"
-    ) {
-      return (
-        AppCore.publicUser(
-          candidate
-        ) ||
-        candidate
-      );
-    }
-  } catch {
-    // fallback abajo
-  }
-
-  return candidate;
-}
-
-function getCurrentRole() {
-  if (
-    !isAuthenticatedContext()
-  ) {
-    return "";
-  }
-
-  const state =
-    getCoreState();
-
-  const user =
-    safeObject(
-      getCurrentUser(),
-      {}
-    );
-
-  let coreRole =
-    "";
-
-  try {
-    coreRole =
-      AppCore
-        .getCurrentRole
-        ?.() ||
-      "";
-  } catch {
-    coreRole =
-      "";
-  }
-
-  return (
-    normalizeRole(
-      first(
-        coreRole,
-        user.role,
-        user.rol,
-        user.roles,
-        state.role,
-        state.rol,
-        state.roles,
-        "user"
-      )
-    ) ||
-    "user"
+function cacheMatches(key = currentContext().key) {
+  return Boolean(
+    cacheState.dashboard &&
+      cacheState.key &&
+      key &&
+      cacheState.key === key
   );
 }
 
-function getCurrentUserId() {
-  const state =
-    getCoreState();
+function isCacheFresh(options = {}) {
+  const key = currentContext().key;
 
-  const user =
-    safeObject(
-      getCurrentUser(),
-      {}
-    );
+  if (!cacheMatches(key)) return false;
 
-  /*
-    No usamos email como scope de cache.
-    Core ya proporciona identidad técnica suficiente.
-  */
-  return safeId(
-    first(
-      user.userId,
-      user.id,
-      user.uid,
-      user.sub,
-      user.slug,
-      user.username,
-      state.userId,
-      state.userSlug,
-      ""
-    )
-  ).toLowerCase();
+  const ttlMs = number(
+    options.ttlMs ?? options.cacheTtlMs,
+    HOME_CACHE_TTL_MS
+  );
+
+  return ttlMs > 0 && cacheAgeMs() <= ttlMs;
 }
 
-function currentContext() {
-  const authenticated =
-    isAuthenticatedContext();
+function cachedDashboard({ stale = false } = {}) {
+  const key = currentContext().key;
 
-  const user =
-    authenticated
-      ? getCurrentUser()
-      : null;
+  if (!cacheMatches(key)) return null;
 
-  const role =
-    authenticated
-      ? getCurrentRole()
-      : "";
-
-  const userId =
-    authenticated &&
-    user
-      ? getCurrentUserId()
-      : "";
-
-  const cacheable =
-    Boolean(
-      authenticated &&
-      user &&
-      role &&
-      userId
-    );
+  const dashboard = cacheState.dashboard;
 
   return {
-    authenticated,
-    cacheable,
-
-    role,
-
-    admin:
-      authenticated &&
-      role === "admin",
-
-    user,
-    userId,
-
-    key:
-      cacheable
-        ? \`${role}:${userId}\`
-        : "",
+    ...dashboard,
+    cached: true,
+    stale: stale || dashboard.stale === true,
+    cache: {
+      ...safeObject(dashboard.cache),
+      hydrated: true,
+      key: cacheState.key,
+      ageMs: cacheAgeMs(),
+      ttlMs: HOME_CACHE_TTL_MS,
+      fresh: isCacheFresh(),
+    },
   };
-}`;
+}
 
-const OLD_COMMIT_CACHE = `function commitCache(dashboard = null, context = currentContext()) {
+function commitCache(dashboard = null, context = currentContext()) {
   if (!isObject(dashboard)) return null;
 
   cacheState.dashboard = dashboard;
@@ -554,1219 +394,788 @@ const OLD_COMMIT_CACHE = `function commitCache(dashboard = null, context = curre
   cacheState.loadedAtMs = now();
 
   return dashboard;
-}`;
+}
 
-const NEW_COMMIT_CACHE = `function commitCache(
-  dashboard = null,
-  context = currentContext()
-) {
-  if (
-    !isObject(dashboard)
-  ) {
-    return null;
+export function clearHomeDashboardCache() {
+  cacheState.dashboard = null;
+  cacheState.key = "";
+  cacheState.loadedAtMs = 0;
+  cacheState.lastError = null;
+  cacheState.inFlight = null;
+  cacheState.inFlightKey = "";
+  cacheState.epoch += 1;
+
+  return true;
+}
+
+/* =========================================================
+   COLLECTION READERS
+========================================================= */
+
+function unwrapList(value = null, depth = 0) {
+  if (Array.isArray(value)) return value;
+  if (!isObject(value) || depth > 4) return [];
+
+  for (const key of LIST_KEYS) {
+    if (Array.isArray(value[key])) return value[key];
   }
+
+  for (const key of WRAPPER_KEYS) {
+    const nested = value[key];
+    if (nested === undefined || nested === null) continue;
+
+    const list = unwrapList(nested, depth + 1);
+    if (list.length || Array.isArray(nested)) return list;
+  }
+
+  return [];
+}
+
+function totalFromPayload(value = null, fallback = 0, depth = 0) {
+  if (!isObject(value) || depth > 4) {
+    return Math.max(0, number(fallback, 0));
+  }
+
+  let best = Math.max(0, number(fallback, 0));
+
+  for (const key of TOTAL_KEYS) {
+    best = Math.max(best, number(value[key], 0));
+  }
+
+  for (const nested of [
+    value.meta,
+    value.pagination,
+    value.paging,
+    value.pageInfo,
+  ]) {
+    if (!isObject(nested)) continue;
+
+    for (const key of TOTAL_KEYS) {
+      best = Math.max(best, number(nested[key], 0));
+    }
+  }
+
+  for (const key of WRAPPER_KEYS) {
+    const nested = value[key];
+
+    if (isObject(nested)) {
+      best = Math.max(best, totalFromPayload(nested, best, depth + 1));
+    }
+  }
+
+  return best;
+}
+
+function collectionFromResponse(response = null, fallbackTotal = 0) {
+  const items = unwrapList(response);
+  const object = safeObject(response, {});
+
+  return {
+    items,
+    total: Math.max(items.length, totalFromPayload(response, fallbackTotal)),
+    stale: object.stale === true,
+    error: object.error || null,
+  };
+}
+
+/* =========================================================
+   INVOICE STATS READERS
+========================================================= */
+
+function invoiceCountFromStats(stats = {}) {
+  const source = safeObject(stats);
+
+  return Math.max(
+    0,
+    number(
+      first(
+        source.invoiceCount,
+        source.countTotal,
+        source.totalCount,
+        source.count,
+        0
+      ),
+      0
+    )
+  );
+}
+
+function totalInvoicedFromStats(stats = {}) {
+  const source = safeObject(stats);
+
+  return optionalNumber(
+    first(
+      source.totalAmount,
+      source.grossAmount,
+      source.totalFacturado,
+      source.totalImporte,
+      source.invoiceAmount,
+      source.amount,
+      null
+    )
+  );
+}
+
+function paidTotalFromStats(stats = {}) {
+  const source = safeObject(stats);
+
+  return optionalNumber(
+    first(
+      source.paidAmount,
+      source.paidTotal,
+      source.totalPagado,
+      source.totalPaid,
+      source.importePagado,
+      source.amountPaid,
+      null
+    )
+  );
+}
+
+function outstandingFromStats(stats = {}) {
+  const source = safeObject(stats);
+
+  const direct = optionalNumber(
+    first(
+      source.outstandingAmount,
+      source.outstandingTotal,
+      null
+    )
+  );
+
+  if (direct !== null) return direct;
+
+  const pending = optionalNumber(
+    first(
+      source.pendingAmount,
+      source.pendingTotal,
+      source.totalPendiente,
+      null
+    )
+  );
+
+  const overdue = optionalNumber(
+    first(
+      source.overdueAmount,
+      source.overdueTotal,
+      source.totalVencido,
+      null
+    )
+  );
+
+  if (pending === null && overdue === null) return null;
+  return number(pending, 0) + number(overdue, 0);
+}
+
+function currencyFromStats(stats = {}, invoices = []) {
+  const source = safeObject(stats);
+
+  return cleanText(
+    first(
+      source.currency,
+      source.moneda,
+      safeArray(source.byCurrency)[0]?.currency,
+      invoices[0]?.currency,
+      invoices[0]?.moneda,
+      "EUR"
+    ),
+    "EUR"
+  ).toUpperCase();
+}
+
+/* =========================================================
+   DOMAIN LOADERS
+========================================================= */
+
+function forceRequested(options = {}) {
+  return options.force === true || options.forceRefresh === true;
+}
+
+async function loadIncidenciasForHome(options = {}) {
+  const response = await IncidenciasApi.listIncidencias({
+    timeout: options.timeout || HOME_TIMEOUT_MS,
+    force: forceRequested(options),
+    returnStaleOnError: options.returnStaleOnError !== false,
+    ttlMs: options.domainTtlMs ?? HOME_CACHE_TTL_MS,
+    query: {
+      limit: HOME_LIST_LIMIT,
+      includeTotal: true,
+      sortBy: "updatedAt",
+      sortDir: "DESC",
+      ...safeObject(options.ticketsQuery),
+      ...safeObject(options.incidenciasQuery),
+    },
+  });
+
+  return {
+    ...collectionFromResponse(response),
+    stats: {},
+    warnings: [],
+  };
+}
+
+async function loadFacturasForHome(options = {}) {
+  const domainOptions = safeObject(options.facturasOptions);
+  const statsOptions = safeObject(options.facturasStatsOptions);
 
   /*
-    Nunca persistimos datos del Home si el scope autenticado
-    no está completamente identificado.
+     Listado y estadísticas globales salen en paralelo.
+     El listado NO necesita calcular estadísticas porque /stats es la
+     fuente canónica del Home.
   */
-  if (
-    context.authenticated !== true ||
-    context.cacheable !== true ||
-    !context.key
-  ) {
-    cacheState.dashboard =
-      null;
+  const [listResult, statsResult] = await Promise.allSettled([
+    FacturasApi.listFacturas({
+      timeout: options.timeout || HOME_TIMEOUT_MS,
+      page: 1,
+      limit: HOME_LIST_LIMIT,
+      sort: "date_desc",
+      direction: "desc",
+      returnStaleOnError: options.returnStaleOnError !== false,
+      ...domainOptions,
 
-    cacheState.key =
-      "";
+      // Forzado al final: Home no depende de stats del listado.
+      includeStats: false,
+      includeStatsAll: false,
+    }),
 
-    cacheState.loadedAtMs =
-      0;
+    FacturasApi.loadFacturasStats({
+      timeout: options.timeout || HOME_TIMEOUT_MS,
+      ...statsOptions,
+    }),
+  ]);
 
-    return dashboard;
+  if (listResult.status === "rejected" && isUnauthorizedError(listResult.reason)) {
+    throw listResult.reason;
   }
 
-  cacheState.dashboard =
-    dashboard;
+  if (statsResult.status === "rejected" && isUnauthorizedError(statsResult.reason)) {
+    throw statsResult.reason;
+  }
 
-  cacheState.key =
-    context.key;
+  if (listResult.status === "rejected" && statsResult.status === "rejected") {
+    throw listResult.reason || statsResult.reason;
+  }
 
-  cacheState.loadedAtMs =
-    now();
+  const collection =
+    listResult.status === "fulfilled"
+      ? collectionFromResponse(listResult.value)
+      : {
+          items: [],
+          total: 0,
+          stale: false,
+          error: listResult.reason || null,
+        };
 
-  return dashboard;
-}`;
+  const stats =
+    statsResult.status === "fulfilled"
+      ? safeObject(statsResult.value)
+      : {};
 
-const OLD_LOAD_HOME_START = `export async function loadHomeDashboard(options = {}) {
+  const warnings = [];
+
+  if (listResult.status === "rejected") {
+    warnings.push(normalizeError("facturas_list", listResult.reason));
+  }
+
+  if (statsResult.status === "rejected") {
+    warnings.push(normalizeError("facturas_stats", statsResult.reason));
+  }
+
+  return {
+    ...collection,
+    stats,
+    statsAvailable:
+      statsResult.status === "fulfilled" &&
+      totalInvoicedFromStats(stats) !== null,
+    warnings,
+  };
+}
+
+async function loadAdminCount(
+  endpoint = "",
+  {
+    timeout = HOME_TIMEOUT_MS,
+    source = "views.home.count",
+    query = {},
+  } = {}
+) {
+  const response = await Http.get(endpoint, {
+    timeout,
+    source,
+    query: {
+      limit: HOME_ADMIN_COUNT_LIMIT,
+      includeTotal: true,
+      ...safeObject(query),
+    },
+  });
+
+  const items = unwrapList(response);
+
+  return {
+    items: [],
+    total: Math.max(items.length, totalFromPayload(response, items.length)),
+    stale: safeObject(response).stale === true,
+    error: safeObject(response).error || null,
+    stats: {},
+    warnings: [],
+  };
+}
+
+async function loadClientesForHome(options = {}) {
+  return loadAdminCount(HOME_ENDPOINTS.clientes, {
+    timeout: options.timeout || HOME_TIMEOUT_MS,
+    source: "views.home.clientes.count",
+    query: safeObject(options.clientesQuery),
+  });
+}
+
+async function loadUsuariosForHome(options = {}) {
+  return loadAdminCount(HOME_ENDPOINTS.usuarios, {
+    timeout: options.timeout || HOME_TIMEOUT_MS,
+    source: "views.home.usuarios.count",
+    query: {
+      ...safeObject(options.usersQuery),
+      ...safeObject(options.usuariosQuery),
+    },
+  });
+}
+
+async function loadDomain(domain = "home", loader = null) {
+  try {
+    const result = safeObject(await loader?.(), {});
+
+    return {
+      domain,
+      items: safeArray(result.items),
+      total: Math.max(safeArray(result.items).length, number(result.total, 0)),
+      stats: safeObject(result.stats),
+      statsAvailable: result.statsAvailable === true,
+      stale: result.stale === true,
+      error: result.error ? normalizeError(domain, result.error) : null,
+      warnings: safeArray(result.warnings),
+    };
+  } catch (error) {
+    if (isUnauthorizedError(error)) throw error;
+
+    return {
+      domain,
+      items: [],
+      total: 0,
+      stats: {},
+      statsAvailable: false,
+      stale: false,
+      error: normalizeError(domain, error),
+      warnings: [],
+    };
+  }
+}
+
+/* =========================================================
+   DASHBOARD BUILDERS
+========================================================= */
+
+function dateValue(value = "") {
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? time : 0;
+}
+
+function buildActivity({ incidencias = [], facturas = [] } = {}) {
+  const ticketItems = safeArray(incidencias).map((ticket) => ({
+    type: "ticket",
+    title: cleanText(
+      first(ticket.subject, ticket.asunto, ticket.title),
+      "Incidencia"
+    ),
+    text: cleanText(
+      first(ticket.status, ticket.estado, ticket.priority, ticket.prioridad),
+      "Actualizada"
+    ),
+    date: first(
+      ticket.lastActivityAt,
+      ticket.updatedAt,
+      ticket.createdAt,
+      ""
+    ),
+  }));
+
+  const invoiceItems = safeArray(facturas).map((invoice) => ({
+    type: "invoice",
+    title: cleanText(
+      first(
+        invoice.numeroFacturaLegal,
+        invoice.invoiceNumber,
+        invoice.number,
+        invoice.title,
+        invoice.name,
+        invoice.id
+      ),
+      "Factura"
+    ),
+    text: cleanText(
+      first(
+        invoice.paymentStatus,
+        invoice.estadoPago,
+        invoice.status,
+        invoice.estado
+      ),
+      "Factura"
+    ),
+    date: first(
+      invoice.updatedAt,
+      invoice.issuedAt,
+      invoice.fechaEmision,
+      invoice.createdAt,
+      ""
+    ),
+  }));
+
+  return [...ticketItems, ...invoiceItems]
+    .sort((a, b) => dateValue(b.date) - dateValue(a.date))
+    .slice(0, 8);
+}
+
+function buildDashboard({
+  context,
+  incidenciasResult,
+  facturasResult,
+  clientesResult,
+  usuariosResult,
+  warnings = [],
+} = {}) {
+  const incidencias = safeArray(incidenciasResult?.items);
+  const facturas = safeArray(facturasResult?.items);
+  const clientes = context.admin ? safeArray(clientesResult?.items) : [];
+  const usuarios = context.admin ? safeArray(usuariosResult?.items) : [];
+
+  const invoiceStats = safeObject(facturasResult?.stats);
+  const statsInvoiceCount = invoiceCountFromStats(invoiceStats);
+
+  const totalInvoiced = totalInvoicedFromStats(invoiceStats);
+  const paidTotal = paidTotalFromStats(invoiceStats);
+  const outstandingAmount = outstandingFromStats(invoiceStats);
+  const currency = currencyFromStats(invoiceStats, facturas);
+
+  const loadedAt = nowIso();
+  const domainWarnings = safeArray(warnings).filter(Boolean);
+
+  const stale = [
+    incidenciasResult,
+    facturasResult,
+    clientesResult,
+    usuariosResult,
+  ].some((result) => result?.stale === true);
+
+  const invoiceCount = Math.max(
+    facturas.length,
+    number(facturasResult?.total, 0),
+    statsInvoiceCount
+  );
+
+  return {
+    role: context.role,
+    admin: context.admin,
+    user: context.user,
+
+    tickets: incidencias,
+    incidencias,
+
+    facturas,
+    invoices: facturas,
+
+    clientes,
+    clients: clientes,
+
+    users: usuarios,
+    usuarios,
+
+    invoiceStats,
+    facturasStats: invoiceStats,
+
+    summary: {
+      tickets: Math.max(
+        incidencias.length,
+        number(incidenciasResult?.total, 0)
+      ),
+      incidencias: Math.max(
+        incidencias.length,
+        number(incidenciasResult?.total, 0)
+      ),
+
+      facturas: invoiceCount,
+      invoices: invoiceCount,
+
+      clientes: context.admin
+        ? Math.max(clientes.length, number(clientesResult?.total, 0))
+        : 0,
+      clients: context.admin
+        ? Math.max(clientes.length, number(clientesResult?.total, 0))
+        : 0,
+
+      users: context.admin
+        ? Math.max(usuarios.length, number(usuariosResult?.total, 0))
+        : 0,
+      usuarios: context.admin
+        ? Math.max(usuarios.length, number(usuariosResult?.total, 0))
+        : 0,
+
+      /*
+         CANÓNICO:
+         totalInvoiced/totalAmount vienen exclusivamente de /api/facturas/stats.
+         Nunca de la suma de las 8 facturas visibles.
+      */
+      totalInvoiced,
+      totalAmount: totalInvoiced,
+      grossAmount: totalInvoiced,
+      totalFacturado: totalInvoiced,
+
+      // Se conservan para otras posibles vistas/compatibilidad.
+      paidTotal,
+      paidAmount: paidTotal,
+      outstandingAmount,
+
+      currency,
+      invoiceStatsAvailable:
+        facturasResult?.statsAvailable === true &&
+        totalInvoiced !== null,
+    },
+
+    activity: buildActivity({
+      incidencias,
+      facturas,
+    }),
+
+    warnings: domainWarnings,
+    partial: domainWarnings.length > 0,
+    stale,
+    cached: false,
+
+    updatedAt: loadedAt,
+    loadedAt,
+
+    cache: {
+      hydrated: false,
+      key: context.key,
+      ageMs: 0,
+      ttlMs: HOME_CACHE_TTL_MS,
+      fresh: true,
+    },
+  };
+}
+
+async function fetchDashboard(options = {}, context = currentContext()) {
+  const emptyDomain = (domain) => ({
+    domain,
+    items: [],
+    total: 0,
+    stats: {},
+    statsAvailable: false,
+    stale: false,
+    error: null,
+    warnings: [],
+  });
+
+  const [
+    incidenciasResult,
+    facturasResult,
+    clientesResult,
+    usuariosResult,
+  ] = await Promise.all([
+    loadDomain("incidencias", () => loadIncidenciasForHome(options)),
+    loadDomain("facturas", () => loadFacturasForHome(options)),
+    context.admin
+      ? loadDomain("clientes", () => loadClientesForHome(options))
+      : Promise.resolve(emptyDomain("clientes")),
+    context.admin
+      ? loadDomain("usuarios", () => loadUsuariosForHome(options))
+      : Promise.resolve(emptyDomain("usuarios")),
+  ]);
+
+  const primaryFailures = [incidenciasResult, facturasResult].filter(
+    (result) => result.error && result.items.length === 0 && !Object.keys(result.stats).length
+  );
+
+  if (primaryFailures.length === 2) {
+    const error = new Error("No se pudo cargar el resumen del Home.");
+    error.status = primaryFailures[0]?.error?.status || null;
+    error.code =
+      primaryFailures[0]?.error?.code || "HOME_PRIMARY_LOAD_FAILED";
+    error.details = primaryFailures.map((result) => result.error);
+    throw error;
+  }
+
+  const warnings = [
+    incidenciasResult.error,
+    ...safeArray(incidenciasResult.warnings),
+    facturasResult.error,
+    ...safeArray(facturasResult.warnings),
+    clientesResult.error,
+    ...safeArray(clientesResult.warnings),
+    usuariosResult.error,
+    ...safeArray(usuariosResult.warnings),
+  ].filter(Boolean);
+
+  return buildDashboard({
+    context,
+    incidenciasResult,
+    facturasResult,
+    clientesResult,
+    usuariosResult,
+    warnings,
+  });
+}
+
+/* =========================================================
+   PUBLIC API
+========================================================= */
+
+export async function loadHomeDashboard(options = {}) {
   const context = currentContext();
   const requestKey = context.key;
   const requestEpoch = cacheState.epoch;
   const force = forceRequested(options);
   const useCache = options.cache !== false && options.noCache !== true;
-  const returnStaleOnError = options.returnStaleOnError !== false;`;
+  const returnStaleOnError = options.returnStaleOnError !== false;
 
-const NEW_LOAD_HOME_START = `export async function loadHomeDashboard(options = {}) {
-  const context =
-    currentContext();
-
-  /*
-    Fail-closed antes de cache, dedupe o APIs de dominio.
-
-    Un Home privado necesita:
-    - sesión autenticada;
-    - usuario público canónico;
-    - rol canónico;
-    - identidad estable para aislar cache.
-  */
-  if (
-    context.authenticated !== true ||
-    !context.user ||
-    !context.role ||
-    !context.userId ||
-    !context.key
-  ) {
-    const error =
-      new Error(
-        "No hay un contexto autenticado válido para cargar el Home."
-      );
-
-    error.code =
-      "HOME_AUTH_CONTEXT_INVALID";
-
-    error.status =
-      401;
-
-    throw error;
+  if (!force && useCache && isCacheFresh(options)) {
+    return cachedDashboard({ stale: false });
   }
 
-  const requestKey =
-    context.key;
-
-  const requestEpoch =
-    cacheState.epoch;
-
-  const force =
-    forceRequested(
-      options
-    );
-
-  const useCache =
-    options.cache !== false &&
-    options.noCache !== true;
-
-  const returnStaleOnError =
-    options.returnStaleOnError !== false;`;
-
-function countOccurrences(
-  text,
-  needle
-) {
-  if (!needle) {
-    return 0;
+  if (cacheState.inFlight && cacheState.inFlightKey === requestKey) {
+    return cacheState.inFlight;
   }
 
-  let count = 0;
-  let offset = 0;
+  cacheState.lastError = null;
 
-  while (true) {
-    const index =
-      text.indexOf(
-        needle,
-        offset
-      );
+  let task = null;
 
-    if (
-      index === -1
-    ) {
-      break;
-    }
-
-    count += 1;
-
-    offset =
-      index +
-      needle.length;
-  }
-
-  return count;
-}
-
-function normalizeLf(
-  value
-) {
-  return String(
-    value
-  )
-    .replace(
-      /\r\n/g,
-      "\n"
-    )
-    .replace(
-      /\r/g,
-      "\n"
-    );
-}
-
-function restoreEol(
-  value,
-  eol
-) {
-  return eol ===
-    "\r\n"
-      ? value.replace(
-          /\n/g,
-          "\r\n"
-        )
-      : value;
-}
-
-function gitBlobSha(
-  buffer
-) {
-  const header =
-    Buffer.from(
-      `blob ${buffer.length}\\0`,
-      "utf8"
-    );
-
-  return crypto
-    .createHash(
-      "sha1"
-    )
-    .update(
-      header
-    )
-    .update(
-      buffer
-    )
-    .digest(
-      "hex"
-    );
-}
-
-function timestamp() {
-  const date =
-    new Date();
-
-  const pad =
-    (value) =>
-      String(
-        value
-      ).padStart(
-        2,
-        "0"
-      );
-
-  return [
-    date.getFullYear(),
-    pad(
-      date.getMonth() + 1
-    ),
-    pad(
-      date.getDate()
-    ),
-    "-",
-    pad(
-      date.getHours()
-    ),
-    pad(
-      date.getMinutes()
-    ),
-    pad(
-      date.getSeconds()
-    ),
-  ].join("");
-}
-
-function info(message) {
-  console.log(
-    `[INFO] ${message}`
-  );
-}
-
-function ok(message) {
-  console.log(
-    `[OK] ${message}`
-  );
-}
-
-function warn(message) {
-  console.warn(
-    `[WARN] ${message}`
-  );
-}
-
-function fail(message) {
-  console.error(
-    `\\n[ERROR] ${message}\\n`
-  );
-
-  process.exitCode =
-    1;
-}
-
-function parseArgs(argv) {
-  const args =
-    argv.slice(2);
-
-  const dryRun =
-    args.includes(
-      "--dry-run"
-    );
-
-  const strictSha =
-    args.includes(
-      "--strict-sha"
-    );
-
-  const positional =
-    args.filter(
-      (arg) =>
-        !arg.startsWith(
-          "--"
-        )
-    );
-
-  return {
-    dryRun,
-    strictSha,
-
-    target:
-      positional[0] ||
-      path.join(
-        process.cwd(),
-        "src",
-        "views",
-        "home",
-        "home.api.js"
-      ),
-  };
-}
-
-function validateFinalSource(
-  sourceLf
-) {
-  const checks = {
-    oldVersion:
-      countOccurrences(
-        sourceLf,
-        OLD_VERSION
-      ),
-
-    newVersion:
-      countOccurrences(
-        sourceLf,
-        NEW_VERSION
-      ),
-
-    oldRole:
-      countOccurrences(
-        sourceLf,
-        OLD_NORMALIZE_ROLE
-      ),
-
-    newRole:
-      countOccurrences(
-        sourceLf,
-        NEW_NORMALIZE_ROLE
-      ),
-
-    oldContext:
-      countOccurrences(
-        sourceLf,
-        OLD_CONTEXT_BLOCK
-      ),
-
-    newContext:
-      countOccurrences(
-        sourceLf,
-        NEW_CONTEXT_BLOCK
-      ),
-
-    oldCommit:
-      countOccurrences(
-        sourceLf,
-        OLD_COMMIT_CACHE
-      ),
-
-    newCommit:
-      countOccurrences(
-        sourceLf,
-        NEW_COMMIT_CACHE
-      ),
-
-    oldLoad:
-      countOccurrences(
-        sourceLf,
-        OLD_LOAD_HOME_START
-      ),
-
-    newLoad:
-      countOccurrences(
-        sourceLf,
-        NEW_LOAD_HOME_START
-      ),
-  };
-
-  return {
-    checks,
-
-    valid:
-      checks.oldVersion === 0 &&
-      checks.newVersion === 1 &&
-
-      checks.oldRole === 0 &&
-      checks.newRole === 1 &&
-
-      checks.oldContext === 0 &&
-      checks.newContext === 1 &&
-
-      checks.oldCommit === 0 &&
-      checks.newCommit === 1 &&
-
-      checks.oldLoad === 0 &&
-      checks.newLoad === 1,
-  };
-}
-
-function runAssertions() {
-  const cleanTextLocal = (
-    value = "",
-    fallback = ""
-  ) => {
-    const output =
-      String(
-        value ??
-        ""
-      )
-        .replace(
-          /[\r\n\t]/g,
-          " "
-        )
-        .replace(
-          /\s+/g,
-          " "
-        )
-        .trim();
-
-    return (
-      output ||
-      fallback
-    );
-  };
-
-  const normalizeRoleLocal =
-    (value = "") => {
-      if (
-        Array.isArray(
-          value
-        )
-      ) {
-        const roles =
-          value
-            .map(
-              normalizeRoleLocal
-            )
-            .filter(
-              Boolean
-            );
-
-        if (
-          roles.includes(
-            "admin"
-          )
-        ) {
-          return "admin";
-        }
-
-        if (
-          roles.includes(
-            "user"
-          )
-        ) {
-          return "user";
-        }
-
-        return "";
-      }
-
-      const role =
-        cleanTextLocal(
-          value,
-          ""
-        ).toLowerCase();
-
-      if (
-        role === "admin"
-      ) {
-        return "admin";
-      }
-
-      if (
-        role === "user"
-      ) {
-        return "user";
-      }
-
-      return "";
-    };
-
-  const roles = [
-    ["admin", "admin"],
-    ["user", "user"],
-    [["user"], "user"],
-    [["admin", "user"], "admin"],
-
-    ["administrator", ""],
-    ["administrador", ""],
-    ["superadmin", ""],
-    ["super_admin", ""],
-    ["root", ""],
-    ["owner", ""],
-    ["cliente", ""],
-    ["usuario", ""],
-  ];
-
-  for (
-    const [
-      input,
-      expected,
-    ]
-    of roles
-  ) {
-    const actual =
-      normalizeRoleLocal(
-        input
-      );
-
-    if (
-      actual !==
-      expected
-    ) {
-      throw new Error(
-        `Rol ${JSON.stringify(input)} => "${actual}", esperado "${expected}"`
-      );
-    }
-  }
-
-  const safeIdLocal =
-    (value = "") =>
-      cleanTextLocal(
-        value,
-        ""
-      )
-        .replace(
-          /[\r\n\t]/g,
-          ""
-        )
-        .slice(
-          0,
-          180
-        );
-
-  const firstLocal =
-    (...values) => {
-      for (
-        const value
-        of values
-      ) {
-        if (
-          value === undefined ||
-          value === null
-        ) {
-          continue;
-        }
-
-        if (
-          typeof value ===
-            "string" &&
-          value.trim() ===
-            ""
-        ) {
-          continue;
-        }
-
-        return value;
-      }
-
-      return null;
-    };
-
-  const userIdFrom =
-    (
-      user = {},
-      state = {}
-    ) =>
-      safeIdLocal(
-        firstLocal(
-          user.userId,
-          user.id,
-          user.uid,
-          user.sub,
-          user.slug,
-          user.username,
-          state.userId,
-          state.userSlug,
-          ""
-        )
-      ).toLowerCase();
-
-  const id1 =
-    userIdFrom(
-      {
-        userId:
-          "USR-001",
-        email:
-          "private@example.com",
-      }
-    );
-
-  if (
-    id1 !==
-    "usr-001"
-  ) {
-    throw new Error(
-      "userId canónico no fue priorizado."
-    );
-  }
-
-  const id2 =
-    userIdFrom(
-      {
-        email:
-          "private@example.com",
-        username:
-          "cristian",
-      }
-    );
-
-  if (
-    id2 !==
-    "cristian"
-  ) {
-    throw new Error(
-      "username debe ser fallback antes que cualquier email."
-    );
-  }
-
-  const id3 =
-    userIdFrom(
-      {
-        email:
-          "private@example.com",
-      }
-    );
-
-  if (
-    id3 !==
-    ""
-  ) {
-    throw new Error(
-      "email no puede convertirse en scope de cache."
-    );
-  }
-
-  const buildContext =
-    ({
-      authenticated,
-      user,
-      role,
-      userId,
-    }) => {
-      const cacheable =
-        Boolean(
-          authenticated &&
-          user &&
-          role &&
-          userId
-        );
-
-      return {
-        authenticated,
-        cacheable,
-        admin:
-          authenticated &&
-          role ===
-            "admin",
-        key:
-          cacheable
-            ? `${role}:${userId}`
-            : "",
-      };
-    };
-
-  const admin =
-    buildContext({
-      authenticated:
-        true,
-      user: {
-        userId:
-          "1",
-      },
-      role:
-        "admin",
-      userId:
-        "1",
-    });
-
-  if (
-    admin.admin !== true ||
-    admin.key !==
-      "admin:1"
-  ) {
-    throw new Error(
-      "Contexto admin válido incorrecto."
-    );
-  }
-
-  const stale =
-    buildContext({
-      authenticated:
-        false,
-      user: {
-        userId:
-          "1",
-      },
-      role:
-        "admin",
-      userId:
-        "1",
-    });
-
-  if (
-    stale.admin !== false ||
-    stale.key !==
-      ""
-  ) {
-    throw new Error(
-      "Estado no autenticado no puede conservar scope admin."
-    );
-  }
-
-  const missingIdentity =
-    buildContext({
-      authenticated:
-        true,
-      user: {},
-      role:
-        "user",
-      userId:
-        "",
-    });
-
-  if (
-    missingIdentity.key !==
-    ""
-  ) {
-    throw new Error(
-      "Sin identidad estable no debe existir cache key."
-    );
-  }
-
-  return true;
-}
-
-function main() {
-  const {
-    dryRun,
-    strictSha,
-    target,
-  } = parseArgs(
-    process.argv
-  );
-
-  const absoluteTarget =
-    path.resolve(
-      target
-    );
-
-  info(
-    `Objetivo: ${absoluteTarget}`
-  );
-
-  if (
-    !fs.existsSync(
-      absoluteTarget
-    )
-  ) {
-    return fail(
-      "No existe el archivo objetivo."
-    );
-  }
-
-  let originalBuffer;
-
-  try {
-    originalBuffer =
-      fs.readFileSync(
-        absoluteTarget
-      );
-  } catch (error) {
-    return fail(
-      `No se pudo leer el archivo: ${error.message}`
-    );
-  }
-
-  const originalText =
-    originalBuffer
-      .toString(
-        "utf8"
-      );
-
-  const detectedEol =
-    originalText.includes(
-      "\r\n"
-    )
-      ? "\r\n"
-      : "\n";
-
-  const sourceLf =
-    normalizeLf(
-      originalText
-    );
-
-  const rawBlobSha =
-    gitBlobSha(
-      originalBuffer
-    );
-
-  const lfBlobSha =
-    gitBlobSha(
-      Buffer.from(
-        sourceLf,
-        "utf8"
-      )
-    );
-
-  const matchesReviewedBlob =
-    rawBlobSha ===
-      EXPECTED_GITHUB_BLOB_SHA ||
-    lfBlobSha ===
-      EXPECTED_GITHUB_BLOB_SHA;
-
-  info(
-    `Git blob SHA actual (raw): ${rawBlobSha}`
-  );
-
-  if (
-    rawBlobSha !==
-    lfBlobSha
-  ) {
-    info(
-      `Git blob SHA normalizado LF: ${lfBlobSha}`
-    );
-  }
-
-  if (
-    matchesReviewedBlob
-  ) {
-    ok(
-      "El archivo coincide con el blob de GitHub revisado."
-    );
-  } else {
-    const message =
-      "El SHA no coincide con el blob revisado. " +
-      "Sólo se continuará si TODOS los bloques contractuales coinciden exactamente una vez.";
-
-    if (
-      strictSha
-    ) {
-      return fail(
-        `${message} --strict-sha impide continuar.`
-      );
-    }
-
-    warn(
-      message
-    );
-  }
-
-  const before = {
-    oldVersion:
-      countOccurrences(
-        sourceLf,
-        OLD_VERSION
-      ),
-
-    newVersion:
-      countOccurrences(
-        sourceLf,
-        NEW_VERSION
-      ),
-
-    oldRole:
-      countOccurrences(
-        sourceLf,
-        OLD_NORMALIZE_ROLE
-      ),
-
-    newRole:
-      countOccurrences(
-        sourceLf,
-        NEW_NORMALIZE_ROLE
-      ),
-
-    oldContext:
-      countOccurrences(
-        sourceLf,
-        OLD_CONTEXT_BLOCK
-      ),
-
-    newContext:
-      countOccurrences(
-        sourceLf,
-        NEW_CONTEXT_BLOCK
-      ),
-
-    oldCommit:
-      countOccurrences(
-        sourceLf,
-        OLD_COMMIT_CACHE
-      ),
-
-    newCommit:
-      countOccurrences(
-        sourceLf,
-        NEW_COMMIT_CACHE
-      ),
-
-    oldLoad:
-      countOccurrences(
-        sourceLf,
-        OLD_LOAD_HOME_START
-      ),
-
-    newLoad:
-      countOccurrences(
-        sourceLf,
-        NEW_LOAD_HOME_START
-      ),
-  };
-
-  info(
-    `Coincidencias antes: ${JSON.stringify(before)}`
-  );
-
-  const alreadyPatched =
-    before.oldVersion === 0 &&
-    before.newVersion === 1 &&
-    before.oldRole === 0 &&
-    before.newRole === 1 &&
-    before.oldContext === 0 &&
-    before.newContext === 1 &&
-    before.oldCommit === 0 &&
-    before.newCommit === 1 &&
-    before.oldLoad === 0 &&
-    before.newLoad === 1;
-
-  if (
-    alreadyPatched
-  ) {
+  task = (async () => {
     try {
-      runAssertions();
+      const dashboard = await fetchDashboard(options, context);
+
+      if (
+        cacheState.epoch !== requestEpoch ||
+        currentContext().key !== requestKey
+      ) {
+        const error = new Error("HOME_CONTEXT_CHANGED");
+        error.code = "HOME_CONTEXT_CHANGED";
+        throw error;
+      }
+
+      commitCache(dashboard, context);
+      return dashboard;
     } catch (error) {
-      return fail(
-        `El hardening parece aplicado pero falló la matriz: ${error.message}`
-      );
-    }
+      cacheState.lastError = normalizeError("home", error);
 
-    ok(
-      "El Home API hardening ya está aplicado."
-    );
-
-    ok(
-      "Matriz rol/contexto/cache: OK."
-    );
-
-    return;
-  }
-
-  const pristine =
-    before.oldVersion === 1 &&
-    before.newVersion === 0 &&
-    before.oldRole === 1 &&
-    before.newRole === 0 &&
-    before.oldContext === 1 &&
-    before.newContext === 0 &&
-    before.oldCommit === 1 &&
-    before.newCommit === 0 &&
-    before.oldLoad === 1 &&
-    before.newLoad === 0;
-
-  if (
-    !pristine
-  ) {
-    return fail(
-      "El archivo no coincide con el estado original revisado ni con el estado final completo. " +
-      "Se aborta para evitar parchear una versión distinta o parcialmente modificada."
-    );
-  }
-
-  try {
-    runAssertions();
-
-    ok(
-      "Matriz contractual previa: OK."
-    );
-  } catch (error) {
-    return fail(
-      `Falló la matriz contractual previa: ${error.message}`
-    );
-  }
-
-  let patchedLf =
-    sourceLf;
-
-  patchedLf =
-    patchedLf.replace(
-      OLD_VERSION,
-      NEW_VERSION
-    );
-
-  patchedLf =
-    patchedLf.replace(
-      OLD_NORMALIZE_ROLE,
-      NEW_NORMALIZE_ROLE
-    );
-
-  patchedLf =
-    patchedLf.replace(
-      OLD_CONTEXT_BLOCK,
-      NEW_CONTEXT_BLOCK
-    );
-
-  patchedLf =
-    patchedLf.replace(
-      OLD_COMMIT_CACHE,
-      NEW_COMMIT_CACHE
-    );
-
-  patchedLf =
-    patchedLf.replace(
-      OLD_LOAD_HOME_START,
-      NEW_LOAD_HOME_START
-    );
-
-  const validation =
-    validateFinalSource(
-      patchedLf
-    );
-
-  if (
-    !validation.valid
-  ) {
-    return fail(
-      `Validación estructural fallida: ${JSON.stringify(validation.checks)}`
-    );
-  }
-
-  ok(
-    "Validación estructural del resultado: OK."
-  );
-
-  info(
-    `Líneas antes: ${sourceLf.split("\\n").length}`
-  );
-
-  info(
-    `Líneas después: ${patchedLf.split("\\n").length}`
-  );
-
-  if (
-    dryRun
-  ) {
-    ok(
-      "DRY RUN completado. No se escribió ningún archivo."
-    );
-
-    console.log(
-      "\nCambios que se aplicarían:"
-    );
-
-    console.log(
-      "  1) roles estrictos admin/user;"
-    );
-
-    console.log(
-      "  2) usuario público canónico desde Core;"
-    );
-
-    console.log(
-      "  3) email eliminado de la identidad de cache;"
-    );
-
-    console.log(
-      "  4) currentContext autenticado explícito;"
-    );
-
-    console.log(
-      "  5) Home fail-closed sin identidad estable;"
-    );
-
-    console.log(
-      "  6) no cachear dashboard sin scope válido."
-    );
-
-    return;
-  }
-
-  const backupPath =
-    `${absoluteTarget}.bak-${timestamp()}`;
-
-  try {
-    fs.copyFileSync(
-      absoluteTarget,
-      backupPath,
-      fs.constants.COPYFILE_EXCL
-    );
-  } catch (error) {
-    return fail(
-      `No se pudo crear backup: ${error.message}`
-    );
-  }
-
-  ok(
-    `Backup creado: ${backupPath}`
-  );
-
-  const patchedText =
-    restoreEol(
-      patchedLf,
-      detectedEol
-    );
-
-  const tempPath =
-    path.join(
-      path.dirname(
-        absoluteTarget
-      ),
-      `.${path.basename(absoluteTarget)}.onion-home-api-${process.pid}-${Date.now()}.tmp`
-    );
-
-  try {
-    fs.writeFileSync(
-      tempPath,
-      patchedText,
-      {
-        encoding:
-          "utf8",
-        flag:
-          "wx",
-      }
-    );
-
-    const tempLf =
-      normalizeLf(
-        fs.readFileSync(
-          tempPath,
-          "utf8"
-        )
-      );
-
-    const tempValidation =
-      validateFinalSource(
-        tempLf
-      );
-
-    if (
-      !tempValidation.valid
-    ) {
-      throw new Error(
-        `Temporal inválido: ${JSON.stringify(tempValidation.checks)}`
-      );
-    }
-
-    fs.renameSync(
-      tempPath,
-      absoluteTarget
-    );
-  } catch (error) {
-    try {
       if (
-        fs.existsSync(
-          tempPath
-        )
+        returnStaleOnError &&
+        cacheState.epoch === requestEpoch &&
+        cacheMatches(requestKey)
       ) {
-        fs.unlinkSync(
-          tempPath
-        );
+        return cachedDashboard({ stale: true });
       }
-    } catch {
-      // noop
+
+      throw error;
+    } finally {
+      if (cacheState.inFlight === task) {
+        cacheState.inFlight = null;
+        cacheState.inFlightKey = "";
+      }
     }
+  })();
 
-    return fail(
-      `No se pudo escribir: ${error.message}. Backup: ${backupPath}`
-    );
-  }
+  cacheState.inFlight = task;
+  cacheState.inFlightKey = requestKey;
 
-  const finalLf =
-    normalizeLf(
-      fs.readFileSync(
-        absoluteTarget,
-        "utf8"
-      )
-    );
-
-  const finalValidation =
-    validateFinalSource(
-      finalLf
-    );
-
-  if (
-    !finalValidation.valid
-  ) {
-    return fail(
-      `Verificación final fallida: ${JSON.stringify(finalValidation.checks)}. ` +
-      `Restaura: ${backupPath}`
-    );
-  }
-
-  try {
-    runAssertions();
-  } catch (error) {
-    return fail(
-      `Matriz final fallida: ${error.message}. Restaura: ${backupPath}`
-    );
-  }
-
-  ok(
-    "Home API context/cache hardening aplicado."
-  );
-
-  ok(
-    "Matriz roles/PII/cache/auth: OK."
-  );
-
-  info(
-    `Nuevo Git blob SHA local: ${gitBlobSha(fs.readFileSync(absoluteTarget))}`
-  );
-
-  console.log(
-    "\nPruebas recomendadas:"
-  );
-
-  console.log(
-    "  1) login admin -> Home con clientes/usuarios;"
-  );
-
-  console.log(
-    "  2) login user -> Home sin dominios admin;"
-  );
-
-  console.log(
-    "  3) logout/login distinto -> cache aislada;"
-  );
-
-  console.log(
-    "  4) recarga -> Home restaura contexto correcto;"
-  );
-
-  console.log(
-    "  5) contexto auth incompleto -> HOME_AUTH_CONTEXT_INVALID sin llamadas de dominio."
-  );
+  return task;
 }
 
-main();
+export function hydrateHomeFromCache() {
+  return cachedDashboard({ stale: false });
+}
+
+export function hasFreshHomeDashboard(options = {}) {
+  return isCacheFresh(options);
+}
+
+export function getHomeCacheState() {
+  const context = currentContext();
+
+  return {
+    hydrated: cacheMatches(context.key),
+    fresh: isCacheFresh(),
+    key: cacheMatches(context.key) ? cacheState.key : "",
+    ageMs: cacheMatches(context.key)
+      ? cacheAgeMs()
+      : Number.POSITIVE_INFINITY,
+    ttlMs: HOME_CACHE_TTL_MS,
+    lastLoadedAt: cacheState.loadedAtMs
+      ? new Date(cacheState.loadedAtMs).toISOString()
+      : null,
+    loading: Boolean(
+      cacheState.inFlight && cacheState.inFlightKey === context.key
+    ),
+    inFlight: Boolean(
+      cacheState.inFlight && cacheState.inFlightKey === context.key
+    ),
+  };
+}
+
+export function getHomeApiSnapshot() {
+  const dashboard = cacheMatches() ? cacheState.dashboard : null;
+
+  return {
+    version: HOME_API_VERSION,
+    role: getCurrentRole(),
+    admin: getCurrentRole() === "admin",
+    lastError: cacheState.lastError,
+    cache: {
+      ...getHomeCacheState(),
+      incidencias: safeArray(dashboard?.incidencias).length,
+      facturas: safeArray(dashboard?.facturas).length,
+      clientes: safeArray(dashboard?.clientes).length,
+      usuarios: safeArray(dashboard?.usuarios).length,
+    },
+    warnings: safeArray(dashboard?.warnings),
+    policy: {
+      domainAggregator: true,
+      reuseIncidenciasApi: true,
+      reuseFacturasApi: true,
+
+      invoiceListLimited: true,
+      invoiceListLimit: HOME_LIST_LIMIT,
+      invoiceStatsDedicatedEndpoint: true,
+      invoiceStatsCanonical: true,
+      noInvoiceVisibleRowsAggregation: true,
+      includeStatsAllRequired: false,
+
+      adminCountQueries: true,
+      adminCountLimit: HOME_ADMIN_COUNT_LIMIT,
+      directHttpOnlyForAdminCounts: true,
+
+      inMemoryHomeCache: true,
+      ttlCache: true,
+      inFlightDedupe: true,
+      staleOnError: true,
+      userScopedCache: true,
+      sessionRaceGuard: true,
+
+      noFetch: true,
+      noStore: true,
+      noStorage: true,
+      noDom: true,
+      noRouter: true,
+    },
+  };
+}
+
+export const HomeApi = Object.freeze({
+  version: HOME_API_VERSION,
+  loadHomeDashboard,
+  hydrateHomeFromCache,
+  hasFreshHomeDashboard,
+  clearHomeDashboardCache,
+  getHomeCacheState,
+  getHomeApiSnapshot,
+});
+
+export default HomeApi;

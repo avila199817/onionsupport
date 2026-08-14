@@ -23,10 +23,6 @@
 
   "routes": [
     {
-      "route": "/api/*",
-      "statusCode": 404
-    },
-    {
       "route": "/.auth/*",
       "statusCode": 404
     },

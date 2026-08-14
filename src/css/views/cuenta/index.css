@@ -1,1454 +1,55 @@
 /* =========================================================
-   Onion SPA - Cuenta View CSS
-   Archivo: src/css/views/cuenta/index.css
+   ONION SUPPORT — CUENTA.CSS
+   Archivo: /src/css/views/cuenta/index.css
 
-   EXTREME PRO SYSTEM · ACCOUNT SETTINGS COMMAND CENTER · 15/10
-   CSS EXTERNAL ONLY · VARIABLES.CSS + LIGHT.CSS + UI.CSS ALIGNED
-   NO :root LOCAL · NO TOKEN DEFINITIONS · NO STYLE INJECTION
-   TEMPLATE 14/10 COMPATIBLE · CUENTAVIEW 14/10 COMPATIBLE
+   PRODUCTIVO · SELF ACCOUNT CONTRACT · TEMPLATE V2
+   VISUAL 1:1 RESTO DE VISTAS
 
-   Responsabilidades:
-   - estilos externos para cuenta.template.js
-   - consumir tokens globales de variables.css / light.css / ui.css
-   - respetar layout.css: .panel-content / .content-wrapper
-   - soportar dark/light mediante tokens existentes
-   - avatar real + fallback por clases/data-attrs
-   - feedback externo para errores/success
-   - panel responsive robusto
-   - inputs, selects, switches, buttons y skeletons de cuenta
+   Alineado con:
+   - cuenta.api.backend-contract.v2.self-account
+   - cuenta.index.api-boundary.v5.self-account
+   - cuenta.template.backend-contract.v2.self-account
+
+   Capacidades reales visibles:
+   - Identidad readonly
+   - Avatar upload/delete
+   - Preferencias readonly
+   - Actividad
+   - Cambio de contraseña
+   - Sesiones bajo demanda
+   - Desactivación self
+
+   Eliminado visualmente:
+   - Guardar perfil
+   - Toggle tema
+   - Selector idioma editable
+   - Toggle privacidad
+   - Cualquier self-update ficticio
+
+   Reglas:
+   - Hero transparente 1:1 resto de vistas
+   - Graphite glass / data-table system
+   - Dark + light vía tokens globales
+   - Responsive por container + viewport
+   - Sin :root local
+   - Sin style injection
 ========================================================= */
+
 
 /* =========================================================
-   BASE
+   ROOT
 ========================================================= */
 
-.cuenta-shell {
-  color: var(--text);
-}
-
-.cuenta-content-wrapper {
-  display: grid;
-  gap: var(--view-section-gap, var(--space-lg));
-}
-
-.cuenta-view {
-  position: relative;
-  isolation: isolate;
-  display: grid;
-  gap: var(--view-section-gap, var(--space-lg));
-  color: var(--text);
-  font-family: var(--font-family);
-}
-
-.cuenta-view,
-.cuenta-view *,
-.cuenta-view *::before,
-.cuenta-view *::after {
-  box-sizing: border-box;
-}
-
-.cuenta-view button,
-.cuenta-view input,
-.cuenta-view select,
-.cuenta-view textarea {
-  font: inherit;
-}
-
-.cuenta-view button {
-  appearance: none;
-  -webkit-appearance: none;
-}
-
-.cuenta-view img {
-  display: block;
-  max-width: 100%;
-}
-
-/* =========================================================
-   ANIMATIONS
-========================================================= */
-
-@keyframes cuentaSpin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes cuentaSkeleton {
-  to {
-    transform: translateX(100%);
-  }
-}
-
-@keyframes cuentaFloatIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px) scale(0.995);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-/* =========================================================
-   SHARED SURFACES
-========================================================= */
-
-.cuenta-hero,
-.cuenta-panel,
-.cuenta-state {
-  position: relative;
-  overflow: hidden;
-  border-radius: var(--view-hero-radius, var(--card-radius-lg));
-  border: 1px solid var(--view-hero-border, var(--panel-border));
-  background:
-    radial-gradient(
-      circle at 0 0,
-      color-mix(in srgb, var(--accent) 20%, transparent),
-      transparent 36%
-    ),
-    radial-gradient(
-      circle at 100% 0,
-      color-mix(in srgb, var(--text-inverse, #ffffff) 10%, transparent),
-      transparent 32%
-    ),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--text-inverse, #ffffff) 5.5%, transparent),
-      transparent 38%
-    ),
-    var(--view-hero-bg, var(--panel-bg));
-  box-shadow: var(--view-hero-shadow, var(--panel-shadow));
-  animation: cuentaFloatIn var(--duration-normal, 0.28s) var(--ease-standard) both;
-}
-
-.cuenta-hero::before,
-.cuenta-panel::before,
-.cuenta-state::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--text-inverse, #ffffff) 7%, transparent),
-      transparent 30%
-    ),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--text-inverse, #ffffff) 3%, transparent),
-      transparent 48%
-    );
-  opacity: 0.76;
-}
-
-.cuenta-hero > *,
-.cuenta-panel > *,
-.cuenta-state > * {
-  position: relative;
-  z-index: 1;
-}
-
-/* =========================================================
-   HERO
-========================================================= */
-
-.cuenta-hero-inner {
-  display: grid;
-  gap: var(--space-lg);
-  padding: var(--space-xl);
-}
-
-.cuenta-hero-top {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-lg);
-  align-items: start;
-}
-
-.cuenta-hero-copy {
-  min-width: 0;
-  display: grid;
-  gap: var(--space-xs);
-}
-
-.cuenta-eyebrow {
-  width: max-content;
-  min-height: calc(30px * var(--ui-scale, 1));
-  padding: 0 var(--space-sm);
-  border-radius: var(--radius-pill);
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--badge-border));
-  background: color-mix(in srgb, var(--accent) 13%, transparent);
-  color: var(--accent-active, var(--text-strong));
-  font-size: var(--font-xs);
-  font-weight: var(--weight-black);
-  letter-spacing: var(--letter-wider);
-  text-transform: uppercase;
-  display: inline-flex;
-  align-items: center;
-  white-space: nowrap;
-}
-
-.cuenta-title {
-  margin: 0;
-  max-width: 100%;
-  color: var(--text-strong);
-  font-size: clamp(var(--font-3xl), 3vw, var(--font-5xl));
-  line-height: 0.98;
-  letter-spacing: var(--view-title-letter, -0.06em);
-  font-weight: var(--view-title-weight, var(--weight-black));
-}
-
-.cuenta-subtitle {
-  margin: 0;
-  max-width: 920px;
-  color: var(--view-subtitle-color, var(--text-muted));
-  font-size: var(--font-lg);
-  line-height: var(--line-relaxed);
-}
-
-.cuenta-hero-actions {
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-  gap: var(--space-xs);
-  flex-wrap: wrap;
-}
-
-/* =========================================================
-   BUTTONS
-========================================================= */
-
-.cuenta-btn {
-  min-height: var(--btn-height);
-  padding: 0 var(--space-md);
-  border-radius: var(--btn-radius, var(--radius-md));
-  border: 1px solid var(--btn-secondary-border);
-  background: var(--btn-secondary-bg);
-  color: var(--btn-secondary-text);
-  font-size: var(--font-md);
-  font-weight: var(--weight-bold);
-  line-height: 1;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-xs);
-  text-decoration: none;
-  white-space: nowrap;
-  box-shadow: var(--btn-secondary-shadow, var(--shadow-sm));
-  user-select: none;
-  -webkit-tap-highlight-color: transparent;
-  transition:
-    transform var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard),
-    background var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard),
-    opacity var(--duration-fast) var(--ease-standard);
-}
-
-.cuenta-btn:hover {
-  transform: translateY(var(--ui-hover-lift, -1px));
-  background: var(--btn-secondary-bg-hover);
-  border-color: color-mix(in srgb, var(--accent) 26%, var(--btn-secondary-border));
-  box-shadow: var(--shadow-md);
-}
-
-.cuenta-btn:active {
-  transform: translateY(0);
-  box-shadow: var(--shadow-sm);
-}
-
-.cuenta-btn:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-.cuenta-btn--primary {
-  border-color: var(--btn-primary-border);
-  background: var(--btn-primary-bg);
-  color: var(--btn-primary-text);
-  box-shadow: var(--btn-primary-shadow);
-}
-
-.cuenta-btn--primary:hover {
-  background: var(--btn-primary-bg-hover);
-  border-color: var(--btn-primary-border-hover);
-}
-
-.cuenta-btn--soft {
-  min-height: calc(38px * var(--ui-scale, 1));
-  padding: 0 var(--space-sm);
-  font-size: var(--font-sm);
-  box-shadow: none;
-}
-
-.cuenta-btn.is-loading,
-.cuenta-btn:disabled,
-.cuenta-btn[aria-busy="true"] {
-  pointer-events: none;
-  cursor: wait;
-  opacity: var(--disabled-opacity, 0.72);
-  transform: none;
-  box-shadow: none;
-}
-
-/* =========================================================
-   ACCOUNT STRIP
-========================================================= */
-
-.cuenta-command-strip {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: var(--space-md);
-  align-items: center;
-  padding: var(--space-md);
-  border-radius: var(--card-radius);
-  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--card-border));
-  background:
-    radial-gradient(
-      circle at 0 0,
-      color-mix(in srgb, var(--accent) 18%, transparent),
-      transparent 44%
-    ),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--text-inverse, #ffffff) 5%, transparent),
-      color-mix(in srgb, var(--text-inverse, #ffffff) 1.5%, transparent)
-    ),
-    var(--card-bg);
-  box-shadow: var(--shadow-card, var(--card-shadow));
-}
-
-.cuenta-account-copy {
-  min-width: 0;
-  display: grid;
-  gap: var(--space-3xs);
-}
-
-.cuenta-account-name {
-  overflow: hidden;
-  color: var(--text-strong);
-  font-size: clamp(var(--font-xl), 1.6vw, var(--font-3xl));
-  line-height: 1.05;
-  font-weight: var(--weight-black);
-  letter-spacing: -0.045em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.cuenta-account-line {
-  overflow: hidden;
-  color: var(--text-dim);
-  font-size: var(--font-sm);
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.cuenta-account-stats {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-xs);
-  flex-wrap: wrap;
-}
-
-/* =========================================================
-   AVATAR
-========================================================= */
-
-.cuenta-avatar {
-  position: relative;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  border-radius: var(--radius-pill);
-  background:
-    radial-gradient(
-      circle at 30% 20%,
-      color-mix(in srgb, var(--text-inverse, #ffffff) 42%, transparent),
-      transparent 30%
-    ),
-    linear-gradient(
-      135deg,
-      var(--accent),
-      color-mix(in srgb, var(--accent) 42%, var(--surface-inverse, #111827))
-    );
-  color: var(--avatar-text, var(--text-on-accent));
-  isolation: isolate;
-  box-shadow:
-    0 16px 34px color-mix(in srgb, var(--accent) 24%, transparent),
-    0 0 0 4px color-mix(in srgb, var(--accent-ring) 72%, transparent),
-    var(--shadow-inner);
-}
-
-.cuenta-avatar--hero {
-  width: calc(72px * var(--ui-scale, 1));
-  height: calc(72px * var(--ui-scale, 1));
-  min-width: calc(72px * var(--ui-scale, 1));
-}
-
-.cuenta-avatar--small {
-  width: calc(42px * var(--ui-scale, 1));
-  height: calc(42px * var(--ui-scale, 1));
-  min-width: calc(42px * var(--ui-scale, 1));
-}
-
-.cuenta-avatar::before {
-  content: "";
-  position: absolute;
-  inset: -34%;
-  z-index: 0;
-  background: conic-gradient(
-    from 120deg,
-    transparent,
-    color-mix(in srgb, var(--accent) 32%, transparent),
-    transparent,
-    color-mix(in srgb, var(--text-inverse, #ffffff) 18%, transparent),
-    transparent
-  );
-  opacity: 0.92;
-}
-
-.cuenta-avatar::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-  background:
-    radial-gradient(
-      circle at 30% 22%,
-      color-mix(in srgb, var(--text-inverse, #ffffff) 42%, transparent),
-      transparent 34%
-    ),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--text-inverse, #ffffff) 10%, transparent),
-      color-mix(in srgb, var(--black, #000000) 12%, transparent)
-    );
-  pointer-events: none;
-  mix-blend-mode: screen;
-}
-
-.cuenta-avatar img {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border-radius: inherit;
-}
-
-.cuenta-avatar-fallback {
-  position: relative;
-  z-index: 2;
-  color: currentColor;
-  font-size: var(--font-3xl);
-  font-weight: var(--weight-black);
-  letter-spacing: -0.055em;
-  text-shadow: var(--text-shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.26));
-}
-
-.cuenta-avatar.has-image .cuenta-avatar-fallback,
-.cuenta-avatar[data-has-avatar="true"] .cuenta-avatar-fallback {
-  display: none;
-}
-
-.cuenta-avatar[data-fallback="true"] .cuenta-avatar-fallback,
-.cuenta-avatar[data-has-avatar="false"] .cuenta-avatar-fallback {
-  display: block;
-}
-
-.cuenta-avatar[data-fallback="true"] img,
-.cuenta-avatar[data-has-avatar="false"] img {
-  display: none;
-}
-
-/* =========================================================
-   CHIPS / STATS
-========================================================= */
-
-.cuenta-hero-meta {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  flex-wrap: wrap;
-}
-
-.cuenta-chip {
-  min-height: calc(30px * var(--ui-scale, 1));
-  padding: 0 var(--space-sm);
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--badge-border);
-  background: var(--badge-bg);
-  color: var(--badge-text);
-  font-size: var(--font-xs);
-  font-weight: var(--weight-bold);
-  letter-spacing: var(--letter-wider);
-  text-transform: uppercase;
-  display: inline-flex;
-  align-items: center;
-  white-space: nowrap;
-}
-
-.cuenta-chip--accent {
-  color: var(--accent-active, var(--text-strong));
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
-}
-
-.cuenta-chip--success {
-  color: var(--success);
-  background: var(--success-bg);
-  border-color: var(--border-success);
-}
-
-.cuenta-chip--warning {
-  color: var(--warning);
-  background: var(--warning-bg);
-  border-color: var(--border-warning);
-}
-
-.cuenta-chip--danger {
-  color: var(--danger);
-  background: var(--danger-bg);
-  border-color: var(--border-danger);
-}
-
-.cuenta-mini-stat {
-  min-width: 124px;
-  display: grid;
-  gap: var(--space-3xs);
-  padding: var(--space-xs) var(--space-sm);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border-soft);
-  background: var(--surface-glass);
-}
-
-.cuenta-mini-stat span {
-  color: var(--text-dim);
-  font-size: var(--font-xs);
-  font-weight: var(--weight-bold);
-  letter-spacing: var(--letter-wider);
-  text-transform: uppercase;
-}
-
-.cuenta-mini-stat strong {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text-strong);
-  font-size: var(--font-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.cuenta-mini-stat--success {
-  border-color: var(--border-success);
-  background: var(--success-bg);
-}
-
-.cuenta-mini-stat--warning {
-  border-color: var(--border-warning);
-  background: var(--warning-bg);
-}
-
-.cuenta-mini-stat--danger {
-  border-color: var(--border-danger);
-  background: var(--danger-bg);
-}
-
-/* =========================================================
-   FEEDBACK
-========================================================= */
-
-.cuenta-feedback {
-  display: grid;
-  gap: var(--space-xs);
-}
-
-.cuenta-feedback-item {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: var(--space-sm);
-  align-items: center;
-  padding: var(--space-sm) var(--space-md);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-soft);
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--text-inverse, #ffffff) 4.5%, transparent),
-      color-mix(in srgb, var(--text-inverse, #ffffff) 1.5%, transparent)
-    ),
-    var(--surface-1);
-  color: var(--text-soft);
-  font-size: var(--font-sm);
-  line-height: var(--line-relaxed);
-  box-shadow: var(--shadow-sm);
-}
-
-.cuenta-feedback-item strong {
-  color: var(--text-strong);
-  font-weight: var(--weight-black);
-  letter-spacing: var(--letter-wide);
-  text-transform: uppercase;
-}
-
-.cuenta-feedback-item span {
-  min-width: 0;
-}
-
-.cuenta-feedback-item--error {
-  border-color: var(--border-danger);
-  background: var(--danger-bg);
-  color: var(--danger);
-}
-
-.cuenta-feedback-item--success {
-  border-color: var(--border-success);
-  background: var(--success-bg);
-  color: var(--success);
-}
-
-/* Legacy external banners, por compatibilidad */
-.cuenta-banner {
-  position: relative;
-  z-index: 1;
-  margin-block-end: var(--space-md);
-  padding: var(--space-sm) var(--space-md);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-soft);
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--text-inverse, #ffffff) 4.5%, transparent),
-      color-mix(in srgb, var(--text-inverse, #ffffff) 1.5%, transparent)
-    ),
-    var(--surface-1);
-  color: var(--text-soft);
-  font-size: var(--font-sm);
-  line-height: var(--line-relaxed);
-  box-shadow: var(--shadow-sm);
-}
-
-.cuenta-banner--info {
-  border-color: var(--border-info);
-  background: var(--info-bg);
-  color: var(--info);
-}
-
-.cuenta-banner--error {
-  border-color: var(--border-danger);
-  background: var(--danger-bg);
-  color: var(--danger);
-}
-
-.cuenta-banner--success {
-  border-color: var(--border-success);
-  background: var(--success-bg);
-  color: var(--success);
-}
-
-/* =========================================================
-   PANEL / CARDS
-========================================================= */
-
-.cuenta-panel {
-  min-width: 0;
-}
-
-.cuenta-cards-grid {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  grid-template-columns: minmax(0, 1.08fr) minmax(360px, 0.92fr);
-  gap: var(--space-md);
-  padding: var(--space-md);
-}
-
-.cuenta-column {
-  display: grid;
-  gap: var(--space-md);
-  min-width: 0;
-  align-content: start;
-}
-
-.cuenta-card {
-  position: relative;
-  display: grid;
-  align-content: start;
-  gap: var(--space-md);
-  min-width: 0;
-  padding: var(--space-lg);
-  border-radius: var(--card-radius);
-  border: 1px solid var(--card-border);
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--text-inverse, #ffffff) 5%, transparent),
-      color-mix(in srgb, var(--text-inverse, #ffffff) 1.2%, transparent)
-    ),
-    var(--card-bg);
-  box-shadow: var(--shadow-card, var(--card-shadow));
-  transition:
-    transform var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard),
-    background var(--duration-fast) var(--ease-standard);
-}
-
-.cuenta-card:hover {
-  transform: translateY(-1px);
-  border-color: color-mix(in srgb, var(--accent) 20%, var(--card-border));
-  box-shadow: var(--shadow-lg);
-}
-
-.cuenta-card--accent {
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--card-border));
-}
-
-.cuenta-card--success {
-  border-color: var(--border-success);
-}
-
-.cuenta-card--warning {
-  border-color: var(--border-warning);
-}
-
-.cuenta-card-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-sm);
-  align-items: start;
-}
-
-.cuenta-card-copy {
-  display: grid;
-  gap: var(--space-xs);
-  min-width: 0;
-}
-
-.cuenta-card-title {
-  margin: 0;
-  color: var(--text-strong);
-  font-size: var(--font-2xl);
-  line-height: var(--line-snug);
-  font-weight: var(--weight-black);
-  letter-spacing: var(--letter-tight);
-}
-
-.cuenta-card-text {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: var(--font-md);
-  line-height: var(--line-relaxed);
-}
-
-.cuenta-card-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: var(--radius-lg);
-  display: grid;
-  place-items: center;
-  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--accent-active, var(--text-strong));
-  font-size: var(--font-sm);
-  font-weight: var(--weight-black);
-  letter-spacing: -0.03em;
-}
-
-/* =========================================================
-   PROFILE / FIELDS
-========================================================= */
-
-.cuenta-profile-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-sm);
-}
-
-.cuenta-field {
-  display: grid;
-  gap: var(--space-2xs);
-  min-width: 0;
-}
-
-.cuenta-field--wide {
-  grid-column: 1 / -1;
-}
-
-.cuenta-field-label {
-  color: var(--form-label-color, var(--text-soft));
-  font-size: var(--form-label-size, var(--font-sm));
-  font-weight: var(--form-label-weight, var(--weight-semibold));
-}
-
-.cuenta-select,
-.cuenta-field input {
-  width: 100%;
-  min-height: var(--input-height);
-  border-radius: var(--input-radius, var(--radius-md));
-  border: 1px solid var(--input-border);
-  background: var(--input-bg);
-  color: var(--input-text);
-  font-size: var(--font-md);
-  font-weight: var(--weight-semibold);
-  outline: none;
-  box-shadow: var(--input-shadow);
-  transition:
-    border-color var(--duration-fast) var(--ease-standard),
-    background var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard),
-    opacity var(--duration-fast) var(--ease-standard);
-}
-
-.cuenta-field input {
-  padding: 0 var(--space-sm);
-}
-
-.cuenta-select {
-  min-width: min(100%, 240px);
-  padding: 0 var(--space-sm);
-  cursor: pointer;
-}
-
-.cuenta-select:focus,
-.cuenta-field input:focus {
-  border-color: var(--input-border-focus);
-  background: var(--input-bg-focus);
-  box-shadow: var(--input-shadow-focus);
-}
-
-.cuenta-field input[readonly] {
-  opacity: 0.86;
-  cursor: default;
-}
-
-.cuenta-select:disabled,
-.cuenta-field input:disabled {
-  cursor: not-allowed;
-  opacity: var(--disabled-opacity, 0.68);
-}
-
-/* =========================================================
-   CONTROLS
-========================================================= */
-
-.cuenta-control-row,
-.cuenta-password-block {
-  display: grid;
-  gap: var(--space-sm);
-  padding: var(--space-sm) 0;
-  border-top: 1px solid var(--border-soft);
-}
-
-.cuenta-control-copy {
-  display: grid;
-  gap: var(--space-2xs);
-}
-
-.cuenta-control-title {
-  color: var(--text-strong);
-  font-size: var(--font-lg);
-  line-height: var(--line-snug);
-  font-weight: var(--weight-bold);
-}
-
-.cuenta-control-description {
-  color: var(--text-dim);
-  font-size: var(--font-md);
-  line-height: var(--line-relaxed);
-}
-
-.cuenta-switch-area {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-sm);
-  flex-wrap: wrap;
-}
-
-.cuenta-switch {
-  display: inline-flex;
-  cursor: pointer;
-  user-select: none;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.cuenta-switch.is-disabled {
-  cursor: not-allowed;
-  opacity: var(--disabled-opacity, 0.72);
-}
-
-.cuenta-switch-track {
-  position: relative;
-  display: inline-flex;
-  width: calc(62px * var(--ui-scale, 1));
-  height: calc(34px * var(--ui-scale, 1));
-  border-radius: var(--radius-pill);
-  padding: 4px;
-  border: 1px solid var(--switch-border, var(--border-default));
-  background: var(--switch-bg);
-  box-shadow: var(--shadow-inner);
-  transition:
-    background var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard);
-}
-
-.cuenta-switch-thumb {
-  position: absolute;
-  top: 4px;
-  left: 4px;
-  width: calc(24px * var(--ui-scale, 1));
-  height: calc(24px * var(--ui-scale, 1));
-  border-radius: var(--radius-pill);
-  background: var(--switch-thumb-bg, var(--text-strong));
-  box-shadow: var(--switch-thumb-shadow, var(--shadow-sm));
-  transition:
-    left var(--duration-fast) var(--ease-standard),
-    background var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard);
-}
-
-.cuenta-switch.is-checked .cuenta-switch-track {
-  background: color-mix(in srgb, var(--accent) 24%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 46%, transparent);
-}
-
-.cuenta-switch.is-checked .cuenta-switch-thumb {
-  left: calc(34px * var(--ui-scale, 1));
-  background: var(--accent);
-}
-
-.cuenta-native-control {
-  position: absolute;
-  inline-size: 1px;
-  block-size: 1px;
-  opacity: 0;
-  pointer-events: none;
-  clip-path: inset(50%);
-}
-
-.cuenta-native-control:focus-visible + .cuenta-control-state {
-  outline: var(--focus-outline, 2px solid var(--accent));
-  outline-offset: var(--focus-offset, 3px);
-  border-radius: var(--radius-sm);
-}
-
-.cuenta-control-state {
-  color: var(--text-dim);
-  font-size: var(--font-xs);
-  font-weight: var(--weight-bold);
-  letter-spacing: var(--letter-wider);
-  text-transform: uppercase;
-}
-
-.cuenta-control-actions,
-.cuenta-password-actions {
-  display: flex;
-  gap: var(--space-xs);
-  flex-wrap: wrap;
-}
-
-.cuenta-select-line {
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  flex-wrap: wrap;
-}
-
-/* =========================================================
-   PASSWORD
-========================================================= */
-
-.cuenta-password-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-sm);
-}
-
-/* =========================================================
-   META
-========================================================= */
-
-.cuenta-meta-list {
-  display: grid;
-  gap: 0;
-  margin-top: auto;
-  border-top: 1px solid var(--border-soft);
-}
-
-.cuenta-meta-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-sm);
-  min-width: 0;
-  padding: var(--space-xs) 0;
-  border-bottom: 1px solid var(--border-soft);
-}
-
-.cuenta-meta-row:last-child {
-  border-bottom: none;
-}
-
-.cuenta-meta-label {
-  color: var(--text-dim);
-  font-size: var(--font-sm);
-  line-height: 1.3;
-}
-
-.cuenta-meta-value {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text-strong);
-  font-size: var(--font-sm);
-  line-height: 1.3;
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.cuenta-meta-row--success .cuenta-meta-value {
-  color: var(--success);
-}
-
-.cuenta-meta-row--warning .cuenta-meta-value {
-  color: var(--warning);
-}
-
-.cuenta-meta-row--danger .cuenta-meta-value {
-  color: var(--danger);
-}
-
-/* =========================================================
-   LOADING / SKELETON
-========================================================= */
-
-.cuenta-inline-loading {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-xs);
-  white-space: nowrap;
-}
-
-.cuenta-inline-spinner {
-  width: 14px;
-  height: 14px;
-  border-radius: var(--radius-pill);
-  border: 2px solid var(--loader-ring);
-  border-top-color: currentColor;
-  animation: cuentaSpin 0.78s linear infinite;
-  flex: 0 0 auto;
-}
-
-.cuenta-inline-loading-text {
-  display: inline-flex;
-  align-items: center;
-}
-
-.cuenta-state {
-  display: grid;
-  justify-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-4xl) var(--space-lg) var(--space-5xl);
-  text-align: center;
-}
-
-.cuenta-state-title {
-  margin: 0;
-  color: var(--text-strong);
-  font-size: var(--font-3xl);
-  line-height: var(--line-tight);
-  font-weight: var(--weight-black);
-  letter-spacing: var(--letter-tight);
-}
-
-.cuenta-state-text {
-  margin: 0;
-  max-width: 620px;
-  color: var(--text-muted);
-  font-size: var(--font-md);
-  line-height: var(--line-relaxed);
-}
-
-.cuenta-loading-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-md);
-  width: 100%;
-}
-
-.cuenta-skeleton-card {
-  display: grid;
-  gap: var(--space-sm);
-  min-height: 260px;
-  padding: var(--space-lg);
-  border-radius: var(--card-radius);
-  border: 1px solid var(--card-border);
-  background: var(--card-bg);
-  box-shadow: var(--card-shadow);
-}
-
-.cuenta-skeleton {
-  position: relative;
-  overflow: hidden;
-  border-radius: var(--skeleton-radius, var(--radius-md));
-  background: var(--skeleton-bg);
-}
-
-.cuenta-skeleton::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  transform: translateX(-100%);
-  background: linear-gradient(
-    90deg,
-    transparent,
-    var(--skeleton-shine),
-    transparent
-  );
-  animation: cuentaSkeleton 1.2s var(--ease-standard) infinite;
-}
-
-.cuenta-skeleton--title {
-  width: 62%;
-  height: 18px;
-}
-
-.cuenta-skeleton--line {
-  width: 100%;
-  height: 12px;
-}
-
-.cuenta-skeleton--line-sm {
-  width: 76%;
-  height: 12px;
-}
-
-.cuenta-skeleton--control {
-  width: 100%;
-  height: 44px;
-  margin-top: var(--space-md);
-}
-
-/* =========================================================
-   PANEL OVERLAY
-========================================================= */
-
-.cuenta-panel-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-  display: grid;
-  place-items: center;
-  padding: var(--space-lg);
-  background: color-mix(in srgb, var(--surface-1) 76%, transparent);
-  backdrop-filter: var(--blur-sm);
-  -webkit-backdrop-filter: var(--blur-sm);
-}
-
-.cuenta-panel-overlay-card {
-  display: grid;
-  justify-items: center;
-  gap: var(--space-sm);
-  min-width: min(100%, 260px);
-  padding: var(--space-lg) var(--space-xl);
-  border-radius: var(--radius-xl);
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border-soft));
-  background: var(--popover-bg);
-  color: var(--text-strong);
-  font-size: var(--font-md);
-  font-weight: var(--weight-bold);
-  box-shadow: var(--shadow-lg);
-}
-
-.cuenta-panel-overlay-spinner {
-  width: 30px;
-  height: 30px;
-  border-radius: var(--radius-pill);
-  border: 3px solid var(--loader-ring);
-  border-top-color: var(--accent);
-  animation: cuentaSpin 0.8s linear infinite;
-}
-
-/* =========================================================
-   STATE DATA ATTRS
-========================================================= */
-
-.cuenta-view[data-cuenta-loading="true"] .cuenta-hero {
-  cursor: progress;
-}
-
-.cuenta-view[data-cuenta-saving="true"] .cuenta-card,
-.cuenta-panel[data-cuenta-busy="true"] .cuenta-card {
-  pointer-events: none;
-}
-
-.cuenta-panel[data-cuenta-busy="true"] {
-  min-height: 360px;
-}
-
-/* =========================================================
-   LIGHT THEME TUNING
-   Nota: no define tokens; solo consume tokens globales ya resueltos.
-========================================================= */
-
-[data-theme="light"] .cuenta-hero,
-[data-theme="light"] .cuenta-panel,
-[data-theme="light"] .cuenta-state {
-  background:
-    radial-gradient(
-      circle at 0 0,
-      color-mix(in srgb, var(--accent) 9%, transparent),
-      transparent 34%
-    ),
-    radial-gradient(
-      circle at 100% 0,
-      color-mix(in srgb, var(--surface-0) 90%, transparent),
-      transparent 28%
-    ),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--surface-0) 88%, transparent),
-      transparent 34%
-    ),
-    var(--view-hero-bg, var(--panel-bg));
-  box-shadow: var(--view-hero-shadow, var(--panel-shadow));
-}
-
-[data-theme="light"] .cuenta-card,
-[data-theme="light"] .cuenta-command-strip,
-[data-theme="light"] .cuenta-skeleton-card {
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--surface-0) 88%, transparent),
-      transparent 34%
-    ),
-    var(--card-bg);
-  box-shadow: var(--card-shadow);
-}
-
-[data-theme="light"] .cuenta-panel-overlay {
-  background: color-mix(in srgb, var(--surface-0) 72%, transparent);
-}
-
-/* =========================================================
-   RESPONSIVE
-========================================================= */
-
-@media (max-width: 1180px) {
-  .cuenta-hero-top,
-  .cuenta-command-strip,
-  .cuenta-cards-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .cuenta-hero-actions,
-  .cuenta-account-stats {
-    justify-content: flex-start;
-  }
-
-  .cuenta-loading-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 900px) {
-  .cuenta-cards-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 760px) {
-  .cuenta-view {
-    gap: var(--space-md);
-  }
-
-  .cuenta-hero-inner {
-    padding: var(--space-lg) var(--space-md);
-  }
-
-  .cuenta-title {
-    font-size: clamp(var(--font-3xl), 8vw, var(--font-4xl));
-    line-height: 1;
-  }
-
-  .cuenta-subtitle {
-    font-size: var(--font-base);
-  }
-
-  .cuenta-hero-actions,
-  .cuenta-select-line,
-  .cuenta-control-actions,
-  .cuenta-password-actions,
-  .cuenta-account-stats {
-    width: 100%;
-  }
-
-  .cuenta-btn,
-  .cuenta-select,
-  .cuenta-mini-stat {
-    width: 100%;
-  }
-
-  .cuenta-cards-grid {
-    padding: var(--space-sm);
-  }
-
-  .cuenta-card {
-    padding: var(--space-md);
-  }
-
-  .cuenta-card-head,
-  .cuenta-profile-grid,
-  .cuenta-password-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .cuenta-field--wide {
-    grid-column: auto;
-  }
-
-  .cuenta-feedback-item {
-    grid-template-columns: 1fr;
-  }
-
-  .cuenta-meta-row {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: var(--space-2xs);
-  }
-
-  .cuenta-meta-value {
-    text-align: left;
-    white-space: normal;
-  }
-
-  .cuenta-avatar--hero {
-    width: 62px;
-    height: 62px;
-    min-width: 62px;
-  }
-}
-
-@media (max-width: 420px) {
-  .cuenta-hero-inner,
-  .cuenta-card {
-    padding: var(--space-md);
-  }
-
-  .cuenta-command-strip {
-    padding: var(--space-sm);
-  }
-
-  .cuenta-cards-grid {
-    padding: var(--space-xs);
-  }
-
-  .cuenta-card-icon {
-    width: 38px;
-    height: 38px;
-    border-radius: var(--radius-md);
-  }
-
-  .cuenta-account-stats {
-    display: grid;
-  }
-
-  .cuenta-hero-meta {
-    display: grid;
-  }
-
-  .cuenta-chip {
-    width: 100%;
-    justify-content: center;
-  }
-}
-
-/* =========================================================
-   ACCESSIBILITY
-========================================================= */
-
-@media (prefers-reduced-motion: reduce) {
-  .cuenta-view *,
-  .cuenta-view *::before,
-  .cuenta-view *::after {
-    animation: none !important;
-    transition: none !important;
-    scroll-behavior: auto !important;
-  }
-}
-
-@media (forced-colors: active) {
-  .cuenta-btn,
-  .cuenta-card,
-  .cuenta-hero,
-  .cuenta-panel,
-  .cuenta-state,
-  .cuenta-feedback-item,
-  .cuenta-command-strip {
-    border: 1px solid CanvasText;
-  }
-
-  .cuenta-btn:focus-visible,
-  .cuenta-select:focus,
-  .cuenta-field input:focus {
-    outline: 2px solid Highlight;
-    outline-offset: 2px;
-  }
-}
-
-/* =========================================================
-   PRINT
-========================================================= */
-
-@media print {
-  .cuenta-hero-actions,
-  .cuenta-control-actions,
-  .cuenta-password-actions,
-  .cuenta-panel-overlay {
-    display: none !important;
-  }
-
-  .cuenta-hero,
-  .cuenta-panel,
-  .cuenta-state,
-  .cuenta-card,
-  .cuenta-command-strip {
-    box-shadow: none !important;
-    background: transparent !important;
-  }
-
-  .cuenta-cards-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* =========================================================
-   CUENTA · VISUAL 1:1 CON INCIDENCIAS
-   Capa final autoritativa.
-   Conserva íntegramente la API de selectores de Cuenta.
-========================================================= */
-
-/* =========================================================
-   ROOT / VIEW
-========================================================= */
-
-:where(.panel-content[data-view="cuenta"], .cuenta-view, [data-cuenta-scope]) {
+:where(
+  .panel-content[data-view="cuenta"],
+  .cuenta-view,
+  [data-cuenta-scope]
+) {
   --cuenta-blue: #60a5fa;
   --cuenta-sky: #38bdf8;
   --cuenta-cyan: #22d3ee;
   --cuenta-indigo: #818cf8;
+  --cuenta-violet: #a78bfa;
   --cuenta-emerald: #34d399;
   --cuenta-green: #22c55e;
   --cuenta-amber: #facc15;
@@ -1458,6 +59,7 @@
 
   display: grid;
   gap: var(--view-section-gap, var(--space-lg));
+
   inline-size: 100%;
   min-inline-size: 0;
 
@@ -1509,28 +111,28 @@
   max-inline-size: 100%;
 }
 
+
 /* =========================================================
-   SHARED INTERACTION
+   ACCESSIBILITY / INTERACTION
 ========================================================= */
 
 .cuenta-btn,
-.cuenta-switch,
-.cuenta-select {
+.cuenta-field input {
   -webkit-tap-highlight-color: transparent;
 }
 
 .cuenta-btn:focus-visible,
-.cuenta-select:focus-visible,
-.cuenta-field input:focus-visible,
-.cuenta-switch:focus-visible {
+.cuenta-field input:focus-visible {
   outline: none;
+
   box-shadow:
     var(--focus-ring),
     0 0 0 5px color-mix(in srgb, var(--accent) 8%, transparent) !important;
 }
 
+
 /* =========================================================
-   HERO · MISMO SISTEMA QUE INCIDENCIAS
+   HERO · 1:1 RESTO DE VISTAS
 ========================================================= */
 
 .cuenta-hero {
@@ -1552,7 +154,6 @@
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 
-  animation: cuentaFloatIn var(--duration-normal, .28s) var(--ease-standard) both;
   transform: translateZ(0);
 }
 
@@ -1576,6 +177,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
+
   gap: clamp(16px, 1.4vw, 26px);
   min-inline-size: 0;
 }
@@ -1587,8 +189,12 @@
 }
 
 .cuenta-eyebrow {
-  width: max-content;
   min-block-size: 34px;
+  inline-size: max-content;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 
   padding-inline: 12px;
 
@@ -1608,10 +214,6 @@
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, var(--text-strong) 5%, transparent),
     0 8px 18px color-mix(in srgb, #000 14%, transparent);
-
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
 
   font-size: 10px;
   line-height: 1;
@@ -1633,18 +235,22 @@
   letter-spacing: -.074em;
 
   text-wrap: balance;
-  white-space: normal;
 
   text-shadow:
-    0 1px 0 rgba(255, 255, 255, .07),
-    0 18px 38px rgba(0, 0, 0, .34);
+    0 1px 0 rgba(255,255,255,.07),
+    0 18px 38px rgba(0,0,0,.34);
 }
 
 .cuenta-subtitle {
   margin: 0;
   max-inline-size: 840px;
 
-  color: color-mix(in srgb, var(--text-muted) 88%, var(--text-strong) 12%);
+  color:
+    color-mix(
+      in srgb,
+      var(--text-muted) 88%,
+      var(--text-strong) 12%
+    );
 
   font-size: clamp(13px, .92vw, 16px);
   line-height: 1.45;
@@ -1656,6 +262,7 @@
   align-items: flex-start;
   justify-content: flex-end;
   flex-wrap: wrap;
+
   gap: 9px;
   min-inline-size: 0;
 }
@@ -1664,12 +271,14 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
+
   gap: 8px;
   min-inline-size: 0;
 }
 
+
 /* =========================================================
-   BUTTONS · PILL GRAPHITE
+   BUTTONS
 ========================================================= */
 
 .cuenta-btn {
@@ -1685,19 +294,21 @@
   box-shadow: var(--btn-secondary-shadow);
 
   cursor: pointer;
+  user-select: none;
 
   display: inline-flex;
   align-items: center;
   justify-content: center;
+
   gap: var(--space-xs);
 
   font-family: var(--font-family);
   font-size: var(--font-md);
-  font-weight: var(--weight-bold);
   line-height: 1;
+  font-weight: var(--weight-bold);
+
   text-decoration: none;
   white-space: nowrap;
-  user-select: none;
 
   transition:
     transform var(--duration-fast) var(--ease-standard),
@@ -1723,8 +334,6 @@
     ),
     var(--btn-secondary-bg);
 
-  gap: 8px;
-
   font-size: 12px;
   font-weight: 950;
 
@@ -1732,22 +341,38 @@
   -webkit-backdrop-filter: var(--glass-blur-sm, blur(12px));
 }
 
-.cuenta-btn:hover {
+.cuenta-btn:hover:not(:disabled):not([aria-disabled="true"]) {
   transform: translateY(-1px);
-  background: var(--btn-secondary-bg-hover, var(--btn-secondary-bg));
+
+  background:
+    var(--btn-secondary-bg-hover, var(--btn-secondary-bg));
+
   color: var(--text-strong);
-  border-color: color-mix(in srgb, var(--btn-secondary-border) 74%, var(--border-strong));
+
+  border-color:
+    color-mix(
+      in srgb,
+      var(--btn-secondary-border) 74%,
+      var(--border-strong)
+    );
+
   box-shadow:
     var(--btn-secondary-shadow),
     0 10px 22px color-mix(in srgb, #000 18%, transparent);
 }
 
-.cuenta-btn:active {
+.cuenta-btn:active:not(:disabled):not([aria-disabled="true"]) {
   transform: translateY(0) scale(.985);
 }
 
 .cuenta-btn--primary {
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--btn-primary-border));
+  border-color:
+    color-mix(
+      in srgb,
+      var(--accent) 42%,
+      var(--btn-primary-border)
+    );
+
   background:
     linear-gradient(
       180deg,
@@ -1755,13 +380,15 @@
       transparent 52%
     ),
     var(--btn-primary-bg);
+
   color: var(--btn-primary-text);
+
   box-shadow:
     var(--btn-primary-shadow),
     0 12px 28px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
-.cuenta-btn--primary:hover {
+.cuenta-btn--primary:hover:not(:disabled):not([aria-disabled="true"]) {
   background:
     linear-gradient(
       180deg,
@@ -1769,28 +396,36 @@
       transparent 54%
     ),
     var(--btn-primary-bg-hover);
+
   border-color: var(--btn-primary-border-hover);
 }
 
 .cuenta-btn--soft {
   min-block-size: calc(38px * var(--ui-scale, 1));
   padding-inline: var(--space-sm);
+
   border-radius: var(--radius-pill);
+
   font-size: var(--font-sm);
 }
 
 .cuenta-btn.is-loading,
 .cuenta-btn:disabled,
+.cuenta-btn[disabled],
+.cuenta-btn[aria-disabled="true"],
 .cuenta-btn[aria-busy="true"] {
   pointer-events: none;
   cursor: wait;
+
   opacity: .54;
   filter: saturate(.75);
+
   transform: none;
 }
 
+
 /* =========================================================
-   ACCOUNT COMMAND STRIP · STAT CARD DE INCIDENCIAS
+   ACCOUNT COMMAND STRIP
 ========================================================= */
 
 .cuenta-command-strip {
@@ -1803,6 +438,7 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
+
   gap: clamp(14px, 1vw, 20px);
 
   min-inline-size: 0;
@@ -1812,15 +448,42 @@
 
   overflow: hidden;
 
-  border: 1px solid color-mix(in srgb, var(--cuenta-stat-color) 30%, rgba(255,255,255,.14));
+  border:
+    1px solid
+    color-mix(
+      in srgb,
+      var(--cuenta-stat-color) 30%,
+      rgba(255,255,255,.14)
+    );
+
   border-radius: 20px;
 
   background:
-    radial-gradient(circle at 84% -4%, color-mix(in srgb, var(--cuenta-stat-color-2) 38%, transparent), transparent 36%),
-    radial-gradient(circle at 0% 100%, color-mix(in srgb, var(--cuenta-stat-color) 22%, transparent), transparent 44%),
-    linear-gradient(135deg, color-mix(in srgb, var(--cuenta-stat-color) 16%, transparent), color-mix(in srgb, var(--cuenta-stat-color-2) 8%, transparent)),
-    radial-gradient(circle at 14% 0%, rgba(255,255,255,.11), transparent 35%),
-    linear-gradient(180deg, rgba(255,255,255,.095), rgba(255,255,255,.03)),
+    radial-gradient(
+      circle at 84% -4%,
+      color-mix(in srgb, var(--cuenta-stat-color-2) 38%, transparent),
+      transparent 36%
+    ),
+    radial-gradient(
+      circle at 0% 100%,
+      color-mix(in srgb, var(--cuenta-stat-color) 22%, transparent),
+      transparent 44%
+    ),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--cuenta-stat-color) 16%, transparent),
+      color-mix(in srgb, var(--cuenta-stat-color-2) 8%, transparent)
+    ),
+    radial-gradient(
+      circle at 14% 0%,
+      rgba(255,255,255,.11),
+      transparent 35%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.095),
+      rgba(255,255,255,.03)
+    ),
     rgba(16,18,24,.72);
 
   box-shadow:
@@ -1841,11 +504,14 @@
 
 .cuenta-command-strip::before {
   content: "";
+
   position: absolute;
   inset-inline: 14px;
   inset-block-start: 0;
   z-index: 0;
+
   block-size: 1px;
+
   background:
     linear-gradient(
       90deg,
@@ -1854,26 +520,45 @@
       color-mix(in srgb, var(--cuenta-stat-color) 66%, rgba(255,255,255,.18)),
       transparent
     );
+
   opacity: .88;
 }
 
 .cuenta-command-strip::after {
   content: "";
+
   position: absolute;
   inset-inline-end: -48px;
   inset-block-end: -58px;
   z-index: 0;
+
   inline-size: 136px;
   block-size: 136px;
+
   border-radius: 999px;
+
   pointer-events: none;
-  background: radial-gradient(circle, color-mix(in srgb, var(--cuenta-stat-color) 24%, transparent), transparent 70%);
+
+  background:
+    radial-gradient(
+      circle,
+      color-mix(in srgb, var(--cuenta-stat-color) 24%, transparent),
+      transparent 70%
+    );
+
   filter: blur(24px);
 }
 
 .cuenta-command-strip:hover {
   transform: translateY(-3px);
-  border-color: color-mix(in srgb, var(--cuenta-stat-color) 48%, rgba(255,255,255,.22));
+
+  border-color:
+    color-mix(
+      in srgb,
+      var(--cuenta-stat-color) 48%,
+      rgba(255,255,255,.22)
+    );
+
   box-shadow:
     0 24px 74px rgba(0,0,0,.44),
     inset 0 1px 0 rgba(255,255,255,.095),
@@ -1888,6 +573,7 @@
 .cuenta-account-copy {
   display: grid;
   gap: 5px;
+
   min-inline-size: 0;
 }
 
@@ -1901,6 +587,7 @@
   line-height: .94;
   font-weight: 950;
   letter-spacing: -.062em;
+
   text-overflow: ellipsis;
   white-space: nowrap;
 
@@ -1918,17 +605,20 @@
   font-size: clamp(11px, .76vw, 13px);
   line-height: 1.35;
   font-weight: 700;
+
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .cuenta-account-stats {
   display: flex;
-  justify-content: flex-end;
   align-items: stretch;
+  justify-content: flex-end;
   flex-wrap: wrap;
+
   gap: 8px;
 }
+
 
 /* =========================================================
    AVATAR
@@ -1946,8 +636,16 @@
   border-radius: var(--radius-pill);
 
   background:
-    radial-gradient(circle at 30% 20%, rgba(255,255,255,.42), transparent 30%),
-    linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 42%, #111827));
+    radial-gradient(
+      circle at 30% 20%,
+      rgba(255,255,255,.42),
+      transparent 30%
+    ),
+    linear-gradient(
+      135deg,
+      var(--accent),
+      color-mix(in srgb, var(--accent) 42%, #111827)
+    );
 
   color: var(--avatar-text, var(--text-on-accent));
 
@@ -1973,29 +671,45 @@
 
 .cuenta-avatar::before {
   content: "";
+
   position: absolute;
   inset: -34%;
   z-index: 0;
-  background: conic-gradient(
-    from 120deg,
-    transparent,
-    color-mix(in srgb, var(--accent) 32%, transparent),
-    transparent,
-    rgba(255,255,255,.18),
-    transparent
-  );
+
+  background:
+    conic-gradient(
+      from 120deg,
+      transparent,
+      color-mix(in srgb, var(--accent) 32%, transparent),
+      transparent,
+      rgba(255,255,255,.18),
+      transparent
+    );
+
   opacity: .92;
 }
 
 .cuenta-avatar::after {
   content: "";
+
   position: absolute;
   inset: 0;
   z-index: 3;
+
   pointer-events: none;
+
   background:
-    radial-gradient(circle at 30% 22%, rgba(255,255,255,.42), transparent 34%),
-    linear-gradient(180deg, rgba(255,255,255,.10), rgba(0,0,0,.12));
+    radial-gradient(
+      circle at 30% 22%,
+      rgba(255,255,255,.42),
+      transparent 34%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.10),
+      rgba(0,0,0,.12)
+    );
+
   mix-blend-mode: screen;
 }
 
@@ -2003,8 +717,10 @@
   position: absolute;
   inset: 0;
   z-index: 2;
+
   inline-size: 100%;
   block-size: 100%;
+
   object-fit: cover;
   border-radius: inherit;
 }
@@ -2012,12 +728,21 @@
 .cuenta-avatar-fallback {
   position: relative;
   z-index: 2;
+
   color: currentColor;
+
   font-size: var(--font-3xl);
   font-weight: var(--weight-black);
   letter-spacing: -.055em;
+
   text-shadow: 0 1px 2px rgba(0,0,0,.26);
 }
+
+.cuenta-avatar.has-image .cuenta-avatar-fallback,
+.cuenta-avatar[data-has-avatar="true"] .cuenta-avatar-fallback {
+  display: none;
+}
+
 
 /* =========================================================
    CHIPS / MINI STATS
@@ -2025,6 +750,11 @@
 
 .cuenta-chip {
   min-block-size: 34px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
   padding-inline: 12px;
 
   border: 1px solid var(--badge-border);
@@ -2044,10 +774,6 @@
     inset 0 1px 0 color-mix(in srgb, var(--text-strong) 5%, transparent),
     0 8px 18px color-mix(in srgb, #000 14%, transparent);
 
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-
   font-size: 10px;
   line-height: 1;
   font-weight: 900;
@@ -2057,14 +783,26 @@
 }
 
 .cuenta-chip--accent {
-  color: color-mix(in srgb, var(--text-strong) 88%, var(--accent) 12%);
+  color:
+    color-mix(
+      in srgb,
+      var(--text-strong) 88%,
+      var(--accent) 12%
+    );
+
   background:
     linear-gradient(
       180deg,
       color-mix(in srgb, var(--accent) 13%, var(--surface-3)),
       color-mix(in srgb, var(--accent) 7%, var(--surface-2))
     );
-  border-color: color-mix(in srgb, var(--accent-border) 62%, var(--border-default));
+
+  border-color:
+    color-mix(
+      in srgb,
+      var(--accent-border) 62%,
+      var(--border-default)
+    );
 }
 
 .cuenta-chip--success {
@@ -2091,6 +829,7 @@
 
   display: grid;
   align-content: center;
+
   gap: 3px;
 
   padding: 9px 12px;
@@ -2099,7 +838,11 @@
   border-radius: 14px;
 
   background:
-    linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.025)),
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.07),
+      rgba(255,255,255,.025)
+    ),
     rgba(8,10,14,.24);
 
   box-shadow:
@@ -2112,6 +855,7 @@
 
 .cuenta-mini-stat span {
   color: rgba(255,255,255,.56);
+
   font-size: 9px;
   font-weight: 950;
   letter-spacing: .085em;
@@ -2121,42 +865,181 @@
 .cuenta-mini-stat strong {
   min-inline-size: 0;
   overflow: hidden;
+
   color: #fff;
+
   font-size: 12px;
   font-weight: 850;
+
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .cuenta-mini-stat--success {
-  border-color: color-mix(in srgb, var(--success) 40%, rgba(255,255,255,.14));
+  border-color:
+    color-mix(
+      in srgb,
+      var(--success) 40%,
+      rgba(255,255,255,.14)
+    );
+
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--success) 16%, transparent), transparent),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--success) 16%, transparent),
+      transparent
+    ),
     rgba(8,10,14,.24);
 }
 
 .cuenta-mini-stat--warning {
-  border-color: color-mix(in srgb, var(--warning) 40%, rgba(255,255,255,.14));
+  border-color:
+    color-mix(
+      in srgb,
+      var(--warning) 40%,
+      rgba(255,255,255,.14)
+    );
+
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--warning) 16%, transparent), transparent),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--warning) 16%, transparent),
+      transparent
+    ),
     rgba(8,10,14,.24);
 }
 
 .cuenta-mini-stat--danger {
-  border-color: color-mix(in srgb, var(--danger) 40%, rgba(255,255,255,.14));
+  border-color:
+    color-mix(
+      in srgb,
+      var(--danger) 40%,
+      rgba(255,255,255,.14)
+    );
+
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--danger) 16%, transparent), transparent),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--danger) 16%, transparent),
+      transparent
+    ),
     rgba(8,10,14,.24);
 }
 
+
 /* =========================================================
-   MAIN PANEL · HISTORY SHELL DE INCIDENCIAS
+   FEEDBACK / BANNERS
+========================================================= */
+
+.cuenta-feedback {
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.cuenta-feedback-item,
+.cuenta-banner {
+  position: relative;
+
+  min-inline-size: 0;
+
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong) 4%, transparent),
+      transparent
+    ),
+    var(--surface-1);
+
+  color: var(--text-soft);
+
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 5%, transparent),
+    0 10px 24px color-mix(in srgb, #000 14%, transparent);
+
+  font-size: var(--font-sm);
+  line-height: 1.5;
+}
+
+.cuenta-feedback-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+
+  gap: var(--space-sm);
+
+  padding: var(--space-sm) var(--space-md);
+}
+
+.cuenta-feedback-item strong {
+  color: var(--text-strong);
+
+  font-weight: 900;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+}
+
+.cuenta-banner {
+  display: block;
+
+  padding: var(--space-sm) var(--space-md);
+}
+
+.cuenta-feedback-item--error,
+.cuenta-banner--error {
+  border-color: var(--border-danger);
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--danger) 7%, transparent),
+      transparent
+    ),
+    var(--danger-bg);
+
+  color: var(--danger);
+}
+
+.cuenta-feedback-item--success,
+.cuenta-banner--success {
+  border-color: var(--border-success);
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--success) 7%, transparent),
+      transparent
+    ),
+    var(--success-bg);
+
+  color: var(--success);
+}
+
+.cuenta-banner--info {
+  border-color: var(--border-info);
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--info) 7%, transparent),
+      transparent
+    ),
+    var(--info-bg);
+
+  color: var(--info);
+}
+
+
+/* =========================================================
+   MAIN PANEL
 ========================================================= */
 
 .cuenta-panel {
   position: relative;
-  min-inline-size: 0;
 
+  min-inline-size: 0;
   overflow: hidden;
 
   border: 1px solid var(--data-table-border);
@@ -2175,17 +1058,21 @@
   backdrop-filter: var(--glass-blur-md);
   -webkit-backdrop-filter: var(--glass-blur-md);
 
-  animation: cuentaFloatIn var(--duration-normal, .28s) var(--ease-standard) both;
+  transform: translateZ(0);
 }
 
 .cuenta-panel::before {
   content: "";
+
   position: absolute;
   inset-inline: 14px;
   inset-block-start: 0;
   z-index: 1;
+
   block-size: 1px;
+
   pointer-events: none;
+
   background:
     linear-gradient(
       90deg,
@@ -2200,7 +1087,10 @@
   z-index: 1;
 
   display: grid;
-  grid-template-columns: minmax(0, 1.08fr) minmax(360px, .92fr);
+  grid-template-columns:
+    minmax(0, 1.08fr)
+    minmax(360px, .92fr);
+
   gap: clamp(10px, .9vw, 15px);
 
   padding: var(--space-md);
@@ -2211,12 +1101,15 @@
 .cuenta-column {
   display: grid;
   align-content: start;
+
   gap: clamp(10px, .9vw, 15px);
+
   min-inline-size: 0;
 }
 
+
 /* =========================================================
-   CARDS · GRAPHITE GLASS
+   CARDS
 ========================================================= */
 
 .cuenta-card {
@@ -2227,6 +1120,7 @@
 
   display: grid;
   align-content: start;
+
   gap: var(--space-md);
 
   min-inline-size: 0;
@@ -2235,13 +1129,32 @@
 
   overflow: hidden;
 
-  border: 1px solid color-mix(in srgb, var(--cuenta-card-accent) 13%, var(--card-border));
+  border:
+    1px solid
+    color-mix(
+      in srgb,
+      var(--cuenta-card-accent) 13%,
+      var(--card-border)
+    );
+
   border-radius: 18px;
 
   background:
-    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--cuenta-card-accent) 10%, transparent), transparent 34%),
-    linear-gradient(180deg, color-mix(in srgb, var(--text-strong) 5%, transparent), transparent 40%),
-    color-mix(in srgb, var(--card-bg) 92%, transparent);
+    radial-gradient(
+      circle at 100% 0%,
+      color-mix(in srgb, var(--cuenta-card-accent) 10%, transparent),
+      transparent 34%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong) 5%, transparent),
+      transparent 40%
+    ),
+    color-mix(
+      in srgb,
+      var(--card-bg) 92%,
+      transparent
+    );
 
   box-shadow:
     0 14px 34px color-mix(in srgb, #000 20%, transparent),
@@ -2259,11 +1172,14 @@
 
 .cuenta-card::before {
   content: "";
+
   position: absolute;
   inset-inline: 14px;
   inset-block-start: 0;
   z-index: 0;
+
   block-size: 1px;
+
   background:
     linear-gradient(
       90deg,
@@ -2271,6 +1187,7 @@
       color-mix(in srgb, var(--cuenta-card-accent) 52%, rgba(255,255,255,.18)),
       transparent
     );
+
   opacity: .72;
 }
 
@@ -2281,7 +1198,14 @@
 
 .cuenta-card:hover {
   transform: translateY(-2px);
-  border-color: color-mix(in srgb, var(--cuenta-card-accent) 28%, var(--card-border));
+
+  border-color:
+    color-mix(
+      in srgb,
+      var(--cuenta-card-accent) 28%,
+      var(--card-border)
+    );
+
   box-shadow:
     0 22px 56px color-mix(in srgb, #000 28%, transparent),
     inset 0 1px 0 color-mix(in srgb, var(--text-strong) 8%, transparent);
@@ -2299,22 +1223,39 @@
   --cuenta-card-accent: var(--cuenta-amber);
 }
 
+/* Danger-zone real sin cambiar el template */
+.cuenta-card:has(#cuenta-deactivate-btn),
+.cuenta-card:has(#cuenta-deactivate-password) {
+  --cuenta-card-accent: var(--cuenta-red);
+
+  border-color:
+    color-mix(
+      in srgb,
+      var(--danger) 26%,
+      var(--card-border)
+    );
+}
+
 .cuenta-card-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
+
   gap: var(--space-sm);
 }
 
 .cuenta-card-copy {
   display: grid;
   gap: 5px;
+
   min-inline-size: 0;
 }
 
 .cuenta-card-title {
   margin: 0;
+
   color: var(--text-strong);
+
   font-size: clamp(18px, 1.2vw, 23px);
   line-height: 1.08;
   font-weight: 900;
@@ -2323,7 +1264,9 @@
 
 .cuenta-card-text {
   margin: 0;
+
   color: var(--text-muted);
+
   font-size: var(--font-sm);
   line-height: 1.48;
   font-weight: 580;
@@ -2333,116 +1276,64 @@
   inline-size: 44px;
   block-size: 44px;
 
-  border: 1px solid color-mix(in srgb, var(--cuenta-card-accent) 30%, transparent);
+  display: grid;
+  place-items: center;
+
+  border:
+    1px solid
+    color-mix(
+      in srgb,
+      var(--cuenta-card-accent) 30%,
+      transparent
+    );
+
   border-radius: 14px;
 
   background:
-    radial-gradient(circle at 30% 18%, rgba(255,255,255,.16), transparent 36%),
-    color-mix(in srgb, var(--cuenta-card-accent) 13%, transparent);
+    radial-gradient(
+      circle at 30% 18%,
+      rgba(255,255,255,.16),
+      transparent 36%
+    ),
+    color-mix(
+      in srgb,
+      var(--cuenta-card-accent) 13%,
+      transparent
+    );
 
-  color: color-mix(in srgb, var(--text-strong) 82%, var(--cuenta-card-accent) 18%);
+  color:
+    color-mix(
+      in srgb,
+      var(--text-strong) 82%,
+      var(--cuenta-card-accent) 18%
+    );
 
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,.07),
     0 10px 22px color-mix(in srgb, var(--cuenta-card-accent) 12%, transparent);
-
-  display: grid;
-  place-items: center;
 
   font-size: var(--font-sm);
   font-weight: 900;
   letter-spacing: -.03em;
 }
 
-/* =========================================================
-   FEEDBACK / BANNERS
-========================================================= */
-
-.cuenta-feedback {
-  display: grid;
-  gap: var(--space-xs);
-}
-
-.cuenta-feedback-item,
-.cuenta-banner {
-  position: relative;
-
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: var(--space-sm);
-
-  padding: var(--space-sm) var(--space-md);
-
-  border: 1px solid var(--border-soft);
-  border-radius: 14px;
-
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--text-strong) 4%, transparent), transparent),
-    var(--surface-1);
-
-  color: var(--text-soft);
-
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 5%, transparent),
-    0 10px 24px color-mix(in srgb, #000 14%, transparent);
-
-  font-size: var(--font-sm);
-  line-height: 1.5;
-}
-
-.cuenta-banner {
-  display: block;
-  margin-block-end: var(--space-md);
-}
-
-.cuenta-feedback-item strong {
-  color: var(--text-strong);
-  font-weight: 900;
-  letter-spacing: .045em;
-  text-transform: uppercase;
-}
-
-.cuenta-feedback-item--error,
-.cuenta-banner--error {
-  border-color: var(--border-danger);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--danger) 7%, transparent), transparent),
-    var(--danger-bg);
-  color: var(--danger);
-}
-
-.cuenta-feedback-item--success,
-.cuenta-banner--success {
-  border-color: var(--border-success);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--success) 7%, transparent), transparent),
-    var(--success-bg);
-  color: var(--success);
-}
-
-.cuenta-banner--info {
-  border-color: var(--border-info);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--info) 7%, transparent), transparent),
-    var(--info-bg);
-  color: var(--info);
-}
 
 /* =========================================================
-   FIELDS / INPUTS
+   READONLY IDENTITY / PASSWORD / FILE INPUTS
 ========================================================= */
 
 .cuenta-profile-grid,
 .cuenta-password-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+
   gap: var(--space-sm);
 }
 
 .cuenta-field {
   display: grid;
   gap: 7px;
+
   min-inline-size: 0;
 }
 
@@ -2452,15 +1343,17 @@
 
 .cuenta-field-label {
   color: var(--form-label-color, var(--text-soft));
+
   font-size: 11px;
   font-weight: 850;
   letter-spacing: .035em;
 }
 
-.cuenta-select,
 .cuenta-field input {
   inline-size: 100%;
   min-block-size: var(--input-height);
+
+  padding-inline: 15px;
 
   border: 1px solid var(--input-border);
   border-radius: var(--radius-pill);
@@ -2483,43 +1376,118 @@
     opacity var(--duration-fast) var(--ease-standard);
 }
 
-.cuenta-field input {
-  padding-inline: 15px;
-}
-
-.cuenta-select {
-  min-inline-size: min(100%, 240px);
-  padding-inline: 15px;
-  cursor: pointer;
-}
-
-.cuenta-select:hover,
-.cuenta-field input:hover {
+.cuenta-field input:hover:not([readonly]):not(:disabled) {
   background: var(--input-bg-hover);
   border-color: var(--input-border-hover);
   box-shadow: var(--input-shadow-hover);
 }
 
-.cuenta-select:focus,
-.cuenta-field input:focus {
+.cuenta-field input:focus:not([readonly]) {
   border-color: var(--input-border-focus);
   background: var(--input-bg-focus);
   box-shadow: var(--input-shadow-focus);
 }
 
+/* readonly deja de parecer editable */
 .cuenta-field input[readonly] {
-  opacity: .86;
   cursor: default;
+
+  border-color:
+    color-mix(
+      in srgb,
+      var(--border-soft) 84%,
+      transparent
+    );
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong) 2%, transparent),
+      transparent
+    ),
+    color-mix(
+      in srgb,
+      var(--surface-elevated) 62%,
+      var(--input-bg)
+    );
+
+  color: var(--text-muted);
+
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 3%, transparent);
+
+  opacity: .92;
 }
 
-.cuenta-select:disabled,
 .cuenta-field input:disabled {
   cursor: not-allowed;
+
   opacity: var(--disabled-opacity, .68);
 }
 
+
 /* =========================================================
-   CONTROLS / SWITCH
+   FILE INPUT · AVATAR
+========================================================= */
+
+.cuenta-field input[type="file"] {
+  min-block-size: 48px;
+
+  padding: 7px 8px;
+
+  cursor: pointer;
+
+  color: var(--text-muted);
+
+  border-style: dashed;
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent) 4%, transparent),
+      transparent
+    ),
+    var(--input-bg);
+}
+
+.cuenta-field input[type="file"]::file-selector-button {
+  min-block-size: 32px;
+
+  margin-inline-end: 10px;
+  padding-inline: 12px;
+
+  border: 1px solid var(--btn-secondary-border);
+  border-radius: var(--radius-pill);
+
+  background: var(--btn-secondary-bg);
+  color: var(--btn-secondary-text);
+
+  cursor: pointer;
+
+  font-size: 11px;
+  font-weight: 850;
+
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
+}
+
+.cuenta-field input[type="file"]:hover:not(:disabled)::file-selector-button {
+  background: var(--btn-secondary-bg-hover, var(--btn-secondary-bg));
+  color: var(--text-strong);
+
+  border-color:
+    color-mix(
+      in srgb,
+      var(--btn-secondary-border) 70%,
+      var(--accent)
+    );
+}
+
+
+/* =========================================================
+   CONTROL BLOCKS
 ========================================================= */
 
 .cuenta-control-row,
@@ -2539,6 +1507,7 @@
 
 .cuenta-control-title {
   color: var(--text-strong);
+
   font-size: var(--font-md);
   line-height: 1.25;
   font-weight: 850;
@@ -2546,127 +1515,31 @@
 
 .cuenta-control-description {
   color: var(--text-dim);
+
   font-size: var(--font-sm);
   line-height: 1.48;
 }
 
-.cuenta-switch-area {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: var(--space-sm);
-}
-
-.cuenta-switch {
-  display: inline-flex;
-  cursor: pointer;
-  user-select: none;
-}
-
-.cuenta-switch.is-disabled {
-  cursor: not-allowed;
-  opacity: var(--disabled-opacity, .72);
-}
-
-.cuenta-switch-track {
-  position: relative;
-
-  display: inline-flex;
-
-  inline-size: calc(62px * var(--ui-scale, 1));
-  block-size: calc(34px * var(--ui-scale, 1));
-
-  padding: 4px;
-
-  border: 1px solid var(--switch-border, var(--border-default));
-  border-radius: var(--radius-pill);
-
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--text-strong) 4%, transparent), transparent),
-    var(--switch-bg);
-
-  box-shadow:
-    inset 0 1px 2px color-mix(in srgb, #000 20%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 4%, transparent);
-
-  transition:
-    background var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard);
-}
-
-.cuenta-switch-thumb {
-  position: absolute;
-  inset-block-start: 4px;
-  inset-inline-start: 4px;
-
-  inline-size: calc(24px * var(--ui-scale, 1));
-  block-size: calc(24px * var(--ui-scale, 1));
-
-  border-radius: var(--radius-pill);
-
-  background: var(--switch-thumb-bg, var(--text-strong));
-
-  box-shadow:
-    0 5px 12px color-mix(in srgb, #000 28%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
-
-  transition:
-    inset-inline-start var(--duration-fast) var(--ease-standard),
-    background var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard);
-}
-
-.cuenta-switch.is-checked .cuenta-switch-track {
-  background:
-    linear-gradient(180deg, color-mix(in srgb, #fff 7%, transparent), transparent),
-    color-mix(in srgb, var(--accent) 24%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 46%, transparent);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent),
-    0 0 20px color-mix(in srgb, var(--accent) 10%, transparent);
-}
-
-.cuenta-switch.is-checked .cuenta-switch-thumb {
-  inset-inline-start: calc(34px * var(--ui-scale, 1));
-  background: var(--accent);
-}
-
-.cuenta-native-control {
-  position: absolute;
-  inline-size: 1px;
-  block-size: 1px;
-  opacity: 0;
-  pointer-events: none;
-  clip-path: inset(50%);
-}
-
-.cuenta-control-state {
-  color: var(--text-dim);
-  font-size: 10px;
-  font-weight: 850;
-  letter-spacing: .055em;
-  text-transform: uppercase;
-}
-
 .cuenta-control-actions,
-.cuenta-password-actions,
-.cuenta-select-line {
+.cuenta-password-actions {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
+
   gap: var(--space-xs);
 }
 
+
 /* =========================================================
-   META LIST
+   META LIST · IDENTITY / PREFS / ACTIVITY / SESSIONS
 ========================================================= */
 
 .cuenta-meta-list {
   display: grid;
   gap: 0;
+
   margin-block-start: auto;
+
   border-top: 1px solid var(--data-table-row-border);
 }
 
@@ -2674,6 +1547,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+
   gap: var(--space-sm);
 
   min-inline-size: 0;
@@ -2692,11 +1566,19 @@
 }
 
 .cuenta-meta-row:hover {
-  background: color-mix(in srgb, var(--data-table-row-hover) 72%, transparent);
+  background:
+    color-mix(
+      in srgb,
+      var(--data-table-row-hover) 72%,
+      transparent
+    );
 }
 
 .cuenta-meta-label {
+  min-inline-size: 0;
+
   color: var(--text-dim);
+
   font-size: var(--font-sm);
   line-height: 1.3;
 }
@@ -2704,21 +1586,192 @@
 .cuenta-meta-value {
   min-inline-size: 0;
   overflow: hidden;
+
   color: var(--text-strong);
+
   font-size: var(--font-sm);
+  line-height: 1.3;
   font-weight: 750;
+
   text-align: end;
+
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.cuenta-meta-row--success .cuenta-meta-value { color: var(--success); }
-.cuenta-meta-row--warning .cuenta-meta-value { color: var(--warning); }
-.cuenta-meta-row--danger .cuenta-meta-value { color: var(--danger); }
+.cuenta-meta-row--success .cuenta-meta-value {
+  color: var(--success);
+}
+
+.cuenta-meta-row--warning .cuenta-meta-value {
+  color: var(--warning);
+}
+
+.cuenta-meta-row--danger .cuenta-meta-value {
+  color: var(--danger);
+}
+
 
 /* =========================================================
-   LOADING / STATES / SKELETON
+   SESSIONS
 ========================================================= */
+
+.cuenta-meta-row[data-cuenta-session-current="true"] {
+  position: relative;
+
+  padding-inline-start: 14px;
+
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--success) 7%, transparent),
+      transparent 44%
+    );
+}
+
+.cuenta-meta-row[data-cuenta-session-current="true"]::before {
+  content: "";
+
+  position: absolute;
+  inset-inline-start: 0;
+  inset-block: 9px;
+
+  inline-size: 3px;
+
+  border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
+
+  background: var(--success);
+
+  box-shadow:
+    0 0 12px color-mix(in srgb, var(--success) 28%, transparent);
+}
+
+.cuenta-meta-row[data-cuenta-session-current="true"] .cuenta-meta-label {
+  color:
+    color-mix(
+      in srgb,
+      var(--text-strong) 82%,
+      var(--success) 18%
+    );
+
+  font-weight: 800;
+}
+
+
+/* =========================================================
+   DANGER ZONE
+========================================================= */
+
+.cuenta-card:has(#cuenta-deactivate-btn) .cuenta-card-icon,
+.cuenta-card:has(#cuenta-deactivate-password) .cuenta-card-icon {
+  border-color:
+    color-mix(
+      in srgb,
+      var(--danger) 34%,
+      transparent
+    );
+
+  background:
+    color-mix(
+      in srgb,
+      var(--danger) 12%,
+      transparent
+    );
+
+  color:
+    color-mix(
+      in srgb,
+      var(--text-strong) 74%,
+      var(--danger) 26%
+    );
+
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.06),
+    0 10px 22px color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.cuenta-card:has(#cuenta-deactivate-btn) .cuenta-btn,
+.cuenta-card:has(#cuenta-deactivate-password) .cuenta-btn {
+  border-color:
+    color-mix(
+      in srgb,
+      var(--danger) 34%,
+      var(--btn-secondary-border)
+    );
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--danger) 8%, transparent),
+      transparent
+    ),
+    var(--btn-secondary-bg);
+
+  color:
+    color-mix(
+      in srgb,
+      var(--text-strong) 78%,
+      var(--danger) 22%
+    );
+}
+
+.cuenta-card:has(#cuenta-deactivate-btn) .cuenta-btn:hover:not(:disabled),
+.cuenta-card:has(#cuenta-deactivate-password) .cuenta-btn:hover:not(:disabled) {
+  border-color:
+    color-mix(
+      in srgb,
+      var(--danger) 54%,
+      var(--btn-secondary-border)
+    );
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--danger) 14%, transparent),
+      transparent
+    ),
+    var(--btn-secondary-bg-hover, var(--btn-secondary-bg));
+}
+
+
+/* =========================================================
+   LOADING / STATE / SKELETON
+========================================================= */
+
+@keyframes cuentaSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes cuentaSkeleton {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+.cuenta-inline-loading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  gap: var(--space-xs);
+
+  white-space: nowrap;
+}
+
+.cuenta-inline-spinner {
+  inline-size: 14px;
+  block-size: 14px;
+
+  flex: 0 0 auto;
+
+  border: 2px solid var(--loader-ring);
+  border-block-start-color: currentColor;
+  border-radius: var(--radius-pill);
+
+  animation: cuentaSpin .78s linear infinite;
+}
 
 .cuenta-state {
   position: relative;
@@ -2726,15 +1779,23 @@
 
   display: grid;
   justify-items: center;
+
   gap: var(--space-sm);
 
-  padding: var(--space-4xl) var(--space-lg) var(--space-5xl);
+  padding:
+    var(--space-4xl)
+    var(--space-lg)
+    var(--space-5xl);
 
   border: 1px solid var(--data-table-border);
   border-radius: var(--data-table-radius);
 
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--text-strong) 4%, transparent), transparent 26%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong) 4%, transparent),
+      transparent 26%
+    ),
     var(--data-table-bg);
 
   box-shadow: var(--data-table-shadow);
@@ -2744,7 +1805,9 @@
 
 .cuenta-state-title {
   margin: 0;
+
   color: var(--text-strong);
+
   font-size: var(--font-3xl);
   line-height: var(--line-tight);
   font-weight: 900;
@@ -2754,7 +1817,9 @@
 .cuenta-state-text {
   margin: 0;
   max-inline-size: 620px;
+
   color: var(--text-muted);
+
   font-size: var(--font-md);
   line-height: var(--line-relaxed);
 }
@@ -2762,7 +1827,9 @@
 .cuenta-loading-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+
   gap: clamp(10px, .9vw, 15px);
+
   inline-size: 100%;
 }
 
@@ -2778,7 +1845,11 @@
   border-radius: 18px;
 
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--text-strong) 4%, transparent), transparent),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong) 4%, transparent),
+      transparent
+    ),
     var(--card-bg);
 
   box-shadow:
@@ -2789,18 +1860,57 @@
 .cuenta-skeleton {
   position: relative;
   overflow: hidden;
+
   border-radius: var(--skeleton-radius, var(--radius-md));
+
   background: var(--skeleton-bg);
 }
 
 .cuenta-skeleton::after {
   content: "";
+
   position: absolute;
   inset: 0;
+
   transform: translateX(-100%);
-  background: linear-gradient(90deg, transparent, var(--skeleton-shine), transparent);
-  animation: cuentaSkeleton 1.2s var(--ease-standard) infinite;
+
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      var(--skeleton-shine),
+      transparent
+    );
+
+  animation:
+    cuentaSkeleton
+    1.2s
+    var(--ease-standard)
+    infinite;
 }
+
+.cuenta-skeleton--title {
+  inline-size: 62%;
+  block-size: 18px;
+}
+
+.cuenta-skeleton--line {
+  inline-size: 100%;
+  block-size: 12px;
+}
+
+.cuenta-skeleton--line-sm {
+  inline-size: 76%;
+  block-size: 12px;
+}
+
+.cuenta-skeleton--control {
+  inline-size: 100%;
+  block-size: 44px;
+
+  margin-block-start: var(--space-md);
+}
+
 
 /* =========================================================
    PANEL OVERLAY
@@ -2816,7 +1926,12 @@
 
   padding: var(--space-lg);
 
-  background: color-mix(in srgb, var(--surface-1) 76%, transparent);
+  background:
+    color-mix(
+      in srgb,
+      var(--surface-1) 76%,
+      transparent
+    );
 
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
@@ -2825,17 +1940,29 @@
 .cuenta-panel-overlay-card {
   display: grid;
   justify-items: center;
+
   gap: var(--space-sm);
 
   min-inline-size: min(100%, 260px);
 
   padding: var(--space-lg) var(--space-xl);
 
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border-soft));
+  border:
+    1px solid
+    color-mix(
+      in srgb,
+      var(--accent) 32%,
+      var(--border-soft)
+    );
+
   border-radius: 18px;
 
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--text-strong) 5%, transparent), transparent),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong) 5%, transparent),
+      transparent
+    ),
     var(--popover-bg);
 
   color: var(--text-strong);
@@ -2848,16 +1975,72 @@
   font-weight: 800;
 }
 
+.cuenta-panel-overlay-spinner {
+  inline-size: 30px;
+  block-size: 30px;
+
+  border: 3px solid var(--loader-ring);
+  border-block-start-color: var(--accent);
+  border-radius: var(--radius-pill);
+
+  animation: cuentaSpin .8s linear infinite;
+}
+
+
+/* =========================================================
+   STATE ATTRS
+========================================================= */
+
+.cuenta-view[data-cuenta-loading="true"] .cuenta-hero {
+  cursor: progress;
+}
+
+.cuenta-view[data-cuenta-saving="true"] .cuenta-card,
+.cuenta-panel[data-cuenta-busy="true"] .cuenta-card {
+  pointer-events: none;
+}
+
+.cuenta-panel[data-cuenta-busy="true"] {
+  min-block-size: 360px;
+}
+
+.cuenta-view[data-cuenta-auth-refresh-required="true"] .cuenta-command-strip {
+  --cuenta-stat-color: var(--cuenta-amber);
+  --cuenta-stat-color-2: var(--cuenta-orange);
+}
+
+.cuenta-view[data-cuenta-deactivated="true"] .cuenta-command-strip {
+  --cuenta-stat-color: var(--cuenta-red);
+  --cuenta-stat-color-2: var(--cuenta-rose);
+}
+
+
 /* =========================================================
    LIGHT
 ========================================================= */
 
 [data-theme="light"] .cuenta-command-strip {
   background:
-    radial-gradient(circle at 84% -4%, color-mix(in srgb, var(--cuenta-stat-color-2) 22%, transparent), transparent 36%),
-    radial-gradient(circle at 0% 100%, color-mix(in srgb, var(--cuenta-stat-color) 13%, transparent), transparent 44%),
-    linear-gradient(135deg, color-mix(in srgb, var(--cuenta-stat-color) 8%, transparent), color-mix(in srgb, var(--cuenta-stat-color-2) 4%, transparent)),
-    linear-gradient(180deg, rgba(255,255,255,.96), rgba(246,248,252,.92));
+    radial-gradient(
+      circle at 84% -4%,
+      color-mix(in srgb, var(--cuenta-stat-color-2) 22%, transparent),
+      transparent 36%
+    ),
+    radial-gradient(
+      circle at 0% 100%,
+      color-mix(in srgb, var(--cuenta-stat-color) 13%, transparent),
+      transparent 44%
+    ),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--cuenta-stat-color) 8%, transparent),
+      color-mix(in srgb, var(--cuenta-stat-color-2) 4%, transparent)
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.96),
+      rgba(246,248,252,.92)
+    );
 }
 
 [data-theme="light"] .cuenta-account-name,
@@ -2872,14 +2055,41 @@
 }
 
 [data-theme="light"] .cuenta-mini-stat {
-  border-color: color-mix(in srgb, var(--border-default) 88%, transparent);
+  border-color:
+    color-mix(
+      in srgb,
+      var(--border-default) 88%,
+      transparent
+    );
+
   background:
-    linear-gradient(180deg, rgba(255,255,255,.88), rgba(255,255,255,.56)),
-    color-mix(in srgb, var(--surface-1) 86%, transparent);
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.88),
+      rgba(255,255,255,.56)
+    ),
+    color-mix(
+      in srgb,
+      var(--surface-1) 86%,
+      transparent
+    );
 }
 
+[data-theme="light"] .cuenta-field input[readonly] {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.72),
+      rgba(255,255,255,.44)
+    ),
+    var(--input-bg);
+
+  color: var(--text-muted);
+}
+
+
 /* =========================================================
-   RESPONSIVE · MISMO RITMO QUE INCIDENCIAS
+   RESPONSIVE · CONTAINER
 ========================================================= */
 
 @container (max-width: 1180px) {
@@ -2929,7 +2139,6 @@
   }
 
   .cuenta-hero-actions,
-  .cuenta-select-line,
   .cuenta-control-actions,
   .cuenta-password-actions,
   .cuenta-account-stats {
@@ -2937,7 +2146,6 @@
   }
 
   .cuenta-btn,
-  .cuenta-select,
   .cuenta-mini-stat {
     inline-size: 100%;
   }
@@ -2948,6 +2156,7 @@
 
   .cuenta-account-stats {
     grid-column: 1 / -1;
+
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2977,6 +2186,7 @@
   .cuenta-meta-row {
     align-items: flex-start;
     flex-direction: column;
+
     gap: var(--space-2xs);
   }
 
@@ -3001,6 +2211,7 @@
   .cuenta-command-strip {
     grid-template-columns: 1fr;
     justify-items: start;
+
     padding: var(--space-sm);
   }
 
@@ -3011,6 +2222,7 @@
   .cuenta-card-icon {
     inline-size: 38px;
     block-size: 38px;
+
     border-radius: var(--radius-md);
   }
 
@@ -3018,6 +2230,7 @@
   .cuenta-hero-meta {
     display: grid;
     grid-template-columns: 1fr;
+
     inline-size: 100%;
   }
 
@@ -3027,7 +2240,11 @@
   }
 }
 
-/* Fallback viewport para navegadores sin container queries */
+
+/* =========================================================
+   RESPONSIVE · VIEWPORT FALLBACK
+========================================================= */
+
 @media (max-width: 1180px) {
   .cuenta-hero-top,
   .cuenta-command-strip {
@@ -3058,3 +2275,67 @@
   }
 }
 
+
+/* =========================================================
+   REDUCED MOTION
+========================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  .cuenta-view *,
+  .cuenta-view *::before,
+  .cuenta-view *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+
+/* =========================================================
+   FORCED COLORS
+========================================================= */
+
+@media (forced-colors: active) {
+  .cuenta-btn,
+  .cuenta-card,
+  .cuenta-panel,
+  .cuenta-state,
+  .cuenta-feedback-item,
+  .cuenta-banner,
+  .cuenta-command-strip {
+    border: 1px solid CanvasText;
+  }
+
+  .cuenta-btn:focus-visible,
+  .cuenta-field input:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+}
+
+
+/* =========================================================
+   PRINT
+========================================================= */
+
+@media print {
+  .cuenta-hero-actions,
+  .cuenta-control-actions,
+  .cuenta-password-actions,
+  .cuenta-panel-overlay,
+  .cuenta-field input[type="file"] {
+    display: none !important;
+  }
+
+  .cuenta-panel,
+  .cuenta-state,
+  .cuenta-card,
+  .cuenta-command-strip {
+    box-shadow: none !important;
+    background: transparent !important;
+  }
+
+  .cuenta-cards-grid {
+    grid-template-columns: 1fr;
+  }
+}

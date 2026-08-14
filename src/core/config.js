@@ -24,16 +24,17 @@
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
-export const CONFIG_VERSION = "core.config.production.v3-reset-contract";
+export const CONFIG_VERSION = "core.config.production.v4-same-origin-api";
 
 /* =========================================================
    CONSTANTES BASE
 ========================================================= */
 
-export const CANONICAL_PRODUCTION_API_BASE = "https://api.onionit.net";
+export const CANONICAL_PRODUCTION_API_BASE = "https://www.onionsupport.com";
 
 export const CANONICAL_BACKEND_API_ORIGINS = Object.freeze([
   CANONICAL_PRODUCTION_API_BASE,
+  "https://api.onionit.net",
 ]);
 
 export const CANONICAL_FRONTEND_ORIGINS = Object.freeze([

@@ -34,7 +34,7 @@ import {
 } from "../../core/config.js";
 
 export const AUTH_VERSION =
-  "auth.minimal.v6.1-first-hotfix";
+  "auth.minimal.v6.2-user-envelope-hotfix";
 
 const ROOT_PATH = "/";
 
@@ -1326,17 +1326,136 @@ function looksLikeUser(
     return false;
   }
 
+  /*
+    IMPORTANTE:
+    Un envelope de Auth puede exponer role / roles / slug en raíz y,
+    simultáneamente, contener el usuario real dentro de user/currentUser.
+
+    Si existe un contenedor explícito de usuario, este objeto NO debe
+    clasificarse como usuario por sus campos derivados de sesión/routing.
+  */
+  const hasEmbeddedUser =
+    isObject(
+      value.user
+    ) ||
+    isObject(
+      value.currentUser
+    ) ||
+    isObject(
+      value.usuario
+    ) ||
+    isObject(
+      value.me
+    ) ||
+    isObject(
+      value.account
+    );
+
+  if (
+    hasEmbeddedUser
+  ) {
+    return false;
+  }
+
+  /*
+    Identidad fuerte:
+    cualquiera de estos campos identifica de forma razonable a una cuenta
+    aunque el payload directo no incluya todos los campos de presentación.
+  */
+  const strongIdentity =
+    cleanText(
+      first(
+        value.id,
+        value.userId,
+        value.uid,
+        value.sub,
+        value.username,
+        value.userName,
+        value.user_name,
+        value.email,
+        value.emailLower,
+        value.email_lower,
+        value.lookup?.emailLower,
+        value.lookup?.email_lower,
+        ""
+      ),
+      ""
+    );
+
+  if (
+    strongIdentity
+  ) {
+    return true;
+  }
+
+  const slug =
+    cleanText(
+      first(
+        value.slug,
+        value.lookup?.slug,
+        value.profile?.slug,
+        value.routing?.slug,
+        ""
+      ),
+      ""
+    );
+
+  const displayName =
+    cleanText(
+      first(
+        value.displayName,
+        value.fullName,
+        value.name,
+        value.nombre,
+        value.profile?.displayName,
+        value.profile?.publicName,
+        value.profile?.name,
+        ""
+      ),
+      ""
+    );
+
+  const role =
+    normalizeRole(
+      first(
+        value.role,
+        value.rol,
+        value.roles,
+        ""
+      )
+    );
+
+  const hasAccountSignals =
+    value.active !== undefined ||
+    value.enabled !== undefined ||
+    value.disabled !== undefined ||
+    value.status !== undefined ||
+    value.estado !== undefined ||
+    value.permissions !== undefined ||
+    value.permisos !== undefined ||
+    value.clienteId !== undefined ||
+    value.tenantId !== undefined;
+
+  /*
+    role/roles NO bastan por sí solos.
+    slug o nombre sí pueden completar una forma de usuario cuando aparecen
+    junto a señales propias de cuenta.
+  */
   return Boolean(
-    value.id ||
-    value.userId ||
-    value.username ||
-    value.slug ||
-    value.lookup?.slug ||
-    value.profile?.slug ||
-    value.role ||
-    value.rol ||
-    Array.isArray(
-      value.roles
+    (
+      slug &&
+      (
+        role ||
+        displayName ||
+        hasAccountSignals
+      )
+    ) ||
+    (
+      displayName &&
+      (
+        role ||
+        hasAccountSignals
+      )
     )
   );
 }
@@ -1391,14 +1510,20 @@ function extractUser(
   payload = {}
 ) {
   if (
-    looksLikeUser(
-      payload
-    )
+    !isObject(payload)
   ) {
-    return payload;
+    return null;
   }
 
-  const user =
+  /*
+    PRIORIDAD CANÓNICA:
+    primero extraemos el usuario explícito del envelope.
+
+    Esto es crítico para los contratos productivos de Onion Support:
+    login / me / refresh pueden tener role, roles, slug, routing, etc.
+    también en el nivel superior, pero el perfil autoritativo está en user.
+  */
+  const explicitUser =
     pick(
       payload,
       [
@@ -1407,14 +1532,49 @@ function extractUser(
         "usuario",
         "me",
         "account",
+      ]
+    );
+
+  if (
+    looksLikeUser(
+      explicitUser
+    )
+  ) {
+    return explicitUser;
+  }
+
+  /*
+    Compatibilidad:
+    algunos contratos legacy pueden exponer un objeto profile como usuario.
+    Sólo lo aceptamos si realmente tiene forma de usuario; no por existir.
+  */
+  const profileUser =
+    pick(
+      payload,
+      [
         "profile",
       ]
     );
 
+  if (
+    looksLikeUser(
+      profileUser
+    )
+  ) {
+    return profileUser;
+  }
+
+  /*
+    Último fallback:
+    soporta respuestas donde el propio payload ES el usuario.
+
+    Se evalúa al final para impedir que un envelope con role/roles/slugs
+    derivados eclipse a payload.user.
+  */
   return looksLikeUser(
-    user
+    payload
   )
-    ? user
+    ? payload
     : null;
 }
 

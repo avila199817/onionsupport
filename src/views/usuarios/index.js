@@ -2,18 +2,20 @@
    Onion Support - Usuarios Index
    Archivo: /src/views/usuarios/index.js
 
-   PRODUCTIVO · CONTROLADOR PURO · API BOUNDARY · V3
+   PRODUCTIVO · CONTROLADOR SPA · API BOUNDARY · V6
 
    Responsabilidad:
-   - Controlar la vista /usuarios y su ciclo SPA.
-   - Delegar TODA la red/cache/modelo a usuarios.api.js. 
+   - Controlar exclusivamente la vista /usuarios.
+   - Delegar HTTP, cache y normalización a usuarios.api.js.
+   - Delegar HTML a usuarios.template.js.
    - Mantener sólo estado de presentación:
-     búsqueda, filtro, visibleLimit y modales.
-   - Sin Http/fetch/localStorage/continuation tokens propios.
-   - Sin fallback de métodos ni segunda API paralela.
+     búsqueda, filtro, visibleLimit y estado de modales.
+   - Mantener un único controlador activo por host/global.
+   - Evitar listeners duplicados en mounts repetidos.
+   - Proteger el host frente a destroy de controladores obsoletos.
+   - Mantener compatibilidad con bridges/exports legacy.
    - No saltarse la validación del modal de creación.
-   - Deduplicar los múltiples eventos compatibles de create success.
-   - Mantener bridge/exports legacy de Usuarios.
+   - Sin fetch/Http/localStorage propios.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -22,9 +24,8 @@ import {
   renderUsuariosTableTemplate,
   renderHeader,
   renderTable,
-  renderLoadingState,
-  renderErrorState,
-  renderAccessDeniedState,
+  USUARIOS_ACTIONS,
+  USUARIOS_DEFAULT_VISIBLE_ROWS,
 } from "./usuarios.template.js";
 
 import UsuariosCreateModal from "./usuarios.template.create.js";
@@ -53,7 +54,6 @@ import {
   loadUsuarios as loadUsuariosApi,
   listUsuarios as listUsuariosApi,
   loadUsuarioDetail as loadUsuarioDetailApi,
-  getUsuarioById as getUsuarioByIdApiRequest,
   createUsuario as createUsuarioApiRequest,
   updateUsuario as updateUsuarioApiRequest,
   deleteUsuario as deleteUsuarioApiRequest,
@@ -76,7 +76,7 @@ import {
 } from "./usuarios.api.js";
 
 /* =========================================================
-   META / COMPAT CONSTANTS
+   META / CONSTANTS
 ========================================================= */
 
 export const USUARIOS_MODULE_NAME = "usuarios";
@@ -84,7 +84,7 @@ export const USUARIOS_VIEW_NAME = "UsuariosView";
 export const USUARIOS_CANONICAL_PATH = "/usuarios";
 
 export const USUARIOS_INDEX_VERSION =
-  "usuarios.index.api-boundary.v5.backend-contract-v3";
+  "usuarios.index.api-boundary.v6.template-contract-v20";
 
 export const USUARIOS_VIEW_VERSION = USUARIOS_INDEX_VERSION;
 export const USUARIOS_MODULE_VERSION = USUARIOS_INDEX_VERSION;
@@ -102,7 +102,18 @@ export {
   USUARIOS_MAX_PAGES,
 };
 
-const DEFAULT_VISIBLE_ROWS = 20;
+const DEFAULT_VISIBLE_ROWS =
+  Number.isFinite(Number(USUARIOS_DEFAULT_VISIBLE_ROWS))
+    ? Number(USUARIOS_DEFAULT_VISIBLE_ROWS)
+    : 20;
+
+const MAX_VISIBLE_ROWS = Math.max(
+  DEFAULT_VISIBLE_ROWS,
+  Number.isFinite(Number(USUARIOS_MAX_LIMIT))
+    ? Number(USUARIOS_MAX_LIMIT)
+    : 500
+);
+
 const SEARCH_DEBOUNCE_MS = 220;
 
 const USUARIOS_CONTROLLER_KEY = Symbol.for(
@@ -113,15 +124,39 @@ const USUARIOS_GLOBAL_CONTROLLER_KEY = Symbol.for(
   "onion.support.usuarios.active-controller"
 );
 
-const DETAIL_ACTION = "detail";
-const CREATE_ACTION = "create";
-const REFRESH_ACTION = "refresh";
-const RETRY_ACTION = "retry";
-const EXPORT_ACTION = "export";
-const FILTER_ACTION = "filter";
-const CLEAR_SEARCH_ACTION = "clear-search";
-const CLEAR_FILTERS_ACTION = "clear-filters";
-const LOAD_MORE_ACTION = "load-more";
+const ACTIONS = Object.freeze({
+  DETAIL: USUARIOS_ACTIONS?.DETAIL || "detail",
+  CREATE: USUARIOS_ACTIONS?.CREATE || "create",
+  REFRESH: USUARIOS_ACTIONS?.REFRESH || "refresh",
+  RETRY: USUARIOS_ACTIONS?.RETRY || "retry",
+  EXPORT: USUARIOS_ACTIONS?.EXPORT || "export",
+  FILTER: USUARIOS_ACTIONS?.FILTER || "filter",
+  CLEAR_SEARCH: USUARIOS_ACTIONS?.CLEAR_SEARCH || "clear-search",
+  CLEAR_FILTERS: USUARIOS_ACTIONS?.CLEAR_FILTERS || "clear-filters",
+  LOAD_MORE: USUARIOS_ACTIONS?.LOAD_MORE || "load-more",
+});
+
+const ACTION_ALIASES = Object.freeze({
+  detail: ACTIONS.DETAIL,
+  open_user: ACTIONS.DETAIL,
+
+  create: ACTIONS.CREATE,
+  create_user: ACTIONS.CREATE,
+
+  refresh: ACTIONS.REFRESH,
+  retry: ACTIONS.RETRY,
+
+  export: ACTIONS.EXPORT,
+  export_csv: ACTIONS.EXPORT,
+
+  filter: ACTIONS.FILTER,
+  filter_usuarios: ACTIONS.FILTER,
+
+  clear_search: ACTIONS.CLEAR_SEARCH,
+  clear_filters: ACTIONS.CLEAR_FILTERS,
+
+  load_more: ACTIONS.LOAD_MORE,
+});
 
 const CREATE_SUCCESS_EVENTS = Object.freeze([
   "usuarios:create:success",
@@ -200,25 +235,9 @@ function cleanText(value = "", fallback = "") {
 function first(...values) {
   for (const value of values) {
     if (value === null || value === undefined) continue;
-    if (
-      typeof value === "string" &&
-      value.trim() === ""
-    ) {
-      continue;
-    }
-    if (
-      Array.isArray(value) &&
-      value.length === 0
-    ) {
-      continue;
-    }
-    if (
-      isObject(value) &&
-      Object.keys(value).length === 0
-    ) {
-      continue;
-    }
-
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    if (isObject(value) && Object.keys(value).length === 0) continue;
     return value;
   }
 
@@ -226,18 +245,12 @@ function first(...values) {
 }
 
 function number(value = 0, fallback = 0) {
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
-  ) {
+  if (value === null || value === undefined || value === "") {
     return fallback;
   }
 
   const parsed = Number(value);
-  return Number.isFinite(parsed)
-    ? parsed
-    : fallback;
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function clamp(value = 0, min = 0, max = 1) {
@@ -265,6 +278,11 @@ function normalizeSearch(value = "") {
     .replace(/[^a-z0-9@._+\-\s]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function normalizeAction(value = "") {
+  const key = normalizeKey(value);
+  return ACTION_ALIASES[key] || "";
 }
 
 function safeError(
@@ -354,7 +372,7 @@ async function safeAsyncCall(
     const fn = target?.[method];
 
     if (isFunction(fn)) {
-      return fn.apply(
+      return await fn.apply(
         target,
         safeArray(args)
       );
@@ -370,11 +388,7 @@ async function safeAsyncCall(
 
 function getAppState() {
   try {
-    return (
-      AppCore.getState?.() ||
-      AppCore.state ||
-      {}
-    );
+    return AppCore.getState?.() || AppCore.state || {};
   } catch {
     return AppCore.state || {};
   }
@@ -391,11 +405,7 @@ function getCurrentUser() {
       null
     );
   } catch {
-    return (
-      state.user ||
-      state.currentUser ||
-      null
-    );
+    return state.user || state.currentUser || null;
   }
 }
 
@@ -405,10 +415,7 @@ function normalizeRole(value = "") {
       .map(normalizeRole)
       .filter(Boolean);
 
-    if (roles.includes("admin")) {
-      return "admin";
-    }
-
+    if (roles.includes("admin")) return "admin";
     return roles[0] || "";
   }
 
@@ -433,10 +440,7 @@ function normalizeRole(value = "") {
 
 function getCurrentRole(context = {}) {
   const state = getAppState();
-  const user = safeObject(
-    getCurrentUser(),
-    {}
-  );
+  const user = safeObject(getCurrentUser(), {});
 
   return (
     normalizeRole(
@@ -474,14 +478,10 @@ function normalizePathname(path = "/") {
     value = `/${value}`;
   }
 
-  value =
-    value.split("?")[0].split("#")[0] ||
-    "/";
+  value = value.split("?")[0].split("#")[0] || "/";
 
   if (value.length > 1) {
-    value =
-      value.replace(/\/+$/g, "") ||
-      "/";
+    value = value.replace(/\/+$/g, "") || "/";
   }
 
   const segments = value
@@ -489,9 +489,7 @@ function normalizePathname(path = "/") {
     .filter(Boolean);
 
   if (segments[0]?.startsWith("@")) {
-    value =
-      `/${segments.slice(1).join("/")}` ||
-      "/";
+    value = `/${segments.slice(1).join("/")}` || "/";
   }
 
   return value;
@@ -501,19 +499,14 @@ function getBrowserPath() {
   if (!isBrowser()) return "";
 
   try {
-    const hash =
-      window.location.hash || "";
+    const hash = window.location.hash || "";
 
     if (hash.startsWith("#/")) {
-      return normalizePathname(
-        hash.slice(1)
-      );
+      return normalizePathname(hash.slice(1));
     }
 
     if (hash.startsWith("#!/")) {
-      return normalizePathname(
-        hash.slice(2)
-      );
+      return normalizePathname(hash.slice(2));
     }
 
     return normalizePathname(
@@ -543,52 +536,32 @@ function routePathFromContext(context = {}) {
 }
 
 function isUsuariosRoute(context = {}) {
-  const explicit =
-    routePathFromContext(context);
+  const explicit = routePathFromContext(context);
 
   if (explicit) {
-    return (
-      normalizePathname(explicit) ===
-      USUARIOS_CANONICAL_PATH
-    );
+    return normalizePathname(explicit) === USUARIOS_CANONICAL_PATH;
   }
 
   const browserPath = getBrowserPath();
 
   if (browserPath) {
-    return (
-      browserPath ===
-      USUARIOS_CANONICAL_PATH
-    );
+    return browserPath === USUARIOS_CANONICAL_PATH;
   }
 
   return true;
 }
 
-function resolveHost(
-  host = null,
-  context = {}
-) {
+function resolveHost(host = null, context = {}) {
   if (host?.nodeType === 1) return host;
-  if (context.host?.nodeType === 1) {
-    return context.host;
-  }
-  if (context.root?.nodeType === 1) {
-    return context.root;
-  }
-  if (context.container?.nodeType === 1) {
-    return context.container;
-  }
+  if (context.host?.nodeType === 1) return context.host;
+  if (context.root?.nodeType === 1) return context.root;
+  if (context.container?.nodeType === 1) return context.container;
 
   if (!isBrowser()) return null;
 
   return (
-    document.querySelector(
-      "[data-view-host='usuarios']"
-    ) ||
-    document.querySelector(
-      "[data-usuarios-host='true']"
-    ) ||
+    document.querySelector("[data-view-host='usuarios']") ||
+    document.querySelector("[data-usuarios-host='true']") ||
     document.querySelector("#app-content") ||
     document.querySelector("main") ||
     null
@@ -599,10 +572,7 @@ function resolveHost(
    TOAST / EVENTS
 ========================================================= */
 
-function showToast(
-  message = "",
-  type = "info"
-) {
+function showToast(message = "", type = "info") {
   const text = cleanText(message, "");
   if (!text) return false;
 
@@ -624,17 +594,14 @@ function showToast(
         return true;
       }
     } catch {
-      // continue
+      // siguiente candidato
     }
   }
 
   return false;
 }
 
-function subscribeEvent(
-  eventName = "",
-  handler = null
-) {
+function subscribeEvent(eventName = "", handler = null) {
   const name = cleanText(eventName, "");
 
   if (!name || !isFunction(handler)) {
@@ -655,10 +622,7 @@ function subscribeEvent(
 
   try {
     if (isBrowser()) {
-      window.addEventListener(
-        name,
-        handler
-      );
+      window.addEventListener(name, handler);
       windowBound = true;
     }
   } catch {
@@ -667,28 +631,16 @@ function subscribeEvent(
 
   return () => {
     try {
-      if (
-        appBound &&
-        isFunction(AppCore?.events?.off)
-      ) {
-        AppCore.events.off(
-          name,
-          handler
-        );
+      if (appBound && isFunction(AppCore?.events?.off)) {
+        AppCore.events.off(name, handler);
       }
     } catch {
       // noop
     }
 
     try {
-      if (
-        windowBound &&
-        isBrowser()
-      ) {
-        window.removeEventListener(
-          name,
-          handler
-        );
+      if (windowBound && isBrowser()) {
+        window.removeEventListener(name, handler);
       }
     } catch {
       // noop
@@ -696,29 +648,15 @@ function subscribeEvent(
   };
 }
 
-function emitEvent(
-  eventName = "",
-  payload = {}
-) {
-  const name = cleanText(
-    eventName,
-    ""
-  );
-
+function emitEvent(eventName = "", payload = {}) {
+  const name = cleanText(eventName, "");
   if (!name) return false;
 
   let emitted = false;
 
   try {
-    if (
-      isFunction(
-        AppCore?.events?.emit
-      )
-    ) {
-      AppCore.events.emit(
-        name,
-        payload
-      );
+    if (isFunction(AppCore?.events?.emit)) {
+      AppCore.events.emit(name, payload);
       emitted = true;
     }
   } catch {
@@ -732,7 +670,6 @@ function emitEvent(
           detail: payload,
         })
       );
-
       emitted = true;
     }
   } catch {
@@ -757,8 +694,8 @@ function eventPayload(event = null) {
 }
 
 /* =========================================================
-   CANONICAL UI READERS
-   El modelo ya viene normalizado por usuarios.api.js.
+   UI READERS
+   El modelo canónico sigue perteneciendo a usuarios.api.js.
 ========================================================= */
 
 function getUsuarioId(item = {}) {
@@ -852,12 +789,9 @@ function getUsuarioStatus(item = {}) {
 }
 
 function statusBucket(item = {}) {
-  const status =
-    getUsuarioStatus(item);
+  const status = getUsuarioStatus(item);
 
-  if (status === "pending") {
-    return "pending";
-  }
+  if (status === "pending") return "pending";
 
   if (
     status === "blocked" ||
@@ -896,37 +830,28 @@ function filterUsuarios(
     search = "",
   } = {}
 ) {
-  const normalizedFilter =
-    normalizeKey(filter || "all");
+  const normalizedFilter = normalizeKey(filter || "all");
 
-  const terms = normalizeSearch(
-    search
-  )
+  const terms = normalizeSearch(search)
     .split(" ")
     .filter(Boolean);
 
-  return safeArray(items).filter(
-    (item) => {
-      if (
-        normalizedFilter !== "all" &&
-        statusBucket(item) !==
-          normalizedFilter
-      ) {
-        return false;
-      }
-
-      if (!terms.length) {
-        return true;
-      }
-
-      const haystack =
-        usuarioSearchText(item);
-
-      return terms.every((term) =>
-        haystack.includes(term)
-      );
+  return safeArray(items).filter((item) => {
+    if (
+      normalizedFilter !== "all" &&
+      statusBucket(item) !== normalizedFilter
+    ) {
+      return false;
     }
-  );
+
+    if (!terms.length) return true;
+
+    const haystack = usuarioSearchText(item);
+
+    return terms.every((term) =>
+      haystack.includes(term)
+    );
+  });
 }
 
 /* =========================================================
@@ -934,78 +859,51 @@ function filterUsuarios(
    Ninguno implementa HTTP propio.
 ========================================================= */
 
-export const fetchUsuariosRequest = (
-  options = {}
-) => fetchUsuariosRequestApi(options);
+export const fetchUsuariosRequest = (options = {}) =>
+  fetchUsuariosRequestApi(options);
 
 export const getUsuarioByIdRequest = (
   id = "",
   options = {}
 ) =>
-  getUsuarioByIdRequestApi(
-    id,
-    options
-  );
+  getUsuarioByIdRequestApi(id, options);
 
 export const createUsuarioRequest = (
   payload = {},
   options = {}
 ) =>
-  createUsuarioRequestApi(
-    payload,
-    options
-  );
+  createUsuarioRequestApi(payload, options);
 
 export const updateUsuarioRequest = (
   id = "",
   payload = {},
   options = {}
 ) =>
-  updateUsuarioRequestApi(
-    id,
-    payload,
-    options
-  );
+  updateUsuarioRequestApi(id, payload, options);
 
 export const deleteUsuarioRequest = (
   id = "",
   options = {}
 ) =>
-  deleteUsuarioRequestApi(
-    id,
-    options
-  );
+  deleteUsuarioRequestApi(id, options);
 
-export const hydrateFromCache = (
-  options = {}
-) =>
+export const hydrateFromCache = (options = {}) =>
   hydrateFromCacheApi(options);
 
-export const hydrateUsuariosFromCache = (
-  options = {}
-) =>
-  hydrateUsuariosFromCacheApi(
-    options
-  );
+export const hydrateUsuariosFromCache = (options = {}) =>
+  hydrateUsuariosFromCacheApi(options);
 
-export const loadUsuarios = (
-  options = {}
-) =>
+export const loadUsuarios = (options = {}) =>
   loadUsuariosApi(options);
 
-export const listUsuarios = (
-  options = {}
-) =>
+export const listUsuarios = (options = {}) =>
   listUsuariosApi(options);
 
 export const loadUsuarioDetail = (
   id = "",
   options = {}
 ) =>
-  loadUsuarioDetailApi(
-    id,
-    options
-  );
+  loadUsuarioDetailApi(id, options);
 
 export const getUsuarioByIdApi =
   loadUsuarioDetail;
@@ -1014,46 +912,33 @@ export const createUsuarioApi = (
   payload = {},
   options = {}
 ) =>
-  createUsuarioApiRequest(
-    payload,
-    options
-  );
+  createUsuarioApiRequest(payload, options);
 
 export const updateUsuarioApi = (
   id = "",
   payload = {},
   options = {}
 ) =>
-  updateUsuarioApiRequest(
-    id,
-    payload,
-    options
-  );
+  updateUsuarioApiRequest(id, payload, options);
 
 export const deleteUsuarioApi = (
   id = "",
   options = {}
 ) =>
-  deleteUsuarioApiRequest(
-    id,
-    options
-  );
+  deleteUsuarioApiRequest(id, options);
 
 /* =========================================================
    CSV
 ========================================================= */
 
 function csvSafeCell(value = "") {
-  let text = String(
-    value ?? ""
-  )
+  let text = String(value ?? "")
     .replace(/[\r\n]+/g, " ")
     .replace(/\t/g, " ")
     .trim();
 
   /*
     Evita CSV/Formula Injection al abrir con Excel/LibreOffice.
-    Se preserva el contenido visible prefijándolo con apostrofe.
   */
   if (/^[=+\-@]/.test(text)) {
     text = `'${text}`;
@@ -1063,18 +948,11 @@ function csvSafeCell(value = "") {
 }
 
 function csvEscape(value = "") {
-  const text =
-    csvSafeCell(value);
-
-  return `"${text.replace(
-    /"/g,
-    '""'
-  )}"`;
+  const text = csvSafeCell(value);
+  return `"${text.replace(/"/g, '""')}"`;
 }
 
-function buildUsuariosCsv(
-  items = []
-) {
+function buildUsuariosCsv(items = []) {
   const header = [
     "ID",
     "Nombre",
@@ -1085,23 +963,19 @@ function buildUsuariosCsv(
     "Estado",
   ];
 
-  const rows = safeArray(items).map(
-    (item) => [
-      getUsuarioId(item),
-      getUsuarioName(item),
-      getUsuarioEmail(item),
-      getUsuarioPhone(item),
-      getUsuarioCity(item),
-      getUsuarioRole(item),
-      getUsuarioStatus(item),
-    ]
-  );
+  const rows = safeArray(items).map((item) => [
+    getUsuarioId(item),
+    getUsuarioName(item),
+    getUsuarioEmail(item),
+    getUsuarioPhone(item),
+    getUsuarioCity(item),
+    getUsuarioRole(item),
+    getUsuarioStatus(item),
+  ]);
 
   return [header, ...rows]
     .map((row) =>
-      row
-        .map(csvEscape)
-        .join(";")
+      row.map(csvEscape).join(";")
     )
     .join("\r\n");
 }
@@ -1122,23 +996,15 @@ function downloadTextFile(
       { type }
     );
 
-    const url =
-      URL.createObjectURL(blob);
-
-    const anchor =
-      document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
 
     anchor.href = url;
-    anchor.download = cleanText(
-      filename,
-      "usuarios.csv"
-    );
+    anchor.download = cleanText(filename, "usuarios.csv");
     anchor.rel = "noopener";
     anchor.hidden = true;
 
-    document.body.appendChild(
-      anchor
-    );
+    document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
 
@@ -1161,15 +1027,8 @@ function createUsuariosController(
   rawHost = null,
   rawContext = {}
 ) {
-  const context = safeObject(
-    rawContext,
-    {}
-  );
-
-  const host = resolveHost(
-    rawHost,
-    context
-  );
+  const context = safeObject(rawContext, {});
+  const host = resolveHost(rawHost, context);
 
   const ownerId =
     `${USUARIOS_VIEW_VERSION}:${++controllerSequence}`;
@@ -1193,8 +1052,7 @@ function createUsuariosController(
   let filter = "all";
   let search = "";
   let searchDraft = "";
-  let visibleLimit =
-    DEFAULT_VISIBLE_ROWS;
+  let visibleLimit = DEFAULT_VISIBLE_ROWS;
 
   let loadSequence = 0;
   let renderFrame = 0;
@@ -1207,39 +1065,42 @@ function createUsuariosController(
   let hostInputHandler = null;
   let hostKeydownHandler = null;
 
+  let eventsBound = false;
   const unsubscribers = [];
-
-  function isAlive() {
-    return (
-      !destroyed &&
-      mounted &&
-      Boolean(host?.isConnected)
-    );
-  }
 
   function isRouteActive() {
     return isUsuariosRoute(context);
   }
 
-  function syncFromApiSnapshot(
-    fallbackItems = null
-  ) {
-    const snapshot =
-      getUsuariosApiStoreSnapshot();
+  function ownsHost(controller = null) {
+    return Boolean(
+      host &&
+      controller &&
+      host[USUARIOS_CONTROLLER_KEY] === controller
+    );
+  }
 
-    const snapshotItems =
-      safeArray(snapshot?.items);
+  function ownsGlobal(controller = null) {
+    const root = getGlobalObject();
+
+    return Boolean(
+      controller &&
+      root?.[USUARIOS_GLOBAL_CONTROLLER_KEY] === controller
+    );
+  }
+
+  function syncFromApiSnapshot(fallbackItems = null) {
+    const snapshot = getUsuariosApiStoreSnapshot();
+    const snapshotItems = safeArray(snapshot?.items);
 
     const sourceItems =
-      snapshotItems.length ||
-      fallbackItems === null
+      snapshotItems.length > 0
         ? snapshotItems
-        : safeArray(fallbackItems);
+        : fallbackItems === null
+          ? snapshotItems
+          : safeArray(fallbackItems);
 
-    items =
-      normalizeUsuariosCollection(
-        sourceItems
-      );
+    items = normalizeUsuariosCollection(sourceItems);
 
     remoteCount = Math.max(
       items.length,
@@ -1261,10 +1122,7 @@ function createUsuariosController(
     nextItems = [],
     meta = {}
   ) {
-    items =
-      normalizeUsuariosCollection(
-        nextItems
-      );
+    items = normalizeUsuariosCollection(nextItems);
 
     remoteCount = Math.max(
       items.length,
@@ -1293,8 +1151,7 @@ function createUsuariosController(
   function selectFilteredItems() {
     return filterUsuarios(items, {
       filter,
-      search:
-        searchDraft || search,
+      search: searchDraft || search,
     });
   }
 
@@ -1304,16 +1161,14 @@ function createUsuariosController(
     visibleLimit = clamp(
       value,
       1,
-      500
+      MAX_VISIBLE_ROWS
     );
 
     return visibleLimit;
   }
 
   function resetVisibleLimit() {
-    visibleLimit =
-      DEFAULT_VISIBLE_ROWS;
-
+    visibleLimit = DEFAULT_VISIBLE_ROWS;
     return visibleLimit;
   }
 
@@ -1384,22 +1239,18 @@ function createUsuariosController(
       activeFilter: filter,
       statusFilter: filter,
 
-      search:
-        searchDraft || search,
-      searchQuery:
-        searchDraft || search,
+      search: searchDraft || search,
+      searchQuery: searchDraft || search,
 
       visibleLimit,
-      usuariosVisibleLimit:
-        visibleLimit,
+      usuariosVisibleLimit: visibleLimit,
 
       page: 1,
       currentPage: 1,
       usuariosPage: 1,
 
       pageSize: visibleLimit,
-      usuariosPageSize:
-        visibleLimit,
+      usuariosPageSize: visibleLimit,
 
       remoteCount,
       totalCount: remoteCount,
@@ -1412,8 +1263,7 @@ function createUsuariosController(
   }
 
   function viewPayload() {
-    const admin =
-      isAdminContext(context);
+    const admin = isAdminContext(context);
 
     return {
       items,
@@ -1433,14 +1283,11 @@ function createUsuariosController(
       filter,
       activeFilter: filter,
 
-      search:
-        searchDraft || search,
-      searchQuery:
-        searchDraft || search,
+      search: searchDraft || search,
+      searchQuery: searchDraft || search,
 
       visibleLimit,
-      usuariosVisibleLimit:
-        visibleLimit,
+      usuariosVisibleLimit: visibleLimit,
 
       page: 1,
       currentPage: 1,
@@ -1460,12 +1307,9 @@ function createUsuariosController(
       restricted: !admin,
       accessDenied: !admin,
 
-      route:
-        USUARIOS_CANONICAL_PATH,
-      source:
-        USUARIOS_INDEX_SOURCE,
-      version:
-        USUARIOS_VIEW_VERSION,
+      route: USUARIOS_CANONICAL_PATH,
+      source: USUARIOS_INDEX_SOURCE,
+      version: USUARIOS_VIEW_VERSION,
 
       apiFallbackActive: false,
       singleApiAuthority: true,
@@ -1477,20 +1321,17 @@ function createUsuariosController(
       return {};
     }
 
-    const active =
-      document.activeElement;
+    const active = document.activeElement;
 
-    const searchInput =
-      host.querySelector(
-        "[data-usuarios-search-input='true']"
-      );
+    const searchInput = host.querySelector(
+      "[data-usuarios-search-input='true']"
+    );
 
     const activeIsSearch =
       active === searchInput;
 
     return {
-      scrollTop:
-        host.scrollTop,
+      scrollTop: host.scrollTop,
 
       activeIsSearch,
 
@@ -1506,9 +1347,7 @@ function createUsuariosController(
     };
   }
 
-  function restoreDomState(
-    snapshot = {}
-  ) {
+  function restoreDomState(snapshot = {}) {
     if (!host || !isBrowser()) {
       return false;
     }
@@ -1520,10 +1359,9 @@ function createUsuariosController(
       );
 
       if (snapshot.activeIsSearch) {
-        const input =
-          host.querySelector(
-            "[data-usuarios-search-input='true']"
-          );
+        const input = host.querySelector(
+          "[data-usuarios-search-input='true']"
+        );
 
         input?.focus?.({
           preventScroll: true,
@@ -1531,14 +1369,9 @@ function createUsuariosController(
 
         if (
           input &&
-          typeof input.setSelectionRange ===
-            "function" &&
-          Number.isInteger(
-            snapshot.selectionStart
-          ) &&
-          Number.isInteger(
-            snapshot.selectionEnd
-          )
+          typeof input.setSelectionRange === "function" &&
+          Number.isInteger(snapshot.selectionStart) &&
+          Number.isInteger(snapshot.selectionEnd)
         ) {
           input.setSelectionRange(
             snapshot.selectionStart,
@@ -1557,9 +1390,7 @@ function createUsuariosController(
     if (!isBrowser()) return null;
 
     const template =
-      document.createElement(
-        "template"
-      );
+      document.createElement("template");
 
     template.innerHTML =
       String(html || "").trim();
@@ -1572,11 +1403,8 @@ function createUsuariosController(
       return false;
     }
 
-    const snapshot =
-      captureDomState();
-
-    const fragment =
-      htmlFragment(html);
+    const snapshot = captureDomState();
+    const fragment = htmlFragment(html);
 
     if (!fragment) return false;
 
@@ -1611,9 +1439,7 @@ function createUsuariosController(
       htmlFragment(html);
 
     const next =
-      fragment?.querySelector?.(
-        selector
-      );
+      fragment?.querySelector?.(selector);
 
     if (!current || !next) {
       return false;
@@ -1643,16 +1469,13 @@ function createUsuariosController(
     ) {
       deferredRender = {
         full: Boolean(
-          deferredRender?.full ||
-            full
+          deferredRender?.full || full
         ),
         header: Boolean(
-          deferredRender?.header ||
-            header
+          deferredRender?.header || header
         ),
         history: Boolean(
-          deferredRender?.history ||
-            history
+          deferredRender?.history || history
         ),
         force: false,
       };
@@ -1663,8 +1486,7 @@ function createUsuariosController(
     deferredRender = null;
     normalizeVisibleLimit();
 
-    const payload =
-      viewPayload();
+    const payload = viewPayload();
 
     const hasRoot = Boolean(
       host.querySelector(
@@ -1674,15 +1496,11 @@ function createUsuariosController(
 
     if (full || !hasRoot) {
       return commitFull(
-        renderUsuariosTableTemplate(
-          payload
-        )
+        renderUsuariosTableTemplate(payload)
       );
     }
 
-    const snapshot =
-      captureDomState();
-
+    const snapshot = captureDomState();
     let changed = false;
 
     if (header) {
@@ -1706,9 +1524,7 @@ function createUsuariosController(
       (header || history)
     ) {
       return commitFull(
-        renderUsuariosTableTemplate(
-          payload
-        )
+        renderUsuariosTableTemplate(payload)
       );
     }
 
@@ -1722,14 +1538,10 @@ function createUsuariosController(
     }
 
     const next = {
-      full:
-        options.full === true,
-      header:
-        options.header === true,
-      history:
-        options.history === true,
-      force:
-        options.force === true,
+      full: options.full === true,
+      header: options.header === true,
+      history: options.history === true,
+      force: options.force === true,
     };
 
     if (options.immediate === true) {
@@ -1741,20 +1553,16 @@ function createUsuariosController(
 
     deferredRender = {
       full: Boolean(
-        deferredRender?.full ||
-          next.full
+        deferredRender?.full || next.full
       ),
       header: Boolean(
-        deferredRender?.header ||
-          next.header
+        deferredRender?.header || next.header
       ),
       history: Boolean(
-        deferredRender?.history ||
-          next.history
+        deferredRender?.history || next.history
       ),
       force: Boolean(
-        deferredRender?.force ||
-          next.force
+        deferredRender?.force || next.force
       ),
     };
 
@@ -1781,9 +1589,7 @@ function createUsuariosController(
       return false;
     }
 
-    const pending =
-      deferredRender;
-
+    const pending = deferredRender;
     deferredRender = null;
 
     return render({
@@ -1798,20 +1604,11 @@ function createUsuariosController(
       return false;
     }
 
-    if (!isAdminContext(context)) {
-      return commitFull(`
-        <section class="usuarios-view-root is-restricted" data-usuarios-scope="true">
-          ${renderAccessDeniedState()}
-        </section>
-      `);
-    }
-
-    return commitFull(`
-      <section class="usuarios-view-root is-loading" data-usuarios-scope="true" aria-busy="true">
-        ${renderHeader(viewPayload())}
-        ${renderLoadingState()}
-      </section>
-    `);
+    return commitFull(
+      renderUsuariosTableTemplate(
+        viewPayload()
+      )
+    );
   }
 
   function renderFatalError(
@@ -1821,16 +1618,19 @@ function createUsuariosController(
       return false;
     }
 
-    return commitFull(`
-      <section class="usuarios-view-root has-error" data-usuarios-scope="true">
-        ${renderErrorState(
-          cleanText(
-            message,
-            "No se pudieron cargar los usuarios."
-          )
-        )}
-      </section>
-    `);
+    error = cleanText(
+      message,
+      "No se pudieron cargar los usuarios."
+    );
+
+    loading = false;
+    refreshing = false;
+
+    return commitFull(
+      renderUsuariosTableTemplate(
+        viewPayload()
+      )
+    );
   }
 
   async function load({
@@ -1848,24 +1648,16 @@ function createUsuariosController(
       return items;
     }
 
-    const sequence =
-      ++loadSequence;
-
-    const hadItems =
-      items.length > 0;
+    const sequence = ++loadSequence;
+    const hadItems = items.length > 0;
 
     error = "";
 
     if (!silent) {
       loading = !hadItems;
       refreshing = hadItems;
-    } else {
-      loading =
-        !hadItems &&
-        loading;
-      refreshing =
-        hadItems &&
-        refreshing;
+    } else if (!hadItems && loading) {
+      loading = true;
     }
 
     render({
@@ -1925,13 +1717,10 @@ function createUsuariosController(
 
       /*
         La única cache válida es la del API.
-        No existe fallback HTTP ni localStorage propio aquí.
       */
       syncFromApiSnapshot(items);
 
-      error = safeError(
-        loadError
-      );
+      error = safeError(loadError);
 
       loading = false;
       refreshing = false;
@@ -1943,10 +1732,7 @@ function createUsuariosController(
           immediate: true,
         });
 
-        showToast(
-          error,
-          "error"
-        );
+        showToast(error, "error");
       } else {
         renderFatalError(error);
       }
@@ -1958,7 +1744,8 @@ function createUsuariosController(
   async function refresh() {
     if (
       refreshing ||
-      loading
+      loading ||
+      destroyed
     ) {
       return items;
     }
@@ -1972,10 +1759,7 @@ function createUsuariosController(
   async function openUsuario(
     userId = ""
   ) {
-    const id = cleanText(
-      userId,
-      ""
-    );
+    const id = cleanText(userId, "");
 
     if (
       !id ||
@@ -1995,10 +1779,7 @@ function createUsuariosController(
 
     try {
       const cached =
-        findUsuarioById(
-          items,
-          id
-        );
+        findUsuarioById(items, id);
 
       const detail =
         (await loadUsuarioDetailApi(
@@ -2025,9 +1806,16 @@ function createUsuariosController(
 
       openingUserId = "";
 
-      UsuariosDetailModal?.open?.(
-        detail
-      );
+      const opened =
+        UsuariosDetailModal?.open?.(
+          detail
+        );
+
+      if (opened === false) {
+        throw new Error(
+          "USUARIO_DETAIL_MODAL_OPEN_FAILED"
+        );
+      }
 
       render({
         history: true,
@@ -2066,19 +1854,16 @@ function createUsuariosController(
   async function refreshUsuario(
     userId = ""
   ) {
-    const modalState =
-      safeObject(
-        UsuariosDetailModal?.getState?.(),
-        {}
-      );
+    const modalState = safeObject(
+      UsuariosDetailModal?.getState?.(),
+      {}
+    );
 
     const id = cleanText(
       first(
         userId,
         modalState.userId,
-        getUsuarioId(
-          modalState.detail
-        ),
+        getUsuarioId(modalState.detail),
         ""
       ),
       ""
@@ -2131,19 +1916,16 @@ function createUsuariosController(
   async function copyUsuarioId(
     userId = ""
   ) {
-    const modalState =
-      safeObject(
-        UsuariosDetailModal?.getState?.(),
-        {}
-      );
+    const modalState = safeObject(
+      UsuariosDetailModal?.getState?.(),
+      {}
+    );
 
     const id = cleanText(
       first(
         userId,
         modalState.userId,
-        getUsuarioId(
-          modalState.detail
-        ),
+        getUsuarioId(modalState.detail),
         ""
       ),
       ""
@@ -2155,16 +1937,14 @@ function createUsuariosController(
 
     try {
       if (
-        !navigator.clipboard
-          ?.writeText
+        !navigator.clipboard?.writeText
       ) {
         throw new Error(
           "CLIPBOARD_UNAVAILABLE"
         );
       }
 
-      await navigator.clipboard
-        .writeText(id);
+      await navigator.clipboard.writeText(id);
 
       showToast(
         "ID de usuario copiado.",
@@ -2175,28 +1955,25 @@ function createUsuariosController(
     } catch {
       try {
         const textarea =
-          document.createElement(
-            "textarea"
-          );
+          document.createElement("textarea");
 
         textarea.value = id;
         textarea.readOnly = true;
-        textarea.hidden = true;
-
-        document.body.appendChild(
-          textarea
+        textarea.setAttribute(
+          "aria-hidden",
+          "true"
         );
 
-        textarea.hidden = false;
-        textarea.style.position =
-          "fixed";
+        textarea.style.position = "fixed";
         textarea.style.opacity = "0";
+        textarea.style.pointerEvents = "none";
+
+        document.body.appendChild(textarea);
+        textarea.focus();
         textarea.select();
 
         const copied =
-          document.execCommand(
-            "copy"
-          );
+          document.execCommand("copy");
 
         textarea.remove();
 
@@ -2204,6 +1981,11 @@ function createUsuariosController(
           showToast(
             "ID de usuario copiado.",
             "success"
+          );
+        } else {
+          showToast(
+            "No se pudo copiar el ID del usuario.",
+            "error"
           );
         }
 
@@ -2312,18 +2094,15 @@ function createUsuariosController(
 
     flushDeferredRender();
 
-    return Boolean(
-      closed !== false
-    );
+    return Boolean(closed !== false);
   }
 
   async function submitCreateUsuario(
     payload = {}
   ) {
     /*
-      El modal es la autoridad de validación del formulario.
-      Si submit devuelve null por validación/error NO hacemos
-      un POST directo por detrás.
+      El modal es la autoridad de validación.
+      Nunca hacemos POST por detrás del modal.
     */
     const submit =
       UsuariosCreateModal?.submit ||
@@ -2359,19 +2138,16 @@ function createUsuariosController(
     });
 
     try {
-      const csv =
-        buildUsuariosCsv(items);
+      const csv = buildUsuariosCsv(items);
 
-      const date =
-        new Date()
-          .toISOString()
-          .slice(0, 10);
+      const date = new Date()
+        .toISOString()
+        .slice(0, 10);
 
-      const ok =
-        downloadTextFile(
-          csv,
-          `usuarios-${date}.csv`
-        );
+      const ok = downloadTextFile(
+        csv,
+        `usuarios-${date}.csv`
+      );
 
       if (!ok) {
         throw new Error(
@@ -2404,9 +2180,7 @@ function createUsuariosController(
     }
   }
 
-  function setFilter(
-    value = "all"
-  ) {
+  function setFilter(value = "all") {
     const normalized =
       normalizeKey(value);
 
@@ -2428,9 +2202,7 @@ function createUsuariosController(
     return filter;
   }
 
-  function setSearch(
-    value = ""
-  ) {
+  function setSearch(value = "") {
     searchDraft =
       cleanText(value, "");
 
@@ -2445,23 +2217,16 @@ function createUsuariosController(
     return search;
   }
 
-  function scheduleSearch(
-    value = ""
-  ) {
+  function scheduleSearch(value = "") {
     searchDraft =
       String(value ?? "");
 
     if (!isBrowser()) {
-      return setSearch(
-        searchDraft
-      );
+      return setSearch(searchDraft);
     }
 
     if (searchTimer) {
-      window.clearTimeout(
-        searchTimer
-      );
-
+      window.clearTimeout(searchTimer);
       searchTimer = 0;
     }
 
@@ -2469,9 +2234,7 @@ function createUsuariosController(
       window.setTimeout(
         () => {
           searchTimer = 0;
-          setSearch(
-            searchDraft
-          );
+          setSearch(searchDraft);
         },
         SEARCH_DEBOUNCE_MS
       );
@@ -2480,6 +2243,14 @@ function createUsuariosController(
   }
 
   function clearFilters() {
+    if (
+      searchTimer &&
+      isBrowser()
+    ) {
+      window.clearTimeout(searchTimer);
+      searchTimer = 0;
+    }
+
     filter = "all";
     search = "";
     searchDraft = "";
@@ -2493,9 +2264,7 @@ function createUsuariosController(
     return true;
   }
 
-  function loadMore(
-    value = null
-  ) {
+  function loadMore(value = null) {
     const nextLimit =
       value === null ||
       value === undefined ||
@@ -2507,7 +2276,7 @@ function createUsuariosController(
     visibleLimit = clamp(
       nextLimit,
       1,
-      500
+      MAX_VISIBLE_ROWS
     );
 
     render({
@@ -2518,13 +2287,12 @@ function createUsuariosController(
   }
 
   function setVisibleLimit(
-    value =
-      DEFAULT_VISIBLE_ROWS
+    value = DEFAULT_VISIBLE_ROWS
   ) {
     visibleLimit = clamp(
       value,
       1,
-      500
+      MAX_VISIBLE_ROWS
     );
 
     render({
@@ -2536,13 +2304,14 @@ function createUsuariosController(
 
   /*
     Compat legacy de paginación:
-    la UI sigue siendo load-more.
+    visualmente seguimos en load-more.
   */
-  function goToPage(
-    value = 1
-  ) {
+  function goToPage(value = 1) {
     const numeric =
-      number(value, 1);
+      Math.max(
+        1,
+        Math.floor(number(value, 1))
+      );
 
     if (numeric > 1) {
       return loadMore(
@@ -2561,32 +2330,47 @@ function createUsuariosController(
   }
 
   function goPrevPage() {
-    resetVisibleLimit();
+    const nextLimit = Math.max(
+      DEFAULT_VISIBLE_ROWS,
+      visibleLimit -
+        DEFAULT_VISIBLE_ROWS
+    );
+
+    visibleLimit = nextLimit;
 
     render({
       history: true,
     });
 
-    return 1;
-  }
-
-  function goNextPage() {
-    return loadMore();
-  }
-
-  function changePageSize(
-    value =
-      DEFAULT_VISIBLE_ROWS
-  ) {
-    return setVisibleLimit(
-      value
+    return Math.max(
+      1,
+      Math.ceil(
+        visibleLimit /
+          DEFAULT_VISIBLE_ROWS
+      )
     );
   }
 
-  function actionFrom(
-    node = null
+  function goNextPage() {
+    loadMore();
+
+    return Math.max(
+      1,
+      Math.ceil(
+        visibleLimit /
+          DEFAULT_VISIBLE_ROWS
+      )
+    );
+  }
+
+  function changePageSize(
+    value = DEFAULT_VISIBLE_ROWS
   ) {
-    return normalizeKey(
+    return setVisibleLimit(value);
+  }
+
+  function actionFrom(node = null) {
+    return normalizeAction(
       first(
         node?.getAttribute?.(
           "data-usuarios-action"
@@ -2603,8 +2387,7 @@ function createUsuariosController(
     node = null,
     event = null
   ) {
-    const action =
-      actionFrom(node);
+    const action = actionFrom(node);
 
     if (!action) return false;
 
@@ -2614,9 +2397,7 @@ function createUsuariosController(
           "data-user-id"
         ),
         node
-          ?.closest?.(
-            "[data-user-id]"
-          )
+          ?.closest?.("[data-user-id]")
           ?.getAttribute?.(
             "data-user-id"
           ),
@@ -2626,32 +2407,28 @@ function createUsuariosController(
     );
 
     switch (action) {
-      case DETAIL_ACTION:
-      case "open_user":
+      case ACTIONS.DETAIL:
         event?.preventDefault?.();
         await openUsuario(userId);
         return true;
 
-      case CREATE_ACTION:
-      case "create_user":
+      case ACTIONS.CREATE:
         event?.preventDefault?.();
         await openCreate();
         return true;
 
-      case REFRESH_ACTION:
-      case RETRY_ACTION:
+      case ACTIONS.REFRESH:
+      case ACTIONS.RETRY:
         event?.preventDefault?.();
         await refresh();
         return true;
 
-      case EXPORT_ACTION:
-      case "export_csv":
+      case ACTIONS.EXPORT:
         event?.preventDefault?.();
         await exportCsv();
         return true;
 
-      case FILTER_ACTION:
-      case "filter_usuarios":
+      case ACTIONS.FILTER:
         event?.preventDefault?.();
 
         setFilter(
@@ -2668,20 +2445,17 @@ function createUsuariosController(
 
         return true;
 
-      case CLEAR_SEARCH_ACTION:
-      case "clear_search":
+      case ACTIONS.CLEAR_SEARCH:
         event?.preventDefault?.();
         setSearch("");
         return true;
 
-      case CLEAR_FILTERS_ACTION:
-      case "clear_filters":
+      case ACTIONS.CLEAR_FILTERS:
         event?.preventDefault?.();
         clearFilters();
         return true;
 
-      case LOAD_MORE_ACTION:
-      case "load_more":
+      case ACTIONS.LOAD_MORE:
         event?.preventDefault?.();
 
         loadMore(
@@ -2713,12 +2487,10 @@ function createUsuariosController(
 
     hostClickHandler =
       async (event) => {
-        const target =
-          event.target;
+        const target = event.target;
 
         if (
-          typeof Element ===
-            "undefined" ||
+          typeof Element === "undefined" ||
           !(target instanceof Element)
         ) {
           return;
@@ -2731,9 +2503,7 @@ function createUsuariosController(
 
         if (
           !actionNode ||
-          !host.contains(
-            actionNode
-          )
+          !host.contains(actionNode)
         ) {
           return;
         }
@@ -2746,16 +2516,11 @@ function createUsuariosController(
 
     hostInputHandler =
       (event) => {
-        const target =
-          event.target;
+        const target = event.target;
 
         if (
-          typeof HTMLInputElement ===
-            "undefined" ||
-          !(
-            target instanceof
-            HTMLInputElement
-          )
+          typeof HTMLInputElement === "undefined" ||
+          !(target instanceof HTMLInputElement)
         ) {
           return;
         }
@@ -2773,12 +2538,10 @@ function createUsuariosController(
 
     hostKeydownHandler =
       async (event) => {
-        const target =
-          event.target;
+        const target = event.target;
 
         if (
-          typeof Element ===
-            "undefined" ||
+          typeof Element === "undefined" ||
           !(target instanceof Element)
         ) {
           return;
@@ -2857,6 +2620,10 @@ function createUsuariosController(
   }
 
   function bindEvents() {
+    if (eventsBound) {
+      return true;
+    }
+
     const onModalRefresh =
       async (event) => {
         const payload =
@@ -2898,9 +2665,13 @@ function createUsuariosController(
         createOpen = false;
 
         /*
-          El modal emite varios aliases y puede emitir por
-          AppCore.events + window. Todos comparten este task.
+          El modal ya usa usuarios.api.js, por lo que su usuario
+          recién creado está en el store canónico antes de emitir.
+          Lo reflejamos inmediatamente y después reconciliamos
+          con backend una sola vez.
         */
+        syncFromApiSnapshot(items);
+
         if (!createRefreshTask) {
           createRefreshTask =
             Promise.resolve()
@@ -2911,9 +2682,7 @@ function createUsuariosController(
                 })
               )
               .finally(() => {
-                createRefreshTask =
-                  null;
-
+                createRefreshTask = null;
                 flushDeferredRender();
               });
         }
@@ -2938,10 +2707,7 @@ function createUsuariosController(
       )
     );
 
-    for (
-      const eventName of
-      DETAIL_CLOSE_EVENTS
-    ) {
+    for (const eventName of DETAIL_CLOSE_EVENTS) {
       unsubscribers.push(
         subscribeEvent(
           eventName,
@@ -2950,10 +2716,7 @@ function createUsuariosController(
       );
     }
 
-    for (
-      const eventName of
-      CREATE_SUCCESS_EVENTS
-    ) {
+    for (const eventName of CREATE_SUCCESS_EVENTS) {
       unsubscribers.push(
         subscribeEvent(
           eventName,
@@ -2962,10 +2725,7 @@ function createUsuariosController(
       );
     }
 
-    for (
-      const eventName of
-      CREATE_CLOSE_EVENTS
-    ) {
+    for (const eventName of CREATE_CLOSE_EVENTS) {
       unsubscribers.push(
         subscribeEvent(
           eventName,
@@ -2974,13 +2734,12 @@ function createUsuariosController(
       );
     }
 
+    eventsBound = true;
     return true;
   }
 
   function unbindEvents() {
-    while (
-      unsubscribers.length
-    ) {
+    while (unsubscribers.length) {
       const unsubscribe =
         unsubscribers.pop();
 
@@ -2991,6 +2750,7 @@ function createUsuariosController(
       }
     }
 
+    eventsBound = false;
     return true;
   }
 
@@ -2999,10 +2759,7 @@ function createUsuariosController(
       searchTimer &&
       isBrowser()
     ) {
-      window.clearTimeout(
-        searchTimer
-      );
-
+      window.clearTimeout(searchTimer);
       searchTimer = 0;
     }
 
@@ -3015,11 +2772,8 @@ function createUsuariosController(
   }
 
   const controller = {
-    version:
-      USUARIOS_VIEW_VERSION,
-
-    name:
-      USUARIOS_MODULE_NAME,
+    version: USUARIOS_VIEW_VERSION,
+    name: USUARIOS_MODULE_NAME,
 
     ownerId,
     host,
@@ -3027,6 +2781,10 @@ function createUsuariosController(
 
     async mount() {
       if (destroyed) {
+        return controller;
+      }
+
+      if (mounted) {
         return controller;
       }
 
@@ -3046,6 +2804,9 @@ function createUsuariosController(
       }
 
       if (!isAdminContext(context)) {
+        loading = false;
+        refreshing = false;
+
         render({
           full: true,
           immediate: true,
@@ -3055,14 +2816,26 @@ function createUsuariosController(
         return controller;
       }
 
-      const cached =
+      /*
+        Primero cache persistente del API y, si no existe,
+        store en memoria del mismo API. Nunca una segunda cache.
+      */
+      const hydrated =
         hydrateUsuariosFromCacheApi({
           freshOnly: true,
         });
 
+      const apiSnapshot =
+        getUsuariosApiStoreSnapshot();
+
+      const bootItems =
+        safeArray(hydrated).length
+          ? safeArray(hydrated)
+          : safeArray(apiSnapshot?.items);
+
       syncItems(
-        safeArray(cached),
-        getUsuariosApiStoreSnapshot()
+        bootItems,
+        apiSnapshot
       );
 
       if (items.length) {
@@ -3079,6 +2852,9 @@ function createUsuariosController(
         renderInitialLoading();
       }
 
+      /*
+        Revalidación silenciosa; el API deduplica y protege carreras.
+      */
       void load({
         force: false,
         silent: true,
@@ -3090,10 +2866,7 @@ function createUsuariosController(
     render(options = {}) {
       return render({
         full: true,
-        ...safeObject(
-          options,
-          {}
-        ),
+        ...safeObject(options, {}),
       });
     },
 
@@ -3156,12 +2929,33 @@ function createUsuariosController(
       const visible =
         selectVisibleItems();
 
-      return {
-        page: 1,
-        currentPage: 1,
+      const hasMore =
+        filtered.length >
+        visible.length;
 
-        pageSize:
-          visibleLimit,
+      const currentPage =
+        Math.max(
+          1,
+          Math.ceil(
+            visible.length /
+              DEFAULT_VISIBLE_ROWS
+          )
+        );
+
+      const totalPages =
+        Math.max(
+          1,
+          Math.ceil(
+            filtered.length /
+              DEFAULT_VISIBLE_ROWS
+          )
+        );
+
+      return {
+        page: currentPage,
+        currentPage,
+
+        pageSize: visibleLimit,
 
         visibleLimit,
         visibleCount:
@@ -3174,18 +2968,18 @@ function createUsuariosController(
               visible.length
           ),
 
-        totalPages: 1,
+        totalPages,
         totalCount:
           filtered.length,
 
         remoteCount,
 
-        hasPrev: false,
-        hasNext: false,
+        hasPrev:
+          visibleLimit >
+          DEFAULT_VISIBLE_ROWS,
 
-        hasMore:
-          filtered.length >
-          visible.length,
+        hasNext: hasMore,
+        hasMore,
       };
     },
 
@@ -3207,9 +3001,7 @@ function createUsuariosController(
     },
 
     isAdmin() {
-      return isAdminContext(
-        context
-      );
+      return isAdminContext(context);
     },
 
     isInitialized() {
@@ -3242,18 +3034,20 @@ function createUsuariosController(
         mounted,
         destroyed,
 
+        hostOwner:
+          ownsHost(controller),
+
+        globalOwner:
+          ownsGlobal(controller),
+
         routeActive:
           isRouteActive(),
 
         admin:
-          isAdminContext(
-            context
-          ),
+          isAdminContext(context),
 
         role:
-          getCurrentRole(
-            context
-          ),
+          getCurrentRole(context),
 
         loading,
         refreshing,
@@ -3280,7 +3074,6 @@ function createUsuariosController(
 
         remoteCount,
 
-        page: 1,
         visibleLimit,
 
         visibleCount:
@@ -3293,27 +3086,20 @@ function createUsuariosController(
         hasMore:
           hasMoreVisibleItems(),
 
-        pageSize:
-          visibleLimit,
-
-        totalPages: 1,
-        filter,
-
-        searchLength:
-          (
-            searchDraft ||
-            search
-          ).length,
-
         lastSyncAt,
         error,
 
         architecture: {
           singleApiAuthority: true,
+          templateActionAuthority: true,
+          templateVisibleRowsAuthority: true,
           indexHttp: false,
           indexLocalStorage: false,
           indexPaginationBackend: false,
           apiContinuationTokens: true,
+          duplicateMountProtected: true,
+          duplicateEventBindingProtected: true,
+          staleControllerDestroyProtected: true,
           duplicateCreateRefreshProtected: true,
           modalValidationBypass: false,
           csvFormulaInjectionProtected: true,
@@ -3326,6 +3112,22 @@ function createUsuariosController(
         return true;
       }
 
+      /*
+        Calculado ANTES de soltar refs.
+        Un controlador obsoleto no puede vaciar el host
+        ni cerrar modales pertenecientes al controlador nuevo.
+      */
+      const wasHostOwner =
+        ownsHost(controller);
+
+      const wasGlobalOwner =
+        ownsGlobal(controller);
+
+      const wasActiveOwner =
+        wasHostOwner ||
+        wasGlobalOwner ||
+        lastController === controller;
+
       destroyed = true;
       mounted = false;
       loadSequence += 1;
@@ -3334,25 +3136,21 @@ function createUsuariosController(
       unbindHost();
       unbindEvents();
 
-      try {
-        UsuariosDetailModal
-          ?.close?.();
-      } catch {
-        // noop
+      if (wasActiveOwner) {
+        try {
+          UsuariosDetailModal?.close?.();
+        } catch {
+          // noop
+        }
+
+        try {
+          UsuariosCreateModal?.close?.();
+        } catch {
+          // noop
+        }
       }
 
-      try {
-        UsuariosCreateModal
-          ?.close?.();
-      } catch {
-        // noop
-      }
-
-      if (
-        host?.[
-          USUARIOS_CONTROLLER_KEY
-        ] === controller
-      ) {
+      if (wasHostOwner) {
         try {
           delete host[
             USUARIOS_CONTROLLER_KEY
@@ -3362,16 +3160,26 @@ function createUsuariosController(
             USUARIOS_CONTROLLER_KEY
           ] = null;
         }
+
+        try {
+          host.removeAttribute(
+            "data-usuarios-controller"
+          );
+
+          host.removeAttribute(
+            "data-usuarios-version"
+          );
+
+          host.replaceChildren();
+        } catch {
+          // noop
+        }
       }
 
       const root =
         getGlobalObject();
 
-      if (
-        root?.[
-          USUARIOS_GLOBAL_CONTROLLER_KEY
-        ] === controller
-      ) {
+      if (wasGlobalOwner) {
         try {
           delete root[
             USUARIOS_GLOBAL_CONTROLLER_KEY
@@ -3388,10 +3196,6 @@ function createUsuariosController(
         controller
       ) {
         lastController = null;
-      }
-
-      if (host) {
-        host.replaceChildren();
       }
 
       return true;
@@ -3420,11 +3224,21 @@ export async function UsuariosView(
   const resolvedHost =
     resolveHost(host, context);
 
+  /*
+    No destruimos una vista activa si el nuevo montaje
+    ni siquiera tiene un host válido.
+  */
+  if (!resolvedHost) {
+    throw new Error(
+      "USUARIOS_HOST_REQUIRED"
+    );
+  }
+
   const root =
     getGlobalObject();
 
   const hostController =
-    resolvedHost?.[
+    resolvedHost[
       USUARIOS_CONTROLLER_KEY
     ] || null;
 
@@ -3467,11 +3281,9 @@ export async function UsuariosView(
       context
     );
 
-  if (resolvedHost) {
-    resolvedHost[
-      USUARIOS_CONTROLLER_KEY
-    ] = controller;
-  }
+  resolvedHost[
+    USUARIOS_CONTROLLER_KEY
+  ] = controller;
 
   root[
     USUARIOS_GLOBAL_CONTROLLER_KEY
@@ -3483,7 +3295,21 @@ export async function UsuariosView(
     controller
   );
 
-  return controller.mount();
+  try {
+    return await controller.mount();
+  } catch (error) {
+    /*
+      Rollback limpio: nunca dejamos un controller roto
+      publicado como activo.
+    */
+    try {
+      controller.destroy();
+    } catch {
+      // noop
+    }
+
+    throw error;
+  }
 }
 
 export const UsuariosIndex =
@@ -3508,13 +3334,20 @@ export function getActiveUsuariosController() {
   const root =
     getGlobalObject();
 
-  return (
+  const active =
     root?.[
       USUARIOS_GLOBAL_CONTROLLER_KEY
     ] ||
     lastController ||
-    null
-  );
+    null;
+
+  if (
+    active?.isDestroyed?.() === true
+  ) {
+    return null;
+  }
+
+  return active;
 }
 
 export const init = (...args) =>
@@ -3588,7 +3421,7 @@ export const initCreate =
 
 export const closeCreate = () =>
   getActiveUsuariosController()
-    ?.closeCreate?.() ||
+    ?.closeCreate?.() ??
   true;
 
 export const renderCreate = () =>
@@ -3622,18 +3455,15 @@ export const submitCreateUsuario = (
     getActiveUsuariosController();
 
   if (
-    controller
-      ?.submitCreateUsuario
+    controller?.submitCreateUsuario
   ) {
     return controller
-      .submitCreateUsuario(
-        payload
-      );
+      .submitCreateUsuario(payload);
   }
 
   /*
-    Sin controlador activo seguimos usando el modal
-    para no saltarnos su validación.
+    Sin controlador activo seguimos usando el modal:
+    su validación sigue siendo obligatoria.
   */
   const submit =
     UsuariosCreateModal?.submit ||
@@ -3661,8 +3491,7 @@ export const loadMore = (
   DEFAULT_VISIBLE_ROWS;
 
 export const setVisibleLimit = (
-  limit =
-    DEFAULT_VISIBLE_ROWS
+  limit = DEFAULT_VISIBLE_ROWS
 ) =>
   getActiveUsuariosController()
     ?.setVisibleLimit?.(limit) ||
@@ -3683,11 +3512,10 @@ export const goPrevPage = () =>
 export const goNextPage = () =>
   getActiveUsuariosController()
     ?.goNextPage?.() ||
-  DEFAULT_VISIBLE_ROWS;
+  1;
 
 export const changePageSize = (
-  size =
-    DEFAULT_VISIBLE_ROWS
+  size = DEFAULT_VISIBLE_ROWS
 ) =>
   getActiveUsuariosController()
     ?.changePageSize?.(size) ||
@@ -3731,17 +3559,28 @@ export const getSortedUsuariosStore =
   };
 
 export const getUsuariosCount =
-  () =>
-    getActiveUsuariosController()
-      ?.getItems?.().length ??
-    getUsuariosApiCount();
+  () => {
+    const controller =
+      getActiveUsuariosController();
+
+    if (controller?.getItems) {
+      return controller.getItems().length;
+    }
+
+    return getUsuariosApiCount();
+  };
 
 export const hasUsuarios =
-  () =>
-    getActiveUsuariosController()
-      ?.getItems?.().length
-      ? true
-      : hasUsuariosApi();
+  () => {
+    const controller =
+      getActiveUsuariosController();
+
+    if (controller?.getItems) {
+      return controller.getItems().length > 0;
+    }
+
+    return hasUsuariosApi();
+  };
 
 export const getUsuariosStoreSnapshot =
   () => {
@@ -3791,6 +3630,7 @@ export const getUsuariosStoreSnapshot =
 export const getUsuariosStateSnapshot =
   () => ({
     ...getUsuariosApiStateSnapshot(),
+
     view:
       getActiveUsuariosController()
         ?.getState?.() ||
@@ -3835,8 +3675,7 @@ export const getState = () =>
   getActiveUsuariosController()
     ?.getState?.() || {
       ...getUsuariosApiStateSnapshot(),
-      items:
-        getUsuarios(),
+      items: getUsuarios(),
     };
 
 export const getSnapshot = () =>
@@ -3844,14 +3683,19 @@ export const getSnapshot = () =>
     ?.getSnapshot?.() || {
       version:
         USUARIOS_VIEW_VERSION,
+
       apiVersion:
         USUARIOS_API_VERSION,
+
       mounted: false,
       destroyed: false,
+
       api:
         getUsuariosApiSnapshot(),
+
       architecture: {
         singleApiAuthority: true,
+        templateActionAuthority: true,
         indexHttp: false,
         indexLocalStorage: false,
       },
@@ -3892,27 +3736,19 @@ export const getUsuariosRouteDebug =
       getBrowserPath(),
 
     contextPath:
-      routePathFromContext(
-        context
-      ),
+      routePathFromContext(context),
 
     canonicalPath:
       USUARIOS_CANONICAL_PATH,
 
     allowed:
-      isUsuariosRoute(
-        context
-      ),
+      isUsuariosRoute(context),
 
     role:
-      getCurrentRole(
-        context
-      ),
+      getCurrentRole(context),
 
     admin:
-      isAdminContext(
-        context
-      ),
+      isAdminContext(context),
 
     apiVersion:
       USUARIOS_API_VERSION,
@@ -4116,9 +3952,7 @@ export function registerGlobalBridge(
         UsuariosDetailModal;
     }
 
-    if (
-      !root.OnionUsuariosCreateModal
-    ) {
+    if (!root.OnionUsuariosCreateModal) {
       root.OnionUsuariosCreateModal =
         UsuariosCreateModal;
     }
@@ -4128,11 +3962,7 @@ export function registerGlobalBridge(
 
   try {
     if (AppCore) {
-      if (
-        !isObject(
-          AppCore.modules
-        )
-      ) {
+      if (!isObject(AppCore.modules)) {
         AppCore.modules = {};
       }
 
@@ -4169,6 +3999,7 @@ export function registerGlobalBridge(
         getBrowserPath(),
 
       singleApiAuthority: true,
+      templateContract: true,
     }
   );
 

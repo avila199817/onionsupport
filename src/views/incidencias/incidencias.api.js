@@ -2,7 +2,7 @@
    Onion Support - Incidencias API
    Archivo: /src/views/incidencias/incidencias.api.js
 
-   PRODUCTIVO · PAINT SAFE · BLOB READY · 1:1 COSMOS · 10/10
+   PRODUCTIVO · PAINT SAFE · SAS SAFE · BLOB READY · 1:1 COSMOS · 10/10
 
    Punto cerrado:
    - El backend /api/tickets devuelve items/rows/tickets/incidencias.
@@ -15,14 +15,16 @@
    - Cachear listado en memoria con TTL y dedupe de concurrentes.
    - Crear incidencias con multipart real cuando hay adjuntos.
    - Cargar detalle, comentar, reabrir, subir adjuntos.
-   - Abrir/descargar adjuntos.
+   - Abrir adjuntos mediante SAS temporales validadas.
+   - Descargar adjuntos siguiendo el contrato JSON -> SAS del backend.
+   - Nunca interpretar como binario el JSON de /attachments/:id/download.
    - Buscar usuarios para creación admin.
    - Sin DOM, sin Router, sin Store, sin fetch propio.
 ========================================================= */
 
 import Http from "../../core/http.js";
 
-export const INCIDENCIAS_API_VERSION = "incidencias.api.paint-safe.v11.no-array-flatten";
+export const INCIDENCIAS_API_VERSION = "incidencias.api.paint-safe.v12.sas-safe-download-contract";
 export const INCIDENCIAS_ENDPOINT = "/api/tickets";
 export const USERS_SEARCH_ENDPOINT = "/api/users";
 
@@ -40,6 +42,10 @@ const DEFAULT_CURRENCY = "EUR";
 const DEFAULT_STATUS = "open";
 const DEFAULT_PRIORITY = "medium";
 const DEFAULT_CATEGORY = "general";
+
+const ATTACHMENT_BLOB_HOST = "onionassets.blob.core.windows.net";
+const ATTACHMENT_BLOB_CONTAINER = "tickets";
+const ATTACHMENT_BLOB_PATH_PREFIX = `/${ATTACHMENT_BLOB_CONTAINER}/`;
 
 const FIXED_TECHNICIAN = Object.freeze({
   id: "ON-20260218164977",
@@ -312,6 +318,132 @@ function firstUrl(...values) {
   }
 
   return "";
+}
+
+/*
+  URLs de adjuntos:
+  - safeUrl() sigue siendo deliberadamente estricta para URLs generales y
+    rechaza secretos/querystrings sensibles.
+  - Una SAS de Azure Blob necesita "sig=", por lo que NO debe pasar por
+    safeUrl().
+  - Permitimos SAS únicamente contra nuestro storage exacto y únicamente
+    dentro del contenedor /tickets/.
+  - No aceptamos otros hosts, credenciales embebidas, HTTP ni esquemas
+    ejecutables.
+*/
+function safeAttachmentUrl(value = "") {
+  const raw = cleanText(value, "");
+
+  if (!raw) return "";
+  if (raw.startsWith("//")) return "";
+  if (/[\r\n\t\\]/.test(raw)) return "";
+  if (/^(javascript|data|vbscript|file):/i.test(raw)) return "";
+
+  /*
+    blob: puede existir en previews locales. No contiene credenciales de
+    Azure y su ámbito es el documento actual.
+  */
+  if (/^blob:/i.test(raw)) return raw;
+
+  /*
+    Se conserva compatibilidad con rutas same-origin de un futuro proxy.
+    Una ruta relativa nunca se interpreta como SAS de un host externo.
+  */
+  if (raw.startsWith("/")) {
+    return raw.replace(/\/{2,}/g, "/");
+  }
+
+  if (!/^https:\/\//i.test(raw)) return "";
+
+  try {
+    const url = new URL(raw);
+
+    if (url.protocol !== "https:") return "";
+    if (url.username || url.password) return "";
+    if (url.hostname.toLowerCase() !== ATTACHMENT_BLOB_HOST) return "";
+
+    const port = cleanText(url.port, "");
+    if (port && port !== "443") return "";
+
+    const pathname = url.pathname || "/";
+    if (!pathname.startsWith(ATTACHMENT_BLOB_PATH_PREFIX)) return "";
+
+    /*
+      En este host/ruta sí se permiten los parámetros SAS de Azure:
+      sv, st, se, sr, sp, sig, rscd, rsct, etc.
+    */
+    return url.href;
+  } catch {
+    return "";
+  }
+}
+
+function firstAttachmentUrl(...values) {
+  const stack = [...values];
+
+  while (stack.length) {
+    const value = stack.shift();
+    if (value === undefined || value === null) continue;
+
+    if (isObject(value)) {
+      stack.unshift(
+        value.viewUrl,
+        value.openUrl,
+        value.downloadUrl,
+        value.signedUrl,
+        value.sasUrl,
+        value.url,
+        value.href,
+        value.blobUrl,
+        value.publicUrl,
+        value.src
+      );
+      continue;
+    }
+
+    const url = safeAttachmentUrl(value);
+    if (url) return url;
+  }
+
+  return "";
+}
+
+function triggerAttachmentDownload(url = "", filename = "") {
+  const href = safeAttachmentUrl(url);
+  if (!href) return false;
+
+  if (
+    typeof document === "undefined" ||
+    !document?.createElement ||
+    !document?.body
+  ) {
+    return false;
+  }
+
+  try {
+    const link = document.createElement("a");
+
+    link.href = href;
+    link.rel = "noopener noreferrer";
+    link.referrerPolicy = "no-referrer";
+    link.style.display = "none";
+
+    /*
+      Azure ya devuelve Content-Disposition=attachment mediante rscd.
+      download es una ayuda adicional para navegadores que la respeten en
+      enlaces cross-origin.
+    */
+    const cleanFilename = cleanText(filename, "");
+    if (cleanFilename) link.download = cleanFilename;
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function countFrom(...values) {
@@ -1897,25 +2029,86 @@ export async function uploadIncidenciaAttachments(id = "", files = [], options =
 
 function normalizeFileResponse(response = {}, context = {}) {
   const data = fileFromPayload(response);
-  const url = firstUrl(data.viewUrl, data.openUrl, data.downloadUrl, data.signedUrl, data.url, response?.url, response?.href);
-  const id = cleanText(first(data.id, data.attachmentId, context.attachmentId), context.attachmentId);
-  const contentType = cleanText(first(data.contentType, data.mimeType, data.mimetype, data.type), "");
+
+  const viewUrl = firstAttachmentUrl(
+    data.viewUrl,
+    data.openUrl,
+    data.signedUrl,
+    data.sasUrl,
+    data.url,
+    response?.viewUrl,
+    response?.openUrl,
+    response?.signedUrl,
+    response?.sasUrl,
+    response?.url,
+    response?.href
+  );
+
+  const downloadUrl = firstAttachmentUrl(
+    data.downloadUrl,
+    data.signedUrl,
+    data.sasUrl,
+    data.url,
+    response?.downloadUrl,
+    response?.signedUrl,
+    response?.sasUrl,
+    response?.url,
+    response?.href
+  );
+
+  const url =
+    context.mode === "download"
+      ? downloadUrl || viewUrl
+      : viewUrl || downloadUrl;
+
+  const id = cleanText(
+    first(
+      data.id,
+      data.attachmentId,
+      context.attachmentId
+    ),
+    context.attachmentId
+  );
+
+  const contentType = cleanText(
+    first(
+      data.contentType,
+      data.mimeType,
+      data.mimetype,
+      data.type
+    ),
+    ""
+  );
 
   return {
     ...data,
+
     ticketId: context.ticketId,
     attachmentId: id,
     mode: context.mode,
     kind: context.kind,
     id,
+
     url,
-    viewUrl: firstUrl(data.viewUrl, url),
-    openUrl: firstUrl(data.openUrl, url),
-    downloadUrl: firstUrl(data.downloadUrl, url),
-    signedUrl: firstUrl(data.signedUrl, url),
-    name: safePublicText(first(data.name, data.filename, data.fileName, "adjunto"), "adjunto"),
+    viewUrl: viewUrl || url,
+    openUrl: viewUrl || url,
+    downloadUrl: downloadUrl || url,
+    signedUrl: url,
+    sasUrl: url,
+
+    name: safePublicText(
+      first(
+        data.name,
+        data.filename,
+        data.fileName,
+        "adjunto"
+      ),
+      "adjunto"
+    ),
+
     contentType,
     mimeType: contentType,
+    mimetype: contentType,
   };
 }
 
@@ -1932,19 +2125,90 @@ export async function openIncidenciaAttachment(options = {}, requestOptions = {}
   return getIncidenciaAttachmentFileRequest({ ...options, mode: "view" }, requestOptions);
 }
 
-export async function downloadIncidenciaAttachment({ ticketId = "", attachmentId = "", kind = "attachments", filename = "" } = {}, { timeout = INCIDENCIAS_DETAIL_TIMEOUT, autoDownload = true } = {}) {
-  const endpoint = getIncidenciaAttachmentFileEndpoint({ ticketId, attachmentId, kind, mode: "download" });
+export async function downloadIncidenciaAttachment(
+  {
+    ticketId = "",
+    attachmentId = "",
+    kind = "attachments",
+    filename = "",
+  } = {},
+  {
+    timeout = INCIDENCIAS_DETAIL_TIMEOUT,
+    autoDownload = true,
+  } = {}
+) {
+  /*
+    CONTRATO REAL DEL BACKEND:
+    GET .../download NO devuelve los bytes del archivo.
+    Devuelve JSON con una SAS temporal cuyo Content-Disposition ya viene
+    preparado como attachment.
 
-  if (typeof Http.downloadBlob === "function") {
-    return Http.downloadBlob(endpoint, {
+    Por tanto:
+    1. Pedimos metadatos/SAS como JSON.
+    2. Validamos que la URL pertenezca exclusivamente al storage de tickets.
+    3. El navegador navega al blob firmado para descargar los bytes reales.
+
+    Nunca usar Http.downloadBlob() contra este endpoint: convertiría el JSON
+    de la API en un Blob y terminaríamos guardándolo con el nombre del TXT/PNG.
+  */
+  const file = await getIncidenciaAttachmentFileRequest(
+    {
+      ticketId,
+      attachmentId,
+      kind,
+      mode: "download",
+    },
+    {
       timeout,
-      autoDownload,
-      filename,
-      source: "views.incidencias.download",
-    });
+    }
+  );
+
+  const downloadUrl = firstAttachmentUrl(
+    file.downloadUrl,
+    file.signedUrl,
+    file.sasUrl,
+    file.url,
+    file.openUrl,
+    file.viewUrl
+  );
+
+  if (!downloadUrl) {
+    const error = new Error(
+      "El backend no devolvió una URL de descarga válida para el adjunto."
+    );
+
+    error.code = "INCIDENCIA_ATTACHMENT_DOWNLOAD_URL_MISSING";
+    throw error;
   }
 
-  return getJson(endpoint, { timeout, source: "views.incidencias.download" });
+  const resolvedFilename = safePublicText(
+    first(
+      filename,
+      file.name,
+      file.filename,
+      file.fileName,
+      "adjunto"
+    ),
+    "adjunto"
+  );
+
+  const autoDownloadStarted =
+    autoDownload === true
+      ? triggerAttachmentDownload(downloadUrl, resolvedFilename)
+      : false;
+
+  return {
+    ...file,
+    ok: true,
+    mode: "download",
+    url: downloadUrl,
+    downloadUrl,
+    signedUrl: downloadUrl,
+    sasUrl: downloadUrl,
+    name: resolvedFilename,
+    filename: resolvedFilename,
+    autoDownloadStarted,
+  };
 }
 
 /* =========================================================
@@ -2019,6 +2283,10 @@ export function getIncidenciasApiSnapshot() {
       noArrayFlattenInFirst: true,
       recursiveListAliases: true,
       keepsBackendItems: true,
+      attachmentSasAllowlist: true,
+      attachmentSasRestrictedToTicketsContainer: true,
+      attachmentDownloadUsesSignedUrl: true,
+      attachmentDownloadDoesNotBlobApiJson: true,
     },
     multipart: {
       createField: "attachments",
@@ -2026,6 +2294,13 @@ export function getIncidenciasApiSnapshot() {
       forceFormDataWhenFiles: true,
       noJsonFallbackWhenFiles: true,
       backendContainer: "tickets",
+    },
+    attachmentTransport: {
+      blobHost: ATTACHMENT_BLOB_HOST,
+      blobContainer: ATTACHMENT_BLOB_CONTAINER,
+      signedUrlsAllowed: true,
+      downloadContract: "json_to_sas",
+      directBlobDownload: true,
     },
     fixedTechnician: FIXED_TECHNICIAN,
   };

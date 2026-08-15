@@ -120,9 +120,9 @@ body[data-app-loading="false"] #app-shell,
   --loader-accent-soft: #34d4ff;
   --loader-accent-deep: #0b61ff;
 
-  --loader-brand-size-final: var(--loader-brand-size, 104px);
-  --loader-logo-size-final: var(--loader-logo-size, 66px);
-  --loader-brand-radius-final: var(--loader-logo-radius, 28px);
+  --loader-brand-size-final: var(--loader-brand-size, 118px);
+  --loader-logo-size-final: var(--loader-logo-size, 76px);
+  --loader-brand-radius-final: var(--loader-logo-radius, 31px);
 
   --loader-brand-border:
     rgb(107 205 255 / .40);
@@ -136,8 +136,8 @@ body[data-app-loading="false"] #app-shell,
     linear-gradient(
       145deg,
       rgb(19 148 255 / .28),
-      rgb(9 25 47 / .94) 45%,
-      rgb(4 12 26 / .98) 100%
+      rgb(9 25 47 / .985) 45%,
+      rgb(4 12 26 / .995) 100%
     );
 
   --loader-brand-core:
@@ -148,8 +148,8 @@ body[data-app-loading="false"] #app-shell,
     ),
     linear-gradient(
       155deg,
-      rgb(8 27 52 / .98),
-      rgb(3 11 24 / .99)
+      rgb(8 27 52 / .995),
+      rgb(3 11 24 / 1)
     );
 
   --loader-brand-shadow:
@@ -208,22 +208,22 @@ body[data-app-loading="false"] #app-shell,
   background:
     radial-gradient(
       circle at 50% 46%,
-      rgb(19 148 255 / .17),
+      rgb(19 148 255 / .24),
       transparent 27%
     ),
     radial-gradient(
       circle at 14% 16%,
-      rgb(19 148 255 / .16),
+      rgb(19 148 255 / .20),
       transparent 32%
     ),
     radial-gradient(
       circle at 86% 14%,
-      rgb(52 212 255 / .10),
+      rgb(52 212 255 / .14),
       transparent 28%
     ),
     radial-gradient(
       circle at 78% 90%,
-      rgb(11 97 255 / .13),
+      rgb(11 97 255 / .18),
       transparent 34%
     ),
     linear-gradient(
@@ -256,20 +256,20 @@ body[data-app-loading="false"] #app-shell,
   background:
     linear-gradient(
       90deg,
-      rgb(255 255 255 / .025) 1px,
+      rgb(255 255 255 / .032) 1px,
       transparent 1px
     ),
     linear-gradient(
       180deg,
-      rgb(255 255 255 / .022) 1px,
+      rgb(255 255 255 / .029) 1px,
       transparent 1px
     ),
     linear-gradient(
       45deg,
       transparent 48.7%,
-      rgb(19 148 255 / .035) 49.5%,
-      rgb(52 212 255 / .045) 50%,
-      rgb(19 148 255 / .035) 50.5%,
+      rgb(19 148 255 / .050) 49.5%,
+      rgb(52 212 255 / .060) 50%,
+      rgb(19 148 255 / .050) 50.5%,
       transparent 51.3%
     );
 
@@ -296,7 +296,7 @@ body[data-app-loading="false"] #app-shell,
       transparent 94%
     );
 
-  opacity: .86;
+  opacity: 1;
 
   transform: translateZ(0);
 
@@ -331,18 +331,18 @@ body[data-app-loading="false"] #app-shell,
     ),
     radial-gradient(
       ellipse at 50% 100%,
-      rgb(19 148 255 / .07),
+      rgb(19 148 255 / .10),
       transparent 46%
     ),
     linear-gradient(
       180deg,
       rgb(0 0 0 / .02),
       transparent 35%,
-      rgb(0 0 0 / .18) 74%,
-      rgb(0 0 0 / .34)
+      rgb(0 0 0 / .26) 74%,
+      rgb(0 0 0 / .46)
     );
 
-  opacity: .96;
+  opacity: 1;
 
   transform: translateZ(0);
 }
@@ -443,7 +443,7 @@ body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
   inline-size: min(74vw, 920px);
   block-size: min(74vw, 920px);
 
-  border: 1px solid rgb(19 148 255 / .09);
+  border: 1px solid rgb(19 148 255 / .12);
   border-radius: 50%;
 
   box-shadow:
@@ -477,17 +477,17 @@ body[data-app-loading="false"] .app-loader:not([data-loader-force="true"]) {
   inset-inline-start: 50%;
   inset-block-start: 50%;
 
-  inline-size: clamp(220px, 28vw, 430px);
-  block-size: clamp(220px, 28vw, 430px);
+  inline-size: clamp(260px, 31vw, 500px);
+  block-size: clamp(260px, 31vw, 500px);
 
   border-radius: 50%;
 
   background:
     radial-gradient(
       circle,
-      rgb(52 212 255 / .09) 0%,
-      rgb(19 148 255 / .07) 22%,
-      rgb(11 97 255 / .025) 48%,
+      rgb(52 212 255 / .13) 0%,
+      rgb(19 148 255 / .10) 22%,
+      rgb(11 97 255 / .04) 48%,
       transparent 72%
     );
 
@@ -812,22 +812,22 @@ body[data-theme="light"] .app-loader {
   background:
     radial-gradient(
       circle at 50% 46%,
-      rgb(19 148 255 / .11),
+      rgb(19 148 255 / .16),
       transparent 27%
     ),
     radial-gradient(
       circle at 14% 16%,
-      rgb(19 148 255 / .09),
+      rgb(19 148 255 / .12),
       transparent 32%
     ),
     radial-gradient(
       circle at 86% 14%,
-      rgb(52 212 255 / .075),
+      rgb(52 212 255 / .10),
       transparent 28%
     ),
     radial-gradient(
       circle at 78% 90%,
-      rgb(11 97 255 / .065),
+      rgb(11 97 255 / .09),
       transparent 34%
     ),
     linear-gradient(
@@ -994,7 +994,7 @@ body[data-app-state="ready"] #app-shell {
   }
 
   50% {
-    opacity: .96;
+    opacity: 1;
     transform:
       translate(-50%, -50%)
       scale(1.08);
@@ -1046,12 +1046,12 @@ body[data-app-state="ready"] #app-shell {
   #app-loader,
   .app-loader {
     --loader-brand-size-final:
-      calc(90px * var(--ui-scale, 1));
+      calc(100px * var(--ui-scale, 1));
 
     --loader-logo-size-final:
-      calc(58px * var(--ui-scale, 1));
+      calc(64px * var(--ui-scale, 1));
 
-    --loader-brand-radius-final: 25px;
+    --loader-brand-radius-final: 28px;
 
     padding:
       max(16px, var(--app-safe-top, 0px))
@@ -1081,21 +1081,21 @@ body[data-app-state="ready"] #app-shell {
   #app-loader,
   .app-loader {
     --loader-brand-size-final:
-      calc(82px * var(--ui-scale, 1));
+      calc(92px * var(--ui-scale, 1));
 
     --loader-logo-size-final:
-      calc(52px * var(--ui-scale, 1));
+      calc(58px * var(--ui-scale, 1));
 
-    --loader-brand-radius-final: 23px;
+    --loader-brand-radius-final: 26px;
   }
 }
 
 @media (max-height: 520px) {
   #app-loader,
   .app-loader {
-    --loader-brand-size-final: 78px;
-    --loader-logo-size-final: 48px;
-    --loader-brand-radius-final: 22px;
+    --loader-brand-size-final: 88px;
+    --loader-logo-size-final: 54px;
+    --loader-brand-radius-final: 25px;
 
     padding-block: 10px;
   }

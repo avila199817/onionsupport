@@ -41,9 +41,10 @@ import {
 } from "../core/config.js";
 
 import * as Routes from "./routes.js";
+import RouteStyles from "./styles.js";
 
 export const ROUTER_VERSION =
-  "router.minimal.v9.1-activation-path-token-hardened";
+  "router.minimal.v10.1-route-styles-preload-atomic-gated";
 
 const PUBLIC_HOME_PATH = "/";
 
@@ -3792,6 +3793,80 @@ function beginTransition(
 }
 
 /* =========================================================
+   ROUTE STYLE TRANSITION
+========================================================= */
+
+async function preloadRouteStylesForTransition(
+  route = null,
+  transition = null
+) {
+  return RouteStyles.preload(
+    route,
+    {
+      signal:
+        transition?.signal ||
+        null,
+    }
+  );
+}
+
+async function prepareRouteStylesForTransition(
+  route = null,
+  transition = null
+) {
+  return RouteStyles.prepare(
+    route,
+    {
+      signal:
+        transition?.signal ||
+        null,
+    }
+  );
+}
+
+function rollbackRouteStylesForTransition(
+  route = null
+) {
+  try {
+    return RouteStyles.rollback(
+      route
+    );
+  } catch {
+    return null;
+  }
+}
+
+function commitRouteStylesForTransition(
+  route = null
+) {
+  try {
+    return RouteStyles.commit(
+      route
+    );
+  } catch {
+    /*
+      El DOM nuevo ya puede estar comprometido.
+      Nunca hacemos clear aquí: sería peor dejar
+      la nueva vista sin el CSS ya preparado.
+    */
+    return null;
+  }
+}
+
+function clearRouteStylesForFallback(
+  reason = "fallback"
+) {
+  try {
+    return RouteStyles.clear({
+      reason,
+    });
+  } catch {
+    return null;
+  }
+}
+
+
+/* =========================================================
    ROUTE RENDER
 ========================================================= */
 
@@ -3804,12 +3879,6 @@ async function renderRoute(
   const route =
     match.route;
 
-  const state =
-    beginTransition(
-      match,
-      options
-    );
-
   const root =
     viewRoot();
 
@@ -3820,6 +3889,144 @@ async function renderRoute(
         "missing-root",
     };
   }
+
+  /*
+    Snapshot de la ruta realmente comprometida.
+    setRoutePending() sólo contiene estado provisional.
+  */
+  const previousState =
+    readState();
+
+  const previousCanonicalPath =
+    normalizePathname(
+      previousState.canonicalPath ||
+      previousState.route ||
+      HOME_PATH
+    );
+
+  const previousPublicPath =
+    normalizePublicPath(
+      previousState.publicPath ||
+      previousCanonicalPath
+    );
+
+  const previousRoute =
+    getRoute(
+      previousCanonicalPath
+    );
+
+  /*
+    PRELOAD:
+    descarga el CSS con media="not all".
+    No aplica todavía estilos de la vista nueva.
+  */
+  if (
+    isFunction(
+      route?.render
+    )
+  ) {
+    try {
+      await preloadRouteStylesForTransition(
+        route,
+        transition
+      );
+    } catch (error) {
+      rollbackRouteStylesForTransition(
+        route
+      );
+
+      if (
+        seq !==
+          renderSeq ||
+        !transitionIsCurrent(
+          transition
+        )
+      ) {
+        return {
+          ok: false,
+          skipped: true,
+
+          reason:
+            transition?.signal
+              ?.aborted
+              ? "aborted-style-preload"
+              : "stale-style-preload",
+        };
+      }
+
+      /*
+        El sidebar pudo quedar marcado provisionalmente
+        por setRoutePending(). Restauramos la ruta activa.
+      */
+      setActiveMenu(
+        previousRoute,
+        {
+          publicPath:
+            previousPublicPath,
+
+          canonicalPath:
+            previousCanonicalPath,
+
+          pending:
+            false,
+        }
+      );
+
+      return {
+        ok: false,
+
+        reason:
+          "style-preload-failed",
+
+        error,
+
+        canonicalPath:
+          normalizePathname(
+            match.canonicalPath ||
+            route?.path ||
+            HOME_PATH
+          ),
+
+        publicPath:
+          stateSafePublicPath(
+            match
+          ),
+      };
+    }
+
+    if (
+      seq !==
+        renderSeq ||
+      !transitionIsCurrent(
+        transition
+      )
+    ) {
+      rollbackRouteStylesForTransition(
+        route
+      );
+
+      return {
+        ok: false,
+        skipped: true,
+
+        reason:
+          transition?.signal
+            ?.aborted
+            ? "aborted-style-preload"
+            : "stale-style-preload",
+      };
+    }
+  }
+
+  /*
+    El CSS ya está descargado, o el loader ha hecho skip
+    porque los safety gates siguen apagados.
+  */
+  const state =
+    beginTransition(
+      match,
+      options
+    );
 
   forceVisible(
     root,
@@ -3850,6 +4057,10 @@ async function renderRoute(
       nextHost
     );
   } catch {
+    rollbackRouteStylesForTransition(
+      route
+    );
+
     return {
       ok: false,
       reason:
@@ -3920,6 +4131,10 @@ async function renderRoute(
         transition
       )
     ) {
+      rollbackRouteStylesForTransition(
+        route
+      );
+
       cleanupView(
         result
       );
@@ -3981,6 +4196,10 @@ async function renderRoute(
         transition
       )
     ) {
+      rollbackRouteStylesForTransition(
+        route
+      );
+
       cleanupView(
         nextView
       );
@@ -3997,6 +4216,96 @@ async function renderRoute(
       };
     }
 
+    /*
+      PREPARE:
+      el CSS ya está descargado. Lo activamos únicamente
+      en la ventana inmediatamente anterior al DOM commit.
+      La hoja anterior continúa activa hasta commit().
+    */
+    try {
+      await prepareRouteStylesForTransition(
+        route,
+        transition
+      );
+    } catch (error) {
+      rollbackRouteStylesForTransition(
+        route
+      );
+
+      cleanupView(
+        nextView
+      );
+
+      removeNode(
+        nextHost
+      );
+
+      if (
+        seq !==
+          renderSeq ||
+        !transitionIsCurrent(
+          transition
+        )
+      ) {
+        return {
+          ok: false,
+          skipped: true,
+
+          reason:
+            transition?.signal
+              ?.aborted
+              ? "aborted-style-prepare"
+              : "stale-style-prepare",
+        };
+      }
+
+      return {
+        ok: false,
+
+        reason:
+          "style-prepare-failed",
+
+        error,
+
+        canonicalPath:
+          state.canonicalPath,
+
+        publicPath:
+          state.publicPath,
+      };
+    }
+
+    if (
+      seq !==
+        renderSeq ||
+      !transitionIsCurrent(
+        transition
+      )
+    ) {
+      rollbackRouteStylesForTransition(
+        route
+      );
+
+      cleanupView(
+        nextView
+      );
+
+      removeNode(
+        nextHost
+      );
+
+      return {
+        ok: false,
+        skipped: true,
+
+        reason:
+          transition?.signal
+            ?.aborted
+            ? "aborted-style-prepare"
+            : "stale-style-prepare",
+      };
+    }
+
     const committed =
       commitRouteHost(
         nextHost,
@@ -4009,6 +4318,10 @@ async function renderRoute(
       );
 
     if (!committed) {
+      rollbackRouteStylesForTransition(
+        route
+      );
+
       cleanupView(
         nextView
       );
@@ -4030,6 +4343,10 @@ async function renderRoute(
           state.publicPath,
       };
     }
+
+    commitRouteStylesForTransition(
+      route
+    );
 
     syncChrome(
       route,
@@ -4094,6 +4411,10 @@ async function renderRoute(
         transition
       )
     ) {
+      rollbackRouteStylesForTransition(
+        route
+      );
+
       removeNode(
         nextHost
       );
@@ -4109,6 +4430,10 @@ async function renderRoute(
             : "stale-error",
       };
     }
+
+    rollbackRouteStylesForTransition(
+      route
+    );
 
     renderFallback(
       "Error de vista",
@@ -4131,6 +4456,10 @@ async function renderRoute(
       );
 
     if (committed) {
+      clearRouteStylesForFallback(
+        "view-error"
+      );
+
       syncChrome(
         route,
         {
@@ -4262,18 +4591,40 @@ function renderNotFound(
     };
   }
 
-  commitRouteHost(
-    nextHost,
-    {
-      route:
-        null,
+  const committed =
+    commitRouteHost(
+      nextHost,
+      {
+        route:
+          null,
 
-      nextView:
-        null,
+        nextView:
+          null,
 
-      previousView,
-      previousHost,
-    }
+        previousView,
+        previousHost,
+      }
+    );
+
+  if (!committed) {
+    removeNode(
+      nextHost
+    );
+
+    return {
+      ok: false,
+      found: false,
+
+      reason:
+        "commit-failed",
+
+      renderSeq:
+        seq,
+    };
+  }
+
+  clearRouteStylesForFallback(
+    "not-found"
   );
 
   return {
@@ -4379,19 +4730,41 @@ function renderForbidden(
     };
   }
 
-  commitRouteHost(
-    nextHost,
-    {
-      route:
-        match.route ||
-        null,
+  const committed =
+    commitRouteHost(
+      nextHost,
+      {
+        route:
+          match.route ||
+          null,
 
-      nextView:
-        null,
+        nextView:
+          null,
 
-      previousView,
-      previousHost,
-    }
+        previousView,
+        previousHost,
+      }
+    );
+
+  if (!committed) {
+    removeNode(
+      nextHost
+    );
+
+    return {
+      ok: false,
+      forbidden: true,
+
+      reason:
+        "commit-failed",
+
+      renderSeq:
+        seq,
+    };
+  }
+
+  clearRouteStylesForFallback(
+    "forbidden"
   );
 
   return {

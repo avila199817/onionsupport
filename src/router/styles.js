@@ -13,7 +13,7 @@
 ========================================================= */
 
 export const ROUTE_STYLES_VERSION =
-  "route-styles.v2-direct-manifest-safe-gated";
+  "route-styles.v3-clear-fallback-safe-gated";
 
 const MODE_ATTRIBUTE =
   "data-css-route-mode";
@@ -1051,6 +1051,74 @@ export function rollbackRouteStyles(
 }
 
 /* =========================================================
+   CLEAR
+   Desactiva todos los CSS gestionados de ruta.
+
+   Uso:
+   - 404 / not-found.
+   - forbidden.
+   - fallback genérico tras error de vista.
+   - Las hojas ya descargadas permanecen cacheadas.
+========================================================= */
+
+export function clearRouteStyles(
+  options = {}
+) {
+  const reason =
+    cleanText(
+      options?.reason,
+      "clear"
+    );
+
+  if (
+    !isBrowser() ||
+    !routeModeEnabled()
+  ) {
+    return Object.freeze({
+      ok: true,
+      skipped: true,
+      mode: currentMode(),
+      reason,
+      activeViewKey,
+    });
+  }
+
+  for (
+    const link
+    of managedLinks()
+  ) {
+    setManagedLinkActive(
+      link,
+      false,
+      "cached"
+    );
+  }
+
+  activeViewKey =
+    "";
+
+  activeHrefs =
+    new Set();
+
+  preparedViewKey =
+    "";
+
+  preparedHrefs =
+    new Set();
+
+  return Object.freeze({
+    ok: true,
+    skipped: false,
+    mode: ROUTE_MODE,
+    reason,
+    activeViewKey,
+    active:
+      Object.freeze([]),
+  });
+}
+
+
+/* =========================================================
    INTROSPECTION
 ========================================================= */
 
@@ -1158,6 +1226,10 @@ export const RouteStyles =
     rollbackRouteStyles,
     rollback:
       rollbackRouteStyles,
+
+    clearRouteStyles,
+    clear:
+      clearRouteStyles,
 
     hasRouteStyleManifest,
     getRouteStyleHrefs,

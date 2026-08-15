@@ -22,7 +22,7 @@ import {
 } from "../index.js";
 
 export const LOGIN_TEMPLATE_VERSION =
-  "login.template.public.v6-portal-2026";
+  "login.template.public.v7-fullscreen-2026";
 
 const APP_NAME = "Onion Support";
 const HOME_HREF = "/";
@@ -433,10 +433,6 @@ function renderShowcase() {
 
 function renderTopbar() {
   const homeHref = homeAnchor("");
-  const servicesHref = homeAnchor("servicios");
-  const methodHref = homeAnchor("metodo");
-  const contactHref = homeAnchor("contacto");
-  const faqHref = homeAnchor("faq");
 
   return `
     <header class="login-topbar">
@@ -458,24 +454,6 @@ function renderTopbar() {
           <strong>ONION</strong><span>SUPPORT</span>
         </span>
       </a>
-
-      <nav
-        class="login-topbar-nav"
-        aria-label="Navegación pública"
-      >
-        <a href="${escapeAttr(homeHref)}">Inicio</a>
-        <a href="${escapeAttr(servicesHref)}">Servicios</a>
-        <a href="${escapeAttr(methodHref)}">Método</a>
-        <a href="${escapeAttr(contactHref)}">Contacto</a>
-        <a href="${escapeAttr(faqHref)}">FAQ</a>
-      </nav>
-
-      <span
-        class="login-topbar-panel"
-        aria-current="page"
-      >
-        Panel cliente
-      </span>
     </header>
   `;
 }

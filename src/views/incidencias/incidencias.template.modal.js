@@ -2,7 +2,7 @@
    Onion Support - Incidencias Detail Template
    Archivo: /src/views/incidencias/incidencias.template.modal.js
 
-   PRODUCTIVO · MODAL DETALLE 10/10 · V15
+   PRODUCTIVO · PREVIEW SAS SAFE · V16
 
    Responsabilidad:
    - Renderizar HTML puro del detalle de una incidencia.
@@ -11,20 +11,25 @@
    - Compatible con DTOs legacy/v2/v3 de tickets/incidencias.
    - Mantener arrays de attachments/history/comments intactos.
    - Header fijo + body scroll mediante detail.css.
-   - CTA de actualización junto al composer, no después del historial.
+   - CTA de actualización junto al composer.
    - No inventar técnico cuando no existe asignación real.
    - Preview inline únicamente para imagen/PDF.
+   - Nunca usar un Blob privado sin SAS como URL renderizable.
+   - Vista de adjuntos restringida a /tickets/ del Blob Storage Onion.
+   - Descargar sigue delegado al controlador/API.
    - Límites de comentario/adjuntos visibles para el usuario.
    - Semántica explícita cuando una actualización reabre la incidencia.
 
    IMPORTANTE:
    - Este archivo NO implementa focus trap ni confirmación de borrador.
-     Eso corresponde al controlador /src/views/incidencias/index.js.
+     Eso corresponde a /src/views/incidencias/index.js.
    - Este archivo NO cambia contratos HTTP.
+   - Este archivo NO genera SAS.
+     La SAS debe venir ya validada desde incidencias.api.js.
 ========================================================= */
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.production.v15";
+  "incidencias.template.modal.production.v16.preview-sas-safe";
 
 export const DETAIL_ACTIONS = Object.freeze({
   CLOSE: "detail-close",
@@ -51,9 +56,23 @@ const COMMENT_ID = "incidencias-modal-comment-input";
 const ATTACHMENTS_INPUT_ID = "incidencias-modal-attachments-input";
 
 const DEFAULT_CURRENCY = "EUR";
+
 const MAX_COMMENT_LENGTH = 4000;
 const MAX_PENDING_FILES = 10;
-const MAX_PENDING_FILE_SIZE = 100 * 1024 * 1024;
+const MAX_PENDING_FILE_SIZE =
+  100 * 1024 * 1024;
+
+/*
+   Contrato exacto del storage de tickets.
+   No ampliar a *.blob.core.windows.net:
+   una URL de adjunto renderizable debe pertenecer al storage real
+   de Onion Support y al contenedor tickets.
+*/
+const TRUSTED_ATTACHMENT_BLOB_HOST =
+  "onionassets.blob.core.windows.net";
+
+const TRUSTED_ATTACHMENT_CONTAINER_PREFIX =
+  "/tickets/";
 
 /* =========================================================
    BASICS
@@ -67,12 +86,19 @@ function isObject(value) {
   );
 }
 
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
+function safeObject(
+  value,
+  fallback = {}
+) {
+  return isObject(value)
+    ? value
+    : fallback;
 }
 
 function safeArray(value) {
-  if (Array.isArray(value)) return value;
+  if (Array.isArray(value)) {
+    return value;
+  }
 
   if (
     value &&
@@ -90,36 +116,67 @@ function safeArray(value) {
   return [];
 }
 
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+function cleanText(
+  value = "",
+  fallback = ""
+) {
+  const output =
+    String(value ?? "")
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
   return output || fallback;
 }
 
-function cleanMultiline(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{4,}/g, "\n\n\n")
-    .trim();
+function cleanMultiline(
+  value = "",
+  fallback = ""
+) {
+  const output =
+    String(value ?? "")
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{4,}/g, "\n\n\n")
+      .trim();
 
   return output || fallback;
 }
 
 /*
-   NO aplanar arrays.
+   NO aplanar arrays aquí.
    attachments/history/comments son valores completos.
 */
 function first(...values) {
   for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
-    if (isObject(value) && Object.keys(value).length === 0) continue;
+    if (
+      value === undefined ||
+      value === null
+    ) {
+      continue;
+    }
+
+    if (
+      typeof value === "string" &&
+      value.trim() === ""
+    ) {
+      continue;
+    }
+
+    if (
+      Array.isArray(value) &&
+      value.length === 0
+    ) {
+      continue;
+    }
+
+    if (
+      isObject(value) &&
+      Object.keys(value).length === 0
+    ) {
+      continue;
+    }
 
     return value;
   }
@@ -127,7 +184,10 @@ function first(...values) {
   return null;
 }
 
-function number(value = 0, fallback = 0) {
+function number(
+  value = 0,
+  fallback = 0
+) {
   if (
     value === null ||
     value === undefined ||
@@ -142,27 +202,44 @@ function number(value = 0, fallback = 0) {
       : fallback;
   }
 
-  if (typeof value === "boolean" || typeof value === "object") {
+  if (
+    typeof value === "boolean" ||
+    typeof value === "object"
+  ) {
     return fallback;
   }
 
   if (typeof value === "string") {
-    let clean = value
-      .trim()
-      .replace(/[€$£¥%]/g, "")
-      .replace(/[^\d.,+\-\s]/g, "")
-      .replace(/\s+/g, "");
+    let clean =
+      value
+        .trim()
+        .replace(/[€$£¥%]/g, "")
+        .replace(/[^\d.,+\-\s]/g, "")
+        .replace(/\s+/g, "");
 
-    if (!clean || clean === "-" || clean === "+") {
+    if (
+      !clean ||
+      clean === "-" ||
+      clean === "+"
+    ) {
       return fallback;
     }
 
-    const hasComma = clean.includes(",");
-    const hasDot = clean.includes(".");
+    const hasComma =
+      clean.includes(",");
 
-    if (hasComma && hasDot) {
-      const lastComma = clean.lastIndexOf(",");
-      const lastDot = clean.lastIndexOf(".");
+    const hasDot =
+      clean.includes(".");
+
+    if (
+      hasComma &&
+      hasDot
+    ) {
+      const lastComma =
+        clean.lastIndexOf(",");
+
+      const lastDot =
+        clean.lastIndexOf(".");
 
       clean =
         lastComma > lastDot
@@ -171,17 +248,20 @@ function number(value = 0, fallback = 0) {
               .replace(/,/g, ".")
           : clean.replace(/,/g, "");
     } else if (hasComma) {
-      clean = clean.replace(/,/g, ".");
+      clean =
+        clean.replace(/,/g, ".");
     }
 
-    const parsed = Number(clean);
+    const parsed =
+      Number(clean);
 
     return Number.isFinite(parsed)
       ? parsed
       : fallback;
   }
 
-  const parsed = Number(value);
+  const parsed =
+    Number(value);
 
   return Number.isFinite(parsed)
     ? parsed
@@ -198,35 +278,54 @@ function escapeHtml(value = "") {
 }
 
 function attr(value = "") {
-  return escapeHtml(cleanText(value, ""));
+  return escapeHtml(
+    cleanText(value, "")
+  );
 }
 
 function htmlAttrs(attrs = {}) {
-  return Object.entries(safeObject(attrs))
-    .map(([key, value]) => {
-      if (!key) return "";
-      if (
-        value === false ||
-        value === null ||
-        value === undefined
-      ) {
-        return "";
-      }
+  return Object.entries(
+    safeObject(attrs)
+  )
+    .map(
+      ([key, value]) => {
+        if (!key) {
+          return "";
+        }
 
-      if (value === true) {
-        return escapeHtml(key);
-      }
+        if (
+          value === false ||
+          value === null ||
+          value === undefined
+        ) {
+          return "";
+        }
 
-      return `${escapeHtml(key)}="${escapeHtml(value)}"`;
-    })
+        if (value === true) {
+          return escapeHtml(key);
+        }
+
+        return (
+          `${escapeHtml(key)}=` +
+          `"${escapeHtml(value)}"`
+        );
+      }
+    )
     .filter(Boolean)
     .join(" ");
 }
 
+/*
+   El flatten aquí es deliberado y local:
+   sólo compone clases CSS, nunca datos de dominio.
+*/
 function joinClasses(...values) {
   return values
     .flat(Infinity)
-    .map((value) => cleanText(value, ""))
+    .map(
+      (value) =>
+        cleanText(value, "")
+    )
     .filter(Boolean)
     .join(" ");
 }
@@ -235,29 +334,64 @@ function normalizeKey(value = "") {
   return cleanText(value, "")
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replace(
+      /[\u0300-\u036f]/g,
+      ""
+    )
     .replace(/[\s-]+/g, "_")
     .replace(/[^\w:.]/g, "")
     .replace(/^_+|_+$/g, "");
 }
 
-function safeUrl(value = "") {
-  const raw = cleanText(value, "");
+/* =========================================================
+   GENERIC URLS
+   Sólo para avatar/personas.
+   Adjuntos usan una política distinta y más estricta.
+========================================================= */
 
-  if (!raw) return "";
-  if (raw.startsWith("//")) return "";
-  if (/[\r\n\t\\]/.test(raw)) return "";
-  if (/^(javascript|data|vbscript|file):/i.test(raw)) return "";
+function safeUrl(value = "") {
+  const raw =
+    cleanText(value, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  if (
+    raw.startsWith("//") ||
+    /[\r\n\t\\]/.test(raw) ||
+    /^(javascript|data|vbscript|file):/i.test(
+      raw
+    )
+  ) {
+    return "";
+  }
 
   if (/^blob:/i.test(raw)) {
     return raw;
   }
 
   if (raw.startsWith("/")) {
-    return raw.replace(/\/{2,}/g, "/");
+    return raw.replace(
+      /\/{2,}/g,
+      "/"
+    );
   }
 
-  if (/^https?:\/\//i.test(raw)) {
+  if (/^https:\/\//i.test(raw)) {
+    try {
+      return new URL(raw).href;
+    } catch {
+      return "";
+    }
+  }
+
+  const localHttp =
+    /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(
+      raw
+    );
+
+  if (localHttp) {
     try {
       return new URL(raw).href;
     } catch {
@@ -269,10 +403,12 @@ function safeUrl(value = "") {
 }
 
 function firstUrl(...values) {
-  const queue = [...values];
+  const queue =
+    [...values];
 
   while (queue.length) {
-    const value = queue.shift();
+    const value =
+      queue.shift();
 
     if (
       value === undefined ||
@@ -281,23 +417,23 @@ function firstUrl(...values) {
       continue;
     }
 
+    if (Array.isArray(value)) {
+      queue.unshift(...value);
+      continue;
+    }
+
     if (isObject(value)) {
       queue.unshift(
-        value.viewUrl,
-        value.openUrl,
-        value.downloadUrl,
-        value.signedUrl,
-        value.blobUrl,
-        value.publicUrl,
-        value.url,
-        value.href,
-        value.src,
         value.avatarUrl,
         value.avatar,
         value.picture,
         value.photoUrl,
         value.photoURL,
         value.imageUrl,
+        value.src,
+        value.href,
+        value.url,
+
         value.profile?.avatarUrl,
         value.profile?.avatar,
         value.profile?.picture
@@ -306,7 +442,8 @@ function firstUrl(...values) {
       continue;
     }
 
-    const url = safeUrl(value);
+    const url =
+      safeUrl(value);
 
     if (url) {
       return url;
@@ -316,8 +453,182 @@ function firstUrl(...values) {
   return "";
 }
 
+/* =========================================================
+   ATTACHMENT URL POLICY
+========================================================= */
+
+function hasAzureSasSignature(
+  url = null
+) {
+  try {
+    return Boolean(
+      url?.searchParams?.get("sig")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isTrustedTicketBlobUrl(
+  url = null
+) {
+  if (!url) {
+    return false;
+  }
+
+  try {
+    return (
+      url.protocol === "https:" &&
+      url.hostname.toLowerCase() ===
+        TRUSTED_ATTACHMENT_BLOB_HOST &&
+      url.pathname
+        .toLowerCase()
+        .startsWith(
+          TRUSTED_ATTACHMENT_CONTAINER_PREFIX
+        )
+    );
+  } catch {
+    return false;
+  }
+}
+
+/*
+   Política:
+   - blob: únicamente para preview local del runtime.
+   - /ruta-relativa únicamente para same-origin.
+   - Azure: HTTPS + host exacto + /tickets/ + SAS firmada.
+   - Ningún otro host absoluto.
+   - Nunca transformar un blobUrl privado en "público".
+*/
+function safeAttachmentUrl(
+  value = "",
+  {
+    allowBlob = true,
+    requireAzureSas = true,
+  } = {}
+) {
+  const raw =
+    cleanText(value, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  if (
+    raw.startsWith("//") ||
+    /[\r\n\t\\]/.test(raw) ||
+    /^(javascript|data|vbscript|file):/i.test(
+      raw
+    )
+  ) {
+    return "";
+  }
+
+  if (/^blob:/i.test(raw)) {
+    return allowBlob
+      ? raw
+      : "";
+  }
+
+  if (raw.startsWith("/")) {
+    return raw.replace(
+      /\/{2,}/g,
+      "/"
+    );
+  }
+
+  if (!/^https:\/\//i.test(raw)) {
+    return "";
+  }
+
+  try {
+    const url =
+      new URL(raw);
+
+    if (
+      !isTrustedTicketBlobUrl(url)
+    ) {
+      return "";
+    }
+
+    if (
+      requireAzureSas &&
+      !hasAzureSasSignature(url)
+    ) {
+      /*
+         El contenedor tickets es privado.
+         Una URL Blob sin sig no es una URL de visualización.
+      */
+      return "";
+    }
+
+    return url.href;
+  } catch {
+    return "";
+  }
+}
+
+function firstAttachmentUrl(
+  ...values
+) {
+  const queue =
+    [...values];
+
+  while (queue.length) {
+    const value =
+      queue.shift();
+
+    if (
+      value === undefined ||
+      value === null
+    ) {
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      queue.unshift(...value);
+      continue;
+    }
+
+    if (isObject(value)) {
+      /*
+         Orden deliberado:
+         vista inline > aliases SAS > url ya normalizada.
+         downloadUrl NO se usa como vista inline.
+         blobUrl/publicUrl NO se usan como fallback.
+      */
+      queue.unshift(
+        value.viewUrl,
+        value.openUrl,
+        value.signedUrl,
+        value.sasUrl,
+        value.url,
+        value.href,
+        value.src
+      );
+
+      continue;
+    }
+
+    const url =
+      safeAttachmentUrl(value);
+
+    if (url) {
+      return url;
+    }
+  }
+
+  return "";
+}
+
+/* =========================================================
+   TEXT / FILE HELPERS
+========================================================= */
+
 function hashText(value = "") {
-  const text = cleanText(value, "");
+  const text =
+    cleanText(value, "");
+
   let hash = 0;
 
   for (
@@ -343,10 +654,13 @@ function initialsFrom(value = "") {
       .slice(0, 2)
       .map(
         (part) =>
-          part[0]?.toUpperCase() || ""
+          part[0]
+            ?.toUpperCase() ||
+          ""
       )
       .join("")
-      .slice(0, 2) || "ON"
+      .slice(0, 2) ||
+    "ON"
   );
 }
 
@@ -354,17 +668,24 @@ function safeFilename(
   value = "",
   fallback = "archivo"
 ) {
-  const raw = cleanText(
-    value,
-    fallback
-  )
-    .split(/[\\/]/)
-    .pop();
+  const raw =
+    cleanText(
+      value,
+      fallback
+    )
+      .split(/[\\/]/)
+      .pop();
 
   return (
     raw
-      .replace(/[\0\r\n\t]/g, "")
-      .replace(/[/:*?"<>|]+/g, "_")
+      .replace(
+        /[\0\r\n\t]/g,
+        ""
+      )
+      .replace(
+        /[/:*?"<>|]+/g,
+        "_"
+      )
       .replace(/\s+/g, " ")
       .trim()
       .slice(0, 160) ||
@@ -373,10 +694,11 @@ function safeFilename(
 }
 
 function fileExtension(value = "") {
-  const name = cleanText(
-    value,
-    ""
-  ).toLowerCase();
+  const name =
+    cleanText(
+      value,
+      ""
+    ).toLowerCase();
 
   const index =
     name.lastIndexOf(".");
@@ -408,15 +730,32 @@ function icon(name = "") {
     `aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
 
   const icons = {
-    close: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
-    plus: `<svg ${common}><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
-    ticket: `<svg ${common}><path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z"/><path d="M13 5v14"/></svg>`,
-    copy: `<svg ${common}><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`,
-    eye: `<svg ${common}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>`,
-    download: `<svg ${common}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>`,
-    paperclip: `<svg ${common}><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.82l8.48-8.49"/></svg>`,
-    file: `<svg ${common}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>`,
-    alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
+    close:
+      `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
+
+    plus:
+      `<svg ${common}><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
+
+    ticket:
+      `<svg ${common}><path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z"/><path d="M13 5v14"/></svg>`,
+
+    copy:
+      `<svg ${common}><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`,
+
+    eye:
+      `<svg ${common}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>`,
+
+    download:
+      `<svg ${common}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>`,
+
+    paperclip:
+      `<svg ${common}><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.82l8.48-8.49"/></svg>`,
+
+    file:
+      `<svg ${common}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>`,
+
+    alert:
+      `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
   };
 
   return (
@@ -430,9 +769,13 @@ function icon(name = "") {
 ========================================================= */
 
 function formatBytes(bytes = 0) {
-  const value = number(bytes, 0);
+  const value =
+    number(bytes, 0);
 
-  if (!value || value <= 0) {
+  if (
+    !value ||
+    value <= 0
+  ) {
     return "";
   }
 
@@ -451,7 +794,9 @@ function formatBytes(bytes = 0) {
 
   if (
     value <
-    1024 * 1024 * 1024
+    1024 *
+      1024 *
+      1024
   ) {
     return `${(
       value /
@@ -477,28 +822,34 @@ function formatMoney(
       "es-ES",
       {
         style: "currency",
-        currency: cleanText(
-          currency,
-          DEFAULT_CURRENCY
-        ).toUpperCase(),
+
+        currency:
+          cleanText(
+            currency,
+            DEFAULT_CURRENCY
+          ).toUpperCase(),
+
         maximumFractionDigits: 2,
       }
     ).format(
       number(value, 0)
     );
   } catch {
-    return `${number(
-      value,
-      0
-    ).toFixed(2)} €`;
+    return (
+      `${number(
+        value,
+        0
+      ).toFixed(2)} €`
+    );
   }
 }
 
 function formatDate(value = "") {
-  const raw = first(
-    value,
-    ""
-  );
+  const raw =
+    first(
+      value,
+      ""
+    );
 
   if (!raw) {
     return "—";
@@ -537,10 +888,11 @@ function formatDate(value = "") {
 function formatRelativeDate(
   value = ""
 ) {
-  const raw = first(
-    value,
-    ""
-  );
+  const raw =
+    first(
+      value,
+      ""
+    );
 
   if (!raw) {
     return "—";
@@ -552,9 +904,7 @@ function formatRelativeDate(
   const ms =
     date.getTime();
 
-  if (
-    !Number.isFinite(ms)
-  ) {
+  if (!Number.isFinite(ms)) {
     return cleanText(
       raw,
       "—"
@@ -580,40 +930,47 @@ function formatRelativeDate(
   }
 
   if (diff < hour) {
-    return `hace ${Math.max(
-      1,
-      Math.round(
-        diff / minute
-      )
-    )} min`;
+    return (
+      `hace ${Math.max(
+        1,
+        Math.round(
+          diff / minute
+        )
+      )} min`
+    );
   }
 
   if (diff < day) {
-    return `hace ${Math.max(
-      1,
-      Math.round(
-        diff / hour
-      )
-    )} h`;
+    return (
+      `hace ${Math.max(
+        1,
+        Math.round(
+          diff / hour
+        )
+      )} h`
+    );
   }
 
   if (diff < 7 * day) {
-    return `hace ${Math.max(
-      1,
-      Math.round(
-        diff / day
-      )
-    )} d`;
+    return (
+      `hace ${Math.max(
+        1,
+        Math.round(
+          diff / day
+        )
+      )} d`
+    );
   }
 
   return formatDate(raw);
 }
 
 function toTimestamp(value = "") {
-  const raw = first(
-    value,
-    ""
-  );
+  const raw =
+    first(
+      value,
+      ""
+    );
 
   if (!raw) {
     return 0;
@@ -647,6 +1004,7 @@ function getTicketId(detail = {}) {
       detail.ticketId,
       detail.incidenciaId,
       detail.id,
+
       raw.ticketId,
       raw.incidenciaId,
       raw.id,
@@ -666,6 +1024,7 @@ function getTitle(detail = {}) {
       detail.subject,
       detail.asunto,
       detail.title,
+
       raw.subject,
       raw.asunto,
       raw.title
@@ -686,6 +1045,7 @@ function getDescription(
       detail.descripcion,
       detail.message,
       detail.preview,
+
       raw.description,
       raw.descripcion,
       raw.message,
@@ -704,8 +1064,10 @@ function getStatus(detail = {}) {
       first(
         detail.status,
         detail.estado,
+
         raw.status,
         raw.estado,
+
         "open"
       )
     );
@@ -762,9 +1124,11 @@ function statusLabel(
 function statusClass(
   status = ""
 ) {
-  return status === "progress"
-    ? "in-progress"
-    : status || "open";
+  return (
+    status === "progress"
+      ? "in-progress"
+      : status || "open"
+  );
 }
 
 function statusWillReopen(
@@ -790,9 +1154,11 @@ function getPriority(
         detail.priority,
         detail.prioridad,
         detail.severity,
+
         raw.priority,
         raw.prioridad,
         raw.severity,
+
         "medium"
       )
     );
@@ -862,6 +1228,7 @@ function getCategory(
       detail.categoria,
       detail.tipo,
       detail.type,
+
       raw.category,
       raw.categoria,
       raw.tipo,
@@ -883,10 +1250,12 @@ function getRequester(
       detail.cliente,
       detail.receptor,
       detail.user,
+
       raw.requesterSnapshot,
       raw.cliente,
       raw.receptor,
       raw.user,
+
       {}
     )
   );
@@ -1185,8 +1554,10 @@ function getCurrency(
       detail.moneda,
       detail.facturaCurrency,
       detail.facturaMoneda,
+
       raw.currency,
       raw.moneda,
+
       DEFAULT_CURRENCY
     ),
     DEFAULT_CURRENCY
@@ -1231,10 +1602,12 @@ function getInvoiceLabel(
     invoiceId &&
     total > 0
   ) {
-    return `${invoiceId} · ${formatMoney(
-      total,
-      getCurrency(detail)
-    )}`;
+    return (
+      `${invoiceId} · ${formatMoney(
+        total,
+        getCurrency(detail)
+      )}`
+    );
   }
 
   if (invoiceId) {
@@ -1256,8 +1629,10 @@ function getCreatedAt(
   return first(
     detail.createdAt,
     raw.createdAt,
+
     detail.lifecycle?.createdAt,
     raw.lifecycle?.createdAt,
+
     null
   );
 }
@@ -1287,6 +1662,28 @@ function getUpdatedAt(
    ATTACHMENTS
 ========================================================= */
 
+function canonicalAttachmentId(
+  file = {},
+  index = 0
+) {
+  const raw =
+    safeObject(file);
+
+  return cleanText(
+    first(
+      raw.id,
+      raw.attachmentId,
+      raw.fileId,
+      raw.storageKey,
+      raw.path,
+      raw.blobPath,
+      raw.blobName,
+      `att_${index}`
+    ),
+    `att_${index}`
+  );
+}
+
 function normalizeAttachment(
   file = {},
   index = 0
@@ -1295,14 +1692,9 @@ function normalizeAttachment(
     safeObject(file);
 
   const id =
-    cleanText(
-      first(
-        raw.attachmentId,
-        raw.id,
-        raw.fileId,
-        `att_${index}`
-      ),
-      `att_${index}`
+    canonicalAttachmentId(
+      raw,
+      index
     );
 
   const name =
@@ -1328,20 +1720,27 @@ function normalizeAttachment(
       ""
     );
 
-  const url =
-    firstUrl(
+  /*
+     Sólo URLs de visualización.
+     blobUrl privado y downloadUrl no participan como fallback.
+  */
+  const viewUrl =
+    firstAttachmentUrl(
       raw.viewUrl,
       raw.openUrl,
-      raw.url,
-      raw.blobUrl,
-      raw.publicUrl,
       raw.signedUrl,
-      raw.downloadUrl
+      raw.sasUrl,
+      raw.url
     );
 
   return {
     ...raw,
 
+    /*
+       Contrato frontend canónico:
+       una única identidad lógica para nuevos/normalizados.
+       El endpoint backend sigue resolviendo aliases legacy.
+    */
     id,
     attachmentId: id,
 
@@ -1352,9 +1751,13 @@ function normalizeAttachment(
     contentType,
     mimeType: contentType,
     mimetype: contentType,
+
     type:
       contentType ||
-      cleanText(raw.type, ""),
+      cleanText(
+        raw.type,
+        ""
+      ),
 
     size:
       number(
@@ -1374,43 +1777,79 @@ function normalizeAttachment(
         0
       ),
 
-    url,
-    viewUrl:
-      firstUrl(
-        raw.viewUrl,
-        raw.openUrl,
-        url
-      ),
+    /*
+       La URL renderizable es siempre la misma vista segura.
+       NO copiamos blobUrl/downloadUrl privado a estos aliases.
+    */
+    url:
+      viewUrl,
 
+    viewUrl,
     openUrl:
-      firstUrl(
-        raw.openUrl,
-        raw.viewUrl,
-        url
-      ),
-
-    downloadUrl:
-      firstUrl(
-        raw.downloadUrl,
-        url
-      ),
+      viewUrl,
 
     signedUrl:
-      firstUrl(
-        raw.signedUrl,
-        url
+      viewUrl,
+
+    sasUrl:
+      viewUrl,
+
+    /*
+       downloadUrl se conserva únicamente si ya es una URL de adjunto
+       válida; el controlador no la usa para descargar: solicita una
+       SAS nueva al endpoint de descarga.
+    */
+    downloadUrl:
+      safeAttachmentUrl(
+        raw.downloadUrl
       ),
 
+    /*
+       Locator interno/legacy: se conserva como dato, nunca se usa
+       directamente para <img>/<iframe>.
+    */
     blobUrl:
-      firstUrl(
+      cleanText(
         raw.blobUrl,
-        url
+        ""
       ),
 
     publicUrl:
-      firstUrl(
+      cleanText(
         raw.publicUrl,
-        url
+        ""
+      ),
+
+    path:
+      cleanText(
+        first(
+          raw.path,
+          raw.blobPath,
+          ""
+        ),
+        ""
+      ),
+
+    blobPath:
+      cleanText(
+        first(
+          raw.blobPath,
+          raw.path,
+          ""
+        ),
+        ""
+      ),
+
+    storageKey:
+      cleanText(
+        raw.storageKey,
+        ""
+      ),
+
+    blobName:
+      cleanText(
+        raw.blobName,
+        ""
       ),
 
     uploadedAt:
@@ -1419,6 +1858,21 @@ function normalizeAttachment(
         raw.createdAt,
         null
       ),
+
+    meta: {
+      ...safeObject(
+        raw.meta
+      ),
+
+      attachmentIdPolicy:
+        "id_equals_attachmentId",
+
+      renderUrlPolicy:
+        "signed_view_only",
+
+      renderableView:
+        Boolean(viewUrl),
+    },
   };
 }
 
@@ -1454,25 +1908,23 @@ function getAttachmentId(
 ) {
   return cleanText(
     first(
-      file.attachmentId,
       file.id,
+      file.attachmentId,
       file.fileId
     ),
     ""
   );
 }
 
-function getAttachmentUrl(
+function getAttachmentViewUrl(
   file = {}
 ) {
-  return firstUrl(
+  return firstAttachmentUrl(
     file.viewUrl,
     file.openUrl,
-    file.url,
-    file.blobUrl,
-    file.publicUrl,
     file.signedUrl,
-    file.downloadUrl
+    file.sasUrl,
+    file.url
   );
 }
 
@@ -1537,6 +1989,40 @@ function isPdfLikeAttachment(
       "application/pdf"
     ) ||
     name.endsWith(".pdf")
+  );
+}
+
+function attachmentTypeLabel(
+  file = {}
+) {
+  if (
+    isImageLikeAttachment(file)
+  ) {
+    return "IMG";
+  }
+
+  if (
+    isPdfLikeAttachment(file)
+  ) {
+    return "PDF";
+  }
+
+  const name =
+    safeFilename(
+      first(
+        file.name,
+        file.filename,
+        file.fileName
+      ),
+      "archivo"
+    );
+
+  return (
+    fileExtension(name)
+      .replace(".", "")
+      .slice(0, 4)
+      .toUpperCase() ||
+    "DOC"
   );
 }
 
@@ -1672,8 +2158,12 @@ function getTimeline(
       .map(normalizeTimelineEntry)
       .sort(
         (a, b) =>
-          toTimestamp(b.createdAt) -
-          toTimestamp(a.createdAt)
+          toTimestamp(
+            b.createdAt
+          ) -
+          toTimestamp(
+            a.createdAt
+          )
       );
   }
 
@@ -1682,8 +2172,10 @@ function getTimeline(
       first(
         detail.history,
         detail.events,
+
         raw.history,
         raw.events,
+
         []
       )
     );
@@ -1694,9 +2186,11 @@ function getTimeline(
         detail.comments,
         detail.notes,
         detail.messages,
+
         raw.comments,
         raw.notes,
         raw.messages,
+
         []
       )
     );
@@ -1715,16 +2209,24 @@ function getTimeline(
         normalizeTimelineEntry(
           {
             ...safeObject(entry),
-            kind: "comment",
-            type: "comment",
+
+            kind:
+              "comment",
+
+            type:
+              "comment",
           },
           index
         )
     ),
   ].sort(
     (a, b) =>
-      toTimestamp(b.createdAt) -
-      toTimestamp(a.createdAt)
+      toTimestamp(
+        b.createdAt
+      ) -
+      toTimestamp(
+        a.createdAt
+      )
   );
 }
 
@@ -1766,6 +2268,20 @@ function buildVm(input = {}) {
       data.pendingFiles
     );
 
+  const previewSource =
+    safeObject(
+      data.previewFile,
+      null
+    );
+
+  const previewFile =
+    previewSource
+      ? normalizeAttachment(
+          previewSource,
+          0
+        )
+      : null;
+
   return {
     open:
       data.open === true &&
@@ -1788,7 +2304,9 @@ function buildVm(input = {}) {
       ),
 
     requiresReopen:
-      statusWillReopen(status),
+      statusWillReopen(
+        status
+      ),
 
     feedbackMessage:
       cleanText(
@@ -1814,11 +2332,7 @@ function buildVm(input = {}) {
         ""
       ),
 
-    previewFile:
-      safeObject(
-        data.previewFile,
-        null
-      ),
+    previewFile,
   };
 }
 
@@ -1877,16 +2391,19 @@ function shortTicketId(
       .filter(Boolean);
 
   const last =
-    parts.at(-1) || "";
+    parts.at(-1) ||
+    "";
 
   if (/^\d{6,}$/.test(last)) {
-    return `#${last.slice(-8)}`;
+    return (
+      `#${last.slice(-8)}`
+    );
   }
 
-  return `${id.slice(
-    0,
-    7
-  )}…${id.slice(-6)}`;
+  return (
+    `${id.slice(0, 7)}` +
+    `…${id.slice(-6)}`
+  );
 }
 
 function renderTicketIdChip(
@@ -1894,10 +2411,15 @@ function renderTicketIdChip(
   vm = {}
 ) {
   const fullId =
-    cleanText(ticketId, "");
+    cleanText(
+      ticketId,
+      ""
+    );
 
   const label =
-    shortTicketId(fullId);
+    shortTicketId(
+      fullId
+    );
 
   return `
     <button
@@ -1938,7 +2460,9 @@ function renderChip(
     );
 
   const safeModifier =
-    normalizeKey(modifier) ||
+    normalizeKey(
+      modifier
+    ) ||
     "neutral";
 
   return `
@@ -1974,6 +2498,7 @@ function renderAvatar(
       <div
         class="${joinClasses(
           "incidencias-modal-avatar-frame",
+
           avatarUrl
             ? ""
             : "incidencias-modal-avatar-frame--fallback"
@@ -2000,7 +2525,9 @@ function renderAvatar(
         }
 
         <span class="incidencias-modal-avatar-fallback">
-          ${escapeHtml(initialsFrom(name))}
+          ${escapeHtml(
+            initialsFrom(name)
+          )}
         </span>
       </div>
     </div>
@@ -2010,7 +2537,11 @@ function renderAvatar(
 function renderTechnicianValue(
   detail = {}
 ) {
-  if (!hasAssignedTechnician(detail)) {
+  if (
+    !hasAssignedTechnician(
+      detail
+    )
+  ) {
     return `
       <span
         class="incidencias-modal-technician-inline incidencias-modal-technician-inline--unassigned"
@@ -2059,6 +2590,7 @@ function renderTechnicianValue(
       <span
         class="${joinClasses(
           "incidencias-modal-technician-avatar",
+
           avatarUrl
             ? ""
             : "incidencias-modal-technician-avatar--fallback"
@@ -2084,11 +2616,16 @@ function renderTechnicianValue(
             : ""
         }
 
-        <span>${escapeHtml(initialsFrom(name))}</span>
+        <span>
+          ${escapeHtml(
+            initialsFrom(name)
+          )}
+        </span>
       </span>
 
       <span class="incidencias-modal-technician-copy">
         <strong>${escapeHtml(name)}</strong>
+
         ${
           email
             ? `<small>${escapeHtml(email)}</small>`
@@ -2110,15 +2647,20 @@ function renderMetaField(
   return `
     <div class="incidencias-modal-meta-card">
       <span>${escapeHtml(label)}</span>
+
       ${
         html
           ? value
-          : `<strong>${escapeHtml(
-              cleanText(
-                value,
-                "—"
-              )
-            )}</strong>`
+          : `
+            <strong>
+              ${escapeHtml(
+                cleanText(
+                  value,
+                  "—"
+                )
+              )}
+            </strong>
+          `
       }
     </div>
   `;
@@ -2227,6 +2769,7 @@ function renderPendingFiles(
                   file?.type,
                   ""
                 ),
+
                 formatBytes(
                   file?.size
                 ),
@@ -2337,6 +2880,7 @@ function renderComposer(
           <h3 id="incidencias-modal-composer-title">
             Añadir actualización
           </h3>
+
           <span>
             Escribe un comentario y, si lo necesitas, adjunta archivos de soporte.
           </span>
@@ -2361,9 +2905,12 @@ function renderComposer(
         data-modal-composer-foot="true"
       >
         <span>${escapeHtml(reopenCopy)}</span>
-        <strong>${escapeHtml(
-          `${vm.commentDraft.length}/${MAX_COMMENT_LENGTH}`
-        )}</strong>
+
+        <strong>
+          ${escapeHtml(
+            `${vm.commentDraft.length}/${MAX_COMMENT_LENGTH}`
+          )}
+        </strong>
       </div>
 
       <label
@@ -2446,12 +2993,9 @@ function renderAttachmentPreviewSquare(
   const isImage =
     isImageLikeAttachment(file);
 
-  const isPdf =
-    isPdfLikeAttachment(file);
-
   const url =
     isImage
-      ? getAttachmentUrl(file)
+      ? getAttachmentViewUrl(file)
       : "";
 
   const name =
@@ -2469,16 +3013,15 @@ function renderAttachmentPreviewSquare(
     busy.isOpening ||
     !busy.attachmentId;
 
+  /*
+     Si el detalle no trae una SAS inline válida:
+     NO pintamos un <img> roto con blobUrl privado.
+     Mostramos el tipo y "Ver" solicitará una SAS nueva al backend.
+  */
   if (
     !isImage ||
     !url
   ) {
-    const ext =
-      fileExtension(name)
-        .replace(".", "")
-        .slice(0, 4)
-        .toUpperCase();
-
     return `
       <button
         type="button"
@@ -2486,16 +3029,17 @@ function renderAttachmentPreviewSquare(
         data-attachment-id="${attr(busy.attachmentId)}"
         class="incidencias-modal-file-square"
         aria-label="${attr(`Ver ${name}`)}"
+        data-renderable-thumbnail="false"
         ${disabledAttrs(
           disabled,
           busy.isOpening
         )}
       >
-        <span>${escapeHtml(
-          isPdf
-            ? "PDF"
-            : ext || "DOC"
-        )}</span>
+        <span>
+          ${escapeHtml(
+            attachmentTypeLabel(file)
+          )}
+        </span>
       </button>
     `;
   }
@@ -2507,12 +3051,14 @@ function renderAttachmentPreviewSquare(
       data-attachment-id="${attr(busy.attachmentId)}"
       class="${joinClasses(
         "incidencias-modal-image-thumb-wrap",
+
         busy.isOpening
           ? "is-loading"
           : ""
       )}"
       aria-label="${attr(`Ampliar ${name}`)}"
       data-modal-thumb-frame="true"
+      data-renderable-thumbnail="true"
       data-thumb-error="false"
       ${disabledAttrs(
         disabled,
@@ -2666,63 +3212,72 @@ function renderAttachments(
             : `
               <div class="incidencias-modal-attachments-grid">
                 ${files
-                  .map((file) => {
-                    const id =
-                      getAttachmentId(file);
+                  .map(
+                    (file) => {
+                      const id =
+                        getAttachmentId(file);
 
-                    const name =
-                      safeFilename(
-                        first(
-                          file.name,
-                          file.filename,
-                          file.fileName
-                        ),
-                        "Archivo"
-                      );
-
-                    const meta =
-                      [
-                        cleanText(
+                      const name =
+                        safeFilename(
                           first(
-                            file.contentType,
-                            file.type,
-                            file.mimeType,
-                            file.mimetype
+                            file.name,
+                            file.filename,
+                            file.fileName
                           ),
-                          ""
-                        ),
+                          "Archivo"
+                        );
 
-                        formatBytes(
-                          file.size
-                        ),
+                      const meta =
+                        [
+                          cleanText(
+                            first(
+                              file.contentType,
+                              file.type,
+                              file.mimeType,
+                              file.mimetype
+                            ),
+                            ""
+                          ),
 
-                        file.uploadedAt
-                          ? formatDate(
-                              file.uploadedAt
-                            )
-                          : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" · ");
+                          formatBytes(
+                            file.size
+                          ),
 
-                    return `
-                      <article
-                        class="incidencias-modal-attachment-card"
-                        data-attachment-id="${attr(id)}"
-                      >
-                        <div class="incidencias-modal-attachment-row">
-                          ${renderAttachmentPreviewSquare(file, vm)}
+                          file.uploadedAt
+                            ? formatDate(
+                                file.uploadedAt
+                              )
+                            : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" · ");
 
-                          <div class="incidencias-modal-attachment-copy">
-                            <strong>${escapeHtml(name)}</strong>
-                            <span>${escapeHtml(meta || "Archivo adjunto")}</span>
+                      return `
+                        <article
+                          class="incidencias-modal-attachment-card"
+                          data-attachment-id="${attr(id)}"
+                          data-attachment-view-ready="${getAttachmentViewUrl(file) ? "true" : "false"}"
+                        >
+                          <div class="incidencias-modal-attachment-row">
+                            ${renderAttachmentPreviewSquare(file, vm)}
+
+                            <div class="incidencias-modal-attachment-copy">
+                              <strong>${escapeHtml(name)}</strong>
+
+                              <span>
+                                ${escapeHtml(
+                                  meta ||
+                                  "Archivo adjunto"
+                                )}
+                              </span>
+                            </div>
+
+                            ${renderAttachmentActionButtons(file, vm)}
                           </div>
-
-                          ${renderAttachmentActionButtons(file, vm)}
-                        </div>
-                      </article>
-                    `;
-                  })
+                        </article>
+                      `;
+                    }
+                  )
                   .join("")}
               </div>
             `
@@ -2745,21 +3300,25 @@ function renderAttachmentPreview(
       null
     );
 
+  if (!file) {
+    return "";
+  }
+
+  /*
+     NUNCA:
+     - downloadUrl
+     - blobUrl
+     - publicUrl
+
+     Para vista inline sólo usamos la URL que pasó la política
+     de adjuntos y que procede del endpoint /view.
+  */
   const url =
-    firstUrl(
-      file?.url,
-      file?.viewUrl,
-      file?.openUrl,
-      file?.downloadUrl,
-      file?.signedUrl,
-      file?.blobUrl,
-      file?.publicUrl
+    getAttachmentViewUrl(
+      file
     );
 
-  if (
-    !file ||
-    !url
-  ) {
+  if (!url) {
     return "";
   }
 
@@ -2790,13 +3349,18 @@ function renderAttachmentPreview(
     );
 
   const image =
-    isImageLikeAttachment(file);
+    isImageLikeAttachment(
+      file
+    );
 
   const pdf =
-    isPdfLikeAttachment(file);
+    isPdfLikeAttachment(
+      file
+    );
 
   const inlinePreview =
-    image || pdf;
+    image ||
+    pdf;
 
   const meta =
     [
@@ -2806,6 +3370,7 @@ function renderAttachmentPreview(
             ? "Vista previa"
             : "Documento"
         ),
+
       size,
     ]
       .filter(Boolean)
@@ -2822,7 +3387,10 @@ function renderAttachmentPreview(
             ? "pdf"
             : "document"
       }"
+      data-preview-url-policy="signed-view-only"
+      data-preview-attachment-id="${attr(getAttachmentId(file))}"
       aria-labelledby="incidencias-modal-preview-title"
+      tabindex="-1"
     >
       <div class="incidencias-modal-preview-head">
         <div class="incidencias-modal-preview-copy">
@@ -2831,7 +3399,10 @@ function renderAttachmentPreview(
           </strong>
 
           <span>
-            ${escapeHtml(meta || "Documento preparado")}
+            ${escapeHtml(
+              meta ||
+              "Documento preparado"
+            )}
           </span>
         </div>
 
@@ -2865,10 +3436,11 @@ function renderAttachmentPreview(
                 src="${attr(url)}"
                 alt="${attr(filename)}"
                 class="incidencias-modal-preview-image"
-                loading="lazy"
+                loading="eager"
                 decoding="async"
                 referrerpolicy="no-referrer"
                 draggable="false"
+                data-modal-preview-image="true"
               >
             </div>
           `
@@ -2879,8 +3451,9 @@ function renderAttachmentPreview(
                   src="${attr(url)}"
                   title="${attr(filename)}"
                   class="incidencias-modal-preview-iframe"
-                  loading="lazy"
+                  loading="eager"
                   referrerpolicy="no-referrer"
+                  data-modal-preview-pdf="true"
                 ></iframe>
               </div>
             `
@@ -2916,7 +3489,9 @@ function renderDescription(
       <p
         id="${DESCRIPTION_ID}"
         class="incidencias-modal-description"
-      >${escapeHtml(getDescription(detail))}</p>
+      >${escapeHtml(
+        getDescription(detail)
+      )}</p>
     </section>
   `;
 }
@@ -2988,98 +3563,103 @@ function renderTimeline(
   return `
     <div class="incidencias-timeline-list">
       ${timeline
-        .map((entry) => {
-          const kind =
-            cleanText(
-              entry.kind,
-              "event"
-            );
+        .map(
+          (entry) => {
+            const kind =
+              cleanText(
+                entry.kind,
+                "event"
+              );
 
-          const type =
-            cleanText(
-              entry.type,
-              "update"
-            );
+            const type =
+              cleanText(
+                entry.type,
+                "update"
+              );
 
-          const isComment =
-            kind === "comment";
+            const isComment =
+              kind === "comment";
 
-          const isCreated =
-            type === "created";
+            const isCreated =
+              type === "created";
 
-          const title =
-            cleanText(
-              entry.title,
-              isComment
-                ? "Comentario"
-                : isCreated
-                  ? "Incidencia creada"
-                  : "Actualización"
-            );
+            const title =
+              cleanText(
+                entry.title,
 
-          const body =
-            cleanMultiline(
-              entry.body,
-              "Actualización registrada."
-            );
-
-          return `
-            <article
-              class="${joinClasses(
-                "incidencias-timeline-card",
                 isComment
-                  ? "is-comment"
-                  : "",
-                isCreated
-                  ? "is-created"
-                  : ""
-              )}"
-            >
-              <div class="incidencias-timeline-accent"></div>
+                  ? "Comentario"
+                  : isCreated
+                    ? "Incidencia creada"
+                    : "Actualización"
+              );
 
-              <div class="incidencias-timeline-main">
-                <div class="incidencias-timeline-title-row">
-                  <strong class="incidencias-timeline-title">
-                    ${escapeHtml(title)}
+            const body =
+              cleanMultiline(
+                entry.body,
+                "Actualización registrada."
+              );
+
+            return `
+              <article
+                class="${joinClasses(
+                  "incidencias-timeline-card",
+
+                  isComment
+                    ? "is-comment"
+                    : "",
+
+                  isCreated
+                    ? "is-created"
+                    : ""
+                )}"
+              >
+                <div class="incidencias-timeline-accent"></div>
+
+                <div class="incidencias-timeline-main">
+                  <div class="incidencias-timeline-title-row">
+                    <strong class="incidencias-timeline-title">
+                      ${escapeHtml(title)}
+                    </strong>
+
+                    <span class="incidencias-timeline-kind">
+                      ${escapeHtml(
+                        isComment
+                          ? "Comentario"
+                          : isCreated
+                            ? "Sistema"
+                            : "Cambio"
+                      )}
+                    </span>
+                  </div>
+
+                  <p class="incidencias-timeline-body">
+                    ${escapeHtml(body)}
+                  </p>
+                </div>
+
+                <div class="incidencias-timeline-meta">
+                  <strong>
+                    ${escapeHtml(
+                      cleanText(
+                        entry.author,
+                        "Sistema"
+                      )
+                    )}
                   </strong>
 
-                  <span class="incidencias-timeline-kind">
+                  <span>
                     ${escapeHtml(
-                      isComment
-                        ? "Comentario"
-                        : isCreated
-                          ? "Sistema"
-                          : "Cambio"
+                      formatDate(
+                        entry.createdAt
+                      )
                     )}
                   </span>
                 </div>
-
-                <p class="incidencias-timeline-body">
-                  ${escapeHtml(body)}
-                </p>
-              </div>
-
-              <div class="incidencias-timeline-meta">
-                <strong>
-                  ${escapeHtml(
-                    cleanText(
-                      entry.author,
-                      "Sistema"
-                    )
-                  )}
-                </strong>
-
-                <span>
-                  ${escapeHtml(
-                    formatDate(
-                      entry.createdAt
-                    )
-                  )}
-                </span>
-              </div>
-            </article>
-          `;
-        })
+              </article>
+            `;
+          }
+        )
         .join("")}
     </div>
   `;
@@ -3147,6 +3727,7 @@ export function renderIncidenciasDetailModal(
       data-submitting="${vm.submitting ? "true" : "false"}"
       data-has-draft="${vm.hasDraft ? "true" : "false"}"
       data-requires-reopen="${vm.requiresReopen ? "true" : "false"}"
+      data-attachment-view-policy="signed-view-only"
     >
       <div
         class="incidencias-modal-overlay"
@@ -3156,6 +3737,7 @@ export function renderIncidenciasDetailModal(
           id="${PANEL_ID}"
           class="${joinClasses(
             "incidencias-modal-panel",
+
             vm.submitting
               ? "is-submitting"
               : ""
@@ -3190,7 +3772,10 @@ export function renderIncidenciasDetailModal(
                   class="incidencias-modal-hero-chips"
                   data-modal-header-chips="true"
                 >
-                  ${renderTicketIdChip(ticketId, vm)}
+                  ${renderTicketIdChip(
+                    ticketId,
+                    vm
+                  )}
 
                   ${renderChip(
                     statusLabel(status),
@@ -3252,7 +3837,11 @@ export function renderIncidenciasDetailModal(
               ${renderFeedbackBox(vm)}
             </div>
 
-            <div data-modal-preview-slot="true">
+            <div
+              data-modal-preview-slot="true"
+              data-preview-active="${vm.previewFile ? "true" : "false"}"
+              aria-live="polite"
+            >
               ${renderAttachmentPreview(vm)}
             </div>
 
@@ -3260,7 +3849,9 @@ export function renderIncidenciasDetailModal(
               ${renderMetaField(
                 "Técnico",
                 renderTechnicianValue(detail),
-                { html: true }
+                {
+                  html: true,
+                }
               )}
 
               ${renderMetaField(
@@ -3275,7 +3866,9 @@ export function renderIncidenciasDetailModal(
 
               ${renderMetaField(
                 "Adjuntos",
-                String(attachments.length)
+                String(
+                  attachments.length
+                )
               )}
             </div>
 
@@ -3355,6 +3948,7 @@ export function validateDetailUpdate({
   ) {
     return {
       valid: false,
+
       message:
         "Añade una actualización o selecciona al menos un archivo.",
     };
@@ -3366,6 +3960,7 @@ export function validateDetailUpdate({
   ) {
     return {
       valid: false,
+
       message:
         "Añade un poco más de detalle antes de enviar la actualización.",
     };
@@ -3377,6 +3972,7 @@ export function validateDetailUpdate({
   ) {
     return {
       valid: false,
+
       message:
         `El comentario no puede superar ${MAX_COMMENT_LENGTH} caracteres.`,
     };
@@ -3388,6 +3984,7 @@ export function validateDetailUpdate({
   ) {
     return {
       valid: false,
+
       message:
         `No puedes adjuntar más de ${MAX_PENDING_FILES} archivos en una actualización.`,
     };
@@ -3403,6 +4000,7 @@ export function validateDetailUpdate({
     ) {
       return {
         valid: false,
+
         message:
           `El archivo ${safeFilename(
             file?.name,
@@ -3446,38 +4044,134 @@ export function getDetailTemplateSnapshot() {
         MAX_PENDING_FILE_SIZE,
     },
 
+    attachmentView: {
+      host:
+        TRUSTED_ATTACHMENT_BLOB_HOST,
+
+      containerPrefix:
+        TRUSTED_ATTACHMENT_CONTAINER_PREFIX,
+
+      requireAzureSas:
+        true,
+
+      allowRelativeSameOrigin:
+        true,
+
+      allowBlobRuntime:
+        true,
+
+      usePrivateBlobLocatorAsView:
+        false,
+
+      useDownloadUrlAsView:
+        false,
+
+      inlineImage:
+        true,
+
+      inlinePdf:
+        true,
+
+      inlineOther:
+        false,
+    },
+
     policy: {
-      templateOnly: true,
-      spaIslandCompatible: true,
-      detailActionsStable: true,
-      dataFieldCompatibility: true,
+      templateOnly:
+        true,
 
-      noArrayFlatten: true,
-      requesterAliasCompatibility: true,
+      spaIslandCompatible:
+        true,
 
-      technicianUsesRealAssignmentOnly: true,
-      noFixedTechnicianFallback: true,
+      detailActionsStable:
+        true,
 
-      attachmentAliasCompatibility: true,
-      timelineAliasCompatibility: true,
-      invoiceAliasCompatibility: true,
+      dataFieldCompatibility:
+        true,
 
-      previewImage: true,
-      previewPdf: true,
-      previewOtherDocumentsInline: false,
+      noArrayFlatten:
+        true,
 
-      submitActionNearComposer: true,
-      explicitReopenCopy: true,
-      visibleUploadLimits: true,
-      exposesDirtyState: true,
+      requesterAliasCompatibility:
+        true,
 
-      noAuth: true,
-      noRouter: true,
-      noHttp: true,
-      noStore: true,
-      noStorage: true,
-      noDomApi: true,
-      noListeners: true,
+      technicianUsesRealAssignmentOnly:
+        true,
+
+      noFixedTechnicianFallback:
+        true,
+
+      attachmentAliasCompatibility:
+        true,
+
+      attachmentCanonicalId:
+        "id_equals_attachmentId",
+
+      attachmentViewSignedOnly:
+        true,
+
+      attachmentExactBlobHost:
+        true,
+
+      attachmentExactTicketsContainer:
+        true,
+
+      attachmentPrivateBlobUrlNotRendered:
+        true,
+
+      attachmentDownloadUrlNotUsedForPreview:
+        true,
+
+      attachmentThumbnailFallbackWithoutSas:
+        true,
+
+      timelineAliasCompatibility:
+        true,
+
+      invoiceAliasCompatibility:
+        true,
+
+      previewImage:
+        true,
+
+      previewPdf:
+        true,
+
+      previewOtherDocumentsInline:
+        false,
+
+      submitActionNearComposer:
+        true,
+
+      explicitReopenCopy:
+        true,
+
+      visibleUploadLimits:
+        true,
+
+      exposesDirtyState:
+        true,
+
+      noAuth:
+        true,
+
+      noRouter:
+        true,
+
+      noHttp:
+        true,
+
+      noStore:
+        true,
+
+      noStorage:
+        true,
+
+      noDomApi:
+        true,
+
+      noListeners:
+        true,
     },
   };
 }

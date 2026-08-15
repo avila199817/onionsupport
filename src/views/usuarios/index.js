@@ -2,7 +2,7 @@
    Onion Support - Usuarios Index
    Archivo: /src/views/usuarios/index.js
 
-   PRODUCTIVO · CONTROLADOR SPA · API BOUNDARY · V6
+   PRODUCTIVO · CONTROLADOR SPA · API BOUNDARY · V7 · DETAIL OPEN/REFRESH SAFE
 
    Responsabilidad:
    - Controlar exclusivamente la vista /usuarios.
@@ -14,6 +14,9 @@
    - Evitar listeners duplicados en mounts repetidos.
    - Proteger el host frente a destroy de controladores obsoletos.
    - Mantener compatibilidad con bridges/exports legacy.
+   - Abrir detalle inmediatamente desde el snapshot visible y reconciliar después.
+   - Evitar que una respuesta async reabra un modal que el usuario ya cerró.
+   - Mantener actualización del modal y store con guard de identidad/race.
    - No saltarse la validación del modal de creación.
    - Sin fetch/Http/localStorage propios.
 ========================================================= */
@@ -84,7 +87,7 @@ export const USUARIOS_VIEW_NAME = "UsuariosView";
 export const USUARIOS_CANONICAL_PATH = "/usuarios";
 
 export const USUARIOS_INDEX_VERSION =
-  "usuarios.index.api-boundary.v6.template-contract-v20";
+  "usuarios.index.api-boundary.v7.detail-open-refresh-race-safe";
 
 export const USUARIOS_VIEW_VERSION = USUARIOS_INDEX_VERSION;
 export const USUARIOS_MODULE_VERSION = USUARIOS_INDEX_VERSION;
@@ -1055,6 +1058,8 @@ function createUsuariosController(
   let visibleLimit = DEFAULT_VISIBLE_ROWS;
 
   let loadSequence = 0;
+  let detailSequence = 0;
+  let detailRefreshSequence = 0;
   let renderFrame = 0;
   let searchTimer = 0;
   let deferredRender = null;
@@ -1763,36 +1768,147 @@ function createUsuariosController(
 
     if (
       !id ||
-      openingUserId ||
       destroyed
     ) {
       return null;
     }
 
+    /*
+      Si ya estamos resolviendo exactamente el mismo usuario,
+      no arrancamos una segunda petición.
+    */
+    if (
+      openingUserId === id
+    ) {
+      return (
+        findUsuarioById(
+          items,
+          id
+        ) ||
+        null
+      );
+    }
+
+    const sequence =
+      ++detailSequence;
+
     openingUserId = id;
     error = "";
 
-    render({
-      history: true,
-      immediate: true,
-    });
+    /*
+      CRÍTICO:
+      No repintamos la tabla antes de abrir el modal.
+      El <tr> pulsado es el return-focus real; si sustituimos
+      .usuarios-history antes de open(), destruimos ese nodo.
+
+      El listado ya contiene un snapshot canónico suficiente para
+      abrir instantáneamente. El GET /:id sólo reconcilia después.
+    */
+    const cached =
+      findUsuarioById(
+        items,
+        id
+      ) ||
+      getUsuarioByIdApiStore(
+        id
+      ) ||
+      null;
+
+    let openedFromSnapshot =
+      false;
+
+    let visibleDetail =
+      cached
+        ? normalizeUsuarioModel(
+            cached
+          )
+        : null;
+
+    if (
+      visibleDetail &&
+      getUsuarioId(
+        visibleDetail
+      ) === id
+    ) {
+      const opened =
+        UsuariosDetailModal?.open?.(
+          visibleDetail
+        );
+
+      if (
+        opened !== false
+      ) {
+        openedFromSnapshot =
+          true;
+
+        /*
+          Ya está visualmente abierto.
+          No dejamos la fila en estado loading porque el usuario
+          puede trabajar/cerrar el modal mientras llega el detalle.
+        */
+        openingUserId = "";
+
+        emitEvent(
+          "usuarios:detail:opened",
+          {
+            detail:
+              visibleDetail,
+
+            userId:
+              id,
+
+            source:
+              "snapshot",
+          }
+        );
+      }
+    }
+
+    /*
+      Si por alguna razón no había snapshot, sí mostramos estado
+      loading en la fila mientras resolvemos el backend.
+    */
+    if (
+      !openedFromSnapshot
+    ) {
+      render({
+        history: true,
+        immediate: true,
+      });
+    }
 
     try {
-      const cached =
-        findUsuarioById(items, id);
-
       const detail =
-        (await loadUsuarioDetailApi(
+        await loadUsuarioDetailApi(
           id,
           {
             force: true,
+            dedupe: false,
             allowCacheFallback: true,
           }
-        )) || cached;
+        );
 
       if (
         destroyed ||
-        !detail
+        sequence !==
+          detailSequence ||
+        !isRouteActive()
+      ) {
+        return null;
+      }
+
+      const normalized =
+        detail
+          ? normalizeUsuarioModel(
+              detail
+            )
+          : visibleDetail;
+
+      if (
+        !normalized ||
+        getUsuarioId(
+          normalized
+        ) !== id
       ) {
         throw new Error(
           "USUARIO_DETAIL_NOT_FOUND"
@@ -1800,38 +1916,130 @@ function createUsuariosController(
       }
 
       syncFromApiSnapshot([
-        detail,
+        normalized,
         ...items,
       ]);
 
-      openingUserId = "";
+      visibleDetail =
+        normalized;
 
-      const opened =
-        UsuariosDetailModal?.open?.(
-          detail
+      const modalState =
+        safeObject(
+          UsuariosDetailModal
+            ?.getState?.(),
+          {}
         );
 
-      if (opened === false) {
-        throw new Error(
-          "USUARIO_DETAIL_MODAL_OPEN_FAILED"
+      const modalUserId =
+        cleanText(
+          first(
+            modalState.userId,
+            getUsuarioId(
+              modalState.detail
+            ),
+            ""
+          ),
+          ""
+        );
+
+      if (
+        openedFromSnapshot
+      ) {
+        /*
+          Nunca reabrir un modal que el usuario cerró mientras
+          la petición estaba en vuelo.
+        */
+        if (
+          modalState.isOpen ===
+            true &&
+          modalUserId === id
+        ) {
+          UsuariosDetailModal
+            ?.update?.(
+              normalized
+            );
+        }
+      } else {
+        const opened =
+          UsuariosDetailModal
+            ?.open?.(
+              normalized
+            );
+
+        if (
+          opened === false
+        ) {
+          throw new Error(
+            "USUARIO_DETAIL_MODAL_OPEN_FAILED"
+          );
+        }
+
+        emitEvent(
+          "usuarios:detail:opened",
+          {
+            detail:
+              normalized,
+
+            userId:
+              id,
+
+            source:
+              "backend",
+          }
         );
       }
 
+      /*
+        La tabla queda reconciliada en memoria. Si el modal sigue
+        abierto, renderNow la difiere para no destruir return-focus.
+      */
       render({
         history: true,
       });
 
       emitEvent(
-        "usuarios:detail:opened",
+        "usuarios:detail:updated",
         {
-          detail,
-          userId: id,
+          detail:
+            normalized,
+
+          userId:
+            id,
+
+          source:
+            "backend",
         }
       );
 
-      return detail;
+      return normalized;
     } catch (detailError) {
-      openingUserId = "";
+      if (
+        destroyed ||
+        sequence !==
+          detailSequence
+      ) {
+        return null;
+      }
+
+      /*
+        Si el modal ya se abrió desde el listado, no lo cerramos
+        porque falle el GET de enriquecimiento. El usuario conserva
+        la ficha visible y recibe aviso de que no se pudo refrescar.
+      */
+      if (
+        openedFromSnapshot &&
+        visibleDetail
+      ) {
+        showToast(
+          safeError(
+            detailError,
+            "No se pudo actualizar el detalle; se muestran los datos cargados."
+          ),
+          "error"
+        );
+
+        return visibleDetail;
+      }
 
       render({
         history: true,
@@ -1848,30 +2056,47 @@ function createUsuariosController(
       );
 
       return null;
+    } finally {
+      if (
+        sequence ===
+          detailSequence
+      ) {
+        openingUserId = "";
+      }
     }
   }
 
   async function refreshUsuario(
     userId = ""
   ) {
-    const modalState = safeObject(
-      UsuariosDetailModal?.getState?.(),
-      {}
-    );
+    const initialModalState =
+      safeObject(
+        UsuariosDetailModal
+          ?.getState?.(),
+        {}
+      );
 
     const id = cleanText(
       first(
         userId,
-        modalState.userId,
-        getUsuarioId(modalState.detail),
+        initialModalState.userId,
+        getUsuarioId(
+          initialModalState.detail
+        ),
         ""
       ),
       ""
     );
 
-    if (!id || destroyed) {
+    if (
+      !id ||
+      destroyed
+    ) {
       return null;
     }
+
+    const sequence =
+      ++detailRefreshSequence;
 
     try {
       const detail =
@@ -1884,23 +2109,106 @@ function createUsuariosController(
           }
         );
 
-      if (detail) {
-        UsuariosDetailModal?.update?.(
+      if (
+        destroyed ||
+        sequence !==
+          detailRefreshSequence ||
+        !isRouteActive()
+      ) {
+        return null;
+      }
+
+      if (!detail) {
+        return null;
+      }
+
+      const normalized =
+        normalizeUsuarioModel(
           detail
         );
 
-        syncFromApiSnapshot([
-          detail,
-          ...items,
-        ]);
-
-        render({
-          full: true,
-        });
+      if (
+        getUsuarioId(
+          normalized
+        ) !== id
+      ) {
+        throw new Error(
+          "USUARIO_REFRESH_ID_MISMATCH"
+        );
       }
 
-      return detail;
+      /*
+        Primero actualizamos la autoridad de datos.
+      */
+      syncFromApiSnapshot([
+        normalized,
+        ...items,
+      ]);
+
+      /*
+        Y sólo actualizamos el modal si SIGUE abierto para el mismo
+        usuario. update() del bridge abre cuando está cerrado; sin este
+        guard una respuesta tardía podía reabrir el modal sola.
+      */
+      const liveModalState =
+        safeObject(
+          UsuariosDetailModal
+            ?.getState?.(),
+          {}
+        );
+
+      const liveModalUserId =
+        cleanText(
+          first(
+            liveModalState.userId,
+            getUsuarioId(
+              liveModalState.detail
+            ),
+            ""
+          ),
+          ""
+        );
+
+      if (
+        liveModalState.isOpen ===
+          true &&
+        liveModalUserId === id
+      ) {
+        UsuariosDetailModal
+          ?.update?.(
+            normalized
+          );
+      }
+
+      /*
+        Con modal abierto este render queda diferido; al cerrar se
+        aplica al listado. Sin modal, actualiza inmediatamente.
+      */
+      render({
+        full: true,
+      });
+
+      emitEvent(
+        "usuarios:detail:refreshed",
+        {
+          detail:
+            normalized,
+
+          userId:
+            id,
+        }
+      );
+
+      return normalized;
     } catch (detailError) {
+      if (
+        sequence !==
+          detailRefreshSequence ||
+        destroyed
+      ) {
+        return null;
+      }
+
       showToast(
         safeError(
           detailError,
@@ -2657,6 +2965,14 @@ function createUsuariosController(
     const onModalClosed =
       () => {
         openingUserId = "";
+
+        /*
+          Invalida cualquier GET de apertura/refresh todavía en vuelo.
+          Una respuesta tardía no puede reabrir ni repintar otro modal.
+        */
+        detailSequence += 1;
+        detailRefreshSequence += 1;
+
         flushDeferredRender();
       };
 
@@ -3101,6 +3417,10 @@ function createUsuariosController(
           duplicateEventBindingProtected: true,
           staleControllerDestroyProtected: true,
           duplicateCreateRefreshProtected: true,
+          detailImmediateSnapshotOpen: true,
+          detailRemoteReconcileAfterOpen: true,
+          detailAsyncCloseRaceProtected: true,
+          detailRefreshNoReopenAfterClose: true,
           modalValidationBypass: false,
           csvFormulaInjectionProtected: true,
         },
@@ -3131,6 +3451,8 @@ function createUsuariosController(
       destroyed = true;
       mounted = false;
       loadSequence += 1;
+      detailSequence += 1;
+      detailRefreshSequence += 1;
 
       clearTimers();
       unbindHost();

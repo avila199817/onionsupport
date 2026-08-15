@@ -2,7 +2,7 @@
    Onion Support - Clientes Index
    Archivo: /src/views/clientes/index.js
 
-   PRODUCTIVO · CONTROLADOR PURO · API BOUNDARY · V6
+   PRODUCTIVO · CONTROLADOR PURO · API BOUNDARY · V7 · CREATE MODAL STABLE SHELL
 
    Responsabilidad:
    - Controlar /clientes y su ciclo de vida SPA.
@@ -19,6 +19,8 @@
    - Proteger la vista contra controllers obsoletos.
    - Proteger el detalle contra respuestas async fuera de orden.
    - Mantener el modal de creación aislado por controller.
+   - Mantener estable el shell DOM del modal mientras cambia su estado.
+   - No reconstruir overlay/panel al escribir, validar, buscar o seleccionar.
    - Mantener compatibilidad pública con ClientesView.
 ========================================================= */
 
@@ -81,7 +83,7 @@ export const CLIENTES_VIEW_NAME = "ClientesView";
 export const CLIENTES_CANONICAL_PATH = "/clientes";
 
 export const CLIENTES_INDEX_VERSION =
-  "clientes.index.api-boundary.v6.controller-ownership-race-safe";
+  "clientes.index.api-boundary.v7.create-modal-stable-shell";
 
 export const CLIENTES_VIEW_VERSION =
   CLIENTES_INDEX_VERSION;
@@ -113,11 +115,20 @@ const USER_SEARCH_DEBOUNCE_MS = 220;
 const EXTERNAL_CREATE_DEDUPE_MS = 750;
 const EXTERNAL_CREATE_REFRESH_DELAY_MS = 80;
 
+const CREATE_MODAL_ROOT_SELECTOR =
+  "[data-clientes-create-root='true']";
+
 const CREATE_MODAL_PANEL_SELECTOR =
   "[data-clientes-create-modal-panel='true']";
 
 const CREATE_MODAL_OVERLAY_SELECTOR =
   "[data-clientes-create-modal-overlay='true']";
+
+const CREATE_MODAL_BODY_SELECTOR =
+  ".cli-create-body, .inc-create-body";
+
+const CREATE_MODAL_USER_RESULTS_SELECTOR =
+  "[data-create-user-results='true']";
 
 const CREATE_SUCCESS_EVENTS = Object.freeze([
   "clientes:create:success",
@@ -2725,6 +2736,18 @@ function createClientesController(
         modalOwnership:
           true,
 
+        createModalStableShell:
+          true,
+
+        createModalNoPanelRemountOnStateRender:
+          true,
+
+        createModalFocusPreserved:
+          true,
+
+        createModalScrollPreserved:
+          true,
+
         detailRaceGuard:
           true,
 
@@ -3826,6 +3849,368 @@ function createClientesController(
     }
   }
 
+  function captureModalScroll(
+    hostNode = null
+  ) {
+    if (
+      !hostNode ||
+      !isBrowser()
+    ) {
+      return null;
+    }
+
+    const body =
+      hostNode.querySelector(
+        CREATE_MODAL_BODY_SELECTOR
+      );
+
+    const results =
+      hostNode.querySelector(
+        CREATE_MODAL_USER_RESULTS_SELECTOR
+      );
+
+    return {
+      bodyTop:
+        Number(
+          body?.scrollTop ||
+          0
+        ),
+
+      bodyLeft:
+        Number(
+          body?.scrollLeft ||
+          0
+        ),
+
+      resultsTop:
+        Number(
+          results?.scrollTop ||
+          0
+        ),
+
+      resultsLeft:
+        Number(
+          results?.scrollLeft ||
+          0
+        ),
+    };
+  }
+
+  function restoreModalScroll(
+    hostNode = null,
+    snapshot = null
+  ) {
+    if (
+      !hostNode ||
+      !snapshot
+    ) {
+      return false;
+    }
+
+    const body =
+      hostNode.querySelector(
+        CREATE_MODAL_BODY_SELECTOR
+      );
+
+    const results =
+      hostNode.querySelector(
+        CREATE_MODAL_USER_RESULTS_SELECTOR
+      );
+
+    try {
+      if (body) {
+        body.scrollTop =
+          Number(
+            snapshot.bodyTop ||
+            0
+          );
+
+        body.scrollLeft =
+          Number(
+            snapshot.bodyLeft ||
+            0
+          );
+      }
+
+      if (results) {
+        results.scrollTop =
+          Number(
+            snapshot.resultsTop ||
+            0
+          );
+
+        results.scrollLeft =
+          Number(
+            snapshot.resultsLeft ||
+            0
+          );
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function syncModalElementAttributes(
+    current = null,
+    next = null
+  ) {
+    if (
+      !current ||
+      !next
+    ) {
+      return false;
+    }
+
+    try {
+      for (
+        const attribute
+        of Array.from(
+          current.attributes ||
+          []
+        )
+      ) {
+        if (
+          !next.hasAttribute(
+            attribute.name
+          )
+        ) {
+          current.removeAttribute(
+            attribute.name
+          );
+        }
+      }
+
+      for (
+        const attribute
+        of Array.from(
+          next.attributes ||
+          []
+        )
+      ) {
+        current.setAttribute(
+          attribute.name,
+          attribute.value
+        );
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function patchCreateModalStableShell(
+    hostNode = null,
+    nextHtml = ""
+  ) {
+    if (
+      !hostNode ||
+      !isBrowser() ||
+      !nextHtml
+    ) {
+      return false;
+    }
+
+    const currentRoot =
+      hostNode.querySelector(
+        CREATE_MODAL_ROOT_SELECTOR
+      );
+
+    const currentOverlay =
+      hostNode.querySelector(
+        CREATE_MODAL_OVERLAY_SELECTOR
+      );
+
+    const currentPanel =
+      hostNode.querySelector(
+        CREATE_MODAL_PANEL_SELECTOR
+      );
+
+    if (
+      !currentRoot ||
+      !currentOverlay ||
+      !currentPanel
+    ) {
+      return false;
+    }
+
+    const template =
+      document.createElement(
+        "template"
+      );
+
+    template.innerHTML =
+      nextHtml;
+
+    const nextRoot =
+      template.content
+        .querySelector(
+          CREATE_MODAL_ROOT_SELECTOR
+        );
+
+    const nextOverlay =
+      template.content
+        .querySelector(
+          CREATE_MODAL_OVERLAY_SELECTOR
+        );
+
+    const nextPanel =
+      template.content
+        .querySelector(
+          CREATE_MODAL_PANEL_SELECTOR
+        );
+
+    if (
+      !nextRoot ||
+      !nextOverlay ||
+      !nextPanel
+    ) {
+      return false;
+    }
+
+    /*
+       CLAVE ANTI-PARPADEO:
+       conservamos físicamente los mismos nodos root/overlay/panel.
+       El CSS de create.css anima .cli-create-panel al entrar; si el
+       panel se sustituye con innerHTML, esa animación vuelve a empezar.
+       Aquí sólo sincronizamos atributos y el contenido INTERNO del panel.
+    */
+    syncModalElementAttributes(
+      currentRoot,
+      nextRoot
+    );
+
+    syncModalElementAttributes(
+      currentOverlay,
+      nextOverlay
+    );
+
+    syncModalElementAttributes(
+      currentPanel,
+      nextPanel
+    );
+
+    currentPanel.replaceChildren(
+      ...Array.from(
+        nextPanel.childNodes
+      )
+    );
+
+    return true;
+  }
+
+  function clearCreateFieldErrorDom(
+    target = null,
+    field = ""
+  ) {
+    if (
+      !target ||
+      !field ||
+      !modalHost
+    ) {
+      return false;
+    }
+
+    try {
+      const fieldContainer =
+        target.closest?.(
+          "[data-create-field]"
+        );
+
+      if (
+        fieldContainer &&
+        cleanText(
+          fieldContainer.getAttribute?.(
+            "data-create-field"
+          ),
+          ""
+        ) === field
+      ) {
+        fieldContainer.classList
+          ?.remove?.(
+            "is-error"
+          );
+      }
+
+      target.removeAttribute?.(
+        "aria-invalid"
+      );
+
+      const errorId =
+        `clientes-create-${field}-error`;
+
+      if (
+        target.getAttribute?.(
+          "aria-describedby"
+        ) === errorId
+      ) {
+        target.removeAttribute?.(
+          "aria-describedby"
+        );
+      }
+
+      for (
+        const errorNode
+        of Array.from(
+          modalHost.querySelectorAll(
+            ".cli-create-field-error, .inc-create-field-error"
+          ) ||
+          []
+        )
+      ) {
+        if (
+          errorNode.id ===
+          errorId
+        ) {
+          errorNode.remove();
+        }
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function clearCreateServerErrorDom() {
+    if (!modalHost) {
+      return false;
+    }
+
+    try {
+      const body =
+        modalHost.querySelector(
+          CREATE_MODAL_BODY_SELECTOR
+        );
+
+      if (!body) {
+        return false;
+      }
+
+      for (
+        const alert
+        of Array.from(
+          body.children ||
+          []
+        )
+      ) {
+        if (
+          alert.matches?.(
+            ".cli-create-alert.is-error, .inc-create-alert.is-error"
+          )
+        ) {
+          alert.remove();
+        }
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function focusableModalElements() {
     if (!modalHost) {
       return [];
@@ -3962,13 +4347,53 @@ function createClientesController(
         hostNode
       );
 
+    const scrollSnapshot =
+      captureModalScroll(
+        hostNode
+      );
+
     try {
-      hostNode.innerHTML =
+      const nextHtml =
         renderClientesCreateModal(
           createModalPayload()
         );
 
+      const hadStableShell =
+        Boolean(
+          hostNode.querySelector(
+            CREATE_MODAL_PANEL_SELECTOR
+          )
+        );
+
+      const patched =
+        hadStableShell
+          ? patchCreateModalStableShell(
+              hostNode,
+              nextHtml
+            )
+          : false;
+
+      /*
+         Únicamente el primer montaje (o un fallback defensivo)
+         crea el root/overlay/panel.
+         Los cambios posteriores NO sustituyen el panel.
+      */
+      if (!patched) {
+        hostNode.innerHTML =
+          nextHtml;
+      }
+
       syncBodyModalClass();
+
+      if (
+        patched &&
+        scrollSnapshot
+      ) {
+        restoreModalScroll(
+          hostNode,
+          scrollSnapshot
+        );
+      }
 
       if (
         !restoreModalFocus(
@@ -3998,8 +4423,18 @@ function createClientesController(
           "No se pudo renderizar el formulario de cliente."
         );
 
-      hostNode.textContent =
-        createModal.serverError;
+      /*
+         No destruimos un modal ya visible por un error de render.
+         Si todavía no existe panel, mostramos el error en el host.
+      */
+      if (
+        !hostNode.querySelector(
+          CREATE_MODAL_PANEL_SELECTOR
+        )
+      ) {
+        hostNode.textContent =
+          createModal.serverError;
+      }
 
       syncBodyModalClass();
 
@@ -4008,6 +4443,11 @@ function createClientesController(
   }
 
   function scheduleCreateModalRender() {
+    /*
+       Este render ya no remonta overlay/panel.
+       Sólo sincroniza el contenido interior manteniendo shell,
+       foco, caret y scroll.
+    */
     cancelFrame(
       modalFrame
     );
@@ -5469,10 +5909,21 @@ function createClientesController(
 
       createModal.errors =
         nextErrors;
+
+      clearCreateFieldErrorDom(
+        target,
+        field
+      );
     }
 
-    createModal.serverError =
-      "";
+    if (
+      createModal.serverError
+    ) {
+      createModal.serverError =
+        "";
+
+      clearCreateServerErrorDom();
+    }
 
     if (
       field === "tipo"
@@ -5485,7 +5936,10 @@ function createClientesController(
           value,
       });
 
-      scheduleCreateModalRender();
+      /*
+         El <select> ya refleja el valor en DOM.
+         No hay ninguna razón visual para regenerar el modal.
+      */
     }
 
     if (

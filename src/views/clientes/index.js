@@ -2,18 +2,24 @@
    Onion Support - Clientes Index
    Archivo: /src/views/clientes/index.js
 
-   PRODUCTIVO · CONTROLADOR PURO · API BOUNDARY · BACKEND CONTRACT V3
+   PRODUCTIVO · CONTROLADOR PURO · API BOUNDARY · V6
 
    Responsabilidad:
-   - Controlar la vista /clientes y su ciclo de vida SPA.
+   - Controlar /clientes y su ciclo de vida SPA.
    - Delegar TODA la API de Clientes a clientes.api.js.
-   - Delegar la búsqueda remota de usuarios a usuarios.api.js.
-   - No tener fetch/Http/localStorage/paginación backend propios.
-   - Mantener únicamente estado de presentación:
-     búsqueda, filtros, orden, visibleLimit y modales.
+   - Delegar búsqueda remota de Usuarios a usuarios.api.js.
+   - Mantener sólo estado de presentación y coordinación.
+   - Respetar el backend real:
+       GET  /api/clientes
+       GET  /api/clientes/:id
+       POST /api/clientes
+     Sin inventar PATCH / PUT / DELETE.
+   - Crear cliente desde un único POST y un único refresh canónico.
    - No convertir ACKs de creación en clientes falsos.
-   - Evitar doble refresh tras crear cliente.
-   - Mantener compatibilidad con el bridge público ClientesView.
+   - Proteger la vista contra controllers obsoletos.
+   - Proteger el detalle contra respuestas async fuera de orden.
+   - Mantener el modal de creación aislado por controller.
+   - Mantener compatibilidad pública con ClientesView.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -49,7 +55,6 @@ import {
 
 import {
   renderClientesCreateModal,
-  renderClientesCreateModalClosed,
   CREATE_ACTIONS,
   getCreateFormDefaults,
   validateCreateForm,
@@ -68,7 +73,7 @@ import {
 } from "../usuarios/usuarios.api.js";
 
 /* =========================================================
-   META / COMPAT EXPORTS
+   META / COMPAT
 ========================================================= */
 
 export const CLIENTES_MODULE_NAME = "clientes";
@@ -76,11 +81,16 @@ export const CLIENTES_VIEW_NAME = "ClientesView";
 export const CLIENTES_CANONICAL_PATH = "/clientes";
 
 export const CLIENTES_INDEX_VERSION =
-  "clientes.index.api-boundary.v5.backend-contract-v3";
+  "clientes.index.api-boundary.v6.controller-ownership-race-safe";
 
-export const CLIENTES_VIEW_VERSION = CLIENTES_INDEX_VERSION;
-export const CLIENTES_MODULE_VERSION = CLIENTES_INDEX_VERSION;
-export const CLIENTES_INDEX_SOURCE = "views.clientes.index";
+export const CLIENTES_VIEW_VERSION =
+  CLIENTES_INDEX_VERSION;
+
+export const CLIENTES_MODULE_VERSION =
+  CLIENTES_INDEX_VERSION;
+
+export const CLIENTES_INDEX_SOURCE =
+  "views.clientes.index";
 
 export {
   CLIENTES_ENDPOINT,
@@ -94,23 +104,20 @@ export {
 const DEFAULT_VISIBLE_LIMIT = 20;
 const VISIBLE_STEP = 20;
 const DEFAULT_SORT_ORDER = "desc";
+
 const SEARCH_DEBOUNCE_MS = 220;
-
-const MODAL_HOST_SELECTOR = "[data-clientes-modal-host='true']";
-const CREATE_MODAL_PANEL_SELECTOR =
-  "[data-clientes-create-modal-panel='true']";
-const CREATE_MODAL_OVERLAY_SELECTOR =
-  "[data-clientes-create-modal-overlay='true']";
-
 const USER_SEARCH_MIN_LENGTH = 2;
 const USER_SEARCH_LIMIT = 8;
 const USER_SEARCH_DEBOUNCE_MS = 220;
 
-const INSTANCES = new WeakMap();
+const EXTERNAL_CREATE_DEDUPE_MS = 750;
+const EXTERNAL_CREATE_REFRESH_DELAY_MS = 80;
 
-const CLIENTES_GLOBAL_CONTROLLER_KEY = Symbol.for(
-  "onion.support.clientes.active-controller"
-);
+const CREATE_MODAL_PANEL_SELECTOR =
+  "[data-clientes-create-modal-panel='true']";
+
+const CREATE_MODAL_OVERLAY_SELECTOR =
+  "[data-clientes-create-modal-overlay='true']";
 
 const CREATE_SUCCESS_EVENTS = Object.freeze([
   "clientes:create:success",
@@ -119,14 +126,23 @@ const CREATE_SUCCESS_EVENTS = Object.freeze([
   "cliente:created",
 ]);
 
-const CREATE_CLOSE_EVENTS = Object.freeze([
-  "clientes:create:closed",
-  "clientes:create:close",
-]);
-
 const DETAIL_CLOSE_EVENTS = Object.freeze([
   "clientes:modal:closed",
 ]);
+
+const INSTANCES = new WeakMap();
+
+const CLIENTES_GLOBAL_CONTROLLER_KEY = Symbol.for(
+  "onion.support.clientes.active-controller"
+);
+
+const CLIENTES_ROOT_OWNER_KEY = Symbol.for(
+  "onion.support.clientes.root-owner"
+);
+
+const CLIENTES_DETAIL_OWNER_KEY = Symbol.for(
+  "onion.support.clientes.detail-owner"
+);
 
 let lastInstance = null;
 let controllerSequence = 0;
@@ -173,7 +189,9 @@ function isElementNode(value = null) {
 }
 
 function safeArray(value) {
-  if (Array.isArray(value)) return value;
+  if (Array.isArray(value)) {
+    return value;
+  }
 
   if (
     value &&
@@ -191,29 +209,61 @@ function safeArray(value) {
   return [];
 }
 
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
+function safeObject(
+  value,
+  fallback = {}
+) {
+  return isObject(value)
+    ? value
+    : fallback;
 }
 
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+function cleanText(
+  value = "",
+  fallback = ""
+) {
+  const output =
+    String(value ?? "")
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
   return output || fallback;
 }
 
 /*
-  No aplanar arrays.
-  En esta vista hay envelopes con items/results y deben conservarse.
+   No aplanar arrays.
+   Los envelopes items/results son estructuras de dominio.
 */
 function first(...values) {
   for (const value of values) {
-    if (value === null || value === undefined) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
-    if (isObject(value) && Object.keys(value).length === 0) continue;
+    if (
+      value === null ||
+      value === undefined
+    ) {
+      continue;
+    }
+
+    if (
+      typeof value === "string" &&
+      value.trim() === ""
+    ) {
+      continue;
+    }
+
+    if (
+      Array.isArray(value) &&
+      value.length === 0
+    ) {
+      continue;
+    }
+
+    if (
+      isObject(value) &&
+      Object.keys(value).length === 0
+    ) {
+      continue;
+    }
 
     return value;
   }
@@ -221,7 +271,10 @@ function first(...values) {
   return null;
 }
 
-function number(value = 0, fallback = 0) {
+function number(
+  value = 0,
+  fallback = 0
+) {
   if (
     value === null ||
     value === undefined ||
@@ -230,75 +283,127 @@ function number(value = 0, fallback = 0) {
     return fallback;
   }
 
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : fallback;
+  if (
+    typeof value === "number"
+  ) {
+    return Number.isFinite(value)
+      ? value
+      : fallback;
   }
 
-  if (typeof value === "string") {
-    let normalized = value
-      .trim()
-      .replace(/[€$£¥%]/g, "")
-      .replace(/[^\d.,+\-\s]/g, "")
-      .replace(/\s+/g, "");
+  if (
+    typeof value === "string"
+  ) {
+    let normalized =
+      value
+        .trim()
+        .replace(/[€$£¥%]/g, "")
+        .replace(/[^\d.,+\-\s]/g, "")
+        .replace(/\s+/g, "");
 
-    if (!normalized || normalized === "-" || normalized === "+") {
+    if (
+      !normalized ||
+      normalized === "-" ||
+      normalized === "+"
+    ) {
       return fallback;
     }
 
-    const hasComma = normalized.includes(",");
-    const hasDot = normalized.includes(".");
+    const comma =
+      normalized.lastIndexOf(",");
 
-    if (hasComma && hasDot) {
-      const lastComma = normalized.lastIndexOf(",");
-      const lastDot = normalized.lastIndexOf(".");
+    const dot =
+      normalized.lastIndexOf(".");
 
+    if (
+      comma >= 0 &&
+      dot >= 0
+    ) {
       normalized =
-        lastComma > lastDot
-          ? normalized.replace(/\./g, "").replace(/,/g, ".")
-          : normalized.replace(/,/g, "");
-    } else if (hasComma) {
-      normalized = normalized.replace(/,/g, ".");
+        comma > dot
+          ? normalized
+              .replace(/\./g, "")
+              .replace(/,/g, ".")
+          : normalized
+              .replace(/,/g, "");
+    } else if (comma >= 0) {
+      normalized =
+        normalized.replace(/,/g, ".");
     }
 
-    const parsed = Number(normalized);
-    return Number.isFinite(parsed) ? parsed : fallback;
+    const parsed =
+      Number(normalized);
+
+    return Number.isFinite(parsed)
+      ? parsed
+      : fallback;
   }
 
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  const parsed =
+    Number(value);
+
+  return Number.isFinite(parsed)
+    ? parsed
+    : fallback;
 }
 
-function clamp(value = 0, min = 0, max = 1) {
+function clamp(
+  value = 0,
+  min = 0,
+  max = 1
+) {
   return Math.min(
-    Math.max(number(value, min), min),
+    Math.max(
+      number(value, min),
+      min
+    ),
     max
   );
 }
 
-function normalizeKey(value = "") {
+function normalizeKey(
+  value = ""
+) {
   return cleanText(value, "")
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replace(
+      /[\u0300-\u036f]/g,
+      ""
+    )
     .replace(/[\s-]+/g, "_")
     .replace(/[^\w:.]/g, "")
     .replace(/^_+|_+$/g, "");
 }
 
-function normalizeSearch(value = "") {
+function normalizeSearch(
+  value = ""
+) {
   return cleanText(value, "")
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9@._+\-\s]+/g, " ")
+    .replace(
+      /[\u0300-\u036f]/g,
+      ""
+    )
+    .replace(
+      /[^a-z0-9@._+\-\s]+/g,
+      " "
+    )
     .replace(/\s+/g, " ")
     .trim();
 }
 
-function normalizeEmail(value = "") {
-  const email = cleanText(value, "").toLowerCase();
+function normalizeEmail(
+  value = ""
+) {
+  const email =
+    cleanText(value, "")
+      .toLowerCase();
 
-  if (!email) return "";
+  if (!email) {
+    return "";
+  }
 
   if (
     [
@@ -315,32 +420,36 @@ function normalizeEmail(value = "") {
     return "";
   }
 
-  return email.includes("@") ? email : "";
+  return email.includes("@")
+    ? email
+    : "";
 }
 
-function normalizeSortOrder(value = "") {
-  const order = normalizeKey(
-    value || DEFAULT_SORT_ORDER
-  );
+function normalizeSortOrder(
+  value = ""
+) {
+  const order =
+    normalizeKey(
+      value ||
+      DEFAULT_SORT_ORDER
+    );
 
-  if (
-    [
-      "asc",
-      "ascending",
-      "oldest",
-      "antiguos",
-      "menor",
-      "menor_mayor",
-      "menor_a_mayor",
-    ].includes(order)
-  ) {
-    return "asc";
-  }
-
-  return "desc";
+  return [
+    "asc",
+    "ascending",
+    "oldest",
+    "antiguos",
+    "menor",
+    "menor_mayor",
+    "menor_a_mayor",
+  ].includes(order)
+    ? "asc"
+    : "desc";
 }
 
-function getNextSortOrder(value = DEFAULT_SORT_ORDER) {
+function getNextSortOrder(
+  value = DEFAULT_SORT_ORDER
+) {
   return normalizeSortOrder(value) === "asc"
     ? "desc"
     : "asc";
@@ -348,7 +457,8 @@ function getNextSortOrder(value = DEFAULT_SORT_ORDER) {
 
 function safeError(
   error = null,
-  fallback = "No se pudieron cargar los clientes."
+  fallback =
+    "No se pudieron cargar los clientes."
 ) {
   return cleanText(
     first(
@@ -365,7 +475,9 @@ function safeError(
   );
 }
 
-function toTimestamp(value = null) {
+function toTimestamp(
+  value = null
+) {
   if (
     value === null ||
     value === undefined ||
@@ -374,38 +486,55 @@ function toTimestamp(value = null) {
     return 0;
   }
 
-  if (typeof value === "number") {
-    if (!Number.isFinite(value) || value === 0) {
+  if (
+    typeof value === "number"
+  ) {
+    if (
+      !Number.isFinite(value) ||
+      value === 0
+    ) {
       return 0;
     }
 
-    return value > 9_999_999_999
-      ? value
-      : value * 1000;
+    return value >
+      9_999_999_999
+        ? value
+        : value * 1000;
   }
 
   const text =
     cleanText(value, "");
 
-  if (!text) return 0;
+  if (!text) {
+    return 0;
+  }
 
-  if (/^[+\-]?\d+(?:\.\d+)?$/.test(text)) {
-    const numeric = Number(text);
+  if (
+    /^[+\-]?\d+(?:\.\d+)?$/.test(
+      text
+    )
+  ) {
+    const numeric =
+      Number(text);
 
-    if (!Number.isFinite(numeric) || numeric === 0) {
+    if (
+      !Number.isFinite(numeric) ||
+      numeric === 0
+    ) {
       return 0;
     }
 
-    return numeric > 9_999_999_999
-      ? numeric
-      : numeric * 1000;
+    return numeric >
+      9_999_999_999
+        ? numeric
+        : numeric * 1000;
   }
 
-  const parsedDate =
+  const parsed =
     Date.parse(text);
 
-  return Number.isFinite(parsedDate)
-    ? parsedDate
+  return Number.isFinite(parsed)
+    ? parsed
     : 0;
 }
 
@@ -417,24 +546,50 @@ function getGlobalObject() {
   }
 }
 
-function nextFrame(callback = null) {
-  if (!isBrowser() || !isFunction(callback)) {
+function nextFrame(
+  callback = null
+) {
+  if (
+    !isBrowser() ||
+    !isFunction(callback)
+  ) {
     return 0;
   }
 
   try {
-    return window.requestAnimationFrame(callback);
+    return window
+      .requestAnimationFrame(
+        callback
+      );
   } catch {
-    return window.setTimeout(callback, 0);
+    return window.setTimeout(
+      callback,
+      0
+    );
   }
 }
 
-function cancelFrame(id = 0) {
-  if (!id || !isBrowser()) return false;
+function cancelFrame(
+  id = 0
+) {
+  if (
+    !id ||
+    !isBrowser()
+  ) {
+    return false;
+  }
 
   try {
-    window.cancelAnimationFrame?.(id);
-    window.clearTimeout?.(id);
+    window
+      .cancelAnimationFrame?.(
+        id
+      );
+
+    window
+      .clearTimeout?.(
+        id
+      );
+
     return true;
   } catch {
     return false;
@@ -442,10 +597,12 @@ function cancelFrame(id = 0) {
 }
 
 /* =========================================================
-   CANONICAL CLIENT VIEW HELPERS
+   CANONICAL CLIENT HELPERS
 ========================================================= */
 
-function canonicalCliente(item = {}) {
+function canonicalCliente(
+  item = {}
+) {
   try {
     return normalizeClienteModel(
       safeObject(item, {})
@@ -455,16 +612,23 @@ function canonicalCliente(item = {}) {
   }
 }
 
-function cloneItems(items = []) {
+function cloneItems(
+  items = []
+) {
   return normalizeClientesCollection(
     safeArray(items)
-  ).map((item) => ({
-    ...item,
-  }));
+  ).map(
+    (item) => ({
+      ...item,
+    })
+  );
 }
 
-function getClienteId(item = {}) {
-  const current = canonicalCliente(item);
+function getClienteId(
+  item = {}
+) {
+  const current =
+    canonicalCliente(item);
 
   return cleanText(
     first(
@@ -480,8 +644,11 @@ function getClienteId(item = {}) {
   );
 }
 
-function getClienteCode(item = {}) {
-  const current = canonicalCliente(item);
+function getClienteCode(
+  item = {}
+) {
+  const current =
+    canonicalCliente(item);
 
   return cleanText(
     first(
@@ -496,8 +663,11 @@ function getClienteCode(item = {}) {
   );
 }
 
-function getClienteName(item = {}) {
-  const current = canonicalCliente(item);
+function getClienteName(
+  item = {}
+) {
+  const current =
+    canonicalCliente(item);
 
   return cleanText(
     first(
@@ -517,8 +687,11 @@ function getClienteName(item = {}) {
   );
 }
 
-function getClienteEmail(item = {}) {
-  const current = canonicalCliente(item);
+function getClienteEmail(
+  item = {}
+) {
+  const current =
+    canonicalCliente(item);
 
   return normalizeEmail(
     first(
@@ -532,8 +705,11 @@ function getClienteEmail(item = {}) {
   );
 }
 
-function getClientePhone(item = {}) {
-  const current = canonicalCliente(item);
+function getClientePhone(
+  item = {}
+) {
+  const current =
+    canonicalCliente(item);
 
   return cleanText(
     first(
@@ -547,8 +723,11 @@ function getClientePhone(item = {}) {
   );
 }
 
-function getClienteCity(item = {}) {
-  const current = canonicalCliente(item);
+function getClienteCity(
+  item = {}
+) {
+  const current =
+    canonicalCliente(item);
 
   return cleanText(
     first(
@@ -564,8 +743,11 @@ function getClienteCity(item = {}) {
   );
 }
 
-function getClienteNif(item = {}) {
-  const current = canonicalCliente(item);
+function getClienteNif(
+  item = {}
+) {
+  const current =
+    canonicalCliente(item);
 
   return cleanText(
     first(
@@ -578,8 +760,11 @@ function getClienteNif(item = {}) {
   ).toUpperCase();
 }
 
-function getClienteType(item = {}) {
-  const current = canonicalCliente(item);
+function getClienteType(
+  item = {}
+) {
+  const current =
+    canonicalCliente(item);
 
   return normalizeKey(
     first(
@@ -592,8 +777,11 @@ function getClienteType(item = {}) {
   );
 }
 
-function getClienteStatus(item = {}) {
-  const current = canonicalCliente(item);
+function getClienteStatus(
+  item = {}
+) {
+  const current =
+    canonicalCliente(item);
 
   return normalizeKey(
     first(
@@ -605,13 +793,53 @@ function getClienteStatus(item = {}) {
   );
 }
 
-/*
-  El template visual trata VIP como activo.
-  Mantenemos la misma semántica en stats/export para no tener
-  contadores distintos entre controlador y tabla.
-*/
-function viewStatusBucket(item = {}) {
-  const status = getClienteStatus(item);
+function getClienteAmount(
+  item = {}
+) {
+  const current =
+    canonicalCliente(item);
+
+  return number(
+    first(
+      current.totalAmount,
+      current.totalImporte,
+      current.facturasTotal,
+      0
+    ),
+    0
+  );
+}
+
+function getClienteUpdatedAt(
+  item = {}
+) {
+  const current =
+    canonicalCliente(item);
+
+  return first(
+    current.lastActivityAt,
+    current.updatedAt,
+    current.lastInvoiceAt,
+    current.lastTicketAt,
+    current.lastContactAt,
+    current.createdAt,
+    0
+  );
+}
+
+function clienteSortTime(
+  item = {}
+) {
+  return toTimestamp(
+    getClienteUpdatedAt(item)
+  );
+}
+
+function viewStatusBucket(
+  item = {}
+) {
+  const status =
+    getClienteStatus(item);
 
   if (
     [
@@ -643,42 +871,11 @@ function viewStatusBucket(item = {}) {
   return "active";
 }
 
-function getClienteUpdatedAt(item = {}) {
-  const current = canonicalCliente(item);
-
-  return first(
-    current.lastActivityAt,
-    current.updatedAt,
-    current.lastInvoiceAt,
-    current.lastTicketAt,
-    current.lastContactAt,
-    current.createdAt,
-    0
-  );
-}
-
-function clienteSortTime(item = {}) {
-  return toTimestamp(
-    getClienteUpdatedAt(item)
-  );
-}
-
-function getClienteAmount(item = {}) {
-  const current = canonicalCliente(item);
-
-  return number(
-    first(
-      current.totalAmount,
-      current.totalImporte,
-      current.facturasTotal,
-      0
-    ),
-    0
-  );
-}
-
-function clienteSearchText(item = {}) {
-  const current = canonicalCliente(item);
+function clienteSearchText(
+  item = {}
+) {
+  const current =
+    canonicalCliente(item);
 
   return normalizeSearch(
     [
@@ -700,140 +897,243 @@ function filterClientesForView(
   {
     filter = "all",
     search = "",
-    sortOrder = DEFAULT_SORT_ORDER,
+    sortOrder =
+      DEFAULT_SORT_ORDER,
   } = {}
 ) {
   const bucket =
-    normalizeKey(filter || "all") || "all";
+    normalizeKey(
+      filter ||
+      "all"
+    ) ||
+    "all";
 
-  const query = normalizeSearch(search);
-  const terms = query
-    .split(/\s+/)
-    .filter(Boolean);
+  const terms =
+    normalizeSearch(search)
+      .split(/\s+/)
+      .filter(Boolean);
 
   const order =
-    normalizeSortOrder(sortOrder);
+    normalizeSortOrder(
+      sortOrder
+    );
 
-  return normalizeClientesCollection(items)
-    .filter((item) => {
-      if (
-        bucket !== "all" &&
-        viewStatusBucket(item) !== bucket
-      ) {
-        return false;
-      }
-
-      if (!terms.length) return true;
-
-      const haystack =
-        clienteSearchText(item);
-
-      return terms.every((term) =>
-        haystack.includes(term)
-      );
-    })
-    .sort((a, b) => {
-      const aTime = clienteSortTime(a);
-      const bTime = clienteSortTime(b);
-
-      const diff =
-        order === "asc"
-          ? aTime - bTime
-          : bTime - aTime;
-
-      if (diff !== 0) {
-        return diff;
-      }
-
-      return getClienteName(a).localeCompare(
-        getClienteName(b),
-        "es",
-        {
-          numeric: true,
-          sensitivity: "base",
+  return normalizeClientesCollection(
+    items
+  )
+    .filter(
+      (item) => {
+        if (
+          bucket !== "all" &&
+          viewStatusBucket(
+            item
+          ) !== bucket
+        ) {
+          return false;
         }
-      );
-    });
+
+        if (!terms.length) {
+          return true;
+        }
+
+        const haystack =
+          clienteSearchText(
+            item
+          );
+
+        return terms.every(
+          (term) =>
+            haystack.includes(
+              term
+            )
+        );
+      }
+    )
+    .sort(
+      (a, b) => {
+        const aTime =
+          clienteSortTime(a);
+
+        const bTime =
+          clienteSortTime(b);
+
+        const diff =
+          order === "asc"
+            ? aTime - bTime
+            : bTime - aTime;
+
+        if (diff !== 0) {
+          return diff;
+        }
+
+        return getClienteName(a)
+          .localeCompare(
+            getClienteName(b),
+            "es",
+            {
+              numeric: true,
+              sensitivity: "base",
+            }
+          );
+      }
+    );
 }
 
 export function computeClientesStats(
   items = []
 ) {
-  return normalizeClientesCollection(items)
-    .reduce(
-      (acc, item) => {
-        const status =
-          getClienteStatus(item);
+  return normalizeClientesCollection(
+    items
+  ).reduce(
+    (acc, item) => {
+      const status =
+        getClienteStatus(item);
 
-        const bucket =
-          viewStatusBucket(item);
+      const bucket =
+        viewStatusBucket(item);
 
-        acc.total += 1;
+      acc.total += 1;
 
-        if (bucket === "active") {
-          acc.activeCount += 1;
-        }
-
-        if (bucket === "pending") {
-          acc.pendingCount += 1;
-        }
-
-        if (bucket === "blocked") {
-          acc.blockedCount += 1;
-        }
-
-        if (
-          status === "vip" ||
-          canonicalCliente(item).vip === true ||
-          canonicalCliente(item).isVip === true
-        ) {
-          acc.vipCount += 1;
-        }
-
-        acc.totalAmount +=
-          getClienteAmount(item);
-
-        acc.invoiceTotal =
-          acc.totalAmount;
-
-        acc.lastUpdateTs =
-          Math.max(
-            acc.lastUpdateTs,
-            clienteSortTime(item)
-          );
-
-        return acc;
-      },
-      {
-        total: 0,
-        activeCount: 0,
-        pendingCount: 0,
-        blockedCount: 0,
-        vipCount: 0,
-        totalAmount: 0,
-        invoiceTotal: 0,
-        lastUpdateTs: 0,
+      if (
+        bucket === "active"
+      ) {
+        acc.activeCount += 1;
       }
+
+      if (
+        bucket === "pending"
+      ) {
+        acc.pendingCount += 1;
+      }
+
+      if (
+        bucket === "blocked"
+      ) {
+        acc.blockedCount += 1;
+      }
+
+      const canonical =
+        canonicalCliente(item);
+
+      if (
+        status === "vip" ||
+        canonical.vip === true ||
+        canonical.isVip === true
+      ) {
+        acc.vipCount += 1;
+      }
+
+      acc.totalAmount +=
+        getClienteAmount(item);
+
+      acc.invoiceTotal =
+        acc.totalAmount;
+
+      acc.lastUpdateTs =
+        Math.max(
+          acc.lastUpdateTs,
+          clienteSortTime(item)
+        );
+
+      return acc;
+    },
+    {
+      total: 0,
+      activeCount: 0,
+      pendingCount: 0,
+      blockedCount: 0,
+      vipCount: 0,
+      totalAmount: 0,
+      invoiceTotal: 0,
+      lastUpdateTs: 0,
+    }
+  );
+}
+
+function upsertCliente(
+  items = [],
+  detail = null
+) {
+  const next =
+    canonicalCliente(
+      detail ||
+      {}
     );
+
+  const id =
+    getClienteId(next);
+
+  if (!id) {
+    return normalizeClientesCollection(
+      items
+    );
+  }
+
+  const output =
+    normalizeClientesCollection(
+      items
+    );
+
+  const index =
+    output.findIndex(
+      (item) =>
+        getClienteId(item) === id
+    );
+
+  if (index >= 0) {
+    const copy =
+      [...output];
+
+    copy[index] =
+      canonicalCliente({
+        ...copy[index],
+        ...next,
+
+        raw: {
+          ...safeObject(
+            copy[index]?.raw
+          ),
+
+          ...safeObject(
+            next?.raw
+          ),
+        },
+      });
+
+    return normalizeClientesCollection(
+      copy
+    );
+  }
+
+  return normalizeClientesCollection([
+    next,
+    ...output,
+  ]);
 }
 
 /* =========================================================
-   CSV SAFETY
+   CSV
 ========================================================= */
 
-function protectCsvFormula(value = "") {
-  const text = String(value ?? "");
+function protectCsvFormula(
+  value = ""
+) {
+  const text =
+    String(value ?? "");
 
-  if (/^\s*[=+\-@]/.test(text)) {
-    return `'${text}`;
-  }
-
-  return text;
+  return /^\s*[=+\-@]/.test(
+    text
+  )
+    ? `'${text}`
+    : text;
 }
 
-function escapeCsv(value = "") {
-  return `"${protectCsvFormula(value)
-    .replace(/"/g, '""')}"`;
+function escapeCsv(
+  value = ""
+) {
+  return `"${protectCsvFormula(
+    value
+  ).replace(/"/g, '""')}"`;
 }
 
 /* =========================================================
@@ -848,12 +1148,16 @@ function getAppState() {
       {}
     );
   } catch {
-    return AppCore.state || {};
+    return (
+      AppCore.state ||
+      {}
+    );
   }
 }
 
 function getCurrentUser() {
-  const state = getAppState();
+  const state =
+    getAppState();
 
   try {
     return (
@@ -873,30 +1177,47 @@ function getCurrentUser() {
 
 function getCoreRole() {
   try {
-    return AppCore.getCurrentRole?.() || "";
+    return (
+      AppCore.getCurrentRole?.() ||
+      ""
+    );
   } catch {
     return "";
   }
 }
 
-function normalizeRole(value = "") {
-  if (Array.isArray(value)) {
-    const roles = value
-      .map(normalizeRole)
-      .filter(Boolean);
+function normalizeRole(
+  value = ""
+) {
+  if (
+    Array.isArray(value)
+  ) {
+    const roles =
+      value
+        .map(normalizeRole)
+        .filter(Boolean);
 
-    if (roles.includes("admin")) {
+    if (
+      roles.includes(
+        "admin"
+      )
+    ) {
       return "admin";
     }
 
-    if (roles.includes("user")) {
+    if (
+      roles.includes(
+        "user"
+      )
+    ) {
       return "user";
     }
 
     return roles[0] || "";
   }
 
-  const role = normalizeKey(value);
+  const role =
+    normalizeKey(value);
 
   if (
     [
@@ -926,12 +1247,17 @@ function normalizeRole(value = "") {
   return role || "user";
 }
 
-function getCurrentRole(context = {}) {
-  const state = getAppState();
-  const user = safeObject(
-    getCurrentUser(),
-    {}
-  );
+function getCurrentRole(
+  context = {}
+) {
+  const state =
+    getAppState();
+
+  const user =
+    safeObject(
+      getCurrentUser(),
+      {}
+    );
 
   return (
     normalizeRole(
@@ -949,73 +1275,100 @@ function getCurrentRole(context = {}) {
         user.roles,
         ""
       )
-    ) || "user"
+    ) ||
+    "user"
   );
 }
 
-function isAdminContext(context = {}) {
+function isAdminContext(
+  context = {}
+) {
   return (
     context.admin === true ||
-    getCurrentRole(context) === "admin"
+    getCurrentRole(
+      context
+    ) === "admin"
   );
 }
 
-function normalizePathname(path = "/") {
-  let value = cleanText(path, "/")
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
+function normalizePathname(
+  path = "/"
+) {
+  let value =
+    cleanText(path, "/")
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
 
-  if (!value.startsWith("/")) {
-    value = `/${value}`;
+  if (
+    !value.startsWith("/")
+  ) {
+    value =
+      `/${value}`;
   }
 
   value =
     value
       .split("?")[0]
-      .split("#")[0] || "/";
-
-  if (value.length > 1) {
-    value =
-      value.replace(/\/+$/g, "") || "/";
-  }
-
-  const segments = value
-    .split("/")
-    .filter(Boolean);
+      .split("#")[0] ||
+    "/";
 
   if (
-    segments[0]?.startsWith("@")
+    value.length > 1
+  ) {
+    value =
+      value
+        .replace(/\/+$/g, "") ||
+      "/";
+  }
+
+  const segments =
+    value
+      .split("/")
+      .filter(Boolean);
+
+  if (
+    segments[0]
+      ?.startsWith("@")
   ) {
     value =
       `/${segments
         .slice(1)
-        .join("/")}` || "/";
+        .join("/")}` ||
+      "/";
   }
 
   return value;
 }
 
 function getBrowserPath() {
-  if (!isBrowser()) return "";
+  if (!isBrowser()) {
+    return "";
+  }
 
   try {
     const hash =
-      window.location.hash || "";
+      window.location.hash ||
+      "";
 
-    if (hash.startsWith("#/")) {
+    if (
+      hash.startsWith("#/")
+    ) {
       return normalizePathname(
         hash.slice(1)
       );
     }
 
-    if (hash.startsWith("#!/")) {
+    if (
+      hash.startsWith("#!/")
+    ) {
       return normalizePathname(
         hash.slice(2)
       );
     }
 
     return normalizePathname(
-      window.location.pathname || "/"
+      window.location.pathname ||
+      "/"
     );
   } catch {
     return "";
@@ -1033,8 +1386,10 @@ function routePathFromContext(
       context.publicPath,
       context.requestedPath,
       context.path,
-      context.options?.canonicalPath,
-      context.options?.routePath,
+      context.options
+        ?.canonicalPath,
+      context.options
+        ?.routePath,
       context.options?.path,
       ""
     ),
@@ -1048,10 +1403,6 @@ function isClientesRoute(
   const browserPath =
     getBrowserPath();
 
-  /*
-    Si el navegador ya está en una ruta real distinta de "/",
-    manda sobre un context antiguo que el router aún no haya limpiado.
-  */
   if (
     browserPath &&
     browserPath !== "/"
@@ -1063,11 +1414,15 @@ function isClientesRoute(
   }
 
   const explicit =
-    routePathFromContext(context);
+    routePathFromContext(
+      context
+    );
 
   if (explicit) {
     return (
-      normalizePathname(explicit) ===
+      normalizePathname(
+        explicit
+      ) ===
       CLIENTES_CANONICAL_PATH
     );
   }
@@ -1086,18 +1441,35 @@ function resolveHost(
   host = null,
   context = {}
 ) {
-  if (isDomNode(host)) return host;
-  if (isDomNode(context.host)) {
+  if (
+    isDomNode(host)
+  ) {
+    return host;
+  }
+
+  if (
+    isDomNode(context.host)
+  ) {
     return context.host;
   }
-  if (isDomNode(context.root)) {
+
+  if (
+    isDomNode(context.root)
+  ) {
     return context.root;
   }
-  if (isDomNode(context.container)) {
+
+  if (
+    isDomNode(
+      context.container
+    )
+  ) {
     return context.container;
   }
 
-  if (!isBrowser()) return null;
+  if (!isBrowser()) {
+    return null;
+  }
 
   return (
     document.querySelector(
@@ -1109,7 +1481,9 @@ function resolveHost(
     document.querySelector(
       "#app-content"
     ) ||
-    document.querySelector("main") ||
+    document.querySelector(
+      "main"
+    ) ||
     null
   );
 }
@@ -1147,9 +1521,14 @@ function showToast(
   type = "info"
 ) {
   const text =
-    cleanText(message, "");
+    cleanText(
+      message,
+      ""
+    );
 
-  if (!text) return false;
+  if (!text) {
+    return false;
+  }
 
   const candidates = [
     AppCore?.toast,
@@ -1157,23 +1536,34 @@ function showToast(
     AppCore?.Toast,
   ];
 
-  for (const toast of candidates) {
+  for (
+    const toast
+    of candidates
+  ) {
     try {
       if (
-        isFunction(toast?.[type])
+        isFunction(
+          toast?.[type]
+        )
       ) {
         toast[type](text);
         return true;
       }
 
       if (
-        isFunction(toast?.show)
+        isFunction(
+          toast?.show
+        )
       ) {
-        toast.show(text, type);
+        toast.show(
+          text,
+          type
+        );
+
         return true;
       }
     } catch {
-      // siguiente candidato
+      // siguiente
     }
   }
 
@@ -1185,7 +1575,10 @@ function subscribeEvent(
   handler = null
 ) {
   const name =
-    cleanText(eventName, "");
+    cleanText(
+      eventName,
+      ""
+    );
 
   if (
     !name ||
@@ -1249,10 +1642,11 @@ function subscribeEvent(
         windowBound &&
         isBrowser()
       ) {
-        window.removeEventListener(
-          name,
-          handler
-        );
+        window
+          .removeEventListener(
+            name,
+            handler
+          );
       }
     } catch {
       // noop
@@ -1260,14 +1654,23 @@ function subscribeEvent(
   };
 }
 
+/*
+   Se emite por un solo bridge.
+   Si AppCore tiene event bus, no duplicamos además en window.
+*/
 function emitEvent(
   eventName = "",
   payload = {}
 ) {
   const name =
-    cleanText(eventName, "");
+    cleanText(
+      eventName,
+      ""
+    );
 
-  if (!name) return false;
+  if (!name) {
+    return false;
+  }
 
   try {
     if (
@@ -1292,7 +1695,8 @@ function emitEvent(
         new CustomEvent(
           name,
           {
-            detail: payload,
+            detail:
+              payload,
           }
         )
       );
@@ -1324,14 +1728,31 @@ function eventPayload(
 
 /* =========================================================
    USER SEARCH ADAPTER
-   HTTP sigue viviendo en usuarios.api.js
 ========================================================= */
 
-function hasSensitiveQuery(
-  value = ""
+function isAzureBlobHost(
+  hostname = ""
 ) {
-  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i.test(
-    String(value || "")
+  const host =
+    cleanText(
+      hostname,
+      ""
+    ).toLowerCase();
+
+  return (
+    host.endsWith(
+      ".blob.core.windows.net"
+    ) ||
+    host ===
+      "blob.core.windows.net"
+  );
+}
+
+function hasAppSecretQuery(
+  url = ""
+) {
+  return /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|jwt|authorization|reset_token|activation_token)=/i.test(
+    String(url || "")
   );
 }
 
@@ -1339,13 +1760,18 @@ function safeImageSrc(
   value = ""
 ) {
   const raw =
-    cleanText(value, "");
+    cleanText(
+      value,
+      ""
+    );
 
-  if (!raw) return "";
-  if (raw.startsWith("//")) return "";
-  if (/[\r\n\t\\]/.test(raw)) return "";
+  if (!raw) {
+    return "";
+  }
 
   if (
+    raw.startsWith("//") ||
+    /[\r\n\t\\]/.test(raw) ||
     /^(javascript|data|vbscript|file):/i.test(
       raw
     )
@@ -1353,27 +1779,19 @@ function safeImageSrc(
     return "";
   }
 
-  if (hasSensitiveQuery(raw)) {
-    return "";
-  }
-
-  if (/^blob:/i.test(raw)) {
+  if (
+    /^blob:/i.test(raw)
+  ) {
     return raw;
   }
 
-  if (raw.startsWith("/")) {
+  if (
+    raw.startsWith("/")
+  ) {
     return raw.replace(
       /\/{2,}/g,
       "/"
     );
-  }
-
-  if (/^https:\/\//i.test(raw)) {
-    try {
-      return new URL(raw).href;
-    } catch {
-      return "";
-    }
   }
 
   if (
@@ -1388,15 +1806,58 @@ function safeImageSrc(
     }
   }
 
-  return "";
+  if (
+    !/^https:\/\//i.test(
+      raw
+    )
+  ) {
+    return "";
+  }
+
+  try {
+    const parsed =
+      new URL(raw);
+
+    if (
+      hasAppSecretQuery(
+        parsed.href
+      )
+    ) {
+      return "";
+    }
+
+    /*
+       SAS de Azure es válido en runtime.
+       No tratamos `sig` como token de aplicación.
+    */
+    if (
+      parsed.searchParams
+        .has("sig") &&
+      !isAzureBlobHost(
+        parsed.hostname
+      )
+    ) {
+      return "";
+    }
+
+    return parsed.href;
+  } catch {
+    return "";
+  }
 }
 
 function firstImageSrc(
   ...values
 ) {
-  const queue = [...values];
+  const queue =
+    [...values];
 
-  while (queue.length) {
+  const seen =
+    new Set();
+
+  while (
+    queue.length
+  ) {
     const value =
       queue.shift();
 
@@ -1407,7 +1868,17 @@ function firstImageSrc(
       continue;
     }
 
-    if (isObject(value)) {
+    if (
+      isObject(value)
+    ) {
+      if (
+        seen.has(value)
+      ) {
+        continue;
+      }
+
+      seen.add(value);
+
       queue.unshift(
         value.avatarUrl,
         value.avatar,
@@ -1415,12 +1886,18 @@ function firstImageSrc(
         value.photoUrl,
         value.photoURL,
         value.imageUrl,
-        value.profile?.avatarUrl,
-        value.profile?.avatar,
-        value.profile?.picture,
-        value.raw?.avatarUrl,
-        value.raw?.avatar,
-        value.raw?.picture
+        value.profile
+          ?.avatarUrl,
+        value.profile
+          ?.avatar,
+        value.profile
+          ?.picture,
+        value.raw
+          ?.avatarUrl,
+        value.raw
+          ?.avatar,
+        value.raw
+          ?.picture
       );
 
       continue;
@@ -1429,7 +1906,9 @@ function firstImageSrc(
     const src =
       safeImageSrc(value);
 
-    if (src) return src;
+    if (src) {
+      return src;
+    }
   }
 
   return "";
@@ -1439,79 +1918,92 @@ function normalizeSearchUser(
   user = {}
 ) {
   const raw =
-    safeObject(user, {});
+    safeObject(
+      user,
+      {}
+    );
 
-  let normalized = raw;
+  let normalized =
+    raw;
 
   try {
     normalized =
-      normalizeUsuarioModel(raw);
+      normalizeUsuarioModel(
+        raw
+      );
   } catch {
-    normalized = raw;
+    normalized =
+      raw;
   }
 
   const nested =
-    safeObject(raw.raw, {});
+    safeObject(
+      raw.raw,
+      {}
+    );
 
-  const userId = cleanText(
-    first(
-      normalized.userId,
-      normalized.id,
-      normalized.uid,
-      raw.userId,
-      raw.id,
-      raw.uid,
-      raw.sub,
-      raw.usuarioId,
-      raw.lookup?.userId,
-      raw.lookup?.id,
-      nested.userId,
-      nested.id,
-      nested.uid,
+  const userId =
+    cleanText(
+      first(
+        normalized.userId,
+        normalized.id,
+        normalized.uid,
+        raw.userId,
+        raw.id,
+        raw.uid,
+        raw.sub,
+        raw.usuarioId,
+        raw.lookup?.userId,
+        raw.lookup?.id,
+        nested.userId,
+        nested.id,
+        nested.uid,
+        ""
+      ),
       ""
-    ),
-    ""
-  );
+    );
 
-  const clienteId = cleanText(
-    first(
-      normalized.clienteId,
-      normalized.clientId,
-      normalized.customerId,
-      raw.targetClienteId,
-      raw.clienteId,
-      raw.clientId,
-      raw.customerId,
-      raw.lookup?.clienteId,
-      raw.lookup?.clientId,
-      raw.cliente?.clienteId,
-      raw.cliente?.id,
-      nested.targetClienteId,
-      nested.clienteId,
-      nested.clientId,
-      nested.customerId,
+  const clienteId =
+    cleanText(
+      first(
+        normalized.clienteId,
+        normalized.clientId,
+        normalized.customerId,
+        raw.targetClienteId,
+        raw.clienteId,
+        raw.clientId,
+        raw.customerId,
+        raw.lookup?.clienteId,
+        raw.lookup?.clientId,
+        raw.cliente?.clienteId,
+        raw.cliente?.id,
+        nested.targetClienteId,
+        nested.clienteId,
+        nested.clientId,
+        nested.customerId,
+        ""
+      ),
       ""
-    ),
-    ""
-  );
+    );
 
-  const name = cleanText(
-    first(
-      normalized.displayName,
-      normalized.fullName,
-      normalized.name,
-      normalized.nombre,
-      raw.displayName,
-      raw.fullName,
-      raw.name,
-      raw.nombre,
-      raw.publicName,
-      raw.username,
-      userId,
+  const name =
+    cleanText(
+      first(
+        normalized.displayName,
+        normalized.fullName,
+        normalized.name,
+        normalized.nombre,
+        raw.displayName,
+        raw.fullName,
+        raw.name,
+        raw.nombre,
+        raw.publicName,
+        raw.username,
+        userId,
+        "Usuario"
+      ),
       "Usuario"
-    ),
-    "Usuario"
-  );
+    );
 
   const email =
     normalizeEmail(
@@ -1584,38 +2076,63 @@ function normalizeSearchUser(
     ...raw,
     ...normalized,
 
+    /*
+       raw se conserva sólo dentro del VM del buscador.
+       No se persiste desde index.js.
+    */
     raw,
 
-    id: userId,
+    id:
+      userId,
+
     userId,
-    uid: userId,
-    targetUserId: userId,
+    uid:
+      userId,
+
+    targetUserId:
+      userId,
 
     clienteId,
-    targetClienteId: clienteId,
-    clientId: clienteId,
-    customerId: clienteId,
+
+    targetClienteId:
+      clienteId,
+
+    clientId:
+      clienteId,
+
+    customerId:
+      clienteId,
 
     name,
-    nombre: name,
-    fullName: name,
-    displayName: name,
+    nombre:
+      name,
+
+    fullName:
+      name,
+
+    displayName:
+      name,
 
     email,
-    emailLower: email,
+    emailLower:
+      email,
 
     phone,
-    telefono: phone,
+    telefono:
+      phone,
 
     username,
     usernameLower:
       username.toLowerCase(),
 
     role,
-    rol: role,
+    rol:
+      role,
 
     avatarUrl,
-    avatar: avatarUrl || null,
+    avatar:
+      avatarUrl ||
+      null,
   };
 }
 
@@ -1623,24 +2140,32 @@ function usersListFromPayload(
   payload = null,
   maxDepth = 6
 ) {
-  if (Array.isArray(payload)) {
+  if (
+    Array.isArray(payload)
+  ) {
     return payload;
   }
 
   const queue = [
     {
-      value: payload,
-      depth: 0,
+      value:
+        payload,
+      depth:
+        0,
     },
   ];
 
-  const seen = new Set();
+  const seen =
+    new Set();
 
-  while (queue.length) {
+  while (
+    queue.length
+  ) {
     const {
       value,
       depth,
-    } = queue.shift();
+    } =
+      queue.shift();
 
     if (
       !isObject(value) ||
@@ -1652,35 +2177,51 @@ function usersListFromPayload(
 
     seen.add(value);
 
-    for (const key of [
-      "items",
-      "results",
-      "users",
-      "usuarios",
-      "rows",
-      "records",
-      "docs",
-      "documents",
-      "list",
-      "value",
-    ]) {
-      if (Array.isArray(value[key])) {
+    for (
+      const key
+      of [
+        "items",
+        "results",
+        "users",
+        "usuarios",
+        "rows",
+        "records",
+        "docs",
+        "documents",
+        "list",
+        "value",
+      ]
+    ) {
+      if (
+        Array.isArray(
+          value[key]
+        )
+      ) {
         return value[key];
       }
     }
 
-    for (const key of [
-      "data",
-      "payload",
-      "response",
-      "result",
-      "body",
-      "value",
-    ]) {
-      if (isObject(value[key])) {
+    for (
+      const key
+      of [
+        "data",
+        "payload",
+        "response",
+        "result",
+        "body",
+        "value",
+      ]
+    ) {
+      if (
+        isObject(
+          value[key]
+        )
+      ) {
         queue.push({
-          value: value[key],
-          depth: depth + 1,
+          value:
+            value[key],
+          depth:
+            depth + 1,
         });
       }
     }
@@ -1693,7 +2234,9 @@ function normalizeSearchUsers(
   payload = null
 ) {
   const rawItems =
-    usersListFromPayload(payload);
+    usersListFromPayload(
+      payload
+    );
 
   let normalizedItems =
     rawItems;
@@ -1708,15 +2251,47 @@ function normalizeSearchUsers(
       rawItems;
   }
 
-  return safeArray(normalizedItems)
-    .map(normalizeSearchUser)
-    .filter(
-      (user) =>
-        Boolean(
-          user.userId ||
-          user.id
-        )
-    );
+  const map =
+    new Map();
+
+  for (
+    const raw
+    of safeArray(
+      normalizedItems
+    )
+  ) {
+    const user =
+      normalizeSearchUser(
+        raw
+      );
+
+    const id =
+      cleanText(
+        first(
+          user.userId,
+          user.id,
+          ""
+        ),
+        ""
+      );
+
+    if (!id) {
+      continue;
+    }
+
+    if (
+      !map.has(id)
+    ) {
+      map.set(
+        id,
+        user
+      );
+    }
+  }
+
+  return [
+    ...map.values(),
+  ];
 }
 
 /* =========================================================
@@ -1727,7 +2302,10 @@ function storeInstance(
   host = null,
   controller = null
 ) {
-  if (!host || !controller) {
+  if (
+    !host ||
+    !controller
+  ) {
     return false;
   }
 
@@ -1742,7 +2320,8 @@ function storeInstance(
   try {
     getGlobalObject()[
       CLIENTES_GLOBAL_CONTROLLER_KEY
-    ] = controller;
+    ] =
+      controller;
   } catch {
     // noop
   }
@@ -1764,9 +2343,10 @@ function clearInstance(
 
   if (
     lastInstance ===
-    controller
+      controller
   ) {
-    lastInstance = null;
+    lastInstance =
+      null;
   }
 
   try {
@@ -1800,6 +2380,18 @@ function createClientesController(
   const id =
     ++controllerSequence;
 
+  const ownerId =
+    `${CLIENTES_INDEX_VERSION}:${id}`;
+
+  const ownerToken =
+    Object.freeze({
+      type:
+        "clientes-controller-owner",
+      id,
+      version:
+        CLIENTES_INDEX_VERSION,
+    });
+
   const cached =
     hydrateClientesFromCache({
       freshOnly: true,
@@ -1815,11 +2407,16 @@ function createClientesController(
     );
 
   let currentContext =
-    safeObject(context);
+    safeObject(
+      context,
+      {}
+    );
 
   let items =
     normalizeClientesCollection(
-      safeArray(cached?.items)
+      safeArray(
+        cached?.items
+      )
     );
 
   let total =
@@ -1837,8 +2434,10 @@ function createClientesController(
   let loadingMore = false;
 
   let error = "";
+
   let filter = "all";
   let search = "";
+
   let sortOrder =
     DEFAULT_SORT_ORDER;
 
@@ -1849,13 +2448,29 @@ function createClientesController(
 
   let renderFrame = 0;
   let modalFrame = 0;
-  let loadSeq = 0;
+
   let searchTimer = 0;
   let userSearchTimer = 0;
+
+  let externalCreateRefreshTimer = 0;
+  let loadSeq = 0;
   let userSearchSeq = 0;
+  let createSeq = 0;
+  let detailSeq = 0;
+
+  let loadPromise = null;
+  let queuedForceRefresh = false;
 
   let modalHost = null;
   let modalHostBound = false;
+
+  let createReturnFocus = null;
+  let deferredMainRender = false;
+
+  let lastExternalCreateKey = "";
+  let lastExternalCreateAt = 0;
+
+  const disposers = [];
 
   const createModal = {
     open: false,
@@ -1864,6 +2479,7 @@ function createClientesController(
     successMessage: "",
     createdClienteId: "",
     errors: {},
+
     form:
       getCreateFormDefaults(),
 
@@ -1877,14 +2493,97 @@ function createClientesController(
     },
   };
 
-  const disposers = [];
+  /* ---------------------------------------------------------
+     OWNERSHIP / ROUTE
+  --------------------------------------------------------- */
+
+  function ownsRoot() {
+    return Boolean(
+      root &&
+      root[
+        CLIENTES_ROOT_OWNER_KEY
+      ] === ownerToken
+    );
+  }
+
+  function claimRoot() {
+    if (!root) {
+      return false;
+    }
+
+    try {
+      root[
+        CLIENTES_ROOT_OWNER_KEY
+      ] =
+        ownerToken;
+
+      root.dataset.view =
+        "clientes";
+
+      root.dataset.controllerId =
+        String(id);
+
+      root.dataset.clientesOwner =
+        ownerId;
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function releaseRoot() {
+    if (
+      !root ||
+      !ownsRoot()
+    ) {
+      return false;
+    }
+
+    try {
+      delete root[
+        CLIENTES_ROOT_OWNER_KEY
+      ];
+    } catch {
+      try {
+        root[
+          CLIENTES_ROOT_OWNER_KEY
+        ] = null;
+      } catch {
+        // noop
+      }
+    }
+
+    try {
+      if (
+        root.dataset
+          .clientesOwner ===
+        ownerId
+      ) {
+        delete root.dataset
+          .clientesOwner;
+      }
+    } catch {
+      // noop
+    }
+
+    return true;
+  }
 
   function assertAlive() {
-    return (
+    return Boolean(
       !destroyed &&
       isClientesRoute(
         currentContext
       )
+    );
+  }
+
+  function assertRenderable() {
+    return Boolean(
+      assertAlive() &&
+      root &&
+      ownsRoot()
     );
   }
 
@@ -1897,18 +2596,34 @@ function createClientesController(
         currentContext
       );
 
-    if (resolved) {
-      root = resolved;
+    if (
+      resolved &&
+      resolved !== root
+    ) {
+      if (
+        root &&
+        ownsRoot()
+      ) {
+        releaseRoot();
+      }
+
+      root =
+        resolved;
     }
 
     return root;
   }
+
+  /* ---------------------------------------------------------
+     PAYLOAD / SNAPSHOT
+  --------------------------------------------------------- */
 
   function payload(
     extra = {}
   ) {
     return {
       id,
+
       user:
         getCurrentUser(),
 
@@ -1922,7 +2637,9 @@ function createClientesController(
           currentContext
         ),
 
-      routes: getRoutes(),
+      routes:
+        getRoutes(),
+
       route:
         getRoutes().clientes,
 
@@ -1930,13 +2647,21 @@ function createClientesController(
         currentContext,
 
       items,
-      clientes: items,
-      clients: items,
-      rows: items,
+      clientes:
+        items,
+
+      clients:
+        items,
+
+      rows:
+        items,
 
       total,
-      remoteCount: total,
-      count: items.length,
+      remoteCount:
+        total,
+
+      count:
+        items.length,
 
       stats:
         computeClientesStats(
@@ -1992,13 +2717,163 @@ function createClientesController(
 
       mounted,
       destroyed,
+
+      safeguards: {
+        rootOwnership:
+          true,
+
+        modalOwnership:
+          true,
+
+        detailRaceGuard:
+          true,
+
+        routeGuardAfterAwait:
+          true,
+
+        createRefreshSingleFlight:
+          true,
+
+        externalCreateDedupe:
+          true,
+
+        visibleLimitMax:
+          CLIENTES_MAX_LIMIT,
+
+        backendMutationContract:
+          "GET_LIST_GET_DETAIL_POST_CREATE",
+
+        noFakeCreateDetail:
+          true,
+      },
     };
   }
 
-  function renderNow() {
+  /* ---------------------------------------------------------
+     MAIN FOCUS
+  --------------------------------------------------------- */
+
+  function captureMainFocus() {
     if (
+      !isBrowser() ||
       !root ||
-      destroyed
+      !ownsRoot()
+    ) {
+      return null;
+    }
+
+    const active =
+      document.activeElement;
+
+    if (
+      !active ||
+      !root.contains(active)
+    ) {
+      return null;
+    }
+
+    const isSearch =
+      active.matches?.(
+        "[data-clientes-search-input], [data-clientes-field='search'], [data-search-input='clientes']"
+      );
+
+    if (!isSearch) {
+      return null;
+    }
+
+    return {
+      type:
+        "search",
+
+      start:
+        Number.isInteger(
+          active.selectionStart
+        )
+          ? active.selectionStart
+          : null,
+
+      end:
+        Number.isInteger(
+          active.selectionEnd
+        )
+          ? active.selectionEnd
+          : null,
+    };
+  }
+
+  function restoreMainFocus(
+    snapshot = null
+  ) {
+    if (
+      !snapshot ||
+      !assertRenderable()
+    ) {
+      return false;
+    }
+
+    if (
+      snapshot.type !==
+      "search"
+    ) {
+      return false;
+    }
+
+    const target =
+      root.querySelector(
+        "[data-clientes-search-input='true'], [data-clientes-field='search'], [data-search-input='clientes']"
+      );
+
+    if (!target) {
+      return false;
+    }
+
+    try {
+      target.focus({
+        preventScroll: true,
+      });
+
+      if (
+        snapshot.start !==
+          null &&
+        snapshot.end !==
+          null &&
+        isFunction(
+          target.setSelectionRange
+        )
+      ) {
+        const max =
+          String(
+            target.value ||
+            ""
+          ).length;
+
+        target.setSelectionRange(
+          Math.min(
+            snapshot.start,
+            max
+          ),
+          Math.min(
+            snapshot.end,
+            max
+          )
+        );
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /* ---------------------------------------------------------
+     MAIN RENDER
+  --------------------------------------------------------- */
+
+  function renderNow({
+    allowWhileCreate = false,
+  } = {}) {
+    if (
+      !assertRenderable()
     ) {
       return false;
     }
@@ -2006,6 +2881,21 @@ function createClientesController(
     cancelFrame(
       renderFrame
     );
+
+    renderFrame = 0;
+
+    if (
+      createModal.open &&
+      !allowWhileCreate
+    ) {
+      deferredMainRender =
+        true;
+
+      return false;
+    }
+
+    const focusSnapshot =
+      captureMainFocus();
 
     const data =
       payload();
@@ -2038,18 +2928,29 @@ function createClientesController(
       root.dataset.controllerId =
         String(id);
 
+      root.dataset.clientesOwner =
+        ownerId;
+
       root.dataset.clientesVersion =
         CLIENTES_INDEX_VERSION;
 
       root.dataset.clientesApiVersion =
         CLIENTES_API_VERSION;
 
+      restoreMainFocus(
+        focusSnapshot
+      );
+
+      deferredMainRender =
+        false;
+
       return true;
     } catch (renderError) {
-      error = safeError(
-        renderError,
-        "No se pudo renderizar la vista de clientes."
-      );
+      error =
+        safeError(
+          renderError,
+          "No se pudo renderizar la vista de clientes."
+        );
 
       try {
         root.innerHTML =
@@ -2058,34 +2959,75 @@ function createClientesController(
             error,
           });
       } catch {
-        /*
-          Boundary final XSS-safe:
-          no interpolamos el mensaje en innerHTML.
-        */
-        root.textContent = error;
+        root.textContent =
+          error;
       }
 
       return false;
     }
   }
 
-  function scheduleRender() {
+  function scheduleRender(
+    options = {}
+  ) {
+    if (
+      !assertRenderable()
+    ) {
+      return 0;
+    }
+
+    if (
+      createModal.open &&
+      options.allowWhileCreate !==
+        true
+    ) {
+      deferredMainRender =
+        true;
+
+      return 0;
+    }
+
     cancelFrame(
       renderFrame
     );
 
     renderFrame =
-      nextFrame(() =>
-        renderNow()
+      nextFrame(
+        () => {
+          renderFrame = 0;
+
+          renderNow(
+            options
+          );
+        }
       );
 
     return renderFrame;
   }
 
+  function flushDeferredMainRender() {
+    if (
+      !deferredMainRender ||
+      createModal.open ||
+      !assertRenderable()
+    ) {
+      return false;
+    }
+
+    deferredMainRender =
+      false;
+
+    return renderNow({
+      allowWhileCreate:
+        true,
+    });
+  }
+
   function setItems(
     nextItems = [],
     {
-      syncedAt = Date.now(),
+      syncedAt =
+        Date.now(),
     } = {}
   ) {
     items =
@@ -2107,22 +3049,16 @@ function createClientesController(
     return items;
   }
 
-  async function load({
+  /* ---------------------------------------------------------
+     LOAD / REFRESH
+  --------------------------------------------------------- */
+
+  async function runLoad({
     force = false,
     silent = false,
   } = {}) {
-    if (!assertAlive()) {
-      return getSnapshot();
-    }
-
-    /*
-      Un único load por controlador. La API ya tiene dedupe,
-      pero aquí evitamos que refresh manual / eventos de UI
-      creen carreras visuales innecesarias.
-    */
     if (
-      loading ||
-      refreshing
+      !assertAlive()
     ) {
       return getSnapshot();
     }
@@ -2162,7 +3098,10 @@ function createClientesController(
 
       if (
         seq !== loadSeq ||
-        destroyed
+        destroyed ||
+        !isClientesRoute(
+          currentContext
+        )
       ) {
         return getSnapshot();
       }
@@ -2187,7 +3126,8 @@ function createClientesController(
           ...snapshot,
           source:
             CLIENTES_INDEX_SOURCE,
-          controllerId: id,
+          controllerId:
+            id,
         }
       );
 
@@ -2197,7 +3137,8 @@ function createClientesController(
           ...snapshot,
           source:
             CLIENTES_INDEX_SOURCE,
-          controllerId: id,
+          controllerId:
+            id,
         }
       );
 
@@ -2205,22 +3146,33 @@ function createClientesController(
     } catch (loadError) {
       if (
         seq !== loadSeq ||
-        destroyed
+        destroyed ||
+        !isClientesRoute(
+          currentContext
+        )
       ) {
         return getSnapshot();
       }
 
       error =
-        safeError(loadError);
+        safeError(
+          loadError
+        );
 
       emitEvent(
         "clientes:error",
         {
-          error: loadError,
-          message: error,
+          error:
+            loadError,
+
+          message:
+            error,
+
           source:
             CLIENTES_INDEX_SOURCE,
-          controllerId: id,
+
+          controllerId:
+            id,
         }
       );
 
@@ -2232,9 +3184,63 @@ function createClientesController(
       ) {
         loading = false;
         refreshing = false;
-        renderNow();
+
+        if (
+          assertRenderable()
+        ) {
+          renderNow();
+        }
       }
     }
+  }
+
+  function load({
+    force = false,
+    silent = false,
+  } = {}) {
+    if (
+      !assertAlive()
+    ) {
+      return Promise.resolve(
+        getSnapshot()
+      );
+    }
+
+    if (loadPromise) {
+      if (force) {
+        queuedForceRefresh =
+          true;
+      }
+
+      return loadPromise;
+    }
+
+    loadPromise =
+      runLoad({
+        force,
+        silent,
+      })
+        .finally(
+          () => {
+            loadPromise =
+              null;
+
+            if (
+              queuedForceRefresh &&
+              assertAlive()
+            ) {
+              queuedForceRefresh =
+                false;
+
+              void load({
+                force: true,
+                silent: true,
+              });
+            }
+          }
+        );
+
+    return loadPromise;
   }
 
   async function refresh() {
@@ -2244,11 +3250,18 @@ function createClientesController(
     });
   }
 
+  /* ---------------------------------------------------------
+     PRESENTATION
+  --------------------------------------------------------- */
+
   function setSearch(
     value = ""
   ) {
     search =
-      cleanText(value, "");
+      cleanText(
+        value,
+        ""
+      );
 
     visibleLimit =
       DEFAULT_VISIBLE_LIMIT;
@@ -2263,8 +3276,10 @@ function createClientesController(
   ) {
     const next =
       normalizeKey(
-        value || "all"
-      ) || "all";
+        value ||
+        "all"
+      ) ||
+      "all";
 
     filter =
       [
@@ -2285,10 +3300,13 @@ function createClientesController(
   }
 
   function setSortOrder(
-    value = DEFAULT_SORT_ORDER
+    value =
+      DEFAULT_SORT_ORDER
   ) {
     sortOrder =
-      normalizeSortOrder(value);
+      normalizeSortOrder(
+        value
+      );
 
     visibleLimit =
       DEFAULT_VISIBLE_LIMIT;
@@ -2327,41 +3345,49 @@ function createClientesController(
   function loadMore(
     limit = null
   ) {
-    loadingMore = true;
+    loadingMore =
+      true;
 
     visibleLimit =
       clamp(
         number(
           limit,
           visibleLimit +
-            VISIBLE_STEP
+          VISIBLE_STEP
         ),
         1,
-        1000
+        CLIENTES_MAX_LIMIT
       );
 
     scheduleRender();
 
     if (isBrowser()) {
-      window.setTimeout?.(
+      window.setTimeout(
         () => {
-          if (destroyed) return;
+          if (
+            destroyed
+          ) {
+            return;
+          }
 
-          loadingMore = false;
+          loadingMore =
+            false;
+
           scheduleRender();
         },
         120
       );
     } else {
-      loadingMore = false;
+      loadingMore =
+        false;
     }
 
     return visibleLimit;
   }
 
-  /* =======================================================
-     CREATE MODAL
-  ======================================================= */
+  /* ---------------------------------------------------------
+     CREATE MODAL HOST
+  --------------------------------------------------------- */
 
   function createModalPayload(
     extra = {}
@@ -2389,10 +3415,20 @@ function createClientesController(
     };
   }
 
-  function modalsOpen() {
-    return Boolean(
-      createModal.open
-    );
+  function detailModalPresent() {
+    if (!isBrowser()) {
+      return false;
+    }
+
+    try {
+      return Boolean(
+        document.querySelector(
+          "[data-clientes-detail-modal-host='true'] [data-clientes-modal-root='true'][data-open='true']"
+        )
+      );
+    } catch {
+      return false;
+    }
   }
 
   function syncBodyModalClass() {
@@ -2401,20 +3437,34 @@ function createClientesController(
     }
 
     try {
-      document.body?.classList.toggle(
-        "modal-open",
-        modalsOpen()
-      );
+      const createOpen =
+        createModal.open ===
+        true;
 
-      document.body?.classList.toggle(
-        "clientes-modal-open",
-        modalsOpen()
-      );
+      const anyOpen =
+        createOpen ||
+        detailModalPresent();
 
-      document.body?.classList.toggle(
-        "clientes-create-open",
-        createModal.open
-      );
+      document.body
+        ?.classList
+        .toggle(
+          "modal-open",
+          anyOpen
+        );
+
+      document.body
+        ?.classList
+        .toggle(
+          "clientes-modal-open",
+          anyOpen
+        );
+
+      document.body
+        ?.classList
+        .toggle(
+          "clientes-create-open",
+          createOpen
+        );
 
       return true;
     } catch {
@@ -2428,15 +3478,14 @@ function createClientesController(
     }
 
     if (
-      modalHost?.isConnected
+      modalHost?.isConnected &&
+      modalHost.dataset
+        ?.owner === ownerId
     ) {
       return modalHost;
     }
 
     modalHost =
-      document.querySelector(
-        MODAL_HOST_SELECTOR
-      ) ||
       document.createElement(
         "div"
       );
@@ -2448,14 +3497,18 @@ function createClientesController(
 
     modalHost.setAttribute(
       "data-owner",
-      CLIENTES_INDEX_VERSION
+      ownerId
     );
 
-    if (!modalHost.isConnected) {
-      document.body.appendChild(
+    modalHost.setAttribute(
+      "data-controller-id",
+      String(id)
+    );
+
+    document.body
+      .appendChild(
         modalHost
       );
-    }
 
     if (!modalHostBound) {
       modalHost.addEventListener(
@@ -2488,10 +3541,633 @@ function createClientesController(
         true
       );
 
-      modalHostBound = true;
+      modalHostBound =
+        true;
     }
 
     return modalHost;
+  }
+
+  function removeModalHost() {
+    cancelFrame(
+      modalFrame
+    );
+
+    modalFrame = 0;
+
+    if (!modalHost) {
+      return false;
+    }
+
+    const owned =
+      modalHost.dataset
+        ?.owner === ownerId;
+
+    if (!owned) {
+      modalHost =
+        null;
+
+      modalHostBound =
+        false;
+
+      return false;
+    }
+
+    try {
+      if (
+        modalHostBound
+      ) {
+        modalHost.removeEventListener(
+          "click",
+          handleModalClick,
+          true
+        );
+
+        modalHost.removeEventListener(
+          "submit",
+          handleModalSubmit,
+          true
+        );
+
+        modalHost.removeEventListener(
+          "input",
+          handleModalInput,
+          true
+        );
+
+        modalHost.removeEventListener(
+          "change",
+          handleModalInput,
+          true
+        );
+
+        modalHost.removeEventListener(
+          "keydown",
+          handleModalKeydown,
+          true
+        );
+      }
+
+      modalHost
+        .replaceChildren();
+
+      modalHost.remove();
+    } catch {
+      // noop
+    }
+
+    modalHost =
+      null;
+
+    modalHostBound =
+      false;
+
+    return true;
+  }
+
+  function captureCreateReturnFocus(
+    node = null
+  ) {
+    if (!isBrowser()) {
+      return false;
+    }
+
+    const candidate =
+      node?.isConnected
+        ? node
+        : document.activeElement;
+
+    if (
+      candidate &&
+      candidate !==
+        document.body &&
+      candidate !==
+        document.documentElement &&
+      isFunction(
+        candidate.focus
+      )
+    ) {
+      createReturnFocus =
+        candidate;
+
+      return true;
+    }
+
+    createReturnFocus =
+      null;
+
+    return false;
+  }
+
+  function restoreCreateReturnFocus() {
+    const target =
+      createReturnFocus;
+
+    createReturnFocus =
+      null;
+
+    if (
+      !target ||
+      !target.isConnected ||
+      !isFunction(
+        target.focus
+      )
+    ) {
+      return false;
+    }
+
+    nextFrame(
+      () => {
+        try {
+          target.focus({
+            preventScroll:
+              true,
+          });
+        } catch {
+          try {
+            target.focus();
+          } catch {
+            // noop
+          }
+        }
+      }
+    );
+
+    return true;
+  }
+
+  function captureModalFocus(
+    hostNode = null
+  ) {
+    if (
+      !hostNode ||
+      !isBrowser()
+    ) {
+      return null;
+    }
+
+    const active =
+      document.activeElement;
+
+    if (
+      !active ||
+      !hostNode.contains(
+        active
+      )
+    ) {
+      return null;
+    }
+
+    const field =
+      cleanText(
+        active.getAttribute?.(
+          "data-field"
+        ) ||
+        active.getAttribute?.(
+          "name"
+        ),
+        ""
+      );
+
+    if (!field) {
+      return null;
+    }
+
+    return {
+      field,
+
+      start:
+        Number.isInteger(
+          active.selectionStart
+        )
+          ? active.selectionStart
+          : null,
+
+      end:
+        Number.isInteger(
+          active.selectionEnd
+        )
+          ? active.selectionEnd
+          : null,
+    };
+  }
+
+  function restoreModalFocus(
+    hostNode = null,
+    snapshot = null
+  ) {
+    if (
+      !hostNode ||
+      !snapshot?.field
+    ) {
+      return false;
+    }
+
+    const target =
+      Array.from(
+        hostNode.querySelectorAll(
+          "[data-field], [name]"
+        ) ||
+        []
+      ).find(
+        (node) =>
+          cleanText(
+            node.getAttribute?.(
+              "data-field"
+            ) ||
+            node.getAttribute?.(
+              "name"
+            ),
+            ""
+          ) ===
+          snapshot.field
+      );
+
+    if (!target) {
+      return false;
+    }
+
+    try {
+      target.focus({
+        preventScroll:
+          true,
+      });
+
+      if (
+        snapshot.start !==
+          null &&
+        snapshot.end !==
+          null &&
+        isFunction(
+          target.setSelectionRange
+        )
+      ) {
+        const max =
+          String(
+            target.value ||
+            ""
+          ).length;
+
+        target.setSelectionRange(
+          Math.min(
+            snapshot.start,
+            max
+          ),
+          Math.min(
+            snapshot.end,
+            max
+          )
+        );
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function focusableModalElements() {
+    if (!modalHost) {
+      return [];
+    }
+
+    const panel =
+      modalHost.querySelector(
+        CREATE_MODAL_PANEL_SELECTOR
+      );
+
+    if (!panel) {
+      return [];
+    }
+
+    return Array.from(
+      panel.querySelectorAll(
+        'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )
+    ).filter(
+      (element) =>
+        !element.hidden &&
+        element.getAttribute?.(
+          "aria-hidden"
+        ) !== "true"
+    );
+  }
+
+  function trapCreateFocus(
+    event = null
+  ) {
+    if (
+      event?.key !== "Tab" ||
+      !createModal.open ||
+      !modalHost
+    ) {
+      return false;
+    }
+
+    const panel =
+      modalHost.querySelector(
+        CREATE_MODAL_PANEL_SELECTOR
+      );
+
+    if (!panel) {
+      return false;
+    }
+
+    const focusable =
+      focusableModalElements();
+
+    if (!focusable.length) {
+      event.preventDefault();
+
+      panel.focus?.();
+
+      return true;
+    }
+
+    const firstNode =
+      focusable[0];
+
+    const lastNode =
+      focusable[
+        focusable.length - 1
+      ];
+
+    const active =
+      document.activeElement;
+
+    if (
+      !panel.contains(
+        active
+      )
+    ) {
+      event.preventDefault();
+
+      (
+        event.shiftKey
+          ? lastNode
+          : firstNode
+      ).focus?.();
+
+      return true;
+    }
+
+    if (
+      event.shiftKey &&
+      active === firstNode
+    ) {
+      event.preventDefault();
+      lastNode.focus?.();
+
+      return true;
+    }
+
+    if (
+      !event.shiftKey &&
+      active === lastNode
+    ) {
+      event.preventDefault();
+      firstNode.focus?.();
+
+      return true;
+    }
+
+    return false;
+  }
+
+  function renderCreateModalNow() {
+    if (
+      destroyed
+    ) {
+      return false;
+    }
+
+    if (
+      !createModal.open
+    ) {
+      removeModalHost();
+      syncBodyModalClass();
+
+      return true;
+    }
+
+    const hostNode =
+      ensureModalHost();
+
+    if (!hostNode) {
+      return false;
+    }
+
+    const focusSnapshot =
+      captureModalFocus(
+        hostNode
+      );
+
+    try {
+      hostNode.innerHTML =
+        renderClientesCreateModal(
+          createModalPayload()
+        );
+
+      syncBodyModalClass();
+
+      if (
+        !restoreModalFocus(
+          hostNode,
+          focusSnapshot
+        )
+      ) {
+        try {
+          hostNode
+            .querySelector(
+              CREATE_MODAL_PANEL_SELECTOR
+            )
+            ?.focus?.({
+              preventScroll:
+                true,
+            });
+        } catch {
+          // noop
+        }
+      }
+
+      return true;
+    } catch (renderError) {
+      createModal.serverError =
+        safeError(
+          renderError,
+          "No se pudo renderizar el formulario de cliente."
+        );
+
+      hostNode.textContent =
+        createModal.serverError;
+
+      syncBodyModalClass();
+
+      return false;
+    }
+  }
+
+  function scheduleCreateModalRender() {
+    cancelFrame(
+      modalFrame
+    );
+
+    modalFrame =
+      nextFrame(
+        () => {
+          modalFrame = 0;
+          renderCreateModalNow();
+        }
+      );
+
+    return modalFrame;
+  }
+
+  function resetCreateModalForm() {
+    createModal.submitting =
+      false;
+
+    createModal.serverError =
+      "";
+
+    createModal.successMessage =
+      "";
+
+    createModal.createdClienteId =
+      "";
+
+    createModal.errors =
+      {};
+
+    createModal.form =
+      getCreateFormDefaults();
+
+    createModal.userSearch = {
+      query: "",
+      loading: false,
+      error: "",
+      results: [],
+      selectedUser: null,
+      empty: false,
+    };
+
+    return createModal;
+  }
+
+  function openCreate(
+    openerNode = null
+  ) {
+    if (
+      !isAdminContext(
+        currentContext
+      )
+    ) {
+      showToast(
+        "No tienes permisos para crear clientes.",
+        "error"
+      );
+
+      return false;
+    }
+
+    if (
+      createModal.open
+    ) {
+      return true;
+    }
+
+    captureCreateReturnFocus(
+      openerNode
+    );
+
+    resetCreateModalForm();
+
+    createModal.open =
+      true;
+
+    creating =
+      false;
+
+    /*
+       El modal es isla DOM.
+       No repintamos la vista detrás al abrirlo.
+    */
+    renderCreateModalNow();
+
+    emitEvent(
+      "clientes:create:open",
+      {
+        source:
+          CLIENTES_INDEX_SOURCE,
+
+        controllerId:
+          id,
+      }
+    );
+
+    return true;
+  }
+
+  function closeCreate({
+    reset = true,
+    emit = true,
+    renderView = true,
+    force = false,
+  } = {}) {
+    if (
+      createModal.submitting &&
+      !force
+    ) {
+      return false;
+    }
+
+    userSearchSeq += 1;
+    createSeq += 1;
+
+    if (
+      isBrowser()
+    ) {
+      window.clearTimeout?.(
+        userSearchTimer
+      );
+    }
+
+    createModal.open =
+      false;
+
+    createModal.submitting =
+      false;
+
+    if (reset) {
+      resetCreateModalForm();
+    }
+
+    removeModalHost();
+    syncBodyModalClass();
+
+    if (
+      renderView &&
+      deferredMainRender
+    ) {
+      flushDeferredMainRender();
+    }
+
+    if (emit) {
+      emitEvent(
+        "clientes:create:closed",
+        {
+          source:
+            CLIENTES_INDEX_SOURCE,
+
+          controllerId:
+            id,
+        }
+      );
+    }
+
+    restoreCreateReturnFocus();
+
+    return true;
   }
 
   function readCreateForm(
@@ -2511,23 +4187,29 @@ function createClientesController(
       Array.from(
         formNode.querySelectorAll(
           "[data-field][name], [data-field]"
-        ) || []
+        ) ||
+        []
       );
 
-    for (const field of fields) {
+    for (
+      const field
+      of fields
+    ) {
       const name =
         cleanText(
           field.getAttribute?.(
             "data-field"
           ) ||
-            field.getAttribute?.(
-              "name"
-            ) ||
-            "",
+          field.getAttribute?.(
+            "name"
+          ) ||
+          "",
           ""
         );
 
-      if (!name) continue;
+      if (!name) {
+        continue;
+      }
 
       const tagName =
         cleanText(
@@ -2557,7 +4239,9 @@ function createClientesController(
         tagName === "input" &&
         type === "radio"
       ) {
-        if (field.checked) {
+        if (
+          field.checked
+        ) {
           output[name] =
             field.value;
         }
@@ -2565,7 +4249,9 @@ function createClientesController(
         continue;
       }
 
-      if ("value" in field) {
+      if (
+        "value" in field
+      ) {
         output[name] =
           field.value;
       }
@@ -2575,7 +4261,8 @@ function createClientesController(
       cleanText(
         first(
           output.userId,
-          output.targetUserId
+          output.targetUserId,
+          ""
         ),
         ""
       );
@@ -2584,65 +4271,11 @@ function createClientesController(
       cleanText(
         first(
           output.targetUserId,
-          output.userId
+          output.userId,
+          ""
         ),
         ""
       );
-
-    output.clienteTipo =
-      normalizeKey(
-        first(
-          output.clienteTipo,
-          output.tipo,
-          "empresa"
-        )
-      );
-
-    output.segmento =
-      normalizeKey(
-        first(
-          output.segmento,
-          output.tipo,
-          "empresa"
-        )
-      );
-
-    output.status =
-      normalizeKey(
-        first(
-          output.status,
-          "active"
-        )
-      );
-
-    output.estado =
-      normalizeKey(
-        first(
-          output.estado,
-          "activo"
-        )
-      );
-
-    output.active =
-      output.active === true ||
-      output.active === "true" ||
-      output.active === "1" ||
-      output.active === 1;
-
-    for (const key of [
-      "porcentajeIVA",
-      "porcentajeIRPF",
-      "paymentTermsDays",
-    ]) {
-      output[key] =
-        number(
-          output[key],
-          key ===
-            "paymentTermsDays"
-            ? 30
-            : 0
-        );
-    }
 
     return output;
   }
@@ -2654,290 +4287,13 @@ function createClientesController(
       ...safeObject(
         createModal.form
       ),
-      ...safeObject(patch),
+
+      ...safeObject(
+        patch
+      ),
     };
 
     return createModal.form;
-  }
-
-  function captureModalFocus(
-    hostNode = null
-  ) {
-    if (
-      !hostNode ||
-      !isBrowser()
-    ) {
-      return null;
-    }
-
-    const active =
-      document.activeElement;
-
-    if (
-      !active ||
-      !hostNode.contains(active)
-    ) {
-      return null;
-    }
-
-    const field =
-      cleanText(
-        active.getAttribute?.(
-          "data-field"
-        ),
-        ""
-      );
-
-    if (!field) {
-      return null;
-    }
-
-    return {
-      field,
-      start:
-        Number.isInteger(
-          active.selectionStart
-        )
-          ? active.selectionStart
-          : null,
-
-      end:
-        Number.isInteger(
-          active.selectionEnd
-        )
-          ? active.selectionEnd
-          : null,
-    };
-  }
-
-  function restoreModalFocus(
-    hostNode = null,
-    snapshot = null
-  ) {
-    if (
-      !hostNode ||
-      !snapshot?.field
-    ) {
-      return false;
-    }
-
-    const candidates =
-      hostNode.querySelectorAll?.(
-        "[data-field]"
-      ) || [];
-
-    const target =
-      Array.from(candidates)
-        .find(
-          (node) =>
-            cleanText(
-              node.getAttribute?.(
-                "data-field"
-              ),
-              ""
-            ) ===
-            snapshot.field
-        );
-
-    if (!target) {
-      return false;
-    }
-
-    try {
-      target.focus?.({
-        preventScroll: true,
-      });
-
-      if (
-        snapshot.start !== null &&
-        snapshot.end !== null &&
-        isFunction(
-          target.setSelectionRange
-        )
-      ) {
-        target.setSelectionRange(
-          snapshot.start,
-          snapshot.end
-        );
-      }
-
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  function renderCreateModalNow() {
-    const hostNode =
-      ensureModalHost();
-
-    if (!hostNode) {
-      return false;
-    }
-
-    const focusSnapshot =
-      captureModalFocus(
-        hostNode
-      );
-
-    try {
-      hostNode.innerHTML =
-        createModal.open
-          ? renderClientesCreateModal(
-              createModalPayload()
-            )
-          : renderClientesCreateModalClosed();
-
-      syncBodyModalClass();
-
-      if (
-        createModal.open &&
-        !restoreModalFocus(
-          hostNode,
-          focusSnapshot
-        )
-      ) {
-        try {
-          hostNode
-            .querySelector(
-              CREATE_MODAL_PANEL_SELECTOR
-            )
-            ?.focus?.({
-              preventScroll: true,
-            });
-        } catch {
-          // noop
-        }
-      }
-
-      return true;
-    } catch (renderError) {
-      createModal.serverError =
-        safeError(
-          renderError,
-          "No se pudo renderizar el formulario de cliente."
-        );
-
-      /*
-        Boundary final seguro si el template falla.
-      */
-      hostNode.textContent =
-        createModal.serverError;
-
-      syncBodyModalClass();
-
-      return false;
-    }
-  }
-
-  function scheduleCreateModalRender() {
-    cancelFrame(
-      modalFrame
-    );
-
-    modalFrame =
-      nextFrame(() =>
-        renderCreateModalNow()
-      );
-
-    return modalFrame;
-  }
-
-  function resetCreateModalForm() {
-    createModal.submitting = false;
-    createModal.serverError = "";
-    createModal.successMessage = "";
-    createModal.createdClienteId = "";
-    createModal.errors = {};
-
-    createModal.form =
-      getCreateFormDefaults();
-
-    createModal.userSearch = {
-      query: "",
-      loading: false,
-      error: "",
-      results: [],
-      selectedUser: null,
-      empty: false,
-    };
-
-    return createModal;
-  }
-
-  function openCreate() {
-    if (
-      !isAdminContext(
-        currentContext
-      )
-    ) {
-      showToast(
-        "No tienes permisos para crear clientes.",
-        "error"
-      );
-
-      return false;
-    }
-
-    resetCreateModalForm();
-
-    createModal.open = true;
-    creating = true;
-
-    scheduleRender();
-    renderCreateModalNow();
-
-    creating = false;
-    scheduleRender();
-
-    emitEvent(
-      "clientes:create:open",
-      {
-        source:
-          CLIENTES_INDEX_SOURCE,
-        controllerId: id,
-      }
-    );
-
-    return true;
-  }
-
-  function closeCreate({
-    reset = true,
-    emit = true,
-    renderView = true,
-  } = {}) {
-    createModal.open = false;
-    createModal.submitting = false;
-
-    if (reset) {
-      resetCreateModalForm();
-    }
-
-    if (isBrowser()) {
-      window.clearTimeout?.(
-        userSearchTimer
-      );
-    }
-
-    scheduleCreateModalRender();
-
-    if (renderView) {
-      scheduleRender();
-    }
-
-    if (emit) {
-      emitEvent(
-        "clientes:create:closed",
-        {
-          source:
-            CLIENTES_INDEX_SOURCE,
-          controllerId: id,
-        }
-      );
-    }
-
-    return true;
   }
 
   function autoReplace(
@@ -2946,10 +4302,16 @@ function createClientesController(
     next = ""
   ) {
     const currentText =
-      cleanText(current, "");
+      cleanText(
+        current,
+        ""
+      );
 
     const previousText =
-      cleanText(previous, "");
+      cleanText(
+        previous,
+        ""
+      );
 
     if (
       !currentText ||
@@ -2968,13 +4330,15 @@ function createClientesController(
   function selectCreateUserFromNode(
     node = null
   ) {
-    if (!node) return false;
+    if (!node) {
+      return false;
+    }
 
     const previous =
       normalizeSearchUser(
         createModal.userSearch
           .selectedUser ||
-          {}
+        {}
       );
 
     const selectedUser =
@@ -2991,16 +4355,20 @@ function createClientesController(
           "",
 
         displayName:
-          node.dataset.userName ||
+          node.dataset
+            .userName ||
           "",
 
         email:
-          node.dataset.userEmail ||
-          node.dataset.email ||
+          node.dataset
+            .userEmail ||
+          node.dataset
+            .email ||
           "",
 
         phone:
-          node.dataset.userPhone ||
+          node.dataset
+            .userPhone ||
           "",
 
         username:
@@ -3009,14 +4377,33 @@ function createClientesController(
           "",
 
         avatarUrl:
-          node.dataset.userAvatar ||
+          node.dataset
+            .userAvatar ||
           "",
       });
 
+    const selectedId =
+      cleanText(
+        first(
+          selectedUser.userId,
+          selectedUser.id,
+          ""
+        ),
+        ""
+      );
+
+    if (!selectedId) {
+      return false;
+    }
+
     const name =
       cleanText(
-        selectedUser.displayName ||
+        first(
+          selectedUser
+            .displayName,
           selectedUser.name,
+          ""
+        ),
         ""
       );
 
@@ -3027,39 +4414,54 @@ function createClientesController(
 
     const phone =
       cleanText(
-        selectedUser.phone ||
+        first(
+          selectedUser.phone,
           selectedUser.telefono,
+          ""
+        ),
         ""
       );
 
     const username =
       cleanText(
-        selectedUser.username ||
-          selectedUser.usernameLower,
+        first(
+          selectedUser.username,
+          selectedUser
+            .usernameLower,
+          ""
+        ),
         ""
       ).toLowerCase();
 
     patchCreateForm({
       targetUserId:
-        selectedUser.userId ||
-        selectedUser.id,
+        selectedId,
 
       userId:
-        selectedUser.userId ||
-        selectedUser.id,
+        selectedId,
 
       targetClienteId:
-        selectedUser.clienteId ||
-        selectedUser.targetClienteId ||
+        selectedUser
+          .clienteId ||
+        selectedUser
+          .targetClienteId ||
         "",
 
-      targetUserName: name,
-      targetUserEmail: email,
-      targetUserPhone: phone,
-      targetUsername: username,
+      targetUserName:
+        name,
+
+      targetUserEmail:
+        email,
+
+      targetUserPhone:
+        phone,
+
+      targetUsername:
+        username,
 
       targetUserAvatar:
-        selectedUser.avatarUrl ||
+        selectedUser
+          .avatarUrl ||
         selectedUser.avatar ||
         "",
 
@@ -3067,8 +4469,9 @@ function createClientesController(
         autoReplace(
           createModal.form
             .contactoNombre,
-          previous.displayName ||
-            previous.name,
+          previous
+            .displayName ||
+          previous.name,
           name
         ),
 
@@ -3089,7 +4492,7 @@ function createClientesController(
           createModal.form
             .contactoPhone,
           previous.phone ||
-            previous.telefono,
+          previous.telefono,
           phone
         ),
 
@@ -3115,7 +4518,8 @@ function createClientesController(
 
       slug:
         autoReplace(
-          createModal.form.slug,
+          createModal.form
+            .slug,
           previous.username,
           username
         ),
@@ -3130,14 +4534,20 @@ function createClientesController(
       empty: false,
     };
 
-    createModal.errors = {
+    const nextErrors = {
       ...safeObject(
         createModal.errors
       ),
-      userId: "",
-      targetUserId: "",
-      targetUser: "",
     };
+
+    delete nextErrors.userId;
+    delete nextErrors
+      .targetUserId;
+    delete nextErrors
+      .targetUser;
+
+    createModal.errors =
+      nextErrors;
 
     scheduleCreateModalRender();
 
@@ -3149,7 +4559,7 @@ function createClientesController(
       normalizeSearchUser(
         createModal.userSearch
           .selectedUser ||
-          {}
+        {}
       );
 
     const patch = {
@@ -3163,10 +4573,6 @@ function createClientesController(
       targetUserAvatar: "",
     };
 
-    /*
-      Si un dato fue autocompletado desde el usuario seleccionado,
-      lo limpiamos. Si el admin lo editó manualmente, se conserva.
-    */
     if (
       cleanText(
         createModal.form
@@ -3174,12 +4580,14 @@ function createClientesController(
         ""
       ) ===
       cleanText(
-        selected.displayName ||
-          selected.name,
+        selected
+          .displayName ||
+        selected.name,
         ""
       )
     ) {
-      patch.contactoNombre = "";
+      patch.contactoNombre =
+        "";
     }
 
     if (
@@ -3191,9 +4599,14 @@ function createClientesController(
         selected.email
       )
     ) {
-      patch.contactoEmail = "";
-      patch.email = "";
-      patch.emailCliente = "";
+      patch.contactoEmail =
+        "";
+
+      patch.email =
+        "";
+
+      patch.emailCliente =
+        "";
     }
 
     if (
@@ -3204,13 +4617,18 @@ function createClientesController(
       ) ===
       cleanText(
         selected.phone ||
-          selected.telefono,
+        selected.telefono,
         ""
       )
     ) {
-      patch.contactoPhone = "";
-      patch.phone = "";
-      patch.telefono = "";
+      patch.contactoPhone =
+        "";
+
+      patch.phone =
+        "";
+
+      patch.telefono =
+        "";
     }
 
     if (
@@ -3222,12 +4640,14 @@ function createClientesController(
         selected.email
       )
     ) {
-      patch.emailFacturacion = "";
+      patch.emailFacturacion =
+        "";
     }
 
     if (
       cleanText(
-        createModal.form.username,
+        createModal.form
+          .username,
         ""
       ) ===
       cleanText(
@@ -3235,7 +4655,8 @@ function createClientesController(
         ""
       )
     ) {
-      patch.username = "";
+      patch.username =
+        "";
     }
 
     if (
@@ -3248,10 +4669,13 @@ function createClientesController(
         ""
       )
     ) {
-      patch.slug = "";
+      patch.slug =
+        "";
     }
 
-    patchCreateForm(patch);
+    patchCreateForm(
+      patch
+    );
 
     createModal.userSearch = {
       query: "",
@@ -3272,7 +4696,7 @@ function createClientesController(
       normalizeSearchUser(
         createModal.userSearch
           .selectedUser ||
-          {}
+        {}
       );
 
     if (
@@ -3351,11 +4775,54 @@ function createClientesController(
     return true;
   }
 
+  function scheduleCreateUserSearch(
+    query = ""
+  ) {
+    const q =
+      cleanText(
+        query,
+        ""
+      );
+
+    createModal.userSearch.query =
+      q;
+
+    if (
+      isBrowser()
+    ) {
+      window.clearTimeout?.(
+        userSearchTimer
+      );
+
+      userSearchTimer =
+        window.setTimeout(
+          () => {
+            userSearchTimer =
+              0;
+
+            void searchCreateUsers(
+              q
+            );
+          },
+          USER_SEARCH_DEBOUNCE_MS
+        );
+    } else {
+      void searchCreateUsers(
+        q
+      );
+    }
+
+    return true;
+  }
+
   async function searchCreateUsers(
     query = ""
   ) {
     const q =
-      cleanText(query, "");
+      cleanText(
+        query,
+        ""
+      );
 
     const seq =
       ++userSearchSeq;
@@ -3390,26 +4857,28 @@ function createClientesController(
     scheduleCreateModalRender();
 
     try {
-      /*
-        Importante:
-        index.js NO toca Http.
-        La red de Usuarios vive en usuarios.api.js.
-      */
       const response =
         await fetchUsuariosRequest({
           all: false,
           limit:
             USER_SEARCH_LIMIT,
-          includeTotal: false,
-          search: q,
+          includeTotal:
+            false,
+          search:
+            q,
           q,
-          timeout: 15_000,
+          timeout:
+            15_000,
         });
 
       if (
         seq !==
           userSearchSeq ||
-        destroyed
+        destroyed ||
+        !createModal.open ||
+        !isClientesRoute(
+          currentContext
+        )
       ) {
         return [];
       }
@@ -3441,7 +4910,8 @@ function createClientesController(
       if (
         seq !==
           userSearchSeq ||
-        destroyed
+        destroyed ||
+        !createModal.open
       ) {
         return [];
       }
@@ -3490,10 +4960,14 @@ function createClientesController(
     }
 
     const form =
-      readCreateForm(formNode);
+      readCreateForm(
+        formNode
+      );
 
     const validation =
-      validateCreateForm(form);
+      validateCreateForm(
+        form
+      );
 
     createModal.form =
       validation.form ||
@@ -3501,7 +4975,8 @@ function createClientesController(
 
     createModal.errors =
       safeObject(
-        validation.errors
+        validation.errors,
+        {}
       );
 
     createModal.serverError =
@@ -3510,12 +4985,21 @@ function createClientesController(
     createModal.successMessage =
       "";
 
-    if (!validation.valid) {
+    if (
+      validation.valid !==
+      true
+    ) {
       scheduleCreateModalRender();
       return false;
     }
 
+    const seq =
+      ++createSeq;
+
     createModal.submitting =
+      true;
+
+    creating =
       true;
 
     scheduleCreateModalRender();
@@ -3528,10 +5012,6 @@ function createClientesController(
           form
         );
 
-      /*
-        clientes.api.js v3 reduce este VM al payload real
-        que admite POST /api/clientes.
-      */
       const created =
         await createClienteRequest(
           payloadToCreate,
@@ -3541,10 +5021,21 @@ function createClientesController(
           }
         );
 
+      if (
+        seq !== createSeq ||
+        destroyed ||
+        !isClientesRoute(
+          currentContext
+        )
+      ) {
+        return false;
+      }
+
       const createdId =
         cleanText(
           first(
-            created?.clienteId,
+            created
+              ?.clienteId,
             created?.id,
             created?.data
               ?.clienteId,
@@ -3561,11 +5052,11 @@ function createClientesController(
       }
 
       /*
-        MUY IMPORTANTE:
-        `created` es un ACK, no un cliente.
-        Nunca lo normalizamos ni lo insertamos en la tabla.
+         POST devuelve ACK.
+         Sólo GET /:id puede proporcionar detalle real.
       */
-      let finalDetail = null;
+      let finalDetail =
+        null;
 
       try {
         finalDetail =
@@ -3576,27 +5067,38 @@ function createClientesController(
             }
           );
       } catch {
-        /*
-          Cosmos puede tardar un instante en quedar disponible.
-          El refresh posterior será la fuente de verdad.
-        */
-        finalDetail = null;
+        finalDetail =
+          null;
+      }
+
+      if (
+        seq !== createSeq ||
+        destroyed ||
+        !isClientesRoute(
+          currentContext
+        )
+      ) {
+        return false;
       }
 
       if (finalDetail) {
-        setItems(
-          [
-            finalDetail,
-            ...items,
-          ],
-          {
-            syncedAt:
-              Date.now(),
-          }
-        );
+        items =
+          upsertCliente(
+            items,
+            finalDetail
+          );
+
+        total =
+          items.length;
+
+        lastSyncAt =
+          Date.now();
       }
 
       createModal.submitting =
+        false;
+
+      creating =
         false;
 
       createModal.createdClienteId =
@@ -3608,8 +5110,13 @@ function createClientesController(
       createModal.serverError =
         "";
 
-      createModal.errors = {};
+      createModal.errors =
+        {};
 
+      /*
+         Un único evento canónico de éxito.
+         Los listeners propios lo ignoran por source/controllerId.
+      */
       emitEvent(
         "clientes:create:success",
         {
@@ -3641,19 +5148,39 @@ function createClientesController(
         "success"
       );
 
-      /*
-        El handler global ignora nuestros propios eventos,
-        por tanto aquí hay UN solo refresh.
-      */
       closeCreate({
         reset: true,
         emit: true,
+        renderView: false,
+        force: true,
       });
 
+      /*
+         ÚNICA reconciliación de red post-creación.
+      */
       await refresh();
+
+      if (
+        assertRenderable()
+      ) {
+        renderNow({
+          allowWhileCreate:
+            true,
+        });
+      }
 
       return true;
     } catch (submitError) {
+      if (
+        seq !== createSeq ||
+        destroyed
+      ) {
+        return false;
+      }
+
+      creating =
+        false;
+
       createModal.submitting =
         false;
 
@@ -3680,7 +5207,9 @@ function createClientesController(
   function createActionFromTarget(
     target = null
   ) {
-    if (!isElementNode(target)) {
+    if (
+      !isElementNode(target)
+    ) {
       return null;
     }
 
@@ -3706,7 +5235,8 @@ function createClientesController(
         cleanText(
           actionable.getAttribute(
             "data-create-action"
-          ) || "",
+          ) ||
+          "",
           ""
         ),
     };
@@ -3724,18 +5254,22 @@ function createClientesController(
     }
 
     const overlay =
-      event.target?.closest?.(
-        CREATE_MODAL_OVERLAY_SELECTOR
-      );
+      event.target
+        ?.closest?.(
+          CREATE_MODAL_OVERLAY_SELECTOR
+        );
 
     if (
       overlay &&
-      event.target === overlay &&
+      event.target ===
+        overlay &&
       createModal.open &&
       !createModal.submitting
     ) {
       event.preventDefault();
+
       closeCreate();
+
       return;
     }
 
@@ -3744,7 +5278,9 @@ function createClientesController(
         event.target
       );
 
-    if (!info?.action) {
+    if (
+      !info?.action
+    ) {
       return;
     }
 
@@ -3759,6 +5295,7 @@ function createClientesController(
       ).includes(action)
     ) {
       event.preventDefault();
+      event.stopPropagation();
     }
 
     if (
@@ -3779,12 +5316,16 @@ function createClientesController(
       CREATE_ACTIONS.SUBMIT
     ) {
       const form =
-        element.closest("form") ||
+        element.closest(
+          "form"
+        ) ||
         modalHost.querySelector(
           "[data-clientes-create-form='true']"
         );
 
-      await submitCreate(form);
+      await submitCreate(
+        form
+      );
 
       return;
     }
@@ -3813,13 +5354,7 @@ function createClientesController(
       CREATE_ACTIONS.COPY_USER_CONTACT
     ) {
       copySelectedUserContact();
-      return;
     }
-
-    /*
-      BILLING_TOGGLE queda cubierto por el change/input
-      de los checkboxes; no se dispara una mutación HTTP.
-    */
   }
 
   function handleModalSubmit(
@@ -3834,15 +5369,21 @@ function createClientesController(
     }
 
     const form =
-      event.target?.closest?.(
-        "[data-clientes-create-form='true']"
-      );
+      event.target
+        ?.closest?.(
+          "[data-clientes-create-form='true']"
+        );
 
-    if (!form) return;
+    if (!form) {
+      return;
+    }
 
     event.preventDefault();
+    event.stopPropagation();
 
-    void submitCreate(form);
+    void submitCreate(
+      form
+    );
   }
 
   function handleModalInput(
@@ -3860,7 +5401,9 @@ function createClientesController(
       event.target;
 
     if (
-      !isElementNode(target)
+      !isElementNode(
+        target
+      )
     ) {
       return;
     }
@@ -3870,39 +5413,25 @@ function createClientesController(
         target.getAttribute(
           "data-field"
         ) ||
-          target.getAttribute(
-            "name"
-          ) ||
-          "",
+        target.getAttribute(
+          "name"
+        ) ||
+        "",
         ""
       );
 
-    if (!field) return;
+    if (!field) {
+      return;
+    }
 
     if (
       field ===
       "targetUserSearch"
     ) {
-      const query =
-        target.value || "";
-
-      createModal.userSearch.query =
-        query;
-
-      if (isBrowser()) {
-        window.clearTimeout?.(
-          userSearchTimer
-        );
-
-        userSearchTimer =
-          window.setTimeout?.(
-            () =>
-              searchCreateUsers(
-                query
-              ),
-            USER_SEARCH_DEBOUNCE_MS
-          );
-      }
+      scheduleCreateUserSearch(
+        target.value ||
+        ""
+      );
 
       return;
     }
@@ -3921,19 +5450,41 @@ function createClientesController(
         : target.value;
 
     patchCreateForm({
-      [field]: value,
+      [field]:
+        value,
     });
 
-    if (field === "tipo") {
+    if (
+      createModal.errors[
+        field
+      ]
+    ) {
+      const nextErrors = {
+        ...createModal.errors,
+      };
+
+      delete nextErrors[
+        field
+      ];
+
+      createModal.errors =
+        nextErrors;
+    }
+
+    createModal.serverError =
+      "";
+
+    if (
+      field === "tipo"
+    ) {
       patchCreateForm({
-        clienteTipo: value,
-        segmento: value,
+        clienteTipo:
+          value,
+
+        segmento:
+          value,
       });
 
-      /*
-        Cambian labels y defaults visuales.
-        Restauramos el foco tras el repaint.
-      */
       scheduleCreateModalRender();
     }
 
@@ -3942,8 +5493,11 @@ function createClientesController(
       "contactoEmail"
     ) {
       patchCreateForm({
-        email: value,
-        emailCliente: value,
+        email:
+          value,
+
+        emailCliente:
+          value,
 
         emailFacturacion:
           createModal.form
@@ -3957,8 +5511,11 @@ function createClientesController(
       "contactoPhone"
     ) {
       patchCreateForm({
-        phone: value,
-        telefono: value,
+        phone:
+          value,
+
+        telefono:
+          value,
       });
     }
   }
@@ -3975,18 +5532,76 @@ function createClientesController(
     }
 
     if (
+      event.key === "Tab"
+    ) {
+      trapCreateFocus(
+        event
+      );
+
+      return;
+    }
+
+    if (
       event.key === "Escape" &&
       createModal.open &&
       !createModal.submitting
     ) {
       event.preventDefault();
+      event.stopPropagation();
+
       closeCreate();
     }
   }
 
-  /* =======================================================
+  /* ---------------------------------------------------------
      DETAIL
-  ======================================================= */
+  --------------------------------------------------------- */
+
+  function claimDetailOwnership() {
+    try {
+      getGlobalObject()[
+        CLIENTES_DETAIL_OWNER_KEY
+      ] =
+        ownerToken;
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function ownsDetailModal() {
+    try {
+      return (
+        getGlobalObject()[
+          CLIENTES_DETAIL_OWNER_KEY
+        ] === ownerToken
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  function releaseDetailOwnership() {
+    try {
+      const global =
+        getGlobalObject();
+
+      if (
+        global[
+          CLIENTES_DETAIL_OWNER_KEY
+        ] === ownerToken
+      ) {
+        delete global[
+          CLIENTES_DETAIL_OWNER_KEY
+        ];
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   async function openCliente(
     idValue = "",
@@ -3995,9 +5610,25 @@ function createClientesController(
     const clienteId =
       cleanText(
         idValue ||
-          getClienteId(detail),
+        getClienteId(
+          detail
+        ),
         ""
       );
+
+    if (!clienteId) {
+      return false;
+    }
+
+    if (
+      openingClienteId ===
+      clienteId
+    ) {
+      return true;
+    }
+
+    const seq =
+      ++detailSeq;
 
     let current =
       detail ||
@@ -4009,16 +5640,12 @@ function createClientesController(
     openingClienteId =
       clienteId;
 
-    scheduleRender();
-
     try {
       /*
-        El backend actual marca GET /api/clientes/:id como detalle admin.
-        Un usuario normal abre el snapshot que ya tiene en la tabla
-        y no provoca un 403 innecesario.
+         El detalle backend es admin.
+         Usuario normal utiliza el snapshot visible sin provocar 403.
       */
       if (
-        clienteId &&
         isAdminContext(
           currentContext
         )
@@ -4032,8 +5659,22 @@ function createClientesController(
               }
             );
         } catch {
-          // fallback al dato visible
+          /*
+             Si falla el detalle y existe snapshot,
+             abrimos lo que ya estaba visible.
+          */
         }
+      }
+
+      if (
+        seq !== detailSeq ||
+        destroyed ||
+        !isClientesRoute(
+          currentContext
+        ) ||
+        !ownsRoot()
+      ) {
+        return false;
       }
 
       if (!current) {
@@ -4046,7 +5687,37 @@ function createClientesController(
       }
 
       const normalized =
-        canonicalCliente(current);
+        canonicalCliente(
+          current
+        );
+
+      /*
+         Guard final:
+         el ID resuelto debe seguir siendo el pedido.
+      */
+      if (
+        getClienteId(
+          normalized
+        ) !== clienteId
+      ) {
+        return false;
+      }
+
+      items =
+        upsertCliente(
+          items,
+          normalized
+        );
+
+      total =
+        items.length;
+
+      /*
+         Importante:
+         no repintamos la tabla justo antes/después de abrir el modal.
+         Así el bridge del modal conserva un return-focus DOM válido.
+      */
+      claimDetailOwnership();
 
       try {
         const opened =
@@ -4054,11 +5725,13 @@ function createClientesController(
             normalized
           );
 
-        if (opened !== false) {
+        if (
+          opened !== false
+        ) {
           return true;
         }
       } catch {
-        // fallback por evento
+        // fallback event
       }
 
       emitEvent(
@@ -4073,15 +5746,10 @@ function createClientesController(
           client:
             normalized,
 
-          clienteId:
-            getClienteId(
-              normalized
-            ),
+          clienteId,
 
           id:
-            getClienteId(
-              normalized
-            ),
+            clienteId,
 
           source:
             CLIENTES_INDEX_SOURCE,
@@ -4093,14 +5761,18 @@ function createClientesController(
 
       return true;
     } finally {
-      openingClienteId = "";
-      scheduleRender();
+      if (
+        seq === detailSeq
+      ) {
+        openingClienteId =
+          "";
+      }
     }
   }
 
-  /* =======================================================
-     CSV
-  ======================================================= */
+  /* ---------------------------------------------------------
+     CSV EXPORT
+  --------------------------------------------------------- */
 
   function exportCsv() {
     const rows =
@@ -4113,24 +5785,25 @@ function createClientesController(
         }
       );
 
-    const headers = [
-      "ID",
-      "Código",
-      "Nombre",
-      "Email",
-      "Teléfono",
-      "Ciudad",
-      "NIF",
-      "Estado",
-      "Tipo",
-      "Importe",
-    ];
-
     const csvRows = [
-      headers,
+      [
+        "ID",
+        "Código",
+        "Nombre",
+        "Email",
+        "Teléfono",
+        "Ciudad",
+        "NIF",
+        "Estado",
+        "Tipo",
+        "Importe",
+      ],
     ];
 
-    for (const item of rows) {
+    for (
+      const item
+      of rows
+    ) {
       csvRows.push([
         getClienteId(item),
         getClienteCode(item),
@@ -4142,17 +5815,25 @@ function createClientesController(
         getClienteStatus(item),
         getClienteType(item),
         String(
-          getClienteAmount(item)
-        ).replace(".", ","),
+          getClienteAmount(
+            item
+          )
+        ).replace(
+          ".",
+          ","
+        ),
       ]);
     }
 
     const csv =
       csvRows
-        .map((row) =>
-          row
-            .map(escapeCsv)
-            .join(";")
+        .map(
+          (row) =>
+            row
+              .map(
+                escapeCsv
+              )
+              .join(";")
         )
         .join("\n");
 
@@ -4163,7 +5844,9 @@ function createClientesController(
     try {
       const blob =
         new Blob(
-          [`\ufeff${csv}`],
+          [
+            `\ufeff${csv}`,
+          ],
           {
             type:
               "text/csv;charset=utf-8",
@@ -4180,27 +5863,35 @@ function createClientesController(
           "a"
         );
 
-      link.href = url;
+      link.href =
+        url;
 
       link.download =
         `clientes-${new Date()
           .toISOString()
           .slice(0, 10)}.csv`;
 
-      link.rel = "noopener";
+      link.rel =
+        "noopener";
 
-      document.body.appendChild(
-        link
-      );
+      document.body
+        .appendChild(
+          link
+        );
 
       link.click();
       link.remove();
 
       window.setTimeout(
-        () =>
-          URL.revokeObjectURL(
-            url
-          ),
+        () => {
+          try {
+            URL.revokeObjectURL(
+              url
+            );
+          } catch {
+            // noop
+          }
+        },
         1000
       );
 
@@ -4215,14 +5906,16 @@ function createClientesController(
     }
   }
 
-  /* =======================================================
+  /* ---------------------------------------------------------
      ROOT EVENTS
-  ======================================================= */
+  --------------------------------------------------------- */
 
   function actionFromTarget(
     target = null
   ) {
-    if (!isElementNode(target)) {
+    if (
+      !isElementNode(target)
+    ) {
       return null;
     }
 
@@ -4249,10 +5942,10 @@ function createClientesController(
           actionable.getAttribute(
             "data-clientes-action"
           ) ||
-            actionable.getAttribute(
-              "data-action"
-            ) ||
-            "",
+          actionable.getAttribute(
+            "data-action"
+          ) ||
+          "",
           ""
         ),
     };
@@ -4261,12 +5954,20 @@ function createClientesController(
   async function handleClick(
     event
   ) {
+    if (
+      !ownsRoot()
+    ) {
+      return;
+    }
+
     const info =
       actionFromTarget(
         event.target
       );
 
-    if (!info?.action) {
+    if (
+      !info?.action
+    ) {
       return;
     }
 
@@ -4276,27 +5977,40 @@ function createClientesController(
     } = info;
 
     const managedActions = [
-      CLIENTES_ACTIONS.OPEN_DETAIL,
+      CLIENTES_ACTIONS
+        .OPEN_DETAIL,
       "detail",
       "open-client",
       "open-cliente",
 
-      CLIENTES_ACTIONS.CREATE_OPEN,
+      CLIENTES_ACTIONS
+        .CREATE_OPEN,
       "create",
       "create-client",
       "create-cliente",
 
-      CLIENTES_ACTIONS.REFRESH,
+      CLIENTES_ACTIONS
+        .REFRESH,
       "retry",
 
-      CLIENTES_ACTIONS.EXPORT,
+      CLIENTES_ACTIONS
+        .EXPORT,
       "export-csv",
 
-      CLIENTES_ACTIONS.FILTER,
-      CLIENTES_ACTIONS.SORT_TOGGLE,
-      CLIENTES_ACTIONS.CLEAR_SEARCH,
-      CLIENTES_ACTIONS.CLEAR_FILTERS,
-      CLIENTES_ACTIONS.LOAD_MORE,
+      CLIENTES_ACTIONS
+        .FILTER,
+
+      CLIENTES_ACTIONS
+        .SORT_TOGGLE,
+
+      CLIENTES_ACTIONS
+        .CLEAR_SEARCH,
+
+      CLIENTES_ACTIONS
+        .CLEAR_FILTERS,
+
+      CLIENTES_ACTIONS
+        .LOAD_MORE,
     ];
 
     if (
@@ -4305,11 +6019,13 @@ function createClientesController(
       )
     ) {
       event.preventDefault();
+      event.stopPropagation();
     }
 
     if (
       [
-        CLIENTES_ACTIONS.OPEN_DETAIL,
+        CLIENTES_ACTIONS
+          .OPEN_DETAIL,
         "detail",
         "open-client",
         "open-cliente",
@@ -4344,19 +6060,24 @@ function createClientesController(
 
     if (
       [
-        CLIENTES_ACTIONS.CREATE_OPEN,
+        CLIENTES_ACTIONS
+          .CREATE_OPEN,
         "create",
         "create-client",
         "create-cliente",
       ].includes(action)
     ) {
-      openCreate();
+      openCreate(
+        element
+      );
+
       return;
     }
 
     if (
       [
-        CLIENTES_ACTIONS.REFRESH,
+        CLIENTES_ACTIONS
+          .REFRESH,
         "retry",
       ].includes(action)
     ) {
@@ -4366,7 +6087,8 @@ function createClientesController(
 
     if (
       [
-        CLIENTES_ACTIONS.EXPORT,
+        CLIENTES_ACTIONS
+          .EXPORT,
         "export-csv",
       ].includes(action)
     ) {
@@ -4376,12 +6098,14 @@ function createClientesController(
 
     if (
       action ===
-      CLIENTES_ACTIONS.FILTER
+      CLIENTES_ACTIONS
+        .FILTER
     ) {
       setFilter(
         element.getAttribute(
           "data-filter"
-        ) || "all"
+        ) ||
+        "all"
       );
 
       return;
@@ -4389,15 +6113,16 @@ function createClientesController(
 
     if (
       action ===
-      CLIENTES_ACTIONS.SORT_TOGGLE
+      CLIENTES_ACTIONS
+        .SORT_TOGGLE
     ) {
       setSortOrder(
         element.getAttribute(
           "data-next-sort-order"
         ) ||
-          getNextSortOrder(
-            sortOrder
-          )
+        getNextSortOrder(
+          sortOrder
+        )
       );
 
       return;
@@ -4405,7 +6130,8 @@ function createClientesController(
 
     if (
       action ===
-      CLIENTES_ACTIONS.CLEAR_SEARCH
+      CLIENTES_ACTIONS
+        .CLEAR_SEARCH
     ) {
       clearSearch();
       return;
@@ -4413,7 +6139,8 @@ function createClientesController(
 
     if (
       action ===
-      CLIENTES_ACTIONS.CLEAR_FILTERS
+      CLIENTES_ACTIONS
+        .CLEAR_FILTERS
     ) {
       clearFilters();
       return;
@@ -4421,7 +6148,8 @@ function createClientesController(
 
     if (
       action ===
-      CLIENTES_ACTIONS.LOAD_MORE
+      CLIENTES_ACTIONS
+        .LOAD_MORE
     ) {
       loadMore(
         element.getAttribute(
@@ -4434,11 +6162,19 @@ function createClientesController(
   function handleInput(
     event
   ) {
+    if (
+      !ownsRoot()
+    ) {
+      return;
+    }
+
     const target =
       event.target;
 
     if (
-      !isElementNode(target)
+      !isElementNode(
+        target
+      )
     ) {
       return;
     }
@@ -4457,19 +6193,26 @@ function createClientesController(
         "[data-search-input='clientes']"
       );
 
-    if (!isSearch) return;
+    if (!isSearch) {
+      return;
+    }
 
-    if (isBrowser()) {
+    if (
+      isBrowser()
+    ) {
       window.clearTimeout?.(
         searchTimer
       );
 
       searchTimer =
-        window.setTimeout?.(
-          () =>
+        window.setTimeout(
+          () => {
+            searchTimer = 0;
+
             setSearch(
               target.value
-            ),
+            );
+          },
           SEARCH_DEBOUNCE_MS
         );
     } else {
@@ -4482,40 +6225,138 @@ function createClientesController(
   function handleKeydown(
     event
   ) {
+    if (
+      !ownsRoot()
+    ) {
+      return;
+    }
+
     const target =
       event.target;
 
     if (
-      !isElementNode(target)
+      !isElementNode(
+        target
+      )
     ) {
       return;
     }
 
     if (
-      event.key === "Enter"
+      event.key !==
+        "Enter" &&
+      event.key !==
+        " "
     ) {
-      const row =
-        target.closest(
-          "[data-client-row='true'], [data-cliente-row='true']"
-        );
-
-      if (row) {
-        event.preventDefault();
-
-        const idTarget =
-          row.getAttribute(
-            "data-client-id"
-          ) ||
-          row.getAttribute(
-            "data-cliente-id"
-          ) ||
-          "";
-
-        void openCliente(
-          idTarget
-        );
-      }
+      return;
     }
+
+    const row =
+      target.closest(
+        "[data-client-row='true'], [data-cliente-row='true']"
+      );
+
+    if (
+      !row ||
+      !root?.contains(
+        row
+      )
+    ) {
+      return;
+    }
+
+    /*
+       No secuestrar Space/Enter de controles nativos dentro de la fila.
+    */
+    if (
+      target !== row &&
+      target.closest(
+        "a, button, input, select, textarea"
+      )
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const idTarget =
+      row.getAttribute(
+        "data-client-id"
+      ) ||
+      row.getAttribute(
+        "data-cliente-id"
+      ) ||
+      "";
+
+    void openCliente(
+      idTarget
+    );
+  }
+
+  /* ---------------------------------------------------------
+     EXTERNAL EVENTS
+  --------------------------------------------------------- */
+
+  function externalCreateKey(
+    data = {}
+  ) {
+    return [
+      cleanText(
+        first(
+          data.clienteId,
+          data.clientId,
+          data.id,
+          data.cliente?.clienteId,
+          data.detail?.clienteId,
+          ""
+        ),
+        ""
+      ),
+
+      cleanText(
+        first(
+          data.userId,
+          data.cliente?.userId,
+          data.detail?.userId,
+          ""
+        ),
+        ""
+      ),
+    ]
+      .filter(Boolean)
+      .join("|") ||
+      "external-create";
+  }
+
+  function scheduleExternalCreateRefresh() {
+    if (!isBrowser()) {
+      void refresh();
+      return true;
+    }
+
+    window.clearTimeout?.(
+      externalCreateRefreshTimer
+    );
+
+    externalCreateRefreshTimer =
+      window.setTimeout(
+        () => {
+          externalCreateRefreshTimer =
+            0;
+
+          if (
+            !assertAlive()
+          ) {
+            return;
+          }
+
+          void refresh();
+        },
+        EXTERNAL_CREATE_REFRESH_DELAY_MS
+      );
+
+    return true;
   }
 
   function handleExternalCreateSuccess(
@@ -4524,20 +6365,106 @@ function createClientesController(
     const data =
       eventPayload(event);
 
-    /*
-      Evita el doble refresh que tenía el controlador anterior:
-      submitCreate() refresca una vez y su propio evento no vuelve
-      a disparar otra petición.
-    */
     if (
       data.source ===
         CLIENTES_INDEX_SOURCE &&
-      data.controllerId === id
+      data.controllerId ===
+        id
     ) {
       return;
     }
 
-    void refresh();
+    const now =
+      Date.now();
+
+    const key =
+      externalCreateKey(
+        data
+      );
+
+    if (
+      key ===
+        lastExternalCreateKey &&
+      (
+        now -
+        lastExternalCreateAt
+      ) <
+        EXTERNAL_CREATE_DEDUPE_MS
+    ) {
+      return;
+    }
+
+    lastExternalCreateKey =
+      key;
+
+    lastExternalCreateAt =
+      now;
+
+    scheduleExternalCreateRefresh();
+  }
+
+  function handleDetailClosed(
+    event = null
+  ) {
+    const data =
+      eventPayload(event);
+
+    if (
+      !ownsDetailModal()
+    ) {
+      return;
+    }
+
+    const closedId =
+      cleanText(
+        first(
+          data.clienteId,
+          data.id,
+          ""
+        ),
+        ""
+      );
+
+    /*
+       Si no hay ID, también liberamos: el bridge acaba de cerrar.
+    */
+    if (
+      !closedId ||
+      !openingClienteId ||
+      closedId !==
+        openingClienteId
+    ) {
+      releaseDetailOwnership();
+    }
+  }
+
+  function closeOwnedDetail({
+    emit = true,
+  } = {}) {
+    if (
+      !ownsDetailModal()
+    ) {
+      return false;
+    }
+
+    detailSeq += 1;
+
+    try {
+      closeClientesDetailModal();
+
+      if (!emit) {
+        /*
+           El bridge actual siempre emite al cerrar.
+           No existe opción silenciosa; sólo evitamos duplicar.
+        */
+      }
+    } catch {
+      // noop
+    }
+
+    releaseDetailOwnership();
+
+    return true;
   }
 
   function handleRouteEvent(
@@ -4565,13 +6492,26 @@ function createClientesController(
         currentContext
       )
     ) {
-      if (createModal.open) {
+      loadSeq += 1;
+      userSearchSeq += 1;
+      createSeq += 1;
+      detailSeq += 1;
+
+      queuedForceRefresh =
+        false;
+
+      if (
+        createModal.open
+      ) {
         closeCreate({
           reset: true,
           emit: false,
           renderView: false,
+          force: true,
         });
       }
+
+      closeOwnedDetail();
 
       return;
     }
@@ -4579,10 +6519,15 @@ function createClientesController(
     scheduleRender();
   }
 
+  /* ---------------------------------------------------------
+     ATTACH / DETACH
+  --------------------------------------------------------- */
+
   function attach() {
     if (
       !root ||
-      mounted
+      mounted ||
+      !ownsRoot()
     ) {
       return false;
     }
@@ -4603,8 +6548,8 @@ function createClientesController(
     );
 
     for (
-      const eventName of
-      CREATE_SUCCESS_EVENTS
+      const eventName
+      of CREATE_SUCCESS_EVENTS
     ) {
       disposers.push(
         subscribeEvent(
@@ -4615,27 +6560,13 @@ function createClientesController(
     }
 
     for (
-      const eventName of
-      CREATE_CLOSE_EVENTS
+      const eventName
+      of DETAIL_CLOSE_EVENTS
     ) {
       disposers.push(
         subscribeEvent(
           eventName,
-          () =>
-            scheduleRender()
-        )
-      );
-    }
-
-    for (
-      const eventName of
-      DETAIL_CLOSE_EVENTS
-    ) {
-      disposers.push(
-        subscribeEvent(
-          eventName,
-          () =>
-            scheduleRender()
+          handleDetailClosed
         )
       );
     }
@@ -4654,29 +6585,25 @@ function createClientesController(
       )
     );
 
-    mounted = true;
+    mounted =
+      true;
 
     return true;
   }
 
   function detach() {
-    if (!root) {
-      mounted = false;
-      return false;
-    }
-
     try {
-      root.removeEventListener(
+      root?.removeEventListener(
         "click",
         handleClick
       );
 
-      root.removeEventListener(
+      root?.removeEventListener(
         "input",
         handleInput
       );
 
-      root.removeEventListener(
+      root?.removeEventListener(
         "keydown",
         handleKeydown
       );
@@ -4685,8 +6612,8 @@ function createClientesController(
     }
 
     for (
-      const dispose of
-      disposers.splice(0)
+      const dispose
+      of disposers.splice(0)
     ) {
       try {
         dispose?.();
@@ -4695,7 +6622,9 @@ function createClientesController(
       }
     }
 
-    if (isBrowser()) {
+    if (
+      isBrowser()
+    ) {
       window.clearTimeout?.(
         searchTimer
       );
@@ -4703,53 +6632,25 @@ function createClientesController(
       window.clearTimeout?.(
         userSearchTimer
       );
+
+      window.clearTimeout?.(
+        externalCreateRefreshTimer
+      );
     }
 
-    try {
-      if (
-        modalHost &&
-        modalHostBound
-      ) {
-        modalHost.removeEventListener(
-          "click",
-          handleModalClick,
-          true
-        );
+    searchTimer = 0;
+    userSearchTimer = 0;
+    externalCreateRefreshTimer = 0;
 
-        modalHost.removeEventListener(
-          "submit",
-          handleModalSubmit,
-          true
-        );
-
-        modalHost.removeEventListener(
-          "input",
-          handleModalInput,
-          true
-        );
-
-        modalHost.removeEventListener(
-          "change",
-          handleModalInput,
-          true
-        );
-
-        modalHost.removeEventListener(
-          "keydown",
-          handleModalKeydown,
-          true
-        );
-
-        modalHostBound = false;
-      }
-    } catch {
-      // noop
-    }
-
-    mounted = false;
+    mounted =
+      false;
 
     return true;
   }
+
+  /* ---------------------------------------------------------
+     MOUNT / DESTROY
+  --------------------------------------------------------- */
 
   async function mount(
     nextHost = null,
@@ -4761,12 +6662,15 @@ function createClientesController(
 
     currentContext = {
       ...currentContext,
+
       ...safeObject(
         nextContext
       ),
     };
 
-    setHost(nextHost);
+    setHost(
+      nextHost
+    );
 
     if (!root) {
       throw new Error(
@@ -4782,17 +6686,34 @@ function createClientesController(
       return getSnapshot();
     }
 
-    attach();
-    renderNow();
+    /*
+       Claim antes de bind/render.
+       Un controller antiguo deja de ser owner inmediatamente.
+    */
+    claimRoot();
 
-    if (!items.length) {
+    attach();
+
+    if (
+      !items.length
+    ) {
+      /*
+         Sin cache: runLoad() controla por sí mismo
+         el estado loading y el primer render.
+         Evitamos un repaint duplicado al montar.
+      */
       await load({
         force: false,
         silent: false,
       });
     } else {
+      loading =
+        false;
+
+      renderNow();
+
       /*
-        Paint inmediato desde cache API y refresh silencioso.
+         Cache inmediata + revalidación silenciosa.
       */
       void load({
         force: false,
@@ -4820,10 +6741,16 @@ function createClientesController(
       return true;
     }
 
-    destroyed = true;
+    destroyed =
+      true;
 
     loadSeq += 1;
     userSearchSeq += 1;
+    createSeq += 1;
+    detailSeq += 1;
+
+    queuedForceRefresh =
+      false;
 
     cancelFrame(
       renderFrame
@@ -4833,37 +6760,56 @@ function createClientesController(
       modalFrame
     );
 
+    renderFrame = 0;
+    modalFrame = 0;
+
     detach();
 
-    try {
-      closeClientesDetailModal();
-    } catch {
-      // noop
-    }
-
-    try {
-      if (modalHost) {
-        modalHost.innerHTML = "";
-        modalHost.remove?.();
-      }
-
-      createModal.open = false;
-      syncBodyModalClass();
-    } catch {
-      // noop
-    }
+    closeOwnedDetail();
 
     if (
-      clear &&
-      root
+      createModal.open
     ) {
-      root.innerHTML = "";
+      closeCreate({
+        reset: true,
+        emit: false,
+        renderView: false,
+        force: true,
+      });
+    } else {
+      removeModalHost();
     }
 
+    createModal.open =
+      false;
+
+    syncBodyModalClass();
+
+    /*
+       CRÍTICO:
+       sólo limpiar el root si este controller todavía lo posee.
+       Un destroy atrasado jamás borra el DOM de una instancia nueva.
+    */
+    if (
+      clear &&
+      root &&
+      ownsRoot()
+    ) {
+      root.replaceChildren();
+    }
+
+    const instanceHost =
+      root;
+
+    releaseRoot();
+
     clearInstance(
-      root,
+      instanceHost,
       controller
     );
+
+    createReturnFocus =
+      null;
 
     return true;
   }
@@ -4871,16 +6817,28 @@ function createClientesController(
   const controller = {
     id,
 
+    version:
+      CLIENTES_INDEX_VERSION,
+
+    owner:
+      ownerId,
+
     get state() {
       return {
         id,
-        host: root,
+
+        host:
+          root,
+
         context:
           currentContext,
 
         items,
         total,
-        remoteCount: total,
+
+        remoteCount:
+          total,
+
         lastSyncAt,
 
         loading,
@@ -4898,6 +6856,22 @@ function createClientesController(
         mounted,
         destroyed,
 
+        ownsRoot:
+          ownsRoot(),
+
+        modalOpen:
+          createModal.open,
+
+        modalOwned:
+          Boolean(
+            modalHost &&
+            modalHost.dataset
+              ?.owner === ownerId
+          ),
+
+        detailOwned:
+          ownsDetailModal(),
+
         apiVersion:
           CLIENTES_API_VERSION,
 
@@ -4907,16 +6881,23 @@ function createClientesController(
     },
 
     getSnapshot,
+
     getState:
       getSnapshot,
 
     mount,
     render,
-    init: mount,
-    bootstrap: mount,
+    init:
+      mount,
+
+    bootstrap:
+      mount,
 
     load,
-    reload: refresh,
+
+    reload:
+      refresh,
+
     refresh,
 
     setSearch,
@@ -4928,10 +6909,12 @@ function createClientesController(
     loadMore,
 
     openCliente,
+
     openClient:
       openCliente,
 
     openCreate,
+
     createCliente:
       openCreate,
 
@@ -4941,15 +6924,19 @@ function createClientesController(
     exportCsv,
 
     destroy,
-    unmount: destroy,
-    dispose: destroy,
+
+    unmount:
+      destroy,
+
+    dispose:
+      destroy,
   };
 
   return controller;
 }
 
 /* =========================================================
-   PUBLIC API
+   PUBLIC CONTROLLER RESOLUTION
 ========================================================= */
 
 function ensureController(
@@ -4970,20 +6957,24 @@ function ensureController(
 
     if (
       existing &&
-      !existing.state.destroyed
+      !existing.state
+        .destroyed
     ) {
       return existing;
     }
 
     /*
-      Si el Router ha reemplazado el host DOM, no dejamos
-      un controlador antiguo vivo con listeners/modales propios.
+       Si el router cambió el host, invalidamos la instancia anterior
+       sin permitir que limpie el host nuevo.
     */
     if (
       lastInstance &&
-      !lastInstance.state.destroyed &&
-      lastInstance.state.host &&
-      lastInstance.state.host !==
+      !lastInstance.state
+        .destroyed &&
+      lastInstance.state
+        .host &&
+      lastInstance.state
+        .host !==
         resolvedHost
     ) {
       void lastInstance
@@ -4998,7 +6989,8 @@ function ensureController(
 
   if (
     lastInstance &&
-    !lastInstance.state.destroyed &&
+    !lastInstance.state
+      .destroyed &&
     !host
   ) {
     return lastInstance;
@@ -5028,12 +7020,16 @@ function parseInitArgs(
   maybeContext = {}
 ) {
   const host =
-    isDomNode(hostOrContext)
+    isDomNode(
+      hostOrContext
+    )
       ? hostOrContext
       : null;
 
   const context =
-    isDomNode(hostOrContext)
+    isDomNode(
+      hostOrContext
+    )
       ? safeObject(
           maybeContext
         )
@@ -5047,6 +7043,10 @@ function parseInitArgs(
   };
 }
 
+/* =========================================================
+   PUBLIC API
+========================================================= */
+
 export async function init(
   hostOrContext = null,
   maybeContext = {}
@@ -5054,10 +7054,11 @@ export async function init(
   const {
     host,
     context,
-  } = parseInitArgs(
-    hostOrContext,
-    maybeContext
-  );
+  } =
+    parseInitArgs(
+      hostOrContext,
+      maybeContext
+    );
 
   const controller =
     ensureController(
@@ -5118,21 +7119,26 @@ export async function destroy(
     return true;
   }
 
-  return lastInstance.destroy(
-    options
-  );
+  return lastInstance
+    .destroy(
+      options
+    );
 }
 
 export async function unmount(
   options = {}
 ) {
-  return destroy(options);
+  return destroy(
+    options
+  );
 }
 
 export async function dispose(
   options = {}
 ) {
-  return destroy(options);
+  return destroy(
+    options
+  );
 }
 
 export function getClientes() {
@@ -5153,7 +7159,8 @@ export function getClientesCount() {
 
 export function hasClientes() {
   return (
-    getClientesCount() > 0
+    getClientesCount() >
+    0
   );
 }
 
@@ -5180,21 +7187,28 @@ export function setClientesSearch(
   value = ""
 ) {
   return ensureController()
-    .setSearch(value);
+    .setSearch(
+      value
+    );
 }
 
 export function setClientesFilter(
   value = "all"
 ) {
   return ensureController()
-    .setFilter(value);
+    .setFilter(
+      value
+    );
 }
 
 export function setClientesSortOrder(
-  value = DEFAULT_SORT_ORDER
+  value =
+    DEFAULT_SORT_ORDER
 ) {
   return ensureController()
-    .setSortOrder(value);
+    .setSortOrder(
+      value
+    );
 }
 
 export function toggleClientesSortOrder() {
@@ -5206,14 +7220,18 @@ export function loadMoreClientes(
   limit = null
 ) {
   return ensureController()
-    .loadMore(limit);
+    .loadMore(
+      limit
+    );
 }
 
 export async function openCliente(
   id = ""
 ) {
   return ensureController()
-    .openCliente(id);
+    .openCliente(
+      id
+    );
 }
 
 export async function openCreate() {
@@ -5276,6 +7294,7 @@ export const ClientesView = {
     loadMoreClientes,
 
   openCliente,
+
   openClient:
     openCliente,
 

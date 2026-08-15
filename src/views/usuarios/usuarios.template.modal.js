@@ -2,18 +2,23 @@
    Onion Support - Usuarios Detail Modal
    Archivo: /src/views/usuarios/usuarios.template.modal.js
 
-   PRODUCTIVO · CANONICAL MODEL · SHARED MODAL CSS · V4
+   PRODUCTIVO · CANONICAL MODEL · SHARED MODAL CSS · V5
 
    Contrato:
-   - Recibe usuario normalizado por usuarios.api.js.
-   - No hace HTTP.
-   - No reinterpreta raw/profile/usuario/lifecycle/audit.
-   - No inyecta CSS ni estilos inline.
-   - Reutiliza el contrato CSS global incidencias-modal-*.
-   - Muestra únicamente datos reales del detalle seguro de /api/users/:id.
-   - No inventa documentos, notas ni metadata inexistente.
-   - Refresh y copy vía event bus para usuarios/index.js.
-   - Singleton SPA, Escape, overlay, focus trap y retorno de foco.
+   - Recibe y vuelve a normalizar únicamente con usuarios.api.js.
+   - No hace HTTP directo.
+   - No lee raw/profile/lifecycle/audit por su cuenta.
+   - No inyecta CSS.
+   - Reutiliza el contrato visual incidencias-modal-*.
+   - Mantiene clases usuarios-modal-* para evolución propia.
+   - No renderiza secretos, tokens, activationUrl ni raw.
+   - Refresh delegado al controlador cuando existe.
+   - Clipboard local seguro con fallback legacy.
+   - Singleton SPA con host estable.
+   - Sin nesting del modal al rerenderizar.
+   - Body-lock idempotente y reversible.
+   - Escape, overlay, focus trap y retorno de foco.
+   - Avatar HTTPS/SAS sólo para el Blob host aprobado.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -24,7 +29,7 @@ import { normalizeUsuarioModel } from "./usuarios.api.js";
 ========================================================= */
 
 export const USUARIOS_MODAL_TEMPLATE_VERSION =
-  "usuarios.template.modal.canonical.v4.shared-detail-css";
+  "usuarios.template.modal.canonical.v5.stable-host";
 
 export const USUARIOS_DETAIL_ACTIONS = Object.freeze({
   CLOSE: "close",
@@ -32,9 +37,22 @@ export const USUARIOS_DETAIL_ACTIONS = Object.freeze({
   COPY_ID: "copy-id",
 });
 
+const HOST_ID = "usuarios-detail-modal-host";
 const MODAL_ID = "usuarios-detail-modal-root";
 const PANEL_ID = "usuarios-detail-modal-panel";
+
 const REFRESH_FALLBACK_TIMEOUT_MS = 15_000;
+
+const TRUSTED_BLOB_HOST =
+  "onionassets.blob.core.windows.net";
+
+const BODY_LOCK_CLASSES = Object.freeze([
+  "modal-open",
+  "usuarios-modal-open",
+  "usuarios-detail-open",
+  "incidencias-modal-open",
+  "incidencias-detail-open",
+]);
 
 /* =========================================================
    STATE
@@ -42,23 +60,30 @@ const REFRESH_FALLBACK_TIMEOUT_MS = 15_000;
 
 const modalState = {
   detail: null,
+
   isOpen: false,
   isRefreshing: false,
 
+  host: null,
   root: null,
   panel: null,
 
   lastActiveElement: null,
+
+  bodyLocked: false,
   previousBodyOverflow: "",
+  previousBodyClasses: new Map(),
 
   clickHandler: null,
   errorHandler: null,
   keydownHandler: null,
 
   refreshSeq: 0,
+  refreshTimer: 0,
 };
 
 let busAttached = false;
+const busUnsubscribers = [];
 
 /* =========================================================
    BASICS
@@ -90,13 +115,35 @@ function safeObject(value, fallback = {}) {
 }
 
 function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (
+    value &&
+    typeof value === "object" &&
+    typeof value.length === "number" &&
+    typeof value !== "string"
+  ) {
+    try {
+      return Array.from(value);
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
 }
 
 function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
+  const output = String(value)
     .replace(/[\r\n\t]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -104,6 +151,9 @@ function cleanText(value = "", fallback = "") {
   return output || fallback;
 }
 
+/*
+  Nunca aplanar arrays de dominio.
+*/
 function first(...values) {
   for (const value of values) {
     if (
@@ -169,21 +219,26 @@ function hashText(value = "") {
   const text =
     cleanText(value, "usuario");
 
-  let hash = 0;
+  let hash = 2166136261;
 
   for (
     let index = 0;
     index < text.length;
     index += 1
   ) {
-    hash =
-      ((hash << 5) - hash) +
-      text.charCodeAt(index);
+    hash ^= text.charCodeAt(index);
 
-    hash |= 0;
+    hash +=
+      (hash << 1) +
+      (hash << 4) +
+      (hash << 7) +
+      (hash << 8) +
+      (hash << 24);
   }
 
-  return Math.abs(hash);
+  return Math.abs(
+    hash >>> 0
+  );
 }
 
 function initialsFrom(value = "") {
@@ -210,8 +265,10 @@ function initialsFrom(value = "") {
 
 function normalizeEmail(value = "") {
   const email =
-    cleanText(value, "")
-      .toLowerCase();
+    cleanText(
+      value,
+      ""
+    ).toLowerCase();
 
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
     email
@@ -220,24 +277,110 @@ function normalizeEmail(value = "") {
     : "";
 }
 
+function safeMailHref(value = "") {
+  const email =
+    normalizeEmail(value);
+
+  return email
+    ? `mailto:${email}`
+    : "";
+}
+
+function safePhoneHref(value = "") {
+  const raw =
+    cleanText(value, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  const plus =
+    raw.startsWith("+")
+      ? "+"
+      : "";
+
+  const digits =
+    raw.replace(/[^\d]/g, "");
+
+  return digits
+    ? `tel:${plus}${digits}`
+    : "";
+}
+
+/* =========================================================
+   AVATAR URL POLICY
+========================================================= */
+
+function isSensitiveAppQueryParam(
+  key = ""
+) {
+  return [
+    "access_token",
+    "accesstoken",
+    "refresh_token",
+    "refreshtoken",
+    "id_token",
+    "idtoken",
+    "token",
+    "code",
+    "secret",
+    "session",
+    "sessionid",
+    "password",
+    "pwd",
+    "key",
+    "jwt",
+    "authorization",
+    "reset_token",
+    "resettoken",
+    "activation_token",
+    "activationtoken",
+  ].includes(
+    normalizeKey(key)
+  );
+}
+
+function hasAzureSasQuery(url = null) {
+  if (!url?.searchParams) {
+    return false;
+  }
+
+  return [
+    ...url.searchParams.keys(),
+  ].some((key) =>
+    [
+      "sig",
+      "se",
+      "sp",
+      "sv",
+      "sr",
+      "spr",
+      "st",
+      "skoid",
+      "sktid",
+      "skt",
+      "ske",
+      "sks",
+      "skv",
+    ].includes(
+      String(key)
+        .toLowerCase()
+    )
+  );
+}
+
 function safeAvatarUrl(value = "") {
   const raw =
     cleanText(value, "");
 
-  if (!raw) return "";
+  if (!raw) {
+    return "";
+  }
 
   if (
     raw.startsWith("//") ||
     /[\r\n\t\\]/.test(raw) ||
     /^(javascript|data|vbscript|file):/i.test(
-      raw
-    )
-  ) {
-    return "";
-  }
-
-  if (
-    /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i.test(
       raw
     )
   ) {
@@ -255,92 +398,130 @@ function safeAvatarUrl(value = "") {
     );
   }
 
-  if (/^https:\/\//i.test(raw)) {
-    try {
-      return new URL(raw).href;
-    } catch {
-      return "";
-    }
-  }
-
-  if (
+  const localHttp =
     /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(
       raw
-    )
+    );
+
+  if (
+    !/^https:\/\//i.test(raw) &&
+    !localHttp
   ) {
-    try {
-      return new URL(raw).href;
-    } catch {
-      return "";
-    }
+    return "";
   }
 
-  return "";
+  try {
+    const url =
+      new URL(raw);
+
+    for (
+      const key
+      of url.searchParams.keys()
+    ) {
+      if (
+        isSensitiveAppQueryParam(key)
+      ) {
+        return "";
+      }
+    }
+
+    /*
+      SAS de avatar:
+      sólo se acepta si pertenece al storage real de Onion.
+      No se abre la puerta a SAS arbitrarias de terceros.
+    */
+    if (
+      hasAzureSasQuery(url) &&
+      url.hostname.toLowerCase() !==
+        TRUSTED_BLOB_HOST
+    ) {
+      return "";
+    }
+
+    return url.href;
+  } catch {
+    return "";
+  }
 }
 
-function safeMailHref(value = "") {
-  const email =
-    normalizeEmail(value);
-
-  return email
-    ? `mailto:${email}`
-    : "";
-}
-
-function safePhoneHref(value = "") {
-  const raw =
-    cleanText(value, "");
-
-  if (!raw) return "";
-
-  const plus =
-    raw.startsWith("+")
-      ? "+"
-      : "";
-
-  const digits =
-    raw.replace(/[^\d]/g, "");
-
-  return digits
-    ? `tel:${plus}${digits}`
-    : "";
-}
+/* =========================================================
+   PUBLIC-SAFE DETAIL CLONE
+========================================================= */
 
 function cloneDetail(detail = null) {
   if (!isObject(detail)) {
     return null;
   }
 
+  /*
+    raw se usa internamente en el API para compatibilidad,
+    pero el modal no necesita volver a publicarlo en eventos/state.
+  */
+  const {
+    raw: _raw,
+    activationUrl: _activationUrl,
+    activateUrl: _activateUrl,
+    resetUrl: _resetUrl,
+    token: _token,
+    accessToken: _accessToken,
+    refreshToken: _refreshToken,
+    ...safeDetail
+  } = detail;
+
   return {
-    ...detail,
+    ...safeDetail,
 
     direccion: {
       ...safeObject(
-        detail.direccion
+        safeDetail.direccion
       ),
     },
 
     address: {
       ...safeObject(
-        detail.address
+        safeDetail.address
+      ),
+    },
+
+    location: {
+      ...safeObject(
+        safeDetail.location
       ),
     },
 
     security: {
       ...safeObject(
-        detail.security
+        safeDetail.security
       ),
+
+      activation: {
+        ...safeObject(
+          safeDetail.security?.activation
+        ),
+      },
+
+      reset: {
+        ...safeObject(
+          safeDetail.security?.reset
+        ),
+      },
     },
 
     permissions: [
       ...safeArray(
-        detail.permissions
+        safeDetail.permissions
+      ),
+    ],
+
+    roles: [
+      ...safeArray(
+        safeDetail.roles
       ),
     ],
 
     meta: {
       ...safeObject(
-        detail.meta
+        safeDetail.meta
       ),
     },
   };
@@ -360,11 +541,13 @@ function safeEmit(
       ""
     );
 
-  if (!name) return false;
+  if (!name) {
+    return false;
+  }
 
   /*
-    AppCore es el bus canónico en la SPA.
-    No emitimos por los dos buses a la vez para evitar duplicados.
+    AppCore es el bus canónico.
+    Sólo usamos window como fallback para no emitir dos veces.
   */
   try {
     if (
@@ -403,7 +586,7 @@ function safeEmit(
   }
 }
 
-function safeOn(
+function subscribeEvent(
   eventName = "",
   handler = null
 ) {
@@ -417,10 +600,11 @@ function safeOn(
     !name ||
     !isFunction(handler)
   ) {
-    return false;
+    return () => {};
   }
 
-  let attached = false;
+  let appBound = false;
+  let windowBound = false;
 
   try {
     if (
@@ -433,10 +617,10 @@ function safeOn(
         handler
       );
 
-      attached = true;
+      appBound = true;
     }
   } catch {
-    // window debajo
+    // noop
   }
 
   if (isBrowser()) {
@@ -446,65 +630,42 @@ function safeOn(
         handler
       );
 
-      attached = true;
+      windowBound = true;
     } catch {
       // noop
     }
   }
 
-  return attached;
-}
-
-function safeOff(
-  eventName = "",
-  handler = null
-) {
-  const name =
-    cleanText(
-      eventName,
-      ""
-    );
-
-  if (
-    !name ||
-    !isFunction(handler)
-  ) {
-    return false;
-  }
-
-  let detached = false;
-
-  try {
-    if (
-      isFunction(
-        AppCore?.events?.off
-      )
-    ) {
-      AppCore.events.off(
-        name,
-        handler
-      );
-
-      detached = true;
-    }
-  } catch {
-    // window debajo
-  }
-
-  if (isBrowser()) {
+  return () => {
     try {
-      window.removeEventListener(
-        name,
-        handler
-      );
-
-      detached = true;
+      if (
+        appBound &&
+        isFunction(
+          AppCore?.events?.off
+        )
+      ) {
+        AppCore.events.off(
+          name,
+          handler
+        );
+      }
     } catch {
       // noop
     }
-  }
 
-  return detached;
+    if (isBrowser()) {
+      try {
+        if (windowBound) {
+          window.removeEventListener(
+            name,
+            handler
+          );
+        }
+      } catch {
+        // noop
+      }
+    }
+  };
 }
 
 function showToast(
@@ -517,7 +678,9 @@ function showToast(
       ""
     );
 
-  if (!text) return false;
+  if (!text) {
+    return false;
+  }
 
   for (const toast of [
     AppCore?.toast,
@@ -530,7 +693,10 @@ function showToast(
           toast?.[type]
         )
       ) {
-        toast[type](text);
+        toast[type](
+          text
+        );
+
         return true;
       }
 
@@ -547,16 +713,14 @@ function showToast(
         return true;
       }
     } catch {
-      // continue
+      // siguiente candidato
     }
   }
 
   return false;
 }
 
-function unwrapEventDetail(
-  event = null
-) {
+function unwrapEventDetail(event = null) {
   const payload =
     safeObject(
       first(
@@ -580,6 +744,47 @@ function unwrapEventDetail(
     ),
     {}
   );
+}
+
+/* =========================================================
+   ACTIVE CONTROLLER BRIDGE
+========================================================= */
+
+function getActiveUsuariosController() {
+  const root =
+    typeof globalThis !== "undefined"
+      ? globalThis
+      : {};
+
+  const candidates = [
+    root?.OnionUsuarios?.controller,
+    root?.OnionUsuariosController,
+    AppCore?.modules?.Usuarios?.controller,
+  ];
+
+  for (const candidate of candidates) {
+    if (
+      !candidate ||
+      !isObject(candidate)
+    ) {
+      continue;
+    }
+
+    try {
+      if (
+        candidate.isDestroyed?.() ===
+        true
+      ) {
+        continue;
+      }
+    } catch {
+      // Si no puede consultar estado, seguimos evaluando métodos.
+    }
+
+    return candidate;
+  }
+
+  return null;
 }
 
 /* =========================================================
@@ -608,9 +813,12 @@ function toTimestamp(value = null) {
     typeof value === "number" &&
     Number.isFinite(value)
   ) {
-    if (value <= 0) return 0;
+    if (value <= 0) {
+      return 0;
+    }
 
-    return value > 9_999_999_999
+    return value >
+      9_999_999_999
       ? value
       : value * 1000;
   }
@@ -618,7 +826,9 @@ function toTimestamp(value = null) {
   const raw =
     cleanText(value, "");
 
-  if (!raw) return 0;
+  if (!raw) {
+    return 0;
+  }
 
   const numeric =
     Number(raw);
@@ -627,7 +837,8 @@ function toTimestamp(value = null) {
     Number.isFinite(numeric) &&
     numeric > 0
   ) {
-    return numeric > 9_999_999_999
+    return numeric >
+      9_999_999_999
       ? numeric
       : numeric * 1000;
   }
@@ -666,9 +877,7 @@ function formatDate(value = null) {
   }
 }
 
-function formatRelativeDate(
-  value = null
-) {
+function formatRelativeDate(value = null) {
   const timestamp =
     toTimestamp(value);
 
@@ -677,11 +886,13 @@ function formatRelativeDate(
   }
 
   const diffMs =
-    timestamp - Date.now();
+    timestamp -
+    Date.now();
 
   const diffMinutes =
     Math.round(
-      diffMs / 60_000
+      diffMs /
+      60_000
     );
 
   const absoluteMinutes =
@@ -701,7 +912,8 @@ function formatRelativeDate(
 
   const hours =
     Math.round(
-      absoluteMinutes / 60
+      absoluteMinutes /
+      60
     );
 
   if (hours < 24) {
@@ -712,7 +924,8 @@ function formatRelativeDate(
 
   const days =
     Math.round(
-      hours / 24
+      hours /
+      24
     );
 
   if (days <= 7) {
@@ -826,11 +1039,15 @@ function getTipo(detail = {}) {
       detail.tipo
     );
 
-  return tipo === "empresa"
-    ? "empresa"
-    : tipo === "particular"
-      ? "particular"
-      : "";
+  if (tipo === "empresa") {
+    return "empresa";
+  }
+
+  if (tipo === "particular") {
+    return "particular";
+  }
+
+  return "";
 }
 
 function tipoLabel(detail = {}) {
@@ -875,7 +1092,13 @@ function getStatus(detail = {}) {
         detail.estado,
         detail.state,
         detail.active === false
-          ? "inactive"
+          ? (
+              detail.emailVerified ===
+                false &&
+              !detail.activatedAt
+                ? "pending"
+                : "inactive"
+            )
           : "active"
       )
     );
@@ -895,22 +1118,20 @@ function getStatus(detail = {}) {
   return "active";
 }
 
-function statusLabel(
-  status = ""
-) {
+function statusLabel(status = "") {
   return {
     active: "Activo",
     pending: "Pendiente",
     blocked: "Bloqueado",
     inactive: "Inactivo",
-  }[getStatus({
-    status,
-  })] || "Activo";
+  }[
+    getStatus({
+      status,
+    })
+  ] || "Activo";
 }
 
-function statusCssModifier(
-  status = ""
-) {
+function statusCssModifier(status = "") {
   return {
     active:
       "status-resolved",
@@ -923,9 +1144,11 @@ function statusCssModifier(
 
     inactive:
       "status-closed",
-  }[getStatus({
-    status,
-  })] || "status-resolved";
+  }[
+    getStatus({
+      status,
+    })
+  ] || "status-resolved";
 }
 
 function getAvatar(detail = {}) {
@@ -989,6 +1212,7 @@ function getDireccion(detail = {}) {
         first(
           source.provincia,
           source.province,
+          detail.provincia,
           ""
         ),
         ""
@@ -999,6 +1223,7 @@ function getDireccion(detail = {}) {
         first(
           source.pais,
           source.country,
+          detail.pais,
           ""
         ),
         ""
@@ -1006,9 +1231,7 @@ function getDireccion(detail = {}) {
   };
 }
 
-function hasDireccion(
-  direccion = {}
-) {
+function hasDireccion(direccion = {}) {
   return Boolean(
     direccion.calle ||
     direccion.cp ||
@@ -1026,21 +1249,41 @@ function getSecurity(detail = {}) {
 }
 
 function getPermissions(detail = {}) {
-  return safeArray(
-    detail.permissions
-  )
-    .map(
-      (permission) =>
-        cleanText(
-          permission,
-          ""
-        )
+  const output = [];
+  const seen = new Set();
+
+  for (
+    const value
+    of safeArray(
+      detail.permissions
     )
-    .filter(Boolean);
+  ) {
+    const permission =
+      cleanText(
+        value,
+        ""
+      );
+
+    if (
+      !permission ||
+      seen.has(permission)
+    ) {
+      continue;
+    }
+
+    seen.add(permission);
+    output.push(permission);
+
+    if (output.length >= 100) {
+      break;
+    }
+  }
+
+  return output;
 }
 
 /* =========================================================
-   UI PARTIALS
+   ICONS
 ========================================================= */
 
 function icon(name = "") {
@@ -1062,13 +1305,26 @@ function icon(name = "") {
 
     phone:
       `<svg ${common}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.11 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.77.63 2.61a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.47-1.2a2 2 0 0 1 2.11-.45c.84.3 1.71.51 2.61.63A2 2 0 0 1 22 16.92z"/></svg>`,
+
+    shield:
+      `<svg ${common}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
+
+    user:
+      `<svg ${common}><path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="7" r="4"/></svg>`,
+
+    map:
+      `<svg ${common}><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2"/></svg>`,
   };
 
   return (
     icons[name] ||
-    icons.copy
+    icons.user
   );
 }
+
+/* =========================================================
+   UI PARTIALS
+========================================================= */
 
 function renderChip(
   label = "",
@@ -1118,8 +1374,11 @@ function renderAvatar(detail = {}) {
           avatar
             ? `
               <img
+                class="usuarios-modal-avatar-img"
                 src="${attr(avatar)}"
                 alt=""
+                width="96"
+                height="96"
                 loading="lazy"
                 decoding="async"
                 referrerpolicy="no-referrer"
@@ -1130,7 +1389,9 @@ function renderAvatar(detail = {}) {
             : ""
         }
 
-        <span class="usuarios-modal-avatar-fallback incidencias-modal-avatar-fallback">
+        <span
+          class="usuarios-modal-avatar-fallback incidencias-modal-avatar-fallback"
+        >
           ${escapeHtml(initials)}
         </span>
       </div>
@@ -1146,11 +1407,25 @@ function renderMetaCard(
   const muted =
     options.muted === true;
 
+  const iconName =
+    cleanText(
+      options.iconName,
+      ""
+    );
+
   return `
     <div
       class="usuarios-modal-meta-card incidencias-modal-meta-card${muted ? " is-muted" : ""}"
     >
-      <span>${escapeHtml(label)}</span>
+      <span>
+        ${
+          iconName
+            ? `${icon(iconName)} `
+            : ""
+        }
+        ${escapeHtml(label)}
+      </span>
+
       <strong>
         ${escapeHtml(
           cleanText(
@@ -1168,7 +1443,9 @@ function renderSectionHeader(
   subtitle = ""
 ) {
   return `
-    <div class="usuarios-modal-section-head incidencias-modal-section-head">
+    <div
+      class="usuarios-modal-section-head incidencias-modal-section-head"
+    >
       <h3>
         ${escapeHtml(title)}
       </h3>
@@ -1203,14 +1480,17 @@ function renderInfoRow(
   }
 
   return `
-    <div class="usuarios-modal-info-row incidencias-modal-meta-card">
+    <div
+      class="usuarios-modal-info-row incidencias-modal-meta-card"
+    >
       <span>
         ${escapeHtml(label)}
       </span>
 
       <strong>
         ${escapeHtml(
-          text || "—"
+          text ||
+          "—"
         )}
       </strong>
     </div>
@@ -1229,10 +1509,14 @@ function renderLinkedField({
       ""
     );
 
-  if (!text) return "";
+  if (!text) {
+    return "";
+  }
 
   return `
-    <div class="usuarios-modal-linked-field incidencias-modal-meta-card">
+    <div
+      class="usuarios-modal-linked-field incidencias-modal-meta-card"
+    >
       <span>
         ${escapeHtml(label)}
       </span>
@@ -1257,12 +1541,10 @@ function renderLinkedField({
 }
 
 /* =========================================================
-   REAL DETAIL SECTIONS
+   DETAIL SECTIONS
 ========================================================= */
 
-function renderContactSection(
-  detail = {}
-) {
+function renderContactSection(detail = {}) {
   const email =
     getEmail(detail);
 
@@ -1273,13 +1555,17 @@ function renderContactSection(
     getUsername(detail);
 
   return `
-    <section class="usuarios-modal-section incidencias-modal-contact-section">
+    <section
+      class="usuarios-modal-section incidencias-modal-contact-section"
+    >
       ${renderSectionHeader(
         "Identidad y contacto",
         "Datos de acceso y contacto registrados"
       )}
 
-      <div class="usuarios-modal-contact-grid incidencias-modal-contact-grid">
+      <div
+        class="usuarios-modal-contact-grid incidencias-modal-contact-grid"
+      >
         ${renderLinkedField({
           label: "Email",
           value: email,
@@ -1296,7 +1582,10 @@ function renderContactSection(
 
         ${renderMetaCard(
           "Username",
-          username || "—"
+          username || "—",
+          {
+            iconName: "user",
+          }
         )}
 
         ${renderMetaCard(
@@ -1308,24 +1597,28 @@ function renderContactSection(
   `;
 }
 
-function renderAddressSection(
-  detail = {}
-) {
+function renderAddressSection(detail = {}) {
   const address =
     getDireccion(detail);
 
-  if (!hasDireccion(address)) {
+  if (
+    !hasDireccion(address)
+  ) {
     return "";
   }
 
   return `
-    <section class="usuarios-modal-section incidencias-modal-description-section">
+    <section
+      class="usuarios-modal-section incidencias-modal-description-section"
+    >
       ${renderSectionHeader(
         "Dirección",
         "Dirección registrada en el usuario"
       )}
 
-      <div class="usuarios-modal-address-grid incidencias-modal-meta-grid">
+      <div
+        class="usuarios-modal-address-grid incidencias-modal-meta-grid"
+      >
         ${renderInfoRow(
           "Calle",
           address.calle
@@ -1355,14 +1648,13 @@ function renderAddressSection(
   `;
 }
 
-function renderSecuritySection(
-  detail = {}
-) {
+function renderSecuritySection(detail = {}) {
   const security =
     getSecurity(detail);
 
   const twofaEnabled =
-    security.twofaEnabled === true;
+    security.twofaEnabled ===
+    true;
 
   const twofaMethod =
     cleanText(
@@ -1376,29 +1668,27 @@ function renderSecuritySection(
       null
     );
 
-  const hasAny =
-    Object.keys(security).length > 0 ||
-    typeof detail.emailVerified === "boolean" ||
-    typeof detail.privacyMode === "boolean" ||
-    typeof detail.darkMode === "boolean";
-
-  if (!hasAny) {
-    return "";
-  }
-
   return `
-    <section class="usuarios-modal-section incidencias-modal-description-section">
+    <section
+      class="usuarios-modal-section incidencias-modal-description-section"
+    >
       ${renderSectionHeader(
         "Seguridad y preferencias",
         "Información segura expuesta por el backend"
       )}
 
-      <div class="usuarios-modal-security-grid incidencias-modal-meta-grid">
+      <div
+        class="usuarios-modal-security-grid incidencias-modal-meta-grid"
+      >
         ${renderMetaCard(
           "Email verificado",
           booleanLabel(
-            detail.emailVerified === true
-          )
+            detail.emailVerified ===
+            true
+          ),
+          {
+            iconName: "shield",
+          }
         )}
 
         ${renderMetaCard(
@@ -1429,7 +1719,8 @@ function renderSecuritySection(
         ${renderMetaCard(
           "Modo privacidad",
           booleanLabel(
-            detail.privacyMode === true,
+            detail.privacyMode ===
+              true,
             "Activado",
             "Desactivado"
           )
@@ -1437,7 +1728,8 @@ function renderSecuritySection(
 
         ${renderMetaCard(
           "Apariencia",
-          detail.darkMode === true
+          detail.darkMode ===
+            true
             ? "Oscuro"
             : "Claro"
         )}
@@ -1446,24 +1738,28 @@ function renderSecuritySection(
   `;
 }
 
-function renderPermissionsSection(
-  detail = {}
-) {
+function renderPermissionsSection(detail = {}) {
   const permissions =
     getPermissions(detail);
 
-  if (!permissions.length) {
+  if (
+    !permissions.length
+  ) {
     return "";
   }
 
   return `
-    <section class="usuarios-modal-section incidencias-modal-description-section">
+    <section
+      class="usuarios-modal-section incidencias-modal-description-section"
+    >
       ${renderSectionHeader(
         "Permisos",
         `${permissions.length} permiso${permissions.length === 1 ? "" : "s"} asignado${permissions.length === 1 ? "" : "s"}`
       )}
 
-      <div class="usuarios-modal-chip-list">
+      <div
+        class="usuarios-modal-chip-list"
+      >
         ${permissions
           .map(
             (permission) =>
@@ -1478,29 +1774,49 @@ function renderPermissionsSection(
   `;
 }
 
-function renderLifecycleSection(
-  detail = {}
-) {
+function renderLifecycleSection(detail = {}) {
   const events = [
     {
       label: "Creación",
       value: detail.createdAt,
+      actor: "",
     },
     {
       label: "Activación",
       value: detail.activatedAt,
+      actor: cleanText(
+        first(
+          detail.activatedBy,
+          detail.activatedByRole,
+          ""
+        ),
+        ""
+      ),
     },
     {
       label: "Última conexión",
       value: detail.lastLoginAt,
+      actor: "",
     },
     {
       label: "Última actualización",
       value: detail.updatedAt,
+      actor: cleanText(
+        detail.updatedBy,
+        ""
+      ),
     },
     {
       label: "Desactivación",
       value: detail.deactivatedAt,
+      actor: cleanText(
+        first(
+          detail.deactivatedBy,
+          detail.deactivatedByRole,
+          ""
+        ),
+        ""
+      ),
     },
   ].filter(
     (event) =>
@@ -1509,34 +1825,53 @@ function renderLifecycleSection(
       ) > 0
   );
 
-  if (!events.length) {
+  if (
+    !events.length
+  ) {
     return "";
   }
 
   return `
-    <section class="usuarios-modal-section incidencias-modal-history-section">
+    <section
+      class="usuarios-modal-section incidencias-modal-history-section"
+    >
       ${renderSectionHeader(
         "Actividad",
         `${events.length} hito${events.length === 1 ? "" : "s"} disponible${events.length === 1 ? "" : "s"}`
       )}
 
-      <div class="usuarios-timeline-list incidencias-timeline-list">
+      <div
+        class="usuarios-timeline-list incidencias-timeline-list"
+      >
         ${events
           .map(
             (event) => `
-              <article class="usuarios-timeline-card incidencias-timeline-card">
-                <div class="usuarios-timeline-accent incidencias-timeline-accent"></div>
+              <article
+                class="usuarios-timeline-card incidencias-timeline-card"
+              >
+                <div
+                  class="usuarios-timeline-accent incidencias-timeline-accent"
+                ></div>
 
-                <div class="usuarios-timeline-main incidencias-timeline-main">
-                  <div class="usuarios-timeline-title-row incidencias-timeline-title-row">
-                    <strong class="usuarios-timeline-title incidencias-timeline-title">
+                <div
+                  class="usuarios-timeline-main incidencias-timeline-main"
+                >
+                  <div
+                    class="usuarios-timeline-title-row incidencias-timeline-title-row"
+                  >
+                    <strong
+                      class="usuarios-timeline-title incidencias-timeline-title"
+                    >
                       ${escapeHtml(event.label)}
                     </strong>
                   </div>
 
-                  <p class="usuarios-timeline-body incidencias-timeline-body">
+                  <p
+                    class="usuarios-timeline-body incidencias-timeline-body"
+                  >
                     ${escapeHtml(
-                      event.label === "Última conexión"
+                      event.label ===
+                        "Última conexión"
                         ? formatRelativeDate(
                             event.value
                           )
@@ -1545,9 +1880,25 @@ function renderLifecycleSection(
                           )
                     )}
                   </p>
+
+                  ${
+                    event.actor
+                      ? `
+                        <p
+                          class="usuarios-timeline-actor"
+                        >
+                          ${escapeHtml(
+                            `Actor · ${event.actor}`
+                          )}
+                        </p>
+                      `
+                      : ""
+                  }
                 </div>
 
-                <div class="usuarios-timeline-meta incidencias-timeline-meta">
+                <div
+                  class="usuarios-timeline-meta incidencias-timeline-meta"
+                >
                   <span>
                     ${escapeHtml(
                       formatDate(
@@ -1565,37 +1916,59 @@ function renderLifecycleSection(
   `;
 }
 
-function renderAdminMetadataSection(
-  detail = {}
-) {
+function renderAdminMetadataSection(detail = {}) {
   const items = [
     [
       "Cliente vinculado",
-      detail.clienteId || "",
+      detail.clienteId ||
+      detail.clientId ||
+      "",
     ],
+
     [
       "NIF / CIF",
-      detail.nif || "",
+      detail.nif ||
+      "",
     ],
+
     [
       "Tipo",
       getTipo(detail)
         ? tipoLabel(detail)
         : "",
     ],
+
     [
       "Avatar",
       detail.hasAvatar === true
         ? "Configurado"
         : "Sin avatar",
     ],
+
     [
       "Actualizado por",
-      detail.updatedBy || "",
+      detail.updatedBy ||
+      "",
     ],
+
+    [
+      "Activado por",
+      detail.activatedBy ||
+      detail.activatedByRole ||
+      "",
+    ],
+
+    [
+      "Desactivado por",
+      detail.deactivatedBy ||
+      detail.deactivatedByRole ||
+      "",
+    ],
+
     [
       "Motivo desactivación",
-      detail.deactivationReason || "",
+      detail.deactivationReason ||
+      "",
     ],
   ].filter(
     ([, value]) =>
@@ -1605,18 +1978,24 @@ function renderAdminMetadataSection(
       )
   );
 
-  if (!items.length) {
+  if (
+    !items.length
+  ) {
     return "";
   }
 
   return `
-    <section class="usuarios-modal-section incidencias-modal-description-section">
+    <section
+      class="usuarios-modal-section incidencias-modal-description-section"
+    >
       ${renderSectionHeader(
         "Datos administrativos",
         "Campos seguros del detalle de administración"
       )}
 
-      <div class="usuarios-modal-admin-grid incidencias-modal-meta-grid">
+      <div
+        class="usuarios-modal-admin-grid incidencias-modal-meta-grid"
+      >
         ${items
           .map(
             ([label, value]) =>
@@ -1652,18 +2031,29 @@ function renderFooter(
       class="usuarios-modal-footer incidencias-modal-footer"
       data-usuarios-modal-footer="true"
     >
-      <div class="usuarios-modal-footer-actions">
+      <div
+        class="usuarios-modal-footer-actions"
+      >
         <button
           type="button"
           class="usuarios-modal-action-btn incidencias-modal-view-btn"
           data-usuarios-modal-action="${USUARIOS_DETAIL_ACTIONS.COPY_ID}"
-          ${!userId || isRefreshing ? "disabled" : ""}
+          ${
+            !userId ||
+            isRefreshing
+              ? 'disabled aria-disabled="true"'
+              : ""
+          }
         >
-          <span class="incidencias-modal-action-icon">
+          <span
+            class="incidencias-modal-action-icon"
+          >
             ${icon("copy")}
           </span>
 
-          <span>Copiar ID</span>
+          <span>
+            Copiar ID
+          </span>
         </button>
 
         <button
@@ -1671,7 +2061,8 @@ function renderFooter(
           class="usuarios-modal-action-btn incidencias-modal-view-btn"
           data-usuarios-modal-action="${USUARIOS_DETAIL_ACTIONS.REFRESH}"
           ${
-            !userId || isRefreshing
+            !userId ||
+            isRefreshing
               ? 'disabled aria-disabled="true"'
               : ""
           }
@@ -1681,7 +2072,9 @@ function renderFooter(
               : ""
           }
         >
-          <span class="incidencias-modal-action-icon">
+          <span
+            class="incidencias-modal-action-icon"
+          >
             ${icon("refresh")}
           </span>
 
@@ -1746,9 +2139,7 @@ function renderFooter(
    PURE TEMPLATE
 ========================================================= */
 
-export function renderUsuariosDetailModal(
-  input = {}
-) {
+export function renderUsuariosDetailModal(input = {}) {
   const data =
     safeObject(input);
 
@@ -1766,22 +2157,25 @@ export function renderUsuariosDetailModal(
   const userId =
     getUserId(detail);
 
-  const name =
-    getName(detail);
+  const email =
+    getEmail(detail);
+
+  const username =
+    getUsername(detail);
 
   if (
     !userId &&
-    !getEmail(detail) &&
-    !getUsername(detail)
+    !email &&
+    !username
   ) {
     return "";
   }
 
+  const name =
+    getName(detail);
+
   const status =
     getStatus(detail);
-
-  const username =
-    getUsername(detail);
 
   const city =
     getDireccion(
@@ -1789,7 +2183,8 @@ export function renderUsuariosDetailModal(
     ).ciudad;
 
   const isRefreshing =
-    data.isRefreshing === true;
+    data.isRefreshing ===
+    true;
 
   return `
     <section
@@ -1817,14 +2212,23 @@ export function renderUsuariosDetailModal(
           aria-modal="true"
           aria-labelledby="usuarios-detail-modal-title"
           aria-describedby="usuarios-detail-modal-summary"
+          aria-busy="${isRefreshing ? "true" : "false"}"
           tabindex="-1"
         >
-          <header class="usuarios-modal-header incidencias-modal-header">
-            <div class="usuarios-modal-hero incidencias-modal-hero">
+          <header
+            class="usuarios-modal-header incidencias-modal-header"
+          >
+            <div
+              class="usuarios-modal-hero incidencias-modal-hero"
+            >
               ${renderAvatar(detail)}
 
-              <div class="usuarios-modal-hero-content incidencias-modal-hero-content">
-                <div class="usuarios-modal-hero-chips incidencias-modal-hero-chips">
+              <div
+                class="usuarios-modal-hero-content incidencias-modal-hero-content"
+              >
+                <div
+                  class="usuarios-modal-hero-chips incidencias-modal-hero-chips"
+                >
                   ${renderChip(
                     statusLabel(
                       status
@@ -1896,14 +2300,18 @@ export function renderUsuariosDetailModal(
               type="button"
               class="usuarios-modal-close-btn incidencias-modal-close-btn"
               data-usuarios-modal-action="${USUARIOS_DETAIL_ACTIONS.CLOSE}"
-              aria-label="Cerrar modal"
+              aria-label="Cerrar detalle de ${attr(name)}"
             >
               ${icon("close")}
             </button>
           </header>
 
-          <main class="usuarios-modal-body incidencias-modal-body">
-            <div class="usuarios-modal-meta-grid incidencias-modal-meta-grid">
+          <main
+            class="usuarios-modal-body incidencias-modal-body"
+          >
+            <div
+              class="usuarios-modal-meta-grid incidencias-modal-meta-grid"
+            >
               ${renderMetaCard(
                 "ID",
                 userId || "—"
@@ -1954,7 +2362,8 @@ export function renderUsuariosDetailModal(
               ${renderMetaCard(
                 "Email verificado",
                 booleanLabel(
-                  detail.emailVerified === true
+                  detail.emailVerified ===
+                  true
                 )
               )}
             </div>
@@ -1965,6 +2374,7 @@ export function renderUsuariosDetailModal(
             ${renderAdminMetadataSection(detail)}
             ${renderPermissionsSection(detail)}
             ${renderLifecycleSection(detail)}
+
             ${renderFooter(
               detail,
               isRefreshing
@@ -1987,70 +2397,93 @@ export const renderUsuarioDetailModalClosed =
   renderUsuariosDetailModalClosed;
 
 /* =========================================================
-   ROOT / BODY
+   HOST / ROOT
 ========================================================= */
 
-function getRoot() {
+function getHost() {
   if (!isBrowser()) {
     return null;
   }
 
-  const current =
+  const host =
     document.getElementById(
-      MODAL_ID
+      HOST_ID
+    ) ||
+    document.querySelector(
+      "[data-usuarios-modal-host='true']"
     );
 
-  if (current) {
-    modalState.root =
-      current;
-
-    modalState.panel =
-      current.querySelector(
-        "[data-usuarios-modal-panel='true']"
-      );
+  if (host) {
+    modalState.host =
+      host;
   }
 
-  return current;
+  return host;
 }
 
-function ensureRoot() {
+function ensureHost() {
   if (!isBrowser()) {
     return null;
   }
 
-  let root =
-    getRoot();
+  let host =
+    getHost();
 
-  if (root) {
-    return root;
+  if (host) {
+    return host;
   }
 
-  root =
+  host =
     document.createElement(
       "div"
     );
 
-  root.id =
-    `${MODAL_ID}-host`;
+  host.id =
+    HOST_ID;
 
-  root.setAttribute(
+  host.setAttribute(
     "data-usuarios-modal-host",
     "true"
   );
 
   document.body.appendChild(
-    root
+    host
   );
+
+  modalState.host =
+    host;
+
+  return host;
+}
+
+function getModalRoot() {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  const host =
+    modalState.host ||
+    getHost();
+
+  const root =
+    host?.querySelector?.(
+      `#${MODAL_ID}`
+    ) ||
+    null;
 
   modalState.root =
     root;
 
+  modalState.panel =
+    root?.querySelector?.(
+      "[data-usuarios-modal-panel='true']"
+    ) ||
+    null;
+
   return root;
 }
 
-function removeDuplicateHosts(
-  keep = null
-) {
+function removeDuplicateHosts(keep = null) {
   if (!isBrowser()) {
     return 0;
   }
@@ -2058,8 +2491,8 @@ function removeDuplicateHosts(
   let removed = 0;
 
   for (
-    const node of
-    document.querySelectorAll(
+    const node
+    of document.querySelectorAll(
       "[data-usuarios-modal-host='true']"
     )
   ) {
@@ -2078,9 +2511,38 @@ function removeDuplicateHosts(
   return removed;
 }
 
+function htmlFragment(html = "") {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  const template =
+    document.createElement(
+      "template"
+    );
+
+  template.innerHTML =
+    String(
+      html ||
+      ""
+    ).trim();
+
+  return template.content;
+}
+
+/* =========================================================
+   BODY LOCK
+========================================================= */
+
 function lockBody() {
   if (!isBrowser()) {
     return false;
+  }
+
+  if (
+    modalState.bodyLocked
+  ) {
+    return true;
   }
 
   try {
@@ -2088,20 +2550,30 @@ function lockBody() {
       document.body.style.overflow ||
       "";
 
-    document.body.classList.add(
-      "modal-open",
-      "usuarios-modal-open",
-      "usuarios-detail-open",
-      "incidencias-modal-open",
-      "incidencias-detail-open"
-    );
+    modalState.previousBodyClasses =
+      new Map();
 
-    /*
-      Compat defensiva con navegadores/CSS antiguo.
-      El contrato principal ya lo cubren las clases.
-    */
+    for (
+      const className
+      of BODY_LOCK_CLASSES
+    ) {
+      modalState.previousBodyClasses.set(
+        className,
+        document.body.classList.contains(
+          className
+        )
+      );
+
+      document.body.classList.add(
+        className
+      );
+    }
+
     document.body.style.overflow =
       "hidden";
+
+    modalState.bodyLocked =
+      true;
 
     return true;
   } catch {
@@ -2111,17 +2583,34 @@ function lockBody() {
 
 function unlockBody() {
   if (!isBrowser()) {
+    modalState.bodyLocked =
+      false;
+
     return false;
   }
 
+  if (
+    !modalState.bodyLocked
+  ) {
+    return true;
+  }
+
   try {
-    document.body.classList.remove(
-      "modal-open",
-      "usuarios-modal-open",
-      "usuarios-detail-open",
-      "incidencias-modal-open",
-      "incidencias-detail-open"
-    );
+    for (
+      const className
+      of BODY_LOCK_CLASSES
+    ) {
+      const existedBefore =
+        modalState.previousBodyClasses.get(
+          className
+        ) === true;
+
+      if (!existedBefore) {
+        document.body.classList.remove(
+          className
+        );
+      }
+    }
 
     document.body.style.overflow =
       modalState.previousBodyOverflow ||
@@ -2130,8 +2619,17 @@ function unlockBody() {
     modalState.previousBodyOverflow =
       "";
 
+    modalState.previousBodyClasses =
+      new Map();
+
+    modalState.bodyLocked =
+      false;
+
     return true;
   } catch {
+    modalState.bodyLocked =
+      false;
+
     return false;
   }
 }
@@ -2150,7 +2648,8 @@ function captureActiveElement() {
 
   return (
     active &&
-    active !== document.body
+    active !==
+      document.body
       ? active
       : null
   );
@@ -2163,18 +2662,27 @@ function focusPanel() {
 
   const panel =
     modalState.panel ||
-    getRoot()?.querySelector?.(
+    getModalRoot()?.querySelector?.(
       "[data-usuarios-modal-panel='true']"
     );
 
+  if (!panel) {
+    return false;
+  }
+
   try {
-    panel?.focus?.({
+    panel.focus?.({
       preventScroll: true,
     });
 
-    return Boolean(panel);
+    return true;
   } catch {
-    return false;
+    try {
+      panel.focus?.();
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -2212,11 +2720,20 @@ function getFocusableElements() {
   const panel =
     modalState.panel;
 
-  if (!panel) return [];
+  if (!panel) {
+    return [];
+  }
 
   return Array.from(
     panel.querySelectorAll(
-      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      [
+        "a[href]",
+        "button:not([disabled])",
+        "input:not([disabled])",
+        "select:not([disabled])",
+        "textarea:not([disabled])",
+        "[tabindex]:not([tabindex='-1'])",
+      ].join(",")
     )
   ).filter(
     (element) =>
@@ -2224,6 +2741,9 @@ function getFocusableElements() {
       !element.hidden &&
       element.getAttribute?.(
         "aria-hidden"
+      ) !== "true" &&
+      element.getAttribute?.(
+        "aria-disabled"
       ) !== "true"
   );
 }
@@ -2242,6 +2762,7 @@ function trapFocus(event = null) {
   if (!focusable.length) {
     event.preventDefault?.();
     focusPanel();
+
     return true;
   }
 
@@ -2258,493 +2779,54 @@ function trapFocus(event = null) {
 
   if (
     event.shiftKey &&
-    active === firstElement
+    (
+      active ===
+        firstElement ||
+      !modalState.panel?.contains?.(
+        active
+      )
+    )
   ) {
     event.preventDefault?.();
     lastElement.focus?.();
+
     return true;
   }
 
   if (
     !event.shiftKey &&
-    active === lastElement
+    (
+      active ===
+        lastElement ||
+      !modalState.panel?.contains?.(
+        active
+      )
+    )
   ) {
     event.preventDefault?.();
     firstElement.focus?.();
+
     return true;
   }
 
   return false;
-}
-
-/* =========================================================
-   RENDER CONTROL
-========================================================= */
-
-function renderMounted({
-  focus = false,
-} = {}) {
-  const host =
-    ensureRoot();
-
-  if (!host) {
-    return null;
-  }
-
-  detachRootBindings();
-
-  host.innerHTML =
-    modalState.isOpen
-      ? renderUsuariosDetailModal({
-          detail:
-            modalState.detail,
-          isRefreshing:
-            modalState.isRefreshing,
-        })
-      : "";
-
-  modalState.root =
-    host;
-
-  modalState.panel =
-    host.querySelector(
-      "[data-usuarios-modal-panel='true']"
-    );
-
-  attachRootBindings();
-
-  if (focus) {
-    focusPanel();
-  }
-
-  return host;
-}
-
-/* =========================================================
-   CLIPBOARD / ACTIONS
-========================================================= */
-
-async function writeClipboardText(
-  text = ""
-) {
-  const value =
-    cleanText(
-      text,
-      ""
-    );
-
-  if (
-    !value ||
-    !isBrowser()
-  ) {
-    return false;
-  }
-
-  try {
-    if (
-      navigator?.clipboard?.writeText
-    ) {
-      await navigator.clipboard
-        .writeText(value);
-
-      return true;
-    }
-  } catch {
-    // textarea debajo
-  }
-
-  try {
-    const textarea =
-      document.createElement(
-        "textarea"
-      );
-
-    textarea.value =
-      value;
-
-    textarea.readOnly =
-      true;
-
-    textarea.setAttribute(
-      "aria-hidden",
-      "true"
-    );
-
-    textarea.style.position =
-      "fixed";
-
-    textarea.style.opacity =
-      "0";
-
-    document.body.appendChild(
-      textarea
-    );
-
-    textarea.focus();
-    textarea.select();
-
-    const copied =
-      document.execCommand(
-        "copy"
-      );
-
-    textarea.remove();
-
-    return Boolean(copied);
-  } catch {
-    return false;
-  }
-}
-
-async function handleCopyId() {
-  const userId =
-    getUserId(
-      modalState.detail ||
-      {}
-    );
-
-  if (!userId) {
-    showToast(
-      "No hay ID para copiar.",
-      "error"
-    );
-
-    return false;
-  }
-
-  /*
-    Con controlador activo, index.js es la autoridad del clipboard.
-  */
-  const emitted =
-    safeEmit(
-      "usuarios:modal:copy",
-      {
-        userId,
-        detail:
-          cloneDetail(
-            modalState.detail
-          ),
-        source:
-          USUARIOS_MODAL_TEMPLATE_VERSION,
-      }
-    );
-
-  if (emitted) {
-    return true;
-  }
-
-  const copied =
-    await writeClipboardText(
-      userId
-    );
-
-  if (copied) {
-    showToast(
-      "ID copiado.",
-      "success"
-    );
-
-    return true;
-  }
-
-  showToast(
-    "No se pudo copiar el ID.",
-    "error"
-  );
-
-  return false;
-}
-
-function handleRefresh() {
-  const userId =
-    getUserId(
-      modalState.detail ||
-      {}
-    );
-
-  if (
-    !userId ||
-    modalState.isRefreshing
-  ) {
-    return false;
-  }
-
-  modalState.isRefreshing =
-    true;
-
-  modalState.refreshSeq += 1;
-
-  const sequence =
-    modalState.refreshSeq;
-
-  renderMounted({
-    focus: false,
-  });
-
-  const emitted =
-    safeEmit(
-      "usuarios:modal:refresh",
-      {
-        userId,
-        detail:
-          cloneDetail(
-            modalState.detail
-          ),
-        source:
-          USUARIOS_MODAL_TEMPLATE_VERSION,
-      }
-    );
-
-  if (!emitted) {
-    modalState.isRefreshing =
-      false;
-
-    renderMounted({
-      focus: false,
-    });
-
-    showToast(
-      "No se pudo solicitar la actualización del usuario.",
-      "error"
-    );
-
-    return false;
-  }
-
-  if (isBrowser()) {
-    window.setTimeout(
-      () => {
-        if (
-          !modalState.isOpen ||
-          !modalState.isRefreshing ||
-          modalState.refreshSeq !==
-            sequence
-        ) {
-          return;
-        }
-
-        modalState.isRefreshing =
-          false;
-
-        renderMounted({
-          focus: false,
-        });
-      },
-      REFRESH_FALLBACK_TIMEOUT_MS
-    );
-  }
-
-  return true;
-}
-
-/* =========================================================
-   PUBLIC OPEN / CLOSE / UPDATE
-========================================================= */
-
-export function openUsuariosModal(
-  detail = {}
-) {
-  const normalized =
-    normalizeDetail(detail);
-
-  if (
-    !getUserId(normalized) &&
-    !getEmail(normalized) &&
-    !getUsername(normalized)
-  ) {
-    showToast(
-      "No se pudo abrir el detalle del usuario.",
-      "error"
-    );
-
-    return false;
-  }
-
-  if (isBrowser()) {
-    modalState.lastActiveElement =
-      captureActiveElement();
-
-    removeDuplicateHosts(
-      ensureRoot()
-    );
-  }
-
-  modalState.detail =
-    normalized;
-
-  modalState.isOpen =
-    true;
-
-  modalState.isRefreshing =
-    false;
-
-  modalState.refreshSeq += 1;
-
-  lockBody();
-
-  renderMounted({
-    focus: true,
-  });
-
-  safeEmit(
-    "usuarios:modal:opened",
-    {
-      detail:
-        cloneDetail(
-          normalized
-        ),
-
-      userId:
-        getUserId(
-          normalized
-        ),
-
-      source:
-        USUARIOS_MODAL_TEMPLATE_VERSION,
-    }
-  );
-
-  return true;
-}
-
-export function closeUsuariosModal() {
-  const userId =
-    getUserId(
-      modalState.detail ||
-      {}
-    );
-
-  modalState.isOpen =
-    false;
-
-  modalState.isRefreshing =
-    false;
-
-  modalState.refreshSeq += 1;
-
-  modalState.detail =
-    null;
-
-  detachRootBindings();
-
-  const host =
-    modalState.root ||
-    getRoot();
-
-  if (host) {
-    host.innerHTML = "";
-  }
-
-  modalState.panel =
-    null;
-
-  unlockBody();
-
-  if (isBrowser()) {
-    window.setTimeout(
-      () => restoreFocus(),
-      0
-    );
-  } else {
-    modalState.lastActiveElement =
-      null;
-  }
-
-  safeEmit(
-    "usuarios:modal:closed",
-    {
-      userId,
-      source:
-        USUARIOS_MODAL_TEMPLATE_VERSION,
-    }
-  );
-
-  return true;
-}
-
-export function updateUsuariosModal(
-  detail = {}
-) {
-  const normalized =
-    normalizeDetail(detail);
-
-  if (
-    !getUserId(normalized) &&
-    !getEmail(normalized) &&
-    !getUsername(normalized)
-  ) {
-    return false;
-  }
-
-  if (!modalState.isOpen) {
-    return openUsuariosModal(
-      normalized
-    );
-  }
-
-  const currentId =
-    getUserId(
-      modalState.detail ||
-      {}
-    );
-
-  const incomingId =
-    getUserId(
-      normalized
-    );
-
-  if (
-    currentId &&
-    incomingId &&
-    currentId !== incomingId
-  ) {
-    return false;
-  }
-
-  modalState.detail =
-    normalized;
-
-  modalState.isRefreshing =
-    false;
-
-  modalState.refreshSeq += 1;
-
-  renderMounted({
-    focus: false,
-  });
-
-  safeEmit(
-    "usuarios:modal:updated",
-    {
-      detail:
-        cloneDetail(
-          normalized
-        ),
-
-      userId:
-        incomingId,
-
-      source:
-        USUARIOS_MODAL_TEMPLATE_VERSION,
-    }
-  );
-
-  return true;
 }
 
 /* =========================================================
    ROOT BINDINGS
 ========================================================= */
 
-function onRootClick(
-  event = null
-) {
+function onRootClick(event = null) {
   const target =
     event?.target;
 
   if (
-    typeof Element === "undefined" ||
-    !(target instanceof Element)
+    typeof Element ===
+      "undefined" ||
+    !(
+      target instanceof
+      Element
+    )
   ) {
     return;
   }
@@ -2786,7 +2868,7 @@ function onRootClick(
       USUARIOS_DETAIL_ACTIONS.REFRESH
     ) {
       event.preventDefault?.();
-      handleRefresh();
+      void handleRefresh();
       return;
     }
   }
@@ -2796,23 +2878,16 @@ function onRootClick(
       "[data-usuarios-modal-overlay='true']"
     );
 
-  const panel =
-    target.closest(
-      "[data-usuarios-modal-panel='true']"
-    );
-
   if (
     overlay &&
-    !panel &&
-    event.target === overlay
+    event.target ===
+      overlay
   ) {
     closeUsuariosModal();
   }
 }
 
-function onRootError(
-  event = null
-) {
+function onRootError(event = null) {
   const target =
     event?.target;
 
@@ -2835,9 +2910,17 @@ function onRootError(
       "[data-usuarios-avatar-frame='true']"
     );
 
-  if (!frame) return;
+  if (!frame) {
+    return;
+  }
 
-  target.hidden = true;
+  target.hidden =
+    true;
+
+  frame.setAttribute(
+    "data-has-avatar",
+    "false"
+  );
 
   frame.setAttribute(
     "data-fallback",
@@ -2850,14 +2933,17 @@ function onRootError(
   );
 }
 
-function onDocumentKeydown(
-  event = null
-) {
-  if (!modalState.isOpen) {
+function onDocumentKeydown(event = null) {
+  if (
+    !modalState.isOpen
+  ) {
     return;
   }
 
-  if (event?.key === "Escape") {
+  if (
+    event?.key ===
+    "Escape"
+  ) {
     event.preventDefault?.();
     closeUsuariosModal();
     return;
@@ -2871,11 +2957,11 @@ function attachRootBindings() {
     return false;
   }
 
-  const root =
-    modalState.root ||
-    ensureRoot();
+  const host =
+    modalState.host ||
+    ensureHost();
 
-  if (!root) {
+  if (!host) {
     return false;
   }
 
@@ -2890,12 +2976,12 @@ function attachRootBindings() {
   modalState.keydownHandler =
     onDocumentKeydown;
 
-  root.addEventListener(
+  host.addEventListener(
     "click",
     modalState.clickHandler
   );
 
-  root.addEventListener(
+  host.addEventListener(
     "error",
     modalState.errorHandler,
     true
@@ -2923,25 +3009,25 @@ function detachRootBindings() {
     return false;
   }
 
-  const root =
-    modalState.root;
+  const host =
+    modalState.host;
 
   try {
     if (
-      root &&
+      host &&
       modalState.clickHandler
     ) {
-      root.removeEventListener(
+      host.removeEventListener(
         "click",
         modalState.clickHandler
       );
     }
 
     if (
-      root &&
+      host &&
       modalState.errorHandler
     ) {
-      root.removeEventListener(
+      host.removeEventListener(
         "error",
         modalState.errorHandler,
         true
@@ -2973,15 +3059,729 @@ function detachRootBindings() {
 }
 
 /* =========================================================
+   RENDER CONTROL
+========================================================= */
+
+function renderMounted({
+  focus = false,
+} = {}) {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  const host =
+    ensureHost();
+
+  if (!host) {
+    return null;
+  }
+
+  removeDuplicateHosts(
+    host
+  );
+
+  detachRootBindings();
+
+  const html =
+    modalState.isOpen
+      ? renderUsuariosDetailModal({
+          detail:
+            modalState.detail,
+
+          isRefreshing:
+            modalState.isRefreshing,
+        })
+      : "";
+
+  const fragment =
+    htmlFragment(html);
+
+  if (!fragment) {
+    return null;
+  }
+
+  host.replaceChildren(
+    fragment
+  );
+
+  modalState.host =
+    host;
+
+  modalState.root =
+    host.querySelector(
+      `#${MODAL_ID}`
+    );
+
+  modalState.panel =
+    host.querySelector(
+      "[data-usuarios-modal-panel='true']"
+    );
+
+  attachRootBindings();
+
+  if (focus) {
+    focusPanel();
+  }
+
+  return host;
+}
+
+function clearRefreshTimer() {
+  if (
+    !modalState.refreshTimer ||
+    !isBrowser()
+  ) {
+    modalState.refreshTimer =
+      0;
+
+    return false;
+  }
+
+  try {
+    window.clearTimeout(
+      modalState.refreshTimer
+    );
+  } catch {
+    // noop
+  }
+
+  modalState.refreshTimer =
+    0;
+
+  return true;
+}
+
+function finishRefresh(
+  sequence = 0,
+  {
+    render = true,
+  } = {}
+) {
+  if (
+    sequence &&
+    modalState.refreshSeq !==
+      sequence
+  ) {
+    return false;
+  }
+
+  clearRefreshTimer();
+
+  modalState.isRefreshing =
+    false;
+
+  if (
+    render &&
+    modalState.isOpen
+  ) {
+    renderMounted({
+      focus: false,
+    });
+  }
+
+  return true;
+}
+
+function armRefreshFallback(
+  sequence = 0
+) {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  clearRefreshTimer();
+
+  modalState.refreshTimer =
+    window.setTimeout(
+      () => {
+        if (
+          !modalState.isOpen ||
+          !modalState.isRefreshing ||
+          modalState.refreshSeq !==
+            sequence
+        ) {
+          return;
+        }
+
+        finishRefresh(
+          sequence,
+          {
+            render: true,
+          }
+        );
+      },
+      REFRESH_FALLBACK_TIMEOUT_MS
+    );
+
+  return true;
+}
+
+/* =========================================================
+   CLIPBOARD
+========================================================= */
+
+async function writeClipboardText(text = "") {
+  const value =
+    cleanText(
+      text,
+      ""
+    );
+
+  if (
+    !value ||
+    !isBrowser()
+  ) {
+    return false;
+  }
+
+  try {
+    if (
+      navigator?.clipboard
+        ?.writeText
+    ) {
+      await navigator.clipboard
+        .writeText(
+          value
+        );
+
+      return true;
+    }
+  } catch {
+    // textarea fallback debajo
+  }
+
+  let textarea = null;
+
+  try {
+    textarea =
+      document.createElement(
+        "textarea"
+      );
+
+    textarea.value =
+      value;
+
+    textarea.readOnly =
+      true;
+
+    textarea.setAttribute(
+      "aria-hidden",
+      "true"
+    );
+
+    textarea.style.position =
+      "fixed";
+
+    textarea.style.inset =
+      "0 auto auto -9999px";
+
+    textarea.style.opacity =
+      "0";
+
+    textarea.style.pointerEvents =
+      "none";
+
+    document.body.appendChild(
+      textarea
+    );
+
+    textarea.focus();
+    textarea.select();
+
+    const copied =
+      document.execCommand(
+        "copy"
+      );
+
+    return Boolean(copied);
+  } catch {
+    return false;
+  } finally {
+    try {
+      textarea?.remove?.();
+    } catch {
+      // noop
+    }
+  }
+}
+
+async function handleCopyId() {
+  const userId =
+    getUserId(
+      modalState.detail ||
+      {}
+    );
+
+  if (!userId) {
+    showToast(
+      "No hay ID para copiar.",
+      "error"
+    );
+
+    return false;
+  }
+
+  const controller =
+    getActiveUsuariosController();
+
+  if (
+    isFunction(
+      controller?.copyUsuarioId
+    )
+  ) {
+    try {
+      const result =
+        await controller.copyUsuarioId(
+          userId
+        );
+
+      if (result !== false) {
+        return true;
+      }
+    } catch {
+      // clipboard local debajo
+    }
+  }
+
+  const copied =
+    await writeClipboardText(
+      userId
+    );
+
+  if (copied) {
+    showToast(
+      "ID de usuario copiado.",
+      "success"
+    );
+
+    safeEmit(
+      "usuarios:modal:copied",
+      {
+        userId,
+        source:
+          USUARIOS_MODAL_TEMPLATE_VERSION,
+      }
+    );
+
+    return true;
+  }
+
+  showToast(
+    "No se pudo copiar el ID del usuario.",
+    "error"
+  );
+
+  return false;
+}
+
+/* =========================================================
+   REFRESH
+========================================================= */
+
+async function handleRefresh() {
+  const userId =
+    getUserId(
+      modalState.detail ||
+      {}
+    );
+
+  if (
+    !userId ||
+    modalState.isRefreshing
+  ) {
+    return false;
+  }
+
+  clearRefreshTimer();
+
+  modalState.isRefreshing =
+    true;
+
+  modalState.refreshSeq += 1;
+
+  const sequence =
+    modalState.refreshSeq;
+
+  renderMounted({
+    focus: false,
+  });
+
+  const controller =
+    getActiveUsuariosController();
+
+  if (
+    isFunction(
+      controller?.refreshUsuario
+    )
+  ) {
+    try {
+      const detail =
+        await controller.refreshUsuario(
+          userId
+        );
+
+      /*
+        refreshUsuario del controlador ya puede haber ejecutado
+        modal.update(detail). Si eso ocurrió, refreshSeq cambia y
+        no debemos renderizar dos veces.
+      */
+      if (
+        modalState.refreshSeq !==
+        sequence
+      ) {
+        return Boolean(detail);
+      }
+
+      if (detail) {
+        const normalized =
+          normalizeDetail(
+            detail
+          );
+
+        if (
+          getUserId(normalized) ===
+          userId
+        ) {
+          modalState.detail =
+            normalized;
+        }
+      }
+
+      finishRefresh(
+        sequence,
+        {
+          render: true,
+        }
+      );
+
+      return Boolean(detail);
+    } catch (error) {
+      if (
+        modalState.refreshSeq ===
+        sequence
+      ) {
+        finishRefresh(
+          sequence,
+          {
+            render: true,
+          }
+        );
+      }
+
+      showToast(
+        cleanText(
+          first(
+            error?.message,
+            "No se pudo actualizar el usuario."
+          ),
+          "No se pudo actualizar el usuario."
+        ),
+        "error"
+      );
+
+      return false;
+    }
+  }
+
+  /*
+    Compatibilidad con controladores antiguos:
+    delegamos por event bus y usamos timeout defensivo.
+  */
+  const emitted =
+    safeEmit(
+      "usuarios:modal:refresh",
+      {
+        userId,
+
+        detail:
+          cloneDetail(
+            modalState.detail
+          ),
+
+        source:
+          USUARIOS_MODAL_TEMPLATE_VERSION,
+      }
+    );
+
+  if (!emitted) {
+    finishRefresh(
+      sequence,
+      {
+        render: true,
+      }
+    );
+
+    showToast(
+      "No se pudo solicitar la actualización del usuario.",
+      "error"
+    );
+
+    return false;
+  }
+
+  armRefreshFallback(
+    sequence
+  );
+
+  return true;
+}
+
+/* =========================================================
+   PUBLIC OPEN / CLOSE / UPDATE
+========================================================= */
+
+export function openUsuariosModal(detail = {}) {
+  attachBus();
+
+  const normalized =
+    normalizeDetail(detail);
+
+  if (
+    !getUserId(normalized) &&
+    !getEmail(normalized) &&
+    !getUsername(normalized)
+  ) {
+    showToast(
+      "No se pudo abrir el detalle del usuario.",
+      "error"
+    );
+
+    return false;
+  }
+
+  const wasOpen =
+    modalState.isOpen;
+
+  if (isBrowser()) {
+    const host =
+      ensureHost();
+
+    removeDuplicateHosts(
+      host
+    );
+
+    /*
+      Sólo capturamos el foco externo al abrir de verdad.
+      Un open() sobre modal ya abierto no puede sustituir el
+      elemento al que debemos devolver el foco al cerrar.
+    */
+    if (!wasOpen) {
+      modalState.lastActiveElement =
+        captureActiveElement();
+    }
+  }
+
+  modalState.detail =
+    normalized;
+
+  modalState.isOpen =
+    true;
+
+  modalState.isRefreshing =
+    false;
+
+  modalState.refreshSeq += 1;
+
+  clearRefreshTimer();
+
+  lockBody();
+
+  renderMounted({
+    focus: !wasOpen,
+  });
+
+  safeEmit(
+    wasOpen
+      ? "usuarios:modal:updated"
+      : "usuarios:modal:opened",
+    {
+      detail:
+        cloneDetail(
+          normalized
+        ),
+
+      userId:
+        getUserId(
+          normalized
+        ),
+
+      source:
+        USUARIOS_MODAL_TEMPLATE_VERSION,
+    }
+  );
+
+  return true;
+}
+
+export function closeUsuariosModal() {
+  const wasOpen =
+    modalState.isOpen;
+
+  const userId =
+    getUserId(
+      modalState.detail ||
+      {}
+    );
+
+  modalState.isOpen =
+    false;
+
+  modalState.isRefreshing =
+    false;
+
+  modalState.refreshSeq += 1;
+
+  clearRefreshTimer();
+
+  modalState.detail =
+    null;
+
+  detachRootBindings();
+
+  const host =
+    modalState.host ||
+    getHost();
+
+  try {
+    host?.replaceChildren?.();
+  } catch {
+    try {
+      if (host) {
+        host.innerHTML = "";
+      }
+    } catch {
+      // noop
+    }
+  }
+
+  modalState.root =
+    null;
+
+  modalState.panel =
+    null;
+
+  unlockBody();
+
+  if (isBrowser()) {
+    window.setTimeout(
+      () =>
+        restoreFocus(),
+      0
+    );
+  } else {
+    modalState.lastActiveElement =
+      null;
+  }
+
+  if (wasOpen) {
+    safeEmit(
+      "usuarios:modal:closed",
+      {
+        userId,
+
+        source:
+          USUARIOS_MODAL_TEMPLATE_VERSION,
+      }
+    );
+  }
+
+  return true;
+}
+
+export function updateUsuariosModal(detail = {}) {
+  const normalized =
+    normalizeDetail(detail);
+
+  if (
+    !getUserId(normalized) &&
+    !getEmail(normalized) &&
+    !getUsername(normalized)
+  ) {
+    return false;
+  }
+
+  if (
+    !modalState.isOpen
+  ) {
+    return openUsuariosModal(
+      normalized
+    );
+  }
+
+  const currentId =
+    getUserId(
+      modalState.detail ||
+      {}
+    );
+
+  const incomingId =
+    getUserId(
+      normalized
+    );
+
+  if (
+    currentId &&
+    incomingId &&
+    currentId !==
+      incomingId
+  ) {
+    return false;
+  }
+
+  modalState.detail =
+    normalized;
+
+  modalState.isRefreshing =
+    false;
+
+  modalState.refreshSeq += 1;
+
+  clearRefreshTimer();
+
+  renderMounted({
+    focus: false,
+  });
+
+  safeEmit(
+    "usuarios:modal:updated",
+    {
+      detail:
+        cloneDetail(
+          normalized
+        ),
+
+      userId:
+        incomingId,
+
+      source:
+        USUARIOS_MODAL_TEMPLATE_VERSION,
+    }
+  );
+
+  return true;
+}
+
+export async function refreshUsuariosModal() {
+  return handleRefresh();
+}
+
+export async function copyUsuariosModalId() {
+  return handleCopyId();
+}
+
+/* =========================================================
    EVENT BUS BRIDGE
 ========================================================= */
 
 function handleOpenEvent(event) {
   const detail =
-    unwrapEventDetail(event);
+    unwrapEventDetail(
+      event
+    );
 
   if (
-    !Object.keys(detail).length
+    !Object.keys(detail)
+      .length
   ) {
     return;
   }
@@ -2997,10 +3797,13 @@ function handleCloseEvent() {
 
 function handleUpdateEvent(event) {
   const detail =
-    unwrapEventDetail(event);
+    unwrapEventDetail(
+      event
+    );
 
   if (
-    !Object.keys(detail).length
+    !Object.keys(detail)
+      .length
   ) {
     return;
   }
@@ -3010,11 +3813,11 @@ function handleUpdateEvent(event) {
   );
 }
 
-function handleDetailRefreshEvent(
-  event
-) {
+function handleDetailRefreshEvent(event) {
   const detail =
-    unwrapEventDetail(event);
+    unwrapEventDetail(
+      event
+    );
 
   if (
     !Object.keys(detail).length ||
@@ -3029,23 +3832,27 @@ function handleDetailRefreshEvent(
       {}
     );
 
+  const normalized =
+    normalizeDetail(
+      detail
+    );
+
   const incomingId =
     getUserId(
-      normalizeDetail(
-        detail
-      )
+      normalized
     );
 
   if (
     currentId &&
     incomingId &&
-    currentId !== incomingId
+    currentId !==
+      incomingId
   ) {
     return;
   }
 
   updateUsuariosModal(
-    detail
+    normalized
   );
 }
 
@@ -3054,67 +3861,70 @@ function attachBus() {
     return true;
   }
 
-  safeOn(
-    "usuarios:modal:open",
-    handleOpenEvent
-  );
+  const subscriptions = [
+    [
+      "usuarios:modal:open",
+      handleOpenEvent,
+    ],
 
-  safeOn(
-    "usuarios:modal:close",
-    handleCloseEvent
-  );
+    [
+      "usuarios:modal:close",
+      handleCloseEvent,
+    ],
 
-  safeOn(
-    "usuarios:modal:update",
-    handleUpdateEvent
-  );
+    [
+      "usuarios:modal:update",
+      handleUpdateEvent,
+    ],
 
-  safeOn(
-    "usuarios:detail:refresh",
-    handleDetailRefreshEvent
-  );
+    [
+      "usuarios:detail:refresh",
+      handleDetailRefreshEvent,
+    ],
 
-  safeOn(
-    "usuarios:detail:success",
-    handleDetailRefreshEvent
-  );
+    [
+      "usuarios:detail:success",
+      handleDetailRefreshEvent,
+    ],
+  ];
 
-  busAttached = true;
+  for (
+    const [
+      eventName,
+      handler,
+    ]
+    of subscriptions
+  ) {
+    busUnsubscribers.push(
+      subscribeEvent(
+        eventName,
+        handler
+      )
+    );
+  }
+
+  busAttached =
+    true;
 
   return true;
 }
 
 function detachBus() {
-  if (!busAttached) {
-    return true;
+  while (
+    busUnsubscribers.length
+  ) {
+    const unsubscribe =
+      busUnsubscribers.pop();
+
+    try {
+      unsubscribe?.();
+    } catch {
+      // noop
+    }
   }
 
-  safeOff(
-    "usuarios:modal:open",
-    handleOpenEvent
-  );
-
-  safeOff(
-    "usuarios:modal:close",
-    handleCloseEvent
-  );
-
-  safeOff(
-    "usuarios:modal:update",
-    handleUpdateEvent
-  );
-
-  safeOff(
-    "usuarios:detail:refresh",
-    handleDetailRefreshEvent
-  );
-
-  safeOff(
-    "usuarios:detail:success",
-    handleDetailRefreshEvent
-  );
-
-  busAttached = false;
+  busAttached =
+    false;
 
   return true;
 }
@@ -3190,14 +4000,18 @@ export function getUsuariosModalSnapshot() {
     intentionallyNotRendered: [
       "documents",
       "notes",
+      "activationUrl",
       "activationToken",
+      "resetUrl",
       "resetToken",
       "password",
       "raw",
     ],
 
     architecture: {
-      http: false,
+      http:
+        false,
+
       localModelNormalization:
         false,
 
@@ -3207,7 +4021,7 @@ export function getUsuariosModalSnapshot() {
       cssInjection:
         false,
 
-      inlineStyles:
+      templateInlineStyles:
         false,
 
       inlineHandlers:
@@ -3216,8 +4030,29 @@ export function getUsuariosModalSnapshot() {
       sharedDetailCss:
         "incidencias-modal-*",
 
+      stableHost:
+        HOST_ID,
+
+      modalRoot:
+        MODAL_ID,
+
+      stableHostRerender:
+        true,
+
+      noNestedModalOnRerender:
+        true,
+
+      bodyLockIdempotent:
+        true,
+
+      bodyClassRestore:
+        true,
+
       dataImageAvatarAllowed:
         false,
+
+      azureSasAvatarHost:
+        TRUSTED_BLOB_HOST,
 
       focusTrap:
         true,
@@ -3234,7 +4069,13 @@ export function getUsuariosModalSnapshot() {
       refreshViaController:
         true,
 
-      copyViaController:
+      refreshEventFallback:
+        true,
+
+      copyViaControllerOrClipboard:
+        true,
+
+      publicStateRawRemoved:
         true,
     },
   };
@@ -3242,6 +4083,86 @@ export function getUsuariosModalSnapshot() {
 
 export const getSnapshot =
   getUsuariosModalSnapshot;
+
+/* =========================================================
+   DESTROY
+========================================================= */
+
+function destroyUsuariosModal() {
+  const wasOpen =
+    modalState.isOpen;
+
+  const userId =
+    getUserId(
+      modalState.detail ||
+      {}
+    );
+
+  clearRefreshTimer();
+
+  detachRootBindings();
+
+  modalState.isOpen =
+    false;
+
+  modalState.isRefreshing =
+    false;
+
+  modalState.detail =
+    null;
+
+  modalState.refreshSeq += 1;
+
+  unlockBody();
+
+  const host =
+    modalState.host ||
+    getHost();
+
+  try {
+    host?.remove?.();
+  } catch {
+    // noop
+  }
+
+  modalState.host =
+    null;
+
+  modalState.root =
+    null;
+
+  modalState.panel =
+    null;
+
+  if (
+    wasOpen &&
+    isBrowser()
+  ) {
+    window.setTimeout(
+      () =>
+        restoreFocus(),
+      0
+    );
+  } else {
+    modalState.lastActiveElement =
+      null;
+  }
+
+  detachBus();
+
+  if (wasOpen) {
+    safeEmit(
+      "usuarios:modal:destroyed",
+      {
+        userId,
+        source:
+          USUARIOS_MODAL_TEMPLATE_VERSION,
+      }
+    );
+  }
+
+  return true;
+}
 
 /* =========================================================
    PUBLIC BRIDGE
@@ -3255,9 +4176,7 @@ export const OnionUsuariosModal =
     actions:
       USUARIOS_DETAIL_ACTIONS,
 
-    open(
-      detail = {}
-    ) {
+    open(detail = {}) {
       return openUsuariosModal(
         detail
       );
@@ -3267,20 +4186,18 @@ export const OnionUsuariosModal =
       return closeUsuariosModal();
     },
 
-    update(
-      detail = {}
-    ) {
+    update(detail = {}) {
       return updateUsuariosModal(
         detail
       );
     },
 
     refresh() {
-      return handleRefresh();
+      return refreshUsuariosModal();
     },
 
     copyId() {
-      return handleCopyId();
+      return copyUsuariosModalId();
     },
 
     getState:
@@ -3295,45 +4212,8 @@ export const OnionUsuariosModal =
     renderClosed:
       renderUsuariosDetailModalClosed,
 
-    destroy() {
-      detachRootBindings();
-
-      modalState.isOpen =
-        false;
-
-      modalState.isRefreshing =
-        false;
-
-      modalState.detail =
-        null;
-
-      modalState.refreshSeq += 1;
-
-      unlockBody();
-
-      const host =
-        modalState.root ||
-        getRoot();
-
-      try {
-        host?.remove?.();
-      } catch {
-        // noop
-      }
-
-      modalState.root =
-        null;
-
-      modalState.panel =
-        null;
-
-      modalState.lastActiveElement =
-        null;
-
-      detachBus();
-
-      return true;
-    },
+    destroy:
+      destroyUsuariosModal,
   });
 
 export const open =
@@ -3344,6 +4224,15 @@ export const close =
 
 export const update =
   updateUsuariosModal;
+
+export const refresh =
+  refreshUsuariosModal;
+
+export const copyId =
+  copyUsuariosModalId;
+
+export const destroy =
+  destroyUsuariosModal;
 
 /* =========================================================
    GLOBAL BRIDGE / AUTO BOOT

@@ -2,32 +2,18 @@
    Onion Support - Facturas Index
    Archivo: /src/views/facturas/index.js
 
-   PRODUCTIVO · MODAL DETAIL 10/10 · V11
+   PRODUCTIVO · SINGLE MOUNT DETAIL MODAL · V12
 
-   Responsabilidad:
-   - Controlador de la vista Facturas.
-   - Hidratar listado desde cache en memoria.
-   - Cargar/listar facturas mediante facturas.api.js.
-   - Scroll infinito real: page + limit + hasMore + nextPage.
-   - Respetar orden/paginación del backend.
-   - Crear factura mediante modal independiente.
-   - Buscar clientes e incidencias vinculables.
-   - Abrir detalle en host global independiente.
-   - Ver/descargar PDF resolviendo JSON/SAS/blob de forma segura.
-   - Enviar o reenviar factura con confirmación consciente.
-   - Feedback de acciones dentro del modal de detalle.
-   - Focus trap real en modal create/detail.
-   - Restaurar foco al elemento que abrió cada modal.
-   - Invalidar cargas de detalle obsoletas al cerrar/cambiar factura.
-   - Evitar que renders del listado destruyan el modal abierto.
-   - Sin Store ni State externo.
+   FIX PRINCIPAL
+   - El modal detalle se monta una sola vez por apertura.
+   - Las actualizaciones posteriores NO recrean overlay/panel.
+   - Si existe factura local, se muestra inmediatamente.
+   - getFacturaById() enriquece el contenido en segundo plano.
+   - Evita el efecto abrir -> cerrar -> abrir.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
-
-import {
-  ROUTES,
-} from "../../core/config.js";
+import { ROUTES } from "../../core/config.js";
 
 import {
   listFacturas,
@@ -59,13 +45,13 @@ import {
 import {
   FACTURA_MODAL_ACTIONS,
   renderFacturasDetailModal,
+  renderFacturasDetailContent,
 } from "./facturas.template.modal.js";
 
 export const FACTURAS_INDEX_VERSION =
-  "facturas.index.productivo.v11.detail-modal-10x10";
+  "facturas.index.productivo.v12.single-mount-detail-modal";
 
-export const FACTURAS_VIEW_VERSION =
-  FACTURAS_INDEX_VERSION;
+export const FACTURAS_VIEW_VERSION = FACTURAS_INDEX_VERSION;
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_BATCH_SIZE = 100;
@@ -81,6 +67,7 @@ const INFINITE_ROOT_MARGIN = "900px 0px 900px 0px";
 
 const DETAIL_MODAL_HOST_ID = "facturas-detail-root";
 const DETAIL_MODAL_HOST_SELECTOR = `#${DETAIL_MODAL_HOST_ID}`;
+const DETAIL_MODAL_ROOT_SELECTOR = "[data-facturas-detail-root='true']";
 const DETAIL_MODAL_PANEL_SELECTOR =
   "[data-facturas-detail-modal='true'], [data-role='facturas-detail-modal']";
 const DETAIL_MODAL_SCROLL_SELECTOR =
@@ -137,7 +124,7 @@ const TICKET_SEARCH_ENDPOINTS = Object.freeze([
 ]);
 
 /* =========================================================
-   BASICS
+   HELPERS
 ========================================================= */
 
 function isBrowser() {
@@ -205,7 +192,6 @@ function first(...values) {
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
     if (isObject(value) && Object.keys(value).length === 0) continue;
-
     return value;
   }
 
@@ -233,55 +219,6 @@ function normalizeKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
-function redact(value = "") {
-  return cleanText(value, "")
-    .replace(
-      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=)([^&#\s]+)/gi,
-      "$1***"
-    )
-    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(
-      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-      "***"
-    );
-}
-
-function safeError(error = null, fallback = "No se pudieron cargar las facturas.") {
-  return cleanText(
-    error?.message ||
-      error?.data?.message ||
-      error?.payload?.message ||
-      error?.response?.message ||
-      fallback,
-    fallback
-  );
-}
-
-function normalizeRole(value = "") {
-  if (Array.isArray(value)) {
-    const roles = value.map(normalizeRole).filter(Boolean);
-
-    if (roles.includes("admin")) return "admin";
-    if (roles.includes("user")) return "user";
-    return "";
-  }
-
-  const role = normalizeKey(value);
-
-  if (
-    ["admin", "administrator", "administrador", "superadmin", "super_admin", "root", "owner"]
-      .includes(role)
-  ) {
-    return "admin";
-  }
-
-  if (["user", "usuario", "client", "cliente", "customer"].includes(role)) {
-    return "user";
-  }
-
-  return "";
-}
-
 function parseBoolean(value, fallback = false) {
   if (typeof value === "boolean") return value;
 
@@ -298,6 +235,33 @@ function parseBoolean(value, fallback = false) {
   }
 
   return fallback;
+}
+
+function redact(value = "") {
+  return cleanText(value, "")
+    .replace(
+      /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=)([^&#\s]+)/gi,
+      "$1***"
+    )
+    .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
+    .replace(
+      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+      "***"
+    );
+}
+
+function safeError(
+  error = null,
+  fallback = "No se pudieron cargar las facturas."
+) {
+  return cleanText(
+    error?.message ||
+      error?.data?.message ||
+      error?.payload?.message ||
+      error?.response?.message ||
+      fallback,
+    fallback
+  );
 }
 
 function nextFrame(callback = null) {
@@ -325,21 +289,23 @@ function cancelFrame(id = 0) {
   }
 }
 
-function nextAnimationFrame(callback = null) {
-  return Boolean(nextFrame(callback));
-}
-
 function isElementVisible(element = null) {
   if (!element || !isBrowser()) return false;
 
   try {
-    if (element.hidden || element.getAttribute?.("aria-hidden") === "true") {
+    if (
+      element.hidden ||
+      element.getAttribute?.("aria-hidden") === "true"
+    ) {
       return false;
     }
 
     const style = window.getComputedStyle?.(element);
 
-    if (style?.display === "none" || style?.visibility === "hidden") {
+    if (
+      style?.display === "none" ||
+      style?.visibility === "hidden"
+    ) {
       return false;
     }
 
@@ -370,7 +336,7 @@ function focusableElements(root = null) {
 }
 
 /* =========================================================
-   CORE / ROUTER
+   CORE / ROLE / ROUTER
 ========================================================= */
 
 function getState() {
@@ -389,6 +355,40 @@ function getCurrentUser() {
   } catch {
     return state.user || state.currentUser || null;
   }
+}
+
+function normalizeRole(value = "") {
+  if (Array.isArray(value)) {
+    const roles = value.map(normalizeRole).filter(Boolean);
+
+    if (roles.includes("admin")) return "admin";
+    if (roles.includes("user")) return "user";
+    return "";
+  }
+
+  const role = normalizeKey(value);
+
+  if (
+    [
+      "admin",
+      "administrator",
+      "administrador",
+      "superadmin",
+      "super_admin",
+      "root",
+      "owner",
+    ].includes(role)
+  ) {
+    return "admin";
+  }
+
+  if (
+    ["user", "usuario", "client", "cliente", "customer"].includes(role)
+  ) {
+    return "user";
+  }
+
+  return "";
 }
 
 function getCurrentRole() {
@@ -454,87 +454,6 @@ function getFacturaId(item = {}) {
     ),
     ""
   );
-}
-
-function mergeFacturaData(current = {}, next = {}) {
-  const base = safeObject(current, {});
-  const incoming = safeObject(next, {});
-  const output = { ...base };
-
-  for (const [key, value] of Object.entries(incoming)) {
-    if (isObject(output[key]) && isObject(value)) {
-      output[key] = mergeFacturaData(output[key], value);
-      continue;
-    }
-
-    if (value === undefined || value === null) continue;
-
-    if (
-      typeof value === "string" &&
-      value.trim() === "" &&
-      output[key] !== undefined
-    ) {
-      continue;
-    }
-
-    if (
-      Array.isArray(value) &&
-      value.length === 0 &&
-      Array.isArray(output[key]) &&
-      output[key].length
-    ) {
-      continue;
-    }
-
-    output[key] = value;
-  }
-
-  return output;
-}
-
-function mergeFacturas(currentItems = [], nextItems = [], { append = true } = {}) {
-  const map = new Map();
-
-  const push = (item = {}) => {
-    const factura = safeObject(item, null);
-    if (!factura) return;
-
-    const id = getFacturaId(factura);
-    if (!id) return;
-
-    if (map.has(id)) {
-      map.set(id, mergeFacturaData(map.get(id), factura));
-      return;
-    }
-
-    map.set(id, factura);
-  };
-
-  if (append) safeArray(currentItems).forEach(push);
-  safeArray(nextItems).forEach(push);
-
-  return [...map.values()];
-}
-
-function upsertFactura(items = [], factura = null, sortMode = "date_desc") {
-  const next = safeObject(factura, null);
-  if (!next) return safeArray(items);
-
-  const id = getFacturaId(next);
-  if (!id) return safeArray(items);
-
-  const current = safeArray(items);
-  const index = current.findIndex((item) => getFacturaId(item) === id);
-
-  if (index >= 0) {
-    const copy = [...current];
-    copy[index] = mergeFacturaData(copy[index], next);
-    return copy;
-  }
-
-  return normalizeKey(sortMode).endsWith("_asc")
-    ? [...current, next]
-    : [next, ...current];
 }
 
 function getFacturaLabel(item = {}) {
@@ -611,8 +530,93 @@ function isFacturaSent(item = {}) {
   return ["enviada", "enviado", "sent"].includes(status);
 }
 
+function mergeFacturaData(current = {}, next = {}) {
+  const base = safeObject(current, {});
+  const incoming = safeObject(next, {});
+  const output = { ...base };
+
+  for (const [key, value] of Object.entries(incoming)) {
+    if (isObject(output[key]) && isObject(value)) {
+      output[key] = mergeFacturaData(output[key], value);
+      continue;
+    }
+
+    if (value === undefined || value === null) continue;
+
+    if (
+      typeof value === "string" &&
+      value.trim() === "" &&
+      output[key] !== undefined
+    ) {
+      continue;
+    }
+
+    if (
+      Array.isArray(value) &&
+      value.length === 0 &&
+      Array.isArray(output[key]) &&
+      output[key].length
+    ) {
+      continue;
+    }
+
+    output[key] = value;
+  }
+
+  return output;
+}
+
+function mergeFacturas(
+  currentItems = [],
+  nextItems = [],
+  { append = true } = {}
+) {
+  const map = new Map();
+
+  const push = (item = {}) => {
+    const factura = safeObject(item, null);
+    if (!factura) return;
+
+    const id = getFacturaId(factura);
+    if (!id) return;
+
+    if (map.has(id)) {
+      map.set(id, mergeFacturaData(map.get(id), factura));
+      return;
+    }
+
+    map.set(id, factura);
+  };
+
+  if (append) safeArray(currentItems).forEach(push);
+  safeArray(nextItems).forEach(push);
+
+  return [...map.values()];
+}
+
+function upsertFactura(items = [], factura = null, sortMode = "date_desc") {
+  const next = safeObject(factura, null);
+  if (!next) return safeArray(items);
+
+  const id = getFacturaId(next);
+  if (!id) return safeArray(items);
+
+  const current = safeArray(items);
+  const index = current.findIndex((item) => getFacturaId(item) === id);
+
+  if (index >= 0) {
+    const copy = [...current];
+    copy[index] = mergeFacturaData(copy[index], next);
+    return copy;
+  }
+
+  return normalizeKey(sortMode).endsWith("_asc")
+    ? [...current, next]
+    : [next, ...current];
+}
+
 /* =========================================================
-   HTTP SEARCH HELPERS
+   SEARCH HELPERS
 ========================================================= */
 
 function getHttpClient() {
@@ -623,7 +627,11 @@ function getHttpClient() {
   }
 }
 
-async function requestGet(endpoint = "", query = {}, source = "views.facturas") {
+async function requestGet(
+  endpoint = "",
+  query = {},
+  source = "views.facturas"
+) {
   const path = cleanText(endpoint, "");
 
   if (!path) {
@@ -678,7 +686,6 @@ function unwrapList(payload = null) {
       object.usuarios,
       object.tickets,
       object.incidencias,
-
       object.data?.items,
       object.data?.rows,
       object.data?.results,
@@ -689,19 +696,16 @@ function unwrapList(payload = null) {
       object.data?.usuarios,
       object.data?.tickets,
       object.data?.incidencias,
-
       object.payload?.items,
       object.payload?.clientes,
       object.payload?.users,
       object.payload?.tickets,
       object.payload?.incidencias,
-
       object.result?.items,
       object.result?.clientes,
       object.result?.users,
       object.result?.tickets,
       object.result?.incidencias,
-
       []
     )
   );
@@ -786,18 +790,39 @@ function normalizeClientCandidate(raw = {}) {
     name,
     nombre: name,
     displayName: name,
-    nombreContacto: cleanText(first(item.nombreContacto, item.contactName, name), name),
-    razonSocial: cleanText(first(item.razonSocial, item.companyName, item.empresa, name), name),
+    nombreContacto: cleanText(
+      first(item.nombreContacto, item.contactName, name),
+      name
+    ),
+    razonSocial: cleanText(
+      first(item.razonSocial, item.companyName, item.empresa, name),
+      name
+    ),
     email,
-    telefono: cleanText(first(item.telefono, item.phone, item.mobile, item.movil), ""),
-    nif: cleanText(first(item.nif, item.cif, item.taxId, item.vatId), ""),
-    username: cleanText(first(item.username, item.slug, email ? email.split("@")[0] : ""), ""),
+    telefono: cleanText(
+      first(item.telefono, item.phone, item.mobile, item.movil),
+      ""
+    ),
+    nif: cleanText(
+      first(item.nif, item.cif, item.taxId, item.vatId),
+      ""
+    ),
+    username: cleanText(
+      first(
+        item.username,
+        item.slug,
+        email ? email.split("@")[0] : ""
+      ),
+      ""
+    ),
     avatarUrl,
     avatar: avatarUrl,
     subtitle: cleanText(
       first(
         email,
-        item.razonSocial && item.razonSocial !== name ? item.razonSocial : "",
+        item.razonSocial && item.razonSocial !== name
+          ? item.razonSocial
+          : "",
         item.telefono,
         item.nif,
         clienteId || userId || id
@@ -818,12 +843,26 @@ function normalizeTicketCandidate(raw = {}) {
   if (!id) return null;
 
   const subject = cleanText(
-    first(item.subject, item.asunto, item.title, item.name, item.preview, item.description),
+    first(
+      item.subject,
+      item.asunto,
+      item.title,
+      item.name,
+      item.preview,
+      item.description
+    ),
     id
   );
 
-  const status = cleanText(first(item.status, item.estado, item.state), "");
-  const category = cleanText(first(item.category, item.categoria, item.tipo), "");
+  const status = cleanText(
+    first(item.status, item.estado, item.state),
+    ""
+  );
+
+  const category = cleanText(
+    first(item.category, item.categoria, item.tipo),
+    ""
+  );
 
   return {
     ...item,
@@ -833,24 +872,32 @@ function normalizeTicketCandidate(raw = {}) {
     subject,
     asunto: subject,
     title: subject,
-    clienteId: cleanText(first(item.clienteId, item.clientId, item.cliente?.clienteId), ""),
-    userId: cleanText(first(item.userId, item.usuarioId, item.userRef?.userId), ""),
+    clienteId: cleanText(
+      first(item.clienteId, item.clientId, item.cliente?.clienteId),
+      ""
+    ),
+    userId: cleanText(
+      first(item.userId, item.usuarioId, item.userRef?.userId),
+      ""
+    ),
     status,
     estado: status,
     category,
     categoria: category,
     facturaLinked: Boolean(
       item.facturaLinked ||
-      item.meta?.facturaLinked ||
-      item.meta?.hasFactura ||
-      item.facturaId ||
-      item.invoiceId
+        item.meta?.facturaLinked ||
+        item.meta?.hasFactura ||
+        item.facturaId ||
+        item.invoiceId
     ),
     subtitle:
       [
         status ? `Estado: ${status}` : "",
         category ? `Tipo: ${category}` : "",
-        item.facturaLinked || item.meta?.hasFactura ? "Ya facturada" : "",
+        item.facturaLinked || item.meta?.hasFactura
+          ? "Ya facturada"
+          : "",
       ]
         .filter(Boolean)
         .join(" · ") || id,
@@ -864,14 +911,37 @@ function dedupeClients(items = []) {
     const normalized = normalizeClientCandidate(item);
     if (!normalized?.id) continue;
 
-    const key = normalized.clienteId || normalized.userId || normalized.id;
+    const key =
+      normalized.clienteId ||
+      normalized.userId ||
+      normalized.id;
 
-    if (!map.has(key)) {
-      map.set(key, normalized);
-    }
+    if (!map.has(key)) map.set(key, normalized);
   }
 
   return [...map.values()].slice(0, SEARCH_LIMIT);
+}
+
+function selectedClienteIds(clients = []) {
+  return [
+    ...new Set(
+      safeArray(clients)
+        .map((item) =>
+          cleanText(first(item.clienteId, item.id), "")
+        )
+        .filter(Boolean)
+    ),
+  ];
+}
+
+function selectedUserIds(clients = []) {
+  return [
+    ...new Set(
+      safeArray(clients)
+        .map((item) => cleanText(item.userId, ""))
+        .filter(Boolean)
+    ),
+  ];
 }
 
 function ticketBelongsToClients(ticket = {}, clients = []) {
@@ -910,33 +980,20 @@ function dedupeTickets(items = [], selectedClientes = []) {
 
   return [...map.values()]
     .sort((a, b) => {
-      const left = Date.parse(a.updatedAt || a.lastActivityAt || a.createdAt || 0);
-      const right = Date.parse(b.updatedAt || b.lastActivityAt || b.createdAt || 0);
+      const left = Date.parse(
+        a.updatedAt || a.lastActivityAt || a.createdAt || 0
+      );
 
-      return (Number.isFinite(right) ? right : 0) -
-        (Number.isFinite(left) ? left : 0);
+      const right = Date.parse(
+        b.updatedAt || b.lastActivityAt || b.createdAt || 0
+      );
+
+      return (
+        (Number.isFinite(right) ? right : 0) -
+        (Number.isFinite(left) ? left : 0)
+      );
     })
     .slice(0, TICKET_LIMIT);
-}
-
-function selectedClienteIds(clients = []) {
-  return [
-    ...new Set(
-      safeArray(clients)
-        .map((item) => cleanText(first(item.clienteId, item.id), ""))
-        .filter(Boolean)
-    ),
-  ];
-}
-
-function selectedUserIds(clients = []) {
-  return [
-    ...new Set(
-      safeArray(clients)
-        .map((item) => cleanText(item.userId, ""))
-        .filter(Boolean)
-    ),
-  ];
 }
 
 async function searchClients(query = "") {
@@ -963,7 +1020,6 @@ async function searchClients(query = "") {
       );
 
       const items = dedupeClients(unwrapList(response));
-
       if (items.length) return items;
     } catch (error) {
       lastError = error;
@@ -996,13 +1052,20 @@ async function searchTickets(query = "", selectedClientes = []) {
           onlyMine: false,
           ...(clienteIds[0] ? { clienteId: clienteIds[0] } : {}),
           ...(userIds[0] ? { userId: userIds[0] } : {}),
-          ...(clienteIds.length ? { clienteIds: clienteIds.join(",") } : {}),
-          ...(userIds.length ? { userIds: userIds.join(",") } : {}),
+          ...(clienteIds.length
+            ? { clienteIds: clienteIds.join(",") }
+            : {}),
+          ...(userIds.length
+            ? { userIds: userIds.join(",") }
+            : {}),
         },
         "views.facturas.ticket-search"
       );
 
-      const items = dedupeTickets(unwrapList(response), selectedClientes);
+      const items = dedupeTickets(
+        unwrapList(response),
+        selectedClientes
+      );
 
       if (items.length) return items;
     } catch (error) {
@@ -1015,15 +1078,12 @@ async function searchTickets(query = "", selectedClientes = []) {
 }
 
 /* =========================================================
-   BODY / FILE / CSV / PDF
+   BODY / DOCUMENTS
 ========================================================= */
 
 function syncBodyModalClass(
   open = false,
-  {
-    detailOpen = false,
-    createOpen = false,
-  } = {}
+  { detailOpen = false, createOpen = false } = {}
 ) {
   if (!isBrowser()) return false;
 
@@ -1032,7 +1092,11 @@ function syncBodyModalClass(
     document.body?.classList.toggle("facturas-modal-open", open);
     document.body?.classList.toggle("facturas-detail-open", detailOpen);
     document.body?.classList.toggle("facturas-create-open", createOpen);
-    document.body?.classList.toggle("facturas-create-modal-open", createOpen);
+    document.body?.classList.toggle(
+      "facturas-create-modal-open",
+      createOpen
+    );
+
     return true;
   } catch {
     return false;
@@ -1074,11 +1138,17 @@ function openUrl(url = "") {
 }
 
 function isBlob(value = null) {
-  return Boolean(typeof Blob !== "undefined" && value instanceof Blob);
+  return Boolean(
+    typeof Blob !== "undefined" &&
+    value instanceof Blob
+  );
 }
 
 function isResponse(value = null) {
-  return Boolean(typeof Response !== "undefined" && value instanceof Response);
+  return Boolean(
+    typeof Response !== "undefined" &&
+    value instanceof Response
+  );
 }
 
 function getContentType(value = null) {
@@ -1105,12 +1175,13 @@ function isJsonContentType(type = "") {
 }
 
 function isPdfContentType(type = "") {
-  return cleanText(type, "").toLowerCase().includes("application/pdf");
+  return cleanText(type, "")
+    .toLowerCase()
+    .includes("application/pdf");
 }
 
 function isPdfUrl(url = "") {
   const value = cleanText(url, "");
-
   if (!value) return false;
 
   return (
@@ -1138,7 +1209,10 @@ async function readJsonBlob(blob = null) {
 
     const clean = String(await blob.text()).trim();
 
-    if (!clean || (!clean.startsWith("{") && !clean.startsWith("["))) {
+    if (
+      !clean ||
+      (!clean.startsWith("{") && !clean.startsWith("["))
+    ) {
       return null;
     }
 
@@ -1164,7 +1238,10 @@ async function readJsonResponse(response = null) {
 
     const clean = String(await clone.text()).trim();
 
-    if (!clean || (!clean.startsWith("{") && !clean.startsWith("["))) {
+    if (
+      !clean ||
+      (!clean.startsWith("{") && !clean.startsWith("["))
+    ) {
       return null;
     }
 
@@ -1174,7 +1251,10 @@ async function readJsonResponse(response = null) {
   }
 }
 
-function getFacturaPdfFilename(payload = null, fallback = "factura.pdf") {
+function getFacturaPdfFilename(
+  payload = null,
+  fallback = "factura.pdf"
+) {
   const data = safeObject(payload, {});
 
   const filename = cleanText(
@@ -1235,81 +1315,72 @@ function pickFacturaPdfUrl(payload = null, mode = "view") {
   const data = safeObject(payload, {});
   const download = mode === "download";
 
-  const raw = cleanText(
-    first(
-      download ? data.downloadUrl : data.viewUrl,
-      data.signedUrl,
-      data.sasUrl,
-      data.url,
+  return safeDocumentUrl(
+    cleanText(
+      first(
+        download ? data.downloadUrl : data.viewUrl,
+        data.signedUrl,
+        data.sasUrl,
+        data.url,
 
-      download ? data.file?.downloadUrl : data.file?.viewUrl,
-      data.file?.signedUrl,
-      data.file?.sasUrl,
-      data.file?.url,
+        download ? data.file?.downloadUrl : data.file?.viewUrl,
+        data.file?.signedUrl,
+        data.file?.sasUrl,
+        data.file?.url,
 
-      download ? data.pdf?.downloadUrl : data.pdf?.viewUrl,
-      data.pdf?.signedUrl,
-      data.pdf?.sasUrl,
-      data.pdf?.url,
+        download ? data.pdf?.downloadUrl : data.pdf?.viewUrl,
+        data.pdf?.signedUrl,
+        data.pdf?.sasUrl,
+        data.pdf?.url,
 
-      download ? data.blob?.downloadUrl : data.blob?.viewUrl,
-      data.blob?.signedUrl,
-      data.blob?.sasUrl,
-      data.blob?.url,
+        download ? data.document?.downloadUrl : data.document?.viewUrl,
+        data.document?.signedUrl,
+        data.document?.sasUrl,
+        data.document?.pdfUrl,
+        data.document?.blobUrl,
+        data.document?.url,
 
-      download ? data.document?.downloadUrl : data.document?.viewUrl,
-      data.document?.signedUrl,
-      data.document?.sasUrl,
-      data.document?.pdfUrl,
-      data.document?.blobUrl,
-      data.document?.url,
+        download
+          ? data.factura?.document?.downloadUrl
+          : data.factura?.document?.viewUrl,
+        data.factura?.document?.signedUrl,
+        data.factura?.document?.sasUrl,
+        data.factura?.document?.pdfUrl,
+        data.factura?.document?.blobUrl,
+        data.factura?.document?.url,
 
-      download ? data.factura?.downloadUrl : data.factura?.viewUrl,
-      data.factura?.signedUrl,
-      data.factura?.sasUrl,
-      data.factura?.pdfUrl,
-      data.factura?.blobUrl,
+        download ? data.factura?.downloadUrl : data.factura?.viewUrl,
+        data.factura?.signedUrl,
+        data.factura?.sasUrl,
+        data.factura?.pdfUrl,
+        data.factura?.blobUrl,
 
-      download
-        ? data.factura?.document?.downloadUrl
-        : data.factura?.document?.viewUrl,
-      data.factura?.document?.signedUrl,
-      data.factura?.document?.sasUrl,
-      data.factura?.document?.pdfUrl,
-      data.factura?.document?.blobUrl,
-      data.factura?.document?.url,
+        download ? data.item?.downloadUrl : data.item?.viewUrl,
+        data.item?.signedUrl,
+        data.item?.sasUrl,
+        data.item?.pdfUrl,
+        data.item?.blobUrl,
 
-      download ? data.item?.downloadUrl : data.item?.viewUrl,
-      data.item?.signedUrl,
-      data.item?.sasUrl,
-      data.item?.pdfUrl,
-      data.item?.blobUrl,
+        download ? data.data?.downloadUrl : data.data?.viewUrl,
+        data.data?.signedUrl,
+        data.data?.sasUrl,
+        data.data?.pdfUrl,
+        data.data?.blobUrl,
 
-      download ? data.data?.downloadUrl : data.data?.viewUrl,
-      data.data?.signedUrl,
-      data.data?.sasUrl,
-      data.data?.pdfUrl,
-      data.data?.blobUrl,
-
-      download ? data.invoice?.downloadUrl : data.invoice?.viewUrl,
-      data.invoice?.signedUrl,
-      data.invoice?.sasUrl,
-      data.invoice?.pdfUrl,
-      data.invoice?.blobUrl
-    ),
-    ""
+        download ? data.invoice?.downloadUrl : data.invoice?.viewUrl,
+        data.invoice?.signedUrl,
+        data.invoice?.sasUrl,
+        data.invoice?.pdfUrl,
+        data.invoice?.blobUrl
+      ),
+      ""
+    )
   );
-
-  return safeDocumentUrl(raw);
 }
 
 async function resolveBlobPdfResult(
   blob = null,
-  {
-    mode = "view",
-    payload = null,
-    objectUrls = null,
-  } = {}
+  { mode = "view", payload = null, objectUrls = null } = {}
 ) {
   if (!isBlob(blob)) {
     return {
@@ -1331,7 +1402,10 @@ async function resolveBlobPdfResult(
     };
   }
 
-  if (isPdfContentType(type) || await blobStartsWithPdf(blob)) {
+  if (
+    isPdfContentType(type) ||
+    await blobStartsWithPdf(blob)
+  ) {
     const objectUrl = URL.createObjectURL(blob);
     objectUrls?.add?.(objectUrl);
 
@@ -1361,10 +1435,7 @@ async function resolveBlobPdfResult(
 
 async function resolveFacturaPdfResult(
   result = null,
-  {
-    mode = "view",
-    objectUrls = null,
-  } = {}
+  { mode = "view", objectUrls = null } = {}
 ) {
   if (typeof result === "string") {
     return {
@@ -1375,16 +1446,11 @@ async function resolveFacturaPdfResult(
   }
 
   if (isResponse(result)) {
-    const type = getContentType(result);
-
-    if (isPdfContentType(type)) {
-      const blob = await result.blob();
-
-      return resolveBlobPdfResult(blob, {
-        mode,
-        payload: null,
-        objectUrls,
-      });
+    if (isPdfContentType(getContentType(result))) {
+      return resolveBlobPdfResult(
+        await result.blob(),
+        { mode, payload: null, objectUrls }
+      );
     }
 
     const json = await readJsonResponse(result);
@@ -1397,11 +1463,10 @@ async function resolveFacturaPdfResult(
   }
 
   if (isBlob(result)) {
-    return resolveBlobPdfResult(result, {
-      mode,
-      payload: null,
-      objectUrls,
-    });
+    return resolveBlobPdfResult(
+      result,
+      { mode, payload: null, objectUrls }
+    );
   }
 
   const payload = safeObject(result, null);
@@ -1416,20 +1481,19 @@ async function resolveFacturaPdfResult(
   }
 
   if (isBlob(result?.blob)) {
-    const resolved = await resolveBlobPdfResult(result.blob, {
-      mode,
-      payload,
-      objectUrls,
-    });
+    const resolved = await resolveBlobPdfResult(
+      result.blob,
+      { mode, payload, objectUrls }
+    );
 
-    if (resolved.url || resolved.payload) {
-      return resolved.payload
-        ? {
-            ...resolved,
-            url: pickFacturaPdfUrl(resolved.payload, mode),
-            filename: getFacturaPdfFilename(resolved.payload),
-          }
-        : resolved;
+    if (resolved.url) return resolved;
+
+    if (resolved.payload) {
+      return {
+        ...resolved,
+        url: pickFacturaPdfUrl(resolved.payload, mode),
+        filename: getFacturaPdfFilename(resolved.payload),
+      };
     }
   }
 
@@ -1441,23 +1505,22 @@ async function resolveFacturaPdfResult(
         const response = await fetch(objectUrl);
         const blob = await response.blob();
 
-        const resolved = await resolveBlobPdfResult(blob, {
-          mode,
-          payload,
-          objectUrls,
-        });
+        const resolved = await resolveBlobPdfResult(
+          blob,
+          { mode, payload, objectUrls }
+        );
 
-        if (resolved.url || resolved.payload) {
-          return resolved.payload
-            ? {
-                ...resolved,
-                url: pickFacturaPdfUrl(resolved.payload, mode),
-                filename: getFacturaPdfFilename(resolved.payload),
-              }
-            : resolved;
+        if (resolved.url) return resolved;
+
+        if (resolved.payload) {
+          return {
+            ...resolved,
+            url: pickFacturaPdfUrl(resolved.payload, mode),
+            filename: getFacturaPdfFilename(resolved.payload),
+          };
         }
       } catch {
-        // No abrir blob local a ciegas si puede ser JSON.
+        // noop
       }
     }
 
@@ -1482,7 +1545,6 @@ function openPendingWindow(title = "Abriendo factura…") {
 
   try {
     const popup = window.open("about:blank", "_blank");
-
     if (!popup) return null;
 
     try {
@@ -1523,7 +1585,6 @@ function openPendingWindow(title = "Abriendo factura…") {
 
 function navigateWindowOrOpen(url = "", popup = null) {
   const target = safeDocumentUrl(url);
-
   if (!target) return false;
 
   try {
@@ -1551,7 +1612,10 @@ function closePendingWindow(popup = null) {
   return false;
 }
 
-function triggerDownloadLink(url = "", filename = "factura.pdf") {
+function triggerDownloadLink(
+  url = "",
+  filename = "factura.pdf"
+) {
   if (!isBrowser()) return false;
 
   const target = safeDocumentUrl(url);
@@ -1586,7 +1650,8 @@ async function downloadRemotePdf(
   const target = safeDocumentUrl(url);
   if (!target) return false;
 
-  const safeFilename = getFacturaPdfFilename({ filename }, "factura.pdf");
+  const safeFilename =
+    getFacturaPdfFilename({ filename }, "factura.pdf");
 
   try {
     const response = await fetch(target, {
@@ -1604,17 +1669,23 @@ async function downloadRemotePdf(
         const objectUrl = URL.createObjectURL(blob);
         objectUrls?.add?.(objectUrl);
 
-        return triggerDownloadLink(objectUrl, safeFilename);
+        return triggerDownloadLink(
+          objectUrl,
+          safeFilename
+        );
       }
     }
   } catch {
-    // Azure/SAS puede bloquear CORS. Fallback: enlace SAS directo.
+    // SAS directo como fallback.
   }
 
   return triggerDownloadLink(target, safeFilename);
 }
 
-function downloadTextFile(filename = "facturas.csv", content = "") {
+function downloadTextFile(
+  filename = "facturas.csv",
+  content = ""
+) {
   if (!isBrowser()) return false;
 
   try {
@@ -1650,7 +1721,13 @@ function downloadTextFile(filename = "facturas.csv", content = "") {
 
 function csvCell(value = "") {
   const text = String(value ?? "").replace(/"/g, '""');
-  return `"${text}"`;
+
+  const safe =
+    /^[=+\-@]/.test(text)
+      ? `'${text}`
+      : text;
+
+  return `"${safe}"`;
 }
 
 function exportCsv(rows = []) {
@@ -1691,9 +1768,21 @@ function exportCsv(rows = []) {
       ),
       cleanText(first(item.paymentStatus, item.estadoPago), ""),
       cleanText(first(item.total, item.amount, item.importe), ""),
-      cleanText(first(item.ticketId, item.incidenciaId, item.relatedTicketId), ""),
       cleanText(
-        first(item.issuedAt, item.fechaFactura, item.fechaEmision, item.createdAt),
+        first(
+          item.ticketId,
+          item.incidenciaId,
+          item.relatedTicketId
+        ),
+        ""
+      ),
+      cleanText(
+        first(
+          item.issuedAt,
+          item.fechaFactura,
+          item.fechaEmision,
+          item.createdAt
+        ),
         ""
       ),
     ]
@@ -1701,16 +1790,17 @@ function exportCsv(rows = []) {
       .join(";")
   );
 
-  const csv = [
-    header.map(csvCell).join(";"),
-    ...lines,
-  ].join("\n");
-
-  return downloadTextFile("facturas.csv", csv);
+  return downloadTextFile(
+    "facturas.csv",
+    [
+      header.map(csvCell).join(";"),
+      ...lines,
+    ].join("\n")
+  );
 }
 
 /* =========================================================
-   FORM HELPERS
+   FORM
 ========================================================= */
 
 function readField(form = null, name = "") {
@@ -1767,10 +1857,16 @@ function createFacturasController(host = null, context = {}) {
   const controllerOwner =
     `${FACTURAS_VIEW_VERSION}:${++FACTURAS_CONTROLLER_SEQUENCE}`;
 
-  const cache = hydrateFacturasFromCache();
+  const cache = safeObject(
+    hydrateFacturasFromCache?.(),
+    {}
+  );
 
   let items = safeArray(cache.items);
-  let total = Math.max(number(cache.total, items.length), items.length);
+  let total = Math.max(
+    number(cache.total, items.length),
+    items.length
+  );
 
   let loading = false;
   let refreshing = false;
@@ -1781,7 +1877,10 @@ function createFacturasController(host = null, context = {}) {
   let page = DEFAULT_PAGE;
   let nextPage =
     items.length && total > items.length
-      ? Math.max(2, Math.floor(items.length / DEFAULT_BATCH_SIZE) + 1)
+      ? Math.max(
+          2,
+          Math.floor(items.length / DEFAULT_BATCH_SIZE) + 1
+        )
       : DEFAULT_PAGE;
 
   let pageSize = DEFAULT_BATCH_SIZE;
@@ -1835,7 +1934,6 @@ function createFacturasController(host = null, context = {}) {
     createdFacturaId: "",
     errors: {},
     form: getFacturaCreateFormDefaults(),
-
     selectedClientes: [],
     selectedTickets: [],
 
@@ -1868,6 +1966,10 @@ function createFacturasController(host = null, context = {}) {
     feedbackType: "info",
   };
 
+  /* ---------------------------------------------------------
+     Lifecycle helpers
+  --------------------------------------------------------- */
+
   function clearCreateTimers() {
     if (clientSearchTimer) {
       window.clearTimeout(clientSearchTimer);
@@ -1878,8 +1980,6 @@ function createFacturasController(host = null, context = {}) {
       window.clearTimeout(ticketSearchTimer);
       ticketSearchTimer = null;
     }
-
-    return true;
   }
 
   function clearTimers() {
@@ -1889,16 +1989,13 @@ function createFacturasController(host = null, context = {}) {
     }
 
     clearCreateTimers();
-    return true;
   }
 
   function disconnectInfiniteObserver() {
-    if (infiniteObserver) {
-      try {
-        infiniteObserver.disconnect();
-      } catch {
-        // noop
-      }
+    try {
+      infiniteObserver?.disconnect?.();
+    } catch {
+      // noop
     }
 
     infiniteObserver = null;
@@ -1916,16 +2013,43 @@ function createFacturasController(host = null, context = {}) {
     objectUrls.clear();
   }
 
-  /* =======================================================
-     MODAL ACCESSIBILITY
-  ======================================================= */
+  /* ---------------------------------------------------------
+     Modal focus / body
+  --------------------------------------------------------- */
 
   function detailModalIsOpen() {
-    return detailModal.open === true || detailModal.detailOpen === true;
+    return (
+      detailModal.open === true ||
+      detailModal.detailOpen === true
+    );
   }
 
   function anyModalIsOpen() {
-    return createModal.open === true || detailModalIsOpen();
+    return (
+      createModal.open === true ||
+      detailModalIsOpen()
+    );
+  }
+
+  function syncModalBodyState() {
+    return syncBodyModalClass(
+      createModal.open || detailModalIsOpen(),
+      {
+        createOpen: createModal.open,
+        detailOpen: detailModalIsOpen(),
+      }
+    );
+  }
+
+  function ownsNode(node = null) {
+    return Boolean(
+      node &&
+      (
+        host?.contains?.(node) ||
+        createModalHost?.contains?.(node) ||
+        detailModalHost?.contains?.(node)
+      )
+    );
   }
 
   function rememberModalReturnFocus(explicitNode = null) {
@@ -1958,15 +2082,15 @@ function createFacturasController(host = null, context = {}) {
   }
 
   function restoreModalReturnFocus() {
-    if (!isBrowser()) {
-      modalReturnFocus = null;
-      return false;
-    }
-
     const target = modalReturnFocus;
     modalReturnFocus = null;
 
-    if (!target || !target.isConnected || !isFunction(target.focus)) {
+    if (
+      !isBrowser() ||
+      !target ||
+      !target.isConnected ||
+      !isFunction(target.focus)
+    ) {
       return false;
     }
 
@@ -1987,11 +2111,15 @@ function createFacturasController(host = null, context = {}) {
 
   function currentModalPanel() {
     if (detailModalIsOpen() && detailModalHost?.isConnected) {
-      return detailModalHost.querySelector(DETAIL_MODAL_PANEL_SELECTOR);
+      return detailModalHost.querySelector(
+        DETAIL_MODAL_PANEL_SELECTOR
+      );
     }
 
     if (createModal.open && createModalHost?.isConnected) {
-      return createModalHost.querySelector(CREATE_MODAL_PANEL_SELECTOR);
+      return createModalHost.querySelector(
+        CREATE_MODAL_PANEL_SELECTOR
+      );
     }
 
     return null;
@@ -2042,27 +2170,18 @@ function createFacturasController(host = null, context = {}) {
     return false;
   }
 
-  /* =======================================================
-     STATE / PAYLOAD
-  ======================================================= */
+  /* ---------------------------------------------------------
+     Render helpers
+  --------------------------------------------------------- */
 
   function mergeRenderOptions(current = {}, next = {}) {
     return {
       ...current,
       ...next,
-      focusSelector: next.focusSelector || current.focusSelector || "",
-      focusEnd:
-        next.focusEnd !== undefined
-          ? next.focusEnd
-          : current.focusEnd,
-    };
-  }
-
-  function mergeDetailRenderOptions(current = {}, next = {}) {
-    return {
-      ...current,
-      ...next,
-      focusSelector: next.focusSelector || current.focusSelector || "",
+      focusSelector:
+        next.focusSelector ||
+        current.focusSelector ||
+        "",
       focusEnd:
         next.focusEnd !== undefined
           ? next.focusEnd
@@ -2071,50 +2190,159 @@ function createFacturasController(host = null, context = {}) {
         next.preserveFocus !== undefined
           ? next.preserveFocus
           : current.preserveFocus,
+      forceShell:
+        next.forceShell !== undefined
+          ? next.forceShell
+          : current.forceShell,
     };
   }
 
-  function mergeCreateRenderOptions(current = {}, next = {}) {
-    return {
-      ...current,
-      ...next,
-      focusSelector: next.focusSelector || current.focusSelector || "",
-      focusEnd:
-        next.focusEnd !== undefined
-          ? next.focusEnd
-          : current.focusEnd,
-      preserveFocus:
-        next.preserveFocus !== undefined
-          ? next.preserveFocus
-          : current.preserveFocus,
-    };
-  }
+  function focusAfterRender(
+    selector = "",
+    placeEnd = true,
+    root = host
+  ) {
+    if (!selector || !root) return false;
 
-  function syncModalBodyState() {
-    return syncBodyModalClass(
-      createModal.open || detailModalIsOpen(),
-      {
-        createOpen: createModal.open,
-        detailOpen: detailModalIsOpen(),
+    try {
+      const node = root.querySelector(selector);
+      if (!node) return false;
+
+      node.focus({ preventScroll: true });
+
+      if (
+        placeEnd &&
+        isFunction(node.setSelectionRange)
+      ) {
+        const end = String(node.value || "").length;
+        node.setSelectionRange(end, end);
       }
-    );
+
+      return true;
+    } catch {
+      return false;
+    }
   }
 
-  function ownsNode(node = null) {
-    return Boolean(
-      node &&
-      (
-        host?.contains?.(node) ||
-        createModalHost?.contains?.(node) ||
-        detailModalHost?.contains?.(node)
-      )
-    );
+  function captureModalDomState(
+    root = null,
+    panelSelector = "",
+    scrollSelector = ""
+  ) {
+    if (!isBrowser() || !root) return null;
+
+    const active = document.activeElement;
+    const panel = root.querySelector(panelSelector);
+    const scrollOwner =
+      (scrollSelector
+        ? root.querySelector(scrollSelector)
+        : null) ||
+      panel;
+
+    return {
+      scrollTop: scrollOwner?.scrollTop || 0,
+      activeId:
+        active && root.contains(active)
+          ? cleanText(active.id, "")
+          : "",
+      activeName:
+        active && root.contains(active)
+          ? cleanText(active.getAttribute?.("name"), "")
+          : "",
+    };
   }
+
+  function restoreModalDomState(
+    root = null,
+    state = null,
+    {
+      panelSelector = "",
+      scrollSelector = "",
+      focusSelector = "",
+      preserveFocus = true,
+    } = {}
+  ) {
+    if (!isBrowser() || !root) return false;
+
+    const panel = root.querySelector(panelSelector);
+    const scrollOwner =
+      (scrollSelector
+        ? root.querySelector(scrollSelector)
+        : null) ||
+      panel;
+
+    if (scrollOwner && state) {
+      scrollOwner.scrollTop = state.scrollTop || 0;
+    }
+
+    nextFrame(() => {
+      if (scrollOwner && state) {
+        scrollOwner.scrollTop = state.scrollTop || 0;
+      }
+    });
+
+    if (preserveFocus === false) {
+      return focusAfterRender(
+        focusSelector || panelSelector,
+        false,
+        root
+      );
+    }
+
+    let target = null;
+
+    if (focusSelector) {
+      target = root.querySelector(focusSelector);
+    }
+
+    if (!target && state?.activeId) {
+      target = [...root.querySelectorAll("[id]")]
+        .find((node) => node.id === state.activeId);
+    }
+
+    if (!target && state?.activeName) {
+      target = [...root.querySelectorAll("[name]")]
+        .find(
+          (node) =>
+            cleanText(node.getAttribute("name"), "") ===
+            state.activeName
+        );
+    }
+
+    if (target?.focus) {
+      try {
+        target.focus({ preventScroll: true });
+        return true;
+      } catch {
+        // noop
+      }
+    }
+
+    if (
+      document.activeElement &&
+      root.contains(document.activeElement)
+    ) {
+      return true;
+    }
+
+    return focusAfterRender(panelSelector, false, root);
+  }
+
+  /* ---------------------------------------------------------
+     Main payload/list
+  --------------------------------------------------------- */
 
   function getSortParts() {
     const normalized = normalizeKey(sort || "date_desc");
-    const sortMode = normalized.endsWith("_asc") ? "date_asc" : "date_desc";
-    const direction = sortMode.endsWith("_asc") ? "asc" : "desc";
+    const sortMode =
+      normalized.endsWith("_asc")
+        ? "date_asc"
+        : "date_desc";
+
+    const direction =
+      sortMode.endsWith("_asc")
+        ? "asc"
+        : "desc";
 
     return {
       sortMode,
@@ -2132,27 +2360,37 @@ function createFacturasController(host = null, context = {}) {
     return {};
   }
 
-  function updatePagingFromResponse(response = {}, requestedPage = DEFAULT_PAGE) {
-    const remoteTotal = number(
-      first(
-        response.total,
-        response.remoteCount,
-        response.totalMatched,
-        response.meta?.total,
-        response.meta?.remoteCount,
-        response.paging?.total,
-        response.paging?.remoteCount,
-        total,
+  function updatePagingFromResponse(
+    response = {},
+    requestedPage = DEFAULT_PAGE
+  ) {
+    total = Math.max(
+      number(
+        first(
+          response.total,
+          response.remoteCount,
+          response.totalMatched,
+          response.meta?.total,
+          response.meta?.remoteCount,
+          response.paging?.total,
+          total,
+          items.length
+        ),
         items.length
       ),
       items.length
     );
 
-    total = Math.max(remoteTotal, items.length);
-
     page = Math.max(
       DEFAULT_PAGE,
-      number(first(response.page, response.paging?.page, requestedPage), requestedPage)
+      number(
+        first(
+          response.page,
+          response.paging?.page,
+          requestedPage
+        ),
+        requestedPage
+      )
     );
 
     const responseHasMore = first(
@@ -2160,24 +2398,29 @@ function createFacturasController(host = null, context = {}) {
       response.more,
       response.canLoadMore,
       response.paging?.hasMore,
-      response.paging?.more,
-      response.paging?.canLoadMore,
       null
     );
 
     hasMore =
       responseHasMore === null
         ? items.length < total
-        : parseBoolean(responseHasMore, items.length < total);
-
-    const rawNextPage = first(
-      response.nextPage,
-      response.paging?.nextPage,
-      hasMore ? page + 1 : null
-    );
+        : parseBoolean(
+            responseHasMore,
+            items.length < total
+          );
 
     nextPage = hasMore
-      ? Math.max(page + 1, number(rawNextPage, page + 1))
+      ? Math.max(
+          page + 1,
+          number(
+            first(
+              response.nextPage,
+              response.paging?.nextPage,
+              page + 1
+            ),
+            page + 1
+          )
+        )
       : null;
   }
 
@@ -2250,223 +2493,20 @@ function createFacturasController(host = null, context = {}) {
         ...createModal,
         open: false,
       },
+
       detailModal: {
         ...detailModal,
         open: false,
         detailOpen: false,
       },
+
       ...extra,
     });
   }
 
-  function createModalPayload() {
-    return {
-      ...createModal,
-      canCreate: isAdmin(),
-      admin: isAdmin(),
-      role: getCurrentRole(),
-    };
-  }
-
-  /* =======================================================
-     DOM STATE
-  ======================================================= */
-
-  function focusAfterRender(selector = "", placeEnd = true, root = host) {
-    if (!selector || !root) return false;
-
-    try {
-      const node = root.querySelector(selector);
-      if (!node) return false;
-
-      node.focus({ preventScroll: true });
-
-      if (placeEnd && isFunction(node.setSelectionRange)) {
-        const end = String(node.value || "").length;
-        node.setSelectionRange(end, end);
-      }
-
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  function captureModalDomState(
-    root = null,
-    panelSelector = "",
-    scrollSelector = ""
-  ) {
-    if (!isBrowser() || !root) return null;
-
-    const active = document.activeElement;
-    const panel = root.querySelector(panelSelector);
-    const scrollOwner =
-      (scrollSelector ? root.querySelector(scrollSelector) : null) ||
-      panel;
-
-    const state = {
-      scrollTop: scrollOwner?.scrollTop || 0,
-      activeField: "",
-      activeName: "",
-      activeId: "",
-      selectionStart: null,
-      selectionEnd: null,
-    };
-
-    if (!active || !root.contains(active)) return state;
-
-    state.activeField = cleanText(
-      active.dataset?.field ||
-      active.dataset?.detailField ||
-      active.dataset?.createField ||
-      "",
-      ""
-    );
-
-    state.activeName = cleanText(active.getAttribute?.("name"), "");
-    state.activeId = cleanText(active.id, "");
-
-    try {
-      if (typeof active.selectionStart === "number") {
-        state.selectionStart = active.selectionStart;
-        state.selectionEnd = active.selectionEnd;
-      }
-    } catch {
-      // noop
-    }
-
-    return state;
-  }
-
-  function findRestorableNode(root = null, state = null, explicitSelector = "") {
-    if (!root) return null;
-
-    if (explicitSelector) {
-      return root.querySelector(explicitSelector);
-    }
-
-    if (!state) return null;
-
-    if (state.activeId) {
-      const byId = Array.from(root.querySelectorAll("[id]"))
-        .find((node) => node.id === state.activeId);
-
-      if (byId) return byId;
-    }
-
-    const candidates = Array.from(
-      root.querySelectorAll(
-        "[data-field], [data-detail-field], [data-create-field], [name], button, [tabindex]"
-      )
-    );
-
-    if (state.activeField) {
-      const byField = candidates.find((node) =>
-        cleanText(
-          node.dataset?.field ||
-          node.dataset?.detailField ||
-          node.dataset?.createField ||
-          "",
-          ""
-        ) === state.activeField
-      );
-
-      if (byField) return byField;
-    }
-
-    if (state.activeName) {
-      const byName = candidates.find((node) =>
-        cleanText(node.getAttribute?.("name"), "") === state.activeName
-      );
-
-      if (byName) return byName;
-    }
-
-    return null;
-  }
-
-  function restoreModalDomState(
-    root = null,
-    state = null,
-    {
-      panelSelector = "",
-      scrollSelector = "",
-      focusSelector = "",
-      focusEnd = true,
-      preserveFocus = true,
-    } = {}
-  ) {
-    if (!isBrowser() || !root) return false;
-
-    const panel = root.querySelector(panelSelector);
-    const scrollOwner =
-      (scrollSelector ? root.querySelector(scrollSelector) : null) ||
-      panel;
-
-    if (scrollOwner && state) {
-      scrollOwner.scrollTop = state.scrollTop || 0;
-    }
-
-    nextFrame(() => {
-      try {
-        if (scrollOwner && state) {
-          scrollOwner.scrollTop = state.scrollTop || 0;
-        }
-      } catch {
-        // noop
-      }
-    });
-
-    if (preserveFocus === false) {
-      return focusAfterRender(
-        focusSelector || panelSelector,
-        focusEnd,
-        root
-      );
-    }
-
-    const target = findRestorableNode(root, state, focusSelector);
-
-    if (!target) {
-      return focusAfterRender(panelSelector, false, root);
-    }
-
-    try {
-      target.focus({ preventScroll: true });
-
-      if (focusEnd !== false && isFunction(target.setSelectionRange)) {
-        const valueLength = String(target.value || "").length;
-
-        const start = Number.isFinite(state?.selectionStart)
-          ? Math.min(state.selectionStart, valueLength)
-          : valueLength;
-
-        const end = Number.isFinite(state?.selectionEnd)
-          ? Math.min(state.selectionEnd, valueLength)
-          : valueLength;
-
-        target.setSelectionRange(start, end);
-      }
-    } catch {
-      // noop
-    }
-
-    return true;
-  }
-
-  /* =======================================================
-     MAIN RENDER DEFERRAL
-  ======================================================= */
-
-  function deferMainRender(options = {}) {
-    deferredRenderOptions = mergeRenderOptions(
-      deferredRenderOptions || {},
-      options
-    );
-
-    return true;
-  }
+  /* ---------------------------------------------------------
+     Main render deferral
+  --------------------------------------------------------- */
 
   function cancelScheduledRender() {
     if (!renderFrame) return false;
@@ -2474,6 +2514,14 @@ function createFacturasController(host = null, context = {}) {
     cancelFrame(renderFrame);
     renderFrame = 0;
     pendingRenderOptions = null;
+    return true;
+  }
+
+  function deferMainRender(options = {}) {
+    deferredRenderOptions = mergeRenderOptions(
+      deferredRenderOptions || {},
+      options
+    );
 
     return true;
   }
@@ -2505,9 +2553,9 @@ function createFacturasController(host = null, context = {}) {
     });
   }
 
-  /* =======================================================
-     CREATE MODAL HOST / RENDER
-  ======================================================= */
+  /* ---------------------------------------------------------
+     Create modal host/render
+  --------------------------------------------------------- */
 
   function cancelScheduledCreateRender() {
     if (!createRenderFrame) return false;
@@ -2515,7 +2563,6 @@ function createFacturasController(host = null, context = {}) {
     cancelFrame(createRenderFrame);
     createRenderFrame = 0;
     pendingCreateRenderOptions = null;
-
     return true;
   }
 
@@ -2538,8 +2585,12 @@ function createFacturasController(host = null, context = {}) {
 
     createModalHost = document.createElement("div");
     createModalHost.id = CREATE_MODAL_HOST_ID;
-    createModalHost.setAttribute("data-facturas-create-host", "true");
+    createModalHost.setAttribute(
+      "data-facturas-create-host",
+      "true"
+    );
     createModalHost.setAttribute("data-owner", controllerOwner);
+
     document.body.appendChild(createModalHost);
 
     if (mounted && !createModalHostBound) {
@@ -2569,7 +2620,6 @@ function createFacturasController(host = null, context = {}) {
 
     createModalHost = null;
     createModalHostBound = false;
-
     return true;
   }
 
@@ -2593,14 +2643,19 @@ function createFacturasController(host = null, context = {}) {
       CREATE_MODAL_PANEL_SELECTOR
     );
 
-    target.innerHTML = renderFacturasCreateModal(createModalPayload());
+    target.innerHTML = renderFacturasCreateModal({
+      ...createModal,
+      canCreate: isAdmin(),
+      admin: isAdmin(),
+      role: getCurrentRole(),
+    });
+
     syncModalBodyState();
 
     restoreModalDomState(target, state, {
       panelSelector: CREATE_MODAL_PANEL_SELECTOR,
       scrollSelector: CREATE_MODAL_PANEL_SELECTOR,
       focusSelector: options.focusSelector || "",
-      focusEnd: options.focusEnd !== false,
       preserveFocus: options.preserveFocus !== false,
     });
 
@@ -2614,7 +2669,7 @@ function createFacturasController(host = null, context = {}) {
       return renderCreateModalNow(options);
     }
 
-    pendingCreateRenderOptions = mergeCreateRenderOptions(
+    pendingCreateRenderOptions = mergeRenderOptions(
       pendingCreateRenderOptions || {},
       options
     );
@@ -2647,7 +2702,9 @@ function createFacturasController(host = null, context = {}) {
           maximumFractionDigits: 2,
         }).format(number(value, 0));
       } catch {
-        return `${number(value, 0).toFixed(2).replace(".", ",")} €`;
+        return `${number(value, 0)
+          .toFixed(2)
+          .replace(".", ",")} €`;
       }
     };
 
@@ -2667,7 +2724,8 @@ function createFacturasController(host = null, context = {}) {
 
     if (taxes) {
       taxes.textContent =
-        `${formatMoney(breakdown.ivaTotal)} / ${formatMoney(breakdown.irpfTotal)}`;
+        `${formatMoney(breakdown.ivaTotal)} / ` +
+        `${formatMoney(breakdown.irpfTotal)}`;
     }
 
     if (totalNode) {
@@ -2677,9 +2735,10 @@ function createFacturasController(host = null, context = {}) {
     return true;
   }
 
-  /* =======================================================
-     DETAIL MODAL HOST / RENDER
-  ======================================================= */
+  /* ---------------------------------------------------------
+     Detail modal host/render
+     SINGLE MOUNT
+  --------------------------------------------------------- */
 
   function cancelScheduledDetailRender() {
     if (!detailRenderFrame) return false;
@@ -2687,7 +2746,6 @@ function createFacturasController(host = null, context = {}) {
     cancelFrame(detailRenderFrame);
     detailRenderFrame = 0;
     pendingDetailRenderOptions = null;
-
     return true;
   }
 
@@ -2698,20 +2756,24 @@ function createFacturasController(host = null, context = {}) {
       return detailModalHost;
     }
 
-    const existing = document.querySelector(DETAIL_MODAL_HOST_SELECTOR);
-
-    if (existing && existing !== detailModalHost) {
-      try {
-        existing.remove();
-      } catch {
-        // noop
-      }
-    }
+    document
+      .querySelectorAll(DETAIL_MODAL_HOST_SELECTOR)
+      .forEach((node) => {
+        try {
+          node.remove();
+        } catch {
+          // noop
+        }
+      });
 
     detailModalHost = document.createElement("div");
     detailModalHost.id = DETAIL_MODAL_HOST_ID;
-    detailModalHost.setAttribute("data-facturas-detail-host", "true");
+    detailModalHost.setAttribute(
+      "data-facturas-detail-host",
+      "true"
+    );
     detailModalHost.setAttribute("data-owner", controllerOwner);
+
     document.body.appendChild(detailModalHost);
 
     if (mounted && !detailModalHostBound) {
@@ -2725,21 +2787,83 @@ function createFacturasController(host = null, context = {}) {
   function removeDetailModalHost() {
     cancelScheduledDetailRender();
 
-    if (!detailModalHost) return false;
+    const current = detailModalHost;
+    if (!current) return false;
 
     try {
       if (detailModalHostBound) {
-        unbindTarget(detailModalHost);
+        unbindTarget(current);
       }
 
-      detailModalHost.replaceChildren();
-      detailModalHost.remove();
+      current.replaceChildren();
+      current.remove();
     } catch {
       // noop
     }
 
     detailModalHost = null;
     detailModalHostBound = false;
+    return true;
+  }
+
+  function detailContentPayload() {
+    return {
+      factura: detailModal.factura,
+      loading: detailModal.detailLoading,
+      sendingFacturaId: detailModal.sendingFacturaId,
+      viewingFacturaId: detailModal.viewingFacturaId,
+      downloadingFacturaId: detailModal.downloadingFacturaId,
+      feedbackMessage: detailModal.feedbackMessage,
+      feedbackType: detailModal.feedbackType,
+    };
+  }
+
+  function mountDetailShell(target = null) {
+    if (!target) return false;
+
+    target.innerHTML = renderFacturasDetailModal(detailModal);
+    target.setAttribute("data-detail-shell-mounted", "true");
+
+    return Boolean(
+      target.querySelector(DETAIL_MODAL_PANEL_SELECTOR)
+    );
+  }
+
+  function patchDetailContent(target = null) {
+    if (!target) return false;
+
+    const panel = target.querySelector(
+      DETAIL_MODAL_PANEL_SELECTOR
+    );
+
+    if (!panel) return false;
+
+    /*
+       FIX:
+       Sólo sustituimos el contenido interno.
+       Overlay + panel sobreviven.
+       Las animaciones de entrada no se reinician.
+    */
+    panel.innerHTML = renderFacturasDetailContent(
+      detailContentPayload()
+    );
+
+    const facturaId = getFacturaId(
+      detailModal.factura || {}
+    );
+
+    const root = target.querySelector(
+      DETAIL_MODAL_ROOT_SELECTOR
+    );
+
+    if (root) {
+      root.dataset.facturaId = facturaId;
+      root.dataset.open = "true";
+      root.dataset.detailShell = "single-mount";
+    }
+
+    panel.dataset.facturaId = facturaId;
+    panel.dataset.detailPatch = "true";
 
     return true;
   }
@@ -2747,17 +2871,20 @@ function createFacturasController(host = null, context = {}) {
   function setDetailFeedback(
     message = "",
     type = "info",
-    {
-      renderNow = true,
-      focusSelector = "",
-    } = {}
+    { renderNow = true, focusSelector = "" } = {}
   ) {
     detailModal.feedbackMessage = cleanText(message, "");
 
-    detailModal.feedbackType =
-      ["success", "warning", "error", "info"].includes(normalizeKey(type))
-        ? normalizeKey(type)
-        : "info";
+    const normalized = normalizeKey(type);
+
+    detailModal.feedbackType = [
+      "success",
+      "warning",
+      "error",
+      "info",
+    ].includes(normalized)
+      ? normalized
+      : "info";
 
     if (renderNow && detailModalIsOpen()) {
       renderDetailModal({
@@ -2798,21 +2925,38 @@ function createFacturasController(host = null, context = {}) {
     const target = ensureDetailModalHost();
     if (!target) return false;
 
-    const state = captureModalDomState(
-      target,
-      DETAIL_MODAL_PANEL_SELECTOR,
-      DETAIL_MODAL_SCROLL_SELECTOR
+    const existingPanel = target.querySelector(
+      DETAIL_MODAL_PANEL_SELECTOR
     );
 
-    target.innerHTML = renderFacturasDetailModal(detailModal);
+    const state = existingPanel
+      ? captureModalDomState(
+          target,
+          DETAIL_MODAL_PANEL_SELECTOR,
+          DETAIL_MODAL_SCROLL_SELECTOR
+        )
+      : null;
+
+    const forceShell = options.forceShell === true;
+
+    let mountedShell = false;
+
+    if (!existingPanel || forceShell) {
+      mountedShell = mountDetailShell(target);
+    } else if (!patchDetailContent(target)) {
+      mountedShell = mountDetailShell(target);
+    }
+
     syncModalBodyState();
 
     restoreModalDomState(target, state, {
       panelSelector: DETAIL_MODAL_PANEL_SELECTOR,
       scrollSelector: DETAIL_MODAL_SCROLL_SELECTOR,
       focusSelector: options.focusSelector || "",
-      focusEnd: options.focusEnd !== false,
-      preserveFocus: options.preserveFocus !== false,
+      preserveFocus:
+        mountedShell
+          ? options.preserveFocus !== false
+          : true,
     });
 
     return true;
@@ -2825,7 +2969,7 @@ function createFacturasController(host = null, context = {}) {
       return renderDetailModalNow(options);
     }
 
-    pendingDetailRenderOptions = mergeDetailRenderOptions(
+    pendingDetailRenderOptions = mergeRenderOptions(
       pendingDetailRenderOptions || {},
       options
     );
@@ -2844,22 +2988,41 @@ function createFacturasController(host = null, context = {}) {
     return true;
   }
 
-  /* =======================================================
-     MAIN RENDER / LIST
-  ======================================================= */
+  /* ---------------------------------------------------------
+     Main render/list
+  --------------------------------------------------------- */
 
   function syncInfiniteObserver() {
-    if (!isBrowser() || destroyed || !host) return false;
+    if (
+      !isBrowser() ||
+      destroyed ||
+      !host
+    ) {
+      return false;
+    }
 
     disconnectInfiniteObserver();
 
-    if (!hasMore || loading || refreshing || loadingMore) return false;
+    if (
+      !hasMore ||
+      loading ||
+      refreshing ||
+      loadingMore ||
+      anyModalIsOpen()
+    ) {
+      return false;
+    }
 
     const sentinel = host.querySelector?.(
       "[data-facturas-infinite-sentinel='true']"
     );
 
-    if (!sentinel || !isFunction(window.IntersectionObserver)) return false;
+    if (
+      !sentinel ||
+      !isFunction(window.IntersectionObserver)
+    ) {
+      return false;
+    }
 
     try {
       infiniteObserver = new IntersectionObserver(
@@ -2869,7 +3032,8 @@ function createFacturasController(host = null, context = {}) {
             loading ||
             refreshing ||
             loadingMore ||
-            !hasMore
+            !hasMore ||
+            anyModalIsOpen()
           ) {
             return;
           }
@@ -2898,7 +3062,10 @@ function createFacturasController(host = null, context = {}) {
 
     cancelScheduledRender();
 
-    if (anyModalIsOpen() && options.allowWhileModal !== true) {
+    if (
+      anyModalIsOpen() &&
+      options.allowWhileModal !== true
+    ) {
       syncModalBodyState();
       return deferMainRender(options);
     }
@@ -2947,34 +3114,28 @@ function createFacturasController(host = null, context = {}) {
   function renderLoading() {
     if (destroyed || !host) return false;
 
-    cancelScheduledRender();
-
     if (anyModalIsOpen()) {
-      syncModalBodyState();
       return deferMainRender({ loadingState: true });
     }
 
     host.innerHTML = renderFacturasLoadingState(viewPayload());
     bindFacturasTemplateDom(host);
     syncModalBodyState();
-
     return true;
   }
 
-  function renderError(message = "No se pudieron cargar las facturas.") {
+  function renderError(
+    message = "No se pudieron cargar las facturas."
+  ) {
     if (destroyed || !host) return false;
 
-    cancelScheduledRender();
-
     if (anyModalIsOpen()) {
-      syncModalBodyState();
       return deferMainRender({ errorMessage: message });
     }
 
     host.innerHTML = renderFacturasErrorState(message);
     syncModalBodyState();
     disconnectInfiniteObserver();
-
     return true;
   }
 
@@ -2998,7 +3159,10 @@ function createFacturasController(host = null, context = {}) {
     error = "";
 
     if (append) {
-      if (loading || refreshing || loadingMore || !hasMore) return null;
+      if (loading || refreshing || loadingMore || !hasMore) {
+        return null;
+      }
+
       loadingMore = true;
     } else if (force && items.length) {
       refreshing = true;
@@ -3051,7 +3215,10 @@ function createFacturasController(host = null, context = {}) {
         ? mergeFacturas(items, rows, { append: true })
         : mergeFacturas([], rows, { append: false });
 
-      updatePagingFromResponse(response || {}, requestedPage);
+      updatePagingFromResponse(
+        response || {},
+        requestedPage
+      );
 
       error = response?.stale
         ? cleanText(response.error?.message, "")
@@ -3088,9 +3255,7 @@ function createFacturasController(host = null, context = {}) {
     hasMore = true;
     total = keepItems ? Math.max(total, items.length) : 0;
 
-    if (!keepItems) {
-      items = [];
-    }
+    if (!keepItems) items = [];
 
     disconnectInfiniteObserver();
     return true;
@@ -3142,14 +3307,12 @@ function createFacturasController(host = null, context = {}) {
       return false;
     }
 
-    const requestedPage = Math.max(
-      DEFAULT_PAGE,
-      number(nextPage, page + 1)
-    );
-
     await fetchList({
       mode: "append",
-      requestPage: requestedPage,
+      requestPage: Math.max(
+        DEFAULT_PAGE,
+        number(nextPage, page + 1)
+      ),
       force: false,
       silent: false,
     });
@@ -3224,9 +3387,10 @@ function createFacturasController(host = null, context = {}) {
   }
 
   function setSort(value = "date_desc") {
-    sort = normalizeKey(value) === "date_asc"
-      ? "date_asc"
-      : "date_desc";
+    sort =
+      normalizeKey(value) === "date_asc"
+        ? "date_asc"
+        : "date_desc";
 
     resetListState({ keepItems: true });
     render();
@@ -3243,15 +3407,18 @@ function createFacturasController(host = null, context = {}) {
   async function setPage(value = DEFAULT_PAGE) {
     return fetchList({
       mode: "replace",
-      requestPage: Math.max(DEFAULT_PAGE, number(value, DEFAULT_PAGE)),
+      requestPage: Math.max(
+        DEFAULT_PAGE,
+        number(value, DEFAULT_PAGE)
+      ),
       force: false,
       silent: false,
     });
   }
 
-  /* =======================================================
-     CREATE MODAL
-  ======================================================= */
+  /* ---------------------------------------------------------
+     Create modal state/search
+  --------------------------------------------------------- */
 
   function resetCreateModal() {
     createModal.open = false;
@@ -3300,7 +3467,6 @@ function createFacturasController(host = null, context = {}) {
       preserveFocus: false,
       focusSelector:
         "[data-field='clienteSearch'], [data-create-field='clienteSearch'], input[name='clienteSearch']",
-      focusEnd: false,
     });
 
     return true;
@@ -3317,11 +3483,9 @@ function createFacturasController(host = null, context = {}) {
     removeCreateModalHost();
     syncModalBodyState();
 
-    flushDeferredMainRender({
-      immediate: true,
-    });
-
+    flushDeferredMainRender({ immediate: true });
     restoreModalReturnFocus();
+
     return true;
   }
 
@@ -3329,8 +3493,7 @@ function createFacturasController(host = null, context = {}) {
     if (!field) return false;
 
     const name = cleanText(
-      field.dataset?.field ||
-      field.name,
+      field.dataset?.field || field.name,
       ""
     );
 
@@ -3355,10 +3518,7 @@ function createFacturasController(host = null, context = {}) {
     };
 
     if (createModal.errors[name]) {
-      const next = {
-        ...createModal.errors,
-      };
-
+      const next = { ...createModal.errors };
       delete next[name];
       createModal.errors = next;
     }
@@ -3374,20 +3534,27 @@ function createFacturasController(host = null, context = {}) {
 
     createModal.form = {
       ...createModal.form,
-      clienteId: cleanText(first(primary?.clienteId, primary?.id, ""), ""),
-      clienteUserId: cleanText(first(primary?.userId, ""), ""),
+      clienteId: cleanText(
+        first(primary?.clienteId, primary?.id, ""),
+        ""
+      ),
+      clienteUserId: cleanText(
+        first(primary?.userId, ""),
+        ""
+      ),
       clienteNombre: cleanText(
         first(primary?.name, primary?.displayName, ""),
         ""
       ),
-      clienteEmail: cleanText(first(primary?.email, ""), ""),
+      clienteEmail: cleanText(
+        first(primary?.email, ""),
+        ""
+      ),
       clienteAvatar: cleanText(
         first(primary?.avatarUrl, primary?.avatar, ""),
         ""
       ),
     };
-
-    return createModal.form;
   }
 
   function syncPrimaryTicketToForm() {
@@ -3417,8 +3584,6 @@ function createFacturasController(host = null, context = {}) {
         id
       ),
     };
-
-    return createModal.form;
   }
 
   function rerenderCreateWithFocus(selector = "") {
@@ -3470,7 +3635,11 @@ function createFacturasController(host = null, context = {}) {
 
   async function runClientSearch(query = "", seq = null) {
     const requestQuery = cleanText(query, "");
-    const requestSeq = Number.isInteger(seq) ? seq : ++clientSearchSeq;
+
+    const requestSeq =
+      Number.isInteger(seq)
+        ? seq
+        : ++clientSearchSeq;
 
     try {
       const results = await searchClients(requestQuery);
@@ -3497,7 +3666,6 @@ function createFacturasController(host = null, context = {}) {
     } catch (searchError) {
       if (
         requestSeq !== clientSearchSeq ||
-        requestQuery !== createModal.clientSearch.query ||
         destroyed ||
         !createModal.open
       ) {
@@ -3522,17 +3690,20 @@ function createFacturasController(host = null, context = {}) {
 
   function selectClient(index = -1) {
     const item = createModal.clientSearch.results[index];
-
     if (!item?.id) return false;
 
     clientSearchSeq += 1;
     ticketSearchSeq += 1;
     clearCreateTimers();
 
-    const exists = createModal.selectedClientes.some((client) =>
-      client.id === item.id ||
-      client.clienteId === item.clienteId ||
-      (client.userId && client.userId === item.userId)
+    const exists = createModal.selectedClientes.some(
+      (client) =>
+        client.id === item.id ||
+        client.clienteId === item.clienteId ||
+        (
+          client.userId &&
+          client.userId === item.userId
+        )
     );
 
     if (!exists) {
@@ -3544,10 +3715,7 @@ function createFacturasController(host = null, context = {}) {
 
     syncPrimaryClientToForm();
 
-    const nextErrors = {
-      ...createModal.errors,
-    };
-
+    const nextErrors = { ...createModal.errors };
     delete nextErrors.clienteId;
     delete nextErrors.incidenciaId;
     createModal.errors = nextErrors;
@@ -3573,7 +3741,8 @@ function createFacturasController(host = null, context = {}) {
     );
 
     void loadTicketsForSelectedClients({
-      autoSelectLatest: createModal.selectedTickets.length === 0,
+      autoSelectLatest:
+        createModal.selectedTickets.length === 0,
     });
 
     return true;
@@ -3589,40 +3758,27 @@ function createFacturasController(host = null, context = {}) {
 
     ticketSearchSeq += 1;
 
-    if (ticketSearchTimer) {
-      window.clearTimeout(ticketSearchTimer);
-      ticketSearchTimer = null;
-    }
-
-    createModal.selectedClientes = createModal.selectedClientes.filter(
-      (_, currentIndex) => currentIndex !== index
-    );
+    createModal.selectedClientes =
+      createModal.selectedClientes.filter(
+        (_, currentIndex) => currentIndex !== index
+      );
 
     syncPrimaryClientToForm();
 
-    if (!createModal.selectedClientes.length) {
-      createModal.selectedTickets = [];
-
-      createModal.ticketSearch = {
-        query: "",
-        loading: false,
-        error: "",
-        results: [],
-        empty: false,
-      };
-
-      syncPrimaryTicketToForm();
-
-      rerenderCreateWithFocus(
-        "[data-field='clienteSearch'], [data-create-field='clienteSearch'], input[name='clienteSearch']"
+    createModal.selectedTickets =
+      createModal.selectedTickets.filter(
+        (ticket) =>
+          ticketBelongsToClients(
+            ticket,
+            createModal.selectedClientes
+          )
       );
 
-      return true;
+    if (!createModal.selectedClientes.length) {
+      createModal.selectedTickets = [];
     }
 
-    createModal.selectedTickets = createModal.selectedTickets.filter((ticket) =>
-      ticketBelongsToClients(ticket, createModal.selectedClientes)
-    );
+    syncPrimaryTicketToForm();
 
     createModal.ticketSearch = {
       query: "",
@@ -3632,15 +3788,18 @@ function createFacturasController(host = null, context = {}) {
       empty: false,
     };
 
-    syncPrimaryTicketToForm();
-
     rerenderCreateWithFocus(
-      "[data-field='ticketSearch'], [data-create-field='ticketSearch'], input[name='ticketSearch']"
+      createModal.selectedClientes.length
+        ? "[data-field='ticketSearch'], [data-create-field='ticketSearch'], input[name='ticketSearch']"
+        : "[data-field='clienteSearch'], [data-create-field='clienteSearch'], input[name='clienteSearch']"
     );
 
-    void loadTicketsForSelectedClients({
-      autoSelectLatest: createModal.selectedTickets.length === 0,
-    });
+    if (createModal.selectedClientes.length) {
+      void loadTicketsForSelectedClients({
+        autoSelectLatest:
+          createModal.selectedTickets.length === 0,
+      });
+    }
 
     return true;
   }
@@ -3662,20 +3821,12 @@ function createFacturasController(host = null, context = {}) {
       ),
     ];
 
-    createModal.selectedTickets = createModal.selectedTickets.filter((ticket) =>
-      ticketBelongsToClients(ticket, createModal.selectedClientes)
-    );
-
     syncPrimaryClientToForm();
     syncPrimaryTicketToForm();
 
     rerenderCreateWithFocus(
       "[data-field='ticketSearch'], [data-create-field='ticketSearch'], input[name='ticketSearch']"
     );
-
-    void loadTicketsForSelectedClients({
-      autoSelectLatest: createModal.selectedTickets.length === 0,
-    });
 
     return true;
   }
@@ -3767,16 +3918,15 @@ function createFacturasController(host = null, context = {}) {
       createModal.ticketSearch.loading = false;
       createModal.ticketSearch.results = [];
       createModal.ticketSearch.empty = false;
-
-      rerenderCreateWithFocus(
-        "[data-field='ticketSearch'], [data-create-field='ticketSearch'], input[name='ticketSearch']"
-      );
-
       return [];
     }
 
     const requestQuery = cleanText(query, "");
-    const requestSeq = Number.isInteger(seq) ? seq : ++ticketSearchSeq;
+
+    const requestSeq =
+      Number.isInteger(seq)
+        ? seq
+        : ++ticketSearchSeq;
 
     const clientKey = [
       ...selectedClienteIds(createModal.selectedClientes),
@@ -3810,7 +3960,6 @@ function createFacturasController(host = null, context = {}) {
 
       if (
         requestSeq !== ticketSearchSeq ||
-        requestQuery !== createModal.ticketSearch.query ||
         clientKey !== currentClientKey ||
         destroyed ||
         !createModal.open
@@ -3838,17 +3987,8 @@ function createFacturasController(host = null, context = {}) {
 
       return results;
     } catch (searchError) {
-      const currentClientKey = [
-        ...selectedClienteIds(createModal.selectedClientes),
-        ...selectedUserIds(createModal.selectedClientes),
-      ]
-        .sort()
-        .join("|");
-
       if (
         requestSeq !== ticketSearchSeq ||
-        requestQuery !== createModal.ticketSearch.query ||
-        clientKey !== currentClientKey ||
         destroyed ||
         !createModal.open
       ) {
@@ -3873,20 +4013,13 @@ function createFacturasController(host = null, context = {}) {
 
   function selectTicket(index = -1) {
     const item = createModal.ticketSearch.results[index];
-
     if (!item?.id) return false;
 
-    ticketSearchSeq += 1;
-
-    if (ticketSearchTimer) {
-      window.clearTimeout(ticketSearchTimer);
-      ticketSearchTimer = null;
-    }
-
-    const exists = createModal.selectedTickets.some((ticket) =>
-      ticket.id === item.id ||
-      ticket.ticketId === item.id ||
-      ticket.incidenciaId === item.id
+    const exists = createModal.selectedTickets.some(
+      (ticket) =>
+        ticket.id === item.id ||
+        ticket.ticketId === item.id ||
+        ticket.incidenciaId === item.id
     );
 
     if (!exists) {
@@ -3898,10 +4031,7 @@ function createFacturasController(host = null, context = {}) {
 
     syncPrimaryTicketToForm();
 
-    const nextErrors = {
-      ...createModal.errors,
-    };
-
+    const nextErrors = { ...createModal.errors };
     delete nextErrors.incidenciaId;
     createModal.errors = nextErrors;
 
@@ -3928,9 +4058,10 @@ function createFacturasController(host = null, context = {}) {
       return false;
     }
 
-    createModal.selectedTickets = createModal.selectedTickets.filter(
-      (_, currentIndex) => currentIndex !== index
-    );
+    createModal.selectedTickets =
+      createModal.selectedTickets.filter(
+        (_, currentIndex) => currentIndex !== index
+      );
 
     syncPrimaryTicketToForm();
 
@@ -3970,11 +4101,6 @@ function createFacturasController(host = null, context = {}) {
   function clearTickets() {
     ticketSearchSeq += 1;
 
-    if (ticketSearchTimer) {
-      window.clearTimeout(ticketSearchTimer);
-      ticketSearchTimer = null;
-    }
-
     createModal.selectedTickets = [];
 
     createModal.ticketSearch = {
@@ -4001,18 +4127,28 @@ function createFacturasController(host = null, context = {}) {
     const form = createModal.form;
     const breakdown = getFacturaCreateBreakdown(form);
 
-    const primaryCliente = createModal.selectedClientes[0] || null;
-    const primaryTicket = createModal.selectedTickets[0] || null;
+    const primaryCliente =
+      createModal.selectedClientes[0] || null;
 
-    const clienteIds = selectedClienteIds(createModal.selectedClientes);
-    const userIds = selectedUserIds(createModal.selectedClientes);
+    const primaryTicket =
+      createModal.selectedTickets[0] || null;
+
+    const clienteIds =
+      selectedClienteIds(createModal.selectedClientes);
+
+    const userIds =
+      selectedUserIds(createModal.selectedClientes);
 
     const ticketIds = [
       ...new Set(
         createModal.selectedTickets
           .map((ticket) =>
             cleanText(
-              first(ticket.ticketId, ticket.incidenciaId, ticket.id),
+              first(
+                ticket.ticketId,
+                ticket.incidenciaId,
+                ticket.id
+              ),
               ""
             )
           )
@@ -4021,12 +4157,19 @@ function createFacturasController(host = null, context = {}) {
     ];
 
     const clienteId = cleanText(
-      first(primaryCliente?.clienteId, primaryCliente?.id, form.clienteId),
+      first(
+        primaryCliente?.clienteId,
+        primaryCliente?.id,
+        form.clienteId
+      ),
       ""
     );
 
     const userId = cleanText(
-      first(primaryCliente?.userId, form.clienteUserId),
+      first(
+        primaryCliente?.userId,
+        form.clienteUserId
+      ),
       ""
     );
 
@@ -4040,7 +4183,10 @@ function createFacturasController(host = null, context = {}) {
     );
 
     const clienteEmail = cleanText(
-      first(primaryCliente?.email, form.clienteEmail),
+      first(
+        primaryCliente?.email,
+        form.clienteEmail
+      ),
       ""
     ).toLowerCase();
 
@@ -4156,17 +4302,18 @@ function createFacturasController(host = null, context = {}) {
     if (createModal.submitting || !isAdmin()) return false;
 
     if (formNode) {
-      createModal.form = {
-        ...createModal.form,
-        fechaServicio: readField(formNode, "fechaServicio"),
-        formaPago: readField(formNode, "formaPago"),
-        estadoPago: readField(formNode, "estadoPago"),
-        sendEmail: readField(formNode, "sendEmail"),
-        concepto: readField(formNode, "concepto"),
-        descripcion: readField(formNode, "descripcion"),
-        cantidad: readField(formNode, "cantidad"),
-        precioUnitario: readField(formNode, "precioUnitario"),
-      };
+      for (const field of [
+        "fechaServicio",
+        "formaPago",
+        "estadoPago",
+        "sendEmail",
+        "concepto",
+        "descripcion",
+        "cantidad",
+        "precioUnitario",
+      ]) {
+        createModal.form[field] = readField(formNode, field);
+      }
     }
 
     const validation = safeObject(
@@ -4179,6 +4326,7 @@ function createFacturasController(host = null, context = {}) {
     );
 
     createModal.errors = safeObject(validation.errors, {});
+
     createModal.form = {
       ...createModal.form,
       ...safeObject(validation.form, {}),
@@ -4186,28 +4334,11 @@ function createFacturasController(host = null, context = {}) {
 
     if (
       validation.valid !== true ||
-      Object.keys(createModal.errors).length > 0
+      Object.keys(createModal.errors).length
     ) {
-      const focusField = createModal.errors.clienteId
-        ? "clienteSearch"
-        : createModal.errors.incidenciaId
-          ? "ticketSearch"
-          : createModal.errors.concepto
-            ? "concepto"
-            : createModal.errors.descripcion
-              ? "descripcion"
-              : createModal.errors.cantidad
-                ? "cantidad"
-                : createModal.errors.precioUnitario
-                  ? "precioUnitario"
-                  : "";
-
       renderCreateModal({
         immediate: true,
         preserveFocus: true,
-        focusSelector: focusField
-          ? `[data-field='${focusField}'], [name='${focusField}']`
-          : "",
       });
 
       return false;
@@ -4216,8 +4347,6 @@ function createFacturasController(host = null, context = {}) {
     creating = true;
     createModal.submitting = true;
     createModal.serverError = "";
-    createModal.successMessage = "";
-    createModal.createdFacturaId = "";
 
     renderCreateModal({
       immediate: true,
@@ -4225,7 +4354,9 @@ function createFacturasController(host = null, context = {}) {
     });
 
     try {
-      const created = await createFactura(buildFacturaPayload());
+      const created = await createFactura(
+        buildFacturaPayload()
+      );
 
       if (created) {
         items = upsertFactura(items, created, sort);
@@ -4234,7 +4365,6 @@ function createFacturasController(host = null, context = {}) {
 
       creating = false;
       resetCreateModal();
-
       removeCreateModalHost();
       syncModalBodyState();
 
@@ -4258,16 +4388,15 @@ function createFacturasController(host = null, context = {}) {
       renderCreateModal({
         immediate: true,
         preserveFocus: true,
-        focusSelector: "[data-field='concepto'], [name='concepto']",
       });
 
       return false;
     }
   }
 
-  /* =======================================================
-     DETAIL MODAL
-  ======================================================= */
+  /* ---------------------------------------------------------
+     Detail state/open
+  --------------------------------------------------------- */
 
   function resetDetailModal() {
     detailModal.open = false;
@@ -4280,12 +4409,11 @@ function createFacturasController(host = null, context = {}) {
     detailModal.feedbackMessage = "";
     detailModal.feedbackType = "info";
     openingFacturaId = "";
-
-    return true;
   }
 
   function closeDetailModal() {
     detailSessionSeq += 1;
+
     resetDetailModal();
 
     renderDetailModal({
@@ -4304,27 +4432,47 @@ function createFacturasController(host = null, context = {}) {
     const id = cleanText(facturaId, "");
     if (!id) return false;
 
+    /*
+       Guard contra eventos duplicados.
+    */
+    if (
+      detailModalIsOpen() &&
+      getFacturaId(detailModal.factura || {}) === id
+    ) {
+      return true;
+    }
+
     rememberModalReturnFocus(openerNode);
     suspendScheduledMainRender();
 
-    const local = items.find((item) => getFacturaId(item) === id) || null;
+    const local =
+      items.find((item) => getFacturaId(item) === id) || null;
 
     const session = ++detailSessionSeq;
     openingFacturaId = id;
 
     detailModal.open = true;
     detailModal.detailOpen = true;
-    detailModal.detailLoading = true;
+
+    /*
+       Si ya tenemos datos del listado:
+       no mostramos skeleton.
+    */
+    detailModal.detailLoading = !local;
     detailModal.factura = local;
     detailModal.sendingFacturaId = "";
     detailModal.viewingFacturaId = "";
     detailModal.downloadingFacturaId = "";
+
     clearDetailFeedback();
 
+    /*
+       ÚNICO montaje del shell.
+    */
     renderDetailModal({
       immediate: true,
+      forceShell: true,
       focusSelector: DETAIL_MODAL_PANEL_SELECTOR,
-      focusEnd: false,
       preserveFocus: false,
     });
 
@@ -4351,10 +4499,12 @@ function createFacturasController(host = null, context = {}) {
       detailModal.detailLoading = false;
       openingFacturaId = "";
 
+      /*
+         Patch interno:
+         NO recrea overlay/panel.
+    */
       renderDetailModal({
         immediate: true,
-        focusSelector: DETAIL_MODAL_PANEL_SELECTOR,
-        focusEnd: false,
         preserveFocus: true,
       });
 
@@ -4405,7 +4555,10 @@ function createFacturasController(host = null, context = {}) {
       return detail;
     }
 
-    return items.find((item) => getFacturaId(item) === id) || null;
+    return (
+      items.find((item) => getFacturaId(item) === id) ||
+      null
+    );
   }
 
   function detailMatchesFactura(facturaId = "") {
@@ -4417,6 +4570,10 @@ function createFacturasController(host = null, context = {}) {
       getFacturaId(detailModal.factura) === id
     );
   }
+
+  /* ---------------------------------------------------------
+     PDF / SEND
+  --------------------------------------------------------- */
 
   async function viewPdf(facturaId = "") {
     const id = cleanText(facturaId, "");
@@ -4481,11 +4638,7 @@ function createFacturasController(host = null, context = {}) {
 
       if (detailMatchesFactura(id)) {
         detailModal.viewingFacturaId = "";
-
-        setDetailFeedback(
-          message,
-          "error"
-        );
+        setDetailFeedback(message, "error");
       } else {
         error = message;
         render();
@@ -4571,11 +4724,7 @@ function createFacturasController(host = null, context = {}) {
 
       if (detailMatchesFactura(id)) {
         detailModal.downloadingFacturaId = "";
-
-        setDetailFeedback(
-          message,
-          "error"
-        );
+        setDetailFeedback(message, "error");
       } else {
         error = message;
         render();
@@ -4587,9 +4736,7 @@ function createFacturasController(host = null, context = {}) {
 
   async function sendFacturaToClient(
     facturaId = "",
-    {
-      confirmResend = true,
-    } = {}
+    { confirmResend = true } = {}
   ) {
     const id = cleanText(facturaId, "");
     if (!id) return false;
@@ -4604,15 +4751,9 @@ function createFacturasController(host = null, context = {}) {
         ? `Esta factura ya fue enviada a ${recipient}. ¿Quieres volver a enviarla?`
         : "Esta factura ya fue enviada. ¿Quieres volver a enviarla?";
 
-      let confirmed = false;
-
-      try {
-        confirmed = window.confirm(question);
-      } catch {
-        confirmed = false;
+      if (!window.confirm(question)) {
+        return false;
       }
-
-      if (!confirmed) return false;
     }
 
     sendingFacturaId = id;
@@ -4645,10 +4786,6 @@ function createFacturasController(host = null, context = {}) {
         items = upsertFactura(items, resultObject, sort);
       }
 
-      /*
-         Si la API sólo confirma {ok:true}, refrescamos el documento
-         para obtener sentAt/sentTo reales.
-      */
       let refreshed = null;
 
       try {
@@ -4674,20 +4811,10 @@ function createFacturasController(host = null, context = {}) {
           );
         }
 
-        const recipient = getFacturaEmail(latest || before || {});
-
         setDetailFeedback(
           alreadySent
-            ? (
-                recipient
-                  ? `Factura reenviada correctamente a ${recipient}.`
-                  : "Factura reenviada correctamente."
-              )
-            : (
-                recipient
-                  ? `Factura enviada correctamente a ${recipient}.`
-                  : "Factura enviada correctamente."
-              ),
+            ? "Factura reenviada correctamente."
+            : "Factura enviada correctamente.",
           "success"
         );
       } else {
@@ -4707,11 +4834,7 @@ function createFacturasController(host = null, context = {}) {
 
       if (detailMatchesFactura(id)) {
         detailModal.sendingFacturaId = "";
-
-        setDetailFeedback(
-          message,
-          "error"
-        );
+        setDetailFeedback(message, "error");
       } else {
         error = message;
         render();
@@ -4742,9 +4865,9 @@ function createFacturasController(host = null, context = {}) {
     return false;
   }
 
-  /* =======================================================
-     ACTIONS
-  ======================================================= */
+  /* ---------------------------------------------------------
+     Actions/events
+  --------------------------------------------------------- */
 
   async function handleAction(action = "", node = null) {
     const type = cleanText(action, "");
@@ -4761,8 +4884,13 @@ function createFacturasController(host = null, context = {}) {
       return setFilter(node?.dataset?.filter || "all");
     }
 
-    if (type === FACTURAS_ACTIONS.CLEAR_FILTERS) return clearFilters();
-    if (type === FACTURAS_ACTIONS.CLEAR_SEARCH) return setSearch("");
+    if (type === FACTURAS_ACTIONS.CLEAR_FILTERS) {
+      return clearFilters();
+    }
+
+    if (type === FACTURAS_ACTIONS.CLEAR_SEARCH) {
+      return setSearch("");
+    }
 
     if (type === FACTURAS_ACTIONS.SORT) {
       return setSort(
@@ -4772,7 +4900,9 @@ function createFacturasController(host = null, context = {}) {
       );
     }
 
-    if (type === LOAD_MORE_ACTION) return loadMore();
+    if (type === LOAD_MORE_ACTION) {
+      return loadMore();
+    }
 
     if (
       FACTURAS_ACTIONS.PREV_PAGE &&
@@ -4825,9 +4955,7 @@ function createFacturasController(host = null, context = {}) {
     ) {
       return sendFacturaToClient(
         facturaIdFromNode(node),
-        {
-          confirmResend: true,
-        }
+        { confirmResend: true }
       );
     }
 
@@ -4852,9 +4980,7 @@ function createFacturasController(host = null, context = {}) {
         createModalHost?.querySelector?.(
           "#facturas-create-form, [data-facturas-create-form='true']"
         ) ||
-        host?.querySelector?.(
-          "#facturas-create-form, [data-facturas-create-form='true']"
-        )
+        null
       );
     }
 
@@ -4892,7 +5018,8 @@ function createFacturasController(host = null, context = {}) {
 
     if (type === FACTURA_CREATE_ACTIONS.TICKET_REFRESH) {
       return loadTicketsForSelectedClients({
-        autoSelectLatest: createModal.selectedTickets.length === 0,
+        autoSelectLatest:
+          createModal.selectedTickets.length === 0,
       });
     }
 
@@ -4908,10 +5035,6 @@ function createFacturasController(host = null, context = {}) {
       ""
     );
   }
-
-  /* =======================================================
-     EVENTS
-  ======================================================= */
 
   function onClick(event) {
     const target =
@@ -4937,10 +5060,13 @@ function createFacturasController(host = null, context = {}) {
       }
     }
 
-    const row = target.closest("[data-facturas-row='true']");
+    const row = target.closest(
+      "[data-facturas-row='true']"
+    );
 
     if (row && host?.contains(row)) {
       event.preventDefault();
+      event.stopPropagation();
 
       void openFactura(
         row.dataset.facturaId || "",
@@ -4996,8 +5122,6 @@ function createFacturasController(host = null, context = {}) {
       ""
     );
 
-    if (!field) return;
-
     if (field === "search") {
       setSearch(target.value || "");
       return;
@@ -5021,9 +5145,11 @@ function createFacturasController(host = null, context = {}) {
   function onChange(event) {
     const target = event.target;
 
-    if (!target || !ownsNode(target)) return;
-
-    if (createModal.open) {
+    if (
+      target &&
+      ownsNode(target) &&
+      createModal.open
+    ) {
       patchCreateFormFromField(target);
     }
   }
@@ -5046,10 +5172,7 @@ function createFacturasController(host = null, context = {}) {
   }
 
   function onKeydown(event) {
-    if (
-      anyModalIsOpen() &&
-      event.key === "Tab"
-    ) {
+    if (anyModalIsOpen() && event.key === "Tab") {
       trapModalFocus(event);
       return;
     }
@@ -5057,12 +5180,16 @@ function createFacturasController(host = null, context = {}) {
     if (event.key === "Escape") {
       if (detailModalIsOpen()) {
         event.preventDefault();
+        event.stopPropagation();
+
         closeDetailModal();
         return;
       }
 
       if (createModal.open) {
         event.preventDefault();
+        event.stopPropagation();
+
         closeCreateModal();
         return;
       }
@@ -5082,6 +5209,7 @@ function createFacturasController(host = null, context = {}) {
     if (!row || !host?.contains(row)) return;
 
     event.preventDefault();
+    event.stopPropagation();
 
     void openFactura(
       row.dataset.facturaId || "",
@@ -5123,7 +5251,7 @@ function createFacturasController(host = null, context = {}) {
 
     scrollTicking = true;
 
-    nextAnimationFrame(() => {
+    nextFrame(() => {
       scrollTicking = false;
 
       if (shouldLoadMoreByScroll()) {
@@ -5138,8 +5266,6 @@ function createFacturasController(host = null, context = {}) {
     target?.addEventListener?.("change", onChange);
     target?.addEventListener?.("submit", onSubmit);
     target?.addEventListener?.("keydown", onKeydown);
-
-    return true;
   }
 
   function unbindTarget(target = null) {
@@ -5148,8 +5274,6 @@ function createFacturasController(host = null, context = {}) {
     target?.removeEventListener?.("change", onChange);
     target?.removeEventListener?.("submit", onSubmit);
     target?.removeEventListener?.("keydown", onKeydown);
-
-    return true;
   }
 
   function bind() {
@@ -5164,8 +5288,6 @@ function createFacturasController(host = null, context = {}) {
         passive: true,
       });
     }
-
-    return true;
   }
 
   function unbind() {
@@ -5185,21 +5307,17 @@ function createFacturasController(host = null, context = {}) {
       window.removeEventListener("scroll", onWindowScroll);
       window.removeEventListener("resize", onWindowScroll);
     }
-
-    return true;
   }
 
-  /* =======================================================
-     PUBLIC CONTROLLER
-  ======================================================= */
+  /* ---------------------------------------------------------
+     Public controller
+  --------------------------------------------------------- */
 
   const controller = {
     version: FACTURAS_VIEW_VERSION,
 
     mount() {
-      if (destroyed || mounted || !host) {
-        return controller;
-      }
+      if (destroyed || mounted || !host) return controller;
 
       mounted = true;
       bind();
@@ -5217,19 +5335,9 @@ function createFacturasController(host = null, context = {}) {
 
       if (items.length) {
         loading = false;
-        refreshing = false;
-        loadingMore = false;
-        error = "";
-
-        render({
-          immediate: true,
-        });
+        render({ immediate: true });
       } else {
         loading = true;
-        refreshing = false;
-        loadingMore = false;
-        error = "";
-
         renderLoading();
       }
 
@@ -5242,6 +5350,8 @@ function createFacturasController(host = null, context = {}) {
     },
 
     destroy() {
+      if (destroyed) return true;
+
       destroyed = true;
       mounted = false;
 
@@ -5251,7 +5361,6 @@ function createFacturasController(host = null, context = {}) {
       detailSessionSeq += 1;
 
       clearTimers();
-
       cancelScheduledRender();
       cancelScheduledCreateRender();
       cancelScheduledDetailRender();
@@ -5261,12 +5370,19 @@ function createFacturasController(host = null, context = {}) {
       disconnectInfiniteObserver();
       unbind();
 
-      removeCreateModalHost();
-      removeDetailModalHost();
-      revokeObjectUrls();
+      if (
+        createModalHost?.dataset?.owner === controllerOwner
+      ) {
+        removeCreateModalHost();
+      }
 
-      resetCreateModal();
-      resetDetailModal();
+      if (
+        detailModalHost?.dataset?.owner === controllerOwner
+      ) {
+        removeDetailModalHost();
+      }
+
+      revokeObjectUrls();
 
       syncBodyModalClass(false, {
         createOpen: false,
@@ -5275,11 +5391,11 @@ function createFacturasController(host = null, context = {}) {
 
       modalReturnFocus = null;
 
-      if (host) {
+      if (
+        host?.[FACTURAS_CONTROLLER_KEY] === controller
+      ) {
         host.replaceChildren();
-      }
 
-      if (host?.[FACTURAS_CONTROLLER_KEY] === controller) {
         try {
           delete host[FACTURAS_CONTROLLER_KEY];
         } catch {
@@ -5308,15 +5424,16 @@ function createFacturasController(host = null, context = {}) {
 
     openCreateModal,
     closeCreateModal,
+
     openFactura,
     closeDetailModal,
 
     getSnapshot() {
       return {
         version: FACTURAS_VIEW_VERSION,
-
         mounted,
         destroyed,
+
         loading,
         refreshing,
         loadingMore,
@@ -5334,53 +5451,33 @@ function createFacturasController(host = null, context = {}) {
         sort,
 
         createModalOpen: createModal.open,
-        createModalHost: Boolean(createModalHost?.isConnected),
-        createModalHostBound,
-
         detailModalOpen: detailModalIsOpen(),
-        detailModalHost: Boolean(detailModalHost?.isConnected),
-        detailModalHostBound,
 
-        detailFeedback: detailModal.feedbackMessage
-          ? {
-              type: detailModal.feedbackType,
-              message: redact(detailModal.feedbackMessage),
-            }
-          : null,
-
-        focusTrap: true,
-        restoresModalFocus: true,
-        detailRaceGuard: true,
-        resendConfirmation: true,
-        localActionFeedback: true,
+        detailShellMounted: Boolean(
+          detailModalHost?.querySelector?.(
+            DETAIL_MODAL_PANEL_SELECTOR
+          )
+        ),
 
         openingFacturaId: openingFacturaId ? "***" : "",
         viewingFacturaId: viewingFacturaId ? "***" : "",
         downloadingFacturaId: downloadingFacturaId ? "***" : "",
         sendingFacturaId: sendingFacturaId ? "***" : "",
 
-        role: getCurrentRole(),
-        admin: isAdmin(),
-
-        stats: computeFacturasStats(items),
         error: redact(error),
 
         policy: {
           noStore: true,
-          noExternalState: true,
-          listStatsDisabled: true,
-          modalIsland: true,
-          focusTrap: true,
-          focusRestore: true,
-          detailRequestRaceGuard: true,
-          localPdfFeedback: true,
-          localDownloadFeedback: true,
-          localSendFeedback: true,
-          confirmResend: true,
-          mainRenderDeferredWhileModal: true,
           singleDetailHost: true,
-          singleCreateHost: true,
-          secureDocumentUrl: true,
+          mainRenderDeferredWhileModal: true,
+          detailRequestRaceGuard: true,
+          detailShellSingleMount: true,
+          detailOverlayPersistent: true,
+          detailPanelPersistent: true,
+          detailContentPatchOnly: true,
+          localDetailImmediate: true,
+          noSecondOpenAnimation: true,
+          duplicateOpenGuard: true,
         },
       };
     },

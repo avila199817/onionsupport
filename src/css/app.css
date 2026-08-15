@@ -164,7 +164,6 @@
    VIEWS · HOME PRIVADA / DASHBOARD
 ========================================================= */
 
-@import url("./views/home/index.css");
 
 
 /* =========================================================
@@ -176,9 +175,6 @@
    3. detail.css
 ========================================================= */
 
-@import url("./views/facturas/index.css");
-@import url("./views/facturas/create.css");
-@import url("./views/facturas/detail.css");
 
 
 /* =========================================================
@@ -197,16 +193,12 @@
    - Si index.css ya cubre todo definitivamente, se pueden retirar luego.
 ========================================================= */
 
-@import url("./views/incidencias/index.css");
-@import url("./views/incidencias/create.css");
-@import url("./views/incidencias/detail.css");
 
 
 /* =========================================================
    VIEWS · CUENTA
 ========================================================= */
 
-@import url("./views/cuenta/index.css");
 
 
 /* =========================================================
@@ -217,8 +209,6 @@
    2. create.css
 ========================================================= */
 
-@import url("./views/usuarios/index.css");
-@import url("./views/usuarios/create.css");
 
 
 /* =========================================================
@@ -230,23 +220,18 @@
    3. detail.css
 ========================================================= */
 
-@import url("./views/clientes/index.css");
-@import url("./views/clientes/create.css");
-@import url("./views/clientes/detail.css");
 
 
 /* =========================================================
    VIEWS · AJUSTES
 ========================================================= */
 
-@import url("./views/ajustes/index.css");
 
 
 /* =========================================================
    VIEWS · SERVIDOR
 ========================================================= */
 
-@import url("./views/servidor/index.css");
 
 
 /* =========================================================
@@ -263,7 +248,6 @@
      frente al shell privado.
 ========================================================= */
 
-@import url("./auth/login.css");
 
 
 /* =========================================================
@@ -289,5 +273,3 @@
    - No debe contaminar la app privada porque todo va scopeado bajo
      .public-auth-shell--home y .public-home.
 ========================================================= */
-
-@import url("./views/public/index.css");

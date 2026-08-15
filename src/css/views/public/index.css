@@ -2377,18 +2377,28 @@ body.public-home-menu-open .public-home-nav.is-footer-visible {
 
   .public-home-nav-panel {
     position: fixed;
-    inset-block-start: var(--public-home-nav-height);
-    inset-inline: clamp(12px, 3vw, 24px);
+    inset-block-start: calc(var(--public-home-nav-height) + 8px);
+    inset-inline-start: auto;
+    inset-inline-end: clamp(14px, 2.4vw, 24px);
     z-index: 75;
 
     display: grid;
+    align-content: start;
     justify-items: stretch;
-    gap: 18px;
+    gap: 12px;
 
-    padding: 20px;
+    inline-size: min(304px, calc(100vw - 28px));
+    max-inline-size: calc(100vw - 28px);
+    max-block-size: calc(100dvh - var(--public-home-nav-height) - 24px);
+    padding: 12px;
+
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
 
     border: 1px solid rgb(255 255 255 / .13);
-    border-radius: 24px;
+    border-radius: 20px;
 
     background:
       radial-gradient(circle at 80% 0%, rgb(19 148 255 / .18), transparent 38%),
@@ -2405,12 +2415,19 @@ body.public-home-menu-open .public-home-nav.is-footer-visible {
     visibility: hidden;
     pointer-events: none;
 
-    transform: translateY(-14px) scale(.98);
+    transform: translateY(-10px) scale(.985);
+    transform-origin: top right;
 
     transition:
       opacity .22s ease,
       visibility .22s ease,
       transform .22s ease;
+  }
+
+  .public-home-nav-panel::-webkit-scrollbar {
+    display: none;
+    inline-size: 0;
+    block-size: 0;
   }
 
   .public-home.is-menu-open .public-home-nav-panel {
@@ -2423,7 +2440,8 @@ body.public-home-menu-open .public-home-nav.is-footer-visible {
   .public-home-nav-menu,
   .public-home-nav-actions {
     display: grid;
-    gap: 8px;
+    inline-size: 100%;
+    gap: 6px;
   }
 
   .public-home-nav-link,
@@ -2434,9 +2452,19 @@ body.public-home-menu-open .public-home-nav.is-footer-visible {
   }
 
   .public-home-nav-link {
+    min-block-size: 44px;
+    padding-inline: 12px;
+    border-radius: 12px;
+  }
+
+  .public-home-login-link {
+    min-block-size: 44px;
+    padding-inline: 14px;
+  }
+
+  .public-home-nav-cta {
     min-block-size: 46px;
     padding-inline: 14px;
-    border-radius: 14px;
   }
 
   .public-home-nav-link:hover,
@@ -2535,6 +2563,15 @@ body.public-home-menu-open .public-home-nav.is-footer-visible {
 
   .public-home-nav {
     padding-inline: 14px;
+  }
+
+  .public-home-nav-panel {
+    inset-inline-end: 14px;
+    inline-size: min(296px, calc(100vw - 28px));
+    max-inline-size: calc(100vw - 28px);
+    gap: 10px;
+    padding: 11px;
+    border-radius: 19px;
   }
 
   .public-home-brand-mark {
@@ -2726,6 +2763,14 @@ body.public-home-menu-open .public-home-nav.is-footer-visible {
 }
 
 @media (max-width: 460px) {
+  .public-home-nav-panel {
+    inset-inline-end: 12px;
+    inline-size: min(286px, calc(100vw - 24px));
+    max-inline-size: calc(100vw - 24px);
+    padding: 10px;
+    border-radius: 18px;
+  }
+
   .public-home-command-portrait {
     min-block-size: 276px;
   }
@@ -2749,6 +2794,12 @@ body.public-home-menu-open .public-home-nav.is-footer-visible {
 }
 
 @media (max-width: 370px) {
+  .public-home-nav-panel {
+    inset-inline-end: 10px;
+    inline-size: calc(100vw - 20px);
+    max-inline-size: calc(100vw - 20px);
+  }
+
   .public-home-command-portrait {
     min-block-size: 248px;
   }

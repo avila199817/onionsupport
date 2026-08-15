@@ -2,24 +2,18 @@
    Onion Support - Route Styles
    Archivo: /src/router/styles.js
 
+   ROUTE CSS LOADER · V2 DIRECT MANIFEST · SAFE GATED
 
-   ROUTE CSS LOADER · STEP 1 · COMPATIBILITY SAFE
-
-
-   Objetivo:
-   - Preparar CSS por ruta antes de renderizar la vista.
-   - No activar route-loading mientras <html> no declare:
-       data-css-route-mode="route"
-   - En modo global no crear links ni requests extra.
-   - Usar únicamente rutas CSS same-origin y declaradas en manifest.
-   - Cachear cargas y deduplicar requests.
-   - Mantener CSS ya cargado durante la sesión.
-   - Cooperar con AbortSignal del Router.
-   - No leer ni persistir publicPath, query, hash ni tokens.
+   IMPORTANTE:
+   - NO crea wrappers CSS.
+   - Usa directamente los CSS YA EXISTENTES del proyecto.
+   - Mientras el contrato de capas no esté listo, este loader queda
+     desactivado aunque exista el archivo.
+   - No lee publicPath, query, hash ni tokens.
 ========================================================= */
 
 export const ROUTE_STYLES_VERSION =
-  "route-styles.v1-compat-atomic-loader";
+  "route-styles.v2-direct-manifest-safe-gated";
 
 const MODE_ATTRIBUTE =
   "data-css-route-mode";
@@ -27,68 +21,100 @@ const MODE_ATTRIBUTE =
 const ROUTE_MODE =
   "route";
 
+const LAYER_CONTRACT_ATTRIBUTE =
+  "data-css-route-layer-contract";
+
+const REQUIRED_LAYER_CONTRACT =
+  "self-layered-v1";
+
 const ROUTE_STYLE_MARKER =
   "data-onion-route-style";
 
 const ROUTE_STYLE_HREF =
   "data-onion-route-style-href";
 
+const ROUTE_STYLE_STATE =
+  "data-onion-route-style-state";
+
 const ALLOWED_PREFIX =
-  "/src/css/routes/";
+  "/src/css/";
+
+const MEDIA_ACTIVE =
+  "all";
+
+const MEDIA_INACTIVE =
+  "not all";
+
+/* =========================================================
+   MANIFEST
+   Apunta directamente a los CSS existentes.
+========================================================= */
 
 const STYLE_MANIFEST = Object.freeze({
   "public-home": Object.freeze([
-    "/src/css/routes/public-home.css",
+    "/src/css/auth/login.css",
+    "/src/css/views/public/index.css",
   ]),
 
   login: Object.freeze([
-    "/src/css/routes/auth.css",
+    "/src/css/auth/login.css",
   ]),
 
   "password-request": Object.freeze([
-    "/src/css/routes/auth.css",
+    "/src/css/auth/login.css",
   ]),
 
   "password-reset": Object.freeze([
-    "/src/css/routes/auth.css",
+    "/src/css/auth/login.css",
   ]),
 
   "activate-account": Object.freeze([
-    "/src/css/routes/auth.css",
+    "/src/css/auth/login.css",
   ]),
 
   home: Object.freeze([
-    "/src/css/routes/home.css",
+    "/src/css/views/home/index.css",
   ]),
 
   incidencias: Object.freeze([
-    "/src/css/routes/incidencias.css",
+    "/src/css/views/incidencias/index.css",
+    "/src/css/views/incidencias/create.css",
+    "/src/css/views/incidencias/detail.css",
   ]),
 
   facturas: Object.freeze([
-    "/src/css/routes/facturas.css",
+    "/src/css/views/facturas/index.css",
+    "/src/css/views/facturas/create.css",
+    "/src/css/views/facturas/detail.css",
   ]),
 
   clientes: Object.freeze([
-    "/src/css/routes/clientes.css",
+    "/src/css/views/clientes/index.css",
+    "/src/css/views/clientes/create.css",
+    "/src/css/views/clientes/detail.css",
   ]),
 
   usuarios: Object.freeze([
-    "/src/css/routes/usuarios.css",
+    "/src/css/views/usuarios/index.css",
+    "/src/css/views/usuarios/create.css",
   ]),
 
   servidor: Object.freeze([
-    "/src/css/routes/servidor.css",
+    "/src/css/views/servidor/index.css",
   ]),
 
   cuenta: Object.freeze([
-    "/src/css/routes/cuenta.css",
+    "/src/css/views/cuenta/index.css",
   ]),
 
   ajustes: Object.freeze([
-    "/src/css/routes/ajustes.css",
+    "/src/css/views/ajustes/index.css",
   ]),
 });
+
+/* =========================================================
+   RUNTIME
+========================================================= */
 
 const loadPromises =
   new Map();
@@ -96,8 +122,21 @@ const loadPromises =
 const loadedHrefs =
   new Set();
 
-const loadedViewKeys =
+let activeViewKey =
+  "";
+
+let activeHrefs =
   new Set();
+
+let preparedViewKey =
+  "";
+
+let preparedHrefs =
+  new Set();
+
+/* =========================================================
+   BASICS
+========================================================= */
 
 function isBrowser() {
   return (
@@ -130,6 +169,16 @@ function cleanViewKey(
     .replace(/\s+/g, "-")
     .replace(/[^a-z0-9._:-]/g, "")
     .slice(0, 96);
+}
+
+function routeViewKey(
+  route = null
+) {
+  return cleanViewKey(
+    route?.viewKey ||
+    route?.name ||
+    ""
+  );
 }
 
 function createAbortError(
@@ -172,6 +221,10 @@ function throwIfAborted(
   );
 }
 
+/* =========================================================
+   MODE / LAYER SAFETY GATE
+========================================================= */
+
 function currentMode() {
   if (!isBrowser()) {
     return "server";
@@ -179,8 +232,7 @@ function currentMode() {
 
   const value =
     cleanText(
-      document
-        .documentElement
+      document.documentElement
         ?.getAttribute(
           MODE_ATTRIBUTE
         ),
@@ -195,11 +247,62 @@ function currentMode() {
   );
 }
 
+function currentLayerContract() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  return cleanText(
+    document.documentElement
+      ?.getAttribute(
+        LAYER_CONTRACT_ATTRIBUTE
+      ),
+    ""
+  )
+    .toLowerCase();
+}
+
+function layerContractReady() {
+  return (
+    currentLayerContract() ===
+    REQUIRED_LAYER_CONTRACT
+  );
+}
+
 function routeModeEnabled() {
   return (
-    currentMode() ===
-    ROUTE_MODE
+    currentMode() === ROUTE_MODE &&
+    layerContractReady()
   );
+}
+
+/* =========================================================
+   MANIFEST / URL SAFETY
+========================================================= */
+
+function manifestHrefsForViewKey(
+  viewKey = ""
+) {
+  const key =
+    cleanViewKey(
+      viewKey
+    );
+
+  if (!key) {
+    return null;
+  }
+
+  const hrefs =
+    STYLE_MANIFEST[key];
+
+  if (
+    !Array.isArray(hrefs) ||
+    !hrefs.length
+  ) {
+    return null;
+  }
+
+  return hrefs;
 }
 
 function normalizeManifestHref(
@@ -215,10 +318,13 @@ function normalizeManifestHref(
     !raw ||
     !raw.startsWith(
       ALLOWED_PREFIX
+    ) ||
+    !raw.endsWith(
+      ".css"
     )
   ) {
     throw new Error(
-      "RouteStyles: href fuera del prefijo permitido."
+      "RouteStyles: href CSS no permitido."
     );
   }
 
@@ -244,10 +350,13 @@ function normalizeManifestHref(
   if (
     !url.pathname.startsWith(
       ALLOWED_PREFIX
+    ) ||
+    !url.pathname.endsWith(
+      ".css"
     )
   ) {
     throw new Error(
-      "RouteStyles: stylesheet fuera de /src/css/routes/."
+      "RouteStyles: stylesheet fuera de /src/css/."
     );
   }
 
@@ -260,61 +369,105 @@ function hrefsForRoute(
   route = null
 ) {
   const viewKey =
-    cleanViewKey(
-      route?.viewKey ||
-      route?.name ||
-      ""
+    routeViewKey(
+      route
     );
 
-  if (!viewKey) {
-    return Object.freeze([]);
-  }
-
   const hrefs =
-    STYLE_MANIFEST[
+    manifestHrefsForViewKey(
       viewKey
-    ];
+    );
 
-  if (
-    !Array.isArray(hrefs) ||
-    !hrefs.length
-  ) {
+  if (hrefs === null) {
     return null;
   }
 
-  return hrefs;
+  return hrefs.map(
+    normalizeManifestHref
+  );
 }
 
-function existingStyleLink(
-  href = ""
-) {
+/* =========================================================
+   MANAGED LINKS
+========================================================= */
+
+function managedLinks() {
   if (!isBrowser()) {
-    return null;
+    return [];
   }
 
+  return [
+    ...document.querySelectorAll(
+      `link[${ROUTE_STYLE_MARKER}="true"]`
+    ),
+  ];
+}
+
+function linkHrefKey(
+  link = null
+) {
+  return cleanText(
+    link?.getAttribute?.(
+      ROUTE_STYLE_HREF
+    ),
+    ""
+  );
+}
+
+function findManagedLink(
+  href = ""
+) {
   const normalized =
     normalizeManifestHref(
       href
     );
 
-  for (
-    const link
-    of document.querySelectorAll(
-      `link[${ROUTE_STYLE_MARKER}]`
-    )
-  ) {
-    if (
-      link.getAttribute(
-        ROUTE_STYLE_HREF
-      ) ===
-      normalized
-    ) {
-      return link;
-    }
+  return (
+    managedLinks()
+      .find(
+        (link) =>
+          linkHrefKey(link) ===
+          normalized
+      ) ||
+    null
+  );
+}
+
+function setManagedLinkActive(
+  link = null,
+  active = false,
+  state = ""
+) {
+  if (!link) {
+    return false;
   }
 
-  return null;
+  try {
+    link.media =
+      active
+        ? MEDIA_ACTIVE
+        : MEDIA_INACTIVE;
+
+    link.disabled =
+      false;
+
+    if (state) {
+      link.setAttribute(
+        ROUTE_STYLE_STATE,
+        state
+      );
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
 }
+
+/* =========================================================
+   LOAD
+   Descarga con media="not all" para no aplicar la hoja todavía.
+========================================================= */
 
 function loadOne(
   href = "",
@@ -346,17 +499,19 @@ function loadOne(
   ) {
     return loadPromises
       .get(normalized)
-      .then((value) => {
-        throwIfAborted(
-          signal
-        );
+      .then(
+        (value) => {
+          throwIfAborted(
+            signal
+          );
 
-        return value;
-      });
+          return value;
+        }
+      );
   }
 
   const existing =
-    existingStyleLink(
+    findManagedLink(
       normalized
     );
 
@@ -376,7 +531,10 @@ function loadOne(
     new Promise(
       (resolve, reject) => {
         if (!isBrowser()) {
-          resolve(normalized);
+          resolve(
+            normalized
+          );
+
           return;
         }
 
@@ -412,13 +570,28 @@ function loadOne(
               true;
 
             cleanup();
-            fn(value);
+
+            fn(
+              value
+            );
           };
 
         const onLoad =
           () => {
             loadedHrefs.add(
               normalized
+            );
+
+            setManagedLinkActive(
+              link,
+              activeHrefs.has(
+                normalized
+              ),
+              activeHrefs.has(
+                normalized
+              )
+                ? "active"
+                : "cached"
             );
 
             finish(
@@ -473,6 +646,12 @@ function loadOne(
           link.href =
             normalized;
 
+          link.media =
+            MEDIA_INACTIVE;
+
+          link.disabled =
+            false;
+
           link.setAttribute(
             ROUTE_STYLE_MARKER,
             "true"
@@ -484,7 +663,7 @@ function loadOne(
           );
 
           link.setAttribute(
-            "data-onion-route-style-state",
+            ROUTE_STYLE_STATE,
             "loading"
           );
 
@@ -502,26 +681,19 @@ function loadOne(
         }
       }
     )
-      .then((value) => {
-        const link =
-          existingStyleLink(
+      .catch(
+        (error) => {
+          loadPromises.delete(
             normalized
           );
 
-        link?.setAttribute(
-          "data-onion-route-style-state",
-          "ready"
-        );
+          loadedHrefs.delete(
+            normalized
+          );
 
-        return value;
-      })
-      .catch((error) => {
-        loadPromises.delete(
-          normalized
-        );
-
-        throw error;
-      });
+          throw error;
+        }
+      );
 
   loadPromises.set(
     normalized,
@@ -539,7 +711,12 @@ function loadOne(
   );
 }
 
-export async function ensureRouteStyles(
+/* =========================================================
+   PRELOAD
+   Descarga sin aplicar.
+========================================================= */
+
+export async function preloadRouteStyles(
   route = null,
   options = {}
 ) {
@@ -552,10 +729,8 @@ export async function ensureRouteStyles(
   );
 
   const viewKey =
-    cleanViewKey(
-      route?.viewKey ||
-      route?.name ||
-      ""
+    routeViewKey(
+      route
     );
 
   if (
@@ -564,10 +739,13 @@ export async function ensureRouteStyles(
   ) {
     return Object.freeze({
       ok: true,
-      mode: currentMode(),
-      viewKey,
-      loaded: Object.freeze([]),
       skipped: true,
+      mode: currentMode(),
+      layerContractReady:
+        layerContractReady(),
+      viewKey,
+      loaded:
+        Object.freeze([]),
     });
   }
 
@@ -576,10 +754,7 @@ export async function ensureRouteStyles(
       route
     );
 
-  if (
-    hrefs ===
-    null
-  ) {
+  if (hrefs === null) {
     const error =
       new Error(
         `RouteStyles: no existe manifest CSS para "${viewKey}".`
@@ -606,31 +781,286 @@ export async function ensureRouteStyles(
     signal
   );
 
-  if (viewKey) {
-    loadedViewKeys.add(
-      viewKey
-    );
-  }
-
   return Object.freeze({
     ok: true,
+    skipped: false,
     mode: ROUTE_MODE,
+    layerContractReady: true,
     viewKey,
     loaded:
       Object.freeze([
         ...loaded,
       ]),
-    skipped: false,
   });
 }
+
+/* =========================================================
+   PREPARE
+   Activa CSS nuevo manteniendo activo el CSS de la vista actual.
+========================================================= */
+
+export async function prepareRouteStyles(
+  route = null,
+  options = {}
+) {
+  const signal =
+    options?.signal ||
+    null;
+
+  const preload =
+    await preloadRouteStyles(
+      route,
+      {
+        signal,
+      }
+    );
+
+  if (
+    preload.skipped
+  ) {
+    return preload;
+  }
+
+  throwIfAborted(
+    signal
+  );
+
+  const viewKey =
+    routeViewKey(
+      route
+    );
+
+  const hrefs =
+    hrefsForRoute(
+      route
+    ) ||
+    [];
+
+  const nextHrefs =
+    new Set(
+      hrefs
+    );
+
+  for (
+    const href
+    of nextHrefs
+  ) {
+    const link =
+      findManagedLink(
+        href
+      );
+
+    if (!link) {
+      const error =
+        new Error(
+          `RouteStyles: link preparado no encontrado para ${href}.`
+        );
+
+      error.code =
+        "ROUTE_STYLE_LINK_MISSING";
+
+      throw error;
+    }
+
+    setManagedLinkActive(
+      link,
+      true,
+      activeHrefs.has(
+        href
+      )
+        ? "active"
+        : "prepared"
+    );
+  }
+
+  preparedViewKey =
+    viewKey;
+
+  preparedHrefs =
+    nextHrefs;
+
+  return Object.freeze({
+    ok: true,
+    skipped: false,
+    mode: ROUTE_MODE,
+    viewKey,
+    prepared:
+      Object.freeze([
+        ...preparedHrefs,
+      ]),
+  });
+}
+
+/* =========================================================
+   COMMIT
+   Se llama sólo después del commit real de la nueva vista.
+========================================================= */
+
+export function commitRouteStyles(
+  route = null
+) {
+  const viewKey =
+    routeViewKey(
+      route
+    );
+
+  if (
+    !isBrowser() ||
+    !routeModeEnabled()
+  ) {
+    return Object.freeze({
+      ok: true,
+      skipped: true,
+      mode: currentMode(),
+      viewKey,
+    });
+  }
+
+  const hrefs =
+    hrefsForRoute(
+      route
+    );
+
+  if (hrefs === null) {
+    return Object.freeze({
+      ok: false,
+      skipped: false,
+      mode: ROUTE_MODE,
+      viewKey,
+      reason:
+        "manifest-missing",
+    });
+  }
+
+  const nextActive =
+    new Set(
+      hrefs
+    );
+
+  for (
+    const link
+    of managedLinks()
+  ) {
+    const href =
+      linkHrefKey(
+        link
+      );
+
+    const active =
+      nextActive.has(
+        href
+      );
+
+    setManagedLinkActive(
+      link,
+      active,
+      active
+        ? "active"
+        : "cached"
+    );
+  }
+
+  activeViewKey =
+    viewKey;
+
+  activeHrefs =
+    nextActive;
+
+  preparedViewKey =
+    "";
+
+  preparedHrefs =
+    new Set();
+
+  return Object.freeze({
+    ok: true,
+    skipped: false,
+    mode: ROUTE_MODE,
+    viewKey,
+    active:
+      Object.freeze([
+        ...activeHrefs,
+      ]),
+  });
+}
+
+/* =========================================================
+   ROLLBACK
+========================================================= */
+
+export function rollbackRouteStyles(
+  route = null
+) {
+  const viewKey =
+    routeViewKey(
+      route
+    );
+
+  if (
+    !isBrowser() ||
+    !routeModeEnabled()
+  ) {
+    return Object.freeze({
+      ok: true,
+      skipped: true,
+      mode: currentMode(),
+      viewKey,
+    });
+  }
+
+  for (
+    const link
+    of managedLinks()
+  ) {
+    const href =
+      linkHrefKey(
+        link
+      );
+
+    const active =
+      activeHrefs.has(
+        href
+      );
+
+    setManagedLinkActive(
+      link,
+      active,
+      active
+        ? "active"
+        : "cached"
+    );
+  }
+
+  preparedViewKey =
+    "";
+
+  preparedHrefs =
+    new Set();
+
+  return Object.freeze({
+    ok: true,
+    skipped: false,
+    mode: ROUTE_MODE,
+    viewKey,
+    activeViewKey,
+    active:
+      Object.freeze([
+        ...activeHrefs,
+      ]),
+  });
+}
+
+/* =========================================================
+   INTROSPECTION
+========================================================= */
 
 export function hasRouteStyleManifest(
   viewKey = ""
 ) {
   return Boolean(
-    STYLE_MANIFEST[
-      cleanViewKey(viewKey)
-    ]
+    manifestHrefsForViewKey(
+      viewKey
+    )
   );
 }
 
@@ -638,9 +1068,9 @@ export function getRouteStyleHrefs(
   viewKey = ""
 ) {
   const hrefs =
-    STYLE_MANIFEST[
-      cleanViewKey(viewKey)
-    ];
+    manifestHrefsForViewKey(
+      viewKey
+    );
 
   return Object.freeze(
     Array.isArray(hrefs)
@@ -660,6 +1090,26 @@ export function getSnapshot() {
     routeModeEnabled:
       routeModeEnabled(),
 
+    layerContract:
+      currentLayerContract(),
+
+    layerContractReady:
+      layerContractReady(),
+
+    activeViewKey,
+
+    preparedViewKey,
+
+    activeHrefs:
+      Object.freeze([
+        ...activeHrefs,
+      ]),
+
+    preparedHrefs:
+      Object.freeze([
+        ...preparedHrefs,
+      ]),
+
     loadedHrefs:
       Object.freeze([
         ...loadedHrefs,
@@ -675,11 +1125,6 @@ export function getSnapshot() {
           )
       )),
 
-    loadedViewKeys:
-      Object.freeze([
-        ...loadedViewKeys,
-      ]),
-
     manifestViewKeys:
       Object.freeze(
         Object.keys(
@@ -689,20 +1134,37 @@ export function getSnapshot() {
   });
 }
 
-export const RouteStyles = Object.freeze({
-  version:
-    ROUTE_STYLES_VERSION,
+/* =========================================================
+   API
+========================================================= */
 
-  ensureRouteStyles,
-  ensure:
-    ensureRouteStyles,
+export const RouteStyles =
+  Object.freeze({
+    version:
+      ROUTE_STYLES_VERSION,
 
-  hasRouteStyleManifest,
-  getRouteStyleHrefs,
-  getSnapshot,
+    preloadRouteStyles,
+    preload:
+      preloadRouteStyles,
 
-  snapshot:
+    prepareRouteStyles,
+    prepare:
+      prepareRouteStyles,
+
+    commitRouteStyles,
+    commit:
+      commitRouteStyles,
+
+    rollbackRouteStyles,
+    rollback:
+      rollbackRouteStyles,
+
+    hasRouteStyleManifest,
+    getRouteStyleHrefs,
+
     getSnapshot,
-});
+    snapshot:
+      getSnapshot,
+  });
 
 export default RouteStyles;

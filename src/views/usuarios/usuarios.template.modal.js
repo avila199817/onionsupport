@@ -2,7 +2,7 @@
    Onion Support - Usuarios Detail Modal
    Archivo: /src/views/usuarios/usuarios.template.modal.js
 
-   PRODUCTIVO · CANONICAL MODEL · SHARED MODAL CSS · V5
+   PRODUCTIVO · CANONICAL MODEL · SHARED MODAL CSS · V6 · STABLE PANEL
 
    Contrato:
    - Recibe y vuelve a normalizar únicamente con usuarios.api.js.
@@ -15,6 +15,8 @@
    - Refresh delegado al controlador cuando existe.
    - Clipboard local seguro con fallback legacy.
    - Singleton SPA con host estable.
+   - Root, overlay y panel físicamente estables durante update/refresh.
+   - La animación de entrada del panel sólo ocurre en el primer mount.
    - Sin nesting del modal al rerenderizar.
    - Body-lock idempotente y reversible.
    - Escape, overlay, focus trap y retorno de foco.
@@ -29,7 +31,7 @@ import { normalizeUsuarioModel } from "./usuarios.api.js";
 ========================================================= */
 
 export const USUARIOS_MODAL_TEMPLATE_VERSION =
-  "usuarios.template.modal.canonical.v5.stable-host";
+  "usuarios.template.modal.canonical.v6.stable-panel-no-flicker";
 
 export const USUARIOS_DETAIL_ACTIONS = Object.freeze({
   CLOSE: "close",
@@ -2530,6 +2532,413 @@ function htmlFragment(html = "") {
   return template.content;
 }
 
+
+function syncElementAttributes(
+  current = null,
+  next = null
+) {
+  if (
+    !current ||
+    !next
+  ) {
+    return false;
+  }
+
+  try {
+    for (
+      const attribute
+      of Array.from(
+        current.attributes ||
+        []
+      )
+    ) {
+      if (
+        !next.hasAttribute(
+          attribute.name
+        )
+      ) {
+        current.removeAttribute(
+          attribute.name
+        );
+      }
+    }
+
+    for (
+      const attribute
+      of Array.from(
+        next.attributes ||
+        []
+      )
+    ) {
+      current.setAttribute(
+        attribute.name,
+        attribute.value
+      );
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function captureMountedScroll(
+  panel = null
+) {
+  if (!panel) {
+    return null;
+  }
+
+  const body =
+    panel.querySelector(
+      ".usuarios-modal-body, .incidencias-modal-body"
+    );
+
+  return {
+    bodyTop:
+      Number(
+        body?.scrollTop ||
+        0
+      ),
+
+    bodyLeft:
+      Number(
+        body?.scrollLeft ||
+        0
+      ),
+  };
+}
+
+function restoreMountedScroll(
+  panel = null,
+  snapshot = null
+) {
+  if (
+    !panel ||
+    !snapshot
+  ) {
+    return false;
+  }
+
+  const body =
+    panel.querySelector(
+      ".usuarios-modal-body, .incidencias-modal-body"
+    );
+
+  if (!body) {
+    return false;
+  }
+
+  try {
+    body.scrollTop =
+      Number(
+        snapshot.bodyTop ||
+        0
+      );
+
+    body.scrollLeft =
+      Number(
+        snapshot.bodyLeft ||
+        0
+      );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function captureMountedFocus(
+  panel = null
+) {
+  if (
+    !isBrowser() ||
+    !panel
+  ) {
+    return null;
+  }
+
+  const active =
+    document.activeElement;
+
+  if (
+    !active ||
+    !panel.contains(active)
+  ) {
+    return null;
+  }
+
+  if (active === panel) {
+    return {
+      panel: true,
+    };
+  }
+
+  return {
+    panel: false,
+
+    id:
+      cleanText(
+        active.id,
+        ""
+      ),
+
+    action:
+      cleanText(
+        active.getAttribute?.(
+          "data-usuarios-modal-action"
+        ),
+        ""
+      ),
+
+    href:
+      cleanText(
+        active.getAttribute?.(
+          "href"
+        ),
+        ""
+      ),
+
+    tag:
+      cleanText(
+        active.tagName,
+        ""
+      ).toLowerCase(),
+  };
+}
+
+function restoreMountedFocus(
+  panel = null,
+  snapshot = null
+) {
+  if (
+    !panel ||
+    !snapshot
+  ) {
+    return false;
+  }
+
+  if (
+    snapshot.panel ===
+    true
+  ) {
+    try {
+      panel.focus?.({
+        preventScroll: true,
+      });
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  let target = null;
+
+  try {
+    if (snapshot.id) {
+      target =
+        panel.querySelector(
+          `#${globalThis?.CSS?.escape ? globalThis.CSS.escape(snapshot.id) : snapshot.id}`
+        );
+    }
+
+    if (
+      !target &&
+      snapshot.action
+    ) {
+      target =
+        panel.querySelector(
+          `[data-usuarios-modal-action="${snapshot.action}"]`
+        );
+    }
+
+    if (
+      !target &&
+      snapshot.href
+    ) {
+      target =
+        Array.from(
+          panel.querySelectorAll(
+            "a[href]"
+          )
+        ).find(
+          (node) =>
+            cleanText(
+              node.getAttribute(
+                "href"
+              ),
+              ""
+            ) === snapshot.href
+        ) ||
+        null;
+    }
+
+    if (
+      target?.focus &&
+      target.getAttribute?.(
+        "aria-disabled"
+      ) !== "true" &&
+      !target.disabled
+    ) {
+      target.focus({
+        preventScroll: true,
+      });
+
+      return true;
+    }
+  } catch {
+    // panel fallback debajo
+  }
+
+  try {
+    panel.focus?.({
+      preventScroll: true,
+    });
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function patchMountedShell(
+  host = null,
+  fragment = null
+) {
+  if (
+    !host ||
+    !fragment
+  ) {
+    return false;
+  }
+
+  const currentRoot =
+    host.querySelector(
+      `#${MODAL_ID}`
+    );
+
+  const currentOverlay =
+    currentRoot?.querySelector?.(
+      "[data-usuarios-modal-overlay='true']"
+    );
+
+  const currentPanel =
+    currentRoot?.querySelector?.(
+      "[data-usuarios-modal-panel='true']"
+    );
+
+  const nextRoot =
+    fragment.querySelector?.(
+      `#${MODAL_ID}`
+    );
+
+  const nextOverlay =
+    nextRoot?.querySelector?.(
+      "[data-usuarios-modal-overlay='true']"
+    );
+
+  const nextPanel =
+    nextRoot?.querySelector?.(
+      "[data-usuarios-modal-panel='true']"
+    );
+
+  if (
+    !currentRoot ||
+    !currentOverlay ||
+    !currentPanel ||
+    !nextRoot ||
+    !nextOverlay ||
+    !nextPanel
+  ) {
+    return false;
+  }
+
+  const currentId =
+    cleanText(
+      currentRoot.getAttribute(
+        "data-user-id"
+      ),
+      ""
+    );
+
+  const nextId =
+    cleanText(
+      nextRoot.getAttribute(
+        "data-user-id"
+      ),
+      ""
+    );
+
+  /*
+    Para el mismo usuario hacemos patch estable.
+    Si cambia la identidad explícitamente, permitimos un mount limpio.
+  */
+  if (
+    currentId &&
+    nextId &&
+    currentId !== nextId
+  ) {
+    return false;
+  }
+
+  const scrollSnapshot =
+    captureMountedScroll(
+      currentPanel
+    );
+
+  const focusSnapshot =
+    captureMountedFocus(
+      currentPanel
+    );
+
+  syncElementAttributes(
+    currentRoot,
+    nextRoot
+  );
+
+  syncElementAttributes(
+    currentOverlay,
+    nextOverlay
+  );
+
+  syncElementAttributes(
+    currentPanel,
+    nextPanel
+  );
+
+  /*
+    ANTI-PARPADEO:
+    NO sustituimos root/overlay/panel.
+    incidencias/detail.css anima overlay y panel al entrar; si esos nodos
+    se recrean tras el GET de detalle, la animación vuelve a empezar y el
+    usuario ve un doble open/flicker.
+  */
+  currentPanel.replaceChildren(
+    ...Array.from(
+      nextPanel.childNodes
+    )
+  );
+
+  modalState.root =
+    currentRoot;
+
+  modalState.panel =
+    currentPanel;
+
+  restoreMountedScroll(
+    currentPanel,
+    scrollSnapshot
+  );
+
+  restoreMountedFocus(
+    currentPanel,
+    focusSnapshot
+  );
+
+  return true;
+}
+
 /* =========================================================
    BODY LOCK
 ========================================================= */
@@ -3064,6 +3473,7 @@ function detachRootBindings() {
 
 function renderMounted({
   focus = false,
+  forceMount = false,
 } = {}) {
   if (!isBrowser()) {
     return null;
@@ -3079,8 +3489,6 @@ function renderMounted({
   removeDuplicateHosts(
     host
   );
-
-  detachRootBindings();
 
   const html =
     modalState.isOpen
@@ -3100,23 +3508,57 @@ function renderMounted({
     return null;
   }
 
-  host.replaceChildren(
-    fragment
-  );
+  const hasMountedPanel =
+    Boolean(
+      host.querySelector(
+        "[data-usuarios-modal-panel='true']"
+      )
+    );
+
+  /*
+    Primer open:
+      mount completo -> la animación CSS se ejecuta una sola vez.
+
+    update()/refresh():
+      root, overlay y panel permanecen físicamente iguales.
+      Sólo cambia el interior del panel.
+  */
+  const patched =
+    (
+      !forceMount &&
+      hasMountedPanel
+    )
+      ? patchMountedShell(
+          host,
+          fragment
+        )
+      : false;
+
+  if (!patched) {
+    detachRootBindings();
+
+    host.replaceChildren(
+      fragment
+    );
+
+    modalState.root =
+      host.querySelector(
+        `#${MODAL_ID}`
+      );
+
+    modalState.panel =
+      host.querySelector(
+        "[data-usuarios-modal-panel='true']"
+      );
+  }
 
   modalState.host =
     host;
 
-  modalState.root =
-    host.querySelector(
-      `#${MODAL_ID}`
-    );
-
-  modalState.panel =
-    host.querySelector(
-      "[data-usuarios-modal-panel='true']"
-    );
-
+  /*
+    Los listeners viven en el host/document, no dentro del contenido
+    sustituido, así que el patch estable no necesita desmontarlos.
+  */
   attachRootBindings();
 
   if (focus) {
@@ -3588,6 +4030,7 @@ export function openUsuariosModal(detail = {}) {
 
   renderMounted({
     focus: !wasOpen,
+    forceMount: !wasOpen,
   });
 
   safeEmit(
@@ -3703,9 +4146,12 @@ export function updateUsuariosModal(detail = {}) {
   if (
     !modalState.isOpen
   ) {
-    return openUsuariosModal(
-      normalized
-    );
+    /*
+      update() no abre.
+      Evita que una respuesta asíncrona tardía reabra un modal cerrado.
+      La apertura pertenece exclusivamente a openUsuariosModal().
+    */
+    return false;
   }
 
   const currentId =
@@ -4037,6 +4483,24 @@ export function getUsuariosModalSnapshot() {
         MODAL_ID,
 
       stableHostRerender:
+        true,
+
+      stableRootOverlayPanel:
+        true,
+
+      panelEntryAnimationOnce:
+        true,
+
+      innerContentPatchOnUpdate:
+        true,
+
+      scrollPreservedOnPatch:
+        true,
+
+      focusPreservedOnPatch:
+        true,
+
+      updateNeverOpensClosedModal:
         true,
 
       noNestedModalOnRerender:

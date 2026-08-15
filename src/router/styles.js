@@ -2,7 +2,9 @@
    Onion Support - Route Styles
    Archivo: /src/router/styles.js
 
+
    ROUTE CSS LOADER · STEP 1 · COMPATIBILITY SAFE
+
 
    Objetivo:
    - Preparar CSS por ruta antes de renderizar la vista.

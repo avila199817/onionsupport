@@ -24,7 +24,7 @@
 
 import Http from "../../core/http.js";
 
-export const INCIDENCIAS_API_VERSION = "incidencias.api.paint-safe.v12.sas-safe-download-contract";
+export const INCIDENCIAS_API_VERSION = "incidencias.api.paint-safe.v13.sas-preview-contract";
 export const INCIDENCIAS_ENDPOINT = "/api/tickets";
 export const USERS_SEARCH_ENDPOINT = "/api/users";
 
@@ -328,6 +328,8 @@ function firstUrl(...values) {
     safeUrl().
   - Permitimos SAS únicamente contra nuestro storage exacto y únicamente
     dentro del contenedor /tickets/.
+  - /tickets/ es privado: una URL Azure sin "sig" es un locator persistente,
+    no una URL navegable para <img>, <iframe> o descarga.
   - No aceptamos otros hosts, credenciales embebidas, HTTP ni esquemas
     ejecutables.
 */
@@ -367,6 +369,12 @@ function safeAttachmentUrl(value = "") {
 
     const pathname = url.pathname || "/";
     if (!pathname.startsWith(ATTACHMENT_BLOB_PATH_PREFIX)) return "";
+
+    /*
+      El contenedor tickets es privado. Sin sig= sólo tenemos un locator
+      persistente de Blob y el navegador recibiría 403 al intentar mostrarlo.
+    */
+    if (!cleanText(url.searchParams.get("sig"), "")) return "";
 
     /*
       En este host/ruta sí se permiten los parámetros SAS de Azure:
@@ -1118,7 +1126,26 @@ function normalizeAttachment(file = {}, index = 0) {
   const id = cleanText(first(raw.id, raw.attachmentId, raw.fileId, `att_${index}`), `att_${index}`);
   const name = safePublicText(first(raw.name, raw.filename, raw.fileName, raw.originalName, `Adjunto ${index + 1}`), `Adjunto ${index + 1}`);
   const contentType = cleanText(first(raw.contentType, raw.mimeType, raw.mimetype, raw.type), "");
-  const url = firstUrl(raw.viewUrl, raw.openUrl, raw.downloadUrl, raw.url, raw.blobUrl, raw.publicUrl, raw.signedUrl);
+
+  /*
+    No usar firstUrl() aquí:
+    safeUrl() rechaza sig= por diseño y una SAS de Azure válida necesita sig=.
+    view/open mantienen la SAS inline; download se mantiene separado.
+    Un blobUrl privado sin firma no se expone como URL renderizable.
+  */
+  const viewUrl = firstAttachmentUrl(
+    raw.viewUrl,
+    raw.openUrl,
+    raw.signedUrl,
+    raw.sasUrl,
+    raw.url,
+    raw.blobUrl,
+    raw.publicUrl
+  );
+
+  const downloadUrl = firstAttachmentUrl(raw.downloadUrl);
+  const signedUrl = firstAttachmentUrl(raw.signedUrl, raw.sasUrl, viewUrl);
+  const url = viewUrl;
   const path = safePublicText(first(raw.path, raw.blobPath, raw.blobName, raw.storagePath, raw.storageKey), "");
 
   return {
@@ -1136,11 +1163,13 @@ function normalizeAttachment(file = {}, index = 0) {
     mimetype: contentType,
     type: cleanText(raw.type, contentType),
     url,
-    viewUrl: firstUrl(raw.viewUrl, url),
-    openUrl: firstUrl(raw.openUrl, url),
-    downloadUrl: firstUrl(raw.downloadUrl, url),
-    blobUrl: firstUrl(raw.blobUrl, url),
-    publicUrl: firstUrl(raw.publicUrl, url),
+    viewUrl,
+    openUrl: viewUrl,
+    downloadUrl,
+    signedUrl: signedUrl || viewUrl,
+    sasUrl: signedUrl || viewUrl,
+    blobUrl: firstAttachmentUrl(raw.blobUrl, viewUrl),
+    publicUrl: firstAttachmentUrl(raw.publicUrl, viewUrl),
     path,
     blobPath: safePublicText(first(raw.blobPath, path), path),
     blobName: safePublicText(first(raw.blobName, path), path),
@@ -2285,6 +2314,9 @@ export function getIncidenciasApiSnapshot() {
       keepsBackendItems: true,
       attachmentSasAllowlist: true,
       attachmentSasRestrictedToTicketsContainer: true,
+      attachmentPrivateBlobRequiresSas: true,
+      attachmentDetailUsesSasSafeNormalizer: true,
+      attachmentUnsignedBlobLocatorNotRendered: true,
       attachmentDownloadUsesSignedUrl: true,
       attachmentDownloadDoesNotBlobApiJson: true,
     },
@@ -2299,6 +2331,8 @@ export function getIncidenciasApiSnapshot() {
       blobHost: ATTACHMENT_BLOB_HOST,
       blobContainer: ATTACHMENT_BLOB_CONTAINER,
       signedUrlsAllowed: true,
+      privateBlobRequiresSignature: true,
+      viewContract: "json_to_inline_sas",
       downloadContract: "json_to_sas",
       directBlobDownload: true,
     },

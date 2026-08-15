@@ -2,7 +2,7 @@
    Onion Support - Incidencias Index
    Archivo: /src/views/incidencias/index.js
 
-   PRODUCTIVO · MODAL DETAIL 10/10 · V13
+   PRODUCTIVO · MODAL DETAIL 10/10 · PREVIEW UX · V14
 
    Contrato:
    - Controlador de la vista Incidencias.
@@ -15,6 +15,8 @@
    - Focus trap real para create/detail.
    - Restaura el foco al elemento que abrió el modal.
    - Escape cierra primero preview; luego modal.
+   - Ver adjunto revela la preview inmediatamente dentro del modal.
+   - Preview protegida contra respuestas SAS fuera de orden.
    - Preserva comentarios multilínea mientras se escribe.
    - Evita re-subir adjuntos si una actualización falla después del upload.
    - Advierte ante refresh/cierre de pestaña con borrador sin enviar.
@@ -63,7 +65,7 @@ import {
 } from "./incidencias.template.modal.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.productivo.modal-10x10.v13";
+  "incidencias.index.productivo.modal-10x10.v14.preview-reveal";
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
@@ -98,6 +100,15 @@ const CREATE_MODAL_OVERLAY_SELECTOR =
 
 const DETAIL_MODAL_OVERLAY_SELECTOR =
   "[data-incidencias-modal-overlay='true']";
+
+const DETAIL_PREVIEW_SELECTOR =
+  "[data-modal-preview='true']";
+
+const DETAIL_PREVIEW_SLOT_SELECTOR =
+  "[data-modal-preview-slot='true']";
+
+const DETAIL_PREVIEW_CLOSE_SELECTOR =
+  `[data-detail-action="${DETAIL_ACTIONS.PREVIEW_CLOSE}"]`;
 
 const FOCUSABLE_SELECTOR = [
   "a[href]",
@@ -1097,6 +1108,7 @@ function createIncidenciasController(
   let loadSeq = 0;
   let userSearchSeq = 0;
   let userSearchTimer = 0;
+  let attachmentPreviewSeq = 0;
 
   /*
      Elemento al que devolvemos el foco al cerrar el modal.
@@ -1744,6 +1756,117 @@ function createIncidenciasController(
     } catch {
       return false;
     }
+  }
+
+  function prefersReducedMotion() {
+    if (!isBrowser()) {
+      return true;
+    }
+
+    try {
+      return Boolean(
+        window.matchMedia?.(
+          "(prefers-reduced-motion: reduce)"
+        )?.matches
+      );
+    } catch {
+      return true;
+    }
+  }
+
+  function revealDetailPreview({
+    focus = true,
+  } = {}) {
+    if (
+      !isBrowser() ||
+      destroyed ||
+      !detailModal.open ||
+      !detailModal.previewFile ||
+      !modalHost?.isConnected
+    ) {
+      return false;
+    }
+
+    const root =
+      modalHost.querySelector(
+        DETAIL_ROOT_SELECTOR
+      );
+
+    const preview =
+      root?.querySelector?.(
+        DETAIL_PREVIEW_SELECTOR
+      ) ||
+      root?.querySelector?.(
+        DETAIL_PREVIEW_SLOT_SELECTOR
+      ) ||
+      null;
+
+    if (!preview) {
+      return false;
+    }
+
+    try {
+      preview.scrollIntoView?.({
+        behavior:
+          prefersReducedMotion()
+            ? "auto"
+            : "smooth",
+
+        block: "center",
+        inline: "nearest",
+      });
+    } catch {
+      try {
+        preview.scrollIntoView?.();
+      } catch {
+        // noop
+      }
+    }
+
+    if (!focus) {
+      return true;
+    }
+
+    const focusTarget =
+      preview.querySelector?.(
+        DETAIL_PREVIEW_CLOSE_SELECTOR
+      ) ||
+      preview;
+
+    if (
+      focusTarget === preview &&
+      !preview.hasAttribute?.("tabindex")
+    ) {
+      preview.setAttribute?.(
+        "tabindex",
+        "-1"
+      );
+    }
+
+    nextFrame(() => {
+      if (
+        destroyed ||
+        !detailModal.open ||
+        !detailModal.previewFile ||
+        !focusTarget?.isConnected
+      ) {
+        return;
+      }
+
+      try {
+        focusTarget.focus?.({
+          preventScroll: true,
+        });
+      } catch {
+        try {
+          focusTarget.focus?.();
+        } catch {
+          // noop
+        }
+      }
+    });
+
+    return true;
   }
 
   function activeElementInside(
@@ -3622,6 +3745,8 @@ function createIncidenciasController(
   ======================================================= */
 
   function resetDetailModal() {
+    attachmentPreviewSeq += 1;
+
     detailModal.open = false;
     detailModal.detail = null;
 
@@ -4301,13 +4426,23 @@ function createIncidenciasController(
 
     if (
       !id ||
-      !ticketId
+      !ticketId ||
+      !detailModal.open
     ) {
       return false;
     }
 
+    const sequence =
+      ++attachmentPreviewSeq;
+
     detailModal.openingAttachmentId =
       id;
+
+    detailModal.feedbackMessage =
+      "";
+
+    detailModal.feedbackType =
+      "info";
 
     renderModals({
       immediate: true,
@@ -4320,15 +4455,94 @@ function createIncidenciasController(
           attachmentId: id,
         });
 
+      /*
+         Carrera protegida:
+         si el usuario abre otro adjunto, cambia de incidencia,
+         cierra la preview o cierra el modal mientras llega la SAS,
+         esta respuesta deja de tener autoridad para pintar.
+      */
+      if (
+        destroyed ||
+        sequence !== attachmentPreviewSeq ||
+        !detailModal.open ||
+        getTicketId(
+          detailModal.detail
+        ) !== ticketId
+      ) {
+        return false;
+      }
+
+      const normalizedFile =
+        safeObject(
+          file,
+          {}
+        );
+
+      const previewUrl =
+        cleanText(
+          first(
+            normalizedFile.viewUrl,
+            normalizedFile.openUrl,
+            normalizedFile.signedUrl,
+            normalizedFile.sasUrl,
+            normalizedFile.url
+          ),
+          ""
+        );
+
+      /*
+         La allowlist y la validación SAS pertenecen exclusivamente
+         a incidencias.api.js. Aquí no relajamos seguridad ni volvemos
+         a interpretar URLs: sólo exigimos que /view haya producido una
+         URL renderizable después de pasar por esa capa.
+      */
+      if (!previewUrl) {
+        const previewError =
+          new Error(
+            "El backend no devolvió una URL temporal válida para visualizar el adjunto."
+          );
+
+        previewError.code =
+          "INCIDENCIA_ATTACHMENT_VIEW_URL_MISSING";
+
+        throw previewError;
+      }
+
       detailModal.previewFile = {
         ...safeObject(
           getAttachmentById(id)
         ),
 
-        ...safeObject(file),
+        ...normalizedFile,
 
         id,
         attachmentId: id,
+
+        url: previewUrl,
+
+        viewUrl:
+          cleanText(
+            normalizedFile.viewUrl,
+            previewUrl
+          ),
+
+        openUrl:
+          cleanText(
+            normalizedFile.openUrl,
+            previewUrl
+          ),
+
+        signedUrl:
+          cleanText(
+            normalizedFile.signedUrl,
+            previewUrl
+          ),
+
+        sasUrl:
+          cleanText(
+            normalizedFile.sasUrl,
+            previewUrl
+          ),
       };
 
       detailModal.openingAttachmentId =
@@ -4338,8 +4552,23 @@ function createIncidenciasController(
         immediate: true,
       });
 
+      /*
+         La preview del template está situada por encima de
+         "Documentos actuales". immediate=true garantiza que ya existe
+         en DOM antes de revelarla.
+      */
+      revealDetailPreview({
+        focus: true,
+      });
+
       return true;
     } catch (attachmentError) {
+      if (
+        sequence !== attachmentPreviewSeq
+      ) {
+        return false;
+      }
+
       detailModal.openingAttachmentId =
         "";
 
@@ -4436,6 +4665,11 @@ function createIncidenciasController(
   }
 
   function closePreview() {
+    attachmentPreviewSeq += 1;
+
+    detailModal.openingAttachmentId =
+      "";
+
     detailModal.previewFile =
       null;
 
@@ -5533,6 +5767,14 @@ function createIncidenciasController(
             detailModal.previewFile
           ),
 
+        attachmentPreviewBusy:
+          Boolean(
+            detailModal.openingAttachmentId
+          ),
+
+        attachmentPreviewRaceSeq:
+          attachmentPreviewSeq,
+
         modalHost:
           Boolean(
             modalHost?.isConnected
@@ -5631,6 +5873,12 @@ function createIncidenciasController(
           detailMultilinePreserved: true,
           detailUploadLimitsEarly: true,
           detailPartialSuccessAware: true,
+
+          attachmentPreviewUsesApiViewContract: true,
+          attachmentPreviewRequiresValidatedUrl: true,
+          attachmentPreviewScrollIntoView: true,
+          attachmentPreviewFocusAfterOpen: true,
+          attachmentPreviewRaceProtected: true,
 
           filteredListNoStateMutation: true,
           firstDoesNotFlattenArrays: true,

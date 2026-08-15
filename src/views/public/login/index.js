@@ -3,34 +3,24 @@
    Archivo: /src/views/public/login/index.js
 
    Responsabilidad:
-   - Controlador mínimo de la vista Login pública.
-   - Montar el template recibido desde ./template.js.
-   - Leer refs por contrato data-*.
-   - Activar controles mínimos del password ya pintados por template.
-   - Validar formulario mínimo.
-   - Llamar Auth.login().
-   - Delegar navegación post-login en Router.
-   - Gestionar loading/error del formulario.
-   - Sin HTML inline.
-   - Sin construir campos.
-   - Sin logo/card/layout.
-   - Sin shared/password-field inexistente.
+   - Controlador mínimo y robusto del login público.
+   - Montar el DOM recibido desde ./template.js.
+   - Mantener intacto el contrato real de Auth.login().
+   - Gestionar password visible, Caps Lock, loading y errores.
+   - Delegar la navegación post-login exclusivamente al Router.
    - Sin HTTP directo.
    - Sin Store.
-   - Sin Toast directo.
    - Sin storage.
-   - Sin eventos globales.
-   - Sin navegación browser paralela.
+   - Sin HTML de layout inline.
 ========================================================= */
 
 import { AppCore } from "../../../core/index.js";
 import { Auth as DefaultAuth } from "../../../features/auth/index.js";
 import createLoginTemplate from "./template.js";
 
-export const LOGIN_VIEW_VERSION = "login.view.public.controller.v4";
+export const LOGIN_VIEW_VERSION = "login.view.public.controller.v5-portal-2026";
 
 const SOURCE = "login.view";
-
 const INSTANCES = new WeakMap();
 
 let lastInstance = null;
@@ -45,10 +35,6 @@ function isBrowser() {
 
 function isFunction(value) {
   return typeof value === "function";
-}
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function cleanText(value = "", fallback = "") {
@@ -122,9 +108,7 @@ function focusSafe(node = null) {
   if (!node) return false;
 
   try {
-    node.focus({
-      preventScroll: true,
-    });
+    node.focus({ preventScroll: true });
   } catch {
     try {
       node.focus?.();
@@ -183,7 +167,6 @@ async function goAfterLogin(result = {}, context = {}) {
   }
 
   const target = resolvePostLoginTarget(result, auth);
-
   const options = {
     source: SOURCE,
     replaceState: true,
@@ -245,15 +228,24 @@ function getRefs(root = null) {
 
     form: root.querySelector("[data-login-form]"),
     identifier: root.querySelector("[data-login-identifier]"),
-    password: root.querySelector("[data-login-password], [data-password-input]"),
+    password: root.querySelector(
+      "[data-login-password], [data-password-input]"
+    ),
     submit: root.querySelector("[data-login-submit]"),
+    submitLabel: root.querySelector("[data-login-submit-label]"),
 
     globalError: root.querySelector("[data-login-global-error]"),
-    identifierError: root.querySelector("[data-login-error='identifier']"),
-    passwordError: root.querySelector("[data-login-error='password']"),
+    identifierError: root.querySelector(
+      "[data-login-error='identifier']"
+    ),
+    passwordError: root.querySelector(
+      "[data-login-error='password']"
+    ),
 
     passwordWrapper: root.querySelector("[data-password-wrapper]"),
-    passwordToggle: root.querySelector("[data-password-toggle], [data-login-password-toggle]"),
+    passwordToggle: root.querySelector(
+      "[data-password-toggle], [data-login-password-toggle]"
+    ),
     passwordCaps: root.querySelector("[data-password-caps]"),
     passwordEye: root.querySelector(".password-eye-icon"),
     passwordEyeOff: root.querySelector(".password-eye-off-icon"),
@@ -306,7 +298,10 @@ function setPasswordVisible(refs, visible = false) {
   refs.password.dataset.passwordVisible = value ? "true" : "false";
 
   if (refs.passwordToggle) {
-    refs.passwordToggle.setAttribute("aria-pressed", value ? "true" : "false");
+    refs.passwordToggle.setAttribute(
+      "aria-pressed",
+      value ? "true" : "false"
+    );
     refs.passwordToggle.setAttribute(
       "aria-label",
       value ? "Ocultar contraseña" : "Mostrar contraseña"
@@ -384,7 +379,6 @@ function initPasswordControls(refs) {
     if (destroyed) return false;
 
     setCapsVisible(refs, false);
-
     return true;
   }
 
@@ -413,8 +407,14 @@ function initPasswordControls(refs) {
       visible = false;
 
       try {
-        refs.passwordToggle?.removeEventListener("mousedown", keepPasswordFocus);
-        refs.passwordToggle?.removeEventListener("click", toggleVisibility);
+        refs.passwordToggle?.removeEventListener(
+          "mousedown",
+          keepPasswordFocus
+        );
+        refs.passwordToggle?.removeEventListener(
+          "click",
+          toggleVisibility
+        );
 
         refs.password?.removeEventListener("keydown", syncCaps);
         refs.password?.removeEventListener("keyup", syncCaps);
@@ -494,8 +494,32 @@ function clearErrors(refs) {
 function setGlobalError(refs, message = "") {
   if (!refs.globalError) return false;
 
-  refs.globalError.textContent = cleanText(message, "No se pudo iniciar sesión.");
+  refs.globalError.textContent = cleanText(
+    message,
+    "No se pudo iniciar sesión."
+  );
   refs.globalError.hidden = false;
+
+  return true;
+}
+
+function setSubmitLabel(refs, loading = false) {
+  const submit = refs?.submit;
+
+  if (!submit) return false;
+
+  const defaultText = cleanText(
+    submit.dataset.defaultText,
+    "Entrar al panel"
+  );
+  const loadingText = cleanText(
+    submit.dataset.loadingText,
+    "Accediendo..."
+  );
+
+  const target = refs.submitLabel || submit;
+
+  target.textContent = loading ? loadingText : defaultText;
 
   return true;
 }
@@ -504,7 +528,11 @@ function setLoading(refs, loading = false, passwordControls = null) {
   const value = Boolean(loading);
   const busy = value ? "true" : "false";
 
-  for (const node of [refs.identifier, refs.password, refs.submit].filter(Boolean)) {
+  for (const node of [
+    refs.identifier,
+    refs.password,
+    refs.submit,
+  ].filter(Boolean)) {
     node.disabled = value;
   }
 
@@ -513,6 +541,7 @@ function setLoading(refs, loading = false, passwordControls = null) {
   if (refs.submit) {
     refs.submit.dataset.loading = busy;
     refs.submit.setAttribute("aria-busy", busy);
+    setSubmitLabel(refs, value);
   }
 
   if (refs.form) {
@@ -568,7 +597,10 @@ function authErrorMessage(error = null) {
       0
   );
 
-  const code = cleanText(error?.code || error?.error || "", "").toUpperCase();
+  const code = cleanText(
+    error?.code || error?.error || "",
+    ""
+  ).toUpperCase();
 
   if (
     status === 401 ||
@@ -596,7 +628,10 @@ function authErrorMessage(error = null) {
     return "El servidor no respondió correctamente. Inténtalo de nuevo.";
   }
 
-  return cleanText(error?.message || "", "No se pudo iniciar sesión.");
+  return cleanText(
+    error?.message || "",
+    "No se pudo iniciar sesión."
+  );
 }
 
 /* =========================================================
@@ -607,10 +642,7 @@ function destroyPrevious(container) {
   const previous = INSTANCES.get(container);
 
   if (previous?.destroy) {
-    previous.destroy({
-      remount: true,
-    });
-
+    previous.destroy({ remount: true });
     return true;
   }
 
@@ -700,7 +732,10 @@ export function renderLoginView(container, context = {}) {
 
       if (!mounted) return false;
 
-      if (result?.authenticated !== true && auth.isAuthenticated?.() !== true) {
+      if (
+        result?.authenticated !== true &&
+        auth.isAuthenticated?.() !== true
+      ) {
         throw new Error("Login inválido.");
       }
 
@@ -712,7 +747,9 @@ export function renderLoginView(container, context = {}) {
       if (!mounted) return false;
 
       if (navigation === false || navigation?.ok === false) {
-        throw new Error("No se pudo completar la navegación tras el login.");
+        throw new Error(
+          "No se pudo completar la navegación tras el login."
+        );
       }
 
       return true;
@@ -743,9 +780,7 @@ export function renderLoginView(container, context = {}) {
 
   const instance = {
     version: LOGIN_VIEW_VERSION,
-
     root: view,
-
     submit,
 
     unlock() {
@@ -784,7 +819,8 @@ export function renderLoginView(container, context = {}) {
 
     getSnapshot() {
       const activeAuth = getAuth(context);
-      const authenticated = activeAuth?.isAuthenticated?.() === true;
+      const authenticated =
+        activeAuth?.isAuthenticated?.() === true;
 
       return {
         version: LOGIN_VIEW_VERSION,

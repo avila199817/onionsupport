@@ -2,20 +2,12 @@
    Onion Support - Login Template
    Archivo: /src/views/public/login/template.js
 
-   Responsabilidad:
-   - Construir sólo el DOM/HTML del login público.
-   - Usar el layout común de /src/views/public/index.js.
-   - Pintar usuario/email, contraseña, botón Entrar y recuperación.
-   - Exponer data-* consumidos por index.js.
-   - Exponer contrato DOM data-password-* para password controls.
-   - Sin Auth.
-   - Sin Router.
-   - Sin HTTP.
-   - Sin Store.
-   - Sin Toast.
-   - Sin validación.
-   - Sin eventos.
-   - Sin imports inexistentes del shared password.
+   Diseño:
+   - Portal auth premium alineado con el Public Home.
+   - Paleta azul / navy / cyan de Onion Support.
+   - Datos públicos reales: +8 años / +300 clientes atendidos.
+   - Sin claims inventados, sin login social, sin OTP.
+   - Mantiene intactos los data-* consumidos por index.js.
 ========================================================= */
 
 import { ROUTES } from "../../../core/config.js";
@@ -29,10 +21,13 @@ import {
   safeInternalHref,
 } from "../index.js";
 
-export const LOGIN_TEMPLATE_VERSION = "login.template.public.v5";
+export const LOGIN_TEMPLATE_VERSION =
+  "login.template.public.v6-portal-2026";
 
 const APP_NAME = "Onion Support";
-const PASSWORD_REQUEST_HREF = ROUTES.passwordRequest || "/password-request";
+const HOME_HREF = "/";
+const PASSWORD_REQUEST_HREF =
+  ROUTES.passwordRequest || "/password-request";
 
 const MAX_IDENTIFIER_LENGTH = 160;
 const MAX_PASSWORD_LENGTH = 1024;
@@ -57,7 +52,20 @@ function dataFlag(name = "") {
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "");
 
-  return clean ? `data-${escapeAttr(clean)}="true"` : "";
+  return clean
+    ? `data-${escapeAttr(clean)}="true"`
+    : "";
+}
+
+function homeAnchor(hash = "") {
+  const cleanHash = text(hash, "")
+    .replace(/^#/, "")
+    .replace(/[^a-z0-9-]/gi, "");
+
+  return safeInternalHref(
+    cleanHash ? `/#${cleanHash}` : HOME_HREF,
+    HOME_HREF
+  );
 }
 
 /* =========================================================
@@ -103,33 +111,67 @@ function renderIcon(name = "") {
         <path d="M7.75 20.25h8.5"></path>
       </svg>
     `,
+
+    shield: `
+      <svg class="login-feature-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M12 3.75 19.25 6v5.5c0 4.42-2.95 7.28-7.25 8.75-4.3-1.47-7.25-4.33-7.25-8.75V6L12 3.75Z"></path>
+        <path d="m8.75 12 2.15 2.15 4.35-4.65"></path>
+      </svg>
+    `,
+
+    bolt: `
+      <svg class="login-feature-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M13.25 2.75 5.75 13h5L10.75 21.25 18.25 10h-5l.25-7.25Z"></path>
+      </svg>
+    `,
+
+    invoice: `
+      <svg class="login-feature-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M7.25 3.75h9.5v16.5l-2-1.2-2.75 1.2-2.75-1.2-2 1.2V3.75Z"></path>
+        <path d="M9.25 8h5.5"></path>
+        <path d="M9.25 11.75h5.5"></path>
+        <path d="M9.25 15.5h3"></path>
+      </svg>
+    `,
+
+    arrow: `
+      <svg class="login-arrow-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M5 12h13"></path>
+        <path d="m13 6 6 6-6 6"></path>
+      </svg>
+    `,
   };
 
   return icons[name] || "";
 }
 
 /* =========================================================
-   LOGO
+   LOGO / BRAND
 ========================================================= */
 
-function renderLoginLogo() {
-  const logoSrc = safeAssetSrc(PUBLIC_AUTH_LOGO, PUBLIC_AUTH_LOGO);
+function renderLogo({
+  shellClass = "login-brand-mark",
+  imageClass = "login-brand-logo",
+  size = 72,
+} = {}) {
+  const logoSrc = safeAssetSrc(
+    PUBLIC_AUTH_LOGO,
+    PUBLIC_AUTH_LOGO
+  );
 
   return `
-    <div class="login-card-logo-wrap" aria-label="${escapeAttr(APP_NAME)}">
-      <span class="login-card-logo-shell" aria-hidden="true">
-        <img
-          class="login-card-logo"
-          src="${escapeAttr(logoSrc)}"
-          alt=""
-          width="96"
-          height="96"
-          loading="eager"
-          decoding="async"
-          draggable="false"
-        >
-      </span>
-    </div>
+    <span class="${escapeAttr(shellClass)}" aria-hidden="true">
+      <img
+        class="${escapeAttr(imageClass)}"
+        src="${escapeAttr(logoSrc)}"
+        alt=""
+        width="${escapeAttr(size)}"
+        height="${escapeAttr(size)}"
+        loading="eager"
+        decoding="async"
+        draggable="false"
+      >
+    </span>
   `;
 }
 
@@ -137,58 +179,53 @@ function renderLoginLogo() {
    FIELD
 ========================================================= */
 
-function renderIdentifierField({
-  id,
-  name,
-  label,
-  autocomplete = "",
-  placeholder = "",
-  icon = "user",
-  dataKey = "",
-  enterKeyHint = "",
-} = {}) {
-  const cleanId = text(id, "");
-  const cleanName = text(name, "");
-  const cleanLabel = text(label, cleanName);
-  const cleanAutocomplete = text(autocomplete, "");
-  const cleanPlaceholder = text(placeholder, cleanLabel);
-  const cleanEnterKeyHint = text(enterKeyHint, "");
+function renderIdentifierField() {
+  const id = "login-identifier";
+  const name = "identifier";
+  const label = "Usuario o email";
 
   return `
     <div
-      class="auth-field login-field login-field-card login-field--identifier login-field--no-label"
-      data-login-field="${escapeAttr(cleanName)}"
+      class="auth-field login-field login-field-card login-field--identifier"
+      data-login-field="${escapeAttr(name)}"
     >
+      <label
+        class="auth-label login-label"
+        for="${escapeAttr(id)}"
+      >
+        ${escapeHtml(label)}
+      </label>
+
       <div class="login-input-shell">
         <span class="login-input-icon" aria-hidden="true">
-          ${renderIcon(icon)}
+          ${renderIcon("user")}
         </span>
 
         <input
           class="auth-input login-input input-text"
-          id="${escapeAttr(cleanId)}"
-          name="${escapeAttr(cleanName)}"
+          id="${escapeAttr(id)}"
+          name="${escapeAttr(name)}"
           type="text"
-          autocomplete="${escapeAttr(cleanAutocomplete)}"
+          autocomplete="username"
           inputmode="text"
-          placeholder="${escapeAttr(cleanPlaceholder)}"
+          placeholder="usuario@empresa.com"
           maxlength="${escapeAttr(MAX_IDENTIFIER_LENGTH)}"
           required
           spellcheck="false"
           autocapitalize="none"
-          aria-label="${escapeAttr(cleanLabel)}"
+          aria-label="${escapeAttr(label)}"
           aria-invalid="false"
-          aria-describedby="${escapeAttr(cleanId)}-error"
-          ${cleanEnterKeyHint ? `enterkeyhint="${escapeAttr(cleanEnterKeyHint)}"` : ""}
-          data-login-input="${escapeAttr(cleanName)}"
-          ${dataFlag(dataKey)}
+          aria-describedby="${escapeAttr(id)}-error"
+          enterkeyhint="next"
+          data-login-input="${escapeAttr(name)}"
+          ${dataFlag("login-identifier")}
         >
       </div>
 
       <p
         class="auth-field-error login-field-error"
-        id="${escapeAttr(cleanId)}-error"
-        data-login-error="${escapeAttr(cleanName)}"
+        id="${escapeAttr(id)}-error"
+        data-login-error="${escapeAttr(name)}"
         aria-live="polite"
         hidden
       ></p>
@@ -203,11 +240,18 @@ function renderPasswordField() {
 
   return `
     <div
-      class="auth-field login-field login-field-card login-field--password login-field--no-label"
+      class="auth-field login-field login-field-card login-field--password"
       data-login-field="password"
       data-login-password-field="true"
       data-password-field="true"
     >
+      <label
+        class="auth-label login-label"
+        for="${escapeAttr(id)}"
+      >
+        Contraseña
+      </label>
+
       <div
         class="password-wrapper login-password-wrapper login-input-shell"
         data-password-wrapper="true"
@@ -222,7 +266,7 @@ function renderPasswordField() {
           name="password"
           type="password"
           autocomplete="current-password"
-          placeholder="Introduce tu contraseña"
+          placeholder="Tu contraseña"
           maxlength="${escapeAttr(MAX_PASSWORD_LENGTH)}"
           required
           spellcheck="false"
@@ -246,7 +290,10 @@ function renderPasswordField() {
           data-password-toggle="true"
           data-login-password-toggle="true"
         >
-          <span class="password-toggle-icon" data-password-toggle-icon="true">
+          <span
+            class="password-toggle-icon"
+            data-password-toggle-icon="true"
+          >
             ${renderIcon("eye")}
             ${renderIcon("eyeOff")}
           </span>
@@ -260,11 +307,18 @@ function renderPasswordField() {
           data-password-caps="true"
           hidden
         >
-          <span class="caps-icon" data-password-caps-icon-wrapper="true" aria-hidden="true">
+          <span
+            class="caps-icon"
+            data-password-caps-icon-wrapper="true"
+            aria-hidden="true"
+          >
             ${renderIcon("caps")}
           </span>
 
-          <span class="caps-label" data-password-caps-label="true">
+          <span
+            class="caps-label"
+            data-password-caps-label="true"
+          >
             Bloq Mayús
           </span>
         </span>
@@ -282,15 +336,270 @@ function renderPasswordField() {
 }
 
 /* =========================================================
-   TEMPLATE
+   SHOWCASE
 ========================================================= */
 
-export function getLoginTemplate() {
+function renderFeature(icon, title, textValue) {
+  return `
+    <article class="login-showcase-feature">
+      <span class="login-showcase-feature-icon" aria-hidden="true">
+        ${renderIcon(icon)}
+      </span>
+
+      <span class="login-showcase-feature-copy">
+        <strong>${escapeHtml(title)}</strong>
+        <span>${escapeHtml(textValue)}</span>
+      </span>
+    </article>
+  `;
+}
+
+function renderShowcase() {
+  return `
+    <section
+      class="login-showcase"
+      aria-labelledby="login-showcase-title"
+    >
+      <div class="login-showcase-copy">
+        <p class="login-showcase-eyebrow">
+          Área privada · Onion Support
+        </p>
+
+        <h1
+          class="login-showcase-title"
+          id="login-showcase-title"
+        >
+          Bienvenido de nuevo a
+          <span>Onion Support</span>
+        </h1>
+
+        <p class="login-showcase-text">
+          Accede a tu panel para gestionar soporte, incidencias
+          y documentación desde un entorno rápido y seguro.
+        </p>
+      </div>
+
+      <div
+        class="login-showcase-features"
+        aria-label="Ventajas del servicio"
+      >
+        ${renderFeature(
+          "bolt",
+          "Respuesta ágil",
+          "Seguimiento claro y comunicación directa."
+        )}
+
+        ${renderFeature(
+          "shield",
+          "Profesional",
+          "Soporte técnico con criterio y trazabilidad."
+        )}
+
+        ${renderFeature(
+          "invoice",
+          "Factura disponible",
+          "Documentación y facturación cuando corresponda."
+        )}
+      </div>
+
+      <div
+        class="login-showcase-metrics"
+        aria-label="Experiencia de Onion Support"
+      >
+        <article class="login-showcase-metric">
+          <strong>+8</strong>
+          <span>años de experiencia</span>
+        </article>
+
+        <article class="login-showcase-metric">
+          <strong>+300</strong>
+          <span>clientes atendidos</span>
+        </article>
+      </div>
+
+      <div class="login-orbit" aria-hidden="true">
+        <span class="login-orbit-ring login-orbit-ring--one"></span>
+        <span class="login-orbit-ring login-orbit-ring--two"></span>
+        <span class="login-orbit-ring login-orbit-ring--three"></span>
+        <span class="login-orbit-core"></span>
+      </div>
+    </section>
+  `;
+}
+
+/* =========================================================
+   TOPBAR
+========================================================= */
+
+function renderTopbar() {
+  const homeHref = homeAnchor("");
+  const servicesHref = homeAnchor("servicios");
+  const methodHref = homeAnchor("metodo");
+  const contactHref = homeAnchor("contacto");
+  const faqHref = homeAnchor("faq");
+
+  return `
+    <header class="login-topbar">
+      <a
+        class="login-topbar-brand"
+        href="${escapeAttr(homeHref)}"
+        data-spa="true"
+        data-router-link="true"
+        data-route="${escapeAttr(homeHref)}"
+        aria-label="Volver a Onion Support"
+      >
+        ${renderLogo({
+          shellClass: "login-brand-mark",
+          imageClass: "login-brand-logo",
+          size: 52,
+        })}
+
+        <span class="login-brand-wordmark" aria-hidden="true">
+          <strong>ONION</strong><span>SUPPORT</span>
+        </span>
+      </a>
+
+      <nav
+        class="login-topbar-nav"
+        aria-label="Navegación pública"
+      >
+        <a href="${escapeAttr(homeHref)}">Inicio</a>
+        <a href="${escapeAttr(servicesHref)}">Servicios</a>
+        <a href="${escapeAttr(methodHref)}">Método</a>
+        <a href="${escapeAttr(contactHref)}">Contacto</a>
+        <a href="${escapeAttr(faqHref)}">FAQ</a>
+      </nav>
+
+      <span
+        class="login-topbar-panel"
+        aria-current="page"
+      >
+        Panel cliente
+      </span>
+    </header>
+  `;
+}
+
+/* =========================================================
+   LOGIN CARD
+========================================================= */
+
+function renderLoginCard() {
   const forgotHref = safeInternalHref(
     PASSWORD_REQUEST_HREF,
     "/password-request"
   );
 
+  return `
+    <section
+      class="login-card-panel login-card-panel--portal"
+      aria-labelledby="login-panel-title"
+      data-login-card="true"
+      data-login-card-size="portal"
+    >
+      <div class="login-card-sheen" aria-hidden="true"></div>
+
+      <header class="login-card-header">
+        <div
+          class="login-card-logo-wrap"
+          aria-label="${escapeAttr(APP_NAME)}"
+        >
+          ${renderLogo({
+            shellClass: "login-card-logo-shell",
+            imageClass: "login-card-logo",
+            size: 96,
+          })}
+        </div>
+
+        <h2
+          class="login-card-title"
+          id="login-panel-title"
+        >
+          Iniciar sesión
+        </h2>
+
+        <p class="login-card-subtitle">
+          Accede a tu cuenta de Onion Support.
+        </p>
+      </header>
+
+      <p
+        class="auth-error login-global-error"
+        data-login-global-error="true"
+        role="alert"
+        aria-live="polite"
+        hidden
+      ></p>
+
+      <form
+        class="auth-form login-form login-form--portal"
+        id="login-form"
+        autocomplete="on"
+        novalidate
+        data-login-form="true"
+      >
+        ${renderIdentifierField()}
+        ${renderPasswordField()}
+
+        <div class="login-form-row">
+          <span class="login-form-note">
+            Acceso seguro
+          </span>
+
+          <a
+            class="auth-link login-link login-forgot-link"
+            href="${escapeAttr(forgotHref)}"
+            data-spa="true"
+            data-router-link="true"
+            data-route="${escapeAttr(forgotHref)}"
+            data-href="${escapeAttr(forgotHref)}"
+            data-login-forgot-password="true"
+          >
+            ¿Has olvidado tu contraseña?
+          </a>
+        </div>
+
+        <button
+          class="auth-button auth-submit login-submit"
+          type="submit"
+          data-login-submit="true"
+          data-default-text="Entrar al panel"
+          data-loading-text="Accediendo..."
+        >
+          <span data-login-submit-label="true">
+            Entrar al panel
+          </span>
+          ${renderIcon("arrow")}
+        </button>
+
+        <div class="login-card-security" aria-label="Acceso protegido">
+          <span class="login-card-security-icon" aria-hidden="true">
+            ${renderIcon("shield")}
+          </span>
+
+          <span>
+            Tus credenciales se envían mediante la sesión segura de Onion Support.
+          </span>
+        </div>
+      </form>
+
+      <footer
+        class="login-card-footer login-card-footer--single"
+        aria-label="Información de Onion Support"
+      >
+        <span>
+          Onion Support · © 2026 · Todos los derechos reservados.
+        </span>
+      </footer>
+    </section>
+  `;
+}
+
+/* =========================================================
+   TEMPLATE
+========================================================= */
+
+export function getLoginTemplate() {
   return renderPublicShell({
     view: "login",
     appName: APP_NAME,
@@ -299,101 +608,23 @@ export function getLoginTemplate() {
 
     body: `
       <section
-        class="login-pro login-pro--narrow"
-        aria-labelledby="login-panel-title"
+        class="login-pro login-pro--portal"
+        aria-label="Acceso a Onion Support"
         data-login-template-version="${escapeAttr(LOGIN_TEMPLATE_VERSION)}"
-        data-login-density="compact"
+        data-login-density="portal"
       >
-        <div class="login-orb login-orb-primary" aria-hidden="true"></div>
-        <div class="login-orb login-orb-secondary" aria-hidden="true"></div>
-        <div class="login-grid-glow" aria-hidden="true"></div>
+        <div class="login-page-glow login-page-glow--one" aria-hidden="true"></div>
+        <div class="login-page-glow login-page-glow--two" aria-hidden="true"></div>
+        <div class="login-page-grid" aria-hidden="true"></div>
 
-        <section
-          class="login-card-panel login-card-panel--narrow"
-          aria-labelledby="login-panel-title"
-          data-login-card="true"
-          data-login-card-size="narrow"
-        >
-          <div class="login-card-sheen" aria-hidden="true"></div>
+        <div class="login-portal-frame">
+          ${renderTopbar()}
 
-          <header class="login-card-header">
-            ${renderLoginLogo()}
-
-            <h2
-              class="login-card-title"
-              id="login-panel-title"
-            >
-              Entra en tu panel
-            </h2>
-
-            <p class="login-card-subtitle">
-              Introduce tus credenciales para continuar.
-            </p>
-          </header>
-
-          <p
-            class="auth-error login-global-error"
-            data-login-global-error="true"
-            role="alert"
-            aria-live="polite"
-            hidden
-          ></p>
-
-          <form
-            class="auth-form login-form login-form--compact"
-            id="login-form"
-            autocomplete="on"
-            novalidate
-            data-login-form="true"
-          >
-            ${renderIdentifierField({
-              id: "login-identifier",
-              name: "identifier",
-              label: "Usuario o email",
-              autocomplete: "username",
-              placeholder: "usuario@empresa.com",
-              icon: "user",
-              dataKey: "login-identifier",
-              enterKeyHint: "next",
-            })}
-
-            ${renderPasswordField()}
-
-            <div class="login-form-row">
-              <span class="login-form-note">
-                Acceso seguro
-              </span>
-
-            <a
-              class="auth-link login-link login-forgot-link"
-              href="${escapeAttr(forgotHref)}"
-              data-spa="true"
-              data-router-link="true"
-              data-route="${escapeAttr(forgotHref)}"
-              data-href="${escapeAttr(forgotHref)}"
-              data-login-forgot-password="true"
-            >
-              ¿Has olvidado tu contraseña?
-            </a>
-            </div>
-
-            <button
-              class="auth-button auth-submit login-submit"
-              type="submit"
-              data-login-submit="true"
-              data-default-text="Entrar al panel"
-              data-loading-text="Accediendo..."
-            >
-              Entrar al panel
-            </button>
-          </form>
-
-          <footer class="login-card-footer login-card-footer--single" aria-label="Información de Onion Support">
-            <span>
-              Acceso registrado · Onion Support · © 2026 · Todos los derechos reservados.
-            </span>
-          </footer>
-        </section>
+          <main class="login-portal-main">
+            ${renderShowcase()}
+            ${renderLoginCard()}
+          </main>
+        </div>
       </section>
     `,
   });

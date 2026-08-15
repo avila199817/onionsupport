@@ -8,6 +8,7 @@
    - Resolver /@{slug} y /@{slug}/{ruta}.
    - Resolver aliases legacy declarados en routes.js.
    - Mantener /password-reset?token=... como token route pública.
+   - Compatibilidad segura con /activate-account/<token> sin persistir el token.
    - Permitir que la vista reciba el token sólo en memoria.
    - NO copiar tokens a AppCore.state, history.state ni data-* del DOM.
    - Validar slug real del usuario autenticado.
@@ -42,7 +43,7 @@ import {
 import * as Routes from "./routes.js";
 
 export const ROUTER_VERSION =
-  "router.minimal.v9-transition-safe";
+  "router.minimal.v9.1-activation-path-token-hardened";
 
 const PUBLIC_HOME_PATH = "/";
 
@@ -73,6 +74,12 @@ const LEGACY_RESET_TOKEN_PATH =
 
 const LEGACY_RESET_TOKEN_REDACT =
   /(\/(?:reset-password|password-reset)\/confirm\/)([^/?#\s]+)/gi;
+
+const LEGACY_ACTIVATION_TOKEN_PATH =
+  /^\/activate-account\/([^/?#]+)(?:\/)?$/i;
+
+const LEGACY_ACTIVATION_TOKEN_REDACT =
+  /(\/activate-account\/)([^/?#\s]+)/gi;
 
 const DEFAULT_SENSITIVE_QUERY_PARAMS =
   [
@@ -203,10 +210,15 @@ function redactLegacyResetToken(
 ) {
   return String(
     value ?? ""
-  ).replace(
-    LEGACY_RESET_TOKEN_REDACT,
-    "$1***"
-  );
+  )
+    .replace(
+      LEGACY_RESET_TOKEN_REDACT,
+      "$1***"
+    )
+    .replace(
+      LEGACY_ACTIVATION_TOKEN_REDACT,
+      "$1***"
+    );
 }
 
 function redact(
@@ -766,13 +778,52 @@ function withSearchHashFrom(
 function isLegacyResetTokenPath(
   path = HOME_PATH
 ) {
-  return (
+  const pathname =
+    publicPathname(
+      path
+    );
+
+  return Boolean(
     LEGACY_RESET_TOKEN_PATH.test(
-      publicPathname(
-        path
-      )
+      pathname
+    ) ||
+    LEGACY_ACTIVATION_TOKEN_PATH.test(
+      pathname
     )
   );
+}
+
+function sensitivePathCanonical(
+  path = HOME_PATH
+) {
+  const pathname =
+    publicPathname(
+      path
+    );
+
+  if (
+    LEGACY_RESET_TOKEN_PATH.test(
+      pathname
+    )
+  ) {
+    return (
+      ROUTES.passwordReset ||
+      "/password-reset"
+    );
+  }
+
+  if (
+    LEGACY_ACTIVATION_TOKEN_PATH.test(
+      pathname
+    )
+  ) {
+    return (
+      ROUTES.activateAccount ||
+      "/activate-account"
+    );
+  }
+
+  return "";
 }
 
 function canonicalLookupPath(
@@ -1086,18 +1137,16 @@ function stateSafePublicPath(
       HOME_PATH
     );
 
-  if (
-    isLegacyResetTokenPath(
+  const sensitiveCanonical =
+    sensitivePathCanonical(
       publicPath
-    )
+    );
+
+  if (
+    sensitiveCanonical
   ) {
     return normalizePathname(
-      match
-        ?.canonicalPath ||
-      canonicalPathFromPublicPath(
-        publicPath
-      ) ||
-      HOME_PATH
+      sensitiveCanonical
     );
   }
 

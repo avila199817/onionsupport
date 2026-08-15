@@ -263,7 +263,7 @@
      frente al shell privado.
 ========================================================= */
 
-@import url("./auth/login.css") layer(auth);
+@import url("./auth/login.css");
 
 
 /* =========================================================
@@ -290,4 +290,4 @@
      .public-auth-shell--home y .public-home.
 ========================================================= */
 
-@import url("./views/public/index.css") layer(auth);
+@import url("./views/public/index.css");

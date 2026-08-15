@@ -2,7 +2,7 @@
    Onion Support - Route Styles
    Archivo: /src/router/styles.js
 
-   ROUTE CSS LOADER · V2 DIRECT MANIFEST · SAFE GATED
+   ROUTE CSS LOADER · V4 · DIRECT MANIFEST · SAFE GATED
 
    IMPORTANTE:
    - NO crea wrappers CSS.
@@ -10,10 +10,12 @@
    - Mientras el contrato de capas no esté listo, este loader queda
      desactivado aunque exista el archivo.
    - No lee publicPath, query, hash ni tokens.
+   - Usuarios reutiliza incidencias/detail.css porque su modal de detalle
+     emite el contrato visual compartido incidencias-modal-*.
 ========================================================= */
 
 export const ROUTE_STYLES_VERSION =
-  "route-styles.v3-clear-fallback-safe-gated";
+  "route-styles.v4-usuarios-detail-shared-css";
 
 const MODE_ATTRIBUTE =
   "data-css-route-mode";
@@ -94,9 +96,18 @@ const STYLE_MANIFEST = Object.freeze({
     "/src/css/views/clientes/detail.css",
   ]),
 
+  /*
+    usuarios.template.modal.js usa simultáneamente clases
+    usuarios-modal-* e incidencias-modal-*.
+
+    En /src/css/views/usuarios actualmente sólo existen
+    index.css y create.css, por lo que el detalle necesita
+    cargar el CSS compartido que implementa incidencias-modal-*.
+  */
   usuarios: Object.freeze([
     "/src/css/views/usuarios/index.css",
     "/src/css/views/usuarios/create.css",
+    "/src/css/views/incidencias/detail.css",
   ]),
 
   servidor: Object.freeze([

@@ -1,0 +1,133 @@
+name: Incidencias Final UX Once
+
+on:
+  push:
+    branches:
+      - fix/incidencias-final-ux-admin-files-20260817
+    paths:
+      - .github/scripts/patch-incidencias-final-ux.py
+      - .github/workflows/incidencias-final-ux-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/incidencias-final-ux-admin-files-20260817
+          fetch-depth: 0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Apply final Incidencias UX patch
+        run: python3 .github/scripts/patch-incidencias-final-ux.py
+
+      - name: Validate JS syntax
+        run: |
+          node --check src/views/incidencias/incidencias.api.js
+          node --check src/views/incidencias/incidencias.template.modal.js
+          node --check src/views/incidencias/index.js
+
+      - name: Validate modal behavior contracts
+        run: |
+          node --input-type=module <<'NODE'
+          import {
+            renderIncidenciasDetailModal,
+            DETAIL_ACTIONS,
+          } from './src/views/incidencias/incidencias.template.modal.js';
+
+          const detail = {
+            ticketId: 'INC-TEST-001',
+            subject: 'Prueba final',
+            description: 'Detalle',
+            status: 'open',
+            priority: 'high',
+            category: 'hardware',
+            displayName: 'Admin Test',
+            email: 'admin@example.com',
+            attachments: [{
+              id: 'att-1',
+              attachmentId: 'att-1',
+              name: 'captura.png',
+              contentType: 'image/png',
+              size: 1024,
+            }],
+            history: [{
+              id: 'h1',
+              type: 'created',
+              title: 'Creada',
+              createdAt: new Date().toISOString(),
+            }],
+          };
+
+          const adminHtml = renderIncidenciasDetailModal({
+            open: true,
+            admin: true,
+            role: 'admin',
+            detail,
+          });
+
+          const userHtml = renderIncidenciasDetailModal({
+            open: true,
+            admin: false,
+            role: 'user',
+            detail,
+          });
+
+          const required = [
+            DETAIL_ACTIONS.HISTORY_REVEAL,
+            DETAIL_ACTIONS.HISTORY_TOGGLE,
+            DETAIL_ACTIONS.ATTACHMENT_DELETE,
+            'Historial',
+            'Ver historial',
+            'Eliminar',
+          ];
+
+          for (const token of required) {
+            if (!adminHtml.includes(token)) {
+              throw new Error(`Admin modal missing ${token}`);
+            }
+          }
+
+          if (userHtml.includes(DETAIL_ACTIONS.ATTACHMENT_DELETE)) {
+            throw new Error('Non-admin modal exposes attachment delete');
+          }
+
+          if (!adminHtml.includes('data-modal-history-slot="true"')) {
+            throw new Error('History slot missing');
+          }
+
+          if (!adminHtml.includes('data-modal-composer="true"')) {
+            throw new Error('Composer missing');
+          }
+          NODE
+
+      - name: Validate backend-compatible delete contract
+        run: |
+          grep -F 'deleteAttachments: [attachmentKey]' src/views/incidencias/incidencias.api.js
+          grep -F 'ATTACHMENT_DELETE: "detail-attachment-delete"' src/views/incidencias/incidencias.template.modal.js
+          grep -F 'HISTORY_REVEAL: "detail-history-reveal"' src/views/incidencias/incidencias.template.modal.js
+          grep -F 'caret-color: var(--idm-info);' src/css/views/incidencias/detail.css
+          if grep -R --line-number --fixed-strings '!important' src/css/views/incidencias/detail.css; then
+            echo 'detail.css contains !important'
+            exit 1
+          fi
+
+      - name: Commit product changes and remove one-shot files
+        run: |
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git rm .github/scripts/patch-incidencias-final-ux.py .github/workflows/incidencias-final-ux-once.yml
+          git add src/views/incidencias/incidencias.api.js \
+                  src/views/incidencias/incidencias.template.modal.js \
+                  src/views/incidencias/index.js \
+                  src/css/views/incidencias/detail.css
+          git commit -m "feat(incidencias): cerrar UX final y borrado admin de adjuntos"
+          git push origin HEAD:fix/incidencias-final-ux-admin-files-20260817

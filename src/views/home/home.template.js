@@ -15,7 +15,7 @@
 ========================================================= */
 
 export const HOME_TEMPLATE_VERSION =
-  "home.template.inicio.v8.total-invoiced.production";
+  "home.template.inicio.v9.loading-states.production";
 
 const ACTIONS = Object.freeze({
   RETRY: "retry",
@@ -221,7 +221,7 @@ function formatMoney(value = 0, currency = "EUR") {
 
 function formatBillingAmount(value, currency = "EUR", available = true) {
   if (!available || optionalNumber(value) === null) {
-    return "No disponible";
+    return "Pendiente";
   }
 
   return formatMoney(value, currency);
@@ -456,6 +456,7 @@ function buildVm(input = {}) {
     routes,
 
     loading: data.loading === true,
+    refreshing: data.refreshing === true,
     error: cleanText(first(data.error, dashboard.error, ""), ""),
     stale: dashboard.stale === true,
 
@@ -521,6 +522,50 @@ function loadingCards(count = 4) {
       <span class="home-skeleton home-skeleton--text"></span>
     </article>
   `).join("");
+}
+
+
+function panelLoadingRows(
+  type = "activity",
+  count = 4
+) {
+  const kind =
+    type === "invoice"
+      ? "invoice"
+      : "activity";
+
+  return `
+    <div
+      class="home-panel-loading home-panel-loading--${kind}"
+      aria-hidden="true"
+      data-home-panel-loading="${kind}"
+    >
+      ${Array.from({ length: count }, (_, index) => {
+        if (kind === "invoice") {
+          return `
+            <div class="home-panel-loading-row home-panel-loading-row--invoice" data-home-loading-row="${index + 1}">
+              <span class="home-panel-loading-copy">
+                <span class="home-skeleton home-panel-loading-title"></span>
+                <span class="home-skeleton home-panel-loading-meta"></span>
+              </span>
+              <span class="home-skeleton home-panel-loading-amount"></span>
+            </div>
+          `;
+        }
+
+        return `
+          <div class="home-panel-loading-row home-panel-loading-row--activity" data-home-loading-row="${index + 1}">
+            <span class="home-skeleton home-panel-loading-icon"></span>
+            <span class="home-panel-loading-copy">
+              <span class="home-skeleton home-panel-loading-title"></span>
+              <span class="home-skeleton home-panel-loading-meta"></span>
+            </span>
+            <span class="home-skeleton home-panel-loading-date"></span>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
 }
 
 function emptyState(
@@ -653,7 +698,7 @@ function stats(vm) {
         vm.counts.currency,
         true
       )}`
-    : "Facturado: no disponible";
+    : "Facturado: pendiente de sincronizar";
 
   const cards = [
     {
@@ -773,13 +818,15 @@ function activity(vm) {
         </div>
       </div>
       ${
-        items.length
-          ? `<ul class="home-activity-list">${items.map(activityItem).join("")}</ul>`
-          : emptyState(
-              "Sin actividad reciente",
-              "Todavía no hay movimientos visibles en el inicio.",
-              "activity"
-            )
+        vm.loading
+          ? panelLoadingRows("activity", 4)
+          : items.length
+            ? `<ul class="home-activity-list">${items.map(activityItem).join("")}</ul>`
+            : emptyState(
+                "Sin actividad reciente",
+                "Todavía no hay movimientos visibles en el inicio.",
+                "activity"
+              )
       }
     </section>
   `;
@@ -858,11 +905,41 @@ function invoices(vm) {
   const items = vm.facturas.slice(0, 5);
   const route = safeRoute(vm.routes.facturas, "/facturas");
 
-  const billedAmount = formatBillingAmount(
-    vm.counts.totalInvoiced,
-    vm.counts.currency,
-    vm.counts.invoiceStatsAvailable
-  );
+  const billingState =
+    vm.loading
+      ? "loading"
+      : vm.counts.invoiceStatsAvailable
+        ? "ready"
+        : "pending";
+
+  const billedAmount =
+    billingState === "ready"
+      ? formatBillingAmount(
+          vm.counts.totalInvoiced,
+          vm.counts.currency,
+          true
+        )
+      : "";
+
+  const billingContent =
+    billingState === "loading"
+      ? `
+        <div class="home-billing-loading" role="status" aria-live="polite">
+          <span class="home-skeleton home-skeleton--billing-value"></span>
+          <small>Calculando facturación…</small>
+        </div>
+      `
+      : billingState === "ready"
+        ? `<strong>${escapeHtml(billedAmount)}</strong>`
+        : `
+          <div class="home-billing-status home-billing-status--pending" role="status">
+            <span class="home-billing-status-icon" aria-hidden="true">${icon("clock")}</span>
+            <span class="home-billing-status-copy">
+              <strong>Total pendiente</strong>
+              <small>Se mostrará cuando las estadísticas terminen de sincronizarse.</small>
+            </span>
+          </div>
+        `;
 
   return `
     <section class="home-panel home-panel--invoices" data-home-section="invoices">
@@ -884,19 +961,22 @@ function invoices(vm) {
         class="home-billing-total"
         data-home-billing-total="invoiced"
         data-home-billing-source="api-facturas-stats"
+        data-home-billing-state="${billingState}"
       >
         <span>Importe total facturado</span>
-        <strong>${escapeHtml(billedAmount)}</strong>
+        ${billingContent}
       </div>
 
       ${
-        items.length
-          ? `<ul class="home-invoice-list">${items.map(invoiceItem).join("")}</ul>`
-          : emptyState(
-              "Sin facturas visibles",
-              "Cuando haya facturas disponibles aparecerán aquí.",
-              "invoice"
-            )
+        vm.loading
+          ? panelLoadingRows("invoice", 4)
+          : items.length
+            ? `<ul class="home-invoice-list">${items.map(invoiceItem).join("")}</ul>`
+            : emptyState(
+                "Sin facturas visibles",
+                "Cuando haya facturas disponibles aparecerán aquí.",
+                "invoice"
+              )
       }
     </section>
   `;

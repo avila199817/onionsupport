@@ -2,7 +2,7 @@
    ONION SUPPORT — HOME / INICIO
    Archivo: /src/css/views/home/index.css
 
-   PRODUCCIÓN · CONSOLIDADO · CSS 10/10
+   PRODUCCIÓN · CONSOLIDADO · HOME LOADING POLISH
 
    Contrato:
    - Sólo presentación de la vista Home.
@@ -998,7 +998,7 @@
       color-mix(in srgb, #000 14%, transparent);
 }
 
-.home-billing-total span {
+.home-billing-total > span {
   color: rgba(255, 255, 255, .56);
 
   font-size: 10px;
@@ -1008,7 +1008,7 @@
   text-transform: uppercase;
 }
 
-.home-billing-total strong {
+.home-billing-total > strong {
   color: #ffffff;
 
   font-size: clamp(30px, 2.35vw, 44px);
@@ -1117,6 +1117,202 @@
   white-space: nowrap;
 }
 
+
+
+.home-billing-total[data-home-billing-state="loading"] {
+  border-color:
+    color-mix(
+      in srgb,
+      var(--warning) 22%,
+      var(--badge-border)
+    );
+
+  background:
+    radial-gradient(
+      circle at 0% 0%,
+      color-mix(in srgb, var(--warning) 10%, transparent),
+      transparent 46%
+    ),
+    color-mix(in srgb, var(--badge-bg) 82%, transparent);
+}
+
+.home-billing-loading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-block-size: 40px;
+}
+
+.home-skeleton--billing-value {
+  inline-size: min(250px, 46%);
+  min-inline-size: 150px;
+  block-size: clamp(30px, 2.2vw, 42px);
+  border-radius: 12px;
+}
+
+.home-billing-loading small {
+  color:
+    color-mix(
+      in srgb,
+      var(--warning) 54%,
+      var(--text-muted)
+    );
+
+  font-size: 11px;
+  line-height: 1.3;
+  font-weight: 760;
+  letter-spacing: -.005em;
+}
+
+.home-billing-total[data-home-billing-state="pending"] {
+  border-color:
+    color-mix(
+      in srgb,
+      var(--warning) 22%,
+      var(--badge-border)
+    );
+
+  background:
+    radial-gradient(
+      circle at 0% 0%,
+      color-mix(in srgb, var(--warning) 9%, transparent),
+      transparent 46%
+    ),
+    color-mix(in srgb, var(--badge-bg) 82%, transparent);
+}
+
+.home-billing-status {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
+  min-inline-size: 0;
+}
+
+.home-billing-status-icon {
+  display: grid;
+  place-items: center;
+  inline-size: 38px;
+  block-size: 38px;
+  border:
+    1px solid
+    color-mix(
+      in srgb,
+      var(--warning) 30%,
+      rgba(255, 255, 255, .12)
+    );
+  border-radius: 13px;
+  color:
+    color-mix(
+      in srgb,
+      var(--warning) 72%,
+      var(--text-strong)
+    );
+  background:
+    color-mix(
+      in srgb,
+      var(--warning) 8%,
+      rgba(255, 255, 255, .025)
+    );
+}
+
+.home-billing-status-icon svg {
+  inline-size: 17px;
+  block-size: 17px;
+}
+
+.home-billing-status-copy {
+  display: grid;
+  gap: 3px;
+  min-inline-size: 0;
+}
+
+.home-billing-status-copy strong {
+  color: var(--text-strong);
+  font-size: 15px;
+  line-height: 1.1;
+  font-weight: 880;
+  letter-spacing: -.02em;
+}
+
+.home-billing-status-copy small {
+  color: var(--text-muted);
+  font-size: 10.5px;
+  line-height: 1.35;
+  font-weight: 620;
+}
+
+.home-panel-loading {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+}
+
+.home-panel-loading-row {
+  min-inline-size: 0;
+  min-block-size: 60px;
+  padding: 10px 12px;
+  border:
+    1px solid
+    color-mix(
+      in srgb,
+      var(--data-table-row-border) 84%,
+      transparent
+    );
+  border-radius: 18px;
+  background: rgba(255, 255, 255, .018);
+}
+
+.home-panel-loading-row--activity {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 70px;
+  align-items: center;
+  gap: 12px;
+}
+
+.home-panel-loading-row--invoice {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 86px;
+  align-items: center;
+  gap: 12px;
+}
+
+.home-panel-loading-copy {
+  display: grid;
+  gap: 7px;
+  min-inline-size: 0;
+}
+
+.home-panel-loading-icon {
+  inline-size: 42px;
+  block-size: 42px;
+  border-radius: 15px;
+}
+
+.home-panel-loading-title {
+  inline-size: min(280px, 72%);
+  block-size: 11px;
+}
+
+.home-panel-loading-meta {
+  inline-size: min(210px, 52%);
+  block-size: 9px;
+  opacity: .72;
+}
+
+.home-panel-loading-date {
+  inline-size: 68px;
+  block-size: 9px;
+  justify-self: end;
+  opacity: .64;
+}
+
+.home-panel-loading-amount {
+  inline-size: 82px;
+  block-size: 12px;
+  justify-self: end;
+  opacity: .78;
+}
 
 /* =========================================================
    12. VACÍO / SKELETON
@@ -1236,7 +1432,7 @@
 
 [data-theme="light"] .home-title,
 [data-theme="light"] .home-stat-value,
-[data-theme="light"] .home-billing-total strong {
+[data-theme="light"] .home-billing-total > strong {
   color: #0f172a;
   text-shadow: none;
 }
@@ -1439,8 +1635,26 @@
   }
 
   .home-activity-item,
-  .home-invoice-item {
+  .home-invoice-item,
+  .home-panel-loading-row--activity,
+  .home-panel-loading-row--invoice {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .home-panel-loading-icon,
+  .home-panel-loading-date,
+  .home-panel-loading-amount {
+    display: none;
+  }
+
+  .home-billing-loading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .home-skeleton--billing-value {
+    inline-size: min(220px, 72%);
   }
 
   .home-activity-icon {

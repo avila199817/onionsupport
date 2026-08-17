@@ -24,7 +24,9 @@ jobs:
           node-version: '22'
 
       - name: Apply modal refinement
-        run: python3 .github/scripts/refine-incidencias-modal-pro-once.py
+        run: |
+          python3 .github/scripts/refine-incidencias-modal-pro-once.py
+          python3 .github/scripts/fix-incidencias-modal-pro-once.py
 
       - name: Syntax check Incidencias JavaScript
         shell: bash

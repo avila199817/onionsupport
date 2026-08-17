@@ -337,6 +337,13 @@
     },
 
     {
+      "route": "/ad1f6102f1914986b540f6a34bf6939b.txt",
+      "headers": {
+        "Cache-Control": "public, max-age=300, must-revalidate",
+        "X-Robots-Tag": "noindex, nofollow, nosnippet"
+      }
+    },
+    {
       "route": "/src/media/*",
       "headers": {
         "Cache-Control": "public, max-age=86400, must-revalidate"

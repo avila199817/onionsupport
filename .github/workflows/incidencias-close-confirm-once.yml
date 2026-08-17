@@ -1,0 +1,135 @@
+name: Incidencias Close Confirm Once
+
+on:
+  push:
+    branches:
+      - polish/incidencias-close-confirm-loader-20260817
+    paths:
+      - .github/scripts/patch-incidencias-close-confirm.py
+      - .github/workflows/incidencias-close-confirm-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: polish/incidencias-close-confirm-loader-20260817
+          fetch-depth: 0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Apply close confirmation patch
+        run: python3 .github/scripts/patch-incidencias-close-confirm.py
+
+      - name: Validate JS syntax
+        run: |
+          node --check src/views/incidencias/incidencias.template.modal.js
+          node --check src/views/incidencias/index.js
+
+      - name: Smoke custom close dialog and loader
+        run: |
+          node --input-type=module <<'NODE'
+          import {
+            renderIncidenciasDetailModal,
+            DETAIL_ACTIONS,
+          } from './src/views/incidencias/incidencias.template.modal.js';
+
+          const detail = {
+            ticketId: 'INC-20260817-TEST01',
+            subject: 'Prueba de cierre',
+            status: 'open',
+            priority: 'high',
+            category: 'hardware',
+            displayName: 'Cliente Test',
+            email: 'cliente@example.com',
+          };
+
+          const confirmHtml = renderIncidenciasDetailModal({
+            open: true,
+            detail,
+            closeConfirmOpen: true,
+            commentDraft: 'Borrador pendiente',
+          });
+
+          for (const token of [
+            'data-detail-close-confirm-dialog="true"',
+            DETAIL_ACTIONS.TICKET_CLOSE_CONFIRM,
+            DETAIL_ACTIONS.TICKET_CLOSE_CANCEL,
+            'Sí, cerrar incidencia',
+            'borrador se descartará',
+          ]) {
+            if (!confirmHtml.includes(token)) {
+              throw new Error(`Missing close confirmation token: ${token}`);
+            }
+          }
+
+          const closingHtml = renderIncidenciasDetailModal({
+            open: true,
+            detail,
+            submitting: true,
+            operation: 'close',
+          });
+
+          if (!closingHtml.includes('Cerrando incidencia...')) {
+            throw new Error('Close loader label missing');
+          }
+          if (closingHtml.includes('data-detail-close-confirm-dialog="true"')) {
+            throw new Error('Confirmation must disappear while closing');
+          }
+          NODE
+
+      - name: Validate close flow contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          index = Path('src/views/incidencias/index.js').read_text(encoding='utf-8')
+          css = Path('src/css/views/incidencias/detail.css').read_text(encoding='utf-8')
+
+          start = index.find('  function closeDetailTicket() {')
+          end = index.find('  /* =======================================================\n     ATTACHMENTS', start)
+          if start < 0 or end < 0:
+              raise SystemExit('close flow not found')
+          flow = index[start:end]
+
+          required = [
+              'detailModal.closeConfirmOpen = true;',
+              'async function confirmDetailTicketClose()',
+              'detailModal.operation = "close";',
+              'await closeIncidencia(ticketId);',
+              'resetDetailModal();',
+              'restoreModalReturnFocus();',
+          ]
+          for token in required:
+              if token not in flow:
+                  raise SystemExit(f'missing close-flow token: {token}')
+
+          if 'window.confirm' in flow:
+              raise SystemExit('browser-native confirm remains in ticket close flow')
+
+          if '.incidencias-modal-confirm-overlay' not in css:
+              raise SystemExit('custom confirm CSS missing')
+          if re.search(r':\s*[^;{}\n]*!\s*important\b', css, flags=re.I):
+              raise SystemExit('detail.css contains !important declaration')
+          PY
+
+      - name: Commit product changes and remove one-shot files
+        run: |
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git rm -f .github/scripts/patch-incidencias-close-confirm.py \
+                    .github/workflows/incidencias-close-confirm-once.yml
+          git add src/views/incidencias/index.js \
+                  src/views/incidencias/incidencias.template.modal.js \
+                  src/css/views/incidencias/detail.css
+          git commit -m "polish(incidencias): cierre propio con confirmación y loader"
+          git push origin HEAD:polish/incidencias-close-confirm-loader-20260817

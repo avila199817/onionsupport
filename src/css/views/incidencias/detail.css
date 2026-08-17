@@ -2,7 +2,7 @@
    ONION SUPPORT — INCIDENCIAS DETAIL MODAL
    Archivo: /src/css/views/incidencias/detail.css
 
-   PRODUCTIVO · V26 · FINAL POLISH · CONTACT ACTIONS
+   PRODUCTIVO · V27 · PRO LOADING SPINNER
 
    Contrato:
    - 1:1 con incidencias.template.modal.js V16 preview-sas-safe.
@@ -3271,52 +3271,132 @@ body.incidencias-detail-open {
   display: inline-flex;
   align-items: center;
 
-  gap: 10px;
+  gap: 12px;
+
+  min-block-size: 52px;
 
   padding:
     13px
-    15px;
+    17px;
 
   border:
     1px solid
-    var(--idm-border-soft);
+    color-mix(
+      in srgb,
+      var(--idm-info) 24%,
+      var(--idm-border-soft)
+    );
 
   border-radius:
     var(--idm-radius-control);
 
   background:
-    var(--idm-panel-elevated);
+    linear-gradient(
+      145deg,
+      color-mix(
+        in srgb,
+        var(--idm-info) 5%,
+        var(--idm-panel-elevated)
+      ),
+      var(--idm-panel-elevated)
+    );
 
   color:
     var(--idm-text-strong);
 
   box-shadow:
-    var(--idm-shadow-section);
+    var(--idm-shadow-section),
+    0 12px 34px
+      color-mix(
+        in srgb,
+        var(--idm-info) 8%,
+        transparent
+      );
 }
 
 .incidencias-modal-loading-box > span {
-  inline-size: 17px;
-  block-size: 17px;
+  position: relative;
+
+  inline-size: 22px;
+  block-size: 22px;
+
+  flex: 0 0 22px;
 
   border:
     2px solid
-    var(--idm-accent-active);
+    color-mix(
+      in srgb,
+      var(--idm-info) 22%,
+      var(--idm-border-soft)
+    );
+
+  border-block-start-color:
+    var(--idm-info);
 
   border-inline-end-color:
-    transparent;
+    color-mix(
+      in srgb,
+      var(--idm-composer-warning, var(--idm-warning)) 82%,
+      var(--idm-info)
+    );
 
   border-radius: 50%;
 
+  box-shadow:
+    0 0 0 1px
+      color-mix(
+        in srgb,
+        var(--idm-info) 5%,
+        transparent
+      ),
+    0 0 18px
+      color-mix(
+        in srgb,
+        var(--idm-info) 14%,
+        transparent
+      );
+
   animation:
     incidenciasDetailSpin
-    .72s
+    .68s
     linear
     infinite;
 }
 
+.incidencias-modal-loading-box > span::after {
+  content: "";
+
+  position: absolute;
+  inset: 50% auto auto 50%;
+
+  inline-size: 4px;
+  block-size: 4px;
+
+  border-radius: 50%;
+
+  background:
+    color-mix(
+      in srgb,
+      var(--idm-info) 72%,
+      white 28%
+    );
+
+  box-shadow:
+    0 0 8px
+      color-mix(
+        in srgb,
+        var(--idm-info) 52%,
+        transparent
+      );
+
+  transform:
+    translate(-50%, -50%);
+}
+
 .incidencias-modal-loading-box > strong {
-  font-size: 12px;
-  font-weight: 760;
+  font-size: 12.5px;
+  font-weight: 780;
+  letter-spacing: -.008em;
 }
 
 

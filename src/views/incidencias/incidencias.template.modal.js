@@ -29,7 +29,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.extreme.v20.preview-sas-safe";
+  "incidencias.template.modal.extreme.v21.pro-close-history";
 
 export const DETAIL_ACTIONS = Object.freeze({
   CLOSE: "detail-close",
@@ -37,6 +37,8 @@ export const DETAIL_ACTIONS = Object.freeze({
 
   COMMENT_SUBMIT: "detail-submit-update",
   COMMENT_CHANGE: "detail-comment-change",
+  TICKET_CLOSE: "detail-ticket-close",
+  HISTORY_TOGGLE: "detail-history-toggle",
 
   ATTACHMENTS_ADD: "detail-attachments-add",
   PENDING_FILE_REMOVE: "detail-pending-file-remove",
@@ -341,6 +343,24 @@ function normalizeKey(value = "") {
     .replace(/[\s-]+/g, "_")
     .replace(/[^\w:.]/g, "")
     .replace(/^_+|_+$/g, "");
+}
+
+function displayLabel(value = "", fallback = "") {
+  const text = cleanText(value, fallback)
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!text) return fallback;
+
+  return text
+    .split(" ")
+    .map((word) =>
+      word
+        ? `${word.charAt(0).toLocaleUpperCase("es-ES")}${word.slice(1)}`
+        : ""
+    )
+    .join(" ");
 }
 
 /* =========================================================
@@ -739,6 +759,15 @@ function icon(name = "") {
 
     plus:
       `<svg ${common}><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
+
+    check:
+      `<svg ${common}><path d="m20 6-11 11-5-5"/></svg>`,
+
+    history:
+      `<svg ${common}><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>`,
+
+    chevronDown:
+      `<svg ${common}><path d="m6 9 6 6 6-6"/></svg>`,
 
     ticket:
       `<svg ${common}><path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z"/><path d="M13 5v14"/></svg>`,
@@ -2193,6 +2222,36 @@ function getTimeline(
   );
 }
 
+function getTimelineCount(detail = {}) {
+  const raw = getRaw(detail);
+  const direct = safeArray(first(detail.timeline, raw.timeline, []));
+  if (direct.length) return direct.length;
+
+  const history = safeArray(
+    first(
+      detail.history,
+      detail.events,
+      raw.history,
+      raw.events,
+      []
+    )
+  );
+
+  const comments = safeArray(
+    first(
+      detail.comments,
+      detail.notes,
+      detail.messages,
+      raw.comments,
+      raw.notes,
+      raw.messages,
+      []
+    )
+  );
+
+  return history.length + comments.length;
+}
+
 /* =========================================================
    VIEW MODEL
 ========================================================= */
@@ -2270,6 +2329,14 @@ function buildVm(input = {}) {
       statusWillReopen(
         status
       ),
+
+    canCloseTicket:
+      !statusWillReopen(
+        status
+      ),
+
+    historyOpen:
+      data.historyOpen === true,
 
     feedbackMessage:
       cleanText(
@@ -2409,6 +2476,47 @@ function renderTicketIdChip(
         ${escapeHtml(label)}
       </span>
     </button>
+  `;
+}
+
+function renderHeaderActions(vm = {}) {
+  return `
+    <div
+      class="incidencias-modal-header-actions"
+      data-modal-header-actions="true"
+    >
+      ${
+        vm.canCloseTicket
+          ? `
+            <button
+              type="button"
+              data-detail-action="${DETAIL_ACTIONS.TICKET_CLOSE}"
+              data-ticket-id="${attr(vm.ticketId)}"
+              class="incidencias-modal-close-ticket-btn"
+              aria-label="Cerrar ticket"
+              title="Cerrar esta incidencia manualmente"
+              ${disabledAttrs(vm.submitting, vm.submitting)}
+            >
+              <span class="incidencias-modal-close-ticket-icon">
+                ${icon("check")}
+              </span>
+              <span class="incidencias-modal-close-ticket-label">
+                Cerrar ticket
+              </span>
+            </button>
+          `
+          : ""
+      }
+
+      <button
+        type="button"
+        data-detail-action="${DETAIL_ACTIONS.CLOSE}"
+        aria-label="Cerrar modal"
+        title="Cerrar ventana"
+        ${disabledAttrs(vm.submitting, vm.submitting)}
+        class="incidencias-modal-close-btn"
+      >${icon("close")}</button>
+    </div>
   `;
 }
 
@@ -3628,6 +3736,63 @@ function renderTimeline(
   `;
 }
 
+function renderHistorySection(vm = {}) {
+  const count = getTimelineCount(vm.detail);
+  const open = vm.historyOpen === true;
+  const countLabel = count
+    ? `${count} registro${count === 1 ? "" : "s"}`
+    : "Sin actividad registrada";
+
+  return `
+    <section
+      class="incidencias-modal-history-section"
+      data-modal-history-slot="true"
+      data-history-open="${open ? "true" : "false"}"
+      aria-labelledby="incidencias-modal-history-title"
+    >
+      <button
+        type="button"
+        class="incidencias-modal-history-toggle"
+        data-detail-action="${DETAIL_ACTIONS.HISTORY_TOGGLE}"
+        aria-expanded="${open ? "true" : "false"}"
+        aria-controls="incidencias-modal-history-content"
+        ${disabledAttrs(vm.submitting, vm.submitting)}
+      >
+        <span class="incidencias-modal-history-toggle-icon" aria-hidden="true">
+          ${icon("history")}
+        </span>
+
+        <span class="incidencias-modal-history-toggle-copy">
+          <strong id="incidencias-modal-history-title">
+            Historial y actividad
+          </strong>
+          <small>${escapeHtml(countLabel)}</small>
+        </span>
+
+        <span class="incidencias-modal-history-toggle-action">
+          <span>${open ? "Ocultar" : "Ver historial"}</span>
+          <span class="incidencias-modal-history-chevron" aria-hidden="true">
+            ${icon("chevronDown")}
+          </span>
+        </span>
+      </button>
+
+      ${
+        open
+          ? `
+            <div
+              id="incidencias-modal-history-content"
+              class="incidencias-modal-history-content"
+            >
+              ${renderTimeline(vm.detail)}
+            </div>
+          `
+          : ""
+      }
+    </section>
+  `;
+}
+
 /* =========================================================
    TEMPLATE
 ========================================================= */
@@ -3751,7 +3916,7 @@ export function renderIncidenciasDetailModal(
                   )}
 
                   ${renderChip(
-                    category,
+                    displayLabel(category, "General"),
                     "category"
                   )}
                 </div>
@@ -3777,16 +3942,7 @@ export function renderIncidenciasDetailModal(
               </div>
             </div>
 
-            <button
-              type="button"
-              data-detail-action="${DETAIL_ACTIONS.CLOSE}"
-              aria-label="Cerrar modal"
-              ${disabledAttrs(
-                vm.submitting,
-                vm.submitting
-              )}
-              class="incidencias-modal-close-btn"
-            >${icon("close")}</button>
+            ${renderHeaderActions(vm)}
           </header>
 
           <main
@@ -3847,19 +4003,7 @@ export function renderIncidenciasDetailModal(
               ${renderComposer(vm)}
             </div>
 
-            <section
-              class="incidencias-modal-history-section"
-              data-modal-history-slot="true"
-              aria-labelledby="incidencias-modal-history-title"
-            >
-              <div class="incidencias-modal-section-head">
-                <h3 id="incidencias-modal-history-title">
-                  Historial y actividad
-                </h3>
-              </div>
-
-              ${renderTimeline(detail)}
-            </section>
+            ${renderHistorySection(vm)}
           </main>
         </div>
       </div>
@@ -4104,6 +4248,18 @@ export function getDetailTemplateSnapshot() {
         false,
 
       submitActionNearComposer:
+        true,
+
+      manualTicketClose:
+        true,
+
+      historyCollapsedByDefault:
+        true,
+
+      historyLazyRender:
+        true,
+
+      categoryDisplayTitleCase:
         true,
 
       explicitReopenCopy:

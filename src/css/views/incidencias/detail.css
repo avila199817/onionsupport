@@ -2,7 +2,7 @@
    ONION SUPPORT — INCIDENCIAS DETAIL MODAL
    Archivo: /src/css/views/incidencias/detail.css
 
-   PRODUCTIVO · V16 · PREVIEW SAS SAFE · EXTREME UI
+   PRODUCTIVO · V21 · PRO CLOSE · LAZY HISTORY · EXTREME UI
 
    Contrato:
    - 1:1 con incidencias.template.modal.js V16 preview-sas-safe.
@@ -934,6 +934,8 @@ body.incidencias-detail-open {
 ========================================================= */
 
 .incidencias-modal-close-btn,
+.incidencias-modal-close-ticket-btn,
+.incidencias-modal-history-toggle,
 .incidencias-modal-id-chip,
 .incidencias-modal-file-square,
 .incidencias-modal-image-thumb-wrap,
@@ -3496,6 +3498,532 @@ body.light
 
 
 /* =========================================================
+   V21 · PRO ACTION HIERARCHY
+   - Close ticket is distinct from closing the window.
+   - Update composer is the primary work area.
+   - History is a lazy disclosure, collapsed by default.
+========================================================= */
+
+.incidencias-modal-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.incidencias-modal-close-ticket-btn {
+  min-block-size: 44px;
+  min-inline-size: 136px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+
+  padding: 9px 13px;
+
+  border:
+    1px solid
+    color-mix(
+      in srgb,
+      var(--idm-error) 34%,
+      var(--idm-border-soft)
+    );
+
+  border-radius: 14px;
+
+  background:
+    color-mix(
+      in srgb,
+      var(--idm-error) 7%,
+      var(--idm-control)
+    );
+
+  color:
+    color-mix(
+      in srgb,
+      var(--idm-error) 76%,
+      var(--idm-text-strong) 24%
+    );
+
+  font-size: 11.5px;
+  font-weight: 780;
+  line-height: 1;
+
+  box-shadow:
+    var(--idm-shadow-control);
+}
+
+.incidencias-modal-close-ticket-icon {
+  inline-size: 18px;
+  block-size: 18px;
+  display: inline-grid;
+  place-items: center;
+}
+
+.incidencias-modal-close-ticket-icon > svg {
+  inline-size: 18px;
+  block-size: 18px;
+}
+
+.incidencias-modal-close-ticket-btn:hover:not(:disabled) {
+  border-color:
+    color-mix(
+      in srgb,
+      var(--idm-error) 58%,
+      var(--idm-border-soft)
+    );
+
+  background:
+    color-mix(
+      in srgb,
+      var(--idm-error) 13%,
+      var(--idm-control)
+    );
+
+  color:
+    var(--idm-text-strong);
+
+  transform:
+    translateY(-1px);
+
+  box-shadow:
+    0 10px 24px
+      color-mix(
+        in srgb,
+        var(--idm-error) 13%,
+        transparent
+      ),
+    var(--idm-shadow-control);
+}
+
+.incidencias-modal-close-ticket-btn:active:not(:disabled) {
+  transform:
+    translateY(0)
+    scale(.985);
+}
+
+/* ---------------------------------------------------------
+   COMPOSER · clearer primary work surface
+--------------------------------------------------------- */
+
+.incidencias-modal-composer {
+  overflow: hidden;
+
+  padding:
+    clamp(18px, 1.7vw, 24px);
+
+  gap: 16px;
+
+  border-color:
+    color-mix(
+      in srgb,
+      var(--idm-accent) 42%,
+      var(--idm-border-soft)
+    );
+
+  background:
+    radial-gradient(
+      circle at 0 0,
+      color-mix(
+        in srgb,
+        var(--idm-accent) 12%,
+        transparent
+      ),
+      transparent 38%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(
+        in srgb,
+        var(--idm-section) 96%,
+        var(--idm-accent) 4%
+      ),
+      var(--idm-section)
+    );
+
+  box-shadow:
+    0 18px 46px rgba(0, 0, 0, .16),
+    0 0 0 1px
+      color-mix(
+        in srgb,
+        var(--idm-accent) 7%,
+        transparent
+      ),
+    inset 0 1px 0 rgba(255, 255, 255, .06);
+}
+
+.incidencias-modal-composer::before {
+  content: "";
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: 22px;
+  block-size: 2px;
+
+  border-radius: 999px;
+
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      color-mix(
+        in srgb,
+        var(--idm-accent-active) 78%,
+        transparent
+      ),
+      transparent
+    );
+
+  pointer-events: none;
+}
+
+.incidencias-modal-composer-head {
+  grid-template-columns:
+    44px
+    minmax(0, 1fr);
+
+  gap: 13px;
+}
+
+.incidencias-modal-composer-icon {
+  inline-size: 44px;
+  block-size: 44px;
+
+  border-color:
+    color-mix(
+      in srgb,
+      var(--idm-accent-active) 62%,
+      var(--idm-border-soft)
+    );
+
+  border-radius: 14px;
+
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(
+        in srgb,
+        var(--idm-accent-active) 28%,
+        var(--idm-control)
+      ),
+      color-mix(
+        in srgb,
+        var(--idm-accent) 14%,
+        var(--idm-control)
+      )
+    );
+
+  color:
+    color-mix(
+      in srgb,
+      var(--idm-accent-active) 82%,
+      white 18%
+    );
+
+  box-shadow:
+    0 8px 22px
+      color-mix(
+        in srgb,
+        var(--idm-accent) 18%,
+        transparent
+      ),
+    inset 0 1px 0 rgba(255, 255, 255, .09);
+}
+
+.incidencias-modal-composer-icon > svg {
+  inline-size: 21px;
+  block-size: 21px;
+  stroke-width: 2.35;
+}
+
+.incidencias-modal-composer-copy > h3 {
+  font-size: 15px;
+  font-weight: 830;
+  letter-spacing: -.012em;
+}
+
+.incidencias-modal-composer-copy > span {
+  max-inline-size: 720px;
+
+  color:
+    color-mix(
+      in srgb,
+      var(--idm-text-soft) 78%,
+      var(--idm-text-muted)
+    );
+
+  font-size: 12px;
+}
+
+.incidencias-modal-comment-textarea {
+  min-block-size: 150px;
+
+  padding:
+    15px
+    16px;
+
+  border-color:
+    color-mix(
+      in srgb,
+      var(--idm-accent) 26%,
+      var(--idm-border-soft)
+    );
+
+  background:
+    color-mix(
+      in srgb,
+      var(--idm-control) 94%,
+      var(--idm-panel-elevated) 6%
+    );
+
+  font-size: 13.5px;
+
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .045),
+    inset 0 0 0 1px rgba(0, 0, 0, .08),
+    0 6px 18px rgba(0, 0, 0, .08);
+}
+
+.incidencias-modal-comment-textarea:focus {
+  border-color:
+    color-mix(
+      in srgb,
+      var(--idm-accent-active) 70%,
+      var(--idm-border-soft)
+    );
+
+  background:
+    color-mix(
+      in srgb,
+      var(--idm-control) 92%,
+      var(--idm-accent) 8%
+    );
+
+  box-shadow:
+    0 0 0 3px
+      color-mix(
+        in srgb,
+        var(--idm-accent) 18%,
+        transparent
+      ),
+    inset 0 1px 0 rgba(255, 255, 255, .05),
+    0 10px 26px rgba(0, 0, 0, .1);
+}
+
+.incidencias-modal-comment-textarea::placeholder {
+  color:
+    color-mix(
+      in srgb,
+      var(--idm-text-muted) 88%,
+      transparent
+    );
+}
+
+.incidencias-modal-dropzone {
+  min-block-size: 86px;
+
+  border-color:
+    color-mix(
+      in srgb,
+      var(--idm-accent) 46%,
+      var(--idm-border-soft)
+    );
+
+  background:
+    color-mix(
+      in srgb,
+      var(--idm-accent) 6%,
+      var(--idm-control)
+    );
+}
+
+.incidencias-modal-dropzone > span {
+  color:
+    color-mix(
+      in srgb,
+      var(--idm-accent-active) 78%,
+      var(--idm-text-strong) 22%
+    );
+}
+
+.incidencias-modal-footer--composer {
+  align-items: center;
+  justify-content: flex-end;
+
+  padding-block-start: 2px;
+}
+
+.incidencias-modal-submit-btn {
+  min-block-size: 48px;
+  min-inline-size: 210px;
+
+  padding:
+    11px
+    18px;
+
+  font-size: 12.5px;
+  letter-spacing: .005em;
+}
+
+/* ---------------------------------------------------------
+   HISTORY · collapsed/lazy by default
+--------------------------------------------------------- */
+
+.incidencias-modal-history-section {
+  overflow: hidden;
+  padding: 0;
+}
+
+.incidencias-modal-history-toggle {
+  inline-size: 100%;
+  min-block-size: 72px;
+
+  display: grid;
+  grid-template-columns:
+    40px
+    minmax(0, 1fr)
+    auto;
+
+  align-items: center;
+  gap: 12px;
+
+  padding:
+    14px
+    17px;
+
+  border-radius:
+    calc(var(--idm-radius-section) - 1px);
+
+  background:
+    color-mix(
+      in srgb,
+      var(--idm-section) 95%,
+      var(--idm-control) 5%
+    );
+
+  color:
+    var(--idm-text);
+
+  text-align: start;
+}
+
+.incidencias-modal-history-toggle:hover:not(:disabled) {
+  background:
+    color-mix(
+      in srgb,
+      var(--idm-accent) 6%,
+      var(--idm-section)
+    );
+}
+
+.incidencias-modal-history-toggle-icon {
+  inline-size: 40px;
+  block-size: 40px;
+
+  display: grid;
+  place-items: center;
+
+  border:
+    1px solid
+    color-mix(
+      in srgb,
+      var(--idm-accent) 30%,
+      var(--idm-border-soft)
+    );
+
+  border-radius: 12px;
+
+  background:
+    color-mix(
+      in srgb,
+      var(--idm-accent) 8%,
+      var(--idm-control)
+    );
+
+  color:
+    var(--idm-accent-active);
+}
+
+.incidencias-modal-history-toggle-copy {
+  min-inline-size: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.incidencias-modal-history-toggle-copy > strong {
+  color:
+    var(--idm-text-strong);
+
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.incidencias-modal-history-toggle-copy > small {
+  color:
+    var(--idm-text-muted);
+
+  font-size: 10.5px;
+  font-weight: 620;
+}
+
+.incidencias-modal-history-toggle-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+
+  color:
+    var(--idm-text-soft);
+
+  font-size: 11px;
+  font-weight: 720;
+  white-space: nowrap;
+}
+
+.incidencias-modal-history-chevron {
+  inline-size: 18px;
+  block-size: 18px;
+
+  display: grid;
+  place-items: center;
+
+  transition:
+    transform
+      var(--idm-duration)
+      var(--idm-ease);
+}
+
+.incidencias-modal-history-toggle[aria-expanded="true"]
+  .incidencias-modal-history-chevron {
+  transform:
+    rotate(180deg);
+}
+
+.incidencias-modal-history-content {
+  padding:
+    0
+    17px
+    17px;
+
+  border-top:
+    1px solid
+    var(--idm-border-subtle);
+
+  background:
+    color-mix(
+      in srgb,
+      var(--idm-section) 97%,
+      transparent
+    );
+}
+
+.incidencias-modal-history-content > .incidencias-timeline-list,
+.incidencias-modal-history-content > .incidencias-timeline-empty {
+  margin-block-start: 14px;
+}
+
+/* =========================================================
    RESPONSIVE · TABLET
 ========================================================= */
 
@@ -3783,7 +4311,7 @@ body.light
   .incidencias-modal-header {
     grid-template-columns:
       minmax(0, 1fr)
-      42px;
+      auto;
 
     padding:
       max(
@@ -3799,6 +4327,22 @@ body.light
     block-size: 42px;
 
     min-inline-size: 42px;
+  }
+
+  .incidencias-modal-header-actions {
+    gap: 6px;
+  }
+
+  .incidencias-modal-close-ticket-btn {
+    inline-size: 42px;
+    min-inline-size: 42px;
+    block-size: 42px;
+
+    padding: 0;
+  }
+
+  .incidencias-modal-close-ticket-label {
+    display: none;
   }
 
   .incidencias-modal-hero {
@@ -4008,6 +4552,38 @@ body.light
     min-block-size: 46px;
   }
 
+  .incidencias-modal-history-toggle {
+    grid-template-columns:
+      36px
+      minmax(0, 1fr)
+      auto;
+
+    min-block-size: 66px;
+
+    gap: 9px;
+
+    padding:
+      12px;
+  }
+
+  .incidencias-modal-history-toggle-icon {
+    inline-size: 36px;
+    block-size: 36px;
+
+    border-radius: 10px;
+  }
+
+  .incidencias-modal-history-toggle-action > span:first-child {
+    display: none;
+  }
+
+  .incidencias-modal-history-content {
+    padding:
+      0
+      12px
+      12px;
+  }
+
   .incidencias-timeline-card {
     padding:
       11px;
@@ -4167,6 +4743,8 @@ body.light
   }
 
   .incidencias-modal-close-btn,
+  .incidencias-modal-close-ticket-btn,
+  .incidencias-modal-history-toggle,
   .incidencias-modal-id-chip,
   .incidencias-modal-file-square,
   .incidencias-modal-image-thumb-wrap,
@@ -4291,6 +4869,7 @@ body.light
   }
 
   .incidencias-modal-close-btn,
+  .incidencias-modal-close-ticket-btn,
   .incidencias-modal-attachment-actions,
   .incidencias-modal-preview-actions,
   .incidencias-modal-composer,

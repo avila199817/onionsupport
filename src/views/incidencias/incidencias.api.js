@@ -24,7 +24,7 @@
 
 import Http from "../../core/http.js";
 
-export const INCIDENCIAS_API_VERSION = "incidencias.api.extreme.v21.manual-close";
+export const INCIDENCIAS_API_VERSION = "incidencias.api.extreme.v23.admin-attachment-delete";
 export const INCIDENCIAS_ENDPOINT = "/api/tickets";
 export const USERS_SEARCH_ENDPOINT = "/api/users";
 
@@ -2149,6 +2149,43 @@ export async function uploadIncidenciaAttachments(id = "", files = [], options =
   return updated ? upsertCachedIncidencia(updated) : null;
 }
 
+export async function deleteIncidenciaAttachment(
+  {
+    ticketId = "",
+    attachmentId = "",
+  } = {},
+  options = {}
+) {
+  const ticketKey = normalizeIncidenciaId(ticketId);
+  const attachmentKey = cleanText(attachmentId, "");
+
+  if (!ticketKey) throw new Error("INCIDENCIA_ID_REQUIRED");
+  if (!attachmentKey) throw new Error("INCIDENCIA_ATTACHMENT_ID_REQUIRED");
+
+  /*
+    Contrato real del backend actual: incidenciaUpdate acepta
+    deleteAttachments sólo para roles admin/support. El mismo PATCH elimina
+    metadata en Cosmos y, tras guardar, borra el Blob registrado.
+  */
+  const updated = await updateIncidenciaRequest(
+    ticketKey,
+    {
+      deleteAttachments: [attachmentKey],
+    },
+    options
+  );
+
+  if (updated) return upsertCachedIncidencia(updated);
+
+  const refreshed = await getIncidenciaByIdRequest(ticketKey, {
+    ...options,
+    force: true,
+    cache: false,
+  });
+
+  return refreshed ? upsertCachedIncidencia(refreshed) : null;
+}
+
 function normalizeFileResponse(response = {}, context = {}) {
   const data = fileFromPayload(response);
 
@@ -2465,6 +2502,7 @@ export default {
 
   openIncidenciaAttachment,
   downloadIncidenciaAttachment,
+  deleteIncidenciaAttachment,
 
   computeIncidenciasStats,
   loadIncidenciasStats,

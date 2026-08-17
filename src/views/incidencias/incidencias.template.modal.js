@@ -29,7 +29,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.extreme.v22.history-first";
+  "incidencias.template.modal.extreme.v23.final-ux-admin-files";
 
 export const DETAIL_ACTIONS = Object.freeze({
   CLOSE: "detail-close",
@@ -39,12 +39,14 @@ export const DETAIL_ACTIONS = Object.freeze({
   COMMENT_CHANGE: "detail-comment-change",
   TICKET_CLOSE: "detail-ticket-close",
   HISTORY_TOGGLE: "detail-history-toggle",
+  HISTORY_REVEAL: "detail-history-reveal",
 
   ATTACHMENTS_ADD: "detail-attachments-add",
   PENDING_FILE_REMOVE: "detail-pending-file-remove",
 
   ATTACHMENT_OPEN: "detail-attachment-open",
   ATTACHMENT_DOWNLOAD: "detail-attachment-download",
+  ATTACHMENT_DELETE: "detail-attachment-delete",
 
   PREVIEW_CLOSE: "detail-preview-close",
   PREVIEW_DOWNLOAD: "detail-preview-download",
@@ -765,6 +767,9 @@ function icon(name = "") {
 
     history:
       `<svg ${common}><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>`,
+
+    trash:
+      `<svg ${common}><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>`,
 
     chevronDown:
       `<svg ${common}><path d="m6 9 6 6 6-6"/></svg>`,
@@ -2338,6 +2343,21 @@ function buildVm(input = {}) {
     historyOpen:
       data.historyOpen === true,
 
+    historyCount:
+      getTimelineCount(detail),
+
+    admin:
+      data.admin === true,
+
+    canDeleteAttachments:
+      data.admin === true,
+
+    deletingAttachmentId:
+      cleanText(
+        data.deletingAttachmentId,
+        ""
+      ),
+
     feedbackMessage:
       cleanText(
         data.feedbackMessage,
@@ -2485,6 +2505,25 @@ function renderHeaderActions(vm = {}) {
       class="incidencias-modal-header-actions"
       data-modal-header-actions="true"
     >
+      <button
+        type="button"
+        data-detail-action="${DETAIL_ACTIONS.HISTORY_REVEAL}"
+        class="incidencias-modal-history-jump-btn"
+        aria-label="Abrir historial y actividad"
+        title="Ver historial y actividad"
+        ${disabledAttrs(vm.submitting, vm.submitting)}
+      >
+        <span class="incidencias-modal-history-jump-icon">
+          ${icon("history")}
+        </span>
+        <span class="incidencias-modal-history-jump-label">
+          Historial
+        </span>
+        <span class="incidencias-modal-history-jump-count" aria-hidden="true">
+          ${escapeHtml(String(vm.historyCount))}
+        </span>
+      </button>
+
       ${
         vm.canCloseTicket
           ? `
@@ -3048,6 +3087,13 @@ function getAttachmentBusyMeta(
         vm.downloadingAttachmentId ===
           attachmentId
       ),
+
+    isDeleting:
+      Boolean(
+        attachmentId &&
+        vm.deletingAttachmentId ===
+          attachmentId
+      ),
   };
 }
 
@@ -3240,6 +3286,40 @@ function renderAttachmentActionButtons(
             `
         }
       </button>
+
+      ${
+        vm.canDeleteAttachments
+          ? `
+            <button
+              type="button"
+              data-detail-action="${DETAIL_ACTIONS.ATTACHMENT_DELETE}"
+              data-attachment-id="${attr(busy.attachmentId)}"
+              ${disabledAttrs(
+                noId ||
+                busy.isDeleting ||
+                vm.submitting,
+                busy.isDeleting
+              )}
+              class="incidencias-modal-delete-btn"
+              aria-label="${attr(`Eliminar ${name}`)}"
+              title="Eliminar este adjunto"
+            >
+              ${
+                busy.isDeleting
+                  ? renderInlineSpinner(
+                      "Eliminando..."
+                    )
+                  : `
+                    <span class="incidencias-modal-action-icon">
+                      ${icon("trash")}
+                    </span>
+                    <span>Eliminar</span>
+                  `
+              }
+            </button>
+          `
+          : ""
+      }
     </div>
   `;
 }
@@ -4257,6 +4337,12 @@ export function getDetailTemplateSnapshot() {
         true,
 
       historyLazyRender:
+        true,
+
+      historyHeaderAccess:
+        true,
+
+      adminAttachmentDelete:
         true,
 
       categoryDisplayTitleCase:

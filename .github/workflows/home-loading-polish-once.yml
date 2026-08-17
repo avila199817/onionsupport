@@ -1,0 +1,153 @@
+name: Home Loading Polish Once
+
+on:
+  push:
+    branches:
+      - polish/incidencias-close-confirm-loader-20260817-never
+      - polish/home-loading-states-20260817
+    paths:
+      - .github/scripts/patch-home-loading-states.py
+      - .github/workflows/home-loading-polish-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: polish/home-loading-states-20260817
+          fetch-depth: 0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Apply Home loading polish
+        run: python3 .github/scripts/patch-home-loading-states.py
+
+      - name: Validate JS syntax
+        run: node --check src/views/home/home.template.js
+
+      - name: Smoke Home loading states
+        run: |
+          node --input-type=module <<'NODE'
+          import {
+            renderHomeTemplate,
+          } from './src/views/home/home.template.js';
+
+          const user = {
+            displayName: 'Cristian Ávila Luque',
+            role: 'admin',
+          };
+
+          const loading = renderHomeTemplate({
+            user,
+            role: 'admin',
+            loading: true,
+            dashboard: {
+              admin: true,
+              user,
+              summary: {},
+            },
+          });
+
+          if (!loading.includes('data-home-billing-state="loading"')) {
+            throw new Error('Missing loading billing state');
+          }
+          if (!loading.includes('Calculando facturación')) {
+            throw new Error('Missing billing loading copy');
+          }
+          if (!loading.includes('data-home-panel-loading="activity"')) {
+            throw new Error('Missing activity skeleton state');
+          }
+          if (!loading.includes('data-home-panel-loading="invoice"')) {
+            throw new Error('Missing invoice skeleton state');
+          }
+          if (loading.includes('Sin actividad reciente')) {
+            throw new Error('Empty activity state must not render while loading');
+          }
+          if (loading.includes('Sin facturas visibles')) {
+            throw new Error('Empty invoice state must not render while loading');
+          }
+          if (loading.includes('No disponible')) {
+            throw new Error('Legacy No disponible copy still rendered');
+          }
+
+          const pending = renderHomeTemplate({
+            user,
+            role: 'admin',
+            dashboard: {
+              admin: true,
+              user,
+              summary: {
+                invoiceStatsAvailable: false,
+              },
+            },
+          });
+
+          if (!pending.includes('data-home-billing-state="pending"')) {
+            throw new Error('Missing pending billing state');
+          }
+          if (!pending.includes('Total pendiente')) {
+            throw new Error('Missing pending billing copy');
+          }
+          if (pending.includes('No disponible')) {
+            throw new Error('Legacy No disponible copy still rendered in pending state');
+          }
+
+          const ready = renderHomeTemplate({
+            user,
+            role: 'admin',
+            dashboard: {
+              admin: true,
+              user,
+              summary: {
+                totalInvoiced: 1240.5,
+                currency: 'EUR',
+                invoiceStatsAvailable: true,
+              },
+            },
+          });
+
+          if (!ready.includes('data-home-billing-state="ready"')) {
+            throw new Error('Missing ready billing state');
+          }
+          if (!ready.includes('1.240,50')) {
+            throw new Error('Ready total was not formatted');
+          }
+          NODE
+
+      - name: Validate CSS contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          css = Path('src/css/views/home/index.css').read_text(encoding='utf-8')
+          required = [
+              '.home-billing-total[data-home-billing-state="loading"]',
+              '.home-billing-status--pending',
+              '.home-panel-loading-row--activity',
+              '.home-panel-loading-row--invoice',
+              '.home-skeleton--billing-value',
+          ]
+          for token in required:
+              if token not in css:
+                  raise SystemExit(f'Missing CSS token: {token}')
+          if re.search(r':\s*[^;{}\n]*!\s*important\b', css, flags=re.I):
+              raise SystemExit('!important declaration found')
+          print('Home CSS loading contract OK')
+          PY
+
+      - name: Commit product changes and remove one-shot files
+        run: |
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git rm .github/scripts/patch-home-loading-states.py .github/workflows/home-loading-polish-once.yml
+          git add src/views/home/home.template.js src/css/views/home/index.css
+          git commit -m "polish(home): estados de carga coherentes y facturación limpia"
+          git push origin polish/home-loading-states-20260817

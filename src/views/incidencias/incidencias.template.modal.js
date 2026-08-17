@@ -29,7 +29,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.extreme.v21.pro-close-history";
+  "incidencias.template.modal.extreme.v22.history-first";
 
 export const DETAIL_ACTIONS = Object.freeze({
   CLOSE: "detail-close",
@@ -3999,11 +3999,11 @@ export function renderIncidenciasDetailModal(
               ${renderAttachments(vm)}
             </div>
 
+            ${renderHistorySection(vm)}
+
             <div data-modal-composer-slot="true">
               ${renderComposer(vm)}
             </div>
-
-            ${renderHistorySection(vm)}
           </main>
         </div>
       </div>

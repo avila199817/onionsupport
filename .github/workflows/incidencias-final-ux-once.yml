@@ -6,6 +6,7 @@ on:
       - fix/incidencias-final-ux-admin-files-20260817
     paths:
       - .github/scripts/patch-incidencias-final-ux.py
+      - .github/scripts/run-patch-incidencias-final-ux.py
       - .github/workflows/incidencias-final-ux-once.yml
 
 permissions:
@@ -27,7 +28,7 @@ jobs:
           node-version: '22'
 
       - name: Apply final Incidencias UX patch
-        run: python3 .github/scripts/patch-incidencias-final-ux.py
+        run: python3 .github/scripts/run-patch-incidencias-final-ux.py
 
       - name: Validate JS syntax
         run: |
@@ -115,16 +116,21 @@ jobs:
           grep -F 'ATTACHMENT_DELETE: "detail-attachment-delete"' src/views/incidencias/incidencias.template.modal.js
           grep -F 'HISTORY_REVEAL: "detail-history-reveal"' src/views/incidencias/incidencias.template.modal.js
           grep -F 'caret-color: var(--idm-info);' src/css/views/incidencias/detail.css
-          if grep -R --line-number --fixed-strings '!important' src/css/views/incidencias/detail.css; then
-            echo 'detail.css contains !important'
-            exit 1
-          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          css = Path('src/css/views/incidencias/detail.css').read_text(encoding='utf-8')
+          if re.search(r':\s*[^;{}\n]*!\s*important\b', css, flags=re.I):
+              raise SystemExit('detail.css contains an !important declaration')
+          PY
 
       - name: Commit product changes and remove one-shot files
         run: |
           git config user.name "Onion Support"
           git config user.email "cristian@onionsupport.com"
-          git rm .github/scripts/patch-incidencias-final-ux.py .github/workflows/incidencias-final-ux-once.yml
+          git rm .github/scripts/patch-incidencias-final-ux.py \
+                 .github/scripts/run-patch-incidencias-final-ux.py \
+                 .github/workflows/incidencias-final-ux-once.yml
           git add src/views/incidencias/incidencias.api.js \
                   src/views/incidencias/incidencias.template.modal.js \
                   src/views/incidencias/index.js \

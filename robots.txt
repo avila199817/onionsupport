@@ -34,4 +34,4 @@ Disallow: /@*
 Disallow: /api/
 Disallow: /.auth/
 
-Sitemap: https://onionsupport.com/sitemap.xml
+Sitemap: https://www.onionsupport.com/sitemap.xml

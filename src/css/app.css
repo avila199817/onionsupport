@@ -193,6 +193,7 @@
    - Si index.css ya cubre todo definitivamente, se pueden retirar luego.
 ========================================================= */
 
+@import url("./views/incidencias/create.interactions.css") layer(views);
 
 
 /* =========================================================

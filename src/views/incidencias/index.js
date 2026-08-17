@@ -2736,6 +2736,23 @@ function createIncidenciasController(
           "[data-modal-composer='true']"
         );
 
+      /*
+         Leer el modo ANTES de sincronizar atributos: si copiamos primero
+         data-history-mode del nextBody al currentBody perdemos precisamente
+         la transición que debemos detectar.
+      */
+      const currentHistoryMode =
+        cleanText(
+          currentBody?.dataset?.historyMode,
+          "ticket"
+        );
+
+      const nextHistoryMode =
+        cleanText(
+          nextBody?.dataset?.historyMode,
+          "ticket"
+        );
+
       syncAttributes(
         currentRoot,
         nextRoot
@@ -2760,18 +2777,6 @@ function createIncidenciasController(
         currentRoot,
         nextRoot
       );
-
-      const currentHistoryMode =
-        cleanText(
-          currentBody?.dataset?.historyMode,
-          "ticket"
-        );
-
-      const nextHistoryMode =
-        cleanText(
-          nextBody?.dataset?.historyMode,
-          "ticket"
-        );
 
       if (
         currentBody &&

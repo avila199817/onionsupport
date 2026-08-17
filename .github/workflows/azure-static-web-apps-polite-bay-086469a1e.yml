@@ -1,7 +1,7 @@
 # =========================================================
 # ONION SUPPORT — AZURE STATIC WEB APPS CI/CD
 # Producción: SPA estática + landing pública indexable
-# Canonical SEO: https://onionsupport.com/
+# Canonical SEO: https://www.onionsupport.com/
 # Área privada: noindex / nofollow
 # Checkout: última fuente autoritativa (main / rama PR interna)
 # Evita desplegar snapshots obsoletos al reintentar ejecuciones
@@ -40,7 +40,7 @@ env:
   API_LOCATION: ""
   OUTPUT_LOCATION: ""
   PRODUCTION_BRANCH: "main"
-  PUBLIC_SITE_URL: "https://onionsupport.com"
+  PUBLIC_SITE_URL: "https://www.onionsupport.com"
   DEPLOY_COOLDOWN_SECONDS: "45"
   DEPLOY_RETRY_SECONDS: "75"
   PRODUCTION_VERIFY_DELAY_SECONDS: "25"
@@ -76,7 +76,7 @@ jobs:
 
     steps:
       - name: Checkout authoritative source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || 'main' }}
           fetch-depth: 1
@@ -126,6 +126,7 @@ jobs:
             "robots.txt"
             "sitemap.xml"
             "favicon.ico"
+            "ad1f6102f1914986b540f6a34bf6939b.txt"
 
             "src/main.js"
 
@@ -305,6 +306,7 @@ jobs:
               "Disallow: /login",
               "Disallow: /password-request",
               "Disallow: /password-reset",
+              "Disallow: /reset-password",
               "Disallow: /activate-account",
               "Disallow: /dashboard",
               "Disallow: /incidencias",
@@ -373,6 +375,7 @@ jobs:
                   "/login",
                   "/password-request",
                   "/password-reset",
+                  "/reset-password",
                   "/activate-account",
                   "/dashboard",
                   "/incidencias",
@@ -534,6 +537,7 @@ jobs:
               "/login",
               "/password-request",
               "/password-reset*",
+              "/reset-password*",
               "/activate-account*",
               "/dashboard*",
               "/@*",

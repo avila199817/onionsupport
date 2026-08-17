@@ -29,7 +29,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.production.v16.preview-sas-safe";
+  "incidencias.template.modal.extreme.v20.preview-sas-safe";
 
 export const DETAIL_ACTIONS = Object.freeze({
   CLOSE: "detail-close",
@@ -725,7 +725,11 @@ function formatLimitBytes(
    ICONS
 ========================================================= */
 
+const MODAL_ICON_CACHE = new Map();
+
 function icon(name = "") {
+  if (MODAL_ICON_CACHE.has(name)) return MODAL_ICON_CACHE.get(name);
+
   const common =
     `aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
 
@@ -758,10 +762,9 @@ function icon(name = "") {
       `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
   };
 
-  return (
-    icons[name] ||
-    icons.file
-  );
+  const result = icons[name] || icons.file;
+  MODAL_ICON_CACHE.set(name, result);
+  return result;
 }
 
 /* =========================================================
@@ -813,76 +816,36 @@ function formatBytes(bytes = 0) {
   ).toFixed(1)} GB`;
 }
 
-function formatMoney(
-  value = 0,
-  currency = DEFAULT_CURRENCY
-) {
-  try {
-    return new Intl.NumberFormat(
-      "es-ES",
-      {
-        style: "currency",
+const MODAL_MONEY_FORMATTERS = new Map();
+const MODAL_DATE_FORMATTER = new Intl.DateTimeFormat("es-ES", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
 
-        currency:
-          cleanText(
-            currency,
-            DEFAULT_CURRENCY
-          ).toUpperCase(),
-
-        maximumFractionDigits: 2,
-      }
-    ).format(
-      number(value, 0)
-    );
-  } catch {
-    return (
-      `${number(
-        value,
-        0
-      ).toFixed(2)} €`
-    );
+function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
+  const code = cleanText(currency, DEFAULT_CURRENCY).toUpperCase();
+  let formatter = MODAL_MONEY_FORMATTERS.get(code);
+  if (!formatter) {
+    try {
+      formatter = new Intl.NumberFormat("es-ES", { style: "currency", currency: code, maximumFractionDigits: 2 });
+      MODAL_MONEY_FORMATTERS.set(code, formatter);
+    } catch {
+      return `${number(value, 0).toFixed(2)} €`;
+    }
   }
+  return formatter.format(number(value, 0));
 }
 
 function formatDate(value = "") {
-  const raw =
-    first(
-      value,
-      ""
-    );
-
-  if (!raw) {
-    return "—";
-  }
-
-  const date =
-    new Date(raw);
-
-  if (
-    !Number.isFinite(
-      date.getTime()
-    )
-  ) {
-    return cleanText(
-      raw,
-      "—"
-    );
-  }
-
-  try {
-    return new Intl.DateTimeFormat(
-      "es-ES",
-      {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      }
-    ).format(date);
-  } catch {
-    return date.toISOString();
-  }
+  const raw = first(value, "");
+  if (!raw) return "—";
+  const date = new Date(raw);
+  if (!Number.isFinite(date.getTime())) return cleanText(raw, "—");
+  try { return MODAL_DATE_FORMATTER.format(date); }
+  catch { return date.toISOString(); }
 }
 
 function formatRelativeDate(

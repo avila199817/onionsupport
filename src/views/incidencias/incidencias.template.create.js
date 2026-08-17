@@ -12,7 +12,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =
-  "incidencias.template.create.productivo.no-copy.v12";
+  "incidencias.template.create.extreme.v20";
 
 export const CREATE_ACTIONS = Object.freeze({
   CLOSE: "create-close",
@@ -70,6 +70,9 @@ const ACCEPT_EXTENSIONS = [
   ".wav",
   ".weba",
 ];
+
+const ACCEPT_EXTENSION_SET = new Set(ACCEPT_EXTENSIONS);
+const ACCEPT_ATTRIBUTE = ACCEPT_ATTRIBUTE;
 
 const CATEGORY_OPTIONS = Object.freeze([
   { value: "general", label: "General" },
@@ -135,15 +138,13 @@ function cleanText(value = "", fallback = "") {
 }
 
 function first(...values) {
-  for (const value of values.flat(Infinity)) {
+  for (const value of values) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
     if (isObject(value) && Object.keys(value).length === 0) continue;
-
     return value;
   }
-
   return null;
 }
 
@@ -977,7 +978,7 @@ function renderFileInput(vm = {}) {
           name="attachments"
           type="file"
           multiple
-          accept="${attr(ACCEPT_EXTENSIONS.join(","))}"
+          accept="${attr(ACCEPT_ATTRIBUTE)}"
           class="inc-create-hidden-input"
           ${disabledAttrs(vm.submitting, vm.submitting)}
         >
@@ -1201,7 +1202,7 @@ export function validateCreateForm(form = {}) {
 
     const extension = fileExtension(file.name);
 
-    if (extension && !ACCEPT_EXTENSIONS.includes(extension)) {
+    if (extension && !ACCEPT_EXTENSION_SET.has(extension)) {
       errors.attachments = `El archivo ${cleanText(file.name, "archivo")} tiene una extensión no permitida.`;
       break;
     }

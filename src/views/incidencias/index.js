@@ -65,7 +65,7 @@ import {
 } from "./incidencias.template.modal.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.productivo.modal-10x10.v14.preview-reveal";
+  "incidencias.index.extreme.v20";
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
@@ -1110,6 +1110,9 @@ function createIncidenciasController(
   let userSearchTimer = 0;
   let attachmentPreviewSeq = 0;
 
+  let loadController = null;
+  let detailController = null;
+
   /*
      Elemento al que devolvemos el foco al cerrar el modal.
      No guardamos selectores ni IDs sensibles; sólo referencia DOM viva.
@@ -1547,27 +1550,12 @@ function createIncidenciasController(
     );
   }
 
-  function viewPayload(
-    extra = {}
-  ) {
+  function viewPayload(extra = {}) {
     return payload({
-      /*
-         El listado recibe sólo las filas visibles.
-         Stats/total siguen calculándose sobre `items` completo.
-      */
-      items:
-        filteredItems(),
-
-      createModal: {
-        ...createModal,
-        open: false,
-      },
-
-      detailModal: {
-        ...detailModal,
-        open: false,
-      },
-
+      canonical: true,
+      items,
+      createModal: { ...createModal, open: false },
+      detailModal: { ...detailModal, open: false },
       ...extra,
     });
   }
@@ -2107,6 +2095,58 @@ function createIncidenciasController(
         current,
         next
       );
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /* =======================================================
+     LIST PATCHING
+     Hot interactions never replace the active search input or the full view.
+  ======================================================= */
+
+  function syncListSearch(currentRoot = null, nextRoot = null) {
+    const currentSearch = currentRoot?.querySelector?.(".incidencias-search");
+    const nextSearch = nextRoot?.querySelector?.(".incidencias-search");
+    if (!currentSearch || !nextSearch) return false;
+
+    const currentInput = currentSearch.querySelector("[data-incidencias-search-input='true']");
+    const nextInput = nextSearch.querySelector("[data-incidencias-search-input='true']");
+    if (currentInput && nextInput && document.activeElement !== currentInput) {
+      currentInput.value = nextInput.value;
+      syncAttributes(currentInput, nextInput);
+    }
+
+    const currentClear = currentSearch.querySelector(".incidencias-search-clear");
+    const nextClear = nextSearch.querySelector(".incidencias-search-clear");
+    if (!currentClear && nextClear) currentSearch.appendChild(nextClear.cloneNode(true));
+    else if (currentClear && !nextClear) currentClear.remove();
+    else if (currentClear && nextClear) syncAttributes(currentClear, nextClear);
+
+    return true;
+  }
+
+  function patchListDom(html = "") {
+    if (!html || !host?.isConnected) return false;
+
+    const currentRoot = host.querySelector("[data-incidencias-scope='true']");
+    const nextRoot = cloneTemplateRoot(html, "[data-incidencias-scope='true']");
+    if (!currentRoot || !nextRoot) return false;
+
+    try {
+      syncAttributes(currentRoot, nextRoot);
+      syncListSearch(currentRoot, nextRoot);
+
+      for (const selector of [
+        ".incidencias-history-copy",
+        ".incidencias-filter-pills",
+        ".incidencias-sort-pills",
+        "[data-incidencias-table-wrap='true']",
+      ]) {
+        if (!replacePart(currentRoot, nextRoot, selector, { preserveFocus: false })) return false;
+      }
 
       return true;
     } catch {
@@ -2816,27 +2856,15 @@ function createIncidenciasController(
     return true;
   }
 
-  function renderNow(
-    options = {}
-  ) {
-    if (
-      destroyed ||
-      !host
-    ) {
-      return false;
-    }
+  function renderNow(options = {}) {
+    if (destroyed || !host) return false;
 
     cancelScheduledRender();
+    const html = renderIncidenciasTemplate(viewPayload());
+    const patched = options.listPatch === true && patchListDom(html);
+    if (!patched) host.innerHTML = html;
 
-    host.innerHTML =
-      renderIncidenciasTemplate(
-        viewPayload()
-      );
-
-    if (!options.skipModals) {
-      renderModalsNow();
-    }
-
+    if (!options.skipModals) renderModalsNow();
     return true;
   }
 
@@ -2947,11 +2975,16 @@ function createIncidenciasController(
       }
     }
 
+    loadController?.abort?.();
+    const requestController = typeof AbortController !== "undefined" ? new AbortController() : null;
+    loadController = requestController;
+
     try {
       const response =
         await listIncidencias({
           returnStaleOnError: true,
           force,
+          signal: requestController?.signal,
         });
 
       if (
@@ -3745,6 +3778,8 @@ function createIncidenciasController(
   ======================================================= */
 
   function resetDetailModal() {
+    detailController?.abort?.();
+    detailController = null;
     attachmentPreviewSeq += 1;
 
     detailModal.open = false;
@@ -3864,10 +3899,15 @@ function createIncidenciasController(
       render();
     }
 
+    detailController?.abort?.();
+    const requestController = typeof AbortController !== "undefined" ? new AbortController() : null;
+    detailController = requestController;
+
     try {
       const detail =
         await loadIncidenciaDetail(
-          id
+          id,
+          { signal: requestController?.signal }
         );
 
       if (
@@ -4716,7 +4756,7 @@ function createIncidenciasController(
        No mutamos `items` temporalmente; evita condiciones de carrera
        con requestAnimationFrame.
     */
-    render(options);
+    render({ ...options, listPatch: true });
     return true;
   }
 
@@ -5666,6 +5706,11 @@ function createIncidenciasController(
 
       loadSeq += 1;
       userSearchSeq += 1;
+
+      loadController?.abort?.();
+      detailController?.abort?.();
+      loadController = null;
+      detailController = null;
 
       clearUserSearchTimer();
 

@@ -8,7 +8,7 @@
    - Acepta items/tickets/incidencias/rows/results/data.items/etc.
 ========================================================= */
 
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.css-1-1.v12";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v20";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   REFRESH: "refresh",
@@ -63,7 +63,7 @@ function txt(v = "", fb = "") {
 }
 
 function first(...values) {
-  for (const v of values.flat(Infinity)) {
+  for (const v of values) {
     if (v === null || v === undefined) continue;
     if (typeof v === "string" && !v.trim()) continue;
     if (Array.isArray(v) && !v.length) continue;
@@ -166,57 +166,55 @@ function initials(v = "") {
    ICONS
 ========================================================= */
 
-function icon(name = "") {
-  const common = `aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
-  const icons = {
-    ticket: `<svg ${common}><path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z"/><path d="M13 5v14"/></svg>`,
-    refresh: `<svg ${common}><path d="M21 12a9 9 0 0 0-15-6.7L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 15 6.7l3-2.7"/><path d="M21 21v-5h-5"/></svg>`,
-    plus: `<svg ${common}><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
-    search: `<svg ${common}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
-    close: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
-    alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
-    paperclip: `<svg ${common}><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.82l8.48-8.49"/></svg>`,
-    euro: `<svg ${common}><path d="M4 10h12"/><path d="M4 14h9"/><path d="M19 6a7.7 7.7 0 0 0-5.2-2C8.9 4 5 7.6 5 12s3.9 8 8.8 8A7.7 7.7 0 0 0 19 18"/></svg>`,
-    chevronDown: `<svg ${common}><path d="m6 9 6 6 6-6"/></svg>`,
-    calendar: `<svg ${common}><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>`,
-    hash: `<svg ${common}><path d="M4 9h16"/><path d="M4 15h16"/><path d="M10 3 8 21"/><path d="m16 3-2 18"/></svg>`,
-  };
-  return icons[name] || icons.ticket;
-}
+const ICON_COMMON = `aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
+const ICONS = Object.freeze({
+  ticket: `<svg ${ICON_COMMON}><path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z"/><path d="M13 5v14"/></svg>`,
+  refresh: `<svg ${ICON_COMMON}><path d="M21 12a9 9 0 0 0-15-6.7L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 15 6.7l3-2.7"/><path d="M21 21v-5h-5"/></svg>`,
+  plus: `<svg ${ICON_COMMON}><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
+  search: `<svg ${ICON_COMMON}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
+  close: `<svg ${ICON_COMMON}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
+  alert: `<svg ${ICON_COMMON}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
+  paperclip: `<svg ${ICON_COMMON}><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.82l8.48-8.49"/></svg>`,
+  euro: `<svg ${ICON_COMMON}><path d="M4 10h12"/><path d="M4 14h9"/><path d="M19 6a7.7 7.7 0 0 0-5.2-2C8.9 4 5 7.6 5 12s3.9 8 8.8 8A7.7 7.7 0 0 0 19 18"/></svg>`,
+  chevronDown: `<svg ${ICON_COMMON}><path d="m6 9 6 6 6-6"/></svg>`,
+  calendar: `<svg ${ICON_COMMON}><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>`,
+  hash: `<svg ${ICON_COMMON}><path d="M4 9h16"/><path d="M4 15h16"/><path d="M10 3 8 21"/><path d="m16 3-2 18"/></svg>`,
+});
+function icon(name = "") { return ICONS[name] || ICONS.ticket; }
 
 /* =========================================================
    FORMATTERS
 ========================================================= */
 
-function formatNumber(v = 0) {
-  try { return new Intl.NumberFormat("es-ES").format(num(v, 0)); }
-  catch { return String(num(v, 0)); }
-}
+const NUMBER_FORMATTER = new Intl.NumberFormat("es-ES");
+const DATE_FORMATTER = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+const SHORT_DATE_FORMATTER = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "short", year: "numeric" });
+const MONEY_FORMATTERS = new Map();
 
+function formatNumber(v = 0) { return NUMBER_FORMATTER.format(num(v, 0)); }
 function formatMoney(v = 0, currency = DEFAULT_CURRENCY) {
-  try {
-    return new Intl.NumberFormat("es-ES", { style: "currency", currency: txt(currency, DEFAULT_CURRENCY).toUpperCase(), maximumFractionDigits: 2 }).format(num(v, 0));
-  } catch {
-    return `${num(v, 0).toFixed(2)} €`;
+  const code = txt(currency, DEFAULT_CURRENCY).toUpperCase();
+  let formatter = MONEY_FORMATTERS.get(code);
+  if (!formatter) {
+    try { formatter = new Intl.NumberFormat("es-ES", { style: "currency", currency: code, maximumFractionDigits: 2 }); }
+    catch { return `${num(v, 0).toFixed(2)} €`; }
+    MONEY_FORMATTERS.set(code, formatter);
   }
+  return formatter.format(num(v, 0));
 }
-
 function formatDate(v = "") {
   const raw = first(v, "");
   if (!raw) return "—";
   const d = new Date(raw);
   if (!Number.isFinite(d.getTime())) return txt(raw, "—");
-  try { return new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(d); }
-  catch { return d.toISOString(); }
+  try { return DATE_FORMATTER.format(d); } catch { return d.toISOString(); }
 }
-
 function formatShortDate(v = "") {
   const raw = first(v, "");
   if (!raw) return "—";
   const d = new Date(raw);
   if (!Number.isFinite(d.getTime())) return txt(raw, "—");
-  try { return new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "short", year: "numeric" }).format(d); }
-  catch { return d.toISOString().slice(0, 10); }
+  try { return SHORT_DATE_FORMATTER.format(d); } catch { return d.toISOString().slice(0, 10); }
 }
 
 function formatRelativeDate(v = "") {
@@ -275,7 +273,7 @@ function getAvatar(it = {}) {
 
 function getAssignedName(it = {}) {
   const r = unwrap(it), a = obj(r.assignment), tec = obj(r.tecnico), asg = obj(r.assignedTo), t = obj(r.technician);
-  return txt(first(r.assignedToName, r.technicianName, r.tecnicoName, r.agentName, a.assignedToName, a.technician?.name, a.technician?.displayName, tec.displayName, tec.name, tec.nombre, asg.displayName, asg.name, asg.nombre, t.displayName, t.name, t.nombre, "Cristian Ávila Luque"), "Cristian Ávila Luque");
+  return txt(first(r.assignedToName, r.technicianName, r.tecnicoName, r.agentName, a.assignedToName, a.technician?.name, a.technician?.displayName, tec.displayName, tec.name, tec.nombre, asg.displayName, asg.name, asg.nombre, t.displayName, t.name, t.nombre, ""), "");
 }
 
 function getAssignedEmail(it = {}) {
@@ -388,8 +386,12 @@ function itemMatchesFilter(it = {}, filter = "all") {
   return true;
 }
 
+const ITEM_TEXT_CACHE = new WeakMap();
 function itemText(it = {}) {
-  return searchKey([getId(it), getSubject(it), getDesc(it), getClientName(it), getClientEmail(it), getAssignedName(it), getAssignedEmail(it), getCategory(it), statusLabel(getStatusRaw(it)), priorityLabel(it)].join(" "));
+  if (isObj(it) && ITEM_TEXT_CACHE.has(it)) return ITEM_TEXT_CACHE.get(it);
+  const value = searchKey([getId(it), getSubject(it), getDesc(it), getClientName(it), getClientEmail(it), getAssignedName(it), getAssignedEmail(it), getCategory(it), statusLabel(getStatusRaw(it)), priorityLabel(it)].join(" "));
+  if (isObj(it)) ITEM_TEXT_CACHE.set(it, value);
+  return value;
 }
 
 function itemMatchesSearch(it = {}, q = "") {
@@ -426,8 +428,13 @@ function mergeStats(items = [], provided = {}) {
 }
 
 function filterCounts(items = []) {
-  const rows = arr(items);
-  return { all: rows.length, open: rows.filter(isOpen).length, closed: rows.filter(isClosed).length };
+  const counts = { all: 0, open: 0, closed: 0 };
+  for (const item of arr(items)) {
+    counts.all += 1;
+    if (isOpen(item)) counts.open += 1;
+    if (isClosed(item)) counts.closed += 1;
+  }
+  return counts;
 }
 
 /* =========================================================
@@ -449,6 +456,7 @@ function arrayCandidates(input = {}) {
 }
 
 function normalizeItems(input = {}) {
+  if (isObj(input) && input.canonical === true && Array.isArray(input.items)) return input.items;
   const candidates = Array.isArray(input) ? [input] : arrayCandidates(input);
   const map = new Map();
   for (const candidate of candidates) {
@@ -478,7 +486,7 @@ function buildVm(input = {}) {
   const filtered = sortItems(items.filter((it) => itemMatchesFilter(it, filter)).filter((it) => itemMatchesSearch(it, search)), order);
   const visible = filtered.slice(0, visibleLimit);
   const total = remoteTotal(d, items.length);
-  const stats = mergeStats(items, d.stats);
+  const stats = d.canonical === true && isObj(d.stats) ? d.stats : mergeStats(items, d.stats);
   return {
     data: d,
     route: txt(first(d.route, d.routes?.incidencias, DEFAULT_ROUTE), DEFAULT_ROUTE),

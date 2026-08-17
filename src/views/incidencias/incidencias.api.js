@@ -24,7 +24,7 @@
 
 import Http from "../../core/http.js";
 
-export const INCIDENCIAS_API_VERSION = "incidencias.api.paint-safe.v13.sas-preview-contract";
+export const INCIDENCIAS_API_VERSION = "incidencias.api.extreme.v20";
 export const INCIDENCIAS_ENDPOINT = "/api/tickets";
 export const USERS_SEARCH_ENDPOINT = "/api/users";
 
@@ -37,6 +37,7 @@ export const INCIDENCIAS_UPLOAD_TIMEOUT = 180000;
 
 export const INCIDENCIAS_LIST_LIMIT = 48;
 export const INCIDENCIAS_CACHE_TTL_MS = 60000;
+export const INCIDENCIAS_DETAIL_CACHE_TTL_MS = 20000;
 
 const DEFAULT_CURRENCY = "EUR";
 const DEFAULT_STATUS = "open";
@@ -68,6 +69,10 @@ let lastError = null;
 let lastCacheKey = "";
 let inFlightListPromise = null;
 let inFlightListKey = "";
+
+const detailCache = new Map();
+const detailInFlight = new Map();
+let usersSearchController = null;
 
 let lastList = {
   items: [],
@@ -645,6 +650,10 @@ export function clearIncidenciasCache() {
   lastCacheKey = "";
   inFlightListPromise = null;
   inFlightListKey = "";
+  detailCache.clear();
+  detailInFlight.clear();
+  usersSearchController?.abort?.();
+  usersSearchController = null;
   loading = false;
   return true;
 }
@@ -675,46 +684,29 @@ function responseErrorMessage(response = {}, fallback = "La operación no se pud
   );
 }
 
-function collectArraysDeep(value = null, seen = new WeakSet()) {
-  if (value === null || value === undefined) return [];
-  if (Array.isArray(value)) return [value];
-  if (typeof value !== "object") return [];
-  if (isBlob(value) || isFile(value)) return [];
-  if (seen.has(value)) return [];
-  seen.add(value);
-
-  const object = safeObject(value, {});
-  const arrays = [];
-
-  for (const key of [
-    "items",
-    "rows",
-    "records",
-    "results",
-    "docs",
-    "documents",
-    "value",
-    "list",
-    "tickets",
-    "incidencias",
-  ]) {
-    if (Array.isArray(object[key])) arrays.push(object[key]);
-  }
-
-  for (const key of ["data", "payload", "result", "response", "body"]) {
-    const nested = object[key];
-    if (nested && typeof nested === "object") arrays.push(...collectArraysDeep(nested, seen));
-  }
-
-  return arrays;
-}
-
 function listFromPayload(payload = null) {
-  const candidates = collectArraysDeep(payload);
-  const nonEmpty = candidates.find((candidate) => Array.isArray(candidate) && candidate.length > 0);
-  if (nonEmpty) return nonEmpty;
+  if (Array.isArray(payload)) return payload;
 
-  return candidates.find(Array.isArray) || [];
+  const root = safeObject(payload, {});
+  const data = safeObject(root.data, {});
+  const candidates = [
+    root.items,
+    root.rows,
+    root.tickets,
+    root.incidencias,
+    root.results,
+    root.records,
+    data.items,
+    data.rows,
+    data.tickets,
+    data.incidencias,
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) return candidate;
+  }
+
+  return [];
 }
 
 function usersListFromPayload(payload = null) {
@@ -919,36 +911,45 @@ function normalizeCreateSearchUser(user = {}) {
 }
 
 function buildUsersSearchQuery(query = "", limit = USERS_SEARCH_LIMIT) {
-  return {
-    q: query,
-    search: query,
-    query,
-    term: query,
-    text: query,
-    keyword: query,
-    limit,
-    includeTotal: false,
-  };
+  return { q: query, limit, includeTotal: false };
 }
 
 export async function searchIncidenciaUsers(query = "", options = {}) {
   const q = cleanText(query, "");
   const limit = Math.max(1, Math.min(number(options.limit, USERS_SEARCH_LIMIT), 20));
 
-  if (q.length < USERS_SEARCH_MIN_LENGTH) return [];
+  if (q.length < USERS_SEARCH_MIN_LENGTH) {
+    usersSearchController?.abort?.();
+    usersSearchController = null;
+    return [];
+  }
 
-  const response = await getJson(USERS_SEARCH_ENDPOINT, {
-    timeout: options.timeout || INCIDENCIAS_TIMEOUT,
-    query: buildUsersSearchQuery(q, limit),
-    source: "views.incidencias.users.search",
-  });
+  const externalSignal = options.signal || null;
+  let controller = null;
 
-  if (responseLooksFailed(response)) throw new Error(responseErrorMessage(response));
+  if (!externalSignal && typeof AbortController !== "undefined") {
+    usersSearchController?.abort?.();
+    controller = new AbortController();
+    usersSearchController = controller;
+  }
 
-  return usersListFromPayload(response)
-    .map(normalizeCreateSearchUser)
-    .filter((user) => user.userId || user.id)
-    .slice(0, limit);
+  try {
+    const response = await getJson(USERS_SEARCH_ENDPOINT, {
+      timeout: options.timeout || INCIDENCIAS_TIMEOUT,
+      query: buildUsersSearchQuery(q, limit),
+      source: "views.incidencias.users.search",
+      signal: externalSignal || controller?.signal,
+    });
+
+    if (responseLooksFailed(response)) throw new Error(responseErrorMessage(response));
+
+    return usersListFromPayload(response)
+      .map(normalizeCreateSearchUser)
+      .filter((user) => user.userId || user.id)
+      .slice(0, limit);
+  } finally {
+    if (controller && usersSearchController === controller) usersSearchController = null;
+  }
 }
 
 /* =========================================================
@@ -1077,7 +1078,6 @@ function normalizePerson(value = {}) {
 function normalizeTechnician(item = {}) {
   const raw = unwrapTicket(item);
   const assignment = safeObject(raw.assignment);
-
   const base = normalizePerson(
     first(
       raw.tecnico,
@@ -1091,18 +1091,57 @@ function normalizeTechnician(item = {}) {
   );
 
   const userId = cleanText(
-    first(raw.assignedToUserId, raw.technicianUserId, raw.tecnicoUserId, assignment.assignedToUserId, assignment.userId, base.userId, FIXED_TECHNICIAN.userId),
-    FIXED_TECHNICIAN.userId
+    first(
+      raw.assignedToUserId,
+      raw.technicianUserId,
+      raw.tecnicoUserId,
+      assignment.assignedToUserId,
+      assignment.userId,
+      base.userId
+    ),
+    ""
   );
-
   const name = cleanText(
-    first(raw.assignedToName, raw.technicianName, raw.tecnicoName, raw.agentName, assignment.assignedToName, assignment.technicianName, assignment.name, base.name, FIXED_TECHNICIAN.name),
-    FIXED_TECHNICIAN.name
+    first(
+      raw.assignedToName,
+      raw.technicianName,
+      raw.tecnicoName,
+      raw.agentName,
+      assignment.assignedToName,
+      assignment.technicianName,
+      assignment.name,
+      base.name
+    ),
+    ""
   );
-
-  const email = firstEmail(raw.assignedToEmail, raw.technicianEmail, raw.tecnicoEmail, raw.agentEmail, assignment.assignedToEmail, assignment.technicianEmail, assignment.email, base.email, FIXED_TECHNICIAN.email);
-  const avatar = firstUrl(raw.assignedToAvatarUrl, raw.assignedToAvatar, raw.technicianAvatarUrl, raw.technicianAvatar, raw.tecnicoAvatarUrl, raw.tecnicoAvatar, raw.agentAvatarUrl, raw.agentAvatar, assignment.assignedToAvatarUrl, assignment.assignedToAvatar, assignment.technicianAvatarUrl, assignment.technicianAvatar, assignment.avatarUrl, assignment.avatar, base.avatarUrl, FIXED_TECHNICIAN.avatarUrl);
-  const role = normalizeKey(first(base.role, FIXED_TECHNICIAN.role)) || FIXED_TECHNICIAN.role;
+  const email = firstEmail(
+    raw.assignedToEmail,
+    raw.technicianEmail,
+    raw.tecnicoEmail,
+    raw.agentEmail,
+    assignment.assignedToEmail,
+    assignment.technicianEmail,
+    assignment.email,
+    base.email
+  );
+  const avatar = firstUrl(
+    raw.assignedToAvatarUrl,
+    raw.assignedToAvatar,
+    raw.technicianAvatarUrl,
+    raw.technicianAvatar,
+    raw.tecnicoAvatarUrl,
+    raw.tecnicoAvatar,
+    raw.agentAvatarUrl,
+    raw.agentAvatar,
+    assignment.assignedToAvatarUrl,
+    assignment.assignedToAvatar,
+    assignment.technicianAvatarUrl,
+    assignment.technicianAvatar,
+    assignment.avatarUrl,
+    assignment.avatar,
+    base.avatarUrl
+  );
+  const role = normalizeKey(base.role || assignment.role || "");
 
   return {
     id: userId || null,
@@ -1116,7 +1155,7 @@ function normalizeTechnician(item = {}) {
     avatarUrl: avatar || null,
     hasAvatar: Boolean(avatar),
     role,
-    display: email ? `${name} <${email}>` : name,
+    display: name ? (email ? `${name} <${email}>` : name) : email,
     assigned: Boolean(userId || email || name),
   };
 }
@@ -1586,6 +1625,8 @@ function upsertCachedIncidencia(item = null) {
   const id = getTicketId(normalized);
   if (!id) return normalized;
 
+  detailCache.set(id, { item: normalized, at: now() });
+
   const current = safeArray(lastList.items).filter((row) => getTicketId(row) !== id);
   const next = normalizeList([normalized, ...current]);
 
@@ -1691,10 +1732,6 @@ function normalizeCreatePayload(payload = {}) {
     blobContainer: "tickets",
     attachmentFieldName: "attachments",
 
-    assignedToUserId: FIXED_TECHNICIAN.userId,
-    assignedToName: FIXED_TECHNICIAN.name,
-    assignedToEmail: FIXED_TECHNICIAN.email,
-    assignmentPolicy: "fixed_default_technician",
   };
 
   if (targetUserId) {
@@ -1811,6 +1848,7 @@ async function getJson(endpoint = "", options = {}) {
     timeout: options.timeout || INCIDENCIAS_TIMEOUT,
     query: safeObject(options.query || options.params),
     source: options.source || "views.incidencias",
+    signal: options.signal,
   });
 }
 
@@ -1818,6 +1856,7 @@ async function postJson(endpoint = "", body = {}, options = {}) {
   return Http.post(endpoint, body, {
     timeout: options.timeout || INCIDENCIAS_TIMEOUT,
     source: options.source || "views.incidencias",
+    signal: options.signal,
   });
 }
 
@@ -1825,6 +1864,7 @@ async function patchJson(endpoint = "", body = {}, options = {}) {
   return Http.patch(endpoint, body, {
     timeout: options.timeout || INCIDENCIAS_TIMEOUT,
     source: options.source || "views.incidencias",
+    signal: options.signal,
   });
 }
 
@@ -1836,6 +1876,7 @@ async function postMultipart(endpoint = "", formData = null, options = {}) {
   return Http.post(endpoint, formData, {
     timeout: options.timeout || INCIDENCIAS_UPLOAD_TIMEOUT,
     source: options.source || "views.incidencias.multipart",
+    signal: options.signal,
     multipart: true,
     formData: true,
     isFormData: true,
@@ -1855,6 +1896,7 @@ export async function fetchIncidenciasRequest(options = {}) {
     timeout: options.timeout || INCIDENCIAS_TIMEOUT,
     query: buildListQuery(options),
     source: "views.incidencias.list",
+    signal: options.signal,
   });
 }
 
@@ -1930,16 +1972,41 @@ export async function loadIncidencias(options = {}) {
   return response.items;
 }
 
-export async function getIncidenciaByIdRequest(id = "", { timeout = INCIDENCIAS_DETAIL_TIMEOUT } = {}) {
-  const response = await getJson(getIncidenciaEndpoint(id), {
-    timeout,
-    source: "views.incidencias.detail",
-  });
+export async function getIncidenciaByIdRequest(id = "", options = {}) {
+  const key = normalizeIncidenciaId(id);
+  if (!key) throw new Error("INCIDENCIA_ID_REQUIRED");
 
-  if (responseLooksFailed(response)) throw new Error(responseErrorMessage(response, "No se pudo cargar la incidencia."));
+  const force = options.force === true || options.forceRefresh === true;
+  const useCache = options.cache !== false && options.noCache !== true;
+  const ttl = Math.max(0, number(options.ttlMs ?? options.cacheTtlMs, INCIDENCIAS_DETAIL_CACHE_TTL_MS));
+  const cached = detailCache.get(key);
 
-  const detail = detailFromPayload(response);
-  return detail ? upsertCachedIncidencia(detail) : null;
+  if (!force && useCache && cached && now() - cached.at <= ttl) return cached.item;
+  if (!force && !options.signal && detailInFlight.has(key)) return detailInFlight.get(key);
+
+  const task = (async () => {
+    const response = await getJson(getIncidenciaEndpoint(key), {
+      timeout: options.timeout || INCIDENCIAS_DETAIL_TIMEOUT,
+      source: "views.incidencias.detail",
+      signal: options.signal,
+    });
+
+    if (responseLooksFailed(response)) {
+      throw new Error(responseErrorMessage(response, "No se pudo cargar la incidencia."));
+    }
+
+    const detail = detailFromPayload(response);
+    return detail ? upsertCachedIncidencia(detail) : null;
+  })();
+
+  if (options.signal) return task;
+
+  detailInFlight.set(key, task);
+  try {
+    return await task;
+  } finally {
+    if (detailInFlight.get(key) === task) detailInFlight.delete(key);
+  }
 }
 
 export const loadIncidenciaDetail = getIncidenciaByIdRequest;
@@ -1948,17 +2015,19 @@ export const loadIncidenciaDetail = getIncidenciaByIdRequest;
    CREATE / UPDATE / COMMENT / REOPEN
 ========================================================= */
 
-export async function createIncidenciaRequest(payload = {}, { timeout = INCIDENCIAS_UPLOAD_TIMEOUT } = {}) {
+export async function createIncidenciaRequest(payload = {}, { timeout = INCIDENCIAS_UPLOAD_TIMEOUT, signal } = {}) {
   const mutation = buildMutationBody(payload);
 
   const response = mutation.hasFiles
     ? await postMultipart(INCIDENCIAS_ENDPOINT, mutation.body, {
         timeout: Math.max(timeout, INCIDENCIAS_UPLOAD_TIMEOUT),
         source: "views.incidencias.create.multipart",
+        signal,
       })
     : await postJson(INCIDENCIAS_ENDPOINT, mutation.body, {
         timeout,
         source: "views.incidencias.create.json",
+        signal,
       });
 
   if (responseLooksFailed(response)) throw new Error(responseErrorMessage(response, "No se pudo crear la incidencia."));
@@ -1972,12 +2041,12 @@ export async function createIncidencia(payload = {}, options = {}) {
   return created ? upsertCachedIncidencia(created) : created;
 }
 
-export async function updateIncidenciaRequest(id = "", payload = {}, { timeout = INCIDENCIAS_TIMEOUT, method = "PATCH" } = {}) {
+export async function updateIncidenciaRequest(id = "", payload = {}, { timeout = INCIDENCIAS_TIMEOUT, method = "PATCH", signal } = {}) {
   const endpoint = getIncidenciaEndpoint(id);
   const verb = cleanText(method, "PATCH").toUpperCase();
 
   const response = verb === "PUT" && typeof Http.put === "function"
-    ? await Http.put(endpoint, safeObject(payload), { timeout, source: "views.incidencias.update" })
+    ? await Http.put(endpoint, safeObject(payload), { timeout, source: "views.incidencias.update", signal })
     : await patchJson(endpoint, safeObject(payload), { timeout, source: "views.incidencias.update" });
 
   if (responseLooksFailed(response)) throw new Error(responseErrorMessage(response, "No se pudo actualizar la incidencia."));
@@ -1988,17 +2057,17 @@ export async function updateIncidenciaRequest(id = "", payload = {}, { timeout =
 
 export async function updateIncidencia(id = "", payload = {}, options = {}) {
   const updated = await updateIncidenciaRequest(id, payload, options);
-  return updated ? upsertCachedIncidencia(updated) : await getIncidenciaByIdRequest(id);
+  return updated ? upsertCachedIncidencia(updated) : null;
 }
 
-export async function commentIncidenciaRequest(id = "", message = "", { timeout = INCIDENCIAS_TIMEOUT, status = "open" } = {}) {
+export async function commentIncidenciaRequest(id = "", message = "", { timeout = INCIDENCIAS_TIMEOUT, status = "open", signal } = {}) {
   const text = cleanText(message, "");
   if (!text) throw new Error("INCIDENCIA_COMMENT_REQUIRED");
 
   const response = await postJson(
     getIncidenciaCommentsEndpoint(id),
     { message: text, text, comment: text, status, estado: status },
-    { timeout, source: "views.incidencias.comment" }
+    { timeout, source: "views.incidencias.comment", signal }
   );
 
   if (responseLooksFailed(response)) throw new Error(responseErrorMessage(response, "No se pudo comentar la incidencia."));
@@ -2009,14 +2078,14 @@ export async function commentIncidenciaRequest(id = "", message = "", { timeout 
 
 export async function commentIncidencia(id = "", message = "", options = {}) {
   const updated = await commentIncidenciaRequest(id, message, options);
-  return updated ? upsertCachedIncidencia(updated) : await getIncidenciaByIdRequest(id);
+  return updated ? upsertCachedIncidencia(updated) : null;
 }
 
-export async function reopenIncidenciaRequest(id = "", { timeout = INCIDENCIAS_TIMEOUT } = {}) {
+export async function reopenIncidenciaRequest(id = "", { timeout = INCIDENCIAS_TIMEOUT, signal } = {}) {
   const response = await postJson(
     getIncidenciaReopenEndpoint(id),
     { status: "open", estado: "open", reopen: true },
-    { timeout, source: "views.incidencias.reopen" }
+    { timeout, source: "views.incidencias.reopen", signal }
   );
 
   if (responseLooksFailed(response)) throw new Error(responseErrorMessage(response, "No se pudo reabrir la incidencia."));
@@ -2027,14 +2096,14 @@ export async function reopenIncidenciaRequest(id = "", { timeout = INCIDENCIAS_T
 
 export async function reopenIncidencia(id = "", options = {}) {
   const updated = await reopenIncidenciaRequest(id, options);
-  return updated ? upsertCachedIncidencia(updated) : await getIncidenciaByIdRequest(id);
+  return updated ? upsertCachedIncidencia(updated) : null;
 }
 
 /* =========================================================
    ATTACHMENTS
 ========================================================= */
 
-export async function uploadIncidenciaAttachmentsRequest(id = "", files = [], { timeout = INCIDENCIAS_UPLOAD_TIMEOUT, status = "open", extra = {} } = {}) {
+export async function uploadIncidenciaAttachmentsRequest(id = "", files = [], { timeout = INCIDENCIAS_UPLOAD_TIMEOUT, status = "open", extra = {}, signal } = {}) {
   const list = dedupeFiles(normalizeFilesInput(files));
   if (!list.length) throw new Error("INCIDENCIA_ATTACHMENTS_REQUIRED");
 
@@ -2043,6 +2112,7 @@ export async function uploadIncidenciaAttachmentsRequest(id = "", files = [], { 
   const response = await postMultipart(getIncidenciaAttachmentsEndpoint(id), formData, {
     timeout,
     source: "views.incidencias.attachments.multipart",
+    signal,
   });
 
   if (responseLooksFailed(response)) throw new Error(responseErrorMessage(response, "No se pudieron subir los adjuntos."));
@@ -2053,7 +2123,7 @@ export async function uploadIncidenciaAttachmentsRequest(id = "", files = [], { 
 
 export async function uploadIncidenciaAttachments(id = "", files = [], options = {}) {
   const updated = await uploadIncidenciaAttachmentsRequest(id, files, options);
-  return updated ? upsertCachedIncidencia(updated) : await getIncidenciaByIdRequest(id);
+  return updated ? upsertCachedIncidencia(updated) : null;
 }
 
 function normalizeFileResponse(response = {}, context = {}) {
@@ -2141,9 +2211,9 @@ function normalizeFileResponse(response = {}, context = {}) {
   };
 }
 
-export async function getIncidenciaAttachmentFileRequest({ ticketId = "", attachmentId = "", mode = "view", kind = "attachments" } = {}, { timeout = INCIDENCIAS_DETAIL_TIMEOUT } = {}) {
+export async function getIncidenciaAttachmentFileRequest({ ticketId = "", attachmentId = "", mode = "view", kind = "attachments" } = {}, { timeout = INCIDENCIAS_DETAIL_TIMEOUT, signal } = {}) {
   const endpoint = getIncidenciaAttachmentFileEndpoint({ ticketId, attachmentId, mode, kind });
-  const response = await getJson(endpoint, { timeout, source: "views.incidencias.attachment.file" });
+  const response = await getJson(endpoint, { timeout, source: "views.incidencias.attachment.file", signal });
 
   if (responseLooksFailed(response)) throw new Error(responseErrorMessage(response, "No se pudo abrir el adjunto."));
 
@@ -2336,7 +2406,8 @@ export function getIncidenciasApiSnapshot() {
       downloadContract: "json_to_sas",
       directBlobDownload: true,
     },
-    fixedTechnician: FIXED_TECHNICIAN,
+    detailCache: { size: detailCache.size, inFlight: detailInFlight.size, ttlMs: INCIDENCIAS_DETAIL_CACHE_TTL_MS },
+    fixedTechnicianPolicyOwnedByBackend: true,
   };
 }
 

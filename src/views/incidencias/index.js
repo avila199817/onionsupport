@@ -67,7 +67,7 @@ import {
 } from "./incidencias.template.modal.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.extreme.v24.history-open-hard-render";
+  "incidencias.index.extreme.v25.history-mode";
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
@@ -2761,6 +2761,52 @@ function createIncidenciasController(
         nextRoot
       );
 
+      const currentHistoryMode =
+        cleanText(
+          currentBody?.dataset?.historyMode,
+          "ticket"
+        );
+
+      const nextHistoryMode =
+        cleanText(
+          nextBody?.dataset?.historyMode,
+          "ticket"
+        );
+
+      if (
+        currentBody &&
+        nextBody &&
+        currentHistoryMode !== nextHistoryMode
+      ) {
+        /*
+           Historial es un modo de contenido del modal, no un scroll-jump.
+           Sustituimos exclusivamente el body para mantener vivo el header,
+           el host y sus listeners. Así no hay parpadeo del panel y el
+           histórico nunca puede quedar fuera del viewport detrás del composer.
+        */
+        replacePart(
+          currentRoot,
+          nextRoot,
+          "[data-modal-header-actions='true']",
+          {
+            preserveFocus: false,
+          }
+        );
+
+        currentBody.replaceWith(
+          nextBody.cloneNode(true)
+        );
+
+        if (options.focusSelector) {
+          focusAfterRender(
+            options.focusSelector,
+            currentRoot
+          );
+        }
+
+        return true;
+      }
+
       for (
         const selector
         of [
@@ -4563,37 +4609,6 @@ function createIncidenciasController(
       return false;
     }
 
-    detailModal.historyOpen = true;
-
-    /*
-       La apertura del historial cambia el DOM estructuralmente: pasa de
-       disclosure lazy sin contenido a timeline renderizada. Forzamos un
-       render completo del modal en esta transición para no depender del
-       patch incremental del history-slot. El host y sus listeners se
-       conservan; sólo se sustituye el HTML interior.
-    */
-    renderModals({
-      immediate: true,
-      fullRender: true,
-    });
-
-    nextFrame(() => {
-      revealDetailHistory({
-        focus: true,
-      });
-    });
-
-    return true;
-  }
-
-  function toggleDetailHistory() {
-    if (
-      !detailModal.open ||
-      detailModal.submitting
-    ) {
-      return false;
-    }
-
     detailModal.historyOpen =
       !detailModal.historyOpen;
 
@@ -4602,20 +4617,17 @@ function createIncidenciasController(
 
     renderModals({
       immediate: true,
-      fullRender: openingHistory,
       focusSelector:
-        `[data-detail-action="${DETAIL_ACTIONS.HISTORY_TOGGLE}"]`,
+        openingHistory
+          ? "[data-modal-history-slot='true']"
+          : DETAIL_MODAL_PANEL_SELECTOR,
     });
 
-    if (openingHistory) {
-      nextFrame(() => {
-        revealDetailHistory({
-          focus: false,
-        });
-      });
-    }
-
     return true;
+  }
+
+  function toggleDetailHistory() {
+    return openDetailHistory();
   }
 
   async function closeDetailTicket() {

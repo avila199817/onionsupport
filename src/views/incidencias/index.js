@@ -67,13 +67,14 @@ import {
 } from "./incidencias.template.modal.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.extreme.v28.close-confirm-loader";
+  "incidencias.index.extreme.v29.interactive-stats";
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
 
 const DEFAULT_VISIBLE_LIMIT = 20;
 const DEFAULT_SORT_ORDER = "desc";
+const DEFAULT_SORT_MODE = "date";
 
 const USER_SEARCH_MIN_LENGTH = 2;
 const USER_SEARCH_LIMIT = 8;
@@ -1159,6 +1160,9 @@ function createIncidenciasController(
   let sortOrder =
     DEFAULT_SORT_ORDER;
 
+  let sortMode =
+    DEFAULT_SORT_MODE;
+
   let visibleLimit =
     DEFAULT_VISIBLE_LIMIT;
 
@@ -1492,6 +1496,7 @@ function createIncidenciasController(
       filter,
       search,
       sortOrder,
+      sortMode,
       visibleLimit,
       openingTicketId,
 
@@ -1505,125 +1510,6 @@ function createIncidenciasController(
 
       ...extra,
     };
-  }
-
-  function filteredItems() {
-    let output =
-      safeArray(items);
-
-    const q =
-      cleanText(
-        search,
-        ""
-      ).toLowerCase();
-
-    if (q) {
-      output =
-        output.filter((item) => {
-          const haystack =
-            [
-              item.ticketId,
-              item.id,
-
-              item.subject,
-              item.asunto,
-              item.title,
-
-              item.message,
-              item.description,
-              item.descripcion,
-
-              item.name,
-              item.displayName,
-              item.email,
-              item.username,
-
-              item.category,
-              item.categoria,
-              item.tipo,
-
-              item.priority,
-              item.status,
-            ]
-              .filter(Boolean)
-              .join(" ")
-              .toLowerCase();
-
-          return haystack.includes(q);
-        });
-    }
-
-    if (
-      filter &&
-      filter !== "all"
-    ) {
-      output =
-        output.filter((item) => {
-          const status =
-            cleanText(
-              first(
-                item.status,
-                item.estado
-              ),
-              ""
-            ).toLowerCase();
-
-          const priority =
-            cleanText(
-              first(
-                item.priority,
-                item.prioridad
-              ),
-              ""
-            ).toLowerCase();
-
-          if (filter === "open") {
-            return [
-              "open",
-              "pending",
-              "in_progress",
-            ].includes(status);
-          }
-
-          if (filter === "closed") {
-            return [
-              "closed",
-              "resolved",
-            ].includes(status);
-          }
-
-          if (filter === "urgent") {
-            return [
-              "urgent",
-              "high",
-            ].includes(priority);
-          }
-
-          return true;
-        });
-    }
-
-    output =
-      [...output].sort(
-        (a, b) => {
-          const diff =
-            ticketSortTime(b) -
-            ticketSortTime(a);
-
-          return (
-            normalizeSortOrder(
-              sortOrder
-            ) === "asc"
-              ? -diff
-              : diff
-          );
-        }
-      );
-
-    return output.slice(
-      0,
-      visibleLimit
-    );
   }
 
   function viewPayload(extra = {}) {
@@ -5345,9 +5231,9 @@ Se quitará de la incidencia y del almacenamiento. Esta acción no se puede desh
     options = {}
   ) {
     /*
-       viewPayload() ya aplica filteredItems().
-       No mutamos `items` temporalmente; evita condiciones de carrera
-       con requestAnimationFrame.
+       El template aplica filtro y orden desde viewPayload().
+       `items` sigue siendo la colección canónica; evitamos duplicar
+       la lógica de filtrado/orden en el controlador.
     */
     render({ ...options, listPatch: true });
     return true;
@@ -5380,6 +5266,12 @@ Se quitará de la incidencia y del almacenamiento. Esta acción no se puede desh
       ) ||
       "all";
 
+    sortMode =
+      DEFAULT_SORT_MODE;
+
+    sortOrder =
+      DEFAULT_SORT_ORDER;
+
     visibleLimit =
       DEFAULT_VISIBLE_LIMIT;
 
@@ -5388,9 +5280,49 @@ Se quitará de la incidencia y del almacenamiento. Esta acción no se puede desh
     return true;
   }
 
+  function applyStatAction(
+    value = ""
+  ) {
+    const stat =
+      cleanText(
+        value,
+        ""
+      ).toLowerCase();
+
+    if (
+      ![
+        "open",
+        "closed",
+        "urgent",
+        "amount",
+      ].includes(stat)
+    ) {
+      return false;
+    }
+
+    search = "";
+    visibleLimit =
+      DEFAULT_VISIBLE_LIMIT;
+
+    if (stat === "amount") {
+      filter = "all";
+      sortMode = "amount";
+      sortOrder = "desc";
+    } else {
+      filter = stat;
+      sortMode = DEFAULT_SORT_MODE;
+      sortOrder = DEFAULT_SORT_ORDER;
+    }
+
+    renderWithFilteredItems();
+    return true;
+  }
+
   function clearFilters() {
     filter = "all";
     search = "";
+    sortMode = DEFAULT_SORT_MODE;
+    sortOrder = DEFAULT_SORT_ORDER;
 
     visibleLimit =
       DEFAULT_VISIBLE_LIMIT;
@@ -5500,6 +5432,16 @@ Se quitará de la incidencia y del almacenamiento. Esta acción no se puede desh
     ) {
       return openCreateModal(
         node
+      );
+    }
+
+    if (
+      type ===
+      INCIDENCIAS_ACTIONS.STAT_APPLY
+    ) {
+      return applyStatAction(
+        node?.dataset?.stat ||
+        ""
       );
     }
 

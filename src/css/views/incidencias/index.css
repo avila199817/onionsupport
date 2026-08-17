@@ -476,6 +476,16 @@
   --inc-stat-color: var(--inc-blue);
   --inc-stat-color-2: var(--inc-cyan);
 
+  appearance: none;
+  inline-size: 100%;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+
   position: relative;
   isolation: isolate;
 
@@ -567,6 +577,33 @@
     0 24px 74px rgba(0, 0, 0, .44),
     inset 0 1px 0 rgba(255, 255, 255, .095),
     0 0 54px color-mix(in srgb, var(--inc-stat-color) 15%, transparent);
+}
+
+
+.incidencias-stat-card:active {
+  transform: translateY(-1px) scale(.992);
+}
+
+.incidencias-stat-card:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--inc-stat-color) 72%, #ffffff 28%);
+  outline-offset: 3px;
+}
+
+.incidencias-stat-card.is-active,
+.incidencias-stat-card[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--inc-stat-color) 72%, rgba(255, 255, 255, .30));
+
+  box-shadow:
+    0 24px 74px rgba(0, 0, 0, .44),
+    inset 0 0 0 1px color-mix(in srgb, var(--inc-stat-color) 18%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, .11),
+    0 0 64px color-mix(in srgb, var(--inc-stat-color) 21%, transparent);
+}
+
+.incidencias-stat-card.is-active::before,
+.incidencias-stat-card[aria-pressed="true"]::before {
+  block-size: 2px;
+  opacity: 1;
 }
 
 .incidencias-stat-card > * {

@@ -40,6 +40,7 @@ import {
   uploadIncidenciaAttachments,
   openIncidenciaAttachment,
   downloadIncidenciaAttachment,
+  deleteIncidenciaAttachment,
   computeIncidenciasStats,
   searchIncidenciaUsers,
 } from "./incidencias.api.js";
@@ -66,7 +67,7 @@ import {
 } from "./incidencias.template.modal.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.extreme.v21.pro-close-history";
+  "incidencias.index.extreme.v23.final-ux-admin-files";
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
@@ -614,6 +615,65 @@ function upsertByTicketId(
     });
 }
 
+
+function replaceByTicketId(
+  items = [],
+  item = null
+) {
+  const next =
+    safeObject(
+      item,
+      null
+    );
+
+  if (!next) {
+    return safeArray(items);
+  }
+
+  const id =
+    getTicketId(next);
+
+  if (!id) {
+    return safeArray(items);
+  }
+
+  let found = false;
+
+  const output =
+    safeArray(items).map((current) => {
+      if (getTicketId(current) !== id) {
+        return current;
+      }
+
+      found = true;
+      return next;
+    });
+
+  if (!found) {
+    output.push(next);
+  }
+
+  return output.sort((a, b) => {
+    const diff =
+      ticketSortTime(b) -
+      ticketSortTime(a);
+
+    if (diff !== 0) {
+      return diff;
+    }
+
+    return getTicketId(b)
+      .localeCompare(
+        getTicketId(a),
+        "es",
+        {
+          numeric: true,
+          sensitivity: "base",
+        }
+      );
+  });
+}
+
 function nextFrame(callback) {
   if (!isBrowser()) {
     return 0;
@@ -1159,6 +1219,7 @@ function createIncidenciasController(
 
     openingAttachmentId: "",
     downloadingAttachmentId: "",
+    deletingAttachmentId: "",
 
     previewFile: null,
     historyOpen: false,
@@ -1854,6 +1915,73 @@ function createIncidenciasController(
         } catch {
           // noop
         }
+      }
+    });
+
+    return true;
+  }
+
+
+  function revealDetailHistory({
+    focus = true,
+  } = {}) {
+    if (
+      !isBrowser() ||
+      destroyed ||
+      !detailModal.open ||
+      !modalHost?.isConnected
+    ) {
+      return false;
+    }
+
+    const root =
+      modalHost.querySelector(
+        DETAIL_ROOT_SELECTOR
+      );
+
+    const history =
+      root?.querySelector?.(
+        "[data-modal-history-slot='true']"
+      ) ||
+      null;
+
+    if (!history) {
+      return false;
+    }
+
+    try {
+      history.scrollIntoView?.({
+        behavior:
+          prefersReducedMotion()
+            ? "auto"
+            : "smooth",
+        block: "start",
+        inline: "nearest",
+      });
+    } catch {
+      try {
+        history.scrollIntoView?.();
+      } catch {
+        // noop
+      }
+    }
+
+    if (!focus) {
+      return true;
+    }
+
+    const toggle =
+      history.querySelector?.(
+        `[data-detail-action="${DETAIL_ACTIONS.HISTORY_TOGGLE}"]`
+      );
+
+    nextFrame(() => {
+      try {
+        toggle?.focus?.({
+          preventScroll: true,
+        });
+      } catch {
+        toggle?.focus?.();
       }
     });
 
@@ -3802,6 +3930,7 @@ function createIncidenciasController(
 
     detailModal.openingAttachmentId = "";
     detailModal.downloadingAttachmentId = "";
+    detailModal.deletingAttachmentId = "";
 
     detailModal.previewFile = null;
     detailModal.historyOpen = false;
@@ -3892,6 +4021,7 @@ function createIncidenciasController(
 
       detailModal.openingAttachmentId = "";
       detailModal.downloadingAttachmentId = "";
+      detailModal.deletingAttachmentId = "";
 
       detailModal.previewFile = null;
       detailModal.historyOpen = false;
@@ -3951,6 +4081,7 @@ function createIncidenciasController(
 
       detailModal.openingAttachmentId = "";
       detailModal.downloadingAttachmentId = "";
+      detailModal.deletingAttachmentId = "";
       detailModal.previewFile = null;
       detailModal.historyOpen = false;
 
@@ -4424,6 +4555,29 @@ function createIncidenciasController(
     }
   }
 
+  function openDetailHistory() {
+    if (
+      !detailModal.open ||
+      detailModal.submitting
+    ) {
+      return false;
+    }
+
+    detailModal.historyOpen = true;
+
+    renderModals({
+      immediate: true,
+    });
+
+    nextFrame(() => {
+      revealDetailHistory({
+        focus: true,
+      });
+    });
+
+    return true;
+  }
+
   function toggleDetailHistory() {
     if (
       !detailModal.open ||
@@ -4440,6 +4594,14 @@ function createIncidenciasController(
       focusSelector:
         `[data-detail-action="${DETAIL_ACTIONS.HISTORY_TOGGLE}"]`,
     });
+
+    if (detailModal.historyOpen) {
+      nextFrame(() => {
+        revealDetailHistory({
+          focus: false,
+        });
+      });
+    }
 
     return true;
   }
@@ -4863,6 +5025,146 @@ function createIncidenciasController(
     }
   }
 
+  async function deleteAttachment(
+    attachmentId = ""
+  ) {
+    const id =
+      cleanText(
+        attachmentId,
+        ""
+      );
+
+    const ticketId =
+      getTicketId(
+        detailModal.detail
+      );
+
+    if (
+      !id ||
+      !ticketId ||
+      !detailModal.open ||
+      detailModal.deletingAttachmentId
+    ) {
+      return false;
+    }
+
+    if (!isAdmin()) {
+      detailModal.feedbackMessage =
+        "Solo un administrador puede eliminar adjuntos.";
+      detailModal.feedbackType =
+        "error";
+      renderModals({ immediate: true });
+      return false;
+    }
+
+    const attachment =
+      getAttachmentById(id);
+
+    const filename =
+      cleanText(
+        first(
+          attachment?.name,
+          attachment?.filename,
+          attachment?.fileName,
+          "este adjunto"
+        ),
+        "este adjunto"
+      );
+
+    if (
+      isBrowser() &&
+      typeof window.confirm === "function"
+    ) {
+      const accepted = window.confirm(
+        `¿Eliminar definitivamente “${filename}”?
+
+Se quitará de la incidencia y del almacenamiento. Esta acción no se puede deshacer.`
+      );
+
+      if (!accepted) {
+        return false;
+      }
+    }
+
+    detailModal.deletingAttachmentId = id;
+    detailModal.feedbackMessage = "";
+    detailModal.feedbackType = "info";
+
+    renderModals({
+      immediate: true,
+    });
+
+    try {
+      const updated =
+        await deleteIncidenciaAttachment({
+          ticketId,
+          attachmentId: id,
+        });
+
+      if (!updated) {
+        throw new Error(
+          "El backend no devolvió la incidencia actualizada."
+        );
+      }
+
+      detailModal.deletingAttachmentId = "";
+      detailModal.detail = updated;
+
+      if (
+        cleanText(
+          first(
+            detailModal.previewFile?.id,
+            detailModal.previewFile?.attachmentId,
+            ""
+          ),
+          ""
+        ) === id
+      ) {
+        attachmentPreviewSeq += 1;
+        detailModal.previewFile = null;
+        detailModal.openingAttachmentId = "";
+      }
+
+      detailModal.feedbackMessage =
+        `Adjunto “${filename}” eliminado correctamente.`;
+      detailModal.feedbackType =
+        "success";
+
+      items =
+        replaceByTicketId(
+          items,
+          updated
+        );
+
+      render({
+        skipModals: true,
+      });
+
+      renderModals({
+        immediate: true,
+        focusSelector:
+          "[data-modal-files-slot='true'] button, [data-modal-history-slot='true'] button",
+      });
+
+      return true;
+    } catch (deleteError) {
+      detailModal.deletingAttachmentId = "";
+      detailModal.feedbackMessage =
+        safeError(
+          deleteError,
+          "No se pudo eliminar el adjunto."
+        );
+      detailModal.feedbackType =
+        "error";
+
+      renderModals({
+        immediate: true,
+      });
+
+      return false;
+    }
+  }
+
   function closePreview() {
     attachmentPreviewSeq += 1;
 
@@ -5191,6 +5493,13 @@ function createIncidenciasController(
 
     if (
       type ===
+      DETAIL_ACTIONS.HISTORY_REVEAL
+    ) {
+      return openDetailHistory();
+    }
+
+    if (
+      type ===
       DETAIL_ACTIONS.HISTORY_TOGGLE
     ) {
       return toggleDetailHistory();
@@ -5220,6 +5529,16 @@ function createIncidenciasController(
       DETAIL_ACTIONS.ATTACHMENT_DOWNLOAD
     ) {
       return downloadAttachment(
+        node?.dataset?.attachmentId ||
+        ""
+      );
+    }
+
+    if (
+      type ===
+      DETAIL_ACTIONS.ATTACHMENT_DELETE
+    ) {
+      return deleteAttachment(
         node?.dataset?.attachmentId ||
         ""
       );
@@ -5988,6 +6307,11 @@ function createIncidenciasController(
         detailHistoryOpen:
           detailModal.historyOpen === true,
 
+        deletingAttachmentId:
+          detailModal.deletingAttachmentId
+            ? "***"
+            : "",
+
         attachmentPreviewBusy:
           Boolean(
             detailModal.openingAttachmentId
@@ -6097,6 +6421,8 @@ function createIncidenciasController(
           detailManualClose: true,
           detailHistoryCollapsedByDefault: true,
           detailHistoryLazyRender: true,
+          detailHistoryHeaderAccess: true,
+          adminAttachmentDelete: true,
 
           attachmentPreviewUsesApiViewContract: true,
           attachmentPreviewRequiresValidatedUrl: true,

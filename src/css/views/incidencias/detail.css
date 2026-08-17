@@ -2,7 +2,7 @@
    ONION SUPPORT — INCIDENCIAS DETAIL MODAL
    Archivo: /src/css/views/incidencias/detail.css
 
-   PRODUCTIVO · V21 · PRO CLOSE · LAZY HISTORY · EXTREME UI
+   PRODUCTIVO · V23 · FINAL UX · HEADER HISTORY · ADMIN FILE DELETE
 
    Contrato:
    - 1:1 con incidencias.template.modal.js V16 preview-sas-safe.
@@ -4021,6 +4021,381 @@ body.light
 .incidencias-modal-history-content > .incidencias-timeline-list,
 .incidencias-modal-history-content > .incidencias-timeline-empty {
   margin-block-start: 14px;
+}
+
+
+/* =========================================================
+   V23 · FINAL UX PASS
+   - Historial siempre accesible desde el header fijo.
+   - Caret explícito y visible en el composer.
+   - Icono + con tratamiento cian/azul de mayor contraste.
+   - Eliminación de adjuntos sólo expuesta por el template a admin.
+   - Sin !important, sin estilos inline, sin hacks de especificidad.
+========================================================= */
+
+.incidencias-modal-history-jump-btn {
+  appearance: none;
+
+  min-block-size: 44px;
+  min-inline-size: 118px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+
+  padding: 9px 11px;
+
+  border:
+    1px solid
+    color-mix(
+      in srgb,
+      var(--idm-info) 36%,
+      var(--idm-border-soft)
+    );
+
+  border-radius: 14px;
+
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(
+        in srgb,
+        var(--idm-info) 10%,
+        var(--idm-control)
+      ),
+      color-mix(
+        in srgb,
+        var(--idm-accent) 8%,
+        var(--idm-control)
+      )
+    );
+
+  color: var(--idm-text-strong);
+
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 790;
+  line-height: 1;
+
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+
+  box-shadow:
+    var(--idm-shadow-control),
+    0 8px 24px
+      color-mix(
+        in srgb,
+        var(--idm-info) 8%,
+        transparent
+      );
+
+  transition:
+    border-color var(--idm-duration) var(--idm-ease),
+    background var(--idm-duration) var(--idm-ease),
+    box-shadow var(--idm-duration) var(--idm-ease),
+    transform var(--idm-duration) var(--idm-ease),
+    opacity var(--idm-duration) var(--idm-ease);
+}
+
+.incidencias-modal-history-jump-btn:hover:not(:disabled) {
+  border-color:
+    color-mix(
+      in srgb,
+      var(--idm-info) 66%,
+      var(--idm-accent-border)
+    );
+
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(
+        in srgb,
+        var(--idm-info) 17%,
+        var(--idm-control)
+      ),
+      color-mix(
+        in srgb,
+        var(--idm-accent) 13%,
+        var(--idm-control)
+      )
+    );
+
+  transform: translateY(-1px);
+
+  box-shadow:
+    var(--idm-shadow-control),
+    0 10px 28px
+      color-mix(
+        in srgb,
+        var(--idm-info) 14%,
+        transparent
+      );
+}
+
+.incidencias-modal-history-jump-btn:active:not(:disabled) {
+  transform: translateY(0) scale(.985);
+}
+
+.incidencias-modal-history-jump-btn:focus-visible {
+  outline: none;
+  box-shadow:
+    var(--idm-shadow-control),
+    var(--idm-focus);
+}
+
+.incidencias-modal-history-jump-btn:disabled {
+  cursor: not-allowed;
+  opacity: .56;
+  transform: none;
+}
+
+.incidencias-modal-history-jump-icon {
+  inline-size: 18px;
+  block-size: 18px;
+
+  display: inline-grid;
+  place-items: center;
+
+  color:
+    color-mix(
+      in srgb,
+      var(--idm-info) 72%,
+      var(--idm-text-strong)
+    );
+}
+
+.incidencias-modal-history-jump-icon > svg {
+  inline-size: 18px;
+  block-size: 18px;
+}
+
+.incidencias-modal-history-jump-count {
+  min-inline-size: 22px;
+  min-block-size: 22px;
+
+  display: inline-grid;
+  place-items: center;
+
+  padding-inline: 6px;
+
+  border:
+    1px solid
+    color-mix(
+      in srgb,
+      var(--idm-info) 24%,
+      var(--idm-border-subtle)
+    );
+
+  border-radius: 999px;
+
+  background:
+    color-mix(
+      in srgb,
+      var(--idm-info) 10%,
+      transparent
+    );
+
+  color: var(--idm-text-soft);
+
+  font-size: 9.5px;
+  font-weight: 800;
+}
+
+.incidencias-modal-history-section {
+  scroll-margin-block: 24px;
+}
+
+/* Composer: caret visible + plus with a clearer premium accent. */
+.incidencias-modal-comment-textarea {
+  color: var(--idm-text-strong);
+  caret-color: var(--idm-info);
+}
+
+.incidencias-modal-comment-textarea:focus {
+  caret-color:
+    color-mix(
+      in srgb,
+      var(--idm-info) 78%,
+      white 22%
+    );
+}
+
+.incidencias-modal-comment-textarea::selection {
+  background:
+    color-mix(
+      in srgb,
+      var(--idm-info) 28%,
+      transparent
+    );
+
+  color: var(--idm-text-strong);
+}
+
+.incidencias-modal-composer-icon {
+  border-color:
+    color-mix(
+      in srgb,
+      var(--idm-info) 64%,
+      var(--idm-border-soft)
+    );
+
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(
+        in srgb,
+        var(--idm-info) 38%,
+        var(--idm-control)
+      ),
+      color-mix(
+        in srgb,
+        var(--idm-accent) 30%,
+        var(--idm-control)
+      )
+    );
+
+  color:
+    color-mix(
+      in srgb,
+      var(--idm-info) 48%,
+      white 52%
+    );
+
+  box-shadow:
+    0 9px 26px
+      color-mix(
+        in srgb,
+        var(--idm-info) 20%,
+        transparent
+      ),
+    inset 0 1px 0 rgba(255, 255, 255, .14);
+}
+
+.incidencias-modal-composer-icon > svg {
+  stroke-width: 2.55;
+}
+
+/* Admin attachment delete action. */
+.incidencias-modal-attachment-actions {
+  flex-wrap: wrap;
+}
+
+.incidencias-modal-delete-btn {
+  appearance: none;
+
+  min-block-size: 38px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+
+  padding: 8px 11px;
+
+  border:
+    1px solid
+    color-mix(
+      in srgb,
+      var(--idm-error) 28%,
+      var(--idm-border-subtle)
+    );
+
+  border-radius: 11px;
+
+  background:
+    color-mix(
+      in srgb,
+      var(--idm-error) 5%,
+      var(--idm-control)
+    );
+
+  color:
+    color-mix(
+      in srgb,
+      var(--idm-error) 70%,
+      var(--idm-text-soft)
+    );
+
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 760;
+  line-height: 1;
+
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+
+  box-shadow: var(--idm-shadow-control);
+
+  transition:
+    border-color var(--idm-duration) var(--idm-ease),
+    background var(--idm-duration) var(--idm-ease),
+    color var(--idm-duration) var(--idm-ease),
+    box-shadow var(--idm-duration) var(--idm-ease),
+    transform var(--idm-duration) var(--idm-ease),
+    opacity var(--idm-duration) var(--idm-ease);
+}
+
+.incidencias-modal-delete-btn:hover:not(:disabled) {
+  border-color:
+    color-mix(
+      in srgb,
+      var(--idm-error) 62%,
+      var(--idm-border-soft)
+    );
+
+  background:
+    color-mix(
+      in srgb,
+      var(--idm-error) 12%,
+      var(--idm-control)
+    );
+
+  color: var(--idm-text-strong);
+  transform: translateY(-1px);
+
+  box-shadow:
+    var(--idm-shadow-control),
+    0 8px 22px
+      color-mix(
+        in srgb,
+        var(--idm-error) 12%,
+        transparent
+      );
+}
+
+.incidencias-modal-delete-btn:active:not(:disabled) {
+  transform: translateY(0) scale(.985);
+}
+
+.incidencias-modal-delete-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--idm-focus);
+}
+
+.incidencias-modal-delete-btn:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+  transform: none;
+}
+
+@media (max-width: 760px) {
+  .incidencias-modal-history-jump-btn {
+    inline-size: 42px;
+    min-inline-size: 42px;
+    block-size: 42px;
+    min-block-size: 42px;
+    padding: 0;
+  }
+
+  .incidencias-modal-history-jump-label,
+  .incidencias-modal-history-jump-count {
+    display: none;
+  }
+
+  .incidencias-modal-attachment-actions {
+    justify-content: flex-start;
+  }
 }
 
 /* =========================================================

@@ -1,0 +1,215 @@
+name: IndexNow
+
+on:
+  workflow_run:
+    workflows:
+      - Azure Static Web Apps CI/CD
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: indexnow-production
+  cancel-in-progress: true
+
+env:
+  PUBLIC_SITE_URL: "https://onionsupport.com"
+  INDEXNOW_ENDPOINT: "https://api.indexnow.org/indexnow"
+  INDEXNOW_KEY: "ad1f6102f1914986b540f6a34bf6939b"
+  INDEXNOW_KEY_FILE: "ad1f6102f1914986b540f6a34bf6939b.txt"
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref_name == 'main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.event == 'push')
+
+    steps:
+      - name: Checkout deployed revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || 'main' }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Validate IndexNow key
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, sys
+
+          key = os.environ['INDEXNOW_KEY']
+          path = Path(os.environ['INDEXNOW_KEY_FILE'])
+
+          if not path.is_file():
+              print(f'::error file={path},title=IndexNow key ausente::No existe el archivo de verificación.')
+              sys.exit(1)
+
+          try:
+              lines = path.read_text(encoding='utf-8').splitlines()
+          except UnicodeDecodeError:
+              print(f'::error file={path},title=IndexNow key inválida::El archivo debe ser UTF-8.')
+              sys.exit(1)
+
+          if lines != [key]:
+              print(f'::error file={path},title=IndexNow key inválida::Debe contener exactamente una línea con la clave configurada.')
+              sys.exit(1)
+
+          print('Contrato local IndexNow OK.')
+          PY
+
+      - name: Build payload
+        id: payload
+        run: |
+          set -euo pipefail
+
+          include_redirects=false
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            include_redirects=true
+          elif git rev-parse HEAD^ >/dev/null 2>&1 && git diff --name-only HEAD^ HEAD -- staticwebapp.config.json | grep -q .; then
+            include_redirects=true
+          fi
+
+          export INDEXNOW_INCLUDE_REDIRECTS="${include_redirects}"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          from urllib.parse import urlsplit
+          import json, os, sys
+          import xml.etree.ElementTree as ET
+
+          base = os.environ['PUBLIC_SITE_URL'].rstrip('/')
+          host = urlsplit(base).netloc
+          urls = []
+          seen = set()
+
+          def add(url):
+              url = (url or '').strip()
+              if not url or url in seen:
+                  return
+              parsed = urlsplit(url)
+              if parsed.scheme != 'https' or parsed.netloc != host:
+                  print(f'::error title=URL IndexNow inválida::Fuera del host canónico: {url}')
+                  sys.exit(1)
+              seen.add(url)
+              urls.append(url)
+
+          ns = {'sm': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
+          try:
+              root = ET.parse('sitemap.xml').getroot()
+          except (ET.ParseError, OSError) as exc:
+              print(f'::error file=sitemap.xml,title=Sitemap inválido::{exc}')
+              sys.exit(1)
+
+          for node in root.findall('sm:url/sm:loc', ns):
+              add(node.text)
+
+          if not urls:
+              print('::error file=sitemap.xml,title=IndexNow sin URLs::El sitemap no contiene URLs publicables.')
+              sys.exit(1)
+
+          if os.environ.get('INDEXNOW_INCLUDE_REDIRECTS') == 'true':
+              config = json.loads(Path('staticwebapp.config.json').read_text(encoding='utf-8'))
+              for rule in config.get('routes', []):
+                  route = str(rule.get('route', '')).strip()
+                  redirect = str(rule.get('redirect', '')).strip()
+                  if route and redirect and '*' not in route and route.startswith('/'):
+                      add(f'{base}{route}')
+
+          payload = {
+              'host': host,
+              'key': os.environ['INDEXNOW_KEY'],
+              'keyLocation': f"{base}/{os.environ['INDEXNOW_KEY_FILE']}",
+              'urlList': urls,
+          }
+
+          Path('/tmp/indexnow-payload.json').write_text(
+              json.dumps(payload, ensure_ascii=False, separators=(',', ':')),
+              encoding='utf-8'
+          )
+          Path('/tmp/indexnow-urls.txt').write_text('\n'.join(urls) + '\n', encoding='utf-8')
+
+          print(f'Payload preparado con {len(urls)} URL(s):')
+          for url in urls:
+              print(f'  - {url}')
+          PY
+
+          echo "include_redirects=${include_redirects}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify production key
+        run: |
+          set -euo pipefail
+          key_url="${PUBLIC_SITE_URL%/}/${INDEXNOW_KEY_FILE}"
+          body=/tmp/indexnow-key.txt
+
+          status="$(curl -sS -o "${body}" -w "%{http_code}" \
+            --retry 6 --retry-delay 5 --retry-all-errors \
+            "${key_url}" || true)"
+
+          if [[ "${status}" != "200" ]]; then
+            echo "::error title=IndexNow key no publicada::${key_url} respondió HTTP ${status}."
+            exit 1
+          fi
+
+          live_key="$(tr -d '\r\n' < "${body}")"
+          if [[ "${live_key}" != "${INDEXNOW_KEY}" ]]; then
+            echo "::error title=IndexNow key incorrecta::El archivo publicado no coincide con la clave configurada."
+            exit 1
+          fi
+
+          echo "Key pública IndexNow verificada."
+
+      - name: Submit URLs
+        run: |
+          set -euo pipefail
+          response=/tmp/indexnow-response.txt
+
+          status="$(curl -sS -o "${response}" -w "%{http_code}" \
+            -X POST "${INDEXNOW_ENDPOINT}" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            --data-binary @/tmp/indexnow-payload.json || true)"
+
+          case "${status}" in
+            200|202)
+              echo "IndexNow aceptó el envío (HTTP ${status})."
+              ;;
+            429)
+              echo "::warning title=IndexNow rate limit::HTTP 429. No se reintenta automáticamente para evitar envíos repetidos."
+              ;;
+            5??)
+              echo "::warning title=IndexNow temporalmente no disponible::HTTP ${status}. El deploy sigue siendo válido."
+              ;;
+            *)
+              echo "::error title=IndexNow rechazó el payload::HTTP ${status}."
+              head -c 1000 "${response}" 2>/dev/null || true
+              echo
+              exit 1
+              ;;
+          esac
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## IndexNow"
+            echo
+            echo "- Host: \`${PUBLIC_SITE_URL#https://}\`"
+            echo "- Redirects incluidos: \`${{ steps.payload.outputs.include_redirects || 'false' }}\`"
+            echo
+            if [[ -f /tmp/indexnow-urls.txt ]]; then
+              echo "### URLs preparadas"
+              while IFS= read -r url; do
+                [[ -z "${url}" ]] && continue
+                echo "- ${url}"
+              done < /tmp/indexnow-urls.txt
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"

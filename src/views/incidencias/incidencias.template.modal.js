@@ -29,7 +29,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.extreme.v23.final-ux-admin-files";
+  "incidencias.template.modal.extreme.v24.consistent-id-chip";
 
 export const DETAIL_ACTIONS = Object.freeze({
   CLOSE: "detail-close",
@@ -2433,21 +2433,6 @@ function shortTicketId(
 
   if (id.length <= 18) {
     return id;
-  }
-
-  const parts =
-    id
-      .split(/[\s:_-]+/)
-      .filter(Boolean);
-
-  const last =
-    parts.at(-1) ||
-    "";
-
-  if (/^\d{6,}$/.test(last)) {
-    return (
-      `#${last.slice(-8)}`
-    );
   }
 
   return (

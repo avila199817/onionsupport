@@ -67,7 +67,7 @@ import {
 } from "./incidencias.template.modal.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.extreme.v23.final-ux-admin-files";
+  "incidencias.index.extreme.v24.history-open-hard-render";
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
@@ -4565,8 +4565,16 @@ function createIncidenciasController(
 
     detailModal.historyOpen = true;
 
+    /*
+       La apertura del historial cambia el DOM estructuralmente: pasa de
+       disclosure lazy sin contenido a timeline renderizada. Forzamos un
+       render completo del modal en esta transición para no depender del
+       patch incremental del history-slot. El host y sus listeners se
+       conservan; sólo se sustituye el HTML interior.
+    */
     renderModals({
       immediate: true,
+      fullRender: true,
     });
 
     nextFrame(() => {
@@ -4589,13 +4597,17 @@ function createIncidenciasController(
     detailModal.historyOpen =
       !detailModal.historyOpen;
 
+    const openingHistory =
+      detailModal.historyOpen === true;
+
     renderModals({
       immediate: true,
+      fullRender: openingHistory,
       focusSelector:
         `[data-detail-action="${DETAIL_ACTIONS.HISTORY_TOGGLE}"]`,
     });
 
-    if (detailModal.historyOpen) {
+    if (openingHistory) {
       nextFrame(() => {
         revealDetailHistory({
           focus: false,

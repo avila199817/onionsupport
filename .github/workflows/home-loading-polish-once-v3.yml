@@ -1,0 +1,147 @@
+name: Home Loading Polish Once V3
+
+on:
+  push:
+    branches:
+      - polish/home-loading-states-20260817
+    paths:
+      - .github/workflows/home-loading-polish-once-v3.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: polish/home-loading-states-20260817
+          fetch-depth: 0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Harden one-shot patcher
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/patch-home-loading-states.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''c = replace_once(
+              c,
+              '.home-billing-total strong {',
+              '.home-billing-total > strong {',
+              'billing amount direct child',
+          )'''
+          new = '''billing_amount_selector = "\\n.home-billing-total strong {"
+          billing_amount_count = c.count(billing_amount_selector)
+          if billing_amount_count != 1:
+              raise SystemExit(f"billing amount direct child: expected 1 anchored match, got {billing_amount_count}")
+          c = c.replace(billing_amount_selector, "\\n.home-billing-total > strong {", 1)'''
+          if old not in text:
+              raise SystemExit('Could not find billing amount patch block')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Apply Home loading polish
+        run: python3 .github/scripts/patch-home-loading-states.py
+
+      - name: Validate JS syntax
+        run: node --check src/views/home/home.template.js
+
+      - name: Smoke Home loading states
+        run: |
+          node --input-type=module <<'NODE'
+          import { renderHomeTemplate } from './src/views/home/home.template.js';
+
+          const user = { displayName: 'Cristian Ávila Luque', role: 'admin' };
+
+          const loading = renderHomeTemplate({
+            user,
+            role: 'admin',
+            loading: true,
+            dashboard: { admin: true, user, summary: {} },
+          });
+
+          for (const token of [
+            'data-home-billing-state="loading"',
+            'Calculando facturación',
+            'data-home-panel-loading="activity"',
+            'data-home-panel-loading="invoice"',
+          ]) {
+            if (!loading.includes(token)) throw new Error(`Missing loading token: ${token}`);
+          }
+
+          for (const forbidden of ['Sin actividad reciente', 'Sin facturas visibles', 'No disponible']) {
+            if (loading.includes(forbidden)) throw new Error(`Loading rendered forbidden copy: ${forbidden}`);
+          }
+
+          const pending = renderHomeTemplate({
+            user,
+            role: 'admin',
+            dashboard: {
+              admin: true,
+              user,
+              summary: { invoiceStatsAvailable: false },
+            },
+          });
+
+          if (!pending.includes('data-home-billing-state="pending"')) throw new Error('Missing pending state');
+          if (!pending.includes('Total pendiente')) throw new Error('Missing pending copy');
+          if (!pending.includes('estadísticas terminen de sincronizarse')) throw new Error('Missing pending explanation');
+          if (pending.includes('No disponible')) throw new Error('Legacy No disponible still present');
+
+          const ready = renderHomeTemplate({
+            user,
+            role: 'admin',
+            dashboard: {
+              admin: true,
+              user,
+              summary: {
+                totalInvoiced: 1240.5,
+                currency: 'EUR',
+                invoiceStatsAvailable: true,
+              },
+            },
+          });
+
+          if (!ready.includes('data-home-billing-state="ready"')) throw new Error('Missing ready state');
+          if (!/1[.]?240,50/.test(ready)) throw new Error('Ready total was not rendered as EUR amount');
+          if (ready.includes('Total pendiente')) throw new Error('Ready state rendered pending copy');
+          NODE
+
+      - name: Validate CSS contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          css = Path('src/css/views/home/index.css').read_text(encoding='utf-8')
+          for token in [
+              '.home-billing-total[data-home-billing-state="loading"]',
+              '.home-billing-status--pending',
+              '.home-panel-loading-row--activity',
+              '.home-panel-loading-row--invoice',
+              '.home-skeleton--billing-value',
+          ]:
+              if token not in css:
+                  raise SystemExit(f'Missing CSS token: {token}')
+          if re.search(r':\s*[^;{}\n]*!\s*important\b', css, flags=re.I):
+              raise SystemExit('!important declaration found')
+          print('Home loading CSS contract OK')
+          PY
+
+      - name: Commit product changes and remove one-shot files
+        run: |
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git rm .github/scripts/patch-home-loading-states.py \
+            .github/workflows/home-loading-polish-once.yml \
+            .github/workflows/home-loading-polish-once-v2.yml \
+            .github/workflows/home-loading-polish-once-v3.yml
+          git add src/views/home/home.template.js src/css/views/home/index.css
+          git commit -m "polish(home): estados de carga coherentes y facturación limpia"
+          git push origin polish/home-loading-states-20260817

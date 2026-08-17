@@ -44,6 +44,8 @@ jobs:
             DETAIL_ACTIONS,
           } from './src/views/incidencias/incidencias.template.modal.js';
 
+          const signedView = 'https://onionassets.blob.core.windows.net/tickets/ON-TEST/INC-TEST-001/captura.png?sv=2026-01-01&sr=b&sp=r&sig=test';
+
           const detail = {
             ticketId: 'INC-TEST-001',
             subject: 'Prueba final',
@@ -59,6 +61,8 @@ jobs:
               name: 'captura.png',
               contentType: 'image/png',
               size: 1024,
+              viewUrl: signedView,
+              signedUrl: signedView,
             }],
             history: [{
               id: 'h1',

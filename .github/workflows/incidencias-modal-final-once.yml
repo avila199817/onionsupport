@@ -1,0 +1,121 @@
+name: Incidencias Modal Final Once
+
+on:
+  push:
+    branches:
+      - polish/incidencias-modal-final-20260817
+    paths:
+      - .github/scripts/patch-incidencias-modal-final.py
+      - .github/workflows/incidencias-modal-final-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: polish/incidencias-modal-final-20260817
+          fetch-depth: 0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Apply final modal polish
+        run: python3 .github/scripts/patch-incidencias-modal-final.py
+
+      - name: Validate all Incidencias JS syntax
+        run: |
+          node --check src/views/incidencias/incidencias.api.js
+          node --check src/views/incidencias/incidencias.template.js
+          node --check src/views/incidencias/incidencias.template.create.js
+          node --check src/views/incidencias/incidencias.template.modal.js
+          node --check src/views/incidencias/index.js
+
+      - name: Smoke test modal contact actions
+        run: |
+          node --input-type=module <<'NODE'
+          import { renderIncidenciasDetailModal } from './src/views/incidencias/incidencias.template.modal.js';
+
+          const html = renderIncidenciasDetailModal({
+            open: true,
+            admin: true,
+            role: 'admin',
+            detail: {
+              ticketId: 'INC-20260817-TEST01',
+              subject: 'Prueba final modal',
+              description: 'Detalle de prueba',
+              status: 'open',
+              priority: 'high',
+              category: 'access',
+              displayName: 'Cliente Prueba',
+              email: 'cliente@example.com',
+              phone: '+34 600 123 456',
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            },
+          });
+
+          const required = [
+            'href="mailto:cliente@example.com"',
+            'href="tel:+34600123456"',
+            'Enviar correo',
+            'Llamar',
+            'incidencias-modal-contact-link',
+            'incidencias-modal-composer',
+          ];
+
+          for (const token of required) {
+            if (!html.includes(token)) {
+              throw new Error(`Modal smoke missing: ${token}`);
+            }
+          }
+
+          if (/href="(?:javascript|data|vbscript|file):/i.test(html)) {
+            throw new Error('Unsafe contact scheme rendered');
+          }
+          NODE
+
+      - name: Validate CSS final contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          css = Path('src/css/views/incidencias/detail.css').read_text(encoding='utf-8')
+          tpl = Path('src/views/incidencias/incidencias.template.modal.js').read_text(encoding='utf-8')
+          index = Path('src/views/incidencias/index.js').read_text(encoding='utf-8')
+
+          if 'var(--idm-composer-warning) 74%' not in css:
+              raise SystemExit('Visible amber composer border missing')
+          if 'var(--idm-accent) 42%' in css[css.index('COMPOSER · clearer primary work surface'):css.index('.incidencias-modal-composer-head', css.index('COMPOSER · clearer primary work surface'))]:
+              raise SystemExit('Legacy accent override still wins over composer yellow')
+          if '.incidencias-modal-technician-avatar[data-has-avatar="true"]' not in css:
+              raise SystemExit('Neutral technician avatar rule missing')
+          if 'background: transparent;' not in css[css.index('.incidencias-modal-technician-avatar[data-has-avatar="true"]'):css.index('.incidencias-modal-technician-copy', css.index('.incidencias-modal-technician-avatar[data-has-avatar="true"]'))]:
+              raise SystemExit('Technician avatar tone background not neutralized')
+          if 'incidencias-modal-contact-link' not in css or 'incidencias-modal-technician-email' not in css:
+              raise SystemExit('Contact action styles missing')
+          if 'mailto:' not in tpl or 'tel:' not in tpl:
+              raise SystemExit('Native contact schemes missing')
+          if '"a[href]"' not in index:
+              raise SystemExit('Modal focus trap does not include contact anchors')
+          if re.search(r':\s*[^;{}\n]*!\s*important\b', css, flags=re.I):
+              raise SystemExit('detail.css contains !important declaration')
+          PY
+
+      - name: Commit product changes and remove one-shot files
+        run: |
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git rm -f .github/scripts/patch-incidencias-modal-final.py \
+                    .github/workflows/incidencias-modal-final-once.yml
+          git add src/css/views/incidencias/detail.css \
+                  src/views/incidencias/incidencias.template.modal.js
+          git commit -m "polish(incidencias): rematar modal y acciones de contacto"
+          git push origin HEAD:polish/incidencias-modal-final-20260817

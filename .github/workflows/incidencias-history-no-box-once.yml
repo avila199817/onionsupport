@@ -25,15 +25,24 @@ jobs:
 
       - name: Validate clean history shell
         run: |
-          grep -F '.incidencias-modal-history-view {' src/css/views/incidencias/detail.css
-          grep -F 'border: 0;' src/css/views/incidencias/detail.css
-          grep -F 'background: transparent;' src/css/views/incidencias/detail.css
-          grep -F 'box-shadow: none;' src/css/views/incidencias/detail.css
           python3 - <<'PY'
           from pathlib import Path
           css = Path('src/css/views/incidencias/detail.css').read_text(encoding='utf-8')
-          if '!important' in css:
-              raise SystemExit('No !important allowed')
+          start = css.index('.incidencias-modal-history-view {')
+          end = css.index('.incidencias-modal-history-view-head {', start)
+          block = css[start:end]
+          required = [
+              'min-block-size: 0;',
+              'border: 0;',
+              'border-radius: 0;',
+              'background: transparent;',
+              'box-shadow: none;',
+          ]
+          for token in required:
+              if token not in block:
+                  raise SystemExit(f'Missing {token}')
+          if '!important' in block:
+              raise SystemExit('New history shell must not use !important')
           PY
 
       - name: Commit CSS and remove one-shot files

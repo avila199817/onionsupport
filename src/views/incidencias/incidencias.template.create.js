@@ -12,7 +12,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =
-  "incidencias.template.create.productivo.no-copy.v12";
+  "incidencias.template.create.extreme.v20";
 
 export const CREATE_ACTIONS = Object.freeze({
   CLOSE: "create-close",
@@ -70,6 +70,9 @@ const ACCEPT_EXTENSIONS = [
   ".wav",
   ".weba",
 ];
+
+const ACCEPT_EXTENSION_SET = new Set(ACCEPT_EXTENSIONS);
+const ACCEPT_ATTRIBUTE = ACCEPT_EXTENSIONS.join(",");
 
 const CATEGORY_OPTIONS = Object.freeze([
   { value: "general", label: "General" },
@@ -135,15 +138,13 @@ function cleanText(value = "", fallback = "") {
 }
 
 function first(...values) {
-  for (const value of values.flat(Infinity)) {
+  for (const value of values) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
     if (isObject(value) && Object.keys(value).length === 0) continue;
-
     return value;
   }
-
   return null;
 }
 
@@ -340,7 +341,11 @@ function isFileLike(value = null) {
    ICONS
 ========================================================= */
 
+const CREATE_ICON_CACHE = new Map();
+
 function icon(name = "") {
+  if (CREATE_ICON_CACHE.has(name)) return CREATE_ICON_CACHE.get(name);
+
   const common =
     `aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
 
@@ -355,7 +360,9 @@ function icon(name = "") {
     user: `<svg ${common}><path d="M12 11.25a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/><path d="M4.75 20.75a7.25 7.25 0 0 1 14.5 0"/></svg>`,
   };
 
-  return icons[name] || "";
+  const result = icons[name] || "";
+  CREATE_ICON_CACHE.set(name, result);
+  return result;
 }
 
 /* =========================================================
@@ -977,7 +984,7 @@ function renderFileInput(vm = {}) {
           name="attachments"
           type="file"
           multiple
-          accept="${attr(ACCEPT_EXTENSIONS.join(","))}"
+          accept="${attr(ACCEPT_ATTRIBUTE)}"
           class="inc-create-hidden-input"
           ${disabledAttrs(vm.submitting, vm.submitting)}
         >
@@ -1201,7 +1208,7 @@ export function validateCreateForm(form = {}) {
 
     const extension = fileExtension(file.name);
 
-    if (extension && !ACCEPT_EXTENSIONS.includes(extension)) {
+    if (extension && !ACCEPT_EXTENSION_SET.has(extension)) {
       errors.attachments = `El archivo ${cleanText(file.name, "archivo")} tiene una extensión no permitida.`;
       break;
     }

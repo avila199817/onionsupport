@@ -8,7 +8,7 @@
    - Acepta items/tickets/incidencias/rows/results/data.items/etc.
 ========================================================= */
 
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.css-1-1.v12";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v20";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   REFRESH: "refresh",
@@ -63,7 +63,7 @@ function txt(v = "", fb = "") {
 }
 
 function first(...values) {
-  for (const v of values.flat(Infinity)) {
+  for (const v of values) {
     if (v === null || v === undefined) continue;
     if (typeof v === "string" && !v.trim()) continue;
     if (Array.isArray(v) && !v.length) continue;
@@ -166,57 +166,55 @@ function initials(v = "") {
    ICONS
 ========================================================= */
 
-function icon(name = "") {
-  const common = `aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
-  const icons = {
-    ticket: `<svg ${common}><path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z"/><path d="M13 5v14"/></svg>`,
-    refresh: `<svg ${common}><path d="M21 12a9 9 0 0 0-15-6.7L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 15 6.7l3-2.7"/><path d="M21 21v-5h-5"/></svg>`,
-    plus: `<svg ${common}><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
-    search: `<svg ${common}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
-    close: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
-    alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
-    paperclip: `<svg ${common}><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.82l8.48-8.49"/></svg>`,
-    euro: `<svg ${common}><path d="M4 10h12"/><path d="M4 14h9"/><path d="M19 6a7.7 7.7 0 0 0-5.2-2C8.9 4 5 7.6 5 12s3.9 8 8.8 8A7.7 7.7 0 0 0 19 18"/></svg>`,
-    chevronDown: `<svg ${common}><path d="m6 9 6 6 6-6"/></svg>`,
-    calendar: `<svg ${common}><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>`,
-    hash: `<svg ${common}><path d="M4 9h16"/><path d="M4 15h16"/><path d="M10 3 8 21"/><path d="m16 3-2 18"/></svg>`,
-  };
-  return icons[name] || icons.ticket;
-}
+const ICON_COMMON = `aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
+const ICONS = Object.freeze({
+  ticket: `<svg ${ICON_COMMON}><path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z"/><path d="M13 5v14"/></svg>`,
+  refresh: `<svg ${ICON_COMMON}><path d="M21 12a9 9 0 0 0-15-6.7L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 15 6.7l3-2.7"/><path d="M21 21v-5h-5"/></svg>`,
+  plus: `<svg ${ICON_COMMON}><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
+  search: `<svg ${ICON_COMMON}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
+  close: `<svg ${ICON_COMMON}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
+  alert: `<svg ${ICON_COMMON}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
+  paperclip: `<svg ${ICON_COMMON}><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.82l8.48-8.49"/></svg>`,
+  euro: `<svg ${ICON_COMMON}><path d="M4 10h12"/><path d="M4 14h9"/><path d="M19 6a7.7 7.7 0 0 0-5.2-2C8.9 4 5 7.6 5 12s3.9 8 8.8 8A7.7 7.7 0 0 0 19 18"/></svg>`,
+  chevronDown: `<svg ${ICON_COMMON}><path d="m6 9 6 6 6-6"/></svg>`,
+  calendar: `<svg ${ICON_COMMON}><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>`,
+  hash: `<svg ${ICON_COMMON}><path d="M4 9h16"/><path d="M4 15h16"/><path d="M10 3 8 21"/><path d="m16 3-2 18"/></svg>`,
+});
+function icon(name = "") { return ICONS[name] || ICONS.ticket; }
 
 /* =========================================================
    FORMATTERS
 ========================================================= */
 
-function formatNumber(v = 0) {
-  try { return new Intl.NumberFormat("es-ES").format(num(v, 0)); }
-  catch { return String(num(v, 0)); }
-}
+const NUMBER_FORMATTER = new Intl.NumberFormat("es-ES");
+const DATE_FORMATTER = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+const SHORT_DATE_FORMATTER = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "short", year: "numeric" });
+const MONEY_FORMATTERS = new Map();
 
+function formatNumber(v = 0) { return NUMBER_FORMATTER.format(num(v, 0)); }
 function formatMoney(v = 0, currency = DEFAULT_CURRENCY) {
-  try {
-    return new Intl.NumberFormat("es-ES", { style: "currency", currency: txt(currency, DEFAULT_CURRENCY).toUpperCase(), maximumFractionDigits: 2 }).format(num(v, 0));
-  } catch {
-    return `${num(v, 0).toFixed(2)} €`;
+  const code = txt(currency, DEFAULT_CURRENCY).toUpperCase();
+  let formatter = MONEY_FORMATTERS.get(code);
+  if (!formatter) {
+    try { formatter = new Intl.NumberFormat("es-ES", { style: "currency", currency: code, maximumFractionDigits: 2 }); }
+    catch { return `${num(v, 0).toFixed(2)} €`; }
+    MONEY_FORMATTERS.set(code, formatter);
   }
+  return formatter.format(num(v, 0));
 }
-
 function formatDate(v = "") {
   const raw = first(v, "");
   if (!raw) return "—";
   const d = new Date(raw);
   if (!Number.isFinite(d.getTime())) return txt(raw, "—");
-  try { return new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(d); }
-  catch { return d.toISOString(); }
+  try { return DATE_FORMATTER.format(d); } catch { return d.toISOString(); }
 }
-
 function formatShortDate(v = "") {
   const raw = first(v, "");
   if (!raw) return "—";
   const d = new Date(raw);
   if (!Number.isFinite(d.getTime())) return txt(raw, "—");
-  try { return new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "short", year: "numeric" }).format(d); }
-  catch { return d.toISOString().slice(0, 10); }
+  try { return SHORT_DATE_FORMATTER.format(d); } catch { return d.toISOString().slice(0, 10); }
 }
 
 function formatRelativeDate(v = "") {
@@ -248,15 +246,34 @@ const dateMs = (v = "") => {
 
 function unwrap(v = {}) {
   const it = obj(v, {});
+  if (it.meta?.frontendReady === true) return it;
   return obj(first(it.ticket, it.incidencia, it.item, it.detail, it.data?.ticket, it.data?.incidencia, it.data?.item, it.data, it), it);
 }
 
-const getId = (it = {}) => txt(first(unwrap(it).ticketId, unwrap(it).incidenciaId, unwrap(it).id, unwrap(it).entityId, unwrap(it).code, unwrap(it).numero, unwrap(it).ticketCode, unwrap(it).reference, unwrap(it).ref, ""), "");
-const getSubject = (it = {}) => txt(first(unwrap(it).subject, unwrap(it).asunto, unwrap(it).title, unwrap(it).name, "Sin asunto"), "Sin asunto");
-const getDesc = (it = {}) => txt(first(unwrap(it).preview, unwrap(it).description, unwrap(it).descripcion, unwrap(it).message, unwrap(it).body, ""), "");
-const getStatusRaw = (it = {}) => txt(first(unwrap(it).status, unwrap(it).estado, unwrap(it).statusKey, unwrap(it).lifecycle?.status, "open"), "open");
-const getPriorityRaw = (it = {}) => txt(first(unwrap(it).priority, unwrap(it).prioridad, unwrap(it).severity, "medium"), "medium");
-const getCategory = (it = {}) => txt(first(unwrap(it).category, unwrap(it).categoria, unwrap(it).tipo, unwrap(it).type, "general"), "general");
+function getId(it = {}) {
+  const r = unwrap(it);
+  return txt(first(r.ticketId, r.incidenciaId, r.id, r.entityId, r.code, r.numero, r.ticketCode, r.reference, r.ref, ""), "");
+}
+function getSubject(it = {}) {
+  const r = unwrap(it);
+  return txt(first(r.subject, r.asunto, r.title, r.name, "Sin asunto"), "Sin asunto");
+}
+function getDesc(it = {}) {
+  const r = unwrap(it);
+  return txt(first(r.preview, r.description, r.descripcion, r.message, r.body, ""), "");
+}
+function getStatusRaw(it = {}) {
+  const r = unwrap(it);
+  return txt(first(r.status, r.estado, r.statusKey, r.lifecycle?.status, "open"), "open");
+}
+function getPriorityRaw(it = {}) {
+  const r = unwrap(it);
+  return txt(first(r.priority, r.prioridad, r.severity, "medium"), "medium");
+}
+function getCategory(it = {}) {
+  const r = unwrap(it);
+  return txt(first(r.category, r.categoria, r.tipo, r.type, "general"), "general");
+}
 
 function getClientName(it = {}) {
   const r = unwrap(it), rs = obj(r.requesterSnapshot), c = obj(r.cliente), rec = obj(r.receptor), u = obj(r.user);
@@ -275,7 +292,7 @@ function getAvatar(it = {}) {
 
 function getAssignedName(it = {}) {
   const r = unwrap(it), a = obj(r.assignment), tec = obj(r.tecnico), asg = obj(r.assignedTo), t = obj(r.technician);
-  return txt(first(r.assignedToName, r.technicianName, r.tecnicoName, r.agentName, a.assignedToName, a.technician?.name, a.technician?.displayName, tec.displayName, tec.name, tec.nombre, asg.displayName, asg.name, asg.nombre, t.displayName, t.name, t.nombre, "Cristian Ávila Luque"), "Cristian Ávila Luque");
+  return txt(first(r.assignedToName, r.technicianName, r.tecnicoName, r.agentName, a.assignedToName, a.technician?.name, a.technician?.displayName, tec.displayName, tec.name, tec.nombre, asg.displayName, asg.name, asg.nombre, t.displayName, t.name, t.nombre, ""), "");
 }
 
 function getAssignedEmail(it = {}) {
@@ -288,8 +305,14 @@ function getAssignedAvatar(it = {}) {
   return firstUrl(r.assignedToAvatarUrl, r.assignedToAvatar, r.technicianAvatarUrl, r.technicianAvatar, r.tecnicoAvatarUrl, r.tecnicoAvatar, r.agentAvatarUrl, r.agentAvatar, a.assignedToAvatarUrl, a.assignedToAvatar, a.technicianAvatarUrl, a.technicianAvatar, a.agentAvatarUrl, a.agentAvatar, a.avatarUrl, a.avatar, a.technician, r.tecnico, r.assignedTo, r.technician);
 }
 
-const getCreated = (it = {}) => first(unwrap(it).createdAt, unwrap(it).fechaCreacion, unwrap(it).created_at, unwrap(it).lifecycle?.createdAt, "");
-const getUpdated = (it = {}) => first(unwrap(it).lastActivityAt, unwrap(it).updatedAt, unwrap(it).modifiedAt, unwrap(it).updated_at, unwrap(it).lifecycle?.lastActivityAt, unwrap(it).lifecycle?.updatedAt, getCreated(it), "");
+function getCreated(it = {}) {
+  const r = unwrap(it);
+  return first(r.createdAt, r.fechaCreacion, r.created_at, r.lifecycle?.createdAt, "");
+}
+function getUpdated(it = {}) {
+  const r = unwrap(it);
+  return first(r.lastActivityAt, r.updatedAt, r.modifiedAt, r.updated_at, r.lifecycle?.lastActivityAt, r.lifecycle?.updatedAt, getCreated(r), "");
+}
 
 function getAttachmentsCount(it = {}) {
   const r = unwrap(it);
@@ -311,44 +334,48 @@ function getCurrency(it = {}) {
    NORMALIZATION
 ========================================================= */
 
+const STATUS_MAP = Object.freeze({
+  open: "open", opened: "open", abierta: "open", abierto: "open",
+  pending: "pending", pendiente: "pending", new: "pending", nueva: "pending", nuevo: "pending",
+  in_progress: "progress", inprogress: "progress", progress: "progress", proceso: "progress", en_proceso: "progress", working: "progress", assigned: "progress", asignada: "progress", asignado: "progress",
+  resolved: "resolved", resuelta: "resolved", resuelto: "resolved", solved: "resolved",
+  closed: "closed", close: "closed", cerrada: "closed", cerrado: "closed",
+  cancelled: "closed", canceled: "closed", cancelada: "closed", cancelado: "closed", archived: "closed", archivada: "closed", archivado: "closed",
+});
+const STATUS_LABELS = Object.freeze({ open: "Abierta", pending: "Pendiente", progress: "En proceso", resolved: "Resuelta", closed: "Cerrada" });
+const PRIORITY_MAP = Object.freeze({
+  low: "low", baja: "low", minor: "low", p3: "low",
+  medium: "medium", media: "medium", normal: "medium", p2: "medium",
+  high: "urgent", alta: "urgent", p1: "urgent",
+  urgent: "urgent", urgente: "urgent",
+  critical: "critical", critica: "critical", critico: "critical", crítico: "critical", crítica: "critical", p0: "critical",
+});
+const PRIORITY_LABELS = Object.freeze({ low: "Baja", medium: "Media", urgent: "Urgente", critical: "Crítica" });
+const OPEN_STATUS_KEYS = new Set(["open", "pending", "progress"]);
+const CLOSED_STATUS_KEYS = new Set(["resolved", "closed"]);
+const URGENT_PRIORITY_KEYS = new Set(["urgent", "critical"]);
+
 function statusKey(v = "") {
   const k = key(v || "open");
-  const map = {
-    open: "open", opened: "open", abierta: "open", abierto: "open",
-    pending: "pending", pendiente: "pending", new: "pending", nueva: "pending", nuevo: "pending",
-    in_progress: "progress", inprogress: "progress", progress: "progress", proceso: "progress", en_proceso: "progress", working: "progress", assigned: "progress", asignada: "progress", asignado: "progress",
-    resolved: "resolved", resuelta: "resolved", resuelto: "resolved", solved: "resolved",
-    closed: "closed", close: "closed", cerrada: "closed", cerrado: "closed",
-    cancelled: "closed", canceled: "closed", cancelada: "closed", cancelado: "closed", archived: "closed", archivada: "closed", archivado: "closed",
-  };
-  return map[k] || k || "open";
+  return STATUS_MAP[k] || k || "open";
 }
-
 function statusLabel(v = "") {
-  return ({ open: "Abierta", pending: "Pendiente", progress: "En proceso", resolved: "Resuelta", closed: "Cerrada" })[statusKey(v)] || txt(v, "Abierta");
+  const normalized = statusKey(v);
+  return STATUS_LABELS[normalized] || txt(v, "Abierta");
 }
-
 function priorityKey(it = {}) {
   const k = key(getPriorityRaw(it) || "medium");
-  const map = {
-    low: "low", baja: "low", minor: "low", p3: "low",
-    medium: "medium", media: "medium", normal: "medium", p2: "medium",
-    high: "urgent", alta: "urgent", p1: "urgent",
-    urgent: "urgent", urgente: "urgent",
-    critical: "critical", critica: "critical", critico: "critical", crítico: "critical", crítica: "critical", p0: "critical",
-  };
-  return map[k] || k || "medium";
+  return PRIORITY_MAP[k] || k || "medium";
 }
-
 function priorityLabel(it = {}) {
   const raw = key(getPriorityRaw(it));
-  if (["high", "alta", "p1"].includes(raw)) return "Alta";
-  return ({ low: "Baja", medium: "Media", urgent: "Urgente", critical: "Crítica" })[priorityKey(it)] || priorityKey(it);
+  if (raw === "high" || raw === "alta" || raw === "p1") return "Alta";
+  const normalized = priorityKey(it);
+  return PRIORITY_LABELS[normalized] || normalized;
 }
-
-const isOpen = (it = {}) => ["open", "pending", "progress"].includes(statusKey(getStatusRaw(it)));
-const isClosed = (it = {}) => ["resolved", "closed"].includes(statusKey(getStatusRaw(it)));
-const isUrgent = (it = {}) => ["urgent", "critical"].includes(priorityKey(it));
+const isOpen = (it = {}) => OPEN_STATUS_KEYS.has(statusKey(getStatusRaw(it)));
+const isClosed = (it = {}) => CLOSED_STATUS_KEYS.has(statusKey(getStatusRaw(it)));
+const isUrgent = (it = {}) => URGENT_PRIORITY_KEYS.has(priorityKey(it));
 const amountKey = (it = {}) => (getInvoiceTotal(it) > 0 ? "paid" : "idle");
 const amountLabel = (it = {}) => (getInvoiceTotal(it) > 0 ? formatMoney(getInvoiceTotal(it), getCurrency(it)) : "—");
 
@@ -388,8 +415,12 @@ function itemMatchesFilter(it = {}, filter = "all") {
   return true;
 }
 
+const ITEM_TEXT_CACHE = new WeakMap();
 function itemText(it = {}) {
-  return searchKey([getId(it), getSubject(it), getDesc(it), getClientName(it), getClientEmail(it), getAssignedName(it), getAssignedEmail(it), getCategory(it), statusLabel(getStatusRaw(it)), priorityLabel(it)].join(" "));
+  if (isObj(it) && ITEM_TEXT_CACHE.has(it)) return ITEM_TEXT_CACHE.get(it);
+  const value = searchKey([getId(it), getSubject(it), getDesc(it), getClientName(it), getClientEmail(it), getAssignedName(it), getAssignedEmail(it), getCategory(it), statusLabel(getStatusRaw(it)), priorityLabel(it)].join(" "));
+  if (isObj(it)) ITEM_TEXT_CACHE.set(it, value);
+  return value;
 }
 
 function itemMatchesSearch(it = {}, q = "") {
@@ -426,8 +457,13 @@ function mergeStats(items = [], provided = {}) {
 }
 
 function filterCounts(items = []) {
-  const rows = arr(items);
-  return { all: rows.length, open: rows.filter(isOpen).length, closed: rows.filter(isClosed).length };
+  const counts = { all: 0, open: 0, closed: 0 };
+  for (const item of arr(items)) {
+    counts.all += 1;
+    if (isOpen(item)) counts.open += 1;
+    if (isClosed(item)) counts.closed += 1;
+  }
+  return counts;
 }
 
 /* =========================================================
@@ -449,6 +485,7 @@ function arrayCandidates(input = {}) {
 }
 
 function normalizeItems(input = {}) {
+  if (isObj(input) && input.canonical === true && Array.isArray(input.items)) return input.items;
   const candidates = Array.isArray(input) ? [input] : arrayCandidates(input);
   const map = new Map();
   for (const candidate of candidates) {
@@ -478,7 +515,7 @@ function buildVm(input = {}) {
   const filtered = sortItems(items.filter((it) => itemMatchesFilter(it, filter)).filter((it) => itemMatchesSearch(it, search)), order);
   const visible = filtered.slice(0, visibleLimit);
   const total = remoteTotal(d, items.length);
-  const stats = mergeStats(items, d.stats);
+  const stats = d.canonical === true && isObj(d.stats) ? d.stats : mergeStats(items, d.stats);
   return {
     data: d,
     route: txt(first(d.route, d.routes?.incidencias, DEFAULT_ROUTE), DEFAULT_ROUTE),

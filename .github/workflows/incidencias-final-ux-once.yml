@@ -106,9 +106,9 @@ jobs:
         run: |
           git config user.name "Onion Support"
           git config user.email "cristian@onionsupport.com"
-          git rm .github/scripts/patch-incidencias-final-ux.py \
-                 .github/scripts/run-patch-incidencias-final-ux.py \
-                 .github/workflows/incidencias-final-ux-once.yml
+          git rm -f .github/scripts/patch-incidencias-final-ux.py \
+                    .github/scripts/run-patch-incidencias-final-ux.py \
+                    .github/workflows/incidencias-final-ux-once.yml
           git add src/views/incidencias/incidencias.api.js \
                   src/views/incidencias/incidencias.template.modal.js \
                   src/views/incidencias/index.js \

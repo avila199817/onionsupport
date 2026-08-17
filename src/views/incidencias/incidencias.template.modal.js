@@ -29,7 +29,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.extreme.v26.final-polish";
+  "incidencias.template.modal.extreme.v28.close-confirm-loader";
 
 export const DETAIL_ACTIONS = Object.freeze({
   CLOSE: "detail-close",
@@ -38,6 +38,8 @@ export const DETAIL_ACTIONS = Object.freeze({
   COMMENT_SUBMIT: "detail-submit-update",
   COMMENT_CHANGE: "detail-comment-change",
   TICKET_CLOSE: "detail-ticket-close",
+  TICKET_CLOSE_CONFIRM: "detail-ticket-close-confirm",
+  TICKET_CLOSE_CANCEL: "detail-ticket-close-cancel",
   HISTORY_TOGGLE: "detail-history-toggle",
   HISTORY_REVEAL: "detail-history-reveal",
 
@@ -770,6 +772,9 @@ function icon(name = "") {
 
     trash:
       `<svg ${common}><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></svg>`,
+
+    alertTriangle:
+      `<svg ${common}><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
 
     chevronDown:
       `<svg ${common}><path d="m6 9 6 6 6-6"/></svg>`,
@@ -2383,6 +2388,12 @@ function buildVm(input = {}) {
     submitting:
       data.submitting === true,
 
+    operation:
+      cleanText(data.operation, ""),
+
+    closeConfirmOpen:
+      data.closeConfirmOpen === true,
+
     commentDraft,
     pendingFiles,
 
@@ -2957,6 +2968,66 @@ function renderFeedbackBox(
     >
       <strong>${escapeHtml(title)}</strong>
       <span>${escapeHtml(message)}</span>
+    </div>
+  `;
+}
+
+
+function renderCloseConfirmation(vm = {}) {
+  if (!vm.closeConfirmOpen) {
+    return "";
+  }
+
+  return `
+    <div
+      class="incidencias-modal-confirm-overlay"
+      data-detail-close-confirm-overlay="true"
+    >
+      <section
+        class="incidencias-modal-confirm-dialog"
+        data-detail-close-confirm-dialog="true"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="incidencias-close-confirm-title"
+        aria-describedby="incidencias-close-confirm-description"
+        tabindex="-1"
+      >
+        <div class="incidencias-modal-confirm-icon" aria-hidden="true">
+          ${icon("alertTriangle")}
+        </div>
+
+        <div class="incidencias-modal-confirm-copy">
+          <span class="incidencias-modal-confirm-eyebrow">Confirmar cierre</span>
+          <h3 id="incidencias-close-confirm-title">¿Cerrar esta incidencia?</h3>
+          <p id="incidencias-close-confirm-description">
+            La incidencia pasará a estado cerrado. Podrás volver a abrirla
+            más adelante enviando una nueva actualización.
+          </p>
+
+          ${
+            vm.hasDraft
+              ? `<div class="incidencias-modal-confirm-warning" role="note">Tienes una actualización sin enviar. Si confirmas el cierre, ese borrador se descartará cuando se cierre esta ventana.</div>`
+              : ""
+          }
+        </div>
+
+        <div class="incidencias-modal-confirm-actions">
+          <button
+            type="button"
+            class="incidencias-modal-confirm-btn incidencias-modal-confirm-btn--cancel"
+            data-detail-action="${DETAIL_ACTIONS.TICKET_CLOSE_CANCEL}"
+          >Cancelar</button>
+
+          <button
+            type="button"
+            class="incidencias-modal-confirm-btn incidencias-modal-confirm-btn--danger"
+            data-detail-action="${DETAIL_ACTIONS.TICKET_CLOSE_CONFIRM}"
+          >
+            <span class="incidencias-modal-confirm-btn-icon" aria-hidden="true">${icon("check")}</span>
+            <span>Sí, cerrar incidencia</span>
+          </button>
+        </div>
+      </section>
     </div>
   `;
 }
@@ -4150,6 +4221,8 @@ export function renderIncidenciasDetailModal(
       data-ticket-id="${attr(ticketId)}"
       data-open="true"
       data-submitting="${vm.submitting ? "true" : "false"}"
+      data-operation="${attr(vm.operation)}"
+      data-close-confirm-open="${vm.closeConfirmOpen ? "true" : "false"}"
       data-has-draft="${vm.hasDraft ? "true" : "false"}"
       data-requires-reopen="${vm.requiresReopen ? "true" : "false"}"
       data-attachment-view-policy="signed-view-only"
@@ -4174,10 +4247,14 @@ export function renderIncidenciasDetailModal(
           tabindex="-1"
           data-incidencias-modal-panel="true"
         >
+          ${renderCloseConfirmation(vm)}
+
           ${
             vm.submitting
               ? renderLoadingOverlay(
-                  "Actualizando incidencia..."
+                  vm.operation === "close"
+                    ? "Cerrando incidencia..."
+                    : "Actualizando incidencia..."
                 )
               : ""
           }

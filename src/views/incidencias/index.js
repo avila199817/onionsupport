@@ -67,7 +67,7 @@ import {
 } from "./incidencias.template.modal.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.extreme.v25.history-mode";
+  "incidencias.index.extreme.v28.close-confirm-loader";
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
@@ -111,6 +111,9 @@ const DETAIL_PREVIEW_SLOT_SELECTOR =
 
 const DETAIL_PREVIEW_CLOSE_SELECTOR =
   `[data-detail-action="${DETAIL_ACTIONS.PREVIEW_CLOSE}"]`;
+
+const DETAIL_CLOSE_CONFIRM_SELECTOR =
+  "[data-detail-close-confirm-dialog='true']";
 
 const FOCUSABLE_SELECTOR = [
   "a[href]",
@@ -1210,6 +1213,8 @@ function createIncidenciasController(
     detail: null,
 
     submitting: false,
+    operation: "",
+    closeConfirmOpen: false,
 
     commentDraft: "",
     pendingFiles: [],
@@ -1342,6 +1347,13 @@ function createIncidenciasController(
     }
 
     if (detailModal.open) {
+      if (detailModal.closeConfirmOpen) {
+        return (
+          modalHost.querySelector(DETAIL_CLOSE_CONFIRM_SELECTOR) ||
+          modalHost.querySelector(DETAIL_MODAL_PANEL_SELECTOR)
+        );
+      }
+
       return modalHost.querySelector(
         DETAIL_MODAL_PANEL_SELECTOR
       );
@@ -2561,6 +2573,50 @@ function createIncidenciasController(
      DETAIL MODAL PATCHING
   ======================================================= */
 
+
+  function syncDetailCloseConfirmOverlay(
+    currentRoot = null,
+    nextRoot = null
+  ) {
+    const currentPanel =
+      currentRoot?.querySelector?.(
+        DETAIL_MODAL_PANEL_SELECTOR
+      );
+
+    const nextPanel =
+      nextRoot?.querySelector?.(
+        DETAIL_MODAL_PANEL_SELECTOR
+      );
+
+    if (!currentPanel || !nextPanel) {
+      return false;
+    }
+
+    try {
+      currentPanel
+        .querySelectorAll(
+          ":scope > .incidencias-modal-confirm-overlay"
+        )
+        .forEach((node) => node.remove());
+
+      const nextOverlay =
+        nextPanel.querySelector(
+          ":scope > .incidencias-modal-confirm-overlay"
+        );
+
+      if (nextOverlay) {
+        currentPanel.insertBefore(
+          nextOverlay.cloneNode(true),
+          currentPanel.firstChild
+        );
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function syncDetailLoadingOverlay(
     currentRoot = null,
     nextRoot = null
@@ -2771,6 +2827,11 @@ function createIncidenciasController(
       syncAttributes(
         currentComposer,
         nextComposer
+      );
+
+      syncDetailCloseConfirmOverlay(
+        currentRoot,
+        nextRoot
       );
 
       syncDetailLoadingOverlay(
@@ -3972,6 +4033,8 @@ function createIncidenciasController(
     detailModal.detail = null;
 
     detailModal.submitting = false;
+    detailModal.operation = "";
+    detailModal.closeConfirmOpen = false;
 
     detailModal.commentDraft = "";
     detailModal.pendingFiles = [];
@@ -3996,6 +4059,13 @@ function createIncidenciasController(
       detailModal.submitting
     ) {
       return false;
+    }
+
+    if (
+      detailModal.closeConfirmOpen &&
+      options.force !== true
+    ) {
+      return cancelDetailTicketClose();
     }
 
     const force =
@@ -4064,6 +4134,8 @@ function createIncidenciasController(
       detailModal.detail = local;
 
       detailModal.submitting = false;
+      detailModal.operation = "";
+      detailModal.closeConfirmOpen = false;
       detailModal.commentDraft = "";
       detailModal.pendingFiles = [];
 
@@ -4124,6 +4196,8 @@ function createIncidenciasController(
         mergedDetail;
 
       detailModal.submitting = false;
+      detailModal.operation = "";
+      detailModal.closeConfirmOpen = false;
       detailModal.commentDraft = "";
       detailModal.pendingFiles = [];
 
@@ -4413,6 +4487,8 @@ function createIncidenciasController(
       );
 
     detailModal.submitting = true;
+    detailModal.operation = "update";
+    detailModal.closeConfirmOpen = false;
     detailModal.feedbackMessage = "";
     detailModal.feedbackType = "info";
 
@@ -4518,6 +4594,7 @@ function createIncidenciasController(
         );
 
       detailModal.submitting = false;
+      detailModal.operation = "";
       detailModal.detail = nextDetail;
 
       detailModal.commentDraft = "";
@@ -4548,6 +4625,7 @@ function createIncidenciasController(
       return true;
     } catch (updateError) {
       detailModal.submitting = false;
+      detailModal.operation = "";
 
       /*
          Conservamos cualquier resultado confirmado.
@@ -4635,23 +4713,7 @@ function createIncidenciasController(
     return openDetailHistory();
   }
 
-  async function closeDetailTicket() {
-    if (
-      !detailModal.open ||
-      detailModal.submitting
-    ) {
-      return false;
-    }
-
-    const ticketId =
-      getTicketId(
-        detailModal.detail
-      );
-
-    if (!ticketId) {
-      return false;
-    }
-
+  function ticketIsAlreadyClosed() {
     const status =
       cleanText(
         first(
@@ -4667,37 +4729,82 @@ function createIncidenciasController(
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "");
 
+    return [
+      "closed",
+      "resolved",
+      "cerrada",
+      "cerrado",
+      "resuelta",
+      "resuelto",
+    ].includes(status);
+  }
+
+  function closeDetailTicket() {
     if (
-      [
-        "closed",
-        "resolved",
-        "cerrada",
-        "cerrado",
-        "resuelta",
-        "resuelto",
-      ].includes(status)
+      !detailModal.open ||
+      detailModal.submitting ||
+      ticketIsAlreadyClosed()
     ) {
       return false;
     }
 
-    if (
-      isBrowser() &&
-      typeof window.confirm === "function"
-    ) {
-      const draftCopy = detailHasDraft()
-        ? "\n\nTienes una actualización sin enviar. Se conservará en pantalla; si la envías después, la incidencia se reabrirá."
-        : "";
-
-      const accepted = window.confirm(
-        `¿Cerrar esta incidencia?${draftCopy}`
-      );
-
-      if (!accepted) {
-        return false;
-      }
+    if (!getTicketId(detailModal.detail)) {
+      return false;
     }
 
+    detailModal.closeConfirmOpen = true;
+    detailModal.feedbackMessage = "";
+    detailModal.feedbackType = "info";
+
+    renderModals({
+      immediate: true,
+      focusSelector:
+        `[data-detail-action="${DETAIL_ACTIONS.TICKET_CLOSE_CONFIRM}"]`,
+    });
+
+    return true;
+  }
+
+  function cancelDetailTicketClose() {
+    if (
+      !detailModal.open ||
+      detailModal.submitting ||
+      !detailModal.closeConfirmOpen
+    ) {
+      return false;
+    }
+
+    detailModal.closeConfirmOpen = false;
+
+    renderModals({
+      immediate: true,
+      focusSelector:
+        `[data-detail-action="${DETAIL_ACTIONS.TICKET_CLOSE}"]`,
+    });
+
+    return true;
+  }
+
+  async function confirmDetailTicketClose() {
+    if (
+      !detailModal.open ||
+      detailModal.submitting ||
+      !detailModal.closeConfirmOpen ||
+      ticketIsAlreadyClosed()
+    ) {
+      return false;
+    }
+
+    const ticketId =
+      getTicketId(detailModal.detail);
+
+    if (!ticketId) {
+      return false;
+    }
+
+    detailModal.closeConfirmOpen = false;
     detailModal.submitting = true;
+    detailModal.operation = "close";
     detailModal.feedbackMessage = "";
     detailModal.feedbackType = "info";
 
@@ -4707,22 +4814,13 @@ function createIncidenciasController(
 
     try {
       const closed =
-        await closeIncidencia(
-          ticketId
-        );
+        await closeIncidencia(ticketId);
 
       const nextDetail =
         mergeTicketData(
           detailModal.detail || {},
           closed || {}
         );
-
-      detailModal.submitting = false;
-      detailModal.detail = nextDetail;
-      detailModal.feedbackMessage =
-        "Incidencia cerrada correctamente.";
-      detailModal.feedbackType =
-        "success";
 
       items =
         upsertByTicketId(
@@ -4734,22 +4832,27 @@ function createIncidenciasController(
         skipModals: true,
       });
 
+      detailModal.submitting = false;
+      detailModal.operation = "";
+
+      resetDetailModal();
+
       renderModals({
         immediate: true,
-        focusSelector:
-          DETAIL_MODAL_PANEL_SELECTOR,
       });
 
+      restoreModalReturnFocus();
       return true;
     } catch (closeError) {
       detailModal.submitting = false;
+      detailModal.operation = "";
+      detailModal.closeConfirmOpen = false;
       detailModal.feedbackMessage =
         safeError(
           closeError,
           "No se pudo cerrar la incidencia."
         );
-      detailModal.feedbackType =
-        "error";
+      detailModal.feedbackType = "error";
 
       renderModals({
         immediate: true,
@@ -5522,6 +5625,20 @@ Se quitará de la incidencia y del almacenamiento. Esta acción no se puede desh
 
     if (
       type ===
+      DETAIL_ACTIONS.TICKET_CLOSE_CANCEL
+    ) {
+      return cancelDetailTicketClose();
+    }
+
+    if (
+      type ===
+      DETAIL_ACTIONS.TICKET_CLOSE_CONFIRM
+    ) {
+      return confirmDetailTicketClose();
+    }
+
+    if (
+      type ===
       DETAIL_ACTIONS.HISTORY_REVEAL
     ) {
       return openDetailHistory();
@@ -5886,6 +6003,13 @@ Se quitará de la incidencia y del almacenamiento. Esta acción no se puede desh
            Escape cierra primero la preview de archivo.
            Segundo Escape cierra el modal (con protección de borrador).
         */
+        if (
+          detailModal.closeConfirmOpen
+        ) {
+          cancelDetailTicketClose();
+          return;
+        }
+
         if (
           detailModal.previewFile
         ) {

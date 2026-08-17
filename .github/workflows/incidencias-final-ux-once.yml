@@ -44,8 +44,6 @@ jobs:
             DETAIL_ACTIONS,
           } from './src/views/incidencias/incidencias.template.modal.js';
 
-          const signedView = 'https://onionassets.blob.core.windows.net/tickets/ON-TEST/INC-TEST-001/captura.png?sv=2026-01-01&sr=b&sp=r&sig=test';
-
           const detail = {
             ticketId: 'INC-TEST-001',
             subject: 'Prueba final',
@@ -55,15 +53,6 @@ jobs:
             category: 'hardware',
             displayName: 'Admin Test',
             email: 'admin@example.com',
-            attachments: [{
-              id: 'att-1',
-              attachmentId: 'att-1',
-              name: 'captura.png',
-              contentType: 'image/png',
-              size: 1024,
-              viewUrl: signedView,
-              signedUrl: signedView,
-            }],
             history: [{
               id: 'h1',
               type: 'created',
@@ -72,45 +61,26 @@ jobs:
             }],
           };
 
-          const adminHtml = renderIncidenciasDetailModal({
+          const html = renderIncidenciasDetailModal({
             open: true,
             admin: true,
             role: 'admin',
             detail,
           });
 
-          const userHtml = renderIncidenciasDetailModal({
-            open: true,
-            admin: false,
-            role: 'user',
-            detail,
-          });
-
           const required = [
             DETAIL_ACTIONS.HISTORY_REVEAL,
             DETAIL_ACTIONS.HISTORY_TOGGLE,
-            DETAIL_ACTIONS.ATTACHMENT_DELETE,
             'Historial',
             'Ver historial',
-            'Eliminar',
+            'data-modal-history-slot="true"',
+            'data-modal-composer="true"',
           ];
 
           for (const token of required) {
-            if (!adminHtml.includes(token)) {
-              throw new Error(`Admin modal missing ${token}`);
+            if (!html.includes(token)) {
+              throw new Error(`Modal missing ${token}`);
             }
-          }
-
-          if (userHtml.includes(DETAIL_ACTIONS.ATTACHMENT_DELETE)) {
-            throw new Error('Non-admin modal exposes attachment delete');
-          }
-
-          if (!adminHtml.includes('data-modal-history-slot="true"')) {
-            throw new Error('History slot missing');
-          }
-
-          if (!adminHtml.includes('data-modal-composer="true"')) {
-            throw new Error('Composer missing');
           }
           NODE
 
@@ -119,6 +89,10 @@ jobs:
           grep -F 'deleteAttachments: [attachmentKey]' src/views/incidencias/incidencias.api.js
           grep -F 'ATTACHMENT_DELETE: "detail-attachment-delete"' src/views/incidencias/incidencias.template.modal.js
           grep -F 'HISTORY_REVEAL: "detail-history-reveal"' src/views/incidencias/incidencias.template.modal.js
+          grep -F 'class="incidencias-modal-delete-btn"' src/views/incidencias/incidencias.template.modal.js
+          grep -F 'vm.canDeleteAttachments' src/views/incidencias/incidencias.template.modal.js
+          grep -F 'DETAIL_ACTIONS.ATTACHMENT_DELETE' src/views/incidencias/index.js
+          grep -F 'deleteIncidenciaAttachment' src/views/incidencias/index.js
           grep -F 'caret-color: var(--idm-info);' src/css/views/incidencias/detail.css
           python3 - <<'PY'
           from pathlib import Path

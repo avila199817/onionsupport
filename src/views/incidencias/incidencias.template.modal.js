@@ -29,7 +29,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.extreme.v25.history-mode";
+  "incidencias.template.modal.extreme.v26.final-polish";
 
 export const DETAIL_ACTIONS = Object.freeze({
   CLOSE: "detail-close",
@@ -788,6 +788,12 @@ function icon(name = "") {
 
     paperclip:
       `<svg ${common}><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.82l8.48-8.49"/></svg>`,
+
+    mail:
+      `<svg ${common}><rect width="18" height="14" x="3" y="5" rx="2"/><path d="m3 7 9 6 9-6"/></svg>`,
+
+    phone:
+      `<svg ${common}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.78.62 2.63a2 2 0 0 1-.45 2.11L8 9.73a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.85.29 1.73.5 2.63.62A2 2 0 0 1 22 16.92Z"/></svg>`,
 
     file:
       `<svg ${common}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>`,
@@ -2699,6 +2705,77 @@ function renderAvatar(
   `;
 }
 
+
+function contactEmailHref(value = "") {
+  const email = cleanText(value, "");
+
+  if (
+    !email ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+  ) {
+    return "";
+  }
+
+  return `mailto:${email}`;
+}
+
+function contactPhoneHref(value = "") {
+  const raw = cleanText(value, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  const compact = raw
+    .replace(/[^\d+]/g, "")
+    .replace(/(?!^)\+/g, "");
+
+  const digits = compact.replace(/\D/g, "");
+
+  if (digits.length < 6) {
+    return "";
+  }
+
+  return `tel:${compact}`;
+}
+
+function renderContactAction({
+  label = "",
+  value = "",
+  href = "",
+  iconName = "file",
+  actionLabel = "Abrir",
+} = {}) {
+  const displayValue = cleanText(value, "—");
+  const safeHref = cleanText(href, "");
+
+  if (!safeHref) {
+    return renderMetaField(label, displayValue);
+  }
+
+  return `
+    <a
+      class="incidencias-modal-meta-card incidencias-modal-contact-link"
+      href="${attr(safeHref)}"
+      aria-label="${attr(`${actionLabel}: ${displayValue}`)}"
+      title="${attr(actionLabel)}"
+    >
+      <span class="incidencias-modal-contact-label">
+        <span class="incidencias-modal-contact-icon" aria-hidden="true">
+          ${icon(iconName)}
+        </span>
+        <span>${escapeHtml(label)}</span>
+      </span>
+
+      <strong>${escapeHtml(displayValue)}</strong>
+
+      <small class="incidencias-modal-contact-action-copy">
+        ${escapeHtml(actionLabel)}
+      </small>
+    </a>
+  `;
+}
+
 function renderTechnicianValue(
   detail = {}
 ) {
@@ -2740,6 +2817,9 @@ function renderTechnicianValue(
 
   const avatarUrl =
     getTechnicianAvatar(detail);
+
+  const emailHref =
+    contactEmailHref(email);
 
   const tone =
     hashText(
@@ -2793,7 +2873,16 @@ function renderTechnicianValue(
 
         ${
           email
-            ? `<small>${escapeHtml(email)}</small>`
+            ? emailHref
+              ? `
+                <a
+                  class="incidencias-modal-technician-email"
+                  href="${attr(emailHref)}"
+                  aria-label="${attr(`Enviar correo a ${email}`)}"
+                  title="Enviar correo"
+                >${escapeHtml(email)}</a>
+              `
+              : `<small>${escapeHtml(email)}</small>`
             : ""
         }
       </span>
@@ -3718,6 +3807,12 @@ function renderContactBlock(
     return "";
   }
 
+  const emailHref =
+    contactEmailHref(email);
+
+  const phoneHref =
+    contactPhoneHref(phone);
+
   return `
     <section
       class="incidencias-modal-contact-section"
@@ -3732,19 +3827,25 @@ function renderContactBlock(
       <div class="incidencias-modal-contact-grid">
         ${
           email
-            ? renderMetaField(
-                "Email",
-                email
-              )
+            ? renderContactAction({
+                label: "Email",
+                value: email,
+                href: emailHref,
+                iconName: "mail",
+                actionLabel: "Enviar correo",
+              })
             : ""
         }
 
         ${
           phone
-            ? renderMetaField(
-                "Teléfono",
-                phone
-              )
+            ? renderContactAction({
+                label: "Teléfono",
+                value: phone,
+                href: phoneHref,
+                iconName: "phone",
+                actionLabel: "Llamar",
+              })
             : ""
         }
       </div>

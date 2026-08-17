@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PUBLIC_SITE_URL: "https://onionsupport.com"
+  PUBLIC_SITE_URL: "https://www.onionsupport.com"
   INDEXNOW_ENDPOINT: "https://api.indexnow.org/indexnow"
   INDEXNOW_KEY: "ad1f6102f1914986b540f6a34bf6939b"
   INDEXNOW_KEY_FILE: "ad1f6102f1914986b540f6a34bf6939b.txt"
@@ -34,7 +34,7 @@ jobs:
 
     steps:
       - name: Checkout deployed revision
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || 'main' }}
           fetch-depth: 2
@@ -75,8 +75,15 @@ jobs:
           include_redirects=false
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             include_redirects=true
-          elif git rev-parse HEAD^ >/dev/null 2>&1 && git diff --name-only HEAD^ HEAD -- staticwebapp.config.json | grep -q .; then
-            include_redirects=true
+          elif git rev-parse HEAD^ >/dev/null 2>&1; then
+            if git diff --name-only HEAD^ HEAD -- \
+              staticwebapp.config.json \
+              index.html \
+              robots.txt \
+              sitemap.xml \
+              .github/workflows/indexnow.yml | grep -q .; then
+              include_redirects=true
+            fi
           fi
 
           export INDEXNOW_INCLUDE_REDIRECTS="${include_redirects}"

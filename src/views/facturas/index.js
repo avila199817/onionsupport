@@ -40,6 +40,8 @@ import {
   getFacturaCreateFormDefaults,
   validateFacturaCreateForm,
   getFacturaCreateBreakdown,
+  renderFacturaCreateClientSearchSlot,
+  renderFacturaCreateTicketSearchSlot,
 } from "./facturas.template.create.js";
 
 import {
@@ -49,7 +51,7 @@ import {
 } from "./facturas.template.modal.js";
 
 export const FACTURAS_INDEX_VERSION =
-  "facturas.index.productivo.v12.single-mount-detail-modal";
+  "facturas.index.productivo.v13.stable-create-search-islands";
 
 export const FACTURAS_VIEW_VERSION = FACTURAS_INDEX_VERSION;
 
@@ -61,7 +63,7 @@ const MAX_BATCH_SIZE = 200;
 const SEARCH_MIN_LENGTH = 2;
 const SEARCH_LIMIT = 10;
 const TICKET_LIMIT = 60;
-const SEARCH_DEBOUNCE_MS = 260;
+const SEARCH_DEBOUNCE_MS = 180;
 const LIST_SEARCH_DEBOUNCE_MS = 280;
 const INFINITE_ROOT_MARGIN = "900px 0px 900px 0px";
 
@@ -79,6 +81,8 @@ const CREATE_MODAL_HOST_ID = "facturas-create-modal-host";
 const CREATE_MODAL_HOST_SELECTOR = `#${CREATE_MODAL_HOST_ID}`;
 const CREATE_MODAL_PANEL_SELECTOR =
   "[data-facturas-create-modal-panel='true']";
+const CREATE_MODAL_SCROLL_SELECTOR =
+  "[data-facturas-create-body='true']";
 const CREATE_MODAL_OVERLAY_SELECTOR =
   "[data-facturas-create-modal-overlay='true']";
 
@@ -2623,6 +2627,99 @@ function createFacturasController(host = null, context = {}) {
     return true;
   }
 
+  function createModalRenderPayload() {
+    return {
+      ...createModal,
+      canCreate: isAdmin(),
+      admin: isAdmin(),
+      role: getCurrentRole(),
+    };
+  }
+
+  function patchCreateSearchIsland(
+    slotName = "",
+    html = "",
+    { busy = false } = {}
+  ) {
+    if (
+      destroyed ||
+      !createModal.open ||
+      !createModalHost?.isConnected ||
+      !slotName
+    ) {
+      return false;
+    }
+
+    const slot = createModalHost.querySelector(
+      `[data-slot="${slotName}"]`
+    );
+
+    if (!slot) return false;
+
+    if (slot.innerHTML !== html) {
+      slot.innerHTML = html;
+    }
+
+    slot.setAttribute(
+      "aria-busy",
+      busy ? "true" : "false"
+    );
+
+    return true;
+  }
+
+  function patchCreateClientSearchDom() {
+    const html = renderFacturaCreateClientSearchSlot(
+      createModalRenderPayload()
+    );
+
+    return patchCreateSearchIsland(
+      "client-search-results",
+      html,
+      { busy: createModal.clientSearch.loading }
+    );
+  }
+
+  function patchCreateTicketSearchDom() {
+    const html = renderFacturaCreateTicketSearchSlot(
+      createModalRenderPayload()
+    );
+
+    const patched = patchCreateSearchIsland(
+      "ticket-search-results",
+      html,
+      { busy: createModal.ticketSearch.loading }
+    );
+
+    const refreshButton = createModalHost?.querySelector?.(
+      `[data-factura-create-action="${FACTURA_CREATE_ACTIONS.TICKET_REFRESH}"]`
+    );
+
+    if (refreshButton) {
+      const disabled = Boolean(
+        createModal.submitting ||
+        createModal.ticketSearch.loading ||
+        !createModal.selectedClientes.length
+      );
+
+      refreshButton.disabled = disabled;
+      refreshButton.setAttribute(
+        "aria-disabled",
+        disabled ? "true" : "false"
+      );
+      refreshButton.setAttribute(
+        "aria-busy",
+        createModal.ticketSearch.loading ? "true" : "false"
+      );
+      refreshButton.textContent =
+        createModal.ticketSearch.loading
+          ? "Cargando..."
+          : "Recargar";
+    }
+
+    return patched;
+  }
+
   function renderCreateModalNow(options = {}) {
     if (destroyed || !isBrowser()) return false;
 
@@ -2640,21 +2737,18 @@ function createFacturasController(host = null, context = {}) {
     const state = captureModalDomState(
       target,
       CREATE_MODAL_PANEL_SELECTOR,
-      CREATE_MODAL_PANEL_SELECTOR
+      CREATE_MODAL_SCROLL_SELECTOR
     );
 
-    target.innerHTML = renderFacturasCreateModal({
-      ...createModal,
-      canCreate: isAdmin(),
-      admin: isAdmin(),
-      role: getCurrentRole(),
-    });
+    target.innerHTML = renderFacturasCreateModal(
+      createModalRenderPayload()
+    );
 
     syncModalBodyState();
 
     restoreModalDomState(target, state, {
       panelSelector: CREATE_MODAL_PANEL_SELECTOR,
-      scrollSelector: CREATE_MODAL_PANEL_SELECTOR,
+      scrollSelector: CREATE_MODAL_SCROLL_SELECTOR,
       focusSelector: options.focusSelector || "",
       preserveFocus: options.preserveFocus !== false,
     });
@@ -3610,20 +3704,13 @@ function createFacturasController(host = null, context = {}) {
     if (query.length < SEARCH_MIN_LENGTH) {
       createModal.clientSearch.loading = false;
       createModal.clientSearch.results = [];
-
-      rerenderCreateWithFocus(
-        "[data-field='clienteSearch'], [data-create-field='clienteSearch'], input[name='clienteSearch']"
-      );
-
+      patchCreateClientSearchDom();
       return true;
     }
 
     createModal.clientSearch.loading = true;
     createModal.clientSearch.results = [];
-
-    rerenderCreateWithFocus(
-      "[data-field='clienteSearch'], [data-create-field='clienteSearch'], input[name='clienteSearch']"
-    );
+    patchCreateClientSearchDom();
 
     clientSearchTimer = window.setTimeout(() => {
       clientSearchTimer = null;
@@ -3658,10 +3745,7 @@ function createFacturasController(host = null, context = {}) {
       createModal.clientSearch.results = results;
       createModal.clientSearch.empty = results.length === 0;
 
-      rerenderCreateWithFocus(
-        "[data-field='clienteSearch'], [data-create-field='clienteSearch'], input[name='clienteSearch']"
-      );
-
+      patchCreateClientSearchDom();
       return true;
     } catch (searchError) {
       if (
@@ -3680,10 +3764,7 @@ function createFacturasController(host = null, context = {}) {
         "No se pudo buscar cliente."
       );
 
-      rerenderCreateWithFocus(
-        "[data-field='clienteSearch'], [data-create-field='clienteSearch'], input[name='clienteSearch']"
-      );
-
+      patchCreateClientSearchDom();
       return false;
     }
   }
@@ -3881,20 +3962,13 @@ function createFacturasController(host = null, context = {}) {
     if (!createModal.selectedClientes.length) {
       createModal.ticketSearch.loading = false;
       createModal.ticketSearch.results = [];
-
-      rerenderCreateWithFocus(
-        "[data-field='ticketSearch'], [data-create-field='ticketSearch'], input[name='ticketSearch']"
-      );
-
+      patchCreateTicketSearchDom();
       return true;
     }
 
     createModal.ticketSearch.loading = true;
     createModal.ticketSearch.results = [];
-
-    rerenderCreateWithFocus(
-      "[data-field='ticketSearch'], [data-create-field='ticketSearch'], input[name='ticketSearch']"
-    );
+    patchCreateTicketSearchDom();
 
     ticketSearchTimer = window.setTimeout(() => {
       ticketSearchTimer = null;
@@ -3918,6 +3992,7 @@ function createFacturasController(host = null, context = {}) {
       createModal.ticketSearch.loading = false;
       createModal.ticketSearch.results = [];
       createModal.ticketSearch.empty = false;
+      patchCreateTicketSearchDom();
       return [];
     }
 
@@ -3941,9 +4016,7 @@ function createFacturasController(host = null, context = {}) {
     createModal.ticketSearch.empty = false;
     createModal.ticketSearch.results = [];
 
-    rerenderCreateWithFocus(
-      "[data-field='ticketSearch'], [data-create-field='ticketSearch'], input[name='ticketSearch']"
-    );
+    patchCreateTicketSearchDom();
 
     try {
       const results = await searchTickets(
@@ -3979,12 +4052,15 @@ function createFacturasController(host = null, context = {}) {
       ) {
         createModal.selectedTickets = [results[0]];
         syncPrimaryTicketToForm();
+
+        rerenderCreateWithFocus(
+          "[data-field='ticketSearch'], [data-create-field='ticketSearch'], input[name='ticketSearch']"
+        );
+
+        return results;
       }
 
-      rerenderCreateWithFocus(
-        "[data-field='ticketSearch'], [data-create-field='ticketSearch'], input[name='ticketSearch']"
-      );
-
+      patchCreateTicketSearchDom();
       return results;
     } catch (searchError) {
       if (
@@ -4003,10 +4079,7 @@ function createFacturasController(host = null, context = {}) {
         "No se pudieron cargar incidencias."
       );
 
-      rerenderCreateWithFocus(
-        "[data-field='ticketSearch'], [data-create-field='ticketSearch'], input[name='ticketSearch']"
-      );
-
+      patchCreateTicketSearchDom();
       return [];
     }
   }
@@ -5476,6 +5549,9 @@ function createFacturasController(host = null, context = {}) {
           detailPanelPersistent: true,
           detailContentPatchOnly: true,
           localDetailImmediate: true,
+          createSearchDomIslands: true,
+          createSearchNoFullRender: true,
+          createSearchRaceGuard: true,
           noSecondOpenAnimation: true,
           duplicateOpenGuard: true,
         },

@@ -24,7 +24,7 @@
 ========================================================= */
 
 export const FACTURAS_CREATE_TEMPLATE_VERSION =
-  "facturas.template.create.v4.final-ui-clean";
+  "facturas.template.create.v5.stable-search-islands";
 
 export const FACTURA_CREATE_ACTIONS = Object.freeze({
   CLOSE: "create-close",
@@ -1311,7 +1311,7 @@ export function renderFacturasCreateModal(input = {}) {
             </button>
           </div>
 
-          <div class="fac-create-body">
+          <div class="fac-create-body" data-facturas-create-body="true">
             ${
               vm.successMessage
                 ? renderAlert(

@@ -9,8 +9,8 @@
    FINAL EXTREME · DOM REAL · CSP CLEAN · NO CSS IN JS
 
    Garantías:
-   - Un único scroll en .fac-create-panel.
-   - Header, body y acciones fluyen juntos.
+   - Panel estable con header fijo y un único scroll en .fac-create-body.
+   - Búsquedas actualizadas por islas DOM, sin remontar el modal al escribir.
    - Sin iconos SVG en los buscadores.
    - Sin botón visual «Limpiar».
    - Indicador desplegable propio para todos los select.
@@ -41,7 +41,7 @@
 #facturas-create-modal-host:empty,
 #facturas-create-modal-root:empty,
 .fac-create-modal-root:empty {
-  display: none !important;
+  display: none;
 }
 
 #facturas-create-modal-host #facturas-create-modal-root {
@@ -65,8 +65,8 @@ body:has(.fac-create-overlay) {
 .fac-create-modal-root,
 .fac-create-overlay,
 .fac-create-panel {
-  --fc-width: clamp(980px, 66vw, 1280px);
-  --fc-height: min(92dvh, 990px);
+  --fc-width: min(1180px, calc(100vw - 48px));
+  --fc-height: min(92dvh, 940px);
 
   --fc-radius-panel: clamp(24px, 1.8vw, 34px);
   --fc-radius-section: 19px;
@@ -167,7 +167,7 @@ body:has(.fac-create-overlay) {
 
 
 /* =========================================================
-   PANEL · SINGLE SCROLL
+   PANEL · STABLE SHELL / BODY SCROLL
 ========================================================= */
 
 .fac-create-panel {
@@ -179,12 +179,9 @@ body:has(.fac-create-overlay) {
   min-block-size: 0;
   max-inline-size: calc(100vw - 36px);
   max-block-size: calc(100dvh - 32px);
-  display: block;
-  overflow-y: auto;
-  overflow-x: hidden;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
   border: 1px solid var(--fc-border);
   border-radius: var(--fc-radius-panel);
   background:
@@ -224,19 +221,26 @@ body:has(.fac-create-overlay) {
   opacity: .92;
 }
 
-.fac-create-panel::-webkit-scrollbar,
+.fac-create-body,
+.fac-create-search-results,
+.fac-create-ticket-list {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.fac-create-body::-webkit-scrollbar,
 .fac-create-search-results::-webkit-scrollbar,
 .fac-create-ticket-list::-webkit-scrollbar {
   inline-size: var(--scrollbar-size, 10px);
 }
 
-.fac-create-panel::-webkit-scrollbar-track,
+.fac-create-body::-webkit-scrollbar-track,
 .fac-create-search-results::-webkit-scrollbar-track,
 .fac-create-ticket-list::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.fac-create-panel::-webkit-scrollbar-thumb,
+.fac-create-body::-webkit-scrollbar-thumb,
 .fac-create-search-results::-webkit-scrollbar-thumb,
 .fac-create-ticket-list::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
@@ -249,34 +253,31 @@ body:has(.fac-create-overlay) {
   pointer-events: auto;
 }
 
-
 /* =========================================================
    HEADER
 ========================================================= */
 
 .fac-create-header {
   position: relative;
-  z-index: 2;
+  z-index: 4;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: clamp(12px, 1vw, 18px);
-  align-items: start;
+  align-items: center;
+  gap: clamp(14px, 1.2vw, 20px);
   min-inline-size: 0;
   padding:
-    clamp(14px, 1vw, 18px)
-    clamp(18px, 1.45vw, 26px)
-    clamp(12px, .9vw, 16px);
+    clamp(18px, 1.35vw, 24px)
+    clamp(20px, 1.8vw, 30px);
   border-bottom: 1px solid var(--fc-border-soft);
   background:
     radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 38%),
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--panel-bg) 95%, #000 5%),
-      color-mix(in srgb, var(--panel-bg) 86%, transparent)
-    ),
-    color-mix(in srgb, var(--surface-2) 88%, #000 12%);
+      color-mix(in srgb, var(--panel-bg) 96%, #fff 4%),
+      color-mix(in srgb, var(--panel-bg) 90%, transparent)
+    );
   box-shadow:
-    0 12px 28px color-mix(in srgb, #000 16%, transparent),
+    0 12px 30px color-mix(in srgb, #000 16%, transparent),
     inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent);
   backdrop-filter: blur(16px) saturate(1.10);
   -webkit-backdrop-filter: blur(16px) saturate(1.10);
@@ -306,7 +307,7 @@ body:has(.fac-create-overlay) {
   margin: 0;
   max-inline-size: 100%;
   color: var(--text-strong);
-  font-size: clamp(23px, 1.95vw, 34px);
+  font-size: clamp(28px, 2.15vw, 38px);
   line-height: .98;
   font-weight: var(--weight-black);
   letter-spacing: -.058em;
@@ -317,19 +318,19 @@ body:has(.fac-create-overlay) {
   margin: 0;
   max-inline-size: 72ch;
   color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.3;
+  font-size: 11.5px;
+  line-height: 1.35;
   font-weight: var(--weight-semibold);
   text-wrap: pretty;
 }
 
 .fac-create-close {
   appearance: none;
-  inline-size: 32px;
-  block-size: 32px;
+  inline-size: 44px;
+  block-size: 44px;
   padding: 0;
   border: 1px solid var(--btn-secondary-border);
-  border-radius: var(--radius-pill);
+  border-radius: 15px;
   background: var(--btn-secondary-bg);
   color: var(--btn-secondary-text);
   box-shadow: var(--fc-control-shadow);
@@ -341,31 +342,35 @@ body:has(.fac-create-overlay) {
   transition:
     transform var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
     box-shadow var(--duration-fast) var(--ease-standard),
     opacity var(--duration-fast) var(--ease-standard);
 }
 
 .fac-create-close svg {
-  inline-size: 14px;
-  block-size: 14px;
+  inline-size: 18px;
+  block-size: 18px;
 }
 
-.fac-create-close:hover {
+.fac-create-close:hover:not(:disabled) {
   transform: translateY(-1px);
   border-color:
     color-mix(in srgb, var(--btn-secondary-border) 66%, var(--accent-border));
+  background:
+    color-mix(in srgb, var(--btn-secondary-bg) 92%, var(--accent) 5%);
+  color: var(--text-strong);
   box-shadow: var(--fc-control-shadow-hover);
 }
 
-.fac-create-close:active {
+.fac-create-close:active:not(:disabled) {
   transform: translateY(0) scale(.985);
 }
 
 .fac-create-close:disabled {
-  pointer-events: none;
+  cursor: not-allowed;
   opacity: .48;
 }
-
 
 /* =========================================================
    BODY / FORM / VISUAL ORDER
@@ -373,17 +378,19 @@ body:has(.fac-create-overlay) {
 
 .fac-create-body {
   min-inline-size: 0;
-  min-block-size: auto;
-  overflow: visible;
+  min-block-size: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
   padding:
-    clamp(14px, 1.1vw, 20px)
-    clamp(18px, 1.45vw, 26px)
-    clamp(20px, 1.8vw, 30px);
+    clamp(18px, 1.45vw, 24px)
+    clamp(20px, 1.8vw, 30px)
+    clamp(24px, 2vw, 34px);
 }
 
 .fac-create-form {
   display: grid;
-  gap: clamp(12px, .9vw, 16px);
+  gap: clamp(14px, 1vw, 18px);
   min-inline-size: 0;
 }
 
@@ -407,14 +414,13 @@ body:has(.fac-create-overlay) {
 
 .fac-create-grid {
   display: grid;
-  gap: 9px;
+  gap: 12px;
   min-inline-size: 0;
 }
 
 .fac-create-grid--2 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
-
 
 /* =========================================================
    FIELDS / INPUTS / SELECTS
@@ -448,10 +454,11 @@ body:has(.fac-create-overlay) {
   color: var(--input-text);
   box-shadow: var(--input-shadow);
   font-family: var(--font-family);
-  font-size: 11px;
+  font-size: 12.5px;
   font-weight: var(--weight-semibold);
   line-height: var(--line-normal);
   outline: none;
+  caret-color: var(--text-strong);
   transition:
     border-color var(--duration-fast) var(--ease-standard),
     box-shadow var(--duration-fast) var(--ease-standard),
@@ -462,24 +469,32 @@ body:has(.fac-create-overlay) {
 
 .fac-create-input,
 .fac-create-select {
-  min-block-size: 35px;
-  padding-inline: 11px;
+  min-block-size: 44px;
+  padding-inline: 13px;
 }
 
 .fac-create-textarea {
-  min-block-size: 78px;
-  padding: 10px 11px;
+  min-block-size: 112px;
+  padding: 13px 14px;
   resize: vertical;
 }
 
 .fac-create-input::placeholder,
 .fac-create-textarea::placeholder {
   color: var(--input-placeholder);
+  opacity: 1;
+  transition: opacity 90ms ease-out, color 90ms ease-out;
 }
 
-.fac-create-input:hover,
-.fac-create-select:hover,
-.fac-create-textarea:hover {
+.fac-create-input:focus::placeholder,
+.fac-create-textarea:focus::placeholder {
+  color: transparent;
+  opacity: 0;
+}
+
+.fac-create-input:hover:not(:disabled),
+.fac-create-select:hover:not(:disabled),
+.fac-create-textarea:hover:not(:disabled) {
   background: var(--input-bg-hover);
   border-color: var(--input-border-hover);
   box-shadow: var(--input-shadow-hover);
@@ -608,7 +623,7 @@ body:has(.fac-create-overlay) {
   outline: none;
   box-shadow:
     var(--focus-ring),
-    0 0 0 5px color-mix(in srgb, var(--accent) 10%, transparent) !important;
+    0 0 0 5px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 
@@ -1000,8 +1015,8 @@ body:has(.fac-create-overlay) {
   appearance: none;
   position: relative;
   z-index: 1;
-  min-block-size: 26px;
-  padding-inline: 8px;
+  min-block-size: 32px;
+  padding-inline: 10px;
   border: 1px solid var(--btn-secondary-border);
   border-radius: var(--radius-pill);
   background: var(--btn-secondary-bg);
@@ -1131,7 +1146,7 @@ body:has(.fac-create-overlay) {
 
 .fac-create-avatar[data-fallback="true"] .fac-create-avatar-img,
 .fac-create-avatar:not(.has-image) .fac-create-avatar-img {
-  display: none !important;
+  display: none;
 }
 
 
@@ -1602,8 +1617,8 @@ body:has(.fac-create-overlay) {
 
 .fac-create-submit {
   appearance: none;
-  min-block-size: 36px;
-  padding-inline: 17px;
+  min-block-size: 44px;
+  padding-inline: 20px;
   border: 1px solid var(--btn-primary-border);
   border-radius: var(--fc-radius-small);
   background: var(--btn-primary-bg);
@@ -1991,32 +2006,32 @@ body:has(.fac-create-overlay) {
   #facturas-create-modal-root,
   .fac-create-modal-root,
   .fac-create-overlay {
-    position: static !important;
-    inset: auto !important;
-    inline-size: 100% !important;
-    block-size: auto !important;
-    padding: 0 !important;
-    background: transparent !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
+    position: static;
+    inset: auto;
+    inline-size: 100%;
+    block-size: auto;
+    padding: 0;
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 
   .fac-create-panel {
-    inline-size: 100% !important;
-    block-size: auto !important;
-    max-inline-size: none !important;
-    max-block-size: none !important;
-    overflow: visible !important;
-    border: 0 !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
+    inline-size: 100%;
+    block-size: auto;
+    max-inline-size: none;
+    max-block-size: none;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
   }
 
   .fac-create-close,
   .fac-create-actions,
   .fac-create-actions--compact,
   .fac-create-loading-overlay {
-    display: none !important;
+    display: none;
   }
 
   .fac-create-header,
@@ -2030,7 +2045,7 @@ body:has(.fac-create-overlay) {
   .fac-create-selected-card--client,
   .fac-create-selected-card--ticket,
   .fac-create-check {
-    box-shadow: none !important;
+    box-shadow: none;
   }
 }
 
@@ -2045,8 +2060,8 @@ body:has(.fac-create-overlay) {
   .fac-create-overlay *,
   .fac-create-overlay *::before,
   .fac-create-overlay *::after {
-    animation: none !important;
-    transition: none !important;
+    animation: none;
+    transition: none;
   }
 
   .fac-create-close:hover,
@@ -2056,7 +2071,7 @@ body:has(.fac-create-overlay) {
   .fac-create-search-item--client:hover,
   .fac-create-ticket-option:hover,
   .fac-create-submit:hover {
-    transform: none !important;
+    transform: none;
   }
 }
 

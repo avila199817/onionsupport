@@ -36,6 +36,7 @@ import {
   loadIncidenciaDetail,
   commentIncidencia,
   reopenIncidencia,
+  closeIncidencia,
   uploadIncidenciaAttachments,
   openIncidenciaAttachment,
   downloadIncidenciaAttachment,
@@ -65,7 +66,7 @@ import {
 } from "./incidencias.template.modal.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.extreme.v20";
+  "incidencias.index.extreme.v21.pro-close-history";
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
@@ -1160,6 +1161,7 @@ function createIncidenciasController(
     downloadingAttachmentId: "",
 
     previewFile: null,
+    historyOpen: false,
   };
 
   /* =======================================================
@@ -2636,6 +2638,9 @@ function createIncidenciasController(
         of [
           "[data-modal-feedback-slot='true']",
           "[data-modal-preview-slot='true']",
+          "[data-modal-header-chips='true']",
+          "[data-modal-header-actions='true']",
+          "[data-modal-updated='true']",
           ".incidencias-modal-meta-grid",
           ".incidencias-modal-description-section",
           ".incidencias-modal-contact-section",
@@ -3799,6 +3804,7 @@ function createIncidenciasController(
     detailModal.downloadingAttachmentId = "";
 
     detailModal.previewFile = null;
+    detailModal.historyOpen = false;
 
     openingTicketId = "";
   }
@@ -3888,6 +3894,7 @@ function createIncidenciasController(
       detailModal.downloadingAttachmentId = "";
 
       detailModal.previewFile = null;
+      detailModal.historyOpen = false;
 
       render({
         skipModals: true,
@@ -3945,6 +3952,7 @@ function createIncidenciasController(
       detailModal.openingAttachmentId = "";
       detailModal.downloadingAttachmentId = "";
       detailModal.previewFile = null;
+      detailModal.historyOpen = false;
 
       if (mergedDetail) {
         items =
@@ -4410,6 +4418,152 @@ function createIncidenciasController(
         immediate: true,
         focusSelector:
           "[data-field='comment']",
+      });
+
+      return false;
+    }
+  }
+
+  function toggleDetailHistory() {
+    if (
+      !detailModal.open ||
+      detailModal.submitting
+    ) {
+      return false;
+    }
+
+    detailModal.historyOpen =
+      !detailModal.historyOpen;
+
+    renderModals({
+      immediate: true,
+      focusSelector:
+        `[data-detail-action="${DETAIL_ACTIONS.HISTORY_TOGGLE}"]`,
+    });
+
+    return true;
+  }
+
+  async function closeDetailTicket() {
+    if (
+      !detailModal.open ||
+      detailModal.submitting
+    ) {
+      return false;
+    }
+
+    const ticketId =
+      getTicketId(
+        detailModal.detail
+      );
+
+    if (!ticketId) {
+      return false;
+    }
+
+    const status =
+      cleanText(
+        first(
+          detailModal.detail?.status,
+          detailModal.detail?.estado,
+          detailModal.detail?.statusKey,
+          detailModal.detail?.lifecycle?.status,
+          ""
+        ),
+        ""
+      )
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
+
+    if (
+      [
+        "closed",
+        "resolved",
+        "cerrada",
+        "cerrado",
+        "resuelta",
+        "resuelto",
+      ].includes(status)
+    ) {
+      return false;
+    }
+
+    if (
+      isBrowser() &&
+      typeof window.confirm === "function"
+    ) {
+      const draftCopy = detailHasDraft()
+        ? "\n\nTienes una actualización sin enviar. Se conservará en pantalla; si la envías después, la incidencia se reabrirá."
+        : "";
+
+      const accepted = window.confirm(
+        `¿Cerrar esta incidencia?${draftCopy}`
+      );
+
+      if (!accepted) {
+        return false;
+      }
+    }
+
+    detailModal.submitting = true;
+    detailModal.feedbackMessage = "";
+    detailModal.feedbackType = "info";
+
+    renderModals({
+      immediate: true,
+    });
+
+    try {
+      const closed =
+        await closeIncidencia(
+          ticketId
+        );
+
+      const nextDetail =
+        mergeTicketData(
+          detailModal.detail || {},
+          closed || {}
+        );
+
+      detailModal.submitting = false;
+      detailModal.detail = nextDetail;
+      detailModal.feedbackMessage =
+        "Incidencia cerrada correctamente.";
+      detailModal.feedbackType =
+        "success";
+
+      items =
+        upsertByTicketId(
+          items,
+          nextDetail
+        );
+
+      render({
+        skipModals: true,
+      });
+
+      renderModals({
+        immediate: true,
+        focusSelector:
+          DETAIL_MODAL_PANEL_SELECTOR,
+      });
+
+      return true;
+    } catch (closeError) {
+      detailModal.submitting = false;
+      detailModal.feedbackMessage =
+        safeError(
+          closeError,
+          "No se pudo cerrar la incidencia."
+        );
+      detailModal.feedbackType =
+        "error";
+
+      renderModals({
+        immediate: true,
+        focusSelector:
+          DETAIL_MODAL_PANEL_SELECTOR,
       });
 
       return false;
@@ -5026,6 +5180,20 @@ function createIncidenciasController(
       DETAIL_ACTIONS.COMMENT_SUBMIT
     ) {
       return submitDetailUpdate();
+    }
+
+    if (
+      type ===
+      DETAIL_ACTIONS.TICKET_CLOSE
+    ) {
+      return closeDetailTicket();
+    }
+
+    if (
+      type ===
+      DETAIL_ACTIONS.HISTORY_TOGGLE
+    ) {
+      return toggleDetailHistory();
     }
 
     if (
@@ -5817,6 +5985,9 @@ function createIncidenciasController(
             detailModal.previewFile
           ),
 
+        detailHistoryOpen:
+          detailModal.historyOpen === true,
+
         attachmentPreviewBusy:
           Boolean(
             detailModal.openingAttachmentId
@@ -5923,6 +6094,9 @@ function createIncidenciasController(
           detailMultilinePreserved: true,
           detailUploadLimitsEarly: true,
           detailPartialSuccessAware: true,
+          detailManualClose: true,
+          detailHistoryCollapsedByDefault: true,
+          detailHistoryLazyRender: true,
 
           attachmentPreviewUsesApiViewContract: true,
           attachmentPreviewRequiresValidatedUrl: true,

@@ -24,7 +24,7 @@
 
 import Http from "../../core/http.js";
 
-export const INCIDENCIAS_API_VERSION = "incidencias.api.extreme.v20";
+export const INCIDENCIAS_API_VERSION = "incidencias.api.extreme.v21.manual-close";
 export const INCIDENCIAS_ENDPOINT = "/api/tickets";
 export const USERS_SEARCH_ENDPOINT = "/api/users";
 
@@ -2051,6 +2051,36 @@ export async function updateIncidenciaRequest(id = "", payload = {}, { timeout =
 export async function updateIncidencia(id = "", payload = {}, options = {}) {
   const updated = await updateIncidenciaRequest(id, payload, options);
   return updated ? upsertCachedIncidencia(updated) : null;
+}
+
+export async function closeIncidenciaRequest(
+  id = "",
+  { timeout = INCIDENCIAS_TIMEOUT, signal } = {}
+) {
+  const closed = await updateIncidenciaRequest(
+    id,
+    { status: "closed", estado: "closed" },
+    { timeout, signal }
+  );
+
+  if (closed) return closed;
+
+  /*
+    Compatibilidad con backends que confirman PATCH con 204/sin body:
+    sólo en ese caso refrescamos el detalle para no inventar timestamps
+    ni estado local. El camino normal sigue siendo una única petición.
+  */
+  return getIncidenciaByIdRequest(id, {
+    timeout: Math.max(timeout, INCIDENCIAS_DETAIL_TIMEOUT),
+    force: true,
+    cache: false,
+    signal,
+  });
+}
+
+export async function closeIncidencia(id = "", options = {}) {
+  const closed = await closeIncidenciaRequest(id, options);
+  return closed ? upsertCachedIncidencia(closed) : null;
 }
 
 export async function commentIncidenciaRequest(id = "", message = "", { timeout = INCIDENCIAS_TIMEOUT, status = "open", signal } = {}) {

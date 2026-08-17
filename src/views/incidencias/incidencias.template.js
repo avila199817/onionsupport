@@ -8,12 +8,13 @@
    - Acepta items/tickets/incidencias/rows/results/data.items/etc.
 ========================================================= */
 
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v20";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v21.interactive-stats";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   REFRESH: "refresh",
   CREATE_OPEN: "create-open",
   FILTER: "filter",
+  STAT_APPLY: "stat-apply",
   SORT_TOGGLE: "sort-toggle",
   CLEAR_FILTERS: "clear-filters",
   CLEAR_SEARCH: "clear-search",
@@ -25,12 +26,14 @@ const DEFAULT_ROUTE = "/incidencias";
 const DEFAULT_VISIBLE_ROWS = 20;
 const DEFAULT_CURRENCY = "EUR";
 const DEFAULT_SORT_ORDER = "desc";
+const DEFAULT_SORT_MODE = "date";
 const TABLE_SCALE = "110";
 
 const FILTERS = Object.freeze([
   { key: "all", label: "Todas" },
   { key: "open", label: "Abiertas" },
   { key: "closed", label: "Cerradas" },
+  { key: "urgent", label: "Urgentes" },
 ]);
 
 export const INCIDENCIAS_TABLE_COLUMNS = Object.freeze([
@@ -384,6 +387,7 @@ function normalizeFilter(v = "all") {
   if (["all", "todas", "todos"].includes(k)) return "all";
   if (["open", "abiertas", "abiertos", "active", "activas", "activos", "pending", "progress", "in_progress"].includes(k)) return "open";
   if (["closed", "cerradas", "cerrados", "resolved", "resueltas", "resueltos"].includes(k)) return "closed";
+  if (["urgent", "urgentes", "critical", "critica", "criticas", "critico", "criticos", "high", "alta", "altas"].includes(k)) return "urgent";
   return "all";
 }
 
@@ -392,16 +396,36 @@ function normalizeSort(v = DEFAULT_SORT_ORDER) {
   return ["asc", "ascending", "menor", "menor_mayor", "menor_a_mayor", "menor-a-mayor", "oldest"].includes(k) ? "asc" : "desc";
 }
 
-const sortLabel = (o = DEFAULT_SORT_ORDER) => (normalizeSort(o) === "asc" ? "Fecha ↑" : "Fecha ↓");
+function normalizeSortMode(v = DEFAULT_SORT_MODE) {
+  const k = key(v || DEFAULT_SORT_MODE);
+  return ["amount", "importe", "invoice", "factura", "billing"].includes(k) ? "amount" : "date";
+}
+
+const sortLabel = (o = DEFAULT_SORT_ORDER, mode = DEFAULT_SORT_MODE) => {
+  const direction = normalizeSort(o) === "asc" ? "↑" : "↓";
+  return normalizeSortMode(mode) === "amount" ? `Importe ${direction}` : `Fecha ${direction}`;
+};
 const nextSort = (o = DEFAULT_SORT_ORDER) => (normalizeSort(o) === "asc" ? "desc" : "asc");
 
 function itemTime(it = {}) {
   return dateMs(getUpdated(it)) || dateMs(getCreated(it)) || 0;
 }
 
-function sortItems(items = [], order = DEFAULT_SORT_ORDER) {
+function sortItems(items = [], order = DEFAULT_SORT_ORDER, mode = DEFAULT_SORT_MODE) {
   const dir = normalizeSort(order) === "asc" ? 1 : -1;
+  const sortMode = normalizeSortMode(mode);
+
   return [...arr(items)].sort((a, b) => {
+    if (sortMode === "amount") {
+      const amountDiff = getInvoiceTotal(a) - getInvoiceTotal(b);
+      if (amountDiff) return amountDiff * dir;
+
+      const timeDiff = itemTime(b) - itemTime(a);
+      if (timeDiff) return timeDiff;
+
+      return getId(a).localeCompare(getId(b), "es", { numeric: true, sensitivity: "base" });
+    }
+
     const diff = itemTime(a) - itemTime(b);
     if (diff) return diff * dir;
     return getId(a).localeCompare(getId(b), "es", { numeric: true, sensitivity: "base" }) * dir;
@@ -412,6 +436,7 @@ function itemMatchesFilter(it = {}, filter = "all") {
   const f = normalizeFilter(filter);
   if (f === "open") return isOpen(it);
   if (f === "closed") return isClosed(it);
+  if (f === "urgent") return isUrgent(it);
   return true;
 }
 
@@ -457,11 +482,12 @@ function mergeStats(items = [], provided = {}) {
 }
 
 function filterCounts(items = []) {
-  const counts = { all: 0, open: 0, closed: 0 };
+  const counts = { all: 0, open: 0, closed: 0, urgent: 0 };
   for (const item of arr(items)) {
     counts.all += 1;
     if (isOpen(item)) counts.open += 1;
     if (isClosed(item)) counts.closed += 1;
+    if (isUrgent(item)) counts.urgent += 1;
   }
   return counts;
 }
@@ -511,8 +537,9 @@ function buildVm(input = {}) {
   const filter = normalizeFilter(d.filter);
   const search = txt(d.search, "");
   const order = normalizeSort(first(d.sortOrder, d.order, d.sort?.order, d.sort?.direction, DEFAULT_SORT_ORDER));
+  const sortMode = normalizeSortMode(first(d.sortMode, d.sort?.mode, d.sort?.field, DEFAULT_SORT_MODE));
   const visibleLimit = Math.max(1, num(d.visibleLimit, DEFAULT_VISIBLE_ROWS));
-  const filtered = sortItems(items.filter((it) => itemMatchesFilter(it, filter)).filter((it) => itemMatchesSearch(it, search)), order);
+  const filtered = sortItems(items.filter((it) => itemMatchesFilter(it, filter)).filter((it) => itemMatchesSearch(it, search)), order, sortMode);
   const visible = filtered.slice(0, visibleLimit);
   const total = remoteTotal(d, items.length);
   const stats = d.canonical === true && isObj(d.stats) ? d.stats : mergeStats(items, d.stats);
@@ -537,9 +564,10 @@ function buildVm(input = {}) {
     filter,
     search,
     sortOrder: order,
-    sortLabel: sortLabel(order),
+    sortMode,
+    sortLabel: sortLabel(order, sortMode),
     nextSortOrder: nextSort(order),
-    nextSortLabel: sortLabel(nextSort(order)),
+    nextSortLabel: sortLabel(nextSort(order), sortMode),
     filterCounts: filterCounts(items),
     stats,
     openingTicketId: txt(d.openingTicketId, ""),
@@ -691,11 +719,27 @@ function renderHeader(vm = {}) {
         <span class="incidencias-meta-pill" data-meta="attachments">${icon("paperclip")}<span>${esc(`${formatNumber(s.attachments)} adjuntos`)}</span></span>
         <span class="incidencias-meta-pill" data-meta="amount">${icon("euro")}<span>${esc(formatMoney(s.invoiceTotal, DEFAULT_CURRENCY))}</span></span>
       </div>
-      <div class="incidencias-stats">
-        <article class="incidencias-stat-card incidencias-stat-card--open" data-stat="open"><div class="incidencias-stat-label">Abiertas</div><div class="incidencias-stat-value">${esc(formatNumber(s.open))}</div><div class="incidencias-stat-text">Solicitudes activas, pendientes o en proceso.</div></article>
-        <article class="incidencias-stat-card incidencias-stat-card--closed" data-stat="closed"><div class="incidencias-stat-label">Cerradas</div><div class="incidencias-stat-value">${esc(formatNumber(s.closed))}</div><div class="incidencias-stat-text">Casos resueltos o cerrados.</div></article>
-        <article class="incidencias-stat-card incidencias-stat-card--urgent" data-stat="urgent"><div class="incidencias-stat-label">Urgentes</div><div class="incidencias-stat-value">${esc(formatNumber(s.urgent))}</div><div class="incidencias-stat-text">Incidencias marcadas como urgentes o críticas.</div></article>
-        <article class="incidencias-stat-card incidencias-stat-card--amount" data-stat="amount"><div class="incidencias-stat-label">Importe asociado</div><div class="incidencias-stat-value">${esc(formatMoney(s.invoiceTotal, DEFAULT_CURRENCY))}</div><div class="incidencias-stat-text">Total vinculado a facturas visibles.</div></article>
+      <div class="incidencias-stats" aria-label="Accesos rápidos del historial">
+        <button type="button" class="incidencias-stat-card incidencias-stat-card--open${vm.filter === "open" && vm.sortMode !== "amount" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="open" aria-pressed="${vm.filter === "open" && vm.sortMode !== "amount" ? "true" : "false"}" aria-label="Mostrar solo incidencias abiertas">
+          <div class="incidencias-stat-label">Abiertas</div>
+          <div class="incidencias-stat-value">${esc(formatNumber(s.open))}</div>
+          <div class="incidencias-stat-text">Solicitudes activas, pendientes o en proceso.</div>
+        </button>
+        <button type="button" class="incidencias-stat-card incidencias-stat-card--closed${vm.filter === "closed" && vm.sortMode !== "amount" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="closed" aria-pressed="${vm.filter === "closed" && vm.sortMode !== "amount" ? "true" : "false"}" aria-label="Mostrar solo incidencias cerradas">
+          <div class="incidencias-stat-label">Cerradas</div>
+          <div class="incidencias-stat-value">${esc(formatNumber(s.closed))}</div>
+          <div class="incidencias-stat-text">Casos resueltos o cerrados.</div>
+        </button>
+        <button type="button" class="incidencias-stat-card incidencias-stat-card--urgent${vm.filter === "urgent" && vm.sortMode !== "amount" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="urgent" aria-pressed="${vm.filter === "urgent" && vm.sortMode !== "amount" ? "true" : "false"}" aria-label="Mostrar solo incidencias urgentes o críticas">
+          <div class="incidencias-stat-label">Urgentes</div>
+          <div class="incidencias-stat-value">${esc(formatNumber(s.urgent))}</div>
+          <div class="incidencias-stat-text">Incidencias marcadas como urgentes o críticas.</div>
+        </button>
+        <button type="button" class="incidencias-stat-card incidencias-stat-card--amount${vm.sortMode === "amount" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="amount" aria-pressed="${vm.sortMode === "amount" ? "true" : "false"}" aria-label="Ordenar incidencias por importe asociado de mayor a menor">
+          <div class="incidencias-stat-label">Importe asociado</div>
+          <div class="incidencias-stat-value">${esc(formatMoney(s.invoiceTotal, DEFAULT_CURRENCY))}</div>
+          <div class="incidencias-stat-text">Ordenar incidencias de mayor a menor importe.</div>
+        </button>
       </div>
     </section>
   `;
@@ -717,7 +761,12 @@ function renderSearch(vm = {}) {
 
 function renderFilters(vm = {}) {
   const order = normalizeSort(vm.sortOrder);
+  const sortMode = normalizeSortMode(vm.sortMode);
   const next = nextSort(order);
+  const currentSortLabel = sortLabel(order, sortMode);
+  const nextSortLabel = sortLabel(next, sortMode);
+  const sortIcon = sortMode === "amount" ? "euro" : "calendar";
+
   return `
     <div class="incidencias-filters" data-incidencias-filters="true">
       <div class="incidencias-filter-pills" role="tablist" aria-label="Filtrar incidencias">
@@ -727,7 +776,7 @@ function renderFilters(vm = {}) {
         }).join("")}
       </div>
       <div class="incidencias-sort-pills" data-incidencias-sort-pills="true">
-        <button type="button" class="incidencias-sort-pill is-active" data-incidencias-action="${INCIDENCIAS_ACTIONS.SORT_TOGGLE}" data-sort-order="${at(order)}" data-next-sort-order="${at(next)}" aria-pressed="true" aria-label="Cambiar orden a ${at(sortLabel(next))}" title="Cambiar orden a ${at(sortLabel(next))}">${icon("calendar")}<span>${esc(sortLabel(order))}</span></button>
+        <button type="button" class="incidencias-sort-pill is-active" data-incidencias-action="${INCIDENCIAS_ACTIONS.SORT_TOGGLE}" data-sort-mode="${at(sortMode)}" data-sort-order="${at(order)}" data-next-sort-order="${at(next)}" aria-pressed="true" aria-label="Cambiar orden a ${at(nextSortLabel)}" title="Cambiar orden a ${at(nextSortLabel)}">${icon(sortIcon)}<span>${esc(currentSortLabel)}</span></button>
       </div>
       ${renderSearch(vm)}
     </div>
@@ -799,7 +848,7 @@ function renderTable(vm = {}) {
   if (!vm.visibleItems.length) return renderEmpty(vm);
   return `
     <div class="incidencias-table-shell">
-      <table class="incidencias-table incidencias-table--no-actions incidencias-table--scale-110" role="table" aria-label="Listado de incidencias" data-table-columns="6" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" data-sort-order="${at(vm.sortOrder)}">
+      <table class="incidencias-table incidencias-table--no-actions incidencias-table--scale-110" role="table" aria-label="Listado de incidencias" data-table-columns="6" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" data-sort-mode="${at(vm.sortMode)}" data-sort-order="${at(vm.sortOrder)}">
         ${renderColgroup()}${renderThead()}
         <tbody>${vm.visibleItems.map((it) => renderRow(it, vm)).join("")}</tbody>
       </table>
@@ -813,11 +862,12 @@ function renderHistory(vm = {}) {
   const refreshing = vm.refreshing && vm.visibleItems.length;
   const activeLabel = FILTERS.find((f) => f.key === vm.filter)?.label || "Todas";
   const criteria = [vm.filter !== "all" ? activeLabel : "", vm.search ? `búsqueda “${vm.search}”` : ""].filter(Boolean);
+  const activeSortLabel = sortLabel(vm.sortOrder, vm.sortMode).toLowerCase();
   const subtitle = initialLoading
     ? "Cargando incidencias..."
     : vm.filter !== "all" || vm.search
-      ? `Mostrando ${formatNumber(vm.visibleCount)} de ${formatNumber(vm.filteredTotal)}${criteria.length ? ` · ${criteria.join(" · ")}` : ""} · orden ${sortLabel(vm.sortOrder).toLowerCase()}`
-      : `Mostrando ${formatNumber(vm.visibleCount)} de ${formatNumber(vm.total)} · orden ${sortLabel(vm.sortOrder).toLowerCase()}`;
+      ? `Mostrando ${formatNumber(vm.visibleCount)} de ${formatNumber(vm.filteredTotal)}${criteria.length ? ` · ${criteria.join(" · ")}` : ""} · orden ${activeSortLabel}`
+      : `Mostrando ${formatNumber(vm.visibleCount)} de ${formatNumber(vm.total)} · orden ${activeSortLabel}`;
 
   return `
     <section class="incidencias-history" data-incidencias-scroll-host="true" data-incidencias-scroll-mode="infinite">

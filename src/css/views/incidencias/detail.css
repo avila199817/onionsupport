@@ -2499,16 +2499,7 @@ body.incidencias-detail-open {
   border-color:
     color-mix(
       in srgb,
-      var(--idm-accent) 26%,
-      var(--idm-border-soft)
-    );
-}
-
-.incidencias-modal-composer[data-modal-has-draft="true"] {
-  border-color:
-    color-mix(
-      in srgb,
-      var(--idm-accent) 52%,
+      var(--idm-warning) 50%,
       var(--idm-border-soft)
     );
 
@@ -2517,7 +2508,31 @@ body.incidencias-detail-open {
     0 0 0 1px
       color-mix(
         in srgb,
-        var(--idm-accent) 8%,
+        var(--idm-warning) 5%,
+        transparent
+      );
+}
+
+.incidencias-modal-composer[data-modal-has-draft="true"] {
+  border-color:
+    color-mix(
+      in srgb,
+      var(--idm-warning) 68%,
+      var(--idm-border-soft)
+    );
+
+  box-shadow:
+    var(--idm-shadow-section),
+    0 0 0 1px
+      color-mix(
+        in srgb,
+        var(--idm-warning) 12%,
+        transparent
+      ),
+    0 12px 34px
+      color-mix(
+        in srgb,
+        var(--idm-warning) 7%,
         transparent
       );
 }
@@ -2526,7 +2541,7 @@ body.incidencias-detail-open {
   border-color:
     color-mix(
       in srgb,
-      var(--idm-warning) 48%,
+      var(--idm-warning) 58%,
       var(--idm-border-soft)
     );
 }

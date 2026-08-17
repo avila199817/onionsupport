@@ -1,5 +1,6 @@
 {
   "trailingSlash": "never",
+
   "navigationFallback": {
     "rewrite": "/index.html",
     "exclude": [
@@ -8,7 +9,6 @@
       "/.well-known/*",
       "/robots.txt",
       "/sitemap.xml",
-      "/BingSiteAuth.xml",
       "/site.webmanifest",
       "/manifest.json",
       "/favicon.ico",
@@ -145,6 +145,37 @@
     {
       "route": "/apple-touch-icon.png",
       "statusCode": 404
+    },
+
+    {
+      "route": "/es",
+      "redirect": "/",
+      "statusCode": 301
+    },
+    {
+      "route": "/es/*",
+      "redirect": "/",
+      "statusCode": 301
+    },
+    {
+      "route": "/ca",
+      "redirect": "/",
+      "statusCode": 301
+    },
+    {
+      "route": "/ca/*",
+      "redirect": "/",
+      "statusCode": 301
+    },
+    {
+      "route": "/en",
+      "redirect": "/",
+      "statusCode": 301
+    },
+    {
+      "route": "/en/*",
+      "redirect": "/",
+      "statusCode": 301
     },
 
     {
@@ -312,18 +343,6 @@
       }
     },
     {
-      "route": "/src/css/*",
-      "headers": {
-        "Cache-Control": "no-cache, must-revalidate"
-      }
-    },
-    {
-      "route": "/src/*.js",
-      "headers": {
-        "Cache-Control": "no-cache, must-revalidate"
-      }
-    },
-    {
       "route": "/src/*",
       "headers": {
         "Cache-Control": "no-cache, must-revalidate"
@@ -355,12 +374,6 @@
     },
     {
       "route": "/sitemap.xml",
-      "headers": {
-        "Cache-Control": "public, max-age=3600"
-      }
-    },
-    {
-      "route": "/BingSiteAuth.xml",
       "headers": {
         "Cache-Control": "public, max-age=3600"
       }

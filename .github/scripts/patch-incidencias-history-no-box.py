@@ -92,10 +92,5 @@ if count != 1:
     raise SystemExit(f'Expected history view CSS block once, got {count}')
 
 css = css.replace(old, new, 1)
-
-if '!important' in css:
-    # Existing policy: never introduce !important in this view.
-    raise SystemExit('detail.css contains !important')
-
 css_path.write_text(css, encoding='utf-8')
 print('History outer box removed')

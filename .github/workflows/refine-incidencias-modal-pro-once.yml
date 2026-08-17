@@ -1,0 +1,154 @@
+name: Refine Incidencias Modal Pro Once
+
+on:
+  push:
+    branches:
+      - ux/incidencias-modal-pro-close-history-20260817
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refine:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Apply modal refinement
+        run: python3 .github/scripts/refine-incidencias-modal-pro-once.py
+
+      - name: Syntax check Incidencias JavaScript
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in src/views/incidencias/*.js; do
+            echo "checking $file"
+            node --check "$file"
+          done
+
+      - name: Import Incidencias modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const files = [
+            './src/views/incidencias/incidencias.api.js',
+            './src/views/incidencias/incidencias.template.create.js',
+            './src/views/incidencias/incidencias.template.js',
+            './src/views/incidencias/incidencias.template.modal.js',
+            './src/views/incidencias/index.js',
+          ];
+          for (const file of files) {
+            await import(file);
+            console.log('import ok', file);
+          }
+          NODE
+
+      - name: Smoke test modal contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { renderIncidenciasDetailModal, DETAIL_ACTIONS } from './src/views/incidencias/incidencias.template.modal.js';
+          import * as Api from './src/views/incidencias/incidencias.api.js';
+
+          const detail = {
+            ticketId: 'INC-TEST-001',
+            subject: 'Prueba profesional',
+            description: 'Detalle de prueba',
+            status: 'open',
+            priority: 'urgent',
+            category: 'access',
+            requesterSnapshot: { name: 'Cliente', email: 'cliente@example.com' },
+            history: [
+              { id: 'h1', type: 'update', title: 'Cambio', body: 'HISTORIAL_GIGANTE_NO_RENDERIZAR_CERRADO', createdAt: '2026-08-17T07:00:00Z' },
+            ],
+            comments: [
+              { id: 'c1', type: 'comment', body: 'Comentario de prueba', createdAt: '2026-08-17T07:01:00Z' },
+            ],
+          };
+
+          const collapsed = renderIncidenciasDetailModal({ open: true, detail, historyOpen: false });
+          if (!collapsed.includes('>Access<')) throw new Error('category title case missing');
+          if (!collapsed.includes(`data-detail-action="${DETAIL_ACTIONS.TICKET_CLOSE}"`)) throw new Error('manual close action missing');
+          if (!collapsed.includes(`data-detail-action="${DETAIL_ACTIONS.HISTORY_TOGGLE}"`)) throw new Error('history toggle missing');
+          if (!collapsed.includes('aria-expanded="false"')) throw new Error('history must start collapsed');
+          if (collapsed.includes('HISTORIAL_GIGANTE_NO_RENDERIZAR_CERRADO')) throw new Error('collapsed history rendered eagerly');
+
+          const expanded = renderIncidenciasDetailModal({ open: true, detail, historyOpen: true });
+          if (!expanded.includes('aria-expanded="true"')) throw new Error('history expanded state missing');
+          if (!expanded.includes('HISTORIAL_GIGANTE_NO_RENDERIZAR_CERRADO')) throw new Error('expanded history missing');
+
+          const closed = renderIncidenciasDetailModal({ open: true, detail: { ...detail, status: 'closed' }, historyOpen: false });
+          if (closed.includes(`data-detail-action="${DETAIL_ACTIONS.TICKET_CLOSE}"`)) throw new Error('close action must disappear for terminal ticket');
+          if (!closed.includes('Enviar actualización y reabrir')) throw new Error('closed update reopen contract missing');
+
+          if (typeof Api.closeIncidencia !== 'function') throw new Error('closeIncidencia export missing');
+          if (typeof Api.closeIncidenciaRequest !== 'function') throw new Error('closeIncidenciaRequest export missing');
+
+          console.log('modal contract smoke ok');
+          NODE
+
+      - name: Verify CSS elite contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          CSS=src/css/views/incidencias/detail.css
+          ! grep -qi '!important' "$CSS"
+          grep -q 'incidencias-modal-close-ticket-btn' "$CSS"
+          grep -q 'incidencias-modal-history-toggle' "$CSS"
+          grep -q 'incidencias-modal-history-content' "$CSS"
+          grep -q 'incidencias-modal-composer-icon > svg' "$CSS"
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          s = Path('src/css/views/incidencias/detail.css').read_text()
+          stripped = re.sub(r'/\*.*?\*/', '', s, flags=re.S)
+          if stripped.count('{') != stripped.count('}'):
+              raise SystemExit('CSS brace mismatch')
+          print('css contract ok')
+          PY
+
+      - name: Verify manual close and lazy history wiring
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'closeIncidenciaRequest' src/views/incidencias/incidencias.api.js
+          grep -q 'status: "closed", estado: "closed"' src/views/incidencias/incidencias.api.js
+          grep -q 'TICKET_CLOSE: "detail-ticket-close"' src/views/incidencias/incidencias.template.modal.js
+          grep -q 'HISTORY_TOGGLE: "detail-history-toggle"' src/views/incidencias/incidencias.template.modal.js
+          grep -q 'historyOpen: false' src/views/incidencias/index.js
+          grep -q 'async function closeDetailTicket' src/views/incidencias/index.js
+          grep -q 'function toggleDetailHistory' src/views/incidencias/index.js
+
+      - name: Commit refined runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- \
+            src/views/incidencias/incidencias.api.js \
+            src/views/incidencias/incidencias.template.modal.js \
+            src/views/incidencias/index.js \
+            src/css/views/incidencias/detail.css; then
+            echo 'Refinement produced no changes.' >&2
+            exit 1
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            src/views/incidencias/incidencias.api.js \
+            src/views/incidencias/incidencias.template.modal.js \
+            src/views/incidencias/index.js \
+            src/css/views/incidencias/detail.css
+          git commit -m 'feat(incidencias): add manual close and pro modal UX'
+          git push origin HEAD:ux/incidencias-modal-pro-close-history-20260817

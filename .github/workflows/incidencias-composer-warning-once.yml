@@ -1,0 +1,52 @@
+name: Incidencias Composer Warning Once
+
+on:
+  push:
+    branches:
+      - style/incidencias-history-colors-spacing-20260817
+    paths:
+      - .github/scripts/patch-incidencias-composer-warning.py
+      - .github/workflows/incidencias-composer-warning-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: style/incidencias-history-colors-spacing-20260817
+          fetch-depth: 0
+
+      - name: Apply composer border patch
+        run: python3 .github/scripts/patch-incidencias-composer-warning.py
+
+      - name: Validate composer border contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          css = Path('src/css/views/incidencias/detail.css').read_text(encoding='utf-8')
+          start = css.index('.incidencias-modal-composer {')
+          end = css.index('.incidencias-modal-composer-head {', start)
+          block = css[start:end]
+          if 'var(--idm-warning) 50%' not in block:
+              raise SystemExit('Default composer warning border missing')
+          if 'var(--idm-warning) 68%' not in block:
+              raise SystemExit('Draft composer warning border missing')
+          if 'var(--idm-warning) 58%' not in block:
+              raise SystemExit('Reopen composer warning border missing')
+          if 'var(--idm-accent) 26%' in block or 'var(--idm-accent) 52%' in block:
+              raise SystemExit('Legacy accent composer borders remain')
+          PY
+
+      - name: Commit CSS and remove one-shot files
+        run: |
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git rm .github/scripts/patch-incidencias-composer-warning.py \
+                 .github/workflows/incidencias-composer-warning-once.yml
+          git add src/css/views/incidencias/detail.css
+          git commit -m "style(incidencias): unificar composer con borde amarillo"
+          git push origin HEAD:style/incidencias-history-colors-spacing-20260817

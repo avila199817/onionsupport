@@ -246,15 +246,34 @@ const dateMs = (v = "") => {
 
 function unwrap(v = {}) {
   const it = obj(v, {});
+  if (it.meta?.frontendReady === true) return it;
   return obj(first(it.ticket, it.incidencia, it.item, it.detail, it.data?.ticket, it.data?.incidencia, it.data?.item, it.data, it), it);
 }
 
-const getId = (it = {}) => txt(first(unwrap(it).ticketId, unwrap(it).incidenciaId, unwrap(it).id, unwrap(it).entityId, unwrap(it).code, unwrap(it).numero, unwrap(it).ticketCode, unwrap(it).reference, unwrap(it).ref, ""), "");
-const getSubject = (it = {}) => txt(first(unwrap(it).subject, unwrap(it).asunto, unwrap(it).title, unwrap(it).name, "Sin asunto"), "Sin asunto");
-const getDesc = (it = {}) => txt(first(unwrap(it).preview, unwrap(it).description, unwrap(it).descripcion, unwrap(it).message, unwrap(it).body, ""), "");
-const getStatusRaw = (it = {}) => txt(first(unwrap(it).status, unwrap(it).estado, unwrap(it).statusKey, unwrap(it).lifecycle?.status, "open"), "open");
-const getPriorityRaw = (it = {}) => txt(first(unwrap(it).priority, unwrap(it).prioridad, unwrap(it).severity, "medium"), "medium");
-const getCategory = (it = {}) => txt(first(unwrap(it).category, unwrap(it).categoria, unwrap(it).tipo, unwrap(it).type, "general"), "general");
+function getId(it = {}) {
+  const r = unwrap(it);
+  return txt(first(r.ticketId, r.incidenciaId, r.id, r.entityId, r.code, r.numero, r.ticketCode, r.reference, r.ref, ""), "");
+}
+function getSubject(it = {}) {
+  const r = unwrap(it);
+  return txt(first(r.subject, r.asunto, r.title, r.name, "Sin asunto"), "Sin asunto");
+}
+function getDesc(it = {}) {
+  const r = unwrap(it);
+  return txt(first(r.preview, r.description, r.descripcion, r.message, r.body, ""), "");
+}
+function getStatusRaw(it = {}) {
+  const r = unwrap(it);
+  return txt(first(r.status, r.estado, r.statusKey, r.lifecycle?.status, "open"), "open");
+}
+function getPriorityRaw(it = {}) {
+  const r = unwrap(it);
+  return txt(first(r.priority, r.prioridad, r.severity, "medium"), "medium");
+}
+function getCategory(it = {}) {
+  const r = unwrap(it);
+  return txt(first(r.category, r.categoria, r.tipo, r.type, "general"), "general");
+}
 
 function getClientName(it = {}) {
   const r = unwrap(it), rs = obj(r.requesterSnapshot), c = obj(r.cliente), rec = obj(r.receptor), u = obj(r.user);
@@ -286,8 +305,14 @@ function getAssignedAvatar(it = {}) {
   return firstUrl(r.assignedToAvatarUrl, r.assignedToAvatar, r.technicianAvatarUrl, r.technicianAvatar, r.tecnicoAvatarUrl, r.tecnicoAvatar, r.agentAvatarUrl, r.agentAvatar, a.assignedToAvatarUrl, a.assignedToAvatar, a.technicianAvatarUrl, a.technicianAvatar, a.agentAvatarUrl, a.agentAvatar, a.avatarUrl, a.avatar, a.technician, r.tecnico, r.assignedTo, r.technician);
 }
 
-const getCreated = (it = {}) => first(unwrap(it).createdAt, unwrap(it).fechaCreacion, unwrap(it).created_at, unwrap(it).lifecycle?.createdAt, "");
-const getUpdated = (it = {}) => first(unwrap(it).lastActivityAt, unwrap(it).updatedAt, unwrap(it).modifiedAt, unwrap(it).updated_at, unwrap(it).lifecycle?.lastActivityAt, unwrap(it).lifecycle?.updatedAt, getCreated(it), "");
+function getCreated(it = {}) {
+  const r = unwrap(it);
+  return first(r.createdAt, r.fechaCreacion, r.created_at, r.lifecycle?.createdAt, "");
+}
+function getUpdated(it = {}) {
+  const r = unwrap(it);
+  return first(r.lastActivityAt, r.updatedAt, r.modifiedAt, r.updated_at, r.lifecycle?.lastActivityAt, r.lifecycle?.updatedAt, getCreated(r), "");
+}
 
 function getAttachmentsCount(it = {}) {
   const r = unwrap(it);
@@ -309,44 +334,48 @@ function getCurrency(it = {}) {
    NORMALIZATION
 ========================================================= */
 
+const STATUS_MAP = Object.freeze({
+  open: "open", opened: "open", abierta: "open", abierto: "open",
+  pending: "pending", pendiente: "pending", new: "pending", nueva: "pending", nuevo: "pending",
+  in_progress: "progress", inprogress: "progress", progress: "progress", proceso: "progress", en_proceso: "progress", working: "progress", assigned: "progress", asignada: "progress", asignado: "progress",
+  resolved: "resolved", resuelta: "resolved", resuelto: "resolved", solved: "resolved",
+  closed: "closed", close: "closed", cerrada: "closed", cerrado: "closed",
+  cancelled: "closed", canceled: "closed", cancelada: "closed", cancelado: "closed", archived: "closed", archivada: "closed", archivado: "closed",
+});
+const STATUS_LABELS = Object.freeze({ open: "Abierta", pending: "Pendiente", progress: "En proceso", resolved: "Resuelta", closed: "Cerrada" });
+const PRIORITY_MAP = Object.freeze({
+  low: "low", baja: "low", minor: "low", p3: "low",
+  medium: "medium", media: "medium", normal: "medium", p2: "medium",
+  high: "urgent", alta: "urgent", p1: "urgent",
+  urgent: "urgent", urgente: "urgent",
+  critical: "critical", critica: "critical", critico: "critical", crítico: "critical", crítica: "critical", p0: "critical",
+});
+const PRIORITY_LABELS = Object.freeze({ low: "Baja", medium: "Media", urgent: "Urgente", critical: "Crítica" });
+const OPEN_STATUS_KEYS = new Set(["open", "pending", "progress"]);
+const CLOSED_STATUS_KEYS = new Set(["resolved", "closed"]);
+const URGENT_PRIORITY_KEYS = new Set(["urgent", "critical"]);
+
 function statusKey(v = "") {
   const k = key(v || "open");
-  const map = {
-    open: "open", opened: "open", abierta: "open", abierto: "open",
-    pending: "pending", pendiente: "pending", new: "pending", nueva: "pending", nuevo: "pending",
-    in_progress: "progress", inprogress: "progress", progress: "progress", proceso: "progress", en_proceso: "progress", working: "progress", assigned: "progress", asignada: "progress", asignado: "progress",
-    resolved: "resolved", resuelta: "resolved", resuelto: "resolved", solved: "resolved",
-    closed: "closed", close: "closed", cerrada: "closed", cerrado: "closed",
-    cancelled: "closed", canceled: "closed", cancelada: "closed", cancelado: "closed", archived: "closed", archivada: "closed", archivado: "closed",
-  };
-  return map[k] || k || "open";
+  return STATUS_MAP[k] || k || "open";
 }
-
 function statusLabel(v = "") {
-  return ({ open: "Abierta", pending: "Pendiente", progress: "En proceso", resolved: "Resuelta", closed: "Cerrada" })[statusKey(v)] || txt(v, "Abierta");
+  const normalized = statusKey(v);
+  return STATUS_LABELS[normalized] || txt(v, "Abierta");
 }
-
 function priorityKey(it = {}) {
   const k = key(getPriorityRaw(it) || "medium");
-  const map = {
-    low: "low", baja: "low", minor: "low", p3: "low",
-    medium: "medium", media: "medium", normal: "medium", p2: "medium",
-    high: "urgent", alta: "urgent", p1: "urgent",
-    urgent: "urgent", urgente: "urgent",
-    critical: "critical", critica: "critical", critico: "critical", crítico: "critical", crítica: "critical", p0: "critical",
-  };
-  return map[k] || k || "medium";
+  return PRIORITY_MAP[k] || k || "medium";
 }
-
 function priorityLabel(it = {}) {
   const raw = key(getPriorityRaw(it));
-  if (["high", "alta", "p1"].includes(raw)) return "Alta";
-  return ({ low: "Baja", medium: "Media", urgent: "Urgente", critical: "Crítica" })[priorityKey(it)] || priorityKey(it);
+  if (raw === "high" || raw === "alta" || raw === "p1") return "Alta";
+  const normalized = priorityKey(it);
+  return PRIORITY_LABELS[normalized] || normalized;
 }
-
-const isOpen = (it = {}) => ["open", "pending", "progress"].includes(statusKey(getStatusRaw(it)));
-const isClosed = (it = {}) => ["resolved", "closed"].includes(statusKey(getStatusRaw(it)));
-const isUrgent = (it = {}) => ["urgent", "critical"].includes(priorityKey(it));
+const isOpen = (it = {}) => OPEN_STATUS_KEYS.has(statusKey(getStatusRaw(it)));
+const isClosed = (it = {}) => CLOSED_STATUS_KEYS.has(statusKey(getStatusRaw(it)));
+const isUrgent = (it = {}) => URGENT_PRIORITY_KEYS.has(priorityKey(it));
 const amountKey = (it = {}) => (getInvoiceTotal(it) > 0 ? "paid" : "idle");
 const amountLabel = (it = {}) => (getInvoiceTotal(it) > 0 ? formatMoney(getInvoiceTotal(it), getCurrency(it)) : "—");
 

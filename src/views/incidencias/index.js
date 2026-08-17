@@ -1112,6 +1112,7 @@ function createIncidenciasController(
 
   let loadController = null;
   let detailController = null;
+  let detailLoadSeq = 0;
 
   /*
      Elemento al que devolvemos el foco al cerrar el modal.
@@ -3780,6 +3781,7 @@ function createIncidenciasController(
   function resetDetailModal() {
     detailController?.abort?.();
     detailController = null;
+    detailLoadSeq += 1;
     attachmentPreviewSeq += 1;
 
     detailModal.open = false;
@@ -3851,6 +3853,7 @@ function createIncidenciasController(
       return false;
     }
 
+    const detailSeq = ++detailLoadSeq;
     rememberModalReturnFocus();
 
     if (
@@ -3912,6 +3915,7 @@ function createIncidenciasController(
 
       if (
         destroyed ||
+        detailSeq !== detailLoadSeq ||
         openingTicketId !== id
       ) {
         return false;
@@ -3966,6 +3970,7 @@ function createIncidenciasController(
     } catch (detailError) {
       if (
         destroyed ||
+        detailSeq !== detailLoadSeq ||
         openingTicketId !== id
       ) {
         return false;

@@ -48,21 +48,6 @@ const ATTACHMENT_BLOB_HOST = "onionassets.blob.core.windows.net";
 const ATTACHMENT_BLOB_CONTAINER = "tickets";
 const ATTACHMENT_BLOB_PATH_PREFIX = `/${ATTACHMENT_BLOB_CONTAINER}/`;
 
-const FIXED_TECHNICIAN = Object.freeze({
-  id: "ON-20260218164977",
-  userId: "ON-20260218164977",
-  name: "Cristian Ávila Luque",
-  nombre: "Cristian Ávila Luque",
-  displayName: "Cristian Ávila Luque",
-  email: "cristian@onionsupport.com",
-  emailLower: "cristian@onionsupport.com",
-  avatar: "https://onionassets.blob.core.windows.net/avatars/ON-20260218164977/avatar.png",
-  avatarUrl: "https://onionassets.blob.core.windows.net/avatars/ON-20260218164977/avatar.png",
-  hasAvatar: true,
-  role: "admin",
-  display: "Cristian Ávila Luque <cristian@onionsupport.com>",
-});
-
 let loading = false;
 let lastLoadedAt = null;
 let lastError = null;
@@ -1343,8 +1328,11 @@ export function normalizeIncidencia(item = {}) {
 
   const assignment = {
     ...safeObject(raw.assignment),
-    status: "assigned",
-    policy: cleanText(raw.assignment?.policy || raw.meta?.assignmentPolicy || "fixed_default_technician", "fixed_default_technician"),
+    status: cleanText(
+      first(raw.assignment?.status, technician.assigned ? "assigned" : "unassigned"),
+      technician.assigned ? "assigned" : "unassigned"
+    ),
+    policy: cleanText(raw.assignment?.policy || raw.meta?.assignmentPolicy || "", ""),
     assignedToUserId: technician.userId,
     userId: technician.userId,
     assignedToName: technician.name,
@@ -1358,7 +1346,7 @@ export function normalizeIncidencia(item = {}) {
     avatar: technician.avatarUrl || null,
     avatarUrl: technician.avatarUrl || null,
     assignedToHasAvatar: technician.hasAvatar,
-    team: cleanText(first(raw.assignment?.team, "support"), "support"),
+    team: cleanText(first(raw.assignment?.team, technician.assigned ? "support" : ""), technician.assigned ? "support" : ""),
     assignedTo: technician,
     technician,
   };
@@ -1905,21 +1893,22 @@ export async function listIncidencias(options = {}) {
   const useCache = options.cache !== false && options.noCache !== true;
   const returnStaleOnError = options.returnStaleOnError !== false;
   const key = listCacheKey(options);
+  const canDedupe = !options.signal;
 
   if (!force && useCache && isCacheFresh(options)) {
     return cachedListResponse({ cached: true, stale: false, options });
   }
 
-  if (!force && inFlightListPromise && inFlightListKey === key) return inFlightListPromise;
+  if (!force && canDedupe && inFlightListPromise && inFlightListKey === key) {
+    return inFlightListPromise;
+  }
 
   loading = true;
   lastError = null;
-  inFlightListKey = key;
 
-  inFlightListPromise = (async () => {
+  const task = (async () => {
     try {
       const response = await fetchIncidenciasRequest(options);
-
       if (responseLooksFailed(response)) {
         throw new Error(responseErrorMessage(response, "No se pudieron cargar las incidencias."));
       }
@@ -1927,7 +1916,6 @@ export async function listIncidencias(options = {}) {
       const rawItems = listFromPayload(response);
       const items = normalizeList(rawItems);
       const total = totalFromPayload(response, items.length);
-
       setListCache({ items, total, key });
 
       return {
@@ -1949,22 +1937,27 @@ export async function listIncidencias(options = {}) {
       };
     } catch (error) {
       lastError = normalizeError(error);
-
       if (returnStaleOnError && lastLoadedAt) {
         return cachedListResponse({ cached: true, stale: true, error: lastError, options });
       }
-
       throw error;
-    } finally {
-      loading = false;
-      if (inFlightListKey === key) {
-        inFlightListPromise = null;
-        inFlightListKey = "";
-      }
     }
   })();
 
-  return inFlightListPromise;
+  if (canDedupe) {
+    inFlightListPromise = task;
+    inFlightListKey = key;
+  }
+
+  try {
+    return await task;
+  } finally {
+    if (canDedupe && inFlightListPromise === task) {
+      inFlightListPromise = null;
+      inFlightListKey = "";
+    }
+    loading = Boolean(inFlightListPromise);
+  }
 }
 
 export async function loadIncidencias(options = {}) {
@@ -2047,7 +2040,7 @@ export async function updateIncidenciaRequest(id = "", payload = {}, { timeout =
 
   const response = verb === "PUT" && typeof Http.put === "function"
     ? await Http.put(endpoint, safeObject(payload), { timeout, source: "views.incidencias.update", signal })
-    : await patchJson(endpoint, safeObject(payload), { timeout, source: "views.incidencias.update" });
+    : await patchJson(endpoint, safeObject(payload), { timeout, source: "views.incidencias.update", signal });
 
   if (responseLooksFailed(response)) throw new Error(responseErrorMessage(response, "No se pudo actualizar la incidencia."));
 
@@ -2234,6 +2227,7 @@ export async function downloadIncidenciaAttachment(
   {
     timeout = INCIDENCIAS_DETAIL_TIMEOUT,
     autoDownload = true,
+    signal,
   } = {}
 ) {
   /*
@@ -2259,6 +2253,7 @@ export async function downloadIncidenciaAttachment(
     },
     {
       timeout,
+      signal,
     }
   );
 

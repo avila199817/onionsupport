@@ -72,7 +72,7 @@ const ACCEPT_EXTENSIONS = [
 ];
 
 const ACCEPT_EXTENSION_SET = new Set(ACCEPT_EXTENSIONS);
-const ACCEPT_ATTRIBUTE = ACCEPT_ATTRIBUTE;
+const ACCEPT_ATTRIBUTE = ACCEPT_EXTENSIONS.join(",");
 
 const CATEGORY_OPTIONS = Object.freeze([
   { value: "general", label: "General" },
@@ -341,7 +341,11 @@ function isFileLike(value = null) {
    ICONS
 ========================================================= */
 
+const CREATE_ICON_CACHE = new Map();
+
 function icon(name = "") {
+  if (CREATE_ICON_CACHE.has(name)) return CREATE_ICON_CACHE.get(name);
+
   const common =
     `aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
 
@@ -356,7 +360,9 @@ function icon(name = "") {
     user: `<svg ${common}><path d="M12 11.25a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/><path d="M4.75 20.75a7.25 7.25 0 0 1 14.5 0"/></svg>`,
   };
 
-  return icons[name] || "";
+  const result = icons[name] || "";
+  CREATE_ICON_CACHE.set(name, result);
+  return result;
 }
 
 /* =========================================================

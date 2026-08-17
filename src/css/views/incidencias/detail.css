@@ -2,7 +2,7 @@
    ONION SUPPORT — INCIDENCIAS DETAIL MODAL
    Archivo: /src/css/views/incidencias/detail.css
 
-   PRODUCTIVO · V23 · FINAL UX · HEADER HISTORY · ADMIN FILE DELETE
+   PRODUCTIVO · V25 · HISTORY MODE · USER CLOSE READY
 
    Contrato:
    - 1:1 con incidencias.template.modal.js V16 preview-sas-safe.
@@ -4023,6 +4023,239 @@ body.light
   margin-block-start: 14px;
 }
 
+
+/* =========================================================
+   V25 · HISTORY MODE
+   El historial sustituye temporalmente el contenido de trabajo del modal.
+   Un solo scroll, cero saltos al composer y sin re-render del panel completo.
+========================================================= */
+
+.incidencias-modal-history-view {
+  min-block-size: 100%;
+  overflow: visible;
+
+  display: grid;
+  align-content: start;
+  gap: 16px;
+
+  padding:
+    clamp(16px, 1.4vw, 22px);
+
+  border:
+    1px solid
+    color-mix(
+      in srgb,
+      var(--idm-info) 24%,
+      var(--idm-border-soft)
+    );
+
+  border-radius:
+    var(--idm-radius-section);
+
+  background:
+    radial-gradient(
+      circle at 0 0,
+      color-mix(
+        in srgb,
+        var(--idm-info) 9%,
+        transparent
+      ),
+      transparent 34%
+    ),
+    color-mix(
+      in srgb,
+      var(--idm-section) 98%,
+      var(--idm-info) 2%
+    );
+
+  box-shadow:
+    var(--idm-shadow-section);
+}
+
+.incidencias-modal-history-view:focus {
+  outline: none;
+}
+
+.incidencias-modal-history-view:focus-visible {
+  box-shadow:
+    var(--idm-shadow-section),
+    var(--idm-focus);
+}
+
+.incidencias-modal-history-view-head {
+  min-inline-size: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.incidencias-modal-history-view-heading {
+  min-inline-size: 0;
+
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.incidencias-modal-history-view-heading > div {
+  min-inline-size: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.incidencias-modal-history-view-heading h3 {
+  margin: 0;
+
+  color: var(--idm-text-strong);
+
+  font-size:
+    clamp(15px, 1.35vw, 18px);
+  font-weight: 840;
+  line-height: 1.2;
+  letter-spacing: -.012em;
+}
+
+.incidencias-modal-history-view-heading span {
+  color: var(--idm-text-muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.incidencias-modal-history-view-icon {
+  flex: 0 0 auto;
+
+  inline-size: 42px;
+  block-size: 42px;
+
+  display: grid;
+  place-items: center;
+
+  border:
+    1px solid
+    color-mix(
+      in srgb,
+      var(--idm-info) 34%,
+      var(--idm-border-soft)
+    );
+
+  border-radius: 13px;
+
+  background:
+    color-mix(
+      in srgb,
+      var(--idm-info) 10%,
+      var(--idm-control)
+    );
+
+  color: var(--idm-info);
+}
+
+.incidencias-modal-history-back-btn {
+  appearance: none;
+
+  min-block-size: 40px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 9px 13px;
+
+  border:
+    1px solid
+    var(--idm-border-soft);
+
+  border-radius: 12px;
+
+  background: var(--idm-control);
+  color: var(--idm-text-strong);
+
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 760;
+  line-height: 1;
+
+  cursor: pointer;
+
+  box-shadow: var(--idm-shadow-control);
+
+  transition:
+    border-color var(--idm-duration) var(--idm-ease),
+    background var(--idm-duration) var(--idm-ease),
+    transform var(--idm-duration) var(--idm-ease),
+    box-shadow var(--idm-duration) var(--idm-ease);
+}
+
+.incidencias-modal-history-back-btn:hover:not(:disabled) {
+  border-color:
+    color-mix(
+      in srgb,
+      var(--idm-info) 42%,
+      var(--idm-border-soft)
+    );
+
+  background:
+    color-mix(
+      in srgb,
+      var(--idm-info) 7%,
+      var(--idm-control)
+    );
+
+  transform: translateY(-1px);
+}
+
+.incidencias-modal-history-back-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--idm-focus);
+}
+
+.incidencias-modal-history-content--standalone {
+  padding: 0;
+  border-top: 0;
+  background: transparent;
+}
+
+.incidencias-modal-history-content--standalone > .incidencias-timeline-list,
+.incidencias-modal-history-content--standalone > .incidencias-timeline-empty {
+  margin-block-start: 0;
+}
+
+.incidencias-modal-history-jump-btn[aria-pressed="true"] {
+  border-color:
+    color-mix(
+      in srgb,
+      var(--idm-info) 66%,
+      var(--idm-accent-border)
+    );
+
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(
+        in srgb,
+        var(--idm-info) 18%,
+        var(--idm-control)
+      ),
+      color-mix(
+        in srgb,
+        var(--idm-accent) 13%,
+        var(--idm-control)
+      )
+    );
+}
+
+@media (max-width: 620px) {
+  .incidencias-modal-history-view-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .incidencias-modal-history-back-btn {
+    inline-size: 100%;
+  }
+}
 
 /* =========================================================
    V23 · FINAL UX PASS

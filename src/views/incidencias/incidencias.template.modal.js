@@ -29,7 +29,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.extreme.v24.consistent-id-chip";
+  "incidencias.template.modal.extreme.v25.history-mode";
 
 export const DETAIL_ACTIONS = Object.freeze({
   CLOSE: "detail-close",
@@ -2493,9 +2493,23 @@ function renderHeaderActions(vm = {}) {
       <button
         type="button"
         data-detail-action="${DETAIL_ACTIONS.HISTORY_REVEAL}"
-        class="incidencias-modal-history-jump-btn"
-        aria-label="Abrir historial y actividad"
-        title="Ver historial y actividad"
+        class="${joinClasses(
+          "incidencias-modal-history-jump-btn",
+          vm.historyOpen
+            ? "is-active"
+            : ""
+        )}"
+        aria-label="${attr(
+          vm.historyOpen
+            ? "Volver al detalle de la incidencia"
+            : "Abrir historial y actividad"
+        )}"
+        title="${attr(
+          vm.historyOpen
+            ? "Volver al ticket"
+            : "Ver historial y actividad"
+        )}"
+        aria-pressed="${vm.historyOpen ? "true" : "false"}"
         ${disabledAttrs(vm.submitting, vm.submitting)}
       >
         <span class="incidencias-modal-history-jump-icon">
@@ -3803,58 +3817,114 @@ function renderTimeline(
 
 function renderHistorySection(vm = {}) {
   const count = getTimelineCount(vm.detail);
-  const open = vm.historyOpen === true;
   const countLabel = count
     ? `${count} registro${count === 1 ? "" : "s"}`
     : "Sin actividad registrada";
 
   return `
     <section
-      class="incidencias-modal-history-section"
+      class="incidencias-modal-history-section incidencias-modal-history-view"
       data-modal-history-slot="true"
-      data-history-open="${open ? "true" : "false"}"
+      data-history-open="true"
       aria-labelledby="incidencias-modal-history-title"
+      tabindex="-1"
     >
-      <button
-        type="button"
-        class="incidencias-modal-history-toggle"
-        data-detail-action="${DETAIL_ACTIONS.HISTORY_TOGGLE}"
-        aria-expanded="${open ? "true" : "false"}"
-        aria-controls="incidencias-modal-history-content"
-        ${disabledAttrs(vm.submitting, vm.submitting)}
-      >
-        <span class="incidencias-modal-history-toggle-icon" aria-hidden="true">
-          ${icon("history")}
-        </span>
-
-        <span class="incidencias-modal-history-toggle-copy">
-          <strong id="incidencias-modal-history-title">
-            Historial y actividad
-          </strong>
-          <small>${escapeHtml(countLabel)}</small>
-        </span>
-
-        <span class="incidencias-modal-history-toggle-action">
-          <span>${open ? "Ocultar" : "Ver historial"}</span>
-          <span class="incidencias-modal-history-chevron" aria-hidden="true">
-            ${icon("chevronDown")}
+      <div class="incidencias-modal-history-view-head">
+        <div class="incidencias-modal-history-view-heading">
+          <span class="incidencias-modal-history-view-icon" aria-hidden="true">
+            ${icon("history")}
           </span>
-        </span>
-      </button>
 
-      ${
-        open
-          ? `
-            <div
-              id="incidencias-modal-history-content"
-              class="incidencias-modal-history-content"
-            >
-              ${renderTimeline(vm.detail)}
-            </div>
-          `
-          : ""
-      }
+          <div>
+            <h3 id="incidencias-modal-history-title">
+              Historial y actividad
+            </h3>
+            <span>${escapeHtml(countLabel)}</span>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          class="incidencias-modal-history-back-btn"
+          data-detail-action="${DETAIL_ACTIONS.HISTORY_REVEAL}"
+          ${disabledAttrs(vm.submitting, vm.submitting)}
+        >
+          Volver al ticket
+        </button>
+      </div>
+
+      <div
+        id="incidencias-modal-history-content"
+        class="incidencias-modal-history-content incidencias-modal-history-content--standalone"
+      >
+        ${renderTimeline(vm.detail)}
+      </div>
     </section>
+  `;
+}
+
+function renderTicketBody(
+  vm = {},
+  {
+    detail = {},
+    attachments = [],
+    createdAt = "—",
+  } = {}
+) {
+  return `
+    <div
+      data-modal-feedback-slot="true"
+      aria-live="polite"
+    >
+      ${renderFeedbackBox(vm)}
+    </div>
+
+    <div
+      data-modal-preview-slot="true"
+      data-preview-active="${vm.previewFile ? "true" : "false"}"
+      aria-live="polite"
+    >
+      ${renderAttachmentPreview(vm)}
+    </div>
+
+    <div class="incidencias-modal-meta-grid">
+      ${renderMetaField(
+        "Técnico",
+        renderTechnicianValue(detail),
+        {
+          html: true,
+        }
+      )}
+
+      ${renderMetaField(
+        "Factura",
+        getInvoiceLabel(detail)
+      )}
+
+      ${renderMetaField(
+        "Creada",
+        createdAt
+      )}
+
+      ${renderMetaField(
+        "Adjuntos",
+        String(
+          attachments.length
+        )
+      )}
+    </div>
+
+    ${renderDescription(detail)}
+
+    ${renderContactBlock(detail)}
+
+    <div data-modal-files-slot="true">
+      ${renderAttachments(vm)}
+    </div>
+
+    <div data-modal-composer-slot="true">
+      ${renderComposer(vm)}
+    </div>
   `;
 }
 
@@ -4013,62 +4083,20 @@ export function renderIncidenciasDetailModal(
           <main
             class="incidencias-modal-body"
             data-modal-body="true"
+            data-history-mode="${vm.historyOpen ? "history" : "ticket"}"
           >
-            <div
-              data-modal-feedback-slot="true"
-              aria-live="polite"
-            >
-              ${renderFeedbackBox(vm)}
-            </div>
-
-            <div
-              data-modal-preview-slot="true"
-              data-preview-active="${vm.previewFile ? "true" : "false"}"
-              aria-live="polite"
-            >
-              ${renderAttachmentPreview(vm)}
-            </div>
-
-            <div class="incidencias-modal-meta-grid">
-              ${renderMetaField(
-                "Técnico",
-                renderTechnicianValue(detail),
-                {
-                  html: true,
-                }
-              )}
-
-              ${renderMetaField(
-                "Factura",
-                getInvoiceLabel(detail)
-              )}
-
-              ${renderMetaField(
-                "Creada",
-                createdAt
-              )}
-
-              ${renderMetaField(
-                "Adjuntos",
-                String(
-                  attachments.length
-                )
-              )}
-            </div>
-
-            ${renderDescription(detail)}
-
-            ${renderContactBlock(detail)}
-
-            <div data-modal-files-slot="true">
-              ${renderAttachments(vm)}
-            </div>
-
-            ${renderHistorySection(vm)}
-
-            <div data-modal-composer-slot="true">
-              ${renderComposer(vm)}
-            </div>
+            ${
+              vm.historyOpen
+                ? renderHistorySection(vm)
+                : renderTicketBody(
+                    vm,
+                    {
+                      detail,
+                      attachments,
+                      createdAt,
+                    }
+                  )
+            }
           </main>
         </div>
       </div>

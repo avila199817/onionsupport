@@ -1,0 +1,50 @@
+name: Incidencias Loading Spinner Once
+
+on:
+  push:
+    branches:
+      - polish/incidencias-loading-spinner-20260817
+    paths:
+      - .github/scripts/patch-incidencias-loading-spinner.py
+      - .github/workflows/incidencias-loading-spinner-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: polish/incidencias-loading-spinner-20260817
+          fetch-depth: 0
+
+      - name: Apply spinner polish
+        run: python3 .github/scripts/patch-incidencias-loading-spinner.py
+
+      - name: Validate spinner CSS
+        run: |
+          grep -F 'PRODUCTIVO · V27 · PRO LOADING SPINNER' src/css/views/incidencias/detail.css
+          grep -F 'inline-size: 22px;' src/css/views/incidencias/detail.css
+          grep -F 'border-block-start-color:' src/css/views/incidencias/detail.css
+          grep -F '.incidencias-modal-loading-box > span::after' src/css/views/incidencias/detail.css
+          grep -F 'incidenciasDetailSpin' src/css/views/incidencias/detail.css
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          css = Path('src/css/views/incidencias/detail.css').read_text(encoding='utf-8')
+          if re.search(r':\s*[^;{}\n]*!\s*important\b', css, flags=re.I):
+              raise SystemExit('detail.css contains an !important declaration')
+          PY
+
+      - name: Commit product change and remove one-shot files
+        run: |
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git rm -f .github/scripts/patch-incidencias-loading-spinner.py \
+                    .github/workflows/incidencias-loading-spinner-once.yml
+          git add src/css/views/incidencias/detail.css
+          git commit -m "polish(incidencias): mejorar spinner de actualización"
+          git push origin HEAD:polish/incidencias-loading-spinner-20260817

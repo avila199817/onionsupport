@@ -2257,6 +2257,62 @@ function getTimelineCount(detail = {}) {
   return history.length + comments.length;
 }
 
+function getTimelineTone(entry = {}) {
+  const kind = normalizeKey(entry.kind || "event");
+  const type = normalizeKey(entry.type || "update");
+
+  if (kind === "comment") return "comment";
+  if (type === "created") return "created";
+
+  const text = normalizeKey(
+    [
+      type,
+      entry.title,
+      entry.body,
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+
+  if (
+    /adjunt|attach|archivo|document|file/.test(text)
+  ) {
+    return "attachment";
+  }
+
+  if (
+    /cerrad|closed|resolved|resuelt/.test(text)
+  ) {
+    return "closed";
+  }
+
+  if (
+    /reabiert|reopen|abiert|opened/.test(text)
+  ) {
+    return "reopened";
+  }
+
+  if (
+    /prioridad|priority|urgent|urgente/.test(text)
+  ) {
+    return "priority";
+  }
+
+  if (
+    /tecnico|técnico|technician|asign/.test(text)
+  ) {
+    return "assignment";
+  }
+
+  if (
+    /factura|invoice/.test(text)
+  ) {
+    return "invoice";
+  }
+
+  return "update";
+}
+
 /* =========================================================
    VIEW MODEL
 ========================================================= */
@@ -3733,6 +3789,9 @@ function renderTimeline(
             const isCreated =
               type === "created";
 
+            const tone =
+              getTimelineTone(entry);
+
             const title =
               cleanText(
                 entry.title,
@@ -3754,6 +3813,7 @@ function renderTimeline(
               <article
                 class="${joinClasses(
                   "incidencias-timeline-card",
+                  `tone-${tone}`,
 
                   isComment
                     ? "is-comment"
@@ -3763,6 +3823,7 @@ function renderTimeline(
                     ? "is-created"
                     : ""
                 )}"
+                data-timeline-tone="${attr(tone)}"
               >
                 <div class="incidencias-timeline-accent"></div>
 

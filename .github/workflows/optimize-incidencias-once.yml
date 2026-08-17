@@ -1,0 +1,79 @@
+name: Optimize Incidencias Once
+
+on:
+  push:
+    branches:
+      - perf/incidencias-extreme-20260817
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  optimize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Harden one-shot optimizer
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('.github/scripts/optimize-incidencias-once.mjs')
+          s = p.read_text()
+          start = s.index("  s = replaceOnce(\n    s,\n    '  return updated ? upsertCachedIncidencia(updated) : await getIncidenciaByIdRequest(id);'")
+          end = s.index("\n\n  s = replaceOnce(\n    s,\n    '    fixedTechnician: FIXED_TECHNICIAN,'", start)
+          replacement = '''  const redundantGet = '  return updated ? upsertCachedIncidencia(updated) : await getIncidenciaByIdRequest(id);';
+          const redundantGetReplacement = '  return updated ? upsertCachedIncidencia(updated) : null;';
+          const redundantGetCount = s.split(redundantGet).length - 1;
+          if (redundantGetCount !== 4) throw new Error(`api redundant detail get: expected 4, got ${redundantGetCount}`);
+          s = s.split(redundantGet).join(redundantGetReplacement);'''
+          p.write_text(s[:start] + replacement + s[end:])
+          PY
+
+      - name: Apply optimized Incidencias runtime
+        run: node .github/scripts/optimize-incidencias-once.mjs
+
+      - name: Syntax check every Incidencias module
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in src/views/incidencias/*.js; do
+            echo "checking $file"
+            node --check "$file"
+          done
+
+      - name: Verify performance contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'canonical: true' src/views/incidencias/index.js
+          grep -q 'function patchListDom' src/views/incidencias/index.js
+          grep -q 'INCIDENCIAS_DETAIL_CACHE_TTL_MS' src/views/incidencias/incidencias.api.js
+          grep -q 'signal: options.signal' src/views/incidencias/incidencias.api.js
+          grep -q 'ITEM_TEXT_CACHE' src/views/incidencias/incidencias.template.js
+          ! grep -q '"Cristian Ávila Luque"), "Cristian Ávila Luque"' src/views/incidencias/incidencias.template.js
+
+      - name: Commit optimized modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- src/views/incidencias; then
+            echo 'Optimizer produced no Incidencias changes.' >&2
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/views/incidencias/*.js
+          git commit -m 'perf(incidencias): optimize runtime and rendering'
+          git push origin HEAD:perf/incidencias-extreme-20260817

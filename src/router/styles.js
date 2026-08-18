@@ -2,7 +2,7 @@
    Onion Support - Route Styles
    Archivo: /src/router/styles.js
 
-   ROUTE CSS LOADER · V4 · DIRECT MANIFEST · SAFE GATED
+   ROUTE CSS LOADER · V5 · DIRECT MANIFEST · SAFE GATED
 
    IMPORTANTE:
    - NO crea wrappers CSS.
@@ -15,7 +15,7 @@
 ========================================================= */
 
 export const ROUTE_STYLES_VERSION =
-  "route-styles.v4-usuarios-detail-shared-css";
+  "route-styles.v5-correo-preview";
 
 const MODE_ATTRIBUTE =
   "data-css-route-mode";
@@ -108,6 +108,10 @@ const STYLE_MANIFEST = Object.freeze({
     "/src/css/views/usuarios/index.css",
     "/src/css/views/usuarios/create.css",
     "/src/css/views/incidencias/detail.css",
+  ]),
+
+  correo: Object.freeze([
+    "/src/css/views/correo/index.css",
   ]),
 
   servidor: Object.freeze([

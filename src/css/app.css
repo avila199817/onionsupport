@@ -119,6 +119,10 @@
    - Dropdowns.
    - Tooltips propios.
 
+   correo-sidebar.css:
+   - Icono canónico de la nueva ruta Correo.
+   - Sin lógica ni dependencias de Microsoft.
+
    topbar.css:
    - Topbar privada.
    - Buscador global.
@@ -132,6 +136,7 @@
 ========================================================= */
 
 @import url("./layout/sidebar.css") layer(layout);
+@import url("./layout/correo-sidebar.css") layer(layout);
 @import url("./layout/topbar.css") layer(layout);
 
 

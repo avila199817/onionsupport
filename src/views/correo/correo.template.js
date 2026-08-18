@@ -10,7 +10,7 @@
    - Sin HTML remoto: el backend entrega body de texto.
 ========================================================= */
 
-export const CORREO_TEMPLATE_VERSION = "correo.template.microsoft.production.v2";
+export const CORREO_TEMPLATE_VERSION = "correo.template.microsoft.production.v3-viewport-final";
 
 const SVG = `aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"`;
 
@@ -370,36 +370,31 @@ export function renderShell(input = {}) {
       data-correo-scope="true"
       data-correo-template-version="${attr(CORREO_TEMPLATE_VERSION)}"
     >
-      <section class="correo-hero">
-        <div class="correo-hero-top">
-          <div class="correo-hero-copy">
-            <p class="correo-kicker">Comunicaciones</p>
-            <h1 class="correo-title">Correo</h1>
-            <p class="correo-subtitle">Tu Outlook de Onion Support, integrado sin sacar credenciales ni tokens de Microsoft del backend.</p>
-          </div>
-          <div class="correo-hero-actions">
-            ${connected ? `
-              <button class="correo-btn" type="button" data-correo-action="refresh">${icon("refresh")}<span>Actualizar</span></button>
-              <button class="correo-btn correo-btn--primary" type="button" data-correo-action="compose">${icon("plus")}<span>Nuevo correo</span></button>
-            ` : `
+      ${connected ? "" : `
+        <section class="correo-hero">
+          <div class="correo-hero-top">
+            <div class="correo-hero-copy">
+              <p class="correo-kicker">Comunicaciones</p>
+              <h1 class="correo-title">Correo</h1>
+              <p class="correo-subtitle">Tu Outlook de Onion Support, integrado sin sacar credenciales ni tokens de Microsoft del backend.</p>
+            </div>
+            <div class="correo-hero-actions">
               <button class="correo-btn correo-btn--primary" type="button" data-correo-action="connect" ${loading ? "disabled" : ""}>${loading ? icon("spinner") : icon("link")}<span>${loading ? "Comprobando…" : "Conectar Outlook"}</span></button>
-            `}
+            </div>
           </div>
-        </div>
 
-        <div class="correo-hero-meta" aria-label="Estado del módulo">
-          <span class="correo-meta-pill correo-meta-pill--brand">${icon("mail")} Microsoft 365</span>
-          <span class="correo-meta-pill ${connected ? "correo-meta-pill--online" : "correo-meta-pill--offline"}"><span class="correo-status-dot"></span>${connected ? "Conectado" : "Sin conexión"}</span>
-          <span class="correo-meta-pill">Graph v1.0</span>
-        </div>
+          <div class="correo-hero-meta" aria-label="Estado del módulo">
+            <span class="correo-meta-pill correo-meta-pill--brand">${icon("mail")} Microsoft 365</span>
+            <span class="correo-meta-pill correo-meta-pill--offline"><span class="correo-status-dot"></span>Sin conexión</span>
+            <span class="correo-meta-pill">Graph v1.0</span>
+          </div>
 
-        <div class="correo-notice" data-correo-notice role="status" aria-live="polite">
-          <span aria-hidden="true">${connected ? icon("shield") : icon("link")}</span>
-          <span data-correo-notice-text>${connected
-            ? `Conectado de forma segura a ${escapeHtml(status.mailbox || "Microsoft 365")}.`
-            : "Conecta tu cuenta Microsoft 365 para cargar carpetas y mensajes reales."}</span>
-        </div>
-      </section>
+          <div class="correo-notice" data-correo-notice role="status" aria-live="polite">
+            <span aria-hidden="true">${icon("link")}</span>
+            <span data-correo-notice-text>Conecta tu cuenta Microsoft 365 para cargar carpetas y mensajes reales.</span>
+          </div>
+        </section>
+      `}
 
       ${connected ? renderConnectedWorkspace(input) : renderDisconnectedWorkspace(input)}
 
@@ -442,6 +437,10 @@ function renderConnectedWorkspace(input = {}) {
 
   return `
     <section class="correo-workspace" aria-label="Correo Microsoft 365">
+      <div class="correo-sr-status" data-correo-notice role="status" aria-live="polite">
+        <span data-correo-notice-text>Outlook conectado · ${escapeHtml(input.status?.mailbox || "Microsoft 365")}</span>
+      </div>
+
       <aside class="correo-folders-panel">
         <div data-correo-account-card>${renderConnectionCard(input.status)}</div>
         <nav class="correo-folders" aria-label="Carpetas de correo" data-correo-folders>
@@ -463,7 +462,11 @@ function renderConnectedWorkspace(input = {}) {
             <p class="correo-kicker">Carpeta</p>
             <h2 data-correo-folder-title>${escapeHtml(folderName)}</h2>
           </div>
-          <span class="correo-count" data-correo-count>${messages.length} ${messages.length === 1 ? "mensaje" : "mensajes"}</span>
+          <div class="correo-list-utilities" aria-label="Acciones de correo">
+            <span class="correo-count" data-correo-count>${messages.length} ${messages.length === 1 ? "mensaje" : "mensajes"}</span>
+            <button class="correo-icon-btn" type="button" data-correo-action="refresh" aria-label="Actualizar correo" title="Actualizar">${icon("refresh")}</button>
+            <button class="correo-btn correo-btn--primary correo-btn--compact" type="button" data-correo-action="compose" title="Nuevo correo">${icon("plus")}<span>Nuevo</span></button>
+          </div>
         </header>
 
         <label class="correo-search">

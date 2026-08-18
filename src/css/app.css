@@ -278,4 +278,4 @@
      .public-auth-shell--home y .public-home.
 ========================================================= */
 
-@import url("./views/public/support-request.css") layer(auth);
+@import url("./views/public/support-request.css");

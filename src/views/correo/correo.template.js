@@ -2,13 +2,14 @@
    Onion Support - Correo Template
    Archivo: /src/views/correo/correo.template.js
 
-   PRODUCTIVO · OUTLOOK / FLUENT · V4
+   PRODUCTIVO · OUTLOOK / FLUENT · V5 FINAL
    - Render puro y escapado.
    - Sin HTTP, tokens ni estado global.
    - Workspace denso, scroll interno e infinito.
+   - Toolbar de lista compacta: filtros + actualizar + redactar.
 ========================================================= */
 
-export const CORREO_TEMPLATE_VERSION = "correo.template.microsoft.production.v4-outlook-extreme";
+export const CORREO_TEMPLATE_VERSION = "correo.template.microsoft.production.v5-final";
 
 const SVG = `aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"`;
 
@@ -17,6 +18,7 @@ const ICONS = Object.freeze({
   inbox: `<svg ${SVG}><path d="M4 4h16v16H4z"/><path d="M4 14h4l2 3h4l2-3h4"/></svg>`,
   star: `<svg ${SVG}><path d="m12 3 2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8-4.3-4.1 5.9-.9Z"/></svg>`,
   draft: `<svg ${SVG}><path d="M4 20h4l11-11a2.8 2.8 0 0 0-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/></svg>`,
+  edit: `<svg ${SVG}><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/><path d="m15 5 3 3"/></svg>`,
   send: `<svg ${SVG}><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>`,
   archive: `<svg ${SVG}><path d="M4 7h16v13H4z"/><path d="M3 3h18v4H3z"/><path d="M9 11h6"/></svg>`,
   trash: `<svg ${SVG}><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="m7 7 1 14h8l1-14"/></svg>`,
@@ -316,7 +318,6 @@ function renderConnectedWorkspace(input = {}) {
   const messages = input.messages || [];
   const selectedFolderId = input.selectedFolderId || "";
   const selectedMessageId = input.selectedMessageId || "";
-  const folderName = cleanText(input.selectedFolderName, "Bandeja de entrada");
   const loadingMessages = input.loadingMessages === true;
   const loadingMore = input.loadingMore === true;
 
@@ -329,9 +330,14 @@ function renderConnectedWorkspace(input = {}) {
         <button class="correo-disconnect-btn" type="button" data-correo-action="disconnect">${icon("logout")}<span>Desconectar cuenta</span></button>
       </aside>
       <section class="correo-list-panel" aria-label="Lista de mensajes">
-        <header class="correo-list-header"><div><p class="correo-kicker">Carpeta</p><h2 data-correo-folder-title>${escapeHtml(folderName)}</h2></div><div class="correo-list-utilities"><span class="correo-count" data-correo-count>${messages.length} ${messages.length === 1 ? "mensaje" : "mensajes"}</span><button class="correo-icon-btn${input.notifications?.enabled ? " is-active" : ""}" type="button" data-correo-action="notifications" aria-label="${input.notifications?.enabled ? "Notificaciones activadas" : "Activar notificaciones"}" title="${input.notifications?.enabled ? "Notificaciones activadas" : "Activar notificaciones"}">${icon("bell")}</button><button class="correo-icon-btn" type="button" data-correo-action="refresh" aria-label="Actualizar" title="Actualizar">${icon("refresh")}</button><button class="correo-btn correo-btn--primary correo-btn--compact" type="button" data-correo-action="compose">${icon("plus")}<span>Nuevo correo</span></button></div></header>
         <label class="correo-search"><span class="correo-search-icon">${icon("search")}</span><input type="search" autocomplete="off" placeholder="Buscar" aria-label="Buscar en Outlook" data-correo-search value="${attr(input.searchTerm || "")}"><kbd>⌘ K</kbd></label>
-        <div class="correo-filter-row" aria-label="Filtros">${filterButton("all", "Todos", input.activeFilter)}${filterButton("unread", "No leídos", input.activeFilter)}${filterButton("flagged", "Destacados", input.activeFilter)}</div>
+        <div class="correo-list-toolbar">
+          <div class="correo-filter-row" aria-label="Filtros">${filterButton("all", "Todos", input.activeFilter)}${filterButton("unread", "No leídos", input.activeFilter)}${filterButton("flagged", "Destacados", input.activeFilter)}</div>
+          <div class="correo-list-utilities">
+            <button class="correo-icon-btn" type="button" data-correo-action="refresh" aria-label="Actualizar" title="Actualizar">${icon("refresh")}</button>
+            <button class="correo-btn correo-btn--primary correo-btn--compact" type="button" data-correo-action="compose">${icon("edit")}<span>Nuevo correo</span></button>
+          </div>
+        </div>
         <div class="correo-message-list" data-correo-message-list aria-busy="${loadingMessages || loadingMore ? "true" : "false"}">${loadingMessages ? renderMessageSkeletons() : renderMessageRows(messages, selectedMessageId)}${loadingMore ? `<div class="correo-infinite-loader">${icon("spinner")}<span>Cargando correos anteriores…</span></div>` : ""}</div>
         <div class="correo-infinite-sentinel" data-correo-infinite-sentinel aria-hidden="true"></div>
       </section>

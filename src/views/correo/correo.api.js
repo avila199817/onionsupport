@@ -14,7 +14,29 @@
 
 import Http from "../../core/http.js";
 
-export const CORREO_API_VERSION = "correo.api.microsoft.production.v1";
+/*
+  Preferencia local por defecto: activada.
+  El permiso real sigue perteneciendo al navegador y NO puede saltarse:
+  si Notification.permission === "default", el usuario deberá concederlo
+  una vez desde el menú de cuenta. Si ya está concedido, Correo arranca
+  notificando automáticamente sin volver a exigir activación manual.
+*/
+const CORREO_NOTIFICATION_PREF_KEY = "onion.correo.notifications.v1";
+
+function primeNotificationPreference() {
+  if (typeof window === "undefined" || !("Notification" in window)) return;
+  try {
+    if (window.localStorage.getItem(CORREO_NOTIFICATION_PREF_KEY) === null) {
+      window.localStorage.setItem(CORREO_NOTIFICATION_PREF_KEY, "1");
+    }
+  } catch {
+    // La preferencia de UI no puede bloquear el cliente de correo.
+  }
+}
+
+primeNotificationPreference();
+
+export const CORREO_API_VERSION = "correo.api.microsoft.production.v2-default-notifications";
 export const MICROSOFT_ENDPOINT = "/api/microsoft";
 
 const DEFAULT_TIMEOUT = 20000;

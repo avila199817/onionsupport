@@ -4,57 +4,73 @@
 
    Scope:
    - Sólo .public-home / .public-auth-shell--home.
-   - Complementa el CSS consolidado de la landing.
    - Formulario público de alta + incidencia.
+   - La política anti-duplicados sigue activa en JS/backend,
+     pero no se expone como bloque informativo permanente.
    - Identidad autenticada en "Panel cliente".
 ========================================================= */
 
 @layer auth {
 
 /* =========================================================
-   1. SECTION / LAYOUT
+   1. SECTION / PREMIUM SHELL
 ========================================================= */
 
 .public-home .public-support-section {
-  padding-block: clamp(72px, 8vw, 122px);
+  padding-block: clamp(76px, 8vw, 132px);
 }
 
 .public-home .public-support-layout {
   position: relative;
+  isolation: isolate;
   display: grid;
-  grid-template-columns: minmax(0, .82fr) minmax(560px, 1.18fr);
-  gap: clamp(28px, 4vw, 68px);
+  grid-template-columns: minmax(0, .80fr) minmax(560px, 1.20fr);
+  gap: clamp(34px, 4.5vw, 76px);
   align-items: start;
 
-  padding: clamp(22px, 3vw, 42px);
-
-  border: 1px solid rgb(255 255 255 / .12);
-  border-radius: var(--public-home-radius-xl);
-
-  background:
-    radial-gradient(circle at 8% 5%, rgb(52 212 255 / .12), transparent 28%),
-    radial-gradient(circle at 95% 84%, rgb(19 148 255 / .15), transparent 34%),
-    linear-gradient(145deg, rgb(8 19 36 / .88), rgb(5 12 24 / .95));
-
-  box-shadow:
-    0 34px 110px rgb(0 0 0 / .38),
-    inset 0 1px 0 rgb(255 255 255 / .08);
+  padding: clamp(28px, 3.5vw, 54px);
 
   overflow: hidden;
+  border: 1px solid rgb(112 210 255 / .16);
+  border-radius: clamp(30px, 3vw, 46px);
+
+  background:
+    radial-gradient(circle at 5% 4%, rgb(52 212 255 / .14), transparent 28%),
+    radial-gradient(circle at 94% 92%, rgb(16 112 255 / .18), transparent 36%),
+    linear-gradient(145deg, rgb(8 22 40 / .94), rgb(3 10 23 / .985));
+
+  box-shadow:
+    0 54px 160px rgb(0 0 0 / .46),
+    0 0 0 1px rgb(0 149 255 / .025),
+    inset 0 1px 0 rgb(255 255 255 / .09);
+}
+
+.public-home .public-support-layout::before,
+.public-home .public-support-layout::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
 }
 
 .public-home .public-support-layout::before {
-  content: "";
-  position: absolute;
   inset: 0;
-  pointer-events: none;
+  z-index: -2;
   background:
-    linear-gradient(90deg, rgb(255 255 255 / .025) 1px, transparent 1px),
-    linear-gradient(180deg, rgb(255 255 255 / .022) 1px, transparent 1px);
-  background-size: 42px 42px;
-  mask-image: linear-gradient(90deg, black, transparent 72%);
-  -webkit-mask-image: linear-gradient(90deg, black, transparent 72%);
-  opacity: .42;
+    linear-gradient(90deg, rgb(255 255 255 / .022) 1px, transparent 1px),
+    linear-gradient(180deg, rgb(255 255 255 / .018) 1px, transparent 1px);
+  background-size: 46px 46px;
+  mask-image: linear-gradient(105deg, black 0%, rgb(0 0 0 / .58) 38%, transparent 78%);
+  -webkit-mask-image: linear-gradient(105deg, black 0%, rgb(0 0 0 / .58) 38%, transparent 78%);
+  opacity: .55;
+}
+
+.public-home .public-support-layout::after {
+  z-index: -1;
+  inset: -1px;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 50% -18%, rgb(119 224 255 / .09), transparent 32%),
+    linear-gradient(115deg, transparent 5%, rgb(76 201 255 / .06) 43%, transparent 68%);
 }
 
 .public-home .public-support-intro,
@@ -63,29 +79,51 @@
   z-index: 1;
 }
 
+/* =========================================================
+   2. LEFT COLUMN / NARRATIVE
+========================================================= */
+
 .public-home .public-support-intro {
   position: sticky;
-  inset-block-start: calc(var(--public-home-scroll-offset) + 12px);
+  inset-block-start: calc(var(--public-home-scroll-offset) + 16px);
   display: grid;
-  gap: 18px;
-  padding: clamp(8px, 1.2vw, 18px);
+  gap: 20px;
+  padding: clamp(10px, 1.5vw, 20px);
+}
+
+.public-home .public-support-intro .public-home-price-eyebrow {
+  width: max-content;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid rgb(52 212 255 / .15);
+  border-radius: 999px;
+  color: #7de7ff;
+  background: rgb(15 139 211 / .07);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .035);
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: .13em;
+  text-transform: uppercase;
 }
 
 .public-home .public-support-intro h2 {
-  max-inline-size: 12ch;
+  max-inline-size: 10.5ch;
   margin: 0;
   color: var(--public-home-text-strong);
-  font-size: clamp(38px, 5vw, 72px);
-  line-height: .97;
-  letter-spacing: -.06em;
+  font-size: clamp(44px, 5.3vw, 78px);
+  font-weight: 950;
+  line-height: .93;
+  letter-spacing: -.066em;
+  text-wrap: balance;
+  text-shadow: 0 20px 48px rgb(0 0 0 / .18);
 }
 
 .public-home .public-support-lead {
-  max-inline-size: 58ch;
+  max-inline-size: 55ch;
   margin: 0;
-  color: var(--public-home-text-soft);
-  font-size: clamp(16px, 1.45vw, 19px);
-  line-height: 1.7;
+  color: #b9c9dc;
+  font-size: clamp(16px, 1.42vw, 19px);
+  line-height: 1.72;
 }
 
 .public-home .public-support-flow {
@@ -95,32 +133,61 @@
 }
 
 .public-home .public-support-flow-item {
+  position: relative;
   display: grid;
-  grid-template-columns: 46px minmax(0, 1fr);
+  grid-template-columns: 44px minmax(0, 1fr);
   gap: 14px;
-  align-items: start;
+  align-items: center;
 
-  padding: 14px;
+  padding: 13px 15px;
 
-  border: 1px solid rgb(255 255 255 / .08);
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / .075);
   border-radius: 17px;
-  background: rgb(255 255 255 / .035);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / .038), rgb(255 255 255 / .018)),
+    rgb(5 14 28 / .56);
+
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .035),
+    0 12px 28px rgb(0 0 0 / .10);
+
+  transition:
+    transform .18s ease,
+    border-color .18s ease,
+    background .18s ease,
+    box-shadow .18s ease;
+}
+
+.public-home .public-support-flow-item:hover {
+  transform: translateX(3px);
+  border-color: rgb(73 207 255 / .16);
+  background:
+    linear-gradient(180deg, rgb(52 212 255 / .045), rgb(255 255 255 / .018)),
+    rgb(5 15 30 / .66);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .045),
+    0 16px 34px rgb(0 0 0 / .13);
 }
 
 .public-home .public-support-flow-item > span {
   display: grid;
   place-items: center;
 
-  inline-size: 42px;
-  block-size: 42px;
+  inline-size: 40px;
+  block-size: 40px;
 
-  border: 1px solid rgb(52 212 255 / .28);
-  border-radius: 13px;
+  border: 1px solid rgb(52 212 255 / .24);
+  border-radius: 12px;
 
-  color: #9eeeff;
-  background: rgb(19 148 255 / .09);
+  color: #9ceeff;
+  background:
+    radial-gradient(circle at 30% 20%, rgb(255 255 255 / .09), transparent 40%),
+    rgb(14 122 192 / .10);
 
-  font-size: 12px;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .04);
+
+  font-size: 11px;
   font-weight: 950;
   letter-spacing: .08em;
 }
@@ -128,55 +195,104 @@
 .public-home .public-support-flow-item strong {
   display: block;
   margin-block-end: 3px;
-  color: #ffffff;
-  font-size: 14px;
+  color: #f8fbff;
+  font-size: 13px;
   font-weight: 900;
+  letter-spacing: -.012em;
 }
 
 .public-home .public-support-flow-item p {
   margin: 0;
-  color: var(--public-home-text-muted);
-  font-size: 13px;
-  line-height: 1.55;
+  color: #7f92aa;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .public-home .public-support-privacy {
-  margin: 4px 0 0;
-  color: var(--public-home-text-muted);
-  font-size: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 5px 0 0;
+  color: #71849c;
+  font-size: 11px;
   line-height: 1.55;
 }
 
+.public-home .public-support-privacy::before {
+  content: "";
+  flex: 0 0 5px;
+  inline-size: 5px;
+  block-size: 5px;
+  margin-block-start: .55em;
+  border-radius: 999px;
+  background: #44d7ff;
+  box-shadow: 0 0 12px rgb(68 215 255 / .50);
+}
+
 /* =========================================================
-   2. FORM PANEL
+   3. FORM PANEL — EXTREME PASS
 ========================================================= */
 
 .public-home .public-support-form {
+  position: relative;
+  isolation: isolate;
   display: grid;
-  gap: 24px;
+  gap: 27px;
 
-  padding: clamp(20px, 2.4vw, 34px);
+  padding: clamp(24px, 2.7vw, 38px);
 
-  border: 1px solid rgb(98 202 255 / .19);
-  border-radius: clamp(22px, 2.3vw, 30px);
+  overflow: hidden;
+  border: 1px solid rgb(108 214 255 / .20);
+  border-radius: clamp(25px, 2.5vw, 34px);
 
   background:
-    radial-gradient(circle at 100% 0%, rgb(52 212 255 / .08), transparent 28%),
-    rgb(3 10 22 / .82);
+    radial-gradient(circle at 97% 0%, rgb(54 211 255 / .105), transparent 27%),
+    radial-gradient(circle at 0% 100%, rgb(24 103 255 / .07), transparent 34%),
+    linear-gradient(158deg, rgb(5 16 32 / .94), rgb(1 8 19 / .965));
 
   box-shadow:
-    0 24px 72px rgb(0 0 0 / .34),
-    inset 0 1px 0 rgb(255 255 255 / .07);
+    0 34px 92px rgb(0 0 0 / .42),
+    0 0 70px rgb(9 121 255 / .045),
+    inset 0 1px 0 rgb(255 255 255 / .075),
+    inset 0 0 0 1px rgb(255 255 255 / .012);
 
-  backdrop-filter: blur(18px) saturate(1.08);
-  -webkit-backdrop-filter: blur(18px) saturate(1.08);
+  backdrop-filter: blur(22px) saturate(1.12);
+  -webkit-backdrop-filter: blur(22px) saturate(1.12);
+}
+
+.public-home .public-support-form::before {
+  content: "";
+  position: absolute;
+  inset: 0 12% auto;
+  z-index: -1;
+  block-size: 1px;
+  background: linear-gradient(90deg, transparent, rgb(106 221 255 / .48), transparent);
+  opacity: .76;
+}
+
+.public-home .public-support-form::after {
+  content: "";
+  position: absolute;
+  z-index: -2;
+  inline-size: 190px;
+  block-size: 190px;
+  inset: -125px -55px auto auto;
+  border-radius: 999px;
+  background: rgb(40 201 255 / .10);
+  filter: blur(42px);
+}
+
+/* El backend sigue aplicando la política. No se muestra como advertencia fija. */
+.public-home .public-support-form [data-public-support-one-open-policy="true"] {
+  display: none !important;
 }
 
 .public-home .public-support-form-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: 20px;
+  padding-block-end: 3px;
 }
 
 .public-home .public-support-form-head > div {
@@ -184,45 +300,73 @@
 }
 
 .public-home .public-support-kicker {
-  display: block;
-  margin-block-end: 6px;
-  color: var(--public-home-accent-2);
-  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-block-end: 8px;
+  color: #54ddff;
+  font-size: 10px;
   font-weight: 950;
-  letter-spacing: .12em;
+  letter-spacing: .14em;
   text-transform: uppercase;
+}
+
+.public-home .public-support-kicker::before {
+  content: "";
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: 50%;
+  background: #4fe4ff;
+  box-shadow: 0 0 0 4px rgb(79 228 255 / .06), 0 0 16px rgb(79 228 255 / .52);
 }
 
 .public-home .public-support-form-head h3 {
   margin: 0;
   color: #ffffff;
-  font-size: clamp(26px, 3vw, 38px);
-  line-height: 1;
-  letter-spacing: -.045em;
+  font-size: clamp(31px, 3vw, 43px);
+  font-weight: 950;
+  line-height: .98;
+  letter-spacing: -.052em;
+  text-wrap: balance;
 }
 
 .public-home .public-support-secure {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
+  gap: 7px;
   min-block-size: 34px;
   padding-inline: 12px;
 
-  border: 1px solid rgb(52 212 255 / .20);
+  border: 1px solid rgb(73 211 255 / .17);
   border-radius: 999px;
 
-  color: #a8efff;
-  background: rgb(19 148 255 / .08);
+  color: #9beaff;
+  background:
+    linear-gradient(180deg, rgb(49 211 255 / .07), rgb(49 211 255 / .025)),
+    rgb(5 24 39 / .52);
 
-  font-size: 11px;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .035);
+
+  font-size: 10px;
   font-weight: 850;
   letter-spacing: .035em;
+  white-space: nowrap;
+}
+
+.public-home .public-support-secure::before {
+  content: "";
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: 999px;
+  background: #53dcae;
+  box-shadow: 0 0 10px rgb(83 220 174 / .50);
 }
 
 .public-home .public-support-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
+  gap: 19px 18px;
 }
 
 .public-home .public-support-field {
@@ -236,10 +380,12 @@
 }
 
 .public-home .public-support-field label {
-  color: #ddecff;
-  font-size: 13px;
-  font-weight: 850;
-  letter-spacing: -.01em;
+  width: max-content;
+  color: #c7d7e9;
+  font-size: 11px;
+  font-weight: 880;
+  line-height: 1.2;
+  letter-spacing: .015em;
 }
 
 .public-home .public-support-field input,
@@ -247,19 +393,20 @@
   inline-size: 100%;
   min-inline-size: 0;
 
-  border: 1px solid rgb(255 255 255 / .12);
+  outline: none;
+  border: 1px solid rgb(255 255 255 / .105);
   border-radius: 15px;
 
-  color: #ffffff;
+  color: #f9fcff;
   background:
-    linear-gradient(180deg, rgb(255 255 255 / .045), rgb(255 255 255 / .022)),
-    rgb(1 7 16 / .72);
+    linear-gradient(180deg, rgb(255 255 255 / .038), rgb(255 255 255 / .017)),
+    rgb(1 8 18 / .84);
 
   box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / .035),
-    0 10px 26px rgb(0 0 0 / .12);
+    inset 0 1px 0 rgb(255 255 255 / .026),
+    0 8px 22px rgb(0 0 0 / .09);
 
-  caret-color: var(--public-home-accent-2);
+  caret-color: #56ddff;
 
   transition:
     border-color .18s ease,
@@ -269,38 +416,42 @@
 }
 
 .public-home .public-support-field input {
-  min-block-size: 54px;
-  padding: 0 15px;
+  min-block-size: 57px;
+  padding: 0 16px;
 }
 
 .public-home .public-support-field textarea {
-  min-block-size: 176px;
-  padding: 15px;
+  min-block-size: 192px;
+  padding: 16px;
   resize: vertical;
-  line-height: 1.55;
+  line-height: 1.6;
 }
 
 .public-home .public-support-field input::placeholder,
 .public-home .public-support-field textarea::placeholder {
-  color: #65758c;
+  color: #607188;
   opacity: 1;
 }
 
 .public-home .public-support-field input:hover,
 .public-home .public-support-field textarea:hover {
-  border-color: rgb(98 202 255 / .25);
+  border-color: rgb(94 213 255 / .23);
   background:
-    linear-gradient(180deg, rgb(255 255 255 / .055), rgb(255 255 255 / .027)),
-    rgb(1 8 18 / .80);
+    linear-gradient(180deg, rgb(255 255 255 / .047), rgb(255 255 255 / .021)),
+    rgb(1 9 21 / .90);
 }
 
 .public-home .public-support-field input:focus,
 .public-home .public-support-field textarea:focus {
-  border-color: rgb(52 212 255 / .54);
-  background: rgb(3 12 27 / .94);
+  transform: translateY(-1px);
+  border-color: rgb(64 215 255 / .58);
+  background:
+    radial-gradient(circle at 96% 0%, rgb(64 215 255 / .035), transparent 30%),
+    rgb(2 12 27 / .97);
   box-shadow:
-    0 0 0 4px rgb(19 148 255 / .11),
-    0 14px 34px rgb(0 0 0 / .18),
+    0 0 0 4px rgb(23 161 255 / .09),
+    0 17px 38px rgb(0 0 0 / .18),
+    0 0 26px rgb(42 190 255 / .045),
     inset 0 1px 0 rgb(255 255 255 / .045);
 }
 
@@ -308,24 +459,24 @@
 .public-home .public-support-field textarea.is-invalid,
 .public-home .public-support-field input[aria-invalid="true"],
 .public-home .public-support-field textarea[aria-invalid="true"] {
-  border-color: rgb(255 92 117 / .66);
+  border-color: rgb(255 92 117 / .62);
   box-shadow:
-    0 0 0 4px rgb(255 92 117 / .09),
-    inset 0 1px 0 rgb(255 255 255 / .035);
+    0 0 0 4px rgb(255 92 117 / .08),
+    inset 0 1px 0 rgb(255 255 255 / .03);
 }
 
 .public-home .public-support-field input:-webkit-autofill,
 .public-home .public-support-field input:-webkit-autofill:hover,
 .public-home .public-support-field input:-webkit-autofill:focus {
   -webkit-text-fill-color: #ffffff;
-  box-shadow: 0 0 0 1000px #071426 inset;
+  box-shadow: 0 0 0 1000px #061325 inset;
   caret-color: #ffffff;
 }
 
 .public-home .public-support-error {
-  color: #ff9aad;
-  font-size: 12px;
-  font-weight: 720;
+  color: #ff9aab;
+  font-size: 11px;
+  font-weight: 760;
   line-height: 1.4;
 }
 
@@ -333,47 +484,84 @@
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  color: var(--public-home-text-muted);
-  font-size: 11px;
+  color: #687b92;
+  font-size: 10px;
   line-height: 1.45;
 }
 
+.public-home .public-support-field-meta [data-public-support-counter] {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
 /* =========================================================
-   3. SUBMIT / STATUS
+   4. SUBMIT / FEEDBACK
 ========================================================= */
 
 .public-home .public-support-submit-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 18px;
-  align-items: center;
+  gap: 12px;
+  align-items: stretch;
 }
 
 .public-home .public-support-status {
+  position: relative;
   min-inline-size: 0;
-  padding: 12px 14px;
+  padding: 13px 15px 13px 39px;
 
-  border: 1px solid rgb(255 255 255 / .10);
+  border: 1px solid rgb(84 207 255 / .14);
   border-radius: 14px;
 
-  color: var(--public-home-text-soft);
-  background: rgb(255 255 255 / .035);
+  color: #aebfd2;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / .028), transparent),
+    rgb(6 19 34 / .70);
 
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 720;
   line-height: 1.5;
 }
 
+.public-home .public-support-status::before {
+  content: "i";
+  position: absolute;
+  inset-inline-start: 14px;
+  inset-block-start: 50%;
+  display: grid;
+  place-items: center;
+  inline-size: 16px;
+  block-size: 16px;
+  translate: 0 -50%;
+  border: 1px solid rgb(113 220 255 / .28);
+  border-radius: 999px;
+  color: #8fe9ff;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 950;
+}
+
 .public-home .public-support-status[data-status="success"] {
-  color: #bfffd4;
-  border-color: rgb(37 211 102 / .28);
-  background: rgb(37 211 102 / .08);
+  color: #bff4d3;
+  border-color: rgb(58 213 123 / .22);
+  background: rgb(40 180 100 / .07);
+}
+
+.public-home .public-support-status[data-status="success"]::before {
+  content: "✓";
+  color: #9ef0bd;
+  border-color: rgb(80 224 139 / .28);
 }
 
 .public-home .public-support-status[data-status="error"] {
   color: #ffc0ca;
-  border-color: rgb(255 92 117 / .32);
-  background: rgb(255 92 117 / .08);
+  border-color: rgb(255 92 117 / .28);
+  background: rgb(255 92 117 / .07);
+}
+
+.public-home .public-support-status[data-status="error"]::before {
+  content: "!";
+  color: #ff9dae;
+  border-color: rgb(255 115 138 / .32);
 }
 
 .public-home .public-support-submit {
@@ -385,30 +573,33 @@
   justify-content: center;
   gap: 12px;
 
-  min-block-size: 54px;
-  padding: 0 22px;
+  inline-size: 100%;
+  min-block-size: 58px;
+  padding: 0 24px;
 
   overflow: hidden;
-  border: 1px solid rgb(255 255 255 / .18);
+  border: 1px solid rgb(255 255 255 / .19);
   border-radius: 16px;
 
   color: #ffffff;
   background:
-    radial-gradient(circle at 24% 0%, rgb(255 255 255 / .32), transparent 36%),
-    linear-gradient(135deg, var(--public-home-accent), var(--public-home-accent-3));
+    radial-gradient(circle at 22% -30%, rgb(255 255 255 / .50), transparent 42%),
+    linear-gradient(112deg, #1599ff 0%, #1475ff 46%, #1457f5 100%);
 
   box-shadow:
-    0 18px 42px rgb(19 148 255 / .26),
-    inset 0 1px 0 rgb(255 255 255 / .22);
+    0 22px 54px rgb(15 111 255 / .27),
+    0 5px 18px rgb(0 0 0 / .22),
+    inset 0 1px 0 rgb(255 255 255 / .28);
 
-  font-size: 14px;
-  font-weight: 930;
-  letter-spacing: -.018em;
+  font-size: 13px;
+  font-weight: 950;
+  letter-spacing: -.012em;
   cursor: pointer;
 
   transition:
     transform .18s ease,
     filter .18s ease,
+    border-color .18s ease,
     box-shadow .18s ease,
     opacity .18s ease;
 }
@@ -416,43 +607,71 @@
 .public-home .public-support-submit::before {
   content: "";
   position: absolute;
-  inset: -80% -38%;
+  inset: -90% -42%;
   z-index: -1;
-  background:
-    linear-gradient(115deg, transparent 40%, rgb(255 255 255 / .24), transparent 60%);
-  transform: translateX(-64%);
-  transition: transform .55s ease;
+  background: linear-gradient(110deg, transparent 38%, rgb(255 255 255 / .28), transparent 60%);
+  transform: translateX(-62%);
+  transition: transform .62s cubic-bezier(.22, .72, .18, 1);
+}
+
+.public-home .public-support-submit::after {
+  content: "";
+  position: absolute;
+  inset: auto 12% -18px;
+  z-index: -2;
+  block-size: 28px;
+  border-radius: 50%;
+  background: rgb(24 125 255 / .30);
+  filter: blur(18px);
 }
 
 .public-home .public-support-submit:hover:not(:disabled) {
   transform: translateY(-2px);
-  filter: saturate(1.12);
+  filter: saturate(1.08) brightness(1.035);
+  border-color: rgb(255 255 255 / .28);
   box-shadow:
-    0 22px 52px rgb(19 148 255 / .34),
-    inset 0 1px 0 rgb(255 255 255 / .26);
+    0 27px 62px rgb(15 111 255 / .34),
+    0 7px 20px rgb(0 0 0 / .22),
+    inset 0 1px 0 rgb(255 255 255 / .31);
 }
 
 .public-home .public-support-submit:hover:not(:disabled)::before {
   transform: translateX(64%);
 }
 
+.public-home .public-support-submit:active:not(:disabled) {
+  transform: translateY(0);
+}
+
 .public-home .public-support-submit:disabled {
-  opacity: .64;
+  opacity: .62;
   cursor: wait;
 }
 
 .public-home .public-support-submit-arrow {
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1;
   transition: transform .18s ease;
 }
 
 .public-home .public-support-submit:hover:not(:disabled) .public-support-submit-arrow {
-  transform: translateX(3px);
+  transform: translateX(4px);
 }
 
 .public-home .public-support-form.is-submitting {
   cursor: progress;
+}
+
+.public-home .public-support-form.has-active-ticket .public-support-submit {
+  color: #b8c8da;
+  border-color: rgb(255 255 255 / .09);
+  background: rgb(255 255 255 / .045);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .035);
+}
+
+.public-home .public-support-form.has-active-ticket .public-support-submit::before,
+.public-home .public-support-form.has-active-ticket .public-support-submit::after {
+  display: none;
 }
 
 .public-home .public-support-honeypot {
@@ -465,7 +684,7 @@
 }
 
 /* =========================================================
-   4. AUTHENTICATED ACCOUNT PILL
+   5. AUTHENTICATED ACCOUNT PILL
 ========================================================= */
 
 .public-home [data-public-home-login].public-support-account-link {
@@ -579,33 +798,38 @@
 }
 
 /* =========================================================
-   5. RESPONSIVE
+   6. RESPONSIVE
 ========================================================= */
 
 @media (max-width: 1180px) {
   .public-home .public-support-layout {
-    grid-template-columns: minmax(0, .7fr) minmax(500px, 1.3fr);
-    gap: 28px;
+    grid-template-columns: minmax(0, .72fr) minmax(500px, 1.28fr);
+    gap: 32px;
   }
 
   .public-home .public-support-intro h2 {
-    font-size: clamp(36px, 5vw, 58px);
+    font-size: clamp(40px, 5vw, 62px);
   }
 }
 
 @media (max-width: 980px) {
   .public-home .public-support-layout {
     grid-template-columns: 1fr;
+    gap: 30px;
   }
 
   .public-home .public-support-intro {
     position: relative;
     inset-block-start: auto;
-    padding: 4px;
+    padding: 6px;
   }
 
   .public-home .public-support-intro h2 {
-    max-inline-size: 15ch;
+    max-inline-size: 13ch;
+  }
+
+  .public-home .public-support-lead {
+    max-inline-size: 66ch;
   }
 
   .public-home .public-support-flow {
@@ -614,63 +838,70 @@
 
   .public-home .public-support-flow-item {
     grid-template-columns: 1fr;
+    align-content: start;
+    min-block-size: 128px;
+  }
+
+  .public-home .public-support-flow-item:hover {
+    transform: translateY(-2px);
   }
 
   .public-home .public-support-flow-item > span {
-    inline-size: 38px;
-    block-size: 38px;
+    inline-size: 36px;
+    block-size: 36px;
   }
 }
 
 @media (max-width: 720px) {
   .public-home .public-support-section {
-    padding-block: 54px;
+    padding-block: 56px;
   }
 
   .public-home .public-support-layout {
     gap: 22px;
-    padding: 16px;
-    border-radius: 26px;
+    padding: 17px;
+    border-radius: 27px;
   }
 
   .public-home .public-support-intro {
-    gap: 14px;
+    gap: 15px;
     padding: 8px;
   }
 
   .public-home .public-support-intro h2 {
-    font-size: clamp(34px, 11vw, 52px);
+    font-size: clamp(38px, 11vw, 54px);
   }
 
   .public-home .public-support-flow {
     grid-template-columns: 1fr;
   }
 
+  .public-home .public-support-flow-item {
+    grid-template-columns: 40px minmax(0, 1fr);
+    min-block-size: 0;
+  }
+
   .public-home .public-support-form {
-    gap: 20px;
-    padding: 18px;
-    border-radius: 22px;
+    gap: 23px;
+    padding: 20px;
+    border-radius: 23px;
   }
 
   .public-home .public-support-grid {
     grid-template-columns: 1fr;
-    gap: 15px;
+    gap: 16px;
   }
 
   .public-home .public-support-field--wide {
     grid-column: auto;
   }
 
-  .public-home .public-support-submit-row {
-    grid-template-columns: 1fr;
+  .public-home .public-support-field input {
+    min-block-size: 55px;
   }
 
-  .public-home .public-support-submit {
-    inline-size: 100%;
-  }
-
-  .public-home .public-support-field-meta {
-    align-items: flex-start;
+  .public-home .public-support-field textarea {
+    min-block-size: 172px;
   }
 
   .public-home .public-support-form-head {
@@ -678,9 +909,9 @@
   }
 
   .public-home .public-support-secure {
-    min-block-size: 30px;
-    padding-inline: 9px;
-    font-size: 10px;
+    min-block-size: 31px;
+    padding-inline: 10px;
+    font-size: 9px;
   }
 
   .public-home [data-public-home-login].public-support-account-link {
@@ -695,25 +926,26 @@
   }
 
   .public-home .public-support-form {
-    padding: 15px;
+    padding: 17px;
   }
 
   .public-home .public-support-form-head {
     display: grid;
     justify-items: start;
+    gap: 13px;
   }
 
-  .public-home .public-support-field input {
-    min-block-size: 52px;
-  }
-
-  .public-home .public-support-field textarea {
-    min-block-size: 160px;
+  .public-home .public-support-form-head h3 {
+    font-size: clamp(30px, 10vw, 38px);
   }
 
   .public-home .public-support-field-meta {
     display: grid;
     gap: 4px;
+  }
+
+  .public-home .public-support-status {
+    padding-inline-end: 12px;
   }
 }
 
@@ -722,6 +954,7 @@
   .public-home .public-support-submit::before,
   .public-home .public-support-submit-arrow,
   .public-home [data-public-home-login].public-support-account-link,
+  .public-home .public-support-flow-item,
   .public-home .public-support-field input,
   .public-home .public-support-field textarea {
     transition: none;

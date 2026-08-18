@@ -5,10 +5,27 @@
    Scope:
    - sólo landing pública;
    - conserva el drawer móvil compacto por contenido;
-   - no añade ni duplica identidad de usuario en la top bar.
+   - no añade ni duplica identidad de usuario en la top bar;
+   - deja el CTA principal del topbar limpio, sin icono.
 ========================================================= */
 
 @layer auth {
+
+/*
+   CTA del topbar:
+   - texto puro para reducir ruido visual;
+   - el SVG se mantiene fuera de la composición aunque el template
+     o el enhancer lo hayan creado antes del retarget final;
+   - padding recalibrado para que el botón conserve peso visual.
+*/
+.public-home .public-home-nav-cta {
+  gap: 0;
+  padding-inline: 23px;
+}
+
+.public-home .public-home-nav-cta > svg {
+  display: none;
+}
 
 @media (max-width: 1040px) {
   .public-home .public-home-nav-panel {
@@ -33,6 +50,7 @@
 
   .public-home .public-home-nav-panel .public-home-nav-cta {
     justify-content: flex-start;
+    padding-inline: 18px;
   }
 }
 

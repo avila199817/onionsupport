@@ -7,7 +7,7 @@
    - Dropdown autenticado con accesos rápidos y cierre de sesión.
    - Nombre compacto: "Nombre I." preservando tildes.
    - Footer sin login/cuenta.
-   - Teléfono con placeholder gris y formato +34 XXX XXX XXX al escribir.
+   - Teléfono España con bandera + prefijo +34 permanentes y ejemplo nativo.
    - SVGs inline afinados sin alterar su semántica.
 ========================================================= */
 
@@ -24,10 +24,12 @@ const ACCOUNT_WRAP = "[data-public-home-account-wrap]";
 const ACCOUNT_MENU = "[data-public-home-account-menu]";
 const ACCOUNT_TOGGLE = "[data-public-home-account-toggle]";
 const LOGOUT_ACTION = "[data-public-home-logout]";
+const PHONE_CONTROL = "[data-public-support-phone-control]";
 
 const SPAIN_PREFIX = "+34";
 const SPAIN_PHONE_DEFAULT = "+34 ";
-const PHONE_PLACEHOLDER = "Ejemplo: +34 612 345 678";
+const PHONE_PLACEHOLDER = "612 345 678";
+const PHONE_EXAMPLE = "+34 612 345 678";
 
 let observer = null;
 let retryTimer = 0;
@@ -372,21 +374,18 @@ function nationalSpanishDigits(value = "") {
   return digits.slice(0, 9);
 }
 
-function formatSpanishPhoneInput(value = "") {
-  const raw = String(value ?? "");
-
-  if (!text(raw) || text(raw) === SPAIN_PREFIX) return "";
-
-  const digits = nationalSpanishDigits(raw);
+function formatNationalPhone(value = "") {
+  const digits = nationalSpanishDigits(value);
   if (!digits) return "";
 
-  const groups = [
-    digits.slice(0, 3),
-    digits.slice(3, 6),
-    digits.slice(6, 9),
-  ].filter(Boolean);
+  return [digits.slice(0, 3), digits.slice(3, 6), digits.slice(6, 9)]
+    .filter(Boolean)
+    .join(" ");
+}
 
-  return `${SPAIN_PREFIX} ${groups.join(" ")}`;
+function formatSpanishPhoneInput(value = "") {
+  const national = formatNationalPhone(value);
+  return national ? `${SPAIN_PREFIX} ${national}` : SPAIN_PREFIX;
 }
 
 function nationalDigitsBeforeCaret(value = "", caret = 0) {
@@ -395,17 +394,11 @@ function nationalDigitsBeforeCaret(value = "", caret = 0) {
 }
 
 function caretForNationalCount(formatted = "", count = 0) {
-  if (!formatted) return 0;
-
-  const start = formatted.startsWith(SPAIN_PHONE_DEFAULT)
-    ? SPAIN_PHONE_DEFAULT.length
-    : 0;
-
-  if (count <= 0) return start;
+  if (!formatted || count <= 0) return 0;
 
   let seen = 0;
 
-  for (let index = start; index < formatted.length; index += 1) {
+  for (let index = 0; index < formatted.length; index += 1) {
     if (!/\d/.test(formatted[index])) continue;
     seen += 1;
     if (seen >= count) return index + 1;
@@ -424,8 +417,7 @@ function formatPhoneControl(input = null, keepCaret = true) {
     selectionStart === null
       ? null
       : nationalDigitsBeforeCaret(raw, selectionStart);
-
-  const formatted = formatSpanishPhoneInput(raw);
+  const formatted = formatNationalPhone(raw);
 
   if (raw !== formatted) input.value = formatted;
 
@@ -469,6 +461,39 @@ function removeLegacyPhoneHelp(field = null) {
   return changed;
 }
 
+function createPhonePrefix() {
+  const prefix = document.createElement("span");
+  prefix.className = "public-support-phone-prefix";
+  prefix.dataset.publicSupportPhonePrefix = "true";
+  prefix.setAttribute("aria-hidden", "true");
+
+  const flag = document.createElement("span");
+  flag.className = "public-support-phone-flag";
+
+  const code = document.createElement("span");
+  code.className = "public-support-phone-code";
+  code.textContent = SPAIN_PREFIX;
+
+  prefix.append(flag, code);
+  return prefix;
+}
+
+function ensurePhoneControl(input = null) {
+  if (!input) return null;
+
+  let control = input.closest(PHONE_CONTROL);
+  if (control) return control;
+
+  control = document.createElement("div");
+  control.className = "public-support-phone-control";
+  control.dataset.publicSupportPhoneControl = "true";
+
+  input.parentNode?.insertBefore(control, input);
+  control.append(createPhonePrefix(), input);
+
+  return control;
+}
+
 function enhancePhone(root = null) {
   const input = root?.querySelector?.(PHONE);
   if (!input) return false;
@@ -476,22 +501,23 @@ function enhancePhone(root = null) {
   const field = input.closest(".public-support-field");
   removeLegacyPhoneHelp(field);
 
-  field?.classList.add("public-support-field--phone-clean");
+  field?.classList.remove("public-support-field--phone-clean");
+  field?.classList.add("public-support-field--phone-prefix");
+
+  ensurePhoneControl(input);
 
   input.placeholder = PHONE_PLACEHOLDER;
+  input.maxLength = 11;
+  input.inputMode = "tel";
+  input.autocomplete = "tel-national";
   input.removeAttribute("title");
   input.setAttribute(
     "aria-label",
-    "Teléfono de España. Ejemplo: +34 612 345 678"
+    `Teléfono de España. Prefijo ${SPAIN_PREFIX} permanente. Ejemplo: ${PHONE_EXAMPLE}`
   );
-  input.dataset.publicSupportPhoneEnhanced = "clean-placeholder";
+  input.dataset.publicSupportPhoneEnhanced = "permanent-es-prefix";
 
-  if (!text(input.value) || text(input.value) === SPAIN_PREFIX) {
-    input.value = "";
-  } else {
-    formatPhoneControl(input, false);
-  }
-
+  formatPhoneControl(input, false);
   return true;
 }
 
@@ -592,6 +618,26 @@ function onDocumentClick(event) {
   const target = event?.target;
   if (!target?.closest) return;
 
+  const phoneControl = target.closest(PHONE_CONTROL);
+
+  if (phoneControl && !target.closest("input")) {
+    const input = phoneControl.querySelector('input[name="phone"]');
+
+    if (input) {
+      event.preventDefault();
+      input.focus();
+
+      try {
+        const end = String(input.value || "").length;
+        input.setSelectionRange(end, end);
+      } catch {
+        // input type/capability fallback
+      }
+    }
+
+    return;
+  }
+
   const logoutAction = target.closest(LOGOUT_ACTION);
 
   if (logoutAction) {
@@ -652,22 +698,13 @@ function onFocusIn(event) {
   const input = event?.target;
 
   if (!input?.matches?.(PHONE)) return;
-
-  if (text(input.value) === SPAIN_PREFIX) {
-    input.value = "";
-  }
+  formatPhoneControl(input, false);
 }
 
 function onFocusOut(event) {
   const input = event?.target;
 
   if (!input?.matches?.(PHONE)) return;
-
-  if (!text(input.value) || text(input.value) === SPAIN_PREFIX) {
-    input.value = "";
-    return;
-  }
-
   formatPhoneControl(input, false);
 }
 

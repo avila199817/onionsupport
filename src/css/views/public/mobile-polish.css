@@ -11,6 +11,10 @@
 
 @layer auth {
 
+.public-home .public-home-price-link {
+  display: none;
+}
+
 /*
    Topbar desktop:
    - "Abrir incidencia" queda en texto puro;

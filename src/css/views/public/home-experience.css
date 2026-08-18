@@ -2,19 +2,28 @@
    ONION SUPPORT — PUBLIC HOME EXPERIENCE
    Archivo: /src/css/views/public/home-experience.css
 
-   Scope:
-   - Remate visual/UX de la home pública.
-   - Orden de acciones de cabecera.
-   - Dropdown de cuenta autenticada.
-   - Ayuda contextual y formato del teléfono.
-   - Retirada visual inmediata del login/cuenta del footer.
-   - Ajuste de precisión de iconos SVG inline.
+   Remate visual/UX:
+   - Landing algo más ancha y respirada.
+   - Login/Cuenta a la izquierda de Abrir incidencia.
+   - Dropdown autenticado compacto.
+   - Teléfono con ayuda únicamente como placeholder gris.
+   - Footer sin login/cuenta.
+   - Precisión de SVGs inline.
 ========================================================= */
 
 @layer auth {
 
 /* =========================================================
-   1. HEADER ACTION ORDER
+   1. WIDTH / GLOBAL BREATHING ROOM
+========================================================= */
+
+.public-auth-shell--home {
+  --public-home-shell-max: 1600px;
+  --public-home-page-gutter: clamp(18px, 3vw, 56px);
+}
+
+/* =========================================================
+   2. HEADER ACTION ORDER
 ========================================================= */
 
 .public-home .public-home-nav-actions > .public-home-login-link,
@@ -39,6 +48,7 @@
 
 .public-home .public-home-account-menu-wrap > [data-public-home-account-toggle] {
   position: relative;
+  max-inline-size: 220px;
   padding-inline-end: 34px;
 }
 
@@ -61,8 +71,12 @@
   transform: translateY(-25%) rotate(225deg);
 }
 
+.public-home .public-support-account-name {
+  max-inline-size: 112px;
+}
+
 /* =========================================================
-   2. AUTHENTICATED ACCOUNT MENU
+   3. AUTHENTICATED ACCOUNT MENU
 ========================================================= */
 
 .public-home .public-home-account-menu {
@@ -190,8 +204,7 @@
 }
 
 /* =========================================================
-   3. FOOTER
-   El JS elimina el nodo; esta regla evita cualquier flash previo.
+   4. FOOTER
 ========================================================= */
 
 .public-home .public-home-footer [data-public-home-login] {
@@ -199,105 +212,26 @@
 }
 
 /* =========================================================
-   4. PHONE FORMAT HELP
+   5. PHONE — PLACEHOLDER ONLY
 ========================================================= */
 
-.public-home .public-support-label-row {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-inline-size: 0;
-  inline-size: fit-content;
+.public-home [data-public-support-phone-help],
+.public-home [data-public-support-phone-tooltip] {
+  display: none;
 }
 
-.public-home .public-support-label-row > label {
-  margin: 0;
-}
-
-.public-home .public-support-field-help {
-  display: inline-grid;
-  place-items: center;
-  flex: 0 0 19px;
-
-  inline-size: 19px;
-  block-size: 19px;
-  padding: 0;
-
-  border: 1px solid rgb(82 198 255 / .30);
-  border-radius: 999px;
-
-  color: #8de9ff;
-  background: rgb(19 148 255 / .08);
-
-  font-size: 11px;
-  font-weight: 900;
-  line-height: 1;
-  cursor: help;
-
-  transition:
-    color .16s ease,
-    border-color .16s ease,
-    background .16s ease,
-    transform .16s ease;
-}
-
-.public-home .public-support-field-help:hover,
-.public-home .public-support-field-help:focus-visible {
-  color: #ffffff;
-  border-color: rgb(82 198 255 / .58);
-  background: rgb(19 148 255 / .18);
-  transform: translateY(-1px);
-}
-
-.public-home .public-support-field-tooltip {
-  position: absolute;
-  inset-inline-start: calc(100% + 8px);
-  inset-block-start: 50%;
-  z-index: 80;
-
-  display: block;
-  inline-size: max-content;
-  max-inline-size: min(250px, calc(100vw - 32px));
-  padding: 8px 10px;
-
-  border: 1px solid rgb(82 198 255 / .22);
-  border-radius: 10px;
-
-  color: #dff7ff;
-  background: rgb(3 12 25 / .98);
-  box-shadow: 0 12px 34px rgb(0 0 0 / .34);
-
-  font-size: 11px;
-  font-weight: 760;
-  line-height: 1.35;
-  white-space: nowrap;
-
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  transform: translate(4px, -50%);
-
-  transition:
-    opacity .14s ease,
-    visibility .14s ease,
-    transform .14s ease;
-}
-
-.public-home .public-support-label-row:hover .public-support-field-tooltip,
-.public-home .public-support-label-row:focus-within .public-support-field-tooltip {
-  opacity: 1;
-  visibility: visible;
-  transform: translate(0, -50%);
-}
-
-.public-home .public-support-field--phone input {
+.public-home .public-support-field--phone-clean input {
   font-variant-numeric: tabular-nums;
   letter-spacing: .012em;
 }
 
+.public-home .public-support-field--phone-clean input::placeholder {
+  color: #65758c;
+  opacity: 1;
+}
+
 /* =========================================================
-   5. SVG PRECISION
+   6. SVG PRECISION
 ========================================================= */
 
 .public-home [data-public-home-svg-polished],
@@ -321,16 +255,24 @@
 }
 
 /* =========================================================
-   6. RESPONSIVE
+   7. RESPONSIVE
 ========================================================= */
+
+@media (max-width: 1280px) {
+  .public-auth-shell--home {
+    --public-home-page-gutter: clamp(18px, 2.5vw, 38px);
+  }
+}
 
 @media (max-width: 1040px) {
   .public-home .public-home-account-menu-wrap {
     inline-size: 100%;
   }
 
-  .public-home .public-home-account-menu-wrap > .public-home-login-link {
+  .public-home .public-home-account-menu-wrap > .public-home-login-link,
+  .public-home .public-home-account-menu-wrap > [data-public-home-account-toggle] {
     inline-size: 100%;
+    max-inline-size: none;
   }
 
   .public-home .public-home-account-menu {
@@ -339,9 +281,17 @@
     inline-size: min(244px, calc(100vw - 32px));
     transform-origin: top left;
   }
+
+  .public-home .public-support-account-name {
+    max-inline-size: 150px;
+  }
 }
 
 @media (max-width: 720px) {
+  .public-auth-shell--home {
+    --public-home-page-gutter: clamp(14px, 4vw, 22px);
+  }
+
   .public-home .public-home-account-menu-wrap {
     flex-direction: column;
   }
@@ -359,27 +309,13 @@
   .public-home .public-home-account-menu.is-open {
     transform: translateY(0);
   }
-
-  .public-home .public-support-field-tooltip {
-    inset-inline-start: 0;
-    inset-block-start: calc(100% + 7px);
-    transform: translateY(-3px);
-    white-space: normal;
-  }
-
-  .public-home .public-support-label-row:hover .public-support-field-tooltip,
-  .public-home .public-support-label-row:focus-within .public-support-field-tooltip {
-    transform: translateY(0);
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .public-home .public-home-account-menu,
   .public-home .public-home-account-menu-item,
   .public-home .public-home-account-menu-item::after,
-  .public-home .public-home-account-menu-wrap > [data-public-home-account-toggle]::after,
-  .public-home .public-support-field-help,
-  .public-home .public-support-field-tooltip {
+  .public-home .public-home-account-menu-wrap > [data-public-home-account-toggle]::after {
     transition: none;
   }
 }

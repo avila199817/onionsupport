@@ -41,7 +41,7 @@ import {
 } from "../core/config.js";
 
 export const ROUTES_VERSION =
-  "routes.minimal.v8.1-activation-path-token-hardened";
+  "routes.minimal.v8.2-correo-preview";
 
 /* =========================================================
    PATHS / NAMES
@@ -70,6 +70,10 @@ export const ROUTE_PATHS = Object.freeze({
   USUARIOS:
     ROUTES.usuarios ||
     "/usuarios",
+
+  CORREO:
+    ROUTES.correo ||
+    "/correo",
 
   SERVIDOR:
     ROUTES.servidor ||
@@ -107,6 +111,7 @@ export const ROUTE_NAMES = Object.freeze({
   FACTURAS: "facturas",
   CLIENTES: "clientes",
   USUARIOS: "usuarios",
+  CORREO: "correo",
   SERVIDOR: "servidor",
   CUENTA: "cuenta",
   AJUSTES: "ajustes",
@@ -750,6 +755,17 @@ const VIEW_SPECS = Object.freeze({
       ),
     names: Object.freeze([
       "UsuariosView",
+    ]),
+  }),
+
+  correo: Object.freeze({
+    moduleKey: "correo",
+    loadModule: () =>
+      import(
+        "../views/correo/index.js"
+      ),
+    names: Object.freeze([
+      "CorreoView",
     ]),
   }),
 
@@ -1418,6 +1434,15 @@ const ROUTE_DEFINITIONS = Object.freeze([
     viewKey: "usuarios",
     adminOnly: true,
     order: 50,
+  }),
+
+  createRoute({
+    path: ROUTE_PATHS.CORREO,
+    name: ROUTE_NAMES.CORREO,
+    title: "Correo",
+    viewKey: "correo",
+    adminOnly: true,
+    order: 55,
   }),
 
   createRoute({

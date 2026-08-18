@@ -1,1 +1,84 @@
-/* placeholder */
+/* =========================================================
+   ONION SUPPORT — CORREO · FULL HEIGHT CONTRACT
+   Archivo: /src/css/views/correo/fullheight.css
+
+   PRODUCTIVO · V1
+   Responsabilidad:
+   - Cerrar la cadena de altura entre main-content y Correo.
+   - Ocupar todo el viewport útil bajo la topbar.
+   - Mantener el scroll dentro de carpetas/lista/lector.
+   - Cero impacto fuera de la ruta Correo.
+========================================================= */
+
+@layer views {
+
+@media (min-width: 1280px) and (min-height: 620px) {
+  /*
+    main-content ya es fixed con top/bottom definidos por el shell.
+    El problema era #view-container: globalmente es display:block y su
+    altura queda determinada por contenido, por lo que height:100% de
+    Correo terminaba antes del fondo del viewport.
+  */
+  .main-content:has([data-correo-host="true"]) {
+    min-block-size: 0;
+    overflow: hidden;
+    scrollbar-gutter: auto;
+  }
+
+  .main-content:has([data-correo-host="true"]) > #app-content {
+    block-size: 100%;
+    min-block-size: 0;
+    flex: 1 1 0;
+    overflow: hidden;
+  }
+
+  #app-content:has([data-correo-host="true"]) {
+    display: flex;
+    flex-direction: column;
+    block-size: 100%;
+    min-block-size: 0;
+    overflow: hidden;
+  }
+
+  #view-container:has([data-correo-host="true"]) {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    align-items: stretch;
+    block-size: 100%;
+    min-block-size: 0;
+    overflow: hidden;
+  }
+
+  #view-container:has([data-correo-host="true"]) > .panel-content[data-view="correo"],
+  .panel-content[data-view="correo"] {
+    display: flex;
+    flex: 1 1 0;
+    block-size: 100%;
+    min-block-size: 0;
+    max-block-size: none;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: hidden;
+  }
+
+  .panel-content[data-view="correo"] > [data-correo-host="true"],
+  [data-correo-host="true"] {
+    display: flex;
+    flex: 1 1 0;
+    block-size: 100%;
+    min-block-size: 0;
+    overflow: hidden;
+  }
+
+  [data-correo-host="true"] > .correo-view-root,
+  .correo-view-root,
+  .correo-workspace {
+    flex: 1 1 0;
+    block-size: 100%;
+    min-block-size: 0;
+    max-block-size: none;
+  }
+}
+
+}

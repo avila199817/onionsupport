@@ -331,7 +331,7 @@ function field(name, label, type, placeholder, autocomplete, maxlength, inputmod
   const mode = inputmode ? ` inputmode="${inputmode}"` : "";
   const initialValue = value ? ` value="${value}"` : "";
   const phoneAttrs = name === "phone"
-    ? ` pattern="(?:\\+34|0034)?[ .-]*[6789](?:[ .-]*\\d){8}" aria-label="Teléfono de España"`
+    ? ` aria-label="Teléfono de España"`
     : "";
 
   return `<div class="public-support-field">
@@ -779,8 +779,9 @@ function errorMessage(error) {
   if (activeTicketConflict(error)) return activeTicketMessage();
   if (code === 429) return "Has realizado varias solicitudes seguidas. Espera un momento y vuelve a intentarlo.";
   if (code === 400 || code === 422) return "Hay algún dato que el servidor no ha podido validar. Revisa el formulario.";
+  if ([502, 503, 504].includes(code)) return "El servicio no ha podido completar la solicitud. Espera unos segundos y vuelve a intentarlo.";
   if ([404, 405, 501].includes(code)) return "El alta directa no está disponible ahora mismo. Puedes contactar por WhatsApp mientras tanto.";
-  return "No se pudo crear la incidencia. Revisa tu conexión e inténtalo de nuevo.";
+  return "No se pudo crear la incidencia. Comprueba tu conexión e inténtalo de nuevo.";
 }
 
 function clearAcceptedIssueFields(form) {
@@ -828,7 +829,7 @@ async function send(form) {
       headers: {
         "Idempotency-Key": requestKey,
       },
-      timeout: 18000,
+      timeout: 50000,
       source: "public-support.intake",
     });
 

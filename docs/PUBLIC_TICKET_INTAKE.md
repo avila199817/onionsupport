@@ -32,6 +32,16 @@ El backend orquesta:
 
 El frontend no envía roles, `userId`, `clienteId`, estado de cuenta, tokens, flags de activación ni IDs de ticket elegidos por el cliente.
 
+### Alcance geográfico inicial
+
+La primera versión del alta pública acepta únicamente teléfonos de España.
+
+- El formulario parte de `+34` por defecto.
+- El frontend normaliza el teléfono a `+34 XXX XXX XXX`.
+- Deben existir exactamente 9 dígitos nacionales después del prefijo de España.
+- El backend debe volver a validar y normalizar el teléfono; nunca debe confiar sólo en la validación del navegador.
+- Si en el futuro se habilitan otros países, esta restricción debe convertirse en una política explícita compartida entre frontend y backend.
+
 ## Reglas de identidad
 
 ### Sesión autenticada
@@ -39,6 +49,8 @@ El frontend no envía roles, `userId`, `clienteId`, estado de cuenta, tokens, fl
 Si existe una sesión válida, la identidad de seguridad sale de la sesión. El backend no debe permitir que un correo escrito en el formulario cambie el propietario del ticket.
 
 Los datos de contacto pueden usarse como información del caso, pero cualquier actualización de perfil debe seguir las reglas normales de cuenta.
+
+La home pública no precarga automáticamente el nombre completo del usuario autenticado en el formulario; el cliente lo introduce explícitamente. El acceso al panel sí puede mostrar la identidad de la sesión según el comportamiento normal de la cabecera.
 
 ### Correo nuevo
 
@@ -93,6 +105,7 @@ No devolver tokens, hashes, información interna de Cosmos, datos de otras cuent
 - Rate limit por IP y por email.
 - Límites de longitud y normalización server-side.
 - Validación de email/teléfono/dirección además de la validación del navegador.
+- Teléfono normalizado y validado de nuevo en backend según el alcance geográfico activo.
 - Anti-spam/abuso en el endpoint y en el envío de correo.
 - No confiar en `source`, `channel` ni ningún identificador enviado por el cliente para autorización.
 - Nunca sobrescribir una cuenta activa desde una petición pública no autenticada.

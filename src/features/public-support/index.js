@@ -8,13 +8,14 @@
    - identidad del cliente autenticado en su acceso al panel;
    - formulario sin exponer automáticamente el nombre del usuario;
    - teléfono limitado a España (+34);
+   - CTAs internos diferenciados de WhatsApp;
    - WhatsApp queda como canal alternativo.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import Http from "../../core/http.js";
 
-export const PUBLIC_SUPPORT_VERSION = "public-support.intake.v3";
+export const PUBLIC_SUPPORT_VERSION = "public-support.intake.v4";
 export const PUBLIC_TICKET_ENDPOINT = "/api/tickets/public";
 
 const HOME = "[data-public-home]";
@@ -311,10 +312,13 @@ function errorNode(name) {
 function field(name, label, type, placeholder, autocomplete, maxlength, inputmode = "", value = "") {
   const mode = inputmode ? ` inputmode="${inputmode}"` : "";
   const initialValue = value ? ` value="${value}"` : "";
+  const phoneAttrs = name === "phone"
+    ? ` pattern="(?:\\+34|0034)?[ .-]*[6789](?:[ .-]*\\d){8}" aria-label="Teléfono de España"`
+    : "";
 
   return `<div class="public-support-field">
     <label for="public-support-${name}">${label}</label>
-    <input id="public-support-${name}" name="${name}" type="${type}"${mode}${initialValue}
+    <input id="public-support-${name}" name="${name}" type="${type}"${mode}${initialValue}${phoneAttrs}
       autocomplete="${autocomplete}" maxlength="${maxlength}" required placeholder="${placeholder}">
     ${errorNode(name)}
   </div>`;
@@ -333,6 +337,60 @@ function ensureForm(root) {
   return section;
 }
 
+function intakeIconNode() {
+  const namespace = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(namespace, "svg");
+  svg.setAttribute("class", "public-home-icon public-support-intake-icon");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+
+  const paths = [
+    "M7.25 3.75h9.5a2 2 0 0 1 2 2v12.5a2 2 0 0 1-2 2h-9.5a2 2 0 0 1-2-2V5.75a2 2 0 0 1 2-2Z",
+    "M9 8.25h6",
+    "M9 11.75h6",
+    "M12 14.5v4",
+    "M10 16.5h4",
+  ];
+
+  for (const d of paths) {
+    const path = document.createElementNS(namespace, "path");
+    path.setAttribute("d", d);
+    svg.appendChild(path);
+  }
+
+  return svg;
+}
+
+function syncIntakeCta(link) {
+  if (!link) return;
+
+  link.href = `#${SECTION_ID}`;
+  link.removeAttribute("target");
+  link.removeAttribute("rel");
+  link.dataset.publicHomeScrollLink = "true";
+  link.dataset.publicSupportIntakeLink = "true";
+
+  const context = text(link.closest(".public-home-price-card")?.querySelector("h3")?.textContent);
+  link.setAttribute(
+    "aria-label",
+    context ? `Abrir incidencia sobre ${context}` : "Abrir formulario de incidencia"
+  );
+
+  if (link.matches(".public-home-price-link")) {
+    const arrow = link.querySelector(".public-home-icon--arrow");
+    if (arrow) link.replaceChildren(document.createTextNode("Abrir incidencia "), arrow);
+    else link.textContent = "Abrir incidencia";
+    return;
+  }
+
+  const label = link.querySelector("span:not([aria-hidden])");
+  if (label) label.textContent = "Abrir incidencia";
+
+  const whatsappIcon = link.querySelector(".public-home-icon--whatsapp");
+  if (whatsappIcon) whatsappIcon.replaceWith(intakeIconNode());
+}
+
 function retargetCtas(root) {
   const selector = [
     ".public-home-nav-cta",
@@ -341,18 +399,7 @@ function retargetCtas(root) {
     ".public-home-contact-actions .public-home-button--primary",
   ].join(",");
 
-  for (const link of root.querySelectorAll(selector)) {
-    link.href = `#${SECTION_ID}`;
-    link.removeAttribute("target");
-    link.removeAttribute("rel");
-    link.dataset.publicHomeScrollLink = "true";
-    link.dataset.publicSupportIntakeLink = "true";
-
-    const label = link.querySelector("span:not([aria-hidden])");
-    if (label && link.matches(".public-home-nav-cta, .public-home-hero-actions .public-home-button--primary")) {
-      label.textContent = "Abrir incidencia";
-    }
-  }
+  root.querySelectorAll(selector).forEach(syncIntakeCta);
 }
 
 function syncFaq(root) {
@@ -380,7 +427,7 @@ function nationalSpanishDigits(value = "") {
 
 function normalizeSpanishPhone(value = "") {
   const national = nationalSpanishDigits(value);
-  if (!/^\d{9}$/.test(national)) return "";
+  if (!/^[6789]\d{8}$/.test(national)) return "";
 
   return `${SPAIN_PREFIX} ${national.slice(0, 3)} ${national.slice(3, 6)} ${national.slice(6, 9)}`;
 }
@@ -390,7 +437,7 @@ function isDefaultSpanishPhone(value = "") {
 }
 
 function prefill(root) {
-  const form = root.querySelector(FORM);
+  const form = root?.querySelector?.(FORM);
   if (!form) return;
 
   const phoneInput = form.elements.namedItem("phone");
@@ -466,17 +513,24 @@ function setFieldError(form, input, message = "") {
 function status(form, message = "", type = "info") {
   const node = form.querySelector("[data-public-support-status]");
   if (!node) return;
-  node.textContent = text(message);
-  node.hidden = !text(message);
-  node.dataset.status = text(message) ? type : "";
+
+  const clean = text(message);
+  node.textContent = clean;
+  node.hidden = !clean;
+  node.dataset.status = clean ? type : "";
+}
+
+function hasFullName(value = "") {
+  const parts = text(value).split(" ").filter(Boolean);
+  return parts.length >= 2 && parts.join(" ").length >= 3;
 }
 
 function validate(form) {
   const rules = {
-    fullName: (v) => v.length >= 3 ? "" : "Introduce tu nombre completo.",
+    fullName: (v) => hasFullName(v) ? "" : "Introduce tu nombre y apellidos.",
     email: (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? "" : "Introduce un correo válido.",
     phone: (v) => normalizeSpanishPhone(v) ? "" : "Introduce un teléfono de España válido (+34 y 9 dígitos).",
-    address: (v) => v.length >= 6 ? "" : "Introduce una dirección completa.",
+    address: (v) => v.length >= 8 ? "" : "Introduce una dirección completa.",
     subject: (v) => v.length >= 4 ? "" : "Resume el problema en el asunto.",
     description: (v) => v.length >= 10 ? "" : "Añade un poco más de detalle sobre el problema.",
   };
@@ -497,12 +551,12 @@ function validate(form) {
 function payload(form) {
   const data = new FormData(form);
   return {
-    fullName: text(data.get("fullName")),
-    email: text(data.get("email")).toLowerCase(),
+    fullName: text(data.get("fullName")).slice(0, 120),
+    email: text(data.get("email")).toLowerCase().slice(0, 180),
     phone: normalizeSpanishPhone(data.get("phone")),
-    address: text(data.get("address")),
-    subject: text(data.get("subject")),
-    description: text(data.get("description")),
+    address: text(data.get("address")).slice(0, 220),
+    subject: text(data.get("subject")).slice(0, 140),
+    description: text(data.get("description")).slice(0, 4000),
     source: "public-home",
     channel: "web",
   };
@@ -511,6 +565,7 @@ function payload(form) {
 function submitting(form, value) {
   form.dataset.submitting = value ? "true" : "false";
   form.classList.toggle("is-submitting", value);
+  form.setAttribute("aria-busy", value ? "true" : "false");
 
   form.querySelectorAll("button, input, textarea, select").forEach((node) => {
     if (node.name !== "website") node.disabled = value;
@@ -663,20 +718,25 @@ function install() {
   window.addEventListener("onion:main:ready", scan);
   document.addEventListener("public-home:ready", scan, true);
 
+  const mount =
+    document.querySelector("#view-container") ||
+    document.querySelector("[data-router-view]") ||
+    document.querySelector("[data-app-content]") ||
+    document.body;
+
   observer = new MutationObserver(scan);
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  observer.observe(mount, { childList: true, subtree: true });
 
-  scan();
-
-  let attempts = 0;
-  retryTimer = window.setInterval(() => {
-    scan();
-    attempts += 1;
-    if (attempts >= 12) {
-      clearInterval(retryTimer);
-      retryTimer = 0;
-    }
-  }, 750);
+  if (!scan()) {
+    let attempts = 0;
+    retryTimer = window.setInterval(() => {
+      attempts += 1;
+      if (scan() || attempts >= 12) {
+        clearInterval(retryTimer);
+        retryTimer = 0;
+      }
+    }, 750);
+  }
 }
 
 export function destroyPublicSupport() {

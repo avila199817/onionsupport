@@ -1,0 +1,171 @@
+# =========================================================
+# ONION SUPPORT — PUBLIC HOME CONTRACT
+# Validación específica de la landing pública + intake.
+# No despliega: protege el contrato visual/técnico del frontend.
+# =========================================================
+
+name: Public Home Contract
+
+run-name: Public Home · ${{ github.event_name }} · ${{ github.head_ref || github.ref_name || 'manual' }}
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "index.html"
+      - "src/features/public-support/**"
+      - "src/views/public/home/**"
+      - "src/css/app.css"
+      - "src/css/views/public/**"
+      - ".github/workflows/public-home-contract.yml"
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "index.html"
+      - "src/features/public-support/**"
+      - "src/views/public/home/**"
+      - "src/css/app.css"
+      - "src/css/views/public/**"
+      - ".github/workflows/public-home-contract.yml"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-home-contract-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate public home
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+
+    steps:
+      - name: Checkout authoritative source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+          persist-credentials: false
+
+      - name: Validate JavaScript syntax
+        run: |
+          set -euo pipefail
+          node --check src/features/public-support/index.js
+          node --check src/views/public/home/index.js
+          node --check src/views/public/home/template.js
+
+      - name: Validate public frontend contract
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+
+          required = [
+              Path("index.html"),
+              Path("src/css/app.css"),
+              Path("src/css/views/public/index.css"),
+              Path("src/css/views/public/support-request.css"),
+              Path("src/css/views/public/mobile-polish.css"),
+              Path("src/features/public-support/index.js"),
+              Path("src/views/public/home/index.js"),
+              Path("src/views/public/home/template.js"),
+          ]
+
+          errors = []
+
+          for path in required:
+              if not path.is_file():
+                  errors.append(f"Falta archivo obligatorio: {path}")
+
+          if errors:
+              for error in errors:
+                  print(f"::error::{error}")
+              sys.exit(1)
+
+          index = Path("index.html").read_text(encoding="utf-8")
+          app_css = Path("src/css/app.css").read_text(encoding="utf-8")
+          intake = Path("src/features/public-support/index.js").read_text(encoding="utf-8")
+          mobile_css = Path("src/css/views/public/mobile-polish.css").read_text(encoding="utf-8")
+
+          checks = [
+              (
+                  '/src/features/public-support/index.js' in index,
+                  "index.html debe cargar el módulo public-support/index.js",
+              ),
+              (
+                  'mobile-polish.js' not in index,
+                  "index.html no debe volver a cargar mobile-polish.js",
+              ),
+              (
+                  '/src/css/views/public/mobile-polish.css' not in index,
+                  "index.html debe mantener app.css como único entrypoint CSS",
+              ),
+              (
+                  '@import url("./views/public/support-request.css")' in app_css,
+                  "app.css debe importar support-request.css",
+              ),
+              (
+                  '@import url("./views/public/mobile-polish.css")' in app_css,
+                  "app.css debe importar mobile-polish.css",
+              ),
+              (
+                  'PUBLIC_TICKET_ENDPOINT = "/api/tickets/public"' in intake,
+                  "El intake debe mantener POST /api/tickets/public como contrato",
+              ),
+              (
+                  'SPAIN_PREFIX = "+34"' in intake,
+                  "El intake debe mantener +34 como prefijo España",
+              ),
+              (
+                  'public-support.intake.v4' in intake,
+                  "Versión final esperada public-support.intake.v4",
+              ),
+              (
+                  'intakeIconNode' in intake and 'public-support-intake-icon' in intake,
+                  "Los CTAs internos deben usar icono propio de incidencia",
+              ),
+              (
+                  'public-home-topbar-account' not in mobile_css,
+                  "El CSS móvil no debe volver a duplicar la identidad en el top bar",
+              ),
+          ]
+
+          for ok, message in checks:
+              if not ok:
+                  errors.append(message)
+
+          forbidden_paths = [
+              Path("src/features/public-support/mobile-polish.js"),
+              Path("noop"),
+          ]
+
+          for path in forbidden_paths:
+              if path.exists():
+                  errors.append(f"Archivo temporal/retirado reaparecido: {path}")
+
+          for css_path in [
+              Path("src/css/views/public/index.css"),
+              Path("src/css/views/public/support-request.css"),
+              Path("src/css/views/public/mobile-polish.css"),
+          ]:
+              css = css_path.read_text(encoding="utf-8")
+              if css.count("{") != css.count("}"):
+                  errors.append(f"Llaves CSS desbalanceadas: {css_path}")
+
+          if errors:
+              for error in errors:
+                  print(f"::error::{error}")
+              sys.exit(1)
+
+          print("Public home frontend contract OK.")
+          PY

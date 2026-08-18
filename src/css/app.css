@@ -276,6 +276,11 @@
    - Ajuste final del drawer móvil por contenido.
    - Sin identidad duplicada ni lógica de usuario.
 
+   home-experience.css:
+   - Orden definitivo de Login/Cuenta y Abrir incidencia.
+   - Dropdown autenticado de accesos rápidos.
+   - Ayuda de teléfono y precisión de SVGs inline.
+
    Importante:
    - Usa layer(auth) intencionadamente para integrarse con el shell público.
    - No debe contaminar la app privada porque todo va scopeado bajo
@@ -284,3 +289,4 @@
 
 @import url("./views/public/support-request.css");
 @import url("./views/public/mobile-polish.css");
+@import url("./views/public/home-experience.css");

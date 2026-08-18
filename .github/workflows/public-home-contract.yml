@@ -136,8 +136,8 @@ jobs:
                   "El intake debe mantener 9 dígitos españoles estándar (6-9)",
               ),
               (
-                  'public-support.intake.v4' in intake,
-                  "Versión final esperada public-support.intake.v4",
+                  'public-support.intake.v5-live-optional-auth' in intake,
+                  "Versión final esperada public-support.intake.v5-live-optional-auth",
               ),
               (
                   'intakeIconNode' in intake and 'public-support-intake-icon' in intake,
@@ -146,6 +146,30 @@ jobs:
               (
                   'fullName: fullName(user)' not in intake,
                   "El formulario público no debe volver a precargar automáticamente el nombre completo",
+              ),
+              (
+                  'const useAuth = session().authenticated === true;' in intake,
+                  "El intake debe habilitar Authorization sólo cuando existe sesión autenticada",
+              ),
+              (
+                  'auth: useAuth,' in intake,
+                  "El POST público debe usar autenticación opcional",
+              ),
+              (
+                  'public: true,' not in intake and 'noAuthHeader: true,' not in intake,
+                  "El intake live no debe volver a bloquear Authorization con public:true/noAuthHeader:true",
+              ),
+              (
+                  '"Idempotency-Key": requestKey' in intake and 'idempotencyKey(form)' in intake,
+                  "El intake debe enviar una Idempotency-Key estable por reintento",
+              ),
+              (
+                  'clearIdempotency(form);' in intake,
+                  "El intake debe rotar la idempotencia al editar o tras éxito",
+              ),
+              (
+                  'Solicitud recibida. Revisa tu correo para continuar.' in intake and 'neutralAccepted(response)' in intake,
+                  "La respuesta anónima anti-enumeración debe mostrarse de forma neutra",
               ),
               (
                   'public.home.view.controller.final.productivo.2026.23.history-replace' in home,
@@ -170,6 +194,10 @@ jobs:
               (
                   'no deben usar su icono' in docs,
                   "La documentación debe diferenciar CTA interno y WhatsApp",
+              ),
+              (
+                  '`Idempotency-Key`' in docs and 'autenticación opcional' in docs,
+                  "La documentación debe describir idempotencia y auth opcional",
               ),
           ]
 

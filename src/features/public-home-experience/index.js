@@ -213,7 +213,9 @@ function resetLoginLink(link = null) {
   link.dataset.route = "/login";
   link.dataset.href = "/login";
   link.setAttribute("aria-label", "Iniciar sesión");
-  link.textContent = "Iniciar sesión";
+  if (text(link.textContent) !== "Iniciar sesión") {
+    link.textContent = "Iniciar sesión";
+  }
 
   return true;
 }
@@ -297,7 +299,9 @@ function ensureAccountMenu(root = null) {
   delete link.dataset.href;
 
   const label = link.querySelector(".public-support-account-label");
-  if (label) label.textContent = "Accesos rápidos";
+  if (label && text(label.textContent) !== "Accesos rápidos") {
+    label.textContent = "Accesos rápidos";
+  }
 
   if (!wrapper.querySelector(ACCOUNT_MENU)) {
     buildAccountMenu(wrapper, link);

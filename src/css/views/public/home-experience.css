@@ -284,7 +284,7 @@
     transform .14s ease;
 }
 
-.public-home .public-support-field--phone:hover .public-support-field-tooltip,
+.public-home .public-support-label-row:hover .public-support-field-tooltip,
 .public-home .public-support-label-row:focus-within .public-support-field-tooltip {
   opacity: 1;
   visibility: visible;
@@ -342,6 +342,10 @@
 }
 
 @media (max-width: 720px) {
+  .public-home .public-home-account-menu-wrap {
+    flex-direction: column;
+  }
+
   .public-home .public-home-account-menu {
     position: static;
     inline-size: 100%;
@@ -363,7 +367,7 @@
     white-space: normal;
   }
 
-  .public-home .public-support-field--phone:hover .public-support-field-tooltip,
+  .public-home .public-support-label-row:hover .public-support-field-tooltip,
   .public-home .public-support-label-row:focus-within .public-support-field-tooltip {
     transform: translateY(0);
   }

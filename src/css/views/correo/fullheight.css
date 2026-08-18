@@ -2,31 +2,72 @@
    ONION SUPPORT — CORREO · FINAL VIEWPORT AUTHORITY
    Archivo: /src/css/views/correo/fullheight.css
 
-   PRODUCTIVO · V2 · DESKTOP FINAL
-   Responsabilidad:
-   - Cerrar de forma definitiva la cadena de altura del shell.
-   - Ocupar todo el viewport útil bajo la topbar.
-   - Mantener scroll únicamente dentro de carpetas/lista/lector.
-   - Compactar la cabecera de lista al estilo Outlook.
-   - Eliminar el bloque redundante Carpeta / Bandeja de entrada.
-   - Alinear filtros + actualizar + nuevo correo en una sola fila.
-   - Mantener la campana sólo dentro del selector de cuenta.
-   - Cero impacto fuera de la ruta Correo.
-
-   Nota de cascada:
-   Este archivo se carga desde app.css antes de los estilos de ruta.
-   Por eso las reglas críticas usan un scope más específico bajo
-   [data-correo-host="true"], evitando !important salvo en la cadena
-   geométrica del shell donde el contrato debe ser inequívoco.
+   PRODUCTIVO · V3 · FINAL
+   - Cierra la cadena de altura real del shell.
+   - Elimina definitivamente el hueco inferior en escritorio.
+   - Mantiene scroll interno en carpetas, lista y lector.
+   - Toolbar compacta: filtros + refrescar + nuevo correo.
+   - Cero impacto fuera de Correo.
 ========================================================= */
 
 @layer views {
 
+/* Toolbar base para cualquier ancho donde se use el nuevo template. */
+[data-correo-host="true"] .correo-list-toolbar {
+  min-inline-size: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 10px 6px;
+  border-block-end: 1px solid var(--correo-border-soft, #383838);
+  background: var(--correo-panel, #292929);
+}
+
+[data-correo-host="true"] .correo-list-toolbar .correo-filter-row {
+  min-inline-size: 0;
+  flex: 1 1 auto;
+  padding: 0;
+  border: 0;
+}
+
+[data-correo-host="true"] .correo-list-toolbar .correo-list-utilities {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+[data-correo-host="true"] .correo-list-toolbar [data-correo-action="refresh"] {
+  inline-size: 30px;
+  block-size: 30px;
+  min-inline-size: 30px;
+  min-block-size: 30px;
+  border-radius: 4px;
+}
+
+[data-correo-host="true"] .correo-list-toolbar [data-correo-action="compose"] {
+  min-block-size: 30px;
+  block-size: 30px;
+  gap: 6px;
+  padding-inline: 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1;
+}
+
+[data-correo-host="true"] .correo-list-toolbar [data-correo-action="compose"] svg {
+  inline-size: 15px;
+  block-size: 15px;
+}
+
 @media (min-width: 1280px) and (min-height: 620px) {
   /* =======================================================
-     1. CONTRATO DE ALTURA REAL
-     main-content ya está fijado entre topbar y fondo. La vista debe
-     heredar exactamente esa altura, no la altura de su contenido.
+     ALTURA REAL
+     main-content ya está fijado entre topbar y fondo. Estas reglas
+     cierran toda la cadena de flex/height y neutralizan el max-height
+     legado de index.css que todavía limitaba .correo-workspace.
   ======================================================= */
 
   .main-content:has([data-correo-host="true"]) {
@@ -87,138 +128,64 @@
 
   [data-correo-host="true"] .correo-workspace {
     flex: 1 1 0 !important;
+    align-self: stretch !important;
     block-size: 100% !important;
     min-block-size: 0 !important;
     max-block-size: none !important;
-    align-self: stretch !important;
     overflow: hidden !important;
   }
 
   [data-correo-host="true"] .correo-folders-panel,
   [data-correo-host="true"] .correo-list-panel,
-  [data-correo-host="true"] .correo-reader {
+  [data-correo-host="true"] .correo-reader,
+  [data-correo-host="true"] .correo-reader-card {
     block-size: 100% !important;
     min-block-size: 0 !important;
     max-block-size: none !important;
   }
 
   /* =======================================================
-     2. LISTA · TOOLBAR ÚNICA
-     DOM existente:
-       header / search / filters / list
-     Se recoloca sin añadir wrappers ni JS.
+     LISTA FINAL
+     Buscar ocupa una fila. Debajo: filtros a la izquierda,
+     refrescar + redactar a la derecha. El resto es lista scrollable.
   ======================================================= */
 
   [data-correo-host="true"] .correo-list-panel {
-    position: relative;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-rows: auto 38px minmax(0, 1fr);
-    overflow: hidden;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: auto 38px minmax(0, 1fr) !important;
+    overflow: hidden !important;
   }
 
   [data-correo-host="true"] .correo-search {
-    grid-column: 1 / -1;
     grid-row: 1;
     align-self: center;
     margin: 8px 10px 6px;
   }
 
-  [data-correo-host="true"] .correo-filter-row {
-    grid-column: 1;
+  [data-correo-host="true"] .correo-list-toolbar {
     grid-row: 2;
-    align-self: stretch;
-    min-block-size: 38px;
-    padding: 3px 4px 5px 10px;
-    border-block-end: 1px solid var(--correo-border-soft, #383838);
-  }
-
-  [data-correo-host="true"] .correo-list-header {
-    grid-column: 2;
-    grid-row: 2;
-    align-self: stretch;
     min-block-size: 38px;
     block-size: 38px;
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 0;
-    padding: 3px 10px 5px 4px;
-    border-block-end: 1px solid var(--correo-border-soft, #383838);
-    background: var(--correo-panel, #292929);
+    padding: 3px 10px 5px;
   }
 
-  /* Carpeta / Bandeja de entrada y contador ya están representados
-     en el panel izquierdo. Duplicarlos roba altura sin aportar contexto. */
-  [data-correo-host="true"] .correo-list-header > div:first-child,
-  [data-correo-host="true"] .correo-list-header .correo-count,
-  [data-correo-host="true"] .correo-list-header [data-correo-action="notifications"] {
-    display: none !important;
-  }
-
-  [data-correo-host="true"] .correo-list-utilities {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 4px;
-  }
-
-  [data-correo-host="true"] .correo-list-header [data-correo-action="refresh"] {
-    inline-size: 30px;
-    block-size: 30px;
-    min-inline-size: 30px;
-    min-block-size: 30px;
-    border-radius: 4px;
-  }
-
-  [data-correo-host="true"] .correo-list-header [data-correo-action="compose"] {
+  [data-correo-host="true"] .correo-list-toolbar .correo-filter-row {
     min-block-size: 30px;
     block-size: 30px;
-    gap: 6px;
-    padding-inline: 10px;
-    border-radius: 4px;
-    font-size: 11px;
-    line-height: 1;
-  }
-
-  /* Sustituye visualmente el + por un lápiz SVG sin tocar el contrato JS. */
-  @supports ((mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3C/svg%3E")) or (-webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3C/svg%3E"))) {
-    [data-correo-host="true"] .correo-list-header [data-correo-action="compose"] > svg {
-      display: none;
-    }
-
-    [data-correo-host="true"] .correo-list-header [data-correo-action="compose"]::before {
-      content: "";
-      inline-size: 15px;
-      block-size: 15px;
-      flex: 0 0 15px;
-      background: currentColor;
-      -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 20h9'/%3E%3Cpath d='M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z'/%3E%3Cpath d='m15 5 3 3'/%3E%3C/svg%3E");
-      -webkit-mask-repeat: no-repeat;
-      -webkit-mask-position: center;
-      -webkit-mask-size: contain;
-      mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 20h9'/%3E%3Cpath d='M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z'/%3E%3Cpath d='m15 5 3 3'/%3E%3C/svg%3E");
-      mask-repeat: no-repeat;
-      mask-position: center;
-      mask-size: contain;
-    }
+    align-items: center;
   }
 
   [data-correo-host="true"] .correo-message-list {
-    grid-column: 1 / -1;
     grid-row: 3;
-    min-block-size: 0;
-    block-size: 100%;
-    overflow: auto;
+    min-block-size: 0 !important;
+    block-size: 100% !important;
+    overflow: auto !important;
   }
 
   [data-correo-host="true"] .correo-infinite-sentinel {
-    display: none;
+    display: none !important;
   }
-
-  /* =======================================================
-     3. DENSIDAD / ALINEACIÓN FINAL
-  ======================================================= */
 
   [data-correo-host="true"] .correo-folders-panel {
     padding-block-end: 8px;
@@ -228,31 +195,39 @@
     margin-block-start: 6px;
   }
 
-  [data-correo-host="true"] .correo-reader-card {
-    block-size: 100%;
-    min-block-size: 0;
-    max-block-size: none;
-  }
-
   [data-correo-host="true"] .correo-reader-scroll {
-    min-block-size: 0;
+    min-block-size: 0 !important;
   }
 }
 
-/* Pantallas de escritorio algo más bajas: mismo contrato, menos aire. */
 @media (min-width: 1280px) and (min-height: 620px) and (max-height: 760px) {
   [data-correo-host="true"] .correo-search {
     margin-block: 6px 4px;
   }
 
   [data-correo-host="true"] .correo-list-panel {
-    grid-template-rows: auto 36px minmax(0, 1fr);
+    grid-template-rows: auto 36px minmax(0, 1fr) !important;
   }
 
-  [data-correo-host="true"] .correo-list-header,
-  [data-correo-host="true"] .correo-filter-row {
+  [data-correo-host="true"] .correo-list-toolbar {
     min-block-size: 36px;
     block-size: 36px;
+    padding-block: 2px 4px;
+  }
+}
+
+@media (max-width: 700px) {
+  [data-correo-host="true"] .correo-list-toolbar {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  [data-correo-host="true"] .correo-list-toolbar .correo-filter-row {
+    flex-basis: 100%;
+  }
+
+  [data-correo-host="true"] .correo-list-toolbar .correo-list-utilities {
+    margin-inline-start: auto;
   }
 }
 

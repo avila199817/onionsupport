@@ -202,6 +202,18 @@
 
 
 /* =========================================================
+   VIEWS · CORREO · GEOMETRÍA DEL VIEWPORT
+
+   fullheight.css:
+   - Cierra la cadena flex sólo cuando existe la vista Correo.
+   - Hace que #view-container y panel-content ocupen todo el espacio útil.
+   - No altera la geometría de otras rutas.
+========================================================= */
+
+@import url("./views/correo/fullheight.css") layer(views);
+
+
+/* =========================================================
    VIEWS · CUENTA
 ========================================================= */
 

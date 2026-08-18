@@ -5,6 +5,8 @@
    Home pública:
    - formulario visible de alta + incidencia;
    - un único POST público al backend;
+   - autenticación opcional: visitante anónimo o sesión existente;
+   - idempotencia estable por intento/reintento del mismo formulario;
    - identidad del cliente autenticado en su acceso al panel;
    - formulario sin exponer automáticamente el nombre del usuario;
    - teléfono limitado a España (+34);
@@ -15,7 +17,7 @@
 import { AppCore } from "../../core/index.js";
 import Http from "../../core/http.js";
 
-export const PUBLIC_SUPPORT_VERSION = "public-support.intake.v4";
+export const PUBLIC_SUPPORT_VERSION = "public-support.intake.v5-live-optional-auth";
 export const PUBLIC_TICKET_ENDPOINT = "/api/tickets/public";
 
 const HOME = "[data-public-home]";
@@ -562,6 +564,39 @@ function payload(form) {
   };
 }
 
+function utcDateSegment(date = new Date()) {
+  return date.toISOString().slice(0, 10).replace(/-/g, "");
+}
+
+function randomIdempotencyNonce() {
+  try {
+    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+
+    if (globalThis.crypto?.getRandomValues) {
+      const bytes = new Uint8Array(16);
+      globalThis.crypto.getRandomValues(bytes);
+      return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    }
+  } catch {
+    // fallback no criptográfico: la clave sólo identifica un reintento, no autoriza nada.
+  }
+
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 18)}`;
+}
+
+function idempotencyKey(form) {
+  const existing = text(form?.dataset?.publicSupportIdempotencyKey);
+  if (existing) return existing;
+
+  const key = `${utcDateSegment()}:${randomIdempotencyNonce()}`;
+  if (form?.dataset) form.dataset.publicSupportIdempotencyKey = key;
+  return key;
+}
+
+function clearIdempotency(form) {
+  if (form?.dataset) delete form.dataset.publicSupportIdempotencyKey;
+}
+
 function submitting(form, value) {
   form.dataset.submitting = value ? "true" : "false";
   form.classList.toggle("is-submitting", value);
@@ -599,7 +634,21 @@ function activation(response) {
   return typeof value === "boolean" ? value : null;
 }
 
+function neutralAccepted(response) {
+  const accepted = first(
+    response?.accepted,
+    response?.data?.accepted,
+    false
+  ) === true;
+
+  return accepted && !ticketId(response) && activation(response) === null;
+}
+
 function successMessage(response) {
+  if (neutralAccepted(response)) {
+    return "Solicitud recibida. Revisa tu correo para continuar.";
+  }
+
   const id = ticketId(response);
   const prefix = id ? `Incidencia ${id} creada.` : "Incidencia creada.";
 
@@ -633,14 +682,17 @@ async function send(form) {
   }
 
   const body = payload(form);
+  const requestKey = idempotencyKey(form);
+  const useAuth = session().authenticated === true;
   submitting(form, true);
 
   try {
     const response = await Http.post(PUBLIC_TICKET_ENDPOINT, body, {
-      public: true,
-      auth: false,
-      noAuthHeader: true,
-      noAutoRefresh: true,
+      auth: useAuth,
+      noAutoRefresh: !useAuth,
+      headers: {
+        "Idempotency-Key": requestKey,
+      },
       timeout: 18000,
       source: "public-support.intake",
     });
@@ -654,6 +706,7 @@ async function send(form) {
       },
     }));
 
+    clearIdempotency(form);
     form.reset();
     const counter = form.querySelector("[data-public-support-counter]");
     if (counter) counter.textContent = "0 / 4000";
@@ -683,6 +736,7 @@ function onInput(event) {
   if (!form || !input?.name) return;
 
   if (input.name !== "website") {
+    clearIdempotency(form);
     setFieldError(form, input, "");
     status(form);
   }

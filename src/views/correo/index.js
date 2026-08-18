@@ -2,15 +2,16 @@
    Onion Support - Correo View
    Archivo: /src/views/correo/index.js
 
-   PRODUCTIVO · MICROSOFT 365
-
-   Responsabilidad:
-   - Controlar la experiencia Outlook del panel privado.
-   - Consumir exclusivamente correo.api.js.
-   - Mantener OAuth fuera del navegador salvo navegación a Microsoft.
-   - Render incremental, carreras controladas y limpieza al desmontar.
+   PRODUCTIVO · MICROSOFT 365 · OUTLOOK EXTREME
+   - Cache efímera entre rutas: cero flash "desconectado".
+   - Scroll infinito con nextCursor.
+   - Notificaciones del navegador mientras Onion esté abierto.
+   - Compose corregido: captura FormData ANTES de deshabilitar campos.
+   - Avatar Onion en selector de cuenta.
 ========================================================= */
 
+import { AppCore } from "../../core/index.js";
+import { Auth as DefaultAuth } from "../../features/auth/index.js";
 import CorreoApi from "./correo.api.js";
 import {
   CORREO_TEMPLATE_VERSION,
@@ -26,20 +27,47 @@ import {
   renderShell,
 } from "./correo.template.js";
 
-export const CORREO_VIEW_VERSION = "correo.view.microsoft.production.v2";
+export const CORREO_VIEW_VERSION = "correo.view.microsoft.production.v3-outlook-extreme";
 
 const INSTANCES = new WeakMap();
 let lastInstance = null;
+
+const NOTIFICATION_PREF_KEY = "onion.correo.notifications.v1";
+const NOTIFICATION_POLL_MS = 60000;
+const MAX_NOTIFICATION_IDS = 80;
+
+const VIEW_CACHE = {
+  status: null,
+  statusKnown: false,
+  folders: [],
+  messages: [],
+  selectedFolderId: "",
+  selectedFolderName: "Bandeja de entrada",
+  selectedMessageId: "",
+  selectedMessage: null,
+  attachments: [],
+  searchTerm: "",
+  activeFilter: "all",
+  nextCursor: "",
+  cachedAt: 0,
+};
+
+const MAIL_WATCHER = {
+  timer: null,
+  inboxFolderId: "",
+  mailbox: "",
+  knownIds: new Set(),
+  seeded: false,
+  polling: false,
+  consecutiveErrors: 0,
+};
 
 function isDomNode(value = null) {
   return Boolean(typeof Node !== "undefined" && value && value instanceof Node);
 }
 
 function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const output = String(value ?? "").replace(/[\r\n\t]/g, " ").replace(/\s+/g, " ").trim();
   return output || fallback;
 }
 
@@ -48,10 +76,7 @@ function safeLower(value = "") {
 }
 
 function errorMessage(error = null, fallback = "No se pudo completar la operación.") {
-  return cleanText(
-    error?.message || error?.data?.message || error?.response?.message || error?.code,
-    fallback
-  );
+  return cleanText(error?.message || error?.data?.message || error?.response?.message || error?.code, fallback);
 }
 
 function errorCode(error = null) {
@@ -82,16 +107,244 @@ function findInbox(folders = []) {
 }
 
 function parseRecipients(value = "") {
-  return [...new Set(
-    String(value ?? "")
-      .split(/[;,\n]+/)
-      .map((item) => item.trim().toLowerCase())
-      .filter(Boolean)
-  )];
+  return [...new Set(String(value ?? "").split(/[;,\n]+/).map((item) => item.trim().toLowerCase()).filter(Boolean))];
 }
 
 function isLikelyEmail(value = "") {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ""));
+}
+
+function safeImageUrl(value = "") {
+  const raw = cleanText(value, "");
+  if (!raw || /[\r\n\t\\]/.test(raw) || /^(?:javascript|data|vbscript|file):/i.test(raw)) return "";
+  if (raw.startsWith("/")) return raw;
+  try {
+    const url = new URL(raw);
+    if (url.protocol === "https:" || url.protocol === "http:") return url.toString();
+  } catch {
+    return "";
+  }
+  return "";
+}
+
+function initialsFrom(value = "") {
+  return cleanText(value, "ON").split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || "").join("").slice(0, 2) || "ON";
+}
+
+function readOnionUser() {
+  let raw = null;
+  try {
+    raw = AppCore?.getCurrentUser?.() || AppCore?.auth?.getUser?.() || AppCore?.auth?.getCurrentUser?.() || DefaultAuth?.getUser?.() || DefaultAuth?.getCurrentUser?.() || AppCore?.getState?.()?.user || AppCore?.state?.user || null;
+  } catch {
+    raw = null;
+  }
+
+  let user = raw;
+  try {
+    user = AppCore?.publicUser?.(raw) || raw;
+  } catch {
+    user = raw;
+  }
+
+  const displayName = cleanText(user?.displayName || user?.fullName || user?.name || user?.nombre || raw?.displayName || raw?.fullName || raw?.name || raw?.nombre, "Cristian Ávila Luque");
+  const avatarUrl = safeImageUrl(
+    user?.avatarUrl || user?.avatar || user?.picture || user?.photoUrl || raw?.avatarUrl || raw?.avatar || raw?.picture || raw?.photoUrl || raw?.profile?.avatarUrl || ""
+  );
+
+  return Object.freeze({ displayName, avatarUrl, initials: initialsFrom(displayName) });
+}
+
+function cloneCacheIntoState(state) {
+  if (!VIEW_CACHE.statusKnown || !VIEW_CACHE.status) return;
+  state.status = VIEW_CACHE.status;
+  state.statusKnown = true;
+  state.folders = [...VIEW_CACHE.folders];
+  state.messages = [...VIEW_CACHE.messages];
+  state.selectedFolderId = VIEW_CACHE.selectedFolderId;
+  state.selectedFolderName = VIEW_CACHE.selectedFolderName;
+  state.selectedMessageId = VIEW_CACHE.selectedMessageId;
+  state.selectedMessage = VIEW_CACHE.selectedMessage;
+  state.attachments = [...VIEW_CACHE.attachments];
+  state.searchTerm = VIEW_CACHE.searchTerm;
+  state.activeFilter = VIEW_CACHE.activeFilter;
+  state.nextCursor = VIEW_CACHE.nextCursor;
+  state.loading = false;
+}
+
+function writeViewCache(state) {
+  VIEW_CACHE.status = state.status;
+  VIEW_CACHE.statusKnown = state.statusKnown === true;
+  VIEW_CACHE.folders = [...state.folders];
+  VIEW_CACHE.messages = [...state.messages];
+  VIEW_CACHE.selectedFolderId = state.selectedFolderId;
+  VIEW_CACHE.selectedFolderName = state.selectedFolderName;
+  VIEW_CACHE.selectedMessageId = state.selectedMessageId;
+  VIEW_CACHE.selectedMessage = state.selectedMessage;
+  VIEW_CACHE.attachments = [...state.attachments];
+  VIEW_CACHE.searchTerm = state.searchTerm;
+  VIEW_CACHE.activeFilter = state.activeFilter;
+  VIEW_CACHE.nextCursor = state.nextCursor;
+  VIEW_CACHE.cachedAt = Date.now();
+}
+
+function clearViewCache() {
+  VIEW_CACHE.status = null;
+  VIEW_CACHE.statusKnown = false;
+  VIEW_CACHE.folders = [];
+  VIEW_CACHE.messages = [];
+  VIEW_CACHE.selectedFolderId = "";
+  VIEW_CACHE.selectedFolderName = "Bandeja de entrada";
+  VIEW_CACHE.selectedMessageId = "";
+  VIEW_CACHE.selectedMessage = null;
+  VIEW_CACHE.attachments = [];
+  VIEW_CACHE.searchTerm = "";
+  VIEW_CACHE.activeFilter = "all";
+  VIEW_CACHE.nextCursor = "";
+  VIEW_CACHE.cachedAt = 0;
+}
+
+function notificationSupported() {
+  return typeof window !== "undefined" && "Notification" in window;
+}
+
+function notificationPreference() {
+  if (!notificationSupported()) return false;
+  try {
+    return window.localStorage.getItem(NOTIFICATION_PREF_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function setNotificationPreference(enabled) {
+  try {
+    if (enabled) window.localStorage.setItem(NOTIFICATION_PREF_KEY, "1");
+    else window.localStorage.removeItem(NOTIFICATION_PREF_KEY);
+  } catch {
+    // La preferencia no es crítica.
+  }
+}
+
+function notificationUiState() {
+  return Object.freeze({
+    supported: notificationSupported(),
+    permission: notificationSupported() ? Notification.permission : "unsupported",
+    enabled: notificationSupported() && Notification.permission === "granted" && notificationPreference(),
+  });
+}
+
+function rememberNotificationIds(messages = []) {
+  for (const message of messages) {
+    if (message?.id) MAIL_WATCHER.knownIds.add(message.id);
+  }
+  if (MAIL_WATCHER.knownIds.size > MAX_NOTIFICATION_IDS) {
+    MAIL_WATCHER.knownIds = new Set([...MAIL_WATCHER.knownIds].slice(-MAX_NOTIFICATION_IDS));
+  }
+}
+
+function stopMailWatcher({ clear = false } = {}) {
+  if (MAIL_WATCHER.timer) clearTimeout(MAIL_WATCHER.timer);
+  MAIL_WATCHER.timer = null;
+  MAIL_WATCHER.polling = false;
+  MAIL_WATCHER.consecutiveErrors = 0;
+  if (clear) {
+    MAIL_WATCHER.inboxFolderId = "";
+    MAIL_WATCHER.mailbox = "";
+    MAIL_WATCHER.knownIds.clear();
+    MAIL_WATCHER.seeded = false;
+  }
+}
+
+function scheduleMailWatcher(delay = NOTIFICATION_POLL_MS) {
+  if (!notificationUiState().enabled || !MAIL_WATCHER.inboxFolderId) return;
+  if (MAIL_WATCHER.timer) clearTimeout(MAIL_WATCHER.timer);
+  MAIL_WATCHER.timer = setTimeout(pollMailWatcher, delay);
+}
+
+function showBrowserNotification(message = {}) {
+  if (!notificationUiState().enabled) return;
+  const sender = cleanText(message?.from?.name || message?.from?.address || message?.sender?.name || message?.sender?.address, "Nuevo correo");
+  const subject = cleanText(message?.subject, "(Sin asunto)");
+  const preview = cleanText(message?.bodyPreview, "");
+  try {
+    const notification = new Notification(sender, {
+      body: preview ? `${subject}\n${preview}` : subject,
+      icon: "/favicon.ico",
+      badge: "/favicon.ico",
+      tag: `onion-mail-${message.id || Date.now()}`,
+      renotify: false,
+    });
+    notification.onclick = () => {
+      try {
+        window.focus();
+        if (window.location.pathname !== "/correo") window.location.assign("/correo");
+      } catch {
+        // noop
+      }
+      notification.close();
+    };
+  } catch {
+    // No bloquear correo por una notificación del SO.
+  }
+}
+
+async function pollMailWatcher() {
+  if (MAIL_WATCHER.polling || !notificationUiState().enabled || !MAIL_WATCHER.inboxFolderId) return;
+  MAIL_WATCHER.polling = true;
+  try {
+    const result = await CorreoApi.messages({ folder: MAIL_WATCHER.inboxFolderId, top: 12 });
+    const messages = result.messages || [];
+    if (!MAIL_WATCHER.seeded) {
+      rememberNotificationIds(messages);
+      MAIL_WATCHER.seeded = true;
+    } else {
+      const fresh = messages.filter((message) => message.id && !MAIL_WATCHER.knownIds.has(message.id));
+      rememberNotificationIds(messages);
+      [...fresh].reverse().forEach(showBrowserNotification);
+      if (fresh.length && typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("onion:correo-new-message", { detail: { count: fresh.length } }));
+      }
+    }
+    MAIL_WATCHER.consecutiveErrors = 0;
+  } catch {
+    MAIL_WATCHER.consecutiveErrors += 1;
+    if (MAIL_WATCHER.consecutiveErrors >= 5) {
+      stopMailWatcher();
+      return;
+    }
+  } finally {
+    MAIL_WATCHER.polling = false;
+    scheduleMailWatcher();
+  }
+}
+
+function configureMailWatcher({ inboxFolderId = "", mailbox = "", seedMessages = [] } = {}) {
+  if (!notificationUiState().enabled || !inboxFolderId) {
+    stopMailWatcher();
+    return;
+  }
+  const accountChanged = MAIL_WATCHER.inboxFolderId !== inboxFolderId || MAIL_WATCHER.mailbox !== mailbox;
+  MAIL_WATCHER.inboxFolderId = inboxFolderId;
+  MAIL_WATCHER.mailbox = mailbox;
+  if (accountChanged) {
+    MAIL_WATCHER.knownIds.clear();
+    MAIL_WATCHER.seeded = false;
+  }
+  if (!MAIL_WATCHER.seeded && seedMessages.length) {
+    rememberNotificationIds(seedMessages.slice(0, 20));
+    MAIL_WATCHER.seeded = true;
+  }
+  scheduleMailWatcher(1500);
+}
+
+async function requestNotifications() {
+  if (!notificationSupported()) return { enabled: false, reason: "unsupported" };
+  let permission = Notification.permission;
+  if (permission === "default") permission = await Notification.requestPermission();
+  const enabled = permission === "granted";
+  setNotificationPreference(enabled);
+  if (!enabled) stopMailWatcher();
+  return { enabled, reason: permission };
 }
 
 function createCorreoController(host, context = {}) {
@@ -104,9 +357,13 @@ function createCorreoController(host, context = {}) {
   let searchTimer = null;
   let listSequence = 0;
   let readerSequence = 0;
+  let infiniteScheduled = false;
 
   const state = {
     status: Object.freeze({ connected: false, healthy: null, mailbox: "" }),
+    statusKnown: false,
+    accountUser: readOnionUser(),
+    notifications: notificationUiState(),
     folders: [],
     messages: [],
     selectedFolderId: "",
@@ -119,9 +376,12 @@ function createCorreoController(host, context = {}) {
     nextCursor: "",
     loading: true,
     loadingMessages: false,
+    loadingMore: false,
     loadingReader: false,
     busyAction: "",
   };
+
+  cloneCacheIntoState(state);
 
   function apiOptions(extra = {}) {
     return { signal, ...extra };
@@ -137,13 +397,11 @@ function createCorreoController(host, context = {}) {
   function toast(message = "", tone = "info", timeout = 4200) {
     const stack = host.querySelector("[data-correo-toasts]");
     if (!stack || destroyed) return;
-
     const item = document.createElement("div");
     item.className = `correo-toast is-${tone}`;
     item.setAttribute("role", tone === "error" ? "alert" : "status");
     item.innerHTML = `<span>${tone === "error" ? icon("warning") : tone === "success" ? icon("check") : icon("mail")}</span><strong>${escapeHtml(cleanText(message, "Correo actualizado."))}</strong>`;
     stack.appendChild(item);
-
     requestAnimationFrame(() => item.classList.add("is-visible"));
     setTimeout(() => {
       item.classList.remove("is-visible");
@@ -153,6 +411,8 @@ function createCorreoController(host, context = {}) {
 
   function renderAll() {
     if (destroyed) return;
+    state.accountUser = readOnionUser();
+    state.notifications = notificationUiState();
     host.innerHTML = renderShell(state);
     host.dataset.view = "correo";
     host.setAttribute("data-correo-host", "true");
@@ -160,7 +420,20 @@ function createCorreoController(host, context = {}) {
 
   function renderAccount() {
     const target = host.querySelector("[data-correo-account-card]");
-    if (target) target.innerHTML = renderConnectionCard(state.status);
+    if (!target) return;
+    state.accountUser = readOnionUser();
+    state.notifications = notificationUiState();
+    target.innerHTML = renderConnectionCard(state.status, state.accountUser, state.notifications);
+  }
+
+  function syncNotificationHeader() {
+    state.notifications = notificationUiState();
+    const button = host.querySelector(".correo-list-utilities [data-correo-action='notifications']");
+    if (!button) return;
+    const enabled = state.notifications.enabled === true;
+    button.classList.toggle("is-active", enabled);
+    button.setAttribute("aria-label", enabled ? "Notificaciones activadas" : "Activar notificaciones");
+    button.title = enabled ? "Notificaciones activadas" : "Activar notificaciones";
   }
 
   function renderFolders() {
@@ -171,37 +444,36 @@ function createCorreoController(host, context = {}) {
   function renderList() {
     const target = host.querySelector("[data-correo-message-list]");
     if (target) {
-      target.setAttribute("aria-busy", state.loadingMessages ? "true" : "false");
+      const previousScrollTop = target.scrollTop;
+      target.setAttribute("aria-busy", state.loadingMessages || state.loadingMore ? "true" : "false");
       target.innerHTML = state.loadingMessages
-        ? Array.from({ length: 6 }, (_, index) => `<div class="correo-message-skeleton" aria-hidden="true" style="--i:${index}"><span></span><div><i></i><i></i><i></i></div></div>`).join("")
-        : renderMessageRows(state.messages, state.selectedMessageId);
+        ? Array.from({ length: 7 }, (_, index) => `<div class="correo-message-skeleton" aria-hidden="true" style="--i:${index}"><span></span><div><i></i><i></i><i></i></div></div>`).join("")
+        : `${renderMessageRows(state.messages, state.selectedMessageId)}${state.loadingMore ? `<div class="correo-infinite-loader">${icon("spinner")}<span>Cargando correos anteriores…</span></div>` : ""}`;
+      if (!state.loadingMessages) target.scrollTop = previousScrollTop;
     }
 
+    const folder = state.folders.find((item) => item.id === state.selectedFolderId);
+    const total = Math.max(Number(folder?.totalItemCount) || 0, state.messages.length);
     const count = host.querySelector("[data-correo-count]");
-    if (count) count.textContent = `${state.messages.length} ${state.messages.length === 1 ? "mensaje" : "mensajes"}`;
-
+    if (count) count.textContent = `${total} ${total === 1 ? "mensaje" : "mensajes"}`;
     const title = host.querySelector("[data-correo-folder-title]");
     if (title) title.textContent = state.selectedFolderName || "Correo";
-
-    const pagination = host.querySelector("[data-correo-pagination]");
-    if (pagination) pagination.hidden = !state.nextCursor;
+    writeViewCache(state);
   }
 
   function renderReaderRegion() {
     const target = host.querySelector("[data-correo-reader]");
     if (target) target.innerHTML = renderReader(state.selectedMessage, state.attachments, state.loadingReader);
+    writeViewCache(state);
   }
 
   function setBusy(action = "") {
     state.busyAction = action;
     const modal = host.querySelector("[data-correo-compose-form]");
-    if (modal) {
-      for (const element of modal.querySelectorAll("button, input, textarea")) {
-        element.disabled = Boolean(action);
-      }
-      const status = modal.querySelector("[data-correo-compose-status]");
-      if (status) status.textContent = action ? "Procesando…" : "";
-    }
+    if (!modal) return;
+    for (const element of modal.querySelectorAll("button, input, textarea")) element.disabled = Boolean(action);
+    const status = modal.querySelector("[data-correo-compose-status]");
+    if (status) status.textContent = action ? "Procesando…" : "";
   }
 
   function consumeOauthQuery() {
@@ -214,52 +486,55 @@ function createCorreoController(host, context = {}) {
         : microsoft === "error"
           ? { message: `Microsoft no pudo completar la conexión${code ? ` · ${code}` : ""}.`, tone: "error", timeout: 6500 }
           : null;
-
       if (microsoft || code) {
         url.searchParams.delete("microsoft");
         url.searchParams.delete("code");
         history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}`);
       }
-
       return result;
     } catch {
       return null;
     }
   }
 
-  async function loadStatus({ probe = false, initial = false } = {}) {
+  async function loadStatus({ probe = false } = {}) {
     try {
-      state.loading = initial;
-      if (initial) renderAll();
-      state.status = await CorreoApi.getStatus(apiOptions({ probe }));
+      const next = await CorreoApi.getStatus(apiOptions({ probe }));
+      state.statusKnown = true;
+      state.status = next;
+      state.loading = false;
 
-      if (state.status.connected) {
-        await loadWorkspace({ initial: true });
+      if (next.connected) {
+        writeViewCache(state);
+        if (!host.querySelector(".correo-workspace") || host.querySelector(".correo-workspace--boot")) renderAll();
+        await loadWorkspace({ initial: false });
       } else {
-        state.loading = false;
+        stopMailWatcher({ clear: true });
+        clearViewCache();
         state.folders = [];
         state.messages = [];
         state.selectedMessage = null;
+        state.attachments = [];
         renderAll();
       }
     } catch (error) {
       if (signal.aborted) return;
       state.loading = false;
-      state.status = Object.freeze({ connected: false, healthy: false, mailbox: "" });
-      renderAll();
-      notice(errorMessage(error, "No se pudo comprobar la conexión con Microsoft."), "error");
+      if (!state.statusKnown) {
+        state.statusKnown = true;
+        state.status = Object.freeze({ connected: false, healthy: false, mailbox: "" });
+        renderAll();
+      } else if (state.status.connected) {
+        state.status = Object.freeze({ ...state.status, healthy: false });
+        renderAccount();
+      }
       toast(errorMessage(error, "No se pudo comprobar Microsoft 365."), "error");
     }
   }
 
   async function loadWorkspace({ initial = false } = {}) {
-    if (initial) {
-      state.loading = false;
-      renderAll();
-    }
-
+    if (initial && !state.status.connected) return;
     notice(`Sincronizando ${state.status.mailbox || "Microsoft 365"}…`);
-
     try {
       const [folders, profile] = await Promise.all([
         CorreoApi.folders(apiOptions()),
@@ -267,41 +542,60 @@ function createCorreoController(host, context = {}) {
       ]);
 
       if (profile?.displayName && profile.displayName !== state.status.displayName) {
-        state.status = Object.freeze({ ...state.status, displayName: profile.displayName });
+        state.status = Object.freeze({ ...state.status, displayName: profile.displayName, healthy: true });
+      } else if (state.status.healthy === false) {
+        state.status = Object.freeze({ ...state.status, healthy: true });
       }
 
       state.folders = sortFolders(folders);
       const selectedExists = state.folders.some((folder) => folder.id === state.selectedFolderId);
-      const first = selectedExists
-        ? state.folders.find((folder) => folder.id === state.selectedFolderId)
-        : findInbox(state.folders);
-
+      const first = selectedExists ? state.folders.find((folder) => folder.id === state.selectedFolderId) : findInbox(state.folders);
       state.selectedFolderId = first?.id || "inbox";
       state.selectedFolderName = first?.displayName || "Bandeja de entrada";
 
       renderAccount();
       renderFolders();
-      await loadMessages({ openFirst: true });
+      await loadMessages({ openFirst: !state.selectedMessageId });
+
+      const inbox = findInbox(state.folders);
+      configureMailWatcher({
+        inboxFolderId: inbox?.id || "",
+        mailbox: state.status.mailbox || "",
+        seedMessages: inbox?.id === state.selectedFolderId ? state.messages : [],
+      });
       notice(`Outlook conectado · ${state.status.mailbox || "Microsoft 365"}`, "success");
+      writeViewCache(state);
     } catch (error) {
       if (signal.aborted) return;
       const code = errorCode(error);
       if (/MICROSOFT_(NOT_CONNECTED|TOKEN|CACHE|ACCOUNT)/.test(code)) {
+        state.statusKnown = true;
         state.status = Object.freeze({ ...state.status, connected: false, healthy: false });
+        stopMailWatcher({ clear: true });
+        clearViewCache();
         renderAll();
+      } else {
+        state.status = Object.freeze({ ...state.status, healthy: false });
+        renderAccount();
       }
-      notice(errorMessage(error, "No se pudo sincronizar el correo."), "error");
-      toast(errorMessage(error, "No se pudo cargar Outlook."), "error");
+      toast(errorMessage(error, "No se pudo sincronizar Outlook."), "error");
     }
   }
 
   async function loadMessages({ append = false, openFirst = false } = {}) {
     if (!state.status.connected) return;
+    if (append && (!state.nextCursor || state.loadingMore || state.loadingMessages)) return;
     const sequence = ++listSequence;
 
-    if (!append) {
+    if (append) {
+      state.loadingMore = true;
+      renderList();
+    } else {
       state.loadingMessages = true;
+      state.loadingMore = false;
       state.nextCursor = "";
+      const list = host.querySelector("[data-correo-message-list]");
+      if (list) list.scrollTop = 0;
       renderList();
     }
 
@@ -315,12 +609,12 @@ function createCorreoController(host, context = {}) {
       }));
 
       if (sequence !== listSequence || destroyed) return;
-
       state.messages = append
         ? [...state.messages, ...result.messages.filter((item) => !state.messages.some((current) => current.id === item.id))]
         : [...result.messages];
       state.nextCursor = result.nextCursor;
       state.loadingMessages = false;
+      state.loadingMore = false;
 
       if (!state.messages.some((item) => item.id === state.selectedMessageId)) {
         state.selectedMessageId = "";
@@ -329,15 +623,12 @@ function createCorreoController(host, context = {}) {
       }
 
       renderList();
-
-      if (openFirst && !state.selectedMessageId && state.messages[0]?.id) {
-        await openMessage(state.messages[0].id);
-      } else {
-        renderReaderRegion();
-      }
+      if (openFirst && !state.selectedMessageId && state.messages[0]?.id) await openMessage(state.messages[0].id);
+      else renderReaderRegion();
     } catch (error) {
       if (sequence !== listSequence || signal.aborted) return;
       state.loadingMessages = false;
+      state.loadingMore = false;
       renderList();
       toast(errorMessage(error, "No se pudieron cargar los mensajes."), "error");
     }
@@ -346,7 +637,6 @@ function createCorreoController(host, context = {}) {
   async function openMessage(id = "") {
     const messageId = cleanText(id, "");
     if (!messageId) return;
-
     const sequence = ++readerSequence;
     state.selectedMessageId = messageId;
     state.loadingReader = true;
@@ -359,20 +649,15 @@ function createCorreoController(host, context = {}) {
       const summary = state.messages.find((item) => item.id === messageId) || null;
       const [detail, attachments] = await Promise.all([
         CorreoApi.message(messageId, apiOptions()),
-        summary?.hasAttachments
-          ? CorreoApi.attachments(messageId, apiOptions()).catch(() => [])
-          : Promise.resolve([]),
+        summary?.hasAttachments ? CorreoApi.attachments(messageId, apiOptions()).catch(() => []) : Promise.resolve([]),
       ]);
-
       if (sequence !== readerSequence || destroyed) return;
 
       state.selectedMessage = detail;
       state.attachments = [...attachments];
       state.loadingReader = false;
-
       const index = state.messages.findIndex((item) => item.id === messageId);
       if (index >= 0) state.messages[index] = detail;
-
       renderList();
       renderReaderRegion();
 
@@ -393,7 +678,7 @@ function createCorreoController(host, context = {}) {
           renderList();
           renderReaderRegion();
         } catch {
-          // Leer el mensaje no debe fallar porque no se pudo marcar leído.
+          // El mensaje sigue siendo legible aunque falle el marcado de leído.
         }
       }
     } catch (error) {
@@ -408,29 +693,27 @@ function createCorreoController(host, context = {}) {
   async function connect() {
     if (state.busyAction) return;
     state.busyAction = "connect";
-    notice("Preparando autorización segura con Microsoft…");
-
     try {
       const connection = await CorreoApi.connect(apiOptions());
       window.location.assign(connection.authorizationUrl);
     } catch (error) {
       state.busyAction = "";
-      toast(errorMessage(error, "No se pudo iniciar la autorización de Microsoft."), "error");
-      notice("No se pudo iniciar Microsoft OAuth.", "error");
+      toast(errorMessage(error, "No se pudo iniciar Microsoft OAuth."), "error");
     }
   }
 
   async function disconnect() {
-    if (!window.confirm("¿Desconectar Outlook de Onion Support? Tendrás que autorizarlo de nuevo para volver a usar correo.")) return;
-
+    if (!window.confirm("¿Desconectar esta cuenta de Outlook de Onion Support?")) return;
     try {
-      notice("Desconectando Outlook…");
       await CorreoApi.disconnect(apiOptions());
+      state.statusKnown = true;
       state.status = Object.freeze({ connected: false, healthy: null, mailbox: state.status.mailbox });
       state.folders = [];
       state.messages = [];
       state.selectedMessage = null;
       state.attachments = [];
+      stopMailWatcher({ clear: true });
+      clearViewCache();
       renderAll();
       toast("Outlook desconectado.", "success");
     } catch (error) {
@@ -441,21 +724,17 @@ function createCorreoController(host, context = {}) {
   function openCompose(mode = "compose") {
     const modalRoot = host.querySelector("[data-correo-modal-root]");
     if (!modalRoot) return;
-
     const message = state.selectedMessage || {};
     let input = { mode, messageId: message.id || "" };
-
-    if (mode === "reply") {
-      input = { ...input, body: "" };
-    } else if (mode === "reply-all") {
-      input = { ...input, body: "" };
-    } else if (mode === "forward") {
-      input = { ...input, subject: message.subject || "", body: "" };
-    }
-
+    if (mode === "forward") input = { ...input, subject: message.subject || "", body: "" };
     modalRoot.innerHTML = renderComposeModal(input);
     document.documentElement.classList.add("correo-modal-open");
-    requestAnimationFrame(() => modalRoot.querySelector("input, textarea")?.focus());
+    requestAnimationFrame(() => {
+      const preferred = mode === "compose" || mode === "forward"
+        ? modalRoot.querySelector("input[name='to']")
+        : modalRoot.querySelector("textarea[name='body']");
+      preferred?.focus();
+    });
   }
 
   function closeModal() {
@@ -471,7 +750,6 @@ function createCorreoController(host, context = {}) {
     const cc = parseRecipients(data.get("cc"));
     const subject = cleanText(data.get("subject"), "");
     const body = String(data.get("body") ?? "");
-
     for (const address of [...to, ...cc]) {
       if (!isLikelyEmail(address)) {
         const error = new Error(`Dirección de correo no válida: ${address}`);
@@ -479,7 +757,6 @@ function createCorreoController(host, context = {}) {
         throw error;
       }
     }
-
     return { to, cc, subject, body, importance: "normal" };
   }
 
@@ -494,8 +771,12 @@ function createCorreoController(host, context = {}) {
     const messageId = cleanText(form.dataset.correoMessageId, "");
 
     try {
-      setBusy("send");
+      // IMPORTANTE: FormData ignora controles disabled. Capturamos antes de setBusy().
       const payload = composePayload(form);
+      const files = selectedFiles(form);
+      if ((mode === "compose" || mode === "forward") && !payload.to.length) throw new Error("Indica al menos un destinatario válido.");
+      if (files.some((file) => file.size > 25 * 1024 * 1024)) throw new Error("Cada adjunto debe ser de 25 MB o menos.");
+      setBusy("send");
 
       if (mode === "reply" || mode === "reply-all") {
         if (!messageId) throw new Error("No hay mensaje al que responder.");
@@ -504,30 +785,21 @@ function createCorreoController(host, context = {}) {
         toast("Respuesta enviada.", "success");
       } else if (mode === "forward") {
         if (!messageId) throw new Error("No hay mensaje que reenviar.");
-        if (!payload.to.length) throw new Error("Indica al menos un destinatario.");
         await CorreoApi.forward(messageId, { to: payload.to, comment: payload.body }, apiOptions());
         toast("Mensaje reenviado.", "success");
+      } else if (!files.length) {
+        await CorreoApi.send(payload, apiOptions());
+        toast("Correo enviado.", "success");
       } else {
-        if (!payload.to.length) throw new Error("Indica al menos un destinatario.");
-        const files = selectedFiles(form);
-        if (files.some((file) => file.size > 25 * 1024 * 1024)) {
-          throw new Error("Cada adjunto debe ser de 25 MB o menos.");
+        const draft = await CorreoApi.createDraft(payload, apiOptions());
+        if (!draft.id) throw new Error("No se pudo crear el borrador para adjuntar archivos.");
+        const status = form.querySelector("[data-correo-compose-status]");
+        for (let index = 0; index < files.length; index += 1) {
+          if (status) status.textContent = `Subiendo ${index + 1}/${files.length}: ${files[index].name}`;
+          await CorreoApi.uploadAttachment(draft.id, files[index], apiOptions());
         }
-
-        if (!files.length) {
-          await CorreoApi.send(payload, apiOptions());
-        } else {
-          const draft = await CorreoApi.createDraft(payload, apiOptions());
-          if (!draft.id) throw new Error("No se pudo crear el borrador para adjuntar archivos.");
-
-          const status = form.querySelector("[data-correo-compose-status]");
-          for (let index = 0; index < files.length; index += 1) {
-            if (status) status.textContent = `Subiendo ${index + 1}/${files.length}: ${files[index].name}`;
-            await CorreoApi.uploadAttachment(draft.id, files[index], apiOptions());
-          }
-          if (status) status.textContent = "Enviando mensaje…";
-          await CorreoApi.sendDraft(draft.id, apiOptions());
-        }
+        if (status) status.textContent = "Enviando mensaje…";
+        await CorreoApi.sendDraft(draft.id, apiOptions());
         toast("Correo enviado.", "success");
       }
 
@@ -545,25 +817,25 @@ function createCorreoController(host, context = {}) {
   async function saveDraft(form) {
     if (state.busyAction) return;
     try {
-      setBusy("draft");
       const payload = composePayload(form);
       const files = selectedFiles(form);
+      for (const file of files) if (file.size > 25 * 1024 * 1024) throw new Error(`${file.name} supera 25 MB.`);
+      setBusy("draft");
       const draft = await CorreoApi.createDraft(payload, apiOptions());
       if (!draft.id) throw new Error("No se pudo crear el borrador.");
-
       const status = form.querySelector("[data-correo-compose-status]");
       for (let index = 0; index < files.length; index += 1) {
-        if (files[index].size > 25 * 1024 * 1024) throw new Error(`${files[index].name} supera 25 MB.`);
         if (status) status.textContent = `Adjuntando ${index + 1}/${files.length}…`;
         await CorreoApi.uploadAttachment(draft.id, files[index], apiOptions());
       }
-
       setBusy("");
       closeModal();
       toast("Borrador guardado en Outlook.", "success");
       await loadMessages({ openFirst: false });
     } catch (error) {
       setBusy("");
+      const status = form.querySelector("[data-correo-compose-status]");
+      if (status) status.textContent = errorMessage(error);
       toast(errorMessage(error, "No se pudo guardar el borrador."), "error");
     }
   }
@@ -588,7 +860,6 @@ function createCorreoController(host, context = {}) {
     const message = state.selectedMessage;
     if (!message?.id) return;
     if (!window.confirm(`¿Eliminar “${message.subject || "este mensaje"}”?`)) return;
-
     try {
       await CorreoApi.deleteMessage(message.id, apiOptions());
       state.messages = state.messages.filter((item) => item.id !== message.id);
@@ -616,7 +887,6 @@ function createCorreoController(host, context = {}) {
   async function moveSelected(destinationId = "") {
     const id = state.selectedMessage?.id;
     if (!id || !destinationId) return;
-
     try {
       await CorreoApi.moveMessage(id, destinationId, apiOptions());
       host.querySelector("[data-correo-move-popover]")?.remove();
@@ -637,8 +907,6 @@ function createCorreoController(host, context = {}) {
     const messageId = cleanText(button.dataset.correoMessageId, "");
     const attachmentId = cleanText(button.dataset.correoAttachmentId, "");
     if (!messageId || !attachmentId) return;
-
-    const original = button.innerHTML;
     button.disabled = true;
     button.classList.add("is-loading");
     try {
@@ -649,7 +917,6 @@ function createCorreoController(host, context = {}) {
     } finally {
       button.disabled = false;
       button.classList.remove("is-loading");
-      if (!button.innerHTML) button.innerHTML = original;
     }
   }
 
@@ -657,7 +924,6 @@ function createCorreoController(host, context = {}) {
     const id = state.selectedMessage?.id;
     if (!id || !state.selectedMessage?.isDraft) return;
     if (!window.confirm("¿Enviar este borrador ahora?")) return;
-
     try {
       await CorreoApi.sendDraft(id, apiOptions());
       toast("Borrador enviado.", "success");
@@ -684,11 +950,44 @@ function createCorreoController(host, context = {}) {
     await loadMessages({ openFirst: true });
   }
 
+  function toggleAccountMenu(button) {
+    const wrap = button.closest("[data-correo-account-wrap]");
+    const menu = wrap?.querySelector("[data-correo-account-menu]");
+    if (!menu) return;
+    const open = menu.hidden;
+    host.querySelectorAll("[data-correo-account-menu]").forEach((item) => { item.hidden = true; });
+    menu.hidden = !open;
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  function closeAccountMenu() {
+    const menu = host.querySelector("[data-correo-account-menu]:not([hidden])");
+    if (!menu) return;
+    menu.hidden = true;
+    host.querySelector("[data-correo-action='account-menu']")?.setAttribute("aria-expanded", "false");
+  }
+
+  async function toggleNotifications() {
+    closeAccountMenu();
+    const result = await requestNotifications();
+    state.notifications = notificationUiState();
+    renderAccount();
+    syncNotificationHeader();
+    if (result.enabled) {
+      const inbox = findInbox(state.folders);
+      configureMailWatcher({ inboxFolderId: inbox?.id || "", mailbox: state.status.mailbox || "", seedMessages: inbox?.id === state.selectedFolderId ? state.messages : [] });
+      toast("Notificaciones de correo activadas.", "success");
+    } else if (result.reason === "unsupported") {
+      toast("Este navegador no admite notificaciones de escritorio.", "error");
+    } else {
+      toast("El navegador no concedió permiso para notificaciones.", "error");
+    }
+  }
+
   async function onClick(event) {
     if (destroyed) return;
     const target = event.target?.closest?.("[data-correo-action]");
     if (!target || !host.contains(target)) return;
-
     const action = cleanText(target.dataset.correoAction, "");
     if (!action) return;
 
@@ -699,7 +998,6 @@ function createCorreoController(host, context = {}) {
     if (action === "close-modal") return closeModal();
     if (action === "folder") return selectFolder(target);
     if (action === "select-message") return openMessage(target.dataset.correoMessageId);
-    if (action === "load-more") return loadMessages({ append: true, openFirst: false });
     if (action === "reply") return openCompose("reply");
     if (action === "reply-all") return openCompose("reply-all");
     if (action === "forward") return openCompose("forward");
@@ -709,11 +1007,17 @@ function createCorreoController(host, context = {}) {
     if (action === "move-menu") return openMoveMenu(target);
     if (action === "move-to") return moveSelected(target.dataset.correoDestinationId);
     if (action === "download-attachment") return downloadAttachment(target);
+    if (action === "send-open-draft") return sendOpenDraft();
+    if (action === "account-menu") return toggleAccountMenu(target);
+    if (action === "notifications") return toggleNotifications();
+    if (action === "add-account") {
+      closeAccountMenu();
+      return toast("Multicuenta ya tiene la interfaz preparada. El backend productivo actual sigue vinculado a una única cuenta Microsoft; no voy a simular una segunda conexión.", "info", 7000);
+    }
     if (action === "save-draft") {
       const form = target.closest("[data-correo-compose-form]");
       if (form) return saveDraft(form);
     }
-    if (action === "send-open-draft") return sendOpenDraft();
     if (action === "filter") {
       const next = cleanText(target.dataset.correoFilter, "all");
       state.activeFilter = ["all", "unread", "flagged"].includes(next) ? next : "all";
@@ -732,7 +1036,6 @@ function createCorreoController(host, context = {}) {
   function onInput(event) {
     if (destroyed) return;
     const target = event.target;
-
     if (target?.matches?.("[data-correo-search]")) {
       state.searchTerm = cleanText(target.value, "");
       if (state.searchTerm) {
@@ -749,13 +1052,11 @@ function createCorreoController(host, context = {}) {
     }
 
     if (target?.matches?.("[data-correo-attachments-input]")) {
-      const summary = target.closest(".correo-file-picker")?.querySelector("[data-correo-file-summary]");
+      const summary = target.closest(".correo-compose-attachments")?.querySelector("[data-correo-file-summary]");
       const files = [...(target.files || [])];
       if (summary) {
         const total = files.reduce((sum, file) => sum + (Number(file.size) || 0), 0);
-        summary.textContent = files.length
-          ? `${files.length} archivo${files.length === 1 ? "" : "s"} · ${formatBytes(total)}`
-          : "Sin adjuntos";
+        summary.textContent = files.length ? `${files.length} archivo${files.length === 1 ? "" : "s"} · ${formatBytes(total)}` : "Sin adjuntos";
       }
     }
   }
@@ -767,20 +1068,31 @@ function createCorreoController(host, context = {}) {
     sendCompose(form);
   }
 
+  function onScroll(event) {
+    const list = event.target;
+    if (!list?.matches?.("[data-correo-message-list]") || !state.nextCursor || state.loadingMore || state.loadingMessages) return;
+    if (list.scrollHeight - list.scrollTop - list.clientHeight > 260) return;
+    if (infiniteScheduled) return;
+    infiniteScheduled = true;
+    requestAnimationFrame(() => {
+      infiniteScheduled = false;
+      loadMessages({ append: true, openFirst: false });
+    });
+  }
+
   function onKeydown(event) {
     if (destroyed) return;
     const modalOpen = Boolean(host.querySelector("[data-correo-compose-form]"));
-
     if (event.key === "Escape") {
       if (modalOpen && !state.busyAction) {
         event.preventDefault();
         closeModal();
       } else {
         host.querySelector("[data-correo-move-popover]")?.remove();
+        closeAccountMenu();
       }
       return;
     }
-
     if ((event.metaKey || event.ctrlKey) && safeLower(event.key) === "k") {
       const search = host.querySelector("[data-correo-search]");
       if (search && state.status.connected) {
@@ -790,7 +1102,6 @@ function createCorreoController(host, context = {}) {
       }
       return;
     }
-
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && modalOpen) {
       const form = host.querySelector("[data-correo-compose-form]");
       if (form && !state.busyAction) {
@@ -802,49 +1113,59 @@ function createCorreoController(host, context = {}) {
 
   function onDocumentClick(event) {
     const popover = host.querySelector("[data-correo-move-popover]");
-    if (!popover) return;
-    if (popover.contains(event.target) || event.target?.closest?.("[data-correo-action='move-menu']")) return;
-    popover.remove();
+    if (popover && !popover.contains(event.target) && !event.target?.closest?.("[data-correo-action='move-menu']")) popover.remove();
+    const accountWrap = event.target?.closest?.("[data-correo-account-wrap]");
+    if (!accountWrap) closeAccountMenu();
+  }
+
+  function onNewMail() {
+    if (destroyed || !mounted || !state.status.connected) return;
+    const inbox = findInbox(state.folders);
+    if (inbox?.id === state.selectedFolderId) loadMessages({ openFirst: false });
+    CorreoApi.folders(apiOptions()).then((folders) => {
+      if (destroyed) return;
+      state.folders = sortFolders(folders);
+      renderFolders();
+      writeViewCache(state);
+    }).catch(() => {});
   }
 
   async function mount() {
     if (destroyed || mounted || !host) return controller;
     if (externalSignal?.aborted) return controller;
-
-    if (externalSignal) {
-      externalSignal.addEventListener("abort", () => aborter.abort(), { once: true });
-    }
+    if (externalSignal) externalSignal.addEventListener("abort", () => aborter.abort(), { once: true });
 
     host.addEventListener("click", onClick);
     host.addEventListener("input", onInput);
     host.addEventListener("submit", onSubmit);
+    host.addEventListener("scroll", onScroll, true);
     document.addEventListener("keydown", onKeydown);
     document.addEventListener("click", onDocumentClick);
+    window.addEventListener("onion:correo-new-message", onNewMail);
 
     mounted = true;
     renderAll();
     const oauthNotice = consumeOauthQuery();
-    await loadStatus({ probe: true, initial: true });
-    if (oauthNotice && !destroyed) {
-      toast(oauthNotice.message, oauthNotice.tone, oauthNotice.timeout);
-    }
+    await loadStatus({ probe: true });
+    if (oauthNotice && !destroyed) toast(oauthNotice.message, oauthNotice.tone, oauthNotice.timeout);
     return controller;
   }
 
   function destroy(options = {}) {
     if (destroyed) return true;
+    writeViewCache(state);
     destroyed = true;
     mounted = false;
     clearTimeout(searchTimer);
     aborter.abort();
-
     host.removeEventListener("click", onClick);
     host.removeEventListener("input", onInput);
     host.removeEventListener("submit", onSubmit);
+    host.removeEventListener("scroll", onScroll, true);
     document.removeEventListener("keydown", onKeydown);
     document.removeEventListener("click", onDocumentClick);
+    window.removeEventListener("onion:correo-new-message", onNewMail);
     document.documentElement.classList.remove("correo-modal-open");
-
     if (options?.clear === true || options?.keepDom === false) host.replaceChildren();
     if (INSTANCES.get(host) === controller) INSTANCES.delete(host);
     return true;
@@ -857,7 +1178,7 @@ function createCorreoController(host, context = {}) {
     destroy,
     unmount: destroy,
     async refresh() {
-      await loadStatus({ probe: true, initial: false });
+      await loadStatus({ probe: true });
       return controller.getSnapshot();
     },
     getSnapshot() {
@@ -874,6 +1195,8 @@ function createCorreoController(host, context = {}) {
         selectedMessageId: state.selectedMessageId,
         searchTerm: state.searchTerm,
         activeFilter: state.activeFilter,
+        notifications: notificationUiState().enabled,
+        infiniteScroll: true,
         networkEnabled: true,
         microsoftGraph: true,
       });
@@ -885,13 +1208,7 @@ function createCorreoController(host, context = {}) {
 
 export function CorreoView(host = null, context = {}) {
   if (!isDomNode(host)) return null;
-
-  try {
-    INSTANCES.get(host)?.destroy?.({ keepDom: false });
-  } catch {
-    // noop
-  }
-
+  try { INSTANCES.get(host)?.destroy?.({ keepDom: false }); } catch { /* noop */ }
   const controller = createCorreoController(host, context && typeof context === "object" ? context : {});
   INSTANCES.set(host, controller);
   lastInstance = controller;
@@ -900,30 +1217,14 @@ export function CorreoView(host = null, context = {}) {
 }
 
 export function destroy(options = {}) {
-  try {
-    return Boolean(lastInstance?.destroy?.(options));
-  } catch {
-    return false;
-  }
+  try { return Boolean(lastInstance?.destroy?.(options)); } catch { return false; }
 }
 
 export function getSnapshot() {
   try {
-    return lastInstance?.getSnapshot?.() || Object.freeze({
-      version: CORREO_VIEW_VERSION,
-      mounted: false,
-      connected: false,
-      networkEnabled: true,
-      microsoftGraph: true,
-    });
+    return lastInstance?.getSnapshot?.() || Object.freeze({ version: CORREO_VIEW_VERSION, mounted: false, connected: Boolean(VIEW_CACHE.status?.connected), networkEnabled: true, microsoftGraph: true });
   } catch {
-    return Object.freeze({
-      version: CORREO_VIEW_VERSION,
-      mounted: false,
-      connected: false,
-      networkEnabled: true,
-      microsoftGraph: true,
-    });
+    return Object.freeze({ version: CORREO_VIEW_VERSION, mounted: false, connected: false, networkEnabled: true, microsoftGraph: true });
   }
 }
 

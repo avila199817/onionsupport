@@ -113,15 +113,6 @@ body.public-support-submission-active {
   animation: public-support-submit-spin .82s linear infinite;
 }
 
-.public-support-submit-spinner::after {
-  content: "";
-  inline-size: 22px;
-  block-size: 22px;
-  border-radius: 999px;
-  background: radial-gradient(circle at 38% 30%, #b9f6ff, #2f9eff 60%, #1558eb);
-  box-shadow: 0 0 22px rgb(68 202 255 / .36);
-}
-
 .public-support-submit-overlay-kicker {
   margin: 0;
   color: #69e5ff;

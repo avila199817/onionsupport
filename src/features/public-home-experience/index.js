@@ -2,16 +2,13 @@
    Onion Support - Public Home Experience
    Archivo: /src/features/public-home-experience/index.js
 
-   Responsabilidad:
-   - Remate UX de la landing pública sin duplicar el intake.
-   - Fijar el orden Login/Cuenta -> Abrir incidencia.
-   - Añadir accesos rápidos a la cuenta autenticada.
-   - Retirar el acceso de login/cuenta del footer.
-   - Formatear en vivo teléfonos españoles (+34 XXX XXX XXX).
-   - Añadir ayuda accesible de formato al campo teléfono.
-   - Normalizar la presentación de SVGs inline sin alterar su semántica.
-   - Logout mediante el módulo Auth canónico.
-   - Sin HTTP propio, sin storage y sin lógica de creación de incidencias.
+   Remate UX de la landing pública:
+   - Login/Cuenta siempre a la izquierda de "Abrir incidencia".
+   - Dropdown autenticado con accesos rápidos y cierre de sesión.
+   - Nombre compacto: "Nombre I." preservando tildes.
+   - Footer sin login/cuenta.
+   - Teléfono con placeholder gris y formato +34 XXX XXX XXX al escribir.
+   - SVGs inline afinados sin alterar su semántica.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -23,15 +20,14 @@ const HOME = "[data-public-home]";
 const FORM = "[data-public-support-form]";
 const PHONE = `${FORM} [name="phone"]`;
 const LOGIN = "[data-public-home-login]";
-const HEADER_LOGIN = `.public-home-nav-actions ${LOGIN}`;
-const FOOTER_LOGIN = `.public-home-footer ${LOGIN}`;
 const ACCOUNT_WRAP = "[data-public-home-account-wrap]";
 const ACCOUNT_MENU = "[data-public-home-account-menu]";
 const ACCOUNT_TOGGLE = "[data-public-home-account-toggle]";
 const LOGOUT_ACTION = "[data-public-home-logout]";
+
 const SPAIN_PREFIX = "+34";
 const SPAIN_PHONE_DEFAULT = "+34 ";
-const PHONE_EXAMPLE = "+34 612 345 678";
+const PHONE_PLACEHOLDER = "Ejemplo: +34 612 345 678";
 
 let observer = null;
 let retryTimer = 0;
@@ -46,24 +42,9 @@ function text(value = "", fallback = "") {
 }
 
 function object(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value))
+  return value && typeof value === "object" && !Array.isArray(value)
     ? value
     : null;
-}
-
-function safePath(value = "", fallback = "/") {
-  const raw = text(value, "");
-
-  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) {
-    return fallback;
-  }
-
-  try {
-    const url = new URL(raw, window.location.origin);
-    return `${url.pathname}${url.search}${url.hash}` || fallback;
-  } catch {
-    return fallback;
-  }
 }
 
 function appState() {
@@ -75,27 +56,41 @@ function appState() {
 }
 
 function currentUser() {
-  const current = appState();
-  return object(current.currentUser) || object(current.user);
+  const state = appState();
+  return object(state.currentUser) || object(state.user);
 }
 
-function isAuthenticated() {
-  const current = appState();
+function authenticated() {
+  const state = appState();
 
   try {
-    return current.authenticated === true || AppCore?.isAuthenticated?.() === true;
+    return state.authenticated === true || AppCore?.isAuthenticated?.() === true;
   } catch {
-    return current.authenticated === true;
+    return state.authenticated === true;
+  }
+}
+
+function safePath(value = "", fallback = "/") {
+  const raw = text(value, "");
+
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return fallback;
+
+  try {
+    const url = new URL(raw, window.location.origin);
+    if (url.origin !== window.location.origin) return fallback;
+    return `${url.pathname}${url.search}${url.hash}` || fallback;
+  } catch {
+    return fallback;
   }
 }
 
 function panelPath(link = null) {
-  const current = appState();
   const fromLink = safePath(link?.getAttribute?.("href") || "", "");
   if (fromLink && fromLink !== "/login") return fromLink;
 
+  const state = appState();
   const fromState = safePath(
-    current.homePath || current.defaultHome || current.postLoginTarget || "",
+    state.homePath || state.defaultHome || state.postLoginTarget || "",
     ""
   );
 
@@ -109,11 +104,50 @@ function panelPath(link = null) {
   return slug ? `/@${encodeURIComponent(slug)}` : "/dashboard";
 }
 
-function routeLink(label, href, extraClass = "") {
+function compactDisplayName(value = "") {
+  const clean = text(value, "");
+  if (!clean) return "";
+
+  const parts = clean.split(" ").filter(Boolean);
+  if (parts.length < 2) return parts[0];
+
+  const initial = Array.from(parts[1])[0]?.toLocaleUpperCase("es-ES") || "";
+  return initial ? `${parts[0]} ${initial}.` : parts[0];
+}
+
+function compactAccountIdentity(root = null) {
+  if (!root) return false;
+
+  let changed = false;
+
+  root.querySelectorAll(".public-support-account-name").forEach((node) => {
+    const original =
+      text(node.dataset.publicHomeFullName || "") || text(node.textContent || "");
+
+    if (!original) return;
+
+    if (!node.dataset.publicHomeFullName) {
+      node.dataset.publicHomeFullName = original;
+    }
+
+    const compact = compactDisplayName(original);
+
+    if (compact && text(node.textContent) !== compact) {
+      node.textContent = compact;
+      changed = true;
+    }
+
+    if (node.title !== original) node.title = original;
+  });
+
+  return changed;
+}
+
+function routeLink(label, href) {
   const link = document.createElement("a");
   const route = safePath(href, "/");
 
-  link.className = `public-home-account-menu-item ${extraClass}`.trim();
+  link.className = "public-home-account-menu-item";
   link.href = route;
   link.textContent = label;
   link.setAttribute("role", "menuitem");
@@ -125,7 +159,7 @@ function routeLink(label, href, extraClass = "") {
   return link;
 }
 
-function closeAccountMenu(wrapper = null, options = {}) {
+function closeAccountMenu(wrapper = null, restoreFocus = false) {
   if (!wrapper) return false;
 
   const menu = wrapper.querySelector(ACCOUNT_MENU);
@@ -136,7 +170,7 @@ function closeAccountMenu(wrapper = null, options = {}) {
   menu?.setAttribute("aria-hidden", "true");
   toggle?.setAttribute("aria-expanded", "false");
 
-  if (options.restoreFocus === true) {
+  if (restoreFocus) {
     try {
       toggle?.focus?.({ preventScroll: true });
     } catch {
@@ -147,24 +181,19 @@ function closeAccountMenu(wrapper = null, options = {}) {
   return true;
 }
 
-function closeAllAccountMenus(options = {}) {
-  if (typeof document === "undefined") return false;
-
+function closeAllAccountMenus(restoreFocus = false) {
   document.querySelectorAll(ACCOUNT_WRAP).forEach((wrapper) => {
-    closeAccountMenu(wrapper, options);
+    closeAccountMenu(wrapper, restoreFocus);
   });
-
-  return true;
 }
 
-function openAccountMenu(wrapper = null, options = {}) {
+function openAccountMenu(wrapper = null, focusFirst = false) {
   if (!wrapper) return false;
 
   closeAllAccountMenus();
 
   const menu = wrapper.querySelector(ACCOUNT_MENU);
   const toggle = wrapper.querySelector(ACCOUNT_TOGGLE);
-
   if (!menu || !toggle) return false;
 
   wrapper.classList.add("is-open");
@@ -172,13 +201,9 @@ function openAccountMenu(wrapper = null, options = {}) {
   menu.setAttribute("aria-hidden", "false");
   toggle.setAttribute("aria-expanded", "true");
 
-  if (options.focusFirst === true) {
-    const first = menu.querySelector("a[href], button:not([disabled])");
-    try {
-      first?.focus?.({ preventScroll: true });
-    } catch {
-      first?.focus?.();
-    }
+  if (focusFirst) {
+    const first = menu.querySelector('a[href], button:not([disabled])');
+    first?.focus?.();
   }
 
   return true;
@@ -192,34 +217,6 @@ function toggleAccountMenu(wrapper = null) {
     : openAccountMenu(wrapper);
 }
 
-function resetLoginLink(link = null) {
-  if (!link) return false;
-
-  const wrapper = link.closest(ACCOUNT_WRAP);
-
-  if (wrapper) {
-    wrapper.parentNode?.insertBefore(link, wrapper);
-    wrapper.remove();
-  }
-
-  link.classList.remove("public-support-account-link");
-  link.removeAttribute("aria-haspopup");
-  link.removeAttribute("aria-expanded");
-  delete link.dataset.publicHomeAccountToggle;
-
-  link.href = "/login";
-  link.dataset.spa = "true";
-  link.dataset.routerLink = "true";
-  link.dataset.route = "/login";
-  link.dataset.href = "/login";
-  link.setAttribute("aria-label", "Iniciar sesión");
-  if (text(link.textContent) !== "Iniciar sesión") {
-    link.textContent = "Iniciar sesión";
-  }
-
-  return true;
-}
-
 function buildAccountMenu(wrapper, link) {
   const menu = document.createElement("div");
   menu.className = "public-home-account-menu";
@@ -228,10 +225,8 @@ function buildAccountMenu(wrapper, link) {
   menu.setAttribute("aria-label", "Accesos rápidos de cuenta");
   menu.setAttribute("aria-hidden", "true");
 
-  const home = panelPath(link);
-
   menu.append(
-    routeLink("Inicio", home),
+    routeLink("Inicio", panelPath(link)),
     routeLink("Incidencias", "/incidencias"),
     routeLink("Facturas", "/facturas"),
     routeLink("Cuenta", "/cuenta")
@@ -255,19 +250,37 @@ function buildAccountMenu(wrapper, link) {
   return menu;
 }
 
+function resetAccountWrapper(link = null) {
+  if (!link) return false;
+
+  const wrapper = link.closest(ACCOUNT_WRAP);
+
+  if (wrapper) {
+    wrapper.parentNode?.insertBefore(link, wrapper);
+    wrapper.remove();
+  }
+
+  link.removeAttribute("aria-haspopup");
+  link.removeAttribute("aria-expanded");
+  delete link.dataset.publicHomeAccountToggle;
+
+  return true;
+}
+
 function ensureAccountMenu(root = null) {
   if (!root) return false;
 
-  const link = root.querySelector(HEADER_LOGIN);
-  if (!link) return false;
+  const actions = root.querySelector(".public-home-nav-actions");
+  const link = actions?.querySelector(LOGIN);
+  if (!actions || !link) return false;
 
-  const authenticated =
-    isAuthenticated() ||
+  const isAccount =
+    authenticated() ||
     root.dataset.publicSupportAuthenticated === "true" ||
     link.dataset.publicSupportAccount === "true";
 
-  if (!authenticated) {
-    resetLoginLink(link);
+  if (!isAccount) {
+    resetAccountWrapper(link);
     return false;
   }
 
@@ -287,12 +300,6 @@ function ensureAccountMenu(root = null) {
   link.setAttribute("aria-expanded", "false");
   link.setAttribute("aria-label", "Abrir accesos rápidos de cuenta");
 
-  /*
-    El enlace de identidad lo gestiona public-support. Aquí lo convertimos
-    únicamente en disparador de menú, por lo que retiramos los marcadores de
-    navegación del Router para evitar que un click abra el panel directamente.
-    El href se conserva como fallback semántico y para construir "Inicio".
-  */
   delete link.dataset.spa;
   delete link.dataset.routerLink;
   delete link.dataset.route;
@@ -303,20 +310,38 @@ function ensureAccountMenu(root = null) {
     label.textContent = "Accesos rápidos";
   }
 
-  if (!wrapper.querySelector(ACCOUNT_MENU)) {
-    buildAccountMenu(wrapper, link);
-  } else {
-    const home = wrapper.querySelector(`${ACCOUNT_MENU} a[role="menuitem"]`);
-    const href = panelPath(link);
+  let menu = wrapper.querySelector(ACCOUNT_MENU);
+  if (!menu) menu = buildAccountMenu(wrapper, link);
 
-    if (home && safePath(home.getAttribute("href"), "") !== href) {
-      home.href = href;
-      home.dataset.route = href;
-      home.dataset.href = href;
-    }
+  const homeLink = menu.querySelector('a[role="menuitem"]');
+  const home = panelPath(link);
+
+  if (homeLink && safePath(homeLink.getAttribute("href"), "") !== home) {
+    homeLink.href = home;
+    homeLink.dataset.route = home;
+    homeLink.dataset.href = home;
   }
 
   return true;
+}
+
+function enforceHeaderActionOrder(root = null) {
+  const actions = root?.querySelector?.(".public-home-nav-actions");
+  if (!actions) return false;
+
+  const account =
+    actions.querySelector(":scope > .public-home-account-menu-wrap") ||
+    actions.querySelector(`:scope > ${LOGIN}`);
+  const incidence = actions.querySelector(":scope > .public-home-nav-cta");
+
+  actions.dataset.publicHomeActionOrder = "login-incidence";
+
+  if (account && incidence && account.nextElementSibling !== incidence) {
+    actions.insertBefore(account, incidence);
+    return true;
+  }
+
+  return false;
 }
 
 function removeFooterLogin(root = null) {
@@ -324,7 +349,7 @@ function removeFooterLogin(root = null) {
 
   let removed = false;
 
-  root.querySelectorAll(FOOTER_LOGIN).forEach((node) => {
+  root.querySelectorAll(`.public-home-footer ${LOGIN}`).forEach((node) => {
     node.remove();
     removed = true;
   });
@@ -332,20 +357,15 @@ function removeFooterLogin(root = null) {
   return removed;
 }
 
-function enforceHeaderActionOrder(root = null) {
-  const actions = root?.querySelector?.(".public-home-nav-actions");
-  if (!actions) return false;
-
-  actions.dataset.publicHomeActionOrder = "login-incidence";
-  return true;
-}
-
 function nationalSpanishDigits(value = "") {
-  let digits = String(value ?? "").replace(/\D/g, "");
+  const raw = String(value ?? "");
+  let digits = raw.replace(/\D/g, "");
 
   if (digits.startsWith("0034")) {
     digits = digits.slice(4);
-  } else if (digits.startsWith("34")) {
+  } else if (/^\s*\+34/.test(raw)) {
+    digits = digits.slice(2);
+  } else if (digits.startsWith("34") && digits.length > 9) {
     digits = digits.slice(2);
   }
 
@@ -353,8 +373,12 @@ function nationalSpanishDigits(value = "") {
 }
 
 function formatSpanishPhoneInput(value = "") {
-  const digits = nationalSpanishDigits(value);
-  if (!digits) return SPAIN_PHONE_DEFAULT;
+  const raw = String(value ?? "");
+
+  if (!text(raw) || text(raw) === SPAIN_PREFIX) return "";
+
+  const digits = nationalSpanishDigits(raw);
+  if (!digits) return "";
 
   const groups = [
     digits.slice(0, 3),
@@ -371,6 +395,8 @@ function nationalDigitsBeforeCaret(value = "", caret = 0) {
 }
 
 function caretForNationalCount(formatted = "", count = 0) {
+  if (!formatted) return 0;
+
   const start = formatted.startsWith(SPAIN_PHONE_DEFAULT)
     ? SPAIN_PHONE_DEFAULT.length
     : 0;
@@ -388,98 +414,83 @@ function caretForNationalCount(formatted = "", count = 0) {
   return formatted.length;
 }
 
-function formatPhoneControl(input = null, options = {}) {
+function formatPhoneControl(input = null, keepCaret = true) {
   if (!input) return false;
 
   const raw = String(input.value ?? "");
   const active = document.activeElement === input;
   const selectionStart = active ? input.selectionStart : null;
-  const count = selectionStart === null
-    ? null
-    : nationalDigitsBeforeCaret(raw, selectionStart);
+  const digitCount =
+    selectionStart === null
+      ? null
+      : nationalDigitsBeforeCaret(raw, selectionStart);
+
   const formatted = formatSpanishPhoneInput(raw);
 
-  if (raw !== formatted) {
-    input.value = formatted;
-  }
+  if (raw !== formatted) input.value = formatted;
 
-  if (active && count !== null && options.keepCaret !== false) {
-    const nextCaret = caretForNationalCount(formatted, count);
+  if (active && keepCaret && digitCount !== null) {
+    const caret = caretForNationalCount(formatted, digitCount);
 
     try {
-      input.setSelectionRange(nextCaret, nextCaret);
+      input.setSelectionRange(caret, caret);
     } catch {
-      // input type/capability fallback: no-op
+      // input type/capability fallback
     }
   }
 
   return true;
 }
 
-function mergeDescribedBy(input = null, id = "") {
-  if (!input || !id) return false;
+function removeLegacyPhoneHelp(field = null) {
+  if (!field) return false;
 
-  const ids = new Set(
-    text(input.getAttribute("aria-describedby") || "", "")
-      .split(" ")
-      .filter(Boolean)
-  );
+  let changed = false;
+  const row = field.querySelector("[data-public-support-phone-label-row]");
 
-  ids.add(id);
-  input.setAttribute("aria-describedby", [...ids].join(" "));
-  return true;
+  if (row) {
+    const label = row.querySelector("label");
+
+    if (label) row.parentNode?.insertBefore(label, row);
+
+    row.remove();
+    changed = true;
+  }
+
+  field
+    .querySelectorAll(
+      "[data-public-support-phone-help], [data-public-support-phone-tooltip]"
+    )
+    .forEach((node) => {
+      node.remove();
+      changed = true;
+    });
+
+  return changed;
 }
 
-function ensurePhoneHelp(root = null) {
+function enhancePhone(root = null) {
   const input = root?.querySelector?.(PHONE);
   if (!input) return false;
 
   const field = input.closest(".public-support-field");
-  const label = field?.querySelector(`label[for="${input.id}"]`);
-  if (!field || !label) return false;
+  removeLegacyPhoneHelp(field);
 
-  field.classList.add("public-support-field--phone");
-  input.dataset.publicSupportPhoneEnhanced = "true";
-  input.title = `Ejemplo: ${PHONE_EXAMPLE}`;
-  input.setAttribute("aria-label", "Teléfono de España, formato +34 y 9 dígitos");
+  field?.classList.add("public-support-field--phone-clean");
 
-  let row = field.querySelector("[data-public-support-phone-label-row]");
+  input.placeholder = PHONE_PLACEHOLDER;
+  input.removeAttribute("title");
+  input.setAttribute(
+    "aria-label",
+    "Teléfono de España. Ejemplo: +34 612 345 678"
+  );
+  input.dataset.publicSupportPhoneEnhanced = "clean-placeholder";
 
-  if (!row) {
-    row = document.createElement("div");
-    row.className = "public-support-label-row";
-    row.dataset.publicSupportPhoneLabelRow = "true";
-
-    label.parentNode?.insertBefore(row, label);
-    row.appendChild(label);
+  if (!text(input.value) || text(input.value) === SPAIN_PREFIX) {
+    input.value = "";
+  } else {
+    formatPhoneControl(input, false);
   }
-
-  let help = row.querySelector("[data-public-support-phone-help]");
-  let tooltip = row.querySelector("[data-public-support-phone-tooltip]");
-
-  if (!help) {
-    help = document.createElement("button");
-    help.type = "button";
-    help.className = "public-support-field-help";
-    help.dataset.publicSupportPhoneHelp = "true";
-    help.setAttribute("aria-label", "Ver ejemplo de formato de teléfono");
-    help.textContent = "?";
-    row.appendChild(help);
-  }
-
-  if (!tooltip) {
-    tooltip = document.createElement("span");
-    tooltip.id = "public-support-phone-example";
-    tooltip.className = "public-support-field-tooltip";
-    tooltip.dataset.publicSupportPhoneTooltip = "true";
-    tooltip.setAttribute("role", "tooltip");
-    tooltip.textContent = `Ejemplo: ${PHONE_EXAMPLE}`;
-    row.appendChild(tooltip);
-  }
-
-  help.setAttribute("aria-describedby", tooltip.id);
-  mergeDescribedBy(input, tooltip.id);
-  formatPhoneControl(input, { keepCaret: false });
 
   return true;
 }
@@ -509,9 +520,10 @@ function enhance(root = null) {
   if (!root || destroyed) return false;
 
   removeFooterLogin(root);
-  enforceHeaderActionOrder(root);
   ensureAccountMenu(root);
-  ensurePhoneHelp(root);
+  compactAccountIdentity(root);
+  enforceHeaderActionOrder(root);
+  enhancePhone(root);
   polishInlineIcons(root);
 
   root.dataset.publicHomeExperience = PUBLIC_HOME_EXPERIENCE_VERSION;
@@ -566,15 +578,11 @@ async function logout(button = null) {
       try {
         AppCore?.clearSession?.();
       } catch {
-        // fallback local best-effort
+        // best effort
       }
     }
   } finally {
-    try {
-      window.location.replace("/");
-    } catch {
-      window.location.href = "/";
-    }
+    window.location.replace("/");
   }
 
   return true;
@@ -585,6 +593,7 @@ function onDocumentClick(event) {
   if (!target?.closest) return;
 
   const logoutAction = target.closest(LOGOUT_ACTION);
+
   if (logoutAction) {
     event.preventDefault();
     event.stopPropagation();
@@ -594,6 +603,7 @@ function onDocumentClick(event) {
   }
 
   const toggle = target.closest(ACCOUNT_TOGGLE);
+
   if (toggle) {
     event.preventDefault();
     event.stopPropagation();
@@ -601,64 +611,75 @@ function onDocumentClick(event) {
     return;
   }
 
-  const menuItem = target.closest(`${ACCOUNT_MENU} a[href]`);
-  if (menuItem) {
+  if (target.closest(`${ACCOUNT_MENU} a[href]`)) {
     closeAllAccountMenus();
     return;
   }
 
-  const wrapper = target.closest(ACCOUNT_WRAP);
-  if (!wrapper) closeAllAccountMenus();
+  if (!target.closest(ACCOUNT_WRAP)) closeAllAccountMenus();
 }
 
 function onDocumentKeydown(event) {
   const target = event?.target;
 
   if (event.key === "Escape") {
-    const open = document.querySelector(`${ACCOUNT_WRAP}.is-open`);
-    if (open) {
+    const wrapper = document.querySelector(`${ACCOUNT_WRAP}.is-open`);
+
+    if (wrapper) {
       event.preventDefault();
-      closeAccountMenu(open, { restoreFocus: true });
+      closeAccountMenu(wrapper, true);
     }
+
     return;
   }
 
-  if (event.key === "ArrowDown" && target?.closest?.(ACCOUNT_TOGGLE)) {
+  const toggle = target?.closest?.(ACCOUNT_TOGGLE);
+
+  if (toggle && (event.key === "ArrowDown" || event.key === "Enter")) {
     event.preventDefault();
-    openAccountMenu(target.closest(ACCOUNT_WRAP), { focusFirst: true });
+    openAccountMenu(toggle.closest(ACCOUNT_WRAP), true);
   }
 }
 
 function onInput(event) {
   const input = event?.target;
-  if (!input?.matches?.(PHONE)) return;
 
-  formatPhoneControl(input);
+  if (!input?.matches?.(PHONE)) return;
+  formatPhoneControl(input, true);
 }
 
 function onFocusIn(event) {
   const input = event?.target;
+
   if (!input?.matches?.(PHONE)) return;
 
-  formatPhoneControl(input, { keepCaret: false });
+  if (text(input.value) === SPAIN_PREFIX) {
+    input.value = "";
+  }
 }
 
 function onFocusOut(event) {
   const input = event?.target;
+
   if (!input?.matches?.(PHONE)) return;
 
-  formatPhoneControl(input, { keepCaret: false });
+  if (!text(input.value) || text(input.value) === SPAIN_PREFIX) {
+    input.value = "";
+    return;
+  }
+
+  formatPhoneControl(input, false);
 }
 
 function install() {
-  if (typeof window === "undefined" || destroyed) return false;
+  if (typeof window === "undefined" || destroyed) return;
 
   document.addEventListener("click", onDocumentClick, true);
   document.addEventListener("keydown", onDocumentKeydown, true);
   document.addEventListener("input", onInput, true);
   document.addEventListener("focusin", onFocusIn, true);
   document.addEventListener("focusout", onFocusOut, true);
-  window.addEventListener("resize", closeAllAccountMenus, { passive: true });
+
   window.addEventListener("onion:main:ready", scan);
   document.addEventListener("public-home:ready", scan, true);
 
@@ -669,10 +690,7 @@ function install() {
     document.body;
 
   observer = new MutationObserver(scan);
-  observer.observe(mount, {
-    childList: true,
-    subtree: true,
-  });
+  observer.observe(mount, { childList: true, subtree: true });
 
   if (!scan()) {
     let attempts = 0;
@@ -680,18 +698,17 @@ function install() {
     retryTimer = window.setInterval(() => {
       attempts += 1;
 
-      if (scan() || attempts >= 16) {
+      if (scan() || attempts >= 12) {
         window.clearInterval(retryTimer);
         retryTimer = 0;
       }
     }, 500);
   }
-
-  return true;
 }
 
 export function destroyPublicHomeExperience() {
   if (typeof window === "undefined" || destroyed) return false;
+
   destroyed = true;
 
   document.removeEventListener("click", onDocumentClick, true);
@@ -699,7 +716,7 @@ export function destroyPublicHomeExperience() {
   document.removeEventListener("input", onInput, true);
   document.removeEventListener("focusin", onFocusIn, true);
   document.removeEventListener("focusout", onFocusOut, true);
-  window.removeEventListener("resize", closeAllAccountMenus);
+
   window.removeEventListener("onion:main:ready", scan);
   document.removeEventListener("public-home:ready", scan, true);
 
@@ -708,7 +725,6 @@ export function destroyPublicHomeExperience() {
 
   if (retryTimer) window.clearInterval(retryTimer);
   retryTimer = 0;
-  closeAllAccountMenus();
 
   return true;
 }

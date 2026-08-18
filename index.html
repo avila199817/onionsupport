@@ -356,6 +356,15 @@
     </main>
   </div>
 
+  <!--
+    Debe ejecutarse antes del Router principal para convertir enlaces
+    históricos /tickets/<INC-...> en la ruta canónica de incidencias.
+  -->
+  <script
+    type="module"
+    src="/src/features/ticket-deeplink/index.js"
+  ></script>
+
   <script
     type="module"
     src="/src/main.js"

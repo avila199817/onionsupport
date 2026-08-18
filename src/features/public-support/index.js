@@ -10,6 +10,8 @@
    - identidad del cliente autenticado en su acceso al panel;
    - formulario sin exponer automáticamente el nombre del usuario;
    - teléfono limitado a España (+34);
+   - una incidencia en curso por cuenta, preparada para enforcement backend;
+   - respuesta anti-enumeración neutra para visitante anónimo;
    - CTAs internos diferenciados de WhatsApp;
    - WhatsApp queda como canal alternativo.
 ========================================================= */
@@ -25,6 +27,12 @@ const FORM = "[data-public-support-form]";
 const SECTION_ID = "incidencia";
 const SPAIN_PREFIX = "+34";
 const SPAIN_PHONE_DEFAULT = "+34 ";
+const ACTIVE_TICKET_ERROR_CODES = new Set([
+  "PUBLIC_TICKET_ACTIVE_EXISTS",
+  "PUBLIC_TICKET_OPEN_EXISTS",
+  "PUBLIC_TICKET_ALREADY_OPEN",
+  "ACTIVE_TICKET_EXISTS",
+]);
 const enhanced = new WeakSet();
 
 let observer = null;
@@ -259,6 +267,14 @@ function formSection() {
         <div class="public-support-form-head">
           <div><span class="public-support-kicker">Nueva incidencia</span><h3>¿Qué necesitas?</h3></div>
           <span class="public-support-secure">Acceso por email</span>
+        </div>
+
+        <div class="public-support-flow-item" data-public-support-one-open-policy="true">
+          <span>1×</span>
+          <div>
+            <strong>Una incidencia en curso por cuenta</strong>
+            <p>Para evitar duplicados, si ya existe una incidencia abierta no se creará otra hasta que la actual se cierre.</p>
+          </div>
         </div>
 
         <div class="public-support-grid">
@@ -522,6 +538,108 @@ function status(form, message = "", type = "info") {
   node.dataset.status = clean ? type : "";
 }
 
+function normalizedErrorCode(error) {
+  return text(first(
+    error?.code,
+    error?.payload?.code,
+    error?.payload?.error,
+    error?.data?.code,
+    error?.data?.error,
+    ""
+  ))
+    .replace(/[\s-]+/g, "_")
+    .toUpperCase();
+}
+
+function activeTicketConflict(error) {
+  const httpStatus = Number(
+    error?.status ||
+    error?.statusCode ||
+    error?.response?.status ||
+    0
+  );
+
+  return (
+    (httpStatus === 409 || httpStatus === 423) &&
+    ACTIVE_TICKET_ERROR_CODES.has(normalizedErrorCode(error))
+  );
+}
+
+function currentFormEmail(form) {
+  return text(form?.elements?.namedItem?.("email")?.value).toLowerCase();
+}
+
+function lockedEmail(form) {
+  return text(form?.dataset?.publicSupportBlockedEmail).toLowerCase();
+}
+
+function lockMatchesCurrentEmail(form) {
+  const locked = lockedEmail(form);
+  return Boolean(locked && locked === currentFormEmail(form));
+}
+
+function lockMessage(form) {
+  return text(
+    form?.dataset?.publicSupportBlockedMessage,
+    "Ya hay una incidencia en curso para esta cuenta. No se abrirá otra hasta que se cierre."
+  );
+}
+
+function lockStatusType(form) {
+  return text(form?.dataset?.publicSupportBlockedStatus, "info");
+}
+
+function syncSubmitState(form) {
+  if (!form) return false;
+
+  const busy = form.dataset.submitting === "true";
+  const locked = lockMatchesCurrentEmail(form);
+  const submit = form.querySelector(".public-support-submit");
+  const label = form.querySelector("[data-public-support-submit-label]");
+
+  form.classList.toggle("has-active-ticket", locked);
+  form.dataset.activeTicket = locked ? "true" : "false";
+
+  if (submit) {
+    submit.disabled = busy;
+    submit.setAttribute("aria-disabled", busy || locked ? "true" : "false");
+  }
+
+  if (label) {
+    label.textContent = busy
+      ? "Creando incidencia…"
+      : locked
+        ? "Incidencia en curso"
+        : "Crear incidencia";
+  }
+
+  return locked;
+}
+
+function setSubmissionLock(form, emailValue, message, type = "info") {
+  const cleanEmail = text(emailValue).toLowerCase();
+  if (!form?.dataset || !cleanEmail) return false;
+
+  form.dataset.publicSupportBlockedEmail = cleanEmail;
+  form.dataset.publicSupportBlockedMessage = text(message);
+  form.dataset.publicSupportBlockedStatus = text(type, "info");
+  syncSubmitState(form);
+  return true;
+}
+
+function showSubmissionLock(form) {
+  if (!lockMatchesCurrentEmail(form)) return false;
+  status(form, lockMessage(form), lockStatusType(form));
+  syncSubmitState(form);
+  return true;
+}
+
+function activeTicketMessage() {
+  return session().authenticated === true
+    ? "Ya tienes una incidencia en curso. Para evitar duplicados, no puedes abrir otra hasta que la actual se cierre. Puedes seguirla desde tu panel."
+    : "Solicitud recibida. Si ya existe una incidencia en curso, no se abrirá otra. Revisa tu correo o entra en tu panel para continuar.";
+}
+
 function hasFullName(value = "") {
   const parts = text(value).split(" ").filter(Boolean);
   return parts.length >= 2 && parts.join(" ").length >= 3;
@@ -602,12 +720,11 @@ function submitting(form, value) {
   form.classList.toggle("is-submitting", value);
   form.setAttribute("aria-busy", value ? "true" : "false");
 
-  form.querySelectorAll("button, input, textarea, select").forEach((node) => {
+  form.querySelectorAll("input, textarea, select").forEach((node) => {
     if (node.name !== "website") node.disabled = value;
   });
 
-  const label = form.querySelector("[data-public-support-submit-label]");
-  if (label) label.textContent = value ? "Creando incidencia…" : "Crear incidencia";
+  syncSubmitState(form);
 }
 
 function ticketId(response) {
@@ -646,7 +763,7 @@ function neutralAccepted(response) {
 
 function successMessage(response) {
   if (neutralAccepted(response)) {
-    return "Solicitud recibida. Revisa tu correo para continuar.";
+    return "Solicitud recibida. Revisa tu correo para continuar. Si ya había una incidencia en curso, no se abrirá otra.";
   }
 
   const id = ticketId(response);
@@ -659,18 +776,36 @@ function successMessage(response) {
 
 function errorMessage(error) {
   const code = Number(error?.status || error?.statusCode || error?.response?.status || 0);
+  if (activeTicketConflict(error)) return activeTicketMessage();
   if (code === 429) return "Has realizado varias solicitudes seguidas. Espera un momento y vuelve a intentarlo.";
   if (code === 400 || code === 422) return "Hay algún dato que el servidor no ha podido validar. Revisa el formulario.";
   if ([404, 405, 501].includes(code)) return "El alta directa no está disponible ahora mismo. Puedes contactar por WhatsApp mientras tanto.";
   return "No se pudo crear la incidencia. Revisa tu conexión e inténtalo de nuevo.";
 }
 
+function clearAcceptedIssueFields(form) {
+  for (const name of ["subject", "description", "website"]) {
+    const input = form.elements.namedItem(name);
+    if (input) input.value = "";
+  }
+
+  for (const input of form.querySelectorAll("input[name], textarea[name]")) {
+    if (input.name !== "website") setFieldError(form, input, "");
+  }
+
+  const counter = form.querySelector("[data-public-support-counter]");
+  if (counter) counter.textContent = "0 / 4000";
+}
+
 async function send(form) {
   if (form.dataset.submitting === "true") return false;
+  if (showSubmissionLock(form)) return false;
   status(form);
 
   if (text(form.elements.namedItem("website")?.value)) {
-    status(form, "Incidencia recibida. Revisa tu correo para continuar.", "success");
+    const message = "Incidencia recibida. Revisa tu correo para continuar.";
+    status(form, message, "success");
+    setSubmissionLock(form, currentFormEmail(form), message, "success");
     return true;
   }
 
@@ -697,7 +832,8 @@ async function send(form) {
       source: "public-support.intake",
     });
 
-    status(form, successMessage(response), "success");
+    const message = successMessage(response);
+    status(form, message, "success");
 
     window.dispatchEvent(new CustomEvent("onion:public-support:created", {
       detail: {
@@ -707,13 +843,23 @@ async function send(form) {
     }));
 
     clearIdempotency(form);
-    form.reset();
-    const counter = form.querySelector("[data-public-support-counter]");
-    if (counter) counter.textContent = "0 / 4000";
-    prefill(form.closest(HOME));
+    clearAcceptedIssueFields(form);
+    setSubmissionLock(form, body.email, message, "success");
     return true;
   } catch (error) {
-    status(form, errorMessage(error), "error");
+    const isActive = activeTicketConflict(error);
+    const message = errorMessage(error);
+    status(form, message, isActive ? "info" : "error");
+
+    if (isActive) {
+      setSubmissionLock(form, body.email, message, "info");
+      window.dispatchEvent(new CustomEvent("onion:public-support:active-ticket", {
+        detail: {
+          version: PUBLIC_SUPPORT_VERSION,
+        },
+      }));
+    }
+
     return false;
   } finally {
     submitting(form, false);
@@ -738,7 +884,9 @@ function onInput(event) {
   if (input.name !== "website") {
     clearIdempotency(form);
     setFieldError(form, input, "");
-    status(form);
+    syncSubmitState(form);
+
+    if (!showSubmissionLock(form)) status(form);
   }
 
   if (input.name === "description") {

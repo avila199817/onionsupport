@@ -49,9 +49,18 @@ La primera versión del alta pública acepta únicamente teléfonos de España.
 
 ### CTA y canal alternativo
 
-Los CTA azules de la home (`Abrir incidencia`) son navegación interna hacia el formulario `#incidencia`; no representan WhatsApp ni deben usar su icono.
+Los CTA azules de la home (`Abrir incidencia`) son navegación interna hacia el formulario `#incidencia`; no representan WhatsApp y no deben usar su icono.
 
 WhatsApp permanece como canal alternativo independiente mediante sus enlaces y el botón flotante verde.
+
+### Una incidencia en curso por cuenta
+
+La interfaz pública comunica de forma explícita la política objetivo de **una única incidencia en curso por cuenta** para reducir duplicados y spam.
+
+- Tras una solicitud aceptada, el frontend bloquea nuevos envíos consecutivos para el mismo correo durante la vista actual y muestra `Incidencia en curso`.
+- Si el backend responde con un conflicto canónico de incidencia activa para una sesión autenticada, el frontend informa de que ya existe una incidencia en curso y remite al panel.
+- Para visitantes anónimos, la respuesta debe seguir siendo neutra: nunca se confirma si un correo concreto tiene cuenta o incidencia abierta.
+- El enforcement definitivo y resistente a recargas, otros navegadores o peticiones directas pertenece al backend. El frontend por sí solo no se considera una barrera anti-spam suficiente.
 
 ## Reglas de identidad
 
@@ -125,7 +134,7 @@ Para peticiones anónimas, la respuesta de éxito es deliberadamente indistingui
 }
 ```
 
-Por tanto, el frontend no debe afirmar que se creó una incidencia cuando recibe esta forma neutra; muestra simplemente que la solicitud fue recibida y que debe revisarse el correo.
+Por tanto, el frontend no debe afirmar que se creó una incidencia cuando recibe esta forma neutra; muestra simplemente que la solicitud fue recibida y que debe revisarse el correo. Puede añadir de forma genérica que, si ya existía una incidencia en curso, no se abrirá otra, sin revelar el estado concreto de ese correo.
 
 En una sesión autenticada el backend puede devolver el identificador real del ticket y `activationRequired: false`, permitiendo indicar que la incidencia ya está disponible en el panel.
 

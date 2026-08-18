@@ -267,10 +267,15 @@
    - WhatsApp flotante.
    - Overrides del public-auth-shell para permitir scroll.
 
+   support-request.css:
+   - Formulario público de alta + incidencia.
+   - Estados de validación/envío.
+   - Identidad autenticada en Panel cliente.
+
    Importante:
-   - Se carga DESPUÉS de auth/login.css.
-   - Usa layer(auth) intencionadamente para poder sobreescribir
-     el shell público del login sin crear una capa nueva.
+   - Usa layer(auth) intencionadamente para integrarse con el shell público.
    - No debe contaminar la app privada porque todo va scopeado bajo
      .public-auth-shell--home y .public-home.
 ========================================================= */
+
+@import url("./views/public/support-request.css") layer(auth);

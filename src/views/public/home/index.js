@@ -24,7 +24,7 @@
 import { AppCore } from "../../../core/index.js";
 import createPublicHomeTemplate from "./template.js";
 
-export const PUBLIC_HOME_VIEW_VERSION = "public.home.view.controller.final.productivo.2026.22.hero-bg-pass-through-10-10";
+export const PUBLIC_HOME_VIEW_VERSION = "public.home.view.controller.final.productivo.2026.23.history-replace";
 
 const SOURCE = "public.home.view";
 
@@ -1184,6 +1184,7 @@ function initAnchorScroll(refs, cleanups, menuControls) {
 
     const ok = scrollToHash(hash, refs, {
       push: true,
+      replace: true,
       focus: true,
     });
 
@@ -2393,6 +2394,7 @@ export function renderPublicHomeView(container, context = {}) {
     scrollTo(hash = "", options = {}) {
       return scrollToHash(hash, refs, {
         push: true,
+        replace: true,
         focus: true,
         ...options,
       });

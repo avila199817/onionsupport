@@ -15,7 +15,7 @@
 ========================================================= */
 
 export const ROUTE_STYLES_VERSION =
-  "route-styles.v5-correo-preview";
+  "route-styles.v5-correo-viewport-final";
 
 const MODE_ATTRIBUTE =
   "data-css-route-mode";
@@ -112,6 +112,7 @@ const STYLE_MANIFEST = Object.freeze({
 
   correo: Object.freeze([
     "/src/css/views/correo/index.css",
+    "/src/css/views/correo/viewport.css",
   ]),
 
   servidor: Object.freeze([

@@ -1,0 +1,528 @@
+/* =========================================================
+   ONION SUPPORT — CORREO · VIEWPORT FINAL
+   Archivo: /src/css/views/correo/viewport.css
+
+   PRODUCTIVO · DENSIDAD / VIEWPORT
+   - Elimina desperdicio vertical en escritorio conectado.
+   - El workspace ocupa todo el área útil bajo Topbar.
+   - Cero scroll de página en escritorio: scroll sólo en carpetas,
+     lista y cuerpo del mensaje cuando realmente hace falta.
+   - Conserva el responsive apilado del CSS base en pantallas estrechas.
+========================================================= */
+
+@layer views {
+
+.correo-sr-status {
+  position: absolute !important;
+  inline-size: 1px !important;
+  block-size: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.correo-list-utilities {
+  min-inline-size: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.correo-list-utilities .correo-count {
+  margin-inline-end: 2px;
+}
+
+.correo-list-utilities .correo-icon-btn {
+  inline-size: 32px;
+  block-size: 32px;
+  border-radius: 9px;
+}
+
+.correo-list-utilities .correo-icon-btn svg {
+  inline-size: 15px;
+  block-size: 15px;
+}
+
+.correo-list-utilities .correo-btn {
+  min-block-size: 32px;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 9.5px;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--correo-blue) 11%, transparent), inset 0 1px 0 rgba(255,255,255,.12);
+}
+
+.correo-list-utilities .correo-btn svg {
+  inline-size: 14px;
+  block-size: 14px;
+}
+
+/* =========================================================
+   DESKTOP · FIT EXACTO AL ÁREA ÚTIL
+   La autoridad del viewport es .main-content, que ya empieza
+   exactamente debajo del Topbar y a la derecha del Sidebar.
+   El corte de 1280px evita competir con el layout apilado del CSS base.
+========================================================= */
+
+@media (min-width: 1280px) and (min-height: 620px) {
+  .main-content:has([data-correo-host="true"]),
+  .main-content:has(.panel-content[data-view="correo"]) {
+    overflow: hidden;
+    scrollbar-gutter: auto;
+  }
+
+  #app-content:has([data-correo-host="true"]),
+  #view-container:has([data-correo-host="true"]),
+  .content-wrapper:has([data-correo-host="true"]),
+  .panel-content[data-view="correo"],
+  [data-correo-host="true"] {
+    min-block-size: 0;
+    block-size: 100%;
+  }
+
+  #app-content:has([data-correo-host="true"]),
+  #view-container:has([data-correo-host="true"]),
+  .content-wrapper:has([data-correo-host="true"]) {
+    max-inline-size: none;
+    padding: 0;
+    margin: 0;
+    gap: 0;
+    overflow: hidden;
+  }
+
+  .panel-content[data-view="correo"],
+  [data-correo-host="true"] {
+    max-inline-size: none;
+    padding: 0;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  .correo-view-root.is-connected {
+    min-block-size: 0;
+    block-size: 100%;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    gap: 0;
+    overflow: hidden;
+  }
+
+  .correo-view-root.is-connected > .correo-hero {
+    display: none !important;
+  }
+
+  .correo-view-root.is-connected .correo-workspace {
+    min-block-size: 0;
+    block-size: 100%;
+    max-block-size: none;
+    grid-template-columns:
+      clamp(205px, 15vw, 240px)
+      clamp(340px, 25vw, 410px)
+      minmax(0, 1fr);
+    overflow: hidden;
+    border-block: 0;
+    border-inline-start: 0;
+    border-inline-end: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .correo-view-root.is-connected .correo-folders-panel,
+  .correo-view-root.is-connected .correo-list-panel,
+  .correo-view-root.is-connected .correo-reader {
+    block-size: 100%;
+    min-block-size: 0;
+    overflow: hidden;
+  }
+
+  /* ---------- Carpetas: fija cabecera y seguridad; sólo navega la lista ---------- */
+
+  .correo-view-root.is-connected .correo-folders-panel {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .correo-view-root.is-connected .correo-account-card {
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    gap: 8px;
+    min-block-size: 52px;
+    padding: 8px;
+    border-radius: 12px;
+  }
+
+  .correo-view-root.is-connected .correo-account-logo {
+    inline-size: 34px;
+    block-size: 34px;
+    border-radius: 10px;
+  }
+
+  .correo-view-root.is-connected .correo-account-logo svg {
+    inline-size: 16px;
+    block-size: 16px;
+  }
+
+  .correo-view-root.is-connected .correo-account-copy strong {
+    font-size: 10.5px;
+  }
+
+  .correo-view-root.is-connected .correo-account-copy span {
+    font-size: 8.5px;
+  }
+
+  .correo-view-root.is-connected .correo-folders {
+    flex: 1 1 auto;
+    min-block-size: 0;
+    align-content: start;
+    gap: 3px;
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
+  .correo-view-root.is-connected .correo-folder {
+    min-block-size: 40px;
+    grid-template-columns: 22px minmax(0, 1fr) auto;
+    gap: 7px;
+    padding: 6px 8px;
+    border-radius: 9px;
+  }
+
+  .correo-view-root.is-connected .correo-folder-copy strong {
+    font-size: 10px;
+  }
+
+  .correo-view-root.is-connected .correo-folder-copy small {
+    font-size: 7.8px;
+  }
+
+  .correo-view-root.is-connected .correo-folder-count {
+    min-inline-size: 22px;
+    padding: 2px 5px;
+    font-size: 8px;
+  }
+
+  .correo-view-root.is-connected .correo-security-card {
+    flex: 0 0 auto;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 7px;
+    margin-block-start: 0;
+    padding: 7px 8px;
+    border-radius: 10px;
+  }
+
+  .correo-view-root.is-connected .correo-security-icon {
+    inline-size: 28px;
+    block-size: 28px;
+    border-radius: 8px;
+  }
+
+  .correo-view-root.is-connected .correo-security-icon svg {
+    inline-size: 14px;
+    block-size: 14px;
+  }
+
+  .correo-view-root.is-connected .correo-security-card > div {
+    gap: 0;
+  }
+
+  .correo-view-root.is-connected .correo-security-card strong {
+    font-size: 9px;
+  }
+
+  .correo-view-root.is-connected .correo-security-card span:not(.correo-security-icon) {
+    display: none;
+  }
+
+  .correo-view-root.is-connected .correo-text-btn {
+    grid-column: 3;
+    grid-row: 1;
+    justify-self: end;
+    padding: 4px 2px;
+    font-size: 8px;
+  }
+
+  /* ---------- Lista: controles compactos, máximo espacio para mensajes ---------- */
+
+  .correo-view-root.is-connected .correo-list-header {
+    min-block-size: 54px;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 11px 7px;
+  }
+
+  .correo-view-root.is-connected .correo-list-header > div:first-child {
+    gap: 3px;
+  }
+
+  .correo-view-root.is-connected .correo-list-header h2 {
+    font-size: 15px;
+  }
+
+  .correo-view-root.is-connected .correo-list-header .correo-kicker {
+    font-size: 8px;
+  }
+
+  .correo-view-root.is-connected .correo-count {
+    font-size: 8px;
+  }
+
+  .correo-view-root.is-connected .correo-search {
+    margin: 0 10px 7px;
+  }
+
+  .correo-view-root.is-connected .correo-search input {
+    min-block-size: 35px;
+    padding-block: 6px;
+    font-size: 10px;
+  }
+
+  .correo-view-root.is-connected .correo-filter-row {
+    gap: 4px;
+    padding: 0 10px 7px;
+  }
+
+  .correo-view-root.is-connected .correo-filter {
+    min-block-size: 27px;
+    padding: 4px 8px;
+    font-size: 8.8px;
+  }
+
+  .correo-view-root.is-connected .correo-message-list {
+    overscroll-behavior: contain;
+  }
+
+  .correo-view-root.is-connected .correo-message-row {
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 8px;
+    padding: 9px 10px;
+  }
+
+  .correo-view-root.is-connected .correo-message-avatar {
+    inline-size: 34px;
+    block-size: 34px;
+    border-radius: 10px;
+    font-size: 9px;
+  }
+
+  .correo-view-root.is-connected .correo-message-copy {
+    gap: 2px;
+  }
+
+  .correo-view-root.is-connected .correo-message-line strong {
+    font-size: 9.8px;
+  }
+
+  .correo-view-root.is-connected .correo-message-line time {
+    font-size: 7.8px;
+  }
+
+  .correo-view-root.is-connected .correo-message-subject {
+    font-size: 10.2px;
+  }
+
+  .correo-view-root.is-connected .correo-message-preview {
+    font-size: 8.8px;
+    line-height: 1.25;
+  }
+
+  .correo-view-root.is-connected .correo-message-meta {
+    min-block-size: 12px;
+  }
+
+  .correo-view-root.is-connected .correo-pagination {
+    padding: 6px;
+  }
+
+  /* ---------- Reader: cabecera / remitente más densos; cuerpo absorbe altura ---------- */
+
+  .correo-view-root.is-connected .correo-reader-card {
+    block-size: 100%;
+    min-block-size: 0;
+  }
+
+  .correo-view-root.is-connected .correo-reader-header {
+    gap: 12px;
+    padding: 14px 16px 11px;
+  }
+
+  .correo-view-root.is-connected .correo-reader-heading {
+    gap: 5px;
+  }
+
+  .correo-view-root.is-connected .correo-reader-heading h2 {
+    font-size: clamp(18px, 1.45vw, 25px);
+    line-height: 1.12;
+  }
+
+  .correo-view-root.is-connected .correo-reader-toolbar {
+    gap: 6px;
+  }
+
+  .correo-view-root.is-connected .correo-reader-toolbar .correo-icon-btn {
+    inline-size: 33px;
+    block-size: 33px;
+    border-radius: 9px;
+  }
+
+  .correo-view-root.is-connected .correo-sender {
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+    gap: 9px;
+    padding: 10px 16px;
+  }
+
+  .correo-view-root.is-connected .correo-sender-avatar {
+    inline-size: 36px;
+    block-size: 36px;
+    border-radius: 10px;
+    font-size: 10px;
+  }
+
+  .correo-view-root.is-connected .correo-reader-scroll {
+    padding: clamp(16px, 1.6vw, 24px);
+    overscroll-behavior: contain;
+  }
+
+  .correo-view-root.is-connected .correo-reader-body {
+    font-size: 12.5px;
+    line-height: 1.62;
+  }
+
+  .correo-view-root.is-connected .correo-reader-actions {
+    padding: 9px 16px;
+  }
+
+  .correo-view-root.is-connected .correo-reader-actions .correo-btn {
+    min-block-size: 34px;
+    padding-inline: 10px;
+    font-size: 9.5px;
+  }
+}
+
+/* =========================================================
+   DESKTOP BAJO · 768p / portátiles
+   Ganamos todavía más filas sin volver la UI microscópica.
+========================================================= */
+
+@media (min-width: 1280px) and (min-height: 620px) and (max-height: 780px) {
+  .correo-view-root.is-connected .correo-folders-panel {
+    gap: 6px;
+    padding: 8px;
+  }
+
+  .correo-view-root.is-connected .correo-account-card {
+    min-block-size: 46px;
+    grid-template-columns: 30px minmax(0, 1fr) auto;
+    padding: 6px 7px;
+  }
+
+  .correo-view-root.is-connected .correo-account-logo {
+    inline-size: 30px;
+    block-size: 30px;
+  }
+
+  .correo-view-root.is-connected .correo-folder {
+    min-block-size: 36px;
+    padding-block: 5px;
+  }
+
+  .correo-view-root.is-connected .correo-security-card {
+    padding-block: 5px;
+  }
+
+  .correo-view-root.is-connected .correo-list-header {
+    min-block-size: 49px;
+    padding-block: 7px 6px;
+  }
+
+  .correo-view-root.is-connected .correo-search {
+    margin-block-end: 5px;
+  }
+
+  .correo-view-root.is-connected .correo-search input {
+    min-block-size: 32px;
+  }
+
+  .correo-view-root.is-connected .correo-filter-row {
+    padding-block-end: 5px;
+  }
+
+  .correo-view-root.is-connected .correo-filter {
+    min-block-size: 25px;
+  }
+
+  .correo-view-root.is-connected .correo-message-row {
+    padding-block: 7px;
+  }
+
+  .correo-view-root.is-connected .correo-message-preview {
+    -webkit-line-clamp: 1;
+  }
+
+  .correo-view-root.is-connected .correo-reader-header {
+    padding-block: 11px 9px;
+  }
+
+  .correo-view-root.is-connected .correo-sender {
+    padding-block: 8px;
+  }
+
+  .correo-view-root.is-connected .correo-reader-scroll {
+    padding-block: 14px;
+  }
+
+  .correo-view-root.is-connected .correo-reader-actions {
+    padding-block: 7px;
+  }
+}
+
+/* =========================================================
+   ANCHOS INTERMEDIOS
+   El CSS base mantiene el apilado; aquí sólo afinamos utilidades.
+========================================================= */
+
+@container (max-width: 1120px) {
+  .correo-list-utilities .correo-count {
+    display: none;
+  }
+}
+
+@container (max-width: 940px) {
+  .correo-list-utilities .correo-btn span {
+    display: none;
+  }
+
+  .correo-list-utilities .correo-btn {
+    inline-size: 32px;
+    padding: 0;
+  }
+}
+
+@container (max-width: 690px) {
+  .correo-list-header {
+    align-items: center;
+  }
+
+  .correo-list-utilities {
+    flex: 0 0 auto;
+  }
+}
+
+@media (forced-colors: active) {
+  .correo-list-utilities .correo-btn,
+  .correo-list-utilities .correo-icon-btn {
+    border: 1px solid CanvasText;
+  }
+}
+
+@media print {
+  .correo-list-utilities {
+    display: none !important;
+  }
+}
+
+}

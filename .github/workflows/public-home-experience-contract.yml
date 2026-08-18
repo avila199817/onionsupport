@@ -1,0 +1,138 @@
+# =========================================================
+# ONION SUPPORT — PUBLIC HOME EXPERIENCE CONTRACT
+# Valida el remate UX de la landing pública.
+# No despliega: protege navegación, teléfono y estilos asociados.
+# =========================================================
+
+name: Public Home Experience Contract
+
+run-name: Public Home UX · ${{ github.event_name }} · ${{ github.head_ref || github.ref_name || 'manual' }}
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "index.html"
+      - "src/css/app.css"
+      - "src/css/views/public/home-experience.css"
+      - "src/features/public-home-experience/**"
+      - ".github/workflows/public-home-experience-contract.yml"
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "index.html"
+      - "src/css/app.css"
+      - "src/css/views/public/home-experience.css"
+      - "src/features/public-home-experience/**"
+      - ".github/workflows/public-home-experience-contract.yml"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-home-experience-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate public home UX
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout authoritative source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+          persist-credentials: false
+
+      - name: Validate JavaScript syntax
+        run: |
+          set -euo pipefail
+          node --check src/features/public-home-experience/index.js
+
+      - name: Validate experience contract
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+
+          index_path = Path("index.html")
+          app_css_path = Path("src/css/app.css")
+          css_path = Path("src/css/views/public/home-experience.css")
+          js_path = Path("src/features/public-home-experience/index.js")
+
+          errors = []
+
+          for path in (index_path, app_css_path, css_path, js_path):
+              if not path.is_file():
+                  errors.append(f"Falta archivo obligatorio: {path}")
+
+          if not errors:
+              index = index_path.read_text(encoding="utf-8")
+              app_css = app_css_path.read_text(encoding="utf-8")
+              css = css_path.read_text(encoding="utf-8")
+              js = js_path.read_text(encoding="utf-8")
+
+              checks = [
+                  (
+                      '/src/features/public-home-experience/index.js' in index,
+                      "index.html debe cargar public-home-experience/index.js",
+                  ),
+                  (
+                      '@import url("./views/public/home-experience.css")' in app_css,
+                      "app.css debe importar home-experience.css",
+                  ),
+                  (
+                      'public-home.experience.v1.production' in js,
+                      "Falta la versión de producción del módulo UX",
+                  ),
+                  (
+                      'data-public-home-account-menu' in js and 'Cerrar sesión' in js,
+                      "El menú autenticado debe conservar accesos rápidos y logout",
+                  ),
+                  (
+                      '"/incidencias"' in js and '"/facturas"' in js and '"/cuenta"' in js,
+                      "El menú autenticado debe conservar Incidencias, Facturas y Cuenta",
+                  ),
+                  (
+                      'formatSpanishPhoneInput' in js and '+34 612 345 678' in js,
+                      "El teléfono debe mantener formato progresivo español y ejemplo",
+                  ),
+                  (
+                      'login-incidence' in js and 'order: 1' in css and 'order: 2' in css,
+                      "Debe mantenerse Login/Cuenta a la izquierda y Abrir incidencia a la derecha",
+                  ),
+                  (
+                      '.public-home-footer [data-public-home-login]' in css,
+                      "El footer debe ocultar inmediatamente el login/cuenta",
+                  ),
+                  (
+                      'shape-rendering: geometricPrecision' in css,
+                      "Debe mantenerse el ajuste de precisión de SVGs inline",
+                  ),
+              ]
+
+              for ok, message in checks:
+                  if not ok:
+                      errors.append(message)
+
+              if css.count("{") != css.count("}"):
+                  errors.append("Llaves CSS desbalanceadas en home-experience.css")
+
+          if errors:
+              for error in errors:
+                  print(f"::error::{error}")
+              sys.exit(1)
+
+          print("Public home experience contract OK.")
+          PY

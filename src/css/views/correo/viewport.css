@@ -65,9 +65,10 @@
    DESKTOP · FIT EXACTO AL ÁREA ÚTIL
    La autoridad del viewport es .main-content, que ya empieza
    exactamente debajo del Topbar y a la derecha del Sidebar.
+   El corte de 1280px evita competir con el layout apilado del CSS base.
 ========================================================= */
 
-@media (min-width: 1101px) and (min-height: 620px) {
+@media (min-width: 1280px) and (min-height: 620px) {
   .main-content:has([data-correo-host="true"]),
   .main-content:has(.panel-content[data-view="correo"]) {
     overflow: hidden;
@@ -407,7 +408,7 @@
    Ganamos todavía más filas sin volver la UI microscópica.
 ========================================================= */
 
-@media (min-width: 1101px) and (min-height: 620px) and (max-height: 780px) {
+@media (min-width: 1280px) and (min-height: 620px) and (max-height: 780px) {
   .correo-view-root.is-connected .correo-folders-panel {
     gap: 6px;
     padding: 8px;

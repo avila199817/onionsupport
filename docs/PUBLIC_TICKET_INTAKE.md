@@ -39,8 +39,15 @@ La primera versión del alta pública acepta únicamente teléfonos de España.
 - El formulario parte de `+34` por defecto.
 - El frontend normaliza el teléfono a `+34 XXX XXX XXX`.
 - Deben existir exactamente 9 dígitos nacionales después del prefijo de España.
+- Para este formulario de contacto se admite numeración española estándar cuyo primer dígito nacional sea `6`, `7`, `8` o `9`.
 - El backend debe volver a validar y normalizar el teléfono; nunca debe confiar sólo en la validación del navegador.
 - Si en el futuro se habilitan otros países, esta restricción debe convertirse en una política explícita compartida entre frontend y backend.
+
+### CTA y canal alternativo
+
+Los CTA azules de la home (`Abrir incidencia`) son navegación interna hacia el formulario `#incidencia`; no representan WhatsApp ni deben usar su icono.
+
+WhatsApp permanece como canal alternativo independiente mediante sus enlaces y el botón flotante verde.
 
 ## Reglas de identidad
 

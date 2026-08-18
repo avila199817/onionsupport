@@ -14,6 +14,7 @@ on:
       - main
     paths:
       - "index.html"
+      - "docs/PUBLIC_TICKET_INTAKE.md"
       - "src/features/public-support/**"
       - "src/views/public/home/**"
       - "src/css/app.css"
@@ -25,6 +26,7 @@ on:
       - main
     paths:
       - "index.html"
+      - "docs/PUBLIC_TICKET_INTAKE.md"
       - "src/features/public-support/**"
       - "src/views/public/home/**"
       - "src/css/app.css"
@@ -72,6 +74,7 @@ jobs:
 
           required = [
               Path("index.html"),
+              Path("docs/PUBLIC_TICKET_INTAKE.md"),
               Path("src/css/app.css"),
               Path("src/css/views/public/index.css"),
               Path("src/css/views/public/support-request.css"),
@@ -93,6 +96,7 @@ jobs:
               sys.exit(1)
 
           index = Path("index.html").read_text(encoding="utf-8")
+          docs = Path("docs/PUBLIC_TICKET_INTAKE.md").read_text(encoding="utf-8")
           app_css = Path("src/css/app.css").read_text(encoding="utf-8")
           intake = Path("src/features/public-support/index.js").read_text(encoding="utf-8")
           mobile_css = Path("src/css/views/public/mobile-polish.css").read_text(encoding="utf-8")
@@ -127,6 +131,10 @@ jobs:
                   "El intake debe mantener +34 como prefijo España",
               ),
               (
+                  '/^[6789]\\d{8}$/' in intake,
+                  "El intake debe mantener 9 dígitos españoles estándar (6-9)",
+              ),
+              (
                   'public-support.intake.v4' in intake,
                   "Versión final esperada public-support.intake.v4",
               ),
@@ -135,8 +143,24 @@ jobs:
                   "Los CTAs internos deben usar icono propio de incidencia",
               ),
               (
+                  'fullName: fullName(user)' not in intake,
+                  "El formulario público no debe volver a precargar automáticamente el nombre completo",
+              ),
+              (
                   'public-home-topbar-account' not in mobile_css,
                   "El CSS móvil no debe volver a duplicar la identidad en el top bar",
+              ),
+              (
+                  '`POST /api/tickets/public`' in docs,
+                  "La documentación debe mantener el endpoint público acordado",
+              ),
+              (
+                  '`+34` por defecto' in docs and '`6`, `7`, `8` o `9`' in docs,
+                  "La documentación debe mantener el alcance telefónico España",
+              ),
+              (
+                  'no deben usar su icono' in docs,
+                  "La documentación debe diferenciar CTA interno y WhatsApp",
               ),
           ]
 

@@ -99,6 +99,7 @@ jobs:
           docs = Path("docs/PUBLIC_TICKET_INTAKE.md").read_text(encoding="utf-8")
           app_css = Path("src/css/app.css").read_text(encoding="utf-8")
           intake = Path("src/features/public-support/index.js").read_text(encoding="utf-8")
+          home = Path("src/views/public/home/index.js").read_text(encoding="utf-8")
           mobile_css = Path("src/css/views/public/mobile-polish.css").read_text(encoding="utf-8")
 
           checks = [
@@ -145,6 +146,14 @@ jobs:
               (
                   'fullName: fullName(user)' not in intake,
                   "El formulario público no debe volver a precargar automáticamente el nombre completo",
+              ),
+              (
+                  'public.home.view.controller.final.productivo.2026.23.history-replace' in home,
+                  "La home debe mantener la revisión que corrige el historial de navegación interna",
+              ),
+              (
+                  home.count('replace: true,') >= 2,
+                  "Los clics y scrollTo programático de la home deben reemplazar el hash sin apilar historial",
               ),
               (
                   'public-home-topbar-account' not in mobile_css,

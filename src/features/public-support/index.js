@@ -5,19 +5,23 @@
    Home pública:
    - formulario visible de alta + incidencia;
    - un único POST público al backend;
-   - avatar + full name cuando ya existe sesión;
+   - identidad del cliente autenticado en su acceso al panel;
+   - formulario sin exponer automáticamente el nombre del usuario;
+   - teléfono limitado a España (+34);
    - WhatsApp queda como canal alternativo.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import Http from "../../core/http.js";
 
-export const PUBLIC_SUPPORT_VERSION = "public-support.intake.v2";
+export const PUBLIC_SUPPORT_VERSION = "public-support.intake.v3";
 export const PUBLIC_TICKET_ENDPOINT = "/api/tickets/public";
 
 const HOME = "[data-public-home]";
 const FORM = "[data-public-support-form]";
 const SECTION_ID = "incidencia";
+const SPAIN_PREFIX = "+34";
+const SPAIN_PHONE_DEFAULT = "+34 ";
 const enhanced = new WeakSet();
 
 let observer = null;
@@ -257,7 +261,7 @@ function formSection() {
         <div class="public-support-grid">
           ${field("fullName", "Nombre completo", "text", "Nombre y apellidos", "name", 120)}
           ${field("email", "Correo electrónico", "email", "tu@correo.com", "email", 180, "email")}
-          ${field("phone", "Teléfono", "tel", "+34 600 000 000", "tel", 32, "tel")}
+          ${field("phone", "Teléfono", "tel", "+34 600 000 000", "tel", 18, "tel", SPAIN_PHONE_DEFAULT)}
           ${field("address", "Dirección", "text", "Calle, número, localidad y CP", "street-address", 220)}
 
           <div class="public-support-field public-support-field--wide">
@@ -304,11 +308,13 @@ function errorNode(name) {
     data-public-support-error-for="${name}" hidden></small>`;
 }
 
-function field(name, label, type, placeholder, autocomplete, maxlength, inputmode = "") {
+function field(name, label, type, placeholder, autocomplete, maxlength, inputmode = "", value = "") {
   const mode = inputmode ? ` inputmode="${inputmode}"` : "";
+  const initialValue = value ? ` value="${value}"` : "";
+
   return `<div class="public-support-field">
     <label for="public-support-${name}">${label}</label>
-    <input id="public-support-${name}" name="${name}" type="${type}"${mode}
+    <input id="public-support-${name}" name="${name}" type="${type}"${mode}${initialValue}
       autocomplete="${autocomplete}" maxlength="${maxlength}" required placeholder="${placeholder}">
     ${errorNode(name)}
   </div>`;
@@ -363,21 +369,53 @@ function syncFaq(root) {
   }
 }
 
+function nationalSpanishDigits(value = "") {
+  let valueDigits = String(value ?? "").replace(/\D/g, "");
+
+  if (valueDigits.startsWith("0034")) valueDigits = valueDigits.slice(4);
+  else if (valueDigits.startsWith("34") && valueDigits.length === 11) valueDigits = valueDigits.slice(2);
+
+  return valueDigits;
+}
+
+function normalizeSpanishPhone(value = "") {
+  const national = nationalSpanishDigits(value);
+  if (!/^\d{9}$/.test(national)) return "";
+
+  return `${SPAIN_PREFIX} ${national.slice(0, 3)} ${national.slice(3, 6)} ${national.slice(6, 9)}`;
+}
+
+function isDefaultSpanishPhone(value = "") {
+  return !text(value) || text(value) === SPAIN_PREFIX;
+}
+
 function prefill(root) {
   const form = root.querySelector(FORM);
-  const { user, authenticated } = session();
-  if (!form || !authenticated || !user) return;
+  if (!form) return;
 
+  const phoneInput = form.elements.namedItem("phone");
+  if (phoneInput && !text(phoneInput.value)) phoneInput.value = SPAIN_PHONE_DEFAULT;
+
+  const { user, authenticated } = session();
+  if (!authenticated || !user) return;
+
+  /*
+     El nombre NO se precarga de forma deliberada: evita exponer
+     automáticamente el nombre del usuario en un formulario público.
+  */
   const values = {
-    fullName: fullName(user),
     email: email(user),
-    phone: phone(user),
     address: address(user),
   };
 
   for (const [name, value] of Object.entries(values)) {
     const input = form.elements.namedItem(name);
     if (input && !text(input.value) && value) input.value = value;
+  }
+
+  const storedPhone = normalizeSpanishPhone(phone(user));
+  if (phoneInput && storedPhone && isDefaultSpanishPhone(phoneInput.value)) {
+    phoneInput.value = storedPhone;
   }
 }
 
@@ -433,15 +471,11 @@ function status(form, message = "", type = "info") {
   node.dataset.status = text(message) ? type : "";
 }
 
-function digits(value) {
-  return String(value ?? "").replace(/\D/g, "").length;
-}
-
 function validate(form) {
   const rules = {
     fullName: (v) => v.length >= 3 ? "" : "Introduce tu nombre completo.",
     email: (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? "" : "Introduce un correo válido.",
-    phone: (v) => digits(v) >= 7 ? "" : "Introduce un teléfono válido.",
+    phone: (v) => normalizeSpanishPhone(v) ? "" : "Introduce un teléfono de España válido (+34 y 9 dígitos).",
     address: (v) => v.length >= 6 ? "" : "Introduce una dirección completa.",
     subject: (v) => v.length >= 4 ? "" : "Resume el problema en el asunto.",
     description: (v) => v.length >= 10 ? "" : "Añade un poco más de detalle sobre el problema.",
@@ -465,7 +499,7 @@ function payload(form) {
   return {
     fullName: text(data.get("fullName")),
     email: text(data.get("email")).toLowerCase(),
-    phone: text(data.get("phone")).replace(/[^\d+()\s.-]/g, "").slice(0, 32),
+    phone: normalizeSpanishPhone(data.get("phone")),
     address: text(data.get("address")),
     subject: text(data.get("subject")),
     description: text(data.get("description")),
@@ -604,11 +638,28 @@ function onInput(event) {
   }
 }
 
+function onFocusIn(event) {
+  const input = event.target;
+  if (!input?.matches?.(`${FORM} [name="phone"]`)) return;
+  if (!text(input.value)) input.value = SPAIN_PHONE_DEFAULT;
+}
+
+function onFocusOut(event) {
+  const input = event.target;
+  if (!input?.matches?.(`${FORM} [name="phone"]`)) return;
+
+  const normalized = normalizeSpanishPhone(input.value);
+  if (normalized) input.value = normalized;
+  else if (!text(input.value)) input.value = SPAIN_PHONE_DEFAULT;
+}
+
 function install() {
   if (typeof window === "undefined" || destroyed) return;
 
   document.addEventListener("submit", onSubmit, true);
   document.addEventListener("input", onInput, true);
+  document.addEventListener("focusin", onFocusIn, true);
+  document.addEventListener("focusout", onFocusOut, true);
   window.addEventListener("onion:main:ready", scan);
   document.addEventListener("public-home:ready", scan, true);
 
@@ -634,6 +685,8 @@ export function destroyPublicSupport() {
 
   document.removeEventListener("submit", onSubmit, true);
   document.removeEventListener("input", onInput, true);
+  document.removeEventListener("focusin", onFocusIn, true);
+  document.removeEventListener("focusout", onFocusOut, true);
   window.removeEventListener("onion:main:ready", scan);
   document.removeEventListener("public-home:ready", scan, true);
 

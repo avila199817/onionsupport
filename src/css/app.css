@@ -272,6 +272,10 @@
    - Estados de validación/envío.
    - Identidad autenticada en Panel cliente.
 
+   mobile-polish.css:
+   - Ajuste final del drawer móvil por contenido.
+   - Sin identidad duplicada ni lógica de usuario.
+
    Importante:
    - Usa layer(auth) intencionadamente para integrarse con el shell público.
    - No debe contaminar la app privada porque todo va scopeado bajo
@@ -279,3 +283,4 @@
 ========================================================= */
 
 @import url("./views/public/support-request.css");
+@import url("./views/public/mobile-polish.css");

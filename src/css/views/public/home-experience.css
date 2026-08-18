@@ -1,0 +1,383 @@
+/* =========================================================
+   ONION SUPPORT — PUBLIC HOME EXPERIENCE
+   Archivo: /src/css/views/public/home-experience.css
+
+   Scope:
+   - Remate visual/UX de la home pública.
+   - Orden de acciones de cabecera.
+   - Dropdown de cuenta autenticada.
+   - Ayuda contextual y formato del teléfono.
+   - Retirada visual inmediata del login/cuenta del footer.
+   - Ajuste de precisión de iconos SVG inline.
+========================================================= */
+
+@layer auth {
+
+/* =========================================================
+   1. HEADER ACTION ORDER
+========================================================= */
+
+.public-home .public-home-nav-actions > .public-home-login-link,
+.public-home .public-home-nav-actions > .public-home-account-menu-wrap {
+  order: 1;
+}
+
+.public-home .public-home-nav-actions > .public-home-nav-cta {
+  order: 2;
+}
+
+.public-home .public-home-account-menu-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+  min-inline-size: 0;
+}
+
+.public-home .public-home-account-menu-wrap > .public-home-login-link {
+  inline-size: 100%;
+}
+
+.public-home .public-home-account-menu-wrap > [data-public-home-account-toggle] {
+  position: relative;
+  padding-inline-end: 34px;
+}
+
+.public-home .public-home-account-menu-wrap > [data-public-home-account-toggle]::after {
+  content: "";
+  position: absolute;
+  inset-inline-end: 14px;
+  inset-block-start: 50%;
+  inline-size: 7px;
+  block-size: 7px;
+  border-inline-end: 1.5px solid currentColor;
+  border-block-end: 1.5px solid currentColor;
+  opacity: .72;
+  transform: translateY(-70%) rotate(45deg);
+  transition: transform .18s ease, opacity .18s ease;
+}
+
+.public-home .public-home-account-menu-wrap.is-open > [data-public-home-account-toggle]::after {
+  opacity: 1;
+  transform: translateY(-25%) rotate(225deg);
+}
+
+/* =========================================================
+   2. AUTHENTICATED ACCOUNT MENU
+========================================================= */
+
+.public-home .public-home-account-menu {
+  position: absolute;
+  inset-block-start: calc(100% + 10px);
+  inset-inline-end: 0;
+  z-index: 180;
+
+  display: grid;
+  gap: 4px;
+  inline-size: min(250px, calc(100vw - 28px));
+  padding: 8px;
+
+  border: 1px solid rgb(82 198 255 / .22);
+  border-radius: 18px;
+
+  background:
+    radial-gradient(circle at 100% 0%, rgb(52 212 255 / .08), transparent 36%),
+    rgb(3 11 23 / .97);
+
+  box-shadow:
+    0 26px 72px rgb(0 0 0 / .48),
+    0 0 0 1px rgb(255 255 255 / .025),
+    inset 0 1px 0 rgb(255 255 255 / .055);
+
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-6px) scale(.985);
+  transform-origin: top right;
+
+  backdrop-filter: blur(20px) saturate(1.12);
+  -webkit-backdrop-filter: blur(20px) saturate(1.12);
+
+  transition:
+    opacity .16s ease,
+    visibility .16s ease,
+    transform .16s ease;
+}
+
+.public-home .public-home-account-menu.is-open {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+}
+
+.public-home .public-home-account-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+
+  min-block-size: 42px;
+  inline-size: 100%;
+  padding: 0 12px;
+
+  border: 1px solid transparent;
+  border-radius: 12px;
+
+  color: #dcecff;
+  background: transparent;
+
+  font: inherit;
+  font-size: 13px;
+  font-weight: 820;
+  text-align: start;
+  cursor: pointer;
+
+  transition:
+    color .16s ease,
+    border-color .16s ease,
+    background .16s ease,
+    transform .16s ease;
+}
+
+.public-home a.public-home-account-menu-item::after {
+  content: "→";
+  color: #76dbff;
+  font-size: 15px;
+  font-weight: 800;
+  opacity: .62;
+  transform: translateX(-2px);
+  transition: opacity .16s ease, transform .16s ease;
+}
+
+.public-home .public-home-account-menu-item:hover,
+.public-home .public-home-account-menu-item:focus-visible {
+  color: #ffffff;
+  border-color: rgb(82 198 255 / .20);
+  background: rgb(19 148 255 / .095);
+  transform: translateX(1px);
+}
+
+.public-home a.public-home-account-menu-item:hover::after,
+.public-home a.public-home-account-menu-item:focus-visible::after {
+  opacity: 1;
+  transform: translateX(1px);
+}
+
+.public-home .public-home-account-menu-divider {
+  display: block;
+  block-size: 1px;
+  margin: 4px 5px;
+  background: rgb(255 255 255 / .085);
+}
+
+.public-home .public-home-account-menu-item--logout {
+  justify-content: flex-start;
+  border: 0;
+  color: #ffb7c3;
+}
+
+.public-home .public-home-account-menu-item--logout:hover,
+.public-home .public-home-account-menu-item--logout:focus-visible {
+  color: #ffd4db;
+  border-color: transparent;
+  background: rgb(255 92 117 / .10);
+}
+
+.public-home .public-home-account-menu-item--logout:disabled {
+  opacity: .66;
+  cursor: wait;
+  transform: none;
+}
+
+/* =========================================================
+   3. FOOTER
+   El JS elimina el nodo; esta regla evita cualquier flash previo.
+========================================================= */
+
+.public-home .public-home-footer [data-public-home-login] {
+  display: none;
+}
+
+/* =========================================================
+   4. PHONE FORMAT HELP
+========================================================= */
+
+.public-home .public-support-label-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-inline-size: 0;
+  inline-size: fit-content;
+}
+
+.public-home .public-support-label-row > label {
+  margin: 0;
+}
+
+.public-home .public-support-field-help {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 19px;
+
+  inline-size: 19px;
+  block-size: 19px;
+  padding: 0;
+
+  border: 1px solid rgb(82 198 255 / .30);
+  border-radius: 999px;
+
+  color: #8de9ff;
+  background: rgb(19 148 255 / .08);
+
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+  cursor: help;
+
+  transition:
+    color .16s ease,
+    border-color .16s ease,
+    background .16s ease,
+    transform .16s ease;
+}
+
+.public-home .public-support-field-help:hover,
+.public-home .public-support-field-help:focus-visible {
+  color: #ffffff;
+  border-color: rgb(82 198 255 / .58);
+  background: rgb(19 148 255 / .18);
+  transform: translateY(-1px);
+}
+
+.public-home .public-support-field-tooltip {
+  position: absolute;
+  inset-inline-start: calc(100% + 8px);
+  inset-block-start: 50%;
+  z-index: 80;
+
+  display: block;
+  inline-size: max-content;
+  max-inline-size: min(250px, calc(100vw - 32px));
+  padding: 8px 10px;
+
+  border: 1px solid rgb(82 198 255 / .22);
+  border-radius: 10px;
+
+  color: #dff7ff;
+  background: rgb(3 12 25 / .98);
+  box-shadow: 0 12px 34px rgb(0 0 0 / .34);
+
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 1.35;
+  white-space: nowrap;
+
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate(4px, -50%);
+
+  transition:
+    opacity .14s ease,
+    visibility .14s ease,
+    transform .14s ease;
+}
+
+.public-home .public-support-field--phone:hover .public-support-field-tooltip,
+.public-home .public-support-label-row:focus-within .public-support-field-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(0, -50%);
+}
+
+.public-home .public-support-field--phone input {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .012em;
+}
+
+/* =========================================================
+   5. SVG PRECISION
+========================================================= */
+
+.public-home [data-public-home-svg-polished],
+.public-home .public-home-service-icon .public-home-icon,
+.public-home .public-home-method-icon .public-home-icon,
+.public-home .public-support-intake-icon {
+  overflow: visible;
+  shape-rendering: geometricPrecision;
+}
+
+.public-home .public-home-service-icon .public-home-icon,
+.public-home .public-home-method-icon .public-home-icon {
+  transform: translateZ(0);
+}
+
+.public-home .public-home-service-icon .public-home-icon path,
+.public-home .public-home-method-icon .public-home-icon path,
+.public-home .public-support-intake-icon path {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* =========================================================
+   6. RESPONSIVE
+========================================================= */
+
+@media (max-width: 1040px) {
+  .public-home .public-home-account-menu-wrap {
+    inline-size: 100%;
+  }
+
+  .public-home .public-home-account-menu-wrap > .public-home-login-link {
+    inline-size: 100%;
+  }
+
+  .public-home .public-home-account-menu {
+    inset-inline-start: 0;
+    inset-inline-end: auto;
+    inline-size: min(244px, calc(100vw - 32px));
+    transform-origin: top left;
+  }
+}
+
+@media (max-width: 720px) {
+  .public-home .public-home-account-menu {
+    position: static;
+    inline-size: 100%;
+    margin-block-start: 7px;
+    box-shadow:
+      0 16px 38px rgb(0 0 0 / .30),
+      inset 0 1px 0 rgb(255 255 255 / .045);
+    transform: translateY(-4px);
+  }
+
+  .public-home .public-home-account-menu.is-open {
+    transform: translateY(0);
+  }
+
+  .public-home .public-support-field-tooltip {
+    inset-inline-start: 0;
+    inset-block-start: calc(100% + 7px);
+    transform: translateY(-3px);
+    white-space: normal;
+  }
+
+  .public-home .public-support-field--phone:hover .public-support-field-tooltip,
+  .public-home .public-support-label-row:focus-within .public-support-field-tooltip {
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .public-home .public-home-account-menu,
+  .public-home .public-home-account-menu-item,
+  .public-home .public-home-account-menu-item::after,
+  .public-home .public-home-account-menu-wrap > [data-public-home-account-toggle]::after,
+  .public-home .public-support-field-help,
+  .public-home .public-support-field-tooltip {
+    transition: none;
+  }
+}
+
+}

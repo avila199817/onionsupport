@@ -67,7 +67,7 @@ import {
 } from "./incidencias.template.modal.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.extreme.v29.interactive-stats";
+  "incidencias.index.extreme.v30.attachments-sort";
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
@@ -5295,6 +5295,7 @@ Se quitará de la incidencia y del almacenamiento. Esta acción no se puede desh
         "closed",
         "urgent",
         "amount",
+        "attachments",
       ].includes(stat)
     ) {
       return false;
@@ -5304,9 +5305,9 @@ Se quitará de la incidencia y del almacenamiento. Esta acción no se puede desh
     visibleLimit =
       DEFAULT_VISIBLE_LIMIT;
 
-    if (stat === "amount") {
+    if (stat === "amount" || stat === "attachments") {
       filter = "all";
-      sortMode = "amount";
+      sortMode = stat;
       sortOrder = "desc";
     } else {
       filter = stat;
@@ -6381,6 +6382,7 @@ Se quitará de la incidencia y del almacenamiento. Esta acción no se puede desh
           search.length,
 
         sortOrder,
+        sortMode,
 
         createModalOpen:
           createModal.open,

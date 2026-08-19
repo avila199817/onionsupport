@@ -13,8 +13,8 @@
    - Cada dominio sólo declara su mapa de slots; la geometría es común.
 
    Esta hoja vive en layer(compositions), después de views y antes de
-   guardrails. Así puede recomponer una vista sin !important y sin convertirse
-   en un parche específico de una ruta.
+   guardrails. Así puede recomponer una vista por orden de cascada y permanecer
+   como sistema transversal, no como parche específico de una ruta.
 ========================================================= */
 
 @layer compositions {

@@ -8,6 +8,7 @@ runtime values.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -37,6 +38,17 @@ FIRST_HELPER_PATTERN = re.compile(
     re.DOTALL,
 )
 EXTERNAL_SCHEMES = ("http://", "https://", "data:", "blob:")
+
+PRIVATE_ROUTE_SLUGS = (
+    "incidencias",
+    "facturas",
+    "clientes",
+    "usuarios",
+    "correo",
+    "servidor",
+    "cuenta",
+    "ajustes",
+)
 
 
 def clean_spec(value: str) -> str:
@@ -117,6 +129,69 @@ def validate_first_helpers(errors: list[str]) -> None:
                 )
 
 
+def validate_private_route_contract(errors: list[str]) -> None:
+    """Keep SPA routing, Azure noindex headers and robots.txt aligned.
+
+    A private route can be valid in Router and still leak a public/indexable shell
+    if the static host contract drifts. The invariant lives here so every deploy
+    and PR validates the same source of truth.
+    """
+
+    config_path = ROOT / "staticwebapp.config.json"
+    robots_path = ROOT / "robots.txt"
+
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        errors.append(f"staticwebapp.config.json :: JSON inválido o ilegible: {error}")
+        return
+
+    try:
+        robots_lines = {
+            line.strip()
+            for line in robots_path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+    except OSError as error:
+        errors.append(f"robots.txt :: archivo ilegible: {error}")
+        robots_lines = set()
+
+    routes = {
+        route.get("route"): route
+        for route in config.get("routes", [])
+        if isinstance(route, dict) and route.get("route")
+    }
+
+    for slug in PRIVATE_ROUTE_SLUGS:
+        static_route = f"/{slug}*"
+        robots_rule = f"Disallow: /{slug}"
+        route = routes.get(static_route)
+
+        if not route:
+            errors.append(
+                f"staticwebapp.config.json :: falta contrato SPA privado para {static_route}"
+            )
+        else:
+            if route.get("rewrite") != "/index.html":
+                errors.append(
+                    f"staticwebapp.config.json :: {static_route} debe reescribir a /index.html"
+                )
+
+            x_robots = str(
+                route.get("headers", {}).get("X-Robots-Tag", "")
+            ).lower()
+
+            if "noindex" not in x_robots or "nofollow" not in x_robots:
+                errors.append(
+                    f"staticwebapp.config.json :: {static_route} debe enviar X-Robots-Tag noindex, nofollow"
+                )
+
+        if robots_rule not in robots_lines:
+            errors.append(
+                f"robots.txt :: falta regla privada obligatoria: {robots_rule}"
+            )
+
+
 def validate_css_references(errors: list[str]) -> None:
     for css_file in sorted((SRC / "css").rglob("*.css")):
         text = css_file.read_text(encoding="utf-8")
@@ -159,6 +234,7 @@ def main() -> int:
     validate_paths(errors)
     validate_js_references(errors)
     validate_first_helpers(errors)
+    validate_private_route_contract(errors)
     validate_css_references(errors)
     validate_known_dead_paths(errors)
 

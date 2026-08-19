@@ -2,13 +2,17 @@
    ONION SUPPORT — PUBLIC HOME EXPERIENCE
    Archivo: /src/css/views/public/home-experience.css
 
-   Remate visual/UX:
-   - Landing algo más ancha y respirada.
+   Sistema visual/UX canónico de la landing:
+   - Landing ancha y respirada.
    - Login/Cuenta a la izquierda de Abrir incidencia.
    - Dropdown autenticado compacto.
+   - Navegación móvil contenida y estable.
    - Teléfono España con bandera + prefijo +34 permanentes.
    - Footer sin login/cuenta.
    - Precisión de SVGs inline.
+
+   Este archivo absorbe la antigua hoja mobile-polish.css para que el
+   comportamiento responsive de la landing tenga una única fuente de verdad.
 ========================================================= */
 
 @layer auth {
@@ -23,8 +27,12 @@
 }
 
 /* =========================================================
-   2. HEADER ACTION ORDER
+   2. HEADER ACTION ORDER / CTA
 ========================================================= */
+
+.public-home .public-home-price-link {
+  display: none;
+}
 
 .public-home .public-home-nav-actions > .public-home-login-link,
 .public-home .public-home-nav-actions > .public-home-account-menu-wrap {
@@ -73,6 +81,17 @@
 
 .public-home .public-support-account-name {
   max-inline-size: 112px;
+}
+
+@media (min-width: 1041px) {
+  .public-home .public-home-nav-cta {
+    gap: 0;
+    padding-inline: 24px;
+  }
+
+  .public-home .public-home-nav-cta > svg {
+    display: none;
+  }
 }
 
 /* =========================================================
@@ -392,7 +411,7 @@
 }
 
 /* =========================================================
-   7. RESPONSIVE
+   7. RESPONSIVE · PUBLIC HOME CANONICAL
 ========================================================= */
 
 @media (max-width: 1280px) {
@@ -402,6 +421,30 @@
 }
 
 @media (max-width: 1040px) {
+  .public-home .public-home-nav-panel {
+    inline-size: fit-content;
+    min-inline-size: 190px;
+    max-inline-size: min(258px, calc(100vw - 28px));
+    justify-items: stretch;
+  }
+
+  .public-home .public-home-nav-menu,
+  .public-home .public-home-nav-actions {
+    inline-size: auto;
+    min-inline-size: 0;
+  }
+
+  .public-home .public-home-nav-panel .public-home-nav-link,
+  .public-home .public-home-nav-panel .public-home-login-link,
+  .public-home .public-home-nav-panel .public-home-nav-cta {
+    inline-size: 100%;
+    white-space: nowrap;
+  }
+
+  .public-home .public-home-nav-panel .public-home-nav-cta {
+    justify-content: flex-start;
+  }
+
   .public-home .public-home-account-menu-wrap {
     inline-size: 100%;
   }
@@ -429,6 +472,12 @@
     --public-home-page-gutter: clamp(14px, 4vw, 22px);
   }
 
+  .public-home .public-home-nav-panel {
+    inline-size: fit-content;
+    min-inline-size: 188px;
+    max-inline-size: min(238px, calc(100vw - 28px));
+  }
+
   .public-home .public-home-account-menu-wrap {
     flex-direction: column;
   }
@@ -449,6 +498,23 @@
 
   .public-home .public-support-phone-prefix {
     padding-inline: 12px 11px;
+  }
+}
+
+@media (max-width: 460px) {
+  .public-home .public-home-nav-panel {
+    inset-inline-end: 12px;
+    inline-size: fit-content;
+    min-inline-size: 184px;
+    max-inline-size: min(226px, calc(100vw - 24px));
+  }
+}
+
+@media (max-width: 390px) {
+  .public-home .public-home-nav-panel {
+    inset-inline-end: 10px;
+    min-inline-size: 180px;
+    max-inline-size: min(218px, calc(100vw - 20px));
   }
 }
 

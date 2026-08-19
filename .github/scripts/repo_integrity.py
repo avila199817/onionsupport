@@ -450,6 +450,21 @@ def validate_ui_system_v4_contract(errors: list[str]) -> None:
         errors.append("src/css/layout/sidebar.css :: falta icono integrado de Correo")
 
 
+def validate_correo_cascade_v5_contract(errors: list[str]) -> None:
+    """Keep Correo on normal cascade; reserve !important for accessibility/print escape hatches."""
+    viewport_path = SRC / "css" / "views" / "correo" / "viewport.css"
+    viewport_text = viewport_path.read_text(encoding="utf-8")
+    important_count = viewport_text.count("!important")
+
+    if important_count > 16:
+        errors.append(
+            f"src/css/views/correo/viewport.css :: demasiados !important tras V5: {important_count} > 16"
+        )
+
+    if "CONSOLIDATED HEIGHT / DENSITY CONTRACT" not in viewport_text:
+        errors.append("src/css/views/correo/viewport.css :: falta contrato consolidado de altura/densidad")
+
+
 def validate_paths(errors: list[str]) -> None:
     for root in (SRC, ROOT / ".github"):
         if not root.exists():
@@ -487,6 +502,7 @@ def main() -> int:
     validate_css_references(errors)
     validate_ui_foundation_contract(errors)
     validate_ui_system_v4_contract(errors)
+    validate_correo_cascade_v5_contract(errors)
     validate_known_dead_paths(errors)
 
     unique_errors = list(dict.fromkeys(errors))

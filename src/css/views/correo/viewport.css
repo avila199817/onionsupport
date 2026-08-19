@@ -68,16 +68,16 @@
 
 .correo-sr-status,
 .correo-field-sr-label {
-  position: absolute !important;
-  inline-size: 1px !important;
-  block-size: 1px !important;
-  padding: 0 !important;
-  margin: -1px !important;
-  overflow: hidden !important;
-  clip: rect(0 0 0 0) !important;
-  clip-path: inset(50%) !important;
-  white-space: nowrap !important;
-  border: 0 !important;
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ---------- Buttons ---------- */
@@ -149,9 +149,9 @@
   }
 
   .panel-content[data-view="correo"] {
-    padding: 0 !important;
-    margin: 0 !important;
-    max-inline-size: none !important;
+    padding: 0;
+    margin: 0;
+    max-inline-size: none;
     overflow: hidden;
   }
 }
@@ -253,7 +253,7 @@
   background: #292929;
   box-shadow: 0 12px 34px rgba(0,0,0,.45);
 }
-.correo-account-menu[hidden] { display: none !important; }
+.correo-account-menu[hidden] { display: none; }
 .correo-account-menu-current {
   min-block-size: 58px;
   display: grid;
@@ -886,77 +886,77 @@ body[data-theme="light"] .correo-field--body textarea { color:#242424; }
   ======================================================= */
 
   .main-content:has([data-correo-host="true"]) {
-    min-block-size: 0 !important;
-    overflow: hidden !important;
-    scrollbar-gutter: auto !important;
+    min-block-size: 0;
+    overflow: hidden;
+    scrollbar-gutter: auto;
   }
 
   .main-content:has([data-correo-host="true"]) > #app-content,
   #app-content:has([data-correo-host="true"]) {
-    display: flex !important;
-    flex: 1 1 0 !important;
-    flex-direction: column !important;
-    block-size: 100% !important;
-    min-block-size: 0 !important;
-    max-block-size: none !important;
-    padding-block-end: 0 !important;
-    overflow: hidden !important;
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    block-size: 100%;
+    min-block-size: 0;
+    max-block-size: none;
+    padding-block-end: 0;
+    overflow: hidden;
   }
 
   #app-content:has([data-correo-host="true"]) > #view-container,
   #view-container:has([data-correo-host="true"]) {
-    display: flex !important;
-    flex: 1 1 0 !important;
-    flex-direction: column !important;
-    align-items: stretch !important;
-    block-size: 100% !important;
-    min-block-size: 0 !important;
-    max-block-size: none !important;
-    overflow: hidden !important;
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    align-items: stretch;
+    block-size: 100%;
+    min-block-size: 0;
+    max-block-size: none;
+    overflow: hidden;
   }
 
   #view-container > .panel-content[data-view="correo"],
   #view-container > .panel-content[data-view="correo"][data-correo-host="true"],
   .panel-content[data-view="correo"][data-correo-host="true"] {
-    display: flex !important;
-    flex: 1 1 0 !important;
-    flex-direction: column !important;
-    align-self: stretch !important;
-    block-size: 100% !important;
-    min-block-size: 0 !important;
-    max-block-size: none !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    overflow: hidden !important;
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    align-self: stretch;
+    block-size: 100%;
+    min-block-size: 0;
+    max-block-size: none;
+    padding: 0;
+    margin: 0;
+    overflow: hidden;
   }
 
   [data-correo-host="true"] > .correo-view-root,
   .panel-content[data-view="correo"] > .correo-view-root {
-    display: flex !important;
-    flex: 1 1 0 !important;
-    flex-direction: column !important;
-    block-size: 100% !important;
-    min-block-size: 0 !important;
-    max-block-size: none !important;
-    overflow: hidden !important;
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    block-size: 100%;
+    min-block-size: 0;
+    max-block-size: none;
+    overflow: hidden;
   }
 
   [data-correo-host="true"] .correo-workspace {
-    flex: 1 1 0 !important;
-    align-self: stretch !important;
-    block-size: 100% !important;
-    min-block-size: 0 !important;
-    max-block-size: none !important;
-    overflow: hidden !important;
+    flex: 1 1 0;
+    align-self: stretch;
+    block-size: 100%;
+    min-block-size: 0;
+    max-block-size: none;
+    overflow: hidden;
   }
 
   [data-correo-host="true"] .correo-folders-panel,
   [data-correo-host="true"] .correo-list-panel,
   [data-correo-host="true"] .correo-reader,
   [data-correo-host="true"] .correo-reader-card {
-    block-size: 100% !important;
-    min-block-size: 0 !important;
-    max-block-size: none !important;
+    block-size: 100%;
+    min-block-size: 0;
+    max-block-size: none;
   }
 
   /* =======================================================
@@ -966,10 +966,10 @@ body[data-theme="light"] .correo-field--body textarea { color:#242424; }
   ======================================================= */
 
   [data-correo-host="true"] .correo-list-panel {
-    display: grid !important;
-    grid-template-columns: minmax(0, 1fr) !important;
-    grid-template-rows: auto 38px minmax(0, 1fr) !important;
-    overflow: hidden !important;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 38px minmax(0, 1fr);
+    overflow: hidden;
   }
 
   [data-correo-host="true"] .correo-search {
@@ -993,13 +993,13 @@ body[data-theme="light"] .correo-field--body textarea { color:#242424; }
 
   [data-correo-host="true"] .correo-message-list {
     grid-row: 3;
-    min-block-size: 0 !important;
-    block-size: 100% !important;
-    overflow: auto !important;
+    min-block-size: 0;
+    block-size: 100%;
+    overflow: auto;
   }
 
   [data-correo-host="true"] .correo-infinite-sentinel {
-    display: none !important;
+    display: none;
   }
 
   [data-correo-host="true"] .correo-folders-panel {
@@ -1011,7 +1011,7 @@ body[data-theme="light"] .correo-field--body textarea { color:#242424; }
   }
 
   [data-correo-host="true"] .correo-reader-scroll {
-    min-block-size: 0 !important;
+    min-block-size: 0;
   }
 }
 
@@ -1021,7 +1021,7 @@ body[data-theme="light"] .correo-field--body textarea { color:#242424; }
   }
 
   [data-correo-host="true"] .correo-list-panel {
-    grid-template-rows: auto 36px minmax(0, 1fr) !important;
+    grid-template-rows: auto 36px minmax(0, 1fr);
   }
 
   [data-correo-host="true"] .correo-list-toolbar {
@@ -1054,63 +1054,63 @@ body[data-theme="light"] .correo-field--body textarea { color:#242424; }
 
 /* Carpetas: densidad de cliente de escritorio real. */
 [data-correo-host="true"] .correo-folders-panel {
-  padding-inline: 7px !important;
-  padding-block-start: 8px !important;
+  padding-inline: 7px;
+  padding-block-start: 8px;
 }
 
 [data-correo-host="true"] .correo-account-wrap {
-  margin-block-end: 5px !important;
+  margin-block-end: 5px;
 }
 
 [data-correo-host="true"] .correo-folder {
-  min-block-size: 36px !important;
-  grid-template-columns: 22px minmax(0, 1fr) auto !important;
-  gap: 6px !important;
-  padding: 3px 7px !important;
-  border-radius: 4px !important;
+  min-block-size: 36px;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 6px;
+  padding: 3px 7px;
+  border-radius: 4px;
 }
 
 [data-correo-host="true"] .correo-folder-icon svg {
-  inline-size: 16px !important;
-  block-size: 16px !important;
+  inline-size: 16px;
+  block-size: 16px;
 }
 
 [data-correo-host="true"] .correo-folder-copy {
-  gap: 0 !important;
+  gap: 0;
 }
 
 [data-correo-host="true"] .correo-folder-copy strong {
-  font-size: 11.5px !important;
-  line-height: 1.2 !important;
+  font-size: 11.5px;
+  line-height: 1.2;
 }
 
 [data-correo-host="true"] .correo-folder-copy small {
-  display: none !important;
+  display: none;
 }
 
 [data-correo-host="true"] .correo-folder-count {
-  min-inline-size: 22px !important;
-  padding: 1px 5px !important;
-  font-size: 9px !important;
-  line-height: 16px !important;
+  min-inline-size: 22px;
+  padding: 1px 5px;
+  font-size: 9px;
+  line-height: 16px;
 }
 
 [data-correo-host="true"] .correo-disconnect-btn {
-  min-block-size: 37px !important;
+  min-block-size: 37px;
 }
 
 /* Cuenta: el perfil no necesita check; la presencia verde ya identifica estado. */
 [data-correo-host="true"] .correo-account-menu-current {
-  grid-template-columns: 32px minmax(0, 1fr) !important;
+  grid-template-columns: 32px minmax(0, 1fr);
 }
 
 [data-correo-host="true"] .correo-account-menu-current > i {
-  display: none !important;
+  display: none;
 }
 
 /* Estado de notificaciones: tercer slot explícito, vacío si está desactivado. */
 [data-correo-host="true"] .correo-account-menu [data-correo-action="notifications"] {
-  grid-template-columns: 22px minmax(0, 1fr) 18px !important;
+  grid-template-columns: 22px minmax(0, 1fr) 18px;
 }
 
 [data-correo-host="true"] .correo-account-menu-check {
@@ -1142,55 +1142,55 @@ body[data-theme="light"] .correo-field--body textarea { color:#242424; }
   Aquí se resetean las dos geometrías y el focus vive en el control completo.
 */
 [data-correo-host="true"] .correo-search {
-  min-block-size: 38px !important;
+  min-block-size: 38px;
   block-size: 38px;
-  display: grid !important;
-  grid-template-columns: 20px minmax(0, 1fr) auto !important;
-  align-items: center !important;
-  gap: 7px !important;
-  padding: 0 9px !important;
-  border: 1px solid #555 !important;
-  border-radius: 5px !important;
-  background: #242424 !important;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  border: 1px solid #555;
+  border-radius: 5px;
+  background: #242424;
   overflow: hidden;
 }
 
 [data-correo-host="true"] .correo-search:focus-within {
-  border-color: #479ef5 !important;
-  box-shadow: inset 0 -2px 0 #479ef5, 0 0 0 1px rgba(71, 158, 245, .22) !important;
+  border-color: #479ef5;
+  box-shadow: inset 0 -2px 0 #479ef5, 0 0 0 1px rgba(71, 158, 245, .22);
 }
 
 [data-correo-host="true"] .correo-search-icon {
-  position: static !important;
-  inset: auto !important;
-  z-index: auto !important;
-  display: grid !important;
-  place-items: center !important;
-  color: #bdbdbd !important;
+  position: static;
+  inset: auto;
+  z-index: auto;
+  display: grid;
+  place-items: center;
+  color: #bdbdbd;
 }
 
 [data-correo-host="true"] .correo-search input {
-  grid-column: 2 !important;
-  inline-size: 100% !important;
-  min-inline-size: 0 !important;
-  block-size: 100% !important;
-  min-block-size: 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  outline: 0 !important;
-  appearance: none !important;
-  -webkit-appearance: none !important;
-  background: transparent !important;
-  color: #fff !important;
-  box-shadow: none !important;
-  font-size: 11.5px !important;
+  grid-column: 2;
+  inline-size: 100%;
+  min-inline-size: 0;
+  block-size: 100%;
+  min-block-size: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  color: #fff;
+  box-shadow: none;
+  font-size: 11.5px;
 }
 
 [data-correo-host="true"] .correo-search input:focus,
 [data-correo-host="true"] .correo-search input:focus-visible {
-  outline: 0 !important;
-  box-shadow: none !important;
+  outline: 0;
+  box-shadow: none;
 }
 
 [data-correo-host="true"] .correo-search input::-webkit-search-decoration,
@@ -1201,16 +1201,16 @@ body[data-theme="light"] .correo-field--body textarea { color:#242424; }
 }
 
 [data-correo-host="true"] .correo-search kbd {
-  position: static !important;
-  inset: auto !important;
-  grid-column: 3 !important;
+  position: static;
+  inset: auto;
+  grid-column: 3;
   justify-self: end;
-  padding: 2px 5px !important;
-  border: 1px solid #4b4b4b !important;
-  border-radius: 4px !important;
-  background: #333 !important;
-  color: #aaa !important;
-  font-size: 8px !important;
+  padding: 2px 5px;
+  border: 1px solid #4b4b4b;
+  border-radius: 4px;
+  background: #333;
+  color: #aaa;
+  font-size: 8px;
   line-height: 1.2;
 }
 
@@ -1221,58 +1221,58 @@ body[data-theme="light"] .correo-field--body textarea { color:#242424; }
 [data-correo-host="true"] .correo-message-skeleton > span,
 [data-correo-host="true"] .correo-message-skeleton i,
 [data-correo-host="true"] .correo-reader-skeleton-block {
-  background-image: linear-gradient(90deg, #303030 0%, #303030 28%, #3b3b3b 42%, #303030 58%, #303030 100%) !important;
-  background-size: 280% 100% !important;
-  animation: correo-final-skeleton 1.35s ease-in-out infinite !important;
+  background-image: linear-gradient(90deg, #303030 0%, #303030 28%, #3b3b3b 42%, #303030 58%, #303030 100%);
+  background-size: 280% 100%;
+  animation: correo-final-skeleton 1.35s ease-in-out infinite;
 }
 
 [data-correo-host="true"] .correo-workspace--boot .correo-boot-account {
-  block-size: 54px !important;
-  margin-block-end: 7px !important;
+  block-size: 54px;
+  margin-block-end: 7px;
 }
 
 [data-correo-host="true"] .correo-workspace--boot .correo-boot-line {
-  block-size: 34px !important;
-  margin-block: 1px !important;
+  block-size: 34px;
+  margin-block: 1px;
 }
 
 [data-correo-host="true"] .correo-workspace--boot .correo-boot-title {
-  inline-size: calc(100% - 20px) !important;
-  block-size: 38px !important;
-  margin: 8px 10px 6px !important;
-  border-radius: 5px !important;
+  inline-size: calc(100% - 20px);
+  block-size: 38px;
+  margin: 8px 10px 6px;
+  border-radius: 5px;
 }
 
 [data-correo-host="true"] .correo-message-skeleton {
-  min-block-size: 82px !important;
-  grid-template-columns: 36px minmax(0, 1fr) !important;
-  gap: 10px !important;
-  padding: 10px 11px !important;
+  min-block-size: 82px;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 11px;
 }
 
 [data-correo-host="true"] .correo-message-skeleton > span {
-  inline-size: 34px !important;
-  block-size: 34px !important;
+  inline-size: 34px;
+  block-size: 34px;
 }
 
 [data-correo-host="true"] .correo-message-skeleton > div {
-  gap: 7px !important;
+  gap: 7px;
 }
 
 [data-correo-host="true"] .correo-message-skeleton i {
-  block-size: 7px !important;
+  block-size: 7px;
 }
 
 [data-correo-host="true"] .correo-message-skeleton:nth-child(2n) > span,
 [data-correo-host="true"] .correo-message-skeleton:nth-child(2n) i,
 [data-correo-host="true"] .correo-workspace--boot .correo-boot-line:nth-child(2n) {
-  animation-delay: -0.32s !important;
+  animation-delay: -0.32s;
 }
 
 [data-correo-host="true"] .correo-reader-loading {
-  gap: 9px !important;
-  color: #a9a9a9 !important;
-  font-size: 11px !important;
+  gap: 9px;
+  color: #a9a9a9;
+  font-size: 11px;
 }
 
 @keyframes correo-final-skeleton {
@@ -1282,13 +1282,13 @@ body[data-theme="light"] .correo-field--body textarea { color:#242424; }
 
 html[data-theme="light"] [data-correo-host="true"] .correo-search,
 body[data-theme="light"] [data-correo-host="true"] .correo-search {
-  background: #fff !important;
-  border-color: #b3b3b3 !important;
+  background: #fff;
+  border-color: #b3b3b3;
 }
 
 html[data-theme="light"] [data-correo-host="true"] .correo-search input,
 body[data-theme="light"] [data-correo-host="true"] .correo-search input {
-  color: #242424 !important;
+  color: #242424;
 }
 
 html[data-theme="light"] [data-correo-host="true"] .correo-account-menu-check,
@@ -1307,16 +1307,16 @@ body[data-theme="light"] [data-correo-host="true"] .correo-workspace--boot .corr
 body[data-theme="light"] [data-correo-host="true"] .correo-workspace--boot .correo-boot-title,
 body[data-theme="light"] [data-correo-host="true"] .correo-message-skeleton > span,
 body[data-theme="light"] [data-correo-host="true"] .correo-message-skeleton i {
-  background-image: linear-gradient(90deg, #e6e6e6 0%, #e6e6e6 28%, #f4f4f4 42%, #e6e6e6 58%, #e6e6e6 100%) !important;
+  background-image: linear-gradient(90deg, #e6e6e6 0%, #e6e6e6 28%, #f4f4f4 42%, #e6e6e6 58%, #e6e6e6 100%);
 }
 
 @media (max-height: 760px) and (min-width: 1280px) {
   [data-correo-host="true"] .correo-folder {
-    min-block-size: 33px !important;
+    min-block-size: 33px;
   }
 
   [data-correo-host="true"] .correo-account-card {
-    min-block-size: 50px !important;
+    min-block-size: 50px;
   }
 }
 

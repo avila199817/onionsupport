@@ -38,7 +38,7 @@ import {
 } from "./incidencias.options.js";
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.extreme.v31.single-submit";
+  "incidencias.template.modal.extreme.v32.avatar-parity";
 
 export const DETAIL_ACTIONS = Object.freeze({
   CLOSE: "detail-close",
@@ -2734,10 +2734,12 @@ function renderAvatar(
   const avatarUrl =
     getClientAvatar(detail);
 
+  const identity =
+    email ||
+    name;
+
   const tone =
-    hashText(
-      `${name}:${email}:${getTicketId(detail)}`
-    ) % 10;
+    hashText(identity) % 10;
 
   return `
     <div
@@ -3965,7 +3967,7 @@ function renderAdminTicketEditor(vm = {}) {
       <div class="incidencias-modal-section-head incidencias-modal-admin-head">
         <div>
           <h3 id="incidencias-modal-admin-editor-title">Gestión del ticket</h3>
-          <span>Estado, prioridad y tipo de incidencia · Los cambios se aplican con la acción del final del modal.</span>
+          <span>Estado, prioridad y tipo de incidencia</span>
         </div>
         <span class="incidencias-modal-admin-badge">Administrador</span>
       </div>

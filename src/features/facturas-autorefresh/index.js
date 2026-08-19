@@ -1,17 +1,17 @@
 /* =========================================================
    Onion Support · Facturas · Autonomous Refresh
-   PRODUCTIVO · V1
+   PRODUCTIVO · V2
 
    Responsabilidad:
    - Mantener Facturas actualizada sin botón manual.
-   - Revalidar sólo cuando la vista está visible y ociosa.
-   - Pausar durante modales, operaciones busy o modo offline.
+   - Revalidar sólo cuando la vista está visible, online y realmente ociosa.
+   - Pausar durante modales, operaciones busy o interacción reciente.
    - Revalidar al volver a foco/online si la vista quedó antigua.
    - No hace HTTP propio: usa el controlador canónico de Facturas.
 ========================================================= */
 
 export const FACTURAS_AUTO_REFRESH_VERSION =
-  "facturas.autorefresh.v1.smart-visible-controller";
+  "facturas.autorefresh.v2.smart-idle-visible-controller";
 
 const CONTROLLER_KEY = Symbol.for("onion.support.facturas.controller");
 const ROOT_SELECTOR = ".facturas-view-root, [data-facturas-scope='true']";
@@ -23,15 +23,19 @@ const MODAL_SELECTOR = [
   "[data-facturas-create-modal-panel='true']",
   "[data-facturas-create-root='true']",
 ].join(",");
+const EDITABLE_SELECTOR =
+  "input, textarea, select, [contenteditable='true'], [role='textbox']";
 
 const AUTO_REFRESH_INTERVAL_MS = 45_000;
 const RETURN_REFRESH_STALE_MS = 15_000;
+const USER_IDLE_GRACE_MS = 12_000;
 const BOOT_RETRY_MS = 350;
 
 let timer = 0;
 let observer = null;
 let refreshing = false;
 let lastRefreshAt = Date.now();
+let lastInteractionAt = 0;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -83,6 +87,17 @@ function modalOpen(root = viewRoot()) {
   return Boolean(root.querySelector(MODAL_SELECTOR));
 }
 
+function userIsInteracting(root = viewRoot(), now = Date.now()) {
+  if (!root) return false;
+
+  const active = document.activeElement;
+  if (active && root.contains(active) && active.matches?.(EDITABLE_SELECTOR)) {
+    return true;
+  }
+
+  return now - lastInteractionAt < USER_IDLE_GRACE_MS;
+}
+
 function controllerBusy(controller = null) {
   if (!controller || typeof controller.getSnapshot !== "function") return true;
 
@@ -112,6 +127,8 @@ async function refreshIfSafe({ forceStale = false } = {}) {
   if (modalOpen(root)) return false;
 
   const now = Date.now();
+  if (userIsInteracting(root, now)) return false;
+
   if (!forceStale && now - lastRefreshAt < AUTO_REFRESH_INTERVAL_MS - 1_000) {
     return false;
   }
@@ -153,6 +170,12 @@ function onReturnToApp() {
   void refreshIfSafe({ forceStale: true });
 }
 
+function onUserInteraction(event) {
+  const root = viewRoot();
+  if (!root || !event?.target || !root.contains(event.target)) return;
+  lastInteractionAt = Date.now();
+}
+
 function startObserver() {
   if (!isBrowser() || typeof MutationObserver === "undefined") return false;
 
@@ -182,6 +205,19 @@ function boot() {
     if (pageVisible()) onReturnToApp();
   }, { passive: true });
 
+  document.addEventListener("pointerdown", onUserInteraction, {
+    passive: true,
+    capture: true,
+  });
+  document.addEventListener("input", onUserInteraction, {
+    passive: true,
+    capture: true,
+  });
+  document.addEventListener("keydown", onUserInteraction, {
+    passive: true,
+    capture: true,
+  });
+
   window.setTimeout(() => removeManualRefresh(viewRoot()), BOOT_RETRY_MS);
   return true;
 }
@@ -195,8 +231,10 @@ export const FacturasAutoRefresh = Object.freeze({
     return {
       intervalMs: AUTO_REFRESH_INTERVAL_MS,
       returnStaleMs: RETURN_REFRESH_STALE_MS,
+      idleGraceMs: USER_IDLE_GRACE_MS,
       refreshing,
       lastRefreshAt,
+      lastInteractionAt,
       viewMounted: Boolean(viewRoot()),
       manualRefreshVisible: Boolean(viewRoot()?.querySelector(REFRESH_BUTTON_SELECTOR)),
     };

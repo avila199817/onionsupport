@@ -29,7 +29,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.extreme.v28.close-confirm-loader";
+  "incidencias.template.modal.extreme.v29.user-contact-privacy";
 
 export const DETAIL_ACTIONS = Object.freeze({
   CLOSE: "detail-close",
@@ -4149,7 +4149,7 @@ function renderTicketBody(
 
     ${renderDescription(detail)}
 
-    ${renderContactBlock(detail)}
+    ${vm.admin ? renderContactBlock(detail) : ""}
 
     <div data-modal-files-slot="true">
       ${renderAttachments(vm)}

@@ -23,7 +23,7 @@ import {
 } from "../../core/config.js";
 
 export const SIDEBAR_TEMPLATE_VERSION =
-  "sidebar.template.unified.v3-hardened";
+  "sidebar.template.unified.v4-single-account-entry";
 
 const SIDEBAR_ROOT_ID = "app-sidebar";
 const BRAND_LABEL = "Onion Support";
@@ -100,7 +100,6 @@ const ICONS = Object.freeze({
   clientes: "clientes",
   usuarios: "usuarios",
   cuenta: "cuenta",
-  ajustes: "ajustes",
   servidor: "servidor",
   logout: "logout",
 });
@@ -122,8 +121,6 @@ const ICON_PATHS = Object.freeze({
     "M12 11.5a4.25 4.25 0 1 0 0-8.5 4.25 4.25 0 0 0 0 8.5Z M4.25 21c.6-4.1 3.7-6.75 7.75-6.75S19.15 16.9 19.75 21",
   cuenta:
     "M12 11.25a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z M4.75 20.75a7.25 7.25 0 0 1 14.5 0",
-  ajustes:
-    "M4 7h9.5 M17.5 7H20 M15.5 5a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z M4 12h2.5 M10.5 12H20 M8.5 10a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z M4 17h9.5 M17.5 17H20 M15.5 15a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z",
   servidor:
     "M5.5 4.25h13A2.5 2.5 0 0 1 21 6.75v2.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 9.25v-2.5a2.25 2.25 0 0 1 2.5-2.5Z M5.5 12.25h13A2.5 2.5 0 0 1 21 14.75v2.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.25v-2.5a2.5 2.5 0 0 1 2.5-2.5Z M7 8h.01 M7 16h.01 M10 8h7 M10 16h7",
   logout:
@@ -917,10 +914,6 @@ function createAccountDropdown(user = {}, options = {}) {
     safeInternalHref(options.cuentaHref || options.accountHref || "", "") ||
     userScopedPrivateHref(ROUTES.cuenta || "/cuenta", currentUser);
 
-  const ajustesHref =
-    safeInternalHref(options.ajustesHref || options.settingsHref || "", "") ||
-    userScopedPrivateHref(ROUTES.ajustes || "/ajustes", currentUser);
-
   const dropdown = el("div", {
     className: CLASSES.accountDropdown,
     attrs: {
@@ -1011,12 +1004,6 @@ function createAccountDropdown(user = {}, options = {}) {
         iconName: ICONS.cuenta,
         action: "navigate",
         href: cuentaHref,
-      }),
-      createAccountMenuItem({
-        label: "Ajustes",
-        iconName: ICONS.ajustes,
-        action: "navigate",
-        href: ajustesHref,
       }),
     ]
   );

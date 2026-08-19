@@ -1,7 +1,0 @@
-@charset "UTF-8";
-
-/*
-   /ajustes es una ruta legacy de compatibilidad.
-   Cuenta es la única implementación self-service y la única autoridad visual.
-*/
-@import url("../cuenta/index.css") layer(views);

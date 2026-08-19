@@ -15,7 +15,7 @@
 ========================================================= */
 
 export const ROUTE_STYLES_VERSION =
-  "route-styles.v5-correo-viewport-final";
+  "route-styles.v6-cuenta-legacy-alias";
 
 const MODE_ATTRIBUTE =
   "data-css-route-mode";
@@ -124,7 +124,7 @@ const STYLE_MANIFEST = Object.freeze({
   ]),
 
   ajustes: Object.freeze([
-    "/src/css/views/ajustes/index.css",
+    "/src/css/views/cuenta/index.css",
   ]),
 });
 

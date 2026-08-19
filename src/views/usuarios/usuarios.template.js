@@ -1,11 +1,19 @@
 /* =========================================================
    Onion Support - Usuarios Template
-   /src/views/usuarios/usuarios.template.js
-   PRODUCTIVO · TEMPLATE PURO · CSS CONTRACT 1:1 · V20
+   Archivo: /src/views/usuarios/usuarios.template.js
+
+   PRODUCTIVO · TEMPLATE PURO · CANONICAL UI · V21
+
+   Responsabilidad:
+   - Emitir exclusivamente HTML/presentación de /usuarios.
+   - Mantener el contrato de seis columnas sin columna de acciones.
+   - Mantener filtros, búsqueda, estados, skeletons y load-more.
+   - Aceptar avatares HTTPS seguros y SAS de Azure Blob en runtime.
+   - Sin HTTP, Store, Router, Auth, localStorage ni DOM operativo.
 ========================================================= */
 
 export const USUARIOS_TEMPLATE_VERSION =
-  "usuarios.template.canonical.v20.css-contract-1x1";
+  "usuarios.template.canonical.v21.system-ui-safe-avatar";
 export const USUARIOS_TABLE_TEMPLATE_VERSION = USUARIOS_TEMPLATE_VERSION;
 export const USUARIOS_VIEW_TEMPLATE_VERSION = USUARIOS_TEMPLATE_VERSION;
 
@@ -86,15 +94,24 @@ export const USUARIOS_TABLE_COLUMNS = Object.freeze([
 ========================================================= */
 
 function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
 }
 
 function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
+  return isObject(value)
+    ? value
+    : fallback;
 }
 
 function safeArray(value) {
-  if (Array.isArray(value)) return value;
+  if (Array.isArray(value)) {
+    return value;
+  }
+
   if (
     value &&
     typeof value === "object" &&
@@ -107,33 +124,75 @@ function safeArray(value) {
       return [];
     }
   }
+
   return [];
 }
 
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
-  const text = String(value)
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+function safeText(value = "", fallback = "") {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
+  const text =
+    String(value)
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
   return text || fallback;
 }
 
-function safeNumber(value, fallback = 0) {
-  if (value === null || value === undefined || value === "") return fallback;
+function safeNumber(value = 0, fallback = 0) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return fallback;
+  }
+
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  return Number.isFinite(parsed)
+    ? parsed
+    : fallback;
 }
 
-/* No aplanar arrays de dominio. */
 function first(...values) {
   for (const value of values) {
-    if (value === null || value === undefined) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
-    if (isObject(value) && Object.keys(value).length === 0) continue;
+    if (
+      value === null ||
+      value === undefined
+    ) {
+      continue;
+    }
+
+    if (
+      typeof value === "string" &&
+      value.trim() === ""
+    ) {
+      continue;
+    }
+
+    if (
+      Array.isArray(value) &&
+      value.length === 0
+    ) {
+      continue;
+    }
+
+    if (
+      isObject(value) &&
+      Object.keys(value).length === 0
+    ) {
+      continue;
+    }
+
     return value;
   }
+
   return null;
 }
 
@@ -146,7 +205,10 @@ function escapeHtml(value = "") {
     .replace(/'/g, "&#39;");
 }
 
-const attr = (value = "") => escapeHtml(safeText(value, ""));
+const attr = (value = "") =>
+  escapeHtml(
+    safeText(value, "")
+  );
 
 function normalizeText(value = "") {
   return safeText(value, "")
@@ -165,20 +227,38 @@ function normalizeKey(value = "") {
 }
 
 function clamp(value, min, max) {
-  return Math.min(Math.max(safeNumber(value, min), min), max);
+  return Math.min(
+    Math.max(
+      safeNumber(value, min),
+      min
+    ),
+    max
+  );
 }
 
 function truncate(value = "", max = 96) {
   const text = safeText(value, "");
   const limit = Math.max(1, safeNumber(max, 96));
-  if (!text || text.length <= limit) return text;
+
+  if (
+    !text ||
+    text.length <= limit
+  ) {
+    return text;
+  }
+
   return `${text.slice(0, Math.max(0, limit - 1)).trim()}…`;
 }
 
 function hashString(value = "") {
   const text = safeText(value, "onion");
   let hash = 2166136261;
-  for (let index = 0; index < text.length; index += 1) {
+
+  for (
+    let index = 0;
+    index < text.length;
+    index += 1
+  ) {
     hash ^= text.charCodeAt(index);
     hash +=
       (hash << 1) +
@@ -187,23 +267,87 @@ function hashString(value = "") {
       (hash << 8) +
       (hash << 24);
   }
+
   return Math.abs(hash >>> 0);
 }
 
 function htmlAttrs(attributes = {}) {
-  return Object.entries(safeObject(attributes))
+  return Object.entries(
+    safeObject(attributes)
+  )
     .map(([name, value]) => {
-      if (!name || value === false || value === null || value === undefined) return "";
-      if (value === true) return escapeHtml(name);
+      if (
+        !name ||
+        value === false ||
+        value === null ||
+        value === undefined
+      ) {
+        return "";
+      }
+
+      if (value === true) {
+        return escapeHtml(name);
+      }
+
       return `${escapeHtml(name)}="${escapeHtml(value)}"`;
     })
     .filter(Boolean)
     .join(" ");
 }
 
+/* =========================================================
+   AVATAR URL POLICY
+   Misma política de runtime que usuarios.api.js:
+   - rechaza credenciales de aplicación;
+   - permite SAS sólo si procede de Azure Blob;
+   - blob: sólo vive en runtime.
+========================================================= */
+
+function isAzureBlobHost(hostname = "") {
+  const host =
+    safeText(hostname, "")
+      .toLowerCase();
+
+  return (
+    host === "blob.core.windows.net" ||
+    host.endsWith(".blob.core.windows.net")
+  );
+}
+
+function isSensitiveQueryParam(key = "") {
+  return [
+    "access_token",
+    "accesstoken",
+    "refresh_token",
+    "refreshtoken",
+    "id_token",
+    "idtoken",
+    "token",
+    "code",
+    "secret",
+    "session",
+    "sessionid",
+    "password",
+    "pwd",
+    "key",
+    "jwt",
+    "authorization",
+    "reset_token",
+    "resettoken",
+    "activation_token",
+    "activationtoken",
+  ].includes(
+    normalizeKey(key)
+  );
+}
+
 function safeAvatarUrl(value = "") {
   const raw = safeText(value, "");
-  if (!raw) return "";
+
+  if (!raw) {
+    return "";
+  }
+
   if (
     raw.startsWith("//") ||
     /[\r\n\t\\]/.test(raw) ||
@@ -212,36 +356,72 @@ function safeAvatarUrl(value = "") {
     return "";
   }
 
-  if (
-    /[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i.test(
+  if (/^blob:/i.test(raw)) {
+    return raw;
+  }
+
+  if (raw.startsWith("/")) {
+    return raw.replace(/\/{2,}/g, "/");
+  }
+
+  const localHttp =
+    /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(
       raw
-    )
+    );
+
+  if (
+    !/^https:\/\//i.test(raw) &&
+    !localHttp
   ) {
     return "";
   }
 
-  if (/^blob:/i.test(raw)) return raw;
-  if (raw.startsWith("/")) return raw.replace(/\/{2,}/g, "/");
+  try {
+    const url = new URL(raw);
+    const queryKeys = [
+      ...url.searchParams.keys(),
+    ];
 
-  if (/^https:\/\//i.test(raw)) {
-    try {
-      return new URL(raw).href;
-    } catch {
+    if (
+      queryKeys.some(
+        isSensitiveQueryParam
+      )
+    ) {
       return "";
     }
-  }
 
-  if (
-    /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(raw)
-  ) {
-    try {
-      return new URL(raw).href;
-    } catch {
+    const hasSas =
+      queryKeys.some((key) =>
+        [
+          "sig",
+          "se",
+          "sp",
+          "sv",
+          "sr",
+          "spr",
+          "st",
+          "skoid",
+          "sktid",
+          "skt",
+          "ske",
+          "sks",
+          "skv",
+        ].includes(
+          String(key).toLowerCase()
+        )
+      );
+
+    if (
+      hasSas &&
+      !isAzureBlobHost(url.hostname)
+    ) {
       return "";
     }
-  }
 
-  return "";
+    return url.href;
+  } catch {
+    return "";
+  }
 }
 
 /* =========================================================
@@ -249,33 +429,62 @@ function safeAvatarUrl(value = "") {
 ========================================================= */
 
 function toTimestamp(value = null) {
-  if (value === null || value === undefined || value === "") return 0;
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return 0;
+  }
 
   if (value instanceof Date) {
     const ms = value.getTime();
-    return Number.isFinite(ms) ? ms : 0;
+    return Number.isFinite(ms)
+      ? ms
+      : 0;
   }
 
-  if (typeof value === "number" && Number.isFinite(value)) {
-    if (value <= 0) return 0;
-    return value > 9_999_999_999 ? value : value * 1000;
+  if (
+    typeof value === "number" &&
+    Number.isFinite(value)
+  ) {
+    if (value <= 0) {
+      return 0;
+    }
+
+    return value > 9_999_999_999
+      ? value
+      : value * 1000;
   }
 
   const raw = safeText(value, "");
-  if (!raw) return 0;
+  if (!raw) {
+    return 0;
+  }
 
   const numeric = Number(raw);
-  if (Number.isFinite(numeric) && numeric > 0) {
-    return numeric > 9_999_999_999 ? numeric : numeric * 1000;
+
+  if (
+    Number.isFinite(numeric) &&
+    numeric > 0
+  ) {
+    return numeric > 9_999_999_999
+      ? numeric
+      : numeric * 1000;
   }
 
   const parsed = Date.parse(raw);
-  return Number.isFinite(parsed) ? parsed : 0;
+  return Number.isFinite(parsed)
+    ? parsed
+    : 0;
 }
 
 function formatDateTime(value = null) {
   const timestamp = toTimestamp(value);
-  if (!timestamp) return "—";
+  if (!timestamp) {
+    return "—";
+  }
+
   try {
     return new Intl.DateTimeFormat("es-ES", {
       day: "2-digit",
@@ -291,7 +500,10 @@ function formatDateTime(value = null) {
 
 function formatDateShort(value = null) {
   const timestamp = toTimestamp(value);
-  if (!timestamp) return "—";
+  if (!timestamp) {
+    return "—";
+  }
+
   try {
     return new Intl.DateTimeFormat("es-ES", {
       day: "2-digit",
@@ -305,22 +517,41 @@ function formatDateShort(value = null) {
 
 function formatRelativeDate(value = null) {
   const timestamp = toTimestamp(value);
-  if (!timestamp) return "Sin fecha";
+  if (!timestamp) {
+    return "Sin fecha";
+  }
 
-  const diffMinutes = Math.round((timestamp - Date.now()) / 60_000);
-  const absMinutes = Math.abs(diffMinutes);
+  const diffMinutes =
+    Math.round(
+      (timestamp - Date.now()) /
+      60_000
+    );
 
-  if (absMinutes < 1) return "Ahora mismo";
+  const absMinutes =
+    Math.abs(diffMinutes);
+
+  if (absMinutes < 1) {
+    return "Ahora mismo";
+  }
+
   if (absMinutes < 60) {
-    return diffMinutes > 0 ? `En ${absMinutes} min` : `Hace ${absMinutes} min`;
+    return diffMinutes > 0
+      ? `En ${absMinutes} min`
+      : `Hace ${absMinutes} min`;
   }
 
-  const hours = Math.round(absMinutes / 60);
+  const hours =
+    Math.round(absMinutes / 60);
+
   if (hours < 24) {
-    return diffMinutes > 0 ? `En ${hours} h` : `Hace ${hours} h`;
+    return diffMinutes > 0
+      ? `En ${hours} h`
+      : `Hace ${hours} h`;
   }
 
-  const days = Math.round(hours / 24);
+  const days =
+    Math.round(hours / 24);
+
   if (days <= 7) {
     return diffMinutes > 0
       ? `En ${days} día${days === 1 ? "" : "s"}`
@@ -332,16 +563,29 @@ function formatRelativeDate(value = null) {
 
 function formatLastAccess(value = null) {
   const timestamp = toTimestamp(value);
-  if (!timestamp) return "Sin acceso";
-  const diffHours = Math.abs(Date.now() - timestamp) / 3_600_000;
-  return diffHours <= 72 ? formatRelativeDate(value) : formatDateTime(value);
+  if (!timestamp) {
+    return "Sin acceso";
+  }
+
+  const diffHours =
+    Math.abs(Date.now() - timestamp) /
+    3_600_000;
+
+  return diffHours <= 72
+    ? formatRelativeDate(value)
+    : formatDateTime(value);
 }
 
 function formatNumber(value = 0) {
   try {
-    return new Intl.NumberFormat("es-ES").format(safeNumber(value, 0));
+    return new Intl.NumberFormat("es-ES")
+      .format(
+        safeNumber(value, 0)
+      );
   } catch {
-    return String(safeNumber(value, 0));
+    return String(
+      safeNumber(value, 0)
+    );
   }
 }
 
@@ -384,7 +628,10 @@ function icon(name = "") {
 ========================================================= */
 
 function getResolvedItems(input = {}) {
-  if (Array.isArray(input)) return input.filter(isObject);
+  if (Array.isArray(input)) {
+    return input.filter(isObject);
+  }
+
   const data = safeObject(input);
 
   for (const candidate of [
@@ -394,19 +641,36 @@ function getResolvedItems(input = {}) {
     data.rows,
     data.results,
   ]) {
-    if (Array.isArray(candidate)) return candidate.filter(isObject);
+    if (Array.isArray(candidate)) {
+      return candidate.filter(isObject);
+    }
   }
 
   return [];
 }
 
 function getUsuarioId(item = {}) {
-  return safeText(first(item.userId, item.id, item.usuarioId, item.uid, ""), "");
+  return safeText(
+    first(
+      item.userId,
+      item.id,
+      item.usuarioId,
+      item.uid,
+      ""
+    ),
+    ""
+  );
 }
 
 function getUsuarioCode(item = {}) {
   return safeText(
-    first(item.code, item.username, getUsuarioId(item), item.email, "USR-SIN-ID"),
+    first(
+      item.code,
+      item.username,
+      getUsuarioId(item),
+      item.email,
+      "USR-SIN-ID"
+    ),
     "USR-SIN-ID"
   );
 }
@@ -428,23 +692,58 @@ function getUsuarioName(item = {}) {
 }
 
 function getUsuarioDescription(item = {}) {
-  const phone = safeText(first(item.phone, item.telefono, ""), "");
-  const tipo = normalizeKey(first(item.tipo, ""));
-  const nif = safeText(item.nif, "");
+  const phone =
+    safeText(
+      first(
+        item.phone,
+        item.telefono,
+        ""
+      ),
+      ""
+    );
+
+  const tipo =
+    normalizeKey(
+      first(
+        item.tipo,
+        ""
+      )
+    );
+
+  const nif =
+    safeText(item.nif, "");
+
   const parts = [];
 
-  if (tipo === "empresa") parts.push("Empresa");
-  else if (tipo === "particular") parts.push("Particular");
+  if (tipo === "empresa") {
+    parts.push("Empresa");
+  } else if (tipo === "particular") {
+    parts.push("Particular");
+  }
 
-  if (phone) parts.push(phone);
-  if (nif) parts.push(nif);
+  if (phone) {
+    parts.push(phone);
+  }
 
-  return parts.join(" · ") || "Usuario Onion Support";
+  if (nif) {
+    parts.push(nif);
+  }
+
+  return parts.join(" · ") ||
+    "Usuario Onion Support";
 }
 
 function getUsuarioEmail(item = {}) {
   return (
-    safeText(first(item.email, item.emailLower, item.mail, ""), "").toLowerCase() ||
+    safeText(
+      first(
+        item.email,
+        item.emailLower,
+        item.mail,
+        ""
+      ),
+      ""
+    ).toLowerCase() ||
     "Sin email"
   );
 }
@@ -460,37 +759,74 @@ function getUsuarioLocation(item = {}) {
         ""
       ),
       ""
-    ) || "Sin ciudad"
+    ) ||
+    "Sin ciudad"
   );
 }
 
 function getUsuarioAvatarUrl(item = {}) {
   return safeAvatarUrl(
-    first(item.avatarUrl, item.avatar, item.photoUrl, item.picture, "")
+    first(
+      item.avatarUrl,
+      item.avatar,
+      item.photoUrl,
+      item.picture,
+      ""
+    )
   );
 }
 
 function getUsuarioInitials(item = {}) {
-  const parts = getUsuarioName(item).split(/\s+/).filter(Boolean);
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase() || "US";
-  return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || "US";
+  const parts =
+    getUsuarioName(item)
+      .split(/\s+/)
+      .filter(Boolean);
+
+  if (parts.length === 1) {
+    return parts[0]
+      .slice(0, 2)
+      .toUpperCase() ||
+      "US";
+  }
+
+  return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`
+    .toUpperCase() ||
+    "US";
 }
 
 function getUsuarioRoleValue(item = {}) {
-  return normalizeKey(first(item.role, item.rol, "user")) === "admin"
+  return normalizeKey(
+    first(
+      item.role,
+      item.rol,
+      "user"
+    )
+  ) === "admin"
     ? "admin"
     : "user";
 }
 
 function getUsuarioRoleLabel(item = {}) {
-  return getUsuarioRoleValue(item) === "admin" ? "Admin" : "Usuario";
+  return getUsuarioRoleValue(item) === "admin"
+    ? "Admin"
+    : "Usuario";
 }
 
 function getStatusKey(value = "") {
   const key = normalizeKey(value);
-  if (key === "pending") return "pending";
-  if (key === "blocked") return "blocked";
-  if (key === "inactive") return "inactive";
+
+  if (key === "pending") {
+    return "pending";
+  }
+
+  if (key === "blocked") {
+    return "blocked";
+  }
+
+  if (key === "inactive") {
+    return "inactive";
+  }
+
   return "active";
 }
 
@@ -500,21 +836,36 @@ function getStatusValue(item = {}) {
       item.status,
       item.estado,
       item.state,
-      item.active === false ? "inactive" : "active"
+      item.active === false
+        ? "inactive"
+        : "active"
     )
   );
 }
 
 function getStatusLabel(value = "") {
   const key = getStatusKey(value);
-  if (key === "pending") return "Pendiente";
-  if (key === "blocked") return "Bloqueado";
-  if (key === "inactive") return "Inactivo";
+
+  if (key === "pending") {
+    return "Pendiente";
+  }
+
+  if (key === "blocked") {
+    return "Bloqueado";
+  }
+
+  if (key === "inactive") {
+    return "Inactivo";
+  }
+
   return "Activo";
 }
 
 function getCreatedAt(item = {}) {
-  return first(item.createdAt, null);
+  return first(
+    item.createdAt,
+    null
+  );
 }
 
 function getUpdatedAt(item = {}) {
@@ -528,22 +879,52 @@ function getUpdatedAt(item = {}) {
 }
 
 function getLastLoginAt(item = {}) {
-  return first(item.lastLoginAt, item.lastAccessAt, null);
+  return first(
+    item.lastLoginAt,
+    item.lastAccessAt,
+    null
+  );
 }
 
-const isActiveLike = (item = {}) => getStatusValue(item) === "active";
-const isPendingLike = (item = {}) => getStatusValue(item) === "pending";
-const isBlockedLike = (item = {}) =>
-  ["blocked", "inactive"].includes(getStatusValue(item));
-const hasAccessLike = (item = {}) => Boolean(toTimestamp(getLastLoginAt(item)));
+const isActiveLike =
+  (item = {}) =>
+    getStatusValue(item) === "active";
+
+const isPendingLike =
+  (item = {}) =>
+    getStatusValue(item) === "pending";
+
+const isBlockedLike =
+  (item = {}) =>
+    [
+      "blocked",
+      "inactive",
+    ].includes(
+      getStatusValue(item)
+    );
+
+const hasAccessLike =
+  (item = {}) =>
+    Boolean(
+      toTimestamp(
+        getLastLoginAt(item)
+      )
+    );
 
 /* =========================================================
-   FILTERS / SEARCH / STATS
+   FILTER / SEARCH / STATS
 ========================================================= */
 
 function normalizeFilter(value = "") {
   const key = normalizeKey(value);
-  return ["active", "pending", "blocked"].includes(key) ? key : "all";
+
+  return [
+    "active",
+    "pending",
+    "blocked",
+  ].includes(key)
+    ? key
+    : "all";
 }
 
 function getActiveFilter(input = {}) {
@@ -580,9 +961,18 @@ function getSearchQuery(input = {}) {
 }
 
 function itemMatchesFilter(item = {}, filter = "all") {
-  if (filter === "active") return isActiveLike(item);
-  if (filter === "pending") return isPendingLike(item);
-  if (filter === "blocked") return isBlockedLike(item);
+  if (filter === "active") {
+    return isActiveLike(item);
+  }
+
+  if (filter === "pending") {
+    return isPendingLike(item);
+  }
+
+  if (filter === "blocked") {
+    return isBlockedLike(item);
+  }
+
   return true;
 }
 
@@ -596,7 +986,9 @@ function getSearchHaystack(item = {}) {
       getUsuarioEmail(item),
       getUsuarioLocation(item),
       getUsuarioRoleLabel(item),
-      getStatusLabel(getStatusValue(item)),
+      getStatusLabel(
+        getStatusValue(item)
+      ),
       item.username,
       item.clienteId,
       item.phone,
@@ -610,46 +1002,73 @@ function getSearchHaystack(item = {}) {
 }
 
 function itemMatchesSearch(item = {}, query = "") {
-  const terms = normalizeText(query).split(" ").filter(Boolean);
-  if (!terms.length) return true;
+  const terms =
+    normalizeText(query)
+      .split(" ")
+      .filter(Boolean);
 
-  const haystack = getSearchHaystack(item);
-  return terms.every((term) => haystack.includes(term));
+  if (!terms.length) {
+    return true;
+  }
+
+  const haystack =
+    getSearchHaystack(item);
+
+  return terms.every(
+    (term) =>
+      haystack.includes(term)
+  );
 }
 
 function filterUsuariosForView(items = [], input = {}) {
   const filter = getActiveFilter(input);
   const search = getSearchQuery(input);
 
-  /* usuarios.api.js conserva la autoridad del orden. */
-  return safeArray(items).filter(
-    (item) =>
-      itemMatchesFilter(item, filter) &&
-      itemMatchesSearch(item, search)
-  );
+  return safeArray(items)
+    .filter(
+      (item) =>
+        itemMatchesFilter(item, filter) &&
+        itemMatchesSearch(item, search)
+    );
 }
 
 function isFilterActive(input = {}) {
-  return getActiveFilter(input) !== "all" || Boolean(getSearchQuery(input));
+  return (
+    getActiveFilter(input) !== "all" ||
+    Boolean(
+      getSearchQuery(input)
+    )
+  );
 }
 
 function computeFilterCounts(items = [], input = {}) {
   const search = getSearchQuery(input);
-  const searchable = safeArray(items).filter((item) =>
-    itemMatchesSearch(item, search)
-  );
+
+  const searchable =
+    safeArray(items)
+      .filter(
+        (item) =>
+          itemMatchesSearch(item, search)
+      );
 
   return {
     all: searchable.length,
-    active: searchable.filter(isActiveLike).length,
-    pending: searchable.filter(isPendingLike).length,
-    blocked: searchable.filter(isBlockedLike).length,
+    active:
+      searchable.filter(isActiveLike).length,
+    pending:
+      searchable.filter(isPendingLike).length,
+    blocked:
+      searchable.filter(isBlockedLike).length,
   };
 }
 
 function getFilterLabel(filter = "all") {
   return (
-    FILTERS.find((item) => item.key === normalizeFilter(filter))?.label ||
+    FILTERS.find(
+      (item) =>
+        item.key ===
+        normalizeFilter(filter)
+    )?.label ||
     "Todos"
   );
 }
@@ -659,10 +1078,14 @@ function computeStats(items = []) {
 
   return {
     total: rows.length,
-    activeCount: rows.filter(isActiveLike).length,
-    pendingCount: rows.filter(isPendingLike).length,
-    blockedCount: rows.filter(isBlockedLike).length,
-    withAccessCount: rows.filter(hasAccessLike).length,
+    activeCount:
+      rows.filter(isActiveLike).length,
+    pendingCount:
+      rows.filter(isPendingLike).length,
+    blockedCount:
+      rows.filter(isBlockedLike).length,
+    withAccessCount:
+      rows.filter(hasAccessLike).length,
   };
 }
 
@@ -688,28 +1111,57 @@ function resolveRemoteCount(input = {}, items = []) {
 }
 
 function getPagination(items = [], input = {}) {
-  const allItems = filterUsuariosForView(items, input);
+  const allItems =
+    filterUsuariosForView(
+      items,
+      input
+    );
+
   const data = safeObject(input);
   const state = safeObject(data.state);
 
-  const visibleLimit = clamp(
-    first(
-      data.visibleLimit,
-      data.usuariosVisibleLimit,
-      state.visibleLimit,
-      state.usuariosVisibleLimit,
-      DEFAULT_VISIBLE_ROWS
-    ),
-    1,
-    500
-  );
+  const visibleLimit =
+    clamp(
+      first(
+        data.visibleLimit,
+        data.usuariosVisibleLimit,
+        state.visibleLimit,
+        state.usuariosVisibleLimit,
+        DEFAULT_VISIBLE_ROWS
+      ),
+      1,
+      500
+    );
 
-  const filtering = isFilterActive(input);
-  const remoteTotal = resolveRemoteCount(input, items);
-  const totalCount = filtering ? allItems.length : remoteTotal;
-  const pageItems = allItems.slice(0, visibleLimit);
-  const visibleCount = pageItems.length;
-  const remainingCount = Math.max(0, allItems.length - visibleCount);
+  const filtering =
+    isFilterActive(input);
+
+  const remoteTotal =
+    resolveRemoteCount(
+      input,
+      items
+    );
+
+  const totalCount =
+    filtering
+      ? allItems.length
+      : remoteTotal;
+
+  const pageItems =
+    allItems.slice(
+      0,
+      visibleLimit
+    );
+
+  const visibleCount =
+    pageItems.length;
+
+  const remainingCount =
+    Math.max(
+      0,
+      allItems.length -
+      visibleCount
+    );
 
   return {
     allItems,
@@ -720,12 +1172,19 @@ function getPagination(items = [], input = {}) {
     remainingCount,
     totalCount,
     remoteTotal,
-    rangeStart: totalCount && visibleCount ? 1 : 0,
-    rangeEnd: visibleCount,
-    hasMore: remainingCount > 0,
+    rangeStart:
+      totalCount && visibleCount
+        ? 1
+        : 0,
+    rangeEnd:
+      visibleCount,
+    hasMore:
+      remainingCount > 0,
     filtering,
-    activeFilter: getActiveFilter(input),
-    searchQuery: getSearchQuery(input),
+    activeFilter:
+      getActiveFilter(input),
+    searchQuery:
+      getSearchQuery(input),
   };
 }
 
@@ -737,14 +1196,21 @@ function renderSpinner(label = "") {
   return `
     <span class="usuarios-inline-loading">
       <span class="usuarios-inline-spinner" aria-hidden="true"></span>
-      ${label ? `<span class="usuarios-inline-loading-text">${escapeHtml(label)}</span>` : ""}
+      ${
+        label
+          ? `<span class="usuarios-inline-loading-text">${escapeHtml(label)}</span>`
+          : ""
+      }
     </span>
   `;
 }
 
 function getAvatarTone(item = {}) {
-  const seed = `${getUsuarioId(item)}|${getUsuarioEmail(item)}|${getUsuarioName(item)}`;
-  return hashString(seed) % AVATAR_TONE_COUNT;
+  const seed =
+    `${getUsuarioId(item)}|${getUsuarioEmail(item)}|${getUsuarioName(item)}`;
+
+  return hashString(seed) %
+    AVATAR_TONE_COUNT;
 }
 
 function renderAvatar(item = {}) {
@@ -761,20 +1227,25 @@ function renderAvatar(item = {}) {
       data-tooltip="${attr(name)}"
       aria-label="${attr(name)}"
     >
-      ${src ? `
-        <img
-          class="usuarios-avatar-img"
-          src="${attr(src)}"
-          alt=""
-          width="48"
-          height="48"
-          loading="lazy"
-          decoding="async"
-          referrerpolicy="no-referrer"
-          draggable="false"
-        >
-      ` : ""}
-      <span class="usuarios-avatar-fallback">${escapeHtml(getUsuarioInitials(item))}</span>
+      ${
+        src
+          ? `<img
+              class="usuarios-avatar-img"
+              src="${attr(src)}"
+              alt=""
+              width="48"
+              height="48"
+              loading="lazy"
+              decoding="async"
+              referrerpolicy="no-referrer"
+              draggable="false"
+            >`
+          : ""
+      }
+
+      <span class="usuarios-avatar-fallback">
+        ${escapeHtml(getUsuarioInitials(item))}
+      </span>
     </span>
   `;
 }
@@ -799,15 +1270,32 @@ function renderRow(item = {}, state = {}) {
   const userId = getUsuarioId(item);
   const name = getUsuarioName(item);
   const status = getStatusValue(item);
-  const openingUserId = safeText(
-    first(runtime.openingUserId, runtime.detailUserId, runtime.loadingUserId, ""),
-    ""
-  );
-  const isOpening = Boolean(openingUserId && openingUserId === userId);
-  const interactive = Boolean(userId);
 
-  const createdRaw = getCreatedAt(item);
-  const lastLoginRaw = getLastLoginAt(item);
+  const openingUserId =
+    safeText(
+      first(
+        runtime.openingUserId,
+        runtime.detailUserId,
+        runtime.loadingUserId,
+        ""
+      ),
+      ""
+    );
+
+  const isOpening =
+    Boolean(
+      openingUserId &&
+      openingUserId === userId
+    );
+
+  const interactive =
+    Boolean(userId);
+
+  const createdRaw =
+    getCreatedAt(item);
+
+  const lastLoginRaw =
+    getLastLoginAt(item);
 
   return `
     <tr
@@ -816,14 +1304,22 @@ function renderRow(item = {}, state = {}) {
       data-user-id="${attr(userId)}"
       data-usuario-id="${attr(userId)}"
       data-detail-target="${interactive ? "true" : "false"}"
-      ${interactive
-        ? `data-usuarios-action="${USUARIOS_ACTIONS.DETAIL}" data-action="open-user" tabindex="0" role="button" aria-label="Abrir detalle de ${attr(name)}"`
-        : 'aria-disabled="true"'}
-      ${htmlAttrs({ "aria-busy": isOpening ? "true" : false })}
+      ${
+        interactive
+          ? `data-usuarios-action="${USUARIOS_ACTIONS.DETAIL}" data-action="open-user" tabindex="0" role="button" aria-label="Abrir detalle de ${attr(name)}"`
+          : `aria-disabled="true"`
+      }
+      ${htmlAttrs({
+        "aria-busy":
+          isOpening
+            ? "true"
+            : false,
+      })}
     >
       <td class="usuarios-cell usuarios-cell--main" data-column="main">
         <div class="usuarios-main">
           ${renderAvatar(item)}
+
           <div class="usuarios-main-copy">
             <div class="usuarios-user-line">
               <span class="usuarios-user-id">${escapeHtml(getUsuarioCode(item))}</span>
@@ -831,8 +1327,14 @@ function renderRow(item = {}, state = {}) {
                 ${escapeHtml(getUsuarioRoleLabel(item))}
               </span>
             </div>
-            <div class="usuarios-user-subject">${escapeHtml(name)}</div>
-            <div class="usuarios-user-description">${escapeHtml(truncate(getUsuarioDescription(item), 96))}</div>
+
+            <div class="usuarios-user-subject">
+              ${escapeHtml(name)}
+            </div>
+
+            <div class="usuarios-user-description">
+              ${escapeHtml(truncate(getUsuarioDescription(item), 96))}
+            </div>
           </div>
         </div>
       </td>
@@ -860,7 +1362,10 @@ function renderRow(item = {}, state = {}) {
       </td>
 
       <td class="usuarios-cell usuarios-cell--activity" data-column="activity">
-        <span class="usuarios-activity-inline" title="${attr(lastLoginRaw ? formatDateTime(lastLoginRaw) : "Sin acceso")}">
+        <span
+          class="usuarios-activity-inline"
+          title="${attr(lastLoginRaw ? formatDateTime(lastLoginRaw) : "Sin acceso")}"
+        >
           ${escapeHtml(lastLoginRaw ? formatLastAccess(lastLoginRaw) : "Sin acceso")}
         </span>
       </td>
@@ -877,7 +1382,10 @@ function renderSearch(input = {}) {
 
   return `
     <div class="usuarios-search" role="search" aria-label="Buscar usuarios">
-      <span class="usuarios-search-icon" aria-hidden="true">${icon("search")}</span>
+      <span class="usuarios-search-icon" aria-hidden="true">
+        ${icon("search")}
+      </span>
+
       <input
         id="usuarios-search-input"
         class="usuarios-search-input"
@@ -891,15 +1399,18 @@ function renderSearch(input = {}) {
         data-field="search"
         aria-label="Buscar usuarios por nombre, email, ciudad, teléfono o identificador"
       >
-      ${search ? `
-        <button
-          type="button"
-          class="usuarios-search-clear"
-          data-usuarios-action="${USUARIOS_ACTIONS.CLEAR_SEARCH}"
-          data-action="clear-search"
-          aria-label="Limpiar búsqueda"
-        >${icon("close")}</button>
-      ` : ""}
+
+      ${
+        search
+          ? `<button
+              type="button"
+              class="usuarios-search-clear"
+              data-usuarios-action="${USUARIOS_ACTIONS.CLEAR_SEARCH}"
+              data-action="clear-search"
+              aria-label="Limpiar búsqueda"
+            >${icon("close")}</button>`
+          : ""
+      }
     </div>
   `;
 }
@@ -908,33 +1419,41 @@ function renderFilters(input = {}, pagination = {}) {
   const data = safeObject(input);
   const items = getResolvedItems(data);
   const counts = computeFilterCounts(items, data);
-  const active = normalizeFilter(
-    pagination.activeFilter || getActiveFilter(data)
-  );
+
+  const active =
+    normalizeFilter(
+      pagination.activeFilter ||
+      getActiveFilter(data)
+    );
 
   return `
     <div class="usuarios-filters" data-usuarios-filters="true">
       <div class="usuarios-filter-pills" role="tablist" aria-label="Filtrar usuarios por estado">
-        ${FILTERS.map((filter) => {
-          const selected = filter.key === active;
-          return `
-            <button
-              type="button"
-              role="tab"
-              class="usuarios-filter-pill${selected ? " is-active" : ""}"
-              data-usuarios-action="${USUARIOS_ACTIONS.FILTER}"
-              data-action="filter-usuarios"
-              data-filter="${attr(filter.key)}"
-              data-filter-status="${attr(filter.key)}"
-              aria-selected="${selected ? "true" : "false"}"
-              aria-pressed="${selected ? "true" : "false"}"
-            >
-              <span>${escapeHtml(filter.label)}</span>
-              <strong>${escapeHtml(formatNumber(counts[filter.key] || 0))}</strong>
-            </button>
-          `;
-        }).join("")}
+        ${FILTERS
+          .map((filter) => {
+            const selected =
+              filter.key === active;
+
+            return `
+              <button
+                type="button"
+                role="tab"
+                class="usuarios-filter-pill${selected ? " is-active" : ""}"
+                data-usuarios-action="${USUARIOS_ACTIONS.FILTER}"
+                data-action="filter-usuarios"
+                data-filter="${attr(filter.key)}"
+                data-filter-status="${attr(filter.key)}"
+                aria-selected="${selected ? "true" : "false"}"
+                aria-pressed="${selected ? "true" : "false"}"
+              >
+                <span>${escapeHtml(filter.label)}</span>
+                <strong>${escapeHtml(formatNumber(counts[filter.key] || 0))}</strong>
+              </button>
+            `;
+          })
+          .join("")}
       </div>
+
       ${renderSearch(data)}
     </div>
   `;
@@ -968,35 +1487,81 @@ export function renderHeader(input = {}) {
   const stats = computeStats(items);
   const remoteCount = resolveRemoteCount(data, items);
 
-  const updatedAt = first(
-    data.lastUpdatedAt,
-    data.updatedAt,
-    state.lastSyncAt,
-    state.lastUpdatedAt,
-    state.updatedAt,
-    ...items.map(getUpdatedAt)
-  );
-
-  const title = safeText(
-    first(data.title, state.title, "Centro de control de usuarios"),
-    "Centro de control de usuarios"
-  );
-
-  const subtitle = safeText(
+  const updatedAt =
     first(
-      data.subtitle,
-      state.subtitle,
-      "Consulta usuarios registrados, revisa su estado, ubicación y última conexión desde una vista clara y alineada con el resto del panel."
-    ),
-    ""
-  );
+      data.lastUpdatedAt,
+      data.updatedAt,
+      state.lastSyncAt,
+      state.lastUpdatedAt,
+      state.updatedAt,
+      ...items.map(getUpdatedAt)
+    );
 
-  const creating = Boolean(first(state.creating, data.creating, false));
-  const refreshing = Boolean(first(state.refreshing, data.refreshing, false));
-  const loading = Boolean(first(state.loading, data.loading, false));
-  const exporting = Boolean(first(state.exporting, data.exporting, false));
-  const admin = data.admin !== false && !shouldRenderRestricted(data);
-  const busy = creating || refreshing || loading || exporting;
+  const title =
+    safeText(
+      first(
+        data.title,
+        state.title,
+        "Centro de control de usuarios"
+      ),
+      "Centro de control de usuarios"
+    );
+
+  const subtitle =
+    safeText(
+      first(
+        data.subtitle,
+        state.subtitle,
+        "Consulta usuarios registrados, revisa su estado, ubicación y última conexión desde una vista clara y alineada con el resto del panel."
+      ),
+      ""
+    );
+
+  const creating =
+    Boolean(
+      first(
+        state.creating,
+        data.creating,
+        false
+      )
+    );
+
+  const refreshing =
+    Boolean(
+      first(
+        state.refreshing,
+        data.refreshing,
+        false
+      )
+    );
+
+  const loading =
+    Boolean(
+      first(
+        state.loading,
+        data.loading,
+        false
+      )
+    );
+
+  const exporting =
+    Boolean(
+      first(
+        state.exporting,
+        data.exporting,
+        false
+      )
+    );
+
+  const admin =
+    data.admin !== false &&
+    !shouldRenderRestricted(data);
+
+  const busy =
+    creating ||
+    refreshing ||
+    loading ||
+    exporting;
 
   return `
     <section
@@ -1006,74 +1571,133 @@ export function renderHeader(input = {}) {
     >
       <div class="usuarios-hero-top">
         <div class="usuarios-hero-copy">
-          <h1 class="usuarios-page-title usuarios-title">${escapeHtml(title)}</h1>
-          <p class="usuarios-page-subtitle usuarios-subtitle">${escapeHtml(subtitle)}</p>
+          <h1 class="usuarios-page-title usuarios-title">
+            ${escapeHtml(title)}
+          </h1>
+
+          <p class="usuarios-page-subtitle usuarios-subtitle">
+            ${escapeHtml(subtitle)}
+          </p>
         </div>
 
-        ${admin ? `
-          <div class="usuarios-hero-actions">
-            <button
-              type="button"
-              id="usuarios-create-btn"
-              class="usuarios-btn usuarios-btn--primary usuarios-btn--create${creating ? " is-loading" : ""}"
-              data-usuarios-action="${USUARIOS_ACTIONS.CREATE}"
-              data-action="create-user"
-              ${htmlAttrs({
-                disabled: creating || loading,
-                "aria-disabled": creating || loading ? "true" : false,
-                "aria-busy": creating ? "true" : false,
-              })}
-            >
-              ${creating
-                ? renderSpinner("Abriendo...")
-                : `${icon("plus")}<span class="usuarios-btn-text">Nuevo usuario</span>`}
-            </button>
+        ${
+          admin
+            ? `<div class="usuarios-hero-actions">
+                <button
+                  type="button"
+                  id="usuarios-create-btn"
+                  class="usuarios-btn usuarios-btn--primary usuarios-btn--create${creating ? " is-loading" : ""}"
+                  data-usuarios-action="${USUARIOS_ACTIONS.CREATE}"
+                  data-action="create-user"
+                  ${htmlAttrs({
+                    disabled:
+                      creating || loading,
+                    "aria-disabled":
+                      creating || loading
+                        ? "true"
+                        : false,
+                    "aria-busy":
+                      creating
+                        ? "true"
+                        : false,
+                  })}
+                >
+                  ${
+                    creating
+                      ? renderSpinner("Abriendo...")
+                      : `${icon("plus")}<span class="usuarios-btn-text">Nuevo usuario</span>`
+                  }
+                </button>
 
-            <button
-              type="button"
-              id="usuarios-refresh-btn"
-              class="usuarios-btn${refreshing ? " is-loading" : ""}"
-              data-usuarios-action="${USUARIOS_ACTIONS.REFRESH}"
-              data-action="refresh"
-              ${htmlAttrs({
-                disabled: refreshing || loading,
-                "aria-disabled": refreshing || loading ? "true" : false,
-                "aria-busy": refreshing ? "true" : false,
-              })}
-            >
-              ${refreshing
-                ? renderSpinner("Actualizando...")
-                : `${icon("refresh")}<span class="usuarios-btn-text">Actualizar</span>`}
-            </button>
+                <button
+                  type="button"
+                  id="usuarios-refresh-btn"
+                  class="usuarios-btn${refreshing ? " is-loading" : ""}"
+                  data-usuarios-action="${USUARIOS_ACTIONS.REFRESH}"
+                  data-action="refresh"
+                  ${htmlAttrs({
+                    disabled:
+                      refreshing || loading,
+                    "aria-disabled":
+                      refreshing || loading
+                        ? "true"
+                        : false,
+                    "aria-busy":
+                      refreshing
+                        ? "true"
+                        : false,
+                  })}
+                >
+                  ${
+                    refreshing
+                      ? renderSpinner("Actualizando...")
+                      : `${icon("refresh")}<span class="usuarios-btn-text">Actualizar</span>`
+                  }
+                </button>
 
-            <button
-              type="button"
-              id="usuarios-export-btn"
-              class="usuarios-btn usuarios-btn--export${exporting ? " is-loading" : ""}"
-              data-usuarios-action="${USUARIOS_ACTIONS.EXPORT}"
-              data-action="export-csv"
-              ${htmlAttrs({
-                disabled: loading || refreshing || exporting || !items.length,
-                "aria-disabled":
-                  loading || refreshing || exporting || !items.length
-                    ? "true"
-                    : false,
-                "aria-busy": exporting ? "true" : false,
-              })}
-            >
-              ${exporting
-                ? renderSpinner("Exportando...")
-                : `${icon("export")}<span class="usuarios-btn-text">Exportar CSV</span>`}
-            </button>
-          </div>
-        ` : ""}
+                <button
+                  type="button"
+                  id="usuarios-export-btn"
+                  class="usuarios-btn usuarios-btn--export${exporting ? " is-loading" : ""}"
+                  data-usuarios-action="${USUARIOS_ACTIONS.EXPORT}"
+                  data-action="export-csv"
+                  ${htmlAttrs({
+                    disabled:
+                      loading ||
+                      refreshing ||
+                      exporting ||
+                      !items.length,
+                    "aria-disabled":
+                      loading ||
+                      refreshing ||
+                      exporting ||
+                      !items.length
+                        ? "true"
+                        : false,
+                    "aria-busy":
+                      exporting
+                        ? "true"
+                        : false,
+                  })}
+                >
+                  ${
+                    exporting
+                      ? renderSpinner("Exportando...")
+                      : `${icon("export")}<span class="usuarios-btn-text">Exportar CSV</span>`
+                  }
+                </button>
+              </div>`
+            : ""
+        }
       </div>
 
       <div class="usuarios-hero-meta">
-        ${admin ? `<span class="usuarios-meta-pill">${icon("shield")}<span>Panel admin</span></span>` : ""}
-        <span class="usuarios-meta-pill">${icon("users")}<span>${escapeHtml(`${formatNumber(remoteCount)} usuarios registrados`)}</span></span>
-        <span class="usuarios-meta-pill">${icon("refresh")}<span>${updatedAt ? escapeHtml(`Última actualización · ${formatRelativeDate(updatedAt)}`) : "Sin sincronización reciente"}</span></span>
-        <span class="usuarios-meta-pill">${icon("clock")}<span>${escapeHtml(`${formatNumber(stats.withAccessCount)} con actividad`)}</span></span>
+        ${
+          admin
+            ? `<span class="usuarios-meta-pill">${icon("shield")}<span>Panel admin</span></span>`
+            : ""
+        }
+
+        <span class="usuarios-meta-pill">
+          ${icon("users")}
+          <span>${escapeHtml(`${formatNumber(remoteCount)} usuarios registrados`)}</span>
+        </span>
+
+        <span class="usuarios-meta-pill">
+          ${icon("refresh")}
+          <span>
+            ${
+              updatedAt
+                ? escapeHtml(`Última actualización · ${formatRelativeDate(updatedAt)}`)
+                : "Sin sincronización reciente"
+            }
+          </span>
+        </span>
+
+        <span class="usuarios-meta-pill">
+          ${icon("clock")}
+          <span>${escapeHtml(`${formatNumber(stats.withAccessCount)} con actividad`)}</span>
+        </span>
       </div>
 
       <div class="usuarios-stats">
@@ -1110,25 +1734,41 @@ export function renderHeader(input = {}) {
 ========================================================= */
 
 function renderColgroup() {
-  return `<colgroup>${USUARIOS_TABLE_COLUMNS.map(
-    (column) => `<col class="${attr(column.colClass)}">`
-  ).join("")}</colgroup>`;
+  return `
+    <colgroup>
+      ${USUARIOS_TABLE_COLUMNS
+        .map(
+          (column) =>
+            `<col class="${attr(column.colClass)}">`
+        )
+        .join("")}
+    </colgroup>
+  `;
 }
 
 function renderThead() {
-  return `<thead><tr>${USUARIOS_TABLE_COLUMNS.map(
-    (column) => `
-      <th
-        class="${attr(column.thClass)}"
-        scope="col"
-        data-column="${attr(column.key)}"
-      >${escapeHtml(column.label)}</th>
-    `
-  ).join("")}</tr></thead>`;
+  return `
+    <thead>
+      <tr>
+        ${USUARIOS_TABLE_COLUMNS
+          .map(
+            (column) => `
+              <th
+                class="${attr(column.thClass)}"
+                scope="col"
+                data-column="${attr(column.key)}"
+              >${escapeHtml(column.label)}</th>
+            `
+          )
+          .join("")}
+      </tr>
+    </thead>
+  `;
 }
 
 function renderTableLoading(rows = DEFAULT_VISIBLE_ROWS) {
-  const count = clamp(rows, 4, 20);
+  const count =
+    clamp(rows, 4, 20);
 
   return `
     <div class="usuarios-table-wrap is-loading" data-usuarios-table-wrap="true">
@@ -1144,18 +1784,33 @@ function renderTableLoading(rows = DEFAULT_VISIBLE_ROWS) {
           >
             ${renderColgroup()}
             ${renderThead()}
+
             <tbody>
-              ${Array.from({ length: count }).map((_, index) => `
-                <tr class="usuarios-row usuarios-row--skeleton" aria-hidden="true" data-skeleton-row="${index + 1}">
-                  ${USUARIOS_TABLE_COLUMNS.map(
-                    (column) => `
-                      <td class="${attr(column.cellClass)}" data-column="${attr(column.key)}">
-                        <span class="usuarios-skeleton usuarios-skeleton--${attr(column.key)}"></span>
-                      </td>
-                    `
-                  ).join("")}
-                </tr>
-              `).join("")}
+              ${Array
+                .from({ length: count })
+                .map(
+                  (_, index) => `
+                    <tr
+                      class="usuarios-row usuarios-row--skeleton"
+                      aria-hidden="true"
+                      data-skeleton-row="${index + 1}"
+                    >
+                      ${USUARIOS_TABLE_COLUMNS
+                        .map(
+                          (column) => `
+                            <td
+                              class="${attr(column.cellClass)}"
+                              data-column="${attr(column.key)}"
+                            >
+                              <span class="usuarios-skeleton usuarios-skeleton--${attr(column.key)}"></span>
+                            </td>
+                          `
+                        )
+                        .join("")}
+                    </tr>
+                  `
+                )
+                .join("")}
             </tbody>
           </table>
         </div>
@@ -1166,8 +1821,14 @@ function renderTableLoading(rows = DEFAULT_VISIBLE_ROWS) {
 
 function renderRefreshOverlay() {
   return `
-    <div class="usuarios-refresh-overlay" aria-live="polite" aria-busy="true">
-      <div class="usuarios-refresh-card">${renderSpinner("Actualizando usuarios...")}</div>
+    <div
+      class="usuarios-refresh-overlay"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <div class="usuarios-refresh-card">
+        ${renderSpinner("Actualizando usuarios...")}
+      </div>
     </div>
   `;
 }
@@ -1190,63 +1851,103 @@ function renderEmptyContent({
     `;
   }
 
-  const title = hasError
-    ? "No se pudieron cargar los usuarios"
-    : filtering
-      ? "No hay usuarios con este criterio"
-      : "No hay usuarios para mostrar";
+  const title =
+    hasError
+      ? "No se pudieron cargar los usuarios"
+      : filtering
+        ? "No hay usuarios con este criterio"
+        : "No hay usuarios para mostrar";
 
-  const text = hasError
-    ? safeText(message, "Puedes reintentar la carga desde el botón de actualizar.")
-    : filtering
-      ? searchQuery
-        ? `No se encontraron usuarios para “${searchQuery}”. Prueba con otro nombre, email, ciudad o identificador.`
-        : "Cambia el filtro activo para volver al listado completo."
-      : "Cuando haya usuarios registrados aparecerán aquí con su estado, alta, email, ubicación y última conexión.";
+  const text =
+    hasError
+      ? safeText(
+          message,
+          "Puedes reintentar la carga desde el botón de actualizar."
+        )
+      : filtering
+        ? searchQuery
+          ? `No se encontraron usuarios para “${searchQuery}”. Prueba con otro nombre, email, ciudad o identificador.`
+          : "Cambia el filtro activo para volver al listado completo."
+        : "Cuando haya usuarios registrados aparecerán aquí con su estado, alta, email, ubicación y última conexión.";
 
   return `
     <div class="usuarios-empty" data-usuarios-empty="true">
-      <div class="usuarios-empty-icon" aria-hidden="true">${hasError ? icon("alert") : icon("users")}</div>
+      <div class="usuarios-empty-icon" aria-hidden="true">
+        ${hasError ? icon("alert") : icon("users")}
+      </div>
+
       <h3 class="usuarios-empty-title">${escapeHtml(title)}</h3>
       <p class="usuarios-empty-text">${escapeHtml(text)}</p>
 
-      ${hasError ? `
-        <button type="button" class="usuarios-btn usuarios-btn--primary" data-usuarios-action="${USUARIOS_ACTIONS.RETRY}" data-action="retry">
-          ${icon("refresh")}<span class="usuarios-btn-text">Reintentar</span>
-        </button>
-      ` : filtering ? `
-        <button type="button" class="usuarios-btn" data-usuarios-action="${USUARIOS_ACTIONS.CLEAR_FILTERS}" data-action="clear-filters">
-          ${icon("close")}<span class="usuarios-btn-text">Limpiar filtros</span>
-        </button>
-      ` : allowCreate ? `
-        <button type="button" class="usuarios-btn usuarios-btn--primary usuarios-btn--create" data-usuarios-action="${USUARIOS_ACTIONS.CREATE}" data-action="create-user">
-          ${icon("plus")}<span class="usuarios-btn-text">Crear usuario</span>
-        </button>
-      ` : ""}
+      ${
+        hasError
+          ? `<button
+              type="button"
+              class="usuarios-btn usuarios-btn--primary"
+              data-usuarios-action="${USUARIOS_ACTIONS.RETRY}"
+              data-action="retry"
+            >
+              ${icon("refresh")}
+              <span class="usuarios-btn-text">Reintentar</span>
+            </button>`
+          : filtering
+            ? `<button
+                type="button"
+                class="usuarios-btn"
+                data-usuarios-action="${USUARIOS_ACTIONS.CLEAR_FILTERS}"
+                data-action="clear-filters"
+              >
+                ${icon("close")}
+                <span class="usuarios-btn-text">Limpiar filtros</span>
+              </button>`
+            : allowCreate
+              ? `<button
+                  type="button"
+                  class="usuarios-btn usuarios-btn--primary usuarios-btn--create"
+                  data-usuarios-action="${USUARIOS_ACTIONS.CREATE}"
+                  data-action="create-user"
+                >
+                  ${icon("plus")}
+                  <span class="usuarios-btn-text">Crear usuario</span>
+                </button>`
+              : ""
+      }
     </div>
   `;
 }
 
 function renderFeedFooter(pagination = {}, state = {}) {
   const runtime = safeObject(state);
-  const disabled = Boolean(runtime.loading || runtime.refreshing);
+  const disabled =
+    Boolean(
+      runtime.loading ||
+      runtime.refreshing
+    );
 
-  if (!pagination.totalCount || !pagination.visibleCount) {
+  if (
+    !pagination.totalCount ||
+    !pagination.visibleCount
+  ) {
     return `<div class="usuarios-feed-sentinel" data-usuarios-load-more="true" aria-hidden="true"></div>`;
   }
 
   if (!pagination.hasMore) {
     return `
       <div class="usuarios-feed-end" data-usuarios-feed-end="true">
-        <span class="usuarios-feed-end-text">Has visto todos los usuarios disponibles.</span>
+        <span class="usuarios-feed-end-text">
+          Has visto todos los usuarios disponibles.
+        </span>
       </div>
     `;
   }
 
-  const nextLimit = Math.max(
-    pagination.visibleLimit + DEFAULT_VISIBLE_ROWS,
-    pagination.visibleCount + DEFAULT_VISIBLE_ROWS
-  );
+  const nextLimit =
+    Math.max(
+      pagination.visibleLimit +
+      DEFAULT_VISIBLE_ROWS,
+      pagination.visibleCount +
+      DEFAULT_VISIBLE_ROWS
+    );
 
   return `
     <div class="usuarios-feed-more" data-usuarios-feed-more="true">
@@ -1259,12 +1960,17 @@ function renderFeedFooter(pagination = {}, state = {}) {
         data-limit="${attr(String(nextLimit))}"
         ${htmlAttrs({
           disabled,
-          "aria-disabled": disabled ? "true" : false,
+          "aria-disabled":
+            disabled
+              ? "true"
+              : false,
         })}
       >
         ${icon("chevronDown")}
         <span>Mostrar más</span>
-        <span class="usuarios-load-more-count">${escapeHtml(`${formatNumber(pagination.remainingCount)} restantes`)}</span>
+        <span class="usuarios-load-more-count">
+          ${escapeHtml(`${formatNumber(pagination.remainingCount)} restantes`)}
+        </span>
       </button>
 
       <span class="usuarios-feed-progress">
@@ -1276,28 +1982,48 @@ function renderFeedFooter(pagination = {}, state = {}) {
 
 export function renderLoadingState() {
   return `
-    <section class="usuarios-history is-loading" data-usuarios-history="true" aria-live="polite" aria-busy="true">
+    <section
+      class="usuarios-history is-loading"
+      data-usuarios-history="true"
+      aria-live="polite"
+      aria-busy="true"
+    >
       <div class="usuarios-history-head">
         <div class="usuarios-history-copy">
           <h2 class="usuarios-history-title">Historial de usuarios</h2>
           <p class="usuarios-history-subtitle">Cargando usuarios...</p>
         </div>
       </div>
+
       ${renderTableLoading(DEFAULT_VISIBLE_ROWS)}
     </section>
   `;
 }
 
-export function renderErrorState(message = "No se pudieron cargar los usuarios.") {
+export function renderErrorState(
+  message = "No se pudieron cargar los usuarios."
+) {
   return `
     <section class="usuarios-error" role="alert" aria-live="assertive">
-      <div class="usuarios-error-icon" aria-hidden="true">${icon("alert")}</div>
+      <div class="usuarios-error-icon" aria-hidden="true">
+        ${icon("alert")}
+      </div>
+
       <div class="usuarios-error-copy">
         <h3 class="usuarios-error-title">No se pudo cargar la vista de usuarios</h3>
-        <p class="usuarios-error-text">${escapeHtml(safeText(message, "Error desconocido al cargar la vista."))}</p>
+        <p class="usuarios-error-text">
+          ${escapeHtml(safeText(message, "Error desconocido al cargar la vista."))}
+        </p>
       </div>
-      <button type="button" class="usuarios-btn usuarios-btn--primary" data-usuarios-action="${USUARIOS_ACTIONS.RETRY}" data-action="retry">
-        ${icon("refresh")}<span class="usuarios-btn-text">Reintentar</span>
+
+      <button
+        type="button"
+        class="usuarios-btn usuarios-btn--primary"
+        data-usuarios-action="${USUARIOS_ACTIONS.RETRY}"
+        data-action="retry"
+      >
+        ${icon("refresh")}
+        <span class="usuarios-btn-text">Reintentar</span>
       </button>
     </section>
   `;
@@ -1306,13 +2032,20 @@ export function renderErrorState(message = "No se pudieron cargar los usuarios."
 export function renderAccessDeniedState() {
   return `
     <section class="usuarios-history" data-usuarios-history="true">
-      ${renderEmptyContent({ restricted: true, allowCreate: false })}
+      ${renderEmptyContent({
+        restricted: true,
+        allowCreate: false,
+      })}
     </section>
   `;
 }
 
 export function renderEmptyUsuariosState(options = {}) {
-  return `<section class="usuarios-history">${renderEmptyContent(options)}</section>`;
+  return `
+    <section class="usuarios-history">
+      ${renderEmptyContent(options)}
+    </section>
+  `;
 }
 
 export function renderTable(input = {}) {
@@ -1321,26 +2054,69 @@ export function renderTable(input = {}) {
   const state = safeObject(data.state);
   const pagination = getPagination(items, data);
 
-  const loading = Boolean(first(state.loading, data.loading, false));
-  const refreshing = Boolean(first(state.refreshing, data.refreshing, false));
-  const errorMessage = safeText(first(state.error, data.error, ""), "");
-  const hasError = Boolean(errorMessage);
-  const initialLoading = loading && !pagination.pageItems.length;
-  const refreshOverlay = refreshing && pagination.pageItems.length;
-  const search = pagination.searchQuery;
+  const loading =
+    Boolean(
+      first(
+        state.loading,
+        data.loading,
+        false
+      )
+    );
+
+  const refreshing =
+    Boolean(
+      first(
+        state.refreshing,
+        data.refreshing,
+        false
+      )
+    );
+
+  const errorMessage =
+    safeText(
+      first(
+        state.error,
+        data.error,
+        ""
+      ),
+      ""
+    );
+
+  const hasError =
+    Boolean(errorMessage);
+
+  const initialLoading =
+    loading &&
+    !pagination.pageItems.length;
+
+  const refreshOverlay =
+    refreshing &&
+    pagination.pageItems.length;
+
+  const search =
+    pagination.searchQuery;
 
   const criteria = [
-    pagination.activeFilter !== "all" ? getFilterLabel(pagination.activeFilter) : "",
-    search ? `búsqueda “${search}”` : "",
+    pagination.activeFilter !== "all"
+      ? getFilterLabel(
+          pagination.activeFilter
+        )
+      : "",
+    search
+      ? `búsqueda “${search}”`
+      : "",
   ].filter(Boolean);
 
-  const subtitle = initialLoading
-    ? "Cargando usuarios..."
-    : pagination.filtering
-      ? `Mostrando ${formatNumber(pagination.visibleCount)} de ${formatNumber(pagination.totalCount)} · ${criteria.join(" · ")}`
-      : `Mostrando ${formatNumber(pagination.visibleCount)} de ${formatNumber(pagination.totalCount)}`;
+  const subtitle =
+    initialLoading
+      ? "Cargando usuarios..."
+      : pagination.filtering
+        ? `Mostrando ${formatNumber(pagination.visibleCount)} de ${formatNumber(pagination.totalCount)} · ${criteria.join(" · ")}`
+        : `Mostrando ${formatNumber(pagination.visibleCount)} de ${formatNumber(pagination.totalCount)}`;
 
-  const admin = data.admin !== false && !shouldRenderRestricted(data);
+  const admin =
+    data.admin !== false &&
+    !shouldRenderRestricted(data);
 
   return `
     <section
@@ -1362,40 +2138,60 @@ export function renderTable(input = {}) {
           <h2 class="usuarios-history-title">Historial de usuarios</h2>
           <p class="usuarios-history-subtitle">${escapeHtml(subtitle)}</p>
         </div>
+
         ${renderFilters(data, pagination)}
       </div>
 
-      ${initialLoading ? renderTableLoading(pagination.visibleLimit) : `
-        <div class="usuarios-table-wrap${refreshing ? " is-refreshing" : ""}" data-usuarios-table-wrap="true">
-          ${refreshOverlay ? renderRefreshOverlay() : ""}
+      ${
+        initialLoading
+          ? renderTableLoading(
+              pagination.visibleLimit
+            )
+          : `<div
+              class="usuarios-table-wrap${refreshing ? " is-refreshing" : ""}"
+              data-usuarios-table-wrap="true"
+            >
+              ${refreshOverlay ? renderRefreshOverlay() : ""}
 
-          ${pagination.pageItems.length ? `
-            <div class="usuarios-table-shell">
-              <table
-                class="usuarios-table usuarios-table--no-actions usuarios-table--scale-110"
-                role="table"
-                aria-label="Listado de usuarios"
-                data-table-columns="${attr(String(USUARIOS_TABLE_COLUMNS.length))}"
-                data-table-actions="false"
-                data-table-scale="${TABLE_SCALE}"
-              >
-                ${renderColgroup()}
-                ${renderThead()}
-                <tbody>
-                  ${pagination.pageItems.map((item) => renderRow(item, state)).join("")}
-                </tbody>
-              </table>
-            </div>
-            ${renderFeedFooter(pagination, state)}
-          ` : renderEmptyContent({
-            hasError,
-            filtering: pagination.filtering,
-            searchQuery: search,
-            message: errorMessage,
-            allowCreate: admin,
-          })}
-        </div>
-      `}
+              ${
+                pagination.pageItems.length
+                  ? `<div class="usuarios-table-shell">
+                      <table
+                        class="usuarios-table usuarios-table--no-actions usuarios-table--scale-110"
+                        role="table"
+                        aria-label="Listado de usuarios"
+                        data-table-columns="${attr(String(USUARIOS_TABLE_COLUMNS.length))}"
+                        data-table-actions="false"
+                        data-table-scale="${TABLE_SCALE}"
+                      >
+                        ${renderColgroup()}
+                        ${renderThead()}
+                        <tbody>
+                          ${pagination.pageItems
+                            .map(
+                              (item) =>
+                                renderRow(item, state)
+                            )
+                            .join("")}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    ${renderFeedFooter(pagination, state)}`
+                  : renderEmptyContent({
+                      hasError,
+                      filtering:
+                        pagination.filtering,
+                      searchQuery:
+                        search,
+                      message:
+                        errorMessage,
+                      allowCreate:
+                        admin,
+                    })
+              }
+            </div>`
+      }
     </section>
   `;
 }
@@ -1405,26 +2201,67 @@ export function renderTable(input = {}) {
 ========================================================= */
 
 export function renderEmptyState(options = {}) {
-  return `<section class="usuarios-history">${renderEmptyContent({
-    hasError: Boolean(options?.hasError),
-    filtering: Boolean(options?.filtering),
-    searchQuery: safeText(options?.searchQuery, ""),
-    message: safeText(options?.message, ""),
-    restricted: Boolean(options?.restricted),
-    allowCreate: options?.allowCreate !== false,
-  })}</section>`;
+  return `
+    <section class="usuarios-history">
+      ${renderEmptyContent({
+        hasError:
+          Boolean(options?.hasError),
+        filtering:
+          Boolean(options?.filtering),
+        searchQuery:
+          safeText(options?.searchQuery, ""),
+        message:
+          safeText(options?.message, ""),
+        restricted:
+          Boolean(options?.restricted),
+        allowCreate:
+          options?.allowCreate !== false,
+      })}
+    </section>
+  `;
 }
 
-export const renderCards = renderTable;
+export const renderCards =
+  renderTable;
 
 export function renderUsuariosTableTemplate(input = {}) {
   const data = safeObject(input);
   const items = getResolvedItems(data);
   const state = safeObject(data.state);
-  const error = safeText(first(state.error, data.error, ""), "");
-  const loading = Boolean(first(state.loading, data.loading, false));
-  const refreshing = Boolean(first(state.refreshing, data.refreshing, false));
-  const pagination = getPagination(items, data);
+
+  const error =
+    safeText(
+      first(
+        state.error,
+        data.error,
+        ""
+      ),
+      ""
+    );
+
+  const loading =
+    Boolean(
+      first(
+        state.loading,
+        data.loading,
+        false
+      )
+    );
+
+  const refreshing =
+    Boolean(
+      first(
+        state.refreshing,
+        data.refreshing,
+        false
+      )
+    );
+
+  const pagination =
+    getPagination(
+      items,
+      data
+    );
 
   const rootAttrs = `
     data-usuarios-scope="true"
@@ -1451,7 +2288,10 @@ export function renderUsuariosTableTemplate(input = {}) {
     `;
   }
 
-  if (error && !items.length) {
+  if (
+    error &&
+    !items.length
+  ) {
     return `
       <section class="usuarios-view-root has-error" ${rootAttrs} aria-busy="false">
         ${renderErrorState(error)}
@@ -1459,7 +2299,11 @@ export function renderUsuariosTableTemplate(input = {}) {
     `;
   }
 
-  const payload = { ...data, items, state };
+  const payload = {
+    ...data,
+    items,
+    state,
+  };
 
   return `
     <section
@@ -1479,21 +2323,40 @@ export function getUsuariosTableTemplateSnapshot(input = {}) {
   const pagination = getPagination(items, data);
 
   return {
-    version: USUARIOS_TABLE_TEMPLATE_VERSION,
-    actions: USUARIOS_TABLE_ACTIONS,
-    columns: USUARIOS_TABLE_COLUMNS.map((column) => column.key),
-    tableColumns: USUARIOS_TABLE_COLUMNS.length,
-    tableActions: false,
-    tableScale: TABLE_SCALE,
-    total: pagination.totalCount,
-    visible: pagination.visibleCount,
-    visibleLimit: pagination.visibleLimit,
-    remainingCount: pagination.remainingCount,
-    hasMore: pagination.hasMore,
-    filter: pagination.activeFilter,
-    searchLength: pagination.searchQuery.length,
-    restricted: shouldRenderRestricted(data),
-    canonicalModel: true,
+    version:
+      USUARIOS_TABLE_TEMPLATE_VERSION,
+    actions:
+      USUARIOS_TABLE_ACTIONS,
+    columns:
+      USUARIOS_TABLE_COLUMNS
+        .map(
+          (column) =>
+            column.key
+        ),
+    tableColumns:
+      USUARIOS_TABLE_COLUMNS.length,
+    tableActions:
+      false,
+    tableScale:
+      TABLE_SCALE,
+    total:
+      pagination.totalCount,
+    visible:
+      pagination.visibleCount,
+    visibleLimit:
+      pagination.visibleLimit,
+    remainingCount:
+      pagination.remainingCount,
+    hasMore:
+      pagination.hasMore,
+    filter:
+      pagination.activeFilter,
+    searchLength:
+      pagination.searchQuery.length,
+    restricted:
+      shouldRenderRestricted(data),
+    canonicalModel:
+      true,
     architecture: {
       http: false,
       store: false,
@@ -1507,6 +2370,8 @@ export function getUsuariosTableTemplateSnapshot(input = {}) {
       rowDetailAction: true,
       actionsColumn: false,
       safeAvatarUrls: true,
+      azureBlobSasRuntimeAllowed: true,
+      externalSasRejected: true,
       dataImageAvatarAllowed: false,
       escapeHtml: true,
     },
@@ -1517,14 +2382,19 @@ export function getUsuariosTableTemplateSnapshot(input = {}) {
       filters: "usuarios-filters",
       table: "usuarios-table",
       row: "usuarios-row",
-      columns: "main,status,date,email,location,activity",
-      avatarTone: "usuarios-avatar-tone-0..9 + data-avatar-tone",
+      columns:
+        "main,status,date,email,location,activity",
+      avatarTone:
+        "usuarios-avatar-tone-0..9 + data-avatar-tone",
     },
   };
 }
 
-export const renderTemplate = renderUsuariosTableTemplate;
-export const renderUsuariosTemplate = renderUsuariosTableTemplate;
-export const getSnapshot = getUsuariosTableTemplateSnapshot;
+export const renderTemplate =
+  renderUsuariosTableTemplate;
+export const renderUsuariosTemplate =
+  renderUsuariosTableTemplate;
+export const getSnapshot =
+  getUsuariosTableTemplateSnapshot;
 
 export default renderUsuariosTableTemplate;

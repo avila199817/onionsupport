@@ -18,20 +18,17 @@ jobs:
           fetch-depth: 0
           ref: refactor/app-chrome-v3-single-layout
 
-      - name: Consolidate layout ownership
+      - name: Move Sidebar geometry into App Chrome
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
 
-          # -------------------------------------------------
-          # chrome.css: Sidebar width/state joins same authority
-          # -------------------------------------------------
           chrome_path = Path("src/css/layout/chrome.css")
           chrome = chrome_path.read_text(encoding="utf-8")
           marker = "/* =========================================================\n   MOBILE-ONLY CHROME NODES\n========================================================= */"
 
-          sidebar_geometry = '''/* =========================================================
+          block = '''/* =========================================================
    SIDEBAR WIDTH · SAME AUTHORITY AS TOPBAR / MAIN
 ========================================================= */
 
@@ -53,7 +50,6 @@ jobs:
   [data-sidebar-state="open"]
 ) {
   --sb-pad-x: var(--sidebar-inline-padding, 8px);
-
   inline-size: var(--chrome-sidebar-open-width);
   min-inline-size: var(--chrome-sidebar-open-width);
   max-inline-size: var(--chrome-sidebar-open-width);
@@ -65,7 +61,6 @@ jobs:
   [data-sidebar-state="collapsed"]
 ) {
   --sb-pad-x: 0px;
-
   inline-size: var(--chrome-sidebar-collapsed-width);
   min-inline-size: var(--chrome-sidebar-collapsed-width);
   max-inline-size: var(--chrome-sidebar-collapsed-width);
@@ -76,44 +71,11 @@ jobs:
           if "SIDEBAR WIDTH · SAME AUTHORITY" not in chrome:
               if marker not in chrome:
                   raise SystemExit("chrome.css: mobile marker missing")
-              chrome = chrome.replace(marker, sidebar_geometry + marker, 1)
+              chrome = chrome.replace(marker, block + marker, 1)
           chrome_path.write_text(chrome, encoding="utf-8")
 
-          # -------------------------------------------------
-          # sidebar.css: remove competing width/state authority
-          # -------------------------------------------------
           sidebar_path = Path("src/css/layout/sidebar.css")
           sidebar = sidebar_path.read_text(encoding="utf-8")
-
-          obsolete_tokens = '''  --sb-open-w:
-    var(--sidebar-width, 260px);
-
-  --sb-collapsed-w:
-    var(--sidebar-collapsed, 72px);
-
-  --sb-mobile-collapsed-w:
-    var(
-      --sidebar-mobile-collapsed-width,
-      60px
-    );
-
-  --sb-mobile-open-w:
-    min(
-      clamp(286px, 42vw, 322px),
-      calc(100vw - 12px)
-    );
-
-  --sb-current-w:
-    var(--sb-open-w);
-
-'''
-          replacement_tokens = '''  --sb-collapsed-w:
-    var(--chrome-sidebar-collapsed-width, var(--sidebar-collapsed, 72px));
-
-'''
-          if obsolete_tokens not in sidebar:
-              raise SystemExit("sidebar.css: width token block missing")
-          sidebar = sidebar.replace(obsolete_tokens, replacement_tokens, 1)
 
           width_block = '''  inline-size:
     var(--sb-current-w);
@@ -144,7 +106,7 @@ jobs:
       var(--sb-ease-fast);
 
 '''
-          replacement_transition = '''  transition:
+          replacement = '''  transition:
     border-color
       var(--sb-fast)
       var(--sb-ease-fast),
@@ -158,85 +120,23 @@ jobs:
 '''
           if transition_block not in sidebar:
               raise SystemExit("sidebar.css: root transition block missing")
-          sidebar = sidebar.replace(transition_block, replacement_transition, 1)
+          sidebar = sidebar.replace(transition_block, replacement, 1)
 
           state_start = sidebar.find("/* =========================================================\n   STATE\n========================================================= */")
           structure_start = sidebar.find("/* =========================================================\n   STRUCTURE\n========================================================= */", state_start)
           if state_start < 0 or structure_start < 0:
-              raise SystemExit("sidebar.css: STATE/STRUCTURE markers missing")
+              raise SystemExit("sidebar.css: state markers missing")
           sidebar = sidebar[:state_start] + sidebar[structure_start:]
-
-          # These tokens belonged exclusively to the removed width transition.
-          for block in (
-              "  --sb-open-duration: .32s;\n  --sb-close-duration: .26s;\n\n",
-              "  --sb-ease:\n    cubic-bezier(.22, .86, .24, 1);\n\n",
-          ):
-              if block not in sidebar:
-                  raise SystemExit(f"sidebar.css: obsolete motion block missing: {block!r}")
-              sidebar = sidebar.replace(block, "", 1)
-
           sidebar_path.write_text(sidebar, encoding="utf-8")
-
-          # -------------------------------------------------
-          # core/layout.css: chrome.css owns horizontal motion
-          # -------------------------------------------------
-          layout_path = Path("src/css/core/layout.css")
-          layout = layout_path.read_text(encoding="utf-8")
-
-          main_transition = '''  transition:
-    inset-inline-start
-      var(--layout-sidebar-motion-duration)
-      var(--layout-sidebar-motion-ease);
-'''
-          if main_transition not in layout:
-              raise SystemExit("layout.css: main transition missing")
-          layout = layout.replace(main_transition, "", 1)
-
-          table_transition = '''  transition:
-    inset-inline-start
-      var(--layout-sidebar-motion-duration)
-      var(--layout-sidebar-motion-ease),
-    border-color
-      var(--duration-normal)
-      var(--ease-standard),
-    background-color
-      var(--duration-normal)
-      var(--ease-standard);
-'''
-          table_replacement = '''  transition:
-    border-color
-      var(--duration-normal)
-      var(--ease-standard),
-    background-color
-      var(--duration-normal)
-      var(--ease-standard);
-'''
-          if table_transition not in layout:
-              raise SystemExit("layout.css: tablehead transition missing")
-          layout = layout.replace(table_transition, table_replacement, 1)
-
-          for block in (
-              "  --layout-sidebar-motion-duration: .32s;\n",
-              "  --layout-sidebar-motion-duration-mobile: .26s;\n\n",
-              "  --layout-sidebar-motion-ease:\n    cubic-bezier(.22, .86, .24, 1);\n\n",
-          ):
-              if block not in layout:
-                  raise SystemExit(f"layout.css: obsolete motion token missing: {block!r}")
-              layout = layout.replace(block, "", 1)
-
-          layout_path.write_text(layout, encoding="utf-8")
           PY
 
-      - name: Validate consolidated architecture
+      - name: Validate
         shell: bash
         run: |
           set -euo pipefail
-          test -f src/css/layout/chrome.css
-          test ! -f src/css/layout/mobile-shell.css
           grep -q 'SIDEBAR WIDTH · SAME AUTHORITY' src/css/layout/chrome.css
-          ! grep -q -- '--sb-current-w' src/css/layout/sidebar.css
-          ! grep -q '^[[:space:]]*STATE$' src/css/layout/sidebar.css
-          ! grep -q -- '--layout-sidebar-motion-duration' src/css/core/layout.css
+          ! grep -q 'var(--sb-current-w)' src/css/layout/sidebar.css
+          test ! -f src/css/layout/mobile-shell.css
           ! grep -q '@layer layout' src/css/layout/chrome.css
           python .github/scripts/repo_integrity.py
           git diff --check
@@ -245,11 +145,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git diff --quiet; then
-            exit 0
-          fi
+          if git diff --quiet; then exit 0; fi
           git config user.name "Onion Support"
           git config user.email "cristian@onionsupport.com"
-          git add src/css/layout/chrome.css src/css/layout/sidebar.css src/css/core/layout.css
-          git commit -m "refactor(chrome): unificar geometría y movimiento del shell"
+          git add src/css/layout/chrome.css src/css/layout/sidebar.css
+          git commit -m "refactor(chrome): mover ancho del sidebar a la autoridad única"
           git push origin HEAD:refactor/app-chrome-v3-single-layout

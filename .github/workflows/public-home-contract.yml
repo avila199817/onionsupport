@@ -78,7 +78,7 @@ jobs:
               Path("src/css/app.css"),
               Path("src/css/views/public/index.css"),
               Path("src/css/views/public/support-request.css"),
-              Path("src/css/views/public/mobile-polish.css"),
+              Path("src/css/views/public/home-experience.css"),
               Path("src/features/public-support/index.js"),
               Path("src/views/public/home/index.js"),
               Path("src/views/public/home/template.js"),
@@ -100,7 +100,7 @@ jobs:
           app_css = Path("src/css/app.css").read_text(encoding="utf-8")
           intake = Path("src/features/public-support/index.js").read_text(encoding="utf-8")
           home = Path("src/views/public/home/index.js").read_text(encoding="utf-8")
-          mobile_css = Path("src/css/views/public/mobile-polish.css").read_text(encoding="utf-8")
+          experience_css = Path("src/css/views/public/home-experience.css").read_text(encoding="utf-8")
 
           checks = [
               (
@@ -120,8 +120,12 @@ jobs:
                   "app.css debe importar support-request.css",
               ),
               (
-                  '@import url("./views/public/mobile-polish.css")' in app_css,
-                  "app.css debe importar mobile-polish.css",
+                  '@import url("./views/public/home-experience.css")' in app_css,
+                  "app.css debe importar home-experience.css como fuente responsive canónica",
+              ),
+              (
+                  'mobile-polish.css' not in app_css,
+                  "app.css no debe volver a importar mobile-polish.css",
               ),
               (
                   'PUBLIC_TICKET_ENDPOINT = "/api/tickets/public"' in intake,
@@ -180,8 +184,16 @@ jobs:
                   "Los clics y scrollTo programático de la home deben reemplazar el hash sin apilar historial",
               ),
               (
-                  'public-home-topbar-account' not in mobile_css,
-                  "El CSS móvil no debe volver a duplicar la identidad en el top bar",
+                  'public-home-topbar-account' not in experience_css,
+                  "El CSS responsive no debe volver a duplicar la identidad en el top bar",
+              ),
+              (
+                  '.public-home .public-home-price-link' in experience_css,
+                  "home-experience.css debe conservar la simplificación canónica del header",
+              ),
+              (
+                  '@media (max-width: 1040px)' in experience_css and '.public-home .public-home-nav-panel' in experience_css,
+                  "home-experience.css debe contener el contrato responsive del drawer público",
               ),
               (
                   '`POST /api/tickets/public`' in docs,
@@ -207,6 +219,7 @@ jobs:
 
           forbidden_paths = [
               Path("src/features/public-support/mobile-polish.js"),
+              Path("src/css/views/public/mobile-polish.css"),
               Path("noop"),
           ]
 
@@ -217,7 +230,7 @@ jobs:
           for css_path in [
               Path("src/css/views/public/index.css"),
               Path("src/css/views/public/support-request.css"),
-              Path("src/css/views/public/mobile-polish.css"),
+              Path("src/css/views/public/home-experience.css"),
           ]:
               css = css_path.read_text(encoding="utf-8")
               if css.count("{") != css.count("}"):

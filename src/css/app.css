@@ -79,12 +79,11 @@
 /* =========================================================
    PUBLIC · LANDING / SUPPORT REQUEST
 
-   Estas hojas forman parte del shell público y deben estar disponibles antes
-   de entrar en la SPA privada. Cada una conserva su propio scope.
+   El responsive de la landing vive en home-experience.css. No existe una hoja
+   separada de polish/hotfix: una sola fuente de verdad por experiencia.
 ========================================================= */
 
 @import url("./views/public/support-request.css");
-@import url("./views/public/mobile-polish.css");
 @import url("./views/public/home-experience.css");
 
 /* =========================================================

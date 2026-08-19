@@ -1,5 +1,6 @@
 name: Incidencias admin editor PR
 
+# Temporary PR-only applicator; removed before merge.
 on:
   pull_request:
     branches:

@@ -257,6 +257,30 @@ function attachObserver() {
   return true;
 }
 
+function bindMediaQuery() {
+  if (!mediaQuery) return false;
+
+  if (typeof mediaQuery.addEventListener === "function") {
+    mediaQuery.addEventListener("change", onMediaChange);
+    return true;
+  }
+
+  mediaQuery.addListener?.(onMediaChange);
+  return true;
+}
+
+function unbindMediaQuery() {
+  if (!mediaQuery) return false;
+
+  if (typeof mediaQuery.removeEventListener === "function") {
+    mediaQuery.removeEventListener("change", onMediaChange);
+    return true;
+  }
+
+  mediaQuery.removeListener?.(onMediaChange);
+  return true;
+}
+
 export function initMobileShell() {
   if (!isBrowser() || initialized) return MOBILE_SHELL;
 
@@ -269,8 +293,7 @@ export function initMobileShell() {
     setMobileDocumentState();
   }
 
-  mediaQuery.addEventListener?.("change", onMediaChange);
-  mediaQuery.addListener?.(onMediaChange);
+  bindMediaQuery();
 
   document.addEventListener("pointerdown", onDocumentPointerDown, true);
   document.addEventListener("click", onDocumentClick);
@@ -291,8 +314,7 @@ export function initMobileShell() {
 export function destroyMobileShell() {
   if (!isBrowser() || !initialized) return MOBILE_SHELL;
 
-  mediaQuery?.removeEventListener?.("change", onMediaChange);
-  mediaQuery?.removeListener?.(onMediaChange);
+  unbindMediaQuery();
 
   document.removeEventListener("pointerdown", onDocumentPointerDown, true);
   document.removeEventListener("click", onDocumentClick);

@@ -14,6 +14,7 @@
    - Mantener variables.css como fuente de verdad visual dark/default.
    - Mantener light.css como única fuente de overrides del tema claro.
    - Dejar las vistas privadas al loader CSS de ruta.
+   - Permitir composiciones responsive transversales sin parches por vista.
    - Cerrar la cascada con invariantes geométricas transversales.
 
    Reglas:
@@ -27,7 +28,7 @@
    CASCADE LAYERS · menor -> mayor prioridad
 ========================================================= */
 
-@layer tokens, reset, core, layout, components, views, auth, guardrails;
+@layer tokens, reset, core, layout, components, views, auth, compositions, guardrails;
 
 /* =========================================================
    TOKENS
@@ -64,8 +65,7 @@
    PRIVATE VIEWS
 
    Las hojas de las vistas privadas se cargan desde src/router/styles.js.
-   Incidencias ya no necesita una hoja global de micro-parches: index.css,
-   create.css y detail.css contienen su sistema completo dentro de layer(views).
+   Cada dominio define su desktop/tablet dentro de layer(views).
 ========================================================= */
 
 /* =========================================================
@@ -86,6 +86,15 @@
 
 @import url("./views/public/support-request.css");
 @import url("./views/public/home-experience.css");
+
+/* =========================================================
+   COMPOSITIONS · RESPONSIVE CROSS-VIEW
+
+   Las composiciones pueden recomponer visualmente varios dominios después de
+   sus hojas de vista sin usar !important. No contienen lógica de negocio.
+========================================================= */
+
+@import url("./compositions/mobile-datalist.css") layer(compositions);
 
 /* =========================================================
    FINAL UI FOUNDATION · PRIVATE LAYOUT GUARDRAILS

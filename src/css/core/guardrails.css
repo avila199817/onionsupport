@@ -1,0 +1,758 @@
+/* =========================================================
+   ONION SUPPORT — UI FOUNDATION / LAYOUT GUARDRAILS
+   Archivo: /src/css/core/guardrails.css
+
+   UI FOUNDATION V1 · PRIVATE SPA · 2026-08-19
+
+   Última barrera geométrica del panel privado:
+   - shrink seguro para flex/grid;
+   - texto largo sin expansión del viewport;
+   - un único scroll vertical de página;
+   - scroll horizontal propiedad de tablas/listas;
+   - mobile/tablet coherente entre vistas;
+   - modales dentro de viewport real + safe areas.
+
+   NO define colores, temas ni lógica de dominio.
+   NO contiene @layer: app.css asigna layer(guardrails).
+========================================================= */
+
+/* =========================================================
+   ROOT / SHRINK CONTRACT
+========================================================= */
+
+:where(
+  .panel-content[data-view],
+  .home-view-root,
+  .incidencias-view-root,
+  .facturas-view-root,
+  .clientes-view-root,
+  .usuarios-view-root,
+  .server-view-root,
+  .servidor-view-root,
+  .cuenta-view,
+  [data-correo-host="true"]
+) {
+  inline-size: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+:where(
+  .panel-content[data-view],
+  .home-view-root,
+  .incidencias-view-root,
+  .facturas-view-root,
+  .clientes-view-root,
+  .usuarios-view-root,
+  .server-view-root,
+  .servidor-view-root,
+  .cuenta-view,
+  [data-correo-host="true"]
+)
+:where(
+  section,
+  article,
+  header,
+  footer,
+  nav,
+  aside,
+  form,
+  fieldset,
+  div,
+  ul,
+  ol,
+  li,
+  dl,
+  dt,
+  dd
+) {
+  min-inline-size: 0;
+}
+
+:where(.panel-content[data-view])
+:where(img, picture, video, canvas, iframe) {
+  max-inline-size: 100%;
+}
+
+/* =========================================================
+   TEXT RESILIENCE
+========================================================= */
+
+:where(.panel-content[data-view])
+:where(h1, h2, h3, h4, h5, h6, p, li, dt, dd, label, figcaption, blockquote) {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
+}
+
+:where(
+  .incidencias-ticket-id,
+  .incidencias-client-email,
+  .facturas-factura-id,
+  .facturas-system-id,
+  .facturas-factura-email,
+  .clientes-client-id,
+  .clientes-contact-link,
+  .usuarios-email-inline,
+  .usuarios-location-inline,
+  .usuarios-activity-inline,
+  .server-probe-endpoint,
+  .server-runtime-value,
+  .server-runtime-meta,
+  .cuenta-meta-value,
+  .cuenta-session-copy,
+  .cuenta-session-network
+) {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+:where(
+  .incidencias-ticket-id,
+  .facturas-factura-id,
+  .facturas-system-id,
+  .server-probe-endpoint,
+  .cuenta-meta-value
+) {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.ui-truncate,
+.text-truncate {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-clamp-2,
+.text-clamp-2,
+.ui-clamp-3,
+.text-clamp-3 {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
+
+.ui-clamp-2,
+.text-clamp-2 { -webkit-line-clamp: 2; }
+
+.ui-clamp-3,
+.text-clamp-3 { -webkit-line-clamp: 3; }
+
+/* =========================================================
+   CONTROLS / ACTIONS
+========================================================= */
+
+:where(.panel-content[data-view])
+:where(button, input, select, textarea, [role="button"]) {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+:where(.panel-content[data-view])
+:where(button, [role="button"])
+:where(span, strong) {
+  min-inline-size: 0;
+}
+
+:where(
+  .incidencias-hero-actions,
+  .facturas-hero-actions,
+  .clientes-hero-actions,
+  .usuarios-hero-actions,
+  .server-hero-actions,
+  .cuenta-hero-actions,
+  .page-header-actions,
+  .section-actions
+) {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  flex-wrap: wrap;
+}
+
+:where(
+  .incidencias-meta-pill,
+  .facturas-meta-pill,
+  .clientes-meta-pill,
+  .usuarios-meta-pill,
+  .server-meta-pill
+) {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+:where(
+  .incidencias-meta-pill,
+  .facturas-meta-pill,
+  .clientes-meta-pill,
+  .usuarios-meta-pill,
+  .server-meta-pill
+) > span {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* =========================================================
+   COMMON PRIVATE HERO GEOMETRY
+========================================================= */
+
+:where(
+  .incidencias-hero,
+  .facturas-hero,
+  .clientes-hero,
+  .usuarios-hero,
+  .server-hero,
+  .servidor-hero,
+  .cuenta-hero
+) {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  display: grid;
+  gap: var(--space-md);
+  padding: clamp(8px, 1vw, 16px) clamp(4px, .9vw, 14px) 0;
+}
+
+:where(
+  .incidencias-hero-top,
+  .facturas-hero-top,
+  .clientes-hero-top,
+  .usuarios-hero-top,
+  .server-hero-top,
+  .cuenta-hero-top
+) {
+  min-inline-size: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-lg);
+}
+
+:where(
+  .incidencias-hero-copy,
+  .facturas-hero-copy,
+  .clientes-hero-copy,
+  .usuarios-hero-copy,
+  .server-hero-copy,
+  .cuenta-hero-copy
+) {
+  min-inline-size: 0;
+}
+
+:where(
+  .incidencias-title,
+  .facturas-page-title,
+  .clientes-title,
+  .clientes-page-title,
+  .usuarios-title,
+  .usuarios-page-title,
+  .server-title,
+  .cuenta-title
+) {
+  min-inline-size: 0;
+  max-inline-size: 920px;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+
+:where(
+  .incidencias-subtitle,
+  .facturas-page-subtitle,
+  .clientes-subtitle,
+  .clientes-page-subtitle,
+  .usuarios-subtitle,
+  .usuarios-page-subtitle,
+  .server-subtitle,
+  .cuenta-subtitle
+) {
+  min-inline-size: 0;
+  max-inline-size: 78ch;
+  overflow-wrap: anywhere;
+}
+
+/* =========================================================
+   DATA SURFACES / SCROLL AUTHORITY
+========================================================= */
+
+:where(
+  .incidencias-history,
+  .facturas-history,
+  .clientes-history,
+  .usuarios-history
+) {
+  inline-size: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  overflow: hidden;
+}
+
+:where(
+  .incidencias-table-shell,
+  .facturas-table-shell,
+  .clientes-table-shell,
+  .usuarios-table-shell,
+  .ui-table-wrap,
+  .table-container
+) {
+  inline-size: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+:where(
+  .panel-content[data-view="incidencias"],
+  .panel-content[data-view="facturas"],
+  .panel-content[data-view="clientes"],
+  .panel-content[data-view="usuarios"],
+  .panel-content[data-view="servidor"],
+  .panel-content[data-view="server"],
+  .panel-content[data-view="cuenta"]
+) {
+  overflow-x: clip;
+}
+
+:where(
+  .incidencias-table,
+  .facturas-table,
+  .clientes-table,
+  .usuarios-table,
+  .ui-table
+) {
+  max-inline-size: none;
+}
+
+:where(
+  .incidencias-history-head,
+  .facturas-history-head,
+  .clientes-history-head,
+  .usuarios-history-head,
+  .incidencias-filters,
+  .facturas-filters,
+  .clientes-filters,
+  .usuarios-filters,
+  .incidencias-search,
+  .facturas-search,
+  .clientes-search,
+  .usuarios-search,
+  .incidencias-filter-pills,
+  .facturas-filter-pills,
+  .clientes-filter-pills,
+  .usuarios-filter-pills,
+  .incidencias-sort-pills,
+  .facturas-sort-pills,
+  .clientes-sort-pills
+) {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+/* =========================================================
+   CARD / GRID RESILIENCE
+========================================================= */
+
+:where(
+  .incidencias-stats,
+  .facturas-stats,
+  .clientes-stats,
+  .usuarios-stats,
+  .server-summary-grid,
+  .server-services-grid,
+  .server-tech-grid,
+  .server-probe-grid,
+  .server-runtime-grid,
+  .cuenta-cards-grid,
+  .cuenta-loading-grid
+) {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+:where(
+  .incidencias-stats,
+  .facturas-stats,
+  .clientes-stats,
+  .usuarios-stats,
+  .server-summary-grid,
+  .server-services-grid,
+  .server-probe-grid,
+  .server-runtime-grid,
+  .cuenta-cards-grid,
+  .cuenta-loading-grid
+) > * {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+:where(
+  .incidencias-stat-card,
+  .facturas-stat-card,
+  .clientes-stat-card,
+  .usuarios-stat-card,
+  .server-summary-card,
+  .server-service-card,
+  .server-probe,
+  .server-runtime-item,
+  .cuenta-card,
+  .cuenta-panel
+) {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+/* =========================================================
+   MODAL / DIALOG VIEWPORT SAFETY
+========================================================= */
+
+:where(
+  dialog,
+  [role="dialog"],
+  [aria-modal="true"]
+) {
+  max-inline-size:
+    min(
+      100%,
+      calc(100dvw - max(24px, calc(var(--app-safe-left) + var(--app-safe-right))))
+    );
+  max-block-size:
+    calc(100dvh - max(24px, calc(var(--app-safe-top) + var(--app-safe-bottom))));
+}
+
+:where(
+  .incidencias-modal,
+  .facturas-modal,
+  .clientes-modal,
+  .usuarios-modal,
+  .ui-modal,
+  .ui-drawer
+) {
+  min-inline-size: 0;
+  max-inline-size: calc(100dvw - 24px);
+  max-block-size: calc(100dvh - 24px);
+}
+
+:where(
+  .incidencias-modal-body,
+  .facturas-modal-body,
+  .clientes-modal-body,
+  .usuarios-modal-body,
+  .ui-modal-body,
+  .ui-drawer-body
+) {
+  min-inline-size: 0;
+  min-block-size: 0;
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* =========================================================
+   TABLET · ONE COMPOSITION
+========================================================= */
+
+@media (max-width: 900px) {
+  .main-content {
+    scrollbar-gutter: auto;
+  }
+
+  :where(
+    .incidencias-hero-top,
+    .facturas-hero-top,
+    .clientes-hero-top,
+    .usuarios-hero-top,
+    .server-hero-top,
+    .cuenta-hero-top
+  ) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :where(
+    .incidencias-hero-actions,
+    .facturas-hero-actions,
+    .clientes-hero-actions,
+    .usuarios-hero-actions,
+    .server-hero-actions,
+    .cuenta-hero-actions
+  ) {
+    inline-size: 100%;
+    justify-content: flex-start;
+  }
+
+  :where(
+    .incidencias-stats,
+    .facturas-stats,
+    .clientes-stats,
+    .usuarios-stats,
+    .server-summary-grid
+  ) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  :where(
+    .incidencias-history-head,
+    .facturas-history-head,
+    .clientes-history-head,
+    .usuarios-history-head,
+    .incidencias-filters,
+    .facturas-filters,
+    .clientes-filters,
+    .usuarios-filters
+  ) {
+    grid-template-columns: minmax(0, 1fr);
+    inline-size: 100%;
+  }
+
+  :where(
+    .incidencias-search,
+    .facturas-search,
+    .clientes-search,
+    .usuarios-search
+  ) {
+    grid-column: 1;
+    grid-row: 1;
+    inline-size: 100%;
+  }
+
+  :where(
+    .incidencias-filter-pills,
+    .facturas-filter-pills,
+    .clientes-filter-pills,
+    .usuarios-filter-pills
+  ) {
+    grid-column: 1;
+    grid-row: 2;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+
+  :where(
+    .incidencias-sort-pills,
+    .facturas-sort-pills,
+    .clientes-sort-pills
+  ) {
+    grid-column: 1;
+    grid-row: 3;
+    justify-self: stretch;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+
+  :where(
+    .incidencias-filter-pills,
+    .facturas-filter-pills,
+    .clientes-filter-pills,
+    .usuarios-filter-pills,
+    .incidencias-sort-pills,
+    .facturas-sort-pills,
+    .clientes-sort-pills
+  )::-webkit-scrollbar {
+    display: none;
+  }
+
+  .server-tech-grid,
+  .server-services-grid,
+  .server-probe-grid,
+  .server-runtime-grid,
+  .cuenta-cards-grid,
+  .cuenta-loading-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* =========================================================
+   MOBILE · SOLID DEFAULTS
+========================================================= */
+
+@media (max-width: 560px) {
+  :where(
+    .incidencias-view-root,
+    .facturas-view-root,
+    .clientes-view-root,
+    .usuarios-view-root,
+    .server-view-root,
+    .servidor-view-root,
+    .cuenta-view
+  ) {
+    gap: var(--space-md);
+  }
+
+  :where(
+    .incidencias-hero,
+    .facturas-hero,
+    .clientes-hero,
+    .usuarios-hero,
+    .server-hero,
+    .servidor-hero,
+    .cuenta-hero
+  ) {
+    padding-inline: 0;
+  }
+
+  :where(
+    .incidencias-title,
+    .facturas-page-title,
+    .clientes-title,
+    .clientes-page-title,
+    .usuarios-title,
+    .usuarios-page-title,
+    .server-title,
+    .cuenta-title
+  ) {
+    font-size: clamp(27px, 9vw, 36px);
+    line-height: 1;
+  }
+
+  :where(
+    .incidencias-subtitle,
+    .facturas-page-subtitle,
+    .clientes-subtitle,
+    .clientes-page-subtitle,
+    .usuarios-subtitle,
+    .usuarios-page-subtitle,
+    .server-subtitle,
+    .cuenta-subtitle
+  ) {
+    font-size: var(--font-sm);
+    line-height: var(--line-normal);
+  }
+
+  :where(
+    .incidencias-stats,
+    .facturas-stats,
+    .clientes-stats,
+    .usuarios-stats,
+    .server-summary-grid,
+    .cuenta-account-stats
+  ) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :where(
+    .incidencias-history,
+    .facturas-history,
+    .clientes-history,
+    .usuarios-history
+  ) {
+    inline-size: 100%;
+    margin-inline: 0;
+    border-inline: 1px solid var(--panel-border);
+    border-radius: var(--radius-md);
+  }
+
+  :where(
+    .incidencias-history-head,
+    .facturas-history-head,
+    .clientes-history-head,
+    .usuarios-history-head
+  ) {
+    padding: var(--space-sm);
+  }
+
+  .server-services-grid,
+  .server-tech-grid,
+  .server-probe-grid,
+  .server-runtime-grid,
+  .cuenta-cards-grid,
+  .cuenta-loading-grid,
+  .cuenta-profile-grid,
+  .cuenta-password-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .server-loading {
+    inset-inline: max(12px, var(--app-safe-left)) max(12px, var(--app-safe-right));
+    max-inline-size: none;
+  }
+}
+
+@media (max-width: 480px) {
+  :where(
+    .incidencias-hero-actions,
+    .facturas-hero-actions,
+    .clientes-hero-actions,
+    .usuarios-hero-actions,
+    .server-hero-actions,
+    .cuenta-hero-actions
+  ) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :where(
+    .incidencias-hero-actions > button,
+    .facturas-hero-actions > button,
+    .clientes-hero-actions > button,
+    .usuarios-hero-actions > button,
+    .server-hero-actions > button,
+    .cuenta-hero-actions > button
+  ) {
+    inline-size: 100%;
+    min-inline-size: 0;
+  }
+}
+
+/* =========================================================
+   TOUCH / MOTION / CONTRAST / PRINT
+========================================================= */
+
+@media (hover: none) and (pointer: coarse) {
+  :where(.panel-content[data-view])
+  :where(button, [role="button"], a[href]) {
+    touch-action: manipulation;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where(.panel-content[data-view]) {
+    scroll-behavior: auto;
+  }
+}
+
+@media (forced-colors: active) {
+  :where(
+    .incidencias-history,
+    .facturas-history,
+    .clientes-history,
+    .usuarios-history,
+    .server-panel,
+    .cuenta-panel,
+    .cuenta-card
+  ) {
+    forced-color-adjust: auto;
+  }
+}
+
+@media print {
+  :where(
+    .panel-content[data-view="incidencias"],
+    .panel-content[data-view="facturas"],
+    .panel-content[data-view="clientes"],
+    .panel-content[data-view="usuarios"],
+    .panel-content[data-view="servidor"],
+    .panel-content[data-view="server"],
+    .panel-content[data-view="cuenta"]
+  ) {
+    overflow: visible !important;
+  }
+
+  :where(
+    .incidencias-table-shell,
+    .facturas-table-shell,
+    .clientes-table-shell,
+    .usuarios-table-shell
+  ) {
+    overflow: visible !important;
+  }
+}

@@ -14,6 +14,7 @@
    - Mantener variables.css como fuente de verdad visual dark/default.
    - Mantener light.css como única fuente de overrides del tema claro.
    - Dejar las vistas privadas al loader CSS de ruta.
+   - Cerrar la cascada con invariantes geométricas transversales.
 
    Reglas:
    - Sin declaraciones CSS directas en este archivo.
@@ -26,7 +27,7 @@
    CASCADE LAYERS · menor -> mayor prioridad
 ========================================================= */
 
-@layer tokens, reset, core, layout, components, views, auth;
+@layer tokens, reset, core, layout, components, views, auth, guardrails;
 
 /* =========================================================
    TOKENS
@@ -85,3 +86,13 @@
 @import url("./views/public/support-request.css");
 @import url("./views/public/mobile-polish.css");
 @import url("./views/public/home-experience.css");
+
+/* =========================================================
+   FINAL UI FOUNDATION · PRIVATE LAYOUT GUARDRAILS
+
+   Esta capa es deliberadamente la última capa declarada. No pinta una vista:
+   impone invariantes de shrink, overflow, scroll, viewport y responsive para
+   que ninguna hoja de ruta pueda volver a romper la geometría del panel.
+========================================================= */
+
+@import url("./core/guardrails.css") layer(guardrails);

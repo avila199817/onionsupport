@@ -28,6 +28,10 @@
   --inc-amount-col: 12%;
   --inc-attachments-col: 10%;
 
+  --inc-avatar-a: var(--accent);
+  --inc-avatar-b: var(--info);
+  --inc-avatar-bg: linear-gradient(135deg, var(--inc-avatar-a), var(--inc-avatar-b));
+
   inline-size: 100%;
   min-inline-size: 0;
   color: var(--text);
@@ -92,7 +96,8 @@
 .incidencias-sort-pill:focus-visible,
 .incidencias-search-input:focus-visible,
 .incidencias-search-clear:focus-visible,
-.incidencias-stat-card:focus-visible {
+.incidencias-stat-card:focus-visible,
+.incidencias-meta-pill--action:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
@@ -260,6 +265,32 @@
   inline-size: 13px;
   block-size: 13px;
   color: var(--text-muted);
+}
+
+.incidencias-meta-pill--action {
+  appearance: none;
+  margin: 0;
+  cursor: pointer;
+  font: inherit;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+
+.incidencias-meta-pill--action:hover {
+  border-color: var(--border-strong);
+  background: var(--solid-hover);
+  color: var(--text-strong);
+  transform: translateY(-1px);
+}
+
+.incidencias-meta-pill--action.is-active,
+.incidencias-meta-pill--action[aria-pressed="true"] {
+  border-color: var(--border-strong);
+  background: var(--solid-selected);
+  color: var(--text-strong);
 }
 
 /* =========================================================
@@ -721,8 +752,10 @@
   overflow: hidden;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-sm);
-  background: var(--solid-bg-2);
-  color: var(--text-strong);
+  border-color: color-mix(in srgb, var(--inc-avatar-a) 44%, var(--border-default));
+  background: linear-gradient(135deg, var(--inc-avatar-a), var(--inc-avatar-b));
+  color: var(--text-on-accent, #fff);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
   font-size: var(--font-xs);
   font-weight: var(--weight-bold);
   letter-spacing: .02em;
@@ -738,6 +771,27 @@
 .incidencias-avatar.has-image .incidencias-avatar-fallback {
   display: none;
 }
+
+.incidencias-avatar[data-avatar-tone="0"],
+.incidencias-assigned-avatar[data-avatar-tone="0"] { --inc-avatar-a: var(--accent); --inc-avatar-b: var(--info); }
+.incidencias-avatar[data-avatar-tone="1"],
+.incidencias-assigned-avatar[data-avatar-tone="1"] { --inc-avatar-a: var(--success); --inc-avatar-b: var(--info); }
+.incidencias-avatar[data-avatar-tone="2"],
+.incidencias-assigned-avatar[data-avatar-tone="2"] { --inc-avatar-a: var(--warning); --inc-avatar-b: var(--accent); }
+.incidencias-avatar[data-avatar-tone="3"],
+.incidencias-assigned-avatar[data-avatar-tone="3"] { --inc-avatar-a: var(--error); --inc-avatar-b: var(--warning); }
+.incidencias-avatar[data-avatar-tone="4"],
+.incidencias-assigned-avatar[data-avatar-tone="4"] { --inc-avatar-a: var(--info); --inc-avatar-b: var(--accent); }
+.incidencias-avatar[data-avatar-tone="5"],
+.incidencias-assigned-avatar[data-avatar-tone="5"] { --inc-avatar-a: var(--success); --inc-avatar-b: var(--accent); }
+.incidencias-avatar[data-avatar-tone="6"],
+.incidencias-assigned-avatar[data-avatar-tone="6"] { --inc-avatar-a: var(--info); --inc-avatar-b: var(--success); }
+.incidencias-avatar[data-avatar-tone="7"],
+.incidencias-assigned-avatar[data-avatar-tone="7"] { --inc-avatar-a: var(--warning); --inc-avatar-b: var(--error); }
+.incidencias-avatar[data-avatar-tone="8"],
+.incidencias-assigned-avatar[data-avatar-tone="8"] { --inc-avatar-a: var(--error); --inc-avatar-b: var(--accent); }
+.incidencias-avatar[data-avatar-tone="9"],
+.incidencias-assigned-avatar[data-avatar-tone="9"] { --inc-avatar-a: var(--accent); --inc-avatar-b: var(--success); }
 
 .incidencias-main-copy {
   display: grid;
@@ -775,6 +829,7 @@
   font-size: 9px;
   font-weight: var(--weight-semibold);
   line-height: 1;
+  text-transform: capitalize;
 }
 
 .incidencias-ticket-subject {
@@ -918,9 +973,10 @@
   display: grid;
   place-items: center;
   overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--inc-avatar-a) 52%, var(--border-default));
   border-radius: 50%;
-  background: var(--solid-bg-3);
-  color: var(--text-strong);
+  background: linear-gradient(135deg, var(--inc-avatar-a), var(--inc-avatar-b));
+  color: var(--text-on-accent, #fff);
   font-size: 7px;
 }
 
@@ -1307,6 +1363,7 @@
   .incidencias-filter-pill,
   .incidencias-sort-pill,
   .incidencias-stat-card,
+  .incidencias-meta-pill--action,
   .incidencias-search,
   .incidencias-table tbody td {
     transition-duration: 0ms;

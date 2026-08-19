@@ -8,7 +8,7 @@
    - Acepta items/tickets/incidencias/rows/results/data.items/etc.
 ========================================================= */
 
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v21.interactive-stats";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v22.attachments-sort-avatar-tones";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   REFRESH: "refresh",
@@ -163,6 +163,11 @@ function hash(v = "") {
 
 function initials(v = "") {
   return txt(v, "").split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() || "").join("").slice(0, 2) || "ON";
+}
+
+function titleCaseLabel(v = "", fb = "General") {
+  const value = txt(v, fb).replace(/[_-]+/g, " ").toLocaleLowerCase("es-ES");
+  return value.replace(/(^|\s)([a-záéíóúüñ])/g, (_, prefix, letter) => `${prefix}${letter.toLocaleUpperCase("es-ES")}`);
 }
 
 /* =========================================================
@@ -398,12 +403,17 @@ function normalizeSort(v = DEFAULT_SORT_ORDER) {
 
 function normalizeSortMode(v = DEFAULT_SORT_MODE) {
   const k = key(v || DEFAULT_SORT_MODE);
-  return ["amount", "importe", "invoice", "factura", "billing"].includes(k) ? "amount" : "date";
+  if (["amount", "importe", "invoice", "factura", "billing"].includes(k)) return "amount";
+  if (["attachments", "attachment", "adjuntos", "adjunto", "files", "archivos"].includes(k)) return "attachments";
+  return "date";
 }
 
 const sortLabel = (o = DEFAULT_SORT_ORDER, mode = DEFAULT_SORT_MODE) => {
   const direction = normalizeSort(o) === "asc" ? "↑" : "↓";
-  return normalizeSortMode(mode) === "amount" ? `Importe ${direction}` : `Fecha ${direction}`;
+  const normalizedMode = normalizeSortMode(mode);
+  if (normalizedMode === "amount") return `Importe ${direction}`;
+  if (normalizedMode === "attachments") return `Adjuntos ${direction}`;
+  return `Fecha ${direction}`;
 };
 const nextSort = (o = DEFAULT_SORT_ORDER) => (normalizeSort(o) === "asc" ? "desc" : "asc");
 
@@ -419,6 +429,16 @@ function sortItems(items = [], order = DEFAULT_SORT_ORDER, mode = DEFAULT_SORT_M
     if (sortMode === "amount") {
       const amountDiff = getInvoiceTotal(a) - getInvoiceTotal(b);
       if (amountDiff) return amountDiff * dir;
+
+      const timeDiff = itemTime(b) - itemTime(a);
+      if (timeDiff) return timeDiff;
+
+      return getId(a).localeCompare(getId(b), "es", { numeric: true, sensitivity: "base" });
+    }
+
+    if (sortMode === "attachments") {
+      const attachmentDiff = getAttachmentsCount(a) - getAttachmentsCount(b);
+      if (attachmentDiff) return attachmentDiff * dir;
 
       const timeDiff = itemTime(b) - itemTime(a);
       if (timeDiff) return timeDiff;
@@ -586,8 +606,10 @@ function buildVm(input = {}) {
 function renderAvatar(it = {}) {
   const name = getClientName(it);
   const src = getAvatar(it);
+  const identity = getClientEmail(it) || name;
+  const tone = hash(identity) % 10;
   return `
-    <span class="incidencias-avatar${src ? " has-image" : " is-fallback"}" data-avatar-tone="${at(String(hash(`${getId(it)}:${name}`) % 10))}" data-has-avatar="${src ? "true" : "false"}" data-fallback="${src ? "false" : "true"}" aria-hidden="true">
+    <span class="incidencias-avatar${src ? " has-image" : " is-fallback"}" data-avatar-tone="${at(String(tone))}" data-has-avatar="${src ? "true" : "false"}" data-fallback="${src ? "false" : "true"}" aria-hidden="true">
       ${src ? `<img class="incidencias-avatar-img" src="${at(src)}" alt="" width="48" height="48" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}
       <span class="incidencias-avatar-fallback">${esc(initials(name))}</span>
     </span>
@@ -619,9 +641,11 @@ function renderAssignedBadge(it = {}) {
   const norm = key(name);
   if (!name || norm === "no_asignado" || norm === "sin_asignar") return "";
   const avatar = getAssignedAvatar(it);
+  const identity = getAssignedEmail(it) || name;
+  const tone = hash(identity) % 10;
   return `
-    <span class="incidencias-assigned-badge" data-assigned="true" title="${at(name)}">
-      <span class="incidencias-assigned-avatar${avatar ? " has-image" : " is-fallback"}" aria-hidden="true">
+    <span class="incidencias-assigned-badge" data-assigned="true" title="${at(`Técnico: ${name}`)}">
+      <span class="incidencias-assigned-avatar${avatar ? " has-image" : " is-fallback"}" data-avatar-tone="${at(String(tone))}" aria-hidden="true">
         ${avatar ? `<img src="${at(avatar)}" alt="" width="20" height="20" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}
         <span>${esc(initials(name))}</span>
       </span>
@@ -664,7 +688,7 @@ function renderRow(it = {}, vm = {}) {
           <div class="incidencias-main-copy">
             <div class="incidencias-ticket-line">
               <span class="incidencias-ticket-id">${esc(id || "Sin ID")}</span>
-              <span class="incidencias-category-pill">${esc(getCategory(it) || "General")}</span>
+              <span class="incidencias-category-pill">${esc(titleCaseLabel(getCategory(it), "General"))}</span>
             </div>
             <div class="incidencias-ticket-subject">${esc(getSubject(it))}</div>
             <div class="incidencias-ticket-description">${esc(getDesc(it) || "Sin descripción.")}</div>
@@ -716,7 +740,7 @@ function renderHeader(vm = {}) {
       <div class="incidencias-hero-meta">
         <span class="incidencias-meta-pill" data-meta="total">${icon("ticket")}<span>${esc(`${formatNumber(vm.total)} solicitudes registradas`)}</span></span>
         <span class="incidencias-meta-pill" data-meta="updated">${icon("refresh")}<span>${updatedAt ? esc(`Última actualización · ${formatRelativeDate(updatedAt)}`) : "Sin actualizaciones recientes"}</span></span>
-        <span class="incidencias-meta-pill" data-meta="attachments">${icon("paperclip")}<span>${esc(`${formatNumber(s.attachments)} adjuntos`)}</span></span>
+        <button type="button" class="incidencias-meta-pill incidencias-meta-pill--action${vm.sortMode === "attachments" ? " is-active" : ""}" data-meta="attachments" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="attachments" aria-pressed="${vm.sortMode === "attachments" ? "true" : "false"}" aria-label="Ordenar incidencias de más adjuntos a menos" title="Ordenar por número de adjuntos">${icon("paperclip")}<span>${esc(`${formatNumber(s.attachments)} adjuntos`)}</span></button>
         <span class="incidencias-meta-pill" data-meta="amount">${icon("euro")}<span>${esc(formatMoney(s.invoiceTotal, DEFAULT_CURRENCY))}</span></span>
       </div>
       <div class="incidencias-stats" aria-label="Accesos rápidos del historial">
@@ -765,7 +789,7 @@ function renderFilters(vm = {}) {
   const next = nextSort(order);
   const currentSortLabel = sortLabel(order, sortMode);
   const nextSortLabel = sortLabel(next, sortMode);
-  const sortIcon = sortMode === "amount" ? "euro" : "calendar";
+  const sortIcon = sortMode === "attachments" ? "paperclip" : sortMode === "amount" ? "euro" : "calendar";
 
   return `
     <div class="incidencias-filters" data-incidencias-filters="true">
@@ -926,6 +950,7 @@ export function getIncidenciasTemplateSnapshot(input = {}) {
     filter: vm.filter,
     searchLength: vm.search.length,
     sortOrder: vm.sortOrder,
+    sortMode: vm.sortMode,
     totalGreaterThanItems: vm.diagnostics.totalGreaterThanItems,
     cssContract: {
       filters: "incidencias-filters/incidencias-filter-pills/incidencias-filter-pill/incidencias-sort-pills/incidencias-sort-pill",

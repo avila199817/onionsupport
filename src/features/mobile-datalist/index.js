@@ -6,7 +6,7 @@
    - Anotar los listados tabulares privados para su composición móvil.
    - Leer labels de <thead> en vez de duplicar textos en CSS/JS.
    - Mantener el DOM/acciones originales de cada vista.
-   - Reaplicar la anotación después de renders del Router.
+   - Reaplicar la anotación después de renders completos o parciales.
    - Sin API, Auth, Router, Store ni lógica de dominio.
 ========================================================= */
 
@@ -101,6 +101,16 @@ function selectorMatches(node, selector = "") {
   );
 }
 
+function nodeTouchesTable(node, selector = "") {
+  if (!node || node.nodeType !== 1 || !selector) return false;
+
+  return Boolean(
+    selectorMatches(node, selector) ||
+    node.closest?.(selector) ||
+    node.querySelector?.(selector)
+  );
+}
+
 function tablesInside(root, selector = "") {
   if (!root || !selector) return [];
 
@@ -108,6 +118,14 @@ function tablesInside(root, selector = "") {
 
   if (selectorMatches(root, selector)) {
     output.push(root);
+  }
+
+  const closest = root.nodeType === 1
+    ? root.closest?.(selector)
+    : null;
+
+  if (closest) {
+    output.push(closest);
   }
 
   if (typeof root.querySelectorAll === "function") {
@@ -262,8 +280,7 @@ function attachObserver() {
 
         if (
           CONFIGS.some((config) =>
-            selectorMatches(node, config.selector) ||
-            Boolean(node.querySelector?.(config.selector))
+            nodeTouchesTable(node, config.selector)
           )
         ) {
           needsEnhancement = true;

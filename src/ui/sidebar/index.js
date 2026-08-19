@@ -22,6 +22,7 @@
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 import { Auth as DefaultAuth } from "../../features/auth/index.js";
 import { Router as DefaultRouter } from "../../router/index.js";
 
@@ -46,7 +47,7 @@ import {
 } from "./template.js";
 
 export const SIDEBAR_VERSION =
-  "sidebar.controller.v3-hardened";
+  "sidebar.controller.v4-canonical-media";
 
 const SIDEBAR_ROOT_ID =
   "app-sidebar";
@@ -711,75 +712,17 @@ function isAdmin() {
 function safeImageUrl(
   value = ""
 ) {
-  const raw =
-    cleanText(
-      value,
-      ""
-    );
-
-  if (!raw) {
-    return "";
-  }
-
-  if (
-    /[\r\n\t\\]/.test(
-      raw
-    )
-  ) {
-    return "";
-  }
-
-  if (
-    /^(javascript|data|vbscript|file):/i.test(
-      raw
-    )
-  ) {
-    return "";
-  }
-
-  if (
-    raw.startsWith(
-      "/"
-    )
-  ) {
-    return raw;
-  }
-
-  if (
-    /^https?:\/\//i.test(
-      raw
-    )
-  ) {
-    try {
-      const url =
-        new URL(
-          raw
-        );
-
-      const sameOrigin =
-        isBrowser() &&
-        url.origin ===
-          window.location.origin;
-
-      if (
-        sameOrigin ||
-        url.hostname ===
-          "api.onionit.net" ||
-        url.hostname.endsWith(
-          ".onionit.net"
-        ) ||
-        url.hostname.endsWith(
-          ".blob.core.windows.net"
-        )
-      ) {
-        return url.toString();
-      }
-    } catch {
-      return "";
+  return sanitizeRuntimeImageUrl(
+    value,
+    {
+      allowRelative: true,
+      allowBlobObjectUrl: true,
+      allowSameOrigin: true,
+      allowOnionApi: true,
+      allowAzureBlob: true,
+      allowAzureBlobSas: true,
     }
-  }
-
-  return "";
+  );
 }
 
 function initialsFrom(
@@ -1352,13 +1295,6 @@ function routeIcon(
     ROUTES.cuenta
   ) {
     return "cuenta";
-  }
-
-  if (
-    clean ===
-    ROUTES.ajustes
-  ) {
-    return "ajustes";
   }
 
   return "home";

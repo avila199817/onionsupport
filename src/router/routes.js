@@ -41,7 +41,7 @@ import {
 } from "../core/config.js";
 
 export const ROUTES_VERSION =
-  "routes.minimal.v8.3-cuenta-legacy-alias";
+  "routes.minimal.v8.4-canonical-visibility";
 
 /* =========================================================
    PATHS / NAMES
@@ -1249,6 +1249,8 @@ function createRoute({
   guestOnly = false,
   adminOnly = false,
   tokenRoute = false,
+  showInSidebar = true,
+  searchable = true,
   order = 0,
 }) {
   const finalPath = normalizePath(path);
@@ -1370,8 +1372,15 @@ function createRoute({
     layout: finalPublic
       ? "auth"
       : "app",
-    sidebar: !finalPublic,
-    showInSidebar: !finalPublic,
+    sidebar:
+      !finalPublic &&
+      showInSidebar !== false,
+    showInSidebar:
+      !finalPublic &&
+      showInSidebar !== false,
+    searchable:
+      !finalPublic &&
+      searchable !== false,
     sidebarKey: finalViewKey,
     order: Number(order) || 0,
     render: createRender(finalViewKey),
@@ -1467,6 +1476,8 @@ const ROUTE_DEFINITIONS = Object.freeze([
     name: ROUTE_NAMES.AJUSTES,
     title: "Ajustes",
     viewKey: "ajustes",
+    showInSidebar: false,
+    searchable: false,
     order: 80,
   }),
 

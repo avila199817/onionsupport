@@ -42,7 +42,7 @@ import {
 } from "./template.js";
 
 export const TOPBAR_VERSION =
-  "topbar.controller.backend-search.v6-hardened";
+  "topbar.controller.backend-search.v7-canonical-routes";
 
 const TOPBAR_ROOT_ID =
   "app-topbar";
@@ -777,29 +777,11 @@ function normalizeRole(
       ""
     ).toLowerCase();
 
-  if (
-    [
-      "admin",
-      "superadmin",
-      "owner",
-      "root",
-    ].includes(role)
-  ) {
-    return ROLE_ADMIN;
-  }
-
-  if (
-    [
-      "user",
-      "usuario",
-      "client",
-      "cliente",
-    ].includes(role)
-  ) {
-    return ROLE_USER;
-  }
-
-  return "";
+  return role === ROLE_ADMIN
+    ? ROLE_ADMIN
+    : role === ROLE_USER
+      ? ROLE_USER
+      : "";
 }
 
 function normalizeRoleList(
@@ -2453,7 +2435,9 @@ function buildSearchIndex(
           route.public !==
             true &&
           route.hideShell !==
-            true
+            true &&
+          route.searchable !==
+            false
       )
       .map(
         routeSearchItem

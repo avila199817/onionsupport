@@ -24,7 +24,7 @@
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
-export const CONFIG_VERSION = "core.config.production.v4-same-origin-api";
+export const CONFIG_VERSION = "core.config.production.v5-route-contract";
 
 /* =========================================================
    CONSTANTES BASE
@@ -97,6 +97,7 @@ export const ROUTES = Object.freeze({
   facturas: "/facturas",
   clientes: "/clientes",
   usuarios: "/usuarios",
+  correo: "/correo",
   servidor: "/servidor",
   cuenta: "/cuenta",
   ajustes: "/ajustes",
@@ -114,6 +115,7 @@ export const TECHNICAL_PUBLIC_ROUTES = PUBLIC_ROUTES;
 export const ADMIN_ROUTES = Object.freeze([
   ROUTES.clientes,
   ROUTES.usuarios,
+  ROUTES.correo,
   ROUTES.servidor,
 ]);
 

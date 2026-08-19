@@ -1,0 +1,362 @@
+/* =========================================================
+   ONION SUPPORT — MOBILE SHELL
+   Archivo: /src/css/layout/mobile-shell.css
+
+   MOBILE SHELL V1 · 2026-08-19
+
+   Autoridad responsive del chrome privado <= 900px:
+   - elimina el rail lateral persistente en móvil;
+   - conserva un único trigger hamburguesa flotante;
+   - Sidebar abierto = drawer off-canvas superpuesto;
+   - Main/Topbar ocupan el 100% del viewport;
+   - reserva sólo el hueco táctil del trigger en Topbar;
+   - sin !important, sin colores de dominio, sin lógica de vistas.
+
+   Este archivo NO sustituye sidebar.css/topbar.css: coordina ambos
+   componentes cuando el shell entra en composición móvil.
+========================================================= */
+
+@layer layout {
+
+@media (max-width: 900px) {
+  :root {
+    --mobile-shell-trigger-size: 44px;
+    --mobile-shell-trigger-zone: 56px;
+    --mobile-shell-inline-gap: 8px;
+  }
+
+  body,
+  body:is(
+    .sidebar-open,
+    .sidebar-collapsed,
+    [data-sidebar-state="open"],
+    [data-sidebar-state="collapsed"],
+    [data-sidebar-open="true"],
+    [data-sidebar-open="false"]
+  ) {
+    --app-sidebar-current-width: 0px;
+    --layout-main-inset-left: 0px;
+    --topbar-effective-sidebar-offset: 0px;
+  }
+
+  :where(#topbar-mount, [data-topbar-mount]) {
+    inset-inline-start: 0;
+  }
+
+  .main-content {
+    inset-inline-start: 0;
+  }
+
+  /* El mount queda por encima del Topbar sólo para que el trigger sea táctil. */
+  :where(#sidebar-mount, [data-sidebar-mount]) {
+    z-index: var(--z-overlay, 60);
+  }
+
+  /* =======================================================
+     CLOSED · HAMBURGER ONLY
+  ======================================================= */
+
+  .sidebar:is(
+    .is-collapsed,
+    [data-open="false"],
+    [data-sidebar-state="collapsed"]
+  ) {
+    --sb-current-w: var(--mobile-shell-trigger-zone);
+    --sb-pad-x: 0px;
+
+    inline-size: var(--mobile-shell-trigger-zone);
+    min-inline-size: var(--mobile-shell-trigger-zone);
+    max-inline-size: var(--mobile-shell-trigger-zone);
+
+    padding:
+      max(7px, env(safe-area-inset-top, 0px))
+      6px
+      0;
+
+    border-inline-end: 0;
+    background: transparent;
+    box-shadow: none;
+    pointer-events: none;
+  }
+
+  .sidebar:is(
+    .is-collapsed,
+    [data-open="false"],
+    [data-sidebar-state="collapsed"]
+  ) .sidebar-inner {
+    align-items: flex-start;
+    pointer-events: none;
+  }
+
+  .sidebar:is(
+    .is-collapsed,
+    [data-open="false"],
+    [data-sidebar-state="collapsed"]
+  ) .sidebar-header {
+    inline-size: var(--mobile-shell-trigger-size);
+    min-block-size: var(--mobile-shell-trigger-size);
+    justify-content: flex-start;
+    padding: 0;
+    pointer-events: auto;
+  }
+
+  .sidebar:is(
+    .is-collapsed,
+    [data-open="false"],
+    [data-sidebar-state="collapsed"]
+  ) :where(
+    .sidebar-brand,
+    .sidebar-nav,
+    .sidebar-footer
+  ) {
+    display: none;
+  }
+
+  .sidebar:is(
+    .is-collapsed,
+    [data-open="false"],
+    [data-sidebar-state="collapsed"]
+  ) .sidebar-toggle {
+    inline-size: var(--mobile-shell-trigger-size);
+    min-inline-size: var(--mobile-shell-trigger-size);
+    max-inline-size: var(--mobile-shell-trigger-size);
+    block-size: var(--mobile-shell-trigger-size);
+    min-block-size: var(--mobile-shell-trigger-size);
+    margin: 0;
+    border: 1px solid var(--sb-border);
+    border-radius: var(--radius-sm, 12px);
+    background: color-mix(in srgb, var(--sb-bg) 92%, transparent);
+    box-shadow: var(--shadow-sm, 0 4px 14px rgba(0, 0, 0, .12));
+    backdrop-filter: blur(14px) saturate(1.08);
+    -webkit-backdrop-filter: blur(14px) saturate(1.08);
+    pointer-events: auto;
+  }
+
+  /* =======================================================
+     OPEN · DRAWER
+  ======================================================= */
+
+  .sidebar:is(
+    .is-open,
+    [data-open="true"],
+    [data-sidebar-state="open"]
+  ) {
+    --sb-current-w: var(--sb-mobile-open-w);
+    --sb-pad-x: var(--sidebar-inline-padding, 8px);
+
+    inline-size: var(--sb-mobile-open-w);
+    min-inline-size: var(--sb-mobile-open-w);
+    max-inline-size: var(--sb-mobile-open-w);
+
+    padding:
+      max(var(--sb-pad-y), env(safe-area-inset-top, 0px))
+      var(--sb-pad-x)
+      max(var(--sb-pad-y), env(safe-area-inset-bottom, 0px));
+
+    border-inline-end: 1px solid var(--sb-border);
+    background: var(--sb-bg);
+    box-shadow:
+      var(--sb-drawer-shadow),
+      0 0 0 100vmax
+      color-mix(in srgb, var(--body-bg) 58%, transparent);
+    pointer-events: auto;
+  }
+
+  .sidebar:is(
+    .is-open,
+    [data-open="true"],
+    [data-sidebar-state="open"]
+  ) .sidebar-inner {
+    align-items: stretch;
+    pointer-events: auto;
+  }
+
+  .sidebar:is(
+    .is-open,
+    [data-open="true"],
+    [data-sidebar-state="open"]
+  ) .sidebar-header {
+    inline-size: 100%;
+    justify-content: space-between;
+  }
+
+  .sidebar:is(
+    .is-open,
+    [data-open="true"],
+    [data-sidebar-state="open"]
+  ) :where(
+    .sidebar-brand,
+    .sidebar-nav,
+    .sidebar-footer
+  ) {
+    pointer-events: auto;
+  }
+
+  /* =======================================================
+     HAMBURGER / CLOSE ICON
+  ======================================================= */
+
+  .sidebar-toggle {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .sidebar-toggle .sidebar-toggle-svg {
+    opacity: 0;
+  }
+
+  .sidebar-toggle::before,
+  .sidebar-toggle::after {
+    content: "";
+    position: absolute;
+    inset-block-start: 50%;
+    inset-inline-start: 50%;
+    inline-size: 18px;
+    block-size: 2px;
+    margin-block-start: -1px;
+    margin-inline-start: -9px;
+    border-radius: var(--radius-pill, 999px);
+    background: currentColor;
+    transform-origin: center;
+    transition:
+      transform var(--sb-fast) var(--sb-ease-fast),
+      box-shadow var(--sb-fast) var(--sb-ease-fast),
+      opacity var(--sb-fast) var(--sb-ease-fast);
+  }
+
+  .sidebar:is(
+    .is-collapsed,
+    [data-open="false"],
+    [data-sidebar-state="collapsed"]
+  ) .sidebar-toggle::before {
+    box-shadow:
+      0 -6px 0 currentColor,
+      0 6px 0 currentColor;
+  }
+
+  .sidebar:is(
+    .is-collapsed,
+    [data-open="false"],
+    [data-sidebar-state="collapsed"]
+  ) .sidebar-toggle::after {
+    opacity: 0;
+  }
+
+  .sidebar:is(
+    .is-open,
+    [data-open="true"],
+    [data-sidebar-state="open"]
+  ) .sidebar-toggle::before {
+    box-shadow: none;
+    transform: rotate(45deg);
+  }
+
+  .sidebar:is(
+    .is-open,
+    [data-open="true"],
+    [data-sidebar-state="open"]
+  ) .sidebar-toggle::after {
+    opacity: 1;
+    transform: rotate(-45deg);
+  }
+
+  /* =======================================================
+     TOPBAR · FULL WIDTH + TRIGGER RESERVATION
+  ======================================================= */
+
+  :where(
+    .topbar,
+    .app-topbar,
+    [data-topbar-root="true"]
+  ) {
+    padding-inline-start:
+      calc(
+        var(--mobile-shell-trigger-zone) +
+        var(--mobile-shell-inline-gap) +
+        var(--topbar-safe-left-local, env(safe-area-inset-left, 0px))
+      );
+  }
+
+  :where(
+    .topbar-search-results,
+    [data-topbar-search-results="true"]
+  ) {
+    inset-inline-start:
+      calc(
+        var(--mobile-shell-trigger-zone) +
+        var(--mobile-shell-inline-gap)
+      );
+  }
+
+  body:is(
+    .sidebar-open,
+    [data-sidebar-state="open"],
+    [data-sidebar-open="true"]
+  ) .main-content {
+    overscroll-behavior: none;
+  }
+}
+
+@media (max-width: 640px) {
+  :root {
+    --mobile-shell-trigger-zone: 54px;
+    --mobile-shell-inline-gap: 6px;
+  }
+
+  :where(
+    .topbar,
+    .app-topbar,
+    [data-topbar-root="true"]
+  ) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :where(
+    .topbar-right,
+    [data-topbar-right="true"],
+    [data-topbar-search-shell]
+  ) {
+    min-inline-size: 0;
+  }
+}
+
+@media (max-width: 420px) {
+  :root {
+    --mobile-shell-trigger-size: 42px;
+    --mobile-shell-trigger-zone: 50px;
+    --mobile-shell-inline-gap: 5px;
+  }
+
+  .sidebar:is(
+    .is-collapsed,
+    [data-open="false"],
+    [data-sidebar-state="collapsed"]
+  ) {
+    padding-inline-start:
+      max(4px, env(safe-area-inset-left, 0px));
+    padding-inline-end: 4px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) and (max-width: 900px) {
+  .sidebar-toggle::before,
+  .sidebar-toggle::after {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) and (max-width: 900px) {
+  .sidebar:is(
+    .is-collapsed,
+    [data-open="false"],
+    [data-sidebar-state="collapsed"]
+  ) .sidebar-toggle {
+    border-color: ButtonText;
+    background: ButtonFace;
+    color: ButtonText;
+    box-shadow: none;
+    forced-color-adjust: auto;
+  }
+}
+
+} /* @layer layout */

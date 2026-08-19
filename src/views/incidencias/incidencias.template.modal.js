@@ -38,12 +38,11 @@ import {
 } from "./incidencias.options.js";
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.extreme.v30.admin-ticket-editor";
+  "incidencias.template.modal.extreme.v31.single-submit";
 
 export const DETAIL_ACTIONS = Object.freeze({
   CLOSE: "detail-close",
   COPY_ID: "detail-copy-id",
-  ADMIN_SAVE: "detail-admin-save",
 
   COMMENT_SUBMIT: "detail-submit-update",
   COMMENT_CHANGE: "detail-comment-change",
@@ -2372,6 +2371,55 @@ function buildVm(input = {}) {
       data.pendingFiles
     );
 
+  const adminDraft =
+    safeObject(
+      data.adminDraft,
+      {}
+    );
+
+  const currentPriority =
+    normalizeIncidenciaPriority(
+      getPriority(detail),
+      "medium"
+    );
+
+  const currentCategory =
+    normalizeIncidenciaCategory(
+      getCategory(detail),
+      "general"
+    );
+
+  const desiredStatus =
+    normalizeIncidenciaStatus(
+      adminDraft.status || status,
+      status || "open"
+    );
+
+  const desiredPriority =
+    normalizeIncidenciaPriority(
+      adminDraft.priority || currentPriority,
+      currentPriority
+    );
+
+  const desiredCategory =
+    normalizeIncidenciaCategory(
+      adminDraft.category || currentCategory,
+      currentCategory
+    );
+
+  const hasAdminChanges =
+    data.admin === true &&
+    Boolean(
+      adminDraft.status ||
+      adminDraft.priority ||
+      adminDraft.category
+    ) &&
+    (
+      desiredStatus !== status ||
+      desiredPriority !== currentPriority ||
+      desiredCategory !== currentCategory
+    );
+
   const previewSource =
     safeObject(
       data.previewFile,
@@ -2406,11 +2454,20 @@ function buildVm(input = {}) {
 
     commentDraft,
     pendingFiles,
+    adminDraft,
+    hasAdminChanges,
+
+    hasContentDraft:
+      Boolean(
+        commentDraft ||
+        pendingFiles.length
+      ),
 
     hasDraft:
       Boolean(
         commentDraft ||
-        pendingFiles.length
+        pendingFiles.length ||
+        hasAdminChanges
       ),
 
     requiresReopen:
@@ -3016,7 +3073,7 @@ function renderCloseConfirmation(vm = {}) {
 
           ${
             vm.hasDraft
-              ? `<div class="incidencias-modal-confirm-warning" role="note">Tienes una actualización sin enviar. Si confirmas el cierre, ese borrador se descartará cuando se cierre esta ventana.</div>`
+              ? `<div class="incidencias-modal-confirm-warning" role="note">Tienes cambios sin guardar. Si confirmas el cierre, se descartarán cuando se cierre esta ventana.</div>`
               : ""
           }
         </div>
@@ -3146,7 +3203,19 @@ function submitButtonLabel(
   vm = {}
 ) {
   if (vm.submitting) {
-    return "Actualizando...";
+    return vm.operation === "admin-update"
+      ? "Aplicando cambios..."
+      : "Actualizando...";
+  }
+
+  if (vm.hasAdminChanges && vm.hasContentDraft) {
+    return vm.requiresReopen
+      ? "Aplicar cambios, enviar y reabrir"
+      : "Aplicar cambios y enviar";
+  }
+
+  if (vm.hasAdminChanges) {
+    return "Aplicar cambios";
   }
 
   return vm.requiresReopen
@@ -3175,7 +3244,7 @@ function renderSubmitButton(
       ${
         vm.submitting
           ? renderInlineSpinner(
-              "Actualizando..."
+              label
             )
           : escapeHtml(label)
       }
@@ -3193,9 +3262,11 @@ function renderComposer(
     );
 
   const reopenCopy =
-    vm.requiresReopen
-      ? "Esta incidencia está cerrada o resuelta. Al enviar, volverá a estado abierta."
-      : "La actualización se añadirá al historial de la incidencia.";
+    vm.hasAdminChanges && !vm.hasContentDraft
+      ? "Los cambios de gestión se aplicarán al guardar desde esta misma acción."
+      : vm.requiresReopen
+        ? "Esta incidencia está cerrada o resuelta. Al enviar, volverá a estado abierta."
+        : "La actualización se añadirá al historial de la incidencia.";
 
   return `
     <section
@@ -3887,35 +3958,48 @@ function renderAdminTicketEditor(vm = {}) {
   return `
     <section
       class="incidencias-modal-admin-editor"
-      data-admin-ticket-editor-section="true"
+      data-modal-admin-editor="true"
+      data-admin-ticket-dirty="${vm.hasAdminChanges ? "true" : "false"}"
       aria-labelledby="incidencias-modal-admin-editor-title"
     >
       <div class="incidencias-modal-section-head incidencias-modal-admin-head">
         <div>
-<h3 id="incidencias-modal-admin-editor-title">Gestión del ticket</h3>
-<span>Estado, prioridad y tipo de incidencia</span>
+          <h3 id="incidencias-modal-admin-editor-title">Gestión del ticket</h3>
+          <span>Estado, prioridad y tipo de incidencia · Los cambios se aplican con la acción del final del modal.</span>
         </div>
         <span class="incidencias-modal-admin-badge">Administrador</span>
       </div>
 
-      <form class="incidencias-modal-admin-form" data-admin-ticket-editor="true" autocomplete="off">
+      <div
+        class="incidencias-modal-admin-form"
+        data-admin-ticket-editor="true"
+        role="group"
+        aria-label="Gestión administrativa del ticket"
+      >
         <div class="incidencias-modal-admin-grid">
-${renderAdminSelect({ label: "Estado", name: "status", value: status, options: INCIDENCIA_STATUS_OPTIONS, disabled: vm.submitting })}
-${renderAdminSelect({ label: "Prioridad", name: "priority", value: priority, options: INCIDENCIA_PRIORITY_OPTIONS, disabled: vm.submitting })}
-${renderAdminSelect({ label: "Tipo de incidencia", name: "category", value: category, options: INCIDENCIA_CATEGORY_OPTIONS, disabled: vm.submitting })}
+          ${renderAdminSelect({
+            label: "Estado",
+            name: "status",
+            value: status,
+            options: INCIDENCIA_STATUS_OPTIONS,
+            disabled: vm.submitting,
+          })}
+          ${renderAdminSelect({
+            label: "Prioridad",
+            name: "priority",
+            value: priority,
+            options: INCIDENCIA_PRIORITY_OPTIONS,
+            disabled: vm.submitting,
+          })}
+          ${renderAdminSelect({
+            label: "Tipo de incidencia",
+            name: "category",
+            value: category,
+            options: INCIDENCIA_CATEGORY_OPTIONS,
+            disabled: vm.submitting,
+          })}
         </div>
-
-        <button
-type="button"
-class="incidencias-modal-admin-save-btn"
-data-detail-action="${DETAIL_ACTIONS.ADMIN_SAVE}"
-${disabledAttrs(vm.submitting, vm.submitting)}
-        >
-${vm.submitting && vm.operation === "admin-update"
-  ? renderInlineSpinner("Guardando...")
-  : "Guardar cambios"}
-        </button>
-      </form>
+      </div>
     </section>
   `;
 }

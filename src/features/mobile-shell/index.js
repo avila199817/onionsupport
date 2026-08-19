@@ -7,6 +7,7 @@
    - Mantener el único trigger móvil dentro del Topbar.
    - Abrir Sidebar como drawer off-canvas sin desplazar la vista.
    - Cerrar por backdrop, navegación, Escape o historial.
+   - Contener foco/interacción mientras el drawer está abierto.
    - Restaurar el estado desktop al abandonar el breakpoint móvil.
    - Sin HTTP, Auth, Router, Store ni lógica de dominio.
 ========================================================= */
@@ -25,9 +26,15 @@ const MOBILE_QUERY = "(max-width: 900px)";
 const SIDEBAR_ROOT_SELECTOR = "[data-sidebar-root='true'], #app-sidebar";
 const SIDEBAR_NAV_LINK_SELECTOR =
   "[data-sidebar-nav-link='true'], [data-sidebar-brand='true']";
+const SIDEBAR_FOCUSABLE_SELECTOR = [
+  "a[href]:not([aria-disabled='true'])",
+  "button:not([disabled]):not([aria-disabled='true'])",
+  "[tabindex]:not([tabindex='-1']):not([aria-disabled='true'])",
+].join(",");
 const MENU_TOGGLE_SELECTOR = "[data-topbar-menu-toggle='true']";
 const BACKDROP_SELECTOR = "[data-app-chrome-backdrop='true']";
 const CHROME_ROOT_SELECTOR = "#app-chrome, [data-app-chrome='true']";
+const MAIN_CONTENT_SELECTOR = "#main-content, [data-main-content='true']";
 
 let initialized = false;
 let mediaQuery = null;
@@ -102,6 +109,46 @@ function shellIsVisible() {
   );
 }
 
+function setNodeInert(node = null, inert = false) {
+  if (!node) return false;
+
+  const next = inert === true;
+  let changed = false;
+
+  try {
+    if ("inert" in node && node.inert !== next) {
+      node.inert = next;
+      changed = true;
+    }
+  } catch {
+    // Fallback: el focus trap sigue evitando salida por teclado.
+  }
+
+  if (node.dataset) {
+    const value = next ? "true" : "false";
+    if (node.dataset.mobileDrawerInert !== value) {
+      node.dataset.mobileDrawerInert = value;
+      changed = true;
+    }
+  }
+
+  return changed;
+}
+
+function syncBackgroundInteractivity(open = false) {
+  if (!isBrowser()) return false;
+
+  const refs = getAppChromeTemplateRefs();
+  const main = document.querySelector(MAIN_CONTENT_SELECTOR);
+  const value = open === true;
+
+  let changed = false;
+  changed = setNodeInert(main, value) || changed;
+  changed = setNodeInert(refs.topbar, value) || changed;
+
+  return changed;
+}
+
 function syncMobileShellState() {
   if (!isBrowser()) return false;
 
@@ -127,23 +174,78 @@ function syncMobileShellState() {
     open,
   });
 
+  syncBackgroundInteractivity(open);
   return true;
 }
 
-function focusToggle() {
-  const toggle = getAppChromeTemplateRefs().menuToggle;
-  if (!toggle || typeof toggle.focus !== "function") return false;
+function isActuallyFocusable(node = null) {
+  if (!node || typeof node.focus !== "function") return false;
+
+  if (
+    node.hidden === true ||
+    node.disabled === true ||
+    node.getAttribute?.("aria-hidden") === "true" ||
+    node.getAttribute?.("aria-disabled") === "true"
+  ) {
+    return false;
+  }
 
   try {
-    toggle.focus({ preventScroll: true });
+    return node.getClientRects().length > 0;
   } catch {
-    toggle.focus();
+    return true;
+  }
+}
+
+function getSidebarFocusableItems() {
+  const sidebar = getSidebarRoot();
+  if (!sidebar) return [];
+
+  try {
+    return Array.from(
+      sidebar.querySelectorAll(SIDEBAR_FOCUSABLE_SELECTOR)
+    ).filter(isActuallyFocusable);
+  } catch {
+    return [];
+  }
+}
+
+function focusNode(node = null) {
+  if (!isActuallyFocusable(node)) return false;
+
+  try {
+    node.focus({ preventScroll: true });
+  } catch {
+    try {
+      node.focus();
+    } catch {
+      return false;
+    }
   }
 
   return true;
 }
 
-function openMobileSidebar() {
+function focusToggle() {
+  return focusNode(getAppChromeTemplateRefs().menuToggle);
+}
+
+function focusSidebarEntry() {
+  const sidebar = getSidebarRoot();
+  if (!sidebar) return false;
+
+  const preferred =
+    sidebar.querySelector?.(
+      "[data-sidebar-nav-link='true'][aria-current='page']"
+    ) ||
+    sidebar.querySelector?.("[data-sidebar-brand='true']") ||
+    getSidebarFocusableItems()[0] ||
+    null;
+
+  return focusNode(preferred);
+}
+
+function openMobileSidebar({ focus = true } = {}) {
   if (!isMobile() || !shellIsVisible()) return false;
 
   try {
@@ -153,6 +255,13 @@ function openMobileSidebar() {
   }
 
   syncMobileShellState();
+
+  if (focus) {
+    window.requestAnimationFrame(() => {
+      focusSidebarEntry();
+    });
+  }
+
   return true;
 }
 
@@ -180,10 +289,10 @@ function toggleMobileSidebar() {
   if (!isMobile() || !shellIsVisible()) return false;
 
   if (sidebarIsOpen()) {
-    return closeMobileSidebar();
+    return closeMobileSidebar({ focus: true });
   }
 
-  return openMobileSidebar();
+  return openMobileSidebar({ focus: true });
 }
 
 function enterMobileMode() {
@@ -203,6 +312,7 @@ function enterMobileMode() {
 function leaveMobileMode() {
   if (!isBrowser()) return false;
 
+  syncBackgroundInteractivity(false);
   syncMobileShellState();
 
   if (
@@ -242,7 +352,7 @@ function onDocumentPointerDown(event) {
   */
   event.preventDefault();
   event.stopPropagation();
-  closeMobileSidebar();
+  closeMobileSidebar({ focus: true });
 }
 
 function onDocumentClick(event) {
@@ -266,26 +376,59 @@ function onDocumentClick(event) {
   if (!link || !sidebar?.contains?.(link)) return;
 
   window.queueMicrotask(() => {
-    closeMobileSidebar();
+    closeMobileSidebar({ focus: false });
   });
 }
 
+function trapSidebarTab(event) {
+  if (event.key !== "Tab" || !sidebarIsOpen()) return false;
+
+  const items = getSidebarFocusableItems();
+  if (!items.length) {
+    event.preventDefault();
+    return true;
+  }
+
+  const sidebar = getSidebarRoot();
+  const active = document.activeElement;
+  const first = items[0];
+  const last = items.at(-1);
+  const inside = sidebar?.contains?.(active) === true;
+
+  if (event.shiftKey) {
+    if (!inside || active === first) {
+      event.preventDefault();
+      focusNode(last);
+      return true;
+    }
+
+    return false;
+  }
+
+  if (!inside || active === last) {
+    event.preventDefault();
+    focusNode(first);
+    return true;
+  }
+
+  return false;
+}
+
 function onDocumentKeyDown(event) {
-  if (
-    event.key !== "Escape" ||
-    !isMobile() ||
-    !sidebarIsOpen()
-  ) {
+  if (!isMobile() || !sidebarIsOpen()) return;
+
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeMobileSidebar({ focus: true });
     return;
   }
 
-  event.preventDefault();
-  closeMobileSidebar({ focus: true });
+  trapSidebarTab(event);
 }
 
 function onHistoryNavigation() {
   if (!isMobile() || !sidebarIsOpen()) return;
-  closeMobileSidebar();
+  closeMobileSidebar({ focus: false });
 }
 
 function mutationNeedsChromeSync(mutation) {
@@ -433,6 +576,8 @@ export function destroyMobileShell() {
   mediaQuery = null;
   initialized = false;
 
+  syncBackgroundInteractivity(false);
+
   for (const node of [document.documentElement, document.body].filter(Boolean)) {
     delete node.dataset.mobileShell;
     delete node.dataset.mobileNavigation;
@@ -459,6 +604,11 @@ export function getMobileShellSnapshot() {
     chromeMounted: Boolean(refs.chrome),
     menuToggleMounted: Boolean(refs.menuToggle),
     backdropMounted: Boolean(refs.backdrop),
+    mainInert:
+      Boolean(
+        document.querySelector(MAIN_CONTENT_SELECTOR)?.inert
+      ),
+    topbarInert: Boolean(refs.topbar?.inert),
     desktopOpenBeforeMobile,
   });
 }

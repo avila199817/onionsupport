@@ -2,43 +2,24 @@
    Onion Support - Servidor Template
    Archivo: /src/views/server/server.template.js
 
-   PRODUCTIVO · CANONICAL HEALTH MODEL · PURE TEMPLATE · V2
+   PRODUCTIVO · OBSERVABILITY GOD MODE · PURE TEMPLATE · V3
 
    Modelo esperado:
    server.api.backend-contract.v2.health-internal
 
-   Servicios reales del dashboard:
-   - Backend API
-   - Cosmos DB
-   - CPU
-   - RAM
-   - Disco
-   - Event loop
-
-   Contrato visual:
-   - No interpreta payload backend crudo.
-   - No descubre endpoints.
-   - No presenta Blob/Azure como health comprobado.
-   - Azure solo puede mostrarse como metadata de entorno.
-   - /health/ready y /health/live se presentan como probes
-     disponibles bajo demanda, no como checks ejecutados.
-   - Sin imports, HTTP, DOM, Store, Router ni CSS inline.
-========================================================= */
-
-/* =========================================================
-   META / CONSTANTS
+   Principios:
+   - Misma gramática visual que el resto de vistas privadas.
+   - Sin HTTP, DOM, Store, Router ni CSS inline.
+   - Sin inventar health de Azure/Blob.
+   - Resumen operativo derivado sólo del snapshot canónico.
 ========================================================= */
 
 export const SERVER_TEMPLATE_VERSION =
-  "server.template.backend-contract.v2.health-internal";
+  "server.template.observability.v3-god-mode";
 
 export const SERVIDOR_TEMPLATE_VERSION =
   SERVER_TEMPLATE_VERSION;
 
-/*
-  Compat histórica. La vista no pagina, pero se conserva
-  el export para consumidores antiguos.
-*/
 export const DEFAULT_PAGE_SIZE = 6;
 
 export const SERVER_ACTIONS = Object.freeze({
@@ -143,6 +124,26 @@ function safeNumber(
     : fallback;
 }
 
+function clamp(
+  value = 0,
+  min = 0,
+  max = 100
+) {
+  const numeric =
+    safeNumber(
+      value,
+      min
+    );
+
+  return Math.min(
+    Math.max(
+      numeric,
+      min
+    ),
+    max
+  );
+}
+
 function escapeHtml(value = "") {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -154,12 +155,18 @@ function escapeHtml(value = "") {
 
 function attr(value = "") {
   return escapeHtml(
-    safeText(value, "")
+    safeText(
+      value,
+      ""
+    )
   );
 }
 
 function normalizeKey(value = "") {
-  return safeText(value, "")
+  return safeText(
+    value,
+    ""
+  )
     .toLowerCase()
     .normalize("NFD")
     .replace(
@@ -214,7 +221,10 @@ function toTimestamp(
   }
 
   const raw =
-    safeText(value, "");
+    safeText(
+      value,
+      ""
+    );
 
   if (!raw) {
     return 0;
@@ -306,6 +316,7 @@ export function normalizeStatus(
       "online",
       "ready",
       "live",
+      "alive",
       "running",
       "connected",
       "available",
@@ -359,21 +370,15 @@ export function getStatusLabel(
       status
     );
 
-  if (
-    value === "healthy"
-  ) {
+  if (value === "healthy") {
     return "Operativo";
   }
 
-  if (
-    value === "warning"
-  ) {
+  if (value === "warning") {
     return "Degradado";
   }
 
-  if (
-    value === "critical"
-  ) {
+  if (value === "critical") {
     return "Crítico";
   }
 
@@ -409,27 +414,22 @@ function createEmptyServices() {
       id: "backend",
       label: "Backend API",
     }),
-
     createEmptyService({
       id: "database",
-      label: "Base de datos",
+      label: "Cosmos DB",
     }),
-
     createEmptyService({
       id: "cpu",
       label: "CPU",
     }),
-
     createEmptyService({
       id: "memory",
       label: "RAM",
     }),
-
     createEmptyService({
       id: "disk",
       label: "Disco",
     }),
-
     createEmptyService({
       id: "event_loop",
       label: "Event loop",
@@ -558,11 +558,6 @@ function canonicalSnapshot(
   const capabilities =
     safeObject(
       source.capabilities
-    );
-
-  const endpoints =
-    safeObject(
-      source.endpoints
     );
 
   return {
@@ -798,7 +793,10 @@ function canonicalSnapshot(
         true,
     },
 
-    endpoints,
+    endpoints:
+      safeObject(
+        source.endpoints
+      ),
 
     azure:
       safeObject(
@@ -857,6 +855,54 @@ function getViewModel(
   };
 }
 
+function serviceSummary(
+  snapshot = {}
+) {
+  const services =
+    safeArray(
+      snapshot.services
+    );
+
+  const countByStatus =
+    services.reduce(
+      (acc, service) => {
+        const status =
+          normalizeStatus(
+            service.status
+          );
+
+        acc[status] =
+          (acc[status] || 0) +
+          1;
+
+        return acc;
+      },
+      {
+        healthy: 0,
+        warning: 0,
+        critical: 0,
+        unknown: 0,
+      }
+    );
+
+  return {
+    total:
+      services.length,
+
+    healthy:
+      countByStatus.healthy,
+
+    warning:
+      countByStatus.warning,
+
+    critical:
+      countByStatus.critical,
+
+    unknown:
+      countByStatus.unknown,
+  };
+}
+
 /* =========================================================
    ICONS
 ========================================================= */
@@ -883,7 +929,7 @@ function icon(name = "") {
       `<svg ${common}><path d="M21 12a9 9 0 0 1-15.5 6.3"/><path d="M3 12a9 9 0 0 1 15.5-6.3"/><path d="M21 4v6h-6"/><path d="M3 20v-6h6"/></svg>`,
 
     live:
-      `<svg ${common}><path d="M4 12a8 8 0 0 1 8-8"/><path d="M4 12a8 8 0 0 0 8 8"/><path d="M20 12a8 8 0 0 0-8-8"/><path d="M20 12a8 8 0 0 1-8 8"/><circle cx="12" cy="12" r="2"/></svg>`,
+      `<svg ${common}><circle cx="12" cy="12" r="3"/><path d="M16.2 7.8a6 6 0 0 1 0 8.4"/><path d="M7.8 16.2a6 6 0 0 1 0-8.4"/><path d="M19.1 4.9a10 10 0 0 1 0 14.2"/><path d="M4.9 19.1a10 10 0 0 1 0-14.2"/></svg>`,
 
     copy:
       `<svg ${common}><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`,
@@ -906,14 +952,23 @@ function icon(name = "") {
     clock:
       `<svg ${common}><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>`,
 
+    gauge:
+      `<svg ${common}><path d="M4 14a8 8 0 1 1 16 0"/><path d="m12 14 4-4"/><path d="M6.3 17h11.4"/></svg>`,
+
     shield:
-      `<svg ${common}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
+      `<svg ${common}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>`,
 
     alert:
       `<svg ${common}><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
 
     cloud:
       `<svg ${common}><path d="M17.5 19H8a6 6 0 1 1 5.6-8.1A4.5 4.5 0 1 1 17.5 19z"/></svg>`,
+
+    activity:
+      `<svg ${common}><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>`,
+
+    terminal:
+      `<svg ${common}><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></svg>`,
   };
 
   return (
@@ -930,33 +985,23 @@ function serviceIcon(
       service.id
     );
 
-  if (
-    id === "database"
-  ) {
+  if (id === "database") {
     return icon("db");
   }
 
-  if (
-    id === "cpu"
-  ) {
+  if (id === "cpu") {
     return icon("cpu");
   }
 
-  if (
-    id === "memory"
-  ) {
+  if (id === "memory") {
     return icon("memory");
   }
 
-  if (
-    id === "disk"
-  ) {
+  if (id === "disk") {
     return icon("disk");
   }
 
-  if (
-    id === "event_loop"
-  ) {
+  if (id === "event_loop") {
     return icon("loop");
   }
 
@@ -964,7 +1009,7 @@ function serviceIcon(
 }
 
 /* =========================================================
-   SERVICE CARDS
+   SMALL UI
 ========================================================= */
 
 function renderStatusChip(
@@ -976,22 +1021,397 @@ function renderStatusChip(
     );
 
   return `
-    <span class="server-status-chip server-status-chip--${attr(normalized)}">
+    <span
+      class="server-status-chip server-status-chip--${attr(normalized)}"
+      data-server-status="${attr(normalized)}"
+    >
       <span
         class="server-status-dot"
         aria-hidden="true"
       ></span>
-      ${escapeHtml(
-        getStatusLabel(
-          normalized
-        )
-      )}
+
+      <span>
+        ${escapeHtml(
+          getStatusLabel(
+            normalized
+          )
+        )}
+      </span>
     </span>
   `;
 }
 
+function renderMetricMeter(
+  value = null,
+  label = ""
+) {
+  const numeric =
+    safeNumber(
+      value,
+      null
+    );
+
+  if (numeric === null) {
+    return "";
+  }
+
+  const meterValue =
+    clamp(
+      numeric,
+      0,
+      100
+    );
+
+  return `
+    <meter
+      class="server-meter"
+      min="0"
+      max="100"
+      low="70"
+      high="90"
+      optimum="45"
+      value="${attr(meterValue)}"
+      aria-label="${attr(label)}"
+    >
+      ${escapeHtml(
+        `${Math.round(meterValue)}%`
+      )}
+    </meter>
+  `;
+}
+
+/* =========================================================
+   HEADER / SUMMARY
+========================================================= */
+
+function renderSummaryCard({
+  id = "",
+  label = "",
+  value = "—",
+  detail = "",
+  status = "unknown",
+  iconName = "activity",
+} = {}) {
+  return `
+    <article
+      class="server-summary-card server-summary-card--${attr(id)}"
+      data-summary-card="${attr(id)}"
+      data-status="${attr(
+        normalizeStatus(status)
+      )}"
+    >
+      <div class="server-summary-icon">
+        ${icon(iconName)}
+      </div>
+
+      <div class="server-summary-copy">
+        <span class="server-summary-label">
+          ${escapeHtml(label)}
+        </span>
+
+        <strong class="server-summary-value">
+          ${escapeHtml(
+            safeText(
+              value,
+              "—"
+            )
+          )}
+        </strong>
+
+        <span class="server-summary-detail">
+          ${escapeHtml(
+            safeText(
+              detail,
+              "Sin datos"
+            )
+          )}
+        </span>
+      </div>
+    </article>
+  `;
+}
+
+export function renderHeader(
+  input = {}
+) {
+  const vm =
+    getViewModel(
+      input
+    );
+
+  const snapshot =
+    vm.snapshot;
+
+  const status =
+    normalizeStatus(
+      snapshot.status
+    );
+
+  const summary =
+    serviceSummary(
+      snapshot
+    );
+
+  return `
+    <section class="server-hero servidor-hero">
+      <div class="server-hero-top">
+        <div class="server-hero-copy">
+          <p class="server-kicker">
+            Observabilidad
+          </p>
+
+          <h1 class="server-title">
+            Estado del servidor
+          </h1>
+
+          <p class="server-subtitle">
+            Estado operativo del backend, Cosmos DB y runtime Node.
+            Latencias, recursos y señales críticas en una sola vista.
+          </p>
+        </div>
+
+        <div class="server-hero-actions">
+          <button
+            type="button"
+            class="server-btn server-btn--primary"
+            data-server-action="${SERVER_ACTIONS.REFRESH}"
+            data-action="${SERVER_ACTIONS.REFRESH_SERVER}"
+            ${
+              vm.refreshing ||
+              vm.loading
+                ? 'disabled aria-disabled="true" aria-busy="true"'
+                : ""
+            }
+          >
+            ${icon("refresh")}
+
+            <span>
+              ${
+                vm.refreshing ||
+                vm.loading
+                  ? "Consultando"
+                  : "Actualizar"
+              }
+            </span>
+          </button>
+
+          <button
+            type="button"
+            class="server-btn server-btn--live${vm.live ? " is-active" : ""}"
+            data-server-action="${SERVER_ACTIONS.TOGGLE_LIVE}"
+            data-action="${SERVER_ACTIONS.TOGGLE_LIVE}"
+            aria-pressed="${vm.live ? "true" : "false"}"
+          >
+            ${icon("live")}
+
+            <span>
+              ${
+                vm.live
+                  ? "Live · 30 s"
+                  : "Activar live"
+              }
+            </span>
+          </button>
+
+          <button
+            type="button"
+            class="server-btn"
+            data-server-action="${SERVER_ACTIONS.COPY_JSON}"
+            data-action="${SERVER_ACTIONS.COPY_JSON}"
+            ${
+              !snapshot.checkedAt
+                ? 'disabled aria-disabled="true"'
+                : ""
+            }
+          >
+            ${icon("copy")}
+
+            <span>
+              Copiar JSON
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <div class="server-hero-meta">
+        <span class="server-meta-pill server-meta-pill--${attr(status)}">
+          ${icon("shield")}
+
+          <span>
+            ${escapeHtml(
+              snapshot.statusLabel
+            )}
+          </span>
+        </span>
+
+        <span class="server-meta-pill">
+          ${icon("clock")}
+
+          <span>
+            ${
+              snapshot.checkedAt
+                ? escapeHtml(
+                    `Actualizado · ${formatDateTime(snapshot.checkedAt)}`
+                  )
+                : "Pendiente de consulta"
+            }
+          </span>
+        </span>
+
+        <span class="server-meta-pill">
+          ${icon("server")}
+
+          <span>
+            ${escapeHtml(
+              snapshot.backendVersion ||
+              snapshot.service
+            )}
+          </span>
+        </span>
+
+        <span class="server-meta-pill${vm.live ? " is-live" : ""}">
+          ${icon("live")}
+
+          <span>
+            ${
+              vm.live
+                ? "Monitorización en tiempo real"
+                : "Monitorización manual"
+            }
+          </span>
+        </span>
+      </div>
+
+      <div class="server-summary-grid">
+        ${renderSummaryCard({
+          id: "status",
+          label: "Estado global",
+          value:
+            snapshot.statusLabel,
+          detail:
+            `${summary.healthy}/${summary.total || 6} componentes operativos`,
+          status,
+          iconName: "shield",
+        })}
+
+        ${renderSummaryCard({
+          id: "api",
+          label: "Latencia API",
+          value:
+            snapshot.latencyLabel,
+          detail:
+            "/health/internal",
+          status:
+            status,
+          iconName: "gauge",
+        })}
+
+        ${renderSummaryCard({
+          id: "database",
+          label: "Cosmos DB",
+          value:
+            snapshot.dbLatencyLabel,
+          detail:
+            snapshot.dbStatusLabel,
+          status:
+            snapshot.dbStatus,
+          iconName: "db",
+        })}
+
+        ${renderSummaryCard({
+          id: "uptime",
+          label: "Uptime",
+          value:
+            snapshot.uptimeLabel,
+          detail:
+            snapshot.service,
+          status:
+            snapshot.checkedAt
+              ? "healthy"
+              : "unknown",
+          iconName: "clock",
+        })}
+      </div>
+    </section>
+  `;
+}
+
+/* =========================================================
+   SERVICE CARDS
+========================================================= */
+
+function metricForService(
+  service = {},
+  snapshot = {}
+) {
+  const id =
+    normalizeKey(
+      service.id
+    );
+
+  if (id === "cpu") {
+    return {
+      value:
+        snapshot.cpuUsage,
+      label:
+        snapshot.cpuUsageLabel,
+      meter:
+        snapshot.cpuUsage,
+      meterLabel:
+        "Uso de CPU",
+    };
+  }
+
+  if (id === "memory") {
+    return {
+      value:
+        snapshot.memoryUsage,
+      label:
+        snapshot.memoryUsageLabel,
+      meter:
+        snapshot.memoryUsage,
+      meterLabel:
+        "Uso de RAM",
+    };
+  }
+
+  if (id === "disk") {
+    return {
+      value:
+        snapshot.diskUsage,
+      label:
+        snapshot.diskUsageLabel,
+      meter:
+        snapshot.diskUsage,
+      meterLabel:
+        "Uso de disco",
+    };
+  }
+
+  if (id === "event_loop") {
+    return {
+      value:
+        snapshot.eventLoopLagMs,
+      label:
+        snapshot.eventLoopLagLabel,
+      meter: null,
+      meterLabel: "",
+    };
+  }
+
+  return {
+    value: null,
+    label:
+      service.value ||
+      service.statusLabel,
+    meter: null,
+    meterLabel: "",
+  };
+}
+
 export function renderServiceCard(
-  service = {}
+  service = {},
+  snapshot = {}
 ) {
   const item =
     canonicalService(
@@ -1003,16 +1423,25 @@ export function renderServiceCard(
       item.status
     );
 
+  const metric =
+    metricForService(
+      item,
+      snapshot
+    );
+
   const displayValue =
-    item.value ||
-    item.statusLabel ||
-    getStatusLabel(status);
+    safeText(
+      metric.label,
+      item.value ||
+      item.statusLabel ||
+      getStatusLabel(status)
+    );
 
   const detail =
     item.error ||
     item.detail ||
     item.endpoint ||
-    "Sin detalle";
+    "Sin detalle disponible.";
 
   return `
     <article
@@ -1020,280 +1449,60 @@ export function renderServiceCard(
       data-server-service="${attr(item.id)}"
       data-status="${attr(status)}"
     >
-      <div class="server-service-icon">
-        ${serviceIcon(item)}
-      </div>
-
-      <div class="server-service-copy">
-        <span class="server-service-label">
-          ${escapeHtml(item.label)}
-        </span>
-
-        <strong class="server-service-value">
-          ${escapeHtml(displayValue)}
-        </strong>
-
-        <span class="server-service-detail">
-          ${escapeHtml(detail)}
-        </span>
-      </div>
-
-      ${renderStatusChip(status)}
-
-      ${
-        item.latencyMs !== null
-          ? `
-            <span class="server-service-latency">
-              ${escapeHtml(
-                formatMs(
-                  item.latencyMs
-                )
-              )}
-            </span>
-          `
-          : ""
-      }
-    </article>
-  `;
-}
-
-/* =========================================================
-   HEALTH CONTRACT TABLE
-========================================================= */
-
-function healthLabel(
-  key = ""
-) {
-  return {
-    internal:
-      "Health interno",
-
-    ready:
-      "Readiness",
-
-    live:
-      "Liveness",
-
-    blobs:
-      "Blob health",
-
-    azure:
-      "Azure health",
-  }[key] || key;
-}
-
-function healthMode(
-  key = "",
-  endpoint = {}
-) {
-  const supported =
-    endpoint.supported ===
-    true;
-
-  if (
-    key === "internal" &&
-    endpoint.ok === true
-  ) {
-    return {
-      status: "healthy",
-      result: "Consultado",
-      detail:
-        "Fuente del dashboard actual.",
-    };
-  }
-
-  if (
-    (
-      key === "ready" ||
-      key === "live"
-    ) &&
-    supported
-  ) {
-    return {
-      status: "unknown",
-      result:
-        "Bajo demanda",
-      detail:
-        "La ruta existe, pero esta vista no la ejecuta en cada carga.",
-    };
-  }
-
-  if (!supported) {
-    return {
-      status: "unknown",
-      result:
-        "No expuesto",
-      detail:
-        safeText(
-          endpoint.reason,
-          "El backend actual no publica este health."
-        ),
-    };
-  }
-
-  return {
-    status:
-      endpoint.ok === false
-        ? "critical"
-        : "unknown",
-
-    result:
-      endpoint.ok === false
-        ? safeText(
-            endpoint.error,
-            "Error"
-          )
-        : "Disponible",
-
-    detail:
-      endpoint.ok === false
-        ? safeText(
-            endpoint.error,
-            "La consulta no respondió correctamente."
-          )
-        : "Disponible en el contrato del backend.",
-  };
-}
-
-function renderHealthContractRow(
-  key = "",
-  endpoint = {}
-) {
-  const item =
-    safeObject(endpoint);
-
-  const mode =
-    healthMode(
-      key,
-      item
-    );
-
-  const path =
-    safeText(
-      item.endpoint,
-      "—"
-    );
-
-  const latency =
-    item.latencyMs ===
-      null ||
-    item.latencyMs ===
-      undefined
-      ? "—"
-      : formatMs(
-          item.latencyMs
-        );
-
-  return `
-    <tr
-      class="server-endpoint-row server-endpoint-row--${attr(mode.status)}"
-      data-health-contract="${attr(key)}"
-      data-supported="${item.supported === true ? "true" : "false"}"
-    >
-      <td>
-        ${escapeHtml(
-          healthLabel(key)
-        )}
-      </td>
-
-      <td>
-        ${escapeHtml(path)}
-      </td>
-
-      <td>
-        ${escapeHtml(latency)}
-      </td>
-
-      <td
-        title="${attr(mode.detail)}"
-      >
-        ${escapeHtml(
-          mode.result
-        )}
-      </td>
-    </tr>
-  `;
-}
-
-function renderHealthContract(
-  snapshot = {}
-) {
-  const endpoints =
-    safeObject(
-      snapshot.endpoints
-    );
-
-  const rows =
-    HEALTH_CONTRACT_ORDER
-      .filter(
-        (key) =>
-          Object.prototype
-            .hasOwnProperty
-            .call(
-              endpoints,
-              key
-            )
-      )
-      .map(
-        (key) =>
-          renderHealthContractRow(
-            key,
-            endpoints[key]
-          )
-      );
-
-  return `
-    <section class="server-dashboard server-dashboard--endpoints">
-      <header class="server-section-head">
-        <div>
-          <p class="server-section-kicker">
-            HEALTH CONTRACT
-          </p>
-
-          <h2 class="server-section-title">
-            Superficie de observabilidad
-          </h2>
+      <header class="server-service-head">
+        <div class="server-service-icon">
+          ${serviceIcon(item)}
         </div>
+
+        <div class="server-service-title-group">
+          <span class="server-service-label">
+            ${escapeHtml(item.label)}
+          </span>
+
+          <strong class="server-service-value">
+            ${escapeHtml(displayValue)}
+          </strong>
+        </div>
+
+        ${renderStatusChip(status)}
       </header>
 
-      <div class="server-table-shell">
-        <table
-          class="server-table"
-          aria-label="Contrato de health del backend"
-        >
-          <thead>
-            <tr>
-              <th>Probe</th>
-              <th>Endpoint</th>
-              <th>Latencia</th>
-              <th>Uso en esta vista</th>
-            </tr>
-          </thead>
+      ${
+        metric.meter !== null
+          ? renderMetricMeter(
+              metric.meter,
+              metric.meterLabel
+            )
+          : ""
+      }
 
-          <tbody>
-            ${
-              rows.length
-                ? rows.join("")
-                : `
-                  <tr>
-                    <td colspan="4">
-                      <div class="server-empty">
-                        <strong>
-                          Sin contrato health cargado.
-                        </strong>
+      <p class="server-service-detail">
+        ${escapeHtml(detail)}
+      </p>
 
-                        <span>
-                          Actualiza la vista para consultar el backend.
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-                `
-            }
-          </tbody>
-        </table>
-      </div>
-    </section>
+      <footer class="server-service-foot">
+        <span>
+          ${escapeHtml(
+            item.endpoint ||
+            "Métrica interna"
+          )}
+        </span>
+
+        ${
+          item.latencyMs !== null
+            ? `
+              <span class="server-service-latency">
+                ${escapeHtml(
+                  formatMs(
+                    item.latencyMs
+                  )
+                )}
+              </span>
+            `
+            : ""
+        }
+      </footer>
+    </article>
   `;
 }
 
@@ -1320,20 +1529,24 @@ function renderWarnings(
   }
 
   return `
-    <section class="server-dashboard">
+    <section class="server-panel server-panel--warnings">
       <header class="server-section-head">
         <div>
           <p class="server-section-kicker">
-            WARNINGS
+            Alertas
           </p>
 
           <h2 class="server-section-title">
-            Avisos del health interno
+            Señales que requieren atención
           </h2>
         </div>
+
+        <span class="server-section-badge">
+          ${warnings.length}
+        </span>
       </header>
 
-      <div class="server-services-grid">
+      <div class="server-warning-list">
         ${warnings
           .map(
             (warning) => {
@@ -1365,38 +1578,34 @@ function renderWarnings(
 
               return `
                 <article
-                  class="server-service-card server-service-card--${attr(severity)}"
+                  class="server-warning server-warning--${attr(severity)}"
                   data-server-warning="${attr(warning.code)}"
                 >
-                  <div class="server-service-icon">
+                  <div class="server-warning-icon">
                     ${icon("alert")}
                   </div>
 
-                  <div class="server-service-copy">
-                    <span class="server-service-label">
+                  <div class="server-warning-copy">
+                    <span class="server-warning-code">
                       ${escapeHtml(
                         warning.code ||
-                        "Health warning"
+                        "HEALTH_WARNING"
                       )}
                     </span>
 
-                    <strong class="server-service-value">
+                    <strong>
                       ${escapeHtml(
                         warning.message
                       )}
                     </strong>
 
-                    <span class="server-service-detail">
+                    <span>
                       ${escapeHtml(
                         detail ||
-                        "El backend ha marcado una condición a revisar."
+                        "Condición reportada por el backend."
                       )}
                     </span>
                   </div>
-
-                  ${renderStatusChip(
-                    severity
-                  )}
                 </article>
               `;
             }
@@ -1408,10 +1617,229 @@ function renderWarnings(
 }
 
 /* =========================================================
-   ENVIRONMENT / RUNTIME
+   HEALTH CONTRACT
 ========================================================= */
 
-function runtimeRows(
+function healthLabel(
+  key = ""
+) {
+  return {
+    internal:
+      "Health interno",
+
+    ready:
+      "Readiness",
+
+    live:
+      "Liveness",
+
+    blobs:
+      "Blob Storage",
+
+    azure:
+      "Azure platform",
+  }[key] || key;
+}
+
+function healthMode(
+  key = "",
+  endpoint = {}
+) {
+  const supported =
+    endpoint.supported ===
+    true;
+
+  if (
+    key === "internal" &&
+    endpoint.ok === true
+  ) {
+    return {
+      status: "healthy",
+      result: "Consultado",
+      detail:
+        "Fuente del dashboard.",
+    };
+  }
+
+  if (
+    (
+      key === "ready" ||
+      key === "live"
+    ) &&
+    supported
+  ) {
+    return {
+      status: "healthy",
+      result: "Disponible",
+      detail:
+        "Probe expuesto por el backend.",
+    };
+  }
+
+  if (!supported) {
+    return {
+      status: "unknown",
+      result: "No expuesto",
+      detail:
+        safeText(
+          endpoint.reason,
+          "El backend actual no publica este health."
+        ),
+    };
+  }
+
+  if (endpoint.ok === false) {
+    return {
+      status: "critical",
+      result:
+        safeText(
+          endpoint.error,
+          "Error"
+        ),
+      detail:
+        safeText(
+          endpoint.error,
+          "La consulta no respondió correctamente."
+        ),
+    };
+  }
+
+  return {
+    status: "unknown",
+    result: "Disponible",
+    detail:
+      "Definido en el contrato de observabilidad.",
+  };
+}
+
+function renderHealthContract(
+  snapshot = {}
+) {
+  const endpoints =
+    safeObject(
+      snapshot.endpoints
+    );
+
+  const items =
+    HEALTH_CONTRACT_ORDER
+      .filter(
+        (key) =>
+          Object.prototype
+            .hasOwnProperty
+            .call(
+              endpoints,
+              key
+            )
+      );
+
+  return `
+    <section class="server-panel server-panel--probes">
+      <header class="server-section-head">
+        <div>
+          <p class="server-section-kicker">
+            Probes
+          </p>
+
+          <h2 class="server-section-title">
+            Contrato de observabilidad
+          </h2>
+        </div>
+      </header>
+
+      <div class="server-probe-grid">
+        ${
+          items.length
+            ? items
+                .map(
+                  (key) => {
+                    const endpoint =
+                      safeObject(
+                        endpoints[key]
+                      );
+
+                    const mode =
+                      healthMode(
+                        key,
+                        endpoint
+                      );
+
+                    return `
+                      <article
+                        class="server-probe server-probe--${attr(mode.status)}"
+                        data-health-contract="${attr(key)}"
+                        data-supported="${endpoint.supported === true ? "true" : "false"}"
+                      >
+                        <div class="server-probe-head">
+                          <span class="server-probe-icon">
+                            ${
+                              key === "azure"
+                                ? icon("cloud")
+                                : key === "internal"
+                                  ? icon("server")
+                                  : icon("activity")
+                            }
+                          </span>
+
+                          <div>
+                            <span class="server-probe-label">
+                              ${escapeHtml(
+                                healthLabel(key)
+                              )}
+                            </span>
+
+                            <strong class="server-probe-result">
+                              ${escapeHtml(
+                                mode.result
+                              )}
+                            </strong>
+                          </div>
+
+                          ${renderStatusChip(
+                            mode.status
+                          )}
+                        </div>
+
+                        <code class="server-probe-endpoint">
+                          ${escapeHtml(
+                            safeText(
+                              endpoint.endpoint,
+                              "—"
+                            )
+                          )}
+                        </code>
+
+                        <span class="server-probe-detail">
+                          ${escapeHtml(
+                            mode.detail
+                          )}
+                        </span>
+                      </article>
+                    `;
+                  }
+                )
+                .join("")
+            : `
+              <div class="server-empty">
+                <strong>
+                  Sin contrato health cargado.
+                </strong>
+
+                <span>
+                  Actualiza la vista para consultar el backend.
+                </span>
+              </div>
+            `
+        }
+      </div>
+    </section>
+  `;
+}
+
+/* =========================================================
+   RUNTIME / AZURE
+========================================================= */
+
+function runtimeItems(
   snapshot = {}
 ) {
   const runtime =
@@ -1445,81 +1873,94 @@ function runtimeRows(
     );
 
   const values = [
-    [
-      "Servicio",
-      snapshot.service,
-    ],
-
-    [
-      "Versión backend",
-      snapshot.backendVersion,
-    ],
-
-    [
-      "Entorno",
-      environment.env,
-    ],
-
-    [
-      "Zona horaria",
-      environment.timezone,
-    ],
-
-    [
-      "Node RSS",
-      node.rssMB !==
-        undefined
-        ? `${node.rssMB} MB`
-        : "",
-    ],
-
-    [
-      "Node heap",
-      node.heapUsedMB !==
-        undefined
-        ? `${node.heapUsedMB} MB`
-        : "",
-    ],
-
-    [
-      "V8 heap limit",
-      v8.heapLimitMB !==
-        undefined
-        ? `${v8.heapLimitMB} MB`
-        : "",
-    ],
-
-    [
-      "Uptime proceso",
-      process.uptime ||
-      snapshot.uptimeLabel,
-    ],
-
-    [
-      "Azure site",
-      azure.websiteSiteName,
-    ],
-
-    [
-      "Azure región",
-      azure.regionName,
-    ],
-
-    [
-      "Azure SKU",
-      azure.sku,
-    ],
-
-    [
-      "Azure slot",
-      azure.slotName,
-    ],
+    {
+      label: "Servicio",
+      value:
+        snapshot.service,
+      meta:
+        snapshot.backendVersion ||
+        "Backend Onion",
+      iconName: "server",
+    },
+    {
+      label: "Node",
+      value:
+        node.version ||
+        environment.nodeVersion,
+      meta:
+        node.rssMB !==
+          undefined
+          ? `RSS ${node.rssMB} MB`
+          : "",
+      iconName: "terminal",
+    },
+    {
+      label: "Heap Node",
+      value:
+        node.heapUsedMB !==
+          undefined
+          ? `${node.heapUsedMB} MB`
+          : "",
+      meta:
+        v8.heapLimitMB !==
+          undefined
+          ? `Límite V8 ${v8.heapLimitMB} MB`
+          : "",
+      iconName: "memory",
+    },
+    {
+      label: "Uptime proceso",
+      value:
+        process.uptime ||
+        snapshot.uptimeLabel,
+      meta:
+        "Proceso Node actual",
+      iconName: "clock",
+    },
+    {
+      label: "Entorno",
+      value:
+        environment.env,
+      meta:
+        environment.timezone
+          ? `TZ ${environment.timezone}`
+          : "",
+      iconName: "shield",
+    },
+    {
+      label: "Azure Site",
+      value:
+        azure.websiteSiteName,
+      meta:
+        azure.slotName
+          ? `Slot ${azure.slotName}`
+          : "",
+      iconName: "cloud",
+    },
+    {
+      label: "Región",
+      value:
+        azure.regionName,
+      meta:
+        azure.sku
+          ? `SKU ${azure.sku}`
+          : "",
+      iconName: "cloud",
+    },
+    {
+      label: "Hostname",
+      value:
+        azure.websiteHostname,
+      meta:
+        "Metadata de runtime",
+      iconName: "server",
+    },
   ];
 
   return values.filter(
-    ([, value]) =>
+    (item) =>
       safeText(
-        value,
+        item.value,
         ""
       )
   );
@@ -1528,300 +1969,98 @@ function runtimeRows(
 function renderRuntime(
   snapshot = {}
 ) {
-  const rows =
-    runtimeRows(
+  const items =
+    runtimeItems(
       snapshot
     );
 
-  if (!rows.length) {
-    return "";
-  }
-
   return `
-    <section class="server-dashboard">
+    <section class="server-panel server-panel--runtime">
       <header class="server-section-head">
         <div>
           <p class="server-section-kicker">
-            RUNTIME
+            Runtime
           </p>
 
           <h2 class="server-section-title">
             Entorno de ejecución
           </h2>
         </div>
+
+        ${
+          snapshot.capabilities
+            ?.azureEnvironment
+            ? `
+              <span class="server-section-badge">
+                Azure
+              </span>
+            `
+            : ""
+        }
       </header>
 
-      <div class="server-table-shell">
-        <table
-          class="server-table"
-          aria-label="Entorno de ejecución del backend"
-        >
-          <thead>
-            <tr>
-              <th>Dato</th>
-              <th>Valor</th>
-              <th colspan="2">Interpretación</th>
-            </tr>
-          </thead>
+      ${
+        items.length
+          ? `
+            <div class="server-runtime-grid">
+              ${items
+                .map(
+                  (item) => `
+                    <article class="server-runtime-item">
+                      <span class="server-runtime-icon">
+                        ${icon(item.iconName)}
+                      </span>
 
-          <tbody>
-            ${rows
-              .map(
-                ([label, value]) => `
-                  <tr>
-                    <td>
-                      ${escapeHtml(label)}
-                    </td>
+                      <div class="server-runtime-copy">
+                        <span class="server-runtime-label">
+                          ${escapeHtml(
+                            item.label
+                          )}
+                        </span>
 
-                    <td>
-                      ${escapeHtml(value)}
-                    </td>
+                        <strong class="server-runtime-value">
+                          ${escapeHtml(
+                            item.value
+                          )}
+                        </strong>
 
-                    <td colspan="2">
-                      ${
-                        label.startsWith(
-                          "Azure "
-                        )
-                          ? "Metadata de entorno; no implica health de Azure."
-                          : "Reportado por /health/internal."
-                      }
-                    </td>
-                  </tr>
-                `
-              )
-              .join("")}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  `;
-}
+                        ${
+                          item.meta
+                            ? `
+                              <span class="server-runtime-meta">
+                                ${escapeHtml(
+                                  item.meta
+                                )}
+                              </span>
+                            `
+                            : ""
+                        }
+                      </div>
+                    </article>
+                  `
+                )
+                .join("")}
+            </div>
+          `
+          : `
+            <div class="server-empty">
+              <strong>
+                Runtime pendiente.
+              </strong>
 
-/* =========================================================
-   HEADER
-========================================================= */
+              <span>
+                Los metadatos aparecerán cuando responda /health/internal.
+              </span>
+            </div>
+          `
+      }
 
-export function renderHeader(
-  input = {}
-) {
-  const vm =
-    getViewModel(
-      input
-    );
-
-  const snapshot =
-    vm.snapshot;
-
-  const status =
-    normalizeStatus(
-      snapshot.status
-    );
-
-  return `
-    <section class="server-hero servidor-hero">
-      <div class="server-hero-top">
-        <div class="server-hero-copy">
-          <p class="server-kicker">
-            Onion Observability
-          </p>
-
-          <h1 class="server-title">
-            Estado del servidor
-          </h1>
-
-          <p class="server-subtitle">
-            Health interno del backend, Cosmos DB y recursos del runtime:
-            CPU, RAM, disco y event loop.
-          </p>
-        </div>
-
-        <div class="server-hero-actions">
-          <button
-            type="button"
-            class="server-btn"
-            data-server-action="${SERVER_ACTIONS.REFRESH}"
-            data-action="${SERVER_ACTIONS.REFRESH_SERVER}"
-            ${
-              vm.refreshing ||
-              vm.loading
-                ? 'disabled aria-disabled="true"'
-                : ""
-            }
-          >
-            ${icon("refresh")}
-
-            <span>
-              ${
-                vm.refreshing ||
-                vm.loading
-                  ? "Consultando"
-                  : "Actualizar"
-              }
-            </span>
-          </button>
-
-          <button
-            type="button"
-            class="server-btn${vm.live ? " is-active" : ""}"
-            data-server-action="${SERVER_ACTIONS.TOGGLE_LIVE}"
-            data-action="${SERVER_ACTIONS.TOGGLE_LIVE}"
-            aria-pressed="${vm.live ? "true" : "false"}"
-          >
-            ${icon("live")}
-
-            <span>
-              ${
-                vm.live
-                  ? "Live activo"
-                  : "Live off"
-              }
-            </span>
-          </button>
-
-          <button
-            type="button"
-            class="server-btn"
-            data-server-action="${SERVER_ACTIONS.COPY_JSON}"
-            data-action="${SERVER_ACTIONS.COPY_JSON}"
-            ${
-              !snapshot.checkedAt
-                ? 'disabled aria-disabled="true"'
-                : ""
-            }
-          >
-            ${icon("copy")}
-
-            <span>
-              Copiar JSON
-            </span>
-          </button>
-        </div>
-      </div>
-
-      <div class="server-hero-meta">
-        <span class="server-meta-pill server-meta-pill--${attr(status)}">
-          ${icon("server")}
-
-          <span>
-            ${escapeHtml(
-              snapshot.statusLabel
-            )}
-          </span>
+      <div class="server-runtime-note">
+        ${icon("shield")}
+        <span>
+          Los datos Azure son metadata del entorno; no se presentan como
+          comprobación independiente de salud de la plataforma.
         </span>
-
-        <span class="server-meta-pill">
-          ${icon("clock")}
-
-          <span>
-            ${
-              snapshot.checkedAt
-                ? escapeHtml(
-                    `Última consulta · ${formatDateTime(snapshot.checkedAt)}`
-                  )
-                : "Pendiente de consulta"
-            }
-          </span>
-        </span>
-
-        <span class="server-meta-pill">
-          ${icon("clock")}
-
-          <span>
-            Uptime · ${escapeHtml(
-              snapshot.uptimeLabel
-            )}
-          </span>
-        </span>
-
-        <span class="server-meta-pill">
-          ${icon("server")}
-
-          <span>
-            API · ${escapeHtml(
-              snapshot.latencyLabel
-            )}
-          </span>
-        </span>
-
-        <span class="server-meta-pill">
-          ${icon("db")}
-
-          <span>
-            DB · ${escapeHtml(
-              snapshot.dbLatencyLabel
-            )}
-          </span>
-        </span>
-      </div>
-
-      <div class="server-stats">
-        <article class="server-stat-card server-stat-card--status">
-          <span class="server-stat-label">
-            Backend
-          </span>
-
-          <strong class="server-stat-value">
-            ${escapeHtml(
-              snapshot.statusLabel
-            )}
-          </strong>
-
-          <span class="server-stat-text">
-            Estado del health interno autenticado.
-          </span>
-        </article>
-
-        <article class="server-stat-card server-stat-card--cpu">
-          <span class="server-stat-label">
-            CPU
-          </span>
-
-          <strong class="server-stat-value">
-            ${escapeHtml(
-              snapshot.cpuUsageLabel
-            )}
-          </strong>
-
-          <span class="server-stat-text">
-            Uso actual del host reportado por backend.
-          </span>
-        </article>
-
-        <article class="server-stat-card server-stat-card--memory">
-          <span class="server-stat-label">
-            RAM
-          </span>
-
-          <strong class="server-stat-value">
-            ${escapeHtml(
-              snapshot.memoryUsageLabel
-            )}
-          </strong>
-
-          <span class="server-stat-text">
-            ${escapeHtml(
-              snapshot.memoryLabel
-            )}
-          </span>
-        </article>
-
-        <article class="server-stat-card server-stat-card--services">
-          <span class="server-stat-label">
-            Disco
-          </span>
-
-          <strong class="server-stat-value">
-            ${escapeHtml(
-              snapshot.diskUsageLabel
-            )}
-          </strong>
-
-          <span class="server-stat-text">
-            ${escapeHtml(
-              snapshot.diskLabel
-            )}
-          </span>
-        </article>
       </div>
     </section>
   `;
@@ -1850,29 +2089,39 @@ export function renderDashboard(
             class="server-error"
             role="alert"
           >
-            <strong>
-              No se pudo completar la última consulta.
-            </strong>
+            <div class="server-error-icon">
+              ${icon("alert")}
+            </div>
 
-            <span>
-              ${escapeHtml(vm.error)}
-            </span>
+            <div>
+              <strong>
+                La última actualización no se completó.
+              </strong>
+
+              <span>
+                ${escapeHtml(vm.error)}
+              </span>
+            </div>
           </div>
         `
         : ""
     }
 
-    <section class="server-dashboard">
+    <section class="server-panel server-panel--services">
       <header class="server-section-head">
         <div>
           <p class="server-section-kicker">
-            STATUS
+            Telemetría
           </p>
 
           <h2 class="server-section-title">
             Componentes monitorizados
           </h2>
         </div>
+
+        <span class="server-section-badge">
+          6 señales
+        </span>
       </header>
 
       <div class="server-services-grid">
@@ -1880,7 +2129,8 @@ export function renderDashboard(
           .map(
             (service) =>
               renderServiceCard(
-                service
+                service,
+                snapshot
               )
           )
           .join("")}
@@ -1888,8 +2138,11 @@ export function renderDashboard(
     </section>
 
     ${renderWarnings(snapshot)}
-    ${renderHealthContract(snapshot)}
-    ${renderRuntime(snapshot)}
+
+    <div class="server-tech-grid">
+      ${renderHealthContract(snapshot)}
+      ${renderRuntime(snapshot)}
+    </div>
   `;
 }
 
@@ -1934,6 +2187,7 @@ export function renderLoadingState(
       data-refreshing="${vm.refreshing ? "true" : "false"}"
       data-live="${vm.live ? "true" : "false"}"
       data-canonical-health="true"
+      data-template-version="${attr(SERVER_TEMPLATE_VERSION)}"
     >
       ${renderHeader(vm)}
       ${renderDashboard(vm)}
@@ -1944,7 +2198,7 @@ export function renderLoadingState(
         aria-live="polite"
       >
         ${renderSpinner(
-          "Consultando /health/internal…"
+          "Consultando el servidor…"
         )}
       </div>
     </section>
@@ -1969,6 +2223,7 @@ export function renderErrorState(
       data-error="true"
       data-live="${vm.live ? "true" : "false"}"
       data-canonical-health="true"
+      data-template-version="${attr(SERVER_TEMPLATE_VERSION)}"
     >
       ${renderHeader(vm)}
 
@@ -1976,16 +2231,22 @@ export function renderErrorState(
         class="server-error"
         role="alert"
       >
-        <strong>
-          No se pudo consultar el health interno.
-        </strong>
+        <div class="server-error-icon">
+          ${icon("alert")}
+        </div>
 
-        <span>
-          ${escapeHtml(
-            vm.error ||
-            "Error desconocido consultando /health/internal."
-          )}
-        </span>
+        <div>
+          <strong>
+            No se pudo consultar el health interno.
+          </strong>
+
+          <span>
+            ${escapeHtml(
+              vm.error ||
+              "Error desconocido consultando /health/internal."
+            )}
+          </span>
+        </div>
       </div>
 
       ${renderDashboard({
@@ -2005,18 +2266,24 @@ export function renderAccessDeniedState() {
       data-view="servidor"
       data-forbidden="true"
       data-canonical-health="true"
+      data-template-version="${attr(SERVER_TEMPLATE_VERSION)}"
     >
-      <div
-        class="server-error"
-        role="alert"
-      >
-        <strong>
-          Acceso restringido.
-        </strong>
+      <div class="server-forbidden">
+        <div class="server-forbidden-icon">
+          ${icon("shield")}
+        </div>
 
-        <span>
-          /health/internal requiere una sesión de administrador.
-        </span>
+        <p class="server-section-kicker">
+          Servidor
+        </p>
+
+        <h1 class="server-title">
+          Acceso restringido
+        </h1>
+
+        <p class="server-subtitle">
+          Esta vista requiere una sesión con rol administrador.
+        </p>
       </div>
     </section>
   `;
@@ -2043,9 +2310,7 @@ export function renderServerTemplate(
     );
 
   if (vm.forbidden) {
-    return renderAccessDeniedState(
-      input
-    );
+    return renderAccessDeniedState();
   }
 
   if (
@@ -2082,7 +2347,7 @@ export function renderServerTemplate(
               aria-live="polite"
             >
               ${renderSpinner(
-                "Consultando /health/internal…"
+                "Consultando el servidor…"
               )}
             </div>
           `
@@ -2123,6 +2388,11 @@ export function getServerTemplateSnapshot(
   const snapshot =
     vm.snapshot;
 
+  const summary =
+    serviceSummary(
+      snapshot
+    );
+
   return {
     version:
       SERVER_TEMPLATE_VERSION,
@@ -2142,6 +2412,9 @@ export function getServerTemplateSnapshot(
 
     serviceCount:
       snapshot.services.length,
+
+    operationalServices:
+      summary.healthy,
 
     healthContracts:
       HEALTH_CONTRACT_ORDER
@@ -2194,11 +2467,14 @@ export function getServerTemplateSnapshot(
       healthInternalSource:
         true,
 
-      readinessOnEveryLoad:
-        false,
+      tokenNativeVisual:
+        true,
 
-      livenessOnEveryLoad:
-        false,
+      nativeMetricMeters:
+        true,
+
+      derivedOperationalSummary:
+        true,
     },
 
     contract: {
@@ -2229,9 +2505,5 @@ export function getSnapshot(
     input
   );
 }
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
 
 export default renderServerTemplate;

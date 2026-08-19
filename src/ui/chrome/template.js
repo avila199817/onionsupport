@@ -2,25 +2,29 @@
    Onion Support - App Chrome Template
    Archivo: /src/ui/chrome/template.js
 
+   APP CHROME TEMPLATE V2
+
    Responsabilidad:
-   - Agrupar Topbar y Sidebar bajo un único root visual estable.
-   - Crear el backdrop glass del drawer móvil.
-   - Insertar un único trigger de navegación dentro del Topbar real.
-   - Exponer refs y sincronizar únicamente atributos visuales/ARIA.
-   - Sin SidebarUI, Router, Auth, HTTP, Store ni lógica de dominio.
+   - Mantener un único root visual para Topbar + Sidebar.
+   - Preparar los mounts antes de que main.js pinte la UI.
+   - Crear el backdrop y el único trigger móvil del Topbar.
+   - Exponer refs y estado ARIA/visual idempotente.
+   - Sin Router, Auth, HTTP, Store ni lógica de dominio.
 ========================================================= */
 
 export const APP_CHROME_TEMPLATE_VERSION =
-  "app-chrome.template.v1-unified-mobile-drawer";
+  "app-chrome.template.v2-single-layout-authority";
 
-const APP_SHELL_SELECTOR = "#app-shell, [data-app-shell='true']";
-const CHROME_ROOT_SELECTOR = "#app-chrome, [data-app-chrome='true']";
-const SIDEBAR_MOUNT_SELECTOR = "#sidebar-mount, [data-sidebar-mount='true']";
-const TOPBAR_MOUNT_SELECTOR = "#topbar-mount, [data-topbar-mount='true']";
-const SIDEBAR_ROOT_SELECTOR = "#app-sidebar, [data-sidebar-root='true']";
-const TOPBAR_ROOT_SELECTOR = "#app-topbar, [data-topbar-root='true']";
-const MENU_TOGGLE_SELECTOR = "[data-topbar-menu-toggle='true']";
-const BACKDROP_SELECTOR = "[data-app-chrome-backdrop='true']";
+const SELECTOR = Object.freeze({
+  shell: "#app-shell, [data-app-shell='true']",
+  chrome: "#app-chrome, [data-app-chrome='true']",
+  sidebarMount: "#sidebar-mount, [data-sidebar-mount='true']",
+  topbarMount: "#topbar-mount, [data-topbar-mount='true']",
+  sidebar: "#app-sidebar, [data-sidebar-root='true']",
+  topbar: "#app-topbar, [data-topbar-root='true']",
+  toggle: "[data-topbar-menu-toggle='true']",
+  backdrop: "[data-app-chrome-backdrop='true']",
+});
 
 function isBrowser() {
   return (
@@ -39,14 +43,11 @@ function query(selector = "", root = null) {
   }
 }
 
-function createElement(tag = "div", options = {}) {
+function el(tag = "div", className = "", attrs = {}) {
   const node = document.createElement(tag);
+  if (className) node.className = className;
 
-  if (options.className) {
-    node.className = options.className;
-  }
-
-  for (const [name, value] of Object.entries(options.attrs || {})) {
+  for (const [name, value] of Object.entries(attrs)) {
     if (value === null || value === undefined || value === false) continue;
     node.setAttribute(name, value === true ? "true" : String(value));
   }
@@ -54,135 +55,112 @@ function createElement(tag = "div", options = {}) {
   return node;
 }
 
-function setAttr(node = null, name = "", value = "") {
+function setAttr(node, name, value) {
   if (!node || !name) return false;
-
   const next = String(value);
   if (node.getAttribute(name) === next) return false;
-
   node.setAttribute(name, next);
   return true;
 }
 
-function setData(node = null, name = "", value = "") {
+function setData(node, name, value) {
   if (!node?.dataset || !name) return false;
-
   const next = String(value);
   if (node.dataset[name] === next) return false;
-
   node.dataset[name] = next;
   return true;
 }
 
-function setHidden(node = null, hidden = false) {
+function setHidden(node, hidden = false) {
   if (!node) return false;
-
   const next = hidden === true;
   if (node.hidden === next) return false;
-
   node.hidden = next;
   return true;
 }
 
-function createMenuIcon() {
-  const icon = createElement("span", {
-    className: "topbar-menu-toggle-icon",
-    attrs: {
-      "aria-hidden": "true",
-      "data-topbar-menu-toggle-icon": "true",
-    },
+function createChromeRoot() {
+  return el("div", "app-chrome", {
+    id: "app-chrome",
+    "data-app-chrome": "true",
+    "data-chrome-version": APP_CHROME_TEMPLATE_VERSION,
+    "data-navigation-state": "closed",
+    "aria-hidden": "false",
+  });
+}
+
+function createBackdrop() {
+  return el("div", "app-chrome-backdrop", {
+    "aria-hidden": "true",
+    "data-app-chrome-backdrop": "true",
+    "data-state": "closed",
+  });
+}
+
+function createMenuToggle() {
+  const button = el("button", "topbar-menu-toggle", {
+    type: "button",
+    hidden: "true",
+    "aria-label": "Abrir navegación",
+    "aria-controls": "app-sidebar",
+    "aria-expanded": "false",
+    "aria-hidden": "true",
+    "data-topbar-menu-toggle": "true",
+    "data-mobile-nav-trigger": "true",
+    "data-state": "closed",
   });
 
-  for (let index = 0; index < 3; index += 1) {
+  const icon = el("span", "topbar-menu-toggle-icon", {
+    "aria-hidden": "true",
+    "data-topbar-menu-toggle-icon": "true",
+  });
+
+  for (let index = 1; index <= 3; index += 1) {
     icon.appendChild(
-      createElement("span", {
-        className: "topbar-menu-toggle-line",
-        attrs: {
-          "data-topbar-menu-toggle-line": String(index + 1),
-        },
+      el("span", "topbar-menu-toggle-line", {
+        "data-topbar-menu-toggle-line": String(index),
       })
     );
   }
 
-  return icon;
-}
-
-export function createTopbarMenuToggle() {
-  if (!isBrowser()) return null;
-
-  const button = createElement("button", {
-    className: "topbar-menu-toggle",
-    attrs: {
-      type: "button",
-      hidden: "true",
-      "aria-label": "Abrir navegación",
-      "aria-controls": "app-sidebar",
-      "aria-expanded": "false",
-      "data-topbar-menu-toggle": "true",
-      "data-mobile-nav-trigger": "true",
-      "data-state": "closed",
-    },
-  });
-
   button.hidden = true;
-  button.appendChild(createMenuIcon());
-
+  button.appendChild(icon);
   return button;
 }
 
-export function createChromeBackdrop() {
-  if (!isBrowser()) return null;
+function ensureRoot() {
+  const shell = query(SELECTOR.shell);
+  if (!shell) return null;
 
-  return createElement("div", {
-    className: "app-chrome-backdrop",
-    attrs: {
-      "aria-hidden": "true",
-      "data-app-chrome-backdrop": "true",
-      "data-state": "closed",
-    },
-  });
-}
-
-function ensureChromeRoot() {
-  const appShell = query(APP_SHELL_SELECTOR);
-  if (!appShell) return null;
-
-  let chrome = query(CHROME_ROOT_SELECTOR, appShell);
-
+  let chrome = query(SELECTOR.chrome, shell);
   if (!chrome) {
-    chrome = createElement("div", {
-      className: "app-chrome",
-      attrs: {
-        id: "app-chrome",
-        "data-app-chrome": "true",
-        "data-chrome-version": APP_CHROME_TEMPLATE_VERSION,
-        "data-navigation-state": "closed",
-        "aria-hidden": "false",
-      },
-    });
-
-    const main = query("#main-content, [data-main-content='true']", appShell);
-    appShell.insertBefore(chrome, main || null);
+    chrome = createChromeRoot();
+    const main = query("#main-content, [data-main-content='true']", shell);
+    shell.insertBefore(chrome, main || null);
   }
 
   setData(chrome, "chromeVersion", APP_CHROME_TEMPLATE_VERSION);
   return chrome;
 }
 
-function ensureChromeChildren(chrome = null) {
+function ensureMounts(chrome) {
   if (!chrome) return false;
 
-  const sidebarMount = query(SIDEBAR_MOUNT_SELECTOR);
-  const topbarMount = query(TOPBAR_MOUNT_SELECTOR);
+  const topbarMount = query(SELECTOR.topbarMount);
+  const sidebarMount = query(SELECTOR.sidebarMount);
 
+  /*
+    Este módulo carga antes de main.js. Los mounts todavía están vacíos,
+    por lo que se agrupan una sola vez antes del primer render visual.
+  */
   if (topbarMount && topbarMount.parentElement !== chrome) {
     chrome.appendChild(topbarMount);
   }
 
-  let backdrop = query(BACKDROP_SELECTOR, chrome);
+  let backdrop = query(SELECTOR.backdrop, chrome);
   if (!backdrop) {
-    backdrop = createChromeBackdrop();
-    if (backdrop) chrome.appendChild(backdrop);
+    backdrop = createBackdrop();
+    chrome.appendChild(backdrop);
   }
 
   if (sidebarMount && sidebarMount.parentElement !== chrome) {
@@ -192,35 +170,22 @@ function ensureChromeChildren(chrome = null) {
   return true;
 }
 
-function ensureTopbarMenuToggle(chrome = null) {
-  const topbar = query(TOPBAR_ROOT_SELECTOR, chrome || document);
+function ensureToggle(chrome) {
+  const topbar = query(SELECTOR.topbar, chrome || document);
   if (!topbar) return null;
 
-  let toggle = query(MENU_TOGGLE_SELECTOR, topbar);
-  if (toggle) return toggle;
+  let toggle = query(SELECTOR.toggle, topbar);
+  if (!toggle) {
+    toggle = createMenuToggle();
+    topbar.insertBefore(toggle, topbar.firstChild || null);
+  }
 
-  toggle = createTopbarMenuToggle();
-  if (!toggle) return null;
-
-  topbar.insertBefore(toggle, topbar.firstChild || null);
   return toggle;
-}
-
-export function ensureAppChromeTemplate() {
-  if (!isBrowser()) return getAppChromeTemplateRefs();
-
-  const chrome = ensureChromeRoot();
-  if (!chrome) return getAppChromeTemplateRefs();
-
-  ensureChromeChildren(chrome);
-  ensureTopbarMenuToggle(chrome);
-
-  return getAppChromeTemplateRefs(chrome);
 }
 
 export function getAppChromeTemplateRefs(root = null) {
   if (!isBrowser()) {
-    return {
+    return Object.freeze({
       chrome: null,
       sidebarMount: null,
       sidebar: null,
@@ -228,23 +193,34 @@ export function getAppChromeTemplateRefs(root = null) {
       topbar: null,
       menuToggle: null,
       backdrop: null,
-    };
+    });
   }
 
   const chrome =
-    root?.matches?.(CHROME_ROOT_SELECTOR)
+    root?.matches?.(SELECTOR.chrome)
       ? root
-      : query(CHROME_ROOT_SELECTOR);
+      : query(SELECTOR.chrome);
 
   return {
     chrome,
-    sidebarMount: query(SIDEBAR_MOUNT_SELECTOR, chrome || document),
-    sidebar: query(SIDEBAR_ROOT_SELECTOR, chrome || document),
-    topbarMount: query(TOPBAR_MOUNT_SELECTOR, chrome || document),
-    topbar: query(TOPBAR_ROOT_SELECTOR, chrome || document),
-    menuToggle: query(MENU_TOGGLE_SELECTOR, chrome || document),
-    backdrop: query(BACKDROP_SELECTOR, chrome || document),
+    sidebarMount: query(SELECTOR.sidebarMount, chrome || document),
+    sidebar: query(SELECTOR.sidebar, chrome || document),
+    topbarMount: query(SELECTOR.topbarMount, chrome || document),
+    topbar: query(SELECTOR.topbar, chrome || document),
+    menuToggle: query(SELECTOR.toggle, chrome || document),
+    backdrop: query(SELECTOR.backdrop, chrome || document),
   };
+}
+
+export function ensureAppChromeTemplate() {
+  if (!isBrowser()) return getAppChromeTemplateRefs();
+
+  const chrome = ensureRoot();
+  if (!chrome) return getAppChromeTemplateRefs();
+
+  ensureMounts(chrome);
+  ensureToggle(chrome);
+  return getAppChromeTemplateRefs(chrome);
 }
 
 export function setAppChromeTemplateState({

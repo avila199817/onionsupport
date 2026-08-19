@@ -52,6 +52,7 @@
 @import url("./layout/sidebar.css") layer(layout);
 @import url("./layout/correo-sidebar.css") layer(layout);
 @import url("./layout/topbar.css") layer(layout);
+@import url("./layout/mobile-shell.css") layer(layout);
 
 /* =========================================================
    GLOBAL COMPONENTS

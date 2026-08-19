@@ -1,0 +1,76 @@
+name: One-shot UI System V6 Detail Modal
+
+on:
+  push:
+    branches:
+      - refactor/ui-system-v6-shared-detail-modal
+
+permissions:
+  contents: write
+
+env:
+  TARGET_BRANCH: refactor/ui-system-v6-shared-detail-modal
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 1
+
+      - name: Guard trigger
+        run: |
+          set -euo pipefail
+          test -f .github/.ui-system-v6-detail-modal-trigger || {
+            echo "Trigger aún no presente; no hay migración que aplicar."
+            exit 0
+          }
+
+      - name: Apply Detail Modal V6
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/ui_system_v6_detail_modal.py
+
+      - name: Validate repository
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/repo_integrity.py
+          while IFS= read -r -d '' file; do
+            node --check "$file"
+          done < <(find src -type f -name '*.js' -print0)
+
+      - name: Validate generated CSS shape
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/css/components/detail-modal.css')
+          text = path.read_text(encoding='utf-8')
+          if text.count('{') != text.count('}'):
+              raise SystemExit('detail-modal.css tiene llaves desbalanceadas')
+          if '.incidencias-modal-' in text or '.usuarios-modal-' in text:
+              raise SystemExit('detail-modal.css contiene selectores de dominio')
+          print('Detail Modal CSS shape OK')
+          PY
+
+      - name: Commit migration
+        run: |
+          set -euo pipefail
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git add \
+            src/css/components/detail-modal.css \
+            src/views/usuarios/usuarios.template.modal.js \
+            src/router/styles.js \
+            .github/scripts/repo_integrity.py \
+            docs/UI_SYSTEM_V6_AUDIT.md
+          if git diff --cached --quiet; then
+            echo "Sin cambios de migración."
+            exit 0
+          fi
+          git commit -m "refactor(usuarios): desacoplar detalle del CSS de Incidencias"
+          git push origin HEAD:${TARGET_BRANCH}

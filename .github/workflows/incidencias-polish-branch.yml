@@ -1,0 +1,462 @@
+name: Incidencias polish branch
+
+on:
+  push:
+    branches:
+      - fix/incidencias-polish-attachments-avatars
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[incidencias-polish-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/incidencias-polish-attachments-avatars
+          fetch-depth: 0
+
+      - name: Apply focused Incidencias polish
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly 1 match, found {count}")
+              return text.replace(old, new, 1)
+
+          template_path = Path("src/views/incidencias/incidencias.template.js")
+          template = template_path.read_text(encoding="utf-8")
+
+          template = replace_once(
+              template,
+              'export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v21.interactive-stats";',
+              'export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v22.attachments-sort-avatar-tones";',
+              "template version",
+          )
+
+          template = replace_once(
+              template,
+              '''function initials(v = "") {
+  return txt(v, "").split(/\\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() || "").join("").slice(0, 2) || "ON";
+}
+''',
+              '''function initials(v = "") {
+  return txt(v, "").split(/\\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() || "").join("").slice(0, 2) || "ON";
+}
+
+function titleCaseLabel(v = "", fb = "General") {
+  const value = txt(v, fb).replace(/[_-]+/g, " ").toLocaleLowerCase("es-ES");
+  return value.replace(/(^|\\s)([a-záéíóúüñ])/g, (_, prefix, letter) => `${prefix}${letter.toLocaleUpperCase("es-ES")}`);
+}
+''',
+              "title case helper",
+          )
+
+          template = replace_once(
+              template,
+              '''function normalizeSortMode(v = DEFAULT_SORT_MODE) {
+  const k = key(v || DEFAULT_SORT_MODE);
+  return ["amount", "importe", "invoice", "factura", "billing"].includes(k) ? "amount" : "date";
+}
+
+const sortLabel = (o = DEFAULT_SORT_ORDER, mode = DEFAULT_SORT_MODE) => {
+  const direction = normalizeSort(o) === "asc" ? "↑" : "↓";
+  return normalizeSortMode(mode) === "amount" ? `Importe ${direction}` : `Fecha ${direction}`;
+};
+''',
+              '''function normalizeSortMode(v = DEFAULT_SORT_MODE) {
+  const k = key(v || DEFAULT_SORT_MODE);
+  if (["amount", "importe", "invoice", "factura", "billing"].includes(k)) return "amount";
+  if (["attachments", "attachment", "adjuntos", "adjunto", "files", "archivos"].includes(k)) return "attachments";
+  return "date";
+}
+
+const sortLabel = (o = DEFAULT_SORT_ORDER, mode = DEFAULT_SORT_MODE) => {
+  const direction = normalizeSort(o) === "asc" ? "↑" : "↓";
+  const normalizedMode = normalizeSortMode(mode);
+  if (normalizedMode === "amount") return `Importe ${direction}`;
+  if (normalizedMode === "attachments") return `Adjuntos ${direction}`;
+  return `Fecha ${direction}`;
+};
+''',
+              "sort mode normalization",
+          )
+
+          template = replace_once(
+              template,
+              '''    if (sortMode === "amount") {
+      const amountDiff = getInvoiceTotal(a) - getInvoiceTotal(b);
+      if (amountDiff) return amountDiff * dir;
+
+      const timeDiff = itemTime(b) - itemTime(a);
+      if (timeDiff) return timeDiff;
+
+      return getId(a).localeCompare(getId(b), "es", { numeric: true, sensitivity: "base" });
+    }
+
+    const diff = itemTime(a) - itemTime(b);
+''',
+              '''    if (sortMode === "amount") {
+      const amountDiff = getInvoiceTotal(a) - getInvoiceTotal(b);
+      if (amountDiff) return amountDiff * dir;
+
+      const timeDiff = itemTime(b) - itemTime(a);
+      if (timeDiff) return timeDiff;
+
+      return getId(a).localeCompare(getId(b), "es", { numeric: true, sensitivity: "base" });
+    }
+
+    if (sortMode === "attachments") {
+      const attachmentDiff = getAttachmentsCount(a) - getAttachmentsCount(b);
+      if (attachmentDiff) return attachmentDiff * dir;
+
+      const timeDiff = itemTime(b) - itemTime(a);
+      if (timeDiff) return timeDiff;
+
+      return getId(a).localeCompare(getId(b), "es", { numeric: true, sensitivity: "base" });
+    }
+
+    const diff = itemTime(a) - itemTime(b);
+''',
+              "attachments sorter",
+          )
+
+          template = replace_once(
+              template,
+              '''function renderAvatar(it = {}) {
+  const name = getClientName(it);
+  const src = getAvatar(it);
+  return `
+    <span class="incidencias-avatar${src ? " has-image" : " is-fallback"}" data-avatar-tone="${at(String(hash(`${getId(it)}:${name}`) % 10))}" data-has-avatar="${src ? "true" : "false"}" data-fallback="${src ? "false" : "true"}" aria-hidden="true">
+''',
+              '''function renderAvatar(it = {}) {
+  const name = getClientName(it);
+  const src = getAvatar(it);
+  const identity = getClientEmail(it) || name;
+  const tone = hash(identity) % 10;
+  return `
+    <span class="incidencias-avatar${src ? " has-image" : " is-fallback"}" data-avatar-tone="${at(String(tone))}" data-has-avatar="${src ? "true" : "false"}" data-fallback="${src ? "false" : "true"}" aria-hidden="true">
+''',
+              "stable requester avatar tone",
+          )
+
+          template = replace_once(
+              template,
+              '''function renderAssignedBadge(it = {}) {
+  const name = getAssignedName(it);
+  const norm = key(name);
+  if (!name || norm === "no_asignado" || norm === "sin_asignar") return "";
+  const avatar = getAssignedAvatar(it);
+  return `
+    <span class="incidencias-assigned-badge" data-assigned="true" title="${at(name)}">
+      <span class="incidencias-assigned-avatar${avatar ? " has-image" : " is-fallback"}" aria-hidden="true">
+''',
+              '''function renderAssignedBadge(it = {}) {
+  const name = getAssignedName(it);
+  const norm = key(name);
+  if (!name || norm === "no_asignado" || norm === "sin_asignar") return "";
+  const avatar = getAssignedAvatar(it);
+  const identity = getAssignedEmail(it) || name;
+  const tone = hash(identity) % 10;
+  return `
+    <span class="incidencias-assigned-badge" data-assigned="true" title="${at(`Técnico: ${name}`)}">
+      <span class="incidencias-assigned-avatar${avatar ? " has-image" : " is-fallback"}" data-avatar-tone="${at(String(tone))}" aria-hidden="true">
+''',
+              "technician tooltip and tone",
+          )
+
+          template = replace_once(
+              template,
+              '<span class="incidencias-category-pill">${esc(getCategory(it) || "General")}</span>',
+              '<span class="incidencias-category-pill">${esc(titleCaseLabel(getCategory(it), "General"))}</span>',
+              "category title case",
+          )
+
+          template = replace_once(
+              template,
+              '''        <span class="incidencias-meta-pill" data-meta="attachments">${icon("paperclip")}<span>${esc(`${formatNumber(s.attachments)} adjuntos`)}</span></span>
+''',
+              '''        <button type="button" class="incidencias-meta-pill incidencias-meta-pill--action${vm.sortMode === "attachments" ? " is-active" : ""}" data-meta="attachments" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="attachments" aria-pressed="${vm.sortMode === "attachments" ? "true" : "false"}" aria-label="Ordenar incidencias de más adjuntos a menos" title="Ordenar por número de adjuntos">${icon("paperclip")}<span>${esc(`${formatNumber(s.attachments)} adjuntos`)}</span></button>
+''',
+              "attachments meta action",
+          )
+
+          template = replace_once(
+              template,
+              '  const sortIcon = sortMode === "amount" ? "euro" : "calendar";',
+              '  const sortIcon = sortMode === "attachments" ? "paperclip" : sortMode === "amount" ? "euro" : "calendar";',
+              "attachments sort icon",
+          )
+
+          template = replace_once(
+              template,
+              '    sortOrder: vm.sortOrder,\n    totalGreaterThanItems: vm.diagnostics.totalGreaterThanItems,',
+              '    sortOrder: vm.sortOrder,\n    sortMode: vm.sortMode,\n    totalGreaterThanItems: vm.diagnostics.totalGreaterThanItems,',
+              "snapshot sort mode",
+          )
+
+          template_path.write_text(template, encoding="utf-8")
+
+          index_path = Path("src/views/incidencias/index.js")
+          index = index_path.read_text(encoding="utf-8")
+
+          index = replace_once(
+              index,
+              '  "incidencias.index.extreme.v29.interactive-stats";',
+              '  "incidencias.index.extreme.v30.attachments-sort";',
+              "index version",
+          )
+
+          index = replace_once(
+              index,
+              '''        "urgent",
+        "amount",
+      ].includes(stat)
+''',
+              '''        "urgent",
+        "amount",
+        "attachments",
+      ].includes(stat)
+''',
+              "stat allowlist",
+          )
+
+          index = replace_once(
+              index,
+              '''    if (stat === "amount") {
+      filter = "all";
+      sortMode = "amount";
+      sortOrder = "desc";
+    } else {
+''',
+              '''    if (stat === "amount" || stat === "attachments") {
+      filter = "all";
+      sortMode = stat;
+      sortOrder = "desc";
+    } else {
+''',
+              "stat sort mode",
+          )
+
+          index = replace_once(
+              index,
+              '''        sortOrder,
+
+        createModalOpen:
+''',
+              '''        sortOrder,
+        sortMode,
+
+        createModalOpen:
+''',
+              "index snapshot sort mode",
+          )
+
+          index_path.write_text(index, encoding="utf-8")
+
+          css_path = Path("src/css/views/incidencias/index.css")
+          css = css_path.read_text(encoding="utf-8")
+
+          css = replace_once(
+              css,
+              '''  --inc-attachments-col: 10%;
+
+  inline-size: 100%;
+''',
+              '''  --inc-attachments-col: 10%;
+
+  --inc-avatar-a: var(--accent);
+  --inc-avatar-b: var(--info);
+  --inc-avatar-bg: linear-gradient(135deg, var(--inc-avatar-a), var(--inc-avatar-b));
+
+  inline-size: 100%;
+''',
+              "avatar tone variables",
+          )
+
+          css = replace_once(
+              css,
+              '''.incidencias-search-clear:focus-visible,
+.incidencias-stat-card:focus-visible {
+''',
+              '''.incidencias-search-clear:focus-visible,
+.incidencias-stat-card:focus-visible,
+.incidencias-meta-pill--action:focus-visible {
+''',
+              "meta focus",
+          )
+
+          css = replace_once(
+              css,
+              '''.incidencias-meta-pill svg {
+  inline-size: 13px;
+  block-size: 13px;
+  color: var(--text-muted);
+}
+''',
+              '''.incidencias-meta-pill svg {
+  inline-size: 13px;
+  block-size: 13px;
+  color: var(--text-muted);
+}
+
+.incidencias-meta-pill--action {
+  appearance: none;
+  margin: 0;
+  cursor: pointer;
+  font: inherit;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+
+.incidencias-meta-pill--action:hover {
+  border-color: var(--border-strong);
+  background: var(--solid-hover);
+  color: var(--text-strong);
+  transform: translateY(-1px);
+}
+
+.incidencias-meta-pill--action.is-active,
+.incidencias-meta-pill--action[aria-pressed="true"] {
+  border-color: var(--border-strong);
+  background: var(--solid-selected);
+  color: var(--text-strong);
+}
+''',
+              "actionable attachments meta",
+          )
+
+          css = replace_once(
+              css,
+              '''  background: var(--solid-bg-2);
+  color: var(--text-strong);
+  font-size: var(--font-xs);
+''',
+              '''  border-color: color-mix(in srgb, var(--inc-avatar-a) 44%, var(--border-default));
+  background: var(--inc-avatar-bg);
+  color: var(--text-on-accent, #fff);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
+  font-size: var(--font-xs);
+''',
+              "requester avatar visual",
+          )
+
+          css = replace_once(
+              css,
+              '''.incidencias-avatar.has-image .incidencias-avatar-fallback {
+  display: none;
+}
+
+.incidencias-main-copy {
+''',
+              '''.incidencias-avatar.has-image .incidencias-avatar-fallback {
+  display: none;
+}
+
+.incidencias-avatar[data-avatar-tone="0"],
+.incidencias-assigned-avatar[data-avatar-tone="0"] { --inc-avatar-a: var(--accent); --inc-avatar-b: var(--info); }
+.incidencias-avatar[data-avatar-tone="1"],
+.incidencias-assigned-avatar[data-avatar-tone="1"] { --inc-avatar-a: var(--success); --inc-avatar-b: var(--info); }
+.incidencias-avatar[data-avatar-tone="2"],
+.incidencias-assigned-avatar[data-avatar-tone="2"] { --inc-avatar-a: var(--warning); --inc-avatar-b: var(--accent); }
+.incidencias-avatar[data-avatar-tone="3"],
+.incidencias-assigned-avatar[data-avatar-tone="3"] { --inc-avatar-a: var(--error); --inc-avatar-b: var(--warning); }
+.incidencias-avatar[data-avatar-tone="4"],
+.incidencias-assigned-avatar[data-avatar-tone="4"] { --inc-avatar-a: var(--info); --inc-avatar-b: var(--accent); }
+.incidencias-avatar[data-avatar-tone="5"],
+.incidencias-assigned-avatar[data-avatar-tone="5"] { --inc-avatar-a: var(--success); --inc-avatar-b: var(--accent); }
+.incidencias-avatar[data-avatar-tone="6"],
+.incidencias-assigned-avatar[data-avatar-tone="6"] { --inc-avatar-a: var(--info); --inc-avatar-b: var(--success); }
+.incidencias-avatar[data-avatar-tone="7"],
+.incidencias-assigned-avatar[data-avatar-tone="7"] { --inc-avatar-a: var(--warning); --inc-avatar-b: var(--error); }
+.incidencias-avatar[data-avatar-tone="8"],
+.incidencias-assigned-avatar[data-avatar-tone="8"] { --inc-avatar-a: var(--error); --inc-avatar-b: var(--accent); }
+.incidencias-avatar[data-avatar-tone="9"],
+.incidencias-assigned-avatar[data-avatar-tone="9"] { --inc-avatar-a: var(--accent); --inc-avatar-b: var(--success); }
+
+.incidencias-main-copy {
+''',
+              "avatar tone mappings",
+          )
+
+          css = replace_once(
+              css,
+              '''  font-weight: var(--weight-semibold);
+  line-height: 1;
+}
+
+.incidencias-ticket-subject {
+''',
+              '''  font-weight: var(--weight-semibold);
+  line-height: 1;
+  text-transform: capitalize;
+}
+
+.incidencias-ticket-subject {
+''',
+              "category capitalization defense",
+          )
+
+          css = replace_once(
+              css,
+              '''  border-radius: 50%;
+  background: var(--solid-bg-3);
+  color: var(--text-strong);
+  font-size: 7px;
+''',
+              '''  border: 1px solid color-mix(in srgb, var(--inc-avatar-a) 52%, var(--border-default));
+  border-radius: 50%;
+  background: var(--inc-avatar-bg);
+  color: var(--text-on-accent, #fff);
+  font-size: 7px;
+''',
+              "technician avatar visual",
+          )
+
+          css = replace_once(
+              css,
+              '''  .incidencias-stat-card,
+  .incidencias-search,
+  .incidencias-table tbody td {
+''',
+              '''  .incidencias-stat-card,
+  .incidencias-meta-pill--action,
+  .incidencias-search,
+  .incidencias-table tbody td {
+''',
+              "reduced motion meta",
+          )
+
+          css_path.write_text(css, encoding="utf-8")
+          PY
+
+      - name: Validate JS and diff
+        shell: bash
+        run: |
+          node --check src/views/incidencias/incidencias.template.js
+          node --check src/views/incidencias/index.js
+          git diff --check
+          git diff -- src/views/incidencias/incidencias.template.js src/views/incidencias/index.js src/css/views/incidencias/index.css
+
+      - name: Commit branch patch
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/views/incidencias/incidencias.template.js src/views/incidencias/index.js src/css/views/incidencias/index.css
+          git commit -m "fix(incidencias): polish categories avatars and attachments [incidencias-polish-applied]"
+          git push origin HEAD:fix/incidencias-polish-attachments-avatars

@@ -1,0 +1,1127 @@
+name: Incidencias admin ticket editor
+
+on:
+  push:
+    branches:
+      - feat/incidencias-admin-ticket-editor
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[incidencias-admin-editor-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/incidencias-admin-ticket-editor
+          fetch-depth: 0
+
+      - name: Apply canonical admin editor
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly 1 match, found {count}")
+              return text.replace(old, new, 1)
+
+          # -------------------------------------------------
+          # CREATE TEMPLATE · consume canonical option source
+          # -------------------------------------------------
+          path = Path('src/views/incidencias/incidencias.template.create.js')
+          text = path.read_text(encoding='utf-8')
+
+          text = replace_once(
+              text,
+              '''========================================================= */
+
+export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =
+  "incidencias.template.create.extreme.v21.role-aware";
+''',
+              '''========================================================= */
+
+import {
+  INCIDENCIA_CATEGORY_OPTIONS,
+  INCIDENCIA_PRIORITY_OPTIONS,
+} from "./incidencias.options.js";
+
+export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =
+  "incidencias.template.create.extreme.v22.canonical-options";
+''',
+              'create imports/version',
+          )
+
+          text = replace_once(
+              text,
+              '''const CATEGORY_OPTIONS = Object.freeze([
+  { value: "general", label: "General" },
+  { value: "technical", label: "Técnica" },
+  { value: "billing", label: "Facturación" },
+  { value: "access", label: "Acceso" },
+  { value: "hardware", label: "Hardware" },
+  { value: "software", label: "Software" },
+  { value: "account", label: "Cuenta" },
+  { value: "network", label: "Redes" },
+  { value: "documentation", label: "Documentación" },
+  { value: "sales", label: "Ventas" },
+]);
+
+const PRIORITY_OPTIONS = Object.freeze([
+  { value: "low", label: "Baja" },
+  { value: "medium", label: "Media" },
+  { value: "high", label: "Alta" },
+  { value: "urgent", label: "Urgente" },
+]);
+''',
+              '''const CATEGORY_OPTIONS = INCIDENCIA_CATEGORY_OPTIONS;
+const PRIORITY_OPTIONS = INCIDENCIA_PRIORITY_OPTIONS;
+''',
+              'create option blocks',
+          )
+
+          path.write_text(text, encoding='utf-8')
+
+          # -------------------------------------------------
+          # DETAIL TEMPLATE · admin-only classification editor
+          # -------------------------------------------------
+          path = Path('src/views/incidencias/incidencias.template.modal.js')
+          text = path.read_text(encoding='utf-8')
+
+          text = replace_once(
+              text,
+              '''========================================================= */
+
+export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
+  "incidencias.template.modal.extreme.v29.user-contact-privacy";
+''',
+              '''========================================================= */
+
+import {
+  INCIDENCIA_STATUS_OPTIONS,
+  INCIDENCIA_PRIORITY_OPTIONS,
+  INCIDENCIA_CATEGORY_OPTIONS,
+  normalizeIncidenciaStatus,
+  normalizeIncidenciaPriority,
+  normalizeIncidenciaCategory,
+} from "./incidencias.options.js";
+
+export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
+  "incidencias.template.modal.extreme.v30.admin-ticket-editor";
+''',
+              'modal imports/version',
+          )
+
+          text = replace_once(
+              text,
+              '''  CLOSE: "detail-close",
+  COPY_ID: "detail-copy-id",
+
+  COMMENT_SUBMIT: "detail-submit-update",
+''',
+              '''  CLOSE: "detail-close",
+  COPY_ID: "detail-copy-id",
+  ADMIN_SAVE: "detail-admin-save",
+
+  COMMENT_SUBMIT: "detail-submit-update",
+''',
+              'modal admin action',
+          )
+
+          marker = '''/* =========================================================
+   CONTENT
+========================================================= */
+
+function renderDescription(
+'''
+
+          admin_editor = '''/* =========================================================
+   CONTENT
+========================================================= */
+
+function renderAdminSelect({
+  label = "",
+  name = "",
+  value = "",
+  options = [],
+  disabled = false,
+} = {}) {
+  return `
+    <label class="incidencias-modal-admin-field">
+      <span class="incidencias-modal-admin-label">${escapeHtml(label)}</span>
+      <span class="incidencias-modal-admin-select-wrap">
+        <select
+          class="incidencias-modal-admin-select"
+          name="${attr(name)}"
+          data-detail-field="${attr(name)}"
+          ${disabledAttrs(disabled, false)}
+        >
+          ${safeArray(options)
+            .map((item) => `
+              <option
+                value="${attr(item.value)}"
+                ${item.value === value ? "selected" : ""}
+              >${escapeHtml(item.label)}</option>
+            `)
+            .join("")}
+        </select>
+        <span class="incidencias-modal-admin-select-chevron" aria-hidden="true">⌄</span>
+      </span>
+    </label>
+  `;
+}
+
+function renderAdminTicketEditor(vm = {}) {
+  if (!vm.admin) {
+    return "";
+  }
+
+  const detail = safeObject(vm.detail);
+
+  const status = normalizeIncidenciaStatus(
+    vm.status,
+    "open"
+  );
+
+  const priority = normalizeIncidenciaPriority(
+    getPriority(detail),
+    "medium"
+  );
+
+  const category = normalizeIncidenciaCategory(
+    getCategory(detail),
+    "general"
+  );
+
+  return `
+    <section
+      class="incidencias-modal-admin-editor"
+      data-admin-ticket-editor-section="true"
+      aria-labelledby="incidencias-modal-admin-editor-title"
+    >
+      <div class="incidencias-modal-section-head incidencias-modal-admin-head">
+        <div>
+          <h3 id="incidencias-modal-admin-editor-title">Gestión del ticket</h3>
+          <span>Estado, prioridad y tipo de incidencia</span>
+        </div>
+        <span class="incidencias-modal-admin-badge">Administrador</span>
+      </div>
+
+      <form
+        class="incidencias-modal-admin-form"
+        data-admin-ticket-editor="true"
+        autocomplete="off"
+      >
+        <div class="incidencias-modal-admin-grid">
+          ${renderAdminSelect({
+            label: "Estado",
+            name: "status",
+            value: status,
+            options: INCIDENCIA_STATUS_OPTIONS,
+            disabled: vm.submitting,
+          })}
+
+          ${renderAdminSelect({
+            label: "Prioridad",
+            name: "priority",
+            value: priority,
+            options: INCIDENCIA_PRIORITY_OPTIONS,
+            disabled: vm.submitting,
+          })}
+
+          ${renderAdminSelect({
+            label: "Tipo de incidencia",
+            name: "category",
+            value: category,
+            options: INCIDENCIA_CATEGORY_OPTIONS,
+            disabled: vm.submitting,
+          })}
+        </div>
+
+        <button
+          type="button"
+          class="incidencias-modal-admin-save-btn"
+          data-detail-action="${DETAIL_ACTIONS.ADMIN_SAVE}"
+          ${disabledAttrs(vm.submitting, vm.submitting)}
+        >
+          ${vm.submitting && vm.operation === "admin-update"
+            ? renderInlineSpinner("Guardando...")
+            : "Guardar cambios"}
+        </button>
+      </form>
+    </section>
+  `;
+}
+
+function renderDescription(
+'''
+
+          text = replace_once(
+              text,
+              marker,
+              admin_editor,
+              'modal admin editor functions',
+          )
+
+          text = replace_once(
+              text,
+              '''    </div>
+
+    ${renderDescription(detail)}
+
+    ${vm.admin ? renderContactBlock(detail) : ""}
+''',
+              '''    </div>
+
+    ${renderAdminTicketEditor(vm)}
+
+    ${renderDescription(detail)}
+
+    ${vm.admin ? renderContactBlock(detail) : ""}
+''',
+              'modal admin editor placement',
+          )
+
+          text = replace_once(
+              text,
+              '''    fields: [
+      "comment",
+      "attachments",
+    ],
+
+    limits: {
+''',
+              '''    fields: [
+      "comment",
+      "attachments",
+    ],
+
+    adminFields: [
+      "status",
+      "priority",
+      "category",
+    ],
+
+    limits: {
+''',
+              'modal snapshot admin fields',
+          )
+
+          path.write_text(text, encoding='utf-8')
+
+          # -------------------------------------------------
+          # CONTROLLER · one admin action, domain-aware status transitions
+          # -------------------------------------------------
+          path = Path('src/views/incidencias/index.js')
+          text = path.read_text(encoding='utf-8')
+
+          text = replace_once(
+              text,
+              '''  createIncidencia,
+  loadIncidenciaDetail,
+  commentIncidencia,
+''',
+              '''  createIncidencia,
+  updateIncidencia,
+  loadIncidenciaDetail,
+  commentIncidencia,
+''',
+              'index update import',
+          )
+
+          text = replace_once(
+              text,
+              '''import {
+  renderIncidenciasDetailModal,
+  DETAIL_ACTIONS,
+  validateDetailUpdate,
+  getDetailTemplateSnapshot,
+} from "./incidencias.template.modal.js";
+
+export const INCIDENCIAS_INDEX_VERSION =
+  "incidencias.index.extreme.v30.attachments-sort";
+''',
+              '''import {
+  renderIncidenciasDetailModal,
+  DETAIL_ACTIONS,
+  validateDetailUpdate,
+  getDetailTemplateSnapshot,
+} from "./incidencias.template.modal.js";
+
+import {
+  normalizeIncidenciaStatus,
+  normalizeIncidenciaPriority,
+  normalizeIncidenciaCategory,
+} from "./incidencias.options.js";
+
+export const INCIDENCIAS_INDEX_VERSION =
+  "incidencias.index.extreme.v31.admin-ticket-editor";
+''',
+              'index options import/version',
+          )
+
+          text = replace_once(
+              text,
+              '''          "[data-modal-updated='true']",
+          ".incidencias-modal-meta-grid",
+          ".incidencias-modal-description-section",
+''',
+              '''          "[data-modal-updated='true']",
+          ".incidencias-modal-meta-grid",
+          ".incidencias-modal-admin-editor",
+          ".incidencias-modal-description-section",
+''',
+              'index detail patch selector',
+          )
+
+          marker = '''  function ticketIsAlreadyClosed() {
+'''
+
+          admin_logic = '''  function getCurrentAdminClassification() {
+    const detail =
+      safeObject(
+        detailModal.detail,
+        {}
+      );
+
+    return {
+      status:
+        normalizeIncidenciaStatus(
+          first(
+            detail.status,
+            detail.estado,
+            detail.statusKey,
+            detail.lifecycle?.status,
+            "open"
+          ),
+          "open"
+        ),
+
+      priority:
+        normalizeIncidenciaPriority(
+          first(
+            detail.priority,
+            detail.prioridad,
+            detail.severity,
+            "medium"
+          ),
+          "medium"
+        ),
+
+      category:
+        normalizeIncidenciaCategory(
+          first(
+            detail.category,
+            detail.categoria,
+            detail.tipo,
+            detail.type,
+            "general"
+          ),
+          "general"
+        ),
+    };
+  }
+
+  function readAdminTicketEditor(
+    formNode = null
+  ) {
+    if (!formNode) {
+      return null;
+    }
+
+    const status =
+      normalizeIncidenciaStatus(
+        readField(
+          formNode,
+          "status"
+        ),
+        ""
+      );
+
+    const priority =
+      normalizeIncidenciaPriority(
+        readField(
+          formNode,
+          "priority"
+        ),
+        ""
+      );
+
+    const category =
+      normalizeIncidenciaCategory(
+        readField(
+          formNode,
+          "category"
+        ),
+        ""
+      );
+
+    if (
+      !status ||
+      !priority ||
+      !category
+    ) {
+      return null;
+    }
+
+    return {
+      status,
+      priority,
+      category,
+    };
+  }
+
+  async function saveAdminTicketChanges(
+    formNode = null
+  ) {
+    if (
+      !detailModal.open ||
+      detailModal.submitting
+    ) {
+      return false;
+    }
+
+    if (!isAdmin()) {
+      detailModal.feedbackMessage =
+        "Solo un administrador puede modificar la clasificación de una incidencia.";
+      detailModal.feedbackType =
+        "error";
+      renderModals({
+        immediate: true,
+      });
+      return false;
+    }
+
+    const ticketId =
+      getTicketId(
+        detailModal.detail
+      );
+
+    const desired =
+      readAdminTicketEditor(
+        formNode
+      );
+
+    if (
+      !ticketId ||
+      !desired
+    ) {
+      detailModal.feedbackMessage =
+        "No se pudieron leer los cambios administrativos del ticket.";
+      detailModal.feedbackType =
+        "error";
+      renderModals({
+        immediate: true,
+      });
+      return false;
+    }
+
+    const current =
+      getCurrentAdminClassification();
+
+    const statusChanged =
+      desired.status !==
+      current.status;
+
+    const priorityChanged =
+      desired.priority !==
+      current.priority;
+
+    const categoryChanged =
+      desired.category !==
+      current.category;
+
+    if (
+      !statusChanged &&
+      !priorityChanged &&
+      !categoryChanged
+    ) {
+      detailModal.feedbackMessage =
+        "No hay cambios administrativos pendientes.";
+      detailModal.feedbackType =
+        "info";
+      renderModals({
+        immediate: true,
+        focusSelector:
+          ".incidencias-modal-admin-save-btn",
+      });
+      return true;
+    }
+
+    detailModal.submitting = true;
+    detailModal.operation =
+      "admin-update";
+    detailModal.closeConfirmOpen = false;
+    detailModal.feedbackMessage = "";
+    detailModal.feedbackType = "info";
+
+    renderModals({
+      immediate: true,
+    });
+
+    let nextDetail =
+      detailModal.detail;
+
+    let reopened = false;
+
+    try {
+      /*
+         Un ticket cerrado se reabre por el endpoint canónico /reopen.
+         Así conservamos lifecycle/historial del backend. Si el estado final
+         solicitado es Pendiente, primero se reabre y después se aplica el
+         estado pending junto al resto de cambios.
+      */
+      if (
+        current.status === "closed" &&
+        desired.status !== "closed"
+      ) {
+        const reopenResult =
+          await reopenIncidencia(
+            ticketId
+          );
+
+        if (!reopenResult) {
+          throw new Error(
+            "El backend no confirmó la reapertura de la incidencia."
+          );
+        }
+
+        nextDetail =
+          mergeTicketData(
+            nextDetail || {},
+            reopenResult
+          );
+
+        reopened = true;
+      }
+
+      const changes = {};
+
+      if (priorityChanged) {
+        changes.priority =
+          desired.priority;
+        changes.prioridad =
+          desired.priority;
+      }
+
+      if (categoryChanged) {
+        changes.category =
+          desired.category;
+        changes.categoria =
+          desired.category;
+        changes.tipo =
+          desired.category;
+        changes.type =
+          desired.category;
+      }
+
+      const effectiveStatus =
+        reopened
+          ? "open"
+          : current.status;
+
+      if (
+        desired.status !==
+        effectiveStatus
+      ) {
+        changes.status =
+          desired.status;
+        changes.estado =
+          desired.status;
+      }
+
+      if (
+        Object.keys(changes).length
+      ) {
+        let updated =
+          await updateIncidencia(
+            ticketId,
+            changes
+          );
+
+        /*
+           Compatibilidad con PATCH 204: refrescamos únicamente si el
+           backend no devuelve DTO. No fabricamos el estado local.
+        */
+        if (!updated) {
+          updated =
+            await loadIncidenciaDetail(
+              ticketId,
+              {
+                force: true,
+                cache: false,
+              }
+            );
+        }
+
+        if (!updated) {
+          throw new Error(
+            "El backend no devolvió la incidencia actualizada."
+          );
+        }
+
+        nextDetail =
+          mergeTicketData(
+            nextDetail || {},
+            updated
+          );
+      }
+
+      detailModal.detail =
+        nextDetail;
+      detailModal.submitting = false;
+      detailModal.operation = "";
+      detailModal.feedbackMessage =
+        "Estado, prioridad y tipo actualizados correctamente.";
+      detailModal.feedbackType =
+        "success";
+
+      items =
+        upsertByTicketId(
+          items,
+          nextDetail
+        );
+
+      render({
+        skipModals: true,
+      });
+
+      renderModals({
+        immediate: true,
+        focusSelector:
+          ".incidencias-modal-admin-save-btn",
+      });
+
+      return true;
+    } catch (adminUpdateError) {
+      detailModal.detail =
+        nextDetail;
+      detailModal.submitting = false;
+      detailModal.operation = "";
+
+      items =
+        upsertByTicketId(
+          items,
+          nextDetail
+        );
+
+      detailModal.feedbackMessage =
+        safeError(
+          adminUpdateError,
+          reopened
+            ? "La incidencia se reabrió, pero no se pudieron guardar el resto de cambios."
+            : "No se pudieron guardar los cambios administrativos."
+        );
+
+      detailModal.feedbackType =
+        "error";
+
+      render({
+        skipModals: true,
+      });
+
+      renderModals({
+        immediate: true,
+        focusSelector:
+          ".incidencias-modal-admin-save-btn",
+      });
+
+      return false;
+    }
+  }
+
+  function ticketIsAlreadyClosed() {
+'''
+
+          text = replace_once(
+              text,
+              marker,
+              admin_logic,
+              'index admin editor logic',
+          )
+
+          text = replace_once(
+              text,
+              '''    if (
+      type ===
+      DETAIL_ACTIONS.COMMENT_SUBMIT
+    ) {
+      return submitDetailUpdate();
+    }
+
+    if (
+      type ===
+      DETAIL_ACTIONS.TICKET_CLOSE
+''',
+              '''    if (
+      type ===
+      DETAIL_ACTIONS.COMMENT_SUBMIT
+    ) {
+      return submitDetailUpdate();
+    }
+
+    if (
+      type ===
+      DETAIL_ACTIONS.ADMIN_SAVE
+    ) {
+      return saveAdminTicketChanges(
+        node?.closest?.(
+          "[data-admin-ticket-editor='true']"
+        ) ||
+        node?.closest?.("form")
+      );
+    }
+
+    if (
+      type ===
+      DETAIL_ACTIONS.TICKET_CLOSE
+''',
+              'index admin save action',
+          )
+
+          path.write_text(text, encoding='utf-8')
+
+          # -------------------------------------------------
+          # DETAIL CSS · native component inside the existing design system
+          # -------------------------------------------------
+          path = Path('src/css/views/incidencias/detail.css')
+          text = path.read_text(encoding='utf-8')
+
+          text = replace_once(
+              text,
+              '''.incidencias-modal-meta-card,
+.incidencias-modal-description-section,
+''',
+              '''.incidencias-modal-meta-card,
+.incidencias-modal-admin-editor,
+.incidencias-modal-description-section,
+''',
+              'css shared card selector',
+          )
+
+          text = replace_once(
+              text,
+              '''.incidencias-modal-history-jump-btn,
+.incidencias-modal-close-btn,
+.incidencias-modal-preview-btn,
+''',
+              '''.incidencias-modal-history-jump-btn,
+.incidencias-modal-close-btn,
+.incidencias-modal-admin-save-btn,
+.incidencias-modal-preview-btn,
+''',
+              'css shared button selector',
+          )
+
+          text = replace_once(
+              text,
+              '''.incidencias-modal-close-ticket-btn:focus-visible,
+.incidencias-modal-preview-btn:focus-visible,
+''',
+              '''.incidencias-modal-close-ticket-btn:focus-visible,
+.incidencias-modal-admin-save-btn:focus-visible,
+.incidencias-modal-preview-btn:focus-visible,
+''',
+              'css admin save focus',
+          )
+
+          text = replace_once(
+              text,
+              '''.incidencias-modal-close-ticket-btn:disabled,
+.incidencias-modal-preview-btn:disabled,
+''',
+              '''.incidencias-modal-close-ticket-btn:disabled,
+.incidencias-modal-admin-save-btn:disabled,
+.incidencias-modal-preview-btn:disabled,
+''',
+              'css admin save disabled',
+          )
+
+          text = replace_once(
+              text,
+              '''.incidencias-modal-description-section,
+.incidencias-modal-contact-section,
+.incidencias-modal-current-files,
+.incidencias-modal-history-section {
+  padding: var(--space-md);
+}
+''',
+              '''.incidencias-modal-admin-editor,
+.incidencias-modal-description-section,
+.incidencias-modal-contact-section,
+.incidencias-modal-current-files,
+.incidencias-modal-history-section {
+  padding: var(--space-md);
+}
+''',
+              'css admin editor padding',
+          )
+
+          marker = '''/* =========================================================
+   TECHNICIAN
+========================================================= */
+'''
+
+          admin_css = '''/* =========================================================
+   ADMIN TICKET EDITOR
+========================================================= */
+
+.incidencias-modal-admin-editor {
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.incidencias-modal-admin-head {
+  margin-block-end: 0;
+}
+
+.incidencias-modal-admin-head > div {
+  min-inline-size: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.incidencias-modal-admin-head > div > span {
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-medium);
+  line-height: 1.35;
+}
+
+.incidencias-modal-admin-badge {
+  min-block-size: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 9px;
+  border: 1px solid var(--badge-border);
+  border-radius: var(--radius-pill);
+  background: var(--badge-bg);
+  color: var(--badge-text);
+  font-size: 9px;
+  font-weight: var(--weight-bold);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.incidencias-modal-admin-form {
+  min-inline-size: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--space-sm);
+}
+
+.incidencias-modal-admin-grid {
+  min-inline-size: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-sm);
+}
+
+.incidencias-modal-admin-field {
+  min-inline-size: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.incidencias-modal-admin-label {
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-bold);
+  line-height: 1.2;
+}
+
+.incidencias-modal-admin-select-wrap {
+  position: relative;
+  min-inline-size: 0;
+  display: block;
+}
+
+.incidencias-modal-admin-select {
+  appearance: none;
+  -webkit-appearance: none;
+  inline-size: 100%;
+  min-inline-size: 0;
+  min-block-size: var(--input-height);
+  margin: 0;
+  padding: 0 38px 0 13px;
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
+  outline: none;
+  background: var(--input-bg);
+  color: var(--input-text, var(--text-strong));
+  box-shadow: var(--input-shadow, none);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-md);
+  font-weight: var(--weight-medium);
+  line-height: 1.4;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+
+.incidencias-modal-admin-select:hover:not(:disabled) {
+  background: var(--input-bg-hover);
+  border-color: var(--input-border-hover);
+}
+
+.incidencias-modal-admin-select:focus-visible {
+  background: var(--input-bg-focus);
+  border-color: var(--input-border-focus);
+  box-shadow: var(--focus-ring);
+}
+
+.incidencias-modal-admin-select:disabled {
+  cursor: not-allowed;
+  background: var(--input-disabled-bg);
+  opacity: .62;
+}
+
+.incidencias-modal-admin-select-chevron {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-end: 13px;
+  transform: translateY(-54%);
+  pointer-events: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.incidencias-modal-admin-save-btn {
+  min-block-size: var(--input-height);
+  padding-inline: var(--space-md);
+  border-color: var(--btn-primary-border);
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  box-shadow: var(--btn-primary-shadow);
+  font-weight: var(--weight-bold);
+}
+
+.incidencias-modal-admin-save-btn:hover:not(:disabled) {
+  border-color: var(--btn-primary-border);
+  background: var(--btn-primary-bg-hover);
+  color: var(--btn-primary-text);
+  transform: translateY(-1px);
+}
+
+.incidencias-modal-admin-save-btn:active:not(:disabled) {
+  background: var(--btn-primary-bg-active);
+  transform: translateY(0);
+}
+
+/* =========================================================
+   TECHNICIAN
+========================================================= */
+'''
+
+          text = replace_once(
+              text,
+              marker,
+              admin_css,
+              'css admin editor section',
+          )
+
+          text = replace_once(
+              text,
+              '''  .incidencias-modal-contact-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .incidencias-modal-preview-head {
+''',
+              '''  .incidencias-modal-admin-form {
+    grid-template-columns: 1fr;
+  }
+
+  .incidencias-modal-admin-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .incidencias-modal-admin-save-btn {
+    justify-self: stretch;
+    inline-size: 100%;
+  }
+
+  .incidencias-modal-contact-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .incidencias-modal-preview-head {
+''',
+              'css admin responsive 720',
+          )
+
+          text = replace_once(
+              text,
+              '''  .incidencias-modal-description-section,
+  .incidencias-modal-contact-section,
+  .incidencias-modal-current-files,
+''',
+              '''  .incidencias-modal-admin-editor,
+  .incidencias-modal-description-section,
+  .incidencias-modal-contact-section,
+  .incidencias-modal-current-files,
+''',
+              'css admin responsive 540 padding',
+          )
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          git diff --check
+          node --check src/views/incidencias/incidencias.options.js
+          node --check src/views/incidencias/incidencias.template.create.js
+          node --check src/views/incidencias/incidencias.template.modal.js
+          node --check src/views/incidencias/index.js
+
+          python - <<'PY'
+          from pathlib import Path
+          options = Path('src/views/incidencias/incidencias.options.js').read_text(encoding='utf-8')
+          modal = Path('src/views/incidencias/incidencias.template.modal.js').read_text(encoding='utf-8')
+          index = Path('src/views/incidencias/index.js').read_text(encoding='utf-8')
+          css = Path('src/css/views/incidencias/detail.css').read_text(encoding='utf-8')
+
+          required = [
+              'option("pending", "Pendiente")',
+              'option("open", "Abierta")',
+              'option("closed", "Cerrada")',
+              'option("low", "Baja")',
+              'option("medium", "Media")',
+              'option("high", "Alta")',
+              'option("urgent", "Urgente")',
+              'option("sales", "Ventas")',
+          ]
+          for needle in required:
+              assert needle in options, needle
+
+          assert 'data-admin-ticket-editor="true"' in modal
+          assert 'DETAIL_ACTIONS.ADMIN_SAVE' in index
+          assert 'await updateIncidencia(' in index
+          assert 'await reopenIncidencia(' in index
+          assert '.incidencias-modal-admin-editor' in css
+          assert 'var(--input-bg)' in css
+          assert 'var(--btn-primary-bg)' in css
+          PY
+
+      - name: Commit product changes
+        shell: bash
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/views/incidencias/incidencias.template.create.js \
+                  src/views/incidencias/incidencias.template.modal.js \
+                  src/views/incidencias/index.js \
+                  src/css/views/incidencias/detail.css
+          git commit -m 'feat(incidencias): editor admin de estado prioridad y tipo [incidencias-admin-editor-applied]'
+          git push origin HEAD:feat/incidencias-admin-ticket-editor

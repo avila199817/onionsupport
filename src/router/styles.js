@@ -15,7 +15,7 @@
 ========================================================= */
 
 export const ROUTE_STYLES_VERSION =
-  "route-styles.v6-cuenta-legacy-alias";
+  "route-styles.v7-ui-system-v4";
 
 const MODE_ATTRIBUTE =
   "data-css-route-mode";

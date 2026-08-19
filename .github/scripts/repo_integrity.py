@@ -404,6 +404,52 @@ def validate_ui_foundation_contract(errors: list[str]) -> None:
                 )
 
 
+def validate_ui_system_v4_contract(errors: list[str]) -> None:
+    """Keep the post-cleanup UI architecture from regressing into bridge/patch layers."""
+    app_text = (SRC / "css" / "app.css").read_text(encoding="utf-8")
+    index_text = (ROOT / "index.html").read_text(encoding="utf-8")
+    route_styles_text = (SRC / "router" / "styles.js").read_text(encoding="utf-8")
+    correo_viewport_text = (SRC / "css" / "views" / "correo" / "viewport.css").read_text(encoding="utf-8")
+    sidebar_text = (SRC / "css" / "layout" / "sidebar.css").read_text(encoding="utf-8")
+
+    dead_paths = (
+        SRC / "css" / "layout" / "mobile-shell.css",
+        SRC / "css" / "layout" / "correo-sidebar.css",
+        SRC / "css" / "views" / "correo" / "fullheight.css",
+        SRC / "features" / "mobile-shell" / "index.js",
+    )
+    for path in dead_paths:
+        if path.exists():
+            errors.append(f"{path.relative_to(ROOT)} :: arquitectura legacy no debe reaparecer")
+
+    for forbidden in ("correo-sidebar.css", "correo/fullheight.css", "mobile-shell.css"):
+        if forbidden in app_text:
+            errors.append(f"src/css/app.css :: import legacy prohibido: {forbidden}")
+
+    if '@import url("./layout/chrome.css") layer(layout);' not in app_text:
+        errors.append("src/css/app.css :: chrome.css debe ser la autoridad final de layout")
+
+    if '/src/ui/chrome/index.js' not in index_text:
+        errors.append("index.html :: debe cargar App Chrome canónico directamente")
+    if '/src/features/mobile-shell/index.js' in index_text:
+        errors.append("index.html :: bridge mobile-shell prohibido")
+
+    for snippet in (
+        'correo: Object.freeze([',
+        '"/src/css/views/correo/index.css"',
+        '"/src/css/views/correo/viewport.css"',
+    ):
+        if snippet not in route_styles_text:
+            errors.append(f"src/router/styles.js :: falta contrato CSS de Correo: {snippet}")
+    if "correo/fullheight.css" in route_styles_text:
+        errors.append("src/router/styles.js :: Correo no puede recuperar fullheight.css")
+
+    if "CONSOLIDATED HEIGHT / DENSITY CONTRACT" not in correo_viewport_text:
+        errors.append("src/css/views/correo/viewport.css :: falta contrato consolidado de viewport")
+    if 'data-sidebar-key="correo"' not in sidebar_text:
+        errors.append("src/css/layout/sidebar.css :: falta icono integrado de Correo")
+
+
 def validate_paths(errors: list[str]) -> None:
     for root in (SRC, ROOT / ".github"):
         if not root.exists():
@@ -440,6 +486,7 @@ def main() -> int:
     validate_api_transport_contract(errors)
     validate_css_references(errors)
     validate_ui_foundation_contract(errors)
+    validate_ui_system_v4_contract(errors)
     validate_known_dead_paths(errors)
 
     unique_errors = list(dict.fromkeys(errors))

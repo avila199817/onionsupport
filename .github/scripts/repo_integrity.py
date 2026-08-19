@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Onion Support repository integrity checks.
 
-Dependency-free and intentionally conservative: validate only references that can
-be resolved statically without executing the SPA or guessing runtime values.
+Dependency-free and intentionally conservative: validate only references and
+contracts that can be resolved statically without executing the SPA or guessing
+runtime values.
 """
 
 from __future__ import annotations
@@ -30,6 +31,10 @@ IMPORT_META_URL_PATTERN = re.compile(
 )
 ROOT_ASSET_PATTERN = re.compile(
     r"['\"](/src/(?:css|media)/[^'\"?#]+(?:\?[^'\"#]*)?(?:#[^'\"]*)?)['\"]"
+)
+FIRST_HELPER_PATTERN = re.compile(
+    r"function\s+first\s*\(\s*\.\.\.values\s*\)\s*\{(?P<body>.*?)\n\}",
+    re.DOTALL,
 )
 EXTERNAL_SCHEMES = ("http://", "https://", "data:", "blob:")
 
@@ -94,6 +99,24 @@ def validate_js_references(errors: list[str]) -> None:
                 record_missing(errors, js_file, spec, "asset /src")
 
 
+def validate_first_helpers(errors: list[str]) -> None:
+    """A `first()` selector must preserve arrays as values, never flatten them.
+
+    Flattening its variadic arguments silently turns a domain collection into its
+    first element. We have already hit this class of bug in Facturas/Incidencias,
+    so it is now a repository-level invariant.
+    """
+
+    for js_file in sorted(SRC.rglob("*.js")):
+        text = js_file.read_text(encoding="utf-8")
+        for match in FIRST_HELPER_PATTERN.finditer(text):
+            body = match.group("body")
+            if "values.flat(" in body or "values.flatMap(" in body:
+                errors.append(
+                    f"{js_file.relative_to(ROOT)} :: first(...values) no puede aplanar arrays"
+                )
+
+
 def validate_css_references(errors: list[str]) -> None:
     for css_file in sorted((SRC / "css").rglob("*.css")):
         text = css_file.read_text(encoding="utf-8")
@@ -135,6 +158,7 @@ def main() -> int:
     errors: list[str] = []
     validate_paths(errors)
     validate_js_references(errors)
+    validate_first_helpers(errors)
     validate_css_references(errors)
     validate_known_dead_paths(errors)
 

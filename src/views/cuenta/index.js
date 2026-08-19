@@ -245,7 +245,7 @@ function cleanText(
 function first(...values) {
   for (
     const value of
-    values.flat(Infinity)
+    values
   ) {
     if (
       value === undefined ||

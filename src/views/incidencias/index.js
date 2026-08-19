@@ -74,7 +74,7 @@ import {
 } from "./incidencias.options.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.extreme.v31.admin-ticket-editor";
+  "incidencias.index.extreme.v32.single-detail-submit";
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
@@ -1266,7 +1266,8 @@ function createIncidenciasController(
       ).trim() ||
       safeArray(
         detailModal.pendingFiles
-      ).length
+      ).length ||
+      hasPendingAdminChanges()
     );
   }
 
@@ -1344,7 +1345,7 @@ function createIncidenciasController(
 
     try {
       return window.confirm(
-        "Tienes una actualización sin enviar. Si cierras ahora, perderás el comentario o los archivos seleccionados. ¿Quieres descartarla?"
+        "Tienes cambios sin guardar. Si cierras ahora, perderás el comentario, los archivos seleccionados o los cambios de gestión del ticket. ¿Quieres descartarlos?"
       );
     } catch {
       return false;
@@ -4609,8 +4610,8 @@ function createIncidenciasController(
     return openDetailHistory();
   }
 
-  function getCurrentAdminClassification() {
-    const detail = safeObject(detailModal.detail, {});
+  function getCurrentAdminClassification(sourceDetail = detailModal.detail) {
+    const detail = safeObject(sourceDetail, {});
 
     return {
       status: normalizeIncidenciaStatus(
@@ -4640,7 +4641,29 @@ function createIncidenciasController(
       : null;
   }
 
-  async function saveAdminTicketChanges(formNode = null) {
+  function adminClassificationChanged(
+    desired = null,
+    detail = detailModal.detail
+  ) {
+    if (!isAdmin() || !isObject(desired)) return false;
+
+    const current = getCurrentAdminClassification(detail);
+
+    return (
+      desired.status !== current.status ||
+      desired.priority !== current.priority ||
+      desired.category !== current.category
+    );
+  }
+
+  function hasPendingAdminChanges() {
+    return adminClassificationChanged(
+      detailModal.adminDraft,
+      detailModal.detail
+    );
+  }
+
+  async function saveAdminTicketChanges(formNode = null, desiredOverride = null, options = {}) {
     if (!detailModal.open || detailModal.submitting) return false;
 
     if (!isAdmin()) {
@@ -4651,7 +4674,9 @@ function createIncidenciasController(
     }
 
     const ticketId = getTicketId(detailModal.detail);
-    const desired = readAdminTicketEditor(formNode);
+    const desired = isObject(desiredOverride)
+      ? desiredOverride
+      : readAdminTicketEditor(formNode);
 
     if (!ticketId || !desired) {
       detailModal.feedbackMessage = "No se pudieron leer los cambios administrativos del ticket.";
@@ -4661,14 +4686,16 @@ function createIncidenciasController(
     }
 
     const current = getCurrentAdminClassification();
-    const statusChanged = desired.status !== current.status;
+    const forceStatusWrite = options.forceStatusWrite === true;
+    const statusChanged = forceStatusWrite || desired.status !== current.status;
     const priorityChanged = desired.priority !== current.priority;
     const categoryChanged = desired.category !== current.category;
 
     if (!statusChanged && !priorityChanged && !categoryChanged) {
+      detailModal.adminDraft = null;
       detailModal.feedbackMessage = "No hay cambios administrativos pendientes.";
       detailModal.feedbackType = "info";
-      renderModals({ immediate: true, focusSelector: ".incidencias-modal-admin-save-btn" });
+      renderModals({ immediate: true, focusSelector: DETAIL_MODAL_PANEL_SELECTOR });
       return true;
     }
 
@@ -4684,7 +4711,7 @@ function createIncidenciasController(
     let reopened = false;
 
     try {
-      if (current.status === "closed" && desired.status !== "closed") {
+      if (!forceStatusWrite && current.status === "closed" && desired.status !== "closed") {
         const reopenResult = await reopenIncidencia(ticketId);
         if (!reopenResult) {
 throw new Error("El backend no confirmó la reapertura de la incidencia.");
@@ -4708,7 +4735,7 @@ throw new Error("El backend no confirmó la reapertura de la incidencia.");
       }
 
       const effectiveStatus = reopened ? "open" : current.status;
-      if (desired.status !== effectiveStatus) {
+      if (forceStatusWrite || desired.status !== effectiveStatus) {
         changes.status = desired.status;
         changes.estado = desired.status;
       }
@@ -4733,7 +4760,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
 
       items = upsertByTicketId(items, nextDetail);
       render({ skipModals: true });
-      renderModals({ immediate: true, focusSelector: ".incidencias-modal-admin-save-btn" });
+      renderModals({ immediate: true, focusSelector: DETAIL_MODAL_PANEL_SELECTOR });
       return true;
     } catch (adminUpdateError) {
       detailModal.detail = nextDetail;
@@ -4750,9 +4777,73 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
       detailModal.feedbackType = "error";
 
       render({ skipModals: true });
-      renderModals({ immediate: true, focusSelector: ".incidencias-modal-admin-save-btn" });
+      renderModals({ immediate: true, focusSelector: DETAIL_MODAL_PANEL_SELECTOR });
       return false;
     }
+  }
+
+  async function submitDetailChanges() {
+    if (detailModal.submitting) return false;
+
+    const editor =
+      modalHost?.querySelector?.(
+        "[data-admin-ticket-editor='true']"
+      ) || null;
+
+    const liveAdminDraft =
+      isAdmin()
+        ? (
+            readAdminTicketEditor(editor) ||
+            (isObject(detailModal.adminDraft)
+              ? detailModal.adminDraft
+              : null)
+          )
+        : null;
+
+    if (liveAdminDraft) {
+      detailModal.adminDraft = { ...liveAdminDraft };
+    }
+
+    const hasAdminChanges =
+      adminClassificationChanged(
+        liveAdminDraft,
+        detailModal.detail
+      );
+
+    const hasContentDraft =
+      Boolean(
+        multilineValue(
+          detailModal.commentDraft
+        ).trim() ||
+        safeArray(
+          detailModal.pendingFiles
+        ).length
+      );
+
+    if (!hasAdminChanges) {
+      detailModal.adminDraft = null;
+      return submitDetailUpdate();
+    }
+
+    if (!hasContentDraft) {
+      return saveAdminTicketChanges(
+        null,
+        liveAdminDraft
+      );
+    }
+
+    const contentSaved =
+      await submitDetailUpdate();
+
+    if (!contentSaved) {
+      return false;
+    }
+
+    return saveAdminTicketChanges(
+      null,
+      liveAdminDraft,
+      { forceStatusWrite: true }
+    );
   }
 
   function ticketIsAlreadyClosed() {
@@ -5712,17 +5803,7 @@ Se quitará de la incidencia y del almacenamiento. Esta acción no se puede desh
       type ===
       DETAIL_ACTIONS.COMMENT_SUBMIT
     ) {
-      return submitDetailUpdate();
-    }
-
-    if (
-      type ===
-      DETAIL_ACTIONS.ADMIN_SAVE
-    ) {
-      return saveAdminTicketChanges(
-        node?.closest?.("[data-admin-ticket-editor='true']") ||
-        node?.closest?.("form")
-      );
+      return submitDetailChanges();
     }
 
     if (
@@ -6041,6 +6122,34 @@ Se quitará de la incidencia y del almacenamiento. Esta acción no se puede desh
         target.value = "";
       } catch {
         // noop
+      }
+
+      return;
+    }
+
+    if (
+      detailModal.open &&
+      isAdmin() &&
+      ["status", "priority", "category"].includes(field)
+    ) {
+      const editor =
+        target.closest?.(
+          "[data-admin-ticket-editor='true']"
+        ) || null;
+
+      const desired =
+        readAdminTicketEditor(editor);
+
+      if (desired) {
+        detailModal.adminDraft = { ...desired };
+        detailModal.feedbackMessage = "";
+        detailModal.feedbackType = "info";
+        syncBodyModalClass();
+
+        renderModals({
+          immediate: true,
+          focusSelector: `[data-field="${field}"]`,
+        });
       }
 
       return;

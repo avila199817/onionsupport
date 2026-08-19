@@ -19,7 +19,7 @@ import {
 } from "./incidencias.options.js";
 
 export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =
-  "incidencias.template.create.extreme.v22.canonical-options";
+  "incidencias.template.create.extreme.v23.text-only-submit";
 
 export const CREATE_ACTIONS = Object.freeze({
   CLOSE: "create-close",
@@ -900,7 +900,7 @@ export function renderIncidenciasCreateModal(input = {}) {
               <div class="inc-create-actions">
                 <span class="inc-create-actions-note">${vm.admin ? "La incidencia se añadirá al historial del cliente seleccionado." : "Podrás seguir el estado y las respuestas desde Incidencias."}</span>
                 <button id="incidencias-create-submit-btn" type="submit" data-create-action="${CREATE_ACTIONS.SUBMIT}" ${disabledAttrs(vm.submitting, vm.submitting)} class="inc-create-submit">
-                  ${vm.submitting ? `<span class="inc-create-spinner" aria-hidden="true"></span><span>Creando...</span>` : `${icon("ticket")}<span>Crear incidencia</span>`}
+                  ${vm.submitting ? `<span class="inc-create-spinner" aria-hidden="true"></span><span>Creando...</span>` : `<span>Crear incidencia</span>`}
                 </button>
               </div>
             </form>
@@ -1038,6 +1038,7 @@ export function getCreateTemplateSnapshot() {
       hiddenTargetFields: true,
       blobFieldName: "attachments",
       formEncoding: "multipart/form-data",
+      textOnlyPrimarySubmit: true,
     },
   };
 }

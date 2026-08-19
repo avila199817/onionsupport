@@ -285,7 +285,6 @@ body.incidencias-detail-open {
 
 .incidencias-modal-history-jump-btn,
 .incidencias-modal-close-btn,
-.incidencias-modal-admin-save-btn,
 .incidencias-modal-preview-btn,
 .incidencias-modal-history-back-btn,
 .incidencias-modal-view-btn,
@@ -346,7 +345,6 @@ body.incidencias-detail-open {
 .incidencias-modal-history-jump-btn:focus-visible,
 .incidencias-modal-close-btn:focus-visible,
 .incidencias-modal-close-ticket-btn:focus-visible,
-.incidencias-modal-admin-save-btn:focus-visible,
 .incidencias-modal-preview-btn:focus-visible,
 .incidencias-modal-history-back-btn:focus-visible,
 .incidencias-modal-view-btn:focus-visible,
@@ -362,7 +360,6 @@ body.incidencias-detail-open {
 .incidencias-modal-history-jump-btn:disabled,
 .incidencias-modal-close-btn:disabled,
 .incidencias-modal-close-ticket-btn:disabled,
-.incidencias-modal-admin-save-btn:disabled,
 .incidencias-modal-preview-btn:disabled,
 .incidencias-modal-history-back-btn:disabled,
 .incidencias-modal-view-btn:disabled,
@@ -623,8 +620,8 @@ body.incidencias-detail-open {
 .incidencias-modal-admin-form {
   min-inline-size: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
   gap: var(--space-sm);
 }
 
@@ -708,27 +705,6 @@ body.incidencias-detail-open {
   line-height: 1;
 }
 
-.incidencias-modal-admin-save-btn {
-  min-block-size: var(--input-height);
-  padding-inline: var(--space-md);
-  border-color: var(--btn-primary-border);
-  background: var(--btn-primary-bg);
-  color: var(--btn-primary-text);
-  box-shadow: var(--btn-primary-shadow);
-  font-weight: var(--weight-bold);
-}
-
-.incidencias-modal-admin-save-btn:hover:not(:disabled) {
-  border-color: var(--btn-primary-border);
-  background: var(--btn-primary-bg-hover);
-  color: var(--btn-primary-text);
-  transform: translateY(-1px);
-}
-
-.incidencias-modal-admin-save-btn:active:not(:disabled) {
-  background: var(--btn-primary-bg-active);
-  transform: translateY(0);
-}
 
 /* =========================================================
    TECHNICIAN
@@ -1926,10 +1902,6 @@ body.incidencias-detail-open {
     grid-template-columns: 1fr;
   }
 
-  .incidencias-modal-admin-save-btn {
-    justify-self: stretch;
-    inline-size: 100%;
-  }
 
   .incidencias-modal-contact-grid {
     grid-template-columns: 1fr;

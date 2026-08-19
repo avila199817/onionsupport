@@ -1669,10 +1669,10 @@ function healthMode(
     supported
   ) {
     return {
-      status: "healthy",
+      status: "unknown",
       result: "Disponible",
       detail:
-        "Probe expuesto por el backend.",
+        "Probe expuesto por el backend; no ejecutado en esta carga.",
     };
   }
 

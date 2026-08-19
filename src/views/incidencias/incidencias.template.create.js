@@ -13,8 +13,13 @@
    - El input de adjuntos SIEMPRE se llama attachments.
 ========================================================= */
 
+import {
+  INCIDENCIA_CATEGORY_OPTIONS,
+  INCIDENCIA_PRIORITY_OPTIONS,
+} from "./incidencias.options.js";
+
 export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =
-  "incidencias.template.create.extreme.v21.role-aware";
+  "incidencias.template.create.extreme.v22.canonical-options";
 
 export const CREATE_ACTIONS = Object.freeze({
   CLOSE: "create-close",
@@ -45,25 +50,8 @@ const ACCEPT_EXTENSIONS = Object.freeze([
 const ACCEPT_EXTENSION_SET = new Set(ACCEPT_EXTENSIONS);
 const ACCEPT_ATTRIBUTE = ACCEPT_EXTENSIONS.join(",");
 
-const CATEGORY_OPTIONS = Object.freeze([
-  { value: "general", label: "General" },
-  { value: "technical", label: "Técnica" },
-  { value: "billing", label: "Facturación" },
-  { value: "access", label: "Acceso" },
-  { value: "hardware", label: "Hardware" },
-  { value: "software", label: "Software" },
-  { value: "account", label: "Cuenta" },
-  { value: "network", label: "Redes" },
-  { value: "documentation", label: "Documentación" },
-  { value: "sales", label: "Ventas" },
-]);
-
-const PRIORITY_OPTIONS = Object.freeze([
-  { value: "low", label: "Baja" },
-  { value: "medium", label: "Media" },
-  { value: "high", label: "Alta" },
-  { value: "urgent", label: "Urgente" },
-]);
+const CATEGORY_OPTIONS = INCIDENCIA_CATEGORY_OPTIONS;
+const PRIORITY_OPTIONS = INCIDENCIA_PRIORITY_OPTIONS;
 
 const DEFAULT_FORM = Object.freeze({
   targetUserId: "",

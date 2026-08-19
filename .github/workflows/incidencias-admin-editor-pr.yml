@@ -1,0 +1,60 @@
+name: Incidencias admin editor PR
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.ref == 'feat/incidencias-admin-ticket-editor'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout head branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/incidencias-admin-ticket-editor
+          fetch-depth: 0
+
+      - name: Apply canonical product patch
+        shell: bash
+        run: |
+          awk '
+            /^[[:space:]]*python - <<'\''PY'\''$/ { capture=1; next }
+            capture && /^[[:space:]]*PY$/ { exit }
+            capture { sub(/^          /, ""); print }
+          ' .github/workflows/incidencias-admin-editor-patch.yml > /tmp/incidencias-admin-editor.py
+
+          test -s /tmp/incidencias-admin-editor.py
+          python /tmp/incidencias-admin-editor.py
+
+          git diff --check
+          node --check src/views/incidencias/incidencias.options.js
+          node --check src/views/incidencias/incidencias.template.create.js
+          node --check src/views/incidencias/incidencias.template.modal.js
+          node --check src/views/incidencias/index.js
+
+          grep -q 'incidencias.index.extreme.v31.admin-ticket-editor' src/views/incidencias/index.js
+          grep -q 'incidencias.template.modal.extreme.v30.admin-ticket-editor' src/views/incidencias/incidencias.template.modal.js
+          grep -q 'data-admin-ticket-editor="true"' src/views/incidencias/incidencias.template.modal.js
+          grep -q 'DETAIL_ACTIONS.ADMIN_SAVE' src/views/incidencias/index.js
+
+      - name: Commit product changes
+        shell: bash
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/views/incidencias/incidencias.template.create.js \
+                  src/views/incidencias/incidencias.template.modal.js \
+                  src/views/incidencias/index.js \
+                  src/css/views/incidencias/detail.css
+          git commit -m 'feat(incidencias): editor admin de estado prioridad y tipo [incidencias-admin-editor-applied]'
+          git push origin HEAD:feat/incidencias-admin-ticket-editor

@@ -753,7 +753,7 @@
   border: 1px solid var(--border-default);
   border-radius: var(--radius-sm);
   border-color: color-mix(in srgb, var(--inc-avatar-a) 44%, var(--border-default));
-  background: var(--inc-avatar-bg);
+  background: linear-gradient(135deg, var(--inc-avatar-a), var(--inc-avatar-b));
   color: var(--text-on-accent, #fff);
   box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
   font-size: var(--font-xs);
@@ -975,7 +975,7 @@
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--inc-avatar-a) 52%, var(--border-default));
   border-radius: 50%;
-  background: var(--inc-avatar-bg);
+  background: linear-gradient(135deg, var(--inc-avatar-a), var(--inc-avatar-b));
   color: var(--text-on-accent, #fff);
   font-size: 7px;
 }

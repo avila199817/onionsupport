@@ -8,300 +8,78 @@
    CSP CLEAN · CASCADE LAYERS · ZERO INLINE SYSTEM
 
    Responsabilidades:
-   - Ser el único punto de entrada CSS de la SPA.
-   - Controlar el orden global de cascada mediante @layer.
-   - Cargar tokens antes de reset/core/layout/componentes/vistas/auth.
-   - Mantener variables.css como fuente de verdad visual.
-   - Mantener light.css sólo como overrides [data-theme="light"].
-   - Evitar estilos inline, estilos inyectados por JS y fuentes externas.
-   - Evitar que vistas/componentes contaminen scopes ajenos.
+   - Ser el punto de entrada CSS global de la SPA.
+   - Declarar el orden de cascada una sola vez.
+   - Cargar únicamente estilos realmente globales.
+   - Mantener variables.css como fuente de verdad visual dark/default.
+   - Mantener light.css como única fuente de overrides del tema claro.
+   - Dejar las vistas privadas al loader CSS de ruta.
 
    Reglas:
    - Sin declaraciones CSS directas en este archivo.
-   - Sin @import externos.
-   - Sin Google Fonts.
-   - Sin @font-face remoto.
-   - Sin :root local aquí.
-   - Sin capas nuevas sin documentar.
+   - Sin imports externos ni fuentes remotas.
+   - Sin imports de parches específicos de una vista privada.
    - Sin imports duplicados.
 ========================================================= */
 
-
 /* =========================================================
-   CASCADE LAYERS
-   Orden de menor a mayor prioridad:
-
-   tokens
-   reset
-   core
-   layout
-   components
-   views
-   auth
-
-   Importante:
-   - Esta declaración debe ir antes de todos los imports.
-   - Los @import deben mantenerse antes de cualquier regla CSS real.
+   CASCADE LAYERS · menor -> mayor prioridad
 ========================================================= */
 
 @layer tokens, reset, core, layout, components, views, auth;
 
-
 /* =========================================================
-   TOKENS · DESIGN SYSTEM
-
-   variables.css:
-   - Fuente de verdad del Token Pro System.
-   - Base visual dark/default.
-   - Tokens globales de layout, UI, tablas, estados y vistas.
-
-   light.css:
-   - Sólo overrides [data-theme="light"].
-   - No debe declarar :root.
-   - No debe definir estructura de componentes/vistas.
+   TOKENS
 ========================================================= */
 
 @import url("./tokens/variables.css") layer(tokens);
 @import url("./tokens/light.css") layer(tokens);
 
-
 /* =========================================================
-   RESET
-
-   reset.css:
-   - Normalización base.
-   - Box model.
-   - Formularios.
-   - Media.
-   - Tablas reales sin romper table/tr/td.
+   RESET / CORE
 ========================================================= */
 
 @import url("./core/reset.css") layer(reset);
-
-
-/* =========================================================
-   CORE
-
-   core.css:
-   - Documento base.
-   - Tipografía desde tokens.
-   - Helpers globales.
-   - Accesibilidad.
-   - Estados transversales mínimos.
-
-   layout.css:
-   - Shell principal.
-   - Scroll global.
-   - Offsets de sidebar/topbar/tablehead.
-   - Main content.
-   - App content.
-   - View root.
-   - Estados boot/ready/auth/shell.
-
-   loader.css:
-   - Loader inicial de boot.
-   - Estados app-loading/app-ready.
-   - Consume tokens globales.
-========================================================= */
-
 @import url("./core/core.css") layer(core);
 @import url("./core/layout.css") layer(core);
 @import url("./core/loader.css") layer(core);
 
-
 /* =========================================================
-   LAYOUT · PRIVATE APP CHROME
-
-   sidebar.css:
-   - Sidebar desktop/mobile.
-   - Navegación privada.
-   - User block.
-   - Dropdowns.
-   - Tooltips propios.
-
-   correo-sidebar.css:
-   - Icono canónico de la nueva ruta Correo.
-   - Sin lógica ni dependencias de Microsoft.
-
-   topbar.css:
-   - Topbar privada.
-   - Buscador global.
-   - Acciones globales.
-   - Integración con tablehead y contenido.
-
-   Reglas:
-   - No crear tokens globales nuevos aquí.
-   - No contaminar vistas.
-   - No forzar layout interno de tablas/vistas.
+   PRIVATE APP CHROME
 ========================================================= */
 
 @import url("./layout/sidebar.css") layer(layout);
 @import url("./layout/correo-sidebar.css") layer(layout);
 @import url("./layout/topbar.css") layer(layout);
 
-
 /* =========================================================
-   COMPONENTS · GLOBAL UI
-
-   ui.css:
-   - Botones.
-   - Inputs.
-   - Badges/chips.
-   - Cards/panels.
-   - Modal/drawer base.
-   - Toast/alert.
-   - Dropdown/tabs.
-   - Avatares.
-   - Tablas UI genéricas.
-   - Pagination/toolbar.
-   - Empty/error/loading/skeleton states.
-
-   Reglas:
-   - Sólo componentes reutilizables.
-   - Las vistas especializan dentro de su scope.
-   - Sin colores hardcoded si existe token.
+   GLOBAL COMPONENTS
 ========================================================= */
 
 @import url("./components/ui.css") layer(components);
 
-
 /* =========================================================
-   VIEWS · HOME PRIVADA / DASHBOARD
+   PRIVATE VIEWS
+
+   Las hojas de las vistas privadas se cargan desde src/router/styles.js.
+   Incidencias ya no necesita una hoja global de micro-parches: index.css,
+   create.css y detail.css contienen su sistema completo dentro de layer(views).
 ========================================================= */
 
-
-
 /* =========================================================
-   VIEWS · FACTURAS
+   CORREO · GEOMETRÍA DEL VIEWPORT
 
-   Orden:
-   1. index.css
-   2. create.css
-   3. detail.css
-========================================================= */
-
-
-
-/* =========================================================
-   VIEWS · INCIDENCIAS
-
-   index.css:
-   - Vista principal de incidencias.
-   - Modal de creación de incidencia.
-   - Modal de detalle de incidencia.
-   - Tabla compacta 6 columnas sin acciones.
-   - Isla estable de modales vía index.js.
-
-   Nota:
-   - create.css y detail.css se mantienen importados porque existen
-     actualmente en el proyecto y pueden contener overrides activos.
-   - Si index.css ya cubre todo definitivamente, se pueden retirar luego.
-========================================================= */
-
-@import url("./views/incidencias/create.interactions.css") layer(views);
-
-
-/* =========================================================
-   VIEWS · CORREO · GEOMETRÍA DEL VIEWPORT
-
-   fullheight.css:
-   - Cierra la cadena flex sólo cuando existe la vista Correo.
-   - Hace que #view-container y panel-content ocupen todo el espacio útil.
-   - No altera la geometría de otras rutas.
+   Excepción global estrictamente scopeada a [data-correo-host="true"].
+   Cierra la cadena de altura real del shell sin afectar otras rutas.
 ========================================================= */
 
 @import url("./views/correo/fullheight.css") layer(views);
 
-
 /* =========================================================
-   VIEWS · CUENTA
-========================================================= */
+   PUBLIC · LANDING / SUPPORT REQUEST
 
-
-
-/* =========================================================
-   VIEWS · USUARIOS
-
-   Orden:
-   1. index.css
-   2. create.css
-========================================================= */
-
-
-
-/* =========================================================
-   VIEWS · CLIENTES
-
-   Orden:
-   1. index.css
-   2. create.css
-   3. detail.css
-========================================================= */
-
-
-
-/* =========================================================
-   VIEWS · AJUSTES
-========================================================= */
-
-
-
-/* =========================================================
-   VIEWS · SERVIDOR
-========================================================= */
-
-
-
-/* =========================================================
-   AUTH · PUBLIC / TECHNICAL SCREENS
-
-   login.css:
-   - Login.
-   - Auth shell.
-   - Activation/reset screens si comparten layout auth.
-   - Shell hidden/auth route behavior.
-
-   Importante:
-   - Auth va al final porque necesita prioridad visual superior
-     frente al shell privado.
-========================================================= */
-
-
-
-/* =========================================================
-   PUBLIC · LANDING ONION SUPPORT
-
-   index.css:
-   - Landing pública de Onion Support.
-   - Vista /src/views/public/home.
-   - Navbar pública.
-   - Hero comercial.
-   - Servicios.
-   - Cómo trabajo.
-   - Precios.
-   - Contacto.
-   - FAQ.
-   - WhatsApp flotante.
-   - Overrides del public-auth-shell para permitir scroll.
-
-   support-request.css:
-   - Formulario público de alta + incidencia.
-   - Estados de validación/envío.
-   - Identidad autenticada en Panel cliente.
-
-   mobile-polish.css:
-   - Ajuste final del drawer móvil por contenido.
-   - Sin identidad duplicada ni lógica de usuario.
-
-   home-experience.css:
-   - Orden definitivo de Login/Cuenta y Abrir incidencia.
-   - Dropdown autenticado de accesos rápidos.
-   - Ayuda de teléfono y precisión de SVGs inline.
-
-   Importante:
-   - Usa layer(auth) intencionadamente para integrarse con el shell público.
-   - No debe contaminar la app privada porque todo va scopeado bajo
-     .public-auth-shell--home y .public-home.
+   Estas hojas forman parte del shell público y deben estar disponibles antes
+   de entrar en la SPA privada. Cada una conserva su propio scope.
 ========================================================= */
 
 @import url("./views/public/support-request.css");

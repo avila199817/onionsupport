@@ -1,20 +1,16 @@
 name: Usuarios Memory Cache Helper
 
 on:
-  pull_request:
+  push:
     branches:
-      - main
-    types:
-      - opened
-      - synchronize
-      - reopened
+      - refactor/usuarios-memory-cache-only
 
 permissions:
   contents: write
 
 jobs:
   patch:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: ${{ !startsWith(github.event.head_commit.message, 'refactor(usuarios): mantener cache administrativo sólo en memoria') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -22,7 +18,7 @@ jobs:
       - name: Checkout branch
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: refactor/usuarios-memory-cache-only
           fetch-depth: 1
           persist-credentials: true
 
@@ -62,10 +58,9 @@ jobs:
               raise SystemExit("Usuarios cache section boundaries not unique")
           before, rest = text.split(cache_start, 1)
           _, after = rest.split(state_start, 1)
-          memory_section = '''/* =========================================================\n   MEMORY CACHE\n========================================================= */\n\n/*\n  Usuarios contiene datos administrativos (email, teléfono, dirección,\n  permisos y seguridad). El cache vive sólo en memoria del módulo: navegar\n  por la SPA sigue siendo instantáneo, pero un hard refresh no deja un\n  directorio de usuarios persistido en el dispositivo.\n\n  Se conserva el nombre interno por compatibilidad del controlador; ya no\n  hidrata ni escribe localStorage.\n*/\nfunction hydrateStateFromCache() {\n  return Boolean(\n    usuariosState.loaded ||\n    usuariosState.items.length\n  );\n}\n\n'''
+          memory_section = '''/* =========================================================\n   MEMORY CACHE\n========================================================= */\n\n/*\n  Usuarios contiene datos administrativos (email, teléfono, dirección,\n  permisos y seguridad). El cache vive sólo en memoria del módulo: navegar\n  por la SPA sigue siendo instantáneo, pero un hard refresh no deja un\n  directorio de usuarios persistido en el dispositivo.\n\n  Se conserva el nombre interno por compatibilidad del controlador; ya no\n  hidrata ni escribe almacenamiento del navegador.\n*/\nfunction hydrateStateFromCache() {\n  return Boolean(\n    usuariosState.loaded ||\n    usuariosState.items.length\n  );\n}\n\n'''
           text = before + memory_section + state_start + after
 
-          # El sync deja de aceptar/escribir una segunda persistencia.
           text, count = re.subn(
               r'''function syncUsuariosCollection\(\{\n  items = \[\],\n  remoteCount = null,\n  lastSyncAt = Date\.now\(\),\n  writeCache = true,\n\} = \{\}\) \{''',
               '''function syncUsuariosCollection({\n  items = [],\n  remoteCount = null,\n  lastSyncAt = Date.now(),\n} = {}) {''',
@@ -88,7 +83,6 @@ jobs:
               1,
           )
 
-          # Compat public API: memory hydration only; freshOnly no longer matters.
           text = text.replace(
               '''export function hydrateFromCache({\n  freshOnly = true,\n} = {}) {\n  hydrateStateFromCache({\n    freshOnly,\n  });''',
               '''export function hydrateFromCache() {\n  hydrateStateFromCache();''',
@@ -100,7 +94,6 @@ jobs:
               1,
           )
 
-          # Snapshot no promete storage/cache persistente.
           text = re.sub(
               r'''\n    cacheKey:\n      USUARIOS_CACHE_KEY,\n\n    cacheSchema:\n      CACHE_SCHEMA_VERSION,''',
               '',
@@ -108,7 +101,6 @@ jobs:
               count=1,
           )
 
-          # Contract comments/snapshots: no browser storage.
           text = text.replace(
               '   - No persistir activationUrl, tokens, secretos ni SAS.\n   - No persistir blob: URLs temporales.\n',
               '   - Sin persistencia browser del directorio administrativo.\n   - No persistir activationUrl, tokens, secretos, SAS ni blob: URLs.\n',
@@ -117,6 +109,7 @@ jobs:
 
           path.write_text(text, encoding="utf-8")
 
+          final = path.read_text(encoding="utf-8")
           forbidden = [
               "localStorage",
               "USUARIOS_CACHE_KEY",
@@ -125,7 +118,6 @@ jobs:
               "toCacheUsuario",
               "avatarUrlForCache",
           ]
-          final = path.read_text(encoding="utf-8")
           for token in forbidden:
               if token in final:
                   raise SystemExit(f"Usuarios persistent cache residue: {token}")
@@ -142,4 +134,4 @@ jobs:
           git config user.email "cristian@onionsupport.com"
           git add src/views/usuarios/usuarios.api.js
           git commit -m "refactor(usuarios): mantener cache administrativo sólo en memoria"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          git push origin HEAD:refactor/usuarios-memory-cache-only

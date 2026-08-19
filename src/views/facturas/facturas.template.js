@@ -947,7 +947,7 @@ function renderRow(item = {}, state = {}) {
         ${renderActionButton({ action: FACTURAS_ACTIONS.OPEN_FACTURA, facturaId, label: "Detalle", loadingLabel: "Abriendo detalle", iconName: "detail", loading: busy.isOpening, tooltip: "Abrir detalle de factura" })}
         ${renderActionButton({ action: FACTURAS_ACTIONS.VIEW_PDF, facturaId, label: "Ver PDF", loadingLabel: "Abriendo PDF", iconName: "eye", loading: busy.isViewingPdf, disabled: !pdfAvailable, tooltip: pdfAvailable ? "Ver PDF de factura" : "PDF no disponible" })}
         ${renderActionButton({ klass: "facturas-action-btn--primary", action: FACTURAS_ACTIONS.DOWNLOAD_PDF, facturaId, label: "Descargar", loadingLabel: "Descargando factura", iconName: "download", loading: busy.isDownloading, disabled: !pdfAvailable, tooltip: pdfAvailable ? "Descargar factura PDF" : "PDF no disponible" })}
-        ${renderActionButton({ klass: "facturas-action-btn--success", action: FACTURAS_ACTIONS.SEND_FACTURA, facturaId, label: sendLabel, loadingLabel: "Enviando factura", iconName: "send", loading: busy.isSending, disabled: !canSend, tooltip: sendTooltip })}
+        ${renderActionButton({ klass: "facturas-action-btn--primary", action: FACTURAS_ACTIONS.SEND_FACTURA, facturaId, label: sendLabel, loadingLabel: "Enviando factura", iconName: "send", loading: busy.isSending, disabled: !canSend, tooltip: sendTooltip })}
       </div></td>
     </tr>`;
 }
@@ -986,7 +986,7 @@ function renderInfiniteScrollFooter(listState = {}, state = {}) {
   const blocked = loading || refreshing || loadingMore;
   const status = loadingMore
     ? renderSpinner("Cargando más facturas...")
-    : hasMore ? "Sigue bajando para cargar más facturas." : hasRows ? "No hay más facturas." : "";
+    : hasMore ? "Sigue bajando para cargar más facturas." : hasRows ? "Has visto todas las facturas disponibles." : "";
 
   return `<div class="facturas-infinite" data-facturas-infinite="true" data-loaded="${attr(String(listState.loadedCount || 0))}" data-visible="${attr(String(listState.visibleCount || 0))}" data-total="${attr(String(listState.remoteTotal || listState.totalCount || 0))}" data-has-more="${hasMore ? "true" : "false"}" aria-live="polite">
     <div class="facturas-infinite-sentinel" data-facturas-infinite-sentinel="true" data-facturas-action="${FACTURAS_ACTIONS.LOAD_MORE}" data-action="${FACTURAS_ACTIONS.LOAD_MORE}" data-next-page="${attr(String(listState.nextPage || 1))}" data-disabled="${blocked || !hasMore ? "true" : "false"}" aria-hidden="true"></div>

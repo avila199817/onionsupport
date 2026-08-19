@@ -8,10 +8,9 @@
    - Acepta items/tickets/incidencias/rows/results/data.items/etc.
 ========================================================= */
 
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v22.attachments-sort-avatar-tones";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v23.autonomous-refresh";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
-  REFRESH: "refresh",
   CREATE_OPEN: "create-open",
   FILTER: "filter",
   STAT_APPLY: "stat-apply",
@@ -731,9 +730,6 @@ function renderHeader(vm = {}) {
         <div class="incidencias-hero-actions">
           <button type="button" id="incidencias-create-btn" class="incidencias-btn incidencias-btn--create" data-incidencias-action="${INCIDENCIAS_ACTIONS.CREATE_OPEN}" ${htmlAttrs({ disabled: vm.creating || vm.loading, "aria-disabled": vm.creating || vm.loading ? "true" : false, "aria-busy": vm.creating ? "true" : false })}>
             ${vm.creating ? spinner("Creando...") : `${icon("plus")}<span>Nueva incidencia</span>`}
-          </button>
-          <button type="button" id="incidencias-refresh-btn" class="incidencias-btn${vm.refreshing ? " is-loading" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.REFRESH}" ${htmlAttrs({ disabled: vm.refreshing || vm.loading, "aria-disabled": vm.refreshing || vm.loading ? "true" : false, "aria-busy": vm.refreshing ? "true" : false })}>
-            ${vm.refreshing ? spinner("Actualizando...") : `${icon("refresh")}<span>Actualizar</span>`}
           </button>
         </div>
       </div>

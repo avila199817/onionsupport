@@ -32,6 +32,7 @@ import {
 import {
   listIncidencias,
   hydrateIncidenciasFromCache,
+  INCIDENCIAS_CACHE_TTL_MS,
   createIncidencia,
   updateIncidencia,
   loadIncidenciaDetail,
@@ -74,7 +75,7 @@ import {
 } from "./incidencias.options.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.extreme.v32.single-detail-submit";
+  "incidencias.index.extreme.v33.autonomous-refresh";
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
@@ -82,6 +83,7 @@ export const INCIDENCIAS_VIEW_VERSION =
 const DEFAULT_VISIBLE_LIMIT = 20;
 const DEFAULT_SORT_ORDER = "desc";
 const DEFAULT_SORT_MODE = "date";
+const AUTO_REFRESH_INTERVAL_MS = INCIDENCIAS_CACHE_TTL_MS;
 
 const USER_SEARCH_MIN_LENGTH = 2;
 const USER_SEARCH_LIMIT = 8;
@@ -1181,6 +1183,8 @@ function createIncidenciasController(
   let modalHostBound = false;
 
   let loadSeq = 0;
+  let autoRefreshTimer = 0;
+  let autoRefreshRunning = false;
   let userSearchSeq = 0;
   let userSearchTimer = 0;
   let attachmentPreviewSeq = 0;
@@ -2178,6 +2182,8 @@ function createIncidenciasController(
       syncListSearch(currentRoot, nextRoot);
 
       for (const selector of [
+        ".incidencias-hero-meta",
+        ".incidencias-stats",
         ".incidencias-history-copy",
         ".incidencias-filter-pills",
         ".incidencias-sort-pills",
@@ -3097,6 +3103,9 @@ function createIncidenciasController(
     const force =
       options.force === true;
 
+    const background =
+      options.background === true;
+
     const hasItems =
       items.length > 0;
 
@@ -3159,7 +3168,14 @@ function createIncidenciasController(
       loading = false;
       refreshing = false;
 
-      render();
+      render(
+        background
+          ? {
+              listPatch: true,
+              skipModals: true,
+            }
+          : {}
+      );
 
       return response;
     } catch (loadError) {
@@ -3177,7 +3193,14 @@ function createIncidenciasController(
       refreshing = false;
 
       if (items.length) {
-        render();
+        render(
+          background
+            ? {
+                listPatch: true,
+                skipModals: true,
+              }
+            : {}
+        );
         return null;
       }
 
@@ -5611,6 +5634,79 @@ Se quitará de la incidencia y del almacenamiento. Esta acción no se puede desh
     });
   }
 
+  function pageIsVisible() {
+    if (!isBrowser()) {
+      return false;
+    }
+
+    return document.visibilityState !== "hidden";
+  }
+
+  async function refreshInBackground() {
+    if (
+      destroyed ||
+      !mounted ||
+      !pageIsVisible() ||
+      autoRefreshRunning ||
+      loading ||
+      refreshing ||
+      creating ||
+      createModal.submitting ||
+      detailModal.submitting
+    ) {
+      return false;
+    }
+
+    autoRefreshRunning = true;
+
+    try {
+      await load({
+        force: false,
+        silent: true,
+        background: true,
+      });
+
+      return true;
+    } finally {
+      autoRefreshRunning = false;
+    }
+  }
+
+  function stopAutoRefresh() {
+    if (!autoRefreshTimer || !isBrowser()) {
+      autoRefreshTimer = 0;
+      return false;
+    }
+
+    window.clearInterval(autoRefreshTimer);
+    autoRefreshTimer = 0;
+    return true;
+  }
+
+  function startAutoRefresh() {
+    if (!isBrowser()) {
+      return false;
+    }
+
+    stopAutoRefresh();
+
+    autoRefreshTimer = window.setInterval(() => {
+      void refreshInBackground();
+    }, AUTO_REFRESH_INTERVAL_MS);
+
+    return true;
+  }
+
+  function onWindowFocus() {
+    void refreshInBackground();
+  }
+
+  function onVisibilityChange() {
+    if (pageIsVisible()) {
+      void refreshInBackground();
+    }
+  }
+
   /* =======================================================
      ACTIONS
   ======================================================= */
@@ -5665,13 +5761,6 @@ Se quitará de la incidencia y del almacenamiento. Esta acción no se puede desh
 
     if (!type) {
       return false;
-    }
-
-    if (
-      type ===
-      INCIDENCIAS_ACTIONS.REFRESH
-    ) {
-      return refresh();
     }
 
     if (
@@ -6535,6 +6624,18 @@ Se quitará de la incidencia y del almacenamiento. Esta acción no se puede desh
           "beforeunload",
           onBeforeUnload
         );
+
+        window.addEventListener(
+          "focus",
+          onWindowFocus
+        );
+
+        document.addEventListener(
+          "visibilitychange",
+          onVisibilityChange
+        );
+
+        startAutoRefresh();
       }
 
       const hasCache =
@@ -6585,6 +6686,18 @@ Se quitará de la incidencia y del almacenamiento. Esta acción no se puede desh
           "beforeunload",
           onBeforeUnload
         );
+
+        window.removeEventListener(
+          "focus",
+          onWindowFocus
+        );
+
+        document.removeEventListener(
+          "visibilitychange",
+          onVisibilityChange
+        );
+
+        stopAutoRefresh();
       }
 
       unbindTarget(host);
@@ -6641,6 +6754,12 @@ Se quitará de la incidencia y del almacenamiento. Esta acción no se puede desh
         loading,
         refreshing,
         creating,
+
+        autoRefresh: {
+          enabled: Boolean(autoRefreshTimer),
+          running: autoRefreshRunning,
+          intervalMs: AUTO_REFRESH_INTERVAL_MS,
+        },
         loadingMore,
 
         total,
@@ -6786,6 +6905,10 @@ Se quitará de la incidencia y del almacenamiento. Esta acción no se puede desh
           focusRestore: true,
           dirtyCloseProtection: true,
           beforeUnloadProtection: true,
+          autonomousRefresh: true,
+          refreshOnWindowFocus: true,
+          refreshOnVisibilityReturn: true,
+          manualRefreshButton: false,
 
           detailMultilinePreserved: true,
           detailUploadLimitsEarly: true,

@@ -13,134 +13,64 @@ jobs:
     if: ${{ !contains(github.event.head_commit.message, '[incidencias-admin-editor-applied]') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout branch
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: feat/incidencias-admin-ticket-editor
           fetch-depth: 0
 
-      - name: Apply canonical admin editor
+      - name: Apply product changes
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
 
-          def replace_once(text, old, new, label):
+          def once(text, old, new, label):
               count = text.count(old)
               if count != 1:
-                  raise SystemExit(f"{label}: expected exactly 1 match, found {count}")
+                  raise SystemExit(f"{label}: expected 1 match, found {count}")
               return text.replace(old, new, 1)
 
-          # -------------------------------------------------
-          # CREATE TEMPLATE · consume canonical option source
-          # -------------------------------------------------
-          path = Path('src/views/incidencias/incidencias.template.create.js')
-          text = path.read_text(encoding='utf-8')
-
-          text = replace_once(
-              text,
-              '''========================================================= */
-
-export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =
-  "incidencias.template.create.extreme.v21.role-aware";
-''',
-              '''========================================================= */
-
-import {
-  INCIDENCIA_CATEGORY_OPTIONS,
-  INCIDENCIA_PRIORITY_OPTIONS,
-} from "./incidencias.options.js";
-
-export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =
-  "incidencias.template.create.extreme.v22.canonical-options";
-''',
+          # CREATE: share the exact classification source with the detail editor.
+          p = Path('src/views/incidencias/incidencias.template.create.js')
+          s = p.read_text(encoding='utf-8')
+          s = once(
+              s,
+              'export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =\n  "incidencias.template.create.extreme.v21.role-aware";',
+              'import {\n  INCIDENCIA_CATEGORY_OPTIONS,\n  INCIDENCIA_PRIORITY_OPTIONS,\n} from "./incidencias.options.js";\n\nexport const INCIDENCIAS_CREATE_TEMPLATE_VERSION =\n  "incidencias.template.create.extreme.v22.canonical-options";',
               'create imports/version',
           )
+          start = s.index('const CATEGORY_OPTIONS = Object.freeze([')
+          end_marker = 'const DEFAULT_FORM = Object.freeze({'
+          end = s.index(end_marker, start)
+          s = s[:start] + 'const CATEGORY_OPTIONS = INCIDENCIA_CATEGORY_OPTIONS;\nconst PRIORITY_OPTIONS = INCIDENCIA_PRIORITY_OPTIONS;\n\n' + s[end:]
+          p.write_text(s, encoding='utf-8')
 
-          text = replace_once(
-              text,
-              '''const CATEGORY_OPTIONS = Object.freeze([
-  { value: "general", label: "General" },
-  { value: "technical", label: "Técnica" },
-  { value: "billing", label: "Facturación" },
-  { value: "access", label: "Acceso" },
-  { value: "hardware", label: "Hardware" },
-  { value: "software", label: "Software" },
-  { value: "account", label: "Cuenta" },
-  { value: "network", label: "Redes" },
-  { value: "documentation", label: "Documentación" },
-  { value: "sales", label: "Ventas" },
-]);
-
-const PRIORITY_OPTIONS = Object.freeze([
-  { value: "low", label: "Baja" },
-  { value: "medium", label: "Media" },
-  { value: "high", label: "Alta" },
-  { value: "urgent", label: "Urgente" },
-]);
-''',
-              '''const CATEGORY_OPTIONS = INCIDENCIA_CATEGORY_OPTIONS;
-const PRIORITY_OPTIONS = INCIDENCIA_PRIORITY_OPTIONS;
-''',
-              'create option blocks',
-          )
-
-          path.write_text(text, encoding='utf-8')
-
-          # -------------------------------------------------
-          # DETAIL TEMPLATE · admin-only classification editor
-          # -------------------------------------------------
-          path = Path('src/views/incidencias/incidencias.template.modal.js')
-          text = path.read_text(encoding='utf-8')
-
-          text = replace_once(
-              text,
-              '''========================================================= */
-
-export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.extreme.v29.user-contact-privacy";
-''',
-              '''========================================================= */
-
-import {
-  INCIDENCIA_STATUS_OPTIONS,
-  INCIDENCIA_PRIORITY_OPTIONS,
-  INCIDENCIA_CATEGORY_OPTIONS,
-  normalizeIncidenciaStatus,
-  normalizeIncidenciaPriority,
-  normalizeIncidenciaCategory,
-} from "./incidencias.options.js";
-
-export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.extreme.v30.admin-ticket-editor";
-''',
+          # DETAIL TEMPLATE: admin-only editor.
+          p = Path('src/views/incidencias/incidencias.template.modal.js')
+          s = p.read_text(encoding='utf-8')
+          s = once(
+              s,
+              'export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =\n  "incidencias.template.modal.extreme.v29.user-contact-privacy";',
+              'import {\n  INCIDENCIA_STATUS_OPTIONS,\n  INCIDENCIA_PRIORITY_OPTIONS,\n  INCIDENCIA_CATEGORY_OPTIONS,\n  normalizeIncidenciaStatus,\n  normalizeIncidenciaPriority,\n  normalizeIncidenciaCategory,\n} from "./incidencias.options.js";\n\nexport const INCIDENCIAS_MODAL_TEMPLATE_VERSION =\n  "incidencias.template.modal.extreme.v30.admin-ticket-editor";',
               'modal imports/version',
           )
-
-          text = replace_once(
-              text,
-              '''  CLOSE: "detail-close",
-  COPY_ID: "detail-copy-id",
-
-  COMMENT_SUBMIT: "detail-submit-update",
-''',
-              '''  CLOSE: "detail-close",
-  COPY_ID: "detail-copy-id",
-  ADMIN_SAVE: "detail-admin-save",
-
-  COMMENT_SUBMIT: "detail-submit-update",
-''',
-              'modal admin action',
+          s = once(
+              s,
+              '  COPY_ID: "detail-copy-id",\n\n  COMMENT_SUBMIT:',
+              '  COPY_ID: "detail-copy-id",\n  ADMIN_SAVE: "detail-admin-save",\n\n  COMMENT_SUBMIT:',
+              'modal action',
           )
 
-          marker = '''/* =========================================================
+          content_marker = '''/* =========================================================
    CONTENT
 ========================================================= */
 
 function renderDescription(
 '''
+          if s.count(content_marker) != 1:
+              raise SystemExit('modal content marker not unique')
 
-          admin_editor = '''/* =========================================================
+          editor = r'''/* =========================================================
    CONTENT
 ========================================================= */
 
@@ -161,14 +91,9 @@ function renderAdminSelect({
           data-detail-field="${attr(name)}"
           ${disabledAttrs(disabled, false)}
         >
-          ${safeArray(options)
-            .map((item) => `
-              <option
-                value="${attr(item.value)}"
-                ${item.value === value ? "selected" : ""}
-              >${escapeHtml(item.label)}</option>
-            `)
-            .join("")}
+          ${safeArray(options).map((item) => `
+            <option value="${attr(item.value)}"${item.value === value ? " selected" : ""}>${escapeHtml(item.label)}</option>
+          `).join("")}
         </select>
         <span class="incidencias-modal-admin-select-chevron" aria-hidden="true">⌄</span>
       </span>
@@ -177,26 +102,13 @@ function renderAdminSelect({
 }
 
 function renderAdminTicketEditor(vm = {}) {
-  if (!vm.admin) {
-    return "";
-  }
+  if (!vm.admin) return "";
 
   const detail = safeObject(vm.detail);
-
-  const status = normalizeIncidenciaStatus(
-    vm.status,
-    "open"
-  );
-
-  const priority = normalizeIncidenciaPriority(
-    getPriority(detail),
-    "medium"
-  );
-
-  const category = normalizeIncidenciaCategory(
-    getCategory(detail),
-    "general"
-  );
+  const draft = safeObject(vm.adminDraft);
+  const status = normalizeIncidenciaStatus(draft.status || vm.status, "open");
+  const priority = normalizeIncidenciaPriority(draft.priority || getPriority(detail), "medium");
+  const category = normalizeIncidenciaCategory(draft.category || getCategory(detail), "general");
 
   return `
     <section
@@ -212,35 +124,11 @@ function renderAdminTicketEditor(vm = {}) {
         <span class="incidencias-modal-admin-badge">Administrador</span>
       </div>
 
-      <form
-        class="incidencias-modal-admin-form"
-        data-admin-ticket-editor="true"
-        autocomplete="off"
-      >
+      <form class="incidencias-modal-admin-form" data-admin-ticket-editor="true" autocomplete="off">
         <div class="incidencias-modal-admin-grid">
-          ${renderAdminSelect({
-            label: "Estado",
-            name: "status",
-            value: status,
-            options: INCIDENCIA_STATUS_OPTIONS,
-            disabled: vm.submitting,
-          })}
-
-          ${renderAdminSelect({
-            label: "Prioridad",
-            name: "priority",
-            value: priority,
-            options: INCIDENCIA_PRIORITY_OPTIONS,
-            disabled: vm.submitting,
-          })}
-
-          ${renderAdminSelect({
-            label: "Tipo de incidencia",
-            name: "category",
-            value: category,
-            options: INCIDENCIA_CATEGORY_OPTIONS,
-            disabled: vm.submitting,
-          })}
+          ${renderAdminSelect({ label: "Estado", name: "status", value: status, options: INCIDENCIA_STATUS_OPTIONS, disabled: vm.submitting })}
+          ${renderAdminSelect({ label: "Prioridad", name: "priority", value: priority, options: INCIDENCIA_PRIORITY_OPTIONS, disabled: vm.submitting })}
+          ${renderAdminSelect({ label: "Tipo de incidencia", name: "category", value: category, options: INCIDENCIA_CATEGORY_OPTIONS, disabled: vm.submitting })}
         </div>
 
         <button
@@ -260,614 +148,259 @@ function renderAdminTicketEditor(vm = {}) {
 
 function renderDescription(
 '''
-
-          text = replace_once(
-              text,
-              marker,
-              admin_editor,
-              'modal admin editor functions',
+          s = s.replace(content_marker, editor, 1)
+          s = once(
+              s,
+              '    ${renderDescription(detail)}\n\n    ${vm.admin ? renderContactBlock(detail) : ""}',
+              '    ${renderAdminTicketEditor(vm)}\n\n    ${renderDescription(detail)}\n\n    ${vm.admin ? renderContactBlock(detail) : ""}',
+              'modal editor placement',
           )
-
-          text = replace_once(
-              text,
-              '''    </div>
-
-    ${renderDescription(detail)}
-
-    ${vm.admin ? renderContactBlock(detail) : ""}
-''',
-              '''    </div>
-
-    ${renderAdminTicketEditor(vm)}
-
-    ${renderDescription(detail)}
-
-    ${vm.admin ? renderContactBlock(detail) : ""}
-''',
-              'modal admin editor placement',
+          s = once(
+              s,
+              '    fields: [\n      "comment",\n      "attachments",\n    ],\n\n    limits:',
+              '    fields: [\n      "comment",\n      "attachments",\n    ],\n\n    adminFields: [\n      "status",\n      "priority",\n      "category",\n    ],\n\n    limits:',
+              'modal snapshot',
           )
+          p.write_text(s, encoding='utf-8')
 
-          text = replace_once(
-              text,
-              '''    fields: [
-      "comment",
-      "attachments",
-    ],
-
-    limits: {
-''',
-              '''    fields: [
-      "comment",
-      "attachments",
-    ],
-
-    adminFields: [
-      "status",
-      "priority",
-      "category",
-    ],
-
-    limits: {
-''',
-              'modal snapshot admin fields',
-          )
-
-          path.write_text(text, encoding='utf-8')
-
-          # -------------------------------------------------
-          # CONTROLLER · one admin action, domain-aware status transitions
-          # -------------------------------------------------
-          path = Path('src/views/incidencias/index.js')
-          text = path.read_text(encoding='utf-8')
-
-          text = replace_once(
-              text,
-              '''  createIncidencia,
-  loadIncidenciaDetail,
-  commentIncidencia,
-''',
-              '''  createIncidencia,
-  updateIncidencia,
-  loadIncidenciaDetail,
-  commentIncidencia,
-''',
+          # CONTROLLER: explicit admin save, canonical reopen and PATCH.
+          p = Path('src/views/incidencias/index.js')
+          s = p.read_text(encoding='utf-8')
+          s = once(
+              s,
+              '  createIncidencia,\n  loadIncidenciaDetail,',
+              '  createIncidencia,\n  updateIncidencia,\n  loadIncidenciaDetail,',
               'index update import',
           )
-
-          text = replace_once(
-              text,
-              '''import {
-  renderIncidenciasDetailModal,
-  DETAIL_ACTIONS,
-  validateDetailUpdate,
-  getDetailTemplateSnapshot,
-} from "./incidencias.template.modal.js";
-
-export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.extreme.v30.attachments-sort";
-''',
-              '''import {
-  renderIncidenciasDetailModal,
-  DETAIL_ACTIONS,
-  validateDetailUpdate,
-  getDetailTemplateSnapshot,
-} from "./incidencias.template.modal.js";
-
-import {
-  normalizeIncidenciaStatus,
-  normalizeIncidenciaPriority,
-  normalizeIncidenciaCategory,
-} from "./incidencias.options.js";
-
-export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.extreme.v31.admin-ticket-editor";
-''',
-              'index options import/version',
+          s = once(
+              s,
+              '} from "./incidencias.template.modal.js";\n\nexport const INCIDENCIAS_INDEX_VERSION =\n  "incidencias.index.extreme.v30.attachments-sort";',
+              '} from "./incidencias.template.modal.js";\n\nimport {\n  normalizeIncidenciaStatus,\n  normalizeIncidenciaPriority,\n  normalizeIncidenciaCategory,\n} from "./incidencias.options.js";\n\nexport const INCIDENCIAS_INDEX_VERSION =\n  "incidencias.index.extreme.v31.admin-ticket-editor";',
+              'index options/version',
           )
 
-          text = replace_once(
-              text,
-              '''          "[data-modal-updated='true']",
-          ".incidencias-modal-meta-grid",
-          ".incidencias-modal-description-section",
-''',
-              '''          "[data-modal-updated='true']",
-          ".incidencias-modal-meta-grid",
-          ".incidencias-modal-admin-editor",
-          ".incidencias-modal-description-section",
-''',
-              'index detail patch selector',
+          meta_selector = '          ".incidencias-modal-meta-grid",\n'
+          if s.count(meta_selector) != 1:
+              raise SystemExit(f'index meta selector expected 1, found {s.count(meta_selector)}')
+          s = s.replace(meta_selector, meta_selector + '          ".incidencias-modal-admin-editor",\n', 1)
+
+          s = once(
+              s,
+              '    commentDraft: "",\n    pendingFiles: [],',
+              '    commentDraft: "",\n    pendingFiles: [],\n    adminDraft: null,',
+              'index detail state adminDraft',
+          )
+          s = once(
+              s,
+              '    detailModal.commentDraft = "";\n    detailModal.pendingFiles = [];',
+              '    detailModal.commentDraft = "";\n    detailModal.pendingFiles = [];\n    detailModal.adminDraft = null;',
+              'index reset adminDraft',
           )
 
-          marker = '''  function ticketIsAlreadyClosed() {
-'''
+          marker = '  function ticketIsAlreadyClosed() {\n'
+          if s.count(marker) != 1:
+              raise SystemExit('index close marker not unique')
 
-          admin_logic = '''  function getCurrentAdminClassification() {
-    const detail =
-      safeObject(
-        detailModal.detail,
-        {}
-      );
+          logic = r'''  function getCurrentAdminClassification() {
+    const detail = safeObject(detailModal.detail, {});
 
     return {
-      status:
-        normalizeIncidenciaStatus(
-          first(
-            detail.status,
-            detail.estado,
-            detail.statusKey,
-            detail.lifecycle?.status,
-            "open"
-          ),
-          "open"
-        ),
-
-      priority:
-        normalizeIncidenciaPriority(
-          first(
-            detail.priority,
-            detail.prioridad,
-            detail.severity,
-            "medium"
-          ),
-          "medium"
-        ),
-
-      category:
-        normalizeIncidenciaCategory(
-          first(
-            detail.category,
-            detail.categoria,
-            detail.tipo,
-            detail.type,
-            "general"
-          ),
-          "general"
-        ),
+      status: normalizeIncidenciaStatus(
+        first(detail.status, detail.estado, detail.statusKey, detail.lifecycle?.status, "open"),
+        "open"
+      ),
+      priority: normalizeIncidenciaPriority(
+        first(detail.priority, detail.prioridad, detail.severity, "medium"),
+        "medium"
+      ),
+      category: normalizeIncidenciaCategory(
+        first(detail.category, detail.categoria, detail.tipo, detail.type, "general"),
+        "general"
+      ),
     };
   }
 
-  function readAdminTicketEditor(
-    formNode = null
-  ) {
-    if (!formNode) {
-      return null;
-    }
+  function readAdminTicketEditor(formNode = null) {
+    if (!formNode) return null;
 
-    const status =
-      normalizeIncidenciaStatus(
-        readField(
-          formNode,
-          "status"
-        ),
-        ""
-      );
+    const status = normalizeIncidenciaStatus(readField(formNode, "status"), "");
+    const priority = normalizeIncidenciaPriority(readField(formNode, "priority"), "");
+    const category = normalizeIncidenciaCategory(readField(formNode, "category"), "");
 
-    const priority =
-      normalizeIncidenciaPriority(
-        readField(
-          formNode,
-          "priority"
-        ),
-        ""
-      );
-
-    const category =
-      normalizeIncidenciaCategory(
-        readField(
-          formNode,
-          "category"
-        ),
-        ""
-      );
-
-    if (
-      !status ||
-      !priority ||
-      !category
-    ) {
-      return null;
-    }
-
-    return {
-      status,
-      priority,
-      category,
-    };
+    return status && priority && category
+      ? { status, priority, category }
+      : null;
   }
 
-  async function saveAdminTicketChanges(
-    formNode = null
-  ) {
-    if (
-      !detailModal.open ||
-      detailModal.submitting
-    ) {
-      return false;
-    }
+  async function saveAdminTicketChanges(formNode = null) {
+    if (!detailModal.open || detailModal.submitting) return false;
 
     if (!isAdmin()) {
-      detailModal.feedbackMessage =
-        "Solo un administrador puede modificar la clasificación de una incidencia.";
-      detailModal.feedbackType =
-        "error";
-      renderModals({
-        immediate: true,
-      });
+      detailModal.feedbackMessage = "Solo un administrador puede modificar la clasificación de una incidencia.";
+      detailModal.feedbackType = "error";
+      renderModals({ immediate: true });
       return false;
     }
 
-    const ticketId =
-      getTicketId(
-        detailModal.detail
-      );
+    const ticketId = getTicketId(detailModal.detail);
+    const desired = readAdminTicketEditor(formNode);
 
-    const desired =
-      readAdminTicketEditor(
-        formNode
-      );
-
-    if (
-      !ticketId ||
-      !desired
-    ) {
-      detailModal.feedbackMessage =
-        "No se pudieron leer los cambios administrativos del ticket.";
-      detailModal.feedbackType =
-        "error";
-      renderModals({
-        immediate: true,
-      });
+    if (!ticketId || !desired) {
+      detailModal.feedbackMessage = "No se pudieron leer los cambios administrativos del ticket.";
+      detailModal.feedbackType = "error";
+      renderModals({ immediate: true });
       return false;
     }
 
-    const current =
-      getCurrentAdminClassification();
+    const current = getCurrentAdminClassification();
+    const statusChanged = desired.status !== current.status;
+    const priorityChanged = desired.priority !== current.priority;
+    const categoryChanged = desired.category !== current.category;
 
-    const statusChanged =
-      desired.status !==
-      current.status;
-
-    const priorityChanged =
-      desired.priority !==
-      current.priority;
-
-    const categoryChanged =
-      desired.category !==
-      current.category;
-
-    if (
-      !statusChanged &&
-      !priorityChanged &&
-      !categoryChanged
-    ) {
-      detailModal.feedbackMessage =
-        "No hay cambios administrativos pendientes.";
-      detailModal.feedbackType =
-        "info";
-      renderModals({
-        immediate: true,
-        focusSelector:
-          ".incidencias-modal-admin-save-btn",
-      });
+    if (!statusChanged && !priorityChanged && !categoryChanged) {
+      detailModal.feedbackMessage = "No hay cambios administrativos pendientes.";
+      detailModal.feedbackType = "info";
+      renderModals({ immediate: true, focusSelector: ".incidencias-modal-admin-save-btn" });
       return true;
     }
 
+    detailModal.adminDraft = { ...desired };
     detailModal.submitting = true;
-    detailModal.operation =
-      "admin-update";
+    detailModal.operation = "admin-update";
     detailModal.closeConfirmOpen = false;
     detailModal.feedbackMessage = "";
     detailModal.feedbackType = "info";
+    renderModals({ immediate: true });
 
-    renderModals({
-      immediate: true,
-    });
-
-    let nextDetail =
-      detailModal.detail;
-
+    let nextDetail = detailModal.detail;
     let reopened = false;
 
     try {
-      /*
-         Un ticket cerrado se reabre por el endpoint canónico /reopen.
-         Así conservamos lifecycle/historial del backend. Si el estado final
-         solicitado es Pendiente, primero se reabre y después se aplica el
-         estado pending junto al resto de cambios.
-      */
-      if (
-        current.status === "closed" &&
-        desired.status !== "closed"
-      ) {
-        const reopenResult =
-          await reopenIncidencia(
-            ticketId
-          );
-
+      if (current.status === "closed" && desired.status !== "closed") {
+        const reopenResult = await reopenIncidencia(ticketId);
         if (!reopenResult) {
-          throw new Error(
-            "El backend no confirmó la reapertura de la incidencia."
-          );
+          throw new Error("El backend no confirmó la reapertura de la incidencia.");
         }
-
-        nextDetail =
-          mergeTicketData(
-            nextDetail || {},
-            reopenResult
-          );
-
+        nextDetail = mergeTicketData(nextDetail || {}, reopenResult);
         reopened = true;
       }
 
       const changes = {};
 
       if (priorityChanged) {
-        changes.priority =
-          desired.priority;
-        changes.prioridad =
-          desired.priority;
+        changes.priority = desired.priority;
+        changes.prioridad = desired.priority;
       }
 
       if (categoryChanged) {
-        changes.category =
-          desired.category;
-        changes.categoria =
-          desired.category;
-        changes.tipo =
-          desired.category;
-        changes.type =
-          desired.category;
+        changes.category = desired.category;
+        changes.categoria = desired.category;
+        changes.tipo = desired.category;
+        changes.type = desired.category;
       }
 
-      const effectiveStatus =
-        reopened
-          ? "open"
-          : current.status;
-
-      if (
-        desired.status !==
-        effectiveStatus
-      ) {
-        changes.status =
-          desired.status;
-        changes.estado =
-          desired.status;
+      const effectiveStatus = reopened ? "open" : current.status;
+      if (desired.status !== effectiveStatus) {
+        changes.status = desired.status;
+        changes.estado = desired.status;
       }
 
-      if (
-        Object.keys(changes).length
-      ) {
-        let updated =
-          await updateIncidencia(
-            ticketId,
-            changes
-          );
-
-        /*
-           Compatibilidad con PATCH 204: refrescamos únicamente si el
-           backend no devuelve DTO. No fabricamos el estado local.
-        */
+      if (Object.keys(changes).length) {
+        let updated = await updateIncidencia(ticketId, changes);
         if (!updated) {
-          updated =
-            await loadIncidenciaDetail(
-              ticketId,
-              {
-                force: true,
-                cache: false,
-              }
-            );
+          updated = await loadIncidenciaDetail(ticketId, { force: true, cache: false });
         }
-
         if (!updated) {
-          throw new Error(
-            "El backend no devolvió la incidencia actualizada."
-          );
+          throw new Error("El backend no devolvió la incidencia actualizada.");
         }
-
-        nextDetail =
-          mergeTicketData(
-            nextDetail || {},
-            updated
-          );
+        nextDetail = mergeTicketData(nextDetail || {}, updated);
       }
 
-      detailModal.detail =
-        nextDetail;
+      detailModal.detail = nextDetail;
+      detailModal.adminDraft = null;
       detailModal.submitting = false;
       detailModal.operation = "";
-      detailModal.feedbackMessage =
-        "Estado, prioridad y tipo actualizados correctamente.";
-      detailModal.feedbackType =
-        "success";
+      detailModal.feedbackMessage = "Estado, prioridad y tipo actualizados correctamente.";
+      detailModal.feedbackType = "success";
 
-      items =
-        upsertByTicketId(
-          items,
-          nextDetail
-        );
-
-      render({
-        skipModals: true,
-      });
-
-      renderModals({
-        immediate: true,
-        focusSelector:
-          ".incidencias-modal-admin-save-btn",
-      });
-
+      items = upsertByTicketId(items, nextDetail);
+      render({ skipModals: true });
+      renderModals({ immediate: true, focusSelector: ".incidencias-modal-admin-save-btn" });
       return true;
     } catch (adminUpdateError) {
-      detailModal.detail =
-        nextDetail;
+      detailModal.detail = nextDetail;
       detailModal.submitting = false;
       detailModal.operation = "";
+      items = upsertByTicketId(items, nextDetail);
 
-      items =
-        upsertByTicketId(
-          items,
-          nextDetail
-        );
+      detailModal.feedbackMessage = safeError(
+        adminUpdateError,
+        reopened
+          ? "La incidencia se reabrió, pero no se pudieron guardar el resto de cambios."
+          : "No se pudieron guardar los cambios administrativos."
+      );
+      detailModal.feedbackType = "error";
 
-      detailModal.feedbackMessage =
-        safeError(
-          adminUpdateError,
-          reopened
-            ? "La incidencia se reabrió, pero no se pudieron guardar el resto de cambios."
-            : "No se pudieron guardar los cambios administrativos."
-        );
-
-      detailModal.feedbackType =
-        "error";
-
-      render({
-        skipModals: true,
-      });
-
-      renderModals({
-        immediate: true,
-        focusSelector:
-          ".incidencias-modal-admin-save-btn",
-      });
-
+      render({ skipModals: true });
+      renderModals({ immediate: true, focusSelector: ".incidencias-modal-admin-save-btn" });
       return false;
     }
   }
 
   function ticketIsAlreadyClosed() {
 '''
+          s = s.replace(marker, logic, 1)
 
-          text = replace_once(
-              text,
-              marker,
-              admin_logic,
-              'index admin editor logic',
+          s = once(
+              s,
+              '    if (\n      type ===\n      DETAIL_ACTIONS.TICKET_CLOSE\n    ) {',
+              '    if (\n      type ===\n      DETAIL_ACTIONS.ADMIN_SAVE\n    ) {\n      return saveAdminTicketChanges(\n        node?.closest?.("[data-admin-ticket-editor=\'true\']") ||\n        node?.closest?.("form")\n      );\n    }\n\n    if (\n      type ===\n      DETAIL_ACTIONS.TICKET_CLOSE\n    ) {',
+              'index admin action',
+          )
+          p.write_text(s, encoding='utf-8')
+
+          # CSS: same card/input/button token system, no private palette.
+          p = Path('src/css/views/incidencias/detail.css')
+          s = p.read_text(encoding='utf-8')
+          s = once(
+              s,
+              '.incidencias-modal-meta-card,\n.incidencias-modal-description-section,',
+              '.incidencias-modal-meta-card,\n.incidencias-modal-admin-editor,\n.incidencias-modal-description-section,',
+              'css shared card',
+          )
+          s = once(
+              s,
+              '.incidencias-modal-history-jump-btn,\n.incidencias-modal-close-btn,\n.incidencias-modal-preview-btn,',
+              '.incidencias-modal-history-jump-btn,\n.incidencias-modal-close-btn,\n.incidencias-modal-admin-save-btn,\n.incidencias-modal-preview-btn,',
+              'css shared button',
+          )
+          s = once(
+              s,
+              '.incidencias-modal-close-ticket-btn:focus-visible,\n.incidencias-modal-preview-btn:focus-visible,',
+              '.incidencias-modal-close-ticket-btn:focus-visible,\n.incidencias-modal-admin-save-btn:focus-visible,\n.incidencias-modal-preview-btn:focus-visible,',
+              'css focus',
+          )
+          s = once(
+              s,
+              '.incidencias-modal-close-ticket-btn:disabled,\n.incidencias-modal-preview-btn:disabled,',
+              '.incidencias-modal-close-ticket-btn:disabled,\n.incidencias-modal-admin-save-btn:disabled,\n.incidencias-modal-preview-btn:disabled,',
+              'css disabled',
+          )
+          s = once(
+              s,
+              '.incidencias-modal-description-section,\n.incidencias-modal-contact-section,\n.incidencias-modal-current-files,\n.incidencias-modal-history-section {\n  padding: var(--space-md);\n}',
+              '.incidencias-modal-admin-editor,\n.incidencias-modal-description-section,\n.incidencias-modal-contact-section,\n.incidencias-modal-current-files,\n.incidencias-modal-history-section {\n  padding: var(--space-md);\n}',
+              'css section padding',
           )
 
-          text = replace_once(
-              text,
-              '''    if (
-      type ===
-      DETAIL_ACTIONS.COMMENT_SUBMIT
-    ) {
-      return submitDetailUpdate();
-    }
-
-    if (
-      type ===
-      DETAIL_ACTIONS.TICKET_CLOSE
-''',
-              '''    if (
-      type ===
-      DETAIL_ACTIONS.COMMENT_SUBMIT
-    ) {
-      return submitDetailUpdate();
-    }
-
-    if (
-      type ===
-      DETAIL_ACTIONS.ADMIN_SAVE
-    ) {
-      return saveAdminTicketChanges(
-        node?.closest?.(
-          "[data-admin-ticket-editor='true']"
-        ) ||
-        node?.closest?.("form")
-      );
-    }
-
-    if (
-      type ===
-      DETAIL_ACTIONS.TICKET_CLOSE
-''',
-              'index admin save action',
-          )
-
-          path.write_text(text, encoding='utf-8')
-
-          # -------------------------------------------------
-          # DETAIL CSS · native component inside the existing design system
-          # -------------------------------------------------
-          path = Path('src/css/views/incidencias/detail.css')
-          text = path.read_text(encoding='utf-8')
-
-          text = replace_once(
-              text,
-              '''.incidencias-modal-meta-card,
-.incidencias-modal-description-section,
-''',
-              '''.incidencias-modal-meta-card,
-.incidencias-modal-admin-editor,
-.incidencias-modal-description-section,
-''',
-              'css shared card selector',
-          )
-
-          text = replace_once(
-              text,
-              '''.incidencias-modal-history-jump-btn,
-.incidencias-modal-close-btn,
-.incidencias-modal-preview-btn,
-''',
-              '''.incidencias-modal-history-jump-btn,
-.incidencias-modal-close-btn,
-.incidencias-modal-admin-save-btn,
-.incidencias-modal-preview-btn,
-''',
-              'css shared button selector',
-          )
-
-          text = replace_once(
-              text,
-              '''.incidencias-modal-close-ticket-btn:focus-visible,
-.incidencias-modal-preview-btn:focus-visible,
-''',
-              '''.incidencias-modal-close-ticket-btn:focus-visible,
-.incidencias-modal-admin-save-btn:focus-visible,
-.incidencias-modal-preview-btn:focus-visible,
-''',
-              'css admin save focus',
-          )
-
-          text = replace_once(
-              text,
-              '''.incidencias-modal-close-ticket-btn:disabled,
-.incidencias-modal-preview-btn:disabled,
-''',
-              '''.incidencias-modal-close-ticket-btn:disabled,
-.incidencias-modal-admin-save-btn:disabled,
-.incidencias-modal-preview-btn:disabled,
-''',
-              'css admin save disabled',
-          )
-
-          text = replace_once(
-              text,
-              '''.incidencias-modal-description-section,
-.incidencias-modal-contact-section,
-.incidencias-modal-current-files,
-.incidencias-modal-history-section {
-  padding: var(--space-md);
-}
-''',
-              '''.incidencias-modal-admin-editor,
-.incidencias-modal-description-section,
-.incidencias-modal-contact-section,
-.incidencias-modal-current-files,
-.incidencias-modal-history-section {
-  padding: var(--space-md);
-}
-''',
-              'css admin editor padding',
-          )
-
-          marker = '''/* =========================================================
+          tech_marker = '''/* =========================================================
    TECHNICIAN
 ========================================================= */
 '''
+          if s.count(tech_marker) != 1:
+              raise SystemExit('css technician marker not unique')
 
-          admin_css = '''/* =========================================================
+          css = r'''/* =========================================================
    ADMIN TICKET EDITOR
 ========================================================= */
 
@@ -1023,23 +556,15 @@ export const INCIDENCIAS_INDEX_VERSION =
    TECHNICIAN
 ========================================================= */
 '''
+          s = s.replace(tech_marker, css, 1)
 
-          text = replace_once(
-              text,
-              marker,
-              admin_css,
-              'css admin editor section',
-          )
-
-          text = replace_once(
-              text,
-              '''  .incidencias-modal-contact-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .incidencias-modal-preview-head {
-''',
-              '''  .incidencias-modal-admin-form {
+          # Tablet/mobile layout.
+          mobile720 = s.find('@media (max-width: 720px)')
+          contact = '  .incidencias-modal-contact-grid {\n    grid-template-columns: 1fr;\n  }'
+          pos = s.find(contact, mobile720)
+          if mobile720 < 0 or pos < 0:
+              raise SystemExit('css 720 insertion point missing')
+          responsive = '''  .incidencias-modal-admin-form {
     grid-template-columns: 1fr;
   }
 
@@ -1052,30 +577,17 @@ export const INCIDENCIAS_INDEX_VERSION =
     inline-size: 100%;
   }
 
-  .incidencias-modal-contact-grid {
-    grid-template-columns: 1fr;
-  }
+'''
+          s = s[:pos] + responsive + s[pos:]
 
-  .incidencias-modal-preview-head {
-''',
-              'css admin responsive 720',
-          )
+          mobile540 = s.find('@media (max-width: 540px)')
+          target = '  .incidencias-modal-description-section,\n  .incidencias-modal-contact-section,\n  .incidencias-modal-current-files,'
+          pos = s.find(target, mobile540)
+          if mobile540 < 0 or pos < 0:
+              raise SystemExit('css 540 insertion point missing')
+          s = s[:pos] + '  .incidencias-modal-admin-editor,\n' + s[pos:]
 
-          text = replace_once(
-              text,
-              '''  .incidencias-modal-description-section,
-  .incidencias-modal-contact-section,
-  .incidencias-modal-current-files,
-''',
-              '''  .incidencias-modal-admin-editor,
-  .incidencias-modal-description-section,
-  .incidencias-modal-contact-section,
-  .incidencias-modal-current-files,
-''',
-              'css admin responsive 540 padding',
-          )
-
-          path.write_text(text, encoding='utf-8')
+          p.write_text(s, encoding='utf-8')
           PY
 
           git diff --check
@@ -1084,34 +596,10 @@ export const INCIDENCIAS_INDEX_VERSION =
           node --check src/views/incidencias/incidencias.template.modal.js
           node --check src/views/incidencias/index.js
 
-          python - <<'PY'
-          from pathlib import Path
-          options = Path('src/views/incidencias/incidencias.options.js').read_text(encoding='utf-8')
-          modal = Path('src/views/incidencias/incidencias.template.modal.js').read_text(encoding='utf-8')
-          index = Path('src/views/incidencias/index.js').read_text(encoding='utf-8')
-          css = Path('src/css/views/incidencias/detail.css').read_text(encoding='utf-8')
-
-          required = [
-              'option("pending", "Pendiente")',
-              'option("open", "Abierta")',
-              'option("closed", "Cerrada")',
-              'option("low", "Baja")',
-              'option("medium", "Media")',
-              'option("high", "Alta")',
-              'option("urgent", "Urgente")',
-              'option("sales", "Ventas")',
-          ]
-          for needle in required:
-              assert needle in options, needle
-
-          assert 'data-admin-ticket-editor="true"' in modal
-          assert 'DETAIL_ACTIONS.ADMIN_SAVE' in index
-          assert 'await updateIncidencia(' in index
-          assert 'await reopenIncidencia(' in index
-          assert '.incidencias-modal-admin-editor' in css
-          assert 'var(--input-bg)' in css
-          assert 'var(--btn-primary-bg)' in css
-          PY
+          grep -q 'incidencias.index.extreme.v31.admin-ticket-editor' src/views/incidencias/index.js
+          grep -q 'incidencias.template.modal.extreme.v30.admin-ticket-editor' src/views/incidencias/incidencias.template.modal.js
+          grep -q 'data-admin-ticket-editor="true"' src/views/incidencias/incidencias.template.modal.js
+          grep -q 'DETAIL_ACTIONS.ADMIN_SAVE' src/views/incidencias/index.js
 
       - name: Commit product changes
         shell: bash

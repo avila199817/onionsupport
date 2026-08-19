@@ -9,13 +9,13 @@ Esta foundation establece una jerarquía única:
 1. `tokens/variables.css` y `tokens/light.css` definen decisiones visuales.
 2. `core/reset.css` normaliza el navegador.
 3. `core/core.css` define tipografía, accesibilidad y helpers.
-4. `core/layout.css` gobierna shell, offsets y la autoridad de scroll vertical.
+4. `core/layout.css` gobierna shell base y la autoridad de scroll vertical.
 5. `components/ui.css` define componentes reutilizables.
 6. `views/**` compone cada dominio.
 7. `compositions/**` puede recomponer varios dominios para una experiencia transversal —por ejemplo DataList móvil— sin introducir lógica de negocio ni `!important`.
 8. `core/guardrails.css` cierra la cascada con invariantes geométricas no negociables.
 
-Topbar y Sidebar mantienen controladores independientes, pero visualmente pertenecen a una única superficie `App Chrome`. La coordinación móvil vive fuera de ambos controladores para no crear dependencias cruzadas.
+Topbar y Sidebar mantienen controladores internos independientes, pero su geometría pertenece a una única superficie `App Chrome`. `css/layout/chrome.css` es la autoridad final de offsets, mounts, drawer y sincronía del shell; `ui/chrome/index.js` posee la coordinación responsive.
 
 ## Contratos no negociables
 
@@ -51,18 +51,24 @@ Los roots y elementos estructurales privados reciben `min-inline-size: 0`. El ta
 
 ### App Chrome móvil
 
-A `900px` Topbar y Sidebar cambian de composición sin fusionar su lógica interna:
+A `900px` Topbar y Sidebar cambian de composición sin repartir su geometría:
 
 - el único trigger de navegación móvil vive dentro del Topbar;
+- `--chrome-sidebar-offset` queda fijado a `0px`;
 - Sidebar cerrado está totalmente off-canvas y tiene huella espacial cero;
-- Main y Topbar ocupan el ancho completo del viewport;
+- Main, Topbar y tablehead ocupan el ancho completo del viewport;
+- abrir/cerrar navegación no cambia el `inset-inline-start` de Topbar/Main;
 - Sidebar abierto se superpone como drawer y nunca desplaza contenido;
 - un backdrop glass real cubre la aplicación, captura el toque exterior y evita click-through;
 - la interacción de fondo queda inerte mientras el drawer está abierto cuando el navegador soporta `inert`;
 - el foco de teclado queda contenido en Sidebar y `Escape` devuelve el foco al trigger;
 - el toggle interno de Sidebar queda reservado a desktop.
 
-`ui/chrome/template.js` posee la estructura visual compartida. `features/mobile-shell/index.js` posee la coordinación del drawer y consume únicamente la API pública de `SidebarUI`. `TopbarUI` y `SidebarUI` no se importan mutuamente.
+`ui/chrome/template.js` posee la estructura visual compartida. `ui/chrome/index.js` posee la coordinación del drawer y consume únicamente la API pública de `SidebarUI`. `css/layout/chrome.css` es la única autoridad geométrica final.
+
+### Regla de cascade layers del chrome
+
+`app.css` importa `chrome.css` dentro de `layer(layout)` y `chrome.css` no vuelve a declarar `@layer layout` internamente. Un `@layer` duplicado crearía una subcapa `layout.layout` y permitiría que reglas antiguas de Topbar/Sidebar ganaran prioridad.
 
 ### Mobile es una composición, no una reducción
 
@@ -137,7 +143,7 @@ Los cambios visuales transversales deben convertirse en sistema o permanecer en 
 
 UI Foundation V1 estabiliza inmediatamente todas las vistas privadas existentes sin exigir una reescritura destructiva simultánea.
 
-Los siguientes refactors pueden eliminar CSS duplicado de `views/**` de forma incremental, moviendo únicamente patrones ya probados al sistema común. Cada migración debe mantener:
+Los siguientes refactors pueden eliminar CSS duplicado de `views/**`, `topbar.css` y `sidebar.css` de forma incremental, moviendo únicamente patrones ya probados al sistema común. Cada migración debe mantener:
 
 - contratos funcionales;
 - dark/light;

@@ -376,6 +376,15 @@
     src="/src/features/facturas-autorefresh/index.js"
   ></script>
 
+  <!--
+    El shell móvil fija el estado inicial del Sidebar antes de que main.js
+    monte el chrome privado: móvil arranca cerrado, desktop conserva su estado.
+  -->
+  <script
+    type="module"
+    src="/src/features/mobile-shell/index.js"
+  ></script>
+
   <script
     type="module"
     src="/src/main.js"

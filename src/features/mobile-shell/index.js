@@ -3,28 +3,37 @@
    Archivo: /src/features/mobile-shell/index.js
 
    Responsabilidad:
-   - Convertir Sidebar en drawer real <= 900px.
-   - Mantener el trigger hamburguesa como único punto de entrada móvil.
-   - Cerrar al navegar, pulsar Escape o tocar fuera del drawer.
+   - Coordinar Topbar + Sidebar como un único chrome <= 900px.
+   - Mantener el único trigger móvil dentro del Topbar.
+   - Abrir Sidebar como drawer off-canvas sin desplazar la vista.
+   - Cerrar por backdrop, navegación, Escape o historial.
    - Restaurar el estado desktop al abandonar el breakpoint móvil.
    - Sin HTTP, Auth, Router, Store ni lógica de dominio.
 ========================================================= */
 
 import { SidebarUI } from "../../ui/sidebar/index.js";
+import {
+  ensureAppChromeTemplate,
+  getAppChromeTemplateRefs,
+  setAppChromeTemplateState,
+} from "../../ui/chrome/template.js";
 
 export const MOBILE_SHELL_VERSION =
-  "mobile-shell.v1-offcanvas-canonical";
+  "mobile-shell.v2-unified-topbar-drawer-glass";
 
 const MOBILE_QUERY = "(max-width: 900px)";
 const SIDEBAR_ROOT_SELECTOR = "[data-sidebar-root='true'], #app-sidebar";
 const SIDEBAR_NAV_LINK_SELECTOR =
   "[data-sidebar-nav-link='true'], [data-sidebar-brand='true']";
-const SIDEBAR_TOGGLE_SELECTOR = "[data-sidebar-toggle='true']";
+const MENU_TOGGLE_SELECTOR = "[data-topbar-menu-toggle='true']";
+const BACKDROP_SELECTOR = "[data-app-chrome-backdrop='true']";
+const CHROME_ROOT_SELECTOR = "#app-chrome, [data-app-chrome='true']";
 
 let initialized = false;
 let mediaQuery = null;
 let desktopOpenBeforeMobile = true;
-let observer = null;
+let stateObserver = null;
+let chromeObserver = null;
 
 function isBrowser() {
   return (
@@ -41,10 +50,6 @@ function eventElement(target = null) {
 function getSidebarRoot() {
   if (!isBrowser()) return null;
   return document.querySelector(SIDEBAR_ROOT_SELECTOR);
-}
-
-function getSidebarToggle() {
-  return getSidebarRoot()?.querySelector?.(SIDEBAR_TOGGLE_SELECTOR) || null;
 }
 
 function isMobile() {
@@ -84,7 +89,9 @@ function sidebarIsOpen() {
 function shellIsVisible() {
   if (!isBrowser()) return false;
 
+  const refs = getAppChromeTemplateRefs();
   const mount =
+    refs.sidebarMount ||
     document.getElementById("sidebar-mount") ||
     document.querySelector("[data-sidebar-mount]");
 
@@ -95,11 +102,14 @@ function shellIsVisible() {
   );
 }
 
-function setMobileDocumentState() {
+function syncMobileShellState() {
   if (!isBrowser()) return false;
 
+  ensureAppChromeTemplate();
+
   const mobile = isMobile();
-  const open = mobile && sidebarIsOpen();
+  const visible = shellIsVisible();
+  const open = mobile && visible && sidebarIsOpen();
 
   for (const node of [document.documentElement, document.body].filter(Boolean)) {
     if (mobile) {
@@ -111,11 +121,17 @@ function setMobileDocumentState() {
     }
   }
 
+  setAppChromeTemplateState({
+    mobile,
+    visible,
+    open,
+  });
+
   return true;
 }
 
 function focusToggle() {
-  const toggle = getSidebarToggle();
+  const toggle = getAppChromeTemplateRefs().menuToggle;
   if (!toggle || typeof toggle.focus !== "function") return false;
 
   try {
@@ -124,6 +140,19 @@ function focusToggle() {
     toggle.focus();
   }
 
+  return true;
+}
+
+function openMobileSidebar() {
+  if (!isMobile() || !shellIsVisible()) return false;
+
+  try {
+    SidebarUI.openSidebar?.();
+  } catch {
+    return false;
+  }
+
+  syncMobileShellState();
   return true;
 }
 
@@ -136,7 +165,7 @@ function closeMobileSidebar({ focus = false } = {}) {
     return false;
   }
 
-  setMobileDocumentState();
+  syncMobileShellState();
 
   if (focus) {
     window.requestAnimationFrame(() => {
@@ -145,6 +174,16 @@ function closeMobileSidebar({ focus = false } = {}) {
   }
 
   return true;
+}
+
+function toggleMobileSidebar() {
+  if (!isMobile() || !shellIsVisible()) return false;
+
+  if (sidebarIsOpen()) {
+    return closeMobileSidebar();
+  }
+
+  return openMobileSidebar();
 }
 
 function enterMobileMode() {
@@ -157,14 +196,14 @@ function enterMobileMode() {
   }
 
   closeMobileSidebar();
-  setMobileDocumentState();
+  syncMobileShellState();
   return true;
 }
 
 function leaveMobileMode() {
   if (!isBrowser()) return false;
 
-  setMobileDocumentState();
+  syncMobileShellState();
 
   if (
     desktopOpenBeforeMobile &&
@@ -177,7 +216,7 @@ function leaveMobileMode() {
     }
   }
 
-  setMobileDocumentState();
+  syncMobileShellState();
   return true;
 }
 
@@ -193,13 +232,13 @@ function onDocumentPointerDown(event) {
   if (!isMobile() || !sidebarIsOpen()) return;
 
   const target = eventElement(event.target);
-  const root = getSidebarRoot();
+  const backdrop = target?.closest?.(BACKDROP_SELECTOR);
 
-  if (!target || !root || root.contains(target)) return;
+  if (!backdrop) return;
 
   /*
-    El primer toque fuera sólo cierra el drawer. Evita activar accidentalmente
-    un botón o enlace que estaba oscurecido por la navegación abierta.
+    El backdrop es una superficie real del chrome. El primer toque fuera
+    pertenece al backdrop, cierra el drawer y nunca atraviesa al contenido.
   */
   event.preventDefault();
   event.stopPropagation();
@@ -210,9 +249,21 @@ function onDocumentClick(event) {
   if (!isMobile()) return;
 
   const target = eventElement(event.target);
-  const link = target?.closest?.(SIDEBAR_NAV_LINK_SELECTOR);
+  if (!target) return;
 
-  if (!link || !getSidebarRoot()?.contains(link)) return;
+  const toggle = target.closest?.(MENU_TOGGLE_SELECTOR);
+
+  if (toggle) {
+    event.preventDefault();
+    event.stopPropagation();
+    toggleMobileSidebar();
+    return;
+  }
+
+  const link = target.closest?.(SIDEBAR_NAV_LINK_SELECTOR);
+  const sidebar = getSidebarRoot();
+
+  if (!link || !sidebar?.contains?.(link)) return;
 
   window.queueMicrotask(() => {
     closeMobileSidebar();
@@ -237,14 +288,37 @@ function onHistoryNavigation() {
   closeMobileSidebar();
 }
 
-function attachObserver() {
-  if (!isBrowser() || observer || !document.body) return false;
+function mutationNeedsChromeSync(mutation) {
+  if (mutation?.type !== "childList" || !mutation.addedNodes?.length) {
+    return false;
+  }
 
-  observer = new MutationObserver(() => {
-    setMobileDocumentState();
+  for (const node of mutation.addedNodes) {
+    if (node.nodeType !== 1) continue;
+
+    if (
+      node.matches?.(
+        `${SIDEBAR_ROOT_SELECTOR}, [data-topbar-root='true'], #app-topbar`
+      ) ||
+      node.querySelector?.(
+        `${SIDEBAR_ROOT_SELECTOR}, [data-topbar-root='true'], #app-topbar`
+      )
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function attachStateObserver() {
+  if (!isBrowser() || stateObserver || !document.body) return false;
+
+  stateObserver = new MutationObserver(() => {
+    syncMobileShellState();
   });
 
-  observer.observe(document.body, {
+  stateObserver.observe(document.body, {
     attributes: true,
     attributeFilter: [
       "class",
@@ -252,6 +326,29 @@ function attachObserver() {
       "data-sidebar-open",
       "data-sidebar-hidden",
     ],
+  });
+
+  return true;
+}
+
+function attachChromeObserver() {
+  if (!isBrowser() || chromeObserver) return false;
+
+  const chrome =
+    document.querySelector(CHROME_ROOT_SELECTOR) ||
+    ensureAppChromeTemplate().chrome;
+
+  if (!chrome) return false;
+
+  chromeObserver = new MutationObserver((mutations) => {
+    if (mutations.some(mutationNeedsChromeSync)) {
+      syncMobileShellState();
+    }
+  });
+
+  chromeObserver.observe(chrome, {
+    childList: true,
+    subtree: true,
   });
 
   return true;
@@ -281,16 +378,24 @@ function unbindMediaQuery() {
   return true;
 }
 
+function onPageShow() {
+  syncMobileShellState();
+}
+
 export function initMobileShell() {
   if (!isBrowser() || initialized) return MOBILE_SHELL;
 
   initialized = true;
   mediaQuery = window.matchMedia(MOBILE_QUERY);
 
+  ensureAppChromeTemplate();
+  attachStateObserver();
+  attachChromeObserver();
+
   if (mediaQuery.matches) {
     enterMobileMode();
   } else {
-    setMobileDocumentState();
+    syncMobileShellState();
   }
 
   bindMediaQuery();
@@ -300,12 +405,10 @@ export function initMobileShell() {
   document.addEventListener("keydown", onDocumentKeyDown);
   window.addEventListener("popstate", onHistoryNavigation);
   window.addEventListener("hashchange", onHistoryNavigation);
-  window.addEventListener("pageshow", setMobileDocumentState);
-
-  attachObserver();
+  window.addEventListener("pageshow", onPageShow);
 
   window.requestAnimationFrame(() => {
-    setMobileDocumentState();
+    syncMobileShellState();
   });
 
   return MOBILE_SHELL;
@@ -321,10 +424,12 @@ export function destroyMobileShell() {
   document.removeEventListener("keydown", onDocumentKeyDown);
   window.removeEventListener("popstate", onHistoryNavigation);
   window.removeEventListener("hashchange", onHistoryNavigation);
-  window.removeEventListener("pageshow", setMobileDocumentState);
+  window.removeEventListener("pageshow", onPageShow);
 
-  observer?.disconnect?.();
-  observer = null;
+  stateObserver?.disconnect?.();
+  chromeObserver?.disconnect?.();
+  stateObserver = null;
+  chromeObserver = null;
   mediaQuery = null;
   initialized = false;
 
@@ -333,16 +438,27 @@ export function destroyMobileShell() {
     delete node.dataset.mobileNavigation;
   }
 
+  setAppChromeTemplateState({
+    mobile: false,
+    visible: shellIsVisible(),
+    open: false,
+  });
+
   return MOBILE_SHELL;
 }
 
 export function getMobileShellSnapshot() {
+  const refs = getAppChromeTemplateRefs();
+
   return Object.freeze({
     version: MOBILE_SHELL_VERSION,
     initialized,
     mobile: isMobile(),
     sidebarOpen: sidebarIsOpen(),
     shellVisible: shellIsVisible(),
+    chromeMounted: Boolean(refs.chrome),
+    menuToggleMounted: Boolean(refs.menuToggle),
+    backdropMounted: Boolean(refs.backdrop),
     desktopOpenBeforeMobile,
   });
 }
@@ -351,6 +467,10 @@ export const MOBILE_SHELL = Object.freeze({
   version: MOBILE_SHELL_VERSION,
   init: initMobileShell,
   destroy: destroyMobileShell,
+  open: openMobileSidebar,
+  close: closeMobileSidebar,
+  toggle: toggleMobileSidebar,
+  sync: syncMobileShellState,
   getSnapshot: getMobileShellSnapshot,
 });
 

@@ -258,6 +258,8 @@ def validate_ui_foundation_contract(errors: list[str]) -> None:
 
     app_path = SRC / "css" / "app.css"
     guardrails_path = SRC / "css" / "core" / "guardrails.css"
+    datalist_path = SRC / "css" / "compositions" / "mobile-datalist.css"
+    datalist_feature_path = SRC / "features" / "mobile-datalist" / "index.js"
 
     try:
         app_text = app_path.read_text(encoding="utf-8")
@@ -266,7 +268,8 @@ def validate_ui_foundation_contract(errors: list[str]) -> None:
         return
 
     required_app = (
-        "@layer tokens, reset, core, layout, components, views, auth, guardrails;",
+        "@layer tokens, reset, core, layout, components, views, auth, compositions, guardrails;",
+        '@import url("./compositions/mobile-datalist.css") layer(compositions);',
         '@import url("./core/guardrails.css") layer(guardrails);',
     )
     for snippet in required_app:
@@ -319,6 +322,55 @@ def validate_ui_foundation_contract(errors: list[str]) -> None:
             "src/css/core/guardrails.css :: guardrails no puede contener lógica de tema"
         )
 
+    if not datalist_path.is_file():
+        errors.append("src/css/compositions/mobile-datalist.css :: falta composición móvil canónica")
+    else:
+        datalist_text = datalist_path.read_text(encoding="utf-8")
+        required_datalist = (
+            "@layer compositions",
+            ".ui-datalist",
+            '.ui-datalist[data-mobile-datalist-layout="incidencias"]',
+            '.ui-datalist[data-mobile-datalist-layout="facturas"]',
+            '.ui-datalist[data-mobile-datalist-layout="clientes"]',
+            '.ui-datalist[data-mobile-datalist-layout="usuarios"]',
+            "@media (max-width: 680px)",
+        )
+        for snippet in required_datalist:
+            if snippet not in datalist_text:
+                errors.append(
+                    f"src/css/compositions/mobile-datalist.css :: falta contrato DataList: {snippet}"
+                )
+
+        if "!important" in datalist_text:
+            errors.append(
+                "src/css/compositions/mobile-datalist.css :: compositions no puede usar !important"
+            )
+
+    if not datalist_feature_path.is_file():
+        errors.append("src/features/mobile-datalist/index.js :: falta adaptador DataList")
+    else:
+        datalist_feature_text = datalist_feature_path.read_text(encoding="utf-8")
+        for snippet in (
+            "MOBILE_DATALIST_VERSION",
+            'layout: "incidencias"',
+            'layout: "facturas"',
+            'layout: "clientes"',
+            'layout: "usuarios"',
+            "MutationObserver",
+        ):
+            if snippet not in datalist_feature_text:
+                errors.append(
+                    f"src/features/mobile-datalist/index.js :: falta contrato DataList: {snippet}"
+                )
+
+    try:
+        index_text = (ROOT / "index.html").read_text(encoding="utf-8")
+    except OSError as error:
+        errors.append(f"index.html :: ilegible: {error}")
+    else:
+        if '/src/features/mobile-datalist/index.js' not in index_text:
+            errors.append("index.html :: debe cargar mobile-datalist/index.js")
+
     for css_path in PRIVATE_UI_INDEX_FILES:
         if not css_path.is_file():
             errors.append(f"{css_path.relative_to(ROOT)} :: falta stylesheet privado canónico")
@@ -340,8 +392,11 @@ def validate_ui_foundation_contract(errors: list[str]) -> None:
         SRC / "css" / "core",
         SRC / "css" / "layout",
         SRC / "css" / "components",
+        SRC / "css" / "compositions",
     )
     for root in architecture_roots:
+        if not root.exists():
+            continue
         for css_path in root.rglob("*.css"):
             if forbidden_architecture_names.search(css_path.name):
                 errors.append(

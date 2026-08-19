@@ -1,0 +1,426 @@
+/* =========================================================
+   ONION SUPPORT — MOBILE DATALIST
+   Archivo: /src/css/compositions/mobile-datalist.css
+
+   MOBILE DATALIST V1 · 2026-08-19
+
+   Representación móvil de los listados tabulares privados:
+   - Desktop conserva la tabla real de cada dominio.
+   - <= 680px el mismo DOM se compone como filas-card jerárquicas.
+   - La cabecera sigue disponible para accesibilidad, pero no ocupa pantalla.
+   - No existe scroll horizontal como UX principal en teléfono.
+   - Etiquetas compactas + valor mantienen el contexto de cada dato.
+   - Cada dominio sólo declara su mapa de slots; la geometría es común.
+
+   Esta hoja vive en layer(compositions), después de views y antes de
+   guardrails. Así puede recomponer una vista por orden de cascada y permanecer
+   como sistema transversal, no como parche específico de una ruta.
+========================================================= */
+
+@layer compositions {
+
+@media (max-width: 680px) {
+  /* =======================================================
+     TABLE -> DATALIST
+  ======================================================= */
+
+  .ui-datalist-shell {
+    inline-size: 100%;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    overflow: visible;
+    overscroll-behavior-inline: auto;
+    scrollbar-width: none;
+  }
+
+  .ui-datalist-shell::-webkit-scrollbar {
+    display: none;
+  }
+
+  .ui-datalist {
+    inline-size: 100%;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    display: block;
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: auto;
+  }
+
+  .ui-datalist > colgroup {
+    display: none;
+  }
+
+  /*
+    Se oculta visualmente, no con display:none: los encabezados siguen en el
+    árbol de accesibilidad y conservan el significado tabular del DOM.
+  */
+  .ui-datalist > thead {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .ui-datalist > tbody,
+  .ui-datalist-body {
+    inline-size: 100%;
+    min-inline-size: 0;
+    display: grid;
+    gap: 8px;
+    padding: 8px;
+  }
+
+  /* =======================================================
+     ROW CARD
+  ======================================================= */
+
+  .ui-datalist-row {
+    position: relative;
+    inline-size: 100%;
+    min-inline-size: 0;
+    block-size: auto;
+    min-block-size: 0;
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-auto-flow: row;
+    align-items: stretch;
+    margin: 0;
+    overflow: hidden;
+    border: 1px solid var(--data-table-row-border, var(--border-soft));
+    border-radius: var(--radius-md);
+    background: var(--card-bg);
+    color: var(--text);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .ui-datalist-row:last-child {
+    border-block-end: 1px solid var(--data-table-row-border, var(--border-soft));
+  }
+
+  .ui-datalist-row[aria-busy="true"] {
+    opacity: .7;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .ui-datalist-row:is([role="button"], [data-detail-target="true"]):hover {
+      border-color: var(--border-default);
+      background: var(--data-table-row-hover, var(--solid-hover));
+    }
+  }
+
+  .ui-datalist-row:is([role="button"], [data-detail-target="true"]):focus-visible {
+    outline: 0;
+    border-color: var(--input-border-focus, var(--border-strong));
+    box-shadow: var(--focus-ring);
+  }
+
+  /* =======================================================
+     CELL
+  ======================================================= */
+
+  .ui-datalist-cell {
+    min-inline-size: 0;
+    min-block-size: 52px;
+    display: grid;
+    align-content: center;
+    justify-items: start;
+    gap: 5px;
+    padding: 9px 10px;
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    text-align: start;
+    vertical-align: middle;
+  }
+
+  .ui-datalist-cell::before {
+    content: attr(data-mobile-label);
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    overflow: hidden;
+    color: var(--text-dim);
+    font-size: 9px;
+    font-weight: var(--weight-bold);
+    line-height: 1;
+    letter-spacing: .055em;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .ui-datalist-cell[data-mobile-label=""]::before,
+  .ui-datalist-cell[data-mobile-slot="primary"]::before,
+  .ui-datalist-cell[data-mobile-slot="actions"]::before,
+  .ui-datalist-row[aria-hidden="true"] .ui-datalist-cell::before {
+    display: none;
+  }
+
+  .ui-datalist-cell[data-mobile-slot="primary"] {
+    grid-column: 1 / -1;
+    min-block-size: 0;
+    padding: 12px;
+    border-block-end: 1px solid var(--border-soft);
+    background:
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--text-strong) 2.8%, transparent),
+        transparent 72%
+      );
+  }
+
+  .ui-datalist-cell[data-mobile-slot="amount"] {
+    justify-items: end;
+    text-align: end;
+  }
+
+  .ui-datalist-cell[data-mobile-slot="amount"]::before {
+    text-align: end;
+  }
+
+  .ui-datalist-cell[data-mobile-slot="actions"] {
+    grid-column: 1 / -1;
+    min-block-size: 0;
+    padding: 8px 10px 10px;
+    border-block-start: 1px solid var(--border-soft);
+  }
+
+  .ui-datalist-actions {
+    inline-size: 100%;
+    min-inline-size: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .ui-datalist-actions > * {
+    inline-size: 100%;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+  }
+
+  /* =======================================================
+     INCIDENCIAS
+
+     primary
+     estado  | importe
+     creada | novedad | adjuntos
+  ======================================================= */
+
+  .ui-datalist[data-mobile-datalist-layout="incidencias"]
+  .ui-datalist-cell[data-mobile-slot="status"] {
+    grid-column: 1 / span 3;
+  }
+
+  .ui-datalist[data-mobile-datalist-layout="incidencias"]
+  .ui-datalist-cell[data-mobile-slot="amount"] {
+    grid-column: 4 / span 3;
+  }
+
+  .ui-datalist[data-mobile-datalist-layout="incidencias"]
+  .ui-datalist-cell[data-mobile-slot="created"] {
+    grid-column: 1 / span 2;
+  }
+
+  .ui-datalist[data-mobile-datalist-layout="incidencias"]
+  .ui-datalist-cell[data-mobile-slot="updated"] {
+    grid-column: 3 / span 2;
+  }
+
+  .ui-datalist[data-mobile-datalist-layout="incidencias"]
+  .ui-datalist-cell[data-mobile-slot="attachments"] {
+    grid-column: 5 / span 2;
+  }
+
+  /* =======================================================
+     FACTURAS
+
+     primary
+     pago   | total
+     fecha  | incidencia
+     acciones 2x2
+  ======================================================= */
+
+  .ui-datalist[data-mobile-datalist-layout="facturas"]
+  .ui-datalist-cell[data-mobile-slot="status"] {
+    grid-column: 1 / span 3;
+  }
+
+  .ui-datalist[data-mobile-datalist-layout="facturas"]
+  .ui-datalist-cell[data-mobile-slot="amount"] {
+    grid-column: 4 / span 3;
+  }
+
+  .ui-datalist[data-mobile-datalist-layout="facturas"]
+  .ui-datalist-cell[data-mobile-slot="date"] {
+    grid-column: 1 / span 2;
+  }
+
+  .ui-datalist[data-mobile-datalist-layout="facturas"]
+  .ui-datalist-cell[data-mobile-slot="relation"] {
+    grid-column: 3 / span 4;
+  }
+
+  /* =======================================================
+     CLIENTES
+
+     primary
+     estado | importe
+     alta   | contacto
+  ======================================================= */
+
+  .ui-datalist[data-mobile-datalist-layout="clientes"]
+  .ui-datalist-cell[data-mobile-slot="status"] {
+    grid-column: 1 / span 3;
+  }
+
+  .ui-datalist[data-mobile-datalist-layout="clientes"]
+  .ui-datalist-cell[data-mobile-slot="amount"] {
+    grid-column: 4 / span 3;
+  }
+
+  .ui-datalist[data-mobile-datalist-layout="clientes"]
+  .ui-datalist-cell[data-mobile-slot="date"] {
+    grid-column: 1 / span 2;
+  }
+
+  .ui-datalist[data-mobile-datalist-layout="clientes"]
+  .ui-datalist-cell[data-mobile-slot="contact"] {
+    grid-column: 3 / span 4;
+  }
+
+  /* =======================================================
+     USUARIOS
+
+     primary
+     estado | alta
+     email
+     ubicación | actividad
+  ======================================================= */
+
+  .ui-datalist[data-mobile-datalist-layout="usuarios"]
+  .ui-datalist-cell[data-mobile-slot="status"] {
+    grid-column: 1 / span 3;
+  }
+
+  .ui-datalist[data-mobile-datalist-layout="usuarios"]
+  .ui-datalist-cell[data-mobile-slot="date"] {
+    grid-column: 4 / span 3;
+  }
+
+  .ui-datalist[data-mobile-datalist-layout="usuarios"]
+  .ui-datalist-cell[data-mobile-slot="email"] {
+    grid-column: 1 / -1;
+  }
+
+  .ui-datalist[data-mobile-datalist-layout="usuarios"]
+  .ui-datalist-cell[data-mobile-slot="location"] {
+    grid-column: 1 / span 3;
+  }
+
+  .ui-datalist[data-mobile-datalist-layout="usuarios"]
+  .ui-datalist-cell[data-mobile-slot="activity"] {
+    grid-column: 4 / span 3;
+  }
+
+  /* =======================================================
+     EXISTING VIEW CONTENT · MOBILE FIT
+  ======================================================= */
+
+  .ui-datalist-cell :where(
+    .incidencias-status-chip,
+    .incidencias-importe-chip,
+    .incidencias-attachments-pill,
+    .facturas-status-chip,
+    .facturas-incidencia-link,
+    .clientes-status-chip,
+    .clientes-amount-chip,
+    .clientes-importe-chip,
+    .usuarios-chip,
+    .usuarios-status-chip
+  ) {
+    max-inline-size: 100%;
+  }
+
+  .ui-datalist-cell :where(
+    .incidencias-date-inline,
+    .facturas-date-inline,
+    .clientes-date-inline,
+    .usuarios-date-inline,
+    .usuarios-location-inline,
+    .usuarios-activity-inline
+  ) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .ui-datalist-cell :where(
+    .facturas-incidencia-link,
+    .clientes-contact-line,
+    .usuarios-email-inline
+  ) {
+    min-inline-size: 0;
+    max-inline-size: 100%;
+  }
+
+  .ui-datalist-cell[data-mobile-slot="amount"] :where(
+    .facturas-total-stack
+  ) {
+    align-items: end;
+    text-align: end;
+  }
+
+  /* =======================================================
+     EXTRA SMALL
+  ======================================================= */
+
+  @media (max-width: 390px) {
+    .ui-datalist > tbody,
+    .ui-datalist-body {
+      gap: 7px;
+      padding: 6px;
+    }
+
+    .ui-datalist-cell {
+      min-block-size: 48px;
+      padding: 8px;
+    }
+
+    .ui-datalist-cell[data-mobile-slot="primary"] {
+      padding: 10px;
+    }
+
+    .ui-datalist-actions {
+      gap: 5px;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) and (max-width: 680px) {
+  .ui-datalist-row,
+  .ui-datalist-cell {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) and (max-width: 680px) {
+  .ui-datalist-row {
+    border-color: CanvasText;
+    background: Canvas;
+    color: CanvasText;
+    box-shadow: none;
+    forced-color-adjust: auto;
+  }
+
+  .ui-datalist-cell[data-mobile-slot="primary"],
+  .ui-datalist-cell[data-mobile-slot="actions"] {
+    border-color: CanvasText;
+    background: Canvas;
+  }
+}
+
+} /* @layer compositions */

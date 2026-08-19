@@ -390,6 +390,15 @@
     src="/src/main.js"
   ></script>
 
+  <!--
+    Las tablas privadas conservan su DOM semántico; esta mejora progresiva las
+    anota para que la capa compositions las convierta en DataList en teléfono.
+  -->
+  <script
+    type="module"
+    src="/src/features/mobile-datalist/index.js"
+  ></script>
+
   <script
     type="module"
     src="/src/features/public-support/index.js"

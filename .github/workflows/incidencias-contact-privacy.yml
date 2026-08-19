@@ -1,0 +1,64 @@
+name: Incidencias contact privacy
+
+on:
+  push:
+    branches:
+      - fix/incidencias-hide-contact-users
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[incidencias-contact-privacy-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/incidencias-hide-contact-users
+          fetch-depth: 0
+
+      - name: Hide requester contact block from non-admin users
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/views/incidencias/incidencias.template.modal.js')
+          text = path.read_text(encoding='utf-8')
+
+          replacements = [
+              (
+                  '  "incidencias.template.modal.extreme.v28.close-confirm-loader";',
+                  '  "incidencias.template.modal.extreme.v29.user-contact-privacy";',
+                  'modal version',
+              ),
+              (
+                  '    ${renderContactBlock(detail)}',
+                  '    ${vm.admin ? renderContactBlock(detail) : ""}',
+                  'admin-only contact block',
+              ),
+          ]
+
+          for old, new, label in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly 1 match, found {count}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          git diff --check
+          node --check src/views/incidencias/incidencias.template.modal.js
+
+      - name: Commit source change
+        shell: bash
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/views/incidencias/incidencias.template.modal.js
+          git commit -m 'fix(incidencias): hide requester contact from users [incidencias-contact-privacy-applied]'
+          git push origin HEAD:fix/incidencias-hide-contact-users

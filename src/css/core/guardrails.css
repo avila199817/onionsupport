@@ -4,26 +4,20 @@
 
    UI FOUNDATION V1 · PRIVATE SPA · 2026-08-19
 
-   Responsabilidad:
-   - Ser la última barrera geométrica del panel privado.
-   - Evitar overflow accidental, texto que expande grids/flex y cards rotas.
-   - Mantener una única autoridad de scroll vertical: .main-content.
-   - Mantener el scroll horizontal dentro de shells de datos/tablas.
-   - Normalizar el comportamiento responsive de las vistas privadas.
-   - Proteger modales, controles y contenido largo frente al viewport real.
+   Última barrera geométrica del panel privado:
+   - shrink seguro para flex/grid;
+   - texto largo sin expansión del viewport;
+   - un único scroll vertical de página;
+   - scroll horizontal propiedad de tablas/listas;
+   - mobile/tablet coherente entre vistas;
+   - modales dentro de viewport real + safe areas.
 
-   NO es una hoja de parches de una vista.
-   NO define paleta, branding ni lógica de negocio.
-   NO sustituye variables.css, layout.css ni ui.css.
-   Las vistas pueden definir su estética; este contrato sólo impone invariantes.
-
-   IMPORTANTE:
-   - app.css importa este archivo en la última cascade layer: guardrails.
-   - No declarar @layer aquí: la capa la asigna el @import canónico.
+   NO define colores, temas ni lógica de dominio.
+   NO contiene @layer: app.css asigna layer(guardrails).
 ========================================================= */
 
 /* =========================================================
-   1. PRIVATE VIEW ROOTS · CONTAINMENT
+   ROOT / SHRINK CONTRACT
 ========================================================= */
 
 :where(
@@ -43,11 +37,6 @@
   max-inline-size: 100%;
 }
 
-/*
-  Regla crítica para flex/grid: el tamaño min-content no puede gobernar
-  el ancho de la aplicación. No se fuerza max-width aquí para no limitar
-  tablas internas que viven dentro de su propio shell horizontal.
-*/
 :where(
   .panel-content[data-view],
   .home-view-root,
@@ -80,58 +69,22 @@
   min-inline-size: 0;
 }
 
-:where(
-  .panel-content[data-view],
-  .home-view-root,
-  .incidencias-view-root,
-  .facturas-view-root,
-  .clientes-view-root,
-  .usuarios-view-root,
-  .server-view-root,
-  .servidor-view-root,
-  .cuenta-view,
-  [data-correo-host="true"]
-)
-:where(
-  img,
-  picture,
-  video,
-  canvas,
-  iframe
-) {
+:where(.panel-content[data-view])
+:where(img, picture, video, canvas, iframe) {
   max-inline-size: 100%;
 }
 
 /* =========================================================
-   2. TEXT RESILIENCE · LONG CONTENT MUST NOT OWN LAYOUT
+   TEXT RESILIENCE
 ========================================================= */
 
 :where(.panel-content[data-view])
-:where(
-  h1,
-  h2,
-  h3,
-  h4,
-  h5,
-  h6,
-  p,
-  li,
-  dt,
-  dd,
-  label,
-  figcaption,
-  blockquote
-) {
+:where(h1, h2, h3, h4, h5, h6, p, li, dt, dd, label, figcaption, blockquote) {
   min-inline-size: 0;
   max-inline-size: 100%;
   overflow-wrap: anywhere;
 }
 
-/*
-  Identificadores, emails, endpoints y metadatos suelen ser los tokens que
-  más fácilmente revientan un grid. Sus componentes conservan ellipsis cuando
-  la vista lo pide; esta capa garantiza que su caja pueda encogerse.
-*/
 :where(
   .incidencias-ticket-id,
   .incidencias-client-email,
@@ -165,7 +118,6 @@
   word-break: break-word;
 }
 
-/* Helpers estructurales canónicos para templates presentes y futuros. */
 .ui-truncate,
 .text-truncate {
   min-inline-size: 0;
@@ -188,40 +140,24 @@
 }
 
 .ui-clamp-2,
-.text-clamp-2 {
-  -webkit-line-clamp: 2;
-}
+.text-clamp-2 { -webkit-line-clamp: 2; }
 
 .ui-clamp-3,
-.text-clamp-3 {
-  -webkit-line-clamp: 3;
-}
+.text-clamp-3 { -webkit-line-clamp: 3; }
 
 /* =========================================================
-   3. CONTROLS · NEVER EXPAND THE VIEWPORT
+   CONTROLS / ACTIONS
 ========================================================= */
 
 :where(.panel-content[data-view])
-:where(
-  button,
-  input,
-  select,
-  textarea,
-  [role="button"]
-) {
+:where(button, input, select, textarea, [role="button"]) {
   min-inline-size: 0;
   max-inline-size: 100%;
 }
 
 :where(.panel-content[data-view])
-:where(
-  button,
-  [role="button"]
-)
-:where(
-  span,
-  strong
-) {
+:where(button, [role="button"])
+:where(span, strong) {
   min-inline-size: 0;
 }
 
@@ -265,8 +201,7 @@
 }
 
 /* =========================================================
-   4. COMMON PRIVATE HERO GEOMETRY
-   Una sola gramática de encabezado para vistas operativas.
+   COMMON PRIVATE HERO GEOMETRY
 ========================================================= */
 
 :where(
@@ -282,10 +217,7 @@
   max-inline-size: 100%;
   display: grid;
   gap: var(--space-md);
-  padding:
-    clamp(8px, 1vw, 16px)
-    clamp(4px, .9vw, 14px)
-    0;
+  padding: clamp(8px, 1vw, 16px) clamp(4px, .9vw, 14px) 0;
 }
 
 :where(
@@ -346,7 +278,7 @@
 }
 
 /* =========================================================
-   5. DATA SURFACES · HORIZONTAL SCROLL LIVES HERE
+   DATA SURFACES / SCROLL AUTHORITY
 ========================================================= */
 
 :where(
@@ -377,7 +309,6 @@
   -webkit-overflow-scrolling: touch;
 }
 
-/* El viewport de la vista nunca es la barra horizontal de una tabla. */
 :where(
   .panel-content[data-view="incidencias"],
   .panel-content[data-view="facturas"],
@@ -412,13 +343,7 @@
   .incidencias-search,
   .facturas-search,
   .clientes-search,
-  .usuarios-search
-) {
-  min-inline-size: 0;
-  max-inline-size: 100%;
-}
-
-:where(
+  .usuarios-search,
   .incidencias-filter-pills,
   .facturas-filter-pills,
   .clientes-filter-pills,
@@ -432,7 +357,7 @@
 }
 
 /* =========================================================
-   6. CARD / GRID RESILIENCE
+   CARD / GRID RESILIENCE
 ========================================================= */
 
 :where(
@@ -485,7 +410,7 @@
 }
 
 /* =========================================================
-   7. MODAL / DIALOG VIEWPORT SAFETY
+   MODAL / DIALOG VIEWPORT SAFETY
 ========================================================= */
 
 :where(
@@ -496,16 +421,10 @@
   max-inline-size:
     min(
       100%,
-      calc(
-        100dvw -
-        max(24px, calc(var(--app-safe-left) + var(--app-safe-right)))
-      )
+      calc(100dvw - max(24px, calc(var(--app-safe-left) + var(--app-safe-right))))
     );
   max-block-size:
-    calc(
-      100dvh -
-      max(24px, calc(var(--app-safe-top) + var(--app-safe-bottom)))
-    );
+    calc(100dvh - max(24px, calc(var(--app-safe-top) + var(--app-safe-bottom))));
 }
 
 :where(
@@ -536,7 +455,7 @@
 }
 
 /* =========================================================
-   8. TABLET · ONE COMPOSITION, NOT ONE EXCEPTION PER VIEW
+   TABLET · ONE COMPOSITION
 ========================================================= */
 
 @media (max-width: 900px) {
@@ -581,13 +500,7 @@
     .incidencias-history-head,
     .facturas-history-head,
     .clientes-history-head,
-    .usuarios-history-head
-  ) {
-    grid-template-columns: minmax(0, 1fr);
-    align-items: stretch;
-  }
-
-  :where(
+    .usuarios-history-head,
     .incidencias-filters,
     .facturas-filters,
     .clientes-filters,
@@ -604,21 +517,32 @@
     .usuarios-search
   ) {
     grid-column: 1;
+    grid-row: 1;
     inline-size: 100%;
-    min-inline-size: 0;
   }
 
   :where(
     .incidencias-filter-pills,
     .facturas-filter-pills,
     .clientes-filter-pills,
-    .usuarios-filter-pills,
+    .usuarios-filter-pills
+  ) {
+    grid-column: 1;
+    grid-row: 2;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+
+  :where(
     .incidencias-sort-pills,
     .facturas-sort-pills,
     .clientes-sort-pills
   ) {
     grid-column: 1;
-    justify-content: flex-start;
+    grid-row: 3;
+    justify-self: stretch;
     overflow-x: auto;
     overflow-y: hidden;
     overscroll-behavior-inline: contain;
@@ -648,18 +572,10 @@
 }
 
 /* =========================================================
-   9. MOBILE · SOLID DEFAULTS FOR EVERY PRIVATE VIEW
+   MOBILE · SOLID DEFAULTS
 ========================================================= */
 
 @media (max-width: 560px) {
-  :where(
-    .content-wrapper:not(.flush),
-    .panel-content[data-view]
-  ) {
-    min-inline-size: 0;
-    max-inline-size: 100%;
-  }
-
   :where(
     .incidencias-view-root,
     .facturas-view-root,
@@ -744,16 +660,6 @@
     padding: var(--space-sm);
   }
 
-  :where(
-    .incidencias-meta-pill,
-    .facturas-meta-pill,
-    .clientes-meta-pill,
-    .usuarios-meta-pill,
-    .server-meta-pill
-  ) {
-    max-inline-size: 100%;
-  }
-
   .server-services-grid,
   .server-tech-grid,
   .server-probe-grid,
@@ -798,16 +704,12 @@
 }
 
 /* =========================================================
-   10. TOUCH / MOTION / CONTRAST
+   TOUCH / MOTION / CONTRAST / PRINT
 ========================================================= */
 
 @media (hover: none) and (pointer: coarse) {
   :where(.panel-content[data-view])
-  :where(
-    button,
-    [role="button"],
-    a[href]
-  ) {
+  :where(button, [role="button"], a[href]) {
     touch-action: manipulation;
   }
 }
@@ -831,10 +733,6 @@
     forced-color-adjust: auto;
   }
 }
-
-/* =========================================================
-   11. PRINT · GUARDRAILS MUST NOT CLIP DOCUMENT OUTPUT
-========================================================= */
 
 @media print {
   :where(

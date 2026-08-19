@@ -38,28 +38,50 @@ jobs:
           from pathlib import Path
 
           path = Path('/tmp/incidencias-admin-editor.py')
-          text = path.read_text(encoding='utf-8')
-          label = "'index detail patch selector'"
-          pos = text.find(label)
-          if pos < 0:
-              raise SystemExit('admin patch selector label not found')
+          script = path.read_text(encoding='utf-8')
 
-          start = text.rfind('text = replace_once(', 0, pos)
-          end = text.find('\n\nmarker =', pos)
-          if start < 0 or end < 0:
-              raise SystemExit('admin patch selector block boundaries not found')
+          def replace_labeled_block(script, label, replacement, end_marker):
+              label_token = repr(label)
+              pos = script.find(label_token)
+              if pos < 0:
+                  raise SystemExit(f'{label}: label not found')
+              start = script.rfind('text = replace_once(', 0, pos)
+              end = script.find(end_marker, pos)
+              if start < 0 or end < 0:
+                  raise SystemExit(f'{label}: block boundaries not found')
+              return script[:start] + replacement + script[end:]
 
-          robust = '''needle = '          ".incidencias-modal-meta-grid",'
-          if text.count(needle) != 1:
-              raise SystemExit(f"index detail patch selector: expected 1 meta-grid selector, found {text.count(needle)}")
-          text = text.replace(
-              needle,
-              needle + '\\n          ".incidencias-modal-admin-editor",',
-              1,
+          script = replace_labeled_block(
+              script,
+              'index detail patch selector',
+              '''needle = '          ".incidencias-modal-meta-grid",'
+if text.count(needle) != 1:
+    raise SystemExit(f"index detail patch selector: expected 1 meta-grid selector, found {text.count(needle)}")
+text = text.replace(
+    needle,
+    needle + '\\n          ".incidencias-modal-admin-editor",',
+    1,
+)
+''',
+              '\n\nmarker =',
           )
-          '''
 
-          path.write_text(text[:start] + robust + text[end:], encoding='utf-8')
+          script = replace_labeled_block(
+              script,
+              'css admin responsive 540 padding',
+              '''mobile_start = text.rfind('@media (max-width: 540px)')
+if mobile_start < 0:
+    raise SystemExit('css admin responsive 540 padding: media block not found')
+mobile_needle = '  .incidencias-modal-description-section,\\n  .incidencias-modal-contact-section,\\n  .incidencias-modal-current-files,'
+mobile_pos = text.find(mobile_needle, mobile_start)
+if mobile_pos < 0:
+    raise SystemExit('css admin responsive 540 padding: target selector not found in mobile block')
+text = text[:mobile_pos] + '  .incidencias-modal-admin-editor,\\n' + text[mobile_pos:]
+''',
+              '\n\npath.write_text(text, encoding=',
+          )
+
+          path.write_text(script, encoding='utf-8')
           PYFIX
 
           python /tmp/incidencias-admin-editor.py
@@ -74,6 +96,7 @@ jobs:
           grep -q 'incidencias.template.modal.extreme.v30.admin-ticket-editor' src/views/incidencias/incidencias.template.modal.js
           grep -q 'data-admin-ticket-editor="true"' src/views/incidencias/incidencias.template.modal.js
           grep -q 'DETAIL_ACTIONS.ADMIN_SAVE' src/views/incidencias/index.js
+          grep -q 'incidencias-modal-admin-editor' src/css/views/incidencias/detail.css
 
       - name: Commit product changes
         shell: bash

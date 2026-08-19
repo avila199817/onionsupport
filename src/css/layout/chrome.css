@@ -29,6 +29,7 @@
       var(--topbar-safe-top, env(safe-area-inset-top, 0px))
     );
 
+  --chrome-z-root: var(--z-sidebar, 40);
   --chrome-z-topbar: var(--z-topbar, 50);
   --chrome-z-backdrop: 70;
   --chrome-z-drawer: 80;
@@ -82,6 +83,8 @@ body:is(
   block-size: 100vh;
   block-size: 100svh;
   block-size: 100dvh;
+
+  z-index: var(--chrome-z-root);
 
   pointer-events: none;
   isolation: isolate;

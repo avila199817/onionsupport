@@ -465,6 +465,38 @@ def validate_correo_cascade_v5_contract(errors: list[str]) -> None:
         errors.append("src/css/views/correo/viewport.css :: falta contrato consolidado de altura/densidad")
 
 
+def validate_detail_modal_v6_contract(errors: list[str]) -> None:
+    """Usuarios must consume the transverse detail modal without importing Incidencias CSS."""
+    component_path = SRC / "css" / "components" / "detail-modal.css"
+    route_styles = (SRC / "router" / "styles.js").read_text(encoding="utf-8")
+    users_template = (SRC / "views" / "usuarios" / "usuarios.template.modal.js").read_text(encoding="utf-8")
+
+    if not component_path.is_file():
+        errors.append("src/css/components/detail-modal.css :: falta componente Detail Modal V6")
+        return
+
+    component = component_path.read_text(encoding="utf-8")
+    for snippet in ("@layer components", ".ui-detail-modal-root", ".ui-detail-modal-panel", ".ui-detail-modal-body"):
+        if snippet not in component:
+            errors.append(f"src/css/components/detail-modal.css :: falta contrato: {snippet}")
+
+    if ".incidencias-modal-" in component or ".usuarios-modal-" in component:
+        errors.append("src/css/components/detail-modal.css :: el componente transversal no puede contener selectores de dominio")
+
+    if "incidencias-modal-" in users_template or "incidencias-detail-open" in users_template:
+        errors.append("src/views/usuarios/usuarios.template.modal.js :: Usuarios no puede depender de clases de Incidencias")
+
+    users_match = re.search(r"usuarios:\s*Object\.freeze\(\[(?P<body>.*?)\]\)", route_styles, re.DOTALL)
+    if not users_match:
+        errors.append("src/router/styles.js :: falta manifest CSS de Usuarios")
+        return
+    users_css = users_match.group("body")
+    if '"/src/css/components/detail-modal.css"' not in users_css:
+        errors.append("src/router/styles.js :: Usuarios debe cargar detail-modal.css")
+    if '"/src/css/views/incidencias/detail.css"' in users_css:
+        errors.append("src/router/styles.js :: Usuarios no puede cargar incidencias/detail.css")
+
+
 def validate_paths(errors: list[str]) -> None:
     for root in (SRC, ROOT / ".github"):
         if not root.exists():
@@ -503,6 +535,7 @@ def main() -> int:
     validate_ui_foundation_contract(errors)
     validate_ui_system_v4_contract(errors)
     validate_correo_cascade_v5_contract(errors)
+    validate_detail_modal_v6_contract(errors)
     validate_known_dead_paths(errors)
 
     unique_errors = list(dict.fromkeys(errors))

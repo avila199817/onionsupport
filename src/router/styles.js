@@ -10,12 +10,11 @@
    - Mientras el contrato de capas no esté listo, este loader queda
      desactivado aunque exista el archivo.
    - No lee publicPath, query, hash ni tokens.
-   - Usuarios reutiliza incidencias/detail.css porque su modal de detalle
-     emite el contrato visual compartido incidencias-modal-*.
+   - Usuarios carga un Detail Modal transversal y no depende del CSS de Incidencias.
 ========================================================= */
 
 export const ROUTE_STYLES_VERSION =
-  "route-styles.v7-ui-system-v4";
+  "route-styles.v8-detail-modal-component";
 
 const MODE_ATTRIBUTE =
   "data-css-route-mode";
@@ -97,17 +96,13 @@ const STYLE_MANIFEST = Object.freeze({
   ]),
 
   /*
-    usuarios.template.modal.js usa simultáneamente clases
-    usuarios-modal-* e incidencias-modal-*.
-
-    En /src/css/views/usuarios actualmente sólo existen
-    index.css y create.css, por lo que el detalle necesita
-    cargar el CSS compartido que implementa incidencias-modal-*.
+    El detalle de Usuarios consume el shell transversal ui-detail-modal-*
+    sin arrastrar la hoja completa de detalle de Incidencias.
   */
   usuarios: Object.freeze([
+    "/src/css/components/detail-modal.css",
     "/src/css/views/usuarios/index.css",
     "/src/css/views/usuarios/create.css",
-    "/src/css/views/incidencias/detail.css",
   ]),
 
   correo: Object.freeze([

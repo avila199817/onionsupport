@@ -15,6 +15,8 @@ Esta foundation establece una jerarquía única:
 7. `compositions/**` puede recomponer varios dominios para una experiencia transversal —por ejemplo DataList móvil— sin introducir lógica de negocio ni `!important`.
 8. `core/guardrails.css` cierra la cascada con invariantes geométricas no negociables.
 
+Topbar y Sidebar mantienen controladores independientes, pero visualmente pertenecen a una única superficie `App Chrome`. La coordinación móvil vive fuera de ambos controladores para no crear dependencias cruzadas.
+
 ## Contratos no negociables
 
 ### Una sola autoridad de scroll vertical
@@ -47,11 +49,26 @@ Los roots y elementos estructurales privados reciben `min-inline-size: 0`. El ta
 
 `dialog`, `[role="dialog"]` y `[aria-modal="true"]` respetan `100dvh`, `100dvw` y safe areas. Un modal no puede quedar detrás de la barra del navegador móvil ni crecer fuera de pantalla.
 
+### App Chrome móvil
+
+A `900px` Topbar y Sidebar cambian de composición sin fusionar su lógica interna:
+
+- el único trigger de navegación móvil vive dentro del Topbar;
+- Sidebar cerrado está totalmente off-canvas y tiene huella espacial cero;
+- Main y Topbar ocupan el ancho completo del viewport;
+- Sidebar abierto se superpone como drawer y nunca desplaza contenido;
+- un backdrop glass real cubre la aplicación, captura el toque exterior y evita click-through;
+- la interacción de fondo queda inerte mientras el drawer está abierto cuando el navegador soporta `inert`;
+- el foco de teclado queda contenido en Sidebar y `Escape` devuelve el foco al trigger;
+- el toggle interno de Sidebar queda reservado a desktop.
+
+`ui/chrome/template.js` posee la estructura visual compartida. `features/mobile-shell/index.js` posee la coordinación del drawer y consume únicamente la API pública de `SidebarUI`. `TopbarUI` y `SidebarUI` no se importan mutuamente.
+
 ### Mobile es una composición, no una reducción
 
 A 900 px:
 
-- el Sidebar se convierte en drawer off-canvas y sólo queda el trigger hamburguesa cuando está cerrado;
+- App Chrome adopta navegación drawer desde Topbar;
 - Main y Topbar pasan a ancho completo;
 - los heroes pasan a una columna;
 - las acciones dejan de competir con el título;

@@ -2,19 +2,16 @@
    Onion Support - Home API
    Archivo: /src/views/home/home.api.js
 
-   PRODUCTIVO · FACTURACIÓN GLOBAL CANÓNICA
+   PRODUCTIVO · DOMAIN AGGREGATOR · 2026-08-19
 
-   Responsabilidad:
-   - Agregar el dashboard de Inicio desde APIs de dominio existentes.
-   - Mantener UN único cache de Home en memoria, aislado por usuario/rol.
-   - Deduplicar cargas concurrentes del Home.
-   - Tolerar fallos parciales sin ocultar dominios disponibles.
-   - Cargar sólo las últimas facturas necesarias para la UI.
-   - Obtener estadísticas GLOBALES desde GET /api/facturas/stats.
-   - NO calcular el total facturado sumando las facturas visibles.
-   - NO depender de includeStatsAll del endpoint de listado.
+   Contrato:
+   - Agrega datos del Home privado desde APIs de dominio existentes.
+   - Un único cache en memoria, aislado por usuario/rol.
+   - Deduplica cargas concurrentes y protege cambios de sesión.
+   - Tolera fallos parciales sin ocultar dominios disponibles.
+   - Facturación global siempre desde /api/facturas/stats.
+   - La actividad conserva identificadores humanos de ticket/factura.
    - Sin DOM, Router, Store, Storage ni fetch propio.
-   - HTTP directo sólo para contadores admin mínimos.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -24,7 +21,7 @@ import IncidenciasApi from "../incidencias/incidencias.api.js";
 import FacturasApi from "../facturas/facturas.api.js";
 
 export const HOME_API_VERSION =
-  "home.api.domain-aggregator.v9.invoice-stats-endpoint";
+  "home.api.domain-aggregator.v10.entity-identifiers";
 
 export const HOME_TIMEOUT_MS = 15_000;
 export const HOME_LIST_LIMIT = 8;
@@ -37,38 +34,17 @@ export const HOME_ENDPOINTS = Object.freeze({
 });
 
 const LIST_KEYS = Object.freeze([
-  "items",
-  "rows",
-  "results",
-  "records",
-  "docs",
-  "documents",
-  "value",
-  "list",
-  "tickets",
-  "incidencias",
-  "facturas",
-  "invoices",
-  "clientes",
-  "clients",
-  "users",
-  "usuarios",
+  "items", "rows", "results", "records", "docs", "documents",
+  "value", "list", "tickets", "incidencias", "facturas", "invoices",
+  "clientes", "clients", "users", "usuarios",
 ]);
 
 const WRAPPER_KEYS = Object.freeze([
-  "data",
-  "payload",
-  "result",
-  "response",
-  "body",
+  "data", "payload", "result", "response", "body",
 ]);
 
 const TOTAL_KEYS = Object.freeze([
-  "total",
-  "totalCount",
-  "remoteCount",
-  "totalMatched",
-  "count",
+  "total", "totalCount", "remoteCount", "totalMatched", "count",
 ]);
 
 const cacheState = {
@@ -89,34 +65,29 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
 function safeObject(value, fallback = {}) {
   return isObject(value) ? value : fallback;
 }
 
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
+  const text = String(value ?? "")
     .replace(/[\r\n\t]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
-  return output || fallback;
+  return text || fallback;
 }
 
-/*
-   No aplanar arrays.
-   Un array de facturas/incidencias es un valor válido completo.
-*/
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
     if (isObject(value) && Object.keys(value).length === 0) continue;
-
     return value;
   }
 
@@ -126,8 +97,7 @@ function first(...values) {
 function number(value, fallback = 0) {
   if (value === null || value === undefined || value === "") return fallback;
   if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
-  if (typeof value === "boolean") return value ? 1 : 0;
-  if (typeof value === "object") return fallback;
+  if (typeof value === "boolean" || typeof value === "object") return fallback;
 
   if (typeof value === "string") {
     let text = value
@@ -142,10 +112,9 @@ function number(value, fallback = 0) {
     const hasDot = text.includes(".");
 
     if (hasComma && hasDot) {
-      text =
-        text.lastIndexOf(",") > text.lastIndexOf(".")
-          ? text.replace(/\./g, "").replace(/,/g, ".")
-          : text.replace(/,/g, "");
+      text = text.lastIndexOf(",") > text.lastIndexOf(".")
+        ? text.replace(/\./g, "").replace(/,/g, ".")
+        : text.replace(/,/g, "");
     } else if (hasComma) {
       text = text.replace(/,/g, ".");
     }
@@ -185,19 +154,14 @@ function redact(value = "") {
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(
-      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-      "***"
-    );
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
 function normalizeRole(value = "") {
   if (Array.isArray(value)) {
     const roles = value.map(normalizeRole).filter(Boolean);
-
     if (roles.includes("admin")) return "admin";
     if (roles.includes("user")) return "user";
-
     return "";
   }
 
@@ -209,17 +173,10 @@ function normalizeRole(value = "") {
     .replace(/[^\w]+/g, "_")
     .replace(/^_+|_+$/g, "");
 
-  if (
-    [
-      "admin",
-      "administrator",
-      "administrador",
-      "superadmin",
-      "super_admin",
-      "root",
-      "owner",
-    ].includes(role)
-  ) {
+  if ([
+    "admin", "administrator", "administrador", "superadmin",
+    "super_admin", "root", "owner",
+  ].includes(role)) {
     return "admin";
   }
 
@@ -259,14 +216,14 @@ function normalizeError(domain = "home", error = null) {
 }
 
 /* =========================================================
-   CURRENT APP CONTEXT
+   APP CONTEXT / CACHE KEY
 ========================================================= */
 
 function getCoreState() {
   try {
-    return AppCore.getState?.() || AppCore.state || {};
+    return AppCore?.getState?.() || AppCore?.state || {};
   } catch {
-    return AppCore.state || {};
+    return AppCore?.state || {};
   }
 }
 
@@ -274,7 +231,7 @@ function getCurrentUser() {
   const state = getCoreState();
 
   try {
-    return AppCore.getCurrentUser?.() || state.user || state.currentUser || null;
+    return AppCore?.getCurrentUser?.() || state.user || state.currentUser || null;
   } catch {
     return state.user || state.currentUser || null;
   }
@@ -284,20 +241,18 @@ function getCurrentRole() {
   const state = getCoreState();
   const user = safeObject(getCurrentUser(), {});
 
-  return (
-    normalizeRole(
-      first(
-        AppCore.getCurrentRole?.(),
-        state.role,
-        state.rol,
-        state.roles,
-        user.role,
-        user.rol,
-        user.roles,
-        "user"
-      )
-    ) || "user"
-  );
+  return normalizeRole(
+    first(
+      AppCore?.getCurrentRole?.(),
+      state.role,
+      state.rol,
+      state.roles,
+      user.role,
+      user.rol,
+      user.roles,
+      "user"
+    )
+  ) || "user";
 }
 
 function getCurrentUserId() {
@@ -333,28 +288,23 @@ function currentContext() {
   };
 }
 
-/* =========================================================
-   HOME CACHE
-========================================================= */
-
 function cacheAgeMs() {
-  if (!cacheState.loadedAtMs) return Number.POSITIVE_INFINITY;
-  return Math.max(0, now() - cacheState.loadedAtMs);
+  return cacheState.loadedAtMs
+    ? Math.max(0, now() - cacheState.loadedAtMs)
+    : Number.POSITIVE_INFINITY;
 }
 
 function cacheMatches(key = currentContext().key) {
   return Boolean(
     cacheState.dashboard &&
-      cacheState.key &&
-      key &&
-      cacheState.key === key
+    cacheState.key &&
+    key &&
+    cacheState.key === key
   );
 }
 
 function isCacheFresh(options = {}) {
-  const key = currentContext().key;
-
-  if (!cacheMatches(key)) return false;
+  if (!cacheMatches()) return false;
 
   const ttlMs = number(
     options.ttlMs ?? options.cacheTtlMs,
@@ -365,18 +315,14 @@ function isCacheFresh(options = {}) {
 }
 
 function cachedDashboard({ stale = false } = {}) {
-  const key = currentContext().key;
-
-  if (!cacheMatches(key)) return null;
-
-  const dashboard = cacheState.dashboard;
+  if (!cacheMatches()) return null;
 
   return {
-    ...dashboard,
+    ...cacheState.dashboard,
     cached: true,
-    stale: stale || dashboard.stale === true,
+    stale: stale || cacheState.dashboard?.stale === true,
     cache: {
-      ...safeObject(dashboard.cache),
+      ...safeObject(cacheState.dashboard?.cache),
       hydrated: true,
       key: cacheState.key,
       ageMs: cacheAgeMs(),
@@ -392,7 +338,6 @@ function commitCache(dashboard = null, context = currentContext()) {
   cacheState.dashboard = dashboard;
   cacheState.key = context.key;
   cacheState.loadedAtMs = now();
-
   return dashboard;
 }
 
@@ -404,12 +349,11 @@ export function clearHomeDashboardCache() {
   cacheState.inFlight = null;
   cacheState.inFlightKey = "";
   cacheState.epoch += 1;
-
   return true;
 }
 
 /* =========================================================
-   COLLECTION READERS
+   GENERIC RESPONSE READERS
 ========================================================= */
 
 function unwrapList(value = null, depth = 0) {
@@ -436,63 +380,49 @@ function totalFromPayload(value = null, fallback = 0, depth = 0) {
     return Math.max(0, number(fallback, 0));
   }
 
-  let best = Math.max(0, number(fallback, 0));
+  let total = Math.max(0, number(fallback, 0));
 
   for (const key of TOTAL_KEYS) {
-    best = Math.max(best, number(value[key], 0));
+    total = Math.max(total, number(value[key], 0));
   }
 
-  for (const nested of [
-    value.meta,
-    value.pagination,
-    value.paging,
-    value.pageInfo,
-  ]) {
+  for (const nested of [value.meta, value.pagination, value.paging, value.pageInfo]) {
     if (!isObject(nested)) continue;
-
     for (const key of TOTAL_KEYS) {
-      best = Math.max(best, number(nested[key], 0));
+      total = Math.max(total, number(nested[key], 0));
     }
   }
 
   for (const key of WRAPPER_KEYS) {
-    const nested = value[key];
-
-    if (isObject(nested)) {
-      best = Math.max(best, totalFromPayload(nested, best, depth + 1));
+    if (isObject(value[key])) {
+      total = Math.max(total, totalFromPayload(value[key], total, depth + 1));
     }
   }
 
-  return best;
+  return total;
 }
 
-function collectionFromResponse(response = null, fallbackTotal = 0) {
+function collectionFromResponse(response = null) {
   const items = unwrapList(response);
   const object = safeObject(response, {});
 
   return {
     items,
-    total: Math.max(items.length, totalFromPayload(response, fallbackTotal)),
+    total: Math.max(items.length, totalFromPayload(response, items.length)),
     stale: object.stale === true,
     error: object.error || null,
   };
 }
 
-/* =========================================================
-   INVOICE STATS READERS
-========================================================= */
-
 function invoiceCountFromStats(stats = {}) {
-  const source = safeObject(stats);
-
   return Math.max(
     0,
     number(
       first(
-        source.invoiceCount,
-        source.countTotal,
-        source.totalCount,
-        source.count,
+        stats.invoiceCount,
+        stats.countTotal,
+        stats.totalCount,
+        stats.count,
         0
       ),
       0
@@ -501,66 +431,45 @@ function invoiceCountFromStats(stats = {}) {
 }
 
 function totalInvoicedFromStats(stats = {}) {
-  const source = safeObject(stats);
-
   return optionalNumber(
     first(
-      source.totalAmount,
-      source.grossAmount,
-      source.totalFacturado,
-      source.totalImporte,
-      source.invoiceAmount,
-      source.amount,
+      stats.totalAmount,
+      stats.grossAmount,
+      stats.totalFacturado,
+      stats.totalImporte,
+      stats.invoiceAmount,
+      stats.amount,
       null
     )
   );
 }
 
 function paidTotalFromStats(stats = {}) {
-  const source = safeObject(stats);
-
   return optionalNumber(
     first(
-      source.paidAmount,
-      source.paidTotal,
-      source.totalPagado,
-      source.totalPaid,
-      source.importePagado,
-      source.amountPaid,
+      stats.paidAmount,
+      stats.paidTotal,
+      stats.totalPagado,
+      stats.totalPaid,
+      stats.importePagado,
+      stats.amountPaid,
       null
     )
   );
 }
 
 function outstandingFromStats(stats = {}) {
-  const source = safeObject(stats);
-
   const direct = optionalNumber(
-    first(
-      source.outstandingAmount,
-      source.outstandingTotal,
-      null
-    )
+    first(stats.outstandingAmount, stats.outstandingTotal, null)
   );
 
   if (direct !== null) return direct;
 
   const pending = optionalNumber(
-    first(
-      source.pendingAmount,
-      source.pendingTotal,
-      source.totalPendiente,
-      null
-    )
+    first(stats.pendingAmount, stats.pendingTotal, stats.totalPendiente, null)
   );
-
   const overdue = optionalNumber(
-    first(
-      source.overdueAmount,
-      source.overdueTotal,
-      source.totalVencido,
-      null
-    )
+    first(stats.overdueAmount, stats.overdueTotal, stats.totalVencido, null)
   );
 
   if (pending === null && overdue === null) return null;
@@ -568,13 +477,11 @@ function outstandingFromStats(stats = {}) {
 }
 
 function currencyFromStats(stats = {}, invoices = []) {
-  const source = safeObject(stats);
-
   return cleanText(
     first(
-      source.currency,
-      source.moneda,
-      safeArray(source.byCurrency)[0]?.currency,
+      stats.currency,
+      stats.moneda,
+      safeArray(stats.byCurrency)[0]?.currency,
       invoices[0]?.currency,
       invoices[0]?.moneda,
       "EUR"
@@ -592,7 +499,7 @@ function forceRequested(options = {}) {
 }
 
 async function loadIncidenciasForHome(options = {}) {
-  const response = await IncidenciasApi.listIncidencias({
+  return IncidenciasApi.listIncidencias({
     timeout: options.timeout || HOME_TIMEOUT_MS,
     force: forceRequested(options),
     returnStaleOnError: options.returnStaleOnError !== false,
@@ -606,23 +513,12 @@ async function loadIncidenciasForHome(options = {}) {
       ...safeObject(options.incidenciasQuery),
     },
   });
-
-  return {
-    ...collectionFromResponse(response),
-    stats: {},
-    warnings: [],
-  };
 }
 
 async function loadFacturasForHome(options = {}) {
   const domainOptions = safeObject(options.facturasOptions);
   const statsOptions = safeObject(options.facturasStatsOptions);
 
-  /*
-     Listado y estadísticas globales salen en paralelo.
-     El listado NO necesita calcular estadísticas porque /stats es la
-     fuente canónica del Home.
-  */
   const [listResult, statsResult] = await Promise.allSettled([
     FacturasApi.listFacturas({
       timeout: options.timeout || HOME_TIMEOUT_MS,
@@ -632,12 +528,9 @@ async function loadFacturasForHome(options = {}) {
       direction: "desc",
       returnStaleOnError: options.returnStaleOnError !== false,
       ...domainOptions,
-
-      // Forzado al final: Home no depende de stats del listado.
       includeStats: false,
       includeStatsAll: false,
     }),
-
     FacturasApi.loadFacturasStats({
       timeout: options.timeout || HOME_TIMEOUT_MS,
       ...statsOptions,
@@ -647,36 +540,25 @@ async function loadFacturasForHome(options = {}) {
   if (listResult.status === "rejected" && isUnauthorizedError(listResult.reason)) {
     throw listResult.reason;
   }
-
   if (statsResult.status === "rejected" && isUnauthorizedError(statsResult.reason)) {
     throw statsResult.reason;
   }
-
   if (listResult.status === "rejected" && statsResult.status === "rejected") {
     throw listResult.reason || statsResult.reason;
   }
 
-  const collection =
-    listResult.status === "fulfilled"
-      ? collectionFromResponse(listResult.value)
-      : {
-          items: [],
-          total: 0,
-          stale: false,
-          error: listResult.reason || null,
-        };
+  const collection = listResult.status === "fulfilled"
+    ? collectionFromResponse(listResult.value)
+    : { items: [], total: 0, stale: false, error: listResult.reason || null };
 
-  const stats =
-    statsResult.status === "fulfilled"
-      ? safeObject(statsResult.value)
-      : {};
+  const stats = statsResult.status === "fulfilled"
+    ? safeObject(statsResult.value)
+    : {};
 
   const warnings = [];
-
   if (listResult.status === "rejected") {
     warnings.push(normalizeError("facturas_list", listResult.reason));
   }
-
   if (statsResult.status === "rejected") {
     warnings.push(normalizeError("facturas_stats", statsResult.reason));
   }
@@ -691,21 +573,14 @@ async function loadFacturasForHome(options = {}) {
   };
 }
 
-async function loadAdminCount(
-  endpoint = "",
-  {
-    timeout = HOME_TIMEOUT_MS,
-    source = "views.home.count",
-    query = {},
-  } = {}
-) {
+async function loadAdminCount(endpoint = "", source = "views.home.count", options = {}) {
   const response = await Http.get(endpoint, {
-    timeout,
+    timeout: options.timeout || HOME_TIMEOUT_MS,
     source,
     query: {
       limit: HOME_ADMIN_COUNT_LIMIT,
       includeTotal: true,
-      ...safeObject(query),
+      ...safeObject(options.query),
     },
   });
 
@@ -716,38 +591,23 @@ async function loadAdminCount(
     total: Math.max(items.length, totalFromPayload(response, items.length)),
     stale: safeObject(response).stale === true,
     error: safeObject(response).error || null,
-    stats: {},
-    warnings: [],
   };
-}
-
-async function loadClientesForHome(options = {}) {
-  return loadAdminCount(HOME_ENDPOINTS.clientes, {
-    timeout: options.timeout || HOME_TIMEOUT_MS,
-    source: "views.home.clientes.count",
-    query: safeObject(options.clientesQuery),
-  });
-}
-
-async function loadUsuariosForHome(options = {}) {
-  return loadAdminCount(HOME_ENDPOINTS.usuarios, {
-    timeout: options.timeout || HOME_TIMEOUT_MS,
-    source: "views.home.usuarios.count",
-    query: {
-      ...safeObject(options.usersQuery),
-      ...safeObject(options.usuariosQuery),
-    },
-  });
 }
 
 async function loadDomain(domain = "home", loader = null) {
   try {
     const result = safeObject(await loader?.(), {});
+    const collection = collectionFromResponse(result);
 
     return {
       domain,
-      items: safeArray(result.items),
-      total: Math.max(safeArray(result.items).length, number(result.total, 0)),
+      items: safeArray(result.items).length
+        ? safeArray(result.items)
+        : collection.items,
+      total: Math.max(
+        safeArray(result.items).length,
+        number(result.total, collection.total)
+      ),
       stats: safeObject(result.stats),
       statsAvailable: result.statsAvailable === true,
       stale: result.stale === true,
@@ -779,13 +639,42 @@ function dateValue(value = "") {
   return Number.isFinite(time) ? time : 0;
 }
 
+function ticketDisplayId(ticket = {}) {
+  return safeId(
+    first(
+      ticket.ticketId,
+      ticket.incidenciaId,
+      ticket.code,
+      ticket.numero,
+      ticket.id,
+      ""
+    )
+  );
+}
+
+function invoiceDisplayId(invoice = {}) {
+  return safeId(
+    first(
+      invoice.numeroFacturaLegal,
+      invoice.invoiceNumber,
+      invoice.number,
+      invoice.facturaId,
+      invoice.invoiceId,
+      invoice.id,
+      ""
+    )
+  );
+}
+
 function buildActivity({ incidencias = [], facturas = [] } = {}) {
   const ticketItems = safeArray(incidencias).map((ticket) => ({
     type: "ticket",
+    entityId: ticketDisplayId(ticket),
     title: cleanText(
       first(ticket.subject, ticket.asunto, ticket.title),
       "Incidencia"
     ),
+    status: cleanText(first(ticket.status, ticket.estado, ""), ""),
     text: cleanText(
       first(ticket.status, ticket.estado, ticket.priority, ticket.prioridad),
       "Actualizada"
@@ -800,6 +689,7 @@ function buildActivity({ incidencias = [], facturas = [] } = {}) {
 
   const invoiceItems = safeArray(facturas).map((invoice) => ({
     type: "invoice",
+    entityId: invoiceDisplayId(invoice),
     title: cleanText(
       first(
         invoice.numeroFacturaLegal,
@@ -810,6 +700,16 @@ function buildActivity({ incidencias = [], facturas = [] } = {}) {
         invoice.id
       ),
       "Factura"
+    ),
+    status: cleanText(
+      first(
+        invoice.paymentStatus,
+        invoice.estadoPago,
+        invoice.status,
+        invoice.estado,
+        invoice.paid ? "paid" : "issued"
+      ),
+      "issued"
     ),
     text: cleanText(
       first(
@@ -830,8 +730,16 @@ function buildActivity({ incidencias = [], facturas = [] } = {}) {
   }));
 
   return [...ticketItems, ...invoiceItems]
-    .sort((a, b) => dateValue(b.date) - dateValue(a.date))
-    .slice(0, 8);
+    .sort((a, b) => {
+      const byDate = dateValue(b.date) - dateValue(a.date);
+      if (byDate !== 0) return byDate;
+      return String(b.entityId || "").localeCompare(
+        String(a.entityId || ""),
+        "es",
+        { numeric: true, sensitivity: "base" }
+      );
+    })
+    .slice(0, HOME_LIST_LIMIT);
 }
 
 function buildDashboard({
@@ -844,19 +752,15 @@ function buildDashboard({
 } = {}) {
   const incidencias = safeArray(incidenciasResult?.items);
   const facturas = safeArray(facturasResult?.items);
-  const clientes = context.admin ? safeArray(clientesResult?.items) : [];
-  const usuarios = context.admin ? safeArray(usuariosResult?.items) : [];
-
   const invoiceStats = safeObject(facturasResult?.stats);
-  const statsInvoiceCount = invoiceCountFromStats(invoiceStats);
 
   const totalInvoiced = totalInvoicedFromStats(invoiceStats);
   const paidTotal = paidTotalFromStats(invoiceStats);
   const outstandingAmount = outstandingFromStats(invoiceStats);
   const currency = currencyFromStats(invoiceStats, facturas);
 
-  const loadedAt = nowIso();
   const domainWarnings = safeArray(warnings).filter(Boolean);
+  const loadedAt = nowIso();
 
   const stale = [
     incidenciasResult,
@@ -868,7 +772,7 @@ function buildDashboard({
   const invoiceCount = Math.max(
     facturas.length,
     number(facturasResult?.total, 0),
-    statsInvoiceCount
+    invoiceCountFromStats(invoiceStats)
   );
 
   return {
@@ -878,77 +782,46 @@ function buildDashboard({
 
     tickets: incidencias,
     incidencias,
-
     facturas,
     invoices: facturas,
 
-    clientes,
-    clients: clientes,
-
-    users: usuarios,
-    usuarios,
+    clientes: [],
+    clients: [],
+    users: [],
+    usuarios: [],
 
     invoiceStats,
     facturasStats: invoiceStats,
 
     summary: {
-      tickets: Math.max(
-        incidencias.length,
-        number(incidenciasResult?.total, 0)
-      ),
-      incidencias: Math.max(
-        incidencias.length,
-        number(incidenciasResult?.total, 0)
-      ),
-
+      tickets: Math.max(incidencias.length, number(incidenciasResult?.total, 0)),
+      incidencias: Math.max(incidencias.length, number(incidenciasResult?.total, 0)),
       facturas: invoiceCount,
       invoices: invoiceCount,
+      clientes: context.admin ? number(clientesResult?.total, 0) : 0,
+      clients: context.admin ? number(clientesResult?.total, 0) : 0,
+      usuarios: context.admin ? number(usuariosResult?.total, 0) : 0,
+      users: context.admin ? number(usuariosResult?.total, 0) : 0,
 
-      clientes: context.admin
-        ? Math.max(clientes.length, number(clientesResult?.total, 0))
-        : 0,
-      clients: context.admin
-        ? Math.max(clientes.length, number(clientesResult?.total, 0))
-        : 0,
-
-      users: context.admin
-        ? Math.max(usuarios.length, number(usuariosResult?.total, 0))
-        : 0,
-      usuarios: context.admin
-        ? Math.max(usuarios.length, number(usuariosResult?.total, 0))
-        : 0,
-
-      /*
-         CANÓNICO:
-         totalInvoiced/totalAmount vienen exclusivamente de /api/facturas/stats.
-         Nunca de la suma de las 8 facturas visibles.
-      */
       totalInvoiced,
       totalAmount: totalInvoiced,
       grossAmount: totalInvoiced,
       totalFacturado: totalInvoiced,
-
-      // Se conservan para otras posibles vistas/compatibilidad.
       paidTotal,
       paidAmount: paidTotal,
       outstandingAmount,
-
       currency,
       invoiceStatsAvailable:
         facturasResult?.statsAvailable === true &&
         totalInvoiced !== null,
     },
 
-    activity: buildActivity({
-      incidencias,
-      facturas,
-    }),
+    activity: buildActivity({ incidencias, facturas }),
 
     warnings: domainWarnings,
     partial: domainWarnings.length > 0,
     stale,
     cached: false,
-
     updatedAt: loadedAt,
     loadedAt,
 
@@ -974,21 +847,31 @@ async function fetchDashboard(options = {}, context = currentContext()) {
     warnings: [],
   });
 
-  const [
-    incidenciasResult,
-    facturasResult,
-    clientesResult,
-    usuariosResult,
-  ] = await Promise.all([
-    loadDomain("incidencias", () => loadIncidenciasForHome(options)),
-    loadDomain("facturas", () => loadFacturasForHome(options)),
-    context.admin
-      ? loadDomain("clientes", () => loadClientesForHome(options))
-      : Promise.resolve(emptyDomain("clientes")),
-    context.admin
-      ? loadDomain("usuarios", () => loadUsuariosForHome(options))
-      : Promise.resolve(emptyDomain("usuarios")),
-  ]);
+  const [incidenciasResult, facturasResult, clientesResult, usuariosResult] =
+    await Promise.all([
+      loadDomain("incidencias", () => loadIncidenciasForHome(options)),
+      loadDomain("facturas", () => loadFacturasForHome(options)),
+      context.admin
+        ? loadDomain("clientes", () => loadAdminCount(
+            HOME_ENDPOINTS.clientes,
+            "views.home.clientes.count",
+            { timeout: options.timeout, query: safeObject(options.clientesQuery) }
+          ))
+        : Promise.resolve(emptyDomain("clientes")),
+      context.admin
+        ? loadDomain("usuarios", () => loadAdminCount(
+            HOME_ENDPOINTS.usuarios,
+            "views.home.usuarios.count",
+            {
+              timeout: options.timeout,
+              query: {
+                ...safeObject(options.usersQuery),
+                ...safeObject(options.usuariosQuery),
+              },
+            }
+          ))
+        : Promise.resolve(emptyDomain("usuarios")),
+    ]);
 
   const primaryFailures = [incidenciasResult, facturasResult].filter(
     (result) => result.error && result.items.length === 0 && !Object.keys(result.stats).length
@@ -997,8 +880,7 @@ async function fetchDashboard(options = {}, context = currentContext()) {
   if (primaryFailures.length === 2) {
     const error = new Error("No se pudo cargar el resumen del Home.");
     error.status = primaryFailures[0]?.error?.status || null;
-    error.code =
-      primaryFailures[0]?.error?.code || "HOME_PRIMARY_LOAD_FAILED";
+    error.code = primaryFailures[0]?.error?.code || "HOME_PRIMARY_LOAD_FAILED";
     error.details = primaryFailures.map((result) => result.error);
     throw error;
   }
@@ -1047,7 +929,6 @@ export async function loadHomeDashboard(options = {}) {
   cacheState.lastError = null;
 
   let task = null;
-
   task = (async () => {
     try {
       const dashboard = await fetchDashboard(options, context);
@@ -1085,7 +966,6 @@ export async function loadHomeDashboard(options = {}) {
 
   cacheState.inFlight = task;
   cacheState.inFlightKey = requestKey;
-
   return task;
 }
 
@@ -1099,14 +979,13 @@ export function hasFreshHomeDashboard(options = {}) {
 
 export function getHomeCacheState() {
   const context = currentContext();
+  const matched = cacheMatches(context.key);
 
   return {
-    hydrated: cacheMatches(context.key),
-    fresh: isCacheFresh(),
-    key: cacheMatches(context.key) ? cacheState.key : "",
-    ageMs: cacheMatches(context.key)
-      ? cacheAgeMs()
-      : Number.POSITIVE_INFINITY,
+    hydrated: matched,
+    fresh: matched ? isCacheFresh() : false,
+    key: matched ? cacheState.key : "",
+    ageMs: matched ? cacheAgeMs() : Number.POSITIVE_INFINITY,
     ttlMs: HOME_CACHE_TTL_MS,
     lastLoadedAt: cacheState.loadedAtMs
       ? new Date(cacheState.loadedAtMs).toISOString()
@@ -1132,38 +1011,25 @@ export function getHomeApiSnapshot() {
       ...getHomeCacheState(),
       incidencias: safeArray(dashboard?.incidencias).length,
       facturas: safeArray(dashboard?.facturas).length,
-      clientes: safeArray(dashboard?.clientes).length,
-      usuarios: safeArray(dashboard?.usuarios).length,
     },
     warnings: safeArray(dashboard?.warnings),
     policy: {
       domainAggregator: true,
       reuseIncidenciasApi: true,
       reuseFacturasApi: true,
-
-      invoiceListLimited: true,
-      invoiceListLimit: HOME_LIST_LIMIT,
-      invoiceStatsDedicatedEndpoint: true,
-      invoiceStatsCanonical: true,
-      noInvoiceVisibleRowsAggregation: true,
-      includeStatsAllRequired: false,
-
+      canonicalInvoiceStats: true,
+      visibleEntityIds: true,
       adminCountQueries: true,
-      adminCountLimit: HOME_ADMIN_COUNT_LIMIT,
-      directHttpOnlyForAdminCounts: true,
-
-      inMemoryHomeCache: true,
-      ttlCache: true,
+      inMemoryCache: true,
       inFlightDedupe: true,
       staleOnError: true,
       userScopedCache: true,
       sessionRaceGuard: true,
-
-      noFetch: true,
-      noStore: true,
-      noStorage: true,
       noDom: true,
       noRouter: true,
+      noStore: true,
+      noStorage: true,
+      noFetch: true,
     },
   };
 }

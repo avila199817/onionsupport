@@ -41,7 +41,7 @@ import {
 } from "../core/config.js";
 
 export const ROUTES_VERSION =
-  "routes.minimal.v8.2-correo-preview";
+  "routes.minimal.v8.3-cuenta-legacy-alias";
 
 /* =========================================================
    PATHS / NAMES
@@ -793,13 +793,13 @@ const VIEW_SPECS = Object.freeze({
   }),
 
   ajustes: Object.freeze({
-    moduleKey: "ajustes",
+    moduleKey: "cuenta",
     loadModule: () =>
       import(
-        "../views/ajustes/index.js"
+        "../views/cuenta/index.js"
       ),
     names: Object.freeze([
-      "AjustesView",
+      "CuentaView",
     ]),
   }),
 

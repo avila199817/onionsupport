@@ -39,7 +39,6 @@ env:
   APP_LOCATION: "/"
   API_LOCATION: ""
   OUTPUT_LOCATION: ""
-  PRODUCTION_BRANCH: "main"
   PUBLIC_SITE_URL: "https://www.onionsupport.com"
   DEPLOY_COOLDOWN_SECONDS: "45"
   DEPLOY_RETRY_SECONDS: "75"
@@ -667,65 +666,10 @@ jobs:
           print("Referencias públicas locales OK.")
           PY
 
-      - name: Audit JS imports non blocking
+      - name: Validate repository integrity
         run: |
           set -euo pipefail
-
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          root = Path(".").resolve()
-          warnings = []
-
-          import_patterns = [
-              re.compile(r"""import\s+(?:[^'"]+?\s+from\s+)?['"]([^'"]+)['"]"""),
-              re.compile(r"""export\s+[^'"]+?\s+from\s+['"]([^'"]+)['"]"""),
-              re.compile(r"""import\s*\(\s*['"]([^'"]+)['"]\s*\)"""),
-          ]
-
-          def resolve_module(base_file, spec):
-              spec = (spec or "").strip()
-
-              if not spec:
-                  return True
-
-              if spec.startswith(("http://", "https://", "data:", "blob:")):
-                  return True
-
-              if not (spec.startswith("./") or spec.startswith("../") or spec.startswith("/")):
-                  return True
-
-              if spec.startswith("/"):
-                  base = root / spec.lstrip("/")
-              else:
-                  base = (base_file.parent / spec).resolve()
-
-              candidates = [base]
-
-              if base.suffix == "":
-                  candidates.append(base.with_suffix(".js"))
-                  candidates.append(base / "index.js")
-
-              return any(candidate.exists() and candidate.is_file() for candidate in candidates)
-
-          for js_file in sorted(Path("src").rglob("*.js")):
-              text = js_file.read_text(encoding="utf-8")
-
-              for pattern in import_patterns:
-                  for match in pattern.finditer(text):
-                      spec = match.group(1)
-
-                      if not resolve_module(js_file.resolve(), spec):
-                          warnings.append((js_file, spec))
-
-          if warnings:
-              print("Imports locales inexistentes detectados. No bloquean deploy, pero deben limpiarse:")
-              for js_file, spec in warnings:
-                  print(f"::warning file={js_file},title=Import local inexistente::{spec}")
-          else:
-              print("Auditoría de imports locales OK.")
-          PY
+          python3 .github/scripts/repo_integrity.py
 
       - name: Validate critical SPA contracts
         run: |
@@ -879,12 +823,10 @@ jobs:
           azure_static_web_apps_api_token: ${{ env.SWA_API_TOKEN }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: upload
-          production_branch: ${{ env.PRODUCTION_BRANCH }}
           app_location: ${{ env.APP_LOCATION }}
           api_location: ${{ env.API_LOCATION }}
           output_location: ${{ env.OUTPUT_LOCATION }}
           skip_app_build: true
-          skip_api_build: true
 
       - name: Wait before retry 2
         if: steps.deploy_1.outcome == 'failure'
@@ -902,12 +844,10 @@ jobs:
           azure_static_web_apps_api_token: ${{ env.SWA_API_TOKEN }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: upload
-          production_branch: ${{ env.PRODUCTION_BRANCH }}
           app_location: ${{ env.APP_LOCATION }}
           api_location: ${{ env.API_LOCATION }}
           output_location: ${{ env.OUTPUT_LOCATION }}
           skip_app_build: true
-          skip_api_build: true
 
       - name: Wait before retry 3
         if: steps.deploy_1.outcome == 'failure' && steps.deploy_2.outcome == 'failure'
@@ -925,12 +865,10 @@ jobs:
           azure_static_web_apps_api_token: ${{ env.SWA_API_TOKEN }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: upload
-          production_branch: ${{ env.PRODUCTION_BRANCH }}
           app_location: ${{ env.APP_LOCATION }}
           api_location: ${{ env.API_LOCATION }}
           output_location: ${{ env.OUTPUT_LOCATION }}
           skip_app_build: true
-          skip_api_build: true
 
       - name: Verify deployment result
         run: |

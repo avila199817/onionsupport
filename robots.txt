@@ -27,6 +27,7 @@ Disallow: /incidencias
 Disallow: /facturas
 Disallow: /clientes
 Disallow: /usuarios
+Disallow: /correo
 Disallow: /servidor
 Disallow: /cuenta
 Disallow: /ajustes

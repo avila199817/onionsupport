@@ -7,7 +7,7 @@
    - Sin botón manual de actualizar.
    - Filas y columnas más densas, sin aire innecesario.
    - Acciones de fila en bloque 2x2 simétrico.
-   - Enviar/Reenviar diferenciado en azul info, nunca verde.
+   - Enviar/Reenviar comparte el mismo estilo primario que Descargar.
    - Dark/light por tokens globales.
 ========================================================= */
 
@@ -229,19 +229,6 @@
   border-color: var(--btn-primary-border);
   background: var(--btn-primary-bg-hover);
   color: var(--btn-primary-text);
-}
-
-/* SEND/RESEND: deliberadamente INFO, no success/verde. */
-.facturas-action-btn--success,
-.facturas-action-btn--success:hover:not(:disabled),
-.facturas-action-btn--success:active:not(:disabled) {
-  border-color: var(--border-info);
-  background: var(--info-bg);
-  color: var(--info-strong, var(--info));
-}
-
-.facturas-action-btn--success:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--info-bg) 82%, var(--info) 18%);
 }
 
 .facturas-btn:disabled,
@@ -1073,20 +1060,32 @@
 .facturas-skeleton--actions { inline-size: 180px; block-size: 68px; }
 
 /* =========================================================
-   INFINITE STATUS
+   INFINITE STATUS / END — 1:1 INCIDENCIAS
 ========================================================= */
 
 .facturas-infinite {
-  min-block-size: 48px;
   display: grid;
   place-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-md);
+  border-block-start: 1px solid var(--border-soft);
+}
+
+.facturas-infinite[data-has-more="true"] {
+  min-block-size: 48px;
+  gap: 0;
   padding: 8px 14px 12px;
+  border-block-start: 0;
 }
 
 .facturas-infinite-sentinel {
   inline-size: 100%;
   block-size: 1px;
   pointer-events: none;
+}
+
+.facturas-infinite[data-has-more="false"] .facturas-infinite-sentinel {
+  display: none;
 }
 
 .facturas-infinite-status {
@@ -1105,9 +1104,14 @@
 }
 
 .facturas-infinite-status.is-complete {
-  border-color: var(--border-success);
-  background: var(--success-bg);
-  color: var(--success-strong, var(--success));
+  min-block-size: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-medium);
 }
 
 /* =========================================================

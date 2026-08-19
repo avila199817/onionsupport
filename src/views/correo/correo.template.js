@@ -2,14 +2,15 @@
    Onion Support - Correo Template
    Archivo: /src/views/correo/correo.template.js
 
-   PRODUCTIVO · OUTLOOK / FLUENT · V5 FINAL
+   PRODUCTIVO · OUTLOOK / FLUENT · V6 FINAL POLISH
    - Render puro y escapado.
    - Sin HTTP, tokens ni estado global.
    - Workspace denso, scroll interno e infinito.
    - Toolbar de lista compacta: filtros + actualizar + redactar.
+   - Estado de notificaciones explícito; sin check redundante en perfil.
 ========================================================= */
 
-export const CORREO_TEMPLATE_VERSION = "correo.template.microsoft.production.v5-final";
+export const CORREO_TEMPLATE_VERSION = "correo.template.microsoft.production.v6-final-polish";
 
 const SVG = `aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"`;
 
@@ -272,9 +273,9 @@ export function renderConnectionCard(status = {}, account = {}, notifications = 
         <span class="correo-account-chevron">${icon("chevronDown")}</span>
       </button>
       <div class="correo-account-menu" data-correo-account-menu role="menu" hidden>
-        <div class="correo-account-menu-current"><span>${renderAccountAvatar(account)}</span><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(mailbox)}</small></div><i>${icon("check")}</i></div>
+        <div class="correo-account-menu-current"><span>${renderAccountAvatar(account)}</span><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(mailbox)}</small></div></div>
         <button type="button" role="menuitem" data-correo-action="add-account">${icon("userPlus")}<span><strong>Añadir otra cuenta</strong><small>Interfaz preparada · requiere backend multicuenta</small></span></button>
-        <button type="button" role="menuitem" data-correo-action="notifications">${icon("bell")}<span><strong>${notificationEnabled ? "Notificaciones activadas" : "Activar notificaciones"}</strong><small>${notificationSupported ? "Avisos del navegador cuando llegue correo" : "Este navegador no admite notificaciones"}</small></span></button>
+        <button class="correo-account-menu-notifications${notificationEnabled ? " is-enabled" : ""}" type="button" role="menuitemcheckbox" aria-checked="${notificationEnabled ? "true" : "false"}" data-correo-action="notifications">${icon("bell")}<span><strong>${notificationEnabled ? "Notificaciones activadas" : "Activar notificaciones"}</strong><small>${notificationSupported ? "Avisos del navegador cuando llegue correo" : "Este navegador no admite notificaciones"}</small></span><i class="correo-account-menu-check" aria-hidden="true">${notificationEnabled ? icon("check") : ""}</i></button>
       </div>
     </div>`;
 }

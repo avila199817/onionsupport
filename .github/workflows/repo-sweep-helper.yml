@@ -111,12 +111,26 @@ jobs:
           before, rest = text.split(start, 1)
           _, after = rest.split(end, 1)
           text = before + '''      - name: Validate repository integrity\n        run: |\n          set -euo pipefail\n          python3 .github/scripts/repo_integrity.py\n\n''' + end + after
+
           if text.count('  PRODUCTION_BRANCH: "main"\n') != 1:
               raise SystemExit("Azure workflow: PRODUCTION_BRANCH env mismatch")
           text = text.replace('  PRODUCTION_BRANCH: "main"\n', '')
-          if text.count('          production_branch: ${{ env.PRODUCTION_BRANCH }}\n') != 3:
-              raise SystemExit("Azure workflow: production_branch input mismatch")
-          text = text.replace('          production_branch: ${{ env.PRODUCTION_BRANCH }}\n', '')
+
+          lines = text.splitlines(keepends=True)
+          production_input_lines = [
+              line for line in lines
+              if line.lstrip().startswith("production_branch:")
+          ]
+          if len(production_input_lines) != 3:
+              raise SystemExit(
+                  f"Azure workflow: production_branch input mismatch ({len(production_input_lines)})"
+              )
+          lines = [
+              line for line in lines
+              if not line.lstrip().startswith("production_branch:")
+          ]
+          text = "".join(lines)
+
           if text.count('          skip_api_build: true\n') != 3:
               raise SystemExit("Azure workflow: skip_api_build input mismatch")
           text = text.replace('          skip_api_build: true\n', '')

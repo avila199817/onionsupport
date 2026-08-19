@@ -1,0 +1,64 @@
+name: Repository First Array Helper
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout sweep branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Preserve arrays in first helpers
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          paths = [
+              Path("src/views/cuenta/cuenta.api.js"),
+              Path("src/views/cuenta/cuenta.template.js"),
+              Path("src/views/cuenta/index.js"),
+          ]
+
+          for path in paths:
+              text = path.read_text(encoding="utf-8")
+              old = "values.flat(Infinity)"
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly one {old}, got {count}")
+              path.write_text(text.replace(old, "values"), encoding="utf-8")
+
+          # One-shot helper: remove itself before commit.
+          Path(".github/workflows/repo-first-array-helper.yml").unlink()
+          PY
+
+          python3 .github/scripts/repo_integrity.py
+          git diff --check
+
+      - name: Commit fix
+        run: |
+          set -euo pipefail
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git add -A
+          git commit -m "fix(cuenta): preservar arrays en selectores first"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}

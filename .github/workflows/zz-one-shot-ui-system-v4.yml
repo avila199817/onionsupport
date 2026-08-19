@@ -1,0 +1,352 @@
+name: One-shot UI System V4
+
+on:
+  push:
+    branches:
+      - refactor/ui-system-v4-repo-sweep
+
+permissions:
+  contents: write
+
+jobs:
+  consolidate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refactor/ui-system-v4-repo-sweep
+          fetch-depth: 0
+
+      - name: Consolidate UI architecture
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          from collections import Counter
+
+          root = Path('.')
+
+          def read(path):
+              return Path(path).read_text(encoding='utf-8')
+
+          def write(path, text):
+              Path(path).write_text(text, encoding='utf-8')
+
+          def replace_once(text, old, new, label):
+              if old not in text:
+                  raise SystemExit(f'{label}: patrón no encontrado')
+              if text.count(old) != 1:
+                  raise SystemExit(f'{label}: patrón ambiguo ({text.count(old)})')
+              return text.replace(old, new, 1)
+
+          # ---------------------------------------------------------
+          # 1. APP.CSS: una sola autoridad de Chrome y cero excepciones
+          #    globales específicas de Correo.
+          # ---------------------------------------------------------
+          app_path = Path('src/css/app.css')
+          app = read(app_path)
+          app = app.replace('@import url("./layout/correo-sidebar.css") layer(layout);\n', '')
+          app = re.sub(
+              r'/\* =+\n   CORREO · GEOMETRÍA DEL VIEWPORT.*?@import url\("\.\/views\/correo\/fullheight\.css"\) layer\(views\);\n\n',
+              '',
+              app,
+              count=1,
+              flags=re.S,
+          )
+          write(app_path, app)
+
+          # ---------------------------------------------------------
+          # 2. CORREO: index.css + viewport.css como únicas hojas.
+          #    fullheight deja de ser parche global y se integra al final
+          #    de viewport.css dentro del mismo @layer views.
+          # ---------------------------------------------------------
+          viewport_path = Path('src/css/views/correo/viewport.css')
+          fullheight_path = Path('src/css/views/correo/fullheight.css')
+          viewport = read(viewport_path)
+          fullheight = read(fullheight_path)
+
+          marker = '} /* @layer views */'
+          if not viewport.rstrip().endswith(marker):
+              raise SystemExit('correo/viewport.css: cierre @layer views no localizado')
+
+          layer_start = fullheight.find('@layer views {')
+          if layer_start < 0 or not fullheight.rstrip().endswith(marker):
+              raise SystemExit('correo/fullheight.css: contrato @layer views inesperado')
+
+          full_body = fullheight[layer_start + len('@layer views {'):]
+          full_body = full_body.rsplit(marker, 1)[0].strip()
+          full_body = full_body.replace(
+              'ONION SUPPORT — CORREO · FINAL VIEWPORT AUTHORITY',
+              'ONION SUPPORT — CORREO · CONSOLIDATED VIEWPORT AUTHORITY V5',
+          )
+          full_body = full_body.replace(
+              'Archivo: /src/css/views/correo/fullheight.css',
+              'Integrado en: /src/css/views/correo/viewport.css',
+          )
+          full_body = full_body.replace(
+              'Autoridad visual de último nivel para corregir conflictos entre\n   index.css y viewport.css sin tocar otras rutas.',
+              'Contrato final de densidad y altura dentro de la hoja canónica\n   de viewport. Ya no existe una tercera hoja correctora.',
+          )
+
+          viewport_base = viewport.rstrip()[:-len(marker)].rstrip()
+          viewport = (
+              viewport_base
+              + '\n\n/* =========================================================\n'
+                '   CORREO · CONSOLIDATED HEIGHT / DENSITY CONTRACT\n'
+                '   Integrado desde la antigua fullheight.css.\n'
+                '   Esta sección vive en la misma hoja y misma capa que el\n'
+                '   resto del viewport; no existe autoridad global paralela.\n'
+                '========================================================= */\n\n'
+              + full_body
+              + '\n\n' + marker + '\n'
+          )
+          write(viewport_path, viewport)
+          fullheight_path.unlink()
+
+          # ---------------------------------------------------------
+          # 3. SIDEBAR: el icono de Correo es parte del propio Sidebar,
+          #    no una hoja de layout separada de 1 KB.
+          # ---------------------------------------------------------
+          correo_sidebar_path = Path('src/css/layout/correo-sidebar.css')
+          sidebar_path = Path('src/css/layout/sidebar.css')
+          correo_sidebar = read(correo_sidebar_path)
+          sidebar = read(sidebar_path).rstrip()
+          block_start = correo_sidebar.find('.sidebar-link[data-sidebar-key="correo"]')
+          if block_start < 0:
+              raise SystemExit('correo-sidebar.css: bloque de icono no localizado')
+          icon_block = correo_sidebar[block_start:].strip()
+          if 'SIDEBAR · CORREO ICON' not in sidebar:
+              sidebar += (
+                  '\n\n/* =========================================================\n'
+                  '   SIDEBAR · CORREO ICON\n'
+                  '   El route key correo usa el mismo contrato visual y DOM.\n'
+                  '========================================================= */\n\n'
+                  + icon_block
+                  + '\n'
+              )
+          write(sidebar_path, sidebar)
+          correo_sidebar_path.unlink()
+
+          # ---------------------------------------------------------
+          # 4. APP CHROME: eliminar el bridge temporal mobile-shell.
+          #    index.html carga directamente la implementación canónica.
+          # ---------------------------------------------------------
+          index_path = Path('index.html')
+          index = read(index_path)
+          index = replace_once(
+              index,
+              'src="/src/features/mobile-shell/index.js"',
+              'src="/src/ui/chrome/index.js"',
+              'index chrome script',
+          )
+          index = index.replace(
+              'El shell móvil fija el estado inicial del Sidebar antes de que main.js\n    monte el chrome privado: móvil arranca cerrado, desktop conserva su estado.',
+              'App Chrome se inicializa antes de main.js y gobierna Topbar + Sidebar\n    desde una única autoridad responsive, sin bridges de compatibilidad.',
+          )
+          write(index_path, index)
+
+          mobile_bridge = Path('src/features/mobile-shell/index.js')
+          if mobile_bridge.exists():
+              mobile_bridge.unlink()
+
+          # ---------------------------------------------------------
+          # 5. ROUTE STYLES: documentar que Correo sólo tiene dos hojas.
+          # ---------------------------------------------------------
+          route_styles_path = Path('src/router/styles.js')
+          route_styles = read(route_styles_path)
+          route_styles = re.sub(
+              r'export const ROUTE_STYLES_VERSION =\n  "[^"]+";',
+              'export const ROUTE_STYLES_VERSION =\n  "route-styles.v7-ui-system-v4";',
+              route_styles,
+              count=1,
+          )
+          expected_correo = '''  correo: Object.freeze([\n    "/src/css/views/correo/index.css",\n    "/src/css/views/correo/viewport.css",\n  ]),'''
+          if expected_correo not in route_styles:
+              raise SystemExit('router/styles.js: manifest de Correo inesperado')
+          write(route_styles_path, route_styles)
+
+          # ---------------------------------------------------------
+          # 6. REPOSITORY INTEGRITY: convertir la limpieza en contrato.
+          # ---------------------------------------------------------
+          integrity_path = Path('.github/scripts/repo_integrity.py')
+          integrity = read(integrity_path)
+          if 'def validate_ui_system_v4_contract' not in integrity:
+              anchor = '\n\ndef validate_paths(errors: list[str]) -> None:\n'
+              if anchor not in integrity:
+                  raise SystemExit('repo_integrity.py: anchor validate_paths no localizado')
+              function = r'''
+
+def validate_ui_system_v4_contract(errors: list[str]) -> None:
+    """Keep the post-cleanup UI architecture from regressing into bridge/patch layers."""
+
+    app_path = SRC / "css" / "app.css"
+    index_path = ROOT / "index.html"
+    route_styles_path = SRC / "router" / "styles.js"
+    correo_viewport_path = SRC / "css" / "views" / "correo" / "viewport.css"
+    sidebar_path = SRC / "css" / "layout" / "sidebar.css"
+
+    dead_paths = (
+        SRC / "css" / "layout" / "mobile-shell.css",
+        SRC / "css" / "layout" / "correo-sidebar.css",
+        SRC / "css" / "views" / "correo" / "fullheight.css",
+        SRC / "features" / "mobile-shell" / "index.js",
+    )
+    for path in dead_paths:
+        if path.exists():
+            errors.append(
+                f"{path.relative_to(ROOT)} :: arquitectura legacy no debe reaparecer"
+            )
+
+    app_text = app_path.read_text(encoding="utf-8")
+    for forbidden in (
+        "correo-sidebar.css",
+        "correo/fullheight.css",
+        "mobile-shell.css",
+    ):
+        if forbidden in app_text:
+            errors.append(f"src/css/app.css :: import legacy prohibido: {forbidden}")
+
+    if '@import url("./layout/chrome.css") layer(layout);' not in app_text:
+        errors.append("src/css/app.css :: chrome.css debe ser la autoridad final de layout")
+
+    index_text = index_path.read_text(encoding="utf-8")
+    if '/src/ui/chrome/index.js' not in index_text:
+        errors.append("index.html :: debe cargar App Chrome canónico directamente")
+    if '/src/features/mobile-shell/index.js' in index_text:
+        errors.append("index.html :: bridge mobile-shell prohibido")
+
+    route_styles_text = route_styles_path.read_text(encoding="utf-8")
+    correo_contract = (
+        'correo: Object.freeze([',
+        '"/src/css/views/correo/index.css"',
+        '"/src/css/views/correo/viewport.css"',
+    )
+    for snippet in correo_contract:
+        if snippet not in route_styles_text:
+            errors.append(
+                f"src/router/styles.js :: falta contrato CSS canónico de Correo: {snippet}"
+            )
+    if "correo/fullheight.css" in route_styles_text:
+        errors.append("src/router/styles.js :: Correo no puede recuperar fullheight.css")
+
+    correo_viewport_text = correo_viewport_path.read_text(encoding="utf-8")
+    if "CONSOLIDATED HEIGHT / DENSITY CONTRACT" not in correo_viewport_text:
+        errors.append(
+            "src/css/views/correo/viewport.css :: falta contrato consolidado de viewport"
+        )
+
+    sidebar_text = sidebar_path.read_text(encoding="utf-8")
+    if 'data-sidebar-key="correo"' not in sidebar_text:
+        errors.append("src/css/layout/sidebar.css :: falta icono integrado de Correo")
+'''
+              integrity = integrity.replace(anchor, function + anchor, 1)
+
+          call_anchor = '    validate_ui_foundation_contract(errors)\n    validate_known_dead_paths(errors)\n'
+          if '    validate_ui_system_v4_contract(errors)\n' not in integrity:
+              if call_anchor not in integrity:
+                  raise SystemExit('repo_integrity.py: anchor main no localizado')
+              integrity = integrity.replace(
+                  call_anchor,
+                  '    validate_ui_foundation_contract(errors)\n    validate_ui_system_v4_contract(errors)\n    validate_known_dead_paths(errors)\n',
+                  1,
+              )
+          write(integrity_path, integrity)
+
+          # ---------------------------------------------------------
+          # 7. AUDITORÍA reproducible del CSS resultante.
+          # ---------------------------------------------------------
+          css_files = sorted((Path('src/css')).rglob('*.css'))
+          rows = []
+          total_bytes = total_important = total_media = total_hex = 0
+          for path in css_files:
+              text = read(path)
+              size = len(text.encode('utf-8'))
+              important = text.count('!important')
+              media = len(re.findall(r'@media\b', text))
+              hexes = len(re.findall(r'#[0-9a-fA-F]{3,8}\b', text))
+              total_bytes += size
+              total_important += important
+              total_media += media
+              total_hex += hexes
+              rows.append((size, important, media, hexes, str(path)))
+
+          rows.sort(reverse=True)
+          top = rows[:15]
+          audit = [
+              '# Onion Support — UI System V4 Audit',
+              '',
+              'Auditoría generada durante la barrida transversal de arquitectura UI.',
+              '',
+              '## Resultado estructural',
+              '',
+              '- `chrome.css` es la única autoridad geométrica de Topbar/Sidebar/Main.',
+              '- No existe `mobile-shell.css` ni bridge JS `features/mobile-shell`.',
+              '- Correo deja de cargar una hoja `fullheight.css` global y la integra en su viewport de ruta.',
+              '- El icono de Correo vive dentro de `sidebar.css`; no existe una mini-hoja paralela.',
+              '- RouteStyles mantiene estilos privados por ruta y App CSS sólo carga infraestructura global.',
+              '',
+              '## Inventario CSS',
+              '',
+              f'- Archivos CSS: **{len(css_files)}**',
+              f'- Peso fuente CSS: **{total_bytes:,} bytes**',
+              f'- Declaraciones `!important`: **{total_important}**',
+              f'- Bloques `@media`: **{total_media}**',
+              f'- Literales hex detectados: **{total_hex}**',
+              '',
+              'Estos contadores no son objetivos por sí mismos; sirven para impedir que la deuda vuelva a crecer a ciegas.',
+              '',
+              '## Hojas más grandes',
+              '',
+              '| CSS | bytes | !important | @media | hex |',
+              '|---|---:|---:|---:|---:|',
+          ]
+          for size, important, media, hexes, path in top:
+              audit.append(f'| `{path}` | {size:,} | {important} | {media} | {hexes} |')
+          audit += [
+              '',
+              '## Siguiente deuda prioritaria',
+              '',
+              '1. Reducir gradualmente los `!important` históricos de Correo ahora que ya no compiten tres autoridades CSS.',
+              '2. Extraer el contrato modal compartido que Usuarios reutiliza actualmente desde `incidencias/detail.css`.',
+              '3. Seguir convergiendo formularios create/detail hacia componentes y tokens comunes sin duplicar lógica de dominio.',
+              '4. Mantener DataList como composición móvil transversal y no volver a tablas desktop encogidas.',
+              '',
+              '## Regla',
+              '',
+              '> Una necesidad transversal se convierte en sistema; una necesidad de dominio vive en su vista; un parche no se convierte en arquitectura.',
+              '',
+          ]
+          write('docs/UI_SYSTEM_V4_AUDIT.md', '\n'.join(audit))
+
+          # Update foundation with the new canonical facts.
+          foundation_path = Path('docs/UI_FOUNDATION.md')
+          foundation = read(foundation_path)
+          note = '''\n## UI System V4 · consolidación de autoridades\n\n- `src/css/layout/chrome.css` gobierna toda la geometría compartida del chrome.\n- `src/ui/chrome/index.js` se carga directamente; no existe bridge `features/mobile-shell`.\n- Correo mantiene únicamente `index.css` + `viewport.css`; su contrato de altura/densidad ya no se inyecta globalmente desde `app.css`.\n- Los estilos específicos del Sidebar deben vivir en `sidebar.css`, no en mini-hojas paralelas.\n- Repository Integrity impide que estas rutas legacy reaparezcan.\n'''
+          if '## UI System V4 · consolidación de autoridades' not in foundation:
+              foundation = foundation.rstrip() + '\n' + note
+          write(foundation_path, foundation)
+          PY
+
+      - name: Validate syntax and repository contracts
+        shell: bash
+        run: |
+          python3 -m py_compile .github/scripts/repo_integrity.py
+          node --check src/router/styles.js
+          node --check src/ui/chrome/index.js
+          node --check src/ui/chrome/template.js
+          python3 .github/scripts/repo_integrity.py
+
+      - name: Commit consolidation
+        shell: bash
+        run: |
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "refactor(ui): consolidar autoridades y retirar bridges legacy"
+          git push origin HEAD:refactor/ui-system-v4-repo-sweep

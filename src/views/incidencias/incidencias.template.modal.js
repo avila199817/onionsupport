@@ -2692,7 +2692,7 @@ function renderHeaderActions(vm = {}) {
         aria-label="Cerrar modal"
         title="Cerrar ventana"
         ${disabledAttrs(vm.submitting, vm.submitting)}
-        class="incidencias-modal-close-btn"
+        class="incidencias-modal-close-btn ui-detail-modal-close-btn"
       >${icon("close")}</button>
     </div>
   `;
@@ -2716,7 +2716,7 @@ function renderChip(
 
   return `
     <span
-      class="incidencias-modal-chip incidencias-modal-chip--${attr(safeModifier)}"
+      class="incidencias-modal-chip incidencias-modal-chip--${attr(safeModifier)} ui-detail-modal-chip--${attr(safeModifier)}"
       title="${attr(safeLabel)}"
     >${escapeHtml(safeLabel)}</span>
   `;
@@ -2743,12 +2743,12 @@ function renderAvatar(
 
   return `
     <div
-      class="incidencias-modal-avatar"
+      class="incidencias-modal-avatar ui-detail-modal-avatar"
       title="${attr(name)}"
     >
       <div
         class="${joinClasses(
-          "incidencias-modal-avatar-frame",
+          "incidencias-modal-avatar-frame ui-detail-modal-avatar-frame",
 
           avatarUrl
             ? ""
@@ -2775,7 +2775,7 @@ function renderAvatar(
             : ""
         }
 
-        <span class="incidencias-modal-avatar-fallback">
+        <span class="incidencias-modal-avatar-fallback ui-detail-modal-avatar-fallback">
           ${escapeHtml(
             initialsFrom(name)
           )}
@@ -2835,7 +2835,7 @@ function renderContactAction({
 
   return `
     <a
-      class="incidencias-modal-meta-card incidencias-modal-contact-link"
+      class="incidencias-modal-meta-card ui-detail-modal-meta-card incidencias-modal-contact-link"
       href="${attr(safeHref)}"
       aria-label="${attr(`${actionLabel}: ${displayValue}`)}"
       title="${attr(actionLabel)}"
@@ -2979,7 +2979,7 @@ function renderMetaField(
     options.html === true;
 
   return `
-    <div class="incidencias-modal-meta-card">
+    <div class="incidencias-modal-meta-card ui-detail-modal-meta-card">
       <span>${escapeHtml(label)}</span>
 
       ${
@@ -3241,7 +3241,7 @@ function renderSubmitButton(
         vm.submitting,
         vm.submitting
       )}
-      class="incidencias-modal-submit-btn"
+      class="incidencias-modal-submit-btn ui-detail-modal-submit-btn"
     >
       ${
         vm.submitting
@@ -3348,7 +3348,7 @@ function renderComposer(
       ${renderPendingFiles(vm)}
 
       <footer
-        class="incidencias-modal-footer incidencias-modal-footer--composer"
+        class="incidencias-modal-footer ui-detail-modal-footer incidencias-modal-footer--composer"
         data-modal-footer="true"
         data-modal-footer-placement="composer"
       >
@@ -3541,7 +3541,7 @@ function renderAttachmentActionButtons(
           vm.submitting,
           busy.isOpening
         )}
-        class="incidencias-modal-view-btn"
+        class="incidencias-modal-view-btn ui-detail-modal-view-btn"
         aria-label="${attr(`Ver ${name}`)}"
       >
         ${
@@ -3550,7 +3550,7 @@ function renderAttachmentActionButtons(
                 "Abriendo..."
               )
             : `
-              <span class="incidencias-modal-action-icon">
+              <span class="incidencias-modal-action-icon ui-detail-modal-action-icon">
                 ${icon("eye")}
               </span>
               <span>Ver</span>
@@ -3577,7 +3577,7 @@ function renderAttachmentActionButtons(
                 "Bajando..."
               )
             : `
-              <span class="incidencias-modal-action-icon">
+              <span class="incidencias-modal-action-icon ui-detail-modal-action-icon">
                 ${icon("download")}
               </span>
               <span>Descargar</span>
@@ -3608,7 +3608,7 @@ function renderAttachmentActionButtons(
                       "Eliminando..."
                     )
                   : `
-                    <span class="incidencias-modal-action-icon">
+                    <span class="incidencias-modal-action-icon ui-detail-modal-action-icon">
                       ${icon("trash")}
                     </span>
                     <span>Eliminar</span>
@@ -3640,7 +3640,7 @@ function renderAttachments(
         data-modal-current-files="true"
         aria-labelledby="incidencias-modal-files-title"
       >
-        <div class="incidencias-modal-section-head">
+        <div class="incidencias-modal-section-head ui-detail-modal-section-head">
           <h3 id="incidencias-modal-files-title">
             Documentos actuales
           </h3>
@@ -3964,7 +3964,7 @@ function renderAdminTicketEditor(vm = {}) {
       data-admin-ticket-dirty="${vm.hasAdminChanges ? "true" : "false"}"
       aria-labelledby="incidencias-modal-admin-editor-title"
     >
-      <div class="incidencias-modal-section-head incidencias-modal-admin-head">
+      <div class="incidencias-modal-section-head ui-detail-modal-section-head incidencias-modal-admin-head">
         <div>
           <h3 id="incidencias-modal-admin-editor-title">Gestión del ticket</h3>
           <span>Estado, prioridad y tipo de incidencia</span>
@@ -4011,10 +4011,10 @@ function renderDescription(
 ) {
   return `
     <section
-      class="incidencias-modal-description-section"
+      class="incidencias-modal-description-section ui-detail-modal-description-section"
       aria-labelledby="incidencias-modal-description-title"
     >
-      <div class="incidencias-modal-section-head">
+      <div class="incidencias-modal-section-head ui-detail-modal-section-head">
         <h3 id="incidencias-modal-description-title">
           Descripción
         </h3>
@@ -4054,16 +4054,16 @@ function renderContactBlock(
 
   return `
     <section
-      class="incidencias-modal-contact-section"
+      class="incidencias-modal-contact-section ui-detail-modal-contact-section"
       aria-labelledby="incidencias-modal-contact-title"
     >
-      <div class="incidencias-modal-section-head">
+      <div class="incidencias-modal-section-head ui-detail-modal-section-head">
         <h3 id="incidencias-modal-contact-title">
           Contacto
         </h3>
       </div>
 
-      <div class="incidencias-modal-contact-grid">
+      <div class="incidencias-modal-contact-grid ui-detail-modal-contact-grid">
         ${
           email
             ? renderContactAction({
@@ -4224,7 +4224,7 @@ function renderHistorySection(vm = {}) {
 
   return `
     <section
-      class="incidencias-modal-history-section incidencias-modal-history-view"
+      class="incidencias-modal-history-section ui-detail-modal-history-section incidencias-modal-history-view"
       data-modal-history-slot="true"
       data-history-open="true"
       aria-labelledby="incidencias-modal-history-title"
@@ -4288,7 +4288,7 @@ function renderTicketBody(
       ${renderAttachmentPreview(vm)}
     </div>
 
-    <div class="incidencias-modal-meta-grid">
+    <div class="incidencias-modal-meta-grid ui-detail-modal-meta-grid">
       ${renderMetaField(
         "Técnico",
         renderTechnicianValue(detail),
@@ -4385,7 +4385,7 @@ export function renderIncidenciasDetailModal(
   return `
     <section
       id="${MODAL_ID}"
-      class="incidencias-modal-root"
+      class="incidencias-modal-root ui-detail-modal-root"
       data-incidencias-modal-root="true"
       data-template-version="${attr(INCIDENCIAS_MODAL_TEMPLATE_VERSION)}"
       data-ticket-id="${attr(ticketId)}"
@@ -4398,13 +4398,13 @@ export function renderIncidenciasDetailModal(
       data-attachment-view-policy="signed-view-only"
     >
       <div
-        class="incidencias-modal-overlay"
+        class="incidencias-modal-overlay ui-detail-modal-overlay"
         data-incidencias-modal-overlay="true"
       >
         <div
           id="${PANEL_ID}"
           class="${joinClasses(
-            "incidencias-modal-panel",
+            "incidencias-modal-panel ui-detail-modal-panel",
 
             vm.submitting
               ? "is-submitting"
@@ -4430,18 +4430,18 @@ export function renderIncidenciasDetailModal(
           }
 
           <header
-            class="incidencias-modal-header"
+            class="incidencias-modal-header ui-detail-modal-header"
             data-modal-header="true"
           >
             <div
-              class="incidencias-modal-hero"
+              class="incidencias-modal-hero ui-detail-modal-hero"
               data-modal-hero="true"
             >
               ${renderAvatar(detail)}
 
-              <div class="incidencias-modal-hero-content">
+              <div class="incidencias-modal-hero-content ui-detail-modal-hero-content">
                 <div
-                  class="incidencias-modal-hero-chips"
+                  class="incidencias-modal-hero-chips ui-detail-modal-hero-chips"
                   data-modal-header-chips="true"
                 >
                   ${renderTicketIdChip(
@@ -4467,12 +4467,12 @@ export function renderIncidenciasDetailModal(
 
                 <h2
                   id="${TITLE_ID}"
-                  class="incidencias-modal-title"
+                  class="incidencias-modal-title ui-detail-modal-title"
                   title="${attr(title)}"
                 >${escapeHtml(title)}</h2>
 
                 <span
-                  class="incidencias-modal-updated"
+                  class="incidencias-modal-updated ui-detail-modal-updated"
                   data-modal-updated="true"
                 >
                   ${escapeHtml(clientName)}
@@ -4490,7 +4490,7 @@ export function renderIncidenciasDetailModal(
           </header>
 
           <main
-            class="incidencias-modal-body"
+            class="incidencias-modal-body ui-detail-modal-body"
             data-modal-body="true"
             data-history-mode="${vm.historyOpen ? "history" : "ticket"}"
           >

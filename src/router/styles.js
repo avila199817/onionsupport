@@ -14,7 +14,7 @@
 ========================================================= */
 
 export const ROUTE_STYLES_VERSION =
-  "route-styles.v8-detail-modal-component";
+  "route-styles.v9-shared-detail-modal";
 
 const MODE_ATTRIBUTE =
   "data-css-route-mode";
@@ -78,6 +78,7 @@ const STYLE_MANIFEST = Object.freeze({
   ]),
 
   incidencias: Object.freeze([
+    "/src/css/components/detail-modal.css",
     "/src/css/views/incidencias/index.css",
     "/src/css/views/incidencias/create.css",
     "/src/css/views/incidencias/detail.css",

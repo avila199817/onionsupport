@@ -14,16 +14,16 @@
 import {
   ROUTES,
   USER_HOME_PREFIX,
-  SENSITIVE_QUERY_PARAMS,
   buildUserHomeRoute,
   buildUserScopedRoute,
   isBlockedRoutePath,
   normalizeRoutePath,
   normalizeUserSlug,
 } from "../../core/config.js";
+import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 
 export const SIDEBAR_TEMPLATE_VERSION =
-  "sidebar.template.unified.v4-single-account-entry";
+  "sidebar.template.unified.v5-runtime-media-policy";
 
 const SIDEBAR_ROOT_ID = "app-sidebar";
 const BRAND_LABEL = "Onion Support";
@@ -175,22 +175,6 @@ function normalizeKey(value = "") {
   return text(value).replace(/[-_\s]/g, "").toLowerCase();
 }
 
-const SENSITIVE_QUERY_KEYS = new Set(
-  (
-    Array.isArray(SENSITIVE_QUERY_PARAMS) && SENSITIVE_QUERY_PARAMS.length
-      ? SENSITIVE_QUERY_PARAMS
-      : [
-          "token", "access_token", "accessToken", "refresh_token", "refreshToken",
-          "id_token", "idToken", "code", "secret", "session", "sessionId",
-          "session_id", "password", "pwd", "key", "sig", "signature", "jwt",
-          "authorization", "reset_token", "resetToken", "activation_token",
-          "activationToken",
-        ]
-  )
-    .map(normalizeKey)
-    .filter(Boolean)
-);
-
 function classNames(...values) {
   return values.flat().map((value) => text(value)).filter(Boolean).join(" ");
 }
@@ -319,28 +303,7 @@ function invokeCallback(callback, ...args) {
 
 function hasSensitiveQuery(value = "") {
   const raw = String(value || "");
-  if (!raw) return false;
-
-  try {
-    const url = new URL(raw, "https://onionsupport.local");
-
-    for (const key of url.searchParams.keys()) {
-      if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) return true;
-    }
-
-    if (url.hash) {
-      const hash = url.hash.replace(/^#/, "");
-      const params = new URLSearchParams(hash.includes("=") ? hash : "");
-
-      for (const key of params.keys()) {
-        if (SENSITIVE_QUERY_KEYS.has(normalizeKey(key))) return true;
-      }
-    }
-  } catch {
-    return /[?&#](?:access_token|accessToken|refresh_token|refreshToken|id_token|idToken|token|code|secret|session|sessionId|session_id|password|pwd|key|sig|signature|jwt|authorization|reset_token|resetToken|activation_token|activationToken)=/i.test(raw);
-  }
-
-  return false;
+  return /[?&#](?:access_token|accessToken|refresh_token|refreshToken|id_token|idToken|token|code|secret|session|sessionId|session_id|password|pwd|key|sig|signature|jwt|authorization|reset_token|resetToken|activation_token|activationToken)=/i.test(raw);
 }
 
 function normalizeInternalPath(value = "") {
@@ -392,32 +355,30 @@ function safeInternalHref(value = "", fallback = "/") {
 }
 
 function safeImageSrc(value = "", fallback = "") {
-  const src = text(value, fallback);
-
-  if (
-    !src ||
-    /[\r\n\t\\]/.test(src) ||
-    hasSensitiveQuery(src) ||
-    /^(javascript|data|vbscript|file):/i.test(src)
-  ) {
-    return fallback;
-  }
-
-  if (src.startsWith("/")) {
-    if (src.startsWith("//")) return fallback;
-    return src.replace(/\/{2,}/g, "/") || fallback;
-  }
-
-  if (/^https?:\/\//i.test(src)) {
-    try {
-      const url = new URL(src);
-      return ["http:", "https:"].includes(url.protocol) ? url.href : fallback;
-    } catch {
-      return fallback;
-    }
-  }
-
-  return fallback;
+  return (
+    sanitizeRuntimeImageUrl(
+      value,
+      {
+        allowRelative: true,
+        allowBlobObjectUrl: true,
+        allowSameOrigin: true,
+        allowOnionApi: true,
+        allowAzureBlob: true,
+        allowAzureBlobSas: true,
+      }
+    ) ||
+    sanitizeRuntimeImageUrl(
+      fallback,
+      {
+        allowRelative: true,
+        allowBlobObjectUrl: true,
+        allowSameOrigin: true,
+        allowOnionApi: true,
+        allowAzureBlob: true,
+        allowAzureBlobSas: true,
+      }
+    )
+  );
 }
 
 /* =========================================================

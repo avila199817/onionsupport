@@ -9,6 +9,7 @@ Onion Support es una SPA JavaScript modular desplegada como sitio estático en A
 
 - Frontend canónico: `https://www.onionsupport.com`
 - API canónica: `https://api.onionit.net`
+- Transporte browser: `/api/*` permanece same-origin mediante Azure Static Web Apps; `/health/*` sale directo a `https://api.onionit.net` porque los health del App Service viven fuera del prefijo `/api`.
 - Idioma funcional actual: español (`es`)
 - Roles funcionales: `admin` y `user`
 - Entry point: `src/main.js`

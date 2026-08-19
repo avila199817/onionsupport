@@ -24,7 +24,7 @@
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
-export const CONFIG_VERSION = "core.config.production.v5-route-contract";
+export const CONFIG_VERSION = "core.config.production.v6-split-origin-health";
 
 /* =========================================================
    CONSTANTES BASE
@@ -32,9 +32,20 @@ export const CONFIG_VERSION = "core.config.production.v5-route-contract";
 
 export const CANONICAL_PRODUCTION_API_BASE = "https://www.onionsupport.com";
 
+export const CANONICAL_DIRECT_BACKEND_API_BASE = "https://api.onionit.net";
+
 export const CANONICAL_BACKEND_API_ORIGINS = Object.freeze([
   CANONICAL_PRODUCTION_API_BASE,
-  "https://api.onionit.net",
+  CANONICAL_DIRECT_BACKEND_API_BASE,
+]);
+
+/*
+  Azure Static Web Apps sólo enruta el backend enlazado bajo /api.
+  Los health del App Service viven en /health, así que deben salir
+  directamente al origen canónico del backend.
+*/
+export const DIRECT_BACKEND_API_PREFIXES = Object.freeze([
+  "/health",
 ]);
 
 export const CANONICAL_FRONTEND_ORIGINS = Object.freeze([

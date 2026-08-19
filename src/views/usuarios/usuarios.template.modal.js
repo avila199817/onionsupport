@@ -9,7 +9,7 @@
    - No hace HTTP directo.
    - No lee raw/profile/lifecycle/audit por su cuenta.
    - No inyecta CSS.
-   - Reutiliza el contrato visual incidencias-modal-*.
+   - Consume el contrato visual transversal ui-detail-modal-*.
    - Mantiene clases usuarios-modal-* para evolución propia.
    - No renderiza secretos, tokens, activationUrl ni raw.
    - Refresh delegado al controlador cuando existe.
@@ -52,8 +52,7 @@ const BODY_LOCK_CLASSES = Object.freeze([
   "modal-open",
   "usuarios-modal-open",
   "usuarios-detail-open",
-  "incidencias-modal-open",
-  "incidencias-detail-open",
+  "ui-detail-modal-open",
 ]);
 
 /* =========================================================
@@ -1338,7 +1337,7 @@ function renderChip(
 
   return `
     <span
-      class="usuarios-modal-chip incidencias-modal-chip incidencias-modal-chip--${attr(safeModifier)}"
+      class="usuarios-modal-chip ui-detail-modal-chip ui-detail-modal-chip--${attr(safeModifier)}"
     >
       ${escapeHtml(label)}
     </span>
@@ -1362,11 +1361,11 @@ function renderAvatar(detail = {}) {
 
   return `
     <div
-      class="usuarios-modal-avatar incidencias-modal-avatar"
+      class="usuarios-modal-avatar ui-detail-modal-avatar"
       aria-label="${attr(name)}"
     >
       <div
-        class="usuarios-modal-avatar-frame incidencias-modal-avatar-frame${avatar ? "" : " usuarios-modal-avatar-frame--fallback incidencias-modal-avatar-frame--fallback"}"
+        class="usuarios-modal-avatar-frame ui-detail-modal-avatar-frame${avatar ? "" : " usuarios-modal-avatar-frame--fallback ui-detail-modal-avatar-frame--fallback"}"
         data-usuarios-avatar-frame="true"
         data-has-avatar="${avatar ? "true" : "false"}"
         data-fallback="${avatar ? "false" : "true"}"
@@ -1392,7 +1391,7 @@ function renderAvatar(detail = {}) {
         }
 
         <span
-          class="usuarios-modal-avatar-fallback incidencias-modal-avatar-fallback"
+          class="usuarios-modal-avatar-fallback ui-detail-modal-avatar-fallback"
         >
           ${escapeHtml(initials)}
         </span>
@@ -1417,7 +1416,7 @@ function renderMetaCard(
 
   return `
     <div
-      class="usuarios-modal-meta-card incidencias-modal-meta-card${muted ? " is-muted" : ""}"
+      class="usuarios-modal-meta-card ui-detail-modal-meta-card${muted ? " is-muted" : ""}"
     >
       <span>
         ${
@@ -1446,7 +1445,7 @@ function renderSectionHeader(
 ) {
   return `
     <div
-      class="usuarios-modal-section-head incidencias-modal-section-head"
+      class="usuarios-modal-section-head ui-detail-modal-section-head"
     >
       <h3>
         ${escapeHtml(title)}
@@ -1483,7 +1482,7 @@ function renderInfoRow(
 
   return `
     <div
-      class="usuarios-modal-info-row incidencias-modal-meta-card"
+      class="usuarios-modal-info-row ui-detail-modal-meta-card"
     >
       <span>
         ${escapeHtml(label)}
@@ -1517,7 +1516,7 @@ function renderLinkedField({
 
   return `
     <div
-      class="usuarios-modal-linked-field incidencias-modal-meta-card"
+      class="usuarios-modal-linked-field ui-detail-modal-meta-card"
     >
       <span>
         ${escapeHtml(label)}
@@ -1558,7 +1557,7 @@ function renderContactSection(detail = {}) {
 
   return `
     <section
-      class="usuarios-modal-section incidencias-modal-contact-section"
+      class="usuarios-modal-section ui-detail-modal-contact-section"
     >
       ${renderSectionHeader(
         "Identidad y contacto",
@@ -1566,7 +1565,7 @@ function renderContactSection(detail = {}) {
       )}
 
       <div
-        class="usuarios-modal-contact-grid incidencias-modal-contact-grid"
+        class="usuarios-modal-contact-grid ui-detail-modal-contact-grid"
       >
         ${renderLinkedField({
           label: "Email",
@@ -1611,7 +1610,7 @@ function renderAddressSection(detail = {}) {
 
   return `
     <section
-      class="usuarios-modal-section incidencias-modal-description-section"
+      class="usuarios-modal-section ui-detail-modal-description-section"
     >
       ${renderSectionHeader(
         "Dirección",
@@ -1619,7 +1618,7 @@ function renderAddressSection(detail = {}) {
       )}
 
       <div
-        class="usuarios-modal-address-grid incidencias-modal-meta-grid"
+        class="usuarios-modal-address-grid ui-detail-modal-meta-grid"
       >
         ${renderInfoRow(
           "Calle",
@@ -1672,7 +1671,7 @@ function renderSecuritySection(detail = {}) {
 
   return `
     <section
-      class="usuarios-modal-section incidencias-modal-description-section"
+      class="usuarios-modal-section ui-detail-modal-description-section"
     >
       ${renderSectionHeader(
         "Seguridad y preferencias",
@@ -1680,7 +1679,7 @@ function renderSecuritySection(detail = {}) {
       )}
 
       <div
-        class="usuarios-modal-security-grid incidencias-modal-meta-grid"
+        class="usuarios-modal-security-grid ui-detail-modal-meta-grid"
       >
         ${renderMetaCard(
           "Email verificado",
@@ -1752,7 +1751,7 @@ function renderPermissionsSection(detail = {}) {
 
   return `
     <section
-      class="usuarios-modal-section incidencias-modal-description-section"
+      class="usuarios-modal-section ui-detail-modal-description-section"
     >
       ${renderSectionHeader(
         "Permisos",
@@ -1835,7 +1834,7 @@ function renderLifecycleSection(detail = {}) {
 
   return `
     <section
-      class="usuarios-modal-section incidencias-modal-history-section"
+      class="usuarios-modal-section ui-detail-modal-history-section"
     >
       ${renderSectionHeader(
         "Actividad",
@@ -1988,7 +1987,7 @@ function renderAdminMetadataSection(detail = {}) {
 
   return `
     <section
-      class="usuarios-modal-section incidencias-modal-description-section"
+      class="usuarios-modal-section ui-detail-modal-description-section"
     >
       ${renderSectionHeader(
         "Datos administrativos",
@@ -1996,7 +1995,7 @@ function renderAdminMetadataSection(detail = {}) {
       )}
 
       <div
-        class="usuarios-modal-admin-grid incidencias-modal-meta-grid"
+        class="usuarios-modal-admin-grid ui-detail-modal-meta-grid"
       >
         ${items
           .map(
@@ -2030,7 +2029,7 @@ function renderFooter(
 
   return `
     <footer
-      class="usuarios-modal-footer incidencias-modal-footer"
+      class="usuarios-modal-footer ui-detail-modal-footer"
       data-usuarios-modal-footer="true"
     >
       <div
@@ -2038,7 +2037,7 @@ function renderFooter(
       >
         <button
           type="button"
-          class="usuarios-modal-action-btn incidencias-modal-view-btn"
+          class="usuarios-modal-action-btn ui-detail-modal-view-btn"
           data-usuarios-modal-action="${USUARIOS_DETAIL_ACTIONS.COPY_ID}"
           ${
             !userId ||
@@ -2048,7 +2047,7 @@ function renderFooter(
           }
         >
           <span
-            class="incidencias-modal-action-icon"
+            class="ui-detail-modal-action-icon"
           >
             ${icon("copy")}
           </span>
@@ -2060,7 +2059,7 @@ function renderFooter(
 
         <button
           type="button"
-          class="usuarios-modal-action-btn incidencias-modal-view-btn"
+          class="usuarios-modal-action-btn ui-detail-modal-view-btn"
           data-usuarios-modal-action="${USUARIOS_DETAIL_ACTIONS.REFRESH}"
           ${
             !userId ||
@@ -2075,7 +2074,7 @@ function renderFooter(
           }
         >
           <span
-            class="incidencias-modal-action-icon"
+            class="ui-detail-modal-action-icon"
           >
             ${icon("refresh")}
           </span>
@@ -2098,7 +2097,7 @@ function renderFooter(
                     email
                   )
                 )}"
-                class="usuarios-modal-footer-link incidencias-modal-view-btn"
+                class="usuarios-modal-footer-link ui-detail-modal-view-btn"
               >
                 ${icon("mail")}
                 Email
@@ -2116,7 +2115,7 @@ function renderFooter(
                     phone
                   )
                 )}"
-                class="usuarios-modal-footer-link incidencias-modal-view-btn"
+                class="usuarios-modal-footer-link ui-detail-modal-view-btn"
               >
                 ${icon("phone")}
                 Llamar
@@ -2128,7 +2127,7 @@ function renderFooter(
 
       <button
         type="button"
-        class="usuarios-modal-close-footer incidencias-modal-submit-btn"
+        class="usuarios-modal-close-footer ui-detail-modal-submit-btn"
         data-usuarios-modal-action="${USUARIOS_DETAIL_ACTIONS.CLOSE}"
       >
         Cerrar
@@ -2191,9 +2190,9 @@ export function renderUsuariosDetailModal(input = {}) {
   return `
     <section
       id="${MODAL_ID}"
-      class="usuarios-modal-root incidencias-modal-root"
+      class="usuarios-modal-root ui-detail-modal-root"
       data-usuarios-modal-root="true"
-      data-incidencias-modal-root="true"
+      data-ui-detail-modal-root="true"
       data-template-version="${attr(USUARIOS_MODAL_TEMPLATE_VERSION)}"
       data-user-id="${attr(userId)}"
       data-status="${attr(status)}"
@@ -2201,15 +2200,15 @@ export function renderUsuariosDetailModal(input = {}) {
       data-canonical-model="true"
     >
       <div
-        class="usuarios-modal-overlay incidencias-modal-overlay"
+        class="usuarios-modal-overlay ui-detail-modal-overlay"
         data-usuarios-modal-overlay="true"
-        data-incidencias-modal-overlay="true"
+        data-ui-detail-modal-overlay="true"
       >
         <div
           id="${PANEL_ID}"
-          class="usuarios-modal-panel incidencias-modal-panel${isRefreshing ? " is-submitting" : ""}"
+          class="usuarios-modal-panel ui-detail-modal-panel${isRefreshing ? " is-submitting" : ""}"
           data-usuarios-modal-panel="true"
-          data-incidencias-modal-panel="true"
+          data-ui-detail-modal-panel="true"
           role="dialog"
           aria-modal="true"
           aria-labelledby="usuarios-detail-modal-title"
@@ -2218,18 +2217,18 @@ export function renderUsuariosDetailModal(input = {}) {
           tabindex="-1"
         >
           <header
-            class="usuarios-modal-header incidencias-modal-header"
+            class="usuarios-modal-header ui-detail-modal-header"
           >
             <div
-              class="usuarios-modal-hero incidencias-modal-hero"
+              class="usuarios-modal-hero ui-detail-modal-hero"
             >
               ${renderAvatar(detail)}
 
               <div
-                class="usuarios-modal-hero-content incidencias-modal-hero-content"
+                class="usuarios-modal-hero-content ui-detail-modal-hero-content"
               >
                 <div
-                  class="usuarios-modal-hero-chips incidencias-modal-hero-chips"
+                  class="usuarios-modal-hero-chips ui-detail-modal-hero-chips"
                 >
                   ${renderChip(
                     statusLabel(
@@ -2270,14 +2269,14 @@ export function renderUsuariosDetailModal(input = {}) {
 
                 <h2
                   id="usuarios-detail-modal-title"
-                  class="usuarios-modal-title incidencias-modal-title"
+                  class="usuarios-modal-title ui-detail-modal-title"
                 >
                   ${escapeHtml(name)}
                 </h2>
 
                 <span
                   id="usuarios-detail-modal-summary"
-                  class="usuarios-modal-updated incidencias-modal-updated"
+                  class="usuarios-modal-updated ui-detail-modal-updated"
                 >
                   ${
                     username
@@ -2300,7 +2299,7 @@ export function renderUsuariosDetailModal(input = {}) {
 
             <button
               type="button"
-              class="usuarios-modal-close-btn incidencias-modal-close-btn"
+              class="usuarios-modal-close-btn ui-detail-modal-close-btn"
               data-usuarios-modal-action="${USUARIOS_DETAIL_ACTIONS.CLOSE}"
               aria-label="Cerrar detalle de ${attr(name)}"
             >
@@ -2309,10 +2308,10 @@ export function renderUsuariosDetailModal(input = {}) {
           </header>
 
           <main
-            class="usuarios-modal-body incidencias-modal-body"
+            class="usuarios-modal-body ui-detail-modal-body"
           >
             <div
-              class="usuarios-modal-meta-grid incidencias-modal-meta-grid"
+              class="usuarios-modal-meta-grid ui-detail-modal-meta-grid"
             >
               ${renderMetaCard(
                 "ID",
@@ -2591,7 +2590,7 @@ function captureMountedScroll(
 
   const body =
     panel.querySelector(
-      ".usuarios-modal-body, .incidencias-modal-body"
+      ".usuarios-modal-body, .ui-detail-modal-body"
     );
 
   return {
@@ -2622,7 +2621,7 @@ function restoreMountedScroll(
 
   const body =
     panel.querySelector(
-      ".usuarios-modal-body, .incidencias-modal-body"
+      ".usuarios-modal-body, .ui-detail-modal-body"
     );
 
   if (!body) {
@@ -3338,7 +3337,7 @@ function onRootError(event = null) {
 
   frame.classList.add(
     "usuarios-modal-avatar-frame--fallback",
-    "incidencias-modal-avatar-frame--fallback"
+    "ui-detail-modal-avatar-frame--fallback"
   );
 }
 
@@ -4473,8 +4472,8 @@ export function getUsuariosModalSnapshot() {
       inlineHandlers:
         false,
 
-      sharedDetailCss:
-        "incidencias-modal-*",
+      detailCssAuthority:
+        "ui-detail-modal-*",
 
       stableHost:
         HOST_ID,

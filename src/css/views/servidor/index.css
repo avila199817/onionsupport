@@ -923,7 +923,7 @@
   border: 0;
   border-radius: var(--radius-pill);
 
-  background: var(--solid-muted);
+  background: var(--badge-bg);
 
   overflow: hidden;
 }
@@ -934,7 +934,7 @@
   border: 0;
   border-radius: var(--radius-pill);
 
-  background: var(--solid-muted);
+  background: var(--badge-bg);
 }
 
 .server-meter::-webkit-meter-optimum-value,

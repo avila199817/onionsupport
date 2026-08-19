@@ -12,7 +12,8 @@ Esta foundation establece una jerarquía única:
 4. `core/layout.css` gobierna shell, offsets y la autoridad de scroll vertical.
 5. `components/ui.css` define componentes reutilizables.
 6. `views/**` compone cada dominio.
-7. `core/guardrails.css` cierra la cascada con invariantes geométricas no negociables.
+7. `compositions/**` puede recomponer varios dominios para una experiencia transversal —por ejemplo DataList móvil— sin introducir lógica de negocio ni `!important`.
+8. `core/guardrails.css` cierra la cascada con invariantes geométricas no negociables.
 
 ## Contratos no negociables
 
@@ -24,7 +25,9 @@ Los componentes que necesitan scroll propio —tablas, correo, modales o listas 
 
 ### El scroll horizontal pertenece al componente
 
-Las tablas no expanden el viewport. Los shells de Incidencias, Facturas, Clientes y Usuarios son los propietarios del scroll horizontal.
+Las tablas no expanden el viewport. Los shells de Incidencias, Facturas, Clientes y Usuarios son los propietarios del scroll horizontal en desktop/tablet cuando resulte necesario.
+
+En teléfono, esos cuatro listados usan la composición DataList: el scroll horizontal deja de ser la UX principal y cada fila conserva el mismo dataset en una tarjeta jerárquica.
 
 Un identificador, email, endpoint o nombre largo nunca puede convertir el panel completo en una superficie horizontal.
 
@@ -48,11 +51,21 @@ Los roots y elementos estructurales privados reciben `min-inline-size: 0`. El ta
 
 A 900 px:
 
+- el Sidebar se convierte en drawer off-canvas y sólo queda el trigger hamburguesa cuando está cerrado;
+- Main y Topbar pasan a ancho completo;
 - los heroes pasan a una columna;
 - las acciones dejan de competir con el título;
 - las métricas pasan a dos columnas;
 - toolbars y filtros pasan a una columna;
 - los filtros horizontales controlan su propio scroll.
+
+A 680 px:
+
+- los listados tabulares de Incidencias, Facturas, Clientes y Usuarios se recomponen como DataList;
+- el dato principal ocupa la primera línea completa;
+- los metadatos conservan labels compactos y posiciones predecibles;
+- los bloques de acciones permanecen táctiles y simétricos;
+- el DOM de tabla se conserva para desktop y accesibilidad.
 
 A 560 px:
 
@@ -66,6 +79,24 @@ A 480 px:
 - los grupos de acciones principales son una columna;
 - cada acción ocupa el ancho disponible.
 
+## Capa `compositions`
+
+`compositions` existe para patrones que necesitan imponerse después de las hojas de dominio, pero que no son guardrails ni parches.
+
+Puede:
+
+- recomponer varios dominios bajo un mismo patrón responsive;
+- utilizar clases/atributos de mejora progresiva compartidos;
+- adaptar densidad, orden visual y slots manteniendo el DOM funcional existente.
+
+No puede:
+
+- contener llamadas de red, auth, router o store;
+- decidir estados de negocio;
+- introducir una paleta paralela;
+- arreglar un único bug coyuntural de una única vista;
+- usar `!important` como mecanismo de arquitectura.
+
 ## Lo que guardrails.css NO puede hacer
 
 No puede:
@@ -77,7 +108,7 @@ No puede:
 - sustituir el CSS de dominio;
 - incluir lógica de negocio.
 
-Si una necesidad sólo aplica a una vista, pertenece a esa vista. Si es una invariante geométrica del producto, pertenece a Foundation.
+Si una necesidad sólo aplica a una vista, pertenece a esa vista. Si es una invariante geométrica del producto, pertenece a Foundation. Si recompone varios dominios bajo una experiencia común, pertenece a `compositions`.
 
 ## Política contra micro-parches
 

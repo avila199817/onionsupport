@@ -1,244 +1,195 @@
 /* =========================================================
-   ONION SUPPORT — FACTURAS CREATE MODAL
-   Archivo: /src/css/views/facturas/create.css
+   Onion Support · Facturas · Crear factura
+   CANÓNICO · SYSTEM TOKENS · 2026-08-19
 
-   Compatible 1:1 con:
-   - /src/views/facturas/facturas.template.create.js
-   - facturas.template.create.v4.final-ui-clean
-
-   FINAL EXTREME · DOM REAL · CSP CLEAN · NO CSS IN JS
-
-   Garantías:
-   - Panel estable con header fijo y un único scroll en .fac-create-body.
-   - Búsquedas actualizadas por islas DOM, sin remontar el modal al escribir.
-   - Sin iconos SVG en los buscadores.
-   - Sin botón visual «Limpiar».
-   - Indicador desplegable propio para todos los select.
-   - Estados, resultados y selecciones estables.
-   - Responsive, temas, impresión y reduced motion.
+   Contrato:
+   - 1:1 con facturas.template.create.js.
+   - Un único scroll en .fac-create-body.
+   - Clientes, incidencias, campos y resumen comparten el design system.
+   - Sin paleta local paralela ni overrides específicos de dark/light.
 ========================================================= */
-
 
 @layer views {
 
 /* =========================================================
-   ROOT / HOST / BODY LOCK
+   ROOT / MODAL
 ========================================================= */
 
-#facturas-create-modal-host,
-#facturas-create-modal-root,
+.fac-create-modal-root,
+.fac-create-modal-root *,
+.fac-create-modal-root *::before,
+.fac-create-modal-root *::after {
+  box-sizing: border-box;
+}
+
 .fac-create-modal-root {
   position: fixed;
   inset: 0;
-  z-index: 2147483000;
+  z-index: var(--z-modal, 1000);
   inline-size: 100vw;
   block-size: 100vh;
   block-size: 100dvh;
+  margin: 0;
+  padding: 0;
   pointer-events: none;
+  isolation: isolate;
+  color: var(--text);
   font-family: var(--font-family);
+  line-height: var(--line-normal);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
 }
 
-#facturas-create-modal-host:empty,
-#facturas-create-modal-root:empty,
-.fac-create-modal-root:empty {
-  display: none;
-}
+.fac-create-modal-root:empty { display: none; }
 
-#facturas-create-modal-host #facturas-create-modal-root {
-  z-index: inherit;
-}
-
-body.facturas-create-modal-open,
-body.facturas-modal-open,
 body.modal-open,
-body:has(.fac-create-overlay) {
+body.facturas-modal-open,
+body.facturas-create-open {
   overflow: hidden;
   overscroll-behavior: none;
 }
 
-
-/* =========================================================
-   LOCAL TOKENS
-========================================================= */
-
-#facturas-create-modal-root,
-.fac-create-modal-root,
-.fac-create-overlay,
-.fac-create-panel {
-  --fc-width: min(1180px, calc(100vw - 48px));
-  --fc-height: min(92dvh, 940px);
-
-  --fc-radius-panel: clamp(24px, 1.8vw, 34px);
-  --fc-radius-section: 19px;
-  --fc-radius-control: 13px;
-  --fc-radius-card: 16px;
-  --fc-radius-small: 14px;
-
-  --fc-border:
-    color-mix(in srgb, var(--border-strong) 72%, var(--accent-border) 28%);
-
-  --fc-border-soft:
-    color-mix(in srgb, var(--border-default) 72%, transparent);
-
-  --fc-section-bg:
-    color-mix(in srgb, var(--card-bg) 94%, transparent);
-
-  --fc-card-bg:
-    color-mix(in srgb, var(--card-bg) 94%, transparent);
-
-  --fc-mini-bg:
-    color-mix(in srgb, var(--badge-bg) 92%, transparent);
-
-  --fc-panel-shadow:
-    0 34px 110px color-mix(in srgb, #000 42%, transparent),
-    0 0 0 1px color-mix(in srgb, #fff 5%, transparent),
-    0 0 70px color-mix(in srgb, var(--accent) 7%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent);
-
-  --fc-section-shadow:
-    0 18px 52px color-mix(in srgb, #000 12%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent);
-
-  --fc-control-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent),
-    0 1px 2px color-mix(in srgb, #000 5%, transparent);
-
-  --fc-control-shadow-hover:
-    inset 0 1px 0 color-mix(in srgb, #fff 15%, transparent),
-    0 10px 24px color-mix(in srgb, #000 8%, transparent);
-
-  --fc-avatar-bg:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--accent) 94%, #2563eb),
-      color-mix(in srgb, var(--info) 90%, #ec4899)
-    );
-}
-
-
-/* =========================================================
-   OVERLAY
-========================================================= */
-
 .fac-create-overlay {
   position: fixed;
   inset: 0;
-  z-index: 2147483000;
+  z-index: 0;
   inline-size: 100vw;
   block-size: 100vh;
   block-size: 100dvh;
   display: grid;
   place-items: center;
-  padding: clamp(14px, 1.6vw, 26px);
-  margin: 0;
+  padding: clamp(12px, 2vw, 28px);
   overflow: hidden;
   pointer-events: auto;
-  color: var(--text);
-  background:
-    radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 30%),
-    radial-gradient(circle at 84% 10%, color-mix(in srgb, var(--info) 13%, transparent), transparent 30%),
-    radial-gradient(circle at 52% 108%, color-mix(in srgb, var(--success) 7%, transparent), transparent 42%),
-    color-mix(in srgb, var(--backdrop-bg, rgba(2, 6, 23, .82)) 90%, transparent);
-  backdrop-filter: blur(22px) saturate(1.14);
-  -webkit-backdrop-filter: blur(22px) saturate(1.14);
-  animation: facCreateOverlayIn .16s var(--ease-standard) both;
+  background: var(--backdrop-bg, rgba(0, 0, 0, .64));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  animation: fac-create-overlay-in 140ms ease-out both;
 }
-
-.fac-create-overlay::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, #fff 5%, transparent),
-      transparent 32%,
-      color-mix(in srgb, #000 13%, transparent)
-    );
-  opacity: .94;
-}
-
-.fac-create-overlay > * {
-  position: relative;
-  z-index: 1;
-}
-
-
-/* =========================================================
-   PANEL · STABLE SHELL / BODY SCROLL
-========================================================= */
 
 .fac-create-panel {
   position: relative;
   isolation: isolate;
-  inline-size: var(--fc-width);
-  block-size: var(--fc-height);
+  inline-size: min(1120px, calc(100vw - 48px));
+  max-inline-size: calc(100vw - 24px);
+  max-block-size: min(92dvh, 920px);
   min-inline-size: 0;
   min-block-size: 0;
-  max-inline-size: calc(100vw - 36px);
-  max-block-size: calc(100dvh - 32px);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
-  border: 1px solid var(--fc-border);
-  border-radius: var(--fc-radius-panel);
-  background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 13%, transparent), transparent 31%),
-    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info) 9%, transparent), transparent 30%),
-    radial-gradient(circle at 100% 100%, color-mix(in srgb, var(--success) 5%, transparent), transparent 42%),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--surface-3) 45%, transparent),
-      color-mix(in srgb, var(--surface-1) 88%, #000 12%)
-    ),
-    var(--panel-bg);
+  border: 1px solid var(--panel-border, var(--border-default));
+  border-radius: var(--modal-radius, var(--radius-lg));
+  background: var(--panel-bg);
   color: var(--text);
-  box-shadow: var(--fc-panel-shadow);
+  box-shadow: var(--shadow-modal, var(--panel-shadow));
   outline: none;
   pointer-events: auto;
-  transform-origin: center;
-  animation: facCreatePanelIn .20s cubic-bezier(.16, 1, .3, 1) both;
+  animation: fac-create-panel-in 180ms var(--ease-standard) both;
 }
 
-.fac-create-panel::before {
-  content: "";
-  position: absolute;
-  inset-inline: 28px;
-  inset-block-start: 0;
-  z-index: 50;
-  block-size: 1px;
-  pointer-events: none;
-  background:
-    linear-gradient(
-      90deg,
-      transparent,
-      color-mix(in srgb, var(--accent) 48%, transparent),
-      color-mix(in srgb, var(--info) 30%, transparent),
-      transparent
-    );
-  opacity: .92;
+.fac-create-panel:focus-visible {
+  box-shadow: var(--shadow-modal, var(--panel-shadow)), var(--focus-ring);
 }
 
-.fac-create-body,
-.fac-create-search-results,
-.fac-create-ticket-list {
+.fac-create-panel.is-submitting { cursor: progress; }
+
+/* =========================================================
+   HEADER
+========================================================= */
+
+.fac-create-header {
+  position: relative;
+  z-index: 3;
+  min-inline-size: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-md);
+  padding: clamp(17px, 1.5vw, 24px) clamp(18px, 2vw, 30px);
+  border-block-end: 1px solid var(--border-soft, var(--border-default));
+  background: var(--surface-2, var(--panel-bg));
+}
+
+.fac-create-header-copy {
+  min-inline-size: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.fac-create-header h2 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: clamp(24px, 2.2vw, 34px);
+  font-weight: var(--weight-black);
+  line-height: 1;
+  letter-spacing: var(--letter-tight);
+}
+
+.fac-create-header p {
+  max-inline-size: 74ch;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-medium);
+  line-height: 1.4;
+}
+
+.fac-create-close {
+  appearance: none;
+  inline-size: 42px;
+  block-size: 42px;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--btn-secondary-border);
+  border-radius: var(--btn-radius);
+  background: var(--btn-secondary-bg);
+  color: var(--btn-secondary-text);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+
+.fac-create-close svg { inline-size: 17px; block-size: 17px; }
+.fac-create-close:hover:not(:disabled) {
+  background: var(--btn-secondary-bg-hover);
+  border-color: var(--border-strong);
+  color: var(--text-strong);
+}
+.fac-create-close:active:not(:disabled) { transform: scale(.97); }
+.fac-create-close:focus-visible { outline: 0; box-shadow: var(--focus-ring); }
+.fac-create-close:disabled { cursor: not-allowed; opacity: .48; }
+
+/* =========================================================
+   BODY / FORM
+========================================================= */
+
+.fac-create-body {
+  min-inline-size: 0;
+  min-block-size: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
+  padding: clamp(18px, 1.6vw, 26px) clamp(18px, 2vw, 30px) clamp(22px, 2vw, 32px);
 }
 
 .fac-create-body::-webkit-scrollbar,
 .fac-create-search-results::-webkit-scrollbar,
 .fac-create-ticket-list::-webkit-scrollbar {
-  inline-size: var(--scrollbar-size, 10px);
+  inline-size: var(--scrollbar-size, 9px);
 }
 
 .fac-create-body::-webkit-scrollbar-track,
 .fac-create-search-results::-webkit-scrollbar-track,
-.fac-create-ticket-list::-webkit-scrollbar-track {
-  background: transparent;
-}
+.fac-create-ticket-list::-webkit-scrollbar-track { background: transparent; }
 
 .fac-create-body::-webkit-scrollbar-thumb,
 .fac-create-search-results::-webkit-scrollbar-thumb,
@@ -249,196 +200,35 @@ body:has(.fac-create-overlay) {
   background-clip: padding-box;
 }
 
-.fac-create-panel.is-submitting {
-  pointer-events: auto;
-}
-
-/* =========================================================
-   HEADER
-========================================================= */
-
-.fac-create-header {
-  position: relative;
-  z-index: 4;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: clamp(14px, 1.2vw, 20px);
-  min-inline-size: 0;
-  padding:
-    clamp(18px, 1.35vw, 24px)
-    clamp(20px, 1.8vw, 30px);
-  border-bottom: 1px solid var(--fc-border-soft);
-  background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 38%),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--panel-bg) 96%, #fff 4%),
-      color-mix(in srgb, var(--panel-bg) 90%, transparent)
-    );
-  box-shadow:
-    0 12px 30px color-mix(in srgb, #000 16%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent);
-  backdrop-filter: blur(16px) saturate(1.10);
-  -webkit-backdrop-filter: blur(16px) saturate(1.10);
-}
-
-.fac-create-header::after {
-  content: "";
-  position: absolute;
-  inset-inline: 34% -10%;
-  inset-block-end: -70px;
-  z-index: -1;
-  block-size: 132px;
-  pointer-events: none;
-  background:
-    radial-gradient(circle, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%);
-  filter: blur(18px);
-  opacity: .7;
-}
-
-.fac-create-header-copy {
-  display: grid;
-  gap: 5px;
-  min-inline-size: 0;
-}
-
-.fac-create-header h2 {
-  margin: 0;
-  max-inline-size: 100%;
-  color: var(--text-strong);
-  font-size: clamp(28px, 2.15vw, 38px);
-  line-height: .98;
-  font-weight: var(--weight-black);
-  letter-spacing: -.058em;
-  text-wrap: balance;
-}
-
-.fac-create-header p {
-  margin: 0;
-  max-inline-size: 72ch;
-  color: var(--text-muted);
-  font-size: 11.5px;
-  line-height: 1.35;
-  font-weight: var(--weight-semibold);
-  text-wrap: pretty;
-}
-
-.fac-create-close {
-  appearance: none;
-  inline-size: 44px;
-  block-size: 44px;
-  padding: 0;
-  border: 1px solid var(--btn-secondary-border);
-  border-radius: 15px;
-  background: var(--btn-secondary-bg);
-  color: var(--btn-secondary-text);
-  box-shadow: var(--fc-control-shadow);
-  cursor: pointer;
-  display: inline-grid;
-  place-items: center;
-  font-family: var(--font-family);
-  line-height: 1;
-  transition:
-    transform var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard),
-    background var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard),
-    opacity var(--duration-fast) var(--ease-standard);
-}
-
-.fac-create-close svg {
-  inline-size: 18px;
-  block-size: 18px;
-}
-
-.fac-create-close:hover:not(:disabled) {
-  transform: translateY(-1px);
-  border-color:
-    color-mix(in srgb, var(--btn-secondary-border) 66%, var(--accent-border));
-  background:
-    color-mix(in srgb, var(--btn-secondary-bg) 92%, var(--accent) 5%);
-  color: var(--text-strong);
-  box-shadow: var(--fc-control-shadow-hover);
-}
-
-.fac-create-close:active:not(:disabled) {
-  transform: translateY(0) scale(.985);
-}
-
-.fac-create-close:disabled {
-  cursor: not-allowed;
-  opacity: .48;
-}
-
-/* =========================================================
-   BODY / FORM / VISUAL ORDER
-========================================================= */
-
-.fac-create-body {
-  min-inline-size: 0;
-  min-block-size: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  overscroll-behavior: contain;
-  padding:
-    clamp(18px, 1.45vw, 24px)
-    clamp(20px, 1.8vw, 30px)
-    clamp(24px, 2vw, 34px);
-}
-
 .fac-create-form {
-  display: grid;
-  gap: clamp(14px, 1vw, 18px);
   min-inline-size: 0;
-}
-
-.fac-create-form > * {
-  order: 20;
-}
-
-.fac-create-form > .fac-create-target,
-.fac-create-form > .fac-create-target--pro {
-  order: 1;
-}
-
-.fac-create-form > .fac-create-total-strip {
-  order: 50;
-}
-
-.fac-create-form > .fac-create-actions,
-.fac-create-form > .fac-create-actions--compact {
-  order: 90;
+  display: grid;
+  gap: var(--space-md);
 }
 
 .fac-create-grid {
-  display: grid;
-  gap: 12px;
   min-inline-size: 0;
+  display: grid;
+  gap: var(--space-sm);
 }
 
-.fac-create-grid--2 {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
+.fac-create-grid--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
 /* =========================================================
-   FIELDS / INPUTS / SELECTS
+   FIELDS
 ========================================================= */
 
 .fac-create-field {
-  display: grid;
-  gap: 5px;
   min-inline-size: 0;
+  display: grid;
+  gap: 6px;
 }
 
 .fac-create-label {
-  color: var(--text-dim);
-  font-size: 8.5px;
-  font-weight: var(--weight-black);
-  letter-spacing: .075em;
-  line-height: var(--line-snug);
-  text-transform: uppercase;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-bold);
+  line-height: 1.2;
 }
 
 .fac-create-input,
@@ -448,56 +238,51 @@ body:has(.fac-create-overlay) {
   -webkit-appearance: none;
   inline-size: 100%;
   min-inline-size: 0;
+  margin: 0;
   border: 1px solid var(--input-border);
-  border-radius: var(--fc-radius-control);
+  border-radius: var(--input-radius);
+  outline: 0;
   background: var(--input-bg);
-  color: var(--input-text);
-  box-shadow: var(--input-shadow);
-  font-family: var(--font-family);
-  font-size: 12.5px;
-  font-weight: var(--weight-semibold);
-  line-height: var(--line-normal);
-  outline: none;
+  color: var(--input-text, var(--text-strong));
   caret-color: var(--text-strong);
+  box-shadow: var(--input-shadow, none);
+  font: inherit;
+  font-size: var(--font-md);
+  font-weight: var(--weight-medium);
+  line-height: 1.45;
   transition:
+    background var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard),
     box-shadow var(--duration-fast) var(--ease-standard),
-    background var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard),
     opacity var(--duration-fast) var(--ease-standard);
 }
 
 .fac-create-input,
 .fac-create-select {
-  min-block-size: 44px;
+  min-block-size: var(--input-height);
   padding-inline: 13px;
 }
 
 .fac-create-textarea {
-  min-block-size: 112px;
-  padding: 13px 14px;
+  min-block-size: 132px;
+  padding: 12px 13px;
   resize: vertical;
 }
 
 .fac-create-input::placeholder,
 .fac-create-textarea::placeholder {
-  color: var(--input-placeholder);
+  color: var(--input-placeholder, var(--text-dim));
   opacity: 1;
-  transition: opacity 90ms ease-out, color 90ms ease-out;
 }
 
 .fac-create-input:focus::placeholder,
-.fac-create-textarea:focus::placeholder {
-  color: transparent;
-  opacity: 0;
-}
+.fac-create-textarea:focus::placeholder { color: transparent; }
 
 .fac-create-input:hover:not(:disabled),
 .fac-create-select:hover:not(:disabled),
 .fac-create-textarea:hover:not(:disabled) {
   background: var(--input-bg-hover);
   border-color: var(--input-border-hover);
-  box-shadow: var(--input-shadow-hover);
 }
 
 .fac-create-input:focus,
@@ -505,1619 +290,733 @@ body:has(.fac-create-overlay) {
 .fac-create-textarea:focus {
   background: var(--input-bg-focus);
   border-color: var(--input-border-focus);
-  box-shadow: var(--input-shadow-focus);
-}
-
-.fac-create-input.is-error,
-.fac-create-select.is-error,
-.fac-create-textarea.is-error {
-  border-color: var(--input-border-error, var(--border-error));
-  box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--error) 12%, transparent),
-    var(--input-shadow);
-}
-
-.fac-create-input.is-readonly,
-.fac-create-input[readonly] {
-  color: var(--text-muted);
-  background:
-    color-mix(in srgb, var(--input-bg) 72%, var(--surface-muted));
-  cursor: default;
+  box-shadow: var(--focus-ring);
 }
 
 .fac-create-input:disabled,
 .fac-create-select:disabled,
 .fac-create-textarea:disabled {
-  opacity: .58;
   cursor: not-allowed;
+  background: var(--input-disabled-bg);
+  opacity: .62;
 }
 
-/* Buscadores sin SVG ni decoración nativa de lupa/cancelación. */
-.fac-create-input[type="search"] {
-  appearance: none;
-  -webkit-appearance: none;
-}
+.fac-create-input.is-error,
+.fac-create-select.is-error,
+.fac-create-textarea.is-error { border-color: var(--border-error); }
 
 .fac-create-input[type="search"]::-webkit-search-decoration,
 .fac-create-input[type="search"]::-webkit-search-cancel-button,
 .fac-create-input[type="search"]::-webkit-search-results-button,
-.fac-create-input[type="search"]::-webkit-search-results-decoration {
-  display: none;
-  -webkit-appearance: none;
+.fac-create-input[type="search"]::-webkit-search-results-decoration { -webkit-appearance: none; }
+
+.fac-create-error {
+  color: var(--error-strong, var(--error));
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1.35;
 }
 
-/* Wrapper real generado por renderSelect(). */
 .fac-create-select-control {
   position: relative;
   display: block;
   min-inline-size: 0;
-  inline-size: 100%;
 }
 
-.fac-create-select-control .fac-create-select {
-  display: block;
-  padding-inline-end: 42px;
-  background-image: none;
-  cursor: pointer;
-}
-
-.fac-create-select::-ms-expand {
-  display: none;
-}
+.fac-create-select { padding-inline-end: 38px; cursor: pointer; }
 
 .fac-create-select-indicator {
   position: absolute;
-  inset-inline-end: 10px;
   inset-block-start: 50%;
-  z-index: 2;
-  inline-size: 24px;
-  block-size: 24px;
-  display: grid;
-  place-items: center;
+  inset-inline-end: 13px;
+  transform: translateY(-52%);
   pointer-events: none;
   color: var(--text-muted);
-  font-family: var(--font-family);
-  font-size: 18px;
-  font-weight: var(--weight-black);
+  font-size: 17px;
   line-height: 1;
-  transform: translateY(-53%);
-  transform-origin: center;
-  transition:
-    color var(--duration-fast) var(--ease-standard),
-    transform var(--duration-fast) var(--ease-standard),
-    opacity var(--duration-fast) var(--ease-standard);
 }
-
-.fac-create-select-control:focus-within .fac-create-select-indicator {
-  color: var(--accent-active);
-  transform: translateY(-53%) scale(1.08);
-}
-
-.fac-create-select-control:has(.fac-create-select:disabled)
-  .fac-create-select-indicator {
-  opacity: .42;
-}
-
-.fac-create-error {
-  color: var(--error);
-  font-size: 10px;
-  font-weight: var(--weight-bold);
-  line-height: var(--line-snug);
-}
-
-
-/* =========================================================
-   FOCUS SYSTEM
-========================================================= */
-
-.fac-create-input:focus-visible,
-.fac-create-select:focus-visible,
-.fac-create-textarea:focus-visible,
-.fac-create-close:focus-visible,
-.fac-create-mini-button:focus-visible,
-.fac-create-icon-button:focus-visible,
-.fac-create-search-item:focus-visible,
-.fac-create-search-item--client:focus-visible,
-.fac-create-ticket-option:focus-visible,
-.fac-create-submit:focus-visible {
-  outline: none;
-  box-shadow:
-    var(--focus-ring),
-    0 0 0 5px color-mix(in srgb, var(--accent) 10%, transparent);
-}
-
-
-/* =========================================================
-   ALERTS
-========================================================= */
-
-.fac-create-alert {
-  display: grid;
-  gap: var(--space-3xs);
-  padding: 11px;
-  border: 1px solid var(--border-info);
-  border-radius: 15px;
-  background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--info) 8%, transparent), transparent 42%),
-    var(--glass-shine),
-    var(--info-bg);
-  color: var(--info);
-  box-shadow:
-    var(--shadow-sm),
-    inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
-}
-
-.fac-create-alert strong {
-  color: var(--text-strong);
-  font-size: 12px;
-  font-weight: var(--weight-black);
-  line-height: var(--line-snug);
-}
-
-.fac-create-alert span {
-  color: currentColor;
-  font-size: 11px;
-  font-weight: var(--weight-semibold);
-  line-height: var(--line-normal);
-}
-
-.fac-create-alert.is-success {
-  border-color: var(--border-success);
-  background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--success) 10%, transparent), transparent 42%),
-    var(--glass-shine),
-    var(--success-bg);
-  color: var(--success);
-}
-
-.fac-create-alert.is-error {
-  border-color: var(--border-error);
-  background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--error) 10%, transparent), transparent 42%),
-    var(--glass-shine),
-    var(--error-bg);
-  color: var(--error);
-}
-
-.fac-create-alert.is-warning {
-  border-color: var(--border-warning);
-  background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--warning) 10%, transparent), transparent 42%),
-    var(--glass-shine),
-    var(--warning-bg);
-  color: var(--warning);
-}
-
-
-/* =========================================================
-   TOTAL STRIP
-========================================================= */
-
-.fac-create-total-strip {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 9px;
-  min-inline-size: 0;
-}
-
-.fac-create-total-strip > div {
-  position: relative;
-  overflow: hidden;
-  min-block-size: 82px;
-  padding: 12px;
-  border: 1px solid var(--card-border);
-  border-radius: var(--fc-radius-card);
-  background:
-    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 42%),
-    var(--glass-shine),
-    var(--card-bg);
-  box-shadow: var(--shadow-card);
-  display: grid;
-  align-content: center;
-  gap: var(--space-3xs);
-}
-
-.fac-create-total-strip > div::after {
-  content: "";
-  position: absolute;
-  inset: auto -28px -38px auto;
-  inline-size: 108px;
-  block-size: 108px;
-  border-radius: 50%;
-  pointer-events: none;
-  background: color-mix(in srgb, var(--accent) 9%, transparent);
-  filter: blur(8px);
-}
-
-.fac-create-total-strip span {
-  position: relative;
-  z-index: 1;
-  color: var(--text-dim);
-  font-size: 8.5px;
-  font-weight: var(--weight-black);
-  letter-spacing: var(--letter-wider);
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.fac-create-total-strip strong {
-  position: relative;
-  z-index: 1;
-  min-inline-size: 0;
-  overflow: hidden;
-  color: var(--text-strong);
-  font-size: clamp(22px, 1.7vw, 32px);
-  font-weight: var(--weight-black);
-  letter-spacing: var(--letter-tight);
-  line-height: .92;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
-.fac-create-total-strip .is-total {
-  border-color: var(--accent-border);
-  background:
-    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 45%),
-    var(--glass-shine),
-    var(--accent-soft);
-}
-
-.fac-create-total-strip .is-total strong {
-  color: var(--accent-active);
-}
-
-
-/* =========================================================
-   TARGET SECTION
-========================================================= */
-
-.fac-create-target,
-.fac-create-target--pro {
-  position: relative;
-  isolation: isolate;
-  overflow: hidden;
-  display: grid;
-  gap: 11px;
-  min-inline-size: 0;
-  padding: clamp(13px, 1vw, 18px);
-  border: 1px solid color-mix(in srgb, var(--card-border) 88%, transparent);
-  border-radius: var(--fc-radius-section);
-  background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 38%),
-    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info) 4%, transparent), transparent 42%),
-    var(--glass-shine),
-    var(--fc-section-bg);
-  box-shadow: var(--fc-section-shadow);
-}
-
-.fac-create-target::before,
-.fac-create-target--pro::before {
-  content: "";
-  position: absolute;
-  inset-block: 0;
-  inset-inline-start: 0;
-  inline-size: 3px;
-  pointer-events: none;
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--accent) 82%, transparent),
-      color-mix(in srgb, var(--info) 62%, transparent)
-    );
-  opacity: .78;
-}
-
-.fac-create-target::after,
-.fac-create-target--pro::after {
-  content: "";
-  position: absolute;
-  inset: auto -36px -46px auto;
-  inline-size: 150px;
-  block-size: 150px;
-  border-radius: 50%;
-  pointer-events: none;
-  background: color-mix(in srgb, var(--accent) 7%, transparent);
-  filter: blur(12px);
-  opacity: .72;
-}
-
-.fac-create-target-head,
-.fac-create-target-head--pro {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-md);
-  align-items: start;
-  min-inline-size: 0;
-}
-
-.fac-create-target-title-block {
-  display: grid;
-  gap: var(--space-3xs);
-  min-inline-size: 0;
-}
-
-.fac-create-target-title-block > span {
-  color: var(--accent-active);
-  font-size: 8.5px;
-  font-weight: var(--weight-black);
-  letter-spacing: var(--letter-wider);
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.fac-create-target-title-block h3 {
-  margin: 0;
-  color: var(--text-strong);
-  font-size: clamp(15px, 1vw, 20px);
-  font-weight: var(--weight-black);
-  letter-spacing: -.04em;
-  line-height: var(--line-tight);
-}
-
-.fac-create-target-title-block p {
-  margin: 0;
-  max-inline-size: 78ch;
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: var(--weight-semibold);
-  line-height: 1.3;
-}
-
-.fac-create-target-metrics {
-  display: flex;
-  align-items: stretch;
-  gap: var(--space-xs);
-}
-
-.fac-create-target-metrics > div {
-  min-inline-size: 74px;
-  padding: 9px;
-  border: 1px solid var(--badge-border);
-  border-radius: var(--fc-radius-small);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, #fff 4%, transparent), transparent),
-    var(--badge-bg);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
-  display: grid;
-  justify-items: center;
-  align-content: center;
-  gap: 2px;
-}
-
-.fac-create-target-metrics strong {
-  color: var(--text-strong);
-  font-size: 19px;
-  font-weight: var(--weight-black);
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-
-.fac-create-target-metrics span {
-  color: var(--text-dim);
-  font-size: 8.5px;
-  font-weight: var(--weight-black);
-  letter-spacing: var(--letter-wider);
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-
-/* =========================================================
-   CLIENT / TICKET PRO CARDS
-========================================================= */
-
-.fac-create-pro-grid {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 9px;
-  min-inline-size: 0;
-}
-
-.fac-create-pro-card,
-.fac-create-pro-card--clients,
-.fac-create-pro-card--tickets {
-  position: relative;
-  overflow: hidden;
-  display: grid;
-  align-content: start;
-  gap: 9px;
-  min-inline-size: 0;
-  min-block-size: 235px;
-  padding: 12px;
-  border: 1px solid color-mix(in srgb, var(--card-border) 88%, transparent);
-  border-radius: var(--fc-radius-card);
-  background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 38%),
-    var(--glass-shine),
-    var(--fc-card-bg);
-  box-shadow: var(--fc-section-shadow);
-}
-
-.fac-create-pro-card::after,
-.fac-create-pro-card--clients::after,
-.fac-create-pro-card--tickets::after {
-  content: "";
-  position: absolute;
-  inset: auto -30px -42px auto;
-  inline-size: 116px;
-  block-size: 116px;
-  border-radius: 50%;
-  pointer-events: none;
-  background: color-mix(in srgb, var(--accent) 7%, transparent);
-  filter: blur(9px);
-  opacity: .72;
-}
-
-.fac-create-pro-card--tickets {
-  background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--info) 7%, transparent), transparent 38%),
-    var(--glass-shine),
-    var(--fc-card-bg);
-}
-
-.fac-create-pro-card--tickets::after {
-  background: color-mix(in srgb, var(--info) 7%, transparent);
-}
-
-.fac-create-pro-card-head {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: start;
-  justify-content: space-between;
-  gap: var(--space-sm);
-  min-inline-size: 0;
-}
-
-/* En clientes ya no existe el botón Limpiar. */
-.fac-create-pro-card--clients .fac-create-pro-card-head {
-  justify-content: flex-start;
-}
-
-.fac-create-pro-card-head > div {
-  display: grid;
-  gap: 3px;
-  min-inline-size: 0;
-}
-
-.fac-create-pro-card-head span {
-  color: var(--text-dim);
-  font-size: 8.5px;
-  font-weight: var(--weight-black);
-  letter-spacing: var(--letter-wider);
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.fac-create-pro-card-head strong {
-  min-inline-size: 0;
-  overflow: hidden;
-  color: var(--text-strong);
-  font-size: 13px;
-  font-weight: var(--weight-black);
-  line-height: var(--line-snug);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-
-/* =========================================================
-   MINI / INLINE BUTTONS
-========================================================= */
-
-.fac-create-mini-button,
-.fac-create-icon-button {
-  appearance: none;
-  position: relative;
-  z-index: 1;
-  min-block-size: 32px;
-  padding-inline: 10px;
-  border: 1px solid var(--btn-secondary-border);
-  border-radius: var(--radius-pill);
-  background: var(--btn-secondary-bg);
-  color: var(--btn-secondary-text);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-family);
-  font-size: 9px;
-  font-weight: var(--weight-black);
-  line-height: 1;
-  text-decoration: none;
-  white-space: nowrap;
-  transition:
-    transform var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard),
-    background var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard),
-    opacity var(--duration-fast) var(--ease-standard);
-}
-
-.fac-create-mini-button:hover,
-.fac-create-icon-button:hover {
-  transform: translateY(-1px);
-  border-color:
-    color-mix(in srgb, var(--btn-secondary-border) 66%, var(--accent-border));
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent),
-    0 8px 18px color-mix(in srgb, #000 7%, transparent);
-}
-
-.fac-create-mini-button:active,
-.fac-create-icon-button:active {
-  transform: translateY(0) scale(.985);
-}
-
-.fac-create-icon-button.is-danger,
-.fac-create-icon-button.is-danger:hover {
-  border-color: var(--border-error);
-  background: var(--error-bg);
-  color: var(--error);
-}
-
-.fac-create-mini-button:disabled,
-.fac-create-icon-button:disabled {
-  pointer-events: none;
-  opacity: .48;
-}
-
-
-/* =========================================================
-   AVATARS
-========================================================= */
-
-.fac-create-avatar {
-  position: relative;
-  inline-size: 35px;
-  block-size: 35px;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, #fff 20%, transparent);
-  border-radius: var(--radius-pill);
-  background: var(--fc-avatar-bg);
-  box-shadow:
-    0 10px 22px color-mix(in srgb, var(--accent) 18%, transparent),
-    0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent),
-    var(--shadow-inner);
-  flex: 0 0 auto;
-  display: inline-grid;
-  place-items: center;
-  transform: translateZ(0);
-}
-
-.fac-create-avatar::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  background:
-    radial-gradient(circle at 30% 22%, rgba(255, 255, 255, .42), transparent 34%),
-    linear-gradient(180deg, rgba(255, 255, 255, .10), rgba(0, 0, 0, .08));
-  mix-blend-mode: screen;
-}
-
-.fac-create-avatar--search {
-  inline-size: 30px;
-  block-size: 30px;
-}
-
-.fac-create-avatar--selected {
-  inline-size: 35px;
-  block-size: 35px;
-}
-
-.fac-create-avatar-img {
-  position: relative;
-  z-index: 1;
-  display: block;
-  inline-size: 100%;
-  block-size: 100%;
-  object-fit: cover;
-}
-
-.fac-create-avatar-fallback {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  color: var(--avatar-text, #fff);
-  font-size: 12px;
-  font-weight: var(--weight-black);
-  letter-spacing: -.035em;
-  text-shadow:
-    0 1px 2px rgba(0, 0, 0, .22),
-    0 0 16px rgba(255, 255, 255, .20);
-}
-
-.fac-create-avatar[data-fallback="true"] .fac-create-avatar-fallback,
-.fac-create-avatar:not(.has-image) .fac-create-avatar-fallback {
-  display: flex;
-}
-
-.fac-create-avatar[data-fallback="true"] .fac-create-avatar-img,
-.fac-create-avatar:not(.has-image) .fac-create-avatar-img {
-  display: none;
-}
-
-
-/* =========================================================
-   SELECTED CLIENTS / TICKETS
-========================================================= */
-
-.fac-create-selected-stack {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  gap: 7px;
-  min-inline-size: 0;
-}
-
-.fac-create-selected-card,
-.fac-create-selected-card--client,
-.fac-create-selected-card--ticket {
-  position: relative;
-  overflow: hidden;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-sm);
-  align-items: center;
-  min-inline-size: 0;
-  padding: 9px;
-  border: 1px solid var(--badge-border);
-  border-radius: var(--fc-radius-small);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, #fff 4%, transparent), transparent),
-    var(--badge-bg);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
-}
-
-.fac-create-selected-card::before,
-.fac-create-selected-card--client::before,
-.fac-create-selected-card--ticket::before {
-  content: "";
-  position: absolute;
-  inset-block: 9px;
-  inset-inline-start: 0;
-  inline-size: 3px;
-  border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
-  background: var(--text-dim);
-  opacity: .32;
-}
-
-.fac-create-selected-card.is-primary,
-.fac-create-selected-card--client.is-primary,
-.fac-create-selected-card--ticket.is-primary {
-  border-color: var(--accent-border);
-  background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 11%, transparent), transparent 48%),
-    var(--accent-soft);
-}
-
-.fac-create-selected-card.is-primary::before,
-.fac-create-selected-card--client.is-primary::before,
-.fac-create-selected-card--ticket.is-primary::before {
-  background: var(--accent);
-  opacity: .92;
-}
-
-.fac-create-selected-card--ticket.is-primary {
-  border-color: color-mix(in srgb, var(--accent-border) 66%, var(--info));
-}
-
-.fac-create-selected-main {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: var(--space-sm);
-  align-items: center;
-  min-inline-size: 0;
-}
-
-.fac-create-selected-copy {
-  display: grid;
-  gap: 3px;
-  min-inline-size: 0;
-}
-
-.fac-create-selected-copy span {
-  color: var(--text-dim);
-  font-size: 9.5px;
-  font-weight: var(--weight-black);
-  letter-spacing: var(--letter-wider);
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.fac-create-selected-copy strong {
-  min-inline-size: 0;
-  overflow: hidden;
-  color: var(--text-strong);
-  font-size: 11px;
-  font-weight: var(--weight-black);
-  line-height: var(--line-snug);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.fac-create-selected-copy small {
-  min-inline-size: 0;
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: var(--weight-semibold);
-  line-height: var(--line-snug);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.fac-create-selected-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-3xs);
-  flex-wrap: wrap;
-}
-
-
-/* =========================================================
-   EMPTY STATES
-========================================================= */
-
-.fac-create-empty-pro {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  justify-items: start;
-  gap: var(--space-3xs);
-  padding: 12px;
-  border: 1px dashed color-mix(in srgb, var(--border-default) 82%, var(--accent-border));
-  border-radius: var(--fc-radius-small);
-  background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 46%),
-    color-mix(in srgb, var(--surface-elevated) 54%, transparent);
-}
-
-.fac-create-empty-pro strong {
-  color: var(--text-strong);
-  font-size: 11px;
-  font-weight: var(--weight-black);
-}
-
-.fac-create-empty-pro span {
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: var(--weight-semibold);
-  line-height: var(--line-normal);
-}
-
-.fac-create-empty-pro.is-locked {
-  opacity: .74;
-}
-
-
-/* =========================================================
-   SEARCH / RESULTS
-========================================================= */
-
-.fac-create-field--search {
-  position: relative;
-  z-index: 1;
-  margin-block-start: var(--space-2xs);
-}
-
-.fac-create-field--search > .fac-create-input {
-  inline-size: 100%;
-}
-
-.fac-create-search-state {
-  position: relative;
-  z-index: 1;
-  padding: 9px;
-  border: 1px solid var(--badge-border);
-  border-radius: var(--fc-radius-control);
-  background: var(--badge-bg);
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: var(--weight-bold);
-  line-height: var(--line-normal);
-}
-
-.fac-create-search-state.is-error {
-  border-color: var(--border-error);
-  background: var(--error-bg);
-  color: var(--error);
-}
-
-.fac-create-search-results,
-.fac-create-ticket-list {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  gap: 7px;
-  min-inline-size: 0;
-  max-block-size: 200px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding-inline-end: 2px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
-}
-
-.fac-create-search-item,
-.fac-create-search-item--client,
-.fac-create-ticket-option {
-  appearance: none;
-  inline-size: 100%;
-  min-inline-size: 0;
-  padding: 9px;
-  border: 1px solid var(--badge-border);
-  border-radius: var(--fc-radius-small);
-  background: var(--badge-bg);
-  color: var(--text);
-  cursor: pointer;
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-sm);
-  font-family: var(--font-family);
-  text-align: start;
-  transition:
-    transform var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard),
-    background var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard),
-    opacity var(--duration-fast) var(--ease-standard);
-}
-
-.fac-create-search-item:hover,
-.fac-create-search-item--client:hover,
-.fac-create-ticket-option:hover {
-  transform: translateY(-1px);
-  border-color: color-mix(in srgb, var(--badge-border) 62%, var(--accent-border));
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent),
-    0 8px 20px color-mix(in srgb, #000 7%, transparent);
-}
-
-.fac-create-search-item:active,
-.fac-create-search-item--client:active,
-.fac-create-ticket-option:active {
-  transform: translateY(0) scale(.99);
-}
-
-.fac-create-search-item.is-selected,
-.fac-create-search-item.is-selected:hover,
-.fac-create-search-item--client.is-selected,
-.fac-create-search-item--client.is-selected:hover,
-.fac-create-ticket-option.is-selected,
-.fac-create-ticket-option.is-selected:hover {
-  border-color: var(--accent-border);
-  background: var(--accent-soft);
-  color: var(--accent-active);
-}
-
-.fac-create-search-item:disabled,
-.fac-create-search-item--client:disabled,
-.fac-create-ticket-option:disabled {
-  cursor: default;
-  opacity: .72;
-  transform: none;
-}
-
-.fac-create-search-copy,
-.fac-create-ticket-option-copy {
-  display: grid;
-  gap: 3px;
-  min-inline-size: 0;
-}
-
-.fac-create-search-copy strong,
-.fac-create-ticket-option-copy strong {
-  min-inline-size: 0;
-  overflow: hidden;
-  color: var(--text-strong);
-  font-size: 11px;
-  font-weight: var(--weight-black);
-  line-height: var(--line-snug);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.fac-create-search-copy span,
-.fac-create-ticket-option-copy small {
-  min-inline-size: 0;
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: 9.5px;
-  font-weight: var(--weight-semibold);
-  line-height: var(--line-snug);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.fac-create-add-pill {
-  min-block-size: 22px;
-  padding-inline: 7px;
-  border: 1px solid var(--accent-border);
-  border-radius: var(--radius-pill);
-  background: var(--accent-soft);
-  color: var(--accent-active);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 8.5px;
-  font-weight: var(--weight-black);
-  letter-spacing: var(--letter-wider);
-  line-height: 1;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-
-/* =========================================================
-   TICKET BADGES
-========================================================= */
-
-.fac-create-ticket-badge,
-.fac-create-ticket-mini-badge {
-  border: 1px solid var(--accent-border);
-  border-radius: var(--radius-pill);
-  background:
-    radial-gradient(circle at 30% 20%, color-mix(in srgb, #fff 26%, transparent), transparent 38%),
-    var(--accent-soft);
-  color: var(--accent-active);
-  box-shadow:
-    0 8px 18px color-mix(in srgb, var(--accent) 14%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
-  display: inline-grid;
-  place-items: center;
-  flex: 0 0 auto;
-  font-weight: var(--weight-black);
-}
-
-.fac-create-ticket-badge {
-  inline-size: 35px;
-  block-size: 35px;
-  font-size: 12px;
-}
-
-.fac-create-ticket-mini-badge {
-  inline-size: 28px;
-  block-size: 28px;
-  font-size: 10px;
-}
-
 
 /* =========================================================
    CHECKBOX
 ========================================================= */
 
 .fac-create-check {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: var(--space-sm);
-  align-items: start;
-  padding: 9px;
-  border: 1px solid var(--badge-border);
-  border-radius: var(--fc-radius-small);
-  background:
-    var(--glass-shine),
-    var(--badge-bg);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
+  min-block-size: var(--input-height);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
+  background: var(--input-bg);
   cursor: pointer;
 }
 
+.fac-create-check:hover { border-color: var(--input-border-hover); background: var(--input-bg-hover); }
+
 .fac-create-check input {
-  appearance: none;
-  inline-size: 20px;
-  block-size: 20px;
-  margin: 1px 0 0;
-  border: 1px solid var(--input-border);
+  inline-size: 17px;
+  block-size: 17px;
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.fac-create-check > span {
+  min-inline-size: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.fac-create-check strong { color: var(--text-strong); font-size: var(--font-sm); }
+.fac-create-check small { color: var(--text-muted); font-size: var(--font-xs); line-height: 1.35; }
+.fac-create-check:has(input:focus-visible) { box-shadow: var(--focus-ring); }
+.fac-create-check:has(input:disabled) { cursor: not-allowed; opacity: .6; }
+
+/* =========================================================
+   TOTAL SUMMARY
+========================================================= */
+
+.fac-create-total-strip {
+  min-inline-size: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border: 1px solid var(--card-border, var(--border-default));
+  border-radius: var(--card-radius, var(--radius-md));
+  background: var(--card-bg, var(--solid-bg-1));
+  box-shadow: var(--card-shadow, none);
+}
+
+.fac-create-total-strip > div {
+  min-inline-size: 0;
+  display: grid;
+  gap: 5px;
+  padding: 11px 12px;
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-sm);
-  background: var(--input-bg);
-  box-shadow: var(--input-shadow);
+  background: var(--solid-bg-1, var(--panel-bg));
+}
+
+.fac-create-total-strip span {
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+}
+
+.fac-create-total-strip strong {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: var(--font-lg);
+  font-weight: var(--weight-black);
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.fac-create-total-strip .is-total {
+  border-color: var(--border-success);
+  background: var(--success-bg);
+}
+
+.fac-create-total-strip .is-total strong { color: var(--success-strong, var(--success)); }
+
+/* =========================================================
+   TARGET: CLIENTS + TICKETS
+========================================================= */
+
+.fac-create-target,
+.fac-create-target--pro {
+  min-inline-size: 0;
+  display: grid;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  border: 1px solid var(--card-border, var(--border-default));
+  border-radius: var(--card-radius, var(--radius-md));
+  background: var(--card-bg, var(--solid-bg-1));
+  box-shadow: var(--card-shadow, none);
+}
+
+.fac-create-target-head,
+.fac-create-target-head--pro {
+  min-inline-size: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.fac-create-target-title-block {
+  min-inline-size: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.fac-create-target-title-block > span,
+.fac-create-pro-card-head span {
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+}
+
+.fac-create-target-title-block h3 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: var(--font-lg);
+  font-weight: var(--weight-bold);
+}
+
+.fac-create-target-title-block p {
+  max-inline-size: 660px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  line-height: 1.45;
+}
+
+.fac-create-target-metrics {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 7px;
+}
+
+.fac-create-target-metrics > div {
+  min-inline-size: 76px;
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--badge-border);
+  border-radius: var(--radius-sm);
+  background: var(--badge-bg);
+  text-align: center;
+}
+
+.fac-create-target-metrics strong { color: var(--text-strong); font-size: var(--font-md); font-variant-numeric: tabular-nums; }
+.fac-create-target-metrics span { color: var(--text-dim); font-size: 9px; text-transform: uppercase; letter-spacing: .035em; }
+
+.fac-create-pro-grid {
+  min-inline-size: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-sm);
+}
+
+.fac-create-pro-card {
+  min-inline-size: 0;
+  display: grid;
+  align-content: start;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--solid-bg-1, var(--panel-bg));
+}
+
+.fac-create-pro-card-head {
+  min-inline-size: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.fac-create-pro-card-head > div { min-inline-size: 0; display: grid; gap: 2px; }
+.fac-create-pro-card-head strong { color: var(--text-strong); font-size: var(--font-sm); font-weight: var(--weight-bold); }
+
+.fac-create-mini-button,
+.fac-create-icon-button,
+.fac-create-add-pill {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  border: 1px solid var(--btn-secondary-border);
+  border-radius: var(--radius-pill);
+  background: var(--btn-secondary-bg);
+  color: var(--btn-secondary-text);
+  font: inherit;
+  font-size: 9.5px;
+  font-weight: var(--weight-bold);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.fac-create-mini-button,
+.fac-create-icon-button {
+  min-block-size: 28px;
+  padding-inline: 9px;
   cursor: pointer;
-  display: inline-grid;
+}
+
+.fac-create-mini-button:hover:not(:disabled),
+.fac-create-icon-button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--btn-secondary-bg-hover);
+  color: var(--text-strong);
+}
+
+.fac-create-mini-button:focus-visible,
+.fac-create-icon-button:focus-visible { outline: 0; box-shadow: var(--focus-ring); }
+.fac-create-mini-button:disabled,
+.fac-create-icon-button:disabled { cursor: not-allowed; opacity: .5; }
+
+.fac-create-icon-button.is-danger {
+  border-color: var(--border-error);
+  background: var(--error-bg);
+  color: var(--error-strong, var(--error));
+}
+
+/* =========================================================
+   SELECTED CARDS / AVATARS
+========================================================= */
+
+.fac-create-selected-stack {
+  min-inline-size: 0;
+  display: grid;
+  gap: 7px;
+}
+
+.fac-create-selected-card {
+  min-inline-size: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: 9px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--solid-bg-2);
+}
+
+.fac-create-selected-card.is-primary {
+  border-color: var(--border-success);
+  background: var(--success-bg);
+}
+
+.fac-create-selected-main {
+  min-inline-size: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.fac-create-selected-copy,
+.fac-create-search-copy,
+.fac-create-ticket-option-copy {
+  min-inline-size: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.fac-create-selected-copy > span {
+  color: var(--text-dim);
+  font-size: 9px;
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: .035em;
+}
+
+.fac-create-selected-copy strong,
+.fac-create-search-copy strong,
+.fac-create-ticket-option-copy strong {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fac-create-selected-copy small,
+.fac-create-search-copy span,
+.fac-create-ticket-option-copy small {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 9.5px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fac-create-selected-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fac-create-avatar {
+  inline-size: 36px;
+  block-size: 36px;
+  flex: 0 0 auto;
+  display: grid;
   place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--solid-bg-2);
+  color: var(--text-strong);
+  font-size: 10px;
+  font-weight: var(--weight-bold);
+}
+
+.fac-create-avatar--search { inline-size: 34px; block-size: 34px; }
+.fac-create-avatar--selected { inline-size: 38px; block-size: 38px; }
+
+.fac-create-avatar-img { inline-size: 100%; block-size: 100%; display: block; object-fit: cover; }
+.fac-create-avatar.has-image .fac-create-avatar-fallback { display: none; }
+
+.fac-create-ticket-badge,
+.fac-create-ticket-mini-badge {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-info);
+  border-radius: var(--radius-sm);
+  background: var(--info-bg);
+  color: var(--info-strong, var(--info));
+  font-weight: var(--weight-bold);
+}
+
+.fac-create-ticket-badge { inline-size: 38px; block-size: 38px; font-size: var(--font-sm); }
+.fac-create-ticket-mini-badge { inline-size: 30px; block-size: 30px; font-size: 10px; }
+
+/* =========================================================
+   SEARCH RESULTS
+========================================================= */
+
+.fac-create-field--search { margin-block-start: 1px; }
+
+.fac-create-search-results,
+.fac-create-ticket-list {
+  min-inline-size: 0;
+  max-block-size: 248px;
+  display: grid;
+  gap: 5px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.fac-create-search-item,
+.fac-create-ticket-option {
+  appearance: none;
+  inline-size: 100%;
+  min-inline-size: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--solid-bg-1, var(--panel-bg));
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.fac-create-search-item:hover:not(:disabled),
+.fac-create-ticket-option:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--solid-hover);
+}
+
+.fac-create-search-item:focus-visible,
+.fac-create-ticket-option:focus-visible { outline: 0; box-shadow: var(--focus-ring); }
+
+.fac-create-search-item.is-selected,
+.fac-create-ticket-option.is-selected {
+  border-color: var(--border-success);
+  background: var(--success-bg);
+}
+
+.fac-create-search-item:disabled,
+.fac-create-ticket-option:disabled { cursor: default; opacity: .68; }
+
+.fac-create-add-pill {
+  min-block-size: 24px;
+  padding-inline: 7px;
+  border-color: var(--badge-border);
+  background: var(--badge-bg);
+  color: var(--badge-text);
+}
+
+.is-selected > .fac-create-add-pill {
+  border-color: var(--border-success);
+  background: var(--success-bg);
+  color: var(--success-strong, var(--success));
+}
+
+.fac-create-search-state,
+.fac-create-empty-pro {
+  min-inline-size: 0;
+  padding: 10px 11px;
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--solid-bg-1, var(--panel-bg));
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  line-height: 1.4;
+}
+
+.fac-create-search-state.is-error {
+  border-color: var(--border-error);
+  background: var(--error-bg);
+  color: var(--error-strong, var(--error));
+}
+
+.fac-create-empty-pro { display: grid; gap: 2px; }
+.fac-create-empty-pro strong { color: var(--text-strong); font-size: var(--font-xs); }
+.fac-create-empty-pro span { color: var(--text-muted); font-size: 9.5px; }
+.fac-create-empty-pro.is-locked { opacity: .72; }
+
+/* =========================================================
+   ALERTS
+========================================================= */
+
+.fac-create-alert {
+  min-inline-size: 0;
+  display: grid;
+  gap: 3px;
+  margin-block-end: var(--space-sm);
+  padding: 10px 12px;
+  border: 1px solid var(--border-info);
+  border-radius: var(--radius-sm);
+  background: var(--info-bg);
+  color: var(--info-strong, var(--info));
+}
+
+.fac-create-alert.is-success { border-color: var(--border-success); background: var(--success-bg); color: var(--success-strong, var(--success)); }
+.fac-create-alert.is-warning { border-color: var(--border-warning); background: var(--warning-bg); color: var(--warning-strong, var(--warning)); }
+.fac-create-alert.is-error { border-color: var(--border-error); background: var(--error-bg); color: var(--error-strong, var(--error)); }
+.fac-create-alert strong { color: currentColor; font-size: var(--font-sm); }
+.fac-create-alert span { font-size: var(--font-xs); line-height: 1.4; }
+
+/* =========================================================
+   ACTIONS
+========================================================= */
+
+.fac-create-actions {
+  min-inline-size: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-sm);
+  padding-block-start: 2px;
+}
+
+.fac-create-action-buttons { display: inline-flex; justify-content: flex-end; gap: var(--space-xs); }
+
+.fac-create-submit {
+  appearance: none;
+  min-block-size: var(--btn-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  margin: 0;
+  padding-inline: var(--space-lg);
+  border: 1px solid var(--btn-primary-border);
+  border-radius: var(--btn-radius);
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  box-shadow: var(--btn-primary-shadow);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-md);
+  font-weight: var(--weight-bold);
+  line-height: 1;
+  white-space: nowrap;
   transition:
     background var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard),
     box-shadow var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard),
     opacity var(--duration-fast) var(--ease-standard);
 }
 
-.fac-create-check input::after {
-  content: "";
-  inline-size: 10px;
-  block-size: 6px;
-  border: solid var(--text-on-accent);
-  border-width: 0 0 2px 2px;
-  opacity: 0;
-  transform: rotate(-45deg) translateY(-1px);
-}
-
-.fac-create-check input:checked {
-  border-color: var(--btn-primary-border);
-  background: var(--btn-primary-bg);
-}
-
-.fac-create-check input:checked::after {
-  opacity: 1;
-}
-
-.fac-create-check input:focus-visible {
-  outline: none;
-  box-shadow:
-    var(--focus-ring),
-    0 0 0 5px color-mix(in srgb, var(--accent) 10%, transparent);
-}
-
-.fac-create-check input:disabled {
-  opacity: .48;
-  cursor: not-allowed;
-}
-
-.fac-create-check span {
-  display: grid;
-  gap: 3px;
-  min-inline-size: 0;
-}
-
-.fac-create-check strong {
-  color: var(--text-strong);
-  font-size: 11px;
-  font-weight: var(--weight-black);
-  line-height: var(--line-snug);
-}
-
-.fac-create-check small {
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: var(--weight-semibold);
-  line-height: var(--line-normal);
-}
-
-
-/* =========================================================
-   FOOTER ACTIONS
-========================================================= */
-
-.fac-create-actions,
-.fac-create-actions--compact {
-  position: relative;
-  z-index: 3;
-  display: grid;
-  grid-template-columns: 1fr;
-  justify-items: end;
-  gap: var(--space-md);
-  align-items: center;
-  margin: 0;
-  padding: 12px 0 0;
-  border-top: 1px solid color-mix(in srgb, var(--border-default) 68%, transparent);
-  background: transparent;
-}
-
-.fac-create-action-buttons {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-xs);
-}
-
-.fac-create-submit {
-  appearance: none;
-  min-block-size: 44px;
-  padding-inline: 20px;
-  border: 1px solid var(--btn-primary-border);
-  border-radius: var(--fc-radius-small);
-  background: var(--btn-primary-bg);
-  color: var(--btn-primary-text);
-  box-shadow:
-    var(--btn-primary-shadow),
-    inset 0 1px 0 color-mix(in srgb, #fff 16%, transparent);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-xs);
-  font-family: var(--font-family);
-  font-size: 11px;
-  font-weight: var(--weight-black);
-  line-height: 1;
-  white-space: nowrap;
-  transition:
-    transform var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard),
-    opacity var(--duration-fast) var(--ease-standard),
-    filter var(--duration-fast) var(--ease-standard);
-}
-
-.fac-create-submit:hover {
-  transform: translateY(-1px);
-  box-shadow:
-    var(--btn-primary-shadow),
-    0 16px 38px color-mix(in srgb, var(--accent) 16%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
-}
-
-.fac-create-submit:active {
-  transform: translateY(0) scale(.985);
-}
-
-.fac-create-submit:disabled {
-  pointer-events: none;
-  opacity: .62;
-}
-
-.fac-create-submit-inner {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-xs);
-}
+.fac-create-submit:hover:not(:disabled) { background: var(--btn-primary-bg-hover); transform: translateY(-1px); }
+.fac-create-submit:active:not(:disabled) { background: var(--btn-primary-bg-active); transform: translateY(0); }
+.fac-create-submit:focus-visible { outline: 0; box-shadow: var(--btn-primary-shadow), var(--focus-ring); }
+.fac-create-submit:disabled { cursor: not-allowed; opacity: .52; transform: none; }
+.fac-create-submit-inner { display: inline-flex; align-items: center; gap: 8px; }
 
 .fac-create-spinner,
 .fac-create-loading-spinner {
-  inline-size: 16px;
-  block-size: 16px;
-  border: 2px solid color-mix(in srgb, currentColor 26%, transparent);
-  border-top-color: currentColor;
-  border-radius: var(--radius-pill);
-  animation: facCreateSpin .78s linear infinite;
+  inline-size: 15px;
+  block-size: 15px;
   flex: 0 0 auto;
+  border: 2px solid color-mix(in srgb, currentColor 28%, transparent);
+  border-block-start-color: currentColor;
+  border-radius: 50%;
+  animation: fac-create-spin .72s linear infinite;
 }
 
-
 /* =========================================================
-   SUBMIT LOADING OVERLAY
+   SUBMIT OVERLAY
 ========================================================= */
 
 .fac-create-loading-overlay {
   position: absolute;
   inset: 0;
-  z-index: 30;
+  z-index: 10;
   display: grid;
   place-items: center;
-  padding: var(--space-lg);
-  background:
-    radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 48%),
-    color-mix(in srgb, var(--backdrop-bg) 72%, transparent);
-  backdrop-filter: blur(16px) saturate(1.06);
-  -webkit-backdrop-filter: blur(16px) saturate(1.06);
+  padding: 20px;
+  background: color-mix(in srgb, var(--panel-bg) 72%, transparent);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
 }
 
 .fac-create-loading-card {
-  min-inline-size: min(360px, 100%);
-  padding: var(--space-xl);
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-2xl, 24px);
-  background:
-    var(--glass-shine),
-    var(--popover-bg);
-  color: var(--text);
-  box-shadow:
-    var(--shadow-lg),
-    0 22px 62px color-mix(in srgb, var(--accent) 13%, transparent);
+  inline-size: min(360px, 100%);
   display: grid;
   justify-items: center;
-  gap: var(--space-xs);
+  gap: 6px;
+  padding: 20px;
+  border: 1px solid var(--panel-border, var(--border-default));
+  border-radius: var(--radius-md);
+  background: var(--panel-bg);
+  color: var(--text);
+  box-shadow: var(--shadow-modal, var(--panel-shadow));
   text-align: center;
-  animation: facCreateLoadingCardIn .18s var(--ease-standard) both;
 }
 
-.fac-create-loading-card .fac-create-loading-spinner {
-  inline-size: 28px;
-  block-size: 28px;
-  color: var(--accent-active);
-}
-
-.fac-create-loading-card strong {
-  color: var(--text-strong);
-  font-size: var(--font-xl);
-  font-weight: var(--weight-black);
-  line-height: var(--line-snug);
-}
-
-.fac-create-loading-card small {
-  color: var(--text-muted);
-  font-size: var(--font-sm);
-  font-weight: var(--weight-semibold);
-  line-height: var(--line-normal);
-}
-
+.fac-create-loading-card strong { color: var(--text-strong); font-size: var(--font-md); }
+.fac-create-loading-card small { color: var(--text-muted); font-size: var(--font-xs); }
+.fac-create-loading-spinner { inline-size: 22px; block-size: 22px; color: var(--accent); }
 
 /* =========================================================
-   LIGHT THEME
+   RESPONSIVE
 ========================================================= */
 
-[data-theme="light"] .fac-create-overlay {
-  background:
-    radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--accent) 13%, transparent), transparent 34%),
-    radial-gradient(circle at 82% 16%, color-mix(in srgb, var(--info) 9%, transparent), transparent 32%),
-    radial-gradient(circle at 50% 110%, color-mix(in srgb, var(--success) 6%, transparent), transparent 40%),
-    rgba(246, 248, 252, .78);
+@media (max-width: 900px) {
+  .fac-create-panel { inline-size: min(820px, calc(100vw - 28px)); max-inline-size: calc(100vw - 20px); }
+  .fac-create-pro-grid { grid-template-columns: 1fr; }
 }
 
-[data-theme="light"] .fac-create-panel {
-  background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 32%),
-    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info) 6%, transparent), transparent 30%),
-    linear-gradient(180deg, rgba(255, 255, 255, .86), rgba(255, 255, 255, .72)),
-    color-mix(in srgb, var(--panel-bg) 96%, #fff);
-  box-shadow:
-    0 30px 90px rgba(15, 23, 42, .18),
-    0 0 0 1px rgba(15, 23, 42, .08),
-    0 0 56px color-mix(in srgb, var(--accent) 7%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, .84);
-}
-
-[data-theme="light"] .fac-create-header {
-  background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 38%),
-    linear-gradient(180deg, rgba(255, 255, 255, .92), rgba(255, 255, 255, .78));
-  box-shadow:
-    0 12px 28px rgba(15, 23, 42, .08),
-    inset 0 1px 0 rgba(255, 255, 255, .86);
-}
-
-[data-theme="light"] .fac-create-input,
-[data-theme="light"] .fac-create-select,
-[data-theme="light"] .fac-create-textarea,
-[data-theme="light"] .fac-create-search-item,
-[data-theme="light"] .fac-create-search-item--client,
-[data-theme="light"] .fac-create-ticket-option,
-[data-theme="light"] .fac-create-selected-card,
-[data-theme="light"] .fac-create-selected-card--client,
-[data-theme="light"] .fac-create-selected-card--ticket,
-[data-theme="light"] .fac-create-check,
-[data-theme="light"] .fac-create-pro-card,
-[data-theme="light"] .fac-create-pro-card--clients,
-[data-theme="light"] .fac-create-pro-card--tickets,
-[data-theme="light"] .fac-create-target,
-[data-theme="light"] .fac-create-target--pro,
-[data-theme="light"] .fac-create-total-strip > div,
-[data-theme="light"] .fac-create-mini-button,
-[data-theme="light"] .fac-create-icon-button,
-[data-theme="light"] .fac-create-close {
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, .78),
-    0 1px 2px rgba(32, 43, 72, .045);
-}
-
-
-/* =========================================================
-   DARK THEME
-========================================================= */
-
-[data-theme="dark"] .fac-create-panel {
-  background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 34%),
-    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info) 9%, transparent), transparent 32%),
-    var(--glass-shine),
-    color-mix(in srgb, var(--panel-bg) 94%, #000);
-}
-
-[data-theme="dark"] .fac-create-input,
-[data-theme="dark"] .fac-create-select,
-[data-theme="dark"] .fac-create-textarea {
-  background: color-mix(in srgb, var(--input-bg) 92%, #000);
-}
-
-[data-theme="dark"] .fac-create-target,
-[data-theme="dark"] .fac-create-target--pro,
-[data-theme="dark"] .fac-create-pro-card,
-[data-theme="dark"] .fac-create-pro-card--clients,
-[data-theme="dark"] .fac-create-pro-card--tickets {
-  background:
-    var(--glass-shine),
-    color-mix(in srgb, var(--card-bg) 92%, #000);
-}
-
-[data-theme="dark"] .fac-create-pro-card--tickets {
-  background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--info) 7%, transparent), transparent 38%),
-    var(--glass-shine),
-    color-mix(in srgb, var(--card-bg) 92%, #000);
-}
-
-[data-theme="dark"] .fac-create-selected-card,
-[data-theme="dark"] .fac-create-selected-card--client,
-[data-theme="dark"] .fac-create-selected-card--ticket,
-[data-theme="dark"] .fac-create-search-item,
-[data-theme="dark"] .fac-create-search-item--client,
-[data-theme="dark"] .fac-create-ticket-option,
-[data-theme="dark"] .fac-create-check,
-[data-theme="dark"] .fac-create-search-state {
-  background:
-    var(--glass-shine),
-    color-mix(in srgb, var(--badge-bg) 88%, #000);
-}
-
-
-/* =========================================================
-   RESPONSIVE · TABLET
-========================================================= */
-
-@media (max-width: 1180px) {
-  #facturas-create-modal-root,
-  .fac-create-modal-root,
-  .fac-create-overlay,
-  .fac-create-panel {
-    --fc-width: min(920px, calc(100vw - 28px));
-    --fc-height: min(92dvh, 940px);
-  }
-
-  .fac-create-pro-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .fac-create-pro-card,
-  .fac-create-pro-card--clients,
-  .fac-create-pro-card--tickets {
-    min-block-size: auto;
-  }
-}
-
-
-/* =========================================================
-   RESPONSIVE · MOBILE
-========================================================= */
-
-@media (max-width: 760px) {
-  #facturas-create-modal-root,
-  .fac-create-modal-root,
-  .fac-create-overlay,
-  .fac-create-panel {
-    --fc-width: calc(100vw - 16px);
-    --fc-height: calc(100dvh - 16px);
-  }
-
-  .fac-create-overlay {
-    padding: 8px;
-    place-items: end stretch;
-  }
+@media (max-width: 680px) {
+  .fac-create-overlay { padding: 0; place-items: stretch; }
 
   .fac-create-panel {
-    inline-size: var(--fc-width);
-    block-size: var(--fc-height);
+    inline-size: 100vw;
+    block-size: 100vh;
+    block-size: 100dvh;
     max-inline-size: none;
     max-block-size: none;
-    border-radius: 24px 24px 0 0;
-  }
-
-  .fac-create-header {
-    padding: 14px 14px 12px;
-  }
-
-  .fac-create-header h2 {
-    font-size: clamp(25px, 8vw, 35px);
-  }
-
-  .fac-create-body {
-    padding: 14px 14px 20px;
-  }
-
-  .fac-create-grid--2,
-  .fac-create-total-strip,
-  .fac-create-pro-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .fac-create-target-head,
-  .fac-create-target-head--pro,
-  .fac-create-selected-card,
-  .fac-create-selected-card--client,
-  .fac-create-selected-card--ticket {
-    grid-template-columns: 1fr;
-  }
-
-  .fac-create-target-metrics {
-    inline-size: 100%;
-  }
-
-  .fac-create-target-metrics > div {
-    flex: 1 1 0;
-  }
-
-  .fac-create-selected-actions {
-    justify-content: flex-start;
-  }
-
-  .fac-create-search-item,
-  .fac-create-search-item--client,
-  .fac-create-ticket-option {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  .fac-create-add-pill {
-    grid-column: 1 / -1;
-    justify-self: start;
-  }
-
-  .fac-create-actions,
-  .fac-create-actions--compact {
-    justify-items: stretch;
-    align-items: stretch;
-  }
-
-  .fac-create-action-buttons,
-  .fac-create-submit {
-    inline-size: 100%;
-  }
-}
-
-@media (max-width: 460px) {
-  #facturas-create-modal-root,
-  .fac-create-modal-root,
-  .fac-create-overlay,
-  .fac-create-panel {
-    --fc-width: 100vw;
-    --fc-height: 96dvh;
-  }
-
-  .fac-create-overlay {
-    padding-inline: 0;
-    padding-block-end: 0;
-  }
-
-  .fac-create-panel {
-    border-inline: 0;
-    border-block-end: 0;
-  }
-
-  .fac-create-close {
-    inline-size: 36px;
-    block-size: 36px;
-  }
-
-  .fac-create-target-metrics {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .fac-create-pro-card-head {
-    display: grid;
-    grid-template-columns: 1fr;
-  }
-
-  .fac-create-mini-button {
-    justify-self: start;
-  }
-}
-
-
-/* =========================================================
-   PRINT
-========================================================= */
-
-@media print {
-  #facturas-create-modal-host,
-  #facturas-create-modal-root,
-  .fac-create-modal-root,
-  .fac-create-overlay {
-    position: static;
-    inset: auto;
-    inline-size: 100%;
-    block-size: auto;
-    padding: 0;
-    background: transparent;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
-
-  .fac-create-panel {
-    inline-size: 100%;
-    block-size: auto;
-    max-inline-size: none;
-    max-block-size: none;
-    overflow: visible;
     border: 0;
     border-radius: 0;
     box-shadow: none;
   }
 
-  .fac-create-close,
-  .fac-create-actions,
-  .fac-create-actions--compact,
-  .fac-create-loading-overlay {
-    display: none;
+  .fac-create-header {
+    padding: max(14px, env(safe-area-inset-top)) 14px 13px;
   }
 
-  .fac-create-header,
+  .fac-create-header h2 { font-size: 24px; }
+
+  .fac-create-body {
+    padding: 14px 12px max(22px, env(safe-area-inset-bottom));
+  }
+
+  .fac-create-grid--2,
+  .fac-create-total-strip { grid-template-columns: 1fr; }
+
+  .fac-create-target-head,
+  .fac-create-target-head--pro { display: grid; grid-template-columns: 1fr; }
+
+  .fac-create-target-metrics { justify-self: start; }
+  .fac-create-selected-card { align-items: flex-start; }
+  .fac-create-selected-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .fac-create-actions { grid-template-columns: 1fr; }
+  .fac-create-action-buttons,
+  .fac-create-submit { inline-size: 100%; }
+}
+
+@media (max-width: 430px) {
   .fac-create-target,
   .fac-create-target--pro,
   .fac-create-pro-card,
-  .fac-create-pro-card--clients,
-  .fac-create-pro-card--tickets,
-  .fac-create-total-strip > div,
-  .fac-create-selected-card,
-  .fac-create-selected-card--client,
-  .fac-create-selected-card--ticket,
-  .fac-create-check {
-    box-shadow: none;
-  }
+  .fac-create-total-strip { padding: 12px; }
+
+  .fac-create-selected-card { display: grid; grid-template-columns: 1fr; }
+  .fac-create-selected-actions { justify-content: flex-start; }
+  .fac-create-search-item,
+  .fac-create-ticket-option { grid-template-columns: auto minmax(0, 1fr); }
+  .fac-create-search-item .fac-create-add-pill,
+  .fac-create-ticket-option .fac-create-add-pill { grid-column: 2; justify-self: start; }
 }
 
+@media (max-height: 700px) and (min-width: 681px) {
+  .fac-create-overlay { padding: 12px; }
+  .fac-create-panel { max-block-size: calc(100dvh - 24px); }
+  .fac-create-header { padding-block: 13px 12px; }
+  .fac-create-body { padding-block: 14px 18px; }
+}
 
 /* =========================================================
-   REDUCED MOTION
+   ACCESSIBILITY / PRINT
 ========================================================= */
 
 @media (prefers-reduced-motion: reduce) {
   .fac-create-overlay,
   .fac-create-panel,
-  .fac-create-overlay *,
-  .fac-create-overlay *::before,
-  .fac-create-overlay *::after {
-    animation: none;
-    transition: none;
-  }
+  .fac-create-spinner,
+  .fac-create-loading-spinner { animation: none; }
 
-  .fac-create-close:hover,
-  .fac-create-mini-button:hover,
-  .fac-create-icon-button:hover,
-  .fac-create-search-item:hover,
-  .fac-create-search-item--client:hover,
-  .fac-create-ticket-option:hover,
-  .fac-create-submit:hover {
-    transform: none;
-  }
+  .fac-create-close,
+  .fac-create-input,
+  .fac-create-select,
+  .fac-create-textarea,
+  .fac-create-search-item,
+  .fac-create-ticket-option,
+  .fac-create-submit { transition: none; }
+
+  .fac-create-submit:hover:not(:disabled) { transform: none; }
 }
 
-
-/* =========================================================
-   KEYFRAMES
-========================================================= */
-
-@keyframes facCreateOverlayIn {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
+@media (forced-colors: active) {
+  .fac-create-panel,
+  .fac-create-pro-card,
+  .fac-create-target,
+  .fac-create-total-strip,
+  .fac-create-selected-card,
+  .fac-create-search-item,
+  .fac-create-ticket-option,
+  .fac-create-input,
+  .fac-create-select,
+  .fac-create-textarea,
+  .fac-create-submit { forced-color-adjust: auto; }
 }
 
-@keyframes facCreatePanelIn {
-  from {
-    opacity: 0;
-    transform: translateY(16px) scale(.972);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+@media print {
+  .fac-create-modal-root { display: none; }
 }
 
-@keyframes facCreateLoadingCardIn {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(.985);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+@keyframes fac-create-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
-@keyframes facCreateSpin {
-  to {
-    transform: rotate(360deg);
-  }
+@keyframes fac-create-panel-in {
+  from { opacity: 0; transform: translateY(8px) scale(.988); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-}
+@keyframes fac-create-spin { to { transform: rotate(1turn); } }
+
+} /* @layer views */

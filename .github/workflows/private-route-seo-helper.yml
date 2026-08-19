@@ -55,32 +55,6 @@ jobs:
               'Disallow: /usuarios\nDisallow: /correo\nDisallow: /servidor\n',
           )
 
-          workflow = ".github/workflows/azure-static-web-apps-polite-bay-086469a1e.yml"
-          p = Path(workflow)
-          text = p.read_text(encoding="utf-8")
-          targets = [
-              (
-                  '              "Disallow: /usuarios",\n              "Disallow: /servidor",\n',
-                  '              "Disallow: /usuarios",\n              "Disallow: /correo",\n              "Disallow: /servidor",\n',
-              ),
-              (
-                  '                  "/usuarios",\n                  "/servidor",\n',
-                  '                  "/usuarios",\n                  "/correo",\n                  "/servidor",\n',
-              ),
-              (
-                  '              "/usuarios*",\n              "/servidor*",\n',
-                  '              "/usuarios*",\n              "/correo*",\n              "/servidor*",\n',
-              ),
-          ]
-
-          for old, new in targets:
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"Azure workflow: expected one route target, got {count}")
-              text = text.replace(old, new)
-
-          p.write_text(text, encoding="utf-8")
-
           Path(".github/workflows/private-route-seo-helper.yml").unlink()
           PY
 

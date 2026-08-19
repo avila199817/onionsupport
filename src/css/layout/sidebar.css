@@ -1889,3 +1889,49 @@ body[data-sidebar-hidden="true"] .sidebar {
       scale(1);
   }
 }
+
+/* =========================================================
+   SIDEBAR · CORREO ICON
+   El route key correo usa el DOM canónico del Sidebar.
+========================================================= */
+
+.sidebar-link[data-sidebar-key="correo"] .sidebar-link-icon {
+  position: relative;
+}
+
+.sidebar-link[data-sidebar-key="correo"] .sidebar-link-svg {
+  opacity: 0;
+}
+
+.sidebar-link[data-sidebar-key="correo"] .sidebar-link-icon::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 50%;
+  inset-block-start: 50%;
+  inline-size: 19px;
+  block-size: 15px;
+  box-sizing: border-box;
+  border: 1.9px solid currentColor;
+  border-radius: 3px;
+  background:
+    linear-gradient(
+      32deg,
+      transparent 46%,
+      currentColor 47% 52%,
+      transparent 53%
+    ) left top / 50% 74% no-repeat,
+    linear-gradient(
+      -32deg,
+      transparent 46%,
+      currentColor 47% 52%,
+      transparent 53%
+    ) right top / 50% 74% no-repeat;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+@media (forced-colors: active) {
+  .sidebar-link[data-sidebar-key="correo"] .sidebar-link-icon::before {
+    background: none;
+  }
+}

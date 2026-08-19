@@ -56,7 +56,6 @@
 ========================================================= */
 
 @import url("./layout/sidebar.css") layer(layout);
-@import url("./layout/correo-sidebar.css") layer(layout);
 @import url("./layout/topbar.css") layer(layout);
 @import url("./layout/chrome.css") layer(layout);
 
@@ -72,15 +71,6 @@
    Las hojas de las vistas privadas se cargan desde src/router/styles.js.
    Cada dominio define su desktop/tablet dentro de layer(views).
 ========================================================= */
-
-/* =========================================================
-   CORREO · GEOMETRÍA DEL VIEWPORT
-
-   Excepción global estrictamente scopeada a [data-correo-host="true"].
-   Cierra la cadena de altura real del shell sin afectar otras rutas.
-========================================================= */
-
-@import url("./views/correo/fullheight.css") layer(views);
 
 /* =========================================================
    PUBLIC · LANDING / SUPPORT REQUEST

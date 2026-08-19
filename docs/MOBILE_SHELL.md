@@ -1,14 +1,16 @@
-# Mobile Shell — retirado como autoridad
+# Mobile Shell — retirado
 
-Desde App Chrome V3, `Mobile Shell` ya no es una pieza independiente del layout.
+`Mobile Shell` ya no existe como implementación ni como autoridad independiente del layout.
+
+Sus responsabilidades fueron absorbidas por **App Chrome** y el bridge temporal `src/features/mobile-shell/index.js` ha sido eliminado en UI System V4.
 
 La autoridad canónica es:
 
-- `src/ui/chrome/template.js` — estructura visual compartida;
-- `src/ui/chrome/index.js` — comportamiento responsive;
-- `src/css/layout/chrome.css` — geometría completa del chrome;
-- `docs/UI_CHROME.md` — contrato de arquitectura y aceptación.
+- `src/ui/chrome/template.js` — estructura compartida, backdrop y trigger móvil;
+- `src/ui/chrome/index.js` — comportamiento responsive, apertura/cierre, foco e interacción;
+- `src/css/layout/chrome.css` — geometría completa de Topbar + Sidebar + main/tablehead;
+- `docs/UI_CHROME.md` — contrato de arquitectura y criterios de aceptación.
 
-`src/features/mobile-shell/index.js` se conserva únicamente como puente de compatibilidad para el arranque actual y no contiene lógica propia.
+`index.html` carga directamente `src/ui/chrome/index.js` antes de `main.js`. No existe un segundo controlador, bridge JS ni stylesheet `mobile-shell.css`.
 
-No añadir nuevas reglas, listeners o documentación de layout bajo el concepto `Mobile Shell`. Cualquier cambio de Topbar + Sidebar pertenece a App Chrome.
+No añadir nuevas reglas, listeners, features o documentación de layout bajo el concepto `Mobile Shell`. Cualquier cambio transversal de Topbar + Sidebar pertenece a App Chrome.

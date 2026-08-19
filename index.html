@@ -377,12 +377,12 @@
   ></script>
 
   <!--
-    El shell móvil fija el estado inicial del Sidebar antes de que main.js
-    monte el chrome privado: móvil arranca cerrado, desktop conserva su estado.
+    App Chrome se inicializa antes de main.js y gobierna Topbar + Sidebar
+    desde una única autoridad responsive, sin bridges de compatibilidad.
   -->
   <script
     type="module"
-    src="/src/features/mobile-shell/index.js"
+    src="/src/ui/chrome/index.js"
   ></script>
 
   <script

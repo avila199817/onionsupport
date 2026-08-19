@@ -159,3 +159,11 @@ Los siguientes refactors pueden eliminar CSS duplicado de `views/**`, `topbar.cs
 > El contenido cambia. La geometría permanece estable.
 
 Si una vista sólo funciona con datos cortos, un ancho concreto o una resolución concreta, la vista no está terminada.
+
+## UI System V4 · consolidación de autoridades
+
+- `src/css/layout/chrome.css` gobierna toda la geometría compartida del chrome.
+- `src/ui/chrome/index.js` se carga directamente; no existe bridge `features/mobile-shell`.
+- Correo mantiene únicamente `index.css` + `viewport.css`; su contrato de altura/densidad ya no se inyecta globalmente desde `app.css`.
+- Los estilos específicos del Sidebar viven en `sidebar.css`, no en mini-hojas paralelas.
+- Repository Integrity impide que estas rutas legacy reaparezcan.

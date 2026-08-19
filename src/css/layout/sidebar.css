@@ -11,7 +11,7 @@
    - Eliminar compatibilidad legacy sin consumidores.
    - Evitar will-change / translate3d permanentes.
    - Animar una sola dimensión de layout.
-   - Mantener desktop rail, mobile rail/drawer, dropdown y avatar.
+   - Mantener navegación/dropdown/avatar; geometría global -> chrome.css.
    - Dark/light, reduced motion, forced colors y print.
    - Sin JS, Router, Auth, Store ni lógica de negocio.
 ========================================================= */
@@ -1742,80 +1742,6 @@ body[data-sidebar-hidden="true"] .sidebar {
 
   display: flex;
   justify-content: center;
-}
-
-
-/* =========================================================
-   MOBILE
-========================================================= */
-
-@media (max-width: 900px) {
-  .sidebar {
-    --sb-open-w:
-      var(--sb-mobile-open-w);
-
-    --sb-collapsed-w:
-      var(--sb-mobile-collapsed-w);
-
-    --sb-rail-slot: 44px;
-    --sb-toggle-slot: 40px;
-
-    --sb-avatar-collapsed-size:
-      32px;
-  }
-
-  .sidebar:is(
-    .is-open,
-    [data-open="true"],
-    [data-sidebar-state="open"]
-  ) {
-    box-shadow:
-      var(--sb-drawer-shadow);
-  }
-}
-
-@media (max-width: 640px) {
-  .sidebar {
-    --sb-mobile-open-w:
-      min(
-        clamp(274px, 84vw, 304px),
-        calc(100vw - 12px)
-      );
-  }
-}
-
-@media (max-width: 420px) {
-  .sidebar {
-    --sb-mobile-open-w:
-      min(
-        clamp(264px, 86vw, 294px),
-        calc(100vw - 10px)
-      );
-  }
-}
-
-@media (max-width: 380px) {
-  .sidebar {
-    --sb-icon-size: 19px;
-
-    --sb-mobile-collapsed-w:
-      var(
-        --sidebar-mobile-collapsed-width,
-        56px
-      );
-
-    --sb-mobile-open-w:
-      min(
-        clamp(258px, 86vw, 288px),
-        calc(100vw - 8px)
-      );
-
-    --sb-rail-slot: 40px;
-    --sb-toggle-slot: 38px;
-
-    --sb-avatar-collapsed-size:
-      30px;
-  }
 }
 
 

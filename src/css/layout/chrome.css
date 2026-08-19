@@ -1,0 +1,737 @@
+/* =========================================================
+   ONION SUPPORT — APP CHROME
+   Archivo: /src/css/layout/chrome.css
+
+   APP CHROME V3 · SINGLE LAYOUT AUTHORITY
+
+   Este archivo es la única autoridad geométrica del chrome privado.
+   Sidebar y Topbar conservan su skin y componentes internos, pero NO
+   deciden offsets globales, huella móvil, drawer ni sincronía del shell.
+
+   IMPORTANTE:
+   - app.css ya importa este archivo dentro de layer(layout).
+   - NO declarar @layer aquí: hacerlo crearía layout.layout y perdería
+     prioridad frente a sidebar.css/topbar.css.
+========================================================= */
+
+/* =========================================================
+   GLOBAL CONTRACT
+========================================================= */
+
+:root {
+  --chrome-breakpoint: 900px;
+  --chrome-sidebar-open-width: var(--sidebar-width, 260px);
+  --chrome-sidebar-collapsed-width: var(--sidebar-collapsed, 72px);
+  --chrome-sidebar-offset: var(--chrome-sidebar-open-width);
+  --chrome-topbar-height:
+    calc(
+      var(--topbar-height, 58px) +
+      var(--topbar-safe-top, env(safe-area-inset-top, 0px))
+    );
+
+  --chrome-z-root: var(--z-sidebar, 40);
+  --chrome-z-topbar: var(--z-topbar, 50);
+  --chrome-z-backdrop: 70;
+  --chrome-z-drawer: 80;
+
+  --chrome-motion-duration: .26s;
+  --chrome-motion-fast: .18s;
+  --chrome-motion-ease: cubic-bezier(.22, .86, .24, 1);
+  --chrome-motion-ease-fast: cubic-bezier(.2, .72, .2, 1);
+}
+
+body {
+  --chrome-sidebar-offset: var(--chrome-sidebar-open-width);
+
+  /* Compatibilidad: layout.css/topbar.css consumen estas variables. */
+  --app-sidebar-current-width: var(--chrome-sidebar-offset);
+  --layout-main-inset-left: var(--chrome-sidebar-offset);
+  --topbar-effective-sidebar-offset: var(--chrome-sidebar-offset);
+}
+
+body:is(
+  .sidebar-collapsed,
+  [data-sidebar-state="collapsed"],
+  [data-sidebar-open="false"]
+) {
+  --chrome-sidebar-offset: var(--chrome-sidebar-collapsed-width);
+}
+
+body:is(
+  .sidebar-hidden,
+  [data-sidebar-state="hidden"],
+  [data-sidebar-hidden="true"]
+) {
+  --chrome-sidebar-offset: 0px;
+}
+
+/* =========================================================
+   CHROME ROOT / MOUNTS
+========================================================= */
+
+:where(
+  #app-chrome,
+  [data-app-chrome="true"]
+) {
+  position: fixed;
+  inset: 0;
+
+  inline-size: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+
+  block-size: 100vh;
+  block-size: 100svh;
+  block-size: 100dvh;
+
+  z-index: var(--chrome-z-root);
+
+  pointer-events: none;
+  isolation: isolate;
+}
+
+:where(
+  #topbar-mount,
+  [data-topbar-mount]
+) {
+  position: fixed;
+  inset-block-start: 0;
+  inset-inline-start: var(--chrome-sidebar-offset);
+  inset-inline-end: 0;
+
+  z-index: var(--chrome-z-topbar);
+
+  inline-size: auto;
+  min-inline-size: 0;
+  block-size: var(--chrome-topbar-height);
+
+  pointer-events: none;
+
+  transition:
+    inset-inline-start
+    var(--chrome-motion-duration)
+    var(--chrome-motion-ease);
+}
+
+:where(
+  #topbar-mount,
+  [data-topbar-mount]
+) > * {
+  pointer-events: auto;
+}
+
+:where(
+  #sidebar-mount,
+  [data-sidebar-mount]
+) {
+  position: fixed;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+
+  inline-size: 0;
+  block-size: 0;
+
+  z-index: var(--z-sidebar, 40);
+
+  overflow: visible;
+  pointer-events: none;
+  isolation: isolate;
+}
+
+:where(
+  #sidebar-mount,
+  [data-sidebar-mount]
+) > * {
+  pointer-events: auto;
+}
+
+/* =========================================================
+   MAIN / TABLEHEAD SHARE THE SAME OFFSET
+========================================================= */
+
+.main-content,
+.table-head {
+  inset-inline-start: var(--chrome-sidebar-offset);
+}
+
+.main-content {
+  transition:
+    inset-inline-start
+    var(--chrome-motion-duration)
+    var(--chrome-motion-ease);
+}
+
+.table-head {
+  transition:
+    inset-inline-start
+    var(--chrome-motion-duration)
+    var(--chrome-motion-ease),
+    border-color var(--duration-normal) var(--ease-standard),
+    background-color var(--duration-normal) var(--ease-standard);
+}
+
+/* =========================================================
+   MOBILE-ONLY CHROME NODES
+========================================================= */
+
+:where(
+  .topbar-menu-toggle,
+  [data-topbar-menu-toggle="true"],
+  .app-chrome-backdrop,
+  [data-app-chrome-backdrop="true"]
+) {
+  display: none;
+}
+
+/* =========================================================
+   MOBILE · ONE PIECE, ZERO SIDEBAR FOOTPRINT
+========================================================= */
+
+@media (max-width: 900px) {
+  :root {
+    --chrome-mobile-trigger-size: 44px;
+    --chrome-mobile-trigger-edge: 10px;
+    --chrome-mobile-trigger-gap: 10px;
+
+    --chrome-mobile-leading-space:
+      calc(
+        var(--chrome-mobile-trigger-size) +
+        var(--chrome-mobile-trigger-edge) +
+        var(--chrome-mobile-trigger-gap)
+      );
+
+    --chrome-mobile-drawer-width:
+      min(
+        clamp(282px, 82vw, 322px),
+        calc(100vw - 54px)
+      );
+  }
+
+  body,
+  body:is(
+    .sidebar-open,
+    .sidebar-collapsed,
+    [data-sidebar-state="open"],
+    [data-sidebar-state="collapsed"],
+    [data-sidebar-open="true"],
+    [data-sidebar-open="false"]
+  ) {
+    --chrome-sidebar-offset: 0px;
+    --app-sidebar-current-width: 0px;
+    --layout-main-inset-left: 0px;
+    --topbar-effective-sidebar-offset: 0px;
+  }
+
+  /*
+    CLAVE: en móvil el Topbar jamás anima su posición al cambiar el estado
+    del Sidebar. El Sidebar es overlay; por tanto el Topbar no tiene nada
+    que recalcular ni "pegarse" después del cierre.
+  */
+  :where(
+    #topbar-mount,
+    [data-topbar-mount]
+  ) {
+    inset-inline-start: 0;
+    z-index: var(--chrome-z-topbar);
+    transition: none;
+  }
+
+  .main-content,
+  .table-head {
+    inset-inline-start: 0;
+  }
+
+  .main-content {
+    transition: none;
+  }
+
+  .table-head {
+    transition:
+      border-color var(--duration-normal) var(--ease-standard),
+      background-color var(--duration-normal) var(--ease-standard);
+  }
+
+  /* =======================================================
+     TOPBAR · TRIGGER INSIDE THE BAR, NOT BESIDE IT
+  ======================================================= */
+
+  :where(
+    .topbar,
+    .app-topbar,
+    [data-topbar-root="true"]
+  ) {
+    padding-inline-start:
+      calc(
+        var(--topbar-safe-left-local, env(safe-area-inset-left, 0px)) +
+        var(--chrome-mobile-leading-space)
+      );
+  }
+
+  :where(
+    .topbar-menu-toggle,
+    [data-topbar-menu-toggle="true"]
+  ):not([hidden]) {
+    appearance: none;
+    -webkit-appearance: none;
+
+    position: absolute;
+    inset-inline-start:
+      calc(
+        var(--topbar-safe-left-local, env(safe-area-inset-left, 0px)) +
+        var(--chrome-mobile-trigger-edge)
+      );
+    inset-block-start:
+      calc(
+        var(--topbar-safe-top-local, env(safe-area-inset-top, 0px)) +
+        (
+          var(--topbar-height-local, 58px) -
+          var(--chrome-mobile-trigger-size)
+        ) / 2
+      );
+
+    z-index: 5;
+
+    inline-size: var(--chrome-mobile-trigger-size);
+    min-inline-size: var(--chrome-mobile-trigger-size);
+    max-inline-size: var(--chrome-mobile-trigger-size);
+
+    block-size: var(--chrome-mobile-trigger-size);
+    min-block-size: var(--chrome-mobile-trigger-size);
+
+    display: grid;
+    place-items: center;
+
+    margin: 0;
+    padding: 0;
+
+    overflow: hidden;
+
+    border: 1px solid var(--topbar-local-search-border);
+    border-radius: var(--radius-md, 14px);
+
+    background:
+      linear-gradient(
+        180deg,
+        color-mix(
+          in srgb,
+          var(--topbar-local-text-strong) 7%,
+          transparent
+        ),
+        transparent 72%
+      ),
+      color-mix(
+        in srgb,
+        var(--topbar-local-search-bg) 92%,
+        transparent
+      );
+
+    color: var(--topbar-local-icon);
+
+    box-shadow:
+      inset 0 1px 0
+      color-mix(
+        in srgb,
+        var(--topbar-local-text-strong) 7%,
+        transparent
+      );
+
+    backdrop-filter: blur(14px) saturate(1.08);
+    -webkit-backdrop-filter: blur(14px) saturate(1.08);
+
+    cursor: pointer;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+
+    transition:
+      border-color .14s var(--chrome-motion-ease-fast),
+      background-color .14s var(--chrome-motion-ease-fast),
+      transform .14s var(--chrome-motion-ease-fast);
+  }
+
+  :where(
+    .topbar-menu-toggle,
+    [data-topbar-menu-toggle="true"]
+  ):not([hidden]):active {
+    transform: scale(.96);
+  }
+
+  :where(
+    .topbar-menu-toggle,
+    [data-topbar-menu-toggle="true"]
+  ):not([hidden]):focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+    box-shadow: var(--topbar-local-focus-ring);
+  }
+
+  .topbar-menu-toggle-icon {
+    position: relative;
+    inline-size: 20px;
+    block-size: 16px;
+    display: block;
+    pointer-events: none;
+  }
+
+  .topbar-menu-toggle-line {
+    position: absolute;
+    inset-inline-start: 1px;
+
+    inline-size: 18px;
+    block-size: 2px;
+
+    border-radius: var(--radius-pill, 999px);
+    background: currentColor;
+    transform-origin: center;
+
+    transition:
+      inset-block-start .18s var(--chrome-motion-ease-fast),
+      opacity .12s var(--chrome-motion-ease-fast),
+      transform .18s var(--chrome-motion-ease-fast);
+  }
+
+  .topbar-menu-toggle-line:nth-child(1) {
+    inset-block-start: 1px;
+  }
+
+  .topbar-menu-toggle-line:nth-child(2) {
+    inset-block-start: 7px;
+  }
+
+  .topbar-menu-toggle-line:nth-child(3) {
+    inset-block-start: 13px;
+  }
+
+  :where(
+    .topbar-menu-toggle,
+    [data-topbar-menu-toggle="true"]
+  )[aria-expanded="true"]
+  .topbar-menu-toggle-line:nth-child(1) {
+    inset-block-start: 7px;
+    transform: rotate(45deg);
+  }
+
+  :where(
+    .topbar-menu-toggle,
+    [data-topbar-menu-toggle="true"]
+  )[aria-expanded="true"]
+  .topbar-menu-toggle-line:nth-child(2) {
+    opacity: 0;
+    transform: scaleX(.25);
+  }
+
+  :where(
+    .topbar-menu-toggle,
+    [data-topbar-menu-toggle="true"]
+  )[aria-expanded="true"]
+  .topbar-menu-toggle-line:nth-child(3) {
+    inset-block-start: 7px;
+    transform: rotate(-45deg);
+  }
+
+  /* =======================================================
+     SEARCH PALETTE · ALWAYS VIEWPORT-BASED ON MOBILE
+  ======================================================= */
+
+  :where(
+    .topbar-search-results,
+    [data-topbar-search-results="true"]
+  ) {
+    inset-inline-start:
+      max(10px, env(safe-area-inset-left, 0px));
+    inset-inline-end:
+      max(10px, env(safe-area-inset-right, 0px));
+
+    inline-size: auto;
+    max-inline-size: none;
+  }
+
+  /* =======================================================
+     SIDEBAR · CONSTANT-WIDTH OFF-CANVAS DRAWER
+  ======================================================= */
+
+  .sidebar,
+  .sidebar:is(
+    .is-open,
+    .is-collapsed,
+    [data-open="true"],
+    [data-open="false"],
+    [data-sidebar-state="open"],
+    [data-sidebar-state="collapsed"]
+  ) {
+    --sb-current-w: var(--chrome-mobile-drawer-width);
+    --sb-pad-x: var(--sidebar-inline-padding, 8px);
+
+    inline-size: var(--chrome-mobile-drawer-width);
+    min-inline-size: var(--chrome-mobile-drawer-width);
+    max-inline-size: var(--chrome-mobile-drawer-width);
+
+    padding:
+      max(var(--sb-pad-y, 8px), env(safe-area-inset-top, 0px))
+      var(--sb-pad-x)
+      max(var(--sb-pad-y, 8px), env(safe-area-inset-bottom, 0px));
+
+    border-inline-end: 1px solid var(--sb-border);
+
+    background:
+      linear-gradient(
+        180deg,
+        color-mix(
+          in srgb,
+          var(--sb-text-strong) 3%,
+          transparent
+        ),
+        transparent 40%
+      ),
+      color-mix(
+        in srgb,
+        var(--sb-bg) 96%,
+        transparent
+      );
+
+    box-shadow:
+      var(--sb-drawer-shadow),
+      inset -1px 0 0
+      color-mix(
+        in srgb,
+        var(--sb-text) 4%,
+        transparent
+      );
+
+    backdrop-filter: blur(24px) saturate(1.12);
+    -webkit-backdrop-filter: blur(24px) saturate(1.12);
+
+    transform: translateX(calc(-100% - 18px));
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+
+    transition:
+      transform .30s var(--chrome-motion-ease),
+      opacity .18s var(--chrome-motion-ease-fast),
+      visibility 0s linear .30s;
+  }
+
+  :where(
+    #sidebar-mount,
+    [data-sidebar-mount]
+  ) {
+    z-index: var(--chrome-z-drawer);
+  }
+
+  .sidebar:is(
+    .is-open,
+    [data-open="true"],
+    [data-sidebar-state="open"]
+  ) {
+    transform: translateX(0);
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+
+    transition:
+      transform .30s var(--chrome-motion-ease),
+      opacity .18s var(--chrome-motion-ease-fast),
+      visibility 0s linear 0s;
+  }
+
+  .sidebar:is(
+    .is-open,
+    [data-open="true"],
+    [data-sidebar-state="open"]
+  ) .sidebar-inner {
+    align-items: stretch;
+  }
+
+  .sidebar:is(
+    .is-open,
+    [data-open="true"],
+    [data-sidebar-state="open"]
+  ) .sidebar-header {
+    inline-size: 100%;
+    justify-content: flex-start;
+  }
+
+  /* En móvil sólo existe el trigger del Topbar. */
+  .sidebar .sidebar-toggle {
+    display: none;
+  }
+
+  /* =======================================================
+     BACKDROP · REAL GLASS SURFACE
+  ======================================================= */
+
+  :where(
+    .app-chrome-backdrop,
+    [data-app-chrome-backdrop="true"]
+  ) {
+    position: fixed;
+    inset: 0;
+
+    z-index: var(--chrome-z-backdrop);
+
+    display: block;
+
+    inline-size: 100%;
+    block-size: 100vh;
+    block-size: 100svh;
+    block-size: 100dvh;
+
+    border: 0;
+
+    background:
+      linear-gradient(
+        180deg,
+        color-mix(
+          in srgb,
+          var(--body-bg) 38%,
+          transparent
+        ),
+        color-mix(
+          in srgb,
+          var(--body-bg) 58%,
+          transparent
+        )
+      );
+
+    backdrop-filter: blur(16px) saturate(.90);
+    -webkit-backdrop-filter: blur(16px) saturate(.90);
+
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+
+    touch-action: none;
+    overscroll-behavior: none;
+
+    transition:
+      opacity .22s var(--chrome-motion-ease-fast),
+      visibility 0s linear .22s;
+  }
+
+  :is(
+    html,
+    body
+  )[data-app-chrome-navigation="open"]
+  :where(
+    .app-chrome-backdrop,
+    [data-app-chrome-backdrop="true"]
+  ) {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+
+    transition:
+      opacity .22s var(--chrome-motion-ease-fast),
+      visibility 0s linear 0s;
+  }
+
+  :is(
+    html,
+    body
+  )[data-app-chrome-navigation="open"]
+  .main-content {
+    overflow-y: hidden;
+    overscroll-behavior: none;
+  }
+}
+
+/* =========================================================
+   COMPACT MOBILE
+========================================================= */
+
+@media (max-width: 640px) {
+  :root {
+    --chrome-mobile-trigger-edge: 8px;
+    --chrome-mobile-trigger-gap: 8px;
+    --chrome-mobile-drawer-width:
+      min(
+        clamp(276px, 84vw, 312px),
+        calc(100vw - 50px)
+      );
+  }
+}
+
+@media (max-width: 420px) {
+  :root {
+    --chrome-mobile-trigger-size: 42px;
+    --chrome-mobile-trigger-edge: 7px;
+    --chrome-mobile-trigger-gap: 7px;
+    --chrome-mobile-drawer-width:
+      min(
+        clamp(270px, 84vw, 304px),
+        calc(100vw - 46px)
+      );
+  }
+}
+
+/* =========================================================
+   ACCESSIBILITY
+========================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  :where(
+    #topbar-mount,
+    [data-topbar-mount],
+    .main-content,
+    .table-head,
+    .sidebar,
+    .app-chrome-backdrop,
+    [data-app-chrome-backdrop="true"],
+    .topbar-menu-toggle-line
+  ) {
+    transition: none;
+    animation: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) and (max-width: 900px) {
+  .sidebar,
+  :where(
+    .app-chrome-backdrop,
+    [data-app-chrome-backdrop="true"]
+  ) {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (forced-colors: active) and (max-width: 900px) {
+  :where(
+    .topbar-menu-toggle,
+    [data-topbar-menu-toggle="true"]
+  ):not([hidden]) {
+    border-color: ButtonText;
+    background: ButtonFace;
+    color: ButtonText;
+    forced-color-adjust: auto;
+  }
+
+  :where(
+    .app-chrome-backdrop,
+    [data-app-chrome-backdrop="true"]
+  ) {
+    background: Canvas;
+    opacity: .72;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    forced-color-adjust: auto;
+  }
+}
+
+@media print {
+  :where(
+    #app-chrome,
+    [data-app-chrome="true"],
+    #sidebar-mount,
+    [data-sidebar-mount],
+    #topbar-mount,
+    [data-topbar-mount]
+  ) {
+    display: none;
+  }
+
+  .main-content,
+  .table-head {
+    inset-inline-start: 0;
+  }
+}

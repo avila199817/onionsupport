@@ -48,12 +48,17 @@
 
 /* =========================================================
    PRIVATE APP CHROME
+
+   Sidebar/Topbar pintan sus componentes internos.
+   chrome.css se carga el último dentro de layer(layout) y es la ÚNICA
+   autoridad geométrica: offsets, mounts, drawer, backdrop y transición
+   desktop/mobile. chrome.css NO puede autodeclarar otro @layer interno.
 ========================================================= */
 
 @import url("./layout/sidebar.css") layer(layout);
 @import url("./layout/correo-sidebar.css") layer(layout);
 @import url("./layout/topbar.css") layer(layout);
-@import url("./layout/mobile-shell.css") layer(layout);
+@import url("./layout/chrome.css") layer(layout);
 
 /* =========================================================
    GLOBAL COMPONENTS

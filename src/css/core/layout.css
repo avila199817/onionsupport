@@ -6,7 +6,7 @@
 
    Responsabilidad:
    - Contrato geométrico del shell.
-   - Offset de Sidebar para main/tablehead.
+   - Consumir el offset canónico publicado por App Chrome.
    - Main como scroll container real.
    - Tablehead fijo con offset dinámico.
    - Capas de mounts sin duplicar el CSS visual de Sidebar/Topbar.
@@ -155,39 +155,6 @@ body {
 
 
 /* =========================================================
-   SIDEBAR WIDTH AUTHORITY
-   SidebarUI v3 sincroniza body/html.
-   No hace falta inspeccionar el DOM con :has().
-========================================================= */
-
-body:is(
-  .sidebar-open,
-  [data-sidebar-state="open"],
-  [data-sidebar-open="true"]
-) {
-  --app-sidebar-current-width:
-    var(--sidebar-width, 260px);
-}
-
-body:is(
-  .sidebar-collapsed,
-  [data-sidebar-state="collapsed"],
-  [data-sidebar-open="false"]
-) {
-  --app-sidebar-current-width:
-    var(--sidebar-collapsed, 72px);
-}
-
-body:is(
-  .sidebar-hidden,
-  [data-sidebar-state="hidden"],
-  [data-sidebar-hidden="true"]
-) {
-  --app-sidebar-current-width: 0px;
-}
-
-
-/* =========================================================
    APP SHELL
 ========================================================= */
 
@@ -309,62 +276,6 @@ body:is(
   )
 ) {
   position: relative;
-}
-
-
-/* =========================================================
-   MOUNT LAYERS
-   La geometría visual final pertenece a sidebar.css/topbar.css.
-========================================================= */
-
-:where(
-  #sidebar-mount,
-  [data-sidebar-mount]
-) {
-  position: fixed;
-
-  inset-block-start: 0;
-  inset-inline-start: 0;
-
-  inline-size: 0;
-  block-size: 0;
-
-  z-index:
-    var(--layout-sidebar-mount-z);
-
-  overflow: visible;
-
-  pointer-events: none;
-  isolation: isolate;
-}
-
-:where(
-  #topbar-mount,
-  [data-topbar-mount]
-) {
-  z-index:
-    var(--layout-topbar-mount-z);
-
-  pointer-events: none;
-}
-
-:where(
-  #sidebar-mount,
-  [data-sidebar-mount],
-  #topbar-mount,
-  [data-topbar-mount]
-)
-> * {
-  pointer-events: auto;
-}
-
-:where(
-  #sidebar-mount,
-  [data-sidebar-mount],
-  #topbar-mount,
-  [data-topbar-mount]
-)[hidden] {
-  display: none !important;
 }
 
 

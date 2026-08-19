@@ -192,6 +192,42 @@ def validate_private_route_contract(errors: list[str]) -> None:
             )
 
 
+def validate_api_transport_contract(errors: list[str]) -> None:
+    """Keep same-origin /api traffic and direct /health traffic explicit.
+
+    Azure Static Web Apps proxies the linked backend only under /api. Root-level
+    /health endpoints otherwise fall through to the SPA and return index.html.
+    """
+
+    config_text = (SRC / "core" / "config.js").read_text(encoding="utf-8")
+    http_text = (SRC / "core" / "http.js").read_text(encoding="utf-8")
+
+    required_config = (
+        'CANONICAL_PRODUCTION_API_BASE = "https://www.onionsupport.com"',
+        'CANONICAL_DIRECT_BACKEND_API_BASE = "https://api.onionit.net"',
+        'DIRECT_BACKEND_API_PREFIXES = Object.freeze([',
+        '"/health"',
+    )
+
+    for snippet in required_config:
+        if snippet not in config_text:
+            errors.append(
+                f"src/core/config.js :: falta contrato de transporte API: {snippet}"
+            )
+
+    required_http = (
+        "CANONICAL_DIRECT_BACKEND_API_BASE",
+        "DIRECT_BACKEND_API_PREFIXES",
+        "shouldUseDirectBackendOrigin",
+    )
+
+    for snippet in required_http:
+        if snippet not in http_text:
+            errors.append(
+                f"src/core/http.js :: falta routing directo de health: {snippet}"
+            )
+
+
 def validate_css_references(errors: list[str]) -> None:
     for css_file in sorted((SRC / "css").rglob("*.css")):
         text = css_file.read_text(encoding="utf-8")
@@ -235,6 +271,7 @@ def main() -> int:
     validate_js_references(errors)
     validate_first_helpers(errors)
     validate_private_route_contract(errors)
+    validate_api_transport_contract(errors)
     validate_css_references(errors)
     validate_known_dead_paths(errors)
 

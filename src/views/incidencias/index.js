@@ -33,6 +33,7 @@ import {
   listIncidencias,
   hydrateIncidenciasFromCache,
   createIncidencia,
+  updateIncidencia,
   loadIncidenciaDetail,
   commentIncidencia,
   reopenIncidencia,
@@ -66,8 +67,14 @@ import {
   getDetailTemplateSnapshot,
 } from "./incidencias.template.modal.js";
 
+import {
+  normalizeIncidenciaStatus,
+  normalizeIncidenciaPriority,
+  normalizeIncidenciaCategory,
+} from "./incidencias.options.js";
+
 export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.extreme.v30.attachments-sort";
+  "incidencias.index.extreme.v31.admin-ticket-editor";
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
@@ -1222,6 +1229,7 @@ function createIncidenciasController(
 
     commentDraft: "",
     pendingFiles: [],
+    adminDraft: null,
 
     feedbackMessage: "",
     feedbackType: "info",
@@ -2768,6 +2776,7 @@ function createIncidenciasController(
           "[data-modal-header-actions='true']",
           "[data-modal-updated='true']",
           ".incidencias-modal-meta-grid",
+          ".incidencias-modal-admin-editor",
           ".incidencias-modal-description-section",
           ".incidencias-modal-contact-section",
           "[data-modal-files-slot='true']",
@@ -3924,6 +3933,7 @@ function createIncidenciasController(
 
     detailModal.commentDraft = "";
     detailModal.pendingFiles = [];
+    detailModal.adminDraft = null;
 
     detailModal.feedbackMessage = "";
     detailModal.feedbackType = "info";
@@ -4597,6 +4607,152 @@ function createIncidenciasController(
 
   function toggleDetailHistory() {
     return openDetailHistory();
+  }
+
+  function getCurrentAdminClassification() {
+    const detail = safeObject(detailModal.detail, {});
+
+    return {
+      status: normalizeIncidenciaStatus(
+        first(detail.status, detail.estado, detail.statusKey, detail.lifecycle?.status, "open"),
+        "open"
+      ),
+      priority: normalizeIncidenciaPriority(
+        first(detail.priority, detail.prioridad, detail.severity, "medium"),
+        "medium"
+      ),
+      category: normalizeIncidenciaCategory(
+        first(detail.category, detail.categoria, detail.tipo, detail.type, "general"),
+        "general"
+      ),
+    };
+  }
+
+  function readAdminTicketEditor(formNode = null) {
+    if (!formNode) return null;
+
+    const status = normalizeIncidenciaStatus(readField(formNode, "status"), "");
+    const priority = normalizeIncidenciaPriority(readField(formNode, "priority"), "");
+    const category = normalizeIncidenciaCategory(readField(formNode, "category"), "");
+
+    return status && priority && category
+      ? { status, priority, category }
+      : null;
+  }
+
+  async function saveAdminTicketChanges(formNode = null) {
+    if (!detailModal.open || detailModal.submitting) return false;
+
+    if (!isAdmin()) {
+      detailModal.feedbackMessage = "Solo un administrador puede modificar la clasificación de una incidencia.";
+      detailModal.feedbackType = "error";
+      renderModals({ immediate: true });
+      return false;
+    }
+
+    const ticketId = getTicketId(detailModal.detail);
+    const desired = readAdminTicketEditor(formNode);
+
+    if (!ticketId || !desired) {
+      detailModal.feedbackMessage = "No se pudieron leer los cambios administrativos del ticket.";
+      detailModal.feedbackType = "error";
+      renderModals({ immediate: true });
+      return false;
+    }
+
+    const current = getCurrentAdminClassification();
+    const statusChanged = desired.status !== current.status;
+    const priorityChanged = desired.priority !== current.priority;
+    const categoryChanged = desired.category !== current.category;
+
+    if (!statusChanged && !priorityChanged && !categoryChanged) {
+      detailModal.feedbackMessage = "No hay cambios administrativos pendientes.";
+      detailModal.feedbackType = "info";
+      renderModals({ immediate: true, focusSelector: ".incidencias-modal-admin-save-btn" });
+      return true;
+    }
+
+    detailModal.adminDraft = { ...desired };
+    detailModal.submitting = true;
+    detailModal.operation = "admin-update";
+    detailModal.closeConfirmOpen = false;
+    detailModal.feedbackMessage = "";
+    detailModal.feedbackType = "info";
+    renderModals({ immediate: true });
+
+    let nextDetail = detailModal.detail;
+    let reopened = false;
+
+    try {
+      if (current.status === "closed" && desired.status !== "closed") {
+        const reopenResult = await reopenIncidencia(ticketId);
+        if (!reopenResult) {
+throw new Error("El backend no confirmó la reapertura de la incidencia.");
+        }
+        nextDetail = mergeTicketData(nextDetail || {}, reopenResult);
+        reopened = true;
+      }
+
+      const changes = {};
+
+      if (priorityChanged) {
+        changes.priority = desired.priority;
+        changes.prioridad = desired.priority;
+      }
+
+      if (categoryChanged) {
+        changes.category = desired.category;
+        changes.categoria = desired.category;
+        changes.tipo = desired.category;
+        changes.type = desired.category;
+      }
+
+      const effectiveStatus = reopened ? "open" : current.status;
+      if (desired.status !== effectiveStatus) {
+        changes.status = desired.status;
+        changes.estado = desired.status;
+      }
+
+      if (Object.keys(changes).length) {
+        let updated = await updateIncidencia(ticketId, changes);
+        if (!updated) {
+updated = await loadIncidenciaDetail(ticketId, { force: true, cache: false });
+        }
+        if (!updated) {
+throw new Error("El backend no devolvió la incidencia actualizada.");
+        }
+        nextDetail = mergeTicketData(nextDetail || {}, updated);
+      }
+
+      detailModal.detail = nextDetail;
+      detailModal.adminDraft = null;
+      detailModal.submitting = false;
+      detailModal.operation = "";
+      detailModal.feedbackMessage = "Estado, prioridad y tipo actualizados correctamente.";
+      detailModal.feedbackType = "success";
+
+      items = upsertByTicketId(items, nextDetail);
+      render({ skipModals: true });
+      renderModals({ immediate: true, focusSelector: ".incidencias-modal-admin-save-btn" });
+      return true;
+    } catch (adminUpdateError) {
+      detailModal.detail = nextDetail;
+      detailModal.submitting = false;
+      detailModal.operation = "";
+      items = upsertByTicketId(items, nextDetail);
+
+      detailModal.feedbackMessage = safeError(
+        adminUpdateError,
+        reopened
+? "La incidencia se reabrió, pero no se pudieron guardar el resto de cambios."
+: "No se pudieron guardar los cambios administrativos."
+      );
+      detailModal.feedbackType = "error";
+
+      render({ skipModals: true });
+      renderModals({ immediate: true, focusSelector: ".incidencias-modal-admin-save-btn" });
+      return false;
+    }
   }
 
   function ticketIsAlreadyClosed() {
@@ -5557,6 +5713,16 @@ Se quitará de la incidencia y del almacenamiento. Esta acción no se puede desh
       DETAIL_ACTIONS.COMMENT_SUBMIT
     ) {
       return submitDetailUpdate();
+    }
+
+    if (
+      type ===
+      DETAIL_ACTIONS.ADMIN_SAVE
+    ) {
+      return saveAdminTicketChanges(
+        node?.closest?.("[data-admin-ticket-editor='true']") ||
+        node?.closest?.("form")
+      );
     }
 
     if (

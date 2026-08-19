@@ -28,12 +28,22 @@
      La SAS debe venir ya validada desde incidencias.api.js.
 ========================================================= */
 
+import {
+  INCIDENCIA_STATUS_OPTIONS,
+  INCIDENCIA_PRIORITY_OPTIONS,
+  INCIDENCIA_CATEGORY_OPTIONS,
+  normalizeIncidenciaStatus,
+  normalizeIncidenciaPriority,
+  normalizeIncidenciaCategory,
+} from "./incidencias.options.js";
+
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.extreme.v29.user-contact-privacy";
+  "incidencias.template.modal.extreme.v30.admin-ticket-editor";
 
 export const DETAIL_ACTIONS = Object.freeze({
   CLOSE: "detail-close",
   COPY_ID: "detail-copy-id",
+  ADMIN_SAVE: "detail-admin-save",
 
   COMMENT_SUBMIT: "detail-submit-update",
   COMMENT_CHANGE: "detail-comment-change",
@@ -3838,6 +3848,78 @@ function renderAttachmentPreview(
    CONTENT
 ========================================================= */
 
+function renderAdminSelect({
+  label = "",
+  name = "",
+  value = "",
+  options = [],
+  disabled = false,
+} = {}) {
+  return `
+    <label class="incidencias-modal-admin-field">
+      <span class="incidencias-modal-admin-label">${escapeHtml(label)}</span>
+      <span class="incidencias-modal-admin-select-wrap">
+        <select
+class="incidencias-modal-admin-select"
+name="${attr(name)}"
+data-detail-field="${attr(name)}"
+${disabledAttrs(disabled, false)}
+        >
+${safeArray(options).map((item) => `
+  <option value="${attr(item.value)}"${item.value === value ? " selected" : ""}>${escapeHtml(item.label)}</option>
+`).join("")}
+        </select>
+        <span class="incidencias-modal-admin-select-chevron" aria-hidden="true">⌄</span>
+      </span>
+    </label>
+  `;
+}
+
+function renderAdminTicketEditor(vm = {}) {
+  if (!vm.admin) return "";
+
+  const detail = safeObject(vm.detail);
+  const draft = safeObject(vm.adminDraft);
+  const status = normalizeIncidenciaStatus(draft.status || vm.status, "open");
+  const priority = normalizeIncidenciaPriority(draft.priority || getPriority(detail), "medium");
+  const category = normalizeIncidenciaCategory(draft.category || getCategory(detail), "general");
+
+  return `
+    <section
+      class="incidencias-modal-admin-editor"
+      data-admin-ticket-editor-section="true"
+      aria-labelledby="incidencias-modal-admin-editor-title"
+    >
+      <div class="incidencias-modal-section-head incidencias-modal-admin-head">
+        <div>
+<h3 id="incidencias-modal-admin-editor-title">Gestión del ticket</h3>
+<span>Estado, prioridad y tipo de incidencia</span>
+        </div>
+        <span class="incidencias-modal-admin-badge">Administrador</span>
+      </div>
+
+      <form class="incidencias-modal-admin-form" data-admin-ticket-editor="true" autocomplete="off">
+        <div class="incidencias-modal-admin-grid">
+${renderAdminSelect({ label: "Estado", name: "status", value: status, options: INCIDENCIA_STATUS_OPTIONS, disabled: vm.submitting })}
+${renderAdminSelect({ label: "Prioridad", name: "priority", value: priority, options: INCIDENCIA_PRIORITY_OPTIONS, disabled: vm.submitting })}
+${renderAdminSelect({ label: "Tipo de incidencia", name: "category", value: category, options: INCIDENCIA_CATEGORY_OPTIONS, disabled: vm.submitting })}
+        </div>
+
+        <button
+type="button"
+class="incidencias-modal-admin-save-btn"
+data-detail-action="${DETAIL_ACTIONS.ADMIN_SAVE}"
+${disabledAttrs(vm.submitting, vm.submitting)}
+        >
+${vm.submitting && vm.operation === "admin-update"
+  ? renderInlineSpinner("Guardando...")
+  : "Guardar cambios"}
+        </button>
+      </form>
+    </section>
+  `;
+}
+
 function renderDescription(
   detail = {}
 ) {
@@ -4146,6 +4228,8 @@ function renderTicketBody(
         )
       )}
     </div>
+
+    ${renderAdminTicketEditor(vm)}
 
     ${renderDescription(detail)}
 
@@ -4470,6 +4554,12 @@ export function getDetailTemplateSnapshot() {
     fields: [
       "comment",
       "attachments",
+    ],
+
+    adminFields: [
+      "status",
+      "priority",
+      "category",
     ],
 
     limits: {

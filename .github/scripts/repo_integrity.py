@@ -50,6 +50,16 @@ PRIVATE_ROUTE_SLUGS = (
     "ajustes",
 )
 
+PRIVATE_UI_INDEX_FILES = (
+    SRC / "css" / "views" / "home" / "index.css",
+    SRC / "css" / "views" / "incidencias" / "index.css",
+    SRC / "css" / "views" / "facturas" / "index.css",
+    SRC / "css" / "views" / "clientes" / "index.css",
+    SRC / "css" / "views" / "usuarios" / "index.css",
+    SRC / "css" / "views" / "servidor" / "index.css",
+    SRC / "css" / "views" / "cuenta" / "index.css",
+)
+
 
 def clean_spec(value: str) -> str:
     return (value or "").strip()
@@ -238,6 +248,107 @@ def validate_css_references(errors: list[str]) -> None:
                 record_missing(errors, css_file, spec, "@import")
 
 
+def validate_ui_foundation_contract(errors: list[str]) -> None:
+    """Keep private SPA geometry governed by one final, non-view-specific layer.
+
+    The route sheets remain free to paint their own domain UI, but they must not
+    be able to remove the shrink/overflow/scroll/mobile invariants that keep the
+    application stable with long content and compact viewports.
+    """
+
+    app_path = SRC / "css" / "app.css"
+    guardrails_path = SRC / "css" / "core" / "guardrails.css"
+
+    try:
+        app_text = app_path.read_text(encoding="utf-8")
+    except OSError as error:
+        errors.append(f"src/css/app.css :: ilegible: {error}")
+        return
+
+    required_app = (
+        "@layer tokens, reset, core, layout, components, views, auth, guardrails;",
+        '@import url("./core/guardrails.css") layer(guardrails);',
+    )
+    for snippet in required_app:
+        if snippet not in app_text:
+            errors.append(f"src/css/app.css :: falta UI Foundation: {snippet}")
+
+    import_specs = [clean_spec(match.group(1)) for match in CSS_IMPORT_PATTERN.finditer(app_text)]
+    duplicates = sorted({spec for spec in import_specs if import_specs.count(spec) > 1})
+    for spec in duplicates:
+        errors.append(f"src/css/app.css :: @import duplicado: {spec}")
+
+    if re.search(r"@import[^;]*(?:patch|hotfix)[^;]*;", app_text, re.IGNORECASE):
+        errors.append("src/css/app.css :: prohibido importar micro-parches/hotfix CSS")
+
+    if not guardrails_path.is_file():
+        errors.append("src/css/core/guardrails.css :: falta contrato final de layout")
+        return
+
+    guardrails_text = guardrails_path.read_text(encoding="utf-8")
+    required_guardrails = (
+        ".panel-content[data-view]",
+        "min-inline-size: 0;",
+        ".main-content",
+        ".incidencias-table-shell",
+        ".facturas-table-shell",
+        ".clientes-table-shell",
+        ".usuarios-table-shell",
+        "overflow-x: auto;",
+        "@media (max-width: 900px)",
+        "@media (max-width: 560px)",
+        "@media (max-width: 480px)",
+        'dialog,',
+        '[role="dialog"]',
+        "100dvh",
+        "var(--app-safe-left)",
+    )
+    for snippet in required_guardrails:
+        if snippet not in guardrails_text:
+            errors.append(
+                f"src/css/core/guardrails.css :: falta invariante obligatoria: {snippet}"
+            )
+
+    if re.search(r"#[0-9a-fA-F]{3,8}\b", guardrails_text):
+        errors.append(
+            "src/css/core/guardrails.css :: guardrails no puede definir colores/paleta"
+        )
+
+    if re.search(r"\[data-theme\s*=", guardrails_text):
+        errors.append(
+            "src/css/core/guardrails.css :: guardrails no puede contener lógica de tema"
+        )
+
+    for css_path in PRIVATE_UI_INDEX_FILES:
+        if not css_path.is_file():
+            errors.append(f"{css_path.relative_to(ROOT)} :: falta stylesheet privado canónico")
+            continue
+
+        text = css_path.read_text(encoding="utf-8")
+        if "@layer views" not in text:
+            errors.append(
+                f"{css_path.relative_to(ROOT)} :: stylesheet privado debe vivir en @layer views"
+            )
+
+        if re.search(r"(?:^|[;{\s])(?:inline-size|width)\s*:\s*100vw\s*;", text, re.IGNORECASE):
+            errors.append(
+                f"{css_path.relative_to(ROOT)} :: 100vw directo prohibido en root/layout privado"
+            )
+
+    forbidden_architecture_names = re.compile(r"(?:patch|hotfix|quickfix)", re.IGNORECASE)
+    architecture_roots = (
+        SRC / "css" / "core",
+        SRC / "css" / "layout",
+        SRC / "css" / "components",
+    )
+    for root in architecture_roots:
+        for css_path in root.rglob("*.css"):
+            if forbidden_architecture_names.search(css_path.name):
+                errors.append(
+                    f"{css_path.relative_to(ROOT)} :: micro-parche prohibido en arquitectura CSS"
+                )
+
+
 def validate_paths(errors: list[str]) -> None:
     for root in (SRC, ROOT / ".github"):
         if not root.exists():
@@ -273,6 +384,7 @@ def main() -> int:
     validate_private_route_contract(errors)
     validate_api_transport_contract(errors)
     validate_css_references(errors)
+    validate_ui_foundation_contract(errors)
     validate_known_dead_paths(errors)
 
     unique_errors = list(dict.fromkeys(errors))

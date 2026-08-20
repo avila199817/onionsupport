@@ -11,6 +11,7 @@
    - Sin Auth / Router / HTTP / Toast / Store / navegación real.
 ========================================================= */
 
+import { AppCore } from "../../core/index.js";
 import {
   ROUTES,
   USER_HOME_PREFIX,
@@ -23,7 +24,7 @@ import {
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 
 export const SIDEBAR_TEMPLATE_VERSION =
-  "sidebar.template.unified.v5-runtime-media-policy";
+  "sidebar.template.unified.v6-core-role-authority";
 
 const SIDEBAR_ROOT_ID = "app-sidebar";
 const BRAND_LABEL = "Onion Support";
@@ -390,7 +391,15 @@ function normalizeRoleList(value = []) {
     ? value.flat(Infinity)
     : text(value).split(/[,\s|;]+/);
 
-  return [...new Set(raw.map(normalizeRole).filter(Boolean))];
+  return [
+    ...new Set(
+      raw
+        .map((role) =>
+          AppCore.normalizeRole(role)
+        )
+        .filter(Boolean)
+    ),
+  ];
 }
 
 function isAdminUser(user = {}) {

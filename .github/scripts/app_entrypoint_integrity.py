@@ -32,6 +32,7 @@ RUNTIME_FILES = {
     "public_progress": ROOT / "src/features/public-support-progress/index.js",
     "chrome": ROOT / "src/ui/chrome/index.js",
     "preboot": ROOT / "src/preboot/theme.js",
+    "route_styles": ROOT / "src/router/styles.js",
 }
 
 
@@ -69,6 +70,7 @@ def validate_runtime_boundaries(errors: list[str], runtime: dict[str, str]) -> N
     progress = runtime["public_progress"]
     chrome = runtime["chrome"]
     preboot = runtime["preboot"]
+    route_styles = runtime["route_styles"]
 
     require(
         errors,
@@ -99,6 +101,16 @@ def validate_runtime_boundaries(errors: list[str], runtime: dict[str, str]) -> N
         and "observer.observe(document.body" not in preview
         and 'observerScope: "router-view"' in preview,
         "incidencias-media-preview debe limitar listeners/observer al Router view",
+    )
+
+    require(
+        errors,
+        '"/src/css/views/incidencias/media-preview.css"' in route_styles
+        and "STYLE_HREF" not in preview
+        and "ensureCss" not in preview
+        and 'document.createElement("link")' not in preview
+        and 'cssAuthority: "router-styles"' in preview,
+        "Incidencias media preview debe recibir CSS exclusivamente del manifest de ruta",
     )
 
     require(
@@ -243,6 +255,7 @@ def main() -> int:
     print(f"- registry global: {len(CANONICAL_MODULES)} módulos")
     print("- post-router: progresivo/no bloqueante")
     print("- observers/listeners globales y compatibilidad retirada: protegidos")
+    print("- CSS privado progresivo: propiedad del manifest de ruta")
     return 0
 
 

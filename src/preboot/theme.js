@@ -1,759 +1,472 @@
 /* =========================================================
-   Onion Support - Preboot Theme
+   Onion Support - Preboot Preferences
    Archivo: /src/preboot/theme.js
 
+   PRODUCTIVO · THEME + ACCENT + LOCALE · V4
+
    Responsabilidad:
-   - Aplicar el tema efectivo inicial según el sistema.
-   - Mantener themeMode="system" separado de theme="light|dark".
-   - Mantener el tema vivo si cambia prefers-color-scheme.
-   - Fijar idioma base inicial: es.
-   - Eliminar no-js lo antes posible.
-   - Evitar escrituras DOM redundantes.
-   - Sin imports, storage, API, Auth, Router, HTTP ni i18n.
+   - Aplicar el tema efectivo antes del boot de la SPA.
+   - Persistir themeMode, color de acento e idioma de interfaz.
+   - Mantener themeMode="system" vivo ante cambios del SO.
+   - Exponer un bridge mínimo window.OnionPreferences para Cuenta.
+   - Evitar flashes y escrituras DOM redundantes.
+   - Sin imports, API, Auth, Router ni HTTP.
 ========================================================= */
 
 (() => {
   "use strict";
 
-  const PREBOOT_VERSION =
-    "preboot.theme.v3-hardened";
+  const PREBOOT_VERSION = "preboot.preferences.v4-theme-accent-locale";
+  const DARK_QUERY = "(prefers-color-scheme: dark)";
 
-  const BASE_LOCALE = "es";
-  const BASE_LANG = "es";
-  const BASE_DIR = "ltr";
+  const STORAGE_KEYS = Object.freeze({
+    themeMode: "onion.ui.themeMode",
+    accent: "onion.ui.accent",
+    locale: "onion.ui.locale",
+  });
 
-  const DARK_QUERY =
-    "(prefers-color-scheme: dark)";
+  const THEME_MODES = Object.freeze(["system", "light", "dark"]);
+  const LOCALES = Object.freeze(["es", "ca", "en"]);
+  const ACCENTS = Object.freeze(["graphite", "blue", "violet", "emerald", "rose"]);
 
-  const THEME_LIGHT = "light";
-  const THEME_DARK = "dark";
-  const THEME_MODE = "system";
-  const THEME_SOURCE = "system";
+  const ACCENT_PALETTES = Object.freeze({
+    graphite: null,
+    blue: Object.freeze({
+      accent: "#3b82f6",
+      hover: "#60a5fa",
+      active: "#2563eb",
+      rgb: "59, 130, 246",
+    }),
+    violet: Object.freeze({
+      accent: "#8b5cf6",
+      hover: "#a78bfa",
+      active: "#7c3aed",
+      rgb: "139, 92, 246",
+    }),
+    emerald: Object.freeze({
+      accent: "#10b981",
+      hover: "#34d399",
+      active: "#059669",
+      rgb: "16, 185, 129",
+    }),
+    rose: Object.freeze({
+      accent: "#f43f5e",
+      hover: "#fb7185",
+      active: "#e11d48",
+      rgb: "244, 63, 94",
+    }),
+  });
 
-  const THEME_COLORS =
-    Object.freeze({
-      light: "#ffffff",
-      dark: "#0a0c11",
-    });
+  const THEME_COLORS = Object.freeze({
+    light: "#ffffff",
+    dark: "#0a0c11",
+  });
+
+  const DEFAULTS = Object.freeze({
+    themeMode: "system",
+    accent: "graphite",
+    locale: "es",
+  });
+
+  const ACCENT_STYLE_KEYS = Object.freeze([
+    "--accent",
+    "--accent-hover",
+    "--accent-active",
+    "--accent-2",
+    "--accent-3",
+    "--accent-4",
+    "--accent-5",
+    "--accent-soft",
+    "--accent-soft-2",
+    "--accent-ghost",
+    "--accent-subtle",
+    "--accent-ring",
+    "--accent-border",
+    "--accent-border-strong",
+    "--accent-glow",
+    "--accent-glow-strong",
+    "--accent-contrast",
+    "--brand",
+    "--brand-hover",
+    "--brand-active",
+    "--brand-soft",
+    "--brand-ring",
+    "--brand-border",
+    "--border-accent",
+    "--border-accent-strong",
+    "--focus-ring",
+    "--focus-ring-strong",
+    "--selection-bg",
+    "--btn-primary-bg",
+    "--btn-primary-bg-hover",
+    "--btn-primary-bg-active",
+    "--btn-primary-border",
+    "--btn-primary-border-hover",
+  ]);
 
   let mediaQuery = null;
   let listenerBound = false;
-
-  let lastTheme = "";
-  let htmlInitialized = false;
-  let bodyInitialized = false;
-  let snapshotInitialized = false;
-
-  /* =========================================================
-     BASICS
-  ========================================================= */
+  let current = { ...DEFAULTS, theme: "light" };
 
   function isBrowser() {
-    return (
-      typeof window !== "undefined" &&
-      typeof document !== "undefined"
-    );
+    return typeof window !== "undefined" && typeof document !== "undefined";
   }
 
-  function normalizeTheme(
-    value = ""
-  ) {
-    return value === THEME_DARK
-      ? THEME_DARK
-      : THEME_LIGHT;
+  function normalizeThemeMode(value = "") {
+    const key = String(value || "").trim().toLowerCase();
+    return THEME_MODES.includes(key) ? key : DEFAULTS.themeMode;
+  }
+
+  function normalizeAccent(value = "") {
+    const key = String(value || "").trim().toLowerCase();
+    return ACCENTS.includes(key) ? key : DEFAULTS.accent;
+  }
+
+  function normalizeLocale(value = "") {
+    const key = String(value || "").trim().toLowerCase().replace("_", "-");
+    if (key.startsWith("ca")) return "ca";
+    if (key.startsWith("en")) return "en";
+    return "es";
   }
 
   function getMediaQuery() {
-    if (mediaQuery) {
-      return mediaQuery;
-    }
-
+    if (mediaQuery) return mediaQuery;
     try {
-      mediaQuery =
-        window.matchMedia(
-          DARK_QUERY
-        );
+      mediaQuery = window.matchMedia(DARK_QUERY);
     } catch {
       mediaQuery = null;
     }
-
     return mediaQuery;
   }
 
   function getSystemTheme() {
-    return getMediaQuery()?.matches
-      ? THEME_DARK
-      : THEME_LIGHT;
+    return getMediaQuery()?.matches ? "dark" : "light";
   }
 
-  /* =========================================================
-     IDEMPOTENT DOM WRITES
-  ========================================================= */
-
-  function setAttributeIfChanged(
-    element,
-    name,
-    value
-  ) {
-    if (!element) {
-      return false;
-    }
-
-    const next =
-      String(value);
-
-    if (
-      element.getAttribute(name) ===
-      next
-    ) {
-      return false;
-    }
-
-    element.setAttribute(
-      name,
-      next
-    );
-
-    return true;
+  function getEffectiveTheme(themeMode = DEFAULTS.themeMode) {
+    const mode = normalizeThemeMode(themeMode);
+    return mode === "system" ? getSystemTheme() : mode;
   }
 
-  function setDatasetIfChanged(
-    element,
-    key,
-    value
-  ) {
-    if (!element?.dataset) {
-      return false;
-    }
-
-    const next =
-      String(value);
-
-    if (
-      element.dataset[key] === next
-    ) {
-      return false;
-    }
-
-    element.dataset[key] =
-      next;
-
-    return true;
-  }
-
-  function setClassState(
-    element,
-    className,
-    enabled
-  ) {
-    if (!element?.classList) {
-      return false;
-    }
-
-    const shouldHave =
-      enabled === true;
-
-    const has =
-      element.classList.contains(
-        className
-      );
-
-    if (has === shouldHave) {
-      return false;
-    }
-
-    element.classList.toggle(
-      className,
-      shouldHave
-    );
-
-    return true;
-  }
-
-  /* =========================================================
-     ROOT THEME / LOCALE
-  ========================================================= */
-
-  function applyRootClasses(
-    element = null,
-    theme = THEME_LIGHT
-  ) {
-    if (!element) {
-      return false;
-    }
-
-    const value =
-      normalizeTheme(theme);
-
-    let changed = false;
-
+  function readStorage(key = "", fallback = "") {
+    if (!isBrowser()) return fallback;
     try {
-      changed =
-        setClassState(
-          element,
-          "no-js",
-          false
-        ) || changed;
-
-      changed =
-        setClassState(
-          element,
-          "js",
-          true
-        ) || changed;
-
-      changed =
-        setClassState(
-          element,
-          "theme-light",
-          value === THEME_LIGHT
-        ) || changed;
-
-      changed =
-        setClassState(
-          element,
-          "theme-dark",
-          value === THEME_DARK
-        ) || changed;
-
-      return changed;
+      return window.localStorage?.getItem(key) || fallback;
     } catch {
-      return false;
+      return fallback;
     }
   }
 
-  function applyThemeDataset(
-    element = null,
-    theme = THEME_LIGHT
-  ) {
-    if (!element) {
-      return false;
-    }
-
-    const value =
-      normalizeTheme(theme);
-
-    let changed = false;
-
+  function writeStorage(key = "", value = "") {
+    if (!isBrowser()) return false;
     try {
-      /*
-        Contrato:
-        - data-theme-mode = preferencia/configuración.
-        - data-theme = tema efectivo que consume CSS.
-      */
-      changed =
-        setDatasetIfChanged(
-          element,
-          "theme",
-          value
-        ) || changed;
-
-      changed =
-        setDatasetIfChanged(
-          element,
-          "themeMode",
-          THEME_MODE
-        ) || changed;
-
-      changed =
-        setDatasetIfChanged(
-          element,
-          "themeSource",
-          THEME_SOURCE
-        ) || changed;
-
-      changed =
-        setDatasetIfChanged(
-          element,
-          "systemTheme",
-          value
-        ) || changed;
-
-      changed =
-        setDatasetIfChanged(
-          element,
-          "themeReady",
-          "true"
-        ) || changed;
-
-      changed =
-        setDatasetIfChanged(
-          element,
-          "prebootThemeVersion",
-          PREBOOT_VERSION
-        ) || changed;
-
-      return changed;
-    } catch {
-      return false;
-    }
-  }
-
-  function applyLocale(
-    element = null
-  ) {
-    if (!element) {
-      return false;
-    }
-
-    let changed = false;
-
-    try {
-      changed =
-        setAttributeIfChanged(
-          element,
-          "lang",
-          BASE_LANG
-        ) || changed;
-
-      changed =
-        setAttributeIfChanged(
-          element,
-          "dir",
-          BASE_DIR
-        ) || changed;
-
-      changed =
-        setDatasetIfChanged(
-          element,
-          "locale",
-          BASE_LOCALE
-        ) || changed;
-
-      changed =
-        setDatasetIfChanged(
-          element,
-          "localeSource",
-          "base"
-        ) || changed;
-
-      changed =
-        setDatasetIfChanged(
-          element,
-          "localeFallback",
-          BASE_LOCALE
-        ) || changed;
-
-      changed =
-        setDatasetIfChanged(
-          element,
-          "localeSupported",
-          BASE_LOCALE
-        ) || changed;
-
-      return changed;
-    } catch {
-      return false;
-    }
-  }
-
-  function applyRoot(
-    element = null,
-    theme = THEME_LIGHT
-  ) {
-    if (!element) {
-      return false;
-    }
-
-    let changed = false;
-
-    changed =
-      applyRootClasses(
-        element,
-        theme
-      ) || changed;
-
-    changed =
-      applyThemeDataset(
-        element,
-        theme
-      ) || changed;
-
-    changed =
-      applyLocale(
-        element
-      ) || changed;
-
-    return changed;
-  }
-
-  /* =========================================================
-     THEME-COLOR
-  ========================================================= */
-
-  function applyThemeColor(
-    theme = THEME_LIGHT
-  ) {
-    if (!isBrowser()) {
-      return false;
-    }
-
-    const value =
-      normalizeTheme(theme);
-
-    const activeColor =
-      THEME_COLORS[value];
-
-    let changed = false;
-
-    try {
-      const metas =
-        document.querySelectorAll(
-          "meta[name='theme-color']"
-        );
-
-      if (!metas.length) {
-        return false;
-      }
-
-      metas.forEach(
-        (meta) => {
-          let color =
-            activeColor;
-
-          if (
-            meta.hasAttribute(
-              "data-onion-theme-color-light"
-            )
-          ) {
-            color =
-              THEME_COLORS.light;
-          } else if (
-            meta.hasAttribute(
-              "data-onion-theme-color-dark"
-            )
-          ) {
-            color =
-              THEME_COLORS.dark;
-          }
-
-          changed =
-            setAttributeIfChanged(
-              meta,
-              "content",
-              color
-            ) || changed;
-        }
-      );
-
-      return changed;
-    } catch {
-      return false;
-    }
-  }
-
-  /* =========================================================
-     SNAPSHOT
-  ========================================================= */
-
-  function snapshotMatches(
-    theme = THEME_LIGHT
-  ) {
-    const value =
-      normalizeTheme(theme);
-
-    const snapshot =
-      window.__ONION_PREBOOT__;
-
-    return Boolean(
-      snapshot &&
-      snapshot.version ===
-        PREBOOT_VERSION &&
-      snapshot.theme === value &&
-      snapshot.themeMode ===
-        THEME_MODE &&
-      snapshot.themeSource ===
-        THEME_SOURCE &&
-      snapshot.systemTheme ===
-        value &&
-      snapshot.locale ===
-        BASE_LOCALE &&
-      snapshot.ready === true
-    );
-  }
-
-  function writeSnapshot(
-    theme = THEME_LIGHT,
-    force = false
-  ) {
-    if (!isBrowser()) {
-      return false;
-    }
-
-    const value =
-      normalizeTheme(theme);
-
-    if (
-      force !== true &&
-      snapshotInitialized &&
-      snapshotMatches(value)
-    ) {
-      return false;
-    }
-
-    try {
-      window.__ONION_PREBOOT__ =
-        Object.freeze({
-          version:
-            PREBOOT_VERSION,
-
-          /*
-            theme = efectivo.
-            themeMode = preferencia.
-          */
-          theme:
-            value,
-
-          themeMode:
-            THEME_MODE,
-
-          themeSource:
-            THEME_SOURCE,
-
-          systemTheme:
-            value,
-
-          locale:
-            BASE_LOCALE,
-
-          localeSource:
-            "base",
-
-          fallbackLocale:
-            BASE_LOCALE,
-
-          supportedLocales:
-            Object.freeze([
-              BASE_LOCALE,
-            ]),
-
-          ready: true,
-
-          updatedAt:
-            new Date()
-              .toISOString(),
-        });
-
-      snapshotInitialized =
-        true;
-
+      window.localStorage?.setItem(key, String(value));
       return true;
     } catch {
       return false;
     }
   }
 
-  /* =========================================================
-     APPLY
-  ========================================================= */
+  function readPreferences() {
+    return {
+      themeMode: normalizeThemeMode(readStorage(STORAGE_KEYS.themeMode, DEFAULTS.themeMode)),
+      accent: normalizeAccent(readStorage(STORAGE_KEYS.accent, DEFAULTS.accent)),
+      locale: normalizeLocale(readStorage(STORAGE_KEYS.locale, DEFAULTS.locale)),
+    };
+  }
 
-  function applyPreboot(
-    options = {}
-  ) {
-    if (!isBrowser()) {
-      return false;
-    }
+  function setAttr(node, name, value) {
+    if (!node) return false;
+    const next = String(value);
+    if (node.getAttribute(name) === next) return false;
+    node.setAttribute(name, next);
+    return true;
+  }
 
-    const theme =
-      normalizeTheme(
-        options.theme ||
-        getSystemTheme()
-      );
+  function setData(node, name, value) {
+    if (!node?.dataset) return false;
+    const next = String(value);
+    if (node.dataset[name] === next) return false;
+    node.dataset[name] = next;
+    return true;
+  }
 
-    const html =
-      document.documentElement;
+  function setClass(node, name, enabled) {
+    if (!node?.classList) return false;
+    const next = enabled === true;
+    if (node.classList.contains(name) === next) return false;
+    node.classList.toggle(name, next);
+    return true;
+  }
 
-    const body =
-      document.body;
-
-    const themeChanged =
-      theme !== lastTheme;
-
+  function clearAccentOverrides(node) {
+    if (!node?.style) return false;
     let changed = false;
-
-    /*
-      HTML existe ya cuando el script se ejecuta en <head>.
-      Se aplica inmediatamente para evitar flash de tema.
-    */
-    if (
-      html &&
-      (
-        !htmlInitialized ||
-        themeChanged ||
-        options.force === true
-      )
-    ) {
-      changed =
-        applyRoot(
-          html,
-          theme
-        ) || changed;
-
-      htmlInitialized =
-        true;
+    for (const key of ACCENT_STYLE_KEYS) {
+      if (node.style.getPropertyValue(key)) {
+        node.style.removeProperty(key);
+        changed = true;
+      }
     }
-
-    /*
-      En la primera ejecución desde <head>, body aún puede no existir.
-      Sólo se inicializa cuando aparece y luego únicamente si cambia tema.
-    */
-    if (
-      body &&
-      (
-        !bodyInitialized ||
-        themeChanged ||
-        options.force === true
-      )
-    ) {
-      changed =
-        applyRoot(
-          body,
-          theme
-        ) || changed;
-
-      bodyInitialized =
-        true;
-    }
-
-    if (
-      themeChanged ||
-      !snapshotInitialized ||
-      options.force === true
-    ) {
-      changed =
-        applyThemeColor(
-          theme
-        ) || changed;
-
-      changed =
-        writeSnapshot(
-          theme,
-          options.force === true
-        ) || changed;
-    }
-
-    lastTheme =
-      theme;
-
     return changed;
   }
 
-  /* =========================================================
-     SYSTEM LISTENER
-  ========================================================= */
+  function setStyle(node, key, value) {
+    if (!node?.style) return false;
+    const next = String(value);
+    if (node.style.getPropertyValue(key).trim() === next) return false;
+    node.style.setProperty(key, next);
+    return true;
+  }
 
-  function onSystemThemeChange(
-    event = null
-  ) {
-    const nextTheme =
-      event?.matches === true
-        ? THEME_DARK
-        : (
-            event?.matches === false
-              ? THEME_LIGHT
-              : getSystemTheme()
-          );
+  function applyAccent(node, accent = DEFAULTS.accent) {
+    if (!node) return false;
+    const key = normalizeAccent(accent);
+    const palette = ACCENT_PALETTES[key];
+    setData(node, "accent", key);
 
-    if (
-      nextTheme === lastTheme
-    ) {
+    if (!palette) return clearAccentOverrides(node);
+
+    const rgb = palette.rgb;
+    let changed = false;
+    const assignments = {
+      "--accent": palette.accent,
+      "--accent-hover": palette.hover,
+      "--accent-active": palette.active,
+      "--accent-2": palette.active,
+      "--accent-3": palette.hover,
+      "--accent-4": palette.accent,
+      "--accent-5": palette.active,
+      "--accent-soft": `rgba(${rgb}, .14)`,
+      "--accent-soft-2": `rgba(${rgb}, .11)`,
+      "--accent-ghost": `rgba(${rgb}, .08)`,
+      "--accent-subtle": `rgba(${rgb}, .055)`,
+      "--accent-ring": `rgba(${rgb}, .30)`,
+      "--accent-border": `rgba(${rgb}, .32)`,
+      "--accent-border-strong": `rgba(${rgb}, .48)`,
+      "--accent-glow": `rgba(${rgb}, .14)`,
+      "--accent-glow-strong": `rgba(${rgb}, .22)`,
+      "--accent-contrast": "#ffffff",
+      "--brand": palette.accent,
+      "--brand-hover": palette.hover,
+      "--brand-active": palette.active,
+      "--brand-soft": `rgba(${rgb}, .14)`,
+      "--brand-ring": `rgba(${rgb}, .30)`,
+      "--brand-border": `rgba(${rgb}, .32)`,
+      "--border-accent": `rgba(${rgb}, .32)`,
+      "--border-accent-strong": `rgba(${rgb}, .48)`,
+      "--focus-ring": `0 0 0 3px rgba(${rgb}, .24)`,
+      "--focus-ring-strong": `0 0 0 3px rgba(${rgb}, .38)`,
+      "--selection-bg": `rgba(${rgb}, .30)`,
+      "--btn-primary-bg": palette.accent,
+      "--btn-primary-bg-hover": palette.hover,
+      "--btn-primary-bg-active": palette.active,
+      "--btn-primary-border": palette.accent,
+      "--btn-primary-border-hover": palette.hover,
+    };
+
+    for (const [name, value] of Object.entries(assignments)) {
+      changed = setStyle(node, name, value) || changed;
+    }
+    return changed;
+  }
+
+  function applyTheme(node, theme = "light", themeMode = DEFAULTS.themeMode) {
+    if (!node) return false;
+    const effective = theme === "dark" ? "dark" : "light";
+    const mode = normalizeThemeMode(themeMode);
+    let changed = false;
+    changed = setClass(node, "no-js", false) || changed;
+    changed = setClass(node, "js", true) || changed;
+    changed = setClass(node, "theme-light", effective === "light") || changed;
+    changed = setClass(node, "theme-dark", effective === "dark") || changed;
+    changed = setData(node, "theme", effective) || changed;
+    changed = setData(node, "themeMode", mode) || changed;
+    changed = setData(node, "themeSource", mode === "system" ? "system" : "preference") || changed;
+    changed = setData(node, "systemTheme", getSystemTheme()) || changed;
+    changed = setData(node, "themeReady", "true") || changed;
+    return changed;
+  }
+
+  function applyLocale(node, locale = DEFAULTS.locale) {
+    if (!node) return false;
+    const value = normalizeLocale(locale);
+    let changed = false;
+    changed = setAttr(node, "lang", value) || changed;
+    changed = setAttr(node, "dir", "ltr") || changed;
+    changed = setData(node, "locale", value) || changed;
+    changed = setData(node, "localeSource", "preference") || changed;
+    changed = setData(node, "localeFallback", "es") || changed;
+    changed = setData(node, "localeSupported", LOCALES.join(",")) || changed;
+    return changed;
+  }
+
+  function applyThemeColor(theme = "light") {
+    if (!isBrowser()) return false;
+    const color = THEME_COLORS[theme === "dark" ? "dark" : "light"];
+    let changed = false;
+    try {
+      document.querySelectorAll("meta[name='theme-color']").forEach((meta) => {
+        let next = color;
+        if (meta.hasAttribute("data-onion-theme-color-light")) next = THEME_COLORS.light;
+        if (meta.hasAttribute("data-onion-theme-color-dark")) next = THEME_COLORS.dark;
+        changed = setAttr(meta, "content", next) || changed;
+      });
+    } catch {
       return false;
     }
+    return changed;
+  }
 
-    return applyPreboot({
-      theme:
-        nextTheme,
-    });
+  function emitChanged(previous, next) {
+    if (!isBrowser()) return false;
+    if (
+      previous.themeMode === next.themeMode &&
+      previous.theme === next.theme &&
+      previous.accent === next.accent &&
+      previous.locale === next.locale
+    ) return false;
+
+    try {
+      window.dispatchEvent(new CustomEvent("onion:preferences:changed", {
+        detail: { ...next, previous: { ...previous } },
+      }));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function writeSnapshot(next) {
+    if (!isBrowser()) return false;
+    try {
+      window.__ONION_PREBOOT__ = Object.freeze({
+        version: PREBOOT_VERSION,
+        theme: next.theme,
+        themeMode: next.themeMode,
+        themeSource: next.themeMode === "system" ? "system" : "preference",
+        systemTheme: getSystemTheme(),
+        accent: next.accent,
+        locale: next.locale,
+        localeSource: "preference",
+        fallbackLocale: "es",
+        supportedLocales: Object.freeze([...LOCALES]),
+        supportedAccents: Object.freeze([...ACCENTS]),
+        ready: true,
+        updatedAt: new Date().toISOString(),
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function applyPreferences(preferences = null, { emit = false } = {}) {
+    if (!isBrowser()) return false;
+    const source = preferences && typeof preferences === "object" ? preferences : readPreferences();
+    const next = {
+      themeMode: normalizeThemeMode(source.themeMode),
+      accent: normalizeAccent(source.accent),
+      locale: normalizeLocale(source.locale),
+    };
+    next.theme = getEffectiveTheme(next.themeMode);
+
+    const previous = { ...current };
+    let changed = false;
+    const html = document.documentElement;
+    const body = document.body;
+
+    for (const node of [html, body]) {
+      if (!node) continue;
+      changed = applyTheme(node, next.theme, next.themeMode) || changed;
+      changed = applyLocale(node, next.locale) || changed;
+      changed = applyAccent(node, next.accent) || changed;
+      changed = setData(node, "prebootThemeVersion", PREBOOT_VERSION) || changed;
+    }
+
+    changed = applyThemeColor(next.theme) || changed;
+    current = next;
+    writeSnapshot(next);
+    if (emit) emitChanged(previous, next);
+    return changed;
+  }
+
+  function setThemeMode(value) {
+    const themeMode = normalizeThemeMode(value);
+    writeStorage(STORAGE_KEYS.themeMode, themeMode);
+    applyPreferences({ ...current, themeMode }, { emit: true });
+    return { ...current };
+  }
+
+  function setAccent(value) {
+    const accent = normalizeAccent(value);
+    writeStorage(STORAGE_KEYS.accent, accent);
+    applyPreferences({ ...current, accent }, { emit: true });
+    return { ...current };
+  }
+
+  function setLocale(value) {
+    const locale = normalizeLocale(value);
+    writeStorage(STORAGE_KEYS.locale, locale);
+    applyPreferences({ ...current, locale }, { emit: true });
+    return { ...current };
+  }
+
+  function getSnapshot() {
+    return {
+      version: PREBOOT_VERSION,
+      ...current,
+      supportedThemeModes: [...THEME_MODES],
+      supportedAccents: [...ACCENTS],
+      supportedLocales: [...LOCALES],
+    };
+  }
+
+  function onSystemThemeChange() {
+    if (current.themeMode !== "system") return false;
+    return applyPreferences(current, { emit: true });
   }
 
   function bindSystemThemeListener() {
-    if (listenerBound) {
-      return true;
-    }
-
-    const query =
-      getMediaQuery();
-
-    if (!query) {
-      return false;
-    }
-
+    if (listenerBound) return true;
+    const query = getMediaQuery();
+    if (!query) return false;
     try {
-      if (
-        typeof query.addEventListener ===
-        "function"
-      ) {
-        query.addEventListener(
-          "change",
-          onSystemThemeChange
-        );
-
-        listenerBound =
-          true;
-
-        return true;
+      if (typeof query.addEventListener === "function") {
+        query.addEventListener("change", onSystemThemeChange);
+      } else if (typeof query.addListener === "function") {
+        query.addListener(onSystemThemeChange);
+      } else {
+        return false;
       }
-
-      if (
-        typeof query.addListener ===
-        "function"
-      ) {
-        query.addListener(
-          onSystemThemeChange
-        );
-
-        listenerBound =
-          true;
-
-        return true;
-      }
+      listenerBound = true;
+      return true;
     } catch {
       return false;
     }
-
-    return false;
   }
 
-  /* =========================================================
-     BOOT
-  ========================================================= */
+  if (!isBrowser()) return;
 
-  if (!isBrowser()) {
-    return;
-  }
-
-  /*
-    Primera pasada síncrona:
-    html + meta theme-color + snapshot.
-    No esperamos DOMContentLoaded para fijar el tema.
-  */
-  applyPreboot();
-
+  current = { ...readPreferences(), theme: getSystemTheme() };
+  applyPreferences(current);
   bindSystemThemeListener();
 
-  /*
-    El script vive en <head>, así que body normalmente aún no existe.
-    Hacemos una única segunda pasada sólo para inicializar body.
-    Si body ya existe, no registramos trabajo redundante.
-  */
-  if (
-    !document.body &&
-    document.readyState ===
-      "loading"
-  ) {
-    document.addEventListener(
-      "DOMContentLoaded",
-      () => {
-        applyPreboot();
-      },
-      {
-        once: true,
-      }
-    );
-  } else if (
-    document.body &&
-    !bodyInitialized
-  ) {
-    applyPreboot();
+  window.OnionPreferences = Object.freeze({
+    version: PREBOOT_VERSION,
+    get: getSnapshot,
+    getSnapshot,
+    apply: () => applyPreferences(readPreferences(), { emit: true }),
+    setThemeMode,
+    setAccent,
+    setLocale,
+  });
+
+  if (!document.body && document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => {
+      applyPreferences(current);
+    }, { once: true });
+  } else if (document.body) {
+    applyPreferences(current);
   }
 })();

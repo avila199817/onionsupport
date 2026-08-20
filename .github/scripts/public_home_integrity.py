@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from html.parser import HTMLParser
 from pathlib import Path
+import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -14,6 +15,7 @@ REQUIRED = (
     "docs/PUBLIC_TICKET_INTAKE.md",
     "src/app/enhancements.js",
     "src/css/app.css",
+    "src/router/styles.js",
     "src/css/views/public/index.css",
     "src/css/views/public/support-request.css",
     "src/css/views/public/public-support-progress.css",
@@ -35,6 +37,13 @@ PUBLIC_ENHANCEMENTS = (
     "../features/public-support/index.js",
     "../features/public-support-progress/index.js",
     "../features/public-home-experience/index.js",
+)
+
+PUBLIC_ROUTE_CSS = (
+    "/src/css/views/public/index.css",
+    "/src/css/views/public/support-request.css",
+    "/src/css/views/public/public-support-progress.css",
+    "/src/css/views/public/home-experience.css",
 )
 
 
@@ -60,6 +69,15 @@ def require(errors: list[str], condition: bool, message: str) -> None:
         errors.append(message)
 
 
+def public_home_manifest(route_styles: str) -> str:
+    match = re.search(
+        r'"public-home"\s*:\s*Object\.freeze\(\[(?P<body>.*?)\]\)',
+        route_styles,
+        re.DOTALL,
+    )
+    return match.group("body") if match else ""
+
+
 def main() -> int:
     errors: list[str] = []
 
@@ -80,6 +98,7 @@ def main() -> int:
     docs = read("docs/PUBLIC_TICKET_INTAKE.md")
     enhancements = read("src/app/enhancements.js")
     app_css = read("src/css/app.css")
+    route_styles = read("src/router/styles.js")
     intake = read("src/features/public-support/index.js")
     progress_js = read("src/features/public-support-progress/index.js")
     home_experience = read("src/features/public-home-experience/index.js")
@@ -108,15 +127,28 @@ def main() -> int:
             f"Enhancement público sin autoridad única: {module_path}",
         )
 
-    for css_path in (
+    manifest = public_home_manifest(route_styles)
+    require(
+        errors,
+        bool(manifest),
+        "src/router/styles.js debe declarar manifest public-home",
+    )
+    for css_path in PUBLIC_ROUTE_CSS:
+        require(
+            errors,
+            f'"{css_path}"' in manifest,
+            f"public-home debe cargar por ruta: {css_path}",
+        )
+
+    for css_name in (
         "support-request.css",
         "public-support-progress.css",
         "home-experience.css",
     ):
         require(
             errors,
-            f'@import url("./views/public/{css_path}")' in app_css,
-            f"src/css/app.css debe cargar {css_path}",
+            css_name not in app_css,
+            f"src/css/app.css no puede cargar CSS específico de public-home: {css_name}",
         )
 
     require(
@@ -238,7 +270,8 @@ def main() -> int:
 
     print("Public home integrity: PASS")
     print("- JS: main.js -> app/enhancements.js")
-    print("- CSS: app.css")
+    print("- CSS: router/styles.js -> public-home")
+    print("- app.css: sólo estilos globales")
     print("- intake, UX y progreso validados por contrato semántico")
     return 0
 

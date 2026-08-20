@@ -636,15 +636,15 @@ inline-size: 100%;
 block-size: 100%;
 object-fit: cover;
 }
-.clientes-avatar--tone-1 { filter: hue-rotate(22deg); }
-.clientes-avatar--tone-2 { filter: hue-rotate(45deg); }
-.clientes-avatar--tone-3 { filter: hue-rotate(68deg); }
-.clientes-avatar--tone-4 { filter: hue-rotate(92deg); }
-.clientes-avatar--tone-5 { filter: hue-rotate(118deg); }
-.clientes-avatar--tone-6 { filter: hue-rotate(146deg); }
-.clientes-avatar--tone-7 { filter: hue-rotate(176deg); }
-.clientes-avatar--tone-8 { filter: hue-rotate(208deg); }
-.clientes-avatar--tone-9 { filter: hue-rotate(242deg); }
+.clientes-avatar:not(.has-image).clientes-avatar--tone-1 { filter: hue-rotate(22deg); }
+.clientes-avatar:not(.has-image).clientes-avatar--tone-2 { filter: hue-rotate(45deg); }
+.clientes-avatar:not(.has-image).clientes-avatar--tone-3 { filter: hue-rotate(68deg); }
+.clientes-avatar:not(.has-image).clientes-avatar--tone-4 { filter: hue-rotate(92deg); }
+.clientes-avatar:not(.has-image).clientes-avatar--tone-5 { filter: hue-rotate(118deg); }
+.clientes-avatar:not(.has-image).clientes-avatar--tone-6 { filter: hue-rotate(146deg); }
+.clientes-avatar:not(.has-image).clientes-avatar--tone-7 { filter: hue-rotate(176deg); }
+.clientes-avatar:not(.has-image).clientes-avatar--tone-8 { filter: hue-rotate(208deg); }
+.clientes-avatar:not(.has-image).clientes-avatar--tone-9 { filter: hue-rotate(242deg); }
 /* Status */
 .clientes-chip {
 min-block-size: 30px;

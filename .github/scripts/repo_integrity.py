@@ -745,6 +745,27 @@ def validate_cuenta_media_v14_contract(errors: list[str]) -> None:
             errors.append(f"src/views/cuenta/cuenta.api.js :: media helper local prohibido V14: {helper}")
 
 
+def validate_sidebar_runtime_v15_contract(errors: list[str]) -> None:
+    """Sidebar template must not reference a removed local role normalizer."""
+    relative = "src/ui/sidebar/template.js"
+    source = (ROOT / relative).read_text(encoding="utf-8")
+
+    if 'import { AppCore } from "../../core/index.js";' not in source:
+        errors.append(f"{relative} :: debe importar AppCore para la autoridad canónica de rol V15")
+
+    if "AppCore.normalizeRole(" not in source:
+        errors.append(f"{relative} :: debe consumir AppCore.normalizeRole() V15")
+
+    if re.search(r"\.map\(\s*normalizeRole\s*\)", source):
+        errors.append(f"{relative} :: callback normalizeRole huérfano prohibido V15")
+
+    if re.search(r"\bfunction\s+normalizeRole\s*\(", source):
+        errors.append(f"{relative} :: normalizador local de rol prohibido V15")
+
+    if "sidebar.template.unified.v6-core-role-authority" not in source:
+        errors.append(f"{relative} :: versión de recuperación V15 ausente")
+
+
 def validate_paths(errors: list[str]) -> None:
     for root in (SRC, ROOT / ".github"):
         if not root.exists():
@@ -775,6 +796,7 @@ def validate_known_dead_paths(errors: list[str]) -> None:
 def main() -> int:
     errors: list[str] = []
     validate_cuenta_media_v14_contract(errors)
+    validate_sidebar_runtime_v15_contract(errors)
     validate_paths(errors)
     validate_js_references(errors)
     validate_first_helpers(errors)

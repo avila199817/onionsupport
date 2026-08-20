@@ -28,7 +28,7 @@ import {
   renderShell,
 } from "./correo.template.js";
 
-export const CORREO_VIEW_VERSION = "correo.view.microsoft.production.v5-canonical-media";
+export const CORREO_VIEW_VERSION = "correo.view.microsoft.production.v6-canonical-user";
 
 const INSTANCES = new WeakMap();
 let lastInstance = null;
@@ -134,25 +134,35 @@ function initialsFrom(value = "") {
 
 function readOnionUser() {
   let raw = null;
+
   try {
-    raw = AppCore?.getCurrentUser?.() || AppCore?.auth?.getUser?.() || AppCore?.auth?.getCurrentUser?.() || DefaultAuth?.getUser?.() || DefaultAuth?.getCurrentUser?.() || AppCore?.getState?.()?.user || AppCore?.state?.user || null;
+    raw =
+      AppCore?.getCurrentUser?.() ||
+      AppCore?.getState?.()?.user ||
+      AppCore?.state?.user ||
+      DefaultAuth?.getUser?.() ||
+      DefaultAuth?.getCurrentUser?.() ||
+      null;
   } catch {
     raw = null;
   }
 
-  let user = raw;
+  let user = null;
+
   try {
-    user = AppCore?.publicUser?.(raw) || raw;
+    user = AppCore?.publicUser?.(raw) || null;
   } catch {
-    user = raw;
+    user = null;
   }
 
-  const displayName = cleanText(user?.displayName || user?.fullName || user?.name || user?.nombre || raw?.displayName || raw?.fullName || raw?.name || raw?.nombre, "Cristian Ávila Luque");
-  const avatarUrl = sanitizeRuntimeImageUrl(
-    user?.avatarUrl || user?.avatar || user?.picture || user?.photoUrl || raw?.avatarUrl || raw?.avatar || raw?.picture || raw?.photoUrl || raw?.profile?.avatarUrl || ""
-  );
+  const displayName = cleanText(user?.displayName, "Usuario");
+  const avatarUrl = sanitizeRuntimeImageUrl(user?.avatarUrl || "");
 
-  return Object.freeze({ displayName, avatarUrl, initials: initialsFrom(displayName) });
+  return Object.freeze({
+    displayName,
+    avatarUrl,
+    initials: initialsFrom(displayName),
+  });
 }
 
 function cloneCacheIntoState(state) {

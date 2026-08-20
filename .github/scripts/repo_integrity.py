@@ -633,7 +633,6 @@ def validate_correo_media_v10_contract(errors: list[str]) -> None:
     required = (
         'import { sanitizeRuntimeImageUrl } from "../../core/media.js"',
         "sanitizeRuntimeImageUrl(",
-        'CORREO_VIEW_VERSION = "correo.view.microsoft.production.v5-canonical-media"',
     )
     for snippet in required:
         if snippet not in view_text:
@@ -645,6 +644,28 @@ def validate_correo_media_v10_contract(errors: list[str]) -> None:
     ):
         if forbidden in view_text:
             errors.append(f"src/views/correo/index.js :: política local de media prohibida tras V10: {forbidden}")
+
+
+def validate_correo_identity_v11_contract(errors: list[str]) -> None:
+    """Correo identity must consume AppCore.publicUser without personal or raw-profile fallbacks."""
+    view_text = (SRC / "views" / "correo" / "index.js").read_text(encoding="utf-8")
+
+    for required in (
+        "AppCore?.publicUser?.(raw)",
+        'cleanText(user?.displayName, "Usuario")',
+        'sanitizeRuntimeImageUrl(user?.avatarUrl || "")',
+        'CORREO_VIEW_VERSION = "correo.view.microsoft.production.v6-canonical-user"',
+    ):
+        if required not in view_text:
+            errors.append(f"src/views/correo/index.js :: falta identidad canónica V11: {required}")
+
+    for forbidden in (
+        "Cristian Ávila Luque",
+        "raw?.profile?.avatarUrl",
+        "raw?.photoUrl",
+    ):
+        if forbidden in view_text:
+            errors.append(f"src/views/correo/index.js :: fallback de identidad legacy prohibido V11: {forbidden}")
 
 
 def validate_paths(errors: list[str]) -> None:
@@ -691,6 +712,7 @@ def main() -> int:
     validate_detail_modal_tokens_v8_contract(errors)
     validate_correo_boundary_v9_contract(errors)
     validate_correo_media_v10_contract(errors)
+    validate_correo_identity_v11_contract(errors)
     validate_known_dead_paths(errors)
 
     unique_errors = list(dict.fromkeys(errors))

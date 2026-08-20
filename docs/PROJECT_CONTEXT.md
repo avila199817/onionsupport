@@ -1,101 +1,87 @@
 # ONION SUPPORT — CONTEXTO CANÓNICO DEL FRONTEND
 
-> Actualizado: 2026-08-19.  
-> Esta documentación describe el estado real del repositorio `avila199817/onionsupport`. Si una afirmación entra en conflicto con el código, `main` es la autoridad.
+> Actualizado: 2026-08-20.  
+> Describe la arquitectura productiva esperada del repositorio `avila199817/onionsupport`. Si documentación y código divergen, el código de `main` es la autoridad.
 
-## 1. Qué es este repositorio
+## 1. Alcance
 
-Onion Support es una SPA JavaScript modular desplegada como sitio estático en Azure Static Web Apps.
+Onion Support es una SPA JavaScript modular desplegada en Azure Static Web Apps.
 
-- Frontend canónico: `https://www.onionsupport.com`
-- API canónica: `https://api.onionit.net`
-- Transporte browser: `/api/*` permanece same-origin mediante Azure Static Web Apps; `/health/*` sale directo a `https://api.onionit.net` porque los health del App Service viven fuera del prefijo `/api`.
-- Idioma funcional actual: español (`es`)
+- Frontend: `https://www.onionsupport.com`
+- API: `https://api.onionit.net`
+- Idioma funcional: español
 - Roles funcionales: `admin` y `user`
-- Entry point: `src/main.js`
-- CSS principal: `src/css/app.css`
-- Router único: `src/router/`
-- HTTP único: `src/core/http.js`
+- Entry point JS: `src/main.js`
+- Registry global: `src/app/enhancements.js`
+- Entry point CSS: `src/css/app.css`
+- Router: `src/router/`
+- HTTP: `src/core/http.js`
 - Auth: `src/features/auth/`
 
-Este repositorio contiene el frontend. El backend no debe duplicarse, simularse ni inferirse aquí.
+Este repositorio es exclusivamente frontend. No debe duplicar, simular ni inventar lógica del backend.
 
-## 2. Principios que no se negocian
+## 2. Regla arquitectónica
 
-La SPA debe mantener una sola autoridad por responsabilidad.
+Debe existir una sola autoridad por responsabilidad.
 
 No crear:
 
-- otro router;
-- otro cliente HTTP;
-- otro sistema de auth;
-- otro store de sesión;
-- otra paleta o design system por vista;
+- otro router, cliente HTTP, sistema de auth o store de sesión;
+- otro orquestador global desde `index.html`;
+- otra paleta/design system por vista;
 - APIs de vista que inventen endpoints;
 - rutas o roles preparados “por si acaso”;
 - almacenamiento persistente de secretos, tokens o SAS;
-- parches CSS acumulativos para corregir arquitectura incorrecta.
+- CSS `patch`, `hotfix`, `final-fix`, `override-vX` o equivalentes;
+- observers/listeners correctores cuando la fuente canónica puede emitir directamente el estado correcto.
 
-Las vistas deben separar, siempre que el dominio lo permita:
+Las vistas separan, cuando el dominio lo permite:
 
-1. API/normalización del dominio;
+1. API y normalización;
 2. controlador/lifecycle DOM;
-3. template HTML puro;
-4. CSS scopeado a la vista y basado en tokens globales.
+3. template HTML;
+4. CSS scopeado y basado en tokens.
 
-## 3. Estructura raíz relevante
+## 3. Boot único
+
+`index.html` mantiene sólo lo imprescindible antes del App:
+
+- `src/preboot/theme.js` como script clásico de tema previo al paint;
+- `src/css/app.css` como stylesheet principal;
+- `/src/main.js` como **único** `script type="module"` ejecutable.
+
+El flujo canónico es:
 
 ```text
-.github/
-  scripts/
-  workflows/
-docs/
-src/
-favicon.ico
 index.html
-robots.txt
-site.webmanifest
-sitemap.xml
-staticwebapp.config.json
+  -> src/main.js
+       -> src/app/enhancements.js
+            -> pre-router: ticket-deeplink + App Chrome
+       -> src/app/index.js
+       -> post-router: mejoras progresivas globales
 ```
 
-La raíz pública mantiene una landing indexable y las rutas privadas de la SPA se protegen con `noindex`/`nofollow` en la configuración estática.
+`src/app/enhancements.js` es el registro único de mejoras globales/progresivas. Los módulos no deben volver a auto-orquestarse desde etiquetas `<script type="module">` dispersas en `index.html`.
 
-## 4. Boot de la SPA
+Las mejoras post-router actuales incluyen DataList móvil, autorefresh de Facturas, previews de Incidencias y experiencia pública. Un fallo progresivo se aísla sin convertir un App sano en fallo fatal.
 
-`index.html` carga:
+## 4. Core
 
-- `src/preboot/theme.js`
-- `src/css/app.css`
-- `src/main.js`
+`src/core/` concentra contratos transversales:
 
-`src/main.js` delega el arranque a `src/app/`.
-
-`src/app/` coordina boot, shell, sesión y montaje de UI. No contiene un segundo router ni un segundo sistema de auth.
-
-No existe actualmente un motor i18n funcional conectado al boot. El antiguo `src/i18n/` fue retirado porque no tenía consumidores productivos. El código y los textos de interfaz actuales se mantienen en español.
-
-## 5. Core
-
-`src/core/` concentra contratos transversales.
-
-Responsabilidades relevantes:
-
-- `config.js`: URLs, rutas centrales, roles y configuración segura;
-- `http.js`: único cliente HTTP de la SPA;
-- `media.js`: política runtime de URLs de imagen del shell;
-- `index.js`: estado/core compartido y acceso al usuario actual.
+- `config.js`: URLs, rutas y roles;
+- `http.js`: cliente HTTP único;
+- `media.js`: política runtime de URLs de imagen;
+- `index.js`: estado/core compartido y usuario actual.
 
 Reglas:
 
-- Las vistas no usan `fetch` directo para operaciones de dominio si existe el cliente HTTP canónico.
-- Las URLs runtime de imagen sólo pueden usar orígenes permitidos.
-- SAS sólo se admite donde el contrato lo necesita y únicamente para Azure Blob Storage.
-- Los roles válidos del producto son `admin` y `user`.
+- no usar `fetch` directo para dominio si existe `core/http.js`;
+- URLs runtime de imagen sólo desde orígenes permitidos;
+- SAS únicamente donde el contrato lo necesita y para Azure Blob;
+- roles de producto: `admin` y `user`.
 
-## 6. Router y rutas
-
-El router único vive en `src/router/`.
+## 5. Router y rutas
 
 Rutas públicas principales:
 
@@ -105,7 +91,7 @@ Rutas públicas principales:
 - `/password-reset`
 - `/activate-account`
 
-Home privada visible:
+Home privada:
 
 - `/@{slug}`
 
@@ -119,106 +105,74 @@ Rutas privadas principales:
 - `/servidor`
 - `/cuenta`
 
-`/ajustes` se conserva únicamente como URL legacy de compatibilidad. Router carga la implementación canónica de `Cuenta`; no existe una segunda vista `Ajustes`, no aparece en sidebar y no participa en búsqueda global.
+`/ajustes` existe sólo como alias legacy y resuelve `Cuenta`. No existe una segunda vista Ajustes.
 
-Admin-only actualmente:
+Admin-only: Clientes, Usuarios, Correo y Servidor. El sidebar controla visibilidad; el Router sigue siendo autoridad de acceso en frontend y el backend es la autoridad final.
 
-- Clientes
-- Usuarios
-- Correo
-- Servidor
+## 6. App Chrome
 
-El sidebar controla visibilidad. El router sigue siendo la autoridad de acceso.
+Topbar y Sidebar son componentes funcionales separados, pero su geometría e interacción responsive pertenecen a **App Chrome**.
+
+Autoridades:
+
+- `src/ui/chrome/template.js`
+- `src/ui/chrome/index.js`
+- `src/css/layout/chrome.css`
+- `docs/UI_CHROME.md`
+
+No existen ni deben reaparecer `mobile-shell.css` o `features/mobile-shell/index.js`.
 
 ## 7. Vistas productivas
 
-`src/views/` contiene los módulos de producto.
-
-### Home
-
-- dashboard privado;
-- cache y agregación delegados a su API;
-- actividad reciente con identificadores de dominio claros;
-- design system global.
-
 ### Incidencias
 
-- listado, creación y detalle;
-- adjuntos, comentarios y lifecycle;
-- edición admin de estado, prioridad y tipo;
-- cierre/reapertura mediante contratos del dominio;
-- refresco autónomo del listado;
-- identidad visual consistente de avatares;
-- opciones canónicas compartidas entre creación y detalle.
+Listado, creación, detalle, adjuntos, comentarios, lifecycle, estados/prioridad/tipo, cierre/reapertura, refresco autónomo y previews de media.
 
 ### Facturas
 
-- listado, creación y detalle;
-- PDF, envío y relación con incidencias;
-- colecciones del dominio preservadas como arrays;
-- diseño alineado con Incidencias y tokens globales.
+Listado, creación, detalle, PDF, envío y relación con incidencias. Las colecciones del dominio se preservan como arrays.
 
 ### Clientes
 
-- listado admin;
-- creación a partir de usuario real;
-- detalle read-only con contratos reales del backend;
-- sin inventar update/delete si no existen.
+Listado admin, creación desde usuario real y detalle read-only conforme al backend.
 
 ### Usuarios
 
-- listado y alta administrativa;
-- detalle de usuario;
-- contratos HTTP centralizados;
-- política de avatares compatible con Azure Blob SAS runtime;
-- no persistir secretos, activation URLs ni SAS.
+Listado, alta administrativa, detalle y política segura de avatares/SAS runtime.
 
 ### Correo
 
-- integración Microsoft a través del backend Onion;
-- sin tokens Microsoft en navegador;
-- carpeta/lista/lector, compose, replies, forward, drafts y adjuntos;
-- scroll infinito y cache efímera del módulo;
-- única persistencia browser intencional: preferencia booleana de notificaciones;
-- ruta admin-only y `noindex`.
+Integración Microsoft a través del backend Onion, sin tokens Microsoft en navegador; carpeta/lista/lector, compose, replies, forward, drafts, adjuntos, scroll infinito y cache efímera. La única persistencia browser intencional es la preferencia booleana de notificaciones.
 
 ### Servidor
 
-- vista administrativa;
-- acceso admin-only;
-- usa contratos del backend, sin inventar infraestructura local.
+Vista administrativa sobre contratos reales del backend.
 
 ### Cuenta
 
-- self-service del usuario autenticado;
-- identidad y preferencias informativas;
-- avatar;
-- cambio de contraseña;
-- sesiones bajo demanda;
-- desactivación de cuenta;
-- no usa `/api/users/:id` para editar el usuario actual;
-- no simula PATCH/PUT self para campos que el backend no expone.
+Self-service del usuario autenticado: identidad, avatar, contraseña, sesiones bajo demanda y desactivación. No inventa PATCH/PUT self que el backend no exponga.
 
 ## 8. CSS y design system
 
-La entrada única es `src/css/app.css`.
+`src/css/app.css` es la única entrada CSS global.
 
-La arquitectura visual usa:
+La arquitectura usa:
 
 - tokens globales;
-- core/layout compartido;
-- sidebar/topbar/shell globales;
-- CSS de vista en `src/css/views/`.
+- reset/core/layout;
+- App Chrome;
+- componentes compartidos;
+- CSS privado cargado por ruta;
+- composiciones transversales;
+- guardrails finales de geometría.
 
 Reglas:
 
-- dark/light deben salir de tokens globales;
-- no crear una paleta completa paralela por vista;
-- evitar `!important` como estrategia de composición;
-- no añadir archivos `final-fix`, `override-vX` o similares;
-- una refactorización debe eliminar reglas sustituidas, no apilarlas.
-
-Las vistas principales Incidencias, Facturas, Clientes, Usuarios, Home y Cuenta ya han pasado por una consolidación visual sobre este criterio.
+- dark/light salen de tokens globales;
+- no crear paletas completas paralelas por vista;
+- `!important` no es estrategia de composición;
+- una refactorización elimina reglas sustituidas en lugar de apilarlas;
+- el CSS público progresivo también entra por `app.css`, no mediante `<link>` laterales.
 
 ## 9. Seguridad frontend
 
@@ -227,111 +181,55 @@ La SPA nunca sustituye la autorización del backend.
 Frontend debe:
 
 - ocultar acciones no permitidas por rol;
-- no exponer tokens ni secretos;
-- no convertir URLs privadas en URLs públicas;
-- redacted logs/snapshots;
+- no exponer tokens, secretos ni SAS en snapshots/logs;
+- no convertir URLs privadas en públicas;
 - evitar storage persistente para credenciales y datos efímeros;
 - usar `core/http.js` para auth/refresh y peticiones protegidas;
-- usar rutas privadas con `noindex`/`nofollow`.
+- mantener rutas privadas con `noindex`/`nofollow`.
 
-Backend sigue siendo autoridad final de ACL, propiedad del recurso y mutaciones.
+Backend sigue siendo autoridad final de ACL, propiedad de recursos y mutaciones.
 
 ## 10. Azure Static Web Apps y SEO
 
-`staticwebapp.config.json` define:
+`staticwebapp.config.json` define fallback SPA, headers de seguridad, cache y `X-Robots-Tag` para rutas privadas.
 
-- fallback/rewrite SPA;
-- headers de seguridad;
-- cache;
-- rutas privadas con `X-Robots-Tag: noindex, nofollow`.
+`robots.txt`, `sitemap.xml` y la configuración estática deben permanecer alineados. `sitemap.xml` contiene sólo URLs públicas indexables.
 
-`robots.txt` y `staticwebapp.config.json` deben mantenerse alineados.
+El archivo raíz con nombre hexadecimal es la clave pública de verificación de IndexNow y forma parte del contrato SEO; no es un temporal.
 
-El validador permanente `.github/scripts/repo_integrity.py` comprueba que estas rutas privadas tengan contrato estático correcto:
-
-- incidencias;
-- facturas;
-- clientes;
-- usuarios;
-- correo;
-- servidor;
-- cuenta;
-- ajustes (alias legacy privado).
-
-`sitemap.xml` contiene únicamente URLs públicas indexables.
-
-## 11. Integridad y CI
+## 11. CI e integridad
 
 ### Repository Integrity
 
-Workflow:
+`.github/workflows/repo-integrity.yml` valida:
 
-- `.github/workflows/repo-integrity.yml`
+- sintaxis de todos los `src/**/*.js` con Node 22;
+- contratos estructurales de `.github/scripts/repo_integrity.py`;
+- entrypoint único mediante `.github/scripts/app_entrypoint_integrity.py`;
+- `staticwebapp.config.json`;
+- merge markers y whitespace.
 
-Valida en cada PR/push a `main`:
+### Public Home Integrity
 
-- sintaxis de todos los `.js` bajo `src/` con Node.js 22;
-- imports/export/import() locales existentes;
-- assets locales y `@import` CSS;
-- `new URL(..., import.meta.url)` locales;
-- rutas privadas Azure/robots;
-- contrato de helpers `first(...values)` para no destruir arrays;
-- `staticwebapp.config.json` válido;
-- merge markers;
-- whitespace del diff.
+`.github/workflows/public-home-contract.yml` usa `.github/scripts/public_home_integrity.py` como contrato único para landing, intake, UX, progreso de envío, registry de enhancements y CSS público.
+
+No debe reaparecer un segundo workflow específico que duplique esas mismas comprobaciones.
 
 ### Azure Static Web Apps
 
-Workflow:
-
-- `.github/workflows/azure-static-web-apps-polite-bay-086469a1e.yml`
-
-Responsabilidades:
-
-- validación de contrato estático;
-- validación SEO;
-- validación de referencias públicas;
-- ejecución del validador de integridad;
-- validación de contratos críticos SPA;
-- preview de PR;
-- deploy productivo tras push a `main`.
-
-No debe mantener una segunda auditoría permisiva que sólo emita warnings para imports rotos.
+`.github/workflows/azure-static-web-apps-polite-bay-086469a1e.yml` valida el contrato de despliegue/SEO/referencias y genera preview de PR o deploy productivo tras push a `main`.
 
 ## 12. Arrays y normalización
 
-Un helper genérico `first(...values)` selecciona el primer valor útil; no debe aplanar arrays del dominio.
+Un helper `first(...values)` selecciona el primer valor útil y no debe aplanar arrays del dominio.
 
-Está prohibido dentro de ese helper:
+Quedan prohibidos dentro de ese helper `values.flat(...)` y `values.flatMap(...)`: adjuntos, permisos, historial, líneas de factura y otras colecciones son valores completos.
 
-- `values.flat(...)`
-- `values.flatMap(...)`
+## 13. Persistencia en navegador
 
-Motivo: adjuntos, permisos, historial, líneas de factura y otras colecciones son valores completos. Aplanarlas antes de seleccionarlas puede convertir un array en un elemento suelto silenciosamente.
+Preferir memoria a storage persistente.
 
-El CI bloquea esta regresión.
-
-## 13. Ajustes legacy
-
-La antigua implementación `src/views/ajustes/` fue eliminada porque duplicaba Cuenta y contenía referencias a módulos ya borrados.
-
-Estado actual:
-
-- `/ajustes` sigue resolviendo para no romper enlaces antiguos;
-- carga `Cuenta` como módulo real;
-- carga el CSS de `Cuenta`;
-- no aparece como segunda opción de menú;
-- no existe API/store/template paralelo de Ajustes.
-
-No reintroducir `ajustes.state.js`, `ajustes.store.js`, `ajustes.model.js`, `ajustesView.js` ni `ajustesEditView.js`. El validador de integridad bloquea esas referencias.
-
-## 14. Persistencia en navegador
-
-Regla general: memoria antes que storage persistente.
-
-Persistencia permitida sólo para preferencias no sensibles que necesiten sobrevivir a un reload, por ejemplo la preferencia booleana de notificaciones de Correo.
-
-No persistir en browser storage:
+No persistir:
 
 - access/refresh tokens;
 - contraseñas;
@@ -341,24 +239,23 @@ No persistir en browser storage:
 - credenciales Microsoft;
 - snapshots de seguridad.
 
-Cualquier cache de datos administrativos debe revisarse explícitamente antes de hacerse persistente.
+Sólo se persisten preferencias no sensibles que realmente deban sobrevivir a un reload.
 
-## 15. Flujo de cambios
+## 14. Flujo de cambios
 
 Para cambios relevantes:
 
 1. partir de `main` actual;
-2. modificar la fuente canónica, no añadir overrides laterales;
-3. ejecutar/esperar Repository Integrity;
-4. esperar Azure preview/deploy del PR;
+2. modificar la autoridad canónica, no crear overrides laterales;
+3. retirar código/documentación reemplazados;
+4. esperar Repository Integrity, Public Home Integrity cuando aplique y Azure preview;
 5. fusionar sólo con CI verde;
-6. dejar `main` sin helpers temporales ni workflows de migración;
-7. el push a `main` dispara el circuito productivo.
+6. dejar `main` sin helpers, workflows o archivos de migración temporales.
 
-## 16. Regla final
+## 15. Regla final
 
-Antes de añadir una nueva capa, preguntar:
+Antes de añadir una capa nueva:
 
 > ¿Ya existe una autoridad para esta responsabilidad?
 
-Si la respuesta es sí, se extiende o corrige esa autoridad. No se crea una segunda implementación.
+Si existe, se corrige o amplía esa autoridad. No se crea una segunda implementación.

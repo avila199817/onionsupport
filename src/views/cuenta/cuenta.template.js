@@ -2,21 +2,23 @@
    Onion Support - Cuenta Template
    Archivo: /src/views/cuenta/cuenta.template.js
 
-   PRODUCTIVO · FOCUSED SELF-SERVICE · V5
+   PRODUCTIVO · COMPACT SELF-SERVICE · V6
 
    Cuenta queda reducida a cinco bloques útiles:
-   1) Foto de perfil.
-   2) Apariencia e idioma.
-   3) Contraseña.
-   4) Método de pago (visible, todavía no configurable).
-   5) Desactivación de cuenta.
+   1) Identidad compacta.
+   2) Foto de perfil.
+   3) Apariencia e idioma.
+   4) Contraseña.
+   5) Método de pago (visible, todavía no configurable).
+   6) Desactivación de cuenta.
 
-   Sin botón manual de actualizar, selector de color, sesiones,
-   actividad, privacidad, zona horaria, moneda ni ficha administrativa.
+   Sin hero editorial, título duplicado, botón manual de actualizar,
+   selector de color, sesiones, actividad, privacidad, zona horaria,
+   moneda ni ficha administrativa redundante.
 ========================================================= */
 
 export const CUENTA_TEMPLATE_VERSION =
-  "cuenta.template.productivo.v5.focused-payment-ready";
+  "cuenta.template.productivo.v6.compact-profile-first";
 
 export const CUENTA_TEMPLATE_CAPABILITIES = Object.freeze({
   readSelf: true,
@@ -30,6 +32,7 @@ export const CUENTA_TEMPLATE_CAPABILITIES = Object.freeze({
   paymentMethodVisible: true,
   paymentMethodConfigurable: false,
   manualRefreshUi: false,
+  editorialHeroUi: false,
 });
 
 export const CUENTA_ACTIONS = Object.freeze({
@@ -45,9 +48,6 @@ export const CUENTA_ACTIONS = Object.freeze({
 
 const COPY = Object.freeze({
   es: Object.freeze({
-    eyebrow: "Cuenta personal",
-    title: "Cuenta",
-    subtitle: "Gestiona lo esencial de tu acceso, tu foto y la experiencia de Onion Support desde un único sitio.",
     active: "Activa",
     disabled: "Desactivada",
     pending: "Pendiente",
@@ -95,9 +95,6 @@ const COPY = Object.freeze({
     errorTitle: "No se pudo completar",
   }),
   ca: Object.freeze({
-    eyebrow: "Compte personal",
-    title: "Compte",
-    subtitle: "Gestiona l'essencial de l'accés, la foto i l'experiència d'Onion Support des d'un únic lloc.",
     active: "Actiu",
     disabled: "Desactivat",
     pending: "Pendent",
@@ -145,9 +142,6 @@ const COPY = Object.freeze({
     errorTitle: "No s'ha pogut completar",
   }),
   en: Object.freeze({
-    eyebrow: "Personal account",
-    title: "Account",
-    subtitle: "Manage the essentials of your access, profile photo and Onion Support experience from one place.",
     active: "Active",
     disabled: "Disabled",
     pending: "Pending",
@@ -408,26 +402,18 @@ function renderPasswordField({ name, label, placeholder, autocomplete, disabled 
 export function renderHeader({ item = null, state = {} } = {}) {
   const detail = safeObject(item);
   const local = resolveState(state);
-  const c = copyFor(local);
   const status = getStatus(detail, local);
   return `
-    <section class="cuenta-hero" data-cuenta-section="hero">
-      <div class="cuenta-hero-copy">
-        <span class="cuenta-eyebrow">${escapeHtml(c.eyebrow)}</span>
-        <h1 class="cuenta-title">${escapeHtml(c.title)}</h1>
-        <p class="cuenta-subtitle">${escapeHtml(c.subtitle)}</p>
+    <section class="cuenta-profile-summary" data-cuenta-section="identity" aria-label="${attr(getName(detail))}">
+      ${renderAvatar(detail, "hero")}
+      <div class="cuenta-profile-copy">
+        <strong class="cuenta-profile-name">${escapeHtml(getName(detail))}</strong>
+        <span class="cuenta-profile-email">${escapeHtml(getEmail(detail))}</span>
+        <span class="cuenta-profile-user">@${escapeHtml(getUsername(detail))}</span>
       </div>
-      <div class="cuenta-profile-summary">
-        ${renderAvatar(detail, "hero")}
-        <div class="cuenta-profile-copy">
-          <strong class="cuenta-profile-name">${escapeHtml(getName(detail))}</strong>
-          <span class="cuenta-profile-email">${escapeHtml(getEmail(detail))}</span>
-          <span class="cuenta-profile-user">@${escapeHtml(getUsername(detail))}</span>
-        </div>
-        <div class="cuenta-profile-badges">
-          <span class="cuenta-chip">${escapeHtml(getRole(detail, local))}</span>
-          <span class="cuenta-chip cuenta-chip--${attr(status.tone)}">${escapeHtml(status.label)}</span>
-        </div>
+      <div class="cuenta-profile-badges">
+        <span class="cuenta-chip">${escapeHtml(getRole(detail, local))}</span>
+        <span class="cuenta-chip cuenta-chip--${attr(status.tone)}">${escapeHtml(status.label)}</span>
       </div>
     </section>
   `;
@@ -588,7 +574,7 @@ export function renderDeactivateCard(detail = {}, state = {}) {
   `;
 }
 
-export function renderIdentityCard() { return ""; }
+export function renderIdentityCard(detail = {}, state = {}) { return renderHeader({ item: detail, state }); }
 export function renderPreferencesCard(detail = {}, state = {}) { return renderAppearanceCard(detail, state); }
 export function renderActivityCard() { return ""; }
 export function renderSessionsCard() { return ""; }
@@ -616,7 +602,7 @@ export function renderCuentaTemplate({ item = null, state = {} } = {}) {
   const local = resolveState(state);
   const detail = isObject(item) ? item : null;
   return `
-    <div class="cuenta-view" data-view="cuenta" data-cuenta-scope="true" data-cuenta-template="${attr(CUENTA_TEMPLATE_VERSION)}" data-cuenta-loading="${local.loading ? "true" : "false"}" data-cuenta-saving="${local.saving ? "true" : "false"}" data-cuenta-locale="${attr(local.preferences.locale)}" data-cuenta-theme-mode="${attr(local.preferences.themeMode)}" data-cuenta-payment-configurable="false">
+    <div class="cuenta-view" data-view="cuenta" data-cuenta-scope="true" data-cuenta-template="${attr(CUENTA_TEMPLATE_VERSION)}" data-cuenta-loading="${local.loading ? "true" : "false"}" data-cuenta-saving="${local.saving ? "true" : "false"}" data-cuenta-locale="${attr(local.preferences.locale)}" data-cuenta-theme-mode="${attr(local.preferences.themeMode)}" data-cuenta-payment-configurable="false" data-cuenta-editorial-hero="false">
       ${detail ? renderHeader({ item: detail, state: local }) : ""}
       ${renderFeedback({ state: local })}
       ${renderPanel({ item: detail, state: local })}
@@ -634,7 +620,7 @@ export function getCuentaTemplateSnapshot({ item = null, state = {} } = {}) {
     loading: local.loading,
     saving: local.saving,
     preferences: { ...local.preferences },
-    renderedCards: ["avatar", "appearance", "security", "payment", "deactivate"],
+    renderedCards: ["identity", "avatar", "appearance", "security", "payment", "deactivate"],
     renderedActions: [
       CUENTA_ACTIONS.CHOOSE_AVATAR,
       CUENTA_ACTIONS.DELETE_AVATAR,
@@ -646,6 +632,7 @@ export function getCuentaTemplateSnapshot({ item = null, state = {} } = {}) {
     architecture: {
       pureTemplate: true,
       manualRefreshUi: false,
+      editorialHeroUi: false,
       accentPreferenceUi: false,
       paymentMethodUi: true,
       paymentMethodConfigurable: false,
@@ -656,6 +643,7 @@ export function getCuentaTemplateSnapshot({ item = null, state = {} } = {}) {
       passwordValueRendered: false,
       safeAvatarUrls: true,
       focusedSelfService: true,
+      compactIdentityFirst: true,
     },
   };
 }

@@ -33,6 +33,7 @@ PUBLIC_ROUTE_CSS = (
 )
 
 RUNTIME_FILES = {
+    "loader": ROOT / "src/app/loader.js",
     "deeplink": ROOT / "src/features/ticket-deeplink/index.js",
     "facturas_refresh": ROOT / "src/features/facturas-autorefresh/index.js",
     "incidencias_preview": ROOT / "src/features/incidencias-media-preview/index.js",
@@ -81,6 +82,7 @@ def public_home_manifest(route_styles: str) -> str:
 
 
 def validate_runtime_boundaries(errors: list[str], runtime: dict[str, str]) -> None:
+    loader = runtime["loader"]
     deeplink = runtime["deeplink"]
     facturas = runtime["facturas_refresh"]
     preview = runtime["incidencias_preview"]
@@ -89,6 +91,13 @@ def validate_runtime_boundaries(errors: list[str], runtime: dict[str, str]) -> N
     chrome = runtime["chrome"]
     preboot = runtime["preboot"]
     route_styles = runtime["route_styles"]
+
+    require(
+        errors,
+        "export function hideLoader" in loader
+        and "forceHideLoader" not in loader,
+        "app/loader.js debe exponer sólo hideLoader como cierre canónico",
+    )
 
     require(
         errors,
@@ -266,6 +275,11 @@ def main() -> int:
         "void startPostRouterEnhancements(enhancements);" in main_text,
         "Los enhancements post-router deben arrancar sin bloquear ready",
     )
+    require(
+        errors,
+        "forceHideLoader" not in main_text,
+        "src/main.js sólo puede consumir hideLoader; alias legacy prohibido",
+    )
 
     for module_path in CANONICAL_MODULES:
         require(
@@ -296,6 +310,7 @@ def main() -> int:
     print("App/runtime integrity: PASS")
     print("- index.html: 1 módulo ejecutable (/src/main.js)")
     print(f"- registry global: {len(CANONICAL_MODULES)} módulos")
+    print("- loader: API canónica sin alias legacy")
     print("- app.css: global-only")
     print("- route styles: CSS público/privado bajo una sola autoridad")
     print("- post-router: progresivo/no bloqueante")

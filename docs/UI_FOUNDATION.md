@@ -167,3 +167,8 @@ Si una vista sólo funciona con datos cortos, un ancho concreto o una resolució
 - Correo mantiene únicamente `index.css` + `viewport.css`; su contrato de altura/densidad ya no se inyecta globalmente desde `app.css`.
 - Los estilos específicos del Sidebar viven en `sidebar.css`, no en mini-hojas paralelas.
 - Repository Integrity impide que estas rutas legacy reaparezcan.
+
+## Detail Modal transversal · V8
+
+Los tokens compartidos del shell de detalle usan el namespace `--ui-detail-modal-*` en `tokens/variables.css` y `tokens/light.css`. Ningún componente transversal puede depender de `--incidencias-modal-*`; ese prefijo queda reservado a necesidades exclusivas del dominio Incidencias.
+

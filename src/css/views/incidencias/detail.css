@@ -7,18 +7,18 @@ overflow: hidden;
 
 .incidencias-modal-id-chip {
 appearance: none;
-  min-block-size: var(--incidencias-modal-chip-height);
+  min-block-size: var(--ui-detail-modal-chip-height);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
   margin: 0;
-  padding-inline: var(--incidencias-modal-chip-padding-x);
+  padding-inline: var(--ui-detail-modal-chip-padding-x);
   border: 1px solid var(--badge-border);
   border-radius: var(--radius-pill);
   background: var(--badge-bg);
   color: var(--badge-text);
-  font-size: var(--incidencias-modal-chip-font-size);
+  font-size: var(--ui-detail-modal-chip-font-size);
   font-weight: var(--weight-semibold);
   line-height: 1;
   white-space: nowrap;
@@ -218,9 +218,9 @@ border: 2px solid transparent;
 .incidencias-modal-current-files,
 .incidencias-modal-composer {
 min-inline-size: 0;
-  border: 1px solid var(--incidencias-modal-card-border);
-  border-radius: var(--incidencias-modal-card-radius);
-  background: var(--incidencias-modal-card-bg);
+  border: 1px solid var(--ui-detail-modal-card-border);
+  border-radius: var(--ui-detail-modal-card-radius);
+  background: var(--ui-detail-modal-card-bg);
 }
 
 .incidencias-modal-admin-editor {
@@ -1031,7 +1031,7 @@ position: absolute;
   display: grid;
   place-items: center;
   padding: var(--space-md);
-  background: color-mix(in srgb, var(--incidencias-modal-bg) 84%, transparent);
+  background: color-mix(in srgb, var(--ui-detail-modal-bg) 84%, transparent);
   backdrop-filter: blur(7px);
   -webkit-backdrop-filter: blur(7px);
 }
@@ -1066,7 +1066,7 @@ position: absolute;
   display: grid;
   place-items: center;
   padding: var(--space-md);
-  background: color-mix(in srgb, var(--incidencias-modal-overlay-bg) 82%, transparent);
+  background: color-mix(in srgb, var(--ui-detail-modal-overlay-bg) 82%, transparent);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
 }
@@ -1392,7 +1392,7 @@ background: var(--warning);
 }
 
 [data-theme="light"] .incidencias-modal-loading-overlay {
-background: color-mix(in srgb, var(--incidencias-modal-bg) 86%, transparent);
+background: color-mix(in srgb, var(--ui-detail-modal-bg) 86%, transparent);
 }
 
 [data-theme="light"] .incidencias-modal-confirm-overlay {

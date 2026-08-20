@@ -1,0 +1,71 @@
+name: One-shot UI System V8 Detail Modal Tokens
+
+on:
+  push:
+    branches:
+      - refactor/ui-system-v8-detail-modal-tokens
+
+permissions:
+  contents: write
+
+env:
+  TARGET_BRANCH: refactor/ui-system-v8-detail-modal-tokens
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 1
+
+      - name: Guard trigger
+        run: |
+          set -euo pipefail
+          test -f .github/.ui-system-v8-detail-modal-tokens-trigger || {
+            echo "Trigger aún no presente; no hay migración que aplicar."
+            exit 0
+          }
+
+      - name: Canonicalize Detail Modal tokens
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/ui_system_v8_detail_modal_tokens.py
+
+      - name: Validate repository
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/repo_integrity.py
+          while IFS= read -r -d '' file; do
+            node --check "$file"
+          done < <(find src -type f -name '*.js' -print0)
+
+      - name: Validate token ownership
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          component = Path('src/css/components/detail-modal.css').read_text(encoding='utf-8')
+          if 'var(--incidencias-modal-' in component:
+              raise SystemExit('detail-modal.css aún depende de tokens Incidencias')
+          variables = Path('src/css/tokens/variables.css').read_text(encoding='utf-8')
+          if '--ui-detail-modal-width:' not in variables:
+              raise SystemExit('variables.css no contiene tokens canónicos Detail Modal')
+          print('Detail Modal token ownership OK')
+          PY
+
+      - name: Commit migration
+        run: |
+          set -euo pipefail
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git add src .github/scripts/repo_integrity.py docs/UI_FOUNDATION.md docs/UI_SYSTEM_V8_AUDIT.md
+          if git diff --cached --quiet; then
+            echo "Sin cambios de migración."
+            exit 0
+          fi
+          git commit -m "refactor(ui): canonicalizar tokens del Detail Modal"
+          git push origin HEAD:${TARGET_BRANCH}

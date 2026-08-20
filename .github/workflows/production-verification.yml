@@ -1,0 +1,63 @@
+name: Production Verification Gate
+
+on:
+  workflow_run:
+    workflows:
+      - Azure Static Web Apps CI/CD
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-verification-main
+  cancel-in-progress: true
+
+jobs:
+  verify-production:
+    name: Verify production matches main
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    if: >-
+      (
+        github.event_name == 'workflow_dispatch' &&
+        github.ref_name == 'main'
+      ) ||
+      (
+        github.event_name == 'workflow_run' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.conclusion == 'success'
+      )
+
+    steps:
+      - name: Checkout deployed revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || 'main' }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Resolve expected revision
+        id: revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_sha="$(git rev-parse HEAD)"
+          echo "sha=${expected_sha}" >> "${GITHUB_OUTPUT}"
+          echo "Expected production revision: ${expected_sha}"
+
+      - name: Validate verifier syntax
+        run: python3 -m py_compile .github/scripts/production_verify.py
+
+      - name: Verify deployed production strictly
+        run: >-
+          python3 .github/scripts/production_verify.py
+          --root .
+          --base-url https://www.onionsupport.com
+          --revision "${{ steps.revision.outputs.sha }}"
+          --attempts 8
+          --delay 10

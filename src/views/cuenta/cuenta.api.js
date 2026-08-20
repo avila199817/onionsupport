@@ -24,6 +24,7 @@
 
 import { AppCore } from "../../core/index.js";
 import Http from "../../core/http.js";
+import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 
 export const CUENTA_API_VERSION =
   "cuenta.api.backend-contract.v4-canonical-role";
@@ -184,76 +185,6 @@ function normalizeDireccion(value = {}) {
     provincia: safeText(first(source.provincia, source.province, source.state, ""), ""),
     pais: safeText(first(source.pais, source.country, ""), ""),
   };
-}
-
-function isAzureBlobHost(hostname = "") {
-  const host = safeText(hostname, "").toLowerCase();
-  return host === "blob.core.windows.net" || host.endsWith(".blob.core.windows.net");
-}
-
-function isSensitiveQueryParam(key = "") {
-  return [
-    "access_token",
-    "accesstoken",
-    "refresh_token",
-    "refreshtoken",
-    "id_token",
-    "idtoken",
-    "token",
-    "code",
-    "secret",
-    "session",
-    "sessionid",
-    "password",
-    "pwd",
-    "key",
-    "jwt",
-    "authorization",
-    "reset_token",
-    "resettoken",
-    "activation_token",
-    "activationtoken",
-  ].includes(normalizeKey(key));
-}
-
-function isAzureSasParam(key = "") {
-  return [
-    "sig", "se", "sp", "sv", "sr", "spr", "st",
-    "skoid", "sktid", "skt", "ske", "sks", "skv",
-  ].includes(String(key).toLowerCase());
-}
-
-function safeAvatarUrl(value = "") {
-  const raw = safeText(value, "");
-  if (!raw) return "";
-
-  if (
-    raw.startsWith("//") ||
-    /[\r\n\t\\]/.test(raw) ||
-    /^(javascript|data|vbscript|file):/i.test(raw)
-  ) {
-    return "";
-  }
-
-  if (/^blob:/i.test(raw)) return raw;
-  if (raw.startsWith("/")) return raw.replace(/\/{2,}/g, "/");
-
-  const localHttp = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(raw);
-  if (!/^https:\/\//i.test(raw) && !localHttp) return "";
-
-  try {
-    const url = new URL(raw);
-    const keys = [...url.searchParams.keys()];
-
-    if (keys.some(isSensitiveQueryParam)) return "";
-
-    const hasSas = keys.some(isAzureSasParam);
-    if (hasSas && !isAzureBlobHost(url.hostname)) return "";
-
-    return url.href;
-  } catch {
-    return "";
-  }
 }
 
 function sanitizePermissions(value = []) {
@@ -445,7 +376,7 @@ export function normalizeCuentaDetail(payload = {}, fallback = {}) {
     cliente.clienteId, cliente.clientId, cliente.customerId, cliente.id,
     ""
   ), "");
-  const avatarUrl = safeAvatarUrl(first(source.avatarUrl, source.avatar, source.picture, ""));
+  const avatarUrl = sanitizeRuntimeImageUrl(first(source.avatarUrl, source.avatar, source.picture, ""));
 
   const darkMode = normalizeBoolean(first(preferences.darkMode, source.darkMode, false), false);
   const privacyMode = normalizeBoolean(first(preferences.privacyMode, source.privacyMode, false), false);
@@ -957,7 +888,7 @@ export async function uploadCuentaAvatarRequest(file, { timeout = CUENTA_UPLOAD_
       source: "views.cuenta.api.avatar.upload",
     });
 
-    const returnedAvatar = safeAvatarUrl(first(response?.avatarUrl, response?.avatar, ""));
+    const returnedAvatar = sanitizeRuntimeImageUrl(first(response?.avatarUrl, response?.avatar, ""));
     return normalizeCuentaDetail(response, {
       ...getCurrentCoreUser(),
       avatar: returnedAvatar,

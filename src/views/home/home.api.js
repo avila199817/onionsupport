@@ -21,7 +21,7 @@ import IncidenciasApi from "../incidencias/incidencias.api.js";
 import FacturasApi from "../facturas/facturas.api.js";
 
 export const HOME_API_VERSION =
-  "home.api.domain-aggregator.v10.entity-identifiers";
+  "home.api.domain-aggregator.v11-canonical-role";
 
 export const HOME_TIMEOUT_MS = 15_000;
 export const HOME_LIST_LIMIT = 8;
@@ -157,36 +157,6 @@ function redact(value = "") {
     .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
-function normalizeRole(value = "") {
-  if (Array.isArray(value)) {
-    const roles = value.map(normalizeRole).filter(Boolean);
-    if (roles.includes("admin")) return "admin";
-    if (roles.includes("user")) return "user";
-    return "";
-  }
-
-  const role = cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-
-  if ([
-    "admin", "administrator", "administrador", "superadmin",
-    "super_admin", "root", "owner",
-  ].includes(role)) {
-    return "admin";
-  }
-
-  if (["user", "usuario", "client", "cliente"].includes(role)) {
-    return "user";
-  }
-
-  return "";
-}
-
 function errorStatus(error = null) {
   return number(
     first(
@@ -241,7 +211,7 @@ function getCurrentRole() {
   const state = getCoreState();
   const user = safeObject(getCurrentUser(), {});
 
-  return normalizeRole(
+  return AppCore.normalizeRole(
     first(
       AppCore?.getCurrentRole?.(),
       state.role,

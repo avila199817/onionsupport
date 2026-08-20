@@ -735,6 +735,16 @@ def validate_role_boundaries_v13_contract(errors: list[str]) -> None:
             errors.append(f"src/views/home/home.api.js :: alias de privilegio legacy prohibido tras V13: {alias}")
 
 
+def validate_cuenta_media_v14_contract(errors: list[str]) -> None:
+    path = ROOT / "src/views/cuenta/cuenta.api.js"
+    source = path.read_text(encoding="utf-8")
+    if 'sanitizeRuntimeImageUrl' not in source or '../../core/media.js' not in source:
+        errors.append("src/views/cuenta/cuenta.api.js :: debe consumir core/media.js tras V14")
+    for helper in ("isAzureBlobHost", "isSensitiveQueryParam", "isAzureSasParam", "safeAvatarUrl"):
+        if re.search(rf"\bfunction\s+{helper}\s*\(", source):
+            errors.append(f"src/views/cuenta/cuenta.api.js :: media helper local prohibido V14: {helper}")
+
+
 def validate_paths(errors: list[str]) -> None:
     for root in (SRC, ROOT / ".github"):
         if not root.exists():
@@ -764,6 +774,7 @@ def validate_known_dead_paths(errors: list[str]) -> None:
 
 def main() -> int:
     errors: list[str] = []
+    validate_cuenta_media_v14_contract(errors)
     validate_paths(errors)
     validate_js_references(errors)
     validate_first_helpers(errors)

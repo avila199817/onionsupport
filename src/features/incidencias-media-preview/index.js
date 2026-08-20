@@ -6,19 +6,18 @@
    - miniaturas locales de adjuntos pendientes;
    - recuperación de miniaturas remotas mediante el /view canónico;
    - sin mutar tickets, File, payloads, permisos ni contratos HTTP;
-   - listeners y observer limitados al mount estable del Router.
+   - listeners y observer limitados al mount estable del Router;
+   - CSS propiedad del manifest canónico de src/router/styles.js.
 ========================================================= */
 
 export const INCIDENCIAS_MEDIA_PREVIEW_VERSION =
-  "incidencias-media-preview.v2-router-view-scope";
+  "incidencias-media-preview.v3-route-css-owned";
 
 const VIEW = "#view-container, [data-router-view='true']";
 const ROOT = "[data-incidencias-modal-root='true']";
 const INPUT = `${ROOT} input[data-detail-field='attachments'], ${ROOT} input[data-field='attachments'][type='file']`;
 const DROPZONE = `${ROOT} [data-dropzone='detail-attachments']`;
 const REMOVE = `${ROOT} [data-detail-action='detail-pending-file-remove']`;
-const STYLE_ID = "onion-incidencias-media-preview-style";
-const STYLE_HREF = "/src/css/views/incidencias/media-preview.css";
 const MAX_FILES = 10;
 const MAX_SIZE = 100 * 1024 * 1024;
 const FAILURE_COOLDOWN = 60_000;
@@ -76,17 +75,6 @@ const labelFor = (file = {}) => {
 
 function viewRoot() {
   return browser() ? document.querySelector(VIEW) : null;
-}
-
-function ensureCss() {
-  if (!browser() || document.getElementById(STYLE_ID)) return false;
-  const link = document.createElement("link");
-  link.id = STYLE_ID;
-  link.rel = "stylesheet";
-  link.href = STYLE_HREF;
-  link.dataset.onionFeature = INCIDENCIAS_MEDIA_PREVIEW_VERSION;
-  document.head.appendChild(link);
-  return true;
 }
 
 function objectUrl(file) {
@@ -506,7 +494,6 @@ export function mountIncidenciasMediaPreview() {
 
   mounted = true;
   mountRoot = root;
-  ensureCss();
 
   mountRoot.addEventListener("change", onChange, true);
   mountRoot.addEventListener("drop", onDrop, true);
@@ -544,6 +531,7 @@ export function getIncidenciasMediaPreviewSnapshot() {
     version: INCIDENCIAS_MEDIA_PREVIEW_VERSION,
     mounted,
     observerScope: "router-view",
+    cssAuthority: "router-styles",
     pendingFiles: pending.order.length,
     remoteCacheEntries: remoteCache.size,
     modalMounted: Boolean(lastRoot?.isConnected),

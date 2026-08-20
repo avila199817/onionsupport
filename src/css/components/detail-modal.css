@@ -77,10 +77,6 @@ position: fixed;
 display: none;
 }
 
-body.ui-detail-modal-open {
-overflow: hidden;
-  overscroll-behavior: none;
-}
 
 .ui-detail-modal-overlay {
 position: fixed;
@@ -158,14 +154,14 @@ inline-size: var(--ui-detail-modal-avatar-size);
 }
 
 .ui-detail-modal-avatar-frame {
---inc-avatar-a: var(--accent);
-  --inc-avatar-b: var(--info);
+--ui-detail-avatar-a: var(--accent);
+  --ui-detail-avatar-b: var(--info);
   display: grid;
   place-items: center;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--inc-avatar-a) 44%, var(--border-default));
+  border: 1px solid color-mix(in srgb, var(--ui-detail-avatar-a) 44%, var(--border-default));
   border-radius: var(--ui-detail-modal-avatar-radius);
-  background: linear-gradient(135deg, var(--inc-avatar-a), var(--inc-avatar-b));
+  background: linear-gradient(135deg, var(--ui-detail-avatar-a), var(--ui-detail-avatar-b));
   color: var(--text-on-accent, #fff);
   box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
   font-size: var(--font-lg);
@@ -174,43 +170,43 @@ inline-size: var(--ui-detail-modal-avatar-size);
 }
 
 .ui-detail-modal-avatar-frame[data-avatar-tone="0"] {
---inc-avatar-a: var(--accent); --inc-avatar-b: var(--info);
+--ui-detail-avatar-a: var(--accent); --ui-detail-avatar-b: var(--info);
 }
 
 .ui-detail-modal-avatar-frame[data-avatar-tone="1"] {
---inc-avatar-a: var(--success); --inc-avatar-b: var(--info);
+--ui-detail-avatar-a: var(--success); --ui-detail-avatar-b: var(--info);
 }
 
 .ui-detail-modal-avatar-frame[data-avatar-tone="2"] {
---inc-avatar-a: var(--warning); --inc-avatar-b: var(--accent);
+--ui-detail-avatar-a: var(--warning); --ui-detail-avatar-b: var(--accent);
 }
 
 .ui-detail-modal-avatar-frame[data-avatar-tone="3"] {
---inc-avatar-a: var(--error); --inc-avatar-b: var(--warning);
+--ui-detail-avatar-a: var(--error); --ui-detail-avatar-b: var(--warning);
 }
 
 .ui-detail-modal-avatar-frame[data-avatar-tone="4"] {
---inc-avatar-a: var(--info); --inc-avatar-b: var(--accent);
+--ui-detail-avatar-a: var(--info); --ui-detail-avatar-b: var(--accent);
 }
 
 .ui-detail-modal-avatar-frame[data-avatar-tone="5"] {
---inc-avatar-a: var(--success); --inc-avatar-b: var(--accent);
+--ui-detail-avatar-a: var(--success); --ui-detail-avatar-b: var(--accent);
 }
 
 .ui-detail-modal-avatar-frame[data-avatar-tone="6"] {
---inc-avatar-a: var(--info); --inc-avatar-b: var(--success);
+--ui-detail-avatar-a: var(--info); --ui-detail-avatar-b: var(--success);
 }
 
 .ui-detail-modal-avatar-frame[data-avatar-tone="7"] {
---inc-avatar-a: var(--warning); --inc-avatar-b: var(--error);
+--ui-detail-avatar-a: var(--warning); --ui-detail-avatar-b: var(--error);
 }
 
 .ui-detail-modal-avatar-frame[data-avatar-tone="8"] {
---inc-avatar-a: var(--error); --inc-avatar-b: var(--accent);
+--ui-detail-avatar-a: var(--error); --ui-detail-avatar-b: var(--accent);
 }
 
 .ui-detail-modal-avatar-frame[data-avatar-tone="9"] {
---inc-avatar-a: var(--accent); --inc-avatar-b: var(--success);
+--ui-detail-avatar-a: var(--accent); --ui-detail-avatar-b: var(--success);
 }
 
 .ui-detail-modal-avatar-frame img {

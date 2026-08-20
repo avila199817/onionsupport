@@ -497,6 +497,54 @@ def validate_detail_modal_v6_contract(errors: list[str]) -> None:
         errors.append("src/router/styles.js :: Usuarios no puede cargar incidencias/detail.css")
 
 
+def validate_shared_detail_modal_v7_contract(errors: list[str]) -> None:
+    """Incidencias and Usuarios must share the same transverse modal shell authority."""
+    route_styles = (SRC / "router" / "styles.js").read_text(encoding="utf-8")
+    inc_template = (SRC / "views" / "incidencias" / "incidencias.template.modal.js").read_text(encoding="utf-8")
+    inc_detail = (SRC / "css" / "views" / "incidencias" / "detail.css").read_text(encoding="utf-8")
+
+    inc_match = re.search(r"incidencias:\s*Object\.freeze\(\[(?P<body>.*?)\]\)", route_styles, re.DOTALL)
+    if not inc_match:
+        errors.append("src/router/styles.js :: falta manifest CSS de Incidencias")
+    else:
+        inc_css = inc_match.group("body")
+        if '"/src/css/components/detail-modal.css"' not in inc_css:
+            errors.append("src/router/styles.js :: Incidencias debe cargar detail-modal.css")
+
+    for snippet in ("ui-detail-modal-root", "ui-detail-modal-overlay", "ui-detail-modal-panel", "ui-detail-modal-body"):
+        if snippet not in inc_template:
+            errors.append(f"src/views/incidencias/incidencias.template.modal.js :: falta clase compartida: {snippet}")
+
+    for selector in (
+        ".incidencias-modal-overlay {",
+        ".incidencias-modal-panel {",
+        ".incidencias-modal-body {",
+        ".incidencias-modal-meta-grid {",
+    ):
+        if selector in inc_detail:
+            errors.append(f"src/css/views/incidencias/detail.css :: regla compartida duplicada tras V7: {selector}")
+
+
+def validate_detail_modal_pairing_v7_contract(errors: list[str]) -> None:
+    """Critical Incidencias modal primitives must carry both domain and shared classes."""
+    template = (SRC / "views" / "incidencias" / "incidencias.template.modal.js").read_text(encoding="utf-8")
+    required_pairs = (
+        "incidencias-modal-root ui-detail-modal-root",
+        "incidencias-modal-overlay ui-detail-modal-overlay",
+        "incidencias-modal-panel ui-detail-modal-panel",
+        "incidencias-modal-chip ui-detail-modal-chip",
+        "incidencias-modal-body ui-detail-modal-body",
+        "incidencias-modal-meta-grid ui-detail-modal-meta-grid",
+    )
+    for pair in required_pairs:
+        if pair not in template:
+            errors.append(f"src/views/incidencias/incidencias.template.modal.js :: falta alias compartido: {pair}")
+
+    dynamic_pair = "incidencias-modal-chip--${attr(safeModifier)} ui-detail-modal-chip--${attr(safeModifier)}"
+    if dynamic_pair not in template:
+        errors.append("src/views/incidencias/incidencias.template.modal.js :: modifier dinámico de chip no comparte autoridad V7")
+
+
 def validate_paths(errors: list[str]) -> None:
     for root in (SRC, ROOT / ".github"):
         if not root.exists():
@@ -536,6 +584,8 @@ def main() -> int:
     validate_ui_system_v4_contract(errors)
     validate_correo_cascade_v5_contract(errors)
     validate_detail_modal_v6_contract(errors)
+    validate_shared_detail_modal_v7_contract(errors)
+    validate_detail_modal_pairing_v7_contract(errors)
     validate_known_dead_paths(errors)
 
     unique_errors = list(dict.fromkeys(errors))

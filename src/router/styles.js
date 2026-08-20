@@ -14,7 +14,7 @@
 ========================================================= */
 
 export const ROUTE_STYLES_VERSION =
-  "route-styles.v9-shared-detail-modal";
+  "route-styles.v12-route-minimal-public-home";
 
 const MODE_ATTRIBUTE =
   "data-css-route-mode";
@@ -53,8 +53,10 @@ const MEDIA_INACTIVE =
 
 const STYLE_MANIFEST = Object.freeze({
   "public-home": Object.freeze([
-    "/src/css/auth/login.css",
     "/src/css/views/public/index.css",
+    "/src/css/views/public/support-request.css",
+    "/src/css/views/public/public-support-progress.css",
+    "/src/css/views/public/home-experience.css",
   ]),
 
   login: Object.freeze([
@@ -82,6 +84,7 @@ const STYLE_MANIFEST = Object.freeze({
     "/src/css/views/incidencias/index.css",
     "/src/css/views/incidencias/create.css",
     "/src/css/views/incidencias/detail.css",
+    "/src/css/views/incidencias/media-preview.css",
   ]),
 
   facturas: Object.freeze([
@@ -1128,7 +1131,6 @@ export function clearRouteStyles(
       Object.freeze([]),
   });
 }
-
 
 /* =========================================================
    INTROSPECTION

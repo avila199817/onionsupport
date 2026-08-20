@@ -1,10 +1,9 @@
 # =========================================================
-# ONION SUPPORT — PUBLIC HOME CONTRACT
-# Validación específica de la landing pública + intake.
-# No despliega: protege el contrato visual/técnico del frontend.
+# ONION SUPPORT — PUBLIC HOME INTEGRITY
+# Contrato único para landing, intake y mejoras públicas.
 # =========================================================
 
-name: Public Home Contract
+name: Public Home Integrity
 
 run-name: Public Home · ${{ github.event_name }} · ${{ github.head_ref || github.ref_name || 'manual' }}
 
@@ -15,10 +14,14 @@ on:
     paths:
       - "index.html"
       - "docs/PUBLIC_TICKET_INTAKE.md"
+      - "src/app/enhancements.js"
       - "src/features/public-support/**"
+      - "src/features/public-support-progress/**"
+      - "src/features/public-home-experience/**"
       - "src/views/public/home/**"
       - "src/css/app.css"
       - "src/css/views/public/**"
+      - ".github/scripts/public_home_integrity.py"
       - ".github/workflows/public-home-contract.yml"
 
   pull_request:
@@ -27,10 +30,14 @@ on:
     paths:
       - "index.html"
       - "docs/PUBLIC_TICKET_INTAKE.md"
+      - "src/app/enhancements.js"
       - "src/features/public-support/**"
+      - "src/features/public-support-progress/**"
+      - "src/features/public-home-experience/**"
       - "src/views/public/home/**"
       - "src/css/app.css"
       - "src/css/views/public/**"
+      - ".github/scripts/public_home_integrity.py"
       - ".github/workflows/public-home-contract.yml"
 
   workflow_dispatch:
@@ -39,7 +46,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: public-home-contract-${{ github.event.pull_request.number || github.ref }}
+  group: public-home-integrity-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -57,189 +64,16 @@ jobs:
           lfs: false
           persist-credentials: false
 
-      - name: Validate JavaScript syntax
+      - name: Validate public JavaScript syntax
+        shell: bash
         run: |
           set -euo pipefail
+          node --check src/app/enhancements.js
           node --check src/features/public-support/index.js
+          node --check src/features/public-support-progress/index.js
+          node --check src/features/public-home-experience/index.js
           node --check src/views/public/home/index.js
           node --check src/views/public/home/template.js
 
       - name: Validate public frontend contract
-        run: |
-          set -euo pipefail
-
-          python3 - <<'PY'
-          from pathlib import Path
-          import sys
-
-          required = [
-              Path("index.html"),
-              Path("docs/PUBLIC_TICKET_INTAKE.md"),
-              Path("src/css/app.css"),
-              Path("src/css/views/public/index.css"),
-              Path("src/css/views/public/support-request.css"),
-              Path("src/css/views/public/home-experience.css"),
-              Path("src/features/public-support/index.js"),
-              Path("src/views/public/home/index.js"),
-              Path("src/views/public/home/template.js"),
-          ]
-
-          errors = []
-
-          for path in required:
-              if not path.is_file():
-                  errors.append(f"Falta archivo obligatorio: {path}")
-
-          if errors:
-              for error in errors:
-                  print(f"::error::{error}")
-              sys.exit(1)
-
-          index = Path("index.html").read_text(encoding="utf-8")
-          docs = Path("docs/PUBLIC_TICKET_INTAKE.md").read_text(encoding="utf-8")
-          app_css = Path("src/css/app.css").read_text(encoding="utf-8")
-          intake = Path("src/features/public-support/index.js").read_text(encoding="utf-8")
-          home = Path("src/views/public/home/index.js").read_text(encoding="utf-8")
-          experience_css = Path("src/css/views/public/home-experience.css").read_text(encoding="utf-8")
-
-          checks = [
-              (
-                  '/src/features/public-support/index.js' in index,
-                  "index.html debe cargar el módulo public-support/index.js",
-              ),
-              (
-                  'mobile-polish.js' not in index,
-                  "index.html no debe volver a cargar mobile-polish.js",
-              ),
-              (
-                  '/src/css/views/public/mobile-polish.css' not in index,
-                  "index.html debe mantener app.css como único entrypoint CSS",
-              ),
-              (
-                  '@import url("./views/public/support-request.css")' in app_css,
-                  "app.css debe importar support-request.css",
-              ),
-              (
-                  '@import url("./views/public/home-experience.css")' in app_css,
-                  "app.css debe importar home-experience.css como fuente responsive canónica",
-              ),
-              (
-                  'mobile-polish.css' not in app_css,
-                  "app.css no debe volver a importar mobile-polish.css",
-              ),
-              (
-                  'PUBLIC_TICKET_ENDPOINT = "/api/tickets/public"' in intake,
-                  "El intake debe mantener POST /api/tickets/public como contrato",
-              ),
-              (
-                  'SPAIN_PREFIX = "+34"' in intake,
-                  "El intake debe mantener +34 como prefijo España",
-              ),
-              (
-                  '/^[6789]\\d{8}$/' in intake,
-                  "El intake debe mantener 9 dígitos españoles estándar (6-9)",
-              ),
-              (
-                  'public-support.intake.v5-live-optional-auth' in intake,
-                  "Versión final esperada public-support.intake.v5-live-optional-auth",
-              ),
-              (
-                  'intakeIconNode' in intake and 'public-support-intake-icon' in intake,
-                  "Los CTAs internos deben usar icono propio de incidencia",
-              ),
-              (
-                  'fullName: fullName(user)' not in intake,
-                  "El formulario público no debe volver a precargar automáticamente el nombre completo",
-              ),
-              (
-                  'const useAuth = session().authenticated === true;' in intake,
-                  "El intake debe habilitar Authorization sólo cuando existe sesión autenticada",
-              ),
-              (
-                  'auth: useAuth,' in intake,
-                  "El POST público debe usar autenticación opcional",
-              ),
-              (
-                  'public: true,' not in intake and 'noAuthHeader: true,' not in intake,
-                  "El intake live no debe volver a bloquear Authorization con public:true/noAuthHeader:true",
-              ),
-              (
-                  '"Idempotency-Key": requestKey' in intake and 'idempotencyKey(form)' in intake,
-                  "El intake debe enviar una Idempotency-Key estable por reintento",
-              ),
-              (
-                  'clearIdempotency(form);' in intake,
-                  "El intake debe rotar la idempotencia al editar o tras éxito",
-              ),
-              (
-                  'Solicitud recibida. Revisa tu correo para continuar.' in intake and 'neutralAccepted(response)' in intake,
-                  "La respuesta anónima anti-enumeración debe mostrarse de forma neutra",
-              ),
-              (
-                  'public.home.view.controller.final.productivo.2026.23.history-replace' in home,
-                  "La home debe mantener la revisión que corrige el historial de navegación interna",
-              ),
-              (
-                  home.count('replace: true,') >= 2,
-                  "Los clics y scrollTo programático de la home deben reemplazar el hash sin apilar historial",
-              ),
-              (
-                  'public-home-topbar-account' not in experience_css,
-                  "El CSS responsive no debe volver a duplicar la identidad en el top bar",
-              ),
-              (
-                  '.public-home .public-home-price-link' in experience_css,
-                  "home-experience.css debe conservar la simplificación canónica del header",
-              ),
-              (
-                  '@media (max-width: 1040px)' in experience_css and '.public-home .public-home-nav-panel' in experience_css,
-                  "home-experience.css debe contener el contrato responsive del drawer público",
-              ),
-              (
-                  '`POST /api/tickets/public`' in docs,
-                  "La documentación debe mantener el endpoint público acordado",
-              ),
-              (
-                  '`+34` por defecto' in docs and '`6`, `7`, `8` o `9`' in docs,
-                  "La documentación debe mantener el alcance telefónico España",
-              ),
-              (
-                  'no deben usar su icono' in docs,
-                  "La documentación debe diferenciar CTA interno y WhatsApp",
-              ),
-              (
-                  '`Idempotency-Key`' in docs and 'autenticación opcional' in docs,
-                  "La documentación debe describir idempotencia y auth opcional",
-              ),
-          ]
-
-          for ok, message in checks:
-              if not ok:
-                  errors.append(message)
-
-          forbidden_paths = [
-              Path("src/features/public-support/mobile-polish.js"),
-              Path("src/css/views/public/mobile-polish.css"),
-              Path("noop"),
-          ]
-
-          for path in forbidden_paths:
-              if path.exists():
-                  errors.append(f"Archivo temporal/retirado reaparecido: {path}")
-
-          for css_path in [
-              Path("src/css/views/public/index.css"),
-              Path("src/css/views/public/support-request.css"),
-              Path("src/css/views/public/home-experience.css"),
-          ]:
-              css = css_path.read_text(encoding="utf-8")
-              if css.count("{") != css.count("}"):
-                  errors.append(f"Llaves CSS desbalanceadas: {css_path}")
-
-          if errors:
-              for error in errors:
-                  print(f"::error::{error}")
-              sys.exit(1)
-
-          print("Public home frontend contract OK.")
-          PY
+        run: python3 .github/scripts/public_home_integrity.py

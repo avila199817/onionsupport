@@ -51,6 +51,9 @@ jobs:
       - name: Validate repository contracts
         run: python3 .github/scripts/repo_integrity.py
 
+      - name: Validate single app entrypoint
+        run: python3 .github/scripts/app_entrypoint_integrity.py
+
       - name: Validate static host JSON
         run: python3 -m json.tool staticwebapp.config.json >/dev/null
 

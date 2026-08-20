@@ -13,15 +13,17 @@
    - una incidencia en curso por cuenta, preparada para enforcement backend;
    - respuesta anti-enumeración neutra para visitante anónimo;
    - CTAs internos diferenciados de WhatsApp;
+   - listeners del formulario limitados al mount persistente del Router;
    - WhatsApp queda como canal alternativo.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import Http from "../../core/http.js";
 
-export const PUBLIC_SUPPORT_VERSION = "public-support.intake.v5-live-optional-auth";
+export const PUBLIC_SUPPORT_VERSION = "public-support.intake.v6-router-view-events";
 export const PUBLIC_TICKET_ENDPOINT = "/api/tickets/public";
 
+const VIEW_ROOT_SELECTOR = "#view-container, [data-router-view='true']";
 const HOME = "[data-public-home]";
 const FORM = "[data-public-support-form]";
 const SECTION_ID = "incidencia";
@@ -37,6 +39,8 @@ const enhanced = new WeakSet();
 
 let observer = null;
 let retryTimer = 0;
+let mountRoot = null;
+let installed = false;
 let destroyed = false;
 
 const text = (value = "", fallback = "") =>
@@ -502,8 +506,10 @@ function enhance(root) {
 
 function scan() {
   if (destroyed || typeof document === "undefined") return false;
+
+  const scope = mountRoot || document;
   let found = false;
-  document.querySelectorAll(HOME).forEach((root) => {
+  scope.querySelectorAll(HOME).forEach((root) => {
     found = enhance(root) || found;
   });
   return found;
@@ -911,24 +917,41 @@ function onFocusOut(event) {
   else if (!text(input.value)) input.value = SPAIN_PHONE_DEFAULT;
 }
 
-function install() {
-  if (typeof window === "undefined" || destroyed) return;
+function bindFormEvents(root) {
+  if (!root) return false;
 
-  document.addEventListener("submit", onSubmit, true);
-  document.addEventListener("input", onInput, true);
-  document.addEventListener("focusin", onFocusIn, true);
-  document.addEventListener("focusout", onFocusOut, true);
+  root.addEventListener("submit", onSubmit, true);
+  root.addEventListener("input", onInput, true);
+  root.addEventListener("focusin", onFocusIn, true);
+  root.addEventListener("focusout", onFocusOut, true);
+  return true;
+}
+
+function unbindFormEvents(root) {
+  if (!root) return false;
+
+  root.removeEventListener("submit", onSubmit, true);
+  root.removeEventListener("input", onInput, true);
+  root.removeEventListener("focusin", onFocusIn, true);
+  root.removeEventListener("focusout", onFocusOut, true);
+  return true;
+}
+
+function install() {
+  if (typeof window === "undefined" || destroyed || installed) return false;
+
+  const root = document.querySelector(VIEW_ROOT_SELECTOR);
+  if (!root || typeof MutationObserver === "undefined") return false;
+
+  mountRoot = root;
+  installed = true;
+  bindFormEvents(root);
+
   window.addEventListener("onion:main:ready", scan);
   document.addEventListener("public-home:ready", scan, true);
 
-  const mount =
-    document.querySelector("#view-container") ||
-    document.querySelector("[data-router-view]") ||
-    document.querySelector("[data-app-content]") ||
-    document.body;
-
   observer = new MutationObserver(scan);
-  observer.observe(mount, { childList: true, subtree: true });
+  observer.observe(root, { childList: true, subtree: true });
 
   if (!scan()) {
     let attempts = 0;
@@ -940,16 +963,15 @@ function install() {
       }
     }, 750);
   }
+
+  return true;
 }
 
 export function destroyPublicSupport() {
   if (typeof window === "undefined" || destroyed) return false;
   destroyed = true;
 
-  document.removeEventListener("submit", onSubmit, true);
-  document.removeEventListener("input", onInput, true);
-  document.removeEventListener("focusin", onFocusIn, true);
-  document.removeEventListener("focusout", onFocusOut, true);
+  unbindFormEvents(mountRoot);
   window.removeEventListener("onion:main:ready", scan);
   document.removeEventListener("public-home:ready", scan, true);
 
@@ -958,7 +980,20 @@ export function destroyPublicSupport() {
 
   if (retryTimer) clearInterval(retryTimer);
   retryTimer = 0;
+  mountRoot = null;
+  installed = false;
   return true;
+}
+
+export function getPublicSupportSnapshot() {
+  return Object.freeze({
+    version: PUBLIC_SUPPORT_VERSION,
+    endpoint: PUBLIC_TICKET_ENDPOINT,
+    installed,
+    listenerScope: mountRoot ? "router-view" : "none",
+    observerScope: mountRoot ? "router-view" : "none",
+    homeMounted: Boolean(mountRoot?.querySelector?.(HOME)),
+  });
 }
 
 if (typeof window !== "undefined") install();
@@ -968,4 +1003,5 @@ export default Object.freeze({
   endpoint: PUBLIC_TICKET_ENDPOINT,
   scan,
   destroy: destroyPublicSupport,
+  getSnapshot: getPublicSupportSnapshot,
 });

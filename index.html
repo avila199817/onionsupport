@@ -163,9 +163,25 @@
     href="/src/css/app.css"
   >
 
+  <!--
+    Sólo se adelantan recursos que main.js necesita antes del Router.
+    Las mejoras post-router permanecen realmente diferidas.
+
+    Autoridad post-router:
+    /src/features/mobile-datalist/index.js se carga desde
+    /src/app/enhancements.js, nunca como script ejecutable de index.html.
+  -->
   <link
-    rel="stylesheet"
-    href="/src/css/views/public/public-support-progress.css"
+    rel="modulepreload"
+    href="/src/app/enhancements.js"
+  >
+  <link
+    rel="modulepreload"
+    href="/src/features/ticket-deeplink/index.js"
+  >
+  <link
+    rel="modulepreload"
+    href="/src/ui/chrome/index.js"
   >
 
   <noscript>
@@ -361,66 +377,10 @@
     </main>
   </div>
 
-  <!--
-    Debe ejecutarse antes del Router principal para convertir enlaces
-    históricos /tickets/<INC-...> en la ruta canónica de incidencias.
-  -->
-  <script
-    type="module"
-    src="/src/features/ticket-deeplink/index.js"
-  ></script>
-
-  <!-- Facturas se revalida de forma autónoma sin control manual. -->
-  <script
-    type="module"
-    src="/src/features/facturas-autorefresh/index.js"
-  ></script>
-
-  <!--
-    Incidencias: miniaturas locales inmediatas y recuperación segura de previews.
-    Feature progresiva: no modifica payloads, permisos ni contratos HTTP.
-  -->
-  <script
-    type="module"
-    src="/src/features/incidencias-media-preview/index.js"
-  ></script>
-
-  <!--
-    App Chrome se inicializa antes de main.js y gobierna Topbar + Sidebar
-    desde una única autoridad responsive, sin bridges de compatibilidad.
-  -->
-  <script
-    type="module"
-    src="/src/ui/chrome/index.js"
-  ></script>
-
+  <!-- Único entrypoint ejecutable de la SPA. -->
   <script
     type="module"
     src="/src/main.js"
-  ></script>
-
-  <!--
-    Las tablas privadas conservan su DOM semántico; esta mejora progresiva las
-    anota para que la capa compositions las convierta en DataList en teléfono.
-  -->
-  <script
-    type="module"
-    src="/src/features/mobile-datalist/index.js"
-  ></script>
-
-  <script
-    type="module"
-    src="/src/features/public-support/index.js"
-  ></script>
-
-  <script
-    type="module"
-    src="/src/features/public-support-progress/index.js"
-  ></script>
-
-  <script
-    type="module"
-    src="/src/features/public-home-experience/index.js"
   ></script>
 </body>
 </html>

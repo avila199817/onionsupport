@@ -2,14 +2,12 @@
    Onion Support - App Chrome Controller
    Archivo: /src/ui/chrome/index.js
 
-   APP CHROME V3
-
    Responsabilidad:
    - Coordinar Topbar + Sidebar como una única pieza de aplicación.
    - Mantener el drawer móvil sin alterar la geometría del contenido.
    - Gestionar trigger, backdrop, Escape, foco e historial.
-   - Consumir la API pública de SidebarUI, sin duplicar navegación/Auth.
-   - Sin HTTP, Router, Store ni lógica de dominio.
+   - Consumir la API pública de SidebarUI sin duplicar navegación/Auth.
+   - Sin compatibilidad Mobile Shell, HTTP, Router, Store ni dominio.
 ========================================================= */
 
 import { SidebarUI } from "../sidebar/index.js";
@@ -20,7 +18,7 @@ import {
 } from "./template.js";
 
 export const APP_CHROME_VERSION =
-  "app-chrome.controller.v3-single-layout-authority";
+  "app-chrome.controller.v4-no-mobile-shell-compat";
 
 const MOBILE_QUERY = "(max-width: 900px)";
 const SIDEBAR_NAV_LINK_SELECTOR =
@@ -34,14 +32,12 @@ const SIDEBAR_FOCUSABLE_SELECTOR = [
 let initialized = false;
 let mediaQuery = null;
 let desktopOpenBeforeMobile = true;
-let documentObserver = null;
+let sidebarStateObserver = null;
 let mountsObserver = null;
+let syncFrame = 0;
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
 function eventElement(target = null) {
@@ -51,17 +47,12 @@ function eventElement(target = null) {
 
 function isMobile() {
   if (!isBrowser()) return false;
-
-  if (!mediaQuery) {
-    mediaQuery = window.matchMedia(MOBILE_QUERY);
-  }
-
+  mediaQuery ||= window.matchMedia(MOBILE_QUERY);
   return mediaQuery.matches === true;
 }
 
 function sidebarState() {
   if (!isBrowser()) return "hidden";
-
   return (
     document.body?.dataset?.sidebarState ||
     document.documentElement?.dataset?.sidebarState ||
@@ -83,7 +74,6 @@ function sidebarIsOpen() {
 
 function chromeIsVisible() {
   const refs = getAppChromeTemplateRefs();
-
   return Boolean(
     refs.sidebarMount &&
     refs.topbarMount &&
@@ -134,25 +124,11 @@ function syncBackgroundInteractivity(open = false) {
 }
 
 function syncDocumentState({ mobile, visible, open }) {
-  const navigation =
-    !visible
-      ? "hidden"
-      : open
-        ? "open"
-        : "closed";
+  const navigation = !visible ? "hidden" : open ? "open" : "closed";
 
   for (const node of [document.documentElement, document.body].filter(Boolean)) {
     node.dataset.appChromeMode = mobile ? "mobile" : "desktop";
     node.dataset.appChromeNavigation = navigation;
-
-    /* Compatibilidad temporal con diagnósticos anteriores. */
-    if (mobile) {
-      node.dataset.mobileShell = "true";
-      node.dataset.mobileNavigation = open ? "open" : "closed";
-    } else {
-      delete node.dataset.mobileShell;
-      delete node.dataset.mobileNavigation;
-    }
   }
 
   return true;
@@ -161,6 +137,11 @@ function syncDocumentState({ mobile, visible, open }) {
 export function syncAppChrome() {
   if (!isBrowser()) return false;
 
+  if (syncFrame) {
+    window.cancelAnimationFrame(syncFrame);
+    syncFrame = 0;
+  }
+
   ensureAppChromeTemplate();
 
   const mobile = isMobile();
@@ -168,14 +149,18 @@ export function syncAppChrome() {
   const open = mobile && visible && sidebarIsOpen();
 
   syncDocumentState({ mobile, visible, open });
-
-  setAppChromeTemplateState({
-    mobile,
-    visible,
-    open,
-  });
-
+  setAppChromeTemplateState({ mobile, visible, open });
   syncBackgroundInteractivity(open);
+  return true;
+}
+
+function scheduleSync() {
+  if (!isBrowser() || syncFrame) return false;
+
+  syncFrame = window.requestAnimationFrame(() => {
+    syncFrame = 0;
+    syncAppChrome();
+  });
   return true;
 }
 
@@ -210,7 +195,6 @@ function focusNode(node = null) {
       return false;
     }
   }
-
   return true;
 }
 
@@ -237,9 +221,7 @@ function focusSidebarEntry() {
   if (!sidebar) return false;
 
   const target =
-    sidebar.querySelector?.(
-      "[data-sidebar-nav-link='true'][aria-current='page']"
-    ) ||
+    sidebar.querySelector?.("[data-sidebar-nav-link='true'][aria-current='page']") ||
     sidebar.querySelector?.("[data-sidebar-brand='true']") ||
     sidebarFocusableItems()[0] ||
     null;
@@ -257,11 +239,7 @@ export function openAppChromeNavigation({ focus = true } = {}) {
   }
 
   syncAppChrome();
-
-  if (focus) {
-    window.requestAnimationFrame(focusSidebarEntry);
-  }
-
+  if (focus) window.requestAnimationFrame(focusSidebarEntry);
   return true;
 }
 
@@ -275,11 +253,7 @@ export function closeAppChromeNavigation({ focus = false } = {}) {
   }
 
   syncAppChrome();
-
-  if (focus) {
-    window.requestAnimationFrame(focusMenuToggle);
-  }
-
+  if (focus) window.requestAnimationFrame(focusMenuToggle);
   return true;
 }
 
@@ -317,11 +291,8 @@ function leaveMobileMode() {
 }
 
 function onMediaChange(event) {
-  if (event.matches) {
-    enterMobileMode();
-  } else {
-    leaveMobileMode();
-  }
+  if (event.matches) enterMobileMode();
+  else leaveMobileMode();
 }
 
 function onPointerDown(event) {
@@ -351,7 +322,6 @@ function onClick(event) {
 
   const link = target.closest?.(SIDEBAR_NAV_LINK_SELECTOR);
   const sidebar = getAppChromeTemplateRefs().sidebar;
-
   if (!link || !sidebar?.contains?.(link)) return;
 
   window.queueMicrotask(() => {
@@ -413,9 +383,9 @@ function onHistoryNavigation() {
 function attachObservers() {
   if (!isBrowser()) return false;
 
-  if (!documentObserver && document.body) {
-    documentObserver = new MutationObserver(syncAppChrome);
-    documentObserver.observe(document.body, {
+  if (!sidebarStateObserver && document.body) {
+    sidebarStateObserver = new MutationObserver(scheduleSync);
+    sidebarStateObserver.observe(document.body, {
       attributes: true,
       attributeFilter: [
         "class",
@@ -431,8 +401,7 @@ function attachObservers() {
     const targets = [refs.topbarMount, refs.sidebarMount].filter(Boolean);
 
     if (targets.length) {
-      mountsObserver = new MutationObserver(syncAppChrome);
-
+      mountsObserver = new MutationObserver(scheduleSync);
       for (const target of targets) {
         mountsObserver.observe(target, {
           childList: true,
@@ -454,7 +423,6 @@ function bindMediaQuery() {
   } else {
     mediaQuery.addListener?.(onMediaChange);
   }
-
   return true;
 }
 
@@ -466,7 +434,6 @@ function unbindMediaQuery() {
   } else {
     mediaQuery.removeListener?.(onMediaChange);
   }
-
   return true;
 }
 
@@ -485,15 +452,12 @@ export function initAppChrome() {
   document.addEventListener("keydown", onKeyDown);
   window.addEventListener("popstate", onHistoryNavigation);
   window.addEventListener("hashchange", onHistoryNavigation);
-  window.addEventListener("pageshow", syncAppChrome);
+  window.addEventListener("pageshow", scheduleSync);
 
-  if (mediaQuery.matches) {
-    enterMobileMode();
-  } else {
-    syncAppChrome();
-  }
+  if (mediaQuery.matches) enterMobileMode();
+  else syncAppChrome();
 
-  window.requestAnimationFrame(syncAppChrome);
+  scheduleSync();
   return AppChromeUI;
 }
 
@@ -507,12 +471,15 @@ export function destroyAppChrome() {
   document.removeEventListener("keydown", onKeyDown);
   window.removeEventListener("popstate", onHistoryNavigation);
   window.removeEventListener("hashchange", onHistoryNavigation);
-  window.removeEventListener("pageshow", syncAppChrome);
+  window.removeEventListener("pageshow", scheduleSync);
 
-  documentObserver?.disconnect?.();
+  sidebarStateObserver?.disconnect?.();
   mountsObserver?.disconnect?.();
-  documentObserver = null;
+  sidebarStateObserver = null;
   mountsObserver = null;
+
+  if (syncFrame) window.cancelAnimationFrame(syncFrame);
+  syncFrame = 0;
   mediaQuery = null;
   initialized = false;
 
@@ -521,8 +488,6 @@ export function destroyAppChrome() {
   for (const node of [document.documentElement, document.body].filter(Boolean)) {
     delete node.dataset.appChromeMode;
     delete node.dataset.appChromeNavigation;
-    delete node.dataset.mobileShell;
-    delete node.dataset.mobileNavigation;
   }
 
   setAppChromeTemplateState({

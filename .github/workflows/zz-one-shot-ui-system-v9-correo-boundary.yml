@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - refactor/ui-system-v9-correo-boundary
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: write
@@ -14,7 +21,7 @@ env:
 jobs:
   migrate:
     runs-on: ubuntu-latest
-    if: github.actor != 'github-actions[bot]'
+    if: github.actor != 'github-actions[bot]' && (github.event_name != 'pull_request' || github.head_ref == 'refactor/ui-system-v9-correo-boundary')
     steps:
       - name: Checkout
         uses: actions/checkout@v6

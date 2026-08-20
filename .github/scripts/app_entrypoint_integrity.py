@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Onion Support: contract for the single browser entrypoint."""
+"""Onion Support: single entrypoint and global runtime ownership contract."""
 
 from __future__ import annotations
 
@@ -25,6 +25,15 @@ CANONICAL_MODULES = (
     "../features/public-home-experience/index.js",
 )
 
+RUNTIME_FILES = {
+    "deeplink": ROOT / "src/features/ticket-deeplink/index.js",
+    "facturas_refresh": ROOT / "src/features/facturas-autorefresh/index.js",
+    "incidencias_preview": ROOT / "src/features/incidencias-media-preview/index.js",
+    "public_progress": ROOT / "src/features/public-support-progress/index.js",
+    "chrome": ROOT / "src/ui/chrome/index.js",
+    "preboot": ROOT / "src/preboot/theme.js",
+}
+
 
 class IndexParser(HTMLParser):
     def __init__(self) -> None:
@@ -48,10 +57,72 @@ def read(path: Path, errors: list[str]) -> str:
         return ""
 
 
+def require(errors: list[str], condition: bool, message: str) -> None:
+    if not condition:
+        errors.append(message)
+
+
+def validate_runtime_boundaries(errors: list[str], runtime: dict[str, str]) -> None:
+    deeplink = runtime["deeplink"]
+    facturas = runtime["facturas_refresh"]
+    preview = runtime["incidencias_preview"]
+    progress = runtime["public_progress"]
+    chrome = runtime["chrome"]
+    preboot = runtime["preboot"]
+
+    require(
+        errors,
+        "observer.observe(root" in deeplink
+        and "observer.observe(document.documentElement" not in deeplink,
+        "ticket-deeplink debe observar sólo el Router view",
+    )
+
+    require(
+        errors,
+        "MutationObserver" not in facturas
+        and "facturas-refresh-btn" not in facturas
+        and "removeManualRefresh" not in facturas,
+        "facturas-autorefresh no puede corregir/borrar DOM del template",
+    )
+
+    require(
+        errors,
+        "observer.observe(mountRoot" in preview
+        and "observer.observe(document.body" not in preview
+        and 'observerScope: "router-view"' in preview,
+        "incidencias-media-preview debe limitar listeners/observer al Router view",
+    )
+
+    require(
+        errors,
+        "observer.observe(root" in progress
+        and "observer.observe(document.documentElement" not in progress
+        and 'observerScope: "router-view"' in progress,
+        "public-support-progress debe observar sólo el Router view",
+    )
+
+    require(
+        errors,
+        "mobileShell" not in chrome
+        and "mobileNavigation" not in chrome
+        and "scheduleSync" in chrome,
+        "App Chrome no puede reintroducir compatibilidad Mobile Shell",
+    )
+
+    require(
+        errors,
+        "LEGACY_ACCENT_STORAGE_KEY" not in preboot
+        and "setAccentDeprecated" not in preboot
+        and "setAccent:" not in preboot,
+        "Preboot sólo puede gobernar tema e idioma; acento legacy prohibido",
+    )
+
+
 def main() -> int:
     errors: list[str] = []
 
-    for required in (INDEX, MAIN, ENHANCEMENTS, APP_CSS):
+    required_paths = (INDEX, MAIN, ENHANCEMENTS, APP_CSS, *RUNTIME_FILES.values())
+    for required in required_paths:
         if not required.is_file():
             errors.append(f"Falta archivo obligatorio: {required.relative_to(ROOT)}")
 
@@ -64,6 +135,7 @@ def main() -> int:
     main_text = read(MAIN, errors)
     enhancements_text = read(ENHANCEMENTS, errors)
     app_css_text = read(APP_CSS, errors)
+    runtime = {name: read(path, errors) for name, path in RUNTIME_FILES.items()}
 
     parser = IndexParser()
     parser.feed(index_text)
@@ -79,9 +151,7 @@ def main() -> int:
             f"index.html debe ejecutar exactamente un script type=module; encontrados: {len(module_scripts)}"
         )
     elif module_scripts[0].get("src") != "/src/main.js":
-        errors.append(
-            "El único script type=module de index.html debe ser /src/main.js"
-        )
+        errors.append("El único script type=module de index.html debe ser /src/main.js")
 
     direct_global_modules = [
         script.get("src", "")
@@ -113,38 +183,58 @@ def main() -> int:
             "src/css/app.css debe importar ./views/public/public-support-progress.css"
         )
 
-    if 'const ENHANCEMENTS_MODULE = "./app/enhancements.js";' not in main_text:
-        errors.append("src/main.js no declara el registry canónico de enhancements")
-
-    for call in (
-        "enhancements.initPreRouter()",
-        "enhancements.initPostRouter()",
-    ):
-        if call not in main_text:
-            errors.append(f"src/main.js no orquesta {call}")
+    require(
+        errors,
+        'const ENHANCEMENTS_MODULE = "./app/enhancements.js";' in main_text,
+        "src/main.js no declara el registry canónico de enhancements",
+    )
+    require(
+        errors,
+        "enhancements.initPreRouter()" in main_text,
+        "src/main.js no orquesta initPreRouter()",
+    )
+    require(
+        errors,
+        "enhancements.initPostRouter()" in main_text,
+        "src/main.js no orquesta initPostRouter()",
+    )
+    require(
+        errors,
+        "void startPostRouterEnhancements(enhancements);" in main_text,
+        "Los enhancements post-router deben arrancar sin bloquear ready",
+    )
 
     for module_path in CANONICAL_MODULES:
-        if module_path not in enhancements_text:
-            errors.append(
-                f"src/app/enhancements.js no registra el módulo canónico: {module_path}"
-            )
+        require(
+            errors,
+            enhancements_text.count(module_path) == 1,
+            f"Registry sin autoridad única para: {module_path}",
+        )
 
-    if enhancements_text.count("ticket-deeplink/index.js") != 1:
-        errors.append("ticket-deeplink debe registrarse exactamente una vez")
+    require(
+        errors,
+        enhancements_text.count("ticket-deeplink/index.js") == 1,
+        "ticket-deeplink debe registrarse exactamente una vez",
+    )
+    require(
+        errors,
+        enhancements_text.count("../ui/chrome/index.js") == 1,
+        "App Chrome debe registrarse exactamente una vez",
+    )
 
-    if enhancements_text.count("../ui/chrome/index.js") != 1:
-        errors.append("App Chrome debe registrarse exactamente una vez")
+    validate_runtime_boundaries(errors, runtime)
 
     if errors:
-        print("\nApp entrypoint integrity: FAIL")
+        print("\nApp/runtime integrity: FAIL")
         for error in errors:
             print(f"- {error}")
         return 1
 
-    print("App entrypoint integrity: PASS")
+    print("App/runtime integrity: PASS")
     print("- index.html: 1 módulo ejecutable (/src/main.js)")
     print(f"- registry global: {len(CANONICAL_MODULES)} módulos")
-    print("- CSS público progresivo centralizado en app.css")
+    print("- post-router: progresivo/no bloqueante")
+    print("- observers globales y compatibilidad retirada: protegidos")
     return 0
 
 

@@ -1,22 +1,21 @@
 /* =========================================================
    Onion Support · Facturas · Autonomous Refresh
-   PRODUCTIVO · V2
+   Archivo: /src/features/facturas-autorefresh/index.js
 
    Responsabilidad:
-   - Mantener Facturas actualizada sin botón manual.
-   - Revalidar sólo cuando la vista está visible, online y realmente ociosa.
+   - Revalidar Facturas sólo cuando la vista está visible, online y ociosa.
    - Pausar durante modales, operaciones busy o interacción reciente.
-   - Revalidar al volver a foco/online si la vista quedó antigua.
-   - No hace HTTP propio: usa el controlador canónico de Facturas.
+   - Revalidar al recuperar foco/online si los datos quedaron antiguos.
+   - Usar exclusivamente el controlador canónico de Facturas.
+   - No corregir ni borrar DOM generado por el template.
 ========================================================= */
 
 export const FACTURAS_AUTO_REFRESH_VERSION =
-  "facturas.autorefresh.v2.smart-idle-visible-controller";
+  "facturas.autorefresh.v3-controller-only";
 
 const CONTROLLER_KEY = Symbol.for("onion.support.facturas.controller");
 const ROOT_SELECTOR = ".facturas-view-root, [data-facturas-scope='true']";
-const REFRESH_BUTTON_SELECTOR =
-  "#facturas-refresh-btn, [data-facturas-action='refresh']#facturas-refresh-btn";
+const VIEW_HOST_SELECTOR = "[data-view-container='true'], #view-container";
 const MODAL_SELECTOR = [
   "[data-facturas-detail-modal='true']",
   "[data-role='facturas-detail-modal']",
@@ -29,13 +28,12 @@ const EDITABLE_SELECTOR =
 const AUTO_REFRESH_INTERVAL_MS = 45_000;
 const RETURN_REFRESH_STALE_MS = 15_000;
 const USER_IDLE_GRACE_MS = 12_000;
-const BOOT_RETRY_MS = 350;
 
 let timer = 0;
-let observer = null;
 let refreshing = false;
 let lastRefreshAt = Date.now();
 let lastInteractionAt = 0;
+let installed = false;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -62,29 +60,15 @@ function findController(root = viewRoot()) {
     node = node.parentElement;
   }
 
-  const viewHost = document.querySelector("[data-view-container='true'], #view-container");
   try {
-    return viewHost?.[CONTROLLER_KEY] || null;
+    return document.querySelector(VIEW_HOST_SELECTOR)?.[CONTROLLER_KEY] || null;
   } catch {
     return null;
   }
 }
 
-function removeManualRefresh(root = viewRoot()) {
-  if (!root) return false;
-
-  let removed = false;
-  root.querySelectorAll(REFRESH_BUTTON_SELECTOR).forEach((button) => {
-    button.remove();
-    removed = true;
-  });
-
-  return removed;
-}
-
 function modalOpen(root = viewRoot()) {
-  if (!root) return false;
-  return Boolean(root.querySelector(MODAL_SELECTOR));
+  return Boolean(root?.querySelector?.(MODAL_SELECTOR));
 }
 
 function userIsInteracting(root = viewRoot(), now = Date.now()) {
@@ -116,25 +100,21 @@ function controllerBusy(controller = null) {
   }
 }
 
-async function refreshIfSafe({ forceStale = false } = {}) {
+export async function refreshIfSafe({ forceStale = false } = {}) {
   if (!isBrowser() || refreshing || !pageVisible()) return false;
   if (navigator.onLine === false) return false;
 
   const root = viewRoot();
-  if (!root || !root.isConnected) return false;
-
-  removeManualRefresh(root);
-  if (modalOpen(root)) return false;
+  if (!root?.isConnected || modalOpen(root)) return false;
 
   const now = Date.now();
   if (userIsInteracting(root, now)) return false;
 
-  if (!forceStale && now - lastRefreshAt < AUTO_REFRESH_INTERVAL_MS - 1_000) {
-    return false;
-  }
-  if (forceStale && now - lastRefreshAt < RETURN_REFRESH_STALE_MS) {
-    return false;
-  }
+  const minAge = forceStale
+    ? RETURN_REFRESH_STALE_MS
+    : AUTO_REFRESH_INTERVAL_MS - 1_000;
+
+  if (now - lastRefreshAt < minAge) return false;
 
   const controller = findController(root);
   if (!controller || typeof controller.refresh !== "function") return false;
@@ -145,7 +125,6 @@ async function refreshIfSafe({ forceStale = false } = {}) {
 
   try {
     await controller.refresh();
-    removeManualRefresh(viewRoot());
     return true;
   } catch {
     return false;
@@ -156,18 +135,20 @@ async function refreshIfSafe({ forceStale = false } = {}) {
 
 function schedule() {
   if (!isBrowser()) return false;
-  if (timer) window.clearInterval(timer);
 
+  if (timer) window.clearInterval(timer);
   timer = window.setInterval(() => {
     void refreshIfSafe();
   }, AUTO_REFRESH_INTERVAL_MS);
-
   return true;
 }
 
 function onReturnToApp() {
-  removeManualRefresh(viewRoot());
   void refreshIfSafe({ forceStale: true });
+}
+
+function onVisibilityChange() {
+  if (pageVisible()) onReturnToApp();
 }
 
 function onUserInteraction(event) {
@@ -176,59 +157,53 @@ function onUserInteraction(event) {
   lastInteractionAt = Date.now();
 }
 
-function startObserver() {
-  if (!isBrowser() || typeof MutationObserver === "undefined") return false;
+export function installFacturasAutoRefresh() {
+  if (!isBrowser() || installed) return false;
+  installed = true;
 
-  observer?.disconnect?.();
-  observer = new MutationObserver(() => {
-    removeManualRefresh(viewRoot());
-  });
-
-  observer.observe(document.documentElement, {
-    childList: true,
-    subtree: true,
-  });
-
-  return true;
-}
-
-function boot() {
-  if (!isBrowser()) return false;
-
-  removeManualRefresh(viewRoot());
   schedule();
-  startObserver();
-
   window.addEventListener("focus", onReturnToApp, { passive: true });
   window.addEventListener("online", onReturnToApp, { passive: true });
-  document.addEventListener("visibilitychange", () => {
-    if (pageVisible()) onReturnToApp();
-  }, { passive: true });
+  document.addEventListener("visibilitychange", onVisibilityChange, { passive: true });
 
-  document.addEventListener("pointerdown", onUserInteraction, {
-    passive: true,
-    capture: true,
-  });
-  document.addEventListener("input", onUserInteraction, {
-    passive: true,
-    capture: true,
-  });
-  document.addEventListener("keydown", onUserInteraction, {
-    passive: true,
-    capture: true,
-  });
+  for (const eventName of ["pointerdown", "input", "keydown"]) {
+    document.addEventListener(eventName, onUserInteraction, {
+      passive: true,
+      capture: true,
+    });
+  }
 
-  window.setTimeout(() => removeManualRefresh(viewRoot()), BOOT_RETRY_MS);
   return true;
 }
 
-boot();
+export function destroyFacturasAutoRefresh() {
+  if (!isBrowser() || !installed) return false;
+  installed = false;
+
+  if (timer) window.clearInterval(timer);
+  timer = 0;
+
+  window.removeEventListener("focus", onReturnToApp);
+  window.removeEventListener("online", onReturnToApp);
+  document.removeEventListener("visibilitychange", onVisibilityChange);
+
+  for (const eventName of ["pointerdown", "input", "keydown"]) {
+    document.removeEventListener(eventName, onUserInteraction, true);
+  }
+
+  refreshing = false;
+  return true;
+}
+
+installFacturasAutoRefresh();
 
 export const FacturasAutoRefresh = Object.freeze({
   version: FACTURAS_AUTO_REFRESH_VERSION,
   refreshIfSafe,
+  install: installFacturasAutoRefresh,
+  destroy: destroyFacturasAutoRefresh,
   getSnapshot() {
-    return {
+    return Object.freeze({
       intervalMs: AUTO_REFRESH_INTERVAL_MS,
       returnStaleMs: RETURN_REFRESH_STALE_MS,
       idleGraceMs: USER_IDLE_GRACE_MS,
@@ -236,8 +211,8 @@ export const FacturasAutoRefresh = Object.freeze({
       lastRefreshAt,
       lastInteractionAt,
       viewMounted: Boolean(viewRoot()),
-      manualRefreshVisible: Boolean(viewRoot()?.querySelector(REFRESH_BUTTON_SELECTOR)),
-    };
+      installed,
+    });
   },
 });
 

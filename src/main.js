@@ -3,22 +3,22 @@
    Archivo: /src/main.js
 
    Responsabilidad:
-   - Entry point único de la SPA.
+   - Entry point único ejecutable de la SPA.
    - Bloquear auto-boot legacy.
-   - Cargar /src/app/index.js.
-   - Ejecutar boot una sola vez.
-   - Mantener el token/ruta sensible sólo en memoria durante el handoff al App.
+   - Orquestar enhancements globales desde /src/app/enhancements.js.
+   - Cargar /src/app/index.js y ejecutar boot una sola vez.
+   - Mantener token/ruta sensible sólo en memoria durante el handoff al App.
    - No copiar secretos de URL a snapshots/eventos globales.
    - Delegar el loader normal en /src/app/loader.js.
    - Mantener un fallback DOM mínimo sólo para fallo extremo del loader.
-   - Mostrar error fatal mínimo en castellano.
    - Sin Auth, Router, Store, Services, fetch, storage ni dominio.
 ========================================================= */
 
-export const MAIN_VERSION = "main.minimal.v5-hardened";
+export const MAIN_VERSION = "main.minimal.v6-single-entrypoint";
 
 const APP_MODULE = "./app/index.js";
 const LOADER_MODULE = "./app/loader.js";
+const ENHANCEMENTS_MODULE = "./app/enhancements.js";
 
 const BOOT_PROMISE_KEY = "__ONION_BOOT_PROMISE__";
 const DISABLE_AUTO_BOOT_KEY = "__ONION_DISABLE_AUTO_BOOT__";
@@ -43,12 +43,6 @@ function isFunction(value) {
   return typeof value === "function";
 }
 
-/*
-  IMPORTANTE:
-  - La URL real se conserva únicamente como variable local durante boot.
-  - El App/Router necesita esa URL real para leer ?token=...
-  - Snapshots, eventos y errores reciben siempre una versión saneada.
-*/
 function getInitialPath() {
   if (!isBrowser()) return "/";
 
@@ -67,10 +61,7 @@ function getInitialPath() {
 
 function redact(value = "") {
   return String(value ?? "")
-    .replace(
-      LEGACY_RESET_TOKEN_PATH,
-      "$1***"
-    )
+    .replace(LEGACY_RESET_TOKEN_PATH, "$1***")
     .replace(
       /([?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|resetToken|activation_token|activationToken)=)([^&#\s]+)/gi,
       "$1***"
@@ -89,9 +80,7 @@ function redact(value = "") {
 }
 
 function getSafeInitialPath() {
-  return redact(
-    getInitialPath()
-  ) || "/";
+  return redact(getInitialPath()) || "/";
 }
 
 function safeError(error = null) {
@@ -104,15 +93,8 @@ function safeError(error = null) {
   }
 
   return {
-    name: redact(
-      error?.name || "Error"
-    ) || "Error",
-
-    message: redact(
-      error?.message ||
-      String(error || "")
-    ),
-
+    name: redact(error?.name || "Error") || "Error",
+    message: redact(error?.message || String(error || "")),
     status:
       error?.status ||
       error?.statusCode ||
@@ -129,30 +111,14 @@ function writeMainSnapshot(patch = {}) {
   if (!isBrowser()) return false;
 
   try {
-    const previous = isObject(
-      window[MAIN_SNAPSHOT_KEY]
-    )
+    const previous = isObject(window[MAIN_SNAPSHOT_KEY])
       ? window[MAIN_SNAPSHOT_KEY]
       : {};
 
-    /*
-      Defensa adicional:
-      aunque un caller pase accidentalmente initialPath real,
-      este boundary nunca lo publica sin sanear.
-    */
-    const nextPatch = {
-      ...patch,
-    };
+    const nextPatch = { ...patch };
 
-    if (
-      Object.prototype.hasOwnProperty.call(
-        nextPatch,
-        "initialPath"
-      )
-    ) {
-      nextPatch.initialPath =
-        redact(nextPatch.initialPath) ||
-        "/";
+    if (Object.prototype.hasOwnProperty.call(nextPatch, "initialPath")) {
+      nextPatch.initialPath = redact(nextPatch.initialPath) || "/";
     }
 
     window[MAIN_SNAPSHOT_KEY] = Object.freeze({
@@ -172,37 +138,23 @@ function dispatchMainEvent(name = "", detail = {}) {
   if (!isBrowser() || !name) return false;
 
   try {
-    const safeDetail = {
-      ...detail,
-    };
+    const safeDetail = { ...detail };
 
-    if (
-      Object.prototype.hasOwnProperty.call(
-        safeDetail,
-        "initialPath"
-      )
-    ) {
-      safeDetail.initialPath =
-        redact(safeDetail.initialPath) ||
-        "/";
+    if (Object.prototype.hasOwnProperty.call(safeDetail, "initialPath")) {
+      safeDetail.initialPath = redact(safeDetail.initialPath) || "/";
     }
 
     if (safeDetail.error) {
-      safeDetail.error = safeError(
-        safeDetail.error
-      );
+      safeDetail.error = safeError(safeDetail.error);
     }
 
     window.dispatchEvent(
-      new CustomEvent(
-        `onion:main:${name}`,
-        {
-          detail: {
-            version: MAIN_VERSION,
-            ...safeDetail,
-          },
-        }
-      )
+      new CustomEvent(`onion:main:${name}`, {
+        detail: {
+          version: MAIN_VERSION,
+          ...safeDetail,
+        },
+      })
     );
 
     return true;
@@ -218,18 +170,10 @@ function dispatchMainEvent(name = "", detail = {}) {
 function setAppState(state = "booting") {
   if (!isBrowser()) return false;
 
-  const value =
-    String(state || "booting")
-      .toLowerCase();
-
-  const booting =
-    value === "booting";
-
-  const ready =
-    value === "ready";
-
-  const fatal =
-    value === "fatal";
+  const value = String(state || "booting").toLowerCase();
+  const booting = value === "booting";
+  const ready = value === "ready";
+  const fatal = value === "fatal";
 
   const nodes = [
     document.documentElement,
@@ -238,16 +182,11 @@ function setAppState(state = "booting") {
 
   for (const node of nodes) {
     node.dataset.appState = value;
-    node.dataset.appLoading =
-      booting ? "true" : "false";
-    node.dataset.appBooting =
-      booting ? "true" : "false";
-    node.dataset.appReady =
-      ready ? "true" : "false";
-    node.dataset.appFatal =
-      fatal ? "true" : "false";
-    node.dataset.mainVersion =
-      MAIN_VERSION;
+    node.dataset.appLoading = booting ? "true" : "false";
+    node.dataset.appBooting = booting ? "true" : "false";
+    node.dataset.appReady = ready ? "true" : "false";
+    node.dataset.appFatal = fatal ? "true" : "false";
+    node.dataset.mainVersion = MAIN_VERSION;
 
     if (ready) {
       node.dataset.appBooted = "true";
@@ -255,26 +194,10 @@ function setAppState(state = "booting") {
 
     node.classList.remove("no-js");
     node.classList.add("js");
-
-    node.classList.toggle(
-      "app-booting",
-      booting
-    );
-
-    node.classList.toggle(
-      "app-loading",
-      booting
-    );
-
-    node.classList.toggle(
-      "app-ready",
-      ready
-    );
-
-    node.classList.toggle(
-      "app-fatal",
-      fatal
-    );
+    node.classList.toggle("app-booting", booting);
+    node.classList.toggle("app-loading", booting);
+    node.classList.toggle("app-ready", ready);
+    node.classList.toggle("app-fatal", fatal);
   }
 
   writeMainSnapshot({
@@ -290,48 +213,20 @@ function setAppState(state = "booting") {
    LOADER BOUNDARY
 ========================================================= */
 
-/*
-  Fallback extremo:
-  sólo se usa si /src/app/loader.js no puede importarse o no expone
-  una API compatible. El control normal del loader vive en loader.js.
-*/
 function emergencyHideLoader() {
   if (!isBrowser()) return false;
 
-  const loader =
-    document.getElementById(
-      "app-loader"
-    );
-
+  const loader = document.getElementById("app-loader");
   if (!loader) return false;
 
   try {
     loader.hidden = true;
-
-    loader.classList.remove(
-      "is-visible"
-    );
-
-    loader.classList.add(
-      "is-hidden"
-    );
-
-    loader.dataset.loaderVisible =
-      "false";
-
-    loader.dataset.loaderState =
-      "hidden";
-
-    loader.setAttribute(
-      "aria-hidden",
-      "true"
-    );
-
-    loader.setAttribute(
-      "aria-busy",
-      "false"
-    );
-
+    loader.classList.remove("is-visible");
+    loader.classList.add("is-hidden");
+    loader.dataset.loaderVisible = "false";
+    loader.dataset.loaderState = "hidden";
+    loader.setAttribute("aria-hidden", "true");
+    loader.setAttribute("aria-busy", "false");
     return true;
   } catch {
     return false;
@@ -342,11 +237,7 @@ async function hideLoaderSafely() {
   if (!isBrowser()) return false;
 
   try {
-    const module =
-      await import(
-        LOADER_MODULE
-      );
-
+    const module = await import(LOADER_MODULE);
     const hide =
       module?.hideLoader ||
       module?.forceHideLoader ||
@@ -354,18 +245,11 @@ async function hideLoaderSafely() {
       module?.default?.forceHideLoader;
 
     if (isFunction(hide)) {
-      const result =
-        await hide();
-
-      if (result !== false) {
-        return true;
-      }
+      const result = await hide();
+      if (result !== false) return true;
     }
   } catch {
-    /*
-      El fatal boundary no puede depender de que el módulo
-      que controla el loader esté sano.
-    */
+    // El fatal boundary no puede depender del módulo normal del loader.
   }
 
   return emergencyHideLoader();
@@ -382,17 +266,8 @@ function showNode(node) {
     node.hidden = false;
     node.removeAttribute("hidden");
     node.removeAttribute("inert");
-
-    node.setAttribute(
-      "aria-hidden",
-      "false"
-    );
-
-    node.setAttribute(
-      "aria-busy",
-      "false"
-    );
-
+    node.setAttribute("aria-hidden", "false");
+    node.setAttribute("aria-busy", "false");
     node.classList.remove(
       "is-hidden",
       "app-hidden",
@@ -400,27 +275,11 @@ function showNode(node) {
       "route-hidden",
       "chrome-hidden"
     );
-
-    node.classList.add(
-      "is-visible"
-    );
-
-    node.style.removeProperty(
-      "display"
-    );
-
-    node.style.removeProperty(
-      "visibility"
-    );
-
-    node.style.removeProperty(
-      "opacity"
-    );
-
-    node.style.removeProperty(
-      "pointer-events"
-    );
-
+    node.classList.add("is-visible");
+    node.style.removeProperty("display");
+    node.style.removeProperty("visibility");
+    node.style.removeProperty("opacity");
+    node.style.removeProperty("pointer-events");
     return true;
   } catch {
     return false;
@@ -431,15 +290,9 @@ function getFatalRoot() {
   if (!isBrowser()) return null;
 
   return (
-    document.getElementById(
-      "view-container"
-    ) ||
-    document.getElementById(
-      "app-content"
-    ) ||
-    document.getElementById(
-      "main-content"
-    ) ||
+    document.getElementById("view-container") ||
+    document.getElementById("app-content") ||
+    document.getElementById("main-content") ||
     document.body ||
     null
   );
@@ -449,103 +302,36 @@ async function showFatalError(error = null) {
   if (!isBrowser()) return false;
 
   setAppState("fatal");
-
   await hideLoaderSafely();
 
-  showNode(
-    document.getElementById(
-      "app-shell"
-    )
-  );
+  showNode(document.getElementById("app-shell"));
+  showNode(document.getElementById("main-content"));
+  showNode(document.getElementById("app-content"));
+  showNode(document.getElementById("view-container"));
 
-  showNode(
-    document.getElementById(
-      "main-content"
-    )
-  );
+  const root = getFatalRoot();
+  if (!root) return false;
 
-  showNode(
-    document.getElementById(
-      "app-content"
-    )
-  );
+  const section = document.createElement("section");
+  section.className = "boot-error-view";
+  section.setAttribute("role", "alert");
+  section.setAttribute("aria-live", "assertive");
 
-  showNode(
-    document.getElementById(
-      "view-container"
-    )
-  );
+  const title = document.createElement("h1");
+  title.textContent = "Error de arranque";
 
-  const root =
-    getFatalRoot();
+  const text = document.createElement("p");
+  text.textContent = "No se pudo iniciar Onion Support. Recarga la página.";
 
-  if (!root) {
-    return false;
-  }
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = "Recargar";
+  button.addEventListener("click", () => window.location.reload());
 
-  const section =
-    document.createElement(
-      "section"
-    );
+  section.append(title, text, button);
+  root.replaceChildren(section);
 
-  section.className =
-    "boot-error-view";
-
-  section.setAttribute(
-    "role",
-    "alert"
-  );
-
-  section.setAttribute(
-    "aria-live",
-    "assertive"
-  );
-
-  const title =
-    document.createElement(
-      "h1"
-    );
-
-  title.textContent =
-    "Error de arranque";
-
-  const text =
-    document.createElement(
-      "p"
-    );
-
-  text.textContent =
-    "No se pudo iniciar Onion Support. Recarga la página.";
-
-  const button =
-    document.createElement(
-      "button"
-    );
-
-  button.type =
-    "button";
-
-  button.textContent =
-    "Recargar";
-
-  button.addEventListener(
-    "click",
-    () =>
-      window.location.reload()
-  );
-
-  section.append(
-    title,
-    text,
-    button
-  );
-
-  root.replaceChildren(
-    section
-  );
-
-  const cleanError =
-    safeError(error);
+  const cleanError = safeError(error);
 
   writeMainSnapshot({
     state: "fatal",
@@ -553,20 +339,13 @@ async function showFatalError(error = null) {
     error: cleanError,
   });
 
-  dispatchMainEvent(
-    "fatal",
-    {
-      initialPath:
-        getSafeInitialPath(),
-      error: cleanError,
-    }
-  );
+  dispatchMainEvent("fatal", {
+    initialPath: getSafeInitialPath(),
+    error: cleanError,
+  });
 
   try {
-    console.error(
-      "[Onion Main] Error de arranque:",
-      cleanError
-    );
+    console.error("[Onion Main] Error de arranque:", cleanError);
   } catch {
     // noop
   }
@@ -578,125 +357,101 @@ async function showFatalError(error = null) {
    BOOT
 ========================================================= */
 
+async function loadEnhancements() {
+  const module = await import(ENHANCEMENTS_MODULE);
+  const registry = module?.AppEnhancements || module?.default;
+
+  if (
+    !registry ||
+    !isFunction(registry.initPreRouter) ||
+    !isFunction(registry.initPostRouter)
+  ) {
+    throw new Error(
+      "/src/app/enhancements.js debe exponer initPreRouter() e initPostRouter()."
+    );
+  }
+
+  return registry;
+}
+
 async function runBoot() {
-  /*
-    rawInitialPath puede contener un token válido.
-    No sale de este scope salvo para el handoff interno a App.
-  */
-  const rawInitialPath =
-    getInitialPath();
-
-  const safeInitialPath =
-    redact(rawInitialPath) ||
-    "/";
-
   setAppState("booting");
+
+  const enhancements = await loadEnhancements();
+
+  /*
+    ticket-deeplink debe poder canonicalizar /tickets/<id> antes de capturar
+    la ruta que recibirá el Router. Chrome también queda preparado aquí.
+  */
+  await enhancements.initPreRouter();
+
+  const rawInitialPath = getInitialPath();
+  const safeInitialPath = redact(rawInitialPath) || "/";
 
   writeMainSnapshot({
     state: "booting",
-    initialPath:
-      safeInitialPath,
+    initialPath: safeInitialPath,
     error: null,
   });
 
-  dispatchMainEvent(
-    "boot-start",
-    {
-      initialPath:
-        safeInitialPath,
-    }
-  );
+  dispatchMainEvent("boot-start", {
+    initialPath: safeInitialPath,
+  });
 
-  const app =
-    await import(
-      APP_MODULE
-    );
-
-  const bootApp =
-    isFunction(
-      app?.bootApp
-    )
-      ? app.bootApp
-      : app?.default;
+  const app = await import(APP_MODULE);
+  const bootApp = isFunction(app?.bootApp) ? app.bootApp : app?.default;
 
   if (!isFunction(bootApp)) {
-    throw new Error(
-      "/src/app/index.js debe exportar bootApp()."
-    );
+    throw new Error("/src/app/index.js debe exportar bootApp().");
   }
 
   await bootApp({
     source: "main",
-
-    /*
-      Necesario para que la primera navegación conserve
-      query/hash y, en reset, el token de la URL.
-      No se publica en snapshots/eventos de Main.
-    */
-    initialPath:
-      rawInitialPath,
-
-    version:
-      MAIN_VERSION,
+    initialPath: rawInitialPath,
+    version: MAIN_VERSION,
   });
+
+  /*
+    Las mejoras progresivas se activan tras el Router. Sus fallos están
+    aislados dentro del registry y no convierten un App sano en fallo fatal.
+  */
+  await enhancements.initPostRouter();
 
   setAppState("ready");
 
   writeMainSnapshot({
     state: "ready",
-    initialPath:
-      safeInitialPath,
+    initialPath: safeInitialPath,
     error: null,
+    enhancements: isFunction(enhancements.getSnapshot)
+      ? enhancements.getSnapshot()
+      : null,
   });
 
-  dispatchMainEvent(
-    "ready",
-    {
-      initialPath:
-        safeInitialPath,
-    }
-  );
+  dispatchMainEvent("ready", {
+    initialPath: safeInitialPath,
+  });
 
   return true;
 }
 
 export function boot() {
   if (!isBrowser()) {
-    return Promise.resolve(
-      false
-    );
+    return Promise.resolve(false);
   }
 
-  window[
-    DISABLE_AUTO_BOOT_KEY
-  ] = true;
+  window[DISABLE_AUTO_BOOT_KEY] = true;
 
-  if (
-    window[
-      BOOT_PROMISE_KEY
-    ]
-  ) {
-    return window[
-      BOOT_PROMISE_KEY
-    ];
+  if (window[BOOT_PROMISE_KEY]) {
+    return window[BOOT_PROMISE_KEY];
   }
 
-  window[
-    BOOT_PROMISE_KEY
-  ] = runBoot()
-    .catch(
-      async (error) => {
-        await showFatalError(
-          error
-        );
+  window[BOOT_PROMISE_KEY] = runBoot().catch(async (error) => {
+    await showFatalError(error);
+    return false;
+  });
 
-        return false;
-      }
-    );
-
-  return window[
-    BOOT_PROMISE_KEY
-  ];
+  return window[BOOT_PROMISE_KEY];
 }
 
 boot();

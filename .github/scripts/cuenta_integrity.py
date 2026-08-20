@@ -8,6 +8,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 INDEX = ROOT / "src/views/cuenta/index.js"
+API = ROOT / "src/views/cuenta/cuenta.api.js"
 TEMPLATE = ROOT / "src/views/cuenta/cuenta.template.js"
 CSS = ROOT / "src/css/views/cuenta/index.css"
 ROUTES = ROOT / "src/router/routes.js"
@@ -32,6 +33,45 @@ FORBIDDEN_INDEX = (
     "export function loadSessions",
     "export function getSessions",
     "export function updatePrivacy",
+)
+
+FORBIDDEN_API = (
+    "authMeta:",
+    "usersSessions:",
+    "usersMeta:",
+    "CUENTA_ALT_ENDPOINT",
+    "CUENTA_DETAIL_TIMEOUT",
+    "getCuentaAltEndpoint",
+    "getCuentaByIdEndpoint",
+    "getCuentaUpdateEndpoint",
+    "getCuentaThemeEndpoint",
+    "getCuentaThemeToggleEndpoint",
+    "getCuentaPrivacyEndpoint",
+    "getCuentaPrivacyToggleEndpoint",
+    "getCuentaLanguageEndpoint",
+    "getCuentaLangEndpoint",
+    "getCuentaMetaEndpoint",
+    "getCuentaSessionsEndpoint",
+    "assertCuentaSelfUpdateSupported",
+    "getCuentaByIdRequest",
+    "updateCuentaRequest",
+    "updateCuentaThemeRequest",
+    "toggleCuentaThemeRequest",
+    "updateCuentaPrivacyRequest",
+    "toggleCuentaPrivacyRequest",
+    "updateCuentaLanguageRequest",
+    "fetchCuentaMetaRequest",
+    "fetchCuentaSessionsRequest",
+    "normalizeCuentaSessionsResponse",
+    "loadCuentaMeta",
+    "loadCuentaSessions",
+    "saveProfile",
+    "savePerfil",
+    "updateProfile",
+    "updatePerfil",
+    "updatePrivacy",
+    "setPrivacy",
+    "setCuentaPrivacy",
 )
 
 FORBIDDEN_TEMPLATE = (
@@ -68,6 +108,27 @@ REQUIRED_INDEX = (
     "function getSnapshot()",
 )
 
+REQUIRED_API = (
+    '"cuenta.api.backend-contract.v5-canonical-runtime"',
+    'me: "/api/auth/me"',
+    'changePassword: "/api/auth/change-password"',
+    'deactivateSelf: "/api/auth/deactivate/self"',
+    'usersAvatar: "/api/users/avatar"',
+    "export function normalizeCuentaDetail",
+    "export function validateCuentaPasswordPayload",
+    "export function validateCuentaAvatarFile",
+    "export function hydrateCuentaFromCache",
+    "export async function loadCuenta",
+    "export async function changePassword",
+    "export async function uploadCuentaAvatar",
+    "export async function deleteCuentaAvatar",
+    "export async function deactivateCuenta",
+    "export function getCuentaApiSnapshot",
+    "unsupportedMutationApisExposed: false",
+    "sessionsApiExposed: false",
+    "metaApiExposed: false",
+)
+
 REQUIRED_TEMPLATE = (
     '"cuenta.template.productivo.v7.canonical-surface"',
     "export function renderCuentaTemplate",
@@ -102,15 +163,18 @@ def require(errors: list[str], text: str, tokens: tuple[str, ...], owner: str) -
 def main() -> int:
     errors: list[str] = []
     index = read(INDEX, errors)
+    api = read(API, errors)
     template = read(TEMPLATE, errors)
     css = read(CSS, errors)
     routes = read(ROUTES, errors)
 
     forbid(errors, index, FORBIDDEN_INDEX, "src/views/cuenta/index.js")
+    forbid(errors, api, FORBIDDEN_API, "src/views/cuenta/cuenta.api.js")
     forbid(errors, template, FORBIDDEN_TEMPLATE, "src/views/cuenta/cuenta.template.js")
     forbid(errors, css, FORBIDDEN_CSS, "src/css/views/cuenta/index.css")
 
     require(errors, index, REQUIRED_INDEX, "src/views/cuenta/index.js")
+    require(errors, api, REQUIRED_API, "src/views/cuenta/cuenta.api.js")
     require(errors, template, REQUIRED_TEMPLATE, "src/views/cuenta/cuenta.template.js")
 
     if 'import(\n        "../views/cuenta/index.js"\n      )' not in routes:
@@ -126,7 +190,8 @@ def main() -> int:
         return 1
 
     print("Cuenta integrity: PASS")
-    print("- superficie canónica sin accent/sessions/profile no-op legacy")
+    print("- index sin accent/sessions/profile no-op legacy")
+    print("- API limitada a operaciones self realmente consumidas")
     print("- template sin aliases vacíos ni acciones retiradas")
     print("- CSS sin correctores de DOM histórico")
     print("- Router mantiene CuentaView para cuenta/ajustes")

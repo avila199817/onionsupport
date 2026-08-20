@@ -13,7 +13,8 @@ Onion Support es una SPA JavaScript modular desplegada en Azure Static Web Apps.
 - Roles funcionales: `admin` y `user`
 - Entry point JS: `src/main.js`
 - Registry global: `src/app/enhancements.js`
-- Entry point CSS: `src/css/app.css`
+- Entry point CSS global: `src/css/app.css`
+- Manifest CSS de ruta: `src/router/styles.js`
 - Router: `src/router/`
 - HTTP: `src/core/http.js`
 - Auth: `src/features/auth/`
@@ -33,7 +34,8 @@ No crear:
 - rutas o roles preparados “por si acaso”;
 - almacenamiento persistente de secretos, tokens o SAS;
 - CSS `patch`, `hotfix`, `final-fix`, `override-vX` o equivalentes;
-- observers/listeners correctores cuando la fuente canónica puede emitir directamente el estado correcto.
+- observers/listeners correctores cuando la fuente canónica puede emitir directamente el estado correcto;
+- `<link>` de estilos inyectados por features cuando la hoja pertenece a una ruta.
 
 Las vistas separan, cuando el dominio lo permite:
 
@@ -47,7 +49,7 @@ Las vistas separan, cuando el dominio lo permite:
 `index.html` mantiene sólo lo imprescindible antes del App:
 
 - `src/preboot/theme.js` como script clásico de tema previo al paint;
-- `src/css/app.css` como stylesheet principal;
+- `src/css/app.css` como stylesheet global;
 - `/src/main.js` como **único** `script type="module"` ejecutable.
 
 El flujo canónico es:
@@ -126,7 +128,7 @@ No existen ni deben reaparecer `mobile-shell.css` o `features/mobile-shell/index
 
 ### Incidencias
 
-Listado, creación, detalle, adjuntos, comentarios, lifecycle, estados/prioridad/tipo, cierre/reapertura, refresco autónomo y previews de media.
+Listado, creación, detalle, adjuntos, comentarios, lifecycle, estados/prioridad/tipo, cierre/reapertura, refresco autónomo y previews de media. La hoja `src/css/views/incidencias/media-preview.css` pertenece al manifest de `incidencias`; el feature JS no inyecta stylesheets.
 
 ### Facturas
 
@@ -154,7 +156,7 @@ Self-service del usuario autenticado: identidad, avatar, contraseña, sesiones b
 
 ## 8. CSS y design system
 
-`src/css/app.css` es la única entrada CSS global.
+`src/css/app.css` es la única entrada CSS global y contiene sólo capas realmente transversales. `src/router/styles.js` es la única autoridad de carga para CSS específico de ruta, tanto público como privado.
 
 La arquitectura usa:
 
@@ -162,7 +164,7 @@ La arquitectura usa:
 - reset/core/layout;
 - App Chrome;
 - componentes compartidos;
-- CSS privado cargado por ruta;
+- CSS de vista cargado por ruta;
 - composiciones transversales;
 - guardrails finales de geometría.
 
@@ -172,7 +174,10 @@ Reglas:
 - no crear paletas completas paralelas por vista;
 - `!important` no es estrategia de composición;
 - una refactorización elimina reglas sustituidas en lugar de apilarlas;
-- el CSS público progresivo también entra por `app.css`, no mediante `<link>` laterales.
+- `app.css` no importa hojas específicas de una ruta;
+- Public Home carga `index.css`, `support-request.css`, `public-support-progress.css` y `home-experience.css` desde su manifest de ruta;
+- la landing no arrastra `auth/login.css`; esa hoja pertenece a las rutas de autenticación;
+- ningún feature debe crear `<link rel="stylesheet">` para CSS que el Router puede declarar canónicamente.
 
 ## 9. Seguridad frontend
 
@@ -205,13 +210,13 @@ El archivo raíz con nombre hexadecimal es la clave pública de verificación de
 
 - sintaxis de todos los `src/**/*.js` con Node 22;
 - contratos estructurales de `.github/scripts/repo_integrity.py`;
-- entrypoint único mediante `.github/scripts/app_entrypoint_integrity.py`;
+- entrypoint/runtime único mediante `.github/scripts/app_entrypoint_integrity.py`;
 - `staticwebapp.config.json`;
 - merge markers y whitespace.
 
 ### Public Home Integrity
 
-`.github/workflows/public-home-contract.yml` usa `.github/scripts/public_home_integrity.py` como contrato único para landing, intake, UX, progreso de envío, registry de enhancements y CSS público.
+`.github/workflows/public-home-contract.yml` usa `.github/scripts/public_home_integrity.py` como contrato único para landing, intake, UX, progreso de envío, registry de enhancements y propiedad CSS de la ruta pública.
 
 No debe reaparecer un segundo workflow específico que duplique esas mismas comprobaciones.
 

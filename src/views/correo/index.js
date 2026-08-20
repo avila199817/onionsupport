@@ -27,7 +27,7 @@ import {
   renderShell,
 } from "./correo.template.js";
 
-export const CORREO_VIEW_VERSION = "correo.view.microsoft.production.v3-outlook-extreme";
+export const CORREO_VIEW_VERSION = "correo.view.microsoft.production.v4-preference-owner";
 
 const INSTANCES = new WeakMap();
 let lastInstance = null;
@@ -35,6 +35,19 @@ let lastInstance = null;
 const NOTIFICATION_PREF_KEY = "onion.correo.notifications.v1";
 const NOTIFICATION_POLL_MS = 60000;
 const MAX_NOTIFICATION_IDS = 80;
+
+function primeNotificationPreference() {
+  if (typeof window === "undefined" || !("Notification" in window)) return;
+  try {
+    if (window.localStorage.getItem(NOTIFICATION_PREF_KEY) === null) {
+      window.localStorage.setItem(NOTIFICATION_PREF_KEY, "1");
+    }
+  } catch {
+    // La preferencia de UI no puede bloquear Correo.
+  }
+}
+
+primeNotificationPreference();
 
 const VIEW_CACHE = {
   status: null,

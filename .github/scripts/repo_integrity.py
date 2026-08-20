@@ -596,6 +596,35 @@ def validate_detail_modal_tokens_v8_contract(errors: list[str]) -> None:
                 )
 
 
+def validate_correo_boundary_v9_contract(errors: list[str]) -> None:
+    """Correo API is HTTP-only; browser notification preferences belong to the view controller."""
+    api_path = SRC / "views" / "correo" / "correo.api.js"
+    view_path = SRC / "views" / "correo" / "index.js"
+    api_text = api_path.read_text(encoding="utf-8")
+    view_text = view_path.read_text(encoding="utf-8")
+
+    for forbidden in ("localStorage", '"Notification" in window', "Notification.requestPermission"):
+        if forbidden in api_text:
+            errors.append(f"src/views/correo/correo.api.js :: responsabilidad browser/UI prohibida: {forbidden}")
+
+    for required in (
+        'import Http from "../../core/http.js"',
+        'MICROSOFT_ENDPOINT = "/api/microsoft"',
+        'CORREO_API_VERSION = "correo.api.microsoft.production.v3-pure-http"',
+    ):
+        if required not in api_text:
+            errors.append(f"src/views/correo/correo.api.js :: falta contrato HTTP V9: {required}")
+
+    for required in (
+        'NOTIFICATION_PREF_KEY = "onion.correo.notifications.v1"',
+        "function primeNotificationPreference()",
+        "window.localStorage.getItem(NOTIFICATION_PREF_KEY)",
+        'window.localStorage.setItem(NOTIFICATION_PREF_KEY, "1")',
+    ):
+        if required not in view_text:
+            errors.append(f"src/views/correo/index.js :: falta autoridad de preferencia V9: {required}")
+
+
 def validate_paths(errors: list[str]) -> None:
     for root in (SRC, ROOT / ".github"):
         if not root.exists():
@@ -638,6 +667,7 @@ def main() -> int:
     validate_shared_detail_modal_v7_contract(errors)
     validate_detail_modal_pairing_v7_contract(errors)
     validate_detail_modal_tokens_v8_contract(errors)
+    validate_correo_boundary_v9_contract(errors)
     validate_known_dead_paths(errors)
 
     unique_errors = list(dict.fromkeys(errors))

@@ -25,6 +25,13 @@ CANONICAL_MODULES = (
     "../features/public-home-experience/index.js",
 )
 
+PUBLIC_ROUTE_CSS = (
+    "/src/css/views/public/index.css",
+    "/src/css/views/public/support-request.css",
+    "/src/css/views/public/public-support-progress.css",
+    "/src/css/views/public/home-experience.css",
+)
+
 RUNTIME_FILES = {
     "deeplink": ROOT / "src/features/ticket-deeplink/index.js",
     "facturas_refresh": ROOT / "src/features/facturas-autorefresh/index.js",
@@ -61,6 +68,15 @@ def read(path: Path, errors: list[str]) -> str:
 def require(errors: list[str], condition: bool, message: str) -> None:
     if not condition:
         errors.append(message)
+
+
+def public_home_manifest(route_styles: str) -> str:
+    match = re.search(
+        r'"public-home"\s*:\s*Object\.freeze\(\[(?P<body>.*?)\]\)',
+        route_styles,
+        re.DOTALL,
+    )
+    return match.group("body") if match else ""
 
 
 def validate_runtime_boundaries(errors: list[str], runtime: dict[str, str]) -> None:
@@ -111,6 +127,13 @@ def validate_runtime_boundaries(errors: list[str], runtime: dict[str, str]) -> N
         and 'document.createElement("link")' not in preview
         and 'cssAuthority: "router-styles"' in preview,
         "Incidencias media preview debe recibir CSS exclusivamente del manifest de ruta",
+    )
+
+    manifest = public_home_manifest(route_styles)
+    require(
+        errors,
+        bool(manifest) and all(f'"{path}"' in manifest for path in PUBLIC_ROUTE_CSS),
+        "public-home debe recibir todo su CSS específico desde el manifest de ruta",
     )
 
     require(
@@ -184,23 +207,23 @@ def main() -> int:
             + ", ".join(direct_global_modules)
         )
 
-    direct_progress_css = any(
-        link.get("rel", "").lower() == "stylesheet"
-        and link.get("href") == "/src/css/views/public/public-support-progress.css"
+    direct_route_css = [
+        link.get("href", "")
         for link in parser.links
+        if link.get("rel", "").strip().lower() == "stylesheet"
+        and link.get("href", "").startswith("/src/css/views/")
+    ]
+    require(
+        errors,
+        not direct_route_css,
+        "index.html no puede enlazar CSS específico de ruta: " + ", ".join(direct_route_css),
     )
-    if direct_progress_css:
-        errors.append(
-            "public-support-progress.css debe entrar por src/css/app.css, no por index.html"
-        )
 
-    css_import_pattern = re.compile(
-        r"@import\s+url\([\"']\./views/public/public-support-progress\.css[\"']\)",
-        re.IGNORECASE,
-    )
-    if not css_import_pattern.search(app_css_text):
-        errors.append(
-            "src/css/app.css debe importar ./views/public/public-support-progress.css"
+    for css_path in PUBLIC_ROUTE_CSS:
+        require(
+            errors,
+            Path(css_path).name not in app_css_text,
+            f"src/css/app.css debe ser global-only; CSS de ruta prohibido: {css_path}",
         )
 
     require(
@@ -253,9 +276,10 @@ def main() -> int:
     print("App/runtime integrity: PASS")
     print("- index.html: 1 módulo ejecutable (/src/main.js)")
     print(f"- registry global: {len(CANONICAL_MODULES)} módulos")
+    print("- app.css: global-only")
+    print("- route styles: CSS público/privado bajo una sola autoridad")
     print("- post-router: progresivo/no bloqueante")
     print("- observers/listeners globales y compatibilidad retirada: protegidos")
-    print("- CSS privado progresivo: propiedad del manifest de ruta")
     return 0
 
 

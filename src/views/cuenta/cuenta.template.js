@@ -2,20 +2,21 @@
    Onion Support - Cuenta Template
    Archivo: /src/views/cuenta/cuenta.template.js
 
-   PRODUCTIVO · FOCUSED SELF-SERVICE · V4
+   PRODUCTIVO · FOCUSED SELF-SERVICE · V5
 
-   Cuenta queda reducida a cuatro bloques útiles:
+   Cuenta queda reducida a cinco bloques útiles:
    1) Foto de perfil.
-   2) Contraseña.
-   3) Apariencia e idioma.
-   4) Desactivación de cuenta.
+   2) Apariencia e idioma.
+   3) Contraseña.
+   4) Método de pago (visible, todavía no configurable).
+   5) Desactivación de cuenta.
 
-   Sin botón manual de actualizar, sesiones, actividad, privacidad,
-   zona horaria, moneda ni ficha administrativa duplicada.
+   Sin botón manual de actualizar, selector de color, sesiones,
+   actividad, privacidad, zona horaria, moneda ni ficha administrativa.
 ========================================================= */
 
 export const CUENTA_TEMPLATE_VERSION =
-  "cuenta.template.productivo.v4.focused-self-service";
+  "cuenta.template.productivo.v5.focused-payment-ready";
 
 export const CUENTA_TEMPLATE_CAPABILITIES = Object.freeze({
   readSelf: true,
@@ -24,8 +25,10 @@ export const CUENTA_TEMPLATE_CAPABILITIES = Object.freeze({
   avatarDelete: true,
   deactivateSelf: true,
   localThemePreference: true,
-  localAccentPreference: true,
   localLanguagePreference: true,
+  localAccentPreference: false,
+  paymentMethodVisible: true,
+  paymentMethodConfigurable: false,
   manualRefreshUi: false,
 });
 
@@ -35,24 +38,16 @@ export const CUENTA_ACTIONS = Object.freeze({
   DELETE_AVATAR: "delete-avatar",
   CHANGE_PASSWORD: "change-password",
   SET_THEME: "set-theme",
-  SET_ACCENT: "set-accent",
   SET_LOCALE: "set-locale",
   DEACTIVATE: "deactivate-account",
+  SET_ACCENT: "set-accent",
 });
-
-const ACCENTS = Object.freeze([
-  { key: "graphite", label: "Graphite", value: "#696969" },
-  { key: "blue", label: "Blue", value: "#3b82f6" },
-  { key: "violet", label: "Violet", value: "#8b5cf6" },
-  { key: "emerald", label: "Emerald", value: "#10b981" },
-  { key: "rose", label: "Rose", value: "#f43f5e" },
-]);
 
 const COPY = Object.freeze({
   es: Object.freeze({
     eyebrow: "Cuenta personal",
     title: "Cuenta",
-    subtitle: "Lo esencial para mantener tu acceso, tu foto y la apariencia de Onion Support bajo control.",
+    subtitle: "Gestiona lo esencial de tu acceso, tu foto y la experiencia de Onion Support desde un único sitio.",
     active: "Activa",
     disabled: "Desactivada",
     pending: "Pendiente",
@@ -63,6 +58,14 @@ const COPY = Object.freeze({
     choosePhoto: "Cambiar foto",
     removePhoto: "Quitar foto",
     photoHint: "PNG, JPEG, WebP, GIF o AVIF · máximo 2 MB.",
+    appearanceTitle: "Apariencia e idioma",
+    appearanceText: "Ajusta el modo visual y el idioma de esta instalación.",
+    modeLabel: "Modo",
+    system: "Sistema",
+    light: "Claro",
+    dark: "Oscuro",
+    languageLabel: "Idioma",
+    appearanceHint: "Los cambios se aplican al instante y quedan guardados en este navegador.",
     passwordTitle: "Contraseña",
     passwordText: "Actualiza tu credencial de acceso de forma segura.",
     currentPassword: "Contraseña actual",
@@ -70,14 +73,14 @@ const COPY = Object.freeze({
     confirmPassword: "Repetir contraseña",
     passwordHint: "Mínimo 10 caracteres con mayúscula, minúscula, número y símbolo.",
     passwordButton: "Cambiar contraseña",
-    appearanceTitle: "Apariencia e idioma",
-    appearanceText: "Personaliza la web sin esperar a una actualización del servidor.",
-    modeLabel: "Modo",
-    system: "Sistema",
-    light: "Claro",
-    dark: "Oscuro",
-    colorLabel: "Color",
-    languageLabel: "Idioma",
+    paymentTitle: "Método de pago",
+    paymentText: "Consulta el estado de facturación de tu cuenta.",
+    paymentBadge: "Próximamente",
+    paymentLabel: "Método principal",
+    paymentEmpty: "Sin método de pago configurado",
+    paymentNumber: "•••• •••• •••• ————",
+    paymentHint: "La configuración de pagos todavía no está disponible desde Cuenta.",
+    paymentButton: "Configurar método",
     deactivateTitle: "Desactivar cuenta",
     deactivateText: "Bloquea tu acceso. Requiere tu contraseña y puede cerrar la sesión actual.",
     deactivatePassword: "Contraseña para confirmar",
@@ -94,7 +97,7 @@ const COPY = Object.freeze({
   ca: Object.freeze({
     eyebrow: "Compte personal",
     title: "Compte",
-    subtitle: "L'essencial per mantenir l'accés, la foto i l'aparença d'Onion Support sota control.",
+    subtitle: "Gestiona l'essencial de l'accés, la foto i l'experiència d'Onion Support des d'un únic lloc.",
     active: "Actiu",
     disabled: "Desactivat",
     pending: "Pendent",
@@ -105,6 +108,14 @@ const COPY = Object.freeze({
     choosePhoto: "Canviar foto",
     removePhoto: "Treure foto",
     photoHint: "PNG, JPEG, WebP, GIF o AVIF · màxim 2 MB.",
+    appearanceTitle: "Aparença i idioma",
+    appearanceText: "Ajusta el mode visual i l'idioma d'aquesta instal·lació.",
+    modeLabel: "Mode",
+    system: "Sistema",
+    light: "Clar",
+    dark: "Fosc",
+    languageLabel: "Idioma",
+    appearanceHint: "Els canvis s'apliquen a l'instant i queden desats en aquest navegador.",
     passwordTitle: "Contrasenya",
     passwordText: "Actualitza la credencial d'accés de forma segura.",
     currentPassword: "Contrasenya actual",
@@ -112,14 +123,14 @@ const COPY = Object.freeze({
     confirmPassword: "Repetir contrasenya",
     passwordHint: "Mínim 10 caràcters amb majúscula, minúscula, número i símbol.",
     passwordButton: "Canviar contrasenya",
-    appearanceTitle: "Aparença i idioma",
-    appearanceText: "Personalitza el web sense esperar una actualització del servidor.",
-    modeLabel: "Mode",
-    system: "Sistema",
-    light: "Clar",
-    dark: "Fosc",
-    colorLabel: "Color",
-    languageLabel: "Idioma",
+    paymentTitle: "Mètode de pagament",
+    paymentText: "Consulta l'estat de facturació del teu compte.",
+    paymentBadge: "Pròximament",
+    paymentLabel: "Mètode principal",
+    paymentEmpty: "Cap mètode de pagament configurat",
+    paymentNumber: "•••• •••• •••• ————",
+    paymentHint: "La configuració de pagaments encara no està disponible des de Compte.",
+    paymentButton: "Configurar mètode",
     deactivateTitle: "Desactivar compte",
     deactivateText: "Bloqueja el teu accés. Requereix la contrasenya i pot tancar la sessió actual.",
     deactivatePassword: "Contrasenya per confirmar",
@@ -136,7 +147,7 @@ const COPY = Object.freeze({
   en: Object.freeze({
     eyebrow: "Personal account",
     title: "Account",
-    subtitle: "The essentials to keep your access, profile photo and Onion Support appearance under control.",
+    subtitle: "Manage the essentials of your access, profile photo and Onion Support experience from one place.",
     active: "Active",
     disabled: "Disabled",
     pending: "Pending",
@@ -147,6 +158,14 @@ const COPY = Object.freeze({
     choosePhoto: "Change photo",
     removePhoto: "Remove photo",
     photoHint: "PNG, JPEG, WebP, GIF or AVIF · maximum 2 MB.",
+    appearanceTitle: "Appearance and language",
+    appearanceText: "Adjust the visual mode and language for this installation.",
+    modeLabel: "Mode",
+    system: "System",
+    light: "Light",
+    dark: "Dark",
+    languageLabel: "Language",
+    appearanceHint: "Changes apply instantly and are saved in this browser.",
     passwordTitle: "Password",
     passwordText: "Update your access credential securely.",
     currentPassword: "Current password",
@@ -154,14 +173,14 @@ const COPY = Object.freeze({
     confirmPassword: "Repeat password",
     passwordHint: "At least 10 characters with upper case, lower case, a number and a symbol.",
     passwordButton: "Change password",
-    appearanceTitle: "Appearance and language",
-    appearanceText: "Personalize the website without waiting for a server update.",
-    modeLabel: "Mode",
-    system: "System",
-    light: "Light",
-    dark: "Dark",
-    colorLabel: "Color",
-    languageLabel: "Language",
+    paymentTitle: "Payment method",
+    paymentText: "Check the billing status of your account.",
+    paymentBadge: "Coming soon",
+    paymentLabel: "Primary method",
+    paymentEmpty: "No payment method configured",
+    paymentNumber: "•••• •••• •••• ————",
+    paymentHint: "Payment setup is not available from Account yet.",
+    paymentButton: "Set up method",
     deactivateTitle: "Deactivate account",
     deactivateText: "Blocks access to your account. Your password is required and the current session may close.",
     deactivatePassword: "Password to confirm",
@@ -237,11 +256,6 @@ function normalizeThemeMode(value = "") {
   return ["system", "light", "dark"].includes(key) ? key : "system";
 }
 
-function normalizeAccent(value = "") {
-  const key = normalizeKey(value);
-  return ACCENTS.some((item) => item.key === key) ? key : "graphite";
-}
-
 function resolveState(state = {}) {
   const source = safeObject(state);
   const preferences = safeObject(source.preferences);
@@ -254,7 +268,6 @@ function resolveState(state = {}) {
     deactivated: source.deactivated === true,
     preferences: {
       themeMode: normalizeThemeMode(first(preferences.themeMode, "system")),
-      accent: normalizeAccent(first(preferences.accent, "graphite")),
       locale: normalizeLocale(first(preferences.locale, "es")),
     },
   };
@@ -272,9 +285,7 @@ function isAzureBlobHost(hostname = "") {
 
 function safeAvatarUrl(value = "") {
   const raw = safeText(value, "");
-  if (!raw || raw.startsWith("//") || /[\r\n\t\\]/.test(raw) || /^(javascript|data|vbscript|file):/i.test(raw)) {
-    return "";
-  }
+  if (!raw || raw.startsWith("//") || /[\r\n\t\\]/.test(raw) || /^(javascript|data|vbscript|file):/i.test(raw)) return "";
   if (/^blob:/i.test(raw)) return raw;
   if (raw.startsWith("/")) return raw.replace(/\/{2,}/g, "/");
   const localHttp = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(raw);
@@ -331,7 +342,8 @@ function icon(name = "") {
   const icons = {
     image: `<svg ${common}><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>`,
     lock: `<svg ${common}><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`,
-    palette: `<svg ${common}><circle cx="13.5" cy="6.5" r=".5"/><circle cx="17.5" cy="10.5" r=".5"/><circle cx="8.5" cy="7.5" r=".5"/><circle cx="6.5" cy="12.5" r=".5"/><path d="M12 22a10 10 0 1 1 10-10c0 2.2-1.8 4-4 4h-1.8a2 2 0 0 0-1.7 3l.3.5A1.7 1.7 0 0 1 13.3 22H12Z"/></svg>`,
+    appearance: `<svg ${common}><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>`,
+    card: `<svg ${common}><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M6 15h4"/></svg>`,
     power: `<svg ${common}><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></svg>`,
     upload: `<svg ${common}><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M5 20h14"/></svg>`,
     trash: `<svg ${common}><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/></svg>`,
@@ -369,11 +381,14 @@ function renderAvatar(detail = {}, size = "hero") {
   `;
 }
 
-function renderCardHead(title, text, iconName) {
+function renderCardHead(title, text, iconName, badge = "") {
   return `
     <div class="cuenta-card-head">
       <div class="cuenta-card-heading">
-        <h2 class="cuenta-card-title">${escapeHtml(title)}</h2>
+        <div class="cuenta-card-title-row">
+          <h2 class="cuenta-card-title">${escapeHtml(title)}</h2>
+          ${badge ? `<span class="cuenta-card-badge">${escapeHtml(badge)}</span>` : ""}
+        </div>
         <p class="cuenta-card-text">${escapeHtml(text)}</p>
       </div>
       <span class="cuenta-card-icon" aria-hidden="true">${icon(iconName)}</span>
@@ -385,14 +400,7 @@ function renderPasswordField({ name, label, placeholder, autocomplete, disabled 
   return `
     <label class="cuenta-field">
       <span class="cuenta-field-label">${escapeHtml(label)}</span>
-      <input
-        type="password"
-        name="${attr(name)}"
-        data-cuenta-field="${attr(name)}"
-        autocomplete="${attr(autocomplete || "off")}"
-        placeholder="${attr(placeholder || label)}"
-        ${disabled ? 'disabled aria-disabled="true"' : ""}
-      >
+      <input type="password" name="${attr(name)}" data-cuenta-field="${attr(name)}" autocomplete="${attr(autocomplete || "off")}" placeholder="${attr(placeholder || label)}" ${disabled ? 'disabled aria-disabled="true"' : ""}>
     </label>
   `;
 }
@@ -409,7 +417,6 @@ export function renderHeader({ item = null, state = {} } = {}) {
         <h1 class="cuenta-title">${escapeHtml(c.title)}</h1>
         <p class="cuenta-subtitle">${escapeHtml(c.subtitle)}</p>
       </div>
-
       <div class="cuenta-profile-summary">
         ${renderAvatar(detail, "hero")}
         <div class="cuenta-profile-copy">
@@ -418,7 +425,7 @@ export function renderHeader({ item = null, state = {} } = {}) {
           <span class="cuenta-profile-user">@${escapeHtml(getUsername(detail))}</span>
         </div>
         <div class="cuenta-profile-badges">
-          <span class="cuenta-chip cuenta-chip--accent">${escapeHtml(getRole(detail, local))}</span>
+          <span class="cuenta-chip">${escapeHtml(getRole(detail, local))}</span>
           <span class="cuenta-chip cuenta-chip--${attr(status.tone)}">${escapeHtml(status.label)}</span>
         </div>
       </div>
@@ -442,7 +449,7 @@ export function renderLoadingState(state = {}) {
   const c = copyFor(state);
   return `
     <section class="cuenta-loading" aria-busy="true" aria-label="${attr(c.loading)}">
-      ${Array.from({ length: 4 }).map(() => `<article class="cuenta-card cuenta-card--skeleton" aria-hidden="true"><span class="cuenta-skeleton cuenta-skeleton--title"></span><span class="cuenta-skeleton"></span><span class="cuenta-skeleton cuenta-skeleton--short"></span><span class="cuenta-skeleton cuenta-skeleton--control"></span></article>`).join("")}
+      ${Array.from({ length: 5 }).map((_, index) => `<article class="cuenta-card cuenta-card--skeleton${index === 2 ? " cuenta-card--skeleton-wide" : ""}" aria-hidden="true"><span class="cuenta-skeleton cuenta-skeleton--title"></span><span class="cuenta-skeleton"></span><span class="cuenta-skeleton cuenta-skeleton--short"></span><span class="cuenta-skeleton cuenta-skeleton--control"></span></article>`).join("")}
     </section>
   `;
 }
@@ -483,6 +490,43 @@ export function renderAvatarCard(detail = {}, state = {}) {
   `;
 }
 
+function renderThemeOption(key, label, selected) {
+  return `<button type="button" class="cuenta-segment${selected ? " is-active" : ""}" data-cuenta-action="${CUENTA_ACTIONS.SET_THEME}" data-value="${attr(key)}" aria-pressed="${selected ? "true" : "false"}">${escapeHtml(label)}</button>`;
+}
+
+export function renderAppearanceCard(detail = {}, state = {}) {
+  void detail;
+  const local = resolveState(state);
+  const c = copyFor(local);
+  const pref = local.preferences;
+  return `
+    <article class="cuenta-card cuenta-card--appearance" data-cuenta-card="appearance">
+      ${renderCardHead(c.appearanceTitle, c.appearanceText, "appearance")}
+      <div class="cuenta-preference-grid">
+        <div class="cuenta-preference-group">
+          <span class="cuenta-preference-label">${escapeHtml(c.modeLabel)}</span>
+          <div class="cuenta-segments" role="group" aria-label="${attr(c.modeLabel)}">
+            ${renderThemeOption("system", c.system, pref.themeMode === "system")}
+            ${renderThemeOption("light", c.light, pref.themeMode === "light")}
+            ${renderThemeOption("dark", c.dark, pref.themeMode === "dark")}
+          </div>
+        </div>
+        <label class="cuenta-field cuenta-field--select">
+          <span class="cuenta-field-label">${escapeHtml(c.languageLabel)}</span>
+          <span class="cuenta-select-wrap">${icon("globe")}
+            <select data-cuenta-field="locale" data-cuenta-action="${CUENTA_ACTIONS.SET_LOCALE}" aria-label="${attr(c.languageLabel)}">
+              <option value="es" ${pref.locale === "es" ? "selected" : ""}>Español</option>
+              <option value="ca" ${pref.locale === "ca" ? "selected" : ""}>Català</option>
+              <option value="en" ${pref.locale === "en" ? "selected" : ""}>English</option>
+            </select>
+          </span>
+        </label>
+      </div>
+      <p class="cuenta-preference-note">${escapeHtml(c.appearanceHint)}</p>
+    </article>
+  `;
+}
+
 export function renderSecurityCard(detail = {}, state = {}) {
   void detail;
   const local = resolveState(state);
@@ -504,59 +548,22 @@ export function renderSecurityCard(detail = {}, state = {}) {
   `;
 }
 
-function renderThemeOption(key, label, selected) {
-  return `
-    <button type="button" class="cuenta-segment${selected ? " is-active" : ""}" data-cuenta-action="${CUENTA_ACTIONS.SET_THEME}" data-value="${attr(key)}" aria-pressed="${selected ? "true" : "false"}">${escapeHtml(label)}</button>
-  `;
-}
-
-export function renderAppearanceCard(detail = {}, state = {}) {
+export function renderPaymentCard(detail = {}, state = {}) {
   void detail;
-  const local = resolveState(state);
-  const c = copyFor(local);
-  const pref = local.preferences;
+  const c = copyFor(state);
   return `
-    <article class="cuenta-card cuenta-card--appearance" data-cuenta-card="appearance">
-      ${renderCardHead(c.appearanceTitle, c.appearanceText, "palette")}
-
-      <div class="cuenta-preference-group">
-        <span class="cuenta-preference-label">${escapeHtml(c.modeLabel)}</span>
-        <div class="cuenta-segments" role="group" aria-label="${attr(c.modeLabel)}">
-          ${renderThemeOption("system", c.system, pref.themeMode === "system")}
-          ${renderThemeOption("light", c.light, pref.themeMode === "light")}
-          ${renderThemeOption("dark", c.dark, pref.themeMode === "dark")}
+    <article class="cuenta-card cuenta-card--payment" data-cuenta-card="payment">
+      ${renderCardHead(c.paymentTitle, c.paymentText, "card", c.paymentBadge)}
+      <div class="cuenta-payment-method" aria-label="${attr(c.paymentEmpty)}">
+        <span class="cuenta-payment-icon" aria-hidden="true">${icon("card")}</span>
+        <div class="cuenta-payment-copy">
+          <span class="cuenta-payment-label">${escapeHtml(c.paymentLabel)}</span>
+          <strong class="cuenta-payment-number">${escapeHtml(c.paymentNumber)}</strong>
+          <span class="cuenta-payment-state">${escapeHtml(c.paymentEmpty)}</span>
         </div>
       </div>
-
-      <div class="cuenta-preference-group">
-        <span class="cuenta-preference-label">${escapeHtml(c.colorLabel)}</span>
-        <div class="cuenta-swatches" role="radiogroup" aria-label="${attr(c.colorLabel)}">
-          ${ACCENTS.map((accent) => `
-            <button
-              type="button"
-              class="cuenta-swatch${pref.accent === accent.key ? " is-active" : ""}"
-              data-cuenta-action="${CUENTA_ACTIONS.SET_ACCENT}"
-              data-value="${attr(accent.key)}"
-              data-accent-preview="${attr(accent.key)}"
-              role="radio"
-              aria-checked="${pref.accent === accent.key ? "true" : "false"}"
-              aria-label="${attr(accent.label)}"
-              title="${attr(accent.label)}"
-            ><span></span></button>
-          `).join("")}
-        </div>
-      </div>
-
-      <label class="cuenta-field cuenta-field--select">
-        <span class="cuenta-field-label">${escapeHtml(c.languageLabel)}</span>
-        <span class="cuenta-select-wrap">${icon("globe")}
-          <select data-cuenta-field="locale" data-cuenta-action="${CUENTA_ACTIONS.SET_LOCALE}" aria-label="${attr(c.languageLabel)}">
-            <option value="es" ${pref.locale === "es" ? "selected" : ""}>Español</option>
-            <option value="ca" ${pref.locale === "ca" ? "selected" : ""}>Català</option>
-            <option value="en" ${pref.locale === "en" ? "selected" : ""}>English</option>
-          </select>
-        </span>
-      </label>
+      <p class="cuenta-payment-note">${escapeHtml(c.paymentHint)}</p>
+      <div class="cuenta-actions">${renderButton({ label: c.paymentButton, iconName: "card", disabled: true })}</div>
     </article>
   `;
 }
@@ -581,7 +588,6 @@ export function renderDeactivateCard(detail = {}, state = {}) {
   `;
 }
 
-/* Compatibilidad pública: la UI V4 ya no renderiza estos bloques. */
 export function renderIdentityCard() { return ""; }
 export function renderPreferencesCard(detail = {}, state = {}) { return renderAppearanceCard(detail, state); }
 export function renderActivityCard() { return ""; }
@@ -593,13 +599,13 @@ export function renderPanel({ item = null, state = {} } = {}) {
   if (local.loading && !detail) return renderLoadingState(local);
   if (local.error && !detail) return renderErrorState(local.error, local);
   if (!detail) return renderEmptyState(local);
-
   return `
     <section class="cuenta-panel" data-cuenta-section="panel">
       <div class="cuenta-cards-grid">
         ${renderAvatarCard(detail, local)}
-        ${renderSecurityCard(detail, local)}
         ${renderAppearanceCard(detail, local)}
+        ${renderSecurityCard(detail, local)}
+        ${renderPaymentCard(detail, local)}
         ${renderDeactivateCard(detail, local)}
       </div>
     </section>
@@ -610,17 +616,7 @@ export function renderCuentaTemplate({ item = null, state = {} } = {}) {
   const local = resolveState(state);
   const detail = isObject(item) ? item : null;
   return `
-    <div
-      class="cuenta-view"
-      data-view="cuenta"
-      data-cuenta-scope="true"
-      data-cuenta-template="${attr(CUENTA_TEMPLATE_VERSION)}"
-      data-cuenta-loading="${local.loading ? "true" : "false"}"
-      data-cuenta-saving="${local.saving ? "true" : "false"}"
-      data-cuenta-locale="${attr(local.preferences.locale)}"
-      data-cuenta-accent="${attr(local.preferences.accent)}"
-      data-cuenta-theme-mode="${attr(local.preferences.themeMode)}"
-    >
+    <div class="cuenta-view" data-view="cuenta" data-cuenta-scope="true" data-cuenta-template="${attr(CUENTA_TEMPLATE_VERSION)}" data-cuenta-loading="${local.loading ? "true" : "false"}" data-cuenta-saving="${local.saving ? "true" : "false"}" data-cuenta-locale="${attr(local.preferences.locale)}" data-cuenta-theme-mode="${attr(local.preferences.themeMode)}" data-cuenta-payment-configurable="false">
       ${detail ? renderHeader({ item: detail, state: local }) : ""}
       ${renderFeedback({ state: local })}
       ${renderPanel({ item: detail, state: local })}
@@ -638,19 +634,21 @@ export function getCuentaTemplateSnapshot({ item = null, state = {} } = {}) {
     loading: local.loading,
     saving: local.saving,
     preferences: { ...local.preferences },
-    renderedCards: ["avatar", "security", "appearance", "deactivate"],
+    renderedCards: ["avatar", "appearance", "security", "payment", "deactivate"],
     renderedActions: [
       CUENTA_ACTIONS.CHOOSE_AVATAR,
       CUENTA_ACTIONS.DELETE_AVATAR,
-      CUENTA_ACTIONS.CHANGE_PASSWORD,
       CUENTA_ACTIONS.SET_THEME,
-      CUENTA_ACTIONS.SET_ACCENT,
       CUENTA_ACTIONS.SET_LOCALE,
+      CUENTA_ACTIONS.CHANGE_PASSWORD,
       CUENTA_ACTIONS.DEACTIVATE,
     ],
     architecture: {
       pureTemplate: true,
       manualRefreshUi: false,
+      accentPreferenceUi: false,
+      paymentMethodUi: true,
+      paymentMethodConfigurable: false,
       sessionsUi: false,
       activityUi: false,
       privacyUi: false,
@@ -674,8 +672,9 @@ export default Object.freeze({
   renderErrorState,
   renderEmptyState,
   renderAvatarCard,
-  renderSecurityCard,
   renderAppearanceCard,
+  renderSecurityCard,
+  renderPaymentCard,
   renderDeactivateCard,
   renderIdentityCard,
   renderPreferencesCard,

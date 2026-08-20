@@ -1,0 +1,73 @@
+name: One-shot UI System V11 Correo Identity
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+
+env:
+  TARGET_BRANCH: refactor/ui-system-v11-correo-user-identity
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]' && github.head_ref == 'refactor/ui-system-v11-correo-user-identity'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 1
+
+      - name: Guard trigger
+        run: |
+          set -euo pipefail
+          test -f .github/.ui-system-v11-correo-identity-trigger
+
+      - name: Apply Correo identity V11
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/ui_system_v11_correo_identity.py
+
+      - name: Validate repository
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/repo_integrity.py
+          while IFS= read -r -d '' file; do
+            node --check "$file"
+          done < <(find src -type f -name '*.js' -print0)
+
+      - name: Validate canonical identity
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('src/views/correo/index.js').read_text(encoding='utf-8')
+          assert 'Cristian Ávila Luque' not in text
+          assert 'AppCore?.publicUser?.(raw)' in text
+          assert 'cleanText(user?.displayName, "Usuario")' in text
+          print('Correo canonical identity OK')
+          PY
+
+      - name: Commit migration
+        run: |
+          set -euo pipefail
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git add \
+            src/views/correo/index.js \
+            .github/scripts/repo_integrity.py \
+            docs/UI_SYSTEM_V11_AUDIT.md
+          if git diff --cached --quiet; then
+            echo "Sin cambios de migración."
+            exit 0
+          fi
+          git commit -m "refactor(correo): consumir identidad canónica del Core"
+          git push origin HEAD:${TARGET_BRANCH}

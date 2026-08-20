@@ -2,45 +2,14 @@
    ONION SUPPORT — DETAIL MODAL COMPONENT
    Archivo: /src/css/components/detail-modal.css
 
-   UI SYSTEM V6
+   UI SYSTEM V8
    - Shell visual compartido para detalles administrativos.
    - Sin selectores de dominio Usuarios/Incidencias.
-   - Tokens genéricos con fallback a los tokens históricos de modal.
+   - Consume tokens canónicos --ui-detail-modal-* del design system.
    - Route-loaded: no aumenta el CSS global de la landing.
 ========================================================= */
 
 @layer components {
-
-.ui-detail-modal-root {
-  --ui-detail-modal-avatar-radius: var(--incidencias-modal-avatar-radius);
-  --ui-detail-modal-avatar-size: var(--incidencias-modal-avatar-size);
-  --ui-detail-modal-bg: var(--incidencias-modal-bg);
-  --ui-detail-modal-body-gap: var(--incidencias-modal-body-gap);
-  --ui-detail-modal-border: var(--incidencias-modal-border);
-  --ui-detail-modal-card-bg: var(--incidencias-modal-card-bg);
-  --ui-detail-modal-card-border: var(--incidencias-modal-card-border);
-  --ui-detail-modal-card-radius: var(--incidencias-modal-card-radius);
-  --ui-detail-modal-chip-font-size: var(--incidencias-modal-chip-font-size);
-  --ui-detail-modal-chip-height: var(--incidencias-modal-chip-height);
-  --ui-detail-modal-chip-padding-x: var(--incidencias-modal-chip-padding-x);
-  --ui-detail-modal-footer-button-height: var(--incidencias-modal-footer-button-height);
-  --ui-detail-modal-footer-button-radius: var(--incidencias-modal-footer-button-radius);
-  --ui-detail-modal-header-border: var(--incidencias-modal-header-border);
-  --ui-detail-modal-header-gap: var(--incidencias-modal-header-gap);
-  --ui-detail-modal-header-padding: var(--incidencias-modal-header-padding);
-  --ui-detail-modal-meta-card-padding: var(--incidencias-modal-meta-card-padding);
-  --ui-detail-modal-meta-grid-gap: var(--incidencias-modal-meta-grid-gap);
-  --ui-detail-modal-overlay-bg: var(--incidencias-modal-overlay-bg);
-  --ui-detail-modal-overlay-blur: var(--incidencias-modal-overlay-blur);
-  --ui-detail-modal-padding: var(--incidencias-modal-padding);
-  --ui-detail-modal-radius: var(--incidencias-modal-radius);
-  --ui-detail-modal-shadow: var(--incidencias-modal-shadow);
-  --ui-detail-modal-title-clamp: var(--incidencias-modal-title-clamp);
-  --ui-detail-modal-title-letter: var(--incidencias-modal-title-letter);
-  --ui-detail-modal-title-line: var(--incidencias-modal-title-line);
-  --ui-detail-modal-title-size: var(--incidencias-modal-title-size);
-  --ui-detail-modal-width: var(--incidencias-modal-width);
-}
 
 body.modal-open,
 body.ui-detail-modal-open {

@@ -545,6 +545,57 @@ def validate_detail_modal_pairing_v7_contract(errors: list[str]) -> None:
         errors.append("src/views/incidencias/incidencias.template.modal.js :: modifier dinámico de chip no comparte autoridad V7")
 
 
+def validate_detail_modal_tokens_v8_contract(errors: list[str]) -> None:
+    """Shared Detail Modal tokens are canonical ui-detail-modal tokens, never Incidencias aliases."""
+    component = (SRC / "css" / "components" / "detail-modal.css").read_text(encoding="utf-8")
+    legacy_tokens = (
+        "--incidencias-modal-avatar-radius",
+        "--incidencias-modal-avatar-size",
+        "--incidencias-modal-bg",
+        "--incidencias-modal-body-gap",
+        "--incidencias-modal-border",
+        "--incidencias-modal-card-bg",
+        "--incidencias-modal-card-border",
+        "--incidencias-modal-card-radius",
+        "--incidencias-modal-chip-font-size",
+        "--incidencias-modal-chip-height",
+        "--incidencias-modal-chip-padding-x",
+        "--incidencias-modal-footer-button-height",
+        "--incidencias-modal-footer-button-radius",
+        "--incidencias-modal-header-border",
+        "--incidencias-modal-header-gap",
+        "--incidencias-modal-header-padding",
+        "--incidencias-modal-meta-card-padding",
+        "--incidencias-modal-meta-grid-gap",
+        "--incidencias-modal-overlay-bg",
+        "--incidencias-modal-overlay-blur",
+        "--incidencias-modal-padding",
+        "--incidencias-modal-radius",
+        "--incidencias-modal-shadow",
+        "--incidencias-modal-title-clamp",
+        "--incidencias-modal-title-letter",
+        "--incidencias-modal-title-line",
+        "--incidencias-modal-title-size",
+        "--incidencias-modal-width",
+    )
+
+    if "var(--incidencias-modal-" in component:
+        errors.append("src/css/components/detail-modal.css :: componente transversal no puede depender de tokens Incidencias")
+
+    source_files = [
+        path
+        for path in SRC.rglob("*")
+        if path.is_file() and path.suffix.lower() in {".css", ".js"}
+    ]
+    for path in source_files:
+        source = path.read_text(encoding="utf-8").lower()
+        for token in legacy_tokens:
+            if token in source:
+                errors.append(
+                    f"{path.relative_to(ROOT)} :: token compartido legacy prohibido tras V8: {token}"
+                )
+
+
 def validate_paths(errors: list[str]) -> None:
     for root in (SRC, ROOT / ".github"):
         if not root.exists():
@@ -586,6 +637,7 @@ def main() -> int:
     validate_detail_modal_v6_contract(errors)
     validate_shared_detail_modal_v7_contract(errors)
     validate_detail_modal_pairing_v7_contract(errors)
+    validate_detail_modal_tokens_v8_contract(errors)
     validate_known_dead_paths(errors)
 
     unique_errors = list(dict.fromkeys(errors))

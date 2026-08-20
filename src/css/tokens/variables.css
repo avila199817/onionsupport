@@ -1347,47 +1347,47 @@
 
 
   /* =========================================================
-     INCIDENCIAS DETAIL / MODAL TOKENS
+     DETAIL MODAL SHARED + INCIDENCIAS DOMAIN TOKENS
   ========================================================= */
-  --incidencias-modal-width: min(1160px, calc(100vw - 40px));
+  --ui-detail-modal-width: min(1160px, calc(100vw - 40px));
   --incidencias-modal-max-height: 92vh;
-  --incidencias-modal-radius: var(--modal-radius);
-  --incidencias-modal-padding: var(--space-lg);
-  --incidencias-modal-body-gap: var(--space-lg);
+  --ui-detail-modal-radius: var(--modal-radius);
+  --ui-detail-modal-padding: var(--space-lg);
+  --ui-detail-modal-body-gap: var(--space-lg);
 
-  --incidencias-modal-overlay-bg: rgba(0,0,0,.64);
-  --incidencias-modal-overlay-blur: blur(12px) saturate(1.02);
+  --ui-detail-modal-overlay-bg: rgba(0,0,0,.64);
+  --ui-detail-modal-overlay-blur: blur(12px) saturate(1.02);
 
-  --incidencias-modal-bg: var(--graphite-400);
-  --incidencias-modal-border: var(--border-default);
-  --incidencias-modal-shadow: var(--shadow-xl);
+  --ui-detail-modal-bg: var(--graphite-400);
+  --ui-detail-modal-border: var(--border-default);
+  --ui-detail-modal-shadow: var(--shadow-xl);
 
-  --incidencias-modal-header-padding: 18px 18px 14px;
-  --incidencias-modal-header-gap: var(--space-sm);
-  --incidencias-modal-header-border: var(--border-soft);
+  --ui-detail-modal-header-padding: 18px 18px 14px;
+  --ui-detail-modal-header-gap: var(--space-sm);
+  --ui-detail-modal-header-border: var(--border-soft);
 
-  --incidencias-modal-avatar-size: 66px;
-  --incidencias-modal-avatar-radius: 21px;
+  --ui-detail-modal-avatar-size: 66px;
+  --ui-detail-modal-avatar-radius: 21px;
 
-  --incidencias-modal-title-size: clamp(19px, 1.9vw, 27px);
-  --incidencias-modal-title-line: 1.14;
-  --incidencias-modal-title-letter: -.045em;
+  --ui-detail-modal-title-size: clamp(19px, 1.9vw, 27px);
+  --ui-detail-modal-title-line: 1.14;
+  --ui-detail-modal-title-letter: -.045em;
   --incidencias-modal-title-bottom-fix: 3px;
-  --incidencias-modal-title-clamp: 2;
+  --ui-detail-modal-title-clamp: 2;
 
-  --incidencias-modal-chip-height: 24px;
-  --incidencias-modal-chip-padding-x: 9px;
-  --incidencias-modal-chip-font-size: 10px;
+  --ui-detail-modal-chip-height: 24px;
+  --ui-detail-modal-chip-padding-x: 9px;
+  --ui-detail-modal-chip-font-size: 10px;
 
-  --incidencias-modal-meta-grid-gap: 10px;
-  --incidencias-modal-meta-card-padding: 12px;
+  --ui-detail-modal-meta-grid-gap: 10px;
+  --ui-detail-modal-meta-card-padding: 12px;
   --incidencias-modal-meta-card-radius: 16px;
   --incidencias-modal-meta-card-bg: rgba(255,255,255,.075);
   --incidencias-modal-meta-card-border: var(--border-soft);
 
-  --incidencias-modal-card-radius: var(--radius-xl);
-  --incidencias-modal-card-bg: rgba(255,255,255,.060);
-  --incidencias-modal-card-border: var(--border-soft);
+  --ui-detail-modal-card-radius: var(--radius-xl);
+  --ui-detail-modal-card-bg: rgba(255,255,255,.060);
+  --ui-detail-modal-card-border: var(--border-soft);
   --incidencias-modal-card-hover-border: rgba(255,255,255,.18);
   --incidencias-modal-card-hover-bg: rgba(255,255,255,.085);
 
@@ -1439,8 +1439,8 @@
   --incidencias-modal-timeline-gap: 14px;
   --incidencias-modal-timeline-accent-width: 4px;
 
-  --incidencias-modal-footer-button-height: 42px;
-  --incidencias-modal-footer-button-radius: 12px;
+  --ui-detail-modal-footer-button-height: 42px;
+  --ui-detail-modal-footer-button-radius: 12px;
 
   --incidencias-modal-transition:
     transform var(--duration-normal) var(--ease-standard),
@@ -1514,7 +1514,7 @@ body[data-route-mode="app"] {
     --topbar-search-command-width: min(680px, calc(100vw - 28px));
     --topbar-search-palette-width: var(--topbar-search-command-width);
 
-    --incidencias-modal-width: min(calc(100vw - 24px), 1160px);
+    --ui-detail-modal-width: min(calc(100vw - 24px), 1160px);
     --incidencias-modal-thumb-width: 82px;
     --incidencias-modal-thumb-height: 68px;
   }
@@ -1573,11 +1573,11 @@ body[data-route-mode="app"] {
 
 @media (max-width: 720px) {
   :root {
-    --incidencias-modal-width: min(calc(100vw - 20px), 1160px);
-    --incidencias-modal-padding: var(--space-md);
-    --incidencias-modal-avatar-size: 58px;
-    --incidencias-modal-avatar-radius: 17px;
-    --incidencias-modal-title-size: clamp(18px, 5.4vw, 23px);
+    --ui-detail-modal-width: min(calc(100vw - 20px), 1160px);
+    --ui-detail-modal-padding: var(--space-md);
+    --ui-detail-modal-avatar-size: 58px;
+    --ui-detail-modal-avatar-radius: 17px;
+    --ui-detail-modal-title-size: clamp(18px, 5.4vw, 23px);
     --incidencias-modal-thumb-width: 74px;
     --incidencias-modal-thumb-height: 62px;
     --incidencias-modal-thumb-radius: 14px;
@@ -1622,10 +1622,10 @@ body[data-route-mode="app"] {
     --font-4xl: calc(28px * var(--ui-scale));
     --font-5xl: calc(34px * var(--ui-scale));
 
-    --incidencias-modal-width: min(calc(100vw - 16px), 1160px);
+    --ui-detail-modal-width: min(calc(100vw - 16px), 1160px);
     --incidencias-modal-thumb-width: 64px;
     --incidencias-modal-thumb-height: 58px;
-    --incidencias-modal-body-gap: var(--space-md);
+    --ui-detail-modal-body-gap: var(--space-md);
   }
 }
 
@@ -1676,7 +1676,7 @@ body[data-route-mode="app"] {
     --topbar-search-glass-blur: none;
     --topbar-search-glass-bg: var(--graphite-500);
 
-    --incidencias-modal-card-bg: var(--surface-2);
+    --ui-detail-modal-card-bg: var(--surface-2);
     --incidencias-modal-upload-bg: var(--surface-2);
     --incidencias-modal-composer-bg: var(--surface-2);
     --incidencias-modal-preview-bg: var(--surface-2);

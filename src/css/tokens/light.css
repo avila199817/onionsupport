@@ -1072,33 +1072,33 @@ body[data-theme="light"] {
 
 
   /* =======================================================
-     INCIDENCIAS DETAIL / MODAL TOKENS
+     DETAIL MODAL SHARED + INCIDENCIAS DOMAIN TOKENS
   ======================================================= */
 
-  --incidencias-modal-overlay-bg: rgba(13,13,13,.32);
-  --incidencias-modal-overlay-blur: blur(12px) saturate(1.04);
+  --ui-detail-modal-overlay-bg: rgba(13,13,13,.32);
+  --ui-detail-modal-overlay-blur: blur(12px) saturate(1.04);
 
-  --incidencias-modal-bg:
+  --ui-detail-modal-bg:
     linear-gradient(180deg, rgba(255,255,255,.99), rgba(245,245,245,.90)),
     rgba(255,255,255,.96);
 
-  --incidencias-modal-border: rgba(13,13,13,.085);
+  --ui-detail-modal-border: rgba(13,13,13,.085);
 
-  --incidencias-modal-shadow:
+  --ui-detail-modal-shadow:
     0 44px 120px rgba(13,13,13,.145),
     0 0 0 1px rgba(255,255,255,.70) inset,
     inset 0 1px 0 rgba(255,255,255,.94);
 
-  --incidencias-modal-header-border: rgba(13,13,13,.070);
+  --ui-detail-modal-header-border: rgba(13,13,13,.070);
 
   --incidencias-modal-meta-card-bg: rgba(13,13,13,.026);
   --incidencias-modal-meta-card-border: rgba(13,13,13,.070);
 
-  --incidencias-modal-card-bg:
+  --ui-detail-modal-card-bg:
     linear-gradient(180deg, rgba(255,255,255,.90), rgba(245,245,245,.72)),
     rgba(255,255,255,.76);
 
-  --incidencias-modal-card-border: rgba(13,13,13,.070);
+  --ui-detail-modal-card-border: rgba(13,13,13,.070);
   --incidencias-modal-card-hover-border: rgba(13,13,13,.115);
 
   --incidencias-modal-card-hover-bg:
@@ -1209,8 +1209,8 @@ body[data-theme="light"] {
     --sidebar-bg-strong: #ffffff;
     --sidebar-dropdown-bg: #ffffff;
 
-    --incidencias-modal-bg: #ffffff;
-    --incidencias-modal-card-bg: #ffffff;
+    --ui-detail-modal-bg: #ffffff;
+    --ui-detail-modal-card-bg: #ffffff;
     --incidencias-modal-upload-bg: #ffffff;
     --incidencias-modal-composer-bg: #ffffff;
     --incidencias-modal-preview-bg: #ffffff;

@@ -9,12 +9,13 @@
    - Cargar /src/app/index.js y ejecutar boot una sola vez.
    - Mantener token/ruta sensible sólo en memoria durante el handoff al App.
    - No copiar secretos de URL a snapshots/eventos globales.
+   - No bloquear el estado ready por mejoras progresivas post-router.
    - Delegar el loader normal en /src/app/loader.js.
    - Mantener un fallback DOM mínimo sólo para fallo extremo del loader.
    - Sin Auth, Router, Store, Services, fetch, storage ni dominio.
 ========================================================= */
 
-export const MAIN_VERSION = "main.minimal.v6-single-entrypoint";
+export const MAIN_VERSION = "main.minimal.v7-progressive-ready";
 
 const APP_MODULE = "./app/index.js";
 const LOADER_MODULE = "./app/loader.js";
@@ -188,9 +189,7 @@ function setAppState(state = "booting") {
     node.dataset.appFatal = fatal ? "true" : "false";
     node.dataset.mainVersion = MAIN_VERSION;
 
-    if (ready) {
-      node.dataset.appBooted = "true";
-    }
+    if (ready) node.dataset.appBooted = "true";
 
     node.classList.remove("no-js");
     node.classList.add("js");
@@ -374,14 +373,46 @@ async function loadEnhancements() {
   return registry;
 }
 
+function enhancementSnapshot(enhancements) {
+  return isFunction(enhancements?.getSnapshot)
+    ? enhancements.getSnapshot()
+    : null;
+}
+
+function startPostRouterEnhancements(enhancements) {
+  const task = Promise.resolve()
+    .then(() => enhancements.initPostRouter())
+    .catch((error) => {
+      try {
+        console.error(
+          "[Onion Main] No se pudieron iniciar todas las mejoras progresivas:",
+          safeError(error)
+        );
+      } catch {
+        // noop
+      }
+      return false;
+    })
+    .then((ok) => {
+      writeMainSnapshot({
+        enhancementsReady: true,
+        enhancementsOk: ok !== false,
+        enhancements: enhancementSnapshot(enhancements),
+      });
+      return ok !== false;
+    });
+
+  return task;
+}
+
 async function runBoot() {
   setAppState("booting");
 
   const enhancements = await loadEnhancements();
 
   /*
-    ticket-deeplink debe poder canonicalizar /tickets/<id> antes de capturar
-    la ruta que recibirá el Router. Chrome también queda preparado aquí.
+    ticket-deeplink debe canonicalizar /tickets/<id> antes de capturar
+    la ruta del Router. Chrome también se prepara antes del App.
   */
   await enhancements.initPreRouter();
 
@@ -392,6 +423,9 @@ async function runBoot() {
     state: "booting",
     initialPath: safeInitialPath,
     error: null,
+    enhancementsReady: false,
+    enhancementsOk: null,
+    enhancements: enhancementSnapshot(enhancements),
   });
 
   dispatchMainEvent("boot-start", {
@@ -412,10 +446,11 @@ async function runBoot() {
   });
 
   /*
-    Las mejoras progresivas se activan tras el Router. Sus fallos están
-    aislados dentro del registry y no convierten un App sano en fallo fatal.
+    El App/Router ya está listo. A partir de aquí los módulos son progresivos:
+    empiezan en background y no retrasan `ready` ni convierten un fallo aislado
+    en un fatal de arranque.
   */
-  await enhancements.initPostRouter();
+  void startPostRouterEnhancements(enhancements);
 
   setAppState("ready");
 
@@ -423,9 +458,7 @@ async function runBoot() {
     state: "ready",
     initialPath: safeInitialPath,
     error: null,
-    enhancements: isFunction(enhancements.getSnapshot)
-      ? enhancements.getSnapshot()
-      : null,
+    enhancements: enhancementSnapshot(enhancements),
   });
 
   dispatchMainEvent("ready", {
@@ -436,9 +469,7 @@ async function runBoot() {
 }
 
 export function boot() {
-  if (!isBrowser()) {
-    return Promise.resolve(false);
-  }
+  if (!isBrowser()) return Promise.resolve(false);
 
   window[DISABLE_AUTO_BOOT_KEY] = true;
 

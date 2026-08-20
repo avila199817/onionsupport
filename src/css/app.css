@@ -4,7 +4,7 @@
    ONION SUPPORT — APP.CSS
    Archivo: /src/css/app.css
 
-   CSS ENTRYPOINT · TOKEN PRO SYSTEM · PRIVATE SPA
+   CSS ENTRYPOINT · TOKEN PRO SYSTEM · SPA
    CSP CLEAN · CASCADE LAYERS · ZERO INLINE SYSTEM
 
    Responsabilidades:
@@ -13,14 +13,14 @@
    - Cargar únicamente estilos realmente globales.
    - Mantener variables.css como fuente de verdad visual dark/default.
    - Mantener light.css como única fuente de overrides del tema claro.
-   - Dejar las vistas privadas al loader CSS de ruta.
+   - Dejar TODAS las hojas específicas de ruta a src/router/styles.js.
    - Permitir composiciones responsive transversales sin parches por vista.
    - Cerrar la cascada con invariantes geométricas transversales.
 
    Reglas:
    - Sin declaraciones CSS directas en este archivo.
    - Sin imports externos ni fuentes remotas.
-   - Sin imports de parches específicos de una vista privada.
+   - Sin imports específicos de una vista/ruta.
    - Sin imports duplicados.
 ========================================================= */
 
@@ -47,7 +47,7 @@
 @import url("./core/loader.css") layer(core);
 
 /* =========================================================
-   PRIVATE APP CHROME
+   APP CHROME GLOBAL
 
    Sidebar/Topbar pintan sus componentes internos.
    chrome.css se carga el último dentro de layer(layout) y es la ÚNICA
@@ -66,22 +66,11 @@
 @import url("./components/ui.css") layer(components);
 
 /* =========================================================
-   PRIVATE VIEWS
+   ROUTE VIEWS
 
-   Las hojas de las vistas privadas se cargan desde src/router/styles.js.
-   Cada dominio define su desktop/tablet dentro de layer(views).
+   Ninguna hoja de vista se importa aquí. Públicas y privadas se cargan desde
+   src/router/styles.js y cada dominio conserva su propia capa de cascada.
 ========================================================= */
-
-/* =========================================================
-   PUBLIC · LANDING / SUPPORT REQUEST
-
-   Toda la experiencia pública entra por este único entrypoint CSS.
-   No hay hojas paralelas enlazadas desde index.html.
-========================================================= */
-
-@import url("./views/public/support-request.css");
-@import url("./views/public/public-support-progress.css");
-@import url("./views/public/home-experience.css");
 
 /* =========================================================
    COMPOSITIONS · RESPONSIVE CROSS-VIEW
@@ -93,11 +82,11 @@
 @import url("./compositions/mobile-datalist.css") layer(compositions);
 
 /* =========================================================
-   FINAL UI FOUNDATION · PRIVATE LAYOUT GUARDRAILS
+   FINAL UI FOUNDATION · LAYOUT GUARDRAILS
 
    Esta capa es deliberadamente la última capa declarada. No pinta una vista:
    impone invariantes de shrink, overflow, scroll, viewport y responsive para
-   que ninguna hoja de ruta pueda volver a romper la geometría del panel.
+   que ninguna hoja de ruta pueda volver a romper la geometría de la SPA.
 ========================================================= */
 
 @import url("./core/guardrails.css") layer(guardrails);

@@ -35,6 +35,15 @@ jobs:
         run: |
           set -euo pipefail
           python3 .github/scripts/ui_system_v11_correo_identity.py
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/repo_integrity.py')
+          text = path.read_text(encoding='utf-8')
+          old = '        \'CORREO_VIEW_VERSION = "correo.view.microsoft.production.v5-canonical-media"\',\n'
+          if old not in text:
+              raise SystemExit('No se encontró pin de versión V10 a retirar')
+          path.write_text(text.replace(old, '', 1), encoding='utf-8')
+          PY
 
       - name: Validate repository
         run: |

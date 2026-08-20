@@ -1,149 +1,167 @@
-# Onion Support — UI Foundation V1
+# Onion Support — UI Foundation
 
 ## Objetivo
 
-La SPA privada debe comportarse como un sistema y no como una colección de vistas que sobreviven por sus propios parches. El contenido puede cambiar; la geometría no debe romperse.
+La SPA privada se comporta como un sistema, no como una colección de vistas sostenidas por correcciones laterales. El contenido puede cambiar; la geometría debe permanecer estable.
 
-Esta foundation establece una jerarquía única:
+## Jerarquía de autoridad
 
-1. `tokens/variables.css` y `tokens/light.css` definen decisiones visuales.
-2. `core/reset.css` normaliza el navegador.
-3. `core/core.css` define tipografía, accesibilidad y helpers.
-4. `core/layout.css` gobierna shell base y la autoridad de scroll vertical.
-5. `components/ui.css` define componentes reutilizables.
-6. `views/**` compone cada dominio.
-7. `compositions/**` puede recomponer varios dominios para una experiencia transversal —por ejemplo DataList móvil— sin introducir lógica de negocio ni `!important`.
-8. `core/guardrails.css` cierra la cascada con invariantes geométricas no negociables.
+1. `src/css/tokens/variables.css` y `src/css/tokens/light.css`: decisiones visuales y temas.
+2. `src/css/core/reset.css`: normalización del navegador.
+3. `src/css/core/core.css`: tipografía, accesibilidad y helpers globales.
+4. `src/css/core/layout.css`: shell base y autoridad de scroll vertical.
+5. `src/css/layout/**`: componentes visuales del shell; `chrome.css` cierra su geometría.
+6. `src/css/components/**`: componentes reutilizables.
+7. `src/css/views/**`: composición de cada dominio.
+8. `src/css/compositions/**`: recomposición transversal de varios dominios.
+9. `src/css/core/guardrails.css`: invariantes geométricas finales.
 
-Topbar y Sidebar mantienen controladores internos independientes, pero su geometría pertenece a una única superficie `App Chrome`. `css/layout/chrome.css` es la autoridad final de offsets, mounts, drawer y sincronía del shell; `ui/chrome/index.js` posee la coordinación responsive.
+`src/css/app.css` declara el orden de layers y es el único entrypoint CSS global.
 
-## Contratos no negociables
+## Scroll
 
-### Una sola autoridad de scroll vertical
+### Vertical
 
-`.main-content` es el scroll vertical del panel. Una vista normal no crea otro viewport vertical completo dentro del viewport principal.
+`.main-content` es la autoridad de scroll vertical del panel. Una vista normal no crea otro viewport vertical completo dentro del viewport principal.
 
-Los componentes que necesitan scroll propio —tablas, correo, modales o listas deliberadamente contenidas— deben declararlo de manera explícita.
+Componentes que necesitan scroll propio —tablas, Correo, modales o listas deliberadamente contenidas— lo declaran de forma explícita.
 
-### El scroll horizontal pertenece al componente
+### Horizontal
 
-Las tablas no expanden el viewport. Los shells de Incidencias, Facturas, Clientes y Usuarios son los propietarios del scroll horizontal en desktop/tablet cuando resulte necesario.
+Las tablas no expanden el viewport. Sus shells son propietarios del overflow horizontal en desktop/tablet cuando sea necesario.
 
-En teléfono, esos cuatro listados usan la composición DataList: el scroll horizontal deja de ser la UX principal y cada fila conserva el mismo dataset en una tarjeta jerárquica.
+En teléfono, Incidencias, Facturas, Clientes y Usuarios usan la composición DataList y el scroll horizontal deja de ser la UX principal.
 
-Un identificador, email, endpoint o nombre largo nunca puede convertir el panel completo en una superficie horizontal.
+Un identificador, email, endpoint o nombre largo nunca puede convertirse en autoridad de layout.
 
-### Flex y Grid siempre pueden encoger
+## Flex y Grid
 
-Los roots y elementos estructurales privados reciben `min-inline-size: 0`. El tamaño `min-content` de un hijo no puede imponer el ancho de su padre.
+Roots y elementos estructurales privados deben poder encoger (`min-inline-size: 0`). El tamaño `min-content` de un hijo no puede imponer el ancho de su padre.
 
-### El texto tiene estrategia
+## Texto
 
-- texto narrativo: puede envolver;
+- narrativo: puede envolver;
 - identificadores y tokens largos: pueden romper cuando sea necesario;
-- una sola línea: usa `text-truncate` / `ui-truncate`;
-- resumen breve: usa `text-clamp-2` o `text-clamp-3`;
-- nunca se usa una cadena larga como autoridad de layout.
+- una línea: truncado explícito;
+- resumen breve: clamp explícito;
+- ninguna cadena larga decide el tamaño de la interfaz.
 
-### Modales dentro del viewport real
+## Modales
 
-`dialog`, `[role="dialog"]` y `[aria-modal="true"]` respetan `100dvh`, `100dvw` y safe areas. Un modal no puede quedar detrás de la barra del navegador móvil ni crecer fuera de pantalla.
+`dialog`, `[role="dialog"]` y `[aria-modal="true"]` respetan viewport dinámico y safe areas. Un modal no puede crecer fuera de pantalla ni quedar detrás del chrome del navegador móvil.
 
-### App Chrome móvil
+El shell transversal de detalle vive en `src/css/components/detail-modal.css` y consume tokens `--ui-detail-modal-*`. Los estilos específicos de cada dominio permanecen en sus hojas de vista.
 
-A `900px` Topbar y Sidebar cambian de composición sin repartir su geometría:
+## App Chrome
 
-- el único trigger de navegación móvil vive dentro del Topbar;
-- `--chrome-sidebar-offset` queda fijado a `0px`;
-- Sidebar cerrado está totalmente off-canvas y tiene huella espacial cero;
-- Main, Topbar y tablehead ocupan el ancho completo del viewport;
-- abrir/cerrar navegación no cambia el `inset-inline-start` de Topbar/Main;
-- Sidebar abierto se superpone como drawer y nunca desplaza contenido;
-- un backdrop glass real cubre la aplicación, captura el toque exterior y evita click-through;
-- la interacción de fondo queda inerte mientras el drawer está abierto cuando el navegador soporta `inert`;
-- el foco de teclado queda contenido en Sidebar y `Escape` devuelve el foco al trigger;
-- el toggle interno de Sidebar queda reservado a desktop.
+Topbar y Sidebar mantienen controladores internos independientes, pero su geometría e interacción transversal pertenecen a App Chrome:
 
-`ui/chrome/template.js` posee la estructura visual compartida. `ui/chrome/index.js` posee la coordinación del drawer y consume únicamente la API pública de `SidebarUI`. `css/layout/chrome.css` es la única autoridad geométrica final.
+- `src/ui/chrome/template.js`: estructura compartida;
+- `src/ui/chrome/index.js`: coordinación responsive;
+- `src/css/layout/chrome.css`: autoridad geométrica final;
+- `src/app/enhancements.js`: registro `pre-router`;
+- `src/main.js`: entrypoint único que prepara Chrome antes del App/Router.
 
-### Regla de cascade layers del chrome
+No existen ni deben reaparecer `mobile-shell.css` o `features/mobile-shell/index.js`.
 
-`app.css` importa `chrome.css` dentro de `layer(layout)` y `chrome.css` no vuelve a declarar `@layer layout` internamente. Un `@layer` duplicado crearía una subcapa `layout.layout` y permitiría que reglas antiguas de Topbar/Sidebar ganaran prioridad.
+### Mobile `<= 900px`
 
-### Mobile es una composición, no una reducción
+- el trigger de navegación vive en Topbar;
+- `--chrome-sidebar-offset` es `0px`;
+- Sidebar cerrado tiene huella espacial cero;
+- Main, Topbar y tablehead ocupan el ancho completo;
+- abrir/cerrar navegación no desplaza Topbar/Main;
+- Sidebar abierto es drawer overlay;
+- backdrop, `inert`, foco y `Escape` forman parte del contrato;
+- safe areas y viewport dinámico son obligatorios.
 
-A 900 px:
+### Desktop
 
-- App Chrome adopta navegación drawer desde Topbar;
-- Main y Topbar pasan a ancho completo;
-- los heroes pasan a una columna;
-- las acciones dejan de competir con el título;
-- las métricas pasan a dos columnas;
-- toolbars y filtros pasan a una columna;
-- los filtros horizontales controlan su propio scroll.
+Sidebar es persistente/colapsable. Sidebar, Topbar, main y tablehead consumen el mismo `--chrome-sidebar-offset`, de modo que `open`, `collapsed` y `hidden` mueven el shell como una unidad.
 
-A 680 px:
+### Cascade
 
-- los listados tabulares de Incidencias, Facturas, Clientes y Usuarios se recomponen como DataList;
-- el dato principal ocupa la primera línea completa;
-- los metadatos conservan labels compactos y posiciones predecibles;
-- los bloques de acciones permanecen táctiles y simétricos;
-- el DOM de tabla se conserva para desktop y accesibilidad.
+`src/css/app.css` mantiene:
 
-A 560 px:
+```css
+@import url("./layout/sidebar.css") layer(layout);
+@import url("./layout/topbar.css") layer(layout);
+@import url("./layout/chrome.css") layer(layout);
+```
 
-- las métricas pasan a una columna;
-- títulos y subtítulos usan escala móvil común;
-- paneles históricos conservan borde/radio y dejan de usar márgenes negativos;
+`chrome.css` no vuelve a declarar `@layer layout` internamente.
+
+## Responsive como composición
+
+A `900px`:
+
+- App Chrome adopta drawer;
+- heroes pasan a una columna;
+- acciones dejan de competir con títulos;
+- métricas pasan a dos columnas;
+- toolbars/filtros pueden pasar a una columna;
+- los filtros horizontales son dueños de su propio overflow.
+
+A `680px`:
+
+- Incidencias, Facturas, Clientes y Usuarios se recomponen como DataList;
+- el dato principal ocupa la primera línea;
+- metadatos conservan labels y posiciones predecibles;
+- acciones permanecen táctiles;
+- el DOM de tabla se conserva.
+
+A `560px`:
+
+- métricas pasan a una columna;
+- títulos/subtítulos usan escala móvil común;
 - grids técnicos y de cuenta pasan a una columna.
 
-A 480 px:
+A `480px`:
 
-- los grupos de acciones principales son una columna;
-- cada acción ocupa el ancho disponible.
+- los grupos de acciones principales pasan a una columna;
+- cada acción puede ocupar el ancho disponible.
 
 ## Capa `compositions`
 
-`compositions` existe para patrones que necesitan imponerse después de las hojas de dominio, pero que no son guardrails ni parches.
-
 Puede:
 
-- recomponer varios dominios bajo un mismo patrón responsive;
-- utilizar clases/atributos de mejora progresiva compartidos;
-- adaptar densidad, orden visual y slots manteniendo el DOM funcional existente.
+- recomponer varios dominios bajo un patrón responsive común;
+- usar clases/atributos de mejora progresiva compartidos;
+- adaptar densidad, orden visual y slots sin duplicar datos ni negocio.
 
 No puede:
 
-- contener llamadas de red, auth, router o store;
+- contener red, auth, router o store;
 - decidir estados de negocio;
-- introducir una paleta paralela;
-- arreglar un único bug coyuntural de una única vista;
-- usar `!important` como mecanismo de arquitectura.
+- crear paleta propia;
+- arreglar un bug aislado de una vista;
+- usar `!important` como mecanismo arquitectónico.
 
-## Lo que guardrails.css NO puede hacer
+La implementación DataList canónica está documentada en `docs/MOBILE_DATALIST.md`.
+
+## Guardrails
+
+`src/css/core/guardrails.css` sólo impone invariantes geométricas transversales.
 
 No puede:
 
-- declarar colores hexadecimales;
-- crear una paleta propia;
+- definir una paleta;
 - contener lógica dark/light;
-- arreglar una sola vista por ID o por un bug coyuntural;
+- arreglar una vista concreta por ID;
 - sustituir el CSS de dominio;
 - incluir lógica de negocio.
 
-Si una necesidad sólo aplica a una vista, pertenece a esa vista. Si es una invariante geométrica del producto, pertenece a Foundation. Si recompone varios dominios bajo una experiencia común, pertenece a `compositions`.
+Si una necesidad sólo aplica a un dominio, vive en su vista. Si recompone varios dominios, vive en `compositions`. Si es una invariante geométrica global, vive en Foundation/guardrails.
 
-## Política contra micro-parches
+## Política contra parches
 
-El core, layout y components no aceptan archivos con nombres `patch`, `hotfix` o `quickfix`. Repository Integrity valida esta regla.
+Core, layout, components y compositions no aceptan archivos `patch`, `hotfix` o `quickfix`.
 
-Los cambios visuales transversales deben convertirse en sistema o permanecer en la hoja canónica del dominio correspondiente.
+Una corrección estructural debe modificar la fuente canónica y retirar la regla, listener, observer, bridge o archivo que deja de ser necesario. No se conserva una segunda capa “por seguridad”.
 
-## Migración progresiva
+## Criterios de aceptación
 
-UI Foundation V1 estabiliza inmediatamente todas las vistas privadas existentes sin exigir una reescritura destructiva simultánea.
-
-Los siguientes refactors pueden eliminar CSS duplicado de `views/**`, `topbar.css` y `sidebar.css` de forma incremental, moviendo únicamente patrones ya probados al sistema común. Cada migración debe mantener:
+Toda evolución visual debe preservar:
 
 - contratos funcionales;
 - dark/light;
@@ -154,21 +172,8 @@ Los siguientes refactors pueden eliminar CSS duplicado de `views/**`, `topbar.cs
 - Repository Integrity;
 - preview de Azure Static Web Apps antes de mergear.
 
-## Regla de diseño
+## Regla final
 
 > El contenido cambia. La geometría permanece estable.
 
-Si una vista sólo funciona con datos cortos, un ancho concreto o una resolución concreta, la vista no está terminada.
-
-## UI System V4 · consolidación de autoridades
-
-- `src/css/layout/chrome.css` gobierna toda la geometría compartida del chrome.
-- `src/ui/chrome/index.js` se carga directamente; no existe bridge `features/mobile-shell`.
-- Correo mantiene únicamente `index.css` + `viewport.css`; su contrato de altura/densidad ya no se inyecta globalmente desde `app.css`.
-- Los estilos específicos del Sidebar viven en `sidebar.css`, no en mini-hojas paralelas.
-- Repository Integrity impide que estas rutas legacy reaparezcan.
-
-## Detail Modal transversal · V8
-
-Los tokens compartidos del shell de detalle usan el namespace `--ui-detail-modal-*` en `tokens/variables.css` y `tokens/light.css`. Ningún componente transversal puede depender de `--incidencias-modal-*`; ese prefijo queda reservado a necesidades exclusivas del dominio Incidencias.
-
+Si una vista sólo funciona con datos cortos, una resolución concreta o una cadena de parches correctores, la vista no está terminada.

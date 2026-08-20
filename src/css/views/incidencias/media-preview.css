@@ -1,0 +1,130 @@
+/* =========================================================
+   Onion Support - Incidencias Media Preview
+   Archivo: /src/css/views/incidencias/media-preview.css
+
+   PRODUCTIVO · ROUTE-SCOPED · FALLBACK-FIRST
+   - Miniaturas locales de adjuntos pendientes.
+   - Miniaturas remotas nunca muestran un hueco negro.
+   - Ritmo vertical del body simétrico respecto al borde del modal.
+========================================================= */
+
+@layer views {
+
+/*
+   Los slots de feedback/preview permanecen en el DOM para que el patcher pueda
+   activarlos sin sustituir el modal completo. Cuando no contienen UI real no
+   deben ocupar una fila del grid ni crear gaps fantasma. Al retirarlos del
+   layout, el padding superior vuelve a ser exactamente el mismo que el inferior.
+   El controlador progresivo marca el estado; no dependemos de :has().
+*/
+.incidencias-modal-body.ui-detail-modal-body
+  > [data-modal-feedback-slot="true"][data-slot-empty="true"],
+.incidencias-modal-body.ui-detail-modal-body
+  > [data-modal-preview-slot="true"][data-slot-empty="true"] {
+  display: none;
+}
+
+/* Pendientes: miniatura + datos + acción. */
+.incidencias-modal-pending-file[data-media-preview-enhanced="true"] {
+  grid-template-columns:
+    var(--incidencias-modal-thumb-width, 92px)
+    minmax(0, 1fr)
+    auto;
+}
+
+.incidencias-modal-pending-thumb {
+  position: relative;
+  inline-size: var(--incidencias-modal-thumb-width, 92px);
+  block-size: var(--incidencias-modal-thumb-height, 58px);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--incidencias-modal-thumb-border, var(--border-default));
+  border-radius: var(--incidencias-modal-thumb-radius, var(--radius-xs));
+  background: var(--incidencias-modal-thumb-bg, var(--solid-bg-2));
+  color: var(--text-muted);
+  isolation: isolate;
+}
+
+.incidencias-modal-pending-thumb-image,
+.incidencias-modal-image-thumb-wrap[data-modal-thumb-frame="true"] .incidencias-modal-image-thumb {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  inline-size: 100%;
+  block-size: 100%;
+  display: block;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.incidencias-modal-pending-thumb-fallback,
+.incidencias-modal-image-thumb-wrap[data-modal-thumb-frame="true"] .incidencias-modal-image-thumb-fallback {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  padding: 6px;
+  background: var(--incidencias-modal-thumb-bg, var(--solid-bg-2));
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: var(--weight-bold);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  opacity: 1;
+}
+
+.incidencias-modal-pending-thumb[data-preview-state="ready"] .incidencias-modal-pending-thumb-image,
+.incidencias-modal-image-thumb-wrap[data-preview-state="ready"] .incidencias-modal-image-thumb {
+  opacity: 1;
+}
+
+.incidencias-modal-pending-thumb[data-preview-state="ready"] .incidencias-modal-pending-thumb-fallback,
+.incidencias-modal-image-thumb-wrap[data-preview-state="ready"] .incidencias-modal-image-thumb-fallback {
+  opacity: 0;
+}
+
+.incidencias-modal-pending-thumb[data-preview-state="error"] .incidencias-modal-pending-thumb-image,
+.incidencias-modal-image-thumb-wrap[data-preview-state="error"] .incidencias-modal-image-thumb {
+  opacity: 0;
+}
+
+/* Evita negro durante load/error: siempre existe la superficie fallback. */
+.incidencias-modal-image-thumb-wrap[data-modal-thumb-frame="true"] {
+  background: var(--incidencias-modal-thumb-bg, var(--solid-bg-2));
+}
+
+.incidencias-modal-image-open-badge {
+  z-index: 3;
+}
+
+@media (max-width: 720px) {
+  .incidencias-modal-pending-file[data-media-preview-enhanced="true"] {
+    grid-template-columns: 64px minmax(0, 1fr) auto;
+  }
+
+  .incidencias-modal-pending-thumb {
+    inline-size: 64px;
+    block-size: 52px;
+  }
+}
+
+@media (max-width: 520px) {
+  .incidencias-modal-pending-file[data-media-preview-enhanced="true"] {
+    grid-template-columns: 56px minmax(0, 1fr);
+  }
+
+  .incidencias-modal-pending-file[data-media-preview-enhanced="true"] > button {
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
+
+  .incidencias-modal-pending-thumb {
+    inline-size: 56px;
+    block-size: 48px;
+  }
+}
+
+}

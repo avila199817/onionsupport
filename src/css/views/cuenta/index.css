@@ -1,8 +1,9 @@
 /* =========================================================
-   ONION SUPPORT — CUENTA V7
+   ONION SUPPORT — CUENTA V9
    Archivo: /src/css/views/cuenta/index.css
 
-   PRODUCTIVO · FOCUSED SELF-SERVICE · SYSTEM TOKENS
+   PRODUCTIVO · FLOATING IDENTITY · SYSTEM TOKENS
+   - Identidad flotante sin card, borde, fondo ni sombra.
    - Foto / apariencia+idioma / contraseña / pago / desactivación.
    - Sin refresh manual, selector de color, sesiones, actividad ni paja.
    - Misma jerarquía visual que Facturas, Clientes y Usuarios.
@@ -34,7 +35,7 @@
 
 .cuenta-view {
   display: grid;
-  gap: var(--space-lg);
+  gap: var(--space-md);
   inline-size: 100%;
   min-inline-size: 0;
 }
@@ -62,56 +63,8 @@
 }
 
 /* =========================================================
-   HERO
+   FLOATING IDENTITY
 ========================================================= */
-
-.cuenta-hero {
-  display: grid;
-  gap: var(--space-md);
-  min-inline-size: 0;
-  padding: clamp(8px, 1vw, 16px) clamp(4px, .9vw, 14px) 0;
-}
-
-.cuenta-hero-copy {
-  display: grid;
-  gap: var(--space-2xs);
-  min-inline-size: 0;
-}
-
-.cuenta-eyebrow {
-  inline-size: max-content;
-  min-block-size: 27px;
-  display: inline-flex;
-  align-items: center;
-  padding-inline: 9px;
-  border: 1px solid var(--badge-border);
-  border-radius: var(--radius-pill);
-  background: var(--badge-bg);
-  color: var(--text-strong);
-  font-size: var(--font-2xs);
-  font-weight: var(--weight-bold);
-  letter-spacing: .07em;
-  text-transform: uppercase;
-}
-
-.cuenta-title {
-  margin: 0;
-  max-inline-size: 900px;
-  color: var(--text-strong);
-  font-size: clamp(30px, 3vw, 44px);
-  font-weight: var(--weight-black);
-  line-height: 1;
-  letter-spacing: var(--letter-tight);
-}
-
-.cuenta-subtitle {
-  margin: 0;
-  max-inline-size: 760px;
-  color: var(--text-muted);
-  font-size: var(--font-base);
-  font-weight: var(--weight-medium);
-  line-height: var(--line-normal);
-}
 
 .cuenta-profile-summary {
   min-inline-size: 0;
@@ -119,11 +72,11 @@
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-md);
-  padding: var(--space-md);
-  border: 1px solid var(--panel-border);
-  border-radius: var(--panel-radius);
-  background: var(--panel-bg);
-  box-shadow: var(--panel-shadow);
+  padding: clamp(8px, 1vw, 14px) clamp(16px, 1.35vw, 22px);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .cuenta-profile-copy {
@@ -940,10 +893,6 @@
 }
 
 @media (max-width: 680px) {
-  .cuenta-hero {
-    padding-inline: 0;
-  }
-
   .cuenta-profile-summary {
     grid-template-columns: auto minmax(0, 1fr);
   }
@@ -966,6 +915,7 @@
   .cuenta-profile-summary {
     grid-template-columns: 1fr;
     justify-items: start;
+    padding-inline: var(--space-xs);
   }
 
   .cuenta-actions {
@@ -1035,8 +985,7 @@
     display: none !important;
   }
 
-  .cuenta-card,
-  .cuenta-profile-summary {
+  .cuenta-card {
     box-shadow: none !important;
   }
 }

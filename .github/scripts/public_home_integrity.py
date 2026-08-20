@@ -140,6 +140,12 @@ def main() -> int:
             f"public-home debe cargar por ruta: {css_path}",
         )
 
+    require(
+        errors,
+        '"/src/css/auth/login.css"' not in manifest,
+        "public-home no debe descargar la hoja de autenticación",
+    )
+
     for css_name in (
         "support-request.css",
         "public-support-progress.css",
@@ -270,7 +276,7 @@ def main() -> int:
 
     print("Public home integrity: PASS")
     print("- JS: main.js -> app/enhancements.js")
-    print("- CSS: router/styles.js -> public-home")
+    print("- CSS: router/styles.js -> public-home (sin auth/login.css)")
     print("- app.css: sólo estilos globales")
     print("- intake, UX y progreso validados por contrato semántico")
     return 0

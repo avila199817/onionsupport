@@ -14,7 +14,7 @@
 ========================================================= */
 
 export const ROUTE_STYLES_VERSION =
-  "route-styles.v10-incidencias-preview-owned";
+  "route-styles.v11-all-route-css-owned";
 
 const MODE_ATTRIBUTE =
   "data-css-route-mode";
@@ -55,6 +55,9 @@ const STYLE_MANIFEST = Object.freeze({
   "public-home": Object.freeze([
     "/src/css/auth/login.css",
     "/src/css/views/public/index.css",
+    "/src/css/views/public/support-request.css",
+    "/src/css/views/public/public-support-progress.css",
+    "/src/css/views/public/home-experience.css",
   ]),
 
   login: Object.freeze([

@@ -87,6 +87,14 @@ def validate_runtime_boundaries(errors: list[str], runtime: dict[str, str]) -> N
 
     require(
         errors,
+        "interactionHost" in facturas
+        and "host.addEventListener(eventName, onUserInteraction" in facturas
+        and "document.addEventListener(eventName, onUserInteraction" not in facturas,
+        "facturas-autorefresh debe escuchar interacción sólo en el Router view",
+    )
+
+    require(
+        errors,
         "observer.observe(mountRoot" in preview
         and "observer.observe(document.body" not in preview
         and 'observerScope: "router-view"' in preview,
@@ -234,7 +242,7 @@ def main() -> int:
     print("- index.html: 1 módulo ejecutable (/src/main.js)")
     print(f"- registry global: {len(CANONICAL_MODULES)} módulos")
     print("- post-router: progresivo/no bloqueante")
-    print("- observers globales y compatibilidad retirada: protegidos")
+    print("- observers/listeners globales y compatibilidad retirada: protegidos")
     return 0
 
 

@@ -41,6 +41,16 @@ jobs:
         run: |
           set -euo pipefail
           python3 .github/scripts/ui_system_v9_correo_boundary.py
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/repo_integrity.py')
+          text = path.read_text(encoding='utf-8')
+          broken = '        "window.localStorage.setItem(NOTIFICATION_PREF_KEY, "1")",'
+          fixed = '        \'window.localStorage.setItem(NOTIFICATION_PREF_KEY, "1")\','
+          if broken not in text:
+              raise SystemExit('No se encontró el literal V9 que debía corregirse')
+          path.write_text(text.replace(broken, fixed, 1), encoding='utf-8')
+          PY
 
       - name: Validate repository
         run: |

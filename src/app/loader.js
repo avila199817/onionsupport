@@ -11,7 +11,7 @@
 ========================================================= */
 
 export const LOADER_VERSION =
-  "app.loader.minimal.v3-hardened";
+  "app.loader.minimal.v4-canonical-hide";
 
 const LOADER_ID =
   "app-loader";
@@ -308,11 +308,6 @@ function writeLoader(
       : "false";
 
   try {
-    /*
-      Idempotencia:
-      si ya estamos exactamente en el estado pedido,
-      no tocamos el DOM otra vez.
-    */
     const alreadyCanonical =
       loader.hidden ===
         !show &&
@@ -419,14 +414,6 @@ export function hideLoader() {
   );
 }
 
-/*
-  Compatibilidad:
-  main.js usa este alias como segunda opción defensiva.
-*/
-export function forceHideLoader() {
-  return hideLoader();
-}
-
 /* =========================================================
    SNAPSHOT
 ========================================================= */
@@ -470,7 +457,6 @@ export default Object.freeze({
 
   showLoader,
   hideLoader,
-  forceHideLoader,
 
   getLoaderSnapshot,
 });

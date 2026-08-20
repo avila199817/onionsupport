@@ -36,6 +36,7 @@ RUNTIME_FILES = {
     "deeplink": ROOT / "src/features/ticket-deeplink/index.js",
     "facturas_refresh": ROOT / "src/features/facturas-autorefresh/index.js",
     "incidencias_preview": ROOT / "src/features/incidencias-media-preview/index.js",
+    "public_support": ROOT / "src/features/public-support/index.js",
     "public_progress": ROOT / "src/features/public-support-progress/index.js",
     "chrome": ROOT / "src/ui/chrome/index.js",
     "preboot": ROOT / "src/preboot/theme.js",
@@ -83,6 +84,7 @@ def validate_runtime_boundaries(errors: list[str], runtime: dict[str, str]) -> N
     deeplink = runtime["deeplink"]
     facturas = runtime["facturas_refresh"]
     preview = runtime["incidencias_preview"]
+    public_support = runtime["public_support"]
     progress = runtime["public_progress"]
     chrome = runtime["chrome"]
     preboot = runtime["preboot"]
@@ -129,11 +131,29 @@ def validate_runtime_boundaries(errors: list[str], runtime: dict[str, str]) -> N
         "Incidencias media preview debe recibir CSS exclusivamente del manifest de ruta",
     )
 
+    require(
+        errors,
+        'VIEW_ROOT_SELECTOR = "#view-container, [data-router-view=\'true\']"' in public_support
+        and "bindFormEvents(root)" in public_support
+        and "observer.observe(root" in public_support
+        and 'listenerScope: mountRoot ? "router-view" : "none"' in public_support
+        and "document.addEventListener(\"submit\", onSubmit" not in public_support
+        and "document.addEventListener(\"input\", onInput" not in public_support
+        and "document.addEventListener(\"focusin\", onFocusIn" not in public_support
+        and "document.addEventListener(\"focusout\", onFocusOut" not in public_support,
+        "public-support intake debe delegar formulario/observer sólo en el Router view",
+    )
+
     manifest = public_home_manifest(route_styles)
     require(
         errors,
         bool(manifest) and all(f'"{path}"' in manifest for path in PUBLIC_ROUTE_CSS),
         "public-home debe recibir todo su CSS específico desde el manifest de ruta",
+    )
+    require(
+        errors,
+        '"/src/css/auth/login.css"' not in manifest,
+        "public-home no puede arrastrar auth/login.css",
     )
 
     require(
@@ -279,7 +299,7 @@ def main() -> int:
     print("- app.css: global-only")
     print("- route styles: CSS público/privado bajo una sola autoridad")
     print("- post-router: progresivo/no bloqueante")
-    print("- observers/listeners globales y compatibilidad retirada: protegidos")
+    print("- listeners/observers de features: scopeados y protegidos")
     return 0
 
 

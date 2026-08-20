@@ -54,6 +54,9 @@ jobs:
       - name: Validate single app entrypoint
         run: python3 .github/scripts/app_entrypoint_integrity.py
 
+      - name: Validate Cuenta canonical surface
+        run: python3 .github/scripts/cuenta_integrity.py
+
       - name: Validate production verifier syntax
         run: python3 -m py_compile .github/scripts/production_verify.py
 

@@ -1,0 +1,57 @@
+name: One-shot UI System V7 Pairing Repair
+
+on:
+  push:
+    branches:
+      - refactor/ui-system-v7-incidencias-detail-modal
+
+permissions:
+  contents: write
+
+env:
+  TARGET_BRANCH: refactor/ui-system-v7-incidencias-detail-modal
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 1
+
+      - name: Guard trigger
+        run: |
+          set -euo pipefail
+          test -f .github/.ui-system-v7-incidencias-modal-trigger
+
+      - name: Repair class pairing
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/ui_system_v7_pairing_repair.py
+
+      - name: Validate repository
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/repo_integrity.py
+          while IFS= read -r -d '' file; do
+            node --check "$file"
+          done < <(find src -type f -name '*.js' -print0)
+
+      - name: Commit repair
+        run: |
+          set -euo pipefail
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git add \
+            src/views/incidencias/incidencias.template.modal.js \
+            .github/scripts/repo_integrity.py \
+            docs/UI_SYSTEM_V7_AUDIT.md
+          if git diff --cached --quiet; then
+            echo "Sin reparación pendiente."
+            exit 0
+          fi
+          git commit -m "fix(incidencias): completar aliases del Detail Modal compartido"
+          git push origin HEAD:${TARGET_BRANCH}

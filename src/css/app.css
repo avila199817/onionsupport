@@ -75,11 +75,12 @@
 /* =========================================================
    PUBLIC · LANDING / SUPPORT REQUEST
 
-   El responsive de la landing vive en home-experience.css. No existe una hoja
-   separada de polish/hotfix: una sola fuente de verdad por experiencia.
+   Toda la experiencia pública entra por este único entrypoint CSS.
+   No hay hojas paralelas enlazadas desde index.html.
 ========================================================= */
 
 @import url("./views/public/support-request.css");
+@import url("./views/public/public-support-progress.css");
 @import url("./views/public/home-experience.css");
 
 /* =========================================================

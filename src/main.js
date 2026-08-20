@@ -15,7 +15,7 @@
    - Sin Auth, Router, Store, Services, fetch, storage ni dominio.
 ========================================================= */
 
-export const MAIN_VERSION = "main.minimal.v7-progressive-ready";
+export const MAIN_VERSION = "main.minimal.v8-canonical-loader";
 
 const APP_MODULE = "./app/index.js";
 const LOADER_MODULE = "./app/loader.js";
@@ -239,9 +239,7 @@ async function hideLoaderSafely() {
     const module = await import(LOADER_MODULE);
     const hide =
       module?.hideLoader ||
-      module?.forceHideLoader ||
-      module?.default?.hideLoader ||
-      module?.default?.forceHideLoader;
+      module?.default?.hideLoader;
 
     if (isFunction(hide)) {
       const result = await hide();

@@ -2,7 +2,7 @@
 
 ## Objetivo
 
-La SPA privada se comporta como un sistema, no como una colección de vistas sostenidas por correcciones laterales. El contenido puede cambiar; la geometría debe permanecer estable.
+La SPA se comporta como un sistema, no como una colección de vistas sostenidas por correcciones laterales. El contenido puede cambiar; la geometría debe permanecer estable.
 
 ## Jerarquía de autoridad
 
@@ -16,7 +16,9 @@ La SPA privada se comporta como un sistema, no como una colección de vistas sos
 8. `src/css/compositions/**`: recomposición transversal de varios dominios.
 9. `src/css/core/guardrails.css`: invariantes geométricas finales.
 
-`src/css/app.css` declara el orden de layers y es el único entrypoint CSS global.
+`src/css/app.css` declara el orden de layers y es el único entrypoint CSS global. Sólo importa estilos transversales. `src/router/styles.js` es la autoridad de carga para las hojas específicas de ruta, públicas y privadas.
+
+Una feature no inyecta `<link rel="stylesheet">` para una hoja que pertenece a una ruta. Si el estilo sólo existe en Incidencias, Facturas, Public Home, Cuenta, etc., se declara en el manifest del Router.
 
 ## Scroll
 
@@ -90,6 +92,8 @@ Sidebar es persistente/colapsable. Sidebar, Topbar, main y tablehead consumen el
 ```
 
 `chrome.css` no vuelve a declarar `@layer layout` internamente.
+
+Las hojas de `src/css/views/**` no se importan desde `app.css`: el Router las prepara, activa y desactiva como parte del commit de cada ruta.
 
 ## Responsive como composición
 

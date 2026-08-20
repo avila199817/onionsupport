@@ -1,18 +1,23 @@
 /* =========================================================
-   ONION SUPPORT — CUENTA V6
+   ONION SUPPORT — CUENTA V7
    Archivo: /src/css/views/cuenta/index.css
 
    PRODUCTIVO · FOCUSED SELF-SERVICE · SYSTEM TOKENS
-   - Foto / contraseña / apariencia+idioma / desactivación.
-   - Sin refresh manual, sesiones, actividad ni bloques administrativos.
+   - Foto / apariencia+idioma / contraseña / pago / desactivación.
+   - Sin refresh manual, selector de color, sesiones, actividad ni paja.
    - Misma jerarquía visual que Facturas, Clientes y Usuarios.
 ========================================================= */
 
 @layer views {
 
-:where(.panel-content[data-view="cuenta"], .cuenta-view, [data-cuenta-scope="true"]) {
+:where(
+  .panel-content[data-view="cuenta"],
+  .cuenta-view,
+  [data-cuenta-scope="true"]
+) {
   --cuenta-avatar-hero: calc(62px * var(--ui-scale));
   --cuenta-avatar-card: calc(58px * var(--ui-scale));
+
   inline-size: 100%;
   min-inline-size: 0;
   color: var(--text);
@@ -23,7 +28,9 @@
 .cuenta-view,
 .cuenta-view *,
 .cuenta-view *::before,
-.cuenta-view *::after { box-sizing: border-box; }
+.cuenta-view *::after {
+  box-sizing: border-box;
+}
 
 .cuenta-view {
   display: grid;
@@ -34,16 +41,25 @@
 
 .cuenta-view button,
 .cuenta-view input,
-.cuenta-view select { font: inherit; }
+.cuenta-view select {
+  font: inherit;
+}
 
-.cuenta-view svg { display: block; flex: 0 0 auto; }
+.cuenta-view svg {
+  display: block;
+  flex: 0 0 auto;
+}
 
-/* El refresh manual deja de formar parte de Cuenta. */
 #cuenta-hero-refresh-btn,
 #cuenta-empty-refresh-btn,
 [data-cuenta-action="refresh-cuenta"],
+[data-cuenta-action="set-accent"],
 .cuenta-panel-overlay,
-.cuenta-refresh-overlay { display: none !important; }
+.cuenta-refresh-overlay,
+.cuenta-swatches,
+.cuenta-swatch {
+  display: none !important;
+}
 
 /* =========================================================
    HERO
@@ -68,9 +84,9 @@
   display: inline-flex;
   align-items: center;
   padding-inline: 9px;
-  border: 1px solid var(--accent-border);
+  border: 1px solid var(--badge-border);
   border-radius: var(--radius-pill);
-  background: var(--accent-soft);
+  background: var(--badge-bg);
   color: var(--text-strong);
   font-size: var(--font-2xs);
   font-weight: var(--weight-bold);
@@ -138,7 +154,9 @@
   white-space: nowrap;
 }
 
-.cuenta-profile-user { color: var(--text-dim); }
+.cuenta-profile-user {
+  color: var(--text-dim);
+}
 
 .cuenta-profile-badges {
   display: flex;
@@ -148,7 +166,8 @@
   gap: var(--space-xs);
 }
 
-.cuenta-chip {
+.cuenta-chip,
+.cuenta-card-badge {
   min-block-size: var(--chip-height);
   display: inline-flex;
   align-items: center;
@@ -161,12 +180,6 @@
   font-size: var(--font-xs);
   font-weight: var(--weight-bold);
   white-space: nowrap;
-}
-
-.cuenta-chip--accent {
-  border-color: var(--accent-border);
-  background: var(--accent-soft);
-  color: var(--text-strong);
 }
 
 .cuenta-chip--success {
@@ -197,10 +210,10 @@
   place-items: center;
   flex: 0 0 auto;
   overflow: hidden;
-  border: 1px solid var(--accent-border);
+  border: 1px solid var(--border-strong);
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--accent), var(--accent-active));
-  color: var(--accent-contrast, #fff);
+  background: var(--avatar-bg);
+  color: var(--avatar-text);
   box-shadow: var(--shadow-sm);
 }
 
@@ -232,19 +245,23 @@
   line-height: 1;
 }
 
-.cuenta-avatar.has-image .cuenta-avatar-fallback { visibility: hidden; }
+.cuenta-avatar.has-image .cuenta-avatar-fallback {
+  visibility: hidden;
+}
 
 /* =========================================================
    CARDS
 ========================================================= */
 
-.cuenta-panel { min-inline-size: 0; }
+.cuenta-panel {
+  min-inline-size: 0;
+}
 
 .cuenta-cards-grid,
 .cuenta-loading {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
+  align-items: stretch;
   gap: var(--space-md);
   min-inline-size: 0;
 }
@@ -269,12 +286,29 @@
   inset-block: 0;
   inset-inline-start: 0;
   inline-size: 3px;
-  background: var(--accent);
+  background: var(--border-strong);
 }
 
-.cuenta-card--security::before { background: var(--warning); }
-.cuenta-card--appearance::before { background: var(--accent); }
-.cuenta-card--danger::before { background: var(--error); }
+.cuenta-card--security,
+.cuenta-card--skeleton-wide {
+  grid-column: 1 / -1;
+}
+
+.cuenta-card--security::before {
+  background: var(--warning);
+}
+
+.cuenta-card--appearance::before {
+  background: var(--info);
+}
+
+.cuenta-card--payment::before {
+  background: var(--success);
+}
+
+.cuenta-card--danger::before {
+  background: var(--error);
+}
 
 .cuenta-card-head {
   min-inline-size: 0;
@@ -287,7 +321,15 @@
 .cuenta-card-heading {
   min-inline-size: 0;
   display: grid;
-  gap: 4px;
+  gap: 5px;
+}
+
+.cuenta-card-title-row {
+  min-inline-size: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
 }
 
 .cuenta-card-title {
@@ -298,9 +340,16 @@
   line-height: 1.2;
 }
 
+.cuenta-card-badge {
+  min-block-size: var(--chip-height-sm);
+  padding-inline: 8px;
+  font-size: var(--font-2xs);
+  color: var(--text-muted);
+}
+
 .cuenta-card-text {
   margin: 0;
-  max-inline-size: 56ch;
+  max-inline-size: 60ch;
   color: var(--text-muted);
   font-size: var(--font-sm);
   font-weight: var(--weight-medium);
@@ -318,17 +367,22 @@
   color: var(--text-muted);
 }
 
-.cuenta-card--appearance .cuenta-card-icon,
-.cuenta-card--photo .cuenta-card-icon {
-  border-color: var(--accent-border);
-  background: var(--accent-soft);
-  color: var(--accent);
+.cuenta-card--appearance .cuenta-card-icon {
+  border-color: var(--border-info);
+  background: var(--info-bg);
+  color: var(--info-strong, var(--info));
 }
 
 .cuenta-card--security .cuenta-card-icon {
   border-color: var(--border-warning);
   background: var(--warning-bg);
   color: var(--warning);
+}
+
+.cuenta-card--payment .cuenta-card-icon {
+  border-color: var(--border-success);
+  background: var(--success-bg);
+  color: var(--success);
 }
 
 .cuenta-card--danger .cuenta-card-icon {
@@ -384,7 +438,9 @@
   transform: translateY(-1px);
 }
 
-.cuenta-btn:active:not(:disabled) { transform: translateY(0); }
+.cuenta-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
 
 .cuenta-btn--primary {
   border-color: var(--btn-primary-border);
@@ -399,7 +455,10 @@
   color: var(--btn-primary-text);
 }
 
-.cuenta-btn--ghost { background: transparent; box-shadow: none; }
+.cuenta-btn--ghost {
+  background: transparent;
+  box-shadow: none;
+}
 
 .cuenta-btn--danger {
   border-color: var(--border-error);
@@ -424,8 +483,7 @@
 .cuenta-btn:focus-visible,
 .cuenta-field input:focus-visible,
 .cuenta-field select:focus-visible,
-.cuenta-segment:focus-visible,
-.cuenta-swatch:focus-visible {
+.cuenta-segment:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
@@ -491,11 +549,9 @@
 
 .cuenta-password-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-sm);
 }
-
-.cuenta-password-grid .cuenta-field:last-child { grid-column: 1 / -1; }
 
 .cuenta-field {
   min-inline-size: 0;
@@ -504,7 +560,8 @@
 }
 
 .cuenta-field-label,
-.cuenta-preference-label {
+.cuenta-preference-label,
+.cuenta-payment-label {
   color: var(--text-muted);
   font-size: var(--font-xs);
   font-weight: var(--weight-bold);
@@ -531,7 +588,9 @@
   font-weight: var(--weight-medium);
 }
 
-.cuenta-field input::placeholder { color: var(--input-placeholder, var(--text-dim)); }
+.cuenta-field input::placeholder {
+  color: var(--input-placeholder, var(--text-dim));
+}
 
 .cuenta-field input:hover,
 .cuenta-field select:hover {
@@ -546,16 +605,24 @@
   box-shadow: var(--focus-ring);
 }
 
-.cuenta-hint {
+.cuenta-hint,
+.cuenta-preference-note,
+.cuenta-payment-note {
   margin: 0;
   padding: 10px 12px;
-  border: 1px solid var(--border-warning);
+  border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
-  background: var(--warning-bg);
-  color: var(--warning-strong, var(--warning));
+  background: var(--block-bg);
+  color: var(--text-muted);
   font-size: var(--font-xs);
   font-weight: var(--weight-medium);
   line-height: 1.45;
+}
+
+.cuenta-hint {
+  border-color: var(--border-warning);
+  background: var(--warning-bg);
+  color: var(--warning-strong, var(--warning));
 }
 
 .cuenta-hint--danger {
@@ -565,8 +632,16 @@
 }
 
 /* =========================================================
-   PREFERENCES
+   APPEARANCE / LANGUAGE
 ========================================================= */
+
+.cuenta-preference-grid {
+  min-inline-size: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(180px, .65fr);
+  gap: var(--space-sm);
+  align-items: end;
+}
 
 .cuenta-preference-group {
   min-inline-size: 0;
@@ -595,56 +670,22 @@
   cursor: pointer;
   font-size: var(--font-xs);
   font-weight: var(--weight-bold);
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 
-.cuenta-segment:hover { background: var(--solid-hover); color: var(--text-strong); }
-
-.cuenta-segment.is-active,
-.cuenta-segment[aria-pressed="true"] {
-  border-color: var(--accent-border);
-  background: var(--accent-soft);
+.cuenta-segment:hover {
+  background: var(--solid-hover);
   color: var(--text-strong);
 }
 
-.cuenta-swatches {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.cuenta-swatch {
-  appearance: none;
-  inline-size: 38px;
-  block-size: 38px;
-  display: grid;
-  place-items: center;
-  padding: 4px;
-  border: 1px solid var(--border-default);
-  border-radius: 50%;
-  background: var(--block-bg);
-  cursor: pointer;
-}
-
-.cuenta-swatch > span {
-  inline-size: 22px;
-  block-size: 22px;
-  border-radius: 50%;
-  background: var(--graphite-100);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,.18);
-}
-
-.cuenta-swatch[data-accent-preview="graphite"] > span { background: #696969; }
-.cuenta-swatch[data-accent-preview="blue"] > span { background: #3b82f6; }
-.cuenta-swatch[data-accent-preview="violet"] > span { background: #8b5cf6; }
-.cuenta-swatch[data-accent-preview="emerald"] > span { background: #10b981; }
-.cuenta-swatch[data-accent-preview="rose"] > span { background: #f43f5e; }
-
-.cuenta-swatch:hover { border-color: var(--border-strong); transform: translateY(-1px); }
-.cuenta-swatch.is-active,
-.cuenta-swatch[aria-checked="true"] {
-  border-color: var(--accent);
-  box-shadow: var(--focus-ring);
+.cuenta-segment.is-active,
+.cuenta-segment[aria-pressed="true"] {
+  border-color: var(--border-strong);
+  background: var(--solid-active);
+  color: var(--text-strong);
 }
 
 .cuenta-select-wrap {
@@ -664,13 +705,74 @@
   color: var(--text-muted);
 }
 
-.cuenta-select-wrap select { padding-inline-start: 38px; cursor: pointer; }
+.cuenta-select-wrap select {
+  padding-inline-start: 38px;
+  cursor: pointer;
+}
+
+/* =========================================================
+   PAYMENT METHOD
+========================================================= */
+
+.cuenta-payment-method {
+  min-inline-size: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  background: var(--block-bg);
+}
+
+.cuenta-payment-icon {
+  inline-size: 46px;
+  block-size: 46px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-success);
+  border-radius: var(--radius-lg);
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.cuenta-payment-copy {
+  min-inline-size: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.cuenta-payment-number {
+  overflow: hidden;
+  color: var(--text-strong);
+  font-family: var(--font-family-mono);
+  font-size: clamp(var(--font-base), 1.5vw, var(--font-lg));
+  font-weight: var(--weight-bold);
+  letter-spacing: .08em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cuenta-payment-state {
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-medium);
+}
+
+.cuenta-payment-note {
+  border-color: var(--border-success);
+  background: var(--success-bg);
+  color: var(--text-soft);
+}
 
 /* =========================================================
    DANGER
 ========================================================= */
 
-.cuenta-card--danger { border-color: color-mix(in srgb, var(--border-error) 60%, var(--card-border)); }
+.cuenta-card--danger {
+  border-color: var(--border-error);
+}
 
 .cuenta-danger-notice {
   padding: var(--space-md);
@@ -713,13 +815,38 @@
   border-radius: var(--radius-md);
 }
 
-.cuenta-feedback-item strong { display: block; color: var(--text-strong); font-size: var(--font-sm); }
-.cuenta-feedback-item p { margin: 3px 0 0; color: var(--text-muted); font-size: var(--font-xs); line-height: 1.45; }
+.cuenta-feedback-item strong {
+  display: block;
+  color: var(--text-strong);
+  font-size: var(--font-sm);
+}
 
-.cuenta-feedback-item--error { border-color: var(--border-error); background: var(--error-bg); }
-.cuenta-feedback-item--error > span { color: var(--error); background: var(--error-soft); }
-.cuenta-feedback-item--success { border-color: var(--border-success); background: var(--success-bg); }
-.cuenta-feedback-item--success > span { color: var(--success); background: var(--success-soft); }
+.cuenta-feedback-item p {
+  margin: 3px 0 0;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  line-height: 1.45;
+}
+
+.cuenta-feedback-item--error {
+  border-color: var(--border-error);
+  background: var(--error-bg);
+}
+
+.cuenta-feedback-item--error > span {
+  color: var(--error);
+  background: var(--error-soft);
+}
+
+.cuenta-feedback-item--success {
+  border-color: var(--border-success);
+  background: var(--success-bg);
+}
+
+.cuenta-feedback-item--success > span {
+  color: var(--success);
+  background: var(--success-soft);
+}
 
 .cuenta-error {
   min-inline-size: 0;
@@ -743,10 +870,25 @@
   color: var(--error);
 }
 
-.cuenta-error h2 { margin: 0; color: var(--text-strong); font-size: var(--font-xl); }
-.cuenta-error p { margin: 4px 0 0; color: var(--text-muted); font-size: var(--font-sm); }
+.cuenta-error h2 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: var(--font-xl);
+}
 
-.cuenta-card--skeleton { min-block-size: 240px; }
+.cuenta-error p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+}
+
+.cuenta-card--skeleton {
+  min-block-size: 230px;
+}
+
+.cuenta-card--skeleton-wide {
+  min-block-size: 210px;
+}
 
 .cuenta-skeleton {
   display: block;
@@ -757,11 +899,24 @@
   animation: cuenta-skeleton-pulse 1.25s ease-in-out infinite alternate;
 }
 
-.cuenta-skeleton--title { inline-size: 46%; block-size: 24px; }
-.cuenta-skeleton--short { inline-size: 62%; }
-.cuenta-skeleton--control { block-size: 46px; border-radius: var(--input-radius); }
+.cuenta-skeleton--title {
+  inline-size: 46%;
+  block-size: 24px;
+}
 
-@keyframes cuenta-skeleton-pulse { from { opacity: .52; } to { opacity: 1; } }
+.cuenta-skeleton--short {
+  inline-size: 62%;
+}
+
+.cuenta-skeleton--control {
+  block-size: 46px;
+  border-radius: var(--input-radius);
+}
+
+@keyframes cuenta-skeleton-pulse {
+  from { opacity: .52; }
+  to { opacity: 1; }
+}
 
 /* =========================================================
    RESPONSIVE
@@ -769,38 +924,93 @@
 
 @media (max-width: 980px) {
   .cuenta-cards-grid,
-  .cuenta-loading { grid-template-columns: 1fr; }
+  .cuenta-loading {
+    grid-template-columns: 1fr;
+  }
+
+  .cuenta-card--security,
+  .cuenta-card--skeleton-wide {
+    grid-column: auto;
+  }
+
+  .cuenta-password-grid,
+  .cuenta-preference-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 680px) {
-  .cuenta-hero { padding-inline: 0; }
-  .cuenta-profile-summary { grid-template-columns: auto minmax(0, 1fr); }
-  .cuenta-profile-badges { grid-column: 1 / -1; justify-content: flex-start; }
-  .cuenta-password-grid { grid-template-columns: 1fr; }
-  .cuenta-password-grid .cuenta-field:last-child { grid-column: auto; }
-  .cuenta-error { grid-template-columns: 1fr; }
+  .cuenta-hero {
+    padding-inline: 0;
+  }
+
+  .cuenta-profile-summary {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .cuenta-profile-badges {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+
+  .cuenta-error {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 480px) {
-  .cuenta-card { padding: var(--space-md); }
-  .cuenta-profile-summary { grid-template-columns: 1fr; justify-items: start; }
-  .cuenta-actions { display: grid; grid-template-columns: 1fr; }
-  .cuenta-actions .cuenta-btn { inline-size: 100%; }
-  .cuenta-segments { grid-template-columns: 1fr; }
+  .cuenta-card {
+    padding: var(--space-md);
+  }
+
+  .cuenta-profile-summary {
+    grid-template-columns: 1fr;
+    justify-items: start;
+  }
+
+  .cuenta-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .cuenta-actions .cuenta-btn {
+    inline-size: 100%;
+  }
+
+  .cuenta-segments {
+    grid-template-columns: 1fr;
+  }
+
+  .cuenta-payment-method {
+    grid-template-columns: 1fr;
+  }
 }
 
 @container (max-width: 760px) {
   .cuenta-cards-grid,
-  .cuenta-loading { grid-template-columns: 1fr; }
+  .cuenta-loading {
+    grid-template-columns: 1fr;
+  }
+
+  .cuenta-card--security,
+  .cuenta-card--skeleton-wide {
+    grid-column: auto;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .cuenta-btn,
-  .cuenta-segment,
-  .cuenta-swatch { transition-duration: 0ms; }
-  .cuenta-btn:hover,
-  .cuenta-swatch:hover { transform: none; }
-  .cuenta-skeleton { animation-duration: 1.6s; }
+  .cuenta-segment {
+    transition-duration: 0ms;
+  }
+
+  .cuenta-btn:hover {
+    transform: none;
+  }
+
+  .cuenta-skeleton {
+    animation-duration: 1.6s;
+  }
 }
 
 @media (forced-colors: active) {
@@ -810,17 +1020,25 @@
   .cuenta-field input,
   .cuenta-field select,
   .cuenta-segment,
-  .cuenta-swatch { forced-color-adjust: auto; }
+  .cuenta-payment-method {
+    forced-color-adjust: auto;
+  }
 }
 
 @media print {
   .cuenta-card--security,
   .cuenta-card--appearance,
+  .cuenta-card--payment,
   .cuenta-card--danger,
   .cuenta-actions,
-  .cuenta-feedback { display: none !important; }
+  .cuenta-feedback {
+    display: none !important;
+  }
+
   .cuenta-card,
-  .cuenta-profile-summary { box-shadow: none !important; }
+  .cuenta-profile-summary {
+    box-shadow: none !important;
+  }
 }
 
 } /* @layer views */

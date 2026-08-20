@@ -1,43 +1,40 @@
-# Onion Support — App Chrome V4
+# Onion Support — App Chrome
 
-Topbar y Sidebar conservan sus controladores funcionales, pero **no son dos piezas de layout independientes**. Forman una única superficie `App Chrome` y toda la geometría compartida pertenece a una sola autoridad.
+Topbar y Sidebar conservan controladores funcionales separados, pero forman una única superficie de layout: **App Chrome**. La geometría transversal y la interacción responsive tienen una sola autoridad.
 
 ## Autoridades
 
-- `ui/topbar/**`: título, búsqueda y resultados. No decide offsets globales.
-- `ui/sidebar/**`: navegación, cuenta y contenido lateral. No decide la huella global del shell.
-- `ui/chrome/template.js`: estructura compartida, backdrop y trigger móvil.
-- `ui/chrome/index.js`: coordinación responsive, apertura/cierre, foco e interacción.
-- `css/layout/chrome.css`: **única autoridad geométrica** de Topbar + Sidebar + main/tablehead.
-- `index.html`: carga directamente `ui/chrome/index.js` antes de `main.js`.
+- `src/ui/topbar/**`: título, búsqueda y resultados. No decide offsets globales.
+- `src/ui/sidebar/**`: navegación, cuenta y contenido lateral. No decide la huella global del shell.
+- `src/ui/chrome/template.js`: estructura compartida, backdrop y trigger móvil.
+- `src/ui/chrome/index.js`: coordinación responsive, apertura/cierre, foco e interacción.
+- `src/css/layout/chrome.css`: única autoridad geométrica de Topbar + Sidebar + main/tablehead.
+- `src/app/enhancements.js`: registra App Chrome en la fase `pre-router`.
+- `src/main.js`: único entrypoint ejecutable; prepara enhancements antes de arrancar el App/Router.
 
-No existe `mobile-shell.css` ni `features/mobile-shell/index.js`. No debe reintroducirse un bridge entre el arranque y App Chrome.
+`index.html` no ejecuta App Chrome ni otros módulos globales directamente. Sólo ejecuta `/src/main.js`.
 
-## Por qué existe App Chrome
+No existen `mobile-shell.css` ni `features/mobile-shell/index.js`, y no debe reintroducirse un bridge paralelo.
 
-La arquitectura anterior repartía geometría entre `topbar.css`, `sidebar.css`, `core/layout.css` y una capa Mobile Shell. Eso permitía estados en los que Sidebar y Topbar calculaban posiciones distintas y provocaba saltos visibles al abrir/cerrar navegación en móvil.
+## Contrato de arranque
 
-App Chrome elimina ese problema. `chrome.css` se importa una sola vez al final de `layer(layout)` y **no declara un `@layer` interno**. Topbar, Sidebar, main y tablehead consumen el mismo contrato geométrico.
+El orden canónico es:
 
-## Mobile `<= 900px`
+```text
+index.html
+  -> src/main.js
+       -> src/app/enhancements.js
+            -> ticket-deeplink
+            -> App Chrome
+       -> src/app/index.js
+       -> enhancements post-router
+```
 
-- `--chrome-sidebar-offset` es siempre `0px`.
-- Topbar, `main-content` y tablehead no cambian de posición al abrir/cerrar navegación.
-- Sidebar es un drawer overlay de ancho constante y sólo anima `transform/opacity`.
-- El único trigger móvil vive dentro del Topbar.
-- El toggle interno del Sidebar se reserva a desktop.
-- El backdrop glass captura outside-click sin click-through.
-- El fondo queda inerte y sin scroll mientras el drawer está abierto.
-- `Escape`, historial, navegación y pulsación exterior cierran el drawer.
-- Safe areas y viewport dinámico forman parte del contrato.
+App Chrome se prepara antes del Router para que el shell responsive esté listo durante el primer montaje, sin convertir `index.html` en un segundo orquestador.
 
-## Desktop
+## Geometría
 
-Desktop conserva Sidebar persistente/colapsable. Sidebar, Topbar, main y tablehead consumen el mismo `--chrome-sidebar-offset`, por lo que cambiar entre `open`, `collapsed` y `hidden` mueve el shell como una unidad.
-
-## Regla de cascada
-
-`src/css/app.css` importa las piezas visuales y deja `chrome.css` como última autoridad dentro de `layer(layout)`:
+`src/css/app.css` carga las piezas visuales y deja `chrome.css` como última autoridad dentro de `layer(layout)`:
 
 ```css
 @import url("./layout/sidebar.css") layer(layout);
@@ -45,28 +42,35 @@ Desktop conserva Sidebar persistente/colapsable. Sidebar, Topbar, main y tablehe
 @import url("./layout/chrome.css") layer(layout);
 ```
 
-`chrome.css` no puede contener `@layer layout { ... }`. Hacerlo crearía una subcapa con prioridad distinta y volvería a repartir la autoridad.
+`chrome.css` no declara otro `@layer layout { ... }` interno. Hacerlo crearía una subcapa y volvería a repartir la prioridad geométrica.
+
+## Mobile `<= 900px`
+
+- `--chrome-sidebar-offset` es `0px`.
+- Topbar, `main-content` y tablehead no cambian de posición al abrir/cerrar navegación.
+- Sidebar funciona como drawer overlay y anima únicamente su propia entrada/salida.
+- El trigger móvil vive en el Topbar.
+- El backdrop captura outside-click sin click-through.
+- El fondo queda inerte y sin scroll mientras el drawer está abierto.
+- `Escape`, historial, navegación y pulsación exterior cierran el drawer.
+- Safe areas y viewport dinámico forman parte del contrato.
+
+## Desktop
+
+Sidebar es persistente/colapsable. Sidebar, Topbar, main y tablehead consumen el mismo `--chrome-sidebar-offset`, por lo que los estados `open`, `collapsed` y `hidden` mueven el shell como una unidad.
 
 ## Criterios de aceptación
 
-1. En móvil cerrado no existe rail lateral ni hueco a la izquierda del Topbar.
-2. Abrir/cerrar Sidebar no produce salto horizontal del Topbar, main o tablehead.
-3. El drawer entra por encima de la aplicación y no desplaza contenido.
-4. El backdrop cubre también la zona del Topbar situada fuera del drawer.
+1. En móvil cerrado no existe rail ni hueco lateral.
+2. Abrir/cerrar Sidebar no desplaza Topbar, main o tablehead.
+3. El drawer se superpone a la aplicación sin mover contenido.
+4. El backdrop cubre también la zona del Topbar fuera del drawer.
 5. Pulsar el backdrop cierra sin activar controles situados detrás.
 6. Dark/light, safe-area, reduced motion, reduced transparency y forced colors tienen salida definida.
 7. Las vistas de dominio no compensan Sidebar/Topbar con offsets propios.
-8. No existe bridge Mobile Shell ni hoja de layout paralela.
-
-## UI System V4
-
-La barrida V4 completa la consolidación:
-
-- `index.html` carga App Chrome directamente;
-- se elimina el bridge `features/mobile-shell`;
-- Repository Integrity impide que reaparezcan `mobile-shell.css` o el bridge JS;
-- cualquier nueva necesidad transversal del chrome debe ampliar estas autoridades canónicas, no crear una segunda implementación.
+8. No existe una segunda autoridad `Mobile Shell`.
+9. `index.html` conserva un único script `type="module"`: `/src/main.js`.
 
 ## Regla final
 
-> Topbar y Sidebar pueden tener componentes internos separados; su geometría y su interacción transversal pertenecen a una sola pieza: App Chrome.
+> Topbar y Sidebar pueden tener componentes internos separados; su geometría y su interacción transversal pertenecen a App Chrome, y su arranque pertenece al entrypoint único de la SPA.

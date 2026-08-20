@@ -1,0 +1,67 @@
+name: One-shot UI System V14 Cuenta Media
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+
+env:
+  TARGET_BRANCH: refactor/ui-system-v14-cuenta-media-policy
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]' && github.head_ref == 'refactor/ui-system-v14-cuenta-media-policy'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 1
+
+      - name: Guard trigger
+        run: |
+          set -euo pipefail
+          test -f .github/.ui-system-v14-cuenta-media-trigger
+
+      - name: Apply Cuenta media V14
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/ui_system_v14_cuenta_media.py
+
+      - name: Validate repository
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/repo_integrity.py
+          while IFS= read -r -d '' file; do node --check "$file"; done < <(find src -type f -name '*.js' -print0)
+
+      - name: Validate media authority
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          text = Path('src/views/cuenta/cuenta.api.js').read_text(encoding='utf-8')
+          assert '../../core/media.js' in text
+          assert text.count('sanitizeRuntimeImageUrl(') >= 2
+          for helper in ('isAzureBlobHost','isSensitiveQueryParam','isAzureSasParam','safeAvatarUrl'):
+              assert not re.search(rf'\bfunction\s+{helper}\s*\(', text), helper
+          print('Cuenta canonical media authority OK')
+          PY
+
+      - name: Commit migration
+        run: |
+          set -euo pipefail
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git add src/views/cuenta/cuenta.api.js .github/scripts/repo_integrity.py docs/UI_SYSTEM_V14_AUDIT.md
+          if git diff --cached --quiet; then echo "Sin cambios de migración."; exit 0; fi
+          git commit -m "refactor(cuenta): consumir media policy canónica"
+          git push origin HEAD:${TARGET_BRANCH}

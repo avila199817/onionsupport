@@ -38,7 +38,7 @@ import {
 } from "./incidencias.options.js";
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.extreme.v32.avatar-parity";
+  "incidencias.template.modal.extreme.v33.shared-detail-modal";
 
 export const DETAIL_ACTIONS = Object.freeze({
   CLOSE: "detail-close",
@@ -2716,7 +2716,7 @@ function renderChip(
 
   return `
     <span
-      class="incidencias-modal-chip incidencias-modal-chip--${attr(safeModifier)} ui-detail-modal-chip--${attr(safeModifier)}"
+      class="incidencias-modal-chip ui-detail-modal-chip incidencias-modal-chip--${attr(safeModifier)} ui-detail-modal-chip--${attr(safeModifier)}"
       title="${attr(safeLabel)}"
     >${escapeHtml(safeLabel)}</span>
   `;

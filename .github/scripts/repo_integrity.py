@@ -525,6 +525,26 @@ def validate_shared_detail_modal_v7_contract(errors: list[str]) -> None:
             errors.append(f"src/css/views/incidencias/detail.css :: regla compartida duplicada tras V7: {selector}")
 
 
+def validate_detail_modal_pairing_v7_contract(errors: list[str]) -> None:
+    """Critical Incidencias modal primitives must carry both domain and shared classes."""
+    template = (SRC / "views" / "incidencias" / "incidencias.template.modal.js").read_text(encoding="utf-8")
+    required_pairs = (
+        "incidencias-modal-root ui-detail-modal-root",
+        "incidencias-modal-overlay ui-detail-modal-overlay",
+        "incidencias-modal-panel ui-detail-modal-panel",
+        "incidencias-modal-chip ui-detail-modal-chip",
+        "incidencias-modal-body ui-detail-modal-body",
+        "incidencias-modal-meta-grid ui-detail-modal-meta-grid",
+    )
+    for pair in required_pairs:
+        if pair not in template:
+            errors.append(f"src/views/incidencias/incidencias.template.modal.js :: falta alias compartido: {pair}")
+
+    dynamic_pair = "incidencias-modal-chip--${attr(safeModifier)} ui-detail-modal-chip--${attr(safeModifier)}"
+    if dynamic_pair not in template:
+        errors.append("src/views/incidencias/incidencias.template.modal.js :: modifier dinámico de chip no comparte autoridad V7")
+
+
 def validate_paths(errors: list[str]) -> None:
     for root in (SRC, ROOT / ".github"):
         if not root.exists():
@@ -565,6 +585,7 @@ def main() -> int:
     validate_correo_cascade_v5_contract(errors)
     validate_detail_modal_v6_contract(errors)
     validate_shared_detail_modal_v7_contract(errors)
+    validate_detail_modal_pairing_v7_contract(errors)
     validate_known_dead_paths(errors)
 
     unique_errors = list(dict.fromkeys(errors))

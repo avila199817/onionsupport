@@ -11,7 +11,7 @@ El componente `ui-detail-modal-*` creado en V6 deja de ser una abstracción usad
 - CSS duplicado retirado del repositorio: **17,961 bytes**
 - Payload estimado de `/incidencias` antes: **118,607 bytes**
 - Payload estimado de `/incidencias` después: **119,057 bytes**
-- Delta de payload de la ruta: **-450 bytes**
+- Variación de payload de `/incidencias`: **+450 bytes (+0,4%)**; a cambio el repositorio elimina 17.961 bytes duplicados y Usuarios/Incidencias comparten una única autoridad de shell.
 
 ## Arquitectura resultante
 
@@ -19,3 +19,9 @@ El componente `ui-detail-modal-*` creado en V6 deja de ser una abstracción usad
 - `views/incidencias/detail.css`: historial, comentarios, adjuntos, cierre, preview y estados específicos del ticket.
 - `views/usuarios/*`: detalle administrativo sobre el mismo shell sin importar CSS de Incidencias.
 - Repository Integrity impide que las reglas base de overlay/panel/body/meta vuelvan a duplicarse en Incidencias.
+
+## Verificación de alias
+
+- Alias de clase reparados tras auditoría del template: **1**.
+- El validador permanente exige pairing explícito para root, overlay, panel, chip, body y meta-grid.
+- Los modificadores dinámicos de chip deben emitir simultáneamente la clase de dominio y la clase transversal.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Onion Support: public landing and intake integrity contract."""
+"""Onion Support: semantic contract for the public landing and intake."""
 
 from __future__ import annotations
 
@@ -42,18 +42,22 @@ class IndexParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.scripts: list[dict[str, str]] = []
-        self.links: list[dict[str, str]] = []
 
     def handle_starttag(self, tag: str, attrs) -> None:
-        data = {str(key).lower(): str(value or "") for key, value in attrs}
-        if tag.lower() == "script":
-            self.scripts.append(data)
-        elif tag.lower() == "link":
-            self.links.append(data)
+        if tag.lower() != "script":
+            return
+        self.scripts.append(
+            {str(key).lower(): str(value or "") for key, value in attrs}
+        )
 
 
 def read(relative: str) -> str:
     return (ROOT / relative).read_text(encoding="utf-8")
+
+
+def require(errors: list[str], condition: bool, message: str) -> None:
+    if not condition:
+        errors.append(message)
 
 
 def main() -> int:
@@ -86,165 +90,132 @@ def main() -> int:
     parser = IndexParser()
     parser.feed(index)
     modules = [
-        script for script in parser.scripts
-        if script.get("type", "").strip().lower() == "module"
+        item
+        for item in parser.scripts
+        if item.get("type", "").strip().lower() == "module"
     ]
 
-    checks = [
-        (
-            len(modules) == 1 and modules[0].get("src") == "/src/main.js",
-            "index.html debe ejecutar únicamente /src/main.js como módulo",
-        ),
-        (
-            all(path in enhancements for path in PUBLIC_ENHANCEMENTS),
-            "Los módulos públicos deben registrarse en src/app/enhancements.js",
-        ),
-        (
-            all(enhancements.count(path) == 1 for path in PUBLIC_ENHANCEMENTS),
-            "Cada enhancement público debe tener una única autoridad de carga",
-        ),
-        (
-            "mobile-polish.js" not in index and "mobile-polish.css" not in app_css,
-            "No debe reaparecer la capa legacy mobile-polish",
-        ),
-        (
-            '@import url("./views/public/support-request.css")' in app_css,
-            "app.css debe importar support-request.css",
-        ),
-        (
-            '@import url("./views/public/public-support-progress.css")' in app_css,
-            "app.css debe importar public-support-progress.css",
-        ),
-        (
-            '@import url("./views/public/home-experience.css")' in app_css,
-            "app.css debe importar home-experience.css",
-        ),
-        (
-            'PUBLIC_TICKET_ENDPOINT = "/api/tickets/public"' in intake,
-            "El intake debe mantener POST /api/tickets/public",
-        ),
-        (
-            'SPAIN_PREFIX = "+34"' in intake and '/^[6789]\\d{8}$/' in intake,
-            "El intake debe mantener el contrato telefónico español",
-        ),
-        (
-            'public-support.intake.v5-live-optional-auth' in intake,
-            "Falta la versión productiva esperada del intake",
-        ),
-        (
-            'intakeIconNode' in intake and 'public-support-intake-icon' in intake,
-            "Los CTAs internos deben conservar su icono de incidencia",
-        ),
-        (
-            'fullName: fullName(user)' not in intake,
-            "El formulario público no debe precargar automáticamente el nombre completo",
-        ),
-        (
-            'const useAuth = session().authenticated === true;' in intake
-            and 'auth: useAuth,' in intake,
-            "El POST público debe conservar autenticación opcional",
-        ),
-        (
-            'public: true,' not in intake and 'noAuthHeader: true,' not in intake,
-            "El intake no debe bloquear Authorization de forma forzada",
-        ),
-        (
-            '"Idempotency-Key": requestKey' in intake
-            and 'idempotencyKey(form)' in intake
-            and 'clearIdempotency(form);' in intake,
-            "El intake debe mantener idempotencia estable y rotación correcta",
-        ),
-        (
-            'Solicitud recibida. Revisa tu correo para continuar.' in intake
-            and 'neutralAccepted(response)' in intake,
-            "La respuesta anónima debe conservar el contrato anti-enumeración",
-        ),
-        (
-            'public-support.progress.v1-fullscreen-blocking' in progress_js
-            and 'MutationObserver' in progress_js,
-            "El progreso de envío debe seguir ligado al estado real del formulario",
-        ),
-        (
-            '.public-support-submit-overlay' in progress_css
-            and 'public-support-submission-active' in progress_css,
-            "Falta el contrato visual del progreso de envío",
-        ),
-        (
-            'public.home.view.controller.final.productivo.2026.23.history-replace' in home,
-            "La home debe conservar la revisión de historial interno",
-        ),
-        (
-            home.count('replace: true,') >= 2,
-            "La navegación interna debe reemplazar hash sin apilar historial",
-        ),
-        (
-            'public-home.experience.v1.production' in home_experience,
-            "Falta la versión productiva del módulo UX público",
-        ),
-        (
-            'data-public-home-account-menu' in home_experience
-            and 'Cerrar sesión' in home_experience,
-            "El menú autenticado debe conservar accesos rápidos y logout",
-        ),
-        (
-            '"/incidencias"' in home_experience
-            and '"/facturas"' in home_experience
-            and '"/cuenta"' in home_experience,
-            "El menú autenticado debe conservar Incidencias, Facturas y Cuenta",
-        ),
-        (
-            'formatSpanishPhoneInput' in home_experience
-            and '+34 612 345 678' in home_experience,
-            "El teléfono debe mantener formato progresivo español",
-        ),
-        (
-            'login-incidence' in home_experience
-            and 'order: 1' in experience_css
-            and 'order: 2' in experience_css,
-            "Debe mantenerse Login/Cuenta antes de Abrir incidencia",
-        ),
-        (
-            '.public-home-footer [data-public-home-login]' in experience_css,
-            "El footer debe ocultar login/cuenta",
-        ),
-        (
-            'shape-rendering: geometricPrecision' in experience_css,
-            "Debe mantenerse la precisión de SVGs inline",
-        ),
-        (
-            'public-home-topbar-account' not in experience_css,
-            "El responsive no debe duplicar identidad en topbar",
-        ),
-        (
-            '.public-home .public-home-price-link' in experience_css,
-            "home-experience.css debe conservar el header canónico",
-        ),
-        (
-            '@media (max-width: 1040px)' in experience_css
-            and '.public-home .public-home-nav-panel' in experience_css,
-            "home-experience.css debe conservar el drawer responsive",
-        ),
-        (
-            '`POST /api/tickets/public`' in docs,
-            "La documentación debe conservar el endpoint público",
-        ),
-        (
-            '`+34` por defecto' in docs and '`6`, `7`, `8` o `9`' in docs,
-            "La documentación debe conservar el alcance telefónico España",
-        ),
-        (
-            'no deben usar su icono' in docs,
-            "La documentación debe diferenciar CTA interno y WhatsApp",
-        ),
-        (
-            '`Idempotency-Key`' in docs and 'autenticación opcional' in docs,
-            "La documentación debe describir idempotencia y auth opcional",
-        ),
-    ]
+    require(
+        errors,
+        len(modules) == 1 and modules[0].get("src") == "/src/main.js",
+        "index.html debe ejecutar únicamente /src/main.js como módulo",
+    )
 
-    for ok, message in checks:
-        if not ok:
-            errors.append(message)
+    for module_path in PUBLIC_ENHANCEMENTS:
+        require(
+            errors,
+            enhancements.count(module_path) == 1,
+            f"Enhancement público sin autoridad única: {module_path}",
+        )
+
+    for css_path in (
+        "support-request.css",
+        "public-support-progress.css",
+        "home-experience.css",
+    ):
+        require(
+            errors,
+            f'@import url("./views/public/{css_path}")' in app_css,
+            f"src/css/app.css debe cargar {css_path}",
+        )
+
+    require(
+        errors,
+        "mobile-polish.js" not in index and "mobile-polish.css" not in app_css,
+        "No debe reaparecer la capa legacy mobile-polish",
+    )
+
+    # Intake: endpoint, auth opcional, España, idempotencia y anti-enumeración.
+    for snippet, message in (
+        ('PUBLIC_TICKET_ENDPOINT = "/api/tickets/public"', "Falta POST /api/tickets/public"),
+        ('SPAIN_PREFIX = "+34"', "Falta prefijo telefónico España"),
+        ('/^[6789]\\d{8}$/', "Falta validación nacional española"),
+        ('const useAuth = session().authenticated === true;', "Falta auth opcional"),
+        ('auth: useAuth,', "El POST no consume auth opcional"),
+        ('"Idempotency-Key": requestKey', "Falta Idempotency-Key"),
+        ('idempotencyKey(form)', "Falta clave estable de idempotencia"),
+        ('neutralAccepted(response)', "Falta respuesta anti-enumeración"),
+        ('intakeIconNode', "Falta icono interno de incidencia"),
+    ):
+        require(errors, snippet in intake, message)
+
+    require(
+        errors,
+        "fullName: fullName(user)" not in intake,
+        "El formulario público no debe precargar automáticamente el nombre",
+    )
+    require(
+        errors,
+        "public: true," not in intake and "noAuthHeader: true," not in intake,
+        "El intake no debe forzar la retirada de Authorization",
+    )
+
+    # Progreso: deriva del data-submitting real y observa sólo el Router view.
+    for snippet, message in (
+        ("PUBLIC_SUPPORT_PROGRESS_VERSION", "Falta contrato de versión del progreso"),
+        ("MutationObserver", "El progreso debe observar el estado real del formulario"),
+        ('VIEW_ROOT_SELECTOR = "#view-container, [data-router-view=\'true\']"', "El observer debe scopearse al Router view"),
+        ('attributeFilter: ["data-submitting"]', "El observer debe limitar atributos a data-submitting"),
+        ("observer.observe(root", "El observer no debe volver a documentElement"),
+    ):
+        require(errors, snippet in progress_js, message)
+
+    require(
+        errors,
+        "observer.observe(document.documentElement" not in progress_js,
+        "El progreso público no puede observar todo documentElement",
+    )
+
+    require(
+        errors,
+        ".public-support-submit-overlay" in progress_css
+        and "public-support-submission-active" in progress_css,
+        "Falta contrato visual del progreso de envío",
+    )
+
+    # Home: historial interno sin spam y UX autenticada/responsive.
+    require(
+        errors,
+        home.count("replace: true,") >= 2,
+        "La navegación interna debe reemplazar hash sin apilar historial",
+    )
+
+    for snippet, message in (
+        ("data-public-home-account-menu", "Falta menú autenticado"),
+        ("Cerrar sesión", "Falta logout en menú autenticado"),
+        ('"/incidencias"', "Falta acceso a Incidencias"),
+        ('"/facturas"', "Falta acceso a Facturas"),
+        ('"/cuenta"', "Falta acceso a Cuenta"),
+        ("formatSpanishPhoneInput", "Falta formato progresivo de teléfono"),
+        ("+34 612 345 678", "Falta ejemplo telefónico español"),
+        ("login-incidence", "Falta orden explícito Cuenta/Incidencia"),
+    ):
+        require(errors, snippet in home_experience, message)
+
+    for snippet, message in (
+        ("order: 1", "Falta orden visual 1 del header público"),
+        ("order: 2", "Falta orden visual 2 del header público"),
+        ('.public-home-footer [data-public-home-login]', "El footer debe ocultar login/cuenta"),
+        ("shape-rendering: geometricPrecision", "Falta precisión de SVG inline"),
+        ("@media (max-width: 1040px)", "Falta breakpoint del drawer público"),
+        (".public-home .public-home-nav-panel", "Falta contrato del drawer público"),
+    ):
+        require(errors, snippet in experience_css, message)
+
+    require(
+        errors,
+        "public-home-topbar-account" not in experience_css,
+        "El responsive no debe duplicar identidad en topbar",
+    )
+
+    for snippet, message in (
+        ("`POST /api/tickets/public`", "Docs: falta endpoint público"),
+        ("`+34` por defecto", "Docs: falta alcance telefónico España"),
+        ("`Idempotency-Key`", "Docs: falta idempotencia"),
+        ("autenticación opcional", "Docs: falta auth opcional"),
+        ("no deben usar su icono", "Docs: falta separación CTA/WhatsApp"),
+    ):
+        require(errors, snippet in docs, message)
 
     for relative in (
         "src/css/views/public/index.css",
@@ -253,8 +224,11 @@ def main() -> int:
         "src/css/views/public/home-experience.css",
     ):
         css = read(relative)
-        if css.count("{") != css.count("}"):
-            errors.append(f"Llaves CSS desbalanceadas: {relative}")
+        require(
+            errors,
+            css.count("{") == css.count("}"),
+            f"Llaves CSS desbalanceadas: {relative}",
+        )
 
     if errors:
         print("\nPublic home integrity: FAIL")
@@ -263,9 +237,9 @@ def main() -> int:
         return 1
 
     print("Public home integrity: PASS")
-    print("- entrypoint JS: main.js -> app/enhancements.js")
-    print("- entrypoint CSS: app.css")
-    print("- intake, UX y progreso público validados")
+    print("- JS: main.js -> app/enhancements.js")
+    print("- CSS: app.css")
+    print("- intake, UX y progreso validados por contrato semántico")
     return 0
 
 

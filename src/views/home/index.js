@@ -148,35 +148,6 @@ function redact(value = "") {
    CORE / USER / ROUTES
 ========================================================= */
 
-function normalizeRole(value = "") {
-  if (Array.isArray(value)) {
-    const roles = value.map(normalizeRole).filter(Boolean);
-
-    if (roles.includes("admin")) return "admin";
-    if (roles.includes("user")) return "user";
-
-    return "";
-  }
-
-  const role = cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-
-  if (["admin", "administrator", "administrador", "superadmin", "super_admin", "root", "owner"].includes(role)) {
-    return "admin";
-  }
-
-  if (["user", "usuario", "client", "cliente"].includes(role)) {
-    return "user";
-  }
-
-  return "";
-}
-
 function getCoreState() {
   try {
     return AppCore?.getState?.() || AppCore?.state || {};
@@ -219,7 +190,7 @@ function getCurrentRole(context = {}) {
   const user = safeObject(getCurrentUser(ctx), {});
 
   return (
-    normalizeRole(
+    AppCore.normalizeRole(
       first(
         ctx.role,
         ctx.rol,

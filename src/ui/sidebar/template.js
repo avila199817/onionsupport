@@ -385,11 +385,6 @@ function safeImageSrc(value = "", fallback = "") {
    USER / ITEM NORMALIZATION
 ========================================================= */
 
-function normalizeRole(value = "") {
-  const role = text(value).toLowerCase();
-  return [ROLE_ADMIN, ROLE_USER].includes(role) ? role : "";
-}
-
 function normalizeRoleList(value = []) {
   const raw = Array.isArray(value)
     ? value.flat(Infinity)

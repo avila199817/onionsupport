@@ -1197,67 +1197,6 @@ function getCoreRole() {
   }
 }
 
-function normalizeRole(
-  value = ""
-) {
-  if (
-    Array.isArray(value)
-  ) {
-    const roles =
-      value
-        .map(normalizeRole)
-        .filter(Boolean);
-
-    if (
-      roles.includes(
-        "admin"
-      )
-    ) {
-      return "admin";
-    }
-
-    if (
-      roles.includes(
-        "user"
-      )
-    ) {
-      return "user";
-    }
-
-    return roles[0] || "";
-  }
-
-  const role =
-    normalizeKey(value);
-
-  if (
-    [
-      "admin",
-      "administrator",
-      "administrador",
-      "superadmin",
-      "super_admin",
-      "root",
-      "owner",
-    ].includes(role)
-  ) {
-    return "admin";
-  }
-
-  if (
-    [
-      "user",
-      "usuario",
-      "client",
-      "cliente",
-    ].includes(role)
-  ) {
-    return "user";
-  }
-
-  return role || "user";
-}
-
 function getCurrentRole(
   context = {}
 ) {
@@ -1271,7 +1210,7 @@ function getCurrentRole(
     );
 
   return (
-    normalizeRole(
+    AppCore.normalizeRole(
       first(
         context.role,
         context.rol,
@@ -2064,7 +2003,7 @@ function normalizeSearchUser(
     );
 
   const role =
-    normalizeRole(
+    AppCore.normalizeRole(
       first(
         normalized.role,
         normalized.rol,

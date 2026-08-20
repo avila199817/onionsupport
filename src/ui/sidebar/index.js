@@ -756,22 +756,6 @@ function initialsFrom(
   );
 }
 
-function normalizeRole(
-  value = ""
-) {
-  const role =
-    cleanText(
-      value,
-      ""
-    )
-      .toLowerCase();
-
-  return role ===
-    "admin"
-      ? "admin"
-      : "user";
-}
-
 function getUserViewModel(
   rawUser = undefined,
   options = {}
@@ -819,7 +803,7 @@ function getUserViewModel(
       : raw;
 
   const role =
-    normalizeRole(
+    AppCore.normalizeRole(
       publicUser?.role ||
       raw.role ||
       raw.rol ||

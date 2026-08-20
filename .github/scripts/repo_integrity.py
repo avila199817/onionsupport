@@ -668,6 +668,49 @@ def validate_correo_identity_v11_contract(errors: list[str]) -> None:
             errors.append(f"src/views/correo/index.js :: fallback de identidad legacy prohibido V11: {forbidden}")
 
 
+def validate_ui_role_authority_v12_contract(errors: list[str]) -> None:
+    """UI controllers use AppCore.normalizeRole; unused local normalizers are removed."""
+    audited_files = (
+        "src/views/home/index.js",
+        "src/views/server/index.js",
+        "src/ui/topbar/index.js",
+        "src/ui/sidebar/index.js",
+        "src/ui/sidebar/template.js",
+        "src/views/incidencias/index.js",
+        "src/views/usuarios/index.js",
+        "src/views/clientes/index.js",
+        "src/views/facturas/index.js",
+    )
+    canonical_role_files = (
+        "src/views/home/index.js",
+        "src/views/server/index.js",
+        "src/ui/sidebar/index.js",
+        "src/views/incidencias/index.js",
+        "src/views/usuarios/index.js",
+        "src/views/clientes/index.js",
+        "src/views/facturas/index.js",
+    )
+    dead_role_files = (
+        "src/ui/topbar/index.js",
+        "src/ui/sidebar/template.js",
+    )
+
+    for relative in audited_files:
+        source = (ROOT / relative).read_text(encoding="utf-8")
+        if re.search(r"\bfunction\s+normalizeRole\s*\(", source):
+            errors.append(f"{relative} :: normalizador local de rol prohibido tras V12")
+
+    for relative in canonical_role_files:
+        source = (ROOT / relative).read_text(encoding="utf-8")
+        if "AppCore.normalizeRole(" not in source:
+            errors.append(f"{relative} :: debe consumir AppCore.normalizeRole()")
+
+    for relative in dead_role_files:
+        source = (ROOT / relative).read_text(encoding="utf-8")
+        if re.search(r"(?<![\w.])normalizeRole\s*\(", source):
+            errors.append(f"{relative} :: reapareció consumidor local de rol sin autoridad canónica")
+
+
 def validate_paths(errors: list[str]) -> None:
     for root in (SRC, ROOT / ".github"):
         if not root.exists():
@@ -713,6 +756,7 @@ def main() -> int:
     validate_correo_boundary_v9_contract(errors)
     validate_correo_media_v10_contract(errors)
     validate_correo_identity_v11_contract(errors)
+    validate_ui_role_authority_v12_contract(errors)
     validate_known_dead_paths(errors)
 
     unique_errors = list(dict.fromkeys(errors))

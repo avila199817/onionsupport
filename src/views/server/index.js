@@ -362,47 +362,6 @@ function getCurrentUser() {
   }
 }
 
-function normalizeRole(
-  value = ""
-) {
-  if (Array.isArray(value)) {
-    const roles =
-      value
-        .map(normalizeRole)
-        .filter(Boolean);
-
-    if (
-      roles.includes("admin")
-    ) {
-      return "admin";
-    }
-
-    return (
-      roles[0] ||
-      "user"
-    );
-  }
-
-  const role =
-    normalizeKey(value);
-
-  if (
-    [
-      "admin",
-      "administrator",
-      "administrador",
-      "superadmin",
-      "super_admin",
-      "root",
-      "owner",
-    ].includes(role)
-  ) {
-    return "admin";
-  }
-
-  return role || "user";
-}
-
 function getCurrentRole(
   context = {}
 ) {
@@ -415,7 +374,7 @@ function getCurrentRole(
       {}
     );
 
-  return normalizeRole(
+  return AppCore.normalizeRole(
     first(
       context.role,
       context.rol,

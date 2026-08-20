@@ -2,13 +2,14 @@
    Onion Support - Cuenta Index
    Archivo: /src/views/cuenta/index.js
 
-   PRODUCTIVO · FOCUSED SELF-SERVICE · SWR · V6
+   PRODUCTIVO · FOCUSED SELF-SERVICE · SWR · V7
 
-   Cuenta V6:
+   Cuenta V7:
    - Cache/Auth inmediata y reconciliación silenciosa.
    - Sin botón manual de actualizar ni overlays de refresco.
-   - Sólo foto, contraseña, apariencia/idioma y desactivación.
-   - Preferencias de interfaz locales, persistentes y aplicadas por preboot.
+   - Foto, apariencia/idioma, contraseña, pagos visibles y desactivación.
+   - Sin selector de color; cualquier preferencia antigua se ignora.
+   - Preferencias locales de tema/idioma aplicadas por preboot.
    - Sin edición de perfil inventada ni PATCH self inexistente.
 ========================================================= */
 
@@ -38,7 +39,7 @@ import {
 } from "./cuenta.template.js";
 
 export const CUENTA_INDEX_VERSION =
-  "cuenta.index.productivo.v6.focused-swr-preferences";
+  "cuenta.index.productivo.v7.focused-payment-ready";
 export const CUENTA_VIEW_VERSION = CUENTA_INDEX_VERSION;
 export const CUENTA_INDEX_SOURCE = "views.cuenta.index";
 
@@ -55,11 +56,10 @@ const REVALIDATE_MIN_AGE_MS = 60_000;
 const ACTION_SELECTOR = "[data-cuenta-action], [data-action]";
 const STORAGE_KEYS = Object.freeze({
   themeMode: "onion.ui.themeMode",
-  accent: "onion.ui.accent",
   locale: "onion.ui.locale",
 });
+const LEGACY_ACCENT_STORAGE_KEY = "onion.ui.accent";
 const THEMES = new Set(["system", "light", "dark"]);
-const ACCENTS = new Set(["graphite", "blue", "violet", "emerald", "rose"]);
 const LOCALES = new Set(["es", "ca", "en"]);
 
 let lastInstance = null;
@@ -86,7 +86,10 @@ function safeArray(value) {
 }
 
 function cleanText(value = "", fallback = "") {
-  const text = String(value ?? "").replace(/[\r\n\t]/g, " ").replace(/\s+/g, " ").trim();
+  const text = String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   return text || fallback;
 }
 
@@ -132,11 +135,6 @@ function safeErrorCode(error = null) {
 function normalizeTheme(value = "") {
   const key = cleanText(value, "system").toLowerCase();
   return THEMES.has(key) ? key : "system";
-}
-
-function normalizeAccent(value = "") {
-  const key = cleanText(value, "graphite").toLowerCase();
-  return ACCENTS.has(key) ? key : "graphite";
 }
 
 function normalizeLocale(value = "") {
@@ -196,6 +194,16 @@ function writeStorage(key = "", value = "") {
   }
 }
 
+function clearLegacyAccentPreference() {
+  if (!isBrowser()) return false;
+  try {
+    window.localStorage?.removeItem(LEGACY_ACCENT_STORAGE_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function preferenceBridge() {
   if (!isBrowser()) return null;
   const bridge = window.OnionPreferences;
@@ -217,51 +225,6 @@ function fallbackApplyTheme(themeMode) {
   return true;
 }
 
-const FALLBACK_ACCENTS = Object.freeze({
-  blue: ["#3b82f6", "#60a5fa", "#2563eb", "59, 130, 246"],
-  violet: ["#8b5cf6", "#a78bfa", "#7c3aed", "139, 92, 246"],
-  emerald: ["#10b981", "#34d399", "#059669", "16, 185, 129"],
-  rose: ["#f43f5e", "#fb7185", "#e11d48", "244, 63, 94"],
-});
-
-function fallbackApplyAccent(accent) {
-  if (!isBrowser()) return false;
-  const key = normalizeAccent(accent);
-  const html = document.documentElement;
-  if (!html) return false;
-  html.dataset.accent = key;
-  const vars = [
-    "--accent", "--accent-hover", "--accent-active", "--accent-soft",
-    "--accent-ring", "--accent-border", "--brand", "--brand-hover",
-    "--brand-active", "--brand-soft", "--focus-ring", "--btn-primary-bg",
-    "--btn-primary-bg-hover", "--btn-primary-bg-active", "--btn-primary-border",
-  ];
-  if (key === "graphite") {
-    vars.forEach((name) => html.style.removeProperty(name));
-    return true;
-  }
-  const [base, hover, active, rgb] = FALLBACK_ACCENTS[key] || FALLBACK_ACCENTS.blue;
-  const values = {
-    "--accent": base,
-    "--accent-hover": hover,
-    "--accent-active": active,
-    "--accent-soft": `rgba(${rgb}, .14)`,
-    "--accent-ring": `rgba(${rgb}, .30)`,
-    "--accent-border": `rgba(${rgb}, .32)`,
-    "--brand": base,
-    "--brand-hover": hover,
-    "--brand-active": active,
-    "--brand-soft": `rgba(${rgb}, .14)`,
-    "--focus-ring": `0 0 0 3px rgba(${rgb}, .24)`,
-    "--btn-primary-bg": base,
-    "--btn-primary-bg-hover": hover,
-    "--btn-primary-bg-active": active,
-    "--btn-primary-border": base,
-  };
-  Object.entries(values).forEach(([name, value]) => html.style.setProperty(name, value));
-  return true;
-}
-
 function fallbackApplyLocale(locale) {
   if (!isBrowser()) return false;
   const value = normalizeLocale(locale);
@@ -274,21 +237,21 @@ function fallbackApplyLocale(locale) {
 }
 
 function readPreferences(item = null) {
+  clearLegacyAccentPreference();
   const bridge = preferenceBridge();
   try {
     const snapshot = bridge?.getSnapshot?.() || bridge?.get?.();
     if (snapshot) {
       return {
         themeMode: normalizeTheme(snapshot.themeMode),
-        accent: normalizeAccent(snapshot.accent),
         locale: normalizeLocale(snapshot.locale),
       };
     }
-  } catch { /* fallback */ }
-
+  } catch {
+    // fallback
+  }
   return {
     themeMode: normalizeTheme(readStorage(STORAGE_KEYS.themeMode, "system")),
-    accent: normalizeAccent(readStorage(STORAGE_KEYS.accent, "graphite")),
     locale: normalizeLocale(readStorage(STORAGE_KEYS.locale, first(item?.lang, item?.locale, "es"))),
   };
 }
@@ -298,21 +261,12 @@ function applyThemePreference(value) {
   const bridge = preferenceBridge();
   try {
     if (typeof bridge?.setThemeMode === "function") return bridge.setThemeMode(themeMode);
-  } catch { /* fallback */ }
+  } catch {
+    // fallback
+  }
   writeStorage(STORAGE_KEYS.themeMode, themeMode);
   fallbackApplyTheme(themeMode);
   return { themeMode };
-}
-
-function applyAccentPreference(value) {
-  const accent = normalizeAccent(value);
-  const bridge = preferenceBridge();
-  try {
-    if (typeof bridge?.setAccent === "function") return bridge.setAccent(accent);
-  } catch { /* fallback */ }
-  writeStorage(STORAGE_KEYS.accent, accent);
-  fallbackApplyAccent(accent);
-  return { accent };
 }
 
 function applyLocalePreference(value) {
@@ -320,7 +274,9 @@ function applyLocalePreference(value) {
   const bridge = preferenceBridge();
   try {
     if (typeof bridge?.setLocale === "function") return bridge.setLocale(locale);
-  } catch { /* fallback */ }
+  } catch {
+    // fallback
+  }
   writeStorage(STORAGE_KEYS.locale, locale);
   fallbackApplyLocale(locale);
   return { locale };
@@ -328,7 +284,8 @@ function applyLocalePreference(value) {
 
 function readField(host, name) {
   if (!host || !name) return "";
-  const selector = `[data-cuenta-field="${String(name).replace(/["\\]/g, "\\$&")}"], [data-field="${String(name).replace(/["\\]/g, "\\$&")}"], [name="${String(name).replace(/["\\]/g, "\\$&")}"]`;
+  const escaped = String(name).replace(/["\\]/g, "\\$&");
+  const selector = `[data-cuenta-field="${escaped}"], [data-field="${escaped}"], [name="${escaped}"]`;
   const node = host.querySelector(selector);
   if (!node) return "";
   if (node.type === "file") return node.files?.[0] || null;
@@ -395,8 +352,10 @@ function createCuentaController(host, context = {}) {
         avatarDelete: true,
         deactivateSelf: true,
         localThemePreference: true,
-        localAccentPreference: true,
         localLanguagePreference: true,
+        localAccentPreference: false,
+        paymentMethodVisible: true,
+        paymentMethodConfigurable: false,
       },
       selfUpdateSupported: false,
       view: { successMessage: extra.success ?? success, form: {} },
@@ -450,7 +409,6 @@ function createCuentaController(host, context = {}) {
     const root = host.querySelector(".cuenta-view");
     if (root) {
       root.dataset.cuentaLocale = preferences.locale;
-      root.dataset.cuentaAccent = preferences.accent;
       root.dataset.cuentaThemeMode = preferences.themeMode;
     }
     return true;
@@ -494,13 +452,11 @@ function createCuentaController(host, context = {}) {
     const sequence = ++loadSequence;
     const hadItem = hasContent(item);
     const before = signature(item);
-
     if (!silent) {
       loading = !hadItem;
       clearFeedback();
       renderNow({ force: true });
     }
-
     try {
       const result = await loadCuentaApi({ force });
       if (destroyed || sequence !== loadSequence) return item;
@@ -508,7 +464,6 @@ function createCuentaController(host, context = {}) {
       lastNetworkAt = Date.now();
       loading = false;
       const changed = before !== signature(item);
-
       if (!silent || changed || !hadItem) {
         if (silent && sensitiveInteractionActive()) {
           pendingRender = true;
@@ -516,13 +471,7 @@ function createCuentaController(host, context = {}) {
           renderNow({ force: true });
         }
       }
-
-      emitCuentaEvent("cuenta:loaded", {
-        source: CUENTA_INDEX_SOURCE,
-        silent,
-        force,
-        changed,
-      });
+      emitCuentaEvent("cuenta:loaded", { source: CUENTA_INDEX_SOURCE, silent, force, changed });
       return item;
     } catch (loadError) {
       if (destroyed || sequence !== loadSequence) return item;
@@ -573,7 +522,6 @@ function createCuentaController(host, context = {}) {
       setFeedback({ nextError: validation.message || "Avatar inválido.", nextErrorCode: validation.code || "INVALID_AVATAR" });
       return null;
     }
-
     const sequence = ++actionSequence;
     clearFeedback();
     setActionBusy("avatar", true);
@@ -624,19 +572,19 @@ function createCuentaController(host, context = {}) {
 
   async function changePassword(explicitPayload = null) {
     if (destroyed || saving) return false;
-    const payload = isObject(explicitPayload) ? {
-      currentPassword: String(explicitPayload.currentPassword ?? ""),
-      newPassword: String(explicitPayload.newPassword ?? ""),
-      confirmPassword: String(explicitPayload.confirmPassword ?? ""),
-    } : passwordPayload();
-
+    const payload = isObject(explicitPayload)
+      ? {
+          currentPassword: String(explicitPayload.currentPassword ?? ""),
+          newPassword: String(explicitPayload.newPassword ?? ""),
+          confirmPassword: String(explicitPayload.confirmPassword ?? ""),
+        }
+      : passwordPayload();
     const validation = validateCuentaPasswordPayload(payload);
     if (!validation.ok) {
       clearSensitiveInputs(host);
       setFeedback({ nextError: validation.message || "Contraseña inválida.", nextErrorCode: validation.code || "INVALID_PASSWORD" });
       return false;
     }
-
     const sequence = ++actionSequence;
     clearFeedback();
     setActionBusy("password", true);
@@ -668,12 +616,10 @@ function createCuentaController(host, context = {}) {
     const password = isObject(explicitPayload)
       ? String(explicitPayload.password ?? "")
       : String(first(readField(host, "deactivatePassword"), readField(host, "password"), "") ?? "");
-
     if (!password.trim()) {
       setFeedback({ nextError: "Introduce tu contraseña para confirmar la desactivación.", nextErrorCode: "PASSWORD_REQUIRED" });
       return false;
     }
-
     const sequence = ++actionSequence;
     clearFeedback();
     setActionBusy("deactivate", true);
@@ -711,20 +657,17 @@ function createCuentaController(host, context = {}) {
     return preferences.themeMode;
   }
 
-  function setAccent(value = "graphite") {
-    preferences.accent = normalizeAccent(value);
-    applyAccentPreference(preferences.accent);
-    renderAppearanceOnly();
-    emitCuentaEvent("cuenta:preferences:changed", { source: CUENTA_INDEX_SOURCE, preferences: { ...preferences } });
-    return preferences.accent;
-  }
-
   function setLocale(value = "es") {
     preferences.locale = normalizeLocale(value);
     applyLocalePreference(preferences.locale);
     renderNow({ force: true });
     emitCuentaEvent("cuenta:preferences:changed", { source: CUENTA_INDEX_SOURCE, preferences: { ...preferences } });
     return preferences.locale;
+  }
+
+  function setAccentDeprecated() {
+    clearLegacyAccentPreference();
+    return false;
   }
 
   async function loadSessions(options = {}) {
@@ -743,17 +686,15 @@ function createCuentaController(host, context = {}) {
     if (!node || !host.contains(node) || node.disabled || node.getAttribute("aria-disabled") === "true") return;
     const action = cleanText(first(node.dataset?.cuentaAction, node.dataset?.action, ""), "");
     if (!action) return;
-
-    if ([CUENTA_ACTIONS.CHOOSE_AVATAR, CUENTA_ACTIONS.DELETE_AVATAR, CUENTA_ACTIONS.SET_THEME, CUENTA_ACTIONS.SET_ACCENT, CUENTA_ACTIONS.RETRY].includes(action)) {
+    if ([CUENTA_ACTIONS.CHOOSE_AVATAR, CUENTA_ACTIONS.DELETE_AVATAR, CUENTA_ACTIONS.SET_THEME, CUENTA_ACTIONS.RETRY].includes(action)) {
       event.preventDefault();
       event.stopPropagation();
     }
-
     if (action === CUENTA_ACTIONS.CHOOSE_AVATAR) { chooseAvatar(); return; }
     if (action === CUENTA_ACTIONS.DELETE_AVATAR) { void deleteAvatar(); return; }
     if (action === CUENTA_ACTIONS.SET_THEME) { setTheme(node.dataset.value || "system"); return; }
-    if (action === CUENTA_ACTIONS.SET_ACCENT) { setAccent(node.dataset.value || "graphite"); return; }
-    if (action === CUENTA_ACTIONS.RETRY) { void load({ force: true, silent: false }); }
+    if (action === CUENTA_ACTIONS.SET_ACCENT) { setAccentDeprecated(); return; }
+    if (action === CUENTA_ACTIONS.RETRY) void load({ force: true, silent: false });
   }
 
   function handleChange(event) {
@@ -907,6 +848,7 @@ function createCuentaController(host, context = {}) {
       authRefreshRequired,
       preferences: { ...preferences },
       sessions: { loaded: legacySessions.length > 0, loading: false, count: legacySessions.length, error: "", ui: false },
+      payment: { visible: true, configurable: false, source: "placeholder" },
       architecture: {
         focusedSelfService: true,
         staleWhileRevalidate: true,
@@ -914,6 +856,9 @@ function createCuentaController(host, context = {}) {
         resumeRevalidation: true,
         manualRefreshUi: false,
         pageRefreshOverlay: false,
+        accentPreferenceUi: false,
+        paymentMethodUi: true,
+        paymentMethodConfigurable: false,
         sessionsUi: false,
         activityUi: false,
         privacyUi: false,
@@ -956,8 +901,8 @@ function createCuentaController(host, context = {}) {
     updateTheme: setTheme,
     updateCuentaTheme: setTheme,
     setCuentaTheme: setTheme,
-    setAccent,
-    updateAccent: setAccent,
+    setAccent: setAccentDeprecated,
+    updateAccent: setAccentDeprecated,
     setLocale,
     updateLanguage: setLocale,
     updateCuentaLanguage: setLocale,
@@ -1044,8 +989,13 @@ export const updateCuentaTheme = updateTheme;
 export const setTheme = updateTheme;
 export const setCuentaTheme = updateTheme;
 
-export function setAccent(value = "graphite") {
-  try { return lastInstance?.setAccent?.(value) ?? false; } catch { return false; }
+export function setAccent() {
+  try {
+    lastInstance?.setAccent?.();
+    return false;
+  } catch {
+    return false;
+  }
 }
 export const updateAccent = setAccent;
 export const updateCuentaAccent = setAccent;
@@ -1099,7 +1049,12 @@ export function getSessions() {
 }
 
 export function clearCuentaViewCache() {
-  try { lastInstance?.resetPresentation?.(); return true; } catch { return false; }
+  try {
+    lastInstance?.resetPresentation?.();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function getSnapshot() {
@@ -1115,10 +1070,14 @@ export function getSnapshot() {
     hasItem: false,
     preferences: readPreferences(),
     sessions: { loaded: false, loading: false, count: 0, error: "", ui: false },
+    payment: { visible: true, configurable: false, source: "placeholder" },
     architecture: {
       focusedSelfService: true,
       staleWhileRevalidate: true,
       manualRefreshUi: false,
+      accentPreferenceUi: false,
+      paymentMethodUi: true,
+      paymentMethodConfigurable: false,
       localPreferences: true,
       directHttp: false,
       apiBoundary: true,

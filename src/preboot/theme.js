@@ -2,13 +2,14 @@
    Onion Support - Preboot Preferences
    Archivo: /src/preboot/theme.js
 
-   PRODUCTIVO · THEME + ACCENT + LOCALE · V4
+   PRODUCTIVO · THEME + LOCALE · V5
 
    Responsabilidad:
    - Aplicar el tema efectivo antes del boot de la SPA.
-   - Persistir themeMode, color de acento e idioma de interfaz.
+   - Persistir themeMode e idioma de interfaz.
    - Mantener themeMode="system" vivo ante cambios del SO.
-   - Exponer un bridge mínimo window.OnionPreferences para Cuenta.
+   - Eliminar el antiguo selector/acento personalizado de V4.
+   - Exponer window.OnionPreferences para Cuenta.
    - Evitar flashes y escrituras DOM redundantes.
    - Sin imports, API, Auth, Router ni HTTP.
 ========================================================= */
@@ -16,46 +17,17 @@
 (() => {
   "use strict";
 
-  const PREBOOT_VERSION = "preboot.preferences.v4-theme-accent-locale";
+  const PREBOOT_VERSION = "preboot.preferences.v5-theme-locale";
   const DARK_QUERY = "(prefers-color-scheme: dark)";
 
   const STORAGE_KEYS = Object.freeze({
     themeMode: "onion.ui.themeMode",
-    accent: "onion.ui.accent",
     locale: "onion.ui.locale",
   });
 
+  const LEGACY_ACCENT_STORAGE_KEY = "onion.ui.accent";
   const THEME_MODES = Object.freeze(["system", "light", "dark"]);
   const LOCALES = Object.freeze(["es", "ca", "en"]);
-  const ACCENTS = Object.freeze(["graphite", "blue", "violet", "emerald", "rose"]);
-
-  const ACCENT_PALETTES = Object.freeze({
-    graphite: null,
-    blue: Object.freeze({
-      accent: "#3b82f6",
-      hover: "#60a5fa",
-      active: "#2563eb",
-      rgb: "59, 130, 246",
-    }),
-    violet: Object.freeze({
-      accent: "#8b5cf6",
-      hover: "#a78bfa",
-      active: "#7c3aed",
-      rgb: "139, 92, 246",
-    }),
-    emerald: Object.freeze({
-      accent: "#10b981",
-      hover: "#34d399",
-      active: "#059669",
-      rgb: "16, 185, 129",
-    }),
-    rose: Object.freeze({
-      accent: "#f43f5e",
-      hover: "#fb7185",
-      active: "#e11d48",
-      rgb: "244, 63, 94",
-    }),
-  });
 
   const THEME_COLORS = Object.freeze({
     light: "#ffffff",
@@ -64,11 +36,10 @@
 
   const DEFAULTS = Object.freeze({
     themeMode: "system",
-    accent: "graphite",
     locale: "es",
   });
 
-  const ACCENT_STYLE_KEYS = Object.freeze([
+  const LEGACY_ACCENT_STYLE_KEYS = Object.freeze([
     "--accent",
     "--accent-hover",
     "--accent-active",
@@ -117,11 +88,6 @@
     return THEME_MODES.includes(key) ? key : DEFAULTS.themeMode;
   }
 
-  function normalizeAccent(value = "") {
-    const key = String(value || "").trim().toLowerCase();
-    return ACCENTS.includes(key) ? key : DEFAULTS.accent;
-  }
-
   function normalizeLocale(value = "") {
     const key = String(value || "").trim().toLowerCase().replace("_", "-");
     if (key.startsWith("ca")) return "ca";
@@ -167,10 +133,19 @@
     }
   }
 
+  function removeStorage(key = "") {
+    if (!isBrowser()) return false;
+    try {
+      window.localStorage?.removeItem(key);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function readPreferences() {
     return {
       themeMode: normalizeThemeMode(readStorage(STORAGE_KEYS.themeMode, DEFAULTS.themeMode)),
-      accent: normalizeAccent(readStorage(STORAGE_KEYS.accent, DEFAULTS.accent)),
       locale: normalizeLocale(readStorage(STORAGE_KEYS.locale, DEFAULTS.locale)),
     };
   }
@@ -199,10 +174,19 @@
     return true;
   }
 
-  function clearAccentOverrides(node) {
-    if (!node?.style) return false;
+  function cleanupLegacyAccentNode(node) {
+    if (!node) return false;
     let changed = false;
-    for (const key of ACCENT_STYLE_KEYS) {
+    try {
+      if (node.dataset?.accent) {
+        delete node.dataset.accent;
+        changed = true;
+      }
+    } catch {
+      // noop
+    }
+    if (!node.style) return changed;
+    for (const key of LEGACY_ACCENT_STYLE_KEYS) {
       if (node.style.getPropertyValue(key)) {
         node.style.removeProperty(key);
         changed = true;
@@ -211,62 +195,11 @@
     return changed;
   }
 
-  function setStyle(node, key, value) {
-    if (!node?.style) return false;
-    const next = String(value);
-    if (node.style.getPropertyValue(key).trim() === next) return false;
-    node.style.setProperty(key, next);
-    return true;
-  }
-
-  function applyAccent(node, accent = DEFAULTS.accent) {
-    if (!node) return false;
-    const key = normalizeAccent(accent);
-    const palette = ACCENT_PALETTES[key];
-    setData(node, "accent", key);
-
-    if (!palette) return clearAccentOverrides(node);
-
-    const rgb = palette.rgb;
-    let changed = false;
-    const assignments = {
-      "--accent": palette.accent,
-      "--accent-hover": palette.hover,
-      "--accent-active": palette.active,
-      "--accent-2": palette.active,
-      "--accent-3": palette.hover,
-      "--accent-4": palette.accent,
-      "--accent-5": palette.active,
-      "--accent-soft": `rgba(${rgb}, .14)`,
-      "--accent-soft-2": `rgba(${rgb}, .11)`,
-      "--accent-ghost": `rgba(${rgb}, .08)`,
-      "--accent-subtle": `rgba(${rgb}, .055)`,
-      "--accent-ring": `rgba(${rgb}, .30)`,
-      "--accent-border": `rgba(${rgb}, .32)`,
-      "--accent-border-strong": `rgba(${rgb}, .48)`,
-      "--accent-glow": `rgba(${rgb}, .14)`,
-      "--accent-glow-strong": `rgba(${rgb}, .22)`,
-      "--accent-contrast": "#ffffff",
-      "--brand": palette.accent,
-      "--brand-hover": palette.hover,
-      "--brand-active": palette.active,
-      "--brand-soft": `rgba(${rgb}, .14)`,
-      "--brand-ring": `rgba(${rgb}, .30)`,
-      "--brand-border": `rgba(${rgb}, .32)`,
-      "--border-accent": `rgba(${rgb}, .32)`,
-      "--border-accent-strong": `rgba(${rgb}, .48)`,
-      "--focus-ring": `0 0 0 3px rgba(${rgb}, .24)`,
-      "--focus-ring-strong": `0 0 0 3px rgba(${rgb}, .38)`,
-      "--selection-bg": `rgba(${rgb}, .30)`,
-      "--btn-primary-bg": palette.accent,
-      "--btn-primary-bg-hover": palette.hover,
-      "--btn-primary-bg-active": palette.active,
-      "--btn-primary-border": palette.accent,
-      "--btn-primary-border-hover": palette.hover,
-    };
-
-    for (const [name, value] of Object.entries(assignments)) {
-      changed = setStyle(node, name, value) || changed;
+  function cleanupLegacyAccent() {
+    if (!isBrowser()) return false;
+    let changed = removeStorage(LEGACY_ACCENT_STORAGE_KEY);
+    for (const node of [document.documentElement, document.body]) {
+      changed = cleanupLegacyAccentNode(node) || changed;
     }
     return changed;
   }
@@ -320,13 +253,9 @@
 
   function emitChanged(previous, next) {
     if (!isBrowser()) return false;
-    if (
-      previous.themeMode === next.themeMode &&
-      previous.theme === next.theme &&
-      previous.accent === next.accent &&
-      previous.locale === next.locale
-    ) return false;
-
+    if (previous.themeMode === next.themeMode && previous.theme === next.theme && previous.locale === next.locale) {
+      return false;
+    }
     try {
       window.dispatchEvent(new CustomEvent("onion:preferences:changed", {
         detail: { ...next, previous: { ...previous } },
@@ -346,12 +275,11 @@
         themeMode: next.themeMode,
         themeSource: next.themeMode === "system" ? "system" : "preference",
         systemTheme: getSystemTheme(),
-        accent: next.accent,
         locale: next.locale,
         localeSource: "preference",
         fallbackLocale: "es",
         supportedLocales: Object.freeze([...LOCALES]),
-        supportedAccents: Object.freeze([...ACCENTS]),
+        accentPreference: false,
         ready: true,
         updatedAt: new Date().toISOString(),
       });
@@ -366,24 +294,17 @@
     const source = preferences && typeof preferences === "object" ? preferences : readPreferences();
     const next = {
       themeMode: normalizeThemeMode(source.themeMode),
-      accent: normalizeAccent(source.accent),
       locale: normalizeLocale(source.locale),
     };
     next.theme = getEffectiveTheme(next.themeMode);
-
     const previous = { ...current };
-    let changed = false;
-    const html = document.documentElement;
-    const body = document.body;
-
-    for (const node of [html, body]) {
+    let changed = cleanupLegacyAccent();
+    for (const node of [document.documentElement, document.body]) {
       if (!node) continue;
       changed = applyTheme(node, next.theme, next.themeMode) || changed;
       changed = applyLocale(node, next.locale) || changed;
-      changed = applyAccent(node, next.accent) || changed;
       changed = setData(node, "prebootThemeVersion", PREBOOT_VERSION) || changed;
     }
-
     changed = applyThemeColor(next.theme) || changed;
     current = next;
     writeSnapshot(next);
@@ -398,13 +319,6 @@
     return { ...current };
   }
 
-  function setAccent(value) {
-    const accent = normalizeAccent(value);
-    writeStorage(STORAGE_KEYS.accent, accent);
-    applyPreferences({ ...current, accent }, { emit: true });
-    return { ...current };
-  }
-
   function setLocale(value) {
     const locale = normalizeLocale(value);
     writeStorage(STORAGE_KEYS.locale, locale);
@@ -412,13 +326,18 @@
     return { ...current };
   }
 
+  function setAccentDeprecated() {
+    cleanupLegacyAccent();
+    return getSnapshot();
+  }
+
   function getSnapshot() {
     return {
       version: PREBOOT_VERSION,
       ...current,
       supportedThemeModes: [...THEME_MODES],
-      supportedAccents: [...ACCENTS],
       supportedLocales: [...LOCALES],
+      accentPreference: false,
     };
   }
 
@@ -449,6 +368,7 @@
   if (!isBrowser()) return;
 
   current = { ...readPreferences(), theme: getSystemTheme() };
+  cleanupLegacyAccent();
   applyPreferences(current);
   bindSystemThemeListener();
 
@@ -458,8 +378,8 @@
     getSnapshot,
     apply: () => applyPreferences(readPreferences(), { emit: true }),
     setThemeMode,
-    setAccent,
     setLocale,
+    setAccent: setAccentDeprecated,
   });
 
   if (!document.body && document.readyState === "loading") {

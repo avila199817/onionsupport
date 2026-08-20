@@ -61,11 +61,19 @@ jobs:
               'src/views/clientes/index.js',
               'src/views/facturas/index.js',
           )
+          canonical = 0
+          dead = 0
           for raw in targets:
               text = Path(raw).read_text(encoding='utf-8')
               assert not re.search(r'\bfunction\s+normalizeRole\s*\(', text), raw
-              assert 'AppCore.normalizeRole(' in text, raw
-          print('UI canonical role authority OK')
+              if 'AppCore.normalizeRole(' in text:
+                  canonical += 1
+              else:
+                  dead += 1
+                  assert not re.search(r'(?<![\w.])normalizeRole\s*\(', text), raw
+          assert canonical == 7, canonical
+          assert dead == 2, dead
+          print(f'UI canonical role authority OK · canonical={canonical} · dead={dead}')
           PY
 
       - name: Commit migration

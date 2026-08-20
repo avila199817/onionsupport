@@ -7,11 +7,12 @@
    - Pausar durante modales, operaciones busy o interacción reciente.
    - Revalidar al recuperar foco/online si los datos quedaron antiguos.
    - Usar exclusivamente el controlador canónico de Facturas.
+   - Escuchar interacción únicamente dentro del mount persistente del Router.
    - No corregir ni borrar DOM generado por el template.
 ========================================================= */
 
 export const FACTURAS_AUTO_REFRESH_VERSION =
-  "facturas.autorefresh.v3-controller-only";
+  "facturas.autorefresh.v4-router-view-interactions";
 
 const CONTROLLER_KEY = Symbol.for("onion.support.facturas.controller");
 const ROOT_SELECTOR = ".facturas-view-root, [data-facturas-scope='true']";
@@ -34,6 +35,7 @@ let refreshing = false;
 let lastRefreshAt = Date.now();
 let lastInteractionAt = 0;
 let installed = false;
+let interactionHost = null;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -43,8 +45,12 @@ function pageVisible() {
   return isBrowser() && document.visibilityState !== "hidden";
 }
 
+function viewHost() {
+  return isBrowser() ? document.querySelector(VIEW_HOST_SELECTOR) : null;
+}
+
 function viewRoot() {
-  return isBrowser() ? document.querySelector(ROOT_SELECTOR) : null;
+  return viewHost()?.querySelector?.(ROOT_SELECTOR) || null;
 }
 
 function findController(root = viewRoot()) {
@@ -61,7 +67,7 @@ function findController(root = viewRoot()) {
   }
 
   try {
-    return document.querySelector(VIEW_HOST_SELECTOR)?.[CONTROLLER_KEY] || null;
+    return viewHost()?.[CONTROLLER_KEY] || null;
   } catch {
     return null;
   }
@@ -157,21 +163,48 @@ function onUserInteraction(event) {
   lastInteractionAt = Date.now();
 }
 
-export function installFacturasAutoRefresh() {
-  if (!isBrowser() || installed) return false;
-  installed = true;
+function bindInteractionHost() {
+  if (!isBrowser() || interactionHost) return Boolean(interactionHost);
 
-  schedule();
-  window.addEventListener("focus", onReturnToApp, { passive: true });
-  window.addEventListener("online", onReturnToApp, { passive: true });
-  document.addEventListener("visibilitychange", onVisibilityChange, { passive: true });
+  const host = viewHost();
+  if (!host) return false;
 
   for (const eventName of ["pointerdown", "input", "keydown"]) {
-    document.addEventListener(eventName, onUserInteraction, {
+    host.addEventListener(eventName, onUserInteraction, {
       passive: true,
       capture: true,
     });
   }
+
+  interactionHost = host;
+  return true;
+}
+
+function unbindInteractionHost() {
+  const host = interactionHost;
+  interactionHost = null;
+  if (!host) return false;
+
+  for (const eventName of ["pointerdown", "input", "keydown"]) {
+    host.removeEventListener(eventName, onUserInteraction, true);
+  }
+
+  return true;
+}
+
+export function installFacturasAutoRefresh() {
+  if (!isBrowser() || installed) return false;
+
+  const host = viewHost();
+  if (!host) return false;
+
+  installed = true;
+  schedule();
+  bindInteractionHost();
+
+  window.addEventListener("focus", onReturnToApp, { passive: true });
+  window.addEventListener("online", onReturnToApp, { passive: true });
+  document.addEventListener("visibilitychange", onVisibilityChange, { passive: true });
 
   return true;
 }
@@ -186,12 +219,10 @@ export function destroyFacturasAutoRefresh() {
   window.removeEventListener("focus", onReturnToApp);
   window.removeEventListener("online", onReturnToApp);
   document.removeEventListener("visibilitychange", onVisibilityChange);
-
-  for (const eventName of ["pointerdown", "input", "keydown"]) {
-    document.removeEventListener(eventName, onUserInteraction, true);
-  }
+  unbindInteractionHost();
 
   refreshing = false;
+  lastInteractionAt = 0;
   return true;
 }
 
@@ -211,6 +242,7 @@ export const FacturasAutoRefresh = Object.freeze({
       lastRefreshAt,
       lastInteractionAt,
       viewMounted: Boolean(viewRoot()),
+      interactionScope: interactionHost ? "router-view" : "none",
       installed,
     });
   },

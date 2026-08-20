@@ -768,22 +768,6 @@ function getCurrentUser(
   }
 }
 
-function normalizeRole(
-  value = ""
-) {
-  const role =
-    cleanText(
-      value,
-      ""
-    ).toLowerCase();
-
-  return role === ROLE_ADMIN
-    ? ROLE_ADMIN
-    : role === ROLE_USER
-      ? ROLE_USER
-      : "";
-}
-
 function normalizeRoleList(
   value = []
 ) {

@@ -412,41 +412,12 @@ function getCurrentUser() {
   }
 }
 
-function normalizeRole(value = "") {
-  if (Array.isArray(value)) {
-    const roles = value
-      .map(normalizeRole)
-      .filter(Boolean);
-
-    if (roles.includes("admin")) return "admin";
-    return roles[0] || "";
-  }
-
-  const role = normalizeKey(value);
-
-  if (
-    [
-      "admin",
-      "administrator",
-      "administrador",
-      "superadmin",
-      "super_admin",
-      "root",
-      "owner",
-    ].includes(role)
-  ) {
-    return "admin";
-  }
-
-  return role || "user";
-}
-
 function getCurrentRole(context = {}) {
   const state = getAppState();
   const user = safeObject(getCurrentUser(), {});
 
   return (
-    normalizeRole(
+    AppCore.normalizeRole(
       first(
         context.role,
         context.rol,

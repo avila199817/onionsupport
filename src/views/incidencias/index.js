@@ -317,56 +317,6 @@ function redact(value = "") {
     );
 }
 
-function normalizeRole(value = "") {
-  if (Array.isArray(value)) {
-    const roles =
-      value
-        .map(normalizeRole)
-        .filter(Boolean);
-
-    if (roles.includes("admin")) {
-      return "admin";
-    }
-
-    if (roles.includes("user")) {
-      return "user";
-    }
-
-    return "";
-  }
-
-  const role =
-    cleanText(value, "")
-      .toLowerCase();
-
-  if (
-    [
-      "admin",
-      "administrator",
-      "administrador",
-      "owner",
-      "superadmin",
-      "super_admin",
-      "root",
-    ].includes(role)
-  ) {
-    return "admin";
-  }
-
-  if (
-    [
-      "user",
-      "usuario",
-      "client",
-      "cliente",
-    ].includes(role)
-  ) {
-    return "user";
-  }
-
-  return role || "";
-}
-
 function normalizeSortOrder(
   value = ""
 ) {
@@ -895,7 +845,7 @@ function getCurrentRole() {
     );
 
   return (
-    normalizeRole(
+    AppCore.normalizeRole(
       first(
         AppCore.getCurrentRole?.(),
         state.role,

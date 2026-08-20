@@ -14,7 +14,7 @@
 ========================================================= */
 
 export const ROUTE_STYLES_VERSION =
-  "route-styles.v9-shared-detail-modal";
+  "route-styles.v10-incidencias-preview-owned";
 
 const MODE_ATTRIBUTE =
   "data-css-route-mode";
@@ -82,6 +82,7 @@ const STYLE_MANIFEST = Object.freeze({
     "/src/css/views/incidencias/index.css",
     "/src/css/views/incidencias/create.css",
     "/src/css/views/incidencias/detail.css",
+    "/src/css/views/incidencias/media-preview.css",
   ]),
 
   facturas: Object.freeze([
@@ -1128,7 +1129,6 @@ export function clearRouteStyles(
       Object.freeze([]),
   });
 }
-
 
 /* =========================================================
    INTROSPECTION

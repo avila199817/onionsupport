@@ -711,6 +711,30 @@ def validate_ui_role_authority_v12_contract(errors: list[str]) -> None:
             errors.append(f"{relative} :: reapareció consumidor local de rol sin autoridad canónica")
 
 
+def validate_role_boundaries_v13_contract(errors: list[str]) -> None:
+    """Auth/Home/Cuenta role boundaries consume AppCore; Core remains the only role parser."""
+    targets = (
+        "src/features/auth/index.js",
+        "src/views/home/home.api.js",
+        "src/views/cuenta/cuenta.api.js",
+    )
+    for relative in targets:
+        source = (ROOT / relative).read_text(encoding="utf-8")
+        if re.search(r"\bfunction\s+normalizeRole\s*\(", source):
+            errors.append(f"{relative} :: normalizador local de rol prohibido tras V13")
+        if "AppCore.normalizeRole(" not in source:
+            errors.append(f"{relative} :: debe consumir AppCore.normalizeRole()")
+
+    auth = (SRC / "features" / "auth" / "index.js").read_text(encoding="utf-8")
+    if "VALID_ROLES" in auth or "ALLOWED_ROLES" in auth:
+        errors.append("src/features/auth/index.js :: Auth no debe mantener un segundo catálogo de roles")
+
+    home_api = (SRC / "views" / "home" / "home.api.js").read_text(encoding="utf-8")
+    for alias in ("administrator", "administrador", "superadmin", "super_admin", "root", "owner"):
+        if f'"{alias}"' in home_api:
+            errors.append(f"src/views/home/home.api.js :: alias de privilegio legacy prohibido tras V13: {alias}")
+
+
 def validate_paths(errors: list[str]) -> None:
     for root in (SRC, ROOT / ".github"):
         if not root.exists():
@@ -757,6 +781,7 @@ def main() -> int:
     validate_correo_media_v10_contract(errors)
     validate_correo_identity_v11_contract(errors)
     validate_ui_role_authority_v12_contract(errors)
+    validate_role_boundaries_v13_contract(errors)
     validate_known_dead_paths(errors)
 
     unique_errors = list(dict.fromkeys(errors))

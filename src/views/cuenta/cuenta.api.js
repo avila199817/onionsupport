@@ -26,7 +26,7 @@ import { AppCore } from "../../core/index.js";
 import Http from "../../core/http.js";
 
 export const CUENTA_API_VERSION =
-  "cuenta.api.backend-contract.v3.self-account-runtime-safe";
+  "cuenta.api.backend-contract.v4-canonical-role";
 
 export const CUENTA_RESOURCE = "cuenta";
 
@@ -152,10 +152,6 @@ function normalizeLang(value = DEFAULT_LANG) {
   if (["en", "eng", "english", "en_us", "en_gb"].includes(key)) return "en";
   if (["ca", "cat", "catala", "catalan", "ca_es"].includes(key)) return "ca";
   return "es";
-}
-
-function normalizeRole(value = DEFAULT_ROLE) {
-  return normalizeKey(value) === "admin" ? "admin" : "user";
 }
 
 function normalizeStatus(source = {}) {
@@ -439,7 +435,7 @@ export function normalizeCuentaDetail(payload = {}, fallback = {}) {
     username, email, "Usuario Onion"
   ), "Usuario Onion");
   const phone = safeText(first(source.phone, source.telefono, ""), "");
-  const role = normalizeRole(first(source.role, source.rol, safeArray(source.roles)[0], DEFAULT_ROLE));
+  const role = AppCore.normalizeRole(first(source.role, source.rol, safeArray(source.roles)[0], DEFAULT_ROLE)) || DEFAULT_ROLE;
   const status = normalizeStatus(source);
   const active = status === "active";
   const tipo = normalizeKey(source.tipo) === "empresa" ? "empresa" : "particular";

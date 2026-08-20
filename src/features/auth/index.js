@@ -28,32 +28,18 @@ import {
   AUTH_ENDPOINTS,
   ROUTES,
   USER_HOME_PREFIX,
-  ALLOWED_ROLES,
   buildUserHomeRoute,
   normalizeUserSlug,
 } from "../../core/config.js";
 
 export const AUTH_VERSION =
-  "auth.minimal.v6.2-user-envelope-hotfix";
+  "auth.minimal.v6.3-canonical-role-authority";
 
 const ROOT_PATH = "/";
 
 const LEGACY_RESET_TOKEN_PATH =
   /(\/(?:reset-password|password-reset)\/confirm\/)([^/?#\s]+)/gi;
 
-const VALID_ROLES =
-  new Set(
-    (
-      Array.isArray(ALLOWED_ROLES) &&
-      ALLOWED_ROLES.length
-        ? ALLOWED_ROLES
-        : ["admin", "user"]
-    ).map(
-      (role) =>
-        String(role)
-          .toLowerCase()
-    )
-  );
 
 const AUTH_ROUTES =
   Object.freeze({
@@ -725,56 +711,11 @@ function cleanToken(
     : "";
 }
 
-function normalizeRole(
-  value = ""
-) {
-  if (
-    Array.isArray(value)
-  ) {
-    const roles =
-      value
-        .map(
-          normalizeRole
-        )
-        .filter(Boolean);
-
-    if (
-      roles.includes(
-        "admin"
-      )
-    ) {
-      return "admin";
-    }
-
-    if (
-      roles.includes(
-        "user"
-      )
-    ) {
-      return "user";
-    }
-
-    return "";
-  }
-
-  const role =
-    cleanText(
-      value,
-      ""
-    ).toLowerCase();
-
-  return VALID_ROLES.has(
-    role
-  )
-    ? role
-    : "";
-}
-
 function roleOrUser(
   value = ""
 ) {
   return (
-    normalizeRole(
+    AppCore.normalizeRole(
       value
     ) ||
     "user"
@@ -1200,7 +1141,7 @@ function hasRole(
   role = ""
 ) {
   const required =
-    normalizeRole(
+    AppCore.normalizeRole(
       role
     );
 
@@ -1416,7 +1357,7 @@ function looksLikeUser(
     );
 
   const role =
-    normalizeRole(
+    AppCore.normalizeRole(
       first(
         value.role,
         value.rol,

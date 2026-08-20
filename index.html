@@ -164,16 +164,20 @@
   >
 
   <!--
-    Hints de módulos globales de uso temprano/frecuente. La ejecución real
-    pertenece exclusivamente a /src/main.js -> /src/app/enhancements.js.
+    Sólo se adelantan recursos que main.js necesita antes del Router.
+    Las mejoras post-router permanecen realmente diferidas.
   -->
   <link
     rel="modulepreload"
-    href="/src/ui/chrome/index.js"
+    href="/src/app/enhancements.js"
   >
   <link
     rel="modulepreload"
-    href="/src/features/mobile-datalist/index.js"
+    href="/src/features/ticket-deeplink/index.js"
+  >
+  <link
+    rel="modulepreload"
+    href="/src/ui/chrome/index.js"
   >
 
   <noscript>

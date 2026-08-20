@@ -1,11 +1,11 @@
 /* =========================================================
-   ONION SUPPORT — CUENTA V9
+   ONION SUPPORT — CUENTA V10
    Archivo: /src/css/views/cuenta/index.css
 
    PRODUCTIVO · FLOATING IDENTITY · SYSTEM TOKENS
    - Identidad flotante sin card, borde, fondo ni sombra.
    - Foto / apariencia+idioma / contraseña / pago / desactivación.
-   - Sin refresh manual, selector de color, sesiones, actividad ni paja.
+   - Sin refresh manual, selector de color, sesiones ni correctores legacy.
    - Misma jerarquía visual que Facturas, Clientes y Usuarios.
 ========================================================= */
 
@@ -49,17 +49,6 @@
 .cuenta-view svg {
   display: block;
   flex: 0 0 auto;
-}
-
-#cuenta-hero-refresh-btn,
-#cuenta-empty-refresh-btn,
-[data-cuenta-action="refresh-cuenta"],
-[data-cuenta-action="set-accent"],
-.cuenta-panel-overlay,
-.cuenta-refresh-overlay,
-.cuenta-swatches,
-.cuenta-swatch {
-  display: none !important;
 }
 
 /* =========================================================

@@ -625,6 +625,28 @@ def validate_correo_boundary_v9_contract(errors: list[str]) -> None:
             errors.append(f"src/views/correo/index.js :: falta autoridad de preferencia V9: {required}")
 
 
+def validate_correo_media_v10_contract(errors: list[str]) -> None:
+    """Correo runtime avatars must use the canonical core/media.js URL policy."""
+    view_path = SRC / "views" / "correo" / "index.js"
+    view_text = view_path.read_text(encoding="utf-8")
+
+    required = (
+        'import { sanitizeRuntimeImageUrl } from "../../core/media.js"',
+        "sanitizeRuntimeImageUrl(",
+        'CORREO_VIEW_VERSION = "correo.view.microsoft.production.v5-canonical-media"',
+    )
+    for snippet in required:
+        if snippet not in view_text:
+            errors.append(f"src/views/correo/index.js :: falta contrato media V10: {snippet}")
+
+    for forbidden in (
+        "function safeImageUrl",
+        "/^(?:javascript|data|vbscript|file):/i.test(raw)",
+    ):
+        if forbidden in view_text:
+            errors.append(f"src/views/correo/index.js :: política local de media prohibida tras V10: {forbidden}")
+
+
 def validate_paths(errors: list[str]) -> None:
     for root in (SRC, ROOT / ".github"):
         if not root.exists():
@@ -668,6 +690,7 @@ def main() -> int:
     validate_detail_modal_pairing_v7_contract(errors)
     validate_detail_modal_tokens_v8_contract(errors)
     validate_correo_boundary_v9_contract(errors)
+    validate_correo_media_v10_contract(errors)
     validate_known_dead_paths(errors)
 
     unique_errors = list(dict.fromkeys(errors))

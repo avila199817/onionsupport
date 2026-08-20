@@ -11,6 +11,7 @@
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 import { Auth as DefaultAuth } from "../../features/auth/index.js";
 import CorreoApi from "./correo.api.js";
 import {
@@ -27,7 +28,7 @@ import {
   renderShell,
 } from "./correo.template.js";
 
-export const CORREO_VIEW_VERSION = "correo.view.microsoft.production.v4-preference-owner";
+export const CORREO_VIEW_VERSION = "correo.view.microsoft.production.v5-canonical-media";
 
 const INSTANCES = new WeakMap();
 let lastInstance = null;
@@ -127,19 +128,6 @@ function isLikelyEmail(value = "") {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ""));
 }
 
-function safeImageUrl(value = "") {
-  const raw = cleanText(value, "");
-  if (!raw || /[\r\n\t\\]/.test(raw) || /^(?:javascript|data|vbscript|file):/i.test(raw)) return "";
-  if (raw.startsWith("/")) return raw;
-  try {
-    const url = new URL(raw);
-    if (url.protocol === "https:" || url.protocol === "http:") return url.toString();
-  } catch {
-    return "";
-  }
-  return "";
-}
-
 function initialsFrom(value = "") {
   return cleanText(value, "ON").split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || "").join("").slice(0, 2) || "ON";
 }
@@ -160,7 +148,7 @@ function readOnionUser() {
   }
 
   const displayName = cleanText(user?.displayName || user?.fullName || user?.name || user?.nombre || raw?.displayName || raw?.fullName || raw?.name || raw?.nombre, "Cristian Ávila Luque");
-  const avatarUrl = safeImageUrl(
+  const avatarUrl = sanitizeRuntimeImageUrl(
     user?.avatarUrl || user?.avatar || user?.picture || user?.photoUrl || raw?.avatarUrl || raw?.avatar || raw?.picture || raw?.photoUrl || raw?.profile?.avatarUrl || ""
   );
 

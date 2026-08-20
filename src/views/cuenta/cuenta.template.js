@@ -2,9 +2,9 @@
    Onion Support - Cuenta Template
    Archivo: /src/views/cuenta/cuenta.template.js
 
-   PRODUCTIVO · COMPACT SELF-SERVICE · V6
+   PRODUCTIVO · COMPACT SELF-SERVICE · V7
 
-   Cuenta queda reducida a cinco bloques útiles:
+   Cuenta queda reducida a seis bloques útiles:
    1) Identidad compacta.
    2) Foto de perfil.
    3) Apariencia e idioma.
@@ -18,7 +18,7 @@
 ========================================================= */
 
 export const CUENTA_TEMPLATE_VERSION =
-  "cuenta.template.productivo.v6.compact-profile-first";
+  "cuenta.template.productivo.v7.canonical-surface";
 
 export const CUENTA_TEMPLATE_CAPABILITIES = Object.freeze({
   readSelf: true,
@@ -43,7 +43,6 @@ export const CUENTA_ACTIONS = Object.freeze({
   SET_THEME: "set-theme",
   SET_LOCALE: "set-locale",
   DEACTIVATE: "deactivate-account",
-  SET_ACCENT: "set-accent",
 });
 
 const COPY = Object.freeze({
@@ -574,11 +573,6 @@ export function renderDeactivateCard(detail = {}, state = {}) {
   `;
 }
 
-export function renderIdentityCard(detail = {}, state = {}) { return renderHeader({ item: detail, state }); }
-export function renderPreferencesCard(detail = {}, state = {}) { return renderAppearanceCard(detail, state); }
-export function renderActivityCard() { return ""; }
-export function renderSessionsCard() { return ""; }
-
 export function renderPanel({ item = null, state = {} } = {}) {
   const detail = isObject(item) ? item : null;
   const local = resolveState(state);
@@ -609,8 +603,6 @@ export function renderCuentaTemplate({ item = null, state = {} } = {}) {
     </div>
   `;
 }
-
-export const renderCuentaViewTemplate = renderCuentaTemplate;
 
 export function getCuentaTemplateSnapshot({ item = null, state = {} } = {}) {
   const local = resolveState(state);
@@ -664,13 +656,8 @@ export default Object.freeze({
   renderSecurityCard,
   renderPaymentCard,
   renderDeactivateCard,
-  renderIdentityCard,
-  renderPreferencesCard,
-  renderActivityCard,
-  renderSessionsCard,
   renderPanel,
   renderCuentaTemplate,
-  renderCuentaViewTemplate,
   getCuentaTemplateSnapshot,
   getSnapshot,
 });

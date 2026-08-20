@@ -2,14 +2,14 @@
    Onion Support - Cuenta Index
    Archivo: /src/views/cuenta/index.js
 
-   PRODUCTIVO · FOCUSED SELF-SERVICE · SWR · V7
+   PRODUCTIVO · FOCUSED SELF-SERVICE · SWR · V8
 
-   Cuenta V7:
+   Cuenta V8:
    - Cache/Auth inmediata y reconciliación silenciosa.
    - Sin botón manual de actualizar ni overlays de refresco.
    - Foto, apariencia/idioma, contraseña, pagos visibles y desactivación.
-   - Sin selector de color; cualquier preferencia antigua se ignora.
    - Preferencias locales de tema/idioma aplicadas por preboot.
+   - Sin selector de color, sesiones UI ni APIs compatibility/no-op.
    - Sin edición de perfil inventada ni PATCH self inexistente.
 ========================================================= */
 
@@ -26,7 +26,6 @@ import {
   validateCuentaAvatarFile,
   uploadCuentaAvatar as uploadCuentaAvatarApi,
   deleteCuentaAvatar as deleteCuentaAvatarApi,
-  loadCuentaSessions as loadCuentaSessionsApi,
   deactivateCuenta as deactivateCuentaApi,
   getCuentaApiSnapshot,
 } from "./cuenta.api.js";
@@ -39,7 +38,7 @@ import {
 } from "./cuenta.template.js";
 
 export const CUENTA_INDEX_VERSION =
-  "cuenta.index.productivo.v7.focused-payment-ready";
+  "cuenta.index.productivo.v8.canonical-surface";
 export const CUENTA_VIEW_VERSION = CUENTA_INDEX_VERSION;
 export const CUENTA_INDEX_SOURCE = "views.cuenta.index";
 
@@ -58,7 +57,6 @@ const STORAGE_KEYS = Object.freeze({
   themeMode: "onion.ui.themeMode",
   locale: "onion.ui.locale",
 });
-const LEGACY_ACCENT_STORAGE_KEY = "onion.ui.accent";
 const THEMES = new Set(["system", "light", "dark"]);
 const LOCALES = new Set(["es", "ca", "en"]);
 
@@ -79,10 +77,6 @@ function isDomNode(value) {
 
 function safeObject(value, fallback = {}) {
   return isObject(value) ? value : fallback;
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
 }
 
 function cleanText(value = "", fallback = "") {
@@ -194,16 +188,6 @@ function writeStorage(key = "", value = "") {
   }
 }
 
-function clearLegacyAccentPreference() {
-  if (!isBrowser()) return false;
-  try {
-    window.localStorage?.removeItem(LEGACY_ACCENT_STORAGE_KEY);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function preferenceBridge() {
   if (!isBrowser()) return null;
   const bridge = window.OnionPreferences;
@@ -237,7 +221,6 @@ function fallbackApplyLocale(locale) {
 }
 
 function readPreferences(item = null) {
-  clearLegacyAccentPreference();
   const bridge = preferenceBridge();
   try {
     const snapshot = bridge?.getSnapshot?.() || bridge?.get?.();
@@ -326,7 +309,6 @@ function createCuentaController(host, context = {}) {
   let lastRenderHtml = "";
   let renderFrame = 0;
   let pendingRender = false;
-  let legacySessions = [];
 
   function ownsHost() {
     return Boolean(host && host.dataset?.cuentaControllerId === controllerId);
@@ -665,21 +647,6 @@ function createCuentaController(host, context = {}) {
     return preferences.locale;
   }
 
-  function setAccentDeprecated() {
-    clearLegacyAccentPreference();
-    return false;
-  }
-
-  async function loadSessions(options = {}) {
-    try {
-      const response = await loadCuentaSessionsApi(options);
-      legacySessions = safeArray(response?.sessions);
-      return [...legacySessions];
-    } catch {
-      return [];
-    }
-  }
-
   function handleClick(event) {
     if (destroyed) return;
     const node = event.target?.closest?.(ACTION_SELECTOR);
@@ -693,7 +660,6 @@ function createCuentaController(host, context = {}) {
     if (action === CUENTA_ACTIONS.CHOOSE_AVATAR) { chooseAvatar(); return; }
     if (action === CUENTA_ACTIONS.DELETE_AVATAR) { void deleteAvatar(); return; }
     if (action === CUENTA_ACTIONS.SET_THEME) { setTheme(node.dataset.value || "system"); return; }
-    if (action === CUENTA_ACTIONS.SET_ACCENT) { setAccentDeprecated(); return; }
     if (action === CUENTA_ACTIONS.RETRY) void load({ force: true, silent: false });
   }
 
@@ -807,7 +773,6 @@ function createCuentaController(host, context = {}) {
     success = "";
     deactivated = false;
     authRefreshRequired = false;
-    legacySessions = [];
     lastRenderHtml = "";
     if (mounted && !destroyed) renderNow({ force: true });
     return true;
@@ -847,7 +812,6 @@ function createCuentaController(host, context = {}) {
       deactivated,
       authRefreshRequired,
       preferences: { ...preferences },
-      sessions: { loaded: legacySessions.length > 0, loading: false, count: legacySessions.length, error: "", ui: false },
       payment: { visible: true, configurable: false, source: "placeholder" },
       architecture: {
         focusedSelfService: true,
@@ -901,31 +865,14 @@ function createCuentaController(host, context = {}) {
     updateTheme: setTheme,
     updateCuentaTheme: setTheme,
     setCuentaTheme: setTheme,
-    setAccent: setAccentDeprecated,
-    updateAccent: setAccentDeprecated,
     setLocale,
     updateLanguage: setLocale,
     updateCuentaLanguage: setLocale,
     setLanguage: setLocale,
     setCuentaLanguage: setLocale,
-    loadSessions,
-    loadCuentaSessions: loadSessions,
-    refreshSessions: () => loadSessions({ force: true }),
-    saveCuenta: () => false,
-    save: () => false,
-    saveProfile: () => false,
-    savePerfil: () => false,
-    updateProfile: () => false,
-    updatePerfil: () => false,
-    updateCuenta: () => false,
-    updatePrivacy: () => false,
-    updateCuentaPrivacy: () => false,
-    setPrivacy: () => false,
-    setCuentaPrivacy: () => false,
     resetPresentation,
     getItem: () => item,
     getCuenta: () => item,
-    getSessions: () => [...legacySessions],
     getState: getSnapshot,
     getSnapshot,
     getDebugSnapshot: getSnapshot,
@@ -974,14 +921,6 @@ export const reload = refresh;
 export const loadCuenta = refresh;
 export const refreshCuenta = refresh;
 
-export function saveCuenta() { return false; }
-export const save = saveCuenta;
-export const saveProfile = saveCuenta;
-export const savePerfil = saveCuenta;
-export const updateProfile = saveCuenta;
-export const updatePerfil = saveCuenta;
-export const updateCuenta = saveCuenta;
-
 export function updateTheme(value = "system") {
   try { return lastInstance?.setTheme?.(value) ?? false; } catch { return false; }
 }
@@ -989,28 +928,12 @@ export const updateCuentaTheme = updateTheme;
 export const setTheme = updateTheme;
 export const setCuentaTheme = updateTheme;
 
-export function setAccent() {
-  try {
-    lastInstance?.setAccent?.();
-    return false;
-  } catch {
-    return false;
-  }
-}
-export const updateAccent = setAccent;
-export const updateCuentaAccent = setAccent;
-
 export function updateLanguage(value = "es") {
   try { return lastInstance?.setLocale?.(value) ?? false; } catch { return false; }
 }
 export const updateCuentaLanguage = updateLanguage;
 export const setLanguage = updateLanguage;
 export const setCuentaLanguage = updateLanguage;
-
-export function updatePrivacy() { return false; }
-export const updateCuentaPrivacy = updatePrivacy;
-export const setPrivacy = updatePrivacy;
-export const setCuentaPrivacy = updatePrivacy;
 
 export function changePassword(payload = null) {
   try { return lastInstance?.changePassword?.(payload) || null; } catch { return null; }
@@ -1028,12 +951,6 @@ export function deleteAvatar() {
 }
 export const deleteCuentaAvatar = deleteAvatar;
 
-export function loadSessions(options = {}) {
-  try { return lastInstance?.loadSessions?.(options) || null; } catch { return null; }
-}
-export const loadCuentaSessions = loadSessions;
-export function refreshSessions() { return loadSessions({ force: true }); }
-
 export function deactivateAccount(payload = null) {
   try { return lastInstance?.deactivateAccount?.(payload) || null; } catch { return null; }
 }
@@ -1043,10 +960,6 @@ export function getItem() {
   try { return lastInstance?.getItem?.() || null; } catch { return null; }
 }
 export const getCuenta = getItem;
-
-export function getSessions() {
-  try { return lastInstance?.getSessions?.() || []; } catch { return []; }
-}
 
 export function clearCuentaViewCache() {
   try {
@@ -1069,7 +982,6 @@ export function getSnapshot() {
     saving: false,
     hasItem: false,
     preferences: readPreferences(),
-    sessions: { loaded: false, loading: false, count: 0, error: "", ui: false },
     payment: { visible: true, configurable: false, source: "placeholder" },
     architecture: {
       focusedSelfService: true,

@@ -17,6 +17,8 @@ PYTHON_FILES = (
     ".github/scripts/app_entrypoint_integrity.py",
     ".github/scripts/boot_visual_integrity.py",
     ".github/scripts/cuenta_integrity.py",
+    ".github/scripts/public_home_integrity.py",
+    ".github/scripts/public_home_performance.py",
     ".github/scripts/production_verify.py",
 )
 

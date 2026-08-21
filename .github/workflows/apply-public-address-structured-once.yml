@@ -4,13 +4,17 @@ on:
   push:
     branches:
       - fix/public-address-structured
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
 
 jobs:
   patch:
-    if: github.actor != 'github-actions[bot]'
+    if: github.actor != 'github-actions[bot]' && (github.event_name == 'push' || github.head_ref == 'fix/public-address-structured')
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:

@@ -174,9 +174,26 @@ def main() -> int:
         ('idempotencyKey(form)', "Falta clave estable de idempotencia"),
         ('neutralAccepted(response)', "Falta respuesta anti-enumeración"),
         ('intakeIconNode', "Falta icono interno de incidencia"),
+        ('formatNationalSpanishPhone', "Falta formato nacional español del teléfono"),
+        ('"tel-national"', "El teléfono debe usar autocomplete nacional"),
     ):
         require(errors, snippet in intake, message)
 
+    require(
+        errors,
+        "SPAIN_PHONE_DEFAULT" not in intake,
+        "El intake no puede inyectar +34 dentro del input telefónico",
+    )
+    require(
+        errors,
+        'root.addEventListener("focusin", onFocusIn' not in intake,
+        "El intake no debe mutar el teléfono al recibir focus",
+    )
+    require(
+        errors,
+        'phone: normalizeSpanishPhone(data.get("phone"))' in intake,
+        "El payload debe seguir normalizando el teléfono con +34",
+    )
     require(
         errors,
         "fullName: fullName(user)" not in intake,
@@ -224,9 +241,14 @@ def main() -> int:
         ('"/incidencias"', "Falta acceso a Incidencias"),
         ('"/facturas"', "Falta acceso a Facturas"),
         ('"/cuenta"', "Falta acceso a Cuenta"),
-        ("formatSpanishPhoneInput", "Falta formato progresivo de teléfono"),
+        ("formatNationalPhone", "Falta formato progresivo nacional de teléfono"),
         ("+34 612 345 678", "Falta ejemplo telefónico español"),
+        ("national-es-with-static-prefix", "Falta contrato teléfono con prefijo visual externo"),
         ("login-incidence", "Falta orden explícito Cuenta/Incidencia"),
+        ('link.removeAttribute("href")', "El toggle autenticado debe ser no navegable"),
+        ('link.setAttribute("role", "button")', "El toggle autenticado debe declarar rol de botón"),
+        ('link.dataset.publicHomeAccountHome = home', "La ruta de panel debe separarse del toggle"),
+        ('event.stopImmediatePropagation?.()', "El toggle debe aislar su evento del Router"),
     ):
         require(errors, snippet in home_experience, message)
 
@@ -278,7 +300,7 @@ def main() -> int:
     print("- JS: main.js -> app/enhancements.js")
     print("- CSS: router/styles.js -> public-home (sin auth/login.css)")
     print("- app.css: sólo estilos globales")
-    print("- intake, UX y progreso validados por contrato semántico")
+    print("- intake, teléfono nacional, menú autenticado y progreso validados")
     return 0
 
 

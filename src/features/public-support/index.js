@@ -24,6 +24,7 @@ import Http from "../../core/http.js";
 export const PUBLIC_SUPPORT_VERSION =
   "public-support.intake.v9-structured-address";
 export const PUBLIC_TICKET_ENDPOINT = "/api/tickets/public";
+const PUBLIC_SUPPORT_TECHNICIAN_PHOTO = "/src/media/img/Cristian_Avila_Formulario.png";
 
 const VIEW_ROOT_SELECTOR = "#view-container, [data-router-view='true']";
 const HOME = "[data-public-home]";
@@ -263,7 +264,11 @@ function formSection() {
     <div class="public-support-layout">
       <div class="public-support-intro">
         <p class="public-home-price-eyebrow">Soporte directo</p>
-        <h2 id="public-support-title">Abre tu incidencia ahora.</h2>
+        <h2 id="public-support-title" class="public-support-title">
+          <span>Abre tu</span>
+          <span>incidencia</span>
+          <span class="public-support-title-accent">ahora.</span>
+        </h2>
         <p class="public-support-lead">
           Cuéntame el problema y dejo el caso registrado desde el primer minuto.
           Si ya tienes cuenta, la reutilizamos por correo o teléfono sin modificar tu perfil.
@@ -274,6 +279,21 @@ function formSection() {
           <div class="public-support-flow-item"><span>02</span><div><strong>Creamos tu acceso si hace falta</strong><p>Solo si no existe usuario, creamos un usuario pendiente y enviamos el enlace seguro para definir la contraseña.</p></div></div>
           <div class="public-support-flow-item"><span>03</span><div><strong>Cliente, solo por Onion Support</strong><p>La home no crea fichas de cliente. El equipo de Onion Support las gestiona después cuando corresponda.</p></div></div>
         </div>
+
+        <figure class="public-support-person">
+          <div class="public-support-person-visual">
+            <img
+              src="${PUBLIC_SUPPORT_TECHNICIAN_PHOTO}"
+              alt="Cristian Ávila, soporte técnico de Onion Support"
+              loading="lazy"
+              decoding="async"
+              fetchpriority="low">
+          </div>
+          <figcaption class="public-support-person-card">
+            <strong>Cristian Ávila</strong>
+            <span>Soporte técnico</span>
+          </figcaption>
+        </figure>
 
         <p class="public-support-privacy">
           Los datos se usan para gestionar la incidencia y, solo si no existe usuario, crear tu acceso.
@@ -304,7 +324,11 @@ function formSection() {
           ${field("postalCode", "Código postal", "text", "08001", "postal-code", 5, "numeric")}
           ${field("city", "Ciudad", "text", "Barcelona", "address-level2", 90)}
           ${field("province", "Provincia", "text", "Barcelona", "address-level1", 90)}
-          ${field("country", "País", "text", "España", "country-name", 90, "", "España", { readonly: true })}
+
+          <div class="public-support-postal-hint public-support-field--wide">
+            <span aria-hidden="true">i</span>
+            <p>El código postal completa la provincia automáticamente. La ciudad permanece editable para que puedas indicar la localidad correcta.</p>
+          </div>
 
           <div class="public-support-field public-support-field--wide">
             <label for="public-support-subject">Asunto</label>

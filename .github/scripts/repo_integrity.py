@@ -214,7 +214,7 @@ def validate_api_transport_contract(errors: list[str]) -> None:
 
     required_config = (
         'CANONICAL_PRODUCTION_API_BASE = "https://www.onionsupport.com"',
-        'CANONICAL_DIRECT_BACKEND_API_BASE = "https://api.onionit.net"',
+        'CANONICAL_DIRECT_BACKEND_API_BASE = "https://api.onionsupport.com"',
         'DIRECT_BACKEND_API_PREFIXES = Object.freeze([',
         '"/health"',
     )

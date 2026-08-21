@@ -1,10 +1,20 @@
 # =========================================================
 # ONION SUPPORT — AZURE STATIC WEB APPS CI/CD
-# Producción: SPA estática + landing pública indexable
-# Canonical SEO: https://www.onionsupport.com/
-# Área privada: noindex / nofollow
-# Checkout: última fuente autoritativa (main / rama PR interna)
-# Evita desplegar snapshots obsoletos al reintentar ejecuciones
+# Production contract:
+#   Frontend canonical: https://www.onionsupport.com
+#   Same-origin API:    https://www.onionsupport.com/api/*
+#   Direct backend:     https://api.onionsupport.com
+#   Azure SWA:          onion-panel
+#   Linked App Service: oniontech
+#
+# Design goals:
+#   - Validate the exact commit that is deployed.
+#   - Deploy static files directly (no Oryx/application build).
+#   - Never retry an upload blindly.
+#   - Poll the deployed environment until exact release bytes are visible.
+#   - Make production verification blocking.
+#   - Keep PR preview lifecycle deterministic.
+#   - Pin third-party actions by immutable commit SHA.
 # =========================================================
 
 name: Azure Static Web Apps CI/CD
@@ -29,30 +39,27 @@ on:
 
 concurrency:
   group: swa-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-permissions:
-  contents: read
-  pull-requests: write
+defaults:
+  run:
+    shell: bash
 
 env:
   APP_LOCATION: "/"
   API_LOCATION: ""
   OUTPUT_LOCATION: ""
   PUBLIC_SITE_URL: "https://www.onionsupport.com"
-  DEPLOY_COOLDOWN_SECONDS: "45"
-  DEPLOY_RETRY_SECONDS: "75"
-  PRODUCTION_VERIFY_DELAY_SECONDS: "25"
-
-defaults:
-  run:
-    shell: bash
+  DIRECT_API_URL: "https://api.onionsupport.com"
 
 jobs:
-  deploy:
-    name: Deploy
+  validate:
+    name: Validate release
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
 
     if: >-
       (
@@ -70,53 +77,39 @@ jobs:
         github.event.pull_request.head.repo.full_name == github.repository
       )
 
-    env:
-      SWA_API_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E }}
+    outputs:
+      validated_sha: ${{ steps.revision.outputs.sha }}
 
     steps:
-      - name: Checkout authoritative source
-        uses: actions/checkout@v6
+      - name: Checkout exact release revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || 'main' }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 1
           submodules: false
           lfs: false
           persist-credentials: false
 
-      - name: Resolve checked out revision
+      - name: Lock validated revision
         id: revision
+        env:
+          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
 
           checked_sha="$(git rev-parse HEAD)"
-          checked_branch="$(git branch --show-current || true)"
 
-          echo "sha=${checked_sha}" >> "${GITHUB_OUTPUT}"
-
-          echo "Event SHA: ${GITHUB_SHA}"
-          echo "Checked-out SHA: ${checked_sha}"
-          echo "Checked-out branch: ${checked_branch:-detached}"
-
-          if [[ -f "robots.txt" ]]; then
-            echo "robots.txt SHA256: $(sha256sum robots.txt | awk '{print $1}')"
-            printf "robots.txt primera línea: "
-            head -n 1 robots.txt || true
-          fi
-
-          if [[ -f "sitemap.xml" ]]; then
-            echo "sitemap.xml SHA256: $(sha256sum sitemap.xml | awk '{print $1}')"
-            printf "sitemap.xml primera línea: "
-            head -n 1 sitemap.xml || true
-          fi
-
-      - name: Validate deploy contract
-        run: |
-          set -euo pipefail
-
-          if [[ -z "${SWA_API_TOKEN:-}" ]]; then
-            echo "::error title=Secret no configurado::Falta el secret AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E."
+          if [[ "${checked_sha}" != "${EXPECTED_SHA}" ]]; then
+            echo "::error title=Checkout no determinista::Esperado ${EXPECTED_SHA}, obtenido ${checked_sha}."
             exit 1
           fi
+
+          echo "sha=${checked_sha}" >> "${GITHUB_OUTPUT}"
+          echo "Validated SHA: ${checked_sha}"
+
+      - name: Validate static release contract
+        run: |
+          set -euo pipefail
 
           required_files=(
             "index.html"
@@ -127,34 +120,27 @@ jobs:
             "favicon.ico"
             "ad1f6102f1914986b540f6a34bf6939b.txt"
 
-            "src/main.js"
+            ".github/scripts/repo_integrity.py"
 
+            "src/main.js"
             "src/app/index.js"
             "src/app/loader.js"
-
             "src/core/config.js"
             "src/core/http.js"
             "src/core/index.js"
-
+            "src/core/media.js"
             "src/features/auth/index.js"
-
             "src/router/index.js"
             "src/router/routes.js"
-
             "src/preboot/theme.js"
-
             "src/css/app.css"
             "src/css/core/noscript.css"
             "src/css/auth/login.css"
-
             "src/views/public/index.js"
-
             "src/views/public/login/index.js"
             "src/views/public/login/template.js"
-
             "src/views/public/password-reset/index.js"
             "src/views/public/password-reset/template.js"
-
             "src/ui/toast/index.js"
             "src/ui/sidebar/index.js"
             "src/ui/sidebar/template.js"
@@ -162,59 +148,29 @@ jobs:
           )
 
           for file in "${required_files[@]}"; do
-            if [[ ! -f "$file" ]]; then
-              echo "::error file=$file,title=Archivo obligatorio no encontrado::No existe: $file"
+            if [[ ! -f "${file}" ]]; then
+              echo "::error file=${file},title=Archivo obligatorio ausente::No existe ${file}."
               exit 1
             fi
           done
 
-          removed_files=(
+          forbidden_files=(
             "BingSiteAuth.xml"
             "manifest.json"
             "sw.js"
             "apple-touch-icon.png"
           )
 
-          for file in "${removed_files[@]}"; do
-            if [[ -e "$file" ]]; then
-              echo "::error file=$file,title=Archivo eliminado reaparecido::Debe eliminarse del repo: $file"
+          for file in "${forbidden_files[@]}"; do
+            if [[ -e "${file}" ]]; then
+              echo "::error file=${file},title=Archivo obsoleto restaurado::${file} debe permanecer eliminado."
               exit 1
             fi
           done
 
-          python3 - <<'PY'
-          from pathlib import Path
-          import sys
-
-          roots = [
-              Path("src"),
-              Path(".github"),
-          ]
-
-          bad_paths = []
-
-          for root in roots:
-              if not root.exists():
-                  continue
-
-              for path in root.rglob("*"):
-                  parts = path.parts
-
-                  for part in parts:
-                      if part != part.strip():
-                          bad_paths.append(str(path))
-                          break
-
-          if bad_paths:
-              for path in bad_paths:
-                  print(f"::error file={path},title=Ruta con espacios inválidos::El path contiene espacios al inicio/final. Renombra la carpeta/archivo.")
-              sys.exit(1)
-
-          print("Paths sin espacios iniciales/finales OK.")
-          PY
-
           python3 -m json.tool staticwebapp.config.json >/dev/null
           python3 -m json.tool site.webmanifest >/dev/null
+          python3 -m py_compile .github/scripts/repo_integrity.py
 
           required_index_refs=(
             "/favicon.ico"
@@ -226,8 +182,8 @@ jobs:
           )
 
           for ref in "${required_index_refs[@]}"; do
-            if ! grep -Fq "$ref" index.html; then
-              echo "::error file=index.html,title=Referencia obligatoria no encontrada::Falta referencia: $ref"
+            if ! grep -Fq "${ref}" index.html; then
+              echo "::error file=index.html,title=Referencia obligatoria ausente::Falta ${ref}."
               exit 1
             fi
           done
@@ -240,26 +196,111 @@ jobs:
           )
 
           for ref in "${forbidden_public_refs[@]}"; do
-            if grep -Fq "$ref" index.html site.webmanifest robots.txt 2>/dev/null; then
-              echo "::error title=Referencia pública obsoleta::No debe quedar '${ref}' en index.html, site.webmanifest ni robots.txt."
+            if grep -Fq "${ref}" index.html site.webmanifest robots.txt 2>/dev/null; then
+              echo "::error title=Referencia pública obsoleta::No debe aparecer '${ref}' en archivos públicos."
               exit 1
             fi
           done
 
-          if grep -Fq "BingSiteAuth.xml" index.html site.webmanifest robots.txt 2>/dev/null; then
-            echo "::error title=Referencia obsoleta::No debe quedar BingSiteAuth.xml en index.html, site.webmanifest ni robots.txt."
-            exit 1
-          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
 
-          echo "Contrato mínimo de archivos OK."
+          bad_paths = []
 
-      - name: Validate SEO contract
+          for root_name in ("src", ".github"):
+              root = Path(root_name)
+              if not root.exists():
+                  continue
+
+              for path in root.rglob("*"):
+                  if any(part != part.strip() for part in path.parts):
+                      bad_paths.append(str(path))
+
+          if bad_paths:
+              for path in bad_paths:
+                  print(
+                      f"::error file={path},title=Ruta inválida::"
+                      "Hay espacios al principio o final de un componente del path."
+                  )
+              sys.exit(1)
+
+          print("Paths del release OK.")
+          PY
+
+          python3 - <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+          from urllib.parse import urlsplit
+          import json
+          import re
+          import sys
+
+          root = Path(".").resolve()
+          errors = []
+
+          def is_external(ref):
+              ref = (ref or "").strip()
+              if not ref or ref.startswith("#") or ref.startswith("//"):
+                  return True
+              return bool(re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", ref))
+
+          def resolve_ref(ref):
+              ref = (ref or "").strip()
+              if is_external(ref):
+                  return None
+
+              path = urlsplit(ref).path or ""
+              if not path or path == "/":
+                  return None
+
+              if path.startswith("/"):
+                  return root / path.lstrip("/")
+
+              return root / path
+
+          def check(owner, ref):
+              path = resolve_ref(ref)
+              if path is not None and not path.exists():
+                  errors.append(f"{owner}: referencia local inexistente {ref}")
+
+          class IndexParser(HTMLParser):
+              def handle_starttag(self, tag, attrs):
+                  attrs = dict(attrs or [])
+
+                  if tag in {"script", "img", "source", "video", "audio"}:
+                      check("index.html", attrs.get("src", ""))
+
+                  if tag == "link":
+                      check("index.html", attrs.get("href", ""))
+
+          IndexParser().feed(Path("index.html").read_text(encoding="utf-8"))
+
+          manifest = json.loads(Path("site.webmanifest").read_text(encoding="utf-8"))
+          for icon in manifest.get("icons", []):
+              if isinstance(icon, dict):
+                  check("site.webmanifest", icon.get("src", ""))
+
+          if errors:
+              for item in errors:
+                  print(f"::error title=Referencia pública local inválida::{item}")
+              sys.exit(1)
+
+          print("Referencias públicas locales OK.")
+          PY
+
+      - name: Validate repository integrity
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/repo_integrity.py
+
+      - name: Validate production SEO and routing contract
         run: |
           set -euo pipefail
 
           python3 - <<'PY'
-          from pathlib import Path
           from html.parser import HTMLParser
+          from pathlib import Path
           from urllib.parse import urlsplit
           import json
           import os
@@ -267,39 +308,26 @@ jobs:
           import xml.etree.ElementTree as ET
 
           base = os.environ["PUBLIC_SITE_URL"].rstrip("/")
+          api = os.environ["DIRECT_API_URL"].rstrip("/")
           expected_home = f"{base}/"
           expected_sitemap = f"{base}/sitemap.xml"
           canonical_host = urlsplit(expected_home).netloc
 
           errors = []
 
-          def add_error(path, message):
+          def error(path, message):
               errors.append((str(path), message))
 
-          def contains_directive(lines, expected):
-              expected = expected.strip().lower()
-              return any(line.strip().lower() == expected for line in lines)
-
-          # -------------------------------------------------
           # robots.txt
-          # -------------------------------------------------
           robots_path = Path("robots.txt")
           robots_text = robots_path.read_text(encoding="utf-8")
-          robots_lines = [
+          robots_lines = {
               line.strip()
               for line in robots_text.splitlines()
               if line.strip() and not line.lstrip().startswith("#")
-          ]
+          }
 
-          if robots_text.lstrip().startswith("<"):
-              first_line = robots_text.lstrip().splitlines()[0][:180]
-              add_error(
-                  robots_path,
-                  "robots.txt contiene XML/HTML. Debe ser texto plano del protocolo robots. "
-                  f"Primera línea detectada: {first_line!r}"
-              )
-
-          required_robots = [
+          required_robots = {
               "User-agent: *",
               "Allow: /",
               "Disallow: /login",
@@ -312,6 +340,7 @@ jobs:
               "Disallow: /facturas",
               "Disallow: /clientes",
               "Disallow: /usuarios",
+              "Disallow: /correo",
               "Disallow: /servidor",
               "Disallow: /cuenta",
               "Disallow: /ajustes",
@@ -319,114 +348,56 @@ jobs:
               "Disallow: /api/",
               "Disallow: /.auth/",
               f"Sitemap: {expected_sitemap}",
-          ]
+          }
 
-          for directive in required_robots:
-              if not contains_directive(robots_lines, directive):
-                  add_error(
-                      robots_path,
-                      f"Falta directiva SEO obligatoria: {directive}"
-                  )
+          for directive in sorted(required_robots):
+              if directive not in robots_lines:
+                  error(robots_path, f"Falta directiva obligatoria: {directive}")
 
-          # -------------------------------------------------
           # sitemap.xml
-          # -------------------------------------------------
           sitemap_path = Path("sitemap.xml")
-
           try:
               tree = ET.parse(sitemap_path)
               root = tree.getroot()
-          except ET.ParseError as error:
-              add_error(sitemap_path, f"XML inválido: {error}")
+          except ET.ParseError as exc:
+              error(sitemap_path, f"XML inválido: {exc}")
               root = None
 
           sitemap_urls = []
 
           if root is not None:
               expected_root = "{http://www.sitemaps.org/schemas/sitemap/0.9}urlset"
-
               if root.tag != expected_root:
-                  add_error(
-                      sitemap_path,
-                      "La raíz debe ser urlset con namespace http://www.sitemaps.org/schemas/sitemap/0.9."
-                  )
+                  error(sitemap_path, "La raíz debe ser urlset con el namespace oficial.")
 
-              namespace = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+              ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
               sitemap_urls = [
                   (node.text or "").strip()
-                  for node in root.findall("sm:url/sm:loc", namespace)
+                  for node in root.findall("sm:url/sm:loc", ns)
                   if (node.text or "").strip()
               ]
 
-              if not sitemap_urls:
-                  add_error(sitemap_path, "El sitemap no contiene ninguna URL <loc>.")
-
-              if len(sitemap_urls) != len(set(sitemap_urls)):
-                  add_error(sitemap_path, "El sitemap contiene URLs duplicadas.")
-
-              if expected_home not in sitemap_urls:
-                  add_error(
+              if sitemap_urls != [expected_home]:
+                  error(
                       sitemap_path,
-                      f"Debe incluir la URL canónica principal: {expected_home}"
+                      f"El sitemap productivo debe publicar exactamente {expected_home}",
                   )
-
-              private_prefixes = (
-                  "/login",
-                  "/password-request",
-                  "/password-reset",
-                  "/reset-password",
-                  "/activate-account",
-                  "/dashboard",
-                  "/incidencias",
-                  "/facturas",
-                  "/clientes",
-                  "/usuarios",
-                  "/servidor",
-                  "/cuenta",
-                  "/ajustes",
-                  "/@",
-                  "/api/",
-                  "/.auth/",
-                  "/docs/",
-                  "/config/",
-              )
 
               for loc in sitemap_urls:
                   parsed = urlsplit(loc)
-                  path = parsed.path or "/"
-
                   if parsed.scheme != "https":
-                      add_error(sitemap_path, f"URL no HTTPS en sitemap: {loc}")
-
+                      error(sitemap_path, f"URL no HTTPS: {loc}")
                   if parsed.netloc != canonical_host:
-                      add_error(
-                          sitemap_path,
-                          f"Host no canónico en sitemap: {loc}. Esperado: {canonical_host}"
-                      )
-
+                      error(sitemap_path, f"Host no canónico: {loc}")
                   if parsed.query or parsed.fragment:
-                      add_error(
-                          sitemap_path,
-                          f"El sitemap no debe publicar query strings ni fragmentos: {loc}"
-                      )
+                      error(sitemap_path, f"Query/fragment no permitido: {loc}")
 
-                  if any(
-                      path == prefix.rstrip("/") or path.startswith(prefix)
-                      for prefix in private_prefixes
-                  ):
-                      add_error(
-                          sitemap_path,
-                          f"Ruta privada/noindex incluida en sitemap: {loc}"
-                      )
-
-          # -------------------------------------------------
-          # index.html SEO
-          # -------------------------------------------------
+          # index.html
           class SeoParser(HTMLParser):
               def __init__(self):
                   super().__init__()
                   self.canonicals = []
-                  self.meta_robots = []
+                  self.robots = {}
 
               def handle_starttag(self, tag, attrs):
                   attrs = {k.lower(): (v or "") for k, v in (attrs or [])}
@@ -440,97 +411,53 @@ jobs:
                   if tag == "meta":
                       name = attrs.get("name", "").strip().lower()
                       if name in {"robots", "googlebot"}:
-                          self.meta_robots.append(
-                              (name, attrs.get("content", "").strip().lower())
-                          )
+                          self.robots[name] = attrs.get("content", "").strip().lower()
 
           index_path = Path("index.html")
-          index_text = index_path.read_text(encoding="utf-8")
           parser = SeoParser()
-          parser.feed(index_text)
+          parser.feed(index_path.read_text(encoding="utf-8"))
 
           if parser.canonicals != [expected_home]:
-              add_error(
-                  index_path,
-                  f"Canonical inválido. Esperado exactamente uno: {expected_home}"
-              )
-
-          robots_meta = {
-              name: content
-              for name, content in parser.meta_robots
-          }
+              error(index_path, f"Canonical esperado exactamente una vez: {expected_home}")
 
           for name in ("robots", "googlebot"):
-              content = robots_meta.get(name, "")
               directives = {
-                  token.strip()
-                  for token in content.split(",")
-                  if token.strip()
+                  item.strip()
+                  for item in parser.robots.get(name, "").split(",")
+                  if item.strip()
               }
-
               if not {"index", "follow"}.issubset(directives):
-                  add_error(
-                      index_path,
-                      f"Meta {name} debe permitir index, follow en la landing pública."
-                  )
+                  error(index_path, f"Meta {name} debe contener index, follow.")
 
-          # -------------------------------------------------
-          # staticwebapp.config.json SEO
-          # -------------------------------------------------
+          # Static Web Apps config
           config_path = Path("staticwebapp.config.json")
           config = json.loads(config_path.read_text(encoding="utf-8"))
+          routes = {
+              route.get("route"): route
+              for route in config.get("routes", [])
+              if isinstance(route, dict) and route.get("route")
+          }
 
-          exclusions = set(
-              config.get("navigationFallback", {}).get("exclude", [])
-          )
+          exclusions = set(config.get("navigationFallback", {}).get("exclude", []))
+          for item in (
+              "/api/*",
+              "/.auth/*",
+              "/robots.txt",
+              "/sitemap.xml",
+              "/site.webmanifest",
+              "/favicon.ico",
+              "/src/*",
+          ):
+              if item not in exclusions:
+                  error(config_path, f"navigationFallback.exclude debe contener {item}")
 
-          for required_exclusion in ("/robots.txt", "/sitemap.xml"):
-              if required_exclusion not in exclusions:
-                  add_error(
-                      config_path,
-                      f"navigationFallback.exclude debe contener {required_exclusion}"
-                  )
-
-          routes = config.get("routes", [])
-
-          def find_route(route_name):
-              for route in routes:
-                  if route.get("route") == route_name:
-                      return route
-              return None
-
-          root_route = find_route("/")
-
-          if not root_route:
-              add_error(config_path, "Falta la ruta pública /.")
+          root_route = routes.get("/")
+          if not root_route or root_route.get("rewrite") != "/index.html":
+              error(config_path, "/ debe reescribir a /index.html.")
           else:
-              root_xrobots = (
-                  root_route.get("headers", {})
-                  .get("X-Robots-Tag", "")
-                  .lower()
-              )
-
-              if "index" not in root_xrobots or "follow" not in root_xrobots:
-                  add_error(
-                      config_path,
-                      "La ruta / debe enviar X-Robots-Tag: index, follow."
-                  )
-
-          for public_asset in ("/robots.txt", "/sitemap.xml"):
-              route = find_route(public_asset)
-
-              if not route:
-                  add_error(
-                      config_path,
-                      f"Falta configuración explícita para {public_asset}."
-                  )
-                  continue
-
-              if int(route.get("statusCode", 200)) >= 400:
-                  add_error(
-                      config_path,
-                      f"{public_asset} no puede estar configurado como error HTTP."
-                  )
+              xrobots = str(root_route.get("headers", {}).get("X-Robots-Tag", "")).lower()
+              if "index" not in xrobots or "follow" not in xrobots:
+                  error(config_path, "/ debe enviar X-Robots-Tag: index, follow.")
 
           private_routes = (
               "/login",
@@ -544,132 +471,59 @@ jobs:
               "/facturas*",
               "/clientes*",
               "/usuarios*",
+              "/correo*",
               "/servidor*",
               "/cuenta*",
               "/ajustes*",
           )
 
-          for private_route in private_routes:
-              route = find_route(private_route)
-
+          for route_name in private_routes:
+              route = routes.get(route_name)
               if not route:
-                  add_error(
-                      config_path,
-                      f"Falta contrato noindex para ruta privada: {private_route}"
-                  )
+                  error(config_path, f"Falta ruta privada: {route_name}")
                   continue
 
-              xrobots = (
-                  route.get("headers", {})
-                  .get("X-Robots-Tag", "")
-                  .lower()
-              )
+              if route.get("rewrite") != "/index.html":
+                  error(config_path, f"{route_name} debe reescribir a /index.html.")
 
-              if "noindex" not in xrobots:
-                  add_error(
+              xrobots = str(route.get("headers", {}).get("X-Robots-Tag", "")).lower()
+              if "noindex" not in xrobots or "nofollow" not in xrobots:
+                  error(
                       config_path,
-                      f"La ruta privada {private_route} debe enviar X-Robots-Tag: noindex."
+                      f"{route_name} debe enviar X-Robots-Tag: noindex, nofollow.",
                   )
+
+          csp = str(config.get("globalHeaders", {}).get("Content-Security-Policy", ""))
+          if api not in csp:
+              error(config_path, f"La CSP debe permitir el backend canónico {api}.")
+
+          legacy_domain = "onionit" + ".net"
+          if legacy_domain in csp:
+              error(config_path, "La CSP contiene el dominio backend legado.")
 
           if errors:
               for path, message in errors:
-                  print(
-                      f"::error file={path},title=Contrato SEO inválido::{message}"
-                  )
+                  print(f"::error file={path},title=Contrato productivo inválido::{message}")
               sys.exit(1)
 
           print(
-              f"Contrato SEO OK. Canonical={expected_home} · "
-              f"Sitemap URLs={len(sitemap_urls)}"
+              "Contrato SEO/routing productivo OK · "
+              f"canonical={expected_home} · api={api}"
           )
           PY
 
-      - name: Validate local public references
+      - name: Reject legacy API domain
         run: |
           set -euo pipefail
 
-          python3 - <<'PY'
-          from pathlib import Path
-          from html.parser import HTMLParser
-          from urllib.parse import urlsplit
-          import json
-          import re
-          import sys
+          legacy_domain="onionit"".""net"
 
-          root = Path(".").resolve()
-          errors = []
+          if git grep -n -I -F "${legacy_domain}" -- .; then
+            echo "::error title=Dominio API legado detectado::El release aún contiene referencias a ${legacy_domain}."
+            exit 1
+          fi
 
-          def add_error(path, message):
-              errors.append((str(path), message))
-
-          def is_external(ref):
-              ref = (ref or "").strip()
-              if not ref:
-                  return True
-              if ref.startswith("#"):
-                  return True
-              if ref.startswith("//"):
-                  return True
-              if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", ref):
-                  return True
-              return False
-
-          def ref_to_path(ref):
-              ref = (ref or "").strip()
-              if is_external(ref):
-                  return None
-
-              parsed = urlsplit(ref)
-              path = parsed.path or ""
-
-              if not path or path == "/":
-                  return None
-
-              if path.startswith("/"):
-                  return root / path.lstrip("/")
-
-              return root / path
-
-          def check_ref(owner, ref):
-              path = ref_to_path(ref)
-
-              if path is None:
-                  return
-
-              if not path.exists():
-                  add_error(owner, f"Referencia local inexistente: {ref}")
-
-          class IndexRefParser(HTMLParser):
-              def handle_starttag(self, tag, attrs):
-                  attrs = dict(attrs or [])
-
-                  if tag in {"script", "img", "source", "video", "audio"}:
-                      check_ref("index.html", attrs.get("src", ""))
-
-                  if tag == "link":
-                      check_ref("index.html", attrs.get("href", ""))
-
-          index_html = Path("index.html").read_text(encoding="utf-8")
-          IndexRefParser().feed(index_html)
-
-          manifest = json.loads(Path("site.webmanifest").read_text(encoding="utf-8"))
-
-          for icon in manifest.get("icons", []):
-              if isinstance(icon, dict):
-                  check_ref("site.webmanifest", icon.get("src", ""))
-
-          if errors:
-              for path, message in errors:
-                  print(f"::error file={path},title=Referencia local inexistente::{message}")
-              sys.exit(1)
-
-          print("Referencias públicas locales OK.")
-          PY
-
-      - name: Validate repository integrity
-        run: |
-          set -euo pipefail
-          python3 .github/scripts/repo_integrity.py
+          echo "Sin referencias al dominio API legado."
 
       - name: Validate critical SPA contracts
         run: |
@@ -679,415 +533,520 @@ jobs:
           from pathlib import Path
           import sys
 
-          checks = [
-              (
-                  "src/views/public/index.js",
-                  [
-                      "PUBLIC_SHARED_VERSION",
-                      "PUBLIC_AUTH_LOGO",
-                      "export function escapeHtml",
-                      "export function escapeAttr",
-                      "export function renderPublicShell",
-                      "export function safeAssetSrc",
-                      "export function safeInternalHref",
-                  ],
-                  [
-                      "LOGIN_VIEW_VERSION",
-                      "renderLoginView",
-                  ],
+          checks = {
+              "src/views/public/index.js": (
+                  "PUBLIC_SHARED_VERSION",
+                  "PUBLIC_AUTH_LOGO",
+                  "export function escapeHtml",
+                  "export function escapeAttr",
+                  "export function renderPublicShell",
+                  "export function safeAssetSrc",
+                  "export function safeInternalHref",
               ),
-              (
-                  "src/views/public/login/index.js",
-                  [
-                      "LOGIN_VIEW_VERSION",
-                      "renderLoginView",
-                      "Auth as DefaultAuth",
-                      "createLoginTemplate",
-                      "goAfterLogin",
-                  ],
-                  [],
+              "src/views/public/login/index.js": (
+                  "LOGIN_VIEW_VERSION",
+                  "renderLoginView",
+                  "Auth as DefaultAuth",
+                  "createLoginTemplate",
+                  "goAfterLogin",
               ),
-              (
-                  "src/views/public/login/template.js",
-                  [
-                      "LOGIN_TEMPLATE_VERSION",
-                      "data-login-form",
-                      "login-identifier",
-                      "data-login-password",
-                      "data-login-submit",
-                      "data-login-forgot-password",
-                      "ROUTES.passwordRequest",
-                  ],
-                  [],
+              "src/views/public/login/template.js": (
+                  "LOGIN_TEMPLATE_VERSION",
+                  "data-login-form",
+                  "login-identifier",
+                  "data-login-password",
+                  "data-login-submit",
+                  "data-login-forgot-password",
+                  "ROUTES.passwordRequest",
               ),
-              (
-                  "src/views/public/password-reset/index.js",
-                  [
-                      "PASSWORD_RESET_VIEW_VERSION",
-                      "renderPasswordResetView",
-                      "requestPasswordReset",
-                      "confirmResetPassword",
-                      "PasswordRequestView",
-                      "PasswordResetView",
-                  ],
-                  [],
+              "src/views/public/password-reset/index.js": (
+                  "PASSWORD_RESET_VIEW_VERSION",
+                  "renderPasswordResetView",
+                  "requestPasswordReset",
+                  "confirmResetPassword",
+                  "PasswordRequestView",
+                  "PasswordResetView",
               ),
-              (
-                  "src/views/public/password-reset/template.js",
-                  [
-                      "PASSWORD_RESET_TEMPLATE_VERSION",
-                      "createPasswordResetTemplate",
-                      "data-password-reset-form",
-                      "data-password-reset-submit",
-                      "password-reset-identifier",
-                      "password-reset-password",
-                      "password-reset-confirm",
-                  ],
-                  [],
+              "src/views/public/password-reset/template.js": (
+                  "PASSWORD_RESET_TEMPLATE_VERSION",
+                  "createPasswordResetTemplate",
+                  "data-password-reset-form",
+                  "data-password-reset-submit",
+                  "password-reset-identifier",
+                  "password-reset-password",
+                  "password-reset-confirm",
               ),
-              (
-                  "src/router/routes.js",
-                  [
-                      "ROUTES_VERSION",
-                      "PASSWORD_REQUEST",
-                      'viewKey: "password-request"',
-                      'import("../views/public/password-reset/index.js")',
-                      '"PasswordRequestView"',
-                  ],
-                  [],
+              "src/router/routes.js": (
+                  "ROUTES_VERSION",
+                  "PASSWORD_REQUEST",
+                  'viewKey: "password-request"',
+                  'import("../views/public/password-reset/index.js")',
+                  '"PasswordRequestView"',
               ),
-              (
-                  "src/router/index.js",
-                  [
-                      "ROUTER_VERSION",
-                      "Router",
-                      "start",
-                      "bind",
-                      "onClick",
-                      "a[data-spa]",
-                      "a[data-route]",
-                  ],
-                  [],
+              "src/router/index.js": (
+                  "ROUTER_VERSION",
+                  "Router",
+                  "start",
+                  "bind",
+                  "onClick",
+                  "a[data-spa]",
+                  "a[data-route]",
               ),
-              (
-                  "src/app/index.js",
-                  [
-                      "APP_VERSION",
-                      "restoreSession",
-                      "Router",
-                      "start",
-                  ],
-                  [],
+              "src/app/index.js": (
+                  "APP_VERSION",
+                  "restoreSession",
+                  "Router",
+                  "start",
               ),
-          ]
+              "src/core/config.js": (
+                  "CONFIG_VERSION",
+                  'CANONICAL_PRODUCTION_API_BASE = "https://www.onionsupport.com"',
+                  'CANONICAL_DIRECT_BACKEND_API_BASE = "https://api.onionsupport.com"',
+                  '"/health"',
+              ),
+          }
 
-          failed = False
+          errors = []
 
-          for file_path, required_tokens, forbidden_tokens in checks:
-              path = Path(file_path)
-
+          for file_name, tokens in checks.items():
+              path = Path(file_name)
               if not path.is_file():
-                  print(f"::error file={file_path},title=Contrato SPA inválido::No existe el archivo.")
-                  failed = True
+                  errors.append(f"{file_name}: no existe")
                   continue
 
               text = path.read_text(encoding="utf-8")
-
-              for token in required_tokens:
+              for token in tokens:
                   if token not in text:
-                      print(f"::error file={file_path},title=Contrato SPA incompleto::Falta token esperado: {token}")
-                      failed = True
+                      errors.append(f"{file_name}: falta {token!r}")
 
-              for token in forbidden_tokens:
-                  if token in text:
-                      print(f"::error file={file_path},title=Contrato SPA contaminado::Token prohibido encontrado: {token}")
-                      failed = True
+          public_shared = Path("src/views/public/index.js").read_text(encoding="utf-8")
+          for forbidden in ("LOGIN_VIEW_VERSION", "renderLoginView"):
+              if forbidden in public_shared:
+                  errors.append(
+                      f"src/views/public/index.js: token contaminante {forbidden!r}"
+                  )
 
-          if failed:
+          if errors:
+              for item in errors:
+                  print(f"::error title=Contrato SPA crítico inválido::{item}")
               sys.exit(1)
 
-          print("Contratos críticos SPA públicos/router OK.")
+          print("Contratos SPA críticos OK.")
           PY
 
-      - name: Deployment cooldown
-        run: |
-          set -euo pipefail
-          echo "Esperando ${DEPLOY_COOLDOWN_SECONDS}s para evitar solapar despliegues en Azure SWA..."
-          sleep "${DEPLOY_COOLDOWN_SECONDS}"
+  deploy:
+    name: Deploy exact release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs:
+      - validate
 
-      - name: Deploy static SPA attempt 1
-        id: deploy_1
-        continue-on-error: true
-        uses: Azure/static-web-apps-deploy@v1
+    permissions:
+      contents: read
+      pull-requests: write
+
+    env:
+      SWA_API_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E }}
+      VALIDATED_SHA: ${{ needs.validate.outputs.validated_sha }}
+
+    steps:
+      - name: Checkout validated revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          azure_static_web_apps_api_token: ${{ env.SWA_API_TOKEN }}
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          action: upload
-          app_location: ${{ env.APP_LOCATION }}
-          api_location: ${{ env.API_LOCATION }}
-          output_location: ${{ env.OUTPUT_LOCATION }}
-          skip_app_build: true
+          ref: ${{ env.VALIDATED_SHA }}
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+          persist-credentials: false
 
-      - name: Wait before retry 2
-        if: steps.deploy_1.outcome == 'failure'
-        run: |
-          set -euo pipefail
-          echo "Deploy attempt 1 falló. Esperando ${DEPLOY_RETRY_SECONDS}s antes del segundo intento..."
-          sleep "${DEPLOY_RETRY_SECONDS}"
-
-      - name: Deploy static SPA attempt 2
-        id: deploy_2
-        if: steps.deploy_1.outcome == 'failure'
-        continue-on-error: true
-        uses: Azure/static-web-apps-deploy@v1
-        with:
-          azure_static_web_apps_api_token: ${{ env.SWA_API_TOKEN }}
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          action: upload
-          app_location: ${{ env.APP_LOCATION }}
-          api_location: ${{ env.API_LOCATION }}
-          output_location: ${{ env.OUTPUT_LOCATION }}
-          skip_app_build: true
-
-      - name: Wait before retry 3
-        if: steps.deploy_1.outcome == 'failure' && steps.deploy_2.outcome == 'failure'
-        run: |
-          set -euo pipefail
-          echo "Deploy attempt 2 falló. Esperando ${DEPLOY_RETRY_SECONDS}s antes del tercer intento..."
-          sleep "${DEPLOY_RETRY_SECONDS}"
-
-      - name: Deploy static SPA attempt 3
-        id: deploy_3
-        if: steps.deploy_1.outcome == 'failure' && steps.deploy_2.outcome == 'failure'
-        continue-on-error: true
-        uses: Azure/static-web-apps-deploy@v1
-        with:
-          azure_static_web_apps_api_token: ${{ env.SWA_API_TOKEN }}
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          action: upload
-          app_location: ${{ env.APP_LOCATION }}
-          api_location: ${{ env.API_LOCATION }}
-          output_location: ${{ env.OUTPUT_LOCATION }}
-          skip_app_build: true
-
-      - name: Verify deployment result
+      - name: Assert immutable release input
         run: |
           set -euo pipefail
 
-          deploy_1="${{ steps.deploy_1.outcome || 'skipped' }}"
-          deploy_2="${{ steps.deploy_2.outcome || 'skipped' }}"
-          deploy_3="${{ steps.deploy_3.outcome || 'skipped' }}"
+          checked_sha="$(git rev-parse HEAD)"
 
-          echo "Deploy attempt 1: ${deploy_1}"
-          echo "Deploy attempt 2: ${deploy_2}"
-          echo "Deploy attempt 3: ${deploy_3}"
-
-          if [[ "${deploy_1}" == "success" || "${deploy_2}" == "success" || "${deploy_3}" == "success" ]]; then
-            echo "Azure SWA deploy OK."
-            exit 0
+          if [[ "${checked_sha}" != "${VALIDATED_SHA}" ]]; then
+            echo "::error title=SHA de deploy incorrecto::Validado ${VALIDATED_SHA}, checkout ${checked_sha}."
+            exit 1
           fi
 
-          echo "::error title=Deploy fallido::Azure SWA rechazó el despliegue tras 3 intentos."
-          exit 1
-
-      - name: Verify production files non blocking
-        if: github.event_name != 'pull_request'
-        run: |
-          set -euo pipefail
-
-          base="${PUBLIC_SITE_URL%/}"
-
-          echo "Esperando ${PRODUCTION_VERIFY_DELAY_SECONDS}s antes de verificar producción..."
-          sleep "${PRODUCTION_VERIFY_DELAY_SECONDS}"
-
-          checks=(
-            "/index.html|/src/main.js"
-            "/src/main.js|/src/app/index.js"
-            "/src/app/index.js|APP_VERSION"
-            "/src/core/config.js|CONFIG_VERSION"
-            "/src/core/http.js|HTTP_VERSION"
-            "/src/core/index.js|CORE_VERSION"
-            "/src/features/auth/index.js|AUTH_VERSION"
-            "/src/router/index.js|ROUTER_VERSION"
-            "/src/router/routes.js|ROUTES_VERSION"
-            "/src/views/public/index.js|PUBLIC_SHARED_VERSION"
-            "/src/views/public/login/index.js|LOGIN_VIEW_VERSION"
-            "/src/views/public/login/template.js|LOGIN_TEMPLATE_VERSION"
-            "/src/views/public/password-reset/index.js|PASSWORD_RESET_VIEW_VERSION"
-            "/src/views/public/password-reset/template.js|PASSWORD_RESET_TEMPLATE_VERSION"
-          )
-
-          failed=0
-
-          for check in "${checks[@]}"; do
-            path="${check%%|*}"
-            marker="${check#*|}"
-            url="${base}${path}?deploy_check=${{ steps.revision.outputs.sha }}"
-
-            echo "Verificando ${url}"
-
-            status="$(curl -L -sS -o /tmp/swa-check-body -w "%{http_code}" \
-              --retry 8 \
-              --retry-delay 10 \
-              --retry-all-errors \
-              "${url}" || true)"
-
-            if [[ "${status}" != "200" ]]; then
-              echo "::warning title=Archivo no publicado::${path} respondió HTTP ${status} en producción."
-              head -c 700 /tmp/swa-check-body || true
-              echo
-              failed=1
-              continue
-            fi
-
-            if ! grep -Fq "${marker}" /tmp/swa-check-body; then
-              echo "::warning title=Contenido inesperado::${path} respondió 200, pero no contiene el marcador esperado '${marker}'."
-              head -c 700 /tmp/swa-check-body || true
-              echo
-              failed=1
-              continue
-            fi
-          done
-
-          if [[ "${failed}" == "1" ]]; then
-            echo "::warning title=Verificación de producción incompleta::El deploy terminó, pero algún archivo aún no se sirve o no coincide. Puede ser propagación/cache o token apuntando a otra SWA."
-          else
-            echo "Producción sirve los módulos SPA requeridos."
+          if [[ -z "${SWA_API_TOKEN:-}" ]]; then
+            echo "::error title=Secret no configurado::Falta AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E."
+            exit 1
           fi
 
-      - name: Verify production SEO files non blocking
-        if: github.event_name != 'pull_request'
+          echo "Deploying immutable SHA: ${VALIDATED_SHA}"
+
+      - name: Deploy static SPA
+        id: deploy
+        uses: Azure/static-web-apps-deploy@4d27395796ac319302594769cfe812bd207490b1 # v1
+        with:
+          azure_static_web_apps_api_token: ${{ env.SWA_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+          app_location: ${{ env.APP_LOCATION }}
+          api_location: ${{ env.API_LOCATION }}
+          output_location: ${{ env.OUTPUT_LOCATION }}
+          skip_app_build: true
+
+      - name: Verify deployed release bytes
+        env:
+          DEPLOYED_URL: ${{ steps.deploy.outputs.static_web_app_url }}
         run: |
           set -euo pipefail
 
-          base="${PUBLIC_SITE_URL%/}"
-          failed=0
+          normalize_base() {
+            local base="${1%/}"
 
-          verify_200_with_marker() {
-            local path="$1"
-            local marker="$2"
-            local url="${base}${path}?deploy_check=${{ steps.revision.outputs.sha }}"
-            local body="/tmp/swa-seo-${RANDOM}.body"
-
-            echo "Verificando SEO ${url}"
-
-            status="$(curl -L -sS -o "${body}" -w "%{http_code}" \
-              --retry 8 \
-              --retry-delay 10 \
-              --retry-all-errors \
-              "${url}" || true)"
-
-            if [[ "${status}" != "200" ]]; then
-              echo "::warning title=SEO no publicado::${path} respondió HTTP ${status}."
-              head -c 700 "${body}" 2>/dev/null || true
-              echo
-              failed=1
-              rm -f "${body}"
-              return
+            if [[ -z "${base}" ]]; then
+              echo "::error title=URL de deploy vacía::Azure no devolvió hostname."
+              return 1
             fi
 
-            if ! grep -Fq "${marker}" "${body}"; then
-              echo "::warning title=SEO inesperado::${path} respondió 200, pero no contiene '${marker}'."
-              head -c 700 "${body}" || true
-              echo
-              failed=1
+            if [[ "${base}" != http://* && "${base}" != https://* ]]; then
+              base="https://${base}"
             fi
 
-            rm -f "${body}"
+            if [[ ! "${base}" =~ ^https:// ]]; then
+              echo "::error title=URL de deploy inválida::Azure devolvió '${base}'."
+              return 1
+            fi
+
+            printf '%s' "${base}"
           }
 
-          verify_200_with_marker "/robots.txt" "User-agent: *"
-          verify_200_with_marker "/sitemap.xml" "<urlset"
-          verify_200_with_marker "/" "rel=\"canonical\""
+          wait_for_release() {
+            local raw_base="$1"
+            local label="$2"
+            local base
+            local attempt
+            local path
+            local remote_path
+            local local_sha
+            local remote_sha
+            local body
 
-          robots_url="${base}/robots.txt?deploy_check=${{ steps.revision.outputs.sha }}"
-          robots_body="$(curl -L -sS \
-            --retry 6 \
-            --retry-delay 10 \
-            --retry-all-errors \
-            "${robots_url}" || true)"
+            base="$(normalize_base "${raw_base}")"
 
-          expected_sitemap="Sitemap: ${base}/sitemap.xml"
+            checks=(
+              "index.html|/"
+              "robots.txt|/robots.txt"
+              "sitemap.xml|/sitemap.xml"
+              "src/main.js|/src/main.js"
+              "src/app/index.js|/src/app/index.js"
+              "src/core/config.js|/src/core/config.js"
+              "src/core/http.js|/src/core/http.js"
+              "src/features/auth/index.js|/src/features/auth/index.js"
+              "src/router/index.js|/src/router/index.js"
+              "src/router/routes.js|/src/router/routes.js"
+            )
 
-          if [[ "${robots_body}" != *"${expected_sitemap}"* ]]; then
-            echo "::warning title=robots.txt sin sitemap::No contiene '${expected_sitemap}'."
-            failed=1
+            echo "Verificando bytes exactos en ${label}: ${base}"
+
+            for attempt in $(seq 1 36); do
+              mismatch=0
+
+              for entry in "${checks[@]}"; do
+                path="${entry%%|*}"
+                remote_path="${entry#*|}"
+                body="$(mktemp)"
+                local_sha="$(sha256sum "${path}" | awk '{print $1}')"
+
+                if ! curl \
+                  --fail \
+                  --silent \
+                  --show-error \
+                  --location \
+                  --connect-timeout 10 \
+                  --max-time 30 \
+                  -H "Cache-Control: no-cache" \
+                  -H "Pragma: no-cache" \
+                  "${base}${remote_path}?release=${VALIDATED_SHA}" \
+                  -o "${body}"; then
+                  mismatch=1
+                  rm -f "${body}"
+                  break
+                fi
+
+                remote_sha="$(sha256sum "${body}" | awk '{print $1}')"
+                rm -f "${body}"
+
+                if [[ "${remote_sha}" != "${local_sha}" ]]; then
+                  mismatch=1
+                  break
+                fi
+              done
+
+              if [[ "${mismatch}" == "0" ]]; then
+                echo "${label}: release ${VALIDATED_SHA} visible y byte-exacto."
+                return 0
+              fi
+
+              if [[ "${attempt}" -lt 36 ]]; then
+                echo "${label}: propagación pendiente (${attempt}/36); reintento en 5s..."
+                sleep 5
+              fi
+            done
+
+            echo "::error title=Release no propagado::${label} no sirve los bytes exactos de ${VALIDATED_SHA} tras 180s."
+            return 1
+          }
+
+          if [[ -z "${DEPLOYED_URL:-}" ]]; then
+            echo "::error title=Azure no devolvió URL::static_web_app_url está vacío."
+            exit 1
           fi
 
-          sitemap_url="${base}/sitemap.xml?deploy_check=${{ steps.revision.outputs.sha }}"
-          sitemap_body="$(curl -L -sS \
-            --retry 6 \
-            --retry-delay 10 \
-            --retry-all-errors \
-            "${sitemap_url}" || true)"
+          wait_for_release "${DEPLOYED_URL}" "Azure deployment environment"
 
-          expected_loc="<loc>${base}/</loc>"
-
-          if [[ "${sitemap_body}" != *"${expected_loc}"* ]]; then
-            echo "::warning title=Sitemap sin canonical::No contiene '${expected_loc}'."
-            failed=1
+          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
+            wait_for_release "${PUBLIC_SITE_URL}" "Canonical production domain"
           fi
 
-          if [[ "${failed}" == "1" ]]; then
-            echo "::warning title=Verificación SEO incompleta::El deploy terminó, pero robots/sitemap/canonical aún no coinciden en producción. Puede ser propagación o caché."
-          else
-            echo "SEO de producción verificado: robots.txt, sitemap.xml y canonical."
-          fi
-
-      - name: Verify production SPA routes non blocking
+      - name: Verify production security, routing and backend
         if: github.event_name != 'pull_request'
         run: |
           set -euo pipefail
 
           base="${PUBLIC_SITE_URL%/}"
+          api="${DIRECT_API_URL%/}"
+          legacy_domain="onionit"".""net"
 
-          routes=(
+          header_value() {
+            local file="$1"
+            local header="$2"
+
+            awk -F': *' -v wanted="${header}" '
+              tolower($1) == tolower(wanted) {
+                sub(/^[^:]+:[[:space:]]*/, "")
+                sub(/\r$/, "")
+                print
+                exit
+              }
+            ' "${file}"
+          }
+
+          require_header_contains() {
+            local file="$1"
+            local header="$2"
+            local expected="$3"
+            local value
+
+            value="$(header_value "${file}" "${header}")"
+
+            if [[ -z "${value}" ]]; then
+              echo "::error title=Header ausente::Falta ${header}."
+              return 1
+            fi
+
+            if [[ "${value,,}" != *"${expected,,}"* ]]; then
+              echo "::error title=Header inesperado::${header}='${value}' no contiene '${expected}'."
+              return 1
+            fi
+          }
+
+          root_headers="$(mktemp)"
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --head \
+            --connect-timeout 10 \
+            --max-time 30 \
+            -H "Cache-Control: no-cache" \
+            "${base}/?headers=${VALIDATED_SHA}" \
+            -o "${root_headers}"
+
+          require_header_contains "${root_headers}" "strict-transport-security" "max-age="
+          require_header_contains "${root_headers}" "x-content-type-options" "nosniff"
+          require_header_contains "${root_headers}" "x-frame-options" "DENY"
+          require_header_contains "${root_headers}" "referrer-policy" "strict-origin-when-cross-origin"
+          require_header_contains "${root_headers}" "permissions-policy" "camera=()"
+          require_header_contains "${root_headers}" "x-robots-tag" "index"
+          require_header_contains "${root_headers}" "x-robots-tag" "follow"
+          require_header_contains "${root_headers}" "content-security-policy" "api.onionsupport.com"
+
+          csp="$(header_value "${root_headers}" "content-security-policy")"
+          rm -f "${root_headers}"
+
+          if [[ "${csp}" == *"${legacy_domain}"* ]]; then
+            echo "::error title=CSP obsoleta::Producción sigue publicando ${legacy_domain}."
+            exit 1
+          fi
+
+          private_routes=(
             "/login"
             "/password-request"
             "/password-reset"
+            "/reset-password"
             "/activate-account"
+            "/dashboard"
+            "/@ci-probe"
+            "/incidencias"
+            "/facturas"
+            "/clientes"
+            "/usuarios"
+            "/correo"
+            "/servidor"
+            "/cuenta"
+            "/ajustes"
           )
 
-          failed=0
-
-          for route in "${routes[@]}"; do
-            url="${base}${route}?route_check=${{ steps.revision.outputs.sha }}"
-
-            echo "Verificando ruta SPA ${url}"
-
-            status="$(curl -L -sS -o /tmp/swa-route-body -w "%{http_code}" \
-              --retry 6 \
-              --retry-delay 10 \
-              --retry-all-errors \
-              "${url}" || true)"
+          for route in "${private_routes[@]}"; do
+            headers="$(mktemp)"
+            status="$(
+              curl \
+                --silent \
+                --show-error \
+                --head \
+                --connect-timeout 10 \
+                --max-time 30 \
+                -H "Cache-Control: no-cache" \
+                -o "${headers}" \
+                -w "%{http_code}" \
+                "${base}${route}?route_check=${VALIDATED_SHA}"
+            )"
 
             if [[ "${status}" != "200" ]]; then
-              echo "::warning title=Ruta SPA no disponible::${route} respondió HTTP ${status}."
-              head -c 700 /tmp/swa-route-body || true
-              echo
-              failed=1
-              continue
+              echo "::error title=Ruta SPA inválida::${route} respondió HTTP ${status}."
+              cat "${headers}"
+              rm -f "${headers}"
+              exit 1
             fi
 
-            if ! grep -Fq "/src/main.js" /tmp/swa-route-body; then
-              echo "::warning title=Fallback SPA inválido::${route} no devolvió index.html con /src/main.js."
-              head -c 700 /tmp/swa-route-body || true
-              echo
-              failed=1
-              continue
+            xrobots="$(header_value "${headers}" "x-robots-tag")"
+            rm -f "${headers}"
+
+            if [[ "${xrobots,,}" != *"noindex"* || "${xrobots,,}" != *"nofollow"* ]]; then
+              echo "::error title=Ruta indexable accidentalmente::${route} envía X-Robots-Tag='${xrobots}'."
+              exit 1
             fi
           done
 
-          if [[ "${failed}" == "1" ]]; then
-            echo "::warning title=Verificación de rutas incompleta::El deploy terminó, pero alguna ruta pública aún no responde como SPA."
-          else
-            echo "Rutas públicas SPA verificadas."
+          health_headers="$(mktemp)"
+          health_body="$(mktemp)"
+          health_status="$(
+            curl \
+              --silent \
+              --show-error \
+              --connect-timeout 10 \
+              --max-time 30 \
+              -H "Origin: ${PUBLIC_SITE_URL}" \
+              -D "${health_headers}" \
+              -o "${health_body}" \
+              -w "%{http_code}" \
+              "${api}/health"
+          )"
+
+          if [[ "${health_status}" != "200" ]]; then
+            echo "::error title=Backend no saludable::${api}/health respondió HTTP ${health_status}."
+            cat "${health_body}"
+            rm -f "${health_headers}" "${health_body}"
+            exit 1
           fi
 
+          python3 - "${health_body}" <<'PY'
+          import json
+          import sys
+
+          path = sys.argv[1]
+          with open(path, "r", encoding="utf-8") as handle:
+              data = json.load(handle)
+
+          if data.get("ok") is not True:
+              raise SystemExit("health.ok no es true")
+          if data.get("code") != "HEALTH_OK":
+              raise SystemExit(f"health.code inesperado: {data.get('code')!r}")
+          if data.get("service") != "onion-backend":
+              raise SystemExit(f"health.service inesperado: {data.get('service')!r}")
+          PY
+
+          require_header_contains "${health_headers}" "access-control-allow-origin" "${PUBLIC_SITE_URL}"
+          require_header_contains "${health_headers}" "access-control-allow-credentials" "true"
+
+          rm -f "${health_headers}" "${health_body}"
+
+          verify_auth_guard() {
+            local url="$1"
+            local label="$2"
+            local headers
+            local body
+            local status
+            local scope
+            local gateway
+
+            headers="$(mktemp)"
+            body="$(mktemp)"
+
+            status="$(
+              curl \
+                --silent \
+                --show-error \
+                --connect-timeout 10 \
+                --max-time 30 \
+                -D "${headers}" \
+                -o "${body}" \
+                -w "%{http_code}" \
+                "${url}/api/auth/me"
+            )"
+
+            if [[ "${status}" != "401" ]]; then
+              echo "::error title=Auth guard inesperado::${label} respondió HTTP ${status}; esperado 401."
+              cat "${body}"
+              rm -f "${headers}" "${body}"
+              return 1
+            fi
+
+            python3 - "${body}" <<'PY'
+          import json
+          import sys
+
+          path = sys.argv[1]
+          with open(path, "r", encoding="utf-8") as handle:
+              data = json.load(handle)
+
+          if data.get("ok") is not False:
+              raise SystemExit("auth.ok debe ser false sin credenciales")
+          if data.get("authenticated") is not False:
+              raise SystemExit("authenticated debe ser false sin credenciales")
+          if data.get("code") != "MISSING_TOKEN":
+              raise SystemExit(f"code inesperado: {data.get('code')!r}")
+          PY
+
+            scope="$(header_value "${headers}" "x-onion-scope")"
+            gateway="$(header_value "${headers}" "x-onion-gateway")"
+
+            if [[ "${scope}" != "onion-api-gateway" ]]; then
+              echo "::error title=Backend incorrecto::${label} x-onion-scope='${scope}'."
+              rm -f "${headers}" "${body}"
+              return 1
+            fi
+
+            if [[ -z "${gateway}" ]]; then
+              echo "::error title=Gateway sin identidad::${label} no devuelve x-onion-gateway."
+              rm -f "${headers}" "${body}"
+              return 1
+            fi
+
+            require_header_contains "${headers}" "www-authenticate" "Bearer"
+
+            rm -f "${headers}" "${body}"
+            echo "${label}: auth guard conectado al Onion API Gateway."
+          }
+
+          verify_auth_guard "${base}" "SWA linked backend"
+          verify_auth_guard "${api}" "Direct API"
+
+          echo "Producción verificada de extremo a extremo: frontend, SEO, headers, rutas, CORS y backend."
+
   close_preview:
-    name: Close PR Preview
+    name: Close PR preview
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+      pull-requests: write
 
     if: >-
       github.event_name == 'pull_request' &&
@@ -1104,50 +1063,13 @@ jobs:
           set -euo pipefail
 
           if [[ -z "${SWA_API_TOKEN:-}" ]]; then
-            echo "::error title=Secret no configurado::Falta el secret AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E."
+            echo "::error title=Secret no configurado::Falta AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E."
             exit 1
           fi
 
-      - name: Close PR preview attempt 1
-        id: close_preview_1
-        continue-on-error: true
-        uses: Azure/static-web-apps-deploy@v1
+      - name: Close Azure SWA preview
+        uses: Azure/static-web-apps-deploy@4d27395796ac319302594769cfe812bd207490b1 # v1
         with:
           azure_static_web_apps_api_token: ${{ env.SWA_API_TOKEN }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: close
-
-      - name: Wait before close preview retry
-        if: steps.close_preview_1.outcome == 'failure'
-        run: |
-          set -euo pipefail
-          echo "Close preview falló. Esperando ${DEPLOY_RETRY_SECONDS}s antes de reintentar..."
-          sleep "${DEPLOY_RETRY_SECONDS}"
-
-      - name: Close PR preview attempt 2
-        id: close_preview_2
-        if: steps.close_preview_1.outcome == 'failure'
-        continue-on-error: true
-        uses: Azure/static-web-apps-deploy@v1
-        with:
-          azure_static_web_apps_api_token: ${{ env.SWA_API_TOKEN }}
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          action: close
-
-      - name: Verify close preview result
-        run: |
-          set -euo pipefail
-
-          close_1="${{ steps.close_preview_1.outcome || 'skipped' }}"
-          close_2="${{ steps.close_preview_2.outcome || 'skipped' }}"
-
-          echo "Close preview attempt 1: ${close_1}"
-          echo "Close preview attempt 2: ${close_2}"
-
-          if [[ "${close_1}" == "success" || "${close_2}" == "success" ]]; then
-            echo "Azure SWA preview close OK."
-            exit 0
-          fi
-
-          echo "::error title=Close preview fallido::Azure SWA rechazó el cierre del preview tras 2 intentos."
-          exit 1

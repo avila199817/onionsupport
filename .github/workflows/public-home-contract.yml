@@ -1,6 +1,6 @@
 # =========================================================
 # ONION SUPPORT — PUBLIC HOME INTEGRITY
-# Contrato único para landing, intake y mejoras públicas.
+# Contrato único para landing, intake, rendimiento y mejoras públicas.
 # =========================================================
 
 name: Public Home Integrity
@@ -22,6 +22,7 @@ on:
       - "src/css/app.css"
       - "src/css/views/public/**"
       - ".github/scripts/public_home_integrity.py"
+      - ".github/scripts/public_home_performance.py"
       - ".github/workflows/public-home-contract.yml"
 
   pull_request:
@@ -38,6 +39,7 @@ on:
       - "src/css/app.css"
       - "src/css/views/public/**"
       - ".github/scripts/public_home_integrity.py"
+      - ".github/scripts/public_home_performance.py"
       - ".github/workflows/public-home-contract.yml"
 
   workflow_dispatch:
@@ -77,3 +79,6 @@ jobs:
 
       - name: Validate public frontend contract
         run: python3 .github/scripts/public_home_integrity.py
+
+      - name: Validate public-home frame budget
+        run: python3 .github/scripts/public_home_performance.py

@@ -1153,6 +1153,100 @@ jobs:
 
           rm -f "${health_headers}" "${health_body}"
 
+          # CORS contract: the canonical frontend must pass preflight exactly.
+          cors_headers="$(mktemp)"
+          cors_status="$(
+            curl \
+              --silent \
+              --show-error \
+              --connect-timeout 10 \
+              --max-time 30 \
+              -X OPTIONS \
+              -H "Origin: ${PUBLIC_SITE_URL}" \
+              -H "Access-Control-Request-Method: GET" \
+              -H "Access-Control-Request-Headers: authorization,content-type" \
+              -D "${cors_headers}" \
+              -o /dev/null \
+              -w "%{http_code}" \
+              "${api}/api/auth/me"
+          )"
+
+          if [[ "${cors_status}" != "204" ]]; then
+            echo "::error title=CORS preflight permitido inválido::Origen ${PUBLIC_SITE_URL} respondió HTTP ${cors_status}; esperado 204."
+            cat "${cors_headers}"
+            rm -f "${cors_headers}"
+            exit 1
+          fi
+
+          cors_origin="$(header_value "${cors_headers}" "access-control-allow-origin")"
+          cors_credentials="$(header_value "${cors_headers}" "access-control-allow-credentials")"
+
+          if [[ "${cors_origin}" != "${PUBLIC_SITE_URL}" ]]; then
+            echo "::error title=CORS origin inesperado::access-control-allow-origin='${cors_origin}'; esperado '${PUBLIC_SITE_URL}'."
+            rm -f "${cors_headers}"
+            exit 1
+          fi
+
+          if [[ "${cors_credentials,,}" != "true" ]]; then
+            echo "::error title=CORS credentials inesperado::access-control-allow-credentials='${cors_credentials}'; esperado true."
+            rm -f "${cors_headers}"
+            exit 1
+          fi
+
+          require_header_contains "${cors_headers}" "access-control-allow-methods" "GET"
+          require_header_contains "${cors_headers}" "access-control-allow-headers" "Authorization"
+          require_header_contains "${cors_headers}" "access-control-allow-headers" "Content-Type"
+          require_header_contains "${cors_headers}" "vary" "Origin"
+          require_header_contains "${cors_headers}" "vary" "Access-Control-Request-Method"
+          require_header_contains "${cors_headers}" "vary" "Access-Control-Request-Headers"
+
+          rm -f "${cors_headers}"
+          echo "CORS permitido: preflight canónico verificado."
+
+          # Hostile origins must be rejected and must never receive browser authorization.
+          hostile_origin="https://evil.example"
+          hostile_headers="$(mktemp)"
+          hostile_status="$(
+            curl \
+              --silent \
+              --show-error \
+              --connect-timeout 10 \
+              --max-time 30 \
+              -X OPTIONS \
+              -H "Origin: ${hostile_origin}" \
+              -H "Access-Control-Request-Method: GET" \
+              -H "Access-Control-Request-Headers: authorization,content-type" \
+              -D "${hostile_headers}" \
+              -o /dev/null \
+              -w "%{http_code}" \
+              "${api}/api/auth/me"
+          )"
+
+          if [[ "${hostile_status}" != "403" ]]; then
+            echo "::error title=CORS origen hostil no bloqueado::${hostile_origin} respondió HTTP ${hostile_status}; esperado 403."
+            cat "${hostile_headers}"
+            rm -f "${hostile_headers}"
+            exit 1
+          fi
+
+          hostile_acao="$(header_value "${hostile_headers}" "access-control-allow-origin")"
+          hostile_acac="$(header_value "${hostile_headers}" "access-control-allow-credentials")"
+
+          if [[ -n "${hostile_acao}" ]]; then
+            echo "::error title=CORS filtró autorización a origen hostil::access-control-allow-origin='${hostile_acao}'."
+            rm -f "${hostile_headers}"
+            exit 1
+          fi
+
+          if [[ -n "${hostile_acac}" ]]; then
+            echo "::error title=CORS filtró credenciales a origen hostil::access-control-allow-credentials='${hostile_acac}'."
+            rm -f "${hostile_headers}"
+            exit 1
+          fi
+
+          rm -f "${hostile_headers}"
+          echo "CORS hostil: origen rechazado sin autorización del navegador."
+
           verify_auth_guard() {
             local url="$1"
             local label="$2"

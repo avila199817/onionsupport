@@ -633,38 +633,25 @@ jobs:
           print("Contratos SPA críticos OK.")
           PY
 
-  deploy:
-    name: Deploy exact release
+  deploy_preview:
+    name: Deploy PR preview
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs:
       - validate
 
-    # Trust boundary:
-    # - every open PR may execute the secret-free validation job;
-    # - only main and same-repository PRs may reach Azure deployment.
+    # Trust boundary: previews are deployment-capable only for same-repository PRs.
     if: >-
-      (
-        github.event_name == 'push' &&
-        github.ref_name == 'main'
-      ) ||
-      (
-        github.event_name == 'workflow_dispatch' &&
-        github.ref_name == 'main'
-      ) ||
-      (
-        github.event_name == 'pull_request' &&
-        github.event.action != 'closed' &&
-        github.base_ref == 'main' &&
-        github.event.pull_request.head.repo.full_name == github.repository
-      )
+      github.event_name == 'pull_request' &&
+      github.event.action != 'closed' &&
+      github.base_ref == 'main' &&
+      github.event.pull_request.head.repo.full_name == github.repository
 
     permissions:
       contents: read
       pull-requests: write
 
     env:
-      SWA_API_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E }}
       VALIDATED_SHA: ${{ needs.validate.outputs.validated_sha }}
 
     steps:
@@ -688,18 +675,24 @@ jobs:
             exit 1
           fi
 
+          echo "Deploying immutable SHA: ${VALIDATED_SHA}"
+
+      - name: Validate deployment token
+        env:
+          SWA_API_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E }}
+        run: |
+          set -euo pipefail
+
           if [[ -z "${SWA_API_TOKEN:-}" ]]; then
             echo "::error title=Secret no configurado::Falta AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E."
             exit 1
           fi
 
-          echo "Deploying immutable SHA: ${VALIDATED_SHA}"
-
       - name: Deploy static SPA
         id: deploy
         uses: Azure/static-web-apps-deploy@4d27395796ac319302594769cfe812bd207490b1 # v1
         with:
-          azure_static_web_apps_api_token: ${{ env.SWA_API_TOKEN }}
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: upload
           app_location: ${{ env.APP_LOCATION }}
@@ -817,12 +810,188 @@ jobs:
 
           wait_for_release "${DEPLOYED_URL}" "Azure deployment environment"
 
-          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]]; then
-            wait_for_release "${PUBLIC_SITE_URL}" "Canonical production domain"
+  deploy_production:
+    name: Deploy production
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs:
+      - validate
+
+    # Production deploys only from the canonical main ref.
+    if: >-
+      (
+        github.event_name == 'push' &&
+        github.ref_name == 'main'
+      ) ||
+      (
+        github.event_name == 'workflow_dispatch' &&
+        github.ref_name == 'main'
+      )
+
+    permissions:
+      contents: read
+
+    env:
+      VALIDATED_SHA: ${{ needs.validate.outputs.validated_sha }}
+
+    steps:
+      - name: Checkout validated revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ env.VALIDATED_SHA }}
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+          persist-credentials: false
+
+      - name: Assert immutable release input
+        run: |
+          set -euo pipefail
+
+          checked_sha="$(git rev-parse HEAD)"
+
+          if [[ "${checked_sha}" != "${VALIDATED_SHA}" ]]; then
+            echo "::error title=SHA de deploy incorrecto::Validado ${VALIDATED_SHA}, checkout ${checked_sha}."
+            exit 1
           fi
 
+          echo "Deploying immutable SHA: ${VALIDATED_SHA}"
+
+      - name: Validate deployment token
+        env:
+          SWA_API_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${SWA_API_TOKEN:-}" ]]; then
+            echo "::error title=Secret no configurado::Falta AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E."
+            exit 1
+          fi
+
+      - name: Deploy static SPA
+        id: deploy
+        uses: Azure/static-web-apps-deploy@4d27395796ac319302594769cfe812bd207490b1 # v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E }}
+          action: upload
+          app_location: ${{ env.APP_LOCATION }}
+          api_location: ${{ env.API_LOCATION }}
+          output_location: ${{ env.OUTPUT_LOCATION }}
+          skip_app_build: true
+
+      - name: Verify deployed release bytes
+        env:
+          DEPLOYED_URL: ${{ steps.deploy.outputs.static_web_app_url }}
+        run: |
+          set -euo pipefail
+
+          normalize_base() {
+            local base="${1%/}"
+
+            if [[ -z "${base}" ]]; then
+              echo "::error title=URL de deploy vacía::Azure no devolvió hostname."
+              return 1
+            fi
+
+            if [[ "${base}" != http://* && "${base}" != https://* ]]; then
+              base="https://${base}"
+            fi
+
+            if [[ ! "${base}" =~ ^https:// ]]; then
+              echo "::error title=URL de deploy inválida::Azure devolvió '${base}'."
+              return 1
+            fi
+
+            printf '%s' "${base}"
+          }
+
+          wait_for_release() {
+            local raw_base="$1"
+            local label="$2"
+            local base
+            local attempt
+            local path
+            local remote_path
+            local local_sha
+            local remote_sha
+            local body
+
+            base="$(normalize_base "${raw_base}")"
+
+            checks=(
+              "index.html|/"
+              "robots.txt|/robots.txt"
+              "sitemap.xml|/sitemap.xml"
+              "src/main.js|/src/main.js"
+              "src/app/index.js|/src/app/index.js"
+              "src/core/config.js|/src/core/config.js"
+              "src/core/http.js|/src/core/http.js"
+              "src/features/auth/index.js|/src/features/auth/index.js"
+              "src/router/index.js|/src/router/index.js"
+              "src/router/routes.js|/src/router/routes.js"
+            )
+
+            echo "Verificando bytes exactos en ${label}: ${base}"
+
+            for attempt in $(seq 1 36); do
+              mismatch=0
+
+              for entry in "${checks[@]}"; do
+                path="${entry%%|*}"
+                remote_path="${entry#*|}"
+                body="$(mktemp)"
+                local_sha="$(sha256sum "${path}" | awk '{print $1}')"
+
+                if ! curl \
+                  --fail \
+                  --silent \
+                  --show-error \
+                  --location \
+                  --connect-timeout 10 \
+                  --max-time 30 \
+                  -H "Cache-Control: no-cache" \
+                  -H "Pragma: no-cache" \
+                  "${base}${remote_path}?release=${VALIDATED_SHA}" \
+                  -o "${body}"; then
+                  mismatch=1
+                  rm -f "${body}"
+                  break
+                fi
+
+                remote_sha="$(sha256sum "${body}" | awk '{print $1}')"
+                rm -f "${body}"
+
+                if [[ "${remote_sha}" != "${local_sha}" ]]; then
+                  mismatch=1
+                  break
+                fi
+              done
+
+              if [[ "${mismatch}" == "0" ]]; then
+                echo "${label}: release ${VALIDATED_SHA} visible y byte-exacto."
+                return 0
+              fi
+
+              if [[ "${attempt}" -lt 36 ]]; then
+                echo "${label}: propagación pendiente (${attempt}/36); reintento en 5s..."
+                sleep 5
+              fi
+            done
+
+            echo "::error title=Release no propagado::${label} no sirve los bytes exactos de ${VALIDATED_SHA} tras 180s."
+            return 1
+          }
+
+          if [[ -z "${DEPLOYED_URL:-}" ]]; then
+            echo "::error title=Azure no devolvió URL::static_web_app_url está vacío."
+            exit 1
+          fi
+
+          wait_for_release "${DEPLOYED_URL}" "Azure deployment environment"
+
+          wait_for_release "${PUBLIC_SITE_URL}" "Canonical production domain"
+
       - name: Verify production security, routing and backend
-        if: github.event_name != 'pull_request'
         run: |
           set -euo pipefail
 
@@ -1072,11 +1241,10 @@ jobs:
       github.base_ref == 'main' &&
       github.event.pull_request.head.repo.full_name == github.repository
 
-    env:
-      SWA_API_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E }}
-
     steps:
       - name: Validate deployment token
+        env:
+          SWA_API_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E }}
         run: |
           set -euo pipefail
 
@@ -1088,6 +1256,6 @@ jobs:
       - name: Close Azure SWA preview
         uses: Azure/static-web-apps-deploy@4d27395796ac319302594769cfe812bd207490b1 # v1
         with:
-          azure_static_web_apps_api_token: ${{ env.SWA_API_TOKEN }}
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: close

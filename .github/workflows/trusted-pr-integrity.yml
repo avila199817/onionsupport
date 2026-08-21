@@ -86,6 +86,10 @@ jobs:
             "${destination}/boot_visual_integrity.py"
           install -m 0644 .github/scripts/cuenta_integrity.py \
             "${destination}/cuenta_integrity.py"
+          install -m 0644 .github/scripts/public_home_integrity.py \
+            "${destination}/public_home_integrity.py"
+          install -m 0644 .github/scripts/public_home_performance.py \
+            "${destination}/public_home_performance.py"
 
       # Deliberate exception: this checkout contains untrusted PR bytes.
       # Nothing from it is executed as a script, action, hook or dependency.
@@ -193,6 +197,18 @@ jobs:
         env:
           ONION_REPO_ROOT: ${{ github.workspace }}/candidate
         run: python3 "${RUNNER_TEMP}/onion-trusted-integrity/cuenta_integrity.py"
+
+      - name: Validate public frontend contract
+        working-directory: candidate
+        env:
+          ONION_REPO_ROOT: ${{ github.workspace }}/candidate
+        run: python3 "${RUNNER_TEMP}/onion-trusted-integrity/public_home_integrity.py"
+
+      - name: Validate public-home frame budget
+        working-directory: candidate
+        env:
+          ONION_REPO_ROOT: ${{ github.workspace }}/candidate
+        run: python3 "${RUNNER_TEMP}/onion-trusted-integrity/public_home_performance.py"
 
       - name: Validate candidate CI and static syntax
         working-directory: candidate

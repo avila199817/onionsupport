@@ -163,7 +163,7 @@ def main() -> int:
         "No debe reaparecer la capa legacy mobile-polish",
     )
 
-    # Intake: endpoint, auth opcional, España, idempotencia y anti-enumeración.
+    # Intake: endpoint, auth opcional, España, idempotencia, identidad y anti-enumeración.
     for snippet, message in (
         ('PUBLIC_TICKET_ENDPOINT = "/api/tickets/public"', "Falta POST /api/tickets/public"),
         ('SPAIN_PREFIX = "+34"', "Falta prefijo telefónico España"),
@@ -176,6 +176,13 @@ def main() -> int:
         ('intakeIconNode', "Falta icono interno de incidencia"),
         ('formatNationalSpanishPhone', "Falta formato nacional español del teléfono"),
         ('"tel-national"', "El teléfono debe usar autocomplete nacional"),
+        ('public-support.intake.v8-existing-user-no-client', "Falta versión final del contrato público"),
+        ('currentFormPhone(form)', "El bloqueo local debe observar el teléfono"),
+        ('publicSupportBlockedPhone', "Falta lock local por teléfono"),
+        ('lockMatchesCurrentIdentity(form)', "El lock debe resolver email O teléfono"),
+        ('Este formulario no crea ni modifica fichas de cliente.', "La UI debe declarar que no crea clientes"),
+        ('correo o teléfono', "La UI debe explicar la reutilización por correo O teléfono"),
+        ('sin modificar el perfil', "La UI debe declarar no-overwrite de usuario existente"),
     ):
         require(errors, snippet in intake, message)
 
@@ -203,6 +210,16 @@ def main() -> int:
         errors,
         "public: true," not in intake and "noAuthHeader: true," not in intake,
         "El intake no debe forzar la retirada de Authorization",
+    )
+    require(
+        errors,
+        "lockMatchesCurrentEmail" not in intake,
+        "No debe reaparecer el lock legacy limitado sólo al correo",
+    )
+    require(
+        errors,
+        "cuenta de cliente" not in intake.lower(),
+        "La UI pública no debe prometer creación/gestión automática de cuenta de cliente",
     )
 
     # Progreso: deriva del data-submitting real y observa sólo el Router view.
@@ -268,14 +285,28 @@ def main() -> int:
         "El responsive no debe duplicar identidad en topbar",
     )
 
+    # Documentación: debe describir exactamente el backend productivo final.
     for snippet, message in (
         ("`POST /api/tickets/public`", "Docs: falta endpoint público"),
-        ("`+34` por defecto", "Docs: falta alcance telefónico España"),
+        ("`+34` como prefijo visual", "Docs: falta alcance telefónico España"),
         ("`Idempotency-Key`", "Docs: falta idempotencia"),
         ("autenticación opcional", "Docs: falta auth opcional"),
         ("no deben usar su icono", "Docs: falta separación CTA/WhatsApp"),
+        ("correo o teléfono", "Docs: falta resolución de identidad por correo O teléfono"),
+        ("nunca crea clientes", "Docs: falta prohibición de creación de cliente"),
+        ("`clienteId: null`", "Docs: falta alta nueva sin cliente"),
+        ("reutilizar sin overwrite", "Docs: falta regla estricta de usuario existente"),
+        ("`INC-YYYYMMDD-XXXXXX`", "Docs: falta formato canónico del ticket"),
+        ("mismo correo o el mismo teléfono", "Docs: falta lock local por ambos identificadores"),
     ):
         require(errors, snippet in docs, message)
+
+    for stale, message in (
+        ("su cliente pendiente", "Docs: no puede reaparecer cliente pendiente en alta pública"),
+        ("rota la activación", "Docs: no puede rotarse activación de usuario existente"),
+        ("el backend no crea el ticket y envía un aviso", "Docs: cuenta existente anónima debe reutilizarse, no rechazarse"),
+    ):
+        require(errors, stale.lower() not in docs.lower(), message)
 
     for relative in (
         "src/css/views/public/index.css",
@@ -300,7 +331,8 @@ def main() -> int:
     print("- JS: main.js -> app/enhancements.js")
     print("- CSS: router/styles.js -> public-home (sin auth/login.css)")
     print("- app.css: sólo estilos globales")
-    print("- intake, teléfono nacional, menú autenticado y progreso validados")
+    print("- intake: reuse por email/teléfono, no-overwrite, NEW sin cliente")
+    print("- teléfono nacional, menú autenticado y progreso validados")
     return 0
 
 

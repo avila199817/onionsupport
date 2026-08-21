@@ -9,12 +9,18 @@ runtime values.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(
+    os.environ.get(
+        "ONION_REPO_ROOT",
+        str(Path(__file__).resolve().parents[2]),
+    )
+).resolve()
 SRC = ROOT / "src"
 
 JS_IMPORT_PATTERNS = (

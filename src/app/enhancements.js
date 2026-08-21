@@ -12,7 +12,7 @@
 ========================================================= */
 
 export const APP_ENHANCEMENTS_VERSION =
-  "app.enhancements.v5-public-home-flow-final";
+  "app.enhancements.v6-public-postal-autofill";
 
 const PRE_ROUTER = Object.freeze([
   Object.freeze({
@@ -45,6 +45,10 @@ const POST_ROUTER = Object.freeze([
   Object.freeze({
     key: "public-support",
     load: () => import("../features/public-support/index.js"),
+  }),
+  Object.freeze({
+    key: "public-postal-autofill",
+    load: () => import("../features/public-postal-autofill/index.js"),
   }),
   Object.freeze({
     key: "public-support-progress",

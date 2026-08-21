@@ -4,11 +4,17 @@
 from __future__ import annotations
 
 from html.parser import HTMLParser
+import os
 from pathlib import Path
 import re
 import sys
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(
+    os.environ.get(
+        "ONION_REPO_ROOT",
+        str(Path(__file__).resolve().parents[2]),
+    )
+).resolve()
 INDEX = ROOT / "index.html"
 MAIN = ROOT / "src/main.js"
 ENHANCEMENTS = ROOT / "src/app/enhancements.js"

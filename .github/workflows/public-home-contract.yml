@@ -27,25 +27,6 @@ on:
       - ".github/scripts/boot_visual_integrity.py"
       - ".github/workflows/public-home-contract.yml"
 
-  pull_request:
-    branches:
-      - main
-    paths:
-      - "index.html"
-      - "docs/PUBLIC_TICKET_INTAKE.md"
-      - "src/app/enhancements.js"
-      - "src/app/loader.js"
-      - "src/features/public-support/**"
-      - "src/features/public-support-progress/**"
-      - "src/features/public-home-experience/**"
-      - "src/views/public/home/**"
-      - "src/css/app.css"
-      - "src/css/views/public/**"
-      - ".github/scripts/public_home_integrity.py"
-      - ".github/scripts/public_home_performance.py"
-      - ".github/scripts/boot_visual_integrity.py"
-      - ".github/workflows/public-home-contract.yml"
-
   workflow_dispatch:
 
 permissions:

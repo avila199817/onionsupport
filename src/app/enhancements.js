@@ -12,7 +12,7 @@
 ========================================================= */
 
 export const APP_ENHANCEMENTS_VERSION =
-  "app.enhancements.v3-incidencias-technician-profile";
+  "app.enhancements.v4-public-support-structured-address";
 
 const PRE_ROUTER = Object.freeze([
   Object.freeze({
@@ -45,6 +45,10 @@ const POST_ROUTER = Object.freeze([
   Object.freeze({
     key: "public-support",
     load: () => import("../features/public-support/index.js"),
+  }),
+  Object.freeze({
+    key: "public-support-structured-address",
+    load: () => import("../features/public-support-structured/index.js"),
   }),
   Object.freeze({
     key: "public-support-progress",

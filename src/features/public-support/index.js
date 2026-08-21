@@ -9,7 +9,7 @@
    - idempotencia estable por intento/reintento del mismo formulario;
    - identidad del cliente autenticado en su acceso al panel;
    - formulario sin exponer automáticamente el nombre del usuario;
-   - teléfono limitado a España (+34);
+   - teléfono limitado a España (+34) con input nacional de 9 dígitos;
    - una incidencia en curso por cuenta, preparada para enforcement backend;
    - respuesta anti-enumeración neutra para visitante anónimo;
    - CTAs internos diferenciados de WhatsApp;
@@ -20,7 +20,7 @@
 import { AppCore } from "../../core/index.js";
 import Http from "../../core/http.js";
 
-export const PUBLIC_SUPPORT_VERSION = "public-support.intake.v6-router-view-events";
+export const PUBLIC_SUPPORT_VERSION = "public-support.intake.v7-national-phone-field";
 export const PUBLIC_TICKET_ENDPOINT = "/api/tickets/public";
 
 const VIEW_ROOT_SELECTOR = "#view-container, [data-router-view='true']";
@@ -28,7 +28,6 @@ const HOME = "[data-public-home]";
 const FORM = "[data-public-support-form]";
 const SECTION_ID = "incidencia";
 const SPAIN_PREFIX = "+34";
-const SPAIN_PHONE_DEFAULT = "+34 ";
 const ACTIVE_TICKET_ERROR_CODES = new Set([
   "PUBLIC_TICKET_ACTIVE_EXISTS",
   "PUBLIC_TICKET_OPEN_EXISTS",
@@ -284,7 +283,7 @@ function formSection() {
         <div class="public-support-grid">
           ${field("fullName", "Nombre completo", "text", "Nombre y apellidos", "name", 120)}
           ${field("email", "Correo electrónico", "email", "tu@correo.com", "email", 180, "email")}
-          ${field("phone", "Teléfono", "tel", "+34 600 000 000", "tel", 18, "tel", SPAIN_PHONE_DEFAULT)}
+          ${field("phone", "Teléfono", "tel", "612 345 678", "tel-national", 11, "tel")}
           ${field("address", "Dirección", "text", "Calle, número, localidad y CP", "street-address", 220)}
 
           <div class="public-support-field public-support-field--wide">
@@ -444,7 +443,15 @@ function nationalSpanishDigits(value = "") {
   if (valueDigits.startsWith("0034")) valueDigits = valueDigits.slice(4);
   else if (valueDigits.startsWith("34") && valueDigits.length === 11) valueDigits = valueDigits.slice(2);
 
-  return valueDigits;
+  return valueDigits.slice(0, 9);
+}
+
+function formatNationalSpanishPhone(value = "") {
+  const national = nationalSpanishDigits(value);
+  if (!national) return "";
+  return [national.slice(0, 3), national.slice(3, 6), national.slice(6, 9)]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function normalizeSpanishPhone(value = "") {
@@ -454,17 +461,11 @@ function normalizeSpanishPhone(value = "") {
   return `${SPAIN_PREFIX} ${national.slice(0, 3)} ${national.slice(3, 6)} ${national.slice(6, 9)}`;
 }
 
-function isDefaultSpanishPhone(value = "") {
-  return !text(value) || text(value) === SPAIN_PREFIX;
-}
-
 function prefill(root) {
   const form = root?.querySelector?.(FORM);
   if (!form) return;
 
   const phoneInput = form.elements.namedItem("phone");
-  if (phoneInput && !text(phoneInput.value)) phoneInput.value = SPAIN_PHONE_DEFAULT;
-
   const { user, authenticated } = session();
   if (!authenticated || !user) return;
 
@@ -482,8 +483,8 @@ function prefill(root) {
     if (input && !text(input.value) && value) input.value = value;
   }
 
-  const storedPhone = normalizeSpanishPhone(phone(user));
-  if (phoneInput && storedPhone && isDefaultSpanishPhone(phoneInput.value)) {
+  const storedPhone = formatNationalSpanishPhone(phone(user));
+  if (phoneInput && storedPhone && !text(phoneInput.value)) {
     phoneInput.value = storedPhone;
   }
 }
@@ -655,7 +656,7 @@ function validate(form) {
   const rules = {
     fullName: (v) => hasFullName(v) ? "" : "Introduce tu nombre y apellidos.",
     email: (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? "" : "Introduce un correo válido.",
-    phone: (v) => normalizeSpanishPhone(v) ? "" : "Introduce un teléfono de España válido (+34 y 9 dígitos).",
+    phone: (v) => normalizeSpanishPhone(v) ? "" : "Introduce un teléfono de España válido (9 dígitos).",
     address: (v) => v.length >= 8 ? "" : "Introduce una dirección completa.",
     subject: (v) => v.length >= 4 ? "" : "Resume el problema en el asunto.",
     description: (v) => v.length >= 10 ? "" : "Añade un poco más de detalle sobre el problema.",
@@ -902,19 +903,11 @@ function onInput(event) {
   }
 }
 
-function onFocusIn(event) {
-  const input = event.target;
-  if (!input?.matches?.(`${FORM} [name="phone"]`)) return;
-  if (!text(input.value)) input.value = SPAIN_PHONE_DEFAULT;
-}
-
 function onFocusOut(event) {
   const input = event.target;
   if (!input?.matches?.(`${FORM} [name="phone"]`)) return;
 
-  const normalized = normalizeSpanishPhone(input.value);
-  if (normalized) input.value = normalized;
-  else if (!text(input.value)) input.value = SPAIN_PHONE_DEFAULT;
+  input.value = formatNationalSpanishPhone(input.value);
 }
 
 function bindFormEvents(root) {
@@ -922,7 +915,6 @@ function bindFormEvents(root) {
 
   root.addEventListener("submit", onSubmit, true);
   root.addEventListener("input", onInput, true);
-  root.addEventListener("focusin", onFocusIn, true);
   root.addEventListener("focusout", onFocusOut, true);
   return true;
 }
@@ -932,7 +924,6 @@ function unbindFormEvents(root) {
 
   root.removeEventListener("submit", onSubmit, true);
   root.removeEventListener("input", onInput, true);
-  root.removeEventListener("focusin", onFocusIn, true);
   root.removeEventListener("focusout", onFocusOut, true);
   return true;
 }

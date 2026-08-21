@@ -1,6 +1,6 @@
 # =========================================================
 # ONION SUPPORT — PUBLIC HOME INTEGRITY
-# Contrato único para landing, intake, rendimiento y mejoras públicas.
+# Contrato único para landing, intake, arranque visual, rendimiento y mejoras públicas.
 # =========================================================
 
 name: Public Home Integrity
@@ -15,6 +15,7 @@ on:
       - "index.html"
       - "docs/PUBLIC_TICKET_INTAKE.md"
       - "src/app/enhancements.js"
+      - "src/app/loader.js"
       - "src/features/public-support/**"
       - "src/features/public-support-progress/**"
       - "src/features/public-home-experience/**"
@@ -23,6 +24,7 @@ on:
       - "src/css/views/public/**"
       - ".github/scripts/public_home_integrity.py"
       - ".github/scripts/public_home_performance.py"
+      - ".github/scripts/boot_visual_integrity.py"
       - ".github/workflows/public-home-contract.yml"
 
   pull_request:
@@ -32,6 +34,7 @@ on:
       - "index.html"
       - "docs/PUBLIC_TICKET_INTAKE.md"
       - "src/app/enhancements.js"
+      - "src/app/loader.js"
       - "src/features/public-support/**"
       - "src/features/public-support-progress/**"
       - "src/features/public-home-experience/**"
@@ -40,6 +43,7 @@ on:
       - "src/css/views/public/**"
       - ".github/scripts/public_home_integrity.py"
       - ".github/scripts/public_home_performance.py"
+      - ".github/scripts/boot_visual_integrity.py"
       - ".github/workflows/public-home-contract.yml"
 
   workflow_dispatch:
@@ -71,6 +75,7 @@ jobs:
         run: |
           set -euo pipefail
           node --check src/app/enhancements.js
+          node --check src/app/loader.js
           node --check src/features/public-support/index.js
           node --check src/features/public-support-progress/index.js
           node --check src/features/public-home-experience/index.js
@@ -82,3 +87,6 @@ jobs:
 
       - name: Validate public-home frame budget
         run: python3 .github/scripts/public_home_performance.py
+
+      - name: Validate cold-boot visual contract
+        run: python3 .github/scripts/boot_visual_integrity.py

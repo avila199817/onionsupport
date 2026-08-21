@@ -4,17 +4,17 @@
 
    Remate UX de la landing pública:
    - Login/Cuenta siempre a la izquierda de "Abrir incidencia".
-   - Dropdown autenticado con accesos rápidos y cierre de sesión.
+   - Dropdown autenticado con toggle no navegable y accesos rápidos.
    - Nombre compacto: "Nombre I." preservando tildes.
    - Footer sin login/cuenta.
-   - Teléfono España con bandera + prefijo +34 permanentes y ejemplo nativo.
+   - Teléfono España: bandera/+34 fijos y campo nacional sin prefijo duplicado.
    - SVGs inline afinados sin alterar su semántica.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
 export const PUBLIC_HOME_EXPERIENCE_VERSION =
-  "public-home.experience.v1.production";
+  "public-home.experience.v2-account-toggle-national-phone";
 
 const HOME = "[data-public-home]";
 const FORM = "[data-public-support-form]";
@@ -27,7 +27,6 @@ const LOGOUT_ACTION = "[data-public-home-logout]";
 const PHONE_CONTROL = "[data-public-support-phone-control]";
 
 const SPAIN_PREFIX = "+34";
-const SPAIN_PHONE_DEFAULT = "+34 ";
 const PHONE_PLACEHOLDER = "612 345 678";
 const PHONE_EXAMPLE = "+34 612 345 678";
 
@@ -87,6 +86,9 @@ function safePath(value = "", fallback = "/") {
 }
 
 function panelPath(link = null) {
+  const stored = safePath(link?.dataset?.publicHomeAccountHome || "", "");
+  if (stored) return stored;
+
   const fromLink = safePath(link?.getAttribute?.("href") || "", "");
   if (fromLink && fromLink !== "/login") return fromLink;
 
@@ -219,7 +221,7 @@ function toggleAccountMenu(wrapper = null) {
     : openAccountMenu(wrapper);
 }
 
-function buildAccountMenu(wrapper, link) {
+function buildAccountMenu(wrapper, homePath) {
   const menu = document.createElement("div");
   menu.className = "public-home-account-menu";
   menu.dataset.publicHomeAccountMenu = "true";
@@ -228,7 +230,7 @@ function buildAccountMenu(wrapper, link) {
   menu.setAttribute("aria-hidden", "true");
 
   menu.append(
-    routeLink("Inicio", panelPath(link)),
+    routeLink("Inicio", homePath),
     routeLink("Incidencias", "/incidencias"),
     routeLink("Facturas", "/facturas"),
     routeLink("Cuenta", "/cuenta")
@@ -264,7 +266,18 @@ function resetAccountWrapper(link = null) {
 
   link.removeAttribute("aria-haspopup");
   link.removeAttribute("aria-expanded");
+  link.removeAttribute("role");
+  link.removeAttribute("tabindex");
   delete link.dataset.publicHomeAccountToggle;
+  delete link.dataset.publicHomeAccountHome;
+
+  if (link.matches("a")) {
+    link.setAttribute("href", "/login");
+    link.dataset.spa = "true";
+    link.dataset.routerLink = "true";
+    link.dataset.route = "/login";
+    link.dataset.href = "/login";
+  }
 
   return true;
 }
@@ -286,6 +299,9 @@ function ensureAccountMenu(root = null) {
     return false;
   }
 
+  const home = panelPath(link);
+  link.dataset.publicHomeAccountHome = home;
+
   let wrapper = link.closest(ACCOUNT_WRAP);
 
   if (!wrapper) {
@@ -298,10 +314,14 @@ function ensureAccountMenu(root = null) {
   }
 
   link.dataset.publicHomeAccountToggle = "true";
+  link.setAttribute("role", "button");
+  link.setAttribute("tabindex", "0");
   link.setAttribute("aria-haspopup", "menu");
   link.setAttribute("aria-expanded", "false");
   link.setAttribute("aria-label", "Abrir accesos rápidos de cuenta");
 
+  // Un toggle de menú nunca debe conservar semántica de navegación.
+  link.removeAttribute("href");
   delete link.dataset.spa;
   delete link.dataset.routerLink;
   delete link.dataset.route;
@@ -313,10 +333,9 @@ function ensureAccountMenu(root = null) {
   }
 
   let menu = wrapper.querySelector(ACCOUNT_MENU);
-  if (!menu) menu = buildAccountMenu(wrapper, link);
+  if (!menu) menu = buildAccountMenu(wrapper, home);
 
   const homeLink = menu.querySelector('a[role="menuitem"]');
-  const home = panelPath(link);
 
   if (homeLink && safePath(homeLink.getAttribute("href"), "") !== home) {
     homeLink.href = home;
@@ -381,11 +400,6 @@ function formatNationalPhone(value = "") {
   return [digits.slice(0, 3), digits.slice(3, 6), digits.slice(6, 9)]
     .filter(Boolean)
     .join(" ");
-}
-
-function formatSpanishPhoneInput(value = "") {
-  const national = formatNationalPhone(value);
-  return national ? `${SPAIN_PREFIX} ${national}` : SPAIN_PREFIX;
 }
 
 function nationalDigitsBeforeCaret(value = "", caret = 0) {
@@ -513,9 +527,9 @@ function enhancePhone(root = null) {
   input.removeAttribute("title");
   input.setAttribute(
     "aria-label",
-    `Teléfono de España. Prefijo ${SPAIN_PREFIX} permanente. Ejemplo: ${PHONE_EXAMPLE}`
+    `Teléfono de España. Prefijo ${SPAIN_PREFIX} fijo fuera del campo. Ejemplo completo: ${PHONE_EXAMPLE}`
   );
-  input.dataset.publicSupportPhoneEnhanced = "permanent-es-prefix";
+  input.dataset.publicSupportPhoneEnhanced = "national-es-with-static-prefix";
 
   formatPhoneControl(input, false);
   return true;
@@ -643,6 +657,7 @@ function onDocumentClick(event) {
   if (logoutAction) {
     event.preventDefault();
     event.stopPropagation();
+    event.stopImmediatePropagation?.();
     closeAllAccountMenus();
     void logout(logoutAction);
     return;
@@ -653,6 +668,7 @@ function onDocumentClick(event) {
   if (toggle) {
     event.preventDefault();
     event.stopPropagation();
+    event.stopImmediatePropagation?.();
     toggleAccountMenu(toggle.closest(ACCOUNT_WRAP));
     return;
   }
@@ -681,8 +697,13 @@ function onDocumentKeydown(event) {
 
   const toggle = target?.closest?.(ACCOUNT_TOGGLE);
 
-  if (toggle && (event.key === "ArrowDown" || event.key === "Enter")) {
+  if (
+    toggle &&
+    (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ")
+  ) {
     event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation?.();
     openAccountMenu(toggle.closest(ACCOUNT_WRAP), true);
   }
 }

@@ -85,7 +85,7 @@ def resolve_local(owner: Path, spec: str) -> Path | None:
         return None
 
     if path_part.startswith("/"):
-        return ROOT / path_part.lstrip("/")
+        return (ROOT / path_part.lstrip("/")).resolve()
 
     return (owner.parent / path_part).resolve()
 
@@ -101,6 +101,28 @@ def record_missing(errors: list[str], owner: Path, spec: str, kind: str) -> None
     errors.append(f"{owner.relative_to(ROOT)} :: {kind} local inexistente: {spec}")
 
 
+def resolve_checked_local(
+    errors: list[str],
+    owner: Path,
+    spec: str,
+) -> Path | None:
+    target = resolve_local(owner, spec)
+
+    if target is None:
+        return None
+
+    try:
+        target.relative_to(ROOT)
+    except ValueError:
+        errors.append(
+            f"{owner.relative_to(ROOT)} :: "
+            f"referencia local escapa del repositorio: {spec}"
+        )
+        return None
+
+    return target
+
+
 def validate_js_references(errors: list[str]) -> None:
     for js_file in sorted(SRC.rglob("*.js")):
         text = js_file.read_text(encoding="utf-8")
@@ -108,7 +130,7 @@ def validate_js_references(errors: list[str]) -> None:
         for pattern in JS_IMPORT_PATTERNS:
             for match in pattern.finditer(text):
                 spec = clean_spec(match.group(1))
-                target = resolve_local(js_file, spec)
+                target = resolve_checked_local(errors, js_file, spec)
                 if target is None:
                     continue
                 if not any(candidate.is_file() for candidate in module_candidates(target)):
@@ -116,13 +138,13 @@ def validate_js_references(errors: list[str]) -> None:
 
         for match in IMPORT_META_URL_PATTERN.finditer(text):
             spec = clean_spec(match.group(1))
-            target = resolve_local(js_file, spec)
+            target = resolve_checked_local(errors, js_file, spec)
             if target is not None and not target.is_file():
                 record_missing(errors, js_file, spec, "asset import.meta.url")
 
         for match in ROOT_ASSET_PATTERN.finditer(text):
             spec = clean_spec(match.group(1))
-            target = resolve_local(js_file, spec)
+            target = resolve_checked_local(errors, js_file, spec)
             if target is not None and not target.is_file():
                 record_missing(errors, js_file, spec, "asset /src")
 
@@ -249,7 +271,7 @@ def validate_css_references(errors: list[str]) -> None:
         text = css_file.read_text(encoding="utf-8")
         for match in CSS_IMPORT_PATTERN.finditer(text):
             spec = clean_spec(match.group(1))
-            target = resolve_local(css_file, spec)
+            target = resolve_checked_local(errors, css_file, spec)
             if target is not None and not target.is_file():
                 record_missing(errors, css_file, spec, "@import")
 

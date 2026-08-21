@@ -146,6 +146,12 @@ jobs:
           install -m 0755 "${source_root}/.github/ci/validate_production_contract.sh"             "${destination}/validate_production_contract.sh"
           install -m 0755 "${source_root}/.github/ci/validate_spa_contracts.sh"             "${destination}/validate_spa_contracts.sh"
           install -m 0644 "${source_root}/.github/scripts/repo_integrity.py"             "${destination}/repo_integrity.py"
+          install -m 0755 "${source_root}/.github/ci/validate_candidate_paths.py" "${destination}/validate_candidate_paths.py"
+
+      - name: Validate candidate path boundary
+        env:
+          ONION_REPO_ROOT: ${{ github.workspace }}/candidate
+        run: python3 "${RUNNER_TEMP}/onion-validation/validate_candidate_paths.py"
 
       - name: Validate static release contract
         run: bash "${RUNNER_TEMP}/onion-validation/validate_static_release.sh"

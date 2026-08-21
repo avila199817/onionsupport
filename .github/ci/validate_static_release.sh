@@ -58,9 +58,15 @@ for file in "${forbidden_files[@]}"; do
   fi
 done
 
-python3 -m json.tool staticwebapp.config.json >/dev/null
-python3 -m json.tool site.webmanifest >/dev/null
-python3 -m py_compile .github/scripts/repo_integrity.py
+python3 -I -m json.tool staticwebapp.config.json >/dev/null
+python3 -I -m json.tool site.webmanifest >/dev/null
+python3 -I - <<'PY'
+from pathlib import Path
+import ast
+
+path = Path(".github/scripts/repo_integrity.py")
+ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+PY
 
 required_index_refs=(
   "/favicon.ico"
@@ -92,7 +98,7 @@ for ref in "${forbidden_public_refs[@]}"; do
   fi
 done
 
-python3 - <<'PY'
+python3 -I - <<'PY'
 from pathlib import Path
 import sys
 
@@ -118,7 +124,7 @@ if bad_paths:
 print("Paths del release OK.")
 PY
 
-python3 - <<'PY'
+python3 -I - <<'PY'
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlsplit

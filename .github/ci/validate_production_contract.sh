@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-python3 - <<'PY'
+python3 -I - <<'PY'
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlsplit

@@ -22,7 +22,7 @@ import { AppCore } from "../../core/index.js";
 import Http from "../../core/http.js";
 
 export const PUBLIC_SUPPORT_VERSION =
-  "public-support.intake.v8-existing-user-no-client";
+  "public-support.intake.v9-structured-address";
 export const PUBLIC_TICKET_ENDPOINT = "/api/tickets/public";
 
 const VIEW_ROOT_SELECTOR = "#view-container, [data-router-view='true']";
@@ -39,7 +39,7 @@ const ACTIVE_TICKET_ERROR_CODES = new Set([
 const enhanced = new WeakSet();
 
 let observer = null;
-let retryTimer = 0;
+let scanFrame = 0;
 let mountRoot = null;
 let installed = false;
 let destroyed = false;
@@ -101,18 +101,30 @@ function phone(user) {
   return text(first(user?.phone, user?.telefono, user?.mobile, user?.profile?.phone, ""));
 }
 
-function address(user) {
+function addressParts(user) {
   const value = first(user?.address, user?.direccion, user?.profile?.address, "");
-  if (typeof value === "string") return text(value);
-  if (!object(value)) return "";
 
-  return text([
-    first(value.street, value.line1, value.calle, ""),
-    first(value.number, value.numero, ""),
-    first(value.postalCode, value.zip, value.cp, ""),
-    first(value.city, value.locality, value.localidad, ""),
-    first(value.region, value.province, value.provincia, ""),
-  ].filter(Boolean).join(", "));
+  if (typeof value === "string") {
+    return {
+      address: text(value),
+      addressLine2: "",
+      postalCode: text(first(user?.cp, user?.postalCode, "")),
+      city: text(first(user?.ciudad, user?.city, "")),
+      province: text(first(user?.provincia, user?.province, "")),
+      country: text(first(user?.pais, user?.country, "España"), "España"),
+    };
+  }
+
+  const current = object(value) || {};
+
+  return {
+    address: text(first(current.street, current.line1, current.calle, user?.calle, "")),
+    addressLine2: text(first(current.line2, current.linea2, user?.linea2, "")),
+    postalCode: text(first(current.postalCode, current.zip, current.cp, user?.postalCode, user?.cp, "")),
+    city: text(first(current.city, current.locality, current.localidad, current.ciudad, user?.city, user?.ciudad, "")),
+    province: text(first(current.region, current.province, current.provincia, user?.province, user?.provincia, "")),
+    country: text(first(current.country, current.pais, user?.country, user?.pais, "España"), "España"),
+  };
 }
 
 function avatar(user) {
@@ -287,7 +299,12 @@ function formSection() {
           ${field("fullName", "Nombre completo", "text", "Nombre y apellidos", "name", 120)}
           ${field("email", "Correo electrónico", "email", "tu@correo.com", "email", 180, "email")}
           ${field("phone", "Teléfono", "tel", "612 345 678", "tel-national", 11, "tel")}
-          ${field("address", "Dirección", "text", "Calle, número, localidad y CP", "street-address", 220)}
+          ${field("address", "Calle y número", "text", "Calle y número", "address-line1", 180)}
+          ${field("addressLine2", "Piso / puerta", "text", "Piso, puerta, escalera (opcional)", "address-line2", 120, "", "", { required: false })}
+          ${field("postalCode", "Código postal", "text", "08001", "postal-code", 5, "numeric")}
+          ${field("city", "Ciudad", "text", "Barcelona", "address-level2", 90)}
+          ${field("province", "Provincia", "text", "Barcelona", "address-level1", 90)}
+          ${field("country", "País", "text", "España", "country-name", 90, "", "España", { readonly: true })}
 
           <div class="public-support-field public-support-field--wide">
             <label for="public-support-subject">Asunto</label>
@@ -333,17 +350,29 @@ function errorNode(name) {
     data-public-support-error-for="${name}" hidden></small>`;
 }
 
-function field(name, label, type, placeholder, autocomplete, maxlength, inputmode = "", value = "") {
+function field(
+  name,
+  label,
+  type,
+  placeholder,
+  autocomplete,
+  maxlength,
+  inputmode = "",
+  value = "",
+  options = {}
+) {
   const mode = inputmode ? ` inputmode="${inputmode}"` : "";
   const initialValue = value ? ` value="${value}"` : "";
+  const required = options?.required === false ? "" : " required";
+  const readonly = options?.readonly === true ? ` readonly aria-readonly="true"` : "";
   const phoneAttrs = name === "phone"
     ? ` aria-label="Teléfono de España"`
     : "";
 
   return `<div class="public-support-field">
     <label for="public-support-${name}">${label}</label>
-    <input id="public-support-${name}" name="${name}" type="${type}"${mode}${initialValue}${phoneAttrs}
-      autocomplete="${autocomplete}" maxlength="${maxlength}" required placeholder="${placeholder}">
+    <input id="public-support-${name}" name="${name}" type="${type}"${mode}${initialValue}${phoneAttrs}${readonly}
+      autocomplete="${autocomplete}" maxlength="${maxlength}"${required} placeholder="${placeholder}">
     ${errorNode(name)}
   </div>`;
 }
@@ -478,7 +507,7 @@ function prefill(root) {
   */
   const values = {
     email: email(user),
-    address: address(user),
+    ...addressParts(user),
   };
 
   for (const [name, value] of Object.entries(values)) {
@@ -517,6 +546,15 @@ function scan() {
     found = enhance(root) || found;
   });
   return found;
+}
+
+function queueScan() {
+  if (destroyed || typeof window === "undefined" || scanFrame) return false;
+  scanFrame = window.requestAnimationFrame(() => {
+    scanFrame = 0;
+    scan();
+  });
+  return true;
 }
 
 function errorFor(form, name) {
@@ -693,7 +731,14 @@ function validate(form) {
     fullName: (v) => hasFullName(v) ? "" : "Introduce tu nombre y apellidos.",
     email: (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? "" : "Introduce un correo válido.",
     phone: (v) => normalizeSpanishPhone(v) ? "" : "Introduce un teléfono de España válido (9 dígitos).",
-    address: (v) => v.length >= 8 ? "" : "Introduce una dirección completa.",
+    address: (v) => v.length >= 5 ? "" : "Introduce la calle y el número.",
+    postalCode: (v) => /^\d{5}$/.test(v) ? "" : "Introduce un código postal español válido de 5 dígitos.",
+    city: (v) => v.length >= 2 ? "" : "Introduce la ciudad.",
+    province: (v) => v.length >= 2 ? "" : "Introduce la provincia.",
+    country: (v) => {
+      const normalized = text(v).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      return ["espana", "es", "spain"].includes(normalized) ? "" : "Este formulario solo admite direcciones de España.";
+    },
     subject: (v) => v.length >= 4 ? "" : "Resume el problema en el asunto.",
     description: (v) => v.length >= 10 ? "" : "Añade un poco más de detalle sobre el problema.",
   };
@@ -717,7 +762,12 @@ function payload(form) {
     fullName: text(data.get("fullName")).slice(0, 120),
     email: text(data.get("email")).toLowerCase().slice(0, 180),
     phone: normalizeSpanishPhone(data.get("phone")),
-    address: text(data.get("address")).slice(0, 220),
+    address: text(data.get("address")).slice(0, 180),
+    addressLine2: text(data.get("addressLine2")).slice(0, 120),
+    postalCode: text(data.get("postalCode")).slice(0, 5),
+    city: text(data.get("city")).slice(0, 90),
+    province: text(data.get("province")).slice(0, 90),
+    country: "España",
     subject: text(data.get("subject")).slice(0, 140),
     description: text(data.get("description")).slice(0, 4000),
     source: "public-home",
@@ -992,22 +1042,12 @@ function install() {
   installed = true;
   bindFormEvents(root);
 
-  window.addEventListener("onion:main:ready", scan);
-  document.addEventListener("public-home:ready", scan, true);
+  window.addEventListener("onion:main:ready", queueScan);
+  document.addEventListener("public-home:ready", queueScan, true);
 
-  observer = new MutationObserver(scan);
+  observer = new MutationObserver(queueScan);
   observer.observe(root, { childList: true, subtree: true });
-
-  if (!scan()) {
-    let attempts = 0;
-    retryTimer = window.setInterval(() => {
-      attempts += 1;
-      if (scan() || attempts >= 12) {
-        clearInterval(retryTimer);
-        retryTimer = 0;
-      }
-    }, 750);
-  }
+  scan();
 
   return true;
 }
@@ -1017,14 +1057,14 @@ export function destroyPublicSupport() {
   destroyed = true;
 
   unbindFormEvents(mountRoot);
-  window.removeEventListener("onion:main:ready", scan);
-  document.removeEventListener("public-home:ready", scan, true);
+  window.removeEventListener("onion:main:ready", queueScan);
+  document.removeEventListener("public-home:ready", queueScan, true);
 
   observer?.disconnect();
   observer = null;
 
-  if (retryTimer) clearInterval(retryTimer);
-  retryTimer = 0;
+  if (scanFrame) window.cancelAnimationFrame(scanFrame);
+  scanFrame = 0;
   mountRoot = null;
   installed = false;
   return true;

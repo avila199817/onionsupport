@@ -12,7 +12,7 @@
 ========================================================= */
 
 export const APP_ENHANCEMENTS_VERSION =
-  "app.enhancements.v4-public-support-structured-address";
+  "app.enhancements.v5-public-home-flow-final";
 
 const PRE_ROUTER = Object.freeze([
   Object.freeze({
@@ -45,10 +45,6 @@ const POST_ROUTER = Object.freeze([
   Object.freeze({
     key: "public-support",
     load: () => import("../features/public-support/index.js"),
-  }),
-  Object.freeze({
-    key: "public-support-structured-address",
-    load: () => import("../features/public-support-structured/index.js"),
   }),
   Object.freeze({
     key: "public-support-progress",

@@ -29,6 +29,7 @@ REQUIRED = (
 
 FORBIDDEN = (
     "src/features/public-support/mobile-polish.js",
+    "src/features/public-support-structured/index.js",
     "src/css/views/public/mobile-polish.css",
     "noop",
 )
@@ -176,7 +177,7 @@ def main() -> int:
         ('intakeIconNode', "Falta icono interno de incidencia"),
         ('formatNationalSpanishPhone', "Falta formato nacional español del teléfono"),
         ('"tel-national"', "El teléfono debe usar autocomplete nacional"),
-        ('public-support.intake.v8-existing-user-no-client', "Falta versión final del contrato público"),
+        ('public-support.intake.v9-structured-address', "Falta versión final del contrato público"),
         ('currentFormPhone(form)', "El bloqueo local debe observar el teléfono"),
         ('publicSupportBlockedPhone', "Falta lock local por teléfono"),
         ('lockMatchesCurrentIdentity(form)', "El lock debe resolver email O teléfono"),
@@ -185,6 +186,12 @@ def main() -> int:
         ('sin modificar el perfil', "La UI debe declarar no-overwrite de usuario existente"),
         ('"Enviando solicitud…"', "El estado busy debe permanecer neutro"),
         ('"onion:public-support:accepted"', "El evento de aceptación debe ser semánticamente neutro"),
+        ('postalCode: text(data.get("postalCode")).slice(0, 5)', "Falta CP estructurado en payload"),
+        ('city: text(data.get("city")).slice(0, 90)', "Falta ciudad estructurada en payload"),
+        ('province: text(data.get("province")).slice(0, 90)', "Falta provincia estructurada en payload"),
+        ('country: "España"', "Falta país canónico en payload"),
+        ('...addressParts(user)', "Falta prefill estructurado desde usuario existente"),
+        ('new MutationObserver(queueScan)', "El intake debe coalescer mutaciones por frame"),
     ):
         require(errors, snippet in intake, message)
 
@@ -272,6 +279,8 @@ def main() -> int:
         ('"/incidencias"', "Falta acceso a Incidencias"),
         ('"/facturas"', "Falta acceso a Facturas"),
         ('"/cuenta"', "Falta acceso a Cuenta"),
+        ("public-home.experience.v3-coalesced-observer", "Falta versión coalescida del Home"),
+        ("new MutationObserver(queueScan)", "El Home debe coalescer mutaciones por frame"),
         ("formatNationalPhone", "Falta formato progresivo nacional de teléfono"),
         ("+34 612 345 678", "Falta ejemplo telefónico español"),
         ("national-es-with-static-prefix", "Falta contrato teléfono con prefijo visual externo"),

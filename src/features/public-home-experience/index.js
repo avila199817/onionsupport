@@ -14,7 +14,7 @@
 import { AppCore } from "../../core/index.js";
 
 export const PUBLIC_HOME_EXPERIENCE_VERSION =
-  "public-home.experience.v2-account-toggle-national-phone";
+  "public-home.experience.v3-coalesced-observer";
 
 const HOME = "[data-public-home]";
 const FORM = "[data-public-support-form]";
@@ -31,7 +31,7 @@ const PHONE_PLACEHOLDER = "612 345 678";
 const PHONE_EXAMPLE = "+34 612 345 678";
 
 let observer = null;
-let retryTimer = 0;
+let scanFrame = 0;
 let destroyed = false;
 let logoutPending = false;
 
@@ -582,6 +582,15 @@ function scan() {
   return found;
 }
 
+function queueScan() {
+  if (destroyed || typeof window === "undefined" || scanFrame) return false;
+  scanFrame = window.requestAnimationFrame(() => {
+    scanFrame = 0;
+    scan();
+  });
+  return true;
+}
+
 async function resolveAuth() {
   const direct =
     AppCore?.getModule?.("auth") ||
@@ -738,8 +747,8 @@ function install() {
   document.addEventListener("focusin", onFocusIn, true);
   document.addEventListener("focusout", onFocusOut, true);
 
-  window.addEventListener("onion:main:ready", scan);
-  document.addEventListener("public-home:ready", scan, true);
+  window.addEventListener("onion:main:ready", queueScan);
+  document.addEventListener("public-home:ready", queueScan, true);
 
   const mount =
     document.querySelector("#view-container") ||
@@ -747,21 +756,9 @@ function install() {
     document.querySelector("[data-app-content]") ||
     document.body;
 
-  observer = new MutationObserver(scan);
+  observer = new MutationObserver(queueScan);
   observer.observe(mount, { childList: true, subtree: true });
-
-  if (!scan()) {
-    let attempts = 0;
-
-    retryTimer = window.setInterval(() => {
-      attempts += 1;
-
-      if (scan() || attempts >= 12) {
-        window.clearInterval(retryTimer);
-        retryTimer = 0;
-      }
-    }, 500);
-  }
+  scan();
 }
 
 export function destroyPublicHomeExperience() {
@@ -775,14 +772,14 @@ export function destroyPublicHomeExperience() {
   document.removeEventListener("focusin", onFocusIn, true);
   document.removeEventListener("focusout", onFocusOut, true);
 
-  window.removeEventListener("onion:main:ready", scan);
-  document.removeEventListener("public-home:ready", scan, true);
+  window.removeEventListener("onion:main:ready", queueScan);
+  document.removeEventListener("public-home:ready", queueScan, true);
 
   observer?.disconnect();
   observer = null;
 
-  if (retryTimer) window.clearInterval(retryTimer);
-  retryTimer = 0;
+  if (scanFrame) window.cancelAnimationFrame(scanFrame);
+  scanFrame = 0;
 
   return true;
 }

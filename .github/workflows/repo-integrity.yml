@@ -54,6 +54,9 @@ jobs:
       - name: Validate single app entrypoint
         run: python3 .github/scripts/app_entrypoint_integrity.py
 
+      - name: Validate boot visual contract
+        run: python3 .github/scripts/boot_visual_integrity.py
+
       - name: Validate Cuenta canonical surface
         run: python3 .github/scripts/cuenta_integrity.py
 

@@ -73,8 +73,7 @@ jobs:
       (
         github.event_name == 'pull_request' &&
         github.event.action != 'closed' &&
-        github.base_ref == 'main' &&
-        github.event.pull_request.head.repo.full_name == github.repository
+        github.base_ref == 'main'
       )
 
     outputs:
@@ -640,6 +639,25 @@ jobs:
     timeout-minutes: 20
     needs:
       - validate
+
+    # Trust boundary:
+    # - every open PR may execute the secret-free validation job;
+    # - only main and same-repository PRs may reach Azure deployment.
+    if: >-
+      (
+        github.event_name == 'push' &&
+        github.ref_name == 'main'
+      ) ||
+      (
+        github.event_name == 'workflow_dispatch' &&
+        github.ref_name == 'main'
+      ) ||
+      (
+        github.event_name == 'pull_request' &&
+        github.event.action != 'closed' &&
+        github.base_ref == 'main' &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      )
 
     permissions:
       contents: read

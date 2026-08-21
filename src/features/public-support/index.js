@@ -7,10 +7,11 @@
    - un único POST público al backend;
    - autenticación opcional: visitante anónimo o sesión existente;
    - idempotencia estable por intento/reintento del mismo formulario;
-   - identidad del cliente autenticado en su acceso al panel;
+   - identidad existente por email O teléfono => reutilización sin overwrite;
+   - alta nueva => usuario pendiente + activación; nunca crea cliente;
    - formulario sin exponer automáticamente el nombre del usuario;
    - teléfono limitado a España (+34) con input nacional de 9 dígitos;
-   - una incidencia en curso por cuenta, preparada para enforcement backend;
+   - una incidencia en curso por cuenta, con bloqueo local por email O teléfono;
    - respuesta anti-enumeración neutra para visitante anónimo;
    - CTAs internos diferenciados de WhatsApp;
    - listeners del formulario limitados al mount persistente del Router;
@@ -20,7 +21,8 @@
 import { AppCore } from "../../core/index.js";
 import Http from "../../core/http.js";
 
-export const PUBLIC_SUPPORT_VERSION = "public-support.intake.v7-national-phone-field";
+export const PUBLIC_SUPPORT_VERSION =
+  "public-support.intake.v8-existing-user-no-client";
 export const PUBLIC_TICKET_ENDPOINT = "/api/tickets/public";
 
 const VIEW_ROOT_SELECTOR = "#view-container, [data-router-view='true']";
@@ -252,17 +254,18 @@ function formSection() {
         <h2 id="public-support-title">Abre tu incidencia ahora.</h2>
         <p class="public-support-lead">
           Cuéntame el problema y dejo el caso registrado desde el primer minuto.
-          Si todavía no tienes cuenta, estos mismos datos sirven para crearla.
+          Si ya tienes cuenta, la reutilizamos por correo o teléfono sin modificar tu perfil.
         </p>
 
         <div class="public-support-flow" aria-label="Qué ocurrirá después">
-          <div class="public-support-flow-item"><span>01</span><div><strong>Registramos el caso</strong><p>La incidencia queda asociada a tu correo y preparada para seguimiento.</p></div></div>
-          <div class="public-support-flow-item"><span>02</span><div><strong>Preparamos tu acceso</strong><p>Si es tu primera vez, recibirás un email seguro para definir tu contraseña.</p></div></div>
-          <div class="public-support-flow-item"><span>03</span><div><strong>Entras en tu panel</strong><p>Desde ahí podrás seguir incidencias, facturas y tus datos de cliente.</p></div></div>
+          <div class="public-support-flow-item"><span>01</span><div><strong>Vinculamos el caso</strong><p>Si reconocemos tu correo o teléfono, usamos esa misma cuenta sin sobrescribir tus datos.</p></div></div>
+          <div class="public-support-flow-item"><span>02</span><div><strong>Creamos tu acceso si hace falta</strong><p>Solo si no existe usuario, creamos un usuario pendiente y enviamos el enlace seguro para definir la contraseña.</p></div></div>
+          <div class="public-support-flow-item"><span>03</span><div><strong>Cliente, solo por Onion Support</strong><p>La home no crea fichas de cliente. El equipo de Onion Support las gestiona después cuando corresponda.</p></div></div>
         </div>
 
         <p class="public-support-privacy">
-          Los datos del formulario se usan para gestionar tu incidencia y tu cuenta de cliente.
+          Los datos se usan para gestionar la incidencia y, solo si no existe usuario, crear tu acceso.
+          Este formulario no crea ni modifica fichas de cliente.
         </p>
       </div>
 
@@ -431,7 +434,7 @@ function syncFaq(root) {
     const answer = item.querySelector("p");
     if (answer) {
       answer.textContent =
-        "Completa el formulario de la web. Crearemos la incidencia y, si es tu primera vez, recibirás un email para activar tu acceso y definir la contraseña.";
+        "Completa el formulario de la web. Si tu correo o teléfono ya corresponde a una cuenta, vincularemos la incidencia a esa cuenta sin modificar el perfil. Si no existe usuario, crearemos el usuario pendiente y enviaremos un email de activación. La ficha de cliente la gestiona Onion Support.";
     }
     break;
   }
@@ -576,13 +579,30 @@ function currentFormEmail(form) {
   return text(form?.elements?.namedItem?.("email")?.value).toLowerCase();
 }
 
+function currentFormPhone(form) {
+  return normalizeSpanishPhone(
+    form?.elements?.namedItem?.("phone")?.value
+  );
+}
+
 function lockedEmail(form) {
   return text(form?.dataset?.publicSupportBlockedEmail).toLowerCase();
 }
 
-function lockMatchesCurrentEmail(form) {
-  const locked = lockedEmail(form);
-  return Boolean(locked && locked === currentFormEmail(form));
+function lockedPhone(form) {
+  return text(form?.dataset?.publicSupportBlockedPhone);
+}
+
+function lockMatchesCurrentIdentity(form) {
+  const emailLock = lockedEmail(form);
+  const phoneLock = lockedPhone(form);
+  const emailValue = currentFormEmail(form);
+  const phoneValue = currentFormPhone(form);
+
+  return Boolean(
+    (emailLock && emailLock === emailValue) ||
+    (phoneLock && phoneLock === phoneValue)
+  );
 }
 
 function lockMessage(form) {
@@ -600,7 +620,7 @@ function syncSubmitState(form) {
   if (!form) return false;
 
   const busy = form.dataset.submitting === "true";
-  const locked = lockMatchesCurrentEmail(form);
+  const locked = lockMatchesCurrentIdentity(form);
   const submit = form.querySelector(".public-support-submit");
   const label = form.querySelector("[data-public-support-submit-label]");
 
@@ -614,7 +634,7 @@ function syncSubmitState(form) {
 
   if (label) {
     label.textContent = busy
-      ? "Creando incidencia…"
+      ? "Enviando solicitud…"
       : locked
         ? "Incidencia en curso"
         : "Crear incidencia";
@@ -623,11 +643,23 @@ function syncSubmitState(form) {
   return locked;
 }
 
-function setSubmissionLock(form, emailValue, message, type = "info") {
+function setSubmissionLock(
+  form,
+  emailValue,
+  phoneValue,
+  message,
+  type = "info"
+) {
   const cleanEmail = text(emailValue).toLowerCase();
-  if (!form?.dataset || !cleanEmail) return false;
+  const cleanPhone = normalizeSpanishPhone(phoneValue);
+  if (!form?.dataset || (!cleanEmail && !cleanPhone)) return false;
 
-  form.dataset.publicSupportBlockedEmail = cleanEmail;
+  if (cleanEmail) form.dataset.publicSupportBlockedEmail = cleanEmail;
+  else delete form.dataset.publicSupportBlockedEmail;
+
+  if (cleanPhone) form.dataset.publicSupportBlockedPhone = cleanPhone;
+  else delete form.dataset.publicSupportBlockedPhone;
+
   form.dataset.publicSupportBlockedMessage = text(message);
   form.dataset.publicSupportBlockedStatus = text(type, "info");
   syncSubmitState(form);
@@ -635,16 +667,20 @@ function setSubmissionLock(form, emailValue, message, type = "info") {
 }
 
 function showSubmissionLock(form) {
-  if (!lockMatchesCurrentEmail(form)) return false;
+  if (!lockMatchesCurrentIdentity(form)) return false;
   status(form, lockMessage(form), lockStatusType(form));
   syncSubmitState(form);
   return true;
 }
 
+function neutralSubmissionMessage() {
+  return "Solicitud recibida. Si los datos identifican de forma coherente una cuenta existente, la solicitud se vinculará a esa cuenta sin modificar el perfil. Si no existe usuario, recibirás un email para activar el nuevo acceso. No se crean fichas de cliente desde este formulario.";
+}
+
 function activeTicketMessage() {
   return session().authenticated === true
     ? "Ya tienes una incidencia en curso. Para evitar duplicados, no puedes abrir otra hasta que la actual se cierre. Puedes seguirla desde tu panel."
-    : "Solicitud recibida. Si ya existe una incidencia en curso, no se abrirá otra. Revisa tu correo o entra en tu panel para continuar.";
+    : "Solicitud recibida. Si los datos corresponden a una cuenta con una incidencia en curso, no se abrirá otra. Si ya tienes acceso, puedes entrar en tu panel.";
 }
 
 function hasFullName(value = "") {
@@ -770,7 +806,7 @@ function neutralAccepted(response) {
 
 function successMessage(response) {
   if (neutralAccepted(response)) {
-    return "Solicitud recibida. Revisa tu correo para continuar. Si ya había una incidencia en curso, no se abrirá otra.";
+    return neutralSubmissionMessage();
   }
 
   const id = ticketId(response);
@@ -778,7 +814,7 @@ function successMessage(response) {
 
   return activation(response) === false
     ? `${prefix} Ya puedes consultarla desde tu panel.`
-    : `${prefix} Revisa tu correo: te enviaremos el enlace seguro para activar tu acceso y crear la contraseña.`;
+    : `${prefix} Revisa tu correo para activar tu usuario. La ficha de cliente, si corresponde, la gestiona Onion Support.`;
 }
 
 function errorMessage(error) {
@@ -787,8 +823,8 @@ function errorMessage(error) {
   if (code === 429) return "Has realizado varias solicitudes seguidas. Espera un momento y vuelve a intentarlo.";
   if (code === 400 || code === 422) return "Hay algún dato que el servidor no ha podido validar. Revisa el formulario.";
   if ([502, 503, 504].includes(code)) return "El servicio no ha podido completar la solicitud. Espera unos segundos y vuelve a intentarlo.";
-  if ([404, 405, 501].includes(code)) return "El alta directa no está disponible ahora mismo. Puedes contactar por WhatsApp mientras tanto.";
-  return "No se pudo crear la incidencia. Comprueba tu conexión e inténtalo de nuevo.";
+  if ([404, 405, 501].includes(code)) return "El formulario de incidencias no está disponible ahora mismo. Puedes contactar por WhatsApp mientras tanto.";
+  return "No se pudo enviar la solicitud. Comprueba tu conexión e inténtalo de nuevo.";
 }
 
 function clearAcceptedIssueFields(form) {
@@ -811,9 +847,15 @@ async function send(form) {
   status(form);
 
   if (text(form.elements.namedItem("website")?.value)) {
-    const message = "Incidencia recibida. Revisa tu correo para continuar.";
+    const message = neutralSubmissionMessage();
     status(form, message, "success");
-    setSubmissionLock(form, currentFormEmail(form), message, "success");
+    setSubmissionLock(
+      form,
+      currentFormEmail(form),
+      currentFormPhone(form),
+      message,
+      "success"
+    );
     return true;
   }
 
@@ -843,7 +885,7 @@ async function send(form) {
     const message = successMessage(response);
     status(form, message, "success");
 
-    window.dispatchEvent(new CustomEvent("onion:public-support:created", {
+    window.dispatchEvent(new CustomEvent("onion:public-support:accepted", {
       detail: {
         version: PUBLIC_SUPPORT_VERSION,
         ticketId: ticketId(response) || null,
@@ -852,7 +894,13 @@ async function send(form) {
 
     clearIdempotency(form);
     clearAcceptedIssueFields(form);
-    setSubmissionLock(form, body.email, message, "success");
+    setSubmissionLock(
+      form,
+      body.email,
+      body.phone,
+      message,
+      "success"
+    );
     return true;
   } catch (error) {
     const isActive = activeTicketConflict(error);
@@ -860,7 +908,13 @@ async function send(form) {
     status(form, message, isActive ? "info" : "error");
 
     if (isActive) {
-      setSubmissionLock(form, body.email, message, "info");
+      setSubmissionLock(
+        form,
+        body.email,
+        body.phone,
+        message,
+        "info"
+      );
       window.dispatchEvent(new CustomEvent("onion:public-support:active-ticket", {
         detail: {
           version: PUBLIC_SUPPORT_VERSION,

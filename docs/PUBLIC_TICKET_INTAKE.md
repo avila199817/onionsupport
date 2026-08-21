@@ -2,27 +2,31 @@
 
 ## Objetivo
 
-La home pública envía una única solicitud al backend. El navegador **no** crea por separado un usuario, un cliente y después un ticket.
-
-Endpoint productivo:
+La home pública envía una única solicitud al backend mediante:
 
 `POST /api/tickets/public`
 
-El backend orquesta:
+El navegador **no** crea por separado usuarios, clientes ni tickets. El backend es la única autoridad de identidad y de vinculación.
 
-1. Validación y normalización de identidad/contacto.
-2. Rate limit por IP y email.
-3. Resolución segura de identidad.
-4. Creación o reutilización de usuario/cliente cuando corresponda.
-5. Creación idempotente de la incidencia vinculada a la identidad correcta.
-6. Emisión del email de activación cuando corresponda.
+El endpoint mantiene **autenticación opcional**: usa la sesión cuando existe y aplica resolución anónima segura por datos de contacto cuando no existe sesión.
+
+Contrato productivo final:
+
+1. Valida y normaliza identidad/contacto.
+2. Aplica rate limit por IP e identidad.
+3. Resuelve la cuenta por sesión autenticada o, en modo anónimo, por **correo o teléfono**.
+4. Si ya existe usuario, reutiliza ese mismo usuario **sin crear ni sobrescribir nada del perfil**.
+5. Si no existe usuario por ninguno de los dos identificadores, crea únicamente un usuario `user` pendiente y su activación.
+6. La home pública **nunca crea clientes**. La ficha de cliente la crea o gestiona posteriormente el personal de Onion Support cuando corresponda.
+7. Crea la incidencia con el mismo generador canónico de IDs que el panel.
+8. Mantiene idempotencia y la política de una incidencia en curso por cuenta.
 
 ## Request
 
 ```json
 {
   "fullName": "Nombre Apellidos",
-  "email": "cliente@dominio.com",
+  "email": "usuario@dominio.com",
   "phone": "+34 600 000 000",
   "address": "Calle, número, CP, localidad",
   "subject": "El portátil no arranca",
@@ -32,95 +36,120 @@ El backend orquesta:
 }
 ```
 
-El frontend no envía roles, `userId`, `clienteId`, estado de cuenta, tokens, flags de activación ni IDs de ticket elegidos por el cliente.
+El frontend no envía roles, `userId`, `clienteId`, estado de cuenta, tokens, flags de activación ni IDs de ticket elegidos por el visitante.
 
-Cada envío lleva además una cabecera `Idempotency-Key` con formato `YYYYMMDD:<nonce>`. La misma key se conserva si una petición falla y el usuario reintenta sin modificar el formulario; al editar cualquier campo se genera una key nueva. El backend mantiene además un fallback determinista de idempotencia.
+Cada envío lleva una cabecera `Idempotency-Key` con formato `YYYYMMDD:<nonce>`. La misma key se conserva al reintentar la misma solicitud sin modificar el formulario; al editar cualquier campo se genera una nueva. La idempotencia no participa en el formato del ID visible de la incidencia.
 
-### Alcance geográfico inicial
+## Alcance telefónico
 
-La primera versión del alta pública acepta únicamente teléfonos de España.
+La versión actual acepta únicamente teléfonos de España.
 
-- El formulario parte de `+34` por defecto.
-- El frontend normaliza el teléfono a `+34 XXX XXX XXX`.
-- Deben existir exactamente 9 dígitos nacionales después del prefijo de España.
-- Para este formulario de contacto se admite numeración española estándar cuyo primer dígito nacional sea `6`, `7`, `8` o `9`.
-- El backend vuelve a validar y normalizar el teléfono; nunca confía sólo en la validación del navegador.
-- Si en el futuro se habilitan otros países, esta restricción debe convertirse en una política explícita compartida entre frontend y backend.
+- La interfaz muestra `+34` como prefijo visual externo al input.
+- El input contiene únicamente los 9 dígitos nacionales, con formato visual `XXX XXX XXX`.
+- El payload se normaliza a `+34 XXX XXX XXX`.
+- Se admite numeración española cuyo primer dígito nacional sea `6`, `7`, `8` o `9`.
+- El backend vuelve a validar y normalizar el teléfono y nunca confía únicamente en el navegador.
 
-### CTA y canal alternativo
+## CTA y canal alternativo
 
-Los CTA azules de la home (`Abrir incidencia`) son navegación interna hacia el formulario `#incidencia`; no representan WhatsApp y no deben usar su icono.
+Los CTA azules de la home (`Abrir incidencia`) navegan internamente a `#incidencia`; no representan WhatsApp y no deben usar su icono.
 
 WhatsApp permanece como canal alternativo independiente mediante sus enlaces y el botón flotante verde.
 
-### Una incidencia en curso por cuenta
+## Una incidencia en curso por cuenta
 
-La interfaz pública comunica de forma explícita la política objetivo de **una única incidencia en curso por cuenta** para reducir duplicados y spam.
+La política productiva es **una única incidencia en curso por cuenta**.
 
-- Tras una solicitud aceptada, el frontend bloquea nuevos envíos consecutivos para el mismo correo durante la vista actual y muestra `Incidencia en curso`.
-- Si el backend responde con un conflicto canónico de incidencia activa para una sesión autenticada, el frontend informa de que ya existe una incidencia en curso y remite al panel.
-- Para visitantes anónimos, la respuesta debe seguir siendo neutra: nunca se confirma si un correo concreto tiene cuenta o incidencia abierta.
-- El enforcement definitivo y resistente a recargas, otros navegadores o peticiones directas pertenece al backend. El frontend por sí solo no se considera una barrera anti-spam suficiente.
+- El backend identifica la cuenta por `userId` canónico y es la autoridad definitiva.
+- El frontend, después de una solicitud aceptada, bloquea durante la vista actual nuevos envíos si coincide **el mismo correo o el mismo teléfono**.
+- Cambiar solo el correo manteniendo el mismo teléfono, o viceversa, no debe levantar el bloqueo local.
+- Si el backend devuelve el conflicto canónico `PUBLIC_TICKET_ACTIVE_EXISTS`, una sesión autenticada puede mostrar el conflicto explícitamente y remitir al panel.
+- En modo anónimo la respuesta permanece neutra para evitar enumeración de cuentas o incidencias.
 
 ## Reglas de identidad
 
 ### Sesión autenticada
 
-El mismo endpoint admite autenticación opcional. Si la SPA tiene una sesión válida, el POST permite el `Authorization` normal del cliente HTTP y el backend toma la identidad de seguridad de la sesión. El correo escrito en el formulario nunca cambia el propietario del ticket.
+Si existe sesión válida, el endpoint admite el `Authorization` normal del cliente HTTP y la identidad de seguridad de la sesión manda sobre los campos escritos en el formulario.
 
-Si no existe sesión, el mismo endpoint funciona de forma anónima y aplica el flujo de verificación por email.
+El correo o teléfono introducido en el formulario no cambia el propietario de una incidencia autenticada ni sobrescribe el perfil.
 
-La home pública no precarga automáticamente el nombre completo del usuario autenticado en el formulario; el cliente lo introduce explícitamente. El acceso al panel sí puede mostrar la identidad de sesión según el comportamiento normal de la cabecera.
+La home no precarga automáticamente el nombre completo del usuario autenticado. Puede precargar otros datos de contacto ya disponibles únicamente como ayuda de formulario; el backend sigue siendo la autoridad canónica.
 
-### Correo nuevo
+### Visitante anónimo: resolución por correo O teléfono
 
-El backend crea una cuenta `user` pendiente, su cliente pendiente, la incidencia y una activación de un solo uso.
+El backend busca coincidencias canónicas por ambos identificadores.
 
-El enlace enviado por email apunta al flujo público de activación bajo:
+- Si solo coincide el correo, reutiliza ese usuario.
+- Si solo coincide el teléfono, reutiliza ese usuario.
+- Si correo y teléfono coinciden con el mismo usuario, reutiliza ese usuario.
+- Si el correo apunta a un usuario y el teléfono a otro distinto, la identidad es inconsistente: no se crea ticket, no se crea usuario y no se modifica ninguna cuenta.
+- La respuesta exterior de un visitante anónimo no revela cuál de estos casos ocurrió.
+
+### Usuario nuevo
+
+Solo cuando **no existe ningún usuario por correo ni por teléfono**, el backend crea:
+
+- un usuario `user` pendiente;
+- los lookups técnicos necesarios;
+- la incidencia;
+- una activación de un solo uso.
+
+El usuario nuevo nace con `clienteId: null`. No se crea documento de cliente desde la home.
+
+El enlace enviado por email apunta al flujo público:
 
 `https://www.onionsupport.com/activate-account/<token>`
 
-La vista frontend mantiene además compatibilidad con `?token=`. El token en claro sólo viaja en el correo y en memoria durante la orquestación; en Cosmos se persiste SHA-256 y el lookup `activate:<digest>`.
+La vista mantiene compatibilidad con `?token=`. El token en claro solo viaja en el email y en memoria durante la orquestación; en Cosmos se persiste su representación segura según el contrato backend.
 
-Al completar la contraseña se activan coordinadamente usuario y cliente.
+Al definir la contraseña se activa el **usuario**. La creación o gestión posterior de la ficha de cliente corresponde al personal de Onion Support y queda fuera del intake público.
 
-### Correo existente pero todavía no activado
+### Usuario ya existente, esté activo o pendiente
 
-Se reutilizan el mismo `userId` y `clienteId`. No se crean duplicados. El backend puede reparar lookups legacy y rota la activación antes de reenviar el email.
+La regla es estricta: **reutilizar sin overwrite**.
 
-Los datos canónicos ya existentes de una identidad pendiente no se sobrescriben simplemente con lo escrito en un formulario público posterior.
+El intake público no cambia nombre, correo, teléfono, dirección, username, estado, contraseña, roles ni `clienteId` del usuario existente. Tampoco crea un usuario duplicado.
 
-### Correo perteneciente a una cuenta activa sin sesión
+La solicitud se vincula a ese mismo `userId`. Si el usuario ya posee una relación de cliente válida, el backend puede reutilizarla en la incidencia; si no existe, la incidencia funciona con `userId` y `clienteId: null`.
 
-No se modifica el perfil ni se vincula silenciosamente una incidencia a una cuenta activa sólo porque alguien conozca su email.
+El intake público no crea ni reemplaza el cliente y no rota ni emite una activación nueva para un usuario que ya existe.
 
-El backend no crea el ticket y envía un aviso seguro para iniciar sesión. La respuesta HTTP anónima sigue siendo neutra para impedir enumeración de usuarios.
+### Cuenta desactivada
 
-### Cuenta desactivada o identidad inconsistente
+Una cuenta existente sigue resolviéndose como la misma identidad y no se sobrescribe desde el formulario. Cualquier política adicional sobre acceso o tratamiento interno pertenece al backend/personal de Onion Support, no al navegador.
 
-No se realizan mutaciones desde el intake público y la respuesta exterior no revela el estado interno de la cuenta.
+### Identidad inconsistente
+
+Si correo y teléfono identifican cuentas distintas, no se realiza ninguna mutación. La respuesta anónima permanece neutra para no revelar qué identificador existe.
 
 ## Ticket
 
-El ticket público reutiliza el builder canónico de las incidencias privadas.
+El ticket público reutiliza el contrato canónico de incidencias del panel.
 
+- ID visible: `INC-YYYYMMDD-XXXXXX`.
+- El sufijo tiene exactamente 6 caracteres hexadecimales, igual que en el panel.
+- La idempotencia se gestiona por separado y nunca amplía, sustituye ni reserva IDs visibles.
 - `subject`: asunto normalizado.
 - `description`: cuerpo normalizado.
 - `status`: `pending`.
 - `priority`: `medium`.
 - `category`: `general`.
-- `source` canónico persistido: `public_home`.
+- `source` persistido: `public_home`.
 - `channel`: `web`.
 - `requesterSnapshot`: generado desde identidad canónica del servidor.
-- `userId` / `clienteId`: asignados y verificados exclusivamente por backend.
+- `userId`: obligatorio y asignado por backend.
+- `clienteId`: opcional; solo se reutiliza si ya existe una relación válida. La home no lo crea.
 - técnico/asignación: política canónica del backend.
 - adjuntos en el intake inicial: ninguno.
 
-La `Idempotency-Key` en claro no se persiste; el ticket conserva únicamente hashes necesarios para replay/consistencia.
+La `Idempotency-Key` en claro no se persiste como identificador visible del ticket; se conservan únicamente los hashes técnicos necesarios para replay/consistencia.
 
 ## Respuesta pública
 
-Para peticiones anónimas, la respuesta de éxito es deliberadamente indistinguible entre cuenta nueva, pendiente, activa, desactivada o determinados estados de consistencia. Ejemplo:
+Para peticiones anónimas, la respuesta exterior es deliberadamente neutra. No confirma si el usuario era nuevo, activo, pendiente, desactivado, si coincidió por correo o por teléfono, ni si se detectó una identidad inconsistente.
+
+Forma canónica:
 
 ```json
 {
@@ -134,28 +163,36 @@ Para peticiones anónimas, la respuesta de éxito es deliberadamente indistingui
 }
 ```
 
-Por tanto, el frontend no debe afirmar que se creó una incidencia cuando recibe esta forma neutra; muestra simplemente que la solicitud fue recibida y que debe revisarse el correo. Puede añadir de forma genérica que, si ya existía una incidencia en curso, no se abrirá otra, sin revelar el estado concreto de ese correo.
+Por tanto, el frontend **no afirma que se creó una incidencia** cuando recibe esta forma neutra. Comunica de manera genérica que:
+
+- si los datos identifican una cuenta existente, se reutiliza sin sobrescribir el perfil;
+- si no existe usuario, se crea el usuario pendiente y se envía la activación;
+- no se crean fichas de cliente desde la home;
+- si ya existe una incidencia en curso, no se abre otra.
 
 En una sesión autenticada el backend puede devolver el identificador real del ticket y `activationRequired: false`, permitiendo indicar que la incidencia ya está disponible en el panel.
 
-Nunca se devuelven tokens, hashes, información interna de Cosmos, datos de otras cuentas ni detalles que permitan enumerar usuarios.
+Nunca se devuelven tokens, hashes, información interna de Cosmos, datos de otras cuentas ni detalles útiles para enumeración.
 
 ## Seguridad obligatoria
 
-- Rate limit específico por IP y por email, además del limiter global de API.
+- Rate limit específico por IP e identidad, además del limiter global de API.
 - Límites de longitud y normalización server-side.
-- Validación de email/teléfono/dirección además de la validación del navegador.
-- Teléfono normalizado y validado de nuevo en backend según el alcance geográfico activo.
+- Validación de email, teléfono y dirección además de la validación del navegador.
+- Teléfono normalizado y validado de nuevo en backend.
 - Honeypot y controles anti-spam/abuso.
-- No confiar en `source`, `channel` ni ningún identificador enviado por el cliente para autorización.
-- Nunca sobrescribir una cuenta activa desde una petición pública no autenticada.
-- Token de activación aleatorio, de un solo uso, con expiración y SHA-256 en base de datos.
+- No confiar en `source`, `channel` ni identificadores enviados por el cliente para autorización.
+- Nunca sobrescribir una cuenta existente desde una petición pública.
+- Nunca crear un cliente desde el intake público.
+- Token de activación aleatorio, de un solo uso y con expiración únicamente para altas nuevas.
 - Redacción de tokens y PII sensible en logs/respuestas.
 - Idempotencia ante reintentos razonables.
 - `Idempotency-Key` permitida explícitamente por la política CORS del backend.
 
-## Consistencia
+## Consistencia y compensaciones
 
-Usuarios, clientes, lookups y tickets viven en contenedores/particiones diferentes, por lo que el flujo es una **transacción lógica** con compensaciones y estados recuperables; no se simula una transacción Cosmos cross-container inexistente.
+Usuarios, lookups y tickets viven en contenedores/particiones diferentes, por lo que el flujo es una **transacción lógica** con compensaciones; no se simula una transacción Cosmos cross-container inexistente.
 
-El correo de activación se envía después de persistir el estado necesario. Si falla ese correo en una creación `NEW/PENDING`, el orquestador elimina el ticket recién creado cuando puede hacerlo de forma segura y mantiene la identidad pendiente recuperable para un reintento posterior.
+El contenedor de clientes es de solo lectura/reutilización para este flujo: puede consultarse una relación ya existente, pero la home no crea ni modifica clientes.
+
+Para una identidad `NEW`, el correo de activación es crítico porque contiene el token raw. Si ese correo falla después de crear el ticket, el backend intenta revertir de forma segura el ticket y la identidad recién provisionada. Los correos informativos de creación de incidencia son fail-soft y no cambian la autoridad de los datos persistidos.

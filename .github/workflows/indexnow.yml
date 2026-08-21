@@ -33,12 +33,59 @@ jobs:
        github.event.workflow_run.event == 'push')
 
     steps:
+      - name: Resolve immutable revision
+        id: revision
+        env:
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha || '' }}
+          DISPATCH_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            expected="${WORKFLOW_RUN_SHA}"
+          else
+            expected="${DISPATCH_SHA}"
+          fi
+
+          if [[ ! "${expected}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error title=SHA inválido::Revision IndexNow no inmutable: '${expected}'."
+            exit 1
+          fi
+
+          echo "sha=${expected}" >> "${GITHUB_OUTPUT}"
+          echo "IndexNow revision: ${expected}"
+
       - name: Checkout deployed revision
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || 'main' }}
+          ref: ${{ steps.revision.outputs.sha }}
           fetch-depth: 2
+          submodules: false
+          lfs: false
           persist-credentials: false
+
+      - name: Assert immutable checkout
+        env:
+          EXPECTED_SHA: ${{ steps.revision.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          actual="$(git rev-parse HEAD)"
+
+          if [[ "${actual}" != "${EXPECTED_SHA}" ]]; then
+            echo "::error title=Checkout IndexNow incorrecto::Esperado ${EXPECTED_SHA}, obtenido ${actual}."
+            exit 1
+          fi
+
+          if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
+            echo "::error title=Checkout IndexNow sucio::Se detectaron mutaciones inesperadas."
+            git status --short
+            exit 1
+          fi
+
+          echo "Immutable IndexNow checkout: ${actual}"
 
       - name: Validate IndexNow key
         run: |

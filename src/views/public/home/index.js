@@ -2,48 +2,37 @@
    Onion Support - Public Home View Controller
    Archivo: /src/views/public/home/index.js
 
-   Responsabilidad:
-   - Controlador de la landing pública de Onion Support 2026.
-   - Montar el template recibido desde ./template.js.
-   - Leer refs por contrato data-*.
-   - Activar menú móvil accesible.
-   - Activar scroll suave interno.
-   - Activar navegación por sección actual.
-   - Activar reveal progresivo opcional.
-   - Activar formulario diagnóstico opcional vía WhatsApp.
-   - Emitir eventos CustomEvent para tracking sin HTTP.
-   - Gestionar destroy limpio.
-   - Sin construir HTML inline.
-   - Sin Auth obligatorio.
-   - Sin HTTP.
-   - Sin Store.
-   - Sin Toast.
-   - Sin dependencias externas.
+   Runtime 2026 orientado a presupuesto de frame:
+   - Un único scroll host y un único listener de scroll.
+   - Como máximo un requestAnimationFrame pendiente por pipeline.
+   - Geometría estructural cacheada e invalidada con ResizeObserver/resize.
+   - Sin polling/heartbeat, wheel/touchmove/keydown ni document-scroll global.
+   - Lecturas de layout separadas de escrituras visuales.
+   - IntersectionObserver para sección activa, reveal y footer.
+   - Cleanup completo y contrato público compatible con el Router.
 ========================================================= */
 
 import { AppCore } from "../../../core/index.js";
 import createPublicHomeTemplate from "./template.js";
 
-export const PUBLIC_HOME_VIEW_VERSION = "public.home.view.controller.final.productivo.2026.23.history-replace";
+export const PUBLIC_HOME_VIEW_VERSION =
+  "public.home.view.controller.2026.24.frame-budgeted-scroll";
 
 const SOURCE = "public.home.view";
-
+const DEFAULT_SCROLL_OFFSET = 92;
+const ACTIVE_ROOT_MARGIN = "-34% 0px -54% 0px";
 const INSTANCES = new WeakMap();
-
+const STYLE_CACHE = new WeakMap();
 let lastInstance = null;
 
-/* =========================================================
-   CONSTANTS
-========================================================= */
-
-const BODY_CLASSES = {
+const BODY_CLASSES = Object.freeze({
   screen: "public-home-screen",
   mounted: "public-home-mounted",
   menuOpen: "public-home-menu-open",
   noScroll: "public-home-no-scroll",
-};
+});
 
-const CLASSES = {
+const CLASSES = Object.freeze({
   mounted: "is-mounted",
   ready: "is-ready",
   active: "is-active",
@@ -51,14 +40,12 @@ const CLASSES = {
   menuOpen: "is-menu-open",
   scrolled: "is-scrolled",
   footerVisible: "is-footer-visible",
-  submitting: "is-submitting",
-  invalid: "is-invalid",
   copied: "is-copied",
   counterReady: "is-counter-ready",
   magnetic: "is-magnetic",
-};
+});
 
-const SELECTORS = {
+const SELECTORS = Object.freeze({
   root: "[data-public-home]",
   nav: "[data-public-home-nav]",
   navToggle: "[data-public-home-nav-toggle]",
@@ -70,21 +57,12 @@ const SELECTORS = {
   reveal: "[data-public-home-reveal], [data-reveal]",
   cta: "[data-public-home-cta]",
   login: "[data-public-home-login]",
-  diagnosticForm: "[data-public-home-diagnostic-form]",
-  formStatus: "[data-public-home-form-status]",
   copyAction: "[data-public-home-copy]",
   metricCounter: "[data-public-home-counter]",
   magnetic: "[data-public-home-magnetic]",
   customScrollbar: "[data-public-home-scrollbar]",
   customScrollbarThumb: "[data-public-home-scrollbar-thumb]",
-};
-
-const DEFAULT_SCROLL_OFFSET = 92;
-const ACTIVE_ROOT_MARGIN = "-34% 0px -54% 0px";
-
-/* =========================================================
-   BASICS
-========================================================= */
+});
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -94,17 +72,13 @@ function isFunction(value) {
   return typeof value === "function";
 }
 
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
 function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
+  return (
+    String(value ?? "")
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim() || fallback
+  );
 }
 
 function redact(value = "") {
@@ -114,91 +88,102 @@ function redact(value = "") {
       "$1***"
     )
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***")
-    .replace(
-      /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
-      "***"
-    );
+    .replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "***");
 }
 
-function isDomNode(value = null) {
-  return Boolean(
-    isBrowser() &&
-      value &&
-      typeof Node !== "undefined" &&
-      value instanceof Node
-  );
-}
-
-function clearNode(node = null) {
-  if (!node) return false;
-
+function toArray(value) {
   try {
-    node.replaceChildren();
-    return true;
+    return Array.from(value || []).filter(Boolean);
   } catch {
-    try {
-      node.textContent = "";
-      return true;
-    } catch {
-      return false;
-    }
+    return [];
   }
 }
 
-function setBodyClass(className = "", enabled = false) {
-  if (!isBrowser() || !className) return false;
+function requestFrame(callback) {
+  if (!isFunction(callback)) return 0;
+  return isBrowser() && isFunction(window.requestAnimationFrame)
+    ? window.requestAnimationFrame(callback)
+    : setTimeout(callback, 16);
+}
 
-  try {
-    document.body.classList.toggle(className, Boolean(enabled));
-    return true;
-  } catch {
-    return false;
+function cancelFrame(id = 0) {
+  if (!id) return;
+  if (isBrowser() && isFunction(window.cancelAnimationFrame)) {
+    window.cancelAnimationFrame(id);
+  } else {
+    clearTimeout(id);
   }
 }
 
-function safeDataset(node = null, key = "", value = "") {
-  if (!node || !key) return false;
-
-  try {
-    node.dataset[key] = String(value);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function removeDataset(node = null, key = "") {
-  if (!node || !key) return false;
-
-  try {
-    delete node.dataset[key];
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function focusSafe(node = null, options = {}) {
-  if (!node) return false;
-
-  try {
-    node.focus({
-      preventScroll: options.preventScroll !== false,
-    });
-  } catch {
-    try {
-      node.focus?.();
-    } catch {
-      return false;
-    }
-  }
-
+function addEvent(cleanups, target, type, listener, options) {
+  if (!target?.addEventListener || !isFunction(listener)) return false;
+  target.addEventListener(type, listener, options);
+  cleanups.push(() => target.removeEventListener(type, listener, options));
   return true;
 }
 
-function getReducedMotion() {
-  if (!isBrowser() || !isFunction(window.matchMedia)) return false;
+function setBodyClass(className, enabled) {
+  document.body?.classList.toggle(className, Boolean(enabled));
+}
 
+function setDataset(node, key, value) {
+  if (!node?.dataset || !key) return false;
+  const next = String(value);
+  if (node.dataset[key] === next) return false;
+  node.dataset[key] = next;
+  return true;
+}
+
+function removeDataset(node, key) {
+  if (!node?.dataset || !(key in node.dataset)) return false;
+  delete node.dataset[key];
+  return true;
+}
+
+function setClass(node, className, enabled) {
+  if (!node?.classList || !className) return false;
+  const next = Boolean(enabled);
+  if (node.classList.contains(className) === next) return false;
+  node.classList.toggle(className, next);
+  return true;
+}
+
+function setCssMetric(node, key, value) {
+  if (!node?.style || !key) return false;
+  let cache = STYLE_CACHE.get(node);
+  if (!cache) {
+    cache = new Map();
+    STYLE_CACHE.set(node, cache);
+  }
+  const next = String(value);
+  if (cache.get(key) === next) return false;
+  cache.set(key, next);
+  node.style.setProperty(key, next);
+  return true;
+}
+
+function removeCssMetric(node, key) {
+  if (!node?.style || !key) return;
+  STYLE_CACHE.get(node)?.delete(key);
+  node.style.removeProperty(key);
+}
+
+function dispatchHomeEvent(root, name, detail = {}) {
+  if (!root || !name) return false;
+  try {
+    return root.dispatchEvent(
+      new CustomEvent(name, {
+        bubbles: true,
+        cancelable: true,
+        detail: { source: SOURCE, version: PUBLIC_HOME_VIEW_VERSION, ...detail },
+      })
+    );
+  } catch {
+    return false;
+  }
+}
+
+function reducedMotion() {
   try {
     return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   } catch {
@@ -206,197 +191,62 @@ function getReducedMotion() {
   }
 }
 
-function requestFrame(callback) {
-  if (!isFunction(callback)) return 0;
-
-  if (isBrowser() && isFunction(window.requestAnimationFrame)) {
-    return window.requestAnimationFrame(callback);
-  }
-
-  return setTimeout(callback, 16);
-}
-
-function cancelFrame(id = 0) {
-  if (!id) return false;
-
+function focusSafe(node) {
+  if (!node?.focus) return false;
   try {
-    if (isBrowser() && isFunction(window.cancelAnimationFrame)) {
-      window.cancelAnimationFrame(id);
-    } else {
-      clearTimeout(id);
-    }
-
-    return true;
+    node.focus({ preventScroll: true });
   } catch {
-    return false;
-  }
-}
-
-/* =========================================================
-   ROUTER / CONTEXT
-========================================================= */
-
-function getRouter(context = {}) {
-  return (
-    context.Router ||
-    context.router ||
-    AppCore.router ||
-    AppCore.Router ||
-    AppCore.getModule?.("router") ||
-    null
-  );
-}
-
-function getAuth(context = {}) {
-  return (
-    context.Auth ||
-    context.auth ||
-    AppCore.auth ||
-    AppCore.Auth ||
-    AppCore.getModule?.("auth") ||
-    null
-  );
-}
-
-/* =========================================================
-   EVENTS
-========================================================= */
-
-function addEvent(cleanups, target, type, listener, options) {
-  if (!target || !isFunction(target.addEventListener) || !isFunction(listener)) {
-    return false;
-  }
-
-  target.addEventListener(type, listener, options);
-
-  cleanups.push(() => {
     try {
-      target.removeEventListener(type, listener, options);
+      node.focus();
     } catch {
-      // noop
+      return false;
     }
-  });
-
+  }
   return true;
 }
 
-function dispatchHomeEvent(root = null, name = "", detail = {}) {
-  if (!isBrowser() || !root || !name) return false;
-
-  try {
-    const event = new CustomEvent(name, {
-      bubbles: true,
-      cancelable: true,
-      detail: {
-        source: SOURCE,
-        version: PUBLIC_HOME_VIEW_VERSION,
-        ...detail,
-      },
-    });
-
-    return root.dispatchEvent(event);
-  } catch {
-    return false;
-  }
-}
-
-function isPlainLeftClick(event = null) {
-  if (!event) return false;
-
-  return (
-    event.button === 0 &&
-    !event.metaKey &&
-    !event.ctrlKey &&
-    !event.shiftKey &&
-    !event.altKey
-  );
-}
-
-/* =========================================================
-   TEMPLATE
-========================================================= */
-
-function htmlToElement(html = "") {
-  if (!isBrowser()) return null;
-
+function htmlToElement(html) {
   const template = document.createElement("template");
   template.innerHTML = String(html || "").trim();
-
   return template.content.firstElementChild || null;
 }
 
 function resolveTemplate() {
   if (!isFunction(createPublicHomeTemplate)) {
-    throw new Error(
-      "[PublicHomeView] template.js debe exportar createPublicHomeTemplate()."
-    );
+    throw new Error("[PublicHomeView] template.js debe exportar createPublicHomeTemplate().");
   }
-
-  const view = createPublicHomeTemplate();
-
-  if (isDomNode(view)) {
-    return view;
+  const output = createPublicHomeTemplate();
+  if (typeof Node !== "undefined" && output instanceof Node) return output;
+  if (typeof output === "string") {
+    const node = htmlToElement(output);
+    if (node) return node;
   }
-
-  if (typeof view === "string") {
-    const node = htmlToElement(view);
-
-    if (isDomNode(node)) {
-      return node;
-    }
-  }
-
-  throw new Error(
-    "[PublicHomeView] createPublicHomeTemplate() debe devolver un nodo DOM o HTML string válido."
-  );
+  throw new Error("[PublicHomeView] template público inválido.");
 }
 
 function mountTemplate(container) {
   const view = resolveTemplate();
-
-  clearNode(container);
-  container.appendChild(view);
-
+  container.replaceChildren(view);
   return view;
 }
 
-/* =========================================================
-   REFS
-========================================================= */
-
-function toArray(list = null) {
-  return Array.from(list || []).filter(Boolean);
-}
-
-function getRefs(view = null) {
-  if (!view) {
-    throw new Error("[PublicHomeView] view inválida.");
-  }
-
+function getRefs(view) {
   const root = view.matches?.(SELECTORS.root)
     ? view
     : view.querySelector?.(SELECTORS.root) || view;
-
-  if (!root) {
-    throw new Error("[PublicHomeView] falta raíz [data-public-home].");
-  }
+  if (!root) throw new Error("[PublicHomeView] falta [data-public-home].");
 
   const refs = {
     view,
     root,
-
     nav: root.querySelector(SELECTORS.nav),
     navToggle: root.querySelector(SELECTORS.navToggle),
     navMenu: root.querySelector(SELECTORS.navMenu),
     navPanel: root.querySelector(SELECTORS.navPanel),
-
     navLinks: toArray(root.querySelectorAll(SELECTORS.navLink)),
     scrollLinks: toArray(root.querySelectorAll(SELECTORS.scrollLink)),
     sections: toArray(root.querySelectorAll(SELECTORS.section)),
     revealItems: toArray(root.querySelectorAll(SELECTORS.reveal)),
-
-    diagnosticForm: root.querySelector(SELECTORS.diagnosticForm),
-    formStatus: root.querySelector(SELECTORS.formStatus),
     copyActions: toArray(root.querySelectorAll(SELECTORS.copyAction)),
     metricCounters: toArray(root.querySelectorAll(SELECTORS.metricCounter)),
     magneticItems: toArray(root.querySelectorAll(SELECTORS.magnetic)),
@@ -406,418 +256,228 @@ function getRefs(view = null) {
 
   if (!refs.navLinks.length) {
     refs.navLinks = toArray(
-      root.querySelectorAll(
-        `${SELECTORS.nav} a[href], ${SELECTORS.navMenu} a[href]`
-      )
+      root.querySelectorAll(`${SELECTORS.nav} a[href], ${SELECTORS.navMenu} a[href]`)
     );
   }
-
   if (!refs.scrollLinks.length) {
     refs.scrollLinks = toArray(root.querySelectorAll("a[href^='#']"));
   }
-
   if (!refs.sections.length) {
     refs.sections = toArray(root.querySelectorAll("section[id], [id][data-section]"));
   }
-
   return refs;
 }
 
-/* =========================================================
-   URL / HASH
-========================================================= */
-
-function decodeHashId(hash = "") {
-  const raw = String(hash || "");
-
-  if (!raw || raw === "#") return "";
-
-  const clean = raw.startsWith("#") ? raw.slice(1) : raw;
-
-  try {
-    return decodeURIComponent(clean);
-  } catch {
-    return clean;
-  }
-}
-
-function cssAttr(value = "") {
-  return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-}
-
-function getAnchorHash(anchor = null) {
-  if (!anchor) return "";
-
-  const rawHref = cleanText(anchor.getAttribute?.("href") || "", "");
-
-  if (!rawHref || rawHref === "#") return "";
-
-  if (rawHref.startsWith("#")) {
-    return rawHref.length > 1 ? rawHref : "";
-  }
-
-  if (!isBrowser()) return "";
-
-  try {
-    const url = new URL(anchor.href, window.location.href);
-
-    const sameOrigin = url.origin === window.location.origin;
-    const samePath = url.pathname === window.location.pathname;
-    const sameSearch = url.search === window.location.search;
-
-    if (sameOrigin && samePath && sameSearch && url.hash && url.hash !== "#") {
-      return url.hash;
-    }
-  } catch {
-    return "";
-  }
-
-  return "";
-}
-
-function getHashTarget(hash = "", refs = {}) {
-  if (!isBrowser()) return null;
-
-  const id = decodeHashId(hash);
-
-  if (!id) return null;
-
-  let target = null;
-
-  try {
-    target = document.getElementById(id);
-  } catch {
-    target = null;
-  }
-
-  if (!target) {
-    try {
-      target = refs.root?.querySelector?.(`[name="${cssAttr(id)}"]`) || null;
-    } catch {
-      target = null;
-    }
-  }
-
-  if (target && refs.view?.contains?.(target)) {
-    return target;
-  }
-
-  if (target && refs.root?.contains?.(target)) {
-    return target;
-  }
-
-  return null;
-}
-
-function getScrollOffset(refs = {}) {
-  if (!isBrowser()) return DEFAULT_SCROLL_OFFSET;
-
-  const root = refs.root || document.documentElement;
-
-  try {
-    const value = window
-      .getComputedStyle(root)
-      .getPropertyValue("--public-home-scroll-offset");
-
-    const parsed = Number.parseFloat(value);
-
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  } catch {
-    // noop
-  }
-
-  const navHeight = refs.nav?.getBoundingClientRect?.().height || 0;
-
-  return Math.max(DEFAULT_SCROLL_OFFSET, Math.ceil(navHeight + 18));
-}
-
-function updateHash(hash = "", replace = false) {
-  if (!isBrowser() || !hash) return false;
-
-  try {
-    const next = `${window.location.pathname}${window.location.search}${hash}`;
-    const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-
-    if (next === current) return true;
-
-    if (replace) {
-      window.history.replaceState(
-        {
-          source: SOURCE,
-        },
-        "",
-        next
-      );
-    } else {
-      window.history.pushState(
-        {
-          source: SOURCE,
-        },
-        "",
-        next
-      );
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/* =========================================================
-   ACTIVE SECTION
-========================================================= */
-
-function normalizeHash(hash = "") {
-  const raw = cleanText(hash, "");
-
-  if (!raw) return "";
-  if (raw.startsWith("#")) return raw;
-
-  return `#${raw}`;
-}
-
-function setActiveHash(refs = {}, hash = "") {
-  const cleanHash = normalizeHash(hash);
-  const activeId = decodeHashId(cleanHash);
-
-  if (!refs.root) return false;
-
-  if (activeId) {
-    safeDataset(refs.root, "activeSection", activeId);
-  } else {
-    removeDataset(refs.root, "activeSection");
-  }
-
-  for (const link of refs.navLinks || []) {
-    const linkHash = getAnchorHash(link);
-    const active = Boolean(cleanHash && linkHash === cleanHash);
-
-    link.classList.toggle(CLASSES.active, active);
-
-    if (active) {
-      link.setAttribute("aria-current", "page");
-    } else {
-      link.removeAttribute("aria-current");
-    }
-  }
-
-  dispatchHomeEvent(refs.root, "public-home:section-change", {
-    hash: cleanHash,
-    section: activeId,
-  });
-
-  return true;
-}
-
-function sectionHash(section = null) {
-  const id = cleanText(section?.id || section?.dataset?.publicHomeSection || "", "");
-
-  return id ? `#${id}` : "";
-}
-
-function pickCurrentSection(refs = {}) {
-  if (!isBrowser()) return "";
-
-  const sections = refs.sections || [];
-
-  if (!sections.length) return "";
-
-  const offset = getScrollOffset(refs);
-  const targetLine = offset + Math.max(80, window.innerHeight * 0.18);
-
-  let bestHash = "";
-  let bestScore = Number.POSITIVE_INFINITY;
-
-  for (const section of sections) {
-    const hash = sectionHash(section);
-
-    if (!hash) continue;
-
-    const rect = section.getBoundingClientRect();
-
-    if (rect.bottom < offset || rect.top > window.innerHeight) {
-      continue;
-    }
-
-    const score = Math.abs(rect.top - targetLine);
-
-    if (score < bestScore) {
-      bestScore = score;
-      bestHash = hash;
-    }
-  }
-
-  return bestHash;
-}
-
-/* =========================================================
-   SCROLL
-========================================================= */
-
-function isScrollableHostCandidate(node = null) {
-  if (!isBrowser() || !node || node === document || node === window) return false;
-  if (node === document.body || node === document.documentElement) return false;
-
+function isScrollableElement(node) {
+  if (!node || node === document.body || node === document.documentElement) return false;
   try {
     const style = window.getComputedStyle(node);
-    const overflowY = String(style.overflowY || style.overflow || "").toLowerCase();
-    const canScroll = (node.scrollHeight || 0) - (node.clientHeight || 0) > 2;
-    const allowsScroll = /auto|scroll|overlay/.test(overflowY);
-
-    return Boolean(canScroll && allowsScroll);
+    return (
+      /auto|scroll|overlay/.test(String(style.overflowY || style.overflow || "")) &&
+      node.scrollHeight - node.clientHeight > 2
+    );
   } catch {
     return false;
   }
 }
 
-function getScrollHost(refs = {}) {
-  if (!isBrowser()) return null;
-
+function resolveScrollHost(refs) {
   const candidates = [
-    refs.root?.closest?.(".main-content"),
-    refs.root?.closest?.("[data-scroll-container]"),
-    refs.root?.closest?.(".public-auth-body"),
-    refs.root?.closest?.(".public-auth-shell--home"),
+    refs.root.closest?.(".main-content"),
+    refs.root.closest?.("[data-scroll-container]"),
+    refs.root.closest?.(".public-auth-body"),
+    refs.root.closest?.(".public-auth-shell--home"),
     document.querySelector(".main-content"),
     document.querySelector("[data-scroll-container]"),
     document.querySelector(".public-auth-body"),
-    document.scrollingElement,
   ].filter(Boolean);
 
+  const seen = new Set();
   for (const candidate of candidates) {
-    if (isScrollableHostCandidate(candidate)) {
-      return candidate;
-    }
+    if (seen.has(candidate)) continue;
+    seen.add(candidate);
+    if (isScrollableElement(candidate)) return candidate;
   }
-
   return window;
 }
 
-function isWindowScrollHost(host = null) {
-  return !host || host === window || host === document || host === document.documentElement || host === document.body;
+function isWindowHost(host) {
+  return !host || host === window;
 }
 
-function getScrollTop(host = null) {
-  if (!isBrowser()) return 0;
-
-  if (isWindowScrollHost(host)) {
-    return window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+function hostScrollTop(host) {
+  if (isWindowHost(host)) {
+    return Math.max(
+      0,
+      window.scrollY || document.documentElement?.scrollTop || document.body?.scrollTop || 0
+    );
   }
-
-  return host.scrollTop || 0;
+  return Math.max(0, host.scrollTop || 0);
 }
 
-function getScrollMax(host = null) {
-  if (!isBrowser()) return 1;
-
-  if (isWindowScrollHost(host)) {
-    const doc = document.documentElement;
-    return Math.max(1, doc.scrollHeight - window.innerHeight);
-  }
-
-  return Math.max(1, host.scrollHeight - host.clientHeight);
-}
-
-function scrollHostTo(host = null, top = 0, behavior = "auto") {
-  if (!isBrowser()) return false;
-
-  const nextTop = Math.max(0, Number(top) || 0);
-
+function hostScrollTo(host, top, behavior = "auto") {
+  const next = Math.max(0, Number(top) || 0);
   try {
-    if (isWindowScrollHost(host)) {
-      window.scrollTo({ top: nextTop, behavior });
-    } else {
-      host.scrollTo({ top: nextTop, behavior });
-    }
-
+    if (isWindowHost(host)) window.scrollTo({ top: next, behavior });
+    else host.scrollTo({ top: next, behavior });
     return true;
   } catch {
-    try {
-      if (isWindowScrollHost(host)) {
-        window.scrollTo(0, nextTop);
-      } else {
-        host.scrollTop = nextTop;
-      }
-
-      return true;
-    } catch {
-      return false;
-    }
+    if (isWindowHost(host)) window.scrollTo(0, next);
+    else host.scrollTop = next;
+    return true;
   }
 }
 
-function scrollToHash(hash = "", refs = {}, options = {}) {
-  if (!isBrowser()) return false;
+function getScrollOffset(refs) {
+  try {
+    const cssValue = window
+      .getComputedStyle(refs.root)
+      .getPropertyValue("--public-home-scroll-offset");
+    const parsed = Number.parseFloat(cssValue);
+    if (Number.isFinite(parsed)) return parsed;
+  } catch {
+    // fallback below
+  }
+  return Math.max(
+    DEFAULT_SCROLL_OFFSET,
+    Math.ceil((refs.nav?.getBoundingClientRect?.().height || 0) + 18)
+  );
+}
 
-  const cleanHash = normalizeHash(hash);
-  const target = getHashTarget(cleanHash, refs);
+function normalizeHash(value = "") {
+  const clean = cleanText(value, "");
+  if (!clean) return "";
+  return clean.startsWith("#") ? clean : `#${clean}`;
+}
 
-  if (!target) return false;
+function decodeHashId(hash = "") {
+  const raw = normalizeHash(hash).slice(1);
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
 
-  const reduced = getReducedMotion();
-  const behavior = options.behavior || (reduced ? "auto" : "smooth");
-  const offset = getScrollOffset(refs);
-  const host = getScrollHost(refs);
-  const hostRectTop = isWindowScrollHost(host) ? 0 : host.getBoundingClientRect().top;
-  const top = getScrollTop(host) + target.getBoundingClientRect().top - hostRectTop - offset;
-
-  const didScroll = scrollHostTo(host, top, behavior);
-
-  if (!didScroll) {
-    try {
-      target.scrollIntoView({ behavior, block: "start" });
-    } catch {
-      return false;
+function getAnchorHash(anchor) {
+  const raw = cleanText(anchor?.getAttribute?.("href") || "", "");
+  if (!raw || raw === "#") return "";
+  if (raw.startsWith("#")) return raw;
+  try {
+    const url = new URL(anchor.href, window.location.href);
+    if (
+      url.origin === window.location.origin &&
+      url.pathname === window.location.pathname &&
+      url.search === window.location.search
+    ) {
+      return url.hash && url.hash !== "#" ? url.hash : "";
     }
+  } catch {
+    // not an internal anchor
   }
+  return "";
+}
 
-  setActiveHash(refs, cleanHash);
+function getHashTarget(hash, refs) {
+  const id = decodeHashId(hash);
+  if (!id) return null;
+  const node = document.getElementById(id);
+  return node && refs.root.contains(node) ? node : null;
+}
 
-  if (options.push !== false) {
-    updateHash(cleanHash, options.replace === true);
-  }
-
-  if (options.focus === true) {
-    const hadTabIndex = target.hasAttribute("tabindex");
-
-    if (!hadTabIndex) {
-      target.setAttribute("tabindex", "-1");
+function replaceHash(hash) {
+  if (!hash) return false;
+  try {
+    const next = `${window.location.pathname}${window.location.search}${hash}`;
+    if (`${window.location.pathname}${window.location.search}${window.location.hash}` === next) {
+      return true;
     }
+    window.history.replaceState({ source: SOURCE }, "", next);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-    const delay = behavior === "smooth" ? 280 : 0;
+function sectionHash(section) {
+  const id = cleanText(section?.id || section?.dataset?.publicHomeSection || "", "");
+  return id ? `#${id}` : "";
+}
 
-    window.setTimeout(() => {
-      focusSafe(target);
+function setActiveHash(refs, hash, state) {
+  const clean = normalizeHash(hash);
+  if (!clean || state.activeHash === clean) return false;
+  state.activeHash = clean;
+  const activeId = decodeHashId(clean);
+  setDataset(refs.root, "activeSection", activeId);
 
-      if (!hadTabIndex) {
-        target.removeAttribute("tabindex");
-      }
-    }, delay);
+  for (const link of refs.navLinks) {
+    const active = getAnchorHash(link) === clean;
+    setClass(link, CLASSES.active, active);
+    if (active) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
   }
 
+  dispatchHomeEvent(refs.root, "public-home:section-change", {
+    hash: clean,
+    section: activeId,
+  });
   return true;
 }
 
-/* =========================================================
-   MENU
-========================================================= */
+function scrollToHash(hash, refs, host, activeState, options = {}) {
+  const clean = normalizeHash(hash);
+  const target = getHashTarget(clean, refs);
+  if (!target) return false;
 
-function getFocusable(container = null) {
-  if (!container) return [];
+  const behavior = options.behavior || (reducedMotion() ? "auto" : "smooth");
+  const offset = getScrollOffset(refs);
+  const targetRect = target.getBoundingClientRect();
+  const hostTop = isWindowHost(host) ? 0 : host.getBoundingClientRect().top;
+  const top = hostScrollTop(host) + targetRect.top - hostTop - offset;
+  hostScrollTo(host, top, behavior);
+  setActiveHash(refs, clean, activeState);
+  if (options.replace !== false) replaceHash(clean);
 
+  if (options.focus) {
+    const hadTabIndex = target.hasAttribute("tabindex");
+    if (!hadTabIndex) target.setAttribute("tabindex", "-1");
+    const timer = window.setTimeout(() => {
+      focusSafe(target);
+      if (!hadTabIndex) target.removeAttribute("tabindex");
+    }, behavior === "smooth" ? 260 : 0);
+    options.cleanups?.push?.(() => window.clearTimeout(timer));
+  }
+  return true;
+}
+
+function initBodyState(refs, cleanups) {
+  setBodyClass(BODY_CLASSES.screen, true);
+  setBodyClass(BODY_CLASSES.mounted, true);
+  setClass(refs.root, CLASSES.mounted, true);
+
+  const frame = requestFrame(() => {
+    setClass(refs.root, CLASSES.ready, true);
+    setDataset(refs.root, "ready", "true");
+    dispatchHomeEvent(refs.root, "public-home:ready", { ready: true });
+  });
+
+  cleanups.push(() => {
+    cancelFrame(frame);
+    setBodyClass(BODY_CLASSES.screen, false);
+    setBodyClass(BODY_CLASSES.mounted, false);
+    setBodyClass(BODY_CLASSES.menuOpen, false);
+    setBodyClass(BODY_CLASSES.noScroll, false);
+    setClass(refs.root, CLASSES.mounted, false);
+    setClass(refs.root, CLASSES.ready, false);
+    removeDataset(refs.root, "ready");
+  });
+}
+
+function getFocusable(container) {
   return toArray(
-    container.querySelectorAll(
-      [
-        "a[href]",
-        "button:not([disabled])",
-        "input:not([disabled])",
-        "select:not([disabled])",
-        "textarea:not([disabled])",
-        "[tabindex]:not([tabindex='-1'])",
-      ].join(",")
+    container?.querySelectorAll?.(
+      "a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex='-1'])"
     )
   ).filter((node) => {
     try {
@@ -828,308 +488,63 @@ function getFocusable(container = null) {
   });
 }
 
-function setMenuOpen(refs = {}, open = false, options = {}) {
-  const value = Boolean(open);
-
-  if (!refs.root) return false;
-
-  refs.root.classList.toggle(CLASSES.menuOpen, value);
-  safeDataset(refs.root, "menuOpen", value ? "true" : "false");
-
-  refs.nav?.classList.toggle(CLASSES.menuOpen, value);
-  refs.navMenu?.classList.toggle(CLASSES.menuOpen, value);
-  refs.navPanel?.classList.toggle(CLASSES.menuOpen, value);
-
-  if (refs.navToggle) {
-    refs.navToggle.setAttribute("aria-expanded", value ? "true" : "false");
-    safeDataset(refs.navToggle, "menuOpen", value ? "true" : "false");
-  }
-
-  setBodyClass(BODY_CLASSES.menuOpen, value);
-  setBodyClass(BODY_CLASSES.noScroll, value);
-
-  dispatchHomeEvent(refs.root, value ? "public-home:menu-open" : "public-home:menu-close", {
-    open: value,
-  });
-
-  if (value && options.focus !== false) {
-    const first = getFocusable(refs.navMenu || refs.navPanel || refs.nav)[0];
-
-    focusSafe(first || refs.navToggle);
-  }
-
-  if (!value && options.restoreFocus === true) {
-    focusSafe(refs.navToggle);
-  }
-
-  return true;
-}
-
-function isMenuOpen(refs = {}) {
-  return refs.root?.dataset?.menuOpen === "true";
-}
-
-/* =========================================================
-   FORM
-========================================================= */
-
-function fieldLabel(input = null) {
-  if (!input) return "";
-
-  const explicit =
-    input.getAttribute("data-label") ||
-    input.getAttribute("aria-label") ||
-    input.getAttribute("placeholder") ||
-    input.name ||
-    input.id ||
-    "";
-
-  return cleanText(explicit, "Campo");
-}
-
-function findFieldError(form = null, input = null) {
-  if (!form || !input) return null;
-
-  const name = cleanText(input.name || input.id || "", "");
-
-  if (!name) return null;
-
-  return (
-    form.querySelector(`[data-public-home-error-for="${cssAttr(name)}"]`) ||
-    form.querySelector(`[data-error-for="${cssAttr(name)}"]`) ||
-    null
-  );
-}
-
-function setFieldError(form = null, input = null, message = "") {
-  if (!input) return false;
-
-  const hasError = Boolean(message);
-  const error = findFieldError(form, input);
-
-  input.classList.toggle(CLASSES.invalid, hasError);
-  input.setAttribute("aria-invalid", hasError ? "true" : "false");
-
-  if (error) {
-    error.textContent = message;
-    error.hidden = !hasError;
-
-    if (hasError && error.id) {
-      input.setAttribute("aria-describedby", error.id);
-    }
-  }
-
-  return hasError;
-}
-
-function setFormStatus(refs = {}, message = "", type = "info") {
-  const status = refs.formStatus;
-
-  if (!status) return false;
-
-  const clean = cleanText(message, "");
-
-  status.textContent = clean;
-  status.hidden = !clean;
-  safeDataset(status, "status", clean ? type : "");
-
-  return true;
-}
-
-function readFormPayload(form = null) {
-  const payload = {};
-
-  if (!form || !isBrowser()) return payload;
-
-  const data = new FormData(form);
-
-  for (const [key, value] of data.entries()) {
-    if (value instanceof File) continue;
-
-    const cleanKey = cleanText(key, "");
-
-    if (!cleanKey) continue;
-
-    payload[cleanKey] = cleanText(value, "");
-  }
-
-  return payload;
-}
-
-function validateForm(form = null) {
-  const errors = [];
-
-  if (!form) return errors;
-
-  const controls = toArray(
-    form.querySelectorAll("input, select, textarea")
-  );
-
-  for (const input of controls) {
-    setFieldError(form, input, "");
-
-    if (input.disabled || input.type === "hidden") {
-      continue;
-    }
-
-    const value = cleanText(input.value || "", "");
-
-    if (input.required && !value) {
-      errors.push({
-        input,
-        message: `${fieldLabel(input)} es obligatorio.`,
-      });
-
-      continue;
-    }
-
-    if (input.type === "email" && value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
-      errors.push({
-        input,
-        message: "Introduce un email válido.",
-      });
-    }
-  }
-
-  return errors;
-}
-
-function labelFromKey(key = "") {
-  return cleanText(key, "")
-    .replace(/[-_]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/^./, (letter) => letter.toUpperCase());
-}
-
-function buildWhatsAppMessage(payload = {}) {
-  const lines = [
-    "Hola Cristian, vengo desde Onion Support.",
-    "Quiero solicitar un diagnóstico técnico.",
-    "",
-  ];
-
-  for (const [key, value] of Object.entries(payload)) {
-    const cleanValue = cleanText(value, "");
-
-    if (!cleanValue) continue;
-
-    lines.push(`${labelFromKey(key)}: ${cleanValue}`);
-  }
-
-  return lines.join("\n").trim();
-}
-
-function openWhatsAppFromForm(form = null, payload = {}) {
-  if (!isBrowser() || !form) return false;
-
-  const phone = cleanText(form.dataset.whatsappPhone || "", "").replace(/[^\d]/g, "");
-
-  if (!phone) return false;
-
-  const message = buildWhatsAppMessage(payload);
-  const href = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
-
-  try {
-    window.open(href, "_blank", "noopener,noreferrer");
-    return true;
-  } catch {
-    window.location.href = href;
-    return true;
-  }
-}
-
-/* =========================================================
-   INIT MODULES
-========================================================= */
-
-function initBodyState(cleanups) {
-  setBodyClass(BODY_CLASSES.screen, true);
-  setBodyClass(BODY_CLASSES.mounted, true);
-
-  cleanups.push(() => {
-    setBodyClass(BODY_CLASSES.screen, false);
-    setBodyClass(BODY_CLASSES.mounted, false);
-    setBodyClass(BODY_CLASSES.menuOpen, false);
-    setBodyClass(BODY_CLASSES.noScroll, false);
-  });
-
-  return true;
-}
-
-function initReadyState(refs, cleanups) {
-  refs.root.classList.add(CLASSES.mounted);
-
-  const frame = requestFrame(() => {
-    refs.root.classList.add(CLASSES.ready);
-    safeDataset(refs.root, "ready", "true");
-
-    dispatchHomeEvent(refs.root, "public-home:ready", {
-      ready: true,
-    });
-  });
-
-  cleanups.push(() => {
-    cancelFrame(frame);
-    refs.root.classList.remove(CLASSES.mounted, CLASSES.ready);
-    removeDataset(refs.root, "ready");
-  });
-
-  return true;
-}
-
 function initMenu(refs, cleanups) {
   let open = false;
 
-  function openMenu(options = {}) {
-    open = true;
-    return setMenuOpen(refs, true, options);
+  function apply(next, options = {}) {
+    open = Boolean(next);
+    for (const node of [refs.root, refs.nav, refs.navMenu, refs.navPanel]) {
+      setClass(node, CLASSES.menuOpen, open);
+    }
+    setDataset(refs.root, "menuOpen", open ? "true" : "false");
+    if (refs.navToggle) {
+      refs.navToggle.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+    setBodyClass(BODY_CLASSES.menuOpen, open);
+    setBodyClass(BODY_CLASSES.noScroll, open);
+    dispatchHomeEvent(refs.root, open ? "public-home:menu-open" : "public-home:menu-close", {
+      open,
+    });
+
+    if (open && options.focus !== false) {
+      focusSafe(getFocusable(refs.navMenu || refs.navPanel || refs.nav)[0] || refs.navToggle);
+    } else if (!open && options.restoreFocus) {
+      focusSafe(refs.navToggle);
+    }
+    return true;
   }
 
-  function closeMenu(options = {}) {
-    open = false;
-    return setMenuOpen(refs, false, options);
-  }
+  const controls = {
+    open: (options = {}) => apply(true, options),
+    close: (options = {}) => apply(false, options),
+    toggle: () => apply(!open, { focus: !open, restoreFocus: open }),
+    isOpen: () => open,
+  };
 
-  function toggleMenu(event = null) {
-    event?.preventDefault?.();
-
-    return open ? closeMenu({ restoreFocus: true }) : openMenu({ focus: true });
-  }
-
-  function onDocumentPointerDown(event = null) {
-    if (!open) return;
-
-    const target = event?.target;
-
-    if (!target) return;
-
-    if (refs.nav?.contains?.(target)) return;
-
-    closeMenu();
-  }
-
-  function onKeyDown(event = null) {
-    if (!event) return;
-
-    if (event.key === "Escape" && open) {
+  if (refs.navToggle) {
+    refs.navToggle.setAttribute("aria-expanded", "false");
+    addEvent(cleanups, refs.navToggle, "click", (event) => {
       event.preventDefault();
-      closeMenu({
-        restoreFocus: true,
-      });
+      controls.toggle();
+    });
+  }
 
+  addEvent(cleanups, document, "pointerdown", (event) => {
+    if (open && !refs.nav?.contains?.(event.target)) controls.close();
+  }, { passive: true });
+
+  addEvent(cleanups, document, "keydown", (event) => {
+    if (!open) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      controls.close({ restoreFocus: true });
       return;
     }
-
-    if (event.key !== "Tab" || !open) return;
-
-    const focusables = getFocusable(refs.navMenu || refs.navPanel || refs.nav);
-
-    if (!focusables.length) return;
-
-    const first = focusables[0];
-    const last = focusables[focusables.length - 1];
-
+    if (event.key !== "Tab") return;
+    const items = getFocusable(refs.navMenu || refs.navPanel || refs.nav);
+    if (!items.length) return;
+    const first = items[0];
+    const last = items.at(-1);
     if (event.shiftKey && document.activeElement === first) {
       event.preventDefault();
       focusSafe(last);
@@ -1137,1381 +552,700 @@ function initMenu(refs, cleanups) {
       event.preventDefault();
       focusSafe(first);
     }
-  }
-
-  if (refs.navToggle) {
-    refs.navToggle.setAttribute("aria-expanded", "false");
-    addEvent(cleanups, refs.navToggle, "click", toggleMenu);
-  }
-
-  addEvent(cleanups, document, "pointerdown", onDocumentPointerDown, {
-    passive: true,
   });
 
-  addEvent(cleanups, document, "keydown", onKeyDown);
+  apply(false, { focus: false });
+  return controls;
+}
 
-  setMenuOpen(refs, false);
+function initAnchorScroll(refs, cleanups, host, activeState, menu) {
+  addEvent(cleanups, refs.root, "click", (event) => {
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) return;
 
+    const anchor = event.target?.closest?.("a[href]");
+    if (!anchor || !refs.root.contains(anchor)) return;
+    const hash = getAnchorHash(anchor);
+    if (!hash || !getHashTarget(hash, refs)) return;
+
+    event.preventDefault();
+    menu.close({ focus: false });
+    const ok = scrollToHash(hash, refs, host, activeState, {
+      replace: true,
+      focus: true,
+      cleanups,
+    });
+    dispatchHomeEvent(refs.root, "public-home:navigate-section", { hash, ok });
+  });
+}
+
+function initCtaTracking(refs, cleanups) {
+  addEvent(cleanups, refs.root, "click", (event) => {
+    const target = event.target?.closest?.(
+      `${SELECTORS.cta},${SELECTORS.login},a[href^='tel:'],a[href^='mailto:'],a[href*='wa.me'],a[href*='whatsapp']`
+    );
+    if (!target || !refs.root.contains(target)) return;
+    dispatchHomeEvent(refs.root, "public-home:cta-click", {
+      label: cleanText(target.textContent, ""),
+      href: redact(target.getAttribute?.("href") || ""),
+      kind: target.matches?.(SELECTORS.login)
+        ? "login"
+        : target.matches?.(SELECTORS.cta)
+          ? "cta"
+          : "contact",
+    });
+  }, { capture: true });
+}
+
+function createFrameScheduler(task) {
+  let frame = 0;
   return {
-    open: openMenu,
-    close: closeMenu,
-    toggle: toggleMenu,
-    isOpen() {
-      return open || isMenuOpen(refs);
+    schedule() {
+      if (frame) return false;
+      frame = requestFrame(() => {
+        frame = 0;
+        task();
+      });
+      return true;
+    },
+    flush() {
+      if (frame) cancelFrame(frame);
+      frame = 0;
+      task();
+    },
+    cancel() {
+      cancelFrame(frame);
+      frame = 0;
     },
   };
 }
 
-function initAnchorScroll(refs, cleanups, menuControls) {
-  function onClick(event = null) {
-    if (!isPlainLeftClick(event)) return;
+function initScrollPipeline(refs, cleanups, host) {
+  const state = {
+    metricsDirty: true,
+    max: 1,
+    viewport: 1,
+    scrollSize: 1,
+    trackRect: null,
+    thumbSize: 0,
+    travel: 1,
+    progressValue: null,
+    progressPercent: null,
+    thumbTop: null,
+    thumbCenter: null,
+    scrolled: null,
+  };
 
-    const anchor = event.target?.closest?.("a[href]");
-
-    if (!anchor || !refs.root.contains(anchor)) return;
-
-    const hash = getAnchorHash(anchor);
-
-    if (!hash) return;
-
-    const target = getHashTarget(hash, refs);
-
-    if (!target) return;
-
-    event.preventDefault();
-
-    menuControls?.close?.();
-
-    const ok = scrollToHash(hash, refs, {
-      push: true,
-      replace: true,
-      focus: true,
-    });
-
-    dispatchHomeEvent(refs.root, "public-home:navigate-section", {
-      hash,
-      ok,
-    });
-  }
-
-  addEvent(cleanups, refs.root, "click", onClick);
-
-  return true;
-}
-
-function initCtaTracking(refs, cleanups) {
-  function onClick(event = null) {
-    const target = event?.target?.closest?.(
-      [
-        SELECTORS.cta,
-        SELECTORS.login,
-        "a[href^='tel:']",
-        "a[href^='mailto:']",
-        "a[href*='wa.me']",
-        "a[href*='whatsapp']",
-      ].join(",")
-    );
-
-    if (!target || !refs.root.contains(target)) return;
-
-    dispatchHomeEvent(refs.root, "public-home:cta-click", {
-      label: cleanText(target.textContent, ""),
-      href: redact(target.getAttribute?.("href") || ""),
-      kind:
-        target.matches?.(SELECTORS.login)
-          ? "login"
-          : target.matches?.(SELECTORS.cta)
-            ? "cta"
-            : "contact",
-    });
-  }
-
-  addEvent(cleanups, refs.root, "click", onClick, {
-    capture: true,
-  });
-
-  return true;
-}
-
-function initScrollState(refs, cleanups) {
-  if (!isBrowser() || !refs?.root) return false;
-
-  let frame = 0;
-  let dragging = false;
-  let activePointerId = null;
-
-  function uniqueNodes(list = []) {
-    const seen = new Set();
-    const output = [];
-
-    for (const item of list) {
-      if (!item || seen.has(item)) continue;
-      seen.add(item);
-      output.push(item);
-    }
-
-    return output;
-  }
-
-  function getScrollCandidates() {
-    const candidates = [
-      refs.root?.closest?.(".main-content"),
-      refs.root?.closest?.("[data-scroll-container]"),
-      refs.root?.closest?.(".public-auth-body"),
-      refs.root?.closest?.(".public-auth-shell--home"),
-      document.querySelector(".main-content"),
-      document.querySelector("[data-scroll-container]"),
-      document.querySelector(".public-auth-body"),
-      document.querySelector(".public-auth-shell--home"),
-      document.scrollingElement,
-      document.documentElement,
-      document.body,
-      window,
-    ];
-
-    return uniqueNodes(candidates);
-  }
-
-  function getElementScrollMax(node = null) {
-    if (!node) return 0;
-
-    if (isWindowScrollHost(node)) {
+  function measureGeometry() {
+    state.metricsDirty = false;
+    if (isWindowHost(host)) {
       const doc = document.documentElement;
       const body = document.body;
-      const height = Math.max(
+      state.viewport = Math.max(1, window.innerHeight || doc?.clientHeight || 1);
+      state.scrollSize = Math.max(
+        state.viewport,
         doc?.scrollHeight || 0,
         body?.scrollHeight || 0,
         doc?.offsetHeight || 0,
         body?.offsetHeight || 0
       );
-
-      return Math.max(0, height - (window.innerHeight || doc?.clientHeight || 0));
+    } else {
+      state.viewport = Math.max(1, host.clientHeight || 1);
+      state.scrollSize = Math.max(state.viewport, host.scrollHeight || state.viewport);
     }
+    state.max = Math.max(1, state.scrollSize - state.viewport);
 
-    return Math.max(0, (node.scrollHeight || 0) - (node.clientHeight || 0));
-  }
-
-  function getElementScrollTop(node = null) {
-    if (!node) return 0;
-
-    if (isWindowScrollHost(node)) {
-      return Math.max(
-        0,
-        window.scrollY ||
-          document.documentElement?.scrollTop ||
-          document.body?.scrollTop ||
-          0
-      );
-    }
-
-    return Math.max(0, node.scrollTop || 0);
-  }
-
-  function getActiveScrollHost() {
-    const candidates = getScrollCandidates();
-    let fallback = window;
-    let fallbackMax = 0;
-
-    for (const candidate of candidates) {
-      const max = getElementScrollMax(candidate);
-      const top = getElementScrollTop(candidate);
-
-      if (max > fallbackMax) {
-        fallback = candidate;
-        fallbackMax = max;
-      }
-
-      if (max > 1 && top > 0) {
-        return candidate;
-      }
-    }
-
-    for (const candidate of candidates) {
-      if (getElementScrollMax(candidate) > 1) {
-        return candidate;
-      }
-    }
-
-    return fallback;
-  }
-
-  function getRootScrollFallback() {
-    const rect = refs.root?.getBoundingClientRect?.();
-
-    if (!rect) {
-      return {
-        top: 0,
-        max: 1,
-      };
-    }
-
-    const viewport = Math.max(1, window.innerHeight || document.documentElement.clientHeight || 1);
-    const rootSize = Math.max(viewport, refs.root.scrollHeight || rect.height || viewport);
-    const max = Math.max(1, rootSize - viewport);
-    const top = Math.max(0, Math.min(max, -rect.top));
-
-    return { top, max };
-  }
-
-  function getScrollInfo() {
-    const host = getActiveScrollHost();
-    let top = getElementScrollTop(host);
-    let max = Math.max(1, getElementScrollMax(host));
-
-    /*
-       Cinturón y tirantes:
-       en algunas integraciones el scroll real vive en un contenedor externo al
-       root o cambia después del mount. Si el host detectado sigue a 0 pero el
-       contenido ya se está moviendo en viewport, calculamos la posición por el
-       rect de la vista para que el indicador no se quede clavado arriba.
-    */
-    if (top <= 0) {
-      const fallback = getRootScrollFallback();
-
-      if (fallback.top > 0) {
-        top = fallback.top;
-        max = fallback.max;
-      }
-    }
-
-    return {
-      host,
-      top,
-      max,
-      progress: Math.max(0, Math.min(1, top / max)),
-    };
-  }
-
-  function getViewportSize(host = getActiveScrollHost()) {
-    if (!isBrowser()) return 1;
-
-    if (isWindowScrollHost(host)) {
-      return Math.max(1, window.innerHeight || document.documentElement.clientHeight || 1);
-    }
-
-    return Math.max(1, host.clientHeight || 1);
-  }
-
-  function getScrollSize(host = getActiveScrollHost()) {
-    if (!isBrowser()) return getViewportSize(host);
-
-    if (isWindowScrollHost(host)) {
-      const doc = document.documentElement;
-      const body = document.body;
-
-      return Math.max(
-        getViewportSize(host),
-        doc?.scrollHeight || 0,
-        body?.scrollHeight || 0,
-        getViewportSize(host)
-      );
-    }
-
-    return Math.max(getViewportSize(host), host.scrollHeight || getViewportSize(host));
-  }
-
-  function getScrollbarMetrics(host = getActiveScrollHost()) {
     const track = refs.customScrollbar;
     const thumb = refs.customScrollbarThumb;
-
-    if (!track || !thumb) {
-      return null;
+    if (track && thumb) {
+      state.trackRect = track.getBoundingClientRect();
+      const trackSize = Math.max(1, state.trackRect.height || 1);
+      const ratio = Math.max(0.08, Math.min(1, state.viewport / state.scrollSize));
+      const maxThumbSize = Math.max(82, Math.round(trackSize * 0.24));
+      state.thumbSize = Math.max(
+        58,
+        Math.min(trackSize, Math.min(maxThumbSize, Math.round(trackSize * ratio)))
+      );
+      state.travel = Math.max(1, trackSize - state.thumbSize);
+      setCssMetric(refs.root, "--public-home-scrollbar-thumb-size", `${Math.round(state.thumbSize)}px`);
+      setCssMetric(track, "--public-home-scrollbar-thumb-size", `${Math.round(state.thumbSize)}px`);
+    } else {
+      state.trackRect = null;
+      state.thumbSize = 0;
+      state.travel = 1;
     }
-
-    const rect = track.getBoundingClientRect();
-    const trackSize = Math.max(1, rect.height || 1);
-    const viewportSize = getViewportSize(host);
-    const scrollSize = getScrollSize(host);
-    const rawRatio = viewportSize / Math.max(viewportSize, scrollSize);
-    const ratio = Math.max(0.08, Math.min(1, rawRatio));
-    const maxThumbSize = Math.max(82, Math.round(trackSize * 0.24));
-    const rawThumbSize = Math.round(trackSize * ratio);
-    const thumbSize = Math.max(58, Math.min(trackSize, Math.min(maxThumbSize, rawThumbSize)));
-    const travel = Math.max(1, trackSize - thumbSize);
-
-    return {
-      rect,
-      trackSize,
-      thumbSize,
-      travel,
-    };
   }
 
-  function sync() {
-    frame = 0;
+  function writeProgress() {
+    if (state.metricsDirty) measureGeometry();
 
-    const info = getScrollInfo();
-    const progress = info.progress;
+    const top = Math.max(0, Math.min(state.max, hostScrollTop(host)));
+    const progress = Math.max(0, Math.min(1, top / state.max));
     const progressValue = progress.toFixed(4);
     const progressPercent = `${(progress * 100).toFixed(2)}%`;
-    const scrolled = info.top > 14;
-    const metrics = getScrollbarMetrics(info.host);
-    const thumbTopNumber = metrics ? Math.round(metrics.travel * progress) : 0;
-    const thumbSizeNumber = metrics ? Math.round(metrics.thumbSize) : 0;
+    const scrolled = top > 14;
+    const thumbTopNumber = Math.round(state.travel * progress);
     const thumbTop = `${thumbTopNumber}px`;
-    const thumbSize = metrics ? `${thumbSizeNumber}px` : "";
-    const thumbCenter = metrics ? `${Math.round(thumbTopNumber + thumbSizeNumber / 2)}px` : "0px";
+    const thumbCenter = `${Math.round(thumbTopNumber + state.thumbSize / 2)}px`;
 
-    refs.root.classList.toggle(CLASSES.scrolled, scrolled);
-    refs.nav?.classList.toggle(CLASSES.scrolled, scrolled);
-    safeDataset(refs.root, "scrolled", scrolled ? "true" : "false");
-    safeDataset(refs.root, "scrollProgress", progressValue);
-    safeDataset(refs.root, "scrollProgressPercent", progressPercent);
-
-    setCssMetric(refs.root, "--public-home-scroll-progress", progressValue);
-    setCssMetric(refs.root, "--public-home-scroll-progress-percent", progressPercent);
-    setCssMetric(refs.root, "--public-home-scrollbar-thumb-top", thumbTop);
-    setCssMetric(refs.root, "--public-home-scrollbar-thumb-center", thumbCenter);
-
-    setCssMetric(refs.customScrollbar, "--public-home-scroll-progress", progressValue);
-    setCssMetric(refs.customScrollbar, "--public-home-scroll-progress-percent", progressPercent);
-    setCssMetric(refs.customScrollbar, "--public-home-scrollbar-thumb-top", thumbTop);
-    setCssMetric(refs.customScrollbar, "--public-home-scrollbar-thumb-center", thumbCenter);
-
-    if (refs.customScrollbar) {
-      safeDataset(refs.customScrollbar, "scrollProgress", progressValue);
-      removeDataset(refs.customScrollbar, "scrollPercent");
+    if (state.scrolled !== scrolled) {
+      state.scrolled = scrolled;
+      setClass(refs.root, CLASSES.scrolled, scrolled);
+      setClass(refs.nav, CLASSES.scrolled, scrolled);
+      setDataset(refs.root, "scrolled", scrolled ? "true" : "false");
     }
 
-    if (thumbSize) {
-      setCssMetric(refs.root, "--public-home-scrollbar-thumb-size", thumbSize);
-      setCssMetric(refs.customScrollbar, "--public-home-scrollbar-thumb-size", thumbSize);
+    if (state.progressValue !== progressValue) {
+      state.progressValue = progressValue;
+      setDataset(refs.root, "scrollProgress", progressValue);
+      setDataset(refs.customScrollbar, "scrollProgress", progressValue);
+      setCssMetric(refs.root, "--public-home-scroll-progress", progressValue);
+      setCssMetric(refs.customScrollbar, "--public-home-scroll-progress", progressValue);
+      setCssMetric(refs.nav, "--public-home-scroll-progress", progressValue);
     }
 
-    setCssMetric(refs.nav, "--public-home-scroll-progress", progressValue);
-    setCssMetric(refs.nav, "--public-home-scroll-progress-percent", progressPercent);
-  }
-
-  function scheduleSync() {
-    if (frame) return;
-
-    frame = requestFrame(sync);
-  }
-
-  function scrollFromPointer(event = null) {
-    if (!event || !refs.customScrollbar) return false;
-
-    const host = getActiveScrollHost();
-    const metrics = getScrollbarMetrics(host);
-
-    if (!metrics) return false;
-
-    const y = Number(event.clientY) || 0;
-    const localY = y - metrics.rect.top - metrics.thumbSize / 2;
-    const progress = Math.max(0, Math.min(1, localY / metrics.travel));
-    const nextTop = progress * Math.max(1, getElementScrollMax(host));
-
-    scrollHostTo(host, nextTop, "auto");
-    sync();
-
-    return true;
-  }
-
-  function onScroll() {
-    scheduleSync();
-  }
-
-  function onScrollbarPointerDown(event) {
-    if (!refs.customScrollbar || event?.button !== 0) return;
-
-    dragging = true;
-    activePointerId = event.pointerId ?? null;
-
-    refs.root.classList.add("is-scrollbar-dragging");
-    safeDataset(refs.root, "scrollbarDragging", "true");
-
-    try {
-      refs.customScrollbar.setPointerCapture?.(activePointerId);
-    } catch {
-      // noop
+    if (state.progressPercent !== progressPercent) {
+      state.progressPercent = progressPercent;
+      setDataset(refs.root, "scrollProgressPercent", progressPercent);
+      setCssMetric(refs.root, "--public-home-scroll-progress-percent", progressPercent);
+      setCssMetric(refs.customScrollbar, "--public-home-scroll-progress-percent", progressPercent);
+      setCssMetric(refs.nav, "--public-home-scroll-progress-percent", progressPercent);
     }
 
-    scrollFromPointer(event);
-    event.preventDefault?.();
-  }
-
-  function onScrollbarPointerMove(event) {
-    if (!dragging) return;
-
-    scrollFromPointer(event);
-    event.preventDefault?.();
-  }
-
-  function stopScrollbarDrag(event) {
-    if (!dragging) return;
-
-    try {
-      refs.customScrollbar?.releasePointerCapture?.(activePointerId ?? event?.pointerId);
-    } catch {
-      // noop
+    if (state.thumbTop !== thumbTop) {
+      state.thumbTop = thumbTop;
+      setCssMetric(refs.root, "--public-home-scrollbar-thumb-top", thumbTop);
+      setCssMetric(refs.customScrollbar, "--public-home-scrollbar-thumb-top", thumbTop);
     }
 
-    dragging = false;
-    activePointerId = null;
-
-    refs.root.classList.remove("is-scrollbar-dragging");
-    removeDataset(refs.root, "scrollbarDragging");
+    if (state.thumbCenter !== thumbCenter) {
+      state.thumbCenter = thumbCenter;
+      setCssMetric(refs.root, "--public-home-scrollbar-thumb-center", thumbCenter);
+      setCssMetric(refs.customScrollbar, "--public-home-scrollbar-thumb-center", thumbCenter);
+    }
   }
 
-  const scrollListeners = getScrollCandidates();
+  const scheduler = createFrameScheduler(writeProgress);
+  const scrollTarget = isWindowHost(host) ? window : host;
+  addEvent(cleanups, scrollTarget, "scroll", scheduler.schedule, { passive: true });
 
-  for (const target of scrollListeners) {
-    addEvent(cleanups, isWindowScrollHost(target) ? window : target, "scroll", onScroll, {
-      passive: true,
-    });
+  function invalidate() {
+    state.metricsDirty = true;
+    scheduler.schedule();
   }
 
-  addEvent(cleanups, window, "scroll", onScroll, { passive: true });
-  addEvent(cleanups, document, "scroll", onScroll, { passive: true, capture: true });
-  addEvent(cleanups, window, "resize", onScroll, { passive: true });
-  addEvent(cleanups, window, "wheel", onScroll, { passive: true, capture: true });
-  addEvent(cleanups, window, "touchmove", onScroll, { passive: true, capture: true });
-  addEvent(cleanups, window, "keydown", onScroll, { passive: true, capture: true });
+  addEvent(cleanups, window, "resize", invalidate, { passive: true });
+
+  let resizeObserver = null;
+  if ("ResizeObserver" in window) {
+    resizeObserver = new ResizeObserver(invalidate);
+    resizeObserver.observe(refs.root);
+    if (refs.customScrollbar) resizeObserver.observe(refs.customScrollbar);
+    if (!isWindowHost(host)) resizeObserver.observe(host);
+    cleanups.push(() => resizeObserver?.disconnect());
+  }
 
   if (refs.customScrollbar) {
-    addEvent(cleanups, refs.customScrollbar, "pointerdown", onScrollbarPointerDown);
-    addEvent(cleanups, refs.customScrollbar, "pointermove", onScrollbarPointerMove);
-    addEvent(cleanups, refs.customScrollbar, "pointerup", stopScrollbarDrag);
-    addEvent(cleanups, refs.customScrollbar, "pointercancel", stopScrollbarDrag);
-    addEvent(cleanups, refs.customScrollbar, "lostpointercapture", stopScrollbarDrag);
+    let dragging = false;
+    let pointerId = null;
+
+    function scrollFromPointer(event) {
+      if (state.metricsDirty) measureGeometry();
+      const rect = state.trackRect;
+      if (!rect) return;
+      const localY = (Number(event.clientY) || 0) - rect.top - state.thumbSize / 2;
+      const progress = Math.max(0, Math.min(1, localY / state.travel));
+      hostScrollTo(host, progress * state.max, "auto");
+      scheduler.schedule();
+    }
+
+    addEvent(cleanups, refs.customScrollbar, "pointerdown", (event) => {
+      if (event.button !== 0) return;
+      dragging = true;
+      pointerId = event.pointerId ?? null;
+      setClass(refs.root, "is-scrollbar-dragging", true);
+      setDataset(refs.root, "scrollbarDragging", "true");
+      refs.customScrollbar.setPointerCapture?.(pointerId);
+      scrollFromPointer(event);
+      event.preventDefault();
+    });
+
+    addEvent(cleanups, refs.customScrollbar, "pointermove", (event) => {
+      if (!dragging) return;
+      scrollFromPointer(event);
+      event.preventDefault();
+    });
+
+    const stop = (event) => {
+      if (!dragging) return;
+      dragging = false;
+      try {
+        refs.customScrollbar.releasePointerCapture?.(pointerId ?? event?.pointerId);
+      } catch {
+        // no active capture
+      }
+      pointerId = null;
+      setClass(refs.root, "is-scrollbar-dragging", false);
+      removeDataset(refs.root, "scrollbarDragging");
+    };
+    addEvent(cleanups, refs.customScrollbar, "pointerup", stop);
+    addEvent(cleanups, refs.customScrollbar, "pointercancel", stop);
+    addEvent(cleanups, refs.customScrollbar, "lostpointercapture", stop);
   }
 
-  sync();
-  requestFrame(sync);
-
-  const lateSyncOne = window.setTimeout(sync, 80);
-  const lateSyncTwo = window.setTimeout(sync, 260);
-  const lateSyncThree = window.setTimeout(sync, 900);
-  const syncHeartbeat = window.setInterval(sync, 350);
+  scheduler.flush();
 
   cleanups.push(() => {
-    window.clearTimeout(lateSyncOne);
-    window.clearTimeout(lateSyncTwo);
-    window.clearTimeout(lateSyncThree);
-    window.clearInterval(syncHeartbeat);
-    cancelFrame(frame);
-    setCssMetric(refs.root, "--public-home-scroll-progress", "0");
-    setCssMetric(refs.root, "--public-home-scroll-progress-percent", "0%");
-    setCssMetric(refs.root, "--public-home-scrollbar-thumb-top", "0px");
-    setCssMetric(refs.root, "--public-home-scrollbar-thumb-center", "0px");
-    setCssMetric(refs.root, "--public-home-scrollbar-thumb-size", "");
-    setCssMetric(refs.customScrollbar, "--public-home-scroll-progress", "0");
-    setCssMetric(refs.customScrollbar, "--public-home-scroll-progress-percent", "0%");
-    setCssMetric(refs.customScrollbar, "--public-home-scrollbar-thumb-top", "0px");
-    setCssMetric(refs.customScrollbar, "--public-home-scrollbar-thumb-center", "0px");
-    setCssMetric(refs.customScrollbar, "--public-home-scrollbar-thumb-size", "");
-    removeDataset(refs.customScrollbar, "scrollPercent");
+    scheduler.cancel();
+    for (const node of [refs.root, refs.customScrollbar, refs.nav]) {
+      for (const key of [
+        "--public-home-scroll-progress",
+        "--public-home-scroll-progress-percent",
+        "--public-home-scrollbar-thumb-top",
+        "--public-home-scrollbar-thumb-center",
+        "--public-home-scrollbar-thumb-size",
+      ]) removeCssMetric(node, key);
+    }
+    setClass(refs.root, CLASSES.scrolled, false);
+    setClass(refs.nav, CLASSES.scrolled, false);
+    setClass(refs.root, "is-scrollbar-dragging", false);
+    for (const key of ["scrolled", "scrollProgress", "scrollProgressPercent", "scrollbarDragging"]) {
+      removeDataset(refs.root, key);
+    }
     removeDataset(refs.customScrollbar, "scrollProgress");
-    setCssMetric(refs.nav, "--public-home-scroll-progress", "0");
-    setCssMetric(refs.nav, "--public-home-scroll-progress-percent", "0%");
-    refs.root.classList.remove("is-scrollbar-dragging");
-    removeDataset(refs.root, "scrollProgress");
-    removeDataset(refs.root, "scrollProgressPercent");
-    removeDataset(refs.root, "scrollbarDragging");
   });
 
-  return true;
+  return Object.freeze({ host, invalidate, schedule: scheduler.schedule });
 }
 
+function initActiveSection(refs, cleanups, host, activeState) {
+  if (!refs.sections.length) return;
 
-function initFooterHeaderVisibility(refs, cleanups) {
-  if (!isBrowser() || !refs?.root || !refs?.nav) return false;
+  const activate = (hash) => setActiveHash(refs, hash, activeState);
 
+  if (!("IntersectionObserver" in window)) {
+    activate(sectionHash(refs.sections[0]));
+    return;
+  }
+
+  const visible = new Map();
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      const hash = sectionHash(entry.target);
+      if (!hash) continue;
+      if (entry.isIntersecting) visible.set(hash, entry.intersectionRatio);
+      else visible.delete(hash);
+    }
+    let bestHash = "";
+    let bestRatio = -1;
+    for (const [hash, ratio] of visible) {
+      if (ratio >= bestRatio) {
+        bestHash = hash;
+        bestRatio = ratio;
+      }
+    }
+    if (bestHash) activate(bestHash);
+  }, {
+    root: isWindowHost(host) ? null : host,
+    rootMargin: ACTIVE_ROOT_MARGIN,
+    threshold: [0, 0.12, 0.24, 0.42, 0.66, 0.88, 1],
+  });
+
+  refs.sections.forEach((section) => observer.observe(section));
+  cleanups.push(() => observer.disconnect());
+  activate(sectionHash(refs.sections[0]));
+}
+
+function initReveal(refs, cleanups, host) {
+  if (!refs.revealItems.length) return;
+  if (reducedMotion() || !("IntersectionObserver" in window)) {
+    refs.revealItems.forEach((item) => {
+      setClass(item, CLASSES.visible, true);
+      setDataset(item, "visible", "true");
+    });
+    return;
+  }
+
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      setClass(entry.target, CLASSES.visible, true);
+      setDataset(entry.target, "visible", "true");
+      observer.unobserve(entry.target);
+    }
+  }, {
+    root: isWindowHost(host) ? null : host,
+    rootMargin: "0px 0px -12% 0px",
+    threshold: [0.08, 0.16, 0.32],
+  });
+
+  refs.revealItems.forEach((item) => observer.observe(item));
+  cleanups.push(() => observer.disconnect());
+}
+
+function initFooterVisibility(refs, cleanups, host) {
   const footer = refs.root.querySelector(".public-home-footer");
+  if (!footer || !("IntersectionObserver" in window)) return;
 
-  if (!footer) return false;
-
-  const scrollHost = getScrollHost(refs);
-  let frame = 0;
-  let lastVisible = null;
-
-  function setVisible(visible) {
-    const value = Boolean(visible);
-
-    if (value === lastVisible) return;
-
-    lastVisible = value;
-    refs.root.classList.toggle(CLASSES.footerVisible, value);
-    refs.nav.classList.toggle(CLASSES.footerVisible, value);
-    safeDataset(refs.root, "footerVisible", value ? "true" : "false");
-
-    dispatchHomeEvent(refs.root, "public-home:footer-visibility", {
-      visible: value,
-    });
-  }
-
-  function compute() {
-    frame = 0;
-
-    const footerRect = footer.getBoundingClientRect();
-    const hostRect = isWindowScrollHost(scrollHost)
-      ? { top: 0, bottom: window.innerHeight }
-      : scrollHost.getBoundingClientRect();
-
-    setVisible(
-      footerRect.top < hostRect.bottom - 2 &&
-      footerRect.bottom > hostRect.top + 2
-    );
-  }
-
-  function schedule() {
-    if (frame) return;
-
-    frame = requestFrame(compute);
-  }
-
-  if ("IntersectionObserver" in window) {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        setVisible(entries.some((entry) => entry.isIntersecting));
-      },
-      {
-        root: isWindowScrollHost(scrollHost) ? null : scrollHost,
-        rootMargin: "0px",
-        threshold: [0, 0.01, 0.08],
-      }
-    );
-
-    observer.observe(footer);
-
-    cleanups.push(() => {
-      try {
-        observer.disconnect();
-      } catch {
-        // noop
-      }
-    });
-  }
-
-  addEvent(cleanups, isWindowScrollHost(scrollHost) ? window : scrollHost, "scroll", schedule, {
-    passive: true,
+  let visible = null;
+  const observer = new IntersectionObserver((entries) => {
+    const next = entries.some((entry) => entry.isIntersecting);
+    if (next === visible) return;
+    visible = next;
+    setClass(refs.root, CLASSES.footerVisible, next);
+    setClass(refs.nav, CLASSES.footerVisible, next);
+    setDataset(refs.root, "footerVisible", next ? "true" : "false");
+    dispatchHomeEvent(refs.root, "public-home:footer-visibility", { visible: next });
+  }, {
+    root: isWindowHost(host) ? null : host,
+    rootMargin: "0px",
+    threshold: [0, 0.01, 0.08],
   });
-
-  addEvent(cleanups, window, "resize", schedule, {
-    passive: true,
-  });
-
-  compute();
-
+  observer.observe(footer);
   cleanups.push(() => {
-    cancelFrame(frame);
-    refs.root.classList.remove(CLASSES.footerVisible);
-    refs.nav.classList.remove(CLASSES.footerVisible);
+    observer.disconnect();
+    setClass(refs.root, CLASSES.footerVisible, false);
+    setClass(refs.nav, CLASSES.footerVisible, false);
     removeDataset(refs.root, "footerVisible");
   });
-
-  return true;
-}
-
-function initActiveSection(refs, cleanups) {
-  const sections = refs.sections || [];
-
-  if (!sections.length) return false;
-
-  let currentHash = "";
-
-  function activate(hash = "") {
-    const cleanHash = normalizeHash(hash);
-
-    if (!cleanHash || cleanHash === currentHash) return false;
-
-    currentHash = cleanHash;
-    setActiveHash(refs, cleanHash);
-
-    return true;
-  }
-
-  function fallbackSync() {
-    activate(pickCurrentSection(refs));
-  }
-
-  if (isBrowser() && "IntersectionObserver" in window) {
-    const visible = new Map();
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          const hash = sectionHash(entry.target);
-
-          if (!hash) continue;
-
-          if (entry.isIntersecting) {
-            visible.set(hash, entry.intersectionRatio);
-          } else {
-            visible.delete(hash);
-          }
-        }
-
-        let bestHash = "";
-        let bestRatio = 0;
-
-        for (const [hash, ratio] of visible.entries()) {
-          if (ratio >= bestRatio) {
-            bestRatio = ratio;
-            bestHash = hash;
-          }
-        }
-
-        activate(bestHash || pickCurrentSection(refs));
-      },
-      {
-        root: null,
-        rootMargin: ACTIVE_ROOT_MARGIN,
-        threshold: [0, 0.12, 0.24, 0.42, 0.66, 0.88, 1],
-      }
-    );
-
-    for (const section of sections) {
-      observer.observe(section);
-    }
-
-    cleanups.push(() => {
-      try {
-        observer.disconnect();
-      } catch {
-        // noop
-      }
-    });
-  } else {
-    let frame = 0;
-
-    function onScroll() {
-      if (frame) return;
-
-      frame = requestFrame(() => {
-        frame = 0;
-        fallbackSync();
-      });
-    }
-
-    addEvent(cleanups, window, "scroll", onScroll, {
-      passive: true,
-    });
-
-    cleanups.push(() => {
-      cancelFrame(frame);
-    });
-  }
-
-  fallbackSync();
-
-  return true;
-}
-
-function initReveal(refs, cleanups) {
-  const items = refs.revealItems || [];
-
-  if (!items.length) return false;
-
-  if (!isBrowser() || getReducedMotion() || !("IntersectionObserver" in window)) {
-    for (const item of items) {
-      item.classList.add(CLASSES.visible);
-      safeDataset(item, "visible", "true");
-    }
-
-    return true;
-  }
-
-  const observer = new IntersectionObserver(
-    (entries) => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting) continue;
-
-        entry.target.classList.add(CLASSES.visible);
-        safeDataset(entry.target, "visible", "true");
-        observer.unobserve(entry.target);
-      }
-    },
-    {
-      root: null,
-      rootMargin: "0px 0px -12% 0px",
-      threshold: [0.08, 0.16, 0.32],
-    }
-  );
-
-  for (const item of items) {
-    observer.observe(item);
-  }
-
-  cleanups.push(() => {
-    try {
-      observer.disconnect();
-    } catch {
-      // noop
-    }
-  });
-
-  return true;
 }
 
 function initPointerFx(refs, cleanups) {
-  if (!isBrowser() || getReducedMotion()) return false;
-
+  if (reducedMotion()) return;
   try {
-    const finePointer = window.matchMedia("(pointer: fine)").matches;
-
-    if (!finePointer) return false;
+    if (!window.matchMedia("(pointer: fine)").matches) return;
   } catch {
-    return false;
+    return;
   }
 
   let frame = 0;
-  let lastEvent = null;
-
-  function sync() {
+  let x = 50;
+  let y = 50;
+  const write = () => {
     frame = 0;
+    setCssMetric(refs.root, "--public-home-pointer-x", `${x.toFixed(2)}%`);
+    setCssMetric(refs.root, "--public-home-pointer-y", `${y.toFixed(2)}%`);
+  };
 
-    if (!lastEvent || !refs.root) return;
-
-    const rect = refs.root.getBoundingClientRect();
-    const x = ((lastEvent.clientX - rect.left) / Math.max(rect.width, 1)) * 100;
-    const y = ((lastEvent.clientY - rect.top) / Math.max(rect.height, 1)) * 100;
-
-    refs.root.style.setProperty("--public-home-pointer-x", `${x.toFixed(2)}%`);
-    refs.root.style.setProperty("--public-home-pointer-y", `${y.toFixed(2)}%`);
-  }
-
-  function onPointerMove(event = null) {
-    lastEvent = event;
-
-    if (frame) return;
-
-    frame = requestFrame(sync);
-  }
-
-  addEvent(cleanups, refs.root, "pointermove", onPointerMove, {
-    passive: true,
-  });
+  addEvent(cleanups, refs.root, "pointermove", (event) => {
+    x = Math.max(0, Math.min(100, (event.clientX / Math.max(1, window.innerWidth)) * 100));
+    y = Math.max(0, Math.min(100, (event.clientY / Math.max(1, window.innerHeight)) * 100));
+    if (!frame) frame = requestFrame(write);
+  }, { passive: true });
 
   cleanups.push(() => {
     cancelFrame(frame);
-
-    try {
-      refs.root.style.removeProperty("--public-home-pointer-x");
-      refs.root.style.removeProperty("--public-home-pointer-y");
-    } catch {
-      // noop
-    }
+    removeCssMetric(refs.root, "--public-home-pointer-x");
+    removeCssMetric(refs.root, "--public-home-pointer-y");
   });
-
-  return true;
-}
-
-
-function setCssMetric(node = null, key = "", value = "") {
-  if (!node || !key) return false;
-
-  try {
-    node.style.setProperty(key, String(value));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function parseNumber(value = "", fallback = 0) {
-  const parsed = Number.parseFloat(String(value ?? "").replace(",", "."));
-
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function formatCounterValue(value = 0, decimals = 0, suffix = "") {
-  const precision = Math.max(0, Math.min(3, Number.parseInt(decimals, 10) || 0));
-  const formatted = Number(value).toLocaleString("es-ES", {
-    minimumFractionDigits: precision,
-    maximumFractionDigits: precision,
-  });
-
-  return `${formatted}${suffix}`;
-}
-
-function writeClipboard(value = "") {
-  if (!isBrowser()) return Promise.resolve(false);
-
-  const clean = cleanText(value, "");
-
-  if (!clean) return Promise.resolve(false);
-
-  if (navigator.clipboard?.writeText && window.isSecureContext) {
-    return navigator.clipboard.writeText(clean).then(() => true).catch(() => false);
-  }
-
-  return new Promise((resolve) => {
-    try {
-      const input = document.createElement("textarea");
-      input.value = clean;
-      input.setAttribute("readonly", "true");
-      input.style.position = "fixed";
-      input.style.inset = "0 auto auto -9999px";
-      input.style.opacity = "0";
-      document.body.appendChild(input);
-      input.select();
-      const ok = document.execCommand("copy");
-      input.remove();
-      resolve(Boolean(ok));
-    } catch {
-      resolve(false);
-    }
-  });
-}
-
-function initCopyActions(refs, cleanups) {
-  const actions = refs.copyActions || [];
-
-  if (!actions.length) return false;
-
-  let timer = 0;
-
-  async function onClick(event = null) {
-    const action = event?.target?.closest?.(SELECTORS.copyAction);
-
-    if (!action || !refs.root?.contains?.(action)) return;
-
-    const value =
-      action.getAttribute("data-copy-value") ||
-      action.dataset.publicHomeCopy ||
-      action.href ||
-      action.textContent ||
-      "";
-
-    const ok = await writeClipboard(value);
-
-    action.classList.toggle(CLASSES.copied, ok);
-    safeDataset(action, "copied", ok ? "true" : "false");
-
-    dispatchHomeEvent(refs.root, ok ? "public-home:copy-success" : "public-home:copy-fail", {
-      ok,
-      value: redact(value),
-      label: cleanText(action.textContent, ""),
-    });
-
-    clearTimeout(timer);
-
-    if (ok) {
-      timer = window.setTimeout(() => {
-        action.classList.remove(CLASSES.copied);
-        removeDataset(action, "copied");
-      }, 1500);
-    }
-  }
-
-  addEvent(cleanups, refs.root, "click", onClick);
-
-  cleanups.push(() => {
-    clearTimeout(timer);
-  });
-
-  return true;
-}
-
-function animateCounter(node = null) {
-  if (!node || node.dataset.counterAnimated === "true") return false;
-
-  const target = parseNumber(node.dataset.counterTarget || node.textContent, 0);
-  const start = parseNumber(node.dataset.counterStart || "0", 0);
-  const decimals = Number.parseInt(node.dataset.counterDecimals || "0", 10) || 0;
-  const suffix = cleanText(node.dataset.counterSuffix || "", "");
-  const duration = Math.max(320, Math.min(2200, Number.parseInt(node.dataset.counterDuration || "1100", 10) || 1100));
-  const reduced = getReducedMotion();
-
-  node.dataset.counterAnimated = "true";
-  node.classList.add(CLASSES.counterReady);
-
-  if (reduced) {
-    node.textContent = formatCounterValue(target, decimals, suffix);
-    return true;
-  }
-
-  const startedAt = performance.now();
-
-  function tick(now) {
-    const progress = Math.min(1, Math.max(0, (now - startedAt) / duration));
-    const eased = 1 - Math.pow(1 - progress, 3);
-    const value = start + (target - start) * eased;
-
-    node.textContent = formatCounterValue(value, decimals, suffix);
-
-    if (progress < 1) {
-      requestFrame(tick);
-    } else {
-      node.textContent = formatCounterValue(target, decimals, suffix);
-    }
-  }
-
-  requestFrame(tick);
-
-  return true;
-}
-
-function initMetricCounters(refs, cleanups) {
-  const counters = refs.metricCounters || [];
-
-  if (!counters.length || !isBrowser()) return false;
-
-  if (!("IntersectionObserver" in window)) {
-    counters.forEach(animateCounter);
-    return true;
-  }
-
-  const observer = new IntersectionObserver(
-    (entries) => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting) continue;
-
-        animateCounter(entry.target);
-        observer.unobserve(entry.target);
-      }
-    },
-    {
-      root: null,
-      rootMargin: "0px 0px -8% 0px",
-      threshold: [0.2, 0.45, 0.7],
-    }
-  );
-
-  for (const counter of counters) {
-    observer.observe(counter);
-  }
-
-  cleanups.push(() => {
-    try {
-      observer.disconnect();
-    } catch {
-      // noop
-    }
-  });
-
-  return true;
 }
 
 function initMagneticCards(refs, cleanups) {
-  const items = refs.magneticItems || [];
-
-  if (!items.length || !isBrowser() || getReducedMotion()) return false;
-
+  if (!refs.magneticItems.length || reducedMotion()) return;
   try {
-    if (!window.matchMedia("(pointer: fine)").matches) return false;
+    if (!window.matchMedia("(pointer: fine)").matches) return;
   } catch {
-    return false;
+    return;
   }
 
-  function onMove(event = null) {
-    const item = event?.currentTarget;
+  const states = new WeakMap();
+  for (const item of refs.magneticItems) {
+    const state = { rect: null, frame: 0, x: 50, y: 50 };
+    states.set(item, state);
 
-    if (!item) return;
+    addEvent(cleanups, item, "pointerenter", () => {
+      state.rect = item.getBoundingClientRect();
+    }, { passive: true });
 
-    const rect = item.getBoundingClientRect();
-    const x = ((event.clientX - rect.left) / Math.max(rect.width, 1)) * 100;
-    const y = ((event.clientY - rect.top) / Math.max(rect.height, 1)) * 100;
-
-    item.classList.add(CLASSES.magnetic);
-    setCssMetric(item, "--card-pointer-x", `${x.toFixed(2)}%`);
-    setCssMetric(item, "--card-pointer-y", `${y.toFixed(2)}%`);
-  }
-
-  function onLeave(event = null) {
-    const item = event?.currentTarget;
-
-    if (!item) return;
-
-    item.classList.remove(CLASSES.magnetic);
-    setCssMetric(item, "--card-pointer-x", "50%");
-    setCssMetric(item, "--card-pointer-y", "50%");
-  }
-
-  for (const item of items) {
-    addEvent(cleanups, item, "pointermove", onMove, {
-      passive: true,
-    });
-    addEvent(cleanups, item, "pointerleave", onLeave, {
-      passive: true,
-    });
-  }
-
-  return true;
-}
-
-function initDiagnosticForm(refs, cleanups) {
-  const form = refs.diagnosticForm;
-
-  if (!form) return false;
-
-  let submitting = false;
-
-  function setSubmitting(value = false) {
-    submitting = Boolean(value);
-
-    form.classList.toggle(CLASSES.submitting, submitting);
-    safeDataset(form, "submitting", submitting ? "true" : "false");
-
-    for (const node of toArray(form.querySelectorAll("button, input, select, textarea"))) {
-      if (node.type === "hidden") continue;
-      node.disabled = submitting;
-    }
-  }
-
-  function onInput(event = null) {
-    const input = event?.target;
-
-    if (!input || !form.contains(input)) return;
-
-    setFieldError(form, input, "");
-    setFormStatus(refs, "", "info");
-  }
-
-  function onSubmit(event = null) {
-    event?.preventDefault?.();
-
-    if (submitting) return false;
-
-    setFormStatus(refs, "", "info");
-
-    const errors = validateForm(form);
-
-    if (errors.length) {
-      for (const error of errors) {
-        setFieldError(form, error.input, error.message);
-      }
-
-      focusSafe(errors[0].input);
-
-      setFormStatus(
-        refs,
-        "Revisa los campos marcados antes de enviar.",
-        "error"
-      );
-
-      dispatchHomeEvent(refs.root, "public-home:diagnostic-invalid", {
-        errors: errors.length,
+    addEvent(cleanups, item, "pointermove", (event) => {
+      const rect = state.rect || item.getBoundingClientRect();
+      state.x = ((event.clientX - rect.left) / Math.max(1, rect.width)) * 100;
+      state.y = ((event.clientY - rect.top) / Math.max(1, rect.height)) * 100;
+      if (state.frame) return;
+      state.frame = requestFrame(() => {
+        state.frame = 0;
+        setClass(item, CLASSES.magnetic, true);
+        setCssMetric(item, "--card-pointer-x", `${state.x.toFixed(2)}%`);
+        setCssMetric(item, "--card-pointer-y", `${state.y.toFixed(2)}%`);
       });
+    }, { passive: true });
 
-      return false;
-    }
+    addEvent(cleanups, item, "pointerleave", () => {
+      state.rect = null;
+      cancelFrame(state.frame);
+      state.frame = 0;
+      setClass(item, CLASSES.magnetic, false);
+      setCssMetric(item, "--card-pointer-x", "50%");
+      setCssMetric(item, "--card-pointer-y", "50%");
+    }, { passive: true });
 
-    const payload = readFormPayload(form);
-
-    setSubmitting(true);
-
-    try {
-      const eventWasDispatched = dispatchHomeEvent(
-        refs.root,
-        "public-home:diagnostic-submit",
-        {
-          payload,
-        }
-      );
-
-      const opened = openWhatsAppFromForm(form, payload);
-
-      if (opened) {
-        setFormStatus(
-          refs,
-          "Abriendo la incidencia en WhatsApp...",
-          "success"
-        );
-      } else {
-        setFormStatus(
-          refs,
-          "Incidencia preparada. Configura data-whatsapp-phone en el formulario para abrir WhatsApp.",
-          "info"
-        );
-      }
-
-      return eventWasDispatched;
-    } catch {
-      setFormStatus(
-        refs,
-        "No se pudo preparar la incidencia. Inténtalo de nuevo.",
-        "error"
-      );
-
-      return false;
-    } finally {
-      window.setTimeout(() => {
-        setSubmitting(false);
-      }, 420);
-    }
+    cleanups.push(() => cancelFrame(state.frame));
   }
-
-  addEvent(cleanups, form, "submit", onSubmit);
-  addEvent(cleanups, form, "input", onInput);
-  addEvent(cleanups, form, "change", onInput);
-
-  return true;
 }
 
+function writeClipboard(value) {
+  const clean = cleanText(value, "");
+  if (!clean) return Promise.resolve(false);
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    return navigator.clipboard.writeText(clean).then(() => true).catch(() => false);
+  }
+  return Promise.resolve(false);
+}
 
-function initFaqCollapsed(refs = {}, cleanups = []) {
-  if (!isBrowser() || !refs?.root) return false;
+function initCopyActions(refs, cleanups) {
+  if (!refs.copyActions.length) return;
+  let timer = 0;
+  addEvent(cleanups, refs.root, "click", async (event) => {
+    const action = event.target?.closest?.(SELECTORS.copyAction);
+    if (!action || !refs.root.contains(action)) return;
+    const value = action.getAttribute("data-copy-value") || action.href || action.textContent || "";
+    const ok = await writeClipboard(value);
+    setClass(action, CLASSES.copied, ok);
+    setDataset(action, "copied", ok ? "true" : "false");
+    dispatchHomeEvent(refs.root, ok ? "public-home:copy-success" : "public-home:copy-fail", {
+      ok,
+      value: redact(value),
+    });
+    clearTimeout(timer);
+    if (ok) timer = window.setTimeout(() => {
+      setClass(action, CLASSES.copied, false);
+      removeDataset(action, "copied");
+    }, 1500);
+  });
+  cleanups.push(() => clearTimeout(timer));
+}
 
+function parseNumber(value, fallback = 0) {
+  const parsed = Number.parseFloat(String(value ?? "").replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function initMetricCounters(refs, cleanups, host) {
+  if (!refs.metricCounters.length) return;
+  const frames = new Set();
+
+  function animate(node) {
+    if (node.dataset.counterAnimated === "true") return;
+    node.dataset.counterAnimated = "true";
+    setClass(node, CLASSES.counterReady, true);
+    const target = parseNumber(node.dataset.counterTarget || node.textContent, 0);
+    const start = parseNumber(node.dataset.counterStart, 0);
+    const duration = Math.max(320, Math.min(2200, Number(node.dataset.counterDuration) || 1100));
+    const suffix = cleanText(node.dataset.counterSuffix || "", "");
+    const decimals = Math.max(0, Math.min(3, Number(node.dataset.counterDecimals) || 0));
+
+    if (reducedMotion()) {
+      node.textContent = `${target.toLocaleString("es-ES", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}${suffix}`;
+      return;
+    }
+
+    const started = performance.now();
+    const tick = (now) => {
+      const progress = Math.min(1, (now - started) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const value = start + (target - start) * eased;
+      node.textContent = `${value.toLocaleString("es-ES", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}${suffix}`;
+      if (progress < 1) {
+        const id = requestFrame(tick);
+        frames.add(id);
+      }
+    };
+    const id = requestFrame(tick);
+    frames.add(id);
+  }
+
+  if (!("IntersectionObserver" in window)) {
+    refs.metricCounters.forEach(animate);
+  } else {
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        animate(entry.target);
+        observer.unobserve(entry.target);
+      }
+    }, {
+      root: isWindowHost(host) ? null : host,
+      rootMargin: "0px 0px -8% 0px",
+      threshold: [0.2, 0.45, 0.7],
+    });
+    refs.metricCounters.forEach((node) => observer.observe(node));
+    cleanups.push(() => observer.disconnect());
+  }
+
+  cleanups.push(() => {
+    for (const frame of frames) cancelFrame(frame);
+    frames.clear();
+  });
+}
+
+function initFaqCollapsed(refs, cleanups) {
   const items = toArray(refs.root.querySelectorAll(".public-home-faq-item"));
-
-  if (!items.length) return false;
-
-  function collapseAll() {
+  if (!items.length) return;
+  for (const item of items) {
+    try {
+      item.open = false;
+      item.removeAttribute("open");
+    } catch {
+      // no-op
+    }
+  }
+  cleanups.push(() => {
     for (const item of items) {
       try {
         item.open = false;
         item.removeAttribute("open");
       } catch {
-        // noop
+        // no-op
       }
     }
-  }
-
-  collapseAll();
-  requestFrame(collapseAll);
-
-  cleanups.push(() => {
-    collapseAll();
   });
-
-  return true;
 }
 
-function initInitialTop(refs) {
-  if (!isBrowser()) return false;
-
+function initInitialTop(refs, host, activeState) {
   try {
-    if ("scrollRestoration" in window.history) {
-      window.history.scrollRestoration = "manual";
-    }
-  } catch {
-    // noop
-  }
-
-  try {
+    if ("scrollRestoration" in window.history) window.history.scrollRestoration = "manual";
     if (window.location.hash && window.location.hash !== "#") {
       window.history.replaceState(
-        {
-          source: SOURCE,
-          reason: "public-home-initial-top",
-        },
+        { source: SOURCE, reason: "public-home-initial-top" },
         "",
         `${window.location.pathname}${window.location.search}`
       );
     }
   } catch {
-    // noop
+    // navigation remains usable
   }
-
-  function goTop() {
-    const host = getScrollHost(refs);
-
-    scrollHostTo(host, 0, "auto");
-    setActiveHash(refs, "#inicio");
-  }
-
-  requestFrame(goTop);
-  window.setTimeout(goTop, 0);
-  window.setTimeout(goTop, 120);
-
-  return true;
+  requestFrame(() => {
+    hostScrollTo(host, 0, "auto");
+    const first = refs.sections.find((section) => sectionHash(section) === "#inicio") || refs.sections[0];
+    if (first) setActiveHash(refs, sectionHash(first), activeState);
+  });
 }
 
-/* =========================================================
-   INSTANCE
-========================================================= */
+function appAuth() {
+  return AppCore.auth || AppCore.Auth || AppCore.getModule?.("auth") || null;
+}
+
+function appRouter() {
+  return AppCore.router || AppCore.Router || AppCore.getModule?.("router") || null;
+}
 
 function destroyPrevious(container) {
   const previous = INSTANCES.get(container);
-
-  if (previous?.destroy) {
-    previous.destroy({
-      remount: true,
-    });
-
-    return true;
-  }
-
-  return false;
-}
-
-function storeInstance(container, instance) {
-  INSTANCES.set(container, instance);
-  lastInstance = instance;
-
+  if (!previous?.destroy) return false;
+  previous.destroy({ remount: true });
   return true;
 }
-
-function clearInstance(container, instance) {
-  if (INSTANCES.get(container) === instance) {
-    INSTANCES.delete(container);
-  }
-
-  if (lastInstance === instance) {
-    lastInstance = null;
-  }
-
-  return true;
-}
-
-/* =========================================================
-   VIEW
-========================================================= */
 
 export function renderPublicHomeView(container, context = {}) {
   if (!isBrowser()) return null;
-
-  if (!container) {
-    throw new Error("[PublicHomeView] container requerido.");
-  }
+  if (!container) throw new Error("[PublicHomeView] container requerido.");
 
   destroyPrevious(container);
-
   const cleanups = [];
-
   const view = mountTemplate(container);
   const refs = getRefs(view);
-
+  const activeState = { activeHash: "" };
+  const host = resolveScrollHost(refs);
   let mounted = true;
 
-  initBodyState(cleanups);
-  initReadyState(refs, cleanups);
-
-  const menuControls = initMenu(refs, cleanups);
-
-  initAnchorScroll(refs, cleanups, menuControls);
+  initBodyState(refs, cleanups);
+  const menu = initMenu(refs, cleanups);
+  initAnchorScroll(refs, cleanups, host, activeState, menu);
   initCtaTracking(refs, cleanups);
-  initScrollState(refs, cleanups);
-  initFooterHeaderVisibility(refs, cleanups);
-  initFaqCollapsed(refs, cleanups);
-  initActiveSection(refs, cleanups);
-  initReveal(refs, cleanups);
+  initScrollPipeline(refs, cleanups, host);
+  initFooterVisibility(refs, cleanups, host);
+  initActiveSection(refs, cleanups, host, activeState);
+  initReveal(refs, cleanups, host);
   initPointerFx(refs, cleanups);
   initCopyActions(refs, cleanups);
-  initMetricCounters(refs, cleanups);
+  initMetricCounters(refs, cleanups, host);
   initMagneticCards(refs, cleanups);
-  initDiagnosticForm(refs, cleanups);
-  initInitialTop(refs);
+  initFaqCollapsed(refs, cleanups);
+  initInitialTop(refs, host, activeState);
 
   const instance = {
     version: PUBLIC_HOME_VIEW_VERSION,
-
     root: refs.root,
     view,
-
     scrollTo(hash = "", options = {}) {
-      return scrollToHash(hash, refs, {
-        push: true,
+      return scrollToHash(hash, refs, host, activeState, {
         replace: true,
         focus: true,
+        cleanups,
         ...options,
       });
     },
-
     openMenu() {
-      return menuControls?.open?.({
-        focus: true,
-      });
+      return menu.open({ focus: true });
     },
-
     closeMenu() {
-      return menuControls?.close?.({
-        restoreFocus: true,
-      });
+      return menu.close({ restoreFocus: true });
     },
-
     toggleMenu() {
-      return menuControls?.toggle?.();
+      return menu.toggle();
     },
-
     refreshActiveSection() {
-      const hash = pickCurrentSection(refs);
-
-      if (!hash) return false;
-
-      return setActiveHash(refs, hash);
+      return activeState.activeHash
+        ? setActiveHash(refs, activeState.activeHash, { activeHash: "" })
+        : false;
     },
-
     destroy(options = {}) {
+      if (!mounted) return true;
       mounted = false;
-
       try {
-        menuControls?.close?.();
+        menu.close({ focus: false });
       } catch {
-        // noop
+        // continue teardown
       }
-
-      for (const cleanup of cleanups.splice(0)) {
+      for (const cleanup of cleanups.splice(0).reverse()) {
         try {
           cleanup?.();
         } catch {
-          // noop
+          // independent cleanup boundary
         }
       }
-
-      try {
-        refs.root.classList.remove(
-          CLASSES.mounted,
-          CLASSES.ready,
-          CLASSES.menuOpen,
-          CLASSES.scrolled
-        );
-      } catch {
-        // noop
-      }
-
-      if (!options?.keepDom) {
-        try {
-          clearNode(container);
-        } catch {
-          // noop
-        }
-      }
-
-      clearInstance(container, instance);
-
+      if (!options.keepDom) container.replaceChildren();
+      if (INSTANCES.get(container) === instance) INSTANCES.delete(container);
+      if (lastInstance === instance) lastInstance = null;
       return true;
     },
-
     getSnapshot() {
-      const router = getRouter(context);
-      const auth = getAuth(context);
-
-      return {
+      const router = context.Router || context.router || appRouter();
+      const auth = context.Auth || context.auth || appAuth();
+      return Object.freeze({
         version: PUBLIC_HOME_VIEW_VERSION,
         source: SOURCE,
         mounted,
         ready: refs.root?.dataset?.ready === "true",
-        menuOpen: menuControls?.isOpen?.() === true,
+        menuOpen: menu.isOpen(),
         activeSection: refs.root?.dataset?.activeSection || null,
-        sectionCount: refs.sections?.length || 0,
-        navLinkCount: refs.navLinks?.length || 0,
-        revealCount: refs.revealItems?.length || 0,
-        hasDiagnosticForm: Boolean(refs.diagnosticForm),
-        copyActionCount: refs.copyActions?.length || 0,
-        metricCounterCount: refs.metricCounters?.length || 0,
-        magneticItemCount: refs.magneticItems?.length || 0,
-        reducedMotion: getReducedMotion(),
-        routerAvailable: Boolean(
-          router?.navigate ||
-            router?.replace ||
-            router?.push ||
-            router?.go
-        ),
+        sectionCount: refs.sections.length,
+        navLinkCount: refs.navLinks.length,
+        revealCount: refs.revealItems.length,
+        metricCounterCount: refs.metricCounters.length,
+        magneticItemCount: refs.magneticItems.length,
+        reducedMotion: reducedMotion(),
+        scrollHost: isWindowHost(host) ? "window" : "element",
+        scrollPipeline: "single-listener-frame-budgeted",
+        routerAvailable: Boolean(router?.navigate || router?.replace || router?.push || router?.go),
         authenticated: auth?.isAuthenticated?.() === true,
-        currentPath: isBrowser()
-          ? redact(
-              `${window.location.pathname}${window.location.search}${window.location.hash}`
-            )
-          : null,
-      };
+        currentPath: redact(`${window.location.pathname}${window.location.search}${window.location.hash}`),
+      });
     },
-
     getDebugSnapshot() {
       return this.getSnapshot();
     },
   };
 
-  storeInstance(container, instance);
-
+  INSTANCES.set(container, instance);
+  lastInstance = instance;
   return instance;
 }
-
-/* =========================================================
-   EXPORTS
-========================================================= */
 
 export function init(container, context = {}) {
   return renderPublicHomeView(container, context);
@@ -2530,19 +1264,14 @@ export function destroy(options = {}) {
 }
 
 export function getSnapshot() {
-  if (lastInstance?.getSnapshot) {
-    return lastInstance.getSnapshot();
-  }
-
-  const auth = getAuth();
-
-  return {
+  if (lastInstance?.getSnapshot) return lastInstance.getSnapshot();
+  return Object.freeze({
     version: PUBLIC_HOME_VIEW_VERSION,
     source: SOURCE,
     mounted: false,
-    authenticated: auth?.isAuthenticated?.() === true,
     browser: isBrowser(),
-  };
+    authenticated: appAuth()?.isAuthenticated?.() === true,
+  });
 }
 
 export const getDebugSnapshot = getSnapshot;
@@ -2563,5 +1292,4 @@ export const PublicHomeView = Object.assign(
 );
 
 export { renderPublicHomeView as render };
-
 export default PublicHomeView;

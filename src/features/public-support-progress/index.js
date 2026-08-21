@@ -5,13 +5,14 @@
    Responsabilidad:
    - Reflejar el estado real data-submitting del formulario público.
    - Mostrar un loader fullscreen sólo durante el POST activo.
+   - Mantener lenguaje neutro mientras el backend resuelve identidad/ticket.
    - Bloquear scroll/interacción del Home durante el envío.
    - Restaurar foco y accesibilidad al finalizar.
    - Observar únicamente el mount del Router, no todo el documento.
 ========================================================= */
 
 export const PUBLIC_SUPPORT_PROGRESS_VERSION =
-  "public-support.progress.v2-router-view-observer";
+  "public-support.progress.v3-neutral-intake";
 
 const VIEW_ROOT_SELECTOR = "#view-container, [data-router-view='true']";
 const FORM_SELECTOR = "[data-public-support-form='true']";
@@ -50,9 +51,9 @@ function createOverlay() {
     <div class="public-support-submit-overlay-card">
       <div class="public-support-submit-spinner" aria-hidden="true"><span></span></div>
       <p class="public-support-submit-overlay-kicker">Enviando solicitud</p>
-      <h2 id="public-support-submit-overlay-title">Creando tu incidencia…</h2>
+      <h2 id="public-support-submit-overlay-title">Procesando tu solicitud…</h2>
       <p id="public-support-submit-overlay-copy">
-        Estamos registrando tu solicitud y preparando el seguimiento.
+        Estamos validando los datos y preparando el seguimiento.
         No cierres esta ventana.
       </p>
     </div>

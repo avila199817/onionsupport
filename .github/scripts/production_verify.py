@@ -35,6 +35,7 @@ EXACT_FILES = (
     "src/views/public/home/index.js",
     "src/views/public/home/template.js",
     "src/features/public-support/index.js",
+    "src/features/public-support-progress/index.js",
     "src/features/public-home-experience/index.js",
     "src/css/app.css",
     "src/css/views/public/index.css",

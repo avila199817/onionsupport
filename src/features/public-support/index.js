@@ -634,7 +634,7 @@ function syncSubmitState(form) {
 
   if (label) {
     label.textContent = busy
-      ? "Creando incidencia…"
+      ? "Enviando solicitud…"
       : locked
         ? "Incidencia en curso"
         : "Crear incidencia";
@@ -674,7 +674,7 @@ function showSubmissionLock(form) {
 }
 
 function neutralSubmissionMessage() {
-  return "Solicitud recibida. Si los datos identifican una cuenta existente, la incidencia se asociará a ella sin modificar el perfil. Si no existe usuario, recibirás un email para activar el nuevo acceso. No se crean fichas de cliente desde este formulario.";
+  return "Solicitud recibida. Si los datos identifican de forma coherente una cuenta existente, la solicitud se vinculará a esa cuenta sin modificar el perfil. Si no existe usuario, recibirás un email para activar el nuevo acceso. No se crean fichas de cliente desde este formulario.";
 }
 
 function activeTicketMessage() {
@@ -885,7 +885,7 @@ async function send(form) {
     const message = successMessage(response);
     status(form, message, "success");
 
-    window.dispatchEvent(new CustomEvent("onion:public-support:created", {
+    window.dispatchEvent(new CustomEvent("onion:public-support:accepted", {
       detail: {
         version: PUBLIC_SUPPORT_VERSION,
         ticketId: ticketId(response) || null,

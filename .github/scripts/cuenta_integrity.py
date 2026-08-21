@@ -3,10 +3,16 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import sys
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(
+    os.environ.get(
+        "ONION_REPO_ROOT",
+        str(Path(__file__).resolve().parents[2]),
+    )
+).resolve()
 INDEX = ROOT / "src/views/cuenta/index.js"
 API = ROOT / "src/views/cuenta/cuenta.api.js"
 TEMPLATE = ROOT / "src/views/cuenta/cuenta.template.js"

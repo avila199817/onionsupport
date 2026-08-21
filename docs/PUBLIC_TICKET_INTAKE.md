@@ -28,13 +28,20 @@ Contrato productivo final:
   "fullName": "Nombre Apellidos",
   "email": "usuario@dominio.com",
   "phone": "+34 600 000 000",
-  "address": "Calle, número, CP, localidad",
+  "address": "Calle y número",
+  "addressLine2": "Piso, puerta o escalera",
+  "postalCode": "08001",
+  "city": "Barcelona",
+  "province": "Barcelona",
+  "country": "España",
   "subject": "El portátil no arranca",
   "description": "Descripción detallada del problema",
   "source": "public-home",
   "channel": "web"
 }
 ```
+
+La dirección de un alta nueva viaja estructurada: `address` es calle/número y se complementa con `addressLine2`, `postalCode`, `city`, `province` y `country`. `addressLine2` es opcional; CP, ciudad, provincia y país se validan de nuevo en backend. Para usuarios existentes estos campos nunca sobrescriben el perfil canónico.
 
 El frontend no envía roles, `userId`, `clienteId`, estado de cuenta, tokens, flags de activación ni IDs de ticket elegidos por el visitante.
 

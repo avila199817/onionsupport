@@ -183,6 +183,8 @@ def main() -> int:
         ('Este formulario no crea ni modifica fichas de cliente.', "La UI debe declarar que no crea clientes"),
         ('correo o teléfono', "La UI debe explicar la reutilización por correo O teléfono"),
         ('sin modificar el perfil', "La UI debe declarar no-overwrite de usuario existente"),
+        ('"Enviando solicitud…"', "El estado busy debe permanecer neutro"),
+        ('"onion:public-support:accepted"', "El evento de aceptación debe ser semánticamente neutro"),
     ):
         require(errors, snippet in intake, message)
 
@@ -221,10 +223,17 @@ def main() -> int:
         "cuenta de cliente" not in intake.lower(),
         "La UI pública no debe prometer creación/gestión automática de cuenta de cliente",
     )
+    require(
+        errors,
+        '"onion:public-support:created"' not in intake,
+        "Una aceptación anónima neutra no puede publicarse como evento created",
+    )
 
-    # Progreso: deriva del data-submitting real y observa sólo el Router view.
+    # Progreso: deriva del data-submitting real, lenguaje neutro y observer limitado.
     for snippet, message in (
         ("PUBLIC_SUPPORT_PROGRESS_VERSION", "Falta contrato de versión del progreso"),
+        ("public-support.progress.v3-neutral-intake", "Falta versión neutral del progreso"),
+        ("Procesando tu solicitud…", "El overlay no debe afirmar creación antes de la respuesta"),
         ("MutationObserver", "El progreso debe observar el estado real del formulario"),
         ('VIEW_ROOT_SELECTOR = "#view-container, [data-router-view=\'true\']"', "El observer debe scopearse al Router view"),
         ('attributeFilter: ["data-submitting"]', "El observer debe limitar atributos a data-submitting"),
@@ -236,6 +245,11 @@ def main() -> int:
         errors,
         "observer.observe(document.documentElement" not in progress_js,
         "El progreso público no puede observar todo documentElement",
+    )
+    require(
+        errors,
+        "Creando tu incidencia…" not in progress_js,
+        "El overlay no puede afirmar que se creó una incidencia antes de resolver el POST",
     )
 
     require(
@@ -332,6 +346,7 @@ def main() -> int:
     print("- CSS: router/styles.js -> public-home (sin auth/login.css)")
     print("- app.css: sólo estilos globales")
     print("- intake: reuse por email/teléfono, no-overwrite, NEW sin cliente")
+    print("- estados accepted/progress neutros y byte-gate productivo")
     print("- teléfono nacional, menú autenticado y progreso validados")
     return 0
 

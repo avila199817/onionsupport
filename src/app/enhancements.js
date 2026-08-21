@@ -12,7 +12,7 @@
 ========================================================= */
 
 export const APP_ENHANCEMENTS_VERSION =
-  "app.enhancements.v2-parallel-phases";
+  "app.enhancements.v3-incidencias-technician-profile";
 
 const PRE_ROUTER = Object.freeze([
   Object.freeze({
@@ -37,6 +37,10 @@ const POST_ROUTER = Object.freeze([
   Object.freeze({
     key: "incidencias-media-preview",
     load: () => import("../features/incidencias-media-preview/index.js"),
+  }),
+  Object.freeze({
+    key: "incidencias-technician-profile",
+    load: () => import("../features/incidencias-technician-profile/index.js"),
   }),
   Object.freeze({
     key: "public-support",

@@ -1,0 +1,327 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+base="${PUBLIC_SITE_URL%/}"
+api="${DIRECT_API_URL%/}"
+legacy_domain="onionit"".""net"
+
+header_value() {
+  local file="$1"
+  local header="$2"
+
+  awk -F': *' -v wanted="${header}" '
+    tolower($1) == tolower(wanted) {
+      sub(/^[^:]+:[[:space:]]*/, "")
+      sub(/\r$/, "")
+      print
+      exit
+    }
+  ' "${file}"
+}
+
+require_header_contains() {
+  local file="$1"
+  local header="$2"
+  local expected="$3"
+  local value
+
+  value="$(header_value "${file}" "${header}")"
+
+  if [[ -z "${value}" ]]; then
+    echo "::error title=Header ausente::Falta ${header}."
+    return 1
+  fi
+
+  if [[ "${value,,}" != *"${expected,,}"* ]]; then
+    echo "::error title=Header inesperado::${header}='${value}' no contiene '${expected}'."
+    return 1
+  fi
+}
+
+root_headers="$(mktemp)"
+curl \
+  --fail \
+  --silent \
+  --show-error \
+  --head \
+  --connect-timeout 10 \
+  --max-time 30 \
+  -H "Cache-Control: no-cache" \
+  "${base}/?headers=${VALIDATED_SHA}" \
+  -o "${root_headers}"
+
+require_header_contains "${root_headers}" "strict-transport-security" "max-age="
+require_header_contains "${root_headers}" "x-content-type-options" "nosniff"
+require_header_contains "${root_headers}" "x-frame-options" "DENY"
+require_header_contains "${root_headers}" "referrer-policy" "strict-origin-when-cross-origin"
+require_header_contains "${root_headers}" "permissions-policy" "camera=()"
+require_header_contains "${root_headers}" "x-robots-tag" "index"
+require_header_contains "${root_headers}" "x-robots-tag" "follow"
+require_header_contains "${root_headers}" "content-security-policy" "api.onionsupport.com"
+
+csp="$(header_value "${root_headers}" "content-security-policy")"
+rm -f "${root_headers}"
+
+if [[ "${csp}" == *"${legacy_domain}"* ]]; then
+  echo "::error title=CSP obsoleta::Producción sigue publicando ${legacy_domain}."
+  exit 1
+fi
+
+private_routes=(
+  "/login"
+  "/password-request"
+  "/password-reset"
+  "/reset-password"
+  "/activate-account"
+  "/dashboard"
+  "/@ci-probe"
+  "/incidencias"
+  "/facturas"
+  "/clientes"
+  "/usuarios"
+  "/correo"
+  "/servidor"
+  "/cuenta"
+  "/ajustes"
+)
+
+for route in "${private_routes[@]}"; do
+  headers="$(mktemp)"
+  status="$(
+    curl \
+      --silent \
+      --show-error \
+      --head \
+      --connect-timeout 10 \
+      --max-time 30 \
+      -H "Cache-Control: no-cache" \
+      -o "${headers}" \
+      -w "%{http_code}" \
+      "${base}${route}?route_check=${VALIDATED_SHA}"
+  )"
+
+  if [[ "${status}" != "200" ]]; then
+    echo "::error title=Ruta SPA inválida::${route} respondió HTTP ${status}."
+    cat "${headers}"
+    rm -f "${headers}"
+    exit 1
+  fi
+
+  xrobots="$(header_value "${headers}" "x-robots-tag")"
+  rm -f "${headers}"
+
+  if [[ "${xrobots,,}" != *"noindex"* || "${xrobots,,}" != *"nofollow"* ]]; then
+    echo "::error title=Ruta indexable accidentalmente::${route} envía X-Robots-Tag='${xrobots}'."
+    exit 1
+  fi
+done
+
+health_headers="$(mktemp)"
+health_body="$(mktemp)"
+health_status="$(
+  curl \
+    --silent \
+    --show-error \
+    --connect-timeout 10 \
+    --max-time 30 \
+    -H "Origin: ${PUBLIC_SITE_URL}" \
+    -D "${health_headers}" \
+    -o "${health_body}" \
+    -w "%{http_code}" \
+    "${api}/health"
+)"
+
+if [[ "${health_status}" != "200" ]]; then
+  echo "::error title=Backend no saludable::${api}/health respondió HTTP ${health_status}."
+  cat "${health_body}"
+  rm -f "${health_headers}" "${health_body}"
+  exit 1
+fi
+
+python3 - "${health_body}" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+
+if data.get("ok") is not True:
+    raise SystemExit("health.ok no es true")
+if data.get("code") != "HEALTH_OK":
+    raise SystemExit(f"health.code inesperado: {data.get('code')!r}")
+if data.get("service") != "onion-backend":
+    raise SystemExit(f"health.service inesperado: {data.get('service')!r}")
+PY
+
+require_header_contains "${health_headers}" "access-control-allow-origin" "${PUBLIC_SITE_URL}"
+require_header_contains "${health_headers}" "access-control-allow-credentials" "true"
+
+rm -f "${health_headers}" "${health_body}"
+
+# CORS contract: the canonical frontend must pass preflight exactly.
+cors_headers="$(mktemp)"
+cors_status="$(
+  curl \
+    --silent \
+    --show-error \
+    --connect-timeout 10 \
+    --max-time 30 \
+    -X OPTIONS \
+    -H "Origin: ${PUBLIC_SITE_URL}" \
+    -H "Access-Control-Request-Method: GET" \
+    -H "Access-Control-Request-Headers: authorization,content-type" \
+    -D "${cors_headers}" \
+    -o /dev/null \
+    -w "%{http_code}" \
+    "${api}/api/auth/me"
+)"
+
+if [[ "${cors_status}" != "204" ]]; then
+  echo "::error title=CORS preflight permitido inválido::Origen ${PUBLIC_SITE_URL} respondió HTTP ${cors_status}; esperado 204."
+  cat "${cors_headers}"
+  rm -f "${cors_headers}"
+  exit 1
+fi
+
+cors_origin="$(header_value "${cors_headers}" "access-control-allow-origin")"
+cors_credentials="$(header_value "${cors_headers}" "access-control-allow-credentials")"
+
+if [[ "${cors_origin}" != "${PUBLIC_SITE_URL}" ]]; then
+  echo "::error title=CORS origin inesperado::access-control-allow-origin='${cors_origin}'; esperado '${PUBLIC_SITE_URL}'."
+  rm -f "${cors_headers}"
+  exit 1
+fi
+
+if [[ "${cors_credentials,,}" != "true" ]]; then
+  echo "::error title=CORS credentials inesperado::access-control-allow-credentials='${cors_credentials}'; esperado true."
+  rm -f "${cors_headers}"
+  exit 1
+fi
+
+require_header_contains "${cors_headers}" "access-control-allow-methods" "GET"
+require_header_contains "${cors_headers}" "access-control-allow-headers" "Authorization"
+require_header_contains "${cors_headers}" "access-control-allow-headers" "Content-Type"
+require_header_contains "${cors_headers}" "vary" "Origin"
+require_header_contains "${cors_headers}" "vary" "Access-Control-Request-Method"
+require_header_contains "${cors_headers}" "vary" "Access-Control-Request-Headers"
+
+rm -f "${cors_headers}"
+echo "CORS permitido: preflight canónico verificado."
+
+# Hostile origins must be rejected and must never receive browser authorization.
+hostile_origin="https://evil.example"
+hostile_headers="$(mktemp)"
+hostile_status="$(
+  curl \
+    --silent \
+    --show-error \
+    --connect-timeout 10 \
+    --max-time 30 \
+    -X OPTIONS \
+    -H "Origin: ${hostile_origin}" \
+    -H "Access-Control-Request-Method: GET" \
+    -H "Access-Control-Request-Headers: authorization,content-type" \
+    -D "${hostile_headers}" \
+    -o /dev/null \
+    -w "%{http_code}" \
+    "${api}/api/auth/me"
+)"
+
+if [[ "${hostile_status}" != "403" ]]; then
+  echo "::error title=CORS origen hostil no bloqueado::${hostile_origin} respondió HTTP ${hostile_status}; esperado 403."
+  cat "${hostile_headers}"
+  rm -f "${hostile_headers}"
+  exit 1
+fi
+
+hostile_acao="$(header_value "${hostile_headers}" "access-control-allow-origin")"
+hostile_acac="$(header_value "${hostile_headers}" "access-control-allow-credentials")"
+
+if [[ -n "${hostile_acao}" ]]; then
+  echo "::error title=CORS filtró autorización a origen hostil::access-control-allow-origin='${hostile_acao}'."
+  rm -f "${hostile_headers}"
+  exit 1
+fi
+
+if [[ -n "${hostile_acac}" ]]; then
+  echo "::error title=CORS filtró credenciales a origen hostil::access-control-allow-credentials='${hostile_acac}'."
+  rm -f "${hostile_headers}"
+  exit 1
+fi
+
+rm -f "${hostile_headers}"
+echo "CORS hostil: origen rechazado sin autorización del navegador."
+
+verify_auth_guard() {
+  local url="$1"
+  local label="$2"
+  local headers
+  local body
+  local status
+  local scope
+  local gateway
+
+  headers="$(mktemp)"
+  body="$(mktemp)"
+
+  status="$(
+    curl \
+      --silent \
+      --show-error \
+      --connect-timeout 10 \
+      --max-time 30 \
+      -D "${headers}" \
+      -o "${body}" \
+      -w "%{http_code}" \
+      "${url}/api/auth/me"
+  )"
+
+  if [[ "${status}" != "401" ]]; then
+    echo "::error title=Auth guard inesperado::${label} respondió HTTP ${status}; esperado 401."
+    cat "${body}"
+    rm -f "${headers}" "${body}"
+    return 1
+  fi
+
+  python3 - "${body}" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+
+if data.get("ok") is not False:
+    raise SystemExit("auth.ok debe ser false sin credenciales")
+if data.get("authenticated") is not False:
+    raise SystemExit("authenticated debe ser false sin credenciales")
+if data.get("code") != "MISSING_TOKEN":
+    raise SystemExit(f"code inesperado: {data.get('code')!r}")
+PY
+
+  scope="$(header_value "${headers}" "x-onion-scope")"
+  gateway="$(header_value "${headers}" "x-onion-gateway")"
+
+  if [[ "${scope}" != "onion-api-gateway" ]]; then
+    echo "::error title=Backend incorrecto::${label} x-onion-scope='${scope}'."
+    rm -f "${headers}" "${body}"
+    return 1
+  fi
+
+  if [[ -z "${gateway}" ]]; then
+    echo "::error title=Gateway sin identidad::${label} no devuelve x-onion-gateway."
+    rm -f "${headers}" "${body}"
+    return 1
+  fi
+
+  require_header_contains "${headers}" "www-authenticate" "Bearer"
+
+  rm -f "${headers}" "${body}"
+  echo "${label}: auth guard conectado al Onion API Gateway."
+}
+
+verify_auth_guard "${base}" "SWA linked backend"
+verify_auth_guard "${api}" "Direct API"
+
+echo "Producción verificada de extremo a extremo: frontend, SEO, headers, rutas, CORS y backend."

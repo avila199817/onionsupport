@@ -44,6 +44,10 @@ const POST_ROUTER = Object.freeze([
   }),
   Object.freeze({
     key: "public-support",
+    load: () => import("../features/public-support/index.js"),
+  }),
+  Object.freeze({
+    key: "public-support-structured-address",
     load: () => import("../features/public-support-structured/index.js"),
   }),
   Object.freeze({

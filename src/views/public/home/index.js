@@ -2,21 +2,22 @@
    Onion Support - Public Home View Controller
    Archivo: /src/views/public/home/index.js
 
-   Runtime 2026 orientado a presupuesto de frame:
-   - Un único scroll host y un único listener de scroll.
-   - Como máximo un requestAnimationFrame pendiente por pipeline.
-   - Geometría estructural cacheada e invalidada con ResizeObserver/resize.
-   - Sin polling/heartbeat, wheel/touchmove/keydown ni document-scroll global.
-   - Lecturas de layout separadas de escrituras visuales.
+   Runtime 2026 · cold-boot safe · frame-budgeted
+   - .main-content es la autoridad determinista del scroll público.
+   - No inferimos el scroll host mediante geometría durante mount oculto.
+   - Un único listener de scroll y un único rAF pendiente.
+   - Geometría cacheada e invalidada por ResizeObserver/viewport.
+   - Navegación por anclas y scrollbar custom comparten el mismo host.
+   - Sin polling/heartbeat, wheel/touchmove ni document-scroll global.
    - IntersectionObserver para sección activa, reveal y footer.
-   - Cleanup completo y contrato público compatible con el Router.
+   - Cleanup completo y contrato público compatible con Router.
 ========================================================= */
 
 import { AppCore } from "../../../core/index.js";
 import createPublicHomeTemplate from "./template.js";
 
 export const PUBLIC_HOME_VIEW_VERSION =
-  "public.home.view.controller.2026.24.frame-budgeted-scroll";
+  "public.home.view.controller.2026.25.cold-boot-main-content";
 
 const SOURCE = "public.home.view";
 const DEFAULT_SCROLL_OFFSET = 92;
@@ -118,7 +119,13 @@ function cancelFrame(id = 0) {
 function addEvent(cleanups, target, type, listener, options) {
   if (!target?.addEventListener || !isFunction(listener)) return false;
   target.addEventListener(type, listener, options);
-  cleanups.push(() => target.removeEventListener(type, listener, options));
+  cleanups.push(() => {
+    try {
+      target.removeEventListener(type, listener, options);
+    } catch {
+      // independent teardown boundary
+    }
+  });
   return true;
 }
 
@@ -215,12 +222,15 @@ function resolveTemplate() {
   if (!isFunction(createPublicHomeTemplate)) {
     throw new Error("[PublicHomeView] template.js debe exportar createPublicHomeTemplate().");
   }
+
   const output = createPublicHomeTemplate();
   if (typeof Node !== "undefined" && output instanceof Node) return output;
+
   if (typeof output === "string") {
     const node = htmlToElement(output);
     if (node) return node;
   }
+
   throw new Error("[PublicHomeView] template público inválido.");
 }
 
@@ -234,6 +244,7 @@ function getRefs(view) {
   const root = view.matches?.(SELECTORS.root)
     ? view
     : view.querySelector?.(SELECTORS.root) || view;
+
   if (!root) throw new Error("[PublicHomeView] falta [data-public-home].");
 
   const refs = {
@@ -259,45 +270,40 @@ function getRefs(view) {
       root.querySelectorAll(`${SELECTORS.nav} a[href], ${SELECTORS.navMenu} a[href]`)
     );
   }
+
   if (!refs.scrollLinks.length) {
     refs.scrollLinks = toArray(root.querySelectorAll("a[href^='#']"));
   }
+
   if (!refs.sections.length) {
     refs.sections = toArray(root.querySelectorAll("section[id], [id][data-section]"));
   }
+
   return refs;
 }
 
-function isScrollableElement(node) {
-  if (!node || node === document.body || node === document.documentElement) return false;
-  try {
-    const style = window.getComputedStyle(node);
-    return (
-      /auto|scroll|overlay/.test(String(style.overflowY || style.overflow || "")) &&
-      node.scrollHeight - node.clientHeight > 2
-    );
-  } catch {
-    return false;
-  }
-}
+/* =========================================================
+   SCROLL HOST CONTRACT
+
+   El CSS canónico de public-home declara .main-content como único
+   scroll host real. La vista se renderiza dentro de un route-host oculto;
+   por eso NO se puede decidir el host con scrollHeight/clientHeight durante
+   mount: en ese instante la geometría de la vista todavía no participa.
+========================================================= */
 
 function resolveScrollHost(refs) {
-  const candidates = [
-    refs.root.closest?.(".main-content"),
-    refs.root.closest?.("[data-scroll-container]"),
-    refs.root.closest?.(".public-auth-body"),
-    refs.root.closest?.(".public-auth-shell--home"),
-    document.querySelector(".main-content"),
-    document.querySelector("[data-scroll-container]"),
-    document.querySelector(".public-auth-body"),
-  ].filter(Boolean);
+  const localMain = refs.root.closest?.(".main-content");
+  if (localMain) return localMain;
 
-  const seen = new Set();
-  for (const candidate of candidates) {
-    if (seen.has(candidate)) continue;
-    seen.add(candidate);
-    if (isScrollableElement(candidate)) return candidate;
-  }
+  const canonicalMain = document.getElementById("main-content");
+  if (canonicalMain) return canonicalMain;
+
+  const explicit =
+    refs.root.closest?.("[data-scroll-container]") ||
+    document.querySelector("[data-scroll-container]");
+
+  if (explicit) return explicit;
+
   return window;
 }
 
@@ -312,19 +318,25 @@ function hostScrollTop(host) {
       window.scrollY || document.documentElement?.scrollTop || document.body?.scrollTop || 0
     );
   }
+
   return Math.max(0, host.scrollTop || 0);
 }
 
 function hostScrollTo(host, top, behavior = "auto") {
   const next = Math.max(0, Number(top) || 0);
+
   try {
     if (isWindowHost(host)) window.scrollTo({ top: next, behavior });
     else host.scrollTo({ top: next, behavior });
     return true;
   } catch {
-    if (isWindowHost(host)) window.scrollTo(0, next);
-    else host.scrollTop = next;
-    return true;
+    try {
+      if (isWindowHost(host)) window.scrollTo(0, next);
+      else host.scrollTop = next;
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -338,6 +350,7 @@ function getScrollOffset(refs) {
   } catch {
     // fallback below
   }
+
   return Math.max(
     DEFAULT_SCROLL_OFFSET,
     Math.ceil((refs.nav?.getBoundingClientRect?.().height || 0) + 18)
@@ -363,6 +376,7 @@ function getAnchorHash(anchor) {
   const raw = cleanText(anchor?.getAttribute?.("href") || "", "");
   if (!raw || raw === "#") return "";
   if (raw.startsWith("#")) return raw;
+
   try {
     const url = new URL(anchor.href, window.location.href);
     if (
@@ -375,23 +389,27 @@ function getAnchorHash(anchor) {
   } catch {
     // not an internal anchor
   }
+
   return "";
 }
 
 function getHashTarget(hash, refs) {
   const id = decodeHashId(hash);
   if (!id) return null;
+
   const node = document.getElementById(id);
   return node && refs.root.contains(node) ? node : null;
 }
 
 function replaceHash(hash) {
   if (!hash) return false;
+
   try {
     const next = `${window.location.pathname}${window.location.search}${hash}`;
     if (`${window.location.pathname}${window.location.search}${window.location.hash}` === next) {
       return true;
     }
+
     window.history.replaceState({ source: SOURCE }, "", next);
     return true;
   } catch {
@@ -407,6 +425,7 @@ function sectionHash(section) {
 function setActiveHash(refs, hash, state) {
   const clean = normalizeHash(hash);
   if (!clean || state.activeHash === clean) return false;
+
   state.activeHash = clean;
   const activeId = decodeHashId(clean);
   setDataset(refs.root, "activeSection", activeId);
@@ -422,6 +441,7 @@ function setActiveHash(refs, hash, state) {
     hash: clean,
     section: activeId,
   });
+
   return true;
 }
 
@@ -433,21 +453,30 @@ function scrollToHash(hash, refs, host, activeState, options = {}) {
   const behavior = options.behavior || (reducedMotion() ? "auto" : "smooth");
   const offset = getScrollOffset(refs);
   const targetRect = target.getBoundingClientRect();
-  const hostTop = isWindowHost(host) ? 0 : host.getBoundingClientRect().top;
-  const top = hostScrollTop(host) + targetRect.top - hostTop - offset;
-  hostScrollTo(host, top, behavior);
+  const hostRectTop = isWindowHost(host) ? 0 : host.getBoundingClientRect().top;
+  const top = hostScrollTop(host) + targetRect.top - hostRectTop - offset;
+
+  const didScroll = hostScrollTo(host, top, behavior);
+  if (!didScroll) return false;
+
   setActiveHash(refs, clean, activeState);
-  if (options.replace !== false) replaceHash(clean);
+
+  if (options.replace !== false) {
+    replaceHash(clean);
+  }
 
   if (options.focus) {
     const hadTabIndex = target.hasAttribute("tabindex");
     if (!hadTabIndex) target.setAttribute("tabindex", "-1");
+
     const timer = window.setTimeout(() => {
       focusSafe(target);
       if (!hadTabIndex) target.removeAttribute("tabindex");
     }, behavior === "smooth" ? 260 : 0);
+
     options.cleanups?.push?.(() => window.clearTimeout(timer));
   }
+
   return true;
 }
 
@@ -493,15 +522,20 @@ function initMenu(refs, cleanups) {
 
   function apply(next, options = {}) {
     open = Boolean(next);
+
     for (const node of [refs.root, refs.nav, refs.navMenu, refs.navPanel]) {
       setClass(node, CLASSES.menuOpen, open);
     }
+
     setDataset(refs.root, "menuOpen", open ? "true" : "false");
+
     if (refs.navToggle) {
       refs.navToggle.setAttribute("aria-expanded", open ? "true" : "false");
     }
+
     setBodyClass(BODY_CLASSES.menuOpen, open);
     setBodyClass(BODY_CLASSES.noScroll, open);
+
     dispatchHomeEvent(refs.root, open ? "public-home:menu-open" : "public-home:menu-close", {
       open,
     });
@@ -511,6 +545,7 @@ function initMenu(refs, cleanups) {
     } else if (!open && options.restoreFocus) {
       focusSafe(refs.navToggle);
     }
+
     return true;
   }
 
@@ -529,22 +564,33 @@ function initMenu(refs, cleanups) {
     });
   }
 
-  addEvent(cleanups, document, "pointerdown", (event) => {
-    if (open && !refs.nav?.contains?.(event.target)) controls.close();
-  }, { passive: true });
+  addEvent(
+    cleanups,
+    document,
+    "pointerdown",
+    (event) => {
+      if (open && !refs.nav?.contains?.(event.target)) controls.close();
+    },
+    { passive: true }
+  );
 
   addEvent(cleanups, document, "keydown", (event) => {
     if (!open) return;
+
     if (event.key === "Escape") {
       event.preventDefault();
       controls.close({ restoreFocus: true });
       return;
     }
+
     if (event.key !== "Tab") return;
+
     const items = getFocusable(refs.navMenu || refs.navPanel || refs.nav);
     if (!items.length) return;
+
     const first = items[0];
     const last = items.at(-1);
+
     if (event.shiftKey && document.activeElement === first) {
       event.preventDefault();
       focusSafe(last);
@@ -566,58 +612,76 @@ function initAnchorScroll(refs, cleanups, host, activeState, menu) {
       event.ctrlKey ||
       event.shiftKey ||
       event.altKey
-    ) return;
+    ) {
+      return;
+    }
 
     const anchor = event.target?.closest?.("a[href]");
     if (!anchor || !refs.root.contains(anchor)) return;
+
     const hash = getAnchorHash(anchor);
     if (!hash || !getHashTarget(hash, refs)) return;
 
     event.preventDefault();
     menu.close({ focus: false });
+
     const ok = scrollToHash(hash, refs, host, activeState, {
       replace: true,
       focus: true,
       cleanups,
     });
+
     dispatchHomeEvent(refs.root, "public-home:navigate-section", { hash, ok });
   });
 }
 
 function initCtaTracking(refs, cleanups) {
-  addEvent(cleanups, refs.root, "click", (event) => {
-    const target = event.target?.closest?.(
-      `${SELECTORS.cta},${SELECTORS.login},a[href^='tel:'],a[href^='mailto:'],a[href*='wa.me'],a[href*='whatsapp']`
-    );
-    if (!target || !refs.root.contains(target)) return;
-    dispatchHomeEvent(refs.root, "public-home:cta-click", {
-      label: cleanText(target.textContent, ""),
-      href: redact(target.getAttribute?.("href") || ""),
-      kind: target.matches?.(SELECTORS.login)
-        ? "login"
-        : target.matches?.(SELECTORS.cta)
-          ? "cta"
-          : "contact",
-    });
-  }, { capture: true });
+  addEvent(
+    cleanups,
+    refs.root,
+    "click",
+    (event) => {
+      const target = event.target?.closest?.(
+        `${SELECTORS.cta},${SELECTORS.login},a[href^='tel:'],a[href^='mailto:'],a[href*='wa.me'],a[href*='whatsapp']`
+      );
+
+      if (!target || !refs.root.contains(target)) return;
+
+      dispatchHomeEvent(refs.root, "public-home:cta-click", {
+        label: cleanText(target.textContent, ""),
+        href: redact(target.getAttribute?.("href") || ""),
+        kind: target.matches?.(SELECTORS.login)
+          ? "login"
+          : target.matches?.(SELECTORS.cta)
+            ? "cta"
+            : "contact",
+      });
+    },
+    { capture: true }
+  );
 }
 
 function createFrameScheduler(task) {
   let frame = 0;
+
   return {
     schedule() {
       if (frame) return false;
+
       frame = requestFrame(() => {
         frame = 0;
         task();
       });
+
       return true;
     },
+
     flush() {
       if (frame) cancelFrame(frame);
       frame = 0;
       task();
     },
+
     cancel() {
       cancelFrame(frame);
       frame = 0;
@@ -643,9 +707,11 @@ function initScrollPipeline(refs, cleanups, host) {
 
   function measureGeometry() {
     state.metricsDirty = false;
+
     if (isWindowHost(host)) {
       const doc = document.documentElement;
       const body = document.body;
+
       state.viewport = Math.max(1, window.innerHeight || doc?.clientHeight || 1);
       state.scrollSize = Math.max(
         state.viewport,
@@ -658,22 +724,38 @@ function initScrollPipeline(refs, cleanups, host) {
       state.viewport = Math.max(1, host.clientHeight || 1);
       state.scrollSize = Math.max(state.viewport, host.scrollHeight || state.viewport);
     }
+
     state.max = Math.max(1, state.scrollSize - state.viewport);
 
     const track = refs.customScrollbar;
     const thumb = refs.customScrollbarThumb;
+
     if (track && thumb) {
-      state.trackRect = track.getBoundingClientRect();
-      const trackSize = Math.max(1, state.trackRect.height || 1);
-      const ratio = Math.max(0.08, Math.min(1, state.viewport / state.scrollSize));
-      const maxThumbSize = Math.max(82, Math.round(trackSize * 0.24));
-      state.thumbSize = Math.max(
-        58,
-        Math.min(trackSize, Math.min(maxThumbSize, Math.round(trackSize * ratio)))
-      );
-      state.travel = Math.max(1, trackSize - state.thumbSize);
-      setCssMetric(refs.root, "--public-home-scrollbar-thumb-size", `${Math.round(state.thumbSize)}px`);
-      setCssMetric(track, "--public-home-scrollbar-thumb-size", `${Math.round(state.thumbSize)}px`);
+      const rect = track.getBoundingClientRect();
+
+      /*
+        Durante el render atómico el route-host está display:none. No fijamos
+        métricas falsas de 1px/58px: ResizeObserver repetirá la medida al commit.
+      */
+      if (rect.height > 4) {
+        state.trackRect = rect;
+        const trackSize = rect.height;
+        const ratio = Math.max(0.08, Math.min(1, state.viewport / state.scrollSize));
+        const maxThumbSize = Math.max(82, Math.round(trackSize * 0.24));
+        state.thumbSize = Math.max(
+          58,
+          Math.min(trackSize, Math.min(maxThumbSize, Math.round(trackSize * ratio)))
+        );
+        state.travel = Math.max(1, trackSize - state.thumbSize);
+
+        const thumbSize = `${Math.round(state.thumbSize)}px`;
+        setCssMetric(refs.root, "--public-home-scrollbar-thumb-size", thumbSize);
+        setCssMetric(track, "--public-home-scrollbar-thumb-size", thumbSize);
+      } else {
+        state.trackRect = null;
+        state.thumbSize = 0;
+        state.travel = 1;
+      }
     } else {
       state.trackRect = null;
       state.thumbSize = 0;
@@ -732,6 +814,7 @@ function initScrollPipeline(refs, cleanups, host) {
 
   const scheduler = createFrameScheduler(writeProgress);
   const scrollTarget = isWindowHost(host) ? window : host;
+
   addEvent(cleanups, scrollTarget, "scroll", scheduler.schedule, { passive: true });
 
   function invalidate() {
@@ -740,11 +823,19 @@ function initScrollPipeline(refs, cleanups, host) {
   }
 
   addEvent(cleanups, window, "resize", invalidate, { passive: true });
+  addEvent(cleanups, window, "orientationchange", invalidate, { passive: true });
+  addEvent(cleanups, window, "pageshow", invalidate, { passive: true });
+
+  if (window.visualViewport) {
+    addEvent(cleanups, window.visualViewport, "resize", invalidate, { passive: true });
+  }
 
   let resizeObserver = null;
+
   if ("ResizeObserver" in window) {
     resizeObserver = new ResizeObserver(invalidate);
     resizeObserver.observe(refs.root);
+    if (refs.nav) resizeObserver.observe(refs.nav);
     if (refs.customScrollbar) resizeObserver.observe(refs.customScrollbar);
     if (!isWindowHost(host)) resizeObserver.observe(host);
     cleanups.push(() => resizeObserver?.disconnect());
@@ -755,22 +846,35 @@ function initScrollPipeline(refs, cleanups, host) {
     let pointerId = null;
 
     function scrollFromPointer(event) {
-      if (state.metricsDirty) measureGeometry();
+      if (state.metricsDirty || !state.trackRect || state.trackRect.height <= 4) {
+        measureGeometry();
+      }
+
       const rect = state.trackRect;
-      if (!rect) return;
+      if (!rect || state.thumbSize <= 0) return false;
+
       const localY = (Number(event.clientY) || 0) - rect.top - state.thumbSize / 2;
       const progress = Math.max(0, Math.min(1, localY / state.travel));
-      hostScrollTo(host, progress * state.max, "auto");
-      scheduler.schedule();
+      const didScroll = hostScrollTo(host, progress * state.max, "auto");
+
+      if (didScroll) scheduler.schedule();
+      return didScroll;
     }
 
     addEvent(cleanups, refs.customScrollbar, "pointerdown", (event) => {
       if (event.button !== 0) return;
+
       dragging = true;
       pointerId = event.pointerId ?? null;
       setClass(refs.root, "is-scrollbar-dragging", true);
       setDataset(refs.root, "scrollbarDragging", "true");
-      refs.customScrollbar.setPointerCapture?.(pointerId);
+
+      try {
+        refs.customScrollbar.setPointerCapture?.(pointerId);
+      } catch {
+        // capture is best effort
+      }
+
       scrollFromPointer(event);
       event.preventDefault();
     });
@@ -784,15 +888,18 @@ function initScrollPipeline(refs, cleanups, host) {
     const stop = (event) => {
       if (!dragging) return;
       dragging = false;
+
       try {
         refs.customScrollbar.releasePointerCapture?.(pointerId ?? event?.pointerId);
       } catch {
         // no active capture
       }
+
       pointerId = null;
       setClass(refs.root, "is-scrollbar-dragging", false);
       removeDataset(refs.root, "scrollbarDragging");
     };
+
     addEvent(cleanups, refs.customScrollbar, "pointerup", stop);
     addEvent(cleanups, refs.customScrollbar, "pointercancel", stop);
     addEvent(cleanups, refs.customScrollbar, "lostpointercapture", stop);
@@ -802,6 +909,7 @@ function initScrollPipeline(refs, cleanups, host) {
 
   cleanups.push(() => {
     scheduler.cancel();
+
     for (const node of [refs.root, refs.customScrollbar, refs.nav]) {
       for (const key of [
         "--public-home-scroll-progress",
@@ -809,14 +917,19 @@ function initScrollPipeline(refs, cleanups, host) {
         "--public-home-scrollbar-thumb-top",
         "--public-home-scrollbar-thumb-center",
         "--public-home-scrollbar-thumb-size",
-      ]) removeCssMetric(node, key);
+      ]) {
+        removeCssMetric(node, key);
+      }
     }
+
     setClass(refs.root, CLASSES.scrolled, false);
     setClass(refs.nav, CLASSES.scrolled, false);
     setClass(refs.root, "is-scrollbar-dragging", false);
+
     for (const key of ["scrolled", "scrollProgress", "scrollProgressPercent", "scrollbarDragging"]) {
       removeDataset(refs.root, key);
     }
+
     removeDataset(refs.customScrollbar, "scrollProgress");
   });
 
@@ -834,27 +947,35 @@ function initActiveSection(refs, cleanups, host, activeState) {
   }
 
   const visible = new Map();
-  const observer = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      const hash = sectionHash(entry.target);
-      if (!hash) continue;
-      if (entry.isIntersecting) visible.set(hash, entry.intersectionRatio);
-      else visible.delete(hash);
-    }
-    let bestHash = "";
-    let bestRatio = -1;
-    for (const [hash, ratio] of visible) {
-      if (ratio >= bestRatio) {
-        bestHash = hash;
-        bestRatio = ratio;
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        const hash = sectionHash(entry.target);
+        if (!hash) continue;
+
+        if (entry.isIntersecting) visible.set(hash, entry.intersectionRatio);
+        else visible.delete(hash);
       }
+
+      let bestHash = "";
+      let bestRatio = -1;
+
+      for (const [hash, ratio] of visible) {
+        if (ratio >= bestRatio) {
+          bestHash = hash;
+          bestRatio = ratio;
+        }
+      }
+
+      if (bestHash) activate(bestHash);
+    },
+    {
+      root: isWindowHost(host) ? null : host,
+      rootMargin: ACTIVE_ROOT_MARGIN,
+      threshold: [0, 0.12, 0.24, 0.42, 0.66, 0.88, 1],
     }
-    if (bestHash) activate(bestHash);
-  }, {
-    root: isWindowHost(host) ? null : host,
-    rootMargin: ACTIVE_ROOT_MARGIN,
-    threshold: [0, 0.12, 0.24, 0.42, 0.66, 0.88, 1],
-  });
+  );
 
   refs.sections.forEach((section) => observer.observe(section));
   cleanups.push(() => observer.disconnect());
@@ -863,6 +984,7 @@ function initActiveSection(refs, cleanups, host, activeState) {
 
 function initReveal(refs, cleanups, host) {
   if (!refs.revealItems.length) return;
+
   if (reducedMotion() || !("IntersectionObserver" in window)) {
     refs.revealItems.forEach((item) => {
       setClass(item, CLASSES.visible, true);
@@ -871,18 +993,21 @@ function initReveal(refs, cleanups, host) {
     return;
   }
 
-  const observer = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      if (!entry.isIntersecting) continue;
-      setClass(entry.target, CLASSES.visible, true);
-      setDataset(entry.target, "visible", "true");
-      observer.unobserve(entry.target);
+  const observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        setClass(entry.target, CLASSES.visible, true);
+        setDataset(entry.target, "visible", "true");
+        observer.unobserve(entry.target);
+      }
+    },
+    {
+      root: isWindowHost(host) ? null : host,
+      rootMargin: "0px 0px -12% 0px",
+      threshold: [0.08, 0.16, 0.32],
     }
-  }, {
-    root: isWindowHost(host) ? null : host,
-    rootMargin: "0px 0px -12% 0px",
-    threshold: [0.08, 0.16, 0.32],
-  });
+  );
 
   refs.revealItems.forEach((item) => observer.observe(item));
   cleanups.push(() => observer.disconnect());
@@ -893,20 +1018,27 @@ function initFooterVisibility(refs, cleanups, host) {
   if (!footer || !("IntersectionObserver" in window)) return;
 
   let visible = null;
-  const observer = new IntersectionObserver((entries) => {
-    const next = entries.some((entry) => entry.isIntersecting);
-    if (next === visible) return;
-    visible = next;
-    setClass(refs.root, CLASSES.footerVisible, next);
-    setClass(refs.nav, CLASSES.footerVisible, next);
-    setDataset(refs.root, "footerVisible", next ? "true" : "false");
-    dispatchHomeEvent(refs.root, "public-home:footer-visibility", { visible: next });
-  }, {
-    root: isWindowHost(host) ? null : host,
-    rootMargin: "0px",
-    threshold: [0, 0.01, 0.08],
-  });
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      const next = entries.some((entry) => entry.isIntersecting);
+      if (next === visible) return;
+
+      visible = next;
+      setClass(refs.root, CLASSES.footerVisible, next);
+      setClass(refs.nav, CLASSES.footerVisible, next);
+      setDataset(refs.root, "footerVisible", next ? "true" : "false");
+      dispatchHomeEvent(refs.root, "public-home:footer-visibility", { visible: next });
+    },
+    {
+      root: isWindowHost(host) ? null : host,
+      rootMargin: "0px",
+      threshold: [0, 0.01, 0.08],
+    }
+  );
+
   observer.observe(footer);
+
   cleanups.push(() => {
     observer.disconnect();
     setClass(refs.root, CLASSES.footerVisible, false);
@@ -917,6 +1049,7 @@ function initFooterVisibility(refs, cleanups, host) {
 
 function initPointerFx(refs, cleanups) {
   if (reducedMotion()) return;
+
   try {
     if (!window.matchMedia("(pointer: fine)").matches) return;
   } catch {
@@ -926,17 +1059,24 @@ function initPointerFx(refs, cleanups) {
   let frame = 0;
   let x = 50;
   let y = 50;
+
   const write = () => {
     frame = 0;
     setCssMetric(refs.root, "--public-home-pointer-x", `${x.toFixed(2)}%`);
     setCssMetric(refs.root, "--public-home-pointer-y", `${y.toFixed(2)}%`);
   };
 
-  addEvent(cleanups, refs.root, "pointermove", (event) => {
-    x = Math.max(0, Math.min(100, (event.clientX / Math.max(1, window.innerWidth)) * 100));
-    y = Math.max(0, Math.min(100, (event.clientY / Math.max(1, window.innerHeight)) * 100));
-    if (!frame) frame = requestFrame(write);
-  }, { passive: true });
+  addEvent(
+    cleanups,
+    refs.root,
+    "pointermove",
+    (event) => {
+      x = Math.max(0, Math.min(100, (event.clientX / Math.max(1, window.innerWidth)) * 100));
+      y = Math.max(0, Math.min(100, (event.clientY / Math.max(1, window.innerHeight)) * 100));
+      if (!frame) frame = requestFrame(write);
+    },
+    { passive: true }
+  );
 
   cleanups.push(() => {
     cancelFrame(frame);
@@ -947,42 +1087,61 @@ function initPointerFx(refs, cleanups) {
 
 function initMagneticCards(refs, cleanups) {
   if (!refs.magneticItems.length || reducedMotion()) return;
+
   try {
     if (!window.matchMedia("(pointer: fine)").matches) return;
   } catch {
     return;
   }
 
-  const states = new WeakMap();
   for (const item of refs.magneticItems) {
     const state = { rect: null, frame: 0, x: 50, y: 50 };
-    states.set(item, state);
 
-    addEvent(cleanups, item, "pointerenter", () => {
-      state.rect = item.getBoundingClientRect();
-    }, { passive: true });
+    addEvent(
+      cleanups,
+      item,
+      "pointerenter",
+      () => {
+        state.rect = item.getBoundingClientRect();
+      },
+      { passive: true }
+    );
 
-    addEvent(cleanups, item, "pointermove", (event) => {
-      const rect = state.rect || item.getBoundingClientRect();
-      state.x = ((event.clientX - rect.left) / Math.max(1, rect.width)) * 100;
-      state.y = ((event.clientY - rect.top) / Math.max(1, rect.height)) * 100;
-      if (state.frame) return;
-      state.frame = requestFrame(() => {
+    addEvent(
+      cleanups,
+      item,
+      "pointermove",
+      (event) => {
+        const rect = state.rect || item.getBoundingClientRect();
+        state.x = ((event.clientX - rect.left) / Math.max(1, rect.width)) * 100;
+        state.y = ((event.clientY - rect.top) / Math.max(1, rect.height)) * 100;
+
+        if (state.frame) return;
+
+        state.frame = requestFrame(() => {
+          state.frame = 0;
+          setClass(item, CLASSES.magnetic, true);
+          setCssMetric(item, "--card-pointer-x", `${state.x.toFixed(2)}%`);
+          setCssMetric(item, "--card-pointer-y", `${state.y.toFixed(2)}%`);
+        });
+      },
+      { passive: true }
+    );
+
+    addEvent(
+      cleanups,
+      item,
+      "pointerleave",
+      () => {
+        state.rect = null;
+        cancelFrame(state.frame);
         state.frame = 0;
-        setClass(item, CLASSES.magnetic, true);
-        setCssMetric(item, "--card-pointer-x", `${state.x.toFixed(2)}%`);
-        setCssMetric(item, "--card-pointer-y", `${state.y.toFixed(2)}%`);
-      });
-    }, { passive: true });
-
-    addEvent(cleanups, item, "pointerleave", () => {
-      state.rect = null;
-      cancelFrame(state.frame);
-      state.frame = 0;
-      setClass(item, CLASSES.magnetic, false);
-      setCssMetric(item, "--card-pointer-x", "50%");
-      setCssMetric(item, "--card-pointer-y", "50%");
-    }, { passive: true });
+        setClass(item, CLASSES.magnetic, false);
+        setCssMetric(item, "--card-pointer-x", "50%");
+        setCssMetric(item, "--card-pointer-y", "50%");
+      },
+      { passive: true }
+    );
 
     cleanups.push(() => cancelFrame(state.frame));
   }
@@ -991,32 +1150,45 @@ function initMagneticCards(refs, cleanups) {
 function writeClipboard(value) {
   const clean = cleanText(value, "");
   if (!clean) return Promise.resolve(false);
+
   if (navigator.clipboard?.writeText && window.isSecureContext) {
     return navigator.clipboard.writeText(clean).then(() => true).catch(() => false);
   }
+
   return Promise.resolve(false);
 }
 
 function initCopyActions(refs, cleanups) {
   if (!refs.copyActions.length) return;
+
   let timer = 0;
+
   addEvent(cleanups, refs.root, "click", async (event) => {
     const action = event.target?.closest?.(SELECTORS.copyAction);
     if (!action || !refs.root.contains(action)) return;
-    const value = action.getAttribute("data-copy-value") || action.href || action.textContent || "";
+
+    const value =
+      action.getAttribute("data-copy-value") || action.href || action.textContent || "";
+
     const ok = await writeClipboard(value);
     setClass(action, CLASSES.copied, ok);
     setDataset(action, "copied", ok ? "true" : "false");
+
     dispatchHomeEvent(refs.root, ok ? "public-home:copy-success" : "public-home:copy-fail", {
       ok,
       value: redact(value),
     });
+
     clearTimeout(timer);
-    if (ok) timer = window.setTimeout(() => {
-      setClass(action, CLASSES.copied, false);
-      removeDataset(action, "copied");
-    }, 1500);
+
+    if (ok) {
+      timer = window.setTimeout(() => {
+        setClass(action, CLASSES.copied, false);
+        removeDataset(action, "copied");
+      }, 1500);
+    }
   });
+
   cleanups.push(() => clearTimeout(timer));
 }
 
@@ -1027,34 +1199,47 @@ function parseNumber(value, fallback = 0) {
 
 function initMetricCounters(refs, cleanups, host) {
   if (!refs.metricCounters.length) return;
+
   const frames = new Set();
 
   function animate(node) {
     if (node.dataset.counterAnimated === "true") return;
+
     node.dataset.counterAnimated = "true";
     setClass(node, CLASSES.counterReady, true);
+
     const target = parseNumber(node.dataset.counterTarget || node.textContent, 0);
     const start = parseNumber(node.dataset.counterStart, 0);
     const duration = Math.max(320, Math.min(2200, Number(node.dataset.counterDuration) || 1100));
     const suffix = cleanText(node.dataset.counterSuffix || "", "");
     const decimals = Math.max(0, Math.min(3, Number(node.dataset.counterDecimals) || 0));
 
+    const format = (value) =>
+      `${value.toLocaleString("es-ES", {
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals,
+      })}${suffix}`;
+
     if (reducedMotion()) {
-      node.textContent = `${target.toLocaleString("es-ES", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}${suffix}`;
+      node.textContent = format(target);
       return;
     }
 
     const started = performance.now();
+
     const tick = (now) => {
-      const progress = Math.min(1, (now - started) / duration);
+      const progress = Math.min(1, Math.max(0, (now - started) / duration));
       const eased = 1 - Math.pow(1 - progress, 3);
-      const value = start + (target - start) * eased;
-      node.textContent = `${value.toLocaleString("es-ES", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}${suffix}`;
+      node.textContent = format(start + (target - start) * eased);
+
       if (progress < 1) {
         const id = requestFrame(tick);
         frames.add(id);
+      } else {
+        node.textContent = format(target);
       }
     };
+
     const id = requestFrame(tick);
     frames.add(id);
   }
@@ -1062,17 +1247,21 @@ function initMetricCounters(refs, cleanups, host) {
   if (!("IntersectionObserver" in window)) {
     refs.metricCounters.forEach(animate);
   } else {
-    const observer = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting) continue;
-        animate(entry.target);
-        observer.unobserve(entry.target);
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          animate(entry.target);
+          observer.unobserve(entry.target);
+        }
+      },
+      {
+        root: isWindowHost(host) ? null : host,
+        rootMargin: "0px 0px -8% 0px",
+        threshold: [0.2, 0.45, 0.7],
       }
-    }, {
-      root: isWindowHost(host) ? null : host,
-      rootMargin: "0px 0px -8% 0px",
-      threshold: [0.2, 0.45, 0.7],
-    });
+    );
+
     refs.metricCounters.forEach((node) => observer.observe(node));
     cleanups.push(() => observer.disconnect());
   }
@@ -1086,6 +1275,7 @@ function initMetricCounters(refs, cleanups, host) {
 function initFaqCollapsed(refs, cleanups) {
   const items = toArray(refs.root.querySelectorAll(".public-home-faq-item"));
   if (!items.length) return;
+
   for (const item of items) {
     try {
       item.open = false;
@@ -1094,6 +1284,7 @@ function initFaqCollapsed(refs, cleanups) {
       // no-op
     }
   }
+
   cleanups.push(() => {
     for (const item of items) {
       try {
@@ -1108,7 +1299,10 @@ function initFaqCollapsed(refs, cleanups) {
 
 function initInitialTop(refs, host, activeState) {
   try {
-    if ("scrollRestoration" in window.history) window.history.scrollRestoration = "manual";
+    if ("scrollRestoration" in window.history) {
+      window.history.scrollRestoration = "manual";
+    }
+
     if (window.location.hash && window.location.hash !== "#") {
       window.history.replaceState(
         { source: SOURCE, reason: "public-home-initial-top" },
@@ -1119,9 +1313,11 @@ function initInitialTop(refs, host, activeState) {
   } catch {
     // navigation remains usable
   }
+
   requestFrame(() => {
     hostScrollTo(host, 0, "auto");
-    const first = refs.sections.find((section) => sectionHash(section) === "#inicio") || refs.sections[0];
+    const first =
+      refs.sections.find((section) => sectionHash(section) === "#inicio") || refs.sections[0];
     if (first) setActiveHash(refs, sectionHash(first), activeState);
   });
 }
@@ -1146,11 +1342,18 @@ export function renderPublicHomeView(container, context = {}) {
   if (!container) throw new Error("[PublicHomeView] container requerido.");
 
   destroyPrevious(container);
+
   const cleanups = [];
   const view = mountTemplate(container);
   const refs = getRefs(view);
   const activeState = { activeHash: "" };
+
+  /*
+    Se resuelve ANTES de cualquier medida, pero por contrato DOM, no por
+    scrollHeight. Esto funciona igual con el route-host oculto y tras commit.
+  */
   const host = resolveScrollHost(refs);
+
   let mounted = true;
 
   initBodyState(refs, cleanups);
@@ -1172,6 +1375,7 @@ export function renderPublicHomeView(container, context = {}) {
     version: PUBLIC_HOME_VIEW_VERSION,
     root: refs.root,
     view,
+
     scrollTo(hash = "", options = {}) {
       return scrollToHash(hash, refs, host, activeState, {
         replace: true,
@@ -1180,28 +1384,35 @@ export function renderPublicHomeView(container, context = {}) {
         ...options,
       });
     },
+
     openMenu() {
       return menu.open({ focus: true });
     },
+
     closeMenu() {
       return menu.close({ restoreFocus: true });
     },
+
     toggleMenu() {
       return menu.toggle();
     },
+
     refreshActiveSection() {
       return activeState.activeHash
         ? setActiveHash(refs, activeState.activeHash, { activeHash: "" })
         : false;
     },
+
     destroy(options = {}) {
       if (!mounted) return true;
       mounted = false;
+
       try {
         menu.close({ focus: false });
       } catch {
         // continue teardown
       }
+
       for (const cleanup of cleanups.splice(0).reverse()) {
         try {
           cleanup?.();
@@ -1209,14 +1420,17 @@ export function renderPublicHomeView(container, context = {}) {
           // independent cleanup boundary
         }
       }
+
       if (!options.keepDom) container.replaceChildren();
       if (INSTANCES.get(container) === instance) INSTANCES.delete(container);
       if (lastInstance === instance) lastInstance = null;
       return true;
     },
+
     getSnapshot() {
       const router = context.Router || context.router || appRouter();
       const auth = context.Auth || context.auth || appAuth();
+
       return Object.freeze({
         version: PUBLIC_HOME_VIEW_VERSION,
         source: SOURCE,
@@ -1230,13 +1444,15 @@ export function renderPublicHomeView(container, context = {}) {
         metricCounterCount: refs.metricCounters.length,
         magneticItemCount: refs.magneticItems.length,
         reducedMotion: reducedMotion(),
-        scrollHost: isWindowHost(host) ? "window" : "element",
+        scrollHost: isWindowHost(host) ? "window" : host.id || "element",
+        scrollContract: "main-content-deterministic",
         scrollPipeline: "single-listener-frame-budgeted",
         routerAvailable: Boolean(router?.navigate || router?.replace || router?.push || router?.go),
         authenticated: auth?.isAuthenticated?.() === true,
         currentPath: redact(`${window.location.pathname}${window.location.search}${window.location.hash}`),
       });
     },
+
     getDebugSnapshot() {
       return this.getSnapshot();
     },
@@ -1265,6 +1481,7 @@ export function destroy(options = {}) {
 
 export function getSnapshot() {
   if (lastInstance?.getSnapshot) return lastInstance.getSnapshot();
+
   return Object.freeze({
     version: PUBLIC_HOME_VIEW_VERSION,
     source: SOURCE,

@@ -65,7 +65,7 @@ def main() -> int:
             f"public-home debe registrar exactamente un listener del scroll host; encontrados {scroll_listener_count}",
         )
 
-    hot_path = function_body(source, "writeProgress", "createFrameScheduler")
+    hot_path = function_body(source, "writeProgress", "initActiveSection")
     if not hot_path:
         fail(errors, "no se pudo localizar writeProgress()")
     else:

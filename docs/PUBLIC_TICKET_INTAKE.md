@@ -8,6 +8,8 @@ La home pública envía una única solicitud al backend mediante:
 
 El navegador **no** crea por separado usuarios, clientes ni tickets. El backend es la única autoridad de identidad y de vinculación.
 
+El endpoint mantiene **autenticación opcional**: usa la sesión cuando existe y aplica resolución anónima segura por datos de contacto cuando no existe sesión.
+
 Contrato productivo final:
 
 1. Valida y normaliza identidad/contacto.

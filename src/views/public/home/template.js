@@ -7,7 +7,7 @@ import {
   safeInternalHref,
 } from "../index.js";
 
-export const PUBLIC_HOME_TEMPLATE_VERSION = "public.home.template.final.productivo.2026.22.hero-bg-pass-through-10-10";
+export const PUBLIC_HOME_TEMPLATE_VERSION = "public.home.template.final.productivo.2026.23-system-icon-10-10";
 
 const APP_NAME = "Onion Support";
 
@@ -96,7 +96,7 @@ function renderIcon(name = "") {
     invoice: `<svg class="public-home-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7.25 3.75h9.5v16.5l-2-1.2-2.75 1.2-2.75-1.2-2 1.2V3.75Z"></path><path d="M9.25 8h5.5"></path><path d="M9.25 11.75h5.5"></path><path d="M9.25 15.5h3"></path></svg>`,
     laptop: `<svg class="public-home-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6.25 5.75h11.5v8.5H6.25v-8.5Z"></path><path d="M4.25 18.25h15.5l-2-4H6.25l-2 4Z"></path></svg>`,
     chip: `<svg class="public-home-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 8h8v8H8V8Z"></path><path d="M9.25 2.75v3"></path><path d="M14.75 2.75v3"></path><path d="M9.25 18.25v3"></path><path d="M14.75 18.25v3"></path><path d="M2.75 9.25h3"></path><path d="M2.75 14.75h3"></path><path d="M18.25 9.25h3"></path><path d="M18.25 14.75h3"></path></svg>`,
-    refresh: `<svg class="public-home-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19.25 8.75V4.75h-4"></path><path d="M18.58 5.42A8.25 8.25 0 1 0 20 12"></path><path d="M4.75 15.25v4h4"></path></svg>`,
+    system: `<svg class="public-home-icon public-home-icon--system" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6.25 4.75h11.5c.83 0 1.5.67 1.5 1.5v8c0 .83-.67 1.5-1.5 1.5H6.25c-.83 0-1.5-.67-1.5-1.5v-8c0-.83.67-1.5 1.5-1.5Z"></path><path d="M12 4.75v11"></path><path d="M4.75 10.25h14.5"></path><path d="M12 15.75v3"></path><path d="M9 19.25h6"></path></svg>`,
     speed: `<svg class="public-home-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4.75 16.25a8.25 8.25 0 1 1 14.5 0"></path><path d="m12 14 4-4"></path><path d="M12 14.25h.01"></path><path d="M7.25 16.25h9.5"></path></svg>`,
     wifi: `<svg class="public-home-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4.25 9.25a12 12 0 0 1 15.5 0"></path><path d="M7.25 12.25a7.5 7.5 0 0 1 9.5 0"></path><path d="M10.25 15.25a3 3 0 0 1 3.5 0"></path><path d="M12 18.25h.01"></path></svg>`,
     printer: `<svg class="public-home-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7.25 8.25v-4.5h9.5v4.5"></path><path d="M7.25 16.25H5.5a1.75 1.75 0 0 1-1.75-1.75v-4.25A2.25 2.25 0 0 1 6 8h12a2.25 2.25 0 0 1 2.25 2.25v4.25a1.75 1.75 0 0 1-1.75 1.75h-1.75"></path><path d="M7.25 13.25h9.5v7h-9.5v-7Z"></path><path d="M16.75 11.25h.01"></path></svg>`,
@@ -135,7 +135,7 @@ const SERVICES = [
     text: "Mejoras con sentido para ganar velocidad, estabilidad y vida útil sin cambiar de equipo.",
   },
   {
-    icon: "refresh",
+    icon: "system",
     title: "Sistema operativo",
     text: "Instalación limpia, drivers, actualizaciones, configuración base y equipo listo para trabajar.",
   },

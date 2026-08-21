@@ -32,7 +32,7 @@ export const CONFIG_VERSION = "core.config.production.v6-split-origin-health";
 
 export const CANONICAL_PRODUCTION_API_BASE = "https://www.onionsupport.com";
 
-export const CANONICAL_DIRECT_BACKEND_API_BASE = "https://api.onionit.net";
+export const CANONICAL_DIRECT_BACKEND_API_BASE = "https://api.onionsupport.com";
 
 export const CANONICAL_BACKEND_API_ORIGINS = Object.freeze([
   CANONICAL_PRODUCTION_API_BASE,

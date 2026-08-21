@@ -21,7 +21,7 @@ const AZURE_BLOB_SUFFIX =
   ".blob.core.windows.net";
 
 const ONION_API_HOST =
-  "api.onionit.net";
+  "api.onionsupport.com";
 
 const SENSITIVE_KEYS = new Set(
   (
@@ -96,7 +96,7 @@ export function isOnionMediaHostname(
 
   return Boolean(
     host === ONION_API_HOST ||
-    host.endsWith(".onionit.net")
+    host.endsWith(".onionsupport.com")
   );
 }
 

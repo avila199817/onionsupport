@@ -3,11 +3,17 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import re
 import sys
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(
+    os.environ.get(
+        "ONION_REPO_ROOT",
+        str(Path(__file__).resolve().parents[2]),
+    )
+).resolve()
 HOME = ROOT / "src/views/public/home/index.js"
 HOME_CSS = ROOT / "src/css/views/public/index.css"
 

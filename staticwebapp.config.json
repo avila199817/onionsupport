@@ -22,164 +22,57 @@
     ]
   },
   "routes": [
-    {
-      "route": "/.auth/*",
-      "statusCode": 404
-    },
-    {
-      "route": "/.well-known",
-      "statusCode": 404
-    },
-    {
-      "route": "/.well-known/*",
-      "statusCode": 404
-    },
-    {
-      "route": "/docs",
-      "statusCode": 404
-    },
-    {
-      "route": "/docs/*",
-      "statusCode": 404
-    },
-    {
-      "route": "/config",
-      "statusCode": 404
-    },
-    {
-      "route": "/config/*",
-      "statusCode": 404
-    },
-    {
-      "route": "/node_modules",
-      "statusCode": 404
-    },
-    {
-      "route": "/node_modules/*",
-      "statusCode": 404
-    },
-    {
-      "route": "/.git",
-      "statusCode": 404
-    },
-    {
-      "route": "/.git/*",
-      "statusCode": 404
-    },
-    {
-      "route": "/.github",
-      "statusCode": 404
-    },
-    {
-      "route": "/.github/*",
-      "statusCode": 404
-    },
-    {
-      "route": "/.vscode",
-      "statusCode": 404
-    },
-    {
-      "route": "/.vscode/*",
-      "statusCode": 404
-    },
-    {
-      "route": "/.idea",
-      "statusCode": 404
-    },
-    {
-      "route": "/.idea/*",
-      "statusCode": 404
-    },
-    {
-      "route": "/staticwebapp.config.json",
-      "statusCode": 404
-    },
-    {
-      "route": "/package.json",
-      "statusCode": 404
-    },
-    {
-      "route": "/package-lock.json",
-      "statusCode": 404
-    },
-    {
-      "route": "/pnpm-lock.yaml",
-      "statusCode": 404
-    },
-    {
-      "route": "/yarn.lock",
-      "statusCode": 404
-    },
-    {
-      "route": "/vite.config.*",
-      "statusCode": 404
-    },
-    {
-      "route": "/webpack.config.*",
-      "statusCode": 404
-    },
-    {
-      "route": "/README*",
-      "statusCode": 404
-    },
-    {
-      "route": "/CHANGELOG*",
-      "statusCode": 404
-    },
-    {
-      "route": "/LICENSE*",
-      "statusCode": 404
-    },
-    {
-      "route": "/.env*",
-      "statusCode": 404
-    },
-    {
-      "route": "/manifest.json",
-      "statusCode": 404
-    },
-    {
-      "route": "/sw.js",
-      "statusCode": 404
-    },
-    {
-      "route": "/apple-touch-icon.png",
-      "statusCode": 404
-    },
-    {
-      "route": "/seo/*",
-      "statusCode": 404
-    },
-    {
-      "route": "/es",
-      "redirect": "/",
-      "statusCode": 301
-    },
-    {
-      "route": "/es/*",
-      "redirect": "/",
-      "statusCode": 301
-    },
-    {
-      "route": "/ca",
-      "redirect": "/",
-      "statusCode": 301
-    },
-    {
-      "route": "/ca/*",
-      "redirect": "/",
-      "statusCode": 301
-    },
-    {
-      "route": "/en",
-      "redirect": "/",
-      "statusCode": 301
-    },
-    {
-      "route": "/en/*",
-      "redirect": "/",
-      "statusCode": 301
-    },
+    { "route": "/.auth/*", "statusCode": 404 },
+    { "route": "/.well-known", "statusCode": 404 },
+    { "route": "/.well-known/*", "statusCode": 404 },
+    { "route": "/docs", "statusCode": 404 },
+    { "route": "/docs/*", "statusCode": 404 },
+    { "route": "/config", "statusCode": 404 },
+    { "route": "/config/*", "statusCode": 404 },
+    { "route": "/node_modules", "statusCode": 404 },
+    { "route": "/node_modules/*", "statusCode": 404 },
+    { "route": "/.git", "statusCode": 404 },
+    { "route": "/.git/*", "statusCode": 404 },
+    { "route": "/.github", "statusCode": 404 },
+    { "route": "/.github/*", "statusCode": 404 },
+    { "route": "/.vscode", "statusCode": 404 },
+    { "route": "/.vscode/*", "statusCode": 404 },
+    { "route": "/.idea", "statusCode": 404 },
+    { "route": "/.idea/*", "statusCode": 404 },
+    { "route": "/staticwebapp.config.json", "statusCode": 404 },
+    { "route": "/package.json", "statusCode": 404 },
+    { "route": "/package-lock.json", "statusCode": 404 },
+    { "route": "/pnpm-lock.yaml", "statusCode": 404 },
+    { "route": "/yarn.lock", "statusCode": 404 },
+    { "route": "/vite.config.*", "statusCode": 404 },
+    { "route": "/webpack.config.*", "statusCode": 404 },
+    { "route": "/README*", "statusCode": 404 },
+    { "route": "/CHANGELOG*", "statusCode": 404 },
+    { "route": "/LICENSE*", "statusCode": 404 },
+    { "route": "/.env*", "statusCode": 404 },
+    { "route": "/manifest.json", "statusCode": 404 },
+    { "route": "/sw.js", "statusCode": 404 },
+    { "route": "/apple-touch-icon.png", "statusCode": 404 },
+
+    { "route": "/seo/reparacion-ordenadores", "redirect": "/reparacion-ordenadores", "statusCode": 301 },
+    { "route": "/seo/reparacion-ordenadores.html", "redirect": "/reparacion-ordenadores", "statusCode": 301 },
+    { "route": "/seo/soporte-informatico", "redirect": "/soporte-informatico", "statusCode": 301 },
+    { "route": "/seo/soporte-informatico.html", "redirect": "/soporte-informatico", "statusCode": 301 },
+    { "route": "/seo/redes-wifi", "redirect": "/redes-wifi", "statusCode": 301 },
+    { "route": "/seo/redes-wifi.html", "redirect": "/redes-wifi", "statusCode": 301 },
+    { "route": "/seo/impresoras", "redirect": "/impresoras", "statusCode": 301 },
+    { "route": "/seo/impresoras.html", "redirect": "/impresoras", "statusCode": 301 },
+    { "route": "/seo/soporte-empresas", "redirect": "/soporte-empresas", "statusCode": 301 },
+    { "route": "/seo/soporte-empresas.html", "redirect": "/soporte-empresas", "statusCode": 301 },
+    { "route": "/seo/*", "statusCode": 404 },
+
+    { "route": "/es", "redirect": "/", "statusCode": 301 },
+    { "route": "/es/*", "redirect": "/", "statusCode": 301 },
+    { "route": "/ca", "redirect": "/", "statusCode": 301 },
+    { "route": "/ca/*", "redirect": "/", "statusCode": 301 },
+    { "route": "/en", "redirect": "/", "statusCode": 301 },
+    { "route": "/en/*", "redirect": "/", "statusCode": 301 },
+
     {
       "route": "/",
       "rewrite": "/index.html",
@@ -190,11 +83,8 @@
         "X-Robots-Tag": "index, follow"
       }
     },
-    {
-      "route": "/index.html",
-      "redirect": "/",
-      "statusCode": 301
-    },
+    { "route": "/index.html", "redirect": "/", "statusCode": 301 },
+
     {
       "route": "/reparacion-ordenadores",
       "rewrite": "/seo/reparacion-ordenadores.html",
@@ -245,11 +135,8 @@
         "X-Robots-Tag": "index, follow"
       }
     },
-    {
-      "route": "/login.html",
-      "redirect": "/login",
-      "statusCode": 301
-    },
+    { "route": "/login.html", "redirect": "/login", "statusCode": 301 },
+
     {
       "route": "/password-request",
       "rewrite": "/index.html",
@@ -390,6 +277,7 @@
         "X-Robots-Tag": "noindex, nofollow"
       }
     },
+
     {
       "route": "/ad1f6102f1914986b540f6a34bf6939b.txt",
       "headers": {
@@ -397,48 +285,13 @@
         "X-Robots-Tag": "noindex, nofollow, nosnippet"
       }
     },
-    {
-      "route": "/src/media/*",
-      "headers": {
-        "Cache-Control": "public, max-age=86400, must-revalidate"
-      }
-    },
-    {
-      "route": "/src/*",
-      "headers": {
-        "Cache-Control": "no-cache, must-revalidate"
-      }
-    },
-    {
-      "route": "/assets/*",
-      "headers": {
-        "Cache-Control": "public, max-age=86400, must-revalidate"
-      }
-    },
-    {
-      "route": "/site.webmanifest",
-      "headers": {
-        "Cache-Control": "public, max-age=86400, must-revalidate"
-      }
-    },
-    {
-      "route": "/favicon.ico",
-      "headers": {
-        "Cache-Control": "public, max-age=86400, must-revalidate"
-      }
-    },
-    {
-      "route": "/robots.txt",
-      "headers": {
-        "Cache-Control": "public, max-age=3600"
-      }
-    },
-    {
-      "route": "/sitemap.xml",
-      "headers": {
-        "Cache-Control": "public, max-age=3600"
-      }
-    }
+    { "route": "/src/media/*", "headers": { "Cache-Control": "public, max-age=86400, must-revalidate" } },
+    { "route": "/src/*", "headers": { "Cache-Control": "no-cache, must-revalidate" } },
+    { "route": "/assets/*", "headers": { "Cache-Control": "public, max-age=86400, must-revalidate" } },
+    { "route": "/site.webmanifest", "headers": { "Cache-Control": "public, max-age=86400, must-revalidate" } },
+    { "route": "/favicon.ico", "headers": { "Cache-Control": "public, max-age=86400, must-revalidate" } },
+    { "route": "/robots.txt", "headers": { "Cache-Control": "public, max-age=3600" } },
+    { "route": "/sitemap.xml", "headers": { "Cache-Control": "public, max-age=3600" } }
   ],
   "globalHeaders": {
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",

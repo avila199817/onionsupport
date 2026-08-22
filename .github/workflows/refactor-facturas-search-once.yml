@@ -1,0 +1,38 @@
+name: One-shot Facturas canonical search refactor
+
+on:
+  push:
+    branches:
+      - fix/facturas-canonical-search-20260822
+
+permissions:
+  contents: write
+
+jobs:
+  refactor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 1
+
+      - name: Apply canonical endpoint refactor
+        run: python3 .github/scripts/refactor_facturas_search_once.py
+
+      - name: Validate JavaScript syntax
+        run: node --check src/views/facturas/index.js
+
+      - name: Remove one-shot tooling and commit result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/scripts/refactor_facturas_search_once.py
+          git rm .github/workflows/refactor-facturas-search-once.yml
+          git add src/views/facturas/index.js
+          git diff --cached --check
+          git commit -m "Facturas: alinear búsquedas con endpoints canónicos"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

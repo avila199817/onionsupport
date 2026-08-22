@@ -24,7 +24,7 @@
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
-export const CONFIG_VERSION = "core.config.production.v7-direct-api";
+export const CONFIG_VERSION = "core.config.production.v8-direct-api-final";
 
 /* =========================================================
    CONSTANTES BASE
@@ -32,20 +32,8 @@ export const CONFIG_VERSION = "core.config.production.v7-direct-api";
 
 export const CANONICAL_PRODUCTION_API_BASE = "https://api.onionsupport.com";
 
-export const CANONICAL_DIRECT_BACKEND_API_BASE = "https://api.onionsupport.com";
-
 export const CANONICAL_BACKEND_API_ORIGINS = Object.freeze([
   CANONICAL_PRODUCTION_API_BASE,
-  CANONICAL_DIRECT_BACKEND_API_BASE,
-]);
-
-/*
-  Compatibilidad temporal del cutover:
-  /health conserva el routing directo explícito mientras retiramos
-  de forma segura el linked backend de Azure Static Web Apps.
-*/
-export const DIRECT_BACKEND_API_PREFIXES = Object.freeze([
-  "/health",
 ]);
 
 export const CANONICAL_FRONTEND_ORIGINS = Object.freeze([

@@ -25,8 +25,6 @@ import {
   config,
   AUTH_ENDPOINTS as CONFIG_AUTH_ENDPOINTS,
   SENSITIVE_QUERY_PARAMS,
-  CANONICAL_DIRECT_BACKEND_API_BASE,
-  DIRECT_BACKEND_API_PREFIXES,
   getApiBase,
   endpointPathFromUrlLike,
   normalizeEndpointPath,
@@ -35,7 +33,7 @@ import {
 } from "./config.js";
 
 export const HTTP_VERSION =
-  "core.http.refresh.blob.v7-split-origin-health";
+  "core.http.refresh.blob.v8-direct-api";
 
 export const AUTH_ENDPOINTS =
   CONFIG_AUTH_ENDPOINTS;
@@ -466,37 +464,6 @@ function getApiOrigin() {
   );
 }
 
-function shouldUseDirectBackendOrigin(
-  path = ""
-) {
-  const normalized =
-    normalizeEndpointPath(
-      path
-    );
-
-  if (!normalized) {
-    return false;
-  }
-
-  return DIRECT_BACKEND_API_PREFIXES
-    .some((prefix) => {
-      const target =
-        normalizeEndpointPath(
-          prefix
-        );
-
-      return Boolean(
-        target &&
-        (
-          normalized === target ||
-          normalized.startsWith(
-            `${target}/`
-          )
-        )
-      );
-    });
-}
-
 function endpointToPath(
   endpoint = "/"
 ) {
@@ -678,13 +645,7 @@ export function buildApiUrl(
   }
 
   const base =
-    (
-      shouldUseDirectBackendOrigin(
-        path
-      )
-        ? CANONICAL_DIRECT_BACKEND_API_BASE
-        : getApiOrigin()
-    )
+    getApiOrigin()
       .replace(
         /\/+$/g,
         ""

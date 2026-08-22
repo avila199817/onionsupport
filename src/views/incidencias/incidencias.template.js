@@ -8,7 +8,7 @@
    - Acepta items/tickets/incidencias/rows/results/data.items/etc.
 ========================================================= */
 
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v26.date-toggle-avatar-title";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v27.stable-toolbar-money-reset";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   CREATE_OPEN: "create-open",
@@ -202,8 +202,20 @@ function formatMoney(v = 0, currency = DEFAULT_CURRENCY) {
   const code = txt(currency, DEFAULT_CURRENCY).toUpperCase();
   let formatter = MONEY_FORMATTERS.get(code);
   if (!formatter) {
-    try { formatter = new Intl.NumberFormat("es-ES", { style: "currency", currency: code, maximumFractionDigits: 2 }); }
-    catch { return `${num(v, 0).toFixed(2)} €`; }
+    try {
+      formatter = new Intl.NumberFormat("es-ES", {
+        style: "currency",
+        currency: code,
+        useGrouping: "always",
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+    } catch {
+      const amount = num(v, 0).toFixed(2).replace(".", ",");
+      const [integer, decimals = "00"] = amount.split(",");
+      const grouped = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+      return `${grouped},${decimals} €`;
+    }
     MONEY_FORMATTERS.set(code, formatter);
   }
   return formatter.format(num(v, 0));
@@ -563,7 +575,9 @@ function buildVm(input = {}) {
       ? "amount"
       : rawFilter === "date"
         ? "date"
-        : filter;
+        : filter === "all"
+          ? ""
+          : filter;
   const visibleLimit = Math.max(1, num(d.visibleLimit, DEFAULT_VISIBLE_ROWS));
   const filtered = sortItems(items.filter((it) => itemMatchesFilter(it, filter)).filter((it) => itemMatchesSearch(it, search)), order, sortMode);
   const visible = filtered.slice(0, visibleLimit);
@@ -727,7 +741,6 @@ const spinner = (label = "Cargando...") => `<span class="incidencias-spinner" ar
 
 function renderHeader(vm = {}) {
   const s = vm.stats;
-  const updatedAt = s.lastUpdateTs ? new Date(s.lastUpdateTs).toISOString() : "";
   return `
     <section class="incidencias-hero" data-incidencias-hero="true">
       <div class="incidencias-hero-top">
@@ -743,7 +756,6 @@ function renderHeader(vm = {}) {
       </div>
       <div class="incidencias-hero-meta">
         <span class="incidencias-meta-pill" data-meta="total">${icon("ticket")}<span>${esc(`${formatNumber(vm.total)} solicitudes registradas`)}</span></span>
-        <span class="incidencias-meta-pill" data-meta="updated">${icon("refresh")}<span>${updatedAt ? esc(`Última actualización · ${formatRelativeDate(updatedAt)}`) : "Sin actualizaciones recientes"}</span></span>
         <button type="button" class="incidencias-meta-pill incidencias-meta-pill--action${vm.selection === "attachments" ? " is-active" : ""}" data-meta="attachments" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="attachments" aria-pressed="${vm.selection === "attachments" ? "true" : "false"}" aria-label="Ordenar incidencias de más adjuntos a menos" title="Ordenar por número de adjuntos">${icon("paperclip")}<span>${esc(`${formatNumber(s.attachments)} adjuntos`)}</span></button>
       </div>
       <div class="incidencias-stats" aria-label="Accesos rápidos del historial">
@@ -806,8 +818,11 @@ function renderFilters(vm = {}) {
     <div class="incidencias-filters" data-incidencias-filters="true" data-selected-control="${at(vm.selection)}">
       <div class="incidencias-filter-pills" role="tablist" aria-label="Filtrar incidencias">
         ${FILTERS.map((f) => {
-          const active = f.key === vm.selection;
-          return `<button type="button" role="tab" class="incidencias-filter-pill${active ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.FILTER}" data-filter="${at(f.key)}" aria-selected="${active ? "true" : "false"}" aria-pressed="${active ? "true" : "false"}"><span>${esc(f.label)}</span><strong>${esc(formatNumber(vm.filterCounts?.[f.key] || 0))}</strong></button>`;
+          const active = f.key !== "all" && f.key === vm.selection;
+          const action = f.key === "all"
+            ? INCIDENCIAS_ACTIONS.CLEAR_FILTERS
+            : INCIDENCIAS_ACTIONS.FILTER;
+          return `<button type="button" role="tab" class="incidencias-filter-pill${active ? " is-active" : ""}" data-incidencias-action="${action}" data-filter="${at(f.key)}" aria-selected="${active ? "true" : "false"}" aria-pressed="${active ? "true" : "false"}"><span>${esc(f.label)}</span><strong>${esc(formatNumber(vm.filterCounts?.[f.key] || 0))}</strong></button>`;
         }).join("")}
       </div>
       <div class="incidencias-sort-pills" data-incidencias-sort-pills="true">

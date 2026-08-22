@@ -231,57 +231,30 @@ def validate_private_route_contract(errors: list[str]) -> None:
 
 
 def validate_api_transport_contract(errors: list[str]) -> None:
-    """Keep the API transport contract valid during the direct-API cutover.
-
-    Production may use the direct API base while the split-origin health
-    compatibility symbols remain temporarily until the Azure backend is unlinked.
-    """
+    """Keep production pinned to the canonical direct API transport."""
 
     config_text = (SRC / "core" / "config.js").read_text(encoding="utf-8")
     http_text = (SRC / "core" / "http.js").read_text(encoding="utf-8")
 
-    canonical_site = (
-        "https://onionsupport.com"
-        if (ROOT / ".github/ci/canonical-apex-v1").is_file()
-        else "https://www.onionsupport.com"
-    )
-
-    allowed_production_api_bases = (
-        f'CANONICAL_PRODUCTION_API_BASE = "{canonical_site}"',
-        'CANONICAL_PRODUCTION_API_BASE = "https://api.onionsupport.com"',
-    )
-
-    if not any(
-        snippet in config_text
-        for snippet in allowed_production_api_bases
-    ):
-        errors.append(
-            "src/core/config.js :: CANONICAL_PRODUCTION_API_BASE "
-            "fuera de las arquitecturas permitidas durante el cutover"
-        )
-
     required_config = (
-        'CANONICAL_DIRECT_BACKEND_API_BASE = "https://api.onionsupport.com"',
-        'DIRECT_BACKEND_API_PREFIXES = Object.freeze([',
-        '"/health"',
+        'CANONICAL_PRODUCTION_API_BASE = "https://api.onionsupport.com"',
     )
 
     for snippet in required_config:
         if snippet not in config_text:
             errors.append(
-                f"src/core/config.js :: falta contrato de transporte API: {snippet}"
+                f"src/core/config.js :: falta contrato API directo: {snippet}"
             )
 
     required_http = (
-        "CANONICAL_DIRECT_BACKEND_API_BASE",
-        "DIRECT_BACKEND_API_PREFIXES",
-        "shouldUseDirectBackendOrigin",
+        "getApiBase",
+        "buildApiUrl",
     )
 
     for snippet in required_http:
         if snippet not in http_text:
             errors.append(
-                f"src/core/http.js :: falta routing directo de health: {snippet}"
+                f"src/core/http.js :: falta contrato HTTP productivo: {snippet}"
             )
 
 

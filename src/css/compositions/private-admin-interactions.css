@@ -14,6 +14,8 @@
    - Mantener estable la toolbar mientras cambia el resultado de búsqueda.
    - Encapsular el CTA principal de Incidencias como botón pill azul,
      sin alterar la paleta ni la geometría del resto del panel.
+   - Resolver las microinteracciones del modal Crear incidencia desde la misma
+     autoridad de interacción, reutilizando estados del design system.
    - Sin !important ni contenido generado.
 ========================================================= */
 
@@ -77,6 +79,73 @@
   box-shadow:
     var(--btn-primary-shadow),
     0 0 0 3px rgba(26, 115, 232, .24);
+}
+
+/* =========================================================
+   INCIDENCIAS · CREAR · INTERACCIONES CANÓNICAS
+
+   El submit del modal comparte exactamente la misma familia Google Blue del
+   CTA de entrada. Cerrar y Quitar conservan geometría secundaria, pero sus
+   hovers comunican una acción destructiva mediante los tokens error globales.
+========================================================= */
+
+.inc-create-submit {
+  --btn-primary-bg: #1A73E8;
+  --btn-primary-bg-hover: #1967D2;
+  --btn-primary-bg-active: #185ABC;
+  --btn-primary-text: #ffffff;
+  --btn-primary-border: #1A73E8;
+  --btn-primary-shadow:
+    0 1px 2px rgba(60, 64, 67, .22),
+    0 1px 3px 1px rgba(60, 64, 67, .10);
+
+  min-inline-size: 190px;
+  border-radius: 999px;
+}
+
+.inc-create-submit:hover:not(:disabled):not([aria-disabled="true"]) {
+  border-color: #1967D2;
+  background: var(--btn-primary-bg-hover);
+  box-shadow:
+    0 2px 6px 2px rgba(60, 64, 67, .18),
+    0 1px 2px rgba(60, 64, 67, .14);
+}
+
+.inc-create-submit:active:not(:disabled):not([aria-disabled="true"]) {
+  border-color: #185ABC;
+  background: var(--btn-primary-bg-active);
+  box-shadow: 0 1px 2px rgba(60, 64, 67, .18);
+}
+
+.inc-create-submit:focus-visible {
+  outline: none;
+  box-shadow:
+    var(--btn-primary-shadow),
+    0 0 0 3px rgba(26, 115, 232, .24);
+}
+
+.inc-create-close:hover:not(:disabled):not([aria-disabled="true"]),
+.inc-create-selected-user-clear:hover:not(:disabled):not([aria-disabled="true"]) {
+  border-color: var(--border-error);
+  background: var(--error-bg);
+  color: var(--error-strong);
+}
+
+.inc-create-close:hover:not(:disabled):not([aria-disabled="true"]) {
+  transform: translateY(-1px);
+}
+
+.inc-create-selected-user-clear:hover:not(:disabled):not([aria-disabled="true"]) {
+  box-shadow: inset 0 0 0 1px var(--error-soft);
+  transform: translateY(-1px);
+}
+
+.inc-create-close:active:not(:disabled):not([aria-disabled="true"]),
+.inc-create-selected-user-clear:active:not(:disabled):not([aria-disabled="true"]) {
+  border-color: var(--error-strong);
+  background: var(--error-soft);
+  color: var(--error-strong);
+  transform: scale(.97);
 }
 
 /* =========================================================
@@ -279,12 +348,18 @@
     .incidencias-sort-pill,
     .incidencias-meta-pill--action,
     .incidencias-row--clickable > td,
-    .incidencias-row--clickable .incidencias-main
+    .incidencias-row--clickable .incidencias-main,
+    .inc-create-submit,
+    .inc-create-close,
+    .inc-create-selected-user-clear
   ) {
     transition-duration: 0ms;
   }
 
-  .incidencias-row--clickable:hover .incidencias-main {
+  .incidencias-row--clickable:hover .incidencias-main,
+  .inc-create-submit:hover,
+  .inc-create-close:hover,
+  .inc-create-selected-user-clear:hover {
     transform: none;
   }
 }
@@ -296,7 +371,10 @@
     .incidencias-meta-pill--action,
     .incidencias-stat-card,
     .incidencias-search,
-    .incidencias-row--clickable > td
+    .incidencias-row--clickable > td,
+    .inc-create-submit,
+    .inc-create-close,
+    .inc-create-selected-user-clear
   ) {
     forced-color-adjust: auto;
   }

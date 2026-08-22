@@ -5,6 +5,8 @@ python3 -I - <<'PY'
 from pathlib import Path
 import sys
 
+canonical_site = "https://onionsupport.com" if Path(".github/ci/canonical-apex-v1").is_file() else "https://www.onionsupport.com"
+
 checks = {
     "src/views/public/index.js": (
         "PUBLIC_SHARED_VERSION",
@@ -72,7 +74,7 @@ checks = {
     ),
     "src/core/config.js": (
         "CONFIG_VERSION",
-        'CANONICAL_PRODUCTION_API_BASE = "https://www.onionsupport.com"',
+        f'CANONICAL_PRODUCTION_API_BASE = "{canonical_site}"',
         'CANONICAL_DIRECT_BACKEND_API_BASE = "https://api.onionsupport.com"',
         '"/health"',
     ),

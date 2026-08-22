@@ -240,8 +240,14 @@ def validate_api_transport_contract(errors: list[str]) -> None:
     config_text = (SRC / "core" / "config.js").read_text(encoding="utf-8")
     http_text = (SRC / "core" / "http.js").read_text(encoding="utf-8")
 
+    canonical_site = (
+        "https://onionsupport.com"
+        if (ROOT / ".github/ci/canonical-apex-v1").is_file()
+        else "https://www.onionsupport.com"
+    )
+
     required_config = (
-        'CANONICAL_PRODUCTION_API_BASE = "https://www.onionsupport.com"',
+        f'CANONICAL_PRODUCTION_API_BASE = "{canonical_site}"',
         'CANONICAL_DIRECT_BACKEND_API_BASE = "https://api.onionsupport.com"',
         'DIRECT_BACKEND_API_PREFIXES = Object.freeze([',
         '"/health"',

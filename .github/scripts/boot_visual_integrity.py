@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guard the boot paint barrier that prevents route CSS FOUC."""
+"""Guard the boot paint barrier and cold-boot DOM against route FOUC."""
 
 from __future__ import annotations
 
@@ -17,6 +17,14 @@ ROOT = Path(
 LOADER = ROOT / "src/app/loader.js"
 ROUTE_STYLES = ROOT / "src/router/styles.js"
 INDEX = ROOT / "index.html"
+
+PUBLIC_SERVICE_PATHS = (
+    "/reparacion-ordenadores",
+    "/soporte-informatico",
+    "/redes-wifi",
+    "/impresoras",
+    "/soporte-empresas",
+)
 
 
 def main() -> int:
@@ -70,9 +78,29 @@ def main() -> int:
         ('id="app-loader"', "index.html debe contener el loader canónico"),
         ('class="app-loader is-visible"', "el loader debe comenzar visible en cold boot"),
         ('data-app-loading="true"', "el documento debe comenzar en estado loading"),
+        ('class="noscript-services"', "el fallback no-JS debe conservar navegación pública útil"),
     ):
         if token not in index:
             errors.append(message)
+
+    if "data-public-home-prerender" in index:
+        errors.append(
+            "index.html no puede pintar contenido prerender dentro del Router root durante cold boot"
+        )
+
+    view_container = re.search(
+        r'<div\s+(?=[^>]*\bid="view-container"\b)[^>]*>(?P<body>.*?)</div>\s*</div>\s*</main>',
+        index,
+        re.DOTALL,
+    )
+    if not view_container:
+        errors.append("no se pudo localizar #view-container en index.html")
+    elif view_container.group("body").strip():
+        errors.append("#view-container debe nacer vacío; Router es la única autoridad visible")
+
+    for path in PUBLIC_SERVICE_PATHS:
+        if f'href="{path}"' not in index:
+            errors.append(f"fallback no-JS sin enlace público: {path}")
 
     if errors:
         print("Boot visual integrity: FAIL")
@@ -82,6 +110,8 @@ def main() -> int:
 
     print("Boot visual integrity: PASS")
     print("- loader starts visible")
+    print("- router root starts empty: no pre-hydration content flash")
+    print("- no-script fallback keeps crawlable public service links")
     print("- route CSS is preloaded inactive")
     print("- hide is deferred through two animation-frame paints")
     print("- pending hides are cancellable and idempotent")

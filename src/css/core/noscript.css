@@ -107,6 +107,53 @@ body{
   color:rgba(245,245,245,.76);
 }
 
+.noscript-box p + p{
+  margin-block-start:10px;
+}
+
+.noscript-box .noscript-services-label{
+  margin-block-start:22px;
+  color:#ffffff;
+  font-weight:760;
+}
+
+.noscript-services{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  margin-block-start:12px;
+}
+
+.noscript-services a{
+  display:inline-flex;
+  align-items:center;
+  min-block-size:40px;
+  padding-inline:14px;
+  border:1px solid rgba(255,255,255,.10);
+  border-radius:999px;
+  color:#eaf4ff;
+  background:rgba(19,148,255,.08);
+  font-size:13px;
+  font-weight:760;
+  text-decoration:none;
+  transition:
+    border-color .18s ease,
+    background .18s ease,
+    transform .18s ease;
+}
+
+.noscript-services a:hover,
+.noscript-services a:focus-visible{
+  border-color:rgba(52,212,255,.44);
+  background:rgba(19,148,255,.16);
+  transform:translateY(-1px);
+}
+
+.noscript-services a:focus-visible{
+  outline:2px solid rgba(52,212,255,.74);
+  outline-offset:2px;
+}
+
 /* light */
 html[data-theme="light"] body,
 [data-theme="light"] body{
@@ -134,13 +181,30 @@ html[data-theme="light"] .noscript-box::before,
 }
 
 html[data-theme="light"] .noscript-box h1,
-[data-theme="light"] .noscript-box h1{
+[data-theme="light"] .noscript-box h1,
+html[data-theme="light"] .noscript-box .noscript-services-label,
+[data-theme="light"] .noscript-box .noscript-services-label{
   color:#0f172a;
 }
 
 html[data-theme="light"] .noscript-box p,
 [data-theme="light"] .noscript-box p{
   color:rgba(23,32,51,.72);
+}
+
+html[data-theme="light"] .noscript-services a,
+[data-theme="light"] .noscript-services a{
+  border-color:rgba(23,32,51,.10);
+  color:#172033;
+  background:rgba(19,148,255,.07);
+}
+
+html[data-theme="light"] .noscript-services a:hover,
+html[data-theme="light"] .noscript-services a:focus-visible,
+[data-theme="light"] .noscript-services a:hover,
+[data-theme="light"] .noscript-services a:focus-visible{
+  border-color:rgba(19,148,255,.32);
+  background:rgba(19,148,255,.12);
 }
 
 /* mobile */
@@ -161,5 +225,16 @@ html[data-theme="light"] .noscript-box p,
 
   .noscript-box p{
     font-size:14px;
+  }
+
+  .noscript-services{
+    display:grid;
+    grid-template-columns:1fr;
+  }
+
+  .noscript-services a{
+    justify-content:center;
+    inline-size:100%;
+    text-align:center;
   }
 }

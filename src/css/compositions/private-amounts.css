@@ -1,1 +1,113 @@
-/* placeholder */
+/* =========================================================
+   ONION SUPPORT — PRIVATE AMOUNTS
+   Archivo: /src/css/compositions/private-amounts.css
+
+   CANÓNICO · FACTURAS AS AMOUNT VISUAL AUTHORITY · 2026-08-22
+
+   Objetivo:
+   - Unificar la presentación de importes de Facturas e Incidencias.
+   - El importe deja de comportarse como badge de estado en Incidencias.
+   - Facturas conserva su stack actual como referencia visual.
+   - Sólo usa tokens del design system; sin paletas ni valores de dominio.
+   - No genera contenido ni moneda por CSS.
+========================================================= */
+
+@layer compositions {
+
+/* =========================================================
+   CANONICAL AMOUNT STACK
+========================================================= */
+
+:is(
+  .facturas-total-stack,
+  .incidencias-importe-chip
+) {
+  min-inline-size: 0;
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 2px;
+}
+
+:is(
+  .facturas-total-value,
+  .incidencias-importe-chip > span
+) {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: var(--font-md);
+  font-weight: var(--weight-bold);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:is(
+  .facturas-total-caption,
+  .facturas-total-meta
+) {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 8.5px;
+  font-weight: var(--weight-medium);
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* =========================================================
+   INCIDENCIAS — MISMO LENGUAJE QUE FACTURAS
+
+   El renderer histórico se mantiene por compatibilidad de contrato DOM,
+   pero visualmente deja de ser un chip verde: el dato monetario se presenta
+   como importe tipográfico, igual que en Facturas.
+========================================================= */
+
+.incidencias-importe-chip {
+  appearance: none;
+  max-inline-size: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-strong);
+}
+
+.incidencias-importe-chip svg {
+  display: none;
+}
+
+.incidencias-importe-chip--paid {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-strong);
+}
+
+.incidencias-importe-chip--idle,
+.incidencias-importe-chip--idle > span {
+  color: var(--text-dim);
+}
+
+.incidencias-cell--amount,
+.incidencias-cell--importe {
+  text-align: start;
+}
+
+/* =========================================================
+   FORCED COLORS
+========================================================= */
+
+@media (forced-colors: active) {
+  .incidencias-importe-chip {
+    forced-color-adjust: auto;
+    border: 0;
+    background: transparent;
+  }
+}
+
+}

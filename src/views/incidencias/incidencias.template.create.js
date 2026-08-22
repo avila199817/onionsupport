@@ -19,7 +19,7 @@ import {
 } from "./incidencias.options.js";
 
 export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =
-  "incidencias.template.create.extreme.v23.text-only-submit";
+  "incidencias.template.create.extreme.v24.user-parity";
 
 export const CREATE_ACTIONS = Object.freeze({
   CLOSE: "create-close",
@@ -314,6 +314,7 @@ function normalizeUserResult(user = {}) {
   ), "");
 
   const avatarUrl = firstImageSrc(raw, nested);
+  const avatarToneIdentity = email || name;
 
   return {
     id: userId,
@@ -330,7 +331,7 @@ function normalizeUserResult(user = {}) {
     avatarUrl,
     avatar: avatarUrl || null,
     initials: initialsFrom(name),
-    tone: hashText(`${userId}:${clienteId}:${email}:${name}`) % 10,
+    tone: hashText(avatarToneIdentity) % 10,
   };
 }
 
@@ -620,7 +621,7 @@ function renderAdminUserSearch(vm = {}) {
     <section class="inc-create-block inc-create-block--target" data-create-admin-user-search="true">
       <div class="inc-create-block-head">
         <div>
-          <span>Cliente</span>
+          <span>Usuario</span>
           <strong>Crear incidencia para</strong>
         </div>
         <small>Busca y selecciona el usuario afectado.</small>
@@ -821,7 +822,7 @@ export function renderIncidenciasCreateModal(input = {}) {
     ? "Describe qué ocurre, desde cuándo pasa y qué necesita revisar soporte."
     : "Explícanos qué ocurre, qué esperabas que pasara y desde cuándo sucede.";
   const headerSubtitle = vm.admin
-    ? "Registra la solicitud, asigna el cliente y clasifica el caso para soporte."
+    ? "Registra la solicitud, asigna el usuario y clasifica el caso para soporte."
     : "Cuéntanos qué ocurre. Soporte se encargará del resto.";
 
   return `
@@ -898,7 +899,7 @@ export function renderIncidenciasCreateModal(input = {}) {
               ${renderFileInput(vm)}
 
               <div class="inc-create-actions">
-                <span class="inc-create-actions-note">${vm.admin ? "La incidencia se añadirá al historial del cliente seleccionado." : "Podrás seguir el estado y las respuestas desde Incidencias."}</span>
+                <span class="inc-create-actions-note">${vm.admin ? "La incidencia se añadirá al historial del usuario seleccionado." : "Podrás seguir el estado y las respuestas desde Incidencias."}</span>
                 <button id="incidencias-create-submit-btn" type="submit" data-create-action="${CREATE_ACTIONS.SUBMIT}" ${disabledAttrs(vm.submitting, vm.submitting)} class="inc-create-submit">
                   ${vm.submitting ? `<span class="inc-create-spinner" aria-hidden="true"></span><span>Creando...</span>` : `<span>Crear incidencia</span>`}
                 </button>
@@ -1021,6 +1022,8 @@ export function getCreateTemplateSnapshot() {
       actionSelect: CREATE_ACTIONS.USER_SELECT,
       actionClear: CREATE_ACTIONS.USER_CLEAR,
       preservesTargetClienteId: true,
+      userFacingTargetLabel: "Usuario",
+      avatarToneMatchesIncidenciasList: true,
     },
     limits: {
       maxFiles: MAX_FILES,
@@ -1039,6 +1042,8 @@ export function getCreateTemplateSnapshot() {
       blobFieldName: "attachments",
       formEncoding: "multipart/form-data",
       textOnlyPrimarySubmit: true,
+      userTerminologyCanonical: true,
+      avatarToneParity: true,
     },
   };
 }

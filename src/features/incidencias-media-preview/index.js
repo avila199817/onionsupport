@@ -558,7 +558,8 @@ export function getIncidenciasMediaPreviewSnapshot() {
   return Object.freeze({
     version: INCIDENCIAS_MEDIA_PREVIEW_VERSION,
     mounted,
-    observerScope: "router-view+incidencias-modal-host",
+    observerScope: "router-view",
+    modalObserverScope: "incidencias-modal-host",
     cssAuthority: "router-styles",
     pendingFiles: pending.order.length,
     remoteCacheEntries: remoteCache.size,

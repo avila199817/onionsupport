@@ -1,13 +1,14 @@
 /* =========================================================
 Onion Support - Clientes Index
 Archivo: /src/views/clientes/index.js
-PRODUCTIVO · STALE-WHILE-REVALIDATE · V8
+PRODUCTIVO · STALE-WHILE-REVALIDATE · V9
 Objetivos:
 - Pintar cache inmediatamente y revalidar en segundo plano.
 - No mostrar loaders de página al volver a /clientes.
 - Un único controller por host y un único GET de listado en vuelo.
 - Mantener creación y detalle como islas estables.
 - Sin botón manual de actualizar; refresh queda sólo como API pública.
+- Los fallos de revalidación silenciosa nunca degradan datos válidos ya visibles.
 ========================================================= */
 import { AppCore } from "../../core/index.js";
 import { ROUTES } from "../../core/config.js";
@@ -50,7 +51,7 @@ normalizeUsuarioModel,
 export const CLIENTES_MODULE_NAME = "clientes";
 export const CLIENTES_VIEW_NAME = "ClientesView";
 export const CLIENTES_CANONICAL_PATH = "/clientes";
-export const CLIENTES_INDEX_VERSION = "clientes.index.productivo.v8.swr-stable-islands";
+export const CLIENTES_INDEX_VERSION = "clientes.index.productivo.v9.swr-background-failure-policy";
 export const CLIENTES_VIEW_VERSION = CLIENTES_INDEX_VERSION;
 export const CLIENTES_MODULE_VERSION = CLIENTES_INDEX_VERSION;
 export const CLIENTES_INDEX_SOURCE = "views.clientes.index";
@@ -459,8 +460,13 @@ setItems(safeArray(response?.items), first(response?.lastSyncAt, Date.now()));
 emitEvent("clientes:loaded", { ...snapshot(), source: CLIENTES_INDEX_SOURCE, controllerId: id });
 return snapshot();
 } catch (loadError) {
-if (seq === loadSeq && !destroyed) error = safeError(loadError);
-emitEvent("clientes:error", { message: error, source: CLIENTES_INDEX_SOURCE, controllerId: id });
+const message = safeError(loadError);
+const backgroundFailure = silent && hasRows;
+if (seq === loadSeq && !destroyed) error = backgroundFailure ? "" : message;
+emitEvent(
+backgroundFailure ? "clientes:revalidation-error" : "clientes:error",
+{ message, silent: backgroundFailure, staleDataAvailable: hasRows, source: CLIENTES_INDEX_SOURCE, controllerId: id }
+);
 return snapshot();
 } finally {
 if (seq === loadSeq && !destroyed) {

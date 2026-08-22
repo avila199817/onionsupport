@@ -1,0 +1,177 @@
+/* =========================================================
+   ONION SUPPORT — PRIVATE ADMIN INTERACTIONS
+   Archivo: /src/css/compositions/private-admin-interactions.css
+
+   CANÓNICO · INTERACTION STATE · 2026-08-22
+
+   Responsabilidad:
+   - Resolver estados interactivos que deben vivir después de la composición
+     geométrica private-admin-parity.css.
+   - Mantener una única selección visible por criterio en Incidencias.
+   - Dar feedback de puntero a las filas sin convertir el hover en un bloque
+     de color plano.
+   - Reutilizar únicamente tokens del design system; sin paletas privadas,
+     !important ni contenido generado.
+========================================================= */
+
+@layer compositions {
+
+/* =========================================================
+   INCIDENCIAS · SELECCIÓN CANÓNICA
+========================================================= */
+
+:is(
+  .incidencias-filter-pill,
+  .incidencias-sort-pill,
+  .incidencias-meta-pill--action
+) {
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+
+:is(
+  .incidencias-filter-pill,
+  .incidencias-sort-pill,
+  .incidencias-meta-pill--action
+):hover {
+  border-color: var(--border-default);
+  background: var(--solid-hover);
+  color: var(--text-strong);
+  transform: translateY(-1px);
+}
+
+:is(
+  .incidencias-filter-pill.is-active,
+  .incidencias-filter-pill[aria-pressed="true"],
+  .incidencias-sort-pill.is-active,
+  .incidencias-sort-pill[aria-pressed="true"],
+  .incidencias-meta-pill--action.is-active,
+  .incidencias-meta-pill--action[aria-pressed="true"]
+) {
+  border-color: var(--border-strong);
+  background: var(--solid-selected);
+  color: var(--text-strong);
+  box-shadow: inset 0 0 0 1px var(--solid-border-soft);
+  transform: none;
+}
+
+:is(
+  .incidencias-filter-pill,
+  .incidencias-sort-pill,
+  .incidencias-meta-pill--action
+):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.incidencias-stat-card.is-active,
+.incidencias-stat-card[aria-pressed="true"] {
+  border-color: var(--border-strong);
+  background: var(--solid-selected);
+  box-shadow: inset 0 0 0 1px var(--solid-border-soft);
+  transform: none;
+}
+
+/* =========================================================
+   INCIDENCIAS · FILAS INTERACTIVAS
+
+   La composición de paridad fija el fondo base de las celdas. Este bloque,
+   situado después de ella en la misma capa, es la autoridad de interacción:
+   mezcla el hover con el fondo de tabla, añade una guía lateral y desplaza
+   mínimamente el contenido principal. No existe una segunda paleta.
+========================================================= */
+
+.incidencias-row--clickable > td {
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    background-image var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.incidencias-row--clickable .incidencias-main {
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+
+.incidencias-row--clickable:focus-visible > td,
+.incidencias-row.is-selected > td,
+.incidencias-row[aria-selected="true"] > td {
+  background-color: var(--data-table-row-hover);
+}
+
+.incidencias-row--clickable:focus-visible > td:first-child,
+.incidencias-row.is-selected > td:first-child,
+.incidencias-row[aria-selected="true"] > td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .incidencias-row--clickable:hover > td {
+    background-color: color-mix(
+      in srgb,
+      var(--data-table-row-hover) 72%,
+      var(--table-bg)
+    );
+    box-shadow:
+      inset 0 1px 0 var(--border-soft),
+      inset 0 -1px 0 var(--border-soft);
+  }
+
+  .incidencias-row--clickable:hover > td:first-child {
+    background-image: linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--accent) 9%, transparent),
+      transparent 46%
+    );
+    box-shadow:
+      inset 3px 0 0 var(--accent),
+      inset 0 1px 0 var(--border-soft),
+      inset 0 -1px 0 var(--border-soft);
+  }
+
+  .incidencias-row--clickable:hover .incidencias-main {
+    transform: translateX(2px);
+  }
+}
+
+/* =========================================================
+   ACCESSIBILITY / MOTION
+========================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  :is(
+    .incidencias-filter-pill,
+    .incidencias-sort-pill,
+    .incidencias-meta-pill--action,
+    .incidencias-row--clickable > td,
+    .incidencias-row--clickable .incidencias-main
+  ) {
+    transition-duration: 0ms;
+  }
+
+  .incidencias-row--clickable:hover .incidencias-main {
+    transform: none;
+  }
+}
+
+@media (forced-colors: active) {
+  :is(
+    .incidencias-filter-pill,
+    .incidencias-sort-pill,
+    .incidencias-meta-pill--action,
+    .incidencias-stat-card,
+    .incidencias-row--clickable > td
+  ) {
+    forced-color-adjust: auto;
+  }
+
+  .incidencias-row--clickable:hover > td:first-child,
+  .incidencias-row--clickable:focus-visible > td:first-child {
+    background-image: none;
+  }
+}
+
+} /* @layer compositions */

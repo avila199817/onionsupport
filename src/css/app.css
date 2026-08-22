@@ -41,7 +41,7 @@
    RESET / CORE
 ========================================================= */
 
-@import url("./core/reset.css") layer(core);
+@import url("./core/reset.css") layer(reset);
 @import url("./core/core.css") layer(core);
 @import url("./core/layout.css") layer(core);
 @import url("./core/loader.css") layer(core);

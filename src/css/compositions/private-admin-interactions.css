@@ -12,11 +12,54 @@
      de color plano.
    - Mantener foco, tipografía y controles sin dobles anillos ni recortes.
    - Mantener estable la toolbar mientras cambia el resultado de búsqueda.
-   - Reutilizar únicamente tokens del design system; sin paletas privadas,
-     !important ni contenido generado.
+   - Encapsular el acento de la acción primaria de Incidencias mediante tokens
+     locales del propio botón, sin alterar la paleta del resto del panel.
+   - Sin !important ni contenido generado.
 ========================================================= */
 
 @layer compositions {
+
+/* =========================================================
+   INCIDENCIAS · ACCIÓN PRIMARIA ROYAL AZURE
+
+   La vista completa conserva su lenguaje graphite. Sólo la acción de crear
+   incidencia recibe un acento cromático reconocible para marcar jerarquía.
+   La familia Royal Azure / Prussian Blue mantiene texto blanco con contraste
+   AA y no contamina otros botones, modales ni vistas: redefinimos únicamente
+   los tokens que el CTA canónico ya consume.
+========================================================= */
+
+#incidencias-create-btn,
+.incidencias-btn--create {
+  --btn-primary-bg:
+    linear-gradient(
+      180deg,
+      #3457D5 0%,
+      #2D51A0 100%
+    );
+
+  --btn-primary-bg-hover:
+    linear-gradient(
+      180deg,
+      #4169E1 0%,
+      #3457D5 100%
+    );
+
+  --btn-primary-bg-active:
+    linear-gradient(
+      180deg,
+      #2D51A0 0%,
+      #244584 100%
+    );
+
+  --btn-primary-text: #ffffff;
+  --btn-primary-border: rgba(36, 69, 132, .58);
+  --btn-primary-shadow:
+    0 14px 30px rgba(52, 87, 213, .22),
+    inset 0 1px 0 rgba(255, 255, 255, .22);
+
+  --accent: #3457D5;
+}
 
 /* =========================================================
    INCIDENCIAS · SELECCIÓN CANÓNICA

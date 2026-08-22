@@ -10,6 +10,8 @@
    - Facturas conserva su stack actual como referencia visual.
    - Sólo usa tokens del design system; sin paletas ni valores de dominio.
    - No genera contenido ni moneda por CSS.
+   - El hero de Incidencias no expone un importe agregado: ese dato vive en
+     la KPI "Importe asociado" y en la columna de importe del historial.
 ========================================================= */
 
 @layer compositions {
@@ -63,9 +65,9 @@
 /* =========================================================
    INCIDENCIAS — MISMO LENGUAJE QUE FACTURAS
 
-   El renderer histórico se mantiene por compatibilidad de contrato DOM,
-   pero visualmente deja de ser un chip verde: el dato monetario se presenta
-   como importe tipográfico, igual que en Facturas.
+   El renderer de filas conserva su contrato DOM, pero visualmente el importe
+   deja de ser un chip de estado y se presenta como valor monetario tipográfico,
+   igual que en Facturas. El importe agregado del hero ya no existe en DOM.
 ========================================================= */
 
 .incidencias-importe-chip {
@@ -80,15 +82,8 @@
   color: var(--text-strong);
 }
 
-/*
-   La moneda la emite el formateador de valor (Intl.NumberFormat).
-   Tanto en tabla como en el resumen superior se muestra una única marca
-   monetaria; los SVG de euro son decorativos y no forman parte del dato.
-*/
-:is(
-  .incidencias-importe-chip,
-  .incidencias-meta-pill[data-meta="amount"]
-) > svg {
+/* La moneda la emite una sola vez Intl.NumberFormat; el SVG es decorativo. */
+.incidencias-importe-chip > svg {
   display: none;
 }
 

@@ -8,7 +8,7 @@
    - Acepta items/tickets/incidencias/rows/results/data.items/etc.
 ========================================================= */
 
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v23.autonomous-refresh";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v24.hero-without-amount-meta";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   CREATE_OPEN: "create-open",
@@ -197,7 +197,6 @@ const NUMBER_FORMATTER = new Intl.NumberFormat("es-ES");
 const DATE_FORMATTER = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 const SHORT_DATE_FORMATTER = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "short", year: "numeric" });
 const MONEY_FORMATTERS = new Map();
-
 function formatNumber(v = 0) { return NUMBER_FORMATTER.format(num(v, 0)); }
 function formatMoney(v = 0, currency = DEFAULT_CURRENCY) {
   const code = txt(currency, DEFAULT_CURRENCY).toUpperCase();
@@ -737,7 +736,6 @@ function renderHeader(vm = {}) {
         <span class="incidencias-meta-pill" data-meta="total">${icon("ticket")}<span>${esc(`${formatNumber(vm.total)} solicitudes registradas`)}</span></span>
         <span class="incidencias-meta-pill" data-meta="updated">${icon("refresh")}<span>${updatedAt ? esc(`Última actualización · ${formatRelativeDate(updatedAt)}`) : "Sin actualizaciones recientes"}</span></span>
         <button type="button" class="incidencias-meta-pill incidencias-meta-pill--action${vm.sortMode === "attachments" ? " is-active" : ""}" data-meta="attachments" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="attachments" aria-pressed="${vm.sortMode === "attachments" ? "true" : "false"}" aria-label="Ordenar incidencias de más adjuntos a menos" title="Ordenar por número de adjuntos">${icon("paperclip")}<span>${esc(`${formatNumber(s.attachments)} adjuntos`)}</span></button>
-        <span class="incidencias-meta-pill" data-meta="amount">${icon("euro")}<span>${esc(formatMoney(s.invoiceTotal, DEFAULT_CURRENCY))}</span></span>
       </div>
       <div class="incidencias-stats" aria-label="Accesos rápidos del historial">
         <button type="button" class="incidencias-stat-card incidencias-stat-card--open${vm.filter === "open" && vm.sortMode !== "amount" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="open" aria-pressed="${vm.filter === "open" && vm.sortMode !== "amount" ? "true" : "false"}" aria-label="Mostrar solo incidencias abiertas">

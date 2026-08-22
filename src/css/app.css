@@ -41,7 +41,7 @@
    RESET / CORE
 ========================================================= */
 
-@import url("./core/reset.css") layer(reset);
+@import url("./core/reset.css") layer(core);
 @import url("./core/core.css") layer(core);
 @import url("./core/layout.css") layer(core);
 @import url("./core/loader.css") layer(core);
@@ -80,8 +80,8 @@
 ========================================================= */
 
 @import url("./compositions/private-admin-parity.css") layer(compositions);
-@import url("./compositions/private-amounts.css") layer(compositions);
 @import url("./compositions/mobile-datalist.css") layer(compositions);
+@import url("./compositions/private-amounts.css") layer(compositions);
 
 /* =========================================================
    FINAL UI FOUNDATION · LAYOUT GUARDRAILS

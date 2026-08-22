@@ -1032,6 +1032,8 @@ export function renderIncidenciasCreateModalClosed() {
 ========================================================= */
 
 export function getCreateFormDefaults() {
+  releaseAttachmentPreviewUrls();
+
   return {
     ...DEFAULT_FORM,
     attachments: [],

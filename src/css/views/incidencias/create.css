@@ -2,15 +2,17 @@
    ONION SUPPORT — INCIDENCIAS · CREAR
    Archivo: /src/css/views/incidencias/create.css
 
-   PRODUCTIVO · ROLE AWARE · SYSTEM TOKENS · 2026-08-19
+   PRODUCTIVO · ROLE AWARE · SYSTEM TOKENS · 2026-08-22
 
    Contrato:
    - 1:1 con incidencias.template.create.js.
-   - Admin: cliente, clasificación, contenido y adjuntos.
+   - Admin: usuario, clasificación, contenido y adjuntos.
    - Usuario: título, descripción y adjuntos.
    - Un único scroll en .inc-create-body.
    - Microinteracciones integradas aquí; no existe una hoja parche aparte.
    - Sin paleta local paralela: consume directamente el design system global.
+   - Avatar fallback comparte la misma paleta/tono de la tabla de Incidencias.
+   - Adjuntos locales muestran thumbnail real cuando el formato lo permite.
    - Dark/light, responsive, reduced-motion y forced-colors.
 ========================================================= */
 
@@ -555,19 +557,35 @@ body.incidencias-create-open {
 
 .inc-create-user-avatar,
 .inc-create-target-user-avatar {
+  --inc-avatar-a: var(--accent);
+  --inc-avatar-b: var(--info);
+
   inline-size: 36px;
   block-size: 36px;
   flex: 0 0 auto;
   display: grid;
   place-items: center;
   overflow: hidden;
-  border: 1px solid var(--border-default);
+  border: 1px solid color-mix(in srgb, var(--inc-avatar-a) 44%, var(--border-default));
   border-radius: var(--radius-sm);
-  background: var(--solid-bg-2);
-  color: var(--text-strong);
+  background: linear-gradient(135deg, var(--inc-avatar-a), var(--inc-avatar-b));
+  color: var(--text-on-accent, #fff);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
   font-size: var(--font-xs);
   font-weight: var(--weight-bold);
+  letter-spacing: .02em;
 }
+
+:is(.inc-create-user-avatar, .inc-create-target-user-avatar)[data-user-tone="0"] { --inc-avatar-a: var(--accent); --inc-avatar-b: var(--info); }
+:is(.inc-create-user-avatar, .inc-create-target-user-avatar)[data-user-tone="1"] { --inc-avatar-a: var(--success); --inc-avatar-b: var(--info); }
+:is(.inc-create-user-avatar, .inc-create-target-user-avatar)[data-user-tone="2"] { --inc-avatar-a: var(--warning); --inc-avatar-b: var(--accent); }
+:is(.inc-create-user-avatar, .inc-create-target-user-avatar)[data-user-tone="3"] { --inc-avatar-a: var(--error); --inc-avatar-b: var(--warning); }
+:is(.inc-create-user-avatar, .inc-create-target-user-avatar)[data-user-tone="4"] { --inc-avatar-a: var(--info); --inc-avatar-b: var(--accent); }
+:is(.inc-create-user-avatar, .inc-create-target-user-avatar)[data-user-tone="5"] { --inc-avatar-a: var(--success); --inc-avatar-b: var(--accent); }
+:is(.inc-create-user-avatar, .inc-create-target-user-avatar)[data-user-tone="6"] { --inc-avatar-a: var(--info); --inc-avatar-b: var(--success); }
+:is(.inc-create-user-avatar, .inc-create-target-user-avatar)[data-user-tone="7"] { --inc-avatar-a: var(--warning); --inc-avatar-b: var(--error); }
+:is(.inc-create-user-avatar, .inc-create-target-user-avatar)[data-user-tone="8"] { --inc-avatar-a: var(--error); --inc-avatar-b: var(--accent); }
+:is(.inc-create-user-avatar, .inc-create-target-user-avatar)[data-user-tone="9"] { --inc-avatar-a: var(--accent); --inc-avatar-b: var(--success); }
 
 .inc-create-user-avatar img,
 .inc-create-target-user-avatar img {
@@ -765,13 +783,64 @@ body.incidencias-create-open {
 .inc-create-file-row {
   min-inline-size: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  padding: 9px 10px;
+  padding: 8px 9px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-xs);
   background: var(--surface-1, var(--input-bg));
+}
+
+.inc-create-file-preview {
+  inline-size: 44px;
+  block-size: 44px;
+  min-inline-size: 44px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xs);
+  background: var(--solid-bg-2);
+  color: var(--text-muted);
+}
+
+.inc-create-file-preview img,
+.inc-create-file-preview video {
+  inline-size: 100%;
+  block-size: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.inc-create-file-preview.is-image,
+.inc-create-file-preview.is-video {
+  background: var(--solid-bg-3);
+  color: var(--text-strong);
+}
+
+.inc-create-file-preview.is-pdf {
+  border-color: var(--border-error);
+  background: var(--error-bg);
+  color: var(--error-strong, var(--error));
+}
+
+.inc-create-file-preview.is-audio {
+  border-color: var(--border-info);
+  background: var(--info-bg);
+  color: var(--info-strong, var(--info));
+}
+
+.inc-create-file-preview-label {
+  max-inline-size: 38px;
+  overflow: hidden;
+  font-size: 8px;
+  font-weight: var(--weight-black);
+  letter-spacing: .045em;
+  line-height: 1;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .inc-create-file-meta {
@@ -1134,10 +1203,11 @@ body.incidencias-create-open {
   }
 
   .inc-create-file-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: 44px minmax(0, 1fr);
   }
 
   .inc-create-file-remove {
+    grid-column: 1 / -1;
     inline-size: 100%;
   }
 }
@@ -1192,6 +1262,9 @@ body.incidencias-create-open {
   .inc-create-select,
   .inc-create-textarea,
   .inc-create-dropzone,
+  .inc-create-user-avatar,
+  .inc-create-target-user-avatar,
+  .inc-create-file-preview,
   .inc-create-submit {
     forced-color-adjust: auto;
   }

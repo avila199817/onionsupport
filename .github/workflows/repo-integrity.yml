@@ -1,5 +1,6 @@
 name: Repository Integrity
 
+# Validate both pull-request candidates and the canonical main branch.
 on:
   push:
     branches:

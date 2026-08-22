@@ -5,7 +5,8 @@
 #   Production API:     https://api.onionsupport.com/api/*
 #   Direct backend:     https://api.onionsupport.com
 #   Azure SWA:          onion-panel
-#   SWA backend link:   transitional only; remove after cutover verification
+#   SWA plan:           Free
+#   Linked backend:      none
 #
 # Design goals:
 #   - Validate the exact commit that is deployed.

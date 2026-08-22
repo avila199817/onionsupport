@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Strict post-deploy verifier for Onion Support production.
 
-The verifier compares critical static files served by Azure Static Web Apps with
-exact bytes from the checked-out commit and validates SPA/SEO route headers. It
-retries for a bounded propagation window and exits non-zero on any final drift.
+The verifier compares critical public files/routes with exact bytes from the
+checked-out commit, validates canonical URLs and enforces index/noindex headers.
+It retries for a bounded propagation window and exits non-zero on final drift.
 """
 
 from __future__ import annotations
@@ -40,25 +40,62 @@ EXACT_FILES = (
     "src/css/app.css",
     "src/css/views/public/index.css",
     "src/css/views/public/home-experience.css",
+    "src/css/seo/public-service.css",
     "robots.txt",
     "sitemap.xml",
     "site.webmanifest",
 )
 
-PUBLIC_ROUTES = (
+EXACT_ROUTE_FILES = (
+    ("/reparacion-ordenadores", "seo/reparacion-ordenadores.html"),
+    ("/soporte-informatico", "seo/soporte-informatico.html"),
+    ("/redes-wifi", "seo/redes-wifi.html"),
+    ("/impresoras", "seo/impresoras.html"),
+    ("/soporte-empresas", "seo/soporte-empresas.html"),
+    ("/login", "login.html"),
+)
+
+SPA_ROUTES = (
     "/",
     "/login",
     "/password-request",
     "/password-reset",
+    "/reset-password",
     "/activate-account",
-)
-
-PRIVATE_ROUTES = (
     "/dashboard",
+    "/@ci-probe",
     "/incidencias",
     "/facturas",
     "/clientes",
     "/usuarios",
+    "/correo",
+    "/servidor",
+    "/cuenta",
+    "/ajustes",
+)
+
+INDEXABLE_ROUTES = (
+    "/",
+    "/reparacion-ordenadores",
+    "/soporte-informatico",
+    "/redes-wifi",
+    "/impresoras",
+    "/soporte-empresas",
+    "/login",
+)
+
+NOINDEX_ROUTES = (
+    "/password-request",
+    "/password-reset",
+    "/reset-password",
+    "/activate-account",
+    "/dashboard",
+    "/@ci-probe",
+    "/incidencias",
+    "/facturas",
+    "/clientes",
+    "/usuarios",
+    "/correo",
     "/servidor",
     "/cuenta",
     "/ajustes",
@@ -96,7 +133,7 @@ def fetch(base_url: str, path: str, revision: str, attempt: int) -> tuple[int, b
     request = Request(
         url,
         headers={
-            "User-Agent": "OnionSupport-Production-Verification/1.0",
+            "User-Agent": "OnionSupport-Production-Verification/2.0",
             "Cache-Control": "no-cache",
             "Pragma": "no-cache",
             "Accept-Encoding": "identity",
@@ -124,17 +161,14 @@ def check_exact_files(root: Path, base_url: str, revision: str, attempt: int) ->
         if not local_path.is_file():
             errors.append(f"archivo local obligatorio inexistente: {relative}")
             continue
-
         try:
             status, body, _ = fetch(base_url, f"/{relative}", revision, attempt)
         except RuntimeError as error:
             errors.append(str(error))
             continue
-
         if status != 200:
             errors.append(f"/{relative}: HTTP {status}, esperado 200")
             continue
-
         expected = local_path.read_bytes()
         if body != expected:
             errors.append(
@@ -142,68 +176,104 @@ def check_exact_files(root: Path, base_url: str, revision: str, attempt: int) ->
                 f"(prod={sha256(body)[:16]} local={sha256(expected)[:16]})"
             )
 
-    return errors
-
-
-def check_spa_routes(base_url: str, revision: str, attempt: int) -> list[str]:
-    errors: list[str] = []
-
-    for route in PUBLIC_ROUTES + PRIVATE_ROUTES:
+    for route, relative in EXACT_ROUTE_FILES:
+        local_path = root / relative
+        if not local_path.is_file():
+            errors.append(f"archivo local obligatorio inexistente: {relative}")
+            continue
         try:
-            status, body, headers = fetch(base_url, route, revision, attempt)
+            status, body, _ = fetch(base_url, route, revision, attempt)
         except RuntimeError as error:
             errors.append(str(error))
             continue
-
         if status != 200:
             errors.append(f"{route}: HTTP {status}, esperado 200")
             continue
+        expected = local_path.read_bytes()
+        if body != expected:
+            errors.append(
+                f"{route}: contenido distinto al backing {relative} "
+                f"(prod={sha256(body)[:16]} local={sha256(expected)[:16]})"
+            )
 
+    return errors
+
+
+def check_routes(base_url: str, revision: str, attempt: int) -> list[str]:
+    errors: list[str] = []
+    cache: dict[str, tuple[int, bytes, dict[str, str]]] = {}
+
+    for route in dict.fromkeys(SPA_ROUTES + INDEXABLE_ROUTES + NOINDEX_ROUTES):
+        try:
+            cache[route] = fetch(base_url, route, revision, attempt)
+        except RuntimeError as error:
+            errors.append(str(error))
+
+    for route in SPA_ROUTES:
+        if route not in cache:
+            continue
+        status, body, _ = cache[route]
+        if status != 200:
+            errors.append(f"{route}: HTTP {status}, esperado 200")
+            continue
         text = body.decode("utf-8", errors="replace")
         if "/src/main.js" not in text:
             errors.append(f"{route}: no devolvió el shell SPA canónico")
 
+    for route in INDEXABLE_ROUTES:
+        if route not in cache:
+            continue
+        status, _, headers = cache[route]
+        if status != 200:
+            errors.append(f"{route}: HTTP {status}, esperado 200")
+            continue
         x_robots = headers.get("x-robots-tag", "").lower()
-        if route in PRIVATE_ROUTES:
-            if "noindex" not in x_robots or "nofollow" not in x_robots:
-                errors.append(
-                    f"{route}: X-Robots-Tag privado inválido: {x_robots!r}"
-                )
-        elif route == "/" and x_robots:
-            if "index" not in x_robots or "follow" not in x_robots:
-                errors.append(f"/: X-Robots-Tag público inválido: {x_robots!r}")
+        if "index" not in x_robots or "follow" not in x_robots or "noindex" in x_robots:
+            errors.append(f"{route}: X-Robots-Tag indexable inválido: {x_robots!r}")
+
+    for route in NOINDEX_ROUTES:
+        if route not in cache:
+            continue
+        status, _, headers = cache[route]
+        if status != 200:
+            errors.append(f"{route}: HTTP {status}, esperado 200")
+            continue
+        x_robots = headers.get("x-robots-tag", "").lower()
+        if "noindex" not in x_robots or "nofollow" not in x_robots:
+            errors.append(f"{route}: X-Robots-Tag privado inválido: {x_robots!r}")
 
     return errors
 
 
 def check_seo(base_url: str, revision: str, attempt: int) -> list[str]:
     errors: list[str] = []
-    expected_home = base_url.rstrip("/") + "/"
 
-    try:
-        status, body, _ = fetch(base_url, "/", revision, attempt)
-    except RuntimeError as error:
-        return [str(error)]
-
-    if status != 200:
-        return [f"/: HTTP {status}, esperado 200 para SEO"]
-
-    parser = CanonicalParser()
-    parser.feed(body.decode("utf-8", errors="replace"))
-    if parser.canonicals != [expected_home]:
-        errors.append(
-            f"/: canonical inválido: {parser.canonicals!r}; esperado [{expected_home!r}]"
-        )
+    for route in INDEXABLE_ROUTES:
+        expected = base_url.rstrip("/") + "/" if route == "/" else base_url.rstrip("/") + route
+        try:
+            status, body, _ = fetch(base_url, route, revision, attempt)
+        except RuntimeError as error:
+            errors.append(str(error))
+            continue
+        if status != 200:
+            errors.append(f"{route}: HTTP {status}, esperado 200 para SEO")
+            continue
+        parser = CanonicalParser()
+        parser.feed(body.decode("utf-8", errors="replace"))
+        if parser.canonicals != [expected]:
+            errors.append(
+                f"{route}: canonical inválido: {parser.canonicals!r}; esperado [{expected!r}]"
+            )
 
     return errors
 
 
 def verify_once(root: Path, base_url: str, revision: str, attempt: int) -> list[str]:
-    errors: list[str] = []
-    errors.extend(check_exact_files(root, base_url, revision, attempt))
-    errors.extend(check_spa_routes(base_url, revision, attempt))
-    errors.extend(check_seo(base_url, revision, attempt))
-    return errors
+    return (
+        check_exact_files(root, base_url, revision, attempt)
+        + check_routes(base_url, revision, attempt)
+        + check_seo(base_url, revision, attempt)
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -229,21 +299,20 @@ def main() -> int:
         return 2
 
     print(f"Production verification · base={base_url} · revision={revision}")
-    print(f"Exact files={len(EXACT_FILES)} · SPA routes={len(PUBLIC_ROUTES) + len(PRIVATE_ROUTES)}")
+    print(
+        f"Exact static files={len(EXACT_FILES)} · exact route files={len(EXACT_ROUTE_FILES)} · "
+        f"indexable routes={len(INDEXABLE_ROUTES)} · noindex routes={len(NOINDEX_ROUTES)}"
+    )
 
     last_errors: list[str] = []
-
     for attempt in range(1, attempts + 1):
         print(f"\nIntento {attempt}/{attempts}")
         last_errors = verify_once(root, base_url, revision, attempt)
-
         if not last_errors:
             print("Production verification: PASS")
             return 0
-
         for error in last_errors:
             print(f"- {error}")
-
         if attempt < attempts:
             print(f"Esperando {delay:g}s por propagación/cache...")
             time.sleep(delay)

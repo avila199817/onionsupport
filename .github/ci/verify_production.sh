@@ -38,6 +38,57 @@ require_header_contains() {
   fi
 }
 
+assert_route_headers() {
+  local route="$1"
+  local mode="$2"
+  local headers
+  local status
+  local xrobots
+
+  headers="$(mktemp)"
+  status="$(
+    curl \
+      --silent \
+      --show-error \
+      --head \
+      --connect-timeout 10 \
+      --max-time 30 \
+      -H "Cache-Control: no-cache" \
+      -o "${headers}" \
+      -w "%{http_code}" \
+      "${base}${route}?route_check=${VALIDATED_SHA}"
+  )"
+
+  if [[ "${status}" != "200" ]]; then
+    echo "::error title=Ruta pública inválida::${route} respondió HTTP ${status}; esperado 200."
+    cat "${headers}"
+    rm -f "${headers}"
+    return 1
+  fi
+
+  xrobots="$(header_value "${headers}" "x-robots-tag")"
+  rm -f "${headers}"
+
+  case "${mode}" in
+    index)
+      if [[ "${xrobots,,}" != *"index"* || "${xrobots,,}" != *"follow"* || "${xrobots,,}" == *"noindex"* ]]; then
+        echo "::error title=Ruta indexable inválida::${route} envía X-Robots-Tag='${xrobots}'."
+        return 1
+      fi
+      ;;
+    noindex)
+      if [[ "${xrobots,,}" != *"noindex"* || "${xrobots,,}" != *"nofollow"* ]]; then
+        echo "::error title=Ruta privada indexable accidentalmente::${route} envía X-Robots-Tag='${xrobots}'."
+        return 1
+      fi
+      ;;
+    *)
+      echo "::error title=Modo de ruta inválido::${mode}"
+      return 1
+      ;;
+  esac
+}
+
 root_headers="$(mktemp)"
 curl \
   --fail \
@@ -67,8 +118,21 @@ if [[ "${csp}" == *"${legacy_domain}"* ]]; then
   exit 1
 fi
 
-private_routes=(
+indexable_routes=(
+  "/"
+  "/reparacion-ordenadores"
+  "/soporte-informatico"
+  "/redes-wifi"
+  "/impresoras"
+  "/soporte-empresas"
   "/login"
+)
+
+for route in "${indexable_routes[@]}"; do
+  assert_route_headers "${route}" index
+done
+
+noindex_routes=(
   "/password-request"
   "/password-reset"
   "/reset-password"
@@ -85,35 +149,8 @@ private_routes=(
   "/ajustes"
 )
 
-for route in "${private_routes[@]}"; do
-  headers="$(mktemp)"
-  status="$(
-    curl \
-      --silent \
-      --show-error \
-      --head \
-      --connect-timeout 10 \
-      --max-time 30 \
-      -H "Cache-Control: no-cache" \
-      -o "${headers}" \
-      -w "%{http_code}" \
-      "${base}${route}?route_check=${VALIDATED_SHA}"
-  )"
-
-  if [[ "${status}" != "200" ]]; then
-    echo "::error title=Ruta SPA inválida::${route} respondió HTTP ${status}."
-    cat "${headers}"
-    rm -f "${headers}"
-    exit 1
-  fi
-
-  xrobots="$(header_value "${headers}" "x-robots-tag")"
-  rm -f "${headers}"
-
-  if [[ "${xrobots,,}" != *"noindex"* || "${xrobots,,}" != *"nofollow"* ]]; then
-    echo "::error title=Ruta indexable accidentalmente::${route} envía X-Robots-Tag='${xrobots}'."
-    exit 1
-  fi
+for route in "${noindex_routes[@]}"; do
+  assert_route_headers "${route}" noindex
 done
 
 health_headers="$(mktemp)"
@@ -156,10 +193,8 @@ PY
 
 require_header_contains "${health_headers}" "access-control-allow-origin" "${PUBLIC_SITE_URL}"
 require_header_contains "${health_headers}" "access-control-allow-credentials" "true"
-
 rm -f "${health_headers}" "${health_body}"
 
-# CORS contract: the canonical frontend must pass preflight exactly.
 cors_headers="$(mktemp)"
 cors_status="$(
   curl \
@@ -205,11 +240,9 @@ require_header_contains "${cors_headers}" "access-control-allow-headers" "Conten
 require_header_contains "${cors_headers}" "vary" "Origin"
 require_header_contains "${cors_headers}" "vary" "Access-Control-Request-Method"
 require_header_contains "${cors_headers}" "vary" "Access-Control-Request-Headers"
-
 rm -f "${cors_headers}"
 echo "CORS permitido: preflight canónico verificado."
 
-# Hostile origins must be rejected and must never receive browser authorization.
 hostile_origin="https://evil.example"
 hostile_headers="$(mktemp)"
 hostile_status="$(
@@ -235,21 +268,17 @@ if [[ "${hostile_status}" != "403" ]]; then
   exit 1
 fi
 
-hostile_acao="$(header_value "${hostile_headers}" "access-control-allow-origin")"
-hostile_acac="$(header_value "${hostile_headers}" "access-control-allow-credentials")"
-
-if [[ -n "${hostile_acao}" ]]; then
-  echo "::error title=CORS filtró autorización a origen hostil::access-control-allow-origin='${hostile_acao}'."
+if [[ -n "$(header_value "${hostile_headers}" "access-control-allow-origin")" ]]; then
+  echo "::error title=CORS filtró autorización a origen hostil::Se devolvió access-control-allow-origin."
   rm -f "${hostile_headers}"
   exit 1
 fi
 
-if [[ -n "${hostile_acac}" ]]; then
-  echo "::error title=CORS filtró credenciales a origen hostil::access-control-allow-credentials='${hostile_acac}'."
+if [[ -n "$(header_value "${hostile_headers}" "access-control-allow-credentials")" ]]; then
+  echo "::error title=CORS filtró credenciales a origen hostil::Se devolvió access-control-allow-credentials."
   rm -f "${hostile_headers}"
   exit 1
 fi
-
 rm -f "${hostile_headers}"
 echo "CORS hostil: origen rechazado sin autorización del navegador."
 
@@ -264,7 +293,6 @@ verify_auth_guard() {
 
   headers="$(mktemp)"
   body="$(mktemp)"
-
   status="$(
     curl \
       --silent \
@@ -287,11 +315,8 @@ verify_auth_guard() {
   python3 - "${body}" <<'PY'
 import json
 import sys
-
-path = sys.argv[1]
-with open(path, "r", encoding="utf-8") as handle:
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
     data = json.load(handle)
-
 if data.get("ok") is not False:
     raise SystemExit("auth.ok debe ser false sin credenciales")
 if data.get("authenticated") is not False:
@@ -302,26 +327,21 @@ PY
 
   scope="$(header_value "${headers}" "x-onion-scope")"
   gateway="$(header_value "${headers}" "x-onion-gateway")"
-
   if [[ "${scope}" != "onion-api-gateway" ]]; then
     echo "::error title=Backend incorrecto::${label} x-onion-scope='${scope}'."
     rm -f "${headers}" "${body}"
     return 1
   fi
-
   if [[ -z "${gateway}" ]]; then
     echo "::error title=Gateway sin identidad::${label} no devuelve x-onion-gateway."
     rm -f "${headers}" "${body}"
     return 1
   fi
-
   require_header_contains "${headers}" "www-authenticate" "Bearer"
-
   rm -f "${headers}" "${body}"
   echo "${label}: auth guard conectado al Onion API Gateway."
 }
 
 verify_auth_guard "${base}" "SWA linked backend"
 verify_auth_guard "${api}" "Direct API"
-
-echo "Producción verificada de extremo a extremo: frontend, SEO, headers, rutas, CORS y backend."
+echo "Producción verificada de extremo a extremo: frontend, superficie SEO pública, headers, rutas, CORS y backend."

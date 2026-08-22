@@ -1,7 +1,6 @@
 # Onion Support · robots.txt
-# La landing pública es la única URL canónica indexable.
-# Googlebot y Bingbot pueden rastrear las rutas HTML privadas para leer
-# sus cabeceras X-Robots-Tag: noindex, nofollow servidas por Azure SWA.
+# Superficie pública indexable: landing, servicios técnicos y acceso cliente.
+# Las rutas sensibles y el área privada permanecen fuera de indexación.
 
 User-agent: Googlebot
 Allow: /
@@ -13,11 +12,8 @@ Allow: /
 Disallow: /api/
 Disallow: /.auth/
 
-# Contrato general para el resto de crawlers.
-# El área privada y las rutas de autenticación no forman parte del contenido público.
 User-agent: *
 Allow: /
-Disallow: /login
 Disallow: /password-request
 Disallow: /password-reset
 Disallow: /reset-password

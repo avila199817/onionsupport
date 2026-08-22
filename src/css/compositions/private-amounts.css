@@ -23,8 +23,10 @@
   .incidencias-importe-chip
 ) {
   min-inline-size: 0;
+  min-block-size: 0;
   display: grid;
   align-content: center;
+  justify-content: start;
   justify-items: start;
   gap: 2px;
 }
@@ -96,6 +98,23 @@
 .incidencias-cell--amount,
 .incidencias-cell--importe {
   text-align: start;
+}
+
+/* =========================================================
+   MOBILE DATALIST
+   El slot monetario conserva la alineación derecha de Facturas.
+========================================================= */
+
+@media (max-width: 680px) {
+  .ui-datalist-cell[data-mobile-slot="amount"] :is(
+    .facturas-total-stack,
+    .incidencias-importe-chip
+  ) {
+    align-items: end;
+    justify-content: end;
+    justify-items: end;
+    text-align: end;
+  }
 }
 
 /* =========================================================

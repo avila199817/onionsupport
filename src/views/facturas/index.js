@@ -108,23 +108,23 @@ let FACTURAS_CONTROLLER_SEQUENCE = 0;
 const LOAD_MORE_ACTION =
   FACTURAS_ACTIONS.LOAD_MORE || "load-more";
 
+/*
+  Búsquedas de selección para alta de Facturas.
+  Priorizar los routers /api/search canónicos del backend y conservar sólo
+  fallbacks que existen realmente. Evita 404 legacy y, sobre todo, evita que
+  /api/clientes (listado general) intercepte una consulta antes del buscador.
+*/
 const CLIENT_SEARCH_ENDPOINTS = Object.freeze([
-  "/api/clientes",
-  "/api/users",
-  "/api/clientes/search",
-  "/api/users/search",
-  "/api/usuarios/search",
   "/api/search/clientes",
   "/api/search/users",
+  "/api/users",
 ]);
 
 const TICKET_SEARCH_ENDPOINTS = Object.freeze([
-  "/api/tickets",
-  "/api/incidencias",
-  "/api/tickets/search",
-  "/api/incidencias/search",
   "/api/search/tickets",
   "/api/search/incidencias",
+  "/api/tickets",
+  "/api/incidencias",
 ]);
 
 /* =========================================================

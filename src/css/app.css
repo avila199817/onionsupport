@@ -79,6 +79,7 @@
    sus hojas de vista sin usar !important. No contienen lógica de negocio.
 ========================================================= */
 
+@import url("./compositions/private-admin-parity.css") layer(compositions);
 @import url("./compositions/mobile-datalist.css") layer(compositions);
 
 /* =========================================================

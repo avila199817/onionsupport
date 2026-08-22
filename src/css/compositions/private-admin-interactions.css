@@ -10,6 +10,7 @@
    - Mantener una única selección visible por criterio en Incidencias.
    - Dar feedback de puntero a las filas sin convertir el hover en un bloque
      de color plano.
+   - Mantener foco, tipografía y controles sin dobles anillos ni recortes.
    - Reutilizar únicamente tokens del design system; sin paletas privadas,
      !important ni contenido generado.
 ========================================================= */
@@ -77,12 +78,53 @@
 }
 
 /* =========================================================
+   INCIDENCIAS · SEARCH SIN DOBLE RECUADRO
+
+   El contenedor ya aporta borde y cambio de estado. El input de tipo search
+   no debe dibujar un segundo focus-ring interior: era el recuadro visible al
+   entrar con el puntero/click. Se conserva el cambio de borde del contenedor
+   como feedback de foco.
+========================================================= */
+
+.incidencias-search:focus-within {
+  box-shadow: none;
+}
+
+.incidencias-search-input:focus,
+.incidencias-search-input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+/* =========================================================
+   INCIDENCIAS · DESCENDENTES TIPOGRÁFICOS
+
+   line-height: 1 en controles compactos puede cortar visualmente glifos como
+   g, j, p, q o y dependiendo de rasterizador/zoom. Una caja de línea real
+   evita el recorte sin alterar las alturas mínimas ni la geometría 1:1.
+========================================================= */
+
+:is(
+  .incidencias-meta-pill,
+  .incidencias-filter-pill,
+  .incidencias-sort-pill,
+  .incidencias-status-chip,
+  .incidencias-priority-badge,
+  .incidencias-assigned-badge,
+  .incidencias-importe-chip,
+  .incidencias-attachments-pill
+) {
+  line-height: 1.25;
+}
+
+/* =========================================================
    INCIDENCIAS · FILAS INTERACTIVAS
 
    La composición de paridad fija el fondo base de las celdas. Este bloque,
    situado después de ella en la misma capa, es la autoridad de interacción:
    mezcla el hover con el fondo de tabla, añade una guía lateral y desplaza
-   mínimamente el contenido principal. No existe una segunda paleta.
+   mínimamente el contenido principal. El foco de teclado se distingue de una
+   selección real: no deja la fila pintada como seleccionada al abrir detalle.
 ========================================================= */
 
 .incidencias-row--clickable > td {
@@ -96,10 +138,13 @@
   transition: transform var(--duration-fast) var(--ease-standard);
 }
 
-.incidencias-row--clickable:focus-visible > td,
 .incidencias-row.is-selected > td,
 .incidencias-row[aria-selected="true"] > td {
   background-color: var(--data-table-row-hover);
+}
+
+.incidencias-row--clickable:focus-visible > td {
+  background-color: var(--table-bg);
 }
 
 .incidencias-row--clickable:focus-visible > td:first-child,
@@ -163,6 +208,7 @@
     .incidencias-sort-pill,
     .incidencias-meta-pill--action,
     .incidencias-stat-card,
+    .incidencias-search,
     .incidencias-row--clickable > td
   ) {
     forced-color-adjust: auto;

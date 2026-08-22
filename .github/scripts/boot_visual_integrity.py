@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from html.parser import HTMLParser
 import os
 from pathlib import Path
 import re
@@ -29,6 +30,88 @@ PUBLIC_SERVICE_PATHS = (
 
 META_DESCRIPTION_MIN = 120
 META_DESCRIPTION_MAX = 155
+
+
+class BootHtmlParser(HTMLParser):
+    """Read boot-critical HTML signals without depending on source formatting."""
+
+    VOID_ELEMENTS = frozenset(
+        {
+            "area",
+            "base",
+            "br",
+            "col",
+            "embed",
+            "hr",
+            "img",
+            "input",
+            "link",
+            "meta",
+            "param",
+            "source",
+            "track",
+            "wbr",
+        }
+    )
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.view_container_count = 0
+        self.view_container_has_content = False
+        self.meta_descriptions: list[str] = []
+        self._view_depth = 0
+
+    @staticmethod
+    def _attrs(attrs) -> dict[str, str]:
+        return {
+            str(key).lower(): (value or "")
+            for key, value in (attrs or [])
+        }
+
+    def _capture_meta_description(self, tag: str, attrs: dict[str, str]) -> None:
+        if tag != "meta":
+            return
+
+        if attrs.get("name", "").strip().lower() != "description":
+            return
+
+        self.meta_descriptions.append(attrs.get("content", "").strip())
+
+    def handle_starttag(self, tag, attrs) -> None:
+        tag = str(tag).lower()
+        attrs_map = self._attrs(attrs)
+        self._capture_meta_description(tag, attrs_map)
+
+        if self._view_depth > 0:
+            self.view_container_has_content = True
+            if tag not in self.VOID_ELEMENTS:
+                self._view_depth += 1
+            return
+
+        if attrs_map.get("id", "").strip() == "view-container":
+            self.view_container_count += 1
+            if tag not in self.VOID_ELEMENTS:
+                self._view_depth = 1
+
+    def handle_startendtag(self, tag, attrs) -> None:
+        tag = str(tag).lower()
+        attrs_map = self._attrs(attrs)
+        self._capture_meta_description(tag, attrs_map)
+
+        if self._view_depth > 0:
+            self.view_container_has_content = True
+            return
+
+        if attrs_map.get("id", "").strip() == "view-container":
+            self.view_container_count += 1
+
+    def handle_endtag(self, tag) -> None:
+        if self._view_depth > 0:
+            self._view_depth -= 1
+
+    def handle_data(self, data) -> None:
+        if self._view_depth > 0 and str(data).strip():
+            self.view_container_has_content = True
 
 
 def main() -> int:
@@ -94,14 +177,16 @@ def main() -> int:
             "index.html no puede pintar contenido prerender dentro del Router root durante cold boot"
         )
 
-    view_container = re.search(
-        r'<div\s+(?=[^>]*\bid="view-container"\b)[^>]*>(?P<body>.*?)</div>\s*</div>\s*</main>',
-        index,
-        re.DOTALL,
-    )
-    if not view_container:
-        errors.append("no se pudo localizar #view-container en index.html")
-    elif view_container.group("body").strip():
+    parser = BootHtmlParser()
+    parser.feed(index)
+    parser.close()
+
+    if parser.view_container_count != 1:
+        errors.append(
+            "index.html debe declarar exactamente un #view-container; "
+            f"encontrados {parser.view_container_count}"
+        )
+    elif parser.view_container_has_content:
         errors.append("#view-container debe nacer vacío; Router es la única autoridad visible")
 
     for path in PUBLIC_SERVICE_PATHS:
@@ -117,17 +202,15 @@ def main() -> int:
     if home_h1_count != 1:
         errors.append(f"public-home debe declarar exactamente un H1; encontrados {home_h1_count}")
 
-    # Mantener una descripción concisa y suficientemente informativa funciona bien
-    # en buscadores que truncan por dispositivo y evita warnings de descripciones extremas.
-    description_match = re.search(
-        r'<meta\s+(?=[^>]*\bname="description"\b)[^>]*\bcontent="([^"]*)"[^>]*>',
-        index,
-        re.IGNORECASE | re.DOTALL,
-    )
-    if not description_match:
-        errors.append("index.html debe declarar meta description")
+    # HTMLParser evita falsos negativos por saltos de línea, orden o espaciado
+    # de atributos. El contrato exige exactamente una descripción canónica.
+    if len(parser.meta_descriptions) != 1:
+        errors.append(
+            "index.html debe declarar exactamente una meta description; "
+            f"encontradas {len(parser.meta_descriptions)}"
+        )
     else:
-        description = " ".join(description_match.group(1).split())
+        description = " ".join(parser.meta_descriptions[0].split())
         length = len(description)
         if not META_DESCRIPTION_MIN <= length <= META_DESCRIPTION_MAX:
             errors.append(

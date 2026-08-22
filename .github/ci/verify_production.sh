@@ -89,6 +89,45 @@ assert_route_headers() {
   esac
 }
 
+assert_redirect() {
+  local route="$1"
+  local destination="$2"
+  local headers
+  local status
+  local location
+
+  headers="$(mktemp)"
+  status="$(
+    curl \
+      --silent \
+      --show-error \
+      --head \
+      --connect-timeout 10 \
+      --max-time 30 \
+      -H "Cache-Control: no-cache" \
+      -o "${headers}" \
+      -w "%{http_code}" \
+      "${base}${route}?alias_check=${VALIDATED_SHA}"
+  )"
+
+  location="$(header_value "${headers}" "location")"
+  rm -f "${headers}"
+
+  if [[ "${status}" != "301" ]]; then
+    echo "::error title=Alias SEO no consolidado::${route} respondió HTTP ${status}; esperado 301."
+    return 1
+  fi
+
+  case "${location}" in
+    "${destination}"|"${base}${destination}")
+      ;;
+    *)
+      echo "::error title=Destino SEO inesperado::${route} location='${location}'; esperado '${destination}'."
+      return 1
+      ;;
+  esac
+}
+
 root_headers="$(mktemp)"
 curl \
   --fail \
@@ -131,6 +170,22 @@ indexable_routes=(
 for route in "${indexable_routes[@]}"; do
   assert_route_headers "${route}" index
 done
+
+while IFS='|' read -r alias destination; do
+  [[ -n "${alias}" ]] || continue
+  assert_redirect "${alias}" "${destination}"
+done <<'EOF'
+/seo/reparacion-ordenadores|/reparacion-ordenadores
+/seo/reparacion-ordenadores.html|/reparacion-ordenadores
+/seo/soporte-informatico|/soporte-informatico
+/seo/soporte-informatico.html|/soporte-informatico
+/seo/redes-wifi|/redes-wifi
+/seo/redes-wifi.html|/redes-wifi
+/seo/impresoras|/impresoras
+/seo/impresoras.html|/impresoras
+/seo/soporte-empresas|/soporte-empresas
+/seo/soporte-empresas.html|/soporte-empresas
+EOF
 
 noindex_routes=(
   "/password-request"
@@ -344,4 +399,4 @@ PY
 
 verify_auth_guard "${base}" "SWA linked backend"
 verify_auth_guard "${api}" "Direct API"
-echo "Producción verificada de extremo a extremo: frontend, superficie SEO pública, headers, rutas, CORS y backend."
+echo "Producción verificada de extremo a extremo: frontend, superficie SEO pública, aliases canónicos, headers, rutas, CORS y backend."

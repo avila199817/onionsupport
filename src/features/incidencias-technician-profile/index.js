@@ -1,12 +1,18 @@
-/* Onion Support · Incidencias Technician Profile v2 */
+/* Onion Support · Incidencias Technician Profile v3 */
 
 export const INCIDENCIAS_TECHNICIAN_PROFILE_VERSION =
-  "incidencias-technician-profile.v2.operator-command-center";
+  "incidencias-technician-profile.v3.detail-modal-flow";
 
 const VIEW = "#view-container, [data-router-view='true']";
-const TECH_BADGE = ".incidencias-assigned-badge[data-assigned='true']";
+const LIST_TECH_BADGE = ".incidencias-assigned-badge[data-assigned='true']";
+const DETAIL_TECHNICIAN = ".incidencias-modal-technician-inline[data-modal-technician='true'][data-technician-assigned='true']";
+const DETAIL_TECH_CARD = ".incidencias-modal-technician-card[data-technician-profile-trigger='true'][data-assigned='true']";
+const TECH_TRIGGER = `${LIST_TECH_BADGE}, ${DETAIL_TECH_CARD}`;
 const PRIORITY_BADGE = ".incidencias-priority-badge[data-priority-badge]";
+const DETAIL_PRIORITY = ".incidencias-modal-chip[class*='incidencias-modal-chip--priority-']";
 const ROW = "[data-ticket-row='true']";
+const DETAIL_ROOT = "[data-incidencias-modal-root='true']";
+const MODAL_HOST = "[data-incidencias-modal-host='true']";
 const HOST_ID = "incidencias-technician-profile-host";
 const ROOT_ID = "incidencias-technician-profile-root";
 const PANEL_ID = "incidencias-technician-profile-panel";
@@ -20,6 +26,8 @@ const FOCUSABLE = [
 let mounted = false;
 let mountRoot = null;
 let observer = null;
+let modalObserver = null;
+let observedModalHost = null;
 let frame = 0;
 let requestSeq = 0;
 let returnFocus = null;
@@ -252,6 +260,10 @@ function closeIcon() {
   return `<svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`;
 }
 
+function eyeIcon() {
+  return `<svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>`;
+}
+
 function avatarMarkup(tech = {}) {
   const src = safeAvatarUrl(tech.avatar);
   const tone = hash(tech.email || tech.userId || tech.name) % 10;
@@ -464,16 +476,59 @@ function closeProfile() {
   return true;
 }
 
+function technicianTriggerName(trigger = null) {
+  return text(first(
+    trigger?.querySelector?.(".incidencias-assigned-name")?.textContent,
+    trigger?.querySelector?.(".incidencias-modal-technician-copy strong")?.textContent,
+    trigger?.querySelector?.("strong")?.textContent,
+    trigger?.textContent
+  ), "Técnico");
+}
+
+function technicianTriggerEmail(trigger = null) {
+  const node = trigger?.querySelector?.(".incidencias-modal-technician-email");
+  return normalizeEmail(first(node?.textContent, node?.getAttribute?.("href")?.replace(/^mailto:/i, "")));
+}
+
+function ticketIdFromTrigger(trigger = null) {
+  const row = trigger?.closest?.(ROW);
+  const detailRoot = trigger?.closest?.(DETAIL_ROOT);
+  return text(first(
+    trigger?.dataset?.ticketId,
+    row?.dataset?.ticketId,
+    row?.dataset?.incidenciaId,
+    detailRoot?.dataset?.ticketId,
+    detailRoot?.dataset?.incidenciaId
+  ), "");
+}
+
+function isSupportedTrigger(trigger = null) {
+  if (!trigger) return false;
+  if (mountRoot?.contains?.(trigger)) return true;
+  if (observedModalHost?.contains?.(trigger)) return true;
+  return Boolean(trigger.closest?.(DETAIL_ROOT));
+}
+
 function decoratePriorityBadges(root = mountRoot) {
   for (const badge of root?.querySelectorAll?.(PRIORITY_BADGE) || []) {
     const label = text(badge.textContent, "");
+    badge.classList.add("incidencias-meta-pill--action");
     if (label) badge.title = `Prioridad: ${label}`;
   }
 }
 
+function decorateDetailPriorityChips(root = observedModalHost) {
+  for (const chip of root?.querySelectorAll?.(DETAIL_PRIORITY) || []) {
+    const label = text(chip.textContent, "");
+    chip.classList.add("incidencias-meta-pill--action");
+    if (label) chip.title = `Prioridad: ${label}`;
+  }
+}
+
 function decorateTechnicianBadges(root = mountRoot) {
-  for (const badge of root?.querySelectorAll?.(TECH_BADGE) || []) {
-    const name = text(badge.querySelector(".incidencias-assigned-name")?.textContent || badge.textContent, "Técnico");
+  for (const badge of root?.querySelectorAll?.(LIST_TECH_BADGE) || []) {
+    const name = technicianTriggerName(badge);
+    badge.classList.add("incidencias-meta-pill--action");
     badge.setAttribute("role", "button");
     badge.setAttribute("tabindex", "0");
     badge.setAttribute("aria-haspopup", "dialog");
@@ -483,11 +538,60 @@ function decorateTechnicianBadges(root = mountRoot) {
   }
 }
 
+function decorateDetailTechnicianCards(root = observedModalHost) {
+  for (const inline of root?.querySelectorAll?.(DETAIL_TECHNICIAN) || []) {
+    const card = inline.closest?.(".incidencias-modal-meta-card");
+    if (!card) continue;
+
+    const name = technicianTriggerName(card);
+    const id = ticketIdFromTrigger(card) || text(inline.closest?.(DETAIL_ROOT)?.dataset?.ticketId, "");
+
+    card.classList.add("incidencias-modal-technician-card", "incidencias-modal-contact-link");
+    card.dataset.technicianProfileTrigger = "true";
+    card.dataset.assigned = "true";
+    if (id) card.dataset.ticketId = id;
+    card.setAttribute("role", "button");
+    card.setAttribute("tabindex", "0");
+    card.setAttribute("aria-haspopup", "dialog");
+    card.setAttribute("aria-label", `Ver perfil del técnico ${name}`);
+    card.title = `Ver perfil del técnico ${name}`;
+
+    const copy = inline.querySelector?.(".incidencias-modal-technician-copy");
+    if (copy && !copy.querySelector?.("[data-technician-profile-eye='true']")) {
+      const action = document.createElement("span");
+      action.className = "incidencias-modal-contact-action-copy incidencias-modal-contact-label";
+      action.dataset.technicianProfileEye = "true";
+      action.setAttribute("aria-hidden", "true");
+      action.innerHTML = `<span class="incidencias-modal-contact-icon">${eyeIcon()}</span><span>Ver perfil</span>`;
+      copy.appendChild(action);
+    }
+  }
+}
+
+function syncModalObserver() {
+  if (!browser()) return false;
+  const nextHost = document.querySelector(MODAL_HOST);
+  if (nextHost === observedModalHost) return Boolean(nextHost);
+
+  modalObserver?.disconnect?.();
+  modalObserver = null;
+  observedModalHost = nextHost || null;
+
+  if (observedModalHost && typeof MutationObserver !== "undefined") {
+    modalObserver = new MutationObserver(schedule);
+    modalObserver.observe(observedModalHost, { childList: true, subtree: true });
+  }
+  return Boolean(observedModalHost);
+}
+
 function sync() {
   frame = 0;
   if (!browser() || !mounted) return;
+  syncModalObserver();
   decoratePriorityBadges();
   decorateTechnicianBadges();
+  decorateDetailPriorityChips();
+  decorateDetailTechnicianCards();
   if (document.getElementById(ROOT_ID) && returnFocus && !returnFocus.isConnected) closeProfile();
 }
 
@@ -501,13 +605,13 @@ const incidenceApi = () => incidenceApiPromise ||= import("../../views/incidenci
 const usersApi = () => usersApiPromise ||= import("../../views/usuarios/usuarios.api.js");
 
 async function loadProfile(trigger = null) {
-  const row = trigger?.closest?.(ROW);
-  const id = text(row?.dataset?.ticketId || row?.dataset?.incidenciaId, "");
+  const id = ticketIdFromTrigger(trigger);
   if (!id) return false;
 
   const seed = {
-    name: text(trigger.querySelector(".incidencias-assigned-name")?.textContent || trigger.textContent, "Técnico"),
-    avatar: safeAvatarUrl(trigger.querySelector("img")?.src || ""),
+    name: technicianTriggerName(trigger),
+    email: technicianTriggerEmail(trigger),
+    avatar: safeAvatarUrl(trigger?.querySelector?.("img")?.src || ""),
   };
 
   returnFocus = trigger;
@@ -551,6 +655,14 @@ async function loadProfile(trigger = null) {
   }
 }
 
+function profileTriggerFromTarget(target = null) {
+  if (!target?.closest) return null;
+  if (target.closest(DETAIL_TECHNICIAN) && !target.closest(DETAIL_TECH_CARD)) {
+    decorateDetailTechnicianCards(target.closest(MODAL_HOST) || document);
+  }
+  return target.closest(TECH_TRIGGER);
+}
+
 function onClick(event) {
   const target = event.target?.nodeType === 3 ? event.target.parentElement : event.target;
   if (target?.closest?.("[data-technician-profile-action='close']")) {
@@ -560,9 +672,16 @@ function onClick(event) {
   if (overlay && target === overlay) {
     event.preventDefault(); event.stopPropagation(); closeProfile(); return;
   }
-  const trigger = target?.closest?.(TECH_BADGE);
-  if (!trigger || !mountRoot?.contains(trigger)) return;
-  event.preventDefault(); event.stopPropagation(); void loadProfile(trigger);
+
+  const trigger = profileTriggerFromTarget(target);
+  if (!trigger || !isSupportedTrigger(trigger)) return;
+
+  const nestedLink = target?.closest?.("a[href]");
+  if (nestedLink && trigger.contains(nestedLink)) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  void loadProfile(trigger);
 }
 
 function trapFocus(event) {
@@ -583,21 +702,27 @@ function onKeydown(event) {
     if (event.key === "Tab") { trapFocus(event); return; }
   }
   if (event.key !== "Enter" && event.key !== " ") return;
-  const trigger = event.target?.closest?.(TECH_BADGE);
-  if (!trigger || !mountRoot?.contains(trigger)) return;
-  event.preventDefault(); event.stopPropagation(); void loadProfile(trigger);
+
+  const trigger = profileTriggerFromTarget(event.target);
+  if (!trigger || !isSupportedTrigger(trigger) || event.target?.closest?.("a[href]")) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  void loadProfile(trigger);
 }
 
 export function mountIncidenciasTechnicianProfile() {
   if (!browser() || mounted) return false;
   const root = document.querySelector(VIEW);
   if (!root || typeof MutationObserver === "undefined") return false;
+
   mounted = true;
   mountRoot = root;
   mountRoot.addEventListener("click", onClick, true);
   mountRoot.addEventListener("keydown", onKeydown, true);
   document.addEventListener("click", onClick, true);
   document.addEventListener("keydown", onKeydown, true);
+
   observer = new MutationObserver(schedule);
   observer.observe(mountRoot, { childList: true, subtree: true });
   schedule();
@@ -608,12 +733,18 @@ export function destroyIncidenciasTechnicianProfile() {
   if (!browser() || !mounted) return false;
   mounted = false;
   requestSeq += 1;
+
   mountRoot?.removeEventListener("click", onClick, true);
   mountRoot?.removeEventListener("keydown", onKeydown, true);
   document.removeEventListener("click", onClick, true);
   document.removeEventListener("keydown", onKeydown, true);
+
   observer?.disconnect?.();
+  modalObserver?.disconnect?.();
   observer = null;
+  modalObserver = null;
+  observedModalHost = null;
+
   if (frame) window.cancelAnimationFrame(frame);
   frame = 0;
   closeProfile();
@@ -626,8 +757,9 @@ export function getIncidenciasTechnicianProfileSnapshot() {
   return Object.freeze({
     version: INCIDENCIAS_TECHNICIAN_PROFILE_VERSION,
     mounted,
-    observerScope: "router-view",
-    cssAuthority: "router-styles",
+    observerScope: "router-view+incidencias-modal-host",
+    cssAuthority: "existing-incidencias-interaction-classes",
+    detailModalIntegrated: Boolean(observedModalHost),
     modalOpen: Boolean(browser() && document.getElementById(ROOT_ID)),
   });
 }

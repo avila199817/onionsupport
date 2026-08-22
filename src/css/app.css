@@ -80,6 +80,7 @@
 ========================================================= */
 
 @import url("./compositions/private-admin-parity.css") layer(compositions);
+@import url("./compositions/private-amounts.css") layer(compositions);
 @import url("./compositions/mobile-datalist.css") layer(compositions);
 
 /* =========================================================

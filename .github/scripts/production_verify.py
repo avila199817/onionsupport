@@ -2,8 +2,9 @@
 """Strict post-deploy verifier for Onion Support production.
 
 The verifier compares critical public files/routes with exact bytes from the
-checked-out commit, validates canonical URLs and enforces index/noindex headers.
-It retries for a bounded propagation window and exits non-zero on final drift.
+checked-out commit, validates canonical URLs, canonical backing redirects and
+enforces index/noindex headers. It retries for a bounded propagation window and
+exits non-zero on final drift.
 """
 
 from __future__ import annotations
@@ -15,8 +16,8 @@ import time
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urljoin
-from urllib.request import Request, urlopen
+from urllib.parse import urlencode, urljoin, urlsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 DEFAULT_BASE_URL = "https://www.onionsupport.com"
 DEFAULT_ATTEMPTS = 8
@@ -53,6 +54,20 @@ EXACT_ROUTE_FILES = (
     ("/impresoras", "seo/impresoras.html"),
     ("/soporte-empresas", "seo/soporte-empresas.html"),
     ("/login", "login.html"),
+)
+
+SEO_ALIAS_REDIRECTS = (
+    ("/seo/reparacion-ordenadores", "/reparacion-ordenadores"),
+    ("/seo/reparacion-ordenadores.html", "/reparacion-ordenadores"),
+    ("/seo/soporte-informatico", "/soporte-informatico"),
+    ("/seo/soporte-informatico.html", "/soporte-informatico"),
+    ("/seo/redes-wifi", "/redes-wifi"),
+    ("/seo/redes-wifi.html", "/redes-wifi"),
+    ("/seo/impresoras", "/impresoras"),
+    ("/seo/impresoras.html", "/impresoras"),
+    ("/seo/soporte-empresas", "/soporte-empresas"),
+    ("/seo/soporte-empresas.html", "/soporte-empresas"),
+    ("/login.html", "/login"),
 )
 
 SPA_ROUTES = (
@@ -116,6 +131,14 @@ class CanonicalParser(HTMLParser):
             self.canonicals.append(data.get("href", "").strip())
 
 
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+NO_REDIRECT_OPENER = build_opener(NoRedirect())
+
+
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -128,12 +151,11 @@ def build_url(base_url: str, path: str, revision: str, attempt: int) -> str:
     return f"{url}{separator}{query}"
 
 
-def fetch(base_url: str, path: str, revision: str, attempt: int) -> tuple[int, bytes, dict[str, str]]:
-    url = build_url(base_url, path, revision, attempt)
-    request = Request(
+def request_for(url: str) -> Request:
+    return Request(
         url,
         headers={
-            "User-Agent": "OnionSupport-Production-Verification/2.0",
+            "User-Agent": "OnionSupport-Production-Verification/3.0",
             "Cache-Control": "no-cache",
             "Pragma": "no-cache",
             "Accept-Encoding": "identity",
@@ -141,8 +163,29 @@ def fetch(base_url: str, path: str, revision: str, attempt: int) -> tuple[int, b
         method="GET",
     )
 
+
+def fetch(base_url: str, path: str, revision: str, attempt: int) -> tuple[int, bytes, dict[str, str]]:
+    url = build_url(base_url, path, revision, attempt)
+    request = request_for(url)
+
     try:
         with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+            headers = {key.lower(): value for key, value in response.headers.items()}
+            return int(response.status), response.read(), headers
+    except HTTPError as error:
+        body = error.read() if hasattr(error, "read") else b""
+        headers = {key.lower(): value for key, value in error.headers.items()} if error.headers else {}
+        return int(error.code), body, headers
+    except (URLError, TimeoutError, OSError) as error:
+        raise RuntimeError(f"{path}: error de red: {error}") from error
+
+
+def fetch_no_redirect(base_url: str, path: str, revision: str, attempt: int) -> tuple[int, bytes, dict[str, str]]:
+    url = build_url(base_url, path, revision, attempt)
+    request = request_for(url)
+
+    try:
+        with NO_REDIRECT_OPENER.open(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
             headers = {key.lower(): value for key, value in response.headers.items()}
             return int(response.status), response.read(), headers
     except HTTPError as error:
@@ -245,6 +288,31 @@ def check_routes(base_url: str, revision: str, attempt: int) -> list[str]:
     return errors
 
 
+def check_aliases(base_url: str, revision: str, attempt: int) -> list[str]:
+    errors: list[str] = []
+    canonical_origin = urlsplit(base_url).scheme + "://" + urlsplit(base_url).netloc
+
+    for alias, destination in SEO_ALIAS_REDIRECTS:
+        try:
+            status, _, headers = fetch_no_redirect(base_url, alias, revision, attempt)
+        except RuntimeError as error:
+            errors.append(str(error))
+            continue
+
+        if status != 301:
+            errors.append(f"{alias}: HTTP {status}, esperado 301 hacia {destination}")
+            continue
+
+        location = headers.get("location", "").strip()
+        allowed = {destination, canonical_origin + destination}
+        if location not in allowed:
+            errors.append(
+                f"{alias}: Location inválido {location!r}; esperado {destination!r}"
+            )
+
+    return errors
+
+
 def check_seo(base_url: str, revision: str, attempt: int) -> list[str]:
     errors: list[str] = []
 
@@ -272,6 +340,7 @@ def verify_once(root: Path, base_url: str, revision: str, attempt: int) -> list[
     return (
         check_exact_files(root, base_url, revision, attempt)
         + check_routes(base_url, revision, attempt)
+        + check_aliases(base_url, revision, attempt)
         + check_seo(base_url, revision, attempt)
     )
 
@@ -301,7 +370,8 @@ def main() -> int:
     print(f"Production verification · base={base_url} · revision={revision}")
     print(
         f"Exact static files={len(EXACT_FILES)} · exact route files={len(EXACT_ROUTE_FILES)} · "
-        f"indexable routes={len(INDEXABLE_ROUTES)} · noindex routes={len(NOINDEX_ROUTES)}"
+        f"indexable routes={len(INDEXABLE_ROUTES)} · aliases={len(SEO_ALIAS_REDIRECTS)} · "
+        f"noindex routes={len(NOINDEX_ROUTES)}"
     )
 
     last_errors: list[str] = []

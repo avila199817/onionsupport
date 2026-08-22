@@ -11,6 +11,7 @@
    - Usuario final sólo ve título, descripción y adjuntos.
    - Categoría/prioridad del usuario final viajan con defaults internos.
    - El input de adjuntos SIEMPRE se llama attachments.
+   - Las previews locales usan object URLs efímeras y se revocan al retirar/cerrar.
 ========================================================= */
 
 import {
@@ -19,7 +20,7 @@ import {
 } from "./incidencias.options.js";
 
 export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =
-  "incidencias.template.create.extreme.v24.user-parity";
+  "incidencias.template.create.extreme.v25.attachment-preview";
 
 export const CREATE_ACTIONS = Object.freeze({
   CLOSE: "create-close",
@@ -528,12 +529,13 @@ function renderSelect({
 function renderUserAvatar(user = {}, className = "inc-create-user-avatar") {
   const safeUser = normalizeUserResult(user);
   const avatar = safeImageSrc(safeUser.avatarUrl || safeUser.avatar);
+  const tone = attr(String(safeUser.tone));
 
   if (avatar) {
-    return `<span class="${attr(className)} has-image" data-user-tone="${attr(String(safeUser.tone))}"><img src="${attr(avatar)}" alt="" loading="lazy" referrerpolicy="no-referrer"></span>`;
+    return `<span class="${attr(className)} has-image" data-user-tone="${tone}" data-avatar-tone="${tone}"><img src="${attr(avatar)}" alt="" loading="lazy" referrerpolicy="no-referrer"></span>`;
   }
 
-  return `<span class="${attr(className)}" data-user-tone="${attr(String(safeUser.tone))}">${escapeHtml(safeUser.initials)}</span>`;
+  return `<span class="${attr(className)}" data-user-tone="${tone}" data-avatar-tone="${tone}">${escapeHtml(safeUser.initials)}</span>`;
 }
 
 function renderSelectedUser(vm = {}) {
@@ -705,16 +707,118 @@ const fileName = (file = {}, index = 0) => cleanText(file.name || file.filename 
 const fileSize = (file = {}) => number(file.size || file.sizeBytes, 0);
 const fileType = (file = {}) => cleanText(file.type || file.contentType || file.mimetype || file.mimeType, "");
 
+const IMAGE_PREVIEW_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif"]);
+const VIDEO_PREVIEW_EXTENSIONS = new Set([".mp4", ".m4v", ".mov", ".webm", ".mkv", ".avi", ".wmv", ".mpeg", ".mpg", ".ogv", ".3gp"]);
+const AUDIO_PREVIEW_EXTENSIONS = new Set([".mp3", ".m4a", ".wav", ".weba"]);
+const ATTACHMENT_PREVIEW_URLS = new Map();
+
+function attachmentPreviewKind(file = {}, index = 0) {
+  const type = fileType(file).toLowerCase();
+  const extension = fileExtension(fileName(file, index));
+
+  if (type.startsWith("image/") || IMAGE_PREVIEW_EXTENSIONS.has(extension)) return "image";
+  if (type.startsWith("video/") || VIDEO_PREVIEW_EXTENSIONS.has(extension)) return "video";
+  if (type.startsWith("audio/") || AUDIO_PREVIEW_EXTENSIONS.has(extension)) return "audio";
+  if (type === "application/pdf" || extension === ".pdf") return "pdf";
+  return "file";
+}
+
+function objectUrlApi() {
+  const api = typeof globalThis !== "undefined" ? globalThis.URL : null;
+  return api && typeof api.createObjectURL === "function" && typeof api.revokeObjectURL === "function"
+    ? api
+    : null;
+}
+
+function revokeAttachmentPreview(file = null) {
+  if (!file || !ATTACHMENT_PREVIEW_URLS.has(file)) return false;
+
+  const url = ATTACHMENT_PREVIEW_URLS.get(file);
+  ATTACHMENT_PREVIEW_URLS.delete(file);
+
+  try {
+    objectUrlApi()?.revokeObjectURL(url);
+  } catch {
+    // La URL ya no necesita conservarse; el navegador liberará el recurso.
+  }
+
+  return true;
+}
+
+function reconcileAttachmentPreviewUrls(files = []) {
+  const current = new Set(safeArray(files).filter((file) => file && typeof file === "object"));
+
+  for (const file of ATTACHMENT_PREVIEW_URLS.keys()) {
+    if (!current.has(file)) revokeAttachmentPreview(file);
+  }
+}
+
+function releaseAttachmentPreviewUrls() {
+  for (const file of [...ATTACHMENT_PREVIEW_URLS.keys()]) {
+    revokeAttachmentPreview(file);
+  }
+}
+
+function attachmentPreviewUrl(file = {}, index = 0) {
+  const kind = attachmentPreviewKind(file, index);
+  if ((kind !== "image" && kind !== "video") || !isFileLike(file)) return "";
+
+  if (ATTACHMENT_PREVIEW_URLS.has(file)) {
+    return ATTACHMENT_PREVIEW_URLS.get(file);
+  }
+
+  const api = objectUrlApi();
+  if (!api) return "";
+
+  try {
+    const url = api.createObjectURL(file);
+    ATTACHMENT_PREVIEW_URLS.set(file, url);
+    return url;
+  } catch {
+    return "";
+  }
+}
+
+function attachmentPreviewLabel(file = {}, index = 0) {
+  const kind = attachmentPreviewKind(file, index);
+  if (kind === "pdf") return "PDF";
+  if (kind === "audio") return "AUDIO";
+  if (kind === "video") return "VÍDEO";
+  if (kind === "image") return "IMG";
+
+  const extension = fileExtension(fileName(file, index)).replace(/^\./, "").toUpperCase();
+  return extension ? extension.slice(0, 5) : "FILE";
+}
+
+function renderAttachmentPreview(file = {}, index = 0) {
+  const kind = attachmentPreviewKind(file, index);
+  const previewUrl = attachmentPreviewUrl(file, index);
+  const label = attachmentPreviewLabel(file, index);
+
+  if (previewUrl && kind === "image") {
+    return `<span class="inc-create-file-preview is-image" data-file-preview-kind="image" aria-hidden="true"><img src="${attr(previewUrl)}" alt="" loading="eager" decoding="async"></span>`;
+  }
+
+  if (previewUrl && kind === "video") {
+    return `<span class="inc-create-file-preview is-video" data-file-preview-kind="video" aria-hidden="true"><video src="${attr(previewUrl)}" muted playsinline preload="metadata"></video></span>`;
+  }
+
+  return `<span class="inc-create-file-preview is-${attr(kind)}" data-file-preview-kind="${attr(kind)}" aria-hidden="true"><span class="inc-create-file-preview-label">${escapeHtml(label)}</span></span>`;
+}
+
 function renderFilesSummary(files = [], vm = {}) {
   const items = safeArray(files);
+  reconcileAttachmentPreviewUrls(items);
   if (!items.length) return "";
 
   return `
     <div class="inc-create-files-list" data-create-files-list="true">
       ${items.map((file, index) => {
         const meta = [fileType(file), formatBytes(fileSize(file))].filter(Boolean).join(" · ");
+        const kind = attachmentPreviewKind(file, index);
         return `
-          <div class="inc-create-file-row" data-create-file-row="true" data-file-index="${attr(String(index))}">
+          <div class="inc-create-file-row" data-create-file-row="true" data-file-index="${attr(String(index))}" data-file-preview-kind="${attr(kind)}">
+            ${renderAttachmentPreview(file, index)}
             <div class="inc-create-file-meta">
               <strong class="inc-create-file-name">${escapeHtml(fileName(file, index))}</strong>
               <span class="inc-create-file-size">${escapeHtml(meta || "Archivo preparado")}</span>
@@ -811,7 +915,11 @@ function renderLoadingOverlay(vm = {}) {
 
 export function renderIncidenciasCreateModal(input = {}) {
   const vm = buildVm(input);
-  if (!vm.open) return "";
+
+  if (!vm.open) {
+    releaseAttachmentPreviewUrls();
+    return "";
+  }
 
   const source = vm.admin ? "panel_admin" : "panel_user";
   const titleLabel = vm.admin ? "Asunto" : "Título";
@@ -914,7 +1022,10 @@ export function renderIncidenciasCreateModal(input = {}) {
   `;
 }
 
-export const renderIncidenciasCreateModalClosed = () => "";
+export function renderIncidenciasCreateModalClosed() {
+  releaseAttachmentPreviewUrls();
+  return "";
+}
 
 /* =========================================================
    VALIDATION / SNAPSHOT
@@ -1044,6 +1155,8 @@ export function getCreateTemplateSnapshot() {
       textOnlyPrimarySubmit: true,
       userTerminologyCanonical: true,
       avatarToneParity: true,
+      localAttachmentPreview: true,
+      revokesAttachmentPreviewUrls: true,
     },
   };
 }

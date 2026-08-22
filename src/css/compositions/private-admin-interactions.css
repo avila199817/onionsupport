@@ -11,6 +11,7 @@
    - Dar feedback de puntero a las filas sin convertir el hover en un bloque
      de color plano.
    - Mantener foco, tipografía y controles sin dobles anillos ni recortes.
+   - Mantener estable la toolbar mientras cambia el resultado de búsqueda.
    - Reutilizar únicamente tokens del design system; sin paletas privadas,
      !important ni contenido generado.
 ========================================================= */
@@ -94,6 +95,31 @@
 .incidencias-search-input:focus-visible {
   outline: none;
   box-shadow: none;
+}
+
+/* =========================================================
+   INCIDENCIAS · TOOLBAR ESTABLE DURANTE BÚSQUEDA
+
+   El subtítulo cambia de longitud al mostrar criterios y resultados. En
+   escritorio reservamos una columna fija para el copy del historial para que
+   esos cambios de texto nunca desplacen Fecha ni el cuadro de búsqueda.
+========================================================= */
+
+@container (min-width: 1121px) {
+  .incidencias-history-head {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+
+  .incidencias-history-copy {
+    inline-size: 240px;
+    max-inline-size: 240px;
+  }
+
+  .incidencias-history-subtitle {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 /* =========================================================

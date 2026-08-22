@@ -6,14 +6,16 @@
    - miniaturas locales de adjuntos pendientes;
    - recuperación de miniaturas remotas mediante el /view canónico;
    - sin mutar tickets, File, payloads, permisos ni contratos HTTP;
-   - listeners y observer limitados al mount estable del Router;
+   - observer de lista limitado al mount estable del Router;
+   - observer del detalle limitado a la isla real del modal;
    - CSS propiedad del manifest canónico de src/router/styles.js.
 ========================================================= */
 
 export const INCIDENCIAS_MEDIA_PREVIEW_VERSION =
-  "incidencias-media-preview.v3-route-css-owned";
+  "incidencias-media-preview.v4-modal-island";
 
 const VIEW = "#view-container, [data-router-view='true']";
+const MODAL_HOST = "[data-incidencias-modal-host='true']";
 const ROOT = "[data-incidencias-modal-root='true']";
 const INPUT = `${ROOT} input[data-detail-field='attachments'], ${ROOT} input[data-field='attachments'][type='file']`;
 const DROPZONE = `${ROOT} [data-dropzone='detail-attachments']`;
@@ -32,6 +34,8 @@ const remoteInflight = new Map();
 const remoteFailureAt = new Map();
 
 let observer = null;
+let modalObserver = null;
+let observedModalHost = null;
 let frame = 0;
 let lastRoot = null;
 let apiPromise = null;
@@ -435,11 +439,31 @@ function syncRemote(root) {
   }
 }
 
+function syncModalObserver() {
+  if (!browser()) return false;
+
+  const nextHost = document.querySelector(MODAL_HOST);
+  if (nextHost === observedModalHost) return Boolean(nextHost);
+
+  modalObserver?.disconnect?.();
+  modalObserver = null;
+  observedModalHost = nextHost || null;
+
+  if (observedModalHost && typeof MutationObserver !== "undefined") {
+    modalObserver = new MutationObserver(schedule);
+    modalObserver.observe(observedModalHost, { childList: true, subtree: true });
+  }
+
+  return Boolean(observedModalHost);
+}
+
 function sync() {
   frame = 0;
   if (!browser() || !mounted) return;
 
-  const root = mountRoot?.querySelector?.(ROOT) || null;
+  syncModalObserver();
+
+  const root = observedModalHost?.querySelector?.(ROOT) || null;
   if (!root) {
     if (lastRoot) {
       clearPending();
@@ -478,11 +502,12 @@ function onDrop(event) {
 
 function onClick(event) {
   const button = event.target?.closest?.(REMOVE);
-  if (!button) return;
+  if (button) {
+    removePending(
+      Number(button.dataset.fileIndex ?? button.dataset.removeAttachment ?? -1)
+    );
+  }
 
-  removePending(
-    Number(button.dataset.fileIndex ?? button.dataset.removeAttachment ?? -1)
-  );
   schedule();
 }
 
@@ -495,9 +520,9 @@ export function mountIncidenciasMediaPreview() {
   mounted = true;
   mountRoot = root;
 
-  mountRoot.addEventListener("change", onChange, true);
-  mountRoot.addEventListener("drop", onDrop, true);
-  mountRoot.addEventListener("click", onClick, true);
+  document.addEventListener("change", onChange, true);
+  document.addEventListener("drop", onDrop, true);
+  document.addEventListener("click", onClick, true);
 
   observer = new MutationObserver(schedule);
   observer.observe(mountRoot, { childList: true, subtree: true });
@@ -509,12 +534,15 @@ export function destroyIncidenciasMediaPreview() {
   if (!browser() || !mounted) return false;
 
   mounted = false;
-  mountRoot?.removeEventListener("change", onChange, true);
-  mountRoot?.removeEventListener("drop", onDrop, true);
-  mountRoot?.removeEventListener("click", onClick, true);
+  document.removeEventListener("change", onChange, true);
+  document.removeEventListener("drop", onDrop, true);
+  document.removeEventListener("click", onClick, true);
 
   observer?.disconnect?.();
+  modalObserver?.disconnect?.();
   observer = null;
+  modalObserver = null;
+  observedModalHost = null;
 
   if (frame) window.cancelAnimationFrame(frame);
   frame = 0;
@@ -531,6 +559,7 @@ export function getIncidenciasMediaPreviewSnapshot() {
     version: INCIDENCIAS_MEDIA_PREVIEW_VERSION,
     mounted,
     observerScope: "router-view",
+    modalObserverScope: "incidencias-modal-host",
     cssAuthority: "router-styles",
     pendingFiles: pending.order.length,
     remoteCacheEntries: remoteCache.size,

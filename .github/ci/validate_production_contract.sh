@@ -15,11 +15,43 @@ api = os.environ["DIRECT_API_URL"].rstrip("/")
 expected_home = f"{base}/"
 expected_sitemap = f"{base}/sitemap.xml"
 canonical_host = urlsplit(expected_home).netloc
+marker_path = Path(".github/ci/seo-public-surface-v2")
+expanded = marker_path.is_file()
 
 errors = []
 
 def error(path, message):
     errors.append((str(path), message))
+
+PUBLIC_PATHS = (
+    "/",
+    "/reparacion-ordenadores",
+    "/soporte-informatico",
+    "/redes-wifi",
+    "/impresoras",
+    "/soporte-empresas",
+    "/login",
+)
+
+PUBLIC_FILES = {
+    "/": Path("index.html"),
+    "/reparacion-ordenadores": Path("seo/reparacion-ordenadores.html"),
+    "/soporte-informatico": Path("seo/soporte-informatico.html"),
+    "/redes-wifi": Path("seo/redes-wifi.html"),
+    "/impresoras": Path("seo/impresoras.html"),
+    "/soporte-empresas": Path("seo/soporte-empresas.html"),
+    "/login": Path("login.html"),
+}
+
+PUBLIC_REWRITES = {
+    "/": "/index.html",
+    "/reparacion-ordenadores": "/seo/reparacion-ordenadores.html",
+    "/soporte-informatico": "/seo/soporte-informatico.html",
+    "/redes-wifi": "/seo/redes-wifi.html",
+    "/impresoras": "/seo/impresoras.html",
+    "/soporte-empresas": "/seo/soporte-empresas.html",
+    "/login": "/login.html",
+}
 
 # robots.txt
 robots_path = Path("robots.txt")
@@ -33,7 +65,6 @@ robots_lines = {
 required_robots = {
     "User-agent: *",
     "Allow: /",
-    "Disallow: /login",
     "Disallow: /password-request",
     "Disallow: /password-reset",
     "Disallow: /reset-password",
@@ -53,9 +84,15 @@ required_robots = {
     f"Sitemap: {expected_sitemap}",
 }
 
+if not expanded:
+    required_robots.add("Disallow: /login")
+
 for directive in sorted(required_robots):
     if directive not in robots_lines:
         error(robots_path, f"Falta directiva obligatoria: {directive}")
+
+if expanded and "Disallow: /login" in robots_lines:
+    error(robots_path, "/login es público/indexable en seo-public-surface-v2 y no puede estar bloqueado.")
 
 # sitemap.xml
 sitemap_path = Path("sitemap.xml")
@@ -67,7 +104,6 @@ except ET.ParseError as exc:
     root = None
 
 sitemap_urls = []
-
 if root is not None:
     expected_root = "{http://www.sitemaps.org/schemas/sitemap/0.9}urlset"
     if root.tag != expected_root:
@@ -80,11 +116,14 @@ if root is not None:
         if (node.text or "").strip()
     ]
 
-    if sitemap_urls != [expected_home]:
-        error(
-            sitemap_path,
-            f"El sitemap productivo debe publicar exactamente {expected_home}",
-        )
+    expected_urls = (
+        [f"{base}{path}" if path != "/" else expected_home for path in PUBLIC_PATHS]
+        if expanded
+        else [expected_home]
+    )
+
+    if sitemap_urls != expected_urls:
+        error(sitemap_path, f"Sitemap inesperado: {sitemap_urls!r}; esperado {expected_urls!r}")
 
     for loc in sitemap_urls:
         parsed = urlsplit(loc)
@@ -95,42 +134,95 @@ if root is not None:
         if parsed.query or parsed.fragment:
             error(sitemap_path, f"Query/fragment no permitido: {loc}")
 
-# index.html
 class SeoParser(HTMLParser):
     def __init__(self):
         super().__init__()
         self.canonicals = []
         self.robots = {}
+        self.descriptions = []
+        self.titles = []
+        self.h1_count = 0
+        self.links = []
+        self._in_title = False
+        self._title_parts = []
 
     def handle_starttag(self, tag, attrs):
         attrs = {k.lower(): (v or "") for k, v in (attrs or [])}
         tag = tag.lower()
-
+        if tag == "title":
+            self._in_title = True
+            self._title_parts = []
+        if tag == "h1":
+            self.h1_count += 1
+        if tag == "a":
+            href = attrs.get("href", "").strip()
+            if href:
+                self.links.append(href)
         if tag == "link":
             rel = {token.lower() for token in attrs.get("rel", "").split()}
             if "canonical" in rel:
                 self.canonicals.append(attrs.get("href", "").strip())
-
         if tag == "meta":
             name = attrs.get("name", "").strip().lower()
-            if name in {"robots", "googlebot"}:
+            if name in {"robots", "googlebot", "bingbot"}:
                 self.robots[name] = attrs.get("content", "").strip().lower()
+            if name == "description":
+                self.descriptions.append(attrs.get("content", "").strip())
 
-index_path = Path("index.html")
-parser = SeoParser()
-parser.feed(index_path.read_text(encoding="utf-8"))
+    def handle_endtag(self, tag):
+        if tag.lower() == "title" and self._in_title:
+            title = " ".join("".join(self._title_parts).split())
+            if title:
+                self.titles.append(title)
+            self._in_title = False
+            self._title_parts = []
 
-if parser.canonicals != [expected_home]:
-    error(index_path, f"Canonical esperado exactamente una vez: {expected_home}")
+    def handle_data(self, data):
+        if self._in_title:
+            self._title_parts.append(data)
 
-for name in ("robots", "googlebot"):
-    directives = {
-        item.strip()
-        for item in parser.robots.get(name, "").split(",")
-        if item.strip()
-    }
-    if not {"index", "follow"}.issubset(directives):
-        error(index_path, f"Meta {name} debe contener index, follow.")
+def validate_public_html(path, expected_url, *, require_h1=False, require_internal_links=False):
+    if not path.is_file():
+        error(path, "Archivo SEO público obligatorio ausente.")
+        return
+    parser = SeoParser()
+    try:
+        parser.feed(path.read_text(encoding="utf-8"))
+    except UnicodeDecodeError as exc:
+        error(path, f"HTML no UTF-8: {exc}")
+        return
+
+    if parser.canonicals != [expected_url]:
+        error(path, f"Canonical esperado exactamente una vez: {expected_url}")
+    if len(parser.titles) != 1 or not parser.titles[0]:
+        error(path, "Debe contener exactamente un <title> no vacío.")
+    if len(parser.descriptions) != 1 or not parser.descriptions[0]:
+        error(path, "Debe contener exactamente una meta description no vacía.")
+    for name in ("robots", "googlebot"):
+        directives = {item.strip() for item in parser.robots.get(name, "").split(",") if item.strip()}
+        if not {"index", "follow"}.issubset(directives):
+            error(path, f"Meta {name} debe contener index, follow.")
+    if require_h1 and parser.h1_count != 1:
+        error(path, f"Debe contener exactamente un H1; encontrados {parser.h1_count}.")
+    if require_internal_links:
+        local_links = [href for href in parser.links if href.startswith("/") and not href.startswith("//")]
+        if "/" not in local_links or "/login" not in local_links:
+            error(path, "Debe enlazar de forma rastreable a / y /login.")
+
+validate_public_html(Path("index.html"), expected_home)
+
+if expanded:
+    if marker_path.read_text(encoding="utf-8").splitlines() != ["seo-public-surface-v2"]:
+        error(marker_path, "El marcador debe contener exactamente 'seo-public-surface-v2'.")
+
+    for public_path in PUBLIC_PATHS[1:]:
+        expected_url = f"{base}{public_path}"
+        validate_public_html(
+            PUBLIC_FILES[public_path],
+            expected_url,
+            require_h1=public_path != "/login",
+            require_internal_links=public_path != "/login",
+        )
 
 # Static Web Apps config
 config_path = Path("staticwebapp.config.json")
@@ -162,8 +254,27 @@ else:
     if "index" not in xrobots or "follow" not in xrobots:
         error(config_path, "/ debe enviar X-Robots-Tag: index, follow.")
 
-private_routes = (
-    "/login",
+if expanded:
+    for public_path, rewrite in PUBLIC_REWRITES.items():
+        route = routes.get(public_path)
+        if not route:
+            error(config_path, f"Falta ruta SEO pública: {public_path}")
+            continue
+        if route.get("rewrite") != rewrite:
+            error(config_path, f"{public_path} debe reescribir exactamente a {rewrite}.")
+        xrobots = str(route.get("headers", {}).get("X-Robots-Tag", "")).lower()
+        if "index" not in xrobots or "follow" not in xrobots or "noindex" in xrobots:
+            error(config_path, f"{public_path} debe enviar X-Robots-Tag: index, follow.")
+
+    seo_backing = routes.get("/seo/*")
+    if not seo_backing or seo_backing.get("statusCode") != 404:
+        error(config_path, "/seo/* debe responder 404 para impedir URLs físicas duplicadas.")
+
+    login_backing = routes.get("/login.html")
+    if not login_backing or login_backing.get("redirect") != "/login" or login_backing.get("statusCode") != 301:
+        error(config_path, "/login.html debe redirigir 301 a /login.")
+
+private_routes = [
     "/password-request",
     "/password-reset*",
     "/reset-password*",
@@ -178,28 +289,24 @@ private_routes = (
     "/servidor*",
     "/cuenta*",
     "/ajustes*",
-)
+]
+if not expanded:
+    private_routes.insert(0, "/login")
 
 for route_name in private_routes:
     route = routes.get(route_name)
     if not route:
         error(config_path, f"Falta ruta privada: {route_name}")
         continue
-
     if route.get("rewrite") != "/index.html":
         error(config_path, f"{route_name} debe reescribir a /index.html.")
-
     xrobots = str(route.get("headers", {}).get("X-Robots-Tag", "")).lower()
     if "noindex" not in xrobots or "nofollow" not in xrobots:
-        error(
-            config_path,
-            f"{route_name} debe enviar X-Robots-Tag: noindex, nofollow.",
-        )
+        error(config_path, f"{route_name} debe enviar X-Robots-Tag: noindex, nofollow.")
 
 csp = str(config.get("globalHeaders", {}).get("Content-Security-Policy", ""))
 if api not in csp:
     error(config_path, f"La CSP debe permitir el backend canónico {api}.")
-
 legacy_domain = "onionit" + ".net"
 if legacy_domain in csp:
     error(config_path, "La CSP contiene el dominio backend legado.")
@@ -209,8 +316,6 @@ if errors:
         print(f"::error file={path},title=Contrato productivo inválido::{message}")
     sys.exit(1)
 
-print(
-    "Contrato SEO/routing productivo OK · "
-    f"canonical={expected_home} · api={api}"
-)
+mode = "expanded-v2" if expanded else "legacy"
+print(f"Contrato SEO/routing productivo OK · mode={mode} · canonical={expected_home} · api={api}")
 PY

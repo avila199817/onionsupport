@@ -53,6 +53,19 @@ PUBLIC_REWRITES = {
     "/login": "/login.html",
 }
 
+BACKING_ALIAS_REDIRECTS = {
+    "/seo/reparacion-ordenadores": "/reparacion-ordenadores",
+    "/seo/reparacion-ordenadores.html": "/reparacion-ordenadores",
+    "/seo/soporte-informatico": "/soporte-informatico",
+    "/seo/soporte-informatico.html": "/soporte-informatico",
+    "/seo/redes-wifi": "/redes-wifi",
+    "/seo/redes-wifi.html": "/redes-wifi",
+    "/seo/impresoras": "/impresoras",
+    "/seo/impresoras.html": "/impresoras",
+    "/seo/soporte-empresas": "/soporte-empresas",
+    "/seo/soporte-empresas.html": "/soporte-empresas",
+}
+
 # robots.txt
 robots_path = Path("robots.txt")
 robots_text = robots_path.read_text(encoding="utf-8")
@@ -266,9 +279,17 @@ if expanded:
         if "index" not in xrobots or "follow" not in xrobots or "noindex" in xrobots:
             error(config_path, f"{public_path} debe enviar X-Robots-Tag: index, follow.")
 
+    for alias, destination in BACKING_ALIAS_REDIRECTS.items():
+        route = routes.get(alias)
+        if not route:
+            error(config_path, f"Falta alias backing SEO: {alias}")
+            continue
+        if route.get("redirect") != destination or route.get("statusCode") != 301:
+            error(config_path, f"{alias} debe redirigir 301 exactamente a {destination}.")
+
     seo_backing = routes.get("/seo/*")
     if not seo_backing or seo_backing.get("statusCode") != 404:
-        error(config_path, "/seo/* debe responder 404 para impedir URLs físicas duplicadas.")
+        error(config_path, "/seo/* debe responder 404 para cualquier backing no reconocido.")
 
     login_backing = routes.get("/login.html")
     if not login_backing or login_backing.get("redirect") != "/login" or login_backing.get("statusCode") != 301:

@@ -147,6 +147,56 @@
       "statusCode": 404
     },
     {
+      "route": "/seo/reparacion-ordenadores",
+      "redirect": "/reparacion-ordenadores",
+      "statusCode": 301
+    },
+    {
+      "route": "/seo/reparacion-ordenadores.html",
+      "redirect": "/reparacion-ordenadores",
+      "statusCode": 301
+    },
+    {
+      "route": "/seo/soporte-informatico",
+      "redirect": "/soporte-informatico",
+      "statusCode": 301
+    },
+    {
+      "route": "/seo/soporte-informatico.html",
+      "redirect": "/soporte-informatico",
+      "statusCode": 301
+    },
+    {
+      "route": "/seo/redes-wifi",
+      "redirect": "/redes-wifi",
+      "statusCode": 301
+    },
+    {
+      "route": "/seo/redes-wifi.html",
+      "redirect": "/redes-wifi",
+      "statusCode": 301
+    },
+    {
+      "route": "/seo/impresoras",
+      "redirect": "/impresoras",
+      "statusCode": 301
+    },
+    {
+      "route": "/seo/impresoras.html",
+      "redirect": "/impresoras",
+      "statusCode": 301
+    },
+    {
+      "route": "/seo/soporte-empresas",
+      "redirect": "/soporte-empresas",
+      "statusCode": 301
+    },
+    {
+      "route": "/seo/soporte-empresas.html",
+      "redirect": "/soporte-empresas",
+      "statusCode": 301
+    },
+    {
       "route": "/seo/*",
       "statusCode": 404
     },

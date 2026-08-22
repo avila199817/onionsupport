@@ -8,7 +8,7 @@
    - Acepta items/tickets/incidencias/rows/results/data.items/etc.
 ========================================================= */
 
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v25.exclusive-selection";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v26.date-toggle-avatar-title";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   CREATE_OPEN: "create-open",
@@ -616,7 +616,7 @@ function renderAvatar(it = {}) {
   const identity = getClientEmail(it) || name;
   const tone = hash(identity) % 10;
   return `
-    <span class="incidencias-avatar${src ? " has-image" : " is-fallback"}" data-avatar-tone="${at(String(tone))}" data-has-avatar="${src ? "true" : "false"}" data-fallback="${src ? "false" : "true"}" aria-hidden="true">
+    <span class="incidencias-avatar${src ? " has-image" : " is-fallback"}" data-avatar-tone="${at(String(tone))}" data-has-avatar="${src ? "true" : "false"}" data-fallback="${src ? "false" : "true"}" title="${at(name)}" aria-hidden="true">
       ${src ? `<img class="incidencias-avatar-img" src="${at(src)}" alt="" width="48" height="48" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}
       <span class="incidencias-avatar-fallback">${esc(initials(name))}</span>
     </span>
@@ -788,6 +788,19 @@ function renderSearch(vm = {}) {
 
 function renderFilters(vm = {}) {
   const dateActive = vm.selection === "date";
+  const order = normalizeSort(vm.sortOrder);
+  const next = nextSort(order);
+  const currentDateLabel = sortLabel(order, "date");
+  const nextDateLabel = sortLabel(next, "date");
+  const dateAction = dateActive
+    ? INCIDENCIAS_ACTIONS.SORT_TOGGLE
+    : INCIDENCIAS_ACTIONS.FILTER;
+  const dateAriaLabel = dateActive
+    ? `Cambiar orden a ${nextDateLabel}`
+    : "Ordenar todas las incidencias por fecha, más recientes primero";
+  const dateTitle = dateActive
+    ? `Cambiar orden a ${nextDateLabel}`
+    : "Ordenar por fecha, más recientes primero";
 
   return `
     <div class="incidencias-filters" data-incidencias-filters="true" data-selected-control="${at(vm.selection)}">
@@ -798,7 +811,7 @@ function renderFilters(vm = {}) {
         }).join("")}
       </div>
       <div class="incidencias-sort-pills" data-incidencias-sort-pills="true">
-        <button type="button" class="incidencias-sort-pill${dateActive ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.FILTER}" data-filter="date" data-sort-mode="date" data-sort-order="${at(DEFAULT_SORT_ORDER)}" aria-pressed="${dateActive ? "true" : "false"}" aria-label="Ordenar todas las incidencias por fecha, más recientes primero" title="Ordenar por fecha, más recientes primero">${icon("calendar")}<span>Fecha ↓</span></button>
+        <button type="button" class="incidencias-sort-pill${dateActive ? " is-active" : ""}" data-incidencias-action="${dateAction}" data-filter="date" data-sort-mode="date" data-sort-order="${at(order)}" data-next-sort-order="${at(next)}" aria-pressed="${dateActive ? "true" : "false"}" aria-label="${at(dateAriaLabel)}" title="${at(dateTitle)}">${icon("calendar")}<span>${esc(currentDateLabel)}</span></button>
       </div>
       ${renderSearch(vm)}
     </div>

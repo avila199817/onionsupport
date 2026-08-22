@@ -19,7 +19,7 @@
 
 name: Azure Static Web Apps CI/CD
 
-run-name: SWA · ${{ github.event_name }} · ${{ github.head_ref || github.ref_name || 'manual' }}
+run-name: SWA · ${{ github.event_name }} · ${{ github.ref_name || 'manual' }}
 
 on:
   push:
@@ -29,8 +29,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: swa-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: swa-${{ github.ref }}
+  cancel-in-progress: false
 
 defaults:
   run:
@@ -52,20 +52,7 @@ jobs:
     permissions:
       contents: read
 
-    if: >-
-      (
-        github.event_name == 'push' &&
-        github.ref_name == 'main'
-      ) ||
-      (
-        github.event_name == 'workflow_dispatch' &&
-        github.ref_name == 'main'
-      ) ||
-      (
-        github.event_name == 'pull_request' &&
-        github.event.action != 'closed' &&
-        github.base_ref == 'main'
-      )
+    if: github.ref_name == 'main'
 
     outputs:
       validated_sha: ${{ steps.revision.outputs.sha }}
@@ -78,21 +65,8 @@ jobs:
       - name: Checkout exact release revision
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
           path: candidate
-          fetch-depth: 1
-          submodules: false
-          lfs: false
-          persist-credentials: false
-
-      - name: Checkout trusted validation tooling
-        if: >-
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name != github.repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          path: trusted-validation-source
           fetch-depth: 1
           submodules: false
           lfs: false
@@ -101,7 +75,7 @@ jobs:
       - name: Lock validated revision
         id: revision
         env:
-          EXPECTED_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          EXPECTED_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
 
@@ -116,8 +90,6 @@ jobs:
           echo "Validated SHA: ${checked_sha}"
 
       - name: Stage trusted validation tooling
-        env:
-          EXTERNAL_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
         run: |
           set -euo pipefail
 
@@ -125,13 +97,8 @@ jobs:
           rm -rf "${destination}"
           mkdir -p "${destination}"
 
-          if [[ "${EXTERNAL_PR}" == "true" ]]; then
-            source_root="../trusted-validation-source"
-            echo "External PR: validators locked to immutable base SHA."
-          else
-            source_root="."
-            echo "Trusted repository revision: validators taken from candidate SHA."
-          fi
+          source_root="."
+          echo "Production release: validators taken from exact release SHA."
 
           install -m 0755 "${source_root}/.github/ci/validate_static_release.sh"             "${destination}/validate_static_release.sh"
           install -m 0755 "${source_root}/.github/ci/validate_production_contract.sh"             "${destination}/validate_production_contract.sh"
@@ -180,15 +147,7 @@ jobs:
       - validate
 
     # Production deploys only from the canonical main ref.
-    if: >-
-      (
-        github.event_name == 'push' &&
-        github.ref_name == 'main'
-      ) ||
-      (
-        github.event_name == 'workflow_dispatch' &&
-        github.ref_name == 'main'
-      )
+    if: github.ref_name == 'main'
 
     permissions:
       contents: read

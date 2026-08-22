@@ -12,53 +12,71 @@
      de color plano.
    - Mantener foco, tipografía y controles sin dobles anillos ni recortes.
    - Mantener estable la toolbar mientras cambia el resultado de búsqueda.
-   - Encapsular el acento de la acción primaria de Incidencias mediante tokens
-     locales del propio botón, sin alterar la paleta del resto del panel.
+   - Encapsular el CTA principal de Incidencias como botón pill azul,
+     sin alterar la paleta ni la geometría del resto del panel.
    - Sin !important ni contenido generado.
 ========================================================= */
 
 @layer compositions {
 
 /* =========================================================
-   INCIDENCIAS · ACCIÓN PRIMARIA ROYAL AZURE
+   INCIDENCIAS · ACCIÓN PRIMARIA GOOGLE BLUE
 
-   La vista completa conserva su lenguaje graphite. Sólo la acción de crear
-   incidencia recibe un acento cromático reconocible para marcar jerarquía.
-   La familia Royal Azure / Prussian Blue mantiene texto blanco con contraste
-   AA y no contamina otros botones, modales ni vistas: redefinimos únicamente
-   los tokens que el CTA canónico ya consume.
+   Nueva incidencia es la única acción primaria del hero. Se conserva el
+   contrato de botón compartido, pero esta variante adopta una geometría pill
+   limpia y la familia Google Blue (#1A73E8) sobre el fondo neutro del panel.
+   El icono decorativo se retira de la presentación para que el CTA sea sólo
+   texto, tal como pide esta variante visual.
 ========================================================= */
 
 #incidencias-create-btn,
 .incidencias-btn--create {
-  --btn-primary-bg:
-    linear-gradient(
-      180deg,
-      #3457D5 0%,
-      #2D51A0 100%
-    );
-
-  --btn-primary-bg-hover:
-    linear-gradient(
-      180deg,
-      #4169E1 0%,
-      #3457D5 100%
-    );
-
-  --btn-primary-bg-active:
-    linear-gradient(
-      180deg,
-      #2D51A0 0%,
-      #244584 100%
-    );
-
+  --btn-primary-bg: #1A73E8;
+  --btn-primary-bg-hover: #1967D2;
+  --btn-primary-bg-active: #185ABC;
   --btn-primary-text: #ffffff;
-  --btn-primary-border: rgba(36, 69, 132, .58);
+  --btn-primary-border: #1A73E8;
   --btn-primary-shadow:
-    0 14px 30px rgba(52, 87, 213, .22),
-    inset 0 1px 0 rgba(255, 255, 255, .22);
+    0 1px 2px rgba(60, 64, 67, .22),
+    0 1px 3px 1px rgba(60, 64, 67, .10);
+  --accent: #1A73E8;
 
-  --accent: #3457D5;
+  min-inline-size: 236px;
+  min-block-size: 56px;
+  gap: 0;
+  padding: 0 30px;
+  border-radius: 999px;
+}
+
+#incidencias-create-btn > svg,
+.incidencias-btn--create > svg {
+  display: none;
+}
+
+#incidencias-create-btn:hover:not(:disabled):not([aria-disabled="true"]),
+.incidencias-btn--create:hover:not(:disabled):not([aria-disabled="true"]) {
+  border-color: #1967D2;
+  background: var(--btn-primary-bg-hover);
+  box-shadow:
+    0 2px 6px 2px rgba(60, 64, 67, .18),
+    0 1px 2px rgba(60, 64, 67, .14);
+  transform: translateY(-1px);
+}
+
+#incidencias-create-btn:active:not(:disabled):not([aria-disabled="true"]),
+.incidencias-btn--create:active:not(:disabled):not([aria-disabled="true"]) {
+  border-color: #185ABC;
+  background: var(--btn-primary-bg-active);
+  box-shadow: 0 1px 2px rgba(60, 64, 67, .18);
+  transform: translateY(0);
+}
+
+#incidencias-create-btn:focus-visible,
+.incidencias-btn--create:focus-visible {
+  outline: none;
+  box-shadow:
+    var(--btn-primary-shadow),
+    0 0 0 3px rgba(26, 115, 232, .24);
 }
 
 /* =========================================================

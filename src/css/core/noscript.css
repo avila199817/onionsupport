@@ -91,7 +91,7 @@ body{
   z-index:1;
 }
 
-.noscript-box h1{
+.noscript-box .noscript-title{
   margin:0 0 12px;
   font-size:28px;
   line-height:1.12;
@@ -180,8 +180,8 @@ html[data-theme="light"] .noscript-box::before,
   background:linear-gradient(180deg, rgba(255,255,255,.42), transparent 34%);
 }
 
-html[data-theme="light"] .noscript-box h1,
-[data-theme="light"] .noscript-box h1,
+html[data-theme="light"] .noscript-box .noscript-title,
+[data-theme="light"] .noscript-box .noscript-title,
 html[data-theme="light"] .noscript-box .noscript-services-label,
 [data-theme="light"] .noscript-box .noscript-services-label{
   color:#0f172a;
@@ -219,7 +219,7 @@ html[data-theme="light"] .noscript-services a:focus-visible,
     border-radius:18px;
   }
 
-  .noscript-box h1{
+  .noscript-box .noscript-title{
     font-size:24px;
   }
 

@@ -24,13 +24,13 @@
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
-export const CONFIG_VERSION = "core.config.production.v6-split-origin-health";
+export const CONFIG_VERSION = "core.config.production.v7-direct-api";
 
 /* =========================================================
    CONSTANTES BASE
 ========================================================= */
 
-export const CANONICAL_PRODUCTION_API_BASE = "https://www.onionsupport.com";
+export const CANONICAL_PRODUCTION_API_BASE = "https://api.onionsupport.com";
 
 export const CANONICAL_DIRECT_BACKEND_API_BASE = "https://api.onionsupport.com";
 
@@ -40,9 +40,9 @@ export const CANONICAL_BACKEND_API_ORIGINS = Object.freeze([
 ]);
 
 /*
-  Azure Static Web Apps sólo enruta el backend enlazado bajo /api.
-  Los health del App Service viven en /health, así que deben salir
-  directamente al origen canónico del backend.
+  Compatibilidad temporal del cutover:
+  /health conserva el routing directo explícito mientras retiramos
+  de forma segura el linked backend de Azure Static Web Apps.
 */
 export const DIRECT_BACKEND_API_PREFIXES = Object.freeze([
   "/health",

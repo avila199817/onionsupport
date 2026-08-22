@@ -397,6 +397,5 @@ PY
   echo "${label}: auth guard conectado al Onion API Gateway."
 }
 
-verify_auth_guard "${base}" "SWA linked backend"
 verify_auth_guard "${api}" "Direct API"
-echo "Producción verificada de extremo a extremo: frontend, superficie SEO pública, aliases canónicos, headers, rutas, CORS y backend."
+echo "Producción verificada de extremo a extremo: frontend, superficie SEO pública, aliases canónicos, headers, rutas, CORS y API directa."

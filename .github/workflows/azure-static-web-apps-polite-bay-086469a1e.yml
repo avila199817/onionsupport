@@ -2,10 +2,10 @@
 # ONION SUPPORT — AZURE STATIC WEB APPS CI/CD
 # Production contract:
 #   Frontend canonical: https://www.onionsupport.com
-#   Same-origin API:    https://www.onionsupport.com/api/*
+#   Production API:     https://api.onionsupport.com/api/*
 #   Direct backend:     https://api.onionsupport.com
 #   Azure SWA:          onion-panel
-#   Linked App Service: oniontech
+#   SWA backend link:   transitional only; remove after cutover verification
 #
 # Design goals:
 #   - Validate the exact commit that is deployed.

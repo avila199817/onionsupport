@@ -231,10 +231,10 @@ def validate_private_route_contract(errors: list[str]) -> None:
 
 
 def validate_api_transport_contract(errors: list[str]) -> None:
-    """Keep same-origin /api traffic and direct /health traffic explicit.
+    """Keep the API transport contract valid during the direct-API cutover.
 
-    Azure Static Web Apps proxies the linked backend only under /api. Root-level
-    /health endpoints otherwise fall through to the SPA and return index.html.
+    Production may use the direct API base while the split-origin health
+    compatibility symbols remain temporarily until the Azure backend is unlinked.
     """
 
     config_text = (SRC / "core" / "config.js").read_text(encoding="utf-8")

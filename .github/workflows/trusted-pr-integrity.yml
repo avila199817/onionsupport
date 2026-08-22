@@ -10,6 +10,7 @@ on:
       - opened
       - synchronize
       - reopened
+      - closed
 
 permissions:
   contents: read
@@ -23,6 +24,11 @@ jobs:
     name: Trusted PR integrity
     runs-on: ubuntu-latest
     timeout-minutes: 7
+    if: github.event.action != 'closed'
+
+    outputs:
+      candidate_sha: ${{ steps.revisions.outputs.candidate_sha }}
+      trusted_sha: ${{ steps.revisions.outputs.trusted_sha }}
 
     env:
       PYTHONDONTWRITEBYTECODE: "1"
@@ -298,3 +304,196 @@ jobs:
         run: |
           set -euo pipefail
           git diff --check HEAD^ HEAD
+
+  deploy_preview:
+    name: Deploy trusted PR preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs:
+      - integrity
+
+    if: >-
+      github.event.action != 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+
+    permissions:
+      contents: read
+
+    env:
+      VALIDATED_SHA: ${{ needs.integrity.outputs.candidate_sha }}
+      TRUSTED_SHA: ${{ needs.integrity.outputs.trusted_sha }}
+
+    steps:
+      - name: Resolve preview environment
+        id: preview
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          preview="pr${PR_NUMBER}"
+
+          if [[ ! "${preview}" =~ ^[A-Za-z0-9]{1,16}$ ]]; then
+            echo "::error title=Preview environment inválido::Nombre '${preview}' fuera del contrato."
+            exit 1
+          fi
+
+          echo "name=${preview}" >> "${GITHUB_OUTPUT}"
+          echo "Trusted preview environment: ${preview}"
+
+      - name: Checkout trusted preview tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TRUSTED_SHA }}
+          path: trusted-preview-source
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+          persist-credentials: false
+
+      - name: Stage trusted preview verifier
+        working-directory: trusted-preview-source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          install -m 0755 .github/ci/verify_release_bytes.sh \
+            "${RUNNER_TEMP}/verify_release_bytes.sh"
+
+      - name: Checkout validated candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.VALIDATED_SHA }}
+          path: candidate
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+          persist-credentials: false
+          allow-unsafe-pr-checkout: true
+
+      - name: Assert immutable preview inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          actual_candidate="$(git -C candidate rev-parse HEAD)"
+          actual_trusted="$(git -C trusted-preview-source rev-parse HEAD)"
+
+          if [[ "${actual_candidate}" != "${VALIDATED_SHA}" ]]; then
+            echo "::error title=Candidate preview incorrecto::Esperado ${VALIDATED_SHA}, obtenido ${actual_candidate}."
+            exit 1
+          fi
+
+          if [[ "${actual_trusted}" != "${TRUSTED_SHA}" ]]; then
+            echo "::error title=Trusted preview incorrecto::Esperado ${TRUSTED_SHA}, obtenido ${actual_trusted}."
+            exit 1
+          fi
+
+          if [[ -n "$(git -C candidate status --porcelain --untracked-files=all)" ]]; then
+            echo "::error title=Candidate preview sucio::El checkout candidato contiene mutaciones."
+            git -C candidate status --short
+            exit 1
+          fi
+
+          echo "Immutable preview candidate: ${actual_candidate}"
+          echo "Immutable preview tooling: ${actual_trusted}"
+
+      - name: Validate preview deployment token
+        env:
+          SWA_API_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${SWA_API_TOKEN:-}" ]]; then
+            echo "::error title=Secret no configurado::Falta AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E."
+            exit 1
+          fi
+
+      - name: Deploy trusted static preview
+        id: deploy
+        uses: Azure/static-web-apps-deploy@4d27395796ac319302594769cfe812bd207490b1 # v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E }}
+          action: upload
+          app_location: candidate
+          api_location: ""
+          output_location: ""
+          skip_app_build: true
+          deployment_environment: ${{ steps.preview.outputs.name }}
+
+      - name: Verify trusted preview release bytes
+        working-directory: candidate
+        env:
+          DEPLOYED_URL: ${{ steps.deploy.outputs.static_web_app_url }}
+          VERIFY_CANONICAL: "false"
+        shell: bash
+        run: bash "${RUNNER_TEMP}/verify_release_bytes.sh"
+
+      - name: Preview summary
+        if: always()
+        env:
+          DEPLOYED_URL: ${{ steps.deploy.outputs.static_web_app_url }}
+          PREVIEW_ENV: ${{ steps.preview.outputs.name }}
+        shell: bash
+        run: |
+          {
+            echo "## Trusted SWA preview"
+            echo
+            echo "- Environment: \`${PREVIEW_ENV}\`"
+            echo "- Candidate SHA: \`${VALIDATED_SHA}\`"
+            if [[ -n "${DEPLOYED_URL:-}" ]]; then
+              echo "- URL: ${DEPLOYED_URL}"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  close_preview:
+    name: Close trusted PR preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    if: >-
+      github.event.action == 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Resolve preview environment
+        id: preview
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          preview="pr${PR_NUMBER}"
+
+          if [[ ! "${preview}" =~ ^[A-Za-z0-9]{1,16}$ ]]; then
+            echo "::error title=Preview environment inválido::Nombre '${preview}' fuera del contrato."
+            exit 1
+          fi
+
+          echo "name=${preview}" >> "${GITHUB_OUTPUT}"
+          echo "Closing trusted preview environment: ${preview}"
+
+      - name: Validate preview deployment token
+        env:
+          SWA_API_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${SWA_API_TOKEN:-}" ]]; then
+            echo "::error title=Secret no configurado::Falta AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E."
+            exit 1
+          fi
+
+      - name: Close trusted Azure SWA preview
+        uses: Azure/static-web-apps-deploy@4d27395796ac319302594769cfe812bd207490b1 # v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E }}
+          action: close
+          deployment_environment: ${{ steps.preview.outputs.name }}

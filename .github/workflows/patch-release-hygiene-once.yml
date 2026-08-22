@@ -1,0 +1,37 @@
+name: One-shot release hygiene patch
+
+on:
+  push:
+    branches:
+      - hardening/premerge-release-integrity-20260822
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 1
+
+      - name: Patch release hygiene gate
+        run: python3 .github/scripts/patch_release_hygiene_once.py
+
+      - name: Validate workflow files as text and remove one-shot tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'artifact_hygiene.py' .github/workflows/azure-static-web-apps-polite-bay-086469a1e.yml >/dev/null
+          grep -F 'pull_request:' .github/workflows/repo-integrity.yml >/dev/null
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/scripts/patch_release_hygiene_once.py
+          git rm .github/workflows/patch-release-hygiene-once.yml
+          git add .github/workflows/azure-static-web-apps-polite-bay-086469a1e.yml .github/workflows/repo-integrity.yml
+          git diff --cached --check
+          git commit -m "CI: bloquear deploy con higiene de artefactos"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guard the boot paint barrier and cold-boot DOM against route FOUC."""
+"""Guard the boot paint barrier, cold-boot DOM and public-home SEO signals."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ ROOT = Path(
 LOADER = ROOT / "src/app/loader.js"
 ROUTE_STYLES = ROOT / "src/router/styles.js"
 INDEX = ROOT / "index.html"
+HOME_TEMPLATE = ROOT / "src/views/public/home/template.js"
 
 PUBLIC_SERVICE_PATHS = (
     "/reparacion-ordenadores",
@@ -26,11 +27,15 @@ PUBLIC_SERVICE_PATHS = (
     "/soporte-empresas",
 )
 
+META_DESCRIPTION_MIN = 120
+META_DESCRIPTION_MAX = 155
+
 
 def main() -> int:
     loader = LOADER.read_text(encoding="utf-8")
     styles = ROUTE_STYLES.read_text(encoding="utf-8")
     index = INDEX.read_text(encoding="utf-8")
+    home_template = HOME_TEMPLATE.read_text(encoding="utf-8")
     errors: list[str] = []
 
     required_loader = {
@@ -78,6 +83,7 @@ def main() -> int:
         ('id="app-loader"', "index.html debe contener el loader canónico"),
         ('class="app-loader is-visible"', "el loader debe comenzar visible en cold boot"),
         ('data-app-loading="true"', "el documento debe comenzar en estado loading"),
+        ('class="noscript-title"', "el fallback no-JS debe usar título visual no-H1"),
         ('class="noscript-services"', "el fallback no-JS debe conservar navegación pública útil"),
     ):
         if token not in index:
@@ -102,6 +108,32 @@ def main() -> int:
         if f'href="{path}"' not in index:
             errors.append(f"fallback no-JS sin enlace público: {path}")
 
+    # El fallback no-JS no debe introducir un segundo H1 en el DOM que analizan
+    # crawlers capaces de renderizar la SPA. El H1 canónico pertenece a la home real.
+    if re.search(r"<h1\b", index, re.IGNORECASE):
+        errors.append("index.html no debe declarar H1; el H1 canónico pertenece a public-home")
+
+    home_h1_count = len(re.findall(r"<h1\b", home_template, re.IGNORECASE))
+    if home_h1_count != 1:
+        errors.append(f"public-home debe declarar exactamente un H1; encontrados {home_h1_count}")
+
+    # Mantener una descripción concisa y suficientemente informativa funciona bien
+    # en buscadores que truncan por dispositivo y evita warnings de descripciones extremas.
+    description_match = re.search(
+        r'<meta\s+(?=[^>]*\bname="description"\b)[^>]*\bcontent="([^"]*)"[^>]*>',
+        index,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not description_match:
+        errors.append("index.html debe declarar meta description")
+    else:
+        description = " ".join(description_match.group(1).split())
+        length = len(description)
+        if not META_DESCRIPTION_MIN <= length <= META_DESCRIPTION_MAX:
+            errors.append(
+                f"meta description fuera del contrato {META_DESCRIPTION_MIN}-{META_DESCRIPTION_MAX}: {length}"
+            )
+
     if errors:
         print("Boot visual integrity: FAIL")
         for error in errors:
@@ -111,7 +143,9 @@ def main() -> int:
     print("Boot visual integrity: PASS")
     print("- loader starts visible")
     print("- router root starts empty: no pre-hydration content flash")
-    print("- no-script fallback keeps crawlable public service links")
+    print("- no-script fallback keeps crawlable public service links without duplicate H1")
+    print("- public home owns exactly one H1")
+    print("- meta description stays concise and informative")
     print("- route CSS is preloaded inactive")
     print("- hide is deferred through two animation-frame paints")
     print("- pending hides are cancellable and idempotent")

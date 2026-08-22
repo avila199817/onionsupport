@@ -246,8 +246,21 @@ def validate_api_transport_contract(errors: list[str]) -> None:
         else "https://www.onionsupport.com"
     )
 
-    required_config = (
+    allowed_production_api_bases = (
         f'CANONICAL_PRODUCTION_API_BASE = "{canonical_site}"',
+        'CANONICAL_PRODUCTION_API_BASE = "https://api.onionsupport.com"',
+    )
+
+    if not any(
+        snippet in config_text
+        for snippet in allowed_production_api_bases
+    ):
+        errors.append(
+            "src/core/config.js :: CANONICAL_PRODUCTION_API_BASE "
+            "fuera de las arquitecturas permitidas durante el cutover"
+        )
+
+    required_config = (
         'CANONICAL_DIRECT_BACKEND_API_BASE = "https://api.onionsupport.com"',
         'DIRECT_BACKEND_API_PREFIXES = Object.freeze([',
         '"/health"',

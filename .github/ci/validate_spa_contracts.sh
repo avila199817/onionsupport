@@ -7,6 +7,11 @@ import sys
 
 canonical_site = "https://onionsupport.com" if Path(".github/ci/canonical-apex-v1").is_file() else "https://www.onionsupport.com"
 
+allowed_production_api_bases = (
+    f'CANONICAL_PRODUCTION_API_BASE = "{canonical_site}"',
+    'CANONICAL_PRODUCTION_API_BASE = "https://api.onionsupport.com"',
+)
+
 checks = {
     "src/views/public/index.js": (
         "PUBLIC_SHARED_VERSION",
@@ -74,7 +79,6 @@ checks = {
     ),
     "src/core/config.js": (
         "CONFIG_VERSION",
-        f'CANONICAL_PRODUCTION_API_BASE = "{canonical_site}"',
         'CANONICAL_DIRECT_BACKEND_API_BASE = "https://api.onionsupport.com"',
         '"/health"',
     ),
@@ -92,6 +96,17 @@ for file_name, tokens in checks.items():
     for token in tokens:
         if token not in text:
             errors.append(f"{file_name}: falta {token!r}")
+
+config_text = Path("src/core/config.js").read_text(encoding="utf-8")
+
+if not any(
+    token in config_text
+    for token in allowed_production_api_bases
+):
+    errors.append(
+        "src/core/config.js: CANONICAL_PRODUCTION_API_BASE "
+        "no coincide con ninguna arquitectura permitida durante el cutover"
+    )
 
 public_shared = Path("src/views/public/index.js").read_text(encoding="utf-8")
 for forbidden in ("LOGIN_VIEW_VERSION", "renderLoginView"):

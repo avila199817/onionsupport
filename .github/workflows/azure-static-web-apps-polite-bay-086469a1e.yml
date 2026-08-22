@@ -104,6 +104,7 @@ jobs:
           install -m 0755 "${source_root}/.github/ci/validate_production_contract.sh"             "${destination}/validate_production_contract.sh"
           install -m 0755 "${source_root}/.github/ci/validate_spa_contracts.sh"             "${destination}/validate_spa_contracts.sh"
           install -m 0644 "${source_root}/.github/scripts/repo_integrity.py"             "${destination}/repo_integrity.py"
+          install -m 0644 "${source_root}/.github/scripts/artifact_hygiene.py"           "${destination}/artifact_hygiene.py"
           install -m 0755 "${source_root}/.github/ci/validate_candidate_paths.py" "${destination}/validate_candidate_paths.py"
 
       - name: Validate candidate path boundary
@@ -120,6 +121,13 @@ jobs:
         run: |
           set -euo pipefail
           python3 "${RUNNER_TEMP}/onion-validation/repo_integrity.py"
+
+      - name: Validate repository artifact hygiene
+        env:
+          ONION_REPO_ROOT: ${{ github.workspace }}/candidate
+        run: |
+          set -euo pipefail
+          python3 "${RUNNER_TEMP}/onion-validation/artifact_hygiene.py"
 
       - name: Validate production SEO and routing contract
         run: bash "${RUNNER_TEMP}/onion-validation/validate_production_contract.sh"

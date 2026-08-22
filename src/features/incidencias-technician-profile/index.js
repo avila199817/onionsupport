@@ -1,7 +1,7 @@
-/* Onion Support · Incidencias Technician Profile v3 */
+/* Onion Support · Incidencias Technician Profile v4 */
 
 export const INCIDENCIAS_TECHNICIAN_PROFILE_VERSION =
-  "incidencias-technician-profile.v3.detail-modal-flow";
+  "incidencias-technician-profile.v4.stable-opener-lifecycle";
 
 const VIEW = "#view-container, [data-router-view='true']";
 const LIST_TECH_BADGE = ".incidencias-assigned-badge[data-assigned='true']";
@@ -592,7 +592,20 @@ function sync() {
   decorateTechnicianBadges();
   decorateDetailPriorityChips();
   decorateDetailTechnicianCards();
-  if (document.getElementById(ROOT_ID) && returnFocus && !returnFocus.isConnected) closeProfile();
+
+  /*
+     El opener sólo sirve para devolver foco. Una sustitución rápida del DOM
+     de la vista puede desconectarlo mientras el perfil ya está abriéndose.
+     Esa pérdida de referencia no tiene autoridad para cerrar el modal ni
+     invalidar la petición: simplemente renunciamos a restaurar ese foco.
+  */
+  if (
+    document.getElementById(ROOT_ID) &&
+    returnFocus &&
+    !returnFocus.isConnected
+  ) {
+    returnFocus = null;
+  }
 }
 
 function schedule() {

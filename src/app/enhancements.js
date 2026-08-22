@@ -12,7 +12,7 @@
 ========================================================= */
 
 export const APP_ENHANCEMENTS_VERSION =
-  "app.enhancements.v6-public-postal-autofill";
+  "app.enhancements.v7-incidencias-detail-experience";
 
 const PRE_ROUTER = Object.freeze([
   Object.freeze({
@@ -37,6 +37,10 @@ const POST_ROUTER = Object.freeze([
   Object.freeze({
     key: "incidencias-media-preview",
     load: () => import("../features/incidencias-media-preview/index.js"),
+  }),
+  Object.freeze({
+    key: "incidencias-detail-experience",
+    load: () => import("../features/incidencias-detail-experience/index.js"),
   }),
   Object.freeze({
     key: "incidencias-technician-profile",

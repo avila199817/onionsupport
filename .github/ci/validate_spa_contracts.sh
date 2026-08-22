@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-python3 - <<'PY'
+python3 -I - <<'PY'
 from pathlib import Path
 import sys
 

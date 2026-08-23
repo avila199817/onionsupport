@@ -1,7 +1,7 @@
-/* Onion Support · Incidencias Technician Profile v4 */
+/* Onion Support · Incidencias Technician Profile v5 */
 
 export const INCIDENCIAS_TECHNICIAN_PROFILE_VERSION =
-  "incidencias-technician-profile.v4.stable-opener-lifecycle";
+  "incidencias-technician-profile.v5.final-ui";
 
 const VIEW = "#view-container, [data-router-view='true']";
 const LIST_TECH_BADGE = ".incidencias-assigned-badge[data-assigned='true']";
@@ -82,6 +82,12 @@ function normalizeKey(value = "") {
 function normalizeEmail(value = "") {
   const email = text(value, "").toLowerCase();
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : "";
+}
+
+function displayLabel(value = "", fallback = "") {
+  const raw = text(value, fallback);
+  if (!raw) return "";
+  return `${raw.charAt(0).toUpperCase()}${raw.slice(1)}`;
 }
 
 function safeAvatarUrl(value = "") {
@@ -256,6 +262,14 @@ function metaCard(label = "", value = "—", hint = "") {
   return `<div class="ui-detail-modal-meta-card"><span>${escapeHtml(label)}</span><strong title="${attr(safeValue)}">${escapeHtml(safeValue)}</strong>${hint ? `<span style="font-size:11px;color:var(--text-muted);font-weight:500;line-height:1.3;">${escapeHtml(hint)}</span>` : ""}</div>`;
 }
 
+function contactCard(label = "", value = "", href = "", actionLabel = "") {
+  const safeValue = text(value, "No disponible");
+  const safeHref = text(href, "");
+  const content = `<span>${escapeHtml(label)}</span><strong title="${attr(safeValue)}">${escapeHtml(safeValue)}</strong>`;
+  if (!safeHref) return `<div class="ui-detail-modal-meta-card">${content}</div>`;
+  return `<a class="ui-detail-modal-meta-card incidencias-modal-contact-link" href="${attr(safeHref)}" aria-label="${attr(actionLabel || `${label}: ${safeValue}`)}" title="${attr(actionLabel || safeValue)}">${content}</a>`;
+}
+
 function closeIcon() {
   return `<svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`;
 }
@@ -272,33 +286,34 @@ function avatarMarkup(tech = {}) {
 
 function statusChip(tech = {}) {
   const active = statusLabel(tech.status) === "Activo";
-  const modifier = active ? "ui-detail-modal-chip--status-resolved" : "ui-detail-modal-chip--priority-critical";
+  const modifier = active ? "incidencias-status-chip--resolved" : "incidencias-priority-badge--critical";
   return `<span class="ui-detail-modal-chip ${modifier}">${active ? "Activo" : "Inactivo"}</span>`;
 }
 
 function ticketStatusChip(ticket = {}) {
   const label = ticketStatusLabel(ticket);
   const modifier = label === "Resuelta"
-    ? "ui-detail-modal-chip--status-resolved"
+    ? "incidencias-status-chip--resolved"
     : label === "Pendiente"
-      ? "ui-detail-modal-chip--status-pending"
-      : "ui-detail-modal-chip--status-open";
+      ? "incidencias-status-chip--pending"
+      : "incidencias-status-chip--open";
   return `<span class="ui-detail-modal-chip ${modifier}">${escapeHtml(label)}</span>`;
 }
 
 function priorityChip(ticket = {}) {
   const label = priorityLabel(ticket);
   const modifier = label === "Urgente"
-    ? "ui-detail-modal-chip--priority-critical"
+    ? "incidencias-priority-badge--critical"
     : label === "Alta"
-      ? "ui-detail-modal-chip--priority-high"
+      ? "incidencias-priority-badge--high"
       : "";
   return `<span class="ui-detail-modal-chip ${modifier}">${escapeHtml(label)}</span>`;
 }
 
-function progressRow(label = "", value = 0, detail = "") {
+function progressRow(label = "", value = 0, detail = "", tone = "info") {
   const safe = Math.max(0, Math.min(100, Number(value) || 0));
-  return `<div style="display:grid;gap:7px;min-width:0;"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;"><span style="color:var(--text-muted);font-size:var(--font-xs);font-weight:600;">${escapeHtml(label)}</span><strong style="color:var(--text-strong);font-size:var(--font-xs);">${escapeHtml(percentLabel(safe))}</strong></div><div aria-hidden="true" style="height:8px;border-radius:999px;overflow:hidden;background:var(--surface-3,var(--ui-detail-modal-card-bg));border:1px solid var(--ui-detail-modal-card-border);"><span style="display:block;height:100%;width:${safe.toFixed(2)}%;border-radius:inherit;background:linear-gradient(90deg,var(--accent),var(--info));"></span></div>${detail ? `<span style="color:var(--text-muted);font-size:11px;line-height:1.3;">${escapeHtml(detail)}</span>` : ""}</div>`;
+  const fill = tone === "success" ? "var(--success)" : "var(--info)";
+  return `<div style="display:grid;gap:7px;min-width:0;"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;"><span style="color:var(--text-muted);font-size:var(--font-xs);font-weight:600;">${escapeHtml(label)}</span><strong style="color:var(--text-strong);font-size:var(--font-xs);">${escapeHtml(percentLabel(safe))}</strong></div><div aria-hidden="true" style="height:8px;border-radius:999px;overflow:hidden;background:var(--surface-3,var(--ui-detail-modal-card-bg));border:1px solid var(--ui-detail-modal-card-border);"><span style="display:block;height:100%;width:${safe.toFixed(2)}%;border-radius:inherit;background:${fill};"></span></div>${detail ? `<span style="color:var(--text-muted);font-size:11px;line-height:1.3;">${escapeHtml(detail)}</span>` : ""}</div>`;
 }
 
 function recentTicketCard(ticket = {}) {
@@ -326,10 +341,11 @@ function renderError(seed = {}, message = "") {
 function renderProfile(tech = {}, stats = {}) {
   const email = normalizeEmail(tech.email);
   const phone = text(tech.phone, "");
+  const dialPhone = phone.replace(/[^+\d]/g, "");
   const exactText = stats.exact
     ? `${numberLabel(stats.assigned)} incidencia${stats.assigned === 1 ? "" : "s"} asignada${stats.assigned === 1 ? "" : "s"}`
     : `Métricas sobre ${numberLabel(stats.loaded)} de ${numberLabel(stats.total)} incidencias cargadas`;
-  const roleLabel = text(tech.position || tech.role, "Técnico");
+  const roleLabel = displayLabel(tech.position || tech.role, "Técnico");
   const username = tech.username ? `@${tech.username.replace(/^@+/, "")}` : "No disponible";
   const recent = array(stats.recent);
 
@@ -343,8 +359,8 @@ function renderProfile(tech = {}, stats = {}) {
         ${metaCard("Urgentes", numberLabel(stats.urgent), stats.urgent ? "Prioridad alta o crítica" : "Sin urgencias")}
       </div>
       <div class="ui-detail-modal-contact-grid" style="margin-top:var(--space-md);">
-        ${progressRow("Tasa de resolución", stats.resolutionRate, `${numberLabel(stats.closed)} de ${numberLabel(stats.assigned)} incidencias resueltas`)}
-        ${progressRow("Carga activa", stats.activeRate, `${numberLabel(stats.active)} en seguimiento`) }
+        ${progressRow("Tasa de resolución", stats.resolutionRate, `${numberLabel(stats.closed)} de ${numberLabel(stats.assigned)} incidencias resueltas`, "success")}
+        ${progressRow("Carga activa", stats.activeRate, `${numberLabel(stats.active)} en seguimiento`, "info")}
       </div>
     </section>
 
@@ -357,8 +373,8 @@ function renderProfile(tech = {}, stats = {}) {
         ${metaCard("Último acceso", dateTimeLabel(tech.lastLoginAt))}
       </div>
       <div class="ui-detail-modal-contact-grid">
-        ${metaCard("Correo", email || "No disponible")}
-        ${metaCard("Teléfono", phone || "No disponible")}
+        ${contactCard("Correo", email || "No disponible", email ? `mailto:${email}` : "", email ? `Enviar correo a ${email}` : "")}
+        ${contactCard("Teléfono", phone || "No disponible", dialPhone ? `tel:${dialPhone}` : "", phone ? `Llamar a ${phone}` : "")}
       </div>
       <div style="margin-top:var(--space-sm);">${metaCard("Identificador de usuario", text(tech.userId, "No disponible"))}</div>
     </section>
@@ -366,13 +382,7 @@ function renderProfile(tech = {}, stats = {}) {
     <section class="ui-detail-modal-history-section">
       ${sectionHeader("Actividad reciente", recent.length ? `${numberLabel(recent.length)} últimas incidencias visibles` : "Sin incidencias recientes")}
       ${recent.length ? `<div class="ui-detail-modal-meta-grid">${recent.map(recentTicketCard).join("")}</div>` : `<p style="margin:0;color:var(--text-muted);font-size:var(--font-sm);">No hay actividad reciente disponible para este técnico.</p>`}
-    </section>
-
-    <footer class="ui-detail-modal-footer" style="gap:8px;flex-wrap:wrap;padding-top:2px;">
-      ${email ? `<a class="ui-detail-modal-view-btn" href="mailto:${attr(email)}">Enviar email</a>` : ""}
-      ${phone ? `<a class="ui-detail-modal-view-btn" href="tel:${attr(phone.replace(/[^+\d]/g, ""))}">Llamar</a>` : ""}
-      <button type="button" class="ui-detail-modal-submit-btn" data-technician-profile-action="close">Cerrar perfil</button>
-    </footer>`;
+    </section>`;
 
   return renderShell({
     tech,
@@ -383,7 +393,7 @@ function renderProfile(tech = {}, stats = {}) {
 
 function renderShell({ tech = {}, body = "", summary = "" } = {}) {
   const name = text(tech.name, "Técnico");
-  const role = text(tech.position || tech.role, "Técnico");
+  const role = displayLabel(tech.position || tech.role, "Técnico");
   return `
     <section id="${ROOT_ID}" class="ui-detail-modal-root" data-technician-profile-root="true">
       <div class="ui-detail-modal-overlay" data-technician-profile-overlay="true">
@@ -397,7 +407,7 @@ function renderShell({ tech = {}, body = "", summary = "" } = {}) {
                 <span id="inc-technician-summary" class="ui-detail-modal-updated">${escapeHtml(summary || "Perfil operativo del técnico asignado")}</span>
               </div>
             </div>
-            <button type="button" class="ui-detail-modal-close-btn" data-technician-profile-action="close" aria-label="Cerrar perfil de ${attr(name)}">${closeIcon()}</button>
+            <button type="button" class="incidencias-modal-close-btn ui-detail-modal-close-btn" data-technician-profile-action="close" aria-label="Cerrar perfil de ${attr(name)}">${closeIcon()}</button>
           </header>
           <main class="ui-detail-modal-body">${body}</main>
         </div>

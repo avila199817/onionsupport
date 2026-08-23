@@ -38,7 +38,7 @@ import {
 } from "./incidencias.options.js";
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.extreme.v34.stable-confirmations";
+  "incidencias.template.modal.extreme.v35.final-polish";
 
 export const DETAIL_ACTIONS = Object.freeze({
   CLOSE: "detail-close",
@@ -2676,15 +2676,15 @@ function renderHeaderActions(vm = {}) {
               data-detail-action="${DETAIL_ACTIONS.TICKET_CLOSE}"
               data-ticket-id="${attr(vm.ticketId)}"
               class="incidencias-modal-close-ticket-btn"
-              aria-label="Cerrar ticket"
-              title="Cerrar esta incidencia manualmente"
+              aria-label="Cerrar incidencia"
+              title="Cerrar esta incidencia"
               ${disabledAttrs(vm.submitting, vm.submitting)}
             >
               <span class="incidencias-modal-close-ticket-icon">
                 ${icon("check")}
               </span>
               <span class="incidencias-modal-close-ticket-label">
-                Cerrar ticket
+                Cerrar incidencia
               </span>
             </button>
           `

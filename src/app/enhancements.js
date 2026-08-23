@@ -12,7 +12,7 @@
 ========================================================= */
 
 export const APP_ENHANCEMENTS_VERSION =
-  "app.enhancements.v8-incidencias-user-update-turn";
+  "app.enhancements.v9-incidencias-detail-state";
 
 const PRE_ROUTER = Object.freeze([
   Object.freeze({
@@ -39,12 +39,8 @@ const POST_ROUTER = Object.freeze([
     load: () => import("../features/incidencias-media-preview/index.js"),
   }),
   Object.freeze({
-    key: "incidencias-detail-experience",
-    load: () => import("../features/incidencias-detail-experience/index.js"),
-  }),
-  Object.freeze({
-    key: "incidencias-user-update-turn",
-    load: () => import("../features/incidencias-user-update-turn/index.js"),
+    key: "incidencias-detail-state",
+    load: () => import("../features/incidencias-detail-state/index.js"),
   }),
   Object.freeze({
     key: "incidencias-technician-profile",

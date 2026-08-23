@@ -8,6 +8,7 @@
    - Sólo renderiza HTML y valida forma local.
    - No hace HTTP, no toca Auth, Store ni DOM.
    - Admin conserva selección de usuario, categoría y prioridad.
+   - La identidad visible del buscador admin es: User ID · correo · teléfono.
    - Usuario final sólo ve título, descripción y adjuntos.
    - Categoría/prioridad del usuario final viajan con defaults internos.
    - El input de adjuntos SIEMPRE se llama attachments.
@@ -20,7 +21,7 @@ import {
 } from "./incidencias.options.js";
 
 export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =
-  "incidencias.template.create.extreme.v25.attachment-preview";
+  "incidencias.template.create.extreme.v26.canonical-user-contact-summary";
 
 export const CREATE_ACTIONS = Object.freeze({
   CLOSE: "create-close",
@@ -308,6 +309,20 @@ function normalizeUserResult(user = {}) {
     ""
   ));
 
+  const phone = cleanText(first(
+    raw.phone, raw.telefono, raw.phoneE164, raw.mobile, raw.movil,
+    raw.contacto?.phone, raw.contacto?.telefono, raw.contacto?.phoneE164,
+    raw.contact?.phone, raw.contact?.telefono, raw.contact?.phoneE164,
+    raw.profile?.phone, raw.profile?.telefono, raw.profile?.phoneE164,
+    raw.lookup?.phoneE164,
+    nested.phone, nested.telefono, nested.phoneE164, nested.mobile, nested.movil,
+    nested.contacto?.phone, nested.contacto?.telefono, nested.contacto?.phoneE164,
+    nested.contact?.phone, nested.contact?.telefono, nested.contact?.phoneE164,
+    nested.profile?.phone, nested.profile?.telefono, nested.profile?.phoneE164,
+    nested.lookup?.phoneE164,
+    ""
+  ), "");
+
   const username = cleanText(first(
     raw.username, raw.usernameLower, raw.userName,
     raw.profile?.username, nested.username, nested.usernameLower,
@@ -315,7 +330,7 @@ function normalizeUserResult(user = {}) {
   ), "");
 
   const avatarUrl = firstImageSrc(raw, nested);
-  const avatarToneIdentity = email || name;
+  const avatarToneIdentity = email || userId || name;
 
   return {
     id: userId,
@@ -327,6 +342,8 @@ function normalizeUserResult(user = {}) {
     name,
     displayName: name,
     email,
+    phone,
+    telefono: phone,
     username,
     role: cleanText(first(raw.role, raw.rol, nested.role, nested.rol, "user"), "user"),
     avatarUrl,
@@ -550,7 +567,11 @@ function renderSelectedUser(vm = {}) {
     avatarUrl: vm.form.targetUserAvatar || vm.selectedUser?.avatarUrl || vm.selectedUser?.avatar,
   });
 
-  const subtitle = [user.email, user.username, user.clienteId].filter(Boolean).join(" · ");
+  const subtitle = [
+    user.userId || "Sin ID",
+    user.email || "Sin correo",
+    user.phone || "Sin teléfono",
+  ].join(" · ");
 
   return `
     <div class="inc-create-selected-user" data-create-selected-user="true">
@@ -558,7 +579,7 @@ function renderSelectedUser(vm = {}) {
         ${renderUserAvatar(user, "inc-create-target-user-avatar")}
         <span class="inc-create-selected-user-copy">
           <strong>${escapeHtml(user.displayName || "Usuario seleccionado")}</strong>
-          <span>${escapeHtml(subtitle || user.userId || "Usuario seleccionado")}</span>
+          <span>${escapeHtml(subtitle)}</span>
         </span>
       </div>
       <button type="button" class="inc-create-selected-user-clear" data-create-action="${CREATE_ACTIONS.USER_CLEAR}" ${disabledAttrs(vm.submitting, vm.submitting)}>Quitar</button>
@@ -587,7 +608,11 @@ function renderUserSearchResults(vm = {}) {
     <div class="inc-create-user-results" role="listbox" data-create-user-results="true" aria-label="Resultados de búsqueda de usuarios">
       ${search.results.map((user) => {
         const item = normalizeUserResult(user);
-        const subtitle = [item.email, item.username, item.role, item.clienteId].filter(Boolean).join(" · ");
+        const subtitle = [
+          item.userId || item.id || "Sin ID",
+          item.email || "Sin correo",
+          item.phone || "Sin teléfono",
+        ].join(" · ");
 
         return `
           <button
@@ -601,13 +626,15 @@ function renderUserSearchResults(vm = {}) {
             data-user-name="${attr(item.displayName)}"
             data-user-email="${attr(item.email)}"
             data-email="${attr(item.email)}"
+            data-user-phone="${attr(item.phone)}"
+            data-phone="${attr(item.phone)}"
             data-user-avatar="${attr(item.avatarUrl)}"
             ${disabledAttrs(vm.submitting, vm.submitting)}
           >
             ${renderUserAvatar(item)}
             <span class="inc-create-user-result-copy">
               <strong>${escapeHtml(item.displayName)}</strong>
-              <span>${escapeHtml(subtitle || item.userId || item.id)}</span>
+              <span>${escapeHtml(subtitle)}</span>
             </span>
           </button>
         `;
@@ -642,7 +669,7 @@ function renderAdminUserSearch(vm = {}) {
             name="targetUserSearch"
             type="search"
             value="${attr(vm.userSearch.query)}"
-            placeholder="Nombre, usuario, email o ID"
+            placeholder="Nombre, ID, correo o teléfono"
             autocomplete="off"
             spellcheck="false"
             aria-autocomplete="list"
@@ -1136,6 +1163,7 @@ export function getCreateTemplateSnapshot() {
       actionClear: CREATE_ACTIONS.USER_CLEAR,
       preservesTargetClienteId: true,
       userFacingTargetLabel: "Usuario",
+      userContactSummary: ["userId", "email", "phone"],
       avatarToneMatchesIncidenciasList: true,
     },
     limits: {
@@ -1152,6 +1180,7 @@ export function getCreateTemplateSnapshot() {
       targetClienteIdCompatible: true,
       doesNotInventClienteId: true,
       hiddenTargetFields: true,
+      canonicalUserContactSummary: true,
       blobFieldName: "attachments",
       formEncoding: "multipart/form-data",
       textOnlyPrimarySubmit: true,

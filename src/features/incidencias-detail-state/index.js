@@ -16,7 +16,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_DETAIL_STATE_VERSION =
-  "incidencias-detail-state.v2.interaction-stable";
+  "incidencias-detail-state.v3.final-polish";
 
 const VIEW = "#view-container, [data-router-view='true']";
 const HOST = "[data-incidencias-modal-host='true']";
@@ -37,6 +37,8 @@ const ID_TEXT = ".incidencias-modal-id-chip-text";
 const TECH_CARD = ".incidencias-modal-technician-card[data-technician-profile-trigger='true']";
 const TECH_INLINE = ".incidencias-modal-technician-inline[data-technician-assigned='true']";
 const TECH_EYE = "[data-technician-profile-eye='true']";
+const TECH_AVATAR_FRAME = "[data-modal-technician-avatar-frame='true']";
+const TECH_AVATAR_IMG = "[data-modal-technician-avatar-img='true']";
 const POLL_MS = 30000;
 
 const PENDING_TITLE = "Pendiente de revisión";
@@ -729,6 +731,7 @@ function ensurePendingChip(root) {
         "ui-detail-modal-chip",
         "incidencias-modal-chip--status-pending",
         "ui-detail-modal-chip--status-pending",
+        "incidencias-modal-review-chip",
       ].join(" ");
       chip.dataset.ticketReviewState = "pending";
 
@@ -777,6 +780,40 @@ function syncTicketId(root) {
   chip.dataset.fullTicketIdVisible = "true";
   chip.title = `Copiar ID: ${id}`;
   return true;
+}
+
+function fallbackTechnicianAvatar(image) {
+  const frame = image?.closest?.(TECH_AVATAR_FRAME) || null;
+  if (!frame) return false;
+
+  ownMutation(() => {
+    frame.dataset.hasAvatar = "false";
+    frame.dataset.fallback = "true";
+    frame.classList.add("incidencias-modal-technician-avatar--fallback");
+    image.remove();
+  });
+
+  return true;
+}
+
+function repairTechnicianAvatar(root) {
+  if (!root) return false;
+
+  let repaired = false;
+
+  for (const image of Array.from(root.querySelectorAll?.(TECH_AVATAR_IMG) || [])) {
+    if (image.complete && Number(image.naturalWidth || 0) === 0) {
+      repaired = fallbackTechnicianAvatar(image) || repaired;
+    }
+  }
+
+  return repaired;
+}
+
+function handleTechnicianAvatarError(event) {
+  const image = event?.target;
+  if (!image?.matches?.(TECH_AVATAR_IMG)) return;
+  fallbackTechnicianAvatar(image);
 }
 
 function syncTechnicianEye(root) {
@@ -834,6 +871,7 @@ function project(root, detail = {}) {
   sortAttachments(root, detail);
   syncTicketId(root);
   syncTechnicianEye(root);
+  repairTechnicianAvatar(root);
 
   return true;
 }
@@ -1034,6 +1072,7 @@ function sync() {
 
   syncTicketId(root);
   syncTechnicianEye(root);
+  repairTechnicianAvatar(root);
 
   if (activeRoot !== root || activeTicketId !== id) {
     activeRoot = root;
@@ -1083,6 +1122,8 @@ export function mountIncidenciasDetailState() {
 
   mounted = true;
 
+  mountRoot.addEventListener("error", handleTechnicianAvatarError, true);
+
   if (typeof MutationObserver !== "undefined") {
     viewObserver = new MutationObserver((mutations) => {
       if (internalMutations > 0) return;
@@ -1115,6 +1156,7 @@ export function destroyIncidenciasDetailState() {
 
   viewObserver?.disconnect?.();
   modalObserver?.disconnect?.();
+  mountRoot?.removeEventListener?.("error", handleTechnicianAvatarError, true);
 
   if (frame && browser()) {
     window.cancelAnimationFrame?.(frame);
@@ -1152,6 +1194,7 @@ export function getIncidenciasDetailStateSnapshot() {
       attachments: "newest_first",
     }),
     pendingIndicator: "warning_clock_chip",
+    technicianAvatarFallback: "initials_on_image_error",
     closedTicketCanReceiveFutureUpdate: true,
     backendIsWriteAuthority: true,
   });

@@ -2,11 +2,11 @@
    Onion Support · Incidencias User Update Turn
    Archivo: /src/features/incidencias-user-update-turn/index.js
 
-   Presentación derivada de la política de conversación del ticket.
+   Proyección UI de la política de conversación del ticket.
 
    Autoridad:
    - backend: decide y bloquea realmente las escrituras
-   - esta feature: explica el estado y desactiva sólo los controles consumidos
+   - esta feature: explica el estado y desactiva sólo la pieza consumida
 
    Regla visible para usuario estándar:
    - un turno admite 1 comentario + 1 lote de adjuntos
@@ -14,10 +14,12 @@
    - cuando el turno está completo, se espera respuesta real de soporte
    - comentario o adjunto de soporte abre un nuevo turno
    - cambios administrativos no desbloquean
+
+   Esta feature es idempotente: si el estado no cambia, no vuelve a mutar DOM.
 ========================================================= */
 
 export const INCIDENCIAS_USER_UPDATE_TURN_VERSION =
-  "incidencias-user-update-turn.v1.single-pending-turn";
+  "incidencias-user-update-turn.v2.idempotent-projection";
 
 const VIEW = "#view-container, [data-router-view='true']";
 const MODAL_HOST = "[data-incidencias-modal-host='true']";
@@ -31,7 +33,7 @@ const SUBMIT = "[data-detail-action='detail-submit-update']";
 const SUCCESS = ".incidencias-modal-feedback--success";
 const STATUS = "[data-user-update-turn-status='true']";
 
-const SUPPORT_ROLES = new Set([
+const SUPPORT_EVENT_ROLES = new Set([
   "admin",
   "support",
   "technician",
@@ -40,7 +42,7 @@ const SUPPORT_ROLES = new Set([
   "staff",
 ]);
 
-const USER_ROLES = new Set([
+const USER_EVENT_ROLES = new Set([
   "user",
   "standard",
   "client",
@@ -91,7 +93,7 @@ let frame = 0;
 let apiPromise = null;
 let requestSeq = 0;
 let hydration = null;
-let lastVisibleTicketId = "";
+let visibleTicketId = "";
 let lastSuccessKey = "";
 
 const browser = () =>
@@ -121,9 +123,18 @@ function first(...values) {
     if (value === null || value === undefined) continue;
     if (typeof value === "string" && !value.trim()) continue;
     if (Array.isArray(value) && !value.length) continue;
-    if (value && typeof value === "object" && !Array.isArray(value) && !Object.keys(value).length) continue;
+    if (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      !Object.keys(value).length
+    ) {
+      continue;
+    }
+
     return value;
   }
+
   return null;
 }
 
@@ -220,10 +231,11 @@ function eventSide(entry = {}, detail = {}) {
     raw.uploadedBy?.role
   );
 
-  if (SUPPORT_ROLES.has(role)) return "support";
-  if (USER_ROLES.has(role)) return "user";
+  if (SUPPORT_EVENT_ROLES.has(role)) return "support";
+  if (USER_EVENT_ROLES.has(role)) return "user";
 
   const identity = supportIdentity(detail);
+
   const actorId = text(
     raw.byUserId ||
     raw.userId ||
@@ -290,18 +302,21 @@ function explicitPolicy(detail = {}) {
     )
   );
 
-  const hasContract =
-    typeof value.awaitingSupportResponse === "boolean" &&
-    (
-      typeof value.canUserAddComment === "boolean" ||
-      typeof value.canUserComment === "boolean"
-    ) &&
-    (
-      typeof value.canUserAddAttachment === "boolean" ||
-      typeof value.canUserAttach === "boolean"
-    );
+  const hasCommentContract =
+    typeof value.canUserAddComment === "boolean" ||
+    typeof value.canUserComment === "boolean";
 
-  if (!hasContract) return null;
+  const hasAttachmentContract =
+    typeof value.canUserAddAttachment === "boolean" ||
+    typeof value.canUserAttach === "boolean";
+
+  if (
+    typeof value.awaitingSupportResponse !== "boolean" ||
+    !hasCommentContract ||
+    !hasAttachmentContract
+  ) {
+    return null;
+  }
 
   return {
     awaitingSupportResponse: value.awaitingSupportResponse === true,
@@ -330,8 +345,8 @@ function derivePolicy(detail = {}) {
   for (const comment of comments) {
     const at = eventTime(comment);
     const side = eventSide(comment, raw);
-    if (!at) continue;
 
+    if (!at) continue;
     if (side === "support") lastSupport = Math.max(lastSupport, at);
     if (side === "user") userEvents.push({ at, kind: "comment" });
   }
@@ -342,6 +357,7 @@ function derivePolicy(detail = {}) {
 
     const at = eventTime(entry);
     const side = eventSide(entry, raw);
+
     if (!at) continue;
 
     if (side === "support") {
@@ -350,20 +366,62 @@ function derivePolicy(detail = {}) {
     }
 
     if (side === "user") {
-      for (const kind of kinds) userEvents.push({ at, kind });
+      for (const kind of kinds) {
+        userEvents.push({ at, kind });
+      }
     }
   }
 
   const pending = userEvents.filter((event) => event.at > lastSupport);
   const commentUsed = pending.some((event) => event.kind === "comment");
   const attachmentUsed = pending.some((event) => event.kind === "attachment");
-  const awaitingSupportResponse = commentUsed || attachmentUsed;
 
   return {
-    awaitingSupportResponse,
+    awaitingSupportResponse: commentUsed || attachmentUsed,
     canUserAddComment: !commentUsed,
     canUserAddAttachment: !attachmentUsed,
   };
+}
+
+function setAttributeIfChanged(element, name, value) {
+  if (!element) return false;
+
+  const next = String(value);
+  if (element.getAttribute(name) === next) return false;
+
+  element.setAttribute(name, next);
+  return true;
+}
+
+function setDisabledIfChanged(element, disabled) {
+  if (!element) return false;
+
+  const next = Boolean(disabled);
+  let changed = false;
+
+  if (element.disabled !== next) {
+    element.disabled = next;
+    changed = true;
+  }
+
+  changed =
+    setAttributeIfChanged(
+      element,
+      "aria-disabled",
+      next ? "true" : "false"
+    ) || changed;
+
+  return changed;
+}
+
+function setTextIfChanged(element, value = "") {
+  if (!element) return false;
+
+  const next = String(value ?? "");
+  if (element.textContent === next) return false;
+
+  element.textContent = next;
+  return true;
 }
 
 function ensureStatus(composer) {
@@ -381,63 +439,77 @@ function ensureStatus(composer) {
   return status;
 }
 
-function removeStatus(composer) {
-  composer?.querySelector?.(STATUS)?.remove?.();
-}
-
 function setStatus(composer, title = "", message = "") {
   const status = ensureStatus(composer);
   if (!status) return false;
 
-  status.replaceChildren();
+  const safeTitle = text(title, "Información");
+  const safeMessage = text(message, "");
+  const signature = `${safeTitle}\n${safeMessage}`;
+
+  if (status.dataset.userUpdateTurnSignature === signature) {
+    return false;
+  }
 
   const strong = document.createElement("strong");
-  strong.textContent = text(title, "Información");
+  strong.textContent = safeTitle;
 
   const span = document.createElement("span");
-  span.textContent = text(message, "");
+  span.textContent = safeMessage;
 
-  status.append(strong, span);
+  status.replaceChildren(strong, span);
+  status.dataset.userUpdateTurnSignature = signature;
   return true;
 }
 
-function rememberControlDefaults(root) {
+function removeStatus(composer) {
+  const status = composer?.querySelector?.(STATUS) || null;
+  if (!status) return false;
+
+  status.remove();
+  return true;
+}
+
+function rememberDefaults(root) {
   const comment = root?.querySelector?.(COMMENT);
   const submit = root?.querySelector?.(SUBMIT);
 
   if (comment && !comment.dataset.userTurnOriginalPlaceholder) {
-    comment.dataset.userTurnOriginalPlaceholder = comment.getAttribute("placeholder") || "";
+    comment.dataset.userTurnOriginalPlaceholder =
+      comment.getAttribute("placeholder") || "";
   }
 
   if (submit && !submit.dataset.userTurnOriginalLabel) {
-    submit.dataset.userTurnOriginalLabel = text(submit.textContent, "Enviar actualización");
+    submit.dataset.userTurnOriginalLabel =
+      text(submit.textContent, "Enviar actualización");
   }
 }
 
 function setLoading(root) {
   if (!root || root.querySelector(ADMIN_EDITOR)) return false;
 
-  rememberControlDefaults(root);
-
   const composer = root.querySelector(COMPOSER);
+  if (!composer) return false;
+
+  rememberDefaults(root);
+
   const comment = root.querySelector(COMMENT);
   const attachments = root.querySelector(ATTACHMENTS);
   const dropzone = root.querySelector(DROPZONE);
   const submit = root.querySelector(SUBMIT);
 
-  if (!composer) return false;
-
-  root.dataset.userUpdateTurn = "checking";
-
-  if (comment) comment.disabled = true;
-  if (attachments) attachments.disabled = true;
-  if (submit) {
-    submit.disabled = true;
-    submit.setAttribute("aria-disabled", "true");
-    submit.textContent = "Comprobando disponibilidad…";
+  if (root.dataset.userUpdateTurnApplied === "checking") {
+    return true;
   }
 
-  dropzone?.setAttribute?.("aria-disabled", "true");
+  root.dataset.userUpdateTurn = "checking";
+  root.dataset.userUpdateTurnApplied = "checking";
+
+  setDisabledIfChanged(comment, true);
+  setDisabledIfChanged(attachments, true);
+  setDisabledIfChanged(submit, true);
+  setAttributeIfChanged(dropzone, "aria-disabled", "true");
+  setTextIfChanged(submit, "Comprobando disponibilidad…");
 
   setStatus(
     composer,
@@ -454,67 +526,67 @@ function applyPolicy(root, policy = {}) {
   const composer = root.querySelector(COMPOSER);
   if (!composer) return false;
 
-  rememberControlDefaults(root);
+  rememberDefaults(root);
 
   const comment = root.querySelector(COMMENT);
   const attachments = root.querySelector(ATTACHMENTS);
   const dropzone = root.querySelector(DROPZONE);
   const submit = root.querySelector(SUBMIT);
-  const submitting = root.dataset.submitting === "true";
 
+  const submitting = root.dataset.submitting === "true";
   const awaiting = policy.awaitingSupportResponse === true;
   const canComment = policy.canUserAddComment !== false;
   const canAttach = policy.canUserAddAttachment !== false;
   const fullyLocked = awaiting && !canComment && !canAttach;
 
-  root.dataset.userUpdateTurn = fullyLocked
+  const state = fullyLocked
     ? "waiting-support"
     : awaiting
       ? "completing-turn"
       : "available";
 
-  composer.dataset.userUpdateTurn = root.dataset.userUpdateTurn;
+  const signature = [
+    state,
+    canComment ? "comment:yes" : "comment:no",
+    canAttach ? "attach:yes" : "attach:no",
+    submitting ? "submitting:yes" : "submitting:no",
+  ].join("|");
+
+  if (root.dataset.userUpdateTurnApplied === signature) {
+    return true;
+  }
+
+  root.dataset.userUpdateTurn = state;
+  root.dataset.userUpdateTurnApplied = signature;
+  composer.dataset.userUpdateTurn = state;
+
+  setDisabledIfChanged(comment, submitting || !canComment);
+  setDisabledIfChanged(attachments, submitting || !canAttach);
+  setDisabledIfChanged(submit, submitting || fullyLocked);
+  setAttributeIfChanged(
+    dropzone,
+    "aria-disabled",
+    submitting || !canAttach ? "true" : "false"
+  );
 
   if (comment) {
-    comment.disabled = submitting || !canComment;
-    comment.setAttribute("aria-disabled", comment.disabled ? "true" : "false");
+    const placeholder = !canComment
+      ? "El comentario de esta actualización ya se ha enviado."
+      : comment.dataset.userTurnOriginalPlaceholder || "";
 
-    const original = comment.dataset.userTurnOriginalPlaceholder || "";
-    comment.setAttribute(
-      "placeholder",
-      !canComment
-        ? "El comentario de esta actualización ya se ha enviado."
-        : original
-    );
+    setAttributeIfChanged(comment, "placeholder", placeholder);
   }
 
-  if (attachments) {
-    attachments.disabled = submitting || !canAttach;
-    attachments.setAttribute("aria-disabled", attachments.disabled ? "true" : "false");
-  }
+  if (!submitting && submit) {
+    const label = fullyLocked
+      ? "Esperando respuesta del soporte"
+      : awaiting && canComment && !canAttach
+        ? "Añadir comentario a esta actualización"
+        : awaiting && !canComment && canAttach
+          ? "Añadir adjuntos a esta actualización"
+          : submit.dataset.userTurnOriginalLabel || "Enviar actualización";
 
-  if (dropzone) {
-    dropzone.setAttribute(
-      "aria-disabled",
-      submitting || !canAttach ? "true" : "false"
-    );
-  }
-
-  if (submit) {
-    submit.disabled = submitting || fullyLocked;
-    submit.setAttribute("aria-disabled", submit.disabled ? "true" : "false");
-
-    if (!submitting) {
-      if (fullyLocked) {
-        submit.textContent = "Esperando respuesta del soporte";
-      } else if (awaiting && canComment && !canAttach) {
-        submit.textContent = "Añadir comentario a esta actualización";
-      } else if (awaiting && !canComment && canAttach) {
-        submit.textContent = "Añadir adjuntos a esta actualización";
-      } else {
-        submit.textContent = submit.dataset.userTurnOriginalLabel || "Enviar actualización";
-      }
-    }
+    setTextIfChanged(submit, label);
   }
 
   if (!awaiting) {
@@ -526,7 +598,7 @@ function applyPolicy(root, policy = {}) {
     setStatus(
       composer,
       "Actualización enviada",
-      "Tu actualización ya está en manos del equipo. Para mantener el hilo claro, podrás iniciar otra cuando un técnico responda en esta incidencia. Si necesitamos continuar por otro canal, te lo indicaremos."
+      "Tu actualización ya está en manos del equipo. Para mantener el seguimiento claro, podrás enviar una nueva cuando un técnico responda en esta incidencia. Si necesitamos continuar por correo, teléfono u otro canal, te lo indicaremos."
     );
 
     return true;
@@ -536,7 +608,7 @@ function applyPolicy(root, policy = {}) {
     setStatus(
       composer,
       "Mensaje enviado",
-      "Tu comentario ya forma parte de esta actualización. Si necesitas completar este mismo turno, todavía puedes añadir un único lote de archivos. Después esperaremos la respuesta del equipo."
+      "Tu comentario ya forma parte de esta actualización. Si necesitas completarla, todavía puedes añadir un único lote de archivos. Después esperaremos la respuesta del equipo."
     );
 
     return true;
@@ -546,7 +618,7 @@ function applyPolicy(root, policy = {}) {
     setStatus(
       composer,
       "Adjuntos enviados",
-      "Los archivos ya forman parte de esta actualización. Puedes añadir un único comentario para completar este mismo turno. Después esperaremos la respuesta del equipo."
+      "Los archivos ya forman parte de esta actualización. Puedes añadir un único comentario para completarla. Después esperaremos la respuesta del equipo."
     );
   }
 
@@ -557,15 +629,23 @@ function hydrate(id = "", { force = false } = {}) {
   const cleanId = text(id, "");
   if (!cleanId) return null;
 
-  if (hydration?.ticketId === cleanId && hydration?.promise && !force) {
+  if (
+    hydration?.ticketId === cleanId &&
+    hydration?.promise &&
+    !force
+  ) {
     return hydration;
   }
 
   const sequence = ++requestSeq;
+
   const current = {
     ticketId: cleanId,
     sequence,
-    detail: force ? null : hydration?.ticketId === cleanId ? hydration.detail : null,
+    detail:
+      !force && hydration?.ticketId === cleanId
+        ? hydration.detail
+        : null,
     resolved: false,
     promise: null,
   };
@@ -584,7 +664,10 @@ function hydrate(id = "", { force = false } = {}) {
       current.resolved = true;
       return current.detail;
     } catch {
-      if (sequence === requestSeq) current.resolved = true;
+      if (sequence === requestSeq) {
+        current.resolved = true;
+      }
+
       return null;
     } finally {
       schedule();
@@ -598,6 +681,7 @@ function hydrate(id = "", { force = false } = {}) {
 function refreshAfterSuccess(root) {
   const id = ticketId(root);
   const success = root?.querySelector?.(SUCCESS);
+
   if (!id || !success) return false;
 
   const key = `${id}::${text(success.textContent)}`;
@@ -608,52 +692,57 @@ function refreshAfterSuccess(root) {
   return true;
 }
 
+function syncModalObserver() {
+  if (!browser()) return false;
+
+  const nextHost = document.querySelector(MODAL_HOST);
+  if (nextHost === observedModalHost) return Boolean(nextHost);
+
+  modalObserver?.disconnect?.();
+  modalObserver = null;
+  observedModalHost = nextHost || null;
+
+  if (observedModalHost && typeof MutationObserver !== "undefined") {
+    modalObserver = new MutationObserver(schedule);
+    modalObserver.observe(observedModalHost, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-submitting"],
+    });
+  }
+
+  return Boolean(observedModalHost);
+}
+
 function sync() {
   if (!browser()) return false;
 
-  const host = document.querySelector(MODAL_HOST);
-
-  if (host !== observedModalHost) {
-    modalObserver?.disconnect?.();
-    modalObserver = null;
-    observedModalHost = host || null;
-
-    if (observedModalHost && typeof MutationObserver !== "undefined") {
-      modalObserver = new MutationObserver(schedule);
-      modalObserver.observe(observedModalHost, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: ["data-submitting", "class", "disabled"],
-      });
-    }
-  }
+  syncModalObserver();
 
   const root = currentRoot();
   const id = ticketId(root);
 
   if (!root || !id) {
-    lastVisibleTicketId = "";
+    visibleTicketId = "";
     lastSuccessKey = "";
     return false;
   }
 
   if (root.querySelector(ADMIN_EDITOR)) {
-    lastVisibleTicketId = id;
+    visibleTicketId = id;
     return true;
   }
 
-  const newlyOpened = lastVisibleTicketId !== id;
-  lastVisibleTicketId = id;
-
-  if (newlyOpened) {
+  if (visibleTicketId !== id) {
+    visibleTicketId = id;
+    lastSuccessKey = "";
     setLoading(root);
     hydrate(id, { force: true });
     return true;
   }
 
   if (refreshAfterSuccess(root)) {
-    if (!hydration?.detail) setLoading(root);
     return true;
   }
 
@@ -717,7 +806,7 @@ export function destroyIncidenciasUserUpdateTurn() {
   observedModalHost = null;
   frame = 0;
   hydration = null;
-  lastVisibleTicketId = "";
+  visibleTicketId = "";
   lastSuccessKey = "";
   requestSeq += 1;
 
@@ -734,6 +823,7 @@ export function getIncidenciasUserUpdateTurnSnapshot() {
       ? Object.freeze(derivePolicy(hydration.detail))
       : null,
     backendIsAuthority: true,
+    domProjectionIsIdempotent: true,
     userTurn: Object.freeze({
       maxComments: 1,
       maxAttachmentBatches: 1,

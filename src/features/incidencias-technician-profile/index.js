@@ -1,7 +1,7 @@
-/* Onion Support · Incidencias Technician Profile v6 */
+/* Onion Support · Incidencias Technician Profile v7 */
 
 export const INCIDENCIAS_TECHNICIAN_PROFILE_VERSION =
-  "incidencias-technician-profile.v6.contact-action-icons";
+  "incidencias-technician-profile.v7.canonical-technician-contact";
 
 const VIEW = "#view-container, [data-router-view='true']";
 const LIST_TECH_BADGE = ".incidencias-assigned-badge[data-assigned='true']";
@@ -164,6 +164,26 @@ function technicianFromTicket(ticket = {}) {
     userId: text(first(raw.assignedToUserId, raw.technicianUserId, raw.tecnicoUserId, assignment.assignedToUserId, assignment.userId, nested.userId, nested.id), ""),
     name: text(first(raw.assignedToName, raw.technicianName, raw.tecnicoName, raw.agentName, assignment.assignedToName, nested.displayName, nested.name, nested.nombre), ""),
     email: normalizeEmail(first(raw.assignedToEmail, raw.technicianEmail, raw.tecnicoEmail, raw.agentEmail, assignment.assignedToEmail, nested.email, nested.emailLower)),
+    phone: text(first(
+      raw.assignedToPhone,
+      raw.technicianPhone,
+      raw.tecnicoPhone,
+      raw.agentPhone,
+      assignment.assignedToPhone,
+      assignment.technicianPhone,
+      assignment.agentPhone,
+      assignment.phone,
+      assignment.telefono,
+      assignment.technician?.phone,
+      assignment.technician?.telefono,
+      assignment.assignedTo?.phone,
+      assignment.assignedTo?.telefono,
+      nested.phone,
+      nested.telefono,
+      nested.phoneE164,
+      nested.mobile,
+      nested.movil
+    ), ""),
     avatar: safeAvatarUrl(first(raw.assignedToAvatarUrl, raw.technicianAvatarUrl, raw.tecnicoAvatarUrl, raw.agentAvatarUrl, assignment.assignedToAvatarUrl, nested.avatarUrl, nested.avatar)),
     role: text(first(nested.role, nested.rol, assignment.role), ""),
   };
@@ -239,7 +259,19 @@ function mergeTechnician(snapshot = {}, user = {}) {
     userId: text(first(source.userId, source.usuarioId, source.id, snapshot.userId), ""),
     name: text(first(source.displayName, source.fullName, source.name, source.nombre, snapshot.name), "Técnico"),
     email: normalizeEmail(first(source.email, source.emailLower, snapshot.email)),
-    phone: text(first(source.phone, source.telefono, source.mobile), ""),
+    phone: text(first(
+      source.phone,
+      source.telefono,
+      source.phoneE164,
+      source.mobile,
+      source.movil,
+      source.contacto?.phone,
+      source.contacto?.telefono,
+      source.profile?.phone,
+      source.profile?.telefono,
+      source.profile?.mobile,
+      snapshot.phone
+    ), ""),
     username: text(first(source.username, source.userName, source.slug), ""),
     role: text(first(source.role, source.rol, snapshot.role), ""),
     position: text(first(source.profile?.position, source.position, source.cargo), ""),
@@ -661,13 +693,17 @@ async function loadProfile(trigger = null) {
     let sourceTicket = items.find((ticket) => ticketId(ticket) === id) || null;
     let snapshot = sourceTicket ? technicianFromTicket(sourceTicket) : seed;
 
-    if (!snapshot.userId) {
+    if (!snapshot.userId || !snapshot.phone) {
       try {
         const detail = await api.loadIncidenciaDetail(id, { force: false, cache: true });
         if (sequence !== requestSeq) return false;
         if (detail) {
           sourceTicket = detail;
-          snapshot = { ...seed, ...technicianFromTicket(detail) };
+          snapshot = {
+            ...seed,
+            ...snapshot,
+            ...technicianFromTicket(detail),
+          };
         }
       } catch { /* perfil parcial permitido */ }
     }

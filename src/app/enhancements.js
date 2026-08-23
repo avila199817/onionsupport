@@ -12,7 +12,7 @@
 ========================================================= */
 
 export const APP_ENHANCEMENTS_VERSION =
-  "app.enhancements.v7-incidencias-detail-experience";
+  "app.enhancements.v8-incidencias-user-update-turn";
 
 const PRE_ROUTER = Object.freeze([
   Object.freeze({
@@ -41,6 +41,10 @@ const POST_ROUTER = Object.freeze([
   Object.freeze({
     key: "incidencias-detail-experience",
     load: () => import("../features/incidencias-detail-experience/index.js"),
+  }),
+  Object.freeze({
+    key: "incidencias-user-update-turn",
+    load: () => import("../features/incidencias-user-update-turn/index.js"),
   }),
   Object.freeze({
     key: "incidencias-technician-profile",

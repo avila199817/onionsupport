@@ -75,7 +75,7 @@ import {
 } from "./incidencias.options.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.extreme.v33.autonomous-refresh";
+  "incidencias.index.extreme.v34.interaction-stable";
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
@@ -1180,6 +1180,7 @@ function createIncidenciasController(
     submitting: false,
     operation: "",
     closeConfirmOpen: false,
+    discardConfirmOpen: false,
 
     commentDraft: "",
     pendingFiles: [],
@@ -1286,24 +1287,64 @@ function createIncidenciasController(
     return true;
   }
 
-  function confirmDiscardDetailDraft() {
+  function openDiscardDetailConfirm() {
     if (
+      !detailModal.open ||
+      detailModal.submitting ||
       !detailHasDraft()
     ) {
-      return true;
-    }
-
-    if (!isBrowser()) {
       return false;
     }
 
-    try {
-      return window.confirm(
-        "Tienes cambios sin guardar. Si cierras ahora, perderás el comentario, los archivos seleccionados o los cambios de gestión del ticket. ¿Quieres descartarlos?"
-      );
-    } catch {
+    detailModal.discardConfirmOpen = true;
+    detailModal.closeConfirmOpen = false;
+
+    detailModal.feedbackMessage = "";
+    detailModal.feedbackType = "info";
+
+    renderModals({
+      immediate: true,
+      focusSelector:
+        `[data-detail-action="${DETAIL_ACTIONS.DISCARD_CLOSE_CONFIRM}"]`,
+    });
+
+    return false;
+  }
+
+  function cancelDiscardDetailClose() {
+    if (
+      !detailModal.open ||
+      detailModal.submitting ||
+      !detailModal.discardConfirmOpen
+    ) {
       return false;
     }
+
+    detailModal.discardConfirmOpen = false;
+
+    renderModals({
+      immediate: true,
+      focusSelector:
+        "[data-field='comment'], [data-incidencias-modal-panel='true']",
+    });
+
+    return true;
+  }
+
+  function confirmDiscardDetailClose() {
+    if (
+      !detailModal.open ||
+      detailModal.submitting ||
+      !detailModal.discardConfirmOpen
+    ) {
+      return false;
+    }
+
+    detailModal.discardConfirmOpen = false;
+
+    return closeDetailModal({
+      force: true,
+    });
   }
 
   function currentModalPanel() {
@@ -1314,7 +1355,10 @@ function createIncidenciasController(
     }
 
     if (detailModal.open) {
-      if (detailModal.closeConfirmOpen) {
+      if (
+        detailModal.closeConfirmOpen ||
+        detailModal.discardConfirmOpen
+      ) {
         return (
           modalHost.querySelector(DETAIL_CLOSE_CONFIRM_SELECTOR) ||
           modalHost.querySelector(DETAIL_MODAL_PANEL_SELECTOR)
@@ -3914,6 +3958,7 @@ function createIncidenciasController(
     detailModal.submitting = false;
     detailModal.operation = "";
     detailModal.closeConfirmOpen = false;
+    detailModal.discardConfirmOpen = false;
 
     detailModal.commentDraft = "";
     detailModal.pendingFiles = [];
@@ -3941,27 +3986,28 @@ function createIncidenciasController(
       return false;
     }
 
-    if (
-      detailModal.closeConfirmOpen &&
-      options.force !== true
-    ) {
-      return cancelDetailTicketClose();
-    }
-
     const force =
       options.force === true;
 
     if (
-      !force &&
-      detailHasDraft() &&
-      !confirmDiscardDetailDraft()
+      detailModal.discardConfirmOpen &&
+      !force
     ) {
-      focusAfterRender(
-        "[data-field='comment']",
-        modalHost
-      );
+      return cancelDiscardDetailClose();
+    }
 
-      return false;
+    if (
+      detailModal.closeConfirmOpen &&
+      !force
+    ) {
+      return cancelDetailTicketClose();
+    }
+
+    if (
+      !force &&
+      detailHasDraft()
+    ) {
+      return openDiscardDetailConfirm();
     }
 
     resetDetailModal();
@@ -4016,6 +4062,7 @@ function createIncidenciasController(
       detailModal.submitting = false;
       detailModal.operation = "";
       detailModal.closeConfirmOpen = false;
+      detailModal.discardConfirmOpen = false;
       detailModal.commentDraft = "";
       detailModal.pendingFiles = [];
 
@@ -4069,26 +4116,16 @@ function createIncidenciasController(
             )
           : local;
 
+      /*
+         La respuesta de hidratación sólo tiene autoridad sobre los datos
+         remotos del ticket. El estado de interacción pertenece al usuario:
+         comentario, archivos, confirmaciones, preview, historial y foco.
+      */
       detailModal.open =
         Boolean(mergedDetail);
 
       detailModal.detail =
         mergedDetail;
-
-      detailModal.submitting = false;
-      detailModal.operation = "";
-      detailModal.closeConfirmOpen = false;
-      detailModal.commentDraft = "";
-      detailModal.pendingFiles = [];
-
-      detailModal.feedbackMessage = "";
-      detailModal.feedbackType = "info";
-
-      detailModal.openingAttachmentId = "";
-      detailModal.downloadingAttachmentId = "";
-      detailModal.deletingAttachmentId = "";
-      detailModal.previewFile = null;
-      detailModal.historyOpen = false;
 
       if (mergedDetail) {
         items =
@@ -4104,11 +4141,17 @@ function createIncidenciasController(
         skipModals: true,
       });
 
-      renderModals({
-        immediate: true,
-        focusSelector:
-          DETAIL_MODAL_PANEL_SELECTOR,
-      });
+      renderModals(
+        local
+          ? {
+              immediate: true,
+            }
+          : {
+              immediate: true,
+              focusSelector:
+                DETAIL_MODAL_PANEL_SELECTOR,
+            }
+      );
 
       return true;
     } catch (detailError) {
@@ -4138,8 +4181,6 @@ function createIncidenciasController(
 
         renderModals({
           immediate: true,
-          focusSelector:
-            DETAIL_MODAL_PANEL_SELECTOR,
         });
 
         return false;
@@ -4179,10 +4220,60 @@ function createIncidenciasController(
     syncBodyModalClass();
 
     /*
-       Actualiza contador, feedback y data-has-draft como máximo
-       una vez por frame, sin reemplazar el textarea activo.
+       Escritura hot-path:
+       ninguna tecla vuelve a renderizar el Modal Details.
+
+       El textarea ya contiene el valor escrito por el navegador; aquí sólo
+       sincronizamos estado derivado que puede actualizarse de forma local.
+       De este modo el foco, la selección, el scroll y el resto del DOM
+       permanecen físicamente intactos mientras se escribe.
     */
-    renderModals();
+    const root =
+      modalHost?.querySelector?.(
+        DETAIL_ROOT_SELECTOR
+      ) || null;
+
+    if (root) {
+      const hasDraft =
+        detailHasDraft();
+
+      root.dataset.hasDraft =
+        hasDraft
+          ? "true"
+          : "false";
+
+      const composer =
+        root.querySelector(
+          "[data-modal-composer='true']"
+        );
+
+      if (composer) {
+        composer.dataset.modalHasDraft =
+          hasDraft
+            ? "true"
+            : "false";
+      }
+
+      const counter =
+        root.querySelector(
+          "[data-modal-composer-foot='true'] strong"
+        );
+
+      if (counter) {
+        counter.textContent =
+          `${detailModal.commentDraft.length}/${DETAIL_LIMITS.maxCommentLength}`;
+      }
+
+      if (
+        !detailModal.feedbackMessage
+      ) {
+        root
+          .querySelector(
+            "[data-modal-feedback-slot='true']"
+          )
+          ?.replaceChildren();
+      }
+    }
 
     return true;
   }
@@ -4369,6 +4460,7 @@ function createIncidenciasController(
     detailModal.submitting = true;
     detailModal.operation = "update";
     detailModal.closeConfirmOpen = false;
+    detailModal.discardConfirmOpen = false;
     detailModal.feedbackMessage = "";
     detailModal.feedbackType = "info";
 
@@ -4686,6 +4778,7 @@ function createIncidenciasController(
     detailModal.submitting = true;
     detailModal.operation = "admin-update";
     detailModal.closeConfirmOpen = false;
+    detailModal.discardConfirmOpen = false;
     detailModal.feedbackMessage = "";
     detailModal.feedbackType = "info";
     renderModals({ immediate: true });
@@ -4868,6 +4961,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
       return false;
     }
 
+    detailModal.discardConfirmOpen = false;
     detailModal.closeConfirmOpen = true;
     detailModal.feedbackMessage = "";
     detailModal.feedbackType = "info";
@@ -4891,6 +4985,8 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
     }
 
     detailModal.closeConfirmOpen = false;
+
+    detailModal.discardConfirmOpen = false;
 
     renderModals({
       immediate: true,
@@ -4919,6 +5015,8 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
     }
 
     detailModal.closeConfirmOpen = false;
+
+    detailModal.discardConfirmOpen = false;
     detailModal.submitting = true;
     detailModal.operation = "close";
     detailModal.feedbackMessage = "";
@@ -4963,6 +5061,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
       detailModal.submitting = false;
       detailModal.operation = "";
       detailModal.closeConfirmOpen = false;
+      detailModal.discardConfirmOpen = false;
       detailModal.feedbackMessage =
         safeError(
           closeError,
@@ -5835,6 +5934,20 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
       DETAIL_ACTIONS.CLOSE
     ) {
       return closeDetailModal();
+    }
+
+    if (
+      type ===
+      DETAIL_ACTIONS.DISCARD_CLOSE_CANCEL
+    ) {
+      return cancelDiscardDetailClose();
+    }
+
+    if (
+      type ===
+      DETAIL_ACTIONS.DISCARD_CLOSE_CONFIRM
+    ) {
+      return confirmDiscardDetailClose();
     }
 
     if (

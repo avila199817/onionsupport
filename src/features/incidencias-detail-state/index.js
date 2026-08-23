@@ -16,7 +16,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_DETAIL_STATE_VERSION =
-  "incidencias-detail-state.v1.canonical-conversation-flow";
+  "incidencias-detail-state.v2.interaction-stable";
 
 const VIEW = "#view-container, [data-router-view='true']";
 const HOST = "[data-incidencias-modal-host='true']";
@@ -37,8 +37,6 @@ const ID_TEXT = ".incidencias-modal-id-chip-text";
 const TECH_CARD = ".incidencias-modal-technician-card[data-technician-profile-trigger='true']";
 const TECH_INLINE = ".incidencias-modal-technician-inline[data-technician-assigned='true']";
 const TECH_EYE = "[data-technician-profile-eye='true']";
-const CLOSE_TICKET = "[data-detail-action='detail-ticket-close']";
-const CLOSE_CONFIRM = "[data-detail-action='detail-ticket-close-confirm']";
 const POLL_MS = 30000;
 
 const PENDING_TITLE = "Pendiente de revisión";
@@ -949,74 +947,6 @@ function refreshAfterSuccess(root) {
   return true;
 }
 
-async function gateCloseTicket(button) {
-  const root = button?.closest?.(ROOT);
-  const id = ticketId(root);
-
-  if (!root || !id) return false;
-
-  let current = hydration;
-
-  if (!current || current.ticketId !== id) {
-    current = hydrate(id, { force: false });
-  }
-
-  try {
-    await current?.promise;
-  } catch {
-    /* Un fallo de refresco no debe impedir cerrar una incidencia. */
-  }
-
-  const liveRoot = currentRoot();
-
-  if (
-    liveRoot !== root ||
-    ticketId(liveRoot) !== id ||
-    liveRoot.dataset?.submitting === "true" ||
-    liveRoot.querySelector(CLOSE_CONFIRM)
-  ) {
-    return true;
-  }
-
-  const liveButton = liveRoot.querySelector(CLOSE_TICKET);
-
-  if (!liveButton || liveButton.disabled) {
-    return true;
-  }
-
-  liveButton.dataset.detailStateReplay = "true";
-  liveButton.click();
-  return true;
-}
-
-function handleClick(event) {
-  const button = event.target?.closest?.(CLOSE_TICKET);
-  if (!button) return;
-
-  if (button.dataset.detailStateReplay === "true") {
-    delete button.dataset.detailStateReplay;
-    return;
-  }
-
-  const root = button.closest(ROOT);
-  const id = ticketId(root);
-
-  if (!root || !id) return;
-
-  if (
-    hydration?.ticketId === id &&
-    hydration?.stable
-  ) {
-    return;
-  }
-
-  event.preventDefault();
-  event.stopPropagation();
-  event.stopImmediatePropagation?.();
-
-  gateCloseTicket(button);
-}
-
 function nodeTouches(node, selectors = []) {
   if (!(node instanceof Element)) return false;
 
@@ -1032,7 +962,6 @@ function modalMutationMatters(mutations = []) {
   const selectors = [
     ROOT,
     SUCCESS,
-    DESCRIPTION_SECTION,
     FILES,
     HEADER_CHIPS,
   ];
@@ -1153,7 +1082,6 @@ export function mountIncidenciasDetailState() {
   if (!mountRoot) return false;
 
   mounted = true;
-  mountRoot.addEventListener("click", handleClick, true);
 
   if (typeof MutationObserver !== "undefined") {
     viewObserver = new MutationObserver((mutations) => {
@@ -1187,7 +1115,6 @@ export function destroyIncidenciasDetailState() {
 
   viewObserver?.disconnect?.();
   modalObserver?.disconnect?.();
-  mountRoot?.removeEventListener?.("click", handleClick, true);
 
   if (frame && browser()) {
     window.cancelAnimationFrame?.(frame);

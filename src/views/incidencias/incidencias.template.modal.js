@@ -38,10 +38,12 @@ import {
 } from "./incidencias.options.js";
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.extreme.v33.shared-detail-modal";
+  "incidencias.template.modal.extreme.v34.stable-confirmations";
 
 export const DETAIL_ACTIONS = Object.freeze({
   CLOSE: "detail-close",
+  DISCARD_CLOSE_CONFIRM: "detail-discard-close-confirm",
+  DISCARD_CLOSE_CANCEL: "detail-discard-close-cancel",
   COPY_ID: "detail-copy-id",
 
   COMMENT_SUBMIT: "detail-submit-update",
@@ -2452,6 +2454,9 @@ function buildVm(input = {}) {
     closeConfirmOpen:
       data.closeConfirmOpen === true,
 
+    discardConfirmOpen:
+      data.discardConfirmOpen === true,
+
     commentDraft,
     pendingFiles,
     adminDraft,
@@ -3043,14 +3048,59 @@ function renderFeedbackBox(
 
 
 function renderCloseConfirmation(vm = {}) {
-  if (!vm.closeConfirmOpen) {
+  const discard =
+    vm.discardConfirmOpen === true;
+
+  const closeTicket =
+    vm.closeConfirmOpen === true;
+
+  if (
+    !discard &&
+    !closeTicket
+  ) {
     return "";
   }
+
+  const eyebrow =
+    discard
+      ? "Cambios sin guardar"
+      : "Confirmar cierre";
+
+  const title =
+    discard
+      ? "¿Descartar los cambios?"
+      : "¿Cerrar esta incidencia?";
+
+  const description =
+    discard
+      ? "Si cierras ahora, perderás el comentario, los archivos seleccionados o los cambios de gestión que todavía no se hayan guardado."
+      : "La incidencia pasará a estado cerrado. Podrás volver a abrirla más adelante enviando una nueva actualización.";
+
+  const cancelAction =
+    discard
+      ? DETAIL_ACTIONS.DISCARD_CLOSE_CANCEL
+      : DETAIL_ACTIONS.TICKET_CLOSE_CANCEL;
+
+  const confirmAction =
+    discard
+      ? DETAIL_ACTIONS.DISCARD_CLOSE_CONFIRM
+      : DETAIL_ACTIONS.TICKET_CLOSE_CONFIRM;
+
+  const cancelLabel =
+    discard
+      ? "Seguir editando"
+      : "Cancelar";
+
+  const confirmLabel =
+    discard
+      ? "Sí, descartar y cerrar"
+      : "Sí, cerrar incidencia";
 
   return `
     <div
       class="incidencias-modal-confirm-overlay"
       data-detail-close-confirm-overlay="true"
+      data-confirm-kind="${discard ? "discard" : "ticket-close"}"
     >
       <section
         class="incidencias-modal-confirm-dialog"
@@ -3066,15 +3116,20 @@ function renderCloseConfirmation(vm = {}) {
         </div>
 
         <div class="incidencias-modal-confirm-copy">
-          <span class="incidencias-modal-confirm-eyebrow">Confirmar cierre</span>
-          <h3 id="incidencias-close-confirm-title">¿Cerrar esta incidencia?</h3>
+          <span class="incidencias-modal-confirm-eyebrow">
+            ${escapeHtml(eyebrow)}
+          </span>
+
+          <h3 id="incidencias-close-confirm-title">
+            ${escapeHtml(title)}
+          </h3>
+
           <p id="incidencias-close-confirm-description">
-            La incidencia pasará a estado cerrado. Podrás volver a abrirla
-            más adelante enviando una nueva actualización.
+            ${escapeHtml(description)}
           </p>
 
           ${
-            vm.hasDraft
+            !discard && vm.hasDraft
               ? `<div class="incidencias-modal-confirm-warning" role="note">Tienes cambios sin guardar. Si confirmas el cierre, se descartarán cuando se cierre esta ventana.</div>`
               : ""
           }
@@ -3084,16 +3139,20 @@ function renderCloseConfirmation(vm = {}) {
           <button
             type="button"
             class="incidencias-modal-confirm-btn incidencias-modal-confirm-btn--cancel"
-            data-detail-action="${DETAIL_ACTIONS.TICKET_CLOSE_CANCEL}"
-          >Cancelar</button>
+            data-detail-action="${cancelAction}"
+          >${escapeHtml(cancelLabel)}</button>
 
           <button
             type="button"
             class="incidencias-modal-confirm-btn incidencias-modal-confirm-btn--danger"
-            data-detail-action="${DETAIL_ACTIONS.TICKET_CLOSE_CONFIRM}"
+            data-detail-action="${confirmAction}"
           >
-            <span class="incidencias-modal-confirm-btn-icon" aria-hidden="true">${icon("check")}</span>
-            <span>Sí, cerrar incidencia</span>
+            <span
+              class="incidencias-modal-confirm-btn-icon"
+              aria-hidden="true"
+            >${icon("check")}</span>
+
+            <span>${escapeHtml(confirmLabel)}</span>
           </button>
         </div>
       </section>
@@ -4393,6 +4452,7 @@ export function renderIncidenciasDetailModal(
       data-submitting="${vm.submitting ? "true" : "false"}"
       data-operation="${attr(vm.operation)}"
       data-close-confirm-open="${vm.closeConfirmOpen ? "true" : "false"}"
+      data-discard-confirm-open="${vm.discardConfirmOpen ? "true" : "false"}"
       data-has-draft="${vm.hasDraft ? "true" : "false"}"
       data-requires-reopen="${vm.requiresReopen ? "true" : "false"}"
       data-attachment-view-policy="signed-view-only"

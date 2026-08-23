@@ -3473,6 +3473,14 @@ function createIncidenciasController(
         ""
       );
 
+    const targetUserPhone =
+      cleanText(
+        node.dataset?.userPhone ||
+        node.dataset?.phone ||
+        "",
+        ""
+      );
+
     const targetUserAvatar =
       cleanText(
         node.dataset?.userAvatar ||
@@ -3496,6 +3504,8 @@ function createIncidenciasController(
       displayName: targetUserName,
 
       email: targetUserEmail,
+      phone: targetUserPhone,
+      telefono: targetUserPhone,
 
       avatar: targetUserAvatar,
       avatarUrl: targetUserAvatar,
@@ -4958,7 +4968,8 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
           closeError,
           "No se pudo cerrar la incidencia."
         );
-      detailModal.feedbackType = "error";
+      detailModal.feedbackType =
+        "error";
 
       renderModals({
         immediate: true,
@@ -5314,9 +5325,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
       typeof window.confirm === "function"
     ) {
       const accepted = window.confirm(
-        `¿Eliminar definitivamente “${filename}”?
-
-Se quitará de la incidencia y del almacenamiento. Esta acción no se puede deshacer.`
+        `¿Eliminar definitivamente “${filename}”?\n\nSe quitará de la incidencia y del almacenamiento. Esta acción no se puede deshacer.`
       );
 
       if (!accepted) {

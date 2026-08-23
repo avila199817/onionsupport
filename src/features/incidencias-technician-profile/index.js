@@ -1,7 +1,7 @@
-/* Onion Support · Incidencias Technician Profile v5 */
+/* Onion Support · Incidencias Technician Profile v6 */
 
 export const INCIDENCIAS_TECHNICIAN_PROFILE_VERSION =
-  "incidencias-technician-profile.v5.final-ui";
+  "incidencias-technician-profile.v6.contact-action-icons";
 
 const VIEW = "#view-container, [data-router-view='true']";
 const LIST_TECH_BADGE = ".incidencias-assigned-badge[data-assigned='true']";
@@ -262,12 +262,23 @@ function metaCard(label = "", value = "—", hint = "") {
   return `<div class="ui-detail-modal-meta-card"><span>${escapeHtml(label)}</span><strong title="${attr(safeValue)}">${escapeHtml(safeValue)}</strong>${hint ? `<span style="font-size:11px;color:var(--text-muted);font-weight:500;line-height:1.3;">${escapeHtml(hint)}</span>` : ""}</div>`;
 }
 
-function contactCard(label = "", value = "", href = "", actionLabel = "") {
+function contactActionIcon(kind = "mail") {
+  const common = `aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
+  if (kind === "phone") {
+    return `<svg ${common}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.11 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.77.63 2.61a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.47-1.2a2 2 0 0 1 2.11-.45c.84.3 1.71.51 2.61.63A2 2 0 0 1 22 16.92z"/></svg>`;
+  }
+  return `<svg ${common}><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a2 2 0 0 1-2.06 0L2 7"/></svg>`;
+}
+
+function contactCard(label = "", value = "", href = "", actionLabel = "", icon = "mail") {
   const safeValue = text(value, "No disponible");
   const safeHref = text(href, "");
-  const content = `<span>${escapeHtml(label)}</span><strong title="${attr(safeValue)}">${escapeHtml(safeValue)}</strong>`;
-  if (!safeHref) return `<div class="ui-detail-modal-meta-card">${content}</div>`;
-  return `<a class="ui-detail-modal-meta-card incidencias-modal-contact-link" href="${attr(safeHref)}" aria-label="${attr(actionLabel || `${label}: ${safeValue}`)}" title="${attr(actionLabel || safeValue)}">${content}</a>`;
+  const iconColor = safeHref ? "var(--link)" : "var(--text-muted)";
+  const actionIcon = `<span aria-hidden="true" style="position:absolute;inset-block-start:14px;inset-inline-end:14px;display:inline-grid;place-items:center;color:${iconColor};pointer-events:none;">${contactActionIcon(icon)}</span>`;
+  const content = `${actionIcon}<span>${escapeHtml(label)}</span><strong title="${attr(safeValue)}">${escapeHtml(safeValue)}</strong>`;
+  const cardStyle = "position:relative;padding-inline-end:48px;";
+  if (!safeHref) return `<div class="ui-detail-modal-meta-card" style="${cardStyle}">${content}</div>`;
+  return `<a class="ui-detail-modal-meta-card incidencias-modal-contact-link" style="${cardStyle}" href="${attr(safeHref)}" aria-label="${attr(actionLabel || `${label}: ${safeValue}`)}" title="${attr(actionLabel || safeValue)}">${content}</a>`;
 }
 
 function closeIcon() {
@@ -373,8 +384,8 @@ function renderProfile(tech = {}, stats = {}) {
         ${metaCard("Último acceso", dateTimeLabel(tech.lastLoginAt))}
       </div>
       <div class="ui-detail-modal-contact-grid">
-        ${contactCard("Correo", email || "No disponible", email ? `mailto:${email}` : "", email ? `Enviar correo a ${email}` : "")}
-        ${contactCard("Teléfono", phone || "No disponible", dialPhone ? `tel:${dialPhone}` : "", phone ? `Llamar a ${phone}` : "")}
+        ${contactCard("Correo", email || "No disponible", email ? `mailto:${email}` : "", email ? `Enviar correo a ${email}` : "", "mail")}
+        ${contactCard("Teléfono", phone || "No disponible", dialPhone ? `tel:${dialPhone}` : "", phone ? `Llamar a ${phone}` : "", "phone")}
       </div>
       <div style="margin-top:var(--space-sm);">${metaCard("Identificador de usuario", text(tech.userId, "No disponible"))}</div>
     </section>

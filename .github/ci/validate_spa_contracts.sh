@@ -74,6 +74,18 @@ checks = {
         "CONFIG_VERSION",
         'CANONICAL_PRODUCTION_API_BASE = "https://api.onionsupport.com"',
     ),
+    "src/views/incidencias/incidencias.api.js": (
+        "INCIDENCIAS_DETAIL_REQUEST_COORDINATOR_VERSION",
+        "createDetailRequestCoordinator",
+        'import * as Impl from "./incidencias.api.impl.js"',
+        "export function getIncidenciaByIdRequest",
+        "export const loadIncidenciaDetail = getIncidenciaByIdRequest",
+    ),
+    "src/views/incidencias/incidencias.api.impl.js": (
+        "INCIDENCIAS_API_VERSION",
+        "getIncidenciaByIdRequest",
+        "upsertCachedIncidencia",
+    ),
 }
 
 errors = []
@@ -103,3 +115,5 @@ if errors:
 
 print("Contratos SPA críticos OK.")
 PY
+
+node --experimental-default-type=module .github/scripts/incidencias_detail_request_contract.mjs

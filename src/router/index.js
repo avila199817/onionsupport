@@ -44,7 +44,7 @@ import * as Routes from "./routes.js";
 import RouteStyles from "./styles.js";
 
 export const ROUTER_VERSION =
-  "router.minimal.v11-native-runtime-state";
+  "router.minimal.v12-phase-attribution";
 
 const PUBLIC_HOME_PATH = "/";
 
@@ -141,6 +141,7 @@ let pendingSeq = 0;
 let pendingPath = "";
 
 let activeTransition = null;
+let runtimePerformanceModule = null;
 
 const disposers = [];
 
@@ -296,6 +297,138 @@ function writeState(
     Core es la única autoridad de escritura del estado global.
   */
   return false;
+}
+
+function performanceNow() {
+  try {
+    return Number(
+      performance.now()
+    ) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function cleanPerformanceKey(
+  value = ""
+) {
+  return cleanText(
+    value,
+    ""
+  )
+    .replace(
+      /[^a-z0-9._:-]/gi,
+      ""
+    )
+    .slice(0, 96);
+}
+
+function getRuntimePerformanceModule() {
+  if (
+    isFunction(
+      runtimePerformanceModule
+        ?.recordRoutePhase
+    )
+  ) {
+    return runtimePerformanceModule;
+  }
+
+  try {
+    const candidate =
+      AppCore.getModule?.(
+        "runtimePerformance"
+      ) ||
+      AppCore.runtimePerformance ||
+      null;
+
+    if (
+      isFunction(
+        candidate?.recordRoutePhase
+      )
+    ) {
+      runtimePerformanceModule =
+        candidate;
+
+      return candidate;
+    }
+  } catch {
+    // noop
+  }
+
+  return null;
+}
+
+function setTransitionPerformanceView(
+  transition = null,
+  route = null
+) {
+  if (!transition) {
+    return "";
+  }
+
+  transition.performanceViewKey =
+    cleanPerformanceKey(
+      route?.viewKey ||
+      route?.name ||
+      ""
+    );
+
+  return transition.performanceViewKey;
+}
+
+function recordTransitionPhase(
+  transition = null,
+  route = null,
+  phase = "",
+  startTime = 0,
+  endTime = performanceNow()
+) {
+  const module =
+    getRuntimePerformanceModule();
+
+  const navigationId =
+    cleanPerformanceKey(
+      transition?.performanceId
+    );
+
+  const viewKey =
+    cleanPerformanceKey(
+      transition?.performanceViewKey ||
+      route?.viewKey ||
+      route?.name ||
+      ""
+    );
+
+  const safePhase =
+    cleanPerformanceKey(
+      phase
+    ).toLowerCase();
+
+  if (
+    !module ||
+    !navigationId ||
+    !viewKey ||
+    !safePhase
+  ) {
+    return false;
+  }
+
+  try {
+    return (
+      module.recordRoutePhase({
+        navigationId,
+        viewKey,
+        phase:
+          safePhase,
+        startTime:
+          Number(startTime),
+        endTime:
+          Number(endTime),
+      }) === true
+    );
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
@@ -2167,12 +2300,21 @@ function createTransition(
   seq = renderSeq,
   externalSignal = null
 ) {
+  const performanceId =
+    `nav:${Math.max(
+      0,
+      Number(seq) || 0
+    ).toString(36)}`;
+
   if (
     typeof AbortController ===
     "undefined"
   ) {
     const transition = {
       seq,
+      performanceId,
+      performanceViewKey:
+        "",
 
       signal:
         externalSignal ||
@@ -2261,6 +2403,9 @@ function createTransition(
 
   const transition = {
     seq,
+    performanceId,
+    performanceViewKey:
+      "",
 
     signal:
       controller.signal,
@@ -3921,12 +4066,22 @@ async function renderRoute(
       route?.render
     )
   ) {
+    const stylePreloadStartedAt =
+      performanceNow();
+
     try {
       await preloadRouteStylesForTransition(
         route,
         transition
       );
     } catch (error) {
+      recordTransitionPhase(
+        transition,
+        route,
+        "style-load",
+        stylePreloadStartedAt
+      );
+
       rollbackRouteStylesForTransition(
         route
       );
@@ -3990,6 +4145,13 @@ async function renderRoute(
       };
     }
 
+    recordTransitionPhase(
+      transition,
+      route,
+      "style-load",
+      stylePreloadStartedAt
+    );
+
     if (
       seq !==
         renderSeq ||
@@ -4018,6 +4180,9 @@ async function renderRoute(
     El CSS ya está descargado, o el loader ha hecho skip
     porque los safety gates siguen apagados.
   */
+  const initialChromeStartedAt =
+    performanceNow();
+
   const state =
     beginTransition(
       match,
@@ -4034,6 +4199,13 @@ async function renderRoute(
       true
       ? "hidden"
       : "visible"
+  );
+
+  recordTransitionPhase(
+    transition,
+    route,
+    "chrome",
+    initialChromeStartedAt
   );
 
   const previousView =
@@ -4075,50 +4247,76 @@ async function renderRoute(
       );
     }
 
-    /*
-      ÚNICO punto donde la vista recibe el publicPath completo.
-      También recibe AbortSignal de la transición; las vistas que
-      no lo consuman siguen protegidas por renderSeq.
-    */
-    const result =
-      await route.render(
-        nextHost,
-        {
-          AppCore,
+    const viewWasLoaded =
+      Routes.isRouteViewLoaded?.(
+        route?.viewKey ||
+        route?.name ||
+        ""
+      ) === true;
 
-          Auth:
-            getAuth(),
+    const viewPhase =
+      viewWasLoaded
+        ? "view-warm"
+        : "view-cold";
 
-          Router,
+    const viewStartedAt =
+      performanceNow();
 
-          route,
+    let result = null;
 
-          canonicalPath:
-            state.canonicalPath,
+    try {
+      /*
+        ÚNICO punto donde la vista recibe el publicPath completo.
+        También recibe AbortSignal de la transición; las vistas que
+        no lo consuman siguen protegidas por renderSeq.
+      */
+      result =
+        await route.render(
+          nextHost,
+          {
+            AppCore,
 
-          publicPath:
-            match.publicPath,
+            Auth:
+              getAuth(),
 
-          routeParams:
-            state.routeParams,
+            Router,
 
-          source:
-            "router",
+            route,
 
-          signal:
-            transition
-              ?.signal ||
-            null,
+            canonicalPath:
+              state.canonicalPath,
 
-          isCurrentRender:
-            () =>
-              seq ===
-                renderSeq &&
-              transitionIsCurrent(
-                transition
-              ),
-        }
+            publicPath:
+              match.publicPath,
+
+            routeParams:
+              state.routeParams,
+
+            source:
+              "router",
+
+            signal:
+              transition
+                ?.signal ||
+              null,
+
+            isCurrentRender:
+              () =>
+                seq ===
+                  renderSeq &&
+                transitionIsCurrent(
+                  transition
+                ),
+          }
+        );
+    } finally {
+      recordTransitionPhase(
+        transition,
+        route,
+        viewPhase,
+        viewStartedAt
       );
+    }
 
     if (
       seq !==
@@ -4218,12 +4416,22 @@ async function renderRoute(
       en la ventana inmediatamente anterior al DOM commit.
       La hoja anterior continúa activa hasta commit().
     */
+    const stylePrepareStartedAt =
+      performanceNow();
+
     try {
       await prepareRouteStylesForTransition(
         route,
         transition
       );
     } catch (error) {
+      recordTransitionPhase(
+        transition,
+        route,
+        "style-load",
+        stylePrepareStartedAt
+      );
+
       rollbackRouteStylesForTransition(
         route
       );
@@ -4271,6 +4479,13 @@ async function renderRoute(
       };
     }
 
+    recordTransitionPhase(
+      transition,
+      route,
+      "style-load",
+      stylePrepareStartedAt
+    );
+
     if (
       seq !==
         renderSeq ||
@@ -4302,6 +4517,9 @@ async function renderRoute(
       };
     }
 
+    const commitStartedAt =
+      performanceNow();
+
     const committed =
       commitRouteHost(
         nextHost,
@@ -4312,6 +4530,13 @@ async function renderRoute(
           previousHost,
         }
       );
+
+    recordTransitionPhase(
+      transition,
+      route,
+      "commit",
+      commitStartedAt
+    );
 
     if (!committed) {
       rollbackRouteStylesForTransition(
@@ -4340,9 +4565,22 @@ async function renderRoute(
       };
     }
 
+    const styleCommitStartedAt =
+      performanceNow();
+
     commitRouteStylesForTransition(
       route
     );
+
+    recordTransitionPhase(
+      transition,
+      route,
+      "style-load",
+      styleCommitStartedAt
+    );
+
+    const chromeStartedAt =
+      performanceNow();
 
     syncChrome(
       route,
@@ -4379,6 +4617,13 @@ async function renderRoute(
         pending:
           false,
       }
+    );
+
+    recordTransitionPhase(
+      transition,
+      route,
+      "chrome",
+      chromeStartedAt
     );
 
     return {
@@ -4854,10 +5099,25 @@ async function executeRender(
       null
     );
 
+  const initialResolveStartedAt =
+    performanceNow();
+
   let match =
     getRouteMatch(
       path
     );
+
+  setTransitionPerformanceView(
+    transition,
+    match.route
+  );
+
+  recordTransitionPhase(
+    transition,
+    match.route,
+    "resolve",
+    initialResolveStartedAt
+  );
 
   setRoutePending(
     match,
@@ -4908,9 +5168,22 @@ async function executeRender(
           );
     }
 
-    await waitForAuthIfNeeded(
-      match.route
-    );
+    const authWaitStartedAt =
+      performanceNow();
+
+    const waitedForAuth =
+      await waitForAuthIfNeeded(
+        match.route
+      );
+
+    if (waitedForAuth) {
+      recordTransitionPhase(
+        transition,
+        match.route,
+        "auth-wait",
+        authWaitStartedAt
+      );
+    }
 
     if (
       !transitionIsCurrent(
@@ -4932,10 +5205,25 @@ async function executeRender(
       Auth pudo cambiar durante la espera.
       Re-resolvemos ruta y guard con estado fresco.
     */
+    const refreshResolveStartedAt =
+      performanceNow();
+
     match =
       getRouteMatch(
         path
       );
+
+    setTransitionPerformanceView(
+      transition,
+      match.route
+    );
+
+    recordTransitionPhase(
+      transition,
+      match.route,
+      "resolve",
+      refreshResolveStartedAt
+    );
 
     setRoutePending(
       match,
@@ -4985,6 +5273,9 @@ async function executeRender(
           );
     }
 
+    const guardStartedAt =
+      performanceNow();
+
     const access =
       checkAccess(
         match
@@ -4993,6 +5284,13 @@ async function executeRender(
     if (
       !access.allowed
     ) {
+      recordTransitionPhase(
+        transition,
+        match.route,
+        "guard",
+        guardStartedAt
+      );
+
       if (
         access.redirectTo
       ) {
@@ -5022,6 +5320,13 @@ async function executeRender(
         : privateSlugRedirect(
             match
           );
+
+    recordTransitionPhase(
+      transition,
+      match.route,
+      "guard",
+      guardStartedAt
+    );
 
     if (
       slugRedirect
@@ -5854,6 +6159,12 @@ function getSnapshot() {
           true,
 
         legacyResetAlias:
+          true,
+
+        nativeRoutePhaseTelemetry:
+          true,
+
+        opaqueNavigationPerformanceIds:
           true,
       }),
   });

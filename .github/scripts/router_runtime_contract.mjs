@@ -56,7 +56,7 @@ assert.equal(
 );
 
 const executableStatePatterns = [
-  /\bAppCore\s*\.\s*state\s*\./,
+  /\bAppCore\s*\.\s*state\s*\.\s*[A-Za-z_$]/,
   /\bAppCore\s*\.\s*state\s*\[/,
   /\bAppCore\s*\.\s*state\s*=/,
   /\bObject\s*\.\s*assign\s*\(\s*AppCore\s*\.\s*state\b/,
@@ -97,7 +97,7 @@ assert.equal(
   "sensitive public-path sanitization must remain intact"
 );
 assert.equal(
-  source.includes('AppCore.getModule?.(\n        "runtimePerformance"'),
+  /AppCore\s*\.\s*getModule\?\.\(\s*["']runtimePerformance["']\s*\)/.test(source),
   true,
   "Router phase telemetry must remain an optional Core registry lookup"
 );

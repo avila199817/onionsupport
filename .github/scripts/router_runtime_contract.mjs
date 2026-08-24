@@ -52,11 +52,23 @@ assert.equal(
   false,
   "Router writes must not call public AppCore.setState()"
 );
-assert.equal(
-  /\bAppCore\s*\.\s*state\s*(?:\.|\[|=)/.test(source),
-  false,
-  "Router must not mutate or dereference AppCore.state directly"
-);
+
+const directStateAccessPatterns = [
+  /\bAppCore\s*\.\s*state\s*\.\s*[A-Za-z_$][\w$]*/,
+  /\bAppCore\s*\.\s*state\s*\[/,
+  /\bAppCore\s*\.\s*state\s*=/,
+  /\bObject\s*\.\s*assign\s*\(\s*AppCore\s*\.\s*state\b/,
+  /\bdelete\s+AppCore\s*\.\s*state\b/,
+];
+
+for (const pattern of directStateAccessPatterns) {
+  assert.equal(
+    pattern.test(source),
+    false,
+    `Router must not access or mutate AppCore.state directly: ${pattern}`
+  );
+}
+
 assert.equal(
   source.includes("AppCore.runtimeState.read()"),
   true,

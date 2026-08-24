@@ -1076,6 +1076,9 @@ function getMount() {
     document.querySelector?.(
       "[data-topbar-mount]"
     ) ||
+    document.querySelector?.(
+      "[data-topbar-root]"
+    ) ||
     null
   );
 }
@@ -4335,7 +4338,7 @@ function onKeydown(
 
   if (
     event.key ===
-    "ArrowUp"
+      "ArrowUp"
   ) {
     event.preventDefault();
 

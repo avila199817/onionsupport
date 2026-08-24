@@ -9,7 +9,7 @@ const files = [
   },
   {
     path: "src/ui/topbar/index.js",
-    version: "topbar.controller.backend-search.v8-native-runtime-state",
+    version: "topbar.controller.backend-search.v9-search-runtime-context",
     reader: "getCoreState",
   },
 ];
@@ -114,6 +114,131 @@ assert.match(
   "Sidebar sync must pass committed context into getContext()"
 );
 
+const topbarSource = await readFile("src/ui/topbar/index.js", "utf8");
+
+function functionSource(source, name, nextName) {
+  const start = source.indexOf(`function ${name}(`);
+  const end = source.indexOf(`\nfunction ${nextName}(`, start);
+  assert.ok(start >= 0 && end > start, `Topbar contract must isolate ${name}()`);
+  return source.slice(start, end);
+}
+
+function compact(source) {
+  return source.replace(/\s+/g, "");
+}
+
+const identitySource = functionSource(
+  topbarSource,
+  "deriveSearchIdentity",
+  "getRouter"
+);
+assert.equal(
+  identitySource.includes("AppCore"),
+  false,
+  "Topbar search identity derivation must consume only the supplied runtime state"
+);
+assert.equal(
+  identitySource.includes("getCoreState"),
+  false,
+  "Topbar search identity derivation must not reread Core"
+);
+assert.equal(
+  identitySource.includes("getCurrentUser("),
+  false,
+  "Topbar search identity derivation must not call the public user getter"
+);
+assert.equal(
+  identitySource.includes("getCurrentRole("),
+  false,
+  "Topbar search identity derivation must not call the public role getter"
+);
+
+const cacheKeySource = functionSource(
+  topbarSource,
+  "buildCacheKey",
+  "getCachedResults"
+);
+assert.equal(
+  (cacheKeySource.match(/getCoreState\s*\(/g) || []).length,
+  1,
+  "Topbar cache-key derivation must perform exactly one operation-local Core read"
+);
+const compactCacheKey = compact(cacheKeySource);
+assert.equal(
+  compactCacheKey.includes("deriveSearchIdentity(state)"),
+  true,
+  "Topbar cache key must derive identity from the operation-local state"
+);
+assert.equal(
+  compactCacheKey.includes("resolveSearchEndpoint(options,state)"),
+  true,
+  "Topbar cache key must reuse the operation-local state for endpoint config"
+);
+assert.equal(
+  cacheKeySource.includes("getCurrentUser("),
+  false,
+  "Topbar cache key must not reread Core through the public user getter"
+);
+assert.equal(
+  cacheKeySource.includes("getCurrentRole("),
+  false,
+  "Topbar cache key must not reread Core through the public role getter"
+);
+
+const searchIndexSource = functionSource(
+  topbarSource,
+  "buildSearchIndex",
+  "scoreSearchItem"
+);
+assert.equal(
+  (searchIndexSource.match(/getCoreState\s*\(/g) || []).length,
+  1,
+  "Topbar local search-index build must perform exactly one operation-local Core read"
+);
+const compactSearchIndex = compact(searchIndexSource);
+assert.equal(
+  compactSearchIndex.includes("deriveSearchIdentity(state)"),
+  true,
+  "Topbar local search-index build must reuse runtime identity"
+);
+assert.equal(
+  compactSearchIndex.includes("coreSearchItems(options,state)"),
+  true,
+  "Topbar local search-index build must reuse the same runtime state for custom items"
+);
+
+const backendSource = functionSource(
+  topbarSource,
+  "fetchBackendResults",
+  "setActiveSearch"
+);
+assert.equal(
+  (backendSource.match(/getCoreState\s*\(/g) || []).length,
+  1,
+  "Topbar backend search setup must perform exactly one pre-await Core read"
+);
+const compactBackend = compact(backendSource);
+assert.equal(
+  compactBackend.includes("deriveSearchIdentity(state)"),
+  true,
+  "Topbar backend search must derive scalar identity from its operation-local state"
+);
+assert.equal(
+  compactBackend.includes("resolveSearchEndpoint(options,state)"),
+  true,
+  "Topbar backend search must reuse the same pre-await state for endpoint config"
+);
+assert.equal(
+  backendSource.includes("getCurrentUser("),
+  false,
+  "Topbar backend search setup must not reread Core through the public user getter"
+);
+assert.equal(
+  backendSource.includes("isAdmin("),
+  false,
+  "Topbar backend search setup must not reread Core through the role helper"
+);
+
 console.log(
-  "Shell runtime contract OK · Sidebar committed Router context reuse · Sidebar/Topbar zero-copy Core reads"
+  "Shell runtime contract OK · Sidebar committed Router context reuse · Topbar one-read search runtime context · Sidebar/Topbar zero-copy Core reads"
 );

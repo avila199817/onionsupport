@@ -7,6 +7,7 @@
    - Completar el preboot en paralelo antes de entregar control a bootApp().
    - Cargar después del Router sólo mejoras relevantes para la ruta real.
    - Detectar commits del Router y activar features bajo demanda.
+   - Coalescer navegaciones rápidas sin perder la última ruta comprometida.
    - No descargar/parsear JS de rutas que el usuario no visita.
    - Aislar fallos de una mejora progresiva para no tumbar el arranque principal.
    - Evitar scripts globales dispersos en index.html.
@@ -14,7 +15,7 @@
 ========================================================= */
 
 export const APP_ENHANCEMENTS_VERSION =
-  "app.enhancements.v12-route-commit-lazy";
+  "app.enhancements.v12.1-route-commit-lazy";
 
 const PRE_ROUTER = Object.freeze([
   Object.freeze({
@@ -82,16 +83,21 @@ const POST_ROUTER = Object.freeze([
 const FALLBACK_PRELOAD_MS = 72;
 const ROUTE_HOST_SELECTOR =
   ".route-view-host:not([hidden])[data-route-path], [data-route-host='true']:not([hidden])[data-route-path]";
+const ROUTE_HOST_NODE_SELECTOR =
+  ".route-view-host, [data-route-host='true']";
 
 const records = new Map();
 let preRouterPromise = null;
 let postRouterPromise = null;
 let routeSyncPromise = null;
+let routeSyncQueued = false;
+let routeSyncSource = "route-commit";
 let routeObserver = null;
 let fallbackTimer = 0;
 let initialRouteLoads = 0;
 let lazyRouteLoads = 0;
 let observerTriggers = 0;
+let coalescedRouteSyncs = 0;
 let fallbackPreloads = 0;
 
 function isBrowser() {
@@ -254,9 +260,10 @@ async function loadPhase(definitions = []) {
 
 async function syncCurrentRouteFeatures(source = "route") {
   const definitions = routeDefinitions();
-  const pending = definitions.filter(
-    (definition) => records.get(definition.key)?.state !== "ready"
-  );
+  const pending = definitions.filter((definition) => {
+    const record = records.get(definition.key);
+    return record?.state !== "ready" && !record?.promise;
+  });
 
   if (source === "initial") {
     initialRouteLoads += pending.length;
@@ -268,13 +275,28 @@ async function syncCurrentRouteFeatures(source = "route") {
 }
 
 function queueRouteFeatureSync(source = "route-commit") {
-  if (routeSyncPromise) return routeSyncPromise;
+  routeSyncSource = source;
 
-  routeSyncPromise = Promise.resolve()
-    .then(() => syncCurrentRouteFeatures(source))
-    .finally(() => {
-      routeSyncPromise = null;
-    });
+  if (routeSyncPromise) {
+    routeSyncQueued = true;
+    coalescedRouteSyncs += 1;
+    return routeSyncPromise;
+  }
+
+  routeSyncPromise = (async () => {
+    let allOk = true;
+
+    do {
+      routeSyncQueued = false;
+      const currentSource = routeSyncSource;
+      const ok = await syncCurrentRouteFeatures(currentSource);
+      allOk = ok && allOk;
+    } while (routeSyncQueued);
+
+    return allOk;
+  })().finally(() => {
+    routeSyncPromise = null;
+  });
 
   return routeSyncPromise;
 }
@@ -291,6 +313,21 @@ function routeObservationRoot() {
   );
 }
 
+function nodeIsRouteHost(node = null) {
+  return Boolean(
+    node?.nodeType === 1 &&
+    typeof node.matches === "function" &&
+    node.matches(ROUTE_HOST_NODE_SELECTOR)
+  );
+}
+
+function mutationTouchesRouteHost(mutation = null) {
+  if (mutation?.type !== "childList") return false;
+
+  return [...mutation.addedNodes, ...mutation.removedNodes]
+    .some(nodeIsRouteHost);
+}
+
 function installRouteObserver() {
   if (!isBrowser() || routeObserver) {
     return Boolean(routeObserver);
@@ -304,12 +341,7 @@ function installRouteObserver() {
   if (!root) return false;
 
   routeObserver = new MutationObserver((mutations) => {
-    const routeHostChanged = mutations.some((mutation) =>
-      mutation.type === "childList" &&
-      (mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0)
-    );
-
-    if (!routeHostChanged) return;
+    if (!mutations.some(mutationTouchesRouteHost)) return;
 
     observerTriggers += 1;
     void queueRouteFeatureSync("route-commit");
@@ -327,8 +359,8 @@ function preloadFallbackSequentially() {
   if (!isBrowser() || fallbackTimer) return false;
 
   const next = POST_ROUTER.find((definition) => {
-    const state = records.get(definition.key)?.state;
-    return state !== "ready" && state !== "loading";
+    const record = records.get(definition.key);
+    return record?.state !== "ready" && !record?.promise;
   });
 
   if (!next) return true;
@@ -347,11 +379,14 @@ async function loadPostRouterPhase() {
   const initialOk = await syncCurrentRouteFeatures("initial");
 
   /*
-    MutationObserver sigue el commit real del Router (swap de route-view-host).
-    Así una feature de Facturas/Incidencias se descarga cuando esa vista existe,
-    no por una precarga especulativa que quizá nunca vaya a usarse.
+    MutationObserver sigue el swap directo de route-view-host del Router.
+    No observa el subtree de la vista: cambios internos de tablas/modales no
+    disparan trabajo de carga progresiva.
 
-    El fallback conserva compatibilidad en navegadores sin MutationObserver.
+    Una navegación que llega mientras otra feature importa se coalesce y vuelve
+    a evaluar la última ruta al terminar, evitando perder commits rápidos.
+
+    El fallback conserva compatibilidad si MutationObserver no existe.
   */
   if (!installRouteObserver()) {
     preloadFallbackSequentially();
@@ -406,13 +441,16 @@ export function getAppEnhancementsSnapshot() {
     lazyRouteLoads,
     observerActive: Boolean(routeObserver),
     observerTriggers,
+    coalescedRouteSyncs,
     fallbackPreloads,
     readyPostRouter,
     totalPostRouter: POST_ROUTER.length,
     policy: Object.freeze({
       parallelPreRouter: true,
       routeCommitLazyLoading: true,
+      rapidNavigationCoalescing: true,
       speculativeRoutePreload: false,
+      routeHostOnlyObservation: true,
       mutationObserverFallback: true,
     }),
     features: Object.freeze(output),

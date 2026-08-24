@@ -2,6 +2,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 import {
+  APP_ENHANCEMENTS_VERSION,
+  getAppEnhancementsSnapshot,
+  isCommittedEnhancementRouteHost,
+  shouldSyncCommittedRouteHost,
+} from "../../src/app/enhancements.js";
+
+import {
   ROUTE_INTENT_PRELOAD_VERSION,
   normalizeIntentPath,
   shouldPrefetchForConnection,
@@ -18,10 +25,13 @@ import {
 } from "../../src/features/runtime-performance/index.js";
 
 assert.equal(
+  APP_ENHANCEMENTS_VERSION,
+  "app.enhancements.v15-committed-route-sync"
+);
+assert.equal(
   ROUTE_INTENT_PRELOAD_VERSION,
   "route-intent-preload.v2-strong-intent-gates"
 );
-
 assert.equal(
   RUNTIME_PERFORMANCE_VERSION,
   "runtime-performance.v2-committed-host-lifecycle"
@@ -75,6 +85,7 @@ const preparingHost = {
   dataset: {
     routeHost: "true",
     routeHostState: "preparing",
+    routePath: "/facturas",
     viewKey: "facturas",
   },
 };
@@ -84,6 +95,7 @@ const readyHost = {
   dataset: {
     routeHost: "true",
     routeHostState: "ready",
+    routePath: "/facturas",
     viewKey: "facturas",
   },
 };
@@ -108,6 +120,36 @@ assert.equal(
   true,
   "a new visible ready host is a new commit"
 );
+
+assert.equal(
+  isCommittedEnhancementRouteHost(preparingHost),
+  false,
+  "progressive features must ignore the hidden preparation host"
+);
+assert.equal(
+  isCommittedEnhancementRouteHost(readyHost),
+  true,
+  "progressive features may sync only from the visible ready host"
+);
+assert.equal(
+  shouldSyncCommittedRouteHost(readyHost, readyHost),
+  false,
+  "the same committed host must not resync progressive features"
+);
+assert.equal(
+  shouldSyncCommittedRouteHost(readyHost, preparingHost),
+  true,
+  "a new committed host must trigger exactly one route feature sync"
+);
+
+const enhancementsSnapshot = getAppEnhancementsSnapshot();
+assert.equal(enhancementsSnapshot.policy.routeCommitLazyLoading, true);
+assert.equal(enhancementsSnapshot.policy.visibleCommittedHostOnly, true);
+assert.equal(enhancementsSnapshot.policy.preparationHostIgnored, true);
+assert.equal(enhancementsSnapshot.policy.rapidNavigationCoalescing, true);
+assert.equal(enhancementsSnapshot.policy.speculativeRoutePreload, false);
+assert.equal(enhancementsSnapshot.policy.routeHostOnlyObservation, true);
+assert.equal(enhancementsSnapshot.policy.mutationObserverFallback, true);
 
 const perfSnapshot = getRuntimePerformanceSnapshot();
 assert.equal(perfSnapshot.installed, false);
@@ -149,6 +191,26 @@ for (const file of sourceFiles) {
     );
   }
 }
+
+const enhancementsSource = await readFile(
+  "src/app/enhancements.js",
+  "utf8"
+);
+assert.equal(
+  enhancementsSource.includes("ROUTE_COMMITTED_SELECTOR"),
+  true,
+  "enhancements must resolve the visible ready host before syncing route features"
+);
+assert.equal(
+  enhancementsSource.includes("lastCommittedHost"),
+  true,
+  "enhancements must dedupe route sync by committed host identity"
+);
+assert.equal(
+  enhancementsSource.includes("subtree: false"),
+  true,
+  "enhancements must not observe internal view mutations"
+);
 
 const preloadSource = await readFile(
   "src/features/route-intent-preload/index.js",
@@ -206,5 +268,5 @@ assert.equal(
 );
 
 console.log(
-  "Navigation performance contract OK · strong-intent preload · committed-host telemetry"
+  "Navigation performance contract OK · committed lazy sync · strong-intent preload · committed-host telemetry"
 );

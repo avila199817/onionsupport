@@ -9,13 +9,10 @@
    - Usar exclusivamente el controlador canónico de Facturas.
    - Escuchar interacción únicamente dentro del mount persistente del Router.
    - No corregir ni borrar DOM generado por el template.
-   - Cargar la confirmación visual del cobro/factura definitiva de la ruta.
 ========================================================= */
 
-import "../facturas-paid-confirm/index.js";
-
 export const FACTURAS_AUTO_REFRESH_VERSION =
-  "facturas.autorefresh.v5-paid-confirm";
+  "facturas.autorefresh.v4-router-view-interactions";
 
 const CONTROLLER_KEY = Symbol.for("onion.support.facturas.controller");
 const ROOT_SELECTOR = ".facturas-view-root, [data-facturas-scope='true']";

@@ -17,7 +17,7 @@
 ========================================================= */
 
 export const APP_ENHANCEMENTS_VERSION =
-  "app.enhancements.v15-committed-route-sync";
+  "app.enhancements.v16-facturas-paid-confirm";
 
 const PRE_ROUTER = Object.freeze([
   Object.freeze({
@@ -45,6 +45,11 @@ const POST_ROUTER = Object.freeze([
     key: "mobile-datalist",
     scope: "global",
     load: () => import("../features/mobile-datalist/index.js"),
+  }),
+  Object.freeze({
+    key: "facturas-paid-confirm",
+    scope: "facturas",
+    load: () => import("../features/facturas-paid-confirm/index.js"),
   }),
   Object.freeze({
     key: "facturas-autorefresh",

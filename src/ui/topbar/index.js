@@ -42,7 +42,7 @@ import {
 } from "./template.js";
 
 export const TOPBAR_VERSION =
-  "topbar.controller.backend-search.v8-native-runtime-state";
+  "topbar.controller.backend-search.v9-search-runtime-context";
 
 const TOPBAR_ROOT_ID =
   "app-topbar";
@@ -874,6 +874,49 @@ function getCurrentUserId(
   );
 }
 
+function deriveSearchIdentity(
+  state = {}
+) {
+  const user =
+    state.user ||
+    state.currentUser ||
+    null;
+
+  const roles =
+    normalizeRoleList([
+      state.role,
+      state.rol,
+      state.roles,
+
+      user?.role,
+      user?.rol,
+      user?.roles,
+    ]);
+
+  const role =
+    user?.isAdmin ===
+      true ||
+    roles.includes(
+      ROLE_ADMIN
+    )
+      ? ROLE_ADMIN
+      : ROLE_USER;
+
+  return Object.freeze({
+    role,
+
+    admin:
+      role ===
+      ROLE_ADMIN,
+
+    userId:
+      getCurrentUserId(
+        state,
+        user
+      ),
+  });
+}
+
 function getRouter(
   context = {}
 ) {
@@ -1032,9 +1075,6 @@ function getMount() {
     ) ||
     document.querySelector?.(
       "[data-topbar-mount]"
-    ) ||
-    document.querySelector?.(
-      "[data-topbar-root]"
     ) ||
     null
   );
@@ -1721,10 +1761,10 @@ function syncVisibility(
    BACKEND SEARCH CONFIG
 ========================================================= */
 
-function getCoreConfig() {
-  const state =
-    getCoreState();
-
+function getCoreConfig(
+  state =
+    getCoreState()
+) {
   return {
     ...(
       isObject(
@@ -1745,10 +1785,14 @@ function getCoreConfig() {
 }
 
 function resolveSearchEndpoint(
-  options = {}
+  options = {},
+  state =
+    getCoreState()
 ) {
   const config =
-    getCoreConfig();
+    getCoreConfig(
+      state
+    );
 
   const endpoint =
     cleanText(
@@ -1889,8 +1933,8 @@ function buildCacheKey(
   const state =
     getCoreState();
 
-  const user =
-    getCurrentUser(
+  const identity =
+    deriveSearchIdentity(
       state
     );
 
@@ -1900,18 +1944,12 @@ function buildCacheKey(
     ),
 
     resolveSearchEndpoint(
-      options
+      options,
+      state
     ),
 
-    getCurrentRole(
-      state,
-      user
-    ),
-
-    getCurrentUserId(
-      state,
-      user
-    ),
+    identity.role,
+    identity.userId,
   ].join("|");
 }
 
@@ -2344,11 +2382,10 @@ function routeSearchItem(
 }
 
 function coreSearchItems(
-  options = {}
+  options = {},
+  state =
+    getCoreState()
 ) {
-  const state =
-    getCoreState();
-
   const router =
     getRouter(
       options
@@ -2395,15 +2432,9 @@ function buildSearchIndex(
   const state =
     getCoreState();
 
-  const user =
-    getCurrentUser(
+  const identity =
+    deriveSearchIdentity(
       state
-    );
-
-  const admin =
-    isAdmin(
-      state,
-      user
     );
 
   const routeItems =
@@ -2423,7 +2454,8 @@ function buildSearchIndex(
 
   const custom =
     coreSearchItems(
-      options
+      options,
+      state
     ).map(
       (
         item,
@@ -2454,7 +2486,7 @@ function buildSearchIndex(
 
         if (
           item.adminOnly &&
-          !admin
+          !identity.admin
         ) {
           return false;
         }
@@ -3403,23 +3435,17 @@ async function fetchBackendResults(
   const state =
     getCoreState();
 
-  const user =
-    getCurrentUser(
+  const identity =
+    deriveSearchIdentity(
       state
     );
 
   const context = {
     admin:
-      isAdmin(
-        state,
-        user
-      ),
+      identity.admin,
 
     currentUserId:
-      getCurrentUserId(
-        state,
-        user
-      ),
+      identity.userId,
   };
 
   metrics.backendRequests +=
@@ -3429,7 +3455,8 @@ async function fetchBackendResults(
     const payload =
       await Http.get(
         resolveSearchEndpoint(
-          options
+          options,
+          state
         ),
         {
           auth: true,

@@ -10,9 +10,12 @@ import { AppCore } from "../../core/index.js";
 import * as Routes from "../../router/routes.js";
 
 export const ROUTE_INTENT_PRELOAD_VERSION =
-  "route-intent-preload.v1-confidence-gated";
+  "route-intent-preload.v2-strong-intent-gates";
 
-const LINK_SELECTOR = "a[data-spa], a[data-route]";
+const LINK_SELECTOR =
+  "a[data-spa], a[data-route], a[href^='/'], [data-router-link]";
+const ROUTE_COMMITTED_SELECTOR =
+  "[data-route-host='true'][data-route-host-state='ready']:not([hidden])";
 const HOVER_DWELL_MS = 64;
 
 const metrics = {
@@ -22,6 +25,10 @@ const metrics = {
   skippedLoaded: 0,
   skippedLoading: 0,
   skippedConnection: 0,
+  skippedHidden: 0,
+  skippedActive: 0,
+  skippedGuard: 0,
+  skippedTouch: 0,
   unresolved: 0,
   lastViewKey: null,
   lastSource: null,
@@ -33,10 +40,6 @@ let hoverAnchor = null;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function isFunction(value) {
-  return typeof value === "function";
 }
 
 function cleanText(value = "", fallback = "") {
@@ -67,9 +70,36 @@ export function shouldPrefetchForConnection(connection = null) {
   return effectiveType !== "slow-2g" && effectiveType !== "2g";
 }
 
+export function shouldPrefetchForDocument(visibilityState = "visible") {
+  return cleanText(visibilityState, "visible").toLowerCase() === "visible";
+}
+
+export function shouldUsePointerIntent(pointerType = "", source = "pointerdown") {
+  const type = cleanText(pointerType, "").toLowerCase();
+  const intentSource = cleanText(source, "pointerdown").toLowerCase();
+
+  if (type === "touch") return false;
+  if (intentSource === "hover-dwell") return !type || type === "mouse";
+  return !type || type === "mouse" || type === "pen";
+}
+
 function connectionAllowsPrefetch() {
   if (!isBrowser()) return false;
   return shouldPrefetchForConnection(navigator?.connection || null);
+}
+
+function documentAllowsPrefetch() {
+  if (!isBrowser()) return false;
+  return shouldPrefetchForDocument(document.visibilityState || "visible");
+}
+
+function hasModifierKey(event = null) {
+  return Boolean(
+    event?.metaKey ||
+    event?.ctrlKey ||
+    event?.shiftKey ||
+    event?.altKey
+  );
 }
 
 function closestIntentLink(target = null) {
@@ -80,17 +110,46 @@ function closestIntentLink(target = null) {
   }
 }
 
-function pathFromAnchor(anchor = null) {
-  if (!isBrowser() || !anchor) return "";
+function rawHrefFromLink(link = null) {
+  return cleanText(
+    link?.dataset?.route ||
+    link?.dataset?.href ||
+    link?.dataset?.to ||
+    link?.getAttribute?.("data-route") ||
+    link?.getAttribute?.("data-href") ||
+    link?.getAttribute?.("data-to") ||
+    link?.getAttribute?.("href") ||
+    link?.href ||
+    "",
+    ""
+  );
+}
+
+function pathFromLink(link = null) {
+  if (!isBrowser() || !link) return "";
 
   try {
-    if (anchor.hasAttribute?.("download")) return "";
+    if (link.hasAttribute?.("download")) return "";
 
-    const target = cleanText(anchor.getAttribute?.("target"), "").toLowerCase();
+    const target = cleanText(link.getAttribute?.("target"), "").toLowerCase();
     if (target && target !== "_self") return "";
 
-    const href = anchor.getAttribute?.("href") || anchor.href || "";
-    if (!href || href.startsWith("#")) return "";
+    const href = rawHrefFromLink(link);
+    if (
+      !href ||
+      href.startsWith("#") ||
+      href.startsWith("//") ||
+      /[\r\n\t\\]/.test(href)
+    ) {
+      return "";
+    }
+
+    if (
+      /^[a-z][a-z0-9+.-]*:/i.test(href) &&
+      !/^https?:\/\//i.test(href)
+    ) {
+      return "";
+    }
 
     const url = new URL(href, window.location.href);
     if (url.origin !== window.location.origin) return "";
@@ -101,15 +160,86 @@ function pathFromAnchor(anchor = null) {
   }
 }
 
-function routeForPath(path = "/") {
+function router() {
   try {
-    return Routes.getRouteByPath?.(normalizeIntentPath(path)) || null;
+    return AppCore.getModule?.("router") || AppCore.router || AppCore.Router || null;
   } catch {
     return null;
   }
 }
 
+function routeForPath(path = "/") {
+  const cleanPath = normalizeIntentPath(path);
+  const activeRouter = router();
+
+  try {
+    const routed = activeRouter?.getRouteMatch?.(cleanPath)?.route;
+    if (routed) return routed;
+  } catch {
+    // fallback a la tabla canónica
+  }
+
+  try {
+    return Routes.getRouteByPath?.(cleanPath) || null;
+  } catch {
+    return null;
+  }
+}
+
+function activeViewKey() {
+  if (!isBrowser()) return "";
+
+  try {
+    const host = document.querySelector(ROUTE_COMMITTED_SELECTOR);
+    return cleanText(host?.dataset?.viewKey, "");
+  } catch {
+    return "";
+  }
+}
+
+function routeAllowedForRuntime(route = null) {
+  if (!route) return false;
+
+  let current = null;
+
+  try {
+    current = AppCore.runtimeState?.read?.() || null;
+  } catch {
+    current = null;
+  }
+
+  const authenticated =
+    current?.authenticated === true ||
+    (!current && AppCore.isAuthenticated?.() === true);
+
+  const role = cleanText(
+    current?.role ||
+    (!current ? AppCore.getCurrentRole?.() : ""),
+    ""
+  ).toLowerCase();
+
+  if (route.public === true) {
+    return !(route.guestOnly === true && authenticated);
+  }
+
+  if (!authenticated) return false;
+
+  if (
+    (route.adminOnly === true || route.requiresAdmin === true) &&
+    role !== "admin"
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 export async function preloadIntentPath(path = "/", source = "intent") {
+  if (!documentAllowsPrefetch()) {
+    metrics.skippedHidden += 1;
+    return false;
+  }
+
   if (!connectionAllowsPrefetch()) {
     metrics.skippedConnection += 1;
     return false;
@@ -125,6 +255,16 @@ export async function preloadIntentPath(path = "/", source = "intent") {
   if (!viewKey) {
     metrics.unresolved += 1;
     return false;
+  }
+
+  if (!routeAllowedForRuntime(route)) {
+    metrics.skippedGuard += 1;
+    return false;
+  }
+
+  if (viewKey === activeViewKey()) {
+    metrics.skippedActive += 1;
+    return true;
   }
 
   if (Routes.isRouteViewLoaded?.(viewKey) === true) {
@@ -148,8 +288,8 @@ export async function preloadIntentPath(path = "/", source = "intent") {
   }
 }
 
-function triggerFromAnchor(anchor = null, source = "intent") {
-  const path = pathFromAnchor(anchor);
+function triggerFromLink(link = null, source = "intent") {
+  const path = pathFromLink(link);
   if (!path) return false;
 
   void preloadIntentPath(path, source);
@@ -165,6 +305,11 @@ function clearHoverIntent() {
 }
 
 function onPointerOver(event) {
+  if (!shouldUsePointerIntent(event?.pointerType, "hover-dwell")) {
+    metrics.skippedTouch += event?.pointerType === "touch" ? 1 : 0;
+    return;
+  }
+
   const anchor = closestIntentLink(event?.target);
   if (!anchor || anchor === hoverAnchor) return;
 
@@ -174,7 +319,13 @@ function onPointerOver(event) {
     const target = hoverAnchor;
     hoverTimer = 0;
     hoverAnchor = null;
-    triggerFromAnchor(target, "hover-dwell");
+
+    if (!documentAllowsPrefetch()) {
+      metrics.skippedHidden += 1;
+      return;
+    }
+
+    triggerFromLink(target, "hover-dwell");
   }, HOVER_DWELL_MS);
 }
 
@@ -190,18 +341,29 @@ function onPointerOut(event) {
 }
 
 function onFocusIn(event) {
-  triggerFromAnchor(closestIntentLink(event?.target), "focus");
+  if (!documentAllowsPrefetch()) {
+    metrics.skippedHidden += 1;
+    return;
+  }
+
+  triggerFromLink(closestIntentLink(event?.target), "focus");
 }
 
 function onPointerDown(event) {
   if (event?.button !== undefined && event.button !== 0) return;
-  triggerFromAnchor(closestIntentLink(event?.target), "pointerdown");
-}
+  if (hasModifierKey(event)) return;
 
-function onClickCapture(event) {
-  if (event?.defaultPrevented) return;
-  if (event?.button !== undefined && event.button !== 0) return;
-  triggerFromAnchor(closestIntentLink(event?.target), "click-capture");
+  if (!shouldUsePointerIntent(event?.pointerType, "pointerdown")) {
+    metrics.skippedTouch += event?.pointerType === "touch" ? 1 : 0;
+    return;
+  }
+
+  if (!documentAllowsPrefetch()) {
+    metrics.skippedHidden += 1;
+    return;
+  }
+
+  triggerFromLink(closestIntentLink(event?.target), "pointerdown");
 }
 
 export function initRouteIntentPreload() {
@@ -213,7 +375,6 @@ export function initRouteIntentPreload() {
   document.addEventListener("pointerout", onPointerOut, { capture: true, passive: true });
   document.addEventListener("focusin", onFocusIn, true);
   document.addEventListener("pointerdown", onPointerDown, { capture: true, passive: true });
-  document.addEventListener("click", onClickCapture, true);
 
   try {
     AppCore.registerModule?.("routeIntentPreload", RouteIntentPreload, { overwrite: true });
@@ -232,7 +393,6 @@ export function destroyRouteIntentPreload() {
   document.removeEventListener("pointerout", onPointerOut, true);
   document.removeEventListener("focusin", onFocusIn, true);
   document.removeEventListener("pointerdown", onPointerDown, true);
-  document.removeEventListener("click", onClickCapture, true);
   installed = false;
   return true;
 }
@@ -248,6 +408,14 @@ export function getRouteIntentPreloadSnapshot() {
       hoverDwellMs: HOVER_DWELL_MS,
       saveDataAware: true,
       slow2gAware: true,
+      documentVisibleOnly: true,
+      modifierAware: true,
+      touchPointerdown: false,
+      activeRouteSkip: true,
+      routerResolution: true,
+      liveGuardAware: true,
+      authCache: false,
+      clickCapture: false,
       routerCacheAuthority: true,
       storesRawUrls: false,
       externalNetwork: false,

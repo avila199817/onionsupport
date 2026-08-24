@@ -1,24 +1,21 @@
 /* =========================================================
-   Onion Support - Incidencias Media Preview
+   Onion Support - Incidencias Media / Live Detail
    Archivo: /src/css/views/incidencias/media-preview.css
 
-   PRODUCTIVO · ROUTE-SCOPED · FALLBACK-FIRST
-   - Miniaturas locales de adjuntos pendientes.
-   - Miniaturas remotas nunca muestran un hueco negro.
-   - Vídeo nativo de adjuntos (MOV/MP4/WebM) con fallback de códec.
-   - Sincronización visual no bloqueante del Modal Details.
-   - Ritmo vertical del body simétrico respecto al borde del modal.
+   PRODUCTIVO · ROUTE-SCOPED · VIEWER-FIRST
+   - Miniaturas locales y remotas con fallback estable.
+   - Visor dedicado de imagen, PDF y vídeo sin mover el scroll del ticket.
+   - Vídeo MOV/MP4/M4V/WebM con primer fotograma cuando el códec es legible.
+   - Sincronización de detalle silenciosa y orientada a señales.
+   - Responsive real hasta viewport móvil completo.
 ========================================================= */
 
 @layer views {
 
-/*
-   Los slots de feedback/preview permanecen en el DOM para que el patcher pueda
-   activarlos sin sustituir el modal completo. Cuando no contienen UI real no
-   deben ocupar una fila del grid ni crear gaps fantasma. Al retirarlos del
-   layout, el padding superior vuelve a ser exactamente el mismo que el inferior.
-   El controlador progresivo marca el estado; no dependemos de :has().
-*/
+/* =======================================================
+   SLOTS VACÍOS
+======================================================= */
+
 .incidencias-modal-body.ui-detail-modal-body
   > [data-modal-feedback-slot="true"][data-slot-empty="true"],
 .incidencias-modal-body.ui-detail-modal-body
@@ -26,7 +23,10 @@
   display: none;
 }
 
-/* Pendientes: miniatura + datos + acción. */
+/* =======================================================
+   MINIATURAS DE ARCHIVOS PENDIENTES / REMOTOS
+======================================================= */
+
 .incidencias-modal-pending-file[data-media-preview-enhanced="true"] {
   grid-template-columns:
     var(--incidencias-modal-thumb-width, 92px)
@@ -49,7 +49,8 @@
 }
 
 .incidencias-modal-pending-thumb-image,
-.incidencias-modal-image-thumb-wrap[data-modal-thumb-frame="true"] .incidencias-modal-image-thumb {
+.incidencias-modal-image-thumb-wrap[data-modal-thumb-frame="true"]
+  .incidencias-modal-image-thumb {
   position: absolute;
   inset: 0;
   z-index: 2;
@@ -62,7 +63,8 @@
 }
 
 .incidencias-modal-pending-thumb-fallback,
-.incidencias-modal-image-thumb-wrap[data-modal-thumb-frame="true"] .incidencias-modal-image-thumb-fallback {
+.incidencias-modal-image-thumb-wrap[data-modal-thumb-frame="true"]
+  .incidencias-modal-image-thumb-fallback {
   position: absolute;
   inset: 0;
   z-index: 1;
@@ -78,22 +80,27 @@
   opacity: 1;
 }
 
-.incidencias-modal-pending-thumb[data-preview-state="ready"] .incidencias-modal-pending-thumb-image,
-.incidencias-modal-image-thumb-wrap[data-preview-state="ready"] .incidencias-modal-image-thumb {
+.incidencias-modal-pending-thumb[data-preview-state="ready"]
+  .incidencias-modal-pending-thumb-image,
+.incidencias-modal-image-thumb-wrap[data-preview-state="ready"]
+  .incidencias-modal-image-thumb {
   opacity: 1;
 }
 
-.incidencias-modal-pending-thumb[data-preview-state="ready"] .incidencias-modal-pending-thumb-fallback,
-.incidencias-modal-image-thumb-wrap[data-preview-state="ready"] .incidencias-modal-image-thumb-fallback {
+.incidencias-modal-pending-thumb[data-preview-state="ready"]
+  .incidencias-modal-pending-thumb-fallback,
+.incidencias-modal-image-thumb-wrap[data-preview-state="ready"]
+  .incidencias-modal-image-thumb-fallback {
   opacity: 0;
 }
 
-.incidencias-modal-pending-thumb[data-preview-state="error"] .incidencias-modal-pending-thumb-image,
-.incidencias-modal-image-thumb-wrap[data-preview-state="error"] .incidencias-modal-image-thumb {
+.incidencias-modal-pending-thumb[data-preview-state="error"]
+  .incidencias-modal-pending-thumb-image,
+.incidencias-modal-image-thumb-wrap[data-preview-state="error"]
+  .incidencias-modal-image-thumb {
   opacity: 0;
 }
 
-/* Evita negro durante load/error: siempre existe la superficie fallback. */
 .incidencias-modal-image-thumb-wrap[data-modal-thumb-frame="true"] {
   background: var(--incidencias-modal-thumb-bg, var(--solid-bg-2));
 }
@@ -103,27 +110,178 @@
 }
 
 /* =======================================================
-   VIDEO PREVIEW · MOV / MP4 / WEBM
+   VISOR DEDICADO
+   El ticket permanece detrás, inmóvil e inert.
 ======================================================= */
 
-.incidencias-modal-preview[data-preview-kind="video"]
-  .incidencias-modal-preview-frame.is-video {
-  position: relative;
-  min-block-size: clamp(220px, 42vw, 540px);
+.incidencias-media-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  inline-size: 100%;
+  block-size: 100%;
+  block-size: 100dvh;
+  display: grid;
+  place-items: stretch;
+  padding: clamp(10px, 2vw, 24px);
+  overflow: hidden;
+  pointer-events: auto;
+  background:
+    color-mix(in srgb, var(--ui-detail-modal-overlay-bg) 92%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  animation: incidencias-viewer-backdrop-in 150ms ease-out both;
+}
+
+.incidencias-media-viewer-stage {
+  min-inline-size: 0;
+  min-block-size: 0;
   display: grid;
   place-items: center;
   overflow: hidden;
-  border-radius: var(--radius-sm);
-  background: var(--solid-bg-2);
+}
+
+.incidencias-modal-preview.incidencias-modal-preview--viewer {
+  position: relative;
+  z-index: 1;
+  inline-size: min(1480px, 100%);
+  block-size: 100%;
+  max-block-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--ui-detail-modal-border);
+  border-radius: var(--ui-detail-modal-radius);
+  background: var(--ui-detail-modal-bg);
+  box-shadow: var(--ui-detail-modal-shadow);
+  outline: none;
+  animation: incidencias-viewer-panel-in 180ms var(--ease-standard) both;
+}
+
+.incidencias-modal-preview--viewer:focus-visible {
+  box-shadow: var(--ui-detail-modal-shadow), var(--focus-ring);
+}
+
+.incidencias-modal-preview--viewer .incidencias-modal-preview-head {
+  position: relative;
+  z-index: 5;
+  min-inline-size: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-md);
+  padding: 12px 14px;
+  border-block-end: 1px solid var(--ui-detail-modal-header-border);
+  background: var(--surface-2, var(--ui-detail-modal-bg));
+}
+
+.incidencias-modal-preview--viewer .incidencias-modal-preview-copy {
+  min-inline-size: 0;
+}
+
+.incidencias-modal-preview--viewer .incidencias-modal-preview-copy strong {
+  font-size: var(--font-md);
+}
+
+.incidencias-modal-preview--viewer .incidencias-modal-preview-actions {
+  flex: 0 0 auto;
+}
+
+/*
+   Esta regla neutraliza las alturas pensadas para la preview inline de
+   detail.css. Dentro del visor, el frame es el viewport del documento.
+*/
+.incidencias-modal-preview--viewer .incidencias-modal-preview-frame,
+.incidencias-modal-preview--viewer .incidencias-modal-preview-frame.is-pdf,
+.incidencias-modal-preview--viewer .incidencias-modal-preview-frame.is-video {
+  position: relative;
+  inline-size: 100%;
+  block-size: 100%;
+  max-inline-size: none;
+  max-block-size: none;
+  min-inline-size: 0;
+  min-block-size: 0;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  padding: clamp(10px, 1.5vw, 20px);
+  border: 0;
+  border-radius: 0;
+  background: var(--surface-0, var(--main-bg));
   isolation: isolate;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.incidencias-modal-preview--viewer .incidencias-modal-preview-frame.is-pdf {
+  padding: 0;
+  overflow: hidden;
+}
+
+.incidencias-modal-preview--viewer .incidencias-modal-preview-image {
+  inline-size: auto;
+  block-size: auto;
+  max-inline-size: 100%;
+  max-block-size: 100%;
+  object-fit: contain;
+  border-radius: var(--incidencias-modal-preview-frame-radius);
+}
+
+.incidencias-modal-preview--viewer .incidencias-modal-preview-iframe {
+  inline-size: 100%;
+  block-size: 100%;
+  min-block-size: 0;
+  border: 0;
+}
+
+.incidencias-modal-preview--viewer > .incidencias-modal-empty-box {
+  align-self: center;
+  justify-self: center;
+  inline-size: min(680px, calc(100% - 32px));
+  margin: 16px;
+  padding: clamp(20px, 4vw, 40px);
+}
+
+.incidencias-modal-preview--viewer .incidencias-modal-preview-frame::-webkit-scrollbar {
+  inline-size: var(--scrollbar-size, 9px);
+  block-size: var(--scrollbar-size, 9px);
+}
+
+.incidencias-modal-preview--viewer .incidencias-modal-preview-frame::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.incidencias-modal-preview--viewer .incidencias-modal-preview-frame::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+[data-incidencias-modal-panel="true"][data-media-viewer-background="true"] {
+  user-select: none;
+}
+
+/* =======================================================
+   VÍDEO / PRIMER FOTOGRAMA
+======================================================= */
+
+.incidencias-modal-preview--viewer
+  .incidencias-modal-preview-frame.is-video {
+  overflow: hidden;
+  padding: 0;
+  background: var(--solid-bg-2);
 }
 
 .incidencias-modal-preview-video {
   position: relative;
   z-index: 2;
   inline-size: 100%;
+  block-size: 100%;
   max-inline-size: 100%;
-  max-block-size: min(68vh, 720px);
+  max-block-size: 100%;
   display: block;
   object-fit: contain;
   background: var(--solid-bg-2);
@@ -138,7 +296,7 @@
   justify-items: center;
   gap: 10px;
   padding: 24px;
-  background: color-mix(in srgb, var(--solid-bg-2) 90%, transparent);
+  background: color-mix(in srgb, var(--solid-bg-2) 88%, transparent);
   color: var(--text-muted);
   pointer-events: none;
 }
@@ -179,11 +337,12 @@
   z-index: 4;
   display: grid;
   place-content: center;
-  padding: clamp(20px, 4vw, 42px);
+  padding: clamp(22px, 5vw, 54px);
   text-align: center;
   color: var(--text-secondary, var(--text-muted));
   background: color-mix(in srgb, var(--solid-bg-2) 94%, transparent);
-  line-height: 1.55;
+  font-size: var(--font-sm);
+  line-height: 1.6;
 }
 
 .incidencias-modal-video-fallback[hidden] {
@@ -199,7 +358,8 @@
 }
 
 /* =======================================================
-   DETAIL LIVE SYNC · NO BLOCKING
+   LIVE SYNC SILENCIOSO
+   Sólo se hace visible para red lenta, cambio real o error puntual.
 ======================================================= */
 
 .incidencias-modal-panel[data-incidencias-modal-panel="true"] {
@@ -209,46 +369,38 @@
 .incidencias-modal-live-sync {
   position: absolute;
   inset-block-start: 12px;
-  inset-inline-end: 70px;
+  inset-inline-end: 62px;
   z-index: 30;
-  min-block-size: 30px;
+  min-block-size: 28px;
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  max-inline-size: min(240px, calc(100% - 130px));
-  padding: 6px 10px;
+  max-inline-size: min(220px, calc(100% - 120px));
+  padding: 5px 9px;
   border: 1px solid var(--border-default);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--solid-bg-1, var(--solid-bg-2)) 92%, transparent);
+  border-radius: var(--radius-pill);
+  background:
+    color-mix(in srgb, var(--solid-bg-1, var(--solid-bg-2)) 94%, transparent);
   color: var(--text-muted);
-  box-shadow: var(--shadow-xs, 0 4px 14px rgba(0, 0, 0, .08));
+  box-shadow: var(--shadow-xs);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   pointer-events: none;
-  opacity: 1;
-  transform: translateY(0);
-  transition:
-    opacity var(--duration-fast) var(--ease-standard),
-    transform var(--duration-fast) var(--ease-standard);
 }
 
 .incidencias-modal-live-sync[hidden] {
   display: none;
 }
 
-.incidencias-modal-live-sync[data-state="syncing"] {
-  color: var(--text-secondary, var(--text-muted));
-}
-
 .incidencias-modal-live-sync[data-state="ready"] {
-  color: var(--success-text, var(--text-secondary, var(--text-muted)));
+  color: var(--success-strong, var(--text-secondary, var(--text-muted)));
 }
 
 .incidencias-modal-live-sync[data-state="ready"]
   .incidencias-modal-live-sync-spinner {
+  position: relative;
   animation: none;
   border-color: currentColor;
-  position: relative;
 }
 
 .incidencias-modal-live-sync[data-state="ready"]
@@ -263,32 +415,56 @@
 }
 
 .incidencias-modal-live-sync[data-state="error"] {
-  color: var(--warning-text, var(--text-secondary, var(--text-muted)));
-}
-
-.incidencias-modal-live-sync[data-state="error"]
-  .incidencias-modal-live-sync-spinner {
-  animation-duration: 1.2s;
+  color: var(--warning-strong, var(--text-secondary, var(--text-muted)));
 }
 
 .incidencias-modal-live-sync-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: var(--weight-semibold);
 }
+
+/* =======================================================
+   MOTION
+======================================================= */
 
 @keyframes incidencias-live-spin {
   to { transform: rotate(360deg); }
 }
 
+@keyframes incidencias-viewer-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes incidencias-viewer-panel-in {
+  from {
+    opacity: 0;
+    transform: scale(.985) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .incidencias-media-viewer,
+  .incidencias-modal-preview--viewer {
+    animation: none;
+  }
+
   .incidencias-modal-video-loader > span,
   .incidencias-modal-live-sync-spinner {
     animation-duration: 1.8s;
   }
 }
+
+/* =======================================================
+   RESPONSIVE
+======================================================= */
 
 @media (max-width: 720px) {
   .incidencias-modal-pending-file[data-media-preview-enhanced="true"] {
@@ -300,15 +476,40 @@
     block-size: 52px;
   }
 
-  .incidencias-modal-live-sync {
-    inset-block-start: 10px;
-    inset-inline-end: 58px;
-    max-inline-size: min(190px, calc(100% - 110px));
+  .incidencias-media-viewer {
+    padding: 0;
   }
 
-  .incidencias-modal-preview[data-preview-kind="video"]
-    .incidencias-modal-preview-frame.is-video {
-    min-block-size: 190px;
+  .incidencias-modal-preview.incidencias-modal-preview--viewer {
+    inline-size: 100%;
+    block-size: 100%;
+    border-inline: 0;
+    border-radius: 0;
+  }
+
+  .incidencias-modal-preview--viewer .incidencias-modal-preview-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    padding:
+      max(10px, env(safe-area-inset-top))
+      max(10px, env(safe-area-inset-right))
+      10px
+      max(10px, env(safe-area-inset-left));
+  }
+
+  .incidencias-modal-preview--viewer .incidencias-modal-preview-actions {
+    gap: 5px;
+  }
+
+  .incidencias-modal-preview--viewer .incidencias-modal-preview-btn {
+    min-inline-size: 0;
+    padding-inline: 9px;
+  }
+
+  .incidencias-modal-live-sync {
+    inset-block-start: 10px;
+    inset-inline-end: 54px;
+    max-inline-size: min(180px, calc(100% - 104px));
   }
 }
 
@@ -327,11 +528,24 @@
     block-size: 48px;
   }
 
+  .incidencias-modal-preview--viewer .incidencias-modal-preview-head {
+    align-items: start;
+  }
+
+  .incidencias-modal-preview--viewer .incidencias-modal-preview-copy span {
+    max-inline-size: 48vw;
+  }
+
+  .incidencias-modal-preview--viewer .incidencias-modal-preview-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
   .incidencias-modal-live-sync {
     inset-inline-start: 50%;
     inset-inline-end: auto;
-    transform: translateX(-50%);
     max-inline-size: calc(100% - 112px);
+    transform: translateX(-50%);
   }
 }
 

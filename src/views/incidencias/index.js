@@ -801,19 +801,21 @@ const DETAIL_LIMITS =
 
 function getState() {
   try {
-    return (
-      AppCore.getState?.() ||
-      AppCore.state ||
-      {}
-    );
+    if (
+      typeof AppCore?.runtimeState?.read ===
+      "function"
+    ) {
+      return (
+        AppCore.runtimeState.read() ||
+        {}
+      );
+    }
   } catch {
-    return (
-      AppCore.state ||
-      {}
-    );
+    // noop
   }
-}
 
+  return {};
+}
 function getCurrentUser() {
   const state =
     getState();

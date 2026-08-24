@@ -121,5 +121,6 @@ node --experimental-default-type=module .github/scripts/core_snapshot_contract.m
 node --experimental-default-type=module .github/scripts/auth_selector_contract.mjs
 node --experimental-default-type=module .github/scripts/router_runtime_contract.mjs
 node --experimental-default-type=module .github/scripts/shell_runtime_contract.mjs
+node --experimental-default-type=module .github/scripts/view_runtime_state_contract.mjs
 node --experimental-default-type=module .github/scripts/navigation_performance_contract.mjs
 node --experimental-default-type=module .github/scripts/incidencias_detail_request_contract.mjs

@@ -147,8 +147,21 @@ function getGlobalObject() {
 try { return globalThis; } catch { return {}; }
 }
 function getAppState() {
-try { return AppCore.getState?.() || AppCore.state || {}; }
-catch { return AppCore.state || {}; }
+  try {
+    if (
+      typeof AppCore?.runtimeState?.read ===
+      "function"
+    ) {
+      return (
+        AppCore.runtimeState.read() ||
+        {}
+      );
+    }
+  } catch {
+    // noop
+  }
+
+  return {};
 }
 function getCurrentUser() {
 const state = getAppState();

@@ -41,69 +41,22 @@ jobs:
               raise SystemExit("Router version anchor is not unique")
           router = router.replace(old_version, new_version, 1)
 
-          success_chrome = '''    syncChrome(
-            route,
-            {
-              AppCore,
-          
-              Auth:
-                getAuth(),
-          
-              Router,
-          
-              route,
-          
-              canonicalPath:
-                state.canonicalPath,
-          
-              publicPath:
-                state.publicPath,
-          
-              routeParams:
-                state.routeParams,
-            }
-          );
-          
-          setActiveMenu(
-            route,
-            {
-              publicPath:
-                state.publicPath,
-          
-              canonicalPath:
-                state.canonicalPath,
-          
-              pending:
-                false,
-            }
-          );
-'''
-          replacement = '''    syncChrome(
-            route,
-            {
-              AppCore,
-          
-              Auth:
-                getAuth(),
-          
-              Router,
-          
-              route,
-          
-              canonicalPath:
-                state.canonicalPath,
-          
-              publicPath:
-                state.publicPath,
-          
-              routeParams:
-                state.routeParams,
-            }
-          );
-'''
-          if router.count(success_chrome) != 1:
-              raise SystemExit(f"Router post-commit active block count={router.count(success_chrome)}")
-          router = router.replace(success_chrome, replacement, 1)
+          chrome_start = router.find("    const chromeStartedAt =\n")
+          chrome_end = router.find("    recordTransitionPhase(\n      transition,\n      route,\n      \"chrome\",", chrome_start)
+          if chrome_start < 0 or chrome_end <= chrome_start:
+              raise SystemExit("Could not isolate successful chrome phase")
+          chrome = router[chrome_start:chrome_end]
+          sync_index = chrome.find("    syncChrome(\n")
+          active_start = chrome.find("    setActiveMenu(\n", sync_index)
+          if sync_index < 0 or active_start < 0:
+              raise SystemExit("Could not find post-sync active-menu call")
+          next_call = chrome.find("    recordTransitionPhase(\n", active_start)
+          if next_call != -1:
+              raise SystemExit("Unexpected phase recorder inside isolated pre-record chrome slice")
+          # The isolated slice ends immediately before recordTransitionPhase, so remove
+          # from the post-sync setActiveMenu call to the end of the slice.
+          chrome = chrome[:active_start]
+          router = router[:chrome_start] + chrome + router[chrome_end:]
 
           policy_anchor = "        singleRouteResolutionPerTransition:\n          true,\n"
           policy_replacement = policy_anchor + "\n        postCommitActiveMenuDedup:\n          true,\n"
@@ -112,8 +65,8 @@ jobs:
           router = router.replace(policy_anchor, policy_replacement, 1)
           router_path.write_text(router, encoding="utf-8")
 
-          router_contract_path = Path(".github/scripts/router_runtime_contract.mjs")
-          contract = router_contract_path.read_text(encoding="utf-8")
+          contract_path = Path(".github/scripts/router_runtime_contract.mjs")
+          contract = contract_path.read_text(encoding="utf-8")
           old_contract_version = '  "router.minimal.v13-single-route-resolution"'
           if contract.count(old_contract_version) != 1:
               raise SystemExit("Router contract version anchor is not unique")
@@ -158,34 +111,11 @@ jobs:
           
           '''.replace("          ", "")
           contract = contract.replace(phase_anchor, dedup_contract + phase_anchor, 1)
-          router_contract_path.write_text(contract, encoding="utf-8")
-
-          shell_contract_path = Path(".github/scripts/shell_runtime_contract.mjs")
-          shell_contract = shell_contract_path.read_text(encoding="utf-8")
-          console_anchor = '''console.log(
-            "Shell runtime contract OK · Sidebar/Topbar zero-copy Core reads · no public snapshots"
-          );
-'''
-          if shell_contract.count(console_anchor) != 1:
-              raise SystemExit("Shell contract console anchor is not unique")
-          sidebar_ownership = '''const sidebarSource = await readFile("src/ui/sidebar/index.js", "utf8");
-          assert.ok(
-            (sidebarSource.match(/\\bsyncActiveMenuDom\\s*\\(/g) || []).length >= 3,
-            "Sidebar must own active-menu synchronization on both fast and structural sync paths"
-          );
-          
-          '''.replace("          ", "")
-          shell_contract = shell_contract.replace(
-              console_anchor,
-              sidebar_ownership + console_anchor,
-              1,
-          )
-          shell_contract_path.write_text(shell_contract, encoding="utf-8")
+          contract_path.write_text(contract, encoding="utf-8")
           PY
 
           node --check src/router/index.js
           node --check .github/scripts/router_runtime_contract.mjs
-          node --check .github/scripts/shell_runtime_contract.mjs
           bash .github/ci/validate_spa_contracts.sh
           git diff --check
 

@@ -4,21 +4,22 @@
 
    Route enhancement del Modal Details:
    - conserva el contrato canónico del controller/API;
-   - transforma la preview inline ya autorizada en un visor modal dedicado;
-   - NO cambia el scroll del ticket ni obliga a volver al header;
-   - imagen/PDF/documento se visualizan en una capa independiente;
+   - mueve la preview autorizada a un visor modal independiente;
+   - mantiene exactamente el scroll del ticket y devuelve el foco al opener;
+   - imagen y vídeo se contienen siempre dentro del viewport, sin scroll exterior;
+   - PDF usa el área disponible del visor y sólo desplaza su propio documento;
    - vídeo MOV/MP4/M4V/WebM usa exclusivamente el /view canónico;
    - iPhone MOV intenta dejar visible un fotograma inicial real;
-   - focus trap, Escape, backdrop y retorno de foco propios del visor;
-   - el panel del ticket queda inert mientras el visor está abierto;
-   - una preview recreada por el patcher se adopta sin parpadeos.
+   - apertura/cierre simétricos con transición y soporte reduced-motion;
+   - focus trap, Escape, backdrop e inert del panel de fondo;
+   - una preview recreada por el patcher se adopta sin desmontar el visor.
 
-   No hay monkey-patching de DOM APIs ni de fetch. El controller continúa
-   siendo la autoridad de abrir/cerrar/descargar el adjunto.
+   No hay monkey-patching de fetch, scroll ni APIs del navegador.
+   El controller continúa siendo la autoridad de abrir/cerrar/descargar.
 ========================================================= */
 
 export const INCIDENCIAS_VIDEO_PREVIEW_VERSION =
-  "incidencias-video-preview.v2.fullscreen-viewer";
+  "incidencias-video-preview.v3.fit-contained-motion";
 
 const VIEW = "#view-container, [data-router-view='true']";
 const HOST = "[data-incidencias-modal-host='true']";
@@ -29,7 +30,6 @@ const SLOT = "[data-modal-preview-slot='true']";
 const PREVIEW = ".incidencias-modal-preview[data-modal-preview='true']";
 const PREVIEW_COPY = ".incidencias-modal-preview-copy";
 const UNSUPPORTED_BOX = ".incidencias-modal-empty-box";
-const VIEWER = "[data-incidencias-media-viewer='true']";
 const VIEWER_STAGE = "[data-incidencias-media-viewer-stage='true']";
 const ACTION_OPEN = "[data-detail-action='detail-attachment-open']";
 const ACTION_CLOSE = "[data-detail-action='detail-preview-close']";
@@ -49,9 +49,11 @@ const FOCUSABLE = [
 
 const VIDEO_EXT_RE = /\.(mov|qt|mp4|m4v|webm|ogv|ogg)$/i;
 const VIDEO_MIME_RE = /(?:^|\s)(video\/[a-z0-9.+-]+)(?:\s|·|$)/i;
+
 const SAS_GUARD_MS = 30_000;
 const DEFAULT_TTL_MS = 4 * 60_000;
 const FIRST_FRAME_SECONDS = 0.08;
+const CLOSE_TRANSITION_MS = 190;
 
 let mounted = false;
 let mountRoot = null;
@@ -61,8 +63,11 @@ let modalHost = null;
 let frame = 0;
 let apiPromise = null;
 let epoch = 0;
+
 let activeViewer = null;
 let pendingOpen = null;
+let closeTimer = 0;
+let controllerClosePass = false;
 
 const cache = new Map();
 const inflight = new Map();
@@ -79,6 +84,10 @@ const text = (value = "", fallback = "") =>
 const api = () =>
   apiPromise ||= import("../../views/incidencias/incidencias.api.js");
 
+/* =========================================================
+   BASICS / URL POLICY
+========================================================= */
+
 function ticketId(root = null) {
   return text(root?.dataset?.ticketId || root?.dataset?.incidenciaId, "");
 }
@@ -92,6 +101,7 @@ function previewMeta(preview = null) {
   const name = text(copy?.querySelector?.("strong")?.textContent, "");
   const meta = text(copy?.querySelector?.("span")?.textContent, "");
   const mime = text(meta.match(VIDEO_MIME_RE)?.[1], "").toLowerCase();
+
   return { name, meta, mime };
 }
 
@@ -100,6 +110,7 @@ function isVideoPreview(preview = null) {
   if (preview.dataset.previewKind === "video") return true;
 
   const { name, meta, mime } = previewMeta(preview);
+
   return Boolean(
     mime.startsWith("video/") ||
     VIDEO_MIME_RE.test(meta) ||
@@ -187,11 +198,31 @@ async function requestViewUrl(root, preview, { force = false } = {}) {
   return task;
 }
 
+/* =========================================================
+   VIEWER STATE
+========================================================= */
+
+function prefersReducedMotion() {
+  if (!browser()) return true;
+
+  try {
+    return Boolean(
+      window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches
+    );
+  } catch {
+    return true;
+  }
+}
+
 function visibleFocusables(root = null) {
   if (!root) return [];
 
   return Array.from(root.querySelectorAll(FOCUSABLE)).filter((node) => {
-    if (!node?.isConnected || node.hidden || node.getAttribute("aria-hidden") === "true") {
+    if (
+      !node?.isConnected ||
+      node.hidden ||
+      node.getAttribute("aria-hidden") === "true"
+    ) {
       return false;
     }
 
@@ -209,6 +240,7 @@ function rememberOpenIntent(button = null) {
   if (!root) return false;
 
   const body = root.querySelector(BODY);
+
   pendingOpen = {
     ticketId: ticketId(root),
     attachmentId: text(button.dataset?.attachmentId, ""),
@@ -235,11 +267,13 @@ function restoreTicketScroll(root = null, preview = null) {
 
   const same =
     pendingOpen.ticketId === ticketId(root) &&
-    (!pendingOpen.attachmentId || pendingOpen.attachmentId === attachmentId(preview));
+    (!pendingOpen.attachmentId ||
+      pendingOpen.attachmentId === attachmentId(preview));
 
   if (!same) return false;
 
   const body = pendingOpen.body;
+
   if (body?.isConnected && !pendingOpen.userMoved) {
     try {
       body.scrollTop = pendingOpen.scrollTop;
@@ -257,23 +291,51 @@ function setPanelInert(root = null, inert = true) {
 
   if (inert) {
     if (!panel.dataset.viewerPreviousAriaHidden) {
-      panel.dataset.viewerPreviousAriaHidden = panel.getAttribute("aria-hidden") ?? "__missing__";
+      panel.dataset.viewerPreviousAriaHidden =
+        panel.getAttribute("aria-hidden") ?? "__missing__";
     }
+
     panel.setAttribute("aria-hidden", "true");
-    try { panel.inert = true; } catch { panel.setAttribute("inert", ""); }
+
+    try {
+      panel.inert = true;
+    } catch {
+      panel.setAttribute("inert", "");
+    }
+
     panel.dataset.mediaViewerBackground = "true";
-  } else {
-    const previous = panel.dataset.viewerPreviousAriaHidden;
-    try { panel.inert = false; } catch { panel.removeAttribute("inert"); }
-    panel.removeAttribute("inert");
-    panel.dataset.mediaViewerBackground = "false";
-
-    if (previous === "__missing__" || !previous) panel.removeAttribute("aria-hidden");
-    else panel.setAttribute("aria-hidden", previous);
-
-    delete panel.dataset.viewerPreviousAriaHidden;
+    return true;
   }
 
+  const previous = panel.dataset.viewerPreviousAriaHidden;
+
+  try {
+    panel.inert = false;
+  } catch {
+    panel.removeAttribute("inert");
+  }
+
+  panel.removeAttribute("inert");
+  panel.dataset.mediaViewerBackground = "false";
+
+  if (previous === "__missing__" || !previous) {
+    panel.removeAttribute("aria-hidden");
+  } else {
+    panel.setAttribute("aria-hidden", previous);
+  }
+
+  delete panel.dataset.viewerPreviousAriaHidden;
+  return true;
+}
+
+function clearCloseTimer() {
+  if (!browser() || !closeTimer) {
+    closeTimer = 0;
+    return false;
+  }
+
+  window.clearTimeout(closeTimer);
+  closeTimer = 0;
   return true;
 }
 
@@ -292,24 +354,42 @@ function createViewerLayer(root = null) {
 
   layer.appendChild(stage);
   root.appendChild(layer);
+
+  document.body?.classList.add("incidencias-media-viewer-open");
+
   return { layer, stage };
 }
 
-function closeThroughController() {
-  const close = activeViewer?.preview?.querySelector?.(ACTION_CLOSE);
-  if (!close) return false;
+function activateViewerLayer(layer = null) {
+  if (!layer?.isConnected) return false;
 
-  try {
-    close.click();
+  const activate = () => {
+    if (
+      !layer.isConnected ||
+      layer.dataset.viewerState === "closing"
+    ) {
+      return;
+    }
+
+    layer.dataset.viewerState = "ready";
+  };
+
+  if (prefersReducedMotion()) {
+    activate();
     return true;
-  } catch {
-    return false;
   }
+
+  window.requestAnimationFrame?.(() => {
+    window.requestAnimationFrame?.(activate);
+  });
+
+  return true;
 }
 
 function focusViewer() {
   const layer = activeViewer?.layer;
   const preview = activeViewer?.preview;
+
   if (!layer?.isConnected || !preview?.isConnected) return false;
 
   const close = preview.querySelector(ACTION_CLOSE);
@@ -321,24 +401,42 @@ function focusViewer() {
 
   queueMicrotask(() => {
     if (!target?.isConnected) return;
-    try { target.focus({ preventScroll: true }); }
-    catch { try { target.focus(); } catch { /* noop */ } }
+
+    try {
+      target.focus({ preventScroll: true });
+    } catch {
+      try {
+        target.focus();
+      } catch {
+        // noop
+      }
+    }
   });
 
   return true;
 }
 
 function cleanupViewer({ restoreFocus = true } = {}) {
+  clearCloseTimer();
+
   if (!activeViewer) {
     pendingOpen = null;
+    document.body?.classList.remove("incidencias-media-viewer-open");
     return false;
   }
 
   const { root, layer, opener } = activeViewer;
+
   setPanelInert(root, false);
 
-  try { layer?.remove?.(); } catch { /* noop */ }
+  try {
+    layer?.remove?.();
+  } catch {
+    // noop
+  }
+
   activeViewer = null;
+  document.body?.classList.remove("incidencias-media-viewer-open");
 
   const shouldRestore =
     restoreFocus &&
@@ -348,12 +446,78 @@ function cleanupViewer({ restoreFocus = true } = {}) {
 
   if (shouldRestore) {
     window.requestAnimationFrame?.(() => {
-      try { opener.focus({ preventScroll: true }); }
-      catch { try { opener.focus(); } catch { /* noop */ } }
+      try {
+        opener.focus({ preventScroll: true });
+      } catch {
+        try {
+          opener.focus();
+        } catch {
+          // noop
+        }
+      }
     });
   }
 
   pendingOpen = null;
+  return true;
+}
+
+function pauseViewerMedia() {
+  const preview = activeViewer?.preview;
+  if (!preview) return false;
+
+  preview.querySelectorAll?.("video, audio").forEach((media) => {
+    try {
+      media.pause?.();
+    } catch {
+      // noop
+    }
+  });
+
+  return true;
+}
+
+function commitViewerClose() {
+  clearCloseTimer();
+
+  const viewer = activeViewer;
+  const close = viewer?.preview?.querySelector?.(ACTION_CLOSE);
+
+  if (!viewer?.layer?.isConnected || !close) {
+    cleanupViewer({ restoreFocus: true });
+    return false;
+  }
+
+  controllerClosePass = true;
+
+  try {
+    close.click();
+    return true;
+  } catch {
+    cleanupViewer({ restoreFocus: true });
+    return false;
+  } finally {
+    controllerClosePass = false;
+  }
+}
+
+function requestViewerClose() {
+  const layer = activeViewer?.layer;
+  if (!layer?.isConnected) return false;
+
+  if (layer.dataset.viewerState === "closing") return true;
+
+  pauseViewerMedia();
+  layer.dataset.viewerState = "closing";
+
+  const delay = prefersReducedMotion() ? 0 : CLOSE_TRANSITION_MS;
+
+  clearCloseTimer();
+  closeTimer = window.setTimeout(() => {
+    closeTimer = 0;
+    commitViewerClose();
+  }, delay);
+
   return true;
 }
 
@@ -362,10 +526,12 @@ function adoptPreview(root = null, preview = null) {
 
   let layer = activeViewer?.root === root ? activeViewer.layer : null;
   let stage = activeViewer?.root === root ? activeViewer.stage : null;
+  let createdLayer = false;
 
   if (!layer?.isConnected || !stage?.isConnected) {
     cleanupViewer({ restoreFocus: false });
     ({ layer, stage } = createViewerLayer(root));
+    createdLayer = true;
   }
 
   const previousPreview = activeViewer?.preview;
@@ -375,7 +541,15 @@ function adoptPreview(root = null, preview = null) {
       : activeViewer?.opener || null;
 
   if (previousPreview && previousPreview !== preview) {
-    try { previousPreview.remove(); } catch { /* noop */ }
+    try {
+      previousPreview.remove();
+    } catch {
+      // noop
+    }
+  }
+
+  if (isVideoPreview(preview)) {
+    preview.dataset.previewKind = "video";
   }
 
   preview.classList.add("incidencias-modal-preview--viewer");
@@ -383,33 +557,72 @@ function adoptPreview(root = null, preview = null) {
   stage.replaceChildren(preview);
 
   activeViewer = { root, layer, stage, preview, opener };
+
   restoreTicketScroll(root, preview);
   setPanelInert(root, true);
 
   const title = preview.querySelector("#incidencias-modal-preview-title");
+
   if (title?.id) {
     layer.setAttribute("aria-labelledby", title.id);
     layer.removeAttribute("aria-label");
   }
 
-  layer.dataset.viewerState = "ready";
-  focusViewer();
+  if (createdLayer) {
+    activateViewerLayer(layer);
+    focusViewer();
+  } else if (layer.dataset.viewerState !== "closing") {
+    layer.dataset.viewerState = "ready";
+  }
+
   return true;
 }
 
+/* =========================================================
+   VIDEO / FIRST FRAME
+========================================================= */
+
 function videoFailureMessage(meta = {}) {
-  const quickTime = meta.mime === "video/quicktime" || /\.(mov|qt)$/i.test(meta.name);
+  const quickTime =
+    meta.mime === "video/quicktime" ||
+    /\.(mov|qt)$/i.test(meta.name);
 
   return quickTime
-    ? "El archivo MOV está correcto, pero este navegador no puede decodificar su códec. Si el iPhone lo grabó en HEVC/H.265, Safari y los equipos con soporte HEVC podrán reproducirlo; el original sigue disponible para descargar."
+    ? "El archivo MOV está correcto, pero este navegador no puede decodificar su códec. Si el iPhone lo grabó en HEVC/H.265, los navegadores y equipos con soporte HEVC podrán reproducirlo; el original sigue disponible para descargar."
     : "El vídeo está disponible, pero este navegador no puede decodificar su códec. Puedes descargar el original desde la parte superior.";
 }
 
 function markVideoReady(frame, loader, fallback) {
   if (!frame?.isConnected) return;
+
   frame.dataset.videoState = "ready";
   if (loader) loader.hidden = true;
   if (fallback) fallback.hidden = true;
+}
+
+function syncVideoIntrinsicSize(video = null) {
+  if (!video) return false;
+
+  const width = Number(video.videoWidth || 0);
+  const height = Number(video.videoHeight || 0);
+
+  if (
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    return false;
+  }
+
+  video.dataset.mediaWidth = String(width);
+  video.dataset.mediaHeight = String(height);
+  video.style.setProperty(
+    "--incidencias-media-aspect",
+    `${width} / ${height}`
+  );
+
+  return true;
 }
 
 function primeFirstFrame(video, frame, loader, fallback) {
@@ -417,35 +630,65 @@ function primeFirstFrame(video, frame, loader, fallback) {
 
   const finish = () => {
     if (primed || !video.isConnected) return;
+
     primed = true;
-    try { video.pause(); } catch { /* noop */ }
+    syncVideoIntrinsicSize(video);
+
+    try {
+      video.pause();
+    } catch {
+      // noop
+    }
+
     markVideoReady(frame, loader, fallback);
   };
 
   const seek = () => {
     if (!video.isConnected || primed) return;
 
+    syncVideoIntrinsicSize(video);
+
     const duration = Number(video.duration || 0);
-    const target = Number.isFinite(duration) && duration > 0
-      ? Math.min(FIRST_FRAME_SECONDS, Math.max(0.01, duration / 200))
-      : FIRST_FRAME_SECONDS;
+    const target =
+      Number.isFinite(duration) && duration > 0
+        ? Math.min(
+            FIRST_FRAME_SECONDS,
+            Math.max(0.01, duration / 200)
+          )
+        : FIRST_FRAME_SECONDS;
 
     try {
-      if (Math.abs(Number(video.currentTime || 0) - target) < 0.005) {
+      if (
+        Math.abs(Number(video.currentTime || 0) - target) < 0.005
+      ) {
         finish();
         return;
       }
+
       video.currentTime = target;
     } catch {
       finish();
     }
   };
 
+  video.addEventListener(
+    "loadedmetadata",
+    () => syncVideoIntrinsicSize(video),
+    { once: true }
+  );
+
   video.addEventListener("loadeddata", seek, { once: true });
   video.addEventListener("seeked", finish, { once: true });
-  video.addEventListener("canplay", () => {
-    if (!primed && Number(video.currentTime || 0) > 0) finish();
-  }, { once: true });
+
+  video.addEventListener(
+    "canplay",
+    () => {
+      if (!primed && Number(video.currentTime || 0) > 0) {
+        finish();
+      }
+    },
+    { once: true }
+  );
 
   if (video.readyState >= 2) queueMicrotask(seek);
 }
@@ -455,6 +698,7 @@ function installVideo(root, preview, url) {
 
   const meta = previewMeta(preview);
   const oldBox = preview.querySelector(UNSUPPORTED_BOX);
+
   const frame = document.createElement("div");
   frame.className = "incidencias-modal-preview-frame is-video";
   frame.dataset.modalPreviewVideoFrame = "true";
@@ -492,16 +736,28 @@ function installVideo(root, preview, url) {
 
     if (!retried && !unsupportedCodec) {
       retried = true;
+
       const key = keyFor(root, preview);
       cache.delete(key);
+
       const freshUrl = await requestViewUrl(root, preview, { force: true });
 
-      if (freshUrl && activeViewer?.preview === preview && preview.isConnected) {
+      if (
+        freshUrl &&
+        activeViewer?.preview === preview &&
+        preview.isConnected
+      ) {
         frame.dataset.videoState = "loading";
         loader.hidden = false;
         fallback.hidden = true;
         video.src = freshUrl;
-        try { video.load(); } catch { /* noop */ }
+
+        try {
+          video.load();
+        } catch {
+          // noop
+        }
+
         return;
       }
     }
@@ -513,6 +769,7 @@ function installVideo(root, preview, url) {
   };
 
   video.addEventListener("error", () => void fail());
+
   primeFirstFrame(video, frame, loader, fallback);
   frame.append(video, loader, fallback);
 
@@ -523,7 +780,12 @@ function installVideo(root, preview, url) {
   preview.dataset.videoEnhanced = "true";
   preview.dataset.videoHydrating = "false";
 
-  try { video.load(); } catch { /* event error handles fallback */ }
+  try {
+    video.load();
+  } catch {
+    // error event handles fallback
+  }
+
   return true;
 }
 
@@ -541,8 +803,11 @@ async function upgradeVideo(root, preview) {
   const expectedKey = keyFor(root, preview);
   if (!expectedKey) return false;
 
+  preview.dataset.previewKind = "video";
   preview.dataset.videoHydrating = "true";
+
   const oldBox = preview.querySelector(UNSUPPORTED_BOX);
+
   if (oldBox) {
     oldBox.classList.add("incidencias-modal-video-preparing");
     oldBox.setAttribute("role", "status");
@@ -562,15 +827,22 @@ async function upgradeVideo(root, preview) {
 
   if (!url) {
     preview.dataset.videoHydrating = "false";
+
     if (oldBox?.isConnected) {
       oldBox.classList.remove("incidencias-modal-video-preparing");
-      oldBox.textContent = "No se ha podido preparar el vídeo. El original sigue disponible para descargar.";
+      oldBox.textContent =
+        "No se ha podido preparar el vídeo. El original sigue disponible para descargar.";
     }
+
     return false;
   }
 
   return installVideo(root, preview, url);
 }
+
+/* =========================================================
+   INPUT / FOCUS
+========================================================= */
 
 function trapViewerFocus(event = null) {
   if (!activeViewer?.layer?.isConnected) return false;
@@ -578,13 +850,14 @@ function trapViewerFocus(event = null) {
   if (event.key === "Escape") {
     event.preventDefault();
     event.stopPropagation();
-    closeThroughController();
+    requestViewerClose();
     return true;
   }
 
   if (event.key !== "Tab") return false;
 
   const focusables = visibleFocusables(activeViewer.layer);
+
   if (!focusables.length) {
     event.preventDefault();
     event.stopPropagation();
@@ -622,7 +895,21 @@ function trapViewerFocus(event = null) {
 }
 
 function onClickCapture(event) {
+  const close = event.target?.closest?.(ACTION_CLOSE);
+
+  if (
+    close &&
+    activeViewer?.preview?.contains?.(close) &&
+    !controllerClosePass
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    requestViewerClose();
+    return;
+  }
+
   const open = event.target?.closest?.(ACTION_OPEN);
+
   if (open?.closest?.(ROOT)) {
     rememberOpenIntent(open);
     return;
@@ -630,19 +917,29 @@ function onClickCapture(event) {
 
   if (
     activeViewer?.layer &&
-    (event.target === activeViewer.layer || event.target?.matches?.(VIEWER_STAGE))
+    (
+      event.target === activeViewer.layer ||
+      event.target?.matches?.(VIEWER_STAGE)
+    )
   ) {
     event.preventDefault();
     event.stopPropagation();
-    closeThroughController();
+    requestViewerClose();
   }
 }
+
+/* =========================================================
+   DOM SYNC
+========================================================= */
 
 function syncModalObserver() {
   if (!browser()) return false;
 
   const nextHost = document.querySelector(HOST);
-  if (nextHost === modalHost) return Boolean(nextHost);
+
+  if (nextHost === modalHost) {
+    return Boolean(nextHost);
+  }
 
   modalObserver?.disconnect?.();
   modalObserver = null;
@@ -650,6 +947,7 @@ function syncModalObserver() {
 
   if (modalHost && typeof MutationObserver !== "undefined") {
     modalObserver = new MutationObserver(schedule);
+
     modalObserver.observe(modalHost, {
       childList: true,
       subtree: true,
@@ -668,6 +966,7 @@ function sync() {
   syncModalObserver();
 
   const root = modalHost?.querySelector?.(ROOT) || null;
+
   if (!root) {
     cleanupViewer({ restoreFocus: false });
     return;
@@ -679,15 +978,23 @@ function sync() {
 
   if (preview) {
     adoptPreview(root, preview);
-    if (isVideoPreview(preview)) void upgradeVideo(root, preview);
+
+    if (isVideoPreview(preview)) {
+      void upgradeVideo(root, preview);
+    }
+
     return;
   }
 
-  if (activeViewer?.root === root && activeViewer.preview?.isConnected) {
+  if (
+    activeViewer?.root === root &&
+    activeViewer.preview?.isConnected
+  ) {
     if (active) {
       if (isVideoPreview(activeViewer.preview)) {
         void upgradeVideo(root, activeViewer.preview);
       }
+
       return;
     }
 
@@ -695,30 +1002,53 @@ function sync() {
     return;
   }
 
-  if (!active) cleanupViewer({ restoreFocus: true });
+  if (!active) {
+    cleanupViewer({ restoreFocus: true });
+  }
 }
 
 function schedule() {
   if (!browser() || !mounted || frame) return false;
+
   frame = window.requestAnimationFrame(sync);
   return true;
 }
+
+/* =========================================================
+   LIFECYCLE
+========================================================= */
 
 export function mountIncidenciasVideoPreview() {
   if (!browser() || mounted) return false;
 
   mountRoot = document.querySelector(VIEW) || document.body;
-  if (!mountRoot || typeof MutationObserver === "undefined") return false;
+
+  if (!mountRoot || typeof MutationObserver === "undefined") {
+    return false;
+  }
 
   mounted = true;
 
   document.addEventListener("click", onClickCapture, true);
   document.addEventListener("keydown", trapViewerFocus, true);
-  document.addEventListener("wheel", markUserMovement, { capture: true, passive: true });
-  document.addEventListener("touchmove", markUserMovement, { capture: true, passive: true });
+
+  document.addEventListener("wheel", markUserMovement, {
+    capture: true,
+    passive: true,
+  });
+
+  document.addEventListener("touchmove", markUserMovement, {
+    capture: true,
+    passive: true,
+  });
 
   viewObserver = new MutationObserver(schedule);
-  viewObserver.observe(mountRoot, { childList: true, subtree: true });
+
+  viewObserver.observe(mountRoot, {
+    childList: true,
+    subtree: true,
+  });
+
   schedule();
   return true;
 }
@@ -736,18 +1066,25 @@ export function destroyIncidenciasVideoPreview() {
 
   viewObserver?.disconnect?.();
   modalObserver?.disconnect?.();
+
   viewObserver = null;
   modalObserver = null;
   modalHost = null;
 
-  if (frame) window.cancelAnimationFrame?.(frame);
-  frame = 0;
+  if (frame) {
+    window.cancelAnimationFrame?.(frame);
+  }
 
+  frame = 0;
+  clearCloseTimer();
   cleanupViewer({ restoreFocus: false });
+
   cache.clear();
   inflight.clear();
+
   pendingOpen = null;
   mountRoot = null;
+
   return true;
 }
 
@@ -756,23 +1093,29 @@ export function getIncidenciasVideoPreviewSnapshot() {
     version: INCIDENCIAS_VIDEO_PREVIEW_VERSION,
     mounted,
     viewerOpen: Boolean(activeViewer?.layer?.isConnected),
+    viewerState: text(activeViewer?.layer?.dataset?.viewerState, "closed"),
     modalMounted: Boolean(modalHost?.isConnected),
     cacheEntries: cache.size,
     inflight: inflight.size,
+
     policy: Object.freeze({
       controllerOwnsOpenClose: true,
       canonicalViewEndpointOnly: true,
       privateBlobLocatorRejectedByApi: true,
       separateFullscreenViewer: true,
+      mediaFitsViewport: true,
+      outerMediaScrollDisabled: true,
       ticketScrollPreserved: true,
       backgroundPanelInert: true,
       viewerFocusTrap: true,
       escapeClosesViewer: true,
       backdropClosesViewer: true,
       openerFocusRestored: true,
+      symmetricOpenCloseMotion: true,
       nativeVideo: true,
       iphoneMov: true,
       firstFramePrime: true,
+      intrinsicVideoRatio: true,
       codecFallback: true,
       sasExpiryRetry: true,
       noScrollApiMonkeyPatch: true,

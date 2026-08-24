@@ -2,7 +2,7 @@
    Onion Support - Facturas API
    Archivo: /src/views/facturas/facturas.api.js
 
-   PRODUCTIVO v5:
+   PRODUCTIVO v6:
    - HTTP único vía core/http.js.
    - Sin DOM, sin Router, sin Store, sin fetch propio.
    - Listado paginado backend-first.
@@ -12,11 +12,13 @@
    - AbortSignal propagada hasta core/http.js.
    - PDF cerrado: pide JSON al backend con json=true y resuelve SAS
      anidada file/pdf/blob sin eliminar query sig/SAS.
+   - Registro de pago mediante command endpoint dedicado, no PATCH genérico.
 ========================================================= */
 
 import Http from "../../core/http.js";
 
-export const FACTURAS_API_VERSION = "facturas.api.production.v5.domain-array-safe";
+export const FACTURAS_API_VERSION =
+  "facturas.api.production.v6.admin-payment-command";
 
 /* =========================================================
    ENDPOINTS / TIMEOUTS
@@ -31,6 +33,7 @@ export const FACTURAS_DETAIL_TIMEOUT = 18000;
 export const FACTURAS_CREATE_TIMEOUT = 45000;
 export const FACTURAS_PDF_TIMEOUT = 45000;
 export const FACTURAS_SEND_TIMEOUT = 30000;
+export const FACTURAS_PAYMENT_TIMEOUT = 20000;
 
 export const FACTURAS_DEFAULT_PAGE = 1;
 export const FACTURAS_DEFAULT_LIMIT = 100;
@@ -328,6 +331,10 @@ export function getFacturaDownloadEndpoint(id = "") {
 
 export function getFacturaSendEndpoint(id = "") {
   return `${getFacturaEndpoint(id)}/send`;
+}
+
+export function getFacturaMarkPaidEndpoint(id = "") {
+  return `${getFacturaEndpoint(id)}/pago`;
 }
 
 export function getFacturaPdfEndpoint(id = "", mode = FACTURA_PDF_MODES.DOWNLOAD) {
@@ -1350,7 +1357,7 @@ export async function loadFacturasStats(options = {}) {
 }
 
 /* =========================================================
-   CREATE / UPDATE / DELETE / SEND
+   CREATE / UPDATE / DELETE / SEND / PAYMENT
 ========================================================= */
 
 export async function createFacturaRequest(payload = {}, options = {}) {
@@ -1469,6 +1476,52 @@ export async function sendFactura(id = "", payload = {}, options = {}) {
   }
 
   return sentItem || response;
+}
+
+export async function markFacturaPaidRequest(
+  id = "",
+  payload = {},
+  options = {}
+) {
+  const response = await postJson(
+    getFacturaMarkPaidEndpoint(id),
+    safeObject(payload),
+    {
+      timeout: options.timeout || FACTURAS_PAYMENT_TIMEOUT,
+      signal: options.signal,
+      source: "views.facturas.mark-paid"
+    }
+  );
+
+  return normalizeFacturaDetailResponse(response);
+}
+
+export async function markFacturaPaid(
+  id = "",
+  payload = {},
+  options = {}
+) {
+  const response = await markFacturaPaidRequest(id, payload, options);
+  const paid = response.item;
+
+  if (paid) {
+    const stableId = getFacturaStableId(paid);
+    const normalizedPaid = normalizeFactura(paid);
+    let found = false;
+
+    const nextItems = lastList.items.map((item) => {
+      if (getFacturaStableId(item) !== stableId) return item;
+      found = true;
+      return normalizedPaid;
+    });
+
+    lastList = {
+      ...lastList,
+      items: found ? nextItems : mergeById([normalizedPaid, ...nextItems])
+    };
+  }
+
+  return paid;
 }
 
 /* =========================================================
@@ -1713,7 +1766,9 @@ export function getFacturasApiSnapshot() {
       propagatesAbortSignal: true,
       dedupeInflightRequests: true,
       pdfJsonSasContract: true,
-      preservesSignedUrls: true
+      preservesSignedUrls: true,
+      explicitAdminPaymentCommand: true,
+      noGenericPatchForPayment: true
     }
   };
 }
@@ -1730,6 +1785,7 @@ export const createInvoice = createFactura;
 export const updateInvoice = updateFactura;
 export const patchInvoice = patchFactura;
 export const removeInvoice = removeFactura;
+export const markInvoicePaid = markFacturaPaid;
 
 export const downloadFactura = downloadFacturaPdfRequest;
 export const viewFactura = viewFacturaPdfRequest;
@@ -1750,7 +1806,8 @@ export const FacturasApi = Object.freeze({
     detail: FACTURAS_DETAIL_TIMEOUT,
     create: FACTURAS_CREATE_TIMEOUT,
     pdf: FACTURAS_PDF_TIMEOUT,
-    send: FACTURAS_SEND_TIMEOUT
+    send: FACTURAS_SEND_TIMEOUT,
+    payment: FACTURAS_PAYMENT_TIMEOUT
   }),
 
   defaults: Object.freeze({
@@ -1764,6 +1821,7 @@ export const FacturasApi = Object.freeze({
   getFacturaViewEndpoint,
   getFacturaDownloadEndpoint,
   getFacturaSendEndpoint,
+  getFacturaMarkPaidEndpoint,
   getFacturaPdfEndpoint,
 
   buildFacturasListEndpoint,
@@ -1811,6 +1869,10 @@ export const FacturasApi = Object.freeze({
 
   sendFacturaRequest,
   sendFactura,
+
+  markFacturaPaidRequest,
+  markFacturaPaid,
+  markInvoicePaid,
 
   viewFacturaPdfRequest,
   downloadFacturaPdfRequest,

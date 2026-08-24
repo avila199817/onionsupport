@@ -50,25 +50,18 @@ function object(value) {
 
 function appState() {
   try {
-    return object(AppCore?.getState?.()) || object(AppCore?.state) || {};
+    return object(AppCore?.runtimeState?.read?.()) || {};
   } catch {
-    return object(AppCore?.state) || {};
+    return {};
   }
 }
 
-function currentUser() {
-  const state = appState();
+function currentUser(state = {}) {
   return object(state.currentUser) || object(state.user);
 }
 
-function authenticated() {
-  const state = appState();
-
-  try {
-    return state.authenticated === true || AppCore?.isAuthenticated?.() === true;
-  } catch {
-    return state.authenticated === true;
-  }
+function authenticated(state = {}) {
+  return state.authenticated === true;
 }
 
 function safePath(value = "", fallback = "/") {
@@ -85,14 +78,13 @@ function safePath(value = "", fallback = "/") {
   }
 }
 
-function panelPath(link = null) {
+function panelPath(link = null, state = {}) {
   const stored = safePath(link?.dataset?.publicHomeAccountHome || "", "");
   if (stored) return stored;
 
   const fromLink = safePath(link?.getAttribute?.("href") || "", "");
   if (fromLink && fromLink !== "/login") return fromLink;
 
-  const state = appState();
   const fromState = safePath(
     state.homePath || state.defaultHome || state.postLoginTarget || "",
     ""
@@ -100,7 +92,7 @@ function panelPath(link = null) {
 
   if (fromState) return fromState;
 
-  const user = currentUser();
+  const user = currentUser(state);
   const slug = text(user?.slug || user?.username || user?.usernameLower || "")
     .replace(/^@+/, "")
     .replace(/[^a-zA-Z0-9._-]/g, "");
@@ -282,7 +274,7 @@ function resetAccountWrapper(link = null) {
   return true;
 }
 
-function ensureAccountMenu(root = null) {
+function ensureAccountMenu(root = null, state = {}) {
   if (!root) return false;
 
   const actions = root.querySelector(".public-home-nav-actions");
@@ -290,7 +282,7 @@ function ensureAccountMenu(root = null) {
   if (!actions || !link) return false;
 
   const isAccount =
-    authenticated() ||
+    authenticated(state) ||
     root.dataset.publicSupportAuthenticated === "true" ||
     link.dataset.publicSupportAccount === "true";
 
@@ -299,7 +291,7 @@ function ensureAccountMenu(root = null) {
     return false;
   }
 
-  const home = panelPath(link);
+  const home = panelPath(link, state);
   link.dataset.publicHomeAccountHome = home;
 
   let wrapper = link.closest(ACCOUNT_WRAP);
@@ -556,11 +548,11 @@ function polishInlineIcons(root = null) {
   return icons.length > 0;
 }
 
-function enhance(root = null) {
+function enhance(root = null, state = {}) {
   if (!root || destroyed) return false;
 
   removeFooterLogin(root);
-  ensureAccountMenu(root);
+  ensureAccountMenu(root, state);
   compactAccountIdentity(root);
   enforceHeaderActionOrder(root);
   enhancePhone(root);
@@ -573,10 +565,14 @@ function enhance(root = null) {
 function scan() {
   if (destroyed || typeof document === "undefined") return false;
 
+  const roots = document.querySelectorAll(HOME);
+  if (!roots.length) return false;
+
+  const state = appState();
   let found = false;
 
-  document.querySelectorAll(HOME).forEach((root) => {
-    found = enhance(root) || found;
+  roots.forEach((root) => {
+    found = enhance(root, state) || found;
   });
 
   return found;

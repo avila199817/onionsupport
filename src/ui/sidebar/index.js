@@ -47,7 +47,7 @@ import {
 } from "./template.js";
 
 export const SIDEBAR_VERSION =
-  "sidebar.controller.v4-canonical-media";
+  "sidebar.controller.v5-native-runtime-state";
 
 const SIDEBAR_ROOT_ID =
   "app-sidebar";
@@ -567,23 +567,19 @@ function readCoreState() {
   try {
     if (
       isFunction(
-        AppCore?.getState
+        AppCore?.runtimeState?.read
       )
     ) {
       return (
-        AppCore.getState() ||
+        AppCore.runtimeState.read() ||
         {}
       );
     }
   } catch {
-    // fallback abajo
+    // noop
   }
 
-  return isObject(
-    AppCore?.state
-  )
-    ? AppCore.state
-    : {};
+  return {};
 }
 
 function getAuth() {

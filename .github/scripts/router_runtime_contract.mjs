@@ -6,7 +6,7 @@ import { Router, ROUTER_VERSION } from "../../src/router/index.js";
 
 assert.equal(
   ROUTER_VERSION,
-  "router.minimal.v12-phase-attribution"
+  "router.minimal.v13-single-route-resolution"
 );
 
 assert.equal(
@@ -41,6 +41,7 @@ assert.equal(snapshot.policy.staleCommitProtection, true);
 assert.equal(snapshot.policy.samePendingNavigationDedup, true);
 assert.equal(snapshot.policy.nativeRoutePhaseTelemetry, true);
 assert.equal(snapshot.policy.opaqueNavigationPerformanceIds, true);
+assert.equal(snapshot.policy.singleRouteResolutionPerTransition, true);
 
 const source = await readFile("src/router/index.js", "utf8");
 
@@ -124,6 +125,29 @@ assert.equal(source.includes('"chrome"'), true);
 assert.equal(source.includes('"resolve"'), true);
 assert.equal(source.includes('"guard"'), true);
 assert.equal(source.includes('"auth-wait"'), true);
+
+const executeRenderStart = source.indexOf("async function executeRender(");
+const executeRenderEnd = source.indexOf("\nfunction render(", executeRenderStart);
+assert.ok(
+  executeRenderStart >= 0 && executeRenderEnd > executeRenderStart,
+  "Router contract must isolate executeRender()"
+);
+const executeRenderSource = source.slice(executeRenderStart, executeRenderEnd);
+assert.equal(
+  (executeRenderSource.match(/\bgetRouteMatch\s*\(/g) || []).length,
+  1,
+  "each Router transition must resolve the route exactly once"
+);
+assert.equal(
+  (executeRenderSource.match(/\bsetRoutePending\s*\(/g) || []).length,
+  1,
+  "each Router transition must publish pending route state exactly once"
+);
+assert.equal(
+  executeRenderSource.includes("refreshResolveStartedAt"),
+  false,
+  "Router must not retain the redundant post-auth route resolution"
+);
 
 const phaseCallStart = source.indexOf("module.recordRoutePhase({");
 assert.notEqual(

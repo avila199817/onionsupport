@@ -44,7 +44,7 @@ import * as Routes from "./routes.js";
 import RouteStyles from "./styles.js";
 
 export const ROUTER_VERSION =
-  "router.minimal.v12-phase-attribution";
+  "router.minimal.v13-single-route-resolution";
 
 const PUBLIC_HOME_PATH = "/";
 
@@ -5102,7 +5102,7 @@ async function executeRender(
   const initialResolveStartedAt =
     performanceNow();
 
-  let match =
+  const match =
     getRouteMatch(
       path
     );
@@ -5199,61 +5199,6 @@ async function executeRender(
             ? "aborted"
             : "stale",
       };
-    }
-
-    /*
-      Auth pudo cambiar durante la espera.
-      Re-resolvemos ruta y guard con estado fresco.
-    */
-    const refreshResolveStartedAt =
-      performanceNow();
-
-    match =
-      getRouteMatch(
-        path
-      );
-
-    setTransitionPerformanceView(
-      transition,
-      match.route
-    );
-
-    recordTransitionPhase(
-      transition,
-      match.route,
-      "resolve",
-      refreshResolveStartedAt
-    );
-
-    setRoutePending(
-      match,
-      options,
-      seq
-    );
-
-    if (
-      hasSensitiveQuery(
-        match.publicPath
-      ) &&
-      !routeAllowsSensitiveQuery(
-        match.route
-      )
-    ) {
-      const cleanPath =
-        stripSensitiveQuery(
-          match.publicPath
-        );
-
-      if (
-        cleanPath !==
-        match.publicPath
-      ) {
-        return redirectTo(
-          cleanPath,
-          options,
-          "scrub-sensitive-query"
-        );
-      }
     }
 
     if (
@@ -6165,6 +6110,9 @@ function getSnapshot() {
           true,
 
         opaqueNavigationPerformanceIds:
+          true,
+
+        singleRouteResolutionPerTransition:
           true,
       }),
   });

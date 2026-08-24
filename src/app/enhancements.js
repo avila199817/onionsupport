@@ -12,11 +12,12 @@
    - Aislar fallos de una mejora progresiva para no tumbar el arranque principal.
    - Evitar scripts globales dispersos en index.html.
    - Core/Auth/HTTP optimizan runtime de forma nativa; sin shim de monkey-patching.
+   - Optimizar navegación por intención y medir el rendering path sólo en memoria.
    - Sin Auth, Router, HTTP, Store ni lógica de dominio propia.
 ========================================================= */
 
 export const APP_ENHANCEMENTS_VERSION =
-  "app.enhancements.v13-native-runtime-state";
+  "app.enhancements.v14-navigation-critical-path";
 
 const PRE_ROUTER = Object.freeze([
   Object.freeze({
@@ -30,6 +31,16 @@ const PRE_ROUTER = Object.freeze([
 ]);
 
 const POST_ROUTER = Object.freeze([
+  Object.freeze({
+    key: "runtime-performance",
+    scope: "global",
+    load: () => import("../features/runtime-performance/index.js"),
+  }),
+  Object.freeze({
+    key: "route-intent-preload",
+    scope: "global",
+    load: () => import("../features/route-intent-preload/index.js"),
+  }),
   Object.freeze({
     key: "mobile-datalist",
     scope: "global",
@@ -445,6 +456,8 @@ export function getAppEnhancementsSnapshot() {
       routeCommitLazyLoading: true,
       rapidNavigationCoalescing: true,
       speculativeRoutePreload: false,
+      routeIntentPreload: true,
+      localRuntimePerformance: true,
       routeHostOnlyObservation: true,
       mutationObserverFallback: true,
     }),

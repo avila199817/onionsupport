@@ -8,11 +8,14 @@
 import { AppCore } from "../../core/index.js";
 
 export const RUNTIME_PERFORMANCE_VERSION =
-  "runtime-performance.v1-navigation-rendering";
+  "runtime-performance.v2-committed-host-lifecycle";
 
 const MAX_SAMPLES = 64;
 const ROUTE_HOST_SELECTOR = ".route-view-host, [data-route-host='true']";
-const NAV_LINK_SELECTOR = "a[data-spa], a[data-route]";
+const ROUTE_COMMITTED_SELECTOR =
+  "[data-route-host='true'][data-route-host-state='ready']:not([hidden])";
+const NAV_LINK_SELECTOR =
+  "a[data-spa], a[data-route], a[href^='/'], [data-router-link]";
 const NAVIGATION_TIMEOUT_MS = 10000;
 
 const samples = {
@@ -27,8 +30,10 @@ const state = {
   routeCommits: 0,
   pendingNavigationAt: null,
   pendingNavigationSource: null,
+  pendingNavigationViewKey: null,
   cls: 0,
   lcp: null,
+  lcpFinalized: false,
   firstPaint: null,
   firstContentfulPaint: null,
   navigation: null,
@@ -36,6 +41,8 @@ const state = {
 
 const observers = [];
 let routeObserver = null;
+let lastCommittedHost = null;
+let navigationTimeout = 0;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -51,6 +58,14 @@ function now() {
   } catch {
     return 0;
   }
+}
+
+function cleanMetricKey(value = "") {
+  const key = String(value ?? "")
+    .replace(/[\r\n\t]/g, "")
+    .trim();
+
+  return /^[a-z0-9._:-]{1,96}$/i.test(key) ? key : "";
 }
 
 function pushSample(name, value) {
@@ -133,6 +148,18 @@ function installPerformanceObserver(type, callback, options = {}) {
   }
 }
 
+function finalizeLcp() {
+  state.lcpFinalized = true;
+}
+
+function onVisibilityChange() {
+  if (document.visibilityState === "hidden") finalizeLcp();
+}
+
+function onPageHide() {
+  finalizeLcp();
+}
+
 function installWebVitalObservers() {
   installPerformanceObserver("longtask", (entry) => {
     pushSample("longTasks", entry.duration);
@@ -151,13 +178,18 @@ function installWebVitalObservers() {
   }, { buffered: true });
 
   installPerformanceObserver("largest-contentful-paint", (entry) => {
-    state.lcp = safeDuration(entry.startTime);
+    if (!state.lcpFinalized) {
+      state.lcp = safeDuration(entry.startTime);
+    }
   }, { buffered: true });
 
   installPerformanceObserver("paint", (entry) => {
     if (entry.name === "first-paint") state.firstPaint = safeDuration(entry.startTime);
     if (entry.name === "first-contentful-paint") state.firstContentfulPaint = safeDuration(entry.startTime);
   }, { buffered: true });
+
+  document.addEventListener("visibilitychange", onVisibilityChange, true);
+  window.addEventListener("pagehide", onPageHide, { passive: true });
 }
 
 function routeObservationRoot() {
@@ -179,12 +211,86 @@ function nodeIsRouteHost(node = null) {
   );
 }
 
-function mutationHasRouteHost(mutation = null) {
+function mutationTouchesRouteHost(mutation = null) {
   if (mutation?.type !== "childList") return false;
-  return [...mutation.addedNodes].some(nodeIsRouteHost);
+  return [...mutation.addedNodes, ...mutation.removedNodes].some(nodeIsRouteHost);
 }
 
-function scheduleCommitPaint(commitAt) {
+export function isCommittedRouteHost(host = null) {
+  return Boolean(
+    host &&
+    host.hidden !== true &&
+    host?.dataset?.routeHost === "true" &&
+    host?.dataset?.routeHostState === "ready"
+  );
+}
+
+export function shouldRecordRouteCommit(host = null, previousHost = null) {
+  return isCommittedRouteHost(host) && host !== previousHost;
+}
+
+function currentCommittedRouteHost() {
+  if (!isBrowser()) return null;
+
+  try {
+    const host = document.querySelector(ROUTE_COMMITTED_SELECTOR);
+    return isCommittedRouteHost(host) ? host : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearNavigationIntent() {
+  if (navigationTimeout && isBrowser()) {
+    window.clearTimeout(navigationTimeout);
+  }
+
+  navigationTimeout = 0;
+  state.pendingNavigationAt = null;
+  state.pendingNavigationSource = null;
+  state.pendingNavigationViewKey = null;
+}
+
+function beginNavigationIntent(source = "navigation", viewKey = "") {
+  const safeViewKey = cleanMetricKey(viewKey);
+  if (!safeViewKey) {
+    clearNavigationIntent();
+    return false;
+  }
+
+  clearNavigationIntent();
+
+  state.pendingNavigationAt = now();
+  state.pendingNavigationSource = cleanMetricKey(source) || "navigation";
+  state.pendingNavigationViewKey = safeViewKey;
+
+  if (isBrowser()) {
+    navigationTimeout = window.setTimeout(
+      clearNavigationIntent,
+      NAVIGATION_TIMEOUT_MS
+    );
+  }
+
+  return true;
+}
+
+function pendingRouterViewKey() {
+  if (!isBrowser()) return "";
+
+  try {
+    const root = document.documentElement;
+    if (root?.dataset?.routePending !== "true") return "";
+    return cleanMetricKey(root?.dataset?.routePendingView);
+  } catch {
+    return "";
+  }
+}
+
+function captureRouterPendingNavigation(source = "navigation") {
+  return beginNavigationIntent(source, pendingRouterViewKey());
+}
+
+function scheduleCommitPaint(commitAt, host) {
   if (!isBrowser()) return;
 
   const raf = isFunction(window.requestAnimationFrame)
@@ -193,16 +299,31 @@ function scheduleCommitPaint(commitAt) {
 
   raf(() => {
     raf(() => {
+      if (
+        host !== lastCommittedHost ||
+        host?.isConnected === false ||
+        !isCommittedRouteHost(host)
+      ) {
+        return;
+      }
+
       pushSample("commitToPaint", Math.max(0, now() - commitAt));
     });
   });
 }
 
-function recordRouteCommit() {
+function recordRouteCommit(host = null) {
+  if (!shouldRecordRouteCommit(host, lastCommittedHost)) return false;
+
   const commitAt = now();
+  const committedViewKey = cleanMetricKey(host?.dataset?.viewKey);
+
+  lastCommittedHost = host;
   state.routeCommits += 1;
 
   if (
+    committedViewKey &&
+    committedViewKey === state.pendingNavigationViewKey &&
     Number.isFinite(state.pendingNavigationAt) &&
     commitAt >= state.pendingNavigationAt &&
     commitAt - state.pendingNavigationAt <= NAVIGATION_TIMEOUT_MS
@@ -210,9 +331,13 @@ function recordRouteCommit() {
     pushSample("intentToCommit", commitAt - state.pendingNavigationAt);
   }
 
-  state.pendingNavigationAt = null;
-  state.pendingNavigationSource = null;
-  scheduleCommitPaint(commitAt);
+  clearNavigationIntent();
+  scheduleCommitPaint(commitAt, host);
+  return true;
+}
+
+function recordCurrentRouteCommit() {
+  return recordRouteCommit(currentCommittedRouteHost());
 }
 
 function installRouteObserver() {
@@ -223,8 +348,11 @@ function installRouteObserver() {
   const root = routeObservationRoot();
   if (!root) return false;
 
+  lastCommittedHost = currentCommittedRouteHost();
+
   routeObserver = new MutationObserver((mutations) => {
-    if (mutations.some(mutationHasRouteHost)) recordRouteCommit();
+    if (!mutations.some(mutationTouchesRouteHost)) return;
+    recordCurrentRouteCommit();
   });
 
   routeObserver.observe(root, { childList: true, subtree: false });
@@ -239,21 +367,36 @@ function closestNavLink(target = null) {
   }
 }
 
-function beginNavigationIntent(source = "navigation") {
-  state.pendingNavigationAt = now();
-  state.pendingNavigationSource = String(source || "navigation");
+function queueMicrotaskSafe(callback) {
+  if (typeof queueMicrotask === "function") {
+    queueMicrotask(callback);
+    return;
+  }
+
+  Promise.resolve().then(callback).catch(() => null);
 }
 
 function onClick(event) {
-  if (event?.defaultPrevented) return;
   if (event?.button !== undefined && event.button !== 0) return;
   if (event?.metaKey || event?.ctrlKey || event?.shiftKey || event?.altKey) return;
   if (!closestNavLink(event?.target)) return;
-  beginNavigationIntent("click");
+
+  /*
+    Runtime Performance se instala después del Router. Un click SPA aceptado
+    ya llega con preventDefault() y routePending activado por el Router.
+    Diferimos una microtarea para leer únicamente el viewKey seguro.
+  */
+  if (event?.defaultPrevented !== true) return;
+
+  queueMicrotaskSafe(() => {
+    captureRouterPendingNavigation("click");
+  });
 }
 
 function onPopState() {
-  beginNavigationIntent("popstate");
+  queueMicrotaskSafe(() => {
+    captureRouterPendingNavigation("popstate");
+  });
 }
 
 export function initRuntimePerformance() {
@@ -282,9 +425,13 @@ export function destroyRuntimePerformance() {
 
   document.removeEventListener("click", onClick, true);
   window.removeEventListener("popstate", onPopState);
+  document.removeEventListener("visibilitychange", onVisibilityChange, true);
+  window.removeEventListener("pagehide", onPageHide);
 
   routeObserver?.disconnect?.();
   routeObserver = null;
+  lastCommittedHost = null;
+  clearNavigationIntent();
 
   for (const observer of observers.splice(0)) {
     try { observer.disconnect?.(); } catch {}
@@ -303,6 +450,7 @@ export function getRuntimePerformanceSnapshot() {
       firstPaint: state.firstPaint,
       firstContentfulPaint: state.firstContentfulPaint,
       lcp: state.lcp,
+      lcpFinalized: state.lcpFinalized,
       cls: state.cls,
     }),
     routeCommits: state.routeCommits,
@@ -319,6 +467,11 @@ export function getRuntimePerformanceSnapshot() {
       userIdentifiers: false,
       boundedSamples: true,
       routeHostOnlyObservation: true,
+      visibleCommittedHostOnly: true,
+      pendingViewKeyMatch: true,
+      stalePaintDrop: true,
+      interactionMetric: "event-duration-not-inp",
+      lcpLifecycleAware: true,
     }),
   });
 }

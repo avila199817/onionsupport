@@ -63,20 +63,22 @@ const sourceFiles = [
   "src/features/runtime-performance/index.js",
 ];
 
+const forbiddenPatterns = [
+  ["fetch() call", /(^|[^A-Za-z0-9_$])fetch\s*\(/m],
+  ["XMLHttpRequest", /\bXMLHttpRequest\b/],
+  ["sendBeacon", /\bsendBeacon\b/],
+  ["localStorage", /\blocalStorage\b/],
+  ["sessionStorage", /\bsessionStorage\b/],
+  ["indexedDB", /\bindexedDB\b/],
+];
+
 for (const file of sourceFiles) {
   const text = await readFile(file, "utf8");
-  for (const forbidden of [
-    "fetch(",
-    "XMLHttpRequest",
-    "sendBeacon",
-    "localStorage",
-    "sessionStorage",
-    "indexedDB",
-  ]) {
+  for (const [label, pattern] of forbiddenPatterns) {
     assert.equal(
-      text.includes(forbidden),
+      pattern.test(text),
       false,
-      `${file} must not contain ${forbidden}`
+      `${file} must not contain ${label}`
     );
   }
 }

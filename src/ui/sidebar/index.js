@@ -47,7 +47,7 @@ import {
 } from "./template.js";
 
 export const SIDEBAR_VERSION =
-  "sidebar.controller.v5-native-runtime-state";
+  "sidebar.controller.v6-committed-route-context";
 
 const SIDEBAR_ROOT_ID =
   "app-sidebar";
@@ -1590,7 +1590,14 @@ function getCurrentRoute(
   }
 }
 
-function getContext() {
+function getContext(
+  options = {}
+) {
+  const supplied =
+    isObject(options)
+      ? options
+      : {};
+
   const state =
     readCoreState();
 
@@ -1627,13 +1634,17 @@ function getContext() {
     );
 
   const publicPath =
+    supplied.publicPath ||
     currentPublicPath(
       state
     );
 
   const canonicalPath =
-    currentCanonicalPath(
-      state
+    normalizePath(
+      supplied.canonicalPath ||
+      currentCanonicalPath(
+        state
+      )
     );
 
   return {
@@ -1665,6 +1676,7 @@ function getContext() {
     canonicalPath,
 
     route:
+      supplied.route ||
       getCurrentRoute(
         publicPath,
         canonicalPath
@@ -2502,13 +2514,17 @@ function renderSidebar(
   return SidebarUI;
 }
 
-function sync() {
+function sync(
+  options = {}
+) {
   if (!isBrowser()) {
     return SidebarUI;
   }
 
   return renderSidebar(
-    getContext()
+    getContext(
+      options
+    )
   );
 }
 

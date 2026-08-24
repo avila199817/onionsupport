@@ -28,7 +28,7 @@ import {
 
 assert.equal(
   APP_ENHANCEMENTS_VERSION,
-  "app.enhancements.v15-committed-route-sync"
+  "app.enhancements.v17-incidencias-live-media"
 );
 assert.equal(
   ROUTE_INTENT_PRELOAD_VERSION,

@@ -1,0 +1,59 @@
+name: Finalize paid invoice client production
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/_finalize-paid-invoice-client-production.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: finalize-paid-invoice-client-production
+  cancel-in-progress: false
+
+jobs:
+  validate-and-integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Use Node.js 22.22.2
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.2
+
+      - name: Apply production hardening
+        run: python3 tools/patch-paid-finalization-client-production.py
+
+      - name: Validate syntax and contract
+        run: |
+          set -euo pipefail
+          node --check src/views/facturas/facturas.api.js
+          node --check src/features/facturas-paid-confirm/index.js
+          node --check src/app/enhancements.js
+          git diff --check
+          git status --short
+
+      - name: Remove bootstrap helpers
+        run: |
+          git rm .github/workflows/_finalize-paid-invoice-client-production.yml
+          git rm tools/patch-paid-finalization-client-production.py
+
+      - name: Commit production integration
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/views/facturas/facturas.api.js
+          git add -u
+          git commit -m "fix(facturas): align paid finalization client timeout"
+          git push origin HEAD:main

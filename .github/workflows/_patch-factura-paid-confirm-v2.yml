@@ -1,0 +1,807 @@
+name: Patch paid invoice confirmation v2
+
+on:
+  push:
+    branches:
+      - feature/factura-paid-confirm-v2
+    paths:
+      - '.github/workflows/_patch-factura-paid-confirm-v2.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/factura-paid-confirm-v2
+          fetch-depth: 0
+
+      - name: Apply exact source patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          def read(path):
+              return Path(path).read_text(encoding="utf-8")
+
+          def write(path, text):
+              Path(path).write_text(text, encoding="utf-8")
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected 1 occurrence, found {count}")
+              return text.replace(old, new, 1)
+
+          # ==================================================
+          # FACTURA DETAIL TEMPLATE
+          # ==================================================
+          path = "src/views/facturas/facturas.template.modal.js"
+          text = read(path)
+
+          text = replace_once(
+              text,
+              '  "facturas.template.modal.productivo.v4.admin-payment";\n',
+              '  "facturas.template.modal.productivo.v5.paid-confirm-finalization";\n',
+              "modal template version",
+          )
+
+          text = replace_once(
+              text,
+              '''  MARK_PAID: "mark-factura-paid",\n  OPEN_INCIDENCIA: "open-incidencia",\n''',
+              '''  MARK_PAID: "mark-factura-paid",\n  MARK_PAID_CONFIRM: "confirm-factura-paid",\n  MARK_PAID_CANCEL: "cancel-factura-paid",\n  OPEN_INCIDENCIA: "open-incidencia",\n''',
+              "modal payment actions",
+          )
+
+          paid_helper = '''function isFacturaPaymentFinalized(\n  factura = {}\n) {\n  const sources = getPayloadSources(factura);\n\n  const status = normalizeKey(\n    firstFromSources(\n      sources,\n      [\n        "payment.finalization.status",\n        "paymentFinalization.status",\n        "finalization.status",\n      ]\n    )\n  );\n\n  const documentStatus = normalizeKey(\n    firstFromSources(\n      sources,\n      [\n        "payment.finalization.document.status",\n        "paymentFinalization.document.status",\n        "finalization.document.status",\n      ]\n    )\n  );\n\n  const deliveryStatus = normalizeKey(\n    firstFromSources(\n      sources,\n      [\n        "payment.finalization.delivery.status",\n        "paymentFinalization.delivery.status",\n        "finalization.delivery.status",\n      ]\n    )\n  );\n\n  return (\n    status === "completed" &&\n    documentStatus === "ready" &&\n    deliveryStatus === "sent"\n  );\n}\n\n'''
+          text = replace_once(
+              text,
+              'function getEstadoPagoTone(\n',
+              paid_helper + 'function getEstadoPagoTone(\n',
+              "payment finalized helper",
+          )
+
+          text = replace_once(
+              text,
+              '''  const alreadyPaid =\n    isFacturaPaid(\n      factura\n    );\n\n  const canMarkPaid =\n    Boolean(\n      admin &&\n      facturaId &&\n      !alreadyPaid\n    );\n''',
+              '''  const alreadyPaid =\n    isFacturaPaid(\n      factura\n    );\n\n  const paymentFinalized =\n    isFacturaPaymentFinalized(\n      factura\n    );\n\n  const canMarkPaid =\n    Boolean(\n      admin &&\n      facturaId &&\n      (!alreadyPaid || !paymentFinalized)\n    );\n\n  const paymentActionLabel =\n    alreadyPaid\n      ? "Finalizar factura"\n      : "Marcar pagada";\n\n  const paymentActionTitle =\n    alreadyPaid\n      ? "Regenerar la factura definitiva pagada y completar su envío"\n      : "Registrar el cobro y generar la factura definitiva pagada";\n''',
+              "payment action eligibility",
+          )
+
+          old_button = '''              title="Registrar el cobro completo de esta factura"\n              aria-label="Marcar factura como pagada"\n              ${disabledAttrs(\n                busy,\n                markingPaid\n              )}\n            >\n              ${\n                markingPaid\n                  ? renderActionSpinner(\n                      "Registrando..."\n                    )\n                  : `\n                    <span class="facturas-detail-btn-icon">\n                      ${icon("check")}\n                    </span>\n                    <span>Marcar pagada</span>\n                  `\n              }\n'''
+          new_button = '''              title="${attr(paymentActionTitle)}"\n              aria-label="${attr(paymentActionTitle)}"\n              data-payment-finalized="${paymentFinalized ? "true" : "false"}"\n              data-payment-already-paid="${alreadyPaid ? "true" : "false"}"\n              ${disabledAttrs(\n                busy,\n                markingPaid\n              )}\n            >\n              ${\n                markingPaid\n                  ? renderActionSpinner(\n                      alreadyPaid\n                        ? "Finalizando..."\n                        : "Registrando..."\n                    )\n                  : `\n                    <span class="facturas-detail-btn-icon">\n                      ${icon("check")}\n                    </span>\n                    <span>${escapeHtml(paymentActionLabel)}</span>\n                  `\n              }\n'''
+          text = replace_once(text, old_button, new_button, "payment action button")
+
+          confirm_renderer = '''function renderPaymentConfirmDialog({\n  factura = {},\n  open = false,\n  markingPaid = false,\n} = {}) {\n  if (!open) return "";\n\n  const facturaId = getFacturaId(factura);\n  const numero = getFacturaNumero(factura);\n  const moneda = getFacturaMoneda(factura);\n  const total = getFacturaTotal(factura);\n  const email = getClienteEmail(factura);\n  const alreadyPaid = isFacturaPaid(factura);\n\n  const title = alreadyPaid\n    ? "Finalizar factura pagada"\n    : "Confirmar cobro completo";\n\n  const intro = alreadyPaid\n    ? "El pago ya consta registrado. Vamos a reparar o completar la versión definitiva de la factura."\n    : "Se registrará el pago completo y la factura pasará a estado Pagada.";\n\n  const confirmLabel = alreadyPaid\n    ? "Finalizar y enviar"\n    : "Marcar pagada y enviar";\n\n  return `\n    <div\n      class="facturas-payment-confirm-overlay"\n      data-facturas-payment-confirm-overlay="true"\n    >\n      <section\n        class="facturas-payment-confirm-dialog"\n        data-facturas-payment-confirm-dialog="true"\n        role="dialog"\n        aria-modal="true"\n        aria-labelledby="facturas-payment-confirm-title"\n        aria-describedby="facturas-payment-confirm-description"\n        tabindex="-1"\n      >\n        <div class="facturas-payment-confirm-icon" aria-hidden="true">\n          ${icon("check")}\n        </div>\n\n        <div class="facturas-payment-confirm-copy">\n          <span class="facturas-payment-confirm-eyebrow">\n            Facturación · Confirmación\n          </span>\n\n          <h3\n            id="facturas-payment-confirm-title"\n            class="facturas-payment-confirm-title"\n          >${escapeHtml(title)}</h3>\n\n          <p\n            id="facturas-payment-confirm-description"\n            class="facturas-payment-confirm-text"\n          >${escapeHtml(intro)}</p>\n        </div>\n\n        <div class="facturas-payment-confirm-summary">\n          <div class="facturas-payment-confirm-summary-item">\n            <span>Factura</span>\n            <strong>${escapeHtml(numero)}</strong>\n          </div>\n\n          <div class="facturas-payment-confirm-summary-item">\n            <span>Importe</span>\n            <strong>${escapeHtml(formatMoney(total, moneda))}</strong>\n          </div>\n\n          <div class="facturas-payment-confirm-summary-item">\n            <span>Destinatario</span>\n            <strong>${escapeHtml(email || "Sin email disponible")}</strong>\n          </div>\n        </div>\n\n        <div class="facturas-payment-confirm-flow">\n          <div>\n            <span aria-hidden="true">${icon("check")}</span>\n            <p><strong>Cobro registrado</strong><small>Pendiente 0,00 € y estado Pagada.</small></p>\n          </div>\n          <div>\n            <span aria-hidden="true">${icon("file")}</span>\n            <p><strong>PDF definitivo</strong><small>Se regenera sobre el documento canónico.</small></p>\n          </div>\n          <div>\n            <span aria-hidden="true">${icon("send")}</span>\n            <p><strong>Envío automático</strong><small>El cliente recibe la factura pagada actualizada.</small></p>\n          </div>\n        </div>\n\n        ${\n          email\n            ? ""\n            : `\n              <div class="facturas-payment-confirm-note" role="status">\n                La factura puede quedar pagada y con el PDF actualizado, pero no podrá enviarse hasta disponer de un email válido del cliente.\n              </div>\n            `\n        }\n\n        <div class="facturas-payment-confirm-actions">\n          <button\n            type="button"\n            class="facturas-payment-confirm-btn facturas-payment-confirm-btn--cancel"\n            data-action="${FACTURA_MODAL_ACTIONS.MARK_PAID_CANCEL}"\n            data-facturas-action="${FACTURA_MODAL_ACTIONS.MARK_PAID_CANCEL}"\n            data-factura-id="${attr(facturaId)}"\n            ${disabledAttrs(markingPaid, false)}\n          >\n            Cancelar\n          </button>\n\n          <button\n            type="button"\n            class="facturas-payment-confirm-btn facturas-payment-confirm-btn--confirm"\n            data-action="${FACTURA_MODAL_ACTIONS.MARK_PAID_CONFIRM}"\n            data-facturas-action="${FACTURA_MODAL_ACTIONS.MARK_PAID_CONFIRM}"\n            data-factura-id="${attr(facturaId)}"\n            ${disabledAttrs(markingPaid, markingPaid)}\n          >\n            ${\n              markingPaid\n                ? renderActionSpinner("Finalizando...")\n                : `\n                  <span aria-hidden="true">${icon("check")}</span>\n                  <span>${escapeHtml(confirmLabel)}</span>\n                `\n            }\n          </button>\n        </div>\n      </section>\n    </div>\n  `;\n}\n\n'''
+          text = replace_once(
+              text,
+              '/* =========================================================\n   CONTENT\n========================================================= */\n',
+              confirm_renderer + '/* =========================================================\n   CONTENT\n========================================================= */\n',
+              "payment confirm renderer",
+          )
+
+          text = replace_once(
+              text,
+              '''  admin = false,\n  markingPaidFacturaId = "",\n''',
+              '''  admin = false,\n  paymentConfirmOpen = false,\n  markingPaidFacturaId = "",\n''',
+              "detail content confirm arg",
+          )
+
+          text = replace_once(
+              text,
+              '''          ${renderEnvioSection(\n            factura\n          )}\n        </main>\n      </div>\n    </div>\n''',
+              '''          ${renderEnvioSection(\n            factura\n          )}\n        </main>\n      </div>\n\n      ${renderPaymentConfirmDialog({\n        factura,\n        open: paymentConfirmOpen,\n        markingPaid,\n      })}\n    </div>\n''',
+              "detail content confirm placement",
+          )
+
+          # renderFacturasDetailModal has a second admin argument occurrence.
+          text = replace_once(
+              text,
+              '''  admin = false,\n  markingPaidFacturaId = "",\n  sendingFacturaId = "",\n  viewingFacturaId = "",\n  downloadingFacturaId = "",\n\n  feedbackMessage = "",\n''',
+              '''  admin = false,\n  paymentConfirmOpen = false,\n  markingPaidFacturaId = "",\n  sendingFacturaId = "",\n  viewingFacturaId = "",\n  downloadingFacturaId = "",\n\n  feedbackMessage = "",\n''',
+              "modal confirm arg",
+          )
+
+          text = replace_once(
+              text,
+              '''            admin,\n            markingPaidFacturaId,\n''',
+              '''            admin,\n            paymentConfirmOpen,\n            markingPaidFacturaId,\n''',
+              "modal passes confirm state",
+          )
+
+          text = replace_once(
+              text,
+              '''      paymentActionAdminOnly: true,\n      paymentActionHiddenWhenPaid: true,\n      localFeedbackReady: true,\n''',
+              '''      paymentActionAdminOnly: true,\n      paymentConfirmationDialog: true,\n      paymentActionRetryUntilFinalized: true,\n      paymentDefinitivePdfFlow: true,\n      localFeedbackReady: true,\n''',
+              "modal snapshot policy",
+          )
+
+          write(path, text)
+
+          # ==================================================
+          # FACTURAS CONTROLLER
+          # ==================================================
+          path = "src/views/facturas/index.js"
+          text = read(path)
+
+          text = text.replace("PRODUCTIVO · SINGLE MOUNT DETAIL MODAL · V14", "PRODUCTIVO · SINGLE MOUNT DETAIL MODAL · V15", 1)
+          text = replace_once(
+              text,
+              '  "facturas.index.productivo.v14.admin-payment-command";\n',
+              '  "facturas.index.productivo.v15.paid-confirm-finalization";\n',
+              "index version",
+          )
+
+          text = replace_once(
+              text,
+              '''const DETAIL_MODAL_OVERLAY_SELECTOR =\n  "[data-facturas-detail-overlay='true']";\n''',
+              '''const DETAIL_MODAL_OVERLAY_SELECTOR =\n  "[data-facturas-detail-overlay='true']";\nconst PAYMENT_CONFIRM_SELECTOR =\n  "[data-facturas-payment-confirm-dialog='true']";\nconst PAYMENT_CONFIRM_OVERLAY_SELECTOR =\n  "[data-facturas-payment-confirm-overlay='true']";\n''',
+              "payment confirm selectors",
+          )
+
+          finalized_helpers = '''function getFacturaPaymentFinalizationState(item = {}) {\n  const raw = safeObject(item);\n  const finalization = safeObject(\n    first(\n      raw.payment?.finalization,\n      raw.paymentFinalization,\n      raw.finalization,\n      raw.raw?.payment?.finalization,\n      {}\n    ),\n    {}\n  );\n\n  const status = normalizeKey(finalization.status || "");\n  const documentStatus = normalizeKey(finalization.document?.status || "");\n  const deliveryStatus = normalizeKey(finalization.delivery?.status || "");\n\n  return {\n    status,\n    documentStatus,\n    deliveryStatus,\n    completed:\n      status === "completed" &&\n      documentStatus === "ready" &&\n      deliveryStatus === "sent",\n    documentReady: documentStatus === "ready",\n    deliverySent: deliveryStatus === "sent",\n    processing: status === "processing",\n    partial: status === "partial" || status === "failed",\n    reason: cleanText(\n      first(\n        finalization.delivery?.reason,\n        finalization.lastError?.code,\n        ""\n      ),\n      ""\n    ),\n  };\n}\n\nfunction isFacturaPaymentFinalized(item = {}) {\n  return getFacturaPaymentFinalizationState(item).completed;\n}\n\n'''
+          text = replace_once(
+              text,
+              'function mergeFacturaData(current = {}, next = {}) {\n',
+              finalized_helpers + 'function mergeFacturaData(current = {}, next = {}) {\n',
+              "index finalization helpers",
+          )
+
+          text = replace_once(
+              text,
+              '''    factura: null,\n    markingPaidFacturaId: "",\n''',
+              '''    factura: null,\n    paymentConfirmOpen: false,\n    markingPaidFacturaId: "",\n''',
+              "detail state confirm",
+          )
+
+          text = replace_once(
+              text,
+              '''    if (detailModalIsOpen() && detailModalHost?.isConnected) {\n      return detailModalHost.querySelector(\n        DETAIL_MODAL_PANEL_SELECTOR\n      );\n    }\n''',
+              '''    if (detailModalIsOpen() && detailModalHost?.isConnected) {\n      if (detailModal.paymentConfirmOpen) {\n        const confirmPanel = detailModalHost.querySelector(\n          PAYMENT_CONFIRM_SELECTOR\n        );\n\n        if (confirmPanel) return confirmPanel;\n      }\n\n      return detailModalHost.querySelector(\n        DETAIL_MODAL_PANEL_SELECTOR\n      );\n    }\n''',
+              "nested confirm focus trap",
+          )
+
+          text = replace_once(
+              text,
+              '''      factura: detailModal.factura,\n      loading: detailModal.detailLoading,\n      admin: isAdmin(),\n      markingPaidFacturaId: detailModal.markingPaidFacturaId,\n''',
+              '''      factura: detailModal.factura,\n      loading: detailModal.detailLoading,\n      admin: isAdmin(),\n      paymentConfirmOpen: detailModal.paymentConfirmOpen,\n      markingPaidFacturaId: detailModal.markingPaidFacturaId,\n''',
+              "detail payload confirm",
+          )
+
+          text = replace_once(
+              text,
+              '''    detailModal.detailLoading = false;\n    detailModal.factura = null;\n    detailModal.markingPaidFacturaId = "";\n''',
+              '''    detailModal.detailLoading = false;\n    detailModal.factura = null;\n    detailModal.paymentConfirmOpen = false;\n    detailModal.markingPaidFacturaId = "";\n''',
+              "reset detail confirm",
+          )
+
+          text = replace_once(
+              text,
+              '''    detailModal.detailLoading = !local;\n    detailModal.factura = local;\n    detailModal.markingPaidFacturaId = "";\n''',
+              '''    detailModal.detailLoading = !local;\n    detailModal.factura = local;\n    detailModal.paymentConfirmOpen = false;\n    detailModal.markingPaidFacturaId = "";\n''',
+              "open detail confirm reset",
+          )
+
+          confirm_controller = '''  function openPaymentConfirmation(facturaId = "") {\n    const id = cleanText(facturaId, "");\n\n    if (\n      !id ||\n      !isAdmin() ||\n      markingPaidFacturaId ||\n      !detailMatchesFactura(id)\n    ) {\n      return false;\n    }\n\n    const factura = getFacturaForAction(id);\n    if (!factura) return false;\n\n    if (\n      isFacturaPaidState(factura) &&\n      isFacturaPaymentFinalized(factura)\n    ) {\n      setDetailFeedback(\n        "La factura ya está pagada, el PDF definitivo está actualizado y el envío al cliente consta completado.",\n        "info"\n      );\n      return true;\n    }\n\n    detailModal.paymentConfirmOpen = true;\n    clearDetailFeedback();\n\n    renderDetailModal({\n      immediate: true,\n      preserveFocus: false,\n      focusSelector: PAYMENT_CONFIRM_SELECTOR,\n    });\n\n    return true;\n  }\n\n  function closePaymentConfirmation({ force = false } = {}) {\n    if (\n      !detailModal.paymentConfirmOpen ||\n      (!force && markingPaidFacturaId)\n    ) {\n      return false;\n    }\n\n    detailModal.paymentConfirmOpen = false;\n\n    renderDetailModal({\n      immediate: true,\n      preserveFocus: false,\n      focusSelector: `[data-facturas-action="${FACTURA_MODAL_ACTIONS.MARK_PAID}"]`,\n    });\n\n    return true;\n  }\n\n'''
+          text = replace_once(
+              text,
+              '  async function markFacturaAsPaid(facturaId = "") {\n',
+              confirm_controller + '  async function markFacturaAsPaid(facturaId = "") {\n',
+              "confirm controller functions",
+          )
+
+          start = text.find('  async function markFacturaAsPaid(facturaId = "") {')
+          end = text.find('  async function openIncidencia(ticketId = "") {', start)
+          if start < 0 or end < 0:
+              raise SystemExit("markFacturaAsPaid boundaries not found")
+
+          new_mark = r'''  async function markFacturaAsPaid(facturaId = "") {
+    const id = cleanText(facturaId, "");
+
+    if (
+      !id ||
+      !isAdmin() ||
+      markingPaidFacturaId
+    ) {
+      return false;
+    }
+
+    const before = getFacturaForAction(id);
+    if (!before) return false;
+
+    if (
+      isFacturaPaidState(before) &&
+      isFacturaPaymentFinalized(before)
+    ) {
+      detailModal.paymentConfirmOpen = false;
+
+      setDetailFeedback(
+        "La factura ya está completamente finalizada como pagada.",
+        "info"
+      );
+
+      return true;
+    }
+
+    markingPaidFacturaId = id;
+
+    if (detailMatchesFactura(id)) {
+      detailModal.paymentConfirmOpen = true;
+      detailModal.markingPaidFacturaId = id;
+      clearDetailFeedback();
+
+      renderDetailModal({
+        immediate: true,
+        preserveFocus: true,
+        focusSelector: PAYMENT_CONFIRM_SELECTOR,
+      });
+    } else {
+      render();
+    }
+
+    try {
+      const result = await markFacturaPaid(id);
+      const resultObject = safeObject(result, null);
+
+      if (resultObject) {
+        items = upsertFactura(items, resultObject, sort);
+      }
+
+      let refreshed = null;
+
+      try {
+        refreshed = await getFacturaById(id);
+      } catch {
+        refreshed = null;
+      }
+
+      if (refreshed) {
+        items = upsertFactura(items, refreshed, sort);
+      }
+
+      const latest = refreshed || resultObject || before;
+      const finalization = getFacturaPaymentFinalizationState(latest || {});
+
+      markingPaidFacturaId = "";
+
+      if (detailMatchesFactura(id)) {
+        detailModal.markingPaidFacturaId = "";
+        detailModal.paymentConfirmOpen = false;
+
+        if (latest) {
+          detailModal.factura = mergeFacturaData(
+            detailModal.factura || {},
+            latest
+          );
+        }
+
+        if (finalization.completed) {
+          setDetailFeedback(
+            "Pago registrado. PDF definitivo actualizado a “Pagada” y enviado al cliente.",
+            "success"
+          );
+        } else if (finalization.documentReady && !finalization.deliverySent) {
+          setDetailFeedback(
+            "El pago y el PDF definitivo están actualizados, pero el envío al cliente no se completó. Puedes pulsar “Finalizar factura” para reintentarlo.",
+            "warning"
+          );
+        } else if (finalization.processing) {
+          setDetailFeedback(
+            "El pago está registrado y la factura definitiva sigue finalizándose. Actualiza el detalle en unos segundos antes de reintentar.",
+            "warning"
+          );
+        } else {
+          setDetailFeedback(
+            "El pago quedó registrado, pero falta completar el PDF definitivo y/o su envío. Usa “Finalizar factura” para reintentarlo.",
+            "warning"
+          );
+        }
+      } else {
+        render();
+      }
+
+      void reloadFromStart({
+        force: true,
+        silent: true,
+        keepItems: true,
+      });
+
+      return true;
+    } catch (paymentError) {
+      markingPaidFacturaId = "";
+
+      let refreshed = null;
+      try {
+        refreshed = await getFacturaById(id);
+      } catch {
+        refreshed = null;
+      }
+
+      if (refreshed) {
+        items = upsertFactura(items, refreshed, sort);
+      }
+
+      const latest = refreshed || getFacturaForAction(id) || before;
+      const paymentCommitted = isFacturaPaidState(latest || {});
+      const finalization = getFacturaPaymentFinalizationState(latest || {});
+
+      const message = paymentCommitted
+        ? finalization.documentReady
+          ? "El cobro consta registrado y el PDF está actualizado, pero la confirmación del envío no terminó. Puedes reintentar con “Finalizar factura”."
+          : "El cobro consta registrado, pero la finalización de la factura quedó incompleta. Puedes reintentar con “Finalizar factura”."
+        : safeError(
+            paymentError,
+            "No se pudo registrar el pago de la factura."
+          );
+
+      if (detailMatchesFactura(id)) {
+        detailModal.markingPaidFacturaId = "";
+        detailModal.paymentConfirmOpen = false;
+
+        if (refreshed) {
+          detailModal.factura = mergeFacturaData(
+            detailModal.factura || {},
+            refreshed
+          );
+        }
+
+        setDetailFeedback(
+          message,
+          paymentCommitted ? "warning" : "error"
+        );
+      } else {
+        error = message;
+        render();
+      }
+
+      return paymentCommitted;
+    }
+  }
+
+'''
+          text = text[:start] + new_mark + text[end:]
+
+          text = replace_once(
+              text,
+              '''    if (type === FACTURA_MODAL_ACTIONS.MARK_PAID) {\n      return markFacturaAsPaid(\n        facturaIdFromNode(node)\n      );\n    }\n''',
+              '''    if (type === FACTURA_MODAL_ACTIONS.MARK_PAID) {\n      return openPaymentConfirmation(\n        facturaIdFromNode(node)\n      );\n    }\n\n    if (type === FACTURA_MODAL_ACTIONS.MARK_PAID_CONFIRM) {\n      return markFacturaAsPaid(\n        facturaIdFromNode(node)\n      );\n    }\n\n    if (type === FACTURA_MODAL_ACTIONS.MARK_PAID_CANCEL) {\n      return closePaymentConfirmation();\n    }\n''',
+              "payment action routing",
+          )
+
+          text = replace_once(
+              text,
+              '''    const detailOverlay = target.closest(\n      DETAIL_MODAL_OVERLAY_SELECTOR\n    );\n''',
+              '''    const paymentConfirmOverlay = target.closest(\n      PAYMENT_CONFIRM_OVERLAY_SELECTOR\n    );\n\n    const paymentConfirmDialog = target.closest(\n      PAYMENT_CONFIRM_SELECTOR\n    );\n\n    if (\n      detailModal.paymentConfirmOpen &&\n      paymentConfirmOverlay &&\n      !paymentConfirmDialog &&\n      target === paymentConfirmOverlay\n    ) {\n      closePaymentConfirmation();\n      return;\n    }\n\n    const detailOverlay = target.closest(\n      DETAIL_MODAL_OVERLAY_SELECTOR\n    );\n''',
+              "confirm overlay click",
+          )
+
+          text = replace_once(
+              text,
+              '''    if (\n      detailOverlay &&\n      !detailPanel &&\n      target === detailOverlay\n    ) {\n      closeDetailModal();\n    }\n''',
+              '''    if (\n      detailOverlay &&\n      !detailPanel &&\n      target === detailOverlay\n    ) {\n      if (detailModal.paymentConfirmOpen) {\n        closePaymentConfirmation();\n        return;\n      }\n\n      closeDetailModal();\n    }\n''',
+              "parent overlay respects confirm",
+          )
+
+          text = replace_once(
+              text,
+              '''    if (event.key === "Escape") {\n      if (detailModalIsOpen()) {\n''',
+              '''    if (event.key === "Escape") {\n      if (detailModal.paymentConfirmOpen) {\n        event.preventDefault();\n        event.stopPropagation();\n\n        closePaymentConfirmation();\n        return;\n      }\n\n      if (detailModalIsOpen()) {\n''',
+              "escape closes confirm first",
+          )
+
+          text = replace_once(
+              text,
+              '''        detailModalOpen: detailModalIsOpen(),\n\n        detailShellMounted: Boolean(\n''',
+              '''        detailModalOpen: detailModalIsOpen(),\n        paymentConfirmOpen: detailModal.paymentConfirmOpen,\n\n        detailShellMounted: Boolean(\n''',
+              "snapshot confirm state",
+          )
+
+          text = replace_once(
+              text,
+              '''          localDetailImmediate: true,\n          createSearchDomIslands: true,\n''',
+              '''          localDetailImmediate: true,\n          customPaymentConfirmation: true,\n          noNativePaymentConfirm: true,\n          paidFinalizationRetry: true,\n          createSearchDomIslands: true,\n''',
+              "snapshot confirm policy",
+          )
+
+          write(path, text)
+
+          # ==================================================
+          # API TIMEOUT
+          # ==================================================
+          path = "src/views/facturas/facturas.api.js"
+          text = read(path)
+          text = replace_once(
+              text,
+              'export const FACTURAS_PAYMENT_TIMEOUT = 20000;\n',
+              'export const FACTURAS_PAYMENT_TIMEOUT = 70000;\n',
+              "payment timeout",
+          )
+          write(path, text)
+
+          # ==================================================
+          # CSS · nested confirmation dialog, same system tokens
+          # ==================================================
+          path = "src/css/views/facturas/detail.css"
+          text = read(path)
+
+          confirm_css = r'''
+/* =========================================================
+   PAYMENT CONFIRMATION · NESTED MODAL
+========================================================= */
+
+.facturas-payment-confirm-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: clamp(18px, 3vw, 40px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: color-mix(in srgb, var(--backdrop-bg, rgba(0, 0, 0, .64)) 88%, transparent);
+  backdrop-filter: blur(14px) saturate(1.08);
+  -webkit-backdrop-filter: blur(14px) saturate(1.08);
+  animation: facturas-payment-confirm-overlay-in 150ms ease-out both;
+}
+
+.facturas-payment-confirm-dialog {
+  inline-size: min(590px, 100%);
+  max-block-size: min(760px, calc(100dvh - 64px));
+  display: grid;
+  gap: 18px;
+  overflow: auto;
+  padding: clamp(22px, 3vw, 30px);
+  border: 1px solid var(--panel-border, var(--border-default));
+  border-radius: var(--radius-lg, 20px);
+  background: var(--panel-bg);
+  color: var(--text);
+  box-shadow: var(--shadow-modal, var(--panel-shadow));
+  outline: none;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  animation: facturas-payment-confirm-dialog-in 180ms var(--ease-standard) both;
+}
+
+.facturas-payment-confirm-dialog:focus-visible {
+  box-shadow: var(--shadow-modal, var(--panel-shadow)), var(--focus-ring);
+}
+
+.facturas-payment-confirm-icon {
+  inline-size: 54px;
+  block-size: 54px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-success);
+  border-radius: var(--radius-md, 14px);
+  background: var(--success-bg);
+  color: var(--success-strong, var(--success));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-on-accent, #fff) 10%, transparent);
+}
+
+.facturas-payment-confirm-icon svg {
+  inline-size: 24px;
+  block-size: 24px;
+}
+
+.facturas-payment-confirm-copy {
+  display: grid;
+  gap: 7px;
+}
+
+.facturas-payment-confirm-eyebrow {
+  color: var(--success-strong, var(--success));
+  font-size: 10px;
+  line-height: 1.2;
+  font-weight: var(--weight-black, 800);
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+
+.facturas-payment-confirm-title {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: clamp(22px, 3vw, 29px);
+  line-height: 1.08;
+  font-weight: var(--weight-black, 800);
+  letter-spacing: var(--letter-tight, -.025em);
+  text-wrap: balance;
+}
+
+.facturas-payment-confirm-text {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-sm, 12px);
+  line-height: 1.6;
+  font-weight: var(--weight-medium, 500);
+}
+
+.facturas-payment-confirm-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.facturas-payment-confirm-summary-item {
+  min-inline-size: 0;
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm, 11px);
+  background: var(--solid-bg-1, var(--panel-bg));
+}
+
+.facturas-payment-confirm-summary-item span {
+  color: var(--text-dim);
+  font-size: 9px;
+  line-height: 1.2;
+  font-weight: var(--weight-bold, 700);
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.facturas-payment-confirm-summary-item strong {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 11px;
+  line-height: 1.35;
+  font-weight: var(--weight-bold, 700);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.facturas-payment-confirm-flow {
+  display: grid;
+  gap: 8px;
+}
+
+.facturas-payment-confirm-flow > div {
+  min-inline-size: 0;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft, var(--border-default));
+  border-radius: var(--radius-sm, 11px);
+  background: var(--surface-2, var(--solid-bg-1));
+}
+
+.facturas-payment-confirm-flow > div > span {
+  inline-size: 34px;
+  block-size: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-success);
+  border-radius: var(--radius-sm, 11px);
+  background: var(--success-bg);
+  color: var(--success-strong, var(--success));
+}
+
+.facturas-payment-confirm-flow svg {
+  inline-size: 16px;
+  block-size: 16px;
+}
+
+.facturas-payment-confirm-flow p {
+  min-inline-size: 0;
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+
+.facturas-payment-confirm-flow strong {
+  color: var(--text-strong);
+  font-size: 11px;
+  line-height: 1.3;
+  font-weight: var(--weight-bold, 700);
+}
+
+.facturas-payment-confirm-flow small {
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.35;
+  font-weight: var(--weight-medium, 500);
+}
+
+.facturas-payment-confirm-note {
+  padding: 11px 12px;
+  border: 1px solid var(--border-warning);
+  border-radius: var(--radius-sm, 11px);
+  background: var(--warning-bg);
+  color: var(--warning-strong, var(--warning));
+  font-size: 10.5px;
+  line-height: 1.45;
+  font-weight: var(--weight-semibold, 600);
+}
+
+.facturas-payment-confirm-actions {
+  display: grid;
+  grid-template-columns: minmax(0, .78fr) minmax(0, 1.22fr);
+  gap: 9px;
+  padding-block-start: 2px;
+}
+
+.facturas-payment-confirm-btn {
+  appearance: none;
+  min-block-size: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding-inline: 15px;
+  border-radius: var(--btn-radius);
+  font: inherit;
+  font-size: var(--font-xs, 11px);
+  line-height: 1;
+  font-weight: var(--weight-bold, 700);
+  cursor: pointer;
+  user-select: none;
+  transition:
+    transform var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+
+.facturas-payment-confirm-btn--cancel {
+  border: 1px solid var(--btn-secondary-border);
+  background: var(--btn-secondary-bg);
+  color: var(--btn-secondary-text);
+}
+
+.facturas-payment-confirm-btn--cancel:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: var(--border-strong);
+  background: var(--btn-secondary-bg-hover);
+  color: var(--text-strong);
+}
+
+.facturas-payment-confirm-btn--confirm {
+  border: 1px solid var(--border-success);
+  background: var(--success);
+  color: var(--text-on-accent, #fff);
+  box-shadow: var(--btn-primary-shadow, none);
+}
+
+.facturas-payment-confirm-btn--confirm:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--success) 88%, var(--text-strong));
+}
+
+.facturas-payment-confirm-btn:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring);
+}
+
+.facturas-payment-confirm-btn:disabled,
+.facturas-payment-confirm-btn[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: .52;
+  transform: none;
+}
+
+.facturas-payment-confirm-btn svg {
+  inline-size: 16px;
+  block-size: 16px;
+}
+'''
+          text = replace_once(
+              text,
+              '/* =========================================================\n   RESPONSIVE\n========================================================= */\n',
+              confirm_css + '\n/* =========================================================\n   RESPONSIVE\n========================================================= */\n',
+              "payment confirm css",
+          )
+
+          text = replace_once(
+              text,
+              '''  .facturas-detail-body { gap: 11px; }\n  .facturas-detail-feedback { grid-template-columns: 1fr; gap: 3px; }\n''',
+              '''  .facturas-detail-body { gap: 11px; }\n  .facturas-detail-feedback { grid-template-columns: 1fr; gap: 3px; }\n  .facturas-payment-confirm-overlay { padding: 12px; }\n  .facturas-payment-confirm-dialog { max-block-size: calc(100dvh - 24px); padding: 19px; gap: 15px; }\n  .facturas-payment-confirm-summary { grid-template-columns: 1fr; }\n  .facturas-payment-confirm-actions { grid-template-columns: 1fr; }\n''',
+              "payment confirm mobile css",
+          )
+
+          text = replace_once(
+              text,
+              '''  .facturas-detail-overlay,\n  .facturas-detail-modal,\n  .facturas-detail-skeleton::after,\n''',
+              '''  .facturas-detail-overlay,\n  .facturas-detail-modal,\n  .facturas-payment-confirm-overlay,\n  .facturas-payment-confirm-dialog,\n  .facturas-detail-skeleton::after,\n''',
+              "payment confirm reduced motion",
+          )
+
+          text = replace_once(
+              text,
+              '''  .facturas-detail-feedback,\n  .facturas-detail-btn,\n  .facturas-detail-avatar { forced-color-adjust: auto; }\n''',
+              '''  .facturas-detail-feedback,\n  .facturas-detail-btn,\n  .facturas-detail-avatar,\n  .facturas-payment-confirm-dialog,\n  .facturas-payment-confirm-btn { forced-color-adjust: auto; }\n''',
+              "payment confirm forced colors",
+          )
+
+          text = replace_once(
+              text,
+              '''@keyframes facturas-detail-shimmer { to { transform: translateX(100%); } }\n@keyframes facturas-detail-spin { to { transform: rotate(1turn); } }\n''',
+              '''@keyframes facturas-detail-shimmer { to { transform: translateX(100%); } }\n@keyframes facturas-detail-spin { to { transform: rotate(1turn); } }\n@keyframes facturas-payment-confirm-overlay-in { from { opacity: 0; } to { opacity: 1; } }\n@keyframes facturas-payment-confirm-dialog-in {\n  from { opacity: 0; transform: translateY(10px) scale(.982); }\n  to { opacity: 1; transform: translateY(0) scale(1); }\n}\n''',
+              "payment confirm keyframes",
+          )
+
+          write(path, text)
+
+          # No native confirmation in payment flow.
+          index = read("src/views/facturas/index.js")
+          payment_start = index.find('  async function markFacturaAsPaid(facturaId = "") {')
+          payment_end = index.find('  async function openIncidencia(ticketId = "") {', payment_start)
+          payment_section = index[payment_start:payment_end]
+          if "window.confirm" in payment_section:
+              raise SystemExit("native window.confirm still present in paid flow")
+
+          checks = {
+              "src/views/facturas/facturas.template.modal.js": [
+                  "MARK_PAID_CONFIRM",
+                  "facturas-payment-confirm-dialog",
+                  "Finalizar factura",
+              ],
+              "src/views/facturas/index.js": [
+                  "openPaymentConfirmation",
+                  "PAYMENT_CONFIRM_SELECTOR",
+                  "paidFinalizationRetry",
+              ],
+              "src/css/views/facturas/detail.css": [
+                  ".facturas-payment-confirm-dialog",
+                  "facturas-payment-confirm-dialog-in",
+              ],
+              "src/views/facturas/facturas.api.js": [
+                  "FACTURAS_PAYMENT_TIMEOUT = 70000",
+              ],
+          }
+
+          for filename, needles in checks.items():
+              content = read(filename)
+              for needle in needles:
+                  if needle not in content:
+                      raise SystemExit(f"missing {needle!r} in {filename}")
+          PY
+
+      - name: Remove one-shot workflow from release branch
+        run: rm -f .github/workflows/_patch-factura-paid-confirm-v2.yml
+
+      - name: Validate JavaScript syntax
+        run: |
+          set -euo pipefail
+          node --check src/views/facturas/facturas.template.modal.js
+          node --check src/views/facturas/index.js
+          node --check src/views/facturas/facturas.api.js
+
+      - name: Validate repository release contracts
+        run: |
+          set -euo pipefail
+          bash .github/ci/validate_static_release.sh
+          python3 .github/scripts/repo_integrity.py
+          python3 .github/scripts/artifact_hygiene.py
+          bash .github/ci/validate_spa_contracts.sh
+
+      - name: Verify diff hygiene
+        run: |
+          set -euo pipefail
+          git diff --check
+          test ! -e .github/workflows/_patch-factura-paid-confirm-v2.yml
+          ! git diff -- src/views/facturas/index.js | grep -F '+      if (!window.confirm'
+          git status --short
+
+      - name: Commit validated integration
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "Onion Support CI"
+          git config user.email "cristian@onionsupport.com"
+          git add -A
+          git commit -m "feat(facturas): add polished paid confirmation flow"
+          git push origin HEAD:feature/factura-paid-confirm-v2

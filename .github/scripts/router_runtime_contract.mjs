@@ -6,7 +6,7 @@ import { Router, ROUTER_VERSION } from "../../src/router/index.js";
 
 assert.equal(
   ROUTER_VERSION,
-  "router.minimal.v13-single-route-resolution"
+  "router.minimal.v14-chrome-active-dedup"
 );
 
 assert.equal(
@@ -42,6 +42,7 @@ assert.equal(snapshot.policy.samePendingNavigationDedup, true);
 assert.equal(snapshot.policy.nativeRoutePhaseTelemetry, true);
 assert.equal(snapshot.policy.opaqueNavigationPerformanceIds, true);
 assert.equal(snapshot.policy.singleRouteResolutionPerTransition, true);
+assert.equal(snapshot.policy.postCommitActiveMenuDedup, true);
 
 const source = await readFile("src/router/index.js", "utf8");
 
@@ -147,6 +148,27 @@ assert.equal(
   executeRenderSource.includes("refreshResolveStartedAt"),
   false,
   "Router must not retain the redundant post-auth route resolution"
+);
+
+const chromePhaseStart = source.indexOf("const chromeStartedAt =");
+const chromePhaseEnd = source.indexOf(
+  'recordTransitionPhase(\n      transition,\n      route,\n      "chrome"',
+  chromePhaseStart
+);
+assert.ok(
+  chromePhaseStart >= 0 && chromePhaseEnd > chromePhaseStart,
+  "Router contract must isolate the successful post-commit chrome phase"
+);
+const chromePhaseSource = source.slice(chromePhaseStart, chromePhaseEnd);
+assert.equal(
+  chromePhaseSource.includes("syncChrome("),
+  true,
+  "successful commit must still sync Sidebar/Topbar"
+);
+assert.equal(
+  chromePhaseSource.includes("setActiveMenu("),
+  false,
+  "Router must not re-walk active menu after Sidebar sync"
 );
 
 const phaseCallStart = source.indexOf("module.recordRoutePhase({");

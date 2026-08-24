@@ -11,6 +11,8 @@ import {
 import {
   RUNTIME_PERFORMANCE_VERSION,
   getRuntimePerformanceSnapshot,
+  isCommittedRouteHost,
+  shouldRecordRouteCommit,
 } from "../../src/features/runtime-performance/index.js";
 
 assert.equal(
@@ -20,7 +22,7 @@ assert.equal(
 
 assert.equal(
   RUNTIME_PERFORMANCE_VERSION,
-  "runtime-performance.v1-navigation-rendering"
+  "runtime-performance.v2-committed-host-lifecycle"
 );
 
 assert.equal(
@@ -47,6 +49,45 @@ assert.equal(intentSnapshot.policy.storesRawUrls, false);
 assert.equal(intentSnapshot.policy.externalNetwork, false);
 assert.equal(intentSnapshot.policy.storage, false);
 
+const preparingHost = {
+  hidden: true,
+  dataset: {
+    routeHost: "true",
+    routeHostState: "preparing",
+    viewKey: "facturas",
+  },
+};
+
+const readyHost = {
+  hidden: false,
+  dataset: {
+    routeHost: "true",
+    routeHostState: "ready",
+    viewKey: "facturas",
+  },
+};
+
+assert.equal(
+  isCommittedRouteHost(preparingHost),
+  false,
+  "a hidden preparation host must never be a route commit"
+);
+assert.equal(
+  isCommittedRouteHost(readyHost),
+  true,
+  "only the visible ready host is a committed route host"
+);
+assert.equal(
+  shouldRecordRouteCommit(readyHost, readyHost),
+  false,
+  "the same committed host must not be counted twice"
+);
+assert.equal(
+  shouldRecordRouteCommit(readyHost, preparingHost),
+  true,
+  "a new visible ready host is a new commit"
+);
+
 const perfSnapshot = getRuntimePerformanceSnapshot();
 assert.equal(perfSnapshot.installed, false);
 assert.equal(perfSnapshot.sampleCap, 64);
@@ -57,6 +98,11 @@ assert.equal(perfSnapshot.policy.rawUrls, false);
 assert.equal(perfSnapshot.policy.userIdentifiers, false);
 assert.equal(perfSnapshot.policy.boundedSamples, true);
 assert.equal(perfSnapshot.policy.routeHostOnlyObservation, true);
+assert.equal(perfSnapshot.policy.visibleCommittedHostOnly, true);
+assert.equal(perfSnapshot.policy.pendingViewKeyMatch, true);
+assert.equal(perfSnapshot.policy.stalePaintDrop, true);
+assert.equal(perfSnapshot.policy.interactionMetric, "event-duration-not-inp");
+assert.equal(perfSnapshot.policy.lcpLifecycleAware, true);
 
 const sourceFiles = [
   "src/features/route-intent-preload/index.js",
@@ -112,7 +158,17 @@ assert.equal(
   true,
   "route telemetry must not observe internal view mutations"
 );
+assert.equal(
+  performanceSource.includes("ROUTE_COMMITTED_SELECTOR"),
+  true,
+  "route telemetry must resolve the visible ready host before recording a commit"
+);
+assert.equal(
+  performanceSource.includes("pendingNavigationViewKey"),
+  true,
+  "navigation intent must be correlated by safe viewKey instead of raw URL"
+);
 
 console.log(
-  "Navigation performance contract OK · local-only telemetry · confidence-gated preload"
+  "Navigation performance contract OK · committed-host telemetry · bounded local metrics"
 );

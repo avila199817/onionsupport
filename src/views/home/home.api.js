@@ -21,7 +21,7 @@ import IncidenciasApi from "../incidencias/incidencias.api.js";
 import FacturasApi from "../facturas/facturas.api.js";
 
 export const HOME_API_VERSION =
-  "home.api.domain-aggregator.v11-canonical-role";
+  "home.api.domain-aggregator.v12-runtime-context";
 
 export const HOME_TIMEOUT_MS = 15_000;
 export const HOME_LIST_LIMIT = 8;
@@ -191,53 +191,48 @@ function normalizeError(domain = "home", error = null) {
 
 function getCoreState() {
   try {
-    return AppCore?.getState?.() || AppCore?.state || {};
+    return AppCore?.runtimeState?.read?.() || {};
   } catch {
-    return AppCore?.state || {};
+    return {};
   }
 }
 
-function getCurrentUser() {
-  const state = getCoreState();
+function getCurrentUser(state = getCoreState()) {
+  const rawUser = state?.hasUser === true ? state.user : null;
+  if (!isObject(rawUser)) return null;
 
-  try {
-    return AppCore?.getCurrentUser?.() || state.user || state.currentUser || null;
-  } catch {
-    return state.user || state.currentUser || null;
-  }
+  return {
+    ...rawUser,
+    roles: Array.isArray(rawUser.roles) ? [...rawUser.roles] : [],
+    permissions: Array.isArray(rawUser.permissions) ? [...rawUser.permissions] : [],
+    permisos: Array.isArray(rawUser.permisos) ? [...rawUser.permisos] : [],
+  };
 }
 
-function getCurrentRole() {
-  const state = getCoreState();
-  const user = safeObject(getCurrentUser(), {});
-
+function getCurrentRole(state = getCoreState(), user = getCurrentUser(state)) {
   return AppCore.normalizeRole(
     first(
-      AppCore?.getCurrentRole?.(),
       state.role,
       state.rol,
       state.roles,
-      user.role,
-      user.rol,
-      user.roles,
+      user?.role,
+      user?.rol,
+      user?.roles,
       "user"
     )
   ) || "user";
 }
 
-function getCurrentUserId() {
-  const state = getCoreState();
-  const user = safeObject(getCurrentUser(), {});
-
+function getCurrentUserId(state = getCoreState(), user = getCurrentUser(state)) {
   return safeId(
     first(
-      user.userId,
-      user.uid,
-      user.sub,
-      user.id,
-      user.email,
-      user.username,
-      user.slug,
+      user?.userId,
+      user?.uid,
+      user?.sub,
+      user?.id,
+      user?.email,
+      user?.username,
+      user?.slug,
       state.userId,
       ""
     )
@@ -245,9 +240,10 @@ function getCurrentUserId() {
 }
 
 function currentContext() {
-  const role = getCurrentRole();
-  const user = getCurrentUser();
-  const userId = getCurrentUserId();
+  const state = getCoreState();
+  const user = getCurrentUser(state);
+  const role = getCurrentRole(state, user);
+  const userId = getCurrentUserId(state, user);
 
   return {
     role,

@@ -1,0 +1,169 @@
+name: One-shot native view runtime patch
+
+on:
+  push:
+    branches:
+      - perf/native-view-runtime-state
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Use Node 22
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Apply deterministic patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          targets = [
+              ("src/views/facturas/index.js", "getState"),
+              ("src/views/incidencias/index.js", "getState"),
+              ("src/views/clientes/index.js", "getAppState"),
+              ("src/views/usuarios/index.js", "getAppState"),
+              ("src/views/server/index.js", "getAppState"),
+          ]
+
+          def replace_reader(path, name):
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              start_token = f"function {name}() {{"
+              start = text.find(start_token)
+              if start < 0 or text.find(start_token, start + 1) != -1:
+                  raise SystemExit(f"{path}: {name} anchor missing or non-unique")
+              end = text.find("\nfunction ", start + len(start_token))
+              if end < 0:
+                  raise SystemExit(f"{path}: could not find function boundary after {name}")
+              old = text[start:end]
+              if "AppCore.getState" not in old or "AppCore.state" not in old:
+                  raise SystemExit(f"{path}: legacy state reader shape changed")
+              new = f'''function {name}() {{
+            try {{
+              if (
+                typeof AppCore?.runtimeState?.read ===
+                "function"
+              ) {{
+                return (
+                  AppCore.runtimeState.read() ||
+                  {{}}
+                );
+              }}
+            }} catch {{
+              // noop
+            }}
+          
+            return {{}};
+          }}'''.replace("          ", "")
+              p.write_text(text[:start] + new + text[end:], encoding="utf-8")
+
+          for path, name in targets:
+              replace_reader(path, name)
+
+          contract = '''import assert from "node:assert/strict";
+          import { readFile } from "node:fs/promises";
+          
+          const viewFiles = [
+            "src/views/facturas/index.js",
+            "src/views/incidencias/index.js",
+            "src/views/clientes/index.js",
+            "src/views/usuarios/index.js",
+            "src/views/server/index.js",
+          ];
+          
+          for (const path of viewFiles) {
+            const source = await readFile(path, "utf8");
+          
+            assert.equal(
+              source.includes("AppCore.runtimeState.read()"),
+              true,
+              `${path} must consume the zero-copy Core runtime state port`
+            );
+            assert.equal(
+              /\\bAppCore\\s*\\.\\s*getState\\s*\\??\\.\\s*\\(/.test(source),
+              false,
+              `${path} must not build public Core state snapshots`
+            );
+          
+            const directStatePatterns = [
+              /\\bAppCore\\s*\\.\\s*state\\s*\\.\\s*[A-Za-z_$][\\w$]*/,
+              /\\bAppCore\\s*\\.\\s*state\\s*\\[/,
+              /\\bAppCore\\s*\\.\\s*state\\s*=/,
+              /\\bObject\\s*\\.\\s*assign\\s*\\(\\s*AppCore\\s*\\.\\s*state\\b/,
+              /\\bdelete\\s+AppCore\\s*\\.\\s*state\\b/,
+            ];
+          
+            for (const pattern of directStatePatterns) {
+              assert.equal(
+                pattern.test(source),
+                false,
+                `${path} must not depend on direct AppCore.state access: ${pattern}`
+              );
+            }
+          
+            assert.equal(
+              source.includes("AppCore.runtimeState.write("),
+              false,
+              `${path} view layer must remain read-only against Core runtime state`
+            );
+          }
+          
+          console.log(
+            "View runtime contract OK · five SPA views use zero-copy read-only Core state"
+          );
+          '''.replace("          ", "")
+          Path(".github/scripts/view_runtime_state_contract.mjs").write_text(
+              contract,
+              encoding="utf-8",
+          )
+
+          validate = Path(".github/ci/validate_spa_contracts.sh")
+          text = validate.read_text(encoding="utf-8")
+          anchor = "node --experimental-default-type=module .github/scripts/shell_runtime_contract.mjs\n"
+          if text.count(anchor) != 1:
+              raise SystemExit("validate_spa_contracts.sh shell contract anchor not unique")
+          validate.write_text(
+              text.replace(
+                  anchor,
+                  anchor + "node --experimental-default-type=module .github/scripts/view_runtime_state_contract.mjs\n",
+                  1,
+              ),
+              encoding="utf-8",
+          )
+          PY
+
+          node --check src/views/facturas/index.js
+          node --check src/views/incidencias/index.js
+          node --check src/views/clientes/index.js
+          node --check src/views/usuarios/index.js
+          node --check src/views/server/index.js
+          node --check .github/scripts/view_runtime_state_contract.mjs
+          bash .github/ci/validate_spa_contracts.sh
+          git diff --check
+
+      - name: Commit patched views
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/one-shot-native-view-state.yml
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Perf: move core SPA views to native runtime reads"
+          git push origin HEAD:perf/native-view-runtime-state

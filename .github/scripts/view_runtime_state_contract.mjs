@@ -103,13 +103,21 @@ const adminSource = functionSource(
 );
 assert.equal(
   countCalls(adminSource, /getAppState\s*\(/g),
-  1,
-  "Usuarios admin helper must perform at most its one default operation-local Core read"
+  0,
+  "Usuarios admin helper must preserve the explicit-admin zero-read short-circuit"
 );
 assert.equal(
-  adminSource.includes("getCurrentRole(context, state)"),
+  adminSource.includes("getCurrentRole(context)"),
   true,
-  "Usuarios admin helper must reuse the supplied runtime state for role resolution"
+  "Usuarios admin helper must delegate one-read role resolution only when needed"
+);
+const compactAdminSource = adminSource.replace(/\s+/g, "");
+assert.equal(
+  compactAdminSource.includes(
+    'context.admin===true||getCurrentRole(context)==="admin"'
+  ),
+  true,
+  "Usuarios admin helper must short-circuit explicit admin before any Core role read"
 );
 
 const payloadSource = functionSource(

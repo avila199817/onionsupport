@@ -32,14 +32,6 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          def replace_once(path, old, new):
-              p = Path(path)
-              text = p.read_text(encoding="utf-8")
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"{path}: expected exactly one match, found {count}")
-              p.write_text(text.replace(old, new, 1), encoding="utf-8")
-
           router_path = Path("src/router/index.js")
           router = router_path.read_text(encoding="utf-8")
 
@@ -49,37 +41,29 @@ jobs:
               raise SystemExit("Router version anchor is not unique")
           router = router.replace(old_version, new_version, 1)
 
-          old_match = '''  let match =
-            getRouteMatch(
-              path
-            );'''
-          new_match = '''  const match =
-            getRouteMatch(
-              path
-            );'''
-          if router.count(old_match) != 1:
-              raise SystemExit(f"Router initial match anchor count={router.count(old_match)}")
-          router = router.replace(old_match, new_match, 1)
+          execute_start = router.find("async function executeRender(\n")
+          execute_end = router.find("\nfunction render(\n", execute_start)
+          if execute_start < 0 or execute_end <= execute_start:
+              raise SystemExit("Could not isolate executeRender")
+          execute = router[execute_start:execute_end]
+
+          if execute.count("  let match =\n") != 1:
+              raise SystemExit("executeRender initial match declaration is not unique")
+          execute = execute.replace("  let match =\n", "  const match =\n", 1)
 
           refresh_anchor = "    /*\n      Auth pudo cambiar durante la espera.\n"
           route_guard_anchor = "    if (\n      !match.route\n    ) {\n"
-          refresh_start = router.find(refresh_anchor)
-          refresh_end = router.find(route_guard_anchor, refresh_start)
+          refresh_start = execute.find(refresh_anchor)
+          refresh_end = execute.find(route_guard_anchor, refresh_start)
           if refresh_start < 0 or refresh_end <= refresh_start:
-              raise SystemExit("Router redundant resolve anchors not found in order")
-          if router.find(refresh_anchor, refresh_start + 1) != -1:
-              raise SystemExit("Router redundant resolve start anchor is not unique")
-          router = router[:refresh_start] + router[refresh_end:]
+              raise SystemExit("Redundant post-auth resolution anchors not found")
+          if execute.find(refresh_anchor, refresh_start + 1) != -1:
+              raise SystemExit("Redundant post-auth resolution anchor is not unique")
+          execute = execute[:refresh_start] + execute[refresh_end:]
+          router = router[:execute_start] + execute + router[execute_end:]
 
-          policy_anchor = '''        opaqueNavigationPerformanceIds:
-          true,
-'''
-          policy_replacement = '''        opaqueNavigationPerformanceIds:
-          true,
-
-        singleRouteResolutionPerTransition:
-          true,
-'''
+          policy_anchor = "        opaqueNavigationPerformanceIds:\n          true,\n"
+          policy_replacement = policy_anchor + "\n        singleRouteResolutionPerTransition:\n          true,\n"
           if router.count(policy_anchor) != 1:
               raise SystemExit("Router policy anchor is not unique")
           router = router.replace(policy_anchor, policy_replacement, 1)
@@ -108,20 +92,20 @@ jobs:
           phase_anchor = 'const phaseCallStart = source.indexOf("module.recordRoutePhase({");\n'
           if contract.count(phase_anchor) != 1:
               raise SystemExit("Router contract phase anchor is not unique")
-          single_resolution_contract = r'''const executeRenderStart = source.indexOf("async function executeRender(");
-          const executeRenderEnd = source.indexOf("\nfunction render(", executeRenderStart);
+          single_resolution_contract = '''const executeRenderStart = source.indexOf("async function executeRender(");
+          const executeRenderEnd = source.indexOf("\\nfunction render(", executeRenderStart);
           assert.ok(
             executeRenderStart >= 0 && executeRenderEnd > executeRenderStart,
             "Router contract must isolate executeRender()"
           );
           const executeRenderSource = source.slice(executeRenderStart, executeRenderEnd);
           assert.equal(
-            (executeRenderSource.match(/\bgetRouteMatch\s*\(/g) || []).length,
+            (executeRenderSource.match(/\\bgetRouteMatch\\s*\\(/g) || []).length,
             1,
             "each Router transition must resolve the route exactly once"
           );
           assert.equal(
-            (executeRenderSource.match(/\bsetRoutePending\s*\(/g) || []).length,
+            (executeRenderSource.match(/\\bsetRoutePending\\s*\\(/g) || []).length,
             1,
             "each Router transition must publish pending route state exactly once"
           );

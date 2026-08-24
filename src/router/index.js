@@ -44,7 +44,7 @@ import * as Routes from "./routes.js";
 import RouteStyles from "./styles.js";
 
 export const ROUTER_VERSION =
-  "router.minimal.v10.1-route-styles-preload-atomic-gated";
+  "router.minimal.v11-native-runtime-state";
 
 const PUBLIC_HOME_PATH = "/";
 
@@ -257,16 +257,16 @@ function readState() {
   try {
     if (
       isFunction(
-        AppCore?.getState
+        AppCore?.runtimeState?.read
       )
     ) {
       return (
-        AppCore.getState() ||
+        AppCore.runtimeState.read() ||
         {}
       );
     }
   } catch {
-    // fallback abajo
+    // noop
   }
 
   return {};
@@ -278,15 +278,11 @@ function writeState(
   try {
     if (
       isFunction(
-        AppCore?.setState
+        AppCore?.runtimeState?.write
       )
     ) {
-      AppCore.setState(
-        patch,
-        {
-          source:
-            "router",
-        }
+      AppCore.runtimeState.write(
+        patch
       );
 
       return true;

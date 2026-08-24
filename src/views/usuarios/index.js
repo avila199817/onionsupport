@@ -348,18 +348,12 @@ function getAppState() {
 
   return {};
 }
-function getCurrentUser() {
-  const state = getAppState();
-  try {
-    return AppCore.getCurrentUser?.() || state.user || state.currentUser || null;
-  } catch {
-    return state.user || state.currentUser || null;
-  }
+function getCurrentUser(state = getAppState()) {
+  return state.user || state.currentUser || null;
 }
 
-function getCurrentRole(context = {}) {
-  const state = getAppState();
-  const user = safeObject(getCurrentUser(), {});
+function getCurrentRole(context = {}, state = getAppState()) {
+  const user = safeObject(getCurrentUser(state), {});
   try {
     return (
       AppCore.normalizeRole(
@@ -368,7 +362,6 @@ function getCurrentRole(context = {}) {
           context.rol,
           context.user?.role,
           context.user?.rol,
-          AppCore.getCurrentRole?.(),
           state.role,
           state.rol,
           state.roles,
@@ -891,7 +884,9 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
   }
 
   function viewPayload() {
-    const admin = isAdminContext(context);
+    const state = getAppState();
+    const role = getCurrentRole(context, state);
+    const admin = context.admin === true || role === "admin";
     return {
       items,
       users: items,
@@ -920,7 +915,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       lastUpdatedAt: lastSyncAt,
       updatedAt: lastSyncAt,
       admin,
-      role: getCurrentRole(context),
+      role,
       forbidden: !admin,
       restricted: !admin,
       accessDenied: !admin,
@@ -1919,6 +1914,9 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     },
 
     getSnapshot() {
+      const state = getAppState();
+      const role = getCurrentRole(context, state);
+      const admin = context.admin === true || role === "admin";
       return {
         version: USUARIOS_VIEW_VERSION,
         apiVersion: USUARIOS_API_VERSION,
@@ -1928,8 +1926,8 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         hostOwner: ownsHost(controller),
         globalOwner: ownsGlobal(controller),
         routeActive: isRouteActive(),
-        admin: isAdminContext(context),
-        role: getCurrentRole(context),
+        admin,
+        role,
         loading,
         refreshing,
         exporting,
@@ -2243,19 +2241,24 @@ export const isDestroyed = () => getActiveUsuariosController()?.isDestroyed?.() 
 export const isMounted = () => getActiveUsuariosController()?.isMounted?.() || false;
 export const canRenderUsuariosNow = (context = {}) => isUsuariosRoute(safeObject(context, {}));
 
-export const getUsuariosRouteDebug = (context = {}) => ({
-  browserPath: getBrowserPath(),
-  contextPath: routePathFromContext(context),
-  canonicalPath: USUARIOS_CANONICAL_PATH,
-  allowed: isUsuariosRoute(context),
-  role: getCurrentRole(context),
-  admin: isAdminContext(context),
-  apiVersion: USUARIOS_API_VERSION,
-  singleApiAuthority: true,
-  staleWhileRevalidate: true,
-  manualRefreshUi: false,
-  apiFallbackActive: false,
-});
+export const getUsuariosRouteDebug = (context = {}) => {
+  const state = getAppState();
+  const role = getCurrentRole(context, state);
+  const admin = context.admin === true || role === "admin";
+  return {
+    browserPath: getBrowserPath(),
+    contextPath: routePathFromContext(context),
+    canonicalPath: USUARIOS_CANONICAL_PATH,
+    allowed: isUsuariosRoute(context),
+    role,
+    admin,
+    apiVersion: USUARIOS_API_VERSION,
+    singleApiAuthority: true,
+    staleWhileRevalidate: true,
+    manualRefreshUi: false,
+    apiFallbackActive: false,
+  };
+};
 
 /* =========================================================
    MODAL COMPAT

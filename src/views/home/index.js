@@ -28,7 +28,7 @@ import {
   renderHomeErrorState,
 } from "./home.template.js";
 
-export const HOME_INDEX_VERSION = "home.index.v11.single-cache.production";
+export const HOME_INDEX_VERSION = "home.index.v12-runtime-context";
 export const HOME_VIEW_VERSION = HOME_INDEX_VERSION;
 
 const SOURCE = "home.view";
@@ -150,44 +150,51 @@ function redact(value = "") {
 
 function getCoreState() {
   try {
-    return AppCore?.getState?.() || AppCore?.state || {};
+    return AppCore.runtimeState.read() || {};
   } catch {
-    return AppCore?.state || {};
+    return {};
   }
 }
 
-function getCurrentUser(context = {}) {
-  const ctx = safeObject(context);
-  const state = getCoreState();
+function cloneRuntimeUser(state = {}) {
+  const rawUser = first(
+    state.user,
+    state.currentUser,
+    state.session?.user,
+    null
+  );
 
-  try {
-    return first(
-      ctx.user,
-      ctx.currentUser,
-      ctx.session?.user,
-      AppCore?.getCurrentUser?.(),
-      state.user,
-      state.currentUser,
-      state.session?.user,
-      null
-    );
-  } catch {
-    return first(
-      ctx.user,
-      ctx.currentUser,
-      ctx.session?.user,
-      state.user,
-      state.currentUser,
-      state.session?.user,
-      null
-    );
-  }
+  if (!isObject(rawUser)) return rawUser ?? null;
+
+  return {
+    ...rawUser,
+    roles: Array.isArray(rawUser.roles) ? [...rawUser.roles] : [],
+    permissions: Array.isArray(rawUser.permissions) ? [...rawUser.permissions] : [],
+    permisos: Array.isArray(rawUser.permisos) ? [...rawUser.permisos] : [],
+  };
 }
 
-function getCurrentRole(context = {}) {
+function getCurrentUser(context = {}, state = getCoreState()) {
   const ctx = safeObject(context);
-  const state = getCoreState();
-  const user = safeObject(getCurrentUser(ctx), {});
+  const contextualUser = first(
+    ctx.user,
+    ctx.currentUser,
+    ctx.session?.user,
+    null
+  );
+
+  return contextualUser !== null
+    ? contextualUser
+    : cloneRuntimeUser(state);
+}
+
+function getCurrentRole(
+  context = {},
+  state = getCoreState(),
+  user = getCurrentUser(context, state)
+) {
+  const ctx = safeObject(context);
+  const safeUser = safeObject(user, {});
 
   return (
     AppCore.normalizeRole(
@@ -196,10 +203,9 @@ function getCurrentRole(context = {}) {
         ctx.rol,
         ctx.roles,
         ctx.userRole,
-        user.role,
-        user.rol,
-        user.roles,
-        AppCore?.getCurrentRole?.(),
+        safeUser.role,
+        safeUser.rol,
+        safeUser.roles,
         state.role,
         state.rol,
         state.roles,
@@ -258,9 +264,12 @@ function getRouter(context = {}) {
 }
 
 function basePayload(context = {}, extra = {}) {
+  const state = getCoreState();
+  const user = getCurrentUser(context, state);
+
   return {
-    user: getCurrentUser(context),
-    role: getCurrentRole(context),
+    user,
+    role: getCurrentRole(context, state, user),
     routes: getRoutes(context),
     ...safeObject(extra),
   };

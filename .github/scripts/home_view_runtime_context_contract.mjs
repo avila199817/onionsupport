@@ -9,7 +9,10 @@ function functionBody(name) {
   const start = source.indexOf(marker);
   assert.notEqual(start, -1, `${path} must define ${name}()`);
 
-  const open = source.indexOf("{", start);
+  const signatureEnd = source.indexOf(") {", start);
+  assert.notEqual(signatureEnd, -1, `${path} ${name}() must close its signature`);
+
+  const open = source.indexOf("{", signatureEnd);
   assert.notEqual(open, -1, `${path} ${name}() must have a body`);
 
   let depth = 0;

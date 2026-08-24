@@ -4,6 +4,7 @@
 
    Responsabilidad:
    - Ser el registro único de mejoras globales/progresivas de la SPA.
+   - Instalar primero la frontera runtime Core/HTTP/Auth antes del bootstrap.
    - Cargar antes del Router únicamente lo que afecta al bootstrap de URL/chrome.
    - Priorizar después del Router sólo las mejoras relevantes para la ruta actual.
    - Diferir el resto por turnos idle para evitar ráfagas de red/parse/ejecución.
@@ -13,9 +14,13 @@
 ========================================================= */
 
 export const APP_ENHANCEMENTS_VERSION =
-  "app.enhancements.v10-route-priority-idle";
+  "app.enhancements.v11-runtime-fastpath";
 
 const PRE_ROUTER = Object.freeze([
+  Object.freeze({
+    key: "runtime-fastpath",
+    load: () => import("../core/runtime-fastpath.js"),
+  }),
   Object.freeze({
     key: "ticket-deeplink",
     load: () => import("../features/ticket-deeplink/index.js"),
@@ -235,6 +240,14 @@ async function loadPhase(definitions = []) {
   return results.every(Boolean);
 }
 
+async function loadPreRouterPhase() {
+  const [runtime, ...rest] = PRE_ROUTER;
+  const runtimeOk = runtime ? await loadFeature(runtime) : true;
+  const restOk = await loadPhase(rest);
+
+  return runtimeOk && restOk;
+}
+
 async function loadPostRouterPhase() {
   const scopes = routeScopes();
   const immediate = POST_ROUTER.filter((definition) =>
@@ -267,7 +280,7 @@ async function loadPostRouterPhase() {
 
 export function initPreRouterEnhancements() {
   if (!preRouterPromise) {
-    preRouterPromise = loadPhase(PRE_ROUTER);
+    preRouterPromise = loadPreRouterPhase();
   }
 
   return preRouterPromise;

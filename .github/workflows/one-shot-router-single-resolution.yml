@@ -40,128 +40,88 @@ jobs:
                   raise SystemExit(f"{path}: expected exactly one match, found {count}")
               p.write_text(text.replace(old, new, 1), encoding="utf-8")
 
-          router = "src/router/index.js"
-          contract = ".github/scripts/router_runtime_contract.mjs"
+          router_path = Path("src/router/index.js")
+          router = router_path.read_text(encoding="utf-8")
 
-          replace_once(
-              router,
-              'export const ROUTER_VERSION =\n  "router.minimal.v12-phase-attribution";',
-              'export const ROUTER_VERSION =\n  "router.minimal.v13-single-route-resolution";',
-          )
+          old_version = 'export const ROUTER_VERSION =\n  "router.minimal.v12-phase-attribution";'
+          new_version = 'export const ROUTER_VERSION =\n  "router.minimal.v13-single-route-resolution";'
+          if router.count(old_version) != 1:
+              raise SystemExit("Router version anchor is not unique")
+          router = router.replace(old_version, new_version, 1)
 
-          replace_once(
-              router,
-              '''  let match =
+          old_match = '''  let match =
             getRouteMatch(
               path
-            );''',
-              '''  const match =
+            );'''
+          new_match = '''  const match =
             getRouteMatch(
               path
-            );''',
-          )
+            );'''
+          if router.count(old_match) != 1:
+              raise SystemExit(f"Router initial match anchor count={router.count(old_match)}")
+          router = router.replace(old_match, new_match, 1)
 
-          redundant = '''    /*
-              Auth pudo cambiar durante la espera.
-              Re-resolvemos ruta y guard con estado fresco.
-            */
-            const refreshResolveStartedAt =
-              performanceNow();
-          
-            match =
-              getRouteMatch(
-                path
-              );
-          
-            setTransitionPerformanceView(
-              transition,
-              match.route
-            );
-          
-            recordTransitionPhase(
-              transition,
-              match.route,
-              "resolve",
-              refreshResolveStartedAt
-            );
-          
-            setRoutePending(
-              match,
-              options,
-              seq
-            );
-          
-            if (
-              hasSensitiveQuery(
-                match.publicPath
-              ) &&
-              !routeAllowsSensitiveQuery(
-                match.route
-              )
-            ) {
-              const cleanPath =
-                stripSensitiveQuery(
-                  match.publicPath
-                );
-          
-              if (
-                cleanPath !==
-                match.publicPath
-              ) {
-                return redirectTo(
-                  cleanPath,
-                  options,
-                  "scrub-sensitive-query"
-                );
-              }
-            }
-          
+          refresh_anchor = "    /*\n      Auth pudo cambiar durante la espera.\n"
+          route_guard_anchor = "    if (\n      !match.route\n    ) {\n"
+          refresh_start = router.find(refresh_anchor)
+          refresh_end = router.find(route_guard_anchor, refresh_start)
+          if refresh_start < 0 or refresh_end <= refresh_start:
+              raise SystemExit("Router redundant resolve anchors not found in order")
+          if router.find(refresh_anchor, refresh_start + 1) != -1:
+              raise SystemExit("Router redundant resolve start anchor is not unique")
+          router = router[:refresh_start] + router[refresh_end:]
+
+          policy_anchor = '''        opaqueNavigationPerformanceIds:
+          true,
 '''
-          replace_once(router, redundant, "")
+          policy_replacement = '''        opaqueNavigationPerformanceIds:
+          true,
 
-          replace_once(
-              router,
-              '''        opaqueNavigationPerformanceIds:
-                    true,
-''',
-              '''        opaqueNavigationPerformanceIds:
-                    true,
-          
-                  singleRouteResolutionPerTransition:
-                    true,
-''',
-          )
+        singleRouteResolutionPerTransition:
+          true,
+'''
+          if router.count(policy_anchor) != 1:
+              raise SystemExit("Router policy anchor is not unique")
+          router = router.replace(policy_anchor, policy_replacement, 1)
+          router_path.write_text(router, encoding="utf-8")
 
-          replace_once(
-              contract,
-              '  "router.minimal.v12-phase-attribution"',
+          contract_path = Path(".github/scripts/router_runtime_contract.mjs")
+          contract = contract_path.read_text(encoding="utf-8")
+          old_contract_version = '  "router.minimal.v12-phase-attribution"'
+          if contract.count(old_contract_version) != 1:
+              raise SystemExit("Router contract version anchor is not unique")
+          contract = contract.replace(
+              old_contract_version,
               '  "router.minimal.v13-single-route-resolution"',
-          )
-          replace_once(
-              contract,
-              '''assert.equal(snapshot.policy.opaqueNavigationPerformanceIds, true);
-''',
-              '''assert.equal(snapshot.policy.opaqueNavigationPerformanceIds, true);
-          assert.equal(snapshot.policy.singleRouteResolutionPerTransition, true);
-''',
+              1,
           )
 
-          marker = '''const phaseCallStart = source.indexOf("module.recordRoutePhase({");
-'''
-          addition = '''const executeRenderStart = source.indexOf("async function executeRender(");
-          const executeRenderEnd = source.indexOf("\\nfunction render(", executeRenderStart);
+          policy_assert = "assert.equal(snapshot.policy.opaqueNavigationPerformanceIds, true);\n"
+          if contract.count(policy_assert) != 1:
+              raise SystemExit("Router contract policy anchor is not unique")
+          contract = contract.replace(
+              policy_assert,
+              policy_assert + "assert.equal(snapshot.policy.singleRouteResolutionPerTransition, true);\n",
+              1,
+          )
+
+          phase_anchor = 'const phaseCallStart = source.indexOf("module.recordRoutePhase({");\n'
+          if contract.count(phase_anchor) != 1:
+              raise SystemExit("Router contract phase anchor is not unique")
+          single_resolution_contract = r'''const executeRenderStart = source.indexOf("async function executeRender(");
+          const executeRenderEnd = source.indexOf("\nfunction render(", executeRenderStart);
           assert.ok(
             executeRenderStart >= 0 && executeRenderEnd > executeRenderStart,
             "Router contract must isolate executeRender()"
           );
           const executeRenderSource = source.slice(executeRenderStart, executeRenderEnd);
           assert.equal(
-            (executeRenderSource.match(/\\bgetRouteMatch\\s*\\(/g) || []).length,
+            (executeRenderSource.match(/\bgetRouteMatch\s*\(/g) || []).length,
             1,
             "each Router transition must resolve the route exactly once"
           );
           assert.equal(
-            (executeRenderSource.match(/\\bsetRoutePending\\s*\\(/g) || []).length,
+            (executeRenderSource.match(/\bsetRoutePending\s*\(/g) || []).length,
             1,
             "each Router transition must publish pending route state exactly once"
           );
@@ -170,9 +130,14 @@ jobs:
             false,
             "Router must not retain the redundant post-auth route resolution"
           );
-          
-          ''' + marker
-          replace_once(contract, marker, addition)
+
+          '''.replace("          ", "")
+          contract = contract.replace(
+              phase_anchor,
+              single_resolution_contract + phase_anchor,
+              1,
+          )
+          contract_path.write_text(contract, encoding="utf-8")
           PY
 
           node --check src/router/index.js

@@ -7,6 +7,7 @@
    - API base desde core/config.js.
    - credentials: "include" por defecto.
    - Authorization sólo si corresponde y existe access token en Core.
+   - Leer/escribir sesión por el puerto runtime zero-copy de Core.
    - Parsear JSON/text/blob/arrayBuffer.
    - Descargar blobs/documentos.
    - Clasificar errores auth sin navegar.
@@ -33,7 +34,7 @@ import {
 } from "./config.js";
 
 export const HTTP_VERSION =
-  "core.http.refresh.blob.v8-direct-api";
+  "core.http.refresh.blob.v9-runtime-state-port";
 
 export const AUTH_ENDPOINTS =
   CONFIG_AUTH_ENDPOINTS;
@@ -718,18 +719,47 @@ function cleanToken(
 
 let appCore = null;
 
+function runtimeStatePort() {
+  const port =
+    appCore?.runtimeState;
+
+  return (
+    isObject(port) &&
+    isFunction(port.read) &&
+    isFunction(port.write)
+  )
+    ? port
+    : null;
+}
+
 function readCoreState() {
   if (!appCore) {
     return null;
   }
 
   try {
+    const port =
+      runtimeStatePort();
+
+    if (port) {
+      return port.read();
+    }
+
+    if (
+      isFunction(
+        appCore.getRuntimeState
+      )
+    ) {
+      return appCore.getRuntimeState();
+    }
+
     if (
       isFunction(
         appCore.getState
       )
     ) {
       return appCore.getState({
+        raw: true,
         includeToken: true,
       });
     }
@@ -742,6 +772,212 @@ function readCoreState() {
   )
     ? appCore.state
     : null;
+}
+
+function writeCoreState(
+  patch = {}
+) {
+  if (
+    !isObject(patch) ||
+    !appCore
+  ) {
+    return false;
+  }
+
+  try {
+    const port =
+      runtimeStatePort();
+
+    if (port) {
+      port.write(
+        patch
+      );
+
+      return true;
+    }
+
+    if (
+      isFunction(
+        appCore.setRuntimeState
+      )
+    ) {
+      appCore.setRuntimeState(
+        patch
+      );
+
+      return true;
+    }
+
+    if (
+      isFunction(
+        appCore.setState
+      )
+    ) {
+      appCore.setState(
+        patch,
+        {
+          raw: true,
+          source:
+            "http",
+        }
+      );
+
+      return true;
+    }
+  } catch {
+    // noop
+  }
+
+  return false;
+}
+
+function authPayloadSources(
+  payload = {}
+) {
+  if (
+    !isObject(payload)
+  ) {
+    return [];
+  }
+
+  return [
+    payload,
+    payload.data,
+    payload.payload,
+    payload.result,
+    payload.auth,
+  ].filter(isObject);
+}
+
+function pickAuthPayloadValue(
+  payload = {},
+  names = []
+) {
+  for (
+    const source
+    of authPayloadSources(
+      payload
+    )
+  ) {
+    for (
+      const name
+      of names
+    ) {
+      const value =
+        source?.[name];
+
+      if (
+        value !== undefined &&
+        value !== null &&
+        value !== ""
+      ) {
+        return value;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function authTokensFromPayload(
+  payload = {}
+) {
+  const token =
+    cleanToken(
+      pickAuthPayloadValue(
+        payload,
+        [
+          "token",
+          "accessToken",
+          "access_token",
+        ]
+      ) ||
+      ""
+    );
+
+  return {
+    token,
+    accessToken:
+      token,
+    access_token:
+      token,
+  };
+}
+
+function authPatchFromPayload(
+  payload = {}
+) {
+  if (
+    !isObject(payload)
+  ) {
+    return {};
+  }
+
+  const patch = {};
+
+  const token =
+    pickAuthPayloadValue(
+      payload,
+      [
+        "token",
+        "accessToken",
+        "access_token",
+      ]
+    );
+
+  const user =
+    pickAuthPayloadValue(
+      payload,
+      [
+        "user",
+        "currentUser",
+        "usuario",
+        "me",
+        "account",
+      ]
+    );
+
+  const session =
+    pickAuthPayloadValue(
+      payload,
+      [
+        "session",
+        "sessionData",
+        "currentSession",
+      ]
+    );
+
+  if (
+    token !== undefined
+  ) {
+    patch.token =
+      token;
+  }
+
+  if (
+    user !== undefined
+  ) {
+    patch.user =
+      user;
+  }
+
+  if (
+    session !== undefined
+  ) {
+    patch.session =
+      session;
+  }
+
+  if (
+    payload.hasRefreshToken !==
+    undefined
+  ) {
+    patch.hasRefreshToken =
+      payload.hasRefreshToken ===
+      true;
+  }
+
+  return patch;
 }
 
 export function getAccessToken() {
@@ -772,25 +1008,19 @@ export function setAccessToken(
       token
     );
 
-  try {
-    appCore
-      ?.setToken
-      ?.(value || null);
-  } catch {
-    // noop
-  }
+  writeCoreState({
+    token:
+      value ||
+      null,
+  });
 
   return value;
 }
 
 export function clearAuthTokens() {
-  try {
-    appCore
-      ?.setToken
-      ?.(null);
-  } catch {
-    // noop
-  }
+  writeCoreState({
+    token: null,
+  });
 
   return true;
 }
@@ -798,56 +1028,43 @@ export function clearAuthTokens() {
 export function setAuthTokens(
   payload = {}
 ) {
-  const token =
-    cleanToken(
-      first(
-        payload?.token,
-        payload?.accessToken,
-        payload?.access_token,
-        payload?.data?.token,
-        payload?.data?.accessToken,
-        payload?.data?.access_token,
-        payload?.payload?.token,
-        payload?.payload?.accessToken,
-        payload?.result?.token,
-        payload?.result?.accessToken,
-        ""
-      )
+  const tokens =
+    authTokensFromPayload(
+      payload
     );
 
-  if (token) {
-    setAccessToken(
-      token
-    );
+  if (
+    tokens.token
+  ) {
+    writeCoreState({
+      token:
+        tokens.token,
+    });
   }
 
-  return {
-    token,
-    accessToken: token,
-    access_token: token,
-  };
+  return tokens;
 }
 
 function applyAuthPayload(
   payload = {}
 ) {
   const tokens =
-    setAuthTokens(
+    authTokensFromPayload(
       payload
     );
 
-  try {
-    if (
-      isFunction(
-        appCore?.applySession
-      )
-    ) {
-      appCore.applySession(
-        payload
-      );
-    }
-  } catch {
-    // noop
+  const patch =
+    authPatchFromPayload(
+      payload
+    );
+
+  if (
+    Object.keys(patch)
+      .length
+  ) {
+    writeCoreState(
+      patch
+    );
   }
 
   return tokens;
@@ -1178,6 +1395,18 @@ function clearCoreSessionIfFinal(
     )
   ) {
     return false;
+  }
+
+  if (
+    writeCoreState({
+      token: null,
+      user: null,
+      session: null,
+      hasRefreshToken:
+        false,
+    })
+  ) {
+    return true;
   }
 
   try {
@@ -2626,6 +2855,10 @@ async function runRefresh(
             }
           );
 
+        /*
+          Un único write canónico aplica token/user/session del refresh.
+          Core normaliza, deriva y toca updatedAt una sola vez.
+        */
         applyAuthPayload(
           result.data ||
           {}
@@ -3232,6 +3465,11 @@ export function getSnapshot() {
         appCore
       ),
 
+    runtimeStatePort:
+      Boolean(
+        runtimeStatePort()
+      ),
+
     hasToken:
       Boolean(
         getAccessToken()
@@ -3309,6 +3547,12 @@ export function getSnapshot() {
         singleClient: true,
         configDriven: true,
         credentialsInclude: true,
+
+        runtimeStateZeroCopyRead:
+          true,
+
+        singleCoreWriteOnRefresh:
+          true,
 
         autoRefresh: true,
         singleFlightRefresh: true,

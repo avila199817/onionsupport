@@ -8,6 +8,7 @@
    - Sesión actual en memoria.
    - Helpers básicos de usuario/rol/ruta.
    - Registro mínimo de módulos.
+   - Puerto runtime interno zero-copy con escritura normalizada.
    - Puente único hacia core/http.js.
    - Mantener derivados de Auth coherentes sin mutar en cada lectura.
    - Evitar que rutas/tokens sensibles entren en snapshots o estado público.
@@ -37,7 +38,10 @@ import {
 import Http from "./http.js";
 
 export const CORE_VERSION =
-  "core.minimal.v6-hardened";
+  "core.minimal.v7-runtime-state-port";
+
+const RUNTIME_STATE_VERSION =
+  "core.runtime-state.v1";
 
 const APP_NAME =
   config?.appName ||
@@ -388,6 +392,8 @@ const moduleRegistry =
 
 let httpClient = null;
 let toastBridge = null;
+let activeRequestClient = null;
+let activeRequestBound = null;
 
 /* =========================================================
    MUTATION HELPERS
@@ -1196,6 +1202,36 @@ function normalizeUser(
       isUsableUser(
         user
       ),
+  };
+}
+
+function cloneCanonicalUser(
+  user = null
+) {
+  if (
+    !isObject(user) ||
+    !isUsableUser(user)
+  ) {
+    return null;
+  }
+
+  return {
+    ...user,
+
+    roles:
+      Array.isArray(user.roles)
+        ? [...user.roles]
+        : [],
+
+    permissions:
+      Array.isArray(user.permissions)
+        ? [...user.permissions]
+        : [],
+
+    permisos:
+      Array.isArray(user.permisos)
+        ? [...user.permisos]
+        : [],
   };
 }
 
@@ -2098,14 +2134,14 @@ function sanitizePatchValue(
 
   if (
     normalizedKey ===
-    "lang"
+      "lang"
   ) {
     return "es";
   }
 
   if (
     normalizedKey ===
-    "locale"
+      "locale"
   ) {
     return "es-ES";
   }
@@ -2130,27 +2166,36 @@ function sanitizePatchValue(
    STATE READ / WRITE
 ========================================================= */
 
-function getState(
-  options = {}
-) {
+function getRuntimeState() {
   /*
-    No tocamos updatedAt al leer.
-    Sólo corregimos derivados si alguien ha mutado AppCore.state
-    directamente por compatibilidad legacy.
+    Contrato interno:
+    - misma referencia canónica;
+    - derivados de Auth sincronizados;
+    - cero structuredClone;
+    - ninguna mutación por lectura salvo reparación de derivados legacy.
   */
   syncAuthDerivedState({
     touch: false,
   });
 
+  return state;
+}
+
+function getState(
+  options = {}
+) {
+  const current =
+    getRuntimeState();
+
   if (
     options.raw === true
   ) {
-    return state;
+    return current;
   }
 
   const snapshot =
     clone(
-      state
+      current
     ) ||
     {};
 
@@ -2370,6 +2415,29 @@ function setState(
     options
   );
 }
+
+function setRuntimeState(
+  patch = {}
+) {
+  return setState(
+    patch,
+    {
+      raw: true,
+    }
+  );
+}
+
+const runtimeState =
+  Object.freeze({
+    version:
+      RUNTIME_STATE_VERSION,
+
+    read:
+      getRuntimeState,
+
+    write:
+      setRuntimeState,
+  });
 
 function patchState(
   patch = {},
@@ -2908,25 +2976,26 @@ function setError(
 
 function isAuthenticated() {
   return (
-    getState()
+    getRuntimeState()
       .authenticated ===
     true
   );
 }
 
 function getCurrentUser() {
-  const snapshot =
-    getState();
+  const current =
+    getRuntimeState();
 
-  return snapshot.hasUser
-    ? snapshot.user ||
-      null
+  return current.hasUser
+    ? cloneCanonicalUser(
+        current.user
+      )
     : null;
 }
 
 function getCurrentRole() {
   return (
-    getState().role ||
+    getRuntimeState().role ||
     null
   );
 }
@@ -2934,11 +3003,11 @@ function getCurrentRole() {
 function hasRole(
   roleOrRoles = []
 ) {
-  const snapshot =
-    getState();
+  const current =
+    getRuntimeState();
 
   if (
-    !snapshot.authenticated
+    !current.authenticated
   ) {
     return false;
   }
@@ -2966,23 +3035,26 @@ function hasRole(
   }
 
   if (
-    snapshot.role ===
+    current.role ===
     "admin"
   ) {
     return true;
   }
 
   return roles.includes(
-    snapshot.role
+    current.role
   );
 }
 
 function getAuthHeader() {
+  const current =
+    getRuntimeState();
+
   const token =
     cleanToken(
-      state.token ||
-      state.accessToken ||
-      state.access_token
+      current.token ||
+      current.accessToken ||
+      current.access_token
     );
 
   return token
@@ -3097,6 +3169,12 @@ function setHttpClient(
   httpClient =
     value;
 
+  activeRequestClient =
+    null;
+
+  activeRequestBound =
+    null;
+
   registerModule(
     "http",
     httpClient,
@@ -3160,11 +3238,23 @@ function getActiveRequest() {
       client?.request
     )
   ) {
-    return client
-      .request
-      .bind(
-        client
-      );
+    if (
+      activeRequestClient !==
+        client ||
+      !isFunction(
+        activeRequestBound
+      )
+    ) {
+      activeRequestClient =
+        client;
+
+      activeRequestBound =
+        client.request.bind(
+          client
+        );
+    }
+
+    return activeRequestBound;
   }
 
   if (
@@ -3542,6 +3632,9 @@ function getSnapshot() {
         httpClient
       ),
 
+    hasRuntimeStatePort:
+      true,
+
     modules:
       Object.freeze(
         listModules()
@@ -3587,6 +3680,7 @@ export const AppCore = {
 
   config,
   state,
+  runtimeState,
   dom,
   ui,
 
@@ -3598,6 +3692,9 @@ export const AppCore = {
   getState,
   setState,
   patchState,
+
+  getRuntimeState,
+  setRuntimeState,
 
   isAuthenticated,
   getCurrentUser,

@@ -11,17 +11,14 @@
    - No descargar/parsear JS de rutas que el usuario no visita.
    - Aislar fallos de una mejora progresiva para no tumbar el arranque principal.
    - Evitar scripts globales dispersos en index.html.
+   - Core/Auth/HTTP optimizan runtime de forma nativa; sin shim de monkey-patching.
    - Sin Auth, Router, HTTP, Store ni lógica de dominio propia.
 ========================================================= */
 
 export const APP_ENHANCEMENTS_VERSION =
-  "app.enhancements.v12.1-route-commit-lazy";
+  "app.enhancements.v13-native-runtime-state";
 
 const PRE_ROUTER = Object.freeze([
-  Object.freeze({
-    key: "runtime-fastpath",
-    load: () => import("../core/runtime-fastpath.js"),
-  }),
   Object.freeze({
     key: "ticket-deeplink",
     load: () => import("../features/ticket-deeplink/index.js"),
@@ -397,10 +394,6 @@ async function loadPostRouterPhase() {
 
 export function initPreRouterEnhancements() {
   if (!preRouterPromise) {
-    /*
-      Todas estas importaciones deben terminar antes de bootApp(), pero ninguna
-      necesita bloquear a las otras durante descarga/parse/evaluación.
-    */
     preRouterPromise = loadPhase(PRE_ROUTER);
   }
 
@@ -447,6 +440,8 @@ export function getAppEnhancementsSnapshot() {
     totalPostRouter: POST_ROUTER.length,
     policy: Object.freeze({
       parallelPreRouter: true,
+      nativeRuntimeState: true,
+      runtimeShim: false,
       routeCommitLazyLoading: true,
       rapidNavigationCoalescing: true,
       speculativeRoutePreload: false,

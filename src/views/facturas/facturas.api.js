@@ -18,7 +18,7 @@
 import Http from "../../core/http.js";
 
 export const FACTURAS_API_VERSION =
-  "facturas.api.production.v6.admin-payment-command";
+  "facturas.api.production.v7.paid-finalization-timeout";
 
 /* =========================================================
    ENDPOINTS / TIMEOUTS
@@ -33,7 +33,7 @@ export const FACTURAS_DETAIL_TIMEOUT = 18000;
 export const FACTURAS_CREATE_TIMEOUT = 45000;
 export const FACTURAS_PDF_TIMEOUT = 45000;
 export const FACTURAS_SEND_TIMEOUT = 30000;
-export const FACTURAS_PAYMENT_TIMEOUT = 20000;
+export const FACTURAS_PAYMENT_TIMEOUT = 120000;
 
 export const FACTURAS_DEFAULT_PAGE = 1;
 export const FACTURAS_DEFAULT_LIMIT = 100;

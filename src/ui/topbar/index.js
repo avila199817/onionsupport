@@ -4338,7 +4338,7 @@ function onKeydown(
 
   if (
     event.key ===
-      "ArrowUp"
+    "ArrowUp"
   ) {
     event.preventDefault();
 

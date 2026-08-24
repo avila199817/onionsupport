@@ -50,7 +50,9 @@ const usuariosSource = await readFile("src/views/usuarios/index.js", "utf8");
 
 function functionSource(source, name, nextName) {
   const start = source.indexOf(`function ${name}(`);
-  const end = source.indexOf(`\nfunction ${nextName}(`, start);
+  const lineStart = source.lastIndexOf("\n", start) + 1;
+  const indent = source.slice(lineStart, start);
+  const end = source.indexOf(`\n${indent}function ${nextName}(`, start);
   assert.ok(start >= 0 && end > start, `Usuarios contract must isolate ${name}()`);
   return source.slice(start, end);
 }

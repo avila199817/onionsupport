@@ -117,5 +117,6 @@ print("Contratos SPA críticos OK.")
 PY
 
 node --experimental-default-type=module .github/scripts/core_runtime_contract.mjs
+node --experimental-default-type=module .github/scripts/core_snapshot_contract.mjs
 node --experimental-default-type=module .github/scripts/auth_selector_contract.mjs
 node --experimental-default-type=module .github/scripts/incidencias_detail_request_contract.mjs

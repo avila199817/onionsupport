@@ -2,22 +2,25 @@
    Onion Support · Incidencias Detail Live Sync
    Archivo: /src/features/incidencias-detail-live-sync/index.js
 
-   Autoridad progresiva de frescura del Modal Details:
-   - stale-while-revalidate real: el modal pinta inmediatamente y se revalida
-     contra servidor con force=true/cache=false;
-   - refresco adaptativo mientras el modal permanece visible;
-   - refresh inmediato al volver a la pestaña, recuperar foco/online y después
-     de una mutación confirmada;
-   - aplica en un único turno de pintura sólo slots remotos/no editables;
-   - preserva textarea, archivos pendientes, foco, preview y confirmaciones;
-   - muestra un mini indicador no bloqueante en vez de vaciar el modal;
-   - nunca necesita recargar la página para ver el último comentario.
+   Frescura del Modal Details sin polling agresivo:
+   - stale-while-revalidate al abrir: pinta lo disponible y valida servidor;
+   - NO ejecuta un interval/timer de polling continuo;
+   - usa señales naturales de invalidación: cambio del row/listado, mutación
+     confirmada, vuelta a foco/pestaña y recuperación de conectividad;
+   - focus/visibility/online sólo revalidan si el detalle ya está stale;
+   - la lista ya tiene su propia actualización de baja frecuencia y actúa como
+     coarse change feed: sólo si cambia el row activo se consulta el detalle;
+   - después de escribir hay una única confirmación read-after-write diferida;
+   - proyecta únicamente datos remotos y preserva borrador, adjuntos pendientes,
+     foco, visor de archivos y confirmaciones del usuario;
+   - el indicador aparece sólo si la red tarda y nunca fuerza un repintado vacío.
 
-   El backend y el controller siguen siendo la autoridad de escrituras.
+   Patrón equivalente a clientes de datos modernos: cache inmediata +
+   invalidación/revalidación por señales, con polling periódico desactivado.
 ========================================================= */
 
 export const INCIDENCIAS_DETAIL_LIVE_SYNC_VERSION =
-  "incidencias-detail-live-sync.v1.atomic-swr";
+  "incidencias-detail-live-sync.v2.signal-driven-swr";
 
 const VIEW = "#view-container, [data-router-view='true']";
 const HOST = "[data-incidencias-modal-host='true']";
@@ -30,13 +33,15 @@ const DESCRIPTION_TEXT = ".incidencias-modal-description";
 const COMMENT_THREAD = "[data-description-comments='true']";
 const SUCCESS = ".incidencias-modal-feedback--success";
 const LIVE = "[data-detail-live-sync='true']";
+const ROW = "[data-ticket-row='true']";
 
-const FAST_POLL_MS = 6_000;
-const IDLE_POLL_MS = 12_000;
-const ERROR_POLL_MS = 15_000;
-const HOT_WINDOW_MS = 30_000;
-const INDICATOR_DELAY_MS = 140;
-const INDICATOR_SETTLE_MS = 1_000;
+const STALE_AFTER_MS = 20_000;
+const WAKE_DEDUPE_MS = 4_000;
+const MUTATION_CONFIRM_DELAY_MS = 650;
+const LIST_SIGNAL_DEBOUNCE_MS = 120;
+const INDICATOR_DELAY_MS = 450;
+const INDICATOR_SETTLE_MS = 900;
+const ERROR_SETTLE_MS = 1_600;
 
 let mounted = false;
 let mountRoot = null;
@@ -44,7 +49,8 @@ let host = null;
 let viewObserver = null;
 let modalObserver = null;
 let frame = 0;
-let pollTimer = 0;
+let mutationConfirmTimer = 0;
+let listSignalTimer = 0;
 let indicatorDelayTimer = 0;
 let indicatorSettleTimer = 0;
 let requestSeq = 0;
@@ -59,11 +65,13 @@ let activeTicketId = "";
 let lastDetail = null;
 let lastSignature = "";
 let lastSuccessKey = "";
-let lastChangedAt = 0;
+let lastListFingerprint = "";
 let lastSyncedAt = 0;
+let lastWakeAt = 0;
 let lastError = null;
 let syncCount = 0;
 let changeCount = 0;
+let signalRefreshCount = 0;
 
 const browser = () =>
   typeof window !== "undefined" && typeof document !== "undefined";
@@ -136,6 +144,10 @@ function rootBusy(root = currentRoot()) {
   );
 }
 
+function isStale() {
+  return !lastSyncedAt || Date.now() - lastSyncedAt >= STALE_AFTER_MS;
+}
+
 const api = () =>
   apiPromise ||= import("../../views/incidencias/incidencias.api.js");
 
@@ -151,6 +163,33 @@ function ownMutation(callback) {
       internalMutations = Math.max(0, internalMutations - 1);
     });
   }
+}
+
+function clearTimer(name = "") {
+  if (!browser()) return false;
+
+  const map = {
+    mutation: mutationConfirmTimer,
+    list: listSignalTimer,
+    indicatorDelay: indicatorDelayTimer,
+    indicatorSettle: indicatorSettleTimer,
+  };
+
+  const id = Number(map[name] || 0);
+  if (!id) return false;
+
+  window.clearTimeout(id);
+
+  if (name === "mutation") mutationConfirmTimer = 0;
+  if (name === "list") listSignalTimer = 0;
+  if (name === "indicatorDelay") indicatorDelayTimer = 0;
+  if (name === "indicatorSettle") indicatorSettleTimer = 0;
+  return true;
+}
+
+function clearIndicatorTimers() {
+  clearTimer("indicatorDelay");
+  clearTimer("indicatorSettle");
 }
 
 function ensureIndicator(root = currentRoot()) {
@@ -178,32 +217,23 @@ function ensureIndicator(root = currentRoot()) {
   const label = document.createElement("span");
   label.className = "incidencias-modal-live-sync-label";
   label.dataset.liveSyncLabel = "true";
-  label.textContent = "Sincronizando…";
+  label.textContent = "Actualizando…";
 
   live.append(spinner, label);
   ownMutation(() => panel.appendChild(live));
   return live;
 }
 
-function clearIndicatorTimers() {
-  if (!browser()) return;
-
-  if (indicatorDelayTimer) window.clearTimeout(indicatorDelayTimer);
-  if (indicatorSettleTimer) window.clearTimeout(indicatorSettleTimer);
-  indicatorDelayTimer = 0;
-  indicatorSettleTimer = 0;
-}
-
 function showIndicator(root, state, label) {
   if (!root?.isConnected) return false;
 
   const live = ensureIndicator(root);
-  const textNode = live?.querySelector?.("[data-live-sync-label='true']");
-  if (!live || !textNode) return false;
+  const labelNode = live?.querySelector?.("[data-live-sync-label='true']");
+  if (!live || !labelNode) return false;
 
   live.dataset.state = state;
   live.hidden = false;
-  textNode.textContent = label;
+  labelNode.textContent = label;
   return true;
 }
 
@@ -219,17 +249,15 @@ function beginIndicator(root) {
   clearIndicatorTimers();
   root.dataset.liveSyncState = "syncing";
 
-  const panel = root.querySelector(PANEL);
-  panel?.setAttribute?.("aria-busy", "true");
-
   indicatorDelayTimer = window.setTimeout(() => {
     indicatorDelayTimer = 0;
+
     if (
       root.isConnected &&
       root === currentRoot() &&
       root.dataset.liveSyncState === "syncing"
     ) {
-      showIndicator(root, "syncing", "Sincronizando…");
+      showIndicator(root, "syncing", "Actualizando…");
     }
   }, INDICATOR_DELAY_MS);
 }
@@ -237,28 +265,41 @@ function beginIndicator(root) {
 function finishIndicator(root, { changed = false, error = false } = {}) {
   if (!root?.isConnected) return;
 
-  if (indicatorDelayTimer) {
-    window.clearTimeout(indicatorDelayTimer);
-    indicatorDelayTimer = 0;
-  }
-
-  const panel = root.querySelector(PANEL);
-  panel?.setAttribute?.("aria-busy", "false");
+  const wasVisible = Boolean(root.querySelector(`${LIVE}:not([hidden])`));
+  clearTimer("indicatorDelay");
+  clearTimer("indicatorSettle");
 
   if (error) {
-    root.dataset.liveSyncState = "retry";
-    showIndicator(root, "error", "Sin conexión · reintentando");
-  } else {
-    root.dataset.liveSyncState = "ready";
-    showIndicator(root, "ready", changed ? "Contenido actualizado" : "Al día");
+    root.dataset.liveSyncState = "error";
+
+    if (wasVisible) {
+      showIndicator(root, "error", "No se pudo actualizar");
+      indicatorSettleTimer = window.setTimeout(() => {
+        indicatorSettleTimer = 0;
+        if (!root.isConnected || root !== currentRoot()) return;
+        hideIndicator(root);
+        root.dataset.liveSyncState = "idle";
+      }, ERROR_SETTLE_MS);
+    }
+
+    return;
   }
 
+  root.dataset.liveSyncState = "ready";
+
+  if (!changed) {
+    hideIndicator(root);
+    root.dataset.liveSyncState = "idle";
+    return;
+  }
+
+  showIndicator(root, "ready", "Contenido actualizado");
   indicatorSettleTimer = window.setTimeout(() => {
     indicatorSettleTimer = 0;
     if (!root.isConnected || root !== currentRoot()) return;
     hideIndicator(root);
-    if (!error) root.dataset.liveSyncState = "idle";
-  }, error ? 2_000 : INDICATOR_SETTLE_MS);
+    root.dataset.liveSyncState = "idle";
+  }, INDICATOR_SETTLE_MS);
 }
 
 function normalizeComment(item = {}, index = 0) {
@@ -284,7 +325,10 @@ function normalizeComment(item = {}, index = 0) {
   if (!body) return null;
 
   return {
-    id: text(first(raw.id, raw.commentId, raw.eventId, `comment_${index}`), `comment_${index}`),
+    id: text(
+      first(raw.id, raw.commentId, raw.eventId, `comment_${index}`),
+      `comment_${index}`
+    ),
     body,
     author: text(
       first(
@@ -417,7 +461,10 @@ function renderFreshComments(root, detail = {}) {
   nextThread.className = "incidencias-modal-description-thread";
   nextThread.dataset.descriptionComments = "true";
   nextThread.dataset.commentSignature = signature;
-  nextThread.setAttribute("aria-label", "Comentarios y seguimiento de la incidencia");
+  nextThread.setAttribute(
+    "aria-label",
+    "Comentarios y seguimiento de la incidencia"
+  );
 
   const head = document.createElement("div");
   head.className = "incidencias-modal-description-thread-head";
@@ -426,7 +473,8 @@ function renderFreshComments(root, detail = {}) {
   title.textContent = "Seguimiento";
 
   const count = document.createElement("span");
-  count.textContent = `${comments.length} comentario${comments.length === 1 ? "" : "s"}`;
+  count.textContent =
+    `${comments.length} comentario${comments.length === 1 ? "" : "s"}`;
 
   const list = document.createElement("div");
   list.className = "incidencias-modal-description-comments";
@@ -530,17 +578,15 @@ async function projectRemoteSlots(root, detail = {}) {
   if (!nextRoot || ticketId(root) !== ticketId(nextRoot)) return false;
 
   /*
-     Un único micro-turno de mutación: no se toca textarea/composer/preview ni
-     confirmaciones. El navegador pinta el conjunto después de este callback.
+     Una sola transacción DOM para datos remotos. No se toca feedback, preview,
+     composer, textarea, input file ni overlays de confirmación.
   */
   ownMutation(() => {
-    const pairs = [
+    for (const selector of [
       "[data-modal-updated='true']",
       ".incidencias-modal-meta-grid",
       ".incidencias-modal-contact-section",
-    ];
-
-    for (const selector of pairs) {
+    ]) {
       const current = root.querySelector(selector);
       const next = nextRoot.querySelector(selector);
       if (current && next && !activeInside(current)) {
@@ -582,32 +628,61 @@ async function projectRemoteSlots(root, detail = {}) {
   return true;
 }
 
-function clearPoll() {
-  if (pollTimer && browser()) window.clearTimeout(pollTimer);
-  pollTimer = 0;
-}
+function rowForTicket(id = activeTicketId) {
+  if (!mountRoot || !id) return null;
 
-function pollDelay() {
-  if (lastError) return ERROR_POLL_MS;
-  if (lastChangedAt && Date.now() - lastChangedAt <= HOT_WINDOW_MS) {
-    return FAST_POLL_MS;
+  for (const row of mountRoot.querySelectorAll(ROW)) {
+    const rowId = text(row.dataset?.ticketId || row.dataset?.incidenciaId, "");
+    if (rowId === id) return row;
   }
-  return IDLE_POLL_MS;
+
+  return null;
 }
 
-function planPoll() {
-  clearPoll();
-  if (!browser() || !mounted || !pageVisible() || !activeTicketId) return false;
+function rowFingerprint(row = null) {
+  if (!row) return "";
 
-  pollTimer = window.setTimeout(() => {
-    pollTimer = 0;
-    const root = currentRoot();
-    const id = ticketId(root);
+  const dataset = Object.entries(row.dataset || {})
+    .filter(([key]) => !/loading|busy|opening/i.test(key))
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${key}:${text(value, "")}`)
+    .join("|");
 
-    if (root && id && id === activeTicketId) {
-      void refreshDetail(id, { reason: "poll" });
+  const copy = text(row.textContent, "");
+  return `${dataset}###${copy}`;
+}
+
+function captureListFingerprint() {
+  lastListFingerprint = rowFingerprint(rowForTicket());
+  return lastListFingerprint;
+}
+
+function scheduleListSignalCheck() {
+  if (!browser() || !mounted || !activeTicketId) return false;
+
+  clearTimer("list");
+  listSignalTimer = window.setTimeout(() => {
+    listSignalTimer = 0;
+
+    if (!activeTicketId || !pageVisible()) return;
+
+    const next = rowFingerprint(rowForTicket());
+    if (!next) return;
+
+    if (!lastListFingerprint) {
+      lastListFingerprint = next;
+      return;
     }
-  }, pollDelay());
+
+    if (next === lastListFingerprint) return;
+
+    lastListFingerprint = next;
+    signalRefreshCount += 1;
+    void refreshDetail(activeTicketId, {
+      reason: "list-change",
+      force: true,
+    });
+  }, LIST_SIGNAL_DEBOUNCE_MS);
 
   return true;
 }
@@ -619,7 +694,16 @@ function abortRequest() {
   inflight = null;
 }
 
-async function refreshDetail(id = "", { reason = "sync" } = {}) {
+function shouldRefresh(reason = "signal", force = false) {
+  if (force) return true;
+
+  return ["open", "mutation-success", "list-change"].includes(reason) || isStale();
+}
+
+async function refreshDetail(
+  id = "",
+  { reason = "signal", force = false } = {}
+) {
   const cleanId = text(id, "");
   const root = currentRoot();
 
@@ -628,9 +712,9 @@ async function refreshDetail(id = "", { reason = "sync" } = {}) {
     !root?.isConnected ||
     ticketId(root) !== cleanId ||
     rootBusy(root) ||
-    !pageVisible()
+    !pageVisible() ||
+    !shouldRefresh(reason, force)
   ) {
-    planPoll();
     return false;
   }
 
@@ -639,7 +723,11 @@ async function refreshDetail(id = "", { reason = "sync" } = {}) {
   }
 
   const sequence = ++requestSeq;
-  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const controller =
+    typeof AbortController !== "undefined"
+      ? new AbortController()
+      : null;
+
   requestController = controller;
   beginIndicator(root);
 
@@ -681,29 +769,26 @@ async function refreshDetail(id = "", { reason = "sync" } = {}) {
       lastError = null;
       syncCount += 1;
 
-      if (changed) {
-        lastChangedAt = Date.now();
-        changeCount += 1;
-      }
+      if (changed) changeCount += 1;
 
       root.dataset.liveSyncLastSuccessAt = new Date(lastSyncedAt).toISOString();
-      root.dataset.liveSyncReason = text(reason, "sync");
+      root.dataset.liveSyncReason = text(reason, "signal");
+      captureListFingerprint();
       finishIndicator(root, { changed, error: false });
       return true;
     } catch (error) {
       if (sequence !== requestSeq) return false;
 
-      const aborted = error?.name === "AbortError";
-      if (!aborted) {
+      if (error?.name !== "AbortError") {
         lastError = error || new Error("LIVE_SYNC_FAILED");
         finishIndicator(root, { error: true });
       }
+
       return false;
     } finally {
       if (sequence === requestSeq) {
         requestController = null;
         inflight = null;
-        planPoll();
       }
     }
   })();
@@ -717,6 +802,29 @@ function successKey(root = currentRoot()) {
   const id = ticketId(root);
   const value = text(success?.textContent, "");
   return id && value ? `${id}::${value}` : "";
+}
+
+function scheduleMutationConfirmation(id = activeTicketId) {
+  if (!browser() || !id) return false;
+
+  clearTimer("mutation");
+  mutationConfirmTimer = window.setTimeout(() => {
+    mutationConfirmTimer = 0;
+
+    if (
+      activeTicketId === id &&
+      currentRoot()?.isConnected &&
+      !rootBusy(currentRoot())
+    ) {
+      signalRefreshCount += 1;
+      void refreshDetail(id, {
+        reason: "mutation-success",
+        force: true,
+      });
+    }
+  }, MUTATION_CONFIRM_DELAY_MS);
+
+  return true;
 }
 
 function syncHostObserver() {
@@ -733,6 +841,7 @@ function syncHostObserver() {
     modalObserver = new MutationObserver(() => {
       if (!internalMutations) schedule();
     });
+
     modalObserver.observe(host, {
       childList: true,
       subtree: true,
@@ -749,16 +858,19 @@ function syncHostObserver() {
 }
 
 function resetActive() {
-  clearPoll();
+  clearTimer("mutation");
+  clearTimer("list");
   clearIndicatorTimers();
   abortRequest();
+
   activeRoot = null;
   activeTicketId = "";
   lastDetail = null;
   lastSignature = "";
   lastSuccessKey = "";
-  lastChangedAt = 0;
+  lastListFingerprint = "";
   lastSyncedAt = 0;
+  lastWakeAt = 0;
   lastError = null;
 }
 
@@ -777,30 +889,29 @@ function sync() {
   }
 
   if (activeRoot !== root || activeTicketId !== id) {
-    clearPoll();
     abortRequest();
     activeRoot = root;
     activeTicketId = id;
     lastDetail = null;
     lastSignature = "";
     lastSuccessKey = successKey(root);
-    lastChangedAt = 0;
+    lastListFingerprint = rowFingerprint(rowForTicket(id));
     lastSyncedAt = 0;
+    lastWakeAt = 0;
     lastError = null;
 
-    /* El contenido local ya está pintado: revalidamos sin vaciar el modal. */
-    void refreshDetail(id, { reason: "open" });
+    /* SWR: contenido local visible, validación servidor en background. */
+    signalRefreshCount += 1;
+    void refreshDetail(id, { reason: "open", force: true });
     return true;
   }
 
   const currentSuccessKey = successKey(root);
   if (currentSuccessKey && currentSuccessKey !== lastSuccessKey) {
     lastSuccessKey = currentSuccessKey;
-    void refreshDetail(id, { reason: "mutation-success" });
-    return true;
+    scheduleMutationConfirmation(id);
   }
 
-  planPoll();
   return true;
 }
 
@@ -810,11 +921,23 @@ function schedule() {
   return true;
 }
 
-function onWake() {
-  if (!mounted || !pageVisible()) return;
-  const root = currentRoot();
-  const id = ticketId(root);
-  if (root && id) void refreshDetail(id, { reason: "wake" });
+function onWake(event = null) {
+  if (!mounted || !pageVisible() || !activeTicketId) return;
+
+  const now = Date.now();
+  if (now - lastWakeAt < WAKE_DEDUPE_MS) return;
+  lastWakeAt = now;
+
+  const reason = event?.type === "online"
+    ? "online"
+    : event?.type === "visibilitychange"
+      ? "visibility"
+      : "focus";
+
+  if (!isStale()) return;
+
+  signalRefreshCount += 1;
+  void refreshDetail(activeTicketId, { reason, force: false });
 }
 
 export function mountIncidenciasDetailLiveSync() {
@@ -828,17 +951,33 @@ export function mountIncidenciasDetailLiveSync() {
   viewObserver = new MutationObserver((mutations) => {
     if (internalMutations) return;
 
+    let modalTouched = false;
+    let listTouched = false;
+
     for (const mutation of mutations) {
       for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
+        if (node?.nodeType !== 1) continue;
+
         if (
-          node?.nodeType === 1 &&
-          (node.matches?.(HOST) || node.matches?.(ROOT) || node.querySelector?.(HOST) || node.querySelector?.(ROOT))
+          node.matches?.(HOST) ||
+          node.matches?.(ROOT) ||
+          node.querySelector?.(HOST) ||
+          node.querySelector?.(ROOT)
         ) {
-          schedule();
-          return;
+          modalTouched = true;
+        }
+
+        if (
+          node.matches?.(ROW) ||
+          node.querySelector?.(ROW)
+        ) {
+          listTouched = true;
         }
       }
     }
+
+    if (modalTouched) schedule();
+    if (listTouched || activeTicketId) scheduleListSignalCheck();
   });
 
   viewObserver.observe(mountRoot, { childList: true, subtree: true });
@@ -882,25 +1021,29 @@ export function getIncidenciasDetailLiveSyncSnapshot() {
     lastSyncedAt: lastSyncedAt ? new Date(lastSyncedAt).toISOString() : null,
     syncCount,
     changeCount,
+    signalRefreshCount,
     hasError: Boolean(lastError),
-    poll: Object.freeze({
-      fastMs: FAST_POLL_MS,
-      idleMs: IDLE_POLL_MS,
-      errorMs: ERROR_POLL_MS,
-      pausesWhenHidden: true,
-    }),
+    staleAfterMs: STALE_AFTER_MS,
     policy: Object.freeze({
       staleWhileRevalidate: true,
-      forceServerRevalidation: true,
-      cacheBypassed: true,
+      forceServerRevalidationOnOpen: true,
+      periodicPolling: false,
+      signalDriven: true,
+      listActsAsCoarseChangeFeed: true,
+      refreshOnListChange: true,
+      refreshAfterMutationSuccess: true,
+      readAfterWriteDelayMs: MUTATION_CONFIRM_DELAY_MS,
+      refreshOnFocusWhenStale: true,
+      refreshOnVisibilityWhenStale: true,
+      refreshOnOnlineWhenStale: true,
+      wakeDedupeMs: WAKE_DEDUPE_MS,
+      slowRequestIndicatorDelayMs: INDICATOR_DELAY_MS,
+      unchangedRequestsRemainSilent: true,
+      retryLoop: false,
       atomicRemoteSlotProjection: true,
       draftPreserved: true,
       previewPreserved: true,
       focusPreserved: true,
-      refreshOnFocus: true,
-      refreshOnVisibility: true,
-      refreshOnOnline: true,
-      refreshAfterMutationSuccess: true,
       noFullPageReload: true,
     }),
   });

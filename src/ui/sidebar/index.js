@@ -47,7 +47,7 @@ import {
 } from "./template.js";
 
 export const SIDEBAR_VERSION =
-  "sidebar.controller.v5-native-runtime-state";
+  "sidebar.controller.v6-router-context-reuse";
 
 const SIDEBAR_ROOT_ID =
   "app-sidebar";
@@ -1590,14 +1590,23 @@ function getCurrentRoute(
   }
 }
 
-function getContext() {
+function getContext(
+  overrides = {}
+) {
+  const supplied =
+    isObject(overrides)
+      ? overrides
+      : {};
+
   const state =
     readCoreState();
 
   const auth =
+    supplied.Auth ||
     getAuth();
 
   const router =
+    supplied.Router ||
     getRouter();
 
   const authenticated =
@@ -1613,6 +1622,7 @@ function getContext() {
     authUserFallback();
 
   const role =
+    supplied.role ||
     state.role ||
     state.rol ||
     authRoleFallback();
@@ -1626,15 +1636,42 @@ function getContext() {
       }
     );
 
+  const suppliedPublicPath =
+    cleanText(
+      supplied.publicPath,
+      ""
+    );
+
   const publicPath =
+    suppliedPublicPath ||
     currentPublicPath(
       state
     );
 
-  const canonicalPath =
-    currentCanonicalPath(
-      state
+  const suppliedCanonicalPath =
+    cleanText(
+      supplied.canonicalPath ||
+      supplied.route?.path,
+      ""
     );
+
+  const canonicalPath =
+    suppliedCanonicalPath
+      ? normalizePath(
+suppliedCanonicalPath
+        )
+      : currentCanonicalPath(
+state
+        );
+
+  const route =
+    supplied.route !==
+      undefined
+      ? supplied.route
+      : getCurrentRoute(
+publicPath,
+canonicalPath
+        );
 
   return {
     AppCore,
@@ -1661,17 +1698,10 @@ function getContext() {
         true,
 
     publicPath,
-
     canonicalPath,
-
-    route:
-      getCurrentRoute(
-        publicPath,
-        canonicalPath
-      ),
+    route,
   };
 }
-
 function shouldRenderSidebar(
   context
 ) {
@@ -2502,13 +2532,19 @@ function renderSidebar(
   return SidebarUI;
 }
 
-function sync() {
+function sync(
+  context = {}
+) {
   if (!isBrowser()) {
     return SidebarUI;
   }
 
   return renderSidebar(
-    getContext()
+    getContext(
+      isObject(context)
+        ? context
+        : {}
+    )
   );
 }
 
@@ -2993,6 +3029,9 @@ function getSnapshot() {
           true,
 
         routeChangeFastSync:
+          true,
+
+        routerContextReuse:
           true,
 
         idempotentDocumentState:

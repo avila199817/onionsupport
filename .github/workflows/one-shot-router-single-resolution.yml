@@ -1,0 +1,193 @@
+name: One-shot Router single-resolution patch
+
+on:
+  push:
+    branches:
+      - perf/router-single-resolution
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Use Node 22
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Apply deterministic patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly one match, found {count}")
+              p.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          router = "src/router/index.js"
+          contract = ".github/scripts/router_runtime_contract.mjs"
+
+          replace_once(
+              router,
+              'export const ROUTER_VERSION =\n  "router.minimal.v12-phase-attribution";',
+              'export const ROUTER_VERSION =\n  "router.minimal.v13-single-route-resolution";',
+          )
+
+          replace_once(
+              router,
+              '''  let match =
+            getRouteMatch(
+              path
+            );''',
+              '''  const match =
+            getRouteMatch(
+              path
+            );''',
+          )
+
+          redundant = '''    /*
+              Auth pudo cambiar durante la espera.
+              Re-resolvemos ruta y guard con estado fresco.
+            */
+            const refreshResolveStartedAt =
+              performanceNow();
+          
+            match =
+              getRouteMatch(
+                path
+              );
+          
+            setTransitionPerformanceView(
+              transition,
+              match.route
+            );
+          
+            recordTransitionPhase(
+              transition,
+              match.route,
+              "resolve",
+              refreshResolveStartedAt
+            );
+          
+            setRoutePending(
+              match,
+              options,
+              seq
+            );
+          
+            if (
+              hasSensitiveQuery(
+                match.publicPath
+              ) &&
+              !routeAllowsSensitiveQuery(
+                match.route
+              )
+            ) {
+              const cleanPath =
+                stripSensitiveQuery(
+                  match.publicPath
+                );
+          
+              if (
+                cleanPath !==
+                match.publicPath
+              ) {
+                return redirectTo(
+                  cleanPath,
+                  options,
+                  "scrub-sensitive-query"
+                );
+              }
+            }
+          
+'''
+          replace_once(router, redundant, "")
+
+          replace_once(
+              router,
+              '''        opaqueNavigationPerformanceIds:
+                    true,
+''',
+              '''        opaqueNavigationPerformanceIds:
+                    true,
+          
+                  singleRouteResolutionPerTransition:
+                    true,
+''',
+          )
+
+          replace_once(
+              contract,
+              '  "router.minimal.v12-phase-attribution"',
+              '  "router.minimal.v13-single-route-resolution"',
+          )
+          replace_once(
+              contract,
+              '''assert.equal(snapshot.policy.opaqueNavigationPerformanceIds, true);
+''',
+              '''assert.equal(snapshot.policy.opaqueNavigationPerformanceIds, true);
+          assert.equal(snapshot.policy.singleRouteResolutionPerTransition, true);
+''',
+          )
+
+          marker = '''const phaseCallStart = source.indexOf("module.recordRoutePhase({");
+'''
+          addition = '''const executeRenderStart = source.indexOf("async function executeRender(");
+          const executeRenderEnd = source.indexOf("\\nfunction render(", executeRenderStart);
+          assert.ok(
+            executeRenderStart >= 0 && executeRenderEnd > executeRenderStart,
+            "Router contract must isolate executeRender()"
+          );
+          const executeRenderSource = source.slice(executeRenderStart, executeRenderEnd);
+          assert.equal(
+            (executeRenderSource.match(/\\bgetRouteMatch\\s*\\(/g) || []).length,
+            1,
+            "each Router transition must resolve the route exactly once"
+          );
+          assert.equal(
+            (executeRenderSource.match(/\\bsetRoutePending\\s*\\(/g) || []).length,
+            1,
+            "each Router transition must publish pending route state exactly once"
+          );
+          assert.equal(
+            executeRenderSource.includes("refreshResolveStartedAt"),
+            false,
+            "Router must not retain the redundant post-auth route resolution"
+          );
+          
+          ''' + marker
+          replace_once(contract, marker, addition)
+          PY
+
+          node --check src/router/index.js
+          node --check .github/scripts/router_runtime_contract.mjs
+          bash .github/ci/validate_spa_contracts.sh
+          git diff --check
+
+      - name: Commit patched Router
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/one-shot-router-single-resolution.yml
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Perf: resolve each Router transition once"
+          git push origin HEAD:perf/router-single-resolution

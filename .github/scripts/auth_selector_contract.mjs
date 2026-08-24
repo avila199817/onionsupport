@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { AppCore } from "../../src/core/index.js";
 import { Auth, AUTH_VERSION } from "../../src/features/auth/index.js";
 
-assert.equal(AUTH_VERSION, "auth.minimal.v8-single-read-selectors");
+assert.equal(AUTH_VERSION, "auth.minimal.v9-token-single-read");
 assert.equal(typeof Auth.getSelectorStats, "function");
 
 Auth.init();
@@ -79,7 +79,7 @@ assert.equal(snapshot.refresh_token, null);
 assert.notEqual(snapshot.user, snapshot.currentUser);
 assert.notEqual(snapshot.session, snapshot.sessionData);
 assert.equal(snapshot.policy.singleReadSelectors, true);
-assert.equal(snapshot.policy.lazyHttpTokenFallback, true);
+assert.equal(snapshot.policy.lazyHttpTokenFallback, false);
 
 AppCore.runtimeState.write({
   user: {
@@ -98,6 +98,9 @@ assert.equal(AppCore.state.authenticated, false);
 assert.equal(AppCore.state.token, null);
 assert.equal(AppCore.state.user, null);
 assert.equal(AppCore.state.hasRefreshToken, false);
+assert.equal(oneCoreRead("guest getToken", () => Auth.getToken()), "");
+assert.equal(oneCoreRead("guest isAuthenticated", () => Auth.isAuthenticated()), false);
+assert.equal(Auth.getSelectorStats().httpTokenFallbacks, 0);
 
 console.log(
   `Auth selector contract OK · coreReads=${Auth.getSelectorStats().coreReads} · contexts=${Auth.getSelectorStats().contexts}`

@@ -22,7 +22,7 @@ import {
   normalizeUserSlug,
 } from "../../core/config.js";
 
-export const AUTH_VERSION = "auth.minimal.v8-single-read-selectors";
+export const AUTH_VERSION = "auth.minimal.v9-token-single-read";
 const ROOT_PATH = "/";
 const LEGACY_RESET_TOKEN_PATH = /(\/(?:reset-password|password-reset)\/confirm\/)([^/?#\s]+)/gi;
 const AUTH_ROUTES = Object.freeze({
@@ -219,10 +219,7 @@ function isCanonicalRuntimeUser(user = null) {
 }
 
 function runtimeToken(state = coreState()) {
-  const direct = cleanToken(first(state?.token, state?.accessToken, state?.access_token, ""));
-  if (direct) return direct;
-  selectorMetrics.httpTokenFallbacks += 1;
-  try { return cleanToken(Http.getAccessToken?.() || ""); } catch { return ""; }
+  return cleanToken(first(state?.token, state?.accessToken, state?.access_token, ""));
 }
 function runtimeUser(state = coreState()) {
   const candidate = first(state?.user, state?.currentUser, state?.session?.user, null);
@@ -450,7 +447,7 @@ function getAuthModuleSnapshot() {
       lastMeAt: sessionState.lastMeAt, lastLogoutAt: sessionState.lastLogoutAt, lastError: sessionState.lastError,
     }),
     selectors: Object.freeze({ ...selectorMetrics }),
-    policy: Object.freeze({ runtimeStateZeroCopyRead: true, singleReadSelectors: true, lazyHttpTokenFallback: true, runtimeStateSingleWrite: true, publicUserIsolation: true, publicSessionIsolation: true, httpOnlyRefreshToken: true }),
+    policy: Object.freeze({ runtimeStateZeroCopyRead: true, singleReadSelectors: true, lazyHttpTokenFallback: false, runtimeStateSingleWrite: true, publicUserIsolation: true, publicSessionIsolation: true, httpOnlyRefreshToken: true }),
   });
 }
 function shouldAttemptRefresh(options = {}) {

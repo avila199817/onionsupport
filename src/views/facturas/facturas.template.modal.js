@@ -2,7 +2,7 @@
    Onion Support - Facturas Modal Template
    Archivo: /src/views/facturas/facturas.template.modal.js
 
-   PRODUCTIVO · MODAL DETAIL 10/10 · V3
+   PRODUCTIVO · MODAL DETAIL 10/10 · V4
 
    Responsabilidad:
    - Render HTML puro del modal detalle de factura.
@@ -10,6 +10,7 @@
      conceptos, envío e incidencia vinculada.
    - Feedback local preparado para index.js V11+.
    - Exponer data-action/data-facturas-action estables.
+   - Acción admin explícita para registrar cobro completo.
    - Compatible con DTOs legacy/v2/v3.
    - Sin AppCore.
    - Sin Auth.
@@ -28,18 +29,19 @@
    - Información financiera legible y jerarquizada.
 
    IMPORTANTE:
-   - Focus trap, restauración de foco, confirmación de reenvío
+   - Focus trap, restauración de foco, confirmación de reenvío/pago
      y feedback de operaciones viven en index.js.
 ========================================================= */
 
 export const FACTURAS_MODAL_TEMPLATE_VERSION =
-  "facturas.template.modal.productivo.v3";
+  "facturas.template.modal.productivo.v4.admin-payment";
 
 export const FACTURA_MODAL_ACTIONS = Object.freeze({
   CLOSE: "close-factura-detail",
   VIEW_PDF: "view-factura-pdf",
   DOWNLOAD_PDF: "download-factura",
   SEND: "send-factura",
+  MARK_PAID: "mark-factura-paid",
   OPEN_INCIDENCIA: "open-incidencia",
 });
 
@@ -959,6 +961,9 @@ function icon(
     send:
       `<svg ${common}><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>`,
 
+    check:
+      `<svg ${common}><path d="m20 6-11 11-5-5"/></svg>`,
+
     ticket:
       `<svg ${common}><path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z"/><path d="M13 5v14"/></svg>`,
 
@@ -1758,6 +1763,26 @@ function getFacturaEstadoLabel(
   return getEstadoLabel(
     getFacturaEstadoRaw(
       factura
+    )
+  );
+}
+
+function isFacturaPaid(
+  factura = {}
+) {
+  return [
+    "paid",
+    "pagada",
+    "pagado",
+    "cobrada",
+    "cobrado",
+    "abonada",
+    "abonado",
+  ].includes(
+    normalizeKey(
+      getFacturaEstadoPagoRaw(
+        factura
+      )
     )
   );
 }
@@ -3370,7 +3395,9 @@ function renderFeedback({
 
 export function renderHeaderActions({
   factura = {},
+  admin = false,
   sending = false,
+  markingPaid = false,
   viewingPdf = false,
   downloading = false,
 } = {}) {
@@ -3390,6 +3417,26 @@ export function renderHeaderActions({
   const alreadySent =
     isFacturaAlreadySent(
       factura
+    );
+
+  const alreadyPaid =
+    isFacturaPaid(
+      factura
+    );
+
+  const canMarkPaid =
+    Boolean(
+      admin &&
+      facturaId &&
+      !alreadyPaid
+    );
+
+  const busy =
+    Boolean(
+      sending ||
+      markingPaid ||
+      viewingPdf ||
+      downloading
     );
 
   const sendLabel =
@@ -3417,7 +3464,7 @@ export function renderHeaderActions({
         aria-label="Ver PDF de la factura"
         ${disabledAttrs(
           !pdfAvailable ||
-          viewingPdf,
+          busy,
           viewingPdf
         )}
       >
@@ -3445,7 +3492,7 @@ export function renderHeaderActions({
         aria-label="Descargar PDF de la factura"
         ${disabledAttrs(
           !pdfAvailable ||
-          downloading,
+          busy,
           downloading
         )}
       >
@@ -3465,7 +3512,7 @@ export function renderHeaderActions({
 
       <button
         type="button"
-        class="facturas-detail-btn facturas-detail-btn--primary"
+        class="facturas-detail-btn ${canMarkPaid ? "" : "facturas-detail-btn--primary"}"
         data-action="${FACTURA_MODAL_ACTIONS.SEND}"
         data-facturas-action="${FACTURA_MODAL_ACTIONS.SEND}"
         data-factura-id="${attr(facturaId)}"
@@ -3483,7 +3530,7 @@ export function renderHeaderActions({
         )}"
         ${disabledAttrs(
           !facturaId ||
-          sending,
+          busy,
           sending
         )}
       >
@@ -3501,6 +3548,39 @@ export function renderHeaderActions({
         }
       </button>
 
+      ${
+        canMarkPaid
+          ? `
+            <button
+              type="button"
+              class="facturas-detail-btn facturas-detail-btn--primary"
+              data-action="${FACTURA_MODAL_ACTIONS.MARK_PAID}"
+              data-facturas-action="${FACTURA_MODAL_ACTIONS.MARK_PAID}"
+              data-factura-id="${attr(facturaId)}"
+              title="Registrar el cobro completo de esta factura"
+              aria-label="Marcar factura como pagada"
+              ${disabledAttrs(
+                busy,
+                markingPaid
+              )}
+            >
+              ${
+                markingPaid
+                  ? renderActionSpinner(
+                      "Registrando..."
+                    )
+                  : `
+                    <span class="facturas-detail-btn-icon">
+                      ${icon("check")}
+                    </span>
+                    <span>Marcar pagada</span>
+                  `
+              }
+            </button>
+          `
+          : ""
+      }
+
       <button
         type="button"
         class="facturas-detail-btn facturas-detail-btn--close"
@@ -3509,9 +3589,7 @@ export function renderHeaderActions({
         aria-label="Cerrar detalle de factura"
         title="Cerrar"
         ${disabledAttrs(
-          sending ||
-          viewingPdf ||
-          downloading,
+          busy,
           false
         )}
       >${icon("close")}</button>
@@ -4055,6 +4133,8 @@ function renderEnvioSection(
 export function renderFacturasDetailContent({
   factura = null,
   loading = false,
+  admin = false,
+  markingPaidFacturaId = "",
   sendingFacturaId = "",
   viewingFacturaId = "",
   downloadingFacturaId = "",
@@ -4135,6 +4215,12 @@ export function renderFacturasDetailContent({
       factura
     );
 
+  const markingPaid =
+    String(
+      markingPaidFacturaId
+    ) ===
+    String(facturaId);
+
   const sending =
     String(
       sendingFacturaId
@@ -4198,12 +4284,26 @@ export function renderFacturasDetailContent({
       factura
     );
 
+  const alreadyPaid =
+    isFacturaPaid(
+      factura
+    );
+
+  const busy =
+    Boolean(
+      markingPaid ||
+      sending ||
+      viewingPdf ||
+      downloading
+    );
+
   return `
     <div
       class="facturas-detail-layout"
       data-factura-id="${attr(facturaId)}"
       data-factura-sent="${alreadySent ? "true" : "false"}"
-      data-factura-busy="${sending || viewingPdf || downloading ? "true" : "false"}"
+      data-factura-paid="${alreadyPaid ? "true" : "false"}"
+      data-factura-busy="${busy ? "true" : "false"}"
     >
       <header
         class="facturas-detail-header"
@@ -4297,6 +4397,8 @@ export function renderFacturasDetailContent({
 
           ${renderHeaderActions({
             factura,
+            admin,
+            markingPaid,
             sending,
             viewingPdf,
             downloading,
@@ -4366,6 +4468,8 @@ export function renderFacturasDetailModal({
   item = null,
   detail = null,
 
+  admin = false,
+  markingPaidFacturaId = "",
   sendingFacturaId = "",
   viewingFacturaId = "",
   downloadingFacturaId = "",
@@ -4422,6 +4526,8 @@ export function renderFacturasDetailModal({
               loading === true ||
               detailLoading === true,
 
+            admin,
+            markingPaidFacturaId,
             sendingFacturaId,
             viewingFacturaId,
             downloadingFacturaId,
@@ -4485,6 +4591,9 @@ export function getFacturasModalTemplateSnapshot() {
       pdfActions: true,
       sendAction: true,
       smartResendLabel: true,
+      paymentAction: true,
+      paymentActionAdminOnly: true,
+      paymentActionHiddenWhenPaid: true,
       localFeedbackReady: true,
 
       openIncidenciaAction: true,

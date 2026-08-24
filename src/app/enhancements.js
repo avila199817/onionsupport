@@ -17,7 +17,7 @@
 ========================================================= */
 
 export const APP_ENHANCEMENTS_VERSION =
-  "app.enhancements.v14-navigation-critical-path";
+  "app.enhancements.v15-committed-route-sync";
 
 const PRE_ROUTER = Object.freeze([
   Object.freeze({
@@ -89,8 +89,8 @@ const POST_ROUTER = Object.freeze([
 ]);
 
 const FALLBACK_PRELOAD_MS = 72;
-const ROUTE_HOST_SELECTOR =
-  ".route-view-host:not([hidden])[data-route-path], [data-route-host='true']:not([hidden])[data-route-path]";
+const ROUTE_COMMITTED_SELECTOR =
+  "[data-route-host='true'][data-route-host-state='ready']:not([hidden])[data-route-path]";
 const ROUTE_HOST_NODE_SELECTOR =
   ".route-view-host, [data-route-host='true']";
 
@@ -101,6 +101,7 @@ let routeSyncPromise = null;
 let routeSyncQueued = false;
 let routeSyncSource = "route-commit";
 let routeObserver = null;
+let lastCommittedHost = null;
 let fallbackTimer = 0;
 let initialRouteLoads = 0;
 let lazyRouteLoads = 0;
@@ -141,12 +142,39 @@ function cleanPathname(value = "/") {
     .toLowerCase() || "/";
 }
 
+export function isCommittedEnhancementRouteHost(host = null) {
+  return Boolean(
+    host &&
+    host.hidden !== true &&
+    host?.dataset?.routeHost === "true" &&
+    host?.dataset?.routeHostState === "ready" &&
+    host?.dataset?.routePath
+  );
+}
+
+export function shouldSyncCommittedRouteHost(
+  host = null,
+  previousHost = null
+) {
+  return isCommittedEnhancementRouteHost(host) && host !== previousHost;
+}
+
+function currentCommittedRouteHost() {
+  if (!isBrowser()) return null;
+
+  try {
+    const host = document.querySelector(ROUTE_COMMITTED_SELECTOR);
+    return isCommittedEnhancementRouteHost(host) ? host : null;
+  } catch {
+    return null;
+  }
+}
+
 function activeRoutePathname() {
   if (!isBrowser()) return "/";
 
   try {
-    const host = document.querySelector(ROUTE_HOST_SELECTOR);
-    const committedPath = host?.dataset?.routePath;
+    const committedPath = currentCommittedRouteHost()?.dataset?.routePath;
 
     if (committedPath) {
       return cleanPathname(committedPath);
@@ -348,9 +376,15 @@ function installRouteObserver() {
   const root = routeObservationRoot();
   if (!root) return false;
 
+  lastCommittedHost = currentCommittedRouteHost();
+
   routeObserver = new MutationObserver((mutations) => {
     if (!mutations.some(mutationTouchesRouteHost)) return;
 
+    const committedHost = currentCommittedRouteHost();
+    if (!shouldSyncCommittedRouteHost(committedHost, lastCommittedHost)) return;
+
+    lastCommittedHost = committedHost;
     observerTriggers += 1;
     void queueRouteFeatureSync("route-commit");
   });
@@ -387,7 +421,8 @@ async function loadPostRouterPhase() {
   const initialOk = await syncCurrentRouteFeatures("initial");
 
   /*
-    MutationObserver sigue el swap directo de route-view-host del Router.
+    MutationObserver sigue únicamente el cambio del route-view-host realmente
+    comprometido. El append oculto/preparing previo al render no dispara carga.
     No observa el subtree de la vista: cambios internos de tablas/modales no
     disparan trabajo de carga progresiva.
 
@@ -454,6 +489,8 @@ export function getAppEnhancementsSnapshot() {
       nativeRuntimeState: true,
       runtimeShim: false,
       routeCommitLazyLoading: true,
+      visibleCommittedHostOnly: true,
+      preparationHostIgnored: true,
       rapidNavigationCoalescing: true,
       speculativeRoutePreload: false,
       routeIntentPreload: true,

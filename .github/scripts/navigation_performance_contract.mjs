@@ -19,8 +19,10 @@ import {
 
 import {
   RUNTIME_PERFORMANCE_VERSION,
+  ROUTE_PERFORMANCE_PHASES,
   getRuntimePerformanceSnapshot,
   isCommittedRouteHost,
+  isSupportedRoutePerformancePhase,
   shouldRecordRouteCommit,
 } from "../../src/features/runtime-performance/index.js";
 
@@ -34,8 +36,26 @@ assert.equal(
 );
 assert.equal(
   RUNTIME_PERFORMANCE_VERSION,
-  "runtime-performance.v2-committed-host-lifecycle"
+  "runtime-performance.v3-route-phase-attribution"
 );
+assert.deepEqual(
+  [...ROUTE_PERFORMANCE_PHASES],
+  [
+    "resolve",
+    "auth-wait",
+    "guard",
+    "style-load",
+    "view-cold",
+    "view-warm",
+    "commit",
+    "chrome",
+  ]
+);
+for (const phase of ROUTE_PERFORMANCE_PHASES) {
+  assert.equal(isSupportedRoutePerformancePhase(phase), true);
+}
+assert.equal(isSupportedRoutePerformancePhase("raw-url"), false);
+assert.equal(isSupportedRoutePerformancePhase("backend"), false);
 
 assert.equal(
   normalizeIntentPath("/@User/facturas?token=secret#modal"),
@@ -154,18 +174,33 @@ assert.equal(enhancementsSnapshot.policy.mutationObserverFallback, true);
 const perfSnapshot = getRuntimePerformanceSnapshot();
 assert.equal(perfSnapshot.installed, false);
 assert.equal(perfSnapshot.sampleCap, 64);
+assert.equal(perfSnapshot.routePhaseEvents, 0);
+assert.equal(perfSnapshot.recentRoutePhases.length, 0);
+for (const phase of ROUTE_PERFORMANCE_PHASES) {
+  assert.equal(perfSnapshot.routePhases[phase].count, 0);
+  assert.equal(perfSnapshot.longTaskAttribution.byPhase[phase].count, 0);
+}
+assert.equal(perfSnapshot.longTaskAttribution.seen, 0);
+assert.equal(perfSnapshot.longTaskAttribution.attributed, 0);
+assert.equal(perfSnapshot.longTaskAttribution.unattributed, 0);
 assert.equal(perfSnapshot.policy.localOnly, true);
 assert.equal(perfSnapshot.policy.externalNetwork, false);
 assert.equal(perfSnapshot.policy.storage, false);
 assert.equal(perfSnapshot.policy.rawUrls, false);
 assert.equal(perfSnapshot.policy.userIdentifiers, false);
 assert.equal(perfSnapshot.policy.boundedSamples, true);
+assert.equal(perfSnapshot.policy.boundedPhaseWindows, 128);
+assert.equal(perfSnapshot.policy.boundedPhaseViews, 32);
 assert.equal(perfSnapshot.policy.routeHostOnlyObservation, true);
 assert.equal(perfSnapshot.policy.visibleCommittedHostOnly, true);
 assert.equal(perfSnapshot.policy.pendingViewKeyMatch, true);
 assert.equal(perfSnapshot.policy.stalePaintDrop, true);
 assert.equal(perfSnapshot.policy.interactionMetric, "event-duration-not-inp");
 assert.equal(perfSnapshot.policy.lcpLifecycleAware, true);
+assert.equal(perfSnapshot.policy.opaqueNavigationIds, true);
+assert.equal(perfSnapshot.policy.routePhaseViewKeyOnly, true);
+assert.equal(perfSnapshot.policy.monotonicPhaseWindows, true);
+assert.equal(perfSnapshot.policy.longTaskPhaseAttribution, "best-overlap");
 
 const sourceFiles = [
   "src/features/route-intent-preload/index.js",
@@ -252,6 +287,16 @@ assert.equal(
   "performance buffers must remain bounded"
 );
 assert.equal(
+  performanceSource.includes("const MAX_PHASE_WINDOWS = 128"),
+  true,
+  "route phase attribution windows must remain bounded"
+);
+assert.equal(
+  performanceSource.includes("const MAX_PHASE_VIEWS = 32"),
+  true,
+  "per-view attribution cardinality must remain bounded"
+);
+assert.equal(
   performanceSource.includes("subtree: false"),
   true,
   "route telemetry must not observe internal view mutations"
@@ -266,7 +311,44 @@ assert.equal(
   true,
   "navigation intent must be correlated by safe viewKey instead of raw URL"
 );
+assert.equal(
+  performanceSource.includes("recordRoutePerformancePhase"),
+  true,
+  "runtime telemetry must expose the explicit Router phase receiver"
+);
+assert.equal(
+  performanceSource.includes("bestPhaseWindow"),
+  true,
+  "long tasks must be attributed by bounded phase-window overlap"
+);
+assert.equal(
+  performanceSource.includes("phaseOverlap"),
+  true,
+  "long-task attribution must use temporal overlap rather than route-name guessing"
+);
+
+const routerSource = await readFile(
+  "src/router/index.js",
+  "utf8"
+);
+for (const phase of ROUTE_PERFORMANCE_PHASES) {
+  assert.equal(
+    routerSource.includes(`"${phase}"`),
+    true,
+    `Router must emit the ${phase} phase`
+  );
+}
+assert.equal(
+  routerSource.includes("Routes.isRouteViewLoaded?.("),
+  true,
+  "cold/warm view attribution must read the Router view cache"
+);
+assert.equal(
+  routerSource.includes("recordTransitionPhase("),
+  true,
+  "Router must emit phase windows through the optional telemetry module"
+);
 
 console.log(
-  "Navigation performance contract OK · committed lazy sync · strong-intent preload · committed-host telemetry"
+  "Navigation performance contract OK · bounded Router phases · Long Task attribution · committed lazy sync"
 );

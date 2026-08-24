@@ -1,0 +1,127 @@
+name: One-shot auth token single-read patch
+
+on:
+  push:
+    branches:
+      - perf/auth-token-single-read
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[auth-token-patch-complete]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply deterministic patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              text = path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly 1 match, found {count}")
+              path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          auth = Path("src/features/auth/index.js")
+          contract = Path(".github/scripts/auth_selector_contract.mjs")
+
+          replace_once(
+              auth,
+              'export const AUTH_VERSION = "auth.minimal.v8-single-read-selectors";',
+              'export const AUTH_VERSION = "auth.minimal.v9-token-single-read";'
+          )
+
+          replace_once(
+              auth,
+              '''function runtimeToken(state = coreState()) {
+  const direct = cleanToken(first(state?.token, state?.accessToken, state?.access_token, ""));
+  if (direct) return direct;
+  selectorMetrics.httpTokenFallbacks += 1;
+  try { return cleanToken(Http.getAccessToken?.() || ""); } catch { return ""; }
+}''',
+              '''function runtimeToken(state = coreState()) {
+  return cleanToken(first(state?.token, state?.accessToken, state?.access_token, ""));
+}'''
+          )
+
+          replace_once(
+              auth,
+              'lazyHttpTokenFallback: true',
+              'lazyHttpTokenFallback: false'
+          )
+
+          replace_once(
+              contract,
+              'assert.equal(AUTH_VERSION, "auth.minimal.v8-single-read-selectors");',
+              'assert.equal(AUTH_VERSION, "auth.minimal.v9-token-single-read");'
+          )
+
+          replace_once(
+              contract,
+              'assert.equal(snapshot.policy.lazyHttpTokenFallback, true);',
+              'assert.equal(snapshot.policy.lazyHttpTokenFallback, false);'
+          )
+
+          replace_once(
+              contract,
+              '''Auth.clearSession();
+assert.equal(AppCore.state.authenticated, false);
+assert.equal(AppCore.state.token, null);
+assert.equal(AppCore.state.user, null);
+assert.equal(AppCore.state.hasRefreshToken, false);
+
+console.log(''',
+              '''Auth.clearSession();
+assert.equal(AppCore.state.authenticated, false);
+assert.equal(AppCore.state.token, null);
+assert.equal(AppCore.state.user, null);
+assert.equal(AppCore.state.hasRefreshToken, false);
+assert.equal(oneCoreRead("guest getToken", () => Auth.getToken()), "");
+assert.equal(oneCoreRead("guest isAuthenticated", () => Auth.isAuthenticated()), false);
+assert.equal(Auth.getSelectorStats().httpTokenFallbacks, 0);
+
+console.log('''
+          )
+
+          workflow = Path(".github/workflows/zz-one-shot-auth-token-single-read.yml")
+          if not workflow.is_file():
+              raise SystemExit("temporary workflow missing before self-delete")
+          workflow.unlink()
+          PY
+
+      - name: Validate syntax and SPA contracts
+        shell: bash
+        run: |
+          node --check src/features/auth/index.js
+          node --experimental-default-type=module .github/scripts/auth_selector_contract.mjs
+          bash .github/ci/validate_spa_contracts.sh
+          git diff --check
+
+      - name: Strict diff against main
+        shell: bash
+        run: |
+          mapfile -t files < <(git diff --name-only origin/main)
+          printf 'Changed files against main:\n%s\n' "${files[*]}"
+          test "${#files[@]}" -eq 2
+          test "${files[0]}" = ".github/scripts/auth_selector_contract.mjs"
+          test "${files[1]}" = "src/features/auth/index.js"
+          git diff --stat origin/main
+          git diff origin/main -- .github/scripts/auth_selector_contract.mjs src/features/auth/index.js
+
+      - name: Commit audited patch
+        shell: bash
+        run: |
+          git config user.name "Onion Support CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Perf: eliminate guest auth token reread [auth-token-patch-complete]"
+          git push origin HEAD:perf/auth-token-single-read

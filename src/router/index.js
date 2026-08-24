@@ -620,7 +620,7 @@ function routePathFromInput(
         }
 
         return (
-          `${url.pathname || HOME_PATH}${url.search || ""}${hash}`
+          `${url.pathname || HOME_PATH}${url.search || ""}${url.hash || ""}`
         );
       } catch {
         return HOME_PATH;
@@ -4531,10 +4531,6 @@ async function renderRoute(
         }
       );
 
-    commitRouteStylesForTransition(
-      route
-    );
-
     recordTransitionPhase(
       transition,
       route,
@@ -4568,6 +4564,20 @@ async function renderRoute(
           state.publicPath,
       };
     }
+
+    const styleCommitStartedAt =
+      performanceNow();
+
+    commitRouteStylesForTransition(
+      route
+    );
+
+    recordTransitionPhase(
+      transition,
+      route,
+      "style-load",
+      styleCommitStartedAt
+    );
 
     const chromeStartedAt =
       performanceNow();

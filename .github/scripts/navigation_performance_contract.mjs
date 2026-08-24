@@ -62,6 +62,8 @@ assert.equal(intentSnapshot.policy.modifierAware, true);
 assert.equal(intentSnapshot.policy.touchPointerdown, false);
 assert.equal(intentSnapshot.policy.activeRouteSkip, true);
 assert.equal(intentSnapshot.policy.routerResolution, true);
+assert.equal(intentSnapshot.policy.liveGuardAware, true);
+assert.equal(intentSnapshot.policy.authCache, false);
 assert.equal(intentSnapshot.policy.clickCapture, false);
 assert.equal(intentSnapshot.policy.routerCacheAuthority, true);
 assert.equal(intentSnapshot.policy.storesRawUrls, false);
@@ -171,6 +173,11 @@ assert.equal(
   preloadSource.includes("getRouteMatch"),
   true,
   "scoped route intent must resolve through the canonical Router when available"
+);
+assert.equal(
+  preloadSource.includes("runtimeState?.read"),
+  true,
+  "preload guard must read live runtime auth state without caching authorization"
 );
 
 const performanceSource = await readFile(

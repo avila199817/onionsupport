@@ -5,6 +5,8 @@ import {
   ROUTE_INTENT_PRELOAD_VERSION,
   normalizeIntentPath,
   shouldPrefetchForConnection,
+  shouldPrefetchForDocument,
+  shouldUsePointerIntent,
   getRouteIntentPreloadSnapshot,
 } from "../../src/features/route-intent-preload/index.js";
 
@@ -17,7 +19,7 @@ import {
 
 assert.equal(
   ROUTE_INTENT_PRELOAD_VERSION,
-  "route-intent-preload.v1-confidence-gated"
+  "route-intent-preload.v2-strong-intent-gates"
 );
 
 assert.equal(
@@ -38,12 +40,29 @@ assert.equal(shouldPrefetchForConnection({ effectiveType: "2g" }), false);
 assert.equal(shouldPrefetchForConnection({ effectiveType: "3g" }), true);
 assert.equal(shouldPrefetchForConnection({ effectiveType: "4g" }), true);
 
+assert.equal(shouldPrefetchForDocument("visible"), true);
+assert.equal(shouldPrefetchForDocument("hidden"), false);
+assert.equal(shouldPrefetchForDocument("prerender"), false);
+
+assert.equal(shouldUsePointerIntent("mouse", "hover-dwell"), true);
+assert.equal(shouldUsePointerIntent("touch", "hover-dwell"), false);
+assert.equal(shouldUsePointerIntent("pen", "hover-dwell"), false);
+assert.equal(shouldUsePointerIntent("mouse", "pointerdown"), true);
+assert.equal(shouldUsePointerIntent("pen", "pointerdown"), true);
+assert.equal(shouldUsePointerIntent("touch", "pointerdown"), false);
+
 const intentSnapshot = getRouteIntentPreloadSnapshot();
 assert.equal(intentSnapshot.installed, false);
 assert.equal(intentSnapshot.policy.sameOriginOnly, true);
 assert.equal(intentSnapshot.policy.strongIntentOnly, true);
 assert.equal(intentSnapshot.policy.saveDataAware, true);
 assert.equal(intentSnapshot.policy.slow2gAware, true);
+assert.equal(intentSnapshot.policy.documentVisibleOnly, true);
+assert.equal(intentSnapshot.policy.modifierAware, true);
+assert.equal(intentSnapshot.policy.touchPointerdown, false);
+assert.equal(intentSnapshot.policy.activeRouteSkip, true);
+assert.equal(intentSnapshot.policy.routerResolution, true);
+assert.equal(intentSnapshot.policy.clickCapture, false);
 assert.equal(intentSnapshot.policy.routerCacheAuthority, true);
 assert.equal(intentSnapshot.policy.storesRawUrls, false);
 assert.equal(intentSnapshot.policy.externalNetwork, false);
@@ -143,6 +162,16 @@ assert.equal(
   true,
   "hover prefetch must remain confidence-gated"
 );
+assert.equal(
+  preloadSource.includes("ROUTE_COMMITTED_SELECTOR"),
+  true,
+  "active-route detection must use the committed host rather than URL persistence"
+);
+assert.equal(
+  preloadSource.includes("getRouteMatch"),
+  true,
+  "scoped route intent must resolve through the canonical Router when available"
+);
 
 const performanceSource = await readFile(
   "src/features/runtime-performance/index.js",
@@ -170,5 +199,5 @@ assert.equal(
 );
 
 console.log(
-  "Navigation performance contract OK · committed-host telemetry · bounded local metrics"
+  "Navigation performance contract OK · strong-intent preload · committed-host telemetry"
 );

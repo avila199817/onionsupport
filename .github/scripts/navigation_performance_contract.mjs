@@ -32,7 +32,7 @@ assert.equal(
 );
 assert.equal(
   ROUTE_INTENT_PRELOAD_VERSION,
-  "route-intent-preload.v2-strong-intent-gates"
+  "route-intent-preload.v3-single-document-gate"
 );
 assert.equal(
   RUNTIME_PERFORMANCE_VERSION,
@@ -276,6 +276,48 @@ assert.equal(
   true,
   "preload guard must read live runtime auth state without caching authorization"
 );
+assert.equal(
+  preloadSource.includes("async function preloadIntentPathInternal("),
+  true,
+  "route intent preload must keep a private operation that accepts a prevalidated document gate"
+);
+assert.equal(
+  preloadSource.includes("!documentVisible && !documentAllowsPrefetch()"),
+  true,
+  "private route intent preload must skip the visibility reread only when the caller already validated it"
+);
+
+const publicPreloadStart = preloadSource.indexOf(
+  'export async function preloadIntentPath(path = "/", source = "intent")'
+);
+const triggerStart = preloadSource.indexOf("\nfunction triggerFromLink(", publicPreloadStart);
+assert.ok(
+  publicPreloadStart >= 0 && triggerStart > publicPreloadStart,
+  "navigation contract must isolate the public preloadIntentPath wrapper"
+);
+const publicPreloadSource = preloadSource.slice(publicPreloadStart, triggerStart);
+assert.equal(
+  publicPreloadSource.includes("documentVisible"),
+  false,
+  "public route intent preload must never expose the internal visibility bypass"
+);
+assert.equal(
+  publicPreloadSource.includes("return preloadIntentPathInternal(path, source);"),
+  true,
+  "public route intent preload must preserve the normal live document visibility gate"
+);
+
+for (const snippet of [
+  'triggerFromLink(target, "hover-dwell", true)',
+  'triggerFromLink(closestIntentLink(event?.target), "focus", true)',
+  'triggerFromLink(closestIntentLink(event?.target), "pointerdown", true)',
+]) {
+  assert.equal(
+    preloadSource.includes(snippet),
+    true,
+    `strong internal intent must reuse its already-validated document gate: ${snippet}`
+  );
+}
 
 const performanceSource = await readFile(
   "src/features/runtime-performance/index.js",
@@ -350,5 +392,5 @@ assert.equal(
 );
 
 console.log(
-  "Navigation performance contract OK · bounded Router phases · Long Task attribution · committed lazy sync"
+  "Navigation performance contract OK · single strong-intent document gate · bounded Router phases · Long Task attribution · committed lazy sync"
 );

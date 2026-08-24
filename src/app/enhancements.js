@@ -4,17 +4,18 @@
 
    Responsabilidad:
    - Ser el registro único de mejoras globales/progresivas de la SPA.
-   - Instalar primero la frontera runtime Core/HTTP/Auth antes del bootstrap.
-   - Cargar antes del Router únicamente lo que afecta al bootstrap de URL/chrome.
-   - Priorizar después del Router sólo las mejoras relevantes para la ruta actual.
-   - Diferir el resto por turnos idle para evitar ráfagas de red/parse/ejecución.
+   - Completar el preboot en paralelo antes de entregar control a bootApp().
+   - Cargar después del Router sólo mejoras relevantes para la ruta real.
+   - Detectar commits del Router y activar features bajo demanda.
+   - Coalescer navegaciones rápidas sin perder la última ruta comprometida.
+   - No descargar/parsear JS de rutas que el usuario no visita.
    - Aislar fallos de una mejora progresiva para no tumbar el arranque principal.
    - Evitar scripts globales dispersos en index.html.
    - Sin Auth, Router, HTTP, Store ni lógica de dominio propia.
 ========================================================= */
 
 export const APP_ENHANCEMENTS_VERSION =
-  "app.enhancements.v11-runtime-fastpath";
+  "app.enhancements.v12.1-route-commit-lazy";
 
 const PRE_ROUTER = Object.freeze([
   Object.freeze({
@@ -79,14 +80,25 @@ const POST_ROUTER = Object.freeze([
   }),
 ]);
 
-const IDLE_FALLBACK_MS = 48;
-const IDLE_TIMEOUT_MS = 1_200;
+const FALLBACK_PRELOAD_MS = 72;
+const ROUTE_HOST_SELECTOR =
+  ".route-view-host:not([hidden])[data-route-path], [data-route-host='true']:not([hidden])[data-route-path]";
+const ROUTE_HOST_NODE_SELECTOR =
+  ".route-view-host, [data-route-host='true']";
 
 const records = new Map();
 let preRouterPromise = null;
 let postRouterPromise = null;
-let deferredLoads = 0;
-let immediateLoads = 0;
+let routeSyncPromise = null;
+let routeSyncQueued = false;
+let routeSyncSource = "route-commit";
+let routeObserver = null;
+let fallbackTimer = 0;
+let initialRouteLoads = 0;
+let lazyRouteLoads = 0;
+let observerTriggers = 0;
+let coalescedRouteSyncs = 0;
+let fallbackPreloads = 0;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -112,11 +124,27 @@ function safeError(error = null) {
   });
 }
 
-function currentPathname() {
+function cleanPathname(value = "/") {
+  return String(value || "/")
+    .split("?")[0]
+    .split("#")[0]
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/")
+    .toLowerCase() || "/";
+}
+
+function activeRoutePathname() {
   if (!isBrowser()) return "/";
 
   try {
-    return String(window.location?.pathname || "/").toLowerCase();
+    const host = document.querySelector(ROUTE_HOST_SELECTOR);
+    const committedPath = host?.dataset?.routePath;
+
+    if (committedPath) {
+      return cleanPathname(committedPath);
+    }
+
+    return cleanPathname(window.location?.pathname || "/");
   } catch {
     return "/";
   }
@@ -129,32 +157,32 @@ function hasPathSegment(pathname = "/", segment = "") {
 
   if (!cleanSegment) return false;
 
-  return String(pathname || "/")
+  return cleanPathname(pathname)
     .split("/")
     .filter(Boolean)
     .includes(cleanSegment);
 }
 
-function routeScopes() {
-  const pathname = currentPathname();
+function routeScopes(pathname = activeRoutePathname()) {
+  const path = cleanPathname(pathname);
   const scopes = new Set(["global"]);
 
-  if (hasPathSegment(pathname, "facturas")) {
+  if (hasPathSegment(path, "facturas")) {
     scopes.add("facturas");
   }
 
   if (
-    hasPathSegment(pathname, "incidencias") ||
-    hasPathSegment(pathname, "tickets")
+    hasPathSegment(path, "incidencias") ||
+    hasPathSegment(path, "tickets")
   ) {
     scopes.add("incidencias");
   }
 
   const isPublicHome =
-    pathname === "/" ||
-    pathname === "/index.html" ||
-    hasPathSegment(pathname, "support") ||
-    hasPathSegment(pathname, "soporte");
+    path === "/" ||
+    path === "/index.html" ||
+    hasPathSegment(path, "support") ||
+    hasPathSegment(path, "soporte");
 
   if (isPublicHome) {
     scopes.add("public");
@@ -163,20 +191,10 @@ function routeScopes() {
   return scopes;
 }
 
-function waitForIdle() {
-  if (!isBrowser()) return Promise.resolve();
-
-  return new Promise((resolve) => {
-    if (typeof window.requestIdleCallback === "function") {
-      window.requestIdleCallback(
-        () => resolve(),
-        { timeout: IDLE_TIMEOUT_MS }
-      );
-      return;
-    }
-
-    window.setTimeout(resolve, IDLE_FALLBACK_MS);
-  });
+function routeDefinitions(scopes = routeScopes()) {
+  return POST_ROUTER.filter((definition) =>
+    scopes.has(definition.scope || "global")
+  );
 }
 
 async function loadFeature(definition) {
@@ -240,47 +258,150 @@ async function loadPhase(definitions = []) {
   return results.every(Boolean);
 }
 
-async function loadPreRouterPhase() {
-  const [runtime, ...rest] = PRE_ROUTER;
-  const runtimeOk = runtime ? await loadFeature(runtime) : true;
-  const restOk = await loadPhase(rest);
+async function syncCurrentRouteFeatures(source = "route") {
+  const definitions = routeDefinitions();
+  const pending = definitions.filter((definition) => {
+    const record = records.get(definition.key);
+    return record?.state !== "ready" && !record?.promise;
+  });
 
-  return runtimeOk && restOk;
+  if (source === "initial") {
+    initialRouteLoads += pending.length;
+  } else {
+    lazyRouteLoads += pending.length;
+  }
+
+  return loadPhase(definitions);
+}
+
+function queueRouteFeatureSync(source = "route-commit") {
+  routeSyncSource = source;
+
+  if (routeSyncPromise) {
+    routeSyncQueued = true;
+    coalescedRouteSyncs += 1;
+    return routeSyncPromise;
+  }
+
+  routeSyncPromise = (async () => {
+    let allOk = true;
+
+    do {
+      routeSyncQueued = false;
+      const currentSource = routeSyncSource;
+      const ok = await syncCurrentRouteFeatures(currentSource);
+      allOk = ok && allOk;
+    } while (routeSyncQueued);
+
+    return allOk;
+  })().finally(() => {
+    routeSyncPromise = null;
+  });
+
+  return routeSyncPromise;
+}
+
+function routeObservationRoot() {
+  if (!isBrowser()) return null;
+
+  return (
+    document.getElementById("view-container") ||
+    document.getElementById("app-content") ||
+    document.getElementById("main-content") ||
+    document.body ||
+    null
+  );
+}
+
+function nodeIsRouteHost(node = null) {
+  return Boolean(
+    node?.nodeType === 1 &&
+    typeof node.matches === "function" &&
+    node.matches(ROUTE_HOST_NODE_SELECTOR)
+  );
+}
+
+function mutationTouchesRouteHost(mutation = null) {
+  if (mutation?.type !== "childList") return false;
+
+  return [...mutation.addedNodes, ...mutation.removedNodes]
+    .some(nodeIsRouteHost);
+}
+
+function installRouteObserver() {
+  if (!isBrowser() || routeObserver) {
+    return Boolean(routeObserver);
+  }
+
+  if (typeof MutationObserver !== "function") {
+    return false;
+  }
+
+  const root = routeObservationRoot();
+  if (!root) return false;
+
+  routeObserver = new MutationObserver((mutations) => {
+    if (!mutations.some(mutationTouchesRouteHost)) return;
+
+    observerTriggers += 1;
+    void queueRouteFeatureSync("route-commit");
+  });
+
+  routeObserver.observe(root, {
+    childList: true,
+    subtree: false,
+  });
+
+  return true;
+}
+
+function preloadFallbackSequentially() {
+  if (!isBrowser() || fallbackTimer) return false;
+
+  const next = POST_ROUTER.find((definition) => {
+    const record = records.get(definition.key);
+    return record?.state !== "ready" && !record?.promise;
+  });
+
+  if (!next) return true;
+
+  fallbackTimer = window.setTimeout(async () => {
+    fallbackTimer = 0;
+    fallbackPreloads += 1;
+    await loadFeature(next);
+    preloadFallbackSequentially();
+  }, FALLBACK_PRELOAD_MS);
+
+  return true;
 }
 
 async function loadPostRouterPhase() {
-  const scopes = routeScopes();
-  const immediate = POST_ROUTER.filter((definition) =>
-    scopes.has(definition.scope || "global")
-  );
-  const deferred = POST_ROUTER.filter((definition) =>
-    !immediate.includes(definition)
-  );
-
-  immediateLoads = immediate.length;
-  deferredLoads = deferred.length;
-
-  const immediateOk = await loadPhase(immediate);
-  let deferredOk = true;
+  const initialOk = await syncCurrentRouteFeatures("initial");
 
   /*
-    El resto se precarga igualmente para que una navegación SPA posterior no
-    tenga que descubrir módulos desde cero, pero nunca en una ráfaga paralela.
-    Un módulo por turno idle reduce contención de red, parse y main-thread justo
-    después del primer render sin cambiar el contrato funcional histórico.
+    MutationObserver sigue el swap directo de route-view-host del Router.
+    No observa el subtree de la vista: cambios internos de tablas/modales no
+    disparan trabajo de carga progresiva.
+
+    Una navegación que llega mientras otra feature importa se coalesce y vuelve
+    a evaluar la última ruta al terminar, evitando perder commits rápidos.
+
+    El fallback conserva compatibilidad si MutationObserver no existe.
   */
-  for (const definition of deferred) {
-    await waitForIdle();
-    const ok = await loadFeature(definition);
-    deferredOk = ok && deferredOk;
+  if (!installRouteObserver()) {
+    preloadFallbackSequentially();
   }
 
-  return immediateOk && deferredOk;
+  return initialOk;
 }
 
 export function initPreRouterEnhancements() {
   if (!preRouterPromise) {
-    preRouterPromise = loadPreRouterPhase();
+    /*
+      Todas estas importaciones deben terminar antes de bootApp(), pero ninguna
+      necesita bloquear a las otras durante descarga/parse/evaluación.
+    */
+    preRouterPromise = loadPhase(PRE_ROUTER);
   }
 
   return preRouterPromise;
@@ -306,15 +427,32 @@ export function getAppEnhancementsSnapshot() {
     });
   }
 
+  const readyPostRouter = POST_ROUTER.reduce(
+    (total, definition) =>
+      total + (records.get(definition.key)?.state === "ready" ? 1 : 0),
+    0
+  );
+
   return Object.freeze({
     version: APP_ENHANCEMENTS_VERSION,
+    routePathname: activeRoutePathname(),
     routeScopes: Object.freeze([...routeScopes()]),
-    immediateLoads,
-    deferredLoads,
-    idleScheduling:
-      isBrowser() && typeof window.requestIdleCallback === "function"
-        ? "requestIdleCallback"
-        : "timeout",
+    initialRouteLoads,
+    lazyRouteLoads,
+    observerActive: Boolean(routeObserver),
+    observerTriggers,
+    coalescedRouteSyncs,
+    fallbackPreloads,
+    readyPostRouter,
+    totalPostRouter: POST_ROUTER.length,
+    policy: Object.freeze({
+      parallelPreRouter: true,
+      routeCommitLazyLoading: true,
+      rapidNavigationCoalescing: true,
+      speculativeRoutePreload: false,
+      routeHostOnlyObservation: true,
+      mutationObserverFallback: true,
+    }),
     features: Object.freeze(output),
   });
 }

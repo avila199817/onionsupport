@@ -3,7 +3,7 @@ import { AppCore, CORE_VERSION } from "../../src/core/index.js";
 
 assert.equal(
   CORE_VERSION,
-  "core.minimal.v8-dirty-runtime-state",
+  "core.minimal.v9-specialized-snapshot",
   "Core runtime contract version must stay explicit"
 );
 

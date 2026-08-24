@@ -23,7 +23,7 @@ import {
 } from "./config.js";
 import Http from "./http.js";
 
-export const CORE_VERSION = "core.minimal.v8-dirty-runtime-state";
+export const CORE_VERSION = "core.minimal.v9-specialized-snapshot";
 const RUNTIME_STATE_VERSION = "core.runtime-state.v2-dirty-guard";
 const APP_NAME = config?.appName || config?.name || "Onion Support";
 const ROOT_PATH = "/";
@@ -79,6 +79,8 @@ const state = {
   route: ROOT_PATH, canonicalPath: ROOT_PATH, publicPath: ROOT_PATH, routeParams: {},
   sidebarOpen: false, lang: "es", locale: "es-ES", theme: "system", updatedAt: null,
 };
+const CANONICAL_STATE_KEYS = new Set(Object.keys(state));
+
 const dom = {};
 const ui = {};
 const moduleRegistry = new Map();
@@ -374,10 +376,59 @@ function getRuntimeState() {
   }
   return state;
 }
+function cloneSnapshotTree(value) {
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(value)) return value.map(cloneSnapshotTree);
+  if (!isObject(value)) return value;
+  const output = {};
+  for (const [key, child] of Object.entries(value)) output[key] = cloneSnapshotTree(child);
+  return output;
+}
+function cloneSnapshotUser(user = null) {
+  if (!isObject(user)) return null;
+  return {
+    ...user,
+    roles: Array.isArray(user.roles) ? [...user.roles] : [],
+    permissions: Array.isArray(user.permissions) ? [...user.permissions] : [],
+    permisos: Array.isArray(user.permisos) ? [...user.permisos] : [],
+  };
+}
+function cloneStateSnapshot(current) {
+  const snapshot = { ...current };
+  snapshot.roles = Array.isArray(current.roles) ? [...current.roles] : [];
+
+  const user = cloneSnapshotUser(current.user);
+  snapshot.user = user;
+  snapshot.currentUser = current.currentUser === current.user
+    ? user
+    : cloneSnapshotUser(current.currentUser);
+
+  const cloneSession = (value) => {
+    if (!isObject(value)) return null;
+    const session = { ...value };
+    if (session.expiresAt && typeof session.expiresAt === "object") session.expiresAt = clone(session.expiresAt);
+    return session;
+  };
+  const session = cloneSession(current.session);
+  snapshot.session = session;
+  snapshot.sessionData = current.sessionData === current.session
+    ? session
+    : cloneSession(current.sessionData);
+
+  snapshot.routeParams = cloneSnapshotTree(current.routeParams || {});
+  snapshot.error = isObject(current.error) ? { ...current.error } : current.error;
+
+  for (const [key, value] of Object.entries(current)) {
+    if (CANONICAL_STATE_KEYS.has(key) || value === null || typeof value !== "object") continue;
+    snapshot[key] = clone(value);
+  }
+
+  return snapshot;
+}
 function getState(options = {}) {
   const current = getRuntimeState();
   if (options.raw === true) return current;
-  const snapshot = clone(current) || {};
+  const snapshot = cloneStateSnapshot(current);
   if (options.includeToken !== true) snapshot.token = snapshot.accessToken = snapshot.access_token = null;
   return snapshot;
 }

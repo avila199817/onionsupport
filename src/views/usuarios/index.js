@@ -379,8 +379,8 @@ function getCurrentRole(context = {}, state = getAppState()) {
   }
 }
 
-function isAdminContext(context = {}, state = getAppState()) {
-  return context.admin === true || getCurrentRole(context, state) === "admin";
+function isAdminContext(context = {}) {
+  return context.admin === true || getCurrentRole(context) === "admin";
 }
 
 function normalizePathname(path = "/") {

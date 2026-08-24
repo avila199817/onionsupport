@@ -44,7 +44,7 @@ import * as Routes from "./routes.js";
 import RouteStyles from "./styles.js";
 
 export const ROUTER_VERSION =
-  "router.minimal.v13-single-route-resolution";
+  "router.minimal.v14-chrome-active-dedup";
 
 const PUBLIC_HOME_PATH = "/";
 
@@ -4605,20 +4605,6 @@ async function renderRoute(
       }
     );
 
-    setActiveMenu(
-      route,
-      {
-        publicPath:
-          state.publicPath,
-
-        canonicalPath:
-          state.canonicalPath,
-
-        pending:
-          false,
-      }
-    );
-
     recordTransitionPhase(
       transition,
       route,
@@ -6113,6 +6099,9 @@ function getSnapshot() {
           true,
 
         singleRouteResolutionPerTransition:
+          true,
+
+        postCommitActiveMenuDedup:
           true,
       }),
   });

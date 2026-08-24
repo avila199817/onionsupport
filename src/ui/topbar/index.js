@@ -42,7 +42,7 @@ import {
 } from "./template.js";
 
 export const TOPBAR_VERSION =
-  "topbar.controller.backend-search.v7-canonical-routes";
+  "topbar.controller.backend-search.v8-native-runtime-state";
 
 const TOPBAR_ROOT_ID =
   "app-topbar";
@@ -725,25 +725,19 @@ function getCoreState() {
   try {
     if (
       isFunction(
-        AppCore?.getState
+        AppCore?.runtimeState?.read
       )
     ) {
       return (
-        AppCore.getState() ||
+        AppCore.runtimeState.read() ||
         {}
       );
     }
   } catch {
-    // fallback abajo
+    // noop
   }
 
-  return (
-    isObject(
-      AppCore?.state
-    )
-      ? AppCore.state
-      : {}
-  );
+  return {};
 }
 
 function getCurrentUser(

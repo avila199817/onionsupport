@@ -2,7 +2,7 @@
    Onion Support - Facturas Index
    Archivo: /src/views/facturas/index.js
 
-   PRODUCTIVO · SINGLE MOUNT DETAIL MODAL · V12
+   PRODUCTIVO · SINGLE MOUNT DETAIL MODAL · V14
 
    FIX PRINCIPAL
    - El modal detalle se monta una sola vez por apertura.
@@ -10,6 +10,7 @@
    - Si existe factura local, se muestra inmediatamente.
    - getFacturaById() enriquece el contenido en segundo plano.
    - Evita el efecto abrir -> cerrar -> abrir.
+   - Registro de cobro admin como command explícito e idempotente.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -21,6 +22,7 @@ import {
   getFacturaById,
   createFactura,
   sendFactura,
+  markFacturaPaid,
   viewFacturaPdfRequest,
   downloadFacturaPdfRequest,
   computeFacturasStats,
@@ -51,7 +53,7 @@ import {
 } from "./facturas.template.modal.js";
 
 export const FACTURAS_INDEX_VERSION =
-  "facturas.index.productivo.v13.stable-create-search-islands";
+  "facturas.index.productivo.v14.admin-payment-command";
 
 export const FACTURAS_VIEW_VERSION = FACTURAS_INDEX_VERSION;
 
@@ -507,6 +509,32 @@ function isFacturaSent(item = {}) {
   );
 
   return ["enviada", "enviado", "sent"].includes(status);
+}
+
+function isFacturaPaidState(item = {}) {
+  const raw = safeObject(item);
+
+  const status = normalizeKey(
+    first(
+      raw.paymentStatus,
+      raw.estadoPago,
+      raw.payment?.status,
+      raw.raw?.paymentStatus,
+      raw.raw?.estadoPago,
+      raw.raw?.payment?.status,
+      ""
+    )
+  );
+
+  return [
+    "paid",
+    "pagada",
+    "pagado",
+    "cobrada",
+    "cobrado",
+    "abonada",
+    "abonado",
+  ].includes(status);
 }
 
 function mergeFacturaData(current = {}, next = {}) {
@@ -1873,6 +1901,7 @@ function createFacturasController(host = null, context = {}) {
   let viewingFacturaId = "";
   let downloadingFacturaId = "";
   let sendingFacturaId = "";
+  let markingPaidFacturaId = "";
 
   let listSeq = 0;
   let clientSearchSeq = 0;
@@ -1938,6 +1967,7 @@ function createFacturasController(host = null, context = {}) {
     detailOpen: false,
     detailLoading: false,
     factura: null,
+    markingPaidFacturaId: "",
     sendingFacturaId: "",
     viewingFacturaId: "",
     downloadingFacturaId: "",
@@ -2455,6 +2485,7 @@ function createFacturasController(host = null, context = {}) {
         viewingFacturaId,
         downloadingFacturaId,
         sendingFacturaId,
+        markingPaidFacturaId,
         role: getCurrentRole(),
         admin: isAdmin(),
         canCreateFactura: isAdmin(),
@@ -2879,6 +2910,8 @@ function createFacturasController(host = null, context = {}) {
     return {
       factura: detailModal.factura,
       loading: detailModal.detailLoading,
+      admin: isAdmin(),
+      markingPaidFacturaId: detailModal.markingPaidFacturaId,
       sendingFacturaId: detailModal.sendingFacturaId,
       viewingFacturaId: detailModal.viewingFacturaId,
       downloadingFacturaId: detailModal.downloadingFacturaId,
@@ -2890,7 +2923,10 @@ function createFacturasController(host = null, context = {}) {
   function mountDetailShell(target = null) {
     if (!target) return false;
 
-    target.innerHTML = renderFacturasDetailModal(detailModal);
+    target.innerHTML = renderFacturasDetailModal({
+      ...detailModal,
+      admin: isAdmin(),
+    });
     target.setAttribute("data-detail-shell-mounted", "true");
 
     return Boolean(
@@ -4451,6 +4487,7 @@ function createFacturasController(host = null, context = {}) {
     detailModal.detailOpen = false;
     detailModal.detailLoading = false;
     detailModal.factura = null;
+    detailModal.markingPaidFacturaId = "";
     detailModal.sendingFacturaId = "";
     detailModal.viewingFacturaId = "";
     detailModal.downloadingFacturaId = "";
@@ -4460,6 +4497,13 @@ function createFacturasController(host = null, context = {}) {
   }
 
   function closeDetailModal() {
+    if (
+      markingPaidFacturaId ||
+      detailModal.markingPaidFacturaId
+    ) {
+      return false;
+    }
+
     detailSessionSeq += 1;
 
     resetDetailModal();
@@ -4508,6 +4552,7 @@ function createFacturasController(host = null, context = {}) {
     */
     detailModal.detailLoading = !local;
     detailModal.factura = local;
+    detailModal.markingPaidFacturaId = "";
     detailModal.sendingFacturaId = "";
     detailModal.viewingFacturaId = "";
     detailModal.downloadingFacturaId = "";
@@ -4550,7 +4595,7 @@ function createFacturasController(host = null, context = {}) {
       /*
          Patch interno:
          NO recrea overlay/panel.
-    */
+      */
       renderDetailModal({
         immediate: true,
         preserveFocus: true,
@@ -4620,7 +4665,7 @@ function createFacturasController(host = null, context = {}) {
   }
 
   /* ---------------------------------------------------------
-     PDF / SEND
+     PDF / SEND / PAYMENT
   --------------------------------------------------------- */
 
   async function viewPdf(facturaId = "") {
@@ -4892,6 +4937,156 @@ function createFacturasController(host = null, context = {}) {
     }
   }
 
+  async function markFacturaAsPaid(facturaId = "") {
+    const id = cleanText(facturaId, "");
+
+    if (
+      !id ||
+      !isAdmin() ||
+      markingPaidFacturaId
+    ) {
+      return false;
+    }
+
+    const before = getFacturaForAction(id);
+    if (!before) return false;
+
+    if (isFacturaPaidState(before)) {
+      if (detailMatchesFactura(id)) {
+        setDetailFeedback(
+          "La factura ya está marcada como pagada.",
+          "info"
+        );
+      }
+
+      return true;
+    }
+
+    if (isBrowser()) {
+      const label = getFacturaLabel(before);
+      const amount = number(
+        first(
+          before.total,
+          before.totalFactura,
+          before.amount,
+          before.importe,
+          0
+        ),
+        0
+      );
+
+      const currency = cleanText(
+        first(before.currency, before.moneda, "EUR"),
+        "EUR"
+      ).toUpperCase();
+
+      let formattedAmount = "";
+
+      try {
+        formattedAmount = new Intl.NumberFormat("es-ES", {
+          style: "currency",
+          currency,
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        }).format(amount);
+      } catch {
+        formattedAmount = `${amount
+          .toFixed(2)
+          .replace(".", ",")} ${currency}`;
+      }
+
+      const question =
+        `¿Marcar la factura ${label} como pagada por ${formattedAmount}?\n\n` +
+        "Se registrará el cobro completo y el pendiente quedará a 0. " +
+        "Esta acción no reenviará la factura ni regenerará el PDF.";
+
+      if (!window.confirm(question)) {
+        return false;
+      }
+    }
+
+    markingPaidFacturaId = id;
+
+    if (detailMatchesFactura(id)) {
+      detailModal.markingPaidFacturaId = id;
+      clearDetailFeedback();
+
+      renderDetailModal({
+        immediate: true,
+        preserveFocus: true,
+      });
+    } else {
+      render();
+    }
+
+    try {
+      const result = await markFacturaPaid(id);
+      const resultObject = safeObject(result, null);
+
+      if (resultObject) {
+        items = upsertFactura(items, resultObject, sort);
+      }
+
+      let refreshed = null;
+
+      try {
+        refreshed = await getFacturaById(id);
+      } catch {
+        refreshed = null;
+      }
+
+      if (refreshed) {
+        items = upsertFactura(items, refreshed, sort);
+      }
+
+      const latest = refreshed || resultObject || before;
+      markingPaidFacturaId = "";
+
+      if (detailMatchesFactura(id)) {
+        detailModal.markingPaidFacturaId = "";
+
+        if (latest) {
+          detailModal.factura = mergeFacturaData(
+            detailModal.factura || {},
+            latest
+          );
+        }
+
+        setDetailFeedback(
+          "Factura marcada como pagada correctamente.",
+          "success"
+        );
+      } else {
+        render();
+      }
+
+      void reloadFromStart({
+        force: true,
+        silent: true,
+        keepItems: true,
+      });
+
+      return true;
+    } catch (paymentError) {
+      markingPaidFacturaId = "";
+
+      const message = safeError(
+        paymentError,
+        "No se pudo registrar el pago de la factura."
+      );
+
+      if (detailMatchesFactura(id)) {
+        detailModal.markingPaidFacturaId = "";
+        setDetailFeedback(message, "error");
+      } else {
+        error = message;
+        render();
+      }
+
+      return false;
+    }
+  }
+
   async function openIncidencia(ticketId = "") {
     const id = cleanText(ticketId, "");
     if (!id) return false;
@@ -5004,6 +5199,12 @@ function createFacturasController(host = null, context = {}) {
       return sendFacturaToClient(
         facturaIdFromNode(node),
         { confirmResend: true }
+      );
+    }
+
+    if (type === FACTURA_MODAL_ACTIONS.MARK_PAID) {
+      return markFacturaAsPaid(
+        facturaIdFromNode(node)
       );
     }
 
@@ -5407,6 +5608,7 @@ function createFacturasController(host = null, context = {}) {
       clientSearchSeq += 1;
       ticketSearchSeq += 1;
       detailSessionSeq += 1;
+      markingPaidFacturaId = "";
 
       clearTimers();
       cancelScheduledRender();
@@ -5511,6 +5713,7 @@ function createFacturasController(host = null, context = {}) {
         viewingFacturaId: viewingFacturaId ? "***" : "",
         downloadingFacturaId: downloadingFacturaId ? "***" : "",
         sendingFacturaId: sendingFacturaId ? "***" : "",
+        markingPaidFacturaId: markingPaidFacturaId ? "***" : "",
 
         error: redact(error),
 
@@ -5529,6 +5732,9 @@ function createFacturasController(host = null, context = {}) {
           createSearchRaceGuard: true,
           noSecondOpenAnimation: true,
           duplicateOpenGuard: true,
+          adminPaymentCommand: true,
+          paymentMutationSingleFlight: true,
+          paymentModalCloseGuard: true,
         },
       };
     },

@@ -10,7 +10,7 @@ import { AppCore } from "../../core/index.js";
 import * as Routes from "../../router/routes.js";
 
 export const ROUTE_INTENT_PRELOAD_VERSION =
-  "route-intent-preload.v2-strong-intent-gates";
+  "route-intent-preload.v3-single-document-gate";
 
 const LINK_SELECTOR =
   "a[data-spa], a[data-route], a[href^='/'], [data-router-link]";
@@ -234,8 +234,12 @@ function routeAllowedForRuntime(route = null) {
   return true;
 }
 
-export async function preloadIntentPath(path = "/", source = "intent") {
-  if (!documentAllowsPrefetch()) {
+async function preloadIntentPathInternal(
+  path = "/",
+  source = "intent",
+  documentVisible = false
+) {
+  if (!documentVisible && !documentAllowsPrefetch()) {
     metrics.skippedHidden += 1;
     return false;
   }
@@ -288,11 +292,19 @@ export async function preloadIntentPath(path = "/", source = "intent") {
   }
 }
 
-function triggerFromLink(link = null, source = "intent") {
+export async function preloadIntentPath(path = "/", source = "intent") {
+  return preloadIntentPathInternal(path, source);
+}
+
+function triggerFromLink(
+  link = null,
+  source = "intent",
+  documentVisible = false
+) {
   const path = pathFromLink(link);
   if (!path) return false;
 
-  void preloadIntentPath(path, source);
+  void preloadIntentPathInternal(path, source, documentVisible);
   return true;
 }
 
@@ -325,7 +337,7 @@ function onPointerOver(event) {
       return;
     }
 
-    triggerFromLink(target, "hover-dwell");
+    triggerFromLink(target, "hover-dwell", true);
   }, HOVER_DWELL_MS);
 }
 
@@ -346,7 +358,7 @@ function onFocusIn(event) {
     return;
   }
 
-  triggerFromLink(closestIntentLink(event?.target), "focus");
+  triggerFromLink(closestIntentLink(event?.target), "focus", true);
 }
 
 function onPointerDown(event) {
@@ -363,7 +375,7 @@ function onPointerDown(event) {
     return;
   }
 
-  triggerFromLink(closestIntentLink(event?.target), "pointerdown");
+  triggerFromLink(closestIntentLink(event?.target), "pointerdown", true);
 }
 
 export function initRouteIntentPreload() {

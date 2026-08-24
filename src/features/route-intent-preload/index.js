@@ -27,6 +27,7 @@ const metrics = {
   skippedConnection: 0,
   skippedHidden: 0,
   skippedActive: 0,
+  skippedGuard: 0,
   skippedTouch: 0,
   unresolved: 0,
   lastViewKey: null,
@@ -196,6 +197,43 @@ function activeViewKey() {
   }
 }
 
+function routeAllowedForRuntime(route = null) {
+  if (!route) return false;
+
+  let current = null;
+
+  try {
+    current = AppCore.runtimeState?.read?.() || null;
+  } catch {
+    current = null;
+  }
+
+  const authenticated =
+    current?.authenticated === true ||
+    (!current && AppCore.isAuthenticated?.() === true);
+
+  const role = cleanText(
+    current?.role ||
+    (!current ? AppCore.getCurrentRole?.() : ""),
+    ""
+  ).toLowerCase();
+
+  if (route.public === true) {
+    return !(route.guestOnly === true && authenticated);
+  }
+
+  if (!authenticated) return false;
+
+  if (
+    (route.adminOnly === true || route.requiresAdmin === true) &&
+    role !== "admin"
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 export async function preloadIntentPath(path = "/", source = "intent") {
   if (!documentAllowsPrefetch()) {
     metrics.skippedHidden += 1;
@@ -216,6 +254,11 @@ export async function preloadIntentPath(path = "/", source = "intent") {
 
   if (!viewKey) {
     metrics.unresolved += 1;
+    return false;
+  }
+
+  if (!routeAllowedForRuntime(route)) {
+    metrics.skippedGuard += 1;
     return false;
   }
 
@@ -370,6 +413,8 @@ export function getRouteIntentPreloadSnapshot() {
       touchPointerdown: false,
       activeRouteSkip: true,
       routerResolution: true,
+      liveGuardAware: true,
+      authCache: false,
       clickCapture: false,
       routerCacheAuthority: true,
       storesRawUrls: false,

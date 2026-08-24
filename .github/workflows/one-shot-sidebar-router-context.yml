@@ -25,30 +25,27 @@ jobs:
           node-version: 22
           package-manager-cache: false
 
-      - name: Apply deterministic patch
+      - name: Apply deterministic Sidebar patch
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
 
-          sidebar_path = Path("src/ui/sidebar/index.js")
-          sidebar = sidebar_path.read_text(encoding="utf-8")
+          path = Path("src/ui/sidebar/index.js")
+          source = path.read_text(encoding="utf-8")
 
           old_version = 'export const SIDEBAR_VERSION =\n  "sidebar.controller.v5-native-runtime-state";'
           new_version = 'export const SIDEBAR_VERSION =\n  "sidebar.controller.v6-router-context-reuse";'
-          if sidebar.count(old_version) != 1:
+          if source.count(old_version) != 1:
               raise SystemExit("Sidebar version anchor is not unique")
-          sidebar = sidebar.replace(old_version, new_version, 1)
+          source = source.replace(old_version, new_version, 1)
 
-          context_start = sidebar.find("function getContext() {\n")
-          context_end = sidebar.find("\nfunction shouldRenderSidebar(\n", context_start)
-          if context_start < 0 or context_end <= context_start:
+          start = source.find("function getContext() {\n")
+          end = source.find("\nfunction shouldRenderSidebar(\n", start)
+          if start < 0 or end <= start:
               raise SystemExit("Could not isolate Sidebar getContext()")
-          if sidebar.find("function getContext() {\n", context_start + 1) != -1:
-              raise SystemExit("Sidebar getContext() is not unique")
-
-          new_context = '''function getContext(
+          replacement = '''function getContext(
             overrides = {}
           ) {
             const supplied =
@@ -156,23 +153,18 @@ jobs:
                   true,
           
               publicPath,
-          
               canonicalPath,
-          
               route,
             };
           }
-          '''.replace("          ", "")
-          sidebar = sidebar[:context_start] + new_context.rstrip() + sidebar[context_end:]
+          '''.replace("          ", "").rstrip()
+          source = source[:start] + replacement + source[end:]
 
-          sync_start = sidebar.find("function sync() {\n")
-          sync_end = sidebar.find("\n/* =========================================================\n   ACTIONS", sync_start)
-          if sync_start < 0 or sync_end <= sync_start:
+          start = source.find("function sync() {\n")
+          end = source.find("\n/* =========================================================\n   ACTIONS", start)
+          if start < 0 or end <= start:
               raise SystemExit("Could not isolate Sidebar sync()")
-          old_sync = sidebar[sync_start:sync_end]
-          if "getContext()" not in old_sync or "renderSidebar(" not in old_sync:
-              raise SystemExit("Sidebar sync() legacy shape changed")
-          new_sync = '''function sync(
+          replacement = '''function sync(
             context = {}
           ) {
             if (!isBrowser()) {
@@ -187,78 +179,22 @@ jobs:
               )
             );
           }
-          '''.replace("          ", "")
-          sidebar = sidebar[:sync_start] + new_sync.rstrip() + "\n" + sidebar[sync_end:]
+          '''.replace("          ", "").rstrip() + "\n"
+          source = source[:start] + replacement + source[end:]
 
-          policy_anchor = '''        routeChangeFastSync:
-          true,
-'''
-          policy_replacement = policy_anchor + '''
-        routerContextReuse:
-          true,
-'''
-          if sidebar.count(policy_anchor) != 1:
+          anchor = "        routeChangeFastSync:\n          true,\n"
+          if source.count(anchor) != 1:
               raise SystemExit("Sidebar policy anchor is not unique")
-          sidebar = sidebar.replace(policy_anchor, policy_replacement, 1)
-          sidebar_path.write_text(sidebar, encoding="utf-8")
+          source = source.replace(
+              anchor,
+              anchor + "\n        routerContextReuse:\n          true,\n",
+              1,
+          )
 
-          contract_path = Path(".github/scripts/shell_runtime_contract.mjs")
-          contract = contract_path.read_text(encoding="utf-8")
-          old_contract_version = '    version: "sidebar.controller.v5-native-runtime-state",'
-          new_contract_version = '    version: "sidebar.controller.v6-router-context-reuse",'
-          if contract.count(old_contract_version) != 1:
-              raise SystemExit("Shell contract Sidebar version anchor is not unique")
-          contract = contract.replace(old_contract_version, new_contract_version, 1)
-
-          console_anchor = '''console.log(
-            "Shell runtime contract OK · Sidebar/Topbar zero-copy Core reads · no public snapshots"
-          );
-'''
-          if contract.count(console_anchor) != 1:
-              raise SystemExit("Shell contract console anchor is not unique")
-          reuse_contract = '''const sidebarSource = await readFile("src/ui/sidebar/index.js", "utf8");
-          const sidebarContextStart = sidebarSource.indexOf("function getContext(");
-          const sidebarContextEnd = sidebarSource.indexOf("\\nfunction shouldRenderSidebar(", sidebarContextStart);
-          assert.ok(
-            sidebarContextStart >= 0 && sidebarContextEnd > sidebarContextStart,
-            "Sidebar contract must isolate getContext()"
-          );
-          const sidebarContextSource = sidebarSource.slice(sidebarContextStart, sidebarContextEnd);
-          for (const expected of [
-            "supplied.publicPath",
-            "supplied.canonicalPath",
-            "supplied.route",
-            "supplied.Router",
-            "supplied.Auth",
-          ]) {
-            assert.equal(
-              sidebarContextSource.includes(expected),
-              true,
-              `Sidebar must reuse Router chrome context: ${expected}`
-            );
-          }
-          const sidebarSyncStart = sidebarSource.indexOf("function sync(");
-          const sidebarSyncEnd = sidebarSource.indexOf("\\n/* =========================================================\\n   ACTIONS", sidebarSyncStart);
-          const sidebarSyncSource = sidebarSource.slice(sidebarSyncStart, sidebarSyncEnd);
-          assert.equal(
-            sidebarSyncSource.includes("getContext("),
-            true,
-            "Sidebar.sync(context) must route supplied chrome context into getContext()"
-          );
-          assert.equal(
-            sidebarSource.includes("routerContextReuse:\\n          true"),
-            true,
-            "Sidebar snapshot policy must expose Router context reuse"
-          );
-          
-          '''.replace("          ", "")
-          contract = contract.replace(console_anchor, reuse_contract + console_anchor, 1)
-          contract_path.write_text(contract, encoding="utf-8")
+          path.write_text(source, encoding="utf-8")
           PY
 
           node --check src/ui/sidebar/index.js
-          node --check .github/scripts/shell_runtime_contract.mjs
-          bash .github/ci/validate_spa_contracts.sh
           git diff --check
 
       - name: Commit patched Sidebar

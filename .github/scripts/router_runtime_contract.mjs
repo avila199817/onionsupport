@@ -6,7 +6,7 @@ import { Router, ROUTER_VERSION } from "../../src/router/index.js";
 
 assert.equal(
   ROUTER_VERSION,
-  "router.minimal.v14-chrome-active-dedup"
+  "router.minimal.v15-public-auth-short-circuit"
 );
 
 assert.equal(
@@ -127,6 +127,35 @@ assert.equal(source.includes('"resolve"'), true);
 assert.equal(source.includes('"guard"'), true);
 assert.equal(source.includes('"auth-wait"'), true);
 
+const authWaitStart = source.indexOf("async function waitForAuthIfNeeded(");
+const authWaitEnd = source.indexOf("\nfunction isAuthenticated(", authWaitStart);
+assert.ok(
+  authWaitStart >= 0 && authWaitEnd > authWaitStart,
+  "Router contract must isolate waitForAuthIfNeeded()"
+);
+const authWaitSource = source.slice(authWaitStart, authWaitEnd);
+const publicShortCircuitIndex = authWaitSource.indexOf("route.public === true");
+const authSelectorIndex = authWaitSource.indexOf('"isAuthenticated"');
+const authResolvingIndex = authWaitSource.indexOf("isAuthResolving()");
+const authPromiseIndex = authWaitSource.indexOf("getInFlightAuthPromise()");
+assert.ok(
+  publicShortCircuitIndex >= 0 && authSelectorIndex > publicShortCircuitIndex,
+  "known public routes must short-circuit before Auth.isAuthenticated()"
+);
+assert.equal(
+  (authWaitSource.match(/"isAuthenticated"/g) || []).length,
+  1,
+  "private-route auth wait must retain exactly one authentication selector"
+);
+assert.ok(
+  authResolvingIndex > authSelectorIndex,
+  "private unauthenticated routes must still inspect resolving Auth state"
+);
+assert.ok(
+  authPromiseIndex > authResolvingIndex,
+  "private Auth wait must still reuse the in-flight Auth promise"
+);
+
 const executeRenderStart = source.indexOf("async function executeRender(");
 const executeRenderEnd = source.indexOf("\nfunction render(", executeRenderStart);
 assert.ok(
@@ -219,5 +248,5 @@ assert.ok(
 );
 
 console.log(
-  "Router runtime contract OK · native Core port · explicit private phase telemetry"
+  "Router runtime contract OK · public auth-wait short-circuit · native Core port · explicit private phase telemetry"
 );

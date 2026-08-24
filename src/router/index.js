@@ -44,7 +44,7 @@ import * as Routes from "./routes.js";
 import RouteStyles from "./styles.js";
 
 export const ROUTER_VERSION =
-  "router.minimal.v14-chrome-active-dedup";
+  "router.minimal.v15-public-auth-short-circuit";
 
 const PUBLIC_HOME_PATH = "/";
 
@@ -1511,17 +1511,17 @@ async function waitForAuthIfNeeded(
   route = null
 ) {
   if (
-    authCall(
-      "isAuthenticated",
-      false
-    ) === true
+    !route ||
+    route.public === true
   ) {
     return false;
   }
 
   if (
-    !route ||
-    route.public === true
+    authCall(
+      "isAuthenticated",
+      false
+    ) === true
   ) {
     return false;
   }

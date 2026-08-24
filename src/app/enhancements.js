@@ -17,7 +17,7 @@
 ========================================================= */
 
 export const APP_ENHANCEMENTS_VERSION =
-  "app.enhancements.v16-facturas-paid-confirm";
+  "app.enhancements.v17-incidencias-live-media";
 
 const PRE_ROUTER = Object.freeze([
   Object.freeze({
@@ -62,9 +62,19 @@ const POST_ROUTER = Object.freeze([
     load: () => import("../features/incidencias-media-preview/index.js"),
   }),
   Object.freeze({
+    key: "incidencias-video-preview",
+    scope: "incidencias",
+    load: () => import("../features/incidencias-video-preview/index.js"),
+  }),
+  Object.freeze({
     key: "incidencias-detail-state",
     scope: "incidencias",
     load: () => import("../features/incidencias-detail-state/index.js"),
+  }),
+  Object.freeze({
+    key: "incidencias-detail-live-sync",
+    scope: "incidencias",
+    load: () => import("../features/incidencias-detail-live-sync/index.js"),
   }),
   Object.freeze({
     key: "incidencias-technician-profile",

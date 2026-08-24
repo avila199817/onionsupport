@@ -2,12 +2,14 @@
    Onion Support - Incidencias Media / Live Detail
    Archivo: /src/css/views/incidencias/media-preview.css
 
-   PRODUCTIVO · ROUTE-SCOPED · VIEWER-FIRST
+   PRODUCTIVO · ROUTE-SCOPED · FIT-CONTAINED VIEWER
    - Miniaturas locales y remotas con fallback estable.
-   - Visor dedicado de imagen, PDF y vídeo sin mover el scroll del ticket.
+   - Visor independiente que nunca mueve el scroll del ticket.
+   - Imagen y vídeo contenidos íntegramente en un único viewport.
+   - PDF ocupa el stage disponible y desplaza sólo su documento interno.
    - Vídeo MOV/MP4/M4V/WebM con primer fotograma cuando el códec es legible.
+   - Apertura/cierre simétricos y respetuosos con reduced-motion.
    - Sincronización de detalle silenciosa y orientada a señales.
-   - Responsive real hasta viewport móvil completo.
 ========================================================= */
 
 @layer views {
@@ -111,29 +113,49 @@
 
 /* =======================================================
    VISOR DEDICADO
-   El ticket permanece detrás, inmóvil e inert.
+   Nunca crea scroll exterior: toda imagen/vídeo cabe en el stage.
 ======================================================= */
+
+body.incidencias-media-viewer-open {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
 
 .incidencias-media-viewer {
   position: fixed;
   inset: 0;
   z-index: 90;
-  inline-size: 100%;
-  block-size: 100%;
+  inline-size: 100vw;
+  block-size: 100vh;
   block-size: 100dvh;
   display: grid;
-  place-items: stretch;
-  padding: clamp(10px, 2vw, 24px);
+  place-items: center;
+  padding: clamp(14px, 2.4vw, 30px);
   overflow: hidden;
   pointer-events: auto;
   background:
-    color-mix(in srgb, var(--ui-detail-modal-overlay-bg) 92%, transparent);
+    color-mix(in srgb, var(--ui-detail-modal-overlay-bg) 90%, transparent);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  animation: incidencias-viewer-backdrop-in 150ms ease-out both;
+
+  opacity: 0;
+  transition:
+    opacity 180ms ease-out,
+    background 180ms ease-out;
+}
+
+.incidencias-media-viewer[data-viewer-state="ready"] {
+  opacity: 1;
+}
+
+.incidencias-media-viewer[data-viewer-state="closing"] {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .incidencias-media-viewer-stage {
+  inline-size: 100%;
+  block-size: 100%;
   min-inline-size: 0;
   min-block-size: 0;
   display: grid;
@@ -141,23 +163,68 @@
   overflow: hidden;
 }
 
+/*
+   Tamaño deliberadamente acotado:
+   - no se usa 100% del viewport "porque sí";
+   - deja aire visual alrededor;
+   - la fila de contenido siempre tiene una altura finita.
+*/
 .incidencias-modal-preview.incidencias-modal-preview--viewer {
   position: relative;
   z-index: 1;
-  inline-size: min(1480px, 100%);
-  block-size: 100%;
-  max-block-size: 100%;
+
+  inline-size: min(1180px, 90vw);
+  block-size: min(760px, 86dvh);
+
+  max-inline-size: calc(100vw - 28px);
+  max-block-size: calc(100dvh - 28px);
   min-inline-size: 0;
   min-block-size: 0;
+
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+
   overflow: hidden;
+
   border: 1px solid var(--ui-detail-modal-border);
   border-radius: var(--ui-detail-modal-radius);
   background: var(--ui-detail-modal-bg);
   box-shadow: var(--ui-detail-modal-shadow);
   outline: none;
-  animation: incidencias-viewer-panel-in 180ms var(--ease-standard) both;
+
+  opacity: 0;
+  transform: translateY(8px) scale(.982);
+  transform-origin: center center;
+  will-change: opacity, transform;
+
+  transition:
+    opacity 180ms ease-out,
+    transform 190ms var(--ease-standard),
+    box-shadow 180ms ease-out;
+}
+
+/* PDF agradece algo más de superficie, sin superar nunca el viewport. */
+.incidencias-modal-preview.incidencias-modal-preview--viewer[data-preview-kind="pdf"] {
+  inline-size: min(1340px, 94vw);
+  block-size: min(860px, 90dvh);
+}
+
+/* Documento no previsualizable: no necesita ocupar una pantalla entera. */
+.incidencias-modal-preview.incidencias-modal-preview--viewer[data-preview-kind="document"] {
+  inline-size: min(760px, 88vw);
+  block-size: min(420px, 68dvh);
+}
+
+.incidencias-media-viewer[data-viewer-state="ready"]
+  .incidencias-modal-preview--viewer {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.incidencias-media-viewer[data-viewer-state="closing"]
+  .incidencias-modal-preview--viewer {
+  opacity: 0;
+  transform: translateY(5px) scale(.988);
 }
 
 .incidencias-modal-preview--viewer:focus-visible {
@@ -172,7 +239,7 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-md);
-  padding: 12px 14px;
+  padding: 11px 13px;
   border-block-end: 1px solid var(--ui-detail-modal-header-border);
   background: var(--surface-2, var(--ui-detail-modal-bg));
 }
@@ -181,17 +248,35 @@
   min-inline-size: 0;
 }
 
+.incidencias-modal-preview--viewer .incidencias-modal-preview-copy strong,
+.incidencias-modal-preview--viewer .incidencias-modal-preview-copy span {
+  display: block;
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .incidencias-modal-preview--viewer .incidencias-modal-preview-copy strong {
-  font-size: var(--font-md);
+  font-size: var(--font-sm);
+}
+
+.incidencias-modal-preview--viewer .incidencias-modal-preview-copy span {
+  margin-block-start: 2px;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
 }
 
 .incidencias-modal-preview--viewer .incidencias-modal-preview-actions {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /*
-   Esta regla neutraliza las alturas pensadas para la preview inline de
-   detail.css. Dentro del visor, el frame es el viewport del documento.
+   Neutraliza por completo las alturas inline de detail.css.
+   El frame es una caja finita: imagen y vídeo NO tienen scroll.
 */
 .incidencias-modal-preview--viewer .incidencias-modal-preview-frame,
 .incidencias-modal-preview--viewer .incidencias-modal-preview-frame.is-pdf,
@@ -203,61 +288,61 @@
   max-block-size: none;
   min-inline-size: 0;
   min-block-size: 0;
+
   display: grid;
   place-items: center;
-  overflow: auto;
-  padding: clamp(10px, 1.5vw, 20px);
+
+  overflow: hidden;
+  padding: clamp(12px, 1.8vw, 22px);
+
   border: 0;
   border-radius: 0;
   background: var(--surface-0, var(--main-bg));
   isolation: isolate;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
-.incidencias-modal-preview--viewer .incidencias-modal-preview-frame.is-pdf {
-  padding: 0;
-  overflow: hidden;
-}
-
+/* Imagen: nunca se recorta, nunca se fuerza a crecer más que su hueco. */
 .incidencias-modal-preview--viewer .incidencias-modal-preview-image {
   inline-size: auto;
   block-size: auto;
   max-inline-size: 100%;
   max-block-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
+
+  display: block;
   object-fit: contain;
+  object-position: center center;
+
+  border: 1px solid var(--border-soft);
   border-radius: var(--incidencias-modal-preview-frame-radius);
+  background: var(--solid-bg-1);
+  box-shadow: var(--shadow-card);
+}
+
+/* PDF: el visor exterior sigue fijo; el scroll pertenece al documento PDF. */
+.incidencias-modal-preview--viewer .incidencias-modal-preview-frame.is-pdf {
+  padding: 0;
+  overflow: hidden;
 }
 
 .incidencias-modal-preview--viewer .incidencias-modal-preview-iframe {
   inline-size: 100%;
   block-size: 100%;
+  min-inline-size: 0;
   min-block-size: 0;
+  display: block;
   border: 0;
+  background: var(--solid-bg-0);
 }
 
+/* Documento sin renderer inline. */
 .incidencias-modal-preview--viewer > .incidencias-modal-empty-box {
   align-self: center;
   justify-self: center;
-  inline-size: min(680px, calc(100% - 32px));
-  margin: 16px;
-  padding: clamp(20px, 4vw, 40px);
-}
-
-.incidencias-modal-preview--viewer .incidencias-modal-preview-frame::-webkit-scrollbar {
-  inline-size: var(--scrollbar-size, 9px);
-  block-size: var(--scrollbar-size, 9px);
-}
-
-.incidencias-modal-preview--viewer .incidencias-modal-preview-frame::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.incidencias-modal-preview--viewer .incidencias-modal-preview-frame::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: var(--radius-pill);
-  background: var(--scrollbar-thumb);
-  background-clip: padding-box;
+  inline-size: min(620px, calc(100% - 28px));
+  margin: 14px;
+  padding: clamp(18px, 4vw, 34px);
 }
 
 [data-incidencias-modal-panel="true"][data-media-viewer-background="true"] {
@@ -271,33 +356,53 @@
 .incidencias-modal-preview--viewer
   .incidencias-modal-preview-frame.is-video {
   overflow: hidden;
-  padding: 0;
+  padding: clamp(12px, 1.8vw, 22px);
   background: var(--solid-bg-2);
 }
 
+/*
+   Clave del ajuste:
+   NO width:100% + height:100%.
+   El elemento reemplazado conserva su ratio intrínseco y se reduce por
+   cualquiera de los dos límites. Así un vídeo horizontal o vertical cabe
+   íntegro en el mismo viewport sin crop ni scroll.
+*/
 .incidencias-modal-preview-video {
   position: relative;
   z-index: 2;
-  inline-size: 100%;
-  block-size: 100%;
+
+  inline-size: auto;
+  block-size: auto;
   max-inline-size: 100%;
   max-block-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
+
   display: block;
   object-fit: contain;
+  object-position: center center;
+  aspect-ratio: var(--incidencias-media-aspect, auto);
+
+  border-radius: var(--incidencias-modal-preview-frame-radius);
   background: var(--solid-bg-2);
+  box-shadow: var(--shadow-card);
 }
 
 .incidencias-modal-video-loader {
   position: absolute;
   inset: 0;
   z-index: 3;
+
   display: grid;
   place-content: center;
   justify-items: center;
   gap: 10px;
+
   padding: 24px;
+
   background: color-mix(in srgb, var(--solid-bg-2) 88%, transparent);
   color: var(--text-muted);
+
   pointer-events: none;
 }
 
@@ -309,9 +414,11 @@
 .incidencias-modal-live-sync-spinner {
   inline-size: 16px;
   block-size: 16px;
+
   border: 2px solid currentColor;
   border-inline-end-color: transparent;
   border-radius: 50%;
+
   animation: incidencias-live-spin .72s linear infinite;
 }
 
@@ -335,12 +442,17 @@
   position: absolute;
   inset: 0;
   z-index: 4;
+
   display: grid;
   place-content: center;
+
   padding: clamp(22px, 5vw, 54px);
+
   text-align: center;
+
   color: var(--text-secondary, var(--text-muted));
   background: color-mix(in srgb, var(--solid-bg-2) 94%, transparent);
+
   font-size: var(--font-sm);
   line-height: 1.6;
 }
@@ -359,7 +471,6 @@
 
 /* =======================================================
    LIVE SYNC SILENCIOSO
-   Sólo se hace visible para red lenta, cambio real o error puntual.
 ======================================================= */
 
 .incidencias-modal-panel[data-incidencias-modal-panel="true"] {
@@ -371,20 +482,27 @@
   inset-block-start: 12px;
   inset-inline-end: 62px;
   z-index: 30;
+
   min-block-size: 28px;
   display: inline-flex;
   align-items: center;
   gap: 7px;
+
   max-inline-size: min(220px, calc(100% - 120px));
   padding: 5px 9px;
+
   border: 1px solid var(--border-default);
   border-radius: var(--radius-pill);
+
   background:
     color-mix(in srgb, var(--solid-bg-1, var(--solid-bg-2)) 94%, transparent);
   color: var(--text-muted);
+
   box-shadow: var(--shadow-xs);
+
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
+
   pointer-events: none;
 }
 
@@ -422,38 +540,27 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+
   font-size: 10.5px;
   font-weight: var(--weight-semibold);
 }
 
 /* =======================================================
-   MOTION
+   MOTION / ACCESSIBILITY
 ======================================================= */
 
 @keyframes incidencias-live-spin {
   to { transform: rotate(360deg); }
 }
 
-@keyframes incidencias-viewer-backdrop-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes incidencias-viewer-panel-in {
-  from {
-    opacity: 0;
-    transform: scale(.985) translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .incidencias-media-viewer,
-  .incidencias-modal-preview--viewer {
-    animation: none;
+  .incidencias-modal-preview.incidencias-modal-preview--viewer {
+    transition-duration: 1ms;
+  }
+
+  .incidencias-modal-preview.incidencias-modal-preview--viewer {
+    transform: none;
   }
 
   .incidencias-modal-video-loader > span,
@@ -466,6 +573,18 @@
    RESPONSIVE
 ======================================================= */
 
+@media (max-width: 900px) {
+  .incidencias-modal-preview.incidencias-modal-preview--viewer {
+    inline-size: min(94vw, 980px);
+    block-size: min(88dvh, 720px);
+  }
+
+  .incidencias-modal-preview.incidencias-modal-preview--viewer[data-preview-kind="pdf"] {
+    inline-size: 95vw;
+    block-size: 92dvh;
+  }
+}
+
 @media (max-width: 720px) {
   .incidencias-modal-pending-file[data-media-preview-enhanced="true"] {
     grid-template-columns: 64px minmax(0, 1fr) auto;
@@ -477,24 +596,26 @@
   }
 
   .incidencias-media-viewer {
-    padding: 0;
+    padding:
+      max(8px, env(safe-area-inset-top))
+      max(8px, env(safe-area-inset-right))
+      max(8px, env(safe-area-inset-bottom))
+      max(8px, env(safe-area-inset-left));
   }
 
-  .incidencias-modal-preview.incidencias-modal-preview--viewer {
-    inline-size: 100%;
-    block-size: 100%;
-    border-inline: 0;
-    border-radius: 0;
+  .incidencias-modal-preview.incidencias-modal-preview--viewer,
+  .incidencias-modal-preview.incidencias-modal-preview--viewer[data-preview-kind="pdf"],
+  .incidencias-modal-preview.incidencias-modal-preview--viewer[data-preview-kind="document"] {
+    inline-size: calc(100vw - 16px);
+    block-size: calc(100dvh - 16px);
+    max-inline-size: calc(100vw - 16px);
+    max-block-size: calc(100dvh - 16px);
   }
 
   .incidencias-modal-preview--viewer .incidencias-modal-preview-head {
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
-    padding:
-      max(10px, env(safe-area-inset-top))
-      max(10px, env(safe-area-inset-right))
-      10px
-      max(10px, env(safe-area-inset-left));
+    padding: 9px 10px;
   }
 
   .incidencias-modal-preview--viewer .incidencias-modal-preview-actions {
@@ -504,6 +625,11 @@
   .incidencias-modal-preview--viewer .incidencias-modal-preview-btn {
     min-inline-size: 0;
     padding-inline: 9px;
+  }
+
+  .incidencias-modal-preview--viewer .incidencias-modal-preview-frame,
+  .incidencias-modal-preview--viewer .incidencias-modal-preview-frame.is-video {
+    padding: 10px;
   }
 
   .incidencias-modal-live-sync {
@@ -533,7 +659,7 @@
   }
 
   .incidencias-modal-preview--viewer .incidencias-modal-preview-copy span {
-    max-inline-size: 48vw;
+    max-inline-size: 42vw;
   }
 
   .incidencias-modal-preview--viewer .incidencias-modal-preview-actions {

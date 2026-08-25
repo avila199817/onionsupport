@@ -15,7 +15,7 @@
    - Sin construir HTML visual.
    - Sin guards.
    - Sin HTTP.
-   - Sin Toast.
+   - Toast sólo para comunicar un fallo explícito de revocación.
    - Sin Store.
    - Sin Services.
    - Sin rutas inventadas.
@@ -47,7 +47,7 @@ import {
 } from "./template.js";
 
 export const SIDEBAR_VERSION =
-  "sidebar.controller.v6-committed-route-context";
+  "sidebar.controller.v7-logout-fail-closed";
 
 const SIDEBAR_ROOT_ID =
   "app-sidebar";
@@ -2125,6 +2125,30 @@ function setLogoutBusy(
   }
 }
 
+function showLogoutFailure() {
+  const message =
+    "No se pudo confirmar el cierre de sesión. Sigues conectado; inténtalo de nuevo.";
+
+  try {
+    if (isFunction(AppCore?.showToast)) {
+      AppCore.showToast(
+        message,
+        "error",
+        {
+          duration: 7000,
+          source: "sidebar.logout",
+        }
+      );
+
+      return true;
+    }
+  } catch {
+    // La sesión se conserva aunque la UI de aviso no esté disponible.
+  }
+
+  return false;
+}
+
 /* =========================================================
    STRUCTURE SIGNATURE
 ========================================================= */
@@ -2688,46 +2712,71 @@ async function handleLogout(
     // noop
   }
 
+  let loggedOut =
+    false;
+
   try {
-    await auth
-      ?.logout
-      ?.(
-        options
+    if (
+      !isFunction(
+        auth?.logout
+      )
+    ) {
+      throw new Error(
+        "Auth.logout no disponible."
       );
+    }
+
+    loggedOut =
+      await auth.logout(
+        options
+      ) === true;
+
+    if (
+      !loggedOut
+    ) {
+      throw new Error(
+        "La revocación remota no fue confirmada."
+      );
+    }
   } catch {
-    // logout remoto best-effort
+    showLogoutFailure();
+    return false;
   } finally {
     logoutInFlight =
       false;
 
-    sidebarOpen =
-      false;
+    setLogoutBusy(
+      false
+    );
+  }
 
-    /*
-      Logout sí purga el DOM porque puede contener nombre/avatar
-      del usuario que acaba de cerrar sesión.
-    */
-    hideSidebar({
-      purge: true,
-    });
+  sidebarOpen =
+    false;
 
-    if (
-      isFunction(
-        router?.replace
-      )
-    ) {
-      await router.replace(
-        ROUTES.login ||
+  /*
+    Sólo purgamos identidad y navegamos después de que Auth confirme
+    la revocación remota o una sesión ya inválida.
+  */
+  hideSidebar({
+    purge: true,
+  });
+
+  if (
+    isFunction(
+      router?.replace
+    )
+  ) {
+    await router.replace(
+      ROUTES.login ||
         "/login",
-        {
-          source:
-            "sidebar.logout",
+      {
+        source:
+          "sidebar.logout",
 
-          replaceState:
-            true,
-        }
-      );
-    }
+        replaceState:
+          true,
+      }
+    );
   }
 
   return true;

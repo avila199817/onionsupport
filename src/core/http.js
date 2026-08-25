@@ -3105,7 +3105,6 @@ export function logout(
       ...options,
 
       auth: true,
-      noAutoRefresh: true,
     }
   );
 }
@@ -3120,7 +3119,6 @@ export function logoutAll(
       ...options,
 
       auth: true,
-      noAutoRefresh: true,
     }
   );
 }

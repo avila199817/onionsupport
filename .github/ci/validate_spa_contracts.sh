@@ -121,6 +121,7 @@ PY
 node --experimental-default-type=module .github/scripts/core_runtime_contract.mjs
 node --experimental-default-type=module .github/scripts/core_snapshot_contract.mjs
 node --experimental-default-type=module .github/scripts/auth_selector_contract.mjs
+node --experimental-default-type=module .github/scripts/auth_logout_contract.mjs
 node --experimental-default-type=module .github/scripts/router_runtime_contract.mjs
 node --experimental-default-type=module .github/scripts/shell_runtime_contract.mjs
 node --experimental-default-type=module .github/scripts/view_runtime_state_contract.mjs

@@ -101,11 +101,34 @@ jobs:
       - name: Validate verifier syntax
         run: python3 -m py_compile verification-tooling/.github/scripts/production_verify.py
 
+      - name: Resolve expected production canonical
+        id: canonical
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          marker="expected-main/.github/ci/canonical-apex-v1"
+
+          if [[ -e "${marker}" ]]; then
+            if [[ ! -f "${marker}" ]] || [[ "$(cat "${marker}")" != "canonical-apex-v1" ]]; then
+              echo "::error file=${marker},title=Marcador canonical inválido::Contenido inesperado."
+              exit 1
+            fi
+
+            site_url="https://onionsupport.com"
+          else
+            legacy_subdomain="www"
+            site_url="https://${legacy_subdomain}.onionsupport.com"
+          fi
+
+          echo "site_url=${site_url}" >> "${GITHUB_OUTPUT}"
+          echo "Expected production canonical: ${site_url}"
+
       - name: Verify deployed production strictly
         run: >-
           python3 verification-tooling/.github/scripts/production_verify.py
           --root expected-main
-          --base-url https://onionsupport.com
+          --base-url "${{ steps.canonical.outputs.site_url }}"
           --revision "${{ steps.revision.outputs.sha }}"
           --attempts 8
           --delay 10

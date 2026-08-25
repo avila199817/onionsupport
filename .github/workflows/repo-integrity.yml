@@ -52,6 +52,9 @@ jobs:
           done
           echo "JavaScript syntax OK · ${#files[@]} files"
 
+      - name: Validate Google measurement contract
+        run: python3 .github/scripts/google_measurement_contract.py
+
       - name: Validate repository contracts
         run: python3 .github/scripts/repo_integrity.py
 

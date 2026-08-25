@@ -2,25 +2,26 @@
    Onion Support · Incidencias Detail Live Sync
    Archivo: /src/features/incidencias-detail-live-sync/index.js
 
-   Frescura del Modal Details sin polling agresivo:
-   - stale-while-revalidate al abrir: pinta lo disponible y valida servidor;
-   - NO ejecuta un interval/timer de polling continuo;
-   - usa señales naturales de invalidación: cambio del row/listado, mutación
-     confirmada, vuelta a foco/pestaña y recuperación de conectividad;
-   - focus/visibility/online sólo revalidan si el detalle ya está stale;
-   - la lista ya tiene su propia actualización de baja frecuencia y actúa como
-     coarse change feed: sólo si cambia el row activo se consulta el detalle;
-   - después de escribir hay una única confirmación read-after-write diferida;
-   - proyecta únicamente datos remotos y preserva borrador, adjuntos pendientes,
-     foco, visor de archivos y confirmaciones del usuario;
-   - el indicador aparece sólo si la red tarda y nunca fuerza un repintado vacío.
-
-   Patrón equivalente a clientes de datos modernos: cache inmediata +
-   invalidación/revalidación por señales, con polling periódico desactivado.
+   DETAIL LIVE DATA · V3 · STABLE MEDIA SLOTS
+   - stale-while-revalidate al abrir;
+   - sin polling periódico agresivo;
+   - invalidación por señales: fila/listado, mutación confirmada, foco,
+     visibilidad y recuperación de red;
+   - read-after-write único después de mutaciones;
+   - proyección granular: sólo se reemplaza un slot si su contenido remoto
+     cambió de verdad;
+   - "Documentos actuales" usa firma semántica que ignora SAS, loaders,
+     clases de enhancement y estados transitorios;
+   - si los adjuntos no cambiaron, el DOM multimedia permanece físicamente vivo:
+     no se destruyen <img>, <video>, frames decodificados ni caché del navegador;
+   - toda proyección conserva scrollTop/scrollLeft del body del Modal Details;
+   - borrador, input file, preview, foco y confirmaciones siguen fuera de la
+     autoridad del live sync;
+   - indicador sólo para red perceptible y silencio total si no cambió nada.
 ========================================================= */
 
 export const INCIDENCIAS_DETAIL_LIVE_SYNC_VERSION =
-  "incidencias-detail-live-sync.v2.signal-driven-swr";
+  "incidencias-detail-live-sync.v3.stable-media-slots";
 
 const VIEW = "#view-container, [data-router-view='true']";
 const HOST = "[data-incidencias-modal-host='true']";
@@ -34,6 +35,9 @@ const COMMENT_THREAD = "[data-description-comments='true']";
 const SUCCESS = ".incidencias-modal-feedback--success";
 const LIVE = "[data-detail-live-sync='true']";
 const ROW = "[data-ticket-row='true']";
+const FILES = "[data-modal-files-slot='true']";
+const ATTACHMENT_COPY = ".incidencias-modal-attachment-copy";
+const HISTORY = "[data-modal-history-slot='true']";
 
 const STALE_AFTER_MS = 20_000;
 const WAKE_DEDUPE_MS = 4_000;
@@ -64,6 +68,7 @@ let activeRoot = null;
 let activeTicketId = "";
 let lastDetail = null;
 let lastSignature = "";
+let lastAttachmentSignature = "";
 let lastSuccessKey = "";
 let lastListFingerprint = "";
 let lastSyncedAt = 0;
@@ -72,6 +77,8 @@ let lastError = null;
 let syncCount = 0;
 let changeCount = 0;
 let signalRefreshCount = 0;
+let mediaSlotPreserveCount = 0;
+let mediaSlotReplaceCount = 0;
 
 const browser = () =>
   typeof window !== "undefined" && typeof document !== "undefined";
@@ -156,6 +163,7 @@ const template = () =>
 
 function ownMutation(callback) {
   internalMutations += 1;
+
   try {
     return callback();
   } finally {
@@ -164,6 +172,10 @@ function ownMutation(callback) {
     });
   }
 }
+
+/* =========================================================
+   TIMERS / INDICATOR
+========================================================= */
 
 function clearTimer(name = "") {
   if (!browser()) return false;
@@ -184,6 +196,7 @@ function clearTimer(name = "") {
   if (name === "list") listSignalTimer = 0;
   if (name === "indicatorDelay") indicatorDelayTimer = 0;
   if (name === "indicatorSettle") indicatorSettleTimer = 0;
+
   return true;
 }
 
@@ -221,6 +234,7 @@ function ensureIndicator(root = currentRoot()) {
 
   live.append(spinner, label);
   ownMutation(() => panel.appendChild(live));
+
   return live;
 }
 
@@ -240,6 +254,7 @@ function showIndicator(root, state, label) {
 function hideIndicator(root = currentRoot()) {
   const live = root?.querySelector?.(LIVE);
   if (!live) return false;
+
   live.dataset.state = "idle";
   live.hidden = true;
   return true;
@@ -266,6 +281,7 @@ function finishIndicator(root, { changed = false, error = false } = {}) {
   if (!root?.isConnected) return;
 
   const wasVisible = Boolean(root.querySelector(`${LIVE}:not([hidden])`));
+
   clearTimer("indicatorDelay");
   clearTimer("indicatorSettle");
 
@@ -274,9 +290,11 @@ function finishIndicator(root, { changed = false, error = false } = {}) {
 
     if (wasVisible) {
       showIndicator(root, "error", "No se pudo actualizar");
+
       indicatorSettleTimer = window.setTimeout(() => {
         indicatorSettleTimer = 0;
         if (!root.isConnected || root !== currentRoot()) return;
+
         hideIndicator(root);
         root.dataset.liveSyncState = "idle";
       }, ERROR_SETTLE_MS);
@@ -294,18 +312,26 @@ function finishIndicator(root, { changed = false, error = false } = {}) {
   }
 
   showIndicator(root, "ready", "Contenido actualizado");
+
   indicatorSettleTimer = window.setTimeout(() => {
     indicatorSettleTimer = 0;
     if (!root.isConnected || root !== currentRoot()) return;
+
     hideIndicator(root);
     root.dataset.liveSyncState = "idle";
   }, INDICATOR_SETTLE_MS);
 }
 
+/* =========================================================
+   COMMENTS / SIGNATURES
+========================================================= */
+
 function normalizeComment(item = {}, index = 0) {
   const raw = object(item);
-  const kind = text(first(raw.kind, raw.type, raw.action, raw.event, "comment"), "")
-    .toLowerCase();
+  const kind = text(
+    first(raw.kind, raw.type, raw.action, raw.event, "comment"),
+    ""
+  ).toLowerCase();
 
   if (kind && !["comment", "comentario"].includes(kind)) return null;
 
@@ -343,7 +369,13 @@ function normalizeComment(item = {}, index = 0) {
       ),
       "Usuario"
     ),
-    createdAt: first(raw.createdAt, raw.date, raw.timestamp, raw.updatedAt, null),
+    createdAt: first(
+      raw.createdAt,
+      raw.date,
+      raw.timestamp,
+      raw.updatedAt,
+      null
+    ),
     sourceIndex: index,
   };
 }
@@ -357,8 +389,10 @@ function commentsFromDetail(detail = {}) {
   if (timeline.length) {
     source = timeline.filter((entry) =>
       ["comment", "comentario"].includes(
-        text(first(entry?.kind, entry?.type, entry?.action, entry?.event, ""), "")
-          .toLowerCase()
+        text(
+          first(entry?.kind, entry?.type, entry?.action, entry?.event, ""),
+          ""
+        ).toLowerCase()
       )
     );
   } else {
@@ -403,7 +437,9 @@ function formatDate(value = null) {
 
 function commentsSignature(comments = []) {
   return comments
-    .map((item) => [item.id, item.body, timestamp(item.createdAt)].join("::"))
+    .map((item) =>
+      [item.id, item.body, timestamp(item.createdAt)].join("::")
+    )
     .join("||");
 }
 
@@ -429,17 +465,22 @@ function buildCommentCard(comment = {}) {
   date.textContent = formatDate(comment.createdAt);
 
   const body = document.createElement("p");
-  body.textContent = multiline(comment.body, "Actualización registrada.");
+  body.textContent = multiline(
+    comment.body,
+    "Actualización registrada."
+  );
 
   head.append(author, date);
   content.append(head, body);
   article.append(accent, content);
+
   return article;
 }
 
 function renderFreshComments(root, detail = {}) {
   const section = root?.querySelector?.(DESCRIPTION_SECTION);
   const description = section?.querySelector?.(DESCRIPTION_TEXT);
+
   if (!section || !description) return false;
 
   const comments = commentsFromDetail(detail);
@@ -478,24 +519,30 @@ function renderFreshComments(root, detail = {}) {
 
   const list = document.createElement("div");
   list.className = "incidencias-modal-description-comments";
-  for (const comment of comments) list.appendChild(buildCommentCard(comment));
+
+  for (const comment of comments) {
+    list.appendChild(buildCommentCard(comment));
+  }
 
   head.append(title, count);
   nextThread.append(head, list);
 
   ownMutation(() => {
-    if (thread) thread.replaceWith(nextThread);
-    else description.insertAdjacentElement("afterend", nextThread);
+    if (thread) {
+      thread.replaceWith(nextThread);
+    } else {
+      description.insertAdjacentElement("afterend", nextThread);
+    }
   });
 
   section.dataset.hasDescriptionComments = "true";
   return true;
 }
 
-function detailSignature(detail = {}) {
+function attachmentsFromDetail(detail = {}) {
   const raw = object(first(detail?.raw, detail));
-  const comments = commentsFromDetail(detail);
-  const attachments = array(
+
+  return array(
     first(
       detail?.attachments,
       detail?.files,
@@ -506,22 +553,73 @@ function detailSignature(detail = {}) {
       []
     )
   );
+}
 
-  const attachmentSig = attachments.map((file, index) => [
-    text(file?.id || file?.attachmentId || file?.fileId || `att_${index}`),
-    text(file?.name || file?.filename || file?.fileName, ""),
-    Number(file?.size || file?.sizeBytes || 0),
-    timestamp(file?.uploadedAt || file?.createdAt || file?.updatedAt),
-  ].join("::")).join("||");
+function attachmentDetailSignature(detail = {}) {
+  return attachmentsFromDetail(detail)
+    .map((file, index) => [
+      text(
+        file?.id ||
+        file?.attachmentId ||
+        file?.fileId ||
+        `att_${index}`
+      ),
+      text(file?.name || file?.filename || file?.fileName, ""),
+      text(
+        file?.contentType ||
+        file?.type ||
+        file?.mimeType ||
+        file?.mimetype,
+        ""
+      ).toLowerCase(),
+      Number(file?.size || file?.sizeBytes || 0),
+      timestamp(file?.uploadedAt || file?.createdAt || file?.updatedAt),
+    ].join("::"))
+    .join("||");
+}
+
+function detailSignature(detail = {}) {
+  const raw = object(first(detail?.raw, detail));
+  const comments = commentsFromDetail(detail);
 
   return [
     text(detail?.status || detail?.estado, ""),
     text(detail?.priority || detail?.prioridad, ""),
     text(detail?.category || detail?.categoria || detail?.type, ""),
+    text(
+      first(
+        detail?.assignedToName,
+        detail?.technicianName,
+        detail?.tecnicoName,
+        raw?.assignedToName,
+        raw?.technicianName,
+        ""
+      ),
+      ""
+    ),
     timestamp(detail?.lastActivityAt || detail?.updatedAt),
     commentsSignature(comments),
-    attachmentSig,
+    attachmentDetailSignature(detail),
   ].join("###");
+}
+
+function fileSlotSignature(slot = null) {
+  if (!slot) return "";
+
+  return Array.from(
+    slot.querySelectorAll(
+      ".incidencias-modal-attachment-card[data-attachment-id]"
+    )
+  )
+    .map((card, index) => {
+      const id = text(card.dataset?.attachmentId, `att_${index}`);
+      const copy = card.querySelector(ATTACHMENT_COPY);
+      const name = text(copy?.querySelector?.("strong")?.textContent, "");
+      const meta = text(copy?.querySelector?.("span")?.textContent, "");
+
+      return [id, name, meta].join("::");
+    })
+    .join("||");
 }
 
 function cloneRootFromHtml(html = "") {
@@ -529,16 +627,122 @@ function cloneRootFromHtml(html = "") {
 
   const holder = document.createElement("template");
   holder.innerHTML = String(html).trim();
+
   return holder.content.querySelector(ROOT);
 }
 
 function activeInside(node = null) {
   if (!node || !browser()) return false;
+
   try {
-    return Boolean(document.activeElement && node.contains(document.activeElement));
+    return Boolean(
+      document.activeElement &&
+      node.contains(document.activeElement)
+    );
   } catch {
     return false;
   }
+}
+
+function htmlEquivalent(current = null, next = null) {
+  if (!current || !next) return current === next;
+
+  try {
+    return current.outerHTML === next.outerHTML;
+  } catch {
+    return false;
+  }
+}
+
+/* =========================================================
+   SCROLL-STABLE PROJECTION
+========================================================= */
+
+function withPreservedBodyScroll(root = null, callback = () => {}) {
+  const body = root?.querySelector?.(BODY);
+
+  if (!body?.isConnected) {
+    return callback();
+  }
+
+  const top = Number(body.scrollTop || 0);
+  const left = Number(body.scrollLeft || 0);
+  const previousOverflowAnchor = body.style.overflowAnchor || "";
+  const viewerOwnsAnchor =
+    body.dataset.mediaViewerScrollAnchor === "true";
+
+  if (!viewerOwnsAnchor) {
+    body.style.overflowAnchor = "none";
+  }
+
+  const restore = () => {
+    if (!body.isConnected) return;
+
+    try {
+      body.scrollTop = top;
+      body.scrollLeft = left;
+    } catch {
+      try {
+        body.scrollTo?.({
+          top,
+          left,
+          behavior: "auto",
+        });
+      } catch {
+        // noop
+      }
+    }
+  };
+
+  try {
+    const result = callback();
+    restore();
+
+    queueMicrotask(() => {
+      restore();
+
+      if (!body.isConnected || viewerOwnsAnchor) return;
+
+      if (previousOverflowAnchor) {
+        body.style.overflowAnchor = previousOverflowAnchor;
+      } else {
+        body.style.removeProperty("overflow-anchor");
+      }
+    });
+
+    return result;
+  } catch (error) {
+    restore();
+
+    if (!viewerOwnsAnchor) {
+      if (previousOverflowAnchor) {
+        body.style.overflowAnchor = previousOverflowAnchor;
+      } else {
+        body.style.removeProperty("overflow-anchor");
+      }
+    }
+
+    throw error;
+  }
+}
+
+function replaceIfChanged(
+  root,
+  nextRoot,
+  selector,
+  {
+    preserveFocus = true,
+  } = {}
+) {
+  const current = root?.querySelector?.(selector);
+  const next = nextRoot?.querySelector?.(selector);
+
+  if (!current || !next) return false;
+  if (preserveFocus && activeInside(current)) return false;
+  if (htmlEquivalent(current, next)) return false;
+
+  current.replaceWith(next.cloneNode(true));
+  return true;
 }
 
 async function projectRemoteSlots(root, detail = {}) {
@@ -558,7 +762,8 @@ async function projectRemoteSlots(root, detail = {}) {
   }
 
   const admin = Boolean(root.querySelector(ADMIN));
-  const historyOpen = root.querySelector(BODY)?.dataset?.historyMode === "history";
+  const historyOpen =
+    root.querySelector(BODY)?.dataset?.historyMode === "history";
 
   const html = renderer({
     open: true,
@@ -575,64 +780,82 @@ async function projectRemoteSlots(root, detail = {}) {
   });
 
   const nextRoot = cloneRootFromHtml(html);
-  if (!nextRoot || ticketId(root) !== ticketId(nextRoot)) return false;
 
-  /*
-     Una sola transacción DOM para datos remotos. No se toca feedback, preview,
-     composer, textarea, input file ni overlays de confirmación.
-  */
-  ownMutation(() => {
-    for (const selector of [
-      "[data-modal-updated='true']",
-      ".incidencias-modal-meta-grid",
-      ".incidencias-modal-contact-section",
-    ]) {
-      const current = root.querySelector(selector);
-      const next = nextRoot.querySelector(selector);
-      if (current && next && !activeInside(current)) {
-        current.replaceWith(next.cloneNode(true));
+  if (!nextRoot || ticketId(root) !== ticketId(nextRoot)) {
+    return false;
+  }
+
+  withPreservedBodyScroll(root, () => {
+    ownMutation(() => {
+      for (const selector of [
+        "[data-modal-updated='true']",
+        ".incidencias-modal-meta-grid",
+        ".incidencias-modal-contact-section",
+      ]) {
+        replaceIfChanged(root, nextRoot, selector);
       }
-    }
 
-    const currentFiles = root.querySelector("[data-modal-files-slot='true']");
-    const nextFiles = nextRoot.querySelector("[data-modal-files-slot='true']");
-    if (
-      currentFiles &&
-      nextFiles &&
-      !activeInside(currentFiles) &&
-      !currentFiles.querySelector("[aria-busy='true']")
-    ) {
-      currentFiles.replaceWith(nextFiles.cloneNode(true));
-    }
+      const currentFiles = root.querySelector(FILES);
+      const nextFiles = nextRoot.querySelector(FILES);
 
-    const currentHistory = root.querySelector("[data-modal-history-slot='true']");
-    const nextHistory = nextRoot.querySelector("[data-modal-history-slot='true']");
-    if (currentHistory && nextHistory && !activeInside(currentHistory)) {
-      currentHistory.replaceWith(nextHistory.cloneNode(true));
-    }
+      if (
+        currentFiles &&
+        nextFiles &&
+        !activeInside(currentFiles) &&
+        !currentFiles.querySelector("[aria-busy='true']")
+      ) {
+        const currentSig = fileSlotSignature(currentFiles);
+        const nextSig = fileSlotSignature(nextFiles);
 
-    const currentAdmin = root.querySelector(ADMIN);
-    const nextAdmin = nextRoot.querySelector(ADMIN);
-    const adminDirty = currentAdmin?.dataset?.adminTicketDirty === "true";
-    if (
-      currentAdmin &&
-      nextAdmin &&
-      !adminDirty &&
-      !activeInside(currentAdmin)
-    ) {
-      currentAdmin.replaceWith(nextAdmin.cloneNode(true));
-    }
+        if (currentSig === nextSig) {
+          /*
+             Ésta es la pieza clave: un refresh de comentarios/estado NO toca
+             "Documentos actuales". El <img>/<video> que ya está decodificado
+             permanece exactamente en el mismo nodo DOM.
+          */
+          mediaSlotPreserveCount += 1;
+        } else {
+          currentFiles.replaceWith(nextFiles.cloneNode(true));
+          mediaSlotReplaceCount += 1;
+        }
+      }
+
+      replaceIfChanged(root, nextRoot, HISTORY);
+
+      const currentAdmin = root.querySelector(ADMIN);
+      const nextAdmin = nextRoot.querySelector(ADMIN);
+      const adminDirty =
+        currentAdmin?.dataset?.adminTicketDirty === "true";
+
+      if (
+        currentAdmin &&
+        nextAdmin &&
+        !adminDirty &&
+        !activeInside(currentAdmin) &&
+        !htmlEquivalent(currentAdmin, nextAdmin)
+      ) {
+        currentAdmin.replaceWith(nextAdmin.cloneNode(true));
+      }
+    });
   });
 
   renderFreshComments(root, detail);
   return true;
 }
 
+/* =========================================================
+   LIST AS COARSE CHANGE FEED
+========================================================= */
+
 function rowForTicket(id = activeTicketId) {
   if (!mountRoot || !id) return null;
 
   for (const row of mountRoot.querySelectorAll(ROW)) {
-    const rowId = text(row.dataset?.ticketId || row.dataset?.incidenciaId, "");
+    const rowId = text(
+      row.dataset?.ticketId || row.dataset?.incidenciaId,
+      ""
+    );
+
     if (rowId === id) return row;
   }
 
@@ -661,6 +884,7 @@ function scheduleListSignalCheck() {
   if (!browser() || !mounted || !activeTicketId) return false;
 
   clearTimer("list");
+
   listSignalTimer = window.setTimeout(() => {
     listSignalTimer = 0;
 
@@ -678,6 +902,7 @@ function scheduleListSignalCheck() {
 
     lastListFingerprint = next;
     signalRefreshCount += 1;
+
     void refreshDetail(activeTicketId, {
       reason: "list-change",
       force: true,
@@ -687,9 +912,19 @@ function scheduleListSignalCheck() {
   return true;
 }
 
+/* =========================================================
+   REQUEST LIFECYCLE
+========================================================= */
+
 function abortRequest() {
   requestSeq += 1;
-  try { requestController?.abort?.(); } catch { /* noop */ }
+
+  try {
+    requestController?.abort?.();
+  } catch {
+    // noop
+  }
+
   requestController = null;
   inflight = null;
 }
@@ -697,12 +932,18 @@ function abortRequest() {
 function shouldRefresh(reason = "signal", force = false) {
   if (force) return true;
 
-  return ["open", "mutation-success", "list-change"].includes(reason) || isStale();
+  return (
+    ["open", "mutation-success", "list-change"].includes(reason) ||
+    isStale()
+  );
 }
 
 async function refreshDetail(
   id = "",
-  { reason = "signal", force = false } = {}
+  {
+    reason = "signal",
+    force = false,
+  } = {}
 ) {
   const cleanId = text(id, "");
   const root = currentRoot();
@@ -723,6 +964,7 @@ async function refreshDetail(
   }
 
   const sequence = ++requestSeq;
+
   const controller =
     typeof AbortController !== "undefined"
       ? new AbortController()
@@ -734,6 +976,7 @@ async function refreshDetail(
   const task = (async () => {
     try {
       const source = await api();
+
       const detail = await source.loadIncidenciaDetail(cleanId, {
         force: true,
         cache: false,
@@ -751,7 +994,11 @@ async function refreshDetail(
       }
 
       const signature = detailSignature(detail);
-      const changed = Boolean(lastSignature && signature !== lastSignature);
+      const attachmentSignature = attachmentDetailSignature(detail);
+      const changed = Boolean(
+        lastSignature &&
+        signature !== lastSignature
+      );
 
       await projectRemoteSlots(root, detail);
 
@@ -765,16 +1012,28 @@ async function refreshDetail(
 
       lastDetail = detail;
       lastSignature = signature;
+      lastAttachmentSignature = attachmentSignature;
       lastSyncedAt = Date.now();
       lastError = null;
       syncCount += 1;
 
-      if (changed) changeCount += 1;
+      if (changed) {
+        changeCount += 1;
+      }
 
-      root.dataset.liveSyncLastSuccessAt = new Date(lastSyncedAt).toISOString();
-      root.dataset.liveSyncReason = text(reason, "signal");
+      root.dataset.liveSyncLastSuccessAt =
+        new Date(lastSyncedAt).toISOString();
+
+      root.dataset.liveSyncReason =
+        text(reason, "signal");
+
       captureListFingerprint();
-      finishIndicator(root, { changed, error: false });
+
+      finishIndicator(root, {
+        changed,
+        error: false,
+      });
+
       return true;
     } catch (error) {
       if (sequence !== requestSeq) return false;
@@ -793,21 +1052,33 @@ async function refreshDetail(
     }
   })();
 
-  inflight = { ticketId: cleanId, promise: task };
+  inflight = {
+    ticketId: cleanId,
+    promise: task,
+  };
+
   return task;
 }
+
+/* =========================================================
+   SIGNALS
+========================================================= */
 
 function successKey(root = currentRoot()) {
   const success = root?.querySelector?.(SUCCESS);
   const id = ticketId(root);
   const value = text(success?.textContent, "");
-  return id && value ? `${id}::${value}` : "";
+
+  return id && value
+    ? `${id}::${value}`
+    : "";
 }
 
 function scheduleMutationConfirmation(id = activeTicketId) {
   if (!browser() || !id) return false;
 
   clearTimer("mutation");
+
   mutationConfirmTimer = window.setTimeout(() => {
     mutationConfirmTimer = 0;
 
@@ -817,6 +1088,7 @@ function scheduleMutationConfirmation(id = activeTicketId) {
       !rootBusy(currentRoot())
     ) {
       signalRefreshCount += 1;
+
       void refreshDetail(id, {
         reason: "mutation-success",
         force: true,
@@ -867,6 +1139,7 @@ function resetActive() {
   activeTicketId = "";
   lastDetail = null;
   lastSignature = "";
+  lastAttachmentSignature = "";
   lastSuccessKey = "";
   lastListFingerprint = "";
   lastSyncedAt = 0;
@@ -876,6 +1149,7 @@ function resetActive() {
 
 function sync() {
   frame = 0;
+
   if (!browser() || !mounted) return false;
 
   syncHostObserver();
@@ -890,24 +1164,38 @@ function sync() {
 
   if (activeRoot !== root || activeTicketId !== id) {
     abortRequest();
+
     activeRoot = root;
     activeTicketId = id;
     lastDetail = null;
     lastSignature = "";
+    lastAttachmentSignature = fileSlotSignature(root.querySelector(FILES));
     lastSuccessKey = successKey(root);
     lastListFingerprint = rowFingerprint(rowForTicket(id));
     lastSyncedAt = 0;
     lastWakeAt = 0;
     lastError = null;
 
-    /* SWR: contenido local visible, validación servidor en background. */
+    /*
+       SWR: el contenido disponible se queda pintado y la validación del
+       servidor se hace detrás, sin vaciar ni reconstruir el modal.
+    */
     signalRefreshCount += 1;
-    void refreshDetail(id, { reason: "open", force: true });
+
+    void refreshDetail(id, {
+      reason: "open",
+      force: true,
+    });
+
     return true;
   }
 
   const currentSuccessKey = successKey(root);
-  if (currentSuccessKey && currentSuccessKey !== lastSuccessKey) {
+
+  if (
+    currentSuccessKey &&
+    currentSuccessKey !== lastSuccessKey
+  ) {
     lastSuccessKey = currentSuccessKey;
     scheduleMutationConfirmation(id);
   }
@@ -917,6 +1205,7 @@ function sync() {
 
 function schedule() {
   if (!browser() || !mounted || frame) return false;
+
   frame = window.requestAnimationFrame(sync);
   return true;
 }
@@ -925,26 +1214,43 @@ function onWake(event = null) {
   if (!mounted || !pageVisible() || !activeTicketId) return;
 
   const now = Date.now();
+
   if (now - lastWakeAt < WAKE_DEDUPE_MS) return;
+
   lastWakeAt = now;
 
-  const reason = event?.type === "online"
-    ? "online"
-    : event?.type === "visibilitychange"
-      ? "visibility"
-      : "focus";
+  const reason =
+    event?.type === "online"
+      ? "online"
+      : event?.type === "visibilitychange"
+        ? "visibility"
+        : "focus";
 
   if (!isStale()) return;
 
   signalRefreshCount += 1;
-  void refreshDetail(activeTicketId, { reason, force: false });
+
+  void refreshDetail(activeTicketId, {
+    reason,
+    force: false,
+  });
 }
+
+/* =========================================================
+   LIFECYCLE
+========================================================= */
 
 export function mountIncidenciasDetailLiveSync() {
   if (!browser() || mounted) return false;
 
   mountRoot = document.querySelector(VIEW) || document.body;
-  if (!mountRoot || typeof MutationObserver === "undefined") return false;
+
+  if (
+    !mountRoot ||
+    typeof MutationObserver === "undefined"
+  ) {
+    return false;
+  }
 
   mounted = true;
 
@@ -955,7 +1261,10 @@ export function mountIncidenciasDetailLiveSync() {
     let listTouched = false;
 
     for (const mutation of mutations) {
-      for (const node of [...mutation.addedNodes, ...mutation.removedNodes]) {
+      for (
+        const node
+        of [...mutation.addedNodes, ...mutation.removedNodes]
+      ) {
         if (node?.nodeType !== 1) continue;
 
         if (
@@ -977,10 +1286,16 @@ export function mountIncidenciasDetailLiveSync() {
     }
 
     if (modalTouched) schedule();
-    if (listTouched || activeTicketId) scheduleListSignalCheck();
+
+    if (listTouched || activeTicketId) {
+      scheduleListSignalCheck();
+    }
   });
 
-  viewObserver.observe(mountRoot, { childList: true, subtree: true });
+  viewObserver.observe(mountRoot, {
+    childList: true,
+    subtree: true,
+  });
 
   window.addEventListener("focus", onWake);
   window.addEventListener("online", onWake);
@@ -998,6 +1313,7 @@ export function destroyIncidenciasDetailLiveSync() {
 
   viewObserver?.disconnect?.();
   modalObserver?.disconnect?.();
+
   viewObserver = null;
   modalObserver = null;
 
@@ -1005,10 +1321,14 @@ export function destroyIncidenciasDetailLiveSync() {
   window.removeEventListener("online", onWake);
   document.removeEventListener("visibilitychange", onWake);
 
-  if (frame) window.cancelAnimationFrame?.(frame);
+  if (frame) {
+    window.cancelAnimationFrame?.(frame);
+  }
+
   frame = 0;
   host = null;
   mountRoot = null;
+
   return true;
 }
 
@@ -1018,12 +1338,19 @@ export function getIncidenciasDetailLiveSyncSnapshot() {
     mounted,
     ticketId: activeTicketId ? "***" : "",
     syncing: Boolean(inflight?.promise),
-    lastSyncedAt: lastSyncedAt ? new Date(lastSyncedAt).toISOString() : null,
+    lastSyncedAt:
+      lastSyncedAt
+        ? new Date(lastSyncedAt).toISOString()
+        : null,
     syncCount,
     changeCount,
     signalRefreshCount,
+    mediaSlotPreserveCount,
+    mediaSlotReplaceCount,
+    hasAttachmentSignature: Boolean(lastAttachmentSignature),
     hasError: Boolean(lastError),
     staleAfterMs: STALE_AFTER_MS,
+
     policy: Object.freeze({
       staleWhileRevalidate: true,
       forceServerRevalidationOnOpen: true,
@@ -1040,7 +1367,15 @@ export function getIncidenciasDetailLiveSyncSnapshot() {
       slowRequestIndicatorDelayMs: INDICATOR_DELAY_MS,
       unchangedRequestsRemainSilent: true,
       retryLoop: false,
+
       atomicRemoteSlotProjection: true,
+      replaceOnlyChangedRemoteSlots: true,
+      mediaSlotSemanticDiff: true,
+      mediaSlotPreservedWhenAttachmentsUnchanged: true,
+      signedUrlChangesDoNotInvalidateMediaSlot: true,
+      decodedMediaNodesSurviveUnrelatedRefresh: true,
+      bodyScrollPreservedDuringProjection: true,
+
       draftPreserved: true,
       previewPreserved: true,
       focusPreserved: true,
@@ -1049,7 +1384,9 @@ export function getIncidenciasDetailLiveSyncSnapshot() {
   });
 }
 
-if (browser()) mountIncidenciasDetailLiveSync();
+if (browser()) {
+  mountIncidenciasDetailLiveSync();
+}
 
 export default Object.freeze({
   version: INCIDENCIAS_DETAIL_LIVE_SYNC_VERSION,

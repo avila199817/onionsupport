@@ -1,0 +1,78 @@
+name: One-shot Google Ads WhatsApp sitewide
+
+on:
+  push:
+    branches:
+      - feat/google-ads-whatsapp-conversion
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/google-ads-whatsapp-conversion
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Install Google tag bootstrap on public SEO pages
+        shell: python
+        run: |
+          from pathlib import Path
+
+          pages = [
+              Path("seo/reparacion-ordenadores.html"),
+              Path("seo/soporte-informatico.html"),
+              Path("seo/redes-wifi.html"),
+              Path("seo/impresoras.html"),
+              Path("seo/soporte-empresas.html"),
+          ]
+          marker = '  <script src="/src/analytics/google-tag.js"></script>\n'
+          anchor = '  <link rel="stylesheet" href="/src/css/seo/public-service.css">\n'
+
+          for path in pages:
+              text = path.read_text(encoding="utf-8")
+              if "wa.me" not in text:
+                  raise SystemExit(f"Expected WhatsApp CTA missing in {path}")
+              if marker not in text:
+                  if anchor not in text:
+                      raise SystemExit(f"SEO stylesheet anchor missing in {path}")
+                  text = text.replace(anchor, anchor + marker, 1)
+                  path.write_text(text, encoding="utf-8")
+
+          for path in pages:
+              text = path.read_text(encoding="utf-8")
+              if text.count('/src/analytics/google-tag.js') != 1:
+                  raise SystemExit(f"Google tag bootstrap count invalid in {path}")
+
+      - name: Validate tracking implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/analytics/google-tag.js
+          grep -Fq 'AW-18395700376' src/analytics/google-tag.js
+          grep -Fq 'AW-18395700376/6zBcCL3zo-ccEJi54MNE' src/analytics/google-tag.js
+          grep -Fq 'window.gtag("config", GOOGLE_ADS_TAG_ID)' src/analytics/google-tag.js
+          grep -Fq 'isWhatsAppLink' src/analytics/google-tag.js
+          for page in seo/reparacion-ordenadores.html seo/soporte-informatico.html seo/redes-wifi.html seo/impresoras.html seo/soporte-empresas.html; do
+            grep -Fq '/src/analytics/google-tag.js' "$page"
+          done
+
+      - name: Remove one-shot workflow and commit patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git rm .github/workflows/one-shot-google-ads-whatsapp-sitewide.yml
+          git add src/analytics/google-tag.js seo/*.html
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "feat(ads): track WhatsApp conversions sitewide"
+          git push origin HEAD:feat/google-ads-whatsapp-conversion

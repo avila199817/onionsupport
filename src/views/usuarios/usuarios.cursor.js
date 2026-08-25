@@ -2,12 +2,12 @@
    Onion Support - Usuarios Cursor API
    Archivo: /src/views/usuarios/usuarios.cursor.js
 
-   CURSOR-FIRST · SERVER FILTERED · SCALE SAFE V1
+   CURSOR-FIRST · SERVER FILTERED · SCALE SAFE V2
 
    Responsabilidad:
    - Cargar una única página de /api/users.
    - Mantener continuation tokens opacos fuera del DOM y snapshots públicos.
-   - Pedir total exacto sólo cuando la vista lo necesita.
+   - Pedir total exacto sólo en la primera página sin filtros, nunca en búsquedas.
    - Delegar normalización de modelo al contrato canónico de usuarios.api.js.
 ========================================================= */
 
@@ -17,7 +17,7 @@ import {
 } from "./usuarios.api.js";
 
 export const USUARIOS_CURSOR_VERSION =
-  "usuarios.cursor.v1.server-pagination";
+  "usuarios.cursor.v2.total-cost-gated";
 
 export const USUARIOS_CURSOR_ENDPOINT = "/api/users";
 export const USUARIOS_CURSOR_PAGE_SIZE = 50;
@@ -132,16 +132,27 @@ export function buildUsuariosCursorQuery({
   sortBy = "updatedAt",
   sortDir = "DESC",
 } = {}) {
-  const query = {
-    limit: clamp(limit, 1, USUARIOS_CURSOR_MAX_PAGE_SIZE),
-    includeTotal: includeTotal === true,
-    sortBy: cleanText(sortBy, "updatedAt"),
-    sortDir: cleanText(sortDir, "DESC").toUpperCase() === "ASC" ? "ASC" : "DESC",
-  };
-
   const token = cleanText(cursor, "");
   const text = cleanText(search, "").slice(0, 200);
   const statusFilter = normalizeStatusFilter(status);
+
+  /*
+    COUNT(1) cross-partition es deliberadamente excepcional:
+    sólo se permite en la primera página global sin búsqueda ni estado.
+    Las consultas interactivas funcionan con totalKnown=false.
+  */
+  const shouldIncludeTotal =
+    includeTotal === true &&
+    !token &&
+    !text &&
+    statusFilter === "all";
+
+  const query = {
+    limit: clamp(limit, 1, USUARIOS_CURSOR_MAX_PAGE_SIZE),
+    includeTotal: shouldIncludeTotal,
+    sortBy: cleanText(sortBy, "updatedAt"),
+    sortDir: cleanText(sortDir, "DESC").toUpperCase() === "ASC" ? "ASC" : "DESC",
+  };
 
   if (token) query.ct = token;
   if (text) {

@@ -27,7 +27,7 @@ jobs:
           node-version: "22"
           package-manager-cache: false
 
-      - name: Make one-shot migration parser export-aware
+      - name: Make one-shot migration parser declaration-aware
         shell: bash
         run: |
           set -euo pipefail
@@ -36,11 +36,20 @@ jobs:
 
           path = Path('.github/scripts/incidencias_finalize_frontend.py')
           text = path.read_text(encoding='utf-8')
-          old = r'(?:async\s+)?function\s+'
-          new = r'(?:export\s+)?(?:async\s+)?function\s+'
-          if text.count(old) != 1:
-              raise SystemExit(f'finalizer parser marker mismatch: {text.count(old)}')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          export_old = r'(?:async\s+)?function\s+'
+          export_new = r'(?:export\s+)?(?:async\s+)?function\s+'
+          if text.count(export_old) != 1:
+              raise SystemExit(f'finalizer declaration marker mismatch: {text.count(export_old)}')
+          text = text.replace(export_old, export_new, 1)
+
+          brace_old = '    brace = text.find("{", match.end())'
+          brace_new = '    closing_paren = text.find(")", match.end())\n    brace = text.find("{", closing_paren + 1)'
+          if text.count(brace_old) != 1:
+              raise SystemExit(f'finalizer body marker mismatch: {text.count(brace_old)}')
+          text = text.replace(brace_old, brace_new, 1)
+
+          path.write_text(text, encoding='utf-8')
           PY
 
       - name: Apply final Incidencias hardening

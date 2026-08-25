@@ -2,7 +2,7 @@
    Onion Support - Cuenta API
    Archivo: /src/views/cuenta/cuenta.api.js
 
-   PRODUCTIVO · SELF ACCOUNT · CANONICAL RUNTIME · V6
+   PRODUCTIVO · SELF ACCOUNT · CANONICAL RUNTIME · V5
 
    Backend self-service real usado por la vista:
    - GET    /api/auth/me
@@ -25,7 +25,7 @@ import Http from "../../core/http.js";
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 
 export const CUENTA_API_VERSION =
-  "cuenta.api.backend-contract.v6-current-password";
+  "cuenta.api.backend-contract.v5-canonical-runtime";
 
 export const CUENTA_RESOURCE = "cuenta";
 

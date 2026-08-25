@@ -174,10 +174,84 @@ assert_origin_redirect() {
   fi
 }
 
+assert_http_www_redirect() {
+  local source="$1"
+  local label="$2"
+  local route="$3"
+  local query="canonical_probe=${VALIDATED_SHA}&preserve=1"
+  local requested="${source}${route}?${query}"
+  local expected="${base}${route}?${query}"
+  local legacy_expected="${legacy_frontend}${route}?${query}"
+  local headers
+  local status
+  local location
+  local second_headers
+  local second_status
+  local second_location
+
+  headers="$(mktemp)"
+  status="$(
+    curl \
+      --silent \
+      --show-error \
+      --head \
+      --connect-timeout 10 \
+      --max-time 30 \
+      -H "Cache-Control: no-cache" \
+      -o "${headers}" \
+      -w "%{http_code}" \
+      "${requested}"
+  )"
+
+  location="$(header_value "${headers}" "location")"
+  rm -f "${headers}"
+
+  if [[ "${status}" != "301" ]]; then
+    echo "::error title=Canonicalización de origen inválida::${label} ${route} respondió HTTP ${status}; esperado 301."
+    return 1
+  fi
+
+  if [[ "${location}" == "${expected}" ]]; then
+    return 0
+  fi
+
+  if [[ "${location}" != "${legacy_expected}" ]]; then
+    echo "::error title=Primer salto HTTP www inválido::${label} ${route} location='${location}'; esperado '${expected}' directo o '${legacy_expected}' como único salto intermedio conservando path/query."
+    return 1
+  fi
+
+  second_headers="$(mktemp)"
+  second_status="$(
+    curl \
+      --silent \
+      --show-error \
+      --head \
+      --connect-timeout 10 \
+      --max-time 30 \
+      -H "Cache-Control: no-cache" \
+      -o "${second_headers}" \
+      -w "%{http_code}" \
+      "${legacy_expected}"
+  )"
+
+  second_location="$(header_value "${second_headers}" "location")"
+  rm -f "${second_headers}"
+
+  if [[ "${second_status}" != "301" ]]; then
+    echo "::error title=Segundo salto HTTP www inválido::${label} ${route} respondió HTTP ${second_status}; esperado 301 hacia '${expected}'."
+    return 1
+  fi
+
+  if [[ "${second_location}" != "${expected}" ]]; then
+    echo "::error title=Cadena HTTP www no consolidada::${label} ${route} segundo location='${second_location}'; esperado '${expected}' sin más saltos y conservando path/query."
+    return 1
+  fi
+}
+
 for route in "/" "/reparacion-ordenadores"; do
   assert_origin_redirect "http://${base#https://}" "HTTP apex" "${route}"
   assert_origin_redirect "${legacy_frontend}" "HTTPS www" "${route}"
-  assert_origin_redirect "http://${legacy_frontend#https://}" "HTTP www" "${route}"
+  assert_http_www_redirect "http://${legacy_frontend#https://}" "HTTP www" "${route}"
 done
 
 root_headers="$(mktemp)"

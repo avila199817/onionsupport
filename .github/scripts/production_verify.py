@@ -222,6 +222,21 @@ def fetch_no_redirect(base_url: str, path: str, revision: str, attempt: int) -> 
         raise RuntimeError(f"{path}: error de red: {error}") from error
 
 
+def fetch_url_no_redirect(url: str) -> tuple[int, bytes, dict[str, str]]:
+    request = request_for(url)
+
+    try:
+        with NO_REDIRECT_OPENER.open(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+            headers = {key.lower(): value for key, value in response.headers.items()}
+            return int(response.status), response.read(), headers
+    except HTTPError as error:
+        body = error.read() if hasattr(error, "read") else b""
+        headers = {key.lower(): value for key, value in error.headers.items()} if error.headers else {}
+        return int(error.code), body, headers
+    except (URLError, TimeoutError, OSError) as error:
+        raise RuntimeError(f"{url}: error de red: {error}") from error
+
+
 def check_exact_files(root: Path, base_url: str, revision: str, attempt: int) -> list[str]:
     errors: list[str] = []
 
@@ -342,13 +357,12 @@ def check_aliases(base_url: str, revision: str, attempt: int) -> list[str]:
 def check_origin_redirects(base_url: str, revision: str, attempt: int) -> list[str]:
     errors: list[str] = []
     legacy_https = legacy_www_origin(base_url)
-    sources = (
+    direct_sources = (
         (replace_scheme(base_url, "http"), "HTTP apex"),
         (legacy_https, "HTTPS www"),
-        (replace_scheme(legacy_https, "http"), "HTTP www"),
     )
 
-    for source, label in sources:
+    for source, label in direct_sources:
         for path in ORIGIN_REDIRECT_PROBES:
             expected = build_url(base_url, path, revision, attempt)
 
@@ -375,6 +389,59 @@ def check_origin_redirects(base_url: str, revision: str, attempt: int) -> list[s
                     f"{label} {path}: Location {location!r}; esperado {expected!r} "
                     "sin cadena y conservando path/query"
                 )
+
+    http_www = replace_scheme(legacy_https, "http")
+    for path in ORIGIN_REDIRECT_PROBES:
+        expected = build_url(base_url, path, revision, attempt)
+        legacy_expected = build_url(legacy_https, path, revision, attempt)
+
+        try:
+            status, _, headers = fetch_no_redirect(
+                http_www,
+                path,
+                revision,
+                attempt,
+            )
+        except RuntimeError as error:
+            errors.append(f"HTTP www {path}: {error}")
+            continue
+
+        if status != 301:
+            errors.append(
+                f"HTTP www {path}: HTTP {status}, esperado 301 hacia "
+                f"{expected} o {legacy_expected}"
+            )
+            continue
+
+        location = headers.get("location", "").strip()
+        if location == expected:
+            continue
+        if location != legacy_expected:
+            errors.append(
+                f"HTTP www {path}: Location {location!r}; esperado {expected!r} directo "
+                f"o {legacy_expected!r} como único salto intermedio conservando path/query"
+            )
+            continue
+
+        try:
+            second_status, _, second_headers = fetch_url_no_redirect(legacy_expected)
+        except RuntimeError as error:
+            errors.append(f"HTTP www {path}: segundo salto: {error}")
+            continue
+
+        if second_status != 301:
+            errors.append(
+                f"HTTP www {path}: segundo salto HTTP {second_status}, "
+                f"esperado 301 hacia {expected}"
+            )
+            continue
+
+        second_location = second_headers.get("location", "").strip()
+        if second_location != expected:
+            errors.append(
+                f"HTTP www {path}: segundo salto Location {second_location!r}; "
+                f"esperado {expected!r} sin más cadenas y conservando path/query"
+            )
 
     return errors
 

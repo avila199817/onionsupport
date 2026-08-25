@@ -2,15 +2,16 @@
    Onion Support · Incidencias Attachment Viewer
    Archivo: /src/features/incidencias-video-preview/index.js
 
-   VIEWER / VIDEO UX · V4
+   VIEWER / VIDEO UX · V5 · MEDIA SESSION STABLE
    - visor modal independiente del flujo del ticket;
-   - conserva el scroll exacto del body del Modal Details;
-   - cancela cualquier desplazamiento automático inducido por la preview;
-   - devuelve el foco al opener sin mover el ticket;
+   - sesión de scroll transaccional: abrir/cerrar conserva el píxel exacto;
+   - el scroll del Modal Details queda anclado mientras el visor está abierto;
+   - el cierre resuelve de nuevo el opener aunque el controller haya re-renderizado;
    - imagen/vídeo contenidos en viewport, PDF con scroll interno;
    - vídeo MOV/MP4/M4V/WebM por /view canónico;
-   - primer fotograma real en el visor;
-   - primer fotograma real también en "Documentos actuales", reutilizando el skin canónico de miniaturas;
+   - primer fotograma real en el visor y en "Documentos actuales";
+   - caché visual LRU de thumbnails de vídeo: un re-render reutiliza el frame ya decodificado;
+   - restauración síncrona de thumbnails desde MutationObserver para evitar un frame de placeholder;
    - fallback limpio cuando el navegador no decodifica el códec;
    - apertura/cierre simétricos, Escape/backdrop/focus-trap/inert;
    - sin monkey-patching de fetch, scrollIntoView ni APIs del navegador.
@@ -19,7 +20,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_VIDEO_PREVIEW_VERSION =
-  "incidencias-video-preview.v4.scroll-anchor-video-thumbs";
+  "incidencias-video-preview.v5.media-session-stable-cache";
 
 const VIEW = "#view-container, [data-router-view='true']";
 const HOST = "[data-incidencias-modal-host='true']";
@@ -57,11 +58,12 @@ const VIDEO_EXT_RE = /\.(mov|qt|mp4|m4v|webm|ogv|ogg)$/i;
 const VIDEO_MIME_RE = /(?:^|\s)(video\/[a-z0-9.+-]+)(?:\s|·|$)/i;
 const VIDEO_LABEL_RE = /^(MOV|QT|MP4|M4V|WEBM|OGV|OGG)$/i;
 
-const SAS_GUARD_MS = 30_000;
-const DEFAULT_TTL_MS = 4 * 60_000;
+const SAS_GUARD_MS = 45_000;
+const DEFAULT_TTL_MS = 15 * 60_000;
 const FIRST_FRAME_SECONDS = 0.08;
 const CLOSE_TRANSITION_MS = 190;
 const SCROLL_EPSILON = 0.5;
+const MAX_THUMB_CACHE = 32;
 
 let mounted = false;
 let mountRoot = null;
@@ -73,14 +75,16 @@ let apiPromise = null;
 let epoch = 0;
 
 let activeViewer = null;
-let pendingOpen = null;
+let mediaSession = null;
 let closeTimer = 0;
 let controllerClosePass = false;
 let correctingScroll = false;
+let finalizingReturn = false;
 
 const cache = new Map();
 const inflight = new Map();
 const thumbInflight = new Map();
+const thumbCache = new Map();
 
 const browser = () =>
   typeof window !== "undefined" && typeof document !== "undefined";
@@ -228,7 +232,7 @@ function requestPreviewUrl(root, preview, options = {}) {
 }
 
 /* =========================================================
-   VIEWER STATE / EXACT SCROLL ANCHOR
+   VIEWER STATE / MEDIA SESSION
 ========================================================= */
 
 function prefersReducedMotion() {
@@ -264,57 +268,65 @@ function visibleFocusables(root = null) {
   });
 }
 
-function releaseScrollAnchorStyles(intent = pendingOpen) {
-  const body = intent?.body;
+function releaseMediaSession(session = mediaSession) {
+  const body = session?.body;
 
-  if (!body?.isConnected || intent?.stylesReleased) {
-    return false;
+  if (!session || session.released) return false;
+  session.released = true;
+
+  if (body?.isConnected) {
+    if (session.previousScrollBehavior) {
+      body.style.scrollBehavior = session.previousScrollBehavior;
+    } else {
+      body.style.removeProperty("scroll-behavior");
+    }
+
+    if (session.previousOverflowAnchor) {
+      body.style.overflowAnchor = session.previousOverflowAnchor;
+    } else {
+      body.style.removeProperty("overflow-anchor");
+    }
+
+    body.dataset.mediaViewerScrollAnchor = "false";
   }
 
-  intent.stylesReleased = true;
-
-  if (intent.previousScrollBehavior) {
-    body.style.scrollBehavior = intent.previousScrollBehavior;
-  } else {
-    body.style.removeProperty("scroll-behavior");
+  if (mediaSession === session) {
+    mediaSession = null;
   }
 
-  if (intent.previousOverflowAnchor) {
-    body.style.overflowAnchor = intent.previousOverflowAnchor;
-  } else {
-    body.style.removeProperty("overflow-anchor");
-  }
-
-  body.dataset.mediaViewerScrollAnchor = "false";
   return true;
 }
 
-function restoreBodyScroll(intent = pendingOpen) {
-  const body = intent?.body;
+function restoreSessionScroll(
+  session = mediaSession,
+  { force = true } = {}
+) {
+  const body = session?.body;
 
-  if (
-    !body?.isConnected ||
-    intent?.userMoved
-  ) {
+  if (!body?.isConnected || (!force && session?.released)) {
     return false;
   }
 
-  const target = Number(intent.scrollTop || 0);
+  const top = Number(session.scrollTop || 0);
+  const left = Number(session.scrollLeft || 0);
 
-  if (Math.abs(Number(body.scrollTop || 0) - target) <= SCROLL_EPSILON) {
+  if (
+    Math.abs(Number(body.scrollTop || 0) - top) <= SCROLL_EPSILON &&
+    Math.abs(Number(body.scrollLeft || 0) - left) <= SCROLL_EPSILON
+  ) {
     return true;
   }
 
   correctingScroll = true;
 
   try {
-    body.scrollTop = target;
-    body.scrollLeft = Number(intent.scrollLeft || 0);
+    body.scrollTop = top;
+    body.scrollLeft = left;
   } catch {
     try {
       body.scrollTo?.({
-        top: target,
-        left: Number(intent.scrollLeft || 0),
+        top,
+        left,
         behavior: "auto",
       });
     } catch {
@@ -331,16 +343,15 @@ function restoreBodyScroll(intent = pendingOpen) {
 
 function rememberOpenIntent(button = null) {
   const root = button?.closest?.(ROOT);
-  if (!root) return false;
+  const body = root?.querySelector?.(BODY);
 
-  const body = root.querySelector(BODY);
-  if (!body) return false;
+  if (!root || !body) return false;
 
-  if (pendingOpen) {
-    releaseScrollAnchorStyles(pendingOpen);
+  if (mediaSession) {
+    releaseMediaSession(mediaSession);
   }
 
-  pendingOpen = {
+  mediaSession = {
     ticketId: ticketId(root),
     attachmentId: text(button.dataset?.attachmentId, ""),
     opener: button,
@@ -350,31 +361,32 @@ function rememberOpenIntent(button = null) {
     body,
     scrollTop: Number(body.scrollTop || 0),
     scrollLeft: Number(body.scrollLeft || 0),
-    userMoved: false,
-    stylesReleased: false,
     previousScrollBehavior: body.style.scrollBehavior || "",
     previousOverflowAnchor: body.style.overflowAnchor || "",
+    released: false,
+    viewerAdopted: false,
+    closing: false,
   };
 
   /*
-     Durante la apertura sólo anulamos desplazamientos que no vienen de un
-     gesto real del usuario. El controller legacy todavía puede ejecutar
-     scrollIntoView() sobre la preview inline; este ancla mantiene el scroll
-     del ticket físicamente estable sin interceptar ni reemplazar esa API.
+     El controller todavía puede revelar la preview inline. No tocamos
+     scrollIntoView(): anclamos el scroll real de este modal durante toda
+     la sesión del visor y lo liberamos únicamente cuando el cierre terminó.
   */
   body.style.scrollBehavior = "auto";
   body.style.overflowAnchor = "none";
   body.dataset.mediaViewerScrollAnchor = "true";
 
+  restoreSessionScroll(mediaSession);
   return true;
 }
 
-function resolveOpener(intent = pendingOpen, root = null) {
-  if (intent?.opener?.isConnected) {
-    return intent.opener;
+function resolveOpener(session = mediaSession, root = null) {
+  if (session?.opener?.isConnected) {
+    return session.opener;
   }
 
-  const attachment = text(intent?.attachmentId, "");
+  const attachment = text(session?.attachmentId, "");
   if (!attachment || !root?.isConnected) return null;
 
   const candidates = Array.from(
@@ -385,7 +397,7 @@ function resolveOpener(intent = pendingOpen, root = null) {
 
   if (!candidates.length) return null;
 
-  if (intent?.openerKind === "action") {
+  if (session?.openerKind === "action") {
     return (
       candidates.find((node) =>
         node.matches?.(".incidencias-modal-view-btn")
@@ -403,60 +415,123 @@ function resolveOpener(intent = pendingOpen, root = null) {
   );
 }
 
-function markUserMovement(event = null) {
-  if (!pendingOpen || !pendingOpen.body?.isConnected) return;
-
-  const target = event?.target;
-
-  if (target && pendingOpen.body.contains?.(target)) {
-    pendingOpen.userMoved = true;
-    releaseScrollAnchorStyles(pendingOpen);
-  }
-}
-
-function enforceScrollAnchor(event = null) {
+function enforceSessionScroll(event = null) {
   if (
-    !pendingOpen ||
-    pendingOpen.userMoved ||
+    !mediaSession ||
+    mediaSession.released ||
     correctingScroll ||
-    !pendingOpen.body?.isConnected
+    finalizingReturn ||
+    !mediaSession.body?.isConnected
   ) {
     return;
   }
 
-  if (event?.target !== pendingOpen.body) return;
-  restoreBodyScroll(pendingOpen);
+  if (event?.target !== mediaSession.body) return;
+
+  /*
+     El fondo está inert mientras el visor está abierto. Cualquier scroll de
+     este body durante la sesión procede de layout/focus/render automático,
+     no de una interacción válida dentro del visor.
+  */
+  restoreSessionScroll(mediaSession);
 }
 
-function stabilizeTicketScroll(root = null, preview = null) {
-  const intent = pendingOpen;
-  if (!intent) return false;
+function stabilizeOpen(root = null, preview = null) {
+  const session = mediaSession;
+  if (!session) return false;
 
   const same =
-    intent.ticketId === ticketId(root) &&
+    session.ticketId === ticketId(root) &&
     (
-      !intent.attachmentId ||
-      intent.attachmentId === previewAttachmentId(preview)
+      !session.attachmentId ||
+      session.attachmentId === previewAttachmentId(preview)
     );
 
   if (!same) return false;
 
-  restoreBodyScroll(intent);
+  session.viewerAdopted = true;
+  restoreSessionScroll(session);
 
-  /*
-     Dos frames: el primero absorbe el scroll iniciado en el mismo task por
-     revealDetailPreview(); el segundo deja la posición final consolidada.
-     No hay timer de polling ni lucha permanente con el usuario.
-  */
   window.requestAnimationFrame?.(() => {
-    restoreBodyScroll(intent);
+    if (mediaSession !== session || session.released) return;
+    restoreSessionScroll(session);
 
     window.requestAnimationFrame?.(() => {
-      restoreBodyScroll(intent);
-      releaseScrollAnchorStyles(intent);
+      if (mediaSession !== session || session.released) return;
+      restoreSessionScroll(session);
+      /*
+         Deliberadamente NO liberamos overflow-anchor aquí. La sesión continúa
+         hasta cerrar el viewer; así un refresh de fondo no mueve el ticket.
+      */
     });
   });
 
+  return true;
+}
+
+function finalizeReturnToTicket(
+  root = null,
+  { restoreFocus = true } = {}
+) {
+  const session = mediaSession;
+
+  if (!session || session.released) return false;
+
+  finalizingReturn = true;
+  session.closing = true;
+
+  const finish = () => {
+    if (mediaSession !== session || session.released) {
+      finalizingReturn = false;
+      return;
+    }
+
+    restoreSessionScroll(session);
+
+    const opener = restoreFocus
+      ? resolveOpener(session, root)
+      : null;
+
+    if (opener?.isConnected && typeof opener.focus === "function") {
+      try {
+        opener.focus({ preventScroll: true });
+      } catch {
+        /*
+           En navegadores viejos el fallback puede desplazar. La restauración
+           del siguiente frame corrige esa diferencia antes de liberar el ancla.
+        */
+        try {
+          opener.focus();
+        } catch {
+          // noop
+        }
+      }
+    }
+
+    restoreSessionScroll(session);
+
+    window.requestAnimationFrame?.(() => {
+      if (mediaSession !== session || session.released) {
+        finalizingReturn = false;
+        return;
+      }
+
+      restoreSessionScroll(session);
+
+      window.requestAnimationFrame?.(() => {
+        if (mediaSession !== session || session.released) {
+          finalizingReturn = false;
+          return;
+        }
+
+        restoreSessionScroll(session);
+        releaseMediaSession(session);
+        finalizingReturn = false;
+      });
+    });
+  };
+
+  queueMicrotask(finish);
   return true;
 }
 
@@ -586,62 +661,47 @@ function focusViewer() {
         // noop
       }
     }
+
+    restoreSessionScroll(mediaSession);
   });
 
   return true;
 }
 
-function cleanupViewer({ restoreFocus = true, preserveIntent = false } = {}) {
+function cleanupViewer({
+  restoreFocus = true,
+  routeTeardown = false,
+} = {}) {
   clearCloseTimer();
 
-  if (pendingOpen) {
-    restoreBodyScroll(pendingOpen);
-    if (!preserveIntent) {
-      releaseScrollAnchorStyles(pendingOpen);
+  const viewer = activeViewer;
+  const root = viewer?.root || modalHost?.querySelector?.(ROOT) || null;
+
+  if (viewer) {
+    setPanelInert(root, false);
+
+    try {
+      viewer.layer?.remove?.();
+    } catch {
+      // noop
     }
-  }
-
-  if (!activeViewer) {
-    if (!preserveIntent) pendingOpen = null;
-    document.body?.classList.remove("incidencias-media-viewer-open");
-    return false;
-  }
-
-  const { root, layer, opener } = activeViewer;
-
-  setPanelInert(root, false);
-
-  try {
-    layer?.remove?.();
-  } catch {
-    // noop
   }
 
   activeViewer = null;
   document.body?.classList.remove("incidencias-media-viewer-open");
 
-  const shouldRestore =
-    restoreFocus &&
-    root?.isConnected &&
-    opener?.isConnected &&
-    typeof opener.focus === "function";
-
-  if (shouldRestore) {
-    window.requestAnimationFrame?.(() => {
-      try {
-        opener.focus({ preventScroll: true });
-      } catch {
-        try {
-          opener.focus();
-        } catch {
-          // noop
-        }
-      }
-    });
+  if (routeTeardown) {
+    if (mediaSession) {
+      releaseMediaSession(mediaSession);
+    }
+    return Boolean(viewer);
   }
 
-  if (!preserveIntent) pendingOpen = null;
-  return true;
+  if (mediaSession) {
+    finalizeReturnToTicket(root, { restoreFocus });
+  }
+
+  return Boolean(viewer);
 }
 
 function pauseViewerMedia() {
@@ -670,10 +730,22 @@ function commitViewerClose() {
     return false;
   }
 
+  if (mediaSession) {
+    mediaSession.closing = true;
+    restoreSessionScroll(mediaSession);
+  }
+
   controllerClosePass = true;
 
   try {
     close.click();
+
+    /*
+       El click puede re-renderizar el slot de archivos y desconectar el opener
+       en el mismo task. No usamos la referencia antigua al cerrar: sync()
+       resolverá el botón actual por ticket/attachment y restaurará después.
+    */
+    schedule();
     return true;
   } catch {
     cleanupViewer({ restoreFocus: true });
@@ -691,6 +763,11 @@ function requestViewerClose() {
 
   pauseViewerMedia();
   layer.dataset.viewerState = "closing";
+
+  if (mediaSession) {
+    mediaSession.closing = true;
+    restoreSessionScroll(mediaSession);
+  }
 
   const delay = prefersReducedMotion() ? 0 : CLOSE_TRANSITION_MS;
 
@@ -713,10 +790,15 @@ function adoptPreview(root = null, preview = null) {
 
   if (!layer?.isConnected || !stage?.isConnected) {
     if (activeViewer) {
-      cleanupViewer({
-        restoreFocus: false,
-        preserveIntent: true,
-      });
+      /*
+         Cambio de preview dentro del mismo ticket: retiramos sólo la capa,
+         pero mantenemos la sesión de scroll y el origen del nuevo click.
+      */
+      const stale = activeViewer;
+      setPanelInert(stale.root, false);
+      try { stale.layer?.remove?.(); } catch { /* noop */ }
+      activeViewer = null;
+      document.body?.classList.remove("incidencias-media-viewer-open");
     }
 
     ({ layer, stage } = createViewerLayer(root));
@@ -725,7 +807,7 @@ function adoptPreview(root = null, preview = null) {
 
   const previousPreview = activeViewer?.preview;
   const opener =
-    resolveOpener(pendingOpen, root) ||
+    resolveOpener(mediaSession, root) ||
     activeViewer?.opener ||
     null;
 
@@ -747,7 +829,7 @@ function adoptPreview(root = null, preview = null) {
 
   activeViewer = { root, layer, stage, preview, opener };
 
-  stabilizeTicketScroll(root, preview);
+  stabilizeOpen(root, preview);
   setPanelInert(root, true);
 
   const title = preview.querySelector("#incidencias-modal-preview-title");
@@ -768,7 +850,7 @@ function adoptPreview(root = null, preview = null) {
 }
 
 /* =========================================================
-   VIDEO / FIRST FRAME IN VIEWER
+   VIDEO / FIRST FRAME
 ========================================================= */
 
 function videoFailureMessage(meta = {}) {
@@ -827,7 +909,7 @@ function primeFirstFrame(
   let primed = false;
 
   const finish = () => {
-    if (primed || !video?.isConnected) return;
+    if (primed || !video) return;
 
     primed = true;
     syncVideoIntrinsicSize(video);
@@ -842,7 +924,7 @@ function primeFirstFrame(
   };
 
   const seek = () => {
-    if (!video?.isConnected || primed) return;
+    if (!video || primed) return;
 
     syncVideoIntrinsicSize(video);
 
@@ -1054,7 +1136,7 @@ async function upgradeViewerVideo(root, preview) {
 }
 
 /* =========================================================
-   VIDEO THUMBNAILS · DOCUMENTOS ACTUALES
+   VIDEO THUMBNAILS · DECODED FRAME CACHE
 ========================================================= */
 
 function attachmentCardMeta(button = null) {
@@ -1108,10 +1190,45 @@ function markThumbState(button = null, state = "fallback") {
   return true;
 }
 
-function installVideoThumbnail(button, url) {
-  if (!button?.isConnected || !url) return false;
+function trimThumbCache() {
+  if (thumbCache.size <= MAX_THUMB_CACHE) return false;
 
-  const { name, fallbackLabel } = attachmentCardMeta(button);
+  const entries = [...thumbCache.entries()]
+    .sort(([, a], [, b]) =>
+      Number(a?.touchedAt || 0) - Number(b?.touchedAt || 0)
+    );
+
+  for (const [key, record] of entries) {
+    if (thumbCache.size <= MAX_THUMB_CACHE) break;
+
+    /*
+       No retiramos un vídeo que sigue montado en la tarjeta visible.
+    */
+    if (record?.button?.isConnected) continue;
+
+    try {
+      record?.video?.pause?.();
+      record?.video?.removeAttribute?.("src");
+      record?.video?.load?.();
+    } catch {
+      // noop
+    }
+
+    thumbCache.delete(key);
+  }
+
+  return true;
+}
+
+function touchThumbRecord(record = null) {
+  if (!record) return false;
+  record.touchedAt = Date.now();
+  trimThumbCache();
+  return true;
+}
+
+function attachThumbRecord(button = null, record = null) {
+  if (!button?.isConnected || !record?.video) return false;
 
   button.classList.remove("incidencias-modal-file-square");
   button.classList.add("incidencias-modal-image-thumb-wrap");
@@ -1120,12 +1237,37 @@ function installVideoThumbnail(button, url) {
     renderableThumbnail: "true",
     modalThumbFrame: "true",
     modalVideoThumbFrame: "true",
-    previewState: "loading",
-    thumbError: "false",
+    videoThumbHydrating: "false",
+    previewState: record.state || "loading",
+    thumbError: record.state === "error" ? "true" : "false",
   });
 
+  record.button = button;
+  touchThumbRecord(record);
+
+  button.replaceChildren(
+    record.video,
+    record.fallback,
+    record.badge
+  );
+
+  markThumbState(button, record.state || "loading");
+  return true;
+}
+
+function createThumbRecord({
+  key,
+  ticket,
+  attachment,
+  url,
+  name,
+  fallbackLabel,
+} = {}) {
+  if (!key || !url) return null;
+
   const video = document.createElement("video");
-  video.className = "incidencias-modal-image-thumb incidencias-modal-video-thumb";
+  video.className =
+    "incidencias-modal-image-thumb incidencias-modal-video-thumb";
   video.src = url;
   video.muted = true;
   video.defaultMuted = true;
@@ -1141,7 +1283,7 @@ function installVideoThumbnail(button, url) {
   fallback.className = "incidencias-modal-image-thumb-fallback";
   fallback.textContent =
     fallbackLabel ||
-    text(name.split(".").pop(), "VID").slice(0, 4).toUpperCase() ||
+    text(name?.split?.(".")?.pop?.(), "VID").slice(0, 4).toUpperCase() ||
     "VID";
   fallback.setAttribute("aria-hidden", "true");
 
@@ -1149,25 +1291,39 @@ function installVideoThumbnail(button, url) {
   badge.className = "incidencias-modal-image-open-badge";
   badge.textContent = "▶ Ver";
 
-  let retried = false;
+  const record = {
+    key,
+    ticket,
+    attachment,
+    url,
+    expiresAt: expiresAt(url),
+    video,
+    fallback,
+    badge,
+    button: null,
+    state: "loading",
+    touchedAt: Date.now(),
+    retried: false,
+  };
+
+  const setState = (state) => {
+    record.state = state;
+    touchThumbRecord(record);
+
+    if (record.button?.isConnected) {
+      markThumbState(record.button, state);
+    }
+  };
 
   const ready = () => {
-    markThumbState(button, "ready");
+    setState("ready");
   };
 
   const fail = async () => {
-    if (!button.isConnected) return;
-
     const unsupportedCodec = Number(video.error?.code || 0) === 4;
 
-    if (!retried && !unsupportedCodec) {
-      retried = true;
-
-      const root = button.closest(ROOT);
-      const ticket = ticketId(root);
-      const attachment = text(button.dataset.attachmentId, "");
-      const key = cacheKey(ticket, attachment);
-
+    if (!record.retried && !unsupportedCodec) {
+      record.retried = true;
       cache.delete(key);
 
       const freshUrl = await requestAttachmentUrl(
@@ -1176,8 +1332,10 @@ function installVideoThumbnail(button, url) {
         { force: true }
       );
 
-      if (freshUrl && button.isConnected) {
-        markThumbState(button, "loading");
+      if (freshUrl && thumbCache.get(key) === record) {
+        record.url = freshUrl;
+        record.expiresAt = expiresAt(freshUrl);
+        setState("loading");
         video.src = freshUrl;
 
         try {
@@ -1190,7 +1348,7 @@ function installVideoThumbnail(button, url) {
       }
     }
 
-    markThumbState(button, "error");
+    setState("error");
   };
 
   video.addEventListener("error", () => void fail());
@@ -1199,15 +1357,59 @@ function installVideoThumbnail(button, url) {
     onReady: ready,
   });
 
-  button.replaceChildren(video, fallback, badge);
+  thumbCache.set(key, record);
+  trimThumbCache();
 
   try {
     video.load();
   } catch {
-    markThumbState(button, "error");
+    setState("error");
   }
 
-  return true;
+  return record;
+}
+
+function cachedThumbRecord(key = "") {
+  const record = thumbCache.get(key);
+  if (!record) return null;
+
+  touchThumbRecord(record);
+
+  /*
+     Para thumbnail permitimos conservar un frame YA decodificado aunque la
+     SAS original haya expirado: el frame está en memoria del navegador y no
+     se vuelve a solicitar. Si aún está cargando y la URL caducó, regeneramos.
+  */
+  if (
+    record.state !== "ready" &&
+    Number(record.expiresAt || 0) <= Date.now() + SAS_GUARD_MS
+  ) {
+    thumbCache.delete(key);
+    return null;
+  }
+
+  return record;
+}
+
+function fastRestoreCachedThumbnails(root = null) {
+  if (!root?.isConnected || !thumbCache.size) return false;
+
+  let restored = false;
+
+  for (const button of root.querySelectorAll(VIDEO_THUMB_CANDIDATE)) {
+    if (!isVideoThumbCandidate(button)) continue;
+
+    const ticket = ticketId(root);
+    const attachment = text(button.dataset.attachmentId, "");
+    const key = cacheKey(ticket, attachment);
+    const record = cachedThumbRecord(key);
+
+    if (record && attachThumbRecord(button, record)) {
+      restored = true;
+    }
+  }
+
+  return restored;
 }
 
 async function hydrateVideoThumbnail(button = null) {
@@ -1227,9 +1429,21 @@ async function hydrateVideoThumbnail(button = null) {
 
   if (!key) return false;
 
+  const visualHit = cachedThumbRecord(key);
+
+  if (visualHit) {
+    return attachThumbRecord(button, visualHit);
+  }
+
   if (thumbInflight.has(key)) {
     await thumbInflight.get(key);
-    return true;
+
+    const after = cachedThumbRecord(key);
+    if (after && button.isConnected) {
+      return attachThumbRecord(button, after);
+    }
+
+    return false;
   }
 
   button.dataset.videoThumbHydrating = "true";
@@ -1252,7 +1466,20 @@ async function hydrateVideoThumbnail(button = null) {
       return false;
     }
 
-    return installVideoThumbnail(button, url);
+    const { name, fallbackLabel } = attachmentCardMeta(button);
+
+    const record = createThumbRecord({
+      key,
+      ticket,
+      attachment,
+      url,
+      name,
+      fallbackLabel,
+    });
+
+    return record
+      ? attachThumbRecord(button, record)
+      : false;
   })();
 
   thumbInflight.set(key, task);
@@ -1269,10 +1496,9 @@ async function hydrateVideoThumbnail(button = null) {
 function syncVideoThumbnails(root = null) {
   if (!root?.isConnected) return false;
 
-  for (
-    const button
-    of root.querySelectorAll(VIDEO_THUMB_CANDIDATE)
-  ) {
+  fastRestoreCachedThumbnails(root);
+
+  for (const button of root.querySelectorAll(VIDEO_THUMB_CANDIDATE)) {
     if (isVideoThumbCandidate(button)) {
       void hydrateVideoThumbnail(button);
     }
@@ -1387,7 +1613,21 @@ function syncModalObserver() {
   modalHost = nextHost || null;
 
   if (modalHost && typeof MutationObserver !== "undefined") {
-    modalObserver = new MutationObserver(schedule);
+    modalObserver = new MutationObserver(() => {
+      /*
+         Microtask del observer: reinsertamos frames decodificados ANTES del
+         siguiente paint. Después schedule() hace el resto de reconciliación.
+      */
+      const root = modalHost?.querySelector?.(ROOT) || null;
+      if (root) {
+        fastRestoreCachedThumbnails(root);
+        if (mediaSession && !mediaSession.released) {
+          restoreSessionScroll(mediaSession);
+        }
+      }
+
+      schedule();
+    });
 
     modalObserver.observe(modalHost, {
       childList: true,
@@ -1412,11 +1652,18 @@ function sync() {
   const root = modalHost?.querySelector?.(ROOT) || null;
 
   if (!root) {
-    cleanupViewer({ restoreFocus: false });
+    cleanupViewer({
+      restoreFocus: false,
+      routeTeardown: true,
+    });
     return;
   }
 
   syncVideoThumbnails(root);
+
+  if (mediaSession && !mediaSession.released) {
+    restoreSessionScroll(mediaSession);
+  }
 
   const slot = root.querySelector(SLOT);
   const preview = slot?.querySelector?.(PREVIEW) || null;
@@ -1449,7 +1696,38 @@ function sync() {
   }
 
   if (!active) {
-    cleanupViewer({ restoreFocus: true });
+    if (activeViewer) {
+      cleanupViewer({ restoreFocus: true });
+    } else if (mediaSession?.closing) {
+      /*
+         El controller puede desmontar la preview antes de que la capa llegue
+         a existir (latencia/cancelación). Cerramos también esa transacción.
+      */
+      finalizeReturnToTicket(root, { restoreFocus: true });
+    } else if (
+      mediaSession &&
+      !mediaSession.viewerAdopted
+    ) {
+      const attachment = text(mediaSession.attachmentId, "");
+      const stillOpening = Array.from(
+        root.querySelectorAll(ACTION_OPEN)
+      ).some((node) =>
+        text(node.dataset?.attachmentId, "") === attachment &&
+        (
+          node.getAttribute("aria-busy") === "true" ||
+          node.disabled === true
+        )
+      );
+
+      /*
+         Si /view falló, el controller quita el busy sin crear preview.
+         Liberamos la transacción en ese punto; nunca dejamos el body anclado
+         después de un error de apertura.
+      */
+      if (!stillOpening) {
+        finalizeReturnToTicket(root, { restoreFocus: true });
+      }
+    }
   }
 }
 
@@ -1477,19 +1755,13 @@ export function mountIncidenciasVideoPreview() {
 
   document.addEventListener("click", onClickCapture, true);
   document.addEventListener("keydown", trapViewerFocus, true);
-  document.addEventListener("scroll", enforceScrollAnchor, true);
+  document.addEventListener("scroll", enforceSessionScroll, true);
 
-  document.addEventListener("wheel", markUserMovement, {
-    capture: true,
-    passive: true,
+  viewObserver = new MutationObserver(() => {
+    const root = document.querySelector(HOST)?.querySelector?.(ROOT) || null;
+    if (root) fastRestoreCachedThumbnails(root);
+    schedule();
   });
-
-  document.addEventListener("touchmove", markUserMovement, {
-    capture: true,
-    passive: true,
-  });
-
-  viewObserver = new MutationObserver(schedule);
 
   viewObserver.observe(mountRoot, {
     childList: true,
@@ -1508,9 +1780,7 @@ export function destroyIncidenciasVideoPreview() {
 
   document.removeEventListener("click", onClickCapture, true);
   document.removeEventListener("keydown", trapViewerFocus, true);
-  document.removeEventListener("scroll", enforceScrollAnchor, true);
-  document.removeEventListener("wheel", markUserMovement, true);
-  document.removeEventListener("touchmove", markUserMovement, true);
+  document.removeEventListener("scroll", enforceSessionScroll, true);
 
   viewObserver?.disconnect?.();
   modalObserver?.disconnect?.();
@@ -1525,13 +1795,33 @@ export function destroyIncidenciasVideoPreview() {
 
   frame = 0;
   clearCloseTimer();
-  cleanupViewer({ restoreFocus: false });
+  cleanupViewer({
+    restoreFocus: false,
+    routeTeardown: true,
+  });
+
+  for (const record of thumbCache.values()) {
+    try {
+      record?.video?.pause?.();
+      record?.video?.removeAttribute?.("src");
+      record?.video?.load?.();
+    } catch {
+      // noop
+    }
+  }
 
   cache.clear();
   inflight.clear();
   thumbInflight.clear();
+  thumbCache.clear();
 
-  pendingOpen = null;
+  if (mediaSession) {
+    releaseMediaSession(mediaSession);
+  }
+
+  mediaSession = null;
+  finalizingReturn = false;
+  correctingScroll = false;
   mountRoot = null;
 
   return true;
@@ -1547,9 +1837,12 @@ export function getIncidenciasVideoPreviewSnapshot() {
       "closed"
     ),
     modalMounted: Boolean(modalHost?.isConnected),
+    mediaSessionActive: Boolean(mediaSession && !mediaSession.released),
+    mediaSessionClosing: Boolean(mediaSession?.closing),
     cacheEntries: cache.size,
     inflight: inflight.size,
     thumbnailInflight: thumbInflight.size,
+    thumbnailVisualCacheEntries: thumbCache.size,
 
     policy: Object.freeze({
       controllerOwnsOpenClose: true,
@@ -1560,9 +1853,12 @@ export function getIncidenciasVideoPreviewSnapshot() {
       mediaFitsViewport: true,
       outerMediaScrollDisabled: true,
 
-      exactTicketScrollAnchor: true,
+      exactTicketScrollTransaction: true,
+      scrollLockedForViewerLifetime: true,
       automaticPreviewScrollNeutralized: true,
-      userScrollStillAuthoritative: true,
+      closeRestoresExactOpenPosition: true,
+      openerReResolvedAfterControllerRender: true,
+      postFocusScrollRevalidation: true,
 
       backgroundPanelInert: true,
       viewerFocusTrap: true,
@@ -1575,6 +1871,8 @@ export function getIncidenciasVideoPreviewSnapshot() {
       iphoneMov: true,
       viewerFirstFramePrime: true,
       currentFilesVideoFirstFrame: true,
+      decodedThumbnailLRU: true,
+      mutationMicrotaskThumbnailRestore: true,
       intrinsicVideoRatio: true,
       codecFallback: true,
       sasExpiryRetry: true,

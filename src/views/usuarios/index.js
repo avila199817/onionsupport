@@ -222,6 +222,46 @@ function getGlobalObject() {
     return {};
   }
 }
+function getAppState() {
+  try {
+    if (typeof AppCore?.runtimeState?.read === "function") {
+      return AppCore.runtimeState.read() || {};
+    }
+  } catch {
+    // noop
+  }
+  return {};
+}
+function getCurrentUser(state = getAppState()) {
+  return state.user || state.currentUser || null;
+}
+function getCurrentRole(context = {}, state = getAppState()) {
+  const user = safeObject(getCurrentUser(state), {});
+  const raw = first(
+    context.role,
+    context.rol,
+    context.user?.role,
+    context.user?.rol,
+    state.role,
+    state.rol,
+    state.roles,
+    user.role,
+    user.rol,
+    user.roles,
+    "user"
+  );
+  try {
+    if (isFunction(AppCore?.normalizeRole)) {
+      return AppCore.normalizeRole(raw) || "user";
+    }
+  } catch {
+    // fallback below
+  }
+  return normalizeKey(Array.isArray(raw) ? raw[0] : raw) === "admin" ? "admin" : "user";
+}
+function isAdminContext(context = {}) {
+  return context.admin === true || getCurrentRole(context) === "admin";
+}
 function normalizePathname(path = "/") {
   let value = cleanText(path, "/")
     .replace(/\\/g, "/")
@@ -267,40 +307,6 @@ function isUsuariosRoute(context = {}) {
   if (explicit) return normalizePathname(explicit) === USUARIOS_CANONICAL_PATH;
   const browserPath = getBrowserPath();
   return browserPath ? browserPath === USUARIOS_CANONICAL_PATH : true;
-}
-function getAppState() {
-  try {
-    return AppCore?.runtimeState?.read?.() || {};
-  } catch {
-    return {};
-  }
-}
-function getCurrentRole(context = {}, state = getAppState()) {
-  const user = safeObject(state.user || state.currentUser, {});
-  const raw = first(
-    context.role,
-    context.rol,
-    context.user?.role,
-    context.user?.rol,
-    state.role,
-    state.rol,
-    state.roles,
-    user.role,
-    user.rol,
-    user.roles,
-    "user"
-  );
-  try {
-    if (isFunction(AppCore?.normalizeRole)) {
-      return AppCore.normalizeRole(raw) || "user";
-    }
-  } catch {
-    // fallback below
-  }
-  return normalizeKey(Array.isArray(raw) ? raw[0] : raw) === "admin" ? "admin" : "user";
-}
-function isAdminContext(context = {}) {
-  return context.admin === true || getCurrentRole(context) === "admin";
 }
 function resolveHost(host = null, context = {}) {
   if (host?.nodeType === 1) return host;
@@ -501,11 +507,8 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
   function routeActive() {
     return isUsuariosRoute(context);
   }
-  function role() {
-    return getCurrentRole(context, getAppState());
-  }
   function admin() {
-    return context.admin === true || role() === "admin";
+    return isAdminContext(context);
   }
   function currentQuery() {
     return {
@@ -539,22 +542,23 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       cursorHidden: true,
     };
   }
-  function payload() {
-    const currentRole = role();
-    const isAdmin = admin();
-    const state = stateSnapshot();
+  function viewPayload() {
+    const state = getAppState();
+    const role = getCurrentRole(context, state);
+    const admin = context.admin === true || role === "admin";
+    const viewState = stateSnapshot();
     return {
       items,
       users: items,
       usuarios: items,
       rows: items,
-      state,
-      ...state,
-      admin: isAdmin,
-      role: currentRole,
-      forbidden: !isAdmin,
-      restricted: !isAdmin,
-      accessDenied: !isAdmin,
+      state: viewState,
+      ...viewState,
+      admin,
+      role,
+      forbidden: !admin,
+      restricted: !admin,
+      accessDenied: !admin,
       route: USUARIOS_CANONICAL_PATH,
       source: USUARIOS_INDEX_SOURCE,
       version: USUARIOS_VIEW_VERSION,
@@ -603,7 +607,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     if (destroyed || !host || !routeActive() || !ownsHost()) return false;
     const dom = preserveDom ? captureDomState() : {};
     const template = document.createElement("template");
-    template.innerHTML = renderUsuariosTableTemplate(payload()).trim();
+    template.innerHTML = renderUsuariosTableTemplate(viewPayload()).trim();
     host.replaceChildren(template.content);
     host.setAttribute("data-usuarios-controller", ownerId);
     host.setAttribute("data-usuarios-version", USUARIOS_VIEW_VERSION);
@@ -1173,6 +1177,9 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       return destroyed;
     },
     getSnapshot() {
+      const state = getAppState();
+      const role = getCurrentRole(context, state);
+      const admin = context.admin === true || role === "admin";
       return {
         version: USUARIOS_VIEW_VERSION,
         apiVersion: USUARIOS_API_VERSION,
@@ -1183,8 +1190,8 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         hostOwner: ownsHost(),
         globalOwner: ownsGlobal(),
         routeActive: routeActive(),
-        admin: admin(),
-        role: role(),
+        admin,
+        role,
         loading,
         loadingMore,
         refreshing,
@@ -1423,19 +1430,28 @@ export const isInitialized = () => getActiveUsuariosController()?.isInitialized?
 export const isDestroyed = () => getActiveUsuariosController()?.isDestroyed?.() ?? true;
 export const isMounted = () => getActiveUsuariosController()?.isMounted?.() || false;
 export const canRenderUsuariosNow = (context = {}) => isUsuariosRoute(safeObject(context, {}));
-export const getUsuariosRouteDebug = (context = {}) => ({
-  browserPath: getBrowserPath(),
-  contextPath: routePathFromContext(context),
-  canonicalPath: USUARIOS_CANONICAL_PATH,
-  allowed: isUsuariosRoute(context),
-  role: getCurrentRole(context, getAppState()),
-  admin: isAdminContext(context),
-  apiVersion: USUARIOS_API_VERSION,
-  cursorVersion: USUARIOS_CURSOR_VERSION,
-  cursorFirst: true,
-  serverFiltered: true,
-  localDatasetCeiling: false,
-});
+export const getUsuariosRouteDebug = (context = {}) => {
+  const state = getAppState();
+  const role = getCurrentRole(context, state);
+  const admin = context.admin === true || role === "admin";
+  return {
+    browserPath: getBrowserPath(),
+    contextPath: routePathFromContext(context),
+    canonicalPath: USUARIOS_CANONICAL_PATH,
+    allowed: isUsuariosRoute(context),
+    role,
+    admin,
+    apiVersion: USUARIOS_API_VERSION,
+    cursorVersion: USUARIOS_CURSOR_VERSION,
+    cursorFirst: true,
+    serverFiltered: true,
+    localDatasetCeiling: false,
+  };
+};
+
+/* =========================================================
+   MODAL COMPAT
+========================================================= */
 
 export const openModal = (detail = {}) => UsuariosDetailModal?.open?.(normalizeUsuarioModel(detail)) || false;
 export const closeModal = () => UsuariosDetailModal?.close?.() || true;

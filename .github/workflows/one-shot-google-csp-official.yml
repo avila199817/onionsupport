@@ -1,0 +1,68 @@
+name: One-shot Google CSP official alignment
+
+on:
+  push:
+    branches:
+      - fix/google-tag-csp-official
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/google-tag-csp-official
+          fetch-depth: 0
+
+      - name: Align CSP with Google Analytics and Ads guidance
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+          path = Path('staticwebapp.config.json')
+          data = json.loads(path.read_text(encoding='utf-8'))
+          csp = data['globalHeaders']['Content-Security-Policy']
+          directives, order = {}, []
+          for raw in csp.split(';'):
+              raw = raw.strip()
+              if not raw:
+                  continue
+              parts = raw.split()
+              directives[parts[0]] = parts[1:]
+              order.append(parts[0])
+          def add(name, *values):
+              current = directives.setdefault(name, [])
+              if name not in order:
+                  order.append(name)
+              for value in values:
+                  if value not in current:
+                      current.append(value)
+          add('img-src', 'https://*.analytics.google.com', 'https://*.g.doubleclick.net', 'https://*.google.com')
+          add('connect-src', 'https://*.analytics.google.com', 'https://*.g.doubleclick.net', 'https://*.google.com', 'https://pagead2.googlesyndication.com')
+          add('frame-src', 'https://www.googletagmanager.com')
+          data['globalHeaders']['Content-Security-Policy'] = '; '.join(' '.join([name] + directives[name]) for name in order) + ';'
+          path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+      - name: Validate JSON and required CSP sources
+        shell: bash
+        run: |
+          python -m json.tool staticwebapp.config.json >/dev/null
+          grep -Fq 'https://*.analytics.google.com' staticwebapp.config.json
+          grep -Fq 'https://*.g.doubleclick.net' staticwebapp.config.json
+          grep -Fq 'https://*.google.com' staticwebapp.config.json
+          grep -Fq 'https://pagead2.googlesyndication.com' staticwebapp.config.json
+          grep -Fq 'https://www.googletagmanager.com' staticwebapp.config.json
+
+      - name: Remove one-shot workflow and commit patch
+        shell: bash
+        run: |
+          rm -f .github/workflows/one-shot-google-csp-official.yml
+          git config user.name 'Onion Support'
+          git config user.email 'cristian@onionsupport.com'
+          git add staticwebapp.config.json .github/workflows/one-shot-google-csp-official.yml
+          git commit -m 'fix(analytics): align CSP with official GA4 and Ads endpoints'
+          git push origin HEAD:fix/google-tag-csp-official

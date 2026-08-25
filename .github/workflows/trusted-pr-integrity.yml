@@ -32,7 +32,7 @@ jobs:
 
     env:
       PYTHONDONTWRITEBYTECODE: "1"
-      PUBLIC_SITE_URL: "https://www.onionsupport.com"
+      PUBLIC_SITE_URL: "https://onionsupport.com"
       DIRECT_API_URL: "https://api.onionsupport.com"
 
     steps:
@@ -155,7 +155,7 @@ jobs:
         shell: bash
         run: python3 "${RUNNER_TEMP}/onion-trusted-integrity/validate_candidate_paths.py"
 
-      - name: Resolve candidate canonical site
+      - name: Validate candidate canonical site
         working-directory: candidate
         shell: bash
         run: |
@@ -163,18 +163,13 @@ jobs:
 
           marker=".github/ci/canonical-apex-v1"
 
-          if [[ -e "${marker}" ]]; then
-            if [[ ! -f "${marker}" ]] || [[ "$(cat "${marker}")" != "canonical-apex-v1" ]]; then
-              echo "::error file=${marker},title=Marcador canonical inválido::Contenido inesperado."
-              exit 1
-            fi
-
-            echo "PUBLIC_SITE_URL=https://onionsupport.com" >> "${GITHUB_ENV}"
-            echo "Candidate canonical: https://onionsupport.com"
-          else
-            echo "PUBLIC_SITE_URL=https://www.onionsupport.com" >> "${GITHUB_ENV}"
-            echo "Candidate canonical: https://www.onionsupport.com"
+          if [[ ! -f "${marker}" ]] || [[ "$(cat "${marker}")" != "canonical-apex-v1" ]]; then
+            echo "::error file=${marker},title=Marcador canonical inválido::Debe existir y contener exactamente canonical-apex-v1."
+            exit 1
           fi
+
+          echo "PUBLIC_SITE_URL=https://onionsupport.com" >> "${GITHUB_ENV}"
+          echo "Candidate canonical: https://onionsupport.com"
 
       - name: Validate candidate SWA helper syntax as data
         working-directory: candidate

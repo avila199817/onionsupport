@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PUBLIC_SITE_URL: "https://www.onionsupport.com"
+  PUBLIC_SITE_URL: "https://onionsupport.com"
   INDEXNOW_ENDPOINT: "https://api.indexnow.org/indexnow"
   INDEXNOW_KEY: "ad1f6102f1914986b540f6a34bf6939b"
   INDEXNOW_KEY_FILE: "ad1f6102f1914986b540f6a34bf6939b.txt"

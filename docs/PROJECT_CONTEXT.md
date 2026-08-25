@@ -7,7 +7,7 @@
 
 Onion Support es una SPA JavaScript modular desplegada en Azure Static Web Apps.
 
-- Frontend: `https://www.onionsupport.com`
+- Frontend: `https://onionsupport.com`
 - API: `https://api.onionsupport.com`
 - Idioma funcional: español
 - Roles funcionales: `admin` y `user`

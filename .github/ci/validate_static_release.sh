@@ -10,6 +10,7 @@ required_files=(
   "sitemap.xml"
   "favicon.ico"
   "ad1f6102f1914986b540f6a34bf6939b.txt"
+  ".github/ci/canonical-apex-v1"
   ".github/ci/seo-public-surface-v2"
   ".github/scripts/repo_integrity.py"
   "seo/reparacion-ordenadores.html"
@@ -54,6 +55,21 @@ if [[ "$(cat .github/ci/seo-public-surface-v2)" != "seo-public-surface-v2" ]]; t
   echo "::error file=.github/ci/seo-public-surface-v2,title=Marcador SEO inválido::Contenido inesperado."
   exit 1
 fi
+
+if [[ "$(cat .github/ci/canonical-apex-v1)" != "canonical-apex-v1" ]]; then
+  echo "::error file=.github/ci/canonical-apex-v1,title=Marcador canonical inválido::Contenido inesperado."
+  exit 1
+fi
+
+for forbidden_origin in \
+  "www"".""onionsupport.com" \
+  "http://onionsupport"".""com" \
+  "http%3A%2F%2Fonionsupport"".""com"; do
+  if git grep -n -I -i -F "${forbidden_origin}" -- .; then
+    echo "::error title=Origen público no canónico::Se detectó '${forbidden_origin}'."
+    exit 1
+  fi
+done
 
 forbidden_files=(
   "BingSiteAuth.xml"

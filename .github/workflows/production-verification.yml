@@ -105,7 +105,7 @@ jobs:
         run: >-
           python3 verification-tooling/.github/scripts/production_verify.py
           --root expected-main
-          --base-url https://www.onionsupport.com
+          --base-url https://onionsupport.com
           --revision "${{ steps.revision.outputs.sha }}"
           --attempts 8
           --delay 10

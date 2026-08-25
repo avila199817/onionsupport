@@ -238,12 +238,14 @@ def validate_api_transport_contract(errors: list[str]) -> None:
 
     required_config = (
         'CANONICAL_PRODUCTION_API_BASE = "https://api.onionsupport.com"',
+        'CANONICAL_FRONTEND_ORIGINS = Object.freeze([',
+        '"https://onionsupport.com",',
     )
 
     for snippet in required_config:
         if snippet not in config_text:
             errors.append(
-                f"src/core/config.js :: falta contrato API directo: {snippet}"
+                f"src/core/config.js :: falta contrato productivo: {snippet}"
             )
 
     required_http = (

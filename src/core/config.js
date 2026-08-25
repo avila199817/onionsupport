@@ -38,7 +38,6 @@ export const CANONICAL_BACKEND_API_ORIGINS = Object.freeze([
 
 export const CANONICAL_FRONTEND_ORIGINS = Object.freeze([
   "https://onionsupport.com",
-  "https://www.onionsupport.com",
 ]);
 
 export const TOKEN_PARAM = "token";

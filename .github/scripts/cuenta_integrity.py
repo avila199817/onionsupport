@@ -115,7 +115,7 @@ REQUIRED_INDEX = (
 )
 
 REQUIRED_API = (
-    '"cuenta.api.backend-contract.v6-current-password"',
+    '"cuenta.api.backend-contract.v5-canonical-runtime"',
     'me: "/api/auth/me"',
     'changePassword: "/api/auth/change-password"',
     'deactivateSelf: "/api/auth/deactivate/self"',

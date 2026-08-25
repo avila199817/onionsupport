@@ -130,7 +130,7 @@ def validate_runtime_boundaries(errors: list[str], runtime: dict[str, str]) -> N
 
     require(
         errors,
-        "observer.observe(mountRoot" in preview
+        re.search(r"observer\.observe\s*\(\s*mountRoot\b", preview) is not None
         and "observer.observe(document.body" not in preview
         and 'observerScope: "router-view"' in preview,
         "incidencias-media-preview debe limitar listeners/observer al Router view",

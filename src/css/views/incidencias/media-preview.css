@@ -1,677 +1,266 @@
 /* =========================================================
-   Onion Support - Incidencias Media / Live Detail
-   Archivo: /src/css/views/incidencias/media-preview.css
+   Onion Support · Incidencias Media Viewer
+   Entrada CSS canónica de la ruta incidencias.
 
-   PRODUCTIVO · ROUTE-SCOPED · FIT-CONTAINED VIEWER
-   - Miniaturas locales y remotas con fallback estable.
-   - Visor independiente que nunca mueve el scroll del ticket.
-   - Imagen y vídeo contenidos íntegramente en un único viewport.
-   - PDF ocupa el stage disponible y desplaza sólo su documento interno.
-   - Vídeo MOV/MP4/M4V/WebM con primer fotograma cuando el códec es legible.
-   - Apertura/cierre simétricos y respetuosos con reduced-motion.
-   - Sincronización de detalle silenciosa y orientada a señales.
+   La base V5 permanece íntegra en media-preview.core.css.
+   Este archivo contiene únicamente la composición final del viewer/gallery.
 ========================================================= */
+
+@import url("./media-preview.core.css");
 
 @layer views {
 
 /* =======================================================
-   SLOTS VACÍOS
+   VIEWER COMPACTO
+   El Details modal permanece claramente visible detrás.
 ======================================================= */
-
-.incidencias-modal-body.ui-detail-modal-body
-  > [data-modal-feedback-slot="true"][data-slot-empty="true"],
-.incidencias-modal-body.ui-detail-modal-body
-  > [data-modal-preview-slot="true"][data-slot-empty="true"] {
-  display: none;
-}
-
-/* =======================================================
-   MINIATURAS DE ARCHIVOS PENDIENTES / REMOTOS
-======================================================= */
-
-.incidencias-modal-pending-file[data-media-preview-enhanced="true"] {
-  grid-template-columns:
-    var(--incidencias-modal-thumb-width, 92px)
-    minmax(0, 1fr)
-    auto;
-}
-
-.incidencias-modal-pending-thumb {
-  position: relative;
-  inline-size: var(--incidencias-modal-thumb-width, 92px);
-  block-size: var(--incidencias-modal-thumb-height, 58px);
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  border: 1px solid var(--incidencias-modal-thumb-border, var(--border-default));
-  border-radius: var(--incidencias-modal-thumb-radius, var(--radius-xs));
-  background: var(--incidencias-modal-thumb-bg, var(--solid-bg-2));
-  color: var(--text-muted);
-  isolation: isolate;
-}
-
-.incidencias-modal-pending-thumb-image,
-.incidencias-modal-image-thumb-wrap[data-modal-thumb-frame="true"]
-  .incidencias-modal-image-thumb {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  inline-size: 100%;
-  block-size: 100%;
-  display: block;
-  object-fit: cover;
-  opacity: 0;
-  transition: opacity var(--duration-fast) var(--ease-standard);
-}
-
-.incidencias-modal-pending-thumb-fallback,
-.incidencias-modal-image-thumb-wrap[data-modal-thumb-frame="true"]
-  .incidencias-modal-image-thumb-fallback {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  display: grid;
-  place-items: center;
-  padding: 6px;
-  background: var(--incidencias-modal-thumb-bg, var(--solid-bg-2));
-  color: var(--text-muted);
-  font-size: 9px;
-  font-weight: var(--weight-bold);
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  opacity: 1;
-}
-
-.incidencias-modal-pending-thumb[data-preview-state="ready"]
-  .incidencias-modal-pending-thumb-image,
-.incidencias-modal-image-thumb-wrap[data-preview-state="ready"]
-  .incidencias-modal-image-thumb {
-  opacity: 1;
-}
-
-.incidencias-modal-pending-thumb[data-preview-state="ready"]
-  .incidencias-modal-pending-thumb-fallback,
-.incidencias-modal-image-thumb-wrap[data-preview-state="ready"]
-  .incidencias-modal-image-thumb-fallback {
-  opacity: 0;
-}
-
-.incidencias-modal-pending-thumb[data-preview-state="error"]
-  .incidencias-modal-pending-thumb-image,
-.incidencias-modal-image-thumb-wrap[data-preview-state="error"]
-  .incidencias-modal-image-thumb {
-  opacity: 0;
-}
-
-.incidencias-modal-image-thumb-wrap[data-modal-thumb-frame="true"] {
-  background: var(--incidencias-modal-thumb-bg, var(--solid-bg-2));
-}
-
-.incidencias-modal-image-open-badge {
-  z-index: 3;
-}
-
-/* =======================================================
-   VISOR DEDICADO
-   Nunca crea scroll exterior: toda imagen/vídeo cabe en el stage.
-======================================================= */
-
-body.incidencias-media-viewer-open {
-  overflow: hidden;
-  overscroll-behavior: none;
-}
 
 .incidencias-media-viewer {
-  position: fixed;
-  inset: 0;
-  z-index: 90;
-  inline-size: 100vw;
-  block-size: 100vh;
-  block-size: 100dvh;
-  display: grid;
-  place-items: center;
-  padding: clamp(14px, 2.4vw, 30px);
-  overflow: hidden;
-  pointer-events: auto;
+  padding: clamp(34px, 5vw, 86px);
   background:
-    color-mix(in srgb, var(--ui-detail-modal-overlay-bg) 90%, transparent);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-
-  opacity: 0;
-  transition:
-    opacity 180ms ease-out,
-    background 180ms ease-out;
+    color-mix(in srgb, var(--ui-detail-modal-overlay-bg) 34%, transparent);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
 }
 
-.incidencias-media-viewer[data-viewer-state="ready"] {
-  opacity: 1;
+.incidencias-modal-preview.incidencias-modal-preview--viewer {
+  inline-size: min(980px, 72vw);
+  block-size: min(620px, 68dvh);
+  max-inline-size: min(78vw, calc(100vw - 120px));
+  max-block-size: min(72dvh, calc(100dvh - 120px));
+  border-radius: clamp(14px, 1.4vw, 22px);
+  box-shadow:
+    0 24px 70px color-mix(in srgb, #000 32%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--border-default) 46%, transparent);
 }
 
-.incidencias-media-viewer[data-viewer-state="closing"] {
-  opacity: 0;
-  pointer-events: none;
+.incidencias-modal-preview.incidencias-modal-preview--viewer[data-preview-kind="pdf"] {
+  inline-size: min(1040px, 76vw);
+  block-size: min(680px, 72dvh);
+  max-inline-size: min(80vw, calc(100vw - 108px));
+  max-block-size: min(76dvh, calc(100dvh - 108px));
 }
+
+.incidencias-modal-preview.incidencias-modal-preview--viewer[data-preview-kind="document"] {
+  inline-size: min(700px, 64vw);
+  block-size: min(400px, 54dvh);
+  max-inline-size: min(72vw, calc(100vw - 120px));
+  max-block-size: min(60dvh, calc(100dvh - 120px));
+}
+
+/* =======================================================
+   GALERÍA
+======================================================= */
 
 .incidencias-media-viewer-stage {
-  inline-size: 100%;
-  block-size: 100%;
-  min-inline-size: 0;
-  min-block-size: 0;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-}
-
-/*
-   Tamaño deliberadamente acotado:
-   - no se usa 100% del viewport "porque sí";
-   - deja aire visual alrededor;
-   - la fila de contenido siempre tiene una altura finita.
-*/
-.incidencias-modal-preview.incidencias-modal-preview--viewer {
   position: relative;
-  z-index: 1;
-
-  inline-size: min(1180px, 90vw);
-  block-size: min(760px, 86dvh);
-
-  max-inline-size: calc(100vw - 28px);
-  max-block-size: calc(100dvh - 28px);
-  min-inline-size: 0;
-  min-block-size: 0;
-
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-
-  overflow: hidden;
-
-  border: 1px solid var(--ui-detail-modal-border);
-  border-radius: var(--ui-detail-modal-radius);
-  background: var(--ui-detail-modal-bg);
-  box-shadow: var(--ui-detail-modal-shadow);
-  outline: none;
-
-  opacity: 0;
-  transform: translateY(8px) scale(.982);
-  transform-origin: center center;
-  will-change: opacity, transform;
-
   transition:
-    opacity 180ms ease-out,
-    transform 190ms var(--ease-standard),
-    box-shadow 180ms ease-out;
+    opacity 145ms ease-out,
+    transform 165ms var(--ease-standard);
 }
 
-/* PDF agradece algo más de superficie, sin superar nunca el viewport. */
-.incidencias-modal-preview.incidencias-modal-preview--viewer[data-preview-kind="pdf"] {
-  inline-size: min(1340px, 94vw);
-  block-size: min(860px, 90dvh);
+.incidencias-media-viewer[data-gallery-navigating="true"]
+  .incidencias-media-viewer-stage {
+  opacity: .58;
+  transform: scale(.992);
 }
 
-/* Documento no previsualizable: no necesita ocupar una pantalla entera. */
-.incidencias-modal-preview.incidencias-modal-preview--viewer[data-preview-kind="document"] {
-  inline-size: min(760px, 88vw);
-  block-size: min(420px, 68dvh);
-}
+.incidencias-media-gallery-nav {
+  position: absolute;
+  inset-block-start: 50%;
+  z-index: 15;
 
-.incidencias-media-viewer[data-viewer-state="ready"]
-  .incidencias-modal-preview--viewer {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-}
-
-.incidencias-media-viewer[data-viewer-state="closing"]
-  .incidencias-modal-preview--viewer {
-  opacity: 0;
-  transform: translateY(5px) scale(.988);
-}
-
-.incidencias-modal-preview--viewer:focus-visible {
-  box-shadow: var(--ui-detail-modal-shadow), var(--focus-ring);
-}
-
-.incidencias-modal-preview--viewer .incidencias-modal-preview-head {
-  position: relative;
-  z-index: 5;
-  min-inline-size: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-md);
-  padding: 11px 13px;
-  border-block-end: 1px solid var(--ui-detail-modal-header-border);
-  background: var(--surface-2, var(--ui-detail-modal-bg));
-}
-
-.incidencias-modal-preview--viewer .incidencias-modal-preview-copy {
-  min-inline-size: 0;
-}
-
-.incidencias-modal-preview--viewer .incidencias-modal-preview-copy strong,
-.incidencias-modal-preview--viewer .incidencias-modal-preview-copy span {
-  display: block;
-  min-inline-size: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.incidencias-modal-preview--viewer .incidencias-modal-preview-copy strong {
-  font-size: var(--font-sm);
-}
-
-.incidencias-modal-preview--viewer .incidencias-modal-preview-copy span {
-  margin-block-start: 2px;
-  color: var(--text-muted);
-  font-size: var(--font-xs);
-}
-
-.incidencias-modal-preview--viewer .incidencias-modal-preview-actions {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/*
-   Neutraliza por completo las alturas inline de detail.css.
-   El frame es una caja finita: imagen y vídeo NO tienen scroll.
-*/
-.incidencias-modal-preview--viewer .incidencias-modal-preview-frame,
-.incidencias-modal-preview--viewer .incidencias-modal-preview-frame.is-pdf,
-.incidencias-modal-preview--viewer .incidencias-modal-preview-frame.is-video {
-  position: relative;
-  inline-size: 100%;
-  block-size: 100%;
-  max-inline-size: none;
-  max-block-size: none;
-  min-inline-size: 0;
-  min-block-size: 0;
-
+  inline-size: 48px;
+  block-size: 48px;
   display: grid;
   place-items: center;
 
-  overflow: hidden;
-  padding: clamp(12px, 1.8vw, 22px);
-
-  border: 0;
-  border-radius: 0;
-  background: var(--surface-0, var(--main-bg));
-  isolation: isolate;
-}
-
-/* Imagen: nunca se recorta, nunca se fuerza a crecer más que su hueco. */
-.incidencias-modal-preview--viewer .incidencias-modal-preview-image {
-  inline-size: auto;
-  block-size: auto;
-  max-inline-size: 100%;
-  max-block-size: 100%;
-  min-inline-size: 0;
-  min-block-size: 0;
-
-  display: block;
-  object-fit: contain;
-  object-position: center center;
-
-  border: 1px solid var(--border-soft);
-  border-radius: var(--incidencias-modal-preview-frame-radius);
-  background: var(--solid-bg-1);
-  box-shadow: var(--shadow-card);
-}
-
-/* PDF: el visor exterior sigue fijo; el scroll pertenece al documento PDF. */
-.incidencias-modal-preview--viewer .incidencias-modal-preview-frame.is-pdf {
+  margin: 0;
   padding: 0;
-  overflow: hidden;
-}
-
-.incidencias-modal-preview--viewer .incidencias-modal-preview-iframe {
-  inline-size: 100%;
-  block-size: 100%;
-  min-inline-size: 0;
-  min-block-size: 0;
-  display: block;
-  border: 0;
-  background: var(--solid-bg-0);
-}
-
-/* Documento sin renderer inline. */
-.incidencias-modal-preview--viewer > .incidencias-modal-empty-box {
-  align-self: center;
-  justify-self: center;
-  inline-size: min(620px, calc(100% - 28px));
-  margin: 14px;
-  padding: clamp(18px, 4vw, 34px);
-}
-
-[data-incidencias-modal-panel="true"][data-media-viewer-background="true"] {
-  user-select: none;
-}
-
-/* =======================================================
-   VÍDEO / PRIMER FOTOGRAMA
-======================================================= */
-
-.incidencias-modal-preview--viewer
-  .incidencias-modal-preview-frame.is-video {
-  overflow: hidden;
-  padding: clamp(12px, 1.8vw, 22px);
-  background: var(--solid-bg-2);
-}
-
-/*
-   Clave del ajuste:
-   NO width:100% + height:100%.
-   El elemento reemplazado conserva su ratio intrínseco y se reduce por
-   cualquiera de los dos límites. Así un vídeo horizontal o vertical cabe
-   íntegro en el mismo viewport sin crop ni scroll.
-*/
-.incidencias-modal-preview-video {
-  position: relative;
-  z-index: 2;
-
-  inline-size: auto;
-  block-size: auto;
-  max-inline-size: 100%;
-  max-block-size: 100%;
-  min-inline-size: 0;
-  min-block-size: 0;
-
-  display: block;
-  object-fit: contain;
-  object-position: center center;
-  aspect-ratio: var(--incidencias-media-aspect, auto);
-
-  border-radius: var(--incidencias-modal-preview-frame-radius);
-  background: var(--solid-bg-2);
-  box-shadow: var(--shadow-card);
-}
-
-.incidencias-modal-video-loader {
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-
-  display: grid;
-  place-content: center;
-  justify-items: center;
-  gap: 10px;
-
-  padding: 24px;
-
-  background: color-mix(in srgb, var(--solid-bg-2) 88%, transparent);
-  color: var(--text-muted);
-
-  pointer-events: none;
-}
-
-.incidencias-modal-video-loader[hidden] {
-  display: none;
-}
-
-.incidencias-modal-video-loader > span,
-.incidencias-modal-live-sync-spinner {
-  inline-size: 16px;
-  block-size: 16px;
-
-  border: 2px solid currentColor;
-  border-inline-end-color: transparent;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 72%, transparent);
   border-radius: 50%;
 
-  animation: incidencias-live-spin .72s linear infinite;
-}
-
-.incidencias-modal-video-loader > strong {
-  font-size: 12px;
-  font-weight: var(--weight-semibold);
-}
-
-.incidencias-modal-preview-frame.is-video[data-video-state="ready"]
-  .incidencias-modal-video-loader {
-  display: none;
-}
-
-.incidencias-modal-preview-frame.is-video[data-video-state="error"]
-  .incidencias-modal-preview-video {
-  opacity: .18;
-  pointer-events: none;
-}
-
-.incidencias-modal-video-fallback {
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-
-  display: grid;
-  place-content: center;
-
-  padding: clamp(22px, 5vw, 54px);
-
-  text-align: center;
-
-  color: var(--text-secondary, var(--text-muted));
-  background: color-mix(in srgb, var(--solid-bg-2) 94%, transparent);
-
-  font-size: var(--font-sm);
-  line-height: 1.6;
-}
-
-.incidencias-modal-video-fallback[hidden] {
-  display: none;
-}
-
-.incidencias-modal-video-preparing {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-block-size: 132px;
-  text-align: center;
-}
-
-/* =======================================================
-   LIVE SYNC SILENCIOSO
-======================================================= */
-
-.incidencias-modal-panel[data-incidencias-modal-panel="true"] {
-  position: relative;
-}
-
-.incidencias-modal-live-sync {
-  position: absolute;
-  inset-block-start: 12px;
-  inset-inline-end: 62px;
-  z-index: 30;
-
-  min-block-size: 28px;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-
-  max-inline-size: min(220px, calc(100% - 120px));
-  padding: 5px 9px;
-
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-pill);
-
   background:
-    color-mix(in srgb, var(--solid-bg-1, var(--solid-bg-2)) 94%, transparent);
-  color: var(--text-muted);
+    color-mix(in srgb, var(--ui-detail-modal-bg) 90%, transparent);
+  color: var(--text-strong);
+  box-shadow:
+    0 12px 34px color-mix(in srgb, #000 22%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent);
 
-  box-shadow: var(--shadow-xs);
-
+  cursor: pointer;
+  transform: translateY(-50%);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
 
-  pointer-events: none;
+  transition:
+    transform 150ms var(--ease-standard),
+    opacity 150ms ease-out,
+    background 150ms ease-out,
+    border-color 150ms ease-out,
+    box-shadow 150ms ease-out;
 }
 
-.incidencias-modal-live-sync[hidden] {
+.incidencias-media-gallery-nav--previous {
+  inset-inline-start:
+    max(18px, calc(50% - min(490px, 36vw) - 66px));
+}
+
+.incidencias-media-gallery-nav--next {
+  inset-inline-end:
+    max(18px, calc(50% - min(490px, 36vw) - 66px));
+}
+
+.incidencias-media-gallery-nav svg {
+  inline-size: 23px;
+  block-size: 23px;
+}
+
+.incidencias-media-gallery-nav:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--ui-detail-modal-bg);
+  transform: translateY(-50%) scale(1.055);
+  box-shadow:
+    0 15px 40px color-mix(in srgb, #000 28%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 16%, transparent);
+}
+
+.incidencias-media-gallery-nav:active:not(:disabled) {
+  transform: translateY(-50%) scale(.975);
+}
+
+.incidencias-media-gallery-nav:focus-visible {
+  outline: none;
+  box-shadow:
+    0 12px 34px color-mix(in srgb, #000 22%, transparent),
+    var(--focus-ring);
+}
+
+.incidencias-media-gallery-nav:disabled {
+  cursor: default;
+  opacity: .24;
+  box-shadow: none;
+}
+
+.incidencias-media-gallery-nav[hidden] {
   display: none;
 }
 
-.incidencias-modal-live-sync[data-state="ready"] {
-  color: var(--success-strong, var(--text-secondary, var(--text-muted)));
-}
-
-.incidencias-modal-live-sync[data-state="ready"]
-  .incidencias-modal-live-sync-spinner {
-  position: relative;
-  animation: none;
-  border-color: currentColor;
-}
-
-.incidencias-modal-live-sync[data-state="ready"]
-  .incidencias-modal-live-sync-spinner::after {
-  content: "";
+.incidencias-media-gallery-counter {
   position: absolute;
-  inline-size: 6px;
-  block-size: 3px;
-  border-inline-start: 2px solid currentColor;
-  border-block-end: 2px solid currentColor;
-  transform: translate(3px, 4px) rotate(-45deg);
+  inset-inline-start: 50%;
+  inset-block-end: clamp(12px, 2.2dvh, 24px);
+  z-index: 15;
+
+  min-inline-size: 48px;
+  min-block-size: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  padding-inline: 10px;
+  border: 1px solid color-mix(in srgb, var(--border-default) 72%, transparent);
+  border-radius: var(--radius-pill);
+
+  background:
+    color-mix(in srgb, var(--ui-detail-modal-bg) 88%, transparent);
+  color: var(--text-secondary, var(--text-muted));
+  box-shadow: 0 8px 24px color-mix(in srgb, #000 16%, transparent);
+
+  font-size: 11px;
+  font-weight: var(--weight-bold);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .02em;
+
+  transform: translateX(-50%);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  pointer-events: none;
 }
 
-.incidencias-modal-live-sync[data-state="error"] {
-  color: var(--warning-strong, var(--text-secondary, var(--text-muted)));
+.incidencias-media-gallery-counter[hidden] {
+  display: none;
 }
 
-.incidencias-modal-live-sync-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-
-  font-size: 10.5px;
-  font-weight: var(--weight-semibold);
-}
-
-/* =======================================================
-   MOTION / ACCESSIBILITY
-======================================================= */
-
-@keyframes incidencias-live-spin {
-  to { transform: rotate(360deg); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .incidencias-media-viewer,
-  .incidencias-modal-preview.incidencias-modal-preview--viewer {
-    transition-duration: 1ms;
+@media (max-width: 1100px) {
+  .incidencias-media-viewer {
+    padding: clamp(24px, 3.5vw, 44px);
   }
 
   .incidencias-modal-preview.incidencias-modal-preview--viewer {
-    transform: none;
-  }
-
-  .incidencias-modal-video-loader > span,
-  .incidencias-modal-live-sync-spinner {
-    animation-duration: 1.8s;
-  }
-}
-
-/* =======================================================
-   RESPONSIVE
-======================================================= */
-
-@media (max-width: 900px) {
-  .incidencias-modal-preview.incidencias-modal-preview--viewer {
-    inline-size: min(94vw, 980px);
-    block-size: min(88dvh, 720px);
+    inline-size: min(860px, 78vw);
+    block-size: min(590px, 68dvh);
+    max-inline-size: calc(100vw - 96px);
+    max-block-size: calc(100dvh - 96px);
   }
 
   .incidencias-modal-preview.incidencias-modal-preview--viewer[data-preview-kind="pdf"] {
-    inline-size: 95vw;
-    block-size: 92dvh;
+    inline-size: min(900px, 82vw);
+    block-size: min(640px, 72dvh);
+    max-inline-size: calc(100vw - 88px);
+    max-block-size: calc(100dvh - 88px);
+  }
+
+  .incidencias-media-gallery-nav--previous {
+    inset-inline-start: 18px;
+  }
+
+  .incidencias-media-gallery-nav--next {
+    inset-inline-end: 18px;
   }
 }
 
 @media (max-width: 720px) {
-  .incidencias-modal-pending-file[data-media-preview-enhanced="true"] {
-    grid-template-columns: 64px minmax(0, 1fr) auto;
-  }
-
-  .incidencias-modal-pending-thumb {
-    inline-size: 64px;
-    block-size: 52px;
-  }
-
   .incidencias-media-viewer {
     padding:
-      max(8px, env(safe-area-inset-top))
-      max(8px, env(safe-area-inset-right))
-      max(8px, env(safe-area-inset-bottom))
-      max(8px, env(safe-area-inset-left));
+      max(14px, env(safe-area-inset-top))
+      max(12px, env(safe-area-inset-right))
+      max(14px, env(safe-area-inset-bottom))
+      max(12px, env(safe-area-inset-left));
+    background:
+      color-mix(in srgb, var(--ui-detail-modal-overlay-bg) 46%, transparent);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
   }
 
   .incidencias-modal-preview.incidencias-modal-preview--viewer,
-  .incidencias-modal-preview.incidencias-modal-preview--viewer[data-preview-kind="pdf"],
+  .incidencias-modal-preview.incidencias-modal-preview--viewer[data-preview-kind="pdf"] {
+    inline-size: calc(100vw - 34px);
+    block-size: min(68dvh, 620px);
+    max-inline-size: calc(100vw - 34px);
+    max-block-size: calc(100dvh - 92px);
+  }
+
   .incidencias-modal-preview.incidencias-modal-preview--viewer[data-preview-kind="document"] {
-    inline-size: calc(100vw - 16px);
-    block-size: calc(100dvh - 16px);
-    max-inline-size: calc(100vw - 16px);
-    max-block-size: calc(100dvh - 16px);
+    inline-size: calc(100vw - 42px);
+    block-size: min(52dvh, 390px);
+    max-inline-size: calc(100vw - 42px);
+    max-block-size: calc(100dvh - 110px);
   }
 
-  .incidencias-modal-preview--viewer .incidencias-modal-preview-head {
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px;
-    padding: 9px 10px;
+  .incidencias-media-gallery-nav {
+    inline-size: 42px;
+    block-size: 42px;
+    background:
+      color-mix(in srgb, var(--ui-detail-modal-bg) 84%, transparent);
   }
 
-  .incidencias-modal-preview--viewer .incidencias-modal-preview-actions {
-    gap: 5px;
+  .incidencias-media-gallery-nav--previous {
+    inset-inline-start: 7px;
   }
 
-  .incidencias-modal-preview--viewer .incidencias-modal-preview-btn {
-    min-inline-size: 0;
-    padding-inline: 9px;
+  .incidencias-media-gallery-nav--next {
+    inset-inline-end: 7px;
   }
 
-  .incidencias-modal-preview--viewer .incidencias-modal-preview-frame,
-  .incidencias-modal-preview--viewer .incidencias-modal-preview-frame.is-video {
-    padding: 10px;
-  }
-
-  .incidencias-modal-live-sync {
-    inset-block-start: 10px;
-    inset-inline-end: 54px;
-    max-inline-size: min(180px, calc(100% - 104px));
+  .incidencias-media-gallery-counter {
+    inset-block-end: max(8px, env(safe-area-inset-bottom));
   }
 }
 
-@media (max-width: 520px) {
-  .incidencias-modal-pending-file[data-media-preview-enhanced="true"] {
-    grid-template-columns: 56px minmax(0, 1fr);
-  }
-
-  .incidencias-modal-pending-file[data-media-preview-enhanced="true"] > button {
-    grid-column: 1 / -1;
-    justify-self: end;
-  }
-
-  .incidencias-modal-pending-thumb {
-    inline-size: 56px;
-    block-size: 48px;
-  }
-
-  .incidencias-modal-preview--viewer .incidencias-modal-preview-head {
-    align-items: start;
-  }
-
-  .incidencias-modal-preview--viewer .incidencias-modal-preview-copy span {
-    max-inline-size: 42vw;
-  }
-
-  .incidencias-modal-preview--viewer .incidencias-modal-preview-actions {
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-
-  .incidencias-modal-live-sync {
-    inset-inline-start: 50%;
-    inset-inline-end: auto;
-    max-inline-size: calc(100% - 112px);
-    transform: translateX(-50%);
+@media (prefers-reduced-motion: reduce) {
+  .incidencias-media-viewer-stage,
+  .incidencias-media-gallery-nav {
+    transition: none;
   }
 }
 

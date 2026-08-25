@@ -1,31 +1,31 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://www.onionsupport.com/</loc>
-    <lastmod>2026-08-22</lastmod>
-  </url>
-  <url>
-    <loc>https://www.onionsupport.com/reparacion-ordenadores</loc>
+    <loc>https://onionsupport.com/</loc>
     <lastmod>2026-08-25</lastmod>
   </url>
   <url>
-    <loc>https://www.onionsupport.com/soporte-informatico</loc>
+    <loc>https://onionsupport.com/reparacion-ordenadores</loc>
     <lastmod>2026-08-25</lastmod>
   </url>
   <url>
-    <loc>https://www.onionsupport.com/redes-wifi</loc>
+    <loc>https://onionsupport.com/soporte-informatico</loc>
     <lastmod>2026-08-25</lastmod>
   </url>
   <url>
-    <loc>https://www.onionsupport.com/impresoras</loc>
+    <loc>https://onionsupport.com/redes-wifi</loc>
     <lastmod>2026-08-25</lastmod>
   </url>
   <url>
-    <loc>https://www.onionsupport.com/soporte-empresas</loc>
+    <loc>https://onionsupport.com/impresoras</loc>
     <lastmod>2026-08-25</lastmod>
   </url>
   <url>
-    <loc>https://www.onionsupport.com/login</loc>
-    <lastmod>2026-08-22</lastmod>
+    <loc>https://onionsupport.com/soporte-empresas</loc>
+    <lastmod>2026-08-25</lastmod>
+  </url>
+  <url>
+    <loc>https://onionsupport.com/login</loc>
+    <lastmod>2026-08-25</lastmod>
   </url>
 </urlset>

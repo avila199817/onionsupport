@@ -73,6 +73,8 @@ checks = {
     "src/core/config.js": (
         "CONFIG_VERSION",
         'CANONICAL_PRODUCTION_API_BASE = "https://api.onionsupport.com"',
+        'CANONICAL_FRONTEND_ORIGINS = Object.freeze([',
+        '"https://onionsupport.com",',
     ),
     "src/views/incidencias/incidencias.api.js": (
         "INCIDENCIAS_DETAIL_REQUEST_COORDINATOR_VERSION",

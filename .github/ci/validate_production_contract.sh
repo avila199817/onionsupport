@@ -12,16 +12,26 @@ import xml.etree.ElementTree as ET
 
 base = os.environ["PUBLIC_SITE_URL"].rstrip("/")
 api = os.environ["DIRECT_API_URL"].rstrip("/")
+canonical_base = "https://onionsupport.com"
 expected_home = f"{base}/"
 expected_sitemap = f"{base}/sitemap.xml"
 canonical_host = urlsplit(expected_home).netloc
 marker_path = Path(".github/ci/seo-public-surface-v2")
+apex_marker_path = Path(".github/ci/canonical-apex-v1")
 expanded = marker_path.is_file()
 
 errors = []
 
 def error(path, message):
     errors.append((str(path), message))
+
+if base != canonical_base:
+    error("PUBLIC_SITE_URL", f"Origen canónico {base!r}; esperado {canonical_base!r}.")
+
+if not apex_marker_path.is_file():
+    error(apex_marker_path, "Marcador del canonical apex ausente.")
+elif apex_marker_path.read_text(encoding="utf-8").splitlines() != ["canonical-apex-v1"]:
+    error(apex_marker_path, "Debe contener exactamente 'canonical-apex-v1'.")
 
 PUBLIC_PATHS = (
     "/",
@@ -151,6 +161,8 @@ class SeoParser(HTMLParser):
     def __init__(self):
         super().__init__()
         self.canonicals = []
+        self.og_urls = []
+        self.itemprop_urls = []
         self.robots = {}
         self.descriptions = []
         self.titles = []
@@ -177,10 +189,16 @@ class SeoParser(HTMLParser):
                 self.canonicals.append(attrs.get("href", "").strip())
         if tag == "meta":
             name = attrs.get("name", "").strip().lower()
+            property_name = attrs.get("property", "").strip().lower()
+            itemprop = attrs.get("itemprop", "").strip().lower()
             if name in {"robots", "googlebot", "bingbot"}:
                 self.robots[name] = attrs.get("content", "").strip().lower()
             if name == "description":
                 self.descriptions.append(attrs.get("content", "").strip())
+            if property_name == "og:url":
+                self.og_urls.append(attrs.get("content", "").strip())
+            if itemprop == "url":
+                self.itemprop_urls.append(attrs.get("content", "").strip())
 
     def handle_endtag(self, tag):
         if tag.lower() == "title" and self._in_title:
@@ -207,6 +225,14 @@ def validate_public_html(path, expected_url, *, require_h1=False, require_intern
 
     if parser.canonicals != [expected_url]:
         error(path, f"Canonical esperado exactamente una vez: {expected_url}")
+    if parser.og_urls != [expected_url]:
+        error(path, f"og:url esperado exactamente una vez: {expected_url}")
+    for itemprop_url in parser.itemprop_urls:
+        parsed_itemprop = urlsplit(itemprop_url)
+        if parsed_itemprop.scheme != "https" or parsed_itemprop.netloc != canonical_host:
+            error(path, f"Microdato itemprop=url fuera del origen canónico: {itemprop_url}")
+        if itemprop_url not in {expected_url, expected_home}:
+            error(path, f"Microdato itemprop=url inesperado: {itemprop_url}")
     if len(parser.titles) != 1 or not parser.titles[0]:
         error(path, "Debe contener exactamente un <title> no vacío.")
     if len(parser.descriptions) != 1 or not parser.descriptions[0]:

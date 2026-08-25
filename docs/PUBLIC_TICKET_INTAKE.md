@@ -106,7 +106,7 @@ El usuario nuevo nace con `clienteId: null`. No se crea documento de cliente des
 
 El enlace enviado por email apunta al flujo público:
 
-`https://www.onionsupport.com/activate-account/<token>`
+`https://onionsupport.com/activate-account/<token>`
 
 La vista mantiene compatibilidad con `?token=`. El token en claro solo viaja en el email y en memoria durante la orquestación; en Cosmos se persiste su representación segura según el contrato backend.
 

@@ -1,7 +1,7 @@
 # =========================================================
 # ONION SUPPORT — AZURE STATIC WEB APPS CI/CD
 # Production contract:
-#   Frontend canonical: https://www.onionsupport.com
+#   Frontend canonical: https://onionsupport.com
 #   Production API:     https://api.onionsupport.com/api/*
 #   Direct backend:     https://api.onionsupport.com
 #   Azure SWA:          onion-panel
@@ -41,7 +41,7 @@ env:
   APP_LOCATION: "/"
   API_LOCATION: ""
   OUTPUT_LOCATION: ""
-  PUBLIC_SITE_URL: "https://www.onionsupport.com"
+  PUBLIC_SITE_URL: "https://onionsupport.com"
   DIRECT_API_URL: "https://api.onionsupport.com"
 
 jobs:
@@ -132,6 +132,15 @@ jobs:
 
       - name: Validate production SEO and routing contract
         run: bash "${RUNNER_TEMP}/onion-validation/validate_production_contract.sh"
+
+      - name: Verify external canonical hostname redirects
+        run: >-
+          python3 .github/scripts/production_verify.py
+          --base-url "${PUBLIC_SITE_URL}"
+          --revision "${{ steps.revision.outputs.sha }}"
+          --attempts 1
+          --delay 0
+          --redirects-only
 
       - name: Reject legacy API domain from runtime
         run: |

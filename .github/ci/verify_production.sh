@@ -5,6 +5,13 @@ base="${PUBLIC_SITE_URL%/}"
 api="${DIRECT_API_URL%/}"
 legacy_domain="onionit"".""net"
 
+if [[ "${base}" != "https://onionsupport.com" ]]; then
+  echo "::error title=Canonical productivo inválido::PUBLIC_SITE_URL='${base}'; esperado https://onionsupport.com."
+  exit 1
+fi
+
+legacy_frontend="https://www.${base#https://}"
+
 header_value() {
   local file="$1"
   local header="$2"
@@ -127,6 +134,51 @@ assert_redirect() {
       ;;
   esac
 }
+
+assert_origin_redirect() {
+  local source="$1"
+  local label="$2"
+  local route="$3"
+  local query="canonical_probe=${VALIDATED_SHA}&preserve=1"
+  local requested="${source}${route}?${query}"
+  local expected="${base}${route}?${query}"
+  local headers
+  local status
+  local location
+
+  headers="$(mktemp)"
+  status="$(
+    curl \
+      --silent \
+      --show-error \
+      --head \
+      --connect-timeout 10 \
+      --max-time 30 \
+      -H "Cache-Control: no-cache" \
+      -o "${headers}" \
+      -w "%{http_code}" \
+      "${requested}"
+  )"
+
+  location="$(header_value "${headers}" "location")"
+  rm -f "${headers}"
+
+  if [[ "${status}" != "301" ]]; then
+    echo "::error title=Canonicalización de origen inválida::${label} ${route} respondió HTTP ${status}; esperado 301."
+    return 1
+  fi
+
+  if [[ "${location}" != "${expected}" ]]; then
+    echo "::error title=Redirección canónica indirecta::${label} ${route} location='${location}'; esperado '${expected}' en un salto conservando path/query."
+    return 1
+  fi
+}
+
+for route in "/" "/reparacion-ordenadores"; do
+  assert_origin_redirect "http://${base#https://}" "HTTP apex" "${route}"
+  assert_origin_redirect "${legacy_frontend}" "HTTPS www" "${route}"
+  assert_origin_redirect "http://${legacy_frontend#https://}" "HTTP www" "${route}"
+done
 
 root_headers="$(mktemp)"
 curl \

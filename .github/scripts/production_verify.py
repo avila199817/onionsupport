@@ -16,13 +16,18 @@ import time
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urljoin, urlsplit
+from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
-DEFAULT_BASE_URL = "https://www.onionsupport.com"
+DEFAULT_BASE_URL = "https://onionsupport.com"
 DEFAULT_ATTEMPTS = 8
 DEFAULT_DELAY_SECONDS = 10.0
 REQUEST_TIMEOUT_SECONDS = 20.0
+
+ORIGIN_REDIRECT_PROBES = (
+    "/",
+    "/reparacion-ordenadores?canonical_probe=1",
+)
 
 EXACT_FILES = (
     "index.html",
@@ -149,6 +154,27 @@ def build_url(base_url: str, path: str, revision: str, attempt: int) -> str:
     query = urlencode({"deploy_check": revision, "attempt": attempt})
     separator = "&" if "?" in url else "?"
     return f"{url}{separator}{query}"
+
+
+def replace_scheme(base_url: str, scheme: str) -> str:
+    parsed = urlsplit(base_url)
+    return urlunsplit((scheme, parsed.netloc, "", "", "")).rstrip("/")
+
+
+def legacy_www_origin(base_url: str) -> str:
+    parsed = urlsplit(base_url)
+    hostname = parsed.hostname or ""
+
+    if not hostname:
+        raise ValueError(f"origen canónico inválido: {base_url!r}")
+
+    legacy_hostname = hostname if hostname.startswith("www.") else f"www.{hostname}"
+    netloc = legacy_hostname
+
+    if parsed.port is not None:
+        netloc = f"{netloc}:{parsed.port}"
+
+    return urlunsplit((parsed.scheme, netloc, "", "", "")).rstrip("/")
 
 
 def request_for(url: str) -> Request:
@@ -313,6 +339,46 @@ def check_aliases(base_url: str, revision: str, attempt: int) -> list[str]:
     return errors
 
 
+def check_origin_redirects(base_url: str, revision: str, attempt: int) -> list[str]:
+    errors: list[str] = []
+    legacy_https = legacy_www_origin(base_url)
+    sources = (
+        (replace_scheme(base_url, "http"), "HTTP apex"),
+        (legacy_https, "HTTPS www"),
+        (replace_scheme(legacy_https, "http"), "HTTP www"),
+    )
+
+    for source, label in sources:
+        for path in ORIGIN_REDIRECT_PROBES:
+            expected = build_url(base_url, path, revision, attempt)
+
+            try:
+                status, _, headers = fetch_no_redirect(
+                    source,
+                    path,
+                    revision,
+                    attempt,
+                )
+            except RuntimeError as error:
+                errors.append(f"{label} {path}: {error}")
+                continue
+
+            if status != 301:
+                errors.append(
+                    f"{label} {path}: HTTP {status}, esperado 301 directo hacia {expected}"
+                )
+                continue
+
+            location = headers.get("location", "").strip()
+            if location != expected:
+                errors.append(
+                    f"{label} {path}: Location {location!r}; esperado {expected!r} "
+                    "sin cadena y conservando path/query"
+                )
+
+    return errors
+
+
 def check_seo(base_url: str, revision: str, attempt: int) -> list[str]:
     errors: list[str] = []
 
@@ -342,6 +408,7 @@ def verify_once(root: Path, base_url: str, revision: str, attempt: int) -> list[
         + check_routes(base_url, revision, attempt)
         + check_aliases(base_url, revision, attempt)
         + check_seo(base_url, revision, attempt)
+        + check_origin_redirects(base_url, revision, attempt)
     )
 
 
@@ -352,6 +419,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--revision", required=True)
     parser.add_argument("--attempts", type=int, default=DEFAULT_ATTEMPTS)
     parser.add_argument("--delay", type=float, default=DEFAULT_DELAY_SECONDS)
+    parser.add_argument(
+        "--redirects-only",
+        action="store_true",
+        help="validate only cross-origin canonical redirects",
+    )
     return parser.parse_args()
 
 
@@ -367,17 +439,31 @@ def main() -> int:
         print("ERROR: --revision no puede estar vacío", file=sys.stderr)
         return 2
 
-    print(f"Production verification · base={base_url} · revision={revision}")
+    mode = "redirects-only" if args.redirects_only else "full"
     print(
-        f"Exact static files={len(EXACT_FILES)} · exact route files={len(EXACT_ROUTE_FILES)} · "
-        f"indexable routes={len(INDEXABLE_ROUTES)} · aliases={len(SEO_ALIAS_REDIRECTS)} · "
-        f"noindex routes={len(NOINDEX_ROUTES)}"
+        f"Production verification · mode={mode} · base={base_url} · revision={revision}"
     )
+    if args.redirects_only:
+        print(f"Origin redirect probes={len(ORIGIN_REDIRECT_PROBES) * 3}")
+    else:
+        print(
+            f"Exact static files={len(EXACT_FILES)} · exact route files={len(EXACT_ROUTE_FILES)} · "
+            f"indexable routes={len(INDEXABLE_ROUTES)} · aliases={len(SEO_ALIAS_REDIRECTS)} · "
+            f"origin redirect probes={len(ORIGIN_REDIRECT_PROBES) * 3} · "
+            f"noindex routes={len(NOINDEX_ROUTES)}"
+        )
 
     last_errors: list[str] = []
     for attempt in range(1, attempts + 1):
         print(f"\nIntento {attempt}/{attempts}")
-        last_errors = verify_once(root, base_url, revision, attempt)
+        if args.redirects_only:
+            last_errors = check_origin_redirects(
+                base_url,
+                revision,
+                attempt,
+            )
+        else:
+            last_errors = verify_once(root, base_url, revision, attempt)
         if not last_errors:
             print("Production verification: PASS")
             return 0
@@ -388,10 +474,12 @@ def main() -> int:
             time.sleep(delay)
 
     print("\nProduction verification: FAIL", file=sys.stderr)
-    print(
-        f"Producción no coincide con el commit esperado tras {attempts} intentos.",
-        file=sys.stderr,
+    failure = (
+        "La canonicalización externa de host no cumple el contrato"
+        if args.redirects_only
+        else "Producción no coincide con el commit esperado"
     )
+    print(f"{failure} tras {attempts} intentos.", file=sys.stderr)
     return 1
 
 

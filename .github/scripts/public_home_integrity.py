@@ -110,6 +110,7 @@ def main() -> int:
     progress_js = read("src/features/public-support-progress/index.js")
     home_experience = read("src/features/public-home-experience/index.js")
     home = read("src/views/public/home/index.js")
+    home_template = read("src/views/public/home/template.js")
     experience_css = read("src/css/views/public/home-experience.css")
     progress_css = read("src/css/views/public/public-support-progress.css")
 
@@ -278,6 +279,13 @@ def main() -> int:
         home.count("replace: true,") >= 2,
         "La navegación interna debe reemplazar hash sin apilar historial",
     )
+
+    for snippet, message in (
+        ('domain: "onionsupport.com"', "Schema LocalBusiness: dominio canónico incorrecto"),
+        ('url: `https://${BUSINESS.domain}/`', "Schema LocalBusiness: URL HTTPS canónica ausente"),
+        ('type="application/ld+json"', "Schema LocalBusiness: script JSON-LD ausente"),
+    ):
+        require(errors, snippet in home_template, message)
 
     for snippet, message in (
         ("data-public-home-account-menu", "Falta menú autenticado"),

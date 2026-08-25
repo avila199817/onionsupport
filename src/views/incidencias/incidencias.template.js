@@ -8,10 +8,11 @@
    - Acepta items/tickets/incidencias/rows/results/data.items/etc.
 ========================================================= */
 
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v27.stable-toolbar-money-reset";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v28.cursor-scale-safe";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   CREATE_OPEN: "create-open",
+  REFRESH: "refresh",
   FILTER: "filter",
   STAT_APPLY: "stat-apply",
   SORT_TOGGLE: "sort-toggle",
@@ -582,6 +583,8 @@ function buildVm(input = {}) {
   const filtered = sortItems(items.filter((it) => itemMatchesFilter(it, filter)).filter((it) => itemMatchesSearch(it, search)), order, sortMode);
   const visible = filtered.slice(0, visibleLimit);
   const total = remoteTotal(d, items.length);
+  const nextCursor = txt(first(d.nextCursor, d.pagination?.nextCursor, ""), "");
+  const remoteHasMore = Boolean(nextCursor) || d.hasMore === true || d.pagination?.hasMore === true || total > items.length;
   const stats = d.canonical === true && isObj(d.stats) ? d.stats : mergeStats(items, d.stats);
   return {
     data: d,
@@ -594,8 +597,12 @@ function buildVm(input = {}) {
     filteredTotal: filtered.length,
     visibleCount: visible.length,
     visibleLimit,
-    remainingCount: Math.max(0, filtered.length - visible.length),
-    hasMore: filtered.length > visible.length,
+    remainingCount: remoteHasMore
+      ? Math.max(0, total - visible.length)
+      : Math.max(0, filtered.length - visible.length),
+    hasMore: filtered.length > visible.length || remoteHasMore,
+    remoteHasMore,
+    nextCursor,
     loading: d.loading === true,
     refreshing: d.refreshing === true,
     creating: d.creating === true,

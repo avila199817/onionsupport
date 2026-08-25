@@ -24,7 +24,7 @@
 
 import Http from "../../core/http.js";
 
-export const INCIDENCIAS_API_VERSION = "incidencias.api.extreme.v23.admin-attachment-delete";
+export const INCIDENCIAS_API_VERSION = "incidencias.api.extreme.v24.cursor-scale-safe";
 export const INCIDENCIAS_ENDPOINT = "/api/tickets";
 export const USERS_SEARCH_ENDPOINT = "/api/users";
 
@@ -38,6 +38,7 @@ export const INCIDENCIAS_UPLOAD_TIMEOUT = 180000;
 export const INCIDENCIAS_LIST_LIMIT = 48;
 export const INCIDENCIAS_CACHE_TTL_MS = 60000;
 export const INCIDENCIAS_DETAIL_CACHE_TTL_MS = 20000;
+export const INCIDENCIAS_DETAIL_CACHE_MAX_ENTRIES = 96;
 
 const DEFAULT_CURRENCY = "EUR";
 const DEFAULT_STATUS = "open";
@@ -63,6 +64,14 @@ let lastList = {
   items: [],
   total: 0,
 };
+
+function pruneDetailCache() {
+  while (detailCache.size > INCIDENCIAS_DETAIL_CACHE_MAX_ENTRIES) {
+    const oldestKey = detailCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    detailCache.delete(oldestKey);
+  }
+}
 
 /* =========================================================
    BASICS
@@ -1614,6 +1623,7 @@ function upsertCachedIncidencia(item = null) {
   if (!id) return normalized;
 
   detailCache.set(id, { item: normalized, at: now() });
+  pruneDetailCache();
 
   const current = safeArray(lastList.items).filter((row) => getTicketId(row) !== id);
   const next = normalizeList([normalized, ...current]);
@@ -1886,6 +1896,82 @@ export async function fetchIncidenciasRequest(options = {}) {
     source: "views.incidencias.list",
     signal: options.signal,
   });
+}
+
+export async function loadIncidenciasPage(options = {}) {
+  const response = await fetchIncidenciasRequest({
+    ...safeObject(options),
+    query: {
+      pageMode: "cursor",
+      limit: INCIDENCIAS_LIST_LIMIT,
+      ...safeObject(options?.query),
+    },
+  });
+
+  if (responseLooksFailed(response)) {
+    throw new Error(
+      responseErrorMessage(response, "No se pudo cargar la página de incidencias.")
+    );
+  }
+
+  const rawItems = listFromPayload(response);
+  const items = normalizeList(rawItems);
+  const data = safeObject(response?.data);
+  const pagination = safeObject(
+    first(response?.pagination, data?.pagination, {})
+  );
+  const total = Math.max(
+    number(
+      first(
+        response?.total,
+        response?.totalCount,
+        data?.total,
+        data?.totalCount,
+        items.length
+      ),
+      items.length
+    ),
+    items.length
+  );
+  const nextCursor = cleanText(
+    first(
+      response?.nextCursor,
+      pagination?.nextCursor,
+      data?.nextCursor,
+      data?.pagination?.nextCursor,
+      ""
+    ),
+    ""
+  );
+  const hasMore =
+    response?.hasMore === true ||
+    pagination?.hasMore === true ||
+    data?.hasMore === true ||
+    data?.pagination?.hasMore === true ||
+    Boolean(nextCursor);
+
+  return {
+    ok: true,
+    cached: false,
+    stale: false,
+    items,
+    total,
+    count: items.length,
+    rawCount: rawItems.length,
+    nextCursor,
+    hasMore,
+    pagination: {
+      ...pagination,
+      mode: "cursor",
+      nextCursor,
+      hasMore,
+      total,
+      pageSize: number(
+        first(pagination?.pageSize, options?.query?.limit, INCIDENCIAS_LIST_LIMIT),
+        INCIDENCIAS_LIST_LIMIT
+      ),
+    },
+  };
 }
 
 export async function listIncidencias(options = {}) {
@@ -2468,7 +2554,7 @@ export function getIncidenciasApiSnapshot() {
       downloadContract: "json_to_sas",
       directBlobDownload: true,
     },
-    detailCache: { size: detailCache.size, inFlight: detailInFlight.size, ttlMs: INCIDENCIAS_DETAIL_CACHE_TTL_MS },
+    detailCache: { size: detailCache.size, inFlight: detailInFlight.size, ttlMs: INCIDENCIAS_DETAIL_CACHE_TTL_MS, maxEntries: INCIDENCIAS_DETAIL_CACHE_MAX_ENTRIES },
     fixedTechnicianPolicyOwnedByBackend: true,
   };
 }
@@ -2478,6 +2564,7 @@ export const getDebugSnapshot = getIncidenciasApiSnapshot;
 
 export default {
   listIncidencias,
+  loadIncidenciasPage,
   loadIncidencias,
   hydrateIncidenciasFromCache,
   clearIncidenciasCache,

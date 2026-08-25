@@ -39,7 +39,7 @@ const TECH_INLINE = ".incidencias-modal-technician-inline[data-technician-assign
 const TECH_EYE = "[data-technician-profile-eye='true']";
 const TECH_AVATAR_FRAME = "[data-modal-technician-avatar-frame='true']";
 const TECH_AVATAR_IMG = "[data-modal-technician-avatar-img='true']";
-const POLL_MS = 30000;
+const POLL_MS = 90000;
 
 const PENDING_TITLE = "Pendiente de revisión";
 const PENDING_MESSAGE =

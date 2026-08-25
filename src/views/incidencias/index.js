@@ -31,7 +31,9 @@ import {
 
 import {
   listIncidencias,
+  loadIncidenciasPage,
   hydrateIncidenciasFromCache,
+  INCIDENCIAS_LIST_LIMIT,
   INCIDENCIAS_CACHE_TTL_MS,
   createIncidencia,
   updateIncidencia,
@@ -75,7 +77,7 @@ import {
 } from "./incidencias.options.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.extreme.v34.interaction-stable";
+  "incidencias.index.extreme.v35.cursor-production";
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
@@ -83,11 +85,13 @@ export const INCIDENCIAS_VIEW_VERSION =
 const DEFAULT_VISIBLE_LIMIT = 20;
 const DEFAULT_SORT_ORDER = "desc";
 const DEFAULT_SORT_MODE = "date";
-const AUTO_REFRESH_INTERVAL_MS = INCIDENCIAS_CACHE_TTL_MS;
+const AUTO_REFRESH_INTERVAL_MS = Math.max(INCIDENCIAS_CACHE_TTL_MS * 3, 180000);
 
 const USER_SEARCH_MIN_LENGTH = 2;
 const USER_SEARCH_LIMIT = 8;
 const USER_SEARCH_DEBOUNCE_MS = 220;
+const LIST_SEARCH_MIN_LENGTH = 3;
+const LIST_SEARCH_DEBOUNCE_MS = 350;
 
 const ROUTER_EVENT_HANDLED_KEY =
   "__onionRouterHandled";
@@ -637,6 +641,35 @@ function replaceByTicketId(
   });
 }
 
+function mergeTicketPage(currentItems = [], incomingItems = []) {
+  const map = new Map();
+
+  for (const current of safeArray(currentItems)) {
+    const id = getTicketId(current);
+    if (id) map.set(id, current);
+  }
+
+  for (const incoming of safeArray(incomingItems)) {
+    const id = getTicketId(incoming);
+    if (!id) continue;
+    map.set(
+      id,
+      map.has(id)
+        ? mergeTicketData(map.get(id), incoming)
+        : incoming
+    );
+  }
+
+  return [...map.values()].sort((a, b) => {
+    const diff = ticketSortTime(b) - ticketSortTime(a);
+    if (diff !== 0) return diff;
+    return getTicketId(b).localeCompare(getTicketId(a), "es", {
+      numeric: true,
+      sensitivity: "base",
+    });
+  });
+}
+
 function nextFrame(callback) {
   if (!isBrowser()) {
     return 0;
@@ -1113,6 +1146,12 @@ function createIncidenciasController(
   let loading = false;
   let refreshing = false;
   let creating = false;
+  let nextCursor = "";
+  let serverSearch = "";
+  let listSearchTimer = 0;
+  let listSearchSeq = 0;
+  let loadMoreSeq = 0;
+  let pageController = null;
   let loadingMore = false;
 
   let error = "";
@@ -3087,33 +3126,31 @@ function createIncidenciasController(
     return true;
   }
 
-  async function load(
-    options = {}
-  ) {
-    const seq =
-      ++loadSeq;
+function clearListSearchTimer() {
+  if (!listSearchTimer) return false;
 
-    const silent =
-      options.silent === true;
+  try {
+    window.clearTimeout(listSearchTimer);
+  } catch {
+    // noop
+  }
 
-    const force =
-      options.force === true;
+  listSearchTimer = 0;
+  return true;
+}
 
-    const background =
-      options.background === true;
-
-    const hasItems =
-      items.length > 0;
+async function load(options = {}) {
+    const seq = ++loadSeq;
+    const silent = options.silent === true;
+    const force = options.force === true;
+    const background = options.background === true;
+    const hasItems = items.length > 0;
 
     error = "";
 
     if (!silent) {
-      loading =
-        !hasItems;
-
-      refreshing =
-        force &&
-        hasItems;
+      loading = !hasItems;
+      refreshing = force && hasItems;
 
       if (loading) {
         renderLoading();
@@ -3123,78 +3160,55 @@ function createIncidenciasController(
     }
 
     loadController?.abort?.();
-    const requestController = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const requestController = typeof AbortController !== "undefined"
+      ? new AbortController()
+      : null;
     loadController = requestController;
 
     try {
-      const response =
-        await listIncidencias({
-          returnStaleOnError: true,
-          force,
-          signal: requestController?.signal,
-        });
+      const response = await loadIncidenciasPage({
+        signal: requestController?.signal,
+        query: {
+          pageMode: "cursor",
+          limit: INCIDENCIAS_LIST_LIMIT,
+          ...(serverSearch ? { q: serverSearch } : {}),
+        },
+      });
 
-      if (
-        destroyed ||
-        seq !== loadSeq
-      ) {
+      if (destroyed || seq !== loadSeq) {
         return response;
       }
 
-      items =
-        safeArray(
-          response.items
-        );
-
-      total =
-        Number(
-          response.total ||
-          items.length
-        ) ||
-        items.length;
-
-      error =
-        response.stale
-          ? cleanText(
-              response.error?.message,
-              ""
-            )
-          : "";
+      items = safeArray(response.items);
+      total = Number(response.total || items.length) || items.length;
+      nextCursor = cleanText(response.nextCursor, "");
+      error = response.stale
+        ? cleanText(response.error?.message, "")
+        : "";
 
       loading = false;
       refreshing = false;
 
       render(
         background
-          ? {
-              listPatch: true,
-              skipModals: true,
-            }
+          ? { listPatch: true, skipModals: true }
           : {}
       );
 
       return response;
     } catch (loadError) {
-      if (
-        destroyed ||
-        seq !== loadSeq
-      ) {
+      if (destroyed || seq !== loadSeq) {
         return null;
       }
 
-      error =
-        safeError(loadError);
-
+      error = safeError(loadError);
       loading = false;
       refreshing = false;
 
       if (items.length) {
         render(
           background
-            ? {
-                listPatch: true,
-                skipModals: true,
-              }
+            ? { listPatch: true, skipModals: true }
             : {}
         );
         return null;
@@ -5569,19 +5583,50 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
     return true;
   }
 
-  function setSearch(
-    value = ""
-  ) {
-    search =
-      cleanText(
-        value,
-        ""
-      );
-
-    visibleLimit =
-      DEFAULT_VISIBLE_LIMIT;
-
+function setSearch(value = "") {
+    const next = cleanText(value, "");
+    search = next;
+    visibleLimit = DEFAULT_VISIBLE_LIMIT;
     renderWithFilteredItems();
+
+    clearListSearchTimer();
+    const requestedServerSearch =
+      next.length >= LIST_SEARCH_MIN_LENGTH
+        ? next
+        : "";
+
+    if (requestedServerSearch === serverSearch) {
+      return true;
+    }
+
+    const seq = ++listSearchSeq;
+
+    const commitSearch = async () => {
+      if (destroyed || seq !== listSearchSeq) return false;
+
+      serverSearch = requestedServerSearch;
+      nextCursor = "";
+      visibleLimit = DEFAULT_VISIBLE_LIMIT;
+
+      await load({
+        force: true,
+        silent: true,
+        background: false,
+        cache: false,
+      });
+
+      return true;
+    };
+
+    if (!isBrowser()) {
+      void commitSearch();
+      return true;
+    }
+
+    listSearchTimer = window.setTimeout(() => {
+      listSearchTimer = 0;
+      void commitSearch();
+    }, LIST_SEARCH_DEBOUNCE_MS);
 
     return true;
   }
@@ -5652,6 +5697,10 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
   function clearFilters() {
     filter = "all";
     search = "";
+    serverSearch = "";
+    nextCursor = "";
+    listSearchSeq += 1;
+    clearListSearchTimer();
     sortMode = DEFAULT_SORT_MODE;
     sortOrder = DEFAULT_SORT_ORDER;
 
@@ -5659,6 +5708,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
       DEFAULT_VISIBLE_LIMIT;
 
     renderWithFilteredItems();
+    void load({ force: true, silent: true, cache: false });
 
     return true;
   }
@@ -5674,17 +5724,72 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
     return true;
   }
 
-  function loadMore() {
+async function loadMore() {
+    if (loadingMore) return false;
+
+    const localVisible = filteredItems().length;
+
+    if (visibleLimit < localVisible) {
+      visibleLimit += DEFAULT_VISIBLE_LIMIT;
+      renderWithFilteredItems();
+      return true;
+    }
+
+    if (!nextCursor) {
+      return false;
+    }
+
+    const seq = ++loadMoreSeq;
+    const cursor = nextCursor;
     loadingMore = true;
-
-    visibleLimit +=
-      DEFAULT_VISIBLE_LIMIT;
-
     renderWithFilteredItems();
 
-    loadingMore = false;
+    pageController?.abort?.();
+    pageController = typeof AbortController !== "undefined"
+      ? new AbortController()
+      : null;
 
-    return true;
+    try {
+      const response = await loadIncidenciasPage({
+        signal: pageController?.signal,
+        query: {
+          pageMode: "cursor",
+          cursor,
+          limit: INCIDENCIAS_LIST_LIMIT,
+          ...(serverSearch ? { q: serverSearch } : {}),
+        },
+      });
+
+      if (destroyed || seq !== loadMoreSeq) {
+        return false;
+      }
+
+      items = mergeTicketPage(items, response.items);
+      total = Math.max(
+        Number(response.total || total || items.length) || items.length,
+        items.length
+      );
+      nextCursor = cleanText(response.nextCursor, "");
+      visibleLimit += DEFAULT_VISIBLE_LIMIT;
+      error = "";
+
+      renderWithFilteredItems();
+      return true;
+    } catch (pageError) {
+      if (destroyed || seq !== loadMoreSeq) {
+        return false;
+      }
+
+      error = safeError(pageError, "No se pudieron cargar más incidencias.");
+      renderWithFilteredItems();
+      return false;
+    } finally {
+      if (seq === loadMoreSeq) {
+        loadingMore = false;
+        pageController = null;
+        renderWithFilteredItems();
+      }
+    }
   }
 
   async function refresh() {
@@ -5871,6 +5976,13 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
       INCIDENCIAS_ACTIONS.CLEAR_SEARCH
     ) {
       return setSearch("");
+    }
+
+    if (
+      type ===
+      INCIDENCIAS_ACTIONS.REFRESH
+    ) {
+      return refresh();
     }
 
     if (
@@ -6751,6 +6863,11 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
       detailController = null;
 
       clearUserSearchTimer();
+      clearListSearchTimer();
+      listSearchSeq += 1;
+      loadMoreSeq += 1;
+      pageController?.abort?.();
+      pageController = null;
 
       cancelScheduledRender();
       cancelScheduledModalRender();
@@ -6995,7 +7112,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
 
           attachmentPreviewUsesApiViewContract: true,
           attachmentPreviewRequiresValidatedUrl: true,
-          attachmentPreviewScrollIntoView: true,
+          attachmentPreviewScrollIntoView: false,
           attachmentPreviewFocusAfterOpen: true,
           attachmentPreviewRaceProtected: true,
 

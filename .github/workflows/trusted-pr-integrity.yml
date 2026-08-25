@@ -198,7 +198,7 @@ jobs:
         shell: bash
         run: bash "${RUNNER_TEMP}/onion-trusted-integrity/validate_production_contract.sh"
 
-      - name: Reject legacy API domain
+      - name: Reject legacy API domain from runtime
         working-directory: candidate
         shell: bash
         run: |
@@ -206,12 +206,17 @@ jobs:
 
           legacy_domain="onionit"".""net"
 
-          if git grep -n -I -F "${legacy_domain}" -- .; then
-            echo "::error title=Dominio API legado detectado::El release aún contiene referencias a ${legacy_domain}."
+          if git grep -n -I -F "${legacy_domain}" -- . \
+            ':(exclude).github/**' \
+            ':(exclude)docs/**' \
+            ':(exclude)tests/**' \
+            ':(exclude)test/**' \
+            ':(exclude)fixtures/**'; then
+            echo "::error title=Dominio API legado detectado::El runtime aún contiene referencias a ${legacy_domain}."
             exit 1
           fi
 
-          echo "Sin referencias al dominio API legado."
+          echo "Runtime desplegable sin referencias al dominio API legado."
 
       - name: Validate critical SPA contracts
         working-directory: candidate

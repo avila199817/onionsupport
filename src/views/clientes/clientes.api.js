@@ -48,10 +48,6 @@ function safeObject(value, fallback = {}) {
     : fallback;
 }
 
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
 function first(...values) {
   for (const value of values) {
     if (value === null || value === undefined) continue;
@@ -137,10 +133,48 @@ function errorMessage(response = {}, fallback = "No se pudieron cargar los clien
       data.error,
       data.code,
       data.data?.message,
+      data.response?.data?.message,
       fallback
     ),
     fallback
   );
+}
+
+function errorCode(error = null) {
+  return cleanText(
+    first(
+      error?.code,
+      error?.data?.code,
+      error?.payload?.code,
+      error?.response?.data?.code,
+      error?.response?.code,
+      error?.error,
+      ""
+    ),
+    ""
+  ).toUpperCase();
+}
+
+function normalizePageError(error = null) {
+  if (errorCode(error) !== "CLIENTES_CURSOR_REJECTED") {
+    return error;
+  }
+
+  const normalized = new Error(
+    errorMessage(error, "El cursor de clientes ya no es válido.")
+  );
+  normalized.name = cleanText(error?.name, "Error");
+  normalized.code = "CLIENTES_CURSOR_INVALID";
+  normalized.status = Number(
+    first(
+      error?.status,
+      error?.statusCode,
+      error?.response?.status,
+      error?.response?.data?.status,
+      400
+    )
+  ) || 400;
+  return normalized;
 }
 
 function normalizedMeta(response = {}) {
@@ -178,16 +212,26 @@ export async function fetchClientesPage(options = {}) {
     query.cursor = cursor;
   }
 
-  const response = await Http.get(CLIENTES_PAGE_ENDPOINT, {
-    timeout: clampInt(options.timeout, CLIENTES_TIMEOUT, 1000, 120_000),
-    query,
-    source: cleanText(options.source, "views.clientes.api.page"),
-    signal: options.signal,
-  });
+  let response;
+  try {
+    response = await Http.get(CLIENTES_PAGE_ENDPOINT, {
+      timeout: clampInt(options.timeout, CLIENTES_TIMEOUT, 1000, 120_000),
+      query,
+      source: cleanText(options.source, "views.clientes.api.page"),
+      signal: options.signal,
+    });
+  } catch (requestError) {
+    throw normalizePageError(requestError);
+  }
 
   if (responseLooksFailed(response)) {
     const error = new Error(errorMessage(response));
-    error.code = cleanText(first(response?.code, response?.error, "CLIENTES_PAGE_REJECTED"));
+    const code = cleanText(
+      first(response?.code, response?.error, "CLIENTES_PAGE_REJECTED")
+    ).toUpperCase();
+    error.code = code === "CLIENTES_CURSOR_REJECTED"
+      ? "CLIENTES_CURSOR_INVALID"
+      : code;
     error.status = Number(response?.status || 400) || 400;
     throw error;
   }
@@ -337,6 +381,7 @@ export function getClientesApiSnapshot() {
     }),
     safeguards: Object.freeze({
       cursorPagination: true,
+      cursorRejectedNormalizesToSafeReset: true,
       noAutomaticPageDrain: true,
       noLegacyDatasetCache: true,
       serverSearch: true,

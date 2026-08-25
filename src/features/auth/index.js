@@ -22,7 +22,7 @@ import {
   normalizeUserSlug,
 } from "../../core/config.js";
 
-export const AUTH_VERSION = "auth.minimal.v9-token-single-read";
+export const AUTH_VERSION = "auth.minimal.v10-logout-fail-closed";
 const ROOT_PATH = "/";
 const LEGACY_RESET_TOKEN_PATH = /(\/(?:reset-password|password-reset)\/confirm\/)([^/?#\s]+)/gi;
 const AUTH_ROUTES = Object.freeze({
@@ -34,8 +34,8 @@ const AUTH_ROUTES = Object.freeze({
 const AUTH_HOME = Object.freeze({ canonical: ROOT_PATH, userPrefix: USER_HOME_PREFIX || "/@" });
 
 const sessionState = {
-  loggingIn: false, restoring: false, refreshing: false, checking: false,
-  loginPromise: null, restorePromise: null, refreshPromise: null, mePromise: null,
+  loggingIn: false, loggingOut: false, restoring: false, refreshing: false, checking: false,
+  loginPromise: null, logoutPromise: null, restorePromise: null, refreshPromise: null, mePromise: null,
   generation: 0, activeFlows: 0,
   lastLoginAt: null, lastRestoreAt: null, lastRefreshAt: null, lastMeAt: null, lastLogoutAt: null,
   lastError: null,
@@ -441,13 +441,13 @@ function getAuthModuleSnapshot() {
     routes: AUTH_ROUTES, home: AUTH_HOME,
     endpoints: Object.freeze({ login: AUTH_ENDPOINTS.login, me: AUTH_ENDPOINTS.me, refresh: AUTH_ENDPOINTS.refresh, logout: AUTH_ENDPOINTS.logout }),
     session: Object.freeze({
-      loggingIn: sessionState.loggingIn, restoring: sessionState.restoring, refreshing: sessionState.refreshing, checking: sessionState.checking,
+      loggingIn: sessionState.loggingIn, loggingOut: sessionState.loggingOut, restoring: sessionState.restoring, refreshing: sessionState.refreshing, checking: sessionState.checking,
       activeFlows: sessionState.activeFlows, generation: sessionState.generation,
       lastLoginAt: sessionState.lastLoginAt, lastRestoreAt: sessionState.lastRestoreAt, lastRefreshAt: sessionState.lastRefreshAt,
       lastMeAt: sessionState.lastMeAt, lastLogoutAt: sessionState.lastLogoutAt, lastError: sessionState.lastError,
     }),
     selectors: Object.freeze({ ...selectorMetrics }),
-    policy: Object.freeze({ runtimeStateZeroCopyRead: true, singleReadSelectors: true, lazyHttpTokenFallback: false, runtimeStateSingleWrite: true, publicUserIsolation: true, publicSessionIsolation: true, httpOnlyRefreshToken: true }),
+    policy: Object.freeze({ runtimeStateZeroCopyRead: true, singleReadSelectors: true, lazyHttpTokenFallback: false, runtimeStateSingleWrite: true, publicUserIsolation: true, publicSessionIsolation: true, httpOnlyRefreshToken: true, remoteLogoutFailClosed: true, expiredAccessTokenLogoutRefreshRetry: true }),
   });
 }
 function shouldAttemptRefresh(options = {}) {
@@ -555,11 +555,57 @@ async function restoreSession(options = {}) {
   return sessionState.restorePromise;
 }
 async function logout(options = {}) {
-  invalidateFlows(); abortActiveFlows(); let remoteLogout = null;
-  try { remoteLogout = Http.logout(options); } catch { remoteLogout = null; }
-  clearSession({ invalidate: false });
-  if (remoteLogout) { try { await remoteLogout; } catch {} }
-  sessionState.lastError = null; sessionState.lastLogoutAt = Date.now(); return true;
+  if (sessionState.logoutPromise) return sessionState.logoutPromise;
+
+  invalidateFlows();
+  abortActiveFlows();
+  sessionState.loggingOut = true;
+
+  sessionState.logoutPromise = (async () => {
+    try {
+      const result = await Http.logout(options);
+
+      if (
+        result?.ok !== true ||
+        result?.loggedOut !== true ||
+        result?.serverRevocationConfirmed !== true
+      ) {
+        const error = new Error(
+          "El servidor no confirmó la revocación de la sesión."
+        );
+        error.name = "AuthLogoutError";
+        error.code = "LOGOUT_REVOCATION_UNCONFIRMED";
+        error.status = 503;
+        throw error;
+      }
+
+      clearSession({ invalidate: false });
+      sessionState.lastError = null;
+      sessionState.lastLogoutAt = Date.now();
+
+      return true;
+    } catch (error) {
+      /*
+        Si refresh/requireAuth demuestra que la sesión ya no es válida,
+        limpiar el cliente es seguro e idempotente. Red/5xx o una
+        revocación no confirmada conservan el estado para permitir retry.
+      */
+      if (shouldClearSessionForAuthError(error)) {
+        clearSession({ invalidate: false });
+        sessionState.lastError = null;
+        sessionState.lastLogoutAt = Date.now();
+        return true;
+      }
+
+      sessionState.lastError = safeError(error, "logout");
+      throw error;
+    } finally {
+      sessionState.loggingOut = false;
+      sessionState.logoutPromise = null;
+    }
+  })();
+
+  return sessionState.logoutPromise;
 }
 
 function tokenFromPayload(payload = {}) {

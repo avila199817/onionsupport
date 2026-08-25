@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { AppCore } from "../../src/core/index.js";
 import { Auth, AUTH_VERSION } from "../../src/features/auth/index.js";
 
-assert.equal(AUTH_VERSION, "auth.minimal.v9-token-single-read");
+assert.equal(AUTH_VERSION, "auth.minimal.v10-logout-fail-closed");
 assert.equal(typeof Auth.getSelectorStats, "function");
 
 Auth.init();

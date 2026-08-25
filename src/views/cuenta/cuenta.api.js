@@ -2,7 +2,7 @@
    Onion Support - Cuenta API
    Archivo: /src/views/cuenta/cuenta.api.js
 
-   PRODUCTIVO · SELF ACCOUNT · CANONICAL RUNTIME · V5
+   PRODUCTIVO · SELF ACCOUNT · CANONICAL RUNTIME · V6
 
    Backend self-service real usado por la vista:
    - GET    /api/auth/me
@@ -25,7 +25,7 @@ import Http from "../../core/http.js";
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 
 export const CUENTA_API_VERSION =
-  "cuenta.api.backend-contract.v5-canonical-runtime";
+  "cuenta.api.backend-contract.v6-current-password";
 
 export const CUENTA_RESOURCE = "cuenta";
 
@@ -48,7 +48,7 @@ export const CUENTA_PASSWORD_POLICY = Object.freeze({
   requiresUppercase: true,
   requiresNumber: true,
   requiresSymbol: true,
-  currentPasswordRequiredByDefault: false,
+  currentPasswordRequiredByDefault: true,
 });
 
 export const CUENTA_AVATAR_POLICY = Object.freeze({
@@ -640,6 +640,14 @@ export function validateCuentaPasswordPayload(payload = {}) {
   };
 
   const password = normalized.newPassword;
+
+  if (!normalized.currentPassword.trim()) {
+    return {
+      ok: false,
+      code: "CURRENT_PASSWORD_REQUIRED",
+      message: "Introduce tu contraseña actual.",
+    };
+  }
 
   if (!password.trim()) {
     return { ok: false, code: "INVALID_INPUT", message: "Introduce una nueva contraseña." };

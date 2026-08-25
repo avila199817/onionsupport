@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import sys
 import time
 from pathlib import Path
@@ -33,6 +34,10 @@ PUBLIC_SURFACES = (
 )
 SCRIPT_TAG = '<script src="/src/analytics/google-tag.js"></script>'
 REQUEST_TIMEOUT_SECONDS = 20.0
+CLICK_CAPTURE_PATTERN = re.compile(
+    r'document\.addEventListener\(\s*"click"\s*,.*?\}\s*,\s*true\s*\);',
+    re.DOTALL,
+)
 
 
 def sha256(data: bytes) -> str:
@@ -57,10 +62,11 @@ def validate_source(root: Path) -> list[str]:
         'window.gtag("config", GOOGLE_ADS_TAG_ID);',
         'window.gtag("event", "conversion", {',
         "send_to: WHATSAPP_CONVERSION_DESTINATION,",
-        'document.addEventListener(',
-        '"click",',
+        'if (/^whatsapp:/i.test(href)) return true;',
         'host === "wa.me"',
+        'host.endsWith(".wa.me")',
         'host === "whatsapp.com"',
+        'host.endsWith(".whatsapp.com")',
     )
 
     for snippet in required_snippets:
@@ -75,6 +81,11 @@ def validate_source(root: Path) -> list[str]:
     if text.count(WHATSAPP_CONVERSION_DESTINATION) != 1:
         errors.append(
             f"{BOOTSTRAP_PATH}: el destino de conversión de WhatsApp debe existir exactamente una vez"
+        )
+
+    if not CLICK_CAPTURE_PATTERN.search(text):
+        errors.append(
+            f"{BOOTSTRAP_PATH}: el listener de WhatsApp debe ejecutarse en fase de captura"
         )
 
     if not text.rstrip().endswith("})();"):

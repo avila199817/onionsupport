@@ -1,0 +1,53 @@
+name: One-shot Spain Google CSP endpoint
+
+on:
+  push:
+    branches:
+      - fix/csp-google-es
+    paths:
+      - .github/workflows/one-shot-csp-google-es.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/csp-google-es
+      - name: Add regional Google endpoint to CSP
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path('staticwebapp.config.json')
+          data = json.loads(path.read_text(encoding='utf-8'))
+          key = 'Content-Security-Policy'
+          csp = data['globalHeaders'][key]
+          directives = []
+          for raw in csp.split(';'):
+              raw = raw.strip()
+              if not raw:
+                  continue
+              parts = raw.split()
+              name, values = parts[0], parts[1:]
+              if name in {'img-src', 'connect-src'} and 'https://www.google.es' not in values:
+                  values.append('https://www.google.es')
+              directives.append(' '.join([name, *values]))
+          data['globalHeaders'][key] = '; '.join(directives) + ';'
+          path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          PY
+          grep -F 'https://www.google.es' staticwebapp.config.json
+      - name: Commit patch and remove one-shot workflow
+        shell: bash
+        run: |
+          rm -f .github/workflows/one-shot-csp-google-es.yml
+          git config user.name 'Onion Support'
+          git config user.email 'cristian@onionsupport.com'
+          git add staticwebapp.config.json .github/workflows/one-shot-csp-google-es.yml
+          git commit -m 'fix(csp): allow Google Spain advertising endpoint'
+          git push origin HEAD:fix/csp-google-es

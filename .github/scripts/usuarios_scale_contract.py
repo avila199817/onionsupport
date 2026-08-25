@@ -34,6 +34,12 @@ require(CURSOR, "USUARIOS_CURSOR_PAGE_SIZE = 50", "Cursor client must use bounde
 require(CURSOR, "query.ct = token", "Cursor client must forward opaque continuation token")
 require(CURSOR, "query.status = statusFilter", "Cursor client must send status filter to backend")
 require(CURSOR, "totalKnown", "Cursor client must preserve exact-total knowledge")
+require(CURSOR, "const shouldIncludeTotal", "Cursor client must gate exact totals")
+require(CURSOR, "includeTotal === true &&", "Exact totals must remain explicit opt-in")
+require(CURSOR, "!token &&", "Continuation pages must never request exact totals")
+require(CURSOR, "!text &&", "Search queries must never request exact totals")
+require(CURSOR, 'statusFilter === "all"', "Filtered status queries must never request exact totals")
+require(CURSOR, "includeTotal: shouldIncludeTotal", "Effective total gate must be sent to backend")
 reject(CURSOR, "USUARIOS_MAX_PAGES", "Cursor client must not contain a page-count ceiling")
 
 require(TEMPLATE, "state.hasMore", "Template must render backend hasMore state")

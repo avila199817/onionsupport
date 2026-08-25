@@ -1,0 +1,49 @@
+name: One-shot GA4 region1 CSP finalizer
+
+on:
+  push:
+    branches:
+      - fix/ga4-region1-csp
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/ga4-region1-csp
+          fetch-depth: 0
+
+      - name: Allow exact GA4 region1 collection host
+        shell: python
+        run: |
+          from pathlib import Path
+          import json
+
+          path = Path('staticwebapp.config.json')
+          text = path.read_text(encoding='utf-8')
+          old = 'https://analytics.google.com https://stats.g.doubleclick.net https://www.google.com wss://api.onionsupport.com'
+          new = 'https://analytics.google.com https://region1.analytics.google.com https://stats.g.doubleclick.net https://www.google.com wss://api.onionsupport.com'
+          if old not in text:
+              raise SystemExit('Expected CSP anchor not found')
+          text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+          data = json.loads(text)
+          csp = data['globalHeaders']['Content-Security-Policy']
+          assert csp.count('https://region1.analytics.google.com') == 1
+          assert "script-src 'self' https://www.googletagmanager.com" in csp
+          assert "script-src 'unsafe-inline'" not in csp
+          print('CSP JSON valid; exact GA4 region1 host allowed once.')
+
+      - name: Remove one-shot workflow and commit patch
+        run: |
+          rm .github/workflows/one-shot-ga4-region1-csp.yml
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git add staticwebapp.config.json .github/workflows/one-shot-ga4-region1-csp.yml
+          git commit -m "fix(analytics): allow GA4 region1 collection endpoint"
+          git push origin HEAD:fix/ga4-region1-csp

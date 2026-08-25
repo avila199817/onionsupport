@@ -48,7 +48,7 @@ export const CUENTA_PASSWORD_POLICY = Object.freeze({
   requiresUppercase: true,
   requiresNumber: true,
   requiresSymbol: true,
-  currentPasswordRequiredByDefault: false,
+  currentPasswordRequiredByDefault: true,
 });
 
 export const CUENTA_AVATAR_POLICY = Object.freeze({
@@ -640,6 +640,14 @@ export function validateCuentaPasswordPayload(payload = {}) {
   };
 
   const password = normalized.newPassword;
+
+  if (!normalized.currentPassword.trim()) {
+    return {
+      ok: false,
+      code: "CURRENT_PASSWORD_REQUIRED",
+      message: "Introduce tu contraseña actual.",
+    };
+  }
 
   if (!password.trim()) {
     return { ok: false, code: "INVALID_INPUT", message: "Introduce una nueva contraseña." };

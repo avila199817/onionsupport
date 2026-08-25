@@ -132,3 +132,22 @@ jobs:
           --revision "${{ steps.revision.outputs.sha }}"
           --attempts 8
           --delay 10
+
+      - name: Verify Google measurement bootstrap exactly
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          contract="verification-tooling/.github/scripts/google_measurement_contract.py"
+          if [[ ! -f "${contract}" ]]; then
+            echo "Google measurement contract is not present in this trusted legacy revision; skipping."
+            exit 0
+          fi
+
+          python3 -m py_compile "${contract}"
+          python3 "${contract}" \
+            --root expected-main \
+            --base-url "${{ steps.canonical.outputs.site_url }}" \
+            --revision "${{ steps.revision.outputs.sha }}" \
+            --attempts 3 \
+            --delay 5

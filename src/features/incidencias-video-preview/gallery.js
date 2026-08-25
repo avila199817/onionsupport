@@ -16,6 +16,7 @@
 export const INCIDENCIAS_MEDIA_GALLERY_VERSION =
   "incidencias-media-gallery.v1.controller-bridged-carousel";
 
+const VIEW = "#view-container, [data-router-view='true']";
 const HOST = "[data-incidencias-modal-host='true']";
 const ROOT = "[data-incidencias-modal-root='true']";
 const VIEWER = "[data-incidencias-media-viewer='true']";
@@ -34,6 +35,8 @@ const NAVIGATION_TIMEOUT_MS = 3500;
 let mounted = false;
 let modalHost = null;
 let observer = null;
+let viewObserver = null;
+let mountRoot = null;
 let frame = 0;
 let navigationTimer = 0;
 let navigationTargetId = "";
@@ -392,6 +395,7 @@ function onKeyDown(event) {
   }
 }
 
+
 function unbindHost(host = modalHost) {
   if (!host) return false;
 
@@ -490,7 +494,16 @@ export function mountIncidenciasMediaGallery() {
     return false;
   }
 
+  mountRoot = document.querySelector(VIEW) || document.body;
+  if (!mountRoot) return false;
+
   mounted = true;
+
+  viewObserver = new MutationObserver(schedule);
+  viewObserver.observe(mountRoot, {
+    childList: true,
+    subtree: true,
+  });
 
   syncModalHost();
   schedule();
@@ -505,8 +518,11 @@ export function destroyIncidenciasMediaGallery() {
   if (modalHost) unbindHost(modalHost);
 
   observer?.disconnect?.();
+  viewObserver?.disconnect?.();
   observer = null;
+  viewObserver = null;
   modalHost = null;
+  mountRoot = null;
 
   if (frame) {
     window.cancelAnimationFrame?.(frame);
@@ -543,6 +559,7 @@ export function getIncidenciasMediaGallerySnapshot() {
       keyboardArrows: true,
       nativeMediaKeysPreserved: true,
       scrollSessionDelegatedToCore: true,
+      hostDiscoveryScope: "stable-router-view",
     }),
   });
 }

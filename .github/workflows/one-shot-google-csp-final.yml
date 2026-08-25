@@ -1,0 +1,127 @@
+name: One-shot final Google CSP compatibility
+
+on:
+  push:
+    branches:
+      - fix/google-csp-preview-final
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/google-csp-preview-final
+          fetch-depth: 0
+
+      - name: Patch CSP safely
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path('staticwebapp.config.json')
+          data = json.loads(path.read_text(encoding='utf-8'))
+          csp = data['globalHeaders']['Content-Security-Policy']
+
+          directives = []
+          index = {}
+          for raw in csp.split(';'):
+              raw = raw.strip()
+              if not raw:
+                  continue
+              bits = raw.split()
+              name, values = bits[0], bits[1:]
+              index[name] = len(directives)
+              directives.append([name, values])
+
+          def add(name, *values):
+              if name not in index:
+                  index[name] = len(directives)
+                  directives.append([name, []])
+              bucket = directives[index[name]][1]
+              for value in values:
+                  if value not in bucket:
+                      bucket.append(value)
+
+          # Google Ads conversion + linker endpoints from Google's CSP guide.
+          add('script-src',
+              'https://www.googleadservices.com',
+              'https://www.google.com',
+              'https://pagead2.googlesyndication.com',
+              'https://googleads.g.doubleclick.net',
+              'https://tagmanager.google.com')
+          add('script-src-elem',
+              "'self'",
+              'https://www.googletagmanager.com',
+              'https://*.googletagmanager.com',
+              'https://www.googleadservices.com',
+              'https://www.google.com',
+              'https://pagead2.googlesyndication.com',
+              'https://googleads.g.doubleclick.net',
+              'https://tagmanager.google.com')
+
+          # Tag Assistant / Preview Mode assets, without globally enabling unsafe-inline.
+          add('style-src',
+              'https://www.googletagmanager.com',
+              'https://tagmanager.google.com',
+              'https://fonts.googleapis.com')
+          add('style-src-elem',
+              "'self'",
+              'https://www.googletagmanager.com',
+              'https://tagmanager.google.com',
+              'https://fonts.googleapis.com',
+              "'sha256-lZlF9cNORfbYeL4/sFRvj9z4mJYNsXmaN6ffGIsJb2k='")
+          add('font-src', 'https://fonts.gstatic.com')
+          add('img-src',
+              'https://pagead2.googlesyndication.com',
+              'https://google.com',
+              'https://www.google.com',
+              'https://fonts.gstatic.com',
+              'https://ssl.gstatic.com',
+              'https://www.gstatic.com')
+          add('connect-src',
+              'https://ad.doubleclick.net',
+              'https://google.com',
+              'https://www.google.com')
+
+          data['globalHeaders']['Content-Security-Policy'] = '; '.join(
+              name + ((' ' + ' '.join(values)) if values else '')
+              for name, values in directives
+          ) + ';'
+
+          path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+          # Hard assertions for the exact failures reported by Chrome/Tag Assistant.
+          final = data['globalHeaders']['Content-Security-Policy']
+          required = [
+              'https://ad.doubleclick.net',
+              'https://fonts.gstatic.com',
+              'https://fonts.googleapis.com',
+              'https://tagmanager.google.com',
+              'https://pagead2.googlesyndication.com',
+              'https://googleads.g.doubleclick.net',
+              "'sha256-lZlF9cNORfbYeL4/sFRvj9z4mJYNsXmaN6ffGIsJb2k='",
+          ]
+          missing = [x for x in required if x not in final]
+          if missing:
+              raise SystemExit(f'Missing CSP tokens: {missing}')
+          if "style-src-elem 'self' 'unsafe-inline'" in final:
+              raise SystemExit('Refusing to weaken style-src-elem with unsafe-inline')
+          PY
+          python3 -m json.tool staticwebapp.config.json >/dev/null
+
+      - name: Commit CSP patch and remove one-shot workflow
+        shell: bash
+        run: |
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git rm .github/workflows/one-shot-google-csp-final.yml
+          git add staticwebapp.config.json
+          git commit -m "fix(csp): complete Google Ads and Tag Assistant allowlist"
+          git push origin HEAD:fix/google-csp-preview-final

@@ -291,10 +291,13 @@ function getCurrentRole(context = {}, state = getAppState()) {
     "user"
   );
   try {
-    return AppCore?.normalizeRole?.(raw) || "user";
+    if (isFunction(AppCore?.normalizeRole)) {
+      return AppCore.normalizeRole(raw) || "user";
+    }
   } catch {
-    return normalizeKey(Array.isArray(raw) ? raw[0] : raw) === "admin" ? "admin" : "user";
+    // fallback below
   }
+  return normalizeKey(Array.isArray(raw) ? raw[0] : raw) === "admin" ? "admin" : "user";
 }
 function isAdminContext(context = {}) {
   return context.admin === true || getCurrentRole(context) === "admin";
@@ -742,13 +745,13 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
   function setFilter(value = "all") {
     const next = normalizeKey(value);
     filter = ["active", "pending", "blocked"].includes(next) ? next : "all";
-    void load({ silent: true });
+    void loadFirstPage({ silent: true });
     return filter;
   }
   function setSearch(value = "") {
     searchDraft = cleanText(value, "");
     search = searchDraft;
-    void load({ silent: true });
+    void loadFirstPage({ silent: true });
     return search;
   }
   function scheduleSearch(value = "") {
@@ -758,7 +761,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     searchTimer = window.setTimeout(() => {
       searchTimer = 0;
       search = cleanText(searchDraft, "");
-      void load({ silent: true });
+      void loadFirstPage({ silent: true });
     }, SEARCH_DEBOUNCE_MS);
     return true;
   }
@@ -768,7 +771,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     filter = "all";
     search = "";
     searchDraft = "";
-    void load({ silent: true });
+    void loadFirstPage({ silent: true });
     return true;
   }
   async function openUsuario(userId = "") {
@@ -1014,7 +1017,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     for (const eventName of CREATE_SUCCESS_EVENTS) {
       unsubscribers.push(subscribeEvent(eventName, () => {
         createOpen = false;
-        void load({ silent: true });
+        void loadFirstPage({ silent: true });
       }));
     }
     for (const eventName of CREATE_CLOSE_EVENTS) {

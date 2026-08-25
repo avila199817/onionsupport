@@ -27,9 +27,10 @@ runtime = "\n".join(
     path.read_text(encoding="utf-8")
     for path in (ROOT / "src").rglob("*.js")
 )
+legacy_api_domain = "api." + "onionit" + "." + "net"
 require(
-    "api.onionit.net" not in runtime.lower(),
-    "legacy api.onionit.net must not exist in frontend runtime",
+    legacy_api_domain not in runtime.lower(),
+    "legacy API domain must not exist in frontend runtime",
 )
 
 require(

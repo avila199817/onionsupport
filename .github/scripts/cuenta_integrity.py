@@ -115,13 +115,16 @@ REQUIRED_INDEX = (
 )
 
 REQUIRED_API = (
-    '"cuenta.api.backend-contract.v5-canonical-runtime"',
+    '"cuenta.api.backend-contract.v6-current-password"',
     'me: "/api/auth/me"',
     'changePassword: "/api/auth/change-password"',
     'deactivateSelf: "/api/auth/deactivate/self"',
     'usersAvatar: "/api/users/avatar"',
     "export function normalizeCuentaDetail",
     "export function validateCuentaPasswordPayload",
+    "currentPasswordRequiredByDefault: true",
+    "if (!normalized.currentPassword.trim()) {",
+    'code: "CURRENT_PASSWORD_REQUIRED"',
     "export function validateCuentaAvatarFile",
     "export function hydrateCuentaFromCache",
     "export async function loadCuenta",

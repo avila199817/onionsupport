@@ -2,24 +2,24 @@
    Onion Support · Incidencias Attachment Viewer
    Archivo: /src/features/incidencias-video-preview/index.js
 
-   Route enhancement del Modal Details:
-   - conserva el contrato canónico del controller/API;
-   - mueve la preview autorizada a un visor modal independiente;
-   - mantiene exactamente el scroll del ticket y devuelve el foco al opener;
-   - imagen y vídeo se contienen siempre dentro del viewport, sin scroll exterior;
-   - PDF usa el área disponible del visor y sólo desplaza su propio documento;
-   - vídeo MOV/MP4/M4V/WebM usa exclusivamente el /view canónico;
-   - iPhone MOV intenta dejar visible un fotograma inicial real;
-   - apertura/cierre simétricos con transición y soporte reduced-motion;
-   - focus trap, Escape, backdrop e inert del panel de fondo;
-   - una preview recreada por el patcher se adopta sin desmontar el visor.
+   VIEWER / VIDEO UX · V4
+   - visor modal independiente del flujo del ticket;
+   - conserva el scroll exacto del body del Modal Details;
+   - cancela cualquier desplazamiento automático inducido por la preview;
+   - devuelve el foco al opener sin mover el ticket;
+   - imagen/vídeo contenidos en viewport, PDF con scroll interno;
+   - vídeo MOV/MP4/M4V/WebM por /view canónico;
+   - primer fotograma real en el visor;
+   - primer fotograma real también en "Documentos actuales", reutilizando el skin canónico de miniaturas;
+   - fallback limpio cuando el navegador no decodifica el códec;
+   - apertura/cierre simétricos, Escape/backdrop/focus-trap/inert;
+   - sin monkey-patching de fetch, scrollIntoView ni APIs del navegador.
 
-   No hay monkey-patching de fetch, scroll ni APIs del navegador.
-   El controller continúa siendo la autoridad de abrir/cerrar/descargar.
+   El controller sigue siendo la autoridad de abrir/cerrar/descargar.
 ========================================================= */
 
 export const INCIDENCIAS_VIDEO_PREVIEW_VERSION =
-  "incidencias-video-preview.v3.fit-contained-motion";
+  "incidencias-video-preview.v4.scroll-anchor-video-thumbs";
 
 const VIEW = "#view-container, [data-router-view='true']";
 const HOST = "[data-incidencias-modal-host='true']";
@@ -33,6 +33,12 @@ const UNSUPPORTED_BOX = ".incidencias-modal-empty-box";
 const VIEWER_STAGE = "[data-incidencias-media-viewer-stage='true']";
 const ACTION_OPEN = "[data-detail-action='detail-attachment-open']";
 const ACTION_CLOSE = "[data-detail-action='detail-preview-close']";
+
+const ATTACHMENT_ROW = ".incidencias-modal-attachment-row";
+const ATTACHMENT_COPY = ".incidencias-modal-attachment-copy";
+const VIDEO_THUMB_CANDIDATE =
+  ".incidencias-modal-file-square[data-renderable-thumbnail='false']";
+const VIDEO_THUMB_FRAME = "[data-modal-video-thumb-frame='true']";
 
 const FOCUSABLE = [
   "a[href]",
@@ -49,11 +55,13 @@ const FOCUSABLE = [
 
 const VIDEO_EXT_RE = /\.(mov|qt|mp4|m4v|webm|ogv|ogg)$/i;
 const VIDEO_MIME_RE = /(?:^|\s)(video\/[a-z0-9.+-]+)(?:\s|·|$)/i;
+const VIDEO_LABEL_RE = /^(MOV|QT|MP4|M4V|WEBM|OGV|OGG)$/i;
 
 const SAS_GUARD_MS = 30_000;
 const DEFAULT_TTL_MS = 4 * 60_000;
 const FIRST_FRAME_SECONDS = 0.08;
 const CLOSE_TRANSITION_MS = 190;
+const SCROLL_EPSILON = 0.5;
 
 let mounted = false;
 let mountRoot = null;
@@ -68,9 +76,11 @@ let activeViewer = null;
 let pendingOpen = null;
 let closeTimer = 0;
 let controllerClosePass = false;
+let correctingScroll = false;
 
 const cache = new Map();
 const inflight = new Map();
+const thumbInflight = new Map();
 
 const browser = () =>
   typeof window !== "undefined" && typeof document !== "undefined";
@@ -92,7 +102,7 @@ function ticketId(root = null) {
   return text(root?.dataset?.ticketId || root?.dataset?.incidenciaId, "");
 }
 
-function attachmentId(preview = null) {
+function previewAttachmentId(preview = null) {
   return text(preview?.dataset?.previewAttachmentId, "");
 }
 
@@ -118,10 +128,13 @@ function isVideoPreview(preview = null) {
   );
 }
 
-function keyFor(root = null, preview = null) {
-  const ticket = ticketId(root);
-  const attachment = attachmentId(preview);
-  return ticket && attachment ? `${ticket}::${attachment}` : "";
+function cacheKey(ticket = "", attachment = "") {
+  const safeTicket = text(ticket, "");
+  const safeAttachment = text(attachment, "");
+
+  return safeTicket && safeAttachment
+    ? `${safeTicket}::${safeAttachment}`
+    : "";
 }
 
 function expiresAt(url = "") {
@@ -157,8 +170,12 @@ function viewUrl(file = {}) {
   );
 }
 
-async function requestViewUrl(root, preview, { force = false } = {}) {
-  const key = keyFor(root, preview);
+async function requestAttachmentUrl(
+  ticket = "",
+  attachment = "",
+  { force = false } = {}
+) {
+  const key = cacheKey(ticket, attachment);
   if (!key) return "";
 
   if (!force) {
@@ -169,15 +186,13 @@ async function requestViewUrl(root, preview, { force = false } = {}) {
   if (inflight.has(key)) return inflight.get(key);
 
   const localEpoch = epoch;
-  const expectedTicket = ticketId(root);
-  const expectedAttachment = attachmentId(preview);
 
   const task = (async () => {
     try {
       const source = await api();
       const file = await source.openIncidenciaAttachment({
-        ticketId: expectedTicket,
-        attachmentId: expectedAttachment,
+        ticketId: ticket,
+        attachmentId: attachment,
       });
 
       if (localEpoch !== epoch) return "";
@@ -185,12 +200,18 @@ async function requestViewUrl(root, preview, { force = false } = {}) {
       const url = viewUrl(file);
       if (!url) return "";
 
-      cache.set(key, { url, expiresAt: expiresAt(url) });
+      cache.set(key, {
+        url,
+        expiresAt: expiresAt(url),
+      });
+
       return url;
     } catch {
       return "";
     } finally {
-      if (inflight.get(key) === task) inflight.delete(key);
+      if (inflight.get(key) === task) {
+        inflight.delete(key);
+      }
     }
   })();
 
@@ -198,8 +219,16 @@ async function requestViewUrl(root, preview, { force = false } = {}) {
   return task;
 }
 
+function requestPreviewUrl(root, preview, options = {}) {
+  return requestAttachmentUrl(
+    ticketId(root),
+    previewAttachmentId(preview),
+    options
+  );
+}
+
 /* =========================================================
-   VIEWER STATE
+   VIEWER STATE / EXACT SCROLL ANCHOR
 ========================================================= */
 
 function prefersReducedMotion() {
@@ -235,52 +264,198 @@ function visibleFocusables(root = null) {
   });
 }
 
+function releaseScrollAnchorStyles(intent = pendingOpen) {
+  const body = intent?.body;
+
+  if (!body?.isConnected || intent?.stylesReleased) {
+    return false;
+  }
+
+  intent.stylesReleased = true;
+
+  if (intent.previousScrollBehavior) {
+    body.style.scrollBehavior = intent.previousScrollBehavior;
+  } else {
+    body.style.removeProperty("scroll-behavior");
+  }
+
+  if (intent.previousOverflowAnchor) {
+    body.style.overflowAnchor = intent.previousOverflowAnchor;
+  } else {
+    body.style.removeProperty("overflow-anchor");
+  }
+
+  body.dataset.mediaViewerScrollAnchor = "false";
+  return true;
+}
+
+function restoreBodyScroll(intent = pendingOpen) {
+  const body = intent?.body;
+
+  if (
+    !body?.isConnected ||
+    intent?.userMoved
+  ) {
+    return false;
+  }
+
+  const target = Number(intent.scrollTop || 0);
+
+  if (Math.abs(Number(body.scrollTop || 0) - target) <= SCROLL_EPSILON) {
+    return true;
+  }
+
+  correctingScroll = true;
+
+  try {
+    body.scrollTop = target;
+    body.scrollLeft = Number(intent.scrollLeft || 0);
+  } catch {
+    try {
+      body.scrollTo?.({
+        top: target,
+        left: Number(intent.scrollLeft || 0),
+        behavior: "auto",
+      });
+    } catch {
+      // noop
+    }
+  } finally {
+    queueMicrotask(() => {
+      correctingScroll = false;
+    });
+  }
+
+  return true;
+}
+
 function rememberOpenIntent(button = null) {
   const root = button?.closest?.(ROOT);
   if (!root) return false;
 
   const body = root.querySelector(BODY);
+  if (!body) return false;
+
+  if (pendingOpen) {
+    releaseScrollAnchorStyles(pendingOpen);
+  }
 
   pendingOpen = {
     ticketId: ticketId(root),
     attachmentId: text(button.dataset?.attachmentId, ""),
     opener: button,
+    openerKind: button.matches?.(".incidencias-modal-view-btn")
+      ? "action"
+      : "thumbnail",
     body,
-    scrollTop: Number(body?.scrollTop || 0),
+    scrollTop: Number(body.scrollTop || 0),
+    scrollLeft: Number(body.scrollLeft || 0),
     userMoved: false,
+    stylesReleased: false,
+    previousScrollBehavior: body.style.scrollBehavior || "",
+    previousOverflowAnchor: body.style.overflowAnchor || "",
   };
 
+  /*
+     Durante la apertura sólo anulamos desplazamientos que no vienen de un
+     gesto real del usuario. El controller legacy todavía puede ejecutar
+     scrollIntoView() sobre la preview inline; este ancla mantiene el scroll
+     del ticket físicamente estable sin interceptar ni reemplazar esa API.
+  */
+  body.style.scrollBehavior = "auto";
+  body.style.overflowAnchor = "none";
+  body.dataset.mediaViewerScrollAnchor = "true";
+
   return true;
+}
+
+function resolveOpener(intent = pendingOpen, root = null) {
+  if (intent?.opener?.isConnected) {
+    return intent.opener;
+  }
+
+  const attachment = text(intent?.attachmentId, "");
+  if (!attachment || !root?.isConnected) return null;
+
+  const candidates = Array.from(
+    root.querySelectorAll(ACTION_OPEN)
+  ).filter((node) =>
+    text(node?.dataset?.attachmentId, "") === attachment
+  );
+
+  if (!candidates.length) return null;
+
+  if (intent?.openerKind === "action") {
+    return (
+      candidates.find((node) =>
+        node.matches?.(".incidencias-modal-view-btn")
+      ) || candidates[0]
+    );
+  }
+
+  return (
+    candidates.find((node) =>
+      node.matches?.(
+        ".incidencias-modal-file-square, " +
+        ".incidencias-modal-image-thumb-wrap"
+      )
+    ) || candidates[0]
+  );
 }
 
 function markUserMovement(event = null) {
   if (!pendingOpen || !pendingOpen.body?.isConnected) return;
 
   const target = event?.target;
+
   if (target && pendingOpen.body.contains?.(target)) {
     pendingOpen.userMoved = true;
+    releaseScrollAnchorStyles(pendingOpen);
   }
 }
 
-function restoreTicketScroll(root = null, preview = null) {
-  if (!pendingOpen) return false;
+function enforceScrollAnchor(event = null) {
+  if (
+    !pendingOpen ||
+    pendingOpen.userMoved ||
+    correctingScroll ||
+    !pendingOpen.body?.isConnected
+  ) {
+    return;
+  }
+
+  if (event?.target !== pendingOpen.body) return;
+  restoreBodyScroll(pendingOpen);
+}
+
+function stabilizeTicketScroll(root = null, preview = null) {
+  const intent = pendingOpen;
+  if (!intent) return false;
 
   const same =
-    pendingOpen.ticketId === ticketId(root) &&
-    (!pendingOpen.attachmentId ||
-      pendingOpen.attachmentId === attachmentId(preview));
+    intent.ticketId === ticketId(root) &&
+    (
+      !intent.attachmentId ||
+      intent.attachmentId === previewAttachmentId(preview)
+    );
 
   if (!same) return false;
 
-  const body = pendingOpen.body;
+  restoreBodyScroll(intent);
 
-  if (body?.isConnected && !pendingOpen.userMoved) {
-    try {
-      body.scrollTop = pendingOpen.scrollTop;
-    } catch {
-      // noop
-    }
-  }
+  /*
+     Dos frames: el primero absorbe el scroll iniciado en el mismo task por
+     revealDetailPreview(); el segundo deja la posición final consolidada.
+     No hay timer de polling ni lucha permanente con el usuario.
+  */
+  window.requestAnimationFrame?.(() => {
+    restoreBodyScroll(intent);
+
+    window.requestAnimationFrame?.(() => {
+      restoreBodyScroll(intent);
+      releaseScrollAnchorStyles(intent);
+    });
+  });
 
   return true;
 }
@@ -416,11 +591,18 @@ function focusViewer() {
   return true;
 }
 
-function cleanupViewer({ restoreFocus = true } = {}) {
+function cleanupViewer({ restoreFocus = true, preserveIntent = false } = {}) {
   clearCloseTimer();
 
+  if (pendingOpen) {
+    restoreBodyScroll(pendingOpen);
+    if (!preserveIntent) {
+      releaseScrollAnchorStyles(pendingOpen);
+    }
+  }
+
   if (!activeViewer) {
-    pendingOpen = null;
+    if (!preserveIntent) pendingOpen = null;
     document.body?.classList.remove("incidencias-media-viewer-open");
     return false;
   }
@@ -458,7 +640,7 @@ function cleanupViewer({ restoreFocus = true } = {}) {
     });
   }
 
-  pendingOpen = null;
+  if (!preserveIntent) pendingOpen = null;
   return true;
 }
 
@@ -513,6 +695,7 @@ function requestViewerClose() {
   const delay = prefersReducedMotion() ? 0 : CLOSE_TRANSITION_MS;
 
   clearCloseTimer();
+
   closeTimer = window.setTimeout(() => {
     closeTimer = 0;
     commitViewerClose();
@@ -529,16 +712,22 @@ function adoptPreview(root = null, preview = null) {
   let createdLayer = false;
 
   if (!layer?.isConnected || !stage?.isConnected) {
-    cleanupViewer({ restoreFocus: false });
+    if (activeViewer) {
+      cleanupViewer({
+        restoreFocus: false,
+        preserveIntent: true,
+      });
+    }
+
     ({ layer, stage } = createViewerLayer(root));
     createdLayer = true;
   }
 
   const previousPreview = activeViewer?.preview;
   const opener =
-    pendingOpen?.opener?.isConnected
-      ? pendingOpen.opener
-      : activeViewer?.opener || null;
+    resolveOpener(pendingOpen, root) ||
+    activeViewer?.opener ||
+    null;
 
   if (previousPreview && previousPreview !== preview) {
     try {
@@ -558,7 +747,7 @@ function adoptPreview(root = null, preview = null) {
 
   activeViewer = { root, layer, stage, preview, opener };
 
-  restoreTicketScroll(root, preview);
+  stabilizeTicketScroll(root, preview);
   setPanelInert(root, true);
 
   const title = preview.querySelector("#incidencias-modal-preview-title");
@@ -579,7 +768,7 @@ function adoptPreview(root = null, preview = null) {
 }
 
 /* =========================================================
-   VIDEO / FIRST FRAME
+   VIDEO / FIRST FRAME IN VIEWER
 ========================================================= */
 
 function videoFailureMessage(meta = {}) {
@@ -590,14 +779,6 @@ function videoFailureMessage(meta = {}) {
   return quickTime
     ? "El archivo MOV está correcto, pero este navegador no puede decodificar su códec. Si el iPhone lo grabó en HEVC/H.265, los navegadores y equipos con soporte HEVC podrán reproducirlo; el original sigue disponible para descargar."
     : "El vídeo está disponible, pero este navegador no puede decodificar su códec. Puedes descargar el original desde la parte superior.";
-}
-
-function markVideoReady(frame, loader, fallback) {
-  if (!frame?.isConnected) return;
-
-  frame.dataset.videoState = "ready";
-  if (loader) loader.hidden = true;
-  if (fallback) fallback.hidden = true;
 }
 
 function syncVideoIntrinsicSize(video = null) {
@@ -617,6 +798,7 @@ function syncVideoIntrinsicSize(video = null) {
 
   video.dataset.mediaWidth = String(width);
   video.dataset.mediaHeight = String(height);
+
   video.style.setProperty(
     "--incidencias-media-aspect",
     `${width} / ${height}`
@@ -625,11 +807,27 @@ function syncVideoIntrinsicSize(video = null) {
   return true;
 }
 
-function primeFirstFrame(video, frame, loader, fallback) {
+function firstFrameTarget(video = null) {
+  const duration = Number(video?.duration || 0);
+
+  return Number.isFinite(duration) && duration > 0
+    ? Math.min(
+        FIRST_FRAME_SECONDS,
+        Math.max(0.01, duration / 200)
+      )
+    : FIRST_FRAME_SECONDS;
+}
+
+function primeFirstFrame(
+  video,
+  {
+    onReady = () => {},
+  } = {}
+) {
   let primed = false;
 
   const finish = () => {
-    if (primed || !video.isConnected) return;
+    if (primed || !video?.isConnected) return;
 
     primed = true;
     syncVideoIntrinsicSize(video);
@@ -640,22 +838,15 @@ function primeFirstFrame(video, frame, loader, fallback) {
       // noop
     }
 
-    markVideoReady(frame, loader, fallback);
+    onReady();
   };
 
   const seek = () => {
-    if (!video.isConnected || primed) return;
+    if (!video?.isConnected || primed) return;
 
     syncVideoIntrinsicSize(video);
 
-    const duration = Number(video.duration || 0);
-    const target =
-      Number.isFinite(duration) && duration > 0
-        ? Math.min(
-            FIRST_FRAME_SECONDS,
-            Math.max(0.01, duration / 200)
-          )
-        : FIRST_FRAME_SECONDS;
+    const target = firstFrameTarget(video);
 
     try {
       if (
@@ -673,7 +864,10 @@ function primeFirstFrame(video, frame, loader, fallback) {
 
   video.addEventListener(
     "loadedmetadata",
-    () => syncVideoIntrinsicSize(video),
+    () => {
+      syncVideoIntrinsicSize(video);
+      seek();
+    },
     { once: true }
   );
 
@@ -683,26 +877,27 @@ function primeFirstFrame(video, frame, loader, fallback) {
   video.addEventListener(
     "canplay",
     () => {
-      if (!primed && Number(video.currentTime || 0) > 0) {
-        finish();
+      if (!primed && video.readyState >= 2) {
+        if (Number(video.currentTime || 0) > 0) finish();
+        else seek();
       }
     },
     { once: true }
   );
 
-  if (video.readyState >= 2) queueMicrotask(seek);
+  if (video.readyState >= 1) queueMicrotask(seek);
 }
 
-function installVideo(root, preview, url) {
+function installViewerVideo(root, preview, url) {
   if (!url || !preview?.isConnected) return false;
 
   const meta = previewMeta(preview);
   const oldBox = preview.querySelector(UNSUPPORTED_BOX);
 
-  const frame = document.createElement("div");
-  frame.className = "incidencias-modal-preview-frame is-video";
-  frame.dataset.modalPreviewVideoFrame = "true";
-  frame.dataset.videoState = "loading";
+  const frameNode = document.createElement("div");
+  frameNode.className = "incidencias-modal-preview-frame is-video";
+  frameNode.dataset.modalPreviewVideoFrame = "true";
+  frameNode.dataset.videoState = "loading";
 
   const video = document.createElement("video");
   video.className = "incidencias-modal-preview-video";
@@ -729,6 +924,14 @@ function installVideo(root, preview, url) {
 
   let retried = false;
 
+  const ready = () => {
+    if (!frameNode.isConnected) return;
+
+    frameNode.dataset.videoState = "ready";
+    loader.hidden = true;
+    fallback.hidden = true;
+  };
+
   const fail = async () => {
     if (!video.isConnected) return;
 
@@ -737,17 +940,23 @@ function installVideo(root, preview, url) {
     if (!retried && !unsupportedCodec) {
       retried = true;
 
-      const key = keyFor(root, preview);
+      const key = cacheKey(
+        ticketId(root),
+        previewAttachmentId(preview)
+      );
+
       cache.delete(key);
 
-      const freshUrl = await requestViewUrl(root, preview, { force: true });
+      const freshUrl = await requestPreviewUrl(root, preview, {
+        force: true,
+      });
 
       if (
         freshUrl &&
         activeViewer?.preview === preview &&
         preview.isConnected
       ) {
-        frame.dataset.videoState = "loading";
+        frameNode.dataset.videoState = "loading";
         loader.hidden = false;
         fallback.hidden = true;
         video.src = freshUrl;
@@ -762,7 +971,7 @@ function installVideo(root, preview, url) {
       }
     }
 
-    frame.dataset.videoState = "error";
+    frameNode.dataset.videoState = "error";
     loader.hidden = true;
     fallback.textContent = videoFailureMessage(meta);
     fallback.hidden = false;
@@ -770,11 +979,11 @@ function installVideo(root, preview, url) {
 
   video.addEventListener("error", () => void fail());
 
-  primeFirstFrame(video, frame, loader, fallback);
-  frame.append(video, loader, fallback);
+  primeFirstFrame(video, { onReady: ready });
+  frameNode.append(video, loader, fallback);
 
-  if (oldBox) oldBox.replaceWith(frame);
-  else preview.appendChild(frame);
+  if (oldBox) oldBox.replaceWith(frameNode);
+  else preview.appendChild(frameNode);
 
   preview.dataset.previewKind = "video";
   preview.dataset.videoEnhanced = "true";
@@ -789,7 +998,7 @@ function installVideo(root, preview, url) {
   return true;
 }
 
-async function upgradeVideo(root, preview) {
+async function upgradeViewerVideo(root, preview) {
   if (
     !root?.isConnected ||
     !preview?.isConnected ||
@@ -800,7 +1009,11 @@ async function upgradeVideo(root, preview) {
     return false;
   }
 
-  const expectedKey = keyFor(root, preview);
+  const expectedKey = cacheKey(
+    ticketId(root),
+    previewAttachmentId(preview)
+  );
+
   if (!expectedKey) return false;
 
   preview.dataset.previewKind = "video";
@@ -815,12 +1028,12 @@ async function upgradeVideo(root, preview) {
     oldBox.textContent = "Preparando vista previa del vídeo…";
   }
 
-  const url = await requestViewUrl(root, preview);
+  const url = await requestPreviewUrl(root, preview);
 
   if (
     !preview.isConnected ||
     activeViewer?.preview !== preview ||
-    keyFor(root, preview) !== expectedKey
+    cacheKey(ticketId(root), previewAttachmentId(preview)) !== expectedKey
   ) {
     return false;
   }
@@ -837,7 +1050,235 @@ async function upgradeVideo(root, preview) {
     return false;
   }
 
-  return installVideo(root, preview, url);
+  return installViewerVideo(root, preview, url);
+}
+
+/* =========================================================
+   VIDEO THUMBNAILS · DOCUMENTOS ACTUALES
+========================================================= */
+
+function attachmentCardMeta(button = null) {
+  const row = button?.closest?.(ATTACHMENT_ROW);
+  const copy = row?.querySelector?.(ATTACHMENT_COPY);
+
+  const name = text(
+    copy?.querySelector?.("strong")?.textContent,
+    text(button?.getAttribute?.("aria-label"), "")
+      .replace(/^Ver\s+/i, "")
+      .replace(/^Ampliar\s+/i, "")
+  );
+
+  const meta = text(copy?.querySelector?.("span")?.textContent, "");
+  const mime = text(meta.match(VIDEO_MIME_RE)?.[1], "").toLowerCase();
+
+  const fallbackLabel = text(
+    button?.querySelector?.(":scope > span")?.textContent,
+    ""
+  ).toUpperCase();
+
+  return {
+    row,
+    name,
+    meta,
+    mime,
+    fallbackLabel,
+  };
+}
+
+function isVideoThumbCandidate(button = null) {
+  if (!button?.isConnected) return false;
+  if (button.matches?.(VIDEO_THUMB_FRAME)) return true;
+
+  const { name, meta, mime, fallbackLabel } =
+    attachmentCardMeta(button);
+
+  return Boolean(
+    mime.startsWith("video/") ||
+    VIDEO_MIME_RE.test(meta) ||
+    VIDEO_EXT_RE.test(name) ||
+    VIDEO_LABEL_RE.test(fallbackLabel)
+  );
+}
+
+function markThumbState(button = null, state = "fallback") {
+  if (!button?.isConnected) return false;
+
+  button.dataset.previewState = state;
+  button.dataset.thumbError = state === "error" ? "true" : "false";
+  return true;
+}
+
+function installVideoThumbnail(button, url) {
+  if (!button?.isConnected || !url) return false;
+
+  const { name, fallbackLabel } = attachmentCardMeta(button);
+
+  button.classList.remove("incidencias-modal-file-square");
+  button.classList.add("incidencias-modal-image-thumb-wrap");
+
+  Object.assign(button.dataset, {
+    renderableThumbnail: "true",
+    modalThumbFrame: "true",
+    modalVideoThumbFrame: "true",
+    previewState: "loading",
+    thumbError: "false",
+  });
+
+  const video = document.createElement("video");
+  video.className = "incidencias-modal-image-thumb incidencias-modal-video-thumb";
+  video.src = url;
+  video.muted = true;
+  video.defaultMuted = true;
+  video.playsInline = true;
+  video.preload = "metadata";
+  video.controls = false;
+  video.tabIndex = -1;
+  video.setAttribute("aria-hidden", "true");
+  video.setAttribute("data-modal-video-thumb-video", "true");
+  video.setAttribute("draggable", "false");
+
+  const fallback = document.createElement("span");
+  fallback.className = "incidencias-modal-image-thumb-fallback";
+  fallback.textContent =
+    fallbackLabel ||
+    text(name.split(".").pop(), "VID").slice(0, 4).toUpperCase() ||
+    "VID";
+  fallback.setAttribute("aria-hidden", "true");
+
+  const badge = document.createElement("span");
+  badge.className = "incidencias-modal-image-open-badge";
+  badge.textContent = "▶ Ver";
+
+  let retried = false;
+
+  const ready = () => {
+    markThumbState(button, "ready");
+  };
+
+  const fail = async () => {
+    if (!button.isConnected) return;
+
+    const unsupportedCodec = Number(video.error?.code || 0) === 4;
+
+    if (!retried && !unsupportedCodec) {
+      retried = true;
+
+      const root = button.closest(ROOT);
+      const ticket = ticketId(root);
+      const attachment = text(button.dataset.attachmentId, "");
+      const key = cacheKey(ticket, attachment);
+
+      cache.delete(key);
+
+      const freshUrl = await requestAttachmentUrl(
+        ticket,
+        attachment,
+        { force: true }
+      );
+
+      if (freshUrl && button.isConnected) {
+        markThumbState(button, "loading");
+        video.src = freshUrl;
+
+        try {
+          video.load();
+        } catch {
+          // noop
+        }
+
+        return;
+      }
+    }
+
+    markThumbState(button, "error");
+  };
+
+  video.addEventListener("error", () => void fail());
+
+  primeFirstFrame(video, {
+    onReady: ready,
+  });
+
+  button.replaceChildren(video, fallback, badge);
+
+  try {
+    video.load();
+  } catch {
+    markThumbState(button, "error");
+  }
+
+  return true;
+}
+
+async function hydrateVideoThumbnail(button = null) {
+  if (
+    !button?.isConnected ||
+    button.dataset.videoThumbHydrating === "true" ||
+    button.dataset.modalVideoThumbFrame === "true" ||
+    !isVideoThumbCandidate(button)
+  ) {
+    return false;
+  }
+
+  const root = button.closest(ROOT);
+  const ticket = ticketId(root);
+  const attachment = text(button.dataset.attachmentId, "");
+  const key = cacheKey(ticket, attachment);
+
+  if (!key) return false;
+
+  if (thumbInflight.has(key)) {
+    await thumbInflight.get(key);
+    return true;
+  }
+
+  button.dataset.videoThumbHydrating = "true";
+  button.dataset.previewState = "loading";
+
+  const task = (async () => {
+    const url = await requestAttachmentUrl(ticket, attachment);
+
+    if (
+      !button.isConnected ||
+      ticketId(root) !== ticket
+    ) {
+      return false;
+    }
+
+    button.dataset.videoThumbHydrating = "false";
+
+    if (!url) {
+      markThumbState(button, "error");
+      return false;
+    }
+
+    return installVideoThumbnail(button, url);
+  })();
+
+  thumbInflight.set(key, task);
+
+  try {
+    return await task;
+  } finally {
+    if (thumbInflight.get(key) === task) {
+      thumbInflight.delete(key);
+    }
+  }
+}
+
+function syncVideoThumbnails(root = null) {
+  if (!root?.isConnected) return false;
+
+  for (
+    const button
+    of root.querySelectorAll(VIDEO_THUMB_CANDIDATE)
+  ) {
+    if (isVideoThumbCandidate(button)) {
+      void hydrateVideoThumbnail(button);
+    }
+  }
+
+  return true;
 }
 
 /* =========================================================
@@ -952,7 +1393,10 @@ function syncModalObserver() {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ["data-preview-active"],
+      attributeFilter: [
+        "data-preview-active",
+        "data-renderable-thumbnail",
+      ],
     });
   }
 
@@ -972,6 +1416,8 @@ function sync() {
     return;
   }
 
+  syncVideoThumbnails(root);
+
   const slot = root.querySelector(SLOT);
   const preview = slot?.querySelector?.(PREVIEW) || null;
   const active = slot?.dataset?.previewActive === "true";
@@ -980,7 +1426,7 @@ function sync() {
     adoptPreview(root, preview);
 
     if (isVideoPreview(preview)) {
-      void upgradeVideo(root, preview);
+      void upgradeViewerVideo(root, preview);
     }
 
     return;
@@ -992,7 +1438,7 @@ function sync() {
   ) {
     if (active) {
       if (isVideoPreview(activeViewer.preview)) {
-        void upgradeVideo(root, activeViewer.preview);
+        void upgradeViewerVideo(root, activeViewer.preview);
       }
 
       return;
@@ -1031,6 +1477,7 @@ export function mountIncidenciasVideoPreview() {
 
   document.addEventListener("click", onClickCapture, true);
   document.addEventListener("keydown", trapViewerFocus, true);
+  document.addEventListener("scroll", enforceScrollAnchor, true);
 
   document.addEventListener("wheel", markUserMovement, {
     capture: true,
@@ -1061,6 +1508,7 @@ export function destroyIncidenciasVideoPreview() {
 
   document.removeEventListener("click", onClickCapture, true);
   document.removeEventListener("keydown", trapViewerFocus, true);
+  document.removeEventListener("scroll", enforceScrollAnchor, true);
   document.removeEventListener("wheel", markUserMovement, true);
   document.removeEventListener("touchmove", markUserMovement, true);
 
@@ -1081,6 +1529,7 @@ export function destroyIncidenciasVideoPreview() {
 
   cache.clear();
   inflight.clear();
+  thumbInflight.clear();
 
   pendingOpen = null;
   mountRoot = null;
@@ -1093,32 +1542,45 @@ export function getIncidenciasVideoPreviewSnapshot() {
     version: INCIDENCIAS_VIDEO_PREVIEW_VERSION,
     mounted,
     viewerOpen: Boolean(activeViewer?.layer?.isConnected),
-    viewerState: text(activeViewer?.layer?.dataset?.viewerState, "closed"),
+    viewerState: text(
+      activeViewer?.layer?.dataset?.viewerState,
+      "closed"
+    ),
     modalMounted: Boolean(modalHost?.isConnected),
     cacheEntries: cache.size,
     inflight: inflight.size,
+    thumbnailInflight: thumbInflight.size,
 
     policy: Object.freeze({
       controllerOwnsOpenClose: true,
       canonicalViewEndpointOnly: true,
       privateBlobLocatorRejectedByApi: true,
+
       separateFullscreenViewer: true,
       mediaFitsViewport: true,
       outerMediaScrollDisabled: true,
-      ticketScrollPreserved: true,
+
+      exactTicketScrollAnchor: true,
+      automaticPreviewScrollNeutralized: true,
+      userScrollStillAuthoritative: true,
+
       backgroundPanelInert: true,
       viewerFocusTrap: true,
       escapeClosesViewer: true,
       backdropClosesViewer: true,
       openerFocusRestored: true,
       symmetricOpenCloseMotion: true,
+
       nativeVideo: true,
       iphoneMov: true,
-      firstFramePrime: true,
+      viewerFirstFramePrime: true,
+      currentFilesVideoFirstFrame: true,
       intrinsicVideoRatio: true,
       codecFallback: true,
       sasExpiryRetry: true,
+
       noScrollApiMonkeyPatch: true,
+      noFetchMonkeyPatch: true,
     }),
   });
 }

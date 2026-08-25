@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 const files = [
   {
     path: "src/ui/sidebar/index.js",
-    version: "sidebar.controller.v6-committed-route-context",
+    version: "sidebar.controller.v7-logout-fail-closed",
     reader: "readCoreState",
   },
   {

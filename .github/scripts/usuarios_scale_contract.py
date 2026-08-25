@@ -30,6 +30,30 @@ require(INDEX, "localDatasetCeiling: false", "Usuarios index must declare no loc
 reject(INDEX, "loadUsuariosApi(", "Usuarios index must not call legacy all-pages loader")
 reject(INDEX, "all: true", "Usuarios index must not request all pages")
 
+# Cursor/query races: an obsolete page must not clear or overwrite a newer page task.
+require(INDEX, "const task = (async () =>", "Load-more must keep a stable task identity")
+require(INDEX, "loadMoreTask = task", "Load-more task must be registered explicitly")
+require(INDEX, "if (loadMoreTask === task) loadMoreTask = null", "Only the owning load-more task may clear the task pointer")
+require(INDEX, "epoch !== queryEpoch", "Cursor responses must be rejected after a query epoch change")
+require(INDEX, "cursor !== continuationToken", "Cursor responses must be rejected after cursor replacement")
+require(INDEX, "loadMoreTaskIdentityProtected: true", "Usuarios snapshot must declare load-more identity protection")
+
+# Detail/modal races: a response for user A must never update a modal now showing user B.
+require(INDEX, "let detailRefreshEpoch = 0", "Detail refreshes need an independent race epoch")
+require(INDEX, "const epoch = ++detailRefreshEpoch", "Each detail refresh must advance its race epoch")
+require(INDEX, "epoch !== detailRefreshEpoch", "Stale detail refresh responses must be rejected")
+require(INDEX, "const liveModalUserId", "Detail refresh must inspect the live modal identity")
+require(INDEX, "liveModalUserId === id", "Detail refresh may update only the same live user")
+require(INDEX, "detailRefreshEpoch += 1", "Open/close/destroy transitions must invalidate old detail refreshes")
+require(INDEX, "detailRefreshRaceProtected: true", "Usuarios snapshot must declare detail refresh race protection")
+
+# Controller teardown must close modal islands only when this controller is the active owner.
+require(INDEX, "const wasActiveOwner", "Destroy must establish whether the controller owns active modal islands")
+require(INDEX, "if (wasActiveOwner)", "Modal teardown must be conditional on active controller ownership")
+require(INDEX, "UsuariosDetailModal?.close?.()", "Destroy must close the detail modal owned by the view")
+require(INDEX, "UsuariosCreateModal?.close?.()", "Destroy must close the create modal owned by the view")
+require(INDEX, "modalDestroyCleanup: true", "Usuarios snapshot must declare modal teardown protection")
+
 require(CURSOR, "USUARIOS_CURSOR_PAGE_SIZE = 50", "Cursor client must use bounded page size")
 require(CURSOR, "query.ct = token", "Cursor client must forward opaque continuation token")
 require(CURSOR, "query.status = statusFilter", "Cursor client must send status filter to backend")

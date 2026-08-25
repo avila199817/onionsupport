@@ -2,7 +2,7 @@
    Onion Support - Usuarios Index
    Archivo: /src/views/usuarios/index.js
 
-   CURSOR-FIRST · SERVER FILTERED · RACE SAFE V9
+   CURSOR-FIRST · SERVER FILTERED · RACE SAFE V10
 
    Objetivos:
    - No precargar el dataset completo.
@@ -72,7 +72,7 @@ export const USUARIOS_MODULE_NAME = "usuarios";
 export const USUARIOS_VIEW_NAME = "UsuariosView";
 export const USUARIOS_CANONICAL_PATH = "/usuarios";
 export const USUARIOS_INDEX_VERSION =
-  "usuarios.index.v9.cursor-first-server-filtered";
+  "usuarios.index.v10.cursor-first-race-safe";
 export const USUARIOS_VIEW_VERSION = USUARIOS_INDEX_VERSION;
 export const USUARIOS_MODULE_VERSION = USUARIOS_INDEX_VERSION;
 export const USUARIOS_INDEX_SOURCE = "views.usuarios.index";
@@ -488,6 +488,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
 
   let queryEpoch = 0;
   let detailEpoch = 0;
+  let detailRefreshEpoch = 0;
   let loadTask = null;
   let loadMoreTask = null;
   let searchTimer = 0;
@@ -697,7 +698,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     loadingMore = true;
     error = "";
     render();
-    loadMoreTask = (async () => {
+    const task = (async () => {
       try {
         const page = await fetchUsuariosCursorPage({
           ...currentQuery(),
@@ -737,10 +738,11 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         }
       }
     })();
+    loadMoreTask = task;
     try {
-      return await loadMoreTask;
+      return await task;
     } finally {
-      loadMoreTask = null;
+      if (loadMoreTask === task) loadMoreTask = null;
     }
   }
   function refresh() {
@@ -782,6 +784,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     const id = cleanText(userId, "");
     if (!id || destroyed) return null;
     const epoch = ++detailEpoch;
+    detailRefreshEpoch += 1;
     openingUserId = id;
     render();
     const cached = findUsuarioById(items, id) || getUsuarioByIdApiStore(id) || null;
@@ -797,8 +800,12 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       const normalized = normalizeUsuarioModel(detail);
       items = mergeUsuariosCursorItems(items, [normalized]);
       const modalState = safeObject(UsuariosDetailModal?.getState?.(), {});
-      if (modalState.isOpen === true) UsuariosDetailModal?.update?.(normalized);
-      else UsuariosDetailModal?.open?.(normalized);
+      const modalUserId = cleanText(first(modalState.userId, getUsuarioId(modalState.detail), ""), "");
+      if (modalState.isOpen === true) {
+        if (modalUserId === id) UsuariosDetailModal?.update?.(normalized);
+      } else {
+        UsuariosDetailModal?.open?.(normalized);
+      }
       render();
       return normalized;
     } catch (detailError) {
@@ -814,22 +821,28 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
   async function refreshUsuario(userId = "") {
     const modalState = safeObject(UsuariosDetailModal?.getState?.(), {});
     const id = cleanText(first(userId, modalState.userId, getUsuarioId(modalState.detail), ""), "");
-    if (!id) return null;
+    if (!id || destroyed) return null;
+    const epoch = ++detailRefreshEpoch;
     try {
       const detail = await loadUsuarioDetailApi(id, {
         force: true,
         dedupe: true,
         allowCacheFallback: true,
       });
-      if (!detail || destroyed) return null;
+      if (!detail || destroyed || epoch !== detailRefreshEpoch || !routeActive()) return null;
       const normalized = normalizeUsuarioModel(detail);
       items = mergeUsuariosCursorItems(items, [normalized]);
       const live = safeObject(UsuariosDetailModal?.getState?.(), {});
-      if (live.isOpen === true) UsuariosDetailModal?.update?.(normalized);
+      const liveModalUserId = cleanText(first(live.userId, getUsuarioId(live.detail), ""), "");
+      if (live.isOpen === true && liveModalUserId === id) {
+        UsuariosDetailModal?.update?.(normalized);
+      }
       render();
       return normalized;
     } catch (refreshError) {
-      showToast(safeError(refreshError, "No se pudo actualizar el usuario."), "error");
+      if (epoch === detailRefreshEpoch && !destroyed) {
+        showToast(safeError(refreshError, "No se pudo actualizar el usuario."), "error");
+      }
       return null;
     }
   }
@@ -1014,6 +1027,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     for (const eventName of DETAIL_CLOSE_EVENTS) {
       unsubscribers.push(subscribeEvent(eventName, () => {
         detailEpoch += 1;
+        detailRefreshEpoch += 1;
         openingUserId = "";
         render();
       }));
@@ -1215,6 +1229,9 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
           localDatasetCeiling: false,
           exactTotalOptIn: true,
           staleResponseProtected: true,
+          detailRefreshRaceProtected: true,
+          loadMoreTaskIdentityProtected: true,
+          modalDestroyCleanup: true,
           duplicateMountProtected: true,
           csvLoadedRowsOnly: true,
         },
@@ -1224,10 +1241,12 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       if (destroyed) return true;
       const wasHostOwner = ownsHost();
       const wasGlobalOwner = ownsGlobal();
+      const wasActiveOwner = wasHostOwner || wasGlobalOwner || lastController === controller;
       destroyed = true;
       mounted = false;
       queryEpoch += 1;
       detailEpoch += 1;
+      detailRefreshEpoch += 1;
       if (searchTimer && isBrowser()) window.clearTimeout(searchTimer);
       searchTimer = 0;
       loadTask = null;
@@ -1235,6 +1254,20 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       unbindHost();
       unbindEvents();
       unbindResumeSignals();
+      if (wasActiveOwner) {
+        createOpen = false;
+        openingUserId = "";
+        try {
+          UsuariosDetailModal?.close?.();
+        } catch {
+          // noop
+        }
+        try {
+          UsuariosCreateModal?.close?.();
+        } catch {
+          // noop
+        }
+      }
       if (wasHostOwner) {
         try {
           delete host[USUARIOS_CONTROLLER_KEY];

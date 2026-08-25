@@ -2,19 +2,18 @@
    Onion Support · Incidencias Media Gallery
    Archivo: /src/features/incidencias-video-preview/gallery.js
 
-   GALLERY NAVIGATION · V1
-   - reutiliza el visor canónico ya abierto; nunca cierra/reabre la capa;
-   - navega únicamente por adjuntos visualizables del ticket actual;
-   - delega la apertura real al controller mediante su acción canónica;
-   - conserva la sesión de scroll/foco gestionada por core.js;
-   - flechas visuales + teclado ArrowLeft/ArrowRight cuando no interfieren con
-     controles nativos de vídeo/PDF/formulario;
-   - contador accesible y estado de transición sin polling;
-   - observer limitado a la isla del modal.
+   GALLERY NAVIGATION · V2 · SOLID BUFFERED
+   - flechas y contador viven DENTRO del modal multimedia;
+   - ArrowLeft/ArrowRight se capturan a nivel document mientras el visor existe;
+   - nunca secuestra teclas de vídeo/audio/PDF/formularios;
+   - conserva el visor canónico y delega la apertura al controller;
+   - mantiene el frame anterior como buffer visual hasta que el nuevo media está listo;
+   - evita parpadeos, fondos negros y saltos de tamaño durante navegación;
+   - observer operativo limitado a la isla del modal y descubrimiento al Router view.
 ========================================================= */
 
 export const INCIDENCIAS_MEDIA_GALLERY_VERSION =
-  "incidencias-media-gallery.v1.controller-bridged-carousel";
+  "incidencias-media-gallery.v2.solid-buffered-inner-controls";
 
 const VIEW = "#view-container, [data-router-view='true']";
 const HOST = "[data-incidencias-modal-host='true']";
@@ -26,11 +25,15 @@ const ATTACHMENT_ROW = ".incidencias-modal-attachment-row";
 const ATTACHMENT_COPY = ".incidencias-modal-attachment-copy";
 const NAV = "[data-media-gallery-action]";
 const COUNTER = "[data-media-gallery-counter='true']";
+const HOLD = "[data-media-gallery-hold='true']";
 
 const MEDIA_EXT_RE =
   /\.(?:png|jpe?g|webp|gif|bmp|avif|heic|heif|pdf|mov|qt|mp4|m4v|webm|ogv|ogg)$/i;
 const MEDIA_MIME_RE = /^(?:image\/|video\/|application\/pdf$)/i;
-const NAVIGATION_TIMEOUT_MS = 3500;
+
+const NAVIGATION_TIMEOUT_MS = 5000;
+const MEDIA_READY_TIMEOUT_MS = 1600;
+const HOLD_RELEASE_MS = 110;
 
 let mounted = false;
 let modalHost = null;
@@ -38,8 +41,11 @@ let observer = null;
 let viewObserver = null;
 let mountRoot = null;
 let frame = 0;
+
 let navigationTimer = 0;
 let navigationTargetId = "";
+let navigationEpoch = 0;
+let navigationSettling = false;
 let lastPreviewId = "";
 let navigationCount = 0;
 
@@ -78,29 +84,21 @@ function attachmentMeta(row = null, trigger = null) {
   );
   const meta = text(copy?.querySelector?.("span")?.textContent, "");
   const mime = text(meta.split("·")[0], "").toLowerCase();
-
   return { name, mime };
 }
 
 function isGalleryMedia(row = null, trigger = null) {
   const { name, mime } = attachmentMeta(row, trigger);
-
-  return Boolean(
-    MEDIA_MIME_RE.test(mime) ||
-    MEDIA_EXT_RE.test(name)
-  );
+  return Boolean(MEDIA_MIME_RE.test(mime) || MEDIA_EXT_RE.test(name));
 }
 
 function preferredTrigger(row = null) {
   if (!row) return null;
-
   const candidates = Array.from(row.querySelectorAll(ACTION_OPEN));
   if (!candidates.length) return null;
 
   return (
-    candidates.find((node) =>
-      node.matches?.(".incidencias-modal-view-btn")
-    ) ||
+    candidates.find((node) => node.matches?.(".incidencias-modal-view-btn")) ||
     candidates.find((node) =>
       node.matches?.(
         ".incidencias-modal-image-thumb-wrap, .incidencias-modal-file-square"
@@ -125,7 +123,6 @@ function galleryItems(root = currentRoot()) {
     }
 
     seen.add(id);
-
     const { name, mime } = attachmentMeta(row, trigger);
     items.push({ id, name, mime, trigger, row });
   }
@@ -137,27 +134,268 @@ function currentIndex(items = [], id = previewId()) {
   return items.findIndex((item) => item.id === id);
 }
 
-function clearNavigationTimer() {
-  if (!browser() || !navigationTimer) {
-    navigationTimer = 0;
-    return false;
+function clearHold(viewer = currentViewer(), { immediate = true } = {}) {
+  const holds = Array.from(viewer?.querySelectorAll?.(HOLD) || []);
+
+  for (const hold of holds) {
+    if (!hold?.isConnected) continue;
+
+    if (immediate) {
+      hold.remove();
+      continue;
+    }
+
+    hold.dataset.holdState = "releasing";
+    window.setTimeout(() => {
+      try { hold.remove(); } catch { /* noop */ }
+    }, HOLD_RELEASE_MS);
   }
 
-  window.clearTimeout(navigationTimer);
-  navigationTimer = 0;
+  return Boolean(holds.length);
+}
+
+function stripCloneSemantics(clone = null) {
+  if (!clone) return false;
+
+  clone.removeAttribute("id");
+  clone.removeAttribute("data-modal-preview");
+  clone.removeAttribute("data-preview-attachment-id");
+  clone.removeAttribute("aria-labelledby");
+  clone.removeAttribute("aria-describedby");
+  clone.setAttribute("aria-hidden", "true");
+  clone.setAttribute("tabindex", "-1");
+  clone.dataset.mediaGalleryHold = "true";
+  clone.dataset.holdState = "holding";
+
+  clone.querySelectorAll("[id]").forEach((node) => node.removeAttribute("id"));
+  clone.querySelectorAll("[aria-live]").forEach((node) =>
+    node.removeAttribute("aria-live")
+  );
+  clone
+    .querySelectorAll(
+      "[data-detail-action], [data-media-gallery-action], [data-media-gallery-counter]"
+    )
+    .forEach((node) => node.remove());
+
+  clone
+    .querySelectorAll("a, button, input, textarea, select, iframe, video, audio")
+    .forEach((node) => {
+      node.setAttribute("tabindex", "-1");
+      node.setAttribute("aria-hidden", "true");
+    });
+
+  try { clone.inert = true; } catch { clone.setAttribute("inert", ""); }
   return true;
 }
 
-function finishNavigation(viewer = currentViewer()) {
-  clearNavigationTimer();
-  navigationTargetId = "";
+function freezeVideoFrames(source = null, clone = null) {
+  if (!source || !clone) return false;
 
-  if (viewer?.isConnected) {
-    viewer.dataset.galleryNavigating = "false";
-    delete viewer.dataset.galleryTargetId;
+  const sourceVideos = Array.from(source.querySelectorAll("video"));
+  const cloneVideos = Array.from(clone.querySelectorAll("video"));
+
+  sourceVideos.forEach((video, index) => {
+    const cloneVideo = cloneVideos[index];
+    if (!cloneVideo) return;
+
+    const width = Number(video.videoWidth || 0);
+    const height = Number(video.videoHeight || 0);
+
+    if (width <= 0 || height <= 0) {
+      try {
+        cloneVideo.pause?.();
+        cloneVideo.removeAttribute("controls");
+        cloneVideo.muted = true;
+      } catch { /* noop */ }
+      return;
+    }
+
+    try {
+      const scale = Math.min(1, 1280 / Math.max(width, height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(width * scale));
+      canvas.height = Math.max(1, Math.round(height * scale));
+      canvas.className =
+        `${cloneVideo.className || ""} incidencias-media-gallery-video-freeze`.trim();
+      canvas.setAttribute("aria-hidden", "true");
+
+      const context = canvas.getContext("2d", {
+        alpha: false,
+        desynchronized: true,
+      });
+
+      context?.drawImage?.(video, 0, 0, canvas.width, canvas.height);
+      cloneVideo.replaceWith(canvas);
+    } catch {
+      try {
+        cloneVideo.pause?.();
+        cloneVideo.removeAttribute("controls");
+        cloneVideo.muted = true;
+      } catch { /* noop */ }
+    }
+  });
+
+  return Boolean(sourceVideos.length);
+}
+
+function createVisualHold(viewer = currentViewer(), preview = currentPreview(viewer)) {
+  if (!viewer?.isConnected || !preview?.isConnected) return null;
+
+  clearHold(viewer, { immediate: true });
+
+  let clone;
+  try { clone = preview.cloneNode(true); } catch { return null; }
+
+  stripCloneSemantics(clone);
+  freezeVideoFrames(preview, clone);
+  clone.classList.add("incidencias-media-gallery-hold");
+
+  const rect = preview.getBoundingClientRect();
+  clone.style.position = "fixed";
+  clone.style.inset = "auto";
+  clone.style.left = `${rect.left}px`;
+  clone.style.top = `${rect.top}px`;
+  clone.style.inlineSize = `${rect.width}px`;
+  clone.style.blockSize = `${rect.height}px`;
+  clone.style.maxInlineSize = "none";
+  clone.style.maxBlockSize = "none";
+  clone.style.transform = "none";
+
+  viewer.appendChild(clone);
+  return clone;
+}
+
+function mediaReadyNow(preview = null) {
+  if (!preview?.isConnected) return false;
+
+  const image = preview.querySelector("img.incidencias-modal-preview-image, img");
+  if (image) {
+    return Boolean(image.complete && Number(image.naturalWidth || 0) > 0);
   }
 
-  return true;
+  const video = preview.querySelector("video");
+  if (video) {
+    const mediaFrame = video.closest?.(".incidencias-modal-preview-frame");
+    return Boolean(
+      Number(video.readyState || 0) >= 2 ||
+      mediaFrame?.dataset?.videoState === "ready" ||
+      mediaFrame?.dataset?.videoState === "error"
+    );
+  }
+
+  if (preview.dataset?.previewKind === "video") {
+    return false;
+  }
+
+  const iframe = preview.querySelector("iframe");
+  if (iframe) {
+    return iframe.dataset.mediaGalleryLoaded === "true";
+  }
+
+  const preparing = preview.querySelector(
+    ".incidencias-modal-video-preparing, .incidencias-modal-video-loader:not([hidden])"
+  );
+
+  return !preparing;
+}
+
+function waitForPreviewReady(
+  preview = null,
+  epoch = navigationEpoch,
+  timeoutMs = MEDIA_READY_TIMEOUT_MS
+) {
+  return new Promise((resolve) => {
+    if (!preview?.isConnected || epoch !== navigationEpoch) {
+      resolve(false);
+      return;
+    }
+
+    let settled = false;
+    let timeout = 0;
+    let mutationObserver = null;
+    const cleanups = [];
+
+    const cleanup = () => {
+      if (timeout) {
+        window.clearTimeout(timeout);
+        timeout = 0;
+      }
+      mutationObserver?.disconnect?.();
+      mutationObserver = null;
+      while (cleanups.length) {
+        try { cleanups.pop()?.(); } catch { /* noop */ }
+      }
+    };
+
+    const finish = (ready = true) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(Boolean(ready));
+    };
+
+    const check = () => {
+      if (epoch !== navigationEpoch || !preview.isConnected) {
+        finish(false);
+        return;
+      }
+      if (mediaReadyNow(preview)) {
+        window.requestAnimationFrame?.(() => finish(true));
+      }
+    };
+
+    const bindMedia = () => {
+      const image = preview.querySelector("img.incidencias-modal-preview-image, img");
+      if (image && image.dataset.mediaGalleryReadyBound !== "true") {
+        image.dataset.mediaGalleryReadyBound = "true";
+        const onReady = () => finish(true);
+        image.addEventListener("load", onReady, { once: true });
+        image.addEventListener("error", onReady, { once: true });
+        cleanups.push(() => {
+          image.removeEventListener("load", onReady);
+          image.removeEventListener("error", onReady);
+        });
+      }
+
+      const video = preview.querySelector("video");
+      if (video && video.dataset.mediaGalleryReadyBound !== "true") {
+        video.dataset.mediaGalleryReadyBound = "true";
+        const onReady = () => finish(true);
+        for (const type of ["loadeddata", "canplay", "error"]) {
+          video.addEventListener(type, onReady, { once: true });
+        }
+        cleanups.push(() => {
+          for (const type of ["loadeddata", "canplay", "error"]) {
+            video.removeEventListener(type, onReady);
+          }
+        });
+      }
+
+      const iframe = preview.querySelector("iframe");
+      if (iframe && iframe.dataset.mediaGalleryReadyBound !== "true") {
+        iframe.dataset.mediaGalleryReadyBound = "true";
+        const onReady = () => {
+          iframe.dataset.mediaGalleryLoaded = "true";
+          finish(true);
+        };
+        iframe.addEventListener("load", onReady, { once: true });
+        cleanups.push(() => iframe.removeEventListener("load", onReady));
+      }
+
+      check();
+    };
+
+    mutationObserver = new MutationObserver(bindMedia);
+    mutationObserver.observe(preview, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["src", "hidden", "data-video-state"],
+    });
+
+    timeout = window.setTimeout(() => finish(true), timeoutMs);
+    bindMedia();
+  });
 }
 
 function svgChevron(direction = "next") {
@@ -174,9 +412,7 @@ function svgChevron(direction = "next") {
   path.setAttribute("stroke-linejoin", "round");
   path.setAttribute(
     "d",
-    direction === "previous"
-      ? "m15 18-6-6 6-6"
-      : "m9 18 6-6-6-6"
+    direction === "previous" ? "m15 18-6-6 6-6" : "m9 18 6-6-6-6"
   );
 
   svg.appendChild(path);
@@ -199,23 +435,23 @@ function createNavButton(direction = "next") {
   return button;
 }
 
-function ensureControls(viewer = currentViewer()) {
-  if (!viewer?.isConnected) return null;
+function ensureControls(preview = currentPreview()) {
+  if (!preview?.isConnected) return null;
 
-  let previous = viewer.querySelector(`${NAV}[data-media-gallery-action='previous']`);
-  let next = viewer.querySelector(`${NAV}[data-media-gallery-action='next']`);
-  let counter = viewer.querySelector(COUNTER);
+  let previous = preview.querySelector(
+    `${NAV}[data-media-gallery-action='previous']`
+  );
+  let next = preview.querySelector(`${NAV}[data-media-gallery-action='next']`);
+  let counter = preview.querySelector(COUNTER);
 
   if (!previous) {
     previous = createNavButton("previous");
-    viewer.appendChild(previous);
+    preview.appendChild(previous);
   }
-
   if (!next) {
     next = createNavButton("next");
-    viewer.appendChild(next);
+    preview.appendChild(next);
   }
-
   if (!counter) {
     counter = document.createElement("div");
     counter.className = "incidencias-media-gallery-counter";
@@ -223,20 +459,26 @@ function ensureControls(viewer = currentViewer()) {
     counter.setAttribute("role", "status");
     counter.setAttribute("aria-live", "polite");
     counter.setAttribute("aria-atomic", "true");
-    viewer.appendChild(counter);
+    preview.appendChild(counter);
   }
 
   return { previous, next, counter };
 }
 
-function syncControls(root = currentRoot(), viewer = currentViewer(root)) {
-  if (!root?.isConnected || !viewer?.isConnected) return false;
+function syncControls(
+  root = currentRoot(),
+  viewer = currentViewer(root),
+  preview = currentPreview(viewer)
+) {
+  if (!root?.isConnected || !viewer?.isConnected || !preview?.isConnected) {
+    return false;
+  }
 
-  const controls = ensureControls(viewer);
+  const controls = ensureControls(preview);
   if (!controls) return false;
 
   const items = galleryItems(root);
-  const id = previewId(currentPreview(viewer));
+  const id = previewId(preview);
   const index = currentIndex(items, id);
   const usable = items.length > 1 && index >= 0;
   const navigating = viewer.dataset.galleryNavigating === "true";
@@ -257,25 +499,45 @@ function syncControls(root = currentRoot(), viewer = currentViewer(root)) {
 
   controls.previous.disabled = navigating || !previousItem;
   controls.next.disabled = navigating || !nextItem;
-
   controls.previous.setAttribute(
     "aria-label",
     previousItem?.name
       ? `Anterior: ${previousItem.name}`
       : "No hay adjunto multimedia anterior"
   );
-
   controls.next.setAttribute(
     "aria-label",
     nextItem?.name
       ? `Siguiente: ${nextItem.name}`
       : "No hay adjunto multimedia siguiente"
   );
-
   controls.previous.title = previousItem?.name || "";
   controls.next.title = nextItem?.name || "";
   controls.counter.textContent = `${index + 1} / ${items.length}`;
+  return true;
+}
 
+function clearNavigationTimer() {
+  if (!browser() || !navigationTimer) {
+    navigationTimer = 0;
+    return false;
+  }
+  window.clearTimeout(navigationTimer);
+  navigationTimer = 0;
+  return true;
+}
+
+function finishNavigation(viewer = currentViewer(), epoch = navigationEpoch) {
+  if (epoch !== navigationEpoch) return false;
+
+  clearNavigationTimer();
+  navigationTargetId = "";
+  navigationSettling = false;
+
+  if (viewer?.isConnected) {
+    viewer.dataset.galleryNavigating = "false";
+    delete viewer.dataset.galleryTargetId;
+  }
   return true;
 }
 
@@ -302,6 +564,43 @@ function dispatchControllerOpen(trigger = null) {
   }
 }
 
+async function settleNavigation(
+  viewer = currentViewer(),
+  preview = currentPreview(viewer),
+  epoch = navigationEpoch
+) {
+  if (
+    navigationSettling ||
+    epoch !== navigationEpoch ||
+    !viewer?.isConnected ||
+    !preview?.isConnected
+  ) {
+    return false;
+  }
+
+  navigationSettling = true;
+
+  try {
+    await waitForPreviewReady(preview, epoch);
+
+    if (
+      epoch !== navigationEpoch ||
+      !viewer.isConnected ||
+      previewId(preview) !== navigationTargetId
+    ) {
+      return false;
+    }
+
+    preview.dataset.galleryReady = "true";
+    clearHold(viewer, { immediate: false });
+    finishNavigation(viewer, epoch);
+    syncControls(currentRoot(), viewer, preview);
+    return true;
+  } finally {
+    if (epoch === navigationEpoch) navigationSettling = false;
+  }
+}
+
 function navigate(direction = "next") {
   const root = currentRoot();
   const viewer = currentViewer(root);
@@ -325,30 +624,35 @@ function navigate(direction = "next") {
   const target = items[index + delta] || null;
   if (!target?.trigger?.isConnected) return false;
 
+  const epoch = ++navigationEpoch;
   navigationTargetId = target.id;
+  navigationSettling = false;
   navigationCount += 1;
 
+  createVisualHold(viewer, preview);
   viewer.dataset.galleryNavigating = "true";
   viewer.dataset.galleryTargetId = target.id;
-  syncControls(root, viewer);
+  syncControls(root, viewer, preview);
 
   clearNavigationTimer();
   navigationTimer = window.setTimeout(() => {
-    navigationTimer = 0;
-    finishNavigation(currentViewer());
+    if (epoch !== navigationEpoch) return;
+    clearHold(currentViewer(), { immediate: false });
+    finishNavigation(currentViewer(), epoch);
     schedule();
   }, NAVIGATION_TIMEOUT_MS);
 
   if (!dispatchControllerOpen(target.trigger)) {
-    finishNavigation(viewer);
-    syncControls(root, viewer);
+    clearHold(viewer, { immediate: false });
+    finishNavigation(viewer, epoch);
+    syncControls(root, viewer, preview);
     return false;
   }
 
   return true;
 }
 
-function interactiveMediaOwnsArrows(node = document.activeElement) {
+function interactiveMediaOwnsArrows(node = null) {
   if (!node || node === document.body || node === document.documentElement) {
     return false;
   }
@@ -366,23 +670,29 @@ function onClick(event) {
 
   event.preventDefault();
   event.stopPropagation();
-
   navigate(
-    button.dataset.mediaGalleryAction === "previous"
-      ? "previous"
-      : "next"
+    button.dataset.mediaGalleryAction === "previous" ? "previous" : "next"
   );
 }
 
-function onKeyDown(event) {
+function onDocumentKeyDown(event) {
   if (
     !["ArrowLeft", "ArrowRight"].includes(event.key) ||
     event.altKey ||
     event.ctrlKey ||
     event.metaKey ||
-    event.shiftKey ||
-    !currentViewer()?.isConnected ||
-    interactiveMediaOwnsArrows()
+    event.shiftKey
+  ) {
+    return;
+  }
+
+  const viewer = currentViewer();
+
+  if (
+    !viewer?.isConnected ||
+    viewer.dataset.viewerState === "closing" ||
+    interactiveMediaOwnsArrows(event.target) ||
+    interactiveMediaOwnsArrows(document.activeElement)
   ) {
     return;
   }
@@ -395,20 +705,15 @@ function onKeyDown(event) {
   }
 }
 
-
 function unbindHost(host = modalHost) {
   if (!host) return false;
-
   host.removeEventListener("click", onClick, true);
-  host.removeEventListener("keydown", onKeyDown, true);
   return true;
 }
 
 function bindHost(host = modalHost) {
   if (!host) return false;
-
   host.addEventListener("click", onClick, true);
-  host.addEventListener("keydown", onKeyDown, true);
   return true;
 }
 
@@ -417,14 +722,12 @@ function syncModalHost() {
   if (nextHost === modalHost) return Boolean(nextHost);
 
   if (modalHost) unbindHost(modalHost);
-
   observer?.disconnect?.();
   observer = null;
   modalHost = nextHost || null;
 
   if (modalHost && typeof MutationObserver !== "undefined") {
     bindHost(modalHost);
-
     observer = new MutationObserver(schedule);
     observer.observe(modalHost, {
       childList: true,
@@ -434,6 +737,7 @@ function syncModalHost() {
         "data-preview-active",
         "data-viewer-state",
         "data-preview-attachment-id",
+        "data-video-state",
       ],
     });
   }
@@ -453,33 +757,28 @@ function sync() {
   if (!root?.isConnected || !viewer?.isConnected) {
     lastPreviewId = "";
     navigationTargetId = "";
+    navigationSettling = false;
     clearNavigationTimer();
     return false;
   }
 
-  const id = previewId(currentPreview(viewer));
+  const preview = currentPreview(viewer);
+  const id = previewId(preview);
 
   if (
     viewer.dataset.galleryNavigating === "true" &&
     navigationTargetId &&
-    id === navigationTargetId
+    id === navigationTargetId &&
+    preview?.isConnected
   ) {
     lastPreviewId = id;
-
-    window.requestAnimationFrame?.(() => {
-      if (!viewer.isConnected) return;
-      finishNavigation(viewer);
-      syncControls(root, viewer);
-    });
-
+    syncControls(root, viewer, preview);
+    void settleNavigation(viewer, preview, navigationEpoch);
     return true;
   }
 
-  if (id && id !== lastPreviewId) {
-    lastPreviewId = id;
-  }
-
-  syncControls(root, viewer);
+  if (id && id !== lastPreviewId) lastPreviewId = id;
+  syncControls(root, viewer, preview);
   return true;
 }
 
@@ -498,6 +797,7 @@ export function mountIncidenciasMediaGallery() {
   if (!mountRoot) return false;
 
   mounted = true;
+  document.addEventListener("keydown", onDocumentKeyDown, true);
 
   viewObserver = new MutationObserver(schedule);
   viewObserver.observe(mountRoot, {
@@ -514,8 +814,11 @@ export function destroyIncidenciasMediaGallery() {
   if (!browser() || !mounted) return false;
 
   mounted = false;
+  navigationEpoch += 1;
+  document.removeEventListener("keydown", onDocumentKeyDown, true);
 
   if (modalHost) unbindHost(modalHost);
+  clearHold(currentViewer(), { immediate: true });
 
   observer?.disconnect?.();
   viewObserver?.disconnect?.();
@@ -524,13 +827,11 @@ export function destroyIncidenciasMediaGallery() {
   modalHost = null;
   mountRoot = null;
 
-  if (frame) {
-    window.cancelAnimationFrame?.(frame);
-  }
-
+  if (frame) window.cancelAnimationFrame?.(frame);
   frame = 0;
   clearNavigationTimer();
   navigationTargetId = "";
+  navigationSettling = false;
   lastPreviewId = "";
   return true;
 }
@@ -538,8 +839,9 @@ export function destroyIncidenciasMediaGallery() {
 export function getIncidenciasMediaGallerySnapshot() {
   const root = currentRoot();
   const viewer = currentViewer(root);
+  const preview = currentPreview(viewer);
   const items = galleryItems(root);
-  const id = previewId(currentPreview(viewer));
+  const id = previewId(preview);
 
   return Object.freeze({
     version: INCIDENCIAS_MEDIA_GALLERY_VERSION,
@@ -548,6 +850,7 @@ export function getIncidenciasMediaGallerySnapshot() {
     galleryItems: items.length,
     currentIndex: Math.max(-1, currentIndex(items, id)),
     navigating: viewer?.dataset?.galleryNavigating === "true",
+    bufferedFrame: Boolean(viewer?.querySelector?.(HOLD)),
     navigationCount,
     policy: Object.freeze({
       controllerOwnsAttachmentOpen: true,
@@ -555,10 +858,17 @@ export function getIncidenciasMediaGallerySnapshot() {
       noViewerCloseBetweenItems: true,
       noPolling: true,
       mediaOnly: true,
+      controlsInsideMediaModal: true,
       arrowButtons: true,
-      keyboardArrows: true,
+      documentKeyboardArrowsWhileViewerOpen: true,
       nativeMediaKeysPreserved: true,
+      previousFrameHeldUntilNewMediaReady: true,
+      imageLoadAware: true,
+      videoLoadedDataAware: true,
+      pdfLoadAware: true,
+      navigationFailOpenTimeout: true,
       scrollSessionDelegatedToCore: true,
+      observerScope: "modal-island",
       hostDiscoveryScope: "stable-router-view",
     }),
   });

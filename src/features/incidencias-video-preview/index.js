@@ -3,11 +3,11 @@
    Entrada canónica del feature de media.
 
    core.js conserva la autoridad del visor, vídeo, cache y sesión de scroll.
-   gallery.js añade navegación lateral sin duplicar transporte ni estado.
+   gallery.js compone navegación sólida, teclado y controles internos.
 ========================================================= */
 
 export const INCIDENCIAS_ATTACHMENT_VIEWER_SUITE_VERSION =
-  "incidencias-attachment-viewer.v6.compact-gallery";
+  "incidencias-attachment-viewer.v7.solid-inner-gallery";
 
 import core from "./core.js";
 import "./gallery.js";

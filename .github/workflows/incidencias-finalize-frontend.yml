@@ -27,6 +27,22 @@ jobs:
           node-version: "22"
           package-manager-cache: false
 
+      - name: Make one-shot migration parser export-aware
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/scripts/incidencias_finalize_frontend.py')
+          text = path.read_text(encoding='utf-8')
+          old = r'(?:async\s+)?function\s+'
+          new = r'(?:export\s+)?(?:async\s+)?function\s+'
+          if text.count(old) != 1:
+              raise SystemExit(f'finalizer parser marker mismatch: {text.count(old)}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
       - name: Apply final Incidencias hardening
         run: python3 .github/scripts/incidencias_finalize_frontend.py
 

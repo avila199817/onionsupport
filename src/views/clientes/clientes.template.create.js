@@ -2954,8 +2954,7 @@ function renderAlert(
 }
 
 function renderLoadingOverlay(
-  label =
-    "Creando cliente..."
+  label = "Creando cliente..."
 ) {
   return `
     <div
@@ -2964,9 +2963,12 @@ function renderLoadingOverlay(
       aria-busy="true"
       data-create-loading-overlay="true"
     >
-      <div class="cli-create-loading-card inc-create-loading-card">
+      <div class="cli-create-loading-card inc-create-loading-card" role="status">
         <span class="cli-create-loading-spinner inc-create-loading-spinner" aria-hidden="true"></span>
-        <strong>${escapeHtml(label)}</strong>
+        <span class="cli-create-loading-copy inc-create-loading-copy">
+          <strong>${escapeHtml(label)}</strong>
+          <small>Guardando el cliente y sincronizando la vinculación con el usuario.</small>
+        </span>
       </div>
     </div>
   `;
@@ -2979,16 +2981,8 @@ function renderLoadingOverlay(
 export function renderClientesCreateModal(
   input = {}
 ) {
-  const vm =
-    buildVm(
-      input
-    );
-
-  if (
-    !vm.open
-  ) {
-    return "";
-  }
+  const vm = buildVm(input);
+  if (!vm.open) return "";
 
   return `
     <section
@@ -3015,20 +3009,9 @@ export function renderClientesCreateModal(
           tabindex="-1"
         >
           <header class="cli-create-header inc-create-header">
-            <div class="cli-create-title-wrap inc-create-title-wrap">
-              <span class="cli-create-title-icon inc-create-title-icon" aria-hidden="true">
-                ${icon("client")}
-              </span>
-
-              <div>
-                <h2 id="clientes-create-title">
-                  Crear cliente
-                </h2>
-
-                <p id="clientes-create-subtitle">
-                  Vincula un usuario real y completa los datos que guarda /api/clientes.
-                </p>
-              </div>
+            <div class="cli-create-header-copy inc-create-header-copy">
+              <h2 id="clientes-create-title">Crear cliente</h2>
+              <p id="clientes-create-subtitle">Vincula un usuario real y completa los datos fiscales, de contacto y dirección del cliente.</p>
             </div>
 
             <button
@@ -3037,31 +3020,12 @@ export function renderClientesCreateModal(
               data-create-action="${CREATE_ACTIONS.CLOSE}"
               aria-label="Cerrar"
               ${disabledAttrs(vm.submitting, vm.submitting)}
-            >
-              ${icon("close")}
-            </button>
+            >${icon("close")}</button>
           </header>
 
           <div class="cli-create-body inc-create-body">
-            ${
-              vm.successMessage
-                ? renderAlert(
-                    "success",
-                    "Cliente creado.",
-                    vm.successMessage
-                  )
-                : ""
-            }
-
-            ${
-              vm.serverError
-                ? renderAlert(
-                    "error",
-                    "No se pudo crear el cliente.",
-                    vm.serverError
-                  )
-                : ""
-            }
+            ${vm.successMessage ? renderAlert("success", "Cliente creado.", vm.successMessage) : ""}
+            ${vm.serverError ? renderAlert("error", "No se pudo crear el cliente.", vm.serverError) : ""}
 
             <form
               id="${FORM_ID}"
@@ -3076,36 +3040,23 @@ export function renderClientesCreateModal(
               ${renderAddressBlock(vm)}
 
               <div class="cli-create-actions inc-create-actions">
+                <span class="cli-create-actions-note inc-create-actions-note">El cliente quedará vinculado al usuario seleccionado y disponible en las vistas privadas.</span>
                 <button
                   id="clientes-create-submit-btn"
                   type="submit"
                   data-create-action="${CREATE_ACTIONS.SUBMIT}"
-                  ${disabledAttrs(
-                    vm.submitting ||
-                    !vm.admin,
-                    vm.submitting
-                  )}
+                  ${disabledAttrs(vm.submitting || !vm.admin, vm.submitting)}
                   class="cli-create-submit inc-create-submit"
                 >
                   <span class="cli-create-submit-inner inc-create-submit-inner">
-                    ${
-                      vm.submitting
-                        ? `<span class="cli-create-spinner inc-create-spinner" aria-hidden="true"></span>Creando...`
-                        : "Crear cliente"
-                    }
+                    ${vm.submitting ? `<span class="cli-create-spinner inc-create-spinner" aria-hidden="true"></span>Creando...` : "Crear cliente"}
                   </span>
                 </button>
               </div>
             </form>
           </div>
 
-          ${
-            vm.submitting
-              ? renderLoadingOverlay(
-                  "Creando cliente y sincronizando usuario..."
-                )
-              : ""
-          }
+          ${vm.submitting ? renderLoadingOverlay("Creando cliente y sincronizando usuario...") : ""}
         </div>
       </div>
     </section>

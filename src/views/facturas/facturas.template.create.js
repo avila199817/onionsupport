@@ -1086,13 +1086,33 @@ function renderTotalStrip(vm = {}) {
    TEMPLATE
 ========================================================= */
 
+function renderFacturaCreateLoadingOverlay(vm = {}) {
+  const lineCount = safeArray(vm.form?.lineas).length;
+  const ticketCount = safeArray(vm.selectedTickets).length;
+  const detail = [
+    lineCount ? `${lineCount === 1 ? "1 partida" : `${lineCount} partidas`}` : "",
+    ticketCount ? `${ticketCount === 1 ? "1 incidencia" : `${ticketCount} incidencias`}` : "",
+  ].filter(Boolean).join(" · ");
+
+  return `
+    <div class="fac-create-loading-overlay" aria-live="polite" aria-busy="true">
+      <div class="fac-create-loading-card" role="status">
+        <span class="fac-create-loading-spinner" aria-hidden="true"></span>
+        <span class="fac-create-loading-copy">
+          <strong>Creando factura...</strong>
+          <small>${escapeHtml(detail ? `Guardando ${detail} y preparando la factura.` : "Guardando la factura y preparando el documento.")}</small>
+        </span>
+      </div>
+    </div>
+  `;
+}
+
 export function renderFacturasCreateModal(input = {}) {
   const vm = buildVm(input);
   if (!vm.open) return "";
 
   const errors = vm.errors;
   const clientCount = vm.selectedClientes.length;
-  const ticketCount = vm.selectedTickets.length;
   const disabled = vm.submitting || !vm.canCreate;
 
   return `
@@ -1102,6 +1122,7 @@ export function renderFacturasCreateModal(input = {}) {
       data-facturas-create-root="true"
       data-open="true"
       data-template-version="${attr(FACTURAS_CREATE_TEMPLATE_VERSION)}"
+      role="presentation"
     >
       <div class="fac-create-overlay" data-facturas-create-modal-overlay="true">
         <div
@@ -1111,14 +1132,13 @@ export function renderFacturasCreateModal(input = {}) {
           role="dialog"
           aria-modal="true"
           aria-labelledby="${PANEL_ID}-title"
+          aria-describedby="${PANEL_ID}-subtitle"
           tabindex="-1"
         >
           <header class="fac-create-header">
-            <div class="fac-create-header-icon" aria-hidden="true">${icon("receipt")}</div>
             <div class="fac-create-header-copy">
-              <span class="fac-create-eyebrow">Facturación</span>
-              <h2 id="${PANEL_ID}-title">Nueva factura</h2>
-              <p>Selecciona el cliente, vincula la incidencia y confirma el perfil fiscal antes de crearla.</p>
+              <h2 id="${PANEL_ID}-title">Crear factura</h2>
+              <p id="${PANEL_ID}-subtitle">Selecciona el cliente, vincula la incidencia y añade todas las partidas que deban facturarse.</p>
             </div>
             <button
               type="button"
@@ -1129,18 +1149,18 @@ export function renderFacturasCreateModal(input = {}) {
             >${icon("close")}</button>
           </header>
 
-          <form id="${FORM_ID}" data-facturas-create-form="true" novalidate>
-            <div class="fac-create-body" data-facturas-create-body="true">
-              ${vm.serverError ? `<div class="fac-create-alert is-error" role="alert">${escapeHtml(vm.serverError)}</div>` : ""}
-              ${vm.successMessage ? `<div class="fac-create-alert is-success" role="status">${escapeHtml(vm.successMessage)}</div>` : ""}
+          <div class="fac-create-body" data-facturas-create-body="true">
+            ${vm.serverError ? `<div class="fac-create-alert is-error" role="alert">${escapeHtml(vm.serverError)}</div>` : ""}
+            ${vm.successMessage ? `<div class="fac-create-alert is-success" role="status">${escapeHtml(vm.successMessage)}</div>` : ""}
 
+            <form id="${FORM_ID}" class="fac-create-form" data-facturas-create-form="true" novalidate>
               <section class="fac-create-section">
                 <div class="fac-create-section-head">
                   <div>
-                    <span class="fac-create-step">01</span>
-                    <h3>Cliente y perfil fiscal</h3>
-                    <p>El cliente principal determina los impuestos. Un particular nunca lleva IRPF.</p>
+                    <span>Cliente</span>
+                    <strong>Cliente y perfil fiscal</strong>
                   </div>
+                  <small>El cliente principal determina el perfil fiscal de la factura.</small>
                 </div>
 
                 <div data-slot="selected-clientes">${renderSelectedClientes(vm)}</div>
@@ -1186,9 +1206,8 @@ export function renderFacturasCreateModal(input = {}) {
               <section class="fac-create-section">
                 <div class="fac-create-section-head">
                   <div>
-                    <span class="fac-create-step">02</span>
-                    <h3>Incidencia vinculada</h3>
-                    <p>La incidencia principal quedará asociada a la factura.</p>
+                    <span>Incidencia</span>
+                    <strong>Incidencia vinculada</strong>
                   </div>
                   <div class="fac-create-section-actions">
                     <button
@@ -1234,9 +1253,8 @@ export function renderFacturasCreateModal(input = {}) {
               <section class="fac-create-section">
                 <div class="fac-create-section-head">
                   <div>
-                    <span class="fac-create-step">03</span>
-                    <h3>Conceptos e importes</h3>
-                    <p>Añade todas las partidas facturables: horas, servicios, materiales, repuestos o consumibles.</p>
+                    <span>Facturación</span>
+                    <strong>Conceptos e importes</strong>
                   </div>
                   <div class="fac-create-section-actions">
                     <button type="button" class="fac-create-link-btn fac-create-line-add" data-factura-create-action="${FACTURA_CREATE_ACTIONS.LINE_ADD}" ${disabled ? "disabled" : ""}>${icon("plus")}<span>Añadir concepto</span></button>
@@ -1262,28 +1280,23 @@ export function renderFacturasCreateModal(input = {}) {
               </section>
 
               ${renderTotalStrip(vm)}
-            </div>
 
-            <footer class="fac-create-footer">
-              <div class="fac-create-footer-actions">
-                <button
-                  type="button"
-                  class="fac-create-btn fac-create-btn--ghost"
-                  data-factura-create-action="${FACTURA_CREATE_ACTIONS.CLOSE}"
-                  ${vm.submitting ? "disabled" : ""}
-                >Cancelar</button>
+              <div class="fac-create-actions">
+                <span class="fac-create-actions-note">La factura se creará con el cliente, las incidencias y todas las partidas seleccionadas.</span>
                 <button
                   type="submit"
-                  class="fac-create-btn fac-create-btn--primary"
+                  class="fac-create-submit"
                   data-factura-create-action="${FACTURA_CREATE_ACTIONS.SUBMIT}"
                   ${disabled ? "disabled" : ""}
                   aria-busy="${vm.submitting ? "true" : "false"}"
                 >
-                  ${vm.submitting ? renderSpinner("Creando factura...") : `${icon("check")}<span>Crear factura</span>`}
+                  ${vm.submitting ? renderSpinner("Creando...") : `<span>Crear factura</span>`}
                 </button>
               </div>
-            </footer>
-          </form>
+            </form>
+          </div>
+
+          ${vm.submitting ? renderFacturaCreateLoadingOverlay(vm) : ""}
         </div>
       </div>
     </section>

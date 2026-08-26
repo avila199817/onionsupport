@@ -852,87 +852,69 @@ function renderSelect({
 function renderAlert() {
   if (!state.error) return "";
 
-  const warning =
-    state.error.startsWith(
-      "El usuario se creó"
-    );
+  const warning = state.error.startsWith("El usuario se creó");
 
   return `
     <div
-      class="usr-create-alert ${warning ? "is-warning" : "is-error"}"
+      class="usr-create-alert inc-create-alert ${warning ? "is-warning" : "is-error"}"
       role="${warning ? "status" : "alert"}"
     >
-      <strong>
-        ${
-          warning
-            ? "Atención con el alta"
-            : "No se pudo crear el usuario"
-        }
-      </strong>
-
-      <span>
-        ${escapeHtml(state.error)}
+      <span class="usr-create-alert-icon inc-create-alert-icon" aria-hidden="true">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0Z"/></svg>
+      </span>
+      <span class="usr-create-alert-copy inc-create-alert-copy">
+        <strong>${warning ? "Atención con el alta" : "No se pudo crear el usuario"}</strong>
+        <span>${escapeHtml(state.error)}</span>
       </span>
     </div>
   `;
 }
 
 function renderLoadingOverlay() {
-  if (!state.submitting) {
-    return "";
-  }
+  if (!state.submitting) return "";
 
   return `
     <div
-      class="usr-create-loading-overlay"
+      class="usr-create-loading-overlay inc-create-loading-overlay"
       aria-live="polite"
       aria-busy="true"
     >
-      <div class="usr-create-loading-card">
-        <span
-          class="usr-create-loading-spinner"
-          aria-hidden="true"
-        ></span>
-
-        <strong>
-          Creando usuario y enviando activación...
-        </strong>
+      <div class="usr-create-loading-card inc-create-loading-card" role="status">
+        <span class="usr-create-loading-spinner inc-create-loading-spinner" aria-hidden="true"></span>
+        <span class="usr-create-loading-copy inc-create-loading-copy">
+          <strong>Creando usuario y enviando activación...</strong>
+          <small>Guardando la cuenta y preparando el correo de activación.</small>
+        </span>
       </div>
     </div>
   `;
 }
 
 function renderModalHtml() {
-  const form =
-    cloneForm(state.form);
-
-  const errors =
-    safeObject(state.errors);
-
-  const disabled =
-    state.submitting;
-
-  const empresa =
-    form.tipo === "empresa";
+  const form = cloneForm(state.form);
+  const errors = safeObject(state.errors);
+  const disabled = state.submitting;
+  const empresa = form.tipo === "empresa";
 
   return `
     <section
       id="${ROOT_ID}"
-      class="usuarios-create-modal-host is-open"
+      class="usuarios-create-modal-host is-open inc-create-root"
       data-usuarios-create-root="true"
       data-version="${attr(USUARIOS_CREATE_MODAL_VERSION)}"
       data-api-version="${attr(USUARIOS_API_VERSION)}"
       data-create-endpoint="${attr(USUARIOS_CREATE_ENDPOINT)}"
       data-activation-flow="true"
+      role="presentation"
     >
       <div
-        class="usr-create-overlay"
+        class="usr-create-overlay inc-create-overlay"
         data-usr-create-action="overlay"
         aria-hidden="false"
       >
         <div
           id="${PANEL_ID}"
-          class="usr-create-panel${state.submitting ? " is-submitting" : ""}"
+          class="usr-create-panel inc-create-panel${state.submitting ? " is-submitting" : ""}"
           data-usuarios-create-panel="true"
           role="dialog"
           aria-modal="true"
@@ -940,44 +922,34 @@ function renderModalHtml() {
           aria-describedby="usuarios-create-description"
           tabindex="-1"
         >
-          ${renderLoadingOverlay()}
-
-          <header class="usr-create-header">
-            <div class="usr-create-header-copy">
-              <div class="usr-create-header-text">
-                <h2 id="usuarios-create-title">
-                  Crear usuario
-                </h2>
-
-                <p id="usuarios-create-description">
-                  Se enviará un correo para que el usuario active la cuenta y establezca su acceso.
-                </p>
-              </div>
+          <header class="usr-create-header inc-create-header">
+            <div class="usr-create-header-copy inc-create-header-copy">
+              <h2 id="usuarios-create-title">Crear usuario</h2>
+              <p id="usuarios-create-description">Completa los datos de la cuenta. Se enviará un correo para que el usuario active su acceso.</p>
             </div>
 
             <button
               type="button"
-              class="usr-create-close"
+              class="usr-create-close inc-create-close"
               data-usr-create-action="close"
               aria-label="Cerrar"
               ${disabled ? "disabled" : ""}
             >
-              ×
+              <svg aria-hidden="true" focusable="false" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
             </button>
           </header>
 
-          <div class="usr-create-body">
+          <div class="usr-create-body inc-create-body">
             ${renderAlert()}
 
             <form
               id="${FORM_ID}"
-              class="usr-create-form"
+              class="usr-create-form inc-create-form"
               data-usuarios-create-form="true"
               novalidate
             >
-              <section class="usr-create-main">
-
-                <div class="usr-create-inline-grid">
+              <section class="usr-create-main inc-create-block">
+                <div class="usr-create-inline-grid inc-create-grid inc-create-grid--2">
                   ${renderField({
                     label: "Nombre completo",
                     name: "name",
@@ -1005,7 +977,7 @@ function renderModalHtml() {
                   })}
                 </div>
 
-                <div class="usr-create-inline-grid usr-create-inline-grid--3">
+                <div class="usr-create-inline-grid usr-create-inline-grid--3 inc-create-grid inc-create-grid--3">
                   ${renderField({
                     label: "Teléfono",
                     name: "phone",
@@ -1025,14 +997,8 @@ function renderModalHtml() {
                     error: errors.tipo,
                     disabled,
                     options: [
-                      {
-                        value: "particular",
-                        label: "Particular",
-                      },
-                      {
-                        value: "empresa",
-                        label: "Empresa",
-                      },
+                      { value: "particular", label: "Particular" },
+                      { value: "empresa", label: "Empresa" },
                     ],
                   })}
 
@@ -1040,21 +1006,17 @@ function renderModalHtml() {
                     label: "NIF / CIF",
                     name: "nif",
                     value: form.nif,
-                    placeholder: empresa
-                      ? "Obligatorio para empresa"
-                      : "Opcional",
+                    placeholder: empresa ? "Obligatorio para empresa" : "Opcional",
                     autocomplete: "off",
                     required: empresa,
                     error: errors.nif,
                     disabled,
                     maxLength: 32,
-                    hint: empresa
-                      ? ""
-                      : "Solo es obligatorio cuando el tipo es Empresa.",
+                    hint: empresa ? "" : "Solo es obligatorio cuando el tipo es Empresa.",
                   })}
                 </div>
 
-                <div class="usr-create-inline-grid">
+                <div class="usr-create-inline-grid inc-create-grid inc-create-grid--2">
                   ${renderField({
                     label: "Calle / dirección",
                     name: "calle",
@@ -1078,7 +1040,7 @@ function renderModalHtml() {
                   })}
                 </div>
 
-                <div class="usr-create-inline-grid usr-create-inline-grid--3">
+                <div class="usr-create-inline-grid usr-create-inline-grid--3 inc-create-grid inc-create-grid--3">
                   ${renderField({
                     label: "Ciudad",
                     name: "ciudad",
@@ -1113,21 +1075,15 @@ function renderModalHtml() {
                   })}
                 </div>
 
-                <div class="usr-create-inline-grid">
+                <div class="usr-create-inline-grid inc-create-grid inc-create-grid--2">
                   ${renderSelect({
                     label: "Privacidad",
                     name: "privacyMode",
                     value: String(Boolean(form.privacyMode)),
                     disabled,
                     options: [
-                      {
-                        value: "false",
-                        label: "Modo estándar",
-                      },
-                      {
-                        value: "true",
-                        label: "Modo privacidad",
-                      },
+                      { value: "false", label: "Modo estándar" },
+                      { value: "true", label: "Modo privacidad" },
                     ],
                   })}
 
@@ -1137,54 +1093,42 @@ function renderModalHtml() {
                     value: String(Boolean(form.darkMode)),
                     disabled,
                     options: [
-                      {
-                        value: "true",
-                        label: "Modo oscuro",
-                      },
-                      {
-                        value: "false",
-                        label: "Modo claro",
-                      },
+                      { value: "true", label: "Modo oscuro" },
+                      { value: "false", label: "Modo claro" },
                     ],
                   })}
                 </div>
 
                 <div
-                  class="usr-create-alert"
+                  class="usr-create-alert inc-create-alert"
                   role="note"
                   data-usuarios-create-activation-note="true"
                 >
-                  <strong>Activación por correo</strong>
-                  <span>
-                    El usuario se crea pendiente de activación. El nombre de usuario se genera automáticamente desde su email.
+                  <span class="usr-create-alert-icon inc-create-alert-icon" aria-hidden="true">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+                  </span>
+                  <span class="usr-create-alert-copy inc-create-alert-copy">
+                    <strong>Activación por correo</strong>
+                    <span>El usuario se crea pendiente de activación. El nombre de usuario se genera automáticamente desde su email.</span>
                   </span>
                 </div>
               </section>
 
-              <footer class="usr-create-actions">
+              <div class="usr-create-actions inc-create-actions">
+                <span class="usr-create-actions-note inc-create-actions-note">El usuario recibirá el enlace de activación en el email indicado.</span>
                 <button
                   type="submit"
-                  class="usr-create-submit"
+                  class="usr-create-submit inc-create-submit"
                   data-usr-create-action="submit"
                   ${disabled ? "disabled" : ""}
                 >
-                  ${
-                    state.submitting
-                      ? `
-                        <span class="usr-create-submit-inner">
-                          <span
-                            class="usr-create-spinner"
-                            aria-hidden="true"
-                          ></span>
-                          Creando...
-                        </span>
-                      `
-                      : "Crear y enviar activación"
-                  }
+                  ${state.submitting ? `<span class="usr-create-spinner inc-create-spinner" aria-hidden="true"></span><span>Creando...</span>` : `<span>Crear y enviar activación</span>`}
                 </button>
-              </footer>
+              </div>
             </form>
           </div>
+
+          ${renderLoadingOverlay()}
         </div>
       </div>
     </section>

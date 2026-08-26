@@ -37,7 +37,7 @@ export const CLIENTES_MODULE_NAME = "clientes";
 export const CLIENTES_VIEW_NAME = "ClientesView";
 export const CLIENTES_CANONICAL_PATH = "/clientes";
 export const CLIENTES_INDEX_VERSION =
-  "clientes.index.cursor.v12.progressive-reconciliation";
+  "clientes.index.cursor.v13.nonblocking-mount";
 export const CLIENTES_VIEW_VERSION = CLIENTES_INDEX_VERSION;
 export const CLIENTES_MODULE_VERSION = CLIENTES_INDEX_VERSION;
 export const CLIENTES_INDEX_SOURCE = "views.clientes.index";
@@ -1601,9 +1601,9 @@ function createClientesController(host = null, initialContext = {}) {
 
     attach();
     clearPageState();
-    loading = true;
-    renderNow();
-    await requestPage({ append: false, silent: false });
+
+    // Incidencias pattern: paint immediately; network revalidation must not block route commit.
+    void requestPage({ append: false, silent: false });
     return snapshot();
   }
 

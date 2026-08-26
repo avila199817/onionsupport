@@ -2,7 +2,7 @@
    Onion Support - Facturas Create Template
    Archivo: /src/views/facturas/facturas.template.create.js
 
-   PRODUCTIVO · TAX PROFILE AWARE · V6
+   PRODUCTIVO · MULTI-LINE BILLING · V7
 
    Política de negocio de Onion Support:
    - Particular: IVA 21 %, IRPF 0 %.
@@ -15,19 +15,19 @@
 ========================================================= */
 
 export const FACTURAS_CREATE_TEMPLATE_VERSION =
-  "facturas.template.create.v6.tax-profile-aware";
+  "facturas.template.create.v7.multi-line-billing";
 
 export const FACTURA_CREATE_ACTIONS = Object.freeze({
   CLOSE: "create-close",
   SUBMIT: "create-submit",
+  LINE_ADD: "create-line-add",
+  LINE_REMOVE: "create-line-remove",
   CLIENT_SELECT: "create-client-select",
   CLIENT_REMOVE: "create-client-remove",
   CLIENT_PRIMARY: "create-client-primary",
-  CLIENT_CLEAR: "create-client-clear",
   TICKET_SELECT: "create-ticket-select",
   TICKET_REMOVE: "create-ticket-remove",
   TICKET_PRIMARY: "create-ticket-primary",
-  TICKET_CLEAR: "create-ticket-clear",
   TICKET_REFRESH: "create-ticket-refresh",
 });
 
@@ -70,11 +70,28 @@ const PAYMENT_STATUS_OPTIONS = Object.freeze([
   { value: "pagada", label: "Pagada" },
 ]);
 
+const LINE_UNIT_OPTIONS = Object.freeze([
+  { value: "h", label: "Horas" },
+  { value: "ud", label: "Unidades" },
+  { value: "servicio", label: "Servicio" },
+  { value: "kit", label: "Kit" },
+]);
+
 const DEFAULT_FORM = Object.freeze({
   concepto: "Servicios de soporte y asistencia técnica informática",
   descripcion: "",
   cantidad: 1,
   precioUnitario: 20,
+  lineas: Object.freeze([
+    Object.freeze({
+      id: "linea-1",
+      concepto: "Servicios de soporte y asistencia técnica informática",
+      descripcion: "",
+      cantidad: 1,
+      unidad: "h",
+      precioUnitario: 20,
+    }),
+  ]),
   fechaServicio: "",
   formaPago: "transferencia bancaria",
   estadoPago: "pendiente",
@@ -563,12 +580,45 @@ function enrichFormWithPrimaryClient(form = {}, selectedClientes = []) {
   };
 }
 
+function normalizeLineItem(linea = {}, index = 0) {
+  const raw = safeObject(linea);
+  const defaultConcept = index === 0 ? DEFAULT_FORM.concepto : "";
+  const cantidad = Math.max(0, number(first(raw.cantidad, raw.horas, raw.qty, raw.quantity), index === 0 ? DEFAULT_FORM.cantidad : 1));
+  const precioUnitario = Math.max(0, number(first(raw.precioUnitario, raw.precio, raw.rate, raw.unitPrice), index === 0 ? DEFAULT_FORM.precioUnitario : 0));
+
+  return {
+    id: cleanText(first(raw.id, raw.lineaId), `linea-${index + 1}`),
+    concepto: cleanText(first(raw.concepto, raw.title), defaultConcept),
+    descripcion: String(first(raw.descripcion, raw.description, raw.detalle, "") ?? "")
+      .split("\r\n").join("\n")
+      .split("\r").join("\n")
+      .trim(),
+    cantidad,
+    unidad: cleanText(first(raw.unidad, raw.unit), index === 0 ? "h" : "ud"),
+    precioUnitario,
+  };
+}
+
 function normalizeForm(form = {}) {
+  const source = safeObject(form);
   const input = {
     ...DEFAULT_FORM,
     fechaServicio: todayInputValue(),
-    ...safeObject(form),
+    ...source,
   };
+
+  const rawLineas = safeArray(source.lineas);
+  const fallbackLine = {
+    id: "linea-1",
+    concepto: input.concepto,
+    descripcion: input.descripcion,
+    cantidad: input.cantidad,
+    unidad: first(input.unidad, "h"),
+    precioUnitario: input.precioUnitario,
+  };
+  const lineas = (rawLineas.length ? rawLineas : [fallbackLine])
+    .map((linea, index) => normalizeLineItem(linea, index));
+  const firstLine = lineas[0] || normalizeLineItem(fallbackLine, 0);
 
   const clienteTipo = cleanText(
     first(input.clienteTipo, input.tipoCliente, input.tipo, input.type),
@@ -586,10 +636,11 @@ function normalizeForm(form = {}) {
   });
 
   return {
-    concepto: cleanText(input.concepto, DEFAULT_FORM.concepto),
-    descripcion: String(input.descripcion ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim(),
-    cantidad: number(input.cantidad, DEFAULT_FORM.cantidad),
-    precioUnitario: number(input.precioUnitario, DEFAULT_FORM.precioUnitario),
+    concepto: firstLine.concepto,
+    descripcion: firstLine.descripcion,
+    cantidad: firstLine.cantidad,
+    precioUnitario: firstLine.precioUnitario,
+    lineas,
     fechaServicio: cleanText(input.fechaServicio, todayInputValue()),
     formaPago: cleanText(input.formaPago, DEFAULT_FORM.formaPago),
     estadoPago: cleanText(input.estadoPago, DEFAULT_FORM.estadoPago),
@@ -614,10 +665,11 @@ function normalizeForm(form = {}) {
 function getInvoiceBreakdown(form = {}) {
   const current = normalizeForm(form);
   const taxProfile = getFacturaCreateTaxProfile(current);
-
-  const cantidad = Math.max(0, number(current.cantidad, 0));
-  const precioUnitario = Math.max(0, number(current.precioUnitario, 0));
-  const base = round2(cantidad * precioUnitario);
+  const lineas = current.lineas.map((linea) => ({
+    ...linea,
+    base: round2(Math.max(0, number(linea.cantidad, 0)) * Math.max(0, number(linea.precioUnitario, 0))),
+  }));
+  const base = round2(lineas.reduce((sum, linea) => sum + linea.base, 0));
 
   const ivaRate = DEFAULT_IVA_RATE;
   const irpfRate = taxProfile.aplicaIrpf ? DEFAULT_IRPF_RATE : 0;
@@ -628,8 +680,9 @@ function getInvoiceBreakdown(form = {}) {
   const totalFactura = round2(base + ivaTotal + irpfTotal);
 
   return {
-    cantidad,
-    precioUnitario,
+    lineas,
+    cantidad: lineas[0]?.cantidad || 0,
+    precioUnitario: lineas[0]?.precioUnitario || 0,
     base,
     ivaRate,
     irpfRate,
@@ -697,12 +750,23 @@ function renderFieldError(message = "") {
   return text ? `<p class="fac-create-field-error" role="alert">${escapeHtml(text)}</p>` : "";
 }
 
+function getCreateAvatarTone(client = {}) {
+  const current = normalizeClient(client);
+  const identity = cleanText(first(current.email, current.name), "cliente");
+  let hash = 0;
+  for (let index = 0; index < identity.length; index += 1) {
+    hash = ((hash << 5) - hash + identity.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash) % 10;
+}
+
 function renderAvatar(client = {}) {
   const current = normalizeClient(client);
   const src = safeImageSrc(current.avatarUrl);
+  const tone = getCreateAvatarTone(current);
 
   return `
-    <span class="fac-create-avatar${src ? " has-image" : ""}" aria-hidden="true">
+    <span class="fac-create-avatar fac-create-avatar--tone-${tone}${src ? " has-image" : ""}" aria-hidden="true">
       ${src ? `<img src="${attr(src)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : ""}
       <span>${escapeHtml(current.initials)}</span>
     </span>
@@ -758,29 +822,37 @@ function renderTicketSearchResults(vm = {}) {
   if (!vm.selectedClientes.length) {
     return `<div class="fac-create-search-state">Selecciona primero el cliente principal.</div>`;
   }
-  if (search.loading) return `<div class="fac-create-search-state">${renderSpinner("Cargando incidencias...")}</div>`;
+  if (search.loading && !search.results.length) return `<div class="fac-create-search-state">${renderSpinner("Cargando incidencias...")}</div>`;
   if (search.error) return `<div class="fac-create-search-state is-error">${escapeHtml(search.error)}</div>`;
   if (search.empty) return `<div class="fac-create-search-state">No hay incidencias disponibles para este cliente.</div>`;
-  if (!search.results.length) return "";
+  if (!search.results.length) return `<div class="fac-create-search-state">No hay incidencias que mostrar para este cliente.</div>`;
+
+  const selectedIds = new Set(vm.selectedTickets.map((item) => cleanText(first(item.ticketId, item.incidenciaId, item.id), "")));
 
   return `
-    <div class="fac-create-search-results" role="listbox" aria-label="Resultados de incidencias">
-      ${search.results.map((ticket, index) => `
-        <button
-          type="button"
-          class="fac-create-search-result fac-create-search-result--ticket"
-          data-factura-create-action="${FACTURA_CREATE_ACTIONS.TICKET_SELECT}"
-          data-ticket-index="${index}"
-          role="option"
-        >
-          <span class="fac-create-result-icon" aria-hidden="true">${icon("ticket")}</span>
-          <span class="fac-create-result-copy">
-            <strong>${escapeHtml(ticket.subject || ticket.id)}</strong>
-            <span>${escapeHtml(ticket.subtitle || ticket.id)}</span>
-          </span>
-          <span class="fac-create-result-plus" aria-hidden="true">${icon("plus")}</span>
-        </button>
-      `).join("")}
+    <div class="fac-create-search-results" role="listbox" aria-label="Incidencias del cliente">
+      ${search.results.map((ticket, index) => {
+        const id = cleanText(first(ticket.ticketId, ticket.incidenciaId, ticket.id), "");
+        const selected = selectedIds.has(id);
+        return `
+          <button
+            type="button"
+            class="fac-create-search-result fac-create-search-result--ticket${selected ? " is-selected" : ""}"
+            data-factura-create-action="${FACTURA_CREATE_ACTIONS.TICKET_SELECT}"
+            data-ticket-index="${index}"
+            role="option"
+            aria-selected="${selected ? "true" : "false"}"
+            ${selected ? "disabled" : ""}
+          >
+            <span class="fac-create-result-icon" aria-hidden="true">${icon("ticket")}</span>
+            <span class="fac-create-result-copy">
+              <strong>${escapeHtml(ticket.subject || ticket.id)}</strong>
+              <span>${escapeHtml(ticket.subtitle || ticket.id)}</span>
+            </span>
+            <span class="fac-create-result-plus" aria-hidden="true">${icon(selected ? "check" : "plus")}</span>
+          </button>
+        `;
+      }).join("")}
     </div>
   `;
 }
@@ -916,6 +988,77 @@ function renderSelect({ label, name, value = "", options = [], error = "", disab
   `;
 }
 
+
+function lineError(errors = {}, index = 0, field = "") {
+  return cleanText(errors?.[`lineas.${index}.${field}`], "");
+}
+
+function renderLineItems(vm = {}, disabled = false) {
+  const lines = safeArray(vm.form.lineas);
+  return `
+    <div class="fac-create-line-items" data-line-items="true">
+      ${lines.map((linea, index) => {
+        const base = round2(number(linea.cantidad, 0) * number(linea.precioUnitario, 0));
+        return `
+          <article class="fac-create-line-item" data-line-item="true" data-line-index="${index}">
+            <header class="fac-create-line-head">
+              <div>
+                <span class="fac-create-line-kicker">Partida ${String(index + 1).padStart(2, "0")}</span>
+                <strong>${escapeHtml(linea.concepto || "Nueva partida")}</strong>
+              </div>
+              <div class="fac-create-line-head-actions">
+                <span class="fac-create-line-total" data-line-total="${index}">${escapeHtml(formatMoney(base))}</span>
+                ${lines.length > 1 ? `
+                  <button
+                    type="button"
+                    class="fac-create-icon-btn fac-create-line-remove"
+                    data-factura-create-action="${FACTURA_CREATE_ACTIONS.LINE_REMOVE}"
+                    data-line-index="${index}"
+                    aria-label="Eliminar partida ${index + 1}"
+                    ${disabled ? "disabled" : ""}
+                  >${icon("close")}</button>
+                ` : ""}
+              </div>
+            </header>
+
+            <div class="fac-create-line-grid">
+              <label class="fac-create-field fac-create-line-concept">
+                <span class="fac-create-label">Concepto *</span>
+                <input class="fac-create-input${lineError(vm.errors, index, "concepto") ? " is-error" : ""}" type="text" value="${attr(linea.concepto)}" data-line-index="${index}" data-line-field="concepto" autocomplete="off" placeholder="Ej. Mano de obra, pasta térmica, desplazamiento..." ${disabled ? "disabled" : ""}>
+                ${renderFieldError(lineError(vm.errors, index, "concepto"))}
+              </label>
+
+              <label class="fac-create-field fac-create-line-description">
+                <span class="fac-create-label">Descripción</span>
+                <input class="fac-create-input" type="text" value="${attr(linea.descripcion)}" data-line-index="${index}" data-line-field="descripcion" autocomplete="off" placeholder="Detalle opcional de la partida" ${disabled ? "disabled" : ""}>
+              </label>
+
+              <label class="fac-create-field">
+                <span class="fac-create-label">Cantidad *</span>
+                <input class="fac-create-input${lineError(vm.errors, index, "cantidad") ? " is-error" : ""}" type="number" min="0.01" step="0.01" value="${attr(linea.cantidad)}" data-line-index="${index}" data-line-field="cantidad" ${disabled ? "disabled" : ""}>
+                ${renderFieldError(lineError(vm.errors, index, "cantidad"))}
+              </label>
+
+              <label class="fac-create-field">
+                <span class="fac-create-label">Unidad</span>
+                <select class="fac-create-input fac-create-select" data-line-index="${index}" data-line-field="unidad" ${disabled ? "disabled" : ""}>
+                  ${LINE_UNIT_OPTIONS.map((option) => `<option value="${attr(option.value)}"${option.value === linea.unidad ? " selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
+                </select>
+              </label>
+
+              <label class="fac-create-field">
+                <span class="fac-create-label">Precio unitario *</span>
+                <input class="fac-create-input${lineError(vm.errors, index, "precioUnitario") ? " is-error" : ""}" type="number" min="0.01" step="0.01" value="${attr(linea.precioUnitario)}" data-line-index="${index}" data-line-field="precioUnitario" ${disabled ? "disabled" : ""}>
+                ${renderFieldError(lineError(vm.errors, index, "precioUnitario"))}
+              </label>
+            </div>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
 function renderTotalStrip(vm = {}) {
   const b = vm.breakdown;
   const profile = vm.taxProfile || b.taxProfile;
@@ -998,11 +1141,6 @@ export function renderFacturasCreateModal(input = {}) {
                     <h3>Cliente y perfil fiscal</h3>
                     <p>El cliente principal determina los impuestos. Un particular nunca lleva IRPF.</p>
                   </div>
-                  ${clientCount ? `
-                    <button type="button" class="fac-create-link-btn" data-factura-create-action="${FACTURA_CREATE_ACTIONS.CLIENT_CLEAR}">
-                      Limpiar
-                    </button>
-                  ` : ""}
                 </div>
 
                 <div data-slot="selected-clientes">${renderSelectedClientes(vm)}</div>
@@ -1019,7 +1157,7 @@ export function renderFacturasCreateModal(input = {}) {
                       name="clienteSearch"
                       type="search"
                       value="${attr(vm.clientSearch.query)}"
-                      placeholder="Nombre, email, empresa o usuario..."
+                      placeholder="Nombre, email, empresa o NIF..."
                       autocomplete="off"
                       spellcheck="false"
                       ${disabled ? "disabled" : ""}
@@ -1053,11 +1191,6 @@ export function renderFacturasCreateModal(input = {}) {
                     <p>La incidencia principal quedará asociada a la factura.</p>
                   </div>
                   <div class="fac-create-section-actions">
-                    ${ticketCount ? `
-                      <button type="button" class="fac-create-link-btn" data-factura-create-action="${FACTURA_CREATE_ACTIONS.TICKET_CLEAR}">
-                        Limpiar
-                      </button>
-                    ` : ""}
                     <button
                       type="button"
                       class="fac-create-link-btn"
@@ -1072,7 +1205,7 @@ export function renderFacturasCreateModal(input = {}) {
                 <div data-error-slot="incidenciaId">${renderFieldError(errors.incidenciaId)}</div>
 
                 <label class="fac-create-field fac-create-field--search">
-                  <span class="fac-create-label">${ticketCount ? "Añadir otra incidencia" : "Buscar incidencia"}</span>
+                  <span class="fac-create-label">Filtrar incidencias del cliente</span>
                   <span class="fac-create-search-shell">
                     <span aria-hidden="true">${icon("search")}</span>
                     <input
@@ -1102,101 +1235,26 @@ export function renderFacturasCreateModal(input = {}) {
                 <div class="fac-create-section-head">
                   <div>
                     <span class="fac-create-step">03</span>
-                    <h3>Detalle económico</h3>
-                    <p>Importes calculados con el perfil fiscal del cliente principal.</p>
+                    <h3>Conceptos e importes</h3>
+                    <p>Añade todas las partidas facturables: horas, servicios, materiales, repuestos o consumibles.</p>
+                  </div>
+                  <div class="fac-create-section-actions">
+                    <button type="button" class="fac-create-link-btn fac-create-line-add" data-factura-create-action="${FACTURA_CREATE_ACTIONS.LINE_ADD}" ${disabled ? "disabled" : ""}>${icon("plus")}<span>Añadir concepto</span></button>
                   </div>
                 </div>
 
-                <div class="fac-create-form-grid">
-                  ${renderInput({
-                    label: "Concepto",
-                    name: "concepto",
-                    value: vm.form.concepto,
-                    placeholder: "Ej. Servicios de soporte técnico",
-                    required: true,
-                    error: errors.concepto,
-                    disabled,
-                  })}
+                ${renderLineItems(vm, disabled)}
+                ${renderFieldError(errors.lineas)}
 
-                  <label class="fac-create-field fac-create-field--wide">
-                    <span class="fac-create-label">Descripción *</span>
-                    <textarea
-                      class="fac-create-input fac-create-textarea${errors.descripcion ? " is-error" : ""}"
-                      data-field="descripcion"
-                      name="descripcion"
-                      rows="4"
-                      placeholder="Describe el servicio realizado..."
-                      ${disabled ? "disabled" : ""}
-                      ${errors.descripcion ? 'aria-invalid="true"' : ""}
-                    >${escapeHtml(vm.form.descripcion)}</textarea>
-                    ${renderFieldError(errors.descripcion)}
-                  </label>
-
-                  ${renderInput({
-                    label: "Cantidad",
-                    name: "cantidad",
-                    value: vm.form.cantidad,
-                    type: "number",
-                    min: "0.01",
-                    step: "0.01",
-                    required: true,
-                    error: errors.cantidad,
-                    disabled,
-                  })}
-
-                  ${renderInput({
-                    label: "Precio unitario",
-                    name: "precioUnitario",
-                    value: vm.form.precioUnitario,
-                    type: "number",
-                    min: "0",
-                    step: "0.01",
-                    required: true,
-                    error: errors.precioUnitario,
-                    disabled,
-                  })}
-
-                  ${renderInput({
-                    label: "Fecha de servicio",
-                    name: "fechaServicio",
-                    value: vm.form.fechaServicio,
-                    type: "date",
-                    required: true,
-                    error: errors.fechaServicio,
-                    disabled,
-                  })}
-
-                  ${renderSelect({
-                    label: "Forma de pago",
-                    name: "formaPago",
-                    value: vm.form.formaPago,
-                    options: PAYMENT_OPTIONS,
-                    error: errors.formaPago,
-                    disabled,
-                  })}
-
-                  ${renderSelect({
-                    label: "Estado de pago",
-                    name: "estadoPago",
-                    value: vm.form.estadoPago,
-                    options: PAYMENT_STATUS_OPTIONS,
-                    error: errors.estadoPago,
-                    disabled,
-                  })}
+                <div class="fac-create-form-grid fac-create-form-grid--meta">
+                  ${renderInput({ label: "Fecha de servicio", name: "fechaServicio", value: vm.form.fechaServicio, type: "date", required: true, error: errors.fechaServicio, disabled })}
+                  ${renderSelect({ label: "Forma de pago", name: "formaPago", value: vm.form.formaPago, options: PAYMENT_OPTIONS, error: errors.formaPago, disabled })}
+                  ${renderSelect({ label: "Estado de pago", name: "estadoPago", value: vm.form.estadoPago, options: PAYMENT_STATUS_OPTIONS, error: errors.estadoPago, disabled })}
 
                   <label class="fac-create-toggle">
-                    <span>
-                      <strong>Enviar por email</strong>
-                      <small>Enviar la factura al cliente al finalizar.</small>
-                    </span>
+                    <span><strong>Enviar por email</strong><small>Enviar la factura al cliente al finalizar.</small></span>
                     <span class="fac-create-toggle-control">
-                      <input
-                        data-field="sendEmail"
-                        name="sendEmail"
-                        type="checkbox"
-                        ${vm.form.sendEmail ? "checked" : ""}
-                        ${disabled ? "disabled" : ""}
-                      >
+                      <input data-field="sendEmail" name="sendEmail" type="checkbox" ${vm.form.sendEmail ? "checked" : ""} ${disabled ? "disabled" : ""}>
                       <span aria-hidden="true"></span>
                     </span>
                   </label>
@@ -1204,21 +1262,9 @@ export function renderFacturasCreateModal(input = {}) {
               </section>
 
               ${renderTotalStrip(vm)}
-
-              <div class="fac-create-tax-footnote">
-                ${icon("shield")}
-                <span>
-                  Política automática: <strong>particular = IVA 21 % sin IRPF</strong>;
-                  empresa/profesional/autónomo = IVA 21 % + IRPF 7 %. El cliente principal manda.
-                </span>
-              </div>
             </div>
 
             <footer class="fac-create-footer">
-              <div class="fac-create-footer-summary">
-                <span>${clientCount ? escapeHtml(vm.primaryClient?.name || "Cliente seleccionado") : "Falta cliente"}</span>
-                <strong>${escapeHtml(formatMoney(vm.breakdown.totalFactura))}</strong>
-              </div>
               <div class="fac-create-footer-actions">
                 <button
                   type="button"
@@ -1277,10 +1323,8 @@ export function renderFacturaCreateTotalsSlot(input = {}) {
 ========================================================= */
 
 export function getFacturaCreateFormDefaults() {
-  return {
-    ...DEFAULT_FORM,
-    fechaServicio: todayInputValue(),
-  };
+  const form = normalizeForm({});
+  return { ...form, lineas: form.lineas.map((linea) => ({ ...linea })) };
 }
 
 export function getFacturaCreateBreakdown(form = {}) {
@@ -1294,39 +1338,21 @@ export function validateFacturaCreateForm({
 } = {}) {
   const normalizedClients = safeArray(selectedClientes).map(normalizeClient);
   const normalizedTickets = safeArray(selectedTickets).map(normalizeTicket);
-
   const enriched = enrichFormWithPrimaryClient(form, normalizedClients);
   const current = normalizeForm(enriched);
   const errors = {};
 
-  if (!normalizedClients.length) {
-    errors.clienteId = "Selecciona al menos un cliente.";
-  }
+  if (!normalizedClients.length) errors.clienteId = "Selecciona al menos un cliente.";
+  if (!normalizedTickets.length) errors.incidenciaId = "Selecciona al menos una incidencia vinculada.";
+  if (!current.lineas.length) errors.lineas = "Añade al menos una partida a la factura.";
 
-  if (!normalizedTickets.length) {
-    errors.incidenciaId = "Selecciona al menos una incidencia vinculada.";
-  }
+  current.lineas.forEach((linea, index) => {
+    if (!linea.concepto || linea.concepto.length < 2) errors[`lineas.${index}.concepto`] = "Indica un concepto válido.";
+    if (!(number(linea.cantidad, 0) > 0)) errors[`lineas.${index}.cantidad`] = "La cantidad debe ser mayor que cero.";
+    if (!(number(linea.precioUnitario, 0) > 0)) errors[`lineas.${index}.precioUnitario`] = "El precio debe ser mayor que cero.";
+  });
 
-  if (!current.concepto || current.concepto.length < 3) {
-    errors.concepto = "Indica un concepto válido.";
-  }
-
-  if (!current.descripcion || current.descripcion.length < 4) {
-    errors.descripcion = "Indica una descripción mínima.";
-  }
-
-  if (!(current.cantidad > 0)) {
-    errors.cantidad = "La cantidad debe ser mayor que cero.";
-  }
-
-  if (current.precioUnitario < 0) {
-    errors.precioUnitario = "El precio no puede ser negativo.";
-  }
-
-  if (!current.fechaServicio) {
-    errors.fechaServicio = "Indica la fecha de servicio.";
-  }
-
+  if (!current.fechaServicio) errors.fechaServicio = "Indica la fecha de servicio.";
   const breakdown = getInvoiceBreakdown(current);
 
   return {

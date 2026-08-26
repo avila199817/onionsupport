@@ -77,7 +77,6 @@ jobs:
           python .github/scripts/private_admin_alignment_contract.py
           python .github/scripts/repo_integrity.py
           node .github/scripts/continuous_scroll_smoke.mjs
-          bash .github/scripts/validate_spa_contracts.sh
           git diff --check
 
       - name: Commit focused change

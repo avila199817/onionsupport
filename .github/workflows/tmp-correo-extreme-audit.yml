@@ -1,0 +1,119 @@
+name: TEMP Correo extreme audit
+
+on:
+  push:
+    branches:
+      - polish/correo-extreme-v7
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: polish/correo-extreme-v7
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Static Correo audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          from collections import Counter
+
+          root = Path('.')
+          index = (root / 'src/views/correo/index.js').read_text(encoding='utf-8')
+          template = (root / 'src/views/correo/correo.template.js').read_text(encoding='utf-8')
+          api = (root / 'src/views/correo/correo.api.js').read_text(encoding='utf-8')
+          css_base = (root / 'src/css/views/correo/index.css').read_text(encoding='utf-8')
+          css_viewport = (root / 'src/css/views/correo/viewport.css').read_text(encoding='utf-8')
+          styles = (root / 'src/router/styles.js').read_text(encoding='utf-8')
+          runtime = index + '\n' + template
+          css = css_base + '\n' + css_viewport
+
+          cls_re = re.compile(r'\.?(correo-[a-z0-9_-]+)', re.I)
+          runtime_classes = set(cls_re.findall(runtime))
+          css_classes = set(cls_re.findall(css))
+          css_only = sorted(css_classes - runtime_classes)
+          runtime_only = sorted(runtime_classes - css_classes)
+
+          print('=== FILE SIZES ===')
+          for p in [
+              'src/views/correo/index.js',
+              'src/views/correo/correo.template.js',
+              'src/views/correo/correo.api.js',
+              'src/css/views/correo/index.css',
+              'src/css/views/correo/viewport.css',
+          ]:
+              text = (root / p).read_text(encoding='utf-8')
+              print(f'{p}: {len(text.splitlines())} lines / {len(text)} chars')
+
+          print('\n=== CLASS SURFACE ===')
+          print('runtime classes:', len(runtime_classes))
+          print('css classes:', len(css_classes))
+          print('css-only classes:', len(css_only))
+          print('\n'.join(css_only))
+          print('runtime-only classes:', len(runtime_only))
+          print('\n'.join(runtime_only))
+
+          print('\n=== DUPLICATE CLASS AUTHORITIES ===')
+          base_classes = set(cls_re.findall(css_base))
+          viewport_classes = set(cls_re.findall(css_viewport))
+          both = sorted(base_classes & viewport_classes)
+          print('classes defined/referenced in BOTH css files:', len(both))
+          print('\n'.join(both))
+
+          print('\n=== ACTION CONTRACT ===')
+          template_actions = set(re.findall(r'data-correo-action=\\?"([a-z0-9-]+)', template))
+          handled_actions = set(re.findall(r'action === "([a-z0-9-]+)"', index))
+          print('template actions:', sorted(template_actions))
+          print('handled actions:', sorted(handled_actions))
+          print('template without handler:', sorted(template_actions - handled_actions))
+          print('handler without static template action:', sorted(handled_actions - template_actions))
+
+          print('\n=== RISK MARKERS ===')
+          markers = {
+              'window.confirm': index.count('window.confirm('),
+              'hardcoded mailbox': (index + template).count('cristian@onionsupport.com'),
+              'fake add-account action': (index + template).count('add-account'),
+              'updateDraft API definitions': api.count('updateDraft('),
+              'updateDraft controller use': index.count('CorreoApi.updateDraft('),
+              'cachedAt writes/reads': (index.count('cachedAt') + template.count('cachedAt')),
+              'route CSS manifest entries': styles.count('/src/css/views/correo/'),
+              'native location.assign correo': index.count('window.location.assign("/correo")'),
+              'compose aria-modal': template.count('aria-modal="true"'),
+              'compose dialog role': template.count('role="dialog"'),
+              'focus trap markers': index.count('focusable') + index.count('focusTrap') + index.count('trapFocus'),
+              'IME markers': index.count('compositionstart') + index.count('compositionend') + index.count('isComposing'),
+              'list request abort markers': index.count('listAbort') + index.count('abortList'),
+          }
+          for key, value in markers.items():
+              print(f'{key}: {value}')
+
+          print('\n=== IMPORTANT CSS LEGACY MARKERS ===')
+          for selector in [
+              '.correo-hero', '.correo-list-header', '.correo-notice', '.correo-connect-orbit',
+              '.correo-connect-features', '.correo-security-card', '.correo-infinite-sentinel',
+              '.correo-attachment-icon', '.correo-attachment-copy', '.correo-attachment-download',
+          ]:
+              print(selector, css.count(selector), runtime.count(selector.lstrip('.')))
+          PY
+
+      - name: Existing repository gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/views/correo/index.js
+          node --check src/views/correo/correo.template.js
+          node --check src/views/correo/correo.api.js
+          python3 .github/scripts/repo_integrity.py
+          bash .github/ci/validate_spa_contracts.sh
+          git diff --check

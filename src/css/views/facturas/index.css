@@ -60,11 +60,6 @@
    MANUAL REFRESH — ELIMINADO DEL PRODUCTO
 ========================================================= */
 
-#facturas-refresh-btn,
-.facturas-hero-actions > [data-facturas-action="refresh"] {
-  display: none;
-}
-
 /* =========================================================
    FOCUS / INTERACTION
 ========================================================= */

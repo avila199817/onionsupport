@@ -50,11 +50,6 @@ Objetivos:
   font: inherit;
 }
 
-#clientes-refresh-btn,
-.clientes-hero-actions > [data-clientes-action="refresh"] {
-  display: none !important;
-}
-
 .clientes-btn,
 .clientes-stat-card,
 .clientes-filter-pill,

@@ -1029,7 +1029,6 @@ export function renderHeader(input = {}) {
       <div class="facturas-hero-actions">
         <button type="button" id="facturas-export-btn" class="facturas-btn" data-action="${FACTURAS_ACTIONS.EXPORT}" data-facturas-action="${FACTURAS_ACTIONS.EXPORT}" ${disabledAttrs(loading || refreshing || !rows.length)}>${icon("export")}<span class="facturas-btn-text">Exportar CSV</span></button>
         ${canCreateFactura ? `<button type="button" id="facturas-create-btn" class="facturas-btn facturas-btn--create${creating ? " is-loading" : ""}" data-action="${FACTURAS_ACTIONS.CREATE_OPEN}" data-facturas-action="${FACTURAS_ACTIONS.CREATE_OPEN}" aria-label="Crear nueva factura" ${disabledAttrs(creating, creating)}>${creating ? renderSpinner("Abriendo...") : `${icon("plus")}<span class="facturas-btn-text">Crear factura</span>`}</button>` : ""}
-        <button type="button" id="facturas-refresh-btn" class="facturas-btn${refreshing ? " is-loading" : ""}" data-action="${FACTURAS_ACTIONS.REFRESH}" data-facturas-action="${FACTURAS_ACTIONS.REFRESH}" ${disabledAttrs(refreshing || loading, refreshing)}>${refreshing ? renderSpinner("Actualizando...") : `${icon("refresh")}<span class="facturas-btn-text">Actualizar</span>`}</button>
       </div>
     </div>
     <div class="facturas-hero-meta">

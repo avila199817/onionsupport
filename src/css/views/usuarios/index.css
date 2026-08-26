@@ -55,11 +55,6 @@
   font: inherit;
 }
 
-#usuarios-refresh-btn,
-.usuarios-hero-actions > [data-usuarios-action="refresh"] {
-  display: none !important;
-}
-
 .usuarios-btn,
 .usuarios-stat-card,
 .usuarios-filter-pill,

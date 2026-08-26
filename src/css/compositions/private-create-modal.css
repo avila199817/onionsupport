@@ -12,7 +12,7 @@
    - Cada dominio conserva únicamente sus campos, copy y lógica de negocio.
    - Esta composición vive DESPUÉS de @layer views para impedir drift entre
      cuatro hojas de ruta independientes sin recurrir a !important.
-   - No introduce una paleta paralela: sólo consume tokens globales.
+   - El rojo de cierre consume danger global; el azul primario pertenece al contrato Create compartido.
 ========================================================= */
 
 @layer compositions {
@@ -21,6 +21,16 @@
   --private-create-panel-width: min(1080px, calc(100vw - 48px));
   --private-create-panel-client-width: min(900px, calc(100vw - 48px));
   --private-create-panel-max-height: min(92dvh, 900px);
+
+  /* Incidencias Create authority: create = blue, close = danger red. */
+  --private-create-primary-bg: #2563eb;
+  --private-create-primary-bg-hover: #3b82f6;
+  --private-create-primary-bg-active: #1d4ed8;
+  --private-create-primary-border: rgba(96, 165, 250, .72);
+  --private-create-primary-text: #ffffff;
+  --private-create-primary-shadow:
+    0 12px 28px rgba(37, 99, 235, .28),
+    inset 0 1px 0 rgba(255, 255, 255, .14);
 }
 
 /* =========================================================
@@ -236,10 +246,11 @@ body.usuarios-create-modal-open {
   place-items: center;
   margin: 0;
   padding: 0;
-  border: 1px solid var(--btn-secondary-border);
+  border: 1px solid var(--danger-border);
   border-radius: var(--btn-radius);
-  background: var(--btn-secondary-bg);
-  color: var(--btn-secondary-text);
+  background: var(--btn-danger-bg);
+  color: var(--btn-danger-text);
+  box-shadow: var(--btn-danger-shadow);
   cursor: pointer;
   font-size: inherit;
   font-weight: inherit;
@@ -268,9 +279,9 @@ body.usuarios-create-modal-open {
   .fac-create-close,
   .usr-create-close
 ):hover:not(:disabled) {
-  background: var(--btn-secondary-bg-hover);
-  border-color: var(--border-strong);
-  color: var(--text-strong);
+  background: var(--btn-danger-bg-hover);
+  border-color: var(--error-hover);
+  color: var(--btn-danger-text);
   transform: none;
 }
 
@@ -280,6 +291,7 @@ body.usuarios-create-modal-open {
   .fac-create-close,
   .usr-create-close
 ):active:not(:disabled) {
+  background: var(--btn-danger-bg-active);
   transform: scale(.97);
 }
 
@@ -833,11 +845,11 @@ body.usuarios-create-modal-open {
   gap: 8px;
   margin: 0;
   padding-inline: var(--space-lg);
-  border: 1px solid var(--btn-primary-border);
+  border: 1px solid var(--private-create-primary-border);
   border-radius: var(--btn-radius);
-  background: var(--btn-primary-bg);
-  color: var(--btn-primary-text);
-  box-shadow: var(--btn-primary-shadow);
+  background: var(--private-create-primary-bg);
+  color: var(--private-create-primary-text);
+  box-shadow: var(--private-create-primary-shadow);
   cursor: pointer;
   font-size: var(--font-md);
   font-weight: var(--weight-bold);
@@ -856,7 +868,7 @@ body.usuarios-create-modal-open {
   .fac-create-submit,
   .usr-create-submit
 ):hover:not(:disabled) {
-  background: var(--btn-primary-bg-hover);
+  background: var(--private-create-primary-bg-hover);
   transform: translateY(-1px);
 }
 
@@ -866,7 +878,7 @@ body.usuarios-create-modal-open {
   .fac-create-submit,
   .usr-create-submit
 ):active:not(:disabled) {
-  background: var(--btn-primary-bg-active);
+  background: var(--private-create-primary-bg-active);
   transform: translateY(0);
 }
 

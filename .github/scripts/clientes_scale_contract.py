@@ -187,6 +187,11 @@ require(
     "main Clientes controller must not simulate pagination with visibleLimit",
 )
 require(
+    "void requestPage({ append: false, silent: false });" in controller
+    and "await requestPage({ append: false, silent: false });" not in controller,
+    "Clientes route mount must paint immediately and never await first-page network I/O",
+)
+require(
     "hydrateClientesFromCache" not in controller,
     "main Clientes controller must not hydrate the former complete-dataset cache",
 )

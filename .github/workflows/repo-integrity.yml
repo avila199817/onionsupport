@@ -76,6 +76,9 @@ jobs:
       - name: Validate private admin cross-view alignment
         run: python3 .github/scripts/private_admin_alignment_contract.py
 
+      - name: Validate private Create modal parity
+        run: python3 .github/scripts/private_create_modal_contract.py
+
       - name: Validate continuous-scroll markup
         run: node .github/scripts/continuous_scroll_smoke.mjs
 

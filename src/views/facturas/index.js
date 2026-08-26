@@ -55,7 +55,7 @@ import {
 } from "./facturas.template.modal.js";
 
 export const FACTURAS_INDEX_VERSION =
-  "facturas.index.productivo.v18.mobile-resend-polish";
+  "facturas.index.productivo.v19.client-only-create-search";
 
 export const FACTURAS_VIEW_VERSION = FACTURAS_INDEX_VERSION;
 
@@ -111,14 +111,13 @@ let FACTURAS_CONTROLLER_SEQUENCE = 0;
 
 /*
   Búsquedas de selección para alta de Facturas.
-  Priorizar los routers /api/search canónicos del backend y conservar sólo
-  fallbacks que existen realmente. Evita 404 legacy y, sobre todo, evita que
-  /api/clientes (listado general) intercepte una consulta antes del buscador.
+  La entidad seleccionable es exclusivamente Cliente. El backend ya expone
+  /api/search/clientes como router canónico sobre el contenedor de clientes;
+  nunca degradar a /api/search/users ni /api/users porque mezclaría usuarios
+  internos con entidades facturables.
 */
 const CLIENT_SEARCH_ENDPOINTS = Object.freeze([
   "/api/search/clientes",
-  "/api/search/users",
-  "/api/users",
 ]);
 
 const TICKET_SEARCH_ENDPOINTS = Object.freeze([

@@ -1,0 +1,61 @@
+name: Private Create Modal Parity Bootstrap
+
+on:
+  push:
+    branches:
+      - feat/private-create-modal-parity
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: feat/private-create-modal-parity
+          fetch-depth: 0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Apply fail-closed parity patch
+        run: python3 .github/scripts/private_create_modal_parity_bootstrap.py
+
+      - name: Validate Create parity and existing contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/views/incidencias/incidencias.template.create.js
+          node --check src/views/facturas/facturas.template.create.js
+          node --check src/views/clientes/clientes.template.create.js
+          node --check src/views/usuarios/usuarios.template.create.js
+          python3 .github/scripts/private_create_modal_contract.py
+          python3 .github/scripts/private_admin_alignment_contract.py
+          python3 .github/scripts/incidencias_scale_contract.py
+          python3 .github/scripts/clientes_scale_contract.py
+          python3 .github/scripts/facturas_continuous_scroll_contract.py
+          python3 .github/scripts/usuarios_scale_contract.py
+          python3 .github/scripts/repo_integrity.py
+          node .github/scripts/continuous_scroll_smoke.mjs
+          bash .github/ci/validate_spa_contracts.sh
+          git diff --check
+          git status --short
+
+      - name: Commit product template alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Onion Support Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add \
+            src/views/facturas/facturas.template.create.js \
+            src/views/clientes/clientes.template.create.js \
+            src/views/usuarios/usuarios.template.create.js
+          git commit -m "refactor: align private Create modals to Incidencias"
+          git push origin HEAD:feat/private-create-modal-parity

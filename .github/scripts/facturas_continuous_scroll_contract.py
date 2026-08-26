@@ -10,6 +10,8 @@ INDEX = (ROOT / "src/views/facturas/index.js").read_text(encoding="utf-8")
 API = (ROOT / "src/views/facturas/facturas.api.js").read_text(encoding="utf-8")
 TEMPLATE = (ROOT / "src/views/facturas/facturas.template.js").read_text(encoding="utf-8")
 STYLE = (ROOT / "src/css/views/facturas/index.css").read_text(encoding="utf-8")
+CREATE_TEMPLATE = (ROOT / "src/views/facturas/facturas.template.create.js").read_text(encoding="utf-8")
+CREATE_STYLE = (ROOT / "src/css/views/facturas/create.css").read_text(encoding="utf-8")
 
 errors: list[str] = []
 
@@ -144,6 +146,23 @@ require(
 )
 reject(INDEX, '"/api/search/users"', "Create-invoice client search must never fall back to user search")
 reject(INDEX, '"/api/users"', "Create-invoice client search must never fall back to the users listing")
+
+
+# Nueva factura is a line-item editor with one canonical client and incident domain.
+reject(CREATE_TEMPLATE, 'CLIENT_CLEAR: "create-client-clear"', "Create invoice must not expose a duplicate client clear action")
+reject(CREATE_TEMPLATE, 'TICKET_CLEAR: "create-ticket-clear"', "Create invoice must not expose a duplicate ticket clear action")
+reject(CREATE_TEMPLATE, "Política automática:", "Create invoice must not render the redundant automatic tax policy footnote")
+reject(CREATE_TEMPLATE, "fac-create-footer-summary", "Create invoice footer must contain actions only")
+require(CREATE_TEMPLATE, 'LINE_ADD: "create-line-add"', "Create invoice must support adding line items")
+require(CREATE_TEMPLATE, 'LINE_REMOVE: "create-line-remove"', "Create invoice must support removing line items")
+require(CREATE_TEMPLATE, 'data-line-field="concepto"', "Line-item editor must expose per-line concepts")
+require(CREATE_TEMPLATE, 'data-line-field="unidad"', "Line-item editor must support service/material units")
+require(INDEX, "readCreateLineItems", "Controller must read every invoice line before submit")
+require(INDEX, "safeArray(breakdown.lineas).map", "Create payload must serialize every validated invoice line")
+require(INDEX, 'const TICKET_SEARCH_ENDPOINTS = Object.freeze([\n  "/api/search/incidencias",\n]);', "Invoice incidents must use the canonical client-scoped incidence search")
+require(INDEX, "autoSelectLatest: false", "Client incidents must remain an explicit choice instead of being auto-selected")
+require(CREATE_TEMPLATE, "fac-create-avatar--tone-${tone}", "Create invoice avatars must inherit the deterministic Facturas palette")
+require(CREATE_STYLE, ".fac-create-avatar--tone-7", "Create invoice must carry the full Facturas avatar tone palette")
 
 # Facturas resend UX must stay inside the product visual system, never browser chrome.
 reject(INDEX, "¿Quieres volver a enviarla?", "Resend confirmation must not use the browser-native confirm dialog")

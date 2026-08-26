@@ -55,7 +55,7 @@ import {
 } from "./facturas.template.modal.js";
 
 export const FACTURAS_INDEX_VERSION =
-  "facturas.index.productivo.v19.client-only-create-search";
+  "facturas.index.productivo.v20.multi-line-create-polish";
 
 export const FACTURAS_VIEW_VERSION = FACTURAS_INDEX_VERSION;
 
@@ -121,10 +121,7 @@ const CLIENT_SEARCH_ENDPOINTS = Object.freeze([
 ]);
 
 const TICKET_SEARCH_ENDPOINTS = Object.freeze([
-  "/api/search/tickets",
   "/api/search/incidencias",
-  "/api/tickets",
-  "/api/incidencias",
 ]);
 
 /* =========================================================
@@ -1190,7 +1187,7 @@ function ticketBelongsToClients(ticket = {}, clients = []) {
   const ticketClienteId = cleanText(ticket.clienteId, "");
   const ticketUserId = cleanText(ticket.userId, "");
 
-  if (!ticketClienteId && !ticketUserId) return true;
+  if (!ticketClienteId && !ticketUserId) return false;
 
   return selected.some((client) => {
     const clienteId = cleanText(first(client.clienteId, client.id), "");
@@ -3393,6 +3390,11 @@ function createFacturasController(host = null, context = {}) {
       totalNode.textContent = formatMoney(breakdown.totalFactura);
     }
 
+    safeArray(breakdown.lineas).forEach((linea, index) => {
+      const node = createModalHost.querySelector(`[data-line-total="${index}"]`);
+      if (node) node.textContent = formatMoney(linea.base);
+    });
+
     return true;
   }
 
@@ -4429,6 +4431,40 @@ function createFacturasController(host = null, context = {}) {
   function patchCreateFormFromField(field = null) {
     if (!field) return false;
 
+    const lineField = cleanText(field.dataset?.lineField, "");
+    const lineIndex = number(field.dataset?.lineIndex, -1);
+    const value =
+      field.type === "checkbox"
+        ? Boolean(field.checked)
+        : field.tagName === "TEXTAREA"
+          ? multilineValue(field.value)
+          : field.value;
+
+    if (lineField && Number.isInteger(lineIndex) && lineIndex >= 0) {
+      const lineas = safeArray(createModal.form.lineas).map((linea) => ({ ...safeObject(linea) }));
+      if (!lineas[lineIndex]) return false;
+
+      lineas[lineIndex] = {
+        ...lineas[lineIndex],
+        [lineField]: value,
+      };
+      createModal.form = {
+        ...createModal.form,
+        lineas,
+      };
+
+      const errorKey = `lineas.${lineIndex}.${lineField}`;
+      if (createModal.errors[errorKey]) {
+        const next = { ...createModal.errors };
+        delete next[errorKey];
+        createModal.errors = next;
+      }
+
+      createModal.serverError = "";
+      patchCreateTotalsDom();
+      return true;
+    }
+
     const name = cleanText(
       field.dataset?.field || field.name,
       ""
@@ -4441,13 +4477,6 @@ function createFacturasController(host = null, context = {}) {
     ) {
       return false;
     }
-
-    const value =
-      field.type === "checkbox"
-        ? Boolean(field.checked)
-        : field.tagName === "TEXTAREA"
-          ? multilineValue(field.value)
-          : field.value;
 
     createModal.form = {
       ...createModal.form,
@@ -4462,7 +4491,6 @@ function createFacturasController(host = null, context = {}) {
 
     createModal.serverError = "";
     patchCreateTotalsDom();
-
     return true;
   }
 
@@ -4665,8 +4693,7 @@ function createFacturasController(host = null, context = {}) {
     );
 
     void loadTicketsForSelectedClients({
-      autoSelectLatest:
-        createModal.selectedTickets.length === 0,
+      autoSelectLatest: false,
     });
 
     return true;
@@ -4810,7 +4837,6 @@ function createFacturasController(host = null, context = {}) {
     }
 
     createModal.ticketSearch.loading = true;
-    createModal.ticketSearch.results = [];
     patchCreateTicketSearchDom();
 
     ticketSearchTimer = window.setTimeout(() => {
@@ -4857,7 +4883,6 @@ function createFacturasController(host = null, context = {}) {
     createModal.ticketSearch.loading = true;
     createModal.ticketSearch.error = "";
     createModal.ticketSearch.empty = false;
-    createModal.ticketSearch.results = [];
 
     patchCreateTicketSearchDom();
 
@@ -4915,8 +4940,7 @@ function createFacturasController(host = null, context = {}) {
       }
 
       createModal.ticketSearch.loading = false;
-      createModal.ticketSearch.results = [];
-      createModal.ticketSearch.empty = false;
+      createModal.ticketSearch.empty = createModal.ticketSearch.results.length === 0;
       createModal.ticketSearch.error = safeError(
         searchError,
         "No se pudieron cargar incidencias."
@@ -4952,11 +4976,10 @@ function createFacturasController(host = null, context = {}) {
     createModal.errors = nextErrors;
 
     createModal.ticketSearch = {
-      query: "",
+      ...createModal.ticketSearch,
       loading: false,
       error: "",
-      results: [],
-      empty: false,
+      empty: createModal.ticketSearch.results.length === 0,
     };
 
     rerenderCreateWithFocus(
@@ -5034,6 +5057,88 @@ function createFacturasController(host = null, context = {}) {
     );
 
     return true;
+  }
+
+  function addCreateLineItem() {
+    const lineas = safeArray(createModal.form.lineas).map((linea) => ({ ...safeObject(linea) }));
+    const id = `linea-${Date.now()}-${lineas.length + 1}`;
+    lineas.push({
+      id,
+      concepto: "",
+      descripcion: "",
+      cantidad: 1,
+      unidad: "ud",
+      precioUnitario: 0,
+    });
+
+    createModal.form = {
+      ...createModal.form,
+      lineas,
+    };
+    createModal.serverError = "";
+
+    renderCreateModal({
+      immediate: true,
+      preserveFocus: true,
+      focusSelector: `[data-line-index="${lineas.length - 1}"][data-line-field="concepto"]`,
+    });
+    return true;
+  }
+
+  function removeCreateLineItem(index = -1) {
+    const lineas = safeArray(createModal.form.lineas).map((linea) => ({ ...safeObject(linea) }));
+    const targetIndex = number(index, -1);
+    if (
+      !Number.isInteger(targetIndex) ||
+      targetIndex < 0 ||
+      targetIndex >= lineas.length ||
+      lineas.length <= 1
+    ) {
+      return false;
+    }
+
+    lineas.splice(targetIndex, 1);
+    createModal.form = {
+      ...createModal.form,
+      lineas,
+    };
+    createModal.errors = {};
+    createModal.serverError = "";
+
+    renderCreateModal({
+      immediate: true,
+      preserveFocus: true,
+      focusSelector: `[data-line-index="${Math.max(0, targetIndex - 1)}"][data-line-field="concepto"]`,
+    });
+    return true;
+  }
+
+  function readCreateLineItems(formNode = null) {
+    if (!formNode?.querySelectorAll) {
+      return safeArray(createModal.form.lineas);
+    }
+
+    return Array.from(
+      formNode.querySelectorAll("[data-line-item='true']")
+    ).map((row, index) => {
+      const read = (field) =>
+        row.querySelector(`[data-line-field="${field}"]`)?.value ?? "";
+
+      return {
+        id: cleanText(
+          first(
+            safeArray(createModal.form.lineas)[index]?.id,
+            `linea-${index + 1}`
+          ),
+          `linea-${index + 1}`
+        ),
+        concepto: cleanText(read("concepto"), ""),
+        descripcion: multilineValue(read("descripcion")),
+        cantidad: number(read("cantidad"), 0),
+        unidad: cleanText(read("unidad"), "ud"),
+        precioUnitario: number(read("precioUnitario"), 0),
+      };
+    });
   }
 
   function buildFacturaPayload() {
@@ -5179,23 +5284,47 @@ function createFacturasController(host = null, context = {}) {
       currency: "EUR",
       moneda: "EUR",
 
-      lineas: [
-        {
-          id: "linea-1",
-          concepto: form.concepto,
-          descripcion: form.descripcion,
-          cantidad: breakdown.cantidad,
-          precioUnitario: breakdown.precioUnitario,
-          subtotal: breakdown.base,
-          base: breakdown.base,
-          baseImponible: breakdown.base,
-          ivaPorcentaje: breakdown.ivaRate,
-          ivaImporte: breakdown.ivaTotal,
-          irpfPorcentaje: breakdown.irpfRate,
-          irpfImporte: breakdown.irpfTotal,
-          total: breakdown.totalFactura,
-        },
-      ],
+      lineas: safeArray(breakdown.lineas).map((linea, index) => {
+        const baseLinea = number(linea.base, 0);
+        const ivaImporte = Math.round(
+          (baseLinea * (breakdown.ivaRate / 100) + Number.EPSILON) * 100
+        ) / 100;
+        const irpfImporte = breakdown.aplicaIrpf
+          ? -Math.round(
+              (baseLinea * (breakdown.irpfRate / 100) + Number.EPSILON) * 100
+            ) / 100
+          : 0;
+
+        return {
+          id: cleanText(
+            first(linea.id, `linea-${index + 1}`),
+            `linea-${index + 1}`
+          ),
+          lineNumber: index + 1,
+          concepto: cleanText(linea.concepto, ""),
+          descripcion: cleanText(
+            first(linea.descripcion, linea.concepto),
+            ""
+          ),
+          cantidad: number(linea.cantidad, 0),
+          unidad: cleanText(linea.unidad, "ud"),
+          precioUnitario: number(linea.precioUnitario, 0),
+          subtotal: baseLinea,
+          base: baseLinea,
+          baseImponible: baseLinea,
+          totalLinea: baseLinea,
+          total: baseLinea,
+          importe: baseLinea,
+          iva: {
+            porcentaje: breakdown.ivaRate,
+            importe: ivaImporte,
+          },
+          irpf: {
+            porcentaje: breakdown.irpfRate,
+            importe: irpfImporte,
+          },
+        };
+      }),
 
       impuestos: [
         {
@@ -5218,18 +5347,14 @@ function createFacturasController(host = null, context = {}) {
     if (createModal.submitting || !isAdmin()) return false;
 
     if (formNode) {
-      for (const field of [
-        "fechaServicio",
-        "formaPago",
-        "estadoPago",
-        "sendEmail",
-        "concepto",
-        "descripcion",
-        "cantidad",
-        "precioUnitario",
-      ]) {
-        createModal.form[field] = readField(formNode, field);
-      }
+      createModal.form = {
+        ...createModal.form,
+        lineas: readCreateLineItems(formNode),
+        fechaServicio: readField(formNode, "fechaServicio"),
+        formaPago: readField(formNode, "formaPago"),
+        estadoPago: readField(formNode, "estadoPago"),
+        sendEmail: readField(formNode, "sendEmail"),
+      };
     }
 
     const validation = safeObject(
@@ -6079,6 +6204,16 @@ function createFacturasController(host = null, context = {}) {
       return closeCreateModal();
     }
 
+    if (type === FACTURA_CREATE_ACTIONS.LINE_ADD) {
+      return addCreateLineItem();
+    }
+
+    if (type === FACTURA_CREATE_ACTIONS.LINE_REMOVE) {
+      return removeCreateLineItem(
+        number(node?.dataset?.lineIndex, -1)
+      );
+    }
+
     if (type === FACTURA_CREATE_ACTIONS.SUBMIT) {
       return submitCreate(
         node?.closest?.("form") ||
@@ -6101,9 +6236,6 @@ function createFacturasController(host = null, context = {}) {
       return makeClientPrimary(clientIndexFromNode(node));
     }
 
-    if (type === FACTURA_CREATE_ACTIONS.CLIENT_CLEAR) {
-      return clearClients();
-    }
 
     if (type === FACTURA_CREATE_ACTIONS.TICKET_SELECT) {
       return selectTicket(ticketIndexFromNode(node));
@@ -6117,14 +6249,10 @@ function createFacturasController(host = null, context = {}) {
       return makeTicketPrimary(ticketIndexFromNode(node));
     }
 
-    if (type === FACTURA_CREATE_ACTIONS.TICKET_CLEAR) {
-      return clearTickets();
-    }
 
     if (type === FACTURA_CREATE_ACTIONS.TICKET_REFRESH) {
       return loadTicketsForSelectedClients({
-        autoSelectLatest:
-          createModal.selectedTickets.length === 0,
+        autoSelectLatest: false,
       });
     }
 

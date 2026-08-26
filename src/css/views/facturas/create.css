@@ -1,6 +1,6 @@
 /* =========================================================
    Onion Support · Facturas · Crear factura
-   PRODUCTIVO · TAX PROFILE AWARE · V6
+   PRODUCTIVO · MULTI-LINE BILLING · V7
 
    Contrato:
    - 1:1 con facturas.template.create.js V6.
@@ -551,13 +551,26 @@ body.facturas-create-open {
   display: grid;
   place-items: center;
   overflow: hidden;
-  border: 1px solid var(--border-strong);
+  border: 1px solid color-mix(in srgb, var(--fac-avatar-a) 44%, var(--border-default));
   border-radius: var(--radius-sm);
-  background: var(--avatar-bg, var(--badge-bg));
-  color: var(--text-strong);
+  background: linear-gradient(135deg, var(--fac-avatar-a), var(--fac-avatar-b));
+  color: var(--text-on-accent, #fff);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
   font-size: var(--font-xs);
   font-weight: var(--weight-black);
 }
+
+
+.fac-create-avatar--tone-0 { --fac-avatar-a: var(--accent); --fac-avatar-b: var(--info); }
+.fac-create-avatar--tone-1 { --fac-avatar-a: var(--success); --fac-avatar-b: var(--info); }
+.fac-create-avatar--tone-2 { --fac-avatar-a: var(--warning); --fac-avatar-b: var(--accent); }
+.fac-create-avatar--tone-3 { --fac-avatar-a: var(--error); --fac-avatar-b: var(--warning); }
+.fac-create-avatar--tone-4 { --fac-avatar-a: var(--info); --fac-avatar-b: var(--accent); }
+.fac-create-avatar--tone-5 { --fac-avatar-a: var(--success); --fac-avatar-b: var(--accent); }
+.fac-create-avatar--tone-6 { --fac-avatar-a: var(--info); --fac-avatar-b: var(--success); }
+.fac-create-avatar--tone-7 { --fac-avatar-a: var(--warning); --fac-avatar-b: var(--error); }
+.fac-create-avatar--tone-8 { --fac-avatar-a: var(--error); --fac-avatar-b: var(--accent); }
+.fac-create-avatar--tone-9 { --fac-avatar-a: var(--accent); --fac-avatar-b: var(--success); }
 
 .fac-create-avatar img {
   position: absolute;
@@ -880,6 +893,144 @@ body.facturas-create-open {
   box-shadow: var(--focus-ring);
 }
 
+
+/* =========================================================
+   MULTI-LINE BILLING
+========================================================= */
+
+.fac-create-line-items {
+  min-inline-size: 0;
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.fac-create-line-item {
+  min-inline-size: 0;
+  display: grid;
+  gap: var(--space-sm);
+  padding: 13px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--solid-bg-1, var(--panel-bg));
+}
+
+.fac-create-line-head {
+  min-inline-size: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.fac-create-line-head > div:first-child {
+  min-inline-size: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fac-create-line-kicker {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border: 1px solid var(--badge-border);
+  border-radius: var(--radius-pill);
+  background: var(--badge-bg);
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: var(--weight-black);
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+
+.fac-create-line-head strong {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: var(--font-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fac-create-line-head-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.fac-create-line-total {
+  color: var(--text-strong);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-black);
+  font-variant-numeric: tabular-nums;
+}
+
+.fac-create-line-grid {
+  min-inline-size: 0;
+  display: grid;
+  grid-template-columns:
+    minmax(180px, 1.35fr)
+    minmax(180px, 1.35fr)
+    minmax(100px, .55fr)
+    minmax(120px, .65fr)
+    minmax(130px, .7fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.fac-create-line-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fac-create-line-add svg {
+  inline-size: 14px;
+  block-size: 14px;
+}
+
+.fac-create-search-result--ticket.is-selected {
+  border-color: var(--border-success);
+  background: var(--success-bg);
+  cursor: default;
+  opacity: 1;
+}
+
+.fac-create-search-result--ticket.is-selected .fac-create-result-plus {
+  color: var(--success-strong, var(--success));
+}
+
+@media (max-width: 980px) {
+  .fac-create-line-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .fac-create-line-concept,
+  .fac-create-line-description {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 640px) {
+  .fac-create-line-head {
+    align-items: flex-start;
+  }
+
+  .fac-create-line-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .fac-create-line-concept,
+  .fac-create-line-description {
+    grid-column: auto;
+  }
+
+  .fac-create-line-head strong {
+    white-space: normal;
+  }
+}
+
 /* =========================================================
    TOTALS
 ========================================================= */
@@ -971,35 +1122,13 @@ body.facturas-create-open {
   min-inline-size: 0;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--space-md);
   padding: 14px clamp(18px, 2vw, 30px);
   border-block-start: 1px solid var(--border-soft, var(--border-default));
   background: var(--surface-2, var(--panel-bg));
 }
 
-.fac-create-footer-summary {
-  min-inline-size: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.fac-create-footer-summary span {
-  max-inline-size: min(50vw, 520px);
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: var(--font-xs);
-  font-weight: var(--weight-semibold);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.fac-create-footer-summary strong {
-  color: var(--text-strong);
-  font-size: var(--font-lg);
-  font-weight: var(--weight-black);
-  font-variant-numeric: tabular-nums;
-}
 
 .fac-create-footer-actions {
   flex: 0 0 auto;

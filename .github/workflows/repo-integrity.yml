@@ -73,6 +73,9 @@ jobs:
       - name: Validate Usuarios scale contract
         run: python3 .github/scripts/usuarios_scale_contract.py
 
+      - name: Validate private admin cross-view alignment
+        run: python3 .github/scripts/private_admin_alignment_contract.py
+
       - name: Validate continuous-scroll markup
         run: node .github/scripts/continuous_scroll_smoke.mjs
 

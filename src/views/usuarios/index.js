@@ -2,7 +2,7 @@
    Onion Support - Usuarios Index
    Archivo: /src/views/usuarios/index.js
 
-   CURSOR-FIRST · SERVER FILTERED · INFINITE SCROLL · RACE SAFE V12
+   CURSOR-FIRST · SERVER FILTERED · INFINITE SCROLL · RACE SAFE V13
 
    Objetivos:
    - No precargar el dataset completo.
@@ -72,7 +72,7 @@ export const USUARIOS_MODULE_NAME = "usuarios";
 export const USUARIOS_VIEW_NAME = "UsuariosView";
 export const USUARIOS_CANONICAL_PATH = "/usuarios";
 export const USUARIOS_INDEX_VERSION =
-  "usuarios.index.v12.debounce-safe-infinite-scroll";
+  "usuarios.index.v13.nonblocking-route-commit";
 export const USUARIOS_VIEW_VERSION = USUARIOS_INDEX_VERSION;
 export const USUARIOS_MODULE_VERSION = USUARIOS_INDEX_VERSION;
 export const USUARIOS_INDEX_SOURCE = "views.usuarios.index";
@@ -1459,9 +1459,9 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         render({ preserveDom: false });
         return controller;
       }
-      loading = true;
-      render({ preserveDom: false });
-      await load({ silent: false });
+      // loadFirstPage paints the loading shell synchronously before its first await.
+      // Start that work now, but never keep the atomic router commit waiting on network.
+      void load({ silent: false });
       return controller;
     },
     render,
@@ -1589,6 +1589,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
           loadMoreTaskIdentityProtected: true,
           modalDestroyCleanup: true,
           duplicateMountProtected: true,
+          routeCommitNonBlocking: true,
           csvLoadedRowsOnly: true,
         },
       };

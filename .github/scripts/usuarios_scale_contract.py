@@ -31,6 +31,13 @@ require(INDEX, "localDatasetCeiling: false", "Usuarios index must declare no loc
 reject(INDEX, "loadUsuariosApi(", "Usuarios index must not call legacy all-pages loader")
 reject(INDEX, "all: true", "Usuarios index must not request all pages")
 
+# Route-open performance: the router awaits route.render() before committing the hidden host.
+# Usuarios must paint its loading shell synchronously, then let the first page resolve in background.
+require(INDEX, "void load({ silent: false });\n      return controller;", "Usuarios mount must start the first page without blocking the router commit")
+reject(INDEX, "await load({ silent: false });", "Usuarios mount must never await first-page network before route commit")
+reject(INDEX, "loading = true;\n      render({ preserveDom: false });\n      await load", "Usuarios mount must not perform a redundant preflight render before loadFirstPage")
+require(INDEX, "routeCommitNonBlocking: true", "Usuarios snapshot must declare non-blocking route commit")
+
 # Cursor/query races: an obsolete page must not clear or overwrite a newer page task.
 require(INDEX, "const task = (async () =>", "Load-more must keep a stable task identity")
 require(INDEX, "loadMoreTask = task", "Load-more task must be registered explicitly")

@@ -8,7 +8,7 @@
    - Acepta items/tickets/incidencias/rows/results/data.items/etc.
 ========================================================= */
 
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v28.cursor-scale-safe";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v30-continuous-scroll";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   CREATE_OPEN: "create-open",
@@ -19,7 +19,7 @@ export const INCIDENCIAS_ACTIONS = Object.freeze({
   CLEAR_FILTERS: "clear-filters",
   CLEAR_SEARCH: "clear-search",
   OPEN_DETAIL: "open-detail",
-  LOAD_MORE: "load-more",
+  RETRY_INCREMENTAL: "retry-incremental",
 });
 
 const DEFAULT_ROUTE = "/incidencias";
@@ -584,7 +584,12 @@ function buildVm(input = {}) {
   const visible = filtered.slice(0, visibleLimit);
   const total = remoteTotal(d, items.length);
   const nextCursor = txt(first(d.nextCursor, d.pagination?.nextCursor, ""), "");
-  const remoteHasMore = Boolean(nextCursor) || d.hasMore === true || d.pagination?.hasMore === true || total > items.length;
+  /*
+    Una página remota sólo es accionable si existe cursor opaco. El total no
+    puede activar por sí solo el feed: hacerlo dejaría un sentinel permanente
+    cuando la API no entrega una continuación utilizable.
+  */
+  const remoteHasMore = Boolean(nextCursor && filtered.length);
   const stats = d.canonical === true && isObj(d.stats) ? d.stats : mergeStats(items, d.stats);
   return {
     data: d,
@@ -603,10 +608,17 @@ function buildVm(input = {}) {
     hasMore: filtered.length > visible.length || remoteHasMore,
     remoteHasMore,
     nextCursor,
+    sortLocked: Boolean(
+      nextCursor ||
+      d.listQueryPending === true ||
+      d.sortLocked === true
+    ),
     loading: d.loading === true,
     refreshing: d.refreshing === true,
     creating: d.creating === true,
     loadingMore: d.loadingMore === true,
+    listQueryPending: d.listQueryPending === true,
+    incrementalError: txt(d.incrementalError, ""),
     error: txt(d.error, ""),
     filter,
     selection,
@@ -763,7 +775,7 @@ function renderHeader(vm = {}) {
       </div>
       <div class="incidencias-hero-meta">
         <span class="incidencias-meta-pill" data-meta="total">${icon("ticket")}<span>${esc(`${formatNumber(vm.total)} solicitudes registradas`)}</span></span>
-        <button type="button" class="incidencias-meta-pill incidencias-meta-pill--action${vm.selection === "attachments" ? " is-active" : ""}" data-meta="attachments" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="attachments" aria-pressed="${vm.selection === "attachments" ? "true" : "false"}" aria-label="Ordenar incidencias de más adjuntos a menos" title="Ordenar por número de adjuntos">${icon("paperclip")}<span>${esc(`${formatNumber(s.attachments)} adjuntos`)}</span></button>
+        <button type="button" class="incidencias-meta-pill incidencias-meta-pill--action${vm.selection === "attachments" ? " is-active" : ""}" data-meta="attachments" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="attachments" aria-pressed="${vm.selection === "attachments" ? "true" : "false"}" aria-label="${vm.sortLocked ? "Orden por adjuntos disponible al completar el historial" : "Ordenar incidencias de más adjuntos a menos"}" title="${vm.sortLocked ? "Disponible al completar el historial" : "Ordenar por número de adjuntos"}" ${vm.sortLocked ? 'disabled aria-disabled="true"' : ""}>${icon("paperclip")}<span>${esc(`${formatNumber(s.attachments)} adjuntos`)}</span></button>
       </div>
       <div class="incidencias-stats" aria-label="Accesos rápidos del historial">
         <button type="button" class="incidencias-stat-card incidencias-stat-card--open${vm.selection === "open" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="open" aria-pressed="${vm.selection === "open" ? "true" : "false"}" aria-label="Mostrar solo incidencias abiertas">
@@ -781,7 +793,7 @@ function renderHeader(vm = {}) {
           <div class="incidencias-stat-value">${esc(formatNumber(s.urgent))}</div>
           <div class="incidencias-stat-text">Incidencias marcadas como urgentes o críticas.</div>
         </button>
-        <button type="button" class="incidencias-stat-card incidencias-stat-card--amount${vm.selection === "amount" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="amount" aria-pressed="${vm.selection === "amount" ? "true" : "false"}" aria-label="Ordenar incidencias por importe asociado de mayor a menor">
+        <button type="button" class="incidencias-stat-card incidencias-stat-card--amount${vm.selection === "amount" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="amount" aria-pressed="${vm.selection === "amount" ? "true" : "false"}" aria-label="${vm.sortLocked ? "Orden por importe disponible al completar el historial" : "Ordenar incidencias por importe asociado de mayor a menor"}" title="${vm.sortLocked ? "Disponible al completar el historial" : "Ordenar por importe"}" ${vm.sortLocked ? 'disabled aria-disabled="true"' : ""}>
           <div class="incidencias-stat-label">Importe asociado</div>
           <div class="incidencias-stat-value">${esc(formatMoney(s.invoiceTotal, DEFAULT_CURRENCY))}</div>
           <div class="incidencias-stat-text">Ordenar incidencias de mayor a menor importe.</div>
@@ -833,7 +845,7 @@ function renderFilters(vm = {}) {
         }).join("")}
       </div>
       <div class="incidencias-sort-pills" data-incidencias-sort-pills="true">
-        <button type="button" class="incidencias-sort-pill${dateActive ? " is-active" : ""}" data-incidencias-action="${dateAction}" data-filter="date" data-sort-mode="date" data-sort-order="${at(order)}" data-next-sort-order="${at(next)}" aria-pressed="${dateActive ? "true" : "false"}" aria-label="${at(dateAriaLabel)}" title="${at(dateTitle)}">${icon("calendar")}<span>${esc(currentDateLabel)}</span></button>
+        <button type="button" class="incidencias-sort-pill${dateActive ? " is-active" : ""}" data-incidencias-action="${dateAction}" data-filter="date" data-sort-mode="date" data-sort-order="${at(order)}" data-next-sort-order="${at(next)}" aria-pressed="${dateActive ? "true" : "false"}" aria-label="${at(vm.sortLocked ? "El orden ascendente estará disponible al completar el historial" : dateAriaLabel)}" title="${at(vm.sortLocked ? "Disponible al completar el historial" : dateTitle)}" ${vm.sortLocked ? 'disabled aria-disabled="true"' : ""}>${icon("calendar")}<span>${esc(currentDateLabel)}</span></button>
       </div>
       ${renderSearch(vm)}
     </div>
@@ -855,7 +867,8 @@ function renderThead() {
 function renderTableLoading(rows = DEFAULT_VISIBLE_ROWS) {
   const count = Math.max(4, num(rows, DEFAULT_VISIBLE_ROWS));
   return `
-    <div class="incidencias-table-wrap is-loading" data-incidencias-table-wrap="true">
+    <div class="incidencias-table-wrap is-loading" data-incidencias-table-wrap="true" data-incidencias-focus-fallback="true" tabindex="-1">
+      <span class="incidencias-visually-hidden" role="status" aria-live="polite" aria-atomic="true">Cargando incidencias...</span>
       <div class="incidencias-table-loading" aria-hidden="true">
         <div class="incidencias-table-shell">
           <table class="incidencias-table incidencias-table--no-actions incidencias-table--scale-110" role="table" aria-label="Cargando incidencias" data-table-columns="6" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}">
@@ -869,7 +882,7 @@ function renderTableLoading(rows = DEFAULT_VISIBLE_ROWS) {
 }
 
 function renderRefreshOverlay() {
-  return `<div class="incidencias-refresh-overlay" aria-live="polite" aria-busy="true"><span class="incidencias-inline-loading"><span class="incidencias-inline-spinner" aria-hidden="true"></span><span>Actualizando incidencias...</span></span></div>`;
+  return `<div class="incidencias-refresh-overlay" aria-hidden="true"><span class="incidencias-inline-loading"><span class="incidencias-inline-spinner" aria-hidden="true"></span><span>Actualizando incidencias...</span></span></div>`;
 }
 
 function renderEmpty(vm = {}) {
@@ -879,7 +892,7 @@ function renderEmpty(vm = {}) {
   const title = hasError ? "No se pudieron cargar las incidencias" : filtering ? "No hay incidencias con esos filtros" : mismatch ? "Hay incidencias, pero no llegaron filas al listado" : "Todavía no hay incidencias";
   const text = hasError ? vm.error : filtering ? "Prueba a limpiar la búsqueda o cambia el filtro activo para volver al historial completo." : mismatch ? "La API está entregando total, pero no está entregando ningún array de filas compatible." : "Cuando haya solicitudes registradas aparecerán aquí con su estado, seguimiento, adjuntos y facturación asociada.";
   return `
-    <div class="incidencias-empty${mismatch ? " is-data-mismatch" : ""}" data-incidencias-empty="true">
+    <div class="incidencias-empty${mismatch ? " is-data-mismatch" : ""}" data-incidencias-empty="true" data-incidencias-focus-fallback="true" tabindex="-1">
       <div class="incidencias-empty-icon" aria-hidden="true">${hasError || mismatch ? icon("alert") : icon("ticket")}</div>
       <h3>${esc(title)}</h3>
       <p>${esc(text)}</p>
@@ -889,20 +902,46 @@ function renderEmpty(vm = {}) {
 }
 
 function renderFeedFooter(vm = {}) {
-  if (!vm.total || !vm.visibleCount) return `<div class="incidencias-feed-sentinel" data-incidencias-load-more="true" data-incidencias-infinite-sentinel="true" aria-hidden="true"></div>`;
-  if (!vm.hasMore) return `<div class="incidencias-feed-end" data-incidencias-feed-end="true" data-incidencias-load-more="false"><span class="incidencias-feed-end-text">Has visto todas las incidencias disponibles.</span></div>`;
+  if (vm.listQueryPending || vm.refreshing) {
+    return `
+      <div class="incidencias-infinite" data-incidencias-infinite="true" data-incidencias-focus-fallback="true" data-state="loading" role="status" aria-live="polite" aria-atomic="true" aria-busy="true" tabindex="-1">
+        <div class="incidencias-infinite-status is-loading">
+          ${spinner(vm.refreshing ? "Actualizando incidencias..." : "Cargando incidencias con los filtros seleccionados...")}
+        </div>
+      </div>
+    `;
+  }
+
+  if (vm.incrementalError && vm.hasMore) {
+    return `
+      <div class="incidencias-infinite" data-incidencias-infinite="true" data-incidencias-focus-fallback="true" data-state="error" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">
+        <div class="incidencias-infinite-error">
+          <span class="incidencias-infinite-error-icon" aria-hidden="true">${icon("alert")}</span>
+          <span class="incidencias-infinite-error-text">${esc(vm.incrementalError)}</span>
+          <button type="button" class="incidencias-btn incidencias-infinite-retry" data-incidencias-action="${INCIDENCIAS_ACTIONS.RETRY_INCREMENTAL}">${icon("refresh")}<span>Reintentar</span></button>
+        </div>
+      </div>
+    `;
+  }
+
+  if (!vm.hasMore) {
+    return vm.visibleCount
+      ? `<div class="incidencias-feed-end" data-incidencias-feed-end="true" data-incidencias-focus-fallback="true" role="status" aria-live="polite" tabindex="-1"><span class="incidencias-feed-end-text">Has visto todas las incidencias disponibles.</span></div>`
+      : "";
+  }
+
   return `
-    <div class="incidencias-feed-more" data-incidencias-feed-more="true">
-      <button type="button" class="incidencias-load-more-btn${vm.loadingMore ? " is-loading" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.LOAD_MORE}" data-incidencias-load-more-button="true" ${htmlAttrs({ disabled: vm.loadingMore, "aria-disabled": vm.loadingMore ? "true" : false, "aria-busy": vm.loadingMore ? "true" : false })}>
-        ${vm.loadingMore ? spinner("Cargando más incidencias...") : `${icon("chevronDown")}<span>Mostrar más</span><span class="incidencias-load-more-count">${esc(`${formatNumber(vm.remainingCount)} restantes`)}</span>`}
-      </button>
-      <div class="incidencias-feed-sentinel" data-incidencias-load-more="true" data-incidencias-infinite-sentinel="true" data-load-more-sentinel="true" aria-hidden="true"></div>
+    <div class="incidencias-infinite" data-incidencias-infinite="true" data-incidencias-focus-fallback="true" data-state="${vm.loadingMore ? "loading" : "idle"}" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">
+      ${vm.loadingMore ? "" : `<div class="incidencias-feed-sentinel" data-incidencias-infinite-sentinel="true" aria-hidden="true"></div>`}
+      <div class="incidencias-infinite-status${vm.loadingMore ? " is-loading" : ""}">
+        ${vm.loadingMore ? spinner("Cargando la siguiente página de incidencias...") : "El historial continúa al desplazarte."}
+      </div>
     </div>
   `;
 }
 
 function renderTable(vm = {}) {
-  if (!vm.visibleItems.length) return renderEmpty(vm);
+  if (!vm.visibleItems.length) return `${renderEmpty(vm)}${renderFeedFooter(vm)}`;
   return `
     <div class="incidencias-table-shell">
       <table class="incidencias-table incidencias-table--no-actions incidencias-table--scale-110" role="table" aria-label="Listado de incidencias" data-table-columns="6" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" data-sort-mode="${at(vm.sortMode)}" data-sort-order="${at(vm.sortOrder)}">
@@ -953,9 +992,9 @@ export function renderIncidenciasLoadingState(input = {}) {
 export function renderIncidenciasErrorState(message = "No se pudieron cargar las incidencias.") {
   return `
     <section class="incidencias-view-root incidencias-view-root--error has-error" data-incidencias-scope="true" data-template-version="${at(INCIDENCIAS_TEMPLATE_VERSION)}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" aria-busy="false">
-      <section class="incidencias-error">
-        <h3 class="incidencias-error-title">No se pudo renderizar la vista de incidencias</h3>
-        <p class="incidencias-error-text">${esc(txt(message, "Error desconocido al cargar la vista."))}</p>
+      <section class="incidencias-error" data-incidencias-focus-fallback="true" tabindex="-1" role="alert" aria-live="assertive" aria-atomic="true" aria-labelledby="incidencias-fatal-error-title" aria-describedby="incidencias-fatal-error-text">
+        <h3 id="incidencias-fatal-error-title" class="incidencias-error-title">No se pudieron cargar las incidencias</h3>
+        <p id="incidencias-fatal-error-text" class="incidencias-error-text">${esc(txt(message, "Error desconocido al cargar la vista."))}</p>
         <button type="button" class="incidencias-btn" data-incidencias-action="${INCIDENCIAS_ACTIONS.REFRESH}">${icon("refresh")}<span>Reintentar</span></button>
       </section>
     </section>
@@ -965,7 +1004,7 @@ export function renderIncidenciasErrorState(message = "No se pudieron cargar las
 export function renderIncidenciasTemplate(input = {}) {
   const vm = buildVm(input);
   return `
-    <section class="${cls("incidencias-view-root", vm.loading ? "is-loading" : "", vm.refreshing ? "is-refreshing" : "", vm.creating ? "is-creating" : "", vm.error ? "has-error" : "")}" data-incidencias-scope="true" data-template-version="${at(INCIDENCIAS_TEMPLATE_VERSION)}" data-route="${at(vm.route)}" data-total="${at(String(vm.total))}" data-visible="${at(String(vm.visibleCount))}" data-filter="${at(vm.filter)}" data-selection="${at(vm.selection)}" data-search-active="${vm.search ? "true" : "false"}" data-sort-order="${at(vm.sortOrder)}" data-loading="${vm.loading ? "true" : "false"}" data-refreshing="${vm.refreshing ? "true" : "false"}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" data-items-extracted="${at(String(vm.items.length))}" data-total-greater-than-items="${vm.diagnostics.totalGreaterThanItems ? "true" : "false"}" aria-busy="${vm.loading || vm.refreshing ? "true" : "false"}">
+    <section class="${cls("incidencias-view-root", vm.loading ? "is-loading" : "", vm.refreshing ? "is-refreshing" : "", vm.creating ? "is-creating" : "", vm.error ? "has-error" : "")}" data-incidencias-scope="true" data-template-version="${at(INCIDENCIAS_TEMPLATE_VERSION)}" data-route="${at(vm.route)}" data-total="${at(String(vm.total))}" data-visible="${at(String(vm.visibleCount))}" data-filter="${at(vm.filter)}" data-selection="${at(vm.selection)}" data-search-active="${vm.search ? "true" : "false"}" data-sort-order="${at(vm.sortOrder)}" data-loading="${vm.loading ? "true" : "false"}" data-refreshing="${vm.refreshing ? "true" : "false"}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" data-items-extracted="${at(String(vm.items.length))}" data-total-greater-than-items="${vm.diagnostics.totalGreaterThanItems ? "true" : "false"}" aria-busy="${vm.loading || vm.refreshing || vm.loadingMore || vm.listQueryPending ? "true" : "false"}">
       ${vm.error ? `<div class="incidencias-alert" role="alert">${icon("alert")}<span>${esc(vm.error)}</span></div>` : ""}
       ${renderHeader(vm)}${renderHistory(vm)}
     </section>
@@ -980,6 +1019,12 @@ export function getIncidenciasTemplateSnapshot(input = {}) {
     extractedItems: vm.items.length,
     visibleCount: vm.visibleCount,
     filteredTotal: vm.filteredTotal,
+    hasMore: vm.hasMore,
+    remoteHasMore: vm.remoteHasMore,
+    nextCursor: vm.nextCursor,
+    incrementalError: Boolean(vm.incrementalError),
+    continuousScroll: true,
+    sortLocked: vm.sortLocked,
     filter: vm.filter,
     selection: vm.selection,
     searchLength: vm.search.length,

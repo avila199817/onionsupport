@@ -14,7 +14,7 @@ export {
 } from "./clientes.template.legacy.js";
 
 export const CLIENTES_TEMPLATE_VERSION =
-  "clientes.template.cursor.v10.loaded-record-semantics";
+  "clientes.template.cursor.v11.continuous-scroll";
 export const CLIENTES_TABLE_TEMPLATE_VERSION = CLIENTES_TEMPLATE_VERSION;
 export const CLIENTES_VIEW_TEMPLATE_VERSION = CLIENTES_TEMPLATE_VERSION;
 
@@ -28,7 +28,7 @@ export const CLIENTES_ACTIONS = Object.freeze({
   CLEAR_SEARCH: "clear-search",
   OPEN_DETAIL: "open-detail",
   DETAIL: "open-detail",
-  LOAD_MORE: "load-more",
+  RETRY_PAGE: "retry-page",
   EXPORT: "export",
 });
 
@@ -101,6 +101,10 @@ function escapeHtml(value = "") {
 
 function attr(value = "") {
   return escapeHtml(cleanText(value, ""));
+}
+
+function attrExact(value = "") {
+  return escapeHtml(String(value ?? "").replace(/[\r\n\t]/g, " "));
 }
 
 function formatNumber(value = 0) {
@@ -368,6 +372,11 @@ function buildVm(input = {}) {
     items,
     filter,
     search: cleanText(data.search, ""),
+    searchDraft: String(
+      Object.prototype.hasOwnProperty.call(data, "searchDraft")
+        ? data.searchDraft ?? ""
+        : data.search ?? ""
+    ).replace(/[\r\n\t]/g, " "),
     sortOrder,
     nextSortOrder: sortOrder === "asc" ? "desc" : "asc",
     admin: data.admin === true || normalizeKey(data.role) === "admin",
@@ -376,8 +385,10 @@ function buildVm(input = {}) {
     loading: data.loading === true,
     refreshing: data.refreshing === true,
     loadingMore: data.loadingMore === true,
+    searchPending: data.searchPending === true,
     creating: data.creating === true,
     error: cleanText(data.error, ""),
+    loadMoreError: cleanText(data.loadMoreError, ""),
     openingClienteId: cleanText(data.openingClienteId, ""),
     lastSyncAt: number(data.lastSyncAt, 0),
     totalKnown: data.totalKnown === true,
@@ -436,7 +447,7 @@ function renderFilters(vm) {
       </div>
       <div class="clientes-search" role="search" aria-label="Buscar clientes">
         <span class="clientes-search-icon" aria-hidden="true">${icon("search")}</span>
-        <input id="clientes-search-input" class="clientes-search-input" type="search" value="${attr(vm.search)}" placeholder="Buscar cliente, email, NIF..." autocomplete="off" spellcheck="false" data-clientes-search-input="true" data-search-input="clientes" aria-label="Buscar clientes">
+        <input id="clientes-search-input" class="clientes-search-input" type="search" value="${attrExact(vm.searchDraft)}" placeholder="Buscar cliente, email, NIF..." autocomplete="off" spellcheck="false" data-clientes-search-input="true" data-search-input="clientes" aria-label="Buscar clientes">
         ${vm.search ? `<button type="button" class="clientes-search-clear" data-clientes-action="${CLIENTES_ACTIONS.CLEAR_SEARCH}" data-action="${CLIENTES_ACTIONS.CLEAR_SEARCH}" aria-label="Limpiar búsqueda">${icon("close")}</button>` : ""}
       </div>
     </div>
@@ -445,21 +456,24 @@ function renderFilters(vm) {
 
 function renderBody(vm) {
   if (vm.loading && !vm.items.length) {
-    return `<div class="clientes-table-loading" aria-live="polite">${renderSpinner("Cargando clientes...")}</div>`;
+    return `<div class="clientes-table-loading">${renderSpinner("Cargando clientes...")}</div>`;
   }
   if (!vm.items.length) {
     const filtering = vm.filter !== "all" || Boolean(vm.search);
+    const emptyAttributes = vm.error
+      ? 'data-clientes-fatal-error="true" role="alert" aria-atomic="true" tabindex="-1"'
+      : 'data-clientes-empty-state="true" tabindex="-1"';
     return `
-      <div class="clientes-empty">
+      <div class="clientes-empty${vm.error ? " clientes-fatal-error" : ""}" ${emptyAttributes}>
         <div class="clientes-empty-icon" aria-hidden="true">${icon(filtering ? "search" : "users")}</div>
         <h3>${escapeHtml(vm.error ? "No se pudieron cargar los clientes" : filtering ? "No hay clientes con esos filtros" : "Todavía no hay clientes")}</h3>
         <p>${escapeHtml(vm.error || (filtering ? "Prueba con otro estado o cambia la búsqueda." : "Cuando haya clientes registrados aparecerán aquí."))}</p>
-        ${filtering ? `<button type="button" class="clientes-btn" data-clientes-action="${CLIENTES_ACTIONS.CLEAR_FILTERS}" data-action="${CLIENTES_ACTIONS.CLEAR_FILTERS}">${icon("close")}<span>Limpiar filtros</span></button>` : ""}
+        ${vm.error ? `<button type="button" class="clientes-btn" data-clientes-action="${CLIENTES_ACTIONS.REFRESH}" data-action="${CLIENTES_ACTIONS.REFRESH}">${icon("refresh")}<span>Reintentar</span></button>` : filtering ? `<button type="button" class="clientes-btn" data-clientes-action="${CLIENTES_ACTIONS.CLEAR_FILTERS}" data-action="${CLIENTES_ACTIONS.CLEAR_FILTERS}">${icon("close")}<span>Limpiar filtros</span></button>` : ""}
       </div>
     `;
   }
   return `
-    ${vm.error ? `<div class="clientes-inline-error" role="status">${escapeHtml(vm.error)}</div>` : ""}
+    ${vm.error ? `<div class="clientes-inline-error" role="alert" aria-atomic="true"><span>${escapeHtml(vm.error)}</span><button type="button" class="clientes-btn clientes-inline-retry" data-clientes-action="${CLIENTES_ACTIONS.REFRESH}" data-action="${CLIENTES_ACTIONS.REFRESH}">${icon("refresh")}<span>Reintentar</span></button></div>` : ""}
     <div class="clientes-table-shell">
       <table class="clientes-table">
         <colgroup><col class="clientes-col--main"><col class="clientes-col--status"><col class="clientes-col--date"><col class="clientes-col--contact"><col class="clientes-col--amount"></colgroup>
@@ -467,27 +481,58 @@ function renderBody(vm) {
         <tbody>${vm.items.map((item) => renderRow(item, vm)).join("")}</tbody>
       </table>
     </div>
-    <div class="clientes-list-footer">
-      ${vm.hasMore ? `<button type="button" class="clientes-load-more-btn" data-clientes-action="${CLIENTES_ACTIONS.LOAD_MORE}" data-action="${CLIENTES_ACTIONS.LOAD_MORE}" ${vm.loadingMore ? 'disabled aria-busy="true"' : ""}>${vm.loadingMore ? renderSpinner("Cargando...") : "<span>Cargar más</span>"}</button>` : "<span>Has visto todos los clientes de esta consulta.</span>"}
-      <span>${escapeHtml(`${formatNumber(vm.items.length)} registros cargados${vm.totalKnown ? ` de ${formatNumber(vm.total)}` : ""}`)}</span>
+    <div class="clientes-infinite" data-clientes-infinite="true" data-has-more="${vm.hasMore ? "true" : "false"}" tabindex="-1">
+      ${vm.hasMore && !vm.loadingMore && !vm.refreshing && !vm.searchPending && !vm.error && !vm.loadMoreError ? '<div class="clientes-infinite-sentinel" data-clientes-infinite-sentinel="true" aria-hidden="true"></div>' : ""}
+      ${vm.error
+        ? '<div class="clientes-infinite-status is-error">Actualización detenida. Reintenta para continuar.</div>'
+        : vm.loadMoreError
+        ? `<div class="clientes-infinite-status is-error"><span>${escapeHtml(vm.loadMoreError)}</span><button type="button" class="clientes-btn clientes-infinite-retry" data-clientes-action="${CLIENTES_ACTIONS.RETRY_PAGE}" data-action="${CLIENTES_ACTIONS.RETRY_PAGE}">${icon("refresh")}<span>Reintentar</span></button></div>`
+        : vm.searchPending
+          ? '<div class="clientes-infinite-status is-loading">Preparando la búsqueda...</div>'
+          : vm.refreshing
+            ? `<div class="clientes-infinite-status is-loading">${renderSpinner("Actualizando clientes...")}</div>`
+            : vm.loadingMore
+              ? `<div class="clientes-infinite-status is-loading">${renderSpinner("Cargando clientes...")}</div>`
+              : vm.hasMore
+                ? '<div class="clientes-infinite-status">Sigue bajando: incorporaremos clientes automáticamente.</div>'
+                : '<div class="clientes-infinite-status is-complete">Has visto todos los clientes de esta consulta.</div>'}
+      <span class="clientes-infinite-count">${escapeHtml(`${formatNumber(vm.items.length)} registros cargados${vm.totalKnown ? ` de ${formatNumber(vm.total)}` : ""}`)}</span>
     </div>
   `;
+}
+
+function historyStatus(vm) {
+  const loaded = formatNumber(vm.items.length);
+  const filtering = vm.filter !== "all" || Boolean(vm.search);
+  if (vm.searchPending) return "Preparando la búsqueda de clientes...";
+  if (vm.error) return vm.error;
+  if (vm.loadMoreError) return vm.loadMoreError;
+  if (vm.loading && !vm.items.length) return "Cargando clientes...";
+  if (vm.loadingMore) return `Cargando clientes automáticamente · ${loaded} cargados`;
+  if (vm.refreshing) return `Actualizando ${loaded} clientes cargados...`;
+  if (!vm.items.length) {
+    return filtering
+      ? "No hay clientes con esos filtros."
+      : "Todavía no hay clientes.";
+  }
+  if (!vm.hasMore) return `Has visto todos los clientes de esta consulta · ${loaded} cargados`;
+  return `Mostrando ${loaded} registros cargados · orden fecha ${vm.sortOrder === "asc" ? "↑" : "↓"}`;
 }
 
 export function renderClientesTemplate(input = {}) {
   const vm = buildVm(input);
   return `
-    <section class="clientes-view-root" data-clientes-scope="true" data-template-version="${CLIENTES_TEMPLATE_VERSION}" data-filter="${attr(vm.filter)}" data-loading="${vm.loading ? "true" : "false"}" data-refreshing="${vm.refreshing ? "true" : "false"}">
+    <section class="clientes-view-root" data-clientes-scope="true" data-template-version="${CLIENTES_TEMPLATE_VERSION}" data-filter="${attr(vm.filter)}" data-loading="${vm.loading ? "true" : "false"}" data-refreshing="${vm.refreshing ? "true" : "false"}" data-search-pending="${vm.searchPending ? "true" : "false"}">
       ${renderHeader(vm)}
       <section class="clientes-history" data-clientes-history="true">
         <div class="clientes-history-head">
           <div class="clientes-history-copy">
             <h2 class="clientes-history-title">Historial de clientes</h2>
-            <p class="clientes-history-subtitle">Mostrando ${escapeHtml(formatNumber(vm.items.length))} registros cargados · orden fecha ${vm.sortOrder === "asc" ? "↑" : "↓"}</p>
+            <p class="clientes-history-subtitle" tabindex="-1" ${vm.error ? "" : 'role="status" aria-live="polite" aria-atomic="true"'}>${escapeHtml(historyStatus(vm))}</p>
           </div>
           ${renderFilters(vm)}
         </div>
-        ${renderBody(vm)}
+        <div class="clientes-history-results" aria-busy="${vm.loading || vm.refreshing || vm.loadingMore || vm.searchPending ? "true" : "false"}">${renderBody(vm)}</div>
       </section>
     </section>
   `;

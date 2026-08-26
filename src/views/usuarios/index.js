@@ -2,7 +2,7 @@
    Onion Support - Usuarios Index
    Archivo: /src/views/usuarios/index.js
 
-   CURSOR-FIRST · SERVER FILTERED · RACE SAFE V10
+   CURSOR-FIRST · SERVER FILTERED · INFINITE SCROLL · RACE SAFE V12
 
    Objetivos:
    - No precargar el dataset completo.
@@ -72,7 +72,7 @@ export const USUARIOS_MODULE_NAME = "usuarios";
 export const USUARIOS_VIEW_NAME = "UsuariosView";
 export const USUARIOS_CANONICAL_PATH = "/usuarios";
 export const USUARIOS_INDEX_VERSION =
-  "usuarios.index.v10.cursor-first-race-safe";
+  "usuarios.index.v12.debounce-safe-infinite-scroll";
 export const USUARIOS_VIEW_VERSION = USUARIOS_INDEX_VERSION;
 export const USUARIOS_MODULE_VERSION = USUARIOS_INDEX_VERSION;
 export const USUARIOS_INDEX_SOURCE = "views.usuarios.index";
@@ -99,6 +99,7 @@ export {
 
 const SEARCH_DEBOUNCE_MS = 250;
 const RESUME_REVALIDATE_MIN_AGE_MS = 60_000;
+const USUARIOS_INFINITE_ROOT_MARGIN = "0px 0px 900px 0px";
 const DEFAULT_VISIBLE_ROWS = Number(USUARIOS_DEFAULT_VISIBLE_ROWS) || USUARIOS_CURSOR_PAGE_SIZE;
 
 const USUARIOS_CONTROLLER_KEY = Symbol.for("onion.support.usuarios.controller");
@@ -113,7 +114,7 @@ const ACTIONS = Object.freeze({
   FILTER: USUARIOS_ACTIONS?.FILTER || "filter",
   CLEAR_SEARCH: USUARIOS_ACTIONS?.CLEAR_SEARCH || "clear-search",
   CLEAR_FILTERS: USUARIOS_ACTIONS?.CLEAR_FILTERS || "clear-filters",
-  LOAD_MORE: USUARIOS_ACTIONS?.LOAD_MORE || "load-more",
+  RETRY_PAGE: USUARIOS_ACTIONS?.RETRY_PAGE || "retry-page",
 });
 
 const ACTION_ALIASES = Object.freeze({
@@ -129,7 +130,7 @@ const ACTION_ALIASES = Object.freeze({
   filter_usuarios: ACTIONS.FILTER,
   clear_search: ACTIONS.CLEAR_SEARCH,
   clear_filters: ACTIONS.CLEAR_FILTERS,
-  load_more: ACTIONS.LOAD_MORE,
+  retry_page: ACTIONS.RETRY_PAGE,
 });
 
 const CREATE_SUCCESS_EVENTS = Object.freeze([
@@ -417,6 +418,10 @@ async function safeAsyncCall(target = null, methods = [], args = [], fallback = 
 function getUsuarioId(item = {}) {
   return cleanText(first(item.userId, item.usuarioId, item.id, item.uid, item.email, ""), "");
 }
+function mergeUsuariosFreshPageFirst(previousItems = [], freshPage = []) {
+  /* Incoming fresh values win; the normalizer restores updatedAt DESC order. */
+  return mergeUsuariosCursorItems(previousItems, freshPage);
+}
 function csvSafeCell(value = "") {
   let text = String(value ?? "").replace(/[\r\n]+/g, " ").replace(/\t/g, " ").trim();
   if (/^[=+\-@]/.test(text)) text = `'${text}`;
@@ -475,10 +480,12 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
   let createOpen = false;
   let openingUserId = "";
   let error = "";
+  let loadMoreError = "";
 
   let items = [];
   let continuationToken = "";
   let hasMore = false;
+  let seenPageCursors = new Set();
   let totalKnown = false;
   let totalCount = null;
   let lastSyncAt = 0;
@@ -491,11 +498,15 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
   let detailRefreshEpoch = 0;
   let loadTask = null;
   let loadMoreTask = null;
+  let infiniteObserver = null;
   let searchTimer = 0;
+  let searchComposing = false;
   let focusHandler = null;
   let visibilityHandler = null;
   let hostClickHandler = null;
   let hostInputHandler = null;
+  let hostCompositionStartHandler = null;
+  let hostCompositionEndHandler = null;
   let hostKeydownHandler = null;
   const unsubscribers = [];
 
@@ -518,6 +529,9 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     };
   }
   function stateSnapshot() {
+    // Keep the exact input draft visible across synchronous rerenders. The
+    // committed `search` value remains normalized only for the API query.
+    const visibleSearch = searchDraft;
     return {
       loading,
       loadingMore,
@@ -526,10 +540,12 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       creating,
       openingUserId,
       error,
+      loadMoreError,
       filter,
       activeFilter: filter,
-      search: searchDraft || search,
-      searchQuery: searchDraft || search,
+      search: visibleSearch,
+      searchQuery: visibleSearch,
+      searchPending: Boolean(searchTimer) || searchComposing,
       totalKnown,
       totalCount,
       remoteCount: totalKnown ? totalCount : null,
@@ -573,21 +589,50 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       localDatasetCeiling: false,
     };
   }
+  function actionFocusScope(node = null) {
+    if (!node?.matches) return "";
+    if (node.matches(".usuarios-stat-card")) return "stat-card";
+    if (node.matches(".usuarios-filter-pill")) return "filter-pill";
+    if (node.matches(".usuarios-feed-retry")) return "feed-retry";
+    if (node.closest?.(".usuarios-hero-actions")) return "hero-action";
+    return "action";
+  }
   function captureDomState() {
     if (!host || !isBrowser()) return {};
     const active = document.activeElement;
     const searchInput = host.querySelector("[data-usuarios-search-input='true']");
+    const row = active?.closest?.("[data-user-row='true'][data-user-id]");
+    const action = active?.closest?.("[data-usuarios-action], [data-action]");
+    const actionNodes = Array.from(
+      host.querySelectorAll("[data-usuarios-action], [data-action]")
+    );
+    const scrollRoot = resolveInfiniteScrollRoot();
     return {
-      scrollTop: host.scrollTop,
+      scrollTop: number(scrollRoot?.scrollTop, 0),
       searchFocused: active === searchInput,
       selectionStart: active === searchInput ? searchInput.selectionStart : null,
       selectionEnd: active === searchInput ? searchInput.selectionEnd : null,
+      userId: cleanText(row?.getAttribute?.("data-user-id"), ""),
+      action: cleanText(
+        first(
+          action?.getAttribute?.("data-usuarios-action"),
+          action?.getAttribute?.("data-action"),
+          ""
+        ),
+        ""
+      ),
+      filter: cleanText(action?.getAttribute?.("data-filter"), ""),
+      actionScope: actionFocusScope(action),
+      actionIndex: action ? actionNodes.indexOf(action) : -1,
+      elementId: cleanText(active?.id, ""),
+      statusFocused: active?.matches?.(".usuarios-history-subtitle") === true,
     };
   }
   function restoreDomState(snapshot = {}) {
     if (!host || !isBrowser()) return false;
     try {
-      host.scrollTop = number(snapshot.scrollTop, 0);
+      const scrollRoot = resolveInfiniteScrollRoot();
+      if (scrollRoot) scrollRoot.scrollTop = number(snapshot.scrollTop, 0);
       if (snapshot.searchFocused) {
         const input = host.querySelector("[data-usuarios-search-input='true']");
         input?.focus?.({ preventScroll: true });
@@ -598,13 +643,191 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         ) {
           input.setSelectionRange(snapshot.selectionStart, snapshot.selectionEnd);
         }
+        return true;
       }
+
+      let target = null;
+      if (snapshot.userId) {
+        target = Array.from(
+          host.querySelectorAll("[data-user-row='true'][data-user-id]")
+        ).find(
+          (candidate) =>
+            cleanText(candidate.getAttribute("data-user-id"), "") === snapshot.userId
+        ) || null;
+      }
+      if (!target && snapshot.elementId) {
+        const candidate = document.getElementById(snapshot.elementId);
+        if (candidate && host.contains(candidate)) target = candidate;
+      }
+      if (!target && snapshot.action) {
+        const actionNodes = Array.from(
+          host.querySelectorAll("[data-usuarios-action], [data-action]")
+        );
+        const matchesActionIdentity = (candidate) => {
+          const action = cleanText(
+            first(
+              candidate.getAttribute("data-usuarios-action"),
+              candidate.getAttribute("data-action"),
+              ""
+            ),
+            ""
+          );
+          const filter = cleanText(candidate.getAttribute("data-filter"), "");
+          const scope = actionFocusScope(candidate);
+          return (
+            action === snapshot.action &&
+            (!snapshot.filter || filter === snapshot.filter) &&
+            (!snapshot.actionScope || scope === snapshot.actionScope)
+          );
+        };
+        const indexedCandidate = Number.isInteger(snapshot.actionIndex)
+          ? actionNodes[snapshot.actionIndex]
+          : null;
+        target = indexedCandidate && matchesActionIdentity(indexedCandidate)
+          ? indexedCandidate
+          : actionNodes.find(matchesActionIdentity) || null;
+      }
+      if (
+        !target &&
+        (
+          snapshot.statusFocused ||
+          [ACTIONS.RETRY_PAGE, ACTIONS.RETRY, ACTIONS.REFRESH].includes(
+            snapshot.action
+          )
+        )
+      ) {
+        target = host.querySelector(".usuarios-history-subtitle");
+      }
+      target?.focus?.({ preventScroll: true });
       return true;
     } catch {
       return false;
     }
   }
+  function disconnectInfiniteObserver(observer = infiniteObserver) {
+    if (!observer) return false;
+    if (infiniteObserver === observer) infiniteObserver = null;
+    try {
+      observer.takeRecords?.();
+    } catch {
+      // noop
+    }
+    try {
+      observer.disconnect();
+    } catch {
+      // noop
+    }
+    return true;
+  }
+  function resolveInfiniteScrollRoot() {
+    if (!isBrowser()) return null;
+    const mainContent = document.getElementById("main-content");
+    if (mainContent?.contains?.(host)) return mainContent;
+    return host?.closest?.(".main-content, [data-main-content='true']") || null;
+  }
+  function cancelSearchDebounce() {
+    const hadPendingSearch = Boolean(searchTimer);
+    if (hadPendingSearch && isBrowser()) window.clearTimeout(searchTimer);
+    searchTimer = 0;
+    return hadPendingSearch;
+  }
+  function invalidateContinuationForPendingSearch() {
+    queryEpoch += 1;
+    loadMoreTask = null;
+    loadingMore = false;
+    continuationToken = "";
+    hasMore = false;
+    seenPageCursors = new Set();
+    loadMoreError = "";
+    disconnectInfiniteObserver();
+    return true;
+  }
+  function focusSearchInput() {
+    if (!host || !isBrowser()) return false;
+    const input = host.querySelector("[data-usuarios-search-input='true']");
+    if (!input) return false;
+    try {
+      input.focus({ preventScroll: true });
+      const end = String(input.value || "").length;
+      input.setSelectionRange?.(end, end);
+      return document.activeElement === input;
+    } catch {
+      return false;
+    }
+  }
+  function syncInfiniteObserver() {
+    disconnectInfiniteObserver();
+    if (
+      !isBrowser() ||
+      !mounted ||
+      destroyed ||
+      !routeActive() ||
+      !admin() ||
+      !ownsHost() ||
+      loading ||
+      refreshing ||
+      loadingMore ||
+      Boolean(searchTimer) ||
+      searchComposing ||
+      Boolean(loadMoreError) ||
+      hasMore !== true ||
+      !continuationToken ||
+      typeof window.IntersectionObserver !== "function"
+    ) {
+      return false;
+    }
+
+    const sentinel = host?.querySelector?.(
+      "[data-usuarios-infinite-sentinel='true']"
+    );
+    const scrollRoot = resolveInfiniteScrollRoot();
+    if (!sentinel || !scrollRoot) return false;
+
+    try {
+      const observer = new window.IntersectionObserver(
+        (entries) => {
+          if (infiniteObserver !== observer) {
+            disconnectInfiniteObserver(observer);
+            return;
+          }
+          if (
+            destroyed ||
+            !mounted ||
+            !routeActive() ||
+            !admin() ||
+            !ownsHost() ||
+            loading ||
+            refreshing ||
+            loadingMore ||
+            Boolean(searchTimer) ||
+            searchComposing ||
+            Boolean(loadMoreError) ||
+            hasMore !== true ||
+            !continuationToken
+          ) {
+            disconnectInfiniteObserver(observer);
+            return;
+          }
+          if (!entries.some((entry) => entry.isIntersecting)) return;
+          disconnectInfiniteObserver(observer);
+          void loadMore();
+        },
+        {
+          root: scrollRoot,
+          rootMargin: USUARIOS_INFINITE_ROOT_MARGIN,
+          threshold: 0.01,
+        }
+      );
+      infiniteObserver = observer;
+      observer.observe(sentinel);
+      return true;
+    } catch {
+      disconnectInfiniteObserver();
+      return false;
+    }
+  }
   function render({ preserveDom = true } = {}) {
+    disconnectInfiniteObserver();
     if (destroyed || !host || !routeActive() || !ownsHost()) return false;
     const dom = preserveDom ? captureDomState() : {};
     const template = document.createElement("template");
@@ -613,33 +836,60 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     host.setAttribute("data-usuarios-controller", ownerId);
     host.setAttribute("data-usuarios-version", USUARIOS_VIEW_VERSION);
     if (preserveDom) restoreDomState(dom);
+    syncInfiniteObserver();
     return true;
   }
-  function applyPage(page = {}, { append = false } = {}) {
+  function applyPage(
+    page = {},
+    {
+      append = false,
+      preservePages = false,
+      preservedToken = "",
+      preservedHasMore = false,
+    } = {}
+  ) {
     items = append
       ? mergeUsuariosCursorItems(items, page.items)
-      : normalizeUsuariosCollection(page.items);
-    continuationToken = cleanText(page.continuationToken, "");
-    hasMore = page.hasMore === true && Boolean(continuationToken);
+      : preservePages
+        ? mergeUsuariosFreshPageFirst(items, page.items)
+        : normalizeUsuariosCollection(page.items);
+    continuationToken = preservePages
+      ? cleanText(preservedToken, "")
+      : cleanText(page.continuationToken, "");
+    hasMore = preservePages
+      ? preservedHasMore === true && Boolean(continuationToken)
+      : page.hasMore === true && Boolean(continuationToken);
     if (page.totalKnown === true) {
       totalKnown = true;
       totalCount = Math.max(items.length, number(page.total, items.length));
-    } else if (!append) {
+    } else if (!append && !preservePages) {
       totalKnown = false;
       totalCount = null;
     }
     lastSyncAt = Date.now();
     error = "";
+    loadMoreError = "";
     return items;
   }
-  async function loadFirstPage({ silent = false } = {}) {
+  async function loadFirstPage({ silent = false, preservePages = false } = {}) {
     if (destroyed || !routeActive() || !admin()) return items;
+    const keepAccumulatedPages = preservePages === true && items.length > 0;
+    const preservedToken = continuationToken;
+    const preservedHasMore = hasMore;
     const epoch = ++queryEpoch;
     loadMoreTask = null;
-    continuationToken = "";
-    hasMore = false;
-    if (!silent) loading = items.length === 0;
-    refreshing = items.length > 0;
+    loadingMore = false;
+    if (!keepAccumulatedPages) {
+      items = [];
+      continuationToken = "";
+      hasMore = false;
+      seenPageCursors = new Set();
+      totalKnown = false;
+      totalCount = null;
+    }
+    loadMoreError = "";
+    loading = !keepAccumulatedPages;
+    refreshing = keepAccumulatedPages;
     error = "";
     render();
 
@@ -651,7 +901,17 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         includeTotal: true,
       });
       if (destroyed || epoch !== queryEpoch || !routeActive()) return items;
-      applyPage(page, { append: false });
+      applyPage(page, {
+        append: false,
+        preservePages: keepAccumulatedPages,
+        preservedToken,
+        preservedHasMore,
+      });
+      if (!keepAccumulatedPages) {
+        seenPageCursors = new Set(
+          continuationToken ? [continuationToken] : []
+        );
+      }
       loading = false;
       refreshing = false;
       render();
@@ -685,8 +945,20 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     });
     return loadTask;
   }
-  async function loadMore() {
-    if (destroyed || !routeActive() || !admin() || !hasMore || !continuationToken) {
+  async function loadMore({ retry = false } = {}) {
+    if (
+      destroyed ||
+      !routeActive() ||
+      !admin() ||
+      loading ||
+      refreshing ||
+      Boolean(loadTask) ||
+      Boolean(searchTimer) ||
+      searchComposing ||
+      !hasMore ||
+      !continuationToken ||
+      (Boolean(loadMoreError) && !retry)
+    ) {
       return items.length;
     }
     if (loadMoreTask) {
@@ -697,6 +969,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     const cursor = continuationToken;
     loadingMore = true;
     error = "";
+    loadMoreError = "";
     render();
     const task = (async () => {
       try {
@@ -714,7 +987,28 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         ) {
           return items.length;
         }
+        const responseCursor = cleanText(page.continuationToken, "");
+        const responseHasMore = page.hasMore === true && Boolean(responseCursor);
+        const mergedItems = mergeUsuariosCursorItems(items, page.items);
+        if (
+          responseHasMore &&
+          (responseCursor === cursor || seenPageCursors.has(responseCursor))
+        ) {
+          const cursorError = new Error(
+            "La API devolvió un cursor de usuarios ya recorrido."
+          );
+          cursorError.code = "USUARIOS_CURSOR_DID_NOT_ADVANCE";
+          throw cursorError;
+        }
+        if (responseHasMore && mergedItems.length <= items.length) {
+          const progressError = new Error(
+            "La siguiente página de usuarios no añadió registros nuevos."
+          );
+          progressError.code = "USUARIOS_PAGE_DID_NOT_ADVANCE";
+          throw progressError;
+        }
         applyPage(page, { append: true });
+        if (responseCursor) seenPageCursors.add(responseCursor);
         render();
         emitEvent("usuarios:page:loaded", {
           count: items.length,
@@ -726,8 +1020,8 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         return items.length;
       } catch (pageError) {
         if (!destroyed && epoch === queryEpoch) {
-          error = safeError(pageError, "No se pudieron cargar más usuarios.");
-          showToast(error, "error");
+          loadMoreError = safeError(pageError, "No se pudieron cargar más usuarios.");
+          showToast(loadMoreError, "error");
           render();
         }
         return items.length;
@@ -745,35 +1039,46 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       if (loadMoreTask === task) loadMoreTask = null;
     }
   }
+  function retryLoadMore() {
+    if (!loadMoreError) return Promise.resolve(items.length);
+    return loadMore({ retry: true });
+  }
+  function retryFirstPage() {
+    return loadFirstPage({ silent: false });
+  }
   function refresh() {
-    return load({ silent: true });
+    return load({ silent: true, preservePages: true });
   }
   function setFilter(value = "all") {
+    cancelSearchDebounce();
+    search = cleanText(searchDraft, "");
     const next = normalizeKey(value);
     filter = ["active", "pending", "blocked"].includes(next) ? next : "all";
     void loadFirstPage({ silent: true });
     return filter;
   }
   function setSearch(value = "") {
-    searchDraft = cleanText(value, "");
-    search = searchDraft;
+    cancelSearchDebounce();
+    searchDraft = String(value ?? "");
+    search = cleanText(searchDraft, "");
     void loadFirstPage({ silent: true });
     return search;
   }
   function scheduleSearch(value = "") {
     searchDraft = String(value ?? "");
     if (!isBrowser()) return setSearch(searchDraft);
-    if (searchTimer) window.clearTimeout(searchTimer);
+    cancelSearchDebounce();
+    invalidateContinuationForPendingSearch();
     searchTimer = window.setTimeout(() => {
       searchTimer = 0;
       search = cleanText(searchDraft, "");
       void loadFirstPage({ silent: true });
     }, SEARCH_DEBOUNCE_MS);
+    render();
     return true;
   }
   function clearFilters() {
-    if (searchTimer && isBrowser()) window.clearTimeout(searchTimer);
-    searchTimer = 0;
+    cancelSearchDebounce();
     filter = "all";
     search = "";
     searchDraft = "";
@@ -936,10 +1241,13 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         event?.preventDefault?.();
         await openCreate();
         return true;
-      case ACTIONS.REFRESH:
       case ACTIONS.RETRY:
         event?.preventDefault?.();
-        await load({ silent: false });
+        await retryFirstPage();
+        return true;
+      case ACTIONS.REFRESH:
+        event?.preventDefault?.();
+        await refresh();
         return true;
       case ACTIONS.EXPORT:
         event?.preventDefault?.();
@@ -952,14 +1260,15 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       case ACTIONS.CLEAR_SEARCH:
         event?.preventDefault?.();
         setSearch("");
+        focusSearchInput();
         return true;
       case ACTIONS.CLEAR_FILTERS:
         event?.preventDefault?.();
         clearFilters();
         return true;
-      case ACTIONS.LOAD_MORE:
+      case ACTIONS.RETRY_PAGE:
         event?.preventDefault?.();
-        await loadMore();
+        await retryLoadMore();
         return true;
       default:
         return false;
@@ -980,6 +1289,37 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         target instanceof HTMLInputElement &&
         target.matches("[data-usuarios-search-input='true']")
       ) {
+        if (event.isComposing || searchComposing) {
+          searchComposing = true;
+          searchDraft = String(target.value ?? "");
+          cancelSearchDebounce();
+          invalidateContinuationForPendingSearch();
+          return;
+        }
+        scheduleSearch(target.value);
+      }
+    };
+    hostCompositionStartHandler = (event) => {
+      const target = event.target;
+      if (
+        typeof HTMLInputElement !== "undefined" &&
+        target instanceof HTMLInputElement &&
+        target.matches("[data-usuarios-search-input='true']")
+      ) {
+        searchComposing = true;
+        searchDraft = String(target.value ?? "");
+        cancelSearchDebounce();
+        invalidateContinuationForPendingSearch();
+      }
+    };
+    hostCompositionEndHandler = (event) => {
+      const target = event.target;
+      if (
+        typeof HTMLInputElement !== "undefined" &&
+        target instanceof HTMLInputElement &&
+        target.matches("[data-usuarios-search-input='true']")
+      ) {
+        searchComposing = false;
         scheduleSearch(target.value);
       }
     };
@@ -996,6 +1336,8 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     };
     host.addEventListener("click", hostClickHandler);
     host.addEventListener("input", hostInputHandler);
+    host.addEventListener("compositionstart", hostCompositionStartHandler);
+    host.addEventListener("compositionend", hostCompositionEndHandler);
     host.addEventListener("keydown", hostKeydownHandler);
     return true;
   }
@@ -1004,12 +1346,16 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     try {
       if (hostClickHandler) host.removeEventListener("click", hostClickHandler);
       if (hostInputHandler) host.removeEventListener("input", hostInputHandler);
+      if (hostCompositionStartHandler) host.removeEventListener("compositionstart", hostCompositionStartHandler);
+      if (hostCompositionEndHandler) host.removeEventListener("compositionend", hostCompositionEndHandler);
       if (hostKeydownHandler) host.removeEventListener("keydown", hostKeydownHandler);
     } catch {
       // noop
     }
     hostClickHandler = null;
     hostInputHandler = null;
+    hostCompositionStartHandler = null;
+    hostCompositionEndHandler = null;
     hostKeydownHandler = null;
     return true;
   }
@@ -1035,7 +1381,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     for (const eventName of CREATE_SUCCESS_EVENTS) {
       unsubscribers.push(subscribeEvent(eventName, () => {
         createOpen = false;
-        void loadFirstPage({ silent: true });
+        void loadFirstPage({ silent: true, preservePages: true });
       }));
     }
     for (const eventName of CREATE_CLOSE_EVENTS) {
@@ -1062,12 +1408,19 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         !mounted ||
         !routeActive() ||
         !admin() ||
+        loading ||
+        refreshing ||
         loadTask ||
+        loadMoreTask ||
+        loadingMore ||
+        Boolean(searchTimer) ||
+        searchComposing ||
+        Boolean(loadMoreError) ||
         Date.now() - lastSyncAt < RESUME_REVALIDATE_MIN_AGE_MS
       ) {
         return;
       }
-      void load({ silent: true });
+      void load({ silent: true, preservePages: true });
     };
     focusHandler = revalidate;
     visibilityHandler = () => {
@@ -1116,6 +1469,8 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     refresh,
     load,
     loadMore,
+    retryLoadMore,
+    retryFirstPage,
     openUsuario,
     refreshUsuario,
     copyUsuarioId,
@@ -1221,6 +1576,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         searchPresent: Boolean(search),
         lastSyncAt,
         error,
+        loadMoreError,
         architecture: {
           cursorFirst: true,
           serverFiltered: true,
@@ -1247,10 +1603,10 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       queryEpoch += 1;
       detailEpoch += 1;
       detailRefreshEpoch += 1;
-      if (searchTimer && isBrowser()) window.clearTimeout(searchTimer);
-      searchTimer = 0;
+      cancelSearchDebounce();
       loadTask = null;
       loadMoreTask = null;
+      disconnectInfiniteObserver();
       unbindHost();
       unbindEvents();
       unbindResumeSignals();

@@ -109,8 +109,8 @@ function responseItems(response = {}) {
           ),
           ""
         ).toLowerCase();
-        if (key && seen.has(key)) continue;
-        if (key) seen.add(key);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
         items.push(item);
       }
       return items;

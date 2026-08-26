@@ -17,6 +17,7 @@ core = read("src/core/config.js")
 controller = read("src/views/incidencias/index.js")
 api = read("src/views/incidencias/incidencias.api.impl.js")
 template = read("src/views/incidencias/incidencias.template.js")
+styles = read("src/css/views/incidencias/index.css")
 
 require(
     'CANONICAL_PRODUCTION_API_BASE = "https://api.onionsupport.com"' in core,
@@ -41,6 +42,61 @@ require(
     "remoteHasMore" in template and "nextCursor" in template,
     "template must understand remote cursor pagination",
 )
+require(
+    'data-incidencias-infinite-sentinel="true"' in template,
+    "template must expose a continuous-scroll sentinel",
+)
+require(
+    'aria-live="polite"' in template and "incrementalError" in template,
+    "continuous loading and incremental failures must be announced accessibly",
+)
+refresh_overlay = template[
+    template.index("function renderRefreshOverlay") : template.index("function renderEmpty")
+]
+require(
+    'aria-live="polite"' not in refresh_overlay
+    and 'aria-hidden="true"' in refresh_overlay,
+    "the visual refresh overlay must not create a second live region",
+)
+pending_footer = template[
+    template.index("if (vm.listQueryPending || vm.refreshing)") : template.index(
+        "if (vm.incrementalError"
+    )
+]
+require(
+    "listQueryPending: d.listQueryPending === true" in template
+    and "if (vm.listQueryPending || vm.refreshing)" in template
+    and "vm.loadingMore || vm.listQueryPending" in template
+    and 'class="incidencias-visually-hidden" role="status" aria-live="polite"' in template
+    and 'aria-live="polite"' in pending_footer
+    and 'data-incidencias-infinite-sentinel="true"' not in pending_footer,
+    "pending first-page queries must use one busy live state without an idle sentinel",
+)
+require(
+    "RETRY_INCREMENTAL" in template and "incidencias-infinite-retry" in template,
+    "only failed incremental loads may expose a retry control",
+)
+
+manual_pagination_markers = (
+    "Mostrar más",
+    "Cargar más",
+    "Ver más",
+    "Load more",
+    "incidencias-load-more-btn",
+    'LOAD_MORE: "load-more"',
+)
+for marker in manual_pagination_markers:
+    require(
+        marker not in template and marker not in styles,
+        f"manual pagination marker must not exist: {marker}",
+    )
+
+require(
+    ".incidencias-infinite" in styles
+    and ".incidencias-infinite-error" in styles
+    and ".incidencias-infinite-retry" in styles,
+    "continuous-scroll idle/loading/error styles must exist",
+)
 
 require(
     "loadIncidenciasPage" in controller,
@@ -53,6 +109,145 @@ require(
 require(
     "nextCursor" in controller,
     "controller must retain the opaque next-page cursor",
+)
+require(
+    "event.isComposing || listSearchComposing" in controller
+    and '"compositionstart",\n      onCompositionStart' in controller
+    and '"compositionend",\n      onCompositionEnd' in controller,
+    "search must wait for IME composition to finish",
+)
+require(
+    "new window.IntersectionObserver" in controller
+    and 'INFINITE_ROOT_MARGIN = "900px 0px 900px 0px"' in controller
+    and "root: getInfiniteScrollRoot()" in controller
+    and 'document.getElementById("main-content")' in controller
+    and 'document.querySelector(".main-content")' in controller,
+    "continuous pagination must observe against the real main scroll host with prefetch margin",
+)
+require(
+    "disconnectInfiniteObserver" in controller
+    and "const observer = new window.IntersectionObserver" in controller
+    and "infiniteObserver !== observer" in controller
+    and "observer.takeRecords?.()" in controller
+    and "observer.observe(sentinel)" in controller
+    and '"incidencias-controller-destroyed"' in controller,
+    "the observer must discard stale records, verify identity, and disconnect on destroy",
+)
+require(
+    "background &&\n        sameContext &&\n        hasItems" in controller
+    and "mergeTicketPage(items, responseItems)" in controller
+    and "autoRefreshRunning = false;\n      syncInfiniteObserver();" in controller
+    and "Boolean(incrementalError) ||\n      creating" in controller,
+    "same-context background revalidation must preserve pages, retry state, and observation",
+)
+require(
+    "loadingMore" in controller
+    and "loadMoreSeq" in controller
+    and "mergeTicketPage" in controller
+    and "INCIDENCIAS_CURSOR_DID_NOT_ADVANCE" in controller,
+    "incremental loading must reject duplicates, races, and non-advancing cursors",
+)
+require(
+    "const seenCursors = new Set()" in controller
+    and "resetCursorHistory(nextCursor)" in controller
+    and "seenCursors.has(responseCursor)" in controller
+    and "INCIDENCIAS_CURSOR_CYCLE" in controller,
+    "cursor history must reset per first-page query and reject A-B-A cycles",
+)
+require(
+    "countNewTicketIds(responseItems) === 0" in controller
+    and "INCIDENCIAS_PAGE_WITHOUT_ID_PROGRESS" in controller,
+    "an advancing cursor without new stable IDs must stop automatic pagination",
+)
+require(
+    "incrementalError = safeError(" in controller
+    and "error = safeError(pageError" not in controller,
+    "next-page failure must stay separate from the general first-page error",
+)
+require(
+    "getListFilterQuery" in controller
+    and "{ closed: false }" in controller
+    and "{ closed: true }" in controller
+    and '{ priority: "urgent" }' in controller
+    and "getListPageQuery()" in controller
+    and "getListPageQuery({ cursor })" in controller,
+    "first and subsequent cursor pages must share the active server filter query",
+)
+require(
+    "restartListQuery" in controller
+    and '"incidencias-filter-query-changed"' in controller
+    and '"incidencias-stat-query-changed"' in controller
+    and '"incidencias-search-query-restored"' in controller
+    and "cancelledPendingSearch" in controller
+    and "nextServerSearch" in controller,
+    "filter changes must invalidate the old cursor and request a new first page",
+)
+require(
+    "let itemsContextKey" in controller
+    and "const requestContextKey" in controller
+    and "const sameContext" in controller
+    and "if (!sameContext)" in controller
+    and 'items = [];\n      total = 0;\n      nextCursor = "";' in controller
+    and "itemsContextKey =\n          requestContextKey;" in controller,
+    "a semantic query change must release rows owned by the previous context before requesting page one",
+)
+search_debounce = controller[
+    controller.index("listSearchTimer = window.setTimeout") : controller.index(
+        "function setFilter"
+    )
+]
+require(
+    "listQueryPending = true;" in search_debounce,
+    "a queued server search must expose a busy state before its first-page request starts",
+)
+require(
+    "getListServerContextKey" in controller
+    and '"date",\n    ].includes(normalized)' in controller
+    and 'nextFilter === "date" &&\n      isListSortLocked()' in controller
+    and "nextServerContext !==\n      currentServerContext" in controller
+    and 'rawFilter === "date"' in template
+    and "const queryChanged = nextFilter !== filter" not in controller,
+    "date sorting must keep its raw UI marker, compare semantic server context, and respect the remote sort lock",
+)
+require(
+    "Boolean(nextCursor && filtered.length)" in template
+    and "(list.filteredTotal > 0 && nextCursor)" in controller,
+    "an empty filtered result must not drain remote cursor pages automatically",
+)
+require(
+    "captureListFocus" in controller
+    and "restoreListFocus" in controller
+    and "listTicketIdForNode" in controller
+    and '"stats",\n        ".incidencias-stats"' in controller
+    and '"filters",\n        ".incidencias-filter-pills"' in controller
+    and '"sort",\n        ".incidencias-sort-pills"' in controller
+    and "snapshot.filter" in controller
+    and "snapshot.sortMode" in controller
+    and "snapshot.scope" in controller
+    and "snapshot.index" in controller
+    and "preventScroll: true" in controller
+    and 'data-incidencias-focus-fallback="true"' in template,
+    "list patching must restore exact row/stat/filter/sort focus by stable identity and scope",
+)
+require(
+    'role="alert" aria-live="assertive" aria-atomic="true"' in template
+    and 'aria-labelledby="incidencias-fatal-error-title"' in template
+    and 'aria-describedby="incidencias-fatal-error-text"' in template
+    and "renderLoading({\n          focusSnapshot:" in controller
+    and "renderError(\n        error,\n        {\n          focusSnapshot:" in controller
+    and "cancelScheduledRender();\n    const focusSnapshot" in controller
+    and "const shouldFocusFatalError" in controller
+    and "fatalFocusSnapshot" in controller,
+    "fatal first-page failures and their retries must be announced and retain a reasonable focus target",
+)
+require(
+    "listQueryPending" in controller
+    and "isListSortLocked" in controller
+    and "listQueryPending = false;\n      loadController = null;\n\n      render(" in controller
+    and "sortLocked" in template
+    and 'disabled aria-disabled="true"' in template
+    and ".incidencias-sort-pill:disabled" in styles,
+    "local sorting must remain disabled while a cursor or first-page query is active",
 )
 require(
     "LIST_SEARCH_DEBOUNCE_MS" in controller and "serverSearch" in controller,
@@ -76,4 +271,7 @@ require(
     "detail cache must evict old entries",
 )
 
-print("Incidencias scale contract OK · canonical API · cursor pages · remote search · bounded detail cache")
+print(
+    "Incidencias scale contract OK · canonical API · continuous cursor scroll · "
+    "cycle/progress guards · stable focus/sort · server filters/search · bounded detail cache"
+)

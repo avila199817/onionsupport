@@ -37,7 +37,7 @@ export const CLIENTES_MODULE_NAME = "clientes";
 export const CLIENTES_VIEW_NAME = "ClientesView";
 export const CLIENTES_CANONICAL_PATH = "/clientes";
 export const CLIENTES_INDEX_VERSION =
-  "clientes.index.cursor.v10.abort-sequence-server-query";
+  "clientes.index.cursor.v12.progressive-reconciliation";
 export const CLIENTES_VIEW_VERSION = CLIENTES_INDEX_VERSION;
 export const CLIENTES_MODULE_VERSION = CLIENTES_INDEX_VERSION;
 export const CLIENTES_INDEX_SOURCE = "views.clientes.index";
@@ -54,6 +54,7 @@ export {
 
 const DEFAULT_SORT_ORDER = "desc";
 const SEARCH_DEBOUNCE_MS = 220;
+const INFINITE_ROOT_MARGIN = "0px 0px 900px 0px";
 const INSTANCES = new WeakMap();
 
 let lastInstance = null;
@@ -356,18 +357,44 @@ function cloneItems(items = []) {
 }
 
 function appendUnique(existing = [], incoming = []) {
-  const output = existing.map((item) => normalizeClienteModel(item));
-  const seen = new Set(output.map(getClienteId).filter(Boolean).map((id) => id.toLowerCase()));
+  const output = [];
+  const seen = new Set();
 
-  for (const raw of incoming) {
+  for (const raw of [...existing, ...incoming]) {
     const item = normalizeClienteModel(raw);
     const id = getClienteId(item);
     const key = id.toLowerCase();
-    if (key && seen.has(key)) continue;
-    if (key) seen.add(key);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
     output.push(item);
   }
   return output;
+}
+
+export function mergeFreshPageWithLoaded(existing = [], incoming = []) {
+  return mergeFreshReconciliationPage([], incoming, existing).visibleItems;
+}
+
+export function mergeFreshReconciliationPage(
+  freshItems = [],
+  incoming = [],
+  visibleItems = []
+) {
+  const previousFresh = appendUnique([], freshItems);
+  const nextFresh = appendUnique(previousFresh, incoming);
+  const freshIds = new Set(
+    nextFresh.map(getClienteId).filter(Boolean).map((id) => id.toLowerCase())
+  );
+  const preservedVisible = appendUnique([], visibleItems).filter((item) => {
+    const id = getClienteId(item).toLowerCase();
+    return id && !freshIds.has(id);
+  });
+
+  return {
+    freshItems: nextFresh,
+    visibleItems: appendUnique(nextFresh, preservedVisible),
+    progressed: nextFresh.length > previousFresh.length,
+  };
 }
 
 function csvEscape(value = "") {
@@ -386,17 +413,22 @@ function createClientesController(host = null, initialContext = {}) {
   let items = [];
   let nextCursor = "";
   let hasMore = false;
+  let seenPageCursors = new Set();
   let totalKnown = false;
   let total = null;
   let lastSyncAt = 0;
+  let freshReconciliationItems = null;
 
   let loading = false;
   let refreshing = false;
   let loadingMore = false;
   let creating = false;
   let error = "";
+  let loadMoreError = "";
 
   let search = "";
+  let searchDraft = "";
+  let searchContextDirty = false;
   let filter = "all";
   let sortOrder = DEFAULT_SORT_ORDER;
 
@@ -405,7 +437,9 @@ function createClientesController(host = null, initialContext = {}) {
   let queryVersion = 0;
   let activeListController = null;
   let searchTimer = 0;
+  let searchComposing = false;
   let renderFrame = 0;
+  let infiniteObserver = null;
   let detailSeq = 0;
   let legacyBridgeHost = null;
   let legacyBridgeReady = false;
@@ -436,10 +470,14 @@ function createClientesController(host = null, initialContext = {}) {
       loadingMore,
       creating,
       error,
+      loadMoreError,
       filter,
       search,
+      searchDraft,
+      searchPending: Boolean(searchTimer) || searchContextDirty,
       sortOrder,
       openingClienteId,
+      reconcilingHistory: Array.isArray(freshReconciliationItems),
       queryVersion,
       apiVersion: CLIENTES_API_VERSION,
       indexVersion: CLIENTES_INDEX_VERSION,
@@ -459,31 +497,153 @@ function createClientesController(host = null, initialContext = {}) {
     };
   }
 
-  function captureSearchFocus() {
+  function captureFocusState() {
     if (!isBrowser() || !root) return null;
+    const scrollRoot = resolveInfiniteScrollRoot();
+    const baseState = {
+      scrollTop: number(scrollRoot?.scrollTop, 0),
+    };
     const active = document.activeElement;
-    if (
-      !active ||
-      !root.contains(active) ||
-      !active.matches?.("[data-clientes-search-input], [data-search-input='clientes']")
-    ) {
-      return null;
+    if (!active || !root.contains(active)) {
+      return { ...baseState, kind: "scroll" };
     }
+
+    if (
+      active.matches?.(
+        "[data-clientes-search-input], [data-search-input='clientes']"
+      )
+    ) {
+      return {
+        ...baseState,
+        kind: "search",
+        start: Number.isInteger(active.selectionStart)
+          ? active.selectionStart
+          : null,
+        end: Number.isInteger(active.selectionEnd)
+          ? active.selectionEnd
+          : null,
+      };
+    }
+
+    const row = active.closest?.("[data-client-id], [data-cliente-id]");
+    const action = active.closest?.("[data-clientes-action], [data-action]");
+    const clientId = cleanText(
+      first(
+        row?.getAttribute?.("data-client-id"),
+        row?.getAttribute?.("data-cliente-id"),
+        ""
+      ),
+      ""
+    );
+
     return {
-      start: Number.isInteger(active.selectionStart) ? active.selectionStart : null,
-      end: Number.isInteger(active.selectionEnd) ? active.selectionEnd : null,
+      ...baseState,
+      kind: "control",
+      clientId,
+      action: cleanText(
+        first(
+          action?.getAttribute?.("data-clientes-action"),
+          action?.getAttribute?.("data-action"),
+          ""
+        ),
+        ""
+      ),
+      filter: cleanText(action?.getAttribute?.("data-filter"), ""),
+      controlKind: active.matches?.(".clientes-stat-card")
+        ? "stat-card"
+        : active.matches?.(".clientes-filter-pill")
+          ? "filter-pill"
+          : active.matches?.(".clientes-sort-pill")
+            ? "sort-pill"
+            : "",
+      elementId: cleanText(active.id, ""),
+      href: cleanText(active.getAttribute?.("href"), ""),
+      tagName: cleanText(active.tagName, "").toLowerCase(),
     };
   }
 
-  function restoreSearchFocus(state = null) {
+  function restoreFocusState(state = null) {
     if (!state || !root) return;
-    const target = root.querySelector(
-      "[data-clientes-search-input], [data-search-input='clientes']"
-    );
+
+    const scrollRoot = resolveInfiniteScrollRoot();
+    if (scrollRoot) scrollRoot.scrollTop = number(state.scrollTop, 0);
+
+    let target = null;
+    if (state.kind === "search") {
+      target = root.querySelector(
+        "[data-clientes-search-input], [data-search-input='clientes']"
+      );
+    } else {
+      if (state.action === CLIENTES_ACTIONS.CLEAR_SEARCH) {
+        target = root.querySelector(
+          "[data-clientes-search-input], [data-search-input='clientes']"
+        );
+      }
+      if (!target && state.action === CLIENTES_ACTIONS.CLEAR_FILTERS) {
+        target = root.querySelector(
+          `.clientes-filter-pill[data-clientes-action="${CLIENTES_ACTIONS.FILTER}"][data-filter="all"]`
+        );
+      }
+      if (!target && state.elementId) {
+        const candidate = document.getElementById(state.elementId);
+        if (candidate && root.contains(candidate)) target = candidate;
+      }
+      const rows = Array.from(
+        root.querySelectorAll?.("[data-client-id], [data-cliente-id]") || []
+      );
+      const scope = state.clientId
+        ? rows.find((row) =>
+            [
+              row.getAttribute("data-client-id"),
+              row.getAttribute("data-cliente-id"),
+            ].some((value) => cleanText(value, "") === state.clientId)
+          ) || null
+        : root;
+      if (!target) {
+        const controls = Array.from(
+          scope?.querySelectorAll?.(
+            "[data-clientes-action], [data-action], a[href], button, [tabindex]"
+          ) || []
+        );
+        target = controls.find((control) => {
+          const action = cleanText(
+            first(
+              control.getAttribute?.("data-clientes-action"),
+              control.getAttribute?.("data-action"),
+              ""
+            ),
+            ""
+          );
+          const href = cleanText(control.getAttribute?.("href"), "");
+          const filter = cleanText(control.getAttribute?.("data-filter"), "");
+          const kindMatches = !state.controlKind || control.matches?.(
+            `.clientes-${state.controlKind}`
+          );
+          if (state.action) {
+            return action === state.action &&
+              (!state.filter || filter === state.filter) &&
+              kindMatches;
+          }
+          if (state.href) return href === state.href;
+          return cleanText(control.tagName, "").toLowerCase() === state.tagName;
+        }) || (scope?.matches?.("[tabindex]") ? scope : null);
+      }
+      if (
+        !target &&
+        (state.clientId ||
+          [CLIENTES_ACTIONS.RETRY_PAGE, CLIENTES_ACTIONS.REFRESH].includes(
+            state.action
+          ))
+      ) {
+        target = root.querySelector(".clientes-history-subtitle");
+      }
+    }
+
     if (!target) return;
     try {
       target.focus({ preventScroll: true });
       if (
+        state.kind === "search" &&
         state.start !== null &&
         state.end !== null &&
         typeof target.setSelectionRange === "function"
@@ -499,17 +659,128 @@ function createClientesController(host = null, initialContext = {}) {
     }
   }
 
+  function disconnectInfiniteObserver(observer = infiniteObserver) {
+    if (!observer) return false;
+    if (infiniteObserver === observer) infiniteObserver = null;
+    try {
+      observer.takeRecords?.();
+    } catch {
+      // noop
+    }
+    try {
+      observer.disconnect();
+    } catch {
+      // noop
+    }
+    return true;
+  }
+
+  function resolveInfiniteScrollRoot() {
+    if (!isBrowser()) return null;
+    const mainContent = document.getElementById("main-content");
+    if (mainContent?.contains?.(root)) return mainContent;
+    return root?.closest?.(".main-content, [data-main-content='true']") || null;
+  }
+
+  function syncInfiniteObserver() {
+    disconnectInfiniteObserver();
+
+    if (
+      !isBrowser() ||
+      !root ||
+      destroyed ||
+      loading ||
+      refreshing ||
+      loadingMore ||
+      Boolean(searchTimer) ||
+      searchContextDirty ||
+      Boolean(error) ||
+      hasMore !== true ||
+      !nextCursor ||
+      Boolean(loadMoreError) ||
+      typeof window.IntersectionObserver !== "function"
+    ) {
+      return false;
+    }
+
+    const sentinel = root.querySelector(
+      "[data-clientes-infinite-sentinel='true']"
+    );
+    const scrollRoot = resolveInfiniteScrollRoot();
+    if (!sentinel || !scrollRoot) return false;
+
+    try {
+      const observer = new window.IntersectionObserver(
+        (entries) => {
+          if (infiniteObserver !== observer) {
+            disconnectInfiniteObserver(observer);
+            return;
+          }
+          if (
+            destroyed ||
+            loading ||
+            refreshing ||
+            loadingMore ||
+            Boolean(searchTimer) ||
+            searchContextDirty ||
+            Boolean(error) ||
+            hasMore !== true ||
+            !nextCursor ||
+            Boolean(loadMoreError)
+          ) {
+            disconnectInfiniteObserver(observer);
+            return;
+          }
+
+          if (entries.some((entry) => entry.isIntersecting)) {
+            disconnectInfiniteObserver(observer);
+            void loadMore();
+          }
+        },
+        {
+          root: scrollRoot,
+          rootMargin: INFINITE_ROOT_MARGIN,
+          threshold: 0.01,
+        }
+      );
+      infiniteObserver = observer;
+      infiniteObserver.observe(sentinel);
+      return true;
+    } catch {
+      disconnectInfiniteObserver();
+      return false;
+    }
+  }
+
   function renderNow() {
     if (!root || destroyed || !isClientesRoute(context)) return false;
     cancelFrame(renderFrame);
     renderFrame = 0;
-    const focusState = captureSearchFocus();
+    disconnectInfiniteObserver();
+    const focusState = captureFocusState();
     try {
       root.innerHTML = renderClientesTemplate(payload());
       root.dataset.view = "clientes";
       root.dataset.clientesVersion = CLIENTES_INDEX_VERSION;
       root.dataset.clientesApiVersion = CLIENTES_API_VERSION;
-      restoreSearchFocus(focusState);
+      restoreFocusState(focusState);
+      if (error && !items.length) {
+        const active = document.activeElement;
+        const mayMoveFocus =
+          !active ||
+          active === document.body ||
+          active === document.documentElement;
+        if (mayMoveFocus) {
+          nextFrame(() => {
+            if (!alive() || !isClientesRoute(context)) return;
+            const fatalError = root?.querySelector?.(
+              "[data-clientes-fatal-error='true']"
+            );
+            try { fatalError?.focus?.({ preventScroll: true }); } catch { /* noop */ }
+          });
+        }
+      }
+      syncInfiniteObserver();
       return true;
     } catch (renderError) {
       error = safeError(renderError, "No se pudo renderizar la vista de clientes.");
@@ -545,18 +816,47 @@ function createClientesController(host = null, initialContext = {}) {
     items = [];
     nextCursor = "";
     hasMore = false;
+    seenPageCursors = new Set();
     totalKnown = false;
     total = null;
     lastSyncAt = 0;
+    freshReconciliationItems = null;
     error = "";
+    loadMoreError = "";
   }
 
-  async function requestPage({ append = false, silent = false, cursorOverride = null } = {}) {
+  async function requestPage({
+    append = false,
+    silent = false,
+    cursorOverride = null,
+    preservePages = false,
+  } = {}) {
     if (!alive()) return snapshot();
 
-    if (append && (loadingMore || hasMore !== true || !nextCursor)) {
+    if (
+      append &&
+      (loading ||
+        refreshing ||
+        loadingMore ||
+        Boolean(searchTimer) ||
+        searchContextDirty ||
+        Boolean(error) ||
+        hasMore !== true ||
+        !nextCursor)
+    ) {
       return snapshot();
     }
+
+    const preserveLoadedPages =
+      !append && preservePages === true && items.length > 0;
+    const preservedTotalKnown = totalKnown;
+    const preservedTotal = total;
+    const preservedLoadMoreError = preserveLoadedPages ? loadMoreError : "";
+    const preservedFreshReconciliationItems = Array.isArray(
+      freshReconciliationItems
+    )
+      ? cloneItems(freshReconciliationItems)
+      : null;
 
     abortList(append ? "clientes-load-more-replaced" : "clientes-first-page-replaced");
     const controller = typeof AbortController !== "undefined"
@@ -571,13 +871,23 @@ function createClientesController(host = null, initialContext = {}) {
       : "";
 
     if (append) {
+      loading = false;
+      refreshing = false;
       loadingMore = true;
-    } else if (items.length && silent) {
+      loadMoreError = "";
+    } else if (preserveLoadedPages && silent) {
+      loading = false;
       refreshing = true;
+      loadingMore = false;
     } else {
       loading = true;
+      refreshing = false;
+      loadingMore = false;
     }
-    if (!silent || !items.length) error = "";
+    if (!append) {
+      loadMoreError = "";
+      error = "";
+    }
     renderNow();
 
     try {
@@ -603,21 +913,124 @@ function createClientesController(host = null, initialContext = {}) {
       }
 
       const pageItems = Array.isArray(response?.items) ? response.items : [];
-      items = append
-        ? appendUnique(items, pageItems)
+      const responseCursor = cleanText(response?.nextCursor, "");
+      const responseHasMore = response?.hasMore === true && Boolean(responseCursor);
+      const responseTotalKnown = response?.totalKnown === true;
+      const responseTotal = Number(response?.total);
+      const normalizedPageItems = appendUnique([], pageItems);
+      const freshWithLoaded = preserveLoadedPages
+        ? mergeFreshPageWithLoaded(items, pageItems)
         : appendUnique([], pageItems);
-      nextCursor = cleanText(response?.nextCursor, "");
-      hasMore = response?.hasMore === true && Boolean(nextCursor);
-      totalKnown = response?.totalKnown === true;
-      total = totalKnown && Number.isFinite(Number(response?.total))
-        ? Number(response.total)
-        : null;
+      const reconciliationPage =
+        append && Array.isArray(preservedFreshReconciliationItems)
+          ? mergeFreshReconciliationPage(
+              preservedFreshReconciliationItems,
+              pageItems,
+              items
+            )
+          : null;
+      const startFreshReconciliation =
+        preserveLoadedPages && responseHasMore;
+      const preserveAccumulatedRows = startFreshReconciliation;
+      const mergedItems = append
+        ? reconciliationPage
+          ? responseHasMore
+            ? reconciliationPage.visibleItems
+            : reconciliationPage.freshItems
+          : appendUnique(items, pageItems)
+        : preserveAccumulatedRows
+          ? freshWithLoaded
+          : appendUnique([], pageItems);
+
+      if (
+        append &&
+        responseHasMore &&
+        (responseCursor === cursor || seenPageCursors.has(responseCursor))
+      ) {
+        const cursorError = new Error(
+          "La API devolvió un cursor de clientes ya recorrido."
+        );
+        cursorError.code = "CLIENTES_CURSOR_DID_NOT_ADVANCE";
+        throw cursorError;
+      }
+
+      if (
+        append &&
+        responseHasMore &&
+        (reconciliationPage
+          ? !reconciliationPage.progressed
+          : mergedItems.length <= items.length)
+      ) {
+        const progressError = new Error(
+          "La siguiente página de clientes no hizo avanzar la colección fresca."
+        );
+        progressError.code = "CLIENTES_PAGE_DID_NOT_ADVANCE";
+        throw progressError;
+      }
+
+      if (
+        !append &&
+        responseHasMore &&
+        normalizedPageItems.length === 0
+      ) {
+        const progressError = new Error(
+          "La primera página continuable no incluyó clientes con identidad estable."
+        );
+        progressError.code = "CLIENTES_PAGE_DID_NOT_ADVANCE";
+        throw progressError;
+      }
+
+      items = mergedItems;
+      nextCursor = responseHasMore ? responseCursor : "";
+      hasMore = responseHasMore && Boolean(nextCursor);
+      if (append && reconciliationPage) {
+        freshReconciliationItems = responseHasMore
+          ? reconciliationPage.freshItems
+          : null;
+      } else if (!append && startFreshReconciliation) {
+        freshReconciliationItems = appendUnique([], pageItems);
+      } else if (!append) {
+        freshReconciliationItems = null;
+      }
+      if (append) {
+        if (responseHasMore && responseCursor) {
+          seenPageCursors.add(responseCursor);
+        }
+      } else {
+        seenPageCursors = new Set(
+          responseHasMore && responseCursor ? [responseCursor] : []
+        );
+      }
+      if (Array.isArray(freshReconciliationItems)) {
+        totalKnown = false;
+        total = null;
+      } else if (preserveAccumulatedRows) {
+        totalKnown = responseTotalKnown || preservedTotalKnown;
+        const knownTotal = responseTotalKnown && Number.isFinite(responseTotal)
+          ? responseTotal
+          : preservedTotal;
+        total = totalKnown && Number.isFinite(Number(knownTotal))
+          ? Math.max(items.length, Number(knownTotal))
+          : null;
+      } else if (append && !responseTotalKnown) {
+        totalKnown = preservedTotalKnown;
+        total = preservedTotalKnown && Number.isFinite(Number(preservedTotal))
+          ? Math.max(items.length, Number(preservedTotal))
+          : null;
+      } else {
+        totalKnown = responseTotalKnown;
+        total = totalKnown && Number.isFinite(Number(response?.total))
+          ? Number(response.total)
+          : null;
+      }
       lastSyncAt = Number(response?.lastSyncAt || Date.now()) || Date.now();
       error = "";
+      loadMoreError = "";
 
       emitEvent("clientes:loaded", {
         ...snapshot(),
         appended: append,
+        preservedPages: preserveAccumulatedRows,
         source: CLIENTES_INDEX_SOURCE,
         controllerId: id,
       });
@@ -645,7 +1058,13 @@ function createClientesController(host = null, initialContext = {}) {
       }
 
       const message = safeError(loadError);
-      error = silent && items.length ? "" : message;
+      if (append && items.length) {
+        loadMoreError = message;
+        error = "";
+      } else {
+        loadMoreError = preserveLoadedPages ? preservedLoadMoreError : "";
+        error = message;
+      }
       emitEvent("clientes:error", {
         message,
         code: errorCode(loadError),
@@ -666,64 +1085,162 @@ function createClientesController(host = null, initialContext = {}) {
   }
 
   async function resetAndLoad() {
+    clearSearchTimer();
     abortList("clientes-query-context-reset");
     requestSeq += 1;
     queryVersion += 1;
+    searchContextDirty = false;
+    loading = false;
+    refreshing = false;
+    loadingMore = false;
     clearPageState();
     return requestPage({ append: false, silent: false });
   }
 
+  function clearSearchTimer() {
+    if (searchTimer && isBrowser()) {
+      window.clearTimeout?.(searchTimer);
+    }
+    searchTimer = 0;
+    return true;
+  }
+
+  function readLiveSearchDraft() {
+    const input = root?.querySelector?.(
+      "[data-clientes-search-input], [data-search-input='clientes']"
+    );
+    return input && "value" in input ? String(input.value ?? "") : searchDraft;
+  }
+
+  function commitSearchDraft() {
+    const rawDraft = String(readLiveSearchDraft() ?? "");
+    searchDraft = rawDraft;
+    const next = cleanText(rawDraft, "");
+    const changed = next !== search;
+    search = next;
+    return changed;
+  }
+
+  function invalidateForSearchDraft() {
+    disconnectInfiniteObserver();
+    abortList("clientes-search-draft-changed");
+    requestSeq += 1;
+    queryVersion += 1;
+    loading = false;
+    refreshing = false;
+    loadingMore = false;
+    searchContextDirty = true;
+    return true;
+  }
+
+  function reflectSearchPendingState() {
+    if (!root || destroyed) return false;
+    root.querySelector?.("[data-clientes-infinite-sentinel='true']")?.remove?.();
+    root.querySelector?.("[data-clientes-scope='true']")?.setAttribute?.(
+      "data-search-pending",
+      "true"
+    );
+    root.querySelector?.(".clientes-history-results")?.setAttribute?.(
+      "aria-busy",
+      "true"
+    );
+    const message = "Preparando la búsqueda de clientes...";
+    const liveStatus = root.querySelector?.(".clientes-history-subtitle");
+    if (liveStatus) liveStatus.textContent = message;
+    const footerStatus = root.querySelector?.(".clientes-infinite-status");
+    if (footerStatus) {
+      footerStatus.classList?.add?.("is-loading");
+      footerStatus.textContent = message;
+    }
+    return true;
+  }
+
   async function refresh() {
     if (!alive()) return snapshot();
-    return requestPage({ append: false, silent: items.length > 0 });
+    const pendingSearch = searchContextDirty || Boolean(searchTimer);
+    clearSearchTimer();
+    const searchChanged = commitSearchDraft();
+    if (pendingSearch || searchChanged) return resetAndLoad();
+    return requestPage({
+      append: false,
+      silent: items.length > 0,
+      preservePages: items.length > 0,
+    });
   }
 
   async function setSearch(value = "") {
-    const next = cleanText(value, "");
-    if (next === search) return search;
+    clearSearchTimer();
+    const rawDraft = String(value ?? "");
+    const next = cleanText(rawDraft, "");
+    const shouldReload = searchContextDirty || next !== search;
+    searchDraft = rawDraft;
     search = next;
-    await resetAndLoad();
+    if (shouldReload) await resetAndLoad();
+    else renderNow();
     return search;
   }
 
   async function setFilter(value = "all") {
+    const pendingSearch = searchContextDirty || Boolean(searchTimer);
+    clearSearchTimer();
+    const searchChanged = commitSearchDraft();
     const key = normalizeKey(value || "all");
     const next = ["all", "active", "pending", "blocked"].includes(key)
       ? key
       : "all";
-    if (next === filter) return filter;
+    const filterChanged = next !== filter;
     filter = next;
-    await resetAndLoad();
+    if (pendingSearch || searchChanged || filterChanged) await resetAndLoad();
+    else renderNow();
     return filter;
   }
 
   async function setSortOrder(value = DEFAULT_SORT_ORDER) {
+    const pendingSearch = searchContextDirty || Boolean(searchTimer);
+    clearSearchTimer();
+    const searchChanged = commitSearchDraft();
     const next = ["asc", "ascending", "oldest", "antiguos"].includes(
       normalizeKey(value)
     )
       ? "asc"
       : "desc";
-    if (next === sortOrder) return sortOrder;
+    const sortChanged = next !== sortOrder;
     sortOrder = next;
-    await resetAndLoad();
+    if (pendingSearch || searchChanged || sortChanged) await resetAndLoad();
+    else renderNow();
     return sortOrder;
   }
 
   async function clearFilters() {
+    const pendingSearch = searchContextDirty || Boolean(searchTimer);
+    clearSearchTimer();
     const changed =
       filter !== "all" ||
       search !== "" ||
+      cleanText(searchDraft, "") !== "" ||
       sortOrder !== DEFAULT_SORT_ORDER;
     filter = "all";
     search = "";
+    searchDraft = "";
     sortOrder = DEFAULT_SORT_ORDER;
-    if (changed) await resetAndLoad();
+    if (pendingSearch || changed) await resetAndLoad();
     else scheduleRender();
     return true;
   }
 
   async function loadMore() {
-    if (hasMore !== true || !nextCursor || loadingMore) return snapshot();
+    if (
+      searchTimer ||
+      searchContextDirty ||
+      Boolean(error) ||
+      loading ||
+      refreshing ||
+      hasMore !== true ||
+      !nextCursor ||
+      loadingMore
+    ) {
+      return snapshot();
+    }
     return requestPage({ append: true });
   }
 
@@ -952,7 +1469,7 @@ function createClientesController(host = null, initialContext = {}) {
       return;
     }
 
-    if (action === CLIENTES_ACTIONS.LOAD_MORE) {
+    if (action === CLIENTES_ACTIONS.RETRY_PAGE) {
       void loadMore();
       return;
     }
@@ -971,12 +1488,51 @@ function createClientesController(host = null, initialContext = {}) {
       return;
     }
 
-    if (isBrowser()) window.clearTimeout?.(searchTimer);
-    const value = target.value;
+    searchDraft = String(target.value ?? "");
+    if (event.isComposing || searchComposing) {
+      searchComposing = true;
+      clearSearchTimer();
+      if (!searchContextDirty) invalidateForSearchDraft();
+      reflectSearchPendingState();
+      return;
+    }
+
+    clearSearchTimer();
+    invalidateForSearchDraft();
     searchTimer = window.setTimeout(() => {
       searchTimer = 0;
-      void setSearch(value);
+      void setSearch(searchDraft);
     }, SEARCH_DEBOUNCE_MS);
+    reflectSearchPendingState();
+  }
+
+  function handleCompositionStart(event) {
+    const target = event.target;
+    if (
+      !isElement(target) ||
+      !target.matches("[data-clientes-search-input], [data-search-input='clientes']")
+    ) {
+      return;
+    }
+
+    searchComposing = true;
+    searchDraft = String(target.value ?? "");
+    clearSearchTimer();
+    if (!searchContextDirty) invalidateForSearchDraft();
+    reflectSearchPendingState();
+  }
+
+  function handleCompositionEnd(event) {
+    const target = event.target;
+    if (
+      !isElement(target) ||
+      !target.matches("[data-clientes-search-input], [data-search-input='clientes']")
+    ) {
+      return;
+    }
+
+    searchComposing = false;
+    handleInput({ target, isComposing: false });
   }
 
   function handleKeydown(event) {
@@ -1003,6 +1559,8 @@ function createClientesController(host = null, initialContext = {}) {
     if (!root || mounted) return;
     root.addEventListener("click", handleClick);
     root.addEventListener("input", handleInput);
+    root.addEventListener("compositionstart", handleCompositionStart);
+    root.addEventListener("compositionend", handleCompositionEnd);
     root.addEventListener("keydown", handleKeydown);
     if (isBrowser()) {
       window.addEventListener("clientes:create:success", onCreated);
@@ -1014,15 +1572,18 @@ function createClientesController(host = null, initialContext = {}) {
     try {
       root?.removeEventListener("click", handleClick);
       root?.removeEventListener("input", handleInput);
+      root?.removeEventListener("compositionstart", handleCompositionStart);
+      root?.removeEventListener("compositionend", handleCompositionEnd);
       root?.removeEventListener("keydown", handleKeydown);
       if (isBrowser()) {
         window.removeEventListener("clientes:create:success", onCreated);
-        window.clearTimeout?.(searchTimer);
+        clearSearchTimer();
       }
     } catch {
       // noop
     }
     searchTimer = 0;
+    searchComposing = false;
     mounted = false;
   }
 
@@ -1049,6 +1610,8 @@ function createClientesController(host = null, initialContext = {}) {
     detailSeq += 1;
     abortList("clientes-controller-destroyed");
     cancelFrame(renderFrame);
+    disconnectInfiniteObserver();
+    freshReconciliationItems = null;
     detach();
 
     try { closeClientesDetailModal(); } catch { /* noop */ }

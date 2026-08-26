@@ -27,7 +27,6 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import re
-          from collections import Counter
 
           root = Path('.')
           index = (root / 'src/views/correo/index.js').read_text(encoding='utf-8')
@@ -39,11 +38,13 @@ jobs:
           runtime = index + '\n' + template
           css = css_base + '\n' + css_viewport
 
-          cls_re = re.compile(r'\.?(correo-[a-z0-9_-]+)', re.I)
-          runtime_classes = set(cls_re.findall(runtime))
-          css_classes = set(cls_re.findall(css))
-          css_only = sorted(css_classes - runtime_classes)
-          runtime_only = sorted(runtime_classes - css_classes)
+          # Only class-selector-like occurrences, not CSS variable names.
+          class_re = re.compile(r'\.([a-zA-Z_][a-zA-Z0-9_-]*)')
+          runtime_class_re = re.compile(r'correo-[a-z0-9_-]+', re.I)
+          runtime_classes = set(runtime_class_re.findall(runtime))
+          base_classes = {c for c in class_re.findall(css_base) if c.startswith('correo-')}
+          viewport_classes = {c for c in class_re.findall(css_viewport) if c.startswith('correo-')}
+          all_css_classes = base_classes | viewport_classes
 
           print('=== FILE SIZES ===')
           for p in [
@@ -56,26 +57,33 @@ jobs:
               text = (root / p).read_text(encoding='utf-8')
               print(f'{p}: {len(text.splitlines())} lines / {len(text)} chars')
 
-          print('\n=== CLASS SURFACE ===')
-          print('runtime classes:', len(runtime_classes))
-          print('css classes:', len(css_classes))
-          print('css-only classes:', len(css_only))
-          print('\n'.join(css_only))
-          print('runtime-only classes:', len(runtime_only))
-          print('\n'.join(runtime_only))
+          print('\n=== CSS AUTHORITY ===')
+          print('runtime class-like ids:', len(runtime_classes))
+          print('base selector classes:', len(base_classes))
+          print('viewport selector classes:', len(viewport_classes))
+          print('selector classes in BOTH:', len(base_classes & viewport_classes))
+          print('\n'.join(sorted(base_classes & viewport_classes)))
 
-          print('\n=== DUPLICATE CLASS AUTHORITIES ===')
-          base_classes = set(cls_re.findall(css_base))
-          viewport_classes = set(cls_re.findall(css_viewport))
-          both = sorted(base_classes & viewport_classes)
-          print('classes defined/referenced in BOTH css files:', len(both))
-          print('\n'.join(both))
+          viewport_missing = sorted(
+              c for c in runtime_classes
+              if c not in viewport_classes and c in base_classes
+          )
+          print('\n=== LIVE CLASSES NEEDING BASE CSS ===')
+          print('count:', len(viewport_missing))
+          print('\n'.join(viewport_missing))
+
+          dead_base = sorted(c for c in base_classes if c not in runtime_classes)
+          dead_viewport = sorted(c for c in viewport_classes if c not in runtime_classes)
+          print('\n=== BASE SELECTORS WITH NO RUNTIME CLASS REFERENCE ===')
+          print('count:', len(dead_base))
+          print('\n'.join(dead_base))
+          print('\n=== VIEWPORT SELECTORS WITH NO RUNTIME CLASS REFERENCE ===')
+          print('count:', len(dead_viewport))
+          print('\n'.join(dead_viewport))
 
           print('\n=== ACTION CONTRACT ===')
           template_actions = set(re.findall(r'data-correo-action=\\?"([a-z0-9-]+)', template))
           handled_actions = set(re.findall(r'action === "([a-z0-9-]+)"', index))
-          print('template actions:', sorted(template_actions))
-          print('handled actions:', sorted(handled_actions))
           print('template without handler:', sorted(template_actions - handled_actions))
           print('handler without static template action:', sorted(handled_actions - template_actions))
 
@@ -86,25 +94,18 @@ jobs:
               'fake add-account action': (index + template).count('add-account'),
               'updateDraft API definitions': api.count('updateDraft('),
               'updateDraft controller use': index.count('CorreoApi.updateDraft('),
-              'cachedAt writes/reads': (index.count('cachedAt') + template.count('cachedAt')),
+              'cachedAt occurrences': (index + template).count('cachedAt'),
               'route CSS manifest entries': styles.count('/src/css/views/correo/'),
-              'native location.assign correo': index.count('window.location.assign("/correo")'),
               'compose aria-modal': template.count('aria-modal="true"'),
-              'compose dialog role': template.count('role="dialog"'),
-              'focus trap markers': index.count('focusable') + index.count('focusTrap') + index.count('trapFocus'),
+              'focus trap markers': index.count('focusableElements') + index.count('trapModalFocus'),
               'IME markers': index.count('compositionstart') + index.count('compositionend') + index.count('isComposing'),
-              'list request abort markers': index.count('listAbort') + index.count('abortList'),
+              'list abort markers': index.count('listAbortController') + index.count('abortListRequest'),
+              'dead count query': index.count('[data-correo-count]'),
+              'dead folder title query': index.count('[data-correo-folder-title]'),
+              'infinite sentinel markup': template.count('data-correo-infinite-sentinel'),
           }
           for key, value in markers.items():
               print(f'{key}: {value}')
-
-          print('\n=== IMPORTANT CSS LEGACY MARKERS ===')
-          for selector in [
-              '.correo-hero', '.correo-list-header', '.correo-notice', '.correo-connect-orbit',
-              '.correo-connect-features', '.correo-security-card', '.correo-infinite-sentinel',
-              '.correo-attachment-icon', '.correo-attachment-copy', '.correo-attachment-download',
-          ]:
-              print(selector, css.count(selector), runtime.count(selector.lstrip('.')))
           PY
 
       - name: Existing repository gates

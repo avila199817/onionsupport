@@ -788,6 +788,97 @@ def validate_sidebar_runtime_v15_contract(errors: list[str]) -> None:
         errors.append(f"{relative} :: versión de recuperación V15 ausente")
 
 
+def validate_private_admin_visual_parity_v16_contract(errors: list[str]) -> None:
+    """Keep the Incidencias listing grammar shared without touching domain logic."""
+    interaction_path = SRC / "css/compositions/private-admin-interactions.css"
+    parity_path = SRC / "css/compositions/private-admin-parity.css"
+    amounts_path = SRC / "css/compositions/private-amounts.css"
+    interactions = interaction_path.read_text(encoding="utf-8")
+    parity = parity_path.read_text(encoding="utf-8")
+    amounts = amounts_path.read_text(encoding="utf-8")
+
+    for domain in ("facturas", "clientes", "usuarios"):
+        required_interactions = (
+            f"#{domain}-create-btn",
+            f".{domain}-btn--create",
+            f".{domain}-filter-pill",
+            f".{domain}-search-input",
+            f".{domain}-history-head",
+        )
+        for token in required_interactions:
+            if token not in interactions:
+                errors.append(
+                    f"{interaction_path.relative_to(ROOT)} :: falta paridad V16 para {token}"
+                )
+
+    for token in (
+        "LISTADOS PRIVADOS · ACCIÓN PRIMARIA GOOGLE BLUE",
+        "min-inline-size: 236px;",
+        "min-block-size: 56px;",
+        "border-radius: 999px;",
+        "LISTADOS PRIVADOS · FILAS INTERACTIVAS",
+        "var(--data-table-row-hover) 72%",
+        "transform: translateX(2px);",
+    ):
+        if token not in interactions:
+            errors.append(
+                f"{interaction_path.relative_to(ROOT)} :: contrato visual V16 ausente: {token}"
+            )
+
+    for token in (
+        "TARGET LISTINGS — INCIDENCIAS EFFECTIVE VALUES 1:1",
+        "padding: 12px var(--table-cell-padding-x);",
+        "font-size: var(--font-base);",
+        "private-admin-shimmer",
+        "@container (max-width: 1120px)",
+        "@container (max-width: 820px)",
+        "@media (max-width: 680px)",
+        "@container (max-width: 560px)",
+    ):
+        if token not in parity:
+            errors.append(
+                f"{parity_path.relative_to(ROOT)} :: contrato visual V16 ausente: {token}"
+            )
+
+    if ".clientes-total-stack" not in amounts or ".clientes-total-value" not in amounts:
+        errors.append(
+            f"{amounts_path.relative_to(ROOT)} :: Clientes debe compartir el stack monetario V16"
+        )
+
+    template_tokens = {
+        "src/views/facturas/facturas.template.js": (
+            "facturas.template.private.v7.admin-visual-parity",
+            "facturas-infinite-error-icon",
+        ),
+        "src/views/clientes/clientes.template.js": (
+            "clientes.template.cursor.v12.private-admin-visual-parity",
+            "clientes-avatar--tone-${avatarTone(current)}",
+            "clientes-table-loading-row",
+            "clientes-refresh-overlay",
+        ),
+        "src/views/usuarios/usuarios.template.js": (
+            "usuarios.template.v27.private-admin-visual-parity",
+            'const TABLE_SCALE = "110";',
+            "usuarios-table-loading-row",
+            "usuarios-refresh-overlay",
+        ),
+    }
+    for relative, tokens in template_tokens.items():
+        source = (ROOT / relative).read_text(encoding="utf-8")
+        for token in tokens:
+            if token not in source:
+                errors.append(f"{relative} :: hook presentacional V16 ausente: {token}")
+
+    for relative in (
+        "src/css/views/facturas/index.css",
+        "src/css/views/clientes/index.css",
+        "src/css/views/usuarios/index.css",
+    ):
+        source = (ROOT / relative).read_text(encoding="utf-8")
+        if "@container (max-width: 1180px)" in source or "@container (max-width: 860px)" in source:
+            errors.append(f"{relative} :: breakpoint target divergente prohibido por V16")
+
+
 def validate_paths(errors: list[str]) -> None:
     for root in (SRC, ROOT / ".github"):
         if not root.exists():
@@ -819,6 +910,7 @@ def main() -> int:
     errors: list[str] = []
     validate_cuenta_media_v14_contract(errors)
     validate_sidebar_runtime_v15_contract(errors)
+    validate_private_admin_visual_parity_v16_contract(errors)
     validate_paths(errors)
     validate_js_references(errors)
     validate_first_helpers(errors)

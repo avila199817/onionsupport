@@ -51,8 +51,7 @@ Objetivos:
 }
 
 #clientes-refresh-btn,
-.clientes-hero-actions > [data-clientes-action="refresh"],
-.clientes-refresh-overlay {
+.clientes-hero-actions > [data-clientes-action="refresh"] {
   display: none !important;
 }
 
@@ -1311,12 +1310,12 @@ Objetivos:
   }
 
   .clientes-filters {
-    grid-template-columns: auto auto minmax(200px, 1fr);
+    grid-template-columns: auto auto minmax(240px, 1fr);
     justify-content: stretch;
   }
 }
 
-@container (max-width: 860px) {
+@container (max-width: 820px) {
   .clientes-hero-top {
     grid-template-columns: 1fr;
   }

@@ -1,0 +1,59 @@
+name: Facturas Resend Polish Bootstrap V4
+
+on:
+  push:
+    branches:
+      - fix/facturas-mobile-resend-confirm
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply scoped Facturas polish and normalize EOF
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          source = Path('.github/workflows/facturas-resend-polish-bootstrap-v3.yml').read_text(encoding='utf-8')
+          start_marker = "          python - <<'PY'\n"
+          end_marker = "\n          PY\n\n      - name: Validate focused Facturas change"
+          start = source.index(start_marker) + len(start_marker)
+          end = source.index(end_marker, start)
+          code = textwrap.dedent(source[start:end])
+          exec(compile(code, 'facturas-resend-polish-bootstrap-v4', 'exec'), {'__name__': '__main__'})
+
+          style_path = Path('src/css/views/facturas/index.css')
+          style_path.write_text(style_path.read_text(encoding='utf-8').rstrip() + '\n', encoding='utf-8')
+          PY
+
+      - name: Validate focused Facturas change
+        shell: bash
+        run: |
+          node --check src/views/facturas/index.js
+          python .github/scripts/facturas_continuous_scroll_contract.py
+          python .github/scripts/private_admin_alignment_contract.py
+          python .github/scripts/repo_integrity.py
+          node .github/scripts/continuous_scroll_smoke.mjs
+          git diff --check
+
+      - name: Commit focused Facturas change
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No product changes to commit"
+            exit 0
+          fi
+          git config user.name "Onion Support Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/views/facturas/index.js src/css/views/facturas/index.css .github/scripts/facturas_continuous_scroll_contract.py
+          git commit -m "fix: polish facturas mobile and resend confirm"
+          git push origin HEAD:fix/facturas-mobile-resend-confirm

@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   patch:
-    if: github.event.head_commit.message == 'chore: bootstrap usuarios open-lag fix'
+    if: "${{ github.event.head_commit.message == 'chore: bootstrap usuarios open-lag fix' }}"
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     steps:
@@ -31,7 +31,6 @@ jobs:
           contract = Path('.github/scripts/usuarios_scale_contract.py')
 
           source = index.read_text(encoding='utf-8')
-          checks = []
 
           def replace_once(text, old, new, label):
               count = text.count(old)

@@ -1142,7 +1142,7 @@ export function renderFacturasCreateModal(input = {}) {
             </div>
             <button
               type="button"
-              class="fac-create-close"
+              class="fac-create-close inc-create-close"
               data-factura-create-action="${FACTURA_CREATE_ACTIONS.CLOSE}"
               aria-label="Cerrar"
               ${vm.submitting ? "disabled" : ""}
@@ -1285,7 +1285,7 @@ export function renderFacturasCreateModal(input = {}) {
                 <span class="fac-create-actions-note">La factura se creará con el cliente, las incidencias y todas las partidas seleccionadas.</span>
                 <button
                   type="submit"
-                  class="fac-create-submit"
+                  class="fac-create-submit inc-create-submit"
                   data-factura-create-action="${FACTURA_CREATE_ACTIONS.SUBMIT}"
                   ${disabled ? "disabled" : ""}
                   aria-busy="${vm.submitting ? "true" : "false"}"

@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 APP = (ROOT / "src/css/app.css").read_text(encoding="utf-8")
 COMPOSITION = (ROOT / "src/css/compositions/private-create-modal.css").read_text(encoding="utf-8")
+INTERACTIONS = (ROOT / "src/css/compositions/private-admin-interactions.css").read_text(encoding="utf-8")
 INC = (ROOT / "src/views/incidencias/incidencias.template.create.js").read_text(encoding="utf-8")
 FAC = (ROOT / "src/views/facturas/facturas.template.create.js").read_text(encoding="utf-8")
 CLI = (ROOT / "src/views/clientes/clientes.template.create.js").read_text(encoding="utf-8")
@@ -40,13 +41,19 @@ require(
 require(COMPOSITION, "INCIDENCIAS CREATE AS VISUAL AUTHORITY", "Shared Create composition must name Incidencias as visual authority")
 require(COMPOSITION, "--private-create-panel-width: min(1080px, calc(100vw - 48px));", "Admin Create modals must share the Incidencias 1080px panel geometry")
 require(COMPOSITION, "grid-template-columns: minmax(0, 1fr) auto;", "Create headers must share the Incidencias title + close geometry")
-require(COMPOSITION, "--private-create-primary-bg: #2563eb;", "All Create submits must keep the canonical Incidencias blue")
-require(COMPOSITION, "background: var(--private-create-primary-bg);", "All Create submits must consume the shared blue Create token")
-require(COMPOSITION, "border: 1px solid var(--private-create-primary-border);", "All Create submits must consume the shared blue border token")
-require(COMPOSITION, "background: var(--btn-danger-bg);", "All Create close buttons must consume the danger red token")
-require(COMPOSITION, "background: var(--btn-danger-bg-hover);", "All Create close buttons must keep danger hover semantics")
-require(COMPOSITION, "background: var(--btn-danger-bg-active);", "All Create close buttons must keep danger active semantics")
-require(COMPOSITION, "background: var(--btn-secondary-bg);", "Create secondary controls must keep the shared secondary token")
+require(INTERACTIONS, ".inc-create-submit {", "Incidencias interaction CSS must remain the Create action authority")
+require(INTERACTIONS, "--btn-primary-bg: #1A73E8;", "Incidencias canonical Create blue must remain #1A73E8")
+require(INTERACTIONS, "--btn-primary-bg-hover: #1967D2;", "Incidencias canonical Create hover must remain #1967D2")
+require(INTERACTIONS, "--btn-primary-bg-active: #185ABC;", "Incidencias canonical Create active must remain #185ABC")
+require(INTERACTIONS, "min-inline-size: 190px;", "Incidencias canonical Create submit width must remain authoritative")
+require(INTERACTIONS, "border-radius: 999px;", "Incidencias canonical Create submit pill geometry must remain authoritative")
+require(INTERACTIONS, ".inc-create-close:hover:not(:disabled):not([aria-disabled=\"true\"])", "Incidencias close hover must remain the destructive-state authority")
+require(INTERACTIONS, "background: var(--error-bg);", "Incidencias close hover must use the canonical error background")
+require(INTERACTIONS, "background: var(--error-soft);", "Incidencias close active must use the canonical error soft background")
+require(COMPOSITION, "background: var(--btn-primary-bg);", "Shared Create submit base must consume Incidencias primary variables")
+require(COMPOSITION, "background: var(--btn-secondary-bg);", "Shared Create close rest state must match Incidencias")
+reject(COMPOSITION, "--private-create-primary-bg", "Shared Create composition must not invent a parallel primary palette")
+reject(COMPOSITION, "background: var(--btn-danger-bg);", "Shared Create close must not become solid red at rest; Incidencias is neutral until hover")
 require(COMPOSITION, "@media (max-width: 760px)", "Create composition must preserve the Incidencias tablet breakpoint")
 require(COMPOSITION, "@media (max-width: 480px)", "Create composition must preserve the Incidencias phone breakpoint")
 for loading_class in [
@@ -77,7 +84,8 @@ for snippet, message in [
     ('class="fac-create-form"', "Facturas Create must expose the canonical form class"),
     ('class="fac-create-actions"', "Facturas Create must use the canonical in-body action row"),
     ('class="fac-create-actions-note"', "Facturas Create must expose the canonical action note"),
-    ('class="fac-create-submit"', "Facturas Create must expose one canonical submit"),
+    ('class="fac-create-close inc-create-close"', "Facturas Create must consume the canonical Incidencias close class"),
+    ('class="fac-create-submit inc-create-submit"', "Facturas Create must consume the canonical Incidencias submit class"),
     ('class="fac-create-loading-overlay"', "Facturas Create must expose the canonical full-panel loading overlay"),
     ('LINE_ADD: "create-line-add"', "Facturas Create must preserve multi-line billing"),
     ('data-line-field="concepto"', "Facturas Create must preserve per-line concepts"),

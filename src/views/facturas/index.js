@@ -55,7 +55,7 @@ import {
 } from "./facturas.template.modal.js";
 
 export const FACTURAS_INDEX_VERSION =
-  "facturas.index.productivo.v17.page-safe-continuous-scroll";
+  "facturas.index.productivo.v18.mobile-resend-polish";
 
 export const FACTURAS_VIEW_VERSION = FACTURAS_INDEX_VERSION;
 
@@ -338,6 +338,182 @@ function focusableElements(root = null) {
   } catch {
     return [];
   }
+}
+
+const FACTURAS_RESEND_CONFIRM_ROOT_ID = "facturas-resend-confirm-root";
+let activeResendConfirm = null;
+
+function ensureFacturaResendConfirmRoot() {
+  if (!isBrowser()) return null;
+  let root = document.getElementById(FACTURAS_RESEND_CONFIRM_ROOT_ID);
+  if (!root) {
+    root = document.createElement("div");
+    root.id = FACTURAS_RESEND_CONFIRM_ROOT_ID;
+    root.dataset.facturasResendConfirmRoot = "true";
+    document.body.appendChild(root);
+  }
+  return root;
+}
+
+function confirmFacturaResend({ factura = {}, recipient = "" } = {}) {
+  if (!isBrowser()) return Promise.resolve(true);
+
+  const facturaId = getFacturaId(factura);
+  if (activeResendConfirm) {
+    return activeResendConfirm.facturaId === facturaId
+      ? activeResendConfirm.promise
+      : Promise.resolve(false);
+  }
+
+  const root = ensureFacturaResendConfirmRoot();
+  if (!root) return Promise.resolve(false);
+
+  const opener = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : null;
+
+  const promise = new Promise((resolve) => {
+    root.replaceChildren();
+
+    const overlay = document.createElement("div");
+    overlay.className = "facturas-resend-confirm-overlay";
+    overlay.dataset.facturasResendConfirmOverlay = "true";
+
+    const dialog = document.createElement("section");
+    dialog.className = "facturas-resend-confirm-dialog";
+    dialog.dataset.facturasResendConfirmDialog = "true";
+    dialog.setAttribute("role", "alertdialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "facturas-resend-confirm-title");
+    dialog.setAttribute("aria-describedby", "facturas-resend-confirm-description");
+    dialog.tabIndex = -1;
+
+    const iconBox = document.createElement("div");
+    iconBox.className = "facturas-resend-confirm-icon";
+    iconBox.setAttribute("aria-hidden", "true");
+    const iconMark = document.createElement("span");
+    iconMark.textContent = "↻";
+    iconBox.appendChild(iconMark);
+
+    const copy = document.createElement("div");
+    copy.className = "facturas-resend-confirm-copy";
+
+    const eyebrow = document.createElement("span");
+    eyebrow.className = "facturas-resend-confirm-eyebrow";
+    eyebrow.textContent = "Reenvío de factura";
+
+    const title = document.createElement("h3");
+    title.id = "facturas-resend-confirm-title";
+    title.textContent = "Esta factura ya fue enviada";
+
+    const description = document.createElement("p");
+    description.id = "facturas-resend-confirm-description";
+    description.textContent = recipient
+      ? `Ya existe un envío a ${recipient}. Confirma solo si quieres volver a enviar la misma factura.`
+      : "Ya existe un envío registrado. Confirma solo si quieres volver a enviar la misma factura.";
+
+    const meta = document.createElement("div");
+    meta.className = "facturas-resend-confirm-meta";
+
+    const invoiceChip = document.createElement("span");
+    invoiceChip.textContent = getFacturaLabel(factura) || "Factura";
+    meta.appendChild(invoiceChip);
+
+    if (recipient) {
+      const recipientChip = document.createElement("span");
+      recipientChip.textContent = recipient;
+      meta.appendChild(recipientChip);
+    }
+
+    copy.append(eyebrow, title, description, meta);
+
+    const actions = document.createElement("div");
+    actions.className = "facturas-resend-confirm-actions";
+
+    const cancelButton = document.createElement("button");
+    cancelButton.type = "button";
+    cancelButton.className = "facturas-resend-confirm-btn facturas-resend-confirm-btn--cancel";
+    cancelButton.dataset.facturasResendConfirmAction = "cancel";
+    cancelButton.textContent = "Cancelar";
+
+    const confirmButton = document.createElement("button");
+    confirmButton.type = "button";
+    confirmButton.className = "facturas-resend-confirm-btn facturas-resend-confirm-btn--confirm";
+    confirmButton.dataset.facturasResendConfirmAction = "confirm";
+    confirmButton.textContent = "Reenviar factura";
+
+    actions.append(cancelButton, confirmButton);
+    dialog.append(iconBox, copy, actions);
+    overlay.appendChild(dialog);
+    root.appendChild(overlay);
+    document.body.classList.add("facturas-resend-confirm-open");
+
+    let settled = false;
+
+    const onRouteChange = () => settle(false);
+    const onCancel = () => settle(false);
+    const onConfirm = () => settle(true);
+    const onOverlayClick = (event) => {
+      if (event.target === overlay) settle(false);
+    };
+    const onKeydown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        settle(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusables = focusableElements(dialog);
+      if (!focusables.length) {
+        event.preventDefault();
+        dialog.focus({ preventScroll: true });
+        return;
+      }
+      const firstNode = focusables[0];
+      const lastNode = focusables[focusables.length - 1];
+      if (event.shiftKey && document.activeElement === firstNode) {
+        event.preventDefault();
+        lastNode.focus({ preventScroll: true });
+      } else if (!event.shiftKey && document.activeElement === lastNode) {
+        event.preventDefault();
+        firstNode.focus({ preventScroll: true });
+      }
+    };
+    const cleanup = () => {
+      dialog.removeEventListener("keydown", onKeydown);
+      overlay.removeEventListener("click", onOverlayClick);
+      cancelButton.removeEventListener("click", onCancel);
+      confirmButton.removeEventListener("click", onConfirm);
+      window.removeEventListener("popstate", onRouteChange);
+      window.removeEventListener("hashchange", onRouteChange);
+      window.removeEventListener("pagehide", onRouteChange);
+      root.replaceChildren();
+      document.body.classList.remove("facturas-resend-confirm-open");
+    };
+    function settle(value) {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      activeResendConfirm = null;
+      try { opener?.focus?.({ preventScroll: true }); } catch { /* noop */ }
+      resolve(Boolean(value));
+    }
+
+    dialog.addEventListener("keydown", onKeydown);
+    overlay.addEventListener("click", onOverlayClick);
+    cancelButton.addEventListener("click", onCancel);
+    confirmButton.addEventListener("click", onConfirm);
+    window.addEventListener("popstate", onRouteChange, { once: true });
+    window.addEventListener("hashchange", onRouteChange, { once: true });
+    window.addEventListener("pagehide", onRouteChange, { once: true });
+
+    nextFrame(() => {
+      try { cancelButton.focus({ preventScroll: true }); } catch { /* noop */ }
+    });
+  });
+
+  activeResendConfirm = { facturaId, promise };
+  return promise;
 }
 
 /* =========================================================
@@ -5515,15 +5691,19 @@ function createFacturasController(host = null, context = {}) {
     const alreadySent = isFacturaSent(before || {});
 
     if (alreadySent && confirmResend && isBrowser()) {
+
       const recipient = getFacturaEmail(before || {});
 
-      const question = recipient
-        ? `Esta factura ya fue enviada a ${recipient}. ¿Quieres volver a enviarla?`
-        : "Esta factura ya fue enviada. ¿Quieres volver a enviarla?";
+      const confirmed = await confirmFacturaResend({
 
-      if (!window.confirm(question)) {
-        return false;
-      }
+        factura: before || {},
+
+        recipient,
+
+      });
+
+      if (!confirmed) return false;
+
     }
 
     sendingFacturaId = id;

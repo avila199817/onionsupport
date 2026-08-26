@@ -136,6 +136,17 @@ require(STYLE, ".facturas-empty:focus-visible", "Empty-result focus target must 
 require(STYLE, ".facturas-loading-status:focus-visible", "Loading focus target must remain visibly focused")
 require(STYLE, "outline: 2px solid CanvasText", "Focus fallbacks must remain visible in forced colors")
 
+# Facturas resend UX must stay inside the product visual system, never browser chrome.
+reject(INDEX, "¿Quieres volver a enviarla?", "Resend confirmation must not use the browser-native confirm dialog")
+require(INDEX, "function confirmFacturaResend", "Resend must expose an accessible custom confirmation flow")
+require(INDEX, 'dialog.setAttribute("role", "alertdialog")', "Resend confirmation must be an alertdialog")
+require(INDEX, 'event.key === "Escape"', "Resend confirmation must support Escape cancellation")
+require(INDEX, "focusableElements(dialog)", "Resend confirmation must trap keyboard focus")
+require(STYLE, ".facturas-resend-confirm-overlay", "Resend confirmation must use the Facturas themed overlay")
+require(STYLE, ".facturas-resend-confirm-dialog", "Resend confirmation must use the Facturas themed dialog")
+require(STYLE, '.ui-datalist[data-mobile-datalist-layout="facturas"]', "Mobile Facturas identity must have a dedicated no-clipping contract")
+require(STYLE, "overflow-wrap: anywhere", "Mobile Facturas identity must wrap long values instead of clipping them")
+
 if errors:
     for error in errors:
         print(f"facturas-continuous-scroll-contract: {error}", file=sys.stderr)

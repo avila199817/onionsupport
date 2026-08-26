@@ -1232,3 +1232,242 @@
 }
 
 } /* @layer views */
+
+/* FACTURAS_RESEND_CONFIRM_10_10 */
+@layer views {
+body.facturas-resend-confirm-open {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+#facturas-resend-confirm-root,
+#facturas-resend-confirm-root *,
+#facturas-resend-confirm-root *::before,
+#facturas-resend-confirm-root *::after {
+  box-sizing: border-box;
+}
+
+#facturas-resend-confirm-root:empty { display: none; }
+
+.facturas-resend-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-modal, 1000) + 90);
+  display: grid;
+  place-items: center;
+  padding: clamp(14px, 3vw, 32px);
+  overflow: auto;
+  background: color-mix(in srgb, var(--ui-detail-modal-overlay-bg, #05070a) 82%, transparent);
+  backdrop-filter: blur(9px);
+  -webkit-backdrop-filter: blur(9px);
+}
+
+.facturas-resend-confirm-dialog {
+  inline-size: min(520px, 100%);
+  min-inline-size: 0;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  border: 1px solid var(--border-warning);
+  border-radius: var(--card-radius);
+  background: var(--card-bg);
+  color: var(--text);
+  box-shadow: var(--shadow-xl);
+  outline: none;
+}
+
+.facturas-resend-confirm-dialog:focus-visible {
+  box-shadow: var(--shadow-xl), var(--focus-ring);
+}
+
+.facturas-resend-confirm-icon {
+  inline-size: 44px;
+  block-size: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-warning);
+  border-radius: var(--radius-sm);
+  background: var(--warning-bg);
+  color: var(--warning-strong, var(--warning));
+  font-size: 24px;
+  font-weight: var(--weight-black);
+  line-height: 1;
+}
+
+.facturas-resend-confirm-copy {
+  min-inline-size: 0;
+  display: grid;
+  gap: 7px;
+}
+
+.facturas-resend-confirm-eyebrow {
+  color: var(--warning-strong, var(--warning));
+  font-size: var(--font-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+
+.facturas-resend-confirm-copy h3 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: var(--font-xl);
+  font-weight: var(--weight-black);
+  line-height: 1.15;
+  text-wrap: balance;
+}
+
+.facturas-resend-confirm-copy p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.facturas-resend-confirm-meta {
+  min-inline-size: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-block-start: 2px;
+}
+
+.facturas-resend-confirm-meta > span {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--badge-border);
+  border-radius: var(--radius-pill);
+  background: var(--badge-bg);
+  color: var(--badge-text);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.facturas-resend-confirm-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.facturas-resend-confirm-btn {
+  appearance: none;
+  min-block-size: var(--btn-height-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding-inline: 13px;
+  border: 1px solid var(--btn-secondary-border);
+  border-radius: var(--btn-radius);
+  background: var(--btn-secondary-bg);
+  color: var(--btn-secondary-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-xs);
+  font-weight: var(--weight-bold);
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+
+.facturas-resend-confirm-btn--cancel:hover:not(:disabled) {
+  background: var(--btn-secondary-bg-hover);
+  border-color: var(--border-strong);
+  color: var(--text-strong);
+}
+
+.facturas-resend-confirm-btn--confirm {
+  border-color: var(--border-warning);
+  background: var(--warning-bg);
+  color: var(--warning-strong, var(--warning));
+}
+
+.facturas-resend-confirm-btn--confirm:hover:not(:disabled) {
+  background: var(--warning-soft, var(--warning-bg));
+  color: var(--text-strong);
+  transform: translateY(-1px);
+}
+
+.facturas-resend-confirm-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+@media (max-width: 680px) {
+  .ui-datalist[data-mobile-datalist-layout="facturas"] .facturas-main {
+    align-items: start;
+  }
+
+  .ui-datalist[data-mobile-datalist-layout="facturas"] .facturas-main-copy,
+  .ui-datalist[data-mobile-datalist-layout="facturas"] .facturas-factura-line {
+    inline-size: 100%;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+  }
+
+  .ui-datalist[data-mobile-datalist-layout="facturas"] :is(
+    .facturas-factura-id,
+    .facturas-system-id,
+    .facturas-factura-client,
+    .facturas-factura-contact,
+    .facturas-factura-email
+  ) {
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
+
+  .ui-datalist[data-mobile-datalist-layout="facturas"] .facturas-factura-client {
+    line-height: 1.3;
+  }
+}
+
+@media (max-width: 560px) {
+  .facturas-resend-confirm-dialog {
+    grid-template-columns: 40px minmax(0, 1fr);
+    gap: var(--space-sm);
+    padding: var(--space-md);
+  }
+
+  .facturas-resend-confirm-icon {
+    inline-size: 40px;
+    block-size: 40px;
+    font-size: 21px;
+  }
+
+  .facturas-resend-confirm-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .facturas-resend-confirm-btn { inline-size: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .facturas-resend-confirm-btn { transition: none; }
+}
+
+@media (forced-colors: active) {
+  .facturas-resend-confirm-dialog,
+  .facturas-resend-confirm-icon,
+  .facturas-resend-confirm-btn,
+  .facturas-resend-confirm-meta > span {
+    border-color: CanvasText;
+    forced-color-adjust: auto;
+  }
+}
+}

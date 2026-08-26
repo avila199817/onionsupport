@@ -18,7 +18,7 @@
 import Http from "../../core/http.js";
 
 export const FACTURAS_API_VERSION =
-  "facturas.api.production.v7.paid-finalization-timeout";
+  "facturas.api.production.v9.continuous-list-snapshot";
 
 /* =========================================================
    ENDPOINTS / TIMEOUTS
@@ -62,7 +62,12 @@ let lastStats = null;
 let lastList = {
   items: [],
   total: 0,
-  queryKey: ""
+  totalKnown: false,
+  queryKey: "",
+  contextKey: "",
+  page: 0,
+  nextPage: null,
+  hasMore: false
 };
 
 const inflight = new Map();
@@ -172,6 +177,16 @@ function normalizeKey(value = "") {
     .replace(/[\s-]+/g, "_")
     .replace(/[^\w:.]/g, "")
     .replace(/^_+|_+$/g, "");
+}
+
+function parseBooleanFlag(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+
+  const key = normalizeKey(value);
+  if (["true", "1", "yes", "si", "on"].includes(key)) return true;
+  if (["false", "0", "no", "off", "none", "null"].includes(key)) return false;
+  return fallback;
 }
 
 function redact(value = "") {
@@ -445,6 +460,20 @@ function buildListQuery({
   return query;
 }
 
+function listContextFromQuery(query = {}) {
+  const context = { ...safeObject(query) };
+  delete context.page;
+  delete context.offset;
+  delete context.includeStats;
+  delete context.includeStatsAll;
+  return context;
+}
+
+export function getFacturasListContextKey(options = {}) {
+  const query = buildListQuery(options);
+  return `facturas-list-context:${stableStringify(listContextFromQuery(query))}`;
+}
+
 export function buildFacturasListEndpoint(options = {}) {
   const params = new URLSearchParams();
   const query = buildListQuery(options);
@@ -497,7 +526,10 @@ function unwrapEnvelope(payload = null, depth = 0) {
 function listFromPayload(payload = null) {
   if (Array.isArray(payload)) return payload;
 
-  const object = safeObject(unwrapEnvelope(payload), {});
+  const unwrapped = unwrapEnvelope(payload);
+  if (Array.isArray(unwrapped)) return unwrapped;
+
+  const object = safeObject(unwrapped, {});
 
   for (const key of ["facturas", "items", "rows", "records", "results", "docs", "documents", "value", "list", "invoices", "data"]) {
     if (Array.isArray(object[key])) return object[key];
@@ -513,10 +545,31 @@ function metaFromPayload(payload = null) {
   return safeObject(first(object.meta, object.paging, object.pagination, object.page, original.meta, original.paging, original.pagination, original.page, {}));
 }
 
+function pagingMetadataFromPayload(payload = null) {
+  const envelope = safeObject(unwrapEnvelope(payload), {});
+  const original = safeObject(payload, {});
+  const paging = {};
+
+  for (const candidate of [
+    original.meta,
+    original.page,
+    original.pagination,
+    original.paging,
+    envelope.meta,
+    envelope.page,
+    envelope.pagination,
+    envelope.paging,
+  ]) {
+    if (isObject(candidate)) Object.assign(paging, candidate);
+  }
+
+  return paging;
+}
+
 function totalFromPayload(payload = null, fallback = 0) {
   const object = safeObject(payload, {});
   const envelope = safeObject(unwrapEnvelope(payload), {});
-  const paging = safeObject(first(envelope.paging, envelope.pagination, envelope.page, object.paging, object.pagination, object.page, {}));
+  const paging = pagingMetadataFromPayload(payload);
 
   return Math.max(
     fallback,
@@ -544,10 +597,35 @@ function totalFromPayload(payload = null, fallback = 0) {
   );
 }
 
+function hasExplicitTotal(payload = null) {
+  const object = safeObject(payload, {});
+  const envelope = safeObject(unwrapEnvelope(payload), {});
+  const paging = pagingMetadataFromPayload(payload);
+
+  return [
+    envelope.total,
+    envelope.totalMatched,
+    envelope.remoteCount,
+    envelope.totalCount,
+    envelope.meta?.total,
+    envelope.meta?.totalCount,
+    paging.total,
+    paging.remoteCount,
+    paging.totalCount,
+    object.total,
+    object.totalMatched,
+    object.remoteCount,
+    object.totalCount,
+  ].some((value) => {
+    if (value === undefined || value === null || value === "") return false;
+    const parsed = number(value, Number.NaN);
+    return Number.isFinite(parsed) && parsed >= 0;
+  });
+}
+
 function pagingFromPayload(payload = null, requestMeta = {}, itemsCount = 0) {
   const envelope = safeObject(unwrapEnvelope(payload), {});
-  const original = safeObject(payload, {});
-  const paging = safeObject(first(envelope.paging, original.paging, envelope.pagination, original.pagination, envelope.page, original.page, {}));
+  const paging = pagingMetadataFromPayload(payload);
 
   const page = number(first(envelope.page, paging.page, paging.currentPage, requestMeta.page, FACTURAS_DEFAULT_PAGE), FACTURAS_DEFAULT_PAGE);
   const limit = number(first(envelope.limit, paging.limit, paging.pageSize, requestMeta.limit, itemsCount || FACTURAS_DEFAULT_LIMIT), itemsCount || FACTURAS_DEFAULT_LIMIT);
@@ -562,11 +640,14 @@ function pagingFromPayload(payload = null, requestMeta = {}, itemsCount = 0) {
     page,
     nextPage: nextPage === null || nextPage === undefined || nextPage === "" ? null : number(nextPage, null),
     totalPages,
-    hasMore: hasMore === null ? itemsCount < total : Boolean(hasMore),
+    hasMore: hasMore === null
+      ? itemsCount < total
+      : parseBooleanFlag(hasMore, itemsCount < total),
     offset,
     limit,
     returned: number(first(envelope.count, paging.returned, itemsCount), itemsCount),
     total,
+    totalKnown: hasExplicitTotal(payload),
     remoteCount: total,
     fetchLimit: number(first(envelope.fetchLimit, paging.fetchLimit, limit), limit),
     mode: cleanText(first(envelope.queryMode, paging.mode, paging.queryMode, ""), "")
@@ -963,6 +1044,7 @@ export function normalizeFacturasListResponse(payload = null, requestMeta = {}) 
     invoices: items,
     count: items.length,
     total,
+    totalKnown: paging.totalKnown,
     remoteCount: total,
     totalMatched: total,
     page: paging.page,
@@ -981,6 +1063,7 @@ export function normalizeFacturasListResponse(payload = null, requestMeta = {}) 
     meta: {
       ...meta,
       total,
+      totalKnown: paging.totalKnown,
       count: items.length,
       remoteCount: total,
       totalMatched: total,
@@ -1241,6 +1324,7 @@ export async function fetchFacturasRequest(options = {}) {
 export async function listFacturas(options = {}) {
   const query = buildListQuery(options);
   const queryKey = `list:${stableStringify(query)}`;
+  const contextKey = getFacturasListContextKey(options);
   const canDedupe = options.dedupe !== false && !options.signal;
 
   if (canDedupe && inflight.has(queryKey)) return inflight.get(queryKey);
@@ -1259,12 +1343,24 @@ export async function listFacturas(options = {}) {
 
       const normalized = normalizeFacturasListResponse(response, { ...options, ...query });
       const cacheAppend = options.cacheAppend === true || options.appendToCache === true;
-      const cachedItems = cacheAppend ? mergeById([...lastList.items, ...normalized.items]) : normalized.items;
+      const sameContext = Boolean(
+        contextKey &&
+        lastList.contextKey &&
+        lastList.contextKey === contextKey
+      );
+      const cachedItems = cacheAppend && sameContext
+        ? mergeById([...lastList.items, ...normalized.items])
+        : normalized.items;
 
       lastList = {
         items: cachedItems,
         total: normalized.total,
-        queryKey
+        totalKnown: normalized.totalKnown === true,
+        queryKey,
+        contextKey,
+        page: normalized.page,
+        nextPage: normalized.nextPage,
+        hasMore: normalized.hasMore === true
       };
 
       if (normalized.stats && Object.keys(normalized.stats).length) lastStats = normalized.stats;
@@ -1274,7 +1370,11 @@ export async function listFacturas(options = {}) {
     } catch (error) {
       lastError = normalizeError(error);
 
-      if (options.returnStaleOnError !== false && lastList.items.length) {
+      if (
+        options.returnStaleOnError !== false &&
+        lastList.items.length &&
+        lastList.queryKey === queryKey
+      ) {
         return {
           ok: false,
           success: false,
@@ -1284,7 +1384,13 @@ export async function listFacturas(options = {}) {
           data: lastList.items,
           invoices: lastList.items,
           total: lastList.total,
+          totalKnown: lastList.totalKnown === true,
           count: lastList.items.length,
+          queryKey: lastList.queryKey,
+          contextKey: lastList.contextKey,
+          page: lastList.page,
+          nextPage: lastList.nextPage,
+          hasMore: lastList.hasMore === true,
           error: lastError
         };
       }
@@ -1372,14 +1478,7 @@ export async function createFacturaRequest(payload = {}, options = {}) {
 
 export async function createFactura(payload = {}, options = {}) {
   const response = await createFacturaRequest(payload, options);
-  const created = response.item;
-
-  if (created) {
-    const nextItems = mergeById([created, ...lastList.items]);
-    lastList = { ...lastList, items: nextItems, total: Math.max(number(lastList.total, 0) + 1, nextItems.length) };
-  }
-
-  return created;
+  return response.item;
 }
 
 export async function updateFacturaRequest(id = "", payload = {}, options = {}) {
@@ -1725,14 +1824,59 @@ export function hydrateFacturasFromCache() {
   return {
     items: safeArray(lastList.items),
     total: number(lastList.total, safeArray(lastList.items).length),
+    totalKnown: lastList.totalKnown === true,
+    queryKey: cleanText(lastList.queryKey, ""),
+    contextKey: cleanText(lastList.contextKey, ""),
+    page: number(lastList.page, 0),
+    nextPage: number(lastList.nextPage, null),
+    hasMore: lastList.hasMore === true,
     stats: lastStats || computeFacturasStats(lastList.items),
     loadedAt: lastLoadedAt,
     hydrated: safeArray(lastList.items).length > 0
   };
 }
 
+export function syncFacturasListCache(snapshot = {}) {
+  const source = safeObject(snapshot, {});
+  const contextKey = cleanText(source.contextKey, "");
+  if (!contextKey) return hydrateFacturasFromCache();
+
+  const items = mergeById(source.items);
+  const hasMore = source.hasMore === true;
+  const rawNextPage = source.nextPage;
+  const nextPage = hasMore && rawNextPage !== null && rawNextPage !== undefined && rawNextPage !== ""
+    ? Math.max(FACTURAS_DEFAULT_PAGE + 1, number(rawNextPage, FACTURAS_DEFAULT_PAGE + 1))
+    : null;
+  const sameContext = lastList.contextKey === contextKey;
+
+  lastList = {
+    items,
+    total: Math.max(items.length, number(source.total, items.length)),
+    totalKnown: source.totalKnown === true,
+    queryKey: sameContext ? cleanText(lastList.queryKey, "") : "",
+    contextKey,
+    page: Math.max(
+      FACTURAS_DEFAULT_PAGE,
+      number(source.page, FACTURAS_DEFAULT_PAGE)
+    ),
+    nextPage,
+    hasMore: hasMore && nextPage !== null,
+  };
+
+  return hydrateFacturasFromCache();
+}
+
 export function clearFacturasCache() {
-  lastList = { items: [], total: 0, queryKey: "" };
+  lastList = {
+    items: [],
+    total: 0,
+    totalKnown: false,
+    queryKey: "",
+    contextKey: "",
+    page: 0,
+    nextPage: null,
+    hasMore: false
+  };
   lastStats = null;
   lastLoadedAt = null;
   lastError = null;
@@ -1750,8 +1894,13 @@ export function getFacturasApiSnapshot() {
     cache: {
       items: lastList.items.length,
       total: lastList.total,
+      totalKnown: lastList.totalKnown === true,
       hydrated: lastList.items.length > 0,
-      queryKey: lastList.queryKey
+      queryKey: lastList.queryKey,
+      contextKey: lastList.contextKey,
+      page: lastList.page,
+      nextPage: lastList.nextPage,
+      hasMore: lastList.hasMore === true
     },
     inflight: inflight.size,
     stats: lastStats || computeFacturasStats(lastList.items),
@@ -1889,6 +2038,8 @@ export const FacturasApi = Object.freeze({
   computeFacturasStats,
 
   hydrateFacturasFromCache,
+  syncFacturasListCache,
+  getFacturasListContextKey,
   clearFacturasCache,
 
   getFacturasApiSnapshot,

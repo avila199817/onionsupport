@@ -53,6 +53,7 @@ import {
   renderIncidenciasTemplate,
   renderIncidenciasLoadingState,
   renderIncidenciasErrorState,
+  getIncidenciasTemplateSnapshot,
   INCIDENCIAS_ACTIONS,
 } from "./incidencias.template.js";
 
@@ -77,7 +78,7 @@ import {
 } from "./incidencias.options.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.extreme.v35.cursor-production";
+  "incidencias.index.extreme.v37-continuous-scroll";
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
@@ -92,6 +93,7 @@ const USER_SEARCH_LIMIT = 8;
 const USER_SEARCH_DEBOUNCE_MS = 220;
 const LIST_SEARCH_MIN_LENGTH = 3;
 const LIST_SEARCH_DEBOUNCE_MS = 350;
+const INFINITE_ROOT_MARGIN = "900px 0px 900px 0px";
 
 const ROUTER_EVENT_HANDLED_KEY =
   "__onionRouterHandled";
@@ -1149,10 +1151,14 @@ function createIncidenciasController(
   let nextCursor = "";
   let serverSearch = "";
   let listSearchTimer = 0;
+  let listSearchComposing = false;
   let listSearchSeq = 0;
   let loadMoreSeq = 0;
   let pageController = null;
   let loadingMore = false;
+  let incrementalError = "";
+  let listQueryPending = false;
+  const seenCursors = new Set();
 
   let error = "";
   let filter = "all";
@@ -1166,9 +1172,16 @@ function createIncidenciasController(
   let visibleLimit =
     DEFAULT_VISIBLE_LIMIT;
 
+  let itemsContextKey =
+    getListServerContextKey(
+      filter,
+      serverSearch
+    );
+
   let openingTicketId = "";
 
   let renderFrame = 0;
+  let infiniteObserver = null;
   let modalFrame = 0;
   let modalHost = null;
   let modalHostBound = false;
@@ -1515,7 +1528,42 @@ function createIncidenciasController(
      PAYLOADS
   ======================================================= */
 
+  function currentListSnapshot() {
+    return getIncidenciasTemplateSnapshot({
+      canonical: true,
+      items,
+      total,
+      filter,
+      search,
+      sortOrder,
+      sortMode,
+      visibleLimit,
+      nextCursor,
+      hasMore: Boolean(nextCursor),
+    });
+  }
+
+  function hasIncrementalContent() {
+    const list = currentListSnapshot();
+
+    return Boolean(
+      list.filteredTotal > list.visibleCount ||
+      (list.filteredTotal > 0 && nextCursor)
+    );
+  }
+
+  function isListSortLocked() {
+    return Boolean(
+      nextCursor ||
+      listQueryPending ||
+      listSearchTimer ||
+      listSearchComposing
+    );
+  }
+
   function payload(extra = {}) {
+    const list = currentListSnapshot();
+
     return {
       user:
         getCurrentUser(),
@@ -1539,7 +1587,17 @@ function createIncidenciasController(
       refreshing,
       creating,
       loadingMore,
+      incrementalError,
+      listQueryPending,
+      sortLocked:
+        isListSortLocked(),
       error,
+
+      nextCursor,
+      hasMore: Boolean(
+        list.filteredTotal > list.visibleCount ||
+        (list.filteredTotal > 0 && nextCursor)
+      ),
 
       filter,
       search,
@@ -2205,7 +2263,331 @@ function createIncidenciasController(
     return true;
   }
 
-  function patchListDom(html = "") {
+  function listTicketIdForNode(
+    node = null
+  ) {
+    const ticketNode =
+      node?.closest?.(
+        "[data-ticket-id], [data-incidencia-id]"
+      ) ||
+      null;
+
+    return cleanText(
+      first(
+        ticketNode?.dataset?.ticketId,
+        ticketNode?.dataset?.incidenciaId
+      ),
+      ""
+    );
+  }
+
+  function captureListFocus(
+    currentRoot = null
+  ) {
+    if (!isBrowser() || !currentRoot) {
+      return null;
+    }
+
+    const active =
+      document.activeElement;
+
+    if (
+      !active ||
+      !currentRoot.contains(active)
+    ) {
+      return null;
+    }
+
+    const actionNode =
+      active.closest?.(
+        "[data-incidencias-action]"
+      ) ||
+      null;
+
+    const scopeDefinitions = [
+      [
+        "stats",
+        ".incidencias-stats",
+      ],
+      [
+        "filters",
+        ".incidencias-filter-pills",
+      ],
+      [
+        "sort",
+        ".incidencias-sort-pills",
+      ],
+      [
+        "table",
+        "[data-incidencias-table-wrap='true']",
+      ],
+    ];
+
+    const scopeEntry =
+      scopeDefinitions.find(
+        ([, selector]) =>
+          active.closest?.(selector)
+      ) ||
+      ["root", "[data-incidencias-scope='true']"];
+
+    const scope = scopeEntry[0];
+    const scopeNode =
+      scope === "root"
+        ? currentRoot
+        : active.closest?.(
+            scopeEntry[1]
+          );
+    const scopeActions =
+      Array.from(
+        scopeNode?.querySelectorAll?.(
+          "[data-incidencias-action]"
+        ) ||
+        []
+      );
+
+    return {
+      ticketId:
+        listTicketIdForNode(active),
+      action:
+        cleanText(
+          actionNode?.dataset
+            ?.incidenciasAction,
+          ""
+        ),
+      filter:
+        cleanText(
+          actionNode?.dataset?.filter,
+          ""
+        ),
+      sortMode:
+        cleanText(
+          actionNode?.dataset?.sortMode,
+          ""
+        ),
+      stat:
+        cleanText(
+          actionNode?.dataset?.stat,
+          ""
+        ),
+      scope,
+      index:
+        actionNode
+          ? scopeActions.indexOf(
+              actionNode
+            )
+          : -1,
+    };
+  }
+
+  function restoreListFocus(
+    currentRoot = null,
+    snapshot = null
+  ) {
+    if (
+      !isBrowser() ||
+      !currentRoot ||
+      !snapshot
+    ) {
+      return false;
+    }
+
+    const ticketId =
+      cleanText(
+        snapshot.ticketId,
+        ""
+      );
+    const action =
+      cleanText(
+        snapshot.action,
+        ""
+      );
+    const filterKey =
+      cleanText(
+        snapshot.filter,
+        ""
+      );
+    const sortMode =
+      cleanText(
+        snapshot.sortMode,
+        ""
+      );
+    const stat =
+      cleanText(
+        snapshot.stat,
+        ""
+      );
+    const scope =
+      cleanText(
+        snapshot.scope,
+        "root"
+      );
+    const index =
+      Number.isInteger(
+        snapshot.index
+      )
+        ? snapshot.index
+        : -1;
+    const scopeSelectors = {
+      stats: ".incidencias-stats",
+      filters: ".incidencias-filter-pills",
+      sort: ".incidencias-sort-pills",
+      table:
+        "[data-incidencias-table-wrap='true']",
+      root:
+        "[data-incidencias-scope='true']",
+    };
+    const scopeRoot =
+      scope === "root"
+        ? currentRoot
+        : currentRoot.querySelector(
+            scopeSelectors[scope] ||
+              scopeSelectors.root
+          );
+    const actionNodes =
+      Array.from(
+        scopeRoot?.querySelectorAll?.(
+          "[data-incidencias-action]"
+        ) ||
+        []
+      );
+    let target = null;
+
+    if (action) {
+      target =
+        actionNodes.find(
+          (node) => {
+            if (
+              cleanText(
+                node.dataset
+                  ?.incidenciasAction,
+                ""
+              ) !== action
+            ) {
+              return false;
+            }
+
+            if (
+              ticketId &&
+              listTicketIdForNode(node) !==
+                ticketId
+            ) {
+              return false;
+            }
+
+            if (
+              filterKey &&
+              cleanText(
+                node.dataset?.filter,
+                ""
+              ) !== filterKey
+            ) {
+              return false;
+            }
+
+            if (
+              sortMode &&
+              cleanText(
+                node.dataset?.sortMode,
+                ""
+              ) !== sortMode
+            ) {
+              return false;
+            }
+
+            if (
+              stat &&
+              cleanText(
+                node.dataset?.stat,
+                ""
+              ) !== stat
+            ) {
+              return false;
+            }
+
+            return true;
+          }
+        ) ||
+        null;
+    }
+
+    if (!target && ticketId) {
+      target =
+        Array.from(
+          currentRoot.querySelectorAll(
+            "[data-ticket-id], [data-incidencia-id]"
+          )
+        ).find(
+          (node) =>
+            listTicketIdForNode(node) ===
+              ticketId
+        ) ||
+        null;
+    }
+
+    if (
+      !target &&
+      index >= 0
+    ) {
+      const indexedTarget =
+        actionNodes[index] ||
+        null;
+
+      if (
+        indexedTarget &&
+        (!action ||
+          cleanText(
+            indexedTarget.dataset
+              ?.incidenciasAction,
+            ""
+          ) === action)
+      ) {
+        target = indexedTarget;
+      }
+    }
+
+    if (!target && action) {
+      target =
+        actionNodes.find(
+          (node) =>
+            cleanText(
+              node.dataset
+                ?.incidenciasAction,
+              ""
+            ) === action
+        ) ||
+        null;
+    }
+
+    if (!target) {
+      target =
+        currentRoot.querySelector(
+          "[data-incidencias-focus-fallback='true']"
+        );
+    }
+
+    if (!target?.focus) {
+      return false;
+    }
+
+    try {
+      target.focus({
+        preventScroll: true,
+      });
+    } catch {
+      try {
+        target.focus();
+      } catch {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  function patchListDom(
+    html = "",
+    options = {}
+  ) {
     if (!html || !host?.isConnected) return false;
 
     const currentRoot = host.querySelector("[data-incidencias-scope='true']");
@@ -2213,6 +2595,12 @@ function createIncidenciasController(
     if (!currentRoot || !nextRoot) return false;
 
     try {
+      const focusSnapshot =
+        options.focusSnapshot ||
+        captureListFocus(
+          currentRoot
+        );
+
       syncAttributes(currentRoot, nextRoot);
       syncListSearch(currentRoot, nextRoot);
 
@@ -2226,6 +2614,11 @@ function createIncidenciasController(
       ]) {
         if (!replacePart(currentRoot, nextRoot, selector, { preserveFocus: false })) return false;
       }
+
+      restoreListFocus(
+        currentRoot,
+        focusSnapshot
+      );
 
       return true;
     } catch {
@@ -3039,15 +3432,173 @@ function createIncidenciasController(
     return true;
   }
 
+  function disconnectInfiniteObserver() {
+    const observer =
+      infiniteObserver;
+
+    if (!observer) {
+      return false;
+    }
+
+    infiniteObserver = null;
+
+    try {
+      observer.takeRecords?.();
+    } catch {
+      // noop
+    }
+
+    try {
+      observer.disconnect();
+    } catch {
+      // El observer ya puede haber sido liberado por el navegador.
+    }
+
+    return true;
+  }
+
+  function getInfiniteScrollRoot() {
+    if (!isBrowser()) {
+      return null;
+    }
+
+    const main =
+      document.getElementById("main-content") ||
+      document.querySelector(".main-content") ||
+      document.querySelector("[data-main-content='true']");
+
+    return main?.contains?.(host)
+      ? main
+      : null;
+  }
+
+  function syncInfiniteObserver() {
+    disconnectInfiniteObserver();
+
+    if (
+      !isBrowser() ||
+      destroyed ||
+      !mounted ||
+      !host ||
+      loading ||
+      refreshing ||
+      loadingMore ||
+      autoRefreshRunning ||
+      creating ||
+      createModal.open ||
+      detailModal.open ||
+      openingTicketId ||
+      listSearchTimer ||
+      listSearchComposing ||
+      listQueryPending ||
+      incrementalError ||
+      !hasIncrementalContent() ||
+      typeof window.IntersectionObserver !== "function"
+    ) {
+      return false;
+    }
+
+    const sentinel = host.querySelector(
+      "[data-incidencias-infinite-sentinel='true']"
+    );
+
+    if (!sentinel) {
+      return false;
+    }
+
+    try {
+      const observer = new window.IntersectionObserver(
+        (entries) => {
+          if (infiniteObserver !== observer) {
+            try {
+              observer.takeRecords?.();
+              observer.disconnect();
+            } catch {
+              // noop
+            }
+            return;
+          }
+
+          if (
+            destroyed ||
+            !mounted ||
+            loading ||
+            refreshing ||
+            loadingMore ||
+            autoRefreshRunning ||
+            creating ||
+            createModal.open ||
+            detailModal.open ||
+            openingTicketId ||
+            listSearchTimer ||
+            listSearchComposing ||
+            listQueryPending ||
+            incrementalError ||
+            !hasIncrementalContent()
+          ) {
+            disconnectInfiniteObserver();
+            return;
+          }
+
+          if (entries.some((entry) => entry.isIntersecting)) {
+            try {
+              observer.takeRecords?.();
+            } catch {
+              // noop
+            }
+            disconnectInfiniteObserver();
+            void loadMore();
+          }
+        },
+        {
+          root: getInfiniteScrollRoot(),
+          rootMargin: INFINITE_ROOT_MARGIN,
+          threshold: 0.01,
+        }
+      );
+
+      infiniteObserver = observer;
+      observer.observe(sentinel);
+      return true;
+    } catch {
+      disconnectInfiniteObserver();
+      return false;
+    }
+  }
+
   function renderNow(options = {}) {
     if (destroyed || !host) return false;
 
+    disconnectInfiniteObserver();
     cancelScheduledRender();
+    const currentRoot =
+      host.querySelector(
+        "[data-incidencias-scope='true']"
+      );
+    const focusSnapshot =
+      options.focusSnapshot ||
+      captureListFocus(
+        currentRoot
+      );
     const html = renderIncidenciasTemplate(viewPayload());
-    const patched = options.listPatch === true && patchListDom(html);
-    if (!patched) host.innerHTML = html;
+    const patched =
+      options.listPatch === true &&
+      patchListDom(
+        html,
+        { focusSnapshot }
+      );
+    if (!patched) {
+      host.innerHTML = html;
+      restoreListFocus(
+        host.querySelector(
+          "[data-incidencias-scope='true']"
+        ),
+        focusSnapshot
+      );
+    }
 
     if (!options.skipModals) renderModalsNow();
+    syncInfiniteObserver();
     return true;
   }
 
@@ -3073,15 +3624,33 @@ function createIncidenciasController(
     return true;
   }
 
-  function renderLoading() {
+  function renderLoading(
+    options = {}
+  ) {
     if (!host) {
       return false;
     }
 
+    disconnectInfiniteObserver();
+    cancelScheduledRender();
+    const focusSnapshot =
+      options.focusSnapshot ||
+      captureListFocus(
+        host.querySelector(
+          "[data-incidencias-scope='true']"
+        )
+      );
     host.innerHTML =
       renderIncidenciasLoadingState(
         payload()
       );
+
+    restoreListFocus(
+      host.querySelector(
+        "[data-incidencias-scope='true']"
+      ),
+      focusSnapshot
+    );
 
     renderModalsNow();
 
@@ -3089,16 +3658,56 @@ function createIncidenciasController(
   }
 
   function renderError(
-    message = ""
+    message = "",
+    options = {}
   ) {
     if (!host) {
       return false;
     }
 
+    disconnectInfiniteObserver();
+    cancelScheduledRender();
+    const focusSnapshot =
+      options.focusSnapshot ||
+      captureListFocus(
+        host.querySelector(
+          "[data-incidencias-scope='true']"
+        )
+      );
     host.innerHTML =
       renderIncidenciasErrorState(
         message
       );
+
+    const activeAfterError =
+      isBrowser()
+        ? document.activeElement
+        : null;
+    const shouldFocusFatalError =
+      isBrowser() &&
+      (
+        !activeAfterError ||
+        activeAfterError ===
+          document.body ||
+        host.contains(
+          activeAfterError
+        )
+      );
+    const fatalFocusSnapshot =
+      focusSnapshot ||
+      (shouldFocusFatalError
+        ? {
+            scope: "root",
+            index: -1,
+          }
+        : null);
+
+    restoreListFocus(
+      host.querySelector(
+        "[data-incidencias-scope='true']"
+      ),
+      fatalFocusSnapshot
+    );
 
     renderModalsNow();
 
@@ -3139,13 +3748,99 @@ function clearListSearchTimer() {
   return true;
 }
 
+function cancelIncrementalRequest(
+  reason = "incidencias-list-context-changed"
+) {
+  loadMoreSeq += 1;
+  disconnectInfiniteObserver();
+
+  try {
+    pageController?.abort?.(reason);
+  } catch {
+    try {
+      pageController?.abort?.();
+    } catch {
+      // noop
+    }
+  }
+
+  pageController = null;
+  loadingMore = false;
+  return true;
+}
+
+function resetCursorHistory(
+  cursor = ""
+) {
+  seenCursors.clear();
+
+  const normalized =
+    cleanText(cursor, "");
+
+  if (normalized) {
+    seenCursors.add(normalized);
+  }
+
+  return true;
+}
+
+function countNewTicketIds(
+  incomingItems = []
+) {
+  const currentIds =
+    new Set(
+      safeArray(items)
+        .map(getTicketId)
+        .filter(Boolean)
+    );
+
+  return new Set(
+    safeArray(incomingItems)
+      .map(getTicketId)
+      .filter(
+        (id) =>
+          id &&
+          !currentIds.has(id)
+      )
+  ).size;
+}
+
 async function load(options = {}) {
     const seq = ++loadSeq;
     const silent = options.silent === true;
     const force = options.force === true;
     const background = options.background === true;
-    const hasItems = items.length > 0;
+    const requestContextKey =
+      getListServerContextKey();
+    const sameContext =
+      requestContextKey ===
+      itemsContextKey;
+    const requestFocusSnapshot =
+      options.focusSnapshot ||
+      captureListFocus(
+        host?.querySelector?.(
+          "[data-incidencias-scope='true']"
+        )
+      );
 
+    if (!sameContext) {
+      items = [];
+      total = 0;
+      nextCursor = "";
+      visibleLimit =
+        DEFAULT_VISIBLE_LIMIT;
+      itemsContextKey =
+        requestContextKey;
+      resetCursorHistory();
+    }
+
+    const hasItems = items.length > 0;
+    const queryWasPending =
+      listQueryPending;
+
+    cancelIncrementalRequest("incidencias-first-page-requested");
+    listQueryPending = true;
+    incrementalError = "";
     error = "";
 
     if (!silent) {
@@ -3153,10 +3848,36 @@ async function load(options = {}) {
       refreshing = force && hasItems;
 
       if (loading) {
-        renderLoading();
+        renderLoading({
+          focusSnapshot:
+            requestFocusSnapshot,
+        });
       } else {
-        render();
+        render({
+          focusSnapshot:
+            requestFocusSnapshot,
+        });
       }
+    } else if (!sameContext) {
+      loading = true;
+      refreshing = false;
+      render({
+        immediate: true,
+        listPatch: true,
+        skipModals: background,
+        focusSnapshot:
+          requestFocusSnapshot,
+      });
+    } else if (
+      !queryWasPending &&
+      hasItems
+    ) {
+      render({
+        listPatch: true,
+        skipModals: background,
+        focusSnapshot:
+          requestFocusSnapshot,
+      });
     }
 
     loadController?.abort?.();
@@ -3168,31 +3889,66 @@ async function load(options = {}) {
     try {
       const response = await loadIncidenciasPage({
         signal: requestController?.signal,
-        query: {
-          pageMode: "cursor",
-          limit: INCIDENCIAS_LIST_LIMIT,
-          ...(serverSearch ? { q: serverSearch } : {}),
-        },
+        query: getListPageQuery(),
       });
 
       if (destroyed || seq !== loadSeq) {
         return response;
       }
 
-      items = safeArray(response.items);
-      total = Number(response.total || items.length) || items.length;
-      nextCursor = cleanText(response.nextCursor, "");
+      const responseItems = safeArray(response.items);
+      const responseCursor = cleanText(response.nextCursor, "");
+
+      if (
+        background &&
+        sameContext &&
+        hasItems
+      ) {
+        /*
+          Focus/visibility refreshes revalidate the leading page without
+          collapsing pages already reached by scroll. The current opaque
+          continuation remains authoritative for the accumulated feed.
+        */
+        items = mergeTicketPage(items, responseItems);
+        total = Math.max(
+          Number(response.total || total || items.length) || items.length,
+          items.length
+        );
+      } else {
+        items = responseItems;
+        itemsContextKey =
+          requestContextKey;
+        total = Number(response.total || items.length) || items.length;
+        nextCursor = responseCursor;
+        resetCursorHistory(nextCursor);
+
+        if (nextCursor) {
+          sortMode = DEFAULT_SORT_MODE;
+          sortOrder = DEFAULT_SORT_ORDER;
+        }
+      }
+      incrementalError = "";
       error = response.stale
         ? cleanText(response.error?.message, "")
         : "";
 
       loading = false;
       refreshing = false;
+      listQueryPending = false;
+      loadController = null;
 
       render(
         background
-          ? { listPatch: true, skipModals: true }
-          : {}
+          ? {
+              listPatch: true,
+              skipModals: true,
+              focusSnapshot:
+                requestFocusSnapshot,
+            }
+          : {
+              focusSnapshot:
+                requestFocusSnapshot,
+            }
       );
 
       return response;
@@ -3204,18 +3960,39 @@ async function load(options = {}) {
       error = safeError(loadError);
       loading = false;
       refreshing = false;
+      listQueryPending = false;
+      loadController = null;
 
       if (items.length) {
         render(
           background
-            ? { listPatch: true, skipModals: true }
-            : {}
+            ? {
+                listPatch: true,
+                skipModals: true,
+                focusSnapshot:
+                  requestFocusSnapshot,
+              }
+            : {
+                focusSnapshot:
+                  requestFocusSnapshot,
+              }
         );
         return null;
       }
 
-      renderError(error);
+      renderError(
+        error,
+        {
+          focusSnapshot:
+            requestFocusSnapshot,
+        }
+      );
       return null;
+    } finally {
+      if (seq === loadSeq) {
+        listQueryPending = false;
+        loadController = null;
+      }
     }
   }
 
@@ -3249,6 +4026,7 @@ async function load(options = {}) {
   function openCreateModal(
     openerNode = null
   ) {
+    disconnectInfiniteObserver();
     rememberModalReturnFocus();
 
     if (
@@ -3294,6 +4072,7 @@ async function load(options = {}) {
     });
 
     restoreModalReturnFocus();
+    syncInfiniteObserver();
 
     return true;
   }
@@ -4033,6 +4812,7 @@ async function load(options = {}) {
     });
 
     restoreModalReturnFocus();
+    syncInfiniteObserver();
 
     return true;
   }
@@ -4051,6 +4831,7 @@ async function load(options = {}) {
       return false;
     }
 
+    disconnectInfiniteObserver();
     const detailSeq = ++detailLoadSeq;
     rememberModalReturnFocus();
 
@@ -5583,21 +6364,118 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
     return true;
   }
 
-function setSearch(value = "") {
-    const next = cleanText(value, "");
-    search = next;
+  function getListFilterQuery(
+    value = filter
+  ) {
+    const normalized = cleanText(
+      value,
+      "all"
+    ).toLowerCase();
+
+    if (normalized === "open") {
+      return { closed: false };
+    }
+
+    if (normalized === "closed") {
+      return { closed: true };
+    }
+
+    if (normalized === "urgent") {
+      return { priority: "urgent" };
+    }
+
+    return {};
+  }
+
+  function getListServerContextKey(
+    filterValue = filter,
+    searchValue = serverSearch
+  ) {
+    const serverFilter =
+      getListFilterQuery(filterValue);
+
+    return JSON.stringify({
+      closed:
+        Object.prototype.hasOwnProperty.call(
+          serverFilter,
+          "closed"
+        )
+          ? serverFilter.closed
+          : null,
+      priority:
+        cleanText(
+          serverFilter.priority,
+          ""
+        ),
+      q: cleanText(searchValue, ""),
+    });
+  }
+
+  function getListPageQuery(
+    options = {}
+  ) {
+    const cursor = cleanText(
+      options.cursor,
+      ""
+    );
+
+    return {
+      pageMode: "cursor",
+      limit: INCIDENCIAS_LIST_LIMIT,
+      ...getListFilterQuery(),
+      ...(serverSearch ? { q: serverSearch } : {}),
+      ...(cursor ? { cursor } : {}),
+    };
+  }
+
+  function restartListQuery(
+    reason = "incidencias-list-query-changed"
+  ) {
+    cancelIncrementalRequest(reason);
+    nextCursor = "";
+    resetCursorHistory();
+    incrementalError = "";
+    listQueryPending = true;
     visibleLimit = DEFAULT_VISIBLE_LIMIT;
     renderWithFilteredItems();
 
-    clearListSearchTimer();
+    void load({
+      force: true,
+      silent: true,
+      background: false,
+      cache: false,
+    });
+
+    return true;
+  }
+
+  function setSearch(value = "") {
+    const next = cleanText(value, "");
+    search = next;
+    visibleLimit = DEFAULT_VISIBLE_LIMIT;
+
+    const cancelledPendingSearch =
+      clearListSearchTimer();
     const requestedServerSearch =
       next.length >= LIST_SEARCH_MIN_LENGTH
         ? next
         : "";
 
     if (requestedServerSearch === serverSearch) {
+      if (cancelledPendingSearch) {
+        return restartListQuery(
+          "incidencias-search-query-restored"
+        );
+      }
+
+      renderWithFilteredItems();
       return true;
     }
+
+    cancelIncrementalRequest("incidencias-search-query-changed");
+    nextCursor = "";
+    resetCursorHistory();
+    incrementalError = "";
 
     const seq = ++listSearchSeq;
 
@@ -5605,9 +6483,6 @@ function setSearch(value = "") {
       if (destroyed || seq !== listSearchSeq) return false;
 
       serverSearch = requestedServerSearch;
-      nextCursor = "";
-      visibleLimit = DEFAULT_VISIBLE_LIMIT;
-
       await load({
         force: true,
         silent: true,
@@ -5619,6 +6494,8 @@ function setSearch(value = "") {
     };
 
     if (!isBrowser()) {
+      listQueryPending = true;
+      renderWithFilteredItems();
       void commitSearch();
       return true;
     }
@@ -5628,18 +6505,58 @@ function setSearch(value = "") {
       void commitSearch();
     }, LIST_SEARCH_DEBOUNCE_MS);
 
+    listQueryPending = true;
+    renderWithFilteredItems();
+
     return true;
   }
 
   function setFilter(
     value = "all"
   ) {
-    filter =
-      cleanText(
-        value,
-        "all"
-      ) ||
-      "all";
+    const normalized = cleanText(
+      value,
+      "all"
+    ).toLowerCase();
+    const nextFilter = [
+      "all",
+      "open",
+      "closed",
+      "urgent",
+      "date",
+    ].includes(normalized)
+      ? normalized
+      : "all";
+
+    if (
+      nextFilter === "date" &&
+      isListSortLocked()
+    ) {
+      return false;
+    }
+
+    const currentServerContext =
+      getListServerContextKey();
+    const cancelledPendingSearch =
+      clearListSearchTimer();
+    if (cancelledPendingSearch) {
+      listSearchSeq += 1;
+    }
+    const nextServerSearch =
+      search.length >= LIST_SEARCH_MIN_LENGTH
+        ? search
+        : "";
+    const nextServerContext =
+      getListServerContextKey(
+        nextFilter,
+        nextServerSearch
+      );
+    const queryChanged =
+      nextServerContext !==
+      currentServerContext;
+
+    filter = nextFilter;
+    serverSearch = nextServerSearch;
 
     sortMode =
       DEFAULT_SORT_MODE;
@@ -5650,8 +6567,16 @@ function setSearch(value = "") {
     visibleLimit =
       DEFAULT_VISIBLE_LIMIT;
 
-    renderWithFilteredItems();
+    if (
+      queryChanged ||
+      cancelledPendingSearch
+    ) {
+      return restartListQuery(
+        "incidencias-filter-query-changed"
+      );
+    }
 
+    renderWithFilteredItems();
     return true;
   }
 
@@ -5676,7 +6601,21 @@ function setSearch(value = "") {
       return false;
     }
 
+    if (
+      isListSortLocked() &&
+      ["amount", "attachments"].includes(stat)
+    ) {
+      return false;
+    }
+
+    const previousServerContext =
+      getListServerContextKey();
+
     search = "";
+    serverSearch = "";
+    listSearchSeq += 1;
+    const cancelledPendingSearch =
+      clearListSearchTimer();
     visibleLimit =
       DEFAULT_VISIBLE_LIMIT;
 
@@ -5690,30 +6629,54 @@ function setSearch(value = "") {
       sortOrder = DEFAULT_SORT_ORDER;
     }
 
+    if (
+      getListServerContextKey() !==
+        previousServerContext ||
+      cancelledPendingSearch
+    ) {
+      return restartListQuery(
+        "incidencias-stat-query-changed"
+      );
+    }
+
     renderWithFilteredItems();
     return true;
   }
 
   function clearFilters() {
+    const previousServerContext =
+      getListServerContextKey();
+
     filter = "all";
     search = "";
     serverSearch = "";
-    nextCursor = "";
     listSearchSeq += 1;
-    clearListSearchTimer();
+    const cancelledPendingSearch =
+      clearListSearchTimer();
     sortMode = DEFAULT_SORT_MODE;
     sortOrder = DEFAULT_SORT_ORDER;
+    incrementalError = "";
 
-    visibleLimit =
-      DEFAULT_VISIBLE_LIMIT;
+    if (
+      getListServerContextKey() !==
+        previousServerContext ||
+      cancelledPendingSearch
+    ) {
+      return restartListQuery(
+        "incidencias-filters-cleared"
+      );
+    }
 
+    visibleLimit = DEFAULT_VISIBLE_LIMIT;
     renderWithFilteredItems();
-    void load({ force: true, silent: true, cache: false });
-
     return true;
   }
 
   function toggleSortOrder() {
+    if (isListSortLocked()) {
+      return false;
+    }
+
     sortOrder =
       getNextSortOrder(
         sortOrder
@@ -5724,27 +6687,55 @@ function setSearch(value = "") {
     return true;
   }
 
-async function loadMore() {
-    if (loadingMore) return false;
+async function loadMore(options = {}) {
+    const retry = options.retry === true;
 
-    const localVisible = filteredItems().length;
+    if (
+      destroyed ||
+      loading ||
+      refreshing ||
+      loadingMore ||
+      autoRefreshRunning ||
+      creating ||
+      createModal.open ||
+      detailModal.open ||
+      listSearchTimer ||
+      listSearchComposing ||
+      listQueryPending ||
+      (incrementalError && !retry)
+    ) {
+      return false;
+    }
 
-    if (visibleLimit < localVisible) {
+    disconnectInfiniteObserver();
+
+    const list = currentListSnapshot();
+
+    if (list.visibleCount < list.filteredTotal) {
+      incrementalError = "";
       visibleLimit += DEFAULT_VISIBLE_LIMIT;
       renderWithFilteredItems();
       return true;
     }
 
     if (!nextCursor) {
+      incrementalError = "";
+      renderWithFilteredItems();
       return false;
     }
 
     const seq = ++loadMoreSeq;
     const cursor = nextCursor;
+    incrementalError = "";
     loadingMore = true;
     renderWithFilteredItems();
 
-    pageController?.abort?.();
+    try {
+      pageController?.abort?.("incidencias-next-page-replaced");
+    } catch {
+      pageController?.abort?.();
+    }
+
     pageController = typeof AbortController !== "undefined"
       ? new AbortController()
       : null;
@@ -5752,26 +6743,56 @@ async function loadMore() {
     try {
       const response = await loadIncidenciasPage({
         signal: pageController?.signal,
-        query: {
-          pageMode: "cursor",
-          cursor,
-          limit: INCIDENCIAS_LIST_LIMIT,
-          ...(serverSearch ? { q: serverSearch } : {}),
-        },
+        query: getListPageQuery({ cursor }),
       });
 
       if (destroyed || seq !== loadMoreSeq) {
         return false;
       }
 
-      items = mergeTicketPage(items, response.items);
+      const responseItems =
+        safeArray(response.items);
+      const responseCursor = cleanText(response.nextCursor, "");
+
+      if (
+        responseCursor &&
+        seenCursors.has(responseCursor)
+      ) {
+        const cursorError = new Error(
+          responseCursor === cursor
+            ? "La API repitió el cursor de la página anterior."
+            : "La API devolvió un ciclo de cursores ya visitado."
+        );
+        cursorError.code =
+          responseCursor === cursor
+            ? "INCIDENCIAS_CURSOR_DID_NOT_ADVANCE"
+            : "INCIDENCIAS_CURSOR_CYCLE";
+        throw cursorError;
+      }
+
+      if (
+        responseCursor &&
+        countNewTicketIds(responseItems) === 0
+      ) {
+        const progressError = new Error(
+          "La siguiente página no añadió ninguna incidencia nueva."
+        );
+        progressError.code =
+          "INCIDENCIAS_PAGE_WITHOUT_ID_PROGRESS";
+        throw progressError;
+      }
+
+      items = mergeTicketPage(items, responseItems);
       total = Math.max(
         Number(response.total || total || items.length) || items.length,
         items.length
       );
-      nextCursor = cleanText(response.nextCursor, "");
+      nextCursor = responseCursor;
+      if (responseCursor) {
+        seenCursors.add(responseCursor);
+      }
       visibleLimit += DEFAULT_VISIBLE_LIMIT;
-      error = "";
+      incrementalError = "";
 
       renderWithFilteredItems();
       return true;
@@ -5780,7 +6801,10 @@ async function loadMore() {
         return false;
       }
 
-      error = safeError(pageError, "No se pudieron cargar más incidencias.");
+      incrementalError = safeError(
+        pageError,
+        "No se pudo cargar la siguiente página de incidencias."
+      );
       renderWithFilteredItems();
       return false;
     } finally {
@@ -5815,6 +6839,9 @@ async function loadMore() {
       autoRefreshRunning ||
       loading ||
       refreshing ||
+      loadingMore ||
+      listQueryPending ||
+      Boolean(incrementalError) ||
       creating ||
       createModal.submitting ||
       detailModal.submitting
@@ -5834,6 +6861,7 @@ async function loadMore() {
       return true;
     } finally {
       autoRefreshRunning = false;
+      syncInfiniteObserver();
     }
   }
 
@@ -5999,9 +7027,11 @@ async function loadMore() {
 
     if (
       type ===
-      INCIDENCIAS_ACTIONS.LOAD_MORE
+      INCIDENCIAS_ACTIONS.RETRY_INCREMENTAL
     ) {
-      return loadMore();
+      return loadMore({
+        retry: true,
+      });
     }
 
     if (
@@ -6313,6 +7343,7 @@ async function loadMore() {
     }
 
     if (field === "search") {
+      if (event.isComposing || listSearchComposing) return;
       setSearch(
         target.value ||
         ""
@@ -6347,6 +7378,35 @@ async function loadMore() {
         target
       );
     }
+  }
+
+  function onCompositionStart(event) {
+    const target = event.target;
+    const field = cleanText(
+      target?.dataset?.field || target?.dataset?.incidenciasField || "",
+      ""
+    );
+    if (field !== "search" || !ownsNode(target)) return;
+
+    listSearchComposing = true;
+    if (clearListSearchTimer()) listSearchSeq += 1;
+    cancelIncrementalRequest("incidencias-search-composition");
+    disconnectInfiniteObserver();
+    listQueryPending = true;
+    renderWithFilteredItems();
+  }
+
+  function onCompositionEnd(event) {
+    const target = event.target;
+    const field = cleanText(
+      target?.dataset?.field || target?.dataset?.incidenciasField || "",
+      ""
+    );
+    if (field !== "search" || !ownsNode(target)) return;
+
+    listSearchComposing = false;
+    listQueryPending = false;
+    setSearch(target.value || "");
   }
 
   function onChange(event) {
@@ -6704,6 +7764,16 @@ async function loadMore() {
     );
 
     target?.addEventListener?.(
+      "compositionstart",
+      onCompositionStart
+    );
+
+    target?.addEventListener?.(
+      "compositionend",
+      onCompositionEnd
+    );
+
+    target?.addEventListener?.(
       "change",
       onChange
     );
@@ -6747,6 +7817,16 @@ async function loadMore() {
     target?.removeEventListener?.(
       "input",
       onInput
+    );
+
+    target?.removeEventListener?.(
+      "compositionstart",
+      onCompositionStart
+    );
+
+    target?.removeEventListener?.(
+      "compositionend",
+      onCompositionEnd
     );
 
     target?.removeEventListener?.(
@@ -6865,9 +7945,12 @@ async function loadMore() {
       clearUserSearchTimer();
       clearListSearchTimer();
       listSearchSeq += 1;
-      loadMoreSeq += 1;
-      pageController?.abort?.();
-      pageController = null;
+      listSearchComposing = false;
+      listQueryPending = false;
+      cancelIncrementalRequest(
+        "incidencias-controller-destroyed"
+      );
+      disconnectInfiniteObserver();
 
       cancelScheduledRender();
       cancelScheduledModalRender();
@@ -6935,6 +8018,8 @@ async function loadMore() {
     closeDetailModal,
 
     getSnapshot() {
+      const list = currentListSnapshot();
+
       return {
         version:
           INCIDENCIAS_VIEW_VERSION,
@@ -6952,13 +8037,35 @@ async function loadMore() {
           intervalMs: AUTO_REFRESH_INTERVAL_MS,
         },
         loadingMore,
+        listQueryPending,
+        incrementalError:
+          Boolean(incrementalError),
+
+        continuousScroll: {
+          enabled: true,
+          observing:
+            Boolean(infiniteObserver),
+          rootMargin:
+            INFINITE_ROOT_MARGIN,
+          rootIsMainContent:
+            Boolean(
+              getInfiniteScrollRoot()
+            ),
+          hasMore:
+            hasIncrementalContent(),
+          seenCursorCount:
+            seenCursors.size,
+        },
 
         total,
         count:
           items.length,
 
         visibleCount:
-          filteredItems().length,
+          list.visibleCount,
+
+        filteredTotal:
+          list.filteredTotal,
 
         visibleLimit,
         filter,

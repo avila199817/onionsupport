@@ -67,8 +67,14 @@ jobs:
       - name: Validate Clientes scale contract
         run: python3 .github/scripts/clientes_scale_contract.py
 
+      - name: Validate Facturas continuous-scroll contract
+        run: python3 .github/scripts/facturas_continuous_scroll_contract.py
+
       - name: Validate Usuarios scale contract
         run: python3 .github/scripts/usuarios_scale_contract.py
+
+      - name: Validate continuous-scroll markup
+        run: node .github/scripts/continuous_scroll_smoke.mjs
 
       - name: Validate repository artifact hygiene
         run: python3 .github/scripts/artifact_hygiene.py

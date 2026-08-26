@@ -968,6 +968,22 @@
   text-align: center;
 }
 
+.facturas-loading-status {
+  display: block;
+  margin: 0;
+  padding: 14px 18px 4px;
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  text-align: center;
+}
+
+.facturas-error:focus-visible,
+.facturas-empty:focus-visible,
+.facturas-loading-status:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .facturas-error-title,
 .facturas-empty-title {
   margin: 0;
@@ -1071,6 +1087,11 @@
   border-block-start: 1px solid var(--border-soft);
 }
 
+.facturas-infinite:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .facturas-infinite[data-has-more="true"] {
   min-block-size: 48px;
   gap: 0;
@@ -1112,6 +1133,18 @@
   color: var(--text-dim);
   font-size: var(--font-xs);
   font-weight: var(--weight-medium);
+}
+
+.facturas-infinite-status.is-error {
+  flex-wrap: wrap;
+  border-color: var(--border-warning);
+  background: var(--warning-bg);
+}
+
+.facturas-infinite-retry {
+  min-block-size: var(--btn-height-sm);
+  padding-inline: 10px;
+  font-size: var(--font-xs);
 }
 
 /* =========================================================
@@ -1197,6 +1230,15 @@
   .facturas-meta-pill,
   .facturas-stat-card {
     forced-color-adjust: auto;
+  }
+
+  .facturas-error:focus-visible,
+  .facturas-empty:focus-visible,
+  .facturas-loading-status:focus-visible,
+  .facturas-infinite:focus-visible {
+    outline: 2px solid CanvasText;
+    outline-offset: 3px;
+    box-shadow: none;
   }
 }
 

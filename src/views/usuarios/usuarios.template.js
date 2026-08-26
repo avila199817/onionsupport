@@ -2,7 +2,7 @@
    Onion Support - Usuarios Template
    Archivo: /src/views/usuarios/usuarios.template.js
 
-   CURSOR-FIRST · SERVER FILTERED · CLIENTES VISUAL PARITY V24
+   CURSOR-FIRST · SERVER FILTERED · INFINITE SCROLL · CLIENTES VISUAL PARITY V26
 
    Contrato:
    - Template puro: sin HTTP, Store, Router ni side effects.
@@ -13,7 +13,7 @@
 ========================================================= */
 
 export const USUARIOS_TEMPLATE_VERSION =
-  "usuarios.template.v24.cursor-first";
+  "usuarios.template.v26.debounce-safe-live-status";
 export const USUARIOS_TABLE_TEMPLATE_VERSION = USUARIOS_TEMPLATE_VERSION;
 export const USUARIOS_VIEW_TEMPLATE_VERSION = USUARIOS_TEMPLATE_VERSION;
 
@@ -26,7 +26,7 @@ export const USUARIOS_ACTIONS = Object.freeze({
   FILTER: "filter",
   CLEAR_SEARCH: "clear-search",
   CLEAR_FILTERS: "clear-filters",
-  LOAD_MORE: "load-more",
+  RETRY_PAGE: "retry-page",
 });
 export const USUARIOS_TABLE_ACTIONS = USUARIOS_ACTIONS;
 
@@ -297,7 +297,11 @@ function filterValue(input = {}) {
 function searchValue(input = {}) {
   const data = safeObject(input);
   const state = stateFrom(data);
-  return cleanText(first(data.search, data.searchQuery, state.search, state.searchQuery, ""), "");
+  // This value is written back into the live search input. Preserve its exact
+  // spacing so a synchronous pending-state render cannot move the caret.
+  return String(
+    data.search ?? data.searchQuery ?? state.search ?? state.searchQuery ?? ""
+  );
 }
 function totalInfo(input = {}, items = []) {
   const data = safeObject(input);
@@ -346,7 +350,7 @@ export function renderHeader(input = {}) {
 function renderFilters(input = {}) {
   const active = filterValue(input);
   const search = searchValue(input);
-  return `<div class="usuarios-filters" aria-label="Filtros y búsqueda de usuarios"><div class="usuarios-filter-pills" role="group" aria-label="Filtrar usuarios por estado">${FILTERS.map((filter) => `<button type="button" class="usuarios-filter-pill${filter.key === active ? " is-active" : ""}" data-usuarios-action="${USUARIOS_ACTIONS.FILTER}" data-action="filter" data-filter="${filter.key}" aria-pressed="${filter.key === active ? "true" : "false"}"><span>${escapeHtml(filter.label)}</span></button>`).join("")}</div><div class="usuarios-search" role="search" aria-label="Buscar usuarios"><span class="usuarios-search-icon" aria-hidden="true">${icon("search")}</span><input id="usuarios-search-input" class="usuarios-search-input" type="search" value="${attr(search)}" placeholder="Buscar usuario, email, ciudad..." autocomplete="off" spellcheck="false" data-usuarios-search-input="true" data-usuarios-field="search" data-field="search" aria-label="Buscar usuarios">${search ? `<button type="button" class="usuarios-search-clear" data-usuarios-action="${USUARIOS_ACTIONS.CLEAR_SEARCH}" data-action="clear-search" aria-label="Limpiar búsqueda">${icon("close")}</button>` : ""}</div></div>`;
+  return `<div class="usuarios-filters" aria-label="Filtros y búsqueda de usuarios"><div class="usuarios-filter-pills" role="group" aria-label="Filtrar usuarios por estado">${FILTERS.map((filter) => `<button type="button" class="usuarios-filter-pill${filter.key === active ? " is-active" : ""}" data-usuarios-action="${USUARIOS_ACTIONS.FILTER}" data-action="filter" data-filter="${filter.key}" aria-pressed="${filter.key === active ? "true" : "false"}"><span>${escapeHtml(filter.label)}</span></button>`).join("")}</div><div class="usuarios-search" role="search" aria-label="Buscar usuarios"><span class="usuarios-search-icon" aria-hidden="true">${icon("search")}</span><input id="usuarios-search-input" class="usuarios-search-input" type="search" value="${escapeHtml(search)}" placeholder="Buscar usuario, email, ciudad..." autocomplete="off" spellcheck="false" data-usuarios-search-input="true" data-usuarios-field="search" data-field="search" aria-label="Buscar usuarios">${search ? `<button type="button" class="usuarios-search-clear" data-usuarios-action="${USUARIOS_ACTIONS.CLEAR_SEARCH}" data-action="clear-search" aria-label="Limpiar búsqueda">${icon("close")}</button>` : ""}</div></div>`;
 }
 
 function renderEmptyContent({ error = "", filtering = false, restricted = false, admin = true } = {}) {
@@ -356,14 +360,29 @@ function renderEmptyContent({ error = "", filtering = false, restricted = false,
   return `<div class="usuarios-empty"><div class="usuarios-empty-icon">${icon("users")}</div><h3>Todavía no hay usuarios</h3><p>Cuando haya usuarios registrados aparecerán aquí.</p>${admin ? `<button type="button" class="usuarios-btn usuarios-btn--create" data-usuarios-action="${USUARIOS_ACTIONS.CREATE}" data-action="create">${icon("plus")}<span>Crear usuario</span></button>` : ""}</div>`;
 }
 
+function getFinalUsersMessage(totalKnown = false, totalCount = 0) {
+  if (!totalKnown) return "Has visto todos los usuarios de la consulta.";
+  const count = Math.max(0, number(totalCount, 0));
+  return count === 1
+    ? "Has visto el único usuario de la consulta."
+    : `Has visto los ${formatNumber(count)} usuarios de la consulta.`;
+}
+
 function renderFooter(input = {}, items = []) {
   const state = stateFrom(input);
   if (!items.length) return "";
   const { totalKnown, totalCount } = totalInfo(input, items);
   const loaded = items.length;
   const label = totalKnown ? `${formatNumber(loaded)} de ${formatNumber(totalCount)}` : `${formatNumber(loaded)} cargados`;
-  if (!state.hasMore) return `<div class="usuarios-list-footer"><span>${escapeHtml(totalKnown ? `Has visto los ${label} usuarios de la consulta.` : "Has visto todos los usuarios de la consulta.")}</span></div>`;
-  return `<div class="usuarios-list-footer"><button type="button" class="usuarios-load-more-btn" data-usuarios-action="${USUARIOS_ACTIONS.LOAD_MORE}" data-action="load-more" ${state.loadingMore ? 'disabled aria-disabled="true"' : ""}><span>${state.loadingMore ? "Cargando..." : "Cargar 50 más"}</span></button><span>${escapeHtml(label)}</span></div>`;
+  const loadMoreError = cleanText(state.loadMoreError, "");
+  if (state.searchPending) return "";
+  if (loadMoreError) {
+    return `<div class="usuarios-list-footer usuarios-feed-error" data-usuarios-infinite="true"><span class="usuarios-feed-status">${escapeHtml(loadMoreError)}</span><button type="button" class="usuarios-feed-retry" data-usuarios-action="${USUARIOS_ACTIONS.RETRY_PAGE}" data-action="${USUARIOS_ACTIONS.RETRY_PAGE}">${icon("refresh")}<span>Reintentar</span></button><span class="usuarios-feed-count">${escapeHtml(label)}</span></div>`;
+  }
+  if (!state.hasMore) {
+    return `<div class="usuarios-list-footer usuarios-feed-end" data-usuarios-infinite="true"><span class="usuarios-feed-status">${escapeHtml(getFinalUsersMessage(totalKnown, totalCount))}</span></div>`;
+  }
+  return `<div class="usuarios-list-footer usuarios-feed-more" data-usuarios-infinite="true" data-has-more="true" aria-busy="${state.loadingMore || state.refreshing ? "true" : "false"}">${state.loadingMore || state.refreshing ? "" : '<div class="usuarios-feed-sentinel" data-usuarios-infinite-sentinel="true" aria-hidden="true"></div>'}<span class="usuarios-feed-status">${state.loadingMore ? renderSpinner("Cargando más usuarios...") : state.refreshing ? renderSpinner("Actualizando usuarios...") : "Continúa desplazándote para cargar usuarios automáticamente."}</span><span class="usuarios-feed-count">${escapeHtml(label)}</span></div>`;
 }
 
 function renderTableLoading(rows = 6) {
@@ -378,15 +397,33 @@ export function renderTable(input = {}) {
   const error = cleanText(first(state.error, data.error, ""), "");
   const filter = filterValue(data);
   const search = searchValue(data);
-  const filtering = filter !== "all" || Boolean(search);
+  const filtering = filter !== "all" || Boolean(cleanText(search, ""));
   const { totalKnown, totalCount } = totalInfo(data, items);
-  const subtitle = loading && !items.length
-    ? "Cargando usuarios..."
-    : totalKnown
-      ? `Mostrando ${formatNumber(items.length)} de ${formatNumber(totalCount)}`
-      : `Mostrando ${formatNumber(items.length)} usuarios cargados`;
+  const loadMoreError = cleanText(state.loadMoreError, "");
+  const loadingMore = state.loadingMore === true;
+  const refreshing = state.refreshing === true;
+  const searchPending = state.searchPending === true;
+  const busy = loading || loadingMore || refreshing || searchPending;
+  const finalSummary = getFinalUsersMessage(totalKnown, totalCount);
+  const subtitle = error
+    ? error
+    : loadMoreError
+      ? loadMoreError
+      : loading && !items.length
+        ? "Cargando usuarios..."
+        : searchPending
+          ? "Preparando la búsqueda de usuarios..."
+        : loadingMore
+          ? `Cargando usuarios automáticamente · ${formatNumber(items.length)} cargados`
+          : refreshing
+            ? `Actualizando ${formatNumber(items.length)} usuarios cargados...`
+            : !state.hasMore && items.length
+              ? finalSummary
+              : totalKnown
+                ? `Mostrando ${formatNumber(items.length)} de ${formatNumber(totalCount)}`
+                : `Mostrando ${formatNumber(items.length)} usuarios cargados`;
 
-  return `<section class="usuarios-history${loading ? " is-loading" : ""}${error ? " has-error" : ""}" data-usuarios-history="true" aria-live="polite" aria-busy="${loading ? "true" : "false"}"><div class="usuarios-history-head"><div class="usuarios-history-copy"><h2 class="usuarios-history-title">Historial de usuarios</h2><p class="usuarios-history-subtitle">${escapeHtml(subtitle)}</p></div>${renderFilters(data)}</div>${error && items.length ? `<div class="usuarios-inline-error" role="status">${escapeHtml(error)}</div>` : ""}${loading && !items.length ? renderTableLoading() : items.length ? `<div class="usuarios-table-shell"><table class="usuarios-table" data-table-columns="6" data-table-scale="${TABLE_SCALE}">${renderColgroup()}${renderThead()}<tbody>${items.map((item) => renderRow(item, state)).join("")}</tbody></table></div>${renderFooter(data, items)}` : renderEmptyContent({ error, filtering, restricted: isRestricted(data), admin: data.admin !== false })}</section>`;
+  return `<section class="usuarios-history${loading ? " is-loading" : ""}${error ? " has-error" : ""}" data-usuarios-history="true" aria-busy="${busy ? "true" : "false"}"><div class="usuarios-history-head"><div class="usuarios-history-copy"><h2 class="usuarios-history-title">Historial de usuarios</h2><p class="usuarios-history-subtitle" tabindex="-1" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(subtitle)}</p></div>${renderFilters(data)}</div>${error && items.length ? `<div class="usuarios-inline-error">${escapeHtml(error)}</div>` : ""}${loading && !items.length ? renderTableLoading() : items.length ? `<div class="usuarios-table-shell"><table class="usuarios-table" data-table-columns="6" data-table-scale="${TABLE_SCALE}">${renderColgroup()}${renderThead()}<tbody>${items.map((item) => renderRow(item, state)).join("")}</tbody></table></div>${renderFooter(data, items)}` : renderEmptyContent({ error, filtering, restricted: isRestricted(data), admin: data.admin !== false })}</section>`;
 }
 
 export function renderUsuariosTableTemplate(input = {}) {

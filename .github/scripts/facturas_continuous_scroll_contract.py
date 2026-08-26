@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""Static safety contract for Facturas continuous pagination."""
+
+from pathlib import Path
+import sys
+
+
+ROOT = Path(__file__).resolve().parents[2]
+INDEX = (ROOT / "src/views/facturas/index.js").read_text(encoding="utf-8")
+API = (ROOT / "src/views/facturas/facturas.api.js").read_text(encoding="utf-8")
+TEMPLATE = (ROOT / "src/views/facturas/facturas.template.js").read_text(encoding="utf-8")
+STYLE = (ROOT / "src/css/views/facturas/index.css").read_text(encoding="utf-8")
+
+errors: list[str] = []
+
+
+def require(source: str, snippet: str, message: str) -> None:
+    if snippet not in source:
+        errors.append(message)
+
+
+def reject(source: str, snippet: str, message: str) -> None:
+    if snippet in source:
+        errors.append(message)
+
+
+# Runtime cache and stale fallbacks must never cross a server-query boundary.
+require(API, "getFacturasListContextKey", "API must expose a canonical list context key")
+require(API, "lastList.contextKey === contextKey", "Append cache must require the same query context")
+require(API, "lastList.queryKey === queryKey", "Stale fallback must require the exact same request")
+require(INDEX, "returnStaleOnError: false", "Controller must reject API stale fallback rows")
+require(INDEX, "requestContextKey !== getListContextKey()", "Controller must reject obsolete query responses")
+require(INDEX, "itemsContextKey = requestContextKey", "Loaded rows must retain their owning query context")
+require(INDEX, "resetListState({ keepItems: false })", "Filter/search changes must clear old-query rows")
+require(INDEX, "FACTURAS_PAGE_DID_NOT_ADVANCE", "Duplicate-only continuation pages must stop automatic loading")
+require(INDEX, "FACTURAS_FIRST_PAGE_DID_NOT_ADVANCE", "An empty continuable first page must stop with a retryable error")
+require(INDEX, "responseAdvertisesMore && normalizedRows.length === 0", "First-page progress must be measured by stable IDs")
+require(INDEX, "items.length <= previousPageState.items.length", "Continuation must prove stable-ID progress")
+require(INDEX, "mergeFacturasFreshPageFirst", "First-page revalidation must retain accumulated rows in server order")
+require(INDEX, "Number(replacedPageSize)", "First-page revalidation must replace, not retain, its stale prior page")
+require(INDEX, "preservePages = false", "First-page loads must declare whether accumulated pages are preserved")
+require(INDEX, "preserveContinuation", "Same-query revalidation must retain its prior continuation")
+require(INDEX, "preserveCompletedHistory", "A completed history must remain complete after safe revalidation")
+require(INDEX, "totalContracted", "Known total contraction must invalidate retained offset pages")
+require(INDEX, "responseTotal !== previousPageState.total", "Any exact total change must invalidate unsafe offset continuation")
+require(INDEX, "!totalChanged", "Page preservation must reject an exact total change")
+require(INDEX, "facturasFirstPageIdentityMatches", "Offset continuation must compare the exact first-page ID order")
+require(INDEX, "stableKnownTotal", "Offset pages may only survive when both exact totals prove the dataset size stable")
+require(INDEX, "!firstPageIdentityChanged", "Offset pages must reset when their first-page boundary changes")
+require(INDEX, "retainedRowsExceedTotal", "Retained stale rows must not exceed a known backend total")
+require(INDEX, "previousPageState.nextPage", "Revalidation must restore the continuation captured before its request")
+require(API, "hasExplicitTotal", "API normalization must distinguish exact totals from page-size fallbacks")
+require(API, "parseBooleanFlag(hasMore", "Legacy string hasMore values must not create phantom continuation pages")
+require(API, "if (Array.isArray(unwrapped)) return unwrapped;", "A data[] envelope must preserve its invoice rows")
+require(API, "original.meta", "A data[] envelope must preserve pagination metadata from its outer envelope")
+require(API, "function pagingMetadataFromPayload", "Mixed envelopes must merge object pagination metadata")
+require(API, "if (isObject(candidate)) Object.assign(paging, candidate);", "A numeric page value must not hide meta continuation fields")
+require(API, "totalKnown: paging.totalKnown", "Exact-total provenance must survive normalization")
+require(API, "nextPage: normalized.nextPage", "Runtime cache must preserve the next page")
+require(API, "hasMore: normalized.hasMore === true", "Runtime cache must preserve backend completion state")
+require(API, "export function syncFacturasListCache", "Controller must be able to persist its reconciled accumulated snapshot")
+require(INDEX, "function syncListCacheSnapshot()", "Controller must synchronize reconciled pages back to API cache")
+require(INDEX, "syncFacturasListCache({", "Controller cache sync must include its final accumulated rows")
+require(INDEX, "syncListCacheSnapshot();", "Successful and rolled-back list requests must persist controller state")
+reject(API, "mergeById([created, ...lastList.items])", "Create must not contaminate an unknown filtered cache context")
+require(INDEX, "const canOptimisticallyInsert", "Create must declare when an optimistic row belongs to the canonical query")
+require(INDEX, 'normalizeKey(filter) === "all"', "Create must not optimistically insert into a filtered query")
+require(INDEX, "facturasCanOptimisticallyInsertCreated", "Create optimism must be covered by a testable safety predicate")
+require(INDEX, '(hasMore !== true || normalizeKey(sort) === "date_desc")', "Partial ascending histories must not optimistically misorder a new invoice")
+require(INDEX, "keepItems: itemsBelongToCurrentQuery()", "Create must revalidate the active server query after success")
+
+# Debounced search owns the list slot; observer and scroll fallback stay blocked.
+require(INDEX, "function cancelListSearchTimer()", "List debounce must have explicit cancellation")
+require(INDEX, "Boolean(listSearchTimer)", "Observer/scroll guards must include pending search")
+require(INDEX, "listSearchTimer ||", "Load-more must reject a pending search")
+require(INDEX, "const hadPendingSearch = cancelListSearchTimer()", "Filter/sort must cancel pending search")
+require(INDEX, "cancelListSearchTimer();\n    filter = \"all\";", "Clear filters must cancel pending search")
+
+# Observer replacement must invalidate queued callbacks, not just current targets.
+require(INDEX, "observer.takeRecords?.()", "Observer teardown must clear queued entries")
+require(INDEX, "infiniteObserver !== observer", "Stale observer callbacks must be identity-guarded")
+require(INDEX, "disconnectInfiniteObserver();\n            void loadMore();", "Observer must disconnect before continuation")
+require(INDEX, "root: scrollRoot", "Observer must use the application scroll owner")
+require(INDEX, "if (!flushedMain) syncInfiniteObserver();", "Closing a modal without deferred render must rearm continuation")
+require(INDEX, "suspendScheduledMainRender();\n    disconnectInfiniteObserver();", "Opening a modal must retire the live continuation observer")
+
+# Incremental DOM replacement must preserve a stable keyboard target.
+require(INDEX, "captureStableListFocus", "Incremental render must capture stable focus")
+require(INDEX, "restoreStableListFocus", "Incremental render must restore stable focus")
+require(INDEX, "facturaId", "Focus restoration must use stable factura identity")
+require(INDEX, "target.focus({ preventScroll: true })", "Focus restoration must not move the feed")
+require(INDEX, "state.action === FACTURAS_ACTIONS.RETRY_PAGE", "Retry focus must move to a stable feed target")
+require(INDEX, "state.selectionStart", "Search focus and caret must survive result rendering")
+require(INDEX, "render({ preserveFocus: true });", "Search rendering must restore its captured caret")
+require(INDEX, "inputValue:", "Search focus capture must retain the exact unnormalized draft")
+require(INDEX, "target.value = state.inputValue", "Search rerender must restore spaces and the exact draft")
+require(INDEX, "event.isComposing || listSearchComposing", "Search must not replace the input during IME composition")
+require(INDEX, 'addEventListener?.("compositionstart", onCompositionStart)', "Search must observe IME composition start")
+require(INDEX, 'addEventListener?.("compositionend", onCompositionEnd)', "Search must commit after IME composition ends")
+require(INDEX, "listSearchComposing ||", "Automatic continuation must pause while search composition is active")
+if INDEX.count("Boolean(error) ||") < 5:
+    errors.append("General first-page errors must block observer, append, load-more and scroll fallback")
+require(INDEX, "state.action === FACTURAS_ACTIONS.CLEAR_SEARCH", "Clearing search must focus its stable input fallback")
+require(INDEX, "state.action === FACTURAS_ACTIONS.CLEAR_FILTERS", "Clearing an empty filter result must focus the stable all-filter control")
+require(INDEX, "state.action === FACTURAS_ACTIONS.REFRESH", "Refresh must focus a stable feed/loading fallback while its button is disabled")
+require(INDEX, "facturaId: cleanText(row?.dataset?.facturaId", "Modal return focus must capture stable row identity")
+require(INDEX, "snapshot.node?.isConnected", "Modal return focus must re-resolve a replaced opener")
+require(INDEX, "sortKey", "Sort focus must use a stable key instead of the changing next direction")
+
+# The sentinel is passive. Retry is the only visible continuation control.
+require(TEMPLATE, 'data-facturas-infinite-sentinel="true"', "Template must expose the observer sentinel")
+require(
+    TEMPLATE,
+    'data-facturas-infinite-sentinel="true" aria-hidden="true"',
+    "Sentinel must remain a passive, hidden observer target",
+)
+require(TEMPLATE, 'RETRY_PAGE: "retry-page"', "Incremental failure must expose retry")
+require(TEMPLATE, "loadMoreError", "Template must distinguish incremental failure")
+require(TEMPLATE, 'class="facturas-refresh-overlay" aria-hidden="true"', "Refresh overlay must not create a second live announcement")
+require(TEMPLATE, "!loadingMore && !refreshing && !loadMoreError", "Sentinel must stay absent while a refresh owns the list")
+require(TEMPLATE, "if (listError)", "A first-page refresh error must suppress automatic continuation")
+require(TEMPLATE, 'id="facturas-list-status" class="facturas-loading-status" role="status"', "Initial loading must expose one visible live status")
+require(TEMPLATE, 'id="facturas-fatal-error" class="facturas-error" role="alert"', "Fatal loading errors must be announced")
+require(TEMPLATE, 'id="facturas-empty-state" class="facturas-empty" tabindex="-1"', "Empty results must expose a stable focus fallback")
+require(TEMPLATE, 'role="status" aria-live="polite" aria-atomic="true"', "Successful empty results must be announced from one live status")
+require(TEMPLATE, 'const liveAttributes = hasError', "Error empties must not duplicate their alert in a polite region")
+require(INDEX, 'host.querySelector("#facturas-fatal-error")', "Fatal errors must receive a stable programmatic focus target")
+reject(TEMPLATE, 'LOAD_MORE: "load-more"', "Template must not export a hidden manual continuation action")
+reject(TEMPLATE, 'data-action="load-more"', "Sentinel must not expose a manual action")
+reject(TEMPLATE, 'data-facturas-action="load-more"', "Sentinel must be observer-only")
+reject(INDEX, "LOAD_MORE_ACTION", "Controller must not retain the hidden sentinel action")
+require(STYLE, ".facturas-infinite-retry", "Retry control must retain explicit styling")
+require(STYLE, ".facturas-infinite:focus-visible", "Feed focus fallback must remain visible")
+require(STYLE, ".facturas-error:focus-visible", "Fatal-error focus target must remain visibly focused")
+require(STYLE, ".facturas-empty:focus-visible", "Empty-result focus target must remain visibly focused")
+require(STYLE, ".facturas-loading-status:focus-visible", "Loading focus target must remain visibly focused")
+require(STYLE, "outline: 2px solid CanvasText", "Focus fallbacks must remain visible in forced colors")
+
+if errors:
+    for error in errors:
+        print(f"facturas-continuous-scroll-contract: {error}", file=sys.stderr)
+    raise SystemExit(1)
+
+print("facturas-continuous-scroll-contract: ok")

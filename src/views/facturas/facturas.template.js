@@ -13,7 +13,7 @@ import { renderFacturasCreateModal } from "./facturas.template.create.js";
 import { renderFacturasDetailModal } from "./facturas.template.modal.js";
 
 export const FACTURAS_TEMPLATE_VERSION =
-  "facturas.template.private.v3.design-system";
+  "facturas.template.private.v6.continuous-scroll-a11y";
 
 export const FACTURAS_ACTIONS = Object.freeze({
   REFRESH: "refresh",
@@ -24,7 +24,7 @@ export const FACTURAS_ACTIONS = Object.freeze({
   CLEAR_SEARCH: "clear-search",
   SEARCH: "search",
   SORT: "sort",
-  LOAD_MORE: "load-more",
+  RETRY_PAGE: "retry-page",
   OPEN_FACTURA: "open-factura",
   VIEW_PDF: "view-factura-pdf",
   DOWNLOAD_PDF: "download-factura",
@@ -771,6 +771,7 @@ function getListState(items = [], input = {}) {
   const explicitHasMore = first(data.hasMore, data.more, data.canLoadMore, runtime.hasMore, runtime.more, runtime.canLoadMore, null);
   const hasMore = explicitHasMore === null ? loadedCount < remoteTotal : bool(explicitHasMore, false);
   const loadingMore = Boolean(first(data.loadingMore, data.loadingNextPage, runtime.loadingMore, runtime.loadingNextPage, false));
+  const loadMoreError = cleanText(first(data.loadMoreError, runtime.loadMoreError, ""), "");
   const sortMode = getSortMode(data);
 
   return {
@@ -785,6 +786,7 @@ function getListState(items = [], input = {}) {
     remoteTotal,
     hasMore,
     loadingMore,
+    loadMoreError,
     filtering,
     activeFilter: getActiveFilter(data),
     searchQuery: getSearchQuery(data),
@@ -962,7 +964,7 @@ function renderTableLoading(rows = DEFAULT_SKELETON_ROWS) {
 }
 
 function renderRefreshOverlay() {
-  return `<div class="facturas-refresh-overlay" aria-live="polite" aria-busy="true"><div class="facturas-refresh-card">${renderSpinner("Actualizando facturas...")}</div></div>`;
+  return `<div class="facturas-refresh-overlay" aria-hidden="true"><div class="facturas-refresh-card">${renderSpinner("Actualizando facturas...")}</div></div>`;
 }
 
 function renderEmptyState({ hasError = false, filtering = false, searchQuery = "" } = {}) {
@@ -973,24 +975,34 @@ function renderEmptyState({ hasError = false, filtering = false, searchQuery = "
       ? searchQuery ? `No se encontraron facturas para “${searchQuery}”. Prueba con otro cliente, email, número o incidencia.` : "Cambia el filtro activo para volver al historial completo."
       : "Cuando haya documentos registrados aparecerán aquí con su estado de pago, PDF, incidencia vinculada y acciones disponibles.";
 
-  return `<div class="facturas-empty"><div class="facturas-empty-icon" aria-hidden="true">${icon(hasError ? "lock" : filtering ? "filter" : "detail")}</div><h3 class="facturas-empty-title">${escapeHtml(title)}</h3><p class="facturas-empty-text">${escapeHtml(text)}</p>${filtering ? `<button type="button" class="facturas-btn" data-facturas-action="${FACTURAS_ACTIONS.CLEAR_FILTERS}" data-action="${FACTURAS_ACTIONS.CLEAR_FILTERS}">${icon("close")}<span class="facturas-btn-text">Limpiar filtros</span></button>` : ""}</div>`;
+  const liveAttributes = hasError
+    ? ""
+    : 'role="status" aria-live="polite" aria-atomic="true"';
+  return `<div id="facturas-empty-state" class="facturas-empty" tabindex="-1" ${liveAttributes}><div class="facturas-empty-icon" aria-hidden="true">${icon(hasError ? "lock" : filtering ? "filter" : "detail")}</div><h3 class="facturas-empty-title">${escapeHtml(title)}</h3><p class="facturas-empty-text">${escapeHtml(text)}</p>${filtering ? `<button type="button" class="facturas-btn" data-facturas-action="${FACTURAS_ACTIONS.CLEAR_FILTERS}" data-action="${FACTURAS_ACTIONS.CLEAR_FILTERS}">${icon("close")}<span class="facturas-btn-text">Limpiar filtros</span></button>` : ""}</div>`;
 }
 
 function renderInfiniteScrollFooter(listState = {}, state = {}) {
   const runtime = safeObject(state);
-  const loading = Boolean(runtime.loading);
-  const refreshing = Boolean(runtime.refreshing);
   const loadingMore = Boolean(first(listState.loadingMore, runtime.loadingMore, runtime.loadingNextPage));
+  const refreshing = Boolean(runtime.refreshing);
   const hasMore = Boolean(listState.hasMore);
   const hasRows = number(listState.visibleCount, 0) > 0;
-  const blocked = loading || refreshing || loadingMore;
-  const status = loadingMore
+  const listError = cleanText(runtime.error, "");
+  const loadMoreError = cleanText(first(listState.loadMoreError, runtime.loadMoreError, ""), "");
+  if (listError) {
+    return `<div class="facturas-infinite" data-facturas-infinite="true" data-has-more="false" tabindex="-1"><div class="facturas-infinite-status is-error">Actualización detenida. Usa Actualizar para reintentar.</div></div>`;
+  }
+  const status = loadMoreError
+    ? `<span>${escapeHtml(loadMoreError)}</span><button type="button" class="facturas-btn facturas-infinite-retry" data-facturas-action="${FACTURAS_ACTIONS.RETRY_PAGE}" data-action="${FACTURAS_ACTIONS.RETRY_PAGE}">${icon("refresh")}<span>Reintentar</span></button>`
+    : loadingMore
     ? renderSpinner("Cargando más facturas...")
-    : hasMore ? "Sigue bajando para cargar más facturas." : hasRows ? "Has visto todas las facturas disponibles." : "";
+    : refreshing
+      ? renderSpinner("Actualizando facturas...")
+    : hasMore ? "El historial continúa al desplazarte." : hasRows ? "Has visto todas las facturas disponibles." : "";
 
-  return `<div class="facturas-infinite" data-facturas-infinite="true" data-loaded="${attr(String(listState.loadedCount || 0))}" data-visible="${attr(String(listState.visibleCount || 0))}" data-total="${attr(String(listState.remoteTotal || listState.totalCount || 0))}" data-has-more="${hasMore ? "true" : "false"}" aria-live="polite">
-    <div class="facturas-infinite-sentinel" data-facturas-infinite-sentinel="true" data-facturas-action="${FACTURAS_ACTIONS.LOAD_MORE}" data-action="${FACTURAS_ACTIONS.LOAD_MORE}" data-next-page="${attr(String(listState.nextPage || 1))}" data-disabled="${blocked || !hasMore ? "true" : "false"}" aria-hidden="true"></div>
-    ${status ? `<div class="facturas-infinite-status${loadingMore ? " is-loading" : ""}${!hasMore && hasRows ? " is-complete" : ""}">${status}</div>` : ""}
+  return `<div class="facturas-infinite" data-facturas-infinite="true" data-loaded="${attr(String(listState.loadedCount || 0))}" data-visible="${attr(String(listState.visibleCount || 0))}" data-total="${attr(String(listState.remoteTotal || listState.totalCount || 0))}" data-has-more="${hasMore ? "true" : "false"}" tabindex="-1" role="status" aria-live="polite" aria-atomic="true">
+    ${hasMore && !loadingMore && !refreshing && !loadMoreError ? '<div class="facturas-infinite-sentinel" data-facturas-infinite-sentinel="true" aria-hidden="true"></div>' : ""}
+    ${status ? `<div class="facturas-infinite-status${loadingMore || refreshing ? " is-loading" : ""}${loadMoreError ? " is-error" : ""}${!hasMore && hasRows ? " is-complete" : ""}">${status}</div>` : ""}
   </div>`;
 }
 
@@ -1039,11 +1051,11 @@ export function renderHeader(input = {}) {
 ========================================================= */
 
 export function renderFacturasLoadingState(input = {}) {
-  return `<section class="facturas-view-root facturas-view-root--loading" data-facturas-scope="true" data-template-version="${attr(FACTURAS_TEMPLATE_VERSION)}" aria-busy="true">${renderHeader({ ...safeObject(input), loading: true })}<section class="facturas-history">${renderTableLoading(DEFAULT_SKELETON_ROWS)}</section></section>`;
+  return `<section class="facturas-view-root facturas-view-root--loading" data-facturas-scope="true" data-template-version="${attr(FACTURAS_TEMPLATE_VERSION)}" aria-busy="true">${renderHeader({ ...safeObject(input), loading: true })}<section class="facturas-history"><span id="facturas-list-status" class="facturas-loading-status" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">Cargando facturas...</span>${renderTableLoading(DEFAULT_SKELETON_ROWS)}</section></section>`;
 }
 
 export function renderFacturasErrorState(message = "No se pudieron cargar las facturas.") {
-  return `<section class="facturas-view-root facturas-view-root--error" data-facturas-scope="true" data-template-version="${attr(FACTURAS_TEMPLATE_VERSION)}"><section class="facturas-error"><h3 class="facturas-error-title">No se pudo cargar Facturas</h3><p class="facturas-error-text">${escapeHtml(cleanText(message, "Error desconocido al cargar la vista."))}</p><button type="button" class="facturas-btn facturas-btn--primary" data-facturas-action="${FACTURAS_ACTIONS.REFRESH}" data-action="${FACTURAS_ACTIONS.REFRESH}">${icon("refresh")}<span class="facturas-btn-text">Reintentar</span></button></section></section>`;
+  return `<section class="facturas-view-root facturas-view-root--error" data-facturas-scope="true" data-template-version="${attr(FACTURAS_TEMPLATE_VERSION)}"><section id="facturas-fatal-error" class="facturas-error" role="alert" aria-atomic="true" tabindex="-1"><h3 class="facturas-error-title">No se pudo cargar Facturas</h3><p class="facturas-error-text">${escapeHtml(cleanText(message, "Error desconocido al cargar la vista."))}</p><button type="button" class="facturas-btn facturas-btn--primary" data-facturas-action="${FACTURAS_ACTIONS.REFRESH}" data-action="${FACTURAS_ACTIONS.REFRESH}">${icon("refresh")}<span class="facturas-btn-text">Reintentar</span></button></section></section>`;
 }
 
 export const renderLoadingState = renderFacturasLoadingState;
@@ -1078,7 +1090,7 @@ export function renderCards(input = {}) {
 
   return `<section class="facturas-history">
     <div class="facturas-history-head"><div class="facturas-history-copy"><h2 class="facturas-history-title">Historial de facturas</h2><p class="facturas-history-subtitle">${escapeHtml(subtitle)}</p></div>${renderFilters(data, listState)}</div>
-    ${showInitialLoading ? renderTableLoading(DEFAULT_SKELETON_ROWS) : `<div class="facturas-table-wrap${refreshing ? " is-refreshing" : ""}">${showRefreshOverlay ? renderRefreshOverlay() : ""}${listState.visibleItems.length ? `<div class="facturas-table-shell"><table class="facturas-table" role="table" aria-label="Listado de facturas"><colgroup><col class="facturas-table-col--main"><col class="facturas-table-col--status"><col class="facturas-table-col--date"><col class="facturas-table-col--amount"><col class="facturas-table-col--incidencia"><col class="facturas-table-col--actions"></colgroup><thead><tr><th scope="col">Factura / cliente</th><th scope="col">Pago</th><th scope="col">Emitida</th><th scope="col">Total</th><th scope="col">Incidencia</th><th scope="col">Acciones</th></tr></thead><tbody>${listState.visibleItems.map((item) => renderRow(item, runtime)).join("")}</tbody></table></div>${renderInfiniteScrollFooter(listState, runtime)}` : renderEmptyState({ hasError, filtering: listState.filtering, searchQuery })}</div>`}
+    ${showInitialLoading ? `<span id="facturas-list-status" class="facturas-loading-status" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">Cargando facturas...</span>${renderTableLoading(DEFAULT_SKELETON_ROWS)}` : `<div class="facturas-table-wrap${refreshing ? " is-refreshing" : ""}">${showRefreshOverlay ? renderRefreshOverlay() : ""}${listState.visibleItems.length ? `<div class="facturas-table-shell"><table class="facturas-table" role="table" aria-label="Listado de facturas"><colgroup><col class="facturas-table-col--main"><col class="facturas-table-col--status"><col class="facturas-table-col--date"><col class="facturas-table-col--amount"><col class="facturas-table-col--incidencia"><col class="facturas-table-col--actions"></colgroup><thead><tr><th scope="col">Factura / cliente</th><th scope="col">Pago</th><th scope="col">Emitida</th><th scope="col">Total</th><th scope="col">Incidencia</th><th scope="col">Acciones</th></tr></thead><tbody>${listState.visibleItems.map((item) => renderRow(item, runtime)).join("")}</tbody></table></div>${renderInfiniteScrollFooter(listState, runtime)}` : renderEmptyState({ hasError, filtering: listState.filtering, searchQuery })}</div>`}
   </section>`;
 }
 

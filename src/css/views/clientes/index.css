@@ -61,7 +61,6 @@ Objetivos:
 .clientes-filter-pill,
 .clientes-sort-pill,
 .clientes-search-clear,
-.clientes-load-more-btn,
 .clientes-table-row {
   -webkit-tap-highlight-color: transparent;
 }
@@ -72,9 +71,9 @@ Objetivos:
 .clientes-sort-pill:focus-visible,
 .clientes-search-input:focus-visible,
 .clientes-search-clear:focus-visible,
-.clientes-load-more-btn:focus-visible,
 .clientes-table-row:focus-visible,
-.clientes-contact-link:focus-visible {
+.clientes-contact-link:focus-visible,
+.clientes-history-subtitle:focus-visible {
   outline: none;
 }
 
@@ -141,8 +140,7 @@ Objetivos:
    BUTTONS
 ========================================================= */
 
-.clientes-btn,
-.clientes-load-more-btn {
+.clientes-btn {
   appearance: none;
   min-block-size: var(--btn-height);
   display: inline-flex;
@@ -171,29 +169,25 @@ Objetivos:
     opacity var(--duration-fast) var(--ease-standard);
 }
 
-.clientes-btn svg,
-.clientes-load-more-btn svg {
+.clientes-btn svg {
   inline-size: 16px;
   block-size: 16px;
   flex: 0 0 auto;
 }
 
-.clientes-btn:hover:not(:disabled),
-.clientes-load-more-btn:hover:not(:disabled) {
+.clientes-btn:hover:not(:disabled) {
   background: var(--btn-secondary-bg-hover);
   border-color: var(--border-strong);
   color: var(--text-strong);
   transform: translateY(-1px);
 }
 
-.clientes-btn:active:not(:disabled),
-.clientes-load-more-btn:active:not(:disabled) {
+.clientes-btn:active:not(:disabled) {
   background: var(--btn-secondary-bg-active);
   transform: translateY(0);
 }
 
-.clientes-btn:focus-visible,
-.clientes-load-more-btn:focus-visible {
+.clientes-btn:focus-visible {
   box-shadow: var(--focus-ring);
 }
 
@@ -215,7 +209,6 @@ Objetivos:
 }
 
 .clientes-btn:disabled,
-.clientes-load-more-btn:disabled,
 .clientes-btn[aria-disabled="true"] {
   cursor: not-allowed;
   pointer-events: none;
@@ -494,6 +487,15 @@ Objetivos:
   font-size: var(--font-xs);
   font-weight: var(--weight-medium);
   line-height: 1.4;
+}
+
+.clientes-history-subtitle:focus-visible {
+  border-radius: var(--radius-sm);
+  box-shadow: var(--focus-ring);
+}
+
+.clientes-history-results {
+  min-inline-size: 0;
 }
 
 .clientes-filters {
@@ -1204,7 +1206,17 @@ Objetivos:
   line-height: 1.5;
 }
 
+.clientes-fatal-error:focus-visible {
+  border-radius: var(--radius-md);
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .clientes-inline-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
   padding: 9px var(--space-md);
   border-block-end: 1px solid color-mix(in srgb, var(--warning) 25%, var(--border-soft));
   background: color-mix(in srgb, var(--warning) 7%, transparent);
@@ -1213,23 +1225,79 @@ Objetivos:
   font-weight: var(--weight-semibold);
 }
 
-.clientes-list-footer {
-  min-block-size: 46px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-sm);
-  padding: 8px var(--space-md);
+.clientes-inline-retry {
+  flex: 0 0 auto;
+}
+
+.clientes-infinite {
+  min-block-size: 48px;
+  display: grid;
+  place-items: center;
+  gap: var(--space-xs);
+  padding: 8px 14px 12px;
   border-block-start: 1px solid var(--border-soft);
   color: var(--text-dim);
   font-size: var(--font-xs);
   font-weight: var(--weight-medium);
 }
 
-.clientes-load-more-btn {
-  min-block-size: var(--btn-height-sm);
-  padding-inline: 12px;
+.clientes-infinite:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.clientes-infinite[data-has-more="true"] {
+  border-block-start: 0;
+}
+
+.clientes-infinite-sentinel {
+  inline-size: 100%;
+  block-size: 1px;
+  pointer-events: none;
+}
+
+.clientes-infinite[data-has-more="false"] .clientes-infinite-sentinel {
+  display: none;
+}
+
+.clientes-infinite-status {
+  min-block-size: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding-inline: 10px;
+  border: 1px solid var(--badge-border);
+  border-radius: var(--radius-pill);
+  background: var(--badge-bg);
+  color: var(--text-dim);
   font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+}
+
+.clientes-infinite-status.is-complete {
+  min-block-size: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-weight: var(--weight-medium);
+}
+
+.clientes-infinite-status.is-error {
+  flex-wrap: wrap;
+  border-color: var(--border-warning);
+  background: var(--warning-bg);
+}
+
+.clientes-infinite-retry {
+  min-block-size: var(--btn-height-sm);
+  padding-inline: 10px;
+  font-size: var(--font-xs);
+}
+
+.clientes-infinite-count {
+  color: var(--text-dim);
 }
 
 /* =========================================================
@@ -1354,7 +1422,6 @@ Objetivos:
   .clientes-btn,
   .clientes-stat-card,
   .clientes-stat-card::after,
-  .clientes-load-more-btn,
   .clientes-table-row,
   .clientes-cell,
   .clientes-filter-pill,
@@ -1364,8 +1431,7 @@ Objetivos:
   }
 
   .clientes-stat-card:hover,
-  .clientes-btn:hover:not(:disabled),
-  .clientes-load-more-btn:hover:not(:disabled) {
+  .clientes-btn:hover:not(:disabled) {
     transform: none;
   }
 }
@@ -1379,12 +1445,22 @@ Objetivos:
   .clientes-history {
     forced-color-adjust: auto;
   }
+
+  .clientes-history-subtitle:focus-visible {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
+  }
+
+  .clientes-fatal-error:focus-visible {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
+  }
 }
 
 @media print {
   .clientes-hero-actions,
   .clientes-filters,
-  .clientes-list-footer {
+  .clientes-infinite {
     display: none !important;
   }
 

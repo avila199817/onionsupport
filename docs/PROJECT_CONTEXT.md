@@ -1,6 +1,6 @@
 # ONION SUPPORT — CONTEXTO CANÓNICO DEL FRONTEND
 
-> Actualizado: 2026-08-20.  
+> Actualizado: 2026-08-26.
 > Describe la arquitectura productiva esperada del repositorio `avila199817/onionsupport`. Si documentación y código divergen, el código de `main` es la autoridad.
 
 ## 1. Alcance
@@ -130,6 +130,10 @@ No existen ni deben reaparecer `mobile-shell.css` o `features/mobile-shell/index
 
 Listado, creación, detalle, adjuntos, comentarios, lifecycle, estados/prioridad/tipo, cierre/reapertura, refresco autónomo y previews de media. La hoja `src/css/views/incidencias/media-preview.css` pertenece al manifest de `incidencias`; el feature JS no inyecta stylesheets.
 
+`/incidencias` es la referencia visual privada. El contrato común de carga
+progresiva para Incidencias, Facturas, Clientes y Usuarios está documentado en
+`docs/CONTINUOUS_SCROLL.md`.
+
 ### Facturas
 
 Listado, creación, detalle, PDF, envío y relación con incidencias. Las colecciones del dominio se preservan como arrays.
@@ -210,6 +214,9 @@ El archivo raíz con nombre hexadecimal es la clave pública de verificación de
 
 - sintaxis de todos los `src/**/*.js` con Node 22;
 - contratos estructurales de `.github/scripts/repo_integrity.py`;
+- contratos de escala de Incidencias, Clientes y Usuarios;
+- contrato de scroll continuo de Facturas y smoke renderizado de las cuatro
+  colecciones;
 - entrypoint/runtime único mediante `.github/scripts/app_entrypoint_integrity.py`;
 - `staticwebapp.config.json`;
 - merge markers y whitespace.
@@ -222,7 +229,10 @@ No debe reaparecer un segundo workflow específico que duplique esas mismas comp
 
 ### Azure Static Web Apps
 
-`.github/workflows/azure-static-web-apps-polite-bay-086469a1e.yml` valida el contrato de despliegue/SEO/referencias y genera preview de PR o deploy productivo tras push a `main`.
+`.github/workflows/trusted-pr-integrity.yml` valida el candidato y genera el
+preview aislado `pr<N>`. Tras fusionar, `.github/workflows/azure-static-web-apps-polite-bay-086469a1e.yml`
+valida el SHA exacto, despliega `main` y verifica bytes, seguridad, routing y
+backend en producción.
 
 ## 12. Arrays y normalización
 

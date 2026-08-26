@@ -2,7 +2,7 @@
    Onion Support - Facturas Index
    Archivo: /src/views/facturas/index.js
 
-   PRODUCTIVO · SINGLE MOUNT DETAIL MODAL · V14
+   PRODUCTIVO · SINGLE MOUNT DETAIL MODAL · V17
 
    FIX PRINCIPAL
    - El modal detalle se monta una sola vez por apertura.
@@ -19,6 +19,8 @@ import { ROUTES } from "../../core/config.js";
 import {
   listFacturas,
   hydrateFacturasFromCache,
+  syncFacturasListCache,
+  getFacturasListContextKey,
   getFacturaById,
   createFactura,
   sendFactura,
@@ -53,7 +55,7 @@ import {
 } from "./facturas.template.modal.js";
 
 export const FACTURAS_INDEX_VERSION =
-  "facturas.index.productivo.v14.admin-payment-command";
+  "facturas.index.productivo.v17.page-safe-continuous-scroll";
 
 export const FACTURAS_VIEW_VERSION = FACTURAS_INDEX_VERSION;
 
@@ -106,9 +108,6 @@ const FACTURAS_CONTROLLER_KEY =
   Symbol.for("onion.support.facturas.controller");
 
 let FACTURAS_CONTROLLER_SEQUENCE = 0;
-
-const LOAD_MORE_ACTION =
-  FACTURAS_ACTIONS.LOAD_MORE || "load-more";
 
 /*
   Búsquedas de selección para alta de Facturas.
@@ -601,6 +600,47 @@ function mergeFacturas(
   return [...map.values()];
 }
 
+export function mergeFacturasFreshPageFirst(
+  currentItems = [],
+  freshItems = [],
+  replacedPageSize = DEFAULT_BATCH_SIZE
+) {
+  const freshPage = mergeFacturas([], freshItems, { append: false });
+  const freshIds = new Set(freshPage.map((item) => getFacturaId(item)));
+  const retainedTail = safeArray(currentItems)
+    .slice(
+      Math.min(
+        safeArray(currentItems).length,
+        Math.max(0, Number(replacedPageSize) || freshPage.length)
+      )
+    )
+    .filter((item) => {
+      const id = getFacturaId(item);
+      return id && !freshIds.has(id);
+    });
+
+  return mergeFacturas(freshPage, retainedTail, { append: true });
+}
+
+export function facturasFirstPageIdentityMatches(
+  currentItems = [],
+  freshItems = [],
+  pageSize = DEFAULT_BATCH_SIZE
+) {
+  const size = Math.max(1, Number(pageSize) || DEFAULT_BATCH_SIZE);
+  const previousPage = mergeFacturas(
+    [],
+    safeArray(currentItems).slice(0, size),
+    { append: false }
+  );
+  const freshPage = mergeFacturas([], freshItems, { append: false });
+
+  return previousPage.length === freshPage.length &&
+    previousPage.every(
+      (item, index) => getFacturaId(item) === getFacturaId(freshPage[index])
+    );
+}
+
 function upsertFactura(items = [], factura = null, sortMode = "date_desc") {
   const next = safeObject(factura, null);
   if (!next) return safeArray(items);
@@ -620,6 +660,23 @@ function upsertFactura(items = [], factura = null, sortMode = "date_desc") {
   return normalizeKey(sortMode).endsWith("_asc")
     ? [...current, next]
     : [next, ...current];
+}
+
+export function facturasCanOptimisticallyInsertCreated({
+  created = null,
+  filter = "all",
+  search = "",
+  hasMore = false,
+  sort = "date_desc",
+  currentQuery = true,
+} = {}) {
+  return Boolean(
+    created &&
+    normalizeKey(filter) === "all" &&
+    !cleanText(search, "") &&
+    currentQuery === true &&
+    (hasMore !== true || normalizeKey(sort) === "date_desc")
+  );
 }
 
 /* =========================================================
@@ -1870,28 +1927,41 @@ function createFacturasController(host = null, context = {}) {
   );
 
   let items = safeArray(cache.items);
+  let itemsContextKey = cleanText(cache.contextKey, "");
   let total = Math.max(
     number(cache.total, items.length),
     items.length
   );
+  let totalKnown = cache.totalKnown === true;
 
   let loading = false;
   let refreshing = false;
   let loadingMore = false;
   let creating = false;
   let error = "";
+  let loadMoreError = "";
 
-  let page = DEFAULT_PAGE;
+  let page = Math.max(
+    DEFAULT_PAGE,
+    number(cache.page, DEFAULT_PAGE)
+  );
+  const cachedHasMore = Boolean(
+    items.length &&
+    (cache.hasMore === true || total > items.length)
+  );
   let nextPage =
-    items.length && total > items.length
+    cachedHasMore
       ? Math.max(
-          2,
-          Math.floor(items.length / DEFAULT_BATCH_SIZE) + 1
+          page + 1,
+          number(
+            cache.nextPage,
+            Math.floor(items.length / DEFAULT_BATCH_SIZE) + 1
+          )
         )
-      : DEFAULT_PAGE;
+      : null;
 
   let pageSize = DEFAULT_BATCH_SIZE;
-  let hasMore = total > items.length;
+  let hasMore = cachedHasMore;
 
   let filter = "all";
   let search = "";
@@ -1909,10 +1979,12 @@ function createFacturasController(host = null, context = {}) {
   let detailSessionSeq = 0;
 
   let listSearchTimer = null;
+  let listSearchComposing = false;
   let clientSearchTimer = null;
   let ticketSearchTimer = null;
 
   let infiniteObserver = null;
+  let infiniteScrollRoot = null;
   let scrollTicking = false;
 
   let renderFrame = 0;
@@ -1991,23 +2063,44 @@ function createFacturasController(host = null, context = {}) {
     }
   }
 
-  function clearTimers() {
+  function cancelListSearchTimer() {
     if (listSearchTimer) {
       window.clearTimeout(listSearchTimer);
       listSearchTimer = null;
+      return true;
     }
 
+    return false;
+  }
+
+  function clearTimers() {
+    cancelListSearchTimer();
     clearCreateTimers();
   }
 
-  function disconnectInfiniteObserver() {
+  function disposeInfiniteObserver(observer = null) {
+    if (!observer) return false;
     try {
-      infiniteObserver?.disconnect?.();
+      observer.takeRecords?.();
+      observer.disconnect?.();
     } catch {
       // noop
     }
 
+    return true;
+  }
+
+  function disconnectInfiniteObserver() {
+    const observer = infiniteObserver;
     infiniteObserver = null;
+    return disposeInfiniteObserver(observer);
+  }
+
+  function resolveInfiniteScrollRoot() {
+    if (!isBrowser()) return null;
+    const mainContent = document.getElementById("main-content");
+    if (mainContent?.contains?.(host)) return mainContent;
+    return host?.closest?.(".main-content, [data-main-content='true']") || null;
   }
 
   function revokeObjectUrls() {
@@ -2064,12 +2157,31 @@ function createFacturasController(host = null, context = {}) {
   function rememberModalReturnFocus(explicitNode = null) {
     if (!isBrowser()) return false;
 
+    const snapshotFor = (node = null) => {
+      if (!node) return null;
+      const row = node.closest?.("[data-facturas-row='true']");
+      const actionNode = node.closest?.(
+        "[data-facturas-action], [data-action]"
+      );
+      return {
+        node,
+        elementId: cleanText(node.id, ""),
+        facturaId: cleanText(row?.dataset?.facturaId, ""),
+        action: cleanText(
+          actionNode?.dataset?.facturasAction ||
+          actionNode?.dataset?.action ||
+          "",
+          ""
+        ),
+      };
+    };
+
     if (
       explicitNode?.isConnected &&
       !createModalHost?.contains?.(explicitNode) &&
       !detailModalHost?.contains?.(explicitNode)
     ) {
-      modalReturnFocus = explicitNode;
+      modalReturnFocus = snapshotFor(explicitNode);
       return true;
     }
 
@@ -2084,26 +2196,72 @@ function createFacturasController(host = null, context = {}) {
       !createModalHost?.contains?.(active) &&
       !detailModalHost?.contains?.(active)
     ) {
-      modalReturnFocus = active;
+      modalReturnFocus = snapshotFor(active);
     }
 
     return true;
   }
 
   function restoreModalReturnFocus() {
-    const target = modalReturnFocus;
+    const snapshot = modalReturnFocus;
     modalReturnFocus = null;
 
-    if (
-      !isBrowser() ||
-      !target ||
-      !target.isConnected ||
-      !isFunction(target.focus)
-    ) {
+    if (!isBrowser() || !snapshot) {
       return false;
     }
 
     nextFrame(() => {
+      let target = snapshot.node?.isConnected
+        ? snapshot.node
+        : null;
+
+      if (!target && snapshot.elementId) {
+        const candidate = document.getElementById(snapshot.elementId);
+        if (candidate && host?.contains?.(candidate)) target = candidate;
+      }
+
+      if (!target && snapshot.facturaId) {
+        const row = [...host.querySelectorAll("[data-facturas-row='true']")]
+          .find((candidate) =>
+            cleanText(candidate?.dataset?.facturaId, "") === snapshot.facturaId
+          ) || null;
+        if (row && snapshot.action) {
+          target = [...row.querySelectorAll(
+            "[data-facturas-action], [data-action]"
+          )].find((candidate) =>
+            cleanText(
+              candidate?.dataset?.facturasAction ||
+              candidate?.dataset?.action ||
+              "",
+              ""
+            ) === snapshot.action
+          ) || row;
+        } else {
+          target = row;
+        }
+      }
+
+      if (!target && snapshot.action) {
+        target = [...host.querySelectorAll(
+          "[data-facturas-action], [data-action]"
+        )].find((candidate) =>
+          cleanText(
+            candidate?.dataset?.facturasAction ||
+            candidate?.dataset?.action ||
+            "",
+            ""
+          ) === snapshot.action
+        ) || null;
+      }
+
+      target = target ||
+        host.querySelector("[data-facturas-infinite='true']") ||
+        host.querySelector("#facturas-empty-state") ||
+        host.querySelector("#facturas-list-status") ||
+        host.querySelector(".facturas-history-title");
+
+      if (!target || !isFunction(target.focus)) return;
+
       try {
         target.focus({ preventScroll: true });
       } catch {
@@ -2230,6 +2388,177 @@ function createFacturasController(host = null, context = {}) {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  function captureStableListFocus() {
+    if (!isBrowser() || !host) return null;
+
+    const active = document.activeElement;
+    if (!active || !host.contains(active)) return null;
+
+    const row = active.closest?.("[data-facturas-row='true']");
+    const facturaId = cleanText(row?.dataset?.facturaId, "");
+
+    const actionNode = active.closest?.(
+      "[data-facturas-action], [data-action]"
+    );
+    const action = actionNode && (!row || row.contains(actionNode))
+      ? cleanText(
+          actionNode?.dataset?.facturasAction ||
+          actionNode?.dataset?.action ||
+          "",
+          ""
+        )
+      : "";
+    const actionScope = row || host;
+    const actionPeers = action
+      ? [...actionScope.querySelectorAll("[data-facturas-action], [data-action]")]
+          .filter((node) => cleanText(
+            node?.dataset?.facturasAction || node?.dataset?.action || "",
+            ""
+          ) === action)
+      : [];
+
+    return {
+      facturaId,
+      action,
+      actionIndex: actionNode ? Math.max(0, actionPeers.indexOf(actionNode)) : 0,
+      rowFocused: active === row,
+      elementId: cleanText(active.id, ""),
+      field: cleanText(active.getAttribute?.("data-field"), ""),
+      filter: cleanText(actionNode?.getAttribute?.("data-filter"), ""),
+      sort: cleanText(actionNode?.getAttribute?.("data-sort"), ""),
+      sortKey: cleanText(actionNode?.getAttribute?.("data-sort-key"), ""),
+      inputValue:
+        cleanText(active.getAttribute?.("data-field"), "") === "search"
+          ? String(active.value ?? "")
+          : null,
+      selectionStart: Number.isInteger(active.selectionStart)
+        ? active.selectionStart
+        : null,
+      selectionEnd: Number.isInteger(active.selectionEnd)
+        ? active.selectionEnd
+        : null,
+      feedFocused: Boolean(active.closest?.("[data-facturas-infinite='true']")),
+    };
+  }
+
+  function restoreStableListFocus(state = null) {
+    if (!state || !host || !isBrowser()) return false;
+
+    const row = state.facturaId
+      ? [...host.querySelectorAll("[data-facturas-row='true']")]
+          .find((node) => cleanText(node?.dataset?.facturaId, "") === state.facturaId)
+      : null;
+
+    let target = row || null;
+    if (row && !state.rowFocused && state.action) {
+      const candidates = [
+        ...row.querySelectorAll("[data-facturas-action], [data-action]"),
+      ].filter((node) => cleanText(
+        node?.dataset?.facturasAction || node?.dataset?.action || "",
+        ""
+      ) === state.action);
+      target = candidates[state.actionIndex] || candidates[0] || row;
+    }
+
+    if (!target && state.elementId) {
+      const candidate = document.getElementById(state.elementId);
+      if (candidate && host.contains(candidate)) target = candidate;
+    }
+
+    if (!target && state.field) {
+      target = [...host.querySelectorAll("[data-field]")]
+        .find((node) => cleanText(node.getAttribute("data-field"), "") === state.field) || null;
+    }
+
+    if (!target && state.action) {
+      const candidates = [
+        ...host.querySelectorAll("[data-facturas-action], [data-action]"),
+      ].filter((node) => {
+        const action = cleanText(
+          node?.dataset?.facturasAction || node?.dataset?.action || "",
+          ""
+        );
+        const filter = cleanText(node.getAttribute?.("data-filter"), "");
+        const sort = cleanText(node.getAttribute?.("data-sort"), "");
+        const sortKey = cleanText(node.getAttribute?.("data-sort-key"), "");
+        return action === state.action &&
+          (!state.filter || filter === state.filter) &&
+          (!state.sortKey || sortKey === state.sortKey) &&
+          (!state.sort || state.action === FACTURAS_ACTIONS.SORT || sort === state.sort);
+      });
+      target = candidates[state.actionIndex] || candidates[0] || null;
+    }
+
+    if (!target && state.action === FACTURAS_ACTIONS.CLEAR_SEARCH) {
+      target = host.querySelector("[data-field='search']");
+    }
+
+    if (!target && state.action === FACTURAS_ACTIONS.CLEAR_FILTERS) {
+      target = host.querySelector(
+        `[data-facturas-action="${FACTURAS_ACTIONS.FILTER}"][data-filter="all"]`
+      );
+    }
+
+    if (
+      !target &&
+      (state.feedFocused || state.action === FACTURAS_ACTIONS.RETRY_PAGE)
+    ) {
+      target = host.querySelector("[data-facturas-infinite='true']");
+    }
+
+    if (!target && state.elementId === "facturas-list-status") {
+      target =
+        host.querySelector("[data-facturas-infinite='true']") ||
+        host.querySelector("#facturas-empty-state");
+    }
+
+    if (!target) return false;
+
+    if (target?.disabled || target?.getAttribute?.("aria-disabled") === "true") {
+      target = row || (
+        state.action === FACTURAS_ACTIONS.REFRESH
+          ? (
+              host.querySelector("[data-facturas-infinite='true']") ||
+              host.querySelector("#facturas-list-status") ||
+              host.querySelector("#facturas-empty-state")
+            )
+          : null
+      );
+    }
+
+    if (!target) return false;
+
+    try {
+      if (
+        state.field === "search" &&
+        typeof state.inputValue === "string" &&
+        "value" in target
+      ) {
+        target.value = state.inputValue;
+      }
+      target.focus({ preventScroll: true });
+      if (
+        Number.isInteger(state.selectionStart) &&
+        Number.isInteger(state.selectionEnd) &&
+        isFunction(target.setSelectionRange)
+      ) {
+        const max = String(target.value || "").length;
+        target.setSelectionRange(
+          Math.min(state.selectionStart, max),
+          Math.min(state.selectionEnd, max)
+        );
+      }
+      return document.activeElement === target;
+    } catch {
+      try {
+        target.focus?.();
+        return document.activeElement === target;
+      } catch {
+        return false;
+      }
     }
   }
 
@@ -2369,10 +2698,60 @@ function createFacturasController(host = null, context = {}) {
     return {};
   }
 
+  function getListContextKey() {
+    const sortParts = getSortParts();
+    return getFacturasListContextKey({
+      limit: pageSize,
+      search,
+      q: search,
+      sortMode: sortParts.sortMode,
+      sort: sortParts.sort,
+      sortBy: sortParts.sortBy,
+      direction: sortParts.direction,
+      sortDir: sortParts.sortDir,
+      includeStats: false,
+      includeStatsAll: false,
+      filters: getListFilters(),
+    });
+  }
+
+  function itemsBelongToCurrentQuery() {
+    return Boolean(
+      items.length &&
+      itemsContextKey &&
+      itemsContextKey === getListContextKey()
+    );
+  }
+
+  function syncListCacheSnapshot() {
+    if (!itemsContextKey) return false;
+
+    try {
+      syncFacturasListCache({
+        items,
+        total,
+        totalKnown,
+        contextKey: itemsContextKey,
+        page,
+        nextPage,
+        hasMore,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function updatePagingFromResponse(
     response = {},
     requestedPage = DEFAULT_PAGE
   ) {
+    const responseTotalKnown = Boolean(
+      response.totalKnown === true ||
+      response.paging?.totalKnown === true ||
+      response.meta?.totalKnown === true
+    );
+    const previousTotalKnown = totalKnown;
     total = Math.max(
       number(
         first(
@@ -2388,6 +2767,9 @@ function createFacturasController(host = null, context = {}) {
         items.length
       ),
       items.length
+    );
+    totalKnown = responseTotalKnown || (
+      requestedPage > DEFAULT_PAGE && previousTotalKnown
     );
 
     page = Math.max(
@@ -2444,6 +2826,7 @@ function createFacturasController(host = null, context = {}) {
       items,
       facturas: items,
       total,
+      totalKnown,
       remoteCount: total,
       totalMatched: total,
 
@@ -2454,6 +2837,7 @@ function createFacturasController(host = null, context = {}) {
       limit: pageSize,
       hasMore,
       loadingMore,
+      loadMoreError,
 
       filter,
       search,
@@ -2470,6 +2854,7 @@ function createFacturasController(host = null, context = {}) {
         loading,
         refreshing,
         loadingMore,
+        loadMoreError,
         creating,
         error,
         page,
@@ -2478,6 +2863,7 @@ function createFacturasController(host = null, context = {}) {
         batchSize: pageSize,
         limit: pageSize,
         hasMore,
+        totalKnown,
         filter,
         search,
         sort,
@@ -3113,6 +3499,11 @@ function createFacturasController(host = null, context = {}) {
       loading ||
       refreshing ||
       loadingMore ||
+      Boolean(listSearchTimer) ||
+      listSearchComposing ||
+      Boolean(error) ||
+      Boolean(loadMoreError) ||
+      !itemsBelongToCurrentQuery() ||
       anyModalIsOpen()
     ) {
       return false;
@@ -3121,22 +3512,34 @@ function createFacturasController(host = null, context = {}) {
     const sentinel = host.querySelector?.(
       "[data-facturas-infinite-sentinel='true']"
     );
+    const scrollRoot = resolveInfiniteScrollRoot();
 
     if (
       !sentinel ||
+      !scrollRoot ||
       !isFunction(window.IntersectionObserver)
     ) {
       return false;
     }
 
     try {
-      infiniteObserver = new IntersectionObserver(
+      const observer = new window.IntersectionObserver(
         (entries) => {
+          if (infiniteObserver !== observer) {
+            disposeInfiniteObserver(observer);
+            return;
+          }
+
           if (
             destroyed ||
             loading ||
             refreshing ||
             loadingMore ||
+            Boolean(listSearchTimer) ||
+            listSearchComposing ||
+            Boolean(error) ||
+            Boolean(loadMoreError) ||
+            !itemsBelongToCurrentQuery() ||
             !hasMore ||
             anyModalIsOpen()
           ) {
@@ -3144,17 +3547,19 @@ function createFacturasController(host = null, context = {}) {
           }
 
           if (entries.some((entry) => entry.isIntersecting)) {
+            disconnectInfiniteObserver();
             void loadMore();
           }
         },
         {
-          root: null,
+          root: scrollRoot,
           rootMargin: INFINITE_ROOT_MARGIN,
           threshold: 0.01,
         }
       );
 
-      infiniteObserver.observe(sentinel);
+      infiniteObserver = observer;
+      observer.observe(sentinel);
       return true;
     } catch {
       disconnectInfiniteObserver();
@@ -3175,6 +3580,10 @@ function createFacturasController(host = null, context = {}) {
       return deferMainRender(options);
     }
 
+    const stableFocus = options.preserveFocus === false
+      ? null
+      : captureStableListFocus();
+
     host.innerHTML = renderFacturasTemplate(viewPayload());
     bindFacturasTemplateDom(host);
     syncModalBodyState();
@@ -3184,6 +3593,8 @@ function createFacturasController(host = null, context = {}) {
         options.focusSelector,
         options.focusEnd !== false
       );
+    } else {
+      restoreStableListFocus(stableFocus);
     }
 
     syncInfiniteObserver();
@@ -3241,6 +3652,12 @@ function createFacturasController(host = null, context = {}) {
     host.innerHTML = renderFacturasErrorState(message);
     syncModalBodyState();
     disconnectInfiniteObserver();
+    const alert = host.querySelector("#facturas-fatal-error");
+    try {
+      alert?.focus?.({ preventScroll: true });
+    } catch {
+      alert?.focus?.();
+    }
     return true;
   }
 
@@ -3249,32 +3666,74 @@ function createFacturasController(host = null, context = {}) {
     requestPage = DEFAULT_PAGE,
     force = false,
     silent = false,
+    preservePages = false,
   } = {}) {
     if (destroyed) return null;
 
     const append = mode === "append";
-    const seq = ++listSeq;
-
     const requestedPage = Math.max(
       DEFAULT_PAGE,
       number(requestPage, DEFAULT_PAGE)
     );
 
     const sortParts = getSortParts();
+    const requestContextKey = getListContextKey();
+    const compatibleItems = itemsBelongToCurrentQuery();
+    const preserveLoadedPages = Boolean(
+      !append &&
+      preservePages === true &&
+      requestedPage === DEFAULT_PAGE &&
+      compatibleItems &&
+      items.length
+    );
+    const previousPageState = {
+      items,
+      total,
+      totalKnown,
+      page,
+      nextPage,
+      hasMore,
+      itemsContextKey,
+      loadMoreError,
+    };
+
+    if (
+      append &&
+      (
+        loading ||
+        refreshing ||
+        loadingMore ||
+        listSearchTimer ||
+        listSearchComposing ||
+        Boolean(error) ||
+        !hasMore ||
+        !compatibleItems
+      )
+    ) {
+      return null;
+    }
+
+    const seq = ++listSeq;
     error = "";
+    if (!preserveLoadedPages) loadMoreError = "";
 
     if (append) {
-      if (loading || refreshing || loadingMore || !hasMore) {
-        return null;
-      }
-
       loadingMore = true;
-    } else if (force && items.length) {
+    } else if (silent && items.length && compatibleItems) {
+      /*
+        Silent revalidation keeps the current DOM, but it still owns the list
+        request slot. Marking it as refreshing prevents the sentinel and the
+        scroll fallback from racing an append request against this first page.
+      */
+      refreshing = true;
+      loading = false;
+      loadingMore = false;
+    } else if (force && compatibleItems) {
       refreshing = true;
       loading = false;
       loadingMore = false;
     } else {
-      loading = !silent;
+      loading = true;
       refreshing = false;
       loadingMore = false;
     }
@@ -3299,12 +3758,18 @@ function createFacturasController(host = null, context = {}) {
 
         filters: getListFilters(),
         cacheAppend: append,
-        returnStaleOnError: !append,
+        returnStaleOnError: false,
         dedupe: true,
         force: force === true,
       });
 
-      if (seq !== listSeq || destroyed) return null;
+      if (
+        seq !== listSeq ||
+        destroyed ||
+        requestContextKey !== getListContextKey()
+      ) {
+        return null;
+      }
 
       const rows = safeArray(
         first(
@@ -3315,19 +3780,170 @@ function createFacturasController(host = null, context = {}) {
           []
         )
       );
+      const normalizedRows = mergeFacturas([], rows, { append: false });
+      const responseAdvertisesMore = parseBoolean(
+        first(
+          response?.hasMore,
+          response?.more,
+          response?.canLoadMore,
+          response?.paging?.hasMore,
+          false
+        ),
+        false
+      );
+      if (!append && responseAdvertisesMore && normalizedRows.length === 0) {
+        const progressError = new Error(
+          "La primera página continuable no incluyó facturas con identidad estable."
+        );
+        progressError.code = "FACTURAS_FIRST_PAGE_DID_NOT_ADVANCE";
+        throw progressError;
+      }
 
-      items = append
-        ? mergeFacturas(items, rows, { append: true })
+      const freshWithLoaded = preserveLoadedPages
+        ? mergeFacturasFreshPageFirst(
+            previousPageState.items,
+            rows,
+            pageSize
+          )
         : mergeFacturas([], rows, { append: false });
+      items = append
+        ? mergeFacturas(previousPageState.items, rows, { append: true })
+        : freshWithLoaded;
+      itemsContextKey = requestContextKey;
 
       updatePagingFromResponse(
         response || {},
         requestedPage
       );
 
+      const responseTotalKnown = Boolean(
+        response?.totalKnown === true ||
+        response?.paging?.totalKnown === true ||
+        response?.meta?.totalKnown === true
+      );
+      const responseTotal = Math.max(
+        0,
+        number(
+          first(
+            response?.total,
+            response?.remoteCount,
+            response?.totalMatched,
+            response?.meta?.total,
+            response?.paging?.total,
+            rows.length
+          ),
+          rows.length
+        )
+      );
+      const totalContracted = Boolean(
+        preserveLoadedPages &&
+        responseTotalKnown &&
+        (
+          responseTotal < previousPageState.items.length ||
+          (
+            previousPageState.totalKnown &&
+            responseTotal < previousPageState.total
+          )
+        )
+      );
+      const totalChanged = Boolean(
+        preserveLoadedPages &&
+        responseTotalKnown &&
+        previousPageState.totalKnown &&
+        responseTotal !== previousPageState.total
+      );
+      const firstPageIdentityChanged = Boolean(
+        preserveLoadedPages &&
+        !facturasFirstPageIdentityMatches(
+          previousPageState.items,
+          rows,
+          pageSize
+        )
+      );
+      const stableKnownTotal = Boolean(
+        responseTotalKnown &&
+        previousPageState.totalKnown &&
+        responseTotal === previousPageState.total
+      );
+      const retainedRowsExceedTotal = Boolean(
+        preserveLoadedPages &&
+        responseTotalKnown &&
+        freshWithLoaded.length > responseTotal
+      );
+      const preserveContinuation = Boolean(
+        preserveLoadedPages &&
+        hasMore &&
+        previousPageState.hasMore &&
+        previousPageState.nextPage &&
+        stableKnownTotal &&
+        !totalContracted &&
+        !totalChanged &&
+        !firstPageIdentityChanged &&
+        !retainedRowsExceedTotal
+      );
+      const preserveCompletedHistory = Boolean(
+        preserveLoadedPages &&
+        hasMore &&
+        !previousPageState.hasMore &&
+        !previousPageState.nextPage &&
+        stableKnownTotal &&
+        !totalContracted &&
+        !totalChanged &&
+        !firstPageIdentityChanged &&
+        !retainedRowsExceedTotal &&
+        (
+          !responseTotalKnown ||
+          freshWithLoaded.length === responseTotal
+        )
+      );
+      const preserveAccumulatedRows =
+        preserveContinuation || preserveCompletedHistory;
+
+      if (preserveAccumulatedRows) {
+        items = freshWithLoaded;
+        page = previousPageState.page;
+        nextPage = preserveContinuation
+          ? previousPageState.nextPage
+          : null;
+        hasMore = preserveContinuation;
+        totalKnown = responseTotalKnown || previousPageState.totalKnown;
+        const knownTotal = responseTotalKnown
+          ? responseTotal
+          : previousPageState.total;
+        total = totalKnown
+          ? Math.max(items.length, knownTotal)
+          : Math.max(items.length, total);
+      } else if (preserveLoadedPages) {
+        items = mergeFacturas([], rows, { append: false });
+        updatePagingFromResponse(response || {}, requestedPage);
+      }
+
+      if (
+        append &&
+        hasMore &&
+        items.length <= previousPageState.items.length
+      ) {
+        items = previousPageState.items;
+        total = previousPageState.total;
+        totalKnown = previousPageState.totalKnown;
+        page = previousPageState.page;
+        nextPage = previousPageState.nextPage;
+        hasMore = previousPageState.hasMore;
+        itemsContextKey = previousPageState.itemsContextKey;
+        const progressError = new Error(
+          "La siguiente página de facturas no añadió registros nuevos."
+        );
+        progressError.code = "FACTURAS_PAGE_DID_NOT_ADVANCE";
+        throw progressError;
+      }
+
       error = response?.stale
         ? cleanText(response.error?.message, "")
         : "";
+      loadMoreError = preserveContinuation
+        ? previousPageState.loadMoreError
+        : "";
+      syncListCacheSnapshot();
 
       loading = false;
       refreshing = false;
@@ -3336,14 +3952,31 @@ function createFacturasController(host = null, context = {}) {
       render();
       return response;
     } catch (loadError) {
-      if (seq !== listSeq || destroyed) return null;
+      if (
+        seq !== listSeq ||
+        destroyed ||
+        requestContextKey !== getListContextKey()
+      ) {
+        return null;
+      }
 
-      error = safeError(loadError);
+      const message = safeError(loadError);
+      if (append && items.length) {
+        loadMoreError = message;
+        error = "";
+      } else if (preserveLoadedPages && items.length) {
+        loadMoreError = previousPageState.loadMoreError;
+        error = message;
+      } else {
+        loadMoreError = "";
+        error = message;
+      }
       loading = false;
       refreshing = false;
       loadingMore = false;
 
       if (items.length) {
+        syncListCacheSnapshot();
         render();
         return null;
       }
@@ -3355,12 +3988,23 @@ function createFacturasController(host = null, context = {}) {
 
   function resetListState({ keepItems = true } = {}) {
     listSeq += 1;
-    page = DEFAULT_PAGE;
-    nextPage = DEFAULT_PAGE;
-    hasMore = true;
-    total = keepItems ? Math.max(total, items.length) : 0;
+    loading = false;
+    refreshing = false;
+    loadingMore = false;
+    error = "";
+    loadMoreError = "";
 
-    if (!keepItems) items = [];
+    if (!keepItems) {
+      items = [];
+      itemsContextKey = "";
+      total = 0;
+      totalKnown = false;
+      page = DEFAULT_PAGE;
+      nextPage = DEFAULT_PAGE;
+      hasMore = true;
+    } else {
+      total = Math.max(total, items.length);
+    }
 
     disconnectInfiniteObserver();
     return true;
@@ -3372,17 +4016,24 @@ function createFacturasController(host = null, context = {}) {
       requestPage: options.page || DEFAULT_PAGE,
       force: options.force === true,
       silent: options.silent === true,
+      preservePages:
+        options.preservePages !== false &&
+        itemsBelongToCurrentQuery(),
     });
   }
 
   async function refresh() {
-    resetListState({ keepItems: true });
+    cancelListSearchTimer();
+    const preservePages = itemsBelongToCurrentQuery();
+    if (!preservePages) resetListState({ keepItems: false });
+    else disconnectInfiniteObserver();
 
     return fetchList({
       mode: "replace",
       requestPage: DEFAULT_PAGE,
       force: true,
       silent: false,
+      preservePages,
     });
   }
 
@@ -3391,13 +4042,18 @@ function createFacturasController(host = null, context = {}) {
     silent = false,
     keepItems = true,
   } = {}) {
-    resetListState({ keepItems });
+    const preservePages = Boolean(
+      keepItems && itemsBelongToCurrentQuery()
+    );
+    if (!preservePages) resetListState({ keepItems: false });
+    else disconnectInfiniteObserver();
 
     return fetchList({
       mode: "replace",
       requestPage: DEFAULT_PAGE,
       force,
       silent,
+      preservePages,
     });
   }
 
@@ -3407,6 +4063,10 @@ function createFacturasController(host = null, context = {}) {
       loading ||
       refreshing ||
       loadingMore ||
+      listSearchTimer ||
+      listSearchComposing ||
+      Boolean(error) ||
+      !itemsBelongToCurrentQuery() ||
       !hasMore
     ) {
       return false;
@@ -3426,87 +4086,82 @@ function createFacturasController(host = null, context = {}) {
   }
 
   function scheduleListReload() {
-    if (listSearchTimer) {
-      window.clearTimeout(listSearchTimer);
-      listSearchTimer = null;
-    }
+    cancelListSearchTimer();
 
     listSearchTimer = window.setTimeout(() => {
       listSearchTimer = null;
 
-      void reloadFromStart({
+      void fetchList({
+        mode: "replace",
+        requestPage: DEFAULT_PAGE,
         force: false,
         silent: true,
-        keepItems: true,
+        preservePages: false,
       });
     }, LIST_SEARCH_DEBOUNCE_MS);
   }
 
-  function setFilter(value = "all") {
-    const next = normalizeKey(value || "all") || "all";
+  function reloadChangedQuery(options = {}) {
+    resetListState({ keepItems: false });
+    loading = true;
+    render(options);
 
-    filter = ["all", "pending", "paid", "overdue"].includes(next)
-      ? next
-      : "all";
-
-    resetListState({ keepItems: true });
-    render();
-
-    void reloadFromStart({
+    void fetchList({
+      mode: "replace",
+      requestPage: DEFAULT_PAGE,
       force: false,
       silent: true,
-      keepItems: true,
+      preservePages: false,
     });
 
     return true;
   }
 
+  function setFilter(value = "all") {
+    const next = normalizeKey(value || "all") || "all";
+    const nextFilter = ["all", "pending", "paid", "overdue"].includes(next)
+      ? next
+      : "all";
+    const hadPendingSearch = cancelListSearchTimer();
+    if (nextFilter === filter && !hadPendingSearch) return true;
+
+    filter = nextFilter;
+    return reloadChangedQuery();
+  }
+
   function setSearch(value = "") {
-    search = cleanText(value, "");
+    const nextSearch = cleanText(value, "");
+    if (nextSearch === search && !listSearchTimer) return true;
+    search = nextSearch;
 
-    resetListState({ keepItems: true });
-
-    render({
-      focusSelector: "[data-field='search']",
-    });
-
+    resetListState({ keepItems: false });
+    loading = true;
     scheduleListReload();
+
+    render({ preserveFocus: true });
+
     return true;
   }
 
   function clearFilters() {
+    cancelListSearchTimer();
     filter = "all";
     search = "";
     sort = "date_desc";
 
-    resetListState({ keepItems: true });
-    render();
-
-    void reloadFromStart({
-      force: false,
-      silent: true,
-      keepItems: true,
-    });
-
-    return true;
+    return reloadChangedQuery();
   }
 
   function setSort(value = "date_desc") {
-    sort =
+    const nextSort =
       normalizeKey(value) === "date_asc"
         ? "date_asc"
         : "date_desc";
+    const hadPendingSearch = cancelListSearchTimer();
+    if (nextSort === sort && !hadPendingSearch) return true;
 
-    resetListState({ keepItems: true });
-    render();
-
-    void reloadFromStart({
-      force: false,
-      silent: true,
-      keepItems: true,
-    });
-
-    return true;
+    sort = nextSort;
+    return reloadChangedQuery();
   }
 
   async function setPage(value = DEFAULT_PAGE) {
@@ -3561,6 +4216,7 @@ function createFacturasController(host = null, context = {}) {
 
     rememberModalReturnFocus(openerNode);
     suspendScheduledMainRender();
+    disconnectInfiniteObserver();
     clearCreateTimers();
 
     resetCreateModal();
@@ -3588,7 +4244,8 @@ function createFacturasController(host = null, context = {}) {
     removeCreateModalHost();
     syncModalBodyState();
 
-    flushDeferredMainRender({ immediate: true });
+    const flushedMain = flushDeferredMainRender({ immediate: true });
+    if (!flushedMain) syncInfiniteObserver();
     restoreModalReturnFocus();
 
     return true;
@@ -4442,9 +5099,22 @@ function createFacturasController(host = null, context = {}) {
         buildFacturaPayload()
       );
 
-      if (created) {
+      const canOptimisticallyInsert = facturasCanOptimisticallyInsertCreated({
+        created,
+        filter,
+        search,
+        hasMore,
+        sort,
+        currentQuery: itemsBelongToCurrentQuery(),
+      });
+      if (canOptimisticallyInsert) {
+        const previousCount = items.length;
         items = upsertFactura(items, created, sort);
-        total = Math.max(total + 1, items.length);
+        total = Math.max(
+          total + (items.length > previousCount ? 1 : 0),
+          items.length
+        );
+        syncListCacheSnapshot();
       }
 
       creating = false;
@@ -4460,6 +5130,11 @@ function createFacturasController(host = null, context = {}) {
       });
 
       restoreModalReturnFocus();
+      void reloadFromStart({
+        force: true,
+        silent: true,
+        keepItems: itemsBelongToCurrentQuery(),
+      });
       return true;
     } catch (createError) {
       creating = false;
@@ -4512,9 +5187,10 @@ function createFacturasController(host = null, context = {}) {
       immediate: true,
     });
 
-    flushDeferredMainRender({
+    const flushedMain = flushDeferredMainRender({
       immediate: true,
     });
+    if (!flushedMain) syncInfiniteObserver();
 
     restoreModalReturnFocus();
     return true;
@@ -4536,6 +5212,7 @@ function createFacturasController(host = null, context = {}) {
 
     rememberModalReturnFocus(openerNode);
     suspendScheduledMainRender();
+    disconnectInfiniteObserver();
 
     const local =
       items.find((item) => getFacturaId(item) === id) || null;
@@ -5143,7 +5820,7 @@ function createFacturasController(host = null, context = {}) {
       );
     }
 
-    if (type === LOAD_MORE_ACTION) {
+    if (type === FACTURAS_ACTIONS.RETRY_PAGE) {
       return loadMore();
     }
 
@@ -5372,6 +6049,7 @@ function createFacturasController(host = null, context = {}) {
     );
 
     if (field === "search") {
+      if (event.isComposing || listSearchComposing) return;
       setSearch(target.value || "");
       return;
     }
@@ -5389,6 +6067,33 @@ function createFacturasController(host = null, context = {}) {
     if (createModal.open) {
       patchCreateFormFromField(target);
     }
+  }
+
+  function onCompositionStart(event) {
+    const target = event.target;
+    if (
+      target &&
+      ownsNode(target) &&
+      cleanText(target?.dataset?.field || target?.name || "", "") === "search"
+    ) {
+      listSearchComposing = true;
+      cancelListSearchTimer();
+      disconnectInfiniteObserver();
+    }
+  }
+
+  function onCompositionEnd(event) {
+    const target = event.target;
+    if (
+      !target ||
+      !ownsNode(target) ||
+      cleanText(target?.dataset?.field || target?.name || "", "") !== "search"
+    ) {
+      return;
+    }
+
+    listSearchComposing = false;
+    setSearch(target.value || "");
   }
 
   function onChange(event) {
@@ -5473,6 +6178,11 @@ function createFacturasController(host = null, context = {}) {
       loading ||
       refreshing ||
       loadingMore ||
+      Boolean(listSearchTimer) ||
+      listSearchComposing ||
+      Boolean(error) ||
+      Boolean(loadMoreError) ||
+      !itemsBelongToCurrentQuery() ||
       !hasMore ||
       anyModalIsOpen()
     ) {
@@ -5480,16 +6190,11 @@ function createFacturasController(host = null, context = {}) {
     }
 
     try {
-      const doc = document.documentElement;
-      const scrollTop = window.scrollY || doc.scrollTop || 0;
-      const viewport = window.innerHeight || doc.clientHeight || 0;
-
-      const height = Math.max(
-        doc.scrollHeight || 0,
-        document.body?.scrollHeight || 0
-      );
-
-      return height - (scrollTop + viewport) < 900;
+      const scrollRoot = infiniteScrollRoot || resolveInfiniteScrollRoot();
+      if (!scrollRoot) return false;
+      return scrollRoot.scrollHeight - (
+        scrollRoot.scrollTop + scrollRoot.clientHeight
+      ) < 900;
     } catch {
       return false;
     }
@@ -5512,6 +6217,8 @@ function createFacturasController(host = null, context = {}) {
   function bindTarget(target = null) {
     target?.addEventListener?.("click", onClick);
     target?.addEventListener?.("input", onInput);
+    target?.addEventListener?.("compositionstart", onCompositionStart);
+    target?.addEventListener?.("compositionend", onCompositionEnd);
     target?.addEventListener?.("change", onChange);
     target?.addEventListener?.("submit", onSubmit);
     target?.addEventListener?.("keydown", onKeydown);
@@ -5520,6 +6227,8 @@ function createFacturasController(host = null, context = {}) {
   function unbindTarget(target = null) {
     target?.removeEventListener?.("click", onClick);
     target?.removeEventListener?.("input", onInput);
+    target?.removeEventListener?.("compositionstart", onCompositionStart);
+    target?.removeEventListener?.("compositionend", onCompositionEnd);
     target?.removeEventListener?.("change", onChange);
     target?.removeEventListener?.("submit", onSubmit);
     target?.removeEventListener?.("keydown", onKeydown);
@@ -5529,7 +6238,8 @@ function createFacturasController(host = null, context = {}) {
     bindTarget(host);
 
     if (isBrowser()) {
-      window.addEventListener("scroll", onWindowScroll, {
+      infiniteScrollRoot = resolveInfiniteScrollRoot();
+      infiniteScrollRoot?.addEventListener?.("scroll", onWindowScroll, {
         passive: true,
       });
 
@@ -5553,8 +6263,9 @@ function createFacturasController(host = null, context = {}) {
     }
 
     if (isBrowser()) {
-      window.removeEventListener("scroll", onWindowScroll);
+      infiniteScrollRoot?.removeEventListener?.("scroll", onWindowScroll);
       window.removeEventListener("resize", onWindowScroll);
+      infiniteScrollRoot = null;
     }
   }
 
@@ -5582,6 +6293,10 @@ function createFacturasController(host = null, context = {}) {
         MAX_BATCH_SIZE
       );
 
+      if (items.length && !itemsBelongToCurrentQuery()) {
+        resetListState({ keepItems: false });
+      }
+
       if (items.length) {
         loading = false;
         render({ immediate: true });
@@ -5593,6 +6308,7 @@ function createFacturasController(host = null, context = {}) {
       void load({
         page: DEFAULT_PAGE,
         silent: true,
+        preservePages: items.length > 0,
       });
 
       return controller;
@@ -5609,6 +6325,7 @@ function createFacturasController(host = null, context = {}) {
       ticketSearchSeq += 1;
       detailSessionSeq += 1;
       markingPaidFacturaId = "";
+      listSearchComposing = false;
 
       clearTimers();
       cancelScheduledRender();
@@ -5687,6 +6404,7 @@ function createFacturasController(host = null, context = {}) {
         loading,
         refreshing,
         loadingMore,
+        loadMoreError: Boolean(loadMoreError),
         creating,
 
         total,

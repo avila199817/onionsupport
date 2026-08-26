@@ -28,7 +28,7 @@ jobs:
           printf '%s\n' "$output"
           test "$status" -eq 1
           grep -Fq "retain ticket results after select: expected 1 match, got 0" <<<"$output"
-          python .github/scripts/facturas_create_polish_bootstrap_v2.py
+          python .github/scripts/facturas_create_polish_bootstrap_v3.py
 
       - name: Validate focused Facturas create change
         shell: bash

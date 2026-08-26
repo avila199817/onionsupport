@@ -72,6 +72,11 @@ function safeObject(value, fallback = {}) {
   return isObject(value) ? value : fallback;
 }
 
+function number(value = 0, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 function cleanText(value = "", fallback = "") {
   const text = String(value ?? "")
     .replace(/[\r\n\t]/g, " ")

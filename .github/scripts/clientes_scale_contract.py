@@ -179,6 +179,10 @@ require(
     "incremental renders must restore scroll, exact filter, search and retry focus",
 )
 require(
+    "function number(value = 0, fallback = 0)" in controller,
+    "focus and scroll restoration must use a locally defined numeric normalizer",
+)
+require(
     "visibleLimit" not in controller,
     "main Clientes controller must not simulate pagination with visibleLimit",
 )

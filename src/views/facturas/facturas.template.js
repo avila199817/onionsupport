@@ -13,7 +13,7 @@ import { renderFacturasCreateModal } from "./facturas.template.create.js";
 import { renderFacturasDetailModal } from "./facturas.template.modal.js";
 
 export const FACTURAS_TEMPLATE_VERSION =
-  "facturas.template.private.v6.continuous-scroll-a11y";
+  "facturas.template.private.v7.admin-visual-parity";
 
 export const FACTURAS_ACTIONS = Object.freeze({
   REFRESH: "refresh",
@@ -381,6 +381,7 @@ const ICONS = Object.freeze({
   close: `<svg ${ICON_COMMON}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
   calendar: `<svg ${ICON_COMMON}><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>`,
   filter: `<svg ${ICON_COMMON}><path d="M22 3H2l8 9.46V19l4 2v-8.54Z"/></svg>`,
+  alert: `<svg ${ICON_COMMON}><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
 });
 const icon = (name = "") => ICONS[name] || "";
 
@@ -990,10 +991,10 @@ function renderInfiniteScrollFooter(listState = {}, state = {}) {
   const listError = cleanText(runtime.error, "");
   const loadMoreError = cleanText(first(listState.loadMoreError, runtime.loadMoreError, ""), "");
   if (listError) {
-    return `<div class="facturas-infinite" data-facturas-infinite="true" data-has-more="false" tabindex="-1"><div class="facturas-infinite-status is-error">Actualización detenida. Usa Actualizar para reintentar.</div></div>`;
+    return `<div class="facturas-infinite" data-facturas-infinite="true" data-has-more="false" tabindex="-1"><div class="facturas-infinite-status is-error"><span class="facturas-infinite-error-icon" aria-hidden="true">${icon("alert")}</span><span>Actualización detenida. Usa Actualizar para reintentar.</span></div></div>`;
   }
   const status = loadMoreError
-    ? `<span>${escapeHtml(loadMoreError)}</span><button type="button" class="facturas-btn facturas-infinite-retry" data-facturas-action="${FACTURAS_ACTIONS.RETRY_PAGE}" data-action="${FACTURAS_ACTIONS.RETRY_PAGE}">${icon("refresh")}<span>Reintentar</span></button>`
+    ? `<span class="facturas-infinite-error-icon" aria-hidden="true">${icon("alert")}</span><span>${escapeHtml(loadMoreError)}</span><button type="button" class="facturas-btn facturas-infinite-retry" data-facturas-action="${FACTURAS_ACTIONS.RETRY_PAGE}" data-action="${FACTURAS_ACTIONS.RETRY_PAGE}">${icon("refresh")}<span>Reintentar</span></button>`
     : loadingMore
     ? renderSpinner("Cargando más facturas...")
     : refreshing
@@ -1051,7 +1052,13 @@ export function renderHeader(input = {}) {
 ========================================================= */
 
 export function renderFacturasLoadingState(input = {}) {
-  return `<section class="facturas-view-root facturas-view-root--loading" data-facturas-scope="true" data-template-version="${attr(FACTURAS_TEMPLATE_VERSION)}" aria-busy="true">${renderHeader({ ...safeObject(input), loading: true })}<section class="facturas-history"><span id="facturas-list-status" class="facturas-loading-status" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">Cargando facturas...</span>${renderTableLoading(DEFAULT_SKELETON_ROWS)}</section></section>`;
+  const data = safeObject(input);
+  const payload = {
+    ...data,
+    loading: true,
+    state: { ...getRuntimeState(data), loading: true },
+  };
+  return `<section class="facturas-view-root facturas-view-root--loading" data-facturas-scope="true" data-template-version="${attr(FACTURAS_TEMPLATE_VERSION)}" aria-busy="true">${renderHeader(payload)}${renderCards(payload)}</section>`;
 }
 
 export function renderFacturasErrorState(message = "No se pudieron cargar las facturas.") {

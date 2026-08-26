@@ -13,7 +13,7 @@
 ========================================================= */
 
 export const USUARIOS_TEMPLATE_VERSION =
-  "usuarios.template.v26.debounce-safe-live-status";
+  "usuarios.template.v27.private-admin-visual-parity";
 export const USUARIOS_TABLE_TEMPLATE_VERSION = USUARIOS_TEMPLATE_VERSION;
 export const USUARIOS_VIEW_TEMPLATE_VERSION = USUARIOS_TEMPLATE_VERSION;
 
@@ -49,7 +49,7 @@ const FILTERS = Object.freeze([
   { key: "blocked", label: "Bloqueados" },
 ]);
 
-const TABLE_SCALE = "100";
+const TABLE_SCALE = "110";
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -288,6 +288,10 @@ function loadedStats(items = []) {
 function renderSpinner(label = "") {
   return `<span class="usuarios-inline-loading"><span class="usuarios-inline-spinner" aria-hidden="true"></span>${label ? `<span>${escapeHtml(label)}</span>` : ""}</span>`;
 }
+
+function renderRefreshOverlay() {
+  return `<div class="usuarios-refresh-overlay" aria-hidden="true">${renderSpinner("Actualizando usuarios...")}</div>`;
+}
 function filterValue(input = {}) {
   const data = safeObject(input);
   const state = stateFrom(data);
@@ -355,7 +359,7 @@ function renderFilters(input = {}) {
 
 function renderEmptyContent({ error = "", filtering = false, restricted = false, admin = true } = {}) {
   if (restricted) return `<div class="usuarios-empty usuarios-empty--forbidden"><div class="usuarios-empty-icon">${icon("shield")}</div><h3>Acceso restringido</h3><p>La vista de usuarios está reservada para administradores.</p></div>`;
-  if (error) return `<div class="usuarios-empty"><div class="usuarios-empty-icon">${icon("alert")}</div><h3>No se pudieron cargar los usuarios</h3><p>${escapeHtml(error)}</p><button type="button" class="usuarios-btn usuarios-btn--create" data-usuarios-action="${USUARIOS_ACTIONS.RETRY}" data-action="retry">${icon("refresh")}<span>Reintentar</span></button></div>`;
+  if (error) return `<div class="usuarios-empty"><div class="usuarios-empty-icon">${icon("alert")}</div><h3>No se pudieron cargar los usuarios</h3><p>${escapeHtml(error)}</p><button type="button" class="usuarios-btn" data-usuarios-action="${USUARIOS_ACTIONS.RETRY}" data-action="retry">${icon("refresh")}<span>Reintentar</span></button></div>`;
   if (filtering) return `<div class="usuarios-empty"><div class="usuarios-empty-icon">${icon("search")}</div><h3>No hay usuarios con esos filtros</h3><p>Prueba con otra búsqueda o estado.</p><button type="button" class="usuarios-btn" data-usuarios-action="${USUARIOS_ACTIONS.CLEAR_FILTERS}" data-action="clear-filters">${icon("close")}<span>Limpiar filtros</span></button></div>`;
   return `<div class="usuarios-empty"><div class="usuarios-empty-icon">${icon("users")}</div><h3>Todavía no hay usuarios</h3><p>Cuando haya usuarios registrados aparecerán aquí.</p>${admin ? `<button type="button" class="usuarios-btn usuarios-btn--create" data-usuarios-action="${USUARIOS_ACTIONS.CREATE}" data-action="create">${icon("plus")}<span>Crear usuario</span></button>` : ""}</div>`;
 }
@@ -377,7 +381,7 @@ function renderFooter(input = {}, items = []) {
   const loadMoreError = cleanText(state.loadMoreError, "");
   if (state.searchPending) return "";
   if (loadMoreError) {
-    return `<div class="usuarios-list-footer usuarios-feed-error" data-usuarios-infinite="true"><span class="usuarios-feed-status">${escapeHtml(loadMoreError)}</span><button type="button" class="usuarios-feed-retry" data-usuarios-action="${USUARIOS_ACTIONS.RETRY_PAGE}" data-action="${USUARIOS_ACTIONS.RETRY_PAGE}">${icon("refresh")}<span>Reintentar</span></button><span class="usuarios-feed-count">${escapeHtml(label)}</span></div>`;
+    return `<div class="usuarios-list-footer usuarios-feed-error" data-usuarios-infinite="true"><span class="usuarios-feed-error-icon" aria-hidden="true">${icon("alert")}</span><span class="usuarios-feed-status">${escapeHtml(loadMoreError)}</span><button type="button" class="usuarios-feed-retry" data-usuarios-action="${USUARIOS_ACTIONS.RETRY_PAGE}" data-action="${USUARIOS_ACTIONS.RETRY_PAGE}">${icon("refresh")}<span>Reintentar</span></button><span class="usuarios-feed-count">${escapeHtml(label)}</span></div>`;
   }
   if (!state.hasMore) {
     return `<div class="usuarios-list-footer usuarios-feed-end" data-usuarios-infinite="true"><span class="usuarios-feed-status">${escapeHtml(getFinalUsersMessage(totalKnown, totalCount))}</span></div>`;
@@ -386,7 +390,7 @@ function renderFooter(input = {}, items = []) {
 }
 
 function renderTableLoading(rows = 6) {
-  return `<div class="usuarios-table-loading" aria-hidden="true">${Array.from({ length: rows }).map(() => `<div class="usuarios-table-loading-row"><span class="usuarios-skeleton usuarios-skeleton--avatar"></span><div class="usuarios-table-loading-copy"><span class="usuarios-skeleton usuarios-skeleton--xs"></span><span class="usuarios-skeleton usuarios-skeleton--lg"></span><span class="usuarios-skeleton usuarios-skeleton--md"></span></div></div>`).join("")}</div>`;
+  return `<div class="usuarios-table-loading" aria-hidden="true">${Array.from({ length: rows }).map(() => `<div class="usuarios-table-loading-row"><span class="usuarios-skeleton usuarios-skeleton--avatar"></span><div class="usuarios-table-loading-copy"><span class="usuarios-skeleton usuarios-skeleton--xs"></span><span class="usuarios-skeleton usuarios-skeleton--lg"></span><span class="usuarios-skeleton usuarios-skeleton--md"></span></div><span class="usuarios-skeleton usuarios-skeleton--pill"></span><span class="usuarios-skeleton usuarios-skeleton--date"></span><span class="usuarios-skeleton usuarios-skeleton--email"></span><span class="usuarios-skeleton usuarios-skeleton--location"></span><span class="usuarios-skeleton usuarios-skeleton--activity"></span></div>`).join("")}</div>`;
 }
 
 export function renderTable(input = {}) {
@@ -423,7 +427,16 @@ export function renderTable(input = {}) {
                 ? `Mostrando ${formatNumber(items.length)} de ${formatNumber(totalCount)}`
                 : `Mostrando ${formatNumber(items.length)} usuarios cargados`;
 
-  return `<section class="usuarios-history${loading ? " is-loading" : ""}${error ? " has-error" : ""}" data-usuarios-history="true" aria-busy="${busy ? "true" : "false"}"><div class="usuarios-history-head"><div class="usuarios-history-copy"><h2 class="usuarios-history-title">Historial de usuarios</h2><p class="usuarios-history-subtitle" tabindex="-1" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(subtitle)}</p></div>${renderFilters(data)}</div>${error && items.length ? `<div class="usuarios-inline-error">${escapeHtml(error)}</div>` : ""}${loading && !items.length ? renderTableLoading() : items.length ? `<div class="usuarios-table-shell"><table class="usuarios-table" data-table-columns="6" data-table-scale="${TABLE_SCALE}">${renderColgroup()}${renderThead()}<tbody>${items.map((item) => renderRow(item, state)).join("")}</tbody></table></div>${renderFooter(data, items)}` : renderEmptyContent({ error, filtering, restricted: isRestricted(data), admin: data.admin !== false })}</section>`;
+  const inlineError = error && items.length
+    ? `<div class="usuarios-inline-error" role="alert" aria-atomic="true"><span class="usuarios-inline-error-icon" aria-hidden="true">${icon("alert")}</span><span>${escapeHtml(error)}</span></div>`
+    : "";
+  const content = loading && !items.length
+    ? renderTableLoading()
+    : items.length
+      ? `<div class="usuarios-table-wrap${refreshing ? " is-refreshing" : ""}">${refreshing ? renderRefreshOverlay() : ""}<div class="usuarios-table-shell"><table class="usuarios-table" data-table-columns="6" data-table-scale="${TABLE_SCALE}">${renderColgroup()}${renderThead()}<tbody>${items.map((item) => renderRow(item, state)).join("")}</tbody></table></div></div>${renderFooter(data, items)}`
+      : renderEmptyContent({ error, filtering, restricted: isRestricted(data), admin: data.admin !== false });
+
+  return `<section class="usuarios-history${loading ? " is-loading" : ""}${error ? " has-error" : ""}" data-usuarios-history="true" aria-busy="${busy ? "true" : "false"}"><div class="usuarios-history-head"><div class="usuarios-history-copy"><h2 class="usuarios-history-title">Historial de usuarios</h2><p class="usuarios-history-subtitle" tabindex="-1" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(subtitle)}</p></div>${renderFilters(data)}</div>${inlineError}${content}</section>`;
 }
 
 export function renderUsuariosTableTemplate(input = {}) {

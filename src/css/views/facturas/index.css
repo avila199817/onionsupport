@@ -14,7 +14,7 @@
 @layer views {
 
 :where(.panel-content[data-view="facturas"], .facturas-view-root, [data-facturas-scope="true"]) {
-  --fac-table-min: 1040px;
+  --fac-table-min: 1080px;
   --fac-main-col: 36%;
   --fac-status-col: 10%;
   --fac-date-col: 10%;
@@ -62,11 +62,6 @@
 
 #facturas-refresh-btn,
 .facturas-hero-actions > [data-facturas-action="refresh"] {
-  display: none;
-}
-
-/* El refresh autónomo no cubre la tabla ni roba atención. */
-.facturas-refresh-overlay {
   display: none;
 }
 
@@ -1151,7 +1146,7 @@
    RESPONSIVE
 ========================================================= */
 
-@container (max-width: 1180px) {
+@container (max-width: 1120px) {
   .facturas-history-head {
     grid-template-columns: 1fr;
     align-items: stretch;
@@ -1186,22 +1181,6 @@
   .facturas-page-title { font-size: 28px; }
   .facturas-stats { grid-template-columns: 1fr; }
   .facturas-btn { flex: 1 1 auto; }
-}
-
-@media (max-width: 1180px) {
-  .facturas-history-head { grid-template-columns: 1fr; }
-  .facturas-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-
-@media (max-width: 820px) {
-  .facturas-hero-top { grid-template-columns: 1fr; }
-  .facturas-hero-actions { justify-content: flex-start; }
-  .facturas-filters { grid-template-columns: 1fr; }
-}
-
-@media (max-width: 560px) {
-  .facturas-page-title { font-size: 28px; }
-  .facturas-stats { grid-template-columns: 1fr; }
 }
 
 /* =========================================================

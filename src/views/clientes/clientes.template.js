@@ -14,7 +14,7 @@ export {
 } from "./clientes.template.legacy.js";
 
 export const CLIENTES_TEMPLATE_VERSION =
-  "clientes.template.cursor.v11.continuous-scroll";
+  "clientes.template.cursor.v12.private-admin-visual-parity";
 export const CLIENTES_TABLE_TEMPLATE_VERSION = CLIENTES_TEMPLATE_VERSION;
 export const CLIENTES_VIEW_TEMPLATE_VERSION = CLIENTES_TEMPLATE_VERSION;
 
@@ -223,6 +223,7 @@ function icon(name = "") {
     plus: '<path d="M12 5v14M5 12h14"/>',
     export: '<path d="M12 3v12"/><path d="m8 7 4-4 4 4"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/>',
     users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>',
+    alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/>',
     close: '<path d="m6 6 12 12M18 6 6 18"/>',
     calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/>',
@@ -240,6 +241,19 @@ function icon(name = "") {
 function initials(value = "") {
   const words = cleanText(value, "CL").split(/\s+/).filter(Boolean);
   return (words.length > 1 ? `${words[0][0]}${words[1][0]}` : words[0].slice(0, 2)).toUpperCase();
+}
+
+function avatarTone(item = {}) {
+  const current = normalizeClienteModel(item);
+  const seed = cleanText(
+    first(current.email, current.clienteId, current.id, current.nombreFiscal, "cliente"),
+    "cliente",
+  );
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = ((hash << 5) - hash + seed.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash) % 10;
 }
 
 function safeAvatarUrl(value = "") {
@@ -265,7 +279,7 @@ function renderAvatar(item = {}) {
   const label = cleanText(first(current.contactoNombre, current.nombreFiscal, "Cliente"), "Cliente");
   const src = safeAvatarUrl(first(current.avatar, current.avatarUrl, ""));
   return `
-    <span class="clientes-avatar${src ? " has-image" : ""}" aria-hidden="true">
+    <span class="clientes-avatar clientes-avatar--tone-${avatarTone(current)}${src ? " has-image" : ""}" aria-hidden="true">
       ${src ? `<img class="clientes-avatar-img" src="${attr(src)}" alt="" width="42" height="42" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : ""}
       <span class="clientes-avatar-fallback">${escapeHtml(initials(label))}</span>
     </span>
@@ -347,6 +361,15 @@ function renderRow(item = {}, vm = {}) {
 
 function renderSpinner(label = "Cargando...") {
   return `<span class="clientes-inline-loading"><span class="clientes-inline-spinner" aria-hidden="true"></span><span>${escapeHtml(label)}</span></span>`;
+}
+
+function renderTableLoading(rows = 6) {
+  const count = Math.max(4, Number.isFinite(Number(rows)) ? Number(rows) : 6);
+  return `<div class="clientes-table-loading" aria-hidden="true">${Array.from({ length: count }).map(() => `<div class="clientes-table-loading-row"><span class="clientes-skeleton clientes-skeleton--avatar"></span><div class="clientes-table-loading-copy"><span class="clientes-skeleton clientes-skeleton--xs"></span><span class="clientes-skeleton clientes-skeleton--lg"></span><span class="clientes-skeleton clientes-skeleton--md"></span></div><span class="clientes-skeleton clientes-skeleton--pill"></span><span class="clientes-skeleton clientes-skeleton--date"></span><span class="clientes-skeleton clientes-skeleton--contact"></span><span class="clientes-skeleton clientes-skeleton--amount"></span></div>`).join("")}</div>`;
+}
+
+function renderRefreshOverlay() {
+  return `<div class="clientes-refresh-overlay" aria-hidden="true">${renderSpinner("Actualizando clientes...")}</div>`;
 }
 
 function buildVm(input = {}) {
@@ -456,7 +479,7 @@ function renderFilters(vm) {
 
 function renderBody(vm) {
   if (vm.loading && !vm.items.length) {
-    return `<div class="clientes-table-loading">${renderSpinner("Cargando clientes...")}</div>`;
+    return renderTableLoading();
   }
   if (!vm.items.length) {
     const filtering = vm.filter !== "all" || Boolean(vm.search);
@@ -473,20 +496,23 @@ function renderBody(vm) {
     `;
   }
   return `
-    ${vm.error ? `<div class="clientes-inline-error" role="alert" aria-atomic="true"><span>${escapeHtml(vm.error)}</span><button type="button" class="clientes-btn clientes-inline-retry" data-clientes-action="${CLIENTES_ACTIONS.REFRESH}" data-action="${CLIENTES_ACTIONS.REFRESH}">${icon("refresh")}<span>Reintentar</span></button></div>` : ""}
-    <div class="clientes-table-shell">
+    ${vm.error ? `<div class="clientes-inline-error" role="alert" aria-atomic="true"><span class="clientes-inline-error-icon" aria-hidden="true">${icon("alert")}</span><span>${escapeHtml(vm.error)}</span><button type="button" class="clientes-btn clientes-inline-retry" data-clientes-action="${CLIENTES_ACTIONS.REFRESH}" data-action="${CLIENTES_ACTIONS.REFRESH}">${icon("refresh")}<span>Reintentar</span></button></div>` : ""}
+    <div class="clientes-table-wrap${vm.refreshing ? " is-refreshing" : ""}">
+      ${vm.refreshing ? renderRefreshOverlay() : ""}
+      <div class="clientes-table-shell">
       <table class="clientes-table">
         <colgroup><col class="clientes-col--main"><col class="clientes-col--status"><col class="clientes-col--date"><col class="clientes-col--contact"><col class="clientes-col--amount"></colgroup>
         <thead><tr>${CLIENTES_TABLE_COLUMNS.map((column) => `<th scope="col" class="clientes-th clientes-th--${column.key}">${escapeHtml(column.label)}</th>`).join("")}</tr></thead>
         <tbody>${vm.items.map((item) => renderRow(item, vm)).join("")}</tbody>
       </table>
+      </div>
     </div>
     <div class="clientes-infinite" data-clientes-infinite="true" data-has-more="${vm.hasMore ? "true" : "false"}" tabindex="-1">
       ${vm.hasMore && !vm.loadingMore && !vm.refreshing && !vm.searchPending && !vm.error && !vm.loadMoreError ? '<div class="clientes-infinite-sentinel" data-clientes-infinite-sentinel="true" aria-hidden="true"></div>' : ""}
       ${vm.error
-        ? '<div class="clientes-infinite-status is-error">Actualización detenida. Reintenta para continuar.</div>'
+        ? `<div class="clientes-infinite-status is-error"><span class="clientes-infinite-error-icon" aria-hidden="true">${icon("alert")}</span><span>Actualización detenida. Reintenta para continuar.</span></div>`
         : vm.loadMoreError
-        ? `<div class="clientes-infinite-status is-error"><span>${escapeHtml(vm.loadMoreError)}</span><button type="button" class="clientes-btn clientes-infinite-retry" data-clientes-action="${CLIENTES_ACTIONS.RETRY_PAGE}" data-action="${CLIENTES_ACTIONS.RETRY_PAGE}">${icon("refresh")}<span>Reintentar</span></button></div>`
+        ? `<div class="clientes-infinite-status is-error"><span class="clientes-infinite-error-icon" aria-hidden="true">${icon("alert")}</span><span>${escapeHtml(vm.loadMoreError)}</span><button type="button" class="clientes-btn clientes-infinite-retry" data-clientes-action="${CLIENTES_ACTIONS.RETRY_PAGE}" data-action="${CLIENTES_ACTIONS.RETRY_PAGE}">${icon("refresh")}<span>Reintentar</span></button></div>`
         : vm.searchPending
           ? '<div class="clientes-infinite-status is-loading">Preparando la búsqueda...</div>'
           : vm.refreshing

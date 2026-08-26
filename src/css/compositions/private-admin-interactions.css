@@ -7,13 +7,13 @@
    Responsabilidad:
    - Resolver estados interactivos que deben vivir después de la composición
      geométrica private-admin-parity.css.
-   - Mantener una única selección visible por criterio en Incidencias.
+   - Mantener una única selección visible por criterio en los listados privados.
    - Dar feedback de puntero a las filas sin convertir el hover en un bloque
      de color plano.
    - Mantener foco, tipografía y controles sin dobles anillos ni recortes.
    - Mantener estable la toolbar mientras cambia el resultado de búsqueda.
-   - Encapsular el CTA principal de Incidencias como botón pill azul,
-     sin alterar la paleta ni la geometría del resto del panel.
+   - Encapsular el CTA principal de cada listado como botón pill azul,
+     sin alterar acciones secundarias ni controles de dominio.
    - Resolver las microinteracciones de los modales Crear y Details desde la
      misma autoridad, reutilizando estados del design system.
    - Reforzar Descripción/seguimiento como contenido primario del Details.
@@ -23,7 +23,7 @@
 @layer compositions {
 
 /* =========================================================
-   INCIDENCIAS · ACCIÓN PRIMARIA GOOGLE BLUE
+   LISTADOS PRIVADOS · ACCIÓN PRIMARIA GOOGLE BLUE
 
    Nueva incidencia es la única acción primaria del hero. Se conserva el
    contrato de botón compartido, pero esta variante adopta una geometría pill
@@ -32,8 +32,16 @@
    texto, tal como pide esta variante visual.
 ========================================================= */
 
-#incidencias-create-btn,
-.incidencias-btn--create {
+:is(
+  #incidencias-create-btn,
+  .incidencias-btn--create,
+  #facturas-create-btn,
+  .facturas-btn--create,
+  #clientes-create-btn,
+  .clientes-btn--create,
+  #usuarios-create-btn,
+  .usuarios-btn--create
+) {
   --btn-primary-bg: #1A73E8;
   --btn-primary-bg-hover: #1967D2;
   --btn-primary-bg-active: #185ABC;
@@ -51,13 +59,29 @@
   border-radius: 999px;
 }
 
-#incidencias-create-btn > svg,
-.incidencias-btn--create > svg {
+:is(
+  #incidencias-create-btn,
+  .incidencias-btn--create,
+  #facturas-create-btn,
+  .facturas-btn--create,
+  #clientes-create-btn,
+  .clientes-btn--create,
+  #usuarios-create-btn,
+  .usuarios-btn--create
+) > svg {
   display: none;
 }
 
-#incidencias-create-btn:hover:not(:disabled):not([aria-disabled="true"]),
-.incidencias-btn--create:hover:not(:disabled):not([aria-disabled="true"]) {
+:is(
+  #incidencias-create-btn,
+  .incidencias-btn--create,
+  #facturas-create-btn,
+  .facturas-btn--create,
+  #clientes-create-btn,
+  .clientes-btn--create,
+  #usuarios-create-btn,
+  .usuarios-btn--create
+):hover:not(:disabled):not([aria-disabled="true"]) {
   border-color: #1967D2;
   background: var(--btn-primary-bg-hover);
   box-shadow:
@@ -66,16 +90,32 @@
   transform: translateY(-1px);
 }
 
-#incidencias-create-btn:active:not(:disabled):not([aria-disabled="true"]),
-.incidencias-btn--create:active:not(:disabled):not([aria-disabled="true"]) {
+:is(
+  #incidencias-create-btn,
+  .incidencias-btn--create,
+  #facturas-create-btn,
+  .facturas-btn--create,
+  #clientes-create-btn,
+  .clientes-btn--create,
+  #usuarios-create-btn,
+  .usuarios-btn--create
+):active:not(:disabled):not([aria-disabled="true"]) {
   border-color: #185ABC;
   background: var(--btn-primary-bg-active);
   box-shadow: 0 1px 2px rgba(60, 64, 67, .18);
   transform: translateY(0);
 }
 
-#incidencias-create-btn:focus-visible,
-.incidencias-btn--create:focus-visible {
+:is(
+  #incidencias-create-btn,
+  .incidencias-btn--create,
+  #facturas-create-btn,
+  .facturas-btn--create,
+  #clientes-create-btn,
+  .clientes-btn--create,
+  #usuarios-create-btn,
+  .usuarios-btn--create
+):focus-visible {
   outline: none;
   box-shadow:
     var(--btn-primary-shadow),
@@ -444,13 +484,18 @@
 }
 
 /* =========================================================
-   INCIDENCIAS · SELECCIÓN CANÓNICA
+   LISTADOS PRIVADOS · SELECCIÓN CANÓNICA
 ========================================================= */
 
 :is(
   .incidencias-filter-pill,
   .incidencias-sort-pill,
-  .incidencias-meta-pill--action
+  .incidencias-meta-pill--action,
+  .facturas-filter-pill,
+  .facturas-sort-pill,
+  .clientes-filter-pill,
+  .clientes-sort-pill,
+  .usuarios-filter-pill
 ) {
   transition:
     background var(--duration-fast) var(--ease-standard),
@@ -463,7 +508,12 @@
 :is(
   .incidencias-filter-pill,
   .incidencias-sort-pill,
-  .incidencias-meta-pill--action
+  .incidencias-meta-pill--action,
+  .facturas-filter-pill,
+  .facturas-sort-pill,
+  .clientes-filter-pill,
+  .clientes-sort-pill,
+  .usuarios-filter-pill
 ):hover {
   border-color: var(--border-default);
   background: var(--solid-hover);
@@ -477,7 +527,17 @@
   .incidencias-sort-pill.is-active,
   .incidencias-sort-pill[aria-pressed="true"],
   .incidencias-meta-pill--action.is-active,
-  .incidencias-meta-pill--action[aria-pressed="true"]
+  .incidencias-meta-pill--action[aria-pressed="true"],
+  .facturas-filter-pill.is-active,
+  .facturas-filter-pill[aria-pressed="true"],
+  .facturas-sort-pill.is-active,
+  .facturas-sort-pill[aria-pressed="true"],
+  .clientes-filter-pill.is-active,
+  .clientes-filter-pill[aria-pressed="true"],
+  .clientes-sort-pill.is-active,
+  .clientes-sort-pill[aria-pressed="true"],
+  .usuarios-filter-pill.is-active,
+  .usuarios-filter-pill[aria-pressed="true"]
 ) {
   border-color: var(--border-strong);
   background: var(--solid-selected);
@@ -489,14 +549,27 @@
 :is(
   .incidencias-filter-pill,
   .incidencias-sort-pill,
-  .incidencias-meta-pill--action
+  .incidencias-meta-pill--action,
+  .facturas-filter-pill,
+  .facturas-sort-pill,
+  .clientes-filter-pill,
+  .clientes-sort-pill,
+  .usuarios-filter-pill
 ):focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
 
-.incidencias-stat-card.is-active,
-.incidencias-stat-card[aria-pressed="true"] {
+:is(
+  .incidencias-stat-card,
+  .clientes-stat-card,
+  .usuarios-stat-card
+).is-active,
+:is(
+  .incidencias-stat-card,
+  .clientes-stat-card,
+  .usuarios-stat-card
+)[aria-pressed="true"] {
   border-color: var(--border-strong);
   background: var(--solid-selected);
   box-shadow: inset 0 0 0 1px var(--solid-border-soft);
@@ -504,7 +577,7 @@
 }
 
 /* =========================================================
-   INCIDENCIAS · SEARCH SIN DOBLE RECUADRO
+   LISTADOS PRIVADOS · SEARCH SIN DOBLE RECUADRO
 
    El contenedor ya aporta borde y cambio de estado. El input de tipo search
    no debe dibujar un segundo focus-ring interior: era el recuadro visible al
@@ -512,18 +585,33 @@
    como feedback de foco.
 ========================================================= */
 
-.incidencias-search:focus-within {
+:is(
+  .incidencias-search,
+  .facturas-search,
+  .clientes-search,
+  .usuarios-search
+):focus-within {
   box-shadow: none;
 }
 
-.incidencias-search-input:focus,
-.incidencias-search-input:focus-visible {
+:is(
+  .incidencias-search-input,
+  .facturas-search-input,
+  .clientes-search-input,
+  .usuarios-search-input
+):focus,
+:is(
+  .incidencias-search-input,
+  .facturas-search-input,
+  .clientes-search-input,
+  .usuarios-search-input
+):focus-visible {
   outline: none;
   box-shadow: none;
 }
 
 /* =========================================================
-   INCIDENCIAS · TOOLBAR ESTABLE DURANTE BÚSQUEDA
+   LISTADOS PRIVADOS · TOOLBAR ESTABLE DURANTE BÚSQUEDA
 
    El subtítulo cambia de longitud al mostrar criterios y resultados. En
    escritorio reservamos una columna fija para el copy del historial para que
@@ -531,16 +619,31 @@
 ========================================================= */
 
 @container (min-width: 1121px) {
-  .incidencias-history-head {
+  :is(
+    .incidencias-history-head,
+    .facturas-history-head,
+    .clientes-history-head,
+    .usuarios-history-head
+  ) {
     grid-template-columns: 240px minmax(0, 1fr);
   }
 
-  .incidencias-history-copy {
+  :is(
+    .incidencias-history-copy,
+    .facturas-history-copy,
+    .clientes-history-copy,
+    .usuarios-history-copy
+  ) {
     inline-size: 240px;
     max-inline-size: 240px;
   }
 
-  .incidencias-history-subtitle {
+  :is(
+    .incidencias-history-subtitle,
+    .facturas-history-subtitle,
+    .clientes-history-subtitle,
+    .usuarios-history-subtitle
+  ) {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -548,7 +651,7 @@
 }
 
 /* =========================================================
-   INCIDENCIAS · DESCENDENTES TIPOGRÁFICOS
+   LISTADOS PRIVADOS · DESCENDENTES TIPOGRÁFICOS
 
    line-height: 1 en controles compactos puede cortar visualmente glifos como
    g, j, p, q o y dependiendo de rasterizador/zoom. Una caja de línea real
@@ -563,13 +666,25 @@
   .incidencias-priority-badge,
   .incidencias-assigned-badge,
   .incidencias-importe-chip,
-  .incidencias-attachments-pill
+  .incidencias-attachments-pill,
+  .facturas-meta-pill,
+  .facturas-filter-pill,
+  .facturas-sort-pill,
+  .facturas-chip,
+  .facturas-mini-badge,
+  .clientes-meta-pill,
+  .clientes-filter-pill,
+  .clientes-sort-pill,
+  .clientes-chip,
+  .usuarios-meta-pill,
+  .usuarios-filter-pill,
+  .usuarios-chip
 ) {
   line-height: 1.25;
 }
 
 /* =========================================================
-   INCIDENCIAS · FILAS INTERACTIVAS
+   LISTADOS PRIVADOS · FILAS INTERACTIVAS
 
    La composición de paridad fija el fondo base de las celdas. Este bloque,
    situado después de ella en la misma capa, es la autoridad de interacción:
@@ -578,34 +693,79 @@
    selección real: no deja la fila pintada como seleccionada al abrir detalle.
 ========================================================= */
 
-.incidencias-row--clickable > td {
+:is(
+  .incidencias-row--clickable,
+  .facturas-table-row,
+  .clientes-table-row,
+  .usuarios-table-row:not([aria-disabled="true"])
+) > td {
   transition:
     background-color var(--duration-fast) var(--ease-standard),
     background-image var(--duration-fast) var(--ease-standard),
     box-shadow var(--duration-fast) var(--ease-standard);
 }
 
-.incidencias-row--clickable .incidencias-main {
+:is(
+  .incidencias-row--clickable .incidencias-main,
+  .facturas-table-row .facturas-main,
+  .clientes-table-row .clientes-main,
+  .usuarios-table-row:not([aria-disabled="true"]) .usuarios-main
+) {
   transition: transform var(--duration-fast) var(--ease-standard);
 }
 
-.incidencias-row.is-selected > td,
-.incidencias-row[aria-selected="true"] > td {
+:is(
+  .incidencias-row,
+  .facturas-table-row,
+  .clientes-table-row,
+  .usuarios-table-row:not([aria-disabled="true"])
+).is-selected > td,
+:is(
+  .incidencias-row,
+  .facturas-table-row,
+  .clientes-table-row,
+  .usuarios-table-row:not([aria-disabled="true"])
+)[aria-selected="true"] > td {
   background-color: var(--data-table-row-hover);
 }
 
-.incidencias-row--clickable:focus-visible > td {
+:is(
+  .incidencias-row--clickable,
+  .facturas-table-row,
+  .clientes-table-row,
+  .usuarios-table-row:not([aria-disabled="true"])
+):focus-visible > td {
   background-color: var(--table-bg);
 }
 
-.incidencias-row--clickable:focus-visible > td:first-child,
-.incidencias-row.is-selected > td:first-child,
-.incidencias-row[aria-selected="true"] > td:first-child {
+:is(
+  .incidencias-row--clickable,
+  .facturas-table-row,
+  .clientes-table-row,
+  .usuarios-table-row:not([aria-disabled="true"])
+):focus-visible > td:first-child,
+:is(
+  .incidencias-row,
+  .facturas-table-row,
+  .clientes-table-row,
+  .usuarios-table-row:not([aria-disabled="true"])
+).is-selected > td:first-child,
+:is(
+  .incidencias-row,
+  .facturas-table-row,
+  .clientes-table-row,
+  .usuarios-table-row:not([aria-disabled="true"])
+)[aria-selected="true"] > td:first-child {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .incidencias-row--clickable:hover > td {
+  :is(
+    .incidencias-row--clickable,
+    .facturas-table-row,
+    .clientes-table-row,
+    .usuarios-table-row:not([aria-disabled="true"])
+  ):hover > td {
     background-color: color-mix(
       in srgb,
       var(--data-table-row-hover) 72%,
@@ -616,7 +776,12 @@
       inset 0 -1px 0 var(--border-soft);
   }
 
-  .incidencias-row--clickable:hover > td:first-child {
+  :is(
+    .incidencias-row--clickable,
+    .facturas-table-row,
+    .clientes-table-row,
+    .usuarios-table-row:not([aria-disabled="true"])
+  ):hover > td:first-child {
     background-image: linear-gradient(
       90deg,
       color-mix(in srgb, var(--accent) 9%, transparent),
@@ -628,9 +793,18 @@
       inset 0 -1px 0 var(--border-soft);
   }
 
-  .incidencias-row--clickable:hover .incidencias-main {
+  :is(
+    .incidencias-row--clickable:hover .incidencias-main,
+    .facturas-table-row:hover .facturas-main,
+    .clientes-table-row:hover .clientes-main,
+    .usuarios-table-row:not([aria-disabled="true"]):hover .usuarios-main
+  ) {
     transform: translateX(2px);
   }
+}
+
+.usuarios-table-row[aria-disabled="true"] {
+  cursor: default;
 }
 
 @media (max-width: 720px) {
@@ -659,8 +833,27 @@
     .incidencias-filter-pill,
     .incidencias-sort-pill,
     .incidencias-meta-pill--action,
+    .facturas-filter-pill,
+    .facturas-sort-pill,
+    .clientes-filter-pill,
+    .clientes-sort-pill,
+    .usuarios-filter-pill,
     .incidencias-row--clickable > td,
     .incidencias-row--clickable .incidencias-main,
+    .facturas-table-row > td,
+    .facturas-table-row .facturas-main,
+    .clientes-table-row > td,
+    .clientes-table-row .clientes-main,
+    .usuarios-table-row > td,
+    .usuarios-table-row .usuarios-main,
+    #incidencias-create-btn,
+    .incidencias-btn--create,
+    #facturas-create-btn,
+    .facturas-btn--create,
+    #clientes-create-btn,
+    .clientes-btn--create,
+    #usuarios-create-btn,
+    .usuarios-btn--create,
     .inc-create-submit,
     .inc-create-close,
     .inc-create-selected-user-clear,
@@ -671,7 +864,28 @@
     transition-duration: 0ms;
   }
 
+  :is(
+    .incidencias-filter-pill,
+    .incidencias-sort-pill,
+    .incidencias-meta-pill--action,
+    .facturas-filter-pill,
+    .facturas-sort-pill,
+    .clientes-filter-pill,
+    .clientes-sort-pill,
+    .usuarios-filter-pill,
+    #incidencias-create-btn,
+    .incidencias-btn--create,
+    #facturas-create-btn,
+    .facturas-btn--create,
+    #clientes-create-btn,
+    .clientes-btn--create,
+    #usuarios-create-btn,
+    .usuarios-btn--create
+  ):hover,
   .incidencias-row--clickable:hover .incidencias-main,
+  .facturas-table-row:hover .facturas-main,
+  .clientes-table-row:hover .clientes-main,
+  .usuarios-table-row:not([aria-disabled="true"]):hover .usuarios-main,
   .inc-create-submit:hover,
   .inc-create-close:hover,
   .inc-create-selected-user-clear:hover,
@@ -690,6 +904,25 @@
     .incidencias-stat-card,
     .incidencias-search,
     .incidencias-row--clickable > td,
+    .facturas-filter-pill,
+    .facturas-sort-pill,
+    .facturas-search,
+    .facturas-table-row > td,
+    .clientes-filter-pill,
+    .clientes-sort-pill,
+    .clientes-stat-card,
+    .clientes-search,
+    .clientes-table-row > td,
+    .usuarios-filter-pill,
+    .usuarios-stat-card,
+    .usuarios-search,
+    .usuarios-table-row > td,
+    #facturas-create-btn,
+    .facturas-btn--create,
+    #clientes-create-btn,
+    .clientes-btn--create,
+    #usuarios-create-btn,
+    .usuarios-btn--create,
     .inc-create-submit,
     .inc-create-close,
     .inc-create-selected-user-clear,
@@ -702,8 +935,18 @@
     forced-color-adjust: auto;
   }
 
-  .incidencias-row--clickable:hover > td:first-child,
-  .incidencias-row--clickable:focus-visible > td:first-child {
+  :is(
+    .incidencias-row--clickable,
+    .facturas-table-row,
+    .clientes-table-row,
+    .usuarios-table-row:not([aria-disabled="true"])
+  ):hover > td:first-child,
+  :is(
+    .incidencias-row--clickable,
+    .facturas-table-row,
+    .clientes-table-row,
+    .usuarios-table-row:not([aria-disabled="true"])
+  ):focus-visible > td:first-child {
     background-image: none;
   }
 }

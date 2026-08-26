@@ -5,7 +5,7 @@
    CANÓNICO · FACTURAS AS AMOUNT VISUAL AUTHORITY · 2026-08-22
 
    Objetivo:
-   - Unificar la presentación de importes de Facturas e Incidencias.
+   - Unificar la presentación de importes de Facturas, Incidencias y Clientes.
    - El importe deja de comportarse como badge de estado en Incidencias.
    - Facturas conserva su stack actual como referencia visual.
    - Sólo usa tokens del design system; sin paletas ni valores de dominio.
@@ -22,7 +22,8 @@
 
 :is(
   .facturas-total-stack,
-  .incidencias-importe-chip
+  .incidencias-importe-chip,
+  .clientes-total-stack
 ) {
   min-inline-size: 0;
   min-block-size: 0;
@@ -35,7 +36,8 @@
 
 :is(
   .facturas-total-value,
-  .incidencias-importe-chip > span
+  .incidencias-importe-chip > span,
+  .clientes-total-value
 ) {
   min-inline-size: 0;
   overflow: hidden;
@@ -50,7 +52,8 @@
 
 :is(
   .facturas-total-caption,
-  .facturas-total-meta
+  .facturas-total-meta,
+  .clientes-total-caption
 ) {
   min-inline-size: 0;
   overflow: hidden;
@@ -99,7 +102,9 @@
 }
 
 .incidencias-cell--amount,
-.incidencias-cell--importe {
+.incidencias-cell--importe,
+.clientes-th--amount,
+.clientes-cell--amount {
   text-align: start;
 }
 
@@ -111,7 +116,8 @@
 @media (max-width: 680px) {
   .ui-datalist-cell[data-mobile-slot="amount"] :is(
     .facturas-total-stack,
-    .incidencias-importe-chip
+    .incidencias-importe-chip,
+    .clientes-total-stack
   ) {
     align-items: end;
     justify-content: end;

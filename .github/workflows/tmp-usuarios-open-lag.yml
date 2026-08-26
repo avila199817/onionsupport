@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   patch:
-    if: "${{ github.event.head_commit.message == 'chore: bootstrap usuarios open-lag fix' }}"
+    if: ${{ contains(github.event.head_commit.message, 'bootstrap usuarios open-lag fix') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     steps:
@@ -66,16 +66,17 @@ jobs:
 
           test = contract.read_text(encoding='utf-8')
           marker = 'reject(INDEX, "all: true", "Usuarios index must not request all pages")\n'
-          insert = '''reject(INDEX, "all: true", "Usuarios index must not request all pages")
-
-# Route-open performance: the router awaits route.render() before committing the hidden host.
-# Usuarios must paint its loading shell synchronously, then let the first page resolve in background.
-require(INDEX, "void load({ silent: false });\\n      return controller;", "Usuarios mount must start the first page without blocking the router commit")
-reject(INDEX, "await load({ silent: false });", "Usuarios mount must never await first-page network before route commit")
-reject(INDEX, "loading = true;\\n      render({ preserveDom: false });\\n      await load", "Usuarios mount must not perform a redundant preflight render before loadFirstPage")
-require(INDEX, "routeCommitNonBlocking: true", "Usuarios snapshot must declare non-blocking route commit")
-'''
-          test = replace_once(test, marker, insert, 'usuarios performance contract insertion')
+          additions = (
+              '\n# Route-open performance: the router awaits route.render() before committing the hidden host.\n'
+              '# Usuarios must paint its loading shell synchronously, then let the first page resolve in background.\n'
+              'require(INDEX, "void load({ silent: false });\\n      return controller;", "Usuarios mount must start the first page without blocking the router commit")\n'
+              'reject(INDEX, "await load({ silent: false });", "Usuarios mount must never await first-page network before route commit")\n'
+              'reject(INDEX, "loading = true;\\n      render({ preserveDom: false });\\n      await load", "Usuarios mount must not perform a redundant preflight render before loadFirstPage")\n'
+              'require(INDEX, "routeCommitNonBlocking: true", "Usuarios snapshot must declare non-blocking route commit")\n'
+          )
+          if test.count(marker) != 1:
+              raise SystemExit(f'usuarios performance contract insertion: expected exactly 1 marker, got {test.count(marker)}')
+          test = test.replace(marker, marker + additions, 1)
           contract.write_text(test, encoding='utf-8')
           PY
 

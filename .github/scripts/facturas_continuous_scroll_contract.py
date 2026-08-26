@@ -136,6 +136,15 @@ require(STYLE, ".facturas-empty:focus-visible", "Empty-result focus target must 
 require(STYLE, ".facturas-loading-status:focus-visible", "Loading focus target must remain visibly focused")
 require(STYLE, "outline: 2px solid CanvasText", "Focus fallbacks must remain visible in forced colors")
 
+# Invoice creation must select billing clients only; user search is a different domain.
+require(
+    INDEX,
+    'const CLIENT_SEARCH_ENDPOINTS = Object.freeze([\n  "/api/search/clientes",\n]);',
+    "Create-invoice client search must use only the canonical clientes search endpoint",
+)
+reject(INDEX, '"/api/search/users"', "Create-invoice client search must never fall back to user search")
+reject(INDEX, '"/api/users"', "Create-invoice client search must never fall back to the users listing")
+
 # Facturas resend UX must stay inside the product visual system, never browser chrome.
 reject(INDEX, "¿Quieres volver a enviarla?", "Resend confirmation must not use the browser-native confirm dialog")
 require(INDEX, "function confirmFacturaResend", "Resend must expose an accessible custom confirmation flow")

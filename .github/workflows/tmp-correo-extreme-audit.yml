@@ -1,4 +1,4 @@
-name: TEMP Correo extreme audit
+name: TEMP Correo extreme patch
 
 on:
   push:
@@ -6,21 +6,21 @@ on:
       - polish/correo-extreme-v7
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  audit:
+  patch:
+    if: ${{ contains(github.event.head_commit.message, 'bootstrap Correo extreme patch') }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 8
+    timeout-minutes: 12
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: polish/correo-extreme-v7
-          fetch-depth: 1
-          persist-credentials: false
+          fetch-depth: 0
 
-      - name: Static Correo audit
+      - name: Apply Correo extreme hardening
         shell: bash
         run: |
           set -euo pipefail
@@ -29,92 +29,823 @@ jobs:
           import re
 
           root = Path('.')
-          index = (root / 'src/views/correo/index.js').read_text(encoding='utf-8')
-          template = (root / 'src/views/correo/correo.template.js').read_text(encoding='utf-8')
-          api = (root / 'src/views/correo/correo.api.js').read_text(encoding='utf-8')
-          css_base = (root / 'src/css/views/correo/index.css').read_text(encoding='utf-8')
-          css_viewport = (root / 'src/css/views/correo/viewport.css').read_text(encoding='utf-8')
-          styles = (root / 'src/router/styles.js').read_text(encoding='utf-8')
-          runtime = index + '\n' + template
-          css = css_base + '\n' + css_viewport
+          index_path = root / 'src/views/correo/index.js'
+          template_path = root / 'src/views/correo/correo.template.js'
+          base_css_path = root / 'src/css/views/correo/index.css'
+          viewport_css_path = root / 'src/css/views/correo/viewport.css'
+          styles_path = root / 'src/router/styles.js'
+          workflow_path = root / '.github/workflows/repo-integrity.yml'
+          contract_path = root / '.github/scripts/correo_integrity.py'
 
-          # Only class-selector-like occurrences, not CSS variable names.
-          class_re = re.compile(r'\.([a-zA-Z_][a-zA-Z0-9_-]*)')
-          runtime_class_re = re.compile(r'correo-[a-z0-9_-]+', re.I)
-          runtime_classes = set(runtime_class_re.findall(runtime))
-          base_classes = {c for c in class_re.findall(css_base) if c.startswith('correo-')}
-          viewport_classes = {c for c in class_re.findall(css_viewport) if c.startswith('correo-')}
-          all_css_classes = base_classes | viewport_classes
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly 1 match, got {count}')
+              return text.replace(old, new, 1)
 
-          print('=== FILE SIZES ===')
-          for p in [
-              'src/views/correo/index.js',
-              'src/views/correo/correo.template.js',
-              'src/views/correo/correo.api.js',
-              'src/css/views/correo/index.css',
-              'src/css/views/correo/viewport.css',
-          ]:
-              text = (root / p).read_text(encoding='utf-8')
-              print(f'{p}: {len(text.splitlines())} lines / {len(text)} chars')
+          def replace_between(text, start, end, new, label):
+              a = text.find(start)
+              if a < 0:
+                  raise SystemExit(f'{label}: start not found')
+              b = text.find(end, a)
+              if b < 0:
+                  raise SystemExit(f'{label}: end not found')
+              return text[:a] + new + text[b:]
 
-          print('\n=== CSS AUTHORITY ===')
-          print('runtime class-like ids:', len(runtime_classes))
-          print('base selector classes:', len(base_classes))
-          print('viewport selector classes:', len(viewport_classes))
-          print('selector classes in BOTH:', len(base_classes & viewport_classes))
-          print('\n'.join(sorted(base_classes & viewport_classes)))
+          # -------------------------------------------------
+          # index.js
+          # -------------------------------------------------
+          src = index_path.read_text(encoding='utf-8')
+          src = replace_once(src, '  renderComposeModal,\n', '  renderComposeModal,\n  renderConfirmModal,\n', 'confirm import')
+          src = replace_once(src,
+              'export const CORREO_VIEW_VERSION = "correo.view.microsoft.production.v6-canonical-user";',
+              'export const CORREO_VIEW_VERSION = "correo.view.microsoft.production.v7-extreme";\n\nconst VIEW_CACHE_TTL_MS = 60_000;',
+              'view version')
+          src = replace_once(src, 'const VIEW_CACHE = {\n  status: null,', 'const VIEW_CACHE = {\n  ownerKey: "",\n  status: null,', 'cache owner')
 
-          viewport_missing = sorted(
-              c for c in runtime_classes
-              if c not in viewport_classes and c in base_classes
-          )
-          print('\n=== LIVE CLASSES NEEDING BASE CSS ===')
-          print('count:', len(viewport_missing))
-          print('\n'.join(viewport_missing))
+          new_user = '''function readOnionUser() {
+  let raw = null;
 
-          dead_base = sorted(c for c in base_classes if c not in runtime_classes)
-          dead_viewport = sorted(c for c in viewport_classes if c not in runtime_classes)
-          print('\n=== BASE SELECTORS WITH NO RUNTIME CLASS REFERENCE ===')
-          print('count:', len(dead_base))
-          print('\n'.join(dead_base))
-          print('\n=== VIEWPORT SELECTORS WITH NO RUNTIME CLASS REFERENCE ===')
-          print('count:', len(dead_viewport))
-          print('\n'.join(dead_viewport))
+  try {
+    raw =
+      AppCore?.getCurrentUser?.() ||
+      AppCore?.getState?.()?.user ||
+      AppCore?.state?.user ||
+      DefaultAuth?.getUser?.() ||
+      DefaultAuth?.getCurrentUser?.() ||
+      null;
+  } catch {
+    raw = null;
+  }
 
-          print('\n=== ACTION CONTRACT ===')
-          template_actions = set(re.findall(r'data-correo-action=\\?"([a-z0-9-]+)', template))
-          handled_actions = set(re.findall(r'action === "([a-z0-9-]+)"', index))
-          print('template without handler:', sorted(template_actions - handled_actions))
-          print('handler without static template action:', sorted(handled_actions - template_actions))
+  let user = null;
+  try { user = AppCore?.publicUser?.(raw) || null; } catch { user = null; }
 
-          print('\n=== RISK MARKERS ===')
-          markers = {
-              'window.confirm': index.count('window.confirm('),
-              'hardcoded mailbox': (index + template).count('cristian@onionsupport.com'),
-              'fake add-account action': (index + template).count('add-account'),
-              'updateDraft API definitions': api.count('updateDraft('),
-              'updateDraft controller use': index.count('CorreoApi.updateDraft('),
-              'cachedAt occurrences': (index + template).count('cachedAt'),
-              'route CSS manifest entries': styles.count('/src/css/views/correo/'),
-              'compose aria-modal': template.count('aria-modal="true"'),
-              'focus trap markers': index.count('focusableElements') + index.count('trapModalFocus'),
-              'IME markers': index.count('compositionstart') + index.count('compositionend') + index.count('isComposing'),
-              'list abort markers': index.count('listAbortController') + index.count('abortListRequest'),
-              'dead count query': index.count('[data-correo-count]'),
-              'dead folder title query': index.count('[data-correo-folder-title]'),
-              'infinite sentinel markup': template.count('data-correo-infinite-sentinel'),
-          }
-          for key, value in markers.items():
-              print(f'{key}: {value}')
+  const displayName = cleanText(user?.displayName, "Usuario");
+  const avatarUrl = sanitizeRuntimeImageUrl(user?.avatarUrl || "");
+  const cacheKey = safeLower(
+    raw?.userId || raw?.id || raw?.uid || raw?.emailLower || raw?.email ||
+    raw?.preferred_username || raw?.username || ""
+  );
+
+  return Object.freeze({
+    displayName,
+    avatarUrl,
+    initials: initialsFrom(displayName),
+    cacheKey,
+  });
+}
+
+'''
+          src = replace_between(src, 'function readOnionUser() {', 'function cloneCacheIntoState(state) {', new_user, 'readOnionUser')
+
+          new_cache = '''function cloneCacheIntoState(state) {
+  const ownerKey = cleanText(state?.accountUser?.cacheKey, "");
+  const fresh = VIEW_CACHE.cachedAt > 0 && Date.now() - VIEW_CACHE.cachedAt <= VIEW_CACHE_TTL_MS;
+  if (!ownerKey || VIEW_CACHE.ownerKey !== ownerKey || !fresh || !VIEW_CACHE.statusKnown || !VIEW_CACHE.status) {
+    clearViewCache();
+    return false;
+  }
+  state.status = VIEW_CACHE.status;
+  state.statusKnown = true;
+  state.folders = [...VIEW_CACHE.folders];
+  state.messages = [...VIEW_CACHE.messages];
+  state.selectedFolderId = VIEW_CACHE.selectedFolderId;
+  state.selectedFolderName = VIEW_CACHE.selectedFolderName;
+  state.selectedMessageId = VIEW_CACHE.selectedMessageId;
+  state.selectedMessage = VIEW_CACHE.selectedMessage;
+  state.attachments = [...VIEW_CACHE.attachments];
+  state.searchTerm = VIEW_CACHE.searchTerm;
+  state.activeFilter = VIEW_CACHE.activeFilter;
+  state.nextCursor = VIEW_CACHE.nextCursor;
+  state.loading = false;
+  return true;
+}
+
+function writeViewCache(state) {
+  const ownerKey = cleanText(state?.accountUser?.cacheKey, "");
+  if (!ownerKey) {
+    clearViewCache();
+    return false;
+  }
+  VIEW_CACHE.ownerKey = ownerKey;
+  VIEW_CACHE.status = state.status;
+  VIEW_CACHE.statusKnown = state.statusKnown === true;
+  VIEW_CACHE.folders = [...state.folders];
+  VIEW_CACHE.messages = [...state.messages];
+  VIEW_CACHE.selectedFolderId = state.selectedFolderId;
+  VIEW_CACHE.selectedFolderName = state.selectedFolderName;
+  VIEW_CACHE.selectedMessageId = state.selectedMessageId;
+  VIEW_CACHE.selectedMessage = state.selectedMessage;
+  VIEW_CACHE.attachments = [...state.attachments];
+  VIEW_CACHE.searchTerm = state.searchTerm;
+  VIEW_CACHE.activeFilter = state.activeFilter;
+  VIEW_CACHE.nextCursor = state.nextCursor;
+  VIEW_CACHE.cachedAt = Date.now();
+  return true;
+}
+
+function clearViewCache() {
+  VIEW_CACHE.ownerKey = "";
+  VIEW_CACHE.status = null;
+  VIEW_CACHE.statusKnown = false;
+  VIEW_CACHE.folders = [];
+  VIEW_CACHE.messages = [];
+  VIEW_CACHE.selectedFolderId = "";
+  VIEW_CACHE.selectedFolderName = "Bandeja de entrada";
+  VIEW_CACHE.selectedMessageId = "";
+  VIEW_CACHE.selectedMessage = null;
+  VIEW_CACHE.attachments = [];
+  VIEW_CACHE.searchTerm = "";
+  VIEW_CACHE.activeFilter = "all";
+  VIEW_CACHE.nextCursor = "";
+  VIEW_CACHE.cachedAt = 0;
+}
+
+'''
+          src = replace_between(src, 'function cloneCacheIntoState(state) {', 'function notificationSupported() {', new_cache, 'cache contract')
+
+          src = replace_once(src,
+              '  let infiniteScheduled = false;\n',
+              '  let infiniteScheduled = false;\n  let listAbortController = null;\n  let modalReturnFocus = null;\n  let confirmResolver = null;\n  let searchComposing = false;\n',
+              'controller state')
+
+          helper_anchor = '''  function apiOptions(extra = {}) {
+    return { signal, ...extra };
+  }
+'''
+          helper_new = helper_anchor + '''
+  function abortListRequest(reason = "correo-list-superseded") {
+    if (!listAbortController) return false;
+    try { listAbortController.abort(reason); } catch { /* noop */ }
+    listAbortController = null;
+    return true;
+  }
+
+  function beginListRequest() {
+    abortListRequest();
+    const controller = new AbortController();
+    listAbortController = controller;
+    return controller;
+  }
+
+  function focusableElements(container = null) {
+    if (!container) return [];
+    return [...container.querySelectorAll(
+      'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+    )].filter((node) => !node.hidden && node.getAttribute("aria-hidden") !== "true");
+  }
+
+  function rememberModalFocus() {
+    const active = document.activeElement;
+    modalReturnFocus = active && host.contains(active) ? active : null;
+  }
+
+  function restoreModalFocus() {
+    const target = modalReturnFocus;
+    modalReturnFocus = null;
+    try { target?.focus?.({ preventScroll: true }); } catch { /* noop */ }
+  }
+
+  function trapModalFocus(event) {
+    if (event.key !== "Tab") return false;
+    const dialog = host.querySelector('[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]');
+    if (!dialog) return false;
+    const focusables = focusableElements(dialog);
+    if (!focusables.length) {
+      event.preventDefault();
+      dialog.focus?.({ preventScroll: true });
+      return true;
+    }
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || !dialog.contains(active))) {
+      event.preventDefault();
+      last.focus({ preventScroll: true });
+      return true;
+    }
+    if (!event.shiftKey && (active === last || !dialog.contains(active))) {
+      event.preventDefault();
+      first.focus({ preventScroll: true });
+      return true;
+    }
+    return false;
+  }
+
+  function settleConfirmation(answer = false) {
+    const resolver = confirmResolver;
+    confirmResolver = null;
+    const root = host.querySelector("[data-correo-modal-root]");
+    if (root) root.replaceChildren();
+    document.documentElement.classList.remove("correo-modal-open");
+    restoreModalFocus();
+    resolver?.(answer === true);
+  }
+
+  function requestConfirmation(config = {}) {
+    if (confirmResolver || state.busyAction) return Promise.resolve(false);
+    const root = host.querySelector("[data-correo-modal-root]");
+    if (!root) return Promise.resolve(false);
+    rememberModalFocus();
+    root.innerHTML = renderConfirmModal(config);
+    document.documentElement.classList.add("correo-modal-open");
+    return new Promise((resolve) => {
+      confirmResolver = resolve;
+      requestAnimationFrame(() => {
+        root.querySelector("[data-correo-confirm-cancel]")?.focus?.({ preventScroll: true });
+      });
+    });
+  }
+'''
+          src = replace_once(src, helper_anchor, helper_new, 'controller helpers')
+
+          # remove dead list title/count DOM work
+          dead = '''
+    const folder = state.folders.find((item) => item.id === state.selectedFolderId);
+    const total = Math.max(Number(folder?.totalItemCount) || 0, state.messages.length);
+    const count = host.querySelector("[data-correo-count]");
+    if (count) count.textContent = `${total} ${total === 1 ? "mensaje" : "mensajes"}`;
+    const title = host.querySelector("[data-correo-folder-title]");
+    if (title) title.textContent = state.selectedFolderName || "Correo";
+'''
+          src = replace_once(src, dead, '\n', 'dead list DOM')
+
+          # loadMessages with active cancellation
+          old_start = '  async function loadMessages({ append = false, openFirst = false } = {}) {'
+          old_end = '  async function openMessage(id = "") {'
+          load_new = '''  async function loadMessages({ append = false, openFirst = false } = {}) {
+    if (!state.status.connected) return;
+    if (append && (!state.nextCursor || state.loadingMore || state.loadingMessages)) return;
+    const sequence = ++listSequence;
+    const requestController = beginListRequest();
+
+    if (append) {
+      state.loadingMore = true;
+      renderList();
+    } else {
+      state.loadingMessages = true;
+      state.loadingMore = false;
+      state.nextCursor = "";
+      const list = host.querySelector("[data-correo-message-list]");
+      if (list) list.scrollTop = 0;
+      renderList();
+    }
+
+    try {
+      const result = await CorreoApi.messages(apiOptions({
+        signal: requestController.signal,
+        cursor: append ? state.nextCursor : "",
+        folder: state.selectedFolderId || "inbox",
+        top: 35,
+        q: cleanText(state.searchTerm, ""),
+        filter: cleanText(state.searchTerm, "") ? "" : state.activeFilter === "all" ? "" : state.activeFilter,
+      }));
+
+      if (sequence !== listSequence || destroyed || requestController.signal.aborted) return;
+      state.messages = append
+        ? [...state.messages, ...result.messages.filter((item) => !state.messages.some((current) => current.id === item.id))]
+        : [...result.messages];
+      state.nextCursor = result.nextCursor;
+      state.loadingMessages = false;
+      state.loadingMore = false;
+
+      if (!state.messages.some((item) => item.id === state.selectedMessageId)) {
+        state.selectedMessageId = "";
+        state.selectedMessage = null;
+        state.attachments = [];
+      }
+
+      renderList();
+      if (openFirst && !state.selectedMessageId && state.messages[0]?.id) await openMessage(state.messages[0].id);
+      else renderReaderRegion();
+    } catch (error) {
+      if (sequence !== listSequence || signal.aborted || requestController.signal.aborted) return;
+      state.loadingMessages = false;
+      state.loadingMore = false;
+      renderList();
+      toast(errorMessage(error, "No se pudieron cargar los mensajes."), "error");
+    } finally {
+      if (listAbortController === requestController) listAbortController = null;
+    }
+  }
+
+'''
+          src = replace_between(src, old_start, old_end, load_new, 'loadMessages')
+
+          # attachment detail correctness
+          old_detail = '''      const summary = state.messages.find((item) => item.id === messageId) || null;
+      const [detail, attachments] = await Promise.all([
+        CorreoApi.message(messageId, apiOptions()),
+        summary?.hasAttachments ? CorreoApi.attachments(messageId, apiOptions()).catch(() => []) : Promise.resolve([]),
+      ]);
+      if (sequence !== readerSequence || destroyed) return;
+
+      state.selectedMessage = detail;
+      state.attachments = [...attachments];'''
+          new_detail = '''      const summary = state.messages.find((item) => item.id === messageId) || null;
+      const eagerAttachments = summary?.hasAttachments
+        ? CorreoApi.attachments(messageId, apiOptions()).catch(() => [])
+        : null;
+      const detail = await CorreoApi.message(messageId, apiOptions());
+      const attachments = eagerAttachments
+        ? await eagerAttachments
+        : detail?.hasAttachments
+          ? await CorreoApi.attachments(messageId, apiOptions()).catch(() => [])
+          : [];
+      if (sequence !== readerSequence || destroyed) return;
+
+      state.selectedMessage = detail;
+      state.attachments = [...attachments];'''
+          src = replace_once(src, old_detail, new_detail, 'attachment correctness')
+
+          # confirmations
+          src = replace_once(src,
+              '    if (!window.confirm("¿Desconectar esta cuenta de Outlook de Onion Support?")) return;',
+              '''    if (!(await requestConfirmation({
+      eyebrow: "Cuenta Microsoft",
+      title: "Desconectar Outlook",
+      message: "Onion Support dejará de acceder al buzón hasta que vuelvas a autorizarlo.",
+      warning: "La sesión local de correo y su caché efímera se limpiarán.",
+      confirmLabel: "Desconectar",
+      tone: "danger",
+    }))) return;''',
+              'disconnect confirm')
+          src = replace_once(src,
+              '    if (!window.confirm(`¿Eliminar “${message.subject || "este mensaje"}”?`)) return;',
+              '''    if (!(await requestConfirmation({
+      eyebrow: "Eliminar mensaje",
+      title: message.subject || "Eliminar este mensaje",
+      message: "El mensaje se moverá o eliminará según la política de Microsoft 365.",
+      warning: "Esta acción modifica el buzón real.",
+      confirmLabel: "Eliminar",
+      tone: "danger",
+    }))) return;''',
+              'delete confirm')
+          src = replace_once(src,
+              '    if (!window.confirm("¿Enviar este borrador ahora?")) return;',
+              '''    if (!(await requestConfirmation({
+      eyebrow: "Borrador",
+      title: "Enviar borrador",
+      message: "Se enviará ahora con los destinatarios, contenido y adjuntos guardados en Microsoft 365.",
+      confirmLabel: "Enviar ahora",
+      tone: "primary",
+    }))) return;''',
+              'send draft confirm')
+
+          # compose: edit draft + focus restoration
+          src = replace_once(src, '  function openCompose(mode = "compose") {', '  function openCompose(mode = "compose") {', 'openCompose anchor')
+          old_open = '''    const message = state.selectedMessage || {};
+    let input = { mode, messageId: message.id || "" };
+    if (mode === "forward") input = { ...input, subject: message.subject || "", body: "" };
+    modalRoot.innerHTML = renderComposeModal(input);
+    document.documentElement.classList.add("correo-modal-open");'''
+          new_open = '''    const message = state.selectedMessage || {};
+    const editDraft = mode === "edit-draft" && message.isDraft === true;
+    let input = { mode, messageId: message.id || "" };
+    if (mode === "forward") input = { ...input, subject: message.subject || "", body: "" };
+    if (editDraft) {
+      input = {
+        ...input,
+        to: (message.toRecipients || []).map((item) => item.address).filter(Boolean).join(", "),
+        cc: (message.ccRecipients || []).map((item) => item.address).filter(Boolean).join(", "),
+        subject: message.subject || "",
+        body: message?.body?.content || "",
+      };
+    }
+    rememberModalFocus();
+    modalRoot.innerHTML = renderComposeModal(input);
+    document.documentElement.classList.add("correo-modal-open");'''
+          src = replace_once(src, old_open, new_open, 'edit draft open')
+          src = replace_once(src,
+              '      const preferred = mode === "compose" || mode === "forward"\n        ? modalRoot.querySelector("input[name=\'to\']")\n        : modalRoot.querySelector("textarea[name=\'body\']");',
+              '      const preferred = mode === "compose" || mode === "forward" || mode === "edit-draft"\n        ? modalRoot.querySelector("input[name=\'to\']")\n        : modalRoot.querySelector("textarea[name=\'body\']");',
+              'edit draft focus')
+          src = replace_once(src,
+              '    document.documentElement.classList.remove("correo-modal-open");\n  }\n\n  function composePayload',
+              '    document.documentElement.classList.remove("correo-modal-open");\n    restoreModalFocus();\n  }\n\n  function composePayload',
+              'modal focus restore')
+
+          # sendCompose edit-draft branch
+          src = replace_once(src,
+              '      if ((mode === "compose" || mode === "forward") && !payload.to.length) throw new Error("Indica al menos un destinatario válido.");',
+              '      if ((mode === "compose" || mode === "forward" || mode === "edit-draft") && !payload.to.length) throw new Error("Indica al menos un destinatario válido.");',
+              'draft recipients')
+          branch_anchor = '''      if (mode === "reply" || mode === "reply-all") {
+        if (!messageId) throw new Error("No hay mensaje al que responder.");'''
+          branch_new = '''      if (mode === "edit-draft") {
+        if (!messageId) throw new Error("No hay borrador que actualizar.");
+        await CorreoApi.updateDraft(messageId, payload, apiOptions());
+        const status = form.querySelector("[data-correo-compose-status]");
+        for (let index = 0; index < files.length; index += 1) {
+          if (status) status.textContent = `Adjuntando ${index + 1}/${files.length}…`;
+          await CorreoApi.uploadAttachment(messageId, files[index], apiOptions());
+        }
+        if (status) status.textContent = "Enviando borrador…";
+        await CorreoApi.sendDraft(messageId, apiOptions());
+        toast("Borrador actualizado y enviado.", "success");
+      } else if (mode === "reply" || mode === "reply-all") {
+        if (!messageId) throw new Error("No hay mensaje al que responder.");'''
+          src = replace_once(src, branch_anchor, branch_new, 'send edited draft')
+
+          # saveDraft updates existing draft
+          src = replace_once(src,
+              '      const payload = composePayload(form);\n      const files = selectedFiles(form);',
+              '      const payload = composePayload(form);\n      const files = selectedFiles(form);',
+              'save payload anchor')
+          old_draft_create = '''      setBusy("draft");
+      const draft = await CorreoApi.createDraft(payload, apiOptions());
+      if (!draft.id) throw new Error("No se pudo crear el borrador.");
+      const status = form.querySelector("[data-correo-compose-status]");
+      for (let index = 0; index < files.length; index += 1) {
+        if (status) status.textContent = `Adjuntando ${index + 1}/${files.length}…`;
+        await CorreoApi.uploadAttachment(draft.id, files[index], apiOptions());
+      }
+      setBusy("");
+      closeModal();
+      toast("Borrador guardado en Outlook.", "success");'''
+          new_draft_create = '''      setBusy("draft");
+      const mode = cleanText(form.dataset.correoComposeMode, "compose");
+      const existingId = cleanText(form.dataset.correoMessageId, "");
+      const draft = mode === "edit-draft" && existingId
+        ? await CorreoApi.updateDraft(existingId, payload, apiOptions())
+        : await CorreoApi.createDraft(payload, apiOptions());
+      const draftId = cleanText(draft?.id || existingId, "");
+      if (!draftId) throw new Error("No se pudo guardar el borrador.");
+      const status = form.querySelector("[data-correo-compose-status]");
+      for (let index = 0; index < files.length; index += 1) {
+        if (status) status.textContent = `Adjuntando ${index + 1}/${files.length}…`;
+        await CorreoApi.uploadAttachment(draftId, files[index], apiOptions());
+      }
+      setBusy("");
+      closeModal();
+      toast(mode === "edit-draft" ? "Borrador actualizado en Outlook." : "Borrador guardado en Outlook.", "success");'''
+          src = replace_once(src, old_draft_create, new_draft_create, 'save existing draft')
+
+          # actions: confirm, edit draft, remove fake add-account
+          src = replace_once(src,
+              '    if (action === "close-modal") return closeModal();',
+              '''    if (action === "close-modal") return closeModal();
+    if (action === "confirm-cancel") return settleConfirmation(false);
+    if (action === "confirm-accept") return settleConfirmation(true);''',
+              'confirm actions')
+          src = replace_once(src,
+              '    if (action === "send-open-draft") return sendOpenDraft();',
+              '    if (action === "edit-draft") return openCompose("edit-draft");\n    if (action === "send-open-draft") return sendOpenDraft();',
+              'edit draft action')
+          fake = '''    if (action === "add-account") {
+      closeAccountMenu();
+      return toast("Multicuenta ya tiene la interfaz preparada. El backend productivo actual sigue vinculado a una única cuenta Microsoft; no voy a simular una segunda conexión.", "info", 7000);
+    }
+'''
+          src = replace_once(src, fake, '', 'fake account action')
+
+          # IME-safe search
+          old_input_search = '''    if (target?.matches?.("[data-correo-search]")) {
+      state.searchTerm = cleanText(target.value, "");
+      if (state.searchTerm) {
+        state.activeFilter = "all";
+        for (const button of host.querySelectorAll("[data-correo-filter]")) {
+          const active = button.dataset.correoFilter === "all";
+          button.classList.toggle("is-active", active);
+          button.setAttribute("aria-pressed", active ? "true" : "false");
+        }
+      }
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => loadMessages({ openFirst: true }), 420);
+      return;
+    }'''
+          new_input_search = '''    if (target?.matches?.("[data-correo-search]")) {
+      state.searchTerm = String(target.value ?? "");
+      clearTimeout(searchTimer);
+      if (event.isComposing || searchComposing) {
+        searchComposing = true;
+        return;
+      }
+      if (cleanText(state.searchTerm, "")) {
+        state.activeFilter = "all";
+        for (const button of host.querySelectorAll("[data-correo-filter]")) {
+          const active = button.dataset.correoFilter === "all";
+          button.classList.toggle("is-active", active);
+          button.setAttribute("aria-pressed", active ? "true" : "false");
+        }
+      }
+      abortListRequest("correo-search-changed");
+      searchTimer = setTimeout(() => loadMessages({ openFirst: true }), 420);
+      return;
+    }'''
+          src = replace_once(src, old_input_search, new_input_search, 'IME search')
+
+          composition_handlers = '''
+  function onCompositionStart(event) {
+    const target = event.target;
+    if (!target?.matches?.("[data-correo-search]")) return;
+    searchComposing = true;
+    state.searchTerm = String(target.value ?? "");
+    clearTimeout(searchTimer);
+    abortListRequest("correo-search-composing");
+  }
+
+  function onCompositionEnd(event) {
+    const target = event.target;
+    if (!target?.matches?.("[data-correo-search]")) return;
+    searchComposing = false;
+    state.searchTerm = String(target.value ?? "");
+    onInput({ target, isComposing: false });
+  }
+
+'''
+          src = replace_once(src, '  function onSubmit(event) {', composition_handlers + '  function onSubmit(event) {', 'composition handlers')
+
+          # modal keyboard trap + confirm Escape
+          old_keyhead = '''  function onKeydown(event) {
+    if (destroyed) return;
+    const modalOpen = Boolean(host.querySelector("[data-correo-compose-form]"));
+    if (event.key === "Escape") {
+      if (modalOpen && !state.busyAction) {
+        event.preventDefault();
+        closeModal();
+      } else {'''
+          new_keyhead = '''  function onKeydown(event) {
+    if (destroyed) return;
+    const composeOpen = Boolean(host.querySelector("[data-correo-compose-form]"));
+    const confirmOpen = Boolean(host.querySelector("[data-correo-confirm-dialog]"));
+    const modalOpen = composeOpen || confirmOpen;
+    if (modalOpen && event.key === "Tab" && trapModalFocus(event)) return;
+    if (event.key === "Escape") {
+      if (confirmOpen && !state.busyAction) {
+        event.preventDefault();
+        settleConfirmation(false);
+      } else if (composeOpen && !state.busyAction) {
+        event.preventDefault();
+        closeModal();
+      } else {'''
+          src = replace_once(src, old_keyhead, new_keyhead, 'modal keydown')
+
+          # mount/destroy listeners and abort
+          src = replace_once(src,
+              '    host.addEventListener("input", onInput);\n    host.addEventListener("submit", onSubmit);',
+              '    host.addEventListener("input", onInput);\n    host.addEventListener("compositionstart", onCompositionStart);\n    host.addEventListener("compositionend", onCompositionEnd);\n    host.addEventListener("submit", onSubmit);',
+              'composition mount')
+          src = replace_once(src,
+              '    clearTimeout(searchTimer);\n    aborter.abort();',
+              '    clearTimeout(searchTimer);\n    abortListRequest("correo-controller-destroyed");\n    if (confirmResolver) settleConfirmation(false);\n    aborter.abort();',
+              'destroy abort')
+          src = replace_once(src,
+              '    host.removeEventListener("input", onInput);\n    host.removeEventListener("submit", onSubmit);',
+              '    host.removeEventListener("input", onInput);\n    host.removeEventListener("compositionstart", onCompositionStart);\n    host.removeEventListener("compositionend", onCompositionEnd);\n    host.removeEventListener("submit", onSubmit);',
+              'composition destroy')
+          src = replace_once(src,
+              '        microsoftGraph: true,\n',
+              '        microsoftGraph: true,\n        cacheOwnerScoped: true,\n        cacheTtlMs: VIEW_CACHE_TTL_MS,\n        staleListAbortable: true,\n        modalFocusTrapped: true,\n        draftEditing: true,\n',
+              'snapshot hardening')
+          index_path.write_text(src, encoding='utf-8')
+
+          # -------------------------------------------------
+          # template.js
+          # -------------------------------------------------
+          tpl = template_path.read_text(encoding='utf-8')
+          tpl = replace_once(tpl,
+              'export const CORREO_TEMPLATE_VERSION = "correo.template.microsoft.production.v6-final-polish";',
+              'export const CORREO_TEMPLATE_VERSION = "correo.template.microsoft.production.v7-extreme";',
+              'template version')
+          tpl = replace_once(tpl,
+              '${message.isDraft\n          ? `<button class="correo-btn correo-btn--primary" type="button" data-correo-action="send-open-draft">${icon("send")}<span>Enviar borrador</span></button>`',
+              '${message.isDraft\n          ? `<button class="correo-btn" type="button" data-correo-action="edit-draft">${icon("edit")}<span>Editar borrador</span></button><button class="correo-btn correo-btn--primary" type="button" data-correo-action="send-open-draft">${icon("send")}<span>Enviar borrador</span></button>`',
+              'draft actions')
+          tpl = replace_once(tpl,
+              '  const mailbox = cleanText(status.mailbox, "cristian@onionsupport.com");',
+              '  const mailbox = cleanText(status.mailbox, connected ? "Cuenta Microsoft 365" : "Microsoft Outlook");',
+              'mailbox fallback')
+          add_account = '        <button type="button" role="menuitem" data-correo-action="add-account">${icon("userPlus")}<span><strong>Añadir otra cuenta</strong><small>Interfaz preparada · requiere backend multicuenta</small></span></button>\n'
+          tpl = replace_once(tpl, add_account, '', 'add account UI')
+          tpl = replace_once(tpl,
+              '        <div class="correo-infinite-sentinel" data-correo-infinite-sentinel aria-hidden="true"></div>\n',
+              '',
+              'dead sentinel')
+
+          # compose supports edit-draft
+          tpl = replace_once(tpl,
+              '  const isForward = mode === "forward";\n  const title = isReply ? (mode === "reply-all" ? "Responder a todos" : "Responder") : isForward ? "Reenviar" : "Nuevo correo";',
+              '  const isForward = mode === "forward";\n  const isEditDraft = mode === "edit-draft";\n  const title = isReply ? (mode === "reply-all" ? "Responder a todos" : "Responder") : isForward ? "Reenviar" : isEditDraft ? "Editar borrador" : "Nuevo correo";',
+              'compose title')
+          tpl = replace_once(tpl,
+              '${mode === "compose" ? `<label class="correo-field correo-field--line"><span>Asunto</span><input name="subject" type="text" maxlength="998" placeholder="Agregar asunto" value="${attr(subject)}"></label>` : ""}',
+              '${mode === "compose" || isEditDraft ? `<label class="correo-field correo-field--line"><span>Asunto</span><input name="subject" type="text" maxlength="998" placeholder="Agregar asunto" value="${attr(subject)}"></label>` : ""}',
+              'draft subject')
+          tpl = replace_once(tpl,
+              '${mode === "compose" ? `<div class="correo-compose-attachments"><label class="correo-file-picker"><input type="file" name="attachments" multiple data-correo-attachments-input><span>${icon("paperclip")} Adjuntar</span></label><small data-correo-file-summary>Sin adjuntos</small></div>` : ""}',
+              '${mode === "compose" || isEditDraft ? `<div class="correo-compose-attachments"><label class="correo-file-picker"><input type="file" name="attachments" multiple data-correo-attachments-input><span>${icon("paperclip")} Adjuntar</span></label><small data-correo-file-summary>${isEditDraft ? "Los adjuntos existentes se conservan · puedes añadir más" : "Sin adjuntos"}</small></div>` : ""}',
+              'draft attachments')
+          tpl = replace_once(tpl,
+              '${mode === "compose" ? `<button class="correo-btn" type="button" data-correo-action="save-draft">Guardar borrador</button>` : ""}',
+              '${mode === "compose" || isEditDraft ? `<button class="correo-btn" type="button" data-correo-action="save-draft">${isEditDraft ? "Guardar cambios" : "Guardar borrador"}</button>` : ""}',
+              'draft save button')
+
+          confirm_fn = r'''
+export function renderConfirmModal(input = {}) {
+  const tone = input.tone === "primary" ? "primary" : "danger";
+  const title = cleanText(input.title, "Confirmar acción");
+  const message = cleanText(input.message, "Confirma que quieres continuar.");
+  const warning = cleanText(input.warning, "");
+  const eyebrow = cleanText(input.eyebrow, tone === "danger" ? "Acción sensible" : "Confirmación");
+  const confirmLabel = cleanText(input.confirmLabel, "Confirmar");
+  return `
+    <div class="correo-confirm-overlay" data-correo-action="confirm-cancel"></div>
+    <section class="correo-confirm-dialog correo-confirm-dialog--${tone}" role="alertdialog" aria-modal="true" aria-labelledby="correo-confirm-title" aria-describedby="correo-confirm-description" data-correo-confirm-dialog tabindex="-1">
+      <span class="correo-confirm-icon" aria-hidden="true">${icon(tone === "danger" ? "warning" : "send")}</span>
+      <div class="correo-confirm-copy">
+        <span class="correo-confirm-eyebrow">${escapeHtml(eyebrow)}</span>
+        <h3 id="correo-confirm-title">${escapeHtml(title)}</h3>
+        <p id="correo-confirm-description">${escapeHtml(message)}</p>
+        ${warning ? `<div class="correo-confirm-warning">${escapeHtml(warning)}</div>` : ""}
+      </div>
+      <div class="correo-confirm-actions">
+        <button class="correo-btn correo-confirm-btn correo-confirm-btn--cancel" type="button" data-correo-action="confirm-cancel" data-correo-confirm-cancel>Cancelar</button>
+        <button class="correo-btn correo-confirm-btn correo-confirm-btn--${tone}" type="button" data-correo-action="confirm-accept">${tone === "danger" ? icon("warning") : icon("send")}<span>${escapeHtml(confirmLabel)}</span></button>
+      </div>
+    </section>`;
+}
+
+'''
+          tpl = replace_once(tpl, 'export function renderComposeModal(input = {}) {', confirm_fn + 'export function renderComposeModal(input = {}) {', 'confirm template')
+          template_path.write_text(tpl, encoding='utf-8')
+
+          # -------------------------------------------------
+          # One canonical Correo stylesheet
+          # -------------------------------------------------
+          viewport = viewport_css_path.read_text(encoding='utf-8')
+          viewport = viewport.replace('Archivo: /src/css/views/correo/viewport.css', 'Archivo: /src/css/views/correo/index.css', 1)
+          viewport = viewport.replace('OUTLOOK / FLUENT VIEWPORT FINAL', 'OUTLOOK / FLUENT CANONICAL', 1)
+          viewport = viewport.replace('PRODUCTIVO · V4', 'PRODUCTIVO · V7 EXTREME', 1)
+          live_base = r'''
+
+/* ---------- Live structural rules migrated from the retired base sheet ---------- */
+.correo-field { min-inline-size: 0; }
+.correo-message-line { min-inline-size: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.correo-mini-empty { display: flex; align-items: center; gap: 8px; padding: 12px; color: var(--correo-text-3, #777); font-size: 9px; }
+
+/* ---------- Confirmation dialog · Incidencias interaction pattern ---------- */
+.correo-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10030;
+  background: color-mix(in srgb, var(--overlay-bg, #050505) 82%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.correo-confirm-dialog {
+  position: fixed;
+  z-index: 10031;
+  inset-inline-start: 50%;
+  inset-block-start: 50%;
+  transform: translate(-50%, -50%);
+  inline-size: min(520px, calc(100vw - 32px));
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: var(--space-md, 16px);
+  padding: var(--space-lg, 20px);
+  border: 1px solid var(--border-default, #4b4b4b);
+  border-radius: var(--radius-md, 12px);
+  background: var(--surface-2, #292929);
+  color: var(--text, #eee);
+  box-shadow: var(--shadow-xl, 0 28px 90px rgba(0,0,0,.48));
+  outline: none;
+}
+.correo-confirm-dialog:focus-visible { box-shadow: var(--shadow-xl, 0 28px 90px rgba(0,0,0,.48)), var(--focus-ring); }
+.correo-confirm-icon { inline-size: 44px; block-size: 44px; display: grid; place-items: center; border: 1px solid var(--border-error); border-radius: var(--radius-sm, 8px); background: var(--error-bg); color: var(--error); }
+.correo-confirm-dialog--primary .correo-confirm-icon { border-color: var(--border-info, #479ef5); background: var(--info-bg, rgba(71,158,245,.12)); color: var(--info, #479ef5); }
+.correo-confirm-icon svg { inline-size: 20px; block-size: 20px; }
+.correo-confirm-copy { min-inline-size: 0; display: grid; gap: 7px; }
+.correo-confirm-eyebrow { color: var(--error-strong, var(--error)); font-size: var(--font-xs, 11px); font-weight: var(--weight-bold, 700); letter-spacing: .055em; text-transform: uppercase; }
+.correo-confirm-dialog--primary .correo-confirm-eyebrow { color: var(--info, #479ef5); }
+.correo-confirm-copy h3 { margin: 0; color: var(--text-strong, #fff); font-size: var(--font-xl, 20px); font-weight: var(--weight-black, 900); line-height: 1.15; }
+.correo-confirm-copy p { margin: 0; color: var(--text-muted, #aaa); font-size: var(--font-sm, 13px); line-height: 1.5; }
+.correo-confirm-warning { padding: 9px 10px; border: 1px solid var(--border-warning); border-radius: var(--radius-xs, 6px); background: var(--warning-bg); color: var(--warning-strong, var(--warning)); font-size: var(--font-xs, 11px); line-height: 1.4; }
+.correo-confirm-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; }
+.correo-confirm-btn--danger { border-color: var(--border-error); background: var(--error-bg); color: var(--error-strong, var(--error)); }
+.correo-confirm-btn--danger:hover:not(:disabled) { background: var(--error-soft); color: var(--text-strong, #fff); }
+.correo-confirm-btn--primary { border-color: var(--correo-blue-strong); background: var(--correo-blue-strong); color: #fff; }
+.correo-confirm-btn--primary:hover:not(:disabled) { border-color: var(--correo-blue-hover); background: var(--correo-blue-hover); }
+
+@media (max-width: 700px) {
+  .correo-confirm-dialog { grid-template-columns: 1fr; padding: var(--space-md, 16px); }
+  .correo-confirm-actions { display: grid; grid-template-columns: 1fr; }
+  .correo-confirm-btn { inline-size: 100%; }
+}
+'''
+          close_marker = '} /* @layer views */'
+          if close_marker not in viewport:
+              raise SystemExit('canonical CSS: layer close marker missing')
+          canonical = viewport.replace(close_marker, live_base + '\n\n' + close_marker, 1)
+          # Sentinel was never used by the controller; remove simple dedicated rules.
+          canonical = re.sub(r'(?ms)^\s*[^\n{]*\.correo-infinite-sentinel[^\{]*\{[^{}]*\}\s*', '\n', canonical)
+          base_css_path.write_text(canonical.rstrip() + '\n', encoding='utf-8')
+
+          # Router: one view CSS authority.
+          styles = styles_path.read_text(encoding='utf-8')
+          styles = replace_once(styles,
+              '  correo: Object.freeze([\n    "/src/css/views/correo/index.css",\n    "/src/css/views/correo/viewport.css",\n  ]),',
+              '  correo: Object.freeze([\n    "/src/css/views/correo/index.css",\n  ]),',
+              'Correo CSS manifest')
+          styles_path.write_text(styles, encoding='utf-8')
+
+          # Permanent Correo contract.
+          contract = r'''#!/usr/bin/env python3
+"""Permanent hardening contract for the Microsoft 365 Correo workspace."""
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+INDEX = (ROOT / "src/views/correo/index.js").read_text(encoding="utf-8")
+TEMPLATE = (ROOT / "src/views/correo/correo.template.js").read_text(encoding="utf-8")
+API = (ROOT / "src/views/correo/correo.api.js").read_text(encoding="utf-8")
+STYLE = (ROOT / "src/css/views/correo/index.css").read_text(encoding="utf-8")
+ROUTE_STYLES = (ROOT / "src/router/styles.js").read_text(encoding="utf-8")
+errors = []
+
+def require(source, snippet, message):
+    if snippet not in source: errors.append(message)
+
+def reject(source, snippet, message):
+    if snippet in source: errors.append(message)
+
+require(INDEX, 'correo.view.microsoft.production.v7-extreme', 'Correo must keep the hardened v7 controller')
+require(TEMPLATE, 'correo.template.microsoft.production.v7-extreme', 'Correo must keep the hardened v7 template')
+require(ROUTE_STYLES, 'correo: Object.freeze([\n    "/src/css/views/correo/index.css",\n  ])', 'Correo must load exactly one route stylesheet')
+reject(ROUTE_STYLES, '/src/css/views/correo/viewport.css', 'Correo viewport.css must not return as a parallel CSS authority')
+if (ROOT / 'src/css/views/correo/viewport.css').exists(): errors.append('Correo viewport.css must remain retired')
+reject(INDEX, 'window.confirm(', 'Correo must use in-app confirmation dialogs, never native confirm()')
+reject(INDEX + TEMPLATE, 'add-account', 'Correo must not advertise unsupported multicuenta UI')
+reject(INDEX + TEMPLATE, 'cristian@onionsupport.com', 'Correo must not hardcode a mailbox identity')
+require(INDEX, 'VIEW_CACHE_TTL_MS = 60_000', 'Correo cache must have a bounded TTL')
+require(INDEX, 'VIEW_CACHE.ownerKey !== ownerKey', 'Correo cache must be isolated by Onion user')
+require(INDEX, 'cacheOwnerScoped: true', 'Correo snapshot must declare cache owner isolation')
+require(INDEX, 'abortListRequest(', 'Correo must cancel stale message-list requests')
+require(INDEX, 'listAbortController', 'Correo must own an abortable list request')
+require(INDEX, 'compositionstart', 'Correo search must support IME composition start')
+require(INDEX, 'compositionend', 'Correo search must support IME composition end')
+require(INDEX, 'event.isComposing || searchComposing', 'Correo search must not fire mid-composition')
+require(INDEX, 'focusableElements(', 'Correo modal system must expose focusable-element discovery')
+require(INDEX, 'trapModalFocus(event)', 'Correo modals must trap keyboard focus')
+require(INDEX, 'restoreModalFocus()', 'Correo modals must restore focus to the opener')
+require(TEMPLATE, 'role="alertdialog"', 'Correo confirmations must be accessible alertdialogs')
+require(TEMPLATE, 'data-correo-confirm-cancel', 'Correo confirmation must expose an explicit cancel target')
+require(INDEX, 'CorreoApi.updateDraft(', 'Correo must support editing the existing Microsoft draft')
+require(TEMPLATE, 'data-correo-action="edit-draft"', 'Draft reader must expose edit action')
+require(INDEX, 'mode === "edit-draft"', 'Correo controller must preserve edit-draft behavior')
+reject(TEMPLATE, 'data-correo-infinite-sentinel', 'Correo must not retain dead infinite-scroll sentinel markup')
+reject(INDEX, '[data-correo-count]', 'Correo must not query removed list-count markup')
+reject(INDEX, '[data-correo-folder-title]', 'Correo must not query removed folder-title markup')
+require(INDEX, 'detail?.hasAttachments', 'Correo must recover attachments when only message detail reports them')
+require(API, 'MICROSOFT_ENDPOINT = "/api/microsoft"', 'Correo must keep the canonical Microsoft backend boundary')
+reject(INDEX + TEMPLATE + API, 'access_token', 'Correo frontend must never handle Microsoft access tokens')
+reject(INDEX + TEMPLATE + API, 'refresh_token', 'Correo frontend must never handle Microsoft refresh tokens')
+require(STYLE, 'Confirmation dialog · Incidencias interaction pattern', 'Correo confirmation CSS must document Incidencias as interaction pattern')
+require(STYLE, '.correo-confirm-dialog', 'Correo must style the in-app confirmation dialog')
+require(STYLE, '@media (prefers-reduced-motion: reduce)', 'Correo must keep reduced-motion support')
+
+if errors:
+    for error in errors: print(f'correo-integrity: {error}', file=__import__('sys').stderr)
+    raise SystemExit(1)
+print('correo-integrity: ok')
+'''
+          contract_path.write_text(contract, encoding='utf-8')
+
+          wf = workflow_path.read_text(encoding='utf-8')
+          marker = '      - name: Validate private Create modal parity\n        run: python3 .github/scripts/private_create_modal_contract.py\n'
+          insertion = marker + '\n      - name: Validate Correo extreme contract\n        run: python3 .github/scripts/correo_integrity.py\n'
+          wf = replace_once(wf, marker, insertion, 'repo-integrity Correo step')
+          workflow_path.write_text(wf, encoding='utf-8')
           PY
 
-      - name: Existing repository gates
+          rm src/css/views/correo/viewport.css
+
+      - name: Validate Correo and repository
         shell: bash
         run: |
           set -euo pipefail
           node --check src/views/correo/index.js
           node --check src/views/correo/correo.template.js
           node --check src/views/correo/correo.api.js
+          python3 .github/scripts/correo_integrity.py
           python3 .github/scripts/repo_integrity.py
+          python3 .github/scripts/private_admin_alignment_contract.py
           bash .github/ci/validate_spa_contracts.sh
+          node .github/scripts/continuous_scroll_smoke.mjs
+          python3 - <<'PY'
+          from pathlib import Path
+          css = Path('src/css/views/correo/index.css').read_text(encoding='utf-8')
+          print(f'Correo canonical CSS: {len(css.splitlines())} lines / {len(css)} chars')
+          assert 'viewport.css' not in Path('src/router/styles.js').read_text(encoding='utf-8')
+          PY
           git diff --check
+
+      - name: Commit product patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git add src/views/correo/index.js src/views/correo/correo.template.js src/css/views/correo/index.css src/css/views/correo/viewport.css src/router/styles.js .github/scripts/correo_integrity.py .github/workflows/repo-integrity.yml
+          git commit -m "feat: rematar Correo a contrato extremo"
+          git push origin HEAD:polish/correo-extreme-v7

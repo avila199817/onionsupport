@@ -45,7 +45,13 @@ require(COMPOSITION, "border: 1px solid var(--btn-primary-border);", "All Create
 require(COMPOSITION, "background: var(--btn-secondary-bg);", "All Create secondary controls must consume the same secondary-button token")
 require(COMPOSITION, "@media (max-width: 760px)", "Create composition must preserve the Incidencias tablet breakpoint")
 require(COMPOSITION, "@media (max-width: 480px)", "Create composition must preserve the Incidencias phone breakpoint")
-require(COMPOSITION, "private-create-loading-overlay", "Create composition must standardize the full-panel loading overlay")
+for loading_class in [
+    ".inc-create-loading-overlay",
+    ".cli-create-loading-overlay",
+    ".fac-create-loading-overlay",
+    ".usr-create-loading-overlay",
+]:
+    require(COMPOSITION, loading_class, f"Create composition must standardize {loading_class}")
 
 # Incidencias remains the reference shape.
 for snippet, message in [

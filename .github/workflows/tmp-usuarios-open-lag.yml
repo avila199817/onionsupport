@@ -1,0 +1,103 @@
+name: TEMP Usuarios open-lag patch
+
+on:
+  push:
+    branches:
+      - perf/usuarios-open-lag
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'chore: bootstrap usuarios open-lag fix'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: perf/usuarios-open-lag
+          fetch-depth: 0
+
+      - name: Apply exact Usuarios route-open fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          index = Path('src/views/usuarios/index.js')
+          contract = Path('.github/scripts/usuarios_scale_contract.py')
+
+          source = index.read_text(encoding='utf-8')
+          checks = []
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly 1 match, got {count}')
+              return text.replace(old, new, 1)
+
+          source = replace_once(
+              source,
+              'CURSOR-FIRST · SERVER FILTERED · INFINITE SCROLL · RACE SAFE V12',
+              'CURSOR-FIRST · SERVER FILTERED · INFINITE SCROLL · RACE SAFE V13',
+              'usuarios header version',
+          )
+          source = replace_once(
+              source,
+              'export const USUARIOS_INDEX_VERSION =\n  "usuarios.index.v12.debounce-safe-infinite-scroll";',
+              'export const USUARIOS_INDEX_VERSION =\n  "usuarios.index.v13.nonblocking-route-commit";',
+              'usuarios runtime version',
+          )
+          source = replace_once(
+              source,
+              '      loading = true;\n      render({ preserveDom: false });\n      await load({ silent: false });\n      return controller;',
+              '      // loadFirstPage paints the loading shell synchronously before its first await.\n      // Start that work now, but never keep the atomic router commit waiting on network.\n      void load({ silent: false });\n      return controller;',
+              'usuarios blocking mount',
+          )
+          source = replace_once(
+              source,
+              '          duplicateMountProtected: true,\n          csvLoadedRowsOnly: true,',
+              '          duplicateMountProtected: true,\n          routeCommitNonBlocking: true,\n          csvLoadedRowsOnly: true,',
+              'usuarios architecture snapshot',
+          )
+          index.write_text(source, encoding='utf-8')
+
+          test = contract.read_text(encoding='utf-8')
+          marker = 'reject(INDEX, "all: true", "Usuarios index must not request all pages")\n'
+          insert = '''reject(INDEX, "all: true", "Usuarios index must not request all pages")
+
+# Route-open performance: the router awaits route.render() before committing the hidden host.
+# Usuarios must paint its loading shell synchronously, then let the first page resolve in background.
+require(INDEX, "void load({ silent: false });\\n      return controller;", "Usuarios mount must start the first page without blocking the router commit")
+reject(INDEX, "await load({ silent: false });", "Usuarios mount must never await first-page network before route commit")
+reject(INDEX, "loading = true;\\n      render({ preserveDom: false });\\n      await load", "Usuarios mount must not perform a redundant preflight render before loadFirstPage")
+require(INDEX, "routeCommitNonBlocking: true", "Usuarios snapshot must declare non-blocking route commit")
+'''
+          test = replace_once(test, marker, insert, 'usuarios performance contract insertion')
+          contract.write_text(test, encoding='utf-8')
+          PY
+
+      - name: Validate focused contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/views/usuarios/index.js
+          python3 .github/scripts/usuarios_scale_contract.py
+          python3 .github/scripts/private_admin_alignment_contract.py
+          python3 .github/scripts/repo_integrity.py
+          bash .github/ci/validate_spa_contracts.sh
+          node .github/scripts/continuous_scroll_smoke.mjs
+          git diff --check
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git add src/views/usuarios/index.js .github/scripts/usuarios_scale_contract.py
+          git commit -m "perf: unblock Usuarios route commit"
+          git push origin HEAD:perf/usuarios-open-lag

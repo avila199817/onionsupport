@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   apply:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,7 +19,16 @@ jobs:
           fetch-depth: 0
 
       - name: Apply focused Facturas create polish
-        run: python .github/scripts/facturas_create_polish_bootstrap.py
+        shell: bash
+        run: |
+          set +e
+          output="$(python .github/scripts/facturas_create_polish_bootstrap.py 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          test "$status" -eq 1
+          grep -Fq "retain ticket results after select: expected 1 match, got 0" <<<"$output"
+          python .github/scripts/facturas_create_polish_bootstrap_v2.py
 
       - name: Validate focused Facturas create change
         shell: bash

@@ -160,6 +160,18 @@ jobs:
 
           python3 /tmp/entity-overlay-patch.py
 
+          python3 - <<'PY'
+          from pathlib import Path
+
+          contract = Path('.github/scripts/entity_overlay_contract.mjs')
+          text = contract.read_text(encoding='utf-8')
+          old = 'data-entity-type="${attr(entityType)}"'
+          new = 'data-entity-type="${attr(type)}"'
+          if text.count(old) != 1:
+            raise SystemExit('entity overlay contract type anchor missing')
+          contract.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
           rm -rf .tmp
           rm -f .github/workflows/tmp-entity-overlay-build.yml
 

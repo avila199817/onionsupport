@@ -111,6 +111,12 @@ assert.equal(
   "Home must preserve the post-await session/context race guard"
 );
 
+assert.equal(
+  source.includes('clientes: "/api/clientes/stats"'),
+  true,
+  "Home admin cliente count must use the exact /api/clientes/stats endpoint, never a one-item cursor page"
+);
+
 console.log(
-  "Home runtime-state contract OK · one operation-local Core read, no public snapshots, isolated retained user"
+  "Home runtime-state contract OK · exact cliente stats count · one operation-local Core read, no public snapshots, isolated retained user"
 );

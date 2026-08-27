@@ -30,7 +30,7 @@ import {
 } from "./loader.js";
 
 export const APP_VERSION =
-  "app.minimal.v6-public-lean-graph";
+  "app.minimal.v7-global-entity-overlay";
 
 /* =========================================================
    CONSTANTS
@@ -83,11 +83,13 @@ let Auth = null;
 let Toast = null;
 let SidebarUI = null;
 let TopbarUI = null;
+let EntityOverlayUI = null;
 
 let authLoadPromise = null;
 let toastLoadPromise = null;
 let sidebarLoadPromise = null;
 let topbarLoadPromise = null;
+let entityOverlayLoadPromise = null;
 
 let bootPhase =
   BOOT_PHASES.IDLE;
@@ -204,6 +206,18 @@ async function ensureTopbarUI() {
   return TopbarUI;
 }
 
+async function ensureEntityOverlayUI() {
+  const loaded = await loadRuntimeModule(
+    EntityOverlayUI,
+    entityOverlayLoadPromise,
+    () => import("../features/entity-overlay/index.js"),
+    ["EntityOverlay"]
+  );
+  entityOverlayLoadPromise = loaded.promise;
+  EntityOverlayUI = loaded.value;
+  return EntityOverlayUI;
+}
+
 function withRuntimeModules(payload = {}) {
   return {
     ...payload,
@@ -212,6 +226,7 @@ function withRuntimeModules(payload = {}) {
     Toast,
     SidebarUI,
     TopbarUI,
+    EntityOverlay: EntityOverlayUI,
   };
 }
 
@@ -854,6 +869,27 @@ async function initGlobalUI(
   };
 }
 
+
+async function initEntityOverlay(
+  payload = {}
+) {
+  const overlay = await ensureEntityOverlayUI();
+
+  const result = await call(
+    overlay,
+    "init",
+    withRuntimeModules(payload),
+    false
+  );
+
+  recordBootStep(
+    "entityOverlay",
+    result
+  );
+
+  return result.value;
+}
+
 function notifyPublicHomeSessionHydrated() {
   if (!isBrowser()) return false;
 
@@ -1169,6 +1205,12 @@ async function runBoot(
   await initGlobalUI(
     payload
   );
+
+  if (lastRestore?.authenticated === true) {
+    await initEntityOverlay(
+      payload
+    );
+  }
 
   await startRouter(
     payload,

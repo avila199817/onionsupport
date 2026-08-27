@@ -152,7 +152,10 @@
     href="/site.webmanifest"
   >
 
-  <!-- Google tag (GA4). Bootstrap local para mantener la CSP sin unsafe-inline. -->
+  <!-- Root-only warmup: no arrastra recursos de la landing a rutas privadas. -->
+  <script async src="/src/preboot/public-home-preload.js"></script>
+
+  <!-- Google tag (GA4). Bootstrap local canónico; el remoto se difiere internamente. -->
   <script src="/src/analytics/google-tag.js"></script>
 
   <!--
@@ -170,10 +173,17 @@
     Sólo se adelantan recursos que main.js necesita antes del Router.
     Las mejoras post-router permanecen realmente diferidas.
 
+    main.js vive al final del body para preservar el HTML semántico, pero su
+    descarga empieza desde head para recortar el cold boot sin ejecutarlo antes.
+
     Autoridad post-router:
     /src/features/mobile-datalist/index.js se carga desde
     /src/app/enhancements.js, nunca como script ejecutable de index.html.
   -->
+  <link
+    rel="modulepreload"
+    href="/src/main.js"
+  >
   <link
     rel="modulepreload"
     href="/src/app/enhancements.js"

@@ -12,6 +12,11 @@
     const head = document.head;
     if (!head) return;
 
+    const heroImageSrcset = [
+      ["/src/media/img/Cristian_Avila_480.webp", "480w"].join(" "),
+      ["/src/media/img/Cristian_Avila_960.webp", "960w"].join(" "),
+    ].join(", ");
+
     const hints = [
       {
         rel: "stylesheet",
@@ -29,7 +34,7 @@
         as: "image",
         href: "/src/media/img/Cristian_Avila_480.webp",
         type: "image/webp",
-        imageSrcset: "/src/media/img/Cristian_Avila_480.webp 480w, /src/media/img/Cristian_Avila_960.webp 960w",
+        imageSrcset: heroImageSrcset,
         imageSizes: "(max-width: 760px) 44vw, 196px",
         fetchPriority: "high",
       },

@@ -1,0 +1,376 @@
+name: TEMP Global Entity Overlay Build
+
+on:
+  push:
+    branches:
+      - feat/global-entity-overlay
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: ${{ !contains(github.event.head_commit.message, '[entity-overlay-applied]') }}
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: feat/global-entity-overlay
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Integrate entity overlay into the private SPA
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          import re
+
+          root = Path('.')
+
+          # -----------------------------------------------------
+          # 1) Private boot: dynamic entity overlay, never / cold boot.
+          # -----------------------------------------------------
+          app_path = root / 'src/app/index.js'
+          app = app_path.read_text(encoding='utf-8')
+
+          app = app.replace(
+              '"app.minimal.v6-public-lean-graph";',
+              '"app.minimal.v7-global-entity-overlay";',
+              1,
+          )
+
+          if 'let EntityOverlayUI = null;' not in app:
+              anchor = 'let TopbarUI = null;\n'
+              if anchor not in app:
+                  raise SystemExit('app: TopbarUI state anchor not found')
+              app = app.replace(anchor, anchor + 'let EntityOverlayUI = null;\n', 1)
+
+          if 'let entityOverlayLoadPromise = null;' not in app:
+              anchor = 'let topbarLoadPromise = null;\n'
+              if anchor not in app:
+                  raise SystemExit('app: topbar promise anchor not found')
+              app = app.replace(anchor, anchor + 'let entityOverlayLoadPromise = null;\n', 1)
+
+          if 'async function ensureEntityOverlayUI()' not in app:
+              match = re.search(
+                  r'(async function ensureTopbarUI\(\) \{.*?\n\})\n\n(function withRuntimeModules)',
+                  app,
+                  re.S,
+              )
+              if not match:
+                  raise SystemExit('app: ensureTopbarUI boundary not found')
+
+              addition = r'''
+
+async function ensureEntityOverlayUI() {
+  const loaded = await loadRuntimeModule(
+    EntityOverlayUI,
+    entityOverlayLoadPromise,
+    () => import("../features/entity-overlay/index.js"),
+    ["EntityOverlay"]
+  );
+  entityOverlayLoadPromise = loaded.promise;
+  EntityOverlayUI = loaded.value;
+  return EntityOverlayUI;
+}
+'''
+              app = app[:match.end(1)] + addition + '\n' + app[match.start(2):]
+
+          if 'EntityOverlay: EntityOverlayUI,' not in app:
+              anchor = '    TopbarUI,\n  };'
+              if anchor not in app:
+                  raise SystemExit('app: runtime module payload anchor not found')
+              app = app.replace(
+                  anchor,
+                  '    TopbarUI,\n    EntityOverlay: EntityOverlayUI,\n  };',
+                  1,
+              )
+
+          if 'async function initEntityOverlay(' not in app:
+              marker = '\nfunction notifyPublicHomeSessionHydrated()'
+              if marker not in app:
+                  raise SystemExit('app: notifyPublicHomeSessionHydrated marker not found')
+
+              addition = r'''
+
+async function initEntityOverlay(
+  payload = {}
+) {
+  const overlay = await ensureEntityOverlayUI();
+
+  const result = await call(
+    overlay,
+    "init",
+    withRuntimeModules(payload),
+    false
+  );
+
+  recordBootStep(
+    "entityOverlay",
+    result
+  );
+
+  return result.value;
+}
+'''
+              app = app.replace(marker, addition + marker, 1)
+
+          if 'await initEntityOverlay(' not in app:
+              anchor = '''  await initGlobalUI(
+    payload
+  );
+
+  await startRouter(
+'''
+              replacement = '''  await initGlobalUI(
+    payload
+  );
+
+  if (lastRestore?.authenticated === true) {
+    await initEntityOverlay(
+      payload
+    );
+  }
+
+  await startRouter(
+'''
+              if anchor not in app:
+                  raise SystemExit('app: private initGlobalUI -> Router anchor not found')
+              app = app.replace(anchor, replacement, 1)
+
+          app_path.write_text(app, encoding='utf-8')
+
+          # -----------------------------------------------------
+          # 2) Deeplinks: URL intent, no route search / row click.
+          # -----------------------------------------------------
+          deeplink_path = root / 'src/features/ticket-deeplink/index.js'
+          deeplink_path.write_text(r'''/* =========================================================
+   Onion Support - Ticket Deep Link -> Global Entity Overlay
+
+   Mantiene enlaces históricos, pero ya no monta Incidencias, no busca filas y
+   no simula clicks. Sólo expresa una intención de entidad en la URL; el overlay
+   privado la resuelve cuando Auth y AppCore están listos.
+========================================================= */
+
+export const TICKET_DEEPLINK_VERSION =
+  "ticket-deeplink.v3-global-entity-intent";
+
+const LEGACY_TICKETS_PREFIX = "/tickets/";
+const PRIVATE_HOME_PATH = "/dashboard";
+const TICKET_ID_PATTERN = /^INC-[A-Z0-9-]{6,120}$/i;
+const ENTITY_TYPE = "incidencia";
+
+let ticketId = "";
+let legacyPath = false;
+let canonicalized = false;
+
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
+
+function cleanText(value = "") {
+  return String(value ?? "")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function safeDecode(value = "") {
+  try {
+    return decodeURIComponent(String(value ?? ""));
+  } catch {
+    return String(value ?? "");
+  }
+}
+
+function normalizeTicketId(value = "") {
+  const id = cleanText(safeDecode(value));
+  return TICKET_ID_PATTERN.test(id) ? id.toUpperCase() : "";
+}
+
+function currentUrl() {
+  if (!isBrowser()) return null;
+
+  try {
+    return new URL(window.location.href);
+  } catch {
+    return null;
+  }
+}
+
+function ticketFromLegacyPath(pathname = "") {
+  const path = cleanText(pathname);
+  if (!path.toLowerCase().startsWith(LEGACY_TICKETS_PREFIX)) return "";
+
+  const suffix = path.slice(LEGACY_TICKETS_PREFIX.length);
+  if (!suffix || suffix.includes("/")) return "";
+  return normalizeTicketId(suffix);
+}
+
+function resolveTicket(url = null) {
+  if (!url) return "";
+
+  return (
+    ticketFromLegacyPath(url.pathname) ||
+    normalizeTicketId(
+      url.searchParams.get("ticketId") ||
+      url.searchParams.get("incidenciaId") ||
+      (url.searchParams.get("entity") === ENTITY_TYPE
+        ? url.searchParams.get("entityId")
+        : "") ||
+      ""
+    )
+  );
+}
+
+function canonicalize() {
+  const url = currentUrl();
+  if (!url) return false;
+
+  ticketId = resolveTicket(url);
+  if (!ticketId) return false;
+
+  legacyPath = Boolean(ticketFromLegacyPath(url.pathname));
+  if (legacyPath) url.pathname = PRIVATE_HOME_PATH;
+
+  url.searchParams.delete("ticketId");
+  url.searchParams.delete("incidenciaId");
+  url.searchParams.set("entity", ENTITY_TYPE);
+  url.searchParams.set("entityId", ticketId);
+
+  try {
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${url.pathname}${url.search}${url.hash}`
+    );
+    canonicalized = true;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+canonicalize();
+
+export function getTicketDeeplinkSnapshot() {
+  return Object.freeze({
+    version: TICKET_DEEPLINK_VERSION,
+    active: Boolean(ticketId),
+    ticketId: ticketId ? "***" : "",
+    legacyPath,
+    canonicalized,
+    searchApplied: false,
+    rowActivated: false,
+    modalOpen: false,
+    finished: canonicalized,
+    strategy: "global-entity-intent",
+  });
+}
+
+export default Object.freeze({
+  version: TICKET_DEEPLINK_VERSION,
+  getSnapshot: getTicketDeeplinkSnapshot,
+});
+''', encoding='utf-8')
+
+          # -----------------------------------------------------
+          # 3) Generate the actual route CSS manifest from this tree.
+          # -----------------------------------------------------
+          domains = {
+              'factura': ('factura', 'facturas', 'invoice'),
+              'incidencia': ('incidencia', 'incidencias', 'ticket'),
+              'cliente': ('cliente', 'clientes', 'client'),
+              'usuario': ('usuario', 'usuarios', 'user'),
+          }
+
+          css_files = sorted((root / 'src/css').rglob('*.css'))
+          style_map = {}
+
+          for entity_type, needles in domains.items():
+              paths = []
+              for css_file in css_files:
+                  rel = css_file.relative_to(root).as_posix()
+                  lower = rel.lower()
+                  parts = [part.lower() for part in css_file.parts]
+
+                  in_domain_directory = any(needle in parts for needle in needles)
+                  named_for_domain = any(
+                      needle in css_file.stem.lower()
+                      for needle in needles
+                      if len(needle) > 4
+                  )
+
+                  if in_domain_directory or named_for_domain:
+                      paths.append('/' + rel)
+
+              style_map[entity_type] = sorted(dict.fromkeys(paths))
+
+          style_lines = [
+              '/* Generado desde el árbol CSS real del repositorio. */',
+              'export const ENTITY_STYLE_PATHS = Object.freeze({',
+          ]
+          for entity_type in ('factura', 'incidencia', 'cliente', 'usuario'):
+              encoded = ', '.join(json.dumps(path) for path in style_map[entity_type])
+              style_lines.append(
+                  f'  {entity_type}: Object.freeze([{encoded}]),'
+              )
+          style_lines.extend([
+              '});',
+              '',
+              'export default ENTITY_STYLE_PATHS;',
+              '',
+          ])
+
+          (root / 'src/features/entity-overlay/styles.generated.js').write_text(
+              '\n'.join(style_lines),
+              encoding='utf-8',
+          )
+
+          # -----------------------------------------------------
+          # 4) Ensure both trusted and normal SPA validation run the contract.
+          # -----------------------------------------------------
+          spa_path = root / '.github/ci/validate_spa_contracts.sh'
+          spa = spa_path.read_text(encoding='utf-8')
+          contract_line = 'node "${ROOT_DIR:-$(git rev-parse --show-toplevel)}/.github/scripts/entity_overlay_contract.mjs"'
+
+          if 'entity_overlay_contract.mjs' not in spa:
+              spa = spa.rstrip() + '\n\n' + contract_line + '\n'
+              spa_path.write_text(spa, encoding='utf-8')
+
+          # The temporary workflow must never enter the PR diff.
+          (root / '.github/workflows/tmp-entity-overlay-build.yml').unlink(missing_ok=True)
+          PY
+
+      - name: Validate runtime and contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/features/entity-overlay/intent.js
+          node --check src/features/entity-overlay/index.js
+          node --check src/features/entity-overlay/adapters/adapter-utils.js
+          node --check src/features/entity-overlay/adapters/factura.js
+          node --check src/features/entity-overlay/adapters/incidencia.js
+          node --check src/features/entity-overlay/adapters/generic-record.js
+          node --check src/features/entity-overlay/adapters/cliente.js
+          node --check src/features/entity-overlay/adapters/usuario.js
+          node --check src/app/index.js
+          node --check src/features/ticket-deeplink/index.js
+          node .github/scripts/entity_overlay_contract.mjs
+          python .github/scripts/google_measurement_contract.py --root .
+          python .github/scripts/repo_integrity.py
+          bash .github/ci/validate_spa_contracts.sh
+          git diff --check
+
+      - name: Commit integrated implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Onion Support CI"
+          git config user.email "cristian@onionsupport.com"
+          git add -A
+          git commit -m "feat: overlay global de entidades [entity-overlay-applied]"
+          git push origin HEAD:feat/global-entity-overlay

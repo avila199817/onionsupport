@@ -25,7 +25,6 @@
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
-import { Auth } from "../features/auth/index.js";
 
 import {
   ROUTES,
@@ -1425,11 +1424,21 @@ function isBlockedPath(
 ========================================================= */
 
 function getAuth() {
-  return (
-    AppCore.auth ||
-    AppCore.Auth ||
-    Auth
-  );
+  try {
+    return (
+      AppCore.getModule?.("auth") ||
+      AppCore.modules?.get?.("auth") ||
+      AppCore.auth ||
+      AppCore.Auth ||
+      null
+    );
+  } catch {
+    return (
+      AppCore.auth ||
+      AppCore.Auth ||
+      null
+    );
+  }
 }
 
 function authCall(

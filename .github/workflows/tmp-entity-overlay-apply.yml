@@ -1,0 +1,54 @@
+name: TEMP Apply Global Entity Overlay
+
+on:
+  push:
+    branches:
+      - feat/global-entity-overlay
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: feat/global-entity-overlay
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Apply product integration
+        run: python3 tools/apply_entity_overlay.py
+
+      - name: Validate implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/features/entity-overlay/intent.js
+          node --check src/features/entity-overlay/index.js
+          node --check src/features/entity-overlay/adapters/adapter-utils.js
+          node --check src/features/entity-overlay/adapters/factura.js
+          node --check src/features/entity-overlay/adapters/incidencia.js
+          node --check src/features/entity-overlay/adapters/generic-record.js
+          node --check src/features/entity-overlay/adapters/cliente.js
+          node --check src/features/entity-overlay/adapters/usuario.js
+          node --check src/app/index.js
+          node --check src/features/ticket-deeplink/index.js
+          node .github/scripts/entity_overlay_contract.mjs
+          python3 .github/scripts/google_measurement_contract.py --root .
+          python3 .github/scripts/repo_integrity.py
+          bash .github/ci/validate_spa_contracts.sh
+          git diff --check
+
+      - name: Commit integrated implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Onion Support CI"
+          git config user.email "cristian@onionsupport.com"
+          git add -A
+          git commit -m "feat: overlay global de entidades [entity-overlay-applied]"
+          git push origin HEAD:feat/global-entity-overlay

@@ -1,0 +1,46 @@
+name: TEMP Fix Main Path Regex
+
+on:
+  push:
+    branches:
+      - fix/main-path-regex-syntax
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: ${{ !contains(github.event.head_commit.message, '[fix-main-syntax]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: fix/main-path-regex-syntax
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Fix invalid backslash regex and validate
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/main.js')
+          text = p.read_text(encoding='utf-8')
+          old = '      .replace(/\\/g, "/")\n'
+          new = '      .replace(/\\\\/g, "/")\n'
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'expected exactly 1 invalid regex, found {count}')
+          p.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          node --check src/main.js
+          git diff --check
+
+      - name: Commit hotfix
+        shell: bash
+        run: |
+          git config user.name "Onion Support CI"
+          git config user.email "cristian@onionsupport.com"
+          git add src/main.js
+          git commit -m "fix: corregir regex de pathname en main [fix-main-syntax]"
+          git push origin HEAD:fix/main-path-regex-syntax

@@ -1,0 +1,38 @@
+/* =========================================================
+   ONION SUPPORT — SIDEBAR EXECUTIVE INTERACTIONS
+
+   Micro-contrato de posicionamiento para los tooltips del rail colapsado.
+   La capa visual usa pseudo-elementos absolutos; estos controles deben ser
+   su containing block para que el tooltip nazca junto al control real.
+========================================================= */
+
+.sidebar-toggle,
+.sidebar-account-trigger {
+  position: relative;
+}
+
+@media (hover: hover) and (pointer: fine) and (min-width: 821px) {
+  .sidebar:is(
+    .is-collapsed,
+    [data-open="false"],
+    [data-sidebar-state="collapsed"]
+  ) :is(
+    .sidebar-link,
+    .sidebar-toggle,
+    .sidebar-account-trigger
+  ) {
+    z-index: 1;
+  }
+
+  .sidebar:is(
+    .is-collapsed,
+    [data-open="false"],
+    [data-sidebar-state="collapsed"]
+  ) :is(
+    .sidebar-link,
+    .sidebar-toggle,
+    .sidebar-account-trigger
+  ):is(:hover, :focus-visible) {
+    z-index: 3;
+  }
+}

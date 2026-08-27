@@ -37,6 +37,9 @@ export const APP_VERSION =
 ========================================================= */
 
 const PUBLIC_HOME_PATH = "/";
+const PUBLIC_HYDRATION_DELAY_MS = 7000;
+const PUBLIC_HYDRATION_INTERACTION_EVENTS =
+  Object.freeze(["pointerdown", "keydown", "touchstart"]);
 
 const AUTH_BOOT_OPTIONS =
   Object.freeze({
@@ -71,6 +74,8 @@ const LEGACY_RESET_TOKEN_PATH =
 
 let bootPromise = null;
 let publicHydrationPromise = null;
+let publicHydrationTimer = 0;
+let publicHydrationInteractionHandler = null;
 let ready = false;
 let publicFastBoot = false;
 
@@ -871,8 +876,19 @@ function hydratePublicHomeInBackground(
 
   publicHydrationPromise = (async () => {
     await initToast(payload);
-    await restoreAuth(payload);
-    await initGlobalUI(payload);
+    const restored = await restoreAuth(payload);
+
+    /*
+      El chrome privado no aporta nada a una visita pública anónima. Sólo se
+      hidrata si realmente existe una sesión autenticada restaurada.
+    */
+    if (
+      authResultAuthenticated(restored) ||
+      lastRestore?.authenticated === true
+    ) {
+      await initGlobalUI(payload);
+    }
+
     notifyPublicHomeSessionHydrated();
     return true;
   })()
@@ -897,6 +913,55 @@ function hydratePublicHomeInBackground(
     });
 
   return publicHydrationPromise;
+}
+
+function clearPublicHydrationSchedule() {
+  if (!isBrowser()) return false;
+
+  if (publicHydrationTimer) {
+    window.clearTimeout(publicHydrationTimer);
+    publicHydrationTimer = 0;
+  }
+
+  if (publicHydrationInteractionHandler) {
+    for (const eventName of PUBLIC_HYDRATION_INTERACTION_EVENTS) {
+      window.removeEventListener(
+        eventName,
+        publicHydrationInteractionHandler,
+        true
+      );
+    }
+    publicHydrationInteractionHandler = null;
+  }
+
+  return true;
+}
+
+function schedulePublicHomeHydration(payload = {}) {
+  if (!isBrowser()) return false;
+  if (publicHydrationPromise || publicHydrationTimer) return true;
+
+  const start = () => {
+    clearPublicHydrationSchedule();
+    void hydratePublicHomeInBackground(payload);
+  };
+
+  publicHydrationInteractionHandler = start;
+
+  for (const eventName of PUBLIC_HYDRATION_INTERACTION_EVENTS) {
+    window.addEventListener(eventName, start, {
+      once: true,
+      capture: true,
+      passive: eventName !== "keydown",
+    });
+  }
+
+  publicHydrationTimer = window.setTimeout(
+    start,
+    PUBLIC_HYDRATION_DELAY_MS
+  );
+
+  return true;
 }
 
 async function startRouter(
@@ -1071,7 +1136,7 @@ async function runBoot(
 
     markReady();
 
-    void hydratePublicHomeInBackground(
+    schedulePublicHomeHydration(
       payload
     );
 

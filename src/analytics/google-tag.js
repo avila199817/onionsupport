@@ -6,7 +6,15 @@
   const WHATSAPP_CONVERSION_DESTINATION =
     "AW-18395700376/6zBcCL3zo-ccEJi54MNE";
 
-  const REMOTE_LOAD_FALLBACK_MS = 1800;
+  /*
+    El bootstrap local permanece disponible desde <head>, pero el JavaScript
+    remoto de Google no compite con el primer viewport. Un usuario que
+    interactúa fuerza la carga inmediatamente; si no hay interacción, GA4 se
+    activa después de una ventana mínima y Google Ads queda todavía más tarde.
+  */
+  const REMOTE_LOAD_MIN_DELAY_MS = 4000;
+  const REMOTE_IDLE_TIMEOUT_MS = 2500;
+  const ADS_AUTO_CONFIG_DELAY_MS = 9000;
 
   window.dataLayer = window.dataLayer || [];
   window.gtag = window.gtag || function gtag() {
@@ -15,10 +23,18 @@
 
   let remoteScheduled = false;
   let remoteLoaded = false;
+  let remoteDelayTimer = 0;
+  let adsConfigured = false;
+  let adsTimer = 0;
 
   function loadRemoteGoogleTag() {
     if (remoteLoaded) return;
     remoteLoaded = true;
+
+    if (remoteDelayTimer) {
+      window.clearTimeout(remoteDelayTimer);
+      remoteDelayTimer = 0;
+    }
 
     const script = document.createElement("script");
     script.async = true;
@@ -29,37 +45,67 @@
     document.head.appendChild(script);
   }
 
+  function configureGoogleAds() {
+    if (adsConfigured) return;
+    adsConfigured = true;
+
+    if (adsTimer) {
+      window.clearTimeout(adsTimer);
+      adsTimer = 0;
+    }
+
+    window.gtag("config", GOOGLE_ADS_TAG_ID);
+  }
+
   function scheduleRemoteGoogleTag() {
     if (remoteScheduled) return;
     remoteScheduled = true;
 
-    const scheduleIdle = () => {
-      if (typeof window.requestIdleCallback === "function") {
-        window.requestIdleCallback(loadRemoteGoogleTag, {
-          timeout: REMOTE_LOAD_FALLBACK_MS,
-        });
-        return;
-      }
+    const scheduleAfterMinimumDelay = () => {
+      remoteDelayTimer = window.setTimeout(() => {
+        remoteDelayTimer = 0;
 
-      window.setTimeout(loadRemoteGoogleTag, 250);
+        if (typeof window.requestIdleCallback === "function") {
+          window.requestIdleCallback(loadRemoteGoogleTag, {
+            timeout: REMOTE_IDLE_TIMEOUT_MS,
+          });
+          return;
+        }
+
+        loadRemoteGoogleTag();
+      }, REMOTE_LOAD_MIN_DELAY_MS);
     };
 
     if (document.readyState === "complete") {
-      scheduleIdle();
+      scheduleAfterMinimumDelay();
       return;
     }
 
-    window.addEventListener("load", scheduleIdle, { once: true });
+    window.addEventListener("load", scheduleAfterMinimumDelay, { once: true });
+  }
+
+  function scheduleGoogleAds() {
+    if (adsConfigured || adsTimer) return;
+
+    adsTimer = window.setTimeout(() => {
+      adsTimer = 0;
+      configureGoogleAds();
+      loadRemoteGoogleTag();
+    }, ADS_AUTO_CONFIG_DELAY_MS);
+  }
+
+  function promoteAnalyticsOnInteraction() {
+    loadRemoteGoogleTag();
   }
 
   /*
-    Los comandos quedan en dataLayer desde el primer momento. Si existe una
-    conversión antes de cargar la librería remota también queda en cola y se
-    procesa al inicializar gtag.js.
+    Los comandos de GA4 quedan en dataLayer desde el primer momento. Ads se
+    configura de forma deliberadamente diferida para que su payload adicional
+    no forme parte del cold boot. Si existe una conversión antes, el handler de
+    WhatsApp configura Ads primero y luego encola el evento en orden.
   */
   window.gtag("js", new Date());
   window.gtag("config", GOOGLE_ANALYTICS_TAG_ID);
-  window.gtag("config", GOOGLE_ADS_TAG_ID);
 
   function isWhatsAppLink(anchor) {
     const href = String(anchor?.getAttribute?.("href") || "").trim();
@@ -86,15 +132,24 @@
       const anchor = event.target?.closest?.("a[href]");
       if (!anchor || !isWhatsAppLink(anchor)) return;
 
+      configureGoogleAds();
       window.gtag("event", "conversion", {
         send_to: WHATSAPP_CONVERSION_DESTINATION,
       });
 
-      /* Un usuario que interactúa ya ha superado la ventana crítica. */
+      /* Una conversión no puede esperar al temporizador normal. */
       loadRemoteGoogleTag();
     },
     true
   );
 
+  for (const eventName of ["pointerdown", "keydown", "touchstart"]) {
+    window.addEventListener(eventName, promoteAnalyticsOnInteraction, {
+      once: true,
+      passive: eventName !== "keydown",
+    });
+  }
+
   scheduleRemoteGoogleTag();
+  scheduleGoogleAds();
 })();

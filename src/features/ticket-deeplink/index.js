@@ -1,33 +1,26 @@
 /* =========================================================
-   Onion Support - Ticket Mail Deep Link
-   Archivo: /src/features/ticket-deeplink/index.js
+   Onion Support - Ticket Deep Link -> Global Entity Overlay
 
-   Responsabilidad:
-   - Compatibilidad con enlaces históricos /tickets/<INC-...>.
-   - Canonicalizar a /incidencias?ticketId=<INC-...> antes del Router.
-   - Abrir el modal canónico de Incidencias sin HTTP ni UI paralela.
-   - Mantener ticketId únicamente en memoria/URL.
-   - Observar sólo el mount del Router mientras existe un deeplink pendiente.
+   Mantiene enlaces históricos, pero ya no monta Incidencias, no busca filas y
+   no simula clicks. Sólo expresa una intención de entidad en la URL; el overlay
+   privado la resuelve cuando Auth y AppCore están listos.
 ========================================================= */
 
 export const TICKET_DEEPLINK_VERSION =
-  "ticket-deeplink.v2-router-view-observer";
+  "ticket-deeplink.v3-global-entity-intent";
 
-const CANONICAL_INCIDENCIAS_PATH = "/incidencias";
 const LEGACY_TICKETS_PREFIX = "/tickets/";
+const PRIVATE_HOME_PATH = "/dashboard";
 const TICKET_ID_PATTERN = /^INC-[A-Z0-9-]{6,120}$/i;
-
+const ENTITY_TYPE = "incidencia";
 const VIEW_ROOT_SELECTOR = "#view-container, [data-router-view='true']";
-const SEARCH_INPUT_SELECTOR = "[data-incidencias-search-input='true']";
-const MODAL_ROOT_SELECTOR = "[data-incidencias-modal-root='true']";
-const MAX_WAIT_MS = 20_000;
 
 let ticketId = "";
-let searchApplied = false;
-let rowActivated = false;
+let legacyPath = false;
+let canonicalized = false;
 let observer = null;
-let timeoutId = 0;
-let finished = false;
+let mountRoot = null;
+let observerInstallHandler = null;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -35,44 +28,22 @@ function isBrowser() {
 
 function cleanText(value = "") {
   return String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
+    .replace(/[\r\n\t]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 function safeDecode(value = "") {
   try {
-    return decodeURIComponent(value);
+    return decodeURIComponent(String(value ?? ""));
   } catch {
-    return value;
+    return String(value ?? "");
   }
 }
 
 function normalizeTicketId(value = "") {
   const id = cleanText(safeDecode(value));
   return TICKET_ID_PATTERN.test(id) ? id.toUpperCase() : "";
-}
-
-function legacyTicketIdFromPath(pathname = "") {
-  const path = cleanText(pathname);
-  if (!path.toLowerCase().startsWith(LEGACY_TICKETS_PREFIX)) return "";
-
-  const suffix = path.slice(LEGACY_TICKETS_PREFIX.length);
-  if (!suffix || suffix.includes("/")) return "";
-  return normalizeTicketId(suffix);
-}
-
-function ticketIdFromUrl(url = null) {
-  if (!url) return "";
-
-  return (
-    legacyTicketIdFromPath(url.pathname) ||
-    normalizeTicketId(
-      url.searchParams.get("ticketId") ||
-      url.searchParams.get("incidenciaId") ||
-      ""
-    )
-  );
 }
 
 function currentUrl() {
@@ -85,15 +56,45 @@ function currentUrl() {
   }
 }
 
-function canonicalizeLegacyUrl() {
-  const url = currentUrl();
+function ticketFromLegacyPath(pathname = "") {
+  const path = cleanText(pathname);
+  if (!path.toLowerCase().startsWith(LEGACY_TICKETS_PREFIX)) return "";
+
+  const suffix = path.slice(LEGACY_TICKETS_PREFIX.length);
+  if (!suffix || suffix.includes("/")) return "";
+  return normalizeTicketId(suffix);
+}
+
+function resolveTicket(url = null) {
   if (!url) return "";
 
-  const legacyId = legacyTicketIdFromPath(url.pathname);
-  if (!legacyId) return ticketIdFromUrl(url);
+  return (
+    ticketFromLegacyPath(url.pathname) ||
+    normalizeTicketId(
+      url.searchParams.get("ticketId") ||
+      url.searchParams.get("incidenciaId") ||
+      (url.searchParams.get("entity") === ENTITY_TYPE
+        ? url.searchParams.get("entityId")
+        : "") ||
+      ""
+    )
+  );
+}
 
-  url.pathname = CANONICAL_INCIDENCIAS_PATH;
-  url.searchParams.set("ticketId", legacyId);
+function canonicalize() {
+  const url = currentUrl();
+  if (!url) return false;
+
+  ticketId = resolveTicket(url);
+  if (!ticketId) return false;
+
+  legacyPath = Boolean(ticketFromLegacyPath(url.pathname));
+  if (legacyPath) url.pathname = PRIVATE_HOME_PATH;
+
+  url.searchParams.delete("ticketId");
+  url.searchParams.delete("incidenciaId");
+  url.searchParams.set("entity", ENTITY_TYPE);
+  url.searchParams.set("entityId", ticketId);
 
   try {
     window.history.replaceState(
@@ -101,204 +102,89 @@ function canonicalizeLegacyUrl() {
       "",
       `${url.pathname}${url.search}${url.hash}`
     );
-  } catch {
-    // La canonicalización visual no debe impedir que el Router reciba el id.
-  }
-
-  return legacyId;
-}
-
-function cssEscape(value = "") {
-  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
-    return CSS.escape(value);
-  }
-
-  return String(value)
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"');
-}
-
-function viewRoot() {
-  return isBrowser() ? document.querySelector(VIEW_ROOT_SELECTOR) : null;
-}
-
-function exactTicketRow(id = "", root = viewRoot()) {
-  if (!id || !root) return null;
-
-  const escaped = cssEscape(id);
-  return (
-    root.querySelector(
-      `[data-ticket-row='true'][data-ticket-id="${escaped}"]`
-    ) ||
-    root.querySelector(
-      `[data-incidencia-row='true'][data-incidencia-id="${escaped}"]`
-    ) ||
-    null
-  );
-}
-
-function modalIsOpen(root = viewRoot()) {
-  return Boolean(root?.querySelector?.(MODAL_ROOT_SELECTOR));
-}
-
-function applyTicketSearch(id = "", root = viewRoot()) {
-  if (!id || searchApplied || !root) return false;
-
-  const input = root.querySelector(SEARCH_INPUT_SELECTOR);
-  if (!input) return false;
-
-  try {
-    input.value = id;
-    input.dispatchEvent(
-      new Event("input", {
-        bubbles: true,
-        composed: true,
-      })
-    );
-    searchApplied = true;
+    canonicalized = true;
     return true;
   } catch {
     return false;
   }
 }
 
-function activateTicketRow(id = "", root = viewRoot()) {
-  if (!id || rowActivated || !root) return false;
-
-  const row = exactTicketRow(id, root);
-  if (!row) return false;
-
-  try {
-    row.click();
-    rowActivated = true;
-    return true;
-  } catch {
-    try {
-      row.dispatchEvent(
-        new MouseEvent("click", {
-          bubbles: true,
-          cancelable: true,
-          composed: true,
-        })
-      );
-      rowActivated = true;
-      return true;
-    } catch {
-      return false;
-    }
-  }
-}
-
-function cleanTicketQueryFromUrl() {
-  const url = currentUrl();
-  if (!url) return false;
-
-  url.searchParams.delete("ticketId");
-  url.searchParams.delete("incidenciaId");
-
-  try {
-    const search = url.searchParams.toString();
-    window.history.replaceState(
-      window.history.state,
-      "",
-      `${url.pathname}${search ? `?${search}` : ""}${url.hash}`
-    );
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function stop() {
-  if (finished) return false;
-  finished = true;
-
-  observer?.disconnect?.();
-  observer = null;
-
-  if (timeoutId) {
-    window.clearTimeout(timeoutId);
-    timeoutId = 0;
+function installScopedObserver() {
+  if (
+    !isBrowser() ||
+    observer ||
+    typeof MutationObserver !== "function"
+  ) {
+    return Boolean(observer);
   }
 
-  return true;
-}
-
-function finishSuccess() {
-  cleanTicketQueryFromUrl();
-  stop();
-  return true;
-}
-
-function attemptOpen() {
-  if (finished || !ticketId || !isBrowser()) return false;
-
-  const root = viewRoot();
+  const root = document.querySelector(VIEW_ROOT_SELECTOR);
   if (!root) return false;
 
-  if (modalIsOpen(root)) return finishSuccess();
-  if (activateTicketRow(ticketId, root)) return true;
+  mountRoot = root;
+  observer = new MutationObserver(() => {
+    canonicalize();
+  });
+  observer.observe(root, {
+    childList: true,
+    subtree: false,
+  });
 
-  applyTicketSearch(ticketId, root);
+  return true;
+}
+
+function scheduleScopedObserver() {
+  if (!ticketId || !isBrowser()) return false;
+  if (installScopedObserver()) return true;
+
+  if (!observerInstallHandler) {
+    observerInstallHandler = () => {
+      observerInstallHandler = null;
+      installScopedObserver();
+    };
+    window.addEventListener("onion:main:ready", observerInstallHandler, {
+      once: true,
+    });
+  }
+
   return false;
 }
 
-function startObserver() {
-  if (!isBrowser() || !ticketId || finished) return false;
+canonicalize();
+scheduleScopedObserver();
 
-  const root = viewRoot();
-  if (!root) return false;
-
-  attemptOpen();
-  if (finished) return true;
-
-  observer = new MutationObserver(() => {
-    attemptOpen();
-  });
-
-  /*
-    Las filas, resultados y el modal entran como nodos del Router view.
-    No hace falta observar atributos ni todo documentElement.
-  */
-  observer.observe(root, {
-    childList: true,
-    subtree: true,
-  });
-
-  timeoutId = window.setTimeout(() => {
-    /*
-      Si no se pudo abrir, el query permanece en la URL. Un refresh posterior
-      vuelve a activar el deeplink sin persistir nada en storage.
-    */
-    stop();
-  }, MAX_WAIT_MS);
-
-  return true;
-}
-
-function boot() {
+export function destroyTicketDeeplink() {
   if (!isBrowser()) return false;
 
-  ticketId = canonicalizeLegacyUrl();
-  if (!ticketId) return false;
+  if (observerInstallHandler) {
+    window.removeEventListener("onion:main:ready", observerInstallHandler);
+    observerInstallHandler = null;
+  }
 
-  return startObserver();
+  observer?.disconnect();
+  observer = null;
+  mountRoot = null;
+  return true;
 }
-
-boot();
 
 export function getTicketDeeplinkSnapshot() {
   return Object.freeze({
     version: TICKET_DEEPLINK_VERSION,
     active: Boolean(ticketId),
-    searchApplied,
-    rowActivated,
-    modalOpen: isBrowser() ? modalIsOpen() : false,
-    finished,
+    ticketId: ticketId ? "***" : "",
+    legacyPath,
+    canonicalized,
+    searchApplied: false,
+    rowActivated: false,
+    modalOpen: false,
+    finished: canonicalized,
+    strategy: "global-entity-intent",
+    observerScope: mountRoot ? "router-view" : "none",
   });
 }
 
 export default Object.freeze({
   version: TICKET_DEEPLINK_VERSION,
   getSnapshot: getTicketDeeplinkSnapshot,
+  destroy: destroyTicketDeeplink,
 });

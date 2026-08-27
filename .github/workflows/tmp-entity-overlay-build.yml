@@ -165,11 +165,26 @@ jobs:
 
           contract = Path('.github/scripts/entity_overlay_contract.mjs')
           text = contract.read_text(encoding='utf-8')
-          old = 'data-entity-type="${attr(entityType)}"'
-          new = 'data-entity-type="${attr(type)}"'
-          if text.count(old) != 1:
-            raise SystemExit('entity overlay contract type anchor missing')
-          contract.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          replacements = (
+            (
+              'data-entity-type="${attr(entityType)}"',
+              'data-entity-type="${attr(type)}"',
+              'entity type contract',
+            ),
+            (
+              'import("../../features/entity-overlay/index.js")',
+              '../../features/entity-overlay/index.js',
+              'entity import contract',
+            ),
+          )
+
+          for old, new, label in replacements:
+            if text.count(old) != 1:
+              raise SystemExit(f'{label} anchor missing')
+            text = text.replace(old, new, 1)
+
+          contract.write_text(text, encoding='utf-8')
           PY
 
           rm -rf .tmp

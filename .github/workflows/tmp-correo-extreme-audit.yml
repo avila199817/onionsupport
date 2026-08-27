@@ -84,6 +84,7 @@ jobs:
           set -euo pipefail
           rm -f .github/scripts/tmp_correo_extreme_patch.py
           rm -f .github/workflows/tmp-correo-extreme-audit.yml
+          rm -f .github/tmp-correo-trigger.txt
 
       - name: Commit product patch
         shell: bash

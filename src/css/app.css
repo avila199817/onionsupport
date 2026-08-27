@@ -52,6 +52,7 @@
    Sidebar/Topbar pintan sus componentes internos.
    sidebar.executive.css remata únicamente el interior visual del Sidebar.
    sidebar.executive.interactions.css ancla las interacciones del rail.
+   topbar.executive.css aplica la misma gramática ejecutiva al Topbar.
    chrome.css se carga el último dentro de layer(layout) y es la ÚNICA
    autoridad geométrica: offsets, mounts, drawer, backdrop y transición
    desktop/mobile. chrome.css NO puede autodeclarar otro @layer interno.
@@ -61,6 +62,7 @@
 @import url("./layout/sidebar.executive.css") layer(layout);
 @import url("./layout/sidebar.executive.interactions.css") layer(layout);
 @import url("./layout/topbar.css") layer(layout);
+@import url("./layout/topbar.executive.css") layer(layout);
 @import url("./layout/chrome.css") layer(layout);
 
 /* =========================================================

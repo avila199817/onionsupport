@@ -8,7 +8,7 @@ const files = [
     reader: "readCoreState",
   },
   {
-    path: "src/ui/topbar/index.js",
+    path: "src/ui/topbar/index.base.js",
     version: "topbar.controller.backend-search.v9-search-runtime-context",
     reader: "getCoreState",
   },
@@ -114,7 +114,35 @@ assert.match(
   "Sidebar sync must pass committed context into getContext()"
 );
 
-const topbarSource = await readFile("src/ui/topbar/index.js", "utf8");
+/*
+  Topbar index.js es ahora un boundary deliberadamente mínimo: conserva el
+  controlador endurecido en index.base.js y carga el enhancement ejecutivo.
+  Este contrato verifica ambos niveles para que el refactor no rebaje ninguna
+  garantía del runtime de búsqueda.
+*/
+const topbarBoundarySource = await readFile("src/ui/topbar/index.js", "utf8");
+assert.equal(
+  topbarBoundarySource.includes('import "../../features/topbar-executive/index.js";'),
+  true,
+  "Topbar boundary must load the executive enhancement exactly from its canonical path"
+);
+assert.equal(
+  topbarBoundarySource.includes('export * from "./index.base.js";'),
+  true,
+  "Topbar boundary must preserve named exports from the hardened controller"
+);
+assert.equal(
+  topbarBoundarySource.includes('export { default } from "./index.base.js";'),
+  true,
+  "Topbar boundary must preserve the default controller export"
+);
+assert.equal(
+  topbarBoundarySource.includes("Http.get"),
+  false,
+  "Topbar boundary must not duplicate search transport logic"
+);
+
+const topbarSource = await readFile("src/ui/topbar/index.base.js", "utf8");
 
 function functionSource(source, name, nextName) {
   const start = source.indexOf(`function ${name}(`);
@@ -240,5 +268,5 @@ assert.equal(
 );
 
 console.log(
-  "Shell runtime contract OK · Sidebar committed Router context reuse · Topbar one-read search runtime context · Sidebar/Topbar zero-copy Core reads"
+  "Shell runtime contract OK · Sidebar committed Router context reuse · Topbar executive boundary + one-read search runtime context · Sidebar/Topbar zero-copy Core reads"
 );

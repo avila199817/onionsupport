@@ -185,6 +185,17 @@ jobs:
             text = text.replace(old, new, 1)
 
           contract.write_text(text, encoding='utf-8')
+
+          enhancements = Path('src/app/enhancements.js')
+          source = enhancements.read_text(encoding='utf-8')
+          old_version = 'app.enhancements.v18-global-entity-overlay'
+          stable_version = 'app.enhancements.v17-incidencias-live-media'
+          if source.count(old_version) != 1:
+            raise SystemExit('enhancements version anchor missing')
+          enhancements.write_text(
+            source.replace(old_version, stable_version, 1),
+            encoding='utf-8',
+          )
           PY
 
           rm -rf .tmp

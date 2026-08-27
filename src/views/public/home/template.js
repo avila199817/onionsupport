@@ -12,6 +12,8 @@ export const PUBLIC_HOME_TEMPLATE_VERSION = "public.home.template.final.producti
 const APP_NAME = "Onion Support";
 
 const CRISTIAN_PROFILE_PHOTO = "src/media/img/Cristian_Avila.png";
+const CRISTIAN_PROFILE_PHOTO_WEBP_480 = "src/media/img/Cristian_Avila_480.webp";
+const CRISTIAN_PROFILE_PHOTO_WEBP_960 = "src/media/img/Cristian_Avila_960.webp";
 
 const BUSINESS = {
   name: "Onion Support",
@@ -331,6 +333,16 @@ function renderHeader() {
 
 function renderHeroVisual() {
   const profilePhoto = safeAssetSrc(BUSINESS.profilePhoto, BUSINESS.profilePhoto);
+  const profilePhotoWebp480 = safeAssetSrc(
+    CRISTIAN_PROFILE_PHOTO_WEBP_480,
+    CRISTIAN_PROFILE_PHOTO_WEBP_480
+  );
+  const profilePhotoWebp960 = safeAssetSrc(
+    CRISTIAN_PROFILE_PHOTO_WEBP_960,
+    CRISTIAN_PROFILE_PHOTO_WEBP_960
+  );
+  const profilePhotoWebpSrcset = `${profilePhotoWebp480} 480w, ${profilePhotoWebp960} 960w`;
+  const profilePhotoSizes = "(max-width: 760px) 44vw, 196px";
 
   return `
     <article class="public-home-profile-card public-home-profile-card--command" aria-label="Perfil profesional de ${escapeAttr(BUSINESS.ownerName)}" data-public-home-card="true" data-public-home-magnetic="true">
@@ -342,7 +354,10 @@ function renderHeroVisual() {
       <div class="public-home-profile-command">
         <section class="public-home-command-hero" aria-label="Resumen profesional">
           <div class="public-home-command-portrait">
-            <img class="public-home-command-photo" src="${escapeAttr(profilePhoto)}" alt="${escapeAttr(BUSINESS.ownerName)} - ${escapeAttr(BUSINESS.name)}" width="520" height="680" loading="eager" decoding="async" draggable="false">
+            <picture class="public-home-command-picture">
+              <source type="image/webp" srcset="${escapeAttr(profilePhotoWebpSrcset)}" sizes="${escapeAttr(profilePhotoSizes)}">
+              <img class="public-home-command-photo" src="${escapeAttr(profilePhoto)}" alt="${escapeAttr(BUSINESS.ownerName)} - ${escapeAttr(BUSINESS.name)}" width="480" height="600" loading="eager" decoding="async" fetchpriority="high" draggable="false">
+            </picture>
           </div>
 
           <div class="public-home-command-copy">

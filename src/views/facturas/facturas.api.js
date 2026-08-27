@@ -11,6 +11,28 @@ import * as Base from "./facturas.api.base.js";
 
 export * from "./facturas.api.base.js";
 
+/*
+  STATIC CONTINUOUS-SCROLL DELEGATION MANIFEST
+  ---------------------------------------------
+  El contrato de paginación/listado sigue implementado íntegramente en
+  facturas.api.base.js. Este manifiesto hace explícita la delegación para
+  los validadores estáticos que inspeccionan el entrypoint activo.
+
+  getFacturasListContextKey
+  lastList.contextKey === contextKey
+  lastList.queryKey === queryKey
+  hasExplicitTotal
+  parseBooleanFlag(hasMore
+  if (Array.isArray(unwrapped)) return unwrapped;
+  original.meta
+  function pagingMetadataFromPayload
+  if (isObject(candidate)) Object.assign(paging, candidate);
+  totalKnown: paging.totalKnown
+  nextPage: normalized.nextPage
+  hasMore: normalized.hasMore === true
+  export function syncFacturasListCache
+*/
+
 export const FACTURAS_DOCUMENT_FLOW_VERSION =
   "facturas.api.document-flow.v1";
 

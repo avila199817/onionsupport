@@ -111,7 +111,6 @@ const STYLE_MANIFEST = Object.freeze({
 
   correo: Object.freeze([
     "/src/css/views/correo/index.css",
-    "/src/css/views/correo/viewport.css",
   ]),
 
   servidor: Object.freeze([

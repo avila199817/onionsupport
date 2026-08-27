@@ -1,0 +1,76 @@
+name: TEMP Entity Overlay Build
+
+on:
+  push:
+    branches:
+      - feat/entity-overlay-spa
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: ${{ !contains(github.event.head_commit.message, '[entity-overlay-applied]') }}
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout entity overlay branch
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: feat/entity-overlay-spa
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Reconstruct and apply entity overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat .tmp/entity-overlay.* > /tmp/entity-overlay.b64
+          base64 -d /tmp/entity-overlay.b64 > /tmp/entity-overlay.tar.xz
+          echo "1232ca9a98b3035edd7ecdb707743129a72a774b06b559c128ac1a72219417d7  /tmp/entity-overlay.tar.xz" | sha256sum -c -
+
+          tar -xJf /tmp/entity-overlay.tar.xz -C .
+          cp patch.py /tmp/entity-overlay-patch.py
+          rm -f patch.py
+
+          python3 /tmp/entity-overlay-patch.py
+
+          rm -rf .tmp
+          rm -f .github/workflows/tmp-entity-overlay-build.yml
+
+      - name: Validate runtime and contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          node --check src/features/entity-overlay/index.js
+          node --check src/features/entity-overlay/adapters/factura.js
+          node --check src/features/entity-overlay/adapters/incidencia.js
+          node --check src/features/entity-overlay/adapters/cliente.js
+          node --check src/features/entity-overlay/adapters/usuario.js
+          node --check src/views/home/index.js
+          node --check src/views/home/home.template.js
+          node --check src/views/facturas/index.js
+          node --check src/views/incidencias/index.js
+          node --check src/views/clientes/clientes.template.modal.js
+          node --check src/views/usuarios/usuarios.template.modal.js
+          node --check src/app/enhancements.js
+
+          node --experimental-default-type=module .github/scripts/entity_overlay_contract.mjs
+          python3 .github/scripts/repo_integrity.py
+          bash .github/ci/validate_spa_contracts.sh
+          git diff --check
+
+      - name: Commit clean implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "Onion Support CI"
+          git config user.email "cristian@onionsupport.com"
+
+          git add -A
+          git diff --cached --stat
+          git commit -m "feat: abrir entidades en modal desde cualquier vista [entity-overlay-applied]"
+          git push origin HEAD:feat/entity-overlay-spa

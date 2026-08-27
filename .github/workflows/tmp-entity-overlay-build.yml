@@ -39,6 +39,7 @@ jobs:
 
           p = Path('/tmp/entity-overlay-patch.py')
           text = p.read_text(encoding='utf-8')
+
           start = text.index("sub_once(\n    path,\n    r'''  async function openIncidencia")
           end = text.index("\n\ntext = read(path)", start)
           replacement = '''replace_once(
@@ -108,6 +109,52 @@ jobs:
               \"facturas cross-entity relation\",
             )'''
           text = text[:start] + replacement + text[end:]
+
+          mount_start = text.index(
+            "replace_once(\n    path,\n    '''    openFactura,\n    closeDetailModal,"
+          )
+          mount_end = text.index(
+            "\n\n# ------------------------------------------------------------------\n# Incidencias",
+            mount_start,
+          )
+          mount_replacement = '''replace_once(
+              path,
+              """  const controller = {
+              version: FACTURAS_VIEW_VERSION,
+
+              mount() {""",
+              """  const controller = {
+              version: FACTURAS_VIEW_VERSION,
+
+              mountDetailOnly() {
+                if (
+                  destroyed ||
+                  mounted ||
+                  !host
+                ) {
+                  return controller;
+                }
+
+                mounted = true;
+                destroyed = false;
+
+                host.setAttribute(
+                  \"data-facturas-detail-only-controller\",
+                  \"true\"
+                );
+
+                bindTarget(host);
+                ensureDetailModalHost();
+                syncModalBodyState();
+
+                return controller;
+              },
+
+              mount() {""",
+              \"facturas detail-only mount\",
+            )'''
+          text = text[:mount_start] + mount_replacement + text[mount_end:]
+
           p.write_text(text, encoding='utf-8')
           PY
 

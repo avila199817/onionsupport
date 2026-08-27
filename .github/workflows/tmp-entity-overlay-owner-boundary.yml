@@ -1,0 +1,141 @@
+name: TEMP Entity Overlay Owner Boundary
+
+on:
+  push:
+    branches:
+      - fix/entity-overlay-owner-boundary
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[owner-boundary-applied]') }}
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: fix/entity-overlay-owner-boundary
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Preserve canonical owner-view controllers
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          intent_path = Path('src/features/entity-overlay/intent.js')
+          intent = intent_path.read_text(encoding='utf-8')
+
+          if 'const OWNER_ROUTE_SEGMENTS' not in intent:
+              anchor = '''const EXPLICIT_ID_KEYS = Object.freeze({\n'''
+              addition = '''const OWNER_ROUTE_SEGMENTS = Object.freeze({\n  factura: Object.freeze(["facturas"]),\n  incidencia: Object.freeze(["incidencias", "tickets"]),\n  cliente: Object.freeze(["clientes"]),\n  usuario: Object.freeze(["usuarios"]),\n});\n\n'''
+              if anchor not in intent:
+                  raise SystemExit('intent: EXPLICIT_ID_KEYS anchor not found')
+              intent = intent.replace(anchor, addition + anchor, 1)
+
+          if 'export function entityOwnerRouteMatches' not in intent:
+              anchor = '''export function normalizeEntityId(type = "", value = "") {\n'''
+              addition = '''export function entityOwnerRouteMatches(\n  type = "",\n  pathname = "/"\n) {\n  const entityType = normalizeEntityType(type);\n  if (!entityType) return false;\n\n  const parts = cleanText(pathname, "/")\n    .split("?")[0]\n    .split("#")[0]\n    .replace(/\\\\/g, "/")\n    .split("/")\n    .map((part) => part.trim().toLowerCase())\n    .filter(Boolean);\n\n  return (OWNER_ROUTE_SEGMENTS[entityType] || [])\n    .some((segment) => parts.includes(segment));\n}\n\n'''
+              if anchor not in intent:
+                  raise SystemExit('intent: normalizeEntityId anchor not found')
+              intent = intent.replace(anchor, addition + anchor, 1)
+
+          if 'entityOwnerRouteMatches,' not in intent:
+              anchor = '''  normalizeEntityType,\n  normalizeEntityId,\n'''
+              if anchor not in intent:
+                  raise SystemExit('intent: default export anchor not found')
+              intent = intent.replace(
+                  anchor,
+                  '''  normalizeEntityType,\n  normalizeEntityId,\n  entityOwnerRouteMatches,\n''',
+                  1,
+              )
+
+          intent_path.write_text(intent, encoding='utf-8')
+
+          overlay_path = Path('src/features/entity-overlay/index.js')
+          overlay = overlay_path.read_text(encoding='utf-8')
+
+          if 'entityOwnerRouteMatches,' not in overlay.split('} from "./intent.js";')[0]:
+              anchor = '''  inferEntityIntentFromElement,\n  normalizeEntityId,\n'''
+              if anchor not in overlay:
+                  raise SystemExit('overlay: intent import anchor not found')
+              overlay = overlay.replace(
+                  anchor,
+                  '''  inferEntityIntentFromElement,\n  entityOwnerRouteMatches,\n  normalizeEntityId,\n''',
+                  1,
+              )
+
+          if 'function shouldDelegateToOwnerView' not in overlay:
+              anchor = '''function stopEntityClick(event = null) {\n'''
+              addition = '''function explicitOverlayRequest(target = null) {\n  const element = target?.nodeType === 3\n    ? target.parentElement\n    : target;\n\n  const node = element?.closest?.(\n    "[data-entity-overlay='true'], [data-entity-overlay-open='true']"\n  );\n\n  return Boolean(node);\n}\n\nfunction routeHostPathFor(target = null) {\n  const element = target?.nodeType === 3\n    ? target.parentElement\n    : target;\n\n  const host = element?.closest?.(\n    "[data-route-host='true'][data-route-path], [data-route-view='true'][data-route-path]"\n  );\n\n  return cleanText(\n    host?.dataset?.routePath ||\n    host?.getAttribute?.("data-route-path") ||\n    "",\n    ""\n  );\n}\n\nfunction shouldDelegateToOwnerView(target = null, intent = null) {\n  if (!intent || explicitOverlayRequest(target)) return false;\n\n  const routePath = routeHostPathFor(target);\n  return Boolean(\n    routePath &&\n    entityOwnerRouteMatches(intent.type, routePath)\n  );\n}\n\n'''
+              if anchor not in overlay:
+                  raise SystemExit('overlay: stopEntityClick anchor not found')
+              overlay = overlay.replace(anchor, addition + anchor, 1)
+
+          if 'shouldDelegateToOwnerView(event.target, intent)' not in overlay:
+              anchor = '''  const intent = inferEntityIntentFromElement(event.target);\n  if (!intent || !canOpen(intent.type, intent.id)) return;\n\n  stopEntityClick(event);\n'''
+              replacement = '''  const intent = inferEntityIntentFromElement(event.target);\n  if (!intent || !canOpen(intent.type, intent.id)) return;\n\n  /*\n    Dentro de la vista propietaria sigue mandando su controller canónico: allí\n    existen edición, mutaciones y estado local completo. El overlay global sólo\n    intercepta otras vistas, topbar/notificaciones o aperturas explícitas.\n  */\n  if (shouldDelegateToOwnerView(event.target, intent)) return;\n\n  stopEntityClick(event);\n'''
+              if anchor not in overlay:
+                  raise SystemExit('overlay: document intent anchor not found')
+              overlay = overlay.replace(anchor, replacement, 1)
+
+          overlay_path.write_text(overlay, encoding='utf-8')
+
+          contract_path = Path('.github/scripts/entity_overlay_contract.mjs')
+          contract = contract_path.read_text(encoding='utf-8')
+
+          if 'entityOwnerRouteMatches,' not in contract.split('} from "../../src/features/entity-overlay/intent.js";')[0]:
+              anchor = '''  inferEntityIntent,\n  normalizeEntityId,\n'''
+              if anchor not in contract:
+                  raise SystemExit('contract: import anchor not found')
+              contract = contract.replace(
+                  anchor,
+                  '''  inferEntityIntent,\n  entityOwnerRouteMatches,\n  normalizeEntityId,\n''',
+                  1,
+              )
+
+          if 'entityOwnerRouteMatches("factura"' not in contract:
+              anchor = '''assert.equal(normalizeEntityId("factura", "../../secret"), "");\n\n'''
+              addition = '''assert.equal(entityOwnerRouteMatches("factura", "/facturas"), true);\nassert.equal(entityOwnerRouteMatches("incidencia", "/incidencias"), true);\nassert.equal(entityOwnerRouteMatches("incidencia", "/tickets/INC-1"), true);\nassert.equal(entityOwnerRouteMatches("factura", "/dashboard"), false);\n\n'''
+              if anchor not in contract:
+                  raise SystemExit('contract: owner-route test anchor not found')
+              contract = contract.replace(anchor, anchor + addition, 1)
+
+          if 'shouldDelegateToOwnerView' not in contract:
+              anchor = '''assert.match(overlay, /data-entity-overlay-panel/);\n'''
+              if anchor not in contract:
+                  raise SystemExit('contract: overlay assertion anchor not found')
+              contract = contract.replace(
+                  anchor,
+                  anchor + 'assert.match(overlay, /shouldDelegateToOwnerView/);\n',
+                  1,
+              )
+
+          contract_path.write_text(contract, encoding='utf-8')
+
+          Path('.github/workflows/tmp-entity-overlay-owner-boundary.yml').unlink(missing_ok=True)
+          PY
+
+      - name: Validate boundary and repository contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/features/entity-overlay/intent.js
+          node --check src/features/entity-overlay/index.js
+          node .github/scripts/entity_overlay_contract.mjs
+          python .github/scripts/repo_integrity.py
+          bash .github/ci/validate_spa_contracts.sh
+          git diff --check
+
+      - name: Commit final boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Onion Support CI"
+          git config user.email "cristian@onionsupport.com"
+          git add -A
+          git commit -m "fix: preservar modales canónicos en sus vistas [owner-boundary-applied]"
+          git push origin HEAD:fix/entity-overlay-owner-boundary

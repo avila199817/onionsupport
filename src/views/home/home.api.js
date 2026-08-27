@@ -29,7 +29,7 @@ export const HOME_ADMIN_COUNT_LIMIT = 1;
 export const HOME_CACHE_TTL_MS = 60_000;
 
 export const HOME_ENDPOINTS = Object.freeze({
-  clientes: "/api/clientes",
+  clientes: "/api/clientes/stats",
   usuarios: "/api/users",
 });
 

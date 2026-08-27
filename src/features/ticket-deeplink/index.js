@@ -13,10 +13,14 @@ const LEGACY_TICKETS_PREFIX = "/tickets/";
 const PRIVATE_HOME_PATH = "/dashboard";
 const TICKET_ID_PATTERN = /^INC-[A-Z0-9-]{6,120}$/i;
 const ENTITY_TYPE = "incidencia";
+const VIEW_ROOT_SELECTOR = "#view-container, [data-router-view='true']";
 
 let ticketId = "";
 let legacyPath = false;
 let canonicalized = false;
+let observer = null;
+let mountRoot = null;
+let observerInstallHandler = null;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -105,7 +109,63 @@ function canonicalize() {
   }
 }
 
+function installScopedObserver() {
+  if (
+    !isBrowser() ||
+    observer ||
+    typeof MutationObserver !== "function"
+  ) {
+    return Boolean(observer);
+  }
+
+  const root = document.querySelector(VIEW_ROOT_SELECTOR);
+  if (!root) return false;
+
+  mountRoot = root;
+  observer = new MutationObserver(() => {
+    canonicalize();
+  });
+  observer.observe(root, {
+    childList: true,
+    subtree: false,
+  });
+
+  return true;
+}
+
+function scheduleScopedObserver() {
+  if (!ticketId || !isBrowser()) return false;
+  if (installScopedObserver()) return true;
+
+  if (!observerInstallHandler) {
+    observerInstallHandler = () => {
+      observerInstallHandler = null;
+      installScopedObserver();
+    };
+    window.addEventListener("onion:main:ready", observerInstallHandler, {
+      once: true,
+    });
+  }
+
+  return false;
+}
+
 canonicalize();
+scheduleScopedObserver();
+
+export function destroyTicketDeeplink() {
+  if (!isBrowser()) return false;
+
+  if (observerInstallHandler) {
+    window.removeEventListener("onion:main:ready", observerInstallHandler);
+    observerInstallHandler = null;
+  }
+
+  observer?.disconnect();
+  observer = null;
+  mountRoot = null;
+  return true;
+}
 
 export function getTicketDeeplinkSnapshot() {
   return Object.freeze({
@@ -119,10 +179,12 @@ export function getTicketDeeplinkSnapshot() {
     modalOpen: false,
     finished: canonicalized,
     strategy: "global-entity-intent",
+    observerScope: mountRoot ? "router-view" : "none",
   });
 }
 
 export default Object.freeze({
   version: TICKET_DEEPLINK_VERSION,
   getSnapshot: getTicketDeeplinkSnapshot,
+  destroy: destroyTicketDeeplink,
 });

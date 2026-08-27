@@ -10,7 +10,7 @@
    - Estado de notificaciones explícito; sin check redundante en perfil.
 ========================================================= */
 
-export const CORREO_TEMPLATE_VERSION = "correo.template.microsoft.production.v6-final-polish";
+export const CORREO_TEMPLATE_VERSION = "correo.template.microsoft.production.v7-extreme-canonical";
 
 const SVG = `aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"`;
 
@@ -42,7 +42,6 @@ const ICONS = Object.freeze({
   warning: `<svg ${SVG}><path d="M12 3 2 21h20L12 3Z"/><path d="M12 9v5M12 18h.01"/></svg>`,
   spinner: `<svg ${SVG} class="correo-spin"><circle cx="12" cy="12" r="8" opacity=".25"/><path d="M20 12a8 8 0 0 0-8-8"/></svg>`,
   bell: `<svg ${SVG}><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>`,
-  userPlus: `<svg ${SVG}><path d="M15 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>`,
   logout: `<svg ${SVG}><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/></svg>`,
 });
 
@@ -243,7 +242,7 @@ export function renderReader(message = null, attachments = [], loading = false) 
       <div class="correo-reader-scroll"><div class="correo-reader-body">${renderBodyText(message?.body?.content)}</div>${renderAttachments(attachments, message.id)}</div>
       <footer class="correo-reader-actions">
         ${message.isDraft
-          ? `<button class="correo-btn correo-btn--primary" type="button" data-correo-action="send-open-draft">${icon("send")}<span>Enviar borrador</span></button>`
+          ? `<button class="correo-btn" type="button" data-correo-action="edit-draft">${icon("edit")}<span>Editar borrador</span></button><button class="correo-btn correo-btn--primary" type="button" data-correo-action="send-open-draft">${icon("send")}<span>Enviar borrador</span></button>`
           : `<button class="correo-btn correo-btn--primary" type="button" data-correo-action="reply">${icon("reply")}<span>Responder</span></button><button class="correo-btn" type="button" data-correo-action="reply-all">${icon("replyAll")}<span>Responder a todos</span></button><button class="correo-btn" type="button" data-correo-action="forward">${icon("forward")}<span>Reenviar</span></button>`}
       </footer>
     </article>`;
@@ -260,7 +259,7 @@ export function renderConnectionCard(status = {}, account = {}, notifications = 
   const connected = status.connected === true;
   const healthy = status.healthy !== false;
   const label = cleanText(status.displayName || account.displayName, connected ? "Microsoft 365" : "Microsoft Outlook");
-  const mailbox = cleanText(status.mailbox, "cristian@onionsupport.com");
+  const mailbox = cleanText(status.mailbox, "Microsoft 365");
   const notificationEnabled = notifications.enabled === true;
   const notificationSupported = notifications.supported !== false;
 
@@ -274,7 +273,6 @@ export function renderConnectionCard(status = {}, account = {}, notifications = 
       </button>
       <div class="correo-account-menu" data-correo-account-menu role="menu" hidden>
         <div class="correo-account-menu-current"><span>${renderAccountAvatar(account)}</span><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(mailbox)}</small></div></div>
-        <button type="button" role="menuitem" data-correo-action="add-account">${icon("userPlus")}<span><strong>Añadir otra cuenta</strong><small>Interfaz preparada · requiere backend multicuenta</small></span></button>
         <button class="correo-account-menu-notifications${notificationEnabled ? " is-enabled" : ""}" type="button" role="menuitemcheckbox" aria-checked="${notificationEnabled ? "true" : "false"}" data-correo-action="notifications">${icon("bell")}<span><strong>${notificationEnabled ? "Notificaciones activadas" : "Activar notificaciones"}</strong><small>${notificationSupported ? "Avisos del navegador cuando llegue correo" : "Este navegador no admite notificaciones"}</small></span><i class="correo-account-menu-check" aria-hidden="true">${notificationEnabled ? icon("check") : ""}</i></button>
       </div>
     </div>`;
@@ -340,7 +338,6 @@ function renderConnectedWorkspace(input = {}) {
           </div>
         </div>
         <div class="correo-message-list" data-correo-message-list aria-busy="${loadingMessages || loadingMore ? "true" : "false"}">${loadingMessages ? renderMessageSkeletons() : renderMessageRows(messages, selectedMessageId)}${loadingMore ? `<div class="correo-infinite-loader">${icon("spinner")}<span>Cargando correos anteriores…</span></div>` : ""}</div>
-        <div class="correo-infinite-sentinel" data-correo-infinite-sentinel aria-hidden="true"></div>
       </section>
       <section class="correo-reader" data-correo-reader aria-label="Lectura del mensaje">${renderReader(input.selectedMessage, input.attachments || [], input.loadingReader === true)}</section>
     </section>`;
@@ -362,23 +359,50 @@ export function renderComposeModal(input = {}) {
   const mode = input.mode || "compose";
   const isReply = mode === "reply" || mode === "reply-all";
   const isForward = mode === "forward";
-  const title = isReply ? (mode === "reply-all" ? "Responder a todos" : "Responder") : isForward ? "Reenviar" : "Nuevo correo";
+  const isDraftEdit = mode === "draft-edit";
+  const title = isReply
+    ? (mode === "reply-all" ? "Responder a todos" : "Responder")
+    : isForward
+      ? "Reenviar"
+      : isDraftEdit
+        ? "Editar borrador"
+        : "Nuevo correo";
   const to = parseRecipientField(input.to || "").join(", ");
   const cc = parseRecipientField(input.cc || "").join(", ");
   const subject = cleanText(input.subject, "");
+  const fullFields = !isReply;
+  const canAttach = mode === "compose" || isDraftEdit;
   return `
     <div class="correo-modal-backdrop" data-correo-action="close-modal"></div>
     <section class="correo-compose" role="dialog" aria-modal="true" aria-labelledby="correo-compose-title">
       <header class="correo-compose-header"><h2 id="correo-compose-title">${escapeHtml(title)}</h2><button class="correo-icon-btn" type="button" data-correo-action="close-modal" aria-label="Cerrar">${icon("close")}</button></header>
       <form class="correo-compose-form" data-correo-compose-form data-correo-compose-mode="${attr(mode)}" data-correo-message-id="${attr(input.messageId || "")}">
         <div class="correo-compose-fields">
-          ${isReply ? "" : `<label class="correo-field correo-field--line"><span>Para</span><input name="to" type="text" inputmode="email" autocomplete="email" placeholder="nombre@empresa.com" value="${attr(to)}" required></label><label class="correo-field correo-field--line"><span>Cc</span><input name="cc" type="text" inputmode="email" autocomplete="off" placeholder="Opcional" value="${attr(cc)}"></label>${mode === "compose" ? `<label class="correo-field correo-field--line"><span>Asunto</span><input name="subject" type="text" maxlength="998" placeholder="Agregar asunto" value="${attr(subject)}"></label>` : ""}`}
+          ${fullFields ? `<label class="correo-field correo-field--line"><span>Para</span><input name="to" type="text" inputmode="email" autocomplete="email" placeholder="nombre@empresa.com" value="${attr(to)}" required></label><label class="correo-field correo-field--line"><span>Cc</span><input name="cc" type="text" inputmode="email" autocomplete="off" placeholder="Opcional" value="${attr(cc)}"></label>${isForward ? "" : `<label class="correo-field correo-field--line"><span>Asunto</span><input name="subject" type="text" maxlength="998" placeholder="Agregar asunto" value="${attr(subject)}"></label>`}` : ""}
         </div>
         <label class="correo-field correo-field--body"><span class="correo-field-sr-label">${isReply ? "Respuesta" : isForward ? "Comentario" : "Mensaje"}</span><textarea name="body" rows="12" placeholder="Escribe tu mensaje…">${escapeHtml(input.body || "")}</textarea></label>
-        ${mode === "compose" ? `<div class="correo-compose-attachments"><label class="correo-file-picker"><input type="file" name="attachments" multiple data-correo-attachments-input><span>${icon("paperclip")} Adjuntar</span></label><small data-correo-file-summary>Sin adjuntos</small></div>` : ""}
-        <footer class="correo-compose-footer"><span class="correo-compose-status" data-correo-compose-status></span><div>${mode === "compose" ? `<button class="correo-btn" type="button" data-correo-action="save-draft">Guardar borrador</button>` : ""}<button class="correo-btn correo-btn--primary" type="submit">${icon("send")}<span>${isReply ? "Enviar" : isForward ? "Reenviar" : "Enviar"}</span></button></div></footer>
+        ${canAttach ? `<div class="correo-compose-attachments"><label class="correo-file-picker"><input type="file" name="attachments" multiple data-correo-attachments-input><span>${icon("paperclip")} Adjuntar</span></label><small data-correo-file-summary>${isDraftEdit ? "Los adjuntos existentes se conservan · añade otros si hace falta" : "Sin adjuntos"}</small></div>` : ""}
+        <footer class="correo-compose-footer"><span class="correo-compose-status" data-correo-compose-status role="status" aria-live="polite"></span><div>${mode === "compose" || isDraftEdit ? `<button class="correo-btn" type="button" data-correo-action="save-draft">${isDraftEdit ? "Guardar cambios" : "Guardar borrador"}</button>` : ""}<button class="correo-btn correo-btn--primary" type="submit">${icon("send")}<span>${isReply ? "Enviar" : isForward ? "Reenviar" : isDraftEdit ? "Enviar borrador" : "Enviar"}</span></button></div></footer>
       </form>
     </section>`;
+}
+
+export function renderConfirmModal(input = {}) {
+  const danger = input.danger === true;
+  const iconName = cleanText(input.iconName, danger ? "warning" : "mail");
+  const eyebrow = cleanText(input.eyebrow, danger ? "Confirmación" : "Correo");
+  const title = cleanText(input.title, "¿Confirmar acción?");
+  const message = cleanText(input.message, "Revisa la acción antes de continuar.");
+  const confirmLabel = cleanText(input.confirmLabel, danger ? "Confirmar" : "Continuar");
+  return `
+    <div class="correo-confirm-overlay">
+      <div class="correo-confirm-backdrop" data-correo-action="confirm-cancel" aria-hidden="true"></div>
+      <section class="correo-confirm-dialog${danger ? " is-danger" : ""}" role="alertdialog" aria-modal="true" aria-labelledby="correo-confirm-title" aria-describedby="correo-confirm-description" tabindex="-1" data-correo-confirm-dialog>
+        <span class="correo-confirm-icon" aria-hidden="true">${icon(iconName)}</span>
+        <div class="correo-confirm-copy"><span class="correo-confirm-eyebrow">${escapeHtml(eyebrow)}</span><h3 id="correo-confirm-title">${escapeHtml(title)}</h3><p id="correo-confirm-description">${escapeHtml(message)}</p></div>
+        <div class="correo-confirm-actions"><button class="correo-btn" type="button" data-correo-action="confirm-cancel">Cancelar</button><button class="correo-btn ${danger ? "correo-btn--danger" : "correo-btn--primary"}" type="button" data-correo-action="confirm-accept">${escapeHtml(confirmLabel)}</button></div>
+      </section>
+    </div>`;
 }
 
 export function renderMoveMenu(folders = [], currentFolderId = "") {

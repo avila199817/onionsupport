@@ -20,6 +20,7 @@ import {
   formatBytes,
   icon,
   renderComposeModal,
+  renderConfirmModal,
   renderConnectionCard,
   renderFolderRows,
   renderMessageRows,
@@ -36,6 +37,7 @@ let lastInstance = null;
 const NOTIFICATION_PREF_KEY = "onion.correo.notifications.v1";
 const NOTIFICATION_POLL_MS = 60000;
 const MAX_NOTIFICATION_IDS = 80;
+const VIEW_CACHE_TTL_MS = 60_000;
 
 function primeNotificationPreference() {
   if (typeof window === "undefined" || !("Notification" in window)) return;
@@ -51,6 +53,7 @@ function primeNotificationPreference() {
 primeNotificationPreference();
 
 const VIEW_CACHE = {
+  ownerKey: "",
   status: null,
   statusKnown: false,
   folders: [],
@@ -157,16 +160,34 @@ function readOnionUser() {
 
   const displayName = cleanText(user?.displayName, "Usuario");
   const avatarUrl = sanitizeRuntimeImageUrl(user?.avatarUrl || "");
+  const cacheKey = cleanText(
+    raw?.id || raw?.userId || raw?.email || raw?.mail || raw?.sub ||
+      user?.id || user?.userId || user?.email || user?.mail || displayName,
+    "anonymous"
+  ).toLocaleLowerCase("es-ES");
 
   return Object.freeze({
     displayName,
     avatarUrl,
     initials: initialsFrom(displayName),
+    cacheKey,
   });
 }
 
-function cloneCacheIntoState(state) {
-  if (!VIEW_CACHE.statusKnown || !VIEW_CACHE.status) return;
+function cloneCacheIntoState(state, ownerKey = "") {
+  const age = VIEW_CACHE.cachedAt > 0 ? Date.now() - VIEW_CACHE.cachedAt : Number.POSITIVE_INFINITY;
+  const valid = Boolean(
+    ownerKey &&
+    VIEW_CACHE.ownerKey === ownerKey &&
+    VIEW_CACHE.statusKnown &&
+    VIEW_CACHE.status &&
+    age >= 0 &&
+    age <= VIEW_CACHE_TTL_MS
+  );
+  if (!valid) {
+    if (VIEW_CACHE.cachedAt || VIEW_CACHE.ownerKey) clearViewCache();
+    return;
+  }
   state.status = VIEW_CACHE.status;
   state.statusKnown = true;
   state.folders = [...VIEW_CACHE.folders];
@@ -183,6 +204,9 @@ function cloneCacheIntoState(state) {
 }
 
 function writeViewCache(state) {
+  const ownerKey = cleanText(state?.accountUser?.cacheKey, "");
+  if (!ownerKey) return;
+  VIEW_CACHE.ownerKey = ownerKey;
   VIEW_CACHE.status = state.status;
   VIEW_CACHE.statusKnown = state.statusKnown === true;
   VIEW_CACHE.folders = [...state.folders];
@@ -199,6 +223,7 @@ function writeViewCache(state) {
 }
 
 function clearViewCache() {
+  VIEW_CACHE.ownerKey = "";
   VIEW_CACHE.status = null;
   VIEW_CACHE.statusKnown = false;
   VIEW_CACHE.folders = [];
@@ -366,9 +391,14 @@ function createCorreoController(host, context = {}) {
   let mounted = false;
   let destroyed = false;
   let searchTimer = null;
+  let searchComposing = false;
   let listSequence = 0;
   let readerSequence = 0;
+  let listAbortController = null;
+  let readerAbortController = null;
   let infiniteScheduled = false;
+  let modalReturnFocus = null;
+  let confirmResolver = null;
 
   const state = {
     status: Object.freeze({ connected: false, healthy: null, mailbox: "" }),
@@ -392,7 +422,7 @@ function createCorreoController(host, context = {}) {
     busyAction: "",
   };
 
-  cloneCacheIntoState(state);
+  cloneCacheIntoState(state, state.accountUser.cacheKey);
 
   function apiOptions(extra = {}) {
     return { signal, ...extra };
@@ -463,12 +493,6 @@ function createCorreoController(host, context = {}) {
       if (!state.loadingMessages) target.scrollTop = previousScrollTop;
     }
 
-    const folder = state.folders.find((item) => item.id === state.selectedFolderId);
-    const total = Math.max(Number(folder?.totalItemCount) || 0, state.messages.length);
-    const count = host.querySelector("[data-correo-count]");
-    if (count) count.textContent = `${total} ${total === 1 ? "mensaje" : "mensajes"}`;
-    const title = host.querySelector("[data-correo-folder-title]");
-    if (title) title.textContent = state.selectedFolderName || "Correo";
     writeViewCache(state);
   }
 
@@ -485,6 +509,67 @@ function createCorreoController(host, context = {}) {
     for (const element of modal.querySelectorAll("button, input, textarea")) element.disabled = Boolean(action);
     const status = modal.querySelector("[data-correo-compose-status]");
     if (status) status.textContent = action ? "Procesando…" : "";
+  }
+
+  function focusableElements(container) {
+    if (!container) return [];
+    return [...container.querySelectorAll(
+      'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+    )].filter((element) => !element.hidden && element.getClientRects().length > 0);
+  }
+
+  function restoreModalFocus() {
+    const target = modalReturnFocus;
+    modalReturnFocus = null;
+    if (target instanceof HTMLElement && target.isConnected) {
+      requestAnimationFrame(() => target.focus({ preventScroll: true }));
+    }
+  }
+
+  function trapModalFocus(event, container) {
+    if (event.key !== "Tab" || !container) return false;
+    const items = focusableElements(container);
+    if (!items.length) {
+      event.preventDefault();
+      container.focus?.({ preventScroll: true });
+      return true;
+    }
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+      return true;
+    }
+    if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+      return true;
+    }
+    return false;
+  }
+
+  function closeConfirm(result = false) {
+    if (!confirmResolver) return false;
+    const resolve = confirmResolver;
+    confirmResolver = null;
+    const root = host.querySelector("[data-correo-modal-root]");
+    if (root) root.replaceChildren();
+    document.documentElement.classList.remove("correo-modal-open");
+    restoreModalFocus();
+    resolve(Boolean(result));
+    return true;
+  }
+
+  function confirmAction(input = {}) {
+    if (confirmResolver || state.busyAction) return Promise.resolve(false);
+    const root = host.querySelector("[data-correo-modal-root]");
+    if (!root) return Promise.resolve(false);
+    modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    root.innerHTML = renderConfirmModal(input);
+    document.documentElement.classList.add("correo-modal-open");
+    requestAnimationFrame(() => root.querySelector("[data-correo-confirm-dialog]")?.focus());
+    return new Promise((resolve) => { confirmResolver = resolve; });
   }
 
   function consumeOauthQuery() {
@@ -597,6 +682,11 @@ function createCorreoController(host, context = {}) {
     if (!state.status.connected) return;
     if (append && (!state.nextCursor || state.loadingMore || state.loadingMessages)) return;
     const sequence = ++listSequence;
+    listAbortController?.abort();
+    const requestAbort = new AbortController();
+    listAbortController = requestAbort;
+    if (signal.aborted) requestAbort.abort();
+    else signal.addEventListener("abort", () => requestAbort.abort(), { once: true });
 
     if (append) {
       state.loadingMore = true;
@@ -612,6 +702,7 @@ function createCorreoController(host, context = {}) {
 
     try {
       const result = await CorreoApi.messages(apiOptions({
+        signal: requestAbort.signal,
         cursor: append ? state.nextCursor : "",
         folder: state.selectedFolderId || "inbox",
         top: 35,
@@ -637,7 +728,7 @@ function createCorreoController(host, context = {}) {
       if (openFirst && !state.selectedMessageId && state.messages[0]?.id) await openMessage(state.messages[0].id);
       else renderReaderRegion();
     } catch (error) {
-      if (sequence !== listSequence || signal.aborted) return;
+      if (sequence !== listSequence || signal.aborted || requestAbort.signal.aborted) return;
       state.loadingMessages = false;
       state.loadingMore = false;
       renderList();
@@ -649,6 +740,11 @@ function createCorreoController(host, context = {}) {
     const messageId = cleanText(id, "");
     if (!messageId) return;
     const sequence = ++readerSequence;
+    readerAbortController?.abort();
+    const requestAbort = new AbortController();
+    readerAbortController = requestAbort;
+    if (signal.aborted) requestAbort.abort();
+    else signal.addEventListener("abort", () => requestAbort.abort(), { once: true });
     state.selectedMessageId = messageId;
     state.loadingReader = true;
     state.selectedMessage = null;
@@ -658,10 +754,15 @@ function createCorreoController(host, context = {}) {
 
     try {
       const summary = state.messages.find((item) => item.id === messageId) || null;
-      const [detail, attachments] = await Promise.all([
-        CorreoApi.message(messageId, apiOptions()),
-        summary?.hasAttachments ? CorreoApi.attachments(messageId, apiOptions()).catch(() => []) : Promise.resolve([]),
-      ]);
+      const attachmentPromise = summary?.hasAttachments
+        ? CorreoApi.attachments(messageId, apiOptions({ signal: requestAbort.signal })).catch(() => [])
+        : null;
+      const detail = await CorreoApi.message(messageId, apiOptions({ signal: requestAbort.signal }));
+      const attachments = attachmentPromise
+        ? await attachmentPromise
+        : detail.hasAttachments
+          ? await CorreoApi.attachments(messageId, apiOptions({ signal: requestAbort.signal })).catch(() => [])
+          : [];
       if (sequence !== readerSequence || destroyed) return;
 
       state.selectedMessage = detail;
@@ -674,7 +775,7 @@ function createCorreoController(host, context = {}) {
 
       if (!detail.isRead && !detail.isDraft) {
         try {
-          const updated = await CorreoApi.updateMessage(messageId, { isRead: true }, apiOptions());
+          const updated = await CorreoApi.updateMessage(messageId, { isRead: true }, apiOptions({ signal: requestAbort.signal }));
           if (sequence !== readerSequence || destroyed) return;
           state.selectedMessage = updated;
           const current = state.messages.findIndex((item) => item.id === messageId);
@@ -693,7 +794,7 @@ function createCorreoController(host, context = {}) {
         }
       }
     } catch (error) {
-      if (sequence !== readerSequence || signal.aborted) return;
+      if (sequence !== readerSequence || signal.aborted || requestAbort.signal.aborted) return;
       state.loadingReader = false;
       state.selectedMessage = null;
       renderReaderRegion();
@@ -714,7 +815,17 @@ function createCorreoController(host, context = {}) {
   }
 
   async function disconnect() {
-    if (!window.confirm("¿Desconectar esta cuenta de Outlook de Onion Support?")) return;
+    const accepted = await confirmAction({
+      eyebrow: "Cuenta Microsoft",
+      title: "¿Desconectar Outlook?",
+      message: state.status.mailbox
+        ? `Onion Support dejará de acceder a ${state.status.mailbox} hasta que vuelvas a conectarla.`
+        : "Onion Support dejará de acceder a esta cuenta hasta que vuelvas a conectarla.",
+      confirmLabel: "Desconectar",
+      danger: true,
+      iconName: "logout",
+    });
+    if (!accepted) return;
     try {
       await CorreoApi.disconnect(apiOptions());
       state.statusKnown = true;
@@ -734,10 +845,20 @@ function createCorreoController(host, context = {}) {
 
   function openCompose(mode = "compose") {
     const modalRoot = host.querySelector("[data-correo-modal-root]");
-    if (!modalRoot) return;
+    if (!modalRoot || confirmResolver) return;
     const message = state.selectedMessage || {};
     let input = { mode, messageId: message.id || "" };
     if (mode === "forward") input = { ...input, subject: message.subject || "", body: "" };
+    if (mode === "draft-edit" && message.isDraft) {
+      input = {
+        ...input,
+        to: (message.toRecipients || []).map((item) => item.address).filter(Boolean).join(", "),
+        cc: (message.ccRecipients || []).map((item) => item.address).filter(Boolean).join(", "),
+        subject: message.subject || "",
+        body: message?.body?.content || "",
+      };
+    }
+    modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     modalRoot.innerHTML = renderComposeModal(input);
     document.documentElement.classList.add("correo-modal-open");
     requestAnimationFrame(() => {
@@ -749,10 +870,11 @@ function createCorreoController(host, context = {}) {
   }
 
   function closeModal() {
-    if (state.busyAction) return;
+    if (state.busyAction || confirmResolver) return;
     const root = host.querySelector("[data-correo-modal-root]");
     if (root) root.replaceChildren();
     document.documentElement.classList.remove("correo-modal-open");
+    restoreModalFocus();
   }
 
   function composePayload(form) {
@@ -785,11 +907,22 @@ function createCorreoController(host, context = {}) {
       // IMPORTANTE: FormData ignora controles disabled. Capturamos antes de setBusy().
       const payload = composePayload(form);
       const files = selectedFiles(form);
-      if ((mode === "compose" || mode === "forward") && !payload.to.length) throw new Error("Indica al menos un destinatario válido.");
+      if ((mode === "compose" || mode === "forward" || mode === "draft-edit") && !payload.to.length) throw new Error("Indica al menos un destinatario válido.");
       if (files.some((file) => file.size > 25 * 1024 * 1024)) throw new Error("Cada adjunto debe ser de 25 MB o menos.");
       setBusy("send");
 
-      if (mode === "reply" || mode === "reply-all") {
+      if (mode === "draft-edit") {
+        if (!messageId) throw new Error("No hay borrador que actualizar.");
+        await CorreoApi.updateDraft(messageId, payload, apiOptions());
+        const status = form.querySelector("[data-correo-compose-status]");
+        for (let index = 0; index < files.length; index += 1) {
+          if (status) status.textContent = `Adjuntando ${index + 1}/${files.length}: ${files[index].name}`;
+          await CorreoApi.uploadAttachment(messageId, files[index], apiOptions());
+        }
+        if (status) status.textContent = "Enviando borrador…";
+        await CorreoApi.sendDraft(messageId, apiOptions());
+        toast("Borrador enviado.", "success");
+      } else if (mode === "reply" || mode === "reply-all") {
         if (!messageId) throw new Error("No hay mensaje al que responder.");
         if (mode === "reply-all") await CorreoApi.replyAll(messageId, payload.body, apiOptions());
         else await CorreoApi.reply(messageId, payload.body, apiOptions());
@@ -830,10 +963,14 @@ function createCorreoController(host, context = {}) {
     try {
       const payload = composePayload(form);
       const files = selectedFiles(form);
+      const mode = cleanText(form.dataset.correoComposeMode, "compose");
+      const messageId = cleanText(form.dataset.correoMessageId, "");
       for (const file of files) if (file.size > 25 * 1024 * 1024) throw new Error(`${file.name} supera 25 MB.`);
       setBusy("draft");
-      const draft = await CorreoApi.createDraft(payload, apiOptions());
-      if (!draft.id) throw new Error("No se pudo crear el borrador.");
+      const draft = mode === "draft-edit"
+        ? await CorreoApi.updateDraft(messageId, payload, apiOptions())
+        : await CorreoApi.createDraft(payload, apiOptions());
+      if (!draft.id) throw new Error("No se pudo guardar el borrador.");
       const status = form.querySelector("[data-correo-compose-status]");
       for (let index = 0; index < files.length; index += 1) {
         if (status) status.textContent = `Adjuntando ${index + 1}/${files.length}…`;
@@ -841,7 +978,7 @@ function createCorreoController(host, context = {}) {
       }
       setBusy("");
       closeModal();
-      toast("Borrador guardado en Outlook.", "success");
+      toast(mode === "draft-edit" ? "Cambios del borrador guardados." : "Borrador guardado en Outlook.", "success");
       await loadMessages({ openFirst: false });
     } catch (error) {
       setBusy("");
@@ -870,7 +1007,15 @@ function createCorreoController(host, context = {}) {
   async function deleteSelected() {
     const message = state.selectedMessage;
     if (!message?.id) return;
-    if (!window.confirm(`¿Eliminar “${message.subject || "este mensaje"}”?`)) return;
+    const accepted = await confirmAction({
+      eyebrow: "Eliminar mensaje",
+      title: `¿Eliminar “${message.subject || "este mensaje"}”?`,
+      message: "El mensaje se eliminará de Outlook. Esta acción no se puede deshacer desde Onion Support.",
+      confirmLabel: "Eliminar",
+      danger: true,
+      iconName: "trash",
+    });
+    if (!accepted) return;
     try {
       await CorreoApi.deleteMessage(message.id, apiOptions());
       state.messages = state.messages.filter((item) => item.id !== message.id);
@@ -934,7 +1079,15 @@ function createCorreoController(host, context = {}) {
   async function sendOpenDraft() {
     const id = state.selectedMessage?.id;
     if (!id || !state.selectedMessage?.isDraft) return;
-    if (!window.confirm("¿Enviar este borrador ahora?")) return;
+    const accepted = await confirmAction({
+      eyebrow: "Borrador",
+      title: "¿Enviar este borrador ahora?",
+      message: state.selectedMessage.subject || "El mensaje se enviará con su contenido actual.",
+      confirmLabel: "Enviar borrador",
+      danger: false,
+      iconName: "send",
+    });
+    if (!accepted) return;
     try {
       await CorreoApi.sendDraft(id, apiOptions());
       toast("Borrador enviado.", "success");
@@ -1002,6 +1155,8 @@ function createCorreoController(host, context = {}) {
     const action = cleanText(target.dataset.correoAction, "");
     if (!action) return;
 
+    if (action === "confirm-accept") return closeConfirm(true);
+    if (action === "confirm-cancel") return closeConfirm(false);
     if (action === "connect") return connect();
     if (action === "disconnect") return disconnect();
     if (action === "refresh") return loadWorkspace({ initial: false });
@@ -1019,12 +1174,9 @@ function createCorreoController(host, context = {}) {
     if (action === "move-to") return moveSelected(target.dataset.correoDestinationId);
     if (action === "download-attachment") return downloadAttachment(target);
     if (action === "send-open-draft") return sendOpenDraft();
+    if (action === "edit-draft") return openCompose("draft-edit");
     if (action === "account-menu") return toggleAccountMenu(target);
     if (action === "notifications") return toggleNotifications();
-    if (action === "add-account") {
-      closeAccountMenu();
-      return toast("Multicuenta ya tiene la interfaz preparada. El backend productivo actual sigue vinculado a una única cuenta Microsoft; no voy a simular una segunda conexión.", "info", 7000);
-    }
     if (action === "save-draft") {
       const form = target.closest("[data-correo-compose-form]");
       if (form) return saveDraft(form);
@@ -1044,21 +1196,36 @@ function createCorreoController(host, context = {}) {
     }
   }
 
+  function applySearchInput(target) {
+    state.searchTerm = cleanText(target?.value, "");
+    if (state.searchTerm) {
+      state.activeFilter = "all";
+      for (const button of host.querySelectorAll("[data-correo-filter]")) {
+        const active = button.dataset.correoFilter === "all";
+        button.classList.toggle("is-active", active);
+        button.setAttribute("aria-pressed", active ? "true" : "false");
+      }
+    }
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => loadMessages({ openFirst: true }), 320);
+  }
+
+  function onCompositionStart(event) {
+    if (event.target?.matches?.("[data-correo-search]")) searchComposing = true;
+  }
+
+  function onCompositionEnd(event) {
+    if (!event.target?.matches?.("[data-correo-search]")) return;
+    searchComposing = false;
+    applySearchInput(event.target);
+  }
+
   function onInput(event) {
     if (destroyed) return;
     const target = event.target;
     if (target?.matches?.("[data-correo-search]")) {
-      state.searchTerm = cleanText(target.value, "");
-      if (state.searchTerm) {
-        state.activeFilter = "all";
-        for (const button of host.querySelectorAll("[data-correo-filter]")) {
-          const active = button.dataset.correoFilter === "all";
-          button.classList.toggle("is-active", active);
-          button.setAttribute("aria-pressed", active ? "true" : "false");
-        }
-      }
-      clearTimeout(searchTimer);
-      searchTimer = setTimeout(() => loadMessages({ openFirst: true }), 420);
+      if (searchComposing || event.isComposing) return;
+      applySearchInput(target);
       return;
     }
 
@@ -1093,9 +1260,22 @@ function createCorreoController(host, context = {}) {
 
   function onKeydown(event) {
     if (destroyed) return;
-    const modalOpen = Boolean(host.querySelector("[data-correo-compose-form]"));
+    const confirmDialog = host.querySelector("[data-correo-confirm-dialog]");
+    const composeDialog = host.querySelector(".correo-compose[role='dialog']");
+    const modalOpen = Boolean(composeDialog);
+    if (confirmDialog && event.key === "Tab") {
+      trapModalFocus(event, confirmDialog);
+      return;
+    }
+    if (composeDialog && event.key === "Tab") {
+      trapModalFocus(event, composeDialog);
+      return;
+    }
     if (event.key === "Escape") {
-      if (modalOpen && !state.busyAction) {
+      if (confirmDialog) {
+        event.preventDefault();
+        closeConfirm(false);
+      } else if (modalOpen && !state.busyAction) {
         event.preventDefault();
         closeModal();
       } else {
@@ -1148,6 +1328,8 @@ function createCorreoController(host, context = {}) {
 
     host.addEventListener("click", onClick);
     host.addEventListener("input", onInput);
+    host.addEventListener("compositionstart", onCompositionStart);
+    host.addEventListener("compositionend", onCompositionEnd);
     host.addEventListener("submit", onSubmit);
     host.addEventListener("scroll", onScroll, true);
     document.addEventListener("keydown", onKeydown);
@@ -1168,9 +1350,18 @@ function createCorreoController(host, context = {}) {
     destroyed = true;
     mounted = false;
     clearTimeout(searchTimer);
+    listAbortController?.abort();
+    readerAbortController?.abort();
+    if (confirmResolver) {
+      const resolve = confirmResolver;
+      confirmResolver = null;
+      resolve(false);
+    }
     aborter.abort();
     host.removeEventListener("click", onClick);
     host.removeEventListener("input", onInput);
+    host.removeEventListener("compositionstart", onCompositionStart);
+    host.removeEventListener("compositionend", onCompositionEnd);
     host.removeEventListener("submit", onSubmit);
     host.removeEventListener("scroll", onScroll, true);
     document.removeEventListener("keydown", onKeydown);
@@ -1207,6 +1398,9 @@ function createCorreoController(host, context = {}) {
         searchTerm: state.searchTerm,
         activeFilter: state.activeFilter,
         notifications: notificationUiState().enabled,
+        cacheIsolated: true,
+        cacheTtlMs: VIEW_CACHE_TTL_MS,
+        routeCommitNonBlocking: true,
         infiniteScroll: true,
         networkEnabled: true,
         microsoftGraph: true,

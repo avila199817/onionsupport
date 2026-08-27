@@ -1,610 +1,1391 @@
 /* =========================================================
-   ONION SUPPORT — CORREO · MICROSOFT 365
-   Archivo: /src/css/views/correo/index.css
+   ONION SUPPORT — CORREO · CANONICAL EXTREME
+   Archivo: /src/css/views/correo/viewport.css
 
-   PRODUCTIVO · VISTA PRIVADA ADMIN
-   - Outlook-like sin copiar branding visual de Outlook.
-   - Tokens Onion + layout denso de escritorio.
-   - Dark/light, container queries, reduced motion, forced colors.
+   PRODUCTIVO · V4
+   - Fluent/Outlook density and color semantics.
+   - Full useful viewport on desktop; no page scroll.
+   - Internal scroll only: folders, message list, reader body.
+   - Infinite message list (no "Cargar más" footer).
+   - Account dropdown, Onion avatar and full-width disconnect.
+   - Compose window rebuilt to avoid double scroll / broken fields.
 ========================================================= */
 
 @layer views {
 
+/* Fluent 2 / Outlook-inspired tokens. The base correo stylesheet remains
+   responsible for generic fallbacks; this file is the final visual authority. */
 :where(.panel-content[data-view="correo"], .correo-view-root, [data-correo-scope]) {
-  --correo-blue: #60a5fa;
-  --correo-blue-strong: #3b82f6;
-  --correo-sky: #38bdf8;
-  --correo-indigo: #818cf8;
-  --correo-emerald: #34d399;
-  --correo-amber: #fbbf24;
-  --correo-red: #fb7185;
-  --correo-border: var(--data-table-border, var(--border, rgba(255,255,255,.105)));
-  --correo-border-strong: color-mix(in srgb, var(--correo-border) 70%, var(--text-strong, #fff) 30%);
-  --correo-panel: color-mix(in srgb, var(--surface-2, #202020) 96%, transparent);
-  --correo-panel-soft: color-mix(in srgb, var(--surface-3, #2a2a2a) 88%, transparent);
-  --correo-panel-deep: color-mix(in srgb, var(--surface-1, #171717) 97%, transparent);
-  --correo-hover: color-mix(in srgb, var(--text-strong, #fff) 5.5%, transparent);
-  --correo-selected: color-mix(in srgb, var(--correo-blue) 12%, var(--correo-panel));
-  --correo-radius: clamp(16px, 1.15vw, 22px);
-  --correo-shadow: 0 24px 62px rgba(0,0,0,.2), inset 0 1px 0 rgba(255,255,255,.025);
-
-  inline-size: 100%;
-  min-inline-size: 0;
-  color: var(--text, #f5f5f5);
-  font-family: var(--font-family, Inter, ui-sans-serif, system-ui, sans-serif);
-  container-type: inline-size;
+  --correo-blue: #479ef5;
+  --correo-blue-strong: #0f6cbd;
+  --correo-blue-hover: #115ea3;
+  --correo-blue-pressed: #0c3b5e;
+  --correo-panel-deep: #1f1f1f;
+  --correo-panel: #292929;
+  --correo-panel-soft: #333333;
+  --correo-panel-hover: #3e3e3e;
+  --correo-panel-selected: #0c3b5e;
+  --correo-border: #424242;
+  --correo-border-soft: #383838;
+  --correo-text: #ffffff;
+  --correo-text-2: #d6d6d6;
+  --correo-text-3: #adadad;
+  --correo-emerald: #54b054;
+  --correo-red: #d13438;
+  --correo-amber: #fce100;
+  --correo-radius: 8px;
+  --correo-shadow: 0 8px 30px rgba(0,0,0,.32);
+  color: var(--correo-text);
 }
 
 .correo-view-root {
-  display: grid;
-  gap: var(--view-section-gap, 18px);
   min-inline-size: 0;
-  padding: 0;
-  background: transparent;
+  min-block-size: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  display: block;
+  background: var(--correo-panel-deep);
+  color: var(--correo-text);
 }
 
 .correo-view-root *,
 .correo-view-root *::before,
 .correo-view-root *::after { box-sizing: border-box; }
+
 .correo-view-root button,
 .correo-view-root input,
-.correo-view-root textarea { font: inherit; }
-.correo-view-root svg { display: block; flex: 0 0 auto; }
-.correo-view-root button { -webkit-tap-highlight-color: transparent; }
-.correo-view-root [hidden] { display: none !important; }
+.correo-view-root textarea {
+  font-family: "Segoe UI", var(--font-family, Inter, system-ui, sans-serif);
+}
 
 .correo-view-root button:focus-visible,
 .correo-view-root input:focus-visible,
 .correo-view-root textarea:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--surface-1, #141414), 0 0 0 4px color-mix(in srgb, var(--correo-blue) 78%, white 22%);
+  outline: 2px solid #ffffff;
+  outline-offset: -2px;
+  box-shadow: 0 0 0 1px var(--correo-blue-strong);
 }
 
-/* ---------- HERO ---------- */
-
-.correo-hero {
-  display: grid;
-  gap: 13px;
-  padding: clamp(8px, .8vw, 14px) clamp(8px, 1.2vw, 22px) 2px;
-}
-
-.correo-hero-top {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 22px;
-}
-
-.correo-hero-copy { display: grid; gap: 6px; min-inline-size: 0; }
-.correo-kicker {
-  margin: 0;
-  color: var(--text-dim, #777);
-  font-size: 10px;
-  line-height: 1;
-  font-weight: 950;
-  letter-spacing: .105em;
-  text-transform: uppercase;
-}
-
-.correo-title {
-  margin: 0;
-  color: var(--text-strong, #fff);
-  font-size: clamp(37px, 3vw, 56px);
-  line-height: .94;
-  font-weight: 950;
-  letter-spacing: -.067em;
-  text-wrap: balance;
-}
-
-.correo-subtitle {
-  max-inline-size: 850px;
-  margin: 0;
-  color: color-mix(in srgb, var(--text-muted, #aaa) 90%, var(--text-strong, #fff));
-  font-size: clamp(13px, .88vw, 15px);
-  line-height: 1.48;
-  font-weight: 650;
-}
-
-.correo-hero-actions,
-.correo-hero-meta,
-.correo-reader-actions,
-.correo-reader-toolbar,
-.correo-reader-badges,
-.correo-compose-footer > div {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.correo-hero-actions { justify-content: flex-end; }
-
-.correo-btn,
-.correo-icon-btn,
-.correo-filter,
-.correo-folder,
-.correo-message-row,
-.correo-attachment,
-.correo-text-btn,
-.correo-move-menu button {
-  appearance: none;
+.correo-sr-status,
+.correo-field-sr-label {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
   border: 0;
-  color: inherit;
-  cursor: pointer;
 }
 
+/* ---------- Buttons ---------- */
 .correo-btn {
-  min-block-size: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 8px 15px;
-  border: 1px solid var(--btn-secondary-border, var(--correo-border));
-  border-radius: var(--radius-pill, 999px);
-  background: linear-gradient(180deg, rgba(255,255,255,.045), transparent 58%), var(--btn-secondary-bg, var(--correo-panel-soft));
-  color: var(--btn-secondary-text, var(--text-strong, #fff));
-  box-shadow: 0 7px 22px rgba(0,0,0,.14), inset 0 1px 0 rgba(255,255,255,.03);
-  font-size: 12px;
-  font-weight: 850;
-  transition: transform 150ms ease, border-color 150ms ease, background 150ms ease, opacity 150ms ease;
-}
-.correo-btn:hover:not(:disabled) { transform: translateY(-1px); border-color: color-mix(in srgb, var(--correo-blue) 43%, var(--correo-border)); }
-.correo-btn:active:not(:disabled) { transform: translateY(0); }
-.correo-btn:disabled { cursor: wait; opacity: .62; }
-.correo-btn--primary {
-  border-color: color-mix(in srgb, var(--correo-blue) 55%, transparent);
-  background: linear-gradient(180deg, rgba(255,255,255,.13), transparent 52%), linear-gradient(135deg, color-mix(in srgb, var(--correo-blue-strong) 92%, #1d4ed8), color-mix(in srgb, var(--correo-indigo) 78%, #2563eb));
+  min-block-size: 32px;
+  padding: 5px 12px;
+  border: 1px solid #5c5c5c;
+  border-radius: 5px;
+  background: #333333;
   color: #fff;
-  box-shadow: 0 11px 28px color-mix(in srgb, var(--correo-blue) 17%, transparent), inset 0 1px 0 rgba(255,255,255,.16);
+  box-shadow: none;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 90ms ease, border-color 90ms ease, transform 90ms ease;
 }
-.correo-btn--compact { min-block-size: 34px; padding: 6px 12px; font-size: 10px; }
-
-.correo-meta-pill {
-  min-block-size: 28px;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 10px;
-  border: 1px solid var(--correo-border);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--correo-panel) 88%, transparent);
-  color: var(--text-muted, #aaa);
-  font-size: 10.5px;
-  font-weight: 820;
+.correo-btn:hover:not(:disabled) { transform: none; background: #3e3e3e; border-color: #666; }
+.correo-btn:active:not(:disabled) { background: #242424; }
+.correo-btn--primary {
+  border-color: var(--correo-blue-strong);
+  background: var(--correo-blue-strong);
+  color: #fff;
+  box-shadow: none;
 }
-.correo-meta-pill svg { inline-size: 14px; block-size: 14px; }
-.correo-meta-pill--brand { color: color-mix(in srgb, var(--correo-blue) 84%, var(--text-strong, #fff)); border-color: color-mix(in srgb, var(--correo-blue) 29%, var(--correo-border)); }
-.correo-meta-pill--offline { color: color-mix(in srgb, var(--correo-amber) 82%, var(--text-strong, #fff)); }
-.correo-meta-pill--online { color: color-mix(in srgb, var(--correo-emerald) 82%, var(--text-strong, #fff)); border-color: color-mix(in srgb, var(--correo-emerald) 24%, var(--correo-border)); }
+.correo-btn--primary:hover:not(:disabled) { background: var(--correo-blue-hover); border-color: var(--correo-blue-hover); }
+.correo-btn--primary:active:not(:disabled) { background: var(--correo-blue-pressed); border-color: var(--correo-blue-pressed); }
+.correo-btn--compact { min-block-size: 32px; padding-inline: 11px; font-size: 12px; }
+.correo-btn svg { inline-size: 16px; block-size: 16px; }
 
-.correo-status-dot,
-.correo-account-state,
-.correo-unread-dot {
-  display: inline-block;
-  inline-size: 7px;
-  block-size: 7px;
-  border-radius: 50%;
-  background: var(--correo-amber);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--correo-amber) 12%, transparent);
-}
-.correo-meta-pill--online .correo-status-dot,
-.correo-account-state.is-online { background: var(--correo-emerald); box-shadow: 0 0 0 3px color-mix(in srgb, var(--correo-emerald) 12%, transparent); }
-
-.correo-notice {
-  min-block-size: 42px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 13px;
-  border: 1px solid color-mix(in srgb, var(--correo-blue) 18%, var(--correo-border));
-  border-radius: 13px;
-  background: color-mix(in srgb, var(--correo-blue) 4.5%, var(--correo-panel));
-  color: var(--text-muted, #aaa);
-  font-size: 11px;
-  font-weight: 720;
-}
-.correo-notice > svg { color: var(--correo-blue); }
-.correo-notice[data-tone="success"] { border-color: color-mix(in srgb, var(--correo-emerald) 26%, var(--correo-border)); }
-.correo-notice[data-tone="success"] > svg { color: var(--correo-emerald); }
-.correo-notice[data-tone="error"] { border-color: color-mix(in srgb, var(--correo-red) 28%, var(--correo-border)); }
-.correo-notice[data-tone="error"] > svg { color: var(--correo-red); }
-
-/* ---------- DISCONNECTED ---------- */
-
-.correo-connect-stage {
-  position: relative;
-  isolation: isolate;
-  min-block-size: clamp(520px, 62vh, 720px);
-  display: grid;
+.correo-icon-btn {
+  inline-size: 32px;
+  block-size: 32px;
+  display: inline-grid;
   place-items: center;
-  overflow: hidden;
-  border: 1px solid var(--correo-border);
-  border-radius: var(--correo-radius);
-  background: radial-gradient(circle at 50% 44%, color-mix(in srgb, var(--correo-blue) 10%, transparent), transparent 35%), radial-gradient(circle at 70% 30%, color-mix(in srgb, var(--correo-indigo) 7%, transparent), transparent 28%), linear-gradient(180deg, color-mix(in srgb, var(--correo-panel-soft) 48%, transparent), var(--correo-panel-deep));
-  box-shadow: var(--correo-shadow);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--correo-text-2);
+  box-shadow: none;
+}
+.correo-icon-btn:hover:not(:disabled) { background: #3e3e3e; color: #fff; border-color: #484848; }
+.correo-icon-btn.is-active { color: #fce100; background: #3a3520; }
+.correo-icon-btn--danger:hover { color: #fff; background: #8f2529; border-color: #a52a2f; }
+
+/* ---------- Desktop viewport ---------- */
+@media (min-width: 1280px) and (min-height: 620px) {
+  .main-content:has([data-correo-host="true"]),
+  .main-content:has(.panel-content[data-view="correo"]) {
+    overflow: hidden;
+    scrollbar-gutter: auto;
+  }
+
+  #app-content:has([data-correo-host="true"]),
+  #view-container:has([data-correo-host="true"]),
+  .content-wrapper:has([data-correo-host="true"]),
+  .panel-content[data-view="correo"],
+  [data-correo-host="true"],
+  .correo-view-root {
+    min-block-size: 0;
+    block-size: 100%;
+  }
+
+  #app-content:has([data-correo-host="true"]),
+  #view-container:has([data-correo-host="true"]),
+  .content-wrapper:has([data-correo-host="true"]) {
+    max-inline-size: none;
+    inline-size: 100%;
+    min-inline-size: 0;
+  }
+
+  .panel-content[data-view="correo"] {
+    padding: 0;
+    margin: 0;
+    max-inline-size: none;
+    overflow: hidden;
+  }
 }
 
-.correo-connect-stage::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -2;
-  opacity: .32;
-  background-image: linear-gradient(color-mix(in srgb, var(--correo-border) 45%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in srgb, var(--correo-border) 45%, transparent) 1px, transparent 1px);
-  background-size: 44px 44px;
-  mask-image: radial-gradient(circle at center, black 10%, transparent 70%);
-}
-
-.correo-connect-orbit {
-  position: absolute;
-  inline-size: min(650px, 80vw);
-  aspect-ratio: 1;
-  border: 1px solid color-mix(in srgb, var(--correo-blue) 13%, transparent);
-  border-radius: 50%;
-  animation: correo-orbit 30s linear infinite;
-}
-.correo-connect-orbit::before,
-.correo-connect-orbit::after { content: ""; position: absolute; inset: 14%; border: 1px solid color-mix(in srgb, var(--correo-indigo) 11%, transparent); border-radius: inherit; }
-.correo-connect-orbit::after { inset: 31%; border-color: color-mix(in srgb, var(--correo-blue) 16%, transparent); }
-.correo-connect-orbit span { position: absolute; inline-size: 8px; block-size: 8px; border-radius: 50%; background: var(--correo-blue); box-shadow: 0 0 28px var(--correo-blue); }
-.correo-connect-orbit span:nth-child(1) { inset-block-start: -4px; inset-inline-start: 50%; }
-.correo-connect-orbit span:nth-child(2) { inset-block-end: 13%; inset-inline-start: 12%; background: var(--correo-indigo); }
-.correo-connect-orbit span:nth-child(3) { inset-block-end: 20%; inset-inline-end: 8%; background: var(--correo-sky); }
-
-.correo-connect-card {
-  position: relative;
-  z-index: 1;
-  inline-size: min(620px, calc(100% - 34px));
-  display: grid;
-  justify-items: center;
-  gap: 12px;
-  padding: clamp(28px, 4vw, 54px);
-  border: 1px solid color-mix(in srgb, var(--correo-blue) 17%, var(--correo-border));
-  border-radius: 26px;
-  background: color-mix(in srgb, var(--correo-panel) 88%, transparent);
-  box-shadow: 0 32px 90px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.055);
-  backdrop-filter: blur(18px) saturate(120%);
-  text-align: center;
-}
-.correo-connect-logo { inline-size: 70px; block-size: 70px; display: grid; place-items: center; margin-block-end: 4px; border: 1px solid color-mix(in srgb, var(--correo-blue) 38%, var(--correo-border)); border-radius: 20px; background: linear-gradient(135deg, color-mix(in srgb, var(--correo-blue) 19%, transparent), color-mix(in srgb, var(--correo-indigo) 10%, transparent)); color: var(--correo-blue); box-shadow: 0 16px 45px color-mix(in srgb, var(--correo-blue) 13%, transparent), inset 0 1px 0 rgba(255,255,255,.08); }
-.correo-connect-logo svg { inline-size: 34px; block-size: 34px; }
-.correo-connect-card h2 { margin: 0; color: var(--text-strong, #fff); font-size: clamp(27px, 3vw, 42px); line-height: 1; font-weight: 950; letter-spacing: -.052em; }
-.correo-connect-card > p:not(.correo-kicker) { max-inline-size: 510px; margin: 0; color: var(--text-muted, #aaa); font-size: 13px; line-height: 1.6; font-weight: 620; }
-.correo-connect-features { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; margin-block: 7px; }
-.correo-connect-features span { display: inline-flex; align-items: center; gap: 6px; min-block-size: 30px; padding: 5px 9px; border: 1px solid var(--correo-border); border-radius: 999px; background: color-mix(in srgb, var(--correo-panel-soft) 70%, transparent); color: var(--text-muted, #aaa); font-size: 10px; font-weight: 780; }
-.correo-connect-features svg { color: var(--correo-emerald); inline-size: 14px; }
-.correo-connect-cta { min-block-size: 50px; margin-block-start: 7px; padding-inline: 20px; }
-
-/* ---------- WORKSPACE ---------- */
-
+/* ---------- Workspace ---------- */
 .correo-workspace {
-  display: grid;
-  grid-template-columns: minmax(190px, 230px) minmax(320px, 390px) minmax(430px, 1fr);
-  min-block-size: clamp(610px, 66vh, 810px);
-  max-block-size: min(810px, calc(100vh - 205px));
   min-inline-size: 0;
+  min-block-size: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  display: grid;
+  grid-template-columns: clamp(236px, 17vw, 280px) clamp(390px, 31vw, 500px) minmax(420px, 1fr);
   overflow: hidden;
-  border: 1px solid var(--correo-border);
-  border-radius: var(--correo-radius);
-  background: var(--correo-panel);
-  box-shadow: var(--correo-shadow);
+  border: 0;
+  border-radius: 0;
+  background: var(--correo-panel-deep);
+  box-shadow: none;
 }
 
 .correo-folders-panel,
 .correo-list-panel,
-.correo-reader { min-inline-size: 0; min-block-size: 0; }
-
-.correo-folders-panel { display: flex; flex-direction: column; gap: 12px; padding: 13px; overflow: auto; border-inline-end: 1px solid var(--correo-border); background: color-mix(in srgb, var(--correo-panel-soft) 72%, transparent); }
-
-.correo-account-card { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-block-size: 62px; padding: 10px; border: 1px solid var(--correo-border); border-radius: 15px; background: color-mix(in srgb, var(--correo-blue) 4%, var(--correo-panel)); }
-.correo-account-card.is-connected { border-color: color-mix(in srgb, var(--correo-emerald) 15%, var(--correo-border)); }
-.correo-account-logo { inline-size: 40px; block-size: 40px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--correo-blue) 34%, var(--correo-border)); border-radius: 12px; background: color-mix(in srgb, var(--correo-blue) 10%, transparent); color: var(--correo-blue); }
-.correo-account-copy { display: grid; gap: 3px; min-inline-size: 0; }
-.correo-account-copy strong { overflow: hidden; color: var(--text-strong, #fff); font-size: 11.5px; font-weight: 900; text-overflow: ellipsis; white-space: nowrap; }
-.correo-account-copy span { overflow: hidden; color: var(--text-muted, #999); font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
-
-.correo-folders { display: grid; gap: 4px; }
-.correo-folder { inline-size: 100%; min-block-size: 46px; display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 7px 9px; border-radius: 11px; background: transparent; color: var(--text-muted, #aaa); text-align: start; transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease; }
-.correo-folder:hover { background: var(--correo-hover); color: var(--text-strong, #fff); }
-.correo-folder.is-active { color: var(--text-strong, #fff); background: color-mix(in srgb, var(--correo-blue) 11%, var(--correo-panel)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--correo-blue) 19%, transparent); }
-.correo-folder-icon { display: grid; place-items: center; color: var(--text-dim, #777); }
-.correo-folder.is-active .correo-folder-icon { color: var(--correo-blue); }
-.correo-folder-copy { display: grid; gap: 2px; min-inline-size: 0; }
-.correo-folder-copy strong { overflow: hidden; font-size: 11px; font-weight: 820; text-overflow: ellipsis; white-space: nowrap; }
-.correo-folder-copy small { color: var(--text-dim, #777); font-size: 8.5px; font-weight: 650; }
-.correo-folder-count { min-inline-size: 23px; padding: 3px 6px; border-radius: 999px; background: color-mix(in srgb, var(--correo-blue) 13%, transparent); color: color-mix(in srgb, var(--correo-blue) 76%, var(--text-strong, #fff)); font-size: 9px; font-weight: 900; text-align: center; }
-
-.correo-security-card { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 9px; margin-block-start: auto; padding: 10px; border: 1px dashed color-mix(in srgb, var(--correo-emerald) 22%, var(--correo-border)); border-radius: 13px; background: color-mix(in srgb, var(--correo-emerald) 3.5%, transparent); }
-.correo-security-icon { inline-size: 32px; block-size: 32px; display: grid; place-items: center; border-radius: 9px; background: color-mix(in srgb, var(--correo-emerald) 9%, transparent); color: var(--correo-emerald); }
-.correo-security-card > div { display: grid; gap: 3px; }
-.correo-security-card strong { color: var(--text-strong, #fff); font-size: 10px; font-weight: 900; }
-.correo-security-card span:not(.correo-security-icon) { color: var(--text-muted, #999); font-size: 8.5px; line-height: 1.35; }
-.correo-text-btn { grid-column: 1 / -1; justify-self: start; padding: 2px 0; background: transparent; color: var(--text-dim, #777); font-size: 9px; font-weight: 800; }
-.correo-text-btn:hover { color: var(--correo-red); }
-
-/* ---------- LIST ---------- */
-
-.correo-list-panel { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto; border-inline-end: 1px solid var(--correo-border); background: color-mix(in srgb, var(--correo-panel) 97%, transparent); }
-.correo-list-header { display: flex; align-items: end; justify-content: space-between; gap: 12px; padding: 16px 15px 11px; }
-.correo-list-header > div { display: grid; gap: 5px; min-inline-size: 0; }
-.correo-list-header h2,
-.correo-reader-heading h2,
-.correo-compose-header h2 { margin: 0; color: var(--text-strong, #fff); font-weight: 920; letter-spacing: -.035em; }
-.correo-list-header h2 { overflow: hidden; font-size: 17px; text-overflow: ellipsis; white-space: nowrap; }
-.correo-count { flex: 0 0 auto; color: var(--text-dim, #777); font-size: 9px; font-weight: 800; }
-
-.correo-search { position: relative; display: flex; align-items: center; margin: 0 13px 10px; }
-.correo-search-icon { position: absolute; inset-inline-start: 11px; z-index: 1; color: var(--text-dim, #777); pointer-events: none; }
-.correo-search input { inline-size: 100%; min-block-size: 39px; padding: 8px 48px 8px 38px; border: 1px solid var(--correo-border); border-radius: 11px; outline: none; background: color-mix(in srgb, var(--correo-panel-soft) 83%, transparent); color: var(--text-strong, #fff); font-size: 11px; font-weight: 650; }
-.correo-search input::placeholder { color: var(--text-dim, #777); }
-.correo-search kbd { position: absolute; inset-inline-end: 9px; padding: 3px 6px; border: 1px solid var(--correo-border); border-radius: 6px; background: color-mix(in srgb, var(--correo-panel) 70%, transparent); color: var(--text-dim, #777); font-size: 8px; font-family: inherit; font-weight: 800; pointer-events: none; }
-
-.correo-filter-row { display: flex; gap: 5px; padding: 0 13px 10px; overflow-x: auto; }
-.correo-filter { min-block-size: 29px; padding: 5px 9px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: var(--text-muted, #999); font-size: 9.5px; font-weight: 850; white-space: nowrap; }
-.correo-filter:hover,
-.correo-filter.is-active { color: var(--text-strong, #fff); background: color-mix(in srgb, var(--correo-blue) 9%, transparent); border-color: color-mix(in srgb, var(--correo-blue) 19%, var(--correo-border)); }
-
-.correo-message-list { min-block-size: 0; overflow: auto; scrollbar-gutter: stable; border-block-start: 1px solid var(--correo-border); }
-.correo-message-row { position: relative; inline-size: 100%; display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 10px; padding: 12px 13px; border-block-end: 1px solid color-mix(in srgb, var(--correo-border) 66%, transparent); background: transparent; text-align: start; transition: background 130ms ease, box-shadow 130ms ease; }
-.correo-message-row:hover { background: var(--correo-hover); }
-.correo-message-row.is-selected { background: var(--correo-selected); box-shadow: inset 3px 0 0 var(--correo-blue); }
-.correo-message-row.is-unread::after { content: ""; position: absolute; inset-inline-end: 8px; inset-block-start: 16px; inline-size: 5px; block-size: 5px; border-radius: 50%; background: var(--correo-blue); }
-
-.correo-message-avatar,
-.correo-sender-avatar { display: grid; place-items: center; flex: 0 0 auto; border-radius: 11px; background: linear-gradient(135deg, color-mix(in srgb, var(--correo-blue) 70%, #172033), color-mix(in srgb, var(--correo-indigo) 74%, #121827)); color: #fff; box-shadow: inset 0 1px 0 rgba(255,255,255,.13); font-weight: 900; }
-.correo-message-avatar { inline-size: 38px; block-size: 38px; font-size: 10px; }
-.correo-message-copy { display: grid; gap: 3px; min-inline-size: 0; }
-.correo-message-line { min-inline-size: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.correo-message-line strong { overflow: hidden; color: var(--text-muted, #aaa); font-size: 10.5px; font-weight: 820; text-overflow: ellipsis; white-space: nowrap; }
-.correo-message-row.is-unread .correo-message-line strong { color: var(--text-strong, #fff); font-weight: 930; }
-.correo-message-line time { flex: 0 0 auto; color: var(--text-dim, #777); font-size: 8.5px; font-weight: 720; }
-.correo-message-subject { overflow: hidden; color: var(--text-strong, #eee); font-size: 11px; font-weight: 740; text-overflow: ellipsis; white-space: nowrap; }
-.correo-message-row.is-unread .correo-message-subject { font-weight: 900; }
-.correo-message-preview { display: -webkit-box; overflow: hidden; color: var(--text-dim, #777); font-size: 9.5px; line-height: 1.32; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.correo-message-meta { min-block-size: 15px; display: flex; align-items: center; gap: 5px; color: var(--text-dim, #777); }
-.correo-mini-icon svg { inline-size: 12px; block-size: 12px; }
-.correo-mini-icon.is-flagged { color: var(--correo-amber); }
-.correo-priority { color: var(--correo-red); font-size: 11px; font-weight: 950; }
-.correo-draft-label { color: var(--correo-red); font-size: 8px; font-weight: 900; text-transform: uppercase; letter-spacing: .04em; }
-.correo-unread-dot { inline-size: 5px; block-size: 5px; background: var(--correo-blue); box-shadow: none; }
-.correo-pagination { display: flex; justify-content: center; padding: 9px; border-block-start: 1px solid var(--correo-border); background: color-mix(in srgb, var(--correo-panel-soft) 55%, transparent); }
-
-.correo-message-skeleton { display: grid; grid-template-columns: 38px 1fr; gap: 10px; padding: 12px 13px; border-block-end: 1px solid color-mix(in srgb, var(--correo-border) 55%, transparent); animation: correo-skeleton-in 250ms ease both; animation-delay: calc(var(--i) * 25ms); }
-.correo-message-skeleton > span { inline-size: 38px; block-size: 38px; border-radius: 11px; background: linear-gradient(90deg, var(--correo-panel-soft), var(--correo-hover), var(--correo-panel-soft)); background-size: 220% 100%; animation: correo-shimmer 1.25s linear infinite; }
-.correo-message-skeleton > div { display: grid; gap: 7px; align-content: center; }
-.correo-message-skeleton i { display: block; block-size: 7px; border-radius: 999px; background: linear-gradient(90deg, var(--correo-panel-soft), var(--correo-hover), var(--correo-panel-soft)); background-size: 220% 100%; animation: correo-shimmer 1.25s linear infinite; }
-.correo-message-skeleton i:nth-child(1) { inline-size: 52%; }
-.correo-message-skeleton i:nth-child(2) { inline-size: 82%; }
-.correo-message-skeleton i:nth-child(3) { inline-size: 68%; }
-
-/* ---------- READER ---------- */
-
-.correo-reader { position: relative; display: grid; min-block-size: 0; background: linear-gradient(180deg, color-mix(in srgb, var(--correo-panel-soft) 18%, transparent), transparent 28%), var(--correo-panel); }
-.correo-reader-card { min-block-size: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; }
-.correo-reader-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 16px; padding: 19px 20px 14px; border-block-end: 1px solid var(--correo-border); }
-.correo-reader-heading { display: grid; gap: 7px; min-inline-size: 0; }
-.correo-reader-heading h2 { max-inline-size: 820px; font-size: clamp(20px, 1.7vw, 28px); line-height: 1.16; text-wrap: balance; }
-.correo-reader-badges { gap: 5px; }
-.correo-badge { min-block-size: 24px; display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px; border: 1px solid var(--correo-border); border-radius: 999px; background: color-mix(in srgb, var(--correo-panel-soft) 65%, transparent); color: var(--text-muted, #999); font-size: 8.5px; font-weight: 850; }
-.correo-badge svg { inline-size: 11px; block-size: 11px; }
-.correo-badge--danger { color: color-mix(in srgb, var(--correo-red) 80%, var(--text-strong, #fff)); border-color: color-mix(in srgb, var(--correo-red) 22%, var(--correo-border)); }
-.correo-badge--flag { color: color-mix(in srgb, var(--correo-amber) 82%, var(--text-strong, #fff)); }
-
-.correo-reader-toolbar { position: relative; justify-content: flex-end; }
-.correo-icon-btn { inline-size: 36px; block-size: 36px; display: grid; place-items: center; border: 1px solid var(--correo-border); border-radius: 10px; background: color-mix(in srgb, var(--correo-panel-soft) 70%, transparent); color: var(--text-muted, #999); transition: color 130ms ease, border-color 130ms ease, background 130ms ease, transform 130ms ease; }
-.correo-icon-btn:hover { color: var(--text-strong, #fff); border-color: color-mix(in srgb, var(--correo-blue) 30%, var(--correo-border)); background: color-mix(in srgb, var(--correo-blue) 7%, var(--correo-panel-soft)); transform: translateY(-1px); }
-.correo-icon-btn.is-active { color: var(--correo-amber); border-color: color-mix(in srgb, var(--correo-amber) 25%, var(--correo-border)); }
-.correo-icon-btn--danger:hover { color: var(--correo-red); border-color: color-mix(in srgb, var(--correo-red) 30%, var(--correo-border)); background: color-mix(in srgb, var(--correo-red) 7%, transparent); }
-
-.correo-sender { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: start; gap: 11px; padding: 14px 20px; border-block-end: 1px solid color-mix(in srgb, var(--correo-border) 70%, transparent); }
-.correo-sender-avatar { inline-size: 42px; block-size: 42px; font-size: 11px; }
-.correo-sender-copy { display: grid; gap: 2px; min-inline-size: 0; }
-.correo-sender-copy > strong { overflow: hidden; color: var(--text-strong, #fff); font-size: 11.5px; font-weight: 900; text-overflow: ellipsis; white-space: nowrap; }
-.correo-sender-copy > span { overflow: hidden; color: var(--text-muted, #999); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.correo-sender-copy small { display: flex; flex-wrap: wrap; gap: 7px; margin-block-start: 3px; color: var(--text-dim, #777); font-size: 8.5px; line-height: 1.35; }
-.correo-sender-copy small span { display: inline; }
-.correo-sender-copy small b { color: var(--text-muted, #999); }
-.correo-sender time { color: var(--text-dim, #777); font-size: 8.5px; font-weight: 700; text-align: end; }
-
-.correo-reader-scroll { min-block-size: 0; overflow: auto; padding: clamp(20px, 2vw, 30px); scrollbar-gutter: stable; }
-.correo-reader-body { max-inline-size: 880px; color: color-mix(in srgb, var(--text, #eee) 91%, var(--text-muted, #aaa)); font-size: 13px; line-height: 1.7; font-weight: 560; }
-.correo-reader-body p { margin: 0 0 1.1em; }
-.correo-reader-body p:last-child { margin-block-end: 0; }
-.correo-body-empty { color: var(--text-dim, #777); font-style: italic; }
-
-.correo-section-label { display: flex; align-items: center; gap: 7px; margin-block: 26px 10px; color: var(--text-muted, #999); font-size: 9px; text-transform: uppercase; letter-spacing: .07em; }
-.correo-section-label svg { inline-size: 14px; }
-.correo-attachment-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
-.correo-attachment { min-inline-size: 0; display: grid; grid-template-columns: 36px minmax(0, 1fr) 28px; align-items: center; gap: 9px; padding: 9px; border: 1px solid var(--correo-border); border-radius: 12px; background: color-mix(in srgb, var(--correo-panel-soft) 67%, transparent); text-align: start; }
-.correo-attachment:hover { border-color: color-mix(in srgb, var(--correo-blue) 30%, var(--correo-border)); background: color-mix(in srgb, var(--correo-blue) 5%, var(--correo-panel-soft)); }
-.correo-attachment:disabled { opacity: .55; cursor: wait; }
-.correo-attachment-icon { inline-size: 36px; block-size: 36px; display: grid; place-items: center; border-radius: 9px; background: color-mix(in srgb, var(--correo-blue) 9%, transparent); color: var(--correo-blue); }
-.correo-attachment-copy { min-inline-size: 0; display: grid; gap: 3px; }
-.correo-attachment-copy strong { overflow: hidden; color: var(--text-strong, #fff); font-size: 9.5px; font-weight: 820; text-overflow: ellipsis; white-space: nowrap; }
-.correo-attachment-copy small { overflow: hidden; color: var(--text-dim, #777); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
-.correo-attachment-download { display: grid; place-items: center; color: var(--text-dim, #777); }
-
-.correo-reader-actions { padding: 12px 20px; border-block-start: 1px solid var(--correo-border); background: color-mix(in srgb, var(--correo-panel-soft) 35%, transparent); }
-.correo-reader-actions .correo-btn { min-block-size: 37px; padding-inline: 12px; font-size: 10px; }
-
-.correo-reader-loading,
-.correo-empty { display: grid; place-items: center; align-content: center; gap: 9px; min-block-size: 100%; padding: 28px; text-align: center; }
-.correo-reader-loading { color: var(--text-muted, #999); font-size: 11px; font-weight: 800; }
-.correo-reader-loading svg { color: var(--correo-blue); }
-.correo-empty-icon { inline-size: 52px; block-size: 52px; display: grid; place-items: center; margin-block-end: 3px; border: 1px solid var(--correo-border); border-radius: 16px; background: color-mix(in srgb, var(--correo-panel-soft) 65%, transparent); color: var(--text-dim, #777); }
-.correo-empty-icon svg { inline-size: 24px; block-size: 24px; }
-.correo-empty strong { color: var(--text-strong, #fff); font-size: 13px; font-weight: 900; }
-.correo-empty span:not(.correo-empty-icon) { max-inline-size: 340px; color: var(--text-dim, #777); font-size: 10px; line-height: 1.45; }
-.correo-empty--list { min-block-size: 260px; }
-.correo-empty--reader { block-size: 100%; }
-.correo-mini-empty { display: flex; align-items: center; gap: 8px; padding: 12px; color: var(--text-dim, #777); font-size: 9px; }
-
-/* ---------- MOVE POPOVER ---------- */
-
-.correo-popover-anchor { position: absolute; z-index: 20; inset-block-start: 42px; inset-inline-end: 40px; }
-.correo-move-menu { inline-size: 210px; max-block-size: 320px; overflow: auto; padding: 7px; border: 1px solid var(--correo-border-strong); border-radius: 12px; background: color-mix(in srgb, var(--correo-panel-deep) 96%, transparent); box-shadow: 0 20px 52px rgba(0,0,0,.34); backdrop-filter: blur(14px); }
-.correo-move-menu > strong { display: block; padding: 6px 8px 8px; color: var(--text-dim, #777); font-size: 8.5px; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; }
-.correo-move-menu button { inline-size: 100%; display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 8px; background: transparent; color: var(--text-muted, #aaa); font-size: 9.5px; font-weight: 750; text-align: start; }
-.correo-move-menu button:hover { background: var(--correo-hover); color: var(--text-strong, #fff); }
-.correo-move-menu svg { inline-size: 14px; }
-
-/* ---------- MODAL / COMPOSE ---------- */
-
-.correo-modal-root:empty { display: none; }
-.correo-modal-root { position: fixed; z-index: 1000; inset: 0; display: grid; place-items: center; padding: 18px; }
-.correo-modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.58); backdrop-filter: blur(7px); animation: correo-fade .18s ease both; }
-.correo-compose { position: relative; inline-size: min(760px, 96vw); max-block-size: min(830px, 92vh); display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; border: 1px solid var(--correo-border-strong); border-radius: 20px; background: color-mix(in srgb, var(--correo-panel-deep) 98%, transparent); box-shadow: 0 38px 120px rgba(0,0,0,.46), inset 0 1px 0 rgba(255,255,255,.05); animation: correo-modal-in .2s cubic-bezier(.2,.8,.2,1) both; }
-.correo-compose-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 16px; border-block-end: 1px solid var(--correo-border); background: linear-gradient(180deg, color-mix(in srgb, var(--correo-blue) 5%, transparent), transparent); }
-.correo-compose-header > div { display: grid; gap: 5px; }
-.correo-compose-header h2 { font-size: 18px; }
-.correo-compose-form { min-block-size: 0; display: grid; grid-template-rows: auto; overflow: auto; }
-.correo-field { display: grid; min-inline-size: 0; }
-.correo-field--line { grid-template-columns: 72px minmax(0, 1fr); align-items: center; min-block-size: 46px; padding-inline: 17px; border-block-end: 1px solid color-mix(in srgb, var(--correo-border) 68%, transparent); }
-.correo-field > span { color: var(--text-dim, #777); font-size: 9.5px; font-weight: 850; text-transform: uppercase; letter-spacing: .055em; }
-.correo-field input,
-.correo-field textarea { inline-size: 100%; border: 0; outline: 0; background: transparent; color: var(--text-strong, #fff); }
-.correo-field input { block-size: 44px; font-size: 11.5px; }
-.correo-field input::placeholder,
-.correo-field textarea::placeholder { color: var(--text-dim, #666); }
-.correo-field--body { min-block-size: 320px; padding: 15px 17px; gap: 9px; }
-.correo-field textarea { min-block-size: 270px; resize: vertical; font-size: 12.5px; line-height: 1.65; }
-.correo-file-picker { position: relative; display: flex; align-items: center; gap: 10px; padding: 10px 17px; border-block-start: 1px solid var(--correo-border); color: var(--text-muted, #999); font-size: 9.5px; }
-.correo-file-picker input { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; opacity: 0; }
-.correo-file-picker > span { display: inline-flex; align-items: center; gap: 6px; padding: 7px 9px; border: 1px solid var(--correo-border); border-radius: 9px; cursor: pointer; font-weight: 800; }
-.correo-file-picker > span:hover { border-color: color-mix(in srgb, var(--correo-blue) 30%, var(--correo-border)); color: var(--text-strong, #fff); }
-.correo-file-picker small { color: var(--text-dim, #777); font-size: 8.5px; }
-.correo-compose-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 15px; border-block-start: 1px solid var(--correo-border); background: color-mix(in srgb, var(--correo-panel-soft) 48%, transparent); }
-.correo-compose-status { min-inline-size: 0; color: var(--text-muted, #999); font-size: 9px; font-weight: 700; }
-.correo-compose-footer .correo-btn { min-block-size: 37px; font-size: 10px; }
-.correo-modal-open { overflow: hidden; }
-
-/* ---------- TOASTS ---------- */
-
-.correo-toast-stack { position: fixed; z-index: 1100; inset-inline-end: 22px; inset-block-end: 22px; display: grid; gap: 8px; inline-size: min(360px, calc(100vw - 28px)); pointer-events: none; }
-.correo-toast { display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 9px; padding: 10px 12px; border: 1px solid var(--correo-border-strong); border-radius: 12px; background: color-mix(in srgb, var(--correo-panel-deep) 96%, transparent); box-shadow: 0 18px 52px rgba(0,0,0,.32); opacity: 0; transform: translateY(10px) scale(.98); transition: opacity 180ms ease, transform 180ms ease; backdrop-filter: blur(14px); }
-.correo-toast.is-visible { opacity: 1; transform: none; }
-.correo-toast > span { inline-size: 30px; block-size: 30px; display: grid; place-items: center; border-radius: 9px; background: color-mix(in srgb, var(--correo-blue) 9%, transparent); color: var(--correo-blue); }
-.correo-toast strong { color: var(--text-strong, #fff); font-size: 9.5px; line-height: 1.35; font-weight: 780; }
-.correo-toast.is-success > span { color: var(--correo-emerald); background: color-mix(in srgb, var(--correo-emerald) 8%, transparent); }
-.correo-toast.is-error > span { color: var(--correo-red); background: color-mix(in srgb, var(--correo-red) 8%, transparent); }
-
-/* ---------- ANIMATION ---------- */
-
-.correo-spin { animation: correo-spin .8s linear infinite; }
-@keyframes correo-spin { to { transform: rotate(360deg); } }
-@keyframes correo-shimmer { to { background-position: -220% 0; } }
-@keyframes correo-skeleton-in { from { opacity: 0; transform: translateY(3px); } }
-@keyframes correo-fade { from { opacity: 0; } }
-@keyframes correo-modal-in { from { opacity: 0; transform: translateY(10px) scale(.985); } }
-@keyframes correo-orbit { to { transform: rotate(360deg); } }
-
-/* ---------- LIGHT ---------- */
-
-@media (prefers-color-scheme: light) {
-  :where(.panel-content[data-view="correo"], .correo-view-root, [data-correo-scope]) {
-    --correo-border: var(--data-table-border, var(--border, rgba(15,23,42,.11)));
-    --correo-panel: color-mix(in srgb, var(--surface-2, #fff) 97%, transparent);
-    --correo-panel-soft: color-mix(in srgb, var(--surface-3, #f4f4f5) 92%, transparent);
-    --correo-panel-deep: color-mix(in srgb, var(--surface-1, #fff) 98%, transparent);
-    --correo-hover: rgba(15,23,42,.045);
-    --correo-shadow: 0 22px 52px rgba(15,23,42,.09), inset 0 1px 0 rgba(255,255,255,.7);
-  }
-  .correo-connect-stage::before { opacity: .42; }
-  .correo-modal-backdrop { background: rgba(15,23,42,.34); }
-  .correo-title { text-shadow: none; }
+.correo-reader {
+  min-inline-size: 0;
+  min-block-size: 0;
+  block-size: 100%;
+  overflow: hidden;
 }
 
-/* ---------- RESPONSIVE ---------- */
-
-@container (max-width: 1120px) {
-  .correo-workspace { grid-template-columns: 190px minmax(300px, 360px) minmax(0, 1fr); }
+.correo-folders-panel {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 0;
+  padding: 10px 8px 10px;
+  border-inline-end: 1px solid var(--correo-border);
+  background: #242424;
 }
 
-@container (max-width: 940px) {
-  .correo-workspace { grid-template-columns: 190px minmax(280px, 1fr); max-block-size: none; }
-  .correo-reader { grid-column: 1 / -1; min-block-size: 520px; border-block-start: 1px solid var(--correo-border); }
-  .correo-list-panel { border-inline-end: 0; }
+.correo-list-panel {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0,1fr);
+  border-inline-end: 1px solid var(--correo-border);
+  background: var(--correo-panel);
 }
 
-@container (max-width: 690px) {
-  .correo-hero-top { grid-template-columns: 1fr; }
-  .correo-hero-actions { justify-content: flex-start; }
-  .correo-workspace { grid-template-columns: 1fr; max-block-size: none; overflow: visible; }
-  .correo-folders-panel { max-block-size: none; border-inline-end: 0; border-block-end: 1px solid var(--correo-border); }
-  .correo-folders { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .correo-security-card { margin-block-start: 0; }
-  .correo-list-panel { min-block-size: 600px; border-block-end: 1px solid var(--correo-border); }
-  .correo-reader { min-block-size: 560px; }
-  .correo-sender { grid-template-columns: 42px minmax(0, 1fr); }
-  .correo-sender time { grid-column: 2; text-align: start; }
-  .correo-reader-header { grid-template-columns: 1fr; }
-  .correo-reader-toolbar { justify-content: flex-start; }
-  .correo-popover-anchor { inset-inline-start: 0; inset-inline-end: auto; }
+.correo-reader {
+  background: #292929;
 }
 
-@media (max-width: 640px) {
-  .correo-modal-root { padding: 8px; align-items: end; }
-  .correo-compose { inline-size: 100%; max-block-size: 94vh; border-radius: 18px 18px 10px 10px; }
-  .correo-compose-footer { align-items: stretch; flex-direction: column; }
-  .correo-compose-footer > div { justify-content: flex-end; }
-  .correo-toast-stack { inset-inline: 14px; inline-size: auto; }
+/* ---------- Account / avatar / menu ---------- */
+.correo-account-wrap { position: relative; z-index: 20; margin-block-end: 7px; }
+.correo-account-card {
+  inline-size: 100%;
+  min-block-size: 58px;
+  display: grid;
+  grid-template-columns: 38px minmax(0,1fr) 8px 18px;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: start;
+}
+.correo-account-card:hover,
+.correo-account-card[aria-expanded="true"] { background: #333; border-color: #464646; }
+.correo-account-avatar {
+  inline-size: 38px;
+  block-size: 38px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: #0f6cbd;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+.correo-account-avatar-img { inline-size: 100%; block-size: 100%; object-fit: cover; display: block; }
+.correo-account-avatar-fallback { display: grid; place-items: center; inline-size: 100%; block-size: 100%; }
+.correo-account-copy { min-inline-size: 0; display: grid; gap: 1px; }
+.correo-account-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #fff; font-size: 12.5px; font-weight: 650; }
+.correo-account-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--correo-text-3); font-size: 10.5px; }
+.correo-account-state { inline-size: 7px; block-size: 7px; border-radius: 50%; background: #8a8886; box-shadow: none; }
+.correo-account-state.is-online { background: #6ccb5f; box-shadow: 0 0 0 2px rgba(108,203,95,.13); }
+.correo-account-chevron { color: #aaa; }
+.correo-account-chevron svg { inline-size: 14px; block-size: 14px; }
+
+.correo-account-menu {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-start: calc(100% + 5px);
+  z-index: 50;
+  overflow: hidden;
+  border: 1px solid #5a5a5a;
+  border-radius: 6px;
+  background: #292929;
+  box-shadow: 0 12px 34px rgba(0,0,0,.45);
+}
+.correo-account-menu[hidden] { display: none; }
+.correo-account-menu-current {
+  min-block-size: 58px;
+  display: grid;
+  grid-template-columns: 32px minmax(0,1fr) 20px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-block-end: 1px solid #424242;
+}
+.correo-account-menu-current > span { inline-size: 32px; block-size: 32px; border-radius: 50%; overflow: hidden; background:#0f6cbd; }
+.correo-account-menu-current > span .correo-account-avatar-img,
+.correo-account-menu-current > span .correo-account-avatar-fallback { inline-size:100%; block-size:100%; }
+.correo-account-menu-current div { min-inline-size: 0; display:grid; gap:2px; }
+.correo-account-menu-current strong,
+.correo-account-menu-current small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.correo-account-menu-current strong { font-size:12px; }
+.correo-account-menu-current small { color:#aaa; font-size:10px; }
+.correo-account-menu-current i { color:#62abf5; }
+.correo-account-menu button {
+  inline-size: 100%;
+  display:grid;
+  grid-template-columns: 22px minmax(0,1fr);
+  align-items:center;
+  gap:9px;
+  padding:9px 10px;
+  border:0;
+  background:transparent;
+  color:#fff;
+  text-align:start;
+}
+.correo-account-menu button:hover { background:#3e3e3e; }
+.correo-account-menu button > svg { color:#c8c8c8; }
+.correo-account-menu button span { display:grid; gap:1px; }
+.correo-account-menu button strong { font-size:11.5px; font-weight:600; }
+.correo-account-menu button small { color:#aaa; font-size:9.5px; line-height:1.25; }
+
+/* ---------- Folders ---------- */
+.correo-folders {
+  min-block-size: 0;
+  overflow: auto;
+  padding-block: 2px 8px;
+  scrollbar-width: thin;
+  scrollbar-color: #5b5b5b transparent;
+}
+.correo-folder {
+  inline-size: 100%;
+  min-block-size: 45px;
+  display: grid;
+  grid-template-columns: 25px minmax(0,1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--correo-text-2);
+  text-align: start;
+}
+.correo-folder:hover { background: #333333; color: #fff; }
+.correo-folder.is-active { background: #0c3b5e; color: #fff; }
+.correo-folder-icon { display:grid; place-items:center; color:#c8c8c8; }
+.correo-folder.is-active .correo-folder-icon { color:#fff; }
+.correo-folder-icon svg { inline-size: 17px; block-size: 17px; }
+.correo-folder-copy { min-inline-size:0; display:grid; gap:1px; }
+.correo-folder-copy strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11.5px; font-weight:600; }
+.correo-folder-copy small { color:#999; font-size:9px; }
+.correo-folder.is-active .correo-folder-copy small { color:#c7e0f4; }
+.correo-folder-count { min-inline-size:24px; padding:2px 6px; border-radius:10px; background:#0f6cbd; color:#fff; font-size:9px; font-weight:700; text-align:center; }
+.correo-folder.is-active .correo-folder-count { background:#479ef5; color:#101010; }
+
+.correo-disconnect-btn {
+  inline-size: 100%;
+  min-block-size: 39px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  margin-block-start: 8px;
+  border: 1px solid #4b4b4b;
+  border-radius: 4px;
+  background: #2b2b2b;
+  color: #d6d6d6;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.correo-disconnect-btn:hover { background:#4a2426; border-color:#7a3336; color:#fff; }
+.correo-disconnect-btn svg { inline-size:15px; block-size:15px; }
+
+/* ---------- Message list ---------- */
+.correo-list-header {
+  min-block-size: 67px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding: 10px 12px 8px;
+  border-block-end: 1px solid var(--correo-border-soft);
+}
+.correo-list-header > div:first-child { min-inline-size:0; display:grid; gap:3px; }
+.correo-list-header .correo-kicker { color:#9d9d9d; font-size:9px; font-weight:650; letter-spacing:.08em; }
+.correo-list-header h2 { margin:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#fff; font-size:17px; line-height:1.15; font-weight:650; letter-spacing:-.018em; }
+.correo-list-utilities { min-inline-size:0; display:flex; align-items:center; justify-content:flex-end; gap:5px; }
+.correo-count { color:#a8a8a8; font-size:9px; white-space:nowrap; }
+
+.correo-search {
+  min-block-size: 36px;
+  display:grid;
+  grid-template-columns: 20px minmax(0,1fr) auto;
+  align-items:center;
+  gap:6px;
+  margin: 8px 10px 5px;
+  padding: 0 9px;
+  border: 1px solid #555;
+  border-radius: 4px;
+  background: #242424;
+  color:#bdbdbd;
+}
+.correo-search:focus-within { border-color:#479ef5; box-shadow: inset 0 -2px 0 #479ef5; }
+.correo-search input { inline-size:100%; min-inline-size:0; border:0; outline:0; background:transparent; color:#fff; font-size:11.5px; }
+.correo-search input::placeholder { color:#9b9b9b; }
+.correo-search-icon svg { inline-size:15px; block-size:15px; }
+.correo-search kbd { padding:2px 5px; border:1px solid #4b4b4b; border-radius:3px; background:#333; color:#aaa; font-size:8px; font-family:inherit; }
+
+.correo-filter-row {
+  display:flex;
+  align-items:center;
+  gap:2px;
+  min-block-size:35px;
+  padding: 2px 10px 5px;
+  border-block-end:1px solid var(--correo-border-soft);
+}
+.correo-filter {
+  min-block-size:28px;
+  padding: 4px 9px;
+  border:0;
+  border-radius:4px;
+  background:transparent;
+  color:#c6c6c6;
+  font-size:10.5px;
+}
+.correo-filter:hover { background:#3a3a3a; color:#fff; }
+.correo-filter.is-active { background:#0c3b5e; color:#fff; }
+
+.correo-message-list {
+  min-block-size:0;
+  overflow:auto;
+  overscroll-behavior:contain;
+  scrollbar-width:thin;
+  scrollbar-color:#5b5b5b transparent;
+  background:#292929;
+}
+.correo-message-row {
+  position:relative;
+  inline-size:100%;
+  min-block-size:82px;
+  display:grid;
+  grid-template-columns: 36px minmax(0,1fr);
+  align-items:start;
+  gap:9px;
+  padding: 9px 10px;
+  border:0;
+  border-block-end:1px solid #383838;
+  border-radius:0;
+  background:transparent;
+  color:var(--correo-text-2);
+  text-align:start;
+}
+.correo-message-row:hover { background:#333333; }
+.correo-message-row.is-selected { background:#0c3b5e; color:#fff; box-shadow: inset 3px 0 0 #479ef5; }
+.correo-message-row.is-unread { background:#2d3338; }
+.correo-message-row.is-unread.is-selected { background:#0c3b5e; }
+.correo-message-avatar {
+  inline-size:34px;
+  block-size:34px;
+  display:grid;
+  place-items:center;
+  border-radius:50%;
+  background:#4f6bed;
+  color:#fff;
+  font-size:10px;
+  font-weight:700;
+}
+.correo-message-copy { min-inline-size:0; display:grid; gap:2px; }
+.correo-message-line--top { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:7px; align-items:center; }
+.correo-message-line--top strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#f5f5f5; font-size:11px; font-weight:600; }
+.correo-message-row.is-unread .correo-message-line--top strong,
+.correo-message-row.is-unread .correo-message-subject { font-weight:700; color:#fff; }
+.correo-message-line--top time { color:#aaa; font-size:8.5px; white-space:nowrap; }
+.correo-message-row.is-selected .correo-message-line--top time { color:#c7e0f4; }
+.correo-message-subject { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#e1e1e1; font-size:10.5px; font-weight:600; }
+.correo-message-preview { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#a9a9a9; font-size:9.5px; }
+.correo-message-row.is-selected .correo-message-preview { color:#d2e7f6; }
+.correo-message-meta { min-block-size:11px; display:flex; align-items:center; gap:4px; color:#aaa; }
+.correo-mini-icon svg { inline-size:11px; block-size:11px; }
+.correo-mini-icon.is-flagged { color:#fce100; }
+.correo-unread-dot { inline-size:6px; block-size:6px; border-radius:50%; background:#479ef5; box-shadow:none; }
+.correo-priority { color:#f1707b; font-weight:800; }
+.correo-draft-label { color:#f1707b; font-size:8px; font-weight:700; }
+
+.correo-infinite-loader {
+  min-block-size:46px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:7px;
+  color:#aaa;
+  font-size:9.5px;
+}
+.correo-infinite-loader svg { inline-size:14px; block-size:14px; }
+.correo-infinite-sentinel { display:none; }
+
+.correo-message-skeleton { min-block-size:82px; display:grid; grid-template-columns:34px 1fr; gap:9px; padding:9px 10px; border-block-end:1px solid #383838; }
+.correo-message-skeleton > span { inline-size:34px; block-size:34px; border-radius:50%; background:#3a3a3a; }
+.correo-message-skeleton > div { display:grid; align-content:start; gap:8px; padding-block-start:2px; }
+.correo-message-skeleton i { display:block; block-size:7px; border-radius:3px; background:#3a3a3a; }
+.correo-message-skeleton i:nth-child(1) { inline-size:45%; }
+.correo-message-skeleton i:nth-child(2) { inline-size:72%; }
+.correo-message-skeleton i:nth-child(3) { inline-size:88%; }
+
+/* ---------- Reader ---------- */
+.correo-reader-card {
+  min-block-size:0;
+  block-size:100%;
+  display:grid;
+  grid-template-rows:auto auto minmax(0,1fr) auto;
+  background:#292929;
+}
+.correo-reader-header {
+  min-block-size:84px;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  align-items:start;
+  gap:12px;
+  padding: 13px 16px 10px;
+  border-block-end:1px solid #424242;
+}
+.correo-reader-heading { min-inline-size:0; display:grid; gap:5px; }
+.correo-reader-heading .correo-kicker { color:#9f9f9f; font-size:9px; font-weight:650; letter-spacing:.08em; }
+.correo-reader-heading h2 { margin:0; color:#fff; font-size:20px; line-height:1.18; font-weight:650; letter-spacing:-.02em; overflow-wrap:anywhere; }
+.correo-reader-toolbar { display:flex; align-items:center; gap:3px; }
+.correo-sender {
+  min-block-size:64px;
+  display:grid;
+  grid-template-columns:38px minmax(0,1fr) auto;
+  align-items:start;
+  gap:9px;
+  padding:10px 16px;
+  border-block-end:1px solid #383838;
+}
+.correo-sender-avatar { inline-size:36px; block-size:36px; display:grid; place-items:center; border-radius:50%; background:#4f6bed; color:#fff; font-size:10px; font-weight:700; }
+.correo-sender-copy { min-inline-size:0; display:grid; gap:2px; }
+.correo-sender-copy strong { color:#fff; font-size:11.5px; font-weight:650; }
+.correo-sender-copy > span { color:#b2b2b2; font-size:9.5px; }
+.correo-sender-copy small { display:flex; flex-wrap:wrap; gap:5px; color:#aaa; font-size:9px; }
+.correo-sender time { color:#aaa; font-size:8.5px; white-space:nowrap; }
+.correo-reader-scroll { min-block-size:0; overflow:auto; overscroll-behavior:contain; padding:16px 20px 26px; scrollbar-width:thin; scrollbar-color:#5b5b5b transparent; }
+.correo-reader-body { max-inline-size:980px; color:#f0f0f0; font-size:12px; line-height:1.58; font-weight:400; }
+.correo-reader-body p { margin:0 0 9px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.correo-reader-body .correo-blank-line { margin-block-end:3px; }
+.correo-reader-empty-body { color:#aaa; font-style:italic; }
+.correo-reader-actions {
+  min-block-size:58px;
+  display:flex;
+  align-items:center;
+  gap:7px;
+  padding:10px 16px;
+  border-block-start:1px solid #424242;
+  background:#292929;
 }
 
-@container (max-width: 470px) {
-  .correo-title { font-size: 38px; }
-  .correo-hero { padding-inline: 2px; }
-  .correo-hero-meta { gap: 5px; }
-  .correo-meta-pill { font-size: 9px; }
-  .correo-folders { grid-template-columns: 1fr; }
-  .correo-reader-scroll { padding: 18px; }
-  .correo-reader-actions { align-items: stretch; flex-direction: column; }
-  .correo-reader-actions .correo-btn { inline-size: 100%; }
-  .correo-attachment-grid { grid-template-columns: 1fr; }
-  .correo-search kbd { display: none; }
-  .correo-search input { padding-inline-end: 12px; }
+.correo-empty--reader,
+.correo-reader-loading {
+  block-size:100%;
+  min-block-size:0;
+  display:grid;
+  place-items:center;
+  align-content:center;
+  gap:8px;
+  color:#aaa;
+  text-align:center;
+}
+.correo-reader-loading { display:flex; justify-content:center; }
+.correo-reader-loading svg { inline-size:18px; block-size:18px; }
+.correo-empty-icon { inline-size:42px; block-size:42px; display:grid; place-items:center; border-radius:50%; background:#333; color:#9f9f9f; }
+.correo-empty-icon svg { inline-size:20px; block-size:20px; }
+.correo-empty strong { color:#ddd; font-size:12px; }
+.correo-empty span:last-child { color:#999; font-size:10px; }
+.correo-empty--list { min-block-size:180px; display:grid; place-items:center; align-content:center; gap:6px; padding:18px; text-align:center; }
+
+/* ---------- Attachments ---------- */
+.correo-attachments { margin-block-start:18px; padding-block-start:12px; border-block-start:1px solid #424242; }
+.correo-attachments h3 { display:flex; align-items:center; gap:6px; margin:0 0 8px; color:#ddd; font-size:10.5px; font-weight:650; }
+.correo-attachments h3 svg { inline-size:14px; block-size:14px; }
+.correo-attachment-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:6px; }
+.correo-attachment { min-inline-size:0; display:grid; grid-template-columns:28px minmax(0,1fr); align-items:center; gap:8px; padding:8px; border:1px solid #4a4a4a; border-radius:4px; background:#333; color:#fff; text-align:start; }
+.correo-attachment:hover { background:#3e3e3e; border-color:#5a5a5a; }
+.correo-attachment > span:first-child { color:#62abf5; }
+.correo-attachment strong,.correo-attachment small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.correo-attachment strong { font-size:10px; }.correo-attachment small { color:#aaa; font-size:8.5px; }
+
+/* ---------- Move popover ---------- */
+.correo-popover-anchor { position:relative; }
+.correo-move-menu { position:absolute; inset-block-start:4px; inset-inline-end:0; z-index:80; min-inline-size:220px; max-block-size:330px; overflow:auto; padding:5px; border:1px solid #555; border-radius:5px; background:#292929; box-shadow:var(--correo-shadow); }
+.correo-move-menu > strong { display:block; padding:6px 8px; color:#aaa; font-size:9px; text-transform:uppercase; letter-spacing:.06em; }
+.correo-move-menu button { inline-size:100%; display:flex; align-items:center; gap:8px; padding:7px 8px; border-radius:3px; background:transparent; color:#eee; font-size:10px; text-align:start; }
+.correo-move-menu button:hover { background:#3e3e3e; }
+.correo-move-menu button svg { inline-size:14px; block-size:14px; }
+
+/* ---------- Compose / Outlook window ---------- */
+html.correo-modal-open { overflow:hidden; }
+.correo-modal-backdrop {
+  position:fixed;
+  inset:0;
+  z-index:9998;
+  background:rgba(0,0,0,.44);
+  backdrop-filter:blur(2px);
+}
+.correo-compose {
+  position:fixed;
+  z-index:9999;
+  inset-inline-start:50%;
+  inset-block-start:clamp(72px, 8vh, 94px);
+  transform:translateX(-50%);
+  inline-size:min(840px, calc(100vw - 44px));
+  block-size:min(650px, calc(100dvh - 112px));
+  min-block-size:420px;
+  display:grid;
+  grid-template-rows:46px minmax(0,1fr);
+  overflow:hidden;
+  border:1px solid #555;
+  border-radius:7px;
+  background:#242424;
+  color:#fff;
+  box-shadow:0 24px 80px rgba(0,0,0,.56);
+}
+.correo-compose-header {
+  min-inline-size:0;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:0 9px 0 14px;
+  border-block-end:1px solid #424242;
+  background:#292929;
+}
+.correo-compose-header h2 { margin:0; color:#fff; font-size:16px; line-height:1; font-weight:650; letter-spacing:-.015em; }
+.correo-compose-form {
+  min-block-size:0;
+  display:grid;
+  grid-template-rows:auto minmax(0,1fr) auto auto;
+  overflow:hidden;
+  background:#242424;
+}
+.correo-compose-fields { display:grid; }
+.correo-field--line {
+  min-block-size:42px;
+  display:grid;
+  grid-template-columns:72px minmax(0,1fr);
+  align-items:center;
+  gap:8px;
+  padding:0 14px;
+  border-block-end:1px solid #3f3f3f;
+}
+.correo-field--line > span { color:#bdbdbd; font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; }
+.correo-field--line input { inline-size:100%; min-inline-size:0; block-size:38px; padding:0; border:0; outline:0; background:transparent; color:#fff; font-size:12px; }
+.correo-field--line input::placeholder { color:#838383; }
+.correo-field--body { min-block-size:0; display:block; padding:0; }
+.correo-field--body textarea {
+  inline-size:100%;
+  block-size:100%;
+  min-block-size:0;
+  resize:none;
+  padding:16px 18px;
+  border:0;
+  outline:0;
+  background:#242424;
+  color:#fff;
+  font-size:13px;
+  line-height:1.55;
+  overflow:auto;
+}
+.correo-field--body textarea::placeholder { color:#7f7f7f; }
+.correo-compose-attachments {
+  min-block-size:48px;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:6px 14px;
+  border-block-start:1px solid #3f3f3f;
+  background:#242424;
+}
+.correo-file-picker { position:relative; min-block-size:30px; display:inline-flex; align-items:center; }
+.correo-file-picker input { position:absolute; inline-size:1px; block-size:1px; opacity:0; pointer-events:none; }
+.correo-file-picker > span { min-block-size:30px; display:inline-flex; align-items:center; gap:6px; padding:5px 9px; border:1px solid #555; border-radius:4px; background:#333; color:#e8e8e8; font-size:10px; font-weight:600; cursor:pointer; }
+.correo-file-picker:hover > span { background:#3e3e3e; }
+.correo-file-picker svg { inline-size:14px; block-size:14px; }
+.correo-compose-attachments > small { min-inline-size:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#949494; font-size:9px; }
+.correo-compose-footer {
+  min-block-size:56px;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  align-items:center;
+  gap:10px;
+  padding:8px 14px;
+  border-block-start:1px solid #424242;
+  background:#292929;
+}
+.correo-compose-footer > div { display:flex; align-items:center; gap:7px; }
+.correo-compose-status { min-inline-size:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#f1707b; font-size:9.5px; }
+
+/* ---------- Toasts ---------- */
+.correo-toast-stack { position:fixed; z-index:10020; inset-inline-end:18px; inset-block-end:18px; display:grid; gap:7px; pointer-events:none; }
+.correo-toast { min-inline-size:280px; max-inline-size:min(420px,calc(100vw - 28px)); display:grid; grid-template-columns:24px minmax(0,1fr); align-items:center; gap:8px; padding:10px 12px; border:1px solid #555; border-radius:5px; background:#292929; color:#fff; box-shadow:0 10px 36px rgba(0,0,0,.42); opacity:0; transform:translateY(8px); transition:opacity 150ms ease,transform 150ms ease; }
+.correo-toast.is-visible { opacity:1; transform:translateY(0); }
+.correo-toast > span { display:grid; place-items:center; color:#62abf5; }.correo-toast.is-success > span { color:#6ccb5f; }.correo-toast.is-error > span { color:#f1707b; }
+.correo-toast strong { font-size:10.5px; line-height:1.35; font-weight:600; }
+
+/* ---------- Boot / disconnected ---------- */
+.correo-workspace--boot { pointer-events:none; }
+.correo-boot-account { block-size:58px; margin-block-end:8px; border-radius:6px; background:#333; }
+.correo-boot-line { block-size:42px; margin-block:2px; border-radius:4px; background:#303030; }
+.correo-boot-title { inline-size:45%; block-size:18px; margin:20px 12px 16px; border-radius:3px; background:#3a3a3a; }
+.correo-connect-stage { block-size:100%; min-block-size:520px; display:grid; place-items:center; border:0; border-radius:0; background:#1f1f1f; box-shadow:none; }
+.correo-connect-stage::before,.correo-connect-orbit { display:none; }
+.correo-connect-card { inline-size:min(430px,calc(100% - 28px)); display:grid; justify-items:center; gap:11px; padding:34px; border:1px solid #424242; border-radius:8px; background:#292929; box-shadow:0 16px 50px rgba(0,0,0,.28); text-align:center; backdrop-filter:none; }
+.correo-connect-logo { inline-size:54px; block-size:54px; display:grid; place-items:center; border:0; border-radius:8px; background:#0f6cbd; color:#fff; box-shadow:none; }
+.correo-connect-logo svg { inline-size:26px; block-size:26px; }
+.correo-connect-card .correo-kicker { color:#9c9c9c; font-size:9px; }
+.correo-connect-card h2 { margin:0; color:#fff; font-size:25px; line-height:1.1; font-weight:650; letter-spacing:-.025em; }
+.correo-connect-card > p:not(.correo-kicker) { margin:0; max-inline-size:340px; color:#aaa; font-size:11px; line-height:1.5; }
+.correo-connect-cta { min-block-size:36px; margin-block-start:5px; }
+
+.correo-spin { animation:correo-spin 900ms linear infinite; }
+@keyframes correo-spin { to { transform:rotate(360deg); } }
+
+/* ---------- Short laptops ---------- */
+@media (min-width:1280px) and (max-height:760px) {
+  .correo-workspace { grid-template-columns:220px clamp(370px,29vw,450px) minmax(390px,1fr); }
+  .correo-folders-panel { padding-block:6px; }
+  .correo-account-card { min-block-size:50px; grid-template-columns:32px minmax(0,1fr) 7px 16px; }
+  .correo-account-avatar { inline-size:32px; block-size:32px; }
+  .correo-folder { min-block-size:39px; }
+  .correo-folder-copy small { display:none; }
+  .correo-list-header { min-block-size:58px; padding-block:7px; }
+  .correo-message-row,.correo-message-skeleton { min-block-size:72px; }
+  .correo-reader-header { min-block-size:72px; padding-block:10px; }
+  .correo-sender { min-block-size:56px; padding-block:8px; }
+  .correo-reader-actions { min-block-size:50px; padding-block:7px; }
+  .correo-compose { inset-block-start:66px; block-size:calc(100dvh - 80px); }
 }
 
-/* ---------- ACCESSIBILITY ---------- */
+/* ---------- Responsive ---------- */
+@media (max-width:1279px) {
+  .correo-view-root { block-size:auto; min-block-size:0; }
+  .correo-workspace { block-size:auto; min-block-size:660px; grid-template-columns:220px minmax(340px,42vw) minmax(360px,1fr); overflow:auto; }
+  .correo-folders-panel,.correo-list-panel,.correo-reader { min-block-size:660px; }
+}
+
+@media (max-width:980px) {
+  .correo-workspace { display:grid; grid-template-columns:210px minmax(0,1fr); min-block-size:680px; }
+  .correo-reader { grid-column:1 / -1; min-block-size:520px; border-block-start:1px solid #424242; }
+  .correo-list-panel { border-inline-end:0; }
+}
+
+@media (max-width:700px) {
+  .correo-workspace { display:block; min-block-size:0; overflow:visible; }
+  .correo-folders-panel,.correo-list-panel,.correo-reader { block-size:auto; min-block-size:0; overflow:visible; border-inline-end:0; }
+  .correo-folders-panel { padding:8px; }
+  .correo-folders { max-block-size:300px; }
+  .correo-message-list { max-block-size:65vh; }
+  .correo-reader-card { block-size:auto; min-block-size:520px; }
+  .correo-reader-scroll { max-block-size:58vh; }
+  .correo-compose { inset:8px; transform:none; inline-size:auto; block-size:auto; min-block-size:0; }
+  .correo-field--line { grid-template-columns:54px minmax(0,1fr); padding-inline:10px; }
+  .correo-compose-footer { grid-template-columns:1fr; }
+  .correo-compose-footer > div { justify-content:flex-end; }
+  .correo-toast-stack { inset-inline:8px; inset-block-end:8px; }
+  .correo-toast { min-inline-size:0; max-inline-size:none; }
+}
+
+/* ---------- Light mode ---------- */
+html[data-theme="light"] :where(.panel-content[data-view="correo"], .correo-view-root, [data-correo-scope]),
+body[data-theme="light"] :where(.panel-content[data-view="correo"], .correo-view-root, [data-correo-scope]) {
+  --correo-panel-deep:#f5f5f5;
+  --correo-panel:#ffffff;
+  --correo-panel-soft:#f5f5f5;
+  --correo-panel-hover:#ebebeb;
+  --correo-border:#d1d1d1;
+  --correo-border-soft:#e0e0e0;
+  --correo-text:#242424;
+  --correo-text-2:#424242;
+  --correo-text-3:#707070;
+}
+html[data-theme="light"] .correo-view-root,
+body[data-theme="light"] .correo-view-root,
+html[data-theme="light"] .correo-reader,
+body[data-theme="light"] .correo-reader,
+html[data-theme="light"] .correo-reader-card,
+body[data-theme="light"] .correo-reader-card { background:#fff; color:#242424; }
+html[data-theme="light"] .correo-folders-panel,
+body[data-theme="light"] .correo-folders-panel { background:#f5f5f5; }
+html[data-theme="light"] .correo-list-panel,
+body[data-theme="light"] .correo-list-panel,
+html[data-theme="light"] .correo-message-list,
+body[data-theme="light"] .correo-message-list { background:#fff; }
+html[data-theme="light"] .correo-message-row,
+body[data-theme="light"] .correo-message-row { color:#424242; border-color:#e5e5e5; }
+html[data-theme="light"] .correo-message-row:hover,
+body[data-theme="light"] .correo-message-row:hover { background:#f5f5f5; }
+html[data-theme="light"] .correo-message-row.is-unread,
+body[data-theme="light"] .correo-message-row.is-unread { background:#eff6fc; }
+html[data-theme="light"] .correo-message-row.is-selected,
+body[data-theme="light"] .correo-message-row.is-selected { background:#cfe4fa; color:#242424; box-shadow:inset 3px 0 0 #0f6cbd; }
+html[data-theme="light"] .correo-message-line--top strong,
+body[data-theme="light"] .correo-message-line--top strong,
+html[data-theme="light"] .correo-message-subject,
+body[data-theme="light"] .correo-message-subject,
+html[data-theme="light"] .correo-reader-heading h2,
+body[data-theme="light"] .correo-reader-heading h2,
+html[data-theme="light"] .correo-sender-copy strong,
+body[data-theme="light"] .correo-sender-copy strong { color:#242424; }
+html[data-theme="light"] .correo-reader-body,
+body[data-theme="light"] .correo-reader-body { color:#242424; }
+html[data-theme="light"] .correo-search,
+body[data-theme="light"] .correo-search { background:#fff; border-color:#b3b3b3; }
+html[data-theme="light"] .correo-search input,
+body[data-theme="light"] .correo-search input { color:#242424; }
+html[data-theme="light"] .correo-account-card:hover,
+body[data-theme="light"] .correo-account-card:hover { background:#e9e9e9; }
+html[data-theme="light"] .correo-account-copy strong,
+body[data-theme="light"] .correo-account-copy strong { color:#242424; }
+html[data-theme="light"] .correo-account-menu,
+body[data-theme="light"] .correo-account-menu,
+html[data-theme="light"] .correo-compose,
+body[data-theme="light"] .correo-compose,
+html[data-theme="light"] .correo-compose-form,
+body[data-theme="light"] .correo-compose-form,
+html[data-theme="light"] .correo-field--body textarea,
+body[data-theme="light"] .correo-field--body textarea,
+html[data-theme="light"] .correo-compose-attachments,
+body[data-theme="light"] .correo-compose-attachments { background:#fff; color:#242424; }
+html[data-theme="light"] .correo-compose-header,
+body[data-theme="light"] .correo-compose-header,
+html[data-theme="light"] .correo-compose-footer,
+body[data-theme="light"] .correo-compose-footer { background:#f5f5f5; }
+html[data-theme="light"] .correo-compose-header h2,
+body[data-theme="light"] .correo-compose-header h2,
+html[data-theme="light"] .correo-field--line input,
+body[data-theme="light"] .correo-field--line input,
+html[data-theme="light"] .correo-field--body textarea,
+body[data-theme="light"] .correo-field--body textarea { color:#242424; }
 
 @media (prefers-reduced-motion: reduce) {
-  .correo-view-root *,
-  .correo-view-root *::before,
-  .correo-view-root *::after {
-    scroll-behavior: auto !important;
-    animation-duration: .001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: .001ms !important;
-  }
+  .correo-view-root *, .correo-view-root *::before, .correo-view-root *::after { scroll-behavior:auto !important; animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; }
 }
 
 @media (forced-colors: active) {
-  .correo-btn,
-  .correo-icon-btn,
-  .correo-folder,
-  .correo-message-row,
-  .correo-attachment,
-  .correo-account-card,
-  .correo-workspace,
-  .correo-connect-card,
-  .correo-compose,
-  .correo-toast { border: 1px solid CanvasText; }
-  .correo-message-row.is-selected { outline: 2px solid Highlight; outline-offset: -2px; }
-  .correo-status-dot,
-  .correo-account-state,
-  .correo-unread-dot { background: Highlight; }
+  .correo-view-root *, .correo-view-root *::before, .correo-view-root *::after { forced-color-adjust:auto; }
+  .correo-btn,.correo-icon-btn,.correo-folder,.correo-message-row,.correo-account-card,.correo-disconnect-btn,.correo-compose,.correo-search { border:1px solid CanvasText; }
 }
 
 @media print {
-  .correo-hero-actions,
-  .correo-folders-panel,
-  .correo-list-panel,
-  .correo-reader-toolbar,
-  .correo-reader-actions,
-  .correo-toast-stack,
-  .correo-modal-root { display: none !important; }
-  .correo-workspace { display: block; max-block-size: none; border: 0; box-shadow: none; }
-  .correo-reader { display: block; }
-  .correo-reader-scroll { overflow: visible; }
+  .correo-folders-panel,.correo-list-panel,.correo-reader-toolbar,.correo-reader-actions,.correo-modal-root,.correo-toast-stack { display:none !important; }
+  .correo-workspace { display:block; }
+  .correo-reader { display:block !important; }
 }
 
+/* =========================================================
+   CORREO · CONSOLIDATED HEIGHT / DENSITY CONTRACT
+   Integrado desde la antigua fullheight.css.
+   Misma hoja, misma capa, una sola autoridad de viewport.
+========================================================= */
+
+/* Toolbar base para cualquier ancho donde se use el nuevo template. */
+[data-correo-host="true"] .correo-list-toolbar {
+  min-inline-size: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 10px 6px;
+  border-block-end: 1px solid var(--correo-border-soft, #383838);
+  background: var(--correo-panel, #292929);
 }
+
+[data-correo-host="true"] .correo-list-toolbar .correo-filter-row {
+  min-inline-size: 0;
+  flex: 1 1 auto;
+  padding: 0;
+  border: 0;
+}
+
+[data-correo-host="true"] .correo-list-toolbar .correo-list-utilities {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+[data-correo-host="true"] .correo-list-toolbar [data-correo-action="refresh"] {
+  inline-size: 30px;
+  block-size: 30px;
+  min-inline-size: 30px;
+  min-block-size: 30px;
+  border-radius: 4px;
+}
+
+[data-correo-host="true"] .correo-list-toolbar [data-correo-action="compose"] {
+  min-block-size: 30px;
+  block-size: 30px;
+  gap: 6px;
+  padding-inline: 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1;
+}
+
+[data-correo-host="true"] .correo-list-toolbar [data-correo-action="compose"] svg {
+  inline-size: 15px;
+  block-size: 15px;
+}
+
+@media (min-width: 1280px) and (min-height: 620px) {
+  /* =======================================================
+     ALTURA REAL
+     main-content ya está fijado entre topbar y fondo. Estas reglas
+     cierran toda la cadena de flex/height y neutralizan el max-height
+     legado de index.css que todavía limitaba .correo-workspace.
+  ======================================================= */
+
+  .main-content:has([data-correo-host="true"]) {
+    min-block-size: 0;
+    overflow: hidden;
+    scrollbar-gutter: auto;
+  }
+
+  .main-content:has([data-correo-host="true"]) > #app-content,
+  #app-content:has([data-correo-host="true"]) {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    block-size: 100%;
+    min-block-size: 0;
+    max-block-size: none;
+    padding-block-end: 0;
+    overflow: hidden;
+  }
+
+  #app-content:has([data-correo-host="true"]) > #view-container,
+  #view-container:has([data-correo-host="true"]) {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    align-items: stretch;
+    block-size: 100%;
+    min-block-size: 0;
+    max-block-size: none;
+    overflow: hidden;
+  }
+
+  #view-container > .panel-content[data-view="correo"],
+  #view-container > .panel-content[data-view="correo"][data-correo-host="true"],
+  .panel-content[data-view="correo"][data-correo-host="true"] {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    align-self: stretch;
+    block-size: 100%;
+    min-block-size: 0;
+    max-block-size: none;
+    padding: 0;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  [data-correo-host="true"] > .correo-view-root,
+  .panel-content[data-view="correo"] > .correo-view-root {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    block-size: 100%;
+    min-block-size: 0;
+    max-block-size: none;
+    overflow: hidden;
+  }
+
+  [data-correo-host="true"] .correo-workspace {
+    flex: 1 1 0;
+    align-self: stretch;
+    block-size: 100%;
+    min-block-size: 0;
+    max-block-size: none;
+    overflow: hidden;
+  }
+
+  [data-correo-host="true"] .correo-folders-panel,
+  [data-correo-host="true"] .correo-list-panel,
+  [data-correo-host="true"] .correo-reader,
+  [data-correo-host="true"] .correo-reader-card {
+    block-size: 100%;
+    min-block-size: 0;
+    max-block-size: none;
+  }
+
+  /* =======================================================
+     LISTA FINAL
+     Buscar ocupa una fila. Debajo: filtros a la izquierda,
+     refrescar + redactar a la derecha. El resto es lista scrollable.
+  ======================================================= */
+
+  [data-correo-host="true"] .correo-list-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 38px minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  [data-correo-host="true"] .correo-search {
+    grid-row: 1;
+    align-self: center;
+    margin: 8px 10px 6px;
+  }
+
+  [data-correo-host="true"] .correo-list-toolbar {
+    grid-row: 2;
+    min-block-size: 38px;
+    block-size: 38px;
+    padding: 3px 10px 5px;
+  }
+
+  [data-correo-host="true"] .correo-list-toolbar .correo-filter-row {
+    min-block-size: 30px;
+    block-size: 30px;
+    align-items: center;
+  }
+
+  [data-correo-host="true"] .correo-message-list {
+    grid-row: 3;
+    min-block-size: 0;
+    block-size: 100%;
+    overflow: auto;
+  }
+
+  [data-correo-host="true"] .correo-infinite-sentinel {
+    display: none;
+  }
+
+  [data-correo-host="true"] .correo-folders-panel {
+    padding-block-end: 8px;
+  }
+
+  [data-correo-host="true"] .correo-disconnect-btn {
+    margin-block-start: 6px;
+  }
+
+  [data-correo-host="true"] .correo-reader-scroll {
+    min-block-size: 0;
+  }
+}
+
+@media (min-width: 1280px) and (min-height: 620px) and (max-height: 760px) {
+  [data-correo-host="true"] .correo-search {
+    margin-block: 6px 4px;
+  }
+
+  [data-correo-host="true"] .correo-list-panel {
+    grid-template-rows: auto 36px minmax(0, 1fr);
+  }
+
+  [data-correo-host="true"] .correo-list-toolbar {
+    min-block-size: 36px;
+    block-size: 36px;
+    padding-block: 2px 4px;
+  }
+}
+
+@media (max-width: 700px) {
+  [data-correo-host="true"] .correo-list-toolbar {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  [data-correo-host="true"] .correo-list-toolbar .correo-filter-row {
+    flex-basis: 100%;
+  }
+
+  [data-correo-host="true"] .correo-list-toolbar .correo-list-utilities {
+    margin-inline-start: auto;
+  }
+}
+
+/* =========================================================
+   FINAL UI POLISH · 2026-08-19
+   Contrato final de densidad y altura dentro de la hoja canónica
+   de viewport. Ya no existe una tercera hoja correctora.
+========================================================= */
+
+/* Carpetas: densidad de cliente de escritorio real. */
+[data-correo-host="true"] .correo-folders-panel {
+  padding-inline: 7px;
+  padding-block-start: 8px;
+}
+
+[data-correo-host="true"] .correo-account-wrap {
+  margin-block-end: 5px;
+}
+
+[data-correo-host="true"] .correo-folder {
+  min-block-size: 36px;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 6px;
+  padding: 3px 7px;
+  border-radius: 4px;
+}
+
+[data-correo-host="true"] .correo-folder-icon svg {
+  inline-size: 16px;
+  block-size: 16px;
+}
+
+[data-correo-host="true"] .correo-folder-copy {
+  gap: 0;
+}
+
+[data-correo-host="true"] .correo-folder-copy strong {
+  font-size: 11.5px;
+  line-height: 1.2;
+}
+
+[data-correo-host="true"] .correo-folder-copy small {
+  display: none;
+}
+
+[data-correo-host="true"] .correo-folder-count {
+  min-inline-size: 22px;
+  padding: 1px 5px;
+  font-size: 9px;
+  line-height: 16px;
+}
+
+[data-correo-host="true"] .correo-disconnect-btn {
+  min-block-size: 37px;
+}
+
+/* Cuenta: el perfil no necesita check; la presencia verde ya identifica estado. */
+[data-correo-host="true"] .correo-account-menu-current {
+  grid-template-columns: 32px minmax(0, 1fr);
+}
+
+[data-correo-host="true"] .correo-account-menu-current > i {
+  display: none;
+}
+
+/* Estado de notificaciones: tercer slot explícito, vacío si está desactivado. */
+[data-correo-host="true"] .correo-account-menu [data-correo-action="notifications"] {
+  grid-template-columns: 22px minmax(0, 1fr) 18px;
+}
+
+[data-correo-host="true"] .correo-account-menu-check {
+  inline-size: 18px;
+  block-size: 18px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #686868;
+  border-radius: 4px;
+  color: transparent;
+  background: #242424;
+}
+
+[data-correo-host="true"] .correo-account-menu-check svg {
+  inline-size: 13px;
+  block-size: 13px;
+}
+
+[data-correo-host="true"] [data-correo-action="notifications"].is-enabled .correo-account-menu-check {
+  border-color: #6ccb5f;
+  background: rgba(108, 203, 95, .14);
+  color: #7bd56d;
+}
+
+/*
+  Buscador: index.css dejaba icono/kbd en position:absolute y viewport.css
+  convertía el contenedor a grid. El input terminaba auto-colocado en la
+  primera columna de 20px, que es la caja blanca diminuta vista en focus.
+  Aquí se resetean las dos geometrías y el focus vive en el control completo.
+*/
+[data-correo-host="true"] .correo-search {
+  min-block-size: 38px;
+  block-size: 38px;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  border: 1px solid #555;
+  border-radius: 5px;
+  background: #242424;
+  overflow: hidden;
+}
+
+[data-correo-host="true"] .correo-search:focus-within {
+  border-color: #479ef5;
+  box-shadow: inset 0 -2px 0 #479ef5, 0 0 0 1px rgba(71, 158, 245, .22);
+}
+
+[data-correo-host="true"] .correo-search-icon {
+  position: static;
+  inset: auto;
+  z-index: auto;
+  display: grid;
+  place-items: center;
+  color: #bdbdbd;
+}
+
+[data-correo-host="true"] .correo-search input {
+  grid-column: 2;
+  inline-size: 100%;
+  min-inline-size: 0;
+  block-size: 100%;
+  min-block-size: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  color: #fff;
+  box-shadow: none;
+  font-size: 11.5px;
+}
+
+[data-correo-host="true"] .correo-search input:focus,
+[data-correo-host="true"] .correo-search input:focus-visible {
+  outline: 0;
+  box-shadow: none;
+}
+
+[data-correo-host="true"] .correo-search input::-webkit-search-decoration,
+[data-correo-host="true"] .correo-search input::-webkit-search-cancel-button,
+[data-correo-host="true"] .correo-search input::-webkit-search-results-button,
+[data-correo-host="true"] .correo-search input::-webkit-search-results-decoration {
+  -webkit-appearance: none;
+}
+
+[data-correo-host="true"] .correo-search kbd {
+  position: static;
+  inset: auto;
+  grid-column: 3;
+  justify-self: end;
+  padding: 2px 5px;
+  border: 1px solid #4b4b4b;
+  border-radius: 4px;
+  background: #333;
+  color: #aaa;
+  font-size: 8px;
+  line-height: 1.2;
+}
+
+/* Skeletons: mismas medidas que el contenido real, shimmer discreto. */
+[data-correo-host="true"] .correo-workspace--boot .correo-boot-account,
+[data-correo-host="true"] .correo-workspace--boot .correo-boot-line,
+[data-correo-host="true"] .correo-workspace--boot .correo-boot-title,
+[data-correo-host="true"] .correo-message-skeleton > span,
+[data-correo-host="true"] .correo-message-skeleton i,
+[data-correo-host="true"] .correo-reader-skeleton-block {
+  background-image: linear-gradient(90deg, #303030 0%, #303030 28%, #3b3b3b 42%, #303030 58%, #303030 100%);
+  background-size: 280% 100%;
+  animation: correo-final-skeleton 1.35s ease-in-out infinite;
+}
+
+[data-correo-host="true"] .correo-workspace--boot .correo-boot-account {
+  block-size: 54px;
+  margin-block-end: 7px;
+}
+
+[data-correo-host="true"] .correo-workspace--boot .correo-boot-line {
+  block-size: 34px;
+  margin-block: 1px;
+}
+
+[data-correo-host="true"] .correo-workspace--boot .correo-boot-title {
+  inline-size: calc(100% - 20px);
+  block-size: 38px;
+  margin: 8px 10px 6px;
+  border-radius: 5px;
+}
+
+[data-correo-host="true"] .correo-message-skeleton {
+  min-block-size: 82px;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 11px;
+}
+
+[data-correo-host="true"] .correo-message-skeleton > span {
+  inline-size: 34px;
+  block-size: 34px;
+}
+
+[data-correo-host="true"] .correo-message-skeleton > div {
+  gap: 7px;
+}
+
+[data-correo-host="true"] .correo-message-skeleton i {
+  block-size: 7px;
+}
+
+[data-correo-host="true"] .correo-message-skeleton:nth-child(2n) > span,
+[data-correo-host="true"] .correo-message-skeleton:nth-child(2n) i,
+[data-correo-host="true"] .correo-workspace--boot .correo-boot-line:nth-child(2n) {
+  animation-delay: -0.32s;
+}
+
+[data-correo-host="true"] .correo-reader-loading {
+  gap: 9px;
+  color: #a9a9a9;
+  font-size: 11px;
+}
+
+@keyframes correo-final-skeleton {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+html[data-theme="light"] [data-correo-host="true"] .correo-search,
+body[data-theme="light"] [data-correo-host="true"] .correo-search {
+  background: #fff;
+  border-color: #b3b3b3;
+}
+
+html[data-theme="light"] [data-correo-host="true"] .correo-search input,
+body[data-theme="light"] [data-correo-host="true"] .correo-search input {
+  color: #242424;
+}
+
+html[data-theme="light"] [data-correo-host="true"] .correo-account-menu-check,
+body[data-theme="light"] [data-correo-host="true"] .correo-account-menu-check {
+  background: #fff;
+  border-color: #a9a9a9;
+}
+
+html[data-theme="light"] [data-correo-host="true"] .correo-workspace--boot .correo-boot-account,
+html[data-theme="light"] [data-correo-host="true"] .correo-workspace--boot .correo-boot-line,
+html[data-theme="light"] [data-correo-host="true"] .correo-workspace--boot .correo-boot-title,
+html[data-theme="light"] [data-correo-host="true"] .correo-message-skeleton > span,
+html[data-theme="light"] [data-correo-host="true"] .correo-message-skeleton i,
+body[data-theme="light"] [data-correo-host="true"] .correo-workspace--boot .correo-boot-account,
+body[data-theme="light"] [data-correo-host="true"] .correo-workspace--boot .correo-boot-line,
+body[data-theme="light"] [data-correo-host="true"] .correo-workspace--boot .correo-boot-title,
+body[data-theme="light"] [data-correo-host="true"] .correo-message-skeleton > span,
+body[data-theme="light"] [data-correo-host="true"] .correo-message-skeleton i {
+  background-image: linear-gradient(90deg, #e6e6e6 0%, #e6e6e6 28%, #f4f4f4 42%, #e6e6e6 58%, #e6e6e6 100%);
+}
+
+@media (max-height: 760px) and (min-width: 1280px) {
+  [data-correo-host="true"] .correo-folder {
+    min-block-size: 33px;
+  }
+
+  [data-correo-host="true"] .correo-account-card {
+    min-block-size: 50px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-correo-host="true"] .correo-workspace--boot .correo-boot-account,
+  [data-correo-host="true"] .correo-workspace--boot .correo-boot-line,
+  [data-correo-host="true"] .correo-workspace--boot .correo-boot-title,
+  [data-correo-host="true"] .correo-message-skeleton > span,
+  [data-correo-host="true"] .correo-message-skeleton i,
+  [data-correo-host="true"] .correo-reader-skeleton-block {
+    animation: none !important;
+  }
+}
+
+/* ---------- Canonical structural primitives ---------- */
+.correo-field { min-inline-size: 0; display: grid; }
+.correo-message-line { min-inline-size: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.correo-mini-empty { display: flex; align-items: center; gap: 8px; padding: 12px; color: var(--correo-text-3, #777); font-size: 9px; }
+
+/* ---------- Onion confirmation surface ---------- */
+.correo-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10030;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(0, 0, 0, .58);
+  backdrop-filter: blur(7px);
+}
+
+.correo-confirm-backdrop { position: absolute; inset: 0; }
+
+.correo-confirm-dialog {
+  position: relative;
+  z-index: 1;
+  inline-size: min(520px, 100%);
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 14px;
+  padding: 20px;
+  border: 1px solid var(--correo-border, #555);
+  border-radius: 8px;
+  outline: none;
+  background: var(--correo-panel, #292929);
+  color: var(--correo-text, #fff);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, .5);
+}
+
+.correo-confirm-dialog:focus-visible { box-shadow: 0 24px 80px rgba(0, 0, 0, .5), 0 0 0 2px var(--correo-blue, #479ef5); }
+.correo-confirm-icon { inline-size: 44px; block-size: 44px; display: grid; place-items: center; border: 1px solid var(--correo-border, #555); border-radius: 7px; background: var(--correo-panel-soft, #333); color: var(--correo-blue, #479ef5); }
+.correo-confirm-dialog.is-danger .correo-confirm-icon { border-color: color-mix(in srgb, var(--correo-red, #d13438) 65%, var(--correo-border, #555)); background: color-mix(in srgb, var(--correo-red, #d13438) 14%, var(--correo-panel-soft, #333)); color: var(--correo-red, #d13438); }
+.correo-confirm-icon svg { inline-size: 20px; block-size: 20px; }
+.correo-confirm-copy { min-inline-size: 0; display: grid; gap: 7px; }
+.correo-confirm-eyebrow { color: var(--correo-text-3, #aaa); font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.correo-confirm-dialog.is-danger .correo-confirm-eyebrow { color: color-mix(in srgb, var(--correo-red, #d13438) 78%, white 22%); }
+.correo-confirm-copy h3 { margin: 0; color: var(--correo-text, #fff); font-size: 18px; line-height: 1.2; font-weight: 650; }
+.correo-confirm-copy p { margin: 0; color: var(--correo-text-3, #aaa); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.correo-confirm-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; margin-block-start: 4px; }
+.correo-btn--danger { border-color: color-mix(in srgb, var(--correo-red, #d13438) 70%, #555); background: color-mix(in srgb, var(--correo-red, #d13438) 18%, #333); color: #fff; }
+.correo-btn--danger:hover:not(:disabled) { border-color: var(--correo-red, #d13438); background: color-mix(in srgb, var(--correo-red, #d13438) 32%, #333); }
+
+@media (max-width: 560px) {
+  .correo-confirm-dialog { grid-template-columns: 1fr; padding: 16px; }
+  .correo-confirm-actions { display: grid; grid-template-columns: 1fr; }
+  .correo-confirm-actions .correo-btn { inline-size: 100%; }
+}
+
+html[data-theme="light"] .correo-confirm-overlay,
+body[data-theme="light"] .correo-confirm-overlay { background: rgba(15, 23, 42, .36); }
+
+} /* @layer views */

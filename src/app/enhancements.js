@@ -17,7 +17,7 @@
 ========================================================= */
 
 export const APP_ENHANCEMENTS_VERSION =
-  "app.enhancements.v17-incidencias-live-media";
+  "app.enhancements.v18-incidencias-avatar-fallback";
 
 const PRE_ROUTER = Object.freeze([
   Object.freeze({
@@ -80,6 +80,11 @@ const POST_ROUTER = Object.freeze([
     key: "incidencias-technician-profile",
     scope: "incidencias",
     load: () => import("../features/incidencias-technician-profile/index.js"),
+  }),
+  Object.freeze({
+    key: "incidencias-avatar-fallback",
+    scope: "incidencias",
+    load: () => import("../features/incidencias-avatar-fallback/index.js"),
   }),
   Object.freeze({
     key: "public-support",

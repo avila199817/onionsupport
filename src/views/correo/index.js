@@ -40,6 +40,7 @@ const NOTIFICATION_POLL_MS = 60000;
 const MAX_NOTIFICATION_IDS = 80;
 const VIEW_CACHE_TTL_MS = 60_000;
 const SIGNATURE_STORAGE_PREFIX = "onion.correo.signature.v1";
+const MAILBOX_PREF_STORAGE_PREFIX = "onion.correo.mailbox.v1";
 const SIGNATURE_MAX_CHARS = 4000;
 
 function primeNotificationPreference() {
@@ -55,20 +56,44 @@ function primeNotificationPreference() {
 
 primeNotificationPreference();
 
-function signatureStorageKey(ownerKey = "") {
+function mailboxPreferenceKey(ownerKey = "") {
   const owner = cleanText(ownerKey, "anonymous").toLocaleLowerCase("es-ES");
-  return `${SIGNATURE_STORAGE_PREFIX}:${encodeURIComponent(owner)}`;
+  return `${MAILBOX_PREF_STORAGE_PREFIX}:${encodeURIComponent(owner)}`;
+}
+
+function readMailboxPreference(ownerKey = "") {
+  if (typeof window === "undefined") return "";
+  try { return cleanText(window.localStorage.getItem(mailboxPreferenceKey(ownerKey)), "").toLowerCase(); } catch { return ""; }
+}
+
+function writeMailboxPreference(ownerKey = "", mailbox = "") {
+  if (typeof window === "undefined") return false;
+  try {
+    const value = cleanText(mailbox, "").toLowerCase();
+    if (value) window.localStorage.setItem(mailboxPreferenceKey(ownerKey), value);
+    else window.localStorage.removeItem(mailboxPreferenceKey(ownerKey));
+    return true;
+  } catch { return false; }
+}
+
+function signatureStorageKey(ownerKey = "", mailbox = "", primaryMailbox = "") {
+  const owner = cleanText(ownerKey, "anonymous").toLocaleLowerCase("es-ES");
+  const base = `${SIGNATURE_STORAGE_PREFIX}:${encodeURIComponent(owner)}`;
+  const selected = cleanText(mailbox, "").toLowerCase();
+  const primary = cleanText(primaryMailbox, "").toLowerCase();
+  if (!selected || !primary || selected === primary) return base;
+  return `${base}:mailbox:${encodeURIComponent(selected)}`;
 }
 
 function normalizeSignatureText(value = "") {
   return String(value ?? "").replace(/\r\n?/g, "\n").slice(0, SIGNATURE_MAX_CHARS);
 }
 
-function readSignaturePreference(ownerKey = "") {
+function readSignaturePreference(ownerKey = "", mailbox = "", primaryMailbox = "") {
   const fallback = Object.freeze({ text: "", enabled: true });
   if (typeof window === "undefined") return fallback;
   try {
-    const raw = window.localStorage.getItem(signatureStorageKey(ownerKey));
+    const raw = window.localStorage.getItem(signatureStorageKey(ownerKey, mailbox, primaryMailbox));
     if (!raw) return fallback;
     const parsed = JSON.parse(raw);
     return Object.freeze({
@@ -80,14 +105,14 @@ function readSignaturePreference(ownerKey = "") {
   }
 }
 
-function writeSignaturePreference(ownerKey = "", preference = {}) {
+function writeSignaturePreference(ownerKey = "", mailbox = "", primaryMailbox = "", preference = {}) {
   if (typeof window === "undefined") return false;
   try {
     const value = {
       text: normalizeSignatureText(preference?.text || ""),
       enabled: preference?.enabled !== false,
     };
-    window.localStorage.setItem(signatureStorageKey(ownerKey), JSON.stringify(value));
+    window.localStorage.setItem(signatureStorageKey(ownerKey, mailbox, primaryMailbox), JSON.stringify(value));
     return true;
   } catch {
     return false;
@@ -103,6 +128,8 @@ function applySignature(body = "", preference = {}) {
 
 const VIEW_CACHE = {
   ownerKey: "",
+  activeMailbox: "",
+  mailboxes: [],
   status: null,
   statusKnown: false,
   folders: [],
@@ -228,6 +255,7 @@ function cloneCacheIntoState(state, ownerKey = "") {
   const valid = Boolean(
     ownerKey &&
     VIEW_CACHE.ownerKey === ownerKey &&
+    (!state.activeMailbox || !VIEW_CACHE.activeMailbox || VIEW_CACHE.activeMailbox === state.activeMailbox) &&
     VIEW_CACHE.statusKnown &&
     VIEW_CACHE.status &&
     age >= 0 &&
@@ -237,6 +265,8 @@ function cloneCacheIntoState(state, ownerKey = "") {
     if (VIEW_CACHE.cachedAt || VIEW_CACHE.ownerKey) clearViewCache();
     return;
   }
+  state.activeMailbox = VIEW_CACHE.activeMailbox || state.activeMailbox;
+  state.mailboxes = [...VIEW_CACHE.mailboxes];
   state.status = VIEW_CACHE.status;
   state.statusKnown = true;
   state.folders = [...VIEW_CACHE.folders];
@@ -256,6 +286,8 @@ function writeViewCache(state) {
   const ownerKey = cleanText(state?.accountUser?.cacheKey, "");
   if (!ownerKey) return;
   VIEW_CACHE.ownerKey = ownerKey;
+  VIEW_CACHE.activeMailbox = cleanText(state.activeMailbox, "").toLowerCase();
+  VIEW_CACHE.mailboxes = [...state.mailboxes];
   VIEW_CACHE.status = state.status;
   VIEW_CACHE.statusKnown = state.statusKnown === true;
   VIEW_CACHE.folders = [...state.folders];
@@ -273,6 +305,8 @@ function writeViewCache(state) {
 
 function clearViewCache() {
   VIEW_CACHE.ownerKey = "";
+  VIEW_CACHE.activeMailbox = "";
+  VIEW_CACHE.mailboxes = [];
   VIEW_CACHE.status = null;
   VIEW_CACHE.statusKnown = false;
   VIEW_CACHE.folders = [];
@@ -377,7 +411,7 @@ async function pollMailWatcher() {
   if (MAIL_WATCHER.polling || !notificationUiState().enabled || !MAIL_WATCHER.inboxFolderId) return;
   MAIL_WATCHER.polling = true;
   try {
-    const result = await CorreoApi.messages({ folder: MAIL_WATCHER.inboxFolderId, top: 12 });
+    const result = await CorreoApi.messages({ mailbox: MAIL_WATCHER.mailbox, folder: MAIL_WATCHER.inboxFolderId, top: 12 });
     const messages = result.messages || [];
     if (!MAIL_WATCHER.seeded) {
       rememberNotificationIds(messages);
@@ -449,10 +483,13 @@ function createCorreoController(host, context = {}) {
   let modalReturnFocus = null;
   let confirmResolver = null;
 
+  const initialAccountUser = readOnionUser();
   const state = {
-    status: Object.freeze({ connected: false, healthy: null, mailbox: "" }),
+    status: Object.freeze({ connected: false, healthy: null, mailbox: "", mailboxes: [] }),
     statusKnown: false,
-    accountUser: readOnionUser(),
+    accountUser: initialAccountUser,
+    mailboxes: [],
+    activeMailbox: readMailboxPreference(initialAccountUser.cacheKey),
     notifications: notificationUiState(),
     folders: [],
     messages: [],
@@ -474,7 +511,8 @@ function createCorreoController(host, context = {}) {
   cloneCacheIntoState(state, state.accountUser.cacheKey);
 
   function apiOptions(extra = {}) {
-    return { signal, ...extra };
+    const mailbox = cleanText(state.activeMailbox, "").toLowerCase();
+    return { signal, ...extra, ...(mailbox ? { mailbox } : {}) };
   }
 
   function notice(message = "", tone = "info") {
@@ -513,7 +551,7 @@ function createCorreoController(host, context = {}) {
     if (!target) return;
     state.accountUser = readOnionUser();
     state.notifications = notificationUiState();
-    target.innerHTML = renderConnectionCard(state.status, state.accountUser, state.notifications);
+    target.innerHTML = renderConnectionCard(state.status, state.accountUser, state.notifications, state.activeMailbox);
   }
 
   function syncNotificationHeader() {
@@ -647,6 +685,12 @@ function createCorreoController(host, context = {}) {
       const next = await CorreoApi.getStatus(apiOptions({ probe }));
       state.statusKnown = true;
       state.status = next;
+      state.mailboxes = [...(next.mailboxes || [])];
+      const primaryMailbox = cleanText(next.mailbox, "").toLowerCase();
+      const preferredMailbox = cleanText(state.activeMailbox || readMailboxPreference(state.accountUser.cacheKey), "").toLowerCase();
+      const allowedMailboxes = state.mailboxes.map((item) => cleanText(item.mailbox, "").toLowerCase()).filter(Boolean);
+      state.activeMailbox = allowedMailboxes.includes(preferredMailbox) ? preferredMailbox : primaryMailbox;
+      if (state.activeMailbox) writeMailboxPreference(state.accountUser.cacheKey, state.activeMailbox);
       state.loading = false;
 
       if (next.connected) {
@@ -679,7 +723,7 @@ function createCorreoController(host, context = {}) {
 
   async function loadWorkspace({ initial = false } = {}) {
     if (initial && !state.status.connected) return;
-    notice(`Sincronizando ${state.status.mailbox || "Microsoft 365"}…`);
+    notice(`Sincronizando ${state.activeMailbox || state.status.mailbox || "Microsoft 365"}…`);
     try {
       const [folders, profile] = await Promise.all([
         CorreoApi.folders(apiOptions()),
@@ -705,14 +749,27 @@ function createCorreoController(host, context = {}) {
       const inbox = findInbox(state.folders);
       configureMailWatcher({
         inboxFolderId: inbox?.id || "",
-        mailbox: state.status.mailbox || "",
+        mailbox: state.activeMailbox || state.status.mailbox || "",
         seedMessages: inbox?.id === state.selectedFolderId ? state.messages : [],
       });
-      notice(`Outlook conectado · ${state.status.mailbox || "Microsoft 365"}`, "success");
+      notice(`Outlook conectado · ${state.activeMailbox || state.status.mailbox || "Microsoft 365"}`, "success");
       writeViewCache(state);
     } catch (error) {
       if (signal.aborted) return;
       const code = errorCode(error);
+      const primaryMailbox = cleanText(state.status.mailbox, "").toLowerCase();
+      const sharedSelected = Boolean(state.activeMailbox && primaryMailbox && state.activeMailbox !== primaryMailbox);
+      if (code === "MICROSOFT_RECONNECT_REQUIRED" && sharedSelected) {
+        writeMailboxPreference(state.accountUser.cacheKey, state.activeMailbox);
+        toast("Microsoft necesita confirmar una vez los permisos del buzón compartido.", "info", 5000);
+        try {
+          const connection = await CorreoApi.connect({ signal });
+          window.location.assign(connection.authorizationUrl);
+        } catch (connectError) {
+          toast(errorMessage(connectError, "No se pudo renovar el permiso Microsoft."), "error", 6000);
+        }
+        return;
+      }
       if (/MICROSOFT_(NOT_CONNECTED|TOKEN|CACHE|ACCOUNT)/.test(code)) {
         state.statusKnown = true;
         state.status = Object.freeze({ ...state.status, connected: false, healthy: false });
@@ -908,7 +965,7 @@ function createCorreoController(host, context = {}) {
       };
     }
     if (mode !== "draft-edit") {
-      input = { ...input, body: applySignature(input.body || "", readSignaturePreference(state.accountUser.cacheKey)) };
+      input = { ...input, body: applySignature(input.body || "", readSignaturePreference(state.accountUser.cacheKey, state.activeMailbox, state.status.mailbox)) };
     }
     modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     modalRoot.innerHTML = renderComposeModal(input);
@@ -926,7 +983,7 @@ function createCorreoController(host, context = {}) {
     const modalRoot = host.querySelector("[data-correo-modal-root]");
     if (!modalRoot || confirmResolver || state.busyAction) return;
     closeAccountMenu();
-    const preference = readSignaturePreference(state.accountUser.cacheKey);
+    const preference = readSignaturePreference(state.accountUser.cacheKey, state.activeMailbox, state.status.mailbox);
     modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     modalRoot.innerHTML = renderSignatureModal(preference);
     document.documentElement.classList.add("correo-modal-open");
@@ -949,7 +1006,7 @@ function createCorreoController(host, context = {}) {
     const data = new FormData(form);
     const textValue = normalizeSignatureText(data.get("signature") || "");
     const enabled = data.get("enabled") === "1";
-    const saved = writeSignaturePreference(state.accountUser.cacheKey, { text: textValue, enabled });
+    const saved = writeSignaturePreference(state.accountUser.cacheKey, state.activeMailbox, state.status.mailbox, { text: textValue, enabled });
     if (!saved) {
       toast("No se pudo guardar la firma en este navegador.", "error");
       return;
@@ -1203,6 +1260,45 @@ function createCorreoController(host, context = {}) {
     await loadMessages({ openFirst: true });
   }
 
+
+  async function selectMailbox(button) {
+    const mailbox = cleanText(button?.dataset?.correoMailbox, "").toLowerCase();
+    if (!mailbox || mailbox === state.activeMailbox || state.busyAction) {
+      closeAccountMenu();
+      return;
+    }
+    const allowed = state.mailboxes.some((item) => cleanText(item?.mailbox, "").toLowerCase() === mailbox);
+    if (!allowed) {
+      toast("Ese buzón no está autorizado en Onion Correo.", "error");
+      return;
+    }
+
+    closeAccountMenu();
+    listSequence += 1;
+    readerSequence += 1;
+    listAbortController?.abort();
+    readerAbortController?.abort();
+    stopMailWatcher({ clear: true });
+
+    state.activeMailbox = mailbox;
+    writeMailboxPreference(state.accountUser.cacheKey, mailbox);
+    state.folders = [];
+    state.messages = [];
+    state.selectedFolderId = "";
+    state.selectedFolderName = "Bandeja de entrada";
+    state.selectedMessageId = "";
+    state.selectedMessage = null;
+    state.attachments = [];
+    state.searchTerm = "";
+    state.activeFilter = "all";
+    state.nextCursor = "";
+    state.loadingMessages = true;
+    state.loadingMore = false;
+    state.loadingReader = false;
+    renderAll();
+    await loadWorkspace({ initial: false });
+  }
+
   function toggleAccountMenu(button) {
     const wrap = button.closest("[data-correo-account-wrap]");
     const menu = wrap?.querySelector("[data-correo-account-menu]");
@@ -1228,7 +1324,7 @@ function createCorreoController(host, context = {}) {
     syncNotificationHeader();
     if (result.enabled) {
       const inbox = findInbox(state.folders);
-      configureMailWatcher({ inboxFolderId: inbox?.id || "", mailbox: state.status.mailbox || "", seedMessages: inbox?.id === state.selectedFolderId ? state.messages : [] });
+      configureMailWatcher({ inboxFolderId: inbox?.id || "", mailbox: state.activeMailbox || state.status.mailbox || "", seedMessages: inbox?.id === state.selectedFolderId ? state.messages : [] });
       toast("Notificaciones de correo activadas.", "success");
     } else if (result.reason === "unsupported") {
       toast("Este navegador no admite notificaciones de escritorio.", "error");
@@ -1265,6 +1361,7 @@ function createCorreoController(host, context = {}) {
     if (action === "send-open-draft") return sendOpenDraft();
     if (action === "edit-draft") return openCompose("draft-edit");
     if (action === "account-menu") return toggleAccountMenu(target);
+    if (action === "mailbox") return selectMailbox(target);
     if (action === "notifications") return toggleNotifications();
     if (action === "signature") return openSignatureSettings();
     if (action === "save-draft") {
@@ -1497,6 +1594,8 @@ function createCorreoController(host, context = {}) {
         connected: state.status.connected === true,
         healthy: state.status.healthy,
         mailbox: state.status.mailbox || "",
+        activeMailbox: state.activeMailbox || state.status.mailbox || "",
+        mailboxCount: state.mailboxes.length,
         folders: state.folders.length,
         messages: state.messages.length,
         selectedFolderId: state.selectedFolderId,
@@ -1504,7 +1603,7 @@ function createCorreoController(host, context = {}) {
         searchTerm: state.searchTerm,
         activeFilter: state.activeFilter,
         notifications: notificationUiState().enabled,
-        signatureConfigured: Boolean(readSignaturePreference(state.accountUser.cacheKey).text.trim()),
+        signatureConfigured: Boolean(readSignaturePreference(state.accountUser.cacheKey, state.activeMailbox, state.status.mailbox).text.trim()),
         cacheIsolated: true,
         cacheTtlMs: VIEW_CACHE_TTL_MS,
         routeCommitNonBlocking: true,

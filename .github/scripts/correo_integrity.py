@@ -23,6 +23,8 @@ for required in (
     'compositionstart', 'compositionend', 'searchComposing',
     'focusableElements', 'trapModalFocus', 'confirmAction', 'renderConfirmModal',
     'CorreoApi.updateDraft(', 'draft-edit', 'routeCommitNonBlocking: true',
+    'MAILBOX_PREF_STORAGE_PREFIX', 'activeMailbox', 'selectMailbox',
+    'readMailboxPreference', 'writeMailboxPreference', 'MAIL_WATCHER.mailbox',
 ):
     if required not in index:
         errors.append(f"falta contrato de controlador: {required}")
@@ -30,13 +32,14 @@ for required in (
     'data-correo-action="edit-draft"', 'data-correo-action="confirm-accept"',
     'data-correo-action="confirm-cancel"', 'role="alertdialog"',
     'Los adjuntos existentes se conservan',
+    'data-correo-action="mailbox"', 'correo-account-menu-mailboxes',
 ):
     if required not in template:
         errors.append(f"falta contrato de template: {required}")
-for required in ('export async function updateDraft(', 'updateDraft,'):
+for required in ('export async function updateDraft(', 'updateDraft,', 'withMailboxQuery', 'mailboxEndpoint', 'mailboxes: Object.freeze'):
     if required not in api:
         errors.append(f"API de borrador incompleta: {required}")
-for required in ('.correo-confirm-overlay', '.correo-confirm-backdrop', '.correo-confirm-dialog', '.correo-btn--danger', '.correo-field', '.correo-message-line'):
+for required in ('.correo-confirm-overlay', '.correo-confirm-backdrop', '.correo-confirm-dialog', '.correo-btn--danger', '.correo-field', '.correo-message-line', '.correo-account-menu-mailboxes', '.correo-mailbox-option'):
     if required not in css:
         errors.append(f"falta CSS canónico de Correo: {required}")
 if css.count('@layer views {') != 1:
@@ -69,4 +72,4 @@ if errors:
     for error in errors:
         print(f"- {error}")
     sys.exit(1)
-print("Correo integrity OK · canonical CSS · fixed boot geometry · polished compose CTA · account-scoped signature · abortable IO · accessible modals")
+print("Correo integrity OK · canonical CSS · shared mailbox selector · mailbox-scoped signature · fixed boot geometry · abortable IO · accessible modals")

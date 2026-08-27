@@ -10,7 +10,7 @@
    - Estado de notificaciones explícito; sin check redundante en perfil.
 ========================================================= */
 
-export const CORREO_TEMPLATE_VERSION = "correo.template.microsoft.production.v7-extreme-canonical";
+export const CORREO_TEMPLATE_VERSION = "correo.template.microsoft.production.v8-shared-mailbox";
 
 const SVG = `aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"`;
 
@@ -255,24 +255,73 @@ function renderAccountAvatar(account = {}) {
   return `<span class="correo-account-avatar-fallback" aria-hidden="true">${escapeHtml(account.initials || initials(label))}</span>`;
 }
 
-export function renderConnectionCard(status = {}, account = {}, notifications = {}) {
+
+function normalizeMailboxEntries(status = {}) {
+  const primary = cleanText(status.mailbox, "").toLowerCase();
+  const entries = Array.isArray(status.mailboxes) ? status.mailboxes : [];
+  const normalized = entries.map((item) => ({
+    mailbox: cleanText(item?.mailbox, "").toLowerCase(),
+    displayName: cleanText(item?.displayName, cleanText(item?.mailbox, "Buzón")),
+    type: cleanText(item?.type, "primary").toLowerCase() === "shared" ? "shared" : "primary",
+  })).filter((item) => item.mailbox);
+  if (primary && !normalized.some((item) => item.mailbox === primary)) {
+    normalized.unshift({ mailbox: primary, displayName: cleanText(status.displayName, primary), type: "primary" });
+  }
+  return normalized;
+}
+
+function renderMailboxAvatar(mailbox = {}, account = {}, primaryMailbox = "") {
+  const isPrimary = mailbox.type !== "shared" && mailbox.mailbox === primaryMailbox;
+  if (isPrimary) return renderAccountAvatar(account);
+  return `<span class="correo-mailbox-avatar-fallback" aria-hidden="true">${escapeHtml(initials(mailbox.displayName || mailbox.mailbox))}</span>`;
+}
+
+function renderMailboxOptions(status = {}, account = {}, activeMailbox = "") {
+  const entries = normalizeMailboxEntries(status);
+  if (entries.length < 2) return "";
+  const primaryMailbox = cleanText(status.mailbox, "").toLowerCase();
+  return `
+    <div class="correo-account-menu-mailboxes" role="group" aria-label="Buzones disponibles">
+      <span class="correo-account-menu-section-label">Buzones</span>
+      ${entries.map((mailbox) => {
+        const selected = mailbox.mailbox === activeMailbox;
+        return `<button class="correo-mailbox-option${selected ? " is-selected" : ""}" type="button" role="menuitemradio" aria-checked="${selected ? "true" : "false"}" data-correo-action="mailbox" data-correo-mailbox="${attr(mailbox.mailbox)}">
+          <span class="correo-mailbox-option-avatar">${renderMailboxAvatar(mailbox, account, primaryMailbox)}</span>
+          <span><strong>${escapeHtml(mailbox.displayName)}</strong><small>${escapeHtml(mailbox.mailbox)}</small></span>
+          <i class="correo-mailbox-option-check" aria-hidden="true">${selected ? icon("check") : ""}</i>
+        </button>`;
+      }).join("")}
+    </div>`;
+}
+
+export function renderConnectionCard(status = {}, account = {}, notifications = {}, activeMailbox = "") {
   const connected = status.connected === true;
   const healthy = status.healthy !== false;
-  const label = cleanText(status.displayName || account.displayName, connected ? "Microsoft 365" : "Microsoft Outlook");
-  const mailbox = cleanText(status.mailbox, "Microsoft 365");
+  const primaryMailbox = cleanText(status.mailbox, "").toLowerCase();
+  const mailboxes = normalizeMailboxEntries(status);
+  const selectedMailbox = mailboxes.find((item) => item.mailbox === cleanText(activeMailbox, "").toLowerCase())
+    || mailboxes.find((item) => item.mailbox === primaryMailbox)
+    || { mailbox: primaryMailbox || "Microsoft 365", displayName: status.displayName || account.displayName || "Microsoft 365", type: "primary" };
+  const mailbox = cleanText(selectedMailbox.mailbox, primaryMailbox || "Microsoft 365");
+  const shared = selectedMailbox.type === "shared";
+  const label = shared
+    ? cleanText(selectedMailbox.displayName, "Soporte")
+    : cleanText(status.displayName || account.displayName, connected ? "Microsoft 365" : "Microsoft Outlook");
+  const activeAvatar = shared ? renderMailboxAvatar(selectedMailbox, account, primaryMailbox) : renderAccountAvatar(account);
   const notificationEnabled = notifications.enabled === true;
   const notificationSupported = notifications.supported !== false;
 
   return `
     <div class="correo-account-wrap${connected ? " is-connected" : ""}" data-correo-account-wrap>
       <button class="correo-account-card" type="button" data-correo-action="account-menu" aria-haspopup="menu" aria-expanded="false">
-        <span class="correo-account-avatar">${renderAccountAvatar(account)}</span>
+        <span class="correo-account-avatar${shared ? " is-shared" : ""}">${activeAvatar}</span>
         <span class="correo-account-copy"><strong>${escapeHtml(label)}</strong><span>${escapeHtml(mailbox)}</span></span>
         <span class="correo-account-state${connected && healthy ? " is-online" : ""}" title="${connected && healthy ? "Conectado" : "Sin conexión"}"></span>
         <span class="correo-account-chevron">${icon("chevronDown")}</span>
       </button>
       <div class="correo-account-menu" data-correo-account-menu role="menu" hidden>
-        <div class="correo-account-menu-current"><span>${renderAccountAvatar(account)}</span><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(mailbox)}</small></div></div>
+        <div class="correo-account-menu-current"><span>${activeAvatar}</span><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(mailbox)}</small></div></div>
+        ${renderMailboxOptions(status, account, mailbox)}
         <button class="correo-account-menu-notifications${notificationEnabled ? " is-enabled" : ""}" type="button" role="menuitemcheckbox" aria-checked="${notificationEnabled ? "true" : "false"}" data-correo-action="notifications">${icon("bell")}<span><strong>${notificationEnabled ? "Notificaciones activadas" : "Activar notificaciones"}</strong><small>${notificationSupported ? "Avisos del navegador cuando llegue correo" : "Este navegador no admite notificaciones"}</small></span><i class="correo-account-menu-check" aria-hidden="true">${notificationEnabled ? icon("check") : ""}</i></button>
         <button class="correo-account-menu-signature" type="button" role="menuitem" data-correo-action="signature">${icon("edit")}<span><strong>Firma de correo</strong><small>Configura la firma que Onion añade al redactar</small></span></button>
       </div>

@@ -50,12 +50,14 @@
    APP CHROME GLOBAL
 
    Sidebar/Topbar pintan sus componentes internos.
+   sidebar.executive.css remata únicamente el interior visual del Sidebar.
    chrome.css se carga el último dentro de layer(layout) y es la ÚNICA
    autoridad geométrica: offsets, mounts, drawer, backdrop y transición
    desktop/mobile. chrome.css NO puede autodeclarar otro @layer interno.
 ========================================================= */
 
 @import url("./layout/sidebar.css") layer(layout);
+@import url("./layout/sidebar.executive.css") layer(layout);
 @import url("./layout/topbar.css") layer(layout);
 @import url("./layout/chrome.css") layer(layout);
 

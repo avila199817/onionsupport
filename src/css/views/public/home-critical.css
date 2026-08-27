@@ -1,0 +1,29 @@
+/* =========================================================
+   ONION SUPPORT — PUBLIC HOME CRITICAL PAINT
+
+   Objetivo:
+   - Mantener fuera del camino de LCP las animaciones decorativas del hero.
+   - Conservar los reveal progresivos del contenido bajo el primer viewport.
+   - No alterar geometría, contenido, accesibilidad ni diseño final.
+
+   Esta hoja se carga exclusivamente en pathname `/` desde preboot.
+   Es intencionadamente unlayered: debe ganar a las reglas @layer auth de la
+   vista sin !important y sin modificar el orden global de cascade layers.
+========================================================= */
+
+/* El documento completo no debe nacer casi transparente durante cold boot. */
+.public-home.is-mounted {
+  animation: none;
+}
+
+/*
+   El hero es contenido crítico/LCP: título, copy, CTAs y visual deben ser
+   visibles en el primer paint. Las animaciones siguen activas bajo el hero.
+*/
+.public-home .public-home-hero [data-public-home-reveal],
+.public-home .public-home-hero [data-reveal] {
+  opacity: 1;
+  transform: none;
+  transition: none;
+  transition-delay: 0s;
+}

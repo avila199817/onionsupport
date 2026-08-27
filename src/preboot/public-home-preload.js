@@ -13,6 +13,11 @@
     if (!head) return;
 
     const hints = [
+      {
+        rel: "stylesheet",
+        href: "/src/css/views/public/home-critical.css",
+        fetchPriority: "high",
+      },
       { rel: "preload", as: "style", href: "/src/css/views/public/index.css" },
       { rel: "preload", as: "style", href: "/src/css/views/public/support-request.css" },
       { rel: "preload", as: "style", href: "/src/css/views/public/public-support-progress.css" },

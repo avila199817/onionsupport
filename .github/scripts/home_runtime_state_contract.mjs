@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 
 const path = "src/views/home/home.api.js";
 const source = await readFile(path, "utf8");
+const facturasBoundaryPath = "src/views/facturas/facturas.api.js";
+const facturasBoundarySource = await readFile(facturasBoundaryPath, "utf8");
 
 function functionBody(name) {
   const marker = `function ${name}(`;
@@ -117,6 +119,22 @@ assert.equal(
   "Home admin cliente count must use the exact /api/clientes/stats endpoint, never a one-item cursor page"
 );
 
+assert.equal(
+  source.includes('import FacturasApi from "../facturas/facturas.api.js";'),
+  true,
+  "Home must keep the historical FacturasApi namespace contract"
+);
+assert.match(
+  facturasBoundarySource,
+  /export\s+default\s+FacturasApi\s*;/,
+  "Facturas integration boundary must export a default API namespace for Home lazy loading"
+);
+assert.match(
+  facturasBoundarySource,
+  /\.\.\.Base/,
+  "Facturas default API namespace must preserve the historical base surface"
+);
+
 console.log(
-  "Home runtime-state contract OK · exact cliente stats count · one operation-local Core read, no public snapshots, isolated retained user"
+  "Home runtime-state contract OK · Facturas default boundary · exact cliente stats count · one operation-local Core read, no public snapshots, isolated retained user"
 );

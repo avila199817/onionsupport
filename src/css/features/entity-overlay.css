@@ -1,0 +1,271 @@
+/* =========================================================
+   Onion Support - Global Entity Overlay
+========================================================= */
+
+:root {
+  --entity-overlay-z: 4200;
+  --entity-overlay-backdrop: rgba(5, 7, 10, 0.72);
+  --entity-overlay-surface: var(--surface-1, #171717);
+  --entity-overlay-surface-2: var(--surface-2, #222);
+  --entity-overlay-border: var(--border-subtle, rgba(255, 255, 255, 0.12));
+  --entity-overlay-text: var(--text-primary, #f7f7f7);
+  --entity-overlay-muted: var(--text-secondary, #a8a8a8);
+  --entity-overlay-radius: 22px;
+}
+
+body.entity-overlay-open {
+  overflow: hidden !important;
+  overscroll-behavior: contain;
+}
+
+.entity-overlay-root[hidden],
+.entity-overlay-root:empty {
+  display: none !important;
+}
+
+.entity-overlay-root:not([hidden]) {
+  position: fixed;
+  inset: 0;
+  z-index: var(--entity-overlay-z);
+  isolation: isolate;
+  pointer-events: auto;
+}
+
+.entity-overlay-root > * {
+  position: relative;
+  z-index: 1;
+}
+
+.entity-overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: clamp(12px, 2vw, 28px);
+  background: var(--entity-overlay-backdrop);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  overflow: auto;
+}
+
+.entity-overlay-loading-panel,
+.entity-overlay-generic-panel {
+  width: min(720px, 100%);
+  max-height: min(880px, calc(100dvh - 24px));
+  color: var(--entity-overlay-text);
+  background: var(--entity-overlay-surface);
+  border: 1px solid var(--entity-overlay-border);
+  border-radius: var(--entity-overlay-radius);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.46);
+  overflow: hidden;
+}
+
+.entity-overlay-loading-panel {
+  min-height: 210px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  padding: 32px;
+  text-align: center;
+}
+
+.entity-overlay-loading-panel > span:last-child,
+.entity-overlay-muted {
+  color: var(--entity-overlay-muted);
+}
+
+.entity-overlay-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-top-color: currentColor;
+  border-radius: 999px;
+  animation: entity-overlay-spin 0.85s linear infinite;
+}
+
+.entity-overlay-generic-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 24px 24px 18px;
+  border-bottom: 1px solid var(--entity-overlay-border);
+}
+
+.entity-overlay-generic-header h2 {
+  margin: 4px 0 0;
+  font-size: clamp(1.3rem, 2.4vw, 1.9rem);
+  line-height: 1.08;
+}
+
+.entity-overlay-eyebrow {
+  display: inline-block;
+  color: var(--entity-overlay-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.entity-overlay-close,
+.entity-overlay-stack-back {
+  appearance: none;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  color: inherit;
+  background: color-mix(in srgb, var(--entity-overlay-surface-2) 88%, transparent);
+  border: 1px solid var(--entity-overlay-border);
+  border-radius: 12px;
+  font: inherit;
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.entity-overlay-close:hover,
+.entity-overlay-stack-back:hover,
+.entity-overlay-close:focus-visible,
+.entity-overlay-stack-back:focus-visible {
+  background: color-mix(in srgb, currentColor 11%, var(--entity-overlay-surface-2));
+  outline: none;
+}
+
+.entity-overlay-stack-back {
+  position: absolute;
+  z-index: 12;
+  inset-block-start: 14px;
+  inset-inline-start: 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+}
+
+.entity-overlay-generic-body {
+  padding: 22px 24px 26px;
+  overflow: auto;
+}
+
+.entity-overlay-generic-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+}
+
+.entity-overlay-generic-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.36fr) minmax(0, 1fr);
+  gap: 20px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--entity-overlay-border);
+}
+
+.entity-overlay-generic-row:last-child {
+  border-bottom: 0;
+}
+
+.entity-overlay-generic-row dt {
+  color: var(--entity-overlay-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.entity-overlay-generic-row dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.entity-overlay-feedback {
+  position: relative;
+  z-index: 15;
+  margin: 14px 16px 0;
+  padding: 11px 13px;
+  border: 1px solid var(--entity-overlay-border);
+  border-radius: 12px;
+  background: var(--entity-overlay-surface-2);
+  color: var(--entity-overlay-text);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.entity-overlay-feedback--success {
+  border-color: rgba(34, 197, 94, 0.42);
+  background: rgba(34, 197, 94, 0.12);
+}
+
+.entity-overlay-feedback--warning {
+  border-color: rgba(245, 158, 11, 0.45);
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.entity-overlay-feedback--error,
+.entity-overlay-error {
+  border-color: rgba(239, 68, 68, 0.45);
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.entity-overlay-error {
+  padding: 12px 14px;
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  border-radius: 12px;
+}
+
+.entity-overlay-root [data-entity-overlay-disabled="true"] {
+  opacity: 0.46;
+  cursor: not-allowed;
+}
+
+.entity-overlay-root [data-entity-overlay-panel="true"] {
+  max-height: calc(100dvh - 24px);
+}
+
+@keyframes entity-overlay-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 720px) {
+  .entity-overlay-backdrop {
+    place-items: end center;
+    padding: 8px;
+  }
+
+  .entity-overlay-loading-panel,
+  .entity-overlay-generic-panel {
+    width: 100%;
+    max-height: calc(100dvh - 8px);
+    border-radius: 20px 20px 12px 12px;
+  }
+
+  .entity-overlay-generic-header {
+    padding: 20px 18px 15px;
+  }
+
+  .entity-overlay-generic-body {
+    padding: 18px;
+  }
+
+  .entity-overlay-generic-row {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .entity-overlay-spinner {
+    animation-duration: 1.8s;
+  }
+}
+
+@media (forced-colors: active) {
+  .entity-overlay-backdrop,
+  .entity-overlay-loading-panel,
+  .entity-overlay-generic-panel,
+  .entity-overlay-feedback {
+    forced-color-adjust: auto;
+  }
+}

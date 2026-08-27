@@ -105,11 +105,22 @@ def validate_runtime_boundaries(errors: list[str], runtime: dict[str, str]) -> N
         "app/loader.js debe exponer sólo hideLoader como cierre canónico",
     )
 
+    deeplink_is_legacy_scoped = (
+        "observer.observe(root" in deeplink
+        and "observer.observe(document.documentElement" not in deeplink
+    )
+    deeplink_is_global_intent = (
+        'strategy: "global-entity-intent"' in deeplink
+        and 'url.searchParams.set("entity", ENTITY_TYPE)' in deeplink
+        and 'url.searchParams.set("entityId", ticketId)' in deeplink
+        and ".click()" not in deeplink
+        and "MutationObserver" not in deeplink
+        and "observer.observe(" not in deeplink
+    )
     require(
         errors,
-        "observer.observe(root" in deeplink
-        and "observer.observe(document.documentElement" not in deeplink,
-        "ticket-deeplink debe observar sólo el Router view",
+        deeplink_is_legacy_scoped or deeplink_is_global_intent,
+        "ticket-deeplink debe limitarse al Router view o expresar sólo una intención global de entidad",
     )
 
     require(

@@ -431,7 +431,11 @@ def validate_ui_system_v4_contract(errors: list[str]) -> None:
     app_text = (SRC / "css" / "app.css").read_text(encoding="utf-8")
     index_text = (ROOT / "index.html").read_text(encoding="utf-8")
     route_styles_text = (SRC / "router" / "styles.js").read_text(encoding="utf-8")
-    correo_viewport_text = (SRC / "css" / "views" / "correo" / "viewport.css").read_text(encoding="utf-8")
+    correo_index_path = SRC / "css" / "views" / "correo" / "index.css"
+    correo_viewport_path = SRC / "css" / "views" / "correo" / "viewport.css"
+    correo_index_text = correo_index_path.read_text(encoding="utf-8")
+    correo_viewport_text = correo_viewport_path.read_text(encoding="utf-8") if correo_viewport_path.exists() else ""
+    correo_single_authority = not correo_viewport_path.exists()
     sidebar_text = (SRC / "css" / "layout" / "sidebar.css").read_text(encoding="utf-8")
 
     dead_paths = (
@@ -456,18 +460,27 @@ def validate_ui_system_v4_contract(errors: list[str]) -> None:
     if '/src/features/mobile-shell/index.js' in index_text:
         errors.append("index.html :: bridge mobile-shell prohibido")
 
-    for snippet in (
-        'correo: Object.freeze([',
-        '"/src/css/views/correo/index.css"',
-        '"/src/css/views/correo/viewport.css"',
-    ):
-        if snippet not in route_styles_text:
-            errors.append(f"src/router/styles.js :: falta contrato CSS de Correo: {snippet}")
+    if correo_single_authority:
+        if route_styles_text.count('/src/css/views/correo/') != 1 or '"/src/css/views/correo/index.css"' not in route_styles_text:
+            errors.append("src/router/styles.js :: Correo canónico debe cargar exactamente index.css")
+        correo_authority_text = correo_index_text
+        correo_authority_label = "src/css/views/correo/index.css"
+    else:
+        for snippet in (
+            'correo: Object.freeze([',
+            '"/src/css/views/correo/index.css"',
+            '"/src/css/views/correo/viewport.css"',
+        ):
+            if snippet not in route_styles_text:
+                errors.append(f"src/router/styles.js :: falta contrato CSS de Correo legacy: {snippet}")
+        correo_authority_text = correo_viewport_text
+        correo_authority_label = "src/css/views/correo/viewport.css"
+
     if "correo/fullheight.css" in route_styles_text:
         errors.append("src/router/styles.js :: Correo no puede recuperar fullheight.css")
 
-    if "CONSOLIDATED HEIGHT / DENSITY CONTRACT" not in correo_viewport_text:
-        errors.append("src/css/views/correo/viewport.css :: falta contrato consolidado de viewport")
+    if "CONSOLIDATED HEIGHT / DENSITY CONTRACT" not in correo_authority_text:
+        errors.append(f"{correo_authority_label} :: falta contrato consolidado de viewport")
     if 'data-sidebar-key="correo"' not in sidebar_text:
         errors.append("src/css/layout/sidebar.css :: falta icono integrado de Correo")
 
@@ -475,16 +488,18 @@ def validate_ui_system_v4_contract(errors: list[str]) -> None:
 def validate_correo_cascade_v5_contract(errors: list[str]) -> None:
     """Keep Correo on normal cascade; reserve !important for accessibility/print escape hatches."""
     viewport_path = SRC / "css" / "views" / "correo" / "viewport.css"
-    viewport_text = viewport_path.read_text(encoding="utf-8")
-    important_count = viewport_text.count("!important")
+    index_path = SRC / "css" / "views" / "correo" / "index.css"
+    active_path = viewport_path if viewport_path.exists() else index_path
+    active_text = active_path.read_text(encoding="utf-8")
+    important_count = active_text.count("!important")
 
     if important_count > 16:
         errors.append(
-            f"src/css/views/correo/viewport.css :: demasiados !important tras V5: {important_count} > 16"
+            f"{active_path.relative_to(ROOT)} :: demasiados !important tras V5: {important_count} > 16"
         )
 
-    if "CONSOLIDATED HEIGHT / DENSITY CONTRACT" not in viewport_text:
-        errors.append("src/css/views/correo/viewport.css :: falta contrato consolidado de altura/densidad")
+    if "CONSOLIDATED HEIGHT / DENSITY CONTRACT" not in active_text:
+        errors.append(f"{active_path.relative_to(ROOT)} :: falta contrato consolidado de altura/densidad")
 
 
 def validate_detail_modal_v6_contract(errors: list[str]) -> None:

@@ -1,0 +1,83 @@
+name: TEMP Wire hero WebP
+
+on:
+  push:
+    branches:
+      - perf/public-home-image-lcp
+
+permissions:
+  contents: write
+
+jobs:
+  wire:
+    if: ${{ !contains(github.event.head_commit.message, '[wired-webp]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: perf/public-home-image-lcp
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Wire responsive hero assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          template_path = Path('src/views/public/home/template.js')
+          template = template_path.read_text(encoding='utf-8')
+
+          old = 'const CRISTIAN_PROFILE_PHOTO = "src/media/img/Cristian_Avila.png";\n'
+          new = '''const CRISTIAN_PROFILE_PHOTO = "src/media/img/Cristian_Avila.png";\nconst CRISTIAN_PROFILE_PHOTO_WEBP_480 = "src/media/img/Cristian_Avila_480.webp";\nconst CRISTIAN_PROFILE_PHOTO_WEBP_960 = "src/media/img/Cristian_Avila_960.webp";\n'''
+          if template.count(old) != 1:
+              raise SystemExit('No se encontró exactamente una constante de foto original')
+          template = template.replace(old, new, 1)
+
+          old = '''function renderHeroVisual() {\n  const profilePhoto = safeAssetSrc(BUSINESS.profilePhoto, BUSINESS.profilePhoto);\n\n  return `\n'''
+          new = '''function renderHeroVisual() {\n  const profilePhoto = safeAssetSrc(BUSINESS.profilePhoto, BUSINESS.profilePhoto);\n  const profilePhotoWebp480 = safeAssetSrc(\n    CRISTIAN_PROFILE_PHOTO_WEBP_480,\n    CRISTIAN_PROFILE_PHOTO_WEBP_480\n  );\n  const profilePhotoWebp960 = safeAssetSrc(\n    CRISTIAN_PROFILE_PHOTO_WEBP_960,\n    CRISTIAN_PROFILE_PHOTO_WEBP_960\n  );\n  const profilePhotoWebpSrcset = `${profilePhotoWebp480} 480w, ${profilePhotoWebp960} 960w`;\n  const profilePhotoSizes = "(max-width: 760px) 44vw, 196px";\n\n  return `\n'''
+          if template.count(old) != 1:
+              raise SystemExit('No se encontró exactamente un renderHeroVisual canónico')
+          template = template.replace(old, new, 1)
+
+          old = '''          <div class="public-home-command-portrait">\n            <img class="public-home-command-photo" src="${escapeAttr(profilePhoto)}" alt="${escapeAttr(BUSINESS.ownerName)} - ${escapeAttr(BUSINESS.name)}" width="520" height="680" loading="eager" decoding="async" draggable="false">\n          </div>\n'''
+          new = '''          <div class="public-home-command-portrait">\n            <picture class="public-home-command-picture">\n              <source type="image/webp" srcset="${escapeAttr(profilePhotoWebpSrcset)}" sizes="${escapeAttr(profilePhotoSizes)}">\n              <img class="public-home-command-photo" src="${escapeAttr(profilePhoto)}" alt="${escapeAttr(BUSINESS.ownerName)} - ${escapeAttr(BUSINESS.name)}" width="480" height="600" loading="eager" decoding="async" fetchpriority="high" draggable="false">\n            </picture>\n          </div>\n'''
+          if template.count(old) != 1:
+              raise SystemExit('No se encontró exactamente la imagen hero canónica')
+          template = template.replace(old, new, 1)
+          template_path.write_text(template, encoding='utf-8')
+
+          preload_path = Path('src/preboot/public-home-preload.js')
+          preload = preload_path.read_text(encoding='utf-8')
+          old = '''      {\n        rel: "preload",\n        as: "image",\n        href: "/src/media/img/Cristian_Avila.png",\n        fetchPriority: "high",\n      },\n'''
+          new = '''      {\n        rel: "preload",\n        as: "image",\n        href: "/src/media/img/Cristian_Avila_480.webp",\n        type: "image/webp",\n        imageSrcset: "/src/media/img/Cristian_Avila_480.webp 480w, /src/media/img/Cristian_Avila_960.webp 960w",\n        imageSizes: "(max-width: 760px) 44vw, 196px",\n        fetchPriority: "high",\n      },\n'''
+          if preload.count(old) != 1:
+              raise SystemExit('No se encontró exactamente el preload PNG canónico')
+          preload = preload.replace(old, new, 1)
+
+          old = '''      if (hint.as) link.as = hint.as;\n      if (hint.fetchPriority) {\n'''
+          new = '''      if (hint.as) link.as = hint.as;\n      if (hint.type) link.type = hint.type;\n      if (hint.imageSrcset) link.setAttribute("imagesrcset", hint.imageSrcset);\n      if (hint.imageSizes) link.setAttribute("imagesizes", hint.imageSizes);\n      if (hint.fetchPriority) {\n'''
+          if preload.count(old) != 1:
+              raise SystemExit('No se encontró exactamente el builder de preload canónico')
+          preload = preload.replace(old, new, 1)
+          preload_path.write_text(preload, encoding='utf-8')
+          PY
+
+          git diff --check
+          git diff -- src/views/public/home/template.js src/preboot/public-home-preload.js
+
+      - name: Commit wired assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Onion Support CI"
+          git config user.email "cristian@onionsupport.com"
+          git add src/views/public/home/template.js src/preboot/public-home-preload.js
+          if git diff --cached --quiet; then
+            echo "No wiring changes"
+            exit 0
+          fi
+          git commit -m "perf: servir hero WebP responsive y prioritario [wired-webp]"
+          git push origin HEAD:perf/public-home-image-lcp

@@ -2,10 +2,11 @@
 """Static and production contract for Onion Support Google measurement.
 
 The contract deliberately locks the Google Analytics destination, Google Ads
-destination and WhatsApp conversion destination that are configured in the
-Google Ads account. It also proves that the shared bootstrap is loaded by every
-public marketing surface and can optionally compare the deployed bootstrap with
-exact bytes from the expected revision.
+destination, public-contact conversion destination and WhatsApp conversion
+destination that are configured in the Google Ads account. It also proves that
+the shared bootstrap is loaded by every public marketing surface and can
+optionally compare the deployed bootstrap with exact bytes from the expected
+revision.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from urllib.request import Request, urlopen
 
 GA4_TAG_ID = "G-RQ77310QBH"
 GOOGLE_ADS_TAG_ID = "AW-18395700376"
+CONTACT_CONVERSION_DESTINATION = "AW-18395700376/WjQvCIe1tuMcEJi54MNE"
 WHATSAPP_CONVERSION_DESTINATION = "AW-18395700376/6zBcCL3zo-ccEJi54MNE"
 BOOTSTRAP_PATH = "src/analytics/google-tag.js"
 PUBLIC_SURFACES = (
@@ -55,13 +57,18 @@ def validate_source(root: Path) -> list[str]:
     required_snippets = (
         f'const GOOGLE_ANALYTICS_TAG_ID = "{GA4_TAG_ID}";',
         f'const GOOGLE_ADS_TAG_ID = "{GOOGLE_ADS_TAG_ID}";',
+        f'"{CONTACT_CONVERSION_DESTINATION}";',
         f'"{WHATSAPP_CONVERSION_DESTINATION}";',
         "https://www.googletagmanager.com/gtag/js?id=",
         'window.gtag("js", new Date());',
         'window.gtag("config", GOOGLE_ANALYTICS_TAG_ID);',
         'window.gtag("config", GOOGLE_ADS_TAG_ID);',
+        'function sendGoogleAdsConversion(destination) {',
         'window.gtag("event", "conversion", {',
-        "send_to: WHATSAPP_CONVERSION_DESTINATION,",
+        "send_to: destination,",
+        'sendGoogleAdsConversion(WHATSAPP_CONVERSION_DESTINATION);',
+        'window.addEventListener("onion:public-support:accepted", () => {',
+        'sendGoogleAdsConversion(CONTACT_CONVERSION_DESTINATION);',
         'if (/^whatsapp:/i.test(href)) return true;',
         'host === "wa.me"',
         'host.endsWith(".wa.me")',
@@ -76,6 +83,11 @@ def validate_source(root: Path) -> list[str]:
     if text.count("googletagmanager.com/gtag/js?id=") != 1:
         errors.append(
             f"{BOOTSTRAP_PATH}: gtag.js debe declararse exactamente una vez"
+        )
+
+    if text.count(CONTACT_CONVERSION_DESTINATION) != 1:
+        errors.append(
+            f"{BOOTSTRAP_PATH}: el destino de conversión de Contacto debe existir exactamente una vez"
         )
 
     if text.count(WHATSAPP_CONVERSION_DESTINATION) != 1:
@@ -221,6 +233,7 @@ def main() -> int:
     print(
         "Google measurement contract: PASS · "
         f"GA4={GA4_TAG_ID} · Ads={GOOGLE_ADS_TAG_ID} · "
+        f"Contact={CONTACT_CONVERSION_DESTINATION} · "
         f"WhatsApp={WHATSAPP_CONVERSION_DESTINATION} · "
         f"public-surfaces={len(PUBLIC_SURFACES)}"
     )

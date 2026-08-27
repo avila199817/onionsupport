@@ -19,26 +19,10 @@ jobs:
           fetch-depth: 1
           persist-credentials: true
 
-      - name: Extract and run patch
+      - name: Apply and validate lean graph
         shell: bash
         run: |
-          awk '
-            /python - <<'"'"'PY'"'"'/ {capture=1; next}
-            capture && /^          PY$/ {exit}
-            capture {sub(/^          /, ""); print}
-          ' .github/workflows/tmp-lean-public-graph.yml > /tmp/lean_patch.py
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('/tmp/lean_patch.py')
-          t = p.read_text(encoding='utf-8')
-          start = t.find("anchor = '''function isFunction(value) {")
-          end = t.find("helpers = anchor +", start)
-          if start < 0 or end < 0:
-              raise SystemExit('embedded isFunction anchor bounds not found')
-          replacement = '''anchor = \'\'\'function isFunction(value) {\n  return (\n    typeof value === "function"\n  );\n}\n\'\'\'\n          '''
-          p.write_text(t[:start] + replacement + t[end:], encoding='utf-8')
-          PY
-          python /tmp/lean_patch.py
+          python tools/tmp_lean_public_graph.py
           node --check src/app/index.js
           node --check src/router/index.js
           node --check src/main.js

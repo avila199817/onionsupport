@@ -27,6 +27,16 @@ jobs:
             capture && /^          PY$/ {exit}
             capture {sub(/^          /, ""); print}
           ' .github/workflows/tmp-lean-public-graph.yml > /tmp/lean_patch.py
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('/tmp/lean_patch.py')
+          t = p.read_text(encoding='utf-8')
+          old = '''anchor = ''' + "'''" + '''function isFunction(value) {\n  return (\n    typeof value ===\n    \"function\"\n  );\n}\n''' + "'''"
+          new = '''anchor = ''' + "'''" + '''function isFunction(value) {\n  return (\n    typeof value === \"function\"\n  );\n}\n''' + "'''"
+          if old not in t:
+              raise SystemExit('embedded isFunction anchor not found')
+          p.write_text(t.replace(old, new, 1), encoding='utf-8')
+          PY
           python /tmp/lean_patch.py
           node --check src/app/index.js
           node --check src/router/index.js

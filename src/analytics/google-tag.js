@@ -3,6 +3,8 @@
 
   const GOOGLE_ANALYTICS_TAG_ID = "G-RQ77310QBH";
   const GOOGLE_ADS_TAG_ID = "AW-18395700376";
+  const CONTACT_CONVERSION_DESTINATION =
+    "AW-18395700376/WjQvCIe1tuMcEJi54MNE";
   const WHATSAPP_CONVERSION_DESTINATION =
     "AW-18395700376/6zBcCL3zo-ccEJi54MNE";
 
@@ -57,6 +59,18 @@
     window.gtag("config", GOOGLE_ADS_TAG_ID);
   }
 
+  function sendGoogleAdsConversion(destination) {
+    if (!destination) return;
+
+    configureGoogleAds();
+    window.gtag("event", "conversion", {
+      send_to: destination,
+    });
+
+    /* Una conversión no puede esperar al temporizador normal. */
+    loadRemoteGoogleTag();
+  }
+
   function scheduleRemoteGoogleTag() {
     if (remoteScheduled) return;
     remoteScheduled = true;
@@ -101,8 +115,8 @@
   /*
     Los comandos de GA4 quedan en dataLayer desde el primer momento. Ads se
     configura de forma deliberadamente diferida para que su payload adicional
-    no forme parte del cold boot. Si existe una conversión antes, el handler de
-    WhatsApp configura Ads primero y luego encola el evento en orden.
+    no forme parte del cold boot. Si existe una conversión antes, el handler
+    correspondiente configura Ads primero y luego encola el evento en orden.
   */
   window.gtag("js", new Date());
   window.gtag("config", GOOGLE_ANALYTICS_TAG_ID);
@@ -132,16 +146,21 @@
       const anchor = event.target?.closest?.("a[href]");
       if (!anchor || !isWhatsAppLink(anchor)) return;
 
-      configureGoogleAds();
-      window.gtag("event", "conversion", {
-        send_to: WHATSAPP_CONVERSION_DESTINATION,
-      });
-
-      /* Una conversión no puede esperar al temporizador normal. */
-      loadRemoteGoogleTag();
+      sendGoogleAdsConversion(WHATSAPP_CONVERSION_DESTINATION);
     },
     true
   );
+
+  /*
+    El formulario público ya emite este evento exclusivamente después de que
+    POST /api/tickets/public haya finalizado con respuesta aceptada. No medimos
+    el clic en "Crear incidencia" ni la carga de la home: sólo la aceptación
+    final del flujo. La respuesta anónima del backend permanece deliberadamente
+    neutra para no debilitar su contrato anti-enumeración.
+  */
+  window.addEventListener("onion:public-support:accepted", () => {
+    sendGoogleAdsConversion(CONTACT_CONVERSION_DESTINATION);
+  });
 
   for (const eventName of ["pointerdown", "keydown", "touchstart"]) {
     window.addEventListener(eventName, promoteAnalyticsOnInteraction, {

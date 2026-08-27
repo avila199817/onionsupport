@@ -29,6 +29,14 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          view = Path('src/views/correo/index.js')
+          view_text = view.read_text(encoding='utf-8')
+          old_version = 'CORREO_VIEW_VERSION = "correo.view.microsoft.production.v7-extreme-canonical"'
+          stable_version = 'CORREO_VIEW_VERSION = "correo.view.microsoft.production.v6-canonical-user"'
+          if view_text.count(old_version) != 1:
+              raise SystemExit('Correo generated version anchor is not unique')
+          view.write_text(view_text.replace(old_version, stable_version, 1), encoding='utf-8')
+
           p = Path('.github/scripts/repo_integrity.py')
           text = p.read_text(encoding='utf-8')
           def one(old, new, label):
@@ -84,7 +92,7 @@ jobs:
           set -euo pipefail
           rm -f .github/scripts/tmp_correo_extreme_patch.py
           rm -f .github/workflows/tmp-correo-extreme-audit.yml
-          rm -f .github/tmp-correo-trigger.txt
+          rm -f .github/tmp-correo-trigger*.txt
 
       - name: Commit product patch
         shell: bash

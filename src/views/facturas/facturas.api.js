@@ -392,3 +392,27 @@ export async function fetchFacturaPdfRequest(id = "", mode = Base.FACTURA_PDF_MO
     ? viewFacturaPdfRequest(id, options)
     : downloadFacturaPdfRequest(id, options);
 }
+
+/*
+  Compatibilidad histórica:
+  varios agregadores de dominio (incluido Home) consumen FacturasApi como
+  default namespace. El boundary debe conservar ese contrato además de los
+  exports nombrados para que los imports lazy no fallen en tiempo de ejecución.
+*/
+const FacturasApi = Object.freeze({
+  ...Base,
+  FACTURAS_DOCUMENT_FLOW_VERSION,
+  isFacturaDocumentActionUrl,
+  normalizeFacturaDetailResponse,
+  normalizeFacturaCreateResponse,
+  normalizeFacturaPdfResponse,
+  fetchFacturaDetailRequest,
+  getFacturaById,
+  createFacturaRequest,
+  createFactura,
+  viewFacturaPdfRequest,
+  downloadFacturaPdfRequest,
+  fetchFacturaPdfRequest,
+});
+
+export default FacturasApi;

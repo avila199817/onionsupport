@@ -155,8 +155,8 @@
   <!-- Root-only warmup: no arrastra recursos de la landing a rutas privadas. -->
   <script async src="/src/preboot/public-home-preload.js"></script>
 
-  <!-- Google tag: descarga temprana, ejecución diferida para no bloquear el primer pintado. -->
-  <script defer src="/src/analytics/google-tag.js"></script>
+  <!-- Google tag (GA4). Bootstrap local canónico; el remoto se difiere internamente. -->
+  <script src="/src/analytics/google-tag.js"></script>
 
   <!--
     Se ejecuta antes de pintar la interfaz para fijar el tema

@@ -1,0 +1,40 @@
+name: TEMP Revert Public Home CSS Phases
+
+on:
+  push:
+    branches:
+      - revert/public-home-css-phases
+
+permissions:
+  contents: write
+
+jobs:
+  revert:
+    if: ${{ !contains(github.event.head_commit.message, '[css-phases-reverted]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: revert/public-home-css-phases
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Restore pre-experiment files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin 1dd360a5e93df1a9bdd8399461ef82fe60da42d9
+          git checkout 1dd360a5e93df1a9bdd8399461ef82fe60da42d9 -- src/router/styles.js src/preboot/public-home-preload.js
+          git diff --check
+          git diff -- src/router/styles.js src/preboot/public-home-preload.js
+
+      - name: Commit rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Onion Support CI"
+          git config user.email "cristian@onionsupport.com"
+          git add src/router/styles.js src/preboot/public-home-preload.js
+          git commit -m "revert: restaurar baseline CSS public-home [css-phases-reverted]"
+          git push origin HEAD:revert/public-home-css-phases

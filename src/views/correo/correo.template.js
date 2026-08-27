@@ -274,6 +274,7 @@ export function renderConnectionCard(status = {}, account = {}, notifications = 
       <div class="correo-account-menu" data-correo-account-menu role="menu" hidden>
         <div class="correo-account-menu-current"><span>${renderAccountAvatar(account)}</span><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(mailbox)}</small></div></div>
         <button class="correo-account-menu-notifications${notificationEnabled ? " is-enabled" : ""}" type="button" role="menuitemcheckbox" aria-checked="${notificationEnabled ? "true" : "false"}" data-correo-action="notifications">${icon("bell")}<span><strong>${notificationEnabled ? "Notificaciones activadas" : "Activar notificaciones"}</strong><small>${notificationSupported ? "Avisos del navegador cuando llegue correo" : "Este navegador no admite notificaciones"}</small></span><i class="correo-account-menu-check" aria-hidden="true">${notificationEnabled ? icon("check") : ""}</i></button>
+        <button class="correo-account-menu-signature" type="button" role="menuitem" data-correo-action="signature">${icon("edit")}<span><strong>Firma de correo</strong><small>Configura la firma que Onion añade al redactar</small></span></button>
       </div>
     </div>`;
 }
@@ -281,8 +282,8 @@ export function renderConnectionCard(status = {}, account = {}, notifications = 
 function renderBootWorkspace() {
   return `
     <section class="correo-workspace correo-workspace--boot" aria-label="Comprobando Microsoft 365" aria-busy="true">
-      <aside class="correo-folders-panel"><div class="correo-boot-account"></div>${Array.from({length:7},()=>`<div class="correo-boot-line"></div>`).join("")}</aside>
-      <section class="correo-list-panel"><div class="correo-boot-title"></div>${Array.from({length:7},()=>`<div class="correo-message-skeleton"><span></span><div><i></i><i></i><i></i></div></div>`).join("")}</section>
+      <aside class="correo-folders-panel"><div class="correo-boot-account"></div><div class="correo-boot-folder-stack">${Array.from({length:7},()=>`<div class="correo-boot-line"></div>`).join("")}</div></aside>
+      <section class="correo-list-panel"><div class="correo-boot-title"></div><div class="correo-boot-message-stack">${Array.from({length:7},()=>`<div class="correo-message-skeleton"><span></span><div><i></i><i></i><i></i></div></div>`).join("")}</div></section>
       <section class="correo-reader"><div class="correo-reader-loading">${icon("spinner")}<span>Restaurando Outlook…</span></div></section>
     </section>`;
 }
@@ -329,12 +330,12 @@ function renderConnectedWorkspace(input = {}) {
         <button class="correo-disconnect-btn" type="button" data-correo-action="disconnect">${icon("logout")}<span>Desconectar cuenta</span></button>
       </aside>
       <section class="correo-list-panel" aria-label="Lista de mensajes">
-        <label class="correo-search"><span class="correo-search-icon">${icon("search")}</span><input type="search" autocomplete="off" placeholder="Buscar" aria-label="Buscar en Outlook" data-correo-search value="${attr(input.searchTerm || "")}"><kbd>⌘ K</kbd></label>
+        <label class="correo-search"><span class="correo-search-icon">${icon("search")}</span><input type="search" autocomplete="off" placeholder="Buscar" aria-label="Buscar en Outlook" data-correo-search value="${attr(input.searchTerm || "")}"></label>
         <div class="correo-list-toolbar">
           <div class="correo-filter-row" aria-label="Filtros">${filterButton("all", "Todos", input.activeFilter)}${filterButton("unread", "No leídos", input.activeFilter)}${filterButton("flagged", "Destacados", input.activeFilter)}</div>
           <div class="correo-list-utilities">
             <button class="correo-icon-btn" type="button" data-correo-action="refresh" aria-label="Actualizar" title="Actualizar">${icon("refresh")}</button>
-            <button class="correo-btn correo-btn--primary correo-btn--compact" type="button" data-correo-action="compose">${icon("edit")}<span>Nuevo correo</span></button>
+            <button class="correo-btn correo-btn--primary correo-btn--compact correo-compose-cta" type="button" data-correo-action="compose">${icon("edit")}<span>Nuevo correo</span></button>
           </div>
         </div>
         <div class="correo-message-list" data-correo-message-list aria-busy="${loadingMessages || loadingMore ? "true" : "false"}">${loadingMessages ? renderMessageSkeletons() : renderMessageRows(messages, selectedMessageId)}${loadingMore ? `<div class="correo-infinite-loader">${icon("spinner")}<span>Cargando correos anteriores…</span></div>` : ""}</div>
@@ -353,6 +354,30 @@ function renderMessageSkeletons() {
 
 function parseRecipientField(value = "") {
   return String(value ?? "").split(/[;,\n]+/).map((item) => item.trim()).filter(Boolean);
+}
+
+export function renderSignatureModal(input = {}) {
+  const raw = String(input.text ?? "").replace(/\r\n?/g, "\n").slice(0, 4000);
+  const enabled = input.enabled !== false;
+  const preview = raw.trim() || "Tu firma aparecerá aquí cuando la guardes.";
+  return `
+    <div class="correo-modal-backdrop" data-correo-action="close-modal"></div>
+    <section class="correo-signature-dialog" role="dialog" aria-modal="true" aria-labelledby="correo-signature-title" data-correo-signature-dialog tabindex="-1">
+      <header class="correo-signature-header">
+        <div><p class="correo-kicker">Personalización</p><h2 id="correo-signature-title">Firma de correo</h2></div>
+        <button class="correo-icon-btn" type="button" data-correo-action="close-modal" aria-label="Cerrar">${icon("close")}</button>
+      </header>
+      <form class="correo-signature-form" data-correo-signature-form>
+        <p class="correo-signature-help">Se guarda para este usuario de Onion Support y se inserta como texto seguro al redactar desde esta vista.</p>
+        <label class="correo-signature-field"><span>Tu firma</span><textarea name="signature" maxlength="4000" rows="7" data-correo-signature-input placeholder="Nombre, cargo, empresa, teléfono…">${escapeHtml(raw)}</textarea></label>
+        <div class="correo-signature-meta">
+          <label class="correo-signature-toggle"><input type="checkbox" name="enabled" value="1" ${enabled ? "checked" : ""}><span>Añadir automáticamente en nuevos correos, respuestas y reenvíos</span></label>
+          <span data-correo-signature-count>${raw.length}/4000</span>
+        </div>
+        <div class="correo-signature-preview"><span>Vista previa</span><div data-correo-signature-preview>${escapeHtml(preview)}</div></div>
+        <footer class="correo-signature-actions"><button class="correo-btn" type="button" data-correo-action="close-modal">Cancelar</button><button class="correo-btn correo-btn--primary" type="submit">Guardar firma</button></footer>
+      </form>
+    </section>`;
 }
 
 export function renderComposeModal(input = {}) {

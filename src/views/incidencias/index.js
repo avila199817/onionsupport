@@ -1125,7 +1125,7 @@ function destroyPrevious(
    CONTROLLER
 ========================================================= */
 
-function createIncidenciasController(
+export function createIncidenciasController(
   host = null,
   context = {}
 ) {
@@ -1134,6 +1134,13 @@ function createIncidenciasController(
 
   let destroyed = false;
   let mounted = false;
+
+  const detailOnly =
+    context?.detailOnly === true ||
+    context?.mode === "entity-overlay";
+
+  const entityOverlayContext =
+    safeObject(context?.entityOverlay);
 
   let items =
     safeArray(cached.items);
@@ -4775,6 +4782,17 @@ async function load(options = {}) {
   function closeDetailModal(
     options = {}
   ) {
+    const closeOptions =
+      safeObject(options);
+
+    const wasOpen =
+      detailModal.open === true;
+
+    const closedTicketId =
+      getTicketId(
+        detailModal.detail || {}
+      );
+
     if (
       detailModal.submitting
     ) {
@@ -4811,8 +4829,38 @@ async function load(options = {}) {
       immediate: true,
     });
 
-    restoreModalReturnFocus();
-    syncInfiniteObserver();
+    if (
+      closeOptions.restoreFocus !==
+      false
+    ) {
+      restoreModalReturnFocus();
+    } else {
+      modalReturnFocus = null;
+    }
+
+    if (!detailOnly) {
+      syncInfiniteObserver();
+    }
+
+    if (
+      wasOpen &&
+      closeOptions.suppressEntityOverlayCallback !==
+        true &&
+      isFunction(
+        entityOverlayContext.onClose
+      )
+    ) {
+      Promise.resolve().then(() =>
+        entityOverlayContext.onClose({
+          type: "incidencia",
+          id: closedTicketId,
+          reason: cleanText(
+            closeOptions.reason,
+            "incidencia-user-close"
+          ),
+        })
+      ).catch(() => {});
+    }
 
     return true;
   }
@@ -7869,6 +7917,35 @@ async function loadMore(options = {}) {
   const controller = {
     version:
       INCIDENCIAS_VIEW_VERSION,
+
+    mountDetailOnly() {
+      if (
+        destroyed ||
+        mounted ||
+        !host
+      ) {
+        return controller;
+      }
+
+      mounted = true;
+      destroyed = false;
+
+      host.setAttribute(
+        "data-incidencias-detail-only-controller",
+        "true"
+      );
+
+      ensureModalHost();
+
+      if (isBrowser()) {
+        window.addEventListener(
+          "beforeunload",
+          onBeforeUnload
+        );
+      }
+
+      return controller;
+    },
 
     mount() {
       if (

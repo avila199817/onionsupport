@@ -24,6 +24,7 @@ import {
 } from "./home.api.js";
 
 import {
+  HOME_ACTIONS,
   renderHomeTemplate,
   renderHomeErrorState,
 } from "./home.template.js";
@@ -35,8 +36,9 @@ const SOURCE = "home.view";
 const ROUTER_EVENT_HANDLED_KEY = "__onionRouterHandled";
 
 const ACTIONS = Object.freeze({
-  RETRY: "retry",
-  NAVIGATE: "navigate",
+  RETRY: HOME_ACTIONS.RETRY,
+  NAVIGATE: HOME_ACTIONS.NAVIGATE,
+  OPEN_ENTITY: HOME_ACTIONS.OPEN_ENTITY,
 });
 
 const REFRESH_ACTIONS = new Set([
@@ -431,7 +433,11 @@ function actionFrom(node = null) {
 }
 
 function isKnownAction(action = "") {
-  return REFRESH_ACTIONS.has(action) || NAVIGATION_ACTIONS.has(action);
+  return (
+    REFRESH_ACTIONS.has(action) ||
+    NAVIGATION_ACTIONS.has(action) ||
+    action === ACTIONS.OPEN_ENTITY
+  );
 }
 
 /* =========================================================
@@ -688,12 +694,68 @@ function createHomeController(host = null, context = {}) {
     }
   }
 
+  async function openEntityFromNode(node = null) {
+    const entityType = cleanText(
+      node?.dataset?.entityType ||
+      node?.dataset?.homeEntityType ||
+      node?.getAttribute?.("data-entity-type") ||
+      "",
+      ""
+    );
+
+    const entityId = cleanText(
+      node?.dataset?.entityId ||
+      node?.dataset?.homeEntityId ||
+      node?.getAttribute?.("data-entity-id") ||
+      "",
+      ""
+    );
+
+    if (!entityType || !entityId) {
+      return false;
+    }
+
+    let entities =
+      AppCore?.getModule?.("entities") ||
+      AppCore?.entities ||
+      null;
+
+    if (!isFunction(entities?.open)) {
+      const module =
+        await import(
+          "../../features/entity-overlay/index.js"
+        );
+
+      entities =
+        module?.EntityOverlay ||
+        module?.default ||
+        null;
+    }
+
+    if (!isFunction(entities?.open)) {
+      return false;
+    }
+
+    return (
+      await entities.open({
+        type: entityType,
+        id: entityId,
+        source: `${SOURCE}.entity`,
+        opener: node,
+      })
+    ) !== false;
+  }
+
   async function handleAction(action = "", node = null) {
     const type = cleanText(action, "");
 
     if (REFRESH_ACTIONS.has(type)) {
       await refresh();
       return true;
+    }
+
+    if (type === ACTIONS.OPEN_ENTITY) {
+      return openEntityFromNode(node);
     }
 
     if (NAVIGATION_ACTIONS.has(type)) {

@@ -1,0 +1,97 @@
+/* =========================================================
+   Onion Support - Entity Overlay transient loader
+========================================================= */
+
+@layer components {
+  [data-entity-overlay-loading-host="true"] {
+    position: fixed;
+    inset: 0;
+    z-index: 2147482500;
+    pointer-events: none;
+  }
+
+  [data-entity-overlay-loading-host="true"]:not([data-open="true"]) {
+    display: none;
+  }
+
+  .entity-overlay-loading {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    background: color-mix(
+      in srgb,
+      var(--overlay-bg, rgba(0, 0, 0, .58)) 76%,
+      transparent
+    );
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+
+  .entity-overlay-loading-card {
+    min-inline-size: min(320px, calc(100vw - 40px));
+    max-inline-size: 420px;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    border: 1px solid var(--border-default);
+    border-radius: var(--card-radius-lg, 16px);
+    background: var(--card-bg, var(--surface-1));
+    color: var(--text);
+    box-shadow: var(--shadow-xl, var(--shadow-lg));
+  }
+
+  .entity-overlay-loading-card > span:last-child {
+    min-inline-size: 0;
+    display: grid;
+    gap: 3px;
+  }
+
+  .entity-overlay-loading-card strong {
+    color: var(--text-strong);
+    font-size: var(--font-md);
+    font-weight: var(--weight-bold);
+    line-height: 1.2;
+  }
+
+  .entity-overlay-loading-card small {
+    color: var(--text-muted);
+    font-size: var(--font-sm);
+    line-height: 1.35;
+  }
+
+  .entity-overlay-loading-spinner {
+    inline-size: 22px;
+    block-size: 22px;
+    border: 2px solid var(--border-default);
+    border-block-start-color: var(--accent, var(--info));
+    border-radius: 999px;
+    animation: entity-overlay-spin .72s linear infinite;
+  }
+
+  @keyframes entity-overlay-spin {
+    to {
+      transform: rotate(1turn);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .entity-overlay-loading-spinner {
+      animation-duration: 1.8s;
+    }
+  }
+
+  @media (forced-colors: active) {
+    .entity-overlay-loading {
+      background: Canvas;
+    }
+
+    .entity-overlay-loading-spinner {
+      border-color: CanvasText;
+      border-block-start-color: Highlight;
+    }
+  }
+}

@@ -500,6 +500,35 @@
   letter-spacing: .045em;
 }
 
+.home-entity-id--action {
+  appearance: none;
+  margin: 0;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+
+.home-entity-id--action:hover {
+  border-color: var(--border-strong);
+  background: var(--solid-hover, var(--badge-bg));
+  color: var(--text-strong);
+}
+
+.home-entity-id--action:active {
+  transform: scale(.98);
+}
+
+.home-entity-id--action:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .home-entity-id code {
   min-inline-size: 0;
   overflow: hidden;

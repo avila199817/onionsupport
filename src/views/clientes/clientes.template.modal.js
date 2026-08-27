@@ -5265,8 +5265,12 @@ export function renderClientesModal(
   );
 }
 
-export function closeClientesDetailModal() {
-  return closeBridge();
+export function closeClientesDetailModal(
+  options = {}
+) {
+  return closeBridge(
+    safeObject(options)
+  );
 }
 
 export function destroyClientesDetailModalBridge({

@@ -13,11 +13,12 @@
 ========================================================= */
 
 export const HOME_TEMPLATE_VERSION =
-  "home.template.private.v10.entity-identifiers";
+  "home.template.private.v11.global-entity-actions";
 
 export const HOME_ACTIONS = Object.freeze({
   RETRY: "retry",
   NAVIGATE: "navigate",
+  OPEN_ENTITY: "open-entity",
 });
 
 const DEFAULT_ROUTES = Object.freeze({
@@ -482,15 +483,45 @@ function statusBadge(value = "", fallback = "Sin estado") {
   return `<span class="home-status home-status--${attr(tone)}" data-home-status="${attr(normalizeKey(value))}">${escapeHtml(label)}</span>`;
 }
 
-function entityIdBadge(kind = "ID", value = "") {
+function entityIdBadge(
+  kind = "ID",
+  value = "",
+  entityType = ""
+) {
   const id = safeDisplayId(value, "");
   if (!id) return "";
 
+  const type = normalizeKey(entityType);
+  const actionable = [
+    "factura",
+    "incidencia",
+    "cliente",
+    "usuario",
+  ].includes(type);
+
+  if (!actionable) {
+    return `
+      <span class="home-entity-id">
+        <span>${escapeHtml(kind)}</span>
+        <code>${escapeHtml(id)}</code>
+      </span>
+    `;
+  }
+
   return `
-    <span class="home-entity-id">
+    <button
+      type="button"
+      class="home-entity-id home-entity-id--action"
+      data-home-action="${HOME_ACTIONS.OPEN_ENTITY}"
+      data-entity-open="true"
+      data-entity-type="${attr(type)}"
+      data-entity-id="${attr(id)}"
+      data-entity-source="home"
+      aria-label="${attr(`Abrir ${kind} ${id}`)}"
+    >
       <span>${escapeHtml(kind)}</span>
       <code>${escapeHtml(id)}</code>
-    </span>
+    </button>
   `;
 }
 
@@ -689,6 +720,17 @@ function activityItem(item = {}) {
   const source = isObject(item) ? item : {};
   const type = normalizeKey(first(source.type, source.tipo, "activity"));
   const isInvoice = type.includes("invoice") || type.includes("factura");
+  const isTicket =
+    type.includes("ticket") ||
+    type.includes("incidencia");
+
+  const entityType =
+    isInvoice
+      ? "factura"
+      : isTicket
+        ? "incidencia"
+        : "";
+
   const entityId = isInvoice ? invoiceDisplayId(source) : ticketDisplayId(source);
 
   const rawTitle = visibleText(
@@ -719,14 +761,14 @@ function activityItem(item = {}) {
   return `
     <li
       class="home-activity-item home-activity-item--${attr(type)}"
-      data-home-entity-type="${attr(isInvoice ? "invoice" : type || "activity")}"
+      data-home-entity-type="${attr(entityType || type || "activity")}"
       data-home-entity-id="${attr(entityId)}"
     >
       <span class="home-activity-icon" aria-hidden="true">${icon(activityIcon(type))}</span>
       <span class="home-activity-body">
         <span class="home-activity-heading">
           <strong>${escapeHtml(title)}</strong>
-          ${entityIdBadge(isInvoice ? "Factura" : "ID", entityId)}
+          ${entityIdBadge(isInvoice ? "Factura" : "ID", entityId, entityType)}
         </span>
         <span class="home-activity-meta">
           ${statusBadge(rawStatus, "Actualizada")}
@@ -800,7 +842,7 @@ function invoiceItem(invoice = {}) {
       <span class="home-invoice-main">
         <span class="home-invoice-heading">
           <strong>${escapeHtml(label)}</strong>
-          ${id ? entityIdBadge("ID", id) : ""}
+          ${id ? entityIdBadge("ID", id, "factura") : ""}
         </span>
         <span class="home-invoice-meta">
           ${statusBadge(rawStatus, "Emitida")}

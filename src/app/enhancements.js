@@ -47,6 +47,11 @@ const POST_ROUTER = Object.freeze([
     load: () => import("../features/mobile-datalist/index.js"),
   }),
   Object.freeze({
+    key: "entity-overlay",
+    scope: "private",
+    load: () => import("../features/entity-overlay/index.js"),
+  }),
+  Object.freeze({
     key: "facturas-paid-confirm",
     scope: "facturas",
     load: () => import("../features/facturas-paid-confirm/index.js"),
@@ -242,6 +247,19 @@ function routeScopes(pathname = activeRoutePathname()) {
 
   if (isPublicHome) {
     scopes.add("public");
+  }
+
+  const isAuthSurface =
+    hasPathSegment(path, "login") ||
+    hasPathSegment(path, "password-request") ||
+    hasPathSegment(path, "password-reset") ||
+    hasPathSegment(path, "activate-account");
+
+  if (
+    !isPublicHome &&
+    !isAuthSurface
+  ) {
+    scopes.add("private");
   }
 
   return scopes;

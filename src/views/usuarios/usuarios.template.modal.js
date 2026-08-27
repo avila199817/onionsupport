@@ -4055,7 +4055,12 @@ export function openUsuariosModal(detail = {}) {
   return true;
 }
 
-export function closeUsuariosModal() {
+export function closeUsuariosModal(
+  options = {}
+) {
+  const closeOptions =
+    safeObject(options);
+
   const wasOpen =
     modalState.isOpen;
 
@@ -4104,7 +4109,11 @@ export function closeUsuariosModal() {
 
   unlockBody();
 
-  if (isBrowser()) {
+  if (
+    isBrowser() &&
+    closeOptions.restoreFocus !==
+      false
+  ) {
     window.setTimeout(
       () =>
         restoreFocus(),
@@ -4115,7 +4124,10 @@ export function closeUsuariosModal() {
       null;
   }
 
-  if (wasOpen) {
+  if (
+    wasOpen &&
+    closeOptions.emit !== false
+  ) {
     safeEmit(
       "usuarios:modal:closed",
       {

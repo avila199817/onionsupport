@@ -2086,9 +2086,16 @@ function facturaIdFromNode(node = null) {
    CONTROLLER
 ========================================================= */
 
-function createFacturasController(host = null, context = {}) {
+export function createFacturasController(host = null, context = {}) {
   let destroyed = false;
   let mounted = false;
+
+  const detailOnly =
+    context?.detailOnly === true ||
+    context?.mode === "entity-overlay";
+
+  const entityOverlayContext =
+    safeObject(context?.entityOverlay);
 
   const controllerOwner =
     `${FACTURAS_VIEW_VERSION}:${++FACTURAS_CONTROLLER_SEQUENCE}`;
@@ -5471,7 +5478,12 @@ function createFacturasController(host = null, context = {}) {
     openingFacturaId = "";
   }
 
-  function closeDetailModal() {
+  function closeDetailModal(options = {}) {
+    const closeOptions = safeObject(options);
+    const wasOpen = detailModalIsOpen();
+    const closedFacturaId =
+      getFacturaId(detailModal.factura || {});
+
     if (
       markingPaidFacturaId ||
       detailModal.markingPaidFacturaId
@@ -5492,7 +5504,29 @@ function createFacturasController(host = null, context = {}) {
     });
     if (!flushedMain) syncInfiniteObserver();
 
-    restoreModalReturnFocus();
+    if (closeOptions.restoreFocus !== false) {
+      restoreModalReturnFocus();
+    } else {
+      modalReturnFocus = null;
+    }
+
+    if (
+      wasOpen &&
+      closeOptions.suppressEntityOverlayCallback !== true &&
+      isFunction(entityOverlayContext.onClose)
+    ) {
+      Promise.resolve().then(() =>
+        entityOverlayContext.onClose({
+          type: "factura",
+          id: closedFacturaId,
+          reason: cleanText(
+            closeOptions.reason,
+            "factura-user-close"
+          ),
+        })
+      ).catch(() => {});
+    }
+
     return true;
   }
 
@@ -6041,11 +6075,13 @@ function createFacturasController(host = null, context = {}) {
         render();
       }
 
-      void reloadFromStart({
-        force: true,
-        silent: true,
-        keepItems: true,
-      });
+      if (!detailOnly) {
+        void reloadFromStart({
+          force: true,
+          silent: true,
+          keepItems: true,
+        });
+      }
 
       return true;
     } catch (paymentError) {
@@ -6071,6 +6107,28 @@ function createFacturasController(host = null, context = {}) {
   async function openIncidencia(ticketId = "") {
     const id = cleanText(ticketId, "");
     if (!id) return false;
+
+    closeCreateModal();
+
+    const entities =
+      entityOverlayContext.service ||
+      AppCore?.getModule?.("entities") ||
+      AppCore?.entities ||
+      null;
+
+    if (isFunction(entities?.open)) {
+      return (
+        await entities.open({
+          type: "incidencia",
+          id,
+          source: "facturas.detail.relation",
+          opener:
+            isBrowser()
+              ? document.activeElement
+              : null,
+        })
+      ) !== false;
+    }
 
     const Router = getRouter(context);
     const route = ROUTES.incidencias || "/incidencias";
@@ -6582,6 +6640,30 @@ function createFacturasController(host = null, context = {}) {
 
   const controller = {
     version: FACTURAS_VIEW_VERSION,
+
+    mountDetailOnly() {
+      if (
+        destroyed ||
+        mounted ||
+        !host
+      ) {
+        return controller;
+      }
+
+      mounted = true;
+      destroyed = false;
+
+      host.setAttribute(
+        "data-facturas-detail-only-controller",
+        "true"
+      );
+
+      bindTarget(host);
+      ensureDetailModalHost();
+      syncModalBodyState();
+
+      return controller;
+    },
 
     mount() {
       if (destroyed || mounted || !host) return controller;

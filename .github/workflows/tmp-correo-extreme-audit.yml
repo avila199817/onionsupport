@@ -29,6 +29,7 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+
           view = Path('src/views/correo/index.js')
           view_text = view.read_text(encoding='utf-8')
           old_version = 'CORREO_VIEW_VERSION = "correo.view.microsoft.production.v7-extreme-canonical"'
@@ -36,6 +37,30 @@ jobs:
           if view_text.count(old_version) != 1:
               raise SystemExit('Correo generated version anchor is not unique')
           view.write_text(view_text.replace(old_version, stable_version, 1), encoding='utf-8')
+
+          template = Path('src/views/correo/correo.template.js')
+          template_text = template.read_text(encoding='utf-8')
+          overlay_old = '<div class="correo-confirm-overlay" data-correo-action="confirm-cancel">\n      <section class="correo-confirm-dialog'
+          overlay_new = '<div class="correo-confirm-overlay">\n      <div class="correo-confirm-backdrop" data-correo-action="confirm-cancel" aria-hidden="true"></div>\n      <section class="correo-confirm-dialog'
+          if template_text.count(overlay_old) != 1:
+              raise SystemExit('Correo confirm overlay anchor is not unique')
+          template.write_text(template_text.replace(overlay_old, overlay_new, 1), encoding='utf-8')
+
+          css = Path('src/css/views/correo/index.css')
+          css_text = css.read_text(encoding='utf-8')
+          dialog_old = '.correo-confirm-dialog {\n  inline-size: min(520px, 100%);'
+          dialog_new = '.correo-confirm-backdrop { position: absolute; inset: 0; }\n\n.correo-confirm-dialog {\n  position: relative;\n  z-index: 1;\n  inline-size: min(520px, 100%);'
+          if css_text.count(dialog_old) != 1:
+              raise SystemExit('Correo confirm dialog CSS anchor is not unique')
+          css.write_text(css_text.replace(dialog_old, dialog_new, 1), encoding='utf-8')
+
+          contract = Path('.github/scripts/correo_integrity.py')
+          contract_text = contract.read_text(encoding='utf-8')
+          contract_old = "for required in ('.correo-confirm-overlay', '.correo-confirm-dialog', '.correo-btn--danger', '.correo-field', '.correo-message-line'):"
+          contract_new = "for required in ('.correo-confirm-overlay', '.correo-confirm-backdrop', '.correo-confirm-dialog', '.correo-btn--danger', '.correo-field', '.correo-message-line'):"
+          if contract_text.count(contract_old) != 1:
+              raise SystemExit('Correo CSS contract anchor is not unique')
+          contract.write_text(contract_text.replace(contract_old, contract_new, 1), encoding='utf-8')
 
           p = Path('.github/scripts/repo_integrity.py')
           text = p.read_text(encoding='utf-8')
@@ -86,12 +111,12 @@ jobs:
           node .github/scripts/continuous_scroll_smoke.mjs
           git diff --check
 
-      - name: Remove temporary bootstrap files
+      - name: Prepare workflow-safe product commit
         shell: bash
         run: |
           set -euo pipefail
+          git checkout HEAD -- .github/workflows/repo-integrity.yml
           rm -f .github/scripts/tmp_correo_extreme_patch.py
-          rm -f .github/workflows/tmp-correo-extreme-audit.yml
           rm -f .github/tmp-correo-trigger*.txt
 
       - name: Commit product patch
@@ -102,6 +127,10 @@ jobs:
           git config user.email 'cristian@onionsupport.com'
           git add -A
           git diff --cached --check
+          if git diff --cached --name-only | grep -q '^\.github/workflows/'; then
+            echo 'Refusing to push workflow changes from GitHub Actions token'
+            exit 1
+          fi
           if git diff --cached --quiet; then
             echo 'No product changes to commit'
             exit 1

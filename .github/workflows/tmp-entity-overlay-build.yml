@@ -28,7 +28,7 @@ jobs:
 
           cat .tmp/entity-overlay.* > /tmp/entity-overlay.b64
           base64 -d /tmp/entity-overlay.b64 > /tmp/entity-overlay.tar.xz
-          echo "1232ca9a98b3035edd7ecdb707743129a72a774b06b559c128ac1a72219417d7  /tmp/entity-overlay.tar.xz" | sha256sum -c -
+          echo "f17bbabab040fc95f20d1ef1a967d36ea49217a6ea6a7a62305037f16cd45024  /tmp/entity-overlay.tar.xz" | sha256sum -c -
 
           tar -xJf /tmp/entity-overlay.tar.xz -C .
           cp patch.py /tmp/entity-overlay-patch.py

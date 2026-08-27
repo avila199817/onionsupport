@@ -92,7 +92,7 @@ function isExactPublicHome(
     const pathname = raw
       .split("#")[0]
       .split("?")[0]
-      .replace(/\/g, "/")
+      .replace(/\\/g, "/")
       .replace(/\/{2,}/g, "/")
       .replace(/\/+$/g, "") || "/";
     return pathname === "/";

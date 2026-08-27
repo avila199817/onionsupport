@@ -21,7 +21,10 @@ jobs:
           fetch-depth: 0
 
       - name: Apply fail-closed patch
-        run: python3 .github/scripts/tmp_correo_shared_mailbox_patch.py
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/tmp_fix_correo_shared_patch_driver.py
+          python3 .github/scripts/tmp_correo_shared_mailbox_patch.py
 
       - name: Validate Correo mailbox candidate
         run: |

@@ -12,6 +12,11 @@
     const head = document.head;
     if (!head) return;
 
+    const heroImageSrcset = [
+      ["/src/media/img/Cristian_Avila_480.webp", "480w"].join(" "),
+      ["/src/media/img/Cristian_Avila_960.webp", "960w"].join(" "),
+    ].join(", ");
+
     const hints = [
       {
         rel: "stylesheet",
@@ -27,7 +32,10 @@
       {
         rel: "preload",
         as: "image",
-        href: "/src/media/img/Cristian_Avila.png",
+        href: "/src/media/img/Cristian_Avila_480.webp",
+        type: "image/webp",
+        imageSrcset: heroImageSrcset,
+        imageSizes: "(max-width: 760px) 44vw, 196px",
         fetchPriority: "high",
       },
     ];
@@ -39,6 +47,9 @@
       link.rel = hint.rel;
       link.href = hint.href;
       if (hint.as) link.as = hint.as;
+      if (hint.type) link.type = hint.type;
+      if (hint.imageSrcset) link.setAttribute("imagesrcset", hint.imageSrcset);
+      if (hint.imageSizes) link.setAttribute("imagesizes", hint.imageSizes);
       if (hint.fetchPriority) {
         link.fetchPriority = hint.fetchPriority;
         link.setAttribute("fetchpriority", hint.fetchPriority);

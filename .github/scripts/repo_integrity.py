@@ -452,8 +452,25 @@ def validate_ui_system_v4_contract(errors: list[str]) -> None:
     if '@import url("./layout/chrome.css") layer(layout);' not in app_text:
         errors.append("src/css/app.css :: chrome.css debe ser la autoridad final de layout")
 
-    if '/src/ui/chrome/index.js' not in index_text:
-        errors.append("index.html :: debe cargar App Chrome canónico directamente")
+    preboot_path = SRC / "preboot" / "public-home-preload.js"
+    try:
+        preboot_text = preboot_path.read_text(encoding="utf-8")
+    except OSError as error:
+        errors.append(f"src/preboot/public-home-preload.js :: ilegible: {error}")
+        preboot_text = ""
+
+    direct_chrome_preload = '/src/ui/chrome/index.js' in index_text
+    root_aware_chrome_preload = (
+        '/src/preboot/public-home-preload.js' in index_text
+        and 'window.location.pathname !== "/"' in preboot_text
+        and '"/src/ui/chrome/index.js"' in preboot_text
+        and 'link.rel = "modulepreload"' in preboot_text
+    )
+
+    if not (direct_chrome_preload or root_aware_chrome_preload):
+        errors.append(
+            "App Chrome debe precargarse directamente o mediante el preboot privado root-aware"
+        )
     if '/src/features/mobile-shell/index.js' in index_text:
         errors.append("index.html :: bridge mobile-shell prohibido")
 

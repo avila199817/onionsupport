@@ -34,6 +34,83 @@ jobs:
           cp patch.py /tmp/entity-overlay-patch.py
           rm -f patch.py
 
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('/tmp/entity-overlay-patch.py')
+          text = p.read_text(encoding='utf-8')
+          start = text.index("sub_once(\n    path,\n    r'''  async function openIncidencia")
+          end = text.index("\n\ntext = read(path)", start)
+          replacement = '''replace_once(
+              path,
+              """  async function openIncidencia(ticketId = \"\") {
+              const id = cleanText(ticketId, \"\");
+              if (!id) return false;
+
+              const Router = getRouter(context);
+              const route = ROUTES.incidencias || \"/incidencias\";
+
+              if (isFunction(Router?.navigate)) {
+                modalReturnFocus = null;
+
+                await Router.navigate(route, {
+                  source: \"facturas.open-incidencia\",
+                  ticketId: id,
+                });
+
+                return true;
+              }
+
+              return false;
+            }""",
+              """  async function openIncidencia(ticketId = \"\") {
+              const id = cleanText(ticketId, \"\");
+              if (!id) return false;
+
+              closeCreateModal();
+
+              const entities =
+                entityOverlayContext.service ||
+                AppCore?.getModule?.(\"entities\") ||
+                AppCore?.entities ||
+                null;
+
+              if (isFunction(entities?.open)) {
+                return (
+                  await entities.open({
+                    type: \"incidencia\",
+                    id,
+                    source: \"facturas.detail.relation\",
+                    opener:
+                      isBrowser()
+                        ? document.activeElement
+                        : null,
+                  })
+                ) !== false;
+              }
+
+              const Router = getRouter(context);
+              const route = ROUTES.incidencias || \"/incidencias\";
+
+              if (isFunction(Router?.navigate)) {
+                modalReturnFocus = null;
+
+                await Router.navigate(route, {
+                  source: \"facturas.open-incidencia\",
+                  ticketId: id,
+                });
+
+                return true;
+              }
+
+              return false;
+            }""",
+              \"facturas cross-entity relation\",
+            )'''
+          text = text[:start] + replacement + text[end:]
+          p.write_text(text, encoding='utf-8')
+          PY
+
           python3 /tmp/entity-overlay-patch.py
 
           rm -rf .tmp

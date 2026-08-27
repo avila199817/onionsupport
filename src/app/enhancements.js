@@ -17,7 +17,7 @@
 ========================================================= */
 
 export const APP_ENHANCEMENTS_VERSION =
-  "app.enhancements.v18-incidencias-avatar-fallback";
+  "app.enhancements.v17-incidencias-live-media";
 
 const PRE_ROUTER = Object.freeze([
   Object.freeze({

@@ -22,12 +22,7 @@
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
-import { Auth } from "../features/auth/index.js";
 import { Router } from "../router/index.js";
-
-import Toast from "../ui/toast/index.js";
-import SidebarUI from "../ui/sidebar/index.js";
-import TopbarUI from "../ui/topbar/index.js";
 
 import {
   showLoader,
@@ -35,7 +30,7 @@ import {
 } from "./loader.js";
 
 export const APP_VERSION =
-  "app.minimal.v5-public-fast-boot";
+  "app.minimal.v6-public-lean-graph";
 
 /* =========================================================
    CONSTANTS
@@ -79,6 +74,16 @@ let publicHydrationPromise = null;
 let ready = false;
 let publicFastBoot = false;
 
+let Auth = null;
+let Toast = null;
+let SidebarUI = null;
+let TopbarUI = null;
+
+let authLoadPromise = null;
+let toastLoadPromise = null;
+let sidebarLoadPromise = null;
+let topbarLoadPromise = null;
+
 let bootPhase =
   BOOT_PHASES.IDLE;
 
@@ -115,6 +120,94 @@ function isFunction(value) {
   return (
     typeof value === "function"
   );
+}
+
+async function loadRuntimeModule(
+  current = null,
+  promise = null,
+  loader = null,
+  names = []
+) {
+  if (current) {
+    return { value: current, promise };
+  }
+
+  const activePromise =
+    promise ||
+    Promise.resolve()
+      .then(loader)
+      .then((module) => {
+        for (const name of names) {
+          if (module?.[name]) {
+            return module[name];
+          }
+        }
+        return module?.default || module || null;
+      });
+
+  return {
+    value: await activePromise,
+    promise: activePromise,
+  };
+}
+
+async function ensureAuth() {
+  const loaded = await loadRuntimeModule(
+    Auth,
+    authLoadPromise,
+    () => import("../features/auth/index.js"),
+    ["Auth"]
+  );
+  authLoadPromise = loaded.promise;
+  Auth = loaded.value;
+  return Auth;
+}
+
+async function ensureToast() {
+  const loaded = await loadRuntimeModule(
+    Toast,
+    toastLoadPromise,
+    () => import("../ui/toast/index.js"),
+    ["Toast"]
+  );
+  toastLoadPromise = loaded.promise;
+  Toast = loaded.value;
+  return Toast;
+}
+
+async function ensureSidebarUI() {
+  const loaded = await loadRuntimeModule(
+    SidebarUI,
+    sidebarLoadPromise,
+    () => import("../ui/sidebar/index.js"),
+    ["SidebarUI"]
+  );
+  sidebarLoadPromise = loaded.promise;
+  SidebarUI = loaded.value;
+  return SidebarUI;
+}
+
+async function ensureTopbarUI() {
+  const loaded = await loadRuntimeModule(
+    TopbarUI,
+    topbarLoadPromise,
+    () => import("../ui/topbar/index.js"),
+    ["TopbarUI"]
+  );
+  topbarLoadPromise = loaded.promise;
+  TopbarUI = loaded.value;
+  return TopbarUI;
+}
+
+function withRuntimeModules(payload = {}) {
+  return {
+    ...payload,
+    Auth,
+    Router,
+    Toast,
+    SidebarUI,
+    TopbarUI,
+  };
 }
 
 function cleanText(
@@ -428,12 +521,7 @@ function createBootPayload(
     AppCore,
     core: AppCore,
 
-    Auth,
     Router,
-
-    Toast,
-    SidebarUI,
-    TopbarUI,
   };
 }
 
@@ -573,11 +661,13 @@ async function initToast(
     BOOT_PHASES.TOAST
   );
 
+  const toast = await ensureToast();
+
   const result =
     await call(
-      Toast,
+      toast,
       "init",
-      payload,
+      withRuntimeModules(payload),
       false
     );
 
@@ -596,16 +686,18 @@ async function initAuth(
     BOOT_PHASES.AUTH
   );
 
+  const auth = await ensureAuth();
+
   /*
     Auth se inicializa sin restaurar aquí.
     restoreSession() se ejecuta una sola vez después.
   */
   const result =
     await call(
-      Auth,
+      auth,
       "init",
       {
-        ...payload,
+        ...withRuntimeModules(payload),
         ...AUTH_BOOT_OPTIONS,
         restoreOnBoot: false,
       },
@@ -627,6 +719,8 @@ async function restoreAuth(
     BOOT_PHASES.RESTORE
   );
 
+  const auth = await ensureAuth();
+
   /*
     La ausencia de sesión NO es un fallo fatal del App.
 
@@ -639,10 +733,10 @@ async function restoreAuth(
   */
   const result =
     await call(
-      Auth,
+      auth,
       "restoreSession",
       {
-        ...payload,
+        ...withRuntimeModules(payload),
         ...AUTH_BOOT_OPTIONS,
       },
       false
@@ -718,11 +812,12 @@ async function initGlobalUI(
     Se mantiene secuencial:
     no introducimos concurrencia entre módulos UI sin necesidad.
   */
+  const sidebar = await ensureSidebarUI();
   const sidebarResult =
     await call(
-      SidebarUI,
+      sidebar,
       "init",
-      payload,
+      withRuntimeModules(payload),
       false
     );
 
@@ -731,11 +826,12 @@ async function initGlobalUI(
     sidebarResult
   );
 
+  const topbar = await ensureTopbarUI();
   const topbarResult =
     await call(
-      TopbarUI,
+      topbar,
       "init",
-      payload,
+      withRuntimeModules(payload),
       false
     );
 
@@ -816,7 +912,7 @@ async function startRouter(
       Router,
       "start",
       createRouterPayload(
-        payload,
+        withRuntimeModules(payload),
         rawInitialPath
       ),
       true
@@ -959,19 +1055,15 @@ async function runBoot(
 
   /*
     Fast-path exclusivo de la home pública exacta (/):
-    - Auth.init instala el contexto local, pero NO restaura por red.
-    - Router puede renderizar public-home porque la ruta es pública.
-    - El loader se retira antes de cualquier refresh/me remoto.
-    - Toast, restore de sesión y chrome se hidratan después en background.
+    - NO descarga Auth, Toast, Sidebar ni Topbar antes del primer render.
+    - Router trata la ruta pública como anónima si Auth aún no está registrado.
+    - El loader se retira antes de cualquier módulo privado o refresh/me remoto.
+    - Auth/Toast/UI se descargan e hidratan después en background.
 
     Ninguna otra ruta usa este atajo. Login/reset/activation y todas las
     rutas privadas mantienen el orden histórico seguro de boot.
   */
   if (publicFastBoot) {
-    await initAuth(
-      payload
-    );
-
     await startRouter(
       payload,
       rawInitialPath

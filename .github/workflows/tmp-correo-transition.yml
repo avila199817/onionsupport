@@ -1,0 +1,54 @@
+name: TEMP Correo CSS transition
+
+on:
+  push:
+    branches:
+      - ci/correo-css-transition-contract
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ contains(github.event.head_commit.message, 'run Correo transition') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ci/correo-css-transition-contract
+          fetch-depth: 0
+
+      - name: Apply transition contract
+        run: python3 .github/scripts/tmp_correo_transition_contract.py
+
+      - name: Validate legacy main with transition tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/repo_integrity.py
+          bash .github/ci/validate_spa_contracts.sh
+          git diff --check
+
+      - name: Prepare workflow-safe commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/scripts/tmp_correo_transition_contract.py
+          rm -f .github/tmp-correo-transition-trigger.txt
+
+      - name: Commit transition contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Onion Support'
+          git config user.email 'cristian@onionsupport.com'
+          git add -A
+          git diff --cached --check
+          if git diff --cached --name-only | grep -q '^\.github/workflows/'; then
+            echo 'Refusing workflow mutation from Actions token'
+            exit 1
+          fi
+          git commit -m 'test: permitir transición CSS canónica de Correo'
+          git push origin HEAD:ci/correo-css-transition-contract

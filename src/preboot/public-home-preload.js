@@ -24,6 +24,8 @@
         fetchPriority: "high",
       },
       { rel: "preload", as: "style", href: "/src/css/views/public/index.css" },
+      { rel: "preload", as: "style", href: "/src/css/views/public/support-request.css" },
+      { rel: "preload", as: "style", href: "/src/css/views/public/public-support-progress.css" },
       { rel: "preload", as: "style", href: "/src/css/views/public/home-experience.css" },
       { rel: "modulepreload", href: "/src/views/public/home/index.js" },
       { rel: "modulepreload", href: "/src/views/public/home/template.js" },

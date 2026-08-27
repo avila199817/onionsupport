@@ -14,7 +14,7 @@
 ========================================================= */
 
 export const ROUTE_STYLES_VERSION =
-  "route-styles.v13-public-home-phased-css";
+  "route-styles.v12-route-minimal-public-home";
 
 const MODE_ATTRIBUTE =
   "data-css-route-mode";
@@ -45,15 +45,6 @@ const MEDIA_ACTIVE =
 
 const MEDIA_INACTIVE =
   "not all";
-
-const PUBLIC_HOME_VIEW_KEY =
-  "public-home";
-
-const PUBLIC_HOME_CRITICAL_HREFS =
-  new Set([
-    "/src/css/views/public/index.css",
-    "/src/css/views/public/home-experience.css",
-  ]);
 
 /* =========================================================
    MANIFEST
@@ -605,18 +596,14 @@ function loadOne(
               normalized
             );
 
-            const shouldRemainActive =
-              activeHrefs.has(
-                normalized
-              ) ||
-              preparedHrefs.has(
-                normalized
-              );
-
             setManagedLinkActive(
               link,
-              shouldRemainActive,
-              shouldRemainActive
+              activeHrefs.has(
+                normalized
+              ),
+              activeHrefs.has(
+                normalized
+              )
                 ? "active"
                 : "cached"
             );
@@ -793,47 +780,9 @@ export async function preloadRouteStyles(
     throw error;
   }
 
-  const blockingHrefs =
-    viewKey ===
-    PUBLIC_HOME_VIEW_KEY
-      ? hrefs.filter(
-          (href) =>
-            PUBLIC_HOME_CRITICAL_HREFS.has(
-              href
-            )
-        )
-      : hrefs;
-
-  const deferredHrefs =
-    viewKey ===
-    PUBLIC_HOME_VIEW_KEY
-      ? hrefs.filter(
-          (href) =>
-            !PUBLIC_HOME_CRITICAL_HREFS.has(
-              href
-            )
-        )
-      : [];
-
-  if (
-    deferredHrefs.length
-  ) {
-    void Promise.all(
-      deferredHrefs.map(
-        (href) =>
-          loadOne(
-            href,
-            null
-          )
-      )
-    ).catch(
-      () => false
-    );
-  }
-
   const loaded =
     await Promise.all(
-      blockingHrefs.map(
+      hrefs.map(
         (href) =>
           loadOne(
             href,
@@ -927,27 +876,14 @@ export async function prepareRouteStyles(
       throw error;
     }
 
-    const deferUntilLoaded =
-      viewKey ===
-        PUBLIC_HOME_VIEW_KEY &&
-      !PUBLIC_HOME_CRITICAL_HREFS.has(
-        href
-      ) &&
-      !loadedHrefs.has(
-        href
-      ) &&
-      !link.sheet;
-
     setManagedLinkActive(
       link,
-      !deferUntilLoaded,
-      deferUntilLoaded
-        ? "deferred"
-        : activeHrefs.has(
-            href
-          )
-          ? "active"
-          : "prepared"
+      true,
+      activeHrefs.has(
+        href
+      )
+        ? "active"
+        : "prepared"
     );
   }
 
@@ -1029,26 +965,11 @@ export function commitRouteStyles(
         href
       );
 
-    const deferUntilLoaded =
-      active &&
-      viewKey ===
-        PUBLIC_HOME_VIEW_KEY &&
-      !PUBLIC_HOME_CRITICAL_HREFS.has(
-        href
-      ) &&
-      !loadedHrefs.has(
-        href
-      ) &&
-      !link.sheet;
-
     setManagedLinkActive(
       link,
-      active &&
-        !deferUntilLoaded,
+      active,
       active
-        ? deferUntilLoaded
-          ? "deferred"
-          : "active"
+        ? "active"
         : "cached"
     );
   }

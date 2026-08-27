@@ -82,6 +82,11 @@ const POST_ROUTER = Object.freeze([
     load: () => import("../features/incidencias-technician-profile/index.js"),
   }),
   Object.freeze({
+    key: "incidencias-avatar-fallback",
+    scope: "incidencias",
+    load: () => import("../features/incidencias-avatar-fallback/index.js"),
+  }),
+  Object.freeze({
     key: "public-support",
     scope: "public",
     load: () => import("../features/public-support/index.js"),

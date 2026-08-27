@@ -286,6 +286,34 @@
 }
 .correo-account-menu button:hover { background:#3e3e3e; }
 .correo-account-menu button > svg { color:#c8c8c8; }
+
+.correo-account-menu-mailboxes {
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border-block-end: 1px solid #424242;
+}
+.correo-account-menu-section-label { padding: 3px 5px 5px; color: #8f8f8f; font-size: 8.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.correo-account-menu [data-correo-action="mailbox"] {
+  grid-template-columns: 30px minmax(0,1fr) 18px;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 5px;
+}
+.correo-account-menu [data-correo-action="mailbox"].is-selected { background: #343434; }
+.correo-mailbox-option-avatar { inline-size: 30px; block-size: 30px; display: grid; place-items: center; overflow: hidden; border-radius: 50%; background: #0f6cbd; color: #fff; font-size: 10px; font-weight: 750; }
+.correo-mailbox-option-avatar .correo-account-avatar-img,
+.correo-mailbox-option-avatar .correo-account-avatar-fallback,
+.correo-mailbox-option-avatar .correo-mailbox-avatar-fallback { inline-size: 100%; block-size: 100%; display: grid; place-items: center; object-fit: cover; }
+.correo-mailbox-option > span:nth-child(2) { min-inline-size: 0; display: grid; gap: 1px; }
+.correo-mailbox-option strong, .correo-mailbox-option small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.correo-mailbox-option strong { color: #fff; font-size: 11px; font-weight: 650; }
+.correo-mailbox-option small { color: #9f9f9f; font-size: 9px; }
+.correo-mailbox-option-check { inline-size: 18px; block-size: 18px; display: grid; place-items: center; color: #62abf5; }
+.correo-mailbox-option-check svg { inline-size: 13px; block-size: 13px; }
+.correo-account-avatar.is-shared,
+.correo-account-menu-current > span:has(.correo-mailbox-avatar-fallback) { background: #881798; }
+.correo-mailbox-avatar-fallback { inline-size: 100%; block-size: 100%; display: grid; place-items: center; color: #fff; font-weight: 750; }
 .correo-account-menu button span { display:grid; gap:1px; }
 .correo-account-menu button strong { font-size:11.5px; font-weight:600; }
 .correo-account-menu button small { color:#aaa; font-size:9.5px; line-height:1.25; }

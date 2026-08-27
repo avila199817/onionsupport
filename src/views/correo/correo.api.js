@@ -124,6 +124,26 @@ function endpoint(path = "") {
   return clean ? `${MICROSOFT_ENDPOINT}/${clean}` : MICROSOFT_ENDPOINT;
 }
 
+function mailboxValue(input = {}) {
+  return cleanText(input?.mailbox, "").toLowerCase();
+}
+
+function withMailboxQuery(input = {}, query = {}) {
+  const mailbox = mailboxValue(input);
+  return {
+    ...safeObject(query, {}),
+    ...(mailbox ? { mailbox } : {}),
+  };
+}
+
+function mailboxEndpoint(path = "", input = {}) {
+  const base = endpoint(path);
+  const mailbox = mailboxValue(input);
+  if (!mailbox) return base;
+  const separator = base.includes("?") ? "&" : "?";
+  return `${base}${separator}mailbox=${encodeURIComponent(mailbox)}`;
+}
+
 export async function getMicrosoftStatus(input = {}) {
   const payload = await Http.get(endpoint("status"), {
     ...options(input),
@@ -141,6 +161,15 @@ export async function getMicrosoftStatus(input = {}) {
     updatedAt: cleanText(raw.updatedAt, ""),
     lastVerifiedAt: cleanText(raw.lastVerifiedAt, ""),
     scopes: Object.freeze(safeArray(raw.scopes).map((item) => cleanText(item, "")).filter(Boolean)),
+    sharedScopes: Object.freeze(safeArray(raw.sharedScopes).map((item) => cleanText(item, "")).filter(Boolean)),
+    mailboxes: Object.freeze(safeArray(raw.mailboxes).map((item) => {
+      const source = safeObject(item, {});
+      return Object.freeze({
+        mailbox: cleanText(source.mailbox, "").toLowerCase(),
+        displayName: cleanText(source.displayName, cleanText(source.mailbox, "Buzón")),
+        type: cleanText(source.type, "primary").toLowerCase() === "shared" ? "shared" : "primary",
+      });
+    }).filter((item) => item.mailbox)),
     healthError: cleanText(raw.healthError, ""),
     profile: safeObject(raw.profile, null),
   });
@@ -180,21 +209,21 @@ export async function getMicrosoftProfile(input = {}) {
 export async function listMailFolders(input = {}) {
   const payload = await Http.get(endpoint("folders"), {
     ...options(input),
-    query: input.includeHidden === true ? { includeHidden: "true" } : undefined,
+    query: withMailboxQuery(input, input.includeHidden === true ? { includeHidden: "true" } : {}),
   });
   return Object.freeze(safeArray(payload?.folders).map(normalizeFolder).filter((item) => item.id));
 }
 
 export async function listMessages(input = {}) {
   const cursor = cleanText(input.cursor, "");
-  const query = cursor
+  const query = withMailboxQuery(input, cursor
     ? { cursor }
     : {
         folder: cleanText(input.folder, "inbox"),
         top: clamp(input.top, 35, 1, 100),
         ...(cleanText(input.q, "") ? { q: cleanText(input.q, "").slice(0, 160) } : {}),
         ...(cleanText(input.filter, "") ? { filter: cleanText(input.filter, "") } : {}),
-      };
+      });
 
   const payload = await Http.get(endpoint("messages"), {
     ...options(input),
@@ -210,7 +239,7 @@ export async function listMessages(input = {}) {
 export async function getMessage(id, input = {}) {
   const cleanId = cleanText(id, "");
   if (!cleanId) throw new Error("MAIL_MESSAGE_ID_REQUIRED");
-  const payload = await Http.get(endpoint(`messages/${encodeURIComponent(cleanId)}`), options(input));
+  const payload = await Http.get(mailboxEndpoint(`messages/${encodeURIComponent(cleanId)}`, input), options(input));
   return normalizeMessage(payload?.message);
 }
 
@@ -218,7 +247,7 @@ export async function updateMessage(id, patch = {}, input = {}) {
   const cleanId = cleanText(id, "");
   if (!cleanId) throw new Error("MAIL_MESSAGE_ID_REQUIRED");
   const payload = await Http.patch(
-    endpoint(`messages/${encodeURIComponent(cleanId)}`),
+    mailboxEndpoint(`messages/${encodeURIComponent(cleanId)}`, input),
     safeObject(patch, {}),
     options(input)
   );
@@ -230,7 +259,7 @@ export async function moveMessage(id, destinationId, input = {}) {
   const destination = cleanText(destinationId, "");
   if (!cleanId || !destination) throw new Error("MAIL_MOVE_ARGUMENT_REQUIRED");
   const payload = await Http.post(
-    endpoint(`messages/${encodeURIComponent(cleanId)}/move`),
+    mailboxEndpoint(`messages/${encodeURIComponent(cleanId)}/move`, input),
     { destinationId: destination },
     options(input)
   );
@@ -240,7 +269,7 @@ export async function moveMessage(id, destinationId, input = {}) {
 export async function deleteMessage(id, input = {}) {
   const cleanId = cleanText(id, "");
   if (!cleanId) throw new Error("MAIL_MESSAGE_ID_REQUIRED");
-  const payload = await Http.delete(endpoint(`messages/${encodeURIComponent(cleanId)}`), options(input));
+  const payload = await Http.delete(mailboxEndpoint(`messages/${encodeURIComponent(cleanId)}`, input), options(input));
   return payload?.deleted === true;
 }
 
@@ -257,7 +286,7 @@ function normalizeWritePayload(payload = {}) {
 }
 
 export async function sendMessage(payload = {}, input = {}) {
-  const response = await Http.post(endpoint("send"), normalizeWritePayload(payload), {
+  const response = await Http.post(mailboxEndpoint("send", input), normalizeWritePayload(payload), {
     ...options(input),
     timeout: SEND_TIMEOUT,
   });
@@ -268,7 +297,7 @@ export async function replyMessage(id, comment = "", input = {}) {
   const cleanId = cleanText(id, "");
   if (!cleanId) throw new Error("MAIL_MESSAGE_ID_REQUIRED");
   const response = await Http.post(
-    endpoint(`messages/${encodeURIComponent(cleanId)}/reply`),
+    mailboxEndpoint(`messages/${encodeURIComponent(cleanId)}/reply`, input),
     { comment: String(comment ?? "") },
     { ...options(input), timeout: SEND_TIMEOUT }
   );
@@ -279,7 +308,7 @@ export async function replyAllMessage(id, comment = "", input = {}) {
   const cleanId = cleanText(id, "");
   if (!cleanId) throw new Error("MAIL_MESSAGE_ID_REQUIRED");
   const response = await Http.post(
-    endpoint(`messages/${encodeURIComponent(cleanId)}/reply-all`),
+    mailboxEndpoint(`messages/${encodeURIComponent(cleanId)}/reply-all`, input),
     { comment: String(comment ?? "") },
     { ...options(input), timeout: SEND_TIMEOUT }
   );
@@ -290,7 +319,7 @@ export async function forwardMessage(id, payload = {}, input = {}) {
   const cleanId = cleanText(id, "");
   if (!cleanId) throw new Error("MAIL_MESSAGE_ID_REQUIRED");
   const response = await Http.post(
-    endpoint(`messages/${encodeURIComponent(cleanId)}/forward`),
+    mailboxEndpoint(`messages/${encodeURIComponent(cleanId)}/forward`, input),
     {
       to: safeArray(payload.to).map((item) => cleanText(item, "")).filter(Boolean),
       comment: String(payload.comment ?? ""),
@@ -301,7 +330,7 @@ export async function forwardMessage(id, payload = {}, input = {}) {
 }
 
 export async function createDraft(payload = {}, input = {}) {
-  const response = await Http.post(endpoint("drafts"), normalizeWritePayload(payload), {
+  const response = await Http.post(mailboxEndpoint("drafts", input), normalizeWritePayload(payload), {
     ...options(input),
     timeout: SEND_TIMEOUT,
   });
@@ -312,7 +341,7 @@ export async function updateDraft(id, payload = {}, input = {}) {
   const cleanId = cleanText(id, "");
   if (!cleanId) throw new Error("MAIL_DRAFT_ID_REQUIRED");
   const response = await Http.patch(
-    endpoint(`drafts/${encodeURIComponent(cleanId)}`),
+    mailboxEndpoint(`drafts/${encodeURIComponent(cleanId)}`, input),
     normalizeWritePayload(payload),
     { ...options(input), timeout: SEND_TIMEOUT }
   );
@@ -323,7 +352,7 @@ export async function sendDraft(id, input = {}) {
   const cleanId = cleanText(id, "");
   if (!cleanId) throw new Error("MAIL_DRAFT_ID_REQUIRED");
   const response = await Http.post(
-    endpoint(`drafts/${encodeURIComponent(cleanId)}/send`),
+    mailboxEndpoint(`drafts/${encodeURIComponent(cleanId)}/send`, input),
     {},
     { ...options(input), timeout: SEND_TIMEOUT }
   );
@@ -334,7 +363,7 @@ export async function listAttachments(messageId, input = {}) {
   const cleanId = cleanText(messageId, "");
   if (!cleanId) throw new Error("MAIL_MESSAGE_ID_REQUIRED");
   const response = await Http.get(
-    endpoint(`messages/${encodeURIComponent(cleanId)}/attachments`),
+    mailboxEndpoint(`messages/${encodeURIComponent(cleanId)}/attachments`, input),
     options(input)
   );
   return Object.freeze(safeArray(response?.attachments).map(normalizeAttachment).filter((item) => item.id));
@@ -346,8 +375,9 @@ export async function downloadAttachment(messageId, attachmentId, input = {}) {
   if (!cleanMessageId || !cleanAttachmentId) throw new Error("MAIL_ATTACHMENT_ID_REQUIRED");
 
   return Http.downloadBlob(
-    endpoint(
-      `messages/${encodeURIComponent(cleanMessageId)}/attachments/${encodeURIComponent(cleanAttachmentId)}/download`
+    mailboxEndpoint(
+      `messages/${encodeURIComponent(cleanMessageId)}/attachments/${encodeURIComponent(cleanAttachmentId)}/download`,
+      input
     ),
     {
       ...options(input),
@@ -365,7 +395,7 @@ export async function uploadAttachment(messageId, file, input = {}) {
   body.append("file", file, file.name);
 
   const response = await Http.post(
-    endpoint(`messages/${encodeURIComponent(cleanMessageId)}/attachments`),
+    mailboxEndpoint(`messages/${encodeURIComponent(cleanMessageId)}/attachments`, input),
     body,
     {
       ...options(input),

@@ -5,7 +5,8 @@
    Responsabilidad:
    - Orquestar el boot mínimo de la SPA.
    - Inicializar Core/Auth/UI.
-   - Restaurar sesión antes del primer render del Router.
+   - Restaurar sesión antes del primer render en rutas privadas.
+   - Permitir fast-path sin red para la home pública exacta (/).
    - Arrancar Router respetando la URL real actual.
    - Mantener tokens/rutas sensibles fuera de módulos que no los necesitan.
    - Delegar el loader exclusivamente en /src/app/loader.js.
@@ -34,11 +35,13 @@ import {
 } from "./loader.js";
 
 export const APP_VERSION =
-  "app.minimal.v4-hardened";
+  "app.minimal.v5-public-fast-boot";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
+
+const PUBLIC_HOME_PATH = "/";
 
 const AUTH_BOOT_OPTIONS =
   Object.freeze({
@@ -72,7 +75,9 @@ const LEGACY_RESET_TOKEN_PATH =
 ========================================================= */
 
 let bootPromise = null;
+let publicHydrationPromise = null;
 let ready = false;
+let publicFastBoot = false;
 
 let bootPhase =
   BOOT_PHASES.IDLE;
@@ -188,6 +193,54 @@ function resolveInitialPath(
     options?.initialPath ||
     currentPath(),
     "/"
+  );
+}
+
+function pathnameFromInitialPath(
+  value = "/"
+) {
+  const raw = cleanText(
+    value,
+    "/"
+  );
+
+  try {
+    if (
+      /^https?:\/\//i.test(raw) &&
+      isBrowser()
+    ) {
+      return new URL(
+        raw,
+        window.location.origin
+      ).pathname || "/";
+    }
+  } catch {
+    return "/";
+  }
+
+  let pathname = raw
+    .split("#")[0]
+    .split("?")[0]
+    .replace(/\\/g, "/") || "/";
+
+  if (!pathname.startsWith("/")) {
+    pathname = `/${pathname}`;
+  }
+
+  pathname = pathname
+    .replace(/\/{2,}/g, "/")
+    .replace(/\/+$/g, "") || "/";
+
+  return pathname;
+}
+
+function isPublicHomeFastPath(
+  rawInitialPath = "/"
+) {
+  return (
+    pathnameFromInitialPath(
+      rawInitialPath
+    ) === PUBLIC_HOME_PATH
   );
 }
 
@@ -700,6 +753,56 @@ async function initGlobalUI(
   };
 }
 
+function notifyPublicHomeSessionHydrated() {
+  if (!isBrowser()) return false;
+
+  try {
+    document.dispatchEvent(
+      new Event("public-home:ready")
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function hydratePublicHomeInBackground(
+  payload = {}
+) {
+  if (publicHydrationPromise) {
+    return publicHydrationPromise;
+  }
+
+  publicHydrationPromise = (async () => {
+    await initToast(payload);
+    await restoreAuth(payload);
+    await initGlobalUI(payload);
+    notifyPublicHomeSessionHydrated();
+    return true;
+  })()
+    .catch((error) => {
+      try {
+        console.error(
+          "[Onion App] Hidratación pública no crítica:",
+          safeError(error)
+        );
+      } catch {
+        // noop
+      }
+      return false;
+    })
+    .finally(() => {
+      publicHydrationPromise = null;
+      if (ready) {
+        setBootPhase(
+          BOOT_PHASES.READY
+        );
+      }
+    });
+
+  return publicHydrationPromise;
+}
+
 async function startRouter(
   payload = {},
   rawInitialPath = "/"
@@ -744,6 +847,7 @@ function markBooting() {
     null;
 
   resetBootSteps();
+  publicFastBoot = false;
 
   setBootPhase(
     BOOT_PHASES.BOOTING
@@ -844,8 +948,46 @@ async function runBoot(
 
   markBooting();
 
+  publicFastBoot =
+    isPublicHomeFastPath(
+      rawInitialPath
+    );
+
+  await initCore(
+    payload
+  );
+
   /*
-    Orden contractual:
+    Fast-path exclusivo de la home pública exacta (/):
+    - Auth.init instala el contexto local, pero NO restaura por red.
+    - Router puede renderizar public-home porque la ruta es pública.
+    - El loader se retira antes de cualquier refresh/me remoto.
+    - Toast, restore de sesión y chrome se hidratan después en background.
+
+    Ninguna otra ruta usa este atajo. Login/reset/activation y todas las
+    rutas privadas mantienen el orden histórico seguro de boot.
+  */
+  if (publicFastBoot) {
+    await initAuth(
+      payload
+    );
+
+    await startRouter(
+      payload,
+      rawInitialPath
+    );
+
+    markReady();
+
+    void hydratePublicHomeInBackground(
+      payload
+    );
+
+    return App;
+  }
+
+  /*
+    Orden contractual para rutas no fast-path:
 
     1. Core.
     2. Toast opcional.
@@ -854,14 +996,7 @@ async function runBoot(
     5. Sidebar/Topbar.
     6. Router.start con URL real.
     7. Loader hidden / App ready.
-
-    Así una recarga de una ruta privada espera al intento de restore
-    y una ruta pública sensible conserva su token hasta llegar al Router.
   */
-  await initCore(
-    payload
-  );
-
   await initToast(
     payload
   );
@@ -982,6 +1117,12 @@ export function getAppSnapshot() {
 
     lastError,
     lastRestore,
+
+    publicFastBoot,
+    publicHydrationPending:
+      Boolean(
+        publicHydrationPromise
+      ),
 
     modules:
       Object.freeze({

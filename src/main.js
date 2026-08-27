@@ -15,7 +15,7 @@
    - Sin Auth, Router, Store, Services, fetch, storage ni dominio.
 ========================================================= */
 
-export const MAIN_VERSION = "main.minimal.v8-canonical-loader";
+export const MAIN_VERSION = "main.minimal.v9-public-lean-graph";
 
 const APP_MODULE = "./app/index.js";
 const LOADER_MODULE = "./app/loader.js";
@@ -82,6 +82,23 @@ function redact(value = "") {
 
 function getSafeInitialPath() {
   return redact(getInitialPath()) || "/";
+}
+
+function isExactPublicHome(
+  value = getInitialPath()
+) {
+  try {
+    const raw = String(value || "/");
+    const pathname = raw
+      .split("#")[0]
+      .split("?")[0]
+      .replace(/\/g, "/")
+      .replace(/\/{2,}/g, "/")
+      .replace(/\/+$/g, "") || "/";
+    return pathname === "/";
+  } catch {
+    return false;
+  }
 }
 
 function safeError(error = null) {
@@ -377,6 +394,22 @@ function enhancementSnapshot(enhancements) {
     : null;
 }
 
+function startDeferredPreRouterEnhancements(enhancements) {
+  return Promise.resolve()
+    .then(() => enhancements.initPreRouter())
+    .catch((error) => {
+      try {
+        console.error(
+          "[Onion Main] Pre-router diferido no crítico:",
+          safeError(error)
+        );
+      } catch {
+        // noop
+      }
+      return false;
+    });
+}
+
 function startPostRouterEnhancements(enhancements) {
   const task = Promise.resolve()
     .then(() => enhancements.initPostRouter())
@@ -407,14 +440,18 @@ async function runBoot() {
   setAppState("booting");
 
   const enhancements = await loadEnhancements();
+  const rawInitialPath = getInitialPath();
+  const publicHomeFastPath = isExactPublicHome(rawInitialPath);
 
   /*
-    ticket-deeplink debe canonicalizar /tickets/<id> antes de capturar
-    la ruta del Router. Chrome también se prepara antes del App.
+    En rutas privadas/token, ticket-deeplink y Chrome conservan su barrera
+    histórica previa al App. En la home pública exacta no son necesarios para
+    el primer paint y se difieren hasta después de bootApp().
   */
-  await enhancements.initPreRouter();
+  if (!publicHomeFastPath) {
+    await enhancements.initPreRouter();
+  }
 
-  const rawInitialPath = getInitialPath();
   const safeInitialPath = redact(rawInitialPath) || "/";
 
   writeMainSnapshot({
@@ -444,10 +481,12 @@ async function runBoot() {
   });
 
   /*
-    El App/Router ya está listo. A partir de aquí los módulos son progresivos:
-    empiezan en background y no retrasan `ready` ni convierten un fallo aislado
-    en un fatal de arranque.
+    El App/Router ya está listo. En `/`, completamos también los módulos
+    pre-router que se excluyeron deliberadamente del camino crítico.
   */
+  if (publicHomeFastPath) {
+    void startDeferredPreRouterEnhancements(enhancements);
+  }
   void startPostRouterEnhancements(enhancements);
 
   setAppState("ready");

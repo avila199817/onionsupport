@@ -7,10 +7,23 @@
     vivir como <link> incondicionales en el documento.
   */
   try {
-    if (window.location.pathname !== "/") return;
-
     const head = document.head;
     if (!head) return;
+
+    if (window.location.pathname !== "/") {
+      for (const href of [
+        "/src/features/ticket-deeplink/index.js",
+        "/src/ui/chrome/index.js",
+      ]) {
+        if (head.querySelector(`link[href="${href}"]`)) continue;
+        const link = document.createElement("link");
+        link.rel = "modulepreload";
+        link.href = href;
+        link.dataset.onionPrivateBootPreload = "true";
+        head.appendChild(link);
+      }
+      return;
+    }
 
     const heroImageSrcset = [
       ["/src/media/img/Cristian_Avila_480.webp", "480w"].join(" "),

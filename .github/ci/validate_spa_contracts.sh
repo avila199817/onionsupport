@@ -129,3 +129,4 @@ node --experimental-default-type=module .github/scripts/home_runtime_state_contr
 node --experimental-default-type=module .github/scripts/home_view_runtime_context_contract.mjs
 node --experimental-default-type=module .github/scripts/navigation_performance_contract.mjs
 node --experimental-default-type=module .github/scripts/incidencias_detail_request_contract.mjs
+node --experimental-default-type=module .github/scripts/facturas_document_flow_contract.mjs

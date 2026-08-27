@@ -1,0 +1,51 @@
+name: TEMP Correo shared mailbox
+
+on:
+  push:
+    branches:
+      - feat/correo-shared-mailbox-selector
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ contains(github.event.head_commit.message, 'run Correo shared mailbox patch') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: feat/correo-shared-mailbox-selector
+          fetch-depth: 0
+
+      - name: Apply fail-closed patch
+        run: python3 .github/scripts/tmp_correo_shared_mailbox_patch.py
+
+      - name: Validate Correo mailbox candidate
+        run: |
+          set -euo pipefail
+          node --check src/views/correo/correo.api.js
+          node --check src/views/correo/index.js
+          node --check src/views/correo/correo.template.js
+          python3 .github/scripts/correo_integrity.py
+          python3 .github/scripts/repo_integrity.py
+          bash .github/ci/validate_spa_contracts.sh
+          node .github/scripts/continuous_scroll_smoke.mjs
+          python3 .github/scripts/artifact_hygiene.py
+          git diff --check
+
+      - name: Commit product changes only
+        run: |
+          set -euo pipefail
+          git config user.name 'Onion Support'
+          git config user.email 'cristian@onionsupport.com'
+          git add src/views/correo/correo.api.js src/views/correo/index.js src/views/correo/correo.template.js src/css/views/correo/index.css .github/scripts/correo_integrity.py
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo 'No product changes to commit'
+            exit 1
+          fi
+          git commit -m 'feat: añadir selector real de buzón compartido en Correo'
+          git push origin HEAD:feat/correo-shared-mailbox-selector

@@ -27,6 +27,7 @@ import {
   renderMoveMenu,
   renderReader,
   renderShell,
+  renderSignatureModal,
 } from "./correo.template.js";
 
 export const CORREO_VIEW_VERSION = "correo.view.microsoft.production.v6-canonical-user";
@@ -38,6 +39,8 @@ const NOTIFICATION_PREF_KEY = "onion.correo.notifications.v1";
 const NOTIFICATION_POLL_MS = 60000;
 const MAX_NOTIFICATION_IDS = 80;
 const VIEW_CACHE_TTL_MS = 60_000;
+const SIGNATURE_STORAGE_PREFIX = "onion.correo.signature.v1";
+const SIGNATURE_MAX_CHARS = 4000;
 
 function primeNotificationPreference() {
   if (typeof window === "undefined" || !("Notification" in window)) return;
@@ -51,6 +54,52 @@ function primeNotificationPreference() {
 }
 
 primeNotificationPreference();
+
+function signatureStorageKey(ownerKey = "") {
+  const owner = cleanText(ownerKey, "anonymous").toLocaleLowerCase("es-ES");
+  return `${SIGNATURE_STORAGE_PREFIX}:${encodeURIComponent(owner)}`;
+}
+
+function normalizeSignatureText(value = "") {
+  return String(value ?? "").replace(/\r\n?/g, "\n").slice(0, SIGNATURE_MAX_CHARS);
+}
+
+function readSignaturePreference(ownerKey = "") {
+  const fallback = Object.freeze({ text: "", enabled: true });
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(signatureStorageKey(ownerKey));
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return Object.freeze({
+      text: normalizeSignatureText(parsed?.text || ""),
+      enabled: parsed?.enabled !== false,
+    });
+  } catch {
+    return fallback;
+  }
+}
+
+function writeSignaturePreference(ownerKey = "", preference = {}) {
+  if (typeof window === "undefined") return false;
+  try {
+    const value = {
+      text: normalizeSignatureText(preference?.text || ""),
+      enabled: preference?.enabled !== false,
+    };
+    window.localStorage.setItem(signatureStorageKey(ownerKey), JSON.stringify(value));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function applySignature(body = "", preference = {}) {
+  const base = String(body ?? "").replace(/\r\n?/g, "\n").trimEnd();
+  const signature = normalizeSignatureText(preference?.text || "").trim();
+  if (preference?.enabled === false || !signature) return base;
+  return base ? `${base}\n\n${signature}` : signature;
+}
 
 const VIEW_CACHE = {
   ownerKey: "",
@@ -858,6 +907,9 @@ function createCorreoController(host, context = {}) {
         body: message?.body?.content || "",
       };
     }
+    if (mode !== "draft-edit") {
+      input = { ...input, body: applySignature(input.body || "", readSignaturePreference(state.accountUser.cacheKey)) };
+    }
     modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     modalRoot.innerHTML = renderComposeModal(input);
     document.documentElement.classList.add("correo-modal-open");
@@ -867,6 +919,43 @@ function createCorreoController(host, context = {}) {
         : modalRoot.querySelector("textarea[name='body']");
       preferred?.focus();
     });
+  }
+
+
+  function openSignatureSettings() {
+    const modalRoot = host.querySelector("[data-correo-modal-root]");
+    if (!modalRoot || confirmResolver || state.busyAction) return;
+    closeAccountMenu();
+    const preference = readSignaturePreference(state.accountUser.cacheKey);
+    modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    modalRoot.innerHTML = renderSignatureModal(preference);
+    document.documentElement.classList.add("correo-modal-open");
+    requestAnimationFrame(() => modalRoot.querySelector("[data-correo-signature-input]")?.focus());
+  }
+
+  function updateSignaturePreview(target) {
+    const form = target?.closest?.("[data-correo-signature-form]");
+    if (!form) return;
+    const value = normalizeSignatureText(target.value || "");
+    if (target.value !== value) target.value = value;
+    const count = form.querySelector("[data-correo-signature-count]");
+    if (count) count.textContent = `${value.length}/${SIGNATURE_MAX_CHARS}`;
+    const preview = form.querySelector("[data-correo-signature-preview]");
+    if (preview) preview.textContent = value.trim() || "Tu firma aparecerá aquí cuando la guardes.";
+  }
+
+  function saveSignatureSettings(form) {
+    if (!form || state.busyAction) return;
+    const data = new FormData(form);
+    const textValue = normalizeSignatureText(data.get("signature") || "");
+    const enabled = data.get("enabled") === "1";
+    const saved = writeSignaturePreference(state.accountUser.cacheKey, { text: textValue, enabled });
+    if (!saved) {
+      toast("No se pudo guardar la firma en este navegador.", "error");
+      return;
+    }
+    closeModal();
+    toast(textValue.trim() ? "Firma de correo guardada." : "Firma eliminada.", "success");
   }
 
   function closeModal() {
@@ -1177,6 +1266,7 @@ function createCorreoController(host, context = {}) {
     if (action === "edit-draft") return openCompose("draft-edit");
     if (action === "account-menu") return toggleAccountMenu(target);
     if (action === "notifications") return toggleNotifications();
+    if (action === "signature") return openSignatureSettings();
     if (action === "save-draft") {
       const form = target.closest("[data-correo-compose-form]");
       if (form) return saveDraft(form);
@@ -1229,6 +1319,11 @@ function createCorreoController(host, context = {}) {
       return;
     }
 
+    if (target?.matches?.("[data-correo-signature-input]")) {
+      updateSignaturePreview(target);
+      return;
+    }
+
     if (target?.matches?.("[data-correo-attachments-input]")) {
       const summary = target.closest(".correo-compose-attachments")?.querySelector("[data-correo-file-summary]");
       const files = [...(target.files || [])];
@@ -1240,6 +1335,12 @@ function createCorreoController(host, context = {}) {
   }
 
   function onSubmit(event) {
+    const signatureForm = event.target?.closest?.("[data-correo-signature-form]");
+    if (signatureForm && host.contains(signatureForm)) {
+      event.preventDefault();
+      saveSignatureSettings(signatureForm);
+      return;
+    }
     const form = event.target?.closest?.("[data-correo-compose-form]");
     if (!form || !host.contains(form)) return;
     event.preventDefault();
@@ -1262,13 +1363,18 @@ function createCorreoController(host, context = {}) {
     if (destroyed) return;
     const confirmDialog = host.querySelector("[data-correo-confirm-dialog]");
     const composeDialog = host.querySelector(".correo-compose[role='dialog']");
-    const modalOpen = Boolean(composeDialog);
+    const signatureDialog = host.querySelector("[data-correo-signature-dialog]");
+    const modalOpen = Boolean(composeDialog || signatureDialog);
     if (confirmDialog && event.key === "Tab") {
       trapModalFocus(event, confirmDialog);
       return;
     }
     if (composeDialog && event.key === "Tab") {
       trapModalFocus(event, composeDialog);
+      return;
+    }
+    if (signatureDialog && event.key === "Tab") {
+      trapModalFocus(event, signatureDialog);
       return;
     }
     if (event.key === "Escape") {
@@ -1293,7 +1399,7 @@ function createCorreoController(host, context = {}) {
       }
       return;
     }
-    if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && modalOpen) {
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && composeDialog) {
       const form = host.querySelector("[data-correo-compose-form]");
       if (form && !state.busyAction) {
         event.preventDefault();
@@ -1398,6 +1504,7 @@ function createCorreoController(host, context = {}) {
         searchTerm: state.searchTerm,
         activeFilter: state.activeFilter,
         notifications: notificationUiState().enabled,
+        signatureConfigured: Boolean(readSignaturePreference(state.accountUser.cacheKey).text.trim()),
         cacheIsolated: true,
         cacheTtlMs: VIEW_CACHE_TTL_MS,
         routeCommitNonBlocking: true,

@@ -42,9 +42,31 @@ for required in ('.correo-confirm-overlay', '.correo-confirm-backdrop', '.correo
 if css.count('@layer views {') != 1:
     errors.append("Correo index.css debe declarar una sola capa views")
 
+if '<kbd>⌘ K</kbd>' in template:
+    errors.append("Correo no debe mostrar un atajo Mac dentro del buscador")
+for required in (
+    'SIGNATURE_STORAGE_PREFIX = "onion.correo.signature.v1"', 'SIGNATURE_MAX_CHARS = 4000',
+    'readSignaturePreference(', 'writeSignaturePreference(', 'applySignature(', 'openSignatureSettings(',
+    'signatureConfigured:',
+):
+    if required not in index:
+        errors.append(f"falta contrato de firma: {required}")
+for required in (
+    'data-correo-action="signature"', 'data-correo-signature-form', 'data-correo-signature-input',
+    'correo-boot-folder-stack', 'correo-boot-message-stack', 'correo-compose-cta', 'renderSignatureModal',
+):
+    if required not in template:
+        errors.append(f"falta contrato UX final de Correo: {required}")
+for required in (
+    '.correo-signature-dialog', '.correo-signature-preview', '.correo-compose-cta',
+    '.correo-boot-folder-stack', '.correo-boot-message-stack',
+):
+    if required not in css:
+        errors.append(f"falta CSS UX final de Correo: {required}")
+
 if errors:
     print("Correo integrity FAILED")
     for error in errors:
         print(f"- {error}")
     sys.exit(1)
-print("Correo integrity OK · single CSS authority · isolated cache · abortable IO · accessible modals · editable drafts")
+print("Correo integrity OK · canonical CSS · fixed boot geometry · polished compose CTA · account-scoped signature · abortable IO · accessible modals")

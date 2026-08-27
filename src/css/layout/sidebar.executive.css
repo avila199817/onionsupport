@@ -1,0 +1,691 @@
+/* =========================================================
+   ONION SUPPORT — SIDEBAR EXECUTIVE
+   Archivo: /src/css/layout/sidebar.executive.css
+
+   FINAL VISUAL LAYER · CHATGPT-INSPIRED · V1
+
+   Objetivo:
+   - afinar el Sidebar canónico sin duplicar su lógica;
+   - mantener open/collapsed, Auth, Router y dropdown existentes;
+   - elevar jerarquía, densidad, foco y acabado ejecutivo;
+   - dejar Cuenta en el perfil inferior y evitar duplicidad visual;
+   - separar herramientas de sistema del flujo operativo;
+   - añadir tooltips al rail colapsado sin JS adicional;
+   - preservar dark/light, reduced-motion, forced-colors y print.
+
+   Regla:
+   - esta hoja NO gobierna offsets globales ni geometría del shell;
+     chrome.css sigue siendo la autoridad de layout exterior.
+========================================================= */
+
+/* =========================================================
+   SYSTEM TOKENS
+========================================================= */
+
+.sidebar {
+  --sb-bg: #171717;
+  --sb-border: rgba(255, 255, 255, .075);
+  --sb-border-strong: rgba(255, 255, 255, .11);
+  --sb-hover: #262626;
+  --sb-active: #2f2f2f;
+  --sb-active-hover: #343434;
+  --sb-text: #e8e8e8;
+  --sb-text-strong: #f7f7f7;
+  --sb-text-muted: #a7a7a7;
+  --sb-text-active: #fff;
+  --sb-icon: #b7b7b7;
+  --sb-icon-active: #f7f7f7;
+  --sb-menu-bg: #202020;
+  --sb-menu-border: rgba(255, 255, 255, .11);
+  --sb-menu-hover: #2d2d2d;
+  --sb-menu-active: #363636;
+  --sb-menu-separator: rgba(255, 255, 255, .075);
+  --sb-avatar-bg: #2d2d2d;
+  --sb-avatar-text: #f7f7f7;
+  --sb-divider: rgba(255, 255, 255, .075);
+  --sb-tooltip-bg: #2b2b2b;
+  --sb-tooltip-border: rgba(255, 255, 255, .10);
+  --sb-tooltip-text: #fff;
+  --sb-item-h: 44px;
+  --sb-item-radius: 11px;
+  --sb-icon-box: 32px;
+  --sb-icon-size: 19px;
+  --sb-avatar-size: 36px;
+  --sb-avatar-collapsed-size: 34px;
+  --sb-toggle-size: 36px;
+  --sb-logo-w: 25px;
+  --sb-logo-h: 25px;
+  --sb-fast: .14s;
+  --sb-normal: .22s;
+  --sb-ease-fast: cubic-bezier(.2, .72, .2, 1);
+  --sb-exec-shadow:
+    0 18px 48px rgba(0, 0, 0, .32),
+    0 2px 8px rgba(0, 0, 0, .20);
+
+  border-inline-end-color: var(--sb-border);
+}
+
+:where(
+  html[data-theme="light"],
+  body[data-theme="light"]
+) .sidebar,
+.sidebar[data-theme="light"] {
+  --sb-bg: #f9f9f9;
+  --sb-border: rgba(13, 13, 13, .075);
+  --sb-border-strong: rgba(13, 13, 13, .10);
+  --sb-hover: #efefef;
+  --sb-active: #e7e7e7;
+  --sb-active-hover: #e2e2e2;
+  --sb-text: #262626;
+  --sb-text-strong: #171717;
+  --sb-text-muted: #737373;
+  --sb-text-active: #111;
+  --sb-icon: #525252;
+  --sb-icon-active: #171717;
+  --sb-menu-bg: #fff;
+  --sb-menu-border: rgba(13, 13, 13, .10);
+  --sb-menu-hover: #f3f3f3;
+  --sb-menu-active: #e9e9e9;
+  --sb-menu-separator: rgba(13, 13, 13, .07);
+  --sb-avatar-bg: #e5e5e5;
+  --sb-avatar-text: #171717;
+  --sb-divider: rgba(13, 13, 13, .07);
+  --sb-tooltip-bg: #202020;
+  --sb-tooltip-border: rgba(0, 0, 0, .12);
+  --sb-tooltip-text: #fff;
+  --sb-exec-shadow:
+    0 20px 58px rgba(13, 13, 13, .14),
+    0 4px 16px rgba(13, 13, 13, .08);
+}
+
+/* =========================================================
+   OPEN SHELL · INNER RHYTHM
+========================================================= */
+
+.sidebar:is(
+  .is-open,
+  [data-open="true"],
+  [data-sidebar-state="open"]
+) {
+  --sb-pad-x: 10px;
+}
+
+.sidebar-header {
+  min-block-size: 58px;
+  padding: 5px 2px 9px;
+}
+
+.sidebar-brand {
+  inline-size: 40px;
+  min-inline-size: 40px;
+  max-inline-size: 40px;
+  min-block-size: 40px;
+  flex: 0 0 40px;
+  justify-content: center;
+  padding: 0;
+  border-radius: 11px;
+  opacity: .96;
+}
+
+.sidebar-brand:hover {
+  background: var(--sb-hover);
+  opacity: 1;
+}
+
+.sidebar-brand:active {
+  background: var(--sb-active);
+  transform: scale(.97);
+}
+
+.sidebar-brand-content {
+  justify-content: center;
+}
+
+.sidebar-toggle {
+  border-radius: 10px;
+  color: var(--sb-icon);
+}
+
+.sidebar-toggle:hover {
+  background: var(--sb-hover);
+  color: var(--sb-icon-active);
+}
+
+.sidebar-toggle:active {
+  background: var(--sb-active);
+}
+
+/* =========================================================
+   NAV · EXECUTIVE DENSITY
+========================================================= */
+
+.sidebar-nav {
+  padding-block: 8px 12px;
+  padding-inline: 0;
+  scrollbar-width: none;
+}
+
+.sidebar-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.sidebar-menu {
+  gap: 2px;
+}
+
+.sidebar-link {
+  min-block-size: var(--sb-item-h);
+  gap: 7px;
+  padding: 5px 8px;
+  border-color: transparent;
+  border-radius: var(--sb-item-radius);
+  color: var(--sb-text);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  letter-spacing: -.006em;
+  overflow: visible;
+}
+
+.sidebar-link:hover {
+  border-color: transparent;
+  background: var(--sb-hover);
+  color: var(--sb-text-strong);
+}
+
+.sidebar-link:active {
+  background: var(--sb-active);
+  transform: scale(.994);
+}
+
+.sidebar-link:is(
+  [aria-current="page"],
+  [data-sidebar-active="true"],
+  .is-active
+) {
+  border-color: transparent;
+  background: var(--sb-active);
+  color: var(--sb-text-active);
+  box-shadow: none;
+  font-weight: 600;
+}
+
+.sidebar-link:is(
+  [aria-current="page"],
+  [data-sidebar-active="true"],
+  .is-active
+):hover {
+  background: var(--sb-active-hover);
+}
+
+.sidebar-link-icon {
+  inline-size: var(--sb-icon-box);
+  min-inline-size: var(--sb-icon-box);
+  block-size: var(--sb-icon-box);
+  flex-basis: var(--sb-icon-box);
+  color: var(--sb-icon);
+  opacity: .94;
+}
+
+.sidebar-link:is(
+  :hover,
+  [aria-current="page"],
+  [data-sidebar-active="true"],
+  .is-active
+) .sidebar-link-icon {
+  color: var(--sb-icon-active);
+  opacity: 1;
+}
+
+.sidebar-link-label {
+  color: currentColor;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: inherit;
+  letter-spacing: inherit;
+}
+
+.sidebar-link-badge {
+  min-inline-size: 19px;
+  block-size: 19px;
+  padding-inline: 5px;
+  border-color: transparent;
+  background: color-mix(in srgb, var(--sb-text) 9%, transparent);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/* =========================================================
+   NAV HIERARCHY
+   Cuenta vive en el perfil inferior, como en ChatGPT.
+========================================================= */
+
+.sidebar-menu-item[data-route$="/cuenta"] {
+  display: none;
+}
+
+.sidebar-menu-item[data-route$="/servidor"] {
+  margin-block-start: 10px;
+  padding-block-start: 9px;
+  border-block-start: 1px solid var(--sb-divider);
+}
+
+/* =========================================================
+   FOOTER · ACCOUNT
+========================================================= */
+
+.sidebar-footer {
+  padding-block: 10px 2px;
+  border-block-start: 1px solid var(--sb-divider);
+}
+
+.sidebar-account-trigger {
+  min-block-size: 54px;
+  gap: 10px;
+  padding: 7px 8px;
+  border-color: transparent;
+  border-radius: 12px;
+  color: var(--sb-text);
+}
+
+.sidebar-account-trigger:hover,
+.sidebar.is-account-menu-open .sidebar-account-trigger {
+  border-color: transparent;
+  background: var(--sb-hover);
+  color: var(--sb-text-strong);
+}
+
+.sidebar-account-trigger:active {
+  background: var(--sb-active);
+  transform: scale(.994);
+}
+
+:where(
+  .sidebar-user-avatar,
+  .sidebar-account-menu-avatar
+) {
+  border-color: color-mix(in srgb, var(--sb-text) 12%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--sb-bg) 72%, transparent);
+}
+
+.sidebar-user-name {
+  color: var(--sb-text-strong);
+  font-size: 14px;
+  line-height: 18px;
+  font-weight: 600;
+  letter-spacing: -.008em;
+}
+
+.sidebar-user-role {
+  color: var(--sb-text-muted);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+}
+
+.sidebar-account-chevron {
+  inline-size: 22px;
+  block-size: 22px;
+  flex-basis: 22px;
+  color: var(--sb-text-muted);
+}
+
+.sidebar.is-account-menu-open .sidebar-account-chevron {
+  color: var(--sb-icon-active);
+  transform: rotate(-90deg);
+}
+
+/* =========================================================
+   ACCOUNT POPOVER
+========================================================= */
+
+.sidebar-account-menu {
+  inset-inline: 0;
+  inset-block-end: calc(100% + 9px);
+  gap: 2px;
+  padding: 8px;
+  border-color: var(--sb-menu-border);
+  border-radius: 16px;
+  background: var(--sb-menu-bg);
+  box-shadow: var(--sb-exec-shadow);
+}
+
+.sidebar-account-menu-header {
+  gap: 10px;
+  padding: 9px 8px 10px;
+  border-radius: 10px;
+}
+
+.sidebar-account-menu-user-name {
+  color: var(--sb-text-strong);
+  font-size: 14px;
+  line-height: 18px;
+  font-weight: 600;
+  letter-spacing: -.008em;
+}
+
+.sidebar-account-menu-user-meta {
+  color: var(--sb-text-muted);
+}
+
+.sidebar-account-menu-group {
+  gap: 2px;
+  padding-block: 5px;
+}
+
+.sidebar-account-menu-item {
+  min-block-size: 40px;
+  gap: 9px;
+  padding: 7px 9px;
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+}
+
+.sidebar-account-menu-item:hover {
+  border-color: transparent;
+  background: var(--sb-menu-hover);
+}
+
+.sidebar-account-menu-item:active {
+  background: var(--sb-menu-active);
+}
+
+/* =========================================================
+   FOCUS · ACCESSIBLE BUT QUIET
+========================================================= */
+
+.sidebar :where(a, button):focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--sb-bg),
+    0 0 0 4px color-mix(in srgb, var(--sb-text-strong) 52%, transparent);
+}
+
+/* =========================================================
+   COLLAPSED RAIL · CHATGPT-LIKE
+========================================================= */
+
+.sidebar:is(
+  .is-collapsed,
+  [data-open="false"],
+  [data-sidebar-state="collapsed"]
+) {
+  --sb-rail-slot: 44px;
+  --sb-toggle-slot: 40px;
+}
+
+.sidebar:is(
+  .is-collapsed,
+  [data-open="false"],
+  [data-sidebar-state="collapsed"]
+) .sidebar-header {
+  padding-block-start: 4px;
+}
+
+.sidebar:is(
+  .is-collapsed,
+  [data-open="false"],
+  [data-sidebar-state="collapsed"]
+) .sidebar-menu {
+  gap: 4px;
+}
+
+.sidebar:is(
+  .is-collapsed,
+  [data-open="false"],
+  [data-sidebar-state="collapsed"]
+) :is(
+  .sidebar-link,
+  .sidebar-account-trigger
+) {
+  border-radius: 11px;
+}
+
+.sidebar:is(
+  .is-collapsed,
+  [data-open="false"],
+  [data-sidebar-state="collapsed"]
+) .sidebar-footer {
+  inline-size: 100%;
+  padding-block-start: 10px;
+}
+
+.sidebar:is(
+  .is-collapsed,
+  [data-open="false"],
+  [data-sidebar-state="collapsed"]
+) .sidebar-menu-item[data-route$="/servidor"] {
+  inline-size: 100%;
+  margin-block-start: 8px;
+  padding-block-start: 8px;
+}
+
+/* =========================================================
+   COLLAPSED TOOLTIPS
+========================================================= */
+
+.sidebar-link[data-sidebar-key="home"] {
+  --sb-tip: "Inicio";
+}
+
+.sidebar-link[data-sidebar-key="incidencias"] {
+  --sb-tip: "Incidencias";
+}
+
+.sidebar-link[data-sidebar-key="facturas"] {
+  --sb-tip: "Facturas";
+}
+
+.sidebar-link[data-sidebar-key="clientes"] {
+  --sb-tip: "Clientes";
+}
+
+.sidebar-link[data-sidebar-key="usuarios"] {
+  --sb-tip: "Usuarios";
+}
+
+.sidebar-link[data-sidebar-key="correo"] {
+  --sb-tip: "Correo";
+}
+
+.sidebar-link[data-sidebar-key="servidor"] {
+  --sb-tip: "Servidor";
+}
+
+@media (hover: hover) and (pointer: fine) and (min-width: 821px) {
+  .sidebar:is(
+    .is-collapsed,
+    [data-open="false"],
+    [data-sidebar-state="collapsed"]
+  ) .sidebar-nav {
+    overflow: visible;
+  }
+
+  .sidebar:is(
+    .is-collapsed,
+    [data-open="false"],
+    [data-sidebar-state="collapsed"]
+  ) :is(
+    .sidebar-link,
+    .sidebar-toggle,
+    .sidebar-account-trigger
+  )::after {
+    position: absolute;
+    inset-inline-start: calc(100% + 10px);
+    inset-block-start: 50%;
+    z-index: var(--z-tooltip, 70);
+
+    min-block-size: 30px;
+    display: inline-flex;
+    align-items: center;
+
+    padding-inline: 10px;
+
+    border: 1px solid var(--sb-tooltip-border);
+    border-radius: 8px;
+
+    background: var(--sb-tooltip-bg);
+    color: var(--sb-tooltip-text);
+
+    box-shadow: 0 8px 26px rgba(0, 0, 0, .18);
+
+    font-size: 12px;
+    line-height: 1;
+    font-weight: 600;
+    letter-spacing: 0;
+    white-space: nowrap;
+
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+
+    transform: translate(2px, -50%) scale(.98);
+    transform-origin: left center;
+
+    transition:
+      opacity .12s ease,
+      transform .12s ease,
+      visibility .12s ease;
+  }
+
+  .sidebar:is(
+    .is-collapsed,
+    [data-open="false"],
+    [data-sidebar-state="collapsed"]
+  ) .sidebar-link::after {
+    content: var(--sb-tip, "Navegación");
+  }
+
+  .sidebar:is(
+    .is-collapsed,
+    [data-open="false"],
+    [data-sidebar-state="collapsed"]
+  ) .sidebar-toggle::after {
+    content: "Abrir barra lateral";
+  }
+
+  .sidebar:is(
+    .is-collapsed,
+    [data-open="false"],
+    [data-sidebar-state="collapsed"]
+  ) .sidebar-account-trigger::after {
+    content: "Cuenta";
+  }
+
+  .sidebar:is(
+    .is-collapsed,
+    [data-open="false"],
+    [data-sidebar-state="collapsed"]
+  ) :is(
+    .sidebar-link,
+    .sidebar-toggle,
+    .sidebar-account-trigger
+  ):is(:hover, :focus-visible)::after {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(0, -50%) scale(1);
+  }
+}
+
+/* =========================================================
+   CORREO · RETAIN CANONICAL ICON HACK CLEANLY
+========================================================= */
+
+.sidebar-link[data-sidebar-key="correo"] .sidebar-link-icon::before {
+  inline-size: 18px;
+  block-size: 14px;
+  border-width: 1.8px;
+  border-radius: 3px;
+}
+
+/* =========================================================
+   SMALL HEIGHTS · KEEP PROFILE ACCESSIBLE
+========================================================= */
+
+@media (max-height: 650px) and (min-width: 821px) {
+  .sidebar-header {
+    min-block-size: 50px;
+    padding-block-end: 5px;
+  }
+
+  .sidebar-nav {
+    padding-block: 4px 7px;
+  }
+
+  .sidebar-menu {
+    gap: 1px;
+  }
+
+  .sidebar-link {
+    min-block-size: 40px;
+    padding-block: 3px;
+  }
+
+  .sidebar-menu-item[data-route$="/servidor"] {
+    margin-block-start: 6px;
+    padding-block-start: 6px;
+  }
+
+  .sidebar-footer {
+    padding-block-start: 6px;
+  }
+
+  .sidebar-account-trigger {
+    min-block-size: 48px;
+  }
+}
+
+/* =========================================================
+   COARSE POINTERS / MOBILE
+========================================================= */
+
+@media (hover: none) and (pointer: coarse) {
+  .sidebar-link,
+  .sidebar-account-trigger,
+  .sidebar-account-menu-item,
+  .sidebar-toggle,
+  .sidebar-brand {
+    min-block-size: 44px;
+  }
+
+  .sidebar-link:active,
+  .sidebar-account-trigger:active,
+  .sidebar-account-menu-item:active,
+  .sidebar-toggle:active,
+  .sidebar-brand:active {
+    transform: none;
+  }
+}
+
+/* =========================================================
+   REDUCED MOTION / FORCED COLORS
+========================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-brand,
+  .sidebar-link,
+  .sidebar-toggle,
+  .sidebar-account-trigger,
+  .sidebar-account-menu-item,
+  .sidebar-account-chevron {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .sidebar-menu-item[data-route$="/servidor"],
+  .sidebar-footer {
+    border-color: CanvasText;
+  }
+
+  .sidebar-link:is(
+    [aria-current="page"],
+    [data-sidebar-active="true"],
+    .is-active
+  ) {
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
+  }
+}

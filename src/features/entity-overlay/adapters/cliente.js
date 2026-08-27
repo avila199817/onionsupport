@@ -19,7 +19,6 @@ export const ClienteEntityAdapter = createGenericRecordAdapter({
   relationTypes: ["incidencia", "factura", "usuario"],
   moduleLoaders: [
     { kind: "api", load: () => import("../../../views/clientes/clientes.api.js") },
-    { kind: "api", load: () => import("../../../views/clientes/clientes.api.base.js") },
     { kind: "template", load: () => import("../../../views/clientes/clientes.template.modal.js") },
   ],
 });

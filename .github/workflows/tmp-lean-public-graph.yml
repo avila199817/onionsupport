@@ -1,0 +1,209 @@
+name: TEMP Lean Public Graph
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: perf/public-home-fast-boot
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Patch lean public graph
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def must_replace(text, old, new, label):
+              if old not in text:
+                  raise SystemExit(f'anchor not found: {label}')
+              return text.replace(old, new, 1)
+
+          # Router: Auth deja de ser import crítico. Lo consume desde AppCore cuando se hidrata.
+          p = Path('src/router/index.js')
+          text = p.read_text(encoding='utf-8')
+          text = must_replace(
+              text,
+              'import { AppCore } from "../core/index.js";\nimport { Auth } from "../features/auth/index.js";\n',
+              'import { AppCore } from "../core/index.js";\n',
+              'router static auth import',
+          )
+          text = must_replace(
+              text,
+              '''function getAuth() {\n  return (\n    AppCore.auth ||\n    AppCore.Auth ||\n    Auth\n  );\n}\n''',
+              '''function getAuth() {\n  try {\n    return (\n      AppCore.getModule?.("auth") ||\n      AppCore.modules?.get?.("auth") ||\n      AppCore.auth ||\n      AppCore.Auth ||\n      null\n    );\n  } catch {\n    return (\n      AppCore.auth ||\n      AppCore.Auth ||\n      null\n    );\n  }\n}\n''',
+              'router getAuth',
+          )
+          p.write_text(text, encoding='utf-8')
+
+          # App: módulos privados pasan a imports dinámicos. Core + Router quedan críticos.
+          p = Path('src/app/index.js')
+          text = p.read_text(encoding='utf-8')
+          text = must_replace(
+              text,
+              '''import { AppCore } from "../core/index.js";\nimport { Auth } from "../features/auth/index.js";\nimport { Router } from "../router/index.js";\n\nimport Toast from "../ui/toast/index.js";\nimport SidebarUI from "../ui/sidebar/index.js";\nimport TopbarUI from "../ui/topbar/index.js";\n''',
+              '''import { AppCore } from "../core/index.js";\nimport { Router } from "../router/index.js";\n''',
+              'app static private imports',
+          )
+          text = must_replace(
+              text,
+              '  "app.minimal.v5-public-fast-boot";',
+              '  "app.minimal.v6-public-lean-graph";',
+              'app version',
+          )
+          text = must_replace(
+              text,
+              '''let bootPromise = null;\nlet publicHydrationPromise = null;\nlet ready = false;\nlet publicFastBoot = false;\n''',
+              '''let bootPromise = null;\nlet publicHydrationPromise = null;\nlet ready = false;\nlet publicFastBoot = false;\n\nlet Auth = null;\nlet Toast = null;\nlet SidebarUI = null;\nlet TopbarUI = null;\n\nlet authLoadPromise = null;\nlet toastLoadPromise = null;\nlet sidebarLoadPromise = null;\nlet topbarLoadPromise = null;\n''',
+              'app runtime module state',
+          )
+          anchor = '''function isFunction(value) {\n  return (\n    typeof value ===\n    "function"\n  );\n}\n'''
+          helpers = anchor + '''\nasync function loadRuntimeModule(\n  current = null,\n  promise = null,\n  loader = null,\n  names = []\n) {\n  if (current) {\n    return { value: current, promise };\n  }\n\n  const activePromise =\n    promise ||\n    Promise.resolve()\n      .then(loader)\n      .then((module) => {\n        for (const name of names) {\n          if (module?.[name]) {\n            return module[name];\n          }\n        }\n        return module?.default || module || null;\n      });\n\n  return {\n    value: await activePromise,\n    promise: activePromise,\n  };\n}\n\nasync function ensureAuth() {\n  const loaded = await loadRuntimeModule(\n    Auth,\n    authLoadPromise,\n    () => import("../features/auth/index.js"),\n    ["Auth"]\n  );\n  authLoadPromise = loaded.promise;\n  Auth = loaded.value;\n  return Auth;\n}\n\nasync function ensureToast() {\n  const loaded = await loadRuntimeModule(\n    Toast,\n    toastLoadPromise,\n    () => import("../ui/toast/index.js"),\n    ["Toast"]\n  );\n  toastLoadPromise = loaded.promise;\n  Toast = loaded.value;\n  return Toast;\n}\n\nasync function ensureSidebarUI() {\n  const loaded = await loadRuntimeModule(\n    SidebarUI,\n    sidebarLoadPromise,\n    () => import("../ui/sidebar/index.js"),\n    ["SidebarUI"]\n  );\n  sidebarLoadPromise = loaded.promise;\n  SidebarUI = loaded.value;\n  return SidebarUI;\n}\n\nasync function ensureTopbarUI() {\n  const loaded = await loadRuntimeModule(\n    TopbarUI,\n    topbarLoadPromise,\n    () => import("../ui/topbar/index.js"),\n    ["TopbarUI"]\n  );\n  topbarLoadPromise = loaded.promise;\n  TopbarUI = loaded.value;\n  return TopbarUI;\n}\n\nfunction withRuntimeModules(payload = {}) {\n  return {\n    ...payload,\n    Auth,\n    Router,\n    Toast,\n    SidebarUI,\n    TopbarUI,\n  };\n}\n'''
+          text = must_replace(text, anchor, helpers, 'runtime module helpers')
+
+          text = must_replace(
+              text,
+              '''    Auth,\n    Router,\n\n    Toast,\n    SidebarUI,\n    TopbarUI,\n''',
+              '''    Router,\n''',
+              'boot payload private refs',
+          )
+
+          text = must_replace(
+              text,
+              '''async function initToast(\n  payload = {}\n) {\n  setBootPhase(\n    BOOT_PHASES.TOAST\n  );\n\n  const result =\n    await call(\n      Toast,\n      "init",\n      payload,\n      false\n    );\n''',
+              '''async function initToast(\n  payload = {}\n) {\n  setBootPhase(\n    BOOT_PHASES.TOAST\n  );\n\n  const toast = await ensureToast();\n\n  const result =\n    await call(\n      toast,\n      "init",\n      withRuntimeModules(payload),\n      false\n    );\n''',
+              'initToast dynamic',
+          )
+
+          text = must_replace(
+              text,
+              '''async function initAuth(\n  payload = {}\n) {\n  setBootPhase(\n    BOOT_PHASES.AUTH\n  );\n\n  /*\n    Auth se inicializa sin restaurar aquí.\n    restoreSession() se ejecuta una sola vez después.\n  */\n  const result =\n    await call(\n      Auth,\n      "init",\n      {\n        ...payload,\n        ...AUTH_BOOT_OPTIONS,\n        restoreOnBoot: false,\n      },\n      true\n    );\n''',
+              '''async function initAuth(\n  payload = {}\n) {\n  setBootPhase(\n    BOOT_PHASES.AUTH\n  );\n\n  const auth = await ensureAuth();\n\n  /*\n    Auth se inicializa sin restaurar aquí.\n    restoreSession() se ejecuta una sola vez después.\n  */\n  const result =\n    await call(\n      auth,\n      "init",\n      {\n        ...withRuntimeModules(payload),\n        ...AUTH_BOOT_OPTIONS,\n        restoreOnBoot: false,\n      },\n      true\n    );\n''',
+              'initAuth dynamic',
+          )
+
+          text = must_replace(
+              text,
+              '''async function restoreAuth(\n  payload = {}\n) {\n  setBootPhase(\n    BOOT_PHASES.RESTORE\n  );\n\n  /*\n''',
+              '''async function restoreAuth(\n  payload = {}\n) {\n  setBootPhase(\n    BOOT_PHASES.RESTORE\n  );\n\n  const auth = await ensureAuth();\n\n  /*\n''',
+              'restoreAuth ensure',
+          )
+          text = must_replace(
+              text,
+              '''    await call(\n      Auth,\n      "restoreSession",\n      {\n        ...payload,\n        ...AUTH_BOOT_OPTIONS,\n      },\n''',
+              '''    await call(\n      auth,\n      "restoreSession",\n      {\n        ...withRuntimeModules(payload),\n        ...AUTH_BOOT_OPTIONS,\n      },\n''',
+              'restoreAuth dynamic',
+          )
+
+          text = must_replace(
+              text,
+              '''async function initGlobalUI(\n  payload = {}\n) {\n  setBootPhase(\n    BOOT_PHASES.UI\n  );\n\n  /*\n    Se mantiene secuencial:\n    no introducimos concurrencia entre módulos UI sin necesidad.\n  */\n  const sidebarResult =\n    await call(\n      SidebarUI,\n      "init",\n      payload,\n      false\n    );\n''',
+              '''async function initGlobalUI(\n  payload = {}\n) {\n  setBootPhase(\n    BOOT_PHASES.UI\n  );\n\n  /*\n    Se mantiene secuencial:\n    no introducimos concurrencia entre módulos UI sin necesidad.\n  */\n  const sidebar = await ensureSidebarUI();\n  const sidebarResult =\n    await call(\n      sidebar,\n      "init",\n      withRuntimeModules(payload),\n      false\n    );\n''',
+              'sidebar dynamic',
+          )
+          text = must_replace(
+              text,
+              '''  const topbarResult =\n    await call(\n      TopbarUI,\n      "init",\n      payload,\n      false\n    );\n''',
+              '''  const topbar = await ensureTopbarUI();\n  const topbarResult =\n    await call(\n      topbar,\n      "init",\n      withRuntimeModules(payload),\n      false\n    );\n''',
+              'topbar dynamic',
+          )
+
+          text = must_replace(
+              text,
+              '''      createRouterPayload(\n        payload,\n        rawInitialPath\n      ),\n''',
+              '''      createRouterPayload(\n        withRuntimeModules(payload),\n        rawInitialPath\n      ),\n''',
+              'router payload runtime modules',
+          )
+
+          text = must_replace(
+              text,
+              '''    Fast-path exclusivo de la home pública exacta (/):\n    - Auth.init instala el contexto local, pero NO restaura por red.\n    - Router puede renderizar public-home porque la ruta es pública.\n    - El loader se retira antes de cualquier refresh/me remoto.\n    - Toast, restore de sesión y chrome se hidratan después en background.\n''',
+              '''    Fast-path exclusivo de la home pública exacta (/):\n    - NO descarga Auth, Toast, Sidebar ni Topbar antes del primer render.\n    - Router trata la ruta pública como anónima si Auth aún no está registrado.\n    - El loader se retira antes de cualquier módulo privado o refresh/me remoto.\n    - Auth/Toast/UI se descargan e hidratan después en background.\n''',
+              'fast path comment',
+          )
+          text = must_replace(
+              text,
+              '''  if (publicFastBoot) {\n    await initAuth(\n      payload\n    );\n\n    await startRouter(\n''',
+              '''  if (publicFastBoot) {\n    await startRouter(\n''',
+              'remove public initAuth',
+          )
+          p.write_text(text, encoding='utf-8')
+
+          # Main: en / no espera PRE_ROUTER; lo arranca en background tras bootApp.
+          p = Path('src/main.js')
+          text = p.read_text(encoding='utf-8')
+          text = must_replace(
+              text,
+              'export const MAIN_VERSION = "main.minimal.v8-canonical-loader";',
+              'export const MAIN_VERSION = "main.minimal.v9-public-lean-graph";',
+              'main version',
+          )
+          anchor = '''function getSafeInitialPath() {\n  return redact(getInitialPath()) || "/";\n}\n'''
+          helper = anchor + '''\nfunction isExactPublicHome(\n  value = getInitialPath()\n) {\n  try {\n    const raw = String(value || "/");\n    const pathname = raw\n      .split("#")[0]\n      .split("?")[0]\n      .replace(/\\\\/g, "/")\n      .replace(/\\/{2,}/g, "/")\n      .replace(/\\/+$/g, "") || "/";\n    return pathname === "/";\n  } catch {\n    return false;\n  }\n}\n'''
+          text = must_replace(text, anchor, helper, 'main public path helper')
+
+          anchor = '''function startPostRouterEnhancements(enhancements) {\n'''
+          helper = '''function startDeferredPreRouterEnhancements(enhancements) {\n  return Promise.resolve()\n    .then(() => enhancements.initPreRouter())\n    .catch((error) => {\n      try {\n        console.error(\n          "[Onion Main] Pre-router diferido no crítico:",\n          safeError(error)\n        );\n      } catch {\n        // noop\n      }\n      return false;\n    });\n}\n\n'''
+          text = must_replace(text, anchor, helper + anchor, 'deferred pre-router helper')
+
+          old = '''  const enhancements = await loadEnhancements();\n\n  /*\n    ticket-deeplink debe canonicalizar /tickets/<id> antes de capturar\n    la ruta del Router. Chrome también se prepara antes del App.\n  */\n  await enhancements.initPreRouter();\n\n  const rawInitialPath = getInitialPath();\n'''
+          new = '''  const enhancements = await loadEnhancements();\n  const rawInitialPath = getInitialPath();\n  const publicHomeFastPath = isExactPublicHome(rawInitialPath);\n\n  /*\n    En rutas privadas/token, ticket-deeplink y Chrome conservan su barrera\n    histórica previa al App. En la home pública exacta no son necesarios para\n    el primer paint y se difieren hasta después de bootApp().\n  */\n  if (!publicHomeFastPath) {\n    await enhancements.initPreRouter();\n  }\n\n'''
+          text = must_replace(text, old, new, 'main pre-router gate')
+
+          text = must_replace(
+              text,
+              '''  /*\n    El App/Router ya está listo. A partir de aquí los módulos son progresivos:\n    empiezan en background y no retrasan `ready` ni convierten un fallo aislado\n    en un fatal de arranque.\n  */\n  void startPostRouterEnhancements(enhancements);\n''',
+              '''  /*\n    El App/Router ya está listo. En `/`, completamos también los módulos\n    pre-router que se excluyeron deliberadamente del camino crítico.\n  */\n  if (publicHomeFastPath) {\n    void startDeferredPreRouterEnhancements(enhancements);\n  }\n  void startPostRouterEnhancements(enhancements);\n''',
+              'main deferred pre-router start',
+          )
+          p.write_text(text, encoding='utf-8')
+
+          # Index: hints privados dejan de ser incondicionales.
+          p = Path('index.html')
+          text = p.read_text(encoding='utf-8')
+          text = must_replace(
+              text,
+              '''  <link\n    rel="modulepreload"\n    href="/src/features/ticket-deeplink/index.js"\n  >\n  <link\n    rel="modulepreload"\n    href="/src/ui/chrome/index.js"\n  >\n''',
+              '',
+              'private modulepreloads',
+          )
+          p.write_text(text, encoding='utf-8')
+
+          # Preboot: en rutas no-root recupera los hints privados; en root mantiene hints públicos.
+          p = Path('src/preboot/public-home-preload.js')
+          text = p.read_text(encoding='utf-8')
+          old = '''    if (window.location.pathname !== "/") return;\n\n    const head = document.head;\n    if (!head) return;\n\n    const heroImageSrcset = [\n'''
+          new = '''    const head = document.head;\n    if (!head) return;\n\n    if (window.location.pathname !== "/") {\n      for (const href of [\n        "/src/features/ticket-deeplink/index.js",\n        "/src/ui/chrome/index.js",\n      ]) {\n        if (head.querySelector(`link[href="${href}"]`)) continue;\n        const link = document.createElement("link");\n        link.rel = "modulepreload";\n        link.href = href;\n        link.dataset.onionPrivateBootPreload = "true";\n        head.appendChild(link);\n      }\n      return;\n    }\n\n    const heroImageSrcset = [\n'''
+          text = must_replace(text, old, new, 'preboot path split')
+          p.write_text(text, encoding='utf-8')
+          PY
+
+          node --check src/app/index.js
+          node --check src/router/index.js
+          node --check src/main.js
+          node --check src/preboot/public-home-preload.js
+          git diff --check
+
+      - name: Validate contracts
+        shell: bash
+        run: |
+          bash .github/ci/validate_spa_contracts.sh
+          python .github/scripts/app_entrypoint_integrity.py
+          python .github/scripts/boot_visual_integrity.py
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "Onion Support CI"
+          git config user.email "cristian@onionsupport.com"
+          git add src/app/index.js src/router/index.js src/main.js index.html src/preboot/public-home-preload.js
+          git commit -m "perf: adelgazar el grafo crítico de la home pública [lean-public-graph]"
+          git push origin HEAD:perf/public-home-fast-boot

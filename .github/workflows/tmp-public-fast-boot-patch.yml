@@ -1,0 +1,95 @@
+name: TEMP Public Home Fast Boot Patch
+
+on:
+  push:
+    branches:
+      - perf/public-home-fast-boot
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[public-fast-boot-applied]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: perf/public-home-fast-boot
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Apply public fast boot
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/app/index.js')
+          text = path.read_text(encoding='utf-8')
+
+          text = text.replace(
+              '   - Restaurar sesión antes del primer render del Router.\n',
+              '   - Restaurar sesión antes del primer render en rutas privadas.\n'
+              '   - Permitir fast-path sin red para la home pública exacta (/).\n'
+          )
+          text = text.replace(
+              'export const APP_VERSION =\n  "app.minimal.v4-hardened";',
+              'export const APP_VERSION =\n  "app.minimal.v5-public-fast-boot";'
+          )
+          text = text.replace(
+              'const AUTH_BOOT_OPTIONS =\n',
+              'const PUBLIC_HOME_PATH = "/";\n\nconst AUTH_BOOT_OPTIONS =\n',
+              1,
+          )
+          text = text.replace(
+              'let bootPromise = null;\nlet ready = false;\n',
+              'let bootPromise = null;\nlet publicHydrationPromise = null;\nlet ready = false;\nlet publicFastBoot = false;\n',
+              1,
+          )
+
+          needle = '''function resolveInitialPath(\n  options = {}\n) {\n  return cleanText(\n    options?.initialPath ||\n    currentPath(),\n    "/"\n  );\n}\n'''
+          replacement = needle + '''\nfunction pathnameFromInitialPath(\n  value = "/"\n) {\n  const raw = cleanText(\n    value,\n    "/"\n  );\n\n  try {\n    if (\n      /^https?:\\/\\//i.test(raw) &&\n      isBrowser()\n    ) {\n      return new URL(\n        raw,\n        window.location.origin\n      ).pathname || "/";\n    }\n  } catch {\n    return "/";\n  }\n\n  let pathname = raw\n    .split("#")[0]\n    .split("?")[0]\n    .replace(/\\\\/g, "/") || "/";\n\n  if (!pathname.startsWith("/")) {\n    pathname = `/${pathname}`;\n  }\n\n  pathname = pathname\n    .replace(/\\/{2,}/g, "/")\n    .replace(/\\/+$/g, "") || "/";\n\n  return pathname;\n}\n\nfunction isPublicHomeFastPath(\n  rawInitialPath = "/"\n) {\n  return (\n    pathnameFromInitialPath(\n      rawInitialPath\n    ) === PUBLIC_HOME_PATH\n  );\n}\n'''
+          if needle not in text:
+              raise SystemExit('resolveInitialPath anchor not found')
+          text = text.replace(needle, replacement, 1)
+
+          needle = '''async function startRouter(\n  payload = {},\n  rawInitialPath = "/"\n) {\n'''
+          helper = '''function notifyPublicHomeSessionHydrated() {\n  if (!isBrowser()) return false;\n\n  try {\n    document.dispatchEvent(\n      new Event("public-home:ready")\n    );\n    return true;\n  } catch {\n    return false;\n  }\n}\n\nfunction hydratePublicHomeInBackground(\n  payload = {}\n) {\n  if (publicHydrationPromise) {\n    return publicHydrationPromise;\n  }\n\n  publicHydrationPromise = (async () => {\n    await initToast(payload);\n    await restoreAuth(payload);\n    await initGlobalUI(payload);\n    notifyPublicHomeSessionHydrated();\n    return true;\n  })()\n    .catch((error) => {\n      try {\n        console.error(\n          "[Onion App] Hidratación pública no crítica:",\n          safeError(error)\n        );\n      } catch {\n        // noop\n      }\n      return false;\n    })\n    .finally(() => {\n      publicHydrationPromise = null;\n      if (ready) {\n        setBootPhase(\n          BOOT_PHASES.READY\n        );\n      }\n    });\n\n  return publicHydrationPromise;\n}\n\n'''
+          if needle not in text:
+              raise SystemExit('startRouter anchor not found')
+          text = text.replace(needle, helper + needle, 1)
+
+          text = text.replace(
+              '''  resetBootSteps();\n\n  setBootPhase(\n''',
+              '''  resetBootSteps();\n  publicFastBoot = false;\n\n  setBootPhase(\n''',
+              1,
+          )
+
+          old = '''  /*\n    Orden contractual:\n\n    1. Core.\n    2. Toast opcional.\n    3. Auth.init sin restore.\n    4. Auth.restoreSession.\n    5. Sidebar/Topbar.\n    6. Router.start con URL real.\n    7. Loader hidden / App ready.\n\n    Así una recarga de una ruta privada espera al intento de restore\n    y una ruta pública sensible conserva su token hasta llegar al Router.\n  */\n  await initCore(\n    payload\n  );\n\n  await initToast(\n    payload\n  );\n\n  await initAuth(\n    payload\n  );\n\n  await restoreAuth(\n    payload\n  );\n\n  await initGlobalUI(\n    payload\n  );\n\n  await startRouter(\n    payload,\n    rawInitialPath\n  );\n\n  markReady();\n\n  return App;\n'''
+          new = '''  publicFastBoot =\n    isPublicHomeFastPath(\n      rawInitialPath\n    );\n\n  await initCore(\n    payload\n  );\n\n  /*\n    Fast-path exclusivo de la home pública exacta (/):\n    - Auth.init instala el contexto local, pero NO restaura por red.\n    - Router puede renderizar public-home porque la ruta es pública.\n    - El loader se retira antes de cualquier refresh/me remoto.\n    - Toast, restore de sesión y chrome se hidratan después en background.\n\n    Ninguna otra ruta usa este atajo. Login/reset/activation y todas las\n    rutas privadas mantienen el orden histórico seguro de boot.\n  */\n  if (publicFastBoot) {\n    await initAuth(\n      payload\n    );\n\n    await startRouter(\n      payload,\n      rawInitialPath\n    );\n\n    markReady();\n\n    void hydratePublicHomeInBackground(\n      payload\n    );\n\n    return App;\n  }\n\n  /*\n    Orden contractual para rutas no fast-path:\n\n    1. Core.\n    2. Toast opcional.\n    3. Auth.init sin restore.\n    4. Auth.restoreSession.\n    5. Sidebar/Topbar.\n    6. Router.start con URL real.\n    7. Loader hidden / App ready.\n  */\n  await initToast(\n    payload\n  );\n\n  await initAuth(\n    payload\n  );\n\n  await restoreAuth(\n    payload\n  );\n\n  await initGlobalUI(\n    payload\n  );\n\n  await startRouter(\n    payload,\n    rawInitialPath\n  );\n\n  markReady();\n\n  return App;\n'''
+          if old not in text:
+              raise SystemExit('runBoot contract block not found')
+          text = text.replace(old, new, 1)
+
+          text = text.replace(
+              '''    lastError,\n    lastRestore,\n\n    modules:\n''',
+              '''    lastError,\n    lastRestore,\n\n    publicFastBoot,\n    publicHydrationPending:\n      Boolean(\n        publicHydrationPromise\n      ),\n\n    modules:\n''',
+              1,
+          )
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          node --check src/app/index.js
+          git diff --check
+          git diff -- src/app/index.js
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "Onion Support CI"
+          git config user.email "cristian@onionsupport.com"
+          git add src/app/index.js
+          git commit -m "perf: fast boot de la home pública [public-fast-boot-applied]"
+          git push origin HEAD:perf/public-home-fast-boot

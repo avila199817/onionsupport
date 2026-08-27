@@ -23,6 +23,48 @@ jobs:
       - name: Apply fail-closed Correo patch
         run: python3 .github/scripts/tmp_correo_extreme_patch.py
 
+      - name: Migrate global Correo CSS contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('.github/scripts/repo_integrity.py')
+          text = p.read_text(encoding='utf-8')
+          def one(old, new, label):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 anchor, found {count}')
+              text = text.replace(old, new, 1)
+          one(
+              '    correo_viewport_text = (SRC / "css" / "views" / "correo" / "viewport.css").read_text(encoding="utf-8")',
+              '    correo_css_path = SRC / "css" / "views" / "correo" / "index.css"\n    correo_css_text = correo_css_path.read_text(encoding="utf-8")',
+              'v4 Correo authority',
+          )
+          one(
+              '''    for snippet in (\n        'correo: Object.freeze([',\n        '\"/src/css/views/correo/index.css\"',\n        '\"/src/css/views/correo/viewport.css\"',\n    ):\n        if snippet not in route_styles_text:\n            errors.append(f\"src/router/styles.js :: falta contrato CSS de Correo: {snippet}\")\n    if \"correo/fullheight.css\" in route_styles_text:\n        errors.append(\"src/router/styles.js :: Correo no puede recuperar fullheight.css\")\n\n    if \"CONSOLIDATED HEIGHT / DENSITY CONTRACT\" not in correo_viewport_text:\n        errors.append(\"src/css/views/correo/viewport.css :: falta contrato consolidado de viewport\")''',
+              '''    for snippet in (\n        'correo: Object.freeze([',\n        '\"/src/css/views/correo/index.css\"',\n    ):\n        if snippet not in route_styles_text:\n            errors.append(f\"src/router/styles.js :: falta contrato CSS de Correo: {snippet}\")\n    if route_styles_text.count('/src/css/views/correo/') != 1:\n        errors.append(\"src/router/styles.js :: Correo debe cargar exactamente una hoja CSS\")\n    if \"correo/fullheight.css\" in route_styles_text:\n        errors.append(\"src/router/styles.js :: Correo no puede recuperar fullheight.css\")\n    if (SRC / \"css\" / \"views\" / \"correo\" / \"viewport.css\").exists():\n        errors.append(\"src/css/views/correo/viewport.css :: autoridad legacy no debe reaparecer\")\n\n    if \"CONSOLIDATED HEIGHT / DENSITY CONTRACT\" not in correo_css_text:\n        errors.append(\"src/css/views/correo/index.css :: falta contrato consolidado de viewport\")''',
+              'v4 Correo manifest',
+          )
+          one(
+              '''    viewport_path = SRC / \"css\" / \"views\" / \"correo\" / \"viewport.css\"\n    viewport_text = viewport_path.read_text(encoding=\"utf-8\")\n    important_count = viewport_text.count(\"!important\")''',
+              '''    correo_path = SRC / \"css\" / \"views\" / \"correo\" / \"index.css\"\n    correo_text = correo_path.read_text(encoding=\"utf-8\")\n    important_count = correo_text.count(\"!important\")''',
+              'cascade Correo path',
+          )
+          one(
+              '''            f\"src/css/views/correo/viewport.css :: demasiados !important tras V5: {important_count} > 16\"''',
+              '''            f\"src/css/views/correo/index.css :: demasiados !important tras V5: {important_count} > 16\"''',
+              'cascade important error',
+          )
+          one(
+              '''    if \"CONSOLIDATED HEIGHT / DENSITY CONTRACT\" not in viewport_text:\n        errors.append(\"src/css/views/correo/viewport.css :: falta contrato consolidado de altura/densidad\")''',
+              '''    if \"CONSOLIDATED HEIGHT / DENSITY CONTRACT\" not in correo_text:\n        errors.append(\"src/css/views/correo/index.css :: falta contrato consolidado de altura/densidad\")''',
+              'cascade density marker',
+          )
+          p.write_text(text, encoding='utf-8')
+          PY
+
       - name: Validate product patch
         shell: bash
         run: |

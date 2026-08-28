@@ -12,6 +12,7 @@ function canonicalRelativePath(value) {
     !value.startsWith("/") &&
     !value.includes("\\") &&
     !/[\u0000-\u001f\u007f]/.test(value) &&
+    /^[A-Za-z0-9._~/-]+$/.test(value) &&
     !value.split("/").some((part) => part === "" || part === "." || part === "..")
   );
 }

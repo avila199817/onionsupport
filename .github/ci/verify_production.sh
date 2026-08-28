@@ -10,6 +10,11 @@ if [[ "${base}" != "https://onionsupport.com" ]]; then
   exit 1
 fi
 
+if [[ "${api}" != "https://api.onionsupport.com" ]]; then
+  echo "::error title=API productiva inválida::DIRECT_API_URL='${api}'; esperado https://api.onionsupport.com."
+  exit 1
+fi
+
 legacy_frontend="https://www.${base#https://}"
 
 header_value() {
@@ -51,6 +56,7 @@ assert_route_headers() {
   local headers
   local status
   local xrobots
+  local cache_control
 
   headers="$(mktemp)"
   status="$(
@@ -74,6 +80,7 @@ assert_route_headers() {
   fi
 
   xrobots="$(header_value "${headers}" "x-robots-tag")"
+  cache_control="$(header_value "${headers}" "cache-control")"
   rm -f "${headers}"
 
   case "${mode}" in
@@ -86,6 +93,10 @@ assert_route_headers() {
     noindex)
       if [[ "${xrobots,,}" != *"noindex"* || "${xrobots,,}" != *"nofollow"* ]]; then
         echo "::error title=Ruta privada indexable accidentalmente::${route} envía X-Robots-Tag='${xrobots}'."
+        return 1
+      fi
+      if [[ "${cache_control,,}" != *"no-cache"* || "${cache_control,,}" != *"no-store"* ]]; then
+        echo "::error title=Ruta privada cacheable::${route} envía Cache-Control='${cache_control}'."
         return 1
       fi
       ;;
@@ -275,11 +286,45 @@ require_header_contains "${root_headers}" "x-robots-tag" "index"
 require_header_contains "${root_headers}" "x-robots-tag" "follow"
 require_header_contains "${root_headers}" "content-security-policy" "api.onionsupport.com"
 
+hsts="$(header_value "${root_headers}" "strict-transport-security")"
 csp="$(header_value "${root_headers}" "content-security-policy")"
 rm -f "${root_headers}"
 
+lower_hsts="${hsts,,}"
+if [[ ! "${lower_hsts}" =~ (^|[;[:space:]])max-age=([0-9]+) ]]; then
+  echo "::error title=HSTS inválido::strict-transport-security='${hsts}' no declara max-age numérico."
+  exit 1
+fi
+hsts_max_age="${BASH_REMATCH[2]}"
+if (( 10#${hsts_max_age} < 31536000 )); then
+  echo "::error title=HSTS insuficiente::max-age=${hsts_max_age}; se exige al menos un año."
+  exit 1
+fi
+if [[ "${lower_hsts}" != *"includesubdomains"* ]]; then
+  echo "::error title=HSTS incompleto::Falta includeSubDomains."
+  exit 1
+fi
+
 if [[ "${csp}" == *"${legacy_domain}"* ]]; then
   echo "::error title=CSP obsoleta::Producción sigue publicando ${legacy_domain}."
+  exit 1
+fi
+
+lower_csp="${csp,,}"
+for directive in \
+  "default-src 'self'" \
+  "base-uri 'self'" \
+  "object-src 'none'" \
+  "frame-ancestors 'none'" \
+  "form-action 'self'" \
+  "script-src-attr 'none'"; do
+  if [[ "${lower_csp}" != *"${directive}"* ]]; then
+    echo "::error title=CSP incompleta::Falta la directiva '${directive}'."
+    exit 1
+  fi
+done
+if [[ "${lower_csp}" == *"'unsafe-eval'"* ]]; then
+  echo "::error title=CSP insegura::Producción permite 'unsafe-eval'."
   exit 1
 fi
 
@@ -313,14 +358,22 @@ done <<'EOF'
 /seo/soporte-empresas.html|/soporte-empresas
 EOF
 
+assert_redirect "/index.html" "/"
+assert_redirect "/login.html" "/login"
+
 noindex_routes=(
   "/password-request"
   "/password-reset"
+  "/password-reset/confirm/ci-verifier"
   "/reset-password"
+  "/reset-password/confirm/ci-verifier"
   "/activate-account"
+  "/activate-account/ci-verifier"
   "/dashboard"
   "/@ci-probe"
+  "/@ci-probe/incidencias/ci-ticket"
   "/incidencias"
+  "/incidencias/ci-ticket"
   "/facturas"
   "/clientes"
   "/usuarios"

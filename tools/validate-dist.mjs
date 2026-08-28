@@ -77,6 +77,7 @@ function canonicalRelativePath(value) {
     !value.startsWith("/") &&
     !value.includes("\\") &&
     !/[\u0000-\u001f\u007f]/.test(value) &&
+    /^[A-Za-z0-9._~/-]+$/.test(value) &&
     posix.normalize(value) === value &&
     !value.split("/").some((part) => part === "" || part === "." || part === "..")
   );
@@ -356,6 +357,11 @@ try {
     errors.push("/assets/* must use one-year immutable caching.");
   }
   for (const route of [
+    "/api",
+    "/.auth",
+    "/seo",
+    "/src",
+    "/assets",
     "/tools",
     "/tools/*",
     "/dist",

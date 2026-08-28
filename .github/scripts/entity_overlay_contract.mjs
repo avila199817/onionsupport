@@ -75,6 +75,9 @@ for (const type of ["factura", "incidencia", "cliente", "usuario"]) {
 assert.match(overlay, /document\.addEventListener\("click",\s*onDocumentClick,\s*true\)/);
 assert.match(overlay, /pushState|writeUrlForEntry/);
 assert.match(overlay, /data-entity-overlay-panel/);
+assert.match(overlay, /isCanonicalOwnerRoute/);
+assert.match(overlay, /hasExplicitOverlayTrigger/);
+assert.match(overlay, /syncUrl: options\?\.syncUrl !== false/);
 assert.match(app, /import\("\.\.\/features\/entity-overlay\/index\.js"\)/);
 assert.doesNotMatch(main, /features\/entity-overlay\/index\.js/);
 assert.doesNotMatch(html, /features\/entity-overlay\/index\.js/);

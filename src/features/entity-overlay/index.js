@@ -767,7 +767,9 @@ function watchCanonicalIncidenciaClose(session = null) {
       El controller propietario ya ha cerrado y limpiado el modal. Sólo ahora
       devolvemos al origen transversal (Inicio, búsqueda, etc.).
     */
-    stopOwnerSession({ navigateBack: Boolean(session.returnPath) });
+    stopOwnerSession({
+      navigateBack: Boolean(session.returnPath) && isIncidenciaOwnerRoute(),
+    });
   });
 
   session.closeObserver.observe(root, { childList: true, subtree: true });

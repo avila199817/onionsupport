@@ -81,6 +81,10 @@ assert.match(overlay, /openIncidenciaDetailById/);
 assert.match(overlay, /INCIDENCIA_MODAL_ROOT_SELECTOR/);
 assert.match(overlay, /context\?\.Router \|\| context\?\.router/);
 assert.match(overlay, /navigateWithRouter\(target\)/);
+assert.match(
+  overlay,
+  /navigateBack:\s*Boolean\(session\.returnPath\)\s*&&\s*isIncidenciaOwnerRoute\(\)/
+);
 assert.doesNotMatch(overlay, /adapters\/incidencia\.js/);
 assert.match(overlay, /pushState|writeUrlForEntry/);
 assert.match(overlay, /data-entity-overlay-panel/);

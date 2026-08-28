@@ -39,7 +39,10 @@ assert.equal(
 );
 
 const goAfterLoginStart = source.indexOf("function goAfterLogin(");
-const goAfterLoginEnd = source.indexOf("\\nfunction goHome(", goAfterLoginStart);
+const goAfterLoginEnd = source.indexOf(
+  "\\n/* =========================================================\\n   EVENTS",
+  goAfterLoginStart
+);
 assert.ok(
   goAfterLoginStart >= 0 && goAfterLoginEnd > goAfterLoginStart,
   "Router contract must isolate goAfterLogin()"

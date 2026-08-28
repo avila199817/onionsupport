@@ -70,6 +70,9 @@ jobs:
       - name: Validate Facturas continuous-scroll contract
         run: python3 .github/scripts/facturas_continuous_scroll_contract.py
 
+      - name: Validate Facturas technical-record guard
+        run: node .github/scripts/facturas_technical_record_guard_contract.mjs
+
       - name: Validate Usuarios scale contract
         run: python3 .github/scripts/usuarios_scale_contract.py
 

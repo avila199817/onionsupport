@@ -263,6 +263,24 @@ require(
     "API layer must expose cache-neutral cursor page loading",
 )
 require(
+    'INCIDENCIAS_LIST_RESPONSE_CONTRACT = "v2"' in api
+    and "responseContract: INCIDENCIAS_LIST_RESPONSE_CONTRACT" in api
+    and '"responseContract",' in api,
+    "canonical list queries must request v2 while retaining an explicit v1 override",
+)
+require(
+    "export function normalizeIncidenciasListResponse" in api
+    and "normalizeIncidenciasListResponse(response" in api
+    and "INCIDENCIAS_LIST_V2_ITEMS_REQUIRED" in api,
+    "page and cached list loaders must share the strict v2 envelope parser",
+)
+require(
+    "object?.hasMore === true" in api
+    and "Boolean(nextCursor)" in api
+    and "pagination.total === null" in api,
+    "cursor continuation and unknown totals must remain type-strict",
+)
+require(
     "INCIDENCIAS_DETAIL_CACHE_MAX_ENTRIES" in api,
     "detail cache must have an explicit capacity bound",
 )

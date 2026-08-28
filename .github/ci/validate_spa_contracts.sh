@@ -132,6 +132,7 @@ node .github/scripts/home_runtime_state_contract.mjs
 node .github/scripts/home_view_runtime_context_contract.mjs
 node .github/scripts/navigation_performance_contract.mjs
 node .github/scripts/incidencias_detail_request_contract.mjs
+node .github/scripts/incidencias_list_response_v2_contract.mjs
 node .github/scripts/facturas_document_flow_contract.mjs
 
 node "${ROOT_DIR:-$(git rev-parse --show-toplevel)}/.github/scripts/entity_overlay_contract.mjs"

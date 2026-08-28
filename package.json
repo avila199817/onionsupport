@@ -11,7 +11,7 @@
   "scripts": {
     "build": "vite build && node tools/normalize-dist.mjs && node tools/finalize-dist.mjs",
     "build:repro": "node tools/verify-reproducible-build.mjs",
-    "check:dist": "node tools/validate-dist.mjs && node tools/candidate-inventory-regression.mjs",
+    "check:dist": "node tools/validate-dist.mjs && node tools/candidate-inventory-regression.mjs && node tools/css-entry-split-dist-contract.mjs",
     "test:trusted-build": "node tools/trusted-build-regression.mjs && node tools/workflow-runner-isolation-regression.mjs && node tools/deployed-dist-verifier-regression.mjs && node tools/production-dist-workflow-regression.mjs",
     "test:browser:dist": "node tools/browser-dist-contract.mjs",
     "preview": "vite preview --host 127.0.0.1",

@@ -17,16 +17,12 @@
 ========================================================= */
 
 export const APP_ENHANCEMENTS_VERSION =
-  "app.enhancements.v17-incidencias-live-media";
+  "app.enhancements.v18-no-private-chrome-preauth";
 
 const PRE_ROUTER = Object.freeze([
   Object.freeze({
     key: "ticket-deeplink",
     load: () => import("../features/ticket-deeplink/index.js"),
-  }),
-  Object.freeze({
-    key: "app-chrome",
-    load: () => import("../ui/chrome/index.js"),
   }),
 ]);
 

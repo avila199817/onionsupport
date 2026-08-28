@@ -28,7 +28,7 @@ import {
 
 assert.equal(
   APP_ENHANCEMENTS_VERSION,
-  "app.enhancements.v17-incidencias-live-media"
+  "app.enhancements.v18-no-private-chrome-preauth"
 );
 assert.equal(
   ROUTE_INTENT_PRELOAD_VERSION,
@@ -230,6 +230,16 @@ for (const file of sourceFiles) {
 const enhancementsSource = await readFile(
   "src/app/enhancements.js",
   "utf8"
+);
+assert.equal(
+  enhancementsSource.includes('key: "app-chrome"'),
+  false,
+  "App Chrome must not be a pre-router/global enhancement before authentication"
+);
+assert.equal(
+  enhancementsSource.includes('../ui/chrome/index.js'),
+  false,
+  "App Chrome import authority must live outside enhancements"
 );
 assert.equal(
   enhancementsSource.includes("ROUTE_COMMITTED_SELECTOR"),

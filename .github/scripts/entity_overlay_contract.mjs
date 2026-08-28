@@ -61,8 +61,9 @@ assert.deepEqual(
   }
 );
 
-const [overlay, app, main, html, deeplink, spaContract] = await Promise.all([
+const [overlay, privateRuntime, app, main, html, deeplink, spaContract] = await Promise.all([
   read("src/features/entity-overlay/index.js"),
+  read("src/features/private-runtime-ui/index.js"),
   read("src/app/index.js"),
   read("src/main.js"),
   read("index.html"),
@@ -95,7 +96,8 @@ assert.match(overlay, /data-entity-overlay-panel/);
 assert.match(overlay, /isCanonicalOwnerRoute/);
 assert.match(overlay, /hasExplicitOverlayTrigger/);
 assert.match(overlay, /syncUrl: options\?\.syncUrl !== false/);
-assert.match(app, /import\("\.\.\/features\/entity-overlay\/index\.js"\)/);
+assert.match(privateRuntime, /import\("\.\.\/entity-overlay\/index\.js"\)/);
+assert.doesNotMatch(app, /features\/entity-overlay\/index\.js/);
 assert.doesNotMatch(main, /features\/entity-overlay\/index\.js/);
 assert.doesNotMatch(html, /features\/entity-overlay\/index\.js/);
 assert.match(deeplink, /canonical-owner-modal/);

@@ -6,7 +6,7 @@ import { Router, ROUTER_VERSION } from "../../src/router/index.js";
 
 assert.equal(
   ROUTER_VERSION,
-  "router.minimal.v15-public-auth-short-circuit"
+  "router.minimal.v16-private-runtime-after-guard"
 );
 
 assert.equal(
@@ -179,6 +179,44 @@ assert.equal(
   "Router must not retain the redundant post-auth route resolution"
 );
 
+const guardIndex = executeRenderSource.indexOf("const guardStartedAt =");
+const slugRedirectIndex = executeRenderSource.indexOf("if (\n      slugRedirect");
+const privateRuntimeIndex = executeRenderSource.indexOf("const privateRuntimeStartedAt =");
+const renderRouteIndex = executeRenderSource.indexOf("return await renderRoute(");
+assert.ok(
+  guardIndex >= 0 &&
+  slugRedirectIndex > guardIndex &&
+  privateRuntimeIndex > slugRedirectIndex &&
+  renderRouteIndex > privateRuntimeIndex,
+  "private runtime must start only after access/user-scope guards and before owner view render"
+);
+assert.equal(
+  executeRenderSource.includes('"private-runtime"'),
+  true,
+  "private runtime activation must remain an explicit Router phase"
+);
+
+const goAfterLoginStart = source.indexOf("function goAfterLogin(");
+const goAfterLoginEnd = source.indexOf(
+  "\n/* =========================================================\n   EVENTS",
+  goAfterLoginStart
+);
+assert.ok(
+  goAfterLoginStart >= 0 && goAfterLoginEnd > goAfterLoginStart,
+  "Router contract must isolate goAfterLogin()"
+);
+const goAfterLoginSource = source.slice(goAfterLoginStart, goAfterLoginEnd);
+assert.equal(
+  goAfterLoginSource.includes('authCall("syncAuthState", false)'),
+  true,
+  "post-login navigation must synchronize the new authenticated Core state"
+);
+assert.equal(
+  /force:\s*true/.test(goAfterLoginSource),
+  true,
+  "post-login navigation must force a fresh transition across the guest/auth boundary"
+);
+
 const chromePhaseStart = source.indexOf("const chromeStartedAt =");
 const chromePhaseEnd = source.indexOf(
   'recordTransitionPhase(\n      transition,\n      route,\n      "chrome"',
@@ -248,5 +286,5 @@ assert.ok(
 );
 
 console.log(
-  "Router runtime contract OK · public auth-wait short-circuit · native Core port · explicit private phase telemetry"
+  "Router runtime contract OK · public auth short-circuit · private runtime after guard · forced post-login transition · native Core port"
 );

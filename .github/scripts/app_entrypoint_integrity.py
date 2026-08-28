@@ -18,11 +18,11 @@ ROOT = Path(
 INDEX = ROOT / "index.html"
 MAIN = ROOT / "src/main.js"
 ENHANCEMENTS = ROOT / "src/app/enhancements.js"
+PRIVATE_RUNTIME = ROOT / "src/features/private-runtime-ui/index.js"
 APP_CSS = ROOT / "src/css/app.css"
 
 CANONICAL_MODULES = (
     "../features/ticket-deeplink/index.js",
-    "../ui/chrome/index.js",
     "../features/mobile-datalist/index.js",
     "../features/facturas-autorefresh/index.js",
     "../features/incidencias-media-preview/index.js",
@@ -210,7 +210,7 @@ def validate_runtime_boundaries(errors: list[str], runtime: dict[str, str]) -> N
 def main() -> int:
     errors: list[str] = []
 
-    required_paths = (INDEX, MAIN, ENHANCEMENTS, APP_CSS, *RUNTIME_FILES.values())
+    required_paths = (INDEX, MAIN, ENHANCEMENTS, PRIVATE_RUNTIME, APP_CSS, *RUNTIME_FILES.values())
     for required in required_paths:
         if not required.is_file():
             errors.append(f"Falta archivo obligatorio: {required.relative_to(ROOT)}")
@@ -223,6 +223,7 @@ def main() -> int:
     index_text = read(INDEX, errors)
     main_text = read(MAIN, errors)
     enhancements_text = read(ENHANCEMENTS, errors)
+    private_runtime_text = read(PRIVATE_RUNTIME, errors)
     app_css_text = read(APP_CSS, errors)
     runtime = {name: read(path, errors) for name, path in RUNTIME_FILES.items()}
 
@@ -312,8 +313,9 @@ def main() -> int:
     )
     require(
         errors,
-        enhancements_text.count("../ui/chrome/index.js") == 1,
-        "App Chrome debe registrarse exactamente una vez",
+        enhancements_text.count("../ui/chrome/index.js") == 0
+        and private_runtime_text.count('import("../../ui/chrome/index.js")') == 1,
+        "App Chrome debe tener una sola autoridad y vivir detrás del runtime privado autenticado",
     )
 
     validate_runtime_boundaries(errors, runtime)
@@ -326,7 +328,8 @@ def main() -> int:
 
     print("App/runtime integrity: PASS")
     print("- index.html: 1 módulo ejecutable (/src/main.js)")
-    print(f"- registry global: {len(CANONICAL_MODULES)} módulos")
+    print(f"- registry global: {len(CANONICAL_MODULES)} módulos públicos/progresivos")
+    print("- App Chrome: autoridad única en private-runtime-ui, fuera de pre-auth")
     print("- loader: API canónica sin alias legacy")
     print("- app.css: global-only")
     print("- route styles: CSS público/privado bajo una sola autoridad")

@@ -95,20 +95,12 @@ body {
   /*
     variables.css ya incluye safe-area dentro de --app-offset-topbar.
   */
+  /* Chrome privado es opt-in. Boot/auth/public empiezan a viewport completo. */
   --layout-main-inset-top:
-    var(
-      --app-offset-topbar,
-      calc(
-        var(--topbar-height, 58px) +
-        var(--layout-safe-top)
-      )
-    );
+    var(--app-offset-topbar, 0px);
 
   --layout-main-inset-left:
-    var(
-      --app-sidebar-current-width,
-      var(--sidebar-width, 260px)
-    );
+    var(--app-sidebar-current-width, 0px);
 
   --layout-content-max:
     var(--content-max, 1360px);
@@ -134,8 +126,7 @@ body {
       rgba(255, 255, 255, .34)
     );
 
-  --app-sidebar-current-width:
-    var(--sidebar-width, 260px);
+  --app-sidebar-current-width: 0px;
 
   --app-offset-tablehead: 0px;
 
@@ -363,8 +354,8 @@ body {
   body.auth-screen,
   body[data-route-mode="auth"],
   html[data-route-mode="auth"] body,
-  body[data-chrome="hidden"]:not([data-route-mode="boot"]),
-  html[data-chrome="hidden"]:not([data-route-mode="boot"]) body
+  body[data-chrome="hidden"],
+  html[data-chrome="hidden"] body
 ) {
   --app-sidebar-current-width: 0px;
   --app-offset-topbar: 0px;
@@ -379,8 +370,8 @@ body {
   body.auth-screen,
   body[data-route-mode="auth"],
   html[data-route-mode="auth"] body,
-  body[data-chrome="hidden"]:not([data-route-mode="boot"]),
-  html[data-chrome="hidden"]:not([data-route-mode="boot"]) body
+  body[data-chrome="hidden"],
+  html[data-chrome="hidden"] body
 )
 :is(
   #sidebar-mount,
@@ -400,8 +391,8 @@ body {
   body.auth-screen,
   body[data-route-mode="auth"],
   html[data-route-mode="auth"] body,
-  body[data-chrome="hidden"]:not([data-route-mode="boot"]),
-  html[data-chrome="hidden"]:not([data-route-mode="boot"]) body
+  body[data-chrome="hidden"],
+  html[data-chrome="hidden"] body
 )
 .main-content {
   inset: 0;
@@ -428,8 +419,8 @@ body {
   body.auth-screen,
   body[data-route-mode="auth"],
   html[data-route-mode="auth"] body,
-  body[data-chrome="hidden"]:not([data-route-mode="boot"]),
-  html[data-chrome="hidden"]:not([data-route-mode="boot"]) body
+  body[data-chrome="hidden"],
+  html[data-chrome="hidden"] body
 )
 #app-content {
   min-block-size: 100vh;
@@ -446,8 +437,8 @@ body {
   body.auth-screen,
   body[data-route-mode="auth"],
   html[data-route-mode="auth"] body,
-  body[data-chrome="hidden"]:not([data-route-mode="boot"]),
-  html[data-chrome="hidden"]:not([data-route-mode="boot"]) body
+  body[data-chrome="hidden"],
+  html[data-chrome="hidden"] body
 )
 :is(
   #view-container,
@@ -465,8 +456,8 @@ body {
   body.auth-screen,
   body[data-route-mode="auth"],
   html[data-route-mode="auth"] body,
-  body[data-chrome="hidden"]:not([data-route-mode="boot"]),
-  html[data-chrome="hidden"]:not([data-route-mode="boot"]) body
+  body[data-chrome="hidden"],
+  html[data-chrome="hidden"] body
 )
 .content-wrapper {
   padding: 0;

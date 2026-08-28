@@ -90,6 +90,48 @@ python3 -I -m json.tool site.webmanifest >/dev/null
 
 python3 -I - <<'PY'
 from pathlib import Path
+import json
+import sys
+
+config = json.loads(Path("staticwebapp.config.json").read_text(encoding="utf-8"))
+routes = {
+    item.get("route"): item
+    for item in config.get("routes", [])
+    if isinstance(item, dict) and isinstance(item.get("route"), str)
+}
+required_bootstrap_denials = (
+    "/tools",
+    "/tools/*",
+    "/dist",
+    "/dist/*",
+    "/build-metadata",
+    "/build-metadata/*",
+    "/package.json",
+    "/package-lock.json",
+    "/vite.config.js",
+    "/.node-version",
+    "/.nvmrc",
+    "/.gitignore",
+)
+
+missing = [
+    route
+    for route in required_bootstrap_denials
+    if routes.get(route, {}).get("statusCode") != 404
+]
+if missing:
+    for route in missing:
+        print(
+            f"::error file=staticwebapp.config.json,title=Ruta de build pública::"
+            f"{route} debe responder 404 durante el deploy legacy."
+        )
+    sys.exit(1)
+
+print(f"Bootstrap build paths denied · routes={len(required_bootstrap_denials)}")
+PY
+
+python3 -I - <<'PY'
+from pathlib import Path
 import ast
 
 path = Path(".github/scripts/repo_integrity.py")

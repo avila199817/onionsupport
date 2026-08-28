@@ -129,6 +129,19 @@ NOINDEX_ROUTES = (
     "/ajustes",
 )
 
+DENIED_BUILD_PATHS = (
+    "/tools",
+    "/tools/validate-dist.mjs",
+    "/dist/index.html",
+    "/build-metadata/release.json",
+    "/package.json",
+    "/package-lock.json",
+    "/vite.config.js",
+    "/.node-version",
+    "/.nvmrc",
+    "/.gitignore",
+)
+
 
 class CanonicalParser(HTMLParser):
     def __init__(self) -> None:
@@ -368,6 +381,21 @@ def check_aliases(base_url: str, revision: str, attempt: int) -> list[str]:
     return errors
 
 
+def check_denied_build_paths(base_url: str, revision: str, attempt: int) -> list[str]:
+    errors: list[str] = []
+
+    for path in DENIED_BUILD_PATHS:
+        try:
+            status, _, _ = fetch_no_redirect(base_url, path, revision, attempt)
+        except RuntimeError as error:
+            errors.append(str(error))
+            continue
+        if status != 404:
+            errors.append(f"{path}: HTTP {status}, esperado 404 para tooling privado")
+
+    return errors
+
+
 def check_origin_redirects(base_url: str, revision: str, attempt: int) -> list[str]:
     errors: list[str] = []
     legacy_https = legacy_www_origin(base_url)
@@ -488,6 +516,7 @@ def verify_once(root: Path, base_url: str, revision: str, attempt: int) -> list[
         check_exact_files(root, base_url, revision, attempt)
         + check_routes(base_url, revision, attempt)
         + check_aliases(base_url, revision, attempt)
+        + check_denied_build_paths(base_url, revision, attempt)
         + check_seo(base_url, revision, attempt)
         + check_origin_redirects(base_url, revision, attempt)
     )
@@ -530,6 +559,7 @@ def main() -> int:
         print(
             f"Exact static files={len(EXACT_FILES)} · exact route files={len(EXACT_ROUTE_FILES)} · "
             f"indexable routes={len(INDEXABLE_ROUTES)} · aliases={len(SEO_ALIAS_REDIRECTS)} · "
+            f"denied build paths={len(DENIED_BUILD_PATHS)} · "
             f"origin redirect probes={len(ORIGIN_REDIRECT_PROBES) * 3} · "
             f"noindex routes={len(NOINDEX_ROUTES)}"
         )

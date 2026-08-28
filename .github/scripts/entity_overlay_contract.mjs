@@ -5,6 +5,8 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+import { resolveRouteLookupPath } from "../../src/router/routes.js";
+
 import {
   inferEntityIntent,
   normalizeEntityId,
@@ -81,11 +83,24 @@ assert.match(overlay, /syncUrl: options\?\.syncUrl !== false/);
 assert.match(app, /import\("\.\.\/features\/entity-overlay\/index\.js"\)/);
 assert.doesNotMatch(main, /features\/entity-overlay\/index\.js/);
 assert.doesNotMatch(html, /features\/entity-overlay\/index\.js/);
-assert.match(deeplink, /entityId/);
-assert.match(deeplink, /entity/);
+assert.match(deeplink, /canonical-owner-modal/);
+assert.match(deeplink, /openIncidenciaDetailById/);
+assert.match(deeplink, /SCOPED_DETAIL_PATTERN/);
 assert.doesNotMatch(deeplink, /\.click\(\)/);
+assert.equal(
+  resolveRouteLookupPath("/@cristian/incidencias/INC-20260827-D03089"),
+  "/incidencias"
+);
+assert.equal(
+  resolveRouteLookupPath("/incidencias/INC-20260827-D03089"),
+  "/incidencias"
+);
+assert.equal(
+  resolveRouteLookupPath("/tickets/INC-20260827-D03089"),
+  "/incidencias"
+);
 assert.match(spaContract, /entity_overlay_contract\.mjs/);
 
 console.log(
-  "Entity overlay contract: PASS · lazy adapters · global intents · view-independent deeplinks"
+  "Entity overlay contract: PASS · lazy overlays · canonical incidencia owner deeplinks"
 );

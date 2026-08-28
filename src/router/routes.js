@@ -427,6 +427,54 @@ function isSingleSegmentChildPath(
   );
 }
 
+
+const PRIVATE_DETAIL_TICKET_PATTERN =
+  /^INC-[A-Z0-9-]{6,120}$/i;
+
+function resolvePrivateDetailRoutePath(
+  path = "/"
+) {
+  const clean = normalizePath(path);
+  const scoped = getUserScopedRouteInfo(clean);
+  const candidate = scoped.scoped
+    ? (
+        scoped.restPath ||
+        scoped.canonicalPath ||
+        "/"
+      )
+    : clean;
+
+  if (
+    isSingleSegmentChildPath(
+      candidate,
+      ROUTE_PATHS.INCIDENCIAS
+    )
+  ) {
+    const suffix = candidate.slice(
+      ROUTE_PATHS.INCIDENCIAS.length + 1
+    );
+
+    if (PRIVATE_DETAIL_TICKET_PATTERN.test(suffix)) {
+      return ROUTE_PATHS.INCIDENCIAS;
+    }
+  }
+
+  if (
+    isSingleSegmentChildPath(
+      candidate,
+      "/tickets"
+    )
+  ) {
+    const suffix = candidate.slice("/tickets/".length);
+
+    if (PRIVATE_DETAIL_TICKET_PATTERN.test(suffix)) {
+      return ROUTE_PATHS.INCIDENCIAS;
+    }
+  }
+
+  return "";
+}
+
 function resolvePublicAliasPath(
   path = "/"
 ) {
@@ -583,6 +631,15 @@ export function resolveRouteLookupPath(
     }
   } catch {
     return "";
+  }
+
+  const privateDetailLookup =
+    resolvePrivateDetailRoutePath(
+      clean
+    );
+
+  if (privateDetailLookup) {
+    return privateDetailLookup;
   }
 
   const scoped = getUserScopedRouteInfo(

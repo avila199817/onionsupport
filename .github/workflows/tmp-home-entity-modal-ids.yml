@@ -1,0 +1,43 @@
+name: TEMP Home Entity Modal IDs
+
+on:
+  push:
+    branches:
+      - feat/home-entity-modal-buttons
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/home-entity-modal-buttons
+          fetch-depth: 0
+
+      - name: Apply ID patch
+        shell: bash
+        run: python3 .github/tmp/home_entity_modal_ids_patch.py
+
+      - name: Validate
+        shell: bash
+        run: |
+          node --check src/views/home/home.template.js
+          node --experimental-default-type=module .github/scripts/entity_overlay_contract.mjs
+          bash .github/ci/validate_spa_contracts.sh
+          git diff --check
+
+      - name: Commit when changed
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "Onion Support CI"
+          git config user.email "cristian@onionsupport.com"
+          git add src/views/home/home.template.js .github/scripts/entity_overlay_contract.mjs
+          git commit -m "fix: cubrir clientId y userId en Home [home-entity-modal-ids-patched]"
+          git push origin HEAD:feat/home-entity-modal-buttons

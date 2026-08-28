@@ -13,7 +13,7 @@
 ========================================================= */
 
 export const HOME_TEMPLATE_VERSION =
-  "home.template.private.v11.entity-modal-buttons";
+  "home.template.private.v12.entity-hit-targets";
 
 export const HOME_ACTIONS = Object.freeze({
   RETRY: "retry",
@@ -748,6 +748,24 @@ function entityOpenLabel(type = "", id = "") {
   return entityId ? `Abrir ${label} ${entityId}` : `Abrir ${label}`;
 }
 
+function entityHitTarget(type = "", id = "") {
+  const entityType = overlayEntityType(type);
+  const entityId = safeDisplayId(id, "");
+
+  if (!entityType || !entityId) return "";
+
+  return `
+    <button
+      type="button"
+      class="home-entity-hit-target"
+      data-entity-overlay-trigger="true"
+      data-entity-type="${attr(entityType)}"
+      data-entity-id="${attr(entityId)}"
+      aria-label="${attr(entityOpenLabel(entityType, entityId))}"
+    ></button>
+  `;
+}
+
 function activityItem(item = {}) {
   const source = isObject(item) ? item : {};
   const type = normalizeKey(first(source.type, source.tipo, "activity"));
@@ -781,7 +799,12 @@ function activityItem(item = {}) {
     ""
   );
 
-  const content = `
+  return `
+    <li
+      class="home-activity-item home-activity-item--${attr(type)} ${interactive ? "home-activity-item--interactive" : ""}"
+      data-home-entity-type="${attr(entityType || type || "activity")}"
+      data-home-entity-id="${attr(entityId)}"
+    >
       <span class="home-activity-icon" aria-hidden="true">${icon(activityIcon(type))}</span>
       <span class="home-activity-body">
         <span class="home-activity-heading">
@@ -793,28 +816,7 @@ function activityItem(item = {}) {
         </span>
       </span>
       <time datetime="${attr(date || "")}">${escapeHtml(formatDate(date))}</time>
-  `;
-
-  return `
-    <li
-      class="home-activity-item home-activity-item--${attr(type)} ${interactive ? "home-activity-item--interactive" : ""}"
-      data-home-entity-type="${attr(entityType || type || "activity")}"
-      data-home-entity-id="${attr(entityId)}"
-    >
-      ${interactive
-        ? `
-          <button
-            type="button"
-            class="home-activity-entity-button"
-            data-entity-overlay-trigger="true"
-            data-entity-type="${attr(entityType)}"
-            data-entity-id="${attr(entityId)}"
-            aria-label="${attr(entityOpenLabel(entityType, entityId))}"
-          >
-            ${content}
-          </button>
-        `
-        : content}
+      ${interactive ? entityHitTarget(entityType, entityId) : ""}
     </li>
   `;
 }
@@ -878,7 +880,12 @@ function invoiceItem(invoice = {}) {
 
   const currency = cleanText(first(source.currency, source.moneda, "EUR"), "EUR");
 
-  const content = `
+  return `
+    <li
+      class="home-invoice-item ${interactive ? "home-invoice-item--interactive" : ""}"
+      data-home-entity-type="invoice"
+      data-home-entity-id="${attr(id)}"
+    >
       <span class="home-invoice-main">
         <span class="home-invoice-heading">
           <strong>${escapeHtml(label)}</strong>
@@ -890,28 +897,7 @@ function invoiceItem(invoice = {}) {
         </span>
       </span>
       <strong class="home-invoice-amount">${hasAmount(amount) ? escapeHtml(formatMoney(amount, currency)) : "—"}</strong>
-  `;
-
-  return `
-    <li
-      class="home-invoice-item ${interactive ? "home-invoice-item--interactive" : ""}"
-      data-home-entity-type="invoice"
-      data-home-entity-id="${attr(id)}"
-    >
-      ${interactive
-        ? `
-          <button
-            type="button"
-            class="home-invoice-entity-button"
-            data-entity-overlay-trigger="true"
-            data-entity-type="factura"
-            data-entity-id="${attr(id)}"
-            aria-label="${attr(entityOpenLabel("factura", id))}"
-          >
-            ${content}
-          </button>
-        `
-        : content}
+      ${interactive ? entityHitTarget("factura", id) : ""}
     </li>
   `;
 }

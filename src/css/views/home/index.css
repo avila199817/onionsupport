@@ -1129,74 +1129,51 @@
 
 
 /* =========================================================
-   HOME ENTITY MODAL BUTTONS
+   HOME ENTITY INTERACTION LAYER
+
+   La geometría pertenece siempre a la fila. El botón de interacción es una
+   capa absoluta y no participa en grid/flex, de modo que activar un modal no
+   puede cambiar posición, anchura ni wrapping del contenido visible.
 ========================================================= */
 
 .home-activity-item--interactive,
 .home-invoice-item--interactive {
-  padding: 0;
+  position: relative;
+  isolation: isolate;
 }
 
-.home-activity-entity-button,
-.home-invoice-entity-button {
+.home-activity-item--interactive > :not(.home-entity-hit-target),
+.home-invoice-item--interactive > :not(.home-entity-hit-target) {
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.home-entity-hit-target {
   appearance: none;
+  position: absolute;
+  inset: 0;
+  z-index: 2;
   inline-size: 100%;
-  min-block-size: inherit;
+  block-size: 100%;
   margin: 0;
+  padding: 0;
   border: 0;
   border-radius: inherit;
   background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: start;
   cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.home-activity-entity-button {
-  display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: 10px 12px;
-}
-
-.home-invoice-entity-button {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-sm);
-  padding: 10px 12px;
-}
-
-.home-activity-entity-button:focus-visible,
-.home-invoice-entity-button:focus-visible {
+.home-entity-hit-target:focus-visible {
   outline: 2px solid var(--focus-ring, var(--border-info));
   outline-offset: -2px;
 }
 
-@media (max-width: 760px) {
-  .home-activity-entity-button {
-    grid-template-columns: 34px minmax(0, 1fr);
-  }
-
-  .home-activity-entity-button time {
-    grid-column: 2;
-    justify-self: start;
-  }
-
-  .home-invoice-entity-button {
-    grid-template-columns: 1fr;
-  }
-
-  .home-invoice-entity-button .home-invoice-amount {
-    justify-self: start;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .home-activity-entity-button,
-  .home-invoice-entity-button {
-    transition: none;
+@media print {
+  .home-entity-hit-target {
+    display: none;
   }
 }
 

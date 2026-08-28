@@ -3,8 +3,10 @@
    Archivo: /src/features/private-runtime-ui/index.js
 
    Única puerta de entrada del chrome privado:
-   - Sidebar, Topbar, AppChrome y EntityOverlay sólo se importan tras Auth.
-   - Las rutas públicas/anónimas no descargan ni inicializan runtime privado.
+   - El build carga CSS, Sidebar, Topbar, AppChrome y EntityOverlay tras Auth.
+   - Las rutas públicas/anónimas del artefacto no descargan runtime privado.
+   - El source legacy conserva app.css completo para rollback y desarrollo.
+   - Si falla el chunk CSS compilado, existe fallback same-origin CSP-clean.
    - Router activa este runtime después del guard de una ruta privada.
    - destroy() no provoca imports tardíos: sólo limpia módulos ya cargados.
 ========================================================= */
@@ -12,17 +14,36 @@
 import { AppCore } from "../../core/index.js";
 
 export const PRIVATE_RUNTIME_UI_VERSION =
-  "private-runtime-ui.v1-auth-private-only";
+  "private-runtime-ui.v3-built-css-boundary";
+
+const PRIVATE_STYLESHEET_HREF =
+  "/src/css/private.css";
+
+const PRIVATE_STYLESHEET_MARKER =
+  "data-onion-private-styles";
 
 let SidebarUI = null;
 let TopbarUI = null;
 let AppChromeUI = null;
 let EntityOverlayUI = null;
+let stylesheetPromise = null;
+let stylesheetReady = false;
 let ensurePromise = null;
 let active = false;
 
 function isFunction(value) {
   return typeof value === "function";
+}
+
+function isBrowser() {
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
+}
+
+function isProductionBuild() {
+  return import.meta.env?.PROD === true;
 }
 
 function getAuth(context = {}) {
@@ -46,6 +67,133 @@ function isAuthenticated(context = {}) {
   } catch {
     return false;
   }
+}
+
+function existingPrivateStylesheet() {
+  if (!isBrowser()) return null;
+
+  return (
+    document.querySelector(
+      `link[${PRIVATE_STYLESHEET_MARKER}="true"]`
+    ) ||
+    null
+  );
+}
+
+function loadFallbackPrivateStylesheet() {
+  if (!isBrowser()) return Promise.resolve(false);
+
+  const existing = existingPrivateStylesheet();
+  if (existing?.sheet) return Promise.resolve(true);
+
+  return new Promise((resolve, reject) => {
+    const link =
+      existing ||
+      document.createElement("link");
+
+    let settled = false;
+
+    const cleanup = () => {
+      link.removeEventListener("load", onLoad);
+      link.removeEventListener("error", onError);
+    };
+
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback(value);
+    };
+
+    const onLoad = () => {
+      link.setAttribute(
+        PRIVATE_STYLESHEET_MARKER,
+        "true"
+      );
+      finish(resolve, true);
+    };
+
+    const onError = () => {
+      if (!existing && link.parentNode) {
+        try { link.remove(); } catch {}
+      }
+
+      const error =
+        new Error(
+          "No se pudo cargar el CSS privado."
+        );
+      error.code =
+        "PRIVATE_STYLESHEET_LOAD_FAILED";
+      finish(reject, error);
+    };
+
+    link.addEventListener(
+      "load",
+      onLoad,
+      { once: true }
+    );
+    link.addEventListener(
+      "error",
+      onError,
+      { once: true }
+    );
+
+    if (!existing) {
+      link.rel = "stylesheet";
+      link.href = PRIVATE_STYLESHEET_HREF;
+      link.setAttribute(
+        PRIVATE_STYLESHEET_MARKER,
+        "true"
+      );
+      document.head.appendChild(link);
+    }
+
+    if (existing?.sheet) {
+      queueMicrotask(onLoad);
+    }
+  });
+}
+
+async function loadBuiltPrivateStylesheet() {
+  await import("../../css/private.css");
+  return true;
+}
+
+async function ensurePrivateStylesheet() {
+  if (stylesheetReady) return true;
+  if (stylesheetPromise) return stylesheetPromise;
+
+  stylesheetPromise = (async () => {
+    if (!isProductionBuild()) {
+      /*
+       * Source/legacy conserva los imports privados dentro de app.css.
+       * No se añade otro <link> para evitar descargar o aplicar CSS duplicado.
+       */
+      stylesheetReady = true;
+      return true;
+    }
+
+    try {
+      if (await loadBuiltPrivateStylesheet()) {
+        stylesheetReady = true;
+        return true;
+      }
+    } catch {
+      // El artefacto conserva /src/css/private.css como recuperación acotada.
+    }
+
+    const loaded =
+      await loadFallbackPrivateStylesheet();
+
+    stylesheetReady =
+      loaded === true;
+
+    return stylesheetReady;
+  })().finally(() => {
+    stylesheetPromise = null;
+  });
+
+  return stylesheetPromise;
 }
 
 async function loadPrivateModules() {
@@ -73,7 +221,12 @@ async function initModule(module, payload = {}) {
 export async function ensurePrivateRuntimeUI(context = {}) {
   if (!isAuthenticated(context)) return false;
 
-  if (active && SidebarUI && TopbarUI) {
+  if (
+    active &&
+    stylesheetReady &&
+    SidebarUI &&
+    TopbarUI
+  ) {
     try { SidebarUI.sync?.(context); } catch {}
     try { TopbarUI.sync?.(context); } catch {}
     try { AppChromeUI?.sync?.(); } catch {}
@@ -84,6 +237,10 @@ export async function ensurePrivateRuntimeUI(context = {}) {
 
   ensurePromise = (async () => {
     if (!isAuthenticated(context)) return false;
+
+    await ensurePrivateStylesheet();
+    if (!isAuthenticated(context)) return false;
+
     await loadPrivateModules();
     if (!isAuthenticated(context)) return false;
 
@@ -134,8 +291,13 @@ export function getPrivateRuntimeUISnapshot() {
   return Object.freeze({
     version: PRIVATE_RUNTIME_UI_VERSION,
     active,
-    loading: Boolean(ensurePromise),
+    loading: Boolean(
+      ensurePromise ||
+      stylesheetPromise
+    ),
+    stylesReady: stylesheetReady,
     loaded: Object.freeze({
+      styles: stylesheetReady,
       sidebar: Boolean(SidebarUI),
       topbar: Boolean(TopbarUI),
       chrome: Boolean(AppChromeUI),

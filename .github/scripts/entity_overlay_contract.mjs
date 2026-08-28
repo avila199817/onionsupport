@@ -101,6 +101,23 @@ assert.equal(
 );
 assert.match(spaContract, /entity_overlay_contract\.mjs/);
 
+
+const [homeTemplate, homeCss] = await Promise.all([
+  read("src/views/home/home.template.js"),
+  read("src/css/views/home/index.css"),
+]);
+
+assert.match(homeTemplate, /data-entity-overlay-trigger="true"/);
+assert.match(homeTemplate, /data-entity-type="\$\{attr\(entityType\)\}"/);
+assert.match(homeTemplate, /data-entity-type="factura"/);
+assert.match(homeTemplate, /function activityEntityId/);
+assert.match(homeTemplate, /raw\.clientId/);
+assert.match(homeTemplate, /raw\.userId/);
+assert.match(homeTemplate, /home-activity-entity-button/);
+assert.match(homeTemplate, /home-invoice-entity-button/);
+assert.match(homeCss, /HOME ENTITY MODAL BUTTONS/);
+assert.match(homeCss, /:focus-visible/);
+
 console.log(
   "Entity overlay contract: PASS · lazy overlays · canonical incidencia owner deeplinks"
 );

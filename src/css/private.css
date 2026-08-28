@@ -6,9 +6,9 @@
 
    ENTRYPOINT CSS DEL ÁREA AUTENTICADA
 
-   Se carga exclusivamente desde private-runtime-ui después de superar Auth.
-   Conserva el orden histórico de app.css para mantener paridad visual 1:1.
-   No contiene tokens, reset, componentes globales ni estilos de ruta.
+   El source conserva estos imports también dentro de app.css para desarrollo y
+   rollback legacy. El build los retira del entry público y este archivo pasa a
+   ser el chunk privado fingerprinted solicitado después del guard Auth.
 ========================================================= */
 
 /* =========================================================

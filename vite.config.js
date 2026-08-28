@@ -61,6 +61,67 @@ const COMPATIBILITY_DIRECTORIES = Object.freeze([
   "src/preboot",
 ]);
 
+/*
+ * app.css stays complete in source mode so development and the immutable
+ * legacy-root rollback preserve their historical CSS contract. During a
+ * production build, only these exact private imports are removed from the
+ * public entry. private-runtime-ui then requests the same ordered list through
+ * private.css after the authentication guard.
+ */
+const PRIVATE_CSS_IMPORTS = Object.freeze([
+  "./layout/sidebar.css",
+  "./layout/sidebar.executive.css",
+  "./layout/sidebar.executive.interactions.css",
+  "./layout/topbar.css",
+  "./layout/topbar.executive.css",
+  "./layout/chrome.css",
+  "./compositions/private-admin-parity.css",
+  "./compositions/private-admin-interactions.css",
+  "./compositions/private-create-modal.css",
+  "./compositions/private-amounts.css",
+]);
+
+function privateCssImportStatement(spec) {
+  const layer = spec.startsWith("./layout/")
+    ? "layout"
+    : "compositions";
+
+  return `@import url("${spec}") layer(${layer});`;
+}
+
+function onionPrivateCssEntrySplit() {
+  const appCssId = resolve(ROOT, "src/css/app.css");
+  const statements = PRIVATE_CSS_IMPORTS.map(privateCssImportStatement);
+
+  return {
+    name: "onion-private-css-entry-split",
+    apply: "build",
+    enforce: "pre",
+    transform(source, id) {
+      if (String(id || "").split("?")[0] !== appCssId) {
+        return null;
+      }
+
+      let output = String(source || "");
+
+      for (const statement of statements) {
+        const occurrences = output.split(statement).length - 1;
+        if (occurrences !== 1) {
+          throw new Error(
+            `Private CSS boundary drift for ${statement}: ${occurrences}`
+          );
+        }
+        output = output.replace(statement, "");
+      }
+
+      return {
+        code: output,
+        map: null,
+      };
+    },
+  };
+}
+
 function posixPath(value) {
   return String(value || "").split(sep).join("/");
 }
@@ -167,7 +228,6 @@ function onionStaticArtifacts() {
       }
 
       preboot.source = source;
-
     },
   };
 }
@@ -214,7 +274,11 @@ export default defineConfig({
   root: ROOT,
   base: "/",
   publicDir: false,
-  plugins: [...onionConditionalNoscriptStyles(), onionStaticArtifacts()],
+  plugins: [
+    ...onionConditionalNoscriptStyles(),
+    onionPrivateCssEntrySplit(),
+    onionStaticArtifacts(),
+  ],
   build: {
     outDir: outputDirectory,
     emptyOutDir: true,

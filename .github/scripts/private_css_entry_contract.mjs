@@ -10,6 +10,8 @@ const privateCss =
   read("src/css/private.css");
 const runtime =
   read("src/features/private-runtime-ui/index.js");
+const viteConfig =
+  read("vite.config.js");
 
 const privateImports = Object.freeze([
   "./layout/sidebar.css",
@@ -27,14 +29,20 @@ const privateImports = Object.freeze([
 for (const privateImport of privateImports) {
   assert.equal(
     globalCss.includes(privateImport),
-    false,
-    `app.css no puede importar ${privateImport}`
+    true,
+    `app.css source debe conservar ${privateImport} para compatibilidad legacy`
   );
 
   assert.equal(
     privateCss.includes(privateImport),
     true,
     `private.css debe importar ${privateImport}`
+  );
+
+  assert.equal(
+    viteConfig.includes(privateImport),
+    true,
+    `Vite debe declarar ${privateImport} en la frontera de split`
   );
 }
 
@@ -73,9 +81,39 @@ for (const forbidden of [
 }
 
 assert.match(
-  runtime,
-  /import\.meta\.env\?\.PROD/,
-  "el build debe seleccionar el chunk CSS privado"
+  viteConfig,
+  /const PRIVATE_CSS_IMPORTS = Object\.freeze\(\[/,
+  "Vite debe declarar la lista cerrada de imports privados"
+);
+
+assert.match(
+  viteConfig,
+  /function onionPrivateCssEntrySplit\(\)/,
+  "Vite debe aplicar el split antes del procesador CSS"
+);
+
+assert.match(
+  viteConfig,
+  /name: "onion-private-css-entry-split"/,
+  "el plugin de split debe tener identidad estable"
+);
+
+assert.match(
+  viteConfig,
+  /enforce: "pre"/,
+  "el split debe ejecutarse antes del plugin CSS de Vite"
+);
+
+assert.match(
+  viteConfig,
+  /PRIVATE_CSS_IMPORTS\.map\(privateCssImportStatement\)/,
+  "el plugin debe derivar statements exactos desde la lista cerrada"
+);
+
+assert.match(
+  viteConfig,
+  /occurrences !== 1/,
+  "el build debe fallar si la frontera fuente deriva"
 );
 
 assert.match(
@@ -87,13 +125,13 @@ assert.match(
 assert.match(
   runtime,
   /"\/src\/css\/private\.css"/,
-  "private-runtime-ui debe conservar el fallback source"
+  "private-runtime-ui debe conservar el fallback del artefacto"
 );
 
 assert.match(
   runtime,
-  /data-onion-private-styles/,
-  "el fallback debe quedar identificado de forma determinista"
+  /if \(!isProductionBuild\(\)\) \{[\s\S]*stylesheetReady = true;/,
+  "source/legacy no debe aplicar private.css dos veces"
 );
 
 const styleGate =

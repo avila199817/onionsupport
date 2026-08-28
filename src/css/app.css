@@ -14,15 +14,13 @@
    - Mantener variables.css como fuente de verdad visual dark/default.
    - Mantener light.css como única fuente de overrides del tema claro.
    - Dejar TODAS las hojas específicas de ruta a src/router/styles.js.
-   - Cargar el chrome/composiciones privadas desde private-runtime-ui.
-   - Permitir composiciones responsive realmente transversales.
-   - Cerrar la cascada con invariantes geométricas globales.
+   - Permitir composiciones responsive transversales sin parches por vista.
+   - Cerrar la cascada con invariantes geométricas transversales.
 
    Reglas:
    - Sin declaraciones CSS directas en este archivo.
    - Sin imports externos ni fuentes remotas.
    - Sin imports específicos de una vista/ruta.
-   - Sin imports de chrome o composiciones exclusivas del área privada.
    - Sin imports duplicados.
 ========================================================= */
 
@@ -49,11 +47,26 @@
 @import url("./core/loader.css") layer(core);
 
 /* =========================================================
-   GLOBAL COMPONENTS
+   APP CHROME GLOBAL
 
-   Sólo componentes compartidos por documentos públicos y privados.
-   Sidebar/Topbar/AppChrome y las composiciones administrativas viven en
-   /src/css/private.css y se solicitan después del guard de autenticación.
+   Sidebar/Topbar pintan sus componentes internos.
+   sidebar.executive.css remata únicamente el interior visual del Sidebar.
+   sidebar.executive.interactions.css ancla las interacciones del rail.
+   topbar.executive.css aplica la misma gramática ejecutiva al Topbar.
+   chrome.css se carga el último dentro de layer(layout) y es la ÚNICA
+   autoridad geométrica: offsets, mounts, drawer, backdrop y transición
+   desktop/mobile. chrome.css NO puede autodeclarar otro @layer interno.
+========================================================= */
+
+@import url("./layout/sidebar.css") layer(layout);
+@import url("./layout/sidebar.executive.css") layer(layout);
+@import url("./layout/sidebar.executive.interactions.css") layer(layout);
+@import url("./layout/topbar.css") layer(layout);
+@import url("./layout/topbar.executive.css") layer(layout);
+@import url("./layout/chrome.css") layer(layout);
+
+/* =========================================================
+   GLOBAL COMPONENTS
 ========================================================= */
 
 @import url("./components/ui.css") layer(components);
@@ -68,11 +81,15 @@
 /* =========================================================
    COMPOSITIONS · RESPONSIVE CROSS-VIEW
 
-   mobile-datalist también da soporte a controles públicos. Las composiciones
-   exclusivas del panel autenticado viven en /src/css/private.css.
+   Las composiciones pueden recomponer visualmente varios dominios después de
+   sus hojas de vista sin usar !important. No contienen lógica de negocio.
 ========================================================= */
 
+@import url("./compositions/private-admin-parity.css") layer(compositions);
+@import url("./compositions/private-admin-interactions.css") layer(compositions);
+@import url("./compositions/private-create-modal.css") layer(compositions);
 @import url("./compositions/mobile-datalist.css") layer(compositions);
+@import url("./compositions/private-amounts.css") layer(compositions);
 
 /* =========================================================
    FINAL UI FOUNDATION · LAYOUT GUARDRAILS

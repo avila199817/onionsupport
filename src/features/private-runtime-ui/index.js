@@ -3,18 +3,18 @@
    Archivo: /src/features/private-runtime-ui/index.js
 
    Única puerta de entrada del chrome privado:
-   - CSS, Sidebar, Topbar, AppChrome y EntityOverlay sólo se cargan tras Auth.
-   - Las rutas públicas/anónimas no descargan ni inicializan runtime privado.
+   - El build carga CSS, Sidebar, Topbar, AppChrome y EntityOverlay tras Auth.
+   - Las rutas públicas/anónimas del artefacto no descargan runtime privado.
+   - El source legacy conserva app.css completo para rollback y desarrollo.
+   - Si falla el chunk CSS compilado, existe fallback same-origin CSP-clean.
    - Router activa este runtime después del guard de una ruta privada.
-   - El build carga private.css como chunk CSS fingerprinted y bajo demanda.
-   - El modo source conserva un fallback <link> compatible y CSP-clean.
    - destroy() no provoca imports tardíos: sólo limpia módulos ya cargados.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
 export const PRIVATE_RUNTIME_UI_VERSION =
-  "private-runtime-ui.v2-auth-css-boundary";
+  "private-runtime-ui.v3-built-css-boundary";
 
 const PRIVATE_STYLESHEET_HREF =
   "/src/css/private.css";
@@ -40,6 +40,10 @@ function isBrowser() {
     typeof window !== "undefined" &&
     typeof document !== "undefined"
   );
+}
+
+function isProductionBuild() {
+  return import.meta.env?.PROD === true;
 }
 
 function getAuth(context = {}) {
@@ -76,7 +80,7 @@ function existingPrivateStylesheet() {
   );
 }
 
-function loadSourcePrivateStylesheet() {
+function loadFallbackPrivateStylesheet() {
   if (!isBrowser()) return Promise.resolve(false);
 
   const existing = existingPrivateStylesheet();
@@ -151,10 +155,6 @@ function loadSourcePrivateStylesheet() {
 }
 
 async function loadBuiltPrivateStylesheet() {
-  if (import.meta.env?.PROD !== true) {
-    return false;
-  }
-
   await import("../../css/private.css");
   return true;
 }
@@ -164,17 +164,26 @@ async function ensurePrivateStylesheet() {
   if (stylesheetPromise) return stylesheetPromise;
 
   stylesheetPromise = (async () => {
+    if (!isProductionBuild()) {
+      /*
+       * Source/legacy conserva los imports privados dentro de app.css.
+       * No se añade otro <link> para evitar descargar o aplicar CSS duplicado.
+       */
+      stylesheetReady = true;
+      return true;
+    }
+
     try {
       if (await loadBuiltPrivateStylesheet()) {
         stylesheetReady = true;
         return true;
       }
     } catch {
-      // El artefacto también conserva /src/css/private.css como fallback.
+      // El artefacto conserva /src/css/private.css como recuperación acotada.
     }
 
     const loaded =
-      await loadSourcePrivateStylesheet();
+      await loadFallbackPrivateStylesheet();
 
     stylesheetReady =
       loaded === true;

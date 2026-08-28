@@ -440,7 +440,7 @@ async function runBoot() {
   setAppState("booting");
 
   const enhancements = await loadEnhancements();
-  const rawInitialPath = getInitialPath();
+  let rawInitialPath = getInitialPath();
   const publicHomeFastPath = isExactPublicHome(rawInitialPath);
 
   /*
@@ -450,6 +450,13 @@ async function runBoot() {
   */
   if (!publicHomeFastPath) {
     await enhancements.initPreRouter();
+
+    /*
+      Las mejoras pre-router pueden canonicalizar enlaces privados antes de
+      que el Router resuelva la vista. El handoff debe usar la URL resultante,
+      no la captura previa a esa canonicalización.
+    */
+    rawInitialPath = getInitialPath();
   }
 
   const safeInitialPath = redact(rawInitialPath) || "/";

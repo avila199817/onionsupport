@@ -1,26 +1,36 @@
 /* =========================================================
-   Onion Support - Ticket Deep Link -> Global Entity Overlay
+   Onion Support - Incidencia Canonical Deep Link
 
-   Mantiene enlaces históricos, pero ya no monta Incidencias, no busca filas y
-   no simula clicks. Sólo expresa una intención de entidad en la URL; el overlay
-   privado la resuelve cuando Auth y AppCore están listos.
+   Contrato:
+   - URL canónica compartible: /@{slug}/incidencias/<INC-ID>.
+   - Un deeplink de incidencia abre la vista propietaria Incidencias y su
+     controller/modal canónico, con Histórico, adjuntos, edición y cierre.
+   - El overlay global queda reservado para aperturas rápidas desde otras vistas.
+   - Mantiene compatibilidad con /tickets/<INC-ID>, /incidencias/<INC-ID>,
+     ?ticketId=..., ?incidenciaId=... y ?entity=incidencia&entityId=....
+   - Sin clicks sintéticos, sin búsqueda de filas y sin HTTP propio.
 ========================================================= */
 
 export const TICKET_DEEPLINK_VERSION =
-  "ticket-deeplink.v3-global-entity-intent";
+  "ticket-deeplink.v4-canonical-owner-modal";
 
+const INCIDENCIAS_PATH = "/incidencias";
 const LEGACY_TICKETS_PREFIX = "/tickets/";
-const PRIVATE_HOME_PATH = "/dashboard";
 const TICKET_ID_PATTERN = /^INC-[A-Z0-9-]{6,120}$/i;
-const ENTITY_TYPE = "incidencia";
+const SCOPED_DETAIL_PATTERN = /^\/@([^/]+)\/incidencias\/([^/?#]+)\/?$/i;
+const UNSCOPED_DETAIL_PATTERN = /^\/incidencias\/([^/?#]+)\/?$/i;
 const VIEW_ROOT_SELECTOR = "#view-container, [data-router-view='true']";
+const MODAL_ROOT_SELECTOR = "[data-incidencias-modal-root='true']";
+const MAX_WAIT_MS = 20_000;
 
 let ticketId = "";
-let legacyPath = false;
-let canonicalized = false;
+let source = "";
 let observer = null;
-let mountRoot = null;
 let observerInstallHandler = null;
+let timeoutId = 0;
+let attemptPromise = null;
+let modalOpened = false;
+let finished = false;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -56,7 +66,24 @@ function currentUrl() {
   }
 }
 
-function ticketFromLegacyPath(pathname = "") {
+function scopedDetailFromPath(pathname = "") {
+  const match = cleanText(pathname).match(SCOPED_DETAIL_PATTERN);
+  const id = normalizeTicketId(match?.[2] || "");
+
+  return id
+    ? {
+        slug: cleanText(match?.[1], ""),
+        id,
+      }
+    : null;
+}
+
+function unscopedDetailFromPath(pathname = "") {
+  const match = cleanText(pathname).match(UNSCOPED_DETAIL_PATTERN);
+  return normalizeTicketId(match?.[1] || "");
+}
+
+function legacyTicketFromPath(pathname = "") {
   const path = cleanText(pathname);
   if (!path.toLowerCase().startsWith(LEGACY_TICKETS_PREFIX)) return "";
 
@@ -65,36 +92,39 @@ function ticketFromLegacyPath(pathname = "") {
   return normalizeTicketId(suffix);
 }
 
-function resolveTicket(url = null) {
+function queryTicket(url = null) {
   if (!url) return "";
 
-  return (
-    ticketFromLegacyPath(url.pathname) ||
-    normalizeTicketId(
-      url.searchParams.get("ticketId") ||
-      url.searchParams.get("incidenciaId") ||
-      (url.searchParams.get("entity") === ENTITY_TYPE
+  return normalizeTicketId(
+    url.searchParams.get("ticketId") ||
+    url.searchParams.get("incidenciaId") ||
+    (
+      url.searchParams.get("entity") === "incidencia"
         ? url.searchParams.get("entityId")
-        : "") ||
-      ""
-    )
+        : ""
+    ) ||
+    ""
   );
 }
 
-function canonicalize() {
-  const url = currentUrl();
+function scopedBase(pathname = "") {
+  const match = cleanText(pathname).match(/^\/@([^/]+)(?:\/incidencias)?\/?$/i);
+  return match?.[1]
+    ? `/@${match[1]}`
+    : "";
+}
+
+function clearLegacyQuery(url = null) {
   if (!url) return false;
-
-  ticketId = resolveTicket(url);
-  if (!ticketId) return false;
-
-  legacyPath = Boolean(ticketFromLegacyPath(url.pathname));
-  if (legacyPath) url.pathname = PRIVATE_HOME_PATH;
-
   url.searchParams.delete("ticketId");
   url.searchParams.delete("incidenciaId");
-  url.searchParams.set("entity", ENTITY_TYPE);
-  url.searchParams.set("entityId", ticketId);
+  url.searchParams.delete("entity");
+  url.searchParams.delete("entityId");
+  return true;
+}
+
+function replaceUrl(url = null) {
+  if (!url || !isBrowser()) return false;
 
   try {
     window.history.replaceState(
@@ -102,69 +132,190 @@ function canonicalize() {
       "",
       `${url.pathname}${url.search}${url.hash}`
     );
-    canonicalized = true;
     return true;
   } catch {
     return false;
   }
 }
 
-function installScopedObserver() {
-  if (
-    !isBrowser() ||
-    observer ||
-    typeof MutationObserver !== "function"
-  ) {
-    return Boolean(observer);
+function resolveAndCanonicalize() {
+  const url = currentUrl();
+  if (!url) return "";
+
+  const scoped = scopedDetailFromPath(url.pathname);
+  if (scoped?.id) {
+    source = "scoped-detail";
+    clearLegacyQuery(url);
+    replaceUrl(url);
+    return scoped.id;
   }
 
-  const root = document.querySelector(VIEW_ROOT_SELECTOR);
-  if (!root) return false;
-
-  mountRoot = root;
-  observer = new MutationObserver(() => {
-    canonicalize();
-  });
-  observer.observe(root, {
-    childList: true,
-    subtree: false,
-  });
-
-  return true;
-}
-
-function scheduleScopedObserver() {
-  if (!ticketId || !isBrowser()) return false;
-  if (installScopedObserver()) return true;
-
-  if (!observerInstallHandler) {
-    observerInstallHandler = () => {
-      observerInstallHandler = null;
-      installScopedObserver();
-    };
-    window.addEventListener("onion:main:ready", observerInstallHandler, {
-      once: true,
-    });
+  const unscoped = unscopedDetailFromPath(url.pathname);
+  if (unscoped) {
+    source = "unscoped-detail";
+    clearLegacyQuery(url);
+    replaceUrl(url);
+    return unscoped;
   }
 
-  return false;
+  const legacy = legacyTicketFromPath(url.pathname);
+  if (legacy) {
+    source = "legacy-ticket-path";
+    url.pathname = `${INCIDENCIAS_PATH}/${legacy}`;
+    clearLegacyQuery(url);
+    replaceUrl(url);
+    return legacy;
+  }
+
+  const queryId = queryTicket(url);
+  if (!queryId) return "";
+
+  source = "legacy-query";
+  const base = scopedBase(url.pathname);
+  url.pathname = base
+    ? `${base}${INCIDENCIAS_PATH}/${queryId}`
+    : `${INCIDENCIAS_PATH}/${queryId}`;
+  clearLegacyQuery(url);
+  replaceUrl(url);
+  return queryId;
 }
 
-canonicalize();
-scheduleScopedObserver();
+function viewRoot() {
+  return isBrowser()
+    ? document.querySelector(VIEW_ROOT_SELECTOR)
+    : null;
+}
 
-export function destroyTicketDeeplink() {
-  if (!isBrowser()) return false;
+function modalIsOpen(root = viewRoot()) {
+  return Boolean(root?.querySelector?.(MODAL_ROOT_SELECTOR));
+}
+
+function baseIncidenciasPath(pathname = "") {
+  const scoped = scopedDetailFromPath(pathname);
+  if (scoped?.slug) {
+    return `/@${scoped.slug}${INCIDENCIAS_PATH}`;
+  }
+
+  return INCIDENCIAS_PATH;
+}
+
+function cleanUrlAfterClose() {
+  const url = currentUrl();
+  if (!url) return false;
+
+  url.pathname = baseIncidenciasPath(url.pathname);
+  clearLegacyQuery(url);
+  return replaceUrl(url);
+}
+
+function stop() {
+  if (finished) return false;
+  finished = true;
+
+  observer?.disconnect?.();
+  observer = null;
 
   if (observerInstallHandler) {
     window.removeEventListener("onion:main:ready", observerInstallHandler);
     observerInstallHandler = null;
   }
 
-  observer?.disconnect();
-  observer = null;
-  mountRoot = null;
+  if (timeoutId) {
+    window.clearTimeout(timeoutId);
+    timeoutId = 0;
+  }
+
   return true;
+}
+
+async function attemptOpen() {
+  if (finished || !ticketId || !isBrowser()) return false;
+  if (attemptPromise) return attemptPromise;
+
+  attemptPromise = (async () => {
+    try {
+      const module = await import("../../views/incidencias/index.js");
+      const open = module?.openIncidenciaDetailById;
+      if (typeof open !== "function") return false;
+
+      const opened = await open(ticketId, null);
+      if (!opened) return false;
+
+      modalOpened = true;
+      return true;
+    } catch {
+      return false;
+    }
+  })().finally(() => {
+    attemptPromise = null;
+  });
+
+  return attemptPromise;
+}
+
+function onMutation() {
+  if (finished) return;
+
+  if (!modalOpened) {
+    void attemptOpen();
+    return;
+  }
+
+  if (!modalIsOpen()) {
+    cleanUrlAfterClose();
+    stop();
+  }
+}
+
+function installObserver() {
+  if (!isBrowser() || !ticketId || finished) return false;
+  if (observer) return true;
+
+  const root = viewRoot();
+  if (!root) return false;
+
+  observer = new MutationObserver(onMutation);
+  observer.observe(root, {
+    childList: true,
+    subtree: true,
+  });
+
+  void attemptOpen();
+
+  timeoutId = window.setTimeout(() => {
+    stop();
+  }, MAX_WAIT_MS);
+
+  return true;
+}
+
+function scheduleObserver() {
+  if (!ticketId || !isBrowser()) return false;
+  if (installObserver()) return true;
+
+  if (!observerInstallHandler) {
+    observerInstallHandler = () => {
+      observerInstallHandler = null;
+      installObserver();
+      void attemptOpen();
+    };
+
+    window.addEventListener(
+      "onion:main:ready",
+      observerInstallHandler,
+      { once: true }
+    );
+  }
+
+  return false;
+}
+
+ticketId = resolveAndCanonicalize();
+scheduleObserver();
+
+export function destroyTicketDeeplink() {
+  if (!isBrowser()) return false;
+  return stop();
 }
 
 export function getTicketDeeplinkSnapshot() {
@@ -172,14 +323,11 @@ export function getTicketDeeplinkSnapshot() {
     version: TICKET_DEEPLINK_VERSION,
     active: Boolean(ticketId),
     ticketId: ticketId ? "***" : "",
-    legacyPath,
-    canonicalized,
-    searchApplied: false,
-    rowActivated: false,
-    modalOpen: false,
-    finished: canonicalized,
-    strategy: "global-entity-intent",
-    observerScope: mountRoot ? "router-view" : "none",
+    source,
+    modalOpened,
+    modalOpen: isBrowser() ? modalIsOpen() : false,
+    finished,
+    strategy: "canonical-owner-modal",
   });
 }
 

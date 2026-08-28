@@ -8268,6 +8268,30 @@ export async function IncidenciasView(
 export const IncidenciasIndex =
   IncidenciasView;
 
+
+export async function openIncidenciaDetailById(
+  ticketId = "",
+  openerNode = null
+) {
+  try {
+    if (
+      !lastInstance ||
+      typeof lastInstance.openDetail !== "function"
+    ) {
+      return false;
+    }
+
+    return Boolean(
+      await lastInstance.openDetail(
+        ticketId,
+        openerNode
+      )
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function destroy() {
   try {
     return Boolean(

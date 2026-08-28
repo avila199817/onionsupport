@@ -705,26 +705,15 @@ function close(options = {}) {
 
   clearCloseFallback();
 
-  const marker = currentMarker();
-  const canGoBack =
-    options?.fromPopstate !== true &&
-    entry.historyMode === "push" &&
-    marker?.token === entry.token;
-
-  if (canGoBack) {
-    try {
-      window.history.back();
-      closeFallbackTimer = window.setTimeout(() => {
-        closeFallbackTimer = 0;
-        if (topEntry() === entry) removeTop({ syncUrl: true });
-      }, CLOSE_HISTORY_FALLBACK_MS);
-      return true;
-    } catch {
-      // fallback below
-    }
-  }
-
-  return removeTop({ syncUrl: true });
+  /*
+    El cierre desde UI debe ser determinista e inmediato. Delegarlo a
+    history.back() podía dejar el overlay visible cuando Router y el
+    listener de popstate competían por la misma navegación.
+  */
+  return removeTop({
+    syncUrl: options?.syncUrl !== false,
+    restore: options?.restore !== false,
+  });
 }
 
 function back() {
@@ -891,6 +880,49 @@ async function handleOverlayClick(event = null) {
   return false;
 }
 
+const OWNER_ROUTE_SEGMENTS = Object.freeze({
+  factura: Object.freeze(["facturas"]),
+  incidencia: Object.freeze(["incidencias", "tickets"]),
+  cliente: Object.freeze(["clientes"]),
+  usuario: Object.freeze(["usuarios"]),
+});
+
+function currentRouteSegments() {
+  if (!isBrowser()) return [];
+
+  try {
+    return String(window.location?.pathname || "/")
+      .toLowerCase()
+      .split("/")
+      .map((part) => part.trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function isCanonicalOwnerRoute(type = "") {
+  const entityType = normalizeEntityType(type);
+  const owners = OWNER_ROUTE_SEGMENTS[entityType] || [];
+  if (!owners.length) return false;
+
+  const segments = currentRouteSegments();
+  return owners.some((owner) => segments.includes(owner));
+}
+
+function hasExplicitOverlayTrigger(target = null) {
+  const element = target?.nodeType === 3 ? target.parentElement : target;
+  if (!element || typeof element.closest !== "function") return false;
+
+  return Boolean(
+    element.closest(
+      "[data-entity-overlay-open='true'], " +
+      "[data-entity-overlay-trigger='true'], " +
+      "[data-entity-overlay-action='open']"
+    )
+  );
+}
+
 function onDocumentClick(event) {
   if (!event || event.button !== 0) return;
   if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -903,6 +935,18 @@ function onDocumentClick(event) {
 
   const intent = inferEntityIntentFromElement(event.target);
   if (!intent || !canOpen(intent.type, intent.id)) return;
+
+  /*
+    En la vista propietaria manda su controller canónico. El overlay
+    global sólo intercepta allí cuando el elemento lo pide de forma
+    explícita. Así se conservan Histórico, edición, adjuntos y cierre.
+  */
+  if (
+    isCanonicalOwnerRoute(intent.type) &&
+    !hasExplicitOverlayTrigger(event.target)
+  ) {
+    return;
+  }
 
   stopEntityClick(event);
   void open({
@@ -992,6 +1036,11 @@ function onPopstate() {
   if (stack.length) clearStack({ restore: true });
 
   const intent = urlIntent();
+  if (intent && isCanonicalOwnerRoute(intent.type)) {
+    writeUrlForEntry(null, "replace");
+    return;
+  }
+
   if (intent) {
     void open({
       ...intent,
@@ -1054,7 +1103,9 @@ export function init(options = {}) {
   initialized = true;
 
   const intent = urlIntent();
-  if (intent && !stack.length) {
+  if (intent && isCanonicalOwnerRoute(intent.type)) {
+    writeUrlForEntry(null, "replace");
+  } else if (intent && !stack.length) {
     void open({
       ...intent,
       historyMode: "replace",

@@ -1127,4 +1127,77 @@
   to { transform: translateX(100%); }
 }
 
+
+/* =========================================================
+   HOME ENTITY MODAL BUTTONS
+========================================================= */
+
+.home-activity-item--interactive,
+.home-invoice-item--interactive {
+  padding: 0;
+}
+
+.home-activity-entity-button,
+.home-invoice-entity-button {
+  appearance: none;
+  inline-size: 100%;
+  min-block-size: inherit;
+  margin: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.home-activity-entity-button {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 10px 12px;
+}
+
+.home-invoice-entity-button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 10px 12px;
+}
+
+.home-activity-entity-button:focus-visible,
+.home-invoice-entity-button:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--border-info));
+  outline-offset: -2px;
+}
+
+@media (max-width: 760px) {
+  .home-activity-entity-button {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .home-activity-entity-button time {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .home-invoice-entity-button {
+    grid-template-columns: 1fr;
+  }
+
+  .home-invoice-entity-button .home-invoice-amount {
+    justify-self: start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-activity-entity-button,
+  .home-invoice-entity-button {
+    transition: none;
+  }
+}
+
 } /* @layer views */

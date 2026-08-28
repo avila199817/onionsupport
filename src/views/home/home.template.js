@@ -13,7 +13,7 @@
 ========================================================= */
 
 export const HOME_TEMPLATE_VERSION =
-  "home.template.private.v10.entity-identifiers";
+  "home.template.private.v11.entity-modal-buttons";
 
 export const HOME_ACTIONS = Object.freeze({
   RETRY: "retry",
@@ -685,11 +685,39 @@ function activityIcon(type = "") {
   return "activity";
 }
 
+function overlayEntityType(type = "") {
+  const key = normalizeKey(type);
+
+  if (key.includes("invoice") || key.includes("factura")) return "factura";
+  if (key.includes("ticket") || key.includes("incidencia")) return "incidencia";
+  if (key.includes("client") || key.includes("cliente")) return "cliente";
+  if (key.includes("user") || key.includes("usuario")) return "usuario";
+
+  return "";
+}
+
+function entityOpenLabel(type = "", id = "") {
+  const entityType = overlayEntityType(type);
+  const entityId = safeDisplayId(id, "");
+
+  const labels = {
+    factura: "factura",
+    incidencia: "incidencia",
+    cliente: "cliente",
+    usuario: "usuario",
+  };
+
+  const label = labels[entityType] || "detalle";
+  return entityId ? `Abrir ${label} ${entityId}` : `Abrir ${label}`;
+}
+
 function activityItem(item = {}) {
   const source = isObject(item) ? item : {};
   const type = normalizeKey(first(source.type, source.tipo, "activity"));
-  const isInvoice = type.includes("invoice") || type.includes("factura");
+  const entityType = overlayEntityType(type);
+  const isInvoice = entityType === "factura";
   const entityId = isInvoice ? invoiceDisplayId(source) : ticketDisplayId(source);
+  const interactive = Boolean(entityType && entityId);
 
   const rawTitle = visibleText(
     first(
@@ -716,12 +744,7 @@ function activityItem(item = {}) {
     ""
   );
 
-  return `
-    <li
-      class="home-activity-item home-activity-item--${attr(type)}"
-      data-home-entity-type="${attr(isInvoice ? "invoice" : type || "activity")}"
-      data-home-entity-id="${attr(entityId)}"
-    >
+  const content = `
       <span class="home-activity-icon" aria-hidden="true">${icon(activityIcon(type))}</span>
       <span class="home-activity-body">
         <span class="home-activity-heading">
@@ -733,6 +756,28 @@ function activityItem(item = {}) {
         </span>
       </span>
       <time datetime="${attr(date || "")}">${escapeHtml(formatDate(date))}</time>
+  `;
+
+  return `
+    <li
+      class="home-activity-item home-activity-item--${attr(type)} ${interactive ? "home-activity-item--interactive" : ""}"
+      data-home-entity-type="${attr(entityType || type || "activity")}"
+      data-home-entity-id="${attr(entityId)}"
+    >
+      ${interactive
+        ? `
+          <button
+            type="button"
+            class="home-activity-entity-button"
+            data-entity-overlay-trigger="true"
+            data-entity-type="${attr(entityType)}"
+            data-entity-id="${attr(entityId)}"
+            aria-label="${attr(entityOpenLabel(entityType, entityId))}"
+          >
+            ${content}
+          </button>
+        `
+        : content}
     </li>
   `;
 }
@@ -764,6 +809,7 @@ function activity(vm) {
 function invoiceItem(invoice = {}) {
   const source = isObject(invoice) ? invoice : {};
   const id = invoiceDisplayId(source);
+  const interactive = Boolean(id);
 
   const concept = cleanText(
     first(source.concepto, source.title, source.titulo, source.name, source.nombre, ""),
@@ -795,8 +841,7 @@ function invoiceItem(invoice = {}) {
 
   const currency = cleanText(first(source.currency, source.moneda, "EUR"), "EUR");
 
-  return `
-    <li class="home-invoice-item" data-home-entity-type="invoice" data-home-entity-id="${attr(id)}">
+  const content = `
       <span class="home-invoice-main">
         <span class="home-invoice-heading">
           <strong>${escapeHtml(label)}</strong>
@@ -808,6 +853,28 @@ function invoiceItem(invoice = {}) {
         </span>
       </span>
       <strong class="home-invoice-amount">${hasAmount(amount) ? escapeHtml(formatMoney(amount, currency)) : "—"}</strong>
+  `;
+
+  return `
+    <li
+      class="home-invoice-item ${interactive ? "home-invoice-item--interactive" : ""}"
+      data-home-entity-type="invoice"
+      data-home-entity-id="${attr(id)}"
+    >
+      ${interactive
+        ? `
+          <button
+            type="button"
+            class="home-invoice-entity-button"
+            data-entity-overlay-trigger="true"
+            data-entity-type="factura"
+            data-entity-id="${attr(id)}"
+            aria-label="${attr(entityOpenLabel("factura", id))}"
+          >
+            ${content}
+          </button>
+        `
+        : content}
     </li>
   `;
 }

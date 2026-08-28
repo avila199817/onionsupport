@@ -123,6 +123,7 @@ jobs:
         env:
           LIGHTHOUSE_RESULTS_PATH: ${{ steps.lighthouse.outputs.resultsPath }}
           LIGHTHOUSE_PROFILE: ${{ matrix.profile }}
+          LIGHTHOUSE_EXPECTED_SAMPLES: "5"
           AUDITED_RELEASE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: >-
           node .github/scripts/lighthouse-summary.mjs

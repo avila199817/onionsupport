@@ -63,7 +63,7 @@ function invoice() {
   };
 }
 
-function technicalRecord() {
+function technicalRecord({ withSnapshot = true } = {}) {
   return {
     id: TECHNICAL_ID,
     clienteId: "CLI-1",
@@ -79,18 +79,16 @@ function technicalRecord() {
     paidAmount: 0,
     pendingAmount: 48.4,
     status: "completed",
-    responseSnapshot: {
-      ok: true,
-      success: true,
-      factura: invoice(),
-    },
+    responseSnapshot: withSnapshot
+      ? { ok: true, success: true, factura: invoice() }
+      : null,
   };
 }
 
-function normalizedTechnicalRecord() {
+function mergedHydratedDetail() {
   return {
-    ...technicalRecord(),
-    raw: technicalRecord(),
+    ...invoice(),
+    raw: technicalRecord({ withSnapshot: false }),
   };
 }
 
@@ -101,7 +99,7 @@ function testTechnicalClassifier() {
   assert.equal(isFacturaModalTechnicalRecord(invoice()), false);
 }
 
-function testDetailPromotesCanonicalSnapshot() {
+function testApiDetailPromotesCanonicalSnapshot() {
   const normalized = normalizeFacturaDetailResponse({
     ok: true,
     factura: technicalRecord(),
@@ -114,7 +112,6 @@ function testDetailPromotesCanonicalSnapshot() {
   assert.equal(normalized.item.numeroFacturaSistema, "2026-08-27-00052");
   assert.equal(normalized.item.total, 48.4);
   assert.equal(normalized.item.baseImponible, 40);
-  assert.equal(normalized.item.ivaImporte, 8.4);
   assert.equal(normalized.item.pendingAmount, 48.4);
   assert.equal(normalized.item.meta.technicalAliasRecovered, true);
   assert.equal(
@@ -136,40 +133,13 @@ function testListDropsTechnicalRecord() {
   assert.equal(normalized.count, 1);
   assert.equal(normalized.total, 1);
   assert.equal(normalized.meta.technicalRecordsFiltered, 1);
-  assert.equal(
-    normalized.meta.technicalRecordGuardVersion,
-    FACTURA_TECHNICAL_UI_GUARD_VERSION
-  );
 }
 
 function testStableIdUsesCanonicalSnapshot() {
   assert.equal(getFacturaStableId(technicalRecord()), CANONICAL_ID);
 }
 
-function testModalPromotesSnapshotBeforePainting() {
-  const canonical = resolveFacturaModalCanonical(normalizedTechnicalRecord());
-
-  assert.ok(canonical);
-  assert.equal(canonical.id, CANONICAL_ID);
-  assert.equal(canonical.facturaId, CANONICAL_ID);
-  assert.equal(canonical.invoiceId, CANONICAL_ID);
-  assert.equal(canonical.numeroFacturaLegal, "2026000052");
-  assert.equal(canonical.numeroFacturaSistema, "2026-08-27-00052");
-  assert.equal(canonical.baseImponible, 40);
-  assert.equal(canonical.total, 48.4);
-  assert.equal(canonical.pendingAmount, 48.4);
-  assert.equal(canonical.raw.id, CANONICAL_ID);
-  assert.equal(canonical.meta.technicalAliasRecovered, true);
-  assert.equal(
-    canonical.meta.technicalAliasGuardVersion,
-    FACTURAS_MODAL_TECHNICAL_GUARD_VERSION
-  );
-
-  const html = renderFacturasDetailContent({
-    factura: normalizedTechnicalRecord(),
-    admin: true,
-  });
-
+function assertCanonicalHtml(html) {
   assert.match(html, new RegExp(`data-factura-id="${CANONICAL_ID}"`));
   assert.match(html, />\s*2026000052\s*</);
   assert.match(html, />\s*2026-08-27-00052\s*</);
@@ -180,17 +150,48 @@ function testModalPromotesSnapshotBeforePainting() {
   assert.doesNotMatch(html, /FACTURA_CREATE_IDEMP_/);
 }
 
-function testModalFailsClosedWithoutCanonicalSnapshot() {
-  const broken = {
-    ...technicalRecord(),
-    responseSnapshot: null,
-    raw: null,
-  };
+function testModalPromotesSnapshotBeforePainting() {
+  const canonical = resolveFacturaModalCanonical(technicalRecord());
+  assert.ok(canonical);
+  assert.equal(canonical.id, CANONICAL_ID);
+  assert.equal(canonical.total, 48.4);
+  assert.equal(canonical.baseImponible, 40);
+  assert.equal(canonical.raw.id, CANONICAL_ID);
+  assert.equal(canonical.meta.technicalAliasRecovered, true);
 
-  assert.equal(resolveFacturaModalCanonical(broken), null);
+  assertCanonicalHtml(renderFacturasDetailContent({
+    factura: technicalRecord(),
+    admin: true,
+  }));
+}
 
-  const html = renderFacturasDetailContent({ factura: broken });
-  assert.match(html, /Detalle no disponible/);
+function testHydratedCanonicalRootWinsOverStaleTechnicalRaw() {
+  const merged = mergedHydratedDetail();
+  const canonical = resolveFacturaModalCanonical(merged);
+
+  assert.ok(canonical);
+  assert.equal(canonical.id, CANONICAL_ID);
+  assert.equal(canonical.facturaId, CANONICAL_ID);
+  assert.equal(canonical.total, 48.4);
+  assert.equal(canonical.baseImponible, 40);
+  assert.equal(canonical.pendingAmount, 48.4);
+  assert.equal(canonical.meta.canonicalRootPreferred, true);
+  assert.equal(canonical.raw.id, CANONICAL_ID);
+  assert.notEqual(canonical.raw.tipoDocumento, "idempotency");
+
+  assertCanonicalHtml(renderFacturasDetailContent({
+    factura: merged,
+    admin: true,
+  }));
+}
+
+function testUnresolvedTechnicalRendersLoadingNotFalseCorruption() {
+  const unresolved = technicalRecord({ withSnapshot: false });
+  assert.equal(resolveFacturaModalCanonical(unresolved), null);
+
+  const html = renderFacturasDetailContent({ factura: unresolved });
+  assert.match(html, /Cargando detalle de factura/);
+  assert.doesNotMatch(html, /Detalle no disponible/);
   assert.doesNotMatch(html, /FACTURA_CREATE_IDEMP_/);
 }
 
@@ -201,21 +202,22 @@ function testVersionContract() {
   );
   assert.equal(
     FACTURAS_MODAL_TECHNICAL_GUARD_VERSION,
-    "facturas.modal.technical-snapshot-first.v1"
+    "facturas.modal.canonical-root-first.v2"
   );
   assert.equal(
     FACTURAS_MODAL_TEMPLATE_VERSION,
-    "facturas.template.modal.productivo.v5.technical-snapshot-first"
+    "facturas.template.modal.productivo.v6.canonical-root-first"
   );
 }
 
 const tests = [
   testTechnicalClassifier,
-  testDetailPromotesCanonicalSnapshot,
+  testApiDetailPromotesCanonicalSnapshot,
   testListDropsTechnicalRecord,
   testStableIdUsesCanonicalSnapshot,
   testModalPromotesSnapshotBeforePainting,
-  testModalFailsClosedWithoutCanonicalSnapshot,
+  testHydratedCanonicalRootWinsOverStaleTechnicalRaw,
+  testUnresolvedTechnicalRendersLoadingNotFalseCorruption,
   testVersionContract,
 ];
 

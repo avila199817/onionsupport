@@ -2,10 +2,9 @@
    Onion Support - Facturas Modal · Canonical Technical Guard
 
    La implementación visual estable vive en
-   facturas.template.modal.base.js. Esta frontera garantiza que ningún
-   registro técnico FACTURA_CREATE_IDEMP_* pueda entrar al renderer como si
-   fuese una factura. Cuando existe responseSnapshot.factura, se promueve el
-   documento canónico antes de calcular IDs, importes, impuestos o acciones.
+   facturas.template.modal.base.js. Esta frontera impide que un registro
+   FACTURA_CREATE_IDEMP_* o cualquier residuo técnico anidado en `raw`
+   gobierne el primer paint o el detalle hidratado del modal.
 ========================================================= */
 
 import BaseDefault, * as Base from "./facturas.template.modal.base.js";
@@ -13,13 +12,12 @@ import BaseDefault, * as Base from "./facturas.template.modal.base.js";
 export * from "./facturas.template.modal.base.js";
 
 export const FACTURAS_MODAL_TEMPLATE_VERSION =
-  "facturas.template.modal.productivo.v5.technical-snapshot-first";
+  "facturas.template.modal.productivo.v6.canonical-root-first";
 
 export const FACTURAS_MODAL_TECHNICAL_GUARD_VERSION =
-  "facturas.modal.technical-snapshot-first.v1";
+  "facturas.modal.canonical-root-first.v2";
 
-const FACTURA_CREATE_IDEMPOTENCY_PREFIX = "FACTURA_CREATE_IDEMP_";
-
+const TECHNICAL_PREFIX = "FACTURA_CREATE_IDEMP_";
 const TECHNICAL_TYPES = new Set([
   "idempotency",
   "idempotencia",
@@ -98,7 +96,6 @@ function text(value = "", fallback = "") {
     .replace(/[\r\n\t]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-
   return output || fallback;
 }
 
@@ -120,7 +117,6 @@ function first(...values) {
     if (isObject(value) && !Object.keys(value).length) continue;
     return value;
   }
-
   return null;
 }
 
@@ -147,7 +143,6 @@ function numberOrNull(value) {
 
   const hasComma = normalized.includes(",");
   const hasDot = normalized.includes(".");
-
   if (hasComma && hasDot) {
     normalized = normalized.lastIndexOf(",") > normalized.lastIndexOf(".")
       ? normalized.replace(/\./g, "").replace(/,/g, ".")
@@ -164,14 +159,16 @@ function round2(value) {
   return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 }
 
+function isTechnicalIdentifier(value = "") {
+  return text(value, "").startsWith(TECHNICAL_PREFIX);
+}
+
 export function isFacturaModalTechnicalRecord(value = null) {
   const source = object(value);
   if (!source) return false;
 
-  for (const candidate of [source.id, source._id, source.operationId]) {
-    if (text(candidate, "").startsWith(FACTURA_CREATE_IDEMPOTENCY_PREFIX)) {
-      return true;
-    }
+  if ([source.id, source._id, source.operationId].some(isTechnicalIdentifier)) {
+    return true;
   }
 
   for (const candidate of [
@@ -199,19 +196,31 @@ export function isFacturaModalTechnicalRecord(value = null) {
   );
 }
 
-function looksLikeCanonicalFactura(value = null) {
-  const source = object(value);
-  if (!source || isFacturaModalTechnicalRecord(source)) return false;
+function canonicalIdentity(source = {}) {
+  const rootId = text(source.id, "");
+  if (rootId && !isTechnicalIdentifier(rootId)) return rootId;
 
-  const id = text(first(
-    source.id,
+  for (const candidate of [
     source.facturaId,
     source.invoiceId,
     source.numeroFacturaLegal,
     source.legalNumber,
-    ""
-  ), "");
+  ]) {
+    const value = text(candidate, "");
+    if (value && !isTechnicalIdentifier(value)) return value;
+  }
 
+  return "";
+}
+
+function looksLikeCanonicalFactura(value = null) {
+  const source = object(value);
+  if (!source) return false;
+
+  const rootId = text(source.id, "");
+  if (isTechnicalIdentifier(rootId)) return false;
+
+  const id = canonicalIdentity(source);
   if (!id) return false;
 
   return Boolean(
@@ -227,6 +236,34 @@ function looksLikeCanonicalFactura(value = null) {
       Array.isArray(source.lineas) ||
       Array.isArray(source.impuestos)
   );
+}
+
+function nestedCandidates(source = {}) {
+  return [
+    source.raw,
+    source.raw?.raw,
+    source.data,
+    source.payload,
+    source.result,
+    source.item,
+    source.factura,
+    source.invoice,
+  ].map((value) => object(value)).filter(Boolean);
+}
+
+function findTechnicalHost(value = null, depth = 0, seen = new Set()) {
+  const source = object(value);
+  if (!source || depth > 4 || seen.has(source)) return null;
+  seen.add(source);
+
+  if (isFacturaModalTechnicalRecord(source)) return source;
+
+  for (const candidate of nestedCandidates(source)) {
+    const resolved = findTechnicalHost(candidate, depth + 1, seen);
+    if (resolved) return resolved;
+  }
+
+  return null;
 }
 
 function snapshotCandidates(envelope = null) {
@@ -257,7 +294,7 @@ function findCanonicalSnapshot(value = null, depth = 0, seen = new Set()) {
   if (!source || depth > 4 || seen.has(source)) return null;
   seen.add(source);
 
-  const envelopes = [
+  for (const envelope of [
     source.responseSnapshot,
     source.resultSnapshot,
     source.snapshot,
@@ -265,24 +302,13 @@ function findCanonicalSnapshot(value = null, depth = 0, seen = new Set()) {
     source.meta?.resultSnapshot,
     source.meta?.createIdempotency?.responseSnapshot,
     source.createIdempotency?.responseSnapshot,
-  ];
-
-  for (const envelope of envelopes) {
+  ]) {
     for (const candidate of snapshotCandidates(envelope)) {
       if (looksLikeCanonicalFactura(candidate)) return candidate;
     }
   }
 
-  for (const candidate of [
-    source.raw,
-    source.raw?.raw,
-    source.data,
-    source.payload,
-    source.result,
-    source.item,
-    source.factura,
-    source.invoice,
-  ]) {
+  for (const candidate of nestedCandidates(source)) {
     const resolved = findCanonicalSnapshot(candidate, depth + 1, seen);
     if (resolved) return resolved;
   }
@@ -290,36 +316,13 @@ function findCanonicalSnapshot(value = null, depth = 0, seen = new Set()) {
   return null;
 }
 
-function findTechnicalHost(value = null) {
-  const source = object(value);
-  if (!source) return null;
-
-  for (const candidate of [
-    source,
-    source.raw,
-    source.raw?.raw,
-    source.data,
-    source.payload,
-    source.result,
-    source.item,
-    source.factura,
-    source.invoice,
-  ]) {
-    if (isFacturaModalTechnicalRecord(candidate)) return candidate;
-  }
-
-  return null;
-}
-
 function fillFallbacks(target = {}, outer = {}, technical = {}) {
   const result = { ...target };
-
   for (const name of FALLBACK_KEYS) {
     if (!empty(result[name])) continue;
     const candidate = first(outer?.[name], technical?.[name]);
     if (!empty(candidate)) result[name] = candidate;
   }
-
   return result;
 }
 
@@ -332,9 +335,8 @@ function taxAmountFromLines(value = {}) {
 
   let total = 0;
   let found = false;
-
-  for (const line of lines) {
-    const item = object(line);
+  for (const raw of lines) {
+    const item = object(raw);
     if (!item) continue;
 
     const amount = numberOrNull(first(
@@ -343,17 +345,15 @@ function taxAmountFromLines(value = {}) {
       item.total,
       item.value
     ));
-
     if (amount === null) continue;
-    found = true;
 
+    found = true;
     const taxKey = key(first(item.tipo, item.taxType, item.name, item.label, ""));
     const negative =
       taxKey.includes("irpf") ||
       taxKey.includes("retencion") ||
       taxKey.includes("withholding") ||
       key(item.sign) === "negative";
-
     total += negative ? -Math.abs(amount) : amount;
   }
 
@@ -384,7 +384,6 @@ function repairFinancialAliases(value = {}) {
     result.totales?.impuestos,
     result.totals?.taxes
   ));
-
   if (taxes === null) taxes = taxAmountFromLines(result);
 
   if (taxes === null) {
@@ -403,7 +402,6 @@ function repairFinancialAliases(value = {}) {
       result.withholdingAmount,
       isObject(result.irpf) ? first(result.irpf.importe, result.irpf.amount) : result.irpf
     ));
-
     if (iva !== null || retention !== null) {
       taxes = round2((iva || 0) - Math.abs(retention || 0));
     }
@@ -445,11 +443,9 @@ function repairFinancialAliases(value = {}) {
     const calculated = round2(base + taxes);
     if (calculated !== 0) total = calculated;
   }
-
   if ((total === null || total === 0) && pending !== null && pending + paid !== 0) {
     total = round2(pending + paid);
   }
-
   if ((base === null || base === 0) && total !== null && taxes !== null) {
     const calculated = round2(total - taxes);
     if (calculated !== 0) base = calculated;
@@ -460,13 +456,11 @@ function repairFinancialAliases(value = {}) {
     result.taxableBase = base;
     result.subtotal = base;
   }
-
   if (taxes !== null) {
     result.taxAmount = taxes;
     result.taxesAmount = taxes;
     result.totalImpuestos = taxes;
   }
-
   if (total !== null) {
     result.total = total;
     result.totalFactura = total;
@@ -477,7 +471,6 @@ function repairFinancialAliases(value = {}) {
 
   result.paidAmount = paid;
   result.pagado = paid;
-
   if (pending !== null) {
     result.pendingAmount = Math.max(0, pending);
     result.pendiente = Math.max(0, pending);
@@ -489,6 +482,15 @@ function repairFinancialAliases(value = {}) {
   return result;
 }
 
+function canonicalRaw(value = {}) {
+  const raw = { ...value };
+  delete raw.raw;
+  delete raw.responseSnapshot;
+  delete raw.resultSnapshot;
+  delete raw.snapshot;
+  return raw;
+}
+
 export function resolveFacturaModalCanonical(value = null) {
   const outer = object(value);
   if (!outer) return value;
@@ -496,32 +498,30 @@ export function resolveFacturaModalCanonical(value = null) {
   const technical = findTechnicalHost(outer);
   if (!technical) return outer;
 
-  const snapshot =
-    findCanonicalSnapshot(technical) ||
-    findCanonicalSnapshot(outer);
+  /*
+    El detalle hidratado puede ser ya canónico en la raíz y conservar un
+    `raw` técnico procedente del primer paint/cache. La raíz canónica debe
+    ganar antes de inspeccionar ese residuo; exigir snapshot en ese punto fue
+    lo que produjo el falso «Detalle no disponible» visto en producción.
+  */
+  const rootCanonical = looksLikeCanonicalFactura(outer)
+    ? outer
+    : null;
+  const snapshot = rootCanonical
+    ? null
+    : findCanonicalSnapshot(technical) || findCanonicalSnapshot(outer);
+  const selected = rootCanonical || snapshot;
+  if (!selected) return null;
 
-  if (!snapshot) return null;
+  const selectedRaw = object(selected.raw);
+  const source =
+    selectedRaw && looksLikeCanonicalFactura(selectedRaw)
+      ? { ...selectedRaw, ...selected }
+      : { ...selected };
 
-  const snapshotRaw = object(snapshot.raw);
-  const canonicalSource =
-    snapshotRaw && !isFacturaModalTechnicalRecord(snapshotRaw)
-      ? { ...snapshotRaw, ...snapshot }
-      : { ...snapshot };
-
-  let canonical = fillFallbacks(canonicalSource, outer, technical);
-
-  const canonicalId = text(first(
-    canonical.id,
-    canonical.facturaId,
-    canonical.invoiceId,
-    technical.facturaId,
-    technical.invoiceId,
-    ""
-  ), "");
-
-  if (!canonicalId || canonicalId.startsWith(FACTURA_CREATE_IDEMPOTENCY_PREFIX)) {
-    return null;
-  }
+  let canonical = fillFallbacks(source, outer, technical);
+  const canonicalId = canonicalIdentity(canonical) || canonicalIdentity(outer);
+  if (!canonicalId || isTechnicalIdentifier(canonicalId)) return null;
 
   const legalNumber = text(first(
     canonical.numeroFacturaLegal,
@@ -557,9 +557,9 @@ export function resolveFacturaModalCanonical(value = null) {
         }
       : {}),
     ...(systemNumber ? { numeroFacturaSistema: systemNumber } : {}),
-    tipoDocumento: text(first(canonical.tipoDocumento, "factura"), "factura"),
-    entityType: text(first(canonical.entityType, "invoice"), "invoice"),
-    type: text(first(canonical.type, "invoice"), "invoice"),
+    tipoDocumento: "factura",
+    entityType: "invoice",
+    type: "invoice",
     status: text(first(canonical.status, canonical.estado, "issued"), "issued"),
     estado: text(first(canonical.estado, canonical.status, "issued"), "issued"),
     meta: {
@@ -567,60 +567,64 @@ export function resolveFacturaModalCanonical(value = null) {
       technicalAliasRecovered: true,
       technicalAliasId: text(technical.id, "") || null,
       technicalAliasGuardVersion: FACTURAS_MODAL_TECHNICAL_GUARD_VERSION,
+      canonicalRootPreferred: Boolean(rootCanonical),
     },
   });
 
-  // El renderer legacy inspecciona `raw`; debe apuntar también al documento
-  // canónico para que ningún cero o ID técnico vuelva a ganar por fallback.
-  canonical.raw = { ...canonical };
-  delete canonical.raw.raw;
-  delete canonical.raw.responseSnapshot;
-  delete canonical.raw.resultSnapshot;
-  delete canonical.raw.snapshot;
-
+  canonical.raw = canonicalRaw(canonical);
   return canonical;
 }
 
-function canonicalOptions(options = {}) {
+function renderState(options = {}) {
   const source = object(options, {});
   const current = first(source.factura, source.item, source.detail, null);
+  const technical = Boolean(findTechnicalHost(current));
   const canonical = resolveFacturaModalCanonical(current);
+  const waitingCanonical = Boolean(
+    technical &&
+    !canonical &&
+    !text(source.feedbackMessage, "")
+  );
 
   return {
-    ...source,
-    factura: canonical,
-    item: null,
-    detail: null,
+    source,
+    canonical,
+    waitingCanonical,
   };
 }
 
 export function renderHeaderActions(options = {}) {
-  const source = object(options, {});
-  return Base.renderHeaderActions({
-    ...source,
-    factura: resolveFacturaModalCanonical(source.factura),
-  });
+  const { source, canonical } = renderState(options);
+  return Base.renderHeaderActions({ ...source, factura: canonical });
 }
 
 export function renderFacturasDetailContent(options = {}) {
-  const source = object(options, {});
+  const { source, canonical, waitingCanonical } = renderState(options);
   return Base.renderFacturasDetailContent({
     ...source,
-    factura: resolveFacturaModalCanonical(source.factura),
+    factura: canonical,
+    loading: source.loading === true || waitingCanonical,
   });
 }
 
 export const renderFacturaDetailContent = renderFacturasDetailContent;
 
 export function renderFacturasDetailModal(options = {}) {
-  return Base.renderFacturasDetailModal(canonicalOptions(options));
+  const { source, canonical, waitingCanonical } = renderState(options);
+  return Base.renderFacturasDetailModal({
+    ...source,
+    factura: canonical,
+    item: null,
+    detail: null,
+    loading: source.loading === true || waitingCanonical,
+    detailLoading: source.detailLoading === true || waitingCanonical,
+  });
 }
 
 export const renderFacturaDetailModal = renderFacturasDetailModal;
 
 export function getFacturasModalTemplateSnapshot() {
   const snapshot = Base.getFacturasModalTemplateSnapshot();
-
   return {
     ...snapshot,
     version: FACTURAS_MODAL_TEMPLATE_VERSION,
@@ -628,8 +632,10 @@ export function getFacturasModalTemplateSnapshot() {
     policy: {
       ...object(snapshot?.policy, {}),
       technicalIdempotencySnapshotFirst: true,
+      canonicalRootBeforeStaleRaw: true,
       technicalIdNeverRendered: true,
       financialFallbackReconciled: true,
+      unresolvedTechnicalShowsLoading: true,
     },
   };
 }

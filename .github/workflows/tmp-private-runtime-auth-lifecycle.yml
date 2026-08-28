@@ -36,6 +36,7 @@ jobs:
           python3 .github/tmp/fix_private_runtime_contracts.py
           python3 .github/tmp/fix_router_runtime_contract.py
           python3 .github/tmp/fix_navigation_performance_contract.py
+          python3 .github/tmp/fix_entity_overlay_contract.py
 
       - name: Validate refactor
         if: steps.guard.outputs.skip != 'true'
@@ -49,6 +50,7 @@ jobs:
           node --experimental-default-type=module .github/scripts/private_runtime_auth_contract.mjs
           node --experimental-default-type=module .github/scripts/router_runtime_contract.mjs
           node --experimental-default-type=module .github/scripts/navigation_performance_contract.mjs
+          node --experimental-default-type=module .github/scripts/entity_overlay_contract.mjs
           python3 .github/scripts/app_entrypoint_integrity.py
           bash .github/ci/validate_spa_contracts.sh
           git diff --check
@@ -63,6 +65,6 @@ jobs:
           fi
           git config user.name "Onion Support CI"
           git config user.email "cristian@onionsupport.com"
-          git add -A src/features/private-runtime-ui src/app/index.js src/app/enhancements.js src/router/index.js src/views/public/login/index.js src/css/tokens/variables.css src/css/core/layout.css src/css/layout/chrome.css .github/scripts/private_runtime_auth_contract.mjs .github/scripts/app_entrypoint_integrity.py .github/scripts/router_runtime_contract.mjs .github/scripts/navigation_performance_contract.mjs .github/ci/validate_spa_contracts.sh
+          git add -A src/features/private-runtime-ui src/app/index.js src/app/enhancements.js src/router/index.js src/views/public/login/index.js src/css/tokens/variables.css src/css/core/layout.css src/css/layout/chrome.css .github/scripts/private_runtime_auth_contract.mjs .github/scripts/app_entrypoint_integrity.py .github/scripts/router_runtime_contract.mjs .github/scripts/navigation_performance_contract.mjs .github/scripts/entity_overlay_contract.mjs .github/ci/validate_spa_contracts.sh
           git commit -m "refactor: runtime privado sólo después de Auth [private-runtime-auth-done]"
           git push origin HEAD:refactor/private-runtime-auth-lifecycle

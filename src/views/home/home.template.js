@@ -696,6 +696,43 @@ function overlayEntityType(type = "") {
   return "";
 }
 
+function activityEntityId(type = "", source = {}) {
+  const entityType = overlayEntityType(type);
+  const raw = isObject(source) ? source : {};
+
+  if (entityType === "factura") return invoiceDisplayId(raw);
+  if (entityType === "incidencia") return ticketDisplayId(raw);
+
+  if (entityType === "cliente") {
+    return safeDisplayId(
+      first(
+        raw.entityId,
+        raw.clienteId,
+        raw.clientId,
+        raw.customerId,
+        raw.id,
+        ""
+      ),
+      ""
+    );
+  }
+
+  if (entityType === "usuario") {
+    return safeDisplayId(
+      first(
+        raw.entityId,
+        raw.usuarioId,
+        raw.userId,
+        raw.id,
+        ""
+      ),
+      ""
+    );
+  }
+
+  return "";
+}
+
 function entityOpenLabel(type = "", id = "") {
   const entityType = overlayEntityType(type);
   const entityId = safeDisplayId(id, "");
@@ -716,7 +753,7 @@ function activityItem(item = {}) {
   const type = normalizeKey(first(source.type, source.tipo, "activity"));
   const entityType = overlayEntityType(type);
   const isInvoice = entityType === "factura";
-  const entityId = isInvoice ? invoiceDisplayId(source) : ticketDisplayId(source);
+  const entityId = activityEntityId(entityType, source);
   const interactive = Boolean(entityType && entityId);
 
   const rawTitle = visibleText(

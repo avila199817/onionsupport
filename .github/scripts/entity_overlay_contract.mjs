@@ -70,11 +70,18 @@ const [overlay, app, main, html, deeplink, spaContract] = await Promise.all([
   read(".github/ci/validate_spa_contracts.sh"),
 ]);
 
-for (const type of ["factura", "incidencia", "cliente", "usuario"]) {
+for (const type of ["factura", "cliente", "usuario"]) {
   assert.match(overlay, new RegExp(`${type}:\\s*\\(\\)\\s*=>\\s*import`));
 }
 
 assert.match(overlay, /document\.addEventListener\("click",\s*onDocumentClick,\s*true\)/);
+assert.match(overlay, /OWNER_ROUTED_TYPES = new Set\(\["incidencia"\]\)/);
+assert.match(overlay, /openCanonicalIncidencia/);
+assert.match(overlay, /openIncidenciaDetailById/);
+assert.match(overlay, /INCIDENCIA_MODAL_ROOT_SELECTOR/);
+assert.match(overlay, /context\?\.Router \|\| context\?\.router/);
+assert.match(overlay, /navigateWithRouter\(target\)/);
+assert.doesNotMatch(overlay, /adapters\/incidencia\.js/);
 assert.match(overlay, /pushState|writeUrlForEntry/);
 assert.match(overlay, /data-entity-overlay-panel/);
 assert.match(overlay, /isCanonicalOwnerRoute/);
@@ -101,6 +108,9 @@ assert.equal(
 );
 assert.match(spaContract, /entity_overlay_contract\.mjs/);
 
+
+const overlayStyles = await read("src/features/entity-overlay/styles.generated.js");
+assert.doesNotMatch(overlayStyles, /^\s*incidencia:/m);
 
 const [homeTemplate, homeCss] = await Promise.all([
   read("src/views/home/home.template.js"),
@@ -130,5 +140,5 @@ assert.doesNotMatch(homeCss, /home-activity-entity-button/);
 assert.doesNotMatch(homeCss, /home-invoice-entity-button/);
 
 console.log(
-  "Entity overlay contract: PASS · lazy overlays · canonical incidencia owner deeplinks"
+  "Entity overlay contract: PASS · incidencia owner authority · lazy simple overlays · canonical deeplinks"
 );

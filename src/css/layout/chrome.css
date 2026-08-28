@@ -22,7 +22,7 @@
   --chrome-breakpoint: 900px;
   --chrome-sidebar-open-width: var(--sidebar-width, 260px);
   --chrome-sidebar-collapsed-width: var(--sidebar-collapsed, 72px);
-  --chrome-sidebar-offset: var(--chrome-sidebar-open-width);
+  --chrome-sidebar-offset: 0px;
   --chrome-topbar-height:
     calc(
       var(--topbar-height, 58px) +
@@ -41,15 +41,24 @@
 }
 
 body {
-  --chrome-sidebar-offset: var(--chrome-sidebar-open-width);
+  --chrome-sidebar-offset: 0px;
+  --app-sidebar-current-width: 0px;
+  --layout-main-inset-left: 0px;
+  --topbar-effective-sidebar-offset: 0px;
+  --app-offset-topbar: 0px;
+  --layout-main-inset-top: 0px;
+}
 
-  /* Compatibilidad: layout.css/topbar.css consumen estas variables. */
+body[data-route-mode="app"][data-chrome="visible"] {
+  --chrome-sidebar-offset: var(--chrome-sidebar-open-width);
   --app-sidebar-current-width: var(--chrome-sidebar-offset);
   --layout-main-inset-left: var(--chrome-sidebar-offset);
   --topbar-effective-sidebar-offset: var(--chrome-sidebar-offset);
+  --app-offset-topbar: var(--chrome-topbar-height);
+  --layout-main-inset-top: var(--chrome-topbar-height);
 }
 
-body:is(
+body[data-route-mode="app"][data-chrome="visible"]:is(
   .sidebar-collapsed,
   [data-sidebar-state="collapsed"],
   [data-sidebar-open="false"]
@@ -57,7 +66,7 @@ body:is(
   --chrome-sidebar-offset: var(--chrome-sidebar-collapsed-width);
 }
 
-body:is(
+body[data-route-mode="app"][data-chrome="visible"]:is(
   .sidebar-hidden,
   [data-sidebar-state="hidden"],
   [data-sidebar-hidden="true"]

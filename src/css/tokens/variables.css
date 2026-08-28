@@ -171,10 +171,10 @@
   --sidebar-mobile-width: min(88vw, calc(320px * var(--ui-scale)));
   --sidebar-mobile-width-xs: min(92vw, calc(304px * var(--ui-scale)));
 
-  --app-sidebar-current-width: var(--sidebar-width);
+  --app-sidebar-current-width: 0px;
 
   --app-offset: calc(var(--topbar-height) + var(--tablehead-height));
-  --app-offset-topbar: calc(var(--topbar-height) + var(--app-safe-top));
+  --app-offset-topbar: 0px;
   --app-offset-tablehead: 0px;
 
   --mobile-bottom-nav-height: 0px;

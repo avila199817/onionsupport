@@ -41,9 +41,13 @@ import {
 
 import * as Routes from "./routes.js";
 import RouteStyles from "./styles.js";
+import {
+  ensurePrivateRuntimeUI,
+  destroyPrivateRuntimeUI,
+} from "../features/private-runtime-ui/index.js";
 
 export const ROUTER_VERSION =
-  "router.minimal.v15-public-auth-short-circuit";
+  "router.minimal.v16-private-runtime-after-guard";
 
 const PUBLIC_HOME_PATH = "/";
 
@@ -2277,6 +2281,28 @@ function checkAccess(
         ? "admin"
         : "authenticated",
   };
+}
+
+async function syncPrivateRuntimeForRoute(
+  route = null,
+  options = {}
+) {
+  if (!route || route.public === true) {
+    if (!isAuthenticated()) {
+      destroyPrivateRuntimeUI();
+    }
+    return true;
+  }
+
+  if (!isAuthenticated()) return false;
+
+  return ensurePrivateRuntimeUI({
+    AppCore,
+    Auth: getAuth(),
+    Router,
+    route,
+    source: options.source || "router",
+  });
 }
 
 /* =========================================================
@@ -5278,6 +5304,39 @@ async function executeRender(
       );
     }
 
+    const privateRuntimeStartedAt = performanceNow();
+    const privateRuntimeReady = await syncPrivateRuntimeForRoute(
+      match.route,
+      options
+    );
+
+    if (
+      match.route?.public !== true &&
+      privateRuntimeReady !== true
+    ) {
+      return {
+        ok: false,
+        reason: "private-runtime-unavailable",
+        canonicalPath: match.canonicalPath,
+        publicPath: stateSafePublicPath(match),
+      };
+    }
+
+    recordTransitionPhase(
+      transition,
+      match.route,
+      "private-runtime",
+      privateRuntimeStartedAt
+    );
+
+    if (!transitionIsCurrent(transition)) {
+      return {
+        ok: false,
+        skipped: true,
+        reason: "stale-private-runtime",
+      };
+    }
+
     return await renderRoute(
       match,
       options,
@@ -5569,15 +5628,17 @@ function goAfterLogin(
   fallback = HOME_PATH,
   options = {}
 ) {
+  /* Login cambia autorización sin recargar: Core debe estar sincronizado. */
+  authCall("syncAuthState", false);
+
   return replace(
     normalizePostLoginTarget(
       fallback
     ),
     {
       ...options,
-
-      source:
-        "login",
+      force: true,
+      source: "login",
     }
   );
 }

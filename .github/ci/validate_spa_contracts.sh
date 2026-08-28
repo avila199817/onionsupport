@@ -124,6 +124,7 @@ node --experimental-default-type=module .github/scripts/auth_selector_contract.m
 node --experimental-default-type=module .github/scripts/auth_logout_contract.mjs
 node --experimental-default-type=module .github/scripts/router_runtime_contract.mjs
 node --experimental-default-type=module .github/scripts/shell_runtime_contract.mjs
+node --experimental-default-type=module .github/scripts/private_runtime_auth_contract.mjs
 node --experimental-default-type=module .github/scripts/view_runtime_state_contract.mjs
 node --experimental-default-type=module .github/scripts/home_runtime_state_contract.mjs
 node --experimental-default-type=module .github/scripts/home_view_runtime_context_contract.mjs

@@ -18,7 +18,7 @@ import { AppCore } from "../../../core/index.js";
 import { Auth as DefaultAuth } from "../../../features/auth/index.js";
 import createLoginTemplate from "./template.js";
 
-export const LOGIN_VIEW_VERSION = "login.view.public.controller.v5-portal-2026";
+export const LOGIN_VIEW_VERSION = "login.view.public.controller.v6-post-auth-transition";
 
 const SOURCE = "login.view";
 const INSTANCES = new WeakMap();
@@ -739,10 +739,31 @@ export function renderLoginView(container, context = {}) {
         throw new Error("Login inválido.");
       }
 
-      const navigation = await goAfterLogin(result || {}, {
+      auth.syncAuthState?.();
+
+      const target = resolvePostLoginTarget(result || {}, auth);
+      let navigation = await goAfterLogin(result || {}, {
         ...context,
         Auth: auth,
       });
+
+      if (!mounted) return false;
+
+      if (
+        isBrowser() &&
+        auth.isAuthenticated?.() === true &&
+        window.location.pathname === "/login"
+      ) {
+        const router = getRouter(context);
+
+        if (isFunction(router?.replace)) {
+          navigation = await router.replace(target, {
+            source: "login.view.recovery",
+            replaceState: true,
+            force: true,
+          });
+        }
+      }
 
       if (!mounted) return false;
 
@@ -750,6 +771,14 @@ export function renderLoginView(container, context = {}) {
         throw new Error(
           "No se pudo completar la navegación tras el login."
         );
+      }
+
+      if (
+        isBrowser() &&
+        auth.isAuthenticated?.() === true &&
+        window.location.pathname === "/login"
+      ) {
+        window.location.replace(target);
       }
 
       return true;

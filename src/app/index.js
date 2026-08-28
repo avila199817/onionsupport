@@ -30,7 +30,7 @@ import {
 } from "./loader.js";
 
 export const APP_VERSION =
-  "app.minimal.v7-global-entity-overlay";
+  "app.minimal.v8-private-runtime-after-guard";
 
 /* =========================================================
    CONSTANTS
@@ -81,15 +81,8 @@ let publicFastBoot = false;
 
 let Auth = null;
 let Toast = null;
-let SidebarUI = null;
-let TopbarUI = null;
-let EntityOverlayUI = null;
-
 let authLoadPromise = null;
 let toastLoadPromise = null;
-let sidebarLoadPromise = null;
-let topbarLoadPromise = null;
-let entityOverlayLoadPromise = null;
 
 let bootPhase =
   BOOT_PHASES.IDLE;
@@ -182,41 +175,6 @@ async function ensureToast() {
   return Toast;
 }
 
-async function ensureSidebarUI() {
-  const loaded = await loadRuntimeModule(
-    SidebarUI,
-    sidebarLoadPromise,
-    () => import("../ui/sidebar/index.js"),
-    ["SidebarUI"]
-  );
-  sidebarLoadPromise = loaded.promise;
-  SidebarUI = loaded.value;
-  return SidebarUI;
-}
-
-async function ensureTopbarUI() {
-  const loaded = await loadRuntimeModule(
-    TopbarUI,
-    topbarLoadPromise,
-    () => import("../ui/topbar/index.js"),
-    ["TopbarUI"]
-  );
-  topbarLoadPromise = loaded.promise;
-  TopbarUI = loaded.value;
-  return TopbarUI;
-}
-
-async function ensureEntityOverlayUI() {
-  const loaded = await loadRuntimeModule(
-    EntityOverlayUI,
-    entityOverlayLoadPromise,
-    () => import("../features/entity-overlay/index.js"),
-    ["EntityOverlay"]
-  );
-  entityOverlayLoadPromise = loaded.promise;
-  EntityOverlayUI = loaded.value;
-  return EntityOverlayUI;
-}
 
 function withRuntimeModules(payload = {}) {
   return {
@@ -224,9 +182,6 @@ function withRuntimeModules(payload = {}) {
     Auth,
     Router,
     Toast,
-    SidebarUI,
-    TopbarUI,
-    EntityOverlay: EntityOverlayUI,
   };
 }
 
@@ -821,74 +776,6 @@ async function restoreAuth(
   return value;
 }
 
-async function initGlobalUI(
-  payload = {}
-) {
-  setBootPhase(
-    BOOT_PHASES.UI
-  );
-
-  /*
-    Se mantiene secuencial:
-    no introducimos concurrencia entre módulos UI sin necesidad.
-  */
-  const sidebar = await ensureSidebarUI();
-  const sidebarResult =
-    await call(
-      sidebar,
-      "init",
-      withRuntimeModules(payload),
-      false
-    );
-
-  recordBootStep(
-    "sidebar",
-    sidebarResult
-  );
-
-  const topbar = await ensureTopbarUI();
-  const topbarResult =
-    await call(
-      topbar,
-      "init",
-      withRuntimeModules(payload),
-      false
-    );
-
-  recordBootStep(
-    "topbar",
-    topbarResult
-  );
-
-  return {
-    sidebar:
-      sidebarResult.value,
-
-    topbar:
-      topbarResult.value,
-  };
-}
-
-
-async function initEntityOverlay(
-  payload = {}
-) {
-  const overlay = await ensureEntityOverlayUI();
-
-  const result = await call(
-    overlay,
-    "init",
-    withRuntimeModules(payload),
-    false
-  );
-
-  recordBootStep(
-    "entityOverlay",
-    result
-  );
-
-  return result.value;
-}
 
 function notifyPublicHomeSessionHydrated() {
   if (!isBrowser()) return false;
@@ -914,16 +801,8 @@ function hydratePublicHomeInBackground(
     await initToast(payload);
     const restored = await restoreAuth(payload);
 
-    /*
-      El chrome privado no aporta nada a una visita pública anónima. Sólo se
-      hidrata si realmente existe una sesión autenticada restaurada.
-    */
-    if (
-      authResultAuthenticated(restored) ||
-      lastRestore?.authenticated === true
-    ) {
-      await initGlobalUI(payload);
-    }
+    /* La home pública nunca activa Sidebar/Topbar, incluso con sesión restaurada. */
+    void restored;
 
     notifyPublicHomeSessionHydrated();
     return true;
@@ -1186,9 +1065,11 @@ async function runBoot(
     2. Toast opcional.
     3. Auth.init sin restore.
     4. Auth.restoreSession.
-    5. Sidebar/Topbar.
-    6. Router.start con URL real.
+    5. Router.start con URL real.
+    6. Router activa runtime privado sólo tras guard Auth+ruta privada.
     7. Loader hidden / App ready.
+
+    Login/reset/activación no importan Sidebar, Topbar, AppChrome ni EntityOverlay.
   */
   await initToast(
     payload
@@ -1201,16 +1082,6 @@ async function runBoot(
   await restoreAuth(
     payload
   );
-
-  await initGlobalUI(
-    payload
-  );
-
-  if (lastRestore?.authenticated === true) {
-    await initEntityOverlay(
-      payload
-    );
-  }
 
   await startRouter(
     payload,
@@ -1344,16 +1215,8 @@ export function getAppSnapshot() {
           Boolean(
             Toast
           ),
-
-        sidebar:
-          Boolean(
-            SidebarUI
-          ),
-
-        topbar:
-          Boolean(
-            TopbarUI
-          ),
+        privateRuntimeOwnedByRouter:
+          true,
       }),
   });
 }

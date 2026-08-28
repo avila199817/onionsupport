@@ -36,6 +36,19 @@ export * from "./facturas.api.base.js";
 export const FACTURAS_DOCUMENT_FLOW_VERSION =
   "facturas.api.document-flow.v1";
 
+export const FACTURA_TECHNICAL_UI_GUARD_VERSION =
+  "facturas.ui.technical-record-guard.v1";
+
+const FACTURA_CREATE_IDEMPOTENCY_PREFIX = "FACTURA_CREATE_IDEMP_";
+const FACTURA_TECHNICAL_TYPES = new Set([
+  "idempotency",
+  "idempotencia",
+  "invoice_create_idempotency",
+  "factura_create_idempotency",
+  "invoice_create_operation",
+  "factura_create_operation",
+]);
+
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -63,8 +76,154 @@ function first(...values) {
   return null;
 }
 
+function recordKey(value = "") {
+  return text(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s.-]+/g, "_")
+    .replace(/[^\w:]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
 function isBlob(value) {
   return typeof Blob !== "undefined" && value instanceof Blob;
+}
+
+export function isFacturaTechnicalRecord(value = null) {
+  const item = object(value, null);
+  if (!item) return false;
+
+  const id = text(item.id, "");
+  if (id.startsWith(FACTURA_CREATE_IDEMPOTENCY_PREFIX)) return true;
+
+  for (const candidate of [
+    item.tipoDocumento,
+    item.entityType,
+    item.tipo,
+    item.type,
+    item.documentType,
+    item.recordType,
+  ]) {
+    if (FACTURA_TECHNICAL_TYPES.has(recordKey(candidate))) return true;
+  }
+
+  return Boolean(
+    recordKey(item.operation) === "factura_create" &&
+    (
+      text(item.operationHash, "") ||
+      recordKey(first(
+        item.version,
+        item.idempotencyVersion,
+        item.meta?.idempotencyVersion,
+        ""
+      )).includes("idempotency")
+    )
+  );
+}
+
+function technicalSnapshotFactura(value = {}) {
+  const item = object(value);
+  const snapshot = object(item.responseSnapshot);
+
+  return object(first(
+    snapshot.factura,
+    snapshot.invoice,
+    snapshot.item,
+    snapshot.data,
+    null
+  ), null);
+}
+
+function promoteTechnicalFactura(value = {}) {
+  const item = object(value, null);
+  if (!item) return { factura: null, technicalId: "" };
+  if (!isFacturaTechnicalRecord(item)) {
+    return { factura: item, technicalId: "" };
+  }
+
+  const nested = technicalSnapshotFactura(item);
+  if (!nested) {
+    return { factura: item, technicalId: text(item.id, "") };
+  }
+
+  const technicalId = text(item.id, "");
+  const canonicalId = text(first(
+    nested.id,
+    nested.facturaId,
+    nested.invoiceId,
+    item.facturaId,
+    item.invoiceId,
+    ""
+  ), "");
+
+  return {
+    factura: {
+      ...nested,
+      id: canonicalId || nested.id,
+      facturaId: text(first(nested.facturaId, canonicalId), canonicalId),
+      invoiceId: text(first(nested.invoiceId, canonicalId), canonicalId),
+      meta: {
+        ...object(nested.meta),
+        technicalAliasRecovered: true,
+        technicalAliasId: technicalId || null,
+        technicalAliasGuardVersion: FACTURA_TECHNICAL_UI_GUARD_VERSION,
+      },
+    },
+    technicalId,
+  };
+}
+
+function sanitizeFacturaItems(items = []) {
+  return Array.isArray(items)
+    ? items.filter((item) => !isFacturaTechnicalRecord(item))
+    : [];
+}
+
+function sanitizeFacturaListResponse(response = null) {
+  const source = object(response, null);
+  if (!source) return response;
+
+  const rawItems = Array.isArray(source.items)
+    ? source.items
+    : Array.isArray(source.facturas)
+      ? source.facturas
+      : Array.isArray(source.invoices)
+        ? source.invoices
+        : Array.isArray(source.data)
+          ? source.data
+          : [];
+
+  const items = sanitizeFacturaItems(rawItems);
+  const removed = rawItems.length - items.length;
+  if (!removed) return source;
+
+  const rawTotal = Number(source.total);
+  const total = Number.isFinite(rawTotal)
+    ? Math.max(items.length, rawTotal - removed)
+    : items.length;
+
+  return {
+    ...source,
+    items,
+    facturas: items,
+    invoices: items,
+    data: items,
+    count: items.length,
+    total,
+    remoteCount: Number.isFinite(Number(source.remoteCount))
+      ? Math.max(items.length, Number(source.remoteCount) - removed)
+      : total,
+    totalMatched: Number.isFinite(Number(source.totalMatched))
+      ? Math.max(items.length, Number(source.totalMatched) - removed)
+      : total,
+    stats: Base.computeFacturasStats(items),
+    meta: {
+      ...object(source.meta),
+      technicalRecordsFiltered: removed,
+      technicalRecordGuardVersion: FACTURA_TECHNICAL_UI_GUARD_VERSION,
+    },
+  };
 }
 
 function isUnsignedAzureBlobUrl(value = "") {
@@ -129,7 +288,8 @@ function documentMetadataFrom(item = {}) {
 }
 
 function canonicalizeFactura(item = {}, envelope = {}) {
-  const source = object(item);
+  const promotion = promoteTechnicalFactura(item);
+  const source = object(promotion.factura);
   if (!Object.keys(source).length) return null;
 
   const externalFile = object(envelope.file);
@@ -173,18 +333,31 @@ function canonicalizeFactura(item = {}, envelope = {}) {
       docs.pdf?.blobPath ||
       docs.document?.blobPath
     ),
+    meta: {
+      ...object(merged.meta),
+      ...(promotion.technicalId
+        ? {
+            technicalAliasRecovered: true,
+            technicalAliasId: promotion.technicalId,
+            technicalAliasGuardVersion: FACTURA_TECHNICAL_UI_GUARD_VERSION,
+          }
+        : {}),
+    },
     documentFlowVersion: FACTURAS_DOCUMENT_FLOW_VERSION,
   };
 }
 
 function facturaId(item = {}) {
+  const promotion = promoteTechnicalFactura(item);
+  const source = object(promotion.factura);
+
   return text(first(
-    item?.id,
-    item?.facturaId,
-    item?.invoiceId,
-    item?.numeroFacturaLegal,
-    item?.numeroFactura,
-    item?.invoiceNumber,
+    source?.id,
+    source?.facturaId,
+    source?.invoiceId,
+    source?.numeroFacturaLegal,
+    source?.numeroFactura,
+    source?.invoiceNumber,
     ""
   ), "");
 }
@@ -240,6 +413,18 @@ function hasActionablePdf(result = null, mode = "view") {
   )));
 }
 
+export function normalizeFactura(item = {}, options = {}) {
+  const promotion = promoteTechnicalFactura(item);
+  const normalized = Base.normalizeFactura(promotion.factura || item, options);
+  return canonicalizeFactura(normalized, item);
+}
+
+export function normalizeFacturasListResponse(payload = null, requestMeta = {}) {
+  return sanitizeFacturaListResponse(
+    Base.normalizeFacturasListResponse(payload, requestMeta)
+  );
+}
+
 export function normalizeFacturaDetailResponse(payload = null) {
   const normalized = Base.normalizeFacturaDetailResponse(payload);
   const item = canonicalizeFactura(normalized?.item, payload);
@@ -276,6 +461,58 @@ export function normalizeFacturaCreateResponse(payload = null) {
 
 export function normalizeFacturaPdfResponse(payload = null, fallback = {}) {
   return sanitizePdfResult(Base.normalizeFacturaPdfResponse(payload, fallback));
+}
+
+export async function listFacturas(options = {}) {
+  const response = await Base.listFacturas(options);
+  const sanitized = sanitizeFacturaListResponse(response);
+
+  if (sanitized !== response) {
+    Base.syncFacturasListCache({
+      ...sanitized,
+      contextKey: Base.getFacturasListContextKey(options),
+    });
+  }
+
+  return sanitized;
+}
+
+export async function loadFacturas(options = {}) {
+  const response = await listFacturas(options);
+  return response?.items || [];
+}
+
+export function hydrateFacturasFromCache() {
+  const source = Base.hydrateFacturasFromCache();
+  const sanitized = sanitizeFacturaListResponse(source);
+
+  if (sanitized !== source && sanitized?.contextKey) {
+    return sanitizeFacturaListResponse(
+      Base.syncFacturasListCache(sanitized)
+    );
+  }
+
+  return sanitized;
+}
+
+export function syncFacturasListCache(snapshot = {}) {
+  const sanitized = sanitizeFacturaListResponse({
+    ...object(snapshot),
+    items: sanitizeFacturaItems(snapshot?.items),
+  });
+
+  return sanitizeFacturaListResponse(
+    Base.syncFacturasListCache(sanitized)
+  );
+}
+
+export function computeFacturasStats(items = []) {
+  return Base.computeFacturasStats(sanitizeFacturaItems(items));
+}
+
+export function getFacturaStableId(item = {}) {
+  const promotion = promoteTechnicalFactura(item);
+  return Base.getFacturaStableId(promotion.factura || item);
 }
 
 export async function fetchFacturaDetailRequest(id = "", options = {}) {
@@ -393,6 +630,8 @@ export async function fetchFacturaPdfRequest(id = "", mode = Base.FACTURA_PDF_MO
     : downloadFacturaPdfRequest(id, options);
 }
 
+export const fetchFacturas = listFacturas;
+
 /*
   Compatibilidad histórica:
   varios agregadores de dominio (incluido Home) consumen FacturasApi como
@@ -402,10 +641,21 @@ export async function fetchFacturaPdfRequest(id = "", mode = Base.FACTURA_PDF_MO
 const FacturasApi = Object.freeze({
   ...Base,
   FACTURAS_DOCUMENT_FLOW_VERSION,
+  FACTURA_TECHNICAL_UI_GUARD_VERSION,
+  isFacturaTechnicalRecord,
   isFacturaDocumentActionUrl,
+  normalizeFactura,
+  normalizeFacturasListResponse,
   normalizeFacturaDetailResponse,
   normalizeFacturaCreateResponse,
   normalizeFacturaPdfResponse,
+  listFacturas,
+  loadFacturas,
+  fetchFacturas,
+  hydrateFacturasFromCache,
+  syncFacturasListCache,
+  computeFacturasStats,
+  getFacturaStableId,
   fetchFacturaDetailRequest,
   getFacturaById,
   createFacturaRequest,

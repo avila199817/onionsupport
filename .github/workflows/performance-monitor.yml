@@ -1,0 +1,131 @@
+# =========================================================
+# ONION SUPPORT — PRODUCTION LIGHTHOUSE MONITOR
+# Read-only synthetic measurement of the canonical public surfaces.
+# =========================================================
+
+name: Production Lighthouse Monitor
+
+run-name: Lighthouse · ${{ github.event_name }} · ${{ github.event.workflow_run.head_sha || github.ref_name || 'manual' }}
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/performance-monitor.yml"
+      - ".github/lighthouse/**"
+      - ".github/scripts/lighthouse-summary.mjs"
+      - ".github/scripts/performance-monitor-contract.mjs"
+
+  workflow_run:
+    workflows:
+      - "Azure Static Web Apps CI/CD"
+    branches:
+      - main
+    types:
+      - completed
+
+  schedule:
+    - cron: "17 5 * * 1-5"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: performance-monitor-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.workflow_run.head_sha || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: Validate performance monitor contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout monitor source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+          persist-credentials: false
+
+      - name: Use exact Node 22
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22.23.2"
+          package-manager-cache: false
+
+      - name: Validate monitor policy
+        run: node .github/scripts/performance-monitor-contract.mjs
+
+  lighthouse:
+    name: Lighthouse ${{ matrix.profile }}
+    if: >-
+      github.event_name != 'pull_request' &&
+      (github.event_name != 'workflow_run' ||
+       github.event.workflow_run.conclusion == 'success')
+    needs:
+      - contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+
+    strategy:
+      fail-fast: false
+      matrix:
+        profile:
+          - mobile
+          - desktop
+
+    steps:
+      - name: Checkout monitor source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+          persist-credentials: false
+
+      - name: Use exact Node 22
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22.23.2"
+          package-manager-cache: false
+
+      - name: Verify canonical public surfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for url in \
+            "https://onionsupport.com/" \
+            "https://onionsupport.com/login"; do
+            curl --fail --location --silent --show-error \
+              --retry 4 --retry-all-errors --retry-delay 3 \
+              --connect-timeout 10 --max-time 45 \
+              "$url" >/dev/null
+          done
+
+      - name: Run five-sample Lighthouse audit
+        id: lighthouse
+        uses: treosh/lighthouse-ci-action@3e7e23fb74242897f95c0ba9cabad3d0227b9b18 # 12.6.2
+        with:
+          urls: |
+            https://onionsupport.com/
+            https://onionsupport.com/login
+          configPath: ./.github/lighthouse/${{ matrix.profile }}.json
+          runs: 5
+          uploadArtifacts: true
+          artifactName: lighthouse-${{ matrix.profile }}-${{ github.run_id }}-${{ github.run_attempt }}
+          temporaryPublicStorage: false
+
+      - name: Publish median and worst-sample summary
+        env:
+          LIGHTHOUSE_RESULTS_PATH: ${{ steps.lighthouse.outputs.resultsPath }}
+          LIGHTHOUSE_PROFILE: ${{ matrix.profile }}
+          AUDITED_RELEASE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: >-
+          node .github/scripts/lighthouse-summary.mjs
+          "${LIGHTHOUSE_RESULTS_PATH}"
+          "${LIGHTHOUSE_PROFILE}"
+          "${AUDITED_RELEASE_SHA}"

@@ -270,3 +270,24 @@ assert.equal(
 console.log(
   "Shell runtime contract OK · Sidebar committed Router context reuse · Topbar executive boundary + one-read search runtime context · Sidebar/Topbar zero-copy Core reads"
 );
+
+
+/* Private chrome visual parity: Sidebar and Topbar share one surface token. */
+const [variablesCss, lightCss, sidebarCss, sidebarExecutiveCss, topbarCss, topbarExecutiveCss] = await Promise.all([
+  readFile("src/css/tokens/variables.css", "utf8"),
+  readFile("src/css/tokens/light.css", "utf8"),
+  readFile("src/css/layout/sidebar.css", "utf8"),
+  readFile("src/css/layout/sidebar.executive.css", "utf8"),
+  readFile("src/css/layout/topbar.css", "utf8"),
+  readFile("src/css/layout/topbar.executive.css", "utf8"),
+]);
+
+assert.match(variablesCss, /--chrome-primary-bg:\s*#171717;/, "Dark chrome surface must have one source of truth");
+assert.match(lightCss, /--chrome-primary-bg:\s*#f9f9f9;/, "Light chrome surface must have one source of truth");
+assert.match(variablesCss, /--sidebar-bg:\s*var\(--chrome-primary-bg\);/, "Sidebar token must consume chrome surface");
+assert.match(variablesCss, /--topbar-bg:\s*var\(--chrome-primary-bg\);/, "Topbar token must consume chrome surface");
+assert.match(sidebarExecutiveCss, /--sb-bg:\s*var\(--chrome-primary-bg,\s*#171717\);/, "Sidebar executive must consume shared dark surface");
+assert.match(topbarExecutiveCss, /--tbx-bg:\s*var\(--chrome-primary-bg,\s*#171717\);/, "Topbar executive must consume shared dark surface");
+assert.match(sidebarCss, /--sb-bg:\s*var\(--chrome-primary-bg,\s*#f9f9f9\);/, "Sidebar light base must consume shared surface");
+assert.match(topbarCss, /--topbar-local-bg-solid:\s*var\(--chrome-primary-bg,\s*#f9f9f9\);/, "Topbar light base must consume shared surface");
+assert.match(topbarCss, /background:\s*var\(--topbar-local-bg-solid\);/, "Topbar base must be solid so first paint matches Sidebar");

@@ -156,8 +156,8 @@
     cubic-bezier(.16, 1, .3, 1);
 
   /* dark/default */
-  --topbar-local-bg-solid: #242424;
-  --topbar-local-bg-glass: rgba(36, 36, 36, .84);
+  --topbar-local-bg-solid: var(--chrome-primary-bg, #171717);
+  --topbar-local-bg-glass: var(--chrome-primary-bg, #171717);
 
   --topbar-local-border:
     rgba(255, 255, 255, .10);
@@ -266,9 +266,8 @@
   .app-topbar,
   [data-topbar-root="true"]
 )[data-theme="light"] {
-  --topbar-local-bg-solid: #fff;
-  --topbar-local-bg-glass:
-    rgba(255, 255, 255, .86);
+  --topbar-local-bg-solid: var(--chrome-primary-bg, #f9f9f9);
+  --topbar-local-bg-glass: var(--chrome-primary-bg, #f9f9f9);
 
   --topbar-local-border:
     rgba(13, 13, 13, .10);
@@ -400,21 +399,7 @@
     1px solid
     var(--topbar-local-border);
 
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(
-        in srgb,
-        var(--topbar-local-bg-solid) 92%,
-        transparent
-      ),
-      color-mix(
-        in srgb,
-        var(--topbar-local-bg-solid) 78%,
-        transparent
-      )
-    ),
-    var(--topbar-local-bg-glass);
+  background: var(--topbar-local-bg-solid);
 
   color:
     var(--topbar-local-text);
@@ -467,6 +452,7 @@
   z-index: -1;
 
   pointer-events: none;
+  display: none;
 
   background:
     radial-gradient(

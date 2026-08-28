@@ -23,7 +23,7 @@
 ========================================================= */
 
 .sidebar {
-  --sb-bg: #171717;
+  --sb-bg: var(--chrome-primary-bg, #171717);
   --sb-border: rgba(255, 255, 255, .075);
   --sb-border-strong: rgba(255, 255, 255, .11);
   --sb-hover: #262626;
@@ -70,7 +70,7 @@
   body[data-theme="light"]
 ) .sidebar,
 .sidebar[data-theme="light"] {
-  --sb-bg: #f9f9f9;
+  --sb-bg: var(--chrome-primary-bg, #f9f9f9);
   --sb-border: rgba(13, 13, 13, .075);
   --sb-border-strong: rgba(13, 13, 13, .10);
   --sb-hover: #efefef;

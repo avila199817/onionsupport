@@ -108,15 +108,26 @@ const [homeTemplate, homeCss] = await Promise.all([
 ]);
 
 assert.match(homeTemplate, /data-entity-overlay-trigger="true"/);
-assert.match(homeTemplate, /data-entity-type="\$\{attr\(entityType\)\}"/);
-assert.match(homeTemplate, /data-entity-type="factura"/);
 assert.match(homeTemplate, /function activityEntityId/);
 assert.match(homeTemplate, /raw\.clientId/);
 assert.match(homeTemplate, /raw\.userId/);
-assert.match(homeTemplate, /home-activity-entity-button/);
-assert.match(homeTemplate, /home-invoice-entity-button/);
-assert.match(homeCss, /HOME ENTITY MODAL BUTTONS/);
-assert.match(homeCss, /:focus-visible/);
+assert.match(homeTemplate, /function entityHitTarget/);
+assert.match(homeTemplate, /class="home-entity-hit-target"/);
+assert.match(homeTemplate, /entityHitTarget\(entityType, entityId\)/);
+assert.match(homeTemplate, /entityHitTarget\("factura", id\)/);
+assert.doesNotMatch(homeTemplate, /home-activity-entity-button/);
+assert.doesNotMatch(homeTemplate, /home-invoice-entity-button/);
+assert.match(homeCss, /HOME ENTITY INTERACTION LAYER/);
+assert.match(
+  homeCss,
+  /\.home-activity-item\s*\{[\s\S]*?grid-template-columns:\s*38px minmax\(0,\s*1fr\) auto;/
+);
+assert.match(
+  homeCss,
+  /\.home-entity-hit-target\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?inset:\s*0;/
+);
+assert.doesNotMatch(homeCss, /home-activity-entity-button/);
+assert.doesNotMatch(homeCss, /home-invoice-entity-button/);
 
 console.log(
   "Entity overlay contract: PASS · lazy overlays · canonical incidencia owner deeplinks"

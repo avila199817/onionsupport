@@ -1,9 +1,9 @@
 /* =========================================================
    Onion Support - Global Entity Overlay
 
-   Abre una entidad desde cualquier punto de la SPA sin montar ni navegar a
-   la vista propietaria. Los adaptadores de dominio y sus CSS se importan sólo
-   cuando existe una intención real de apertura.
+   Despacha entidades desde cualquier punto de la SPA. Incidencias es siempre
+   propiedad de su vista/controlador canónico; las entidades simples conservan
+   overlay lazy mientras migran al mismo contrato propietario.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -25,7 +25,7 @@ import {
 } from "./adapters/adapter-utils.js";
 
 export const ENTITY_OVERLAY_VERSION =
-  "entity-overlay.v1.global-lazy-stack";
+  "entity-overlay.v2-incidencia-owner-authority";
 
 const ROOT_ID = "entity-overlay-root";
 const ROOT_SELECTOR = `#${ROOT_ID}`;
@@ -39,10 +39,23 @@ const CLOSE_HISTORY_FALLBACK_MS = 450;
 
 const ADAPTER_LOADERS = Object.freeze({
   factura: () => import("./adapters/factura.js"),
-  incidencia: () => import("./adapters/incidencia.js"),
   cliente: () => import("./adapters/cliente.js"),
   usuario: () => import("./adapters/usuario.js"),
 });
+
+/*
+  Incidencias tiene un controller de dominio completo (histórico, adjuntos,
+  previews, borradores, edición, live sync y focus trap). Nunca se vuelve a
+  renderizar su template directamente desde el overlay global.
+*/
+const OWNER_ROUTED_TYPES = new Set(["incidencia"]);
+const INCIDENCIA_OWNER_SEGMENT = "incidencias";
+const INCIDENCIA_MODAL_ROOT_SELECTOR = "[data-incidencias-modal-root='true']";
+const OWNER_ROUTE_ROOT_SELECTOR = "#view-container, [data-router-view='true']";
+const OWNER_OPEN_TIMEOUT_MS = 12_000;
+
+let ownerSequence = 0;
+let ownerSession = null;
 
 const ACTION_SELECTOR = [
   "[data-entity-overlay-action]",
@@ -232,7 +245,7 @@ function normalizeOpenInput(input = {}) {
   const type = normalizeEntityType(input?.type || input?.entityType || "");
   const id = normalizeEntityId(type, input?.id || input?.entityId || "");
 
-  if (!type || !id || !ADAPTER_LOADERS[type]) return null;
+  if (!type || !id || (!ADAPTER_LOADERS[type] && !OWNER_ROUTED_TYPES.has(type))) return null;
 
   return {
     type,
@@ -622,12 +635,262 @@ async function hydrateEntry(entry = null, { silent = false } = {}) {
   return !entry.error;
 }
 
+function currentPublicPathWithoutEntityQuery() {
+  const url = currentUrl();
+  if (!url) return "/";
+
+  url.searchParams.delete(TYPE_QUERY);
+  url.searchParams.delete(ID_QUERY);
+
+  return `${url.pathname || "/"}${url.search || ""}${url.hash || ""}`;
+}
+
+function currentScopePrefix() {
+  const pathname = currentUrl()?.pathname || "";
+  const match = pathname.match(/^\/@([^/]+)/);
+  return match?.[1] ? `/@${match[1]}` : "";
+}
+
+function incidenciaOwnerBasePath() {
+  return `${currentScopePrefix()}/${INCIDENCIA_OWNER_SEGMENT}`
+    .replace(/\/{2,}/g, "/");
+}
+
+function incidenciaOwnerDetailPath(id = "") {
+  const entityId = normalizeEntityId("incidencia", id);
+  if (!entityId) return "";
+  return `${incidenciaOwnerBasePath()}/${encodeURIComponent(entityId)}`;
+}
+
+function ownerRouteRoot() {
+  if (!isBrowser()) return null;
+  return document.querySelector(OWNER_ROUTE_ROOT_SELECTOR) || document.body || null;
+}
+
+function ownerModalOpen() {
+  if (!isBrowser()) return false;
+  return Boolean(document.querySelector(INCIDENCIA_MODAL_ROOT_SELECTOR));
+}
+
+function isIncidenciaOwnerRoute() {
+  return isCanonicalOwnerRoute("incidencia");
+}
+
+async function navigateWithRouter(path = "", options = {}) {
+  const target = cleanText(path, "");
+  if (!target || !isBrowser()) return false;
+
+  const router = context?.Router || context?.router || null;
+  if (typeof router?.navigate === "function") {
+    await Promise.resolve(router.navigate(target, options));
+    return true;
+  }
+
+  /* Fallback de seguridad: no fabricamos un modal huérfano si Router falta. */
+  try {
+    window.location.assign(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function stopOwnerSession({ navigateBack = false } = {}) {
+  const session = ownerSession;
+  ownerSession = null;
+
+  if (!session) return false;
+
+  session.openObserver?.disconnect?.();
+  session.closeObserver?.disconnect?.();
+
+  if (session.timeoutId) {
+    window.clearTimeout(session.timeoutId);
+    session.timeoutId = 0;
+  }
+
+  if (session.readyHandler) {
+    window.removeEventListener("onion:main:ready", session.readyHandler);
+    session.readyHandler = null;
+  }
+
+  if (navigateBack && session.returnPath) {
+    const returnPath = session.returnPath;
+    const scrollY = Number(session.scrollY) || 0;
+
+    void navigateWithRouter(returnPath).then(() => {
+      window.requestAnimationFrame?.(() => {
+        try { window.scrollTo({ top: scrollY, left: 0, behavior: "auto" }); } catch { /* noop */ }
+      });
+    });
+  }
+
+  return true;
+}
+
+async function tryOpenCanonicalIncidencia(session = null) {
+  if (!session || ownerSession !== session || session.sequence !== ownerSequence) {
+    return false;
+  }
+
+  try {
+    const module = await import("../../views/incidencias/index.js");
+    const opener = module?.openIncidenciaDetailById;
+    if (typeof opener !== "function") return false;
+
+    return Boolean(await opener(session.id, null));
+  } catch {
+    return false;
+  }
+}
+
+function watchCanonicalIncidenciaClose(session = null) {
+  if (!session || ownerSession !== session || !isBrowser()) return false;
+
+  const root = ownerRouteRoot();
+  if (!root || typeof MutationObserver !== "function") return false;
+
+  session.modalSeen = ownerModalOpen();
+  session.closeObserver?.disconnect?.();
+  session.closeObserver = new MutationObserver(() => {
+    if (ownerSession !== session) return;
+
+    const openNow = ownerModalOpen();
+    if (openNow) {
+      session.modalSeen = true;
+      return;
+    }
+
+    if (!session.modalSeen) return;
+
+    /*
+      El controller propietario ya ha cerrado y limpiado el modal. Sólo ahora
+      devolvemos al origen transversal (Inicio, búsqueda, etc.).
+    */
+    stopOwnerSession({ navigateBack: Boolean(session.returnPath) });
+  });
+
+  session.closeObserver.observe(root, { childList: true, subtree: true });
+  return true;
+}
+
+async function waitAndOpenCanonicalIncidencia(session = null) {
+  if (!session || !isBrowser()) return false;
+
+  if (await tryOpenCanonicalIncidencia(session)) {
+    watchCanonicalIncidenciaClose(session);
+    return true;
+  }
+
+  const root = ownerRouteRoot();
+  if (!root || typeof MutationObserver !== "function") return false;
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let attempting = false;
+
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      session.openObserver?.disconnect?.();
+      session.openObserver = null;
+      if (session.timeoutId) {
+        window.clearTimeout(session.timeoutId);
+        session.timeoutId = 0;
+      }
+      if (session.readyHandler) {
+        window.removeEventListener("onion:main:ready", session.readyHandler);
+        session.readyHandler = null;
+      }
+      if (ok) watchCanonicalIncidenciaClose(session);
+      resolve(ok);
+    };
+
+    const attempt = async () => {
+      if (attempting || settled || ownerSession !== session) return;
+      attempting = true;
+      try {
+        if (await tryOpenCanonicalIncidencia(session)) finish(true);
+      } finally {
+        attempting = false;
+      }
+    };
+
+    session.openObserver = new MutationObserver(() => { void attempt(); });
+    session.openObserver.observe(root, { childList: true, subtree: true });
+
+    session.readyHandler = () => { void attempt(); };
+    window.addEventListener("onion:main:ready", session.readyHandler);
+
+    session.timeoutId = window.setTimeout(() => finish(false), OWNER_OPEN_TIMEOUT_MS);
+    void attempt();
+  });
+}
+
+async function openCanonicalIncidencia(input = {}) {
+  const id = normalizeEntityId("incidencia", input?.id || input?.entityId || "");
+  if (!id || !isBrowser()) return false;
+
+  /* Un overlay previo nunca debe convivir con el controller de Incidencias. */
+  clearStack({ restore: false });
+  writeUrlForEntry(null, "replace");
+  stopOwnerSession();
+
+  const alreadyOwner = isIncidenciaOwnerRoute();
+  const returnPath = alreadyOwner ? "" : currentPublicPathWithoutEntityQuery();
+  const target = incidenciaOwnerDetailPath(id);
+  if (!target) return false;
+
+  const session = {
+    sequence: ++ownerSequence,
+    type: "incidencia",
+    id,
+    source: cleanText(input?.source, "api"),
+    target,
+    returnPath,
+    scrollY: Number(window.scrollY) || 0,
+    openObserver: null,
+    closeObserver: null,
+    timeoutId: 0,
+    readyHandler: null,
+    modalSeen: false,
+  };
+
+  ownerSession = session;
+
+  if (!alreadyOwner) {
+    const navigated = await navigateWithRouter(target);
+    if (!navigated || ownerSession !== session) {
+      stopOwnerSession();
+      return false;
+    }
+  }
+
+  const opened = await waitAndOpenCanonicalIncidencia(session);
+  if (!opened && ownerSession === session) {
+    stopOwnerSession({ navigateBack: Boolean(returnPath) });
+    return false;
+  }
+
+  return Object.freeze({
+    type: "incidencia",
+    id,
+    ownerRouted: true,
+    source: session.source,
+    target,
+  });
+}
+
 async function open(input = {}) {
   if (!initialized) init(context);
 
   const normalized = normalizeOpenInput(input);
   if (!normalized) {
     throw new TypeError("Entidad o identificador no válidos.");
+  }
+
+  if (normalized.type === "incidencia") {
+    return openCanonicalIncidencia(normalized);
   }
 
   const current = topEntry();
@@ -756,7 +1019,7 @@ function canOpen(type = "", id = "") {
   const entityType = normalizeEntityType(type);
   return Boolean(
     entityType &&
-    ADAPTER_LOADERS[entityType] &&
+    (ADAPTER_LOADERS[entityType] || OWNER_ROUTED_TYPES.has(entityType)) &&
     normalizeEntityId(entityType, id)
   );
 }
@@ -776,8 +1039,14 @@ function snapshot() {
           source: topEntry().source,
         })
       : null,
-    registeredTypes: Object.freeze(Object.keys(ADAPTER_LOADERS)),
+    registeredTypes: Object.freeze([
+      ...Object.keys(ADAPTER_LOADERS),
+      ...OWNER_ROUTED_TYPES,
+    ]),
     loadedAdapters: Object.freeze([...adapterPromises.keys()]),
+    ownerRouted: ownerSession
+      ? Object.freeze({ type: ownerSession.type, active: true })
+      : null,
   });
 }
 
@@ -1004,6 +1273,10 @@ function onDocumentKeydown(event) {
 function onPopstate() {
   clearCloseFallback();
 
+  if (ownerSession && !isIncidenciaOwnerRoute()) {
+    stopOwnerSession();
+  }
+
   const marker = currentMarker();
 
   if (marker?.token) {
@@ -1120,6 +1393,7 @@ export function destroy() {
   if (!isBrowser()) return false;
 
   clearCloseFallback();
+  stopOwnerSession();
   clearStack({ restore: false });
 
   if (documentClickBound) {

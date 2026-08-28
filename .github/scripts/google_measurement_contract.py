@@ -34,7 +34,7 @@ PUBLIC_SURFACES = (
     "seo/impresoras.html",
     "seo/soporte-empresas.html",
 )
-SCRIPT_TAG = '<script src="/src/analytics/google-tag.js"></script>'
+SCRIPT_TAG = '<script defer src="/src/analytics/google-tag.js"></script>'
 REQUEST_TIMEOUT_SECONDS = 20.0
 CLICK_CAPTURE_PATTERN = re.compile(
     r'document\.addEventListener\(\s*"click"\s*,.*?\}\s*,\s*true\s*\);',
@@ -74,6 +74,11 @@ def validate_source(root: Path) -> list[str]:
         'host.endsWith(".wa.me")',
         'host === "whatsapp.com"',
         'host.endsWith(".whatsapp.com")',
+        "const REMOTE_FALLBACK_DELAY_MS = 15000;",
+        'const ANALYTICS_CONSENT_EVENT = "onion:analytics:consent-granted";',
+        "function promoteAnalyticsOnSignificantInteraction(event) {",
+        "if (event?.isTrusted !== true) return;",
+        "scheduleRemoteGoogleTag();",
     )
 
     for snippet in required_snippets:
@@ -102,6 +107,16 @@ def validate_source(root: Path) -> list[str]:
 
     if not text.rstrip().endswith("})();"):
         errors.append(f"{BOOTSTRAP_PATH}: bootstrap IIFE incompleto")
+
+    for forbidden in (
+        "ADS_AUTO_CONFIG_DELAY_MS",
+        "REMOTE_LOAD_MIN_DELAY_MS",
+        '["pointerdown", "keydown", "touchstart"]',
+    ):
+        if forbidden in text:
+            errors.append(
+                f"{BOOTSTRAP_PATH}: carga remota prematura restaurada: {forbidden}"
+            )
 
     for relative in PUBLIC_SURFACES:
         page = root / relative

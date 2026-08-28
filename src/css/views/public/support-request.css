@@ -294,6 +294,11 @@
   inline-size: 100%;
 }
 
+.public-home .public-support-person-visual picture {
+  display: block;
+  inline-size: 100%;
+}
+
 .public-home .public-support-person-visual img {
   display: block;
   inline-size: 100%;
@@ -996,6 +1001,18 @@
 @media (max-width: 720px) {
   .public-home .public-support-section {
     padding-block: 56px;
+  }
+
+  .public-home .public-support-person-card,
+  .public-home .public-support-form {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .public-home .public-support-person::before,
+  .public-home .public-support-form::after,
+  .public-home .public-support-submit::after {
+    display: none;
   }
 
   .public-home .public-support-layout {

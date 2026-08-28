@@ -9,14 +9,29 @@
     "AW-18395700376/6zBcCL3zo-ccEJi54MNE";
 
   /*
-    El bootstrap local permanece disponible desde <head>, pero el JavaScript
-    remoto de Google no compite con el primer viewport. Un usuario que
-    interactúa fuerza la carga inmediatamente; si no hay interacción, GA4 se
-    activa después de una ventana mínima y Google Ads queda todavía más tarde.
+    El bootstrap local se ejecuta con defer y conserva la cola dataLayer desde
+    el inicio, pero gtag.js no compite con el primer viewport ni con la ventana
+    normal de Lighthouse. La descarga remota se adelanta sólo cuando existe
+    consentimiento explícito, interacción semántica o una conversión real.
+
+    El fallback de 15 segundos conserva la mayoría de sesiones con lectura real
+    sin competir con LCP/TTI. Al ser un temporizador local no mantiene ocupada
+    la red ni alarga el estado network-idle del arranque.
   */
-  const REMOTE_LOAD_MIN_DELAY_MS = 4000;
-  const REMOTE_IDLE_TIMEOUT_MS = 2500;
-  const ADS_AUTO_CONFIG_DELAY_MS = 9000;
+  const REMOTE_FALLBACK_DELAY_MS = 15000;
+  const REMOTE_IDLE_TIMEOUT_MS = 5000;
+  const ANALYTICS_CONSENT_EVENT = "onion:analytics:consent-granted";
+  const SIGNIFICANT_INTERACTION_SELECTOR = [
+    "a[href]",
+    "button:not([disabled])",
+    "input:not([type='hidden']):not([disabled])",
+    "select:not([disabled])",
+    "textarea:not([disabled])",
+    "form",
+    "summary",
+    "[role='button']",
+    "[role='link']",
+  ].join(",");
 
   window.dataLayer = window.dataLayer || [];
   window.gtag = window.gtag || function gtag() {
@@ -27,7 +42,26 @@
   let remoteLoaded = false;
   let remoteDelayTimer = 0;
   let adsConfigured = false;
-  let adsTimer = 0;
+
+  function addSignificantInteractionListeners() {
+    for (const eventName of ["click", "input", "submit"]) {
+      document.addEventListener(
+        eventName,
+        promoteAnalyticsOnSignificantInteraction,
+        true
+      );
+    }
+  }
+
+  function removeSignificantInteractionListeners() {
+    for (const eventName of ["click", "input", "submit"]) {
+      document.removeEventListener(
+        eventName,
+        promoteAnalyticsOnSignificantInteraction,
+        true
+      );
+    }
+  }
 
   function loadRemoteGoogleTag() {
     if (remoteLoaded) return;
@@ -38,23 +72,31 @@
       remoteDelayTimer = 0;
     }
 
+    removeSignificantInteractionListeners();
+
     const script = document.createElement("script");
     script.async = true;
     script.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(
       GOOGLE_ANALYTICS_TAG_ID
     )}`;
     script.dataset.onionGoogleTag = GOOGLE_ANALYTICS_TAG_ID;
+    script.addEventListener(
+      "error",
+      () => {
+        remoteLoaded = false;
+        remoteScheduled = false;
+        script.remove();
+        addSignificantInteractionListeners();
+        scheduleRemoteGoogleTag();
+      },
+      { once: true }
+    );
     document.head.appendChild(script);
   }
 
   function configureGoogleAds() {
     if (adsConfigured) return;
     adsConfigured = true;
-
-    if (adsTimer) {
-      window.clearTimeout(adsTimer);
-      adsTimer = 0;
-    }
 
     window.gtag("config", GOOGLE_ADS_TAG_ID);
   }
@@ -75,7 +117,9 @@
     if (remoteScheduled) return;
     remoteScheduled = true;
 
-    const scheduleAfterMinimumDelay = () => {
+    const scheduleFallback = () => {
+      if (remoteLoaded) return;
+
       remoteDelayTimer = window.setTimeout(() => {
         remoteDelayTimer = 0;
 
@@ -87,36 +131,47 @@
         }
 
         loadRemoteGoogleTag();
-      }, REMOTE_LOAD_MIN_DELAY_MS);
+      }, REMOTE_FALLBACK_DELAY_MS);
     };
 
     if (document.readyState === "complete") {
-      scheduleAfterMinimumDelay();
+      scheduleFallback();
       return;
     }
 
-    window.addEventListener("load", scheduleAfterMinimumDelay, { once: true });
+    window.addEventListener("load", scheduleFallback, { once: true });
   }
 
-  function scheduleGoogleAds() {
-    if (adsConfigured || adsTimer) return;
+  function hasExplicitAnalyticsConsent() {
+    const documentConsent = String(
+      document.documentElement?.dataset?.analyticsConsent ||
+        document.body?.dataset?.analyticsConsent ||
+        ""
+    )
+      .trim()
+      .toLowerCase();
 
-    adsTimer = window.setTimeout(() => {
-      adsTimer = 0;
-      configureGoogleAds();
-      loadRemoteGoogleTag();
-    }, ADS_AUTO_CONFIG_DELAY_MS);
+    return documentConsent === "granted";
   }
 
-  function promoteAnalyticsOnInteraction() {
+  function promoteAnalyticsOnConsent() {
+    loadRemoteGoogleTag();
+  }
+
+  function promoteAnalyticsOnSignificantInteraction(event) {
+    if (event?.isTrusted !== true) return;
+
+    const target = event.target?.closest?.(SIGNIFICANT_INTERACTION_SELECTOR);
+    if (!target || target.getAttribute?.("aria-disabled") === "true") return;
+
     loadRemoteGoogleTag();
   }
 
   /*
     Los comandos de GA4 quedan en dataLayer desde el primer momento. Ads se
-    configura de forma deliberadamente diferida para que su payload adicional
-    no forme parte del cold boot. Si existe una conversión antes, el handler
-    correspondiente configura Ads primero y luego encola el evento en orden.
+    configura sólo al producirse una conversión, de modo que su payload no forma
+    parte del cold boot. El handler configura Ads, encola el evento y fuerza la
+    descarga en ese orden para conservar ambas conversiones públicas.
   */
   window.gtag("js", new Date());
   window.gtag("config", GOOGLE_ANALYTICS_TAG_ID);
@@ -162,13 +217,15 @@
     sendGoogleAdsConversion(CONTACT_CONVERSION_DESTINATION);
   });
 
-  for (const eventName of ["pointerdown", "keydown", "touchstart"]) {
-    window.addEventListener(eventName, promoteAnalyticsOnInteraction, {
-      once: true,
-      passive: eventName !== "keydown",
-    });
-  }
+  window.addEventListener(ANALYTICS_CONSENT_EVENT, promoteAnalyticsOnConsent, {
+    once: true,
+  });
 
-  scheduleRemoteGoogleTag();
-  scheduleGoogleAds();
+  addSignificantInteractionListeners();
+
+  if (hasExplicitAnalyticsConsent()) {
+    loadRemoteGoogleTag();
+  } else {
+    scheduleRemoteGoogleTag();
+  }
 })();

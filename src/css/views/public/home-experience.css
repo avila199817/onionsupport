@@ -711,6 +711,11 @@
     --public-home-page-gutter: clamp(14px, 4vw, 22px);
   }
 
+  .public-home .public-home-account-menu {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
   .public-home .public-home-nav-panel {
     inline-size: fit-content;
     min-inline-size: 188px;

@@ -73,7 +73,7 @@ const publicCss =
 
 for (const sentinel of [
   "--sb-open-w",
-  "--topbar-",
+  "--chrome-sidebar-offset",
   "private-admin-toolbar",
   "private-create-modal",
 ]) {
@@ -97,7 +97,7 @@ const privateAsset =
     const text = read(path);
     return (
       text.includes("--sb-open-w") &&
-      text.includes("--topbar-")
+      text.includes("--chrome-sidebar-offset")
     );
   });
 

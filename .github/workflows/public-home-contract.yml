@@ -13,13 +13,22 @@ on:
       - main
     paths:
       - "index.html"
+      - "login.html"
       - "docs/PUBLIC_TICKET_INTAKE.md"
       - "src/app/enhancements.js"
       - "src/app/loader.js"
       - "src/features/public-support/**"
       - "src/features/public-support-progress/**"
       - "src/features/public-home-experience/**"
+      - "src/media/img/Cristian_Avila_224.webp"
+      - "src/media/img/Cristian_Avila_480.webp"
+      - "src/media/img/Cristian_Avila_640.webp"
+      - "src/media/img/Cristian_Avila_960.webp"
+      - "src/media/img/favicon_black_circle_128.webp"
+      - "src/preboot/public-home-preload.js"
+      - "src/views/public/index.js"
       - "src/views/public/home/**"
+      - "src/views/public/login/**"
       - "src/css/app.css"
       - "src/css/views/public/**"
       - ".github/scripts/public_home_integrity.py"
@@ -63,11 +72,14 @@ jobs:
           set -euo pipefail
           node --check src/app/enhancements.js
           node --check src/app/loader.js
+          node --check src/preboot/public-home-preload.js
           node --check src/features/public-support/index.js
           node --check src/features/public-support-progress/index.js
           node --check src/features/public-home-experience/index.js
+          node --check src/views/public/index.js
           node --check src/views/public/home/index.js
           node --check src/views/public/home/template.js
+          node --check src/views/public/login/template.js
 
       - name: Validate public frontend contract
         run: python3 .github/scripts/public_home_integrity.py

@@ -18,6 +18,7 @@ ROOT = Path(
 
 REQUIRED = (
     "index.html",
+    "login.html",
     "docs/PUBLIC_TICKET_INTAKE.md",
     "src/app/enhancements.js",
     "src/css/app.css",
@@ -31,8 +32,16 @@ REQUIRED = (
     "src/media/img/Cristian_Avila_Formulario_960.webp",
     "src/features/public-support-progress/index.js",
     "src/features/public-home-experience/index.js",
+    "src/media/img/Cristian_Avila_224.webp",
+    "src/media/img/Cristian_Avila_480.webp",
+    "src/media/img/Cristian_Avila_640.webp",
+    "src/media/img/Cristian_Avila_960.webp",
     "src/views/public/home/index.js",
     "src/views/public/home/template.js",
+    "src/media/img/favicon_black_circle_128.webp",
+    "src/preboot/public-home-preload.js",
+    "src/views/public/index.js",
+    "src/views/public/login/template.js",
 )
 
 FORBIDDEN = (
@@ -78,6 +87,80 @@ def require(errors: list[str], condition: bool, message: str) -> None:
         errors.append(message)
 
 
+PICTURE_PATTERN = re.compile(
+    r"<picture\b[^>]*>(?P<body>.*?)</picture>",
+    re.DOTALL | re.IGNORECASE,
+)
+HERO_WEBP_PATTERN = re.compile(r"/?src/media/img/Cristian_Avila_(\d+)\.webp")
+
+
+def picture_uses_modern_source(
+    source: str,
+    modern_reference: str,
+    fallback_reference: str,
+) -> bool:
+    for match in PICTURE_PATTERN.finditer(source):
+        body = match.group("body")
+        source_index = body.find("<source")
+        modern_index = body.find(modern_reference)
+        image_index = body.find("<img")
+        fallback_index = body.find(fallback_reference, image_index)
+
+        if (
+            source_index >= 0
+            and modern_index > source_index
+            and image_index > modern_index
+            and fallback_index > image_index
+            and 'type="image/webp"' in body[source_index:image_index]
+        ):
+            return True
+
+    return False
+
+
+def fallback_image_outside_picture(source: str, fallback_reference: str) -> bool:
+    without_pictures = PICTURE_PATTERN.sub("", source)
+    return bool(
+        re.search(
+            rf"<img\b[^>]*\bsrc\s*=\s*\"[^\"]*{re.escape(fallback_reference)}",
+            without_pictures,
+            re.DOTALL | re.IGNORECASE,
+        )
+    )
+
+
+def webp_dimensions(relative: str) -> tuple[int, int]:
+    data = (ROOT / relative).read_bytes()
+    if len(data) < 20 or data[:4] != b"RIFF" or data[8:12] != b"WEBP":
+        raise ValueError("cabecera RIFF/WEBP inválida")
+
+    offset = 12
+    while offset + 8 <= len(data):
+        chunk = data[offset : offset + 4]
+        size = int.from_bytes(data[offset + 4 : offset + 8], "little")
+        payload = data[offset + 8 : offset + 8 + size]
+
+        if chunk == b"VP8X" and len(payload) >= 10:
+            width = int.from_bytes(payload[4:7], "little") + 1
+            height = int.from_bytes(payload[7:10], "little") + 1
+            return width, height
+
+        if chunk == b"VP8L" and len(payload) >= 5 and payload[0] == 0x2F:
+            packed = int.from_bytes(payload[1:5], "little")
+            width = (packed & 0x3FFF) + 1
+            height = ((packed >> 14) & 0x3FFF) + 1
+            return width, height
+
+        if chunk == b"VP8 " and len(payload) >= 14 and payload[6:9] == b"\x9d\x01\x2a":
+            width = int.from_bytes(payload[10:12], "little") & 0x3FFF
+            height = int.from_bytes(payload[12:14], "little") & 0x3FFF
+            return width, height
+
+        offset += 8 + size + (size % 2)
+
+    raise ValueError("dimensiones WebP no encontradas")
+
+
 def public_home_manifest(route_styles: str) -> str:
     match = re.search(
         r'"public-home"\s*:\s*Object\.freeze\(\[(?P<body>.*?)\]\)',
@@ -104,6 +187,7 @@ def main() -> int:
         return 1
 
     index = read("index.html")
+    login_document = read("login.html")
     docs = read("docs/PUBLIC_TICKET_INTAKE.md")
     enhancements = read("src/app/enhancements.js")
     app_css = read("src/css/app.css")
@@ -113,6 +197,9 @@ def main() -> int:
     home_experience = read("src/features/public-home-experience/index.js")
     home = read("src/views/public/home/index.js")
     home_template = read("src/views/public/home/template.js")
+    home_preload = read("src/preboot/public-home-preload.js")
+    public_shared = read("src/views/public/index.js")
+    login_template = read("src/views/public/login/template.js")
     experience_css = read("src/css/views/public/home-experience.css")
     progress_css = read("src/css/views/public/public-support-progress.css")
 
@@ -270,6 +357,128 @@ def main() -> int:
             f"Budget imagen excedido: {relative} pesa {size} B (máximo {maximum} B)",
         )
 
+    # Imágenes públicas críticas: el navegador moderno debe elegir WebP,
+    # template y preload deben describir el mismo hero, y los assets no pueden
+    # recuperar el peso que Lighthouse acaba de eliminar.
+    expected_hero_widths = [224, 480, 640, 960]
+    expected_hero_sizes = (
+        "(max-width: 720px) calc(100vw - 90px), "
+        "(max-width: 1040px) 206px, "
+        "(max-width: 1240px) 176px, 196px"
+    )
+    template_hero_widths = sorted(
+        {int(width) for width in HERO_WEBP_PATTERN.findall(home_template)}
+    )
+    preload_hero_widths = sorted(
+        {int(width) for width in HERO_WEBP_PATTERN.findall(home_preload)}
+    )
+
+    require(
+        errors,
+        template_hero_widths == expected_hero_widths,
+        f"Hero responsive inválido en template: {template_hero_widths}",
+    )
+    require(
+        errors,
+        preload_hero_widths == expected_hero_widths,
+        f"Hero responsive inválido en preload: {preload_hero_widths}",
+    )
+    require(
+        errors,
+        template_hero_widths == preload_hero_widths,
+        "El srcset del hero y su preload están desincronizados",
+    )
+    require(
+        errors,
+        "${profilePhotoWebp224} 224w, ${profilePhotoWebp480} 480w, ${profilePhotoWebp640} 640w, ${profilePhotoWebp960} 960w"
+        in home_template,
+        "El picture del hero debe elegir 224/480/640/960 WebP",
+    )
+    for snippet, message in (
+        ('["/src/media/img/Cristian_Avila_224.webp", "224w"]', "El preload no ofrece hero 224w"),
+        ('["/src/media/img/Cristian_Avila_480.webp", "480w"]', "El preload no ofrece hero 480w"),
+        ('["/src/media/img/Cristian_Avila_640.webp", "640w"]', "El preload no ofrece hero 640w"),
+        ('["/src/media/img/Cristian_Avila_960.webp", "960w"]', "El preload no ofrece hero 960w"),
+        ('href: "/src/media/img/Cristian_Avila_224.webp"', "El fallback del preload debe usar hero 224w"),
+        ("imageSrcset: heroImageSrcset", "El preload debe publicar imagesrcset"),
+        ("imageSizes: heroImageSizes", "El preload debe publicar imagesizes canónico"),
+    ):
+        require(errors, snippet in home_preload, message)
+
+    template_sizes = re.search(
+        r'const profilePhotoSizes = "(?P<value>[^"]+)"', home_template
+    )
+    preload_sizes = re.search(
+        r'const heroImageSizes = "(?P<value>[^"]+)"', home_preload
+    )
+    require(
+        errors,
+        bool(template_sizes and preload_sizes)
+        and template_sizes.group("value") == preload_sizes.group("value")
+        and template_sizes.group("value") == expected_hero_sizes,
+        "Los sizes del hero deben reflejar la geometría CSS y coincidir con el preload",
+    )
+
+    for source, modern_reference, fallback_reference, label in (
+        (index, "/src/media/img/favicon_black_circle_128.webp", "/favicon.ico", "loader home"),
+        (login_document, "/src/media/img/favicon_black_circle_128.webp", "/favicon.ico", "loader login"),
+        (public_shared, "logoWebp", "logoFallback", "marca pública compartida"),
+        (home_template, "logoWebp", "logoFallback", "marca home"),
+        (login_template, "logoWebp", "logoFallback", "marca login"),
+        (
+            home_template,
+            "escapeAttr(profilePhotoWebpSrcset)",
+            "escapeAttr(profilePhoto)",
+            "hero home",
+        ),
+    ):
+        require(
+            errors,
+            picture_uses_modern_source(source, modern_reference, fallback_reference),
+            f"{label}: falta WebP elegido antes del fallback",
+        )
+        require(
+            errors,
+            not fallback_image_outside_picture(source, fallback_reference),
+            f"{label}: el PNG/ICO reapareció como imagen elegida fuera de picture",
+        )
+
+    for source, label in (
+        (public_shared, "marca pública compartida"),
+        (home_template, "marca home"),
+        (login_template, "marca login"),
+    ):
+        require(
+            errors,
+            "PUBLIC_AUTH_LOGO_WEBP" in source,
+            f"{label}: falta autoridad del logo WebP canónico",
+        )
+
+    image_budgets = (
+        ("src/media/img/favicon_black_circle_128.webp", (128, 128), 2_500),
+        ("src/media/img/Cristian_Avila_224.webp", (224, 280), 8_500),
+        ("src/media/img/Cristian_Avila_480.webp", (480, 600), 32_000),
+        ("src/media/img/Cristian_Avila_640.webp", (640, 800), 35_000),
+        ("src/media/img/Cristian_Avila_960.webp", (960, 1200), 85_000),
+    )
+    for relative, expected_dimensions, maximum in image_budgets:
+        size = (ROOT / relative).stat().st_size
+        require(
+            errors,
+            size <= maximum,
+            f"Budget imagen excedido: {relative} pesa {size} B (máximo {maximum} B)",
+        )
+        try:
+            dimensions = webp_dimensions(relative)
+        except (OSError, ValueError) as error:
+            errors.append(f"WebP inválido: {relative} ({error})")
+            continue
+        require(
+            errors,
+            dimensions == expected_dimensions,
+            f"Dimensiones WebP inválidas: {relative} es {dimensions}, esperado {expected_dimensions}",
+        )
+
     # Progreso: deriva del data-submitting real, lenguaje neutro y observer limitado.
     for snippet, message in (
         ("PUBLIC_SUPPORT_PROGRESS_VERSION", "Falta contrato de versión del progreso"),
@@ -398,6 +607,8 @@ def main() -> int:
     print("- intake: reuse por email/teléfono, no-overwrite, NEW sin cliente")
     print("- estados accepted/progress neutros y byte-gate productivo")
     print("- teléfono nacional, menú autenticado y progreso validados")
+    print("- imágenes: logo WebP canónico y hero 224/480/640/960 sincronizado")
+    print("- budgets: logo <= 2500 B; hero 224 <= 8500 B; hero 640 <= 35000 B")
     return 0
 
 

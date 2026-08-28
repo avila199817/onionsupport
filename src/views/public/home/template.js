@@ -1,5 +1,6 @@
 import {
   PUBLIC_AUTH_LOGO,
+  PUBLIC_AUTH_LOGO_WEBP,
   escapeAttr,
   escapeHtml,
   renderPublicShell,
@@ -12,7 +13,9 @@ export const PUBLIC_HOME_TEMPLATE_VERSION = "public.home.template.final.producti
 const APP_NAME = "Onion Support";
 
 const CRISTIAN_PROFILE_PHOTO = "src/media/img/Cristian_Avila.png";
+const CRISTIAN_PROFILE_PHOTO_WEBP_224 = "src/media/img/Cristian_Avila_224.webp";
 const CRISTIAN_PROFILE_PHOTO_WEBP_480 = "src/media/img/Cristian_Avila_480.webp";
+const CRISTIAN_PROFILE_PHOTO_WEBP_640 = "src/media/img/Cristian_Avila_640.webp";
 const CRISTIAN_PROFILE_PHOTO_WEBP_960 = "src/media/img/Cristian_Avila_960.webp";
 
 const BUSINESS = {
@@ -233,11 +236,15 @@ const FAQS = [
 ];
 
 function renderLogo({ compact = false } = {}) {
-  const logoSrc = safeAssetSrc(PUBLIC_AUTH_LOGO, PUBLIC_AUTH_LOGO);
+  const logoFallback = safeAssetSrc(PUBLIC_AUTH_LOGO, PUBLIC_AUTH_LOGO);
+  const logoWebp = safeAssetSrc(PUBLIC_AUTH_LOGO_WEBP, PUBLIC_AUTH_LOGO_WEBP);
 
   return `
     <span class="public-home-brand-mark" aria-hidden="true">
-      <img class="public-home-brand-logo" src="${escapeAttr(logoSrc)}" alt="" width="44" height="44" loading="eager" decoding="async" draggable="false">
+      <picture>
+        <source type="image/webp" srcset="${escapeAttr(logoWebp)}">
+        <img class="public-home-brand-logo" src="${escapeAttr(logoFallback)}" alt="" width="44" height="44" loading="eager" decoding="async" draggable="false">
+      </picture>
     </span>
     <span class="public-home-brand-copy">
       <span class="public-home-brand-name"><span>ONION</span><strong>SUPPORT</strong></span>
@@ -333,16 +340,24 @@ function renderHeader() {
 
 function renderHeroVisual() {
   const profilePhoto = safeAssetSrc(BUSINESS.profilePhoto, BUSINESS.profilePhoto);
+  const profilePhotoWebp224 = safeAssetSrc(
+    CRISTIAN_PROFILE_PHOTO_WEBP_224,
+    CRISTIAN_PROFILE_PHOTO_WEBP_224
+  );
   const profilePhotoWebp480 = safeAssetSrc(
     CRISTIAN_PROFILE_PHOTO_WEBP_480,
     CRISTIAN_PROFILE_PHOTO_WEBP_480
+  );
+  const profilePhotoWebp640 = safeAssetSrc(
+    CRISTIAN_PROFILE_PHOTO_WEBP_640,
+    CRISTIAN_PROFILE_PHOTO_WEBP_640
   );
   const profilePhotoWebp960 = safeAssetSrc(
     CRISTIAN_PROFILE_PHOTO_WEBP_960,
     CRISTIAN_PROFILE_PHOTO_WEBP_960
   );
-  const profilePhotoWebpSrcset = `${profilePhotoWebp480} 480w, ${profilePhotoWebp960} 960w`;
-  const profilePhotoSizes = "(max-width: 760px) 44vw, 196px";
+  const profilePhotoWebpSrcset = `${profilePhotoWebp224} 224w, ${profilePhotoWebp480} 480w, ${profilePhotoWebp640} 640w, ${profilePhotoWebp960} 960w`;
+  const profilePhotoSizes = "(max-width: 720px) calc(100vw - 90px), (max-width: 1040px) 206px, (max-width: 1240px) 176px, 196px";
 
   return `
     <article class="public-home-profile-card public-home-profile-card--command" aria-label="Perfil profesional de ${escapeAttr(BUSINESS.ownerName)}" data-public-home-card="true" data-public-home-magnetic="true">

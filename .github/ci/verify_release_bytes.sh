@@ -62,6 +62,15 @@ wait_for_release() {
     "src/features/auth/index.js|/src/features/auth/index.js"
     "src/router/index.js|/src/router/index.js"
     "src/router/routes.js|/src/router/routes.js"
+    "src/preboot/public-home-preload.js|/src/preboot/public-home-preload.js"
+    "src/views/public/index.js|/src/views/public/index.js"
+    "src/views/public/home/template.js|/src/views/public/home/template.js"
+    "src/views/public/login/template.js|/src/views/public/login/template.js"
+    "src/media/img/favicon_black_circle_128.webp|/src/media/img/favicon_black_circle_128.webp"
+    "src/media/img/Cristian_Avila_224.webp|/src/media/img/Cristian_Avila_224.webp"
+    "src/media/img/Cristian_Avila_480.webp|/src/media/img/Cristian_Avila_480.webp"
+    "src/media/img/Cristian_Avila_640.webp|/src/media/img/Cristian_Avila_640.webp"
+    "src/media/img/Cristian_Avila_960.webp|/src/media/img/Cristian_Avila_960.webp"
   )
 
   base="$(normalize_base "${raw_base}")"

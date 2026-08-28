@@ -14,6 +14,7 @@ import { ROUTES } from "../../../core/config.js";
 
 import {
   PUBLIC_AUTH_LOGO,
+  PUBLIC_AUTH_LOGO_WEBP,
   escapeAttr,
   escapeHtml,
   renderPublicShell,
@@ -154,23 +155,30 @@ function renderLogo({
   imageClass = "login-brand-logo",
   size = 72,
 } = {}) {
-  const logoSrc = safeAssetSrc(
+  const logoFallback = safeAssetSrc(
     PUBLIC_AUTH_LOGO,
     PUBLIC_AUTH_LOGO
+  );
+  const logoWebp = safeAssetSrc(
+    PUBLIC_AUTH_LOGO_WEBP,
+    PUBLIC_AUTH_LOGO_WEBP
   );
 
   return `
     <span class="${escapeAttr(shellClass)}" aria-hidden="true">
-      <img
-        class="${escapeAttr(imageClass)}"
-        src="${escapeAttr(logoSrc)}"
-        alt=""
-        width="${escapeAttr(size)}"
-        height="${escapeAttr(size)}"
-        loading="eager"
-        decoding="async"
-        draggable="false"
-      >
+      <picture>
+        <source type="image/webp" srcset="${escapeAttr(logoWebp)}">
+        <img
+          class="${escapeAttr(imageClass)}"
+          src="${escapeAttr(logoFallback)}"
+          alt=""
+          width="${escapeAttr(size)}"
+          height="${escapeAttr(size)}"
+          loading="eager"
+          decoding="async"
+          draggable="false"
+        >
+      </picture>
     </span>
   `;
 }

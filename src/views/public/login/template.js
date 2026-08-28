@@ -478,10 +478,7 @@ function renderLoginCard() {
       <div class="login-card-sheen" aria-hidden="true"></div>
 
       <header class="login-card-header">
-        <div
-          class="login-card-logo-wrap"
-          aria-label="${escapeAttr(APP_NAME)}"
-        >
+        <div class="login-card-logo-wrap">
           ${renderLogo({
             shellClass: "login-card-logo-shell",
             imageClass: "login-card-logo",

@@ -1703,6 +1703,7 @@ export async function searchFacturaIncidencias({
   includeClosed = true,
   includeAll = true,
   onlyMine = false,
+  responseContract = "v2",
   timeout = FACTURAS_LIST_TIMEOUT,
   signal
 } = {}) {
@@ -1710,7 +1711,8 @@ export async function searchFacturaIncidencias({
     limit: Math.min(Math.max(1, number(limit, 50)), 100),
     includeClosed: Boolean(includeClosed),
     includeAll: Boolean(includeAll),
-    onlyMine: Boolean(onlyMine)
+    onlyMine: Boolean(onlyMine),
+    responseContract: cleanText(responseContract, "v2") === "v1" ? "v1" : "v2"
   };
 
   const term = cleanText(first(q, search), "");

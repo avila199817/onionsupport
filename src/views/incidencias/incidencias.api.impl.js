@@ -39,6 +39,7 @@ export const INCIDENCIAS_LIST_LIMIT = 48;
 export const INCIDENCIAS_CACHE_TTL_MS = 60000;
 export const INCIDENCIAS_DETAIL_CACHE_TTL_MS = 20000;
 export const INCIDENCIAS_DETAIL_CACHE_MAX_ENTRIES = 96;
+export const INCIDENCIAS_LIST_RESPONSE_CONTRACT = "v2";
 
 const DEFAULT_CURRENCY = "EUR";
 const DEFAULT_STATUS = "open";
@@ -63,6 +64,7 @@ let usersSearchController = null;
 let lastList = {
   items: [],
   total: 0,
+  response: {},
 };
 
 function pruneDetailCache() {
@@ -546,6 +548,7 @@ function buildListQuery({ query = {}, params = {}, ...rest } = {}) {
     "withComments",
     "withInvoices",
     "assigned",
+    "responseContract",
   ]) {
     if (rest[key] !== undefined) restQuery[key] = rest[key];
   }
@@ -555,6 +558,7 @@ function buildListQuery({ query = {}, params = {}, ...rest } = {}) {
     includeTotal: true,
     sortBy: "updatedAt",
     sortDir: "DESC",
+    responseContract: INCIDENCIAS_LIST_RESPONSE_CONTRACT,
     ...safeObject(params),
     ...restQuery,
     ...safeObject(query),
@@ -571,7 +575,10 @@ function isCacheFresh(options = {}) {
   const key = listCacheKey(options);
   if (lastCacheKey && key && lastCacheKey !== key) return false;
 
-  const ttl = number(options.ttlMs ?? options.cacheTtlMs, INCIDENCIAS_CACHE_TTL_MS);
+  const ttl = number(
+    options.ttlMs ?? options.cacheTtlMs ?? INCIDENCIAS_CACHE_TTL_MS,
+    INCIDENCIAS_CACHE_TTL_MS
+  );
   if (ttl <= 0) return false;
 
   return cacheAgeMs() <= ttl;
@@ -580,32 +587,48 @@ function isCacheFresh(options = {}) {
 function cachedListResponse({ cached = true, stale = false, error = null, options = {} } = {}) {
   const items = safeArray(lastList.items);
   const total = Math.max(number(lastList.total, items.length), items.length);
+  const response = safeObject(lastList.response, {});
+  const responseTotal = Object.prototype.hasOwnProperty.call(response, "total")
+    ? response.total
+    : total;
 
   return {
+    ...response,
     ok: !error,
+    success: !error && response.success !== false,
     cached,
     stale,
     items,
-    total,
-    count: items.length,
+    total: responseTotal,
+    count: Object.prototype.hasOwnProperty.call(response, "count")
+      ? response.count
+      : items.length,
+    rawCount: Object.prototype.hasOwnProperty.call(response, "rawCount")
+      ? response.rawCount
+      : items.length,
     loadedAt: lastLoadedAt,
     ...(error ? { error } : {}),
     cache: {
       hydrated: Boolean(lastLoadedAt),
       key: lastCacheKey,
       ageMs: cacheAgeMs(),
-      ttlMs: number(options.ttlMs ?? options.cacheTtlMs, INCIDENCIAS_CACHE_TTL_MS),
+      ttlMs: number(
+        options.ttlMs ?? options.cacheTtlMs ?? INCIDENCIAS_CACHE_TTL_MS,
+        INCIDENCIAS_CACHE_TTL_MS
+      ),
       fresh: !stale && !error && isCacheFresh(options),
     },
   };
 }
 
-function setListCache({ items = [], total = 0, key = "" } = {}) {
+function setListCache({ items = [], total = 0, key = "", response = {} } = {}) {
   const normalizedItems = normalizeList(items);
+  const { items: _responseItems, ...responseMetadata } = safeObject(response, {});
 
   lastList = {
     items: normalizedItems,
     total: Math.max(number(total, normalizedItems.length), normalizedItems.length),
+    response: responseMetadata,
   };
 
   lastLoadedAt = nowIso();
@@ -616,14 +639,24 @@ function setListCache({ items = [], total = 0, key = "" } = {}) {
 
 export function hydrateIncidenciasFromCache() {
   const items = safeArray(lastList.items);
+  const response = safeObject(lastList.response, {});
+  const total = Math.max(number(lastList.total, items.length), items.length);
 
   return {
+    ...response,
     ok: Boolean(lastLoadedAt),
     cached: true,
     stale: !lastLoadedAt,
     items,
-    total: Math.max(number(lastList.total, items.length), items.length),
-    count: items.length,
+    total: Object.prototype.hasOwnProperty.call(response, "total")
+      ? response.total
+      : total,
+    count: Object.prototype.hasOwnProperty.call(response, "count")
+      ? response.count
+      : items.length,
+    rawCount: Object.prototype.hasOwnProperty.call(response, "rawCount")
+      ? response.rawCount
+      : items.length,
     loadedAt: lastLoadedAt,
     loading,
     error: lastError,
@@ -638,7 +671,7 @@ export function hydrateIncidenciasFromCache() {
 }
 
 export function clearIncidenciasCache() {
-  lastList = { items: [], total: 0 };
+  lastList = { items: [], total: 0, response: {} };
   lastLoadedAt = null;
   lastError = null;
   lastCacheKey = "";
@@ -701,6 +734,229 @@ function listFromPayload(payload = null) {
   }
 
   return [];
+}
+
+function firstOwnValue(
+  objects = [],
+  keys = [],
+  {
+    allowNull = false,
+    allowEmptyArray = false,
+    accept = null,
+  } = {}
+) {
+  for (const object of objects) {
+    if (!isObject(object)) continue;
+
+    for (const key of keys) {
+      if (!Object.prototype.hasOwnProperty.call(object, key)) continue;
+
+      const value = object[key];
+      if (value === undefined || (!allowNull && value === null)) continue;
+      if (typeof value === "string" && value.trim() === "") continue;
+      if (Array.isArray(value) && value.length === 0 && !allowEmptyArray) continue;
+      if (isObject(value) && Object.keys(value).length === 0) continue;
+      if (typeof accept === "function" && !accept(value)) continue;
+      return { found: true, value };
+    }
+  }
+
+  return { found: false, value: undefined };
+}
+
+function normalizeEnvelopeCount(value, fallback = 0) {
+  if (value === undefined || value === null || value === "") return fallback;
+  const parsed = number(value, Number.NaN);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function normalizeOpaqueCursor(value = "") {
+  return typeof value === "string" ? cleanText(value, "") : "";
+}
+
+function v2ContractMarker(value = null) {
+  if (value === 2) return true;
+  const marker = cleanText(value, "").toLowerCase();
+  if (!marker) return false;
+
+  return marker === "2" || marker === "v2" || /(?:^|[.\/_-])v?2$/u.test(marker);
+}
+
+/**
+ * Normaliza exclusivamente el envelope del listado. La normalización de cada
+ * fila sigue perteneciendo a normalizeIncidencia()/normalizeList().
+ *
+ * El contrato v2 es estricto respecto a `items`: si el backend anuncia v2 y
+ * omite el array canónico, fallamos en lugar de pintar un historial vacío.
+ * Los aliases históricos sólo se usan cuando la respuesta no se identifica
+ * como v2, preservando el fallback durante el despliegue gradual del backend.
+ */
+export function normalizeIncidenciasListResponse(payload = null, requestMeta = {}) {
+  const root = safeObject(payload, {});
+  const data = safeObject(root.data, {});
+  const rootMeta = safeObject(root.meta, {});
+  const dataMeta = safeObject(data.meta, {});
+  const envelopeObjects = [root, data, rootMeta, dataMeta];
+
+  const responseContractEntry = firstOwnValue(
+    envelopeObjects,
+    ["responseContract"]
+  );
+  const contractVersionEntry = firstOwnValue(
+    envelopeObjects,
+    ["contractVersion"]
+  );
+  const schemaEntry = firstOwnValue(envelopeObjects, ["schema"]);
+  const isV2 =
+    v2ContractMarker(responseContractEntry.value) ||
+    v2ContractMarker(contractVersionEntry.value) ||
+    v2ContractMarker(schemaEntry.value);
+
+  const canonicalItemsEntry = firstOwnValue(
+    [root, data],
+    ["items"],
+    { allowNull: true, allowEmptyArray: true }
+  );
+
+  if (isV2 && (!canonicalItemsEntry.found || !Array.isArray(canonicalItemsEntry.value))) {
+    const error = new TypeError(
+      "La respuesta v2 de incidencias no contiene el array canónico items[]."
+    );
+    error.code = "INCIDENCIAS_LIST_V2_ITEMS_REQUIRED";
+    throw error;
+  }
+
+  const rawItems = isV2 ? canonicalItemsEntry.value : listFromPayload(payload);
+  const items = normalizeList(rawItems);
+
+  const paginationEntry = firstOwnValue(
+    [root, data, rootMeta, dataMeta],
+    ["pagination"]
+  );
+  const pagination = safeObject(paginationEntry.value, {});
+  const rootPagination = safeObject(root.pagination, {});
+  const dataPagination = safeObject(data.pagination, {});
+  const rootMetaPagination = safeObject(rootMeta.pagination, {});
+  const dataMetaPagination = safeObject(dataMeta.pagination, {});
+  const valueObjects = [
+    root,
+    data,
+    rootPagination,
+    dataPagination,
+    rootMeta,
+    dataMeta,
+    rootMetaPagination,
+    dataMetaPagination,
+  ];
+
+  const rawCountEntry = firstOwnValue(valueObjects, ["rawCount"]);
+  const countEntry = firstOwnValue(valueObjects, ["count"]);
+  const totalEntry = firstOwnValue(
+    valueObjects,
+    ["total", "totalCount", "remoteCount"],
+    { allowNull: true }
+  );
+  const totalKnownEntry = firstOwnValue(valueObjects, ["totalKnown"]);
+  const totalIsLowerBoundEntry = firstOwnValue(
+    valueObjects,
+    ["totalIsLowerBound"]
+  );
+  const nextCursorEntry = firstOwnValue(
+    [
+      root,
+      rootPagination,
+      data,
+      dataPagination,
+      rootMeta,
+      rootMetaPagination,
+      dataMeta,
+      dataMetaPagination,
+    ],
+    ["nextCursor"],
+    { accept: (value) => typeof value === "string" }
+  );
+
+  const nextCursor = normalizeOpaqueCursor(nextCursorEntry.value);
+  const hasMore =
+    valueObjects.some((object) => object?.hasMore === true) ||
+    Boolean(nextCursor);
+  const rawCount = normalizeEnvelopeCount(rawCountEntry.value, rawItems.length);
+  const count = normalizeEnvelopeCount(countEntry.value, items.length);
+  const total = totalEntry.found
+    ? totalEntry.value === null
+      ? isV2
+        ? null
+        : items.length
+      : isV2
+        ? normalizeEnvelopeCount(totalEntry.value, items.length)
+        : Math.max(
+            normalizeEnvelopeCount(totalEntry.value, items.length),
+            items.length
+          )
+    : totalFromPayload(payload, items.length);
+  const totalIsLowerBound = totalIsLowerBoundEntry.value === true;
+  const paginationHasOwnTotal = Object.prototype.hasOwnProperty.call(
+    pagination,
+    "total"
+  );
+  const paginationTotal = paginationHasOwnTotal
+    ? pagination.total === null
+      ? isV2
+        ? null
+        : total
+      : isV2
+        ? normalizeEnvelopeCount(pagination.total, total ?? items.length)
+        : Math.max(
+            normalizeEnvelopeCount(pagination.total, total ?? items.length),
+            total ?? items.length,
+            items.length
+          )
+    : total;
+  const totalKnown = totalKnownEntry.found
+    ? totalKnownEntry.value === true
+    : paginationTotal !== null && total !== null && !totalIsLowerBound;
+  const summaryEntry = firstOwnValue(envelopeObjects, ["summary"]);
+
+  return {
+    ok: root.ok !== false,
+    success: root.success !== false,
+    items,
+    rawCount,
+    count,
+    total,
+    nextCursor,
+    hasMore,
+    pagination: {
+      ...pagination,
+      mode: cleanText(
+        first(pagination.mode, requestMeta.pageMode, requestMeta.query?.pageMode),
+        "cursor"
+      ),
+      nextCursor,
+      hasMore,
+      total: paginationTotal,
+      pageSize: normalizeEnvelopeCount(
+        first(
+          pagination.pageSize,
+          pagination.limit,
+          requestMeta.limit,
+          requestMeta.query?.limit
+        ),
+        INCIDENCIAS_LIST_LIMIT
+      ),
+    },
+    meta: safeObject(firstOwnValue([root, data], ["meta"]).value, {}),
+    summary: safeObject(summaryEntry.value, {}),
+    schema: schemaEntry.found ? schemaEntry.value : null,
+    contractVersion: contractVersionEntry.found
+      ? contractVersionEntry.value
+      : null,
+    responseContract: responseContractEntry.found
+      ? responseContractEntry.value
+      : null,
+    totalKnown,
+    totalIsLowerBound,
+  };
 }
 
 function usersListFromPayload(payload = null) {
@@ -1629,8 +1885,13 @@ function upsertCachedIncidencia(item = null) {
   const next = normalizeList([normalized, ...current]);
 
   lastList = {
+    ...lastList,
     items: next,
     total: Math.max(number(lastList.total, next.length), next.length),
+    // El cursor/resumen remoto deja de ser autoritativo tras una mutación local.
+    // Las filas optimistas se conservan con el shape cacheado histórico hasta
+    // que una nueva lectura repueble metadata v2 coherente.
+    response: {},
   };
 
   lastLoadedAt = lastLoadedAt || nowIso();
@@ -1914,62 +2175,19 @@ export async function loadIncidenciasPage(options = {}) {
     );
   }
 
-  const rawItems = listFromPayload(response);
-  const items = normalizeList(rawItems);
-  const data = safeObject(response?.data);
-  const pagination = safeObject(
-    first(response?.pagination, data?.pagination, {})
-  );
-  const total = Math.max(
-    number(
-      first(
-        response?.total,
-        response?.totalCount,
-        data?.total,
-        data?.totalCount,
-        items.length
-      ),
-      items.length
-    ),
-    items.length
-  );
-  const nextCursor = cleanText(
-    first(
-      response?.nextCursor,
-      pagination?.nextCursor,
-      data?.nextCursor,
-      data?.pagination?.nextCursor,
-      ""
-    ),
-    ""
-  );
-  const hasMore =
-    response?.hasMore === true ||
-    pagination?.hasMore === true ||
-    data?.hasMore === true ||
-    data?.pagination?.hasMore === true ||
-    Boolean(nextCursor);
+  const normalized = normalizeIncidenciasListResponse(response, {
+    ...safeObject(options),
+    pageMode: "cursor",
+  });
 
   return {
+    ...normalized,
     ok: true,
     cached: false,
     stale: false,
-    items,
-    total,
-    count: items.length,
-    rawCount: rawItems.length,
-    nextCursor,
-    hasMore,
     pagination: {
-      ...pagination,
+      ...normalized.pagination,
       mode: "cursor",
-      nextCursor,
-      hasMore,
-      total,
-      pageSize: number(
-        first(pagination?.pageSize, options?.query?.limit, INCIDENCIAS_LIST_LIMIT),
-        INCIDENCIAS_LIST_LIMIT
-      ),
     },
   };
 }
@@ -1999,31 +2217,44 @@ export async function listIncidencias(options = {}) {
         throw new Error(responseErrorMessage(response, "No se pudieron cargar las incidencias."));
       }
 
-      const rawItems = listFromPayload(response);
-      const items = normalizeList(rawItems);
-      const total = totalFromPayload(response, items.length);
-      setListCache({ items, total, key });
+      const normalized = normalizeIncidenciasListResponse(response, options);
+      const cacheTotal = normalized.total === null
+        ? normalized.items.length
+        : normalized.total;
+      setListCache({
+        items: normalized.items,
+        total: cacheTotal,
+        key,
+        response: normalized,
+      });
 
       return {
+        ...normalized,
         ok: true,
         cached: false,
         stale: false,
         items: lastList.items,
-        total: lastList.total,
-        count: lastList.items.length,
         loadedAt: lastLoadedAt,
-        rawCount: rawItems.length,
         cache: {
           hydrated: true,
           key: lastCacheKey,
           ageMs: 0,
-          ttlMs: number(options.ttlMs ?? options.cacheTtlMs, INCIDENCIAS_CACHE_TTL_MS),
+          ttlMs: number(
+            options.ttlMs ?? options.cacheTtlMs ?? INCIDENCIAS_CACHE_TTL_MS,
+            INCIDENCIAS_CACHE_TTL_MS
+          ),
           fresh: true,
         },
       };
     } catch (error) {
       lastError = normalizeError(error);
-      if (returnStaleOnError && lastLoadedAt) {
+      if (
+        returnStaleOnError &&
+        lastLoadedAt &&
+        lastCacheKey &&
+        key &&
+        lastCacheKey === key
+      ) {
         return cachedListResponse({ cached: true, stale: true, error: lastError, options });
       }
       throw error;
@@ -2563,6 +2794,7 @@ export const getSnapshot = getIncidenciasApiSnapshot;
 export const getDebugSnapshot = getIncidenciasApiSnapshot;
 
 export default {
+  normalizeIncidenciasListResponse,
   listIncidencias,
   loadIncidenciasPage,
   loadIncidencias,

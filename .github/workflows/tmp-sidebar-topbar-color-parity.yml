@@ -1,0 +1,57 @@
+name: TEMP Sidebar Topbar Color Parity
+
+on:
+  push:
+    branches:
+      - fix/sidebar-topbar-color-parity
+
+permissions:
+  contents: write
+
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/sidebar-topbar-color-parity
+          fetch-depth: 0
+
+      - name: Guard completed parity
+        id: guard
+        shell: bash
+        run: |
+          if git log -1 --pretty=%B | grep -q '\[chrome-color-parity-done\]'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Apply chrome color parity
+        if: steps.guard.outputs.skip != 'true'
+        shell: bash
+        run: python3 .github/tmp/fix_sidebar_topbar_color_parity.py
+
+      - name: Validate chrome color parity
+        if: steps.guard.outputs.skip != 'true'
+        shell: bash
+        run: |
+          node --experimental-default-type=module .github/scripts/shell_runtime_contract.mjs
+          python3 .github/scripts/app_entrypoint_integrity.py
+          bash .github/ci/validate_spa_contracts.sh
+          git diff --check
+
+      - name: Commit parity
+        if: steps.guard.outputs.skip != 'true'
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git config user.name "Onion Support CI"
+          git config user.email "cristian@onionsupport.com"
+          git add src/css/tokens/variables.css src/css/tokens/light.css src/css/layout/sidebar.css src/css/layout/sidebar.executive.css src/css/layout/topbar.css src/css/layout/topbar.executive.css .github/scripts/shell_runtime_contract.mjs
+          git commit -m "fix: unificar color Sidebar y Topbar 1:1 [chrome-color-parity-done]"
+          git push origin HEAD:fix/sidebar-topbar-color-parity

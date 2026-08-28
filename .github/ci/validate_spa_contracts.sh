@@ -20,7 +20,7 @@ checks = {
         "renderLoginView",
         "Auth as DefaultAuth",
         "createLoginTemplate",
-        "goAfterLogin",
+        "handoffAfterLogin",
     ),
     "src/views/public/login/template.js": (
         "LOGIN_TEMPLATE_VERSION",
@@ -125,6 +125,7 @@ node --experimental-default-type=module .github/scripts/auth_logout_contract.mjs
 node --experimental-default-type=module .github/scripts/router_runtime_contract.mjs
 node --experimental-default-type=module .github/scripts/shell_runtime_contract.mjs
 node --experimental-default-type=module .github/scripts/private_runtime_auth_contract.mjs
+node --experimental-default-type=module .github/scripts/login_document_handoff_contract.mjs
 node --experimental-default-type=module .github/scripts/view_runtime_state_contract.mjs
 node --experimental-default-type=module .github/scripts/home_runtime_state_contract.mjs
 node --experimental-default-type=module .github/scripts/home_view_runtime_context_contract.mjs

@@ -1,9 +1,9 @@
 /* =========================================================
    Onion Support - Global Entity Overlay
 
-   Despacha entidades desde cualquier punto de la SPA. Incidencias es siempre
-   propiedad de su vista/controlador canónico; las entidades simples conservan
-   overlay lazy mientras migran al mismo contrato propietario.
+   Despacha entidades desde cualquier punto de la SPA. Incidencias y Facturas
+   pertenecen siempre a sus vistas/controladores canónicos; las entidades simples
+   conservan overlay lazy mientras migran al mismo contrato propietario.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -25,7 +25,7 @@ import {
 } from "./adapters/adapter-utils.js";
 
 export const ENTITY_OVERLAY_VERSION =
-  "entity-overlay.v2-incidencia-owner-authority";
+  "entity-overlay.v3-factura-incidencia-owner-authority";
 
 const ROOT_ID = "entity-overlay-root";
 const ROOT_SELECTOR = `#${ROOT_ID}`;
@@ -38,19 +38,32 @@ const STYLE_TIMEOUT_MS = 4_000;
 const CLOSE_HISTORY_FALLBACK_MS = 450;
 
 const ADAPTER_LOADERS = Object.freeze({
-  factura: () => import("./adapters/factura.js"),
   cliente: () => import("./adapters/cliente.js"),
   usuario: () => import("./adapters/usuario.js"),
 });
 
 /*
-  Incidencias tiene un controller de dominio completo (histórico, adjuntos,
-  previews, borradores, edición, live sync y focus trap). Nunca se vuelve a
-  renderizar su template directamente desde el overlay global.
+  Los dominios con controller completo nunca vuelven a renderizar su template
+  directamente desde el overlay global. El overlay sólo conserva la intención,
+  navega a la vista propietaria y delega la apertura en su controller real.
 */
-const OWNER_ROUTED_TYPES = new Set(["incidencia"]);
-const INCIDENCIA_OWNER_SEGMENT = "incidencias";
-const INCIDENCIA_MODAL_ROOT_SELECTOR = "[data-incidencias-modal-root='true']";
+const OWNER_DEFINITIONS = Object.freeze({
+  factura: Object.freeze({
+    routeSegment: "facturas",
+    modalSelector: "[data-facturas-detail-root='true']",
+    load: () => import("../../views/facturas/index.js"),
+    openerName: "openFacturaDetailById",
+    detailPath: false,
+  }),
+  incidencia: Object.freeze({
+    routeSegment: "incidencias",
+    modalSelector: "[data-incidencias-modal-root='true']",
+    load: () => import("../../views/incidencias/index.js"),
+    openerName: "openIncidenciaDetailById",
+    detailPath: true,
+  }),
+});
+const OWNER_ROUTED_TYPES = new Set(Object.keys(OWNER_DEFINITIONS));
 const OWNER_ROUTE_ROOT_SELECTOR = "#view-container, [data-router-view='true']";
 const OWNER_OPEN_TIMEOUT_MS = 12_000;
 
@@ -651,15 +664,29 @@ function currentScopePrefix() {
   return match?.[1] ? `/@${match[1]}` : "";
 }
 
-function incidenciaOwnerBasePath() {
-  return `${currentScopePrefix()}/${INCIDENCIA_OWNER_SEGMENT}`
+function ownerDefinition(type = "") {
+  const entityType = normalizeEntityType(type);
+  return OWNER_DEFINITIONS[entityType] || null;
+}
+
+function ownerBasePath(type = "") {
+  const definition = ownerDefinition(type);
+  if (!definition) return "";
+
+  return `${currentScopePrefix()}/${definition.routeSegment}`
     .replace(/\/{2,}/g, "/");
 }
 
-function incidenciaOwnerDetailPath(id = "") {
-  const entityId = normalizeEntityId("incidencia", id);
-  if (!entityId) return "";
-  return `${incidenciaOwnerBasePath()}/${encodeURIComponent(entityId)}`;
+function ownerTargetPath(type = "", id = "") {
+  const entityType = normalizeEntityType(type);
+  const entityId = normalizeEntityId(entityType, id);
+  const definition = ownerDefinition(entityType);
+  const base = ownerBasePath(entityType);
+
+  if (!entityId || !definition || !base) return "";
+  return definition.detailPath
+    ? `${base}/${encodeURIComponent(entityId)}`
+    : base;
 }
 
 function ownerRouteRoot() {
@@ -667,13 +694,19 @@ function ownerRouteRoot() {
   return document.querySelector(OWNER_ROUTE_ROOT_SELECTOR) || document.body || null;
 }
 
-function ownerModalOpen() {
-  if (!isBrowser()) return false;
-  return Boolean(document.querySelector(INCIDENCIA_MODAL_ROOT_SELECTOR));
+function ownerCloseObservationRoot() {
+  if (!isBrowser()) return null;
+  return document.body || ownerRouteRoot();
 }
 
-function isIncidenciaOwnerRoute() {
-  return isCanonicalOwnerRoute("incidencia");
+function ownerModalOpen(type = "") {
+  if (!isBrowser()) return false;
+  const selector = ownerDefinition(type)?.modalSelector;
+  return Boolean(selector && document.querySelector(selector));
+}
+
+function isOwnerRoute(type = "") {
+  return isCanonicalOwnerRoute(type);
 }
 
 async function navigateWithRouter(path = "", options = {}) {
@@ -728,14 +761,17 @@ function stopOwnerSession({ navigateBack = false } = {}) {
   return true;
 }
 
-async function tryOpenCanonicalIncidencia(session = null) {
+async function tryOpenCanonicalOwner(session = null) {
   if (!session || ownerSession !== session || session.sequence !== ownerSequence) {
     return false;
   }
 
+  const definition = ownerDefinition(session.type);
+  if (!definition || typeof definition.load !== "function") return false;
+
   try {
-    const module = await import("../../views/incidencias/index.js");
-    const opener = module?.openIncidenciaDetailById;
+    const module = await definition.load();
+    const opener = module?.[definition.openerName];
     if (typeof opener !== "function") return false;
 
     return Boolean(await opener(session.id, null));
@@ -744,18 +780,18 @@ async function tryOpenCanonicalIncidencia(session = null) {
   }
 }
 
-function watchCanonicalIncidenciaClose(session = null) {
+function watchCanonicalOwnerClose(session = null) {
   if (!session || ownerSession !== session || !isBrowser()) return false;
 
-  const root = ownerRouteRoot();
+  const root = ownerCloseObservationRoot();
   if (!root || typeof MutationObserver !== "function") return false;
 
-  session.modalSeen = ownerModalOpen();
+  session.modalSeen = ownerModalOpen(session.type);
   session.closeObserver?.disconnect?.();
   session.closeObserver = new MutationObserver(() => {
     if (ownerSession !== session) return;
 
-    const openNow = ownerModalOpen();
+    const openNow = ownerModalOpen(session.type);
     if (openNow) {
       session.modalSeen = true;
       return;
@@ -764,11 +800,12 @@ function watchCanonicalIncidenciaClose(session = null) {
     if (!session.modalSeen) return;
 
     /*
-      El controller propietario ya ha cerrado y limpiado el modal. Sólo ahora
-      devolvemos al origen transversal (Inicio, búsqueda, etc.).
+      El controller propietario ya ha cerrado y limpiado el modal. Sólo vuelve
+      al origen transversal si el usuario sigue en esa vista propietaria; una
+      navegación explícita por sidebar/router siempre tiene prioridad.
     */
     stopOwnerSession({
-      navigateBack: Boolean(session.returnPath) && isIncidenciaOwnerRoute(),
+      navigateBack: Boolean(session.returnPath) && isOwnerRoute(session.type),
     });
   });
 
@@ -776,11 +813,11 @@ function watchCanonicalIncidenciaClose(session = null) {
   return true;
 }
 
-async function waitAndOpenCanonicalIncidencia(session = null) {
+async function waitAndOpenCanonicalOwner(session = null) {
   if (!session || !isBrowser()) return false;
 
-  if (await tryOpenCanonicalIncidencia(session)) {
-    watchCanonicalIncidenciaClose(session);
+  if (await tryOpenCanonicalOwner(session)) {
+    watchCanonicalOwnerClose(session);
     return true;
   }
 
@@ -804,7 +841,7 @@ async function waitAndOpenCanonicalIncidencia(session = null) {
         window.removeEventListener("onion:main:ready", session.readyHandler);
         session.readyHandler = null;
       }
-      if (ok) watchCanonicalIncidenciaClose(session);
+      if (ok) watchCanonicalOwnerClose(session);
       resolve(ok);
     };
 
@@ -812,7 +849,7 @@ async function waitAndOpenCanonicalIncidencia(session = null) {
       if (attempting || settled || ownerSession !== session) return;
       attempting = true;
       try {
-        if (await tryOpenCanonicalIncidencia(session)) finish(true);
+        if (await tryOpenCanonicalOwner(session)) finish(true);
       } finally {
         attempting = false;
       }
@@ -829,23 +866,24 @@ async function waitAndOpenCanonicalIncidencia(session = null) {
   });
 }
 
-async function openCanonicalIncidencia(input = {}) {
-  const id = normalizeEntityId("incidencia", input?.id || input?.entityId || "");
-  if (!id || !isBrowser()) return false;
+async function openCanonicalOwner(input = {}) {
+  const type = normalizeEntityType(input?.type || input?.entityType || "");
+  const id = normalizeEntityId(type, input?.id || input?.entityId || "");
+  if (!type || !id || !OWNER_ROUTED_TYPES.has(type) || !isBrowser()) return false;
 
-  /* Un overlay previo nunca debe convivir con el controller de Incidencias. */
+  /* Un overlay previo nunca debe convivir con un controller propietario. */
   clearStack({ restore: false });
   writeUrlForEntry(null, "replace");
   stopOwnerSession();
 
-  const alreadyOwner = isIncidenciaOwnerRoute();
+  const alreadyOwner = isOwnerRoute(type);
   const returnPath = alreadyOwner ? "" : currentPublicPathWithoutEntityQuery();
-  const target = incidenciaOwnerDetailPath(id);
+  const target = ownerTargetPath(type, id);
   if (!target) return false;
 
   const session = {
     sequence: ++ownerSequence,
-    type: "incidencia",
+    type,
     id,
     source: cleanText(input?.source, "api"),
     target,
@@ -861,21 +899,23 @@ async function openCanonicalIncidencia(input = {}) {
   ownerSession = session;
 
   if (!alreadyOwner) {
-    const navigated = await navigateWithRouter(target);
+    const navigated = await navigateWithRouter(target, {
+      source: `entity-overlay.owner.${type}`,
+    });
     if (!navigated || ownerSession !== session) {
       stopOwnerSession();
       return false;
     }
   }
 
-  const opened = await waitAndOpenCanonicalIncidencia(session);
+  const opened = await waitAndOpenCanonicalOwner(session);
   if (!opened && ownerSession === session) {
     stopOwnerSession({ navigateBack: Boolean(returnPath) });
     return false;
   }
 
   return Object.freeze({
-    type: "incidencia",
+    type,
     id,
     ownerRouted: true,
     source: session.source,
@@ -891,8 +931,8 @@ async function open(input = {}) {
     throw new TypeError("Entidad o identificador no válidos.");
   }
 
-  if (normalized.type === "incidencia") {
-    return openCanonicalIncidencia(normalized);
+  if (OWNER_ROUTED_TYPES.has(normalized.type)) {
+    return openCanonicalOwner(normalized);
   }
 
   const current = topEntry();
@@ -1275,7 +1315,7 @@ function onDocumentKeydown(event) {
 function onPopstate() {
   clearCloseFallback();
 
-  if (ownerSession && !isIncidenciaOwnerRoute()) {
+  if (ownerSession && !isOwnerRoute(ownerSession.type)) {
     stopOwnerSession();
   }
 

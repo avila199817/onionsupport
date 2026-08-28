@@ -26,6 +26,16 @@ def reject(source: str, snippet: str, message: str) -> None:
         errors.append(message)
 
 
+# Owner authority and first-render performance.
+require(INDEX, "const DEFAULT_BATCH_SIZE = 50;", "Facturas initial batch must stay bounded for a light first render")
+require(INDEX, "export async function openFacturaDetailById", "Facturas must expose its canonical detail opener")
+require(INDEX, "lastFacturasController", "Facturas canonical opener must target the mounted controller")
+require(TEMPLATE, "Exportar cargadas", "Partial CSV export must say that only loaded invoices are exported")
+require(TEMPLATE, "Actualización detenida.", "Refresh failure must expose actionable copy")
+require(TEMPLATE, 'data-facturas-action="${FACTURAS_ACTIONS.REFRESH}"', "Refresh failure must expose a retry action")
+reject(TEMPLATE, "Usa Actualizar para reintentar", "Facturas must not reference the removed manual Actualizar button")
+reject(TEMPLATE, "counts[filter.key]", "Server-filter pills must not display misleading partial counts")
+
 # Runtime cache and stale fallbacks must never cross a server-query boundary.
 require(API, "getFacturasListContextKey", "API must expose a canonical list context key")
 require(API, "lastList.contextKey === contextKey", "Append cache must require the same query context")

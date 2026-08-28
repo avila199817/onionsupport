@@ -884,7 +884,6 @@ function renderSearch(input = {}) {
 
 function renderFilters(input = {}, listState = {}) {
   const data = safeObject(input);
-  const counts = computeFilterCounts(getInputItems(data), data);
   const activeFilter = normalizeFilter(listState.activeFilter || getActiveFilter(data));
   const sortMode = normalizeSort(listState.sortMode || getSortMode(data));
   const option = getSortOption(sortMode);
@@ -896,7 +895,7 @@ function renderFilters(input = {}, listState = {}) {
       <div class="facturas-filter-pills" role="group" aria-label="Filtrar facturas por estado de pago">
         ${FILTERS.map((filter) => {
           const active = filter.key === activeFilter;
-          return `<button type="button" class="facturas-filter-pill${active ? " is-active" : ""}" data-facturas-action="${FACTURAS_ACTIONS.FILTER}" data-action="${FACTURAS_ACTIONS.FILTER}" data-filter="${attr(filter.key)}" data-filter-status="${attr(filter.key)}" data-payment-filter="${attr(filter.key)}" aria-pressed="${active ? "true" : "false"}"><span>${escapeHtml(filter.label)}</span><strong>${escapeHtml(String(counts[filter.key] ?? 0))}</strong></button>`;
+          return `<button type="button" class="facturas-filter-pill${active ? " is-active" : ""}" data-facturas-action="${FACTURAS_ACTIONS.FILTER}" data-action="${FACTURAS_ACTIONS.FILTER}" data-filter="${attr(filter.key)}" data-filter-status="${attr(filter.key)}" data-payment-filter="${attr(filter.key)}" aria-pressed="${active ? "true" : "false"}"><span>${escapeHtml(filter.label)}</span></button>`;
         }).join("")}
       </div>
       <div class="facturas-sort-pills" role="group" aria-label="Ordenar listado de facturas" data-current-sort="${attr(sortMode)}">
@@ -991,7 +990,7 @@ function renderInfiniteScrollFooter(listState = {}, state = {}) {
   const listError = cleanText(runtime.error, "");
   const loadMoreError = cleanText(first(listState.loadMoreError, runtime.loadMoreError, ""), "");
   if (listError) {
-    return `<div class="facturas-infinite" data-facturas-infinite="true" data-has-more="false" tabindex="-1"><div class="facturas-infinite-status is-error"><span class="facturas-infinite-error-icon" aria-hidden="true">${icon("alert")}</span><span>Actualización detenida. Usa Actualizar para reintentar.</span></div></div>`;
+    return `<div class="facturas-infinite" data-facturas-infinite="true" data-has-more="false" tabindex="-1"><div class="facturas-infinite-status is-error"><span class="facturas-infinite-error-icon" aria-hidden="true">${icon("alert")}</span><span>Actualización detenida.</span><button type="button" class="facturas-btn facturas-infinite-retry" data-facturas-action="${FACTURAS_ACTIONS.REFRESH}" data-action="${FACTURAS_ACTIONS.REFRESH}">${icon("refresh")}<span>Reintentar</span></button></div></div>`;
   }
   const status = loadMoreError
     ? `<span class="facturas-infinite-error-icon" aria-hidden="true">${icon("alert")}</span><span>${escapeHtml(loadMoreError)}</span><button type="button" class="facturas-btn facturas-infinite-retry" data-facturas-action="${FACTURAS_ACTIONS.RETRY_PAGE}" data-action="${FACTURAS_ACTIONS.RETRY_PAGE}">${icon("refresh")}<span>Reintentar</span></button>`
@@ -1019,6 +1018,8 @@ export function renderHeader(input = {}) {
   const canCreateFactura = isAdmin(data);
   const updatedAt = first(data.lastUpdatedAt, runtime.lastSyncAt, data.updatedAt, runtime.updatedAt, ...rows.map(getUpdatedAt));
   const remoteCount = getRemoteTotal(data, stats.total);
+  const exportIsPartial = remoteCount > rows.length;
+  const exportLabel = exportIsPartial ? "Exportar cargadas" : "Exportar CSV";
   const refreshing = Boolean(first(runtime.refreshing, data.refreshing));
   const loading = Boolean(first(runtime.loading, data.loading));
   const creating = Boolean(first(runtime.creating, runtime.creatingFactura, data.creating));
@@ -1027,7 +1028,7 @@ export function renderHeader(input = {}) {
     <div class="facturas-hero-top">
       <div class="facturas-hero-copy"><h1 class="facturas-page-title">Facturas</h1><p class="facturas-page-subtitle">Gestiona facturas, cobros, documentos PDF y su incidencia vinculada desde un único historial.</p></div>
       <div class="facturas-hero-actions">
-        <button type="button" id="facturas-export-btn" class="facturas-btn" data-action="${FACTURAS_ACTIONS.EXPORT}" data-facturas-action="${FACTURAS_ACTIONS.EXPORT}" ${disabledAttrs(loading || refreshing || !rows.length)}>${icon("export")}<span class="facturas-btn-text">Exportar CSV</span></button>
+        <button type="button" id="facturas-export-btn" class="facturas-btn" data-action="${FACTURAS_ACTIONS.EXPORT}" data-facturas-action="${FACTURAS_ACTIONS.EXPORT}" ${disabledAttrs(loading || refreshing || !rows.length)}>${icon("export")}<span class="facturas-btn-text">${escapeHtml(exportLabel)}</span></button>
         ${canCreateFactura ? `<button type="button" id="facturas-create-btn" class="facturas-btn facturas-btn--create${creating ? " is-loading" : ""}" data-action="${FACTURAS_ACTIONS.CREATE_OPEN}" data-facturas-action="${FACTURAS_ACTIONS.CREATE_OPEN}" aria-label="Crear nueva factura" ${disabledAttrs(creating, creating)}>${creating ? renderSpinner("Abriendo...") : `${icon("plus")}<span class="facturas-btn-text">Crear factura</span>`}</button>` : ""}
       </div>
     </div>

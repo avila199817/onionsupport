@@ -55,12 +55,12 @@ import {
 } from "./facturas.template.modal.js";
 
 export const FACTURAS_INDEX_VERSION =
-  "facturas.index.productivo.v20.multi-line-create-polish";
+  "facturas.index.productivo.v21.owner-authority-performance";
 
 export const FACTURAS_VIEW_VERSION = FACTURAS_INDEX_VERSION;
 
 const DEFAULT_PAGE = 1;
-const DEFAULT_BATCH_SIZE = 100;
+const DEFAULT_BATCH_SIZE = 50;
 const MIN_BATCH_SIZE = 20;
 const MAX_BATCH_SIZE = 200;
 
@@ -108,6 +108,7 @@ const FACTURAS_CONTROLLER_KEY =
   Symbol.for("onion.support.facturas.controller");
 
 let FACTURAS_CONTROLLER_SEQUENCE = 0;
+let lastFacturasController = null;
 
 /*
   Búsquedas de selección para alta de Facturas.
@@ -6677,6 +6678,10 @@ function createFacturasController(host = null, context = {}) {
         }
       }
 
+      if (lastFacturasController === controller) {
+        lastFacturasController = null;
+      }
+
       return true;
     },
 
@@ -6760,6 +6765,8 @@ function createFacturasController(host = null, context = {}) {
           adminPaymentCommand: true,
           paymentMutationSingleFlight: true,
           paymentModalCloseGuard: true,
+          ownerAuthorityBridge: true,
+          initialBatchSize: DEFAULT_BATCH_SIZE,
         },
       };
     },
@@ -6791,10 +6798,34 @@ export async function FacturasView(host = null, context = {}) {
 
   const controller = createFacturasController(host, context);
   host[FACTURAS_CONTROLLER_KEY] = controller;
+  lastFacturasController = controller;
 
   return controller.mount();
 }
 
 export const FacturasIndex = FacturasView;
+
+export async function openFacturaDetailById(
+  facturaId = "",
+  openerNode = null
+) {
+  try {
+    if (
+      !lastFacturasController ||
+      typeof lastFacturasController.openFactura !== "function"
+    ) {
+      return false;
+    }
+
+    return Boolean(
+      await lastFacturasController.openFactura(
+        facturaId,
+        openerNode
+      )
+    );
+  } catch {
+    return false;
+  }
+}
 
 export default FacturasView;

@@ -70,22 +70,26 @@ const [overlay, app, main, html, deeplink, spaContract] = await Promise.all([
   read(".github/ci/validate_spa_contracts.sh"),
 ]);
 
-for (const type of ["factura", "cliente", "usuario"]) {
+for (const type of ["cliente", "usuario"]) {
   assert.match(overlay, new RegExp(`${type}:\\s*\\(\\)\\s*=>\\s*import`));
 }
 
 assert.match(overlay, /document\.addEventListener\("click",\s*onDocumentClick,\s*true\)/);
-assert.match(overlay, /OWNER_ROUTED_TYPES = new Set\(\["incidencia"\]\)/);
-assert.match(overlay, /openCanonicalIncidencia/);
+assert.match(overlay, /OWNER_DEFINITIONS/);
+assert.match(overlay, /factura:\s*Object\.freeze\(\{/);
+assert.match(overlay, /incidencia:\s*Object\.freeze\(\{/);
+assert.match(overlay, /openFacturaDetailById/);
+assert.match(overlay, /openCanonicalOwner/);
 assert.match(overlay, /openIncidenciaDetailById/);
-assert.match(overlay, /INCIDENCIA_MODAL_ROOT_SELECTOR/);
+assert.match(overlay, /ownerModalOpen/);
 assert.match(overlay, /context\?\.Router \|\| context\?\.router/);
-assert.match(overlay, /navigateWithRouter\(target\)/);
+assert.match(overlay, /navigateWithRouter\(target,/);
 assert.match(
   overlay,
-  /navigateBack:\s*Boolean\(session\.returnPath\)\s*&&\s*isIncidenciaOwnerRoute\(\)/
+  /navigateBack:\s*Boolean\(session\.returnPath\)\s*&&\s*isOwnerRoute\(session\.type\)/
 );
 assert.doesNotMatch(overlay, /adapters\/incidencia\.js/);
+assert.doesNotMatch(overlay, /adapters\/factura\.js/);
 assert.match(overlay, /pushState|writeUrlForEntry/);
 assert.match(overlay, /data-entity-overlay-panel/);
 assert.match(overlay, /isCanonicalOwnerRoute/);
@@ -115,6 +119,11 @@ assert.match(spaContract, /entity_overlay_contract\.mjs/);
 
 const overlayStyles = await read("src/features/entity-overlay/styles.generated.js");
 assert.doesNotMatch(overlayStyles, /^\s*incidencia:/m);
+assert.doesNotMatch(overlayStyles, /^\s*factura:/m);
+
+const facturasIndex = await read("src/views/facturas/index.js");
+assert.match(facturasIndex, /export async function openFacturaDetailById/);
+assert.match(facturasIndex, /const DEFAULT_BATCH_SIZE = 50;/);
 
 const [homeTemplate, homeCss] = await Promise.all([
   read("src/views/home/home.template.js"),
@@ -144,5 +153,5 @@ assert.doesNotMatch(homeCss, /home-activity-entity-button/);
 assert.doesNotMatch(homeCss, /home-invoice-entity-button/);
 
 console.log(
-  "Entity overlay contract: PASS · incidencia owner authority · lazy simple overlays · canonical deeplinks"
+  "Entity overlay contract: PASS · factura/incidencia owner authority · lazy simple overlays · canonical deeplinks"
 );

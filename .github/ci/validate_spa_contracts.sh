@@ -126,6 +126,7 @@ node .github/scripts/router_runtime_contract.mjs
 node .github/scripts/shell_runtime_contract.mjs
 node .github/scripts/private_runtime_auth_contract.mjs
 node .github/scripts/login_document_handoff_contract.mjs
+node .github/scripts/login_accessibility_contract.mjs
 node .github/scripts/view_runtime_state_contract.mjs
 node .github/scripts/home_runtime_state_contract.mjs
 node .github/scripts/home_view_runtime_context_contract.mjs

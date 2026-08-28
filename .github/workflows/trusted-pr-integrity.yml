@@ -326,12 +326,337 @@ jobs:
           set -euo pipefail
           git diff --check HEAD^ HEAD
 
+  build_candidate_dist:
+    name: Build candidate dist without secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs:
+      - integrity
+
+    if: github.event.action != 'closed'
+
+    permissions:
+      contents: read
+
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
+      artifact_name: ${{ steps.artifact.outputs.name }}
+
+    steps:
+      - name: Checkout candidate build input
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.integrity.outputs.candidate_sha }}
+          path: candidate
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+          persist-credentials: false
+          allow-unsafe-pr-checkout: true
+
+      - name: Assert immutable candidate build input
+        working-directory: candidate
+        env:
+          CANDIDATE_SHA: ${{ needs.integrity.outputs.candidate_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "${actual_sha}" != "${CANDIDATE_SHA}" ]]; then
+            echo "::error title=Candidate build incorrecto::Esperado ${CANDIDATE_SHA}, obtenido ${actual_sha}."
+            exit 1
+          fi
+
+          if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
+            echo "::error title=Candidate build sucio::El checkout contiene mutaciones previas."
+            git status --short
+            exit 1
+          fi
+
+      - name: Use exact Node 22
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22.23.2"
+          package-manager-cache: false
+
+      - name: Use exact npm
+        working-directory: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare npm@10.9.8 --activate
+          [[ "$(node --version)" == "v22.23.2" ]]
+          [[ "$(npm --version)" == "10.9.8" ]]
+
+      # This job intentionally executes candidate build code, but it has no
+      # secrets, no write permission and no persisted checkout credentials.
+      - name: Install locked candidate dependencies
+        working-directory: candidate
+        shell: bash
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Build and self-check candidate artifact
+        working-directory: candidate
+        env:
+          ONION_RELEASE_SHA: ${{ needs.integrity.outputs.candidate_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build
+          npm run check:dist
+          npm run build:repro
+          npm run test:browser:dist
+
+      - name: Assert tracked candidate remains unmodified
+        working-directory: candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+            echo "::error title=Build mutó archivos versionados::"
+            git status --short
+            exit 1
+          fi
+
+      - name: Name immutable build artifact
+        id: artifact
+        env:
+          CANDIDATE_SHA: ${{ needs.integrity.outputs.candidate_sha }}
+        shell: bash
+        run: echo "name=frontend-dist-${CANDIDATE_SHA}-${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload candidate artifact for trusted validation
+        id: upload
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: |
+            candidate/dist
+            candidate/build-metadata
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 1
+
+  validate_dist_artifact:
+    name: Validate dist with trusted base tooling
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    needs:
+      - integrity
+      - build_candidate_dist
+
+    if: github.event.action != 'closed'
+
+    permissions:
+      contents: read
+
+    outputs:
+      trusted_artifact_id: ${{ steps.upload_trusted.outputs.artifact-id }}
+      trusted_artifact_digest: ${{ steps.upload_trusted.outputs.artifact-digest }}
+      trusted_artifact_name: ${{ steps.trusted_artifact.outputs.name }}
+      trusted_manifest_digest: ${{ steps.provenance.outputs.manifest_digest }}
+
+    steps:
+      - name: Checkout trusted dist validator
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.integrity.outputs.trusted_sha }}
+          path: trusted-validator
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+          persist-credentials: false
+
+      # Data-only checkout: no candidate script, action, hook or dependency is
+      # executed in this trusted validation job.
+      - name: Checkout candidate source as validation data
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.integrity.outputs.candidate_sha }}
+          path: candidate-data
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+          persist-credentials: false
+          allow-unsafe-pr-checkout: true
+
+      - name: Download exact candidate artifact by ID
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          artifact-ids: ${{ needs.build_candidate_dist.outputs.artifact_id }}
+          path: artifact
+          merge-multiple: true
+
+      - name: Use exact Node 22 for trusted validation
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22.23.2"
+          package-manager-cache: false
+
+      - name: Use exact trusted npm
+        working-directory: trusted-validator
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare npm@10.9.8 --activate
+          [[ "$(node --version)" == "v22.23.2" ]]
+          [[ "$(npm --version)" == "10.9.8" ]]
+
+      - name: Prove trusted provenance regressions
+        working-directory: trusted-validator
+        shell: bash
+        run: npm run test:trusted-build
+
+      - name: Stage candidate data behind trusted build tooling
+        env:
+          ONION_TRUSTED_SOURCE_DIR: ${{ github.workspace }}/trusted-validator
+          ONION_CANDIDATE_SOURCE_DIR: ${{ github.workspace }}/candidate-data
+          ONION_STAGED_BUILD_DIR: ${{ github.workspace }}/trusted-rebuild
+        shell: bash
+        run: node trusted-validator/tools/stage-trusted-build.mjs
+
+      - name: Install locked trusted build dependencies
+        working-directory: trusted-rebuild
+        shell: bash
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      # Only package.json, lockfile, Vite config and tools from the immutable
+      # base are executable here. Candidate HTML/src/static files are data.
+      - name: Build trusted reference from candidate data
+        working-directory: trusted-rebuild
+        env:
+          ONION_RELEASE_SHA: ${{ needs.integrity.outputs.candidate_sha }}
+          ONION_CANDIDATE_SOURCE_DIR: ${{ github.workspace }}/candidate-data
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build
+          npm run check:dist
+          npm run build:repro
+
+      - name: Materialize exact trusted artifact in this runner
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -e trusted-artifact ]]; then
+            echo "::error title=Envelope trusted preexistente::trusted-artifact debe crearse desde cero en este job."
+            exit 1
+          fi
+
+          mkdir trusted-artifact
+          cp -a trusted-rebuild/dist trusted-artifact/dist
+          cp -a trusted-rebuild/build-metadata trusted-artifact/build-metadata
+
+          mapfile -d '' roots < <(
+            find trusted-artifact -mindepth 1 -maxdepth 1 -printf '%f\0' | sort -z
+          )
+          if (( ${#roots[@]} != 2 )) || \
+            [[ "${roots[0]}" != "build-metadata" ]] || \
+            [[ "${roots[1]}" != "dist" ]]; then
+            echo "::error title=Envelope trusted no exacto::Sólo se permiten dist y build-metadata."
+            printf 'Root inesperado: %q\n' "${roots[@]}"
+            exit 1
+          fi
+
+          for path in trusted-artifact/dist trusted-artifact/build-metadata; do
+            if [[ ! -d "${path}" ]] || [[ -L "${path}" ]]; then
+              echo "::error title=Envelope trusted inválido::${path} debe ser un directorio real."
+              exit 1
+            fi
+          done
+
+      - name: Validate candidate artifact and prove trusted byte provenance
+        id: provenance
+        env:
+          ONION_BUILD_OUT_DIR: ${{ github.workspace }}/artifact/dist
+          ONION_BUILD_METADATA_DIR: ${{ github.workspace }}/artifact/build-metadata
+          ONION_CANDIDATE_SOURCE_DIR: ${{ github.workspace }}/candidate-data
+          ONION_CANDIDATE_ARTIFACT_DIR: ${{ github.workspace }}/artifact
+          ONION_TRUSTED_ARTIFACT_DIR: ${{ github.workspace }}/trusted-artifact
+          ONION_ARTIFACT_DIR: ${{ github.workspace }}/artifact
+          ONION_RELEASE_SHA: ${{ needs.integrity.outputs.candidate_sha }}
+          EXPECTED_ARTIFACT_DIGEST: ${{ needs.build_candidate_dist.outputs.artifact_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          trusted_sha="$(git -C trusted-validator rev-parse HEAD)"
+          candidate_sha="$(git -C candidate-data rev-parse HEAD)"
+          if [[ "${trusted_sha}" != "${{ needs.integrity.outputs.trusted_sha }}" ]]; then
+            echo "::error title=Validador trusted incorrecto::SHA inesperado ${trusted_sha}."
+            exit 1
+          fi
+
+          if [[ "${candidate_sha}" != "${ONION_RELEASE_SHA}" ]]; then
+            echo "::error title=Candidate data incorrecto::SHA inesperado ${candidate_sha}."
+            exit 1
+          fi
+
+          if [[ ! "${EXPECTED_ARTIFACT_DIGEST}" =~ ^(sha256:)?[0-9a-f]{64}$ ]]; then
+            echo "::error title=Digest de artifact inválido::${EXPECTED_ARTIFACT_DIGEST}"
+            exit 1
+          fi
+
+          for path in \
+            artifact/dist \
+            artifact/build-metadata \
+            trusted-artifact/dist \
+            trusted-artifact/build-metadata; do
+            if [[ ! -d "${path}" ]] || [[ -L "${path}" ]]; then
+              echo "::error title=Raíz de artifact ausente::${path} debe existir en este runner y ser un directorio real."
+              exit 1
+            fi
+          done
+
+          node trusted-validator/tools/validate-dist.mjs
+          node trusted-validator/tools/verify-artifact-envelope.mjs
+          node trusted-validator/tools/compare-build-artifacts.mjs
+
+          manifest_digest="$(sha256sum trusted-artifact/build-metadata/release-manifest.json | awk '{print $1}')"
+          if [[ ! "${manifest_digest}" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error title=Digest de manifest inválido::${manifest_digest}"
+            exit 1
+          fi
+          echo "manifest_digest=${manifest_digest}" >> "${GITHUB_OUTPUT}"
+
+          echo "Candidate artifact ID: ${{ needs.build_candidate_dist.outputs.artifact_id }}"
+          echo "Candidate archive digest: ${EXPECTED_ARTIFACT_DIGEST}"
+          echo "Trusted manifest digest: ${manifest_digest}"
+
+      - name: Name trusted rebuild artifact
+        id: trusted_artifact
+        env:
+          CANDIDATE_SHA: ${{ needs.integrity.outputs.candidate_sha }}
+        shell: bash
+        run: echo "name=frontend-trusted-dist-${CANDIDATE_SHA}-${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload trusted rebuild for later preview deployment
+        id: upload_trusted
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: ${{ steps.trusted_artifact.outputs.name }}
+          path: |
+            trusted-artifact/dist
+            trusted-artifact/build-metadata
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 1
+
+  # Bootstrap PR-A itself still runs the old workflow from its base and deploys
+  # the legacy root. Once PR-A is on main, later PRs consume only this artifact
+  # rebuilt with base tooling. Production remains on the legacy root workflow.
   deploy_preview:
     name: Deploy trusted PR preview
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs:
       - integrity
+      - validate_dist_artifact
 
     if: >-
       github.event.action != 'closed' &&
@@ -343,6 +668,7 @@ jobs:
     env:
       VALIDATED_SHA: ${{ needs.integrity.outputs.candidate_sha }}
       TRUSTED_SHA: ${{ needs.integrity.outputs.trusted_sha }}
+      TRUSTED_MANIFEST_DIGEST: ${{ needs.validate_dist_artifact.outputs.trusted_manifest_digest }}
 
     steps:
       - name: Resolve preview environment
@@ -373,51 +699,50 @@ jobs:
           lfs: false
           persist-credentials: false
 
-      - name: Stage trusted preview verifier
-        working-directory: trusted-preview-source
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          install -m 0755 .github/ci/verify_release_bytes.sh \
-            "${RUNNER_TEMP}/verify_release_bytes.sh"
-
-      - name: Checkout validated candidate
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download exact trusted rebuild by ID
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
-          ref: ${{ env.VALIDATED_SHA }}
-          path: candidate
-          fetch-depth: 1
-          submodules: false
-          lfs: false
-          persist-credentials: false
-          allow-unsafe-pr-checkout: true
+          artifact-ids: ${{ needs.validate_dist_artifact.outputs.trusted_artifact_id }}
+          path: trusted-artifact
+          merge-multiple: true
+
+      - name: Use exact Node 22 for trusted artifact verification
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22.23.2"
+          package-manager-cache: false
 
       - name: Assert immutable preview inputs
+        env:
+          EXPECTED_ARCHIVE_DIGEST: ${{ needs.validate_dist_artifact.outputs.trusted_artifact_digest }}
+          ONION_ARTIFACT_DIR: ${{ github.workspace }}/trusted-artifact
+          ONION_RELEASE_SHA: ${{ env.VALIDATED_SHA }}
+          EXPECTED_MANIFEST_DIGEST: ${{ env.TRUSTED_MANIFEST_DIGEST }}
         shell: bash
         run: |
           set -euo pipefail
 
-          actual_candidate="$(git -C candidate rev-parse HEAD)"
           actual_trusted="$(git -C trusted-preview-source rev-parse HEAD)"
-
-          if [[ "${actual_candidate}" != "${VALIDATED_SHA}" ]]; then
-            echo "::error title=Candidate preview incorrecto::Esperado ${VALIDATED_SHA}, obtenido ${actual_candidate}."
-            exit 1
-          fi
 
           if [[ "${actual_trusted}" != "${TRUSTED_SHA}" ]]; then
             echo "::error title=Trusted preview incorrecto::Esperado ${TRUSTED_SHA}, obtenido ${actual_trusted}."
             exit 1
           fi
 
-          if [[ -n "$(git -C candidate status --porcelain --untracked-files=all)" ]]; then
-            echo "::error title=Candidate preview sucio::El checkout candidato contiene mutaciones."
-            git -C candidate status --short
+          if [[ ! "${EXPECTED_ARCHIVE_DIGEST}" =~ ^(sha256:)?[0-9a-f]{64}$ ]]; then
+            echo "::error title=Digest de artifact trusted inválido::${EXPECTED_ARCHIVE_DIGEST}"
             exit 1
           fi
 
-          echo "Immutable preview candidate: ${actual_candidate}"
+          if [[ ! "${TRUSTED_MANIFEST_DIGEST}" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error title=Digest de manifest trusted inválido::${TRUSTED_MANIFEST_DIGEST}"
+            exit 1
+          fi
+
+          node trusted-preview-source/tools/verify-artifact-envelope.mjs
+
+          echo "Trusted artifact ID: ${{ needs.validate_dist_artifact.outputs.trusted_artifact_id }}"
+          echo "Trusted artifact digest: ${EXPECTED_ARCHIVE_DIGEST}"
           echo "Immutable preview tooling: ${actual_trusted}"
 
       - name: Validate preview deployment token
@@ -438,19 +763,20 @@ jobs:
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E }}
           action: upload
-          app_location: candidate
+          app_location: trusted-artifact/dist
           api_location: ""
           output_location: ""
           skip_app_build: true
           deployment_environment: ${{ steps.preview.outputs.name }}
 
       - name: Verify trusted preview release bytes
-        working-directory: candidate
         env:
           DEPLOYED_URL: ${{ steps.deploy.outputs.static_web_app_url }}
-          VERIFY_CANONICAL: "false"
+          ONION_ARTIFACT_DIR: ${{ github.workspace }}/trusted-artifact
+          ONION_RELEASE_SHA: ${{ env.VALIDATED_SHA }}
+          EXPECTED_MANIFEST_DIGEST: ${{ env.TRUSTED_MANIFEST_DIGEST }}
         shell: bash
-        run: bash "${RUNNER_TEMP}/verify_release_bytes.sh"
+        run: node trusted-preview-source/tools/verify-deployed-dist.mjs
 
       - name: Preview summary
         if: always()

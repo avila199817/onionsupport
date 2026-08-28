@@ -50,6 +50,7 @@ wait_for_release() {
   local remote_sha
   local body
   local mismatch
+  local status
 
   local checks=(
     "index.html|/"
@@ -71,6 +72,19 @@ wait_for_release() {
     "src/media/img/Cristian_Avila_480.webp|/src/media/img/Cristian_Avila_480.webp"
     "src/media/img/Cristian_Avila_640.webp|/src/media/img/Cristian_Avila_640.webp"
     "src/media/img/Cristian_Avila_960.webp|/src/media/img/Cristian_Avila_960.webp"
+  )
+
+  local denied_paths=(
+    "/tools"
+    "/tools/validate-dist.mjs"
+    "/dist/index.html"
+    "/build-metadata/release.json"
+    "/package.json"
+    "/package-lock.json"
+    "/vite.config.js"
+    "/.node-version"
+    "/.nvmrc"
+    "/.gitignore"
   )
 
   base="$(normalize_base "${raw_base}")"
@@ -112,7 +126,27 @@ wait_for_release() {
     done
 
     if [[ "${mismatch}" == "0" ]]; then
-      echo "${label}: release ${VALIDATED_SHA} visible y byte-exacto."
+      for path in "${denied_paths[@]}"; do
+        status="$(curl \
+          --silent \
+          --show-error \
+          --connect-timeout 10 \
+          --max-time 30 \
+          -H "Cache-Control: no-cache" \
+          -H "Pragma: no-cache" \
+          -o /dev/null \
+          -w '%{http_code}' \
+          "${base}${path}?release=${VALIDATED_SHA}" || true)"
+
+        if [[ "${status}" != "404" ]]; then
+          mismatch=1
+          break
+        fi
+      done
+    fi
+
+    if [[ "${mismatch}" == "0" ]]; then
+      echo "${label}: release ${VALIDATED_SHA} visible, byte-exacto y tooling de build privado."
       return 0
     fi
 

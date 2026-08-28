@@ -1,0 +1,4 @@
+dist/
+build-metadata/
+node_modules/
+.onion-build-*/

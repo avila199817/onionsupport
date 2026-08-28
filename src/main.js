@@ -253,7 +253,7 @@ async function hideLoaderSafely() {
   if (!isBrowser()) return false;
 
   try {
-    const module = await import(LOADER_MODULE);
+    const module = await import("./app/loader.js");
     const hide =
       module?.hideLoader ||
       module?.default?.hideLoader;
@@ -372,7 +372,7 @@ async function showFatalError(error = null) {
 ========================================================= */
 
 async function loadEnhancements() {
-  const module = await import(ENHANCEMENTS_MODULE);
+  const module = await import("./app/enhancements.js");
   const registry = module?.AppEnhancements || module?.default;
 
   if (
@@ -474,7 +474,7 @@ async function runBoot() {
     initialPath: safeInitialPath,
   });
 
-  const app = await import(APP_MODULE);
+  const app = await import("./app/index.js");
   const bootApp = isFunction(app?.bootApp) ? app.bootApp : app?.default;
 
   if (!isFunction(bootApp)) {

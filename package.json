@@ -1,0 +1,26 @@
+{
+  "name": "onionsupport-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.23.2 <23",
+    "npm": ">=10.9.8 <11"
+  },
+  "packageManager": "npm@10.9.8",
+  "scripts": {
+    "build": "vite build && node tools/normalize-dist.mjs && node tools/finalize-dist.mjs",
+    "build:repro": "node tools/verify-reproducible-build.mjs",
+    "check:dist": "node tools/validate-dist.mjs && node tools/candidate-inventory-regression.mjs",
+    "test:trusted-build": "node tools/trusted-build-regression.mjs && node tools/workflow-runner-isolation-regression.mjs",
+    "test:browser:dist": "node tools/browser-dist-contract.mjs",
+    "preview": "vite preview --host 127.0.0.1",
+    "validate:source": "PUBLIC_SITE_URL=https://onionsupport.com DIRECT_API_URL=https://api.onionsupport.com bash .github/ci/validate_static_release.sh && PUBLIC_SITE_URL=https://onionsupport.com DIRECT_API_URL=https://api.onionsupport.com bash .github/ci/validate_production_contract.sh && bash .github/ci/validate_spa_contracts.sh && python3 .github/scripts/repo_integrity.py && python3 .github/scripts/artifact_hygiene.py",
+    "validate": "npm run validate:source && npm run test:trusted-build && npm run build && npm run check:dist",
+    "validate:ci": "npm run validate && npm run build:repro && npm run test:browser:dist"
+  },
+  "devDependencies": {
+    "playwright-core": "1.62.1",
+    "vite": "8.2.2"
+  }
+}

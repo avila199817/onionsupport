@@ -43,6 +43,30 @@
       "statusCode": 404
     },
     {
+      "route": "/tools",
+      "statusCode": 404
+    },
+    {
+      "route": "/tools/*",
+      "statusCode": 404
+    },
+    {
+      "route": "/dist",
+      "statusCode": 404
+    },
+    {
+      "route": "/dist/*",
+      "statusCode": 404
+    },
+    {
+      "route": "/build-metadata",
+      "statusCode": 404
+    },
+    {
+      "route": "/build-metadata/*",
+      "statusCode": 404
+    },
+    {
       "route": "/config",
       "statusCode": 404
     },
@@ -103,11 +127,27 @@
       "statusCode": 404
     },
     {
+      "route": "/.node-version",
+      "statusCode": 404
+    },
+    {
+      "route": "/.nvmrc",
+      "statusCode": 404
+    },
+    {
+      "route": "/.gitignore",
+      "statusCode": 404
+    },
+    {
       "route": "/pnpm-lock.yaml",
       "statusCode": 404
     },
     {
       "route": "/yarn.lock",
+      "statusCode": 404
+    },
+    {
+      "route": "/vite.config.js",
       "statusCode": 404
     },
     {
@@ -462,7 +502,7 @@
     {
       "route": "/assets/*",
       "headers": {
-        "Cache-Control": "public, max-age=86400, must-revalidate"
+        "Cache-Control": "public, max-age=31536000, immutable"
       }
     },
     {

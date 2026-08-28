@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -24,6 +25,8 @@ ROOT = Path(
 IGNORED_DIRS = frozenset({".git"})
 FORBIDDEN_DIRS = frozenset(
     {
+        "dist",
+        "build-metadata",
         "node_modules",
         "coverage",
         ".nyc_output",
@@ -56,6 +59,16 @@ def rel(path: Path) -> str:
 def scan() -> tuple[list[str], int]:
     errors: list[str] = []
     files_seen = 0
+    tracked = {
+        item
+        for item in subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+        ).stdout.decode("utf-8").split("\0")
+        if item
+    }
 
     for current, dirs, files in os.walk(ROOT):
         current_path = Path(current)
@@ -67,9 +80,11 @@ def scan() -> tuple[list[str], int]:
 
             target = current_path / name
             if name in FORBIDDEN_DIRS:
-                errors.append(
-                    f"{rel(target)} :: directorio generado/prohibido dentro del repositorio"
-                )
+                prefix = f"{rel(target).rstrip('/')}/"
+                if any(path.startswith(prefix) for path in tracked):
+                    errors.append(
+                        f"{rel(target)} :: directorio generado/prohibido versionado en el repositorio"
+                    )
                 continue
 
             kept_dirs.append(name)

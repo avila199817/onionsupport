@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  existsSync,
   readdirSync,
   readFileSync,
   statSync,
@@ -58,6 +59,16 @@ for (const documentName of publicDocuments) {
       localCssPath(href)
     );
   }
+}
+
+const activationMarker =
+  join(DIST, "src", "css", "private.css");
+
+if (!existsSync(activationMarker)) {
+  console.log(
+    "CSS entry split dist contract OK (foundation inactive)."
+  );
+  process.exit(0);
 }
 
 const publicCss =

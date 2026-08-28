@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readdir, readFile, lstat } from "node:fs/promises";
 import { basename, dirname, resolve, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
@@ -67,7 +68,13 @@ const COMPATIBILITY_DIRECTORIES = Object.freeze([
  * production build, only these exact private imports are removed from the
  * public entry. private-runtime-ui then requests the same ordered list through
  * private.css after the authentication guard.
+ *
+ * The plugin is absent until candidate data adds private.css. That lets this
+ * file become trusted base tooling in one PR without changing release bytes;
+ * the following activation PR is then rebuilt identically by trusted tooling.
  */
+const PRIVATE_CSS_ENTRY = resolve(ROOT, "src/css/private.css");
+
 const PRIVATE_CSS_IMPORTS = Object.freeze([
   "./layout/sidebar.css",
   "./layout/sidebar.executive.css",
@@ -87,6 +94,10 @@ function privateCssImportStatement(spec) {
     : "compositions";
 
   return `@import url("${spec}") layer(${layer});`;
+}
+
+function privateCssSplitEnabled() {
+  return existsSync(PRIVATE_CSS_ENTRY);
 }
 
 function onionPrivateCssEntrySplit() {
@@ -276,7 +287,7 @@ export default defineConfig({
   publicDir: false,
   plugins: [
     ...onionConditionalNoscriptStyles(),
-    onionPrivateCssEntrySplit(),
+    ...(privateCssSplitEnabled() ? [onionPrivateCssEntrySplit()] : []),
     onionStaticArtifacts(),
   ],
   build: {

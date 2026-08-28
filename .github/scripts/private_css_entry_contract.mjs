@@ -1,17 +1,19 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 const read = (path) =>
   readFileSync(path, "utf8");
 
 const globalCss =
   read("src/css/app.css");
-const privateCss =
-  read("src/css/private.css");
 const runtime =
   read("src/features/private-runtime-ui/index.js");
 const viteConfig =
   read("vite.config.js");
+const privateCssPath =
+  "src/css/private.css";
+const privateCssActive =
+  existsSync(privateCssPath);
 
 const privateImports = Object.freeze([
   "./layout/sidebar.css",
@@ -34,29 +36,10 @@ for (const privateImport of privateImports) {
   );
 
   assert.equal(
-    privateCss.includes(privateImport),
-    true,
-    `private.css debe importar ${privateImport}`
-  );
-
-  assert.equal(
     viteConfig.includes(privateImport),
     true,
     `Vite debe declarar ${privateImport} en la frontera de split`
   );
-}
-
-let previousIndex = -1;
-for (const privateImport of privateImports) {
-  const currentIndex =
-    privateCss.indexOf(privateImport);
-
-  assert.ok(
-    currentIndex > previousIndex,
-    `private.css debe conservar el orden de ${privateImport}`
-  );
-
-  previousIndex = currentIndex;
 }
 
 assert.match(
@@ -65,20 +48,11 @@ assert.match(
   "mobile-datalist debe seguir disponible para controles transversales"
 );
 
-for (const forbidden of [
-  "tokens/variables.css",
-  "tokens/light.css",
-  "core/reset.css",
-  "components/ui.css",
-  "views/public/",
-  "auth/login.css",
-]) {
-  assert.equal(
-    privateCss.includes(forbidden),
-    false,
-    `private.css no puede arrastrar ${forbidden}`
-  );
-}
+assert.match(
+  viteConfig,
+  /const PRIVATE_CSS_ENTRY = resolve\(ROOT, "src\/css\/private\.css"\);/,
+  "Vite debe ligar la activación a la entrada privada candidata"
+);
 
 assert.match(
   viteConfig,
@@ -89,7 +63,7 @@ assert.match(
 assert.match(
   viteConfig,
   /function onionPrivateCssEntrySplit\(\)/,
-  "Vite debe aplicar el split antes del procesador CSS"
+  "Vite debe definir el split antes del procesador CSS"
 );
 
 assert.match(
@@ -115,6 +89,70 @@ assert.match(
   /occurrences !== 1/,
   "el build debe fallar si la frontera fuente deriva"
 );
+
+assert.match(
+  viteConfig,
+  /existsSync\(PRIVATE_CSS_ENTRY\)/,
+  "la base trusted sólo debe activar el split cuando private.css exista"
+);
+
+assert.match(
+  viteConfig,
+  /\.\.\.\(privateCssSplitEnabled\(\) \? \[onionPrivateCssEntrySplit\(\)\] : \[\]\)/,
+  "el plugin debe quedar completamente ausente mientras la entrada no exista"
+);
+
+if (!privateCssActive) {
+  assert.equal(
+    runtime.includes('import("../../css/private.css")'),
+    false,
+    "la fase foundation no puede activar todavía el chunk privado"
+  );
+
+  console.log(
+    "Private CSS entry foundation contract OK (inactive)."
+  );
+  process.exit(0);
+}
+
+const privateCss =
+  read(privateCssPath);
+
+for (const privateImport of privateImports) {
+  assert.equal(
+    privateCss.includes(privateImport),
+    true,
+    `private.css debe importar ${privateImport}`
+  );
+}
+
+let previousIndex = -1;
+for (const privateImport of privateImports) {
+  const currentIndex =
+    privateCss.indexOf(privateImport);
+
+  assert.ok(
+    currentIndex > previousIndex,
+    `private.css debe conservar el orden de ${privateImport}`
+  );
+
+  previousIndex = currentIndex;
+}
+
+for (const forbidden of [
+  "tokens/variables.css",
+  "tokens/light.css",
+  "core/reset.css",
+  "components/ui.css",
+  "views/public/",
+  "auth/login.css",
+]) {
+  assert.equal(
+    privateCss.includes(forbidden),
+    false,
+    `private.css no puede arrastrar ${forbidden}`
+  );
+}
 
 assert.match(
   runtime,
@@ -157,5 +195,5 @@ assert.ok(
 );
 
 console.log(
-  "Private CSS entry contract OK."
+  "Private CSS entry activation contract OK."
 );

@@ -96,6 +96,7 @@ for (const token of [
   "temporaryPublicStorage: false",
   "https://onionsupport.com/",
   "https://onionsupport.com/login",
+  'LIGHTHOUSE_EXPECTED_SAMPLES: "5"',
   "node .github/scripts/performance-monitor-contract.mjs",
   "node .github/scripts/lighthouse-summary.mjs",
 ]) {
@@ -187,7 +188,12 @@ assert.equal(
 );
 
 for (const token of [
-  "onionsupport.lighthouse-summary.v1",
+  "onionsupport.lighthouse-summary.v2",
+  "reportIdentity",
+  "uniqueReportsByIdentity",
+  "duplicatesIgnored",
+  "expectedSamplesPerUrl",
+  "Unexpected Lighthouse sample count",
   "performanceMedian",
   "performanceWorst",
   "lcpMedian",
@@ -205,5 +211,5 @@ for (const token of [
 }
 
 console.log(
-  "Performance monitor contract OK · 5 samples · mobile/desktop · private artifacts · read-only"
+  "Performance monitor contract OK · 5 unique samples · deduplicated · mobile/desktop · private artifacts · read-only"
 );

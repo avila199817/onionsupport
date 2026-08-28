@@ -98,8 +98,31 @@ jobs:
           echo "sha=${expected_sha}" >> "${GITHUB_OUTPUT}"
           echo "Immutable verification inputs: ${expected_sha}"
 
+      - name: Resolve expected production release contract
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          workflow="expected-main/.github/workflows/azure-static-web-apps-polite-bay-086469a1e.yml"
+          if grep -Fq 'PRODUCTION_RELEASE_CONTRACT: "compiled-dist-v1"' "${workflow}"; then
+            mode="compiled-dist"
+          elif grep -Fq 'APP_LOCATION: "/"' "${workflow}"; then
+            mode="legacy-root"
+          else
+            echo "::error file=${workflow},title=Contrato productivo desconocido::No es legacy-root ni compiled-dist-v1."
+            exit 1
+          fi
+
+          echo "mode=${mode}" >> "${GITHUB_OUTPUT}"
+          echo "Expected production release contract: ${mode}"
+
       - name: Validate verifier syntax
-        run: python3 -m py_compile verification-tooling/.github/scripts/production_verify.py
+        run: |
+          set -euo pipefail
+          python3 -m py_compile verification-tooling/.github/scripts/production_verify.py
+          bash -n verification-tooling/.github/ci/verify_production.sh
+          node --check verification-tooling/tools/verify-deployed-dist.mjs
 
       - name: Resolve expected production canonical
         id: canonical
@@ -124,7 +147,8 @@ jobs:
           echo "site_url=${site_url}" >> "${GITHUB_OUTPUT}"
           echo "Expected production canonical: ${site_url}"
 
-      - name: Verify deployed production strictly
+      - name: Verify deployed legacy production strictly
+        if: steps.release.outputs.mode == 'legacy-root'
         run: >-
           python3 verification-tooling/.github/scripts/production_verify.py
           --root expected-main
@@ -132,6 +156,89 @@ jobs:
           --revision "${{ steps.revision.outputs.sha }}"
           --attempts 8
           --delay 10
+
+      - name: Use exact Node 22 for compiled verification
+        if: steps.release.outputs.mode == 'compiled-dist'
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22.23.2"
+          package-manager-cache: false
+
+      - name: Use exact npm for compiled verification
+        if: steps.release.outputs.mode == 'compiled-dist'
+        working-directory: expected-main
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare npm@10.9.8 --activate
+          [[ "$(node --version)" == "v22.23.2" ]]
+          [[ "$(npm --version)" == "10.9.8" ]]
+
+      - name: Rebuild expected compiled production
+        if: steps.release.outputs.mode == 'compiled-dist'
+        working-directory: expected-main
+        env:
+          ONION_RELEASE_SHA: ${{ steps.revision.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run build
+          npm run check:dist
+          npm run build:repro
+          npm run test:browser:dist
+
+      - name: Materialize exact expected compiled artifact
+        if: steps.release.outputs.mode == 'compiled-dist'
+        env:
+          EXPECTED_SHA: ${{ steps.revision.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          artifact="${GITHUB_WORKSPACE}/expected-artifact"
+          if [[ -e "${artifact}" ]]; then
+            echo "::error title=Envelope esperado preexistente::${artifact} ya existe."
+            exit 1
+          fi
+
+          mkdir "${artifact}"
+          cp -a expected-main/dist "${artifact}/dist"
+          cp -a expected-main/build-metadata "${artifact}/build-metadata"
+
+          mapfile -t roots < <(
+            find "${artifact}" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort
+          )
+          if [[ "${#roots[@]}" -ne 2 ]] || \
+             [[ "${roots[0]}" != "build-metadata" ]] || \
+             [[ "${roots[1]}" != "dist" ]]; then
+            echo "::error title=Envelope esperado no exacto::Sólo se permiten dist y build-metadata."
+            printf 'Root inesperado: %s\n' "${roots[@]}"
+            exit 1
+          fi
+
+          ONION_ARTIFACT_DIR="${artifact}" \
+          ONION_RELEASE_SHA="${EXPECTED_SHA}" \
+            node verification-tooling/tools/verify-artifact-envelope.mjs
+
+      - name: Verify canonical compiled bytes exactly
+        if: steps.release.outputs.mode == 'compiled-dist'
+        env:
+          DEPLOYED_URL: ${{ steps.canonical.outputs.site_url }}
+          ONION_ARTIFACT_DIR: ${{ github.workspace }}/expected-artifact
+          ONION_RELEASE_SHA: ${{ steps.revision.outputs.sha }}
+        shell: bash
+        run: node verification-tooling/tools/verify-deployed-dist.mjs
+
+      - name: Verify compiled production security, routing and backend
+        if: steps.release.outputs.mode == 'compiled-dist'
+        env:
+          PUBLIC_SITE_URL: ${{ steps.canonical.outputs.site_url }}
+          DIRECT_API_URL: https://api.onionsupport.com
+          VALIDATED_SHA: ${{ steps.revision.outputs.sha }}
+        shell: bash
+        run: bash verification-tooling/.github/ci/verify_production.sh
 
       - name: Verify Google measurement bootstrap exactly
         shell: bash

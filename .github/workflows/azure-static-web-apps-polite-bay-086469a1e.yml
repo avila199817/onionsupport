@@ -10,9 +10,11 @@
 #
 # Design goals:
 #   - Validate the exact commit that is deployed.
+#   - Build and validate the production dist in a job without secrets.
+#   - Transfer only the exact dist envelope to a fresh deploy runner.
 #   - Deploy static files directly (no Oryx/application build).
 #   - Never retry an upload blindly.
-#   - Poll the deployed environment until exact release bytes are visible.
+#   - Validate the Azure origin redirect, then poll canonical exact bytes.
 #   - Make production verification blocking.
 #   - Keep PR preview lifecycle deterministic.
 #   - Pin third-party actions by immutable commit SHA.
@@ -28,6 +30,15 @@ on:
       - main
 
   workflow_dispatch:
+    inputs:
+      deployment_mode:
+        description: "compiled-dist or emergency known-good legacy root"
+        required: true
+        default: compiled-dist
+        type: choice
+        options:
+          - compiled-dist
+          - legacy-root
 
 concurrency:
   group: swa-${{ github.ref }}
@@ -38,9 +49,10 @@ defaults:
     shell: bash
 
 env:
-  APP_LOCATION: "/"
+  PRODUCTION_RELEASE_CONTRACT: "compiled-dist-v1"
   API_LOCATION: ""
   OUTPUT_LOCATION: ""
+  AZURE_PRODUCTION_ORIGIN: "https://polite-bay-086469a1e.1.azurestaticapps.net"
   PUBLIC_SITE_URL: "https://onionsupport.com"
   DIRECT_API_URL: "https://api.onionsupport.com"
 
@@ -57,6 +69,12 @@ jobs:
 
     outputs:
       validated_sha: ${{ steps.revision.outputs.sha }}
+      deployment_mode: ${{ steps.revision.outputs.mode }}
+      app_location: ${{ steps.revision.outputs.app_location }}
+      production_artifact_id: ${{ steps.upload_release.outputs.artifact-id }}
+      production_artifact_digest: ${{ steps.upload_release.outputs.artifact-digest }}
+      production_artifact_name: ${{ steps.artifact_name.outputs.name }}
+      production_manifest_digest: ${{ steps.production_envelope.outputs.manifest_digest }}
 
     defaults:
       run:
@@ -66,7 +84,7 @@ jobs:
       - name: Checkout exact release revision
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.deployment_mode == 'legacy-root' && 'edbdf2429b85a3de405d18aa58bd85eb319bd6de' || github.sha }}
           path: candidate
           fetch-depth: 1
           submodules: false
@@ -76,11 +94,35 @@ jobs:
       - name: Lock validated revision
         id: revision
         env:
-          EXPECTED_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_MODE: ${{ inputs.deployment_mode || 'compiled-dist' }}
+          EXPECTED_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.deployment_mode == 'legacy-root' && 'edbdf2429b85a3de405d18aa58bd85eb319bd6de' || github.sha }}
+          KNOWN_GOOD_LEGACY_SHA: edbdf2429b85a3de405d18aa58bd85eb319bd6de
         run: |
           set -euo pipefail
 
           checked_sha="$(git rev-parse HEAD)"
+          mode="compiled-dist"
+          app_location="production-artifact/dist"
+
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            case "${REQUESTED_MODE}" in
+              compiled-dist)
+                ;;
+              legacy-root)
+                mode="legacy-root"
+                app_location="/"
+                if [[ "${checked_sha}" != "${KNOWN_GOOD_LEGACY_SHA}" ]]; then
+                  echo "::error title=Rollback no inmutable::Esperado ${KNOWN_GOOD_LEGACY_SHA}, obtenido ${checked_sha}."
+                  exit 1
+                fi
+                ;;
+              *)
+                echo "::error title=Modo de deploy inválido::${REQUESTED_MODE}"
+                exit 1
+                ;;
+            esac
+          fi
 
           if [[ "${checked_sha}" != "${EXPECTED_SHA}" ]]; then
             echo "::error title=Checkout no determinista::Esperado ${EXPECTED_SHA}, obtenido ${checked_sha}."
@@ -88,7 +130,9 @@ jobs:
           fi
 
           echo "sha=${checked_sha}" >> "${GITHUB_OUTPUT}"
-          echo "Validated SHA: ${checked_sha}"
+          echo "mode=${mode}" >> "${GITHUB_OUTPUT}"
+          echo "app_location=${app_location}" >> "${GITHUB_OUTPUT}"
+          echo "Validated SHA: ${checked_sha} · mode=${mode} · app_location=${app_location}"
 
       - name: Stage trusted validation tooling
         run: |
@@ -160,14 +204,101 @@ jobs:
 
           echo "Runtime desplegable sin referencias al dominio API legado."
 
-      - name: Use Node 22
+      - name: Use exact Node 22
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: "22"
+          node-version: "22.23.2"
           package-manager-cache: false
 
       - name: Validate critical SPA contracts
         run: bash "${RUNNER_TEMP}/onion-validation/validate_spa_contracts.sh"
+
+      - name: Use exact npm
+        if: steps.revision.outputs.mode == 'compiled-dist'
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare npm@10.9.8 --activate
+          [[ "$(node --version)" == "v22.23.2" ]]
+          [[ "$(npm --version)" == "10.9.8" ]]
+
+      # This entire job has contents:read and no production secret. The browser
+      # contract therefore cannot persist hooks into the fresh deploy runner.
+      - name: Install locked release dependencies
+        if: steps.revision.outputs.mode == 'compiled-dist'
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Build and validate production dist without secrets
+        if: steps.revision.outputs.mode == 'compiled-dist'
+        env:
+          ONION_RELEASE_SHA: ${{ steps.revision.outputs.sha }}
+        run: npm run validate:ci
+
+      - name: Materialize exact production artifact
+        if: steps.revision.outputs.mode == 'compiled-dist'
+        id: production_envelope
+        env:
+          ONION_ARTIFACT_DIR: ${{ github.workspace }}/candidate/production-artifact
+          ONION_RELEASE_SHA: ${{ steps.revision.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ -e production-artifact ]]; then
+            echo "::error title=Envelope productivo preexistente::production-artifact debe crearse desde cero."
+            exit 1
+          fi
+
+          mkdir production-artifact
+          cp -a dist production-artifact/dist
+          cp -a build-metadata production-artifact/build-metadata
+
+          mapfile -d '' roots < <(
+            find production-artifact -mindepth 1 -maxdepth 1 -printf '%f\0' | sort -z
+          )
+          if (( ${#roots[@]} != 2 )) || \
+            [[ "${roots[0]}" != "build-metadata" ]] || \
+            [[ "${roots[1]}" != "dist" ]]; then
+            echo "::error title=Envelope productivo no exacto::Sólo se permiten dist y build-metadata."
+            printf 'Root inesperado: %q\n' "${roots[@]}"
+            exit 1
+          fi
+
+          for path in production-artifact/dist production-artifact/build-metadata; do
+            if [[ ! -d "${path}" ]] || [[ -L "${path}" ]]; then
+              echo "::error title=Envelope productivo inválido::${path} debe ser un directorio real."
+              exit 1
+            fi
+          done
+
+          node tools/verify-artifact-envelope.mjs
+
+          manifest_digest="$(sha256sum production-artifact/build-metadata/release-manifest.json | awk '{print $1}')"
+          if [[ ! "${manifest_digest}" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error title=Digest de manifest productivo inválido::${manifest_digest}"
+            exit 1
+          fi
+          echo "manifest_digest=${manifest_digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Name immutable production artifact
+        if: steps.revision.outputs.mode == 'compiled-dist'
+        id: artifact_name
+        env:
+          RELEASE_SHA: ${{ steps.revision.outputs.sha }}
+        run: echo "name=frontend-production-dist-${RELEASE_SHA}-${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload exact production artifact
+        if: steps.revision.outputs.mode == 'compiled-dist'
+        id: upload_release
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: ${{ steps.artifact_name.outputs.name }}
+          path: |
+            candidate/production-artifact/dist
+            candidate/production-artifact/build-metadata
+          if-no-files-found: error
+          include-hidden-files: false
+          retention-days: 1
+
   deploy_production:
     name: Deploy production
     runs-on: ubuntu-latest
@@ -183,6 +314,10 @@ jobs:
 
     env:
       VALIDATED_SHA: ${{ needs.validate.outputs.validated_sha }}
+      DEPLOYMENT_MODE: ${{ needs.validate.outputs.deployment_mode }}
+      APP_LOCATION: ${{ needs.validate.outputs.app_location }}
+      PRODUCTION_ARTIFACT_DIGEST: ${{ needs.validate.outputs.production_artifact_digest }}
+      PRODUCTION_MANIFEST_DIGEST: ${{ needs.validate.outputs.production_manifest_digest }}
 
     steps:
       - name: Checkout validated revision
@@ -207,6 +342,58 @@ jobs:
 
           echo "Deploying immutable SHA: ${VALIDATED_SHA}"
 
+      - name: Download exact production artifact by ID
+        if: env.DEPLOYMENT_MODE == 'compiled-dist'
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          artifact-ids: ${{ needs.validate.outputs.production_artifact_id }}
+          path: production-artifact
+          merge-multiple: true
+
+      - name: Use exact Node 22 for artifact verification
+        if: env.DEPLOYMENT_MODE == 'compiled-dist'
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22.23.2"
+          package-manager-cache: false
+
+      - name: Validate exact production artifact before token access
+        if: env.DEPLOYMENT_MODE == 'compiled-dist'
+        env:
+          ONION_ARTIFACT_DIR: ${{ github.workspace }}/production-artifact
+          ONION_RELEASE_SHA: ${{ env.VALIDATED_SHA }}
+          EXPECTED_MANIFEST_DIGEST: ${{ env.PRODUCTION_MANIFEST_DIGEST }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${PRODUCTION_ARTIFACT_DIGEST}" =~ ^(sha256:)?[0-9a-f]{64}$ ]]; then
+            echo "::error title=Digest de artifact productivo inválido::${PRODUCTION_ARTIFACT_DIGEST}"
+            exit 1
+          fi
+
+          mapfile -d '' roots < <(
+            find production-artifact -mindepth 1 -maxdepth 1 -printf '%f\0' | sort -z
+          )
+          if (( ${#roots[@]} != 2 )) || \
+            [[ "${roots[0]}" != "build-metadata" ]] || \
+            [[ "${roots[1]}" != "dist" ]]; then
+            echo "::error title=Artifact productivo descargado no exacto::Sólo se permiten dist y build-metadata."
+            printf 'Root inesperado: %q\n' "${roots[@]}"
+            exit 1
+          fi
+
+          for path in production-artifact/dist production-artifact/build-metadata; do
+            if [[ ! -d "${path}" ]] || [[ -L "${path}" ]]; then
+              echo "::error title=Artifact productivo descargado inválido::${path} debe ser un directorio real."
+              exit 1
+            fi
+          done
+
+          node tools/verify-artifact-envelope.mjs
+          echo "Production artifact ID: ${{ needs.validate.outputs.production_artifact_id }}"
+          echo "Production archive digest: ${PRODUCTION_ARTIFACT_DIGEST}"
+          echo "Production manifest digest: ${PRODUCTION_MANIFEST_DIGEST}"
+
       - name: Validate deployment token
         env:
           SWA_API_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E }}
@@ -223,7 +410,7 @@ jobs:
           install -m 0755 .github/ci/verify_release_bytes.sh "${RUNNER_TEMP}/verify_release_bytes.sh"
           install -m 0755 .github/ci/verify_production.sh "${RUNNER_TEMP}/verify_production.sh"
 
-      - name: Deploy static SPA
+      - name: Deploy compiled static SPA
         id: deploy
         uses: Azure/static-web-apps-deploy@4d27395796ac319302594769cfe812bd207490b1 # v1
         with:
@@ -234,10 +421,99 @@ jobs:
           output_location: ${{ env.OUTPUT_LOCATION }}
           skip_app_build: true
 
-      - name: Verify deployed release bytes
+      - name: Verify Azure production origin canonicalizes exactly
         env:
           DEPLOYED_URL: ${{ steps.deploy.outputs.static_web_app_url }}
-          VERIFY_CANONICAL: "true"
+        run: |
+          set -euo pipefail
+
+          azure_origin="${DEPLOYED_URL%/}"
+          expected_origin="${AZURE_PRODUCTION_ORIGIN%/}"
+          canonical="${PUBLIC_SITE_URL%/}"
+
+          if [[ "${azure_origin}" != "${expected_origin}" ]]; then
+            echo "::error title=Origen Azure inesperado::El action devolvió '${azure_origin}'; esperado '${expected_origin}'."
+            exit 1
+          fi
+
+          if [[ "${canonical}" != "https://onionsupport.com" ]]; then
+            echo "::error title=Canonical productivo inesperado::PUBLIC_SITE_URL='${canonical}'."
+            exit 1
+          fi
+
+          for attempt in $(seq 1 8); do
+            mismatch=0
+
+            for route in "/" "/login" "/@ci-probe/incidencias/ci-ticket"; do
+              query="origin_probe=${VALIDATED_SHA}&preserve=1&attempt=${attempt}"
+              requested="${azure_origin}${route}?${query}"
+              expected="${canonical}${route}?${query}"
+
+              if ! response="$(
+                curl \
+                  --silent \
+                  --show-error \
+                  --connect-timeout 10 \
+                  --max-time 30 \
+                  --dump-header - \
+                  --output /dev/null \
+                  --write-out $'\nONION_STATUS:%{http_code}\n' \
+                  -H "Cache-Control: no-cache" \
+                  -H "Pragma: no-cache" \
+                  "${requested}"
+              )"; then
+                mismatch=1
+                break
+              fi
+
+              status="$(
+                awk -F: '$1 == "ONION_STATUS" { value=$2 } END { print value }' <<< "${response}"
+              )"
+              location="$(
+                awk -F': *' '
+                  tolower($1) == "location" {
+                    sub(/^[^:]+:[[:space:]]*/, "")
+                    sub(/\r$/, "")
+                    value=$0
+                  }
+                  END { print value }
+                ' <<< "${response}"
+              )"
+
+              if [[ "${status}" != "301" ]] || [[ "${location}" != "${expected}" ]]; then
+                mismatch=1
+                break
+              fi
+            done
+
+            if [[ "${mismatch}" == "0" ]]; then
+              echo "Azure production origin redirects to canonical in one exact path/query-preserving hop."
+              break
+            fi
+
+            if [[ "${attempt}" == "8" ]]; then
+              echo "::error title=Redirect Azure inesperado::El origen no respondió 301 hacia el canonical exacto tras 8 intentos."
+              exit 1
+            fi
+
+            echo "Azure origin propagation pending (${attempt}/8); retrying in 5s..."
+            sleep 5
+          done
+
+      - name: Verify canonical dist bytes
+        if: env.DEPLOYMENT_MODE == 'compiled-dist'
+        env:
+          DEPLOYED_URL: ${{ env.PUBLIC_SITE_URL }}
+          ONION_ARTIFACT_DIR: ${{ github.workspace }}/production-artifact
+          ONION_RELEASE_SHA: ${{ env.VALIDATED_SHA }}
+          EXPECTED_MANIFEST_DIGEST: ${{ env.PRODUCTION_MANIFEST_DIGEST }}
+        run: node tools/verify-deployed-dist.mjs
+
+      - name: Verify known-good legacy canonical bytes
+        if: env.DEPLOYMENT_MODE == 'legacy-root'
+        env:
+          DEPLOYED_URL: ${{ env.PUBLIC_SITE_URL }}
+          VERIFY_CANONICAL: "false"
         run: bash "${RUNNER_TEMP}/verify_release_bytes.sh"
 
       - name: Verify production security, routing and backend

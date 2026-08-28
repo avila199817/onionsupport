@@ -7,6 +7,16 @@ const [resultsPathArg = "", profileArg = "", releaseShaArg = ""] =
 const resultsRoot = path.resolve(resultsPathArg || ".lighthouseci");
 const profile = String(profileArg || "unknown").trim() || "unknown";
 const releaseSha = String(releaseShaArg || "").trim();
+const expectedSamples = Number.parseInt(
+  process.env.LIGHTHOUSE_EXPECTED_SAMPLES || "5",
+  10
+);
+
+if (!Number.isInteger(expectedSamples) || expectedSamples < 1 || expectedSamples > 20) {
+  throw new Error(
+    `Invalid LIGHTHOUSE_EXPECTED_SAMPLES: ${process.env.LIGHTHOUSE_EXPECTED_SAMPLES || ""}`
+  );
+}
 
 function walk(directory) {
   const files = [];
@@ -74,6 +84,19 @@ function auditValue(lhr, name) {
   return number(lhr?.audits?.[name]?.numericValue);
 }
 
+function reportIdentity(lhr, fallback = "") {
+  const parts = [
+    lhr?.fetchTime,
+    lhr?.requestedUrl,
+    lhr?.finalUrl,
+    lhr?.lighthouseVersion,
+  ].map((value) => String(value || "").trim());
+
+  return parts.some(Boolean)
+    ? parts.join("|")
+    : fallback;
+}
+
 function formatScore(value) {
   return value === null ? "—" : String(Math.round(value));
 }
@@ -94,7 +117,7 @@ if (!fs.existsSync(resultsRoot)) {
   );
 }
 
-const reports = [];
+const rawReports = [];
 
 for (const file of walk(resultsRoot)) {
   let parsed;
@@ -114,7 +137,11 @@ for (const file of walk(resultsRoot)) {
     continue;
   }
 
-  reports.push({
+  rawReports.push({
+    identity: reportIdentity(
+      parsed,
+      path.relative(resultsRoot, file)
+    ),
     file: path.relative(resultsRoot, file),
     url:
       parsed.finalDisplayedUrl ||
@@ -132,12 +159,22 @@ for (const file of walk(resultsRoot)) {
   });
 }
 
-if (!reports.length) {
+if (!rawReports.length) {
   throw new Error(
     `No Lighthouse result JSON was found under ${resultsRoot}`
   );
 }
 
+const uniqueReportsByIdentity = new Map();
+
+for (const report of rawReports) {
+  if (!uniqueReportsByIdentity.has(report.identity)) {
+    uniqueReportsByIdentity.set(report.identity, report);
+  }
+}
+
+const reports = [...uniqueReportsByIdentity.values()];
+const duplicatesIgnored = rawReports.length - reports.length;
 const grouped = new Map();
 
 for (const report of reports) {
@@ -158,6 +195,12 @@ for (const report of reports) {
 const rows = [];
 
 for (const [url, samples] of [...grouped.entries()].sort()) {
+  if (samples.length !== expectedSamples) {
+    throw new Error(
+      `Unexpected Lighthouse sample count for ${url}: expected ${expectedSamples}, got ${samples.length}`
+    );
+  }
+
   rows.push({
     url,
     samples: samples.length,
@@ -188,11 +231,14 @@ for (const [url, samples] of [...grouped.entries()].sort()) {
 }
 
 const summary = {
-  schema: "onionsupport.lighthouse-summary.v1",
+  schema: "onionsupport.lighthouse-summary.v2",
   generatedAt: new Date().toISOString(),
   profile,
   releaseSha,
-  reports: reports.length,
+  expectedSamplesPerUrl: expectedSamples,
+  rawReports: rawReports.length,
+  uniqueReports: reports.length,
+  duplicatesIgnored,
   urls: rows,
 };
 
@@ -213,6 +259,8 @@ const markdown = [
   releaseSha
     ? `Release auditado: \`${releaseSha}\``
     : "Release auditado: no disponible",
+  "",
+  `Muestras únicas: **${reports.length}** · duplicados técnicos ignorados: **${duplicatesIgnored}**`,
   "",
   "| URL | n | Perf mediana | Perf peor | A11y | BP | SEO | LCP mediana / peor | CLS mediana / peor | TBT mediana / peor |",
   "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",

@@ -28,8 +28,23 @@ provides Chromium and treats that contract as mandatory.
 
 ## Production activation gate
 
-Production remains on the legacy repository-root deployment until a post-merge
-canary proves the trusted `dist` preview with JavaScript enabled and disabled,
-valid routing and headers, public home and login behavior, and the authenticated
-application boundary. Switching production to `dist` requires a separate,
-reviewable change and a verified rollback path.
+Production uses the `compiled-dist-v1` contract only after a canary proved the
+trusted `dist` preview with JavaScript enabled and disabled, valid routing and
+headers, public home and login behavior, and the authenticated application
+boundary. The verifier hardening was merged separately before activation so
+the activation preview itself runs against that trusted base.
+
+## Emergency rollback
+
+The production workflow exposes a manual `legacy-root` mode pinned to
+`edbdf2429b85a3de405d18aa58bd85eb319bd6de`, the last repository-root release
+whose deployment and independent production gate both completed successfully
+(workflow runs `33142535574` and `33142594975`). The rollback checks out that
+immutable revision, deploys `/` without a build, and blocks on exact bytes for
+both the Azure environment and `https://onionsupport.com`, followed by the
+security, routing, CORS and backend verifier.
+
+After an incident is understood, manual `compiled-dist` mode rebuilds the
+current `main` revision through the normal no-secret artifact boundary. The
+known-good SHA must not be changed without equivalent successful deployment
+and independent-gate evidence.

@@ -148,6 +148,25 @@ try {
   assert.match(extraRootError, /Artifact root entries are not exact/);
   await rm(resolve(trustedArtifact, "unexpected-root.txt"));
 
+  for (const [label, unsafeName] of [
+    ["encoded traversal", "%2e%2e.js"],
+    ["query delimiter", "query?.js"],
+    ["fragment delimiter", "fragment#.js"],
+  ]) {
+    const unsafeArtifact = resolve(tempRoot, `unsafe-${label.replaceAll(" ", "-")}`);
+    await cp(trustedArtifact, unsafeArtifact, { recursive: true });
+    await write(unsafeArtifact, `dist/assets/js/${unsafeName}`, "unsafe path\n");
+    await writeEnvelope(unsafeArtifact);
+    const unsafeError = await rejectedMessage(() => (
+      verifyArtifactEnvelope(unsafeArtifact, { releaseSha: SHA })
+    ));
+    assert.match(
+      unsafeError,
+      /Non-canonical artifact path|Manifest path is not canonical/,
+      `${label} must be rejected before deployment URL construction.`
+    );
+  }
+
   const forgedCandidate = resolve(tempRoot, "forged-candidate");
   await cp(trustedArtifact, forgedCandidate, { recursive: true });
   await write(

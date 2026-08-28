@@ -274,16 +274,26 @@ routes = {
 
 exclusions = set(config.get("navigationFallback", {}).get("exclude", []))
 for item in (
+    "/api",
     "/api/*",
+    "/.auth",
     "/.auth/*",
     "/robots.txt",
     "/sitemap.xml",
     "/site.webmanifest",
     "/favicon.ico",
+    "/src",
     "/src/*",
+    "/assets",
+    "/seo",
 ):
     if item not in exclusions:
         error(config_path, f"navigationFallback.exclude debe contener {item}")
+
+for denied_path in ("/api", "/.auth", "/seo", "/src", "/assets"):
+    denial = routes.get(denied_path)
+    if not denial or denial.get("statusCode") != 404:
+        error(config_path, f"{denied_path} debe responder 404 sin caer en navigationFallback.")
 
 root_route = routes.get("/")
 if not root_route or root_route.get("rewrite") != "/index.html":

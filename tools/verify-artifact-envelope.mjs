@@ -77,6 +77,7 @@ export async function verifyArtifactEnvelope(root, { releaseSha, manifestDigest 
     if (
       !path || path.startsWith("/") || path.includes("\\") ||
       /[\u0000-\u001f\u007f]/.test(path) ||
+      !/^[A-Za-z0-9._~/-]+$/.test(path) ||
       path.split("/").some((part) => part === "" || part === "." || part === "..")
     ) {
       throw new Error(`Manifest path is not canonical: ${path}`);

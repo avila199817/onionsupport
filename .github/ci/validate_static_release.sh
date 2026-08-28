@@ -100,6 +100,11 @@ routes = {
     if isinstance(item, dict) and isinstance(item.get("route"), str)
 }
 required_bootstrap_denials = (
+    "/api",
+    "/.auth",
+    "/seo",
+    "/src",
+    "/assets",
     "/tools",
     "/tools/*",
     "/dist",

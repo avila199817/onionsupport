@@ -44,7 +44,7 @@
     var(--sb-open-w);
 
   --sb-bg:
-    var(--sidebar-bg, #242424);
+    var(--sidebar-bg, var(--chrome-primary-bg, #171717));
 
   --sb-border:
     var(
@@ -325,7 +325,7 @@
   body[data-theme="light"]
 ) .sidebar,
 .sidebar[data-theme="light"] {
-  --sb-bg: #fff;
+  --sb-bg: var(--chrome-primary-bg, #f9f9f9);
 
   --sb-border:
     rgba(13, 13, 13, .10);

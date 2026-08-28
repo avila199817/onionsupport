@@ -54,6 +54,9 @@ body[data-theme="light"] {
   --light-350: #dadada;
   --light-400: #d1d1d1;
 
+  /* Private chrome · same surface for Sidebar + Topbar */
+  --chrome-primary-bg: #f9f9f9;
+
   --light-text-900: #0D0D0D;
   --light-text-800: #111111;
   --light-text-700: #1a1a1a;
@@ -639,8 +642,8 @@ body[data-theme="light"] {
      SIDEBAR SYSTEM · LIGHT FINAL
   ======================================================= */
 
-  --sidebar-bg: #ffffff;
-  --sidebar-bg-strong: #ffffff;
+  --sidebar-bg: var(--chrome-primary-bg);
+  --sidebar-bg-strong: var(--chrome-primary-bg);
   --sidebar-border: rgba(13,13,13,.080);
 
   --sidebar-shadow: none;
@@ -713,9 +716,7 @@ body[data-theme="light"] {
      TOPBAR SYSTEM
   ======================================================= */
 
-  --topbar-bg:
-    linear-gradient(180deg, rgba(255,255,255,.88), rgba(245,245,245,.70)),
-    rgba(255,255,255,.82);
+  --topbar-bg: var(--chrome-primary-bg);
 
   --topbar-border: rgba(13,13,13,.075);
   --topbar-shadow: 0 10px 30px rgba(13,13,13,.050);

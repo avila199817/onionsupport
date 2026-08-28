@@ -85,6 +85,9 @@
   --white: #ffffff;
   --black: #000000;
 
+  /* Private chrome · single surface authority */
+  --chrome-primary-bg: #171717;
+
 
   /* =========================================================
      GLOBAL SCALE / DENSITY
@@ -771,7 +774,7 @@
   /* =========================================================
      SIDEBAR SYSTEM · FINAL SOLID GRAPHITE
   ========================================================= */
-  --sidebar-bg: var(--graphite-400);
+  --sidebar-bg: var(--chrome-primary-bg);
   --sidebar-bg-strong: var(--graphite-400);
   --sidebar-border: rgba(255,255,255,.12);
 
@@ -902,7 +905,7 @@
   /* =========================================================
      TOPBAR SYSTEM
   ========================================================= */
-  --topbar-bg: rgba(var(--graphite-rgb-500), .92);
+  --topbar-bg: var(--chrome-primary-bg);
   --topbar-border: rgba(255,255,255,.10);
   --topbar-shadow: 0 10px 26px rgba(0,0,0,.24);
   --topbar-blur: blur(16px) saturate(1.02);

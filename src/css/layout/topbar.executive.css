@@ -23,7 +23,7 @@
   .app-topbar,
   [data-topbar-root="true"]
 ) {
-  --tbx-bg: #242424;
+  --tbx-bg: var(--chrome-primary-bg, #171717);
   --tbx-surface: #2f2f2f;
   --tbx-surface-hover: #3b3b3b;
   --tbx-surface-active: #525252;
@@ -62,7 +62,7 @@
   .app-topbar,
   [data-topbar-root="true"]
 )[data-theme="light"] {
-  --tbx-bg: #fff;
+  --tbx-bg: var(--chrome-primary-bg, #f9f9f9);
   --tbx-surface: #f7f7f7;
   --tbx-surface-hover: #f2f2f2;
   --tbx-surface-active: #e8e8e8;

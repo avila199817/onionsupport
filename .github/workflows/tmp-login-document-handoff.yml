@@ -1,0 +1,58 @@
+name: TEMP Login Document Handoff
+
+on:
+  push:
+    branches:
+      - fix/login-document-handoff
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/login-document-handoff
+          fetch-depth: 0
+
+      - name: Guard completed refactor
+        id: guard
+        shell: bash
+        run: |
+          if git log -1 --pretty=%B | grep -q '\[login-document-handoff-done\]'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Apply login document handoff
+        if: steps.guard.outputs.skip != 'true'
+        shell: bash
+        run: |
+          python3 .github/tmp/fix_login_document_handoff.py
+
+      - name: Validate login handoff
+        if: steps.guard.outputs.skip != 'true'
+        shell: bash
+        run: |
+          node --check src/views/public/login/index.js
+          node --experimental-default-type=module .github/scripts/login_document_handoff_contract.mjs
+          bash .github/ci/validate_spa_contracts.sh
+          git diff --check
+
+      - name: Commit fix
+        if: steps.guard.outputs.skip != 'true'
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git config user.name "Onion Support CI"
+          git config user.email "cristian@onionsupport.com"
+          git add src/views/public/login/index.js .github/ci/validate_spa_contracts.sh .github/scripts/login_document_handoff_contract.mjs
+          git commit -m "fix: cruzar login a panel con handoff documental [login-document-handoff-done]"
+          git push origin HEAD:fix/login-document-handoff

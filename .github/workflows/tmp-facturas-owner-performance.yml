@@ -1,0 +1,62 @@
+name: TEMP Facturas Owner Performance
+
+on:
+  push:
+    branches:
+      - refactor/facturas-owner-performance-polish
+
+permissions:
+  contents: write
+
+jobs:
+  refactor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: refactor/facturas-owner-performance-polish
+          fetch-depth: 0
+
+      - name: Guard completed refactor
+        id: guard
+        shell: bash
+        run: |
+          if git log -1 --pretty=%B | grep -q '\[facturas-owner-performance-done\]'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Apply Facturas owner/performance refactor
+        if: steps.guard.outputs.skip != 'true'
+        shell: bash
+        run: python3 .github/tmp/refactor_facturas_owner_performance.py
+
+      - name: Validate Facturas refactor
+        if: steps.guard.outputs.skip != 'true'
+        shell: bash
+        run: |
+          node --check src/features/entity-overlay/index.js
+          node --check src/views/facturas/index.js
+          node --check src/views/facturas/facturas.template.js
+          node --experimental-default-type=module .github/scripts/entity_overlay_contract.mjs
+          python3 .github/scripts/facturas_continuous_scroll_contract.py
+          python3 .github/scripts/app_entrypoint_integrity.py
+          bash .github/ci/validate_spa_contracts.sh
+          git diff --check
+          test ! -e src/features/entity-overlay/adapters/factura.js
+
+      - name: Commit refactor
+        if: steps.guard.outputs.skip != 'true'
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git config user.name "Onion Support CI"
+          git config user.email "cristian@onionsupport.com"
+          git add -A src/features/entity-overlay src/views/facturas .github/scripts/entity_overlay_contract.mjs .github/scripts/facturas_continuous_scroll_contract.py
+          git commit -m "refactor: Facturas usa autoridad canónica y primer render ligero [facturas-owner-performance-done]"
+          git push origin HEAD:refactor/facturas-owner-performance-polish

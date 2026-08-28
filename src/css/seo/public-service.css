@@ -703,6 +703,13 @@ h1 {
 
   .seo-header {
     position: static;
+    background: rgb(3 7 18 / .97);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .seo-card::after {
+    display: none;
   }
 
   .seo-header-inner {

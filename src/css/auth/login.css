@@ -2001,6 +2001,26 @@ body.auth-screen.auth-no-scroll {
     block-size: 100dvh;
   }
 
+  /*
+     En pantallas táctiles pequeñas retiramos los glows filtrados de viewport
+     completo y el vidrio del panel; la superficie opaca conserva el contraste.
+  */
+  .login-page-glow,
+  .login-orb,
+  .login-grid-glow {
+    display: none;
+  }
+
+  .login-card-panel,
+  .password-reset-card-panel {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .login-card-logo-shell::before {
+    animation: none;
+  }
+
   .public-auth-shell--login .public-auth-body {
     overflow-y: auto;
     overflow-x: hidden;

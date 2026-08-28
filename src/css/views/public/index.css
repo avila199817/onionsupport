@@ -2561,6 +2561,47 @@ body.public-home-menu-open .public-home-nav.is-footer-visible {
     --public-home-brand-subtitle-size: 10px;
   }
 
+  /*
+     El primer viewport móvil conserva profundidad con gradientes estáticos,
+     sin rasterizar tres capas gigantes con blur ni vidrio fijo al hacer scroll.
+  */
+  .public-home {
+    background: linear-gradient(135deg, #030712 0%, #071121 52%, #02040a 100%);
+  }
+
+  .public-home-background {
+    background:
+      radial-gradient(circle at 12% 8%, rgb(19 148 255 / .18), transparent 34%),
+      radial-gradient(circle at 88% 18%, rgb(52 212 255 / .10), transparent 30%),
+      linear-gradient(135deg, #030712 0%, #071121 52%, #02040a 100%);
+  }
+
+  .public-home-bg-orb,
+  .public-home-bg-noise {
+    display: none;
+  }
+
+  .public-home-bg-grid {
+    opacity: .22;
+  }
+
+  .public-home-scrollbar,
+  .public-home-nav,
+  .public-home-nav-panel,
+  .public-home-command-hero,
+  .public-home-command-stat,
+  .public-home-command-checklist,
+  .public-home-service-card,
+  .public-home-price-card,
+  .public-home-faq-item {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .public-home-nav {
+    background: rgb(3 7 18 / .96);
+  }
+
   .public-home-nav {
     padding-inline: 14px;
   }

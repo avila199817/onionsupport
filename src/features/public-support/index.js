@@ -25,6 +25,10 @@ export const PUBLIC_SUPPORT_VERSION =
   "public-support.intake.v9-structured-address";
 export const PUBLIC_TICKET_ENDPOINT = "/api/tickets/public";
 const PUBLIC_SUPPORT_TECHNICIAN_PHOTO = "/src/media/img/Cristian_Avila_Formulario.png";
+const PUBLIC_SUPPORT_TECHNICIAN_PHOTO_WEBP_480 =
+  "/src/media/img/Cristian_Avila_Formulario_480.webp";
+const PUBLIC_SUPPORT_TECHNICIAN_PHOTO_WEBP_960 =
+  "/src/media/img/Cristian_Avila_Formulario_960.webp";
 
 const VIEW_ROOT_SELECTOR = "#view-container, [data-router-view='true']";
 const HOME = "[data-public-home]";
@@ -282,12 +286,20 @@ function formSection() {
 
         <figure class="public-support-person">
           <div class="public-support-person-visual">
-            <img
-              src="${PUBLIC_SUPPORT_TECHNICIAN_PHOTO}"
-              alt="Cristian Ávila, soporte técnico de Onion Support"
-              loading="lazy"
-              decoding="async"
-              fetchpriority="low">
+            <picture>
+              <source
+                type="image/webp"
+                srcset="${PUBLIC_SUPPORT_TECHNICIAN_PHOTO_WEBP_480} 480w, ${PUBLIC_SUPPORT_TECHNICIAN_PHOTO_WEBP_960} 960w"
+                sizes="(max-width: 460px) min(82vw, 248px), (max-width: 720px) min(76vw, 286px), (max-width: 980px) min(64vw, 330px), (max-width: 1180px) min(23vw, 286px), min(24vw, 340px)">
+              <img
+                src="${PUBLIC_SUPPORT_TECHNICIAN_PHOTO}"
+                width="1122"
+                height="1402"
+                alt="Cristian Ávila, soporte técnico de Onion Support"
+                loading="lazy"
+                decoding="async"
+                fetchpriority="low">
+            </picture>
           </div>
           <figcaption class="public-support-person-card">
             <strong>Cristian Ávila</strong>

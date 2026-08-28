@@ -299,13 +299,6 @@ body[data-app-loading="false"] #app-shell,
   opacity: 1;
 
   transform: translateZ(0);
-
-  animation:
-    loaderGridDrift
-    12s
-    cubic-bezier(.2, .8, .2, 1)
-    infinite
-    alternate;
 }
 
 #app-loader::after,
@@ -969,18 +962,12 @@ body[data-app-state="ready"] #app-shell {
     transform:
       translateZ(0)
       scale(1);
-
-    filter: var(--loader-logo-filter);
   }
 
   50% {
     transform:
       translateZ(0)
       scale(1.035);
-
-    filter:
-      var(--loader-logo-filter)
-      brightness(1.06);
   }
 }
 
@@ -1016,27 +1003,6 @@ body[data-app-state="ready"] #app-shell {
       scale(.58);
   }
 }
-
-@keyframes loaderGridDrift {
-  from {
-    background-position:
-      0 0,
-      0 0,
-      0 0;
-
-    opacity: .72;
-  }
-
-  to {
-    background-position:
-      8px 0,
-      0 8px,
-      12px 12px;
-
-    opacity: .94;
-  }
-}
-
 
 /* =========================================================
    14. RESPONSIVE
@@ -1074,6 +1040,26 @@ body[data-app-state="ready"] #app-shell {
       0 0 0 105px rgb(52 212 255 / .040),
       0 0 0 156px rgb(19 148 255 / .012),
       0 0 0 157px rgb(19 148 255 / .030);
+  }
+
+  /*
+     En móvil el loader dura sólo la barrera de pintura inicial. Evitamos
+     mantener un halo filtrado y una respiración infinita durante esos frames.
+  */
+  #app-loader .app-loader__backdrop::after,
+  .app-loader .app-loader__backdrop::after,
+  #app-loader [data-loader-backdrop="true"]::after,
+  .app-loader [data-loader-backdrop="true"]::after {
+    display: none;
+  }
+
+  #app-loader .app-loader__logo,
+  .app-loader .app-loader__logo,
+  #app-loader .loader-logo,
+  .app-loader .loader-logo,
+  #app-loader [data-loader-logo="true"],
+  .app-loader [data-loader-logo="true"] {
+    animation: none;
   }
 }
 

@@ -27,6 +27,8 @@ REQUIRED = (
     "src/css/views/public/public-support-progress.css",
     "src/css/views/public/home-experience.css",
     "src/features/public-support/index.js",
+    "src/media/img/Cristian_Avila_Formulario_480.webp",
+    "src/media/img/Cristian_Avila_Formulario_960.webp",
     "src/features/public-support-progress/index.js",
     "src/features/public-home-experience/index.js",
     "src/views/public/home/index.js",
@@ -242,6 +244,31 @@ def main() -> int:
         '"onion:public-support:created"' not in intake,
         "Una aceptación anónima neutra no puede publicarse como evento created",
     )
+
+    # La fotografía secundaria no puede volver a descargar el PNG de 1,6 MB
+    # en navegadores modernos ni perder sus dimensiones intrínsecas.
+    for snippet, message in (
+        ("<picture>", "La fotografía del técnico debe usar picture"),
+        ("PUBLIC_SUPPORT_TECHNICIAN_PHOTO_WEBP_480", "Falta WebP 480 del técnico"),
+        ("PUBLIC_SUPPORT_TECHNICIAN_PHOTO_WEBP_960", "Falta WebP 960 del técnico"),
+        (" 480w, ${PUBLIC_SUPPORT_TECHNICIAN_PHOTO_WEBP_960} 960w", "Falta srcset responsive del técnico"),
+        ('width="1122"', "Falta anchura intrínseca del técnico"),
+        ('height="1402"', "Falta altura intrínseca del técnico"),
+        ('loading="lazy"', "La fotografía secundaria debe seguir siendo lazy"),
+        ('fetchpriority="low"', "La fotografía secundaria no puede competir con el hero"),
+    ):
+        require(errors, snippet in intake, message)
+
+    for relative, maximum in (
+        ("src/media/img/Cristian_Avila_Formulario_480.webp", 30_000),
+        ("src/media/img/Cristian_Avila_Formulario_960.webp", 70_000),
+    ):
+        size = (ROOT / relative).stat().st_size
+        require(
+            errors,
+            size <= maximum,
+            f"Budget imagen excedido: {relative} pesa {size} B (máximo {maximum} B)",
+        )
 
     # Progreso: deriva del data-submitting real, lenguaje neutro y observer limitado.
     for snippet, message in (

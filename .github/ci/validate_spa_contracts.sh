@@ -118,19 +118,19 @@ if errors:
 print("Contratos SPA críticos OK.")
 PY
 
-node --experimental-default-type=module .github/scripts/core_runtime_contract.mjs
-node --experimental-default-type=module .github/scripts/core_snapshot_contract.mjs
-node --experimental-default-type=module .github/scripts/auth_selector_contract.mjs
-node --experimental-default-type=module .github/scripts/auth_logout_contract.mjs
-node --experimental-default-type=module .github/scripts/router_runtime_contract.mjs
-node --experimental-default-type=module .github/scripts/shell_runtime_contract.mjs
-node --experimental-default-type=module .github/scripts/private_runtime_auth_contract.mjs
-node --experimental-default-type=module .github/scripts/login_document_handoff_contract.mjs
-node --experimental-default-type=module .github/scripts/view_runtime_state_contract.mjs
-node --experimental-default-type=module .github/scripts/home_runtime_state_contract.mjs
-node --experimental-default-type=module .github/scripts/home_view_runtime_context_contract.mjs
-node --experimental-default-type=module .github/scripts/navigation_performance_contract.mjs
-node --experimental-default-type=module .github/scripts/incidencias_detail_request_contract.mjs
-node --experimental-default-type=module .github/scripts/facturas_document_flow_contract.mjs
+node .github/scripts/core_runtime_contract.mjs
+node .github/scripts/core_snapshot_contract.mjs
+node .github/scripts/auth_selector_contract.mjs
+node .github/scripts/auth_logout_contract.mjs
+node .github/scripts/router_runtime_contract.mjs
+node .github/scripts/shell_runtime_contract.mjs
+node .github/scripts/private_runtime_auth_contract.mjs
+node .github/scripts/login_document_handoff_contract.mjs
+node .github/scripts/view_runtime_state_contract.mjs
+node .github/scripts/home_runtime_state_contract.mjs
+node .github/scripts/home_view_runtime_context_contract.mjs
+node .github/scripts/navigation_performance_contract.mjs
+node .github/scripts/incidencias_detail_request_contract.mjs
+node .github/scripts/facturas_document_flow_contract.mjs
 
 node "${ROOT_DIR:-$(git rev-parse --show-toplevel)}/.github/scripts/entity_overlay_contract.mjs"

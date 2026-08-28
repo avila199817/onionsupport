@@ -130,7 +130,7 @@ assert.match(
 
 assert.match(
   ci,
-  /node --experimental-default-type=module \.github\/scripts\/auth_logout_contract\.mjs/,
+  /node \.github\/scripts\/auth_logout_contract\.mjs/,
   "critical SPA validation must execute the logout regression contract"
 );
 

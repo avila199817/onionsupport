@@ -1,0 +1,60 @@
+name: TEMP Incidencias Owner Modal Authority
+
+on:
+  push:
+    branches:
+      - refactor/incidencias-owner-modal-authority
+
+permissions:
+  contents: write
+
+jobs:
+  refactor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: refactor/incidencias-owner-modal-authority
+          fetch-depth: 0
+
+      - name: Guard completed refactor
+        id: guard
+        shell: bash
+        run: |
+          if git log -1 --pretty=%B | grep -q '\[incidencia-owner-authority-done\]'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Apply owner authority refactor
+        if: steps.guard.outputs.skip != 'true'
+        shell: bash
+        run: python3 .github/tmp/refactor_incidencia_owner_authority.py
+
+      - name: Validate owner authority contract
+        if: steps.guard.outputs.skip != 'true'
+        shell: bash
+        run: |
+          node --check src/features/entity-overlay/index.js
+          node --check src/views/incidencias/index.js
+          node --experimental-default-type=module .github/scripts/entity_overlay_contract.mjs
+          python3 .github/scripts/app_entrypoint_integrity.py
+          bash .github/ci/validate_spa_contracts.sh
+          git diff --check
+          test ! -e src/features/entity-overlay/adapters/incidencia.js
+
+      - name: Commit refactor
+        if: steps.guard.outputs.skip != 'true'
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git config user.name "Onion Support CI"
+          git config user.email "cristian@onionsupport.com"
+          git add -A src/features/entity-overlay .github/scripts/entity_overlay_contract.mjs
+          git commit -m "refactor: incidencia usa siempre modal propietario [incidencia-owner-authority-done]"
+          git push origin HEAD:refactor/incidencias-owner-modal-authority

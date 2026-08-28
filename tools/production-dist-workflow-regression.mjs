@@ -24,6 +24,10 @@ function jobSection(name, nextName = "") {
 
 const validateJob = jobSection("validate", "deploy_production");
 const deployJob = jobSection("deploy_production");
+const originStep = deployJob.slice(
+  deployJob.indexOf("Verify Azure production origin canonicalizes exactly"),
+  deployJob.indexOf("Verify canonical dist bytes")
+);
 
 assert.match(
   workflow,
@@ -63,11 +67,25 @@ for (const token of [
   "node tools/verify-artifact-envelope.mjs",
   "app_location: ${{ env.APP_LOCATION }}",
   "skip_app_build: true",
+  "Verify Azure production origin canonicalizes exactly",
+  "for attempt in $(seq 1 8)",
+  "--dump-header -",
+  'if [[ "${status}" != "301" ]]',
+  '[[ "${location}" != "${expected}" ]]',
   "node tools/verify-deployed-dist.mjs",
   "bash \"${RUNNER_TEMP}/verify_production.sh\"",
 ]) {
   assert.ok(deployJob.includes(token), `Production deploy contract missing: ${token}`);
 }
+assert.ok(
+  workflow.includes('AZURE_PRODUCTION_ORIGIN: "https://polite-bay-086469a1e.1.azurestaticapps.net"'),
+  "The production Azure origin must remain pinned exactly."
+);
+assert.doesNotMatch(
+  originStep,
+  /--location|redirect:\s*["']follow["']/,
+  "Azure-origin verification must prove the single redirect without following it."
+);
 assert.doesNotMatch(
   deployJob,
   /npm (?:ci|install|run (?:build|validate:ci|test:browser:dist))/,
@@ -78,14 +96,14 @@ const downloadIndex = deployJob.indexOf("Download exact production artifact by I
 const envelopeIndex = deployJob.indexOf("Validate exact production artifact before token access");
 const tokenIndex = deployJob.indexOf("Validate deployment token");
 const deployIndex = deployJob.indexOf("Deploy compiled static SPA");
-const bytesIndex = deployJob.indexOf("Verify deployed dist bytes");
+const originIndex = deployJob.indexOf("Verify Azure production origin canonicalizes exactly");
 const canonicalBytesIndex = deployJob.indexOf("Verify canonical dist bytes");
 const productionIndex = deployJob.indexOf("Verify production security, routing and backend");
 assert.ok(
   downloadIndex >= 0 && envelopeIndex > downloadIndex && tokenIndex > envelopeIndex &&
-  deployIndex > tokenIndex && bytesIndex > deployIndex && canonicalBytesIndex > bytesIndex &&
+  deployIndex > tokenIndex && originIndex > deployIndex && canonicalBytesIndex > originIndex &&
   productionIndex > canonicalBytesIndex,
-  "Download, envelope gate, token, deploy and both post-deploy byte gates changed."
+  "Download, envelope gate, token, deploy, Azure redirect and canonical byte gate changed."
 );
 
 for (const token of [
@@ -95,8 +113,9 @@ for (const token of [
   "KNOWN_GOOD_LEGACY_SHA: edbdf2429b85a3de405d18aa58bd85eb319bd6de",
   'app_location="/"',
   "if: env.DEPLOYMENT_MODE == 'legacy-root'",
-  "Verify known-good legacy rollback bytes",
-  "VERIFY_CANONICAL: \"true\"",
+  "Verify known-good legacy canonical bytes",
+  "DEPLOYED_URL: ${{ env.PUBLIC_SITE_URL }}",
+  "VERIFY_CANONICAL: \"false\"",
 ]) {
   assert.ok(workflow.includes(token), `Known-good rollback contract missing: ${token}`);
 }
@@ -139,6 +158,6 @@ assert.doesNotMatch(
 console.log("Production dist workflow regression: PASS");
 console.log("- build and browser validation run in the no-secret job");
 console.log("- a fresh runner validates the exact artifact before token access");
-console.log("- Azure and canonical compiled bytes block production success");
+console.log("- exact Azure-origin canonicalization and canonical bytes block production success");
 console.log("- external verification supports legacy base PRs and compiled main");
 console.log("- manual rollback is pinned to the verified legacy SHA");

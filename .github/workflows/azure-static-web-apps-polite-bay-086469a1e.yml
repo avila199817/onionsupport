@@ -14,7 +14,7 @@
 #   - Transfer only the exact dist envelope to a fresh deploy runner.
 #   - Deploy static files directly (no Oryx/application build).
 #   - Never retry an upload blindly.
-#   - Poll the deployed environment until exact release bytes are visible.
+#   - Validate the Azure origin redirect, then poll canonical exact bytes.
 #   - Make production verification blocking.
 #   - Keep PR preview lifecycle deterministic.
 #   - Pin third-party actions by immutable commit SHA.
@@ -52,6 +52,7 @@ env:
   PRODUCTION_RELEASE_CONTRACT: "compiled-dist-v1"
   API_LOCATION: ""
   OUTPUT_LOCATION: ""
+  AZURE_PRODUCTION_ORIGIN: "https://polite-bay-086469a1e.1.azurestaticapps.net"
   PUBLIC_SITE_URL: "https://onionsupport.com"
   DIRECT_API_URL: "https://api.onionsupport.com"
 
@@ -420,14 +421,84 @@ jobs:
           output_location: ${{ env.OUTPUT_LOCATION }}
           skip_app_build: true
 
-      - name: Verify deployed dist bytes
-        if: env.DEPLOYMENT_MODE == 'compiled-dist'
+      - name: Verify Azure production origin canonicalizes exactly
         env:
           DEPLOYED_URL: ${{ steps.deploy.outputs.static_web_app_url }}
-          ONION_ARTIFACT_DIR: ${{ github.workspace }}/production-artifact
-          ONION_RELEASE_SHA: ${{ env.VALIDATED_SHA }}
-          EXPECTED_MANIFEST_DIGEST: ${{ env.PRODUCTION_MANIFEST_DIGEST }}
-        run: node tools/verify-deployed-dist.mjs
+        run: |
+          set -euo pipefail
+
+          azure_origin="${DEPLOYED_URL%/}"
+          expected_origin="${AZURE_PRODUCTION_ORIGIN%/}"
+          canonical="${PUBLIC_SITE_URL%/}"
+
+          if [[ "${azure_origin}" != "${expected_origin}" ]]; then
+            echo "::error title=Origen Azure inesperado::El action devolvió '${azure_origin}'; esperado '${expected_origin}'."
+            exit 1
+          fi
+
+          if [[ "${canonical}" != "https://onionsupport.com" ]]; then
+            echo "::error title=Canonical productivo inesperado::PUBLIC_SITE_URL='${canonical}'."
+            exit 1
+          fi
+
+          for attempt in $(seq 1 8); do
+            mismatch=0
+
+            for route in "/" "/login" "/@ci-probe/incidencias/ci-ticket"; do
+              query="origin_probe=${VALIDATED_SHA}&preserve=1&attempt=${attempt}"
+              requested="${azure_origin}${route}?${query}"
+              expected="${canonical}${route}?${query}"
+
+              if ! response="$(
+                curl \
+                  --silent \
+                  --show-error \
+                  --connect-timeout 10 \
+                  --max-time 30 \
+                  --dump-header - \
+                  --output /dev/null \
+                  --write-out $'\nONION_STATUS:%{http_code}\n' \
+                  -H "Cache-Control: no-cache" \
+                  -H "Pragma: no-cache" \
+                  "${requested}"
+              )"; then
+                mismatch=1
+                break
+              fi
+
+              status="$(
+                awk -F: '$1 == "ONION_STATUS" { value=$2 } END { print value }' <<< "${response}"
+              )"
+              location="$(
+                awk -F': *' '
+                  tolower($1) == "location" {
+                    sub(/^[^:]+:[[:space:]]*/, "")
+                    sub(/\r$/, "")
+                    value=$0
+                  }
+                  END { print value }
+                ' <<< "${response}"
+              )"
+
+              if [[ "${status}" != "301" ]] || [[ "${location}" != "${expected}" ]]; then
+                mismatch=1
+                break
+              fi
+            done
+
+            if [[ "${mismatch}" == "0" ]]; then
+              echo "Azure production origin redirects to canonical in one exact path/query-preserving hop."
+              break
+            fi
+
+            if [[ "${attempt}" == "8" ]]; then
+              echo "::error title=Redirect Azure inesperado::El origen no respondió 301 hacia el canonical exacto tras 8 intentos."
+              exit 1
+            fi
+
+            echo "Azure origin propagation pending (${attempt}/8); retrying in 5s..."
+            sleep 5
+          done
 
       - name: Verify canonical dist bytes
         if: env.DEPLOYMENT_MODE == 'compiled-dist'
@@ -438,11 +509,11 @@ jobs:
           EXPECTED_MANIFEST_DIGEST: ${{ env.PRODUCTION_MANIFEST_DIGEST }}
         run: node tools/verify-deployed-dist.mjs
 
-      - name: Verify known-good legacy rollback bytes
+      - name: Verify known-good legacy canonical bytes
         if: env.DEPLOYMENT_MODE == 'legacy-root'
         env:
-          DEPLOYED_URL: ${{ steps.deploy.outputs.static_web_app_url }}
-          VERIFY_CANONICAL: "true"
+          DEPLOYED_URL: ${{ env.PUBLIC_SITE_URL }}
+          VERIFY_CANONICAL: "false"
         run: bash "${RUNNER_TEMP}/verify_release_bytes.sh"
 
       - name: Verify production security, routing and backend

@@ -31,7 +31,9 @@ jobs:
       - name: Apply Facturas owner/performance refactor
         if: steps.guard.outputs.skip != 'true'
         shell: bash
-        run: python3 .github/tmp/refactor_facturas_owner_performance.py
+        run: |
+          python3 .github/tmp/refactor_facturas_owner_performance.py
+          python3 .github/tmp/fix_facturas_owner_contract.py
 
       - name: Validate Facturas refactor
         if: steps.guard.outputs.skip != 'true'

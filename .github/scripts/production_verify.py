@@ -38,8 +38,16 @@ EXACT_FILES = (
     "src/router/index.js",
     "src/router/routes.js",
     "src/router/styles.js",
+    "src/preboot/public-home-preload.js",
+    "src/views/public/index.js",
     "src/views/public/home/index.js",
     "src/views/public/home/template.js",
+    "src/views/public/login/template.js",
+    "src/media/img/favicon_black_circle_128.webp",
+    "src/media/img/Cristian_Avila_224.webp",
+    "src/media/img/Cristian_Avila_480.webp",
+    "src/media/img/Cristian_Avila_640.webp",
+    "src/media/img/Cristian_Avila_960.webp",
     "src/features/public-support/index.js",
     "src/features/public-support-progress/index.js",
     "src/features/public-home-experience/index.js",
@@ -246,7 +254,7 @@ def check_exact_files(root: Path, base_url: str, revision: str, attempt: int) ->
             errors.append(f"archivo local obligatorio inexistente: {relative}")
             continue
         try:
-            status, body, _ = fetch(base_url, f"/{relative}", revision, attempt)
+            status, body, headers = fetch(base_url, f"/{relative}", revision, attempt)
         except RuntimeError as error:
             errors.append(str(error))
             continue
@@ -259,6 +267,12 @@ def check_exact_files(root: Path, base_url: str, revision: str, attempt: int) ->
                 f"/{relative}: contenido distinto al commit "
                 f"(prod={sha256(body)[:16]} local={sha256(expected)[:16]})"
             )
+        if relative.endswith(".webp"):
+            content_type = headers.get("content-type", "").split(";", 1)[0].strip().lower()
+            if content_type != "image/webp":
+                errors.append(
+                    f"/{relative}: Content-Type {content_type or 'ausente'}, esperado image/webp"
+                )
 
     for route, relative in EXACT_ROUTE_FILES:
         local_path = root / relative

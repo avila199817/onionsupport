@@ -31,6 +31,10 @@ export const PUBLIC_AUTH_LOGO = new URL(
   "../../media/img/favicon_black_circle.png",
   import.meta.url
 ).href;
+export const PUBLIC_AUTH_LOGO_WEBP = new URL(
+  "../../media/img/favicon_black_circle_128.webp",
+  import.meta.url
+).href;
 
 const APP_NAME = "Onion Support";
 const DEFAULT_PUBLIC_VIEW = "public";
@@ -336,6 +340,8 @@ function renderPublicHeader({
 } = {}) {
   const cleanTitle = text(title, appName);
   const cleanSubtitle = text(subtitle, "");
+  const logoFallback = safeAssetSrc(PUBLIC_AUTH_LOGO, PUBLIC_AUTH_LOGO);
+  const logoWebp = safeAssetSrc(PUBLIC_AUTH_LOGO_WEBP, PUBLIC_AUTH_LOGO_WEBP);
 
   return `
     <header
@@ -347,17 +353,20 @@ function renderPublicHeader({
         data-public-brand="true"
         aria-label="${escapeAttr(appName)}"
       >
-        <img
-          class="public-auth-brand-logo"
-          src="${escapeAttr(safeAssetSrc(PUBLIC_AUTH_LOGO, PUBLIC_AUTH_LOGO))}"
-          alt=""
-          width="40"
-          height="40"
-          loading="eager"
-          decoding="async"
-          draggable="false"
-          data-public-brand-logo="true"
-        >
+        <picture>
+          <source type="image/webp" srcset="${escapeAttr(logoWebp)}">
+          <img
+            class="public-auth-brand-logo"
+            src="${escapeAttr(logoFallback)}"
+            alt=""
+            width="40"
+            height="40"
+            loading="eager"
+            decoding="async"
+            draggable="false"
+            data-public-brand-logo="true"
+          >
+        </picture>
 
         <span class="public-auth-brand-name">
           ${escapeHtml(appName)}
@@ -467,6 +476,7 @@ export default {
   version: PUBLIC_SHARED_VERSION,
 
   PUBLIC_AUTH_LOGO,
+  PUBLIC_AUTH_LOGO_WEBP,
 
   escapeHtml,
   escapeAttr,

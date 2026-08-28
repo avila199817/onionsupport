@@ -26,9 +26,12 @@
     }
 
     const heroImageSrcset = [
+      ["/src/media/img/Cristian_Avila_224.webp", "224w"].join(" "),
       ["/src/media/img/Cristian_Avila_480.webp", "480w"].join(" "),
+      ["/src/media/img/Cristian_Avila_640.webp", "640w"].join(" "),
       ["/src/media/img/Cristian_Avila_960.webp", "960w"].join(" "),
     ].join(", ");
+    const heroImageSizes = "(max-width: 720px) calc(100vw - 90px), (max-width: 1040px) 206px, (max-width: 1240px) 176px, 196px";
 
     const hints = [
       {
@@ -45,10 +48,10 @@
       {
         rel: "preload",
         as: "image",
-        href: "/src/media/img/Cristian_Avila_480.webp",
+        href: "/src/media/img/Cristian_Avila_224.webp",
         type: "image/webp",
         imageSrcset: heroImageSrcset,
-        imageSizes: "(max-width: 760px) 44vw, 196px",
+        imageSizes: heroImageSizes,
         fetchPriority: "high",
       },
     ];

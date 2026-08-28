@@ -287,7 +287,7 @@ assert.match(
 assert.doesNotMatch(homeCss, /home-activity-entity-button/);
 assert.doesNotMatch(homeCss, /home-invoice-entity-button/);'''
 
-contract, count = contract_pattern.subn(contract_replacement, contract, count=1)
+contract, count = contract_pattern.subn(lambda _: contract_replacement, contract, count=1)
 if count != 1:
     raise SystemExit("entity overlay contract: Home assertions block not found")
 

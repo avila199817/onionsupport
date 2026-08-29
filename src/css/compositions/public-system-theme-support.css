@@ -128,6 +128,24 @@ html:is([data-theme="light"], .theme-light) .public-home .public-support-field l
   color: #2a415b;
 }
 
+html:is([data-theme="light"], .theme-light) .public-home .public-support-phone-prefix {
+  color: #ffffff;
+  background:
+    linear-gradient(
+      135deg,
+      var(--public-home-accent-2),
+      var(--public-home-accent) 46%,
+      var(--public-home-accent-3)
+    );
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .34),
+    0 8px 18px rgb(19 148 255 / .18);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home .public-support-phone-prefix::after {
+  background: rgb(255 255 255 / .28);
+}
+
 html:is([data-theme="light"], .theme-light) .public-home .public-support-field input,
 html:is([data-theme="light"], .theme-light) .public-home .public-support-field textarea {
   color: var(--public-home-text-strong);

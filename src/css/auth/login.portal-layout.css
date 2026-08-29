@@ -1,0 +1,161 @@
+/* =========================================================
+   ONION SUPPORT — LOGIN PORTAL LAYOUT
+   Archivo: /src/css/auth/login.portal-layout.css
+
+   PORTAL GEOMETRY · DESKTOP ALIGNMENT · MOBILE CARD-ONLY
+
+   Responsabilidad única:
+   - Alinear la marca superior y el contenido con un gutter común.
+   - Bajar la marca mediante geometría real del topbar, sin transforms.
+   - Reconvertir la vista móvil en una experiencia centrada sólo en login.
+   - Mantener scroll seguro cuando teclado o viewport reducen la altura.
+
+   Esta hoja se carga DESPUÉS de login.css y únicamente en la ruta login.
+   No modifica password request, password reset ni activación de cuenta.
+   Sin !important. Sin hacks de posición. Sin assets externos.
+========================================================= */
+
+@layer auth {
+
+/* =========================================================
+   1. DESKTOP · SHARED GUTTER / REAL TOPBAR FLOW
+========================================================= */
+
+.public-auth-shell--login {
+  --login-page-gutter: clamp(54px, 7vw, 148px);
+}
+
+.public-auth-shell--login .login-topbar {
+  min-block-size: 112px;
+
+  padding:
+    clamp(34px, 4.6dvh, 44px)
+    var(--login-page-gutter)
+    14px;
+}
+
+.public-auth-shell--login .login-topbar-brand {
+  transform: none;
+}
+
+.public-auth-shell--login .login-portal-main {
+  padding-inline: var(--login-page-gutter);
+}
+
+/* =========================================================
+   2. INTERMEDIATE VIEWPORTS · KEEP THE SAME ALIGNMENT AXIS
+========================================================= */
+
+@media (max-width: 1240px) {
+  .public-auth-shell--login {
+    --login-page-gutter: 34px;
+  }
+}
+
+@media (max-width: 1060px) {
+  .public-auth-shell--login {
+    --login-page-gutter: 28px;
+  }
+}
+
+/* =========================================================
+   3. MOBILE CARD-ONLY · <= 860px
+========================================================= */
+
+@media (max-width: 860px) {
+  .public-auth-shell--login {
+    block-size: 100dvh;
+  }
+
+  .public-auth-shell--login::before,
+  .public-auth-shell--login::after,
+  .public-auth-shell--login .login-portal-frame::before {
+    content: none;
+  }
+
+  .public-auth-shell--login .login-page-glow,
+  .public-auth-shell--login .login-page-grid,
+  .public-auth-shell--login .login-topbar,
+  .public-auth-shell--login .login-showcase {
+    display: none;
+  }
+
+  .public-auth-shell--login .public-auth-body {
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .public-auth-shell--login .login-pro--portal,
+  .public-auth-shell--login .login-portal-frame {
+    block-size: auto;
+    min-block-size: 100dvh;
+  }
+
+  .public-auth-shell--login .login-portal-frame {
+    grid-template-rows: minmax(0, 1fr);
+    overflow: visible;
+  }
+
+  .public-auth-shell--login .login-portal-main {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(min-content, 1fr);
+
+    align-items: stretch;
+    justify-items: center;
+
+    gap: 0;
+
+    min-block-size: 100dvh;
+
+    padding:
+      max(12px, env(safe-area-inset-top))
+      max(12px, env(safe-area-inset-right))
+      max(12px, env(safe-area-inset-bottom))
+      max(12px, env(safe-area-inset-left));
+  }
+
+  .public-auth-shell--login .login-card-panel--portal {
+    align-self: auto;
+    justify-self: center;
+
+    inline-size: min(100%, var(--login-card-max));
+    max-inline-size: var(--login-card-max);
+
+    margin-block: auto;
+  }
+}
+
+/* =========================================================
+   4. COMPACT MOBILE GUTTER · <= 560px
+========================================================= */
+
+@media (max-width: 560px) {
+  .public-auth-shell--login .login-portal-main {
+    padding:
+      max(8px, env(safe-area-inset-top))
+      max(8px, env(safe-area-inset-right))
+      max(8px, env(safe-area-inset-bottom))
+      max(8px, env(safe-area-inset-left));
+  }
+}
+
+/* =========================================================
+   5. SHORT DESKTOP · PRESERVE FIT WITHOUT FAKE OFFSETS
+========================================================= */
+
+@media (max-height: 800px) and (min-width: 861px) {
+  .public-auth-shell--login .login-topbar {
+    min-block-size: 84px;
+
+    padding:
+      18px
+      var(--login-page-gutter)
+      8px;
+  }
+
+  .public-auth-shell--login .login-topbar-brand {
+    transform: none;
+  }
+}
+
+}

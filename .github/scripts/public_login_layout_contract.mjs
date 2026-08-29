@@ -1,0 +1,260 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+import {
+  ROUTE_STYLES_VERSION,
+  getRouteStyleHrefs,
+} from "../../src/router/styles.js";
+
+const read = (path) =>
+  readFileSync(path, "utf8");
+
+const BASE_AUTH_CSS =
+  "/src/css/auth/login.css";
+const PORTAL_LAYOUT_CSS =
+  "/src/css/auth/login.portal-layout.css";
+
+const layoutCss =
+  read("src/css/auth/login.portal-layout.css");
+const executableLayoutCss =
+  layoutCss.replace(/\/\*[\s\S]*?\*\//g, "");
+const template =
+  read("src/views/public/login/template.js");
+const packageJson =
+  JSON.parse(read("package.json"));
+
+function section(source, startMarker, endMarker) {
+  const start =
+    source.indexOf(startMarker);
+
+  assert.ok(
+    start >= 0,
+    `No se encontró la sección ${startMarker}`
+  );
+
+  const end =
+    source.indexOf(endMarker, start);
+
+  assert.ok(
+    end > start,
+    `No se encontró el cierre ${endMarker}`
+  );
+
+  return source.slice(start, end);
+}
+
+function declarationBlock(source, selector) {
+  const selectorIndex =
+    source.indexOf(selector);
+
+  assert.ok(
+    selectorIndex >= 0,
+    `No se encontró el selector ${selector}`
+  );
+
+  const open =
+    source.indexOf("{", selectorIndex);
+  const close =
+    source.indexOf("}", open);
+
+  assert.ok(
+    open > selectorIndex &&
+    close > open,
+    `Bloque CSS inválido para ${selector}`
+  );
+
+  return source.slice(open + 1, close);
+}
+
+assert.equal(
+  ROUTE_STYLES_VERSION,
+  "route-styles.v13-login-card-first",
+  "La versión del manifest debe identificar la composición card-first"
+);
+
+assert.deepEqual(
+  getRouteStyleHrefs("login"),
+  [
+    BASE_AUTH_CSS,
+    PORTAL_LAYOUT_CSS,
+  ],
+  "Login debe cargar base visual y geometría portal en ese orden"
+);
+
+for (const siblingRoute of [
+  "password-request",
+  "password-reset",
+  "activate-account",
+]) {
+  assert.deepEqual(
+    getRouteStyleHrefs(siblingRoute),
+    [BASE_AUTH_CSS],
+    `${siblingRoute} no debe heredar la composición exclusiva del login`
+  );
+}
+
+assert.match(
+  layoutCss,
+  /@layer auth\s*\{/,
+  "La composición debe permanecer dentro de la capa auth"
+);
+
+assert.equal(
+  executableLayoutCss.includes("!important"),
+  false,
+  "La geometría del login no puede depender de !important"
+);
+
+const topbar =
+  declarationBlock(
+    layoutCss,
+    ".public-auth-shell--login .login-topbar"
+  );
+
+assert.match(
+  topbar,
+  /min-block-size:\s*112px;/,
+  "Desktop debe reservar espacio real para bajar la marca"
+);
+
+assert.match(
+  topbar,
+  /var\(--login-page-gutter\)/,
+  "Topbar y cuerpo deben compartir el mismo eje horizontal"
+);
+
+const brand =
+  declarationBlock(
+    layoutCss,
+    ".public-auth-shell--login .login-topbar-brand"
+  );
+
+assert.match(
+  brand,
+  /transform:\s*none;/,
+  "La marca no puede volver a depender de un desplazamiento óptico"
+);
+
+const portalMain =
+  declarationBlock(
+    layoutCss,
+    ".public-auth-shell--login .login-portal-main"
+  );
+
+assert.match(
+  portalMain,
+  /padding-inline:\s*var\(--login-page-gutter\);/,
+  "El cuerpo debe consumir el mismo gutter que la marca"
+);
+
+const mobile =
+  section(
+    layoutCss,
+    "3. MOBILE CARD-ONLY · <= 860px",
+    "4. COMPACT MOBILE GUTTER · <= 560px"
+  );
+
+assert.match(
+  mobile,
+  /@media \(max-width: 860px\)/,
+  "La frontera móvil debe quedar fijada en 860px"
+);
+
+const hiddenMobileContent =
+  declarationBlock(
+    mobile,
+    ".public-auth-shell--login .login-page-glow,"
+  );
+
+assert.match(
+  mobile,
+  /\.public-auth-shell--login \.login-topbar,/,
+  "La marca exterior debe retirarse en móvil"
+);
+
+assert.match(
+  mobile,
+  /\.public-auth-shell--login \.login-showcase\s*\{/,
+  "El showcase debe retirarse en móvil"
+);
+
+assert.match(
+  hiddenMobileContent,
+  /display:\s*none;/,
+  "El contenido exterior al card debe quedar fuera del layout móvil"
+);
+
+const mobileMain =
+  declarationBlock(
+    mobile,
+    ".public-auth-shell--login .login-portal-main"
+  );
+
+for (const invariant of [
+  /grid-template-columns:\s*minmax\(0, 1fr\);/,
+  /grid-template-rows:\s*minmax\(min-content, 1fr\);/,
+  /min-block-size:\s*100dvh;/,
+  /env\(safe-area-inset-top\)/,
+  /env\(safe-area-inset-bottom\)/,
+]) {
+  assert.match(
+    mobileMain,
+    invariant,
+    "El main móvil debe centrar el card y respetar viewport/safe areas"
+  );
+}
+
+const mobileCard =
+  declarationBlock(
+    mobile,
+    ".public-auth-shell--login .login-card-panel--portal"
+  );
+
+assert.match(
+  mobileCard,
+  /margin-block:\s*auto;/,
+  "El card debe centrarse cuando cabe y arrancar sin recorte cuando desborda"
+);
+
+assert.doesNotMatch(
+  mobileCard,
+  /display:\s*none;/,
+  "La composición móvil nunca puede ocultar el card"
+);
+
+for (const selector of [
+  "login-topbar",
+  "login-showcase",
+  "login-card-panel--portal",
+  'data-login-card="true"',
+]) {
+  assert.equal(
+    template.includes(selector),
+    true,
+    `El template debe conservar ${selector}`
+  );
+}
+
+const topbarIndex =
+  template.indexOf("${renderTopbar()}");
+const showcaseIndex =
+  template.indexOf("${renderShowcase()}");
+const cardIndex =
+  template.indexOf("${renderLoginCard()}");
+
+assert.ok(
+  topbarIndex >= 0 &&
+  showcaseIndex > topbarIndex &&
+  cardIndex > showcaseIndex,
+  "La estructura semántica desktop debe conservar topbar, showcase y card"
+);
+
+assert.match(
+  packageJson.scripts?.["validate:source"] || "",
+  /public_login_layout_contract\.mjs/,
+  "validate:source debe ejecutar este contrato"
+);
+
+console.log(
+  `✅ public login layout contract (${ROUTE_STYLES_VERSION} · mobile card-only)`
+);

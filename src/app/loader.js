@@ -6,14 +6,19 @@
    - Ser la autoridad única sobre #app-loader.
    - Mantener un contrato DOM/ARIA/dataset consistente.
    - Evitar escrituras DOM redundantes durante el boot.
+   - Abrir un handoff visual ready antes de retirar el overlay.
    - Retirar el loader sólo después de una barrera de pintura corta.
    - Evitar FOUC cuando una hoja CSS de ruta cambia de media not-all a all.
+   - Conservar la salida normal animable; hidden queda reservado al escape inmediato.
    - Exponer una API pequeña, estable e idempotente.
    - Sin Auth, Router, Store, fetch ni storage.
 ========================================================= */
 
 export const LOADER_VERSION =
-  "app.loader.minimal.v5-paint-barrier";
+  "app.loader.orbit-glass.v6-paint-handoff";
+
+export const LOADER_VISUAL_MODE =
+  "transparent-orbit-v2";
 
 const LOADER_ID = "app-loader";
 const HIDE_PAINT_FRAMES = 2;
@@ -30,6 +35,7 @@ const LOADER_STATE_ALIASES = Object.freeze({
   booting: LOADER_STATES.BOOTING,
   loading: LOADER_STATES.BOOTING,
   ready: LOADER_STATES.READY,
+  settling: LOADER_STATES.READY,
   done: LOADER_STATES.READY,
   complete: LOADER_STATES.READY,
   completed: LOADER_STATES.READY,
@@ -158,27 +164,43 @@ function writeLoader(visible = false, state = LOADER_STATES.BOOTING) {
   const show = Boolean(visible) && normalized !== LOADER_STATES.HIDDEN;
   const finalState = show ? normalized : LOADER_STATES.HIDDEN;
   const busy = show && finalState === LOADER_STATES.BOOTING;
+  const settling = show && finalState === LOADER_STATES.READY;
   const ariaHidden = show ? "false" : "true";
   const ariaBusy = busy ? "true" : "false";
 
   try {
     const alreadyCanonical =
-      loader.hidden === !show &&
+      (!show || loader.hidden === false) &&
       loader.classList.contains("is-visible") === show &&
       loader.classList.contains("is-hidden") === !show &&
+      loader.classList.contains("is-settling") === settling &&
       loader.dataset?.loaderVisible === (show ? "true" : "false") &&
       loader.dataset?.loaderState === finalState &&
+      loader.dataset?.loaderSettling === (settling ? "true" : "false") &&
+      loader.dataset?.loaderVisual === LOADER_VISUAL_MODE &&
       loader.getAttribute("aria-hidden") === ariaHidden &&
       loader.getAttribute("aria-busy") === ariaBusy;
 
     if (alreadyCanonical) return true;
 
-    if (loader.hidden !== !show) loader.hidden = !show;
+    /*
+      La salida normal conserva el nodo sin [hidden] para que CSS complete
+      el fade y visibility delay. Sólo show necesita retirar un hidden previo;
+      hideLoaderImmediately() mantiene el escape de desmontaje instantáneo.
+    */
+    if (show && loader.hidden === true) {
+      loader.hidden = false;
+    }
 
     setClassState(loader, "is-visible", show);
     setClassState(loader, "is-hidden", !show);
+    setClassState(loader, "is-settling", settling);
+
     setDatasetIfChanged(loader, "loaderVisible", show ? "true" : "false");
     setDatasetIfChanged(loader, "loaderState", finalState);
+    setDatasetIfChanged(loader, "loaderSettling", settling ? "true" : "false");
+    setDatasetIfChanged(loader, "loaderVisual", LOADER_VISUAL_MODE);
+
     setAttributeIfChanged(loader, "aria-hidden", ariaHidden);
     setAttributeIfChanged(loader, "aria-busy", ariaBusy);
 
@@ -198,6 +220,17 @@ function cancelPendingHide() {
 function scheduleHideAfterPaint() {
   if (!isBrowser()) return false;
   if (hideFrame) return true;
+  if (!isLoaderVisible()) return true;
+
+  /*
+    READY abre el handoff translúcido inmediatamente:
+    - Router ya ha comprometido el shell y la vista.
+    - El scrim reduce opacidad/blur y deja apreciar el destino.
+    - El borde orbital sigue comunicando actividad durante los paints finales.
+  */
+  if (!writeLoader(true, LOADER_STATES.READY)) {
+    return false;
+  }
 
   const generation = ++hideGeneration;
   let remaining = HIDE_PAINT_FRAMES;
@@ -228,19 +261,33 @@ export function showLoader(state = LOADER_STATES.BOOTING) {
 
 /*
   hideLoader mantiene su contrato síncrono (boolean) para no alterar App/Main,
-  pero la mutación visible se difiere dos paints. Durante esos paints:
-  - Router ya ha comprometido el route-host;
+  pero ejecuta un handoff ready y difiere la salida dos paints. Durante ellos:
+  - Router ya ha comprometido el route-host y shellState=ready;
   - las hojas de ruta cargadas con media="not all" pueden activarse;
-  - Safari/iOS completa style/layout sin exponer HTML sin estilos.
+  - el overlay translúcido deja ver el destino sin exponer HTML sin estilos;
+  - Safari/iOS completa style/layout antes del fade final.
 */
 export function hideLoader() {
   if (!getLoaderElement()) return false;
+  if (!isLoaderVisible()) return true;
   return scheduleHideAfterPaint();
 }
 
 export function hideLoaderImmediately() {
   cancelPendingHide();
-  return writeLoader(false, LOADER_STATES.HIDDEN);
+
+  const loader = getLoaderElement();
+  if (!loader) return false;
+
+  const written = writeLoader(false, LOADER_STATES.HIDDEN);
+
+  try {
+    loader.hidden = true;
+  } catch {
+    return false;
+  }
+
+  return written;
 }
 
 export function getLoaderSnapshot() {
@@ -248,10 +295,14 @@ export function getLoaderSnapshot() {
 
   return Object.freeze({
     version: LOADER_VERSION,
+    visualMode: LOADER_VISUAL_MODE,
     exists: Boolean(loader),
     visible: isLoaderVisible(),
     state: getLoaderState(),
     busy: loader?.getAttribute("aria-busy") === "true",
+    settling:
+      loader?.classList?.contains("is-settling") === true ||
+      loader?.dataset?.loaderSettling === "true",
     hidePending: Boolean(hideFrame),
     paintBarrierFrames: HIDE_PAINT_FRAMES,
   });
@@ -259,6 +310,7 @@ export function getLoaderSnapshot() {
 
 export default Object.freeze({
   LOADER_VERSION,
+  LOADER_VISUAL_MODE,
   LOADER_STATES,
   getLoaderElement,
   getLoaderState,

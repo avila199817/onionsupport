@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guard the boot paint barrier, loader surface, cold-boot DOM and public-home SEO signals."""
+"""Guard the boot paint barrier, translucent loader handoff, cold-boot DOM and SEO."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from html.parser import HTMLParser
 import os
 from pathlib import Path
 import re
-import sys
+
 
 ROOT = Path(
     os.environ.get(
@@ -133,14 +133,32 @@ def main() -> int:
     errors: list[str] = []
 
     required_loader = {
-        "app.loader.minimal.v5-paint-barrier": "falta versión del loader con paint barrier",
-        "const HIDE_PAINT_FRAMES = 2;": "el loader debe cubrir al menos dos paints de estabilización",
-        "function scheduleHideAfterPaint()": "falta scheduler de ocultación por paint",
-        "function cancelPendingHide()": "showLoader debe poder cancelar una ocultación pendiente",
-        "return scheduleHideAfterPaint();": "hideLoader debe usar la barrera de pintura",
-        "cancelPendingHide();": "el loader visible debe invalidar hides obsoletos",
-        "hideLoaderImmediately": "falta escape explícito para ocultación inmediata controlada",
-        "requestAnimationFrame": "la barrera debe sincronizarse con el pipeline de pintura",
+        "app.loader.orbit-glass.v6-paint-handoff":
+            "falta versión del loader con handoff translúcido",
+        'LOADER_VISUAL_MODE =\n  "transparent-orbit-v2"':
+            "falta identidad del contrato visual orbit/glass",
+        "const HIDE_PAINT_FRAMES = 2;":
+            "el loader debe cubrir al menos dos paints de estabilización",
+        "function scheduleHideAfterPaint()":
+            "falta scheduler de ocultación por paint",
+        "writeLoader(true, LOADER_STATES.READY)":
+            "hide debe abrir primero el estado ready translúcido",
+        '"is-settling"':
+            "falta la clase canónica del handoff visual",
+        '"loaderSettling"':
+            "falta dataset canónico del handoff visual",
+        '"loaderVisual"':
+            "falta dataset de versión visual",
+        "function cancelPendingHide()":
+            "showLoader debe poder cancelar una ocultación pendiente",
+        "return scheduleHideAfterPaint();":
+            "hideLoader debe usar la barrera de pintura",
+        "if (!isLoaderVisible()) return true;":
+            "hideLoader debe ser idempotente cuando ya está oculto",
+        "hideLoaderImmediately":
+            "falta escape explícito para ocultación inmediata controlada",
+        "requestAnimationFrame":
+            "la barrera debe sincronizarse con el pipeline de pintura",
     }
 
     for token, message in required_loader.items():
@@ -150,6 +168,11 @@ def main() -> int:
     match = re.search(r"const\s+HIDE_PAINT_FRAMES\s*=\s*(\d+)\s*;", loader)
     if not match or int(match.group(1)) < 2:
         errors.append("HIDE_PAINT_FRAMES debe ser >= 2")
+
+    if "loader.hidden = !show" in loader:
+        errors.append(
+            "la salida normal no puede cortar el fade aplicando hidden inmediatamente"
+        )
 
     hide_body = re.search(
         r"export\s+function\s+hideLoader\s*\([^)]*\)\s*\{(?P<body>.*?)\n\}",
@@ -165,58 +188,118 @@ def main() -> int:
         if "setTimeout" in body:
             errors.append("hideLoader() no puede usar una espera temporal arbitraria")
 
+    immediate_body = re.search(
+        r"export\s+function\s+hideLoaderImmediately\s*\([^)]*\)\s*"
+        r"\{(?P<body>.*?)\n\}",
+        loader,
+        re.DOTALL,
+    )
+    if not immediate_body or "loader.hidden = true;" not in immediate_body.group("body"):
+        errors.append("hideLoaderImmediately() debe conservar el desmontaje instantáneo")
+
     required_loader_css = {
-        "PRODUCCIÓN · SOLID CANVAS · GLASS BRAND · V1":
-            "loader.css debe declarar el contrato visual solid/glass",
-        "--loader-canvas: #0a0c11;":
-            "el loader dark debe usar el canvas sólido canónico",
-        "--loader-canvas: #ffffff;":
-            "el loader light debe usar el canvas sólido canónico",
-        "background: var(--loader-canvas);":
-            "el viewport del loader debe pintar exclusivamente su canvas",
+        "PRODUCCIÓN · TRANSLUCENT HANDOFF · ORBIT BORDER · V2":
+            "loader.css debe declarar el contrato visual handoff/orbit V2",
+        "--loader-overlay:":
+            "falta el scrim translúcido dark",
+        "--loader-overlay-ready:":
+            "falta el scrim de handoff más transparente",
         "--loader-brand-surface:":
-            "falta la superficie translúcida del logo",
-        "backdrop-filter: blur(18px) saturate(1.08);":
-            "falta el vidrio del logo en navegadores estándar",
-        "-webkit-backdrop-filter: blur(18px) saturate(1.08);":
-            "falta el vidrio del logo en Safari",
+            "falta la superficie glass del logo",
+        "--loader-orbit-speed:":
+            "falta la velocidad canónica del borde orbital",
+        "background: transparent;":
+            "el root del loader debe permanecer transparente",
+        "background-color: var(--loader-overlay);":
+            "el backdrop debe pintar el scrim translúcido",
+        "blur(var(--loader-overlay-blur))":
+            "falta blur controlado del overlay",
+        "blur(var(--loader-overlay-ready-blur))":
+            "falta reducción de blur durante el handoff",
+        "backdrop-filter: blur(13px) saturate(1.08);":
+            "falta vidrio de la tile en navegadores estándar",
+        "-webkit-backdrop-filter: blur(13px) saturate(1.08);":
+            "falta vidrio de la tile en Safari",
+        "conic-gradient(":
+            "falta el trazo luminoso orbital del borde",
+        "@keyframes loaderBorderOrbit":
+            "falta la animación canónica del borde",
         "@keyframes loaderLogoBreathe":
             "el loader sin texto necesita una señal de actividad mínima",
+        "#app-shell[data-shell-state=\"ready\"]":
+            "el shell listo debe poder pintarse detrás del loader",
         "@media (prefers-reduced-motion: reduce)":
-            "el movimiento del logo debe respetar reduced motion",
+            "el movimiento debe respetar reduced motion",
         "@media (prefers-reduced-transparency: reduce)":
-            "la superficie del logo debe respetar reduced transparency",
+            "el loader debe respetar reduced transparency",
         "@media (forced-colors: active)":
             "el loader debe conservar contraste forzado",
     }
 
+    compact_css = re.sub(r"\s+", " ", executable_loader_css)
+
     for token, message in required_loader_css.items():
-        if token not in loader_css:
+        if token not in loader_css and token not in compact_css:
             errors.append(message)
 
     forbidden_loader_css = {
-        "gradient(": "el fondo del loader debe ser sólido, sin gradientes",
-        "mask-image": "el loader no puede reconstruir máscaras decorativas",
-        "-webkit-mask-image": "el loader no puede reconstruir máscaras decorativas WebKit",
-        "::before": "el loader no puede añadir pseudo-elementos decorativos",
-        "::after": "el loader no puede añadir pseudo-elementos decorativos",
-        "background-size": "el loader no puede reintroducir rejillas o patrones",
-        "loaderSpin": "el logo no puede depender de giros ornamentales",
-        "loaderRings": "el loader no puede reintroducir anillos",
-        "loaderHalo": "el loader no puede reintroducir halos circulares animados",
-        "!important": "loader.css no puede depender de prioridades forzadas",
+        "radial-gradient(":
+            "el loader no puede reintroducir círculos o halos de fondo",
+        "linear-gradient(":
+            "el loader no puede reintroducir diagonales o fondos multicapa",
+        "repeating-":
+            "el loader no puede reintroducir patrones repetidos",
+        "mask-image":
+            "el loader no puede depender de máscaras decorativas",
+        "-webkit-mask-image":
+            "el loader no puede depender de máscaras decorativas WebKit",
+        "background-size":
+            "el loader no puede reintroducir rejillas o patrones",
+        "loaderRings":
+            "el loader no puede reintroducir anillos de fondo",
+        "loaderHalo":
+            "el loader no puede reintroducir halos circulares animados",
+        "!important":
+            "loader.css no puede depender de prioridades forzadas",
     }
 
     for token, message in forbidden_loader_css.items():
         if token in executable_loader_css:
             errors.append(message)
 
-    if not re.search(
-        r"#app-loader\s+\.app-loader__backdrop,[\s\S]{0,700}?"
-        r"\{\s*display:\s*none\s*;",
+    if executable_loader_css.count("conic-gradient(") != 1:
+        errors.append("el loader debe contener exactamente un gradiente: el borde orbital")
+
+    if re.search(
+        r"(?:#app-loader|\.app-loader)::(?:before|after)",
         executable_loader_css,
     ):
-        errors.append("el backdrop legacy debe quedar neutralizado")
+        errors.append(
+            "el viewport del loader no puede usar pseudo-elementos decorativos"
+        )
+
+    if re.search(
+        r"(?:html|body)\.(?:app-booting|app-loading)\s+#app-shell",
+        executable_loader_css,
+    ):
+        errors.append(
+            "el estado global booting no puede ocultar un shell ya comprometido por Router"
+        )
+
+    if not re.search(
+        r"#app-loader\s+\.app-loader__backdrop,[\s\S]{0,1000}?"
+        r"\{\s*position:\s*absolute;[\s\S]{0,500}?"
+        r"display:\s*block;",
+        executable_loader_css,
+    ):
+        errors.append("el backdrop plano debe permanecer activo como scrim")
+
+    if not re.search(
+        r"#app-loader\s+\.app-loader__brand::before,[\s\S]{0,1200}?"
+        r"animation:\s*loaderBorderOrbit",
+        executable_loader_css,
+    ):
+        errors.append("el borde orbital debe vivir únicamente en la tile central")
 
     if not re.search(
         r"#app-loader\s+\.app-loader__copy,[\s\S]{0,1800}?"
@@ -224,6 +307,18 @@ def main() -> int:
         executable_loader_css,
     ):
         errors.append("copy, barras y progreso legacy deben permanecer ocultos")
+
+    if not re.search(
+        r"--loader-overlay:\s*rgb\([^)]*/\s*\.(?:[1-6]\d?)\s*\);",
+        executable_loader_css,
+    ):
+        errors.append("el overlay dark debe conservar alpha real y moderado")
+
+    if not re.search(
+        r"--loader-brand-surface:\s*rgb\([^)]*/\s*\.(?:[1-5]\d?)\s*\);",
+        executable_loader_css,
+    ):
+        errors.append("la tile debe conservar alpha real para mostrar el fondo")
 
     loader_markup_forbidden = (
         "app-loader__copy",
@@ -239,8 +334,10 @@ def main() -> int:
             errors.append(f"{document_name} debe contener el loader canónico")
         if 'class="app-loader is-visible"' not in document:
             errors.append(f"{document_name}: el loader debe comenzar visible")
+        if 'data-loader-backdrop="true"' not in document:
+            errors.append(f"{document_name}: falta el scrim plano del loader")
         if 'data-loader-logo-card="true"' not in document:
-            errors.append(f"{document_name}: falta el único elemento visual del loader")
+            errors.append(f"{document_name}: falta la tile central del loader")
         if 'aria-label="Cargando Onion Support"' not in document:
             errors.append(f"{document_name}: falta nombre accesible no visible")
 
@@ -320,10 +417,12 @@ def main() -> int:
         return 1
 
     print("Boot visual integrity: PASS")
-    print("- loader starts visible")
-    print("- loader canvas is solid in dark and light themes")
-    print("- loader keeps one translucent central brand tile")
-    print("- loader has no visible text, progress, rings, grids or decorative pseudo-elements")
+    print("- loader starts visible and keeps accessible status")
+    print("- router-ready shell can paint below the translucent handoff")
+    print("- dark/light scrims preserve alpha and controlled blur")
+    print("- central glass tile keeps one rotating edge trace")
+    print("- loader has no visible text, progress, rings, grids or background patterns")
+    print("- normal hide keeps the CSS fade; immediate hide remains available")
     print("- router root starts empty: no pre-hydration content flash")
     print("- no-script fallback keeps crawlable public service links without duplicate H1")
     print("- public home owns exactly one H1")

@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 
 import {
+  FACTURA_CANONICAL_ALIAS_VERSION,
   FACTURA_TECHNICAL_UI_GUARD_VERSION,
+  canonicalizeFacturaListItem,
   getFacturaStableId,
   isFacturaTechnicalRecord,
   normalizeFacturaDetailResponse,
   normalizeFacturasListResponse,
+  resolveFacturaCanonicalId,
 } from "../../src/views/facturas/facturas.api.js";
 
 import {
@@ -25,7 +28,7 @@ function invoice() {
     id: CANONICAL_ID,
     facturaId: CANONICAL_ID,
     invoiceId: CANONICAL_ID,
-    clienteId: "CLI-1",
+    clienteId: "CON-20260822077849",
     tipoDocumento: "factura",
     entityType: "invoice",
     type: "invoice",
@@ -34,10 +37,11 @@ function invoice() {
     clienteNombre: "José Ferrandiz Martorell",
     razonSocial: "José Ferrandiz Martorell",
     clienteEmail: "josepfmartorell@gmail.com",
+    emailCliente: "josepfmartorell@gmail.com",
     fechaEmision: "2026-08-27T15:53:23.044Z",
     fechaServicio: "2026-08-26T00:00:00.000Z",
     formaPago: "transferencia_bancaria",
-    ticketId: "INC-20260827-DEMO",
+    ticketId: "INC-20260827-D03089",
     baseImponible: 40,
     lineas: [
       {
@@ -66,7 +70,15 @@ function invoice() {
 function technicalRecord({ withSnapshot = true } = {}) {
   return {
     id: TECHNICAL_ID,
-    clienteId: "CLI-1",
+    clienteId: "CON-20260822077849",
+    clienteNombre: "José Ferrandiz Martorell",
+    razonSocial: "José Ferrandiz Martorell",
+    clienteEmail: "josepfmartorell@gmail.com",
+    emailCliente: "josepfmartorell@gmail.com",
+    fechaEmision: "2026-08-27T15:53:23.044Z",
+    fechaServicio: "2026-08-26T00:00:00.000Z",
+    formaPago: "transferencia_bancaria",
+    ticketId: "INC-20260827-D03089",
     tipoDocumento: "idempotency",
     entityType: "invoice_create_idempotency",
     type: "invoice_create_idempotency",
@@ -78,10 +90,26 @@ function technicalRecord({ withSnapshot = true } = {}) {
     baseImponible: 0,
     paidAmount: 0,
     pendingAmount: 48.4,
+    impuestos: [
+      { tipo: "IVA", porcentaje: 21, base: 40, importe: 8.4 },
+    ],
+    ivaImporte: 8.4,
+    estadoPago: "pending",
+    paymentStatus: "pending",
     status: "completed",
     responseSnapshot: withSnapshot
       ? { ok: true, success: true, factura: invoice() }
       : null,
+  };
+}
+
+function normalizedTechnicalLeak() {
+  return {
+    ...technicalRecord({ withSnapshot: false }),
+    numeroFacturaLegal: TECHNICAL_ID,
+    numeroFactura: TECHNICAL_ID,
+    invoiceNumber: TECHNICAL_ID,
+    raw: technicalRecord({ withSnapshot: false }),
   };
 }
 
@@ -95,6 +123,7 @@ function mergedHydratedDetail() {
 function testTechnicalClassifier() {
   assert.equal(isFacturaTechnicalRecord(technicalRecord()), true);
   assert.equal(isFacturaTechnicalRecord(invoice()), false);
+  assert.equal(isFacturaTechnicalRecord(normalizedTechnicalLeak()), true);
   assert.equal(isFacturaModalTechnicalRecord(technicalRecord()), true);
   assert.equal(isFacturaModalTechnicalRecord(invoice()), false);
 }
@@ -114,13 +143,9 @@ function testApiDetailPromotesCanonicalSnapshot() {
   assert.equal(normalized.item.baseImponible, 40);
   assert.equal(normalized.item.pendingAmount, 48.4);
   assert.equal(normalized.item.meta.technicalAliasRecovered, true);
-  assert.equal(
-    normalized.item.meta.technicalAliasGuardVersion,
-    FACTURA_TECHNICAL_UI_GUARD_VERSION
-  );
 }
 
-function testListDropsTechnicalRecord() {
+function testListCollapsesTechnicalAndCanonicalDuplicate() {
   const normalized = normalizeFacturasListResponse({
     ok: true,
     items: [technicalRecord(), invoice()],
@@ -132,11 +157,57 @@ function testListDropsTechnicalRecord() {
   assert.deepEqual(normalized.items.map((item) => item.id), [CANONICAL_ID]);
   assert.equal(normalized.count, 1);
   assert.equal(normalized.total, 1);
-  assert.equal(normalized.meta.technicalRecordsFiltered, 1);
 }
 
-function testStableIdUsesCanonicalSnapshot() {
+function testNormalizedTechnicalLeakBecomesCanonicalRow() {
+  const normalized = normalizeFacturasListResponse({
+    ok: true,
+    items: [normalizedTechnicalLeak()],
+    total: 1,
+    count: 1,
+    totalKnown: true,
+  });
+
+  assert.equal(normalized.items.length, 1);
+
+  const item = normalized.items[0];
+  assert.equal(item.id, CANONICAL_ID);
+  assert.equal(item.facturaId, CANONICAL_ID);
+  assert.equal(item.invoiceId, CANONICAL_ID);
+  assert.equal(item.numeroFacturaLegal, "2026000052");
+  assert.equal(item.numeroFacturaSistema, "2026-08-27-00052");
+  assert.equal(item.clienteNombre, "José Ferrandiz Martorell");
+  assert.equal(item.clienteEmail, "josepfmartorell@gmail.com");
+  assert.equal(item.total, 48.4);
+  assert.equal(item.baseImponible, 40);
+  assert.equal(item.pendingAmount, 48.4);
+  assert.equal(item.meta.technicalAliasRecovered, true);
+  assert.equal(
+    item.meta.canonicalAliasVersion,
+    FACTURA_CANONICAL_ALIAS_VERSION
+  );
+  assert.equal(item.raw.id, CANONICAL_ID);
+  assert.notEqual(item.raw.tipoDocumento, "idempotency");
+  assert.doesNotMatch(JSON.stringify(item), /FACTURA_CREATE_IDEMP_/);
+}
+
+function testTechnicalRequestIdResolvesBeforeHttpBoundary() {
+  const item = canonicalizeFacturaListItem(normalizedTechnicalLeak());
+
+  assert.equal(item.id, CANONICAL_ID);
+  assert.equal(
+    resolveFacturaCanonicalId(TECHNICAL_ID, { factura: item }),
+    CANONICAL_ID
+  );
+  assert.equal(
+    resolveFacturaCanonicalId(TECHNICAL_ID),
+    CANONICAL_ID
+  );
+}
+
+function testStableIdUsesCanonicalAlias() {
   assert.equal(getFacturaStableId(technicalRecord()), CANONICAL_ID);
+  assert.equal(getFacturaStableId(normalizedTechnicalLeak()), CANONICAL_ID);
 }
 
 function assertCanonicalHtml(html) {
@@ -165,6 +236,33 @@ function testModalPromotesSnapshotBeforePainting() {
   }));
 }
 
+function testApiBoundaryRemovesSkeletonCauseBeforeModal() {
+  const normalized = normalizeFacturasListResponse({
+    ok: true,
+    items: [normalizedTechnicalLeak()],
+    total: 1,
+    count: 1,
+    totalKnown: true,
+  });
+  const canonical = normalized.items[0];
+
+  assert.ok(canonical);
+  assert.equal(canonical.id, CANONICAL_ID);
+  assert.equal(canonical.total, 48.4);
+  assert.equal(canonical.baseImponible, 40);
+
+  const html = renderFacturasDetailContent({
+    factura: canonical,
+    admin: true,
+  });
+
+  assert.match(html, /José Ferrandiz Martorell/);
+  assert.match(html, /48,40/);
+  assert.doesNotMatch(html, /Cargando detalle de factura/);
+  assert.doesNotMatch(html, /Detalle no disponible/);
+  assert.doesNotMatch(html, /FACTURA_CREATE_IDEMP_/);
+}
+
 function testHydratedCanonicalRootWinsOverStaleTechnicalRaw() {
   const merged = mergedHydratedDetail();
   const canonical = resolveFacturaModalCanonical(merged);
@@ -185,17 +283,11 @@ function testHydratedCanonicalRootWinsOverStaleTechnicalRaw() {
   }));
 }
 
-function testUnresolvedTechnicalRendersLoadingNotFalseCorruption() {
-  const unresolved = technicalRecord({ withSnapshot: false });
-  assert.equal(resolveFacturaModalCanonical(unresolved), null);
-
-  const html = renderFacturasDetailContent({ factura: unresolved });
-  assert.match(html, /Cargando detalle de factura/);
-  assert.doesNotMatch(html, /Detalle no disponible/);
-  assert.doesNotMatch(html, /FACTURA_CREATE_IDEMP_/);
-}
-
 function testVersionContract() {
+  assert.equal(
+    FACTURA_CANONICAL_ALIAS_VERSION,
+    "facturas.api.canonical-alias-boundary.v2"
+  );
   assert.equal(
     FACTURA_TECHNICAL_UI_GUARD_VERSION,
     "facturas.ui.technical-record-guard.v1"
@@ -213,11 +305,13 @@ function testVersionContract() {
 const tests = [
   testTechnicalClassifier,
   testApiDetailPromotesCanonicalSnapshot,
-  testListDropsTechnicalRecord,
-  testStableIdUsesCanonicalSnapshot,
+  testListCollapsesTechnicalAndCanonicalDuplicate,
+  testNormalizedTechnicalLeakBecomesCanonicalRow,
+  testTechnicalRequestIdResolvesBeforeHttpBoundary,
+  testStableIdUsesCanonicalAlias,
   testModalPromotesSnapshotBeforePainting,
+  testApiBoundaryRemovesSkeletonCauseBeforeModal,
   testHydratedCanonicalRootWinsOverStaleTechnicalRaw,
-  testUnresolvedTechnicalRendersLoadingNotFalseCorruption,
   testVersionContract,
 ];
 
@@ -228,5 +322,5 @@ for (const test of tests) {
 
 console.log(
   `✅ facturas technical record guard ${tests.length}/${tests.length} ` +
-  `(${FACTURA_TECHNICAL_UI_GUARD_VERSION} · ${FACTURAS_MODAL_TECHNICAL_GUARD_VERSION})`
+  `(${FACTURA_CANONICAL_ALIAS_VERSION} · ${FACTURAS_MODAL_TECHNICAL_GUARD_VERSION})`
 );

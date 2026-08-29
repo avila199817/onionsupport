@@ -11,7 +11,7 @@ import AliasCoreDefault, * as AliasCore from "./facturas.api.alias-core.js";
 export * from "./facturas.api.alias-core.js";
 
 export const FACTURA_RAW_ALIAS_RECONCILIATION_VERSION =
-  "facturas.api.raw-alias-reconciliation.v3";
+  "facturas.api.raw-alias-reconciliation.v4";
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -70,6 +70,21 @@ function stripTechnicalProjection(value = null, depth = 0, seen = new WeakSet())
   }
 
   return output;
+}
+
+function withCanonicalRecoveredRaw(value = null) {
+  if (!isObject(value) || value.meta?.technicalAliasRecovered !== true) {
+    return value;
+  }
+
+  const canonical = stripTechnicalProjection(value);
+  const raw = stripTechnicalProjection({ ...canonical });
+  delete raw.raw;
+
+  return {
+    ...canonical,
+    raw,
+  };
 }
 
 function reconcileArray(items = []) {
@@ -224,10 +239,38 @@ function reconcilePayload(value = null, depth = 0, seen = new WeakSet()) {
   return output;
 }
 
+function restoreCanonicalRaw(response = null) {
+  if (Array.isArray(response)) {
+    return response.map(withCanonicalRecoveredRaw);
+  }
+
+  if (!isObject(response) || !Array.isArray(response.items)) {
+    return response;
+  }
+
+  const items = response.items.map(withCanonicalRecoveredRaw);
+
+  return {
+    ...response,
+    items,
+    facturas: items,
+    invoices: items,
+    data: items,
+    count: items.length,
+    meta: {
+      ...(isObject(response.meta) ? response.meta : {}),
+      rawAliasReconciliationVersion:
+        FACTURA_RAW_ALIAS_RECONCILIATION_VERSION,
+    },
+  };
+}
+
 export function normalizeFacturasListResponse(payload = null, requestMeta = {}) {
-  return AliasCore.normalizeFacturasListResponse(
-    reconcilePayload(payload),
-    requestMeta
+  return restoreCanonicalRaw(
+    AliasCore.normalizeFacturasListResponse(
+      reconcilePayload(payload),
+      requestMeta
+    )
   );
 }
 

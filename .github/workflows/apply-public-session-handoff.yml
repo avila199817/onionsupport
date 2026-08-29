@@ -1,0 +1,566 @@
+name: Apply public session handoff
+
+on:
+  push:
+    branches:
+      - fix/public-session-handoff
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    name: Apply canonical public session handoff
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+
+    steps:
+      - name: Checkout working branch
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: fix/public-session-handoff
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+          persist-credentials: true
+
+      - name: Use Node 22
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Apply exact source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: Path, old: str, new: str, label: str) -> bool:
+              source = path.read_text(encoding="utf-8")
+              if old in source:
+                  count = source.count(old)
+                  if count != 1:
+                      raise SystemExit(f"{label}: expected one source token, found {count}")
+                  path.write_text(source.replace(old, new, 1), encoding="utf-8")
+                  return True
+              if new in source:
+                  return False
+              raise SystemExit(f"{label}: neither source nor target token found")
+
+          changed = False
+
+          app_path = Path("src/app/index.js")
+          changed = replace_once(
+              app_path,
+              '  "app.minimal.v8-private-runtime-after-guard";',
+              '  "app.minimal.v9-public-session-handoff";',
+              "app version",
+          ) or changed
+
+          changed = replace_once(
+              app_path,
+              '''const PUBLIC_HOME_PATH = "/";
+          const PUBLIC_HYDRATION_DELAY_MS = 7000;
+          const PUBLIC_HYDRATION_INTERACTION_EVENTS =
+            Object.freeze(["pointerdown", "keydown", "touchstart"]);'''.strip(),
+              '''const PUBLIC_HOME_PATH = "/";
+          const PUBLIC_HOME_SESSION_EVENT = "public-home:session-hydrated";
+          const PUBLIC_HYDRATION_DELAY_MS = 120;
+          const PUBLIC_HYDRATION_INTERACTION_EVENTS =
+            Object.freeze(["pointerdown", "keydown", "touchstart"]);'''.strip(),
+              "public hydration constants",
+          ) or changed
+
+          changed = replace_once(
+              app_path,
+              '''function notifyPublicHomeSessionHydrated() {
+            if (!isBrowser()) return false;
+
+            try {
+              document.dispatchEvent(
+                new Event("public-home:ready")
+              );
+              return true;
+            } catch {
+              return false;
+            }
+          }'''.strip(),
+              '''function notifyPublicHomeSessionHydrated() {
+            if (!isBrowser()) return false;
+
+            let notified = false;
+
+            for (const eventName of [
+              PUBLIC_HOME_SESSION_EVENT,
+              "public-home:ready",
+            ]) {
+              try {
+                document.dispatchEvent(
+                  new Event(eventName)
+                );
+                notified = true;
+              } catch {
+                // Cada notificación mantiene su propio límite de fallo.
+              }
+            }
+
+            return notified;
+          }'''.strip(),
+              "public session notification",
+          ) or changed
+
+          changed = replace_once(
+              app_path,
+              '''  publicHydrationPromise = (async () => {
+              await initToast(payload);
+              const restored = await restoreAuth(payload);
+
+              /* La home pública nunca activa Sidebar/Topbar, incluso con sesión restaurada. */
+              void restored;
+
+              notifyPublicHomeSessionHydrated();
+              return true;
+            })()''',
+              '''  publicHydrationPromise = (async () => {
+              /*
+                Router consulta el módulo Auth registrado para autorizar rutas
+                privadas. Importarlo sin init dejaba Core hidratado, pero al
+                Router todavía en estado invitado.
+              */
+              await initAuth(payload);
+              const restored = await restoreAuth(payload);
+
+              /* La home pública nunca activa Sidebar/Topbar, incluso con sesión restaurada. */
+              void restored;
+
+              notifyPublicHomeSessionHydrated();
+
+              /* Toast es progresivo y nunca retrasa identidad ni navegación. */
+              try {
+                await initToast(payload);
+              } catch {
+                // Mejora opcional: la sesión ya quedó entregada a la interfaz.
+              }
+
+              return true;
+            })()''',
+              "public auth handoff order",
+          ) or changed
+
+          support_path = Path("src/features/public-support/index.js")
+          changed = replace_once(
+              support_path,
+              '  "public-support.intake.v9-structured-address";',
+              '  "public-support.intake.v10-canonical-panel-handoff";',
+              "public support version",
+          ) or changed
+
+          changed = replace_once(
+              support_path,
+              '''const FORM = "[data-public-support-form]";
+          const SECTION_ID = "incidencia";
+          const SPAIN_PREFIX = "+34";'''.strip(),
+              '''const FORM = "[data-public-support-form]";
+          const SECTION_ID = "incidencia";
+          const PUBLIC_HOME_SESSION_EVENT = "public-home:session-hydrated";
+          const SPAIN_PREFIX = "+34";'''.strip(),
+              "public support session event",
+          ) or changed
+
+          changed = replace_once(
+              support_path,
+              '''function panelHref(current, user) {
+            const existing = text(first(current?.homePath, current?.defaultHome, ""));
+            if (existing.startsWith("/") && !existing.startsWith("//")) return existing;
+
+            const slug = text(first(current?.userSlug, user?.slug, user?.username, user?.usernameLower, ""))
+              .replace(/^@+/, "")
+              .replace(/[^a-zA-Z0-9._-]/g, "");
+
+            return slug ? `/@${encodeURIComponent(slug)}` : "/";
+          }'''.strip(),
+              '''function internalPanelPath(value = "") {
+            const raw = text(value, "");
+            if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "";
+
+            try {
+              const url = new URL(raw, window.location.origin);
+              const path = `${url.pathname}${url.search}${url.hash}`;
+
+              if (
+                url.origin !== window.location.origin ||
+                path === "/" ||
+                url.pathname === "/login"
+              ) {
+                return "";
+              }
+
+              return path;
+            } catch {
+              return "";
+            }
+          }
+
+          function panelHref(current, user) {
+            const fromState = internalPanelPath(first(
+              current?.homePath,
+              current?.defaultHome,
+              current?.postLoginTarget,
+              ""
+            ));
+
+            if (fromState) return fromState;
+
+            const slug = text(first(
+              current?.userSlug,
+              user?.slug,
+              user?.username,
+              user?.usernameLower,
+              user?.userId,
+              user?.id,
+              ""
+            ))
+              .replace(/^@+/, "")
+              .replace(/[^a-zA-Z0-9._-]/g, "");
+
+            return slug ? `/@${encodeURIComponent(slug)}` : "/dashboard";
+          }'''.strip(),
+              "canonical panel href",
+          ) or changed
+
+          changed = replace_once(
+              support_path,
+              '''  window.addEventListener("onion:main:ready", queueScan);
+            document.addEventListener("public-home:ready", queueScan, true);''',
+              '''  window.addEventListener("onion:main:ready", queueScan);
+            document.addEventListener(PUBLIC_HOME_SESSION_EVENT, queueScan, true);
+            document.addEventListener("public-home:ready", queueScan, true);''',
+              "public support hydrated listener",
+          ) or changed
+
+          changed = replace_once(
+              support_path,
+              '''  window.removeEventListener("onion:main:ready", queueScan);
+            document.removeEventListener("public-home:ready", queueScan, true);''',
+              '''  window.removeEventListener("onion:main:ready", queueScan);
+            document.removeEventListener(PUBLIC_HOME_SESSION_EVENT, queueScan, true);
+            document.removeEventListener("public-home:ready", queueScan, true);''',
+              "public support hydrated cleanup",
+          ) or changed
+
+          experience_path = Path("src/features/public-home-experience/index.js")
+          changed = replace_once(
+              experience_path,
+              '  "public-home.experience.v3-coalesced-observer";',
+              '  "public-home.experience.v4-canonical-session-handoff";',
+              "public home experience version",
+          ) or changed
+
+          changed = replace_once(
+              experience_path,
+              '''const ACCOUNT_TOGGLE = "[data-public-home-account-toggle]";
+          const LOGOUT_ACTION = "[data-public-home-logout]";
+          const PHONE_CONTROL = "[data-public-support-phone-control]";'''.strip(),
+              '''const ACCOUNT_TOGGLE = "[data-public-home-account-toggle]";
+          const LOGOUT_ACTION = "[data-public-home-logout]";
+          const PUBLIC_HOME_SESSION_EVENT = "public-home:session-hydrated";
+          const PHONE_CONTROL = "[data-public-support-phone-control]";'''.strip(),
+              "experience session event",
+          ) or changed
+
+          changed = replace_once(
+              experience_path,
+              '''function panelPath(link = null, state = {}) {
+            const stored = safePath(link?.dataset?.publicHomeAccountHome || "", "");
+            if (stored) return stored;
+
+            const fromLink = safePath(link?.getAttribute?.("href") || "", "");
+            if (fromLink && fromLink !== "/login") return fromLink;
+
+            const fromState = safePath(
+              state.homePath || state.defaultHome || state.postLoginTarget || "",
+              ""
+            );
+
+            if (fromState) return fromState;
+
+            const user = currentUser(state);
+            const slug = text(user?.slug || user?.username || user?.usernameLower || "")
+              .replace(/^@+/, "")
+              .replace(/[^a-zA-Z0-9._-]/g, "");
+
+            return slug ? `/@${encodeURIComponent(slug)}` : "/dashboard";
+          }'''.strip(),
+              '''function panelCandidate(value = "") {
+            const path = safePath(value, "");
+
+            if (
+              !path ||
+              path === "/" ||
+              path === "/login" ||
+              path.startsWith("/login?") ||
+              path.startsWith("/login#")
+            ) {
+              return "";
+            }
+
+            return path;
+          }
+
+          function panelPath(link = null, state = {}) {
+            const fromState = panelCandidate(
+              state.homePath || state.defaultHome || state.postLoginTarget || ""
+            );
+
+            if (fromState) return fromState;
+
+            const user = currentUser(state);
+            const slug = text(
+              state.userSlug ||
+              user?.slug ||
+              user?.username ||
+              user?.usernameLower ||
+              user?.userId ||
+              user?.id ||
+              ""
+            )
+              .replace(/^@+/, "")
+              .replace(/[^a-zA-Z0-9._-]/g, "");
+
+            if (slug) return `/@${encodeURIComponent(slug)}`;
+
+            const stored = panelCandidate(
+              link?.dataset?.publicHomeAccountHome || ""
+            );
+            if (stored) return stored;
+
+            const fromLink = panelCandidate(
+              link?.getAttribute?.("href") || ""
+            );
+            if (fromLink) return fromLink;
+
+            return "/dashboard";
+          }'''.strip(),
+              "canonical account menu panel path",
+          ) or changed
+
+          changed = replace_once(
+              experience_path,
+              '    routeLink("Inicio", homePath),',
+              '    routeLink("Inicio del panel", homePath),',
+              "panel home label",
+          ) or changed
+
+          changed = replace_once(
+              experience_path,
+              '''  window.addEventListener("onion:main:ready", queueScan);
+            document.addEventListener("public-home:ready", queueScan, true);''',
+              '''  window.addEventListener("onion:main:ready", queueScan);
+            document.addEventListener(PUBLIC_HOME_SESSION_EVENT, queueScan, true);
+            document.addEventListener("public-home:ready", queueScan, true);''',
+              "experience hydrated listener",
+          ) or changed
+
+          changed = replace_once(
+              experience_path,
+              '''  window.removeEventListener("onion:main:ready", queueScan);
+            document.removeEventListener("public-home:ready", queueScan, true);''',
+              '''  window.removeEventListener("onion:main:ready", queueScan);
+            document.removeEventListener(PUBLIC_HOME_SESSION_EVENT, queueScan, true);
+            document.removeEventListener("public-home:ready", queueScan, true);''',
+              "experience hydrated cleanup",
+          ) or changed
+
+          contract_path = Path(".github/scripts/public_home_session_handoff_contract.mjs")
+          contract_source = r'''import assert from "node:assert/strict";
+          import { readFileSync } from "node:fs";
+
+          const read = (path) => readFileSync(path, "utf8");
+
+          const app = read("src/app/index.js");
+          const auth = read("src/features/auth/index.js");
+          const router = read("src/router/index.js");
+          const support = read("src/features/public-support/index.js");
+          const experience = read("src/features/public-home-experience/index.js");
+
+          const delayMatch = app.match(/const PUBLIC_HYDRATION_DELAY_MS =\s*(\d+);/);
+          assert.ok(delayMatch, "App debe declarar el retardo de hidratación pública");
+
+          const hydrationDelay = Number(delayMatch[1]);
+          assert.ok(
+            Number.isFinite(hydrationDelay) && hydrationDelay >= 0 && hydrationDelay <= 500,
+            "La sesión pública debe empezar tras el primer paint, nunca varios segundos después"
+          );
+
+          assert.match(
+            app,
+            /const PUBLIC_HOME_SESSION_EVENT = "public-home:session-hydrated";/,
+            "App debe publicar un evento específico de sesión hidratada"
+          );
+
+          const hydrationStart = app.indexOf("function hydratePublicHomeInBackground");
+          const hydrationEnd = app.indexOf("function clearPublicHydrationSchedule", hydrationStart);
+          assert.ok(hydrationStart >= 0 && hydrationEnd > hydrationStart, "Falta el flujo de hidratación pública");
+
+          const hydration = app.slice(hydrationStart, hydrationEnd);
+          const authInitIndex = hydration.indexOf("await initAuth(payload);");
+          const restoreIndex = hydration.indexOf("const restored = await restoreAuth(payload);");
+          const notifyIndex = hydration.indexOf("notifyPublicHomeSessionHydrated();");
+          const toastIndex = hydration.indexOf("await initToast(payload);");
+
+          assert.ok(authInitIndex >= 0, "La home pública debe registrar Auth antes del restore");
+          assert.ok(restoreIndex > authInitIndex, "Auth.init debe preceder a Auth.restoreSession");
+          assert.ok(notifyIndex > restoreIndex, "La interfaz sólo se sincroniza después del restore");
+          assert.ok(toastIndex > notifyIndex, "Toast no puede bloquear identidad ni navegación privada");
+
+          assert.match(
+            app,
+            /PUBLIC_HOME_SESSION_EVENT,[\s\S]*?"public-home:ready"/,
+            "El handoff debe emitir el evento específico y conservar compatibilidad"
+          );
+
+          const fastPathStart = app.indexOf("if (publicFastBoot)");
+          const fastPathEnd = app.indexOf("/*\n    Orden contractual para rutas no fast-path", fastPathStart);
+          const fastPath = app.slice(fastPathStart, fastPathEnd);
+          assert.ok(
+            fastPath.indexOf("markReady();") < fastPath.indexOf("schedulePublicHomeHydration("),
+            "El primer render público debe completarse antes de iniciar la restauración en background"
+          );
+
+          assert.match(
+            auth,
+            /AppCore\.registerModule\("auth", Auth, \{ overwrite: true \}\)/,
+            "Auth.init debe registrar el módulo que consume Router"
+          );
+          assert.match(
+            router,
+            /AppCore\.getModule\?\.\("auth"\)/,
+            "Router debe autorizar rutas privadas mediante el módulo Auth registrado"
+          );
+
+          assert.match(
+            support,
+            /function internalPanelPath\(value = ""\)/,
+            "Public Support debe validar el destino privado"
+          );
+          assert.match(
+            support,
+            /path === "\/"[\s\S]*?url\.pathname === "\/login"/,
+            "Public Support debe rechazar home pública y login como panel"
+          );
+          assert.match(
+            support,
+            /current\?\.postLoginTarget/,
+            "Public Support debe contemplar el destino autenticado canónico"
+          );
+          assert.match(
+            support,
+            /return slug \? `\/@\$\{encodeURIComponent\(slug\)\}` : "\/dashboard";/,
+            "Public Support debe derivar un panel real cuando el estado aún conserva /"
+          );
+          assert.match(
+            support,
+            /document\.addEventListener\(PUBLIC_HOME_SESSION_EVENT, queueScan, true\)/,
+            "Public Support debe refrescar identidad al terminar el restore"
+          );
+
+          const panelPathStart = experience.indexOf("function panelPath(");
+          const panelPathEnd = experience.indexOf("function compactDisplayName", panelPathStart);
+          assert.ok(panelPathStart >= 0 && panelPathEnd > panelPathStart, "Falta panelPath en Public Home Experience");
+
+          const panelPath = experience.slice(panelPathStart, panelPathEnd);
+          const stateIndex = panelPath.indexOf("const fromState = panelCandidate(");
+          const slugIndex = panelPath.indexOf("const slug = text(");
+          const storedIndex = panelPath.indexOf("const stored = panelCandidate(");
+          const linkIndex = panelPath.indexOf("const fromLink = panelCandidate(");
+
+          assert.ok(stateIndex >= 0, "El menú debe priorizar el estado autenticado actual");
+          assert.ok(slugIndex > stateIndex, "El slug debe resolver el panel cuando el estado aún vale /");
+          assert.ok(storedIndex > slugIndex, "Un cache anterior nunca debe ganar al estado/slug actual");
+          assert.ok(linkIndex > storedIndex, "El href histórico debe ser el último fallback interno");
+
+          assert.match(
+            experience,
+            /path === "\/"[\s\S]*?path === "\/login"/,
+            "El menú debe rechazar / y /login como destinos de panel"
+          );
+          assert.match(
+            experience,
+            /routeLink\("Inicio del panel", homePath\)/,
+            "El acceso directo debe expresar inequívocamente que abre el panel"
+          );
+          assert.match(
+            experience,
+            /document\.addEventListener\(PUBLIC_HOME_SESSION_EVENT, queueScan, true\)/,
+            "El menú debe reconstruirse al terminar la hidratación de sesión"
+          );
+
+          for (const [name, source] of [
+            ["app", app],
+            ["public-support", support],
+            ["public-home-experience", experience],
+          ]) {
+            assert.equal(source.includes("setInterval("), false, `${name} no puede resolver sesión mediante polling`);
+          }
+
+          console.log("✅ public home session handoff contract (fast restore · Auth registered · canonical panel route)");
+          '''.replace("          ", "")
+
+          if not contract_path.exists() or contract_path.read_text(encoding="utf-8") != contract_source:
+              contract_path.write_text(contract_source, encoding="utf-8")
+              changed = True
+
+          validate_path = Path(".github/ci/validate_spa_contracts.sh")
+          validate_source = validate_path.read_text(encoding="utf-8")
+          contract_call = "node .github/scripts/public_home_session_handoff_contract.mjs\n"
+          contract_anchor = "node .github/scripts/private_runtime_auth_contract.mjs\n"
+
+          if contract_call not in validate_source:
+              if validate_source.count(contract_anchor) != 1:
+                  raise SystemExit("SPA contract insertion anchor is missing or ambiguous")
+              validate_source = validate_source.replace(
+                  contract_anchor,
+                  contract_anchor + contract_call,
+                  1,
+              )
+              validate_path.write_text(validate_source, encoding="utf-8")
+              changed = True
+
+          print("source changes applied" if changed else "source already converged")
+          PY
+
+      - name: Validate exact handoff contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/app/index.js
+          node --check src/features/public-support/index.js
+          node --check src/features/public-home-experience/index.js
+          node --check .github/scripts/public_home_session_handoff_contract.mjs
+          node .github/scripts/public_home_session_handoff_contract.mjs
+          bash .github/ci/validate_spa_contracts.sh
+          git diff --check
+
+      - name: Commit source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet; then
+            echo "Branch already contains the requested source changes."
+            exit 0
+          fi
+
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git add \
+            src/app/index.js \
+            src/features/public-support/index.js \
+            src/features/public-home-experience/index.js \
+            .github/scripts/public_home_session_handoff_contract.mjs \
+            .github/ci/validate_spa_contracts.sh
+          git commit -m "fix(public): acelerar sesión y corregir acceso al panel"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

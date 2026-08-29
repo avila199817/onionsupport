@@ -279,9 +279,9 @@ function formSection() {
         </p>
 
         <div class="public-support-flow" aria-label="Qué ocurrirá después">
-          <div class="public-support-flow-item"><span>01</span><div><strong>Vinculamos el caso</strong><p>Si reconocemos tu correo o teléfono, usamos esa misma cuenta sin sobrescribir tus datos.</p></div></div>
-          <div class="public-support-flow-item"><span>02</span><div><strong>Creamos tu acceso si hace falta</strong><p>Solo si no existe usuario, creamos un usuario pendiente y enviamos el enlace seguro para definir la contraseña.</p></div></div>
-          <div class="public-support-flow-item"><span>03</span><div><strong>Cliente, solo por Onion Support</strong><p>La home no crea fichas de cliente. El equipo de Onion Support las gestiona después cuando corresponda.</p></div></div>
+          <div class="public-support-flow-item"><span>1</span><div><strong>Vinculamos el caso</strong><p>Si reconocemos tu correo o teléfono, usamos esa misma cuenta sin sobrescribir tus datos.</p></div></div>
+          <div class="public-support-flow-item"><span>2</span><div><strong>Creamos tu acceso si hace falta</strong><p>Solo si no existe usuario, creamos un usuario pendiente y enviamos el enlace seguro para definir la contraseña.</p></div></div>
+          <div class="public-support-flow-item"><span>3</span><div><strong>Cliente, solo por Onion Support</strong><p>La home no crea fichas de cliente. El equipo de Onion Support las gestiona después cuando corresponda.</p></div></div>
         </div>
 
         <figure class="public-support-person">

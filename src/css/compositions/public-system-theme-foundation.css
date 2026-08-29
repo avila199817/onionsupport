@@ -1,0 +1,233 @@
+/* =========================================================
+   ONION SUPPORT — PUBLIC SYSTEM THEME · FOUNDATION
+   Archivo: /src/css/compositions/public-system-theme-foundation.css
+
+   PUBLIC SYSTEM THEME COMPOSITION · HOME + AUTH · 2026
+
+   Contrato:
+   - Composición transversal: sólo overrides visuales del tema claro.
+   - Se activa mediante el tema efectivo aplicado por /src/preboot/theme.js.
+   - themeMode="system" sigue prefers-color-scheme y reacciona al SO.
+   - Cubre Home pública, intake, progreso y todas las rutas Auth públicas.
+   - Conserva el azul Onion Support; light no se convierte en gris genérico.
+   - No modifica geometría, DOM, Auth, Router, Store ni comportamiento.
+   - Sin prioridades forzadas, estilos inline, assets externos ni fuentes remotas.
+========================================================= */
+
+/* =========================================================
+   1. LIGHT TOKENS / DOCUMENT CANVAS
+========================================================= */
+
+html:is([data-theme="light"], .theme-light) {
+  color-scheme: light;
+
+  --public-light-canvas: #f4f7fb;
+  --public-light-canvas-strong: #ffffff;
+  --public-light-canvas-soft: #edf3f9;
+
+  --public-light-text: #142338;
+  --public-light-text-strong: #081423;
+  --public-light-text-soft: #52667c;
+  --public-light-text-muted: #708298;
+
+  --public-light-border: rgb(18 57 94 / .12);
+  --public-light-border-strong: rgb(19 148 255 / .34);
+
+  --public-light-surface: rgb(255 255 255 / .80);
+  --public-light-surface-strong: rgb(255 255 255 / .94);
+  --public-light-surface-soft: rgb(244 249 254 / .86);
+
+  --public-light-shadow:
+    0 28px 78px rgb(31 67 103 / .14),
+    0 12px 30px rgb(19 148 255 / .07),
+    inset 0 1px 0 rgb(255 255 255 / .92);
+}
+
+html:is([data-theme="light"], .theme-light) body.public-home-screen,
+html:is([data-theme="light"], .theme-light) body.auth-screen,
+html:is([data-theme="light"], .theme-light) body.auth-screen.public-home-screen {
+  color: var(--public-light-text);
+  background: var(--public-light-canvas);
+}
+
+/* =========================================================
+   2. PUBLIC HOME · ROOT / ATMOSPHERE
+========================================================= */
+
+html:is([data-theme="light"], .theme-light) .public-auth-shell--home {
+  --public-home-bg: #f4f7fb;
+  --public-home-bg-2: #edf3f9;
+
+  --public-home-surface: rgb(255 255 255 / .78);
+  --public-home-surface-strong: rgb(255 255 255 / .94);
+  --public-home-card: rgb(255 255 255 / .82);
+  --public-home-card-hover: rgb(247 251 255 / .97);
+
+  --public-home-text: #142338;
+  --public-home-text-strong: #081423;
+  --public-home-text-soft: #52667c;
+  --public-home-text-muted: #708298;
+
+  --public-home-border: rgb(18 57 94 / .12);
+  --public-home-border-strong: rgb(19 148 255 / .34);
+
+  --public-home-shadow:
+    0 30px 86px rgb(31 67 103 / .14),
+    0 12px 32px rgb(19 148 255 / .07),
+    inset 0 1px 0 rgb(255 255 255 / .90);
+
+  color: var(--public-home-text);
+  background: var(--public-home-bg);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home {
+  color: var(--public-home-text);
+  background:
+    radial-gradient(
+      circle at var(--public-home-pointer-x, 74%) var(--public-home-pointer-y, 18%),
+      rgb(19 148 255 / .10),
+      transparent 32%
+    ),
+    linear-gradient(135deg, #ffffff 0%, #f4f8fc 48%, #eaf1f8 100%);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home ::selection {
+  color: #ffffff;
+  background: rgb(19 148 255 / .66);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home-background {
+  background:
+    radial-gradient(circle at 12% 8%, rgb(19 148 255 / .14), transparent 34%),
+    radial-gradient(circle at 86% 14%, rgb(52 212 255 / .10), transparent 30%),
+    radial-gradient(circle at 74% 90%, rgb(11 97 255 / .08), transparent 38%),
+    linear-gradient(135deg, #ffffff 0%, #f5f9fd 52%, #eaf1f8 100%);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home-bg-orb {
+  opacity: .34;
+}
+
+html:is([data-theme="light"], .theme-light) .public-home-bg-orb--one {
+  background: rgb(19 148 255 / .22);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home-bg-orb--two {
+  background: rgb(52 212 255 / .16);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home-bg-orb--three {
+  background: rgb(11 97 255 / .10);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home-bg-grid {
+  opacity: .24;
+  background:
+    linear-gradient(90deg, rgb(17 54 88 / .045) 1px, transparent 1px),
+    linear-gradient(180deg, rgb(17 54 88 / .040) 1px, transparent 1px),
+    linear-gradient(45deg, transparent 48%, rgb(19 148 255 / .055) 50%, transparent 52%);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home-bg-noise {
+  opacity: .10;
+  background:
+    radial-gradient(circle at 20% 30%, rgb(17 54 88 / .12) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 80% 70%, rgb(19 148 255 / .14) 0 1px, transparent 1.5px);
+}
+
+/* =========================================================
+   3. PUBLIC HOME · SCROLLBAR / NAVIGATION
+========================================================= */
+
+html:is([data-theme="light"], .theme-light) .public-home-scrollbar {
+  border-color: rgb(19 148 255 / .28);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / .92), rgb(241 247 253 / .80)),
+    rgb(255 255 255 / .76);
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / .82),
+    0 10px 28px rgb(31 67 103 / .12),
+    inset 0 1px 0 rgb(255 255 255 / .96),
+    inset 0 -1px 0 rgb(17 54 88 / .08);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home-scrollbar::before {
+  opacity: .28;
+}
+
+html:is([data-theme="light"], .theme-light) .public-home-scrollbar-thumb {
+  border-color: rgb(255 255 255 / .84);
+  box-shadow:
+    0 0 0 1px rgb(19 148 255 / .08),
+    0 10px 24px rgb(19 148 255 / .22),
+    0 0 34px rgb(52 212 255 / .18),
+    inset 0 1px 0 rgb(255 255 255 / .88),
+    inset 0 -10px 20px rgb(7 92 255 / .20);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home-nav {
+  border-block-end-color: rgb(18 57 94 / .10);
+  background: rgb(255 255 255 / .82);
+  box-shadow: 0 16px 46px rgb(31 67 103 / .10);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home-nav.is-scrolled {
+  background: rgb(255 255 255 / .94);
+  box-shadow:
+    0 18px 50px rgb(31 67 103 / .13),
+    0 1px 0 rgb(19 148 255 / .07);
+}
+
+html:is([data-theme="light"], .theme-light) :is(
+  .public-home-brand,
+  .public-home-footer-brand,
+  .public-home-brand-name
+) {
+  color: var(--public-home-text-strong);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home-brand-mark {
+  border-color: rgb(19 148 255 / .18);
+  box-shadow:
+    0 12px 30px rgb(19 148 255 / .20),
+    inset 0 1px 0 rgb(255 255 255 / .34);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home-brand-logo {
+  filter: drop-shadow(0 7px 12px rgb(18 55 92 / .15));
+}
+
+html:is([data-theme="light"], .theme-light) .public-home-nav-link {
+  color: var(--public-home-text-soft);
+}
+
+html:is([data-theme="light"], .theme-light) :is(
+  .public-home-nav-link:hover,
+  .public-home-nav-link.is-active,
+  .public-home-nav-link[aria-current="page"]
+) {
+  color: var(--public-home-text-strong);
+  text-shadow: 0 0 20px rgb(19 148 255 / .14);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home-login-link {
+  color: var(--public-home-text-soft);
+  border-color: rgb(18 57 94 / .12);
+  background: rgb(255 255 255 / .66);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .86);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home-login-link:hover {
+  color: var(--public-home-text-strong);
+  border-color: rgb(19 148 255 / .30);
+  background: rgb(19 148 255 / .07);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home-nav-toggle {
+  color: var(--public-home-text-strong);
+  border-color: rgb(18 57 94 / .13);
+  background: rgb(255 255 255 / .76);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .92);
+}
+
+/* =========================================================

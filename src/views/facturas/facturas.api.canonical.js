@@ -11,7 +11,9 @@ import AliasCoreDefault, * as AliasCore from "./facturas.api.alias-core.js";
 export * from "./facturas.api.alias-core.js";
 
 export const FACTURA_RAW_ALIAS_RECONCILIATION_VERSION =
-  "facturas.api.raw-alias-reconciliation.v4";
+  "facturas.api.raw-alias-reconciliation.v5";
+
+const TECHNICAL_PREFIX = "FACTURA_CREATE_IDEMP_";
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -19,6 +21,10 @@ function isObject(value) {
 
 function text(value = "") {
   return String(value ?? "").trim();
+}
+
+function isTechnicalIdentifier(value = "") {
+  return text(value).startsWith(TECHNICAL_PREFIX);
 }
 
 function finiteNumber(value) {
@@ -34,6 +40,47 @@ function technicalVersion(value = "") {
 
   return normalized.includes("idempotency") ||
     normalized.includes("idempotencia");
+}
+
+function canonicalIdFrom(value = {}) {
+  for (const candidate of [
+    value.id,
+    value.facturaId,
+    value.invoiceId,
+    value.canonicalFacturaId,
+    value.committedFacturaId,
+  ]) {
+    const id = text(candidate);
+    if (id && !isTechnicalIdentifier(id)) return id;
+  }
+
+  return "";
+}
+
+function legalNumberFromCanonicalId(value = "") {
+  const match = text(value).match(/^FAC-(\d{10})-/i);
+  return match?.[1] || "";
+}
+
+function canonicalLegalNumber(value = {}, canonicalId = "") {
+  const derived = legalNumberFromCanonicalId(canonicalId);
+  if (derived) return derived;
+
+  for (const candidate of [
+    value.numeroFacturaLegal,
+    value.legalInvoiceNumber,
+    value.legalNumber,
+    value.numeroFactura,
+    value.invoiceNumber,
+    value.number,
+    value.numeroFacturaSistema,
+    canonicalId,
+  ]) {
+    const number = text(candidate);
+    if (number && !isTechnicalIdentifier(number)) return number;
+  }
+
+  return canonicalId;
 }
 
 function stripTechnicalProjection(value = null, depth = 0, seen = new WeakSet()) {
@@ -63,6 +110,25 @@ function stripTechnicalProjection(value = null, depth = 0, seen = new WeakSet())
     delete output.meta.operationHash;
     delete output.meta.payloadHash;
     delete output.meta.idempotencyVersion;
+  }
+
+  const canonicalId = canonicalIdFrom(output);
+  if (canonicalId) {
+    output.id = canonicalId;
+    output.facturaId = canonicalId;
+    output.invoiceId = canonicalId;
+
+    const legalNumber = canonicalLegalNumber(output, canonicalId);
+    if (legalNumber) {
+      output.numeroFacturaLegal = legalNumber;
+      output.numeroFactura = legalNumber;
+      output.invoiceNumber = legalNumber;
+      output.number = legalNumber;
+    }
+  }
+
+  for (const name of ["_id", "operationId"]) {
+    if (isTechnicalIdentifier(output[name])) delete output[name];
   }
 
   if (isObject(output.raw)) {

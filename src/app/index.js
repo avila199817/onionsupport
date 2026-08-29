@@ -30,14 +30,15 @@ import {
 } from "./loader.js";
 
 export const APP_VERSION =
-  "app.minimal.v8-private-runtime-after-guard";
+  "app.minimal.v9-public-session-handoff";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
 const PUBLIC_HOME_PATH = "/";
-const PUBLIC_HYDRATION_DELAY_MS = 7000;
+const PUBLIC_HOME_SESSION_EVENT = "public-home:session-hydrated";
+const PUBLIC_HYDRATION_DELAY_MS = 120;
 const PUBLIC_HYDRATION_INTERACTION_EVENTS =
   Object.freeze(["pointerdown", "keydown", "touchstart"]);
 
@@ -780,14 +781,23 @@ async function restoreAuth(
 function notifyPublicHomeSessionHydrated() {
   if (!isBrowser()) return false;
 
-  try {
-    document.dispatchEvent(
-      new Event("public-home:ready")
-    );
-    return true;
-  } catch {
-    return false;
+  let notified = false;
+
+  for (const eventName of [
+    PUBLIC_HOME_SESSION_EVENT,
+    "public-home:ready",
+  ]) {
+    try {
+      document.dispatchEvent(
+        new Event(eventName)
+      );
+      notified = true;
+    } catch {
+      // Cada notificación mantiene su propio límite de fallo.
+    }
   }
+
+  return notified;
 }
 
 function hydratePublicHomeInBackground(
@@ -798,13 +808,26 @@ function hydratePublicHomeInBackground(
   }
 
   publicHydrationPromise = (async () => {
-    await initToast(payload);
+    /*
+      Router consulta el módulo Auth registrado para autorizar rutas
+      privadas. Importarlo sin init dejaba Core hidratado, pero al
+      Router todavía en estado invitado.
+    */
+    await initAuth(payload);
     const restored = await restoreAuth(payload);
 
     /* La home pública nunca activa Sidebar/Topbar, incluso con sesión restaurada. */
     void restored;
 
     notifyPublicHomeSessionHydrated();
+
+    /* Toast es progresivo y nunca retrasa identidad ni navegación. */
+    try {
+      await initToast(payload);
+    } catch {
+      // Mejora opcional: la sesión ya quedó entregada a la interfaz.
+    }
+
     return true;
   })()
     .catch((error) => {

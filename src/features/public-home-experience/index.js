@@ -14,7 +14,7 @@
 import { AppCore } from "../../core/index.js";
 
 export const PUBLIC_HOME_EXPERIENCE_VERSION =
-  "public-home.experience.v3-coalesced-observer";
+  "public-home.experience.v4-canonical-session-handoff";
 
 const HOME = "[data-public-home]";
 const FORM = "[data-public-support-form]";
@@ -24,6 +24,7 @@ const ACCOUNT_WRAP = "[data-public-home-account-wrap]";
 const ACCOUNT_MENU = "[data-public-home-account-menu]";
 const ACCOUNT_TOGGLE = "[data-public-home-account-toggle]";
 const LOGOUT_ACTION = "[data-public-home-logout]";
+const PUBLIC_HOME_SESSION_EVENT = "public-home:session-hydrated";
 const PHONE_CONTROL = "[data-public-support-phone-control]";
 
 const SPAIN_PREFIX = "+34";
@@ -78,26 +79,55 @@ function safePath(value = "", fallback = "/") {
   }
 }
 
+function panelCandidate(value = "") {
+  const path = safePath(value, "");
+
+  if (
+    !path ||
+    path === "/" ||
+    path === "/login" ||
+    path.startsWith("/login?") ||
+    path.startsWith("/login#")
+  ) {
+    return "";
+  }
+
+  return path;
+}
+
 function panelPath(link = null, state = {}) {
-  const stored = safePath(link?.dataset?.publicHomeAccountHome || "", "");
-  if (stored) return stored;
-
-  const fromLink = safePath(link?.getAttribute?.("href") || "", "");
-  if (fromLink && fromLink !== "/login") return fromLink;
-
-  const fromState = safePath(
-    state.homePath || state.defaultHome || state.postLoginTarget || "",
-    ""
+  const fromState = panelCandidate(
+    state.homePath || state.defaultHome || state.postLoginTarget || ""
   );
 
   if (fromState) return fromState;
 
   const user = currentUser(state);
-  const slug = text(user?.slug || user?.username || user?.usernameLower || "")
+  const slug = text(
+    state.userSlug ||
+    user?.slug ||
+    user?.username ||
+    user?.usernameLower ||
+    user?.userId ||
+    user?.id ||
+    ""
+  )
     .replace(/^@+/, "")
     .replace(/[^a-zA-Z0-9._-]/g, "");
 
-  return slug ? `/@${encodeURIComponent(slug)}` : "/dashboard";
+  if (slug) return `/@${encodeURIComponent(slug)}`;
+
+  const stored = panelCandidate(
+    link?.dataset?.publicHomeAccountHome || ""
+  );
+  if (stored) return stored;
+
+  const fromLink = panelCandidate(
+    link?.getAttribute?.("href") || ""
+  );
+  if (fromLink) return fromLink;
+
+  return "/dashboard";
 }
 
 function compactDisplayName(value = "") {
@@ -222,7 +252,7 @@ function buildAccountMenu(wrapper, homePath) {
   menu.setAttribute("aria-hidden", "true");
 
   menu.append(
-    routeLink("Inicio", homePath),
+    routeLink("Inicio del panel", homePath),
     routeLink("Incidencias", "/incidencias"),
     routeLink("Facturas", "/facturas"),
     routeLink("Cuenta", "/cuenta")
@@ -744,6 +774,7 @@ function install() {
   document.addEventListener("focusout", onFocusOut, true);
 
   window.addEventListener("onion:main:ready", queueScan);
+  document.addEventListener(PUBLIC_HOME_SESSION_EVENT, queueScan, true);
   document.addEventListener("public-home:ready", queueScan, true);
 
   const mount =
@@ -769,6 +800,7 @@ export function destroyPublicHomeExperience() {
   document.removeEventListener("focusout", onFocusOut, true);
 
   window.removeEventListener("onion:main:ready", queueScan);
+  document.removeEventListener(PUBLIC_HOME_SESSION_EVENT, queueScan, true);
   document.removeEventListener("public-home:ready", queueScan, true);
 
   observer?.disconnect();

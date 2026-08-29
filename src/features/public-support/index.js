@@ -22,7 +22,7 @@ import { AppCore } from "../../core/index.js";
 import Http from "../../core/http.js";
 
 export const PUBLIC_SUPPORT_VERSION =
-  "public-support.intake.v9-structured-address";
+  "public-support.intake.v10-canonical-panel-handoff";
 export const PUBLIC_TICKET_ENDPOINT = "/api/tickets/public";
 const PUBLIC_SUPPORT_TECHNICIAN_PHOTO = "/src/media/img/Cristian_Avila_Formulario.png";
 const PUBLIC_SUPPORT_TECHNICIAN_PHOTO_WEBP_480 =
@@ -34,6 +34,7 @@ const VIEW_ROOT_SELECTOR = "#view-container, [data-router-view='true']";
 const HOME = "[data-public-home]";
 const FORM = "[data-public-support-form]";
 const SECTION_ID = "incidencia";
+const PUBLIC_HOME_SESSION_EVENT = "public-home:session-hydrated";
 const SPAIN_PREFIX = "+34";
 const ACTIVE_TICKET_ERROR_CODES = new Set([
   "PUBLIC_TICKET_ACTIVE_EXISTS",
@@ -165,15 +166,51 @@ function initials(name) {
     .join("") || "OS";
 }
 
-function panelHref(current, user) {
-  const existing = text(first(current?.homePath, current?.defaultHome, ""));
-  if (existing.startsWith("/") && !existing.startsWith("//")) return existing;
+function internalPanelPath(value = "") {
+  const raw = text(value, "");
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "";
 
-  const slug = text(first(current?.userSlug, user?.slug, user?.username, user?.usernameLower, ""))
+  try {
+    const url = new URL(raw, window.location.origin);
+    const path = `${url.pathname}${url.search}${url.hash}`;
+
+    if (
+      url.origin !== window.location.origin ||
+      path === "/" ||
+      url.pathname === "/login"
+    ) {
+      return "";
+    }
+
+    return path;
+  } catch {
+    return "";
+  }
+}
+
+function panelHref(current, user) {
+  const fromState = internalPanelPath(first(
+    current?.homePath,
+    current?.defaultHome,
+    current?.postLoginTarget,
+    ""
+  ));
+
+  if (fromState) return fromState;
+
+  const slug = text(first(
+    current?.userSlug,
+    user?.slug,
+    user?.username,
+    user?.usernameLower,
+    user?.userId,
+    user?.id,
+    ""
+  ))
     .replace(/^@+/, "")
     .replace(/[^a-zA-Z0-9._-]/g, "");
 
-  return slug ? `/@${encodeURIComponent(slug)}` : "/";
+  return slug ? `/@${encodeURIComponent(slug)}` : "/dashboard";
 }
 
 function identityNode(name, src) {
@@ -1079,6 +1116,7 @@ function install() {
   bindFormEvents(root);
 
   window.addEventListener("onion:main:ready", queueScan);
+  document.addEventListener(PUBLIC_HOME_SESSION_EVENT, queueScan, true);
   document.addEventListener("public-home:ready", queueScan, true);
 
   observer = new MutationObserver(queueScan);
@@ -1094,6 +1132,7 @@ export function destroyPublicSupport() {
 
   unbindFormEvents(mountRoot);
   window.removeEventListener("onion:main:ready", queueScan);
+  document.removeEventListener(PUBLIC_HOME_SESSION_EVENT, queueScan, true);
   document.removeEventListener("public-home:ready", queueScan, true);
 
   observer?.disconnect();

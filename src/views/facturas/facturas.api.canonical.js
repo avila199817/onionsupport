@@ -11,19 +11,29 @@ import AliasCoreDefault, * as AliasCore from "./facturas.api.alias-core.js";
 export * from "./facturas.api.alias-core.js";
 
 export const FACTURA_RAW_ALIAS_RECONCILIATION_VERSION =
-  "facturas.api.raw-alias-reconciliation.v1";
+  "facturas.api.raw-alias-reconciliation.v2";
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+function finiteNumber(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function reconcileArray(items = []) {
   const output = [];
   const seen = new Set();
+  let removed = 0;
 
   for (const raw of Array.isArray(items) ? items : []) {
     const item = AliasCore.canonicalizeFacturaListItem(raw);
-    if (!item) continue;
+    if (!item) {
+      removed += 1;
+      continue;
+    }
 
     const id = String(
       item.id ||
@@ -33,21 +43,71 @@ function reconcileArray(items = []) {
       ""
     ).trim();
 
-    if (id && seen.has(id)) continue;
+    if (id && seen.has(id)) {
+      removed += 1;
+      continue;
+    }
+
     if (id) seen.add(id);
     output.push(item);
   }
 
-  return output;
+  return { items: output, removed };
+}
+
+function primaryItems(value = {}) {
+  for (const name of [
+    "items",
+    "facturas",
+    "invoices",
+    "rows",
+    "records",
+    "results",
+    "docs",
+    "documents",
+    "value",
+    "list",
+    "data",
+  ]) {
+    if (Array.isArray(value?.[name])) return value[name];
+  }
+
+  return [];
+}
+
+function adjustCountFields(value = {}, removed = 0, minimum = 0) {
+  if (!isObject(value) || removed <= 0) return value;
+
+  let output = value;
+  let changed = false;
+
+  for (const name of [
+    "count",
+    "returned",
+    "total",
+    "totalCount",
+    "remoteCount",
+    "totalMatched",
+  ]) {
+    const current = finiteNumber(value[name]);
+    if (current === null) continue;
+
+    if (!changed) output = { ...value };
+    output[name] = Math.max(minimum, current - removed);
+    changed = true;
+  }
+
+  return changed ? output : value;
 }
 
 function reconcilePayload(value = null, depth = 0, seen = new WeakSet()) {
-  if (Array.isArray(value)) return reconcileArray(value);
+  if (Array.isArray(value)) return reconcileArray(value).items;
   if (!isObject(value) || depth > 4 || seen.has(value)) return value;
   seen.add(value);
 
   let output = value;
   let changed = false;
+  let removed = 0;
 
   for (const name of [
     "items",
@@ -62,33 +122,50 @@ function reconcilePayload(value = null, depth = 0, seen = new WeakSet()) {
     "list",
   ]) {
     if (!Array.isArray(value[name])) continue;
+
+    const reconciled = reconcileArray(value[name]);
     if (!changed) output = { ...value };
-    output[name] = reconcileArray(value[name]);
+    output[name] = reconciled.items;
     changed = true;
+    removed = Math.max(removed, reconciled.removed);
   }
 
   if (Array.isArray(value.data)) {
+    const reconciled = reconcileArray(value.data);
     if (!changed) output = { ...value };
-    output.data = reconcileArray(value.data);
+    output.data = reconciled.items;
     changed = true;
+    removed = Math.max(removed, reconciled.removed);
   }
 
   for (const name of ["data", "payload", "result"]) {
     if (!isObject(value[name])) continue;
     const nested = reconcilePayload(value[name], depth + 1, seen);
     if (nested === value[name]) continue;
+
     if (!changed) output = { ...value };
     output[name] = nested;
     changed = true;
   }
 
-  if (changed) {
-    output.meta = {
-      ...(isObject(value.meta) ? value.meta : {}),
-      rawAliasReconciliationVersion:
-        FACTURA_RAW_ALIAS_RECONCILIATION_VERSION,
-    };
+  if (!changed) return value;
+
+  const minimum = primaryItems(output).length;
+  if (removed > 0) {
+    output = adjustCountFields(output, removed, minimum);
+
+    for (const name of ["meta", "paging", "pagination", "page"]) {
+      if (!isObject(output[name])) continue;
+      output[name] = adjustCountFields(output[name], removed, minimum);
+    }
   }
+
+  output.meta = {
+    ...(isObject(output.meta) ? output.meta : {}),
+    rawAliasReconciliationVersion:
+      FACTURA_RAW_ALIAS_RECONCILIATION_VERSION,
+    rawAliasRecordsReconciled: removed,
+  };
 
   return output;
 }

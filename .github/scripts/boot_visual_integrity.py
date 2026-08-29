@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guard the boot paint barrier, cold-boot DOM and public-home SEO signals."""
+"""Guard the boot paint barrier, loader surface, cold-boot DOM and public-home SEO signals."""
 
 from __future__ import annotations
 
@@ -16,8 +16,10 @@ ROOT = Path(
     )
 ).resolve()
 LOADER = ROOT / "src/app/loader.js"
+LOADER_CSS = ROOT / "src/css/core/loader.css"
 ROUTE_STYLES = ROOT / "src/router/styles.js"
 INDEX = ROOT / "index.html"
+LOGIN = ROOT / "login.html"
 HOME_TEMPLATE = ROOT / "src/views/public/home/template.js"
 
 PUBLIC_SERVICE_PATHS = (
@@ -114,10 +116,19 @@ class BootHtmlParser(HTMLParser):
             self.view_container_has_content = True
 
 
+def strip_css_comments(source: str) -> str:
+    """Return executable CSS so comments cannot satisfy or break contracts."""
+
+    return re.sub(r"/\*[\s\S]*?\*/", "", source)
+
+
 def main() -> int:
     loader = LOADER.read_text(encoding="utf-8")
+    loader_css = LOADER_CSS.read_text(encoding="utf-8")
+    executable_loader_css = strip_css_comments(loader_css)
     styles = ROUTE_STYLES.read_text(encoding="utf-8")
     index = INDEX.read_text(encoding="utf-8")
+    login = LOGIN.read_text(encoding="utf-8")
     home_template = HOME_TEMPLATE.read_text(encoding="utf-8")
     errors: list[str] = []
 
@@ -153,6 +164,91 @@ def main() -> int:
             errors.append("hideLoader() no puede retirar el loader inmediatamente")
         if "setTimeout" in body:
             errors.append("hideLoader() no puede usar una espera temporal arbitraria")
+
+    required_loader_css = {
+        "PRODUCCIÓN · SOLID CANVAS · GLASS BRAND · V1":
+            "loader.css debe declarar el contrato visual solid/glass",
+        "--loader-canvas: #0a0c11;":
+            "el loader dark debe usar el canvas sólido canónico",
+        "--loader-canvas: #ffffff;":
+            "el loader light debe usar el canvas sólido canónico",
+        "background: var(--loader-canvas);":
+            "el viewport del loader debe pintar exclusivamente su canvas",
+        "--loader-brand-surface:":
+            "falta la superficie translúcida del logo",
+        "backdrop-filter: blur(18px) saturate(1.08);":
+            "falta el vidrio del logo en navegadores estándar",
+        "-webkit-backdrop-filter: blur(18px) saturate(1.08);":
+            "falta el vidrio del logo en Safari",
+        "@keyframes loaderLogoBreathe":
+            "el loader sin texto necesita una señal de actividad mínima",
+        "@media (prefers-reduced-motion: reduce)":
+            "el movimiento del logo debe respetar reduced motion",
+        "@media (prefers-reduced-transparency: reduce)":
+            "la superficie del logo debe respetar reduced transparency",
+        "@media (forced-colors: active)":
+            "el loader debe conservar contraste forzado",
+    }
+
+    for token, message in required_loader_css.items():
+        if token not in loader_css:
+            errors.append(message)
+
+    forbidden_loader_css = {
+        "gradient(": "el fondo del loader debe ser sólido, sin gradientes",
+        "mask-image": "el loader no puede reconstruir máscaras decorativas",
+        "-webkit-mask-image": "el loader no puede reconstruir máscaras decorativas WebKit",
+        "::before": "el loader no puede añadir pseudo-elementos decorativos",
+        "::after": "el loader no puede añadir pseudo-elementos decorativos",
+        "background-size": "el loader no puede reintroducir rejillas o patrones",
+        "loaderSpin": "el logo no puede depender de giros ornamentales",
+        "loaderRings": "el loader no puede reintroducir anillos",
+        "loaderHalo": "el loader no puede reintroducir halos circulares animados",
+        "!important": "loader.css no puede depender de prioridades forzadas",
+    }
+
+    for token, message in forbidden_loader_css.items():
+        if token in executable_loader_css:
+            errors.append(message)
+
+    if not re.search(
+        r"#app-loader\s+\.app-loader__backdrop,[\s\S]{0,700}?"
+        r"\{\s*display:\s*none\s*;",
+        executable_loader_css,
+    ):
+        errors.append("el backdrop legacy debe quedar neutralizado")
+
+    if not re.search(
+        r"#app-loader\s+\.app-loader__copy,[\s\S]{0,1800}?"
+        r"\{\s*display:\s*none\s*;",
+        executable_loader_css,
+    ):
+        errors.append("copy, barras y progreso legacy deben permanecer ocultos")
+
+    loader_markup_forbidden = (
+        "app-loader__copy",
+        "app-loader__bar",
+        "app-loader__progress",
+        "loader-title",
+        "loader-subtitle",
+        "loader-progress",
+    )
+
+    for document_name, document in (("index.html", index), ("login.html", login)):
+        if 'id="app-loader"' not in document:
+            errors.append(f"{document_name} debe contener el loader canónico")
+        if 'class="app-loader is-visible"' not in document:
+            errors.append(f"{document_name}: el loader debe comenzar visible")
+        if 'data-loader-logo-card="true"' not in document:
+            errors.append(f"{document_name}: falta el único elemento visual del loader")
+        if 'aria-label="Cargando Onion Support"' not in document:
+            errors.append(f"{document_name}: falta nombre accesible no visible")
+
+        for token in loader_markup_forbidden:
+            if token in document:
+                errors.append(
+                    f"{document_name}: el loader no puede pintar texto o progreso visible ({token})"
+                )
 
     for token, message in (
         ('MEDIA_INACTIVE =\n  "not all"', "RouteStyles debe conservar descarga inactiva previa al commit"),
@@ -225,6 +321,9 @@ def main() -> int:
 
     print("Boot visual integrity: PASS")
     print("- loader starts visible")
+    print("- loader canvas is solid in dark and light themes")
+    print("- loader keeps one translucent central brand tile")
+    print("- loader has no visible text, progress, rings, grids or decorative pseudo-elements")
     print("- router root starts empty: no pre-hydration content flash")
     print("- no-script fallback keeps crawlable public service links without duplicate H1")
     print("- public home owns exactly one H1")

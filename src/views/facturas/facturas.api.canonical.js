@@ -11,10 +11,14 @@ import AliasCoreDefault, * as AliasCore from "./facturas.api.alias-core.js";
 export * from "./facturas.api.alias-core.js";
 
 export const FACTURA_RAW_ALIAS_RECONCILIATION_VERSION =
-  "facturas.api.raw-alias-reconciliation.v2";
+  "facturas.api.raw-alias-reconciliation.v3";
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function text(value = "") {
+  return String(value ?? "").trim();
 }
 
 function finiteNumber(value) {
@@ -23,25 +27,75 @@ function finiteNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function technicalVersion(value = "") {
+  const normalized = text(value)
+    .toLowerCase()
+    .replace(/[\s.-]+/g, "_");
+
+  return normalized.includes("idempotency") ||
+    normalized.includes("idempotencia");
+}
+
+function stripTechnicalProjection(value = null, depth = 0, seen = new WeakSet()) {
+  if (!isObject(value) || depth > 3 || seen.has(value)) return value;
+  seen.add(value);
+
+  const output = { ...value };
+
+  delete output.responseSnapshot;
+  delete output.resultSnapshot;
+  delete output.snapshot;
+  delete output.operation;
+  delete output.operationType;
+  delete output.operationHash;
+  delete output.payloadHash;
+  delete output.idempotencyVersion;
+  delete output.ttl;
+  delete output.ownerToken;
+  delete output.leaseUntil;
+  delete output.lastHeartbeatAt;
+
+  if (technicalVersion(output.version)) delete output.version;
+
+  if (isObject(output.meta)) {
+    output.meta = { ...output.meta };
+    delete output.meta.technicalAliasId;
+    delete output.meta.operationHash;
+    delete output.meta.payloadHash;
+    delete output.meta.idempotencyVersion;
+  }
+
+  if (isObject(output.raw)) {
+    output.raw = stripTechnicalProjection(output.raw, depth + 1, seen);
+  }
+
+  return output;
+}
+
 function reconcileArray(items = []) {
   const output = [];
   const seen = new Set();
   let removed = 0;
 
   for (const raw of Array.isArray(items) ? items : []) {
-    const item = AliasCore.canonicalizeFacturaListItem(raw);
+    const technical = AliasCore.isFacturaTechnicalRecord(raw) === true;
+    const resolved = AliasCore.canonicalizeFacturaListItem(raw);
+    const item = technical
+      ? stripTechnicalProjection(resolved)
+      : resolved;
+
     if (!item) {
       removed += 1;
       continue;
     }
 
-    const id = String(
+    const id = text(
       item.id ||
       item.facturaId ||
       item.invoiceId ||
       item.numeroFacturaLegal ||
       ""
-    ).trim();
+    );
 
     if (id && seen.has(id)) {
       removed += 1;

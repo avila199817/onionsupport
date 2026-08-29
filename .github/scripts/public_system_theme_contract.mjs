@@ -53,6 +53,20 @@ for (const [token, message] of [
   assert.ok(publicSupport.includes(token), message);
 }
 
+for (const [token, message] of [
+  ['<span>1</span><div><strong>Vinculamos el caso</strong>', "El flujo público debe mostrar el paso 1 sin cero inicial"],
+  ['<span>2</span><div><strong>Creamos tu acceso si hace falta</strong>', "El flujo público debe mostrar el paso 2 sin cero inicial"],
+  ['<span>3</span><div><strong>Cliente, solo por Onion Support</strong>', "El flujo público debe mostrar el paso 3 sin cero inicial"],
+]) {
+  assert.ok(publicSupport.includes(token), message);
+}
+
+assert.doesNotMatch(
+  publicSupport,
+  /<span>0[123]<\/span>/,
+  "El flujo público no puede recuperar ceros iniciales en sus pasos"
+);
+
 const lightScope = /html:is\(\[data-theme="light"\], \.theme-light\)/;
 assert.match(
   executableThemeCss,
@@ -70,6 +84,7 @@ for (const [pattern, message] of [
   [/\.public-home-profile-card--command\s*\{/, "Falta la tarjeta profesional light"],
   [/\.public-home \.public-support-layout\s*\{/, "Falta el intake público light"],
   [/\.public-home \.public-support-form\s*\{/, "Falta el formulario público light"],
+  [/\.public-support-flow > \.public-support-flow-item > span\s*\{[\s\S]*?color:\s*var\(--public-home-accent-3\);/, "Los pasos 1, 2 y 3 deben usar azul intenso en modo light"],
   [/\.public-support-submit-overlay\s*\{/, "Falta el overlay de envío light"],
   [/\.public-auth-shell:not\(\.public-auth-shell--home\)\s*\{/, "Falta el shell Auth light"],
   [/\.login-card-panel--portal\s*\{/, "Falta el card de login light"],
@@ -96,6 +111,7 @@ for (const selector of [
   ".public-home-floating-whatsapp",
   '[data-public-support-intake-link="true"]',
   ".public-support-field input",
+  ".public-support-flow > .public-support-flow-item > span",
   ".public-support-phone-prefix",
   ".login-showcase-title",
   ".login-card-title",
@@ -168,4 +184,4 @@ assert.ok(
   "La implementación light debe cubrir todas las superficies públicas"
 );
 
-console.log("✅ public system theme contract (device/system · home + auth · light/dark · WhatsApp/intake/phone-prefix white-blue)");
+console.log("✅ public system theme contract (device/system · home + auth · light/dark · WhatsApp/intake/phone-prefix/steps)");

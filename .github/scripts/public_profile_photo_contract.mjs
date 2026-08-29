@@ -31,8 +31,8 @@ assert.match(
 
 assert.match(
   criticalCss,
-  /@media \(max-width: 720px\)\s*\{[\s\S]*?\.public-home \.public-home-command-portrait\s*\{\s*--public-home-profile-photo-offset-y:\s*12px;\s*\}[\s\S]*?\}/,
-  "Móvil debe ampliar el aire superior del retrato a 12px"
+  /@media \(max-width: 720px\)\s*\{[\s\S]*?\.public-home \.public-home-command-portrait\s*\{\s*--public-home-profile-photo-offset-y:\s*40px;\s*\}[\s\S]*?\}/,
+  "Móvil debe compensar el recorte vertical con un offset de 40px"
 );
 
 const mobileMatch = criticalCss.match(
@@ -63,5 +63,5 @@ assert.match(
 );
 
 console.log(
-  "✅ public profile photo contract (desktop 5px · mobile 12px · object-position only)"
+  "✅ public profile photo contract (desktop 5px · mobile 40px · object-position only)"
 );

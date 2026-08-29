@@ -16,6 +16,7 @@ const themeCss = themeFiles.map(({ source }) => source).join("\n");
 const executableThemeCss = stripComments(themeCss);
 const appCss = read("src/css/app.css");
 const preboot = read("src/preboot/theme.js");
+const publicSupport = read("src/features/public-support/index.js");
 const packageJson = JSON.parse(read("package.json"));
 
 for (const path of THEME_CSS_PATHS) {
@@ -44,6 +45,14 @@ for (const [token, message] of [
   assert.ok(preboot.includes(token), message);
 }
 
+for (const [token, message] of [
+  ['link.dataset.publicSupportIntakeLink = "true";', "Los CTA internos deben publicar su marcador semántico"],
+  ['label.textContent = "Abrir incidencia";', "Los CTA con span deben recibir el texto Abrir incidencia"],
+  ['link.textContent = "Abrir incidencia";', "Los CTA sin span deben recibir el texto Abrir incidencia"],
+]) {
+  assert.ok(publicSupport.includes(token), message);
+}
+
 const lightScope = /html:is\(\[data-theme="light"\], \.theme-light\)/;
 assert.match(
   executableThemeCss,
@@ -67,6 +76,8 @@ for (const [pattern, message] of [
   [/\.login-input-shell\s*\{/, "Faltan los campos de login light"],
   [/\.public-home-floating-whatsapp\s*\{[\s\S]*?color:\s*#ffffff;/, "El acceso flotante de WhatsApp debe conservar contraste blanco en light"],
   [/\.public-home-icon--whatsapp path\s*\{[\s\S]*?fill:\s*currentColor;[\s\S]*?stroke:\s*none;/, "El glifo de WhatsApp debe heredar el blanco del acceso flotante"],
+  [/\[data-public-support-intake-link="true"\]\s*\{[\s\S]*?color:\s*#ffffff;/, "Todos los CTA Abrir incidencia deben usar texto blanco en light"],
+  [/\[data-public-support-intake-link="true"\]\s*>\s*span,[\s\S]*?\[data-public-support-intake-link="true"\]\s*\.public-home-icon\s*\{[\s\S]*?color:\s*inherit;/, "Texto e iconos de los CTA internos deben heredar el blanco canónico"],
   [/@media \(max-width: 1040px\)[\s\S]*?\.public-home-nav-panel\s*\{/, "El menú público light debe cubrir tablet/móvil"],
   [/@media \(max-width: 720px\)[\s\S]*?\.login-card-panel,[\s\S]*?\.password-reset-card-panel/, "Las superficies Auth light deben conservar su fallback móvil"],
 ]) {
@@ -82,6 +93,7 @@ for (const selector of [
   ".public-home-footer",
   ".public-home-account-menu",
   ".public-home-floating-whatsapp",
+  '[data-public-support-intake-link="true"]',
   ".public-support-field input",
   ".login-showcase-title",
   ".login-card-title",
@@ -154,4 +166,4 @@ assert.ok(
   "La implementación light debe cubrir todas las superficies públicas"
 );
 
-console.log("✅ public system theme contract (device/system · home + auth · light/dark · WhatsApp white)");
+console.log("✅ public system theme contract (device/system · home + auth · light/dark · WhatsApp/intake white)");

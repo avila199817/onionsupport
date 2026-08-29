@@ -7,6 +7,7 @@
    Responsabilidad única:
    - Alinear la marca superior y el contenido con un gutter común.
    - Situar la marca dentro de una zona vertical real, sin transforms.
+   - Centrar el card desktop respecto al viewport completo.
    - Reconvertir la vista móvil en una experiencia centrada sólo en login.
    - Mantener scroll seguro cuando teclado o viewport reducen la altura.
    - Dar al logo interior del card una interacción de vuelta a la home.
@@ -27,17 +28,18 @@
   --login-brand-zone-start: clamp(68px, 9.2dvh, 80px);
   --login-brand-zone-end: 14px;
   --login-brand-mark-size: 48px;
-}
-
-.public-auth-shell--login .login-topbar {
-  align-items: flex-start;
-
-  min-block-size:
+  --login-brand-row-size:
     calc(
       var(--login-brand-zone-start) +
       var(--login-brand-mark-size) +
       var(--login-brand-zone-end)
     );
+}
+
+.public-auth-shell--login .login-topbar {
+  align-items: flex-start;
+
+  min-block-size: var(--login-brand-row-size);
 
   padding:
     var(--login-brand-zone-start)
@@ -54,7 +56,25 @@
 }
 
 /* =========================================================
-   2. CARD LOGO · CANONICAL HOME LINK
+   2. DESKTOP CARD · VIEWPORT CENTER BALANCE
+
+   El main empieza después de la fila de marca. Para que el centro visual
+   del card coincida con el centro del viewport completo, su margen final
+   compensa exactamente esa fila. Al alinearse por su margin-box, el card
+   sube la mitad de la reserva superior sin alterar el flujo ni el showcase.
+========================================================= */
+
+@media (min-width: 861px) {
+  .public-auth-shell--login .login-card-panel--portal {
+    align-self: center;
+
+    margin-block-start: 0;
+    margin-block-end: var(--login-brand-row-size);
+  }
+}
+
+/* =========================================================
+   3. CARD LOGO · CANONICAL HOME LINK
 ========================================================= */
 
 .public-auth-shell--login .login-card-home-link {
@@ -98,7 +118,7 @@
 }
 
 /* =========================================================
-   3. INTERMEDIATE VIEWPORTS · KEEP THE SAME ALIGNMENT AXIS
+   4. INTERMEDIATE VIEWPORTS · KEEP THE SAME ALIGNMENT AXIS
 ========================================================= */
 
 @media (max-width: 1240px) {
@@ -114,7 +134,7 @@
 }
 
 /* =========================================================
-   4. MOBILE CARD-ONLY · <= 860px
+   5. MOBILE CARD-ONLY · <= 860px
 ========================================================= */
 
 @media (max-width: 860px) {
@@ -181,7 +201,7 @@
 }
 
 /* =========================================================
-   5. COMPACT MOBILE GUTTER · <= 560px
+   6. COMPACT MOBILE GUTTER · <= 560px
 ========================================================= */
 
 @media (max-width: 560px) {
@@ -195,7 +215,7 @@
 }
 
 /* =========================================================
-   6. REDUCED MOTION
+   7. REDUCED MOTION
 ========================================================= */
 
 @media (prefers-reduced-motion: reduce) {

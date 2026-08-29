@@ -4,6 +4,7 @@
    Objetivo:
    - Mantener fuera del camino de LCP las animaciones decorativas del hero.
    - Conservar los reveal progresivos del contenido bajo el primer viewport.
+   - Fijar el encuadre canónico de la fotografía crítica del perfil.
    - No alterar geometría, contenido, accesibilidad ni diseño final.
 
    Esta hoja se carga exclusivamente en pathname `/` desde preboot.
@@ -26,4 +27,19 @@
   transform: none;
   transition: none;
   transition-delay: 0s;
+}
+
+/*
+   El retrato forma parte del hero crítico. El ajuste vive en object-position,
+   no en transform ni offsets del marco, para bajar únicamente el encuadre
+   visible sin cambiar tamaño, flujo, recorte o geometría de la tarjeta.
+*/
+.public-home .public-home-command-portrait {
+  --public-home-profile-photo-offset-y: 5px;
+}
+
+.public-home .public-home-command-photo {
+  object-position:
+    center
+    calc(50% + var(--public-home-profile-photo-offset-y));
 }

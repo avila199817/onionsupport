@@ -43,3 +43,14 @@
     center
     calc(50% + var(--public-home-profile-photo-offset-y));
 }
+
+/*
+   En móvil el marco es más alto y estrecho, por lo que el mismo recorte óptico
+   necesita algo más de aire superior. Se ajusta sólo la posición del contenido
+   de la imagen; el contenedor, su tamaño y el responsive permanecen intactos.
+*/
+@media (max-width: 720px) {
+  .public-home .public-home-command-portrait {
+    --public-home-profile-photo-offset-y: 12px;
+  }
+}

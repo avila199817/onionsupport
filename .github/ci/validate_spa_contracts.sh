@@ -125,6 +125,7 @@ node .github/scripts/auth_logout_contract.mjs
 node .github/scripts/router_runtime_contract.mjs
 node .github/scripts/shell_runtime_contract.mjs
 node .github/scripts/private_runtime_auth_contract.mjs
+node .github/scripts/public_home_session_handoff_contract.mjs
 node .github/scripts/private_css_entry_contract.mjs
 node .github/scripts/login_document_handoff_contract.mjs
 node .github/scripts/login_accessibility_contract.mjs

@@ -73,6 +73,9 @@ jobs:
       - name: Validate Facturas technical-record guard
         run: node .github/scripts/facturas_technical_record_guard_contract.mjs
 
+      - name: Validate public login card-first layout
+        run: node .github/scripts/public_login_layout_contract.mjs
+
       - name: Validate Usuarios scale contract
         run: python3 .github/scripts/usuarios_scale_contract.py
 

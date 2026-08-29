@@ -1,59 +1,33 @@
 /* =========================================================
-   Onion Support - Facturas API · Integration Boundary
+   Onion Support - Facturas API · Canonical Alias Boundary
 
-   Mantiene la API histórica en facturas.api.base.js y concentra aquí
-   la frontera create -> detail -> PDF para que la vista nunca trabaje
-   con un snapshot parcial recién creado ni con una URL Azure privada
-   presentada como si fuese una URL firmada.
+   La implementación productiva previa vive en
+   facturas.api.boundary.js. Esta última frontera normaliza también los
+   registros técnicos que ya fueron convertidos por capas legacy y conservan
+   el origen FACTURA_CREATE_IDEMP_* dentro de `raw`.
+
+   Invariante:
+   - ninguna fila, caché, petición de detalle ni acción usa un ID técnico;
+   - el alias se resuelve siempre al facturaId canónico antes de tocar HTTP;
+   - si el listado contiene alias + factura real, sólo queda la factura real.
 ========================================================= */
 
-import * as Base from "./facturas.api.base.js";
+import * as Boundary from "./facturas.api.boundary.js";
 
-export * from "./facturas.api.base.js";
+export * from "./facturas.api.boundary.js";
 
-/*
-  STATIC CONTINUOUS-SCROLL DELEGATION MANIFEST
-  ---------------------------------------------
-  El contrato de paginación/listado sigue implementado íntegramente en
-  facturas.api.base.js. Este manifiesto hace explícita la delegación para
-  los validadores estáticos que inspeccionan el entrypoint activo.
+export const FACTURA_CANONICAL_ALIAS_VERSION =
+  "facturas.api.canonical-alias-boundary.v2";
 
-  getFacturasListContextKey
-  lastList.contextKey === contextKey
-  lastList.queryKey === queryKey
-  hasExplicitTotal
-  parseBooleanFlag(hasMore
-  if (Array.isArray(unwrapped)) return unwrapped;
-  original.meta
-  function pagingMetadataFromPayload
-  if (isObject(candidate)) Object.assign(paging, candidate);
-  totalKnown: paging.totalKnown
-  nextPage: normalized.nextPage
-  hasMore: normalized.hasMore === true
-  export function syncFacturasListCache
-*/
-
-export const FACTURAS_DOCUMENT_FLOW_VERSION =
-  "facturas.api.document-flow.v1";
-
-export const FACTURA_TECHNICAL_UI_GUARD_VERSION =
-  "facturas.ui.technical-record-guard.v1";
-
-const FACTURA_CREATE_IDEMPOTENCY_PREFIX = "FACTURA_CREATE_IDEMP_";
-const FACTURA_TECHNICAL_TYPES = new Set([
-  "idempotency",
-  "idempotencia",
-  "invoice_create_idempotency",
-  "factura_create_idempotency",
-  "invoice_create_operation",
-  "factura_create_operation",
-]);
+const TECHNICAL_PREFIX = "FACTURA_CREATE_IDEMP_";
+const aliasRegistry = new Map();
+const MAX_ALIAS_REGISTRY = 256;
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function object(value, fallback = {}) {
+function object(value, fallback = null) {
   return isObject(value) ? value : fallback;
 }
 
@@ -62,7 +36,18 @@ function text(value = "", fallback = "") {
     .replace(/[\r\n\t]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+
   return output || fallback;
+}
+
+function key(value = "") {
+  return text(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s.-]+/g, "_")
+    .replace(/[^\w:]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }
 
 function first(...values) {
@@ -73,115 +58,554 @@ function first(...values) {
     if (isObject(value) && !Object.keys(value).length) continue;
     return value;
   }
+
   return null;
 }
 
-function recordKey(value = "") {
-  return text(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s.-]+/g, "_")
-    .replace(/[^\w:]+/g, "_")
-    .replace(/^_+|_+$/g, "");
+function numberOrNull(value) {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "boolean" || typeof value === "object") return null;
+
+  let normalized = String(value)
+    .trim()
+    .replace(/[€$£¥%]/g, "")
+    .replace(/[^\d.,+\-\s]/g, "")
+    .replace(/\s+/g, "");
+
+  if (!normalized || normalized === "+" || normalized === "-") return null;
+
+  const hasComma = normalized.includes(",");
+  const hasDot = normalized.includes(".");
+
+  if (hasComma && hasDot) {
+    normalized = normalized.lastIndexOf(",") > normalized.lastIndexOf(".")
+      ? normalized.replace(/\./g, "").replace(/,/g, ".")
+      : normalized.replace(/,/g, "");
+  } else if (hasComma) {
+    normalized = normalized.replace(/,/g, ".");
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
-function isBlob(value) {
-  return typeof Blob !== "undefined" && value instanceof Blob;
+function round2(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+function isTechnicalIdentifier(value = "") {
+  return text(value, "").startsWith(TECHNICAL_PREFIX);
+}
+
+function nestedObjects(value = {}) {
+  const source = object(value, {});
+  return [
+    source.raw,
+    source.raw?.raw,
+    source.data,
+    source.payload,
+    source.result,
+    source.item,
+    source.factura,
+    source.invoice,
+  ].map((item) => object(item)).filter(Boolean);
 }
 
 export function isFacturaTechnicalRecord(value = null) {
-  const item = object(value, null);
-  if (!item) return false;
+  const source = object(value);
+  if (!source) return false;
 
-  const id = text(item.id, "");
-  if (id.startsWith(FACTURA_CREATE_IDEMPOTENCY_PREFIX)) return true;
+  if (typeof Boundary.isFacturaTechnicalRecord === "function" &&
+      Boundary.isFacturaTechnicalRecord(source)) {
+    return true;
+  }
+
+  if ([source.id, source._id, source.operationId].some(isTechnicalIdentifier)) {
+    return true;
+  }
+
+  for (const candidate of nestedObjects(source)) {
+    if (typeof Boundary.isFacturaTechnicalRecord === "function" &&
+        Boundary.isFacturaTechnicalRecord(candidate)) {
+      return true;
+    }
+
+    if ([candidate.id, candidate._id, candidate.operationId]
+      .some(isTechnicalIdentifier)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function technicalHosts(value = null, depth = 0, seen = new Set()) {
+  const source = object(value);
+  if (!source || depth > 5 || seen.has(source)) return [];
+  seen.add(source);
+
+  const output = [];
+  if (isFacturaTechnicalRecord(source)) output.push(source);
+
+  for (const candidate of nestedObjects(source)) {
+    output.push(...technicalHosts(candidate, depth + 1, seen));
+  }
+
+  return output;
+}
+
+function canonicalSnapshot(value = null, depth = 0, seen = new Set()) {
+  const source = object(value);
+  if (!source || depth > 5 || seen.has(source)) return null;
+  seen.add(source);
+
+  const envelopes = [
+    source.responseSnapshot,
+    source.resultSnapshot,
+    source.snapshot,
+    source.meta?.responseSnapshot,
+    source.meta?.resultSnapshot,
+    source.meta?.createIdempotency?.responseSnapshot,
+    source.createIdempotency?.responseSnapshot,
+  ];
+
+  for (const rawEnvelope of envelopes) {
+    const envelope = object(rawEnvelope);
+    if (!envelope) continue;
+
+    for (const candidate of [
+      envelope.factura,
+      envelope.invoice,
+      envelope.item,
+      envelope.data?.factura,
+      envelope.data?.invoice,
+      envelope.data?.item,
+      envelope.data,
+      envelope.payload?.factura,
+      envelope.payload?.invoice,
+      envelope.payload?.item,
+      envelope.payload,
+      envelope.result?.factura,
+      envelope.result?.invoice,
+      envelope.result?.item,
+      envelope.result,
+    ]) {
+      const item = object(candidate);
+      if (!item || isFacturaTechnicalRecord(item)) continue;
+
+      const id = canonicalIdentifier(item);
+      if (id) return item;
+    }
+  }
+
+  for (const candidate of nestedObjects(source)) {
+    const resolved = canonicalSnapshot(candidate, depth + 1, seen);
+    if (resolved) return resolved;
+  }
+
+  return null;
+}
+
+function canonicalIdentifier(value = null) {
+  const source = object(value);
+  if (!source) return "";
+
+  const rootId = text(source.id, "");
+  if (rootId && !isTechnicalIdentifier(rootId)) return rootId;
 
   for (const candidate of [
-    item.tipoDocumento,
-    item.entityType,
-    item.tipo,
-    item.type,
-    item.documentType,
-    item.recordType,
+    source.facturaId,
+    source.invoiceId,
+    source.committedFacturaId,
+    source.canonicalFacturaId,
+    source.numeroFacturaLegal,
+    source.legalInvoiceNumber,
+    source.legalNumber,
   ]) {
-    if (FACTURA_TECHNICAL_TYPES.has(recordKey(candidate))) return true;
+    const id = text(candidate, "");
+    if (id && !isTechnicalIdentifier(id)) return id;
   }
 
-  return Boolean(
-    recordKey(item.operation) === "factura_create" &&
-    (
-      text(item.operationHash, "") ||
-      recordKey(first(
-        item.version,
-        item.idempotencyVersion,
-        item.meta?.idempotencyVersion,
-        ""
-      )).includes("idempotency")
-    )
-  );
+  return "";
 }
 
-function technicalSnapshotFactura(value = {}) {
-  const item = object(value);
-  const snapshot = object(item.responseSnapshot);
+function rememberAlias(technicalId = "", canonicalId = "") {
+  const technical = text(technicalId, "");
+  const canonical = text(canonicalId, "");
 
-  return object(first(
-    snapshot.factura,
-    snapshot.invoice,
-    snapshot.item,
-    snapshot.data,
-    null
-  ), null);
+  if (!isTechnicalIdentifier(technical) ||
+      !canonical ||
+      isTechnicalIdentifier(canonical)) {
+    return canonical;
+  }
+
+  if (aliasRegistry.size >= MAX_ALIAS_REGISTRY &&
+      !aliasRegistry.has(technical)) {
+    aliasRegistry.delete(aliasRegistry.keys().next().value);
+  }
+
+  aliasRegistry.set(technical, canonical);
+  return canonical;
 }
 
-function promoteTechnicalFactura(value = {}) {
-  const item = object(value, null);
-  if (!item) return { factura: null, technicalId: "" };
-  if (!isFacturaTechnicalRecord(item)) {
-    return { factura: item, technicalId: "" };
+function registerAliases(value = null, canonicalId = "") {
+  for (const host of technicalHosts(value)) {
+    rememberAlias(host.id, canonicalId);
+    rememberAlias(host._id, canonicalId);
+    rememberAlias(host.operationId, canonicalId);
+  }
+}
+
+function taxesFromLines(value = {}) {
+  const source = object(value, {});
+  const lines = Array.isArray(source.impuestos)
+    ? source.impuestos
+    : Array.isArray(source.taxes)
+      ? source.taxes
+      : [];
+
+  let total = 0;
+  let found = false;
+
+  for (const raw of lines) {
+    const item = object(raw);
+    if (!item) continue;
+
+    const amount = numberOrNull(first(
+      item.importe,
+      item.amount,
+      item.total,
+      item.value
+    ));
+    if (amount === null) continue;
+
+    found = true;
+    const type = key(first(item.tipo, item.type, item.name, item.label, ""));
+    const negative =
+      type.includes("irpf") ||
+      type.includes("retencion") ||
+      type.includes("withholding") ||
+      key(item.sign) === "negative";
+
+    total += negative ? -Math.abs(amount) : amount;
   }
 
-  const nested = technicalSnapshotFactura(item);
-  if (!nested) {
-    return { factura: item, technicalId: text(item.id, "") };
+  return found ? round2(total) : null;
+}
+
+function normalizeFinancialAliases(value = {}) {
+  const result = { ...object(value, {}) };
+
+  let base = numberOrNull(first(
+    result.baseImponible,
+    result.taxableBase,
+    result.subtotal,
+    result.base,
+    result.importeBase,
+    result.totales?.baseImponible,
+    result.totals?.taxableBase,
+    result.totales?.base,
+    result.totals?.subtotal,
+    result.resumen?.baseImponible,
+    result.summary?.base
+  ));
+
+  let taxes = numberOrNull(first(
+    result.impuestosTotal,
+    result.taxAmount,
+    result.taxesAmount,
+    result.totalImpuestos,
+    result.importeImpuestos,
+    result.netTaxAmount,
+    result.totales?.impuestos,
+    result.totals?.taxes,
+    result.resumen?.iva,
+    result.summary?.taxes
+  ));
+
+  if (taxes === null) taxes = taxesFromLines(result);
+
+  if (taxes === null) {
+    const iva = numberOrNull(first(
+      result.ivaImporte,
+      result.importeIva,
+      result.totalIva,
+      result.ivaTotal,
+      isObject(result.iva) ? first(result.iva.importe, result.iva.amount) : result.iva
+    ));
+    const retention = numberOrNull(first(
+      result.irpfImporte,
+      result.importeIrpf,
+      result.totalIrpf,
+      result.retencion,
+      result.retencionesTotal,
+      result.withholdingAmount,
+      isObject(result.irpf) ? first(result.irpf.importe, result.irpf.amount) : result.irpf
+    ));
+
+    if (iva !== null || retention !== null) {
+      taxes = round2((iva || 0) - Math.abs(retention || 0));
+    }
   }
 
-  const technicalId = text(item.id, "");
-  const canonicalId = text(first(
-    nested.id,
-    nested.facturaId,
-    nested.invoiceId,
-    item.facturaId,
-    item.invoiceId,
+  const paid = numberOrNull(first(
+    result.paidAmount,
+    result.totalPagado,
+    result.pagado,
+    result.payment?.paidAmount,
+    result.totales?.pagado,
+    result.totals?.paid
+  )) ?? 0;
+
+  const pending = numberOrNull(first(
+    result.pendingAmount,
+    result.totalPendiente,
+    result.pendiente,
+    result.outstandingAmount,
+    result.amountDue,
+    result.payment?.pendingAmount,
+    result.totales?.pendiente,
+    result.totals?.pending
+  ));
+
+  let total = numberOrNull(first(
+    result.total,
+    result.totalFactura,
+    result.importeTotal,
+    result.amount,
+    result.invoiceAmount,
+    result.grandTotal,
+    result.totalAmount,
+    result.totales?.total,
+    result.totals?.total,
+    result.resumen?.total,
+    result.summary?.total
+  ));
+
+  if ((total === null || total === 0) && pending !== null && pending + paid !== 0) {
+    total = round2(pending + paid);
+  }
+  if ((total === null || total === 0) && base !== null && taxes !== null) {
+    const calculated = round2(base + taxes);
+    if (calculated !== 0) total = calculated;
+  }
+  if ((base === null || base === 0) && total !== null && taxes !== null) {
+    const calculated = round2(total - taxes);
+    if (calculated !== 0) base = calculated;
+  }
+
+  if (base !== null) {
+    result.baseImponible = base;
+    result.taxableBase = base;
+    result.subtotal = base;
+    result.base = base;
+  }
+  if (taxes !== null) {
+    result.impuestosTotal = taxes;
+    result.taxAmount = taxes;
+    result.taxesAmount = taxes;
+    result.totalImpuestos = taxes;
+  }
+  if (total !== null) {
+    result.total = total;
+    result.totalFactura = total;
+    result.importeTotal = total;
+    result.amount = total;
+    result.invoiceAmount = total;
+    result.facturaTotal = total;
+  }
+
+  result.paidAmount = paid;
+  result.pagado = paid;
+
+  if (pending !== null) {
+    result.pendingAmount = Math.max(0, pending);
+    result.pendiente = Math.max(0, pending);
+  } else if (total !== null) {
+    result.pendingAmount = Math.max(0, round2(total - paid));
+    result.pendiente = result.pendingAmount;
+  }
+
+  return result;
+}
+
+function stripTechnicalState(value = {}) {
+  const result = { ...object(value, {}) };
+  delete result.responseSnapshot;
+  delete result.resultSnapshot;
+  delete result.snapshot;
+  delete result.operationHash;
+  delete result.payloadHash;
+  delete result.idempotencyVersion;
+  delete result.ttl;
+  delete result.ownerToken;
+  delete result.leaseUntil;
+  delete result.lastHeartbeatAt;
+  return result;
+}
+
+function canonicalRaw(value = {}) {
+  const raw = stripTechnicalState(value);
+  delete raw.raw;
+  raw.meta = {
+    ...object(raw.meta, {}),
+    technicalAliasRecovered:
+      raw.meta?.technicalAliasRecovered === true,
+    canonicalAliasVersion: FACTURA_CANONICAL_ALIAS_VERSION,
+  };
+  return raw;
+}
+
+export function canonicalizeFacturaListItem(value = null) {
+  const outer = object(value);
+  if (!outer) return null;
+
+  const hosts = technicalHosts(outer);
+  if (!hosts.length) return outer;
+
+  const snapshot = canonicalSnapshot(outer);
+  const source = snapshot
+    ? object(Boundary.normalizeFactura(snapshot), snapshot)
+    : { ...outer };
+
+  const canonicalId =
+    canonicalIdentifier(source) ||
+    canonicalIdentifier(outer) ||
+    hosts.map(canonicalIdentifier).find(Boolean) ||
+    "";
+
+  if (!canonicalId || isTechnicalIdentifier(canonicalId)) return null;
+
+  registerAliases(outer, canonicalId);
+
+  const legalNumber = [
+    source.numeroFacturaLegal,
+    source.legalInvoiceNumber,
+    source.legalNumber,
+    source.numeroFactura,
+    source.invoiceNumber,
+    source.number,
+    outer.numeroFacturaLegal,
+    outer.numeroFactura,
+    outer.invoiceNumber,
+    outer.number,
+    source.numeroFacturaSistema,
+    outer.numeroFacturaSistema,
+    canonicalId,
+  ]
+    .map((candidate) => text(candidate, ""))
+    .find((candidate) => candidate && !isTechnicalIdentifier(candidate)) || canonicalId;
+
+  const systemNumber = text(first(
+    source.numeroFacturaSistema,
+    source.systemInvoiceNumber,
+    outer.numeroFacturaSistema,
+    hosts[0]?.numeroFacturaSistema,
     ""
   ), "");
 
-  return {
-    factura: {
-      ...nested,
-      id: canonicalId || nested.id,
-      facturaId: text(first(nested.facturaId, canonicalId), canonicalId),
-      invoiceId: text(first(nested.invoiceId, canonicalId), canonicalId),
-      meta: {
-        ...object(nested.meta),
-        technicalAliasRecovered: true,
-        technicalAliasId: technicalId || null,
-        technicalAliasGuardVersion: FACTURA_TECHNICAL_UI_GUARD_VERSION,
-      },
+  let canonical = normalizeFinancialAliases(stripTechnicalState({
+    ...source,
+    id: canonicalId,
+    facturaId: canonicalId,
+    invoiceId: canonicalId,
+    ...(legalNumber
+      ? {
+          numeroFacturaLegal: legalNumber,
+          numeroFactura: text(first(source.numeroFactura, legalNumber), legalNumber),
+          invoiceNumber: text(first(source.invoiceNumber, legalNumber), legalNumber),
+          number: text(first(source.number, legalNumber), legalNumber),
+        }
+      : {}),
+    ...(systemNumber ? { numeroFacturaSistema: systemNumber } : {}),
+    tipoDocumento: "factura",
+    entityType: "invoice",
+    type: "invoice",
+    status: ["issued", "emitida", "sent", "enviada", "paid", "pagada", "draft", "borrador"]
+      .includes(key(first(source.status, source.estado, "")))
+        ? text(first(source.status, source.estado), "issued")
+        : "issued",
+    estado: ["issued", "emitida", "sent", "enviada", "paid", "pagada", "draft", "borrador"]
+      .includes(key(first(source.estado, source.status, "")))
+        ? text(first(source.estado, source.status), "issued")
+        : "issued",
+    meta: {
+      ...object(source.meta, {}),
+      technicalAliasRecovered: true,
+      technicalAliasId: text(first(
+        hosts[0]?.id,
+        hosts[0]?._id,
+        hosts[0]?.operationId,
+        ""
+      ), "") || null,
+      canonicalAliasVersion: FACTURA_CANONICAL_ALIAS_VERSION,
     },
-    technicalId,
+  }));
+
+  canonical.raw = canonicalRaw(canonical);
+  return canonical;
+}
+
+function canonicalPriority(value = {}) {
+  const source = object(value, {});
+  if (source.meta?.technicalAliasRecovered !== true &&
+      !isFacturaTechnicalRecord(source)) {
+    return 2;
+  }
+  return 1;
+}
+
+function mergeCanonical(left = {}, right = {}) {
+  const preferred = canonicalPriority(right) >= canonicalPriority(left)
+    ? right
+    : left;
+  const fallback = preferred === right ? left : right;
+
+  return {
+    ...fallback,
+    ...preferred,
+    meta: {
+      ...object(fallback.meta, {}),
+      ...object(preferred.meta, {}),
+    },
+    raw: canonicalRaw(preferred),
   };
 }
 
-function sanitizeFacturaItems(items = []) {
-  return Array.isArray(items)
-    ? items.filter((item) => !isFacturaTechnicalRecord(item))
-    : [];
+function canonicalItems(items = []) {
+  const map = new Map();
+  let filtered = 0;
+
+  for (const raw of Array.isArray(items) ? items : []) {
+    const canonical = canonicalizeFacturaListItem(raw);
+    if (!canonical) {
+      filtered += 1;
+      continue;
+    }
+
+    const id = canonicalIdentifier(canonical);
+    if (!id) {
+      filtered += 1;
+      continue;
+    }
+
+    if (map.has(id)) {
+      map.set(id, mergeCanonical(map.get(id), canonical));
+      filtered += 1;
+    } else {
+      map.set(id, canonical);
+    }
+  }
+
+  return {
+    items: [...map.values()],
+    filtered,
+  };
 }
 
-function sanitizeFacturaListResponse(response = null) {
-  const source = object(response, null);
+function canonicalizeListResponse(response = null) {
+  const source = object(response);
   if (!source) return response;
 
   const rawItems = Array.isArray(source.items)
@@ -194,258 +618,103 @@ function sanitizeFacturaListResponse(response = null) {
           ? source.data
           : [];
 
-  const items = sanitizeFacturaItems(rawItems);
-  const removed = rawItems.length - items.length;
-  if (!removed) return source;
+  const result = canonicalItems(rawItems);
+  if (!result.filtered &&
+      result.items.every((item, index) => item === rawItems[index])) {
+    return source;
+  }
 
   const rawTotal = Number(source.total);
   const total = Number.isFinite(rawTotal)
-    ? Math.max(items.length, rawTotal - removed)
-    : items.length;
+    ? Math.max(result.items.length, rawTotal - result.filtered)
+    : result.items.length;
 
   return {
     ...source,
-    items,
-    facturas: items,
-    invoices: items,
-    data: items,
-    count: items.length,
+    items: result.items,
+    facturas: result.items,
+    invoices: result.items,
+    data: result.items,
+    count: result.items.length,
     total,
     remoteCount: Number.isFinite(Number(source.remoteCount))
-      ? Math.max(items.length, Number(source.remoteCount) - removed)
+      ? Math.max(result.items.length, Number(source.remoteCount) - result.filtered)
       : total,
     totalMatched: Number.isFinite(Number(source.totalMatched))
-      ? Math.max(items.length, Number(source.totalMatched) - removed)
+      ? Math.max(result.items.length, Number(source.totalMatched) - result.filtered)
       : total,
-    stats: Base.computeFacturasStats(items),
+    stats: Boundary.computeFacturasStats(result.items),
     meta: {
-      ...object(source.meta),
-      technicalRecordsFiltered: removed,
-      technicalRecordGuardVersion: FACTURA_TECHNICAL_UI_GUARD_VERSION,
+      ...object(source.meta, {}),
+      canonicalAliasesReconciled: result.filtered,
+      canonicalAliasVersion: FACTURA_CANONICAL_ALIAS_VERSION,
     },
   };
 }
 
-function isUnsignedAzureBlobUrl(value = "") {
-  const raw = text(value, "");
-  if (!/^https:\/\//i.test(raw)) return false;
+export function resolveFacturaCanonicalId(id = "", options = {}) {
+  const requested = text(id, "");
+  if (!requested) return "";
 
-  try {
-    const url = new URL(raw);
-    if (!/\.blob\.core\.windows\.net$/i.test(url.hostname)) return false;
+  if (!isTechnicalIdentifier(requested)) return requested;
 
-    const hasSignature = Boolean(
-      url.searchParams.get("sig") &&
-      (url.searchParams.get("se") || url.searchParams.get("sp") || url.searchParams.get("sv"))
-    );
+  const registered = aliasRegistry.get(requested);
+  if (registered) return registered;
 
-    return !hasSignature;
-  } catch {
-    return true;
+  for (const candidate of [
+    options.factura,
+    options.invoice,
+    options.item,
+    options.data,
+    options.payload,
+  ]) {
+    const canonical = canonicalizeFacturaListItem(candidate);
+    const resolved = canonicalIdentifier(canonical);
+    if (resolved) {
+      rememberAlias(requested, resolved);
+      return resolved;
+    }
   }
+
+  return requested;
 }
 
-export function isFacturaDocumentActionUrl(value = "") {
-  const raw = text(value, "");
-  if (!raw) return false;
-  if (/^(javascript|data|vbscript|file):/i.test(raw)) return false;
-  if (/^blob:/i.test(raw)) return true;
-  if (raw.startsWith("/")) return true;
-  if (!/^https:\/\//i.test(raw)) return false;
-  return !isUnsignedAzureBlobUrl(raw);
-}
+function canonicalizeDetailItem(value = null) {
+  const canonical = canonicalizeFacturaListItem(value);
+  if (canonical) return canonical;
 
-function cleanActionUrl(value = "") {
-  const raw = text(value, "");
-  return isFacturaDocumentActionUrl(raw) ? raw : "";
-}
-
-function sanitizeDocumentObject(value = {}) {
-  const source = object(value);
-  const url = cleanActionUrl(first(source.url, source.signedUrl, source.sasUrl, ""));
-  const signedUrl = cleanActionUrl(first(source.signedUrl, source.sasUrl, url, ""));
-  const sasUrl = cleanActionUrl(first(source.sasUrl, source.signedUrl, signedUrl, ""));
-  const viewUrl = cleanActionUrl(first(source.viewUrl, signedUrl, sasUrl, url, ""));
-  const downloadUrl = cleanActionUrl(first(source.downloadUrl, signedUrl, sasUrl, url, ""));
-
-  return {
-    ...source,
-    url: url || null,
-    signedUrl: signedUrl || null,
-    sasUrl: sasUrl || null,
-    viewUrl: viewUrl || null,
-    downloadUrl: downloadUrl || null,
-  };
-}
-
-function documentMetadataFrom(item = {}) {
-  const source = object(item);
-  const file = sanitizeDocumentObject(first(source.file, source.pdf, source.document, {}));
-  const pdf = sanitizeDocumentObject(first(source.pdf, source.file, source.document, {}));
-  const document = sanitizeDocumentObject(first(source.document, source.file, source.pdf, {}));
-
-  return { file, pdf, document };
-}
-
-function canonicalizeFactura(item = {}, envelope = {}) {
-  const promotion = promoteTechnicalFactura(item);
-  const source = object(promotion.factura);
-  if (!Object.keys(source).length) return null;
-
-  const externalFile = object(envelope.file);
-  const externalPdf = object(envelope.pdf);
-  const externalDocument = object(envelope.document);
-
-  const merged = {
-    ...source,
-    ...(Object.keys(externalFile).length
-      ? { file: { ...object(source.file), ...externalFile } }
-      : {}),
-    ...(Object.keys(externalPdf).length
-      ? { pdf: { ...object(source.pdf), ...externalPdf } }
-      : {}),
-    ...(Object.keys(externalDocument).length
-      ? { document: { ...object(source.document), ...externalDocument } }
-      : {}),
-  };
-
-  const docs = documentMetadataFrom(merged);
-  const rootPdfUrl = cleanActionUrl(merged.pdfUrl);
-  const rootViewUrl = cleanActionUrl(merged.viewUrl);
-  const rootDownloadUrl = cleanActionUrl(merged.downloadUrl);
-  const rootSignedUrl = cleanActionUrl(merged.signedUrl);
-  const rootSasUrl = cleanActionUrl(merged.sasUrl);
-
-  return {
-    ...merged,
-    ...docs,
-    pdfUrl: rootPdfUrl || null,
-    viewUrl: rootViewUrl || null,
-    downloadUrl: rootDownloadUrl || null,
-    signedUrl: rootSignedUrl || null,
-    sasUrl: rootSasUrl || null,
-    documentReady: Boolean(
-      merged.documentReady === true ||
-      merged.hasPdf === true ||
-      merged.pdfAvailable === true ||
-      merged.meta?.hasPdf === true ||
-      docs.file?.blobPath ||
-      docs.pdf?.blobPath ||
-      docs.document?.blobPath
-    ),
-    meta: {
-      ...object(merged.meta),
-      ...(promotion.technicalId
-        ? {
-            technicalAliasRecovered: true,
-            technicalAliasId: promotion.technicalId,
-            technicalAliasGuardVersion: FACTURA_TECHNICAL_UI_GUARD_VERSION,
-          }
-        : {}),
-    },
-    documentFlowVersion: FACTURAS_DOCUMENT_FLOW_VERSION,
-  };
-}
-
-function facturaId(item = {}) {
-  const promotion = promoteTechnicalFactura(item);
-  const source = object(promotion.factura);
-
-  return text(first(
-    source?.id,
-    source?.facturaId,
-    source?.invoiceId,
-    source?.numeroFacturaLegal,
-    source?.numeroFactura,
-    source?.invoiceNumber,
-    ""
-  ), "");
-}
-
-function sanitizePdfResult(result = null) {
-  if (isBlob(result)) return result;
-  const source = object(result, null);
-  if (!source) return result;
-
-  const file = sanitizeDocumentObject(first(source.file, source.pdf, source.document, source));
-  const pdf = sanitizeDocumentObject(first(source.pdf, source.file, source.document, source));
-  const document = sanitizeDocumentObject(first(source.document, source.file, source.pdf, source));
-
-  const nestedFactura = canonicalizeFactura(first(source.factura, source.item, source.data, {}));
-
-  return {
-    ...source,
-    url: cleanActionUrl(first(source.url, file.url, pdf.url, document.url, "")) || null,
-    signedUrl: cleanActionUrl(first(source.signedUrl, file.signedUrl, pdf.signedUrl, document.signedUrl, "")) || null,
-    sasUrl: cleanActionUrl(first(source.sasUrl, file.sasUrl, pdf.sasUrl, document.sasUrl, "")) || null,
-    viewUrl: cleanActionUrl(first(source.viewUrl, file.viewUrl, pdf.viewUrl, document.viewUrl, "")) || null,
-    downloadUrl: cleanActionUrl(first(source.downloadUrl, file.downloadUrl, pdf.downloadUrl, document.downloadUrl, "")) || null,
-    file,
-    pdf,
-    document,
-    ...(nestedFactura
-      ? { factura: nestedFactura, item: nestedFactura, data: nestedFactura }
-      : {}),
-    raw: undefined,
-    documentFlowVersion: FACTURAS_DOCUMENT_FLOW_VERSION,
-  };
-}
-
-function hasActionablePdf(result = null, mode = "view") {
-  if (isBlob(result)) return true;
-  const source = object(result);
-  const preferred = mode === "download"
-    ? first(source.downloadUrl, source.file?.downloadUrl, source.pdf?.downloadUrl, source.document?.downloadUrl)
-    : first(source.viewUrl, source.file?.viewUrl, source.pdf?.viewUrl, source.document?.viewUrl);
-
-  return Boolean(cleanActionUrl(first(
-    preferred,
-    source.signedUrl,
-    source.sasUrl,
-    source.url,
-    source.file?.signedUrl,
-    source.file?.sasUrl,
-    source.file?.url,
-    source.pdf?.signedUrl,
-    source.pdf?.sasUrl,
-    source.pdf?.url,
-    ""
-  )));
+  const normalized = object(Boundary.normalizeFactura(value), null);
+  return normalized || value;
 }
 
 export function normalizeFactura(item = {}, options = {}) {
-  const promotion = promoteTechnicalFactura(item);
-  const normalized = Base.normalizeFactura(promotion.factura || item, options);
-  return canonicalizeFactura(normalized, item);
+  const normalized = Boundary.normalizeFactura(item, options);
+  return canonicalizeDetailItem(normalized);
 }
 
 export function normalizeFacturasListResponse(payload = null, requestMeta = {}) {
-  return sanitizeFacturaListResponse(
-    Base.normalizeFacturasListResponse(payload, requestMeta)
+  return canonicalizeListResponse(
+    Boundary.normalizeFacturasListResponse(payload, requestMeta)
   );
 }
 
 export function normalizeFacturaDetailResponse(payload = null) {
-  const normalized = Base.normalizeFacturaDetailResponse(payload);
-  const item = canonicalizeFactura(normalized?.item, payload);
+  const normalized = Boundary.normalizeFacturaDetailResponse(payload);
+  const item = canonicalizeDetailItem(normalized?.item);
+
   return {
     ...normalized,
     ok: Boolean(item),
     item,
     factura: item,
     data: item,
-    documentFlowVersion: FACTURAS_DOCUMENT_FLOW_VERSION,
+    canonicalAliasVersion: FACTURA_CANONICAL_ALIAS_VERSION,
   };
 }
 
 export function normalizeFacturaCreateResponse(payload = null) {
-  const normalized = Base.normalizeFacturaCreateResponse(payload);
-  const item = canonicalizeFactura(normalized?.item, {
-    ...object(payload),
-    file: first(normalized?.file, payload?.file, payload?.pdf, payload?.document, {}),
-    pdf: first(payload?.pdf, normalized?.file, payload?.file, payload?.document, {}),
-    document: first(payload?.document, payload?.file, payload?.pdf, {}),
-  });
+  const normalized = Boundary.normalizeFacturaCreateResponse(payload);
+  const item = canonicalizeDetailItem(normalized?.item);
 
   return {
     ...normalized,
@@ -454,28 +723,22 @@ export function normalizeFacturaCreateResponse(payload = null) {
     factura: item,
     data: item,
     created: Boolean(item),
-    documentReady: Boolean(item?.documentReady),
-    documentFlowVersion: FACTURAS_DOCUMENT_FLOW_VERSION,
+    canonicalAliasVersion: FACTURA_CANONICAL_ALIAS_VERSION,
   };
 }
 
-export function normalizeFacturaPdfResponse(payload = null, fallback = {}) {
-  return sanitizePdfResult(Base.normalizeFacturaPdfResponse(payload, fallback));
-}
-
 export async function listFacturas(options = {}) {
-  const response = await Base.listFacturas(options);
-  const sanitized = sanitizeFacturaListResponse(response);
+  const response = await Boundary.listFacturas(options);
+  const canonical = canonicalizeListResponse(response);
 
-  if (sanitized !== response) {
-    Base.syncFacturasListCache({
-      ...sanitized,
-      contextKey: Base.getFacturasListContextKey(options),
-    });
+  if (canonical !== response && canonical?.contextKey) {
+    Boundary.syncFacturasListCache(canonical);
   }
 
-  return sanitized;
+  return canonical;
 }
+
+export const fetchFacturas = listFacturas;
 
 export async function loadFacturas(options = {}) {
   const response = await listFacturas(options);
@@ -483,80 +746,90 @@ export async function loadFacturas(options = {}) {
 }
 
 export function hydrateFacturasFromCache() {
-  const source = Base.hydrateFacturasFromCache();
-  const sanitized = sanitizeFacturaListResponse(source);
+  const source = Boundary.hydrateFacturasFromCache();
+  const canonical = canonicalizeListResponse(source);
 
-  if (sanitized !== source && sanitized?.contextKey) {
-    return sanitizeFacturaListResponse(
-      Base.syncFacturasListCache(sanitized)
+  if (canonical !== source && canonical?.contextKey) {
+    return canonicalizeListResponse(
+      Boundary.syncFacturasListCache(canonical)
     );
   }
 
-  return sanitized;
+  return canonical;
 }
 
 export function syncFacturasListCache(snapshot = {}) {
-  const sanitized = sanitizeFacturaListResponse({
-    ...object(snapshot),
-    items: sanitizeFacturaItems(snapshot?.items),
+  const canonical = canonicalizeListResponse({
+    ...object(snapshot, {}),
+    items: Array.isArray(snapshot?.items) ? snapshot.items : [],
   });
 
-  return sanitizeFacturaListResponse(
-    Base.syncFacturasListCache(sanitized)
+  return canonicalizeListResponse(
+    Boundary.syncFacturasListCache(canonical)
   );
 }
 
 export function computeFacturasStats(items = []) {
-  return Base.computeFacturasStats(sanitizeFacturaItems(items));
+  return Boundary.computeFacturasStats(canonicalItems(items).items);
 }
 
 export function getFacturaStableId(item = {}) {
-  const promotion = promoteTechnicalFactura(item);
-  return Base.getFacturaStableId(promotion.factura || item);
+  return canonicalIdentifier(canonicalizeFacturaListItem(item)) ||
+    Boundary.getFacturaStableId(item);
 }
 
 export async function fetchFacturaDetailRequest(id = "", options = {}) {
-  const response = await Base.fetchFacturaDetailRequest(id, options);
-  const item = canonicalizeFactura(response?.item);
+  const requestId = resolveFacturaCanonicalId(id, options);
+  const response = await Boundary.fetchFacturaDetailRequest(requestId, {
+    ...options,
+    dedupe: options.dedupe !== false && requestId === id,
+  });
+  const item = canonicalizeDetailItem(response?.item);
+
+  if (isTechnicalIdentifier(id) && item) {
+    rememberAlias(id, canonicalIdentifier(item));
+  }
+
   return {
     ...response,
     ok: Boolean(item),
     item,
     factura: item,
     data: item,
-    documentFlowVersion: FACTURAS_DOCUMENT_FLOW_VERSION,
+    requestedId: id,
+    canonicalRequestId: requestId,
+    canonicalAliasVersion: FACTURA_CANONICAL_ALIAS_VERSION,
   };
 }
+
+export const getFacturaByIdRequest = fetchFacturaDetailRequest;
 
 export async function getFacturaById(id = "", options = {}) {
   const response = await fetchFacturaDetailRequest(id, options);
   return response.item;
 }
 
+export const detailFactura = getFacturaById;
+
 export async function createFacturaRequest(payload = {}, options = {}) {
-  const response = await Base.createFacturaRequest(payload, options);
-  const item = canonicalizeFactura(response?.item, response);
+  const response = await Boundary.createFacturaRequest(payload, options);
+  const item = canonicalizeDetailItem(response?.item);
+
   return {
     ...response,
     item,
     factura: item,
     data: item,
     created: Boolean(item),
-    documentReady: Boolean(item?.documentReady || response?.documentReady),
-    documentFlowVersion: FACTURAS_DOCUMENT_FLOW_VERSION,
+    canonicalAliasVersion: FACTURA_CANONICAL_ALIAS_VERSION,
   };
 }
 
 export async function createFactura(payload = {}, options = {}) {
   const response = await createFacturaRequest(payload, options);
   let created = response.item;
-  const id = facturaId(created);
 
-  /*
-    La creación no se considera integrada en la vista hasta intentar leer
-    el DTO canónico de detalle. Esto elimina el snapshot parcial que antes
-    entraba directamente en la tabla/modal después del POST.
-  */
+  const id = canonicalIdentifier(created);
   if (id) {
     try {
       const hydrated = await getFacturaById(id, {
@@ -565,104 +838,188 @@ export async function createFactura(payload = {}, options = {}) {
       });
       if (hydrated) created = hydrated;
     } catch {
-      // El POST ya confirmó la factura. Conservamos su DTO enriquecido y la
-      // recarga normal de la vista hará la reconciliación posterior.
+      // El POST ya confirmó la creación. La lista revalidará después.
     }
   }
 
-  return canonicalizeFactura(created, response);
+  return canonicalizeDetailItem(created);
 }
 
-async function requestPdfWithSingleRetry(
-  baseRequest,
+export const createInvoice = createFactura;
+
+function canonicalActionId(id = "", payload = {}, options = {}) {
+  return resolveFacturaCanonicalId(id, {
+    ...options,
+    factura: first(options.factura, payload.factura, payload.item, payload.data),
+  });
+}
+
+export async function updateFacturaRequest(id = "", payload = {}, options = {}) {
+  return Boundary.updateFacturaRequest(
+    canonicalActionId(id, payload, options),
+    payload,
+    options
+  );
+}
+
+export async function updateFactura(id = "", payload = {}, options = {}) {
+  return canonicalizeDetailItem(await Boundary.updateFactura(
+    canonicalActionId(id, payload, options),
+    payload,
+    options
+  ));
+}
+
+export const updateInvoice = updateFactura;
+
+export async function patchFacturaRequest(id = "", payload = {}, options = {}) {
+  return Boundary.patchFacturaRequest(
+    canonicalActionId(id, payload, options),
+    payload,
+    options
+  );
+}
+
+export async function patchFactura(id = "", payload = {}, options = {}) {
+  return canonicalizeDetailItem(await Boundary.patchFactura(
+    canonicalActionId(id, payload, options),
+    payload,
+    options
+  ));
+}
+
+export const patchInvoice = patchFactura;
+
+export async function removeFacturaRequest(id = "", options = {}) {
+  return Boundary.removeFacturaRequest(
+    resolveFacturaCanonicalId(id, options),
+    options
+  );
+}
+
+export async function removeFactura(id = "", options = {}) {
+  return Boundary.removeFactura(
+    resolveFacturaCanonicalId(id, options),
+    options
+  );
+}
+
+export const removeInvoice = removeFactura;
+
+export async function sendFacturaRequest(id = "", payload = {}, options = {}) {
+  return Boundary.sendFacturaRequest(
+    canonicalActionId(id, payload, options),
+    payload,
+    options
+  );
+}
+
+export async function sendFactura(id = "", payload = {}, options = {}) {
+  return canonicalizeDetailItem(await Boundary.sendFactura(
+    canonicalActionId(id, payload, options),
+    payload,
+    options
+  ));
+}
+
+export async function markFacturaPaidRequest(
   id = "",
-  options = {},
-  mode = "view"
+  payload = {},
+  options = {}
 ) {
-  let firstError = null;
-
-  try {
-    const result = sanitizePdfResult(await baseRequest(id, options));
-    if (hasActionablePdf(result, mode)) return result;
-  } catch (error) {
-    firstError = error;
-  }
-
-  /*
-    El backend dispone de self-heal del Blob. Un único segundo intento con
-    force cubre la carrera entre reparación/persistencia y lectura sin crear
-    bucles ni esconder errores reales.
-  */
-  try {
-    const result = sanitizePdfResult(await baseRequest(id, {
-      ...options,
-      force: true,
-    }));
-    if (hasActionablePdf(result, mode)) return result;
-    return result;
-  } catch (error) {
-    throw error || firstError || new Error("FACTURA_PDF_REQUEST_FAILED");
-  }
+  return Boundary.markFacturaPaidRequest(
+    canonicalActionId(id, payload, options),
+    payload,
+    options
+  );
 }
+
+export async function markFacturaPaid(
+  id = "",
+  payload = {},
+  options = {}
+) {
+  return canonicalizeDetailItem(await Boundary.markFacturaPaid(
+    canonicalActionId(id, payload, options),
+    payload,
+    options
+  ));
+}
+
+export const markInvoicePaid = markFacturaPaid;
 
 export async function viewFacturaPdfRequest(id = "", options = {}) {
-  return requestPdfWithSingleRetry(
-    Base.viewFacturaPdfRequest,
-    id,
-    options,
-    "view"
+  return Boundary.viewFacturaPdfRequest(
+    resolveFacturaCanonicalId(id, options),
+    options
   );
 }
 
 export async function downloadFacturaPdfRequest(id = "", options = {}) {
-  return requestPdfWithSingleRetry(
-    Base.downloadFacturaPdfRequest,
-    id,
-    options,
-    "download"
+  return Boundary.downloadFacturaPdfRequest(
+    resolveFacturaCanonicalId(id, options),
+    options
   );
 }
 
-export async function fetchFacturaPdfRequest(id = "", mode = Base.FACTURA_PDF_MODES.DOWNLOAD, options = {}) {
-  const key = text(mode, "download").toLowerCase();
-  return ["view", "inline", "ver", "open", "preview"].includes(key)
+export async function fetchFacturaPdfRequest(
+  id = "",
+  mode = Boundary.FACTURA_PDF_MODES.DOWNLOAD,
+  options = {}
+) {
+  const normalizedMode = key(mode);
+  return ["view", "inline", "ver", "open", "preview"].includes(normalizedMode)
     ? viewFacturaPdfRequest(id, options)
     : downloadFacturaPdfRequest(id, options);
 }
 
-export const fetchFacturas = listFacturas;
+export const downloadFactura = downloadFacturaPdfRequest;
+export const viewFactura = viewFacturaPdfRequest;
 
-/*
-  Compatibilidad histórica:
-  varios agregadores de dominio (incluido Home) consumen FacturasApi como
-  default namespace. El boundary debe conservar ese contrato además de los
-  exports nombrados para que los imports lazy no fallen en tiempo de ejecución.
-*/
-const FacturasApi = Object.freeze({
-  ...Base,
-  FACTURAS_DOCUMENT_FLOW_VERSION,
-  FACTURA_TECHNICAL_UI_GUARD_VERSION,
+export const FacturasApi = Object.freeze({
+  ...Boundary.default,
+  ...Boundary,
+  FACTURA_CANONICAL_ALIAS_VERSION,
   isFacturaTechnicalRecord,
-  isFacturaDocumentActionUrl,
+  canonicalizeFacturaListItem,
+  resolveFacturaCanonicalId,
   normalizeFactura,
   normalizeFacturasListResponse,
   normalizeFacturaDetailResponse,
   normalizeFacturaCreateResponse,
-  normalizeFacturaPdfResponse,
   listFacturas,
-  loadFacturas,
   fetchFacturas,
+  loadFacturas,
   hydrateFacturasFromCache,
   syncFacturasListCache,
   computeFacturasStats,
   getFacturaStableId,
   fetchFacturaDetailRequest,
+  getFacturaByIdRequest,
   getFacturaById,
+  detailFactura,
   createFacturaRequest,
   createFactura,
+  createInvoice,
+  updateFacturaRequest,
+  updateFactura,
+  updateInvoice,
+  patchFacturaRequest,
+  patchFactura,
+  patchInvoice,
+  removeFacturaRequest,
+  removeFactura,
+  removeInvoice,
+  sendFacturaRequest,
+  sendFactura,
+  markFacturaPaidRequest,
+  markFacturaPaid,
+  markInvoicePaid,
   viewFacturaPdfRequest,
   downloadFacturaPdfRequest,
   fetchFacturaPdfRequest,
+  downloadFactura,
+  viewFactura,
 });
 
 export default FacturasApi;

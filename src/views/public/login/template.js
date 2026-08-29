@@ -356,7 +356,7 @@ function renderPasswordField() {
 
       <p
         class="auth-field-error login-field-error"
-        id="${escapeAttr(errorId)}-error"
+        id="${escapeAttr(errorId)}"
         data-login-error="password"
         aria-live="polite"
         hidden

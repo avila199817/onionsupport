@@ -106,6 +106,9 @@ jobs:
       - name: Validate production verifier syntax
         run: python3 -m py_compile .github/scripts/production_verify.py
 
+      - name: Validate production availability monitor
+        run: node .github/scripts/production-availability-contract.mjs
+
       - name: Validate static host JSON
         run: python3 -m json.tool staticwebapp.config.json >/dev/null
 

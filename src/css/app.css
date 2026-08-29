@@ -12,15 +12,16 @@
    - Declarar el orden de cascada una sola vez.
    - Cargar únicamente estilos realmente globales.
    - Mantener variables.css como fuente de verdad visual dark/default.
-   - Mantener light.css como única fuente de overrides del tema claro.
+   - Mantener light.css como fuente global de tokens del tema claro.
    - Dejar TODAS las hojas específicas de ruta a src/router/styles.js.
+   - Aplicar el tema público system/light como composición transversal Home + Auth.
    - Permitir composiciones responsive transversales sin parches por vista.
    - Cerrar la cascada con invariantes geométricas transversales.
 
    Reglas:
    - Sin declaraciones CSS directas en este archivo.
    - Sin imports externos ni fuentes remotas.
-   - Sin imports específicos de una vista/ruta.
+   - Sin imports de una única vista/ruta; las composiciones deben ser transversales.
    - Sin imports duplicados.
 ========================================================= */
 
@@ -83,8 +84,15 @@
 
    Las composiciones pueden recomponer visualmente varios dominios después de
    sus hojas de vista sin usar !important. No contienen lógica de negocio.
+
+   La familia public-system-theme-* es deliberadamente transversal: adapta todas las
+   superficies públicas Home + Auth al tema efectivo resuelto por preboot.
 ========================================================= */
 
+@import url("./compositions/public-system-theme-foundation.css") layer(compositions);
+@import url("./compositions/public-system-theme-home.css") layer(compositions);
+@import url("./compositions/public-system-theme-support.css") layer(compositions);
+@import url("./compositions/public-system-theme-auth.css") layer(compositions);
 @import url("./compositions/private-admin-parity.css") layer(compositions);
 @import url("./compositions/private-admin-interactions.css") layer(compositions);
 @import url("./compositions/private-create-modal.css") layer(compositions);

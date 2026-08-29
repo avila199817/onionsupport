@@ -741,6 +741,33 @@ function computeStats(items = []) {
   });
 }
 
+function resolveHeaderStats(input = {}, rows = []) {
+  const data = safeObject(input);
+  const runtime = getRuntimeState(data);
+  const local = computeStats(rows);
+  const source = safeObject(data.stats);
+  const authoritative = Boolean(first(data.statsAuthoritative, runtime.statsAuthoritative, false));
+
+  if (!authoritative || !Object.keys(source).length) {
+    return { ...local, authoritative: false };
+  }
+
+  return {
+    total: number(first(source.invoiceCount, source.countTotal, source.total), local.total),
+    totalImporte: number(first(source.totalAmount, source.totalFacturado, source.totalImporte), local.totalImporte),
+    totalPagado: number(first(source.paidAmount, source.totalPagado, source.paidTotal), local.totalPagado),
+    totalPendiente: number(first(source.outstandingAmount, source.pendingAmount, source.totalPendiente, source.pendingTotal), local.totalPendiente),
+    totalVencido: number(first(source.overdueAmount, source.totalVencido, source.overdueTotal), local.totalVencido),
+    pendingCount: number(first(source.pendingCount, source.countPendientes), local.pendingCount),
+    paidCount: number(first(source.paidCount, source.countPagadas), local.paidCount),
+    overdueCount: number(first(source.overdueCount, source.countVencidas), local.overdueCount),
+    pdfCount: number(first(source.countWithPdf, source.countConPdf), local.pdfCount),
+    sentCount: number(first(source.sentCount, source.countEnviadas), local.sentCount),
+    incidenciaCount: number(first(source.linkedTicketCount, source.countConIncidencia), local.incidenciaCount),
+    authoritative: true,
+  };
+}
+
 function getRemoteTotal(input = {}, fallback = 0) {
   const data = safeObject(input);
   const runtime = getRuntimeState(data);
@@ -1014,7 +1041,7 @@ export function renderHeader(input = {}) {
   const data = safeObject(input);
   const rows = sortFacturas(getInputItems(data), { sort: "date_desc" });
   const runtime = getRuntimeState(data);
-  const stats = computeStats(rows);
+  const stats = resolveHeaderStats(data, rows);
   const canCreateFactura = isAdmin(data);
   const updatedAt = first(data.lastUpdatedAt, runtime.lastSyncAt, data.updatedAt, runtime.updatedAt, ...rows.map(getUpdatedAt));
   const remoteCount = getRemoteTotal(data, stats.total);
@@ -1039,8 +1066,8 @@ export function renderHeader(input = {}) {
       <span class="facturas-meta-pill">${icon("mail")}<span>${escapeHtml(`${stats.sentCount} enviadas`)}</span></span>
     </div>
     <div class="facturas-stats">
-      <article class="facturas-stat-card facturas-stat-card--accent"><div class="facturas-stat-label">Facturas cargadas</div><div class="facturas-stat-value">${escapeHtml(String(stats.total))}</div><div class="facturas-stat-text">Documentos disponibles en la sesión actual.</div></article>
-      <article class="facturas-stat-card facturas-stat-card--success"><div class="facturas-stat-label">Importe visible</div><div class="facturas-stat-value">${escapeHtml(formatMoney(stats.totalImporte, DEFAULT_CURRENCY))}</div><div class="facturas-stat-text">Suma de las facturas cargadas actualmente.</div></article>
+      <article class="facturas-stat-card facturas-stat-card--accent"><div class="facturas-stat-label">${stats.authoritative ? "Facturas totales" : "Facturas cargadas"}</div><div class="facturas-stat-value">${escapeHtml(String(stats.total))}</div><div class="facturas-stat-text">${stats.authoritative ? "Documentos contabilizados por el backend sobre todo el conjunto visible." : "Documentos disponibles en la sesión actual."}</div></article>
+      <article class="facturas-stat-card facturas-stat-card--success"><div class="facturas-stat-label">${stats.authoritative ? "Total facturado" : "Importe visible"}</div><div class="facturas-stat-value">${escapeHtml(formatMoney(stats.totalImporte, DEFAULT_CURRENCY))}</div><div class="facturas-stat-text">${stats.authoritative ? "Importe global calculado por el backend, independiente del scroll." : "Suma de las facturas cargadas actualmente."}</div></article>
       <article class="facturas-stat-card facturas-stat-card--warning"><div class="facturas-stat-label">Pendientes</div><div class="facturas-stat-value">${escapeHtml(String(stats.pendingCount))}</div><div class="facturas-stat-text">Cobro pendiente, parcial o documento en borrador.</div></article>
       <article class="facturas-stat-card facturas-stat-card--danger"><div class="facturas-stat-label">Vencidas / pagadas</div><div class="facturas-stat-value">${escapeHtml(`${stats.overdueCount} / ${stats.paidCount}`)}</div><div class="facturas-stat-text">Balance rápido del estado de cobro.</div></article>
     </div>

@@ -18,6 +18,7 @@ import { ROUTES } from "../../core/config.js";
 
 import {
   listFacturas,
+  loadFacturasStats,
   hydrateFacturasFromCache,
   syncFacturasListCache,
   getFacturasListContextKey,
@@ -2106,6 +2107,9 @@ function createFacturasController(host = null, context = {}) {
     items.length
   );
   let totalKnown = cache.totalKnown === true;
+  let authoritativeStats = null;
+  let authoritativeStatsLoading = false;
+  let authoritativeStatsSeq = 0;
 
   let loading = false;
   let refreshing = false;
@@ -2988,6 +2992,35 @@ function createFacturasController(host = null, context = {}) {
       : null;
   }
 
+  function getViewStats() {
+    return authoritativeStats || computeFacturasStats(items);
+  }
+
+  async function refreshAuthoritativeStats({ renderOnSuccess = true } = {}) {
+    const seq = ++authoritativeStatsSeq;
+    authoritativeStatsLoading = true;
+
+    try {
+      const stats = safeObject(
+        await loadFacturasStats({ dedupe: true }),
+        {}
+      );
+
+      if (destroyed || seq !== authoritativeStatsSeq) return null;
+      if (Object.keys(stats).length) authoritativeStats = stats;
+      return authoritativeStats;
+    } catch {
+      return null;
+    } finally {
+      if (!destroyed && seq === authoritativeStatsSeq) {
+        authoritativeStatsLoading = false;
+        if (renderOnSuccess && authoritativeStats) {
+          render({ preserveFocus: true });
+        }
+      }
+    }
+  }
+
   function payload(extra = {}) {
     return {
       user: getCurrentUser(),
@@ -3021,7 +3054,9 @@ function createFacturasController(host = null, context = {}) {
       creating,
       error,
 
-      stats: computeFacturasStats(items),
+      stats: getViewStats(),
+      statsAuthoritative: Boolean(authoritativeStats),
+      statsLoading: authoritativeStatsLoading,
 
       state: {
         loading,
@@ -3037,6 +3072,8 @@ function createFacturasController(host = null, context = {}) {
         limit: pageSize,
         hasMore,
         totalKnown,
+        statsAuthoritative: Boolean(authoritativeStats),
+        statsLoading: authoritativeStatsLoading,
         filter,
         search,
         sort,
@@ -4189,6 +4226,7 @@ function createFacturasController(host = null, context = {}) {
   }
 
   async function load(options = {}) {
+    void refreshAuthoritativeStats();
     return fetchList({
       mode: "replace",
       requestPage: options.page || DEFAULT_PAGE,
@@ -4201,6 +4239,7 @@ function createFacturasController(host = null, context = {}) {
   }
 
   async function refresh() {
+    void refreshAuthoritativeStats();
     cancelListSearchTimer();
     const preservePages = itemsBelongToCurrentQuery();
     if (!preservePages) resetListState({ keepItems: false });

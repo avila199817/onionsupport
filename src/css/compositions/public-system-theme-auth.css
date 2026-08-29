@@ -1,0 +1,384 @@
+/* =========================================================
+   ONION SUPPORT — PUBLIC SYSTEM THEME · AUTH
+   Archivo: /src/css/compositions/public-system-theme-auth.css
+
+   AUTH LIGHT SURFACES · LOGIN + RESET + ACTIVATION · 2026
+========================================================= */
+
+/* =========================================================
+   9. PUBLIC AUTH · TOKENS / CANVAS
+========================================================= */
+
+html:is([data-theme="light"], .theme-light) .public-auth-shell:not(.public-auth-shell--home) {
+  --auth-bg: #f4f7fb;
+  --auth-bg-soft: #edf3f9;
+  --auth-surface: rgb(255 255 255 / .80);
+  --auth-surface-strong: rgb(255 255 255 / .95);
+  --auth-card: rgb(255 255 255 / .88);
+
+  --auth-text: #142338;
+  --auth-text-strong: #081423;
+  --auth-text-soft: #52667c;
+  --auth-text-muted: #708298;
+
+  --auth-border: rgb(18 57 94 / .12);
+  --auth-border-strong: rgb(19 148 255 / .34);
+
+  color: var(--auth-text);
+  background:
+    radial-gradient(circle at 10% 8%, rgb(19 148 255 / .12), transparent 32%),
+    radial-gradient(circle at 86% 12%, rgb(52 212 255 / .08), transparent 28%),
+    radial-gradient(circle at 72% 92%, rgb(11 97 255 / .07), transparent 36%),
+    linear-gradient(135deg, #ffffff 0%, #f4f8fc 52%, #eaf1f8 100%);
+}
+
+html:is([data-theme="light"], .theme-light) .public-auth-shell:not(.public-auth-shell--home)::before {
+  background:
+    linear-gradient(90deg, rgb(18 57 94 / .035) 1px, transparent 1px),
+    linear-gradient(180deg, rgb(18 57 94 / .032) 1px, transparent 1px),
+    linear-gradient(45deg, transparent 48%, rgb(19 148 255 / .04) 50%, transparent 52%);
+  opacity: .42;
+}
+
+html:is([data-theme="light"], .theme-light) .public-auth-shell:not(.public-auth-shell--home)::after {
+  background:
+    radial-gradient(circle at 20% 28%, rgb(18 57 94 / .08) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 80% 68%, rgb(19 148 255 / .10) 0 1px, transparent 1.5px);
+  opacity: .16;
+}
+
+html:is([data-theme="light"], .theme-light) .public-auth-shell:not(.public-auth-shell--home) .public-auth-body {
+  scrollbar-color: rgb(19 148 255 / .42) transparent;
+}
+
+html:is([data-theme="light"], .theme-light) .login-portal-frame {
+  background:
+    radial-gradient(circle at 31% 44%, rgb(19 148 255 / .07), transparent 33%),
+    radial-gradient(circle at 86% 18%, rgb(52 212 255 / .045), transparent 27%),
+    linear-gradient(135deg, rgb(255 255 255 / .88), rgb(238 245 251 / .96));
+}
+
+html:is([data-theme="light"], .theme-light) .login-portal-frame::before {
+  background:
+    linear-gradient(90deg, rgb(18 57 94 / .035) 1px, transparent 1px),
+    linear-gradient(180deg, rgb(18 57 94 / .030) 1px, transparent 1px);
+  opacity: .34;
+}
+
+html:is([data-theme="light"], .theme-light) .login-page-grid {
+  background:
+    radial-gradient(circle at 50% 0%, rgb(19 148 255 / .07), transparent 37%),
+    linear-gradient(135deg, #ffffff, #f1f6fb 52%, #e8f0f7);
+}
+
+html:is([data-theme="light"], .theme-light) .login-page-glow--one {
+  background: rgb(19 148 255 / .16);
+}
+
+html:is([data-theme="light"], .theme-light) .login-page-glow--two {
+  background: rgb(52 212 255 / .10);
+}
+
+/* =========================================================
+   10. PUBLIC AUTH · BRAND / SHOWCASE
+========================================================= */
+
+html:is([data-theme="light"], .theme-light) :is(
+  .login-topbar-brand,
+  .login-brand-wordmark strong,
+  .login-showcase-title,
+  .login-showcase-feature-copy strong,
+  .login-showcase-metric strong,
+  .login-card-title,
+  .password-reset-title
+) {
+  color: var(--auth-text-strong);
+}
+
+html:is([data-theme="light"], .theme-light) .login-brand-logo {
+  filter: drop-shadow(0 7px 12px rgb(18 55 92 / .14));
+}
+
+html:is([data-theme="light"], .theme-light) .login-showcase-feature {
+  border-color: rgb(18 57 94 / .10);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / .96), rgb(244 249 254 / .82)),
+    rgb(255 255 255 / .76);
+  box-shadow:
+    inset 0 1px 0 #ffffff,
+    0 10px 26px rgb(31 67 103 / .07);
+}
+
+html:is([data-theme="light"], .theme-light) .login-showcase-feature-icon {
+  border-color: rgb(19 148 255 / .18);
+  background: rgb(19 148 255 / .055);
+  box-shadow: inset 0 1px 0 #ffffff;
+}
+
+html:is([data-theme="light"], .theme-light) .login-showcase-metric {
+  background: linear-gradient(90deg, rgb(19 148 255 / .075), transparent);
+}
+
+html:is([data-theme="light"], .theme-light) .login-orbit-ring {
+  border-color: rgb(19 148 255 / .20);
+  box-shadow:
+    0 0 24px rgb(19 148 255 / .06),
+    inset 0 0 24px rgb(19 148 255 / .035);
+}
+
+html:is([data-theme="light"], .theme-light) .login-orbit-ring--two {
+  border-color: rgb(52 212 255 / .18);
+}
+
+html:is([data-theme="light"], .theme-light) .login-orbit-ring--three {
+  border-color: rgb(19 148 255 / .28);
+}
+
+/* =========================================================
+   11. PUBLIC AUTH · CARDS / FORMS
+========================================================= */
+
+html:is([data-theme="light"], .theme-light) :is(
+  .login-card-panel,
+  .password-reset-card-panel
+) {
+  border-color: rgb(18 57 94 / .13);
+  background:
+    radial-gradient(circle at 50% 0%, rgb(19 148 255 / .07), transparent 34%),
+    linear-gradient(180deg, rgb(255 255 255 / .98), rgb(241 247 253 / .94)),
+    rgb(255 255 255 / .90);
+  box-shadow:
+    0 28px 78px rgb(31 67 103 / .16),
+    0 14px 38px rgb(19 148 255 / .06),
+    inset 0 1px 0 #ffffff;
+}
+
+html:is([data-theme="light"], .theme-light) .login-card-panel--portal {
+  border-color: rgb(19 148 255 / .20);
+  background:
+    radial-gradient(circle at 50% -8%, rgb(19 148 255 / .09), transparent 36%),
+    linear-gradient(180deg, rgb(255 255 255 / .99), rgb(239 246 252 / .96)),
+    #ffffff;
+  box-shadow:
+    0 30px 84px rgb(31 67 103 / .17),
+    0 16px 42px rgb(19 148 255 / .07),
+    inset 0 1px 0 #ffffff;
+}
+
+html:is([data-theme="light"], .theme-light) .login-card-sheen {
+  background:
+    linear-gradient(125deg, transparent 5%, rgb(255 255 255 / .72) 18%, transparent 32%),
+    radial-gradient(circle at 86% 4%, rgb(19 148 255 / .065), transparent 26%);
+  opacity: .64;
+}
+
+html:is([data-theme="light"], .theme-light) :is(
+  .auth-label,
+  .login-label,
+  .password-label,
+  .password-reset-label
+) {
+  color: #2a415b;
+}
+
+html:is([data-theme="light"], .theme-light) .login-input-shell {
+  border-color: rgb(18 57 94 / .14);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / .98), rgb(247 250 253 / .96)),
+    #ffffff;
+  box-shadow:
+    inset 0 1px 0 #ffffff,
+    0 7px 18px rgb(31 67 103 / .06);
+}
+
+html:is([data-theme="light"], .theme-light) .login-input-shell:hover {
+  border-color: rgb(19 148 255 / .22);
+  background: #ffffff;
+}
+
+html:is([data-theme="light"], .theme-light) .login-input-shell:focus-within {
+  border-color: rgb(19 148 255 / .48);
+  background: #ffffff;
+  box-shadow:
+    0 0 0 4px rgb(19 148 255 / .09),
+    0 14px 30px rgb(31 67 103 / .09),
+    inset 0 1px 0 #ffffff;
+}
+
+html:is([data-theme="light"], .theme-light) :is(
+  .auth-input,
+  .login-input,
+  .password-reset-input,
+  .input-text,
+  [data-password-input]
+) {
+  color: var(--auth-text-strong);
+  border-color: rgb(18 57 94 / .13);
+  background: #ffffff;
+  box-shadow: inset 0 1px 0 #ffffff;
+}
+
+html:is([data-theme="light"], .theme-light) :is(
+  .auth-input,
+  .login-input,
+  .password-reset-input,
+  .input-text,
+  [data-password-input]
+)::placeholder {
+  color: #8292a5;
+}
+
+html:is([data-theme="light"], .theme-light) :is(
+  .auth-input,
+  .login-input,
+  .password-reset-input,
+  .input-text,
+  [data-password-input]
+):-webkit-autofill {
+  -webkit-text-fill-color: var(--auth-text-strong);
+  box-shadow: 0 0 0 1000px #ffffff inset;
+}
+
+html:is([data-theme="light"], .theme-light) .login-input-icon,
+html:is([data-theme="light"], .theme-light) :is(
+  .password-toggle,
+  .login-password-toggle,
+  .password-reset-password-toggle,
+  [data-password-toggle]
+) {
+  color: #71849a;
+}
+
+html:is([data-theme="light"], .theme-light) :is(
+  .password-toggle:hover,
+  .login-password-toggle:hover,
+  .password-reset-password-toggle:hover,
+  [data-password-toggle]:hover,
+  .password-toggle[aria-pressed="true"],
+  .login-password-toggle[aria-pressed="true"],
+  .password-reset-password-toggle[aria-pressed="true"],
+  [data-password-toggle][aria-pressed="true"]
+) {
+  color: var(--auth-text-strong);
+  border-color: rgb(19 148 255 / .20);
+  background: rgb(19 148 255 / .055);
+}
+
+html:is([data-theme="light"], .theme-light) .password-caps,
+html:is([data-theme="light"], .theme-light) [data-password-caps] {
+  color: #17436a;
+  border-color: rgb(19 148 255 / .18);
+  background: rgb(19 148 255 / .06);
+}
+
+html:is([data-theme="light"], .theme-light) :is(
+  .auth-link,
+  .login-link,
+  .login-reset-link,
+  .password-reset-link,
+  .auth-reset a,
+  .login-reset a
+) {
+  color: #0877c7;
+}
+
+html:is([data-theme="light"], .theme-light) :is(
+  .auth-link:hover,
+  .login-link:hover,
+  .login-reset-link:hover,
+  .password-reset-link:hover,
+  .auth-reset a:hover,
+  .login-reset a:hover
+) {
+  color: #045d9f;
+  text-shadow: 0 0 16px rgb(19 148 255 / .12);
+}
+
+html:is([data-theme="light"], .theme-light) .login-card-security {
+  color: var(--auth-text-muted);
+  border-color: rgb(18 57 94 / .09);
+  background: rgb(18 57 94 / .028);
+}
+
+html:is([data-theme="light"], .theme-light) .login-card-footer,
+html:is([data-theme="light"], .theme-light) :is(
+  .password-reset-password-policy,
+  .auth-help
+) {
+  color: var(--auth-text-muted);
+}
+
+html:is([data-theme="light"], .theme-light) :is(
+  .auth-message,
+  .login-message,
+  .auth-error,
+  .login-error,
+  .login-global-error,
+  .password-reset-message
+) {
+  background:
+    linear-gradient(135deg, rgb(255 92 117 / .08), rgb(255 255 255 / .88));
+  box-shadow: inset 0 1px 0 #ffffff;
+}
+
+html:is([data-theme="light"], .theme-light) :is(
+  .auth-message.is-success,
+  .password-reset-message.is-success,
+  .password-reset-message[data-message-type="success"]
+) {
+  color: #0d628d;
+  background:
+    linear-gradient(135deg, rgb(19 148 255 / .08), rgb(255 255 255 / .90));
+}
+
+/* =========================================================
+   12. RESPONSIVE LIGHT NAV / MOBILE STABILITY
+========================================================= */
+
+@media (max-width: 1040px) {
+  html:is([data-theme="light"], .theme-light) .public-home-nav-panel {
+    border-color: rgb(18 57 94 / .12);
+    background:
+      radial-gradient(circle at 80% 0%, rgb(19 148 255 / .09), transparent 40%),
+      rgb(255 255 255 / .96);
+    box-shadow:
+      0 28px 72px rgb(31 67 103 / .18),
+      inset 0 1px 0 rgb(255 255 255 / .94);
+  }
+
+  html:is([data-theme="light"], .theme-light) :is(
+    .public-home-nav-link:hover,
+    .public-home-nav-link.is-active,
+    .public-home-nav-link[aria-current="page"]
+  ) {
+    background-color: rgb(19 148 255 / .065);
+  }
+}
+
+@media (max-width: 720px) {
+  html:is([data-theme="light"], .theme-light) .public-home {
+    background: linear-gradient(135deg, #ffffff 0%, #f4f8fc 52%, #eaf1f8 100%);
+  }
+
+  html:is([data-theme="light"], .theme-light) .public-home-background {
+    background:
+      radial-gradient(circle at 12% 8%, rgb(19 148 255 / .10), transparent 36%),
+      radial-gradient(circle at 88% 18%, rgb(52 212 255 / .07), transparent 32%),
+      linear-gradient(135deg, #ffffff 0%, #f4f8fc 52%, #eaf1f8 100%);
+  }
+
+  html:is([data-theme="light"], .theme-light) .public-home-nav {
+    background: rgb(255 255 255 / .97);
+  }
+
+  html:is([data-theme="light"], .theme-light) .public-home-nav-panel {
+    background: rgb(255 255 255 / .98);
+  }
+
+  html:is([data-theme="light"], .theme-light) :is(
+    .login-card-panel,
+    .password-reset-card-panel
+  ) {
+    background: #ffffff;
+  }
+}

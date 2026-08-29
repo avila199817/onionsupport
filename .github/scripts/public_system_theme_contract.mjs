@@ -65,6 +65,8 @@ for (const [pattern, message] of [
   [/\.public-auth-shell:not\(\.public-auth-shell--home\)\s*\{/, "Falta el shell Auth light"],
   [/\.login-card-panel--portal\s*\{/, "Falta el card de login light"],
   [/\.login-input-shell\s*\{/, "Faltan los campos de login light"],
+  [/\.public-home-floating-whatsapp\s*\{[\s\S]*?color:\s*#ffffff;/, "El acceso flotante de WhatsApp debe conservar contraste blanco en light"],
+  [/\.public-home-icon--whatsapp path\s*\{[\s\S]*?fill:\s*currentColor;[\s\S]*?stroke:\s*none;/, "El glifo de WhatsApp debe heredar el blanco del acceso flotante"],
   [/@media \(max-width: 1040px\)[\s\S]*?\.public-home-nav-panel\s*\{/, "El menú público light debe cubrir tablet/móvil"],
   [/@media \(max-width: 720px\)[\s\S]*?\.login-card-panel,[\s\S]*?\.password-reset-card-panel/, "Las superficies Auth light deben conservar su fallback móvil"],
 ]) {
@@ -79,6 +81,7 @@ for (const selector of [
   ".public-home-faq-item",
   ".public-home-footer",
   ".public-home-account-menu",
+  ".public-home-floating-whatsapp",
   ".public-support-field input",
   ".login-showcase-title",
   ".login-card-title",
@@ -151,4 +154,4 @@ assert.ok(
   "La implementación light debe cubrir todas las superficies públicas"
 );
 
-console.log("✅ public system theme contract (device/system · home + auth · light/dark)");
+console.log("✅ public system theme contract (device/system · home + auth · light/dark · WhatsApp white)");

@@ -69,7 +69,7 @@ function declarationBlock(source, selector) {
 assert.equal(
   ROUTE_STYLES_VERSION,
   "route-styles.v13-login-card-first",
-  "La versión del manifest debe identificar la composición card-first"
+  "La versión del manifest debe conservar la composición card-first"
 );
 
 assert.deepEqual(
@@ -105,23 +105,44 @@ assert.equal(
   "La geometría del login no puede depender de !important"
 );
 
+const loginScope =
+  declarationBlock(
+    layoutCss,
+    ".public-auth-shell--login"
+  );
+
+for (const invariant of [
+  /--login-page-gutter:\s*clamp\(54px, 7vw, 148px\);/,
+  /--login-brand-zone-start:\s*clamp\(68px, 9\.2dvh, 80px\);/,
+  /--login-brand-zone-end:\s*14px;/,
+  /--login-brand-mark-size:\s*48px;/,
+]) {
+  assert.match(
+    loginScope,
+    invariant,
+    "La zona desktop de marca debe conservar su geometría canónica"
+  );
+}
+
 const topbar =
   declarationBlock(
     layoutCss,
     ".public-auth-shell--login .login-topbar"
   );
 
-assert.match(
-  topbar,
-  /min-block-size:\s*112px;/,
-  "Desktop debe reservar espacio real para bajar la marca"
-);
-
-assert.match(
-  topbar,
+for (const invariant of [
+  /align-items:\s*flex-start;/,
+  /var\(--login-brand-zone-start\)/,
+  /var\(--login-brand-mark-size\)/,
+  /var\(--login-brand-zone-end\)/,
   /var\(--login-page-gutter\)/,
-  "Topbar y cuerpo deben compartir el mismo eje horizontal"
-);
+]) {
+  assert.match(
+    topbar,
+    invariant,
+    "Desktop debe reservar una zona real y estable para la marca"
+  );
+}
 
 const brand =
   declarationBlock(
@@ -133,6 +154,12 @@ assert.match(
   brand,
   /transform:\s*none;/,
   "La marca no puede volver a depender de un desplazamiento óptico"
+);
+
+assert.doesNotMatch(
+  executableLayoutCss,
+  /@media\s*\(max-height:[\s\S]*?\.public-auth-shell--login \.login-topbar\s*\{/,
+  "Ningún viewport corto puede volver a sacar la marca de su zona"
 );
 
 const portalMain =
@@ -147,11 +174,39 @@ assert.match(
   "El cuerpo debe consumir el mismo gutter que la marca"
 );
 
+const cardHomeLinkCss =
+  declarationBlock(
+    layoutCss,
+    ".public-auth-shell--login .login-card-home-link"
+  );
+
+for (const invariant of [
+  /display:\s*inline-grid;/,
+  /place-items:\s*center;/,
+  /min-inline-size:\s*72px;/,
+  /min-block-size:\s*72px;/,
+  /text-decoration:\s*none;/,
+  /touch-action:\s*manipulation;/,
+  /-webkit-tap-highlight-color:\s*transparent;/,
+]) {
+  assert.match(
+    cardHomeLinkCss,
+    invariant,
+    "El logo enlazado del card debe conservar una interacción táctil accesible"
+  );
+}
+
+assert.match(
+  layoutCss,
+  /\.public-auth-shell--login \.login-card-home-link:focus-visible\s*\{/,
+  "El enlace del logo debe tener foco visible"
+);
+
 const mobile =
   section(
     layoutCss,
-    "3. MOBILE CARD-ONLY · <= 860px",
-    "4. COMPACT MOBILE GUTTER · <= 560px"
+    "4. MOBILE CARD-ONLY · <= 860px",
+    "5. COMPACT MOBILE GUTTER · <= 560px"
   );
 
 assert.match(
@@ -182,6 +237,12 @@ assert.match(
   hiddenMobileContent,
   /display:\s*none;/,
   "El contenido exterior al card debe quedar fuera del layout móvil"
+);
+
+assert.doesNotMatch(
+  hiddenMobileContent,
+  /login-card-home-link/,
+  "El enlace home del logo interior nunca puede quedar oculto en móvil"
 );
 
 const mobileMain =
@@ -222,11 +283,57 @@ assert.doesNotMatch(
   "La composición móvil nunca puede ocultar el card"
 );
 
+assert.match(
+  template,
+  /login\.template\.public\.v8-home-logo-link-2026/,
+  "El template debe identificar la revisión enlazada a la home"
+);
+
+const cardHomeLogo =
+  section(
+    template,
+    "function renderLoginCardHomeLogo()",
+    "/* =========================================================\n   FIELD"
+  );
+
+for (const invariant of [
+  /const homeHref = homeAnchor\(""\);/,
+  /class="login-card-home-link"/,
+  /href="\$\{escapeAttr\(homeHref\)\}"/,
+  /data-spa="true"/,
+  /data-router-link="true"/,
+  /data-route="\$\{escapeAttr\(homeHref\)\}"/,
+  /data-login-home-link="true"/,
+  /aria-label="Ir a la página principal de Onion Support"/,
+  /shellClass: "login-card-logo-shell"/,
+  /imageClass: "login-card-logo"/,
+]) {
+  assert.match(
+    cardHomeLogo,
+    invariant,
+    "El logo del card debe navegar semánticamente a la home pública"
+  );
+}
+
+const loginCardSource =
+  section(
+    template,
+    "function renderLoginCard()",
+    "/* =========================================================\n   TEMPLATE"
+  );
+
+assert.match(
+  loginCardSource,
+  /\$\{renderLoginCardHomeLogo\(\)\}/,
+  "El card debe renderizar el enlace home canónico"
+);
+
 for (const selector of [
   "login-topbar",
   "login-showcase",
   "login-card-panel--portal",
   'data-login-card="true"',
+  'data-login-home-link="true"',
 ]) {
   assert.equal(
     template.includes(selector),
@@ -256,5 +363,5 @@ assert.match(
 );
 
 console.log(
-  `✅ public login layout contract (${ROUTE_STYLES_VERSION} · mobile card-only)`
+  `✅ public login layout contract (${ROUTE_STYLES_VERSION} · brand zone · mobile card-only · home link)`
 );

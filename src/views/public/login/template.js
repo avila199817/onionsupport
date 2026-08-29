@@ -23,7 +23,7 @@ import {
 } from "../index.js";
 
 export const LOGIN_TEMPLATE_VERSION =
-  "login.template.public.v7-fullscreen-2026";
+  "login.template.public.v8-home-logo-link-2026";
 
 const APP_NAME = "Onion Support";
 const HOME_HREF = "/";
@@ -180,6 +180,28 @@ function renderLogo({
         >
       </picture>
     </span>
+  `;
+}
+
+function renderLoginCardHomeLogo() {
+  const homeHref = homeAnchor("");
+
+  return `
+    <a
+      class="login-card-home-link"
+      href="${escapeAttr(homeHref)}"
+      data-spa="true"
+      data-router-link="true"
+      data-route="${escapeAttr(homeHref)}"
+      data-login-home-link="true"
+      aria-label="Ir a la página principal de Onion Support"
+    >
+      ${renderLogo({
+        shellClass: "login-card-logo-shell",
+        imageClass: "login-card-logo",
+        size: 96,
+      })}
+    </a>
   `;
 }
 
@@ -487,11 +509,7 @@ function renderLoginCard() {
 
       <header class="login-card-header">
         <div class="login-card-logo-wrap">
-          ${renderLogo({
-            shellClass: "login-card-logo-shell",
-            imageClass: "login-card-logo",
-            size: 96,
-          })}
+          ${renderLoginCardHomeLogo()}
         </div>
 
         <h2

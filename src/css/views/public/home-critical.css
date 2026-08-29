@@ -45,12 +45,13 @@
 }
 
 /*
-   En móvil el marco es más alto y estrecho, por lo que el mismo recorte óptico
-   necesita algo más de aire superior. Se ajusta sólo la posición del contenido
-   de la imagen; el contenedor, su tamaño y el responsive permanecen intactos.
+   En móvil el marco es más ancho en relación con la fotografía vertical y el
+   recorte superior es mucho mayor que en desktop. El offset móvil compensa ese
+   recorte para recuperar el cabello completo y una respiración superior limpia,
+   sin mover el marco ni alterar las dimensiones del componente.
 */
 @media (max-width: 720px) {
   .public-home .public-home-command-portrait {
-    --public-home-profile-photo-offset-y: 12px;
+    --public-home-profile-photo-offset-y: 40px;
   }
 }

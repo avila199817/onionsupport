@@ -116,6 +116,7 @@ for (const invariant of [
   /--login-brand-zone-start:\s*clamp\(68px, 9\.2dvh, 80px\);/,
   /--login-brand-zone-end:\s*14px;/,
   /--login-brand-mark-size:\s*48px;/,
+  /--login-brand-row-size:\s*calc\([\s\S]*?var\(--login-brand-zone-start\)[\s\S]*?var\(--login-brand-mark-size\)[\s\S]*?var\(--login-brand-zone-end\)[\s\S]*?\);/,
 ]) {
   assert.match(
     loginScope,
@@ -132,8 +133,8 @@ const topbar =
 
 for (const invariant of [
   /align-items:\s*flex-start;/,
+  /min-block-size:\s*var\(--login-brand-row-size\);/,
   /var\(--login-brand-zone-start\)/,
-  /var\(--login-brand-mark-size\)/,
   /var\(--login-brand-zone-end\)/,
   /var\(--login-page-gutter\)/,
 ]) {
@@ -174,6 +175,49 @@ assert.match(
   "El cuerpo debe consumir el mismo gutter que la marca"
 );
 
+const desktopCard =
+  section(
+    layoutCss,
+    "2. DESKTOP CARD · VIEWPORT CENTER BALANCE",
+    "3. CARD LOGO · CANONICAL HOME LINK"
+  );
+
+assert.match(
+  desktopCard,
+  /@media \(min-width: 861px\)/,
+  "El balance vertical debe aplicarse sólo al layout desktop"
+);
+
+const desktopCardPanel =
+  declarationBlock(
+    desktopCard,
+    ".public-auth-shell--login .login-card-panel--portal"
+  );
+
+for (const invariant of [
+  /align-self:\s*center;/,
+  /margin-block-start:\s*0;/,
+  /margin-block-end:\s*var\(--login-brand-row-size\);/,
+]) {
+  assert.match(
+    desktopCardPanel,
+    invariant,
+    "El card desktop debe compensar la fila superior y centrar su border-box en el viewport"
+  );
+}
+
+assert.doesNotMatch(
+  desktopCardPanel,
+  /(?:transform|translate|inset-block|position\s*:\s*(?:absolute|fixed))/,
+  "El centrado desktop no puede depender de offsets visuales ni posicionamiento fuera de flujo"
+);
+
+assert.doesNotMatch(
+  desktopCard,
+  /\.login-showcase\s*\{/,
+  "El balance vertical solicitado debe afectar sólo al card, no al showcase"
+);
+
 const cardHomeLinkCss =
   declarationBlock(
     layoutCss,
@@ -205,8 +249,8 @@ assert.match(
 const mobile =
   section(
     layoutCss,
-    "4. MOBILE CARD-ONLY · <= 860px",
-    "5. COMPACT MOBILE GUTTER · <= 560px"
+    "5. MOBILE CARD-ONLY · <= 860px",
+    "6. COMPACT MOBILE GUTTER · <= 560px"
   );
 
 assert.match(
@@ -363,5 +407,5 @@ assert.match(
 );
 
 console.log(
-  `✅ public login layout contract (${ROUTE_STYLES_VERSION} · brand zone · mobile card-only · home link)`
+  `✅ public login layout contract (${ROUTE_STYLES_VERSION} · viewport-centered desktop card · mobile card-only · home link)`
 );

@@ -78,6 +78,7 @@ for (const [pattern, message] of [
   [/\.public-home-icon--whatsapp path\s*\{[\s\S]*?fill:\s*currentColor;[\s\S]*?stroke:\s*none;/, "El glifo de WhatsApp debe heredar el blanco del acceso flotante"],
   [/\[data-public-support-intake-link="true"\]\s*\{[\s\S]*?color:\s*#ffffff;/, "Todos los CTA Abrir incidencia deben usar texto blanco en light"],
   [/\[data-public-support-intake-link="true"\]\s*>\s*span,[\s\S]*?\[data-public-support-intake-link="true"\]\s*\.public-home-icon\s*\{[\s\S]*?color:\s*inherit;/, "Texto e iconos de los CTA internos deben heredar el blanco canónico"],
+  [/\.public-home \.public-support-phone-prefix\s*\{[\s\S]*?color:\s*#ffffff;[\s\S]*?var\(--public-home-accent-2\)[\s\S]*?var\(--public-home-accent\)[\s\S]*?var\(--public-home-accent-3\)/, "El prefijo telefónico light debe usar el gradiente azul canónico con texto blanco"],
   [/@media \(max-width: 1040px\)[\s\S]*?\.public-home-nav-panel\s*\{/, "El menú público light debe cubrir tablet/móvil"],
   [/@media \(max-width: 720px\)[\s\S]*?\.login-card-panel,[\s\S]*?\.password-reset-card-panel/, "Las superficies Auth light deben conservar su fallback móvil"],
 ]) {
@@ -95,6 +96,7 @@ for (const selector of [
   ".public-home-floating-whatsapp",
   '[data-public-support-intake-link="true"]',
   ".public-support-field input",
+  ".public-support-phone-prefix",
   ".login-showcase-title",
   ".login-card-title",
   ".login-input",
@@ -166,4 +168,4 @@ assert.ok(
   "La implementación light debe cubrir todas las superficies públicas"
 );
 
-console.log("✅ public system theme contract (device/system · home + auth · light/dark · WhatsApp/intake white)");
+console.log("✅ public system theme contract (device/system · home + auth · light/dark · WhatsApp/intake/phone-prefix white-blue)");

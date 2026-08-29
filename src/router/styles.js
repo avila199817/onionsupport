@@ -14,7 +14,7 @@
 ========================================================= */
 
 export const ROUTE_STYLES_VERSION =
-  "route-styles.v12-route-minimal-public-home";
+  "route-styles.v13-login-card-first";
 
 const MODE_ATTRIBUTE =
   "data-css-route-mode";
@@ -61,6 +61,7 @@ const STYLE_MANIFEST = Object.freeze({
 
   login: Object.freeze([
     "/src/css/auth/login.css",
+    "/src/css/auth/login.portal-layout.css",
   ]),
 
   "password-request": Object.freeze([

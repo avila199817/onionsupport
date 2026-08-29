@@ -28,7 +28,7 @@ function invoice() {
     id: CANONICAL_ID,
     facturaId: CANONICAL_ID,
     invoiceId: CANONICAL_ID,
-    clienteId: "CLI-1",
+    clienteId: "CON-20260822077849",
     tipoDocumento: "factura",
     entityType: "invoice",
     type: "invoice",
@@ -37,10 +37,11 @@ function invoice() {
     clienteNombre: "José Ferrandiz Martorell",
     razonSocial: "José Ferrandiz Martorell",
     clienteEmail: "josepfmartorell@gmail.com",
+    emailCliente: "josepfmartorell@gmail.com",
     fechaEmision: "2026-08-27T15:53:23.044Z",
     fechaServicio: "2026-08-26T00:00:00.000Z",
     formaPago: "transferencia_bancaria",
-    ticketId: "INC-20260827-DEMO",
+    ticketId: "INC-20260827-D03089",
     baseImponible: 40,
     lineas: [
       {
@@ -69,7 +70,15 @@ function invoice() {
 function technicalRecord({ withSnapshot = true } = {}) {
   return {
     id: TECHNICAL_ID,
-    clienteId: "CLI-1",
+    clienteId: "CON-20260822077849",
+    clienteNombre: "José Ferrandiz Martorell",
+    razonSocial: "José Ferrandiz Martorell",
+    clienteEmail: "josepfmartorell@gmail.com",
+    emailCliente: "josepfmartorell@gmail.com",
+    fechaEmision: "2026-08-27T15:53:23.044Z",
+    fechaServicio: "2026-08-26T00:00:00.000Z",
+    formaPago: "transferencia_bancaria",
+    ticketId: "INC-20260827-D03089",
     tipoDocumento: "idempotency",
     entityType: "invoice_create_idempotency",
     type: "invoice_create_idempotency",
@@ -165,7 +174,10 @@ function testNormalizedTechnicalLeakBecomesCanonicalRow() {
   assert.equal(item.id, CANONICAL_ID);
   assert.equal(item.facturaId, CANONICAL_ID);
   assert.equal(item.invoiceId, CANONICAL_ID);
+  assert.equal(item.numeroFacturaLegal, "2026000052");
   assert.equal(item.numeroFacturaSistema, "2026-08-27-00052");
+  assert.equal(item.clienteNombre, "José Ferrandiz Martorell");
+  assert.equal(item.clienteEmail, "josepfmartorell@gmail.com");
   assert.equal(item.total, 48.4);
   assert.equal(item.baseImponible, 40);
   assert.equal(item.pendingAmount, 48.4);
@@ -225,7 +237,14 @@ function testModalPromotesSnapshotBeforePainting() {
 }
 
 function testApiBoundaryRemovesSkeletonCauseBeforeModal() {
-  const canonical = canonicalizeFacturaListItem(normalizedTechnicalLeak());
+  const normalized = normalizeFacturasListResponse({
+    ok: true,
+    items: [normalizedTechnicalLeak()],
+    total: 1,
+    count: 1,
+    totalKnown: true,
+  });
+  const canonical = normalized.items[0];
 
   assert.ok(canonical);
   assert.equal(canonical.id, CANONICAL_ID);

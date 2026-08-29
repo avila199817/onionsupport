@@ -16,6 +16,8 @@ const PORTAL_LAYOUT_CSS =
 
 const layoutCss =
   read("src/css/auth/login.portal-layout.css");
+const executableLayoutCss =
+  layoutCss.replace(/\/\*[\s\S]*?\*\//g, "");
 const template =
   read("src/views/public/login/template.js");
 const packageJson =
@@ -98,7 +100,7 @@ assert.match(
 );
 
 assert.equal(
-  layoutCss.includes("!important"),
+  executableLayoutCss.includes("!important"),
   false,
   "La geometría del login no puede depender de !important"
 );

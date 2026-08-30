@@ -163,7 +163,7 @@ for (const pair of [
 }
 assert.match(
   ticketHtml,
-  /incidencias-modal-chip--status-open ui-detail-modal-chip--status-open/,
+  /incidencias-modal-chip--status_open ui-detail-modal-chip--status_open/,
   "el modifier dinámico de chip debe conservar la autoridad V7 en el render real"
 );
 assert.ok(

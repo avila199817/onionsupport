@@ -28,7 +28,7 @@ import {
 
 assert.equal(
   APP_ENHANCEMENTS_VERSION,
-  "app.enhancements.v18-no-private-chrome-preauth"
+  "app.enhancements.v19-incidencias-followup-avatars"
 );
 assert.equal(
   ROUTE_INTENT_PRELOAD_VERSION,

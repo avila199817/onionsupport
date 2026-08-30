@@ -17,7 +17,7 @@
 ========================================================= */
 
 export const APP_ENHANCEMENTS_VERSION =
-  "app.enhancements.v18-no-private-chrome-preauth";
+  "app.enhancements.v19-incidencias-followup-avatars";
 
 const PRE_ROUTER = Object.freeze([
   Object.freeze({
@@ -81,6 +81,11 @@ const POST_ROUTER = Object.freeze([
     key: "incidencias-avatar-fallback",
     scope: "incidencias",
     load: () => import("../features/incidencias-avatar-fallback/index.js"),
+  }),
+  Object.freeze({
+    key: "incidencias-followup-avatars",
+    scope: "incidencias",
+    load: () => import("../features/incidencias-followup-avatars/index.js"),
   }),
   Object.freeze({
     key: "public-support",

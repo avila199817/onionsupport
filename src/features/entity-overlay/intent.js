@@ -302,9 +302,39 @@ function attribute(node = null, name = "") {
   }
 }
 
+/*
+  Los controles de creación son interacciones locales del formulario.
+  Sus data-user-id / data-cliente-id transportan la selección que consumirá
+  el controller de Create; NO son una petición de navegación ni de quick view.
+
+  El Entity Overlay escucha en capture sobre document, por lo que esta frontera
+  debe evaluarse antes de inferir una entidad a partir de IDs genéricos.
+  Se mantiene un escape explícito para una futura acción Create que sí quiera
+  abrir una entidad deliberadamente.
+*/
+function blocksEntityIntentFromElement(element = null) {
+  if (!element || typeof element.closest !== "function") return false;
+
+  const localInteraction = element.closest(
+    "[data-entity-overlay-ignore='true'], [data-create-action]"
+  );
+
+  if (!localInteraction) return false;
+
+  const explicitlyAllowed =
+    cleanText(attribute(localInteraction, "data-entity-overlay-allow"), "")
+      .toLowerCase() === "true" ||
+    cleanText(attribute(localInteraction, "data-entity-overlay-action"), "")
+      .toLowerCase() === "open";
+
+  return !explicitlyAllowed;
+}
+
 export function inferEntityIntentFromElement(target = null) {
   const element = target?.nodeType === 3 ? target.parentElement : target;
   if (!element || typeof element.closest !== "function") return null;
+
+  if (blocksEntityIntentFromElement(element)) return null;
 
   const node = element.closest([
     "[data-entity-type]",

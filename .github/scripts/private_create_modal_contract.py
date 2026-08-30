@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[2]
 APP = (ROOT / "src/css/app.css").read_text(encoding="utf-8")
 COMPOSITION = (ROOT / "src/css/compositions/private-create-modal.css").read_text(encoding="utf-8")
 INTERACTIONS = (ROOT / "src/css/compositions/private-admin-interactions.css").read_text(encoding="utf-8")
-INC = (ROOT / "src/views/incidencias/incidencias.template.create.js").read_text(encoding="utf-8")
+INC = (ROOT / "src/views/incidencias/incidencias.template.create.impl.js").read_text(encoding="utf-8")
 FAC = (ROOT / "src/views/facturas/facturas.template.create.js").read_text(encoding="utf-8")
 CLI = (ROOT / "src/views/clientes/clientes.template.create.js").read_text(encoding="utf-8")
 USR = (ROOT / "src/views/usuarios/usuarios.template.create.js").read_text(encoding="utf-8")

@@ -8,8 +8,14 @@ const source = fs.readFileSync(FEATURE_PATH, "utf8");
 
 assert.match(
   source,
-  /incidencias\.avatar-fallback\.v2\.comment-authors/u,
-  "la mejora debe versionar explícitamente los avatares de comentaristas"
+  /incidencias\.avatar-fallback\.v3\.comment-identity-first/u,
+  "la mejora debe versionar explícitamente el matching identity-first"
+);
+
+assert.match(
+  source,
+  /loadIncidenciaDetail/u,
+  "el enhancement debe reutilizar el coordinador canónico de detalle"
 );
 
 assert.match(
@@ -28,6 +34,30 @@ assert.match(
   source,
   /\[data-modal-technician='true'\]\[data-technician-assigned='true'\]/u,
   "el avatar del técnico debe reutilizar el perfil asignado ya renderizado"
+);
+
+assert.match(
+  source,
+  /entry\.byUserId/u,
+  "los comentarios deben reconocer el userId estable persistido por backend"
+);
+
+assert.match(
+  source,
+  /entry\.byEmail/u,
+  "los comentarios deben reconocer el email estable persistido por backend"
+);
+
+assert.match(
+  source,
+  /stableIdentity\?\.hasStableIdentity/u,
+  "una identidad estable debe tener prioridad sobre el matching por nombre"
+);
+
+assert.match(
+  source,
+  /return matchProfileByStableIdentity\(stableIdentity, profiles\)/u,
+  "cuando existe identidad estable no debe existir fallback silencioso por nombre"
 );
 
 assert.match(
@@ -66,6 +96,85 @@ assert.match(
   "los avatares deben sobrevivir rerenders del modal y comentarios nuevos"
 );
 
+const feature = await import(
+  new URL(`../../${FEATURE_PATH}`, import.meta.url)
+);
+
+const {
+  buildCommentIdentityIndex,
+  resolveCommentProfile,
+} = feature.IncidenciasAvatarFallbackInternals;
+
+const requester = Object.freeze({
+  source: "requester",
+  name: "Cristian Ávila Luque",
+  userId: "on-requester",
+  email: "requester@example.com",
+  src: "https://example.test/requester.jpg",
+});
+
+const technician = Object.freeze({
+  source: "technician",
+  name: "Cristian Ávila",
+  userId: "on-technician",
+  email: "technician@example.com",
+  src: "https://example.test/technician.jpg",
+});
+
+const profiles = [requester, technician];
+
+{
+  const index = buildCommentIdentityIndex({
+    comments: [
+      {
+        byName: "Cristian Ávila",
+        byUserId: "on-technician",
+        byEmail: "technician@example.com",
+      },
+    ],
+  });
+
+  assert.equal(
+    resolveCommentProfile("Cristian Ávila", index, profiles)?.source,
+    "technician",
+    "el userId/email estable debe resolver el técnico aunque los nombres se solapen"
+  );
+}
+
+{
+  const index = buildCommentIdentityIndex({
+    comments: [
+      {
+        byName: "Cristian Ávila",
+        byUserId: "on-third-person",
+        byEmail: "third@example.com",
+      },
+    ],
+  });
+
+  assert.equal(
+    resolveCommentProfile("Cristian Ávila", index, profiles),
+    null,
+    "un ID/email estable que no coincide debe fallar cerrado y no apropiarse de una foto por nombre"
+  );
+}
+
+{
+  const index = buildCommentIdentityIndex({
+    comments: [
+      {
+        byName: "Cristian Ávila Luque",
+      },
+    ],
+  });
+
+  assert.equal(
+    resolveCommentProfile("Cristian Ávila Luque", index, profiles)?.source,
+    "requester",
+    "los comentarios legacy sin identidad estable deben conservar compatibilidad por nombre exacto"
+  );
+}
+
 console.log(
-  "Incidencias comment avatar contract OK · real requester/technician photos · no extra card · responsive alignment"
+  "Incidencias comment avatar contract OK · identity-first userId/email · legacy name fallback · no extra card"
 );

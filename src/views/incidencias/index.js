@@ -67,19 +67,24 @@ export const getSnapshot = Impl.getSnapshot;
 export const getDebugSnapshot = Impl.getDebugSnapshot;
 
 export function getIncidenciasViewBoundarySnapshot() {
+  const runtimeState = AppCore.runtimeState.read();
   const implementationSnapshot = Impl.getSnapshot?.() || {};
+  const runtimeUser = runtimeState?.user || runtimeState?.auth?.user || {};
 
   return Object.freeze({
     version: INCIDENCIAS_VIEW_VERSION,
     implementationVersion: Impl.INCIDENCIAS_VIEW_VERSION,
     createUserComboboxVersion: INCIDENCIAS_CREATE_USER_COMBOBOX_VERSION,
-    role: AppCore.normalizeRole(implementationSnapshot.role || "user"),
+    role: AppCore.normalizeRole(
+      implementationSnapshot.role || runtimeUser.role || runtimeUser.rol || "user"
+    ),
     policy: Object.freeze({
       controllerImplementationPreserved1to1: true,
       comboboxInstalledPerController: true,
       comboboxCleanupOnDestroy: true,
       noSecondSelectionPath: true,
       canonicalRoleAuthority: true,
+      zeroCopyRuntimeState: true,
     }),
   });
 }

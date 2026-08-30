@@ -9,6 +9,7 @@
    - Mantener el foco en el input mientras se navega por resultados.
    - ArrowUp/ArrowDown/Home/End cambian la opción activa.
    - Enter selecciona la opción activa usando el click canónico existente.
+   - Enter nunca puede enviar el formulario Create mientras el popup está abierto.
    - Escape cierra únicamente el popup si está abierto; un segundo Escape
      vuelve a pertenecer al controlador del modal.
    - Añadir combobox/listbox/aria-activedescendant sin duplicar selección.
@@ -17,7 +18,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_CREATE_USER_COMBOBOX_VERSION =
-  "incidencias.create-user-combobox.v1";
+  "incidencias.create-user-combobox.v2-enter-safe";
 
 const ROOT_SELECTOR = "[data-incidencias-create-root='true']";
 const INPUT_SELECTOR = "[data-create-user-search-input='true']";
@@ -72,6 +73,7 @@ export function getIncidenciasCreateUserComboboxSnapshot() {
       inputKeepsFocus: true,
       usesActiveDescendant: true,
       selectionDelegatesToCanonicalClick: true,
+      enterNeverSubmitsCreateWhilePopupOpen: true,
       escapeDismissesPopupBeforeModal: true,
       imeSafe: true,
       noHttp: true,
@@ -254,10 +256,14 @@ export function installIncidenciasCreateUserCombobox({
       return;
     }
 
-    if (event.key === "Enter" && expanded && activeIndex >= 0) {
+    if (event.key === "Enter" && expanded) {
       event.preventDefault();
       event.stopImmediatePropagation();
-      selectActive();
+
+      if (activeIndex >= 0) {
+        selectActive();
+      }
+
       return;
     }
 

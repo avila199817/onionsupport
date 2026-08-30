@@ -10,6 +10,7 @@ const snapshot = getIncidenciasCreateUserComboboxSnapshot();
 assert.equal(snapshot.policy.inputKeepsFocus, true);
 assert.equal(snapshot.policy.usesActiveDescendant, true);
 assert.equal(snapshot.policy.selectionDelegatesToCanonicalClick, true);
+assert.equal(snapshot.policy.enterNeverSubmitsCreateWhilePopupOpen, true);
 assert.equal(snapshot.policy.escapeDismissesPopupBeforeModal, true);
 assert.equal(snapshot.policy.imeSafe, true);
 assert.deepEqual(snapshot.keyboard, [
@@ -46,6 +47,7 @@ for (const required of [
   'option.setAttribute("aria-selected", selected ? "true" : "false")',
   'option.tabIndex = -1',
   'option.click()',
+  'event.key === "Enter" && expanded',
   'event.stopImmediatePropagation()',
   'event.isComposing || composing',
 ]) {
@@ -96,5 +98,5 @@ for (const required of [
 }
 
 console.log(
-  "Incidencias Create user combobox OK · keyboard/ARIA/IME · canonical click selection · status writes remain selective"
+  "Incidencias Create user combobox OK · keyboard/ARIA/IME · Enter cannot submit popup · canonical click selection · status writes remain selective"
 );

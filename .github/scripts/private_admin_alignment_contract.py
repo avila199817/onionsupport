@@ -39,10 +39,22 @@ for shared_css in (
     require(shared_css in app_css, f"app.css must import {shared_css}")
 
 for view in VIEWS:
-    index = read(f"src/views/{view}/index.js")
+    index_path = (
+        "src/views/incidencias/index.impl.js"
+        if view == "incidencias"
+        else f"src/views/{view}/index.js"
+    )
+    index = read(index_path)
     template_name = "incidencias.template.js" if view == "incidencias" else f"{view}.template.js"
     template = read(f"src/views/{view}/{template_name}")
     styles = read(f"src/css/views/{view}/index.css")
+
+    if view == "incidencias":
+        boundary = read("src/views/incidencias/index.js")
+        require(
+            'import * as Impl from "./index.impl.js"' in boundary,
+            "incidencias stable boundary must delegate to index.impl.js",
+        )
 
     require("@layer views" in styles, f"{view} CSS must remain in @layer views")
     require(

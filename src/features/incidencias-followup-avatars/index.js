@@ -6,10 +6,13 @@
    - Actuar sobre las cards generadas por incidencias-detail-state.
    - Resolver identidad por userId/email y usar nombre sólo para legacy.
    - Reutilizar exclusivamente los avatares vivos ya renderizados en el modal.
-   - No crear placeholders, badges, bordes, fondos ni sombras nuevos.
+   - Mantener presentación co-localizada en style.css, cargada con este feature.
+   - No crear placeholders ni duplicar datos de perfil.
 ========================================================= */
 
 "use strict";
+
+import "./style.css";
 
 import {
   loadIncidenciaDetail,
@@ -20,7 +23,7 @@ import {
 } from "../incidencias-avatar-fallback/index.js";
 
 export const INCIDENCIAS_FOLLOWUP_AVATARS_VERSION =
-  "incidencias.followup-avatars.v1.identity-first";
+  "incidencias.followup-avatars.v2.premium-horizontal";
 
 const MODAL_SELECTOR =
   "[data-incidencias-modal-root='true']";
@@ -45,9 +48,6 @@ const AUTHOR_WRAP_CLASS =
 
 const AVATAR_CLASS =
   "incidencias-modal-description-comment-avatar";
-
-const STYLE_ID =
-  "onion-incidencias-followup-avatar-style";
 
 const MOUNT_KEY =
   "__ONION_INCIDENCIAS_FOLLOWUP_AVATARS__";
@@ -215,8 +215,8 @@ function createAvatar(head = null, profile = null, authorText = "") {
   image.className = AVATAR_CLASS;
   image.src = profile.src;
   image.alt = "";
-  image.width = 22;
-  image.height = 22;
+  image.width = 28;
+  image.height = 28;
   image.loading = "lazy";
   image.decoding = "async";
   image.referrerPolicy = "no-referrer";
@@ -235,6 +235,11 @@ function createAvatar(head = null, profile = null, authorText = "") {
     { once: true }
   );
 
+  /*
+    La foto es siempre el primer hijo del wrapper y el nombre el segundo.
+    style.css convierte ese orden DOM en una cuadrícula horizontal robusta:
+    avatar | nombre. La fecha permanece hermana independiente a la derecha.
+  */
   wrap.insertBefore(image, author || wrap.firstChild);
   head.dataset.followupAvatarSource = profile.source;
   head.dataset.followupAvatarAuthor = authorText;
@@ -275,41 +280,6 @@ function syncHead(head = null, identityIndex = new Map(), availableProfiles = []
 
   removeAvatar(head);
   createAvatar(head, profile, authorText);
-  return true;
-}
-
-function installStyles() {
-  if (!isBrowser()) return false;
-  if (document.getElementById(STYLE_ID)) return true;
-
-  const style = document.createElement("style");
-  style.id = STYLE_ID;
-  style.textContent = `
-    .${AUTHOR_WRAP_CLASS} {
-      min-inline-size: 0;
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
-    }
-
-    .${AUTHOR_WRAP_CLASS} > strong {
-      min-inline-size: 0;
-    }
-
-    .${AVATAR_CLASS} {
-      inline-size: 22px;
-      block-size: 22px;
-      flex: 0 0 22px;
-      display: block;
-      object-fit: cover;
-      border: 0;
-      border-radius: 50%;
-      background: transparent;
-      box-shadow: none;
-    }
-  `;
-
-  document.head?.appendChild(style);
   return true;
 }
 
@@ -365,8 +335,6 @@ function queueHydration(modal = null) {
 
 export function syncModal(modal = null) {
   if (!modal?.querySelectorAll) return 0;
-
-  installStyles();
 
   const heads = [...modal.querySelectorAll(COMMENT_HEAD_SELECTOR)];
   if (!heads.length) return 0;
@@ -479,6 +447,7 @@ export function mountIncidenciasFollowupAvatars() {
     observerActive,
     target: "Seguimiento",
     selector: COMMENT_HEAD_SELECTOR,
+    presentation: "css-colocated-premium-horizontal",
     mountedAt: new Date().toISOString(),
   });
 

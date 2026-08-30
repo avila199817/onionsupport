@@ -1,0 +1,65 @@
+/* =========================================================
+   Onion Support · Incidencias Follow-up Avatars
+
+   Presentación del avatar real dentro de Seguimiento.
+   La identidad y el fallback pertenecen a index.js; este archivo sólo
+   gobierna geometría/presentación y se carga junto al enhancement lazy.
+========================================================= */
+
+.incidencias-modal-description-comment-head
+  > .incidencias-modal-description-comment-author {
+  min-inline-size: 0;
+  display: inline-grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 9px;
+  justify-self: start;
+}
+
+.incidencias-modal-description-comment-author
+  > strong {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.incidencias-modal-description-comment-avatar {
+  inline-size: 28px;
+  block-size: 28px;
+  min-inline-size: 28px;
+  min-block-size: 28px;
+  display: block;
+  object-fit: cover;
+  object-position: center;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 72%, transparent);
+  border-radius: 999px;
+  background: var(--surface-2, var(--card-bg));
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--card-bg) 86%, transparent),
+    0 2px 8px rgba(0, 0, 0, .22);
+}
+
+@media (max-width: 720px) {
+  .incidencias-modal-description-comment-head
+    > .incidencias-modal-description-comment-author {
+    grid-template-columns: 26px minmax(0, 1fr);
+    column-gap: 8px;
+  }
+
+  .incidencias-modal-description-comment-avatar {
+    inline-size: 26px;
+    block-size: 26px;
+    min-inline-size: 26px;
+    min-block-size: 26px;
+  }
+}
+
+@media (forced-colors: active) {
+  .incidencias-modal-description-comment-avatar {
+    border: 1px solid CanvasText;
+    box-shadow: none;
+    forced-color-adjust: auto;
+  }
+}

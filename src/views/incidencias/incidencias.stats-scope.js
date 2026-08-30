@@ -15,7 +15,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_STATS_SCOPE_VERSION =
-  "incidencias.stats-scope.v1.truthful-loaded-metrics";
+  "incidencias.stats-scope.v2.attribute-synchronized";
 
 const ROOT_SELECTOR = "[data-incidencias-scope='true']";
 
@@ -81,6 +81,7 @@ export function getIncidenciasStatsScopeSnapshot() {
       zeroHttp: true,
       zeroMetricRecalculation: true,
       loadedMetricsExplicitWhenPartial: true,
+      attributeTransitionsObserved: true,
       canonicalCopyRestoredWhenComplete: true,
       valuesRemainControllerOwned: true,
       filtersRemainControllerOwned: true,
@@ -161,6 +162,8 @@ export function installIncidenciasStatsScope({
     : null;
 
   observer?.observe?.(host || documentLike.body || documentLike.documentElement, {
+    attributes: true,
+    attributeFilter: ["data-total-greater-than-items"],
     childList: true,
     subtree: true,
   });

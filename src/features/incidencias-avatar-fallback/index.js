@@ -9,11 +9,19 @@
      errores futuros después de rerenders/infinite scroll.
    - En el modal de detalle, reutilizar las fotos reales ya renderizadas
      de solicitante/técnico junto al nombre de quien comenta.
+   - Resolver el autor por userId/email cuando el comentario dispone de
+     identidad estable; el nombre queda sólo como compatibilidad legacy.
    - No crear tarjetas, badges ni decoraciones nuevas alrededor del autor.
 ========================================================= */
 
+"use strict";
+
+import {
+  loadIncidenciaDetail,
+} from "../../views/incidencias/incidencias.api.js";
+
 export const INCIDENCIAS_AVATAR_FALLBACK_VERSION =
-  "incidencias.avatar-fallback.v2.comment-authors";
+  "incidencias.avatar-fallback.v3.comment-identity-first";
 
 const IMAGE_SELECTOR = [
   ".incidencias-avatar-img",
@@ -51,17 +59,69 @@ const MOUNT_KEY = "__ONION_INCIDENCIAS_AVATAR_FALLBACK__";
 let commentObserver = null;
 let commentScanQueued = false;
 
+const detailIdentityCache = new Map();
+const detailIdentityFlights = new Map();
+const detailIdentityFailures = new Set();
+
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function normalizePersonName(value = "") {
+function safeObject(value = null) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : null;
+}
+
+function safeArray(value = null) {
+  return Array.isArray(value) ? value : [];
+}
+
+function cleanText(value = "") {
   return String(value ?? "")
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function firstText(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+
+    if (typeof value === "string" || typeof value === "number") {
+      const text = cleanText(value);
+      if (text) return text;
+    }
+  }
+
+  return "";
+}
+
+function firstObject(...values) {
+  for (const value of values) {
+    const object = safeObject(value);
+    if (object && Object.keys(object).length) return object;
+  }
+
+  return {};
+}
+
+function normalizePersonName(value = "") {
+  return cleanText(value)
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function normalizeUserId(value = "") {
+  return cleanText(value).toLowerCase();
+}
+
+function normalizeEmail(value = "") {
+  const email = cleanText(value).toLowerCase();
+  return email.includes("@") ? email : "";
 }
 
 function samePerson(left = "", right = "") {
@@ -81,7 +141,7 @@ function samePerson(left = "", right = "") {
 function cleanImageSrc(image = null) {
   if (!image || image.hidden === true) return "";
 
-  const src = String(image.getAttribute?.("src") || "").trim();
+  const src = cleanText(image.getAttribute?.("src") || "");
   if (!src) return "";
 
   const host = image.closest?.("[data-has-avatar]") || null;
@@ -142,11 +202,114 @@ function scanBrokenImages(root = document) {
   return repaired;
 }
 
-function profileFromRequester(modal = null) {
+function unwrapDetail(value = null) {
+  const root = safeObject(value) || {};
+
+  return firstObject(
+    root.detail,
+    root.ticket,
+    root.incidencia,
+    root.item,
+    root.data,
+    root
+  );
+}
+
+function ticketIdFromModal(modal = null) {
+  return cleanText(modal?.dataset?.ticketId || "");
+}
+
+function requesterIdentity(detail = {}) {
+  const raw = safeObject(detail?.raw) || {};
+  const requester = firstObject(
+    detail.requesterSnapshot,
+    detail.cliente,
+    detail.receptor,
+    detail.user,
+    raw.requesterSnapshot,
+    raw.cliente,
+    raw.receptor,
+    raw.user
+  );
+
+  return Object.freeze({
+    userId: normalizeUserId(firstText(
+      detail.userId,
+      detail.usuarioId,
+      detail.ownerUserId,
+      detail.createdByUserId,
+      detail.receptorUserId,
+      requester.userId,
+      requester.id,
+      raw.userId,
+      raw.usuarioId,
+      raw.ownerUserId,
+      raw.createdByUserId,
+      raw.receptorUserId
+    )),
+    email: normalizeEmail(firstText(
+      detail.email,
+      detail.emailLower,
+      detail.userEmail,
+      detail.clienteEmail,
+      requester.email,
+      requester.emailLower,
+      raw.email,
+      raw.emailLower,
+      raw.userEmail
+    )),
+  });
+}
+
+function technicianIdentity(detail = {}) {
+  const raw = safeObject(detail?.raw) || {};
+  const assignment = firstObject(detail.assignment, raw.assignment);
+  const technician = firstObject(
+    assignment.technician,
+    detail.tecnico,
+    detail.assignedTo,
+    detail.technician,
+    raw.tecnico,
+    raw.assignedTo,
+    raw.technician
+  );
+
+  return Object.freeze({
+    userId: normalizeUserId(firstText(
+      detail.assignedToUserId,
+      detail.technicianUserId,
+      detail.tecnicoUserId,
+      assignment.assignedToUserId,
+      assignment.userId,
+      assignment.technician?.userId,
+      assignment.technician?.id,
+      technician.userId,
+      technician.id,
+      raw.assignedToUserId,
+      raw.technicianUserId,
+      raw.tecnicoUserId
+    )),
+    email: normalizeEmail(firstText(
+      detail.assignedToEmail,
+      detail.technicianEmail,
+      detail.tecnicoEmail,
+      assignment.assignedToEmail,
+      assignment.email,
+      assignment.technician?.email,
+      technician.email,
+      technician.emailLower,
+      raw.assignedToEmail,
+      raw.technicianEmail,
+      raw.tecnicoEmail
+    )),
+  });
+}
+
+function profileFromRequester(modal = null, detail = {}) {
   const host = modal?.querySelector?.(REQUESTER_PROFILE_SELECTOR) || null;
   if (!host) return null;
 
-  const name = String(host.getAttribute("title") || "").trim();
+  const name = cleanText(host.getAttribute("title") || "");
   const image = host.querySelector?.("[data-modal-avatar-img='true']") || null;
   const src = cleanImageSrc(image);
 
@@ -156,18 +319,19 @@ function profileFromRequester(modal = null) {
     name,
     src,
     source: "requester",
+    ...requesterIdentity(detail),
   });
 }
 
-function profileFromTechnician(modal = null) {
+function profileFromTechnician(modal = null, detail = {}) {
   const host = modal?.querySelector?.(TECHNICIAN_PROFILE_SELECTOR) || null;
   if (!host) return null;
 
-  const name = String(
+  const name = cleanText(
     host.querySelector?.(".incidencias-modal-technician-copy strong")?.textContent ||
       host.querySelector?.("strong")?.textContent ||
       ""
-  ).trim();
+  );
 
   const image =
     host.querySelector?.("[data-modal-technician-avatar-img='true']") || null;
@@ -179,14 +343,132 @@ function profileFromTechnician(modal = null) {
     name,
     src,
     source: "technician",
+    ...technicianIdentity(detail),
   });
 }
 
-function commentProfiles(modal = null) {
+function commentProfiles(modal = null, detail = {}) {
   return [
-    profileFromRequester(modal),
-    profileFromTechnician(modal),
+    profileFromRequester(modal, detail),
+    profileFromTechnician(modal, detail),
   ].filter(Boolean);
+}
+
+function commentEntries(detail = {}) {
+  const raw = safeObject(detail?.raw) || {};
+  const entries = [];
+
+  for (const value of [
+    ...safeArray(detail.comments),
+    ...safeArray(detail.notes),
+    ...safeArray(detail.messages),
+    ...safeArray(raw.comments),
+    ...safeArray(raw.notes),
+    ...safeArray(raw.messages),
+  ]) {
+    const entry = safeObject(value);
+    if (entry) entries.push(entry);
+  }
+
+  for (const value of [
+    ...safeArray(detail.timeline),
+    ...safeArray(raw.timeline),
+  ]) {
+    const entry = safeObject(value);
+    if (!entry) continue;
+
+    const kind = cleanText(
+      firstText(entry.kind, entry.type, entry.action, entry.event)
+    ).toLowerCase();
+
+    if (["comment", "comentario"].includes(kind)) {
+      entries.push(entry);
+    }
+  }
+
+  return entries;
+}
+
+function stableCommentIdentity(entry = {}) {
+  const byObject = safeObject(entry.by) || {};
+  const createdBy = safeObject(entry.createdBy) || {};
+  const updatedBy = safeObject(entry.updatedBy) || {};
+
+  return Object.freeze({
+    name: firstText(
+      entry.author,
+      entry.byName,
+      entry.createdByName,
+      entry.userName,
+      entry.name,
+      byObject.name,
+      createdBy.name,
+      updatedBy.name
+    ),
+    userId: normalizeUserId(firstText(
+      entry.byUserId,
+      typeof entry.by === "string" || typeof entry.by === "number"
+        ? entry.by
+        : "",
+      entry.authorUserId,
+      entry.createdByUserId,
+      entry.userId,
+      byObject.userId,
+      byObject.id,
+      createdBy.userId,
+      createdBy.id,
+      updatedBy.userId,
+      updatedBy.id
+    )),
+    email: normalizeEmail(firstText(
+      entry.byEmail,
+      entry.authorEmail,
+      entry.createdByEmail,
+      entry.email,
+      byObject.email,
+      createdBy.email,
+      updatedBy.email
+    )),
+  });
+}
+
+function buildCommentIdentityIndex(detail = {}) {
+  const aggregate = new Map();
+
+  for (const entry of commentEntries(detail)) {
+    const identity = stableCommentIdentity(entry);
+    const key = normalizePersonName(identity.name);
+    if (!key) continue;
+
+    const bucket = aggregate.get(key) || {
+      userIds: new Set(),
+      emails: new Set(),
+    };
+
+    if (identity.userId) bucket.userIds.add(identity.userId);
+    if (identity.email) bucket.emails.add(identity.email);
+    aggregate.set(key, bucket);
+  }
+
+  const index = new Map();
+
+  for (const [key, bucket] of aggregate) {
+    const userIds = [...bucket.userIds];
+    const emails = [...bucket.emails];
+
+    index.set(key, Object.freeze({
+      userId: userIds.length === 1 ? userIds[0] : "",
+      email: emails.length === 1 ? emails[0] : "",
+      ambiguous:
+        userIds.length > 1 ||
+        emails.length > 1,
+      hasStableIdentity:
+        userIds.length > 0 ||
+        emails.length > 0,
+    }));
+  }
+
+  return index;
 }
 
 function directAuthorNode(meta = null) {
@@ -195,6 +477,59 @@ function directAuthorNode(meta = null) {
   return [...meta.children].find(
     (node) => node?.tagName === "STRONG"
   ) || null;
+}
+
+function matchProfileByStableIdentity(identity = null, profiles = []) {
+  if (!identity || identity.ambiguous) return null;
+
+  if (identity.userId) {
+    const byUserId = profiles.filter(
+      (profile) =>
+        profile?.userId &&
+        profile.userId === identity.userId
+    );
+
+    if (byUserId.length === 1) return byUserId[0];
+  }
+
+  if (identity.email) {
+    const byEmail = profiles.filter(
+      (profile) =>
+        profile?.email &&
+        profile.email === identity.email
+    );
+
+    if (byEmail.length === 1) return byEmail[0];
+  }
+
+  return null;
+}
+
+function resolveCommentProfile(author = "", identityIndex = new Map(), profiles = []) {
+  const key = normalizePersonName(author);
+  if (!key) return null;
+
+  const stableIdentity = identityIndex.get(key) || null;
+
+  if (stableIdentity?.hasStableIdentity) {
+    /*
+      Fail closed: cuando backend conoce la identidad, un nombre parecido
+      nunca puede sobrescribir un userId/email que no coincide.
+    */
+    return matchProfileByStableIdentity(stableIdentity, profiles);
+  }
+
+  const exact = profiles.filter(
+    (profile) => normalizePersonName(profile?.name) === key
+  );
+
+  if (exact.length === 1) return exact[0];
+
+  const legacy = profiles.filter(
+    (profile) => samePerson(author, profile?.name)
+  );
+
+  return legacy.length === 1 ? legacy[0] : null;
 }
 
 function removeCommentAvatar(meta = null) {
@@ -304,18 +639,16 @@ function createCommentAvatar(meta = null, profile = null, author = "") {
   return image;
 }
 
-function syncCommentMeta(meta = null, profiles = []) {
+function syncCommentMeta(meta = null, profiles = [], identityIndex = new Map()) {
   const authorNode = directAuthorNode(meta);
-  const author = String(authorNode?.textContent || "").trim();
+  const author = cleanText(authorNode?.textContent || "");
 
   if (!author) {
     removeCommentAvatar(meta);
     return false;
   }
 
-  const profile = profiles.find((candidate) =>
-    samePerson(author, candidate?.name)
-  ) || null;
+  const profile = resolveCommentProfile(author, identityIndex, profiles);
 
   if (!profile?.src) {
     removeCommentAvatar(meta);
@@ -323,7 +656,7 @@ function syncCommentMeta(meta = null, profiles = []) {
   }
 
   const current = meta.querySelector?.(`.${COMMENT_AVATAR_CLASS}`) || null;
-  const currentSrc = String(current?.getAttribute?.("src") || "").trim();
+  const currentSrc = cleanText(current?.getAttribute?.("src") || "");
 
   if (
     current &&
@@ -336,6 +669,57 @@ function syncCommentMeta(meta = null, profiles = []) {
 
   removeCommentAvatar(meta);
   createCommentAvatar(meta, profile, author);
+  return true;
+}
+
+async function hydrateDetailIdentity(modal = null) {
+  const ticketId = ticketIdFromModal(modal);
+  if (!ticketId) return null;
+
+  if (detailIdentityCache.has(ticketId)) {
+    return detailIdentityCache.get(ticketId);
+  }
+
+  if (detailIdentityFlights.has(ticketId)) {
+    return detailIdentityFlights.get(ticketId);
+  }
+
+  const flight = Promise.resolve()
+    .then(() => loadIncidenciaDetail(ticketId))
+    .then((result) => {
+      const detail = unwrapDetail(result);
+
+      if (detail && Object.keys(detail).length) {
+        detailIdentityCache.set(ticketId, detail);
+        detailIdentityFailures.delete(ticketId);
+      }
+
+      return detail || null;
+    })
+    .catch(() => {
+      detailIdentityFailures.add(ticketId);
+      return null;
+    })
+    .finally(() => {
+      detailIdentityFlights.delete(ticketId);
+    });
+
+  detailIdentityFlights.set(ticketId, flight);
+  return flight;
+}
+
+function queueIdentityHydration(modal = null) {
+  const ticketId = ticketIdFromModal(modal);
+  if (!ticketId || detailIdentityCache.has(ticketId) || detailIdentityFlights.has(ticketId)) {
+    return false;
+  }
+
+  void hydrateDetailIdentity(modal).then(() => {
+    if (modal?.isConnected) {
+      syncIncidenciasCommentAvatars(modal);
+    }
+  });
+
   return true;
 }
 
@@ -357,10 +741,27 @@ export function syncIncidenciasCommentAvatars(root = document) {
   let synced = 0;
 
   for (const modal of modals) {
-    const profiles = commentProfiles(modal);
+    const ticketId = ticketIdFromModal(modal);
+    const detail = detailIdentityCache.get(ticketId) || {};
+    const identityReady = Boolean(detail && Object.keys(detail).length);
+    const identityFailed = detailIdentityFailures.has(ticketId);
+
+    if (!identityReady && !identityFailed) {
+      for (const meta of modal.querySelectorAll(COMMENT_META_SELECTOR)) {
+        removeCommentAvatar(meta);
+      }
+
+      queueIdentityHydration(modal);
+      continue;
+    }
+
+    const profiles = commentProfiles(modal, detail);
+    const identityIndex = identityReady
+      ? buildCommentIdentityIndex(detail)
+      : new Map();
 
     for (const meta of modal.querySelectorAll(COMMENT_META_SELECTOR)) {
-      if (syncCommentMeta(meta, profiles)) synced += 1;
+      if (syncCommentMeta(meta, profiles, identityIndex)) synced += 1;
     }
   }
 
@@ -450,6 +851,7 @@ export function mountIncidenciasAvatarFallback() {
     repairedAtMount,
     commentAvatarsAtMount,
     commentObserverActive,
+    identityFirst: true,
     mountedAt: new Date().toISOString(),
   });
 
@@ -457,6 +859,18 @@ export function mountIncidenciasAvatarFallback() {
 }
 
 mountIncidenciasAvatarFallback();
+
+export const IncidenciasAvatarFallbackInternals = Object.freeze({
+  normalizePersonName,
+  normalizeUserId,
+  normalizeEmail,
+  requesterIdentity,
+  technicianIdentity,
+  stableCommentIdentity,
+  buildCommentIdentityIndex,
+  matchProfileByStableIdentity,
+  resolveCommentProfile,
+});
 
 export default Object.freeze({
   version: INCIDENCIAS_AVATAR_FALLBACK_VERSION,

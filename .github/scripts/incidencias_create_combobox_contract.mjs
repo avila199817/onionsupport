@@ -64,7 +64,7 @@ for (const key of snapshot.keyboard) {
 for (const required of [
   'installIncidenciasCreateUserCombobox',
   '__incidenciasCreateUserComboboxInstalled',
-  'controller.destroy = function destroyIncidenciasWithCombobox()',
+  'controller.destroy = function destroyIncidenciasWithEnhancements()',
   'uninstallCombobox?.()',
   'controllerImplementationPreserved1to1: true',
 ]) {

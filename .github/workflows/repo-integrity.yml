@@ -67,6 +67,9 @@ jobs:
       - name: Validate Incidencias Create user selection
         run: node .github/scripts/incidencias_create_user_selection_contract.mjs
 
+      - name: Validate Incidencias Create validation parity
+        run: node .github/scripts/incidencias_create_validation_contract.mjs
+
       - name: Validate Clientes scale contract
         run: python3 .github/scripts/clientes_scale_contract.py
 

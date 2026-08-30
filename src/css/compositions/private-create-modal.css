@@ -661,7 +661,11 @@ body.usuarios-create-modal-open {
   min-inline-size: 0;
 }
 
-.fac-create-search-shell > span:first-child {
+:is(
+  .inc-create-search-icon,
+  .cli-create-search-icon,
+  .fac-create-search-shell > span:first-child
+) {
   position: absolute;
   inset-block-start: 50%;
   inset-inline-start: 13px;
@@ -673,7 +677,19 @@ body.usuarios-create-modal-open {
   color: var(--text-muted);
 }
 
-.fac-create-search-shell .fac-create-input {
+:is(
+  .inc-create-search-icon,
+  .cli-create-search-icon
+) svg {
+  inline-size: 16px;
+  block-size: 16px;
+}
+
+:is(
+  .inc-create-search-control > .inc-create-input--with-icon,
+  .cli-create-search-control > .cli-create-input--with-icon,
+  .fac-create-search-shell .fac-create-input
+) {
   padding-inline-start: 40px;
 }
 

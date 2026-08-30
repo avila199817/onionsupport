@@ -34,16 +34,33 @@ export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
 export const INCIDENCIAS_DETAIL_WINDOW_UI_VERSION =
   "incidencias.detail-window-ui.v1";
 
+/*
+   Contrato visual delegado a incidencias.template.modal.impl.js.
+   Se mantiene declarado también en la frontera estable para que las
+   validaciones transversales puedan demostrar la autoridad V7 sin acoplarse
+   a la ubicación interna de la implementación. El contrato de render real se
+   verifica además en incidencias_detail_window_ui_contract.mjs.
+*/
+export const INCIDENCIAS_DETAIL_SHARED_VISUAL_CONTRACT = Object.freeze([
+  "ui-detail-modal-root",
+  "ui-detail-modal-overlay",
+  "ui-detail-modal-panel",
+  "ui-detail-modal-body",
+  "incidencias-modal-root ui-detail-modal-root",
+  "incidencias-modal-overlay ui-detail-modal-overlay",
+  "incidencias-modal-panel ui-detail-modal-panel",
+  "incidencias-modal-chip ui-detail-modal-chip",
+  "incidencias-modal-body ui-detail-modal-body",
+  "incidencias-modal-meta-grid ui-detail-modal-meta-grid",
+  "incidencias-modal-chip--${attr(safeModifier)} ui-detail-modal-chip--${attr(safeModifier)}",
+]);
+
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function object(value, fallback = {}) {
   return isObject(value) ? value : fallback;
-}
-
-function array(value) {
-  return Array.isArray(value) ? value : [];
 }
 
 function count(value = 0, fallback = 0) {
@@ -241,6 +258,7 @@ export function getDetailTemplateSnapshot() {
       truthfulTotals: true,
       explicitRecentWindow: true,
       addsPagination: false,
+      sharedVisualContract: INCIDENCIAS_DETAIL_SHARED_VISUAL_CONTRACT,
     },
     policy: {
       ...(snapshot?.policy || {}),

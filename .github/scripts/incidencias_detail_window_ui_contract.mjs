@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import {
+  INCIDENCIAS_DETAIL_SHARED_VISUAL_CONTRACT,
   INCIDENCIAS_DETAIL_WINDOW_UI_VERSION,
   getDetailTemplateSnapshot,
   getIncidenciasDetailWindowUiState,
@@ -143,6 +144,33 @@ assert.match(
   "la tarjeta meta de adjuntos debe mostrar el total real"
 );
 
+/*
+  La frontera delega el chrome a .impl.js, pero el HTML final debe conservar
+  exactamente las parejas V7 que protegen la autoridad visual transversal.
+*/
+for (const pair of [
+  "incidencias-modal-root ui-detail-modal-root",
+  "incidencias-modal-overlay ui-detail-modal-overlay",
+  "incidencias-modal-panel ui-detail-modal-panel",
+  "incidencias-modal-chip ui-detail-modal-chip",
+  "incidencias-modal-body ui-detail-modal-body",
+  "incidencias-modal-meta-grid ui-detail-modal-meta-grid",
+]) {
+  assert.ok(
+    ticketHtml.includes(pair),
+    `el render real debe conservar el alias visual compartido: ${pair}`
+  );
+}
+assert.match(
+  ticketHtml,
+  /incidencias-modal-chip--status-open ui-detail-modal-chip--status-open/,
+  "el modifier dinámico de chip debe conservar la autoridad V7 en el render real"
+);
+assert.ok(
+  INCIDENCIAS_DETAIL_SHARED_VISUAL_CONTRACT.length >= 10,
+  "la frontera estable debe declarar explícitamente el contrato visual delegado"
+);
+
 /* =========================================================
    HISTORY VIEW · TRUE ACTIVITY TOTAL
 ========================================================= */
@@ -187,7 +215,11 @@ assert.equal(snapshot.detailWindowUi.explicitRecentWindow, true);
 assert.equal(snapshot.detailWindowUi.addsPagination, false);
 assert.equal(snapshot.policy.truthfulBoundedCollections, true);
 assert.equal(snapshot.policy.noSyntheticTimelineEntries, true);
+assert.deepEqual(
+  snapshot.detailWindowUi.sharedVisualContract,
+  INCIDENCIAS_DETAIL_SHARED_VISUAL_CONTRACT
+);
 
 console.log(
-  "Incidencias Detail window UI OK · truthful history/attachment totals · explicit recent window · no pagination"
+  "Incidencias Detail window UI OK · truthful history/attachment totals · shared V7 render contract · explicit recent window · no pagination"
 );

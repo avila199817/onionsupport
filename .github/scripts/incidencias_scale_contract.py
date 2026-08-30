@@ -14,11 +14,17 @@ def require(condition: bool, message: str) -> None:
 
 
 core = read("src/core/config.js")
-controller = read("src/views/incidencias/index.js")
+boundary = read("src/views/incidencias/index.js")
+controller = read("src/views/incidencias/index.impl.js")
 api = read("src/views/incidencias/incidencias.api.impl.js")
 template = read("src/views/incidencias/incidencias.template.js")
 styles = read("src/css/views/incidencias/index.css")
 
+require(
+    'import * as Impl from "./index.impl.js"' in boundary
+    and "Impl.IncidenciasView(host, context)" in boundary,
+    "stable Incidencias boundary must delegate to the full controller implementation",
+)
 require(
     'CANONICAL_PRODUCTION_API_BASE = "https://api.onionsupport.com"' in core,
     "frontend canonical API must be api.onionsupport.com",

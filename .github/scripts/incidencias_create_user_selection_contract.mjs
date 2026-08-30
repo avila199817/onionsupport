@@ -10,14 +10,23 @@ const read = (path) => readFileSync(path, "utf8");
 const incidenciasApi = read(
   "src/views/incidencias/incidencias.api.impl.js"
 );
-const incidenciasIndex = read(
+const incidenciasBoundary = read(
   "src/views/incidencias/index.js"
+);
+const incidenciasIndex = read(
+  "src/views/incidencias/index.impl.js"
 );
 const incidenciasCreateTemplate = read(
   "src/views/incidencias/incidencias.template.create.impl.js"
 );
 const entityIntent = read(
   "src/features/entity-overlay/intent.js"
+);
+
+assert.match(
+  incidenciasBoundary,
+  /import \* as Impl from "\.\/index\.impl\.js";/,
+  "La frontera estable de Incidencias debe delegar al controller productivo"
 );
 
 /* =========================================================

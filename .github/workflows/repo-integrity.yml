@@ -70,6 +70,9 @@ jobs:
       - name: Validate Incidencias Create validation parity
         run: node .github/scripts/incidencias_create_validation_contract.mjs
 
+      - name: Validate Incidencias Create user combobox
+        run: node .github/scripts/incidencias_create_combobox_contract.mjs
+
       - name: Validate Incidencias Detail bounded-window truth
         run: node .github/scripts/incidencias_detail_window_ui_contract.mjs
 

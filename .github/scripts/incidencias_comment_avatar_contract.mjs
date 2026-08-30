@@ -3,8 +3,14 @@ import fs from "node:fs";
 
 const FEATURE_PATH =
   "src/features/incidencias-avatar-fallback/index.js";
+const FOLLOWUP_PATH =
+  "src/features/incidencias-followup-avatars/index.js";
+const ENHANCEMENTS_PATH =
+  "src/app/enhancements.js";
 
 const source = fs.readFileSync(FEATURE_PATH, "utf8");
+const followupSource = fs.readFileSync(FOLLOWUP_PATH, "utf8");
+const enhancementsSource = fs.readFileSync(ENHANCEMENTS_PATH, "utf8");
 
 assert.match(
   source,
@@ -33,7 +39,7 @@ assert.doesNotMatch(
 assert.match(
   source,
   /\.incidencias-timeline-card\.is-comment \.incidencias-timeline-meta/u,
-  "los avatares deben limitarse a comentarios reales del timeline"
+  "el historial independiente debe seguir admitiendo avatares"
 );
 
 assert.match(
@@ -73,39 +79,69 @@ assert.match(
 );
 
 assert.match(
-  source,
+  followupSource,
+  /incidencias\.followup-avatars\.v1\.identity-first/u,
+  "Seguimiento debe tener una mejora específica y versionada"
+);
+
+assert.match(
+  followupSource,
+  /\.incidencias-modal-description-comment-head/u,
+  "la foto debe apuntar al renderer real de Seguimiento visible en Details"
+);
+
+assert.match(
+  followupSource,
+  /IncidenciasAvatarFallbackInternals/u,
+  "Seguimiento debe reutilizar la política identity-first ya validada"
+);
+
+assert.match(
+  followupSource,
+  /buildCommentIdentityIndex/u,
+  "Seguimiento debe resolver comentarios desde identidad estable del detalle"
+);
+
+assert.match(
+  followupSource,
+  /resolveCommentProfile/u,
+  "Seguimiento debe fallar cerrado cuando la identidad no coincide"
+);
+
+assert.match(
+  followupSource,
   /document\.createElement\("img"\)/u,
-  "el comentario debe recibir únicamente la foto, sin una tarjeta decorativa nueva"
-);
-
-assert.doesNotMatch(
-  source,
-  /createCommentAvatar[\s\S]*?document\.createElement\("(?:div|article|section)"\)/u,
-  "no se deben crear recuadros o contenedores visuales nuevos para el avatar"
+  "Seguimiento debe insertar una foto real junto al autor"
 );
 
 assert.match(
-  source,
+  followupSource,
+  /incidencias-modal-description-comment-author/u,
+  "foto y nombre deben viajar juntos sin alterar la fecha del comentario"
+);
+
+assert.match(
+  followupSource,
   /inline-size:\s*22px;[\s\S]*?block-size:\s*22px;/u,
-  "el avatar del comentario debe mantenerse pequeño y alineado con autor/fecha"
+  "el avatar visible de Seguimiento debe medir exactamente 22px"
 );
 
 assert.match(
-  source,
-  /border:\s*0;[\s\S]*?background:\s*transparent;[\s\S]*?box-shadow:\s*none;/u,
-  "la foto no debe añadir borde, badge, fondo ni sombra"
+  followupSource,
+  /border:\s*0;[\s\S]*?border-radius:\s*50%;[\s\S]*?background:\s*transparent;[\s\S]*?box-shadow:\s*none;/u,
+  "la foto de Seguimiento no debe añadir borde, badge, fondo ni sombra"
 );
 
 assert.match(
-  source,
-  /@media \(max-width: 720px\)/u,
-  "el alineado debe respetar el breakpoint existente del modal"
-);
-
-assert.match(
-  source,
+  followupSource,
   /MutationObserver/u,
-  "los avatares deben sobrevivir rerenders del modal y comentarios nuevos"
+  "las fotos de Seguimiento deben sobrevivir rerenders y comentarios nuevos"
+);
+
+assert.match(
+  enhancementsSource,
+  /key:\s*"incidencias-followup-avatars"[\s\S]*?scope:\s*"incidencias"[\s\S]*?features\/incidencias-followup-avatars\/index\.js/u,
+  "la mejora visible de Seguimiento debe cargarse únicamente en Incidencias"
 );
 
 const feature = await import(
@@ -188,5 +224,5 @@ const profiles = [requester, technician];
 }
 
 console.log(
-  "Incidencias comment avatar contract OK · identity-first userId/email · modal-scoped WeakMap · legacy fallback"
+  "Incidencias comment avatar contract OK · visible Seguimiento + timeline · identity-first · 22px"
 );

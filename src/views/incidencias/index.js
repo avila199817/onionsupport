@@ -19,12 +19,31 @@ import {
   installIncidenciasStatsScope,
   INCIDENCIAS_STATS_SCOPE_VERSION,
 } from "./incidencias.stats-scope.js";
+import {
+  installIncidenciasDetailAttachmentPolicy,
+  INCIDENCIAS_DETAIL_ATTACHMENT_POLICY_VERSION,
+} from "./incidencias.detail-attachment-policy.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
-  `${Impl.INCIDENCIAS_INDEX_VERSION}.create-user-combobox.truthful-loaded-stats`;
+  `${Impl.INCIDENCIAS_INDEX_VERSION}.create-user-combobox.truthful-loaded-stats.detail-attachment-policy`;
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
+
+function resolveBoundaryRole() {
+  const runtimeState = AppCore.runtimeState.read();
+  const implementationSnapshot = Impl.getSnapshot?.() || {};
+  const runtimeUser = runtimeState?.user || runtimeState?.auth?.user || {};
+
+  return AppCore.normalizeRole(
+    implementationSnapshot.role ||
+    runtimeState?.role ||
+    runtimeState?.rol ||
+    runtimeUser.role ||
+    runtimeUser.rol ||
+    "user"
+  );
+}
 
 export async function IncidenciasView(host = null, context = {}) {
   const controller = await Impl.IncidenciasView(host, context);
@@ -44,6 +63,11 @@ export async function IncidenciasView(host = null, context = {}) {
     document: documentLike,
   });
 
+  const uninstallDetailAttachmentPolicy = installIncidenciasDetailAttachmentPolicy({
+    document: documentLike,
+    getRole: resolveBoundaryRole,
+  });
+
   const originalDestroy = typeof controller.destroy === "function"
     ? controller.destroy.bind(controller)
     : null;
@@ -52,6 +76,7 @@ export async function IncidenciasView(host = null, context = {}) {
     "__incidenciasViewEnhancementsInstalled",
     "__incidenciasCreateUserComboboxInstalled",
     "__incidenciasStatsScopeInstalled",
+    "__incidenciasDetailAttachmentPolicyInstalled",
   ]) {
     Object.defineProperty(controller, key, {
       value: true,
@@ -61,6 +86,7 @@ export async function IncidenciasView(host = null, context = {}) {
   }
 
   controller.destroy = function destroyIncidenciasWithEnhancements() {
+    uninstallDetailAttachmentPolicy?.();
     uninstallStatsScope?.();
     uninstallCombobox?.();
     return originalDestroy ? originalDestroy() : true;
@@ -83,24 +109,20 @@ export const getSnapshot = Impl.getSnapshot;
 export const getDebugSnapshot = Impl.getDebugSnapshot;
 
 export function getIncidenciasViewBoundarySnapshot() {
-  const runtimeState = AppCore.runtimeState.read();
-  const implementationSnapshot = Impl.getSnapshot?.() || {};
-  const runtimeUser = runtimeState?.user || runtimeState?.auth?.user || {};
-
   return Object.freeze({
     version: INCIDENCIAS_VIEW_VERSION,
     implementationVersion: Impl.INCIDENCIAS_VIEW_VERSION,
     createUserComboboxVersion: INCIDENCIAS_CREATE_USER_COMBOBOX_VERSION,
     statsScopeVersion: INCIDENCIAS_STATS_SCOPE_VERSION,
-    role: AppCore.normalizeRole(
-      implementationSnapshot.role || runtimeUser.role || runtimeUser.rol || "user"
-    ),
+    detailAttachmentPolicyVersion: INCIDENCIAS_DETAIL_ATTACHMENT_POLICY_VERSION,
+    role: resolveBoundaryRole(),
     policy: Object.freeze({
       controllerImplementationPreserved1to1: true,
       enhancementsInstalledPerController: true,
       enhancementsCleanupOnDestroy: true,
       noSecondSelectionPath: true,
       truthfulLoadedStats: true,
+      detailAttachmentLimitsEarly: true,
       canonicalRoleAuthority: true,
       zeroCopyRuntimeState: true,
     }),

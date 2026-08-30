@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static syntax checks for an untrusted Repository Integrity candidate."""
+"""Static syntax and production-workflow checks for an untrusted candidate."""
 
 from __future__ import annotations
 
@@ -24,6 +24,10 @@ PYTHON_FILES = (
 
 JSON_FILES = (
     "staticwebapp.config.json",
+)
+
+SWA_PRODUCTION_WORKFLOW = (
+    ".github/workflows/azure-static-web-apps-polite-bay-086469a1e.yml"
 )
 
 
@@ -61,6 +65,84 @@ def checked_file(root: Path, relative: str) -> Path:
         raise RuntimeError(f"{relative}: no es un archivo regular")
 
     return resolved
+
+
+def validate_swa_provenance_contract(root: Path, errors: list[str]) -> None:
+    """Require PR provenance before an automatic SWA production deploy.
+
+    This validator runs from the trusted base checkout in pull_request_target.
+    The workflow being inspected is candidate data, so changing the candidate
+    copy of this validator cannot weaken the check for the current PR.
+    """
+
+    try:
+        path = checked_file(root, SWA_PRODUCTION_WORKFLOW)
+        source = path.read_text(encoding="utf-8")
+    except RuntimeError as exc:
+        errors.append(str(exc))
+        return
+    except UnicodeDecodeError:
+        errors.append(f"{SWA_PRODUCTION_WORKFLOW}: debe ser UTF-8")
+        return
+
+    required_markers = (
+        (
+            "pull-requests: read",
+            "el job de validación necesita pull-requests: read para comprobar procedencia",
+        ),
+        (
+            "- name: Require merged pull request for automatic production",
+            "falta el gate de procedencia de producción",
+        ),
+        (
+            "if: github.event_name != 'workflow_dispatch'",
+            "el gate automático debe conservar workflow_dispatch como escape explícito",
+        ),
+        (
+            "GITHUB_TOKEN: ${{ github.token }}",
+            "el gate debe usar el token efímero del workflow",
+        ),
+        (
+            '"https://api.github.com/repos/${REPOSITORY}/commits/${REVISION}/pulls"',
+            "el gate debe resolver la asociación commit -> pull request",
+        ),
+        (
+            'select(.merged_at != null and .base.ref == "main")',
+            "el gate debe exigir una PR fusionada cuyo destino sea main",
+        ),
+        (
+            "Automatic production rejected:",
+            "el gate debe fallar cerrado cuando no existe PR fusionada",
+        ),
+    )
+
+    for marker, message in required_markers:
+        if marker not in source:
+            errors.append(f"{SWA_PRODUCTION_WORKFLOW}: {message}")
+
+    lock_marker = "      - name: Lock validated revision"
+    gate_marker = "      - name: Require merged pull request for automatic production"
+    validation_marker = "      - name: Stage trusted validation tooling"
+
+    lock_index = source.find(lock_marker)
+    gate_index = source.find(gate_marker)
+    validation_index = source.find(validation_marker)
+
+    if not (
+        lock_index >= 0
+        and gate_index > lock_index
+        and validation_index > gate_index
+    ):
+        errors.append(
+            f"{SWA_PRODUCTION_WORKFLOW}: el gate de procedencia debe ejecutarse "
+            "después de fijar el SHA y antes de validar/materializar el release"
+        )
+
+    if "pull_request:" in source.split("on:", 1)[-1].split("concurrency:", 1)[0]:
+        errors.append(
+            f"{SWA_PRODUCTION_WORKFLOW}: el workflow productivo no debe desplegar "
+            "directamente desde el evento pull_request"
+        )
 
 
 def main() -> int:
@@ -102,6 +184,8 @@ def main() -> int:
                 f"en línea {exc.lineno} columna {exc.colno}"
             )
 
+    validate_swa_provenance_contract(root, errors)
+
     if errors:
         for error in errors:
             print(f"::error title=Candidate CI/static syntax inválida::{error}")
@@ -109,7 +193,8 @@ def main() -> int:
 
     print(
         "Candidate CI/static syntax OK · "
-        f"Python={len(PYTHON_FILES)} · JSON={len(JSON_FILES)}"
+        f"Python={len(PYTHON_FILES)} · JSON={len(JSON_FILES)} · "
+        "SWA provenance=locked"
     )
     return 0
 

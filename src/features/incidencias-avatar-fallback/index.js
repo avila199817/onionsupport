@@ -11,6 +11,8 @@
      de solicitante/técnico junto al nombre de quien comenta.
    - Resolver el autor por userId/email cuando el comentario dispone de
      identidad estable; el nombre queda sólo como compatibilidad legacy.
+   - Mantener la identidad hidratada ligada al nodo de modal actual para
+     no reutilizar datos obsoletos tras cerrar/reabrir o reasignar técnico.
    - No crear tarjetas, badges ni decoraciones nuevas alrededor del autor.
 ========================================================= */
 
@@ -21,7 +23,7 @@ import {
 } from "../../views/incidencias/incidencias.api.js";
 
 export const INCIDENCIAS_AVATAR_FALLBACK_VERSION =
-  "incidencias.avatar-fallback.v3.comment-identity-first";
+  "incidencias.avatar-fallback.v4.comment-identity-modal-scope";
 
 const IMAGE_SELECTOR = [
   ".incidencias-avatar-img",
@@ -59,9 +61,14 @@ const MOUNT_KEY = "__ONION_INCIDENCIAS_AVATAR_FALLBACK__";
 let commentObserver = null;
 let commentScanQueued = false;
 
-const detailIdentityCache = new Map();
-const detailIdentityFlights = new Map();
-const detailIdentityFailures = new Set();
+/*
+   Estado por nodo de modal, no por ticketId.
+   Al desaparecer el modal, WeakMap permite liberar el detalle hidratado.
+   Una reapertura obtiene de nuevo el detalle mediante el coordinador
+   canónico (single-flight + cache TTL), evitando identidades eternamente
+   obsoletas en una SPA de larga duración.
+*/
+const detailIdentityState = new WeakMap();
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -672,17 +679,26 @@ function syncCommentMeta(meta = null, profiles = [], identityIndex = new Map()) 
   return true;
 }
 
+function getModalIdentityState(modal = null) {
+  if (!modal || typeof modal !== "object") return null;
+  return detailIdentityState.get(modal) || null;
+}
+
 async function hydrateDetailIdentity(modal = null) {
   const ticketId = ticketIdFromModal(modal);
-  if (!ticketId) return null;
+  if (!ticketId || !modal) return null;
 
-  if (detailIdentityCache.has(ticketId)) {
-    return detailIdentityCache.get(ticketId);
-  }
+  let state = getModalIdentityState(modal);
 
-  if (detailIdentityFlights.has(ticketId)) {
-    return detailIdentityFlights.get(ticketId);
-  }
+  if (state?.detail) return state.detail;
+  if (state?.promise) return state.promise;
+
+  state = {
+    ticketId,
+    detail: null,
+    promise: null,
+    failed: false,
+  };
 
   const flight = Promise.resolve()
     .then(() => loadIncidenciaDetail(ticketId))
@@ -690,27 +706,38 @@ async function hydrateDetailIdentity(modal = null) {
       const detail = unwrapDetail(result);
 
       if (detail && Object.keys(detail).length) {
-        detailIdentityCache.set(ticketId, detail);
-        detailIdentityFailures.delete(ticketId);
+        state.detail = detail;
+        state.failed = false;
+      } else {
+        state.failed = true;
       }
 
-      return detail || null;
+      return state.detail;
     })
     .catch(() => {
-      detailIdentityFailures.add(ticketId);
+      state.failed = true;
+      state.detail = null;
       return null;
     })
     .finally(() => {
-      detailIdentityFlights.delete(ticketId);
+      state.promise = null;
     });
 
-  detailIdentityFlights.set(ticketId, flight);
+  state.promise = flight;
+  detailIdentityState.set(modal, state);
+
   return flight;
 }
 
 function queueIdentityHydration(modal = null) {
   const ticketId = ticketIdFromModal(modal);
-  if (!ticketId || detailIdentityCache.has(ticketId) || detailIdentityFlights.has(ticketId)) {
+  const state = getModalIdentityState(modal);
+
+  if (
+    !ticketId ||
+    state?.detail ||
+    state?.promise
+  ) {
     return false;
   }
 
@@ -741,10 +768,10 @@ export function syncIncidenciasCommentAvatars(root = document) {
   let synced = 0;
 
   for (const modal of modals) {
-    const ticketId = ticketIdFromModal(modal);
-    const detail = detailIdentityCache.get(ticketId) || {};
+    const state = getModalIdentityState(modal);
+    const detail = state?.detail || {};
     const identityReady = Boolean(detail && Object.keys(detail).length);
-    const identityFailed = detailIdentityFailures.has(ticketId);
+    const identityFailed = state?.failed === true;
 
     if (!identityReady && !identityFailed) {
       for (const meta of modal.querySelectorAll(COMMENT_META_SELECTOR)) {
@@ -852,6 +879,7 @@ export function mountIncidenciasAvatarFallback() {
     commentAvatarsAtMount,
     commentObserverActive,
     identityFirst: true,
+    modalScopedIdentity: true,
     mountedAt: new Date().toISOString(),
   });
 
@@ -870,6 +898,7 @@ export const IncidenciasAvatarFallbackInternals = Object.freeze({
   buildCommentIdentityIndex,
   matchProfileByStableIdentity,
   resolveCommentProfile,
+  getModalIdentityState,
 });
 
 export default Object.freeze({

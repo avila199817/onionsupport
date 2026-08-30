@@ -9,6 +9,7 @@
    usuario de Create y garantiza su cleanup junto al controller existente.
 ========================================================= */
 
+import { AppCore } from "../../core/index.js";
 import * as Impl from "./index.impl.js";
 import {
   installIncidenciasCreateUserCombobox,
@@ -66,15 +67,19 @@ export const getSnapshot = Impl.getSnapshot;
 export const getDebugSnapshot = Impl.getDebugSnapshot;
 
 export function getIncidenciasViewBoundarySnapshot() {
+  const implementationSnapshot = Impl.getSnapshot?.() || {};
+
   return Object.freeze({
     version: INCIDENCIAS_VIEW_VERSION,
     implementationVersion: Impl.INCIDENCIAS_VIEW_VERSION,
     createUserComboboxVersion: INCIDENCIAS_CREATE_USER_COMBOBOX_VERSION,
+    role: AppCore.normalizeRole(implementationSnapshot.role || "user"),
     policy: Object.freeze({
       controllerImplementationPreserved1to1: true,
       comboboxInstalledPerController: true,
       comboboxCleanupOnDestroy: true,
       noSecondSelectionPath: true,
+      canonicalRoleAuthority: true,
     }),
   });
 }

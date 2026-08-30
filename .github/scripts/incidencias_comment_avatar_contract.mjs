@@ -5,11 +5,14 @@ const FEATURE_PATH =
   "src/features/incidencias-avatar-fallback/index.js";
 const FOLLOWUP_PATH =
   "src/features/incidencias-followup-avatars/index.js";
+const FOLLOWUP_STYLE_PATH =
+  "src/features/incidencias-followup-avatars/style.css";
 const ENHANCEMENTS_PATH =
   "src/app/enhancements.js";
 
 const source = fs.readFileSync(FEATURE_PATH, "utf8");
 const followupSource = fs.readFileSync(FOLLOWUP_PATH, "utf8");
+const followupStyle = fs.readFileSync(FOLLOWUP_STYLE_PATH, "utf8");
 const enhancementsSource = fs.readFileSync(ENHANCEMENTS_PATH, "utf8");
 
 assert.match(
@@ -80,8 +83,20 @@ assert.match(
 
 assert.match(
   followupSource,
-  /incidencias\.followup-avatars\.v1\.identity-first/u,
-  "Seguimiento debe tener una mejora específica y versionada"
+  /incidencias\.followup-avatars\.v2\.premium-horizontal/u,
+  "Seguimiento debe versionar explícitamente la presentación premium horizontal"
+);
+
+assert.match(
+  followupSource,
+  /import\s+"\.\/style\.css";/u,
+  "la presentación del avatar debe estar co-localizada como CSS del feature"
+);
+
+assert.doesNotMatch(
+  followupSource,
+  /createElement\("style"\)/u,
+  "el feature no debe inyectar CSS dinámico desde JavaScript"
 );
 
 assert.match(
@@ -122,14 +137,56 @@ assert.match(
 
 assert.match(
   followupSource,
-  /inline-size:\s*22px;[\s\S]*?block-size:\s*22px;/u,
-  "el avatar visible de Seguimiento debe medir exactamente 22px"
+  /image\.width\s*=\s*28;[\s\S]*?image\.height\s*=\s*28;/u,
+  "el elemento img debe declarar 28x28 para reservar geometría antes de cargar"
 );
 
 assert.match(
-  followupSource,
-  /border:\s*0;[\s\S]*?border-radius:\s*50%;[\s\S]*?background:\s*transparent;[\s\S]*?box-shadow:\s*none;/u,
-  "la foto de Seguimiento no debe añadir borde, badge, fondo ni sombra"
+  followupStyle,
+  /grid-template-columns:\s*28px\s+minmax\(0,\s*1fr\)/u,
+  "el wrapper de autor debe reservar una primera columna fija para la foto"
+);
+
+assert.match(
+  followupStyle,
+  /inline-size:\s*28px;[\s\S]*?block-size:\s*28px;/u,
+  "el avatar premium de escritorio debe medir 28px"
+);
+
+assert.match(
+  followupStyle,
+  /border-radius:\s*999px;/u,
+  "el avatar debe ser inequívocamente circular"
+);
+
+assert.match(
+  followupStyle,
+  /border:\s*1px solid color-mix/u,
+  "el acabado premium debe usar un borde sutil derivado del design system"
+);
+
+assert.match(
+  followupStyle,
+  /0 0 0 2px color-mix[\s\S]*?0 2px 8px rgba\(0, 0, 0, \.22\)/u,
+  "el avatar debe tener ring y profundidad discretos, no una tarjeta nueva"
+);
+
+assert.match(
+  followupStyle,
+  /@media \(max-width: 720px\)[\s\S]*?inline-size:\s*26px;[\s\S]*?block-size:\s*26px;/u,
+  "móvil debe compactar el avatar a 26px manteniendo la relación horizontal"
+);
+
+assert.match(
+  followupStyle,
+  /@media \(forced-colors: active\)/u,
+  "el acabado debe conservar una alternativa accesible en forced-colors"
+);
+
+assert.doesNotMatch(
+  followupStyle,
+  /!important/u,
+  "el CSS del avatar no debe depender de !important"
 );
 
 assert.match(
@@ -224,5 +281,5 @@ const profiles = [requester, technician];
 }
 
 console.log(
-  "Incidencias comment avatar contract OK · visible Seguimiento + timeline · identity-first · 22px"
+  "Incidencias comment avatar contract OK · Seguimiento premium horizontal · identity-first · 28/26px"
 );

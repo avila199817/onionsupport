@@ -8,14 +8,26 @@ const source = fs.readFileSync(FEATURE_PATH, "utf8");
 
 assert.match(
   source,
-  /incidencias\.avatar-fallback\.v3\.comment-identity-first/u,
-  "la mejora debe versionar explícitamente el matching identity-first"
+  /incidencias\.avatar-fallback\.v4\.comment-identity-modal-scope/u,
+  "la mejora debe versionar explícitamente identidad estable y scope de modal"
 );
 
 assert.match(
   source,
   /loadIncidenciaDetail/u,
   "el enhancement debe reutilizar el coordinador canónico de detalle"
+);
+
+assert.match(
+  source,
+  /const detailIdentityState = new WeakMap\(\)/u,
+  "la identidad hidratada debe vivir por nodo de modal y poder liberarse al cerrar"
+);
+
+assert.doesNotMatch(
+  source,
+  /detailIdentityCache\s*=\s*new Map/u,
+  "no se permite una caché eterna por ticketId para la identidad visual"
 );
 
 assert.match(
@@ -176,5 +188,5 @@ const profiles = [requester, technician];
 }
 
 console.log(
-  "Incidencias comment avatar contract OK · identity-first userId/email · legacy name fallback · no extra card"
+  "Incidencias comment avatar contract OK · identity-first userId/email · modal-scoped WeakMap · legacy fallback"
 );

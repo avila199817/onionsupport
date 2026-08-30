@@ -14,7 +14,7 @@ const incidenciasIndex = read(
   "src/views/incidencias/index.js"
 );
 const incidenciasCreateTemplate = read(
-  "src/views/incidencias/incidencias.template.create.js"
+  "src/views/incidencias/incidencias.template.create.impl.js"
 );
 const entityIntent = read(
   "src/features/entity-overlay/intent.js"

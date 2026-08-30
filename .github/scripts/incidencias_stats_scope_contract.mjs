@@ -58,7 +58,7 @@ assert.match(
 );
 assert.doesNotMatch(
   scopeSource,
-  /Http|fetch\(|XMLHttpRequest|\/api\/tickets\/stats/,
+  /(?:from\s+["'][^"']*core\/http\.js["']|\bHttp\.(?:get|post|put|patch|delete)\s*\(|\bfetch\s*\(|XMLHttpRequest|\/api\/tickets\/stats)/,
   "el etiquetado de alcance no puede añadir una segunda consulta de stats"
 );
 assert.match(

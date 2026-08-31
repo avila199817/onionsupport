@@ -9,6 +9,17 @@ import {
 } from "../../src/views/incidencias/incidencias.filter-facets.js";
 
 import {
+  INCIDENCIAS_URGENT_FACET_SERVER_PRIORITY,
+  isIncidenciasUrgentFacetPriority,
+  matchesIncidenciasPriorityQuery,
+  getIncidenciasPriorityPolicySnapshot,
+} from "../../src/views/incidencias/incidencias.priority-policy.js";
+
+import {
+  computeIncidenciasStats,
+} from "../../src/views/incidencias/incidencias.api.js";
+
+import {
   getIncidenciasTemplateSnapshot,
   renderIncidenciasTemplate,
 } from "../../src/views/incidencias/incidencias.template.js";
@@ -16,10 +27,54 @@ import {
 assert.deepEqual(getIncidenciasFacetFilterQuery("all"), {});
 assert.deepEqual(getIncidenciasFacetFilterQuery("open"), { closed: false });
 assert.deepEqual(getIncidenciasFacetFilterQuery("closed"), { closed: true });
+assert.equal(INCIDENCIAS_URGENT_FACET_SERVER_PRIORITY, "high");
 assert.deepEqual(
   getIncidenciasFacetFilterQuery("urgent"),
   { priority: "high" },
   "la faceta Urgentes debe consultar la prioridad productiva high"
+);
+
+/* =========================================================
+   PRIORITY TRUTH · KPI === PILL === SERVER ROWS
+========================================================= */
+
+for (const value of ["high", "alta", "p1", "ALTA"] ) {
+  assert.equal(
+    isIncidenciasUrgentFacetPriority(value),
+    true,
+    `${value} debe pertenecer a la faceta productiva Urgentes`
+  );
+}
+
+for (const value of ["urgent", "urgente", "critical", "critica", "p0", "medium"] ) {
+  assert.equal(
+    isIncidenciasUrgentFacetPriority(value),
+    false,
+    `${value} no puede inflar la faceta priority=high`
+  );
+}
+
+const priorityUniverse = [
+  { id: "HIGH-1", priority: "high" },
+  { id: "HIGH-2", prioridad: "alta" },
+  { id: "TRUE-URGENT", priority: "urgent" },
+  { id: "CRITICAL-1", priority: "critical" },
+  { id: "MEDIUM-1", priority: "medium" },
+];
+
+assert.deepEqual(
+  priorityUniverse
+    .filter((item) => matchesIncidenciasPriorityQuery(item, "high"))
+    .map((item) => item.id),
+  ["HIGH-1", "HIGH-2"],
+  "la proyección local de priority=high debe ser idéntica al backend"
+);
+
+const canonicalStats = computeIncidenciasStats(priorityUniverse);
+assert.equal(
+  canonicalStats.urgent,
+  2,
+  "el KPI Urgentes no puede contar urgent/critical si el facet remoto es priority=high"
 );
 
 assert.deepEqual(
@@ -130,29 +185,17 @@ assert.equal(templateSnapshot.totalGreaterThanItems, true);
 const serverFilteredUrgentRows = [
   {
     id: "URGENT-HIGH",
-    subject: "Alta reconocida localmente",
+    subject: "Alta reconocida por el servidor",
     status: "closed",
     priority: "high",
   },
   {
-    id: "URGENT-BACKEND-CLASSIFIED",
-    subject: "Urgente clasificada por el servidor",
+    id: "URGENT-HIGH-2",
+    subject: "Segunda prioridad alta",
     status: "closed",
-    priority: "medium",
+    priority: "alta",
   },
 ];
-
-const localUrgentHtml = renderIncidenciasTemplate({
-  canonical: true,
-  items: serverFilteredUrgentRows,
-  total: 2,
-  filter: "urgent",
-});
-assert.doesNotMatch(
-  localUrgentHtml,
-  /URGENT-BACKEND-CLASSIFIED/,
-  "sin autoridad remota el template mantiene su filtro local de compatibilidad"
-);
 
 const serverUrgentInput = {
   canonical: true,
@@ -161,12 +204,12 @@ const serverUrgentInput = {
   filter: "urgent",
   serverFilterApplied: true,
   stats: {
-    total: 2,
-    open: 0,
-    closed: 2,
+    total: 22,
+    open: 3,
+    closed: 19,
     urgent: 2,
-    attachments: 0,
-    invoiceTotal: 0,
+    attachments: 32,
+    invoiceTotal: 1496.6,
   },
   filterCounts: {
     all: 22,
@@ -179,22 +222,29 @@ const serverUrgentInput = {
 const serverUrgentHtml = renderIncidenciasTemplate(serverUrgentInput);
 assert.match(serverUrgentHtml, /data-server-filter-applied="true"/);
 assert.match(serverUrgentHtml, /URGENT-HIGH/);
-assert.match(
-  serverUrgentHtml,
-  /URGENT-BACKEND-CLASSIFIED/,
-  "una lista filtrada por el servidor no puede perder filas por un segundo filtro local"
-);
+assert.match(serverUrgentHtml, /URGENT-HIGH-2/);
+assert.match(serverUrgentHtml, /data-filter="urgent"[\s\S]*?<strong>2<\/strong>/);
 const serverUrgentSnapshot = getIncidenciasTemplateSnapshot(serverUrgentInput);
 assert.equal(serverUrgentSnapshot.serverFilterApplied, true);
 assert.equal(serverUrgentSnapshot.filteredTotal, 2);
+assert.equal(serverUrgentSnapshot.filterCounts.urgent, 2);
 
 const facetSnapshot = getIncidenciasFilterFacetsSnapshot();
 assert.equal(facetSnapshot.policy.selectedFacetExcludedFromCounts, true);
 assert.equal(facetSnapshot.policy.searchDefinesFacetUniverse, true);
-assert.equal(facetSnapshot.policy.highPriorityMapsToUrgentProductFacet, true);
+assert.equal(facetSnapshot.policy.urgentFacetMatchesServerExactly, true);
+assert.equal(facetSnapshot.policy.urgentFacetServerPriority, "high");
+
+const prioritySnapshot = getIncidenciasPriorityPolicySnapshot();
+assert.equal(prioritySnapshot.urgentFacetMatchesServerExactly, true);
+assert.equal(prioritySnapshot.urgentAndCriticalAreNotImplicitlyCountedAsHigh, true);
 
 const controllerSource = await readFile(
   new URL("../../src/views/incidencias/index.impl.js", import.meta.url),
+  "utf8"
+);
+const apiSource = await readFile(
+  new URL("../../src/views/incidencias/incidencias.api.js", import.meta.url),
   "utf8"
 );
 
@@ -209,6 +259,18 @@ for (const required of [
   assert.ok(controllerSource.includes(required), `falta integración de facetas: ${required}`);
 }
 
+for (const required of [
+  "matchesIncidenciasPriorityQuery",
+  "isIncidenciasUrgentFacetItem",
+  "isFacetCountQuery",
+  "source.force === true",
+  "source.cache === false",
+  "facetCountsBypassLocalProjection: true",
+  "statsUseCanonicalUrgentFacet: true",
+]) {
+  assert.ok(apiSource.includes(required), `falta autoridad de prioridad en API: ${required}`);
+}
+
 assert.match(
   controllerSource,
   /loadIncidenciasPage\(\{[\s\S]*?query:\s*getIncidenciasFacetRequestQuery/,
@@ -221,5 +283,5 @@ assert.match(
 );
 
 console.log(
-  "Incidencias filter facets OK · stable sibling counts · server-owned rows never disappear in a second local filter"
+  "Incidencias filter facets OK · KPI/pill/server rows share priority=high truth · urgent/critical cannot inflate count"
 );

@@ -13,7 +13,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_MEDIA_GALLERY_VERSION =
-  "incidencias-media-gallery.v2.solid-buffered-inner-controls";
+  "incidencias-media-gallery.v2.1.observer-idempotent";
 
 const VIEW = "#view-container, [data-router-view='true']";
 const HOST = "[data-incidencias-modal-host='true']";
@@ -57,6 +57,16 @@ const text = (value = "", fallback = "") =>
     .replace(/[\r\n\t]/g, " ")
     .replace(/\s+/g, " ")
     .trim() || fallback;
+
+export function syncIncidenciasMediaGalleryText(node = null, value = "") {
+  if (!node) return false;
+
+  const nextValue = String(value ?? "");
+  if (node.textContent === nextValue) return false;
+
+  node.textContent = nextValue;
+  return true;
+}
 
 function currentRoot() {
   return modalHost?.querySelector?.(ROOT) || null;
@@ -490,7 +500,7 @@ function syncControls(
   if (!usable) {
     controls.previous.disabled = true;
     controls.next.disabled = true;
-    controls.counter.textContent = "";
+    syncIncidenciasMediaGalleryText(controls.counter, "");
     return true;
   }
 
@@ -513,7 +523,10 @@ function syncControls(
   );
   controls.previous.title = previousItem?.name || "";
   controls.next.title = nextItem?.name || "";
-  controls.counter.textContent = `${index + 1} / ${items.length}`;
+  syncIncidenciasMediaGalleryText(
+    controls.counter,
+    `${index + 1} / ${items.length}`
+  );
   return true;
 }
 
@@ -868,6 +881,8 @@ export function getIncidenciasMediaGallerySnapshot() {
       pdfLoadAware: true,
       navigationFailOpenTimeout: true,
       scrollSessionDelegatedToCore: true,
+      observerTextWritesIdempotent: true,
+      mutationObserverFrameLoopPrevented: true,
       observerScope: "modal-island",
       hostDiscoveryScope: "stable-router-view",
     }),

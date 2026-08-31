@@ -117,15 +117,15 @@ if not errors:
 
     # Siete capas = jerarquía real completa, incluida la segunda pill inferior.
     main_after = re.search(
-        r"\.incidencias-skeleton--main::after\s*\{(?P<body>.*?)\n\}",
+        r"(?m)^\.incidencias-skeleton--main::after\s*\{(?P<body>.*?)^\}",
         skeleton_css,
-        re.DOTALL,
+        re.DOTALL | re.MULTILINE,
     )
     if not main_after:
         errors.append(f"{SKELETON_CSS}: falta silueta principal")
     else:
         body = main_after.group("body")
-        mask_match = re.search(r"(?<!webkit-)mask:\s*(?P<mask>.*?);", body, re.DOTALL)
+        mask_match = re.search(r"(?m)^\s*mask:\s*(?P<mask>.*?);", body, re.DOTALL)
         if not mask_match:
             errors.append(f"{SKELETON_CSS}: falta mask canónico")
         elif mask_match.group("mask").count("linear-gradient") != 7:

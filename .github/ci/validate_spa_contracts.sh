@@ -120,6 +120,7 @@ PY
 
 python3 .github/scripts/private_css_authority_contract.py
 python3 .github/scripts/facturas_loading_parity_contract.py
+python3 .github/scripts/incidencias_skeleton_contract.py
 
 node .github/scripts/core_runtime_contract.mjs
 node .github/scripts/core_snapshot_contract.mjs

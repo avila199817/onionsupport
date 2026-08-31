@@ -140,6 +140,16 @@ const requestEnd = controllerSource.indexOf(
 );
 const requestSource = controllerSource.slice(requestStart, requestEnd);
 assert.ok(requestStart >= 0 && requestEnd > requestStart);
+assert.match(
+  requestSource,
+  /openerNode\s*=\s*null/,
+  "abrir la confirmación debe conservar el botón que inició la acción"
+);
+assert.match(
+  requestSource,
+  /preserveAttachmentList:\s*true/,
+  "abrir la confirmación no debe repintar la lista subyacente"
+);
 assert.doesNotMatch(
   requestSource,
   /deleteIncidenciaAttachment\s*\(/,
@@ -155,15 +165,44 @@ const cancelEnd = controllerSource.indexOf(
 );
 const cancelSource = controllerSource.slice(cancelStart, cancelEnd);
 assert.ok(cancelStart >= 0 && cancelEnd > cancelStart);
+for (const required of [
+  "const returnFocus =",
+  "attachmentDeleteReturnFocus",
+  "preserveAttachmentList: true",
+  "returnFocus?.isConnected",
+  'typeof returnFocus.focus === "function"',
+  "returnFocus.focus({",
+  "focusAfterRender(",
+]) {
+  assert.ok(
+    cancelSource.includes(required),
+    `falta el retorno de foco sobre el botón estable: ${required}`
+  );
+}
 assert.match(
   cancelSource,
   /nextFrame\s*\(\s*\(\)\s*=>/,
-  "la restauración debe esperar a que el botón repintado esté conectado"
+  "el retorno debe esperar al cierre visual del overlay"
+);
+
+const patchStart = controllerSource.indexOf(
+  "function patchDetailModalDom("
+);
+const patchEnd = controllerSource.indexOf(
+  "function cancelScheduledRender(",
+  patchStart
+);
+const patchSource = controllerSource.slice(patchStart, patchEnd);
+assert.ok(patchStart >= 0 && patchEnd > patchStart);
+assert.match(
+  patchSource,
+  /options\.preserveAttachmentList\s*===\s*true/,
+  "el patcher debe poder conservar la lista al cambiar sólo la confirmación"
 );
 assert.match(
-  cancelSource,
-  /focusAfterRender\s*\(\s*focusSelector,\s*modalHost\s*\)/,
-  "cancelar debe devolver el foco al botón exacto de adjunto"
+  patchSource,
+  /selector\s*===\s*"\[data-modal-files-slot='true'\]"/,
+  "la preservación debe limitarse al slot de adjuntos"
 );
 
 const confirmStart = controllerSource.indexOf(

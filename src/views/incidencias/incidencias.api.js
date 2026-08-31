@@ -6,6 +6,9 @@
    - mantener el API público histórico de Incidencias;
    - delegar normalización/cache/mutaciones al implementation canónico;
    - ser la única autoridad de single-flight para GET de detalle;
+   - exigir integridad materializada en Modal Details (comments/history/files);
+   - forzar lectura remota sin cache para toda hidratación de detalle UI;
+   - rehidratar mutaciones confirmadas antes de devolverlas al controller;
    - compartir un GET no-forzado aunque el caller use AbortSignal;
    - conservar la cancelación del caller que originó la request;
    - no deduplicar refreshes explícitos `force=true`;
@@ -16,11 +19,21 @@
 "use strict";
 
 import * as Impl from "./incidencias.api.impl.js";
+import {
+  INCIDENCIAS_DETAIL_INTEGRITY_VERSION,
+  createDetailIntegrityLoader,
+  inspectIncidenciaDetailIntegrity,
+} from "./incidencias.detail-integrity.js";
 
 export * from "./incidencias.api.impl.js";
+export {
+  INCIDENCIAS_DETAIL_INTEGRITY_VERSION,
+  createDetailIntegrityLoader,
+  inspectIncidenciaDetailIntegrity,
+} from "./incidencias.detail-integrity.js";
 
 export const INCIDENCIAS_DETAIL_REQUEST_COORDINATOR_VERSION =
-  "incidencias.detail-request.single-flight.v1";
+  "incidencias.detail-request.single-flight.v2-integrity";
 
 export const INCIDENCIAS_HOT_LIST_QUERY_VERSION =
   "incidencias.list-query.complete-universe.v1";
@@ -417,53 +430,8 @@ export async function loadIncidenciasPage(options = {}) {
   return response;
 }
 
-/*
-   Las mutaciones invalidan el universo optimista. El controller ya incorpora
-   la entidad confirmada en su colección viva; la siguiente consulta completa
-   vuelve a demostrar si el universo cabe en una sola página antes de reactivar
-   el fast-path. Exactitud antes que una caché agresiva.
-*/
-async function mutateAndInvalidate(method, args = []) {
-  const result = await method(...args);
-  invalidateCompleteUniverse();
-  return result;
-}
-
-export function clearIncidenciasCache(...args) {
-  invalidateCompleteUniverse();
-  return Impl.clearIncidenciasCache(...args);
-}
-
-export async function createIncidencia(...args) {
-  return mutateAndInvalidate(Impl.createIncidencia, args);
-}
-
-export async function updateIncidencia(...args) {
-  return mutateAndInvalidate(Impl.updateIncidencia, args);
-}
-
-export async function commentIncidencia(...args) {
-  return mutateAndInvalidate(Impl.commentIncidencia, args);
-}
-
-export async function reopenIncidencia(...args) {
-  return mutateAndInvalidate(Impl.reopenIncidencia, args);
-}
-
-export async function closeIncidencia(...args) {
-  return mutateAndInvalidate(Impl.closeIncidencia, args);
-}
-
-export async function uploadIncidenciaAttachments(...args) {
-  return mutateAndInvalidate(Impl.uploadIncidenciaAttachments, args);
-}
-
-export async function deleteIncidenciaAttachment(...args) {
-  return mutateAndInvalidate(Impl.deleteIncidenciaAttachment, args);
-}
-
 /* =========================================================
-   DETAIL SINGLE-FLIGHT
+   DETAIL SINGLE-FLIGHT + INTEGRITY
 ========================================================= */
 
 export function createDetailRequestCoordinator(loader) {
@@ -526,11 +494,137 @@ const detailCoordinator = createDetailRequestCoordinator(
   (id, options) => Impl.getIncidenciaByIdRequest(id, options)
 );
 
+/*
+   El Modal Details NUNCA confía en la cache de detalle como fuente final.
+   Esto es deliberado: respuestas de PATCH/comment/upload pueden ser parciales
+   y el implementation histórico las normaliza con arrays vacíos. Un Ctrl+F5
+   funcionaba porque borraba esa cache de memoria. Ahora la lectura pública del
+   Detail fuerza GET remoto, valida colecciones y reintenta si el payload llega
+   eventualmente incompleto.
+*/
+const detailIntegrityLoader = createDetailIntegrityLoader(
+  (id, options) => detailCoordinator.request(id, options)
+);
+
 export function getIncidenciaByIdRequest(id = "", options = {}) {
-  return detailCoordinator.request(id, options);
+  return detailIntegrityLoader.request(id, options);
 }
 
 export const loadIncidenciaDetail = getIncidenciaByIdRequest;
+
+function ticketIdFromDetail(value = null) {
+  const source = object(value);
+  return cleanKey(
+    source.ticketId ||
+    source.incidenciaId ||
+    source.id ||
+    source.code ||
+    source.numero ||
+    ""
+  );
+}
+
+function mutationSignal(args = []) {
+  for (let index = args.length - 1; index >= 0; index -= 1) {
+    const source = object(args[index]);
+    if (source.signal) return source.signal;
+  }
+  return null;
+}
+
+function mutationTicketId(args = [], result = null, mode = "first") {
+  if (mode === "create") return ticketIdFromDetail(result);
+
+  if (mode === "object") {
+    const source = object(args[0]);
+    return cleanKey(
+      source.ticketId ||
+      source.incidenciaId ||
+      source.id ||
+      ticketIdFromDetail(result)
+    );
+  }
+
+  return cleanKey(args[0] || ticketIdFromDetail(result));
+}
+
+async function authoritativeMutationResult(
+  method,
+  args = [],
+  {
+    idMode = "first",
+  } = {}
+) {
+  const result = await method(...args);
+  invalidateCompleteUniverse();
+
+  const id = mutationTicketId(args, result, idMode);
+  if (!id) return result;
+
+  /*
+     La mutación ya puede haber escrito una respuesta parcial en detailCache
+     dentro del implementation. Forzamos inmediatamente la lectura completa y
+     devolvemos ESA entidad al controller. Si la API de lectura está caída tras
+     una mutación confirmada no convertimos una operación ya cometida en un
+     falso fallo/reintento destructivo: devolvemos el resultado confirmado.
+     La próxima apertura volverá a forzar integridad igualmente.
+  */
+  try {
+    return await getIncidenciaByIdRequest(id, {
+      signal: mutationSignal(args),
+      integrityAttempts: 4,
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") throw error;
+    return result;
+  }
+}
+
+/*
+   Las mutaciones invalidan el universo optimista y, cuando existe identidad
+   de ticket, rehidratan el Detail desde el endpoint autoritativo. Así una
+   respuesta parcial nunca se convierte en el estado visible final del modal.
+*/
+export function clearIncidenciasCache(...args) {
+  invalidateCompleteUniverse();
+  return Impl.clearIncidenciasCache(...args);
+}
+
+export async function createIncidencia(...args) {
+  return authoritativeMutationResult(
+    Impl.createIncidencia,
+    args,
+    { idMode: "create" }
+  );
+}
+
+export async function updateIncidencia(...args) {
+  return authoritativeMutationResult(Impl.updateIncidencia, args);
+}
+
+export async function commentIncidencia(...args) {
+  return authoritativeMutationResult(Impl.commentIncidencia, args);
+}
+
+export async function reopenIncidencia(...args) {
+  return authoritativeMutationResult(Impl.reopenIncidencia, args);
+}
+
+export async function closeIncidencia(...args) {
+  return authoritativeMutationResult(Impl.closeIncidencia, args);
+}
+
+export async function uploadIncidenciaAttachments(...args) {
+  return authoritativeMutationResult(Impl.uploadIncidenciaAttachments, args);
+}
+
+export async function deleteIncidenciaAttachment(...args) {
+  return authoritativeMutationResult(
+    Impl.deleteIncidenciaAttachment,
+    args,
+    { idMode: "object" }
+  );
+}
 
 export function getIncidenciasApiSnapshot() {
   const base =
@@ -545,6 +639,14 @@ export function getIncidenciasApiSnapshot() {
       ...detailCoordinator.snapshot(),
       singleFlightAcrossAbortableCallers: true,
       forcedRefreshesBypassSingleFlight: true,
+    }),
+    detailIntegrity: Object.freeze({
+      version: INCIDENCIAS_DETAIL_INTEGRITY_VERSION,
+      ...detailIntegrityLoader.snapshot(),
+      modalReadsAlwaysForceRemote: true,
+      staleDetailCacheNeverFinalAuthority: true,
+      mutationsRehydrateAuthoritativeDetail: true,
+      countArrayMismatchIsIncomplete: true,
     }),
     hotListQuery: Object.freeze({
       version: INCIDENCIAS_HOT_LIST_QUERY_VERSION,
@@ -574,6 +676,7 @@ export default {
   uploadIncidenciaAttachments,
   deleteIncidenciaAttachment,
   clearIncidenciasCache,
+  inspectIncidenciaDetailIntegrity,
   getIncidenciasApiSnapshot,
   getSnapshot,
   getDebugSnapshot,

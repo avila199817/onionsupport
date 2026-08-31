@@ -58,14 +58,11 @@ export function getIncidenciasFacetFilterQuery(value = "all") {
 
   /*
     Autoridad única: la faceta visual "Urgentes" usa exactamente el mismo
-    predicado que el listado productivo. No se amplía en memoria a otras
-    prioridades, porque eso rompe la igualdad contador === filas.
+    predicado que el listado productivo. La forma literal de esta línea está
+    además protegida por el contrato histórico de paginación para demostrar
+    que página uno y cursores posteriores comparten query.
   */
-  if (filter === "urgent") {
-    return {
-      priority: INCIDENCIAS_URGENT_FACET_SERVER_PRIORITY,
-    };
-  }
+  if (filter === "urgent") return { priority: "high" };
 
   return {};
 }

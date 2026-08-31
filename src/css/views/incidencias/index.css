@@ -305,11 +305,54 @@
   font-weight: var(--weight-semibold);
 }
 
-/* Skeleton: esta vista conserva sólo layout/ancho. El paint completo vive en
-   components/skeleton.css dentro de layer(loading). */
+/* Skeleton: esta vista conserva sólo geometría. Paint, alturas semánticas,
+   shimmer y accesibilidad pertenecen a components/skeleton.css. */
 .incidencias-row--skeleton {
+  --inc-skeleton-subject-width: 58%;
+  --inc-skeleton-description-width: 90%;
+  --inc-skeleton-client-width: 62%;
+  --inc-skeleton-updated-width: 78px;
   min-block-size: var(--private-admin-row-min);
   pointer-events: none;
+}
+
+/* Variación controlada = datos creíbles sin cambiar la caja real de la fila. */
+.incidencias-row--skeleton:nth-child(1) {
+  --inc-skeleton-subject-width: 48%;
+  --inc-skeleton-description-width: 91%;
+  --inc-skeleton-client-width: 60%;
+  --inc-skeleton-updated-width: 54px;
+}
+
+.incidencias-row--skeleton:nth-child(2) {
+  --inc-skeleton-subject-width: 78%;
+  --inc-skeleton-description-width: 96%;
+  --inc-skeleton-client-width: 64%;
+}
+
+.incidencias-row--skeleton:nth-child(3) {
+  --inc-skeleton-subject-width: 86%;
+  --inc-skeleton-description-width: 94%;
+  --inc-skeleton-client-width: 61%;
+}
+
+.incidencias-row--skeleton:nth-child(4) {
+  --inc-skeleton-subject-width: 56%;
+  --inc-skeleton-description-width: 88%;
+  --inc-skeleton-client-width: 60%;
+}
+
+.incidencias-row--skeleton:nth-child(5) {
+  --inc-skeleton-subject-width: 71%;
+  --inc-skeleton-description-width: 93%;
+  --inc-skeleton-client-width: 65%;
+  --inc-skeleton-updated-width: 54px;
+}
+
+.incidencias-row--skeleton:nth-child(6) {
+  --inc-skeleton-subject-width: 64%;
+  --inc-skeleton-description-width: 89%;
+  --inc-skeleton-client-width: 58%;
 }
 
 /* Seis filas cubren el viewport sin crear un historial fantasma de 20 filas. */
@@ -317,11 +360,11 @@
 
 .incidencias-row--skeleton > .incidencias-cell { vertical-align: middle; }
 .incidencias-skeleton--main { inline-size: 100%; min-inline-size: 0; }
-.incidencias-skeleton--status { inline-size: 72%; }
-.incidencias-skeleton--created { inline-size: 66%; }
-.incidencias-skeleton--updated { inline-size: 70%; }
-.incidencias-skeleton--amount { inline-size: 64%; }
-.incidencias-skeleton--attachments { inline-size: 52%; }
+.incidencias-skeleton--status { inline-size: min(64px, 100%); }
+.incidencias-skeleton--created { inline-size: min(78px, 100%); }
+.incidencias-skeleton--updated { inline-size: min(var(--inc-skeleton-updated-width), 100%); }
+.incidencias-skeleton--amount { inline-size: min(58px, 100%); }
+.incidencias-skeleton--attachments { inline-size: min(46px, 100%); }
 
 .incidencias-alert {
   min-inline-size: 0;

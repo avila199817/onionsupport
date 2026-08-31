@@ -79,10 +79,22 @@ checks = {
     ),
     "src/views/incidencias/incidencias.api.js": (
         "INCIDENCIAS_DETAIL_REQUEST_COORDINATOR_VERSION",
+        "INCIDENCIAS_HOT_LIST_QUERY_VERSION",
         "createDetailRequestCoordinator",
         'import * as Impl from "./incidencias.api.impl.js"',
+        "export async function loadIncidenciasPage",
         "export function getIncidenciaByIdRequest",
         "export const loadIncidenciaDetail = getIncidenciaByIdRequest",
+        "exactProjectionOnlyWithoutCursor",
+        "paginatedDatasetsStayServerAuthoritative",
+    ),
+    "src/views/incidencias/incidencias.hot-list.js": (
+        "INCIDENCIAS_HOT_LIST_VERSION",
+        "installIncidenciasHotList",
+        "data-incidencias-search-input",
+        "selectionStart",
+        "selectionEnd",
+        "MutationObserver",
     ),
     "src/views/incidencias/incidencias.api.impl.js": (
         "INCIDENCIAS_API_VERSION",
@@ -140,6 +152,7 @@ node .github/scripts/home_runtime_state_contract.mjs
 node .github/scripts/home_view_runtime_context_contract.mjs
 node .github/scripts/navigation_performance_contract.mjs
 node .github/scripts/incidencias_detail_request_contract.mjs
+node .github/scripts/incidencias_hot_list_contract.mjs
 node .github/scripts/incidencias_list_response_v2_contract.mjs
 node .github/scripts/facturas_document_flow_contract.mjs
 

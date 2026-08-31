@@ -15,6 +15,19 @@ assert.equal(partial.cards.urgent.label, "Urgentes cargadas");
 assert.equal(partial.cards.amount.label, "Importe cargado");
 assert.equal(partial.attachmentsSuffix, " en cargadas");
 
+const partialWithExactFacets = getIncidenciasStatsScopePresentation({
+  partial: true,
+  facetsExact: true,
+});
+assert.equal(partialWithExactFacets.scope, "loaded");
+assert.equal(partialWithExactFacets.cards.open.scope, "complete");
+assert.equal(partialWithExactFacets.cards.open.label, "Abiertas");
+assert.equal(partialWithExactFacets.cards.closed.label, "Cerradas");
+assert.equal(partialWithExactFacets.cards.urgent.label, "Urgentes");
+assert.equal(partialWithExactFacets.cards.amount.scope, "loaded");
+assert.equal(partialWithExactFacets.cards.amount.label, "Importe cargado");
+assert.equal(partialWithExactFacets.attachmentsSuffix, " en cargadas");
+
 const complete = getIncidenciasStatsScopePresentation({ partial: false });
 assert.equal(complete.scope, "complete");
 assert.equal(complete.cards.open.label, "Abiertas");
@@ -27,6 +40,7 @@ const snapshot = getIncidenciasStatsScopeSnapshot();
 assert.equal(snapshot.policy.zeroHttp, true);
 assert.equal(snapshot.policy.zeroMetricRecalculation, true);
 assert.equal(snapshot.policy.loadedMetricsExplicitWhenPartial, true);
+assert.equal(snapshot.policy.exactFacetCountsRemainGlobal, true);
 assert.equal(snapshot.policy.attributeTransitionsObserved, true);
 assert.equal(snapshot.policy.canonicalCopyRestoredWhenComplete, true);
 assert.equal(snapshot.policy.valuesRemainControllerOwned, true);
@@ -52,6 +66,7 @@ class FakeMutationObserver {
 const runtimeRoot = {
   dataset: {
     totalGreaterThanItems: "false",
+    filterFacetsExact: "false",
   },
   querySelector() {
     return null;
@@ -80,6 +95,7 @@ assert.equal(runtimeRoot.dataset.statsScope, "complete");
 assert.equal(observerOptions?.attributes, true);
 assert.deepEqual(observerOptions?.attributeFilter, [
   "data-total-greater-than-items",
+  "data-filter-facets-exact",
 ]);
 assert.equal(observerOptions?.childList, true);
 assert.equal(observerOptions?.subtree, true);
@@ -97,6 +113,21 @@ assert.equal(
   runtimeRoot.dataset.statsScope,
   "loaded",
   "el cambio 8/22 debe etiquetar inmediatamente las métricas como cargadas"
+);
+
+runtimeRoot.dataset.filterFacetsExact = "true";
+mutationCallback?.([
+  {
+    type: "attributes",
+    attributeName: "data-filter-facets-exact",
+    target: runtimeRoot,
+  },
+]);
+await Promise.resolve();
+assert.equal(
+  runtimeRoot.dataset.statsScope,
+  "loaded",
+  "las facetas exactas no convierten en globales importe ni adjuntos"
 );
 
 runtimeRoot.dataset.totalGreaterThanItems = "false";
@@ -144,6 +175,16 @@ assert.match(
   /root\.dataset\?\.totalGreaterThanItems === "true"/,
   "el enhancement debe consumir la señal canónica, no inferirla del DOM visible"
 );
+assert.match(
+  templateSource,
+  /data-filter-facets-exact="\$\{vm\.filterFacetsExact \? "true" : "false"\}"/,
+  "la vista debe publicar cuándo las facetas de estado son exactas"
+);
+assert.match(
+  scopeSource,
+  /root\.dataset\?\.filterFacetsExact === "true"/,
+  "el scope debe distinguir facetas exactas de agregados todavía parciales"
+);
 assert.doesNotMatch(
   scopeSource,
   /(?:from\s+["'][^"']*core\/http\.js["']|\bHttp\.(?:get|post|put|patch|delete)\s*\(|\bfetch\s*\(|XMLHttpRequest|\/api\/tickets\/stats)/,
@@ -166,5 +207,5 @@ assert.match(
 );
 
 console.log(
-  "Incidencias stats scope OK · attribute-synced 8/22 => loaded · 22/22 => complete · zero HTTP"
+  "Incidencias stats scope OK · facetas exactas globales · agregados parciales etiquetados · zero HTTP"
 );

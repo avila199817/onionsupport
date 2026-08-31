@@ -127,6 +127,66 @@ assert.deepEqual(templateSnapshot.filterCounts, facets.counts);
 assert.equal(templateSnapshot.filterFacetsExact, true);
 assert.equal(templateSnapshot.totalGreaterThanItems, true);
 
+const serverFilteredUrgentRows = [
+  {
+    id: "URGENT-HIGH",
+    subject: "Alta reconocida localmente",
+    status: "closed",
+    priority: "high",
+  },
+  {
+    id: "URGENT-BACKEND-CLASSIFIED",
+    subject: "Urgente clasificada por el servidor",
+    status: "closed",
+    priority: "medium",
+  },
+];
+
+const localUrgentHtml = renderIncidenciasTemplate({
+  canonical: true,
+  items: serverFilteredUrgentRows,
+  total: 2,
+  filter: "urgent",
+});
+assert.doesNotMatch(
+  localUrgentHtml,
+  /URGENT-BACKEND-CLASSIFIED/,
+  "sin autoridad remota el template mantiene su filtro local de compatibilidad"
+);
+
+const serverUrgentInput = {
+  canonical: true,
+  items: serverFilteredUrgentRows,
+  total: 2,
+  filter: "urgent",
+  serverFilterApplied: true,
+  stats: {
+    total: 2,
+    open: 0,
+    closed: 2,
+    urgent: 2,
+    attachments: 0,
+    invoiceTotal: 0,
+  },
+  filterCounts: {
+    all: 22,
+    open: 3,
+    closed: 19,
+    urgent: 2,
+  },
+  filterFacetsExact: true,
+};
+const serverUrgentHtml = renderIncidenciasTemplate(serverUrgentInput);
+assert.match(serverUrgentHtml, /URGENT-HIGH/);
+assert.match(
+  serverUrgentHtml,
+  /URGENT-BACKEND-CLASSIFIED/,
+  "una lista filtrada por el servidor no puede perder filas por un segundo filtro local"
+);
+const serverUrgentSnapshot = getIncidenciasTemplateSnapshot(serverUrgentInput);
+assert.equal(serverUrgentSnapshot.serverFilterApplied, true);
+assert.equal(serverUrgentSnapshot.filteredTotal, 2);
+
 const facetSnapshot = getIncidenciasFilterFacetsSnapshot();
 assert.equal(facetSnapshot.policy.selectedFacetExcludedFromCounts, true);
 assert.equal(facetSnapshot.policy.searchDefinesFacetUniverse, true);
@@ -143,6 +203,7 @@ for (const required of [
   "getIncidenciasFacetRequestQuery",
   "buildIncidenciasFilterFacetPresentation",
   "syncActiveFacetUniverseFromItems",
+  "serverFilterApplied",
 ]) {
   assert.ok(controllerSource.includes(required), `falta integración de facetas: ${required}`);
 }
@@ -154,5 +215,5 @@ assert.match(
 );
 
 console.log(
-  "Incidencias filter facets OK · Todas 22 · Abiertas 3 · Cerradas 19 · Urgentes 2 · active filter never erases sibling counts"
+  "Incidencias filter facets OK · stable sibling counts · server-owned rows never disappear in a second local filter"
 );

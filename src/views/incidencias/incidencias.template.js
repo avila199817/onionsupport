@@ -8,7 +8,7 @@
    - Acepta items/tickets/incidencias/rows/results/data.items/etc.
 ========================================================= */
 
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v31-search-facets";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v32-server-filter-authority";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   CREATE_OPEN: "create-open",
@@ -590,8 +590,19 @@ function buildVm(input = {}) {
         : filter === "all"
           ? ""
           : filter;
-  const visibleLimit = Math.max(1, num(d.visibleLimit, DEFAULT_VISIBLE_ROWS));
-  const filtered = sortItems(items.filter((it) => itemMatchesFilter(it, filter)).filter((it) => itemMatchesSearch(it, search)), order, sortMode);
+  const visibleLimit = Math.max(
+    1,
+    num(d.visibleLimit ?? DEFAULT_VISIBLE_ROWS, DEFAULT_VISIBLE_ROWS)
+  );
+  const serverFilterApplied = d.serverFilterApplied === true;
+  const filterOwnedItems = serverFilterApplied
+    ? items
+    : items.filter((it) => itemMatchesFilter(it, filter));
+  const filtered = sortItems(
+    filterOwnedItems.filter((it) => itemMatchesSearch(it, search)),
+    order,
+    sortMode
+  );
   const visible = filtered.slice(0, visibleLimit);
   const total = remoteTotal(d, items.length);
   const nextCursor = txt(first(d.nextCursor, d.pagination?.nextCursor, ""), "");
@@ -636,6 +647,7 @@ function buildVm(input = {}) {
     incrementalError: txt(d.incrementalError, ""),
     error: txt(d.error, ""),
     filter,
+    serverFilterApplied,
     selection,
     search,
     sortOrder: order,
@@ -1043,6 +1055,7 @@ export function getIncidenciasTemplateSnapshot(input = {}) {
     continuousScroll: true,
     sortLocked: vm.sortLocked,
     filter: vm.filter,
+    serverFilterApplied: vm.serverFilterApplied,
     filterCounts: vm.filterCounts,
     filterFacetsExact: vm.filterFacetsExact,
     statsPartial: vm.statsPartial,

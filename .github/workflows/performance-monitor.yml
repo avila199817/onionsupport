@@ -99,7 +99,8 @@ jobs:
 
           for url in \
             "https://onionsupport.com/" \
-            "https://onionsupport.com/login"; do
+            "https://onionsupport.com/login" \
+            "https://onionsupport.com/reparacion-ordenadores"; do
             curl --fail --location --silent --show-error \
               --retry 4 --retry-all-errors --retry-delay 3 \
               --connect-timeout 10 --max-time 45 \
@@ -113,6 +114,7 @@ jobs:
           urls: |
             https://onionsupport.com/
             https://onionsupport.com/login
+            https://onionsupport.com/reparacion-ordenadores
           configPath: ./.github/lighthouse/${{ matrix.profile }}.json
           runs: 5
           uploadArtifacts: true

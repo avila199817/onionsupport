@@ -8,7 +8,7 @@ import {
   safeInternalHref,
 } from "../index.js";
 
-export const PUBLIC_HOME_TEMPLATE_VERSION = "public.home.template.final.productivo.2026.23-system-icon-10-10";
+export const PUBLIC_HOME_TEMPLATE_VERSION = "public.home.template.final.productivo.2026.24-seo-structure-10-10";
 
 const APP_NAME = "Onion Support";
 
@@ -48,8 +48,11 @@ const DEFAULT_INCIDENT_MESSAGE =
 const LOCAL_BUSINESS_SCHEMA = {
   "@context": "https://schema.org",
   "@type": "LocalBusiness",
+  "@id": `https://${BUSINESS.domain}/#business`,
   name: BUSINESS.name,
   url: `https://${BUSINESS.domain}/`,
+  image: `https://${BUSINESS.domain}/src/media/img/Cristian_Avila_480.webp`,
+  logo: `https://${BUSINESS.domain}/src/media/img/favicon_black_circle_128.webp`,
   email: BUSINESS.email,
   telephone: BUSINESS.phoneTel,
   areaServed: "Sant Vicenç de Castellet, Barcelona y alrededores",
@@ -132,46 +135,55 @@ const SERVICES = [
   {
     icon: "laptop",
     title: "Ordenadores y portátiles",
+    href: "/reparacion-ordenadores",
     text: "Arranque, lentitud, pantallazos, temperatura, batería, disco, periféricos y fallos de uso diario.",
   },
   {
     icon: "chip",
     title: "SSD, RAM y componentes",
+    href: "/reparacion-ordenadores",
     text: "Mejoras con sentido para ganar velocidad, estabilidad y vida útil sin cambiar de equipo.",
   },
   {
     icon: "system",
     title: "Sistema operativo",
+    href: "/soporte-informatico",
     text: "Instalación limpia, drivers, actualizaciones, configuración base y equipo listo para trabajar.",
   },
   {
     icon: "speed",
     title: "Optimización real",
+    href: "/soporte-informatico",
     text: "Inicio, almacenamiento, programas pesados y ajustes para recuperar fluidez sin humo.",
   },
   {
     icon: "wifi",
     title: "WiFi y redes",
+    href: "/redes-wifi",
     text: "Red doméstica, repetidores, conexión estable, configuración de dispositivos y pequeños entornos.",
   },
   {
     icon: "printer",
     title: "Impresoras y periféricos",
+    href: "/impresoras",
     text: "Instalación, conexión, drivers, escáner, impresoras compartidas y periféricos de trabajo.",
   },
   {
     icon: "shield",
     title: "Diagnóstico técnico",
+    href: "/soporte-informatico",
     text: "Primero claridad: qué falla, qué merece la pena reparar y qué no conviene tocar.",
   },
   {
     icon: "lock",
     title: "Seguridad y limpieza",
+    href: "/soporte-informatico",
     text: "Revisión básica, limpieza de software, permisos, navegador, programas no deseados y estabilidad.",
   },
   {
     icon: "portfolio",
     title: "Portfolio técnico",
+    href: "/soporte-empresas",
     text: "Soluciones reales para particulares, autónomos, comercios y equipos que tienen que funcionar.",
   },
 ];
@@ -272,11 +284,11 @@ function renderTrustItems() {
 
 function renderServices() {
   return SERVICES.map((service, index) => `
-    <article class="public-home-service-card" data-public-home-reveal="true" data-public-home-magnetic="true" style="--public-home-reveal-index:${escapeAttr(index)};">
+    <a class="public-home-service-card" href="${escapeAttr(service.href)}" aria-label="${escapeAttr(`${service.title} · Ver servicio`)}" data-public-home-service-link="true" data-public-home-reveal="true" data-public-home-magnetic="true" style="--public-home-reveal-index:${escapeAttr(index)};">
       <span class="public-home-service-icon" aria-hidden="true">${renderIcon(service.icon)}</span>
       <h3>${escapeHtml(service.title)}</h3>
       <p>${escapeHtml(service.text)}</p>
-    </article>
+    </a>
   `).join("");
 }
 

@@ -53,6 +53,12 @@ function v2Response(items, {
   };
 }
 
+function executableSource(source = "") {
+  return String(source)
+    .replace(/\/\*[\s\S]*?\*\//gu, "")
+    .replace(/(^|\s)\/\/.*$/gmu, "$1");
+}
+
 const originalGet = Http.get;
 const requests = [];
 let nextResponse = v2Response([]);
@@ -205,26 +211,30 @@ try {
     );
   }
 
+  const hotExecutable = executableSource(hotListSource);
+
   assert.doesNotMatch(
-    hotListSource,
+    hotExecutable,
     /setTimeout\s*\(|requestAnimationFrame\s*\(/u,
     "el hot path del search no debe programar timers ni frames para restaurar caret"
   );
 
   assert.doesNotMatch(
-    hotListSource,
+    hotExecutable,
     /input\.value\s*=/u,
     "la capa de foco no puede reescribir el value del search"
   );
 
-  const desiredIndex = hotListSource.indexOf("const desired = {");
-  const focusIndex = hotListSource.indexOf("input.focus({ preventScroll: true });");
-  assert.ok(desiredIndex >= 0 && focusIndex > desiredIndex,
-    "la selección deseada debe congelarse ANTES de focus(), porque focusin puede observar caret=0");
+  const desiredIndex = hotExecutable.indexOf("const desired = {");
+  const focusIndex = hotExecutable.indexOf("input.focus({ preventScroll: true });");
+  assert.ok(
+    desiredIndex >= 0 && focusIndex > desiredIndex,
+    "la selección deseada debe congelarse ANTES de focus(), porque focusin puede observar caret=0"
+  );
 
-  const inputHandlerStart = hotListSource.indexOf("function onInput(event)");
-  const selectHandlerStart = hotListSource.indexOf("function onSelect(event)");
-  const inputHandler = hotListSource.slice(inputHandlerStart, selectHandlerStart);
+  const inputHandlerStart = hotExecutable.indexOf("function onInput(event)");
+  const selectHandlerStart = hotExecutable.indexOf("function onSelect(event)");
+  const inputHandler = hotExecutable.slice(inputHandlerStart, selectHandlerStart);
   assert.doesNotMatch(
     inputHandler,
     /focus\s*\(|setSelectionRange|scheduleReplacementRestore/u,

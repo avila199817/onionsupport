@@ -4,18 +4,18 @@
 
    TRUTHFUL UI · DOM ENHANCEMENT · ZERO HTTP
 
-   La vista calcula hoy Abiertas/Cerradas/Urgentes, Adjuntos e Importe sobre
-   los tickets que ya están cargados en memoria. Mientras existe historial
-   remoto pendiente, esas cifras NO son globales y no deben parecerlo.
+   La vista recibe facetas exactas de Abiertas/Cerradas/Urgentes para el
+   universo de búsqueda activo. Adjuntos e Importe pueden seguir basándose
+   en los tickets cargados mientras existe historial remoto pendiente.
 
    Este enhancement no inventa métricas ni añade consultas:
-   - si total > items cargados, etiqueta esas métricas como "cargadas";
-   - cuando el feed está completo, restaura el copy canónico;
+   - conserva el copy global de las facetas cuando son exactas;
+   - etiqueta sólo las métricas agregadas parciales como "cargadas";
    - no toca valores, filtros, acciones, cursor, HTTP ni Cosmos.
 ========================================================= */
 
 export const INCIDENCIAS_STATS_SCOPE_VERSION =
-  "incidencias.stats-scope.v2.attribute-synchronized";
+  "incidencias.stats-scope.v3.facet-aware";
 
 const ROOT_SELECTOR = "[data-incidencias-scope='true']";
 
@@ -52,21 +52,32 @@ function setText(node = null, value = "") {
   return true;
 }
 
-export function getIncidenciasStatsScopePresentation({ partial = false } = {}) {
+export function getIncidenciasStatsScopePresentation({
+  partial = false,
+  facetsExact = false,
+} = {}) {
   const loaded = partial === true;
+  const exactFacets = facetsExact === true;
+  const facetKeys = new Set(["open", "closed", "urgent"]);
 
   return Object.freeze({
     scope: loaded ? "loaded" : "complete",
     partial: loaded,
+    facetsExact: exactFacets,
     cards: Object.freeze(
       Object.fromEntries(
-        Object.entries(COPY).map(([key, copy]) => [
-          key,
-          Object.freeze({
-            label: loaded ? copy.loadedLabel : copy.completeLabel,
-            text: loaded ? copy.loadedText : copy.completeText,
-          }),
-        ])
+        Object.entries(COPY).map(([key, copy]) => {
+          const useLoadedCopy =
+            loaded && !(exactFacets && facetKeys.has(key));
+          return [
+            key,
+            Object.freeze({
+              scope: useLoadedCopy ? "loaded" : "complete",
+              label: useLoadedCopy ? copy.loadedLabel : copy.completeLabel,
+              text: useLoadedCopy ? copy.loadedText : copy.completeText,
+            }),
+          ];
+        })
       )
     ),
     attachmentsSuffix: loaded ? " en cargadas" : "",
@@ -81,6 +92,7 @@ export function getIncidenciasStatsScopeSnapshot() {
       zeroHttp: true,
       zeroMetricRecalculation: true,
       loadedMetricsExplicitWhenPartial: true,
+      exactFacetCountsRemainGlobal: true,
       attributeTransitionsObserved: true,
       canonicalCopyRestoredWhenComplete: true,
       valuesRemainControllerOwned: true,
@@ -93,7 +105,11 @@ export function applyIncidenciasStatsScope(root = null) {
   if (!root?.querySelector) return false;
 
   const partial = root.dataset?.totalGreaterThanItems === "true";
-  const presentation = getIncidenciasStatsScopePresentation({ partial });
+  const facetsExact = root.dataset?.filterFacetsExact === "true";
+  const presentation = getIncidenciasStatsScopePresentation({
+    partial,
+    facetsExact,
+  });
 
   root.dataset.statsScope = presentation.scope;
 
@@ -101,7 +117,7 @@ export function applyIncidenciasStatsScope(root = null) {
     const card = root.querySelector(`[data-stat="${key}"]`);
     if (!card) continue;
 
-    card.dataset.statScope = presentation.scope;
+    card.dataset.statScope = presentation.cards[key].scope;
     setText(
       card.querySelector(".incidencias-stat-label"),
       presentation.cards[key].label
@@ -163,7 +179,10 @@ export function installIncidenciasStatsScope({
 
   observer?.observe?.(host || documentLike.body || documentLike.documentElement, {
     attributes: true,
-    attributeFilter: ["data-total-greater-than-items"],
+    attributeFilter: [
+      "data-total-greater-than-items",
+      "data-filter-facets-exact",
+    ],
     childList: true,
     subtree: true,
   });

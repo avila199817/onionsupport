@@ -594,7 +594,6 @@
   line-height: 1.4;
 }
 
-/* Legacy decorative KPI icons are not part of the canonical CRUD card. */
 :is(.clientes-stat-icon, .usuarios-stat-icon) { display: none; }
 
 /* =========================================================
@@ -999,7 +998,8 @@
 }
 
 /* =========================================================
-   TABLE FOUNDATION
+   TARGET LISTINGS — INCIDENCIAS EFFECTIVE VALUES 1:1
+   La fundación única conserva las métricas efectivas del listado padre.
 ========================================================= */
 
 :is(
@@ -1096,7 +1096,7 @@
 ) tbody td,
 :is(.clientes-cell, .usuarios-cell) {
   min-inline-size: 0;
-  padding: 11px var(--table-cell-padding-x);
+  padding: 12px var(--table-cell-padding-x);
   border-block-end: 1px solid var(--data-table-row-border);
   background: var(--table-bg);
   vertical-align: middle;
@@ -1320,7 +1320,7 @@
   display: block;
   overflow: hidden;
   border-radius: var(--radius-pill);
-  background: linear-gradient(90deg, var(--solid-subtle), var(--solid-hover), var(--solid-subtle));
+  background: linear-gradient(90deg, var(--skeleton-bg), var(--skeleton-bg-strong), var(--skeleton-bg));
   background-size: 220% 100%;
   animation: private-admin-shimmer 1.35s linear infinite;
 }

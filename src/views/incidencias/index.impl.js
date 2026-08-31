@@ -85,7 +85,7 @@ import {
 } from "./incidencias.filter-facets.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.extreme.v41-owned-attachment-delete-confirm";
+  "incidencias.index.extreme.v42-attachment-delete-focus-return";
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
@@ -6329,14 +6329,35 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
     const attachmentId =
       detailModal.attachmentDeleteConfirmId;
 
+    const focusSelector =
+      attachmentId
+        ? `[data-detail-action="${DETAIL_ACTIONS.ATTACHMENT_DELETE}"][data-attachment-id="${escapeCssAttribute(attachmentId)}"]`
+        : `[data-detail-action="${DETAIL_ACTIONS.ATTACHMENT_DELETE}"]`;
+
     clearAttachmentDeleteConfirm();
 
     renderModals({
       immediate: true,
-      focusSelector:
-        attachmentId
-          ? `[data-detail-action="${DETAIL_ACTIONS.ATTACHMENT_DELETE}"][data-attachment-id="${escapeCssAttribute(attachmentId)}"]`
-          : `[data-detail-action="${DETAIL_ACTIONS.ATTACHMENT_DELETE}"]`,
+    });
+
+    /*
+       El overlay y la lista de adjuntos se reemplazan en el mismo evento.
+       Restaurar en el siguiente frame garantiza que el botón definitivo ya
+       está conectado y evita que el foco caiga en document.body.
+    */
+    nextFrame(() => {
+      if (
+        destroyed ||
+        !detailModal.open ||
+        detailModal.attachmentDeleteConfirmOpen
+      ) {
+        return;
+      }
+
+      focusAfterRender(
+        focusSelector,
+        modalHost
+      );
     });
 
     return true;

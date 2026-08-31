@@ -23,7 +23,7 @@ import {
 } from "../incidencias-avatar-fallback/index.js";
 
 export const INCIDENCIAS_FOLLOWUP_AVATARS_VERSION =
-  "incidencias.followup-avatars.v3.universal-initials";
+  "incidencias.followup-avatars.v4.canonical-visual";
 
 const MODAL_SELECTOR =
   "[data-incidencias-modal-root='true']";
@@ -60,6 +60,12 @@ const AVATAR_IMAGE_CLASS =
 
 const AVATAR_FALLBACK_CLASS =
   "incidencias-modal-description-comment-avatar-fallback";
+
+const CANONICAL_AVATAR_FRAME_CLASS =
+  "ui-detail-modal-avatar-frame";
+
+const CANONICAL_AVATAR_FALLBACK_CLASS =
+  "ui-detail-modal-avatar-fallback";
 
 const MOUNT_KEY =
   "__ONION_INCIDENCIAS_FOLLOWUP_AVATARS__";
@@ -261,13 +267,15 @@ function createAvatar(head = null, profile = null, authorText = "") {
     : avatarToneFromIdentity(profile?.email || profile?.name || authorText);
 
   const avatar = document.createElement("span");
-  avatar.className = AVATAR_CLASS;
+  avatar.className =
+    `${AVATAR_CLASS} ${CANONICAL_AVATAR_FRAME_CLASS}`;
   avatar.setAttribute("aria-hidden", "true");
   avatar.dataset.followupAvatar = "true";
   avatar.dataset.avatarTone = String(tone);
 
   const fallback = document.createElement("span");
-  fallback.className = AVATAR_FALLBACK_CLASS;
+  fallback.className =
+    `${AVATAR_FALLBACK_CLASS} ${CANONICAL_AVATAR_FALLBACK_CLASS}`;
   fallback.textContent = avatarInitials(authorText);
   avatar.appendChild(fallback);
 
@@ -543,7 +551,7 @@ export function mountIncidenciasFollowupAvatars() {
     observerActive,
     target: "Seguimiento",
     selector: COMMENT_HEAD_SELECTOR,
-    presentation: "css-colocated-universal-initials",
+    presentation: "shared-canonical-visual",
     mountedAt: new Date().toISOString(),
   });
 

@@ -640,8 +640,16 @@ animation: none;
 .ui-detail-modal-meta-card,
 .ui-detail-modal-description-section,
 .ui-detail-modal-contact-section,
-.ui-detail-modal-history-section {
+.ui-detail-modal-history-section,
+.ui-detail-modal-avatar-frame {
 forced-color-adjust: auto;
+}
+
+.ui-detail-modal-avatar-frame {
+border: 1px solid CanvasText;
+  background: Canvas;
+  color: CanvasText;
+  box-shadow: none;
 }
 }
 

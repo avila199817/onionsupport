@@ -152,6 +152,7 @@ node .github/scripts/home_runtime_state_contract.mjs
 node .github/scripts/home_view_runtime_context_contract.mjs
 node .github/scripts/navigation_performance_contract.mjs
 node .github/scripts/incidencias_detail_request_contract.mjs
+node .github/scripts/incidencias_detail_comments_visibility_contract.mjs
 node .github/scripts/incidencias_hot_list_contract.mjs
 node .github/scripts/incidencias_list_response_v2_contract.mjs
 node .github/scripts/facturas_document_flow_contract.mjs

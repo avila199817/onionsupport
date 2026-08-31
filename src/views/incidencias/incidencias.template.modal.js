@@ -29,7 +29,7 @@ export {
 };
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.extreme.v36.truthful-bounded-windows";
+  "incidencias.template.modal.extreme.v37-owned-attachment-delete-confirm";
 
 export const INCIDENCIAS_DETAIL_WINDOW_UI_VERSION =
   "incidencias.detail-window-ui.v1";

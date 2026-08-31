@@ -8,7 +8,7 @@ import {
   safeInternalHref,
 } from "../index.js";
 
-export const PUBLIC_HOME_TEMPLATE_VERSION = "public.home.template.final.productivo.2026.24-seo-structure-10-10";
+export const PUBLIC_HOME_TEMPLATE_VERSION = "public.home.template.final.productivo.2026.25-login-anchor-canonical";
 
 const APP_NAME = "Onion Support";
 
@@ -335,7 +335,7 @@ function renderHeader() {
         <nav class="public-home-nav-panel" id="public-home-nav-panel" aria-label="Navegación principal" data-public-home-nav-panel="true">
           <div class="public-home-nav-menu" data-public-home-menu="true">${renderNavLinks()}</div>
           <div class="public-home-nav-actions">
-            <a class="public-home-login-link" href="${escapeAttr(loginHref)}" data-spa="true" data-router-link="true" data-route="${escapeAttr(loginHref)}" data-href="${escapeAttr(loginHref)}" data-public-home-login="true">Panel cliente</a>
+            <a class="public-home-login-link" href="${escapeAttr(loginHref)}" data-spa="true" data-router-link="true" data-route="${escapeAttr(loginHref)}" data-href="${escapeAttr(loginHref)}" data-public-home-login="true">Iniciar sesión</a>
             <a class="public-home-nav-cta" href="${escapeAttr(whatsappHref())}" target="_blank" rel="noopener noreferrer" data-public-home-cta="true">
               ${renderIcon("whatsapp")}<span>Solicitar diagnóstico</span>
             </a>
@@ -550,7 +550,7 @@ function renderFooter() {
           <a href="#precios" data-public-home-scroll-link="true">Precios</a>
           <a href="#contacto" data-public-home-scroll-link="true">Contacto</a>
           <a href="#faq" data-public-home-scroll-link="true">FAQ</a>
-          <a href="${escapeAttr(loginHref)}" data-spa="true" data-router-link="true" data-route="${escapeAttr(loginHref)}" data-public-home-login="true">Panel cliente</a>
+          <a href="${escapeAttr(loginHref)}" data-spa="true" data-router-link="true" data-route="${escapeAttr(loginHref)}" data-public-home-login="true">Iniciar sesión</a>
         </div>
         <div class="public-home-footer-contact">
           <a href="${escapeAttr(whatsappHref())}" target="_blank" rel="noopener noreferrer" data-public-home-cta="true">${renderIcon("whatsapp")}<span>Solicitar diagnóstico</span></a>

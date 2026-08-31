@@ -227,6 +227,10 @@ def main() -> int:
     require(errors, 'data-public-home-service-link="true"' in home_template, "Las tarjetas de servicio deben ser enlaces HTML rastreables")
     require(errors, '"@id": `https://${BUSINESS.domain}/#business`' in home_template, "El LocalBusiness runtime debe reutilizar el @id canónico")
     require(errors, '"publisher": { "@id": "https://onionsupport.com/#business" }' in index, "El WebSite raíz debe apuntar al LocalBusiness canónico")
+    canonical_login_anchor = 'data-public-home-login="true">Iniciar sesión</a>'
+    require(errors, home_template.count(canonical_login_anchor) == 2, "La landing debe nombrar /login como Iniciar sesión en header y footer")
+    require(errors, 'data-public-home-login="true">Panel cliente</a>' not in home_template, "La landing no puede reintroducir Panel cliente como anchor de /login")
+    require(errors, '<a href="/login">Iniciar sesión</a>' in index, "El fallback raíz debe conservar Iniciar sesión como anchor de /login")
     for relative, (href, canonical) in service_hierarchy.items():
         require(errors, f'href: "{href}"' in home_template, f"La landing debe enlazar semánticamente {href}")
         source = read(relative)
@@ -234,6 +238,9 @@ def main() -> int:
         require(errors, '"@type": "BreadcrumbList"' in source, f"{relative} debe declarar BreadcrumbList")
         require(errors, f'"item": "{canonical}"' in source, f"{relative} debe cerrar el breadcrumb sobre su canonical")
         require(errors, 'itemid="https://onionsupport.com/#business"' in source, f"{relative} debe reutilizar la identidad canónica del proveedor")
+        login_anchor = '<a href="/login">Iniciar sesión</a>'
+        require(errors, source.count(login_anchor) == 2, f"{relative} debe usar Iniciar sesión en sus dos enlaces a /login")
+        require(errors, "Panel cliente" not in source and "Acceso al panel cliente" not in source, f"{relative} no puede usar anchors alternativos para /login")
 
     for module_path in PUBLIC_ENHANCEMENTS:
         require(

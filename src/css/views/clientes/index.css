@@ -17,6 +17,12 @@
   --cli-amount-col: 13%;
 }
 
+.clientes-history-subtitle:focus-visible {
+  border-radius: var(--radius-xs);
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .clientes-table { min-inline-size: var(--cli-table-min); }
 .clientes-col--main { inline-size: var(--cli-main-col); }
 .clientes-col--status { inline-size: var(--cli-status-col); }
@@ -304,6 +310,14 @@
   flex-wrap: wrap;
   border-color: var(--border-warning);
   background: var(--warning-bg);
+}
+
+@media (forced-colors: active) {
+  .clientes-history-subtitle:focus-visible {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
+    box-shadow: none;
+  }
 }
 
 @media print {

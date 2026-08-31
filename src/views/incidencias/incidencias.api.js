@@ -13,7 +13,9 @@
    - conservar la cancelación del caller que originó la request;
    - no deduplicar refreshes explícitos `force=true`;
    - resolver filtros/search de la primera página desde memoria SÓLO cuando
-     el universo completo está demostrado (sin cursor y total === items).
+     el universo completo está demostrado (sin cursor y total === items);
+   - hacer que KPI/pill/filtro Urgentes compartan exactamente la prioridad
+     productiva `high` que consulta el backend.
 ========================================================= */
 
 "use strict";
@@ -24,6 +26,13 @@ import {
   createDetailIntegrityLoader,
   inspectIncidenciaDetailIntegrity,
 } from "./incidencias.detail-integrity.js";
+import {
+  INCIDENCIAS_PRIORITY_POLICY_VERSION,
+  INCIDENCIAS_URGENT_FACET_SERVER_PRIORITY,
+  isIncidenciasUrgentFacetItem,
+  matchesIncidenciasPriorityQuery,
+  getIncidenciasPriorityPolicySnapshot,
+} from "./incidencias.priority-policy.js";
 
 export * from "./incidencias.api.impl.js";
 export {
@@ -31,12 +40,22 @@ export {
   createDetailIntegrityLoader,
   inspectIncidenciaDetailIntegrity,
 } from "./incidencias.detail-integrity.js";
+export {
+  INCIDENCIAS_PRIORITY_POLICY_VERSION,
+  INCIDENCIAS_URGENT_FACET_SERVER_PRIORITY,
+  normalizeIncidenciasPriorityKey,
+  incidenciaPriorityValue,
+  isIncidenciasUrgentFacetPriority,
+  isIncidenciasUrgentFacetItem,
+  matchesIncidenciasPriorityQuery,
+  getIncidenciasPriorityPolicySnapshot,
+} from "./incidencias.priority-policy.js";
 
 export const INCIDENCIAS_DETAIL_REQUEST_COORDINATOR_VERSION =
   "incidencias.detail-request.single-flight.v2-integrity";
 
 export const INCIDENCIAS_HOT_LIST_QUERY_VERSION =
-  "incidencias.list-query.complete-universe.v1";
+  "incidencias.list-query.complete-universe.v2-priority-truth";
 
 const HOT_LIST_REVALIDATE_MIN_INTERVAL_MS = 12000;
 
@@ -169,6 +188,16 @@ function isMainListFirstPageQuery(query = {}) {
   return !cleanKey(source.cursor) && limit >= canonicalLimit;
 }
 
+function isFacetCountQuery(query = {}) {
+  const source = object(query);
+  const limit = Math.max(1, Math.trunc(finiteNumber(source.limit, 0)));
+  const hasFacetPredicate =
+    Object.prototype.hasOwnProperty.call(source, "closed") ||
+    Boolean(cleanKey(source.priority));
+
+  return !cleanKey(source.cursor) && limit === 1 && hasFacetPredicate;
+}
+
 function rememberCompleteUniverse(response = {}, query = {}) {
   if (!isUnfilteredFirstPageQuery(query)) return false;
 
@@ -215,17 +244,6 @@ function itemStatus(item = {}) {
   );
 }
 
-function itemPriority(item = {}) {
-  const source = object(item);
-  return normalizeStateKey(
-    source.priority ||
-    source.prioridad ||
-    source.severity ||
-    source.priorityKey ||
-    "medium"
-  );
-}
-
 function itemMatchesClosed(item = {}, closed = null) {
   if (closed !== true && closed !== false) return true;
 
@@ -243,26 +261,7 @@ function itemMatchesClosed(item = {}, closed = null) {
 }
 
 function itemMatchesPriority(item = {}, requested = "") {
-  const queryPriority = normalizeStateKey(requested);
-  if (!queryPriority) return true;
-
-  const priority = itemPriority(item);
-
-  if (["high", "urgent", "urgente", "alta", "p1"].includes(queryPriority)) {
-    return [
-      "high",
-      "urgent",
-      "urgente",
-      "alta",
-      "critical",
-      "critica",
-      "critico",
-      "p0",
-      "p1",
-    ].includes(priority);
-  }
-
-  return priority === queryPriority;
+  return matchesIncidenciasPriorityQuery(item, requested);
 }
 
 function searchHaystack(item = {}) {
@@ -418,7 +417,16 @@ export async function loadIncidenciasPage(options = {}) {
   if (signal?.aborted) throw abortError();
 
   const query = queryFrom(source);
-  const projected = projectCompleteUniverse(query);
+  const authoritative = Boolean(
+    source.force === true ||
+    source.forceRefresh === true ||
+    source.cache === false ||
+    source.noCache === true ||
+    isFacetCountQuery(query)
+  );
+  const projected = authoritative
+    ? null
+    : projectCompleteUniverse(query);
 
   if (projected) {
     void revalidateCompleteUniverse();
@@ -428,6 +436,30 @@ export async function loadIncidenciasPage(options = {}) {
   const response = await Impl.loadIncidenciasPage(options);
   rememberCompleteUniverse(response, query);
   return response;
+}
+
+/*
+   Estadística canónica para la UI: el resto de agregados siguen delegados al
+   implementation histórico, pero `urgent` se recalcula con la MISMA política
+   de la faceta remota. De este modo el KPI nunca puede contar un documento
+   que la consulta priority=high no vaya a pintar.
+*/
+export function computeIncidenciasStats(items = undefined) {
+  const base =
+    typeof Impl.computeIncidenciasStats === "function"
+      ? Impl.computeIncidenciasStats(items)
+      : {};
+
+  if (!Array.isArray(items)) return base;
+
+  return {
+    ...base,
+    urgent: items.reduce(
+      (total, item) =>
+        total + (isIncidenciasUrgentFacetItem(item) ? 1 : 0),
+      0
+    ),
+  };
 }
 
 /* =========================================================
@@ -648,6 +680,14 @@ export function getIncidenciasApiSnapshot() {
       mutationsRehydrateAuthoritativeDetail: true,
       countArrayMismatchIsIncomplete: true,
     }),
+    priorityPolicy: Object.freeze({
+      version: INCIDENCIAS_PRIORITY_POLICY_VERSION,
+      ...getIncidenciasPriorityPolicySnapshot(),
+      urgentFacetServerPriority: INCIDENCIAS_URGENT_FACET_SERVER_PRIORITY,
+      statsUseCanonicalUrgentFacet: true,
+      facetCountsBypassLocalProjection: true,
+      forcedLoadsBypassLocalProjection: true,
+    }),
     hotListQuery: Object.freeze({
       version: INCIDENCIAS_HOT_LIST_QUERY_VERSION,
       completeUniverse: Boolean(completeUniverse),
@@ -656,6 +696,7 @@ export function getIncidenciasApiSnapshot() {
       exactProjectionOnlyWithoutCursor: true,
       paginatedDatasetsStayServerAuthoritative: true,
       mutationsInvalidateProjectionUniverse: true,
+      priorityProjectionMatchesServerFacet: true,
     }),
   });
 }
@@ -668,6 +709,7 @@ export default {
   loadIncidenciasPage,
   loadIncidenciaDetail,
   getIncidenciaByIdRequest,
+  computeIncidenciasStats,
   createIncidencia,
   updateIncidencia,
   commentIncidencia,

@@ -8,8 +8,13 @@
    normaliza sus totales; el controller conserva la autoridad HTTP.
 ========================================================= */
 
+import {
+  INCIDENCIAS_PRIORITY_POLICY_VERSION,
+  INCIDENCIAS_URGENT_FACET_SERVER_PRIORITY,
+} from "./incidencias.priority-policy.js";
+
 export const INCIDENCIAS_FILTER_FACETS_VERSION =
-  "incidencias.filter-facets.v1.search-universe";
+  "incidencias.filter-facets.v2-priority-truth";
 
 export const INCIDENCIAS_FILTER_FACET_KEYS = Object.freeze([
   "all",
@@ -52,9 +57,10 @@ export function getIncidenciasFacetFilterQuery(value = "all") {
   if (filter === "closed") return { closed: true };
 
   /*
-    La taxonomía visual agrupa high/alta dentro de Urgentes. Producción
-    persiste esas incidencias como high; consultar urgent devolvía 0 aunque
-    las cards ya las contaban como urgentes.
+    Autoridad única: la faceta visual "Urgentes" usa exactamente el mismo
+    predicado que el listado productivo. La forma literal de esta línea está
+    además protegida por el contrato histórico de paginación para demostrar
+    que página uno y cursores posteriores comparten query.
   */
   if (filter === "urgent") return { priority: "high" };
 
@@ -152,12 +158,14 @@ export function getIncidenciasFilterFacetsSnapshot() {
   return Object.freeze({
     version: INCIDENCIAS_FILTER_FACETS_VERSION,
     keys: INCIDENCIAS_FILTER_FACET_KEYS,
+    priorityPolicyVersion: INCIDENCIAS_PRIORITY_POLICY_VERSION,
     policy: Object.freeze({
       selectedFacetExcludedFromCounts: true,
       searchDefinesFacetUniverse: true,
       dateSortDoesNotChangeFacets: true,
       cacheNeutralPageQueries: true,
-      highPriorityMapsToUrgentProductFacet: true,
+      urgentFacetServerPriority: INCIDENCIAS_URGENT_FACET_SERVER_PRIORITY,
+      urgentFacetMatchesServerExactly: true,
       exactStatusCountsPreserveUniverseAggregates: true,
     }),
   });

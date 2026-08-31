@@ -286,7 +286,7 @@
 }
 
 /* =========================================================
-   DOMAIN LOADING / FEEDBACK
+   DOMAIN LOADING / CONTINUOUS SCROLL / FEEDBACK
 ========================================================= */
 
 .incidencias-spinner,
@@ -385,6 +385,42 @@
   flex: 1 1 280px;
   font-size: var(--font-sm);
   line-height: var(--line-normal);
+}
+
+.incidencias-infinite-retry {
+  appearance: none;
+  min-block-size: var(--btn-height-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 12px;
+  border: 1px solid var(--btn-secondary-border);
+  border-radius: var(--btn-radius);
+  background: var(--btn-secondary-bg);
+  color: var(--btn-secondary-text);
+  cursor: pointer;
+  font-size: var(--font-xs);
+  font-weight: var(--weight-bold);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.incidencias-infinite-retry:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--btn-secondary-bg-hover);
+  color: var(--text-strong);
+}
+
+.incidencias-infinite-retry:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.incidencias-sort-pill:disabled,
+.incidencias-sort-pill[aria-disabled="true"] {
+  cursor: not-allowed;
+  pointer-events: none;
+  opacity: .52;
 }
 
 [data-incidencias-focus-fallback="true"]:focus-visible {

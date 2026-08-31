@@ -1,0 +1,291 @@
+name: SEO 10 Content Refactor v3
+
+on:
+  push:
+    branches:
+      - seo/extreme-10-structure
+
+permissions:
+  contents: write
+
+jobs:
+  mutate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: seo/extreme-10-structure
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply SEO structure and quality contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import html as html_lib
+          import json
+          import re
+
+          ROOT = Path.cwd()
+          def read(path): return (ROOT / path).read_text(encoding="utf-8")
+          def write(path, text): (ROOT / path).write_text(text, encoding="utf-8")
+
+          # Root WebSite + canonical LocalBusiness entity graph.
+          index_path = "index.html"
+          index = read(index_path)
+          pattern = re.compile(
+              r'<script type="application/ld\+json">\s*\{\s*"@context"\s*:\s*"https://schema\.org",\s*"@type"\s*:\s*"WebSite",\s*"@id"\s*:\s*"https://onionsupport\.com/#website"[\s\S]*?</script>',
+              re.I,
+          )
+          replacement = '''<script type="application/ld+json">
+            {
+              "@context": "https://schema.org",
+              "@graph": [
+                {
+                  "@type": "WebSite",
+                  "@id": "https://onionsupport.com/#website",
+                  "url": "https://onionsupport.com/",
+                  "name": "Onion Support",
+                  "alternateName": "Onion Support · Soluciones IT",
+                  "inLanguage": "es",
+                  "publisher": { "@id": "https://onionsupport.com/#business" }
+                },
+                {
+                  "@type": "LocalBusiness",
+                  "@id": "https://onionsupport.com/#business",
+                  "name": "Onion Support",
+                  "url": "https://onionsupport.com/",
+                  "image": "https://onionsupport.com/src/media/img/Cristian_Avila_480.webp",
+                  "logo": "https://onionsupport.com/src/media/img/favicon_black_circle_128.webp",
+                  "email": "cristian@onionsupport.com",
+                  "telephone": "+34629946615",
+                  "areaServed": "Sant Vicenç de Castellet, Barcelona y alrededores",
+                  "address": {
+                    "@type": "PostalAddress",
+                    "addressLocality": "Sant Vicenç de Castellet",
+                    "postalCode": "08295",
+                    "addressRegion": "Cataluña",
+                    "addressCountry": "ES"
+                  }
+                }
+              ]
+            }
+          </script>'''
+          index, count = pattern.subn(replacement, index, count=1)
+          if count != 1: raise SystemExit(f"index WebSite schema target count={count}")
+          write(index_path, index)
+
+          # Public landing service cards become semantic internal anchors.
+          template_path = "src/views/public/home/template.js"
+          template = read(template_path)
+          old_version = 'public.home.template.final.productivo.2026.23-system-icon-10-10'
+          if old_version not in template: raise SystemExit("template version anchor missing")
+          template = template.replace(old_version, 'public.home.template.final.productivo.2026.24-seo-structure-10-10', 1)
+
+          business_pattern = re.compile(r'const LOCAL_BUSINESS_SCHEMA = \{[\s\S]*?\n\};\n\nfunction text', re.M)
+          business_replacement = '''const LOCAL_BUSINESS_SCHEMA = {
+            "@context": "https://schema.org",
+            "@type": "LocalBusiness",
+            "@id": `https://${BUSINESS.domain}/#business`,
+            name: BUSINESS.name,
+            url: `https://${BUSINESS.domain}/`,
+            image: `https://${BUSINESS.domain}/src/media/img/Cristian_Avila_480.webp`,
+            logo: `https://${BUSINESS.domain}/src/media/img/favicon_black_circle_128.webp`,
+            email: BUSINESS.email,
+            telephone: BUSINESS.phoneTel,
+            areaServed: "Sant Vicenç de Castellet, Barcelona y alrededores",
+            address: {
+              "@type": "PostalAddress",
+              addressLocality: "Sant Vicenç de Castellet",
+              postalCode: BUSINESS.postalCode,
+              addressRegion: BUSINESS.region,
+              addressCountry: "ES",
+            },
+          };
+
+          function text'''
+          template, count = business_pattern.subn(business_replacement, template, count=1)
+          if count != 1: raise SystemExit(f"runtime LocalBusiness target count={count}")
+
+          service_hrefs = {
+              "Ordenadores y portátiles": "/reparacion-ordenadores",
+              "SSD, RAM y componentes": "/reparacion-ordenadores",
+              "Sistema operativo": "/soporte-informatico",
+              "Optimización real": "/soporte-informatico",
+              "WiFi y redes": "/redes-wifi",
+              "Impresoras y periféricos": "/impresoras",
+              "Diagnóstico técnico": "/soporte-informatico",
+              "Seguridad y limpieza": "/soporte-informatico",
+              "Portfolio técnico": "/soporte-empresas",
+          }
+          for title, href in service_hrefs.items():
+              p = re.compile(rf'(title:\s*"{re.escape(title)}",\s*\n)(\s*)text:', re.M)
+              template, count = p.subn(lambda m, href=href: f'{m.group(1)}{m.group(2)}href: "{href}",\n{m.group(2)}text:', template, count=1)
+              if count != 1: raise SystemExit(f"service href target count={count}: {title}")
+
+          render_pattern = re.compile(
+              r'function renderServices\(\) \{\s*return SERVICES\.map\(\(service, index\) => `\s*<article class="public-home-service-card"[\s\S]*?</article>\s*`\)\.join\(""\);\s*\}',
+              re.M,
+          )
+          render_replacement = '''function renderServices() {
+            return SERVICES.map((service, index) => `
+              <a class="public-home-service-card" href="${escapeAttr(service.href)}" aria-label="${escapeAttr(`${service.title} · Ver servicio`)}" data-public-home-service-link="true" data-public-home-reveal="true" data-public-home-magnetic="true" style="--public-home-reveal-index:${escapeAttr(index)};">
+                <span class="public-home-service-icon" aria-hidden="true">${renderIcon(service.icon)}</span>
+                <h3>${escapeHtml(service.title)}</h3>
+                <p>${escapeHtml(service.text)}</p>
+              </a>
+            `).join("");
+          }'''
+          template, count = render_pattern.subn(render_replacement, template, count=1)
+          if count != 1: raise SystemExit(f"renderServices target count={count}")
+          write(template_path, template)
+
+          # Static service pages: explicit hierarchy and one provider identity.
+          services = {
+              "reparacion-ordenadores": "Reparación de ordenadores",
+              "soporte-informatico": "Soporte informático",
+              "redes-wifi": "WiFi y redes",
+              "impresoras": "Impresoras y periféricos",
+              "soporte-empresas": "Soporte informático para empresas",
+          }
+          for slug, label in services.items():
+              path = f"seo/{slug}.html"
+              source = read(path)
+              canonical = f"https://onionsupport.com/{slug}"
+              title_match = re.search(r"<title>(.*?)</title>", source, re.S | re.I)
+              if not title_match: raise SystemExit(f"{path}: title missing")
+              page_name = html_lib.unescape(" ".join(title_match.group(1).split()))
+              source, count = re.subn(
+                  r'<div itemprop="provider" itemscope itemtype="https://schema\.org/LocalBusiness">',
+                  '<div itemprop="provider" itemscope itemtype="https://schema.org/LocalBusiness" itemid="https://onionsupport.com/#business">',
+                  source,
+                  count=1,
+              )
+              if count != 1: raise SystemExit(f"{path}: provider target count={count}")
+              schema = {
+                  "@context": "https://schema.org",
+                  "@graph": [
+                      {
+                          "@type": "WebPage",
+                          "@id": f"{canonical}#webpage",
+                          "url": canonical,
+                          "name": page_name,
+                          "isPartOf": {"@id": "https://onionsupport.com/#website"},
+                          "about": {"@id": "https://onionsupport.com/#business"},
+                          "breadcrumb": {"@id": f"{canonical}#breadcrumb"},
+                          "inLanguage": "es",
+                      },
+                      {
+                          "@type": "BreadcrumbList",
+                          "@id": f"{canonical}#breadcrumb",
+                          "itemListElement": [
+                              {"@type": "ListItem", "position": 1, "name": "Onion Support", "item": "https://onionsupport.com/"},
+                              {"@type": "ListItem", "position": 2, "name": label, "item": canonical},
+                          ],
+                      },
+                  ],
+              }
+              json_ld = json.dumps(schema, ensure_ascii=False, indent=2).replace("<", "\\u003c")
+              block = '  <script type="application/ld+json" data-onion-schema="service-hierarchy">\n' + "\n".join("    " + line for line in json_ld.splitlines()) + "\n  </script>\n\n"
+              marker = '  <link rel="icon" href="/favicon.ico" sizes="any">'
+              if source.count(marker) != 1: raise SystemExit(f"{path}: favicon marker count={source.count(marker)}")
+              source = source.replace(marker, block + marker, 1)
+              write(path, source)
+
+          # Sitemap freshness for every changed public service page.
+          sitemap_path = "sitemap.xml"
+          write(sitemap_path, read(sitemap_path).replace("<lastmod>2026-08-25</lastmod>", "<lastmod>2026-08-31</lastmod>"))
+
+          # Stricter mobile Lighthouse warning budgets.
+          mobile_path = ".github/lighthouse/mobile.json"
+          mobile = json.loads(read(mobile_path))
+          rules = mobile["ci"]["assert"]["assertions"]
+          rules["categories:performance"][1]["minScore"] = 0.92
+          rules["first-contentful-paint"][1]["maxNumericValue"] = 1800
+          rules["largest-contentful-paint"][1]["maxNumericValue"] = 2500
+          rules["total-blocking-time"][1]["maxNumericValue"] = 300
+          write(mobile_path, json.dumps(mobile, ensure_ascii=False, indent=2) + "\n")
+
+          # Performance contract now locks the stricter budgets.
+          perf_path = ".github/scripts/performance-monitor-contract.mjs"
+          perf = read(perf_path)
+          marker = '''for (const token of [
+            "onionsupport.lighthouse-summary.v2",'''
+          hardening = '''const mobileRules = assertions(mobile);
+          const desktopRules = assertions(desktop);
+
+          assert.equal(mobileRules["categories:performance"]?.[1]?.minScore, 0.92, "mobile performance warning budget must be 0.92");
+          assert.equal(mobileRules["first-contentful-paint"]?.[1]?.maxNumericValue, 1800, "mobile FCP warning budget must be 1800ms");
+          assert.equal(mobileRules["largest-contentful-paint"]?.[1]?.maxNumericValue, 2500, "mobile LCP warning budget must be 2500ms");
+          assert.equal(mobileRules["total-blocking-time"]?.[1]?.maxNumericValue, 300, "mobile TBT warning budget must be 300ms");
+          for (const [label, metricRules] of [["mobile", mobileRules], ["desktop", desktopRules]]) {
+            assert.equal(metricRules["cumulative-layout-shift"]?.[1]?.maxNumericValue, 0.1, `${label}: CLS warning budget must stay at 0.1`);
+            assert.ok(metricRules["largest-contentful-paint"]?.[1]?.maxNumericValue <= 2500, `${label}: LCP warning budget cannot exceed 2500ms`);
+          }
+
+          for (const token of [
+            "onionsupport.lighthouse-summary.v2",'''
+          if perf.count(marker) != 1: raise SystemExit("performance contract insertion marker not unique")
+          write(perf_path, perf.replace(marker, hardening, 1))
+
+          # Canonical public-home contract locks hierarchy signals permanently.
+          public_path = ".github/scripts/public_home_integrity.py"
+          public = read(public_path)
+          marker = '''    for module_path in PUBLIC_ENHANCEMENTS:
+          '''
+          contract = '''    service_hierarchy = {
+                  "seo/reparacion-ordenadores.html": ("/reparacion-ordenadores", "https://onionsupport.com/reparacion-ordenadores"),
+                  "seo/soporte-informatico.html": ("/soporte-informatico", "https://onionsupport.com/soporte-informatico"),
+                  "seo/redes-wifi.html": ("/redes-wifi", "https://onionsupport.com/redes-wifi"),
+                  "seo/impresoras.html": ("/impresoras", "https://onionsupport.com/impresoras"),
+                  "seo/soporte-empresas.html": ("/soporte-empresas", "https://onionsupport.com/soporte-empresas"),
+              }
+              require(errors, 'data-public-home-service-link="true"' in home_template, "Las tarjetas de servicio deben ser enlaces HTML rastreables")
+              require(errors, '"@id": `https://${BUSINESS.domain}/#business`' in home_template, "El LocalBusiness runtime debe reutilizar el @id canónico")
+              require(errors, '"publisher": { "@id": "https://onionsupport.com/#business" }' in index, "El WebSite raíz debe apuntar al LocalBusiness canónico")
+              for relative, (href, canonical) in service_hierarchy.items():
+                  require(errors, f'href: "{href}"' in home_template, f"La landing debe enlazar semánticamente {href}")
+                  source = read(relative)
+                  require(errors, 'data-onion-schema="service-hierarchy"' in source, f"{relative} debe declarar jerarquía WebPage/BreadcrumbList")
+                  require(errors, '"@type": "BreadcrumbList"' in source, f"{relative} debe declarar BreadcrumbList")
+                  require(errors, f'"item": "{canonical}"' in source, f"{relative} debe cerrar el breadcrumb sobre su canonical")
+                  require(errors, 'itemid="https://onionsupport.com/#business"' in source, f"{relative} debe reutilizar la identidad canónica del proveedor")
+
+              for module_path in PUBLIC_ENHANCEMENTS:
+          '''
+          if public.count(marker) != 1: raise SystemExit("public home contract insertion marker not unique")
+          write(public_path, public.replace(marker, contract, 1))
+
+          assert 'data-public-home-service-link="true"' in read(template_path)
+          assert '"@type": "BreadcrumbList"' in read("seo/reparacion-ordenadores.html")
+          PY
+
+      - name: Run focused contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .github/scripts/performance-monitor-contract.mjs
+          python3 .github/scripts/public_home_integrity.py
+          python3 -m json.tool .github/lighthouse/mobile.json >/dev/null
+          python3 -m json.tool .github/lighthouse/desktop.json >/dev/null
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          ET.parse('sitemap.xml')
+          print('SEO 10 XML contract OK')
+          PY
+
+      - name: Commit content changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git add index.html sitemap.xml src/views/public/home/template.js seo/*.html .github/lighthouse/mobile.json .github/scripts/performance-monitor-contract.mjs .github/scripts/public_home_integrity.py
+          git diff --cached --check
+          git commit -m "seo: harden public architecture to 10/10"
+          git push origin HEAD:seo/extreme-10-structure

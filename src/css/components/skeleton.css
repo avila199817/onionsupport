@@ -39,6 +39,7 @@
   --ui-skeleton-line-strong: 14px;
   --ui-skeleton-title: 24px;
   --ui-skeleton-value: 28px;
+  --ui-skeleton-chip-sm: 20px;
   --ui-skeleton-chip: 25px;
   --ui-skeleton-control: 46px;
   --ui-skeleton-avatar: 42px;
@@ -203,14 +204,26 @@
 }
 
 /* =========================================================
-   INCIDENCIAS · IDENTITY GEOMETRY
-   El contenedor principal NO es un skeleton pintado. Sólo sus piezas internas.
+   INCIDENCIAS · REAL ROW SILHOUETTE
+
+   La fila loading conserva el mismo colgroup, padding y alineación que la fila
+   real. El contenedor principal no se pinta como un bloque: el mask dibuja la
+   silueta exacta de avatar + ID/categoría + asunto + descripción + cliente +
+   dos badges. Las longitudes variables se reciben desde la geometría local de
+   la vista y nunca cambian paint, tokens ni animación.
 ========================================================= */
 
 .incidencias-skeleton--main {
   --inc-skeleton-copy-offset: calc(var(--private-admin-avatar-size) + var(--private-admin-main-gap));
+  --inc-skeleton-id-width: 108px;
+  --inc-skeleton-category-width: 54px;
+  --inc-skeleton-subject-width: 58%;
+  --inc-skeleton-description-width: 90%;
+  --inc-skeleton-client-width: 62%;
+  --inc-skeleton-priority-width: 60px;
+  --inc-skeleton-assigned-width: 120px;
   position: relative;
-  block-size: 108px;
+  block-size: 105px;
   overflow: visible;
   border-radius: 0;
   background: none;
@@ -244,19 +257,21 @@
   inset-inline-start: var(--inc-skeleton-copy-offset);
   inline-size: max(0px, calc(100% - var(--inc-skeleton-copy-offset)));
   -webkit-mask:
-    linear-gradient(#000 0 0) 0 0 / 28% 10px no-repeat,
-    linear-gradient(#000 0 0) 36% 0 / 22% 20px no-repeat,
-    linear-gradient(#000 0 0) 0 27px / 88% 13px no-repeat,
-    linear-gradient(#000 0 0) 0 48px / 74% 10px no-repeat,
-    linear-gradient(#000 0 0) 0 66px / 64% 10px no-repeat,
-    linear-gradient(#000 0 0) 0 83px / 34% 25px no-repeat;
+    linear-gradient(#000 0 0) 0 6px / var(--inc-skeleton-id-width) var(--ui-skeleton-line-sm) no-repeat,
+    linear-gradient(#000 0 0) 116px 0 / var(--inc-skeleton-category-width) var(--ui-skeleton-chip-sm) no-repeat,
+    linear-gradient(#000 0 0) 0 27px / var(--inc-skeleton-subject-width) var(--ui-skeleton-line-strong) no-repeat,
+    linear-gradient(#000 0 0) 0 50px / var(--inc-skeleton-description-width) var(--ui-skeleton-line-sm) no-repeat,
+    linear-gradient(#000 0 0) 0 68px / var(--inc-skeleton-client-width) var(--ui-skeleton-line-sm) no-repeat,
+    linear-gradient(#000 0 0) 0 80px / var(--inc-skeleton-priority-width) var(--ui-skeleton-chip) no-repeat,
+    linear-gradient(#000 0 0) 68px 80px / var(--inc-skeleton-assigned-width) var(--ui-skeleton-chip) no-repeat;
   mask:
-    linear-gradient(#000 0 0) 0 0 / 28% 10px no-repeat,
-    linear-gradient(#000 0 0) 36% 0 / 22% 20px no-repeat,
-    linear-gradient(#000 0 0) 0 27px / 88% 13px no-repeat,
-    linear-gradient(#000 0 0) 0 48px / 74% 10px no-repeat,
-    linear-gradient(#000 0 0) 0 66px / 64% 10px no-repeat,
-    linear-gradient(#000 0 0) 0 83px / 34% 25px no-repeat;
+    linear-gradient(#000 0 0) 0 6px / var(--inc-skeleton-id-width) var(--ui-skeleton-line-sm) no-repeat,
+    linear-gradient(#000 0 0) 116px 0 / var(--inc-skeleton-category-width) var(--ui-skeleton-chip-sm) no-repeat,
+    linear-gradient(#000 0 0) 0 27px / var(--inc-skeleton-subject-width) var(--ui-skeleton-line-strong) no-repeat,
+    linear-gradient(#000 0 0) 0 50px / var(--inc-skeleton-description-width) var(--ui-skeleton-line-sm) no-repeat,
+    linear-gradient(#000 0 0) 0 68px / var(--inc-skeleton-client-width) var(--ui-skeleton-line-sm) no-repeat,
+    linear-gradient(#000 0 0) 0 80px / var(--inc-skeleton-priority-width) var(--ui-skeleton-chip) no-repeat,
+    linear-gradient(#000 0 0) 68px 80px / var(--inc-skeleton-assigned-width) var(--ui-skeleton-chip) no-repeat;
 }
 
 /* =========================================================

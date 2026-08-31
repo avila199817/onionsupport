@@ -1,0 +1,309 @@
+/* =========================================================
+   ONION SUPPORT — PUBLIC SUPPORT EXTREME
+   Archivo: /src/css/views/public/support-extreme.css
+
+   Capa progresiva del intake público:
+   - autoridad de identidad visible sin revelar existencia de cuentas;
+   - alerts/status diferenciados por severidad;
+   - reintento transitorio legible;
+   - remate responsive que elimina solapes del técnico en desktop estrecho.
+========================================================= */
+
+@layer auth {
+
+/* =========================================================
+   1. CONTACT AUTHORITY
+========================================================= */
+
+.public-home .public-support-contact-authority {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 13px;
+  align-items: center;
+  margin: -4px 0 0;
+  padding: 13px 15px;
+  overflow: hidden;
+  border: 1px solid rgb(69 205 255 / .19);
+  border-radius: 16px;
+  color: #9fb5cb;
+  background:
+    radial-gradient(circle at 0% 0%, rgb(61 214 255 / .10), transparent 42%),
+    linear-gradient(145deg, rgb(17 53 84 / .31), rgb(4 18 34 / .58));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .045),
+    0 12px 30px rgb(0 0 0 / .10);
+}
+
+.public-home .public-support-contact-authority::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  inline-size: 2px;
+  background: linear-gradient(180deg, #5ee8ff, #177cff);
+  box-shadow: 0 0 18px rgb(52 212 255 / .34);
+}
+
+.public-home .public-support-contact-authority-icon {
+  display: grid;
+  place-items: center;
+  inline-size: 40px;
+  block-size: 40px;
+  border: 1px solid rgb(87 219 255 / .28);
+  border-radius: 13px;
+  color: #83eaff;
+  background:
+    radial-gradient(circle at 32% 18%, rgb(255 255 255 / .14), transparent 40%),
+    linear-gradient(145deg, rgb(23 148 226 / .16), rgb(20 91 214 / .09));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .055),
+    0 0 22px rgb(31 167 255 / .08);
+}
+
+.public-home .public-support-contact-authority-icon svg {
+  inline-size: 22px;
+  block-size: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.public-home .public-support-contact-authority strong {
+  display: block;
+  margin-block-end: 3px;
+  color: #eff9ff;
+  font-size: 12px;
+  font-weight: 920;
+  line-height: 1.3;
+  letter-spacing: -.01em;
+}
+
+.public-home .public-support-contact-authority p {
+  margin: 0;
+  color: #8ca4bc;
+  font-size: 10.5px;
+  font-weight: 650;
+  line-height: 1.55;
+}
+
+/* =========================================================
+   2. FEEDBACK / ALERTS
+========================================================= */
+
+.public-home .public-support-status[data-public-support-feedback]:not([hidden]) {
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .035),
+    0 12px 30px rgb(0 0 0 / .10);
+}
+
+.public-home .public-support-status[data-public-support-feedback]::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  inline-size: 2px;
+  border-radius: inherit;
+  background: rgb(100 214 255 / .48);
+  opacity: .86;
+}
+
+.public-home .public-support-status[data-status="success"] {
+  color: #c9f7db;
+  border-color: rgb(58 213 123 / .27);
+  background:
+    linear-gradient(180deg, rgb(58 213 123 / .06), transparent),
+    rgb(28 122 76 / .085);
+}
+
+.public-home .public-support-status[data-status="success"]::after {
+  background: #3dd783;
+  box-shadow: 0 0 16px rgb(61 215 131 / .30);
+}
+
+.public-home .public-support-status[data-status="info"] {
+  color: #b8d9f4;
+  border-color: rgb(84 207 255 / .18);
+  background:
+    linear-gradient(180deg, rgb(54 189 255 / .045), transparent),
+    rgb(6 31 55 / .70);
+}
+
+.public-home .public-support-status[data-status="warning"] {
+  color: #ffe7ae;
+  border-color: rgb(255 190 82 / .30);
+  background:
+    radial-gradient(circle at 0% 50%, rgb(255 187 65 / .08), transparent 34%),
+    linear-gradient(180deg, rgb(255 184 67 / .055), transparent),
+    rgb(54 34 8 / .34);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .035),
+    0 14px 34px rgb(0 0 0 / .12),
+    0 0 28px rgb(255 176 58 / .035);
+}
+
+.public-home .public-support-status[data-status="warning"]::before {
+  content: "!";
+  color: #ffd98c;
+  border-color: rgb(255 199 104 / .42);
+  background: rgb(255 183 62 / .055);
+}
+
+.public-home .public-support-status[data-status="warning"]::after {
+  background: #ffbc4d;
+  box-shadow: 0 0 18px rgb(255 188 77 / .30);
+}
+
+.public-home .public-support-status[data-status="error"] {
+  color: #ffc3cc;
+  border-color: rgb(255 92 117 / .31);
+  background:
+    radial-gradient(circle at 0% 50%, rgb(255 92 117 / .08), transparent 34%),
+    rgb(255 92 117 / .07);
+}
+
+.public-home .public-support-status[data-status="error"]::after {
+  background: #ff667e;
+  box-shadow: 0 0 18px rgb(255 102 126 / .25);
+}
+
+.public-home .public-support-form[data-public-support-retry="true"] .public-support-submit:not(:disabled) {
+  border-color: rgb(111 218 255 / .27);
+  box-shadow:
+    0 22px 54px rgb(15 111 255 / .24),
+    0 0 0 1px rgb(85 218 255 / .035),
+    inset 0 1px 0 rgb(255 255 255 / .28);
+}
+
+/* =========================================================
+   3. MID-DESKTOP COLLISION GUARD
+========================================================= */
+
+@media (min-width: 981px) and (max-width: 1320px) {
+  .public-home .public-support-intro {
+    min-block-size: 0;
+  }
+
+  .public-home .public-support-flow,
+  .public-home .public-support-privacy {
+    max-inline-size: none;
+  }
+
+  .public-home .public-support-person {
+    position: relative;
+    inset: auto;
+    justify-self: center;
+    inline-size: min(260px, 74%);
+    margin: 2px auto -2px;
+  }
+
+  .public-home .public-support-person-card {
+    min-inline-size: 72%;
+    margin-block-start: -25px;
+  }
+}
+
+/* =========================================================
+   4. COMPACT / MOBILE
+========================================================= */
+
+@media (max-width: 720px) {
+  .public-home .public-support-contact-authority {
+    grid-template-columns: 38px minmax(0, 1fr);
+    gap: 11px;
+    padding: 12px 13px;
+    border-radius: 14px;
+  }
+
+  .public-home .public-support-contact-authority-icon {
+    inline-size: 36px;
+    block-size: 36px;
+    border-radius: 12px;
+  }
+
+  .public-home .public-support-contact-authority-icon svg {
+    inline-size: 20px;
+    block-size: 20px;
+  }
+}
+
+@media (max-width: 460px) {
+  .public-home .public-support-contact-authority {
+    align-items: start;
+  }
+
+  .public-home .public-support-contact-authority p {
+    font-size: 10px;
+  }
+}
+
+/* =========================================================
+   5. LIGHT THEME
+========================================================= */
+
+html:is([data-theme="light"], .theme-light) .public-home .public-support-contact-authority {
+  color: var(--public-home-text-soft);
+  border-color: rgb(19 148 255 / .17);
+  background:
+    radial-gradient(circle at 0% 0%, rgb(52 212 255 / .09), transparent 44%),
+    linear-gradient(145deg, rgb(247 252 255 / .98), rgb(235 245 253 / .92));
+  box-shadow:
+    inset 0 1px 0 #ffffff,
+    0 10px 25px rgb(31 67 103 / .08);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home .public-support-contact-authority strong {
+  color: var(--public-home-text-strong);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home .public-support-contact-authority p {
+  color: var(--public-home-text-muted);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home .public-support-contact-authority-icon {
+  color: #0877c7;
+  border-color: rgb(19 148 255 / .20);
+  background:
+    linear-gradient(145deg, rgb(233 248 255 / .98), rgb(240 246 255 / .92));
+  box-shadow:
+    inset 0 1px 0 #ffffff,
+    0 8px 18px rgb(19 148 255 / .08);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home .public-support-status[data-status="warning"] {
+  color: #8a5100;
+  border-color: rgb(217 137 16 / .25);
+  background:
+    radial-gradient(circle at 0% 50%, rgb(245 158 11 / .08), transparent 36%),
+    rgb(245 158 11 / .065);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home .public-support-status[data-status="info"] {
+  color: #315574;
+  border-color: rgb(19 148 255 / .15);
+  background: rgb(19 148 255 / .045);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home .public-support-status[data-status="success"] {
+  color: #166534;
+  border-color: rgb(22 163 74 / .22);
+  background: rgb(22 163 74 / .07);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home .public-support-status[data-status="error"] {
+  color: #b4233b;
+  border-color: rgb(220 38 68 / .22);
+  background: rgb(220 38 68 / .065);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .public-home .public-support-contact-authority,
+  .public-home .public-support-status,
+  .public-home .public-support-submit {
+    transition: none;
+  }
+}
+
+}

@@ -17,7 +17,7 @@
 ========================================================= */
 
 export const APP_ENHANCEMENTS_VERSION =
-  "app.enhancements.v19-incidencias-followup-avatars";
+  "app.enhancements.v20-public-support-extreme";
 
 const PRE_ROUTER = Object.freeze([
   Object.freeze({
@@ -91,6 +91,11 @@ const POST_ROUTER = Object.freeze([
     key: "public-support",
     scope: "public",
     load: () => import("../features/public-support/index.js"),
+  }),
+  Object.freeze({
+    key: "public-support-extreme",
+    scope: "public",
+    load: () => import("../features/public-support-extreme/index.js"),
   }),
   Object.freeze({
     key: "public-postal-autofill",

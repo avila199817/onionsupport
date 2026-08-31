@@ -38,7 +38,7 @@ import {
 } from "./incidencias.options.js";
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.extreme.v35.final-polish";
+  "incidencias.template.modal.extreme.v36-owned-attachment-delete-confirm";
 
 export const DETAIL_ACTIONS = Object.freeze({
   CLOSE: "detail-close",
@@ -60,6 +60,8 @@ export const DETAIL_ACTIONS = Object.freeze({
   ATTACHMENT_OPEN: "detail-attachment-open",
   ATTACHMENT_DOWNLOAD: "detail-attachment-download",
   ATTACHMENT_DELETE: "detail-attachment-delete",
+  ATTACHMENT_DELETE_CONFIRM: "detail-attachment-delete-confirm",
+  ATTACHMENT_DELETE_CANCEL: "detail-attachment-delete-cancel",
 
   PREVIEW_CLOSE: "detail-preview-close",
   PREVIEW_DOWNLOAD: "detail-preview-download",
@@ -2436,6 +2438,17 @@ function buildVm(input = {}) {
         )
       : null;
 
+  const attachmentDeleteConfirmId =
+    cleanText(
+      data.attachmentDeleteConfirmId,
+      ""
+    );
+
+  const attachmentDeleteConfirmOpen =
+    data.admin === true &&
+    data.attachmentDeleteConfirmOpen === true &&
+    Boolean(attachmentDeleteConfirmId);
+
   return {
     open:
       data.open === true &&
@@ -2456,6 +2469,15 @@ function buildVm(input = {}) {
 
     discardConfirmOpen:
       data.discardConfirmOpen === true,
+
+    attachmentDeleteConfirmOpen,
+    attachmentDeleteConfirmId,
+
+    attachmentDeleteConfirmName:
+      cleanText(
+        data.attachmentDeleteConfirmName,
+        "este adjunto"
+      ).slice(0, 160),
 
     commentDraft,
     pendingFiles,
@@ -3047,7 +3069,10 @@ function renderFeedbackBox(
 }
 
 
-function renderCloseConfirmation(vm = {}) {
+function renderDetailConfirmation(vm = {}) {
+  const attachmentDelete =
+    vm.attachmentDeleteConfirmOpen === true;
+
   const discard =
     vm.discardConfirmOpen === true;
 
@@ -3055,60 +3080,93 @@ function renderCloseConfirmation(vm = {}) {
     vm.closeConfirmOpen === true;
 
   if (
+    !attachmentDelete &&
     !discard &&
     !closeTicket
   ) {
     return "";
   }
 
+  const kind =
+    attachmentDelete
+      ? "attachment-delete"
+      : discard
+        ? "discard"
+        : "ticket-close";
+
   const eyebrow =
-    discard
-      ? "Cambios sin guardar"
-      : "Confirmar cierre";
+    attachmentDelete
+      ? "Eliminar adjunto"
+      : discard
+        ? "Cambios sin guardar"
+        : "Confirmar cierre";
 
   const title =
-    discard
-      ? "¿Descartar los cambios?"
-      : "¿Cerrar esta incidencia?";
+    attachmentDelete
+      ? "¿Eliminar este archivo?"
+      : discard
+        ? "¿Descartar los cambios?"
+        : "¿Cerrar esta incidencia?";
 
   const description =
-    discard
-      ? "Si cierras ahora, perderás el comentario, los archivos seleccionados o los cambios de gestión que todavía no se hayan guardado."
-      : "La incidencia pasará a estado cerrado. Podrás volver a abrirla más adelante enviando una nueva actualización.";
+    attachmentDelete
+      ? "Se quitará de la incidencia y del almacenamiento. Esta acción no se puede deshacer."
+      : discard
+        ? "Si cierras ahora, perderás el comentario, los archivos seleccionados o los cambios de gestión que todavía no se hayan guardado."
+        : "La incidencia pasará a estado cerrado. Podrás volver a abrirla más adelante enviando una nueva actualización.";
 
   const cancelAction =
-    discard
-      ? DETAIL_ACTIONS.DISCARD_CLOSE_CANCEL
-      : DETAIL_ACTIONS.TICKET_CLOSE_CANCEL;
+    attachmentDelete
+      ? DETAIL_ACTIONS.ATTACHMENT_DELETE_CANCEL
+      : discard
+        ? DETAIL_ACTIONS.DISCARD_CLOSE_CANCEL
+        : DETAIL_ACTIONS.TICKET_CLOSE_CANCEL;
 
   const confirmAction =
-    discard
-      ? DETAIL_ACTIONS.DISCARD_CLOSE_CONFIRM
-      : DETAIL_ACTIONS.TICKET_CLOSE_CONFIRM;
+    attachmentDelete
+      ? DETAIL_ACTIONS.ATTACHMENT_DELETE_CONFIRM
+      : discard
+        ? DETAIL_ACTIONS.DISCARD_CLOSE_CONFIRM
+        : DETAIL_ACTIONS.TICKET_CLOSE_CONFIRM;
 
   const cancelLabel =
-    discard
-      ? "Seguir editando"
-      : "Cancelar";
+    attachmentDelete
+      ? "Conservar archivo"
+      : discard
+        ? "Seguir editando"
+        : "Cancelar";
 
   const confirmLabel =
-    discard
-      ? "Sí, descartar y cerrar"
-      : "Sí, cerrar incidencia";
+    attachmentDelete
+      ? "Sí, eliminar adjunto"
+      : discard
+        ? "Sí, descartar y cerrar"
+        : "Sí, cerrar incidencia";
+
+  const titleId =
+    `incidencias-${kind}-confirm-title`;
+
+  const descriptionId =
+    `incidencias-${kind}-confirm-description`;
+
+  const filenameId =
+    "incidencias-attachment-delete-confirm-filename";
 
   return `
     <div
       class="incidencias-modal-confirm-overlay"
+      data-detail-confirm-overlay="true"
       data-detail-close-confirm-overlay="true"
-      data-confirm-kind="${discard ? "discard" : "ticket-close"}"
+      data-confirm-kind="${kind}"
     >
       <section
         class="incidencias-modal-confirm-dialog"
+        data-detail-confirm-dialog="true"
         data-detail-close-confirm-dialog="true"
         role="alertdialog"
         aria-modal="true"
-        aria-labelledby="incidencias-close-confirm-title"
-        aria-describedby="incidencias-close-confirm-description"
+        aria-labelledby="${titleId}"
+        aria-describedby="${descriptionId}${attachmentDelete ? ` ${filenameId}` : ""}"
         tabindex="-1"
       >
         <div class="incidencias-modal-confirm-icon" aria-hidden="true">
@@ -3120,16 +3178,32 @@ function renderCloseConfirmation(vm = {}) {
             ${escapeHtml(eyebrow)}
           </span>
 
-          <h3 id="incidencias-close-confirm-title">
+          <h3 id="${titleId}">
             ${escapeHtml(title)}
           </h3>
 
-          <p id="incidencias-close-confirm-description">
+          <p id="${descriptionId}">
             ${escapeHtml(description)}
           </p>
 
           ${
-            !discard && vm.hasDraft
+            attachmentDelete
+              ? `<div
+                  id="${filenameId}"
+                  class="incidencias-modal-confirm-filename"
+                  data-detail-attachment-delete-name="true"
+                  title="${attr(vm.attachmentDeleteConfirmName)}"
+                >
+                  <span aria-hidden="true">${icon("trash")}</span>
+                  <strong>${escapeHtml(vm.attachmentDeleteConfirmName)}</strong>
+                </div>`
+              : ""
+          }
+
+          ${
+            !attachmentDelete &&
+            !discard &&
+            vm.hasDraft
               ? `<div class="incidencias-modal-confirm-warning" role="note">Tienes cambios sin guardar. Si confirmas el cierre, se descartarán cuando se cierre esta ventana.</div>`
               : ""
           }
@@ -3150,7 +3224,7 @@ function renderCloseConfirmation(vm = {}) {
             <span
               class="incidencias-modal-confirm-btn-icon"
               aria-hidden="true"
-            >${icon("check")}</span>
+            >${icon(attachmentDelete ? "trash" : "check")}</span>
 
             <span>${escapeHtml(confirmLabel)}</span>
           </button>
@@ -4453,6 +4527,7 @@ export function renderIncidenciasDetailModal(
       data-operation="${attr(vm.operation)}"
       data-close-confirm-open="${vm.closeConfirmOpen ? "true" : "false"}"
       data-discard-confirm-open="${vm.discardConfirmOpen ? "true" : "false"}"
+      data-attachment-delete-confirm-open="${vm.attachmentDeleteConfirmOpen ? "true" : "false"}"
       data-has-draft="${vm.hasDraft ? "true" : "false"}"
       data-requires-reopen="${vm.requiresReopen ? "true" : "false"}"
       data-attachment-view-policy="signed-view-only"
@@ -4477,14 +4552,16 @@ export function renderIncidenciasDetailModal(
           tabindex="-1"
           data-incidencias-modal-panel="true"
         >
-          ${renderCloseConfirmation(vm)}
+          ${renderDetailConfirmation(vm)}
 
           ${
             vm.submitting
               ? renderLoadingOverlay(
                   vm.operation === "close"
                     ? "Cerrando incidencia..."
-                    : "Actualizando incidencia..."
+                    : vm.operation === "delete-attachment"
+                      ? "Eliminando adjunto..."
+                      : "Actualizando incidencia..."
                 )
               : ""
           }
@@ -4831,6 +4908,15 @@ export function getDetailTemplateSnapshot() {
         true,
 
       adminAttachmentDelete:
+        true,
+
+      applicationOwnedAttachmentDeleteConfirmation:
+        true,
+
+      nativeBrowserAttachmentConfirm:
+        false,
+
+      attachmentDeleteRequiresExplicitConfirmAction:
         true,
 
       categoryDisplayTitleCase:

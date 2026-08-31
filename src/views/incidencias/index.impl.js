@@ -77,8 +77,15 @@ import {
   normalizeIncidenciaCategory,
 } from "./incidencias.options.js";
 
+import {
+  buildIncidenciasFilterFacetPresentation,
+  getIncidenciasFacetFilterQuery,
+  getIncidenciasFacetRequestQuery,
+  mergeIncidenciasFacetStats,
+} from "./incidencias.filter-facets.js";
+
 export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.extreme.v37-continuous-scroll";
+  "incidencias.index.extreme.v38-search-facets";
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
@@ -1159,6 +1166,9 @@ function createIncidenciasController(
   let incrementalError = "";
   let listQueryPending = false;
   const seenCursors = new Set();
+  const filterFacetCache = new Map();
+  let filterFacetSeq = 0;
+  let filterFacetController = null;
 
   let error = "";
   let filter = "all";
@@ -1563,6 +1573,8 @@ function createIncidenciasController(
 
   function payload(extra = {}) {
     const list = currentListSnapshot();
+    const localStats = computeIncidenciasStats(items);
+    const facetState = getActiveFilterFacetState();
 
     return {
       user:
@@ -1607,9 +1619,15 @@ function createIncidenciasController(
       openingTicketId,
 
       stats:
-        computeIncidenciasStats(
-          items
-        ),
+        facetState?.stats || localStats,
+      filterCounts:
+        facetState?.counts || null,
+      statsPartial:
+        facetState
+          ? facetState.aggregatePartial === true
+          : Boolean(nextCursor || total > items.length),
+      filterFacetsExact:
+        facetState?.exact === true,
 
       createModal,
       detailModal,
@@ -3950,6 +3968,21 @@ async function load(options = {}) {
                 requestFocusSnapshot,
             }
       );
+
+      void refreshFilterFacets({
+        baseResponse:
+          filter === "all"
+            ? {
+                ...response,
+                items: safeArray(items),
+                total,
+                nextCursor,
+              }
+            : null,
+        force:
+          background ||
+          options.refreshFacets === true,
+      });
 
       return response;
     } catch (loadError) {
@@ -6352,6 +6385,152 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
      LIST CONTROLS
   ======================================================= */
 
+  function filterFacetSearchKey(
+    value = serverSearch
+  ) {
+    return cleanText(value, "")
+      .toLocaleLowerCase("es-ES");
+  }
+
+  function getActiveFilterFacetState() {
+    return filterFacetCache.get(
+      filterFacetSearchKey()
+    ) || null;
+  }
+
+  function syncActiveFacetUniverseFromItems() {
+    if (filter !== "all") return false;
+
+    const key = filterFacetSearchKey();
+    const current = filterFacetCache.get(key);
+    if (!current) return false;
+
+    const next = Object.freeze({
+      ...current,
+      stats: mergeIncidenciasFacetStats(
+        computeIncidenciasStats(items),
+        current.counts
+      ),
+      aggregatePartial: Boolean(
+        nextCursor ||
+        Number(current.counts?.all || 0) > items.length
+      ),
+      universeLoaded: items.length,
+    });
+
+    filterFacetCache.set(key, next);
+    return true;
+  }
+
+  async function refreshFilterFacets({
+    baseResponse = null,
+    force = false,
+  } = {}) {
+    const key = filterFacetSearchKey();
+    const cached = filterFacetCache.get(key);
+
+    if (cached && !force) return cached;
+
+    const seq = ++filterFacetSeq;
+
+    try {
+      filterFacetController?.abort?.(
+        "incidencias-filter-facets-replaced"
+      );
+    } catch {
+      filterFacetController?.abort?.();
+    }
+
+    const requestController =
+      typeof AbortController !== "undefined"
+        ? new AbortController()
+        : null;
+    filterFacetController = requestController;
+
+    const loadFacet = async (facet) => {
+      if (facet === "all" && baseResponse) {
+        return baseResponse;
+      }
+
+      return loadIncidenciasPage({
+        signal: requestController?.signal,
+        query: getIncidenciasFacetRequestQuery(
+          facet,
+          {
+            search: serverSearch,
+            limit:
+              facet === "all"
+                ? INCIDENCIAS_LIST_LIMIT
+                : 1,
+          }
+        ),
+      });
+    };
+
+    try {
+      const [
+        all,
+        open,
+        closed,
+        urgent,
+      ] = await Promise.all(
+        ["all", "open", "closed", "urgent"]
+          .map(loadFacet)
+      );
+
+      if (
+        destroyed ||
+        seq !== filterFacetSeq ||
+        key !== filterFacetSearchKey()
+      ) {
+        return null;
+      }
+
+      const universeItems =
+        filter === "all"
+          ? safeArray(items)
+          : safeArray(all?.items);
+      const universeStats =
+        computeIncidenciasStats(universeItems);
+      const presentation =
+        buildIncidenciasFilterFacetPresentation(
+          { all, open, closed, urgent },
+          {
+            universeStats,
+            universeLoaded:
+              universeItems.length,
+          }
+        );
+      const next = Object.freeze({
+        ...presentation,
+        updatedAt: Date.now(),
+      });
+
+      filterFacetCache.set(key, next);
+
+      if (
+        mounted &&
+        !loading &&
+        !listQueryPending
+      ) {
+        renderWithFilteredItems({
+          skipModals: true,
+        });
+      }
+
+      return next;
+    } catch {
+      return cached || null;
+    } finally {
+      if (
+        filterFacetController ===
+        requestController
+      ) {
+        filterFacetController = null;
+      }
+    }
+  }
+
   function renderWithFilteredItems(
     options = {}
   ) {
@@ -6367,24 +6546,9 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
   function getListFilterQuery(
     value = filter
   ) {
-    const normalized = cleanText(
-      value,
-      "all"
-    ).toLowerCase();
-
-    if (normalized === "open") {
-      return { closed: false };
-    }
-
-    if (normalized === "closed") {
-      return { closed: true };
-    }
-
-    if (normalized === "urgent") {
-      return { priority: "urgent" };
-    }
-
-    return {};
+    return getIncidenciasFacetFilterQuery(
+      value
+    );
   }
 
   function getListServerContextKey(
@@ -6791,6 +6955,7 @@ async function loadMore(options = {}) {
       if (responseCursor) {
         seenCursors.add(responseCursor);
       }
+      syncActiveFacetUniverseFromItems();
       visibleLimit += DEFAULT_VISIBLE_LIMIT;
       incrementalError = "";
 
@@ -6820,6 +6985,7 @@ async function loadMore(options = {}) {
     return load({
       force: true,
       silent: false,
+      refreshFacets: true,
     });
   }
 
@@ -7936,11 +8102,15 @@ async function loadMore(options = {}) {
 
       loadSeq += 1;
       userSearchSeq += 1;
+      filterFacetSeq += 1;
 
       loadController?.abort?.();
       detailController?.abort?.();
+      filterFacetController?.abort?.();
       loadController = null;
       detailController = null;
+      filterFacetController = null;
+      filterFacetCache.clear();
 
       clearUserSearchTimer();
       clearListSearchTimer();

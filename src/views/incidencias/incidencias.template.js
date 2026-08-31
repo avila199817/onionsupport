@@ -8,7 +8,7 @@
    - Acepta items/tickets/incidencias/rows/results/data.items/etc.
 ========================================================= */
 
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v30-continuous-scroll";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v31-search-facets";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   CREATE_OPEN: "create-open",
@@ -523,6 +523,17 @@ function filterCounts(items = []) {
   return counts;
 }
 
+function mergeFilterCounts(items = [], provided = null) {
+  const local = filterCounts(items);
+  const counts = obj(provided);
+  return {
+    all: Math.max(0, num(first(counts.all, local.all), local.all)),
+    open: Math.max(0, num(first(counts.open, local.open), local.open)),
+    closed: Math.max(0, num(first(counts.closed, local.closed), local.closed)),
+    urgent: Math.max(0, num(first(counts.urgent, local.urgent), local.urgent)),
+  };
+}
+
 /* =========================================================
    ARRAY EXTRACTION
 ========================================================= */
@@ -591,6 +602,10 @@ function buildVm(input = {}) {
   */
   const remoteHasMore = Boolean(nextCursor && filtered.length);
   const stats = d.canonical === true && isObj(d.stats) ? d.stats : mergeStats(items, d.stats);
+  const statsPartial = typeof d.statsPartial === "boolean"
+    ? d.statsPartial
+    : total > items.length;
+  const filterFacetsExact = d.filterFacetsExact === true;
   return {
     data: d,
     route: txt(first(d.route, d.routes?.incidencias, DEFAULT_ROUTE), DEFAULT_ROUTE),
@@ -628,11 +643,13 @@ function buildVm(input = {}) {
     sortLabel: sortLabel(order, sortMode),
     nextSortOrder: nextSort(order),
     nextSortLabel: sortLabel(nextSort(order), sortMode),
-    filterCounts: filterCounts(items),
+    filterCounts: mergeFilterCounts(items, d.filterCounts),
+    filterFacetsExact,
+    statsPartial,
     stats,
     openingTicketId: txt(d.openingTicketId, ""),
     diagnostics: {
-      totalGreaterThanItems: total > 0 && items.length === 0,
+      totalGreaterThanItems: statsPartial,
       extractedItems: items.length,
       templateVersion: INCIDENCIAS_TEMPLATE_VERSION,
     },
@@ -774,7 +791,7 @@ function renderHeader(vm = {}) {
         </div>
       </div>
       <div class="incidencias-hero-meta">
-        <span class="incidencias-meta-pill" data-meta="total">${icon("ticket")}<span>${esc(`${formatNumber(vm.total)} solicitudes registradas`)}</span></span>
+        <span class="incidencias-meta-pill" data-meta="total">${icon("ticket")}<span>${esc(`${formatNumber(s.total)} solicitudes registradas`)}</span></span>
         <button type="button" class="incidencias-meta-pill incidencias-meta-pill--action${vm.selection === "attachments" ? " is-active" : ""}" data-meta="attachments" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="attachments" aria-pressed="${vm.selection === "attachments" ? "true" : "false"}" aria-label="${vm.sortLocked ? "Orden por adjuntos disponible al completar el historial" : "Ordenar incidencias de más adjuntos a menos"}" title="${vm.sortLocked ? "Disponible al completar el historial" : "Ordenar por número de adjuntos"}" ${vm.sortLocked ? 'disabled aria-disabled="true"' : ""}>${icon("paperclip")}<span>${esc(`${formatNumber(s.attachments)} adjuntos`)}</span></button>
       </div>
       <div class="incidencias-stats" aria-label="Accesos rápidos del historial">
@@ -983,7 +1000,7 @@ function renderHistory(vm = {}) {
 export function renderIncidenciasLoadingState(input = {}) {
   const vm = buildVm({ ...obj(input), loading: true });
   return `
-    <section class="incidencias-view-root incidencias-view-root--loading is-loading" data-incidencias-scope="true" data-template-version="${at(INCIDENCIAS_TEMPLATE_VERSION)}" data-total="${at(String(vm.total))}" data-visible="${at(String(vm.visibleCount))}" data-filter="${at(vm.filter)}" data-selection="${at(vm.selection)}" data-sort-order="${at(vm.sortOrder)}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" aria-busy="true">
+    <section class="incidencias-view-root incidencias-view-root--loading is-loading" data-incidencias-scope="true" data-template-version="${at(INCIDENCIAS_TEMPLATE_VERSION)}" data-total="${at(String(vm.total))}" data-visible="${at(String(vm.visibleCount))}" data-filter="${at(vm.filter)}" data-selection="${at(vm.selection)}" data-sort-order="${at(vm.sortOrder)}" data-filter-facets-exact="${vm.filterFacetsExact ? "true" : "false"}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" aria-busy="true">
       ${renderHeader(vm)}${renderHistory(vm)}
     </section>
   `;
@@ -1004,7 +1021,7 @@ export function renderIncidenciasErrorState(message = "No se pudieron cargar las
 export function renderIncidenciasTemplate(input = {}) {
   const vm = buildVm(input);
   return `
-    <section class="${cls("incidencias-view-root", vm.loading ? "is-loading" : "", vm.refreshing ? "is-refreshing" : "", vm.creating ? "is-creating" : "", vm.error ? "has-error" : "")}" data-incidencias-scope="true" data-template-version="${at(INCIDENCIAS_TEMPLATE_VERSION)}" data-route="${at(vm.route)}" data-total="${at(String(vm.total))}" data-visible="${at(String(vm.visibleCount))}" data-filter="${at(vm.filter)}" data-selection="${at(vm.selection)}" data-search-active="${vm.search ? "true" : "false"}" data-sort-order="${at(vm.sortOrder)}" data-loading="${vm.loading ? "true" : "false"}" data-refreshing="${vm.refreshing ? "true" : "false"}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" data-items-extracted="${at(String(vm.items.length))}" data-total-greater-than-items="${vm.diagnostics.totalGreaterThanItems ? "true" : "false"}" aria-busy="${vm.loading || vm.refreshing || vm.loadingMore || vm.listQueryPending ? "true" : "false"}">
+    <section class="${cls("incidencias-view-root", vm.loading ? "is-loading" : "", vm.refreshing ? "is-refreshing" : "", vm.creating ? "is-creating" : "", vm.error ? "has-error" : "")}" data-incidencias-scope="true" data-template-version="${at(INCIDENCIAS_TEMPLATE_VERSION)}" data-route="${at(vm.route)}" data-total="${at(String(vm.total))}" data-visible="${at(String(vm.visibleCount))}" data-filter="${at(vm.filter)}" data-selection="${at(vm.selection)}" data-search-active="${vm.search ? "true" : "false"}" data-sort-order="${at(vm.sortOrder)}" data-filter-facets-exact="${vm.filterFacetsExact ? "true" : "false"}" data-loading="${vm.loading ? "true" : "false"}" data-refreshing="${vm.refreshing ? "true" : "false"}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" data-items-extracted="${at(String(vm.items.length))}" data-total-greater-than-items="${vm.diagnostics.totalGreaterThanItems ? "true" : "false"}" aria-busy="${vm.loading || vm.refreshing || vm.loadingMore || vm.listQueryPending ? "true" : "false"}">
       ${vm.error ? `<div class="incidencias-alert" role="alert">${icon("alert")}<span>${esc(vm.error)}</span></div>` : ""}
       ${renderHeader(vm)}${renderHistory(vm)}
     </section>
@@ -1026,6 +1043,9 @@ export function getIncidenciasTemplateSnapshot(input = {}) {
     continuousScroll: true,
     sortLocked: vm.sortLocked,
     filter: vm.filter,
+    filterCounts: vm.filterCounts,
+    filterFacetsExact: vm.filterFacetsExact,
+    statsPartial: vm.statsPartial,
     selection: vm.selection,
     searchLength: vm.search.length,
     sortOrder: vm.sortOrder,

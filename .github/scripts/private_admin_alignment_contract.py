@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Cross-view integrity contract for the four private admin listings."""
+"""Cross-view integrity contract for the private listing foundation."""
 
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
-VIEWS = ("incidencias", "facturas", "clientes", "usuarios")
+CRUD_VIEWS = ("incidencias", "facturas", "clientes", "usuarios")
 MANUAL_PAGINATION_MARKERS = (
     "Mostrar más",
     "Cargar más",
@@ -26,19 +26,30 @@ def require(condition: bool, message: str) -> None:
 
 
 app_css = read("src/css/app.css")
+private_css = read("src/css/private.css")
 mobile_js = read("src/features/mobile-datalist/index.js")
 mobile_css = read("src/css/compositions/mobile-datalist.css")
 parity_css = read("src/css/compositions/private-admin-parity.css")
 interactions_css = read("src/css/compositions/private-admin-interactions.css")
+server_css = read("src/css/views/servidor/index.css")
 
-for shared_css in (
-    './compositions/private-admin-parity.css',
-    './compositions/private-admin-interactions.css',
-    './compositions/mobile-datalist.css',
-):
-    require(shared_css in app_css, f"app.css must import {shared_css}")
+for entry_name, entry in (("app.css", app_css), ("private.css", private_css)):
+    for shared_css in (
+        './compositions/private-admin-parity.css',
+        './compositions/private-admin-interactions.css',
+        './compositions/private-create-modal.css',
+    ):
+        require(shared_css in entry, f"{entry_name} must import {shared_css}")
 
-for view in VIEWS:
+require("PRIVATE UI FOUNDATION" in parity_css, "shared composition must declare the single private UI foundation")
+require("SINGLE VISUAL AUTHORITY" in parity_css, "shared composition must declare single visual authority")
+require(".server-hero" in parity_css, "Servidor hero must consume the shared private foundation")
+require(".server-summary-grid" in parity_css, "Servidor KPI shell must consume the shared private foundation")
+require(".server-panel" in parity_css, "Servidor panels must consume the shared private foundation")
+require("@import" not in server_css, "Servidor domain CSS must not import a parallel base stylesheet")
+require(not (ROOT / "src/css/views/servidor/base.css").exists(), "obsolete Servidor base.css must stay deleted")
+
+for view in CRUD_VIEWS:
     index_path = (
         "src/views/incidencias/index.impl.js"
         if view == "incidencias"
@@ -71,19 +82,10 @@ for view in VIEWS:
     )
 
     for marker in MANUAL_PAGINATION_MARKERS:
-        require(
-            marker not in template,
-            f"{view} template reintroduced manual pagination marker: {marker}",
-        )
+        require(marker not in template, f"{view} template reintroduced manual pagination marker: {marker}")
 
-    require(
-        f'layout: "{view}"' in mobile_js,
-        f"mobile datalist JS must include {view}",
-    )
-    require(
-        f'data-mobile-datalist-layout="{view}"' in mobile_css,
-        f"mobile datalist CSS must include {view}",
-    )
+    require(f'layout: "{view}"' in mobile_js, f"mobile datalist JS must include {view}")
+    require(f'data-mobile-datalist-layout="{view}"' in mobile_css, f"mobile datalist CSS must include {view}")
 
 for domain in ("facturas", "clientes", "usuarios"):
     for token in (
@@ -92,20 +94,23 @@ for domain in ("facturas", "clientes", "usuarios"):
         f".{domain}-search-input",
         f".{domain}-history-head",
     ):
-        require(
-            token in interactions_css,
-            f"shared interactions missing {token}",
-        )
+        require(token in interactions_css, f"shared interactions missing {token}")
 
     for token in (
         f".{domain}-stats",
         f".{domain}-history",
-        f".{domain}-table-wrap",
+        f".{domain}-table",
+        f".{domain}-avatar",
     ):
-        require(
-            token in parity_css,
-            f"shared parity missing {token}",
-        )
+        require(token in parity_css, f"shared parity missing {token}")
+
+for token in (
+    ".incidencias-stats",
+    ".incidencias-history",
+    ".incidencias-table",
+    ".incidencias-avatar",
+):
+    require(token in parity_css, f"Incidencias shared authority missing {token}")
 
 for breakpoint in (
     "@container (max-width: 1120px)",
@@ -116,6 +121,6 @@ for breakpoint in (
     require(breakpoint in parity_css, f"shared responsive breakpoint missing: {breakpoint}")
 
 print(
-    "Private admin alignment contract OK · 4 views · continuous scroll · "
-    "IME-safe search · shared parity/interactions · mobile datalist"
+    "Private admin alignment contract OK · 4 CRUD views + Servidor · continuous scroll · "
+    "IME-safe search · single listing foundation · shared interactions · mobile datalist"
 )

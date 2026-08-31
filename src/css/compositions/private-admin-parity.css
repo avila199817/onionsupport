@@ -1,16 +1,26 @@
 /* =========================================================
-   ONION SUPPORT — PRIVATE ADMIN PARITY
+   ONION SUPPORT — PRIVATE UI FOUNDATION
    Archivo: /src/css/compositions/private-admin-parity.css
 
-   CANÓNICO · INCIDENCIAS AS VISUAL AUTHORITY · 2026-08-22
+   CANÓNICO · SINGLE VISUAL AUTHORITY · 2026-08-31
 
-   Objetivo:
-   - Incidencias, Facturas, Clientes y Usuarios comparten una sola gramática.
-   - Esta composición NO crea paletas, widgets ni estados paralelos.
-   - Reutiliza exclusivamente tokens del design system y la geometría ya
-     consolidada en Incidencias.
-   - Conserva la semántica y acciones propias de cada dominio.
-   - Mobile datalist se aplica después y conserva su responsabilidad.
+   Responsabilidad única:
+   - Shell visual de los listados privados y Servidor.
+   - Hero, títulos, acciones, KPIs, paneles, filtros, búsqueda, tablas,
+     avatares fallback, estados vacíos/loading e invariantes responsive.
+   - Incidencias sigue siendo la referencia de producto, pero la autoridad CSS
+     ya no vive duplicada dentro de cada vista: vive aquí.
+
+   Fuera de alcance deliberadamente:
+   - Crear -> private-create-modal.css
+   - Details -> components/detail-modal.css + CSS semántico de cada dominio
+   - Lógica/semántica propia de cada dominio -> src/css/views/<dominio>/
+
+   Reglas:
+   - Sin paletas por vista.
+   - Sin !important.
+   - Light/Dark exclusivamente por tokens globales.
+   - Las hojas de vista sólo pueden conservar estructura o semántica propia.
 ========================================================= */
 
 @layer compositions {
@@ -20,21 +30,43 @@
   --private-admin-avatar-radius: var(--radius-sm);
   --private-admin-main-gap: 11px;
   --private-admin-kpi-height: 112px;
-  --private-admin-create-width: min(1080px, calc(100vw - 48px));
-  --private-admin-primary-action-height: var(--btn-height-lg);
-  --private-admin-primary-action-min-width: 202px;
-  --private-admin-primary-action-icon-size: 34px;
+  --private-admin-row-min: 84px;
+  --private-admin-toolbar-gap: var(--space-xs);
+  --private-admin-hero-title-size: clamp(30px, 3vw, 44px);
 }
 
 /* =========================================================
-   PAGE SHELL / HERO — INCIDENCIAS 1:1
+   ROOT / RESET / TYPOGRAPHY
 ========================================================= */
+
+:where(
+  .panel-content[data-view="incidencias"],
+  .panel-content[data-view="facturas"],
+  .panel-content[data-view="clientes"],
+  .panel-content[data-view="usuarios"],
+  .panel-content[data-view="servidor"],
+  .panel-content[data-view="server"],
+  .incidencias-view-root,
+  .facturas-view-root,
+  .clientes-view-root,
+  .usuarios-view-root,
+  .server-view-root,
+  .servidor-view-root
+) {
+  inline-size: 100%;
+  min-inline-size: 0;
+  color: var(--text);
+  font-family: var(--font-family);
+  container-type: inline-size;
+}
 
 :is(
   .incidencias-view-root,
   .facturas-view-root,
   .clientes-view-root,
-  .usuarios-view-root
+  .usuarios-view-root,
+  .server-view-root,
+  .servidor-view-root
 ) {
   inline-size: 100%;
   min-inline-size: 0;
@@ -42,15 +74,57 @@
   gap: var(--space-lg);
   margin: 0;
   padding: 0;
-  color: var(--text);
-  font-family: var(--font-family);
 }
+
+:where(
+  .incidencias-view-root,
+  .facturas-view-root,
+  .clientes-view-root,
+  .usuarios-view-root,
+  .server-view-root,
+  .servidor-view-root
+) *,
+:where(
+  .incidencias-view-root,
+  .facturas-view-root,
+  .clientes-view-root,
+  .usuarios-view-root,
+  .server-view-root,
+  .servidor-view-root
+) *::before,
+:where(
+  .incidencias-view-root,
+  .facturas-view-root,
+  .clientes-view-root,
+  .usuarios-view-root,
+  .server-view-root,
+  .servidor-view-root
+) *::after {
+  box-sizing: border-box;
+}
+
+:where(
+  .incidencias-view-root,
+  .facturas-view-root,
+  .clientes-view-root,
+  .usuarios-view-root,
+  .server-view-root,
+  .servidor-view-root
+) :is(button, input, select, textarea, meter) {
+  font: inherit;
+}
+
+/* =========================================================
+   HERO
+========================================================= */
 
 :is(
   .incidencias-hero,
   .facturas-hero,
   .clientes-hero,
-  .usuarios-hero
+  .usuarios-hero,
+  .server-hero,
+  .servidor-hero
 ) {
   min-inline-size: 0;
   display: grid;
@@ -66,7 +140,8 @@
   .incidencias-hero-top,
   .facturas-hero-top,
   .clientes-hero-top,
-  .usuarios-hero-top
+  .usuarios-hero-top,
+  .server-hero-top
 ) {
   min-inline-size: 0;
   display: grid;
@@ -79,7 +154,8 @@
   .incidencias-hero-copy,
   .facturas-hero-copy,
   .clientes-hero-copy,
-  .usuarios-hero-copy
+  .usuarios-hero-copy,
+  .server-hero-copy
 ) {
   min-inline-size: 0;
   display: grid;
@@ -92,12 +168,13 @@
   .clientes-page-title,
   .clientes-title,
   .usuarios-page-title,
-  .usuarios-title
+  .usuarios-title,
+  .server-title
 ) {
-  max-inline-size: 900px;
+  max-inline-size: 920px;
   margin: 0;
   color: var(--text-strong);
-  font-size: clamp(30px, 3vw, 44px);
+  font-size: var(--private-admin-hero-title-size);
   font-weight: var(--weight-black);
   line-height: 1;
   letter-spacing: var(--letter-tight);
@@ -110,9 +187,10 @@
   .clientes-page-subtitle,
   .clientes-subtitle,
   .usuarios-page-subtitle,
-  .usuarios-subtitle
+  .usuarios-subtitle,
+  .server-subtitle
 ) {
-  max-inline-size: 780px;
+  max-inline-size: 820px;
   margin: 0;
   color: var(--text-muted);
   font-size: var(--font-base);
@@ -124,8 +202,10 @@
   .incidencias-hero-actions,
   .facturas-hero-actions,
   .clientes-hero-actions,
-  .usuarios-hero-actions
+  .usuarios-hero-actions,
+  .server-hero-actions
 ) {
+  min-inline-size: 0;
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
@@ -133,179 +213,12 @@
   gap: var(--space-xs);
 }
 
-/* =========================================================
-   PRIMARY CREATE ACTION — CTA CANÓNICO DEL PANEL PRIVADO
-
-   Crear una entidad es la acción principal de estas vistas. La geometría,
-   jerarquía y feedback viven aquí para que Incidencias, Facturas, Clientes y
-   Usuarios no vuelvan a divergir. No se introduce una paleta nueva: fondo,
-   borde, texto y sombra proceden íntegramente del button system global.
-========================================================= */
-
-:is(
-  .incidencias-btn--create,
-  #incidencias-create-btn,
-  .facturas-btn--create,
-  #facturas-create-btn,
-  .clientes-btn--create,
-  #clientes-create-btn,
-  .usuarios-btn--create,
-  #usuarios-create-btn
-) {
-  position: relative;
-  isolation: isolate;
-  min-inline-size: var(--private-admin-primary-action-min-width);
-  min-block-size: var(--private-admin-primary-action-height);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 6px 16px 6px 8px;
-  overflow: hidden;
-  border: 1px solid var(--btn-primary-border);
-  border-radius: calc(var(--btn-radius) + 2px);
-  background: var(--btn-primary-bg);
-  color: var(--btn-primary-text);
-  box-shadow: var(--btn-primary-shadow);
-  font-family: var(--font-family);
-  font-size: var(--font-md);
-  font-weight: var(--weight-bold);
-  line-height: 1.15;
-  letter-spacing: -.01em;
-  text-decoration: none;
-  white-space: nowrap;
-  transition:
-    background var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard),
-    transform var(--duration-fast) var(--ease-standard),
-    opacity var(--duration-fast) var(--ease-standard);
-}
-
-:is(
-  .incidencias-btn--create,
-  #incidencias-create-btn,
-  .facturas-btn--create,
-  #facturas-create-btn,
-  .clientes-btn--create,
-  #clientes-create-btn,
-  .usuarios-btn--create,
-  #usuarios-create-btn
-) > svg {
-  inline-size: var(--private-admin-primary-action-icon-size);
-  block-size: var(--private-admin-primary-action-icon-size);
-  flex: 0 0 var(--private-admin-primary-action-icon-size);
-  padding: 8px;
-  border: 1px solid color-mix(in srgb, var(--btn-primary-text) 18%, transparent);
-  border-radius: var(--radius-xs);
-  background: color-mix(in srgb, var(--btn-primary-text) 10%, transparent);
-  color: currentColor;
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--btn-primary-text) 10%, transparent);
-  transition:
-    background var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard),
-    transform var(--duration-fast) var(--ease-standard);
-}
-
-:is(
-  .incidencias-btn--create,
-  #incidencias-create-btn,
-  .facturas-btn--create,
-  #facturas-create-btn,
-  .clientes-btn--create,
-  #clientes-create-btn,
-  .usuarios-btn--create,
-  #usuarios-create-btn
-):hover:not(:disabled):not([aria-disabled="true"]) {
-  border-color: color-mix(in srgb, var(--btn-primary-text) 26%, var(--btn-primary-border));
-  background: var(--btn-primary-bg-hover);
-  color: var(--btn-primary-text);
-  box-shadow:
-    var(--btn-primary-shadow),
-    0 10px 24px color-mix(in srgb, var(--accent) 16%, transparent);
-  transform: translateY(-2px);
-}
-
-:is(
-  .incidencias-btn--create,
-  #incidencias-create-btn,
-  .facturas-btn--create,
-  #facturas-create-btn,
-  .clientes-btn--create,
-  #clientes-create-btn,
-  .usuarios-btn--create,
-  #usuarios-create-btn
-):hover:not(:disabled):not([aria-disabled="true"]) > svg {
-  border-color: color-mix(in srgb, var(--btn-primary-text) 28%, transparent);
-  background: color-mix(in srgb, var(--btn-primary-text) 15%, transparent);
-  transform: translateY(-1px);
-}
-
-:is(
-  .incidencias-btn--create,
-  #incidencias-create-btn,
-  .facturas-btn--create,
-  #facturas-create-btn,
-  .clientes-btn--create,
-  #clientes-create-btn,
-  .usuarios-btn--create,
-  #usuarios-create-btn
-):active:not(:disabled):not([aria-disabled="true"]) {
-  background: var(--btn-primary-bg-active);
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--btn-primary-text) 8%, transparent),
-    0 5px 14px color-mix(in srgb, var(--accent) 12%, transparent);
-  transform: translateY(0) scale(.985);
-}
-
-:is(
-  .incidencias-btn--create,
-  #incidencias-create-btn,
-  .facturas-btn--create,
-  #facturas-create-btn,
-  .clientes-btn--create,
-  #clientes-create-btn,
-  .usuarios-btn--create,
-  #usuarios-create-btn
-):focus-visible {
-  outline: none;
-  box-shadow: var(--btn-primary-shadow), var(--focus-ring);
-}
-
-:is(
-  .incidencias-btn--create,
-  #incidencias-create-btn,
-  .facturas-btn--create,
-  #facturas-create-btn,
-  .clientes-btn--create,
-  #clientes-create-btn,
-  .usuarios-btn--create,
-  #usuarios-create-btn
-):disabled,
-:is(
-  .incidencias-btn--create,
-  #incidencias-create-btn,
-  .facturas-btn--create,
-  #facturas-create-btn,
-  .clientes-btn--create,
-  #clientes-create-btn,
-  .usuarios-btn--create,
-  #usuarios-create-btn
-)[aria-disabled="true"] {
-  transform: none;
-}
-
-/* =========================================================
-   HERO META PILLS — UNA ÚNICA MÉTRICA VISUAL
-   El botón de Adjuntos conserva su data-action/aria-pressed y por tanto
-   sigue ordenando/filtrando; aquí sólo se iguala la presentación.
-========================================================= */
-
 :is(
   .incidencias-hero-meta,
   .facturas-hero-meta,
   .clientes-hero-meta,
-  .usuarios-hero-meta
+  .usuarios-hero-meta,
+  .server-hero-meta
 ) {
   min-inline-size: 0;
   display: flex;
@@ -314,30 +227,184 @@
   gap: var(--space-xs);
 }
 
+/* =========================================================
+   BUTTON FOUNDATION
+========================================================= */
+
+:is(
+  .incidencias-btn,
+  .facturas-btn,
+  .clientes-btn,
+  .usuarios-btn,
+  .usuarios-feed-retry,
+  .server-btn
+) {
+  appearance: none;
+  min-block-size: var(--btn-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  margin: 0;
+  padding-inline: var(--space-md);
+  border: 1px solid var(--btn-secondary-border);
+  border-radius: var(--btn-radius);
+  background: var(--btn-secondary-bg);
+  color: var(--btn-secondary-text);
+  box-shadow: var(--btn-secondary-shadow);
+  cursor: pointer;
+  font-size: var(--font-md);
+  font-weight: var(--weight-bold);
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+
+:is(
+  .incidencias-btn,
+  .facturas-btn,
+  .clientes-btn,
+  .usuarios-btn,
+  .usuarios-feed-retry,
+  .server-btn
+) svg {
+  inline-size: 16px;
+  block-size: 16px;
+  flex: 0 0 auto;
+}
+
+:is(
+  .incidencias-btn,
+  .facturas-btn,
+  .clientes-btn,
+  .usuarios-btn,
+  .usuarios-feed-retry,
+  .server-btn
+):hover:not(:disabled):not([aria-disabled="true"]) {
+  border-color: var(--border-strong);
+  background: var(--btn-secondary-bg-hover);
+  color: var(--text-strong);
+  transform: translateY(-1px);
+}
+
+:is(
+  .incidencias-btn,
+  .facturas-btn,
+  .clientes-btn,
+  .usuarios-btn,
+  .usuarios-feed-retry,
+  .server-btn
+):active:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--btn-secondary-bg-active);
+  transform: translateY(0);
+}
+
+:is(
+  .incidencias-btn,
+  .facturas-btn,
+  .clientes-btn,
+  .usuarios-btn,
+  .usuarios-feed-retry,
+  .server-btn
+):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+:is(
+  .incidencias-btn,
+  .facturas-btn,
+  .clientes-btn,
+  .usuarios-btn,
+  .usuarios-feed-retry,
+  .server-btn
+):disabled,
+:is(
+  .incidencias-btn,
+  .facturas-btn,
+  .clientes-btn,
+  .usuarios-btn,
+  .usuarios-feed-retry,
+  .server-btn
+)[aria-disabled="true"] {
+  cursor: not-allowed;
+  pointer-events: none;
+  opacity: .52;
+  transform: none;
+}
+
+:is(
+  .incidencias-btn--create,
+  #incidencias-create-btn,
+  .facturas-btn--primary,
+  .facturas-btn--create,
+  #facturas-create-btn,
+  .clientes-btn--primary,
+  .clientes-btn--create,
+  #clientes-create-btn,
+  .usuarios-btn--primary,
+  .usuarios-btn--create,
+  #usuarios-create-btn,
+  .server-btn--primary
+) {
+  border-color: var(--btn-primary-border);
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  box-shadow: var(--btn-primary-shadow);
+}
+
+:is(
+  .incidencias-btn--create,
+  #incidencias-create-btn,
+  .facturas-btn--primary,
+  .facturas-btn--create,
+  #facturas-create-btn,
+  .clientes-btn--primary,
+  .clientes-btn--create,
+  #clientes-create-btn,
+  .usuarios-btn--primary,
+  .usuarios-btn--create,
+  #usuarios-create-btn,
+  .server-btn--primary
+):hover:not(:disabled):not([aria-disabled="true"]) {
+  border-color: var(--btn-primary-border);
+  background: var(--btn-primary-bg-hover);
+  color: var(--btn-primary-text);
+}
+
+/* =========================================================
+   META / BADGE FOUNDATION
+========================================================= */
+
 :is(
   .incidencias-meta-pill,
   .facturas-meta-pill,
   .clientes-meta-pill,
-  .usuarios-meta-pill
+  .usuarios-meta-pill,
+  .server-meta-pill
 ) {
-  appearance: none;
   min-block-size: 30px;
+  max-inline-size: 100%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  max-inline-size: 100%;
-  margin: 0;
   padding-inline: 10px;
   border: 1px solid var(--badge-border);
   border-radius: var(--radius-pill);
   background: var(--badge-bg);
   color: var(--badge-text);
-  font-family: var(--font-family);
   font-size: var(--font-xs);
   font-weight: var(--weight-semibold);
   line-height: 1;
-  letter-spacing: 0;
   white-space: nowrap;
 }
 
@@ -345,7 +412,8 @@
   .incidencias-meta-pill,
   .facturas-meta-pill,
   .clientes-meta-pill,
-  .usuarios-meta-pill
+  .usuarios-meta-pill,
+  .server-meta-pill
 ) svg {
   inline-size: 13px;
   block-size: 13px;
@@ -353,16 +421,8 @@
   color: var(--text-muted);
 }
 
-/* Neutraliza el shorthand `font: inherit` histórico del pill de Adjuntos. */
-.incidencias-meta-pill--action {
-  font-family: var(--font-family);
-  font-size: var(--font-xs);
-  font-weight: var(--weight-semibold);
-  line-height: 1;
-}
-
 /* =========================================================
-   KPI CARDS — GEOMETRÍA / TONO / MOVIMIENTO DE INCIDENCIAS
+   CRUD KPI FOUNDATION
 ========================================================= */
 
 :is(
@@ -383,44 +443,111 @@
   .clientes-stat-card,
   .usuarios-stat-card
 ) {
+  --private-stat-accent: var(--info);
+  appearance: none;
   position: relative;
   min-inline-size: 0;
   min-block-size: var(--private-admin-kpi-height);
   display: grid;
   align-content: start;
   gap: 5px;
+  overflow: hidden;
   margin: 0;
   padding: var(--space-md);
-  overflow: hidden;
   border: 1px solid var(--card-border);
   border-radius: var(--radius-md);
   background: var(--card-bg);
   color: var(--text);
   box-shadow: var(--card-shadow);
   text-align: start;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
 }
 
 :is(
+  .incidencias-stat-card,
+  .facturas-stat-card,
   .clientes-stat-card,
   .usuarios-stat-card
-)::after {
-  display: none;
-  content: none;
+)::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: 3px;
+  background: var(--private-stat-accent);
+}
+
+:is(.incidencias-stat-card, .clientes-stat-card, .usuarios-stat-card) {
+  cursor: pointer;
+}
+
+.incidencias-stat-card--open,
+.facturas-stat-card--accent,
+.clientes-stat-card--accent,
+.clientes-stat-card--total,
+.usuarios-stat-card--accent,
+.usuarios-stat-card--total { --private-stat-accent: var(--info); }
+
+.incidencias-stat-card--closed,
+.facturas-stat-card--success,
+.clientes-stat-card--success,
+.clientes-stat-card--active,
+.usuarios-stat-card--success,
+.usuarios-stat-card--active { --private-stat-accent: var(--success); }
+
+.facturas-stat-card--warning,
+.clientes-stat-card--warning,
+.clientes-stat-card--pending,
+.usuarios-stat-card--warning,
+.usuarios-stat-card--pending { --private-stat-accent: var(--warning); }
+
+.incidencias-stat-card--urgent,
+.facturas-stat-card--danger,
+.clientes-stat-card--danger,
+.clientes-stat-card--blocked,
+.usuarios-stat-card--danger,
+.usuarios-stat-card--blocked { --private-stat-accent: var(--error); }
+
+.incidencias-stat-card--amount { --private-stat-accent: var(--accent); }
+
+:is(
+  .incidencias-stat-card,
+  .clientes-stat-card,
+  .usuarios-stat-card
+):hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--private-stat-accent) 35%, var(--card-border));
+  background: color-mix(in srgb, var(--private-stat-accent) 4%, var(--card-bg));
+  transform: translateY(-1px);
 }
 
 :is(
-  .clientes-stat-icon,
-  .usuarios-stat-icon
-) {
-  display: none;
+  .incidencias-stat-card,
+  .clientes-stat-card,
+  .usuarios-stat-card
+).is-active,
+:is(
+  .incidencias-stat-card,
+  .clientes-stat-card,
+  .usuarios-stat-card
+)[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--private-stat-accent) 58%, var(--card-border));
+  background: color-mix(in srgb, var(--private-stat-accent) 7%, var(--card-bg));
+  box-shadow: var(--card-shadow), inset 0 0 0 1px color-mix(in srgb, var(--private-stat-accent) 16%, transparent);
 }
 
 :is(
-  .clientes-stat-topline,
-  .usuarios-stat-topline
-) {
-  display: block;
-  min-inline-size: 0;
+  .incidencias-stat-card,
+  .clientes-stat-card,
+  .usuarios-stat-card
+):focus-visible {
+  outline: none;
+  border-color: var(--private-stat-accent);
+  box-shadow: var(--focus-ring);
 }
 
 :is(
@@ -452,6 +579,7 @@
   letter-spacing: var(--letter-tight);
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 :is(
@@ -466,49 +594,18 @@
   line-height: 1.4;
 }
 
-:is(
-  .incidencias-stat-card,
-  .clientes-stat-card,
-  .usuarios-stat-card
-):hover {
-  border-color: var(--card-border-hover);
-  background: var(--panel-bg-hover);
-  transform: translateY(-1px);
-}
-
-:is(
-  .incidencias-stat-card,
-  .clientes-stat-card,
-  .usuarios-stat-card
-).is-active,
-:is(
-  .incidencias-stat-card,
-  .clientes-stat-card,
-  .usuarios-stat-card
-)[aria-pressed="true"] {
-  border-color: var(--border-strong);
-  background: var(--solid-selected);
-  box-shadow: inset 0 0 0 1px var(--solid-border-soft);
-}
-
-:is(
-  .incidencias-stat-card,
-  .clientes-stat-card,
-  .usuarios-stat-card
-):focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
+:is(.clientes-stat-icon, .usuarios-stat-icon) { display: none; }
 
 /* =========================================================
-   HISTORY / TOOLBAR
+   HISTORY / SERVER PANEL SHELL
 ========================================================= */
 
 :is(
   .incidencias-history,
   .facturas-history,
   .clientes-history,
-  .usuarios-history
+  .usuarios-history,
+  .server-panel
 ) {
   min-inline-size: 0;
   overflow: hidden;
@@ -531,6 +628,17 @@
   gap: var(--space-md);
   padding: var(--space-md);
   border-block-end: 1px solid var(--border-soft);
+}
+
+:is(
+  .incidencias-history-copy,
+  .facturas-history-copy,
+  .clientes-history-copy,
+  .usuarios-history-copy
+) {
+  min-inline-size: 0;
+  display: grid;
+  gap: 3px;
 }
 
 :is(
@@ -559,6 +667,52 @@
   line-height: 1.4;
 }
 
+.server-section-head {
+  min-inline-size: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md) var(--space-lg);
+  border-block-end: 1px solid var(--data-table-row-border);
+  background: var(--data-table-head-bg);
+}
+
+.server-section-head > div {
+  min-inline-size: 0;
+  display: grid;
+  gap: var(--space-3xs);
+}
+
+.server-section-title {
+  margin: 0;
+  color: var(--section-title-color);
+  font-size: var(--section-title-size);
+  font-weight: var(--section-title-weight);
+  line-height: var(--line-snug);
+  letter-spacing: var(--letter-tight);
+}
+
+.server-section-badge {
+  min-block-size: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 10px;
+  border: 1px solid var(--badge-border);
+  border-radius: var(--radius-pill);
+  background: var(--badge-bg);
+  color: var(--badge-text);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* =========================================================
+   FILTERS / TOOLBAR
+========================================================= */
+
 :is(
   .incidencias-filters,
   .facturas-filters,
@@ -567,15 +721,32 @@
 ) {
   min-inline-size: 0;
   display: grid;
-  grid-template-columns: auto auto minmax(220px, 1fr);
   align-items: center;
   justify-content: end;
-  gap: var(--space-xs);
+  gap: var(--private-admin-toolbar-gap);
 }
 
-/* Usuarios no expone orden: dos controles reales no deben reservar tres pistas. */
+:is(.incidencias-filters, .facturas-filters, .clientes-filters) {
+  grid-template-columns: auto auto minmax(220px, 1fr);
+}
+
 .usuarios-filters {
   grid-template-columns: auto minmax(220px, 1fr);
+}
+
+:is(
+  .incidencias-filter-pills,
+  .incidencias-sort-pills,
+  .facturas-filter-pills,
+  .facturas-sort-pills,
+  .clientes-filter-pills,
+  .clientes-sort-pills,
+  .usuarios-filter-pills
+) {
+  min-inline-size: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2xs);
 }
 
 :is(
@@ -585,8 +756,7 @@
   .facturas-sort-pill,
   .clientes-filter-pill,
   .clientes-sort-pill,
-  .usuarios-filter-pill,
-  .usuarios-sort-pill
+  .usuarios-filter-pill
 ) {
   appearance: none;
   min-block-size: var(--btn-height-sm);
@@ -600,11 +770,34 @@
   border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-muted);
-  font-family: var(--font-family);
+  cursor: pointer;
   font-size: var(--font-xs);
   font-weight: var(--weight-semibold);
   line-height: 1;
   white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+:is(
+  .incidencias-filter-pill,
+  .facturas-filter-pill,
+  .clientes-filter-pill,
+  .usuarios-filter-pill
+) strong {
+  min-inline-size: 20px;
+  display: inline-grid;
+  place-items: center;
+  padding: 2px 5px;
+  border-radius: var(--radius-pill);
+  background: var(--badge-bg);
+  color: inherit;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
 }
 
 :is(
@@ -614,56 +807,335 @@
   .facturas-sort-pill,
   .clientes-filter-pill,
   .clientes-sort-pill,
-  .usuarios-filter-pill,
-  .usuarios-sort-pill
-):hover {
-  background: var(--solid-hover);
+  .usuarios-filter-pill
+):hover:not(:disabled) {
   border-color: var(--border-default);
+  background: var(--solid-hover);
   color: var(--text-strong);
 }
 
+:is(
+  .incidencias-filter-pill,
+  .facturas-filter-pill,
+  .clientes-filter-pill,
+  .usuarios-filter-pill
+).is-active,
+:is(
+  .incidencias-filter-pill,
+  .facturas-filter-pill,
+  .clientes-filter-pill,
+  .usuarios-filter-pill
+)[aria-pressed="true"],
+:is(.incidencias-sort-pill, .facturas-sort-pill, .clientes-sort-pill).is-active {
+  border-color: var(--border-strong);
+  background: var(--solid-selected);
+  color: var(--text-strong);
+}
+
+:is(
+  .incidencias-filter-pill,
+  .incidencias-sort-pill,
+  .facturas-filter-pill,
+  .facturas-sort-pill,
+  .clientes-filter-pill,
+  .clientes-sort-pill,
+  .usuarios-filter-pill
+):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 /* =========================================================
-   TABLE IDENTITY — AVATAR / POSITION / DENSITY 1:1
+   SEARCH
 ========================================================= */
 
 :is(
-  .incidencias-table tbody td,
-  .facturas-table tbody td,
-  .clientes-table tbody td,
-  .usuarios-table tbody td
+  .incidencias-search,
+  .facturas-search,
+  .clientes-search,
+  .usuarios-search
 ) {
+  position: relative;
+  min-inline-size: 0;
+  inline-size: 100%;
+  min-block-size: var(--input-height);
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding-inline: 12px 8px;
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
+  background: var(--input-bg);
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+:is(
+  .incidencias-search,
+  .facturas-search,
+  .clientes-search,
+  .usuarios-search
+):hover {
+  border-color: var(--input-border-hover);
+  background: var(--input-bg-hover);
+}
+
+:is(
+  .incidencias-search,
+  .facturas-search,
+  .clientes-search,
+  .usuarios-search
+):focus-within {
+  border-color: var(--input-border-focus);
+  background: var(--input-bg-focus);
+  box-shadow: var(--focus-ring);
+}
+
+:is(
+  .incidencias-search-icon,
+  .facturas-search-icon,
+  .clientes-search-icon,
+  .usuarios-search-icon
+) {
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+:is(
+  .incidencias-search-icon,
+  .facturas-search-icon,
+  .clientes-search-icon,
+  .usuarios-search-icon
+) svg {
+  inline-size: 15px;
+  block-size: 15px;
+}
+
+:is(
+  .incidencias-search-input,
+  .facturas-search-input,
+  .clientes-search-input,
+  .usuarios-search-input
+) {
+  appearance: none;
+  -webkit-appearance: none;
+  inline-size: 100%;
+  min-inline-size: 0;
+  min-block-size: calc(var(--input-height) - 2px);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--input-text, var(--text-strong));
+  caret-color: var(--text-strong);
+  box-shadow: none;
+  font-size: var(--font-md);
+  font-weight: var(--weight-medium);
+}
+
+:is(
+  .incidencias-search-input,
+  .facturas-search-input,
+  .clientes-search-input,
+  .usuarios-search-input
+)::placeholder {
+  color: var(--input-placeholder, var(--text-dim));
+}
+
+:is(
+  .incidencias-search-input,
+  .facturas-search-input,
+  .clientes-search-input,
+  .usuarios-search-input
+):focus::placeholder {
+  color: transparent;
+}
+
+:is(
+  .incidencias-search-clear,
+  .facturas-search-clear,
+  .clientes-search-clear,
+  .usuarios-search-clear
+) {
+  appearance: none;
+  inline-size: 30px;
+  block-size: 30px;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+:is(
+  .incidencias-search-clear,
+  .facturas-search-clear,
+  .clientes-search-clear,
+  .usuarios-search-clear
+):hover {
+  background: var(--solid-hover);
+  color: var(--text-strong);
+}
+
+:is(
+  .incidencias-search-clear,
+  .facturas-search-clear,
+  .clientes-search-clear,
+  .usuarios-search-clear
+):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* =========================================================
+   TARGET LISTINGS — INCIDENCIAS EFFECTIVE VALUES 1:1
+   La fundación única conserva las métricas efectivas del listado padre.
+========================================================= */
+
+:is(
+  .incidencias-table-wrap,
+  .facturas-table-wrap,
+  .clientes-history-results,
+  .usuarios-history-results
+) {
+  position: relative;
+  min-inline-size: 0;
+  min-block-size: 120px;
+}
+
+:is(
+  .incidencias-table-shell,
+  .facturas-table-shell,
+  .clientes-table-shell,
+  .usuarios-table-shell
+) {
+  inline-size: 100%;
+  min-inline-size: 0;
+  overflow-x: auto;
+  overflow-y: visible;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+:is(
+  .incidencias-table-shell,
+  .facturas-table-shell,
+  .clientes-table-shell,
+  .usuarios-table-shell
+)::-webkit-scrollbar {
+  block-size: var(--scrollbar-size, 9px);
+}
+
+:is(
+  .incidencias-table-shell,
+  .facturas-table-shell,
+  .clientes-table-shell,
+  .usuarios-table-shell
+)::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+:is(
+  .incidencias-table,
+  .facturas-table,
+  .clientes-table,
+  .usuarios-table
+) {
+  inline-size: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  background: var(--table-bg);
+  color: var(--data-table-cell-text);
+  font-variant-numeric: tabular-nums;
+}
+
+:is(
+  .incidencias-table,
+  .facturas-table,
+  .clientes-table,
+  .usuarios-table
+) thead th,
+:is(.clientes-th, .usuarios-th) {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 2;
+  min-block-size: var(--data-table-head-height);
+  padding: var(--table-cell-padding-y) var(--table-cell-padding-x);
+  border-block-end: 1px solid var(--table-border);
+  background: var(--table-head-bg);
+  color: var(--data-table-head-text);
+  font-size: var(--data-table-head-font-size, var(--font-xs));
+  font-weight: var(--data-table-head-font-weight, var(--weight-bold));
+  line-height: 1;
+  letter-spacing: var(--data-table-head-letter, .04em);
+  text-align: start;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+:is(
+  .incidencias-table,
+  .facturas-table,
+  .clientes-table,
+  .usuarios-table
+) tbody td,
+:is(.clientes-cell, .usuarios-cell) {
+  min-inline-size: 0;
   padding: 12px var(--table-cell-padding-x);
   border-block-end: 1px solid var(--data-table-row-border);
   background: var(--table-bg);
-  color: var(--data-table-cell-text, var(--text));
-  font-size: var(--font-base);
-  line-height: var(--line-normal);
   vertical-align: middle;
+  color: var(--data-table-cell-text, var(--text));
+  font-size: var(--font-sm);
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
 }
 
 :is(
-  .facturas-table thead th,
-  .clientes-th,
-  .usuarios-th
+  .incidencias-row--clickable,
+  .facturas-table-row,
+  .clientes-table-row,
+  .usuarios-table-row
 ) {
-  block-size: auto;
-  height: auto;
-  padding: var(--table-cell-padding-y) var(--table-cell-padding-x);
-  color: var(--data-table-head-text);
-  font-size: var(--data-table-head-font-size);
-  font-weight: var(--data-table-head-font-weight);
-  line-height: var(--line-normal);
-  letter-spacing: var(--data-table-head-letter);
+  min-block-size: var(--private-admin-row-min);
+  color: inherit;
+  cursor: pointer;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
-:is(
-  .incidencias-cell--main,
-  .facturas-cell--main,
-  .clientes-cell--main,
-  .usuarios-cell--main
-) {
-  position: relative;
-  padding-inline-start: calc(var(--table-cell-padding-x) + 8px);
+.incidencias-row--clickable:hover > td,
+.incidencias-row--clickable:focus-visible > td,
+.facturas-table-row:hover > td,
+.facturas-table-row:focus-visible > td,
+.clientes-table-row:hover > .clientes-cell,
+.clientes-table-row:focus-visible > .clientes-cell,
+.usuarios-table-row:hover > .usuarios-cell,
+.usuarios-table-row:focus-visible > .usuarios-cell {
+  background: var(--data-table-row-hover);
+}
+
+.incidencias-row--clickable:focus-visible > td:first-child,
+.facturas-table-row:focus-visible > td:first-child,
+.clientes-table-row:focus-visible > .clientes-cell:first-child,
+.usuarios-table-row:focus-visible > .usuarios-cell:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 :is(
@@ -675,20 +1147,15 @@
   min-inline-size: 0;
   display: grid;
   grid-template-columns: var(--private-admin-avatar-size) minmax(0, 1fr);
-  align-items: start;
+  align-items: center;
   gap: var(--private-admin-main-gap);
 }
 
-:is(
-  .incidencias-main-copy,
-  .facturas-main-copy,
-  .clientes-main-copy,
-  .usuarios-main-copy
-) {
-  min-inline-size: 0;
-  display: grid;
-  gap: 4px;
-}
+.incidencias-main { align-items: start; }
+
+/* =========================================================
+   CANONICAL FALLBACK AVATAR
+========================================================= */
 
 :is(
   .incidencias-avatar,
@@ -698,12 +1165,12 @@
 ) {
   --private-avatar-a: var(--accent);
   --private-avatar-b: var(--info);
-
   position: relative;
   inline-size: var(--private-admin-avatar-size);
   block-size: var(--private-admin-avatar-size);
   display: grid;
   place-items: center;
+  flex: 0 0 auto;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--private-avatar-a) 44%, var(--border-default));
   border-radius: var(--private-admin-avatar-radius);
@@ -715,17 +1182,12 @@
   letter-spacing: .02em;
 }
 
-:is(.incidencias-avatar[data-avatar-tone="0"], .facturas-avatar--tone-0, .clientes-avatar--tone-0, .usuarios-avatar--tone-0, .usuarios-avatar-tone-0) { --private-avatar-a: var(--accent); --private-avatar-b: var(--info); }
-:is(.incidencias-avatar[data-avatar-tone="1"], .facturas-avatar--tone-1, .clientes-avatar--tone-1, .usuarios-avatar--tone-1, .usuarios-avatar-tone-1) { --private-avatar-a: var(--success); --private-avatar-b: var(--info); }
-:is(.incidencias-avatar[data-avatar-tone="2"], .facturas-avatar--tone-2, .clientes-avatar--tone-2, .usuarios-avatar--tone-2, .usuarios-avatar-tone-2) { --private-avatar-a: var(--warning); --private-avatar-b: var(--accent); }
-:is(.incidencias-avatar[data-avatar-tone="3"], .facturas-avatar--tone-3, .clientes-avatar--tone-3, .usuarios-avatar--tone-3, .usuarios-avatar-tone-3) { --private-avatar-a: var(--error); --private-avatar-b: var(--warning); }
-:is(.incidencias-avatar[data-avatar-tone="4"], .facturas-avatar--tone-4, .clientes-avatar--tone-4, .usuarios-avatar--tone-4, .usuarios-avatar-tone-4) { --private-avatar-a: var(--info); --private-avatar-b: var(--accent); }
-:is(.incidencias-avatar[data-avatar-tone="5"], .facturas-avatar--tone-5, .clientes-avatar--tone-5, .usuarios-avatar--tone-5, .usuarios-avatar-tone-5) { --private-avatar-a: var(--success); --private-avatar-b: var(--accent); }
-:is(.incidencias-avatar[data-avatar-tone="6"], .facturas-avatar--tone-6, .clientes-avatar--tone-6, .usuarios-avatar--tone-6, .usuarios-avatar-tone-6) { --private-avatar-a: var(--info); --private-avatar-b: var(--success); }
-:is(.incidencias-avatar[data-avatar-tone="7"], .facturas-avatar--tone-7, .clientes-avatar--tone-7, .usuarios-avatar--tone-7, .usuarios-avatar-tone-7) { --private-avatar-a: var(--warning); --private-avatar-b: var(--error); }
-:is(.incidencias-avatar[data-avatar-tone="8"], .facturas-avatar--tone-8, .clientes-avatar--tone-8, .usuarios-avatar--tone-8, .usuarios-avatar-tone-8) { --private-avatar-a: var(--error); --private-avatar-b: var(--accent); }
-:is(.incidencias-avatar[data-avatar-tone="9"], .facturas-avatar--tone-9, .clientes-avatar--tone-9, .usuarios-avatar--tone-9, .usuarios-avatar-tone-9) { --private-avatar-a: var(--accent); --private-avatar-b: var(--success); }
-
+:is(
+  .incidencias-avatar,
+  .facturas-avatar,
+  .clientes-avatar,
+  .usuarios-avatar
+) img,
 :is(
   .incidencias-avatar-img,
   .facturas-avatar-img,
@@ -734,269 +1196,140 @@
 ) {
   position: absolute;
   inset: 0;
+  z-index: 2;
   inline-size: 100%;
   block-size: 100%;
   display: block;
   object-fit: cover;
-  object-position: center;
 }
+
+:is(
+  .incidencias-avatar[data-avatar-tone="0"],
+  .facturas-avatar--tone-0,
+  .clientes-avatar--tone-0,
+  .usuarios-avatar--tone-0,
+  .usuarios-avatar-tone-0,
+  .usuarios-avatar[data-avatar-tone="0"]
+) { --private-avatar-a: var(--accent); --private-avatar-b: var(--info); }
+:is(
+  .incidencias-avatar[data-avatar-tone="1"],
+  .facturas-avatar--tone-1,
+  .clientes-avatar--tone-1,
+  .usuarios-avatar--tone-1,
+  .usuarios-avatar-tone-1,
+  .usuarios-avatar[data-avatar-tone="1"]
+) { --private-avatar-a: var(--success); --private-avatar-b: var(--info); }
+:is(
+  .incidencias-avatar[data-avatar-tone="2"],
+  .facturas-avatar--tone-2,
+  .clientes-avatar--tone-2,
+  .usuarios-avatar--tone-2,
+  .usuarios-avatar-tone-2,
+  .usuarios-avatar[data-avatar-tone="2"]
+) { --private-avatar-a: var(--warning); --private-avatar-b: var(--accent); }
+:is(
+  .incidencias-avatar[data-avatar-tone="3"],
+  .facturas-avatar--tone-3,
+  .clientes-avatar--tone-3,
+  .usuarios-avatar--tone-3,
+  .usuarios-avatar-tone-3,
+  .usuarios-avatar[data-avatar-tone="3"]
+) { --private-avatar-a: var(--error); --private-avatar-b: var(--warning); }
+:is(
+  .incidencias-avatar[data-avatar-tone="4"],
+  .facturas-avatar--tone-4,
+  .clientes-avatar--tone-4,
+  .usuarios-avatar--tone-4,
+  .usuarios-avatar-tone-4,
+  .usuarios-avatar[data-avatar-tone="4"]
+) { --private-avatar-a: var(--info); --private-avatar-b: var(--accent); }
+:is(
+  .incidencias-avatar[data-avatar-tone="5"],
+  .facturas-avatar--tone-5,
+  .clientes-avatar--tone-5,
+  .usuarios-avatar--tone-5,
+  .usuarios-avatar-tone-5,
+  .usuarios-avatar[data-avatar-tone="5"]
+) { --private-avatar-a: var(--success); --private-avatar-b: var(--accent); }
+:is(
+  .incidencias-avatar[data-avatar-tone="6"],
+  .facturas-avatar--tone-6,
+  .clientes-avatar--tone-6,
+  .usuarios-avatar--tone-6,
+  .usuarios-avatar-tone-6,
+  .usuarios-avatar[data-avatar-tone="6"]
+) { --private-avatar-a: var(--info); --private-avatar-b: var(--success); }
+:is(
+  .incidencias-avatar[data-avatar-tone="7"],
+  .facturas-avatar--tone-7,
+  .clientes-avatar--tone-7,
+  .usuarios-avatar--tone-7,
+  .usuarios-avatar-tone-7,
+  .usuarios-avatar[data-avatar-tone="7"]
+) { --private-avatar-a: var(--warning); --private-avatar-b: var(--error); }
+:is(
+  .incidencias-avatar[data-avatar-tone="8"],
+  .facturas-avatar--tone-8,
+  .clientes-avatar--tone-8,
+  .usuarios-avatar--tone-8,
+  .usuarios-avatar-tone-8,
+  .usuarios-avatar[data-avatar-tone="8"]
+) { --private-avatar-a: var(--error); --private-avatar-b: var(--accent); }
+:is(
+  .incidencias-avatar[data-avatar-tone="9"],
+  .facturas-avatar--tone-9,
+  .clientes-avatar--tone-9,
+  .usuarios-avatar--tone-9,
+  .usuarios-avatar-tone-9,
+  .usuarios-avatar[data-avatar-tone="9"]
+) { --private-avatar-a: var(--accent); --private-avatar-b: var(--success); }
 
 /* =========================================================
-   TARGET LISTINGS — INCIDENCIAS EFFECTIVE VALUES 1:1
-
-   Sólo alcanza el DOM de los listados. Crear y Details conservan sus hojas y
-   selectores propios.
+   SHARED CHIPS / SKELETONS / EMPTY / FEED
 ========================================================= */
 
-:is(.facturas-search-icon, .clientes-search-icon, .usuarios-search-icon) svg {
-  inline-size: 16px;
-  block-size: 16px;
-}
-
-:is(.facturas-search-input, .clientes-search-input, .usuarios-search-input) {
-  block-size: calc(var(--input-height) - 2px);
-  min-block-size: 0;
-  margin: 0;
-  color: var(--input-text, var(--text-strong));
-  caret-color: var(--text-strong);
-  box-shadow: none;
-  font-size: var(--font-md);
-  font-weight: var(--weight-medium);
-}
-
 :is(
-  .facturas-search-input,
-  .clientes-search-input,
-  .usuarios-search-input
-)::placeholder {
-  color: var(--input-placeholder, var(--text-dim));
-}
-
-:is(
-  .facturas-search-input,
-  .clientes-search-input,
-  .usuarios-search-input
-):focus::placeholder {
-  color: transparent;
-}
-
-:is(
-  .facturas-search-input,
-  .clientes-search-input,
-  .usuarios-search-input
-)::-webkit-search-decoration,
-:is(
-  .facturas-search-input,
-  .clientes-search-input,
-  .usuarios-search-input
-)::-webkit-search-cancel-button,
-:is(
-  .facturas-search-input,
-  .clientes-search-input,
-  .usuarios-search-input
-)::-webkit-search-results-button,
-:is(
-  .facturas-search-input,
-  .clientes-search-input,
-  .usuarios-search-input
-)::-webkit-search-results-decoration {
-  -webkit-appearance: none;
-}
-
-:is(.facturas-chip, .clientes-chip, .usuarios-chip, .facturas-mini-badge) {
-  min-block-size: 25px;
+  .facturas-chip,
+  .facturas-mini-badge,
+  .clientes-chip,
+  .clientes-mini-badge,
+  .usuarios-chip,
+  .usuarios-status-chip,
+  .usuarios-role-pill
+) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 6px;
   max-inline-size: 100%;
-  padding-inline: 8px;
+  border: 1px solid var(--badge-border);
   border-radius: var(--radius-pill);
-  font-size: 9.5px;
-  font-weight: var(--weight-semibold);
-  line-height: 1.25;
-  white-space: nowrap;
-}
-
-.facturas-mini-badge svg {
-  inline-size: 12px;
-  block-size: 12px;
-  color: currentColor;
-}
-
-:is(.clientes-category-pill, .clientes-mini-badge, .usuarios-role-pill) {
-  min-block-size: 20px;
-  display: inline-flex;
-  align-items: center;
-  padding-inline: 7px;
-  border-radius: var(--radius-pill);
-  font-size: 9px;
+  background: var(--badge-bg);
+  color: var(--badge-text);
   font-weight: var(--weight-semibold);
   line-height: 1;
-  text-transform: capitalize;
   white-space: nowrap;
 }
 
-:is(.facturas-row-badges, .clientes-client-line-top, .usuarios-user-line-top) {
-  gap: 6px;
-}
-
-:is(.facturas-factura-client, .clientes-client-name, .usuarios-user-name) {
-  line-height: 1.3;
-}
-
 :is(
-  .facturas-factura-contact,
-  .clientes-client-description,
-  .usuarios-user-description
-) {
-  color: var(--text-muted);
-  font-size: var(--font-xs);
-  font-weight: var(--weight-medium);
-  line-height: 1.35;
-}
-
-:is(.facturas-date-inline, .clientes-date-inline, .usuarios-date-inline) {
-  color: var(--text-soft);
-  font-size: var(--font-xs);
-  font-weight: var(--weight-medium);
-}
-
-:is(
-  .facturas-btn,
-  .clientes-btn,
-  .usuarios-btn
-):disabled,
-:is(
-  .facturas-btn,
-  .clientes-btn,
-  .usuarios-btn
-)[aria-disabled="true"] {
-  cursor: not-allowed;
-  opacity: .52;
-  transform: none;
-}
-
-:is(
-  .clientes-stat-card,
-  .usuarios-stat-card
-):focus-visible:not(.is-active):not([aria-pressed="true"]) {
-  border-color: var(--card-border);
-}
-
-:is(.clientes-table-row, .usuarios-table-row).is-loading > td {
-  opacity: .66;
-}
-
-:is(.facturas-table-wrap, .clientes-table-wrap, .usuarios-table-wrap) {
-  position: relative;
-  min-inline-size: 0;
-  min-block-size: 120px;
-}
-
-:is(
-  .facturas-refresh-overlay,
-  .clientes-refresh-overlay,
-  .usuarios-refresh-overlay
-) {
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-  display: grid;
-  place-items: start center;
-  padding-block-start: var(--space-md);
-  pointer-events: none;
-  background: color-mix(in srgb, var(--panel-bg) 68%, transparent);
-}
-
-:is(
-  .facturas-refresh-card,
-  .clientes-refresh-overlay > .clientes-inline-loading,
-  .usuarios-refresh-overlay > .usuarios-inline-loading
-) {
-  min-block-size: 34px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding-inline: 12px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-pill);
-  background: var(--panel-bg);
-  color: var(--text-soft);
-  box-shadow: var(--shadow-sm);
-  font-size: var(--font-xs);
-  font-weight: var(--weight-semibold);
-}
-
-[data-theme="light"] :is(
-  .facturas-refresh-overlay,
-  .clientes-refresh-overlay,
-  .usuarios-refresh-overlay
-) {
-  background: color-mix(in srgb, var(--panel-bg) 74%, transparent);
-}
-
-:is(.facturas-skeleton, .clientes-skeleton, .usuarios-skeleton) {
-  display: block;
-  block-size: 12px;
-  overflow: hidden;
-  border-radius: var(--radius-pill);
-  background:
-    linear-gradient(
-      90deg,
-      var(--solid-bg-2) 0%,
-      var(--solid-bg-2) 32%,
-      var(--solid-bg-3) 46%,
-      var(--solid-bg-2) 60%,
-      var(--solid-bg-2) 100%
-    );
-  background-size: 260% 100%;
-  animation: private-admin-shimmer 1.3s ease-in-out infinite;
-}
-
-:is(
-  .facturas-table-loading,
-  .clientes-table-loading,
-  .usuarios-table-loading
-) {
-  inline-size: 100%;
-  min-inline-size: 0;
-  overflow-x: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
-}
-
-:is(
+  .incidencias-skeleton,
   .facturas-skeleton,
   .clientes-skeleton,
   .usuarios-skeleton
-)::after {
-  display: none;
-  content: none;
-}
-
-:is(
-  .facturas-skeleton--avatar,
-  .clientes-skeleton--avatar,
-  .usuarios-skeleton--avatar
 ) {
-  inline-size: 42px;
-  block-size: 42px;
-  border-radius: var(--radius-sm);
+  display: block;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, var(--skeleton-bg), var(--skeleton-bg-strong), var(--skeleton-bg));
+  background-size: 220% 100%;
+  animation: private-admin-shimmer 1.35s linear infinite;
 }
 
 :is(
-  .facturas-skeleton--pill,
-  .clientes-skeleton--pill,
-  .usuarios-skeleton--pill
-) {
-  inline-size: 72%;
-  block-size: 12px;
-}
-
-:is(
-  .facturas-empty,
+  .incidencias-empty,
+  .incidencias-error,
   .facturas-error,
+  .facturas-empty,
   .clientes-empty,
   .usuarios-empty
 ) {
@@ -1005,744 +1338,131 @@
   place-items: center;
   align-content: center;
   gap: var(--space-sm);
-  margin: 0;
-  padding: var(--space-xl);
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+  padding: clamp(28px, 5vw, 64px) var(--space-lg);
+  color: var(--text-muted);
   text-align: center;
 }
 
-:is(.facturas-empty-icon, .clientes-empty-icon, .usuarios-empty-icon) {
-  inline-size: 46px;
-  block-size: 46px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  background: var(--solid-bg-2);
-  color: var(--text-muted);
-}
-
-:is(.facturas-empty-icon, .clientes-empty-icon, .usuarios-empty-icon) svg {
-  inline-size: 22px;
-  block-size: 22px;
-}
-
 :is(
-  .facturas-empty-title,
+  .incidencias-empty h3,
+  .incidencias-error-title,
   .facturas-error-title,
+  .facturas-empty-title,
   .clientes-empty h3,
   .usuarios-empty h3,
   .usuarios-empty-title
 ) {
-  font-size: var(--font-xl);
+  margin: 0;
+  color: var(--text-strong);
+  font-size: var(--font-lg);
+  font-weight: var(--weight-bold);
 }
 
 :is(
-  .facturas-empty-text,
+  .incidencias-empty p,
+  .incidencias-error-text,
   .facturas-error-text,
+  .facturas-empty-text,
   .clientes-empty p,
   .usuarios-empty p,
   .usuarios-empty-text
 ) {
-  max-inline-size: 620px;
-  line-height: var(--line-normal);
-}
-
-:is(.clientes-inline-error, .usuarios-inline-error) {
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-start;
-  gap: 10px;
-  padding: 11px 13px;
-  border: 1px solid var(--border-error);
-  border-radius: var(--radius-sm);
-  background: var(--error-bg);
-  color: var(--text-strong);
+  max-inline-size: 600px;
+  margin: 0;
+  color: var(--text-muted);
   font-size: var(--font-sm);
-  font-weight: var(--weight-medium);
-  line-height: 1.45;
+  line-height: 1.5;
 }
 
 :is(
   .facturas-infinite,
   .clientes-infinite,
-  .usuarios-list-footer
+  .incidencias-infinite,
+  .incidencias-feed-end,
+  .usuarios-list-footer,
+  .usuarios-feed-more,
+  .usuarios-feed-end,
+  .usuarios-feed-error
 ) {
-  min-block-size: 0;
-  display: grid;
-  place-items: center;
-  gap: var(--space-xs);
-  padding: var(--space-md);
-  color: var(--text-dim);
-  font-size: var(--font-xs);
-  font-weight: var(--weight-medium);
-}
-
-:is(
-  .facturas-infinite-status,
-  .clientes-infinite-status,
-  .usuarios-feed-status
-) {
-  min-block-size: 24px;
+  min-block-size: 46px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-xs);
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+  gap: var(--space-sm);
+  padding: 8px var(--space-md);
+  border-block-start: 1px solid var(--border-soft);
   color: var(--text-dim);
   font-size: var(--font-xs);
   font-weight: var(--weight-medium);
   text-align: center;
 }
 
-:is(
-  .facturas-infinite-status.is-error,
-  .clientes-infinite-status.is-error,
-  .usuarios-feed-error
-) {
-  inline-size: min(100%, 720px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: var(--space-sm);
-  padding: var(--space-sm);
-  border: 1px solid var(--border-error);
-  border-radius: var(--radius-sm);
-  background: var(--error-bg);
-  color: var(--text-strong);
-}
-
-:is(
-  .facturas-infinite-error-icon,
-  .clientes-infinite-error-icon,
-  .usuarios-feed-error-icon,
-  .clientes-inline-error-icon,
-  .usuarios-inline-error-icon
-) {
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  color: var(--error);
-}
-
-:is(
-  .facturas-infinite-error-icon,
-  .clientes-infinite-error-icon,
-  .usuarios-feed-error-icon,
-  .clientes-inline-error-icon,
-  .usuarios-inline-error-icon
-) svg {
-  inline-size: 17px;
-  block-size: 17px;
-}
-
-:is(
-  .facturas-infinite[data-has-more="false"],
-  .clientes-infinite[data-has-more="false"],
-  .usuarios-feed-end
-) {
-  border-block-start: 1px solid var(--border-soft);
-}
-
-@keyframes private-admin-shimmer {
-  from { background-position: 100% 0; }
-  to { background-position: -100% 0; }
-}
-
 /* =========================================================
-   CREATE MODALS — SHELL ÚNICO BASADO EN INCIDENCIAS
+   SERVER SUMMARY FOUNDATION
 ========================================================= */
 
-:is(
-  .inc-create-overlay,
-  .fac-create-overlay,
-  .cli-create-overlay,
-  .usr-create-overlay
-) {
-  place-items: center;
-  padding: clamp(12px, 2vw, 28px);
-  background: rgba(0, 0, 0, .64);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+.server-summary-grid {
+  min-inline-size: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-sm);
 }
 
-:is(
-  .inc-create-panel,
-  .fac-create-panel,
-  .cli-create-panel,
-  .usr-create-panel
-) {
-  inline-size: var(--private-admin-create-width);
-  max-inline-size: calc(100vw - 24px);
-  max-block-size: min(92dvh, 900px);
+.server-summary-card {
+  position: relative;
   min-inline-size: 0;
-  min-block-size: 0;
+  min-block-size: var(--private-admin-kpi-height);
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-content: start;
+  gap: 5px 11px;
   overflow: hidden;
-  border: 1px solid var(--panel-border);
-  border-radius: var(--modal-radius);
-  background: var(--panel-bg);
-  color: var(--text);
-  box-shadow: var(--shadow-modal, var(--panel-shadow));
-}
-
-/* El flujo cliente de Incidencias mantiene su intención compacta. */
-.inc-create-panel.is-client {
-  inline-size: min(900px, calc(100vw - 48px));
-}
-
-:is(
-  .inc-create-header,
-  .fac-create-header,
-  .cli-create-header,
-  .usr-create-header
-) {
-  min-inline-size: 0;
-  gap: var(--space-md);
-  padding: clamp(17px, 1.5vw, 24px) clamp(18px, 2vw, 30px);
-  border-block-end: 1px solid var(--border-soft);
-  background: var(--surface-2, var(--panel-bg));
-  box-shadow: none;
-}
-
-:is(
-  .inc-create-header h2,
-  .fac-create-header h2,
-  .cli-create-header h2,
-  #clientes-create-title,
-  #clientes-create-modal-title,
-  .usr-create-header-text h2
-) {
   margin: 0;
-  color: var(--text-strong);
-  font-size: clamp(24px, 2.2vw, 34px);
-  font-weight: var(--weight-black);
-  line-height: 1;
-  letter-spacing: var(--letter-tight);
-}
-
-:is(
-  .inc-create-header p,
-  .fac-create-header p,
-  .cli-create-header p,
-  .cli-create-title-wrap p,
-  .usr-create-header-text p
-) {
-  max-inline-size: 74ch;
-  margin: 0;
-  color: var(--text-muted);
-  font-size: var(--font-sm);
-  font-weight: var(--weight-medium);
-  line-height: 1.4;
-}
-
-:is(
-  .inc-create-close,
-  .fac-create-close,
-  .cli-create-close,
-  .usr-create-close
-) {
-  inline-size: 42px;
-  block-size: 42px;
-  min-inline-size: 42px;
-  min-block-size: 42px;
-  border: 1px solid var(--btn-secondary-border);
-  border-radius: var(--btn-radius);
-  background: var(--btn-secondary-bg);
-  color: var(--btn-secondary-text);
-}
-
-:is(
-  .inc-create-body,
-  .fac-create-body,
-  .cli-create-body,
-  .usr-create-body
-) {
-  min-inline-size: 0;
-  min-block-size: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
-  padding: clamp(18px, 1.6vw, 26px) clamp(18px, 2vw, 30px) clamp(22px, 2vw, 32px);
-}
-
-:is(
-  .inc-create-block,
-  .inc-create-admin-classification,
-  .inc-create-files-card,
-  .fac-create-section,
-  .cli-create-block,
-  .usr-create-main
-) {
-  min-inline-size: 0;
+  padding: var(--space-md);
   border: 1px solid var(--card-border);
-  border-radius: var(--card-radius);
+  border-radius: var(--radius-md);
   background: var(--card-bg);
+  color: var(--text);
   box-shadow: var(--card-shadow);
 }
 
-/* =========================================================
-   DETAIL MODALS — UN MISMO SHELL / AVATAR / COLOR / TIPO
-========================================================= */
-
-:is(
-  .ui-detail-modal-overlay,
-  .clientes-modal-overlay,
-  .facturas-detail-overlay
-) {
-  place-items: center;
-  padding: clamp(12px, 2vw, 28px);
-  background: var(--ui-detail-modal-overlay-bg);
-  backdrop-filter: var(--ui-detail-modal-overlay-blur);
-  -webkit-backdrop-filter: var(--ui-detail-modal-overlay-blur);
-}
-
-:is(
-  .ui-detail-modal-panel,
-  .clientes-modal-panel,
-  .facturas-detail-modal
-) {
-  inline-size: var(--ui-detail-modal-width);
-  block-size: min(92dvh, 940px);
-  max-inline-size: calc(100vw - 24px);
-  max-block-size: calc(100dvh - 24px);
-  border: 1px solid var(--ui-detail-modal-border);
-  border-radius: var(--ui-detail-modal-radius);
-  background: var(--ui-detail-modal-bg);
-  color: var(--text);
-  box-shadow: var(--ui-detail-modal-shadow);
-}
-
-:is(
-  .ui-detail-modal-header,
-  .clientes-modal-header,
-  .facturas-detail-header
-) {
-  min-inline-size: 0;
-  padding: var(--ui-detail-modal-header-padding);
-  border-block-end: 1px solid var(--ui-detail-modal-header-border);
-  background: var(--surface-2, var(--ui-detail-modal-bg));
-  box-shadow: none;
-}
-
-:is(
-  .ui-detail-modal-avatar,
-  .ui-detail-modal-avatar-frame,
-  .clientes-modal-avatar,
-  .clientes-modal-avatar-frame,
-  .facturas-detail-avatar
-) {
-  inline-size: var(--ui-detail-modal-avatar-size);
-  block-size: var(--ui-detail-modal-avatar-size);
-}
-
-:is(
-  .ui-detail-modal-avatar-frame,
-  .clientes-modal-avatar-frame,
-  .facturas-detail-avatar
-) {
-  border-radius: var(--ui-detail-modal-avatar-radius);
-  font-size: var(--font-lg);
-  font-weight: var(--weight-black);
-  letter-spacing: var(--letter-tight);
-}
-
-:is(
-  .ui-detail-modal-title,
-  .clientes-modal-title,
-  .facturas-detail-title
-) {
-  margin: 0;
-  color: var(--text-strong);
-  font-size: var(--ui-detail-modal-title-size);
-  font-weight: var(--weight-black);
-  line-height: var(--ui-detail-modal-title-line);
-  letter-spacing: var(--ui-detail-modal-title-letter);
-}
-
-:is(
-  .ui-detail-modal-chip,
-  .clientes-modal-chip,
-  .clientes-modal-id-chip,
-  .facturas-detail-chip,
-  .facturas-detail-number,
-  .facturas-detail-system-number
-) {
-  min-block-size: var(--ui-detail-modal-chip-height);
-  padding-inline: var(--ui-detail-modal-chip-padding-x);
-  border: 1px solid var(--badge-border);
-  border-radius: var(--radius-pill);
-  background: var(--badge-bg);
-  color: var(--badge-text);
-  font-family: var(--font-family);
-  font-size: var(--ui-detail-modal-chip-font-size);
-  font-weight: var(--weight-semibold);
+.server-summary-label {
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-bold);
   line-height: 1;
+  letter-spacing: .055em;
+  text-transform: uppercase;
 }
 
-:is(
-  .ui-detail-modal-body,
-  .clientes-modal-body,
-  .facturas-detail-body-shell
-) {
+.server-summary-value {
   min-inline-size: 0;
-  min-block-size: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
-  padding: var(--ui-detail-modal-padding);
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: clamp(22px, 1.9vw, 32px);
+  font-weight: var(--weight-black);
+  line-height: 1;
+  letter-spacing: var(--letter-tight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
-:is(
-  .ui-detail-modal-meta-card,
-  .ui-detail-modal-description-section,
-  .ui-detail-modal-contact-section,
-  .ui-detail-modal-history-section,
-  .clientes-modal-meta-card,
-  .clientes-modal-info-row,
-  .clientes-modal-address-card,
-  .clientes-modal-section,
-  .facturas-detail-mini,
-  .facturas-detail-stat,
-  .facturas-detail-tax-card,
-  .facturas-detail-section
-) {
-  border-color: var(--ui-detail-modal-card-border);
-  background: var(--ui-detail-modal-card-bg);
+.server-summary-detail {
+  min-inline-size: 0;
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-medium);
+  line-height: var(--line-normal);
+  overflow-wrap: anywhere;
 }
-
-:is(
-  .ui-detail-modal-close-btn,
-  .clientes-modal-close-btn,
-  .facturas-detail-btn--close
-) {
-  inline-size: 40px;
-  block-size: 40px;
-  min-inline-size: 40px;
-  min-block-size: 40px;
-  padding: 0;
-  border: 1px solid var(--btn-secondary-border);
-  border-radius: var(--radius-xs);
-  background: var(--btn-secondary-bg);
-  color: var(--btn-secondary-text);
-}
-
-/* Canonical detail avatar tones from the shared Incidencias component. */
-.clientes-modal-avatar-frame[data-avatar-tone="0"] { --cli-detail-avatar-a: var(--accent); --cli-detail-avatar-b: var(--info); }
-.clientes-modal-avatar-frame[data-avatar-tone="1"] { --cli-detail-avatar-a: var(--success); --cli-detail-avatar-b: var(--info); }
-.clientes-modal-avatar-frame[data-avatar-tone="2"] { --cli-detail-avatar-a: var(--warning); --cli-detail-avatar-b: var(--accent); }
-.clientes-modal-avatar-frame[data-avatar-tone="3"] { --cli-detail-avatar-a: var(--error); --cli-detail-avatar-b: var(--warning); }
-.clientes-modal-avatar-frame[data-avatar-tone="4"] { --cli-detail-avatar-a: var(--info); --cli-detail-avatar-b: var(--accent); }
-.clientes-modal-avatar-frame[data-avatar-tone="5"] { --cli-detail-avatar-a: var(--success); --cli-detail-avatar-b: var(--accent); }
-.clientes-modal-avatar-frame[data-avatar-tone="6"] { --cli-detail-avatar-a: var(--info); --cli-detail-avatar-b: var(--success); }
-.clientes-modal-avatar-frame[data-avatar-tone="7"] { --cli-detail-avatar-a: var(--warning); --cli-detail-avatar-b: var(--error); }
-.clientes-modal-avatar-frame[data-avatar-tone="8"] { --cli-detail-avatar-a: var(--error); --cli-detail-avatar-b: var(--accent); }
-.clientes-modal-avatar-frame[data-avatar-tone="9"] { --cli-detail-avatar-a: var(--accent); --cli-detail-avatar-b: var(--success); }
 
 /* =========================================================
    RESPONSIVE
 ========================================================= */
 
 @container (max-width: 1120px) {
-  :is(.facturas-stats, .clientes-stats, .usuarios-stats) {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  :is(
-    .facturas-history-head,
-    .clientes-history-head,
-    .usuarios-history-head
-  ) {
-    grid-template-columns: 1fr;
-    align-items: stretch;
-  }
-
-  :is(.facturas-filters, .clientes-filters) {
-    grid-template-columns: auto auto minmax(240px, 1fr);
-    justify-content: stretch;
-  }
-
-  .usuarios-filters {
-    grid-template-columns: auto minmax(240px, 1fr);
-    justify-content: stretch;
-  }
-}
-
-@container (max-width: 820px) {
-  :is(
-    .facturas-hero-top,
-    .clientes-hero-top,
-    .usuarios-hero-top
-  ) {
-    grid-template-columns: 1fr;
-  }
-
-  :is(
-    .facturas-hero-actions,
-    .clientes-hero-actions,
-    .usuarios-hero-actions
-  ) {
-    justify-content: flex-start;
-  }
-
-  :is(.facturas-filters, .clientes-filters) {
-    grid-template-columns: 1fr auto;
-  }
-
-  .usuarios-filters {
-    grid-template-columns: 1fr;
-  }
-
-  :is(.facturas-search, .clientes-search, .usuarios-search) {
-    grid-column: 1 / -1;
-    grid-row: 1;
-  }
-
-  :is(.facturas-filter-pills, .clientes-filter-pills) {
-    grid-column: 1;
-    grid-row: 2;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  :is(.facturas-sort-pills, .clientes-sort-pills) {
-    grid-column: 2;
-    grid-row: 2;
-    justify-self: end;
-  }
-
-  .usuarios-filter-pills {
-    grid-column: 1;
-    grid-row: 2;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  :is(
-    .facturas-filter-pills,
-    .clientes-filter-pills,
-    .usuarios-filter-pills
-  )::-webkit-scrollbar {
-    display: none;
-  }
-}
-
-@media (max-width: 680px) {
-  :is(
-    .facturas-table-loading,
-    .clientes-table-loading,
-    .usuarios-table-loading
-  ) {
-    gap: 8px;
-    padding: 8px;
-    overflow: visible;
-  }
-
-  :is(
-    .facturas-table-loading-row,
-    .clientes-table-loading-row,
-    .usuarios-table-loading-row
-  ) {
-    min-block-size: 0;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    gap: 9px;
-    padding: 12px;
-    border: 1px solid var(--data-table-row-border, var(--border-soft));
-    border-radius: var(--radius-md);
-    background: var(--card-bg);
-    box-shadow: var(--shadow-sm);
-  }
-
-  :is(
-    .facturas-skeleton--avatar,
-    .clientes-skeleton--avatar,
-    .usuarios-skeleton--avatar
-  ) {
-    grid-column: 1;
-    grid-row: 1;
-  }
-
-  :is(
-    .facturas-table-loading-copy,
-    .clientes-table-loading-copy,
-    .usuarios-table-loading-copy
-  ) {
-    grid-column: 2 / -1;
-    grid-row: 1;
-  }
-
-  :is(
-    .facturas-skeleton--pill,
-    .clientes-skeleton--pill,
-    .usuarios-skeleton--pill
-  ) {
-    grid-column: 1 / span 3;
-    grid-row: 2;
-  }
-
-  :is(
-    .facturas-skeleton--amount,
-    .clientes-skeleton--amount
-  ) {
-    grid-column: 4 / span 3;
-    grid-row: 2;
-  }
-
-  :is(
-    .facturas-skeleton--date,
-    .clientes-skeleton--date
-  ) {
-    grid-column: 1 / span 2;
-    grid-row: 3;
-  }
-
-  :is(
-    .facturas-skeleton--ticket,
-    .clientes-skeleton--contact
-  ) {
-    grid-column: 3 / span 4;
-    grid-row: 3;
-  }
-
-  .facturas-skeleton--actions {
-    grid-column: 1 / -1;
-    grid-row: 4;
-  }
-
-  .usuarios-skeleton--date {
-    grid-column: 4 / span 3;
-    grid-row: 2;
-  }
-
-  .usuarios-skeleton--email {
-    grid-column: 1 / -1;
-    grid-row: 3;
-  }
-
-  .usuarios-skeleton--location {
-    grid-column: 1 / span 3;
-    grid-row: 4;
-  }
-
-  .usuarios-skeleton--activity {
-    grid-column: 4 / span 3;
-    grid-row: 4;
-  }
-}
-
-@container (max-width: 560px) {
-  :is(.facturas-view-root, .clientes-view-root, .usuarios-view-root) {
-    gap: var(--space-md);
-  }
-
-  :is(.facturas-hero, .clientes-hero, .usuarios-hero) {
-    padding-inline: 0;
-  }
-
-  :is(
-    .facturas-hero-actions,
-    .clientes-hero-actions,
-    .usuarios-hero-actions,
-    .facturas-hero-actions > button,
-    .clientes-hero-actions > button,
-    .usuarios-hero-actions > button
-  ) {
-    inline-size: 100%;
-  }
-
-  :is(
-    .facturas-hero-actions > button,
-    .clientes-hero-actions > button,
-    .usuarios-hero-actions > button
-  ) {
-    flex: 1 1 calc(50% - var(--space-xs));
-  }
-
-  :is(.facturas-hero-meta, .clientes-hero-meta, .usuarios-hero-meta) {
-    gap: 6px;
-  }
-
-  :is(.facturas-meta-pill, .clientes-meta-pill, .usuarios-meta-pill) {
-    max-inline-size: 100%;
-  }
-
-  :is(
-    .facturas-page-title,
-    .clientes-page-title,
-    .clientes-title,
-    .usuarios-page-title,
-    .usuarios-title
-  ) {
-    font-size: clamp(27px, 9vw, 36px);
-  }
-
-  :is(.facturas-stats, .clientes-stats, .usuarios-stats) {
-    grid-template-columns: 1fr;
-  }
-
-  :is(
-    .facturas-stat-card,
-    .clientes-stat-card,
-    .usuarios-stat-card
-  ) {
-    min-block-size: 94px;
-  }
-
-  :is(.facturas-history, .clientes-history, .usuarios-history) {
-    border-radius: var(--radius-md);
-  }
-
-  :is(
-    .facturas-history-head,
-    .clientes-history-head,
-    .usuarios-history-head
-  ) {
-    padding: var(--space-sm);
-  }
-
-  :is(.facturas-filters, .clientes-filters, .usuarios-filters) {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  :is(
-    .facturas-search,
-    .facturas-filter-pills,
-    .facturas-sort-pills,
-    .clientes-search,
-    .clientes-filter-pills,
-    .clientes-sort-pills,
-    .usuarios-search,
-    .usuarios-filter-pills
-  ) {
-    grid-column: 1;
-    inline-size: 100%;
-  }
-
-  :is(.facturas-sort-pills, .clientes-sort-pills) {
-    grid-row: 3;
-    justify-self: stretch;
-  }
-
-  :is(.facturas-sort-pill, .clientes-sort-pill) {
-    inline-size: 100%;
-  }
-}
-
-@media (max-width: 980px) {
-  :is(
-    .incidencias-stats,
-    .facturas-stats,
-    .clientes-stats,
-    .usuarios-stats
-  ) {
+  :is(.incidencias-stats, .facturas-stats, .clientes-stats, .usuarios-stats) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1755,18 +1475,25 @@
     grid-template-columns: 1fr;
     align-items: stretch;
   }
-}
 
-@media (max-width: 720px) {
-  :root {
-    --private-admin-create-width: min(calc(100vw - 20px), 1080px);
+  :is(.incidencias-filters, .facturas-filters, .clientes-filters) {
+    grid-template-columns: auto auto minmax(240px, 1fr);
+    justify-content: stretch;
   }
 
+  .usuarios-filters {
+    grid-template-columns: auto minmax(240px, 1fr);
+    justify-content: stretch;
+  }
+}
+
+@container (max-width: 820px) {
   :is(
     .incidencias-hero-top,
     .facturas-hero-top,
     .clientes-hero-top,
-    .usuarios-hero-top
+    .usuarios-hero-top,
+    .server-hero-top
   ) {
     grid-template-columns: 1fr;
   }
@@ -1775,96 +1502,211 @@
     .incidencias-hero-actions,
     .facturas-hero-actions,
     .clientes-hero-actions,
-    .usuarios-hero-actions
+    .usuarios-hero-actions,
+    .server-hero-actions
   ) {
     justify-content: flex-start;
   }
 
-  :is(
-    .inc-create-panel,
-    .fac-create-panel,
-    .cli-create-panel,
-    .usr-create-panel
-  ) {
-    inline-size: min(calc(100vw - 20px), 1080px);
-  }
-
-  :is(
-    .ui-detail-modal-avatar,
-    .ui-detail-modal-avatar-frame,
-    .clientes-modal-avatar,
-    .clientes-modal-avatar-frame,
-    .facturas-detail-avatar
-  ) {
-    inline-size: var(--ui-detail-modal-avatar-size);
-    block-size: var(--ui-detail-modal-avatar-size);
-  }
-}
-
-@media (max-width: 560px) {
-  :is(
-    .incidencias-stats,
-    .facturas-stats,
-    .clientes-stats,
-    .usuarios-stats
-  ) {
+  :is(.incidencias-filters, .facturas-filters, .clientes-filters, .usuarios-filters) {
     grid-template-columns: 1fr;
   }
 
   :is(
-    .incidencias-btn--create,
-    #incidencias-create-btn,
-    .facturas-btn--create,
-    #facturas-create-btn,
-    .clientes-btn--create,
-    #clientes-create-btn,
-    .usuarios-btn--create,
-    #usuarios-create-btn
+    .incidencias-filter-pills,
+    .incidencias-sort-pills,
+    .facturas-filter-pills,
+    .facturas-sort-pills,
+    .clientes-filter-pills,
+    .clientes-sort-pills,
+    .usuarios-filter-pills
+  ) {
+    overflow-x: auto;
+    justify-content: flex-start;
+    padding-block-end: 2px;
+    scrollbar-width: thin;
+  }
+}
+
+@media (max-width: 680px) {
+  :is(
+    .incidencias-view-root,
+    .facturas-view-root,
+    .clientes-view-root,
+    .usuarios-view-root,
+    .server-view-root,
+    .servidor-view-root
+  ) {
+    gap: var(--space-md);
+  }
+}
+
+@container (max-width: 560px) {
+  :is(
+    .incidencias-hero,
+    .facturas-hero,
+    .clientes-hero,
+    .usuarios-hero,
+    .server-hero,
+    .servidor-hero
+  ) {
+    padding-inline: 0;
+  }
+
+  :is(
+    .incidencias-title,
+    .facturas-page-title,
+    .clientes-page-title,
+    .clientes-title,
+    .usuarios-page-title,
+    .usuarios-title,
+    .server-title
+  ) {
+    font-size: clamp(27px, 9vw, 38px);
+  }
+
+  :is(
+    .incidencias-hero-actions,
+    .facturas-hero-actions,
+    .clientes-hero-actions,
+    .usuarios-hero-actions,
+    .server-hero-actions
   ) {
     inline-size: 100%;
-    min-inline-size: 0;
   }
+
+  :is(.incidencias-stats, .facturas-stats, .clientes-stats, .usuarios-stats) {
+    grid-template-columns: 1fr;
+    gap: var(--space-xs);
+  }
+
+  :is(.incidencias-history, .facturas-history, .clientes-history, .usuarios-history, .server-panel) {
+    border-radius: var(--radius-md);
+  }
+
+  :is(
+    .incidencias-history-head,
+    .facturas-history-head,
+    .clientes-history-head,
+    .usuarios-history-head
+  ) {
+    padding: var(--space-sm);
+  }
+
+  :is(
+    .incidencias-filter-pill,
+    .incidencias-sort-pill,
+    .facturas-filter-pill,
+    .facturas-sort-pill,
+    .clientes-filter-pill,
+    .clientes-sort-pill,
+    .usuarios-filter-pill
+  ) {
+    flex: 0 0 auto;
+  }
+
+  .server-section-head {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+}
+
+/* =========================================================
+   ACCESSIBILITY / PRINT
+========================================================= */
+
+@keyframes private-admin-shimmer {
+  to { background-position: -220% 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  :is(.facturas-skeleton, .clientes-skeleton, .usuarios-skeleton) {
-    animation: none;
-  }
-
   :is(
+    .incidencias-btn,
+    .facturas-btn,
+    .clientes-btn,
+    .usuarios-btn,
+    .server-btn,
     .incidencias-stat-card,
+    .facturas-stat-card,
     .clientes-stat-card,
     .usuarios-stat-card,
-    .facturas-skeleton,
-    .clientes-skeleton,
-    .usuarios-skeleton,
-    .incidencias-meta-pill--action,
-    .incidencias-btn--create,
-    #incidencias-create-btn,
-    .facturas-btn--create,
-    #facturas-create-btn,
-    .clientes-btn--create,
-    #clientes-create-btn,
-    .usuarios-btn--create,
-    #usuarios-create-btn
+    .incidencias-filter-pill,
+    .facturas-filter-pill,
+    .clientes-filter-pill,
+    .usuarios-filter-pill,
+    .incidencias-search,
+    .facturas-search,
+    .clientes-search,
+    .usuarios-search
   ) {
-    transition-duration: 0ms;
-    transform: none;
+    transition: none;
+  }
+
+  :is(.incidencias-skeleton, .facturas-skeleton, .clientes-skeleton, .usuarios-skeleton) {
+    animation: none;
+  }
+}
+
+@media (forced-colors: active) {
+  :is(
+    .incidencias-stat-card,
+    .facturas-stat-card,
+    .clientes-stat-card,
+    .usuarios-stat-card,
+    .incidencias-history,
+    .facturas-history,
+    .clientes-history,
+    .usuarios-history,
+    .server-panel,
+    .server-summary-card
+  ) {
+    forced-color-adjust: auto;
+  }
+}
+
+@media print {
+  :is(
+    .incidencias-hero-actions,
+    .facturas-hero-actions,
+    .clientes-hero-actions,
+    .usuarios-hero-actions,
+    .server-hero-actions,
+    .incidencias-filters,
+    .facturas-filters,
+    .clientes-filters,
+    .usuarios-filters,
+    .incidencias-infinite,
+    .facturas-infinite,
+    .clientes-infinite,
+    .usuarios-list-footer,
+    .server-loading
+  ) {
+    display: none;
   }
 
   :is(
-    .incidencias-btn--create,
-    #incidencias-create-btn,
-    .facturas-btn--create,
-    #facturas-create-btn,
-    .clientes-btn--create,
-    #clientes-create-btn,
-    .usuarios-btn--create,
-    #usuarios-create-btn
-  ) > svg {
-    transition-duration: 0ms;
-    transform: none;
+    .incidencias-history,
+    .facturas-history,
+    .clientes-history,
+    .usuarios-history,
+    .server-panel,
+    .incidencias-stat-card,
+    .facturas-stat-card,
+    .clientes-stat-card,
+    .usuarios-stat-card,
+    .server-summary-card
+  ) {
+    box-shadow: none;
+  }
+
+  :is(
+    .incidencias-table-shell,
+    .facturas-table-shell,
+    .clientes-table-shell,
+    .usuarios-table-shell
+  ) {
+    overflow: visible;
   }
 }
 
-}
+} /* @layer compositions */

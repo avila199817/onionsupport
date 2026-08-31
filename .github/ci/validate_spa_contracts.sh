@@ -118,6 +118,8 @@ if errors:
 print("Contratos SPA críticos OK.")
 PY
 
+python3 .github/scripts/private_css_authority_contract.py
+
 node .github/scripts/core_runtime_contract.mjs
 node .github/scripts/core_snapshot_contract.mjs
 node .github/scripts/auth_selector_contract.mjs

@@ -76,6 +76,9 @@ jobs:
       - name: Validate Incidencias stats scope truth
         run: node .github/scripts/incidencias_stats_scope_contract.mjs
 
+      - name: Validate Incidencias filter facets
+        run: node .github/scripts/incidencias_filter_facets_contract.mjs
+
       - name: Validate Incidencias Detail attachment policy
         run: node .github/scripts/incidencias_detail_attachment_policy_contract.mjs
 

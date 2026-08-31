@@ -7,12 +7,15 @@ const FOLLOWUP_PATH =
   "src/features/incidencias-followup-avatars/index.js";
 const FOLLOWUP_STYLE_PATH =
   "src/features/incidencias-followup-avatars/style.css";
+const DETAIL_MODAL_STYLE_PATH =
+  "src/css/components/detail-modal.css";
 const ENHANCEMENTS_PATH =
   "src/app/enhancements.js";
 
 const source = fs.readFileSync(FEATURE_PATH, "utf8");
 const followupSource = fs.readFileSync(FOLLOWUP_PATH, "utf8");
 const followupStyle = fs.readFileSync(FOLLOWUP_STYLE_PATH, "utf8");
+const detailModalStyle = fs.readFileSync(DETAIL_MODAL_STYLE_PATH, "utf8");
 const enhancementsSource = fs.readFileSync(ENHANCEMENTS_PATH, "utf8");
 
 assert.match(
@@ -83,8 +86,8 @@ assert.match(
 
 assert.match(
   followupSource,
-  /incidencias\.followup-avatars\.v3\.universal-initials/u,
-  "Seguimiento debe versionar explícitamente el avatar universal con iniciales"
+  /incidencias\.followup-avatars\.v4\.canonical-visual/u,
+  "Seguimiento debe versionar explícitamente la piel visual canónica compartida"
 );
 
 assert.match(
@@ -97,6 +100,18 @@ assert.doesNotMatch(
   followupSource,
   /createElement\("style"\)/u,
   "el feature no debe inyectar CSS dinámico desde JavaScript"
+);
+
+assert.match(
+  followupSource,
+  /avatar\.className\s*=\s*[\s\S]*?AVATAR_CLASS[\s\S]*?CANONICAL_AVATAR_FRAME_CLASS/u,
+  "el comentario debe montar el mismo frame ui-detail-modal-avatar-frame del encabezado"
+);
+
+assert.match(
+  followupSource,
+  /fallback\.className\s*=\s*[\s\S]*?AVATAR_FALLBACK_CLASS[\s\S]*?CANONICAL_AVATAR_FALLBACK_CLASS/u,
+  "las iniciales deben reutilizar el fallback estructural canónico"
 );
 
 assert.match(
@@ -184,33 +199,21 @@ assert.match(
 );
 
 assert.match(
-  followupStyle,
-  /background:\s*linear-gradient\([\s\S]*?var\(--followup-avatar-a\)[\s\S]*?var\(--followup-avatar-b\)/u,
-  "las iniciales deben usar el gradiente canónico del sistema de avatares"
+  detailModalStyle,
+  /\.ui-detail-modal-avatar-frame\s*\{[\s\S]*?border:\s*1px solid color-mix[\s\S]*?background:\s*linear-gradient\(135deg,[\s\S]*?box-shadow:\s*inset 0 1px 0 color-mix/u,
+  "gradiente, borde y brillo deben pertenecer al componente canónico compartido"
 );
 
 assert.match(
-  followupStyle,
-  /\[data-avatar-tone="3"\][\s\S]*?--followup-avatar-a:\s*var\(--error\);[\s\S]*?--followup-avatar-b:\s*var\(--warning\);/u,
-  "el tono naranja de Carlos debe conservar la pareja error-warning del encabezado"
+  detailModalStyle,
+  /\.ui-detail-modal-avatar-frame\[data-avatar-tone="3"\][\s\S]*?--ui-detail-avatar-a:\s*var\(--error\);[\s\S]*?--ui-detail-avatar-b:\s*var\(--warning\);/u,
+  "Carlos debe conservar la pareja error-warning del mismo selector que el encabezado"
 );
 
-assert.match(
+assert.doesNotMatch(
   followupStyle,
-  /incidencias-modal-description-comment-avatar-fallback[\s\S]*?place-items:\s*center/u,
-  "las iniciales deben quedar centradas dentro del círculo"
-);
-
-assert.match(
-  followupStyle,
-  /border:\s*1px solid color-mix/u,
-  "el acabado premium debe usar un borde sutil derivado del design system"
-);
-
-assert.match(
-  followupStyle,
-  /0 0 0 2px color-mix[\s\S]*?0 2px 8px rgba\(0, 0, 0, \.22\)/u,
-  "el avatar debe tener ring y profundidad discretos, no una tarjeta nueva"
+  /--followup-avatar-|linear-gradient|box-shadow:\s|\[data-avatar-tone=/u,
+  "Seguimiento no puede mantener una segunda paleta o textura visual"
 );
 
 assert.match(
@@ -220,9 +223,9 @@ assert.match(
 );
 
 assert.match(
-  followupStyle,
-  /@media \(forced-colors: active\)/u,
-  "el acabado debe conservar una alternativa accesible en forced-colors"
+  detailModalStyle,
+  /@media \(forced-colors: active\)[\s\S]*?\.ui-detail-modal-avatar-frame\s*\{[\s\S]*?background:\s*Canvas;[\s\S]*?box-shadow:\s*none;/u,
+  "la alternativa forced-colors también debe pertenecer al componente compartido"
 );
 
 assert.doesNotMatch(
@@ -343,5 +346,5 @@ const profiles = [requester, technician];
 }
 
 console.log(
-  "Incidencias comment avatar contract OK · initials universal · tone parity · identity-first · 28/26px"
+  "Incidencias comment avatar contract OK · canonical visual owner · stable tones · identity-first · 28/26px"
 );

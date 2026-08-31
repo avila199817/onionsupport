@@ -221,19 +221,19 @@ assert.match(
 
 assert.match(
   detailExperienceSource,
-  /date\\.className\\s*=\\s*"incidencias-modal-description-comment-date"/u,
+  /date\.className\s*=\s*"incidencias-modal-description-comment-date"/u,
   "la fecha del comentario debe exponer una clase semántica propia"
 );
 
 assert.match(
   privateInteractionsStyle,
-  /\\.incidencias-modal-description-comment-date\\s*\\{[\\s\\S]*?color:\\s*var\\(--text-muted\\);/u,
+  /\.incidencias-modal-description-comment-date\s*\{[\s\S]*?color:\s*var\(--text-muted\);/u,
   "sólo la fecha debe consumir la tipografía secundaria del comentario"
 );
 
 assert.doesNotMatch(
   privateInteractionsStyle,
-  /\\.incidencias-modal-description-comment-head\\s+span\\s*\\{/u,
+  /\.incidencias-modal-description-comment-head\s+span\s*\{/u,
   "la tipografía contextual no puede alcanzar avatares u otros spans del encabezado"
 );
 

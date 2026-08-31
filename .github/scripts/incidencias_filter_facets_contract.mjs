@@ -177,6 +177,7 @@ const serverUrgentInput = {
   filterFacetsExact: true,
 };
 const serverUrgentHtml = renderIncidenciasTemplate(serverUrgentInput);
+assert.match(serverUrgentHtml, /data-server-filter-applied="true"/);
 assert.match(serverUrgentHtml, /URGENT-HIGH/);
 assert.match(
   serverUrgentHtml,
@@ -212,6 +213,11 @@ assert.match(
   controllerSource,
   /loadIncidenciasPage\(\{[\s\S]*?query:\s*getIncidenciasFacetRequestQuery/,
   "las facetas deben usar el page loader cache-neutral"
+);
+assert.match(
+  controllerSource,
+  /function payload\(extra = \{\}\)[\s\S]*?filter,\s*serverFilterApplied:\s*\["open", "closed", "urgent"\]\.includes\(filter\),\s*search,[\s\S]*?function viewPayload/,
+  "la autoridad remota debe llegar al payload que renderiza la tabla, no sólo al snapshot interno"
 );
 
 console.log(

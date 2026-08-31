@@ -85,7 +85,7 @@ import {
 } from "./incidencias.filter-facets.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.extreme.v42-attachment-delete-focus-return";
+  "incidencias.index.extreme.v43-stable-attachment-delete-focus";
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
@@ -1222,6 +1222,12 @@ function createIncidenciasController(
   */
   let modalReturnFocus = null;
 
+  /*
+     Botón de adjunto que abrió la confirmación. Durante abrir/cancelar
+     preservamos la lista para mantener esta referencia conectada.
+  */
+  let attachmentDeleteReturnFocus = null;
+
   const createModal = {
     open: false,
     submitting: false,
@@ -1377,6 +1383,7 @@ function createIncidenciasController(
     detailModal.attachmentDeleteConfirmOpen = false;
     detailModal.attachmentDeleteConfirmId = "";
     detailModal.attachmentDeleteConfirmName = "";
+    attachmentDeleteReturnFocus = null;
 
     detailModal.feedbackMessage = "";
     detailModal.feedbackType = "info";
@@ -3256,6 +3263,13 @@ function createIncidenciasController(
           "[data-modal-history-slot='true']",
         ]
       ) {
+        if (
+          options.preserveAttachmentList === true &&
+          selector === "[data-modal-files-slot='true']"
+        ) {
+          continue;
+        }
+
         replacePart(
           currentRoot,
           nextRoot,
@@ -4810,6 +4824,7 @@ async function load(options = {}) {
     detailModal.attachmentDeleteConfirmOpen = false;
     detailModal.attachmentDeleteConfirmId = "";
     detailModal.attachmentDeleteConfirmName = "";
+    attachmentDeleteReturnFocus = null;
 
     detailModal.commentDraft = "";
     detailModal.pendingFiles = [];
@@ -4926,6 +4941,7 @@ async function load(options = {}) {
       detailModal.attachmentDeleteConfirmOpen = false;
       detailModal.attachmentDeleteConfirmId = "";
       detailModal.attachmentDeleteConfirmName = "";
+      attachmentDeleteReturnFocus = null;
       detailModal.commentDraft = "";
       detailModal.pendingFiles = [];
 
@@ -5829,6 +5845,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
     detailModal.attachmentDeleteConfirmOpen = false;
     detailModal.attachmentDeleteConfirmId = "";
     detailModal.attachmentDeleteConfirmName = "";
+    attachmentDeleteReturnFocus = null;
     detailModal.feedbackMessage = "";
     detailModal.feedbackType = "info";
 
@@ -6240,7 +6257,8 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
   }
 
   function requestAttachmentDelete(
-    attachmentId = ""
+    attachmentId = "",
+    openerNode = null
   ) {
     const id =
       cleanText(
@@ -6299,11 +6317,16 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
     detailModal.attachmentDeleteConfirmOpen = true;
     detailModal.attachmentDeleteConfirmId = id;
     detailModal.attachmentDeleteConfirmName = filename;
+    attachmentDeleteReturnFocus =
+      openerNode?.isConnected
+        ? openerNode
+        : null;
     detailModal.feedbackMessage = "";
     detailModal.feedbackType = "info";
 
     renderModals({
       immediate: true,
+      preserveAttachmentList: true,
       focusSelector:
         `[data-detail-action="${DETAIL_ACTIONS.ATTACHMENT_DELETE_CANCEL}"]`,
     });
@@ -6315,6 +6338,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
     detailModal.attachmentDeleteConfirmOpen = false;
     detailModal.attachmentDeleteConfirmId = "";
     detailModal.attachmentDeleteConfirmName = "";
+    attachmentDeleteReturnFocus = null;
   }
 
   function cancelAttachmentDeleteConfirm() {
@@ -6329,6 +6353,9 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
     const attachmentId =
       detailModal.attachmentDeleteConfirmId;
 
+    const returnFocus =
+      attachmentDeleteReturnFocus;
+
     const focusSelector =
       attachmentId
         ? `[data-detail-action="${DETAIL_ACTIONS.ATTACHMENT_DELETE}"][data-attachment-id="${escapeCssAttribute(attachmentId)}"]`
@@ -6336,15 +6363,15 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
 
     clearAttachmentDeleteConfirm();
 
+    /*
+       La confirmación no cambia los adjuntos. Preservar su slot mantiene vivo
+       el botón que abrió el diálogo y evita un repintado innecesario.
+    */
     renderModals({
       immediate: true,
+      preserveAttachmentList: true,
     });
 
-    /*
-       El overlay y la lista de adjuntos se reemplazan en el mismo evento.
-       Restaurar en el siguiente frame garantiza que el botón definitivo ya
-       está conectado y evita que el foco caiga en document.body.
-    */
     nextFrame(() => {
       if (
         destroyed ||
@@ -6352,6 +6379,25 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
         detailModal.attachmentDeleteConfirmOpen
       ) {
         return;
+      }
+
+      if (
+        returnFocus?.isConnected &&
+        typeof returnFocus.focus === "function"
+      ) {
+        try {
+          returnFocus.focus({
+            preventScroll: true,
+          });
+          return;
+        } catch {
+          try {
+            returnFocus.focus();
+            return;
+          } catch {
+            // El selector exacto es el fallback si el nodo dejó de existir.
+          }
+        }
       }
 
       focusAfterRender(
@@ -7506,7 +7552,8 @@ async function loadMore(options = {}) {
     ) {
       return requestAttachmentDelete(
         node?.dataset?.attachmentId ||
-        ""
+        "",
+        node
       );
     }
 

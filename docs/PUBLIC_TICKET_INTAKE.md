@@ -8,18 +8,20 @@ La home pública envía una única solicitud al backend mediante:
 
 El navegador **no** crea por separado usuarios, clientes ni tickets. El backend es la única autoridad de identidad y de vinculación.
 
-El endpoint mantiene **autenticación opcional**: usa la sesión cuando existe y aplica resolución anónima segura por datos de contacto cuando no existe sesión.
+El endpoint mantiene **autenticación opcional**, pero la sesión no decide por sí sola el propietario de la incidencia. El backend resuelve siempre los datos de contacto enviados —**correo y teléfono**— y sólo considera el flujo autenticado cuando esa identidad resuelta coincide exactamente con el actor de la sesión.
 
 Contrato productivo final:
 
 1. Valida y normaliza identidad/contacto.
 2. Aplica rate limit por IP e identidad.
-3. Resuelve la cuenta por sesión autenticada o, en modo anónimo, por **correo o teléfono**.
-4. Si ya existe usuario, reutiliza ese mismo usuario **sin crear ni sobrescribir nada del perfil**.
-5. Si no existe usuario por ninguno de los dos identificadores, crea únicamente un usuario `user` pendiente y su activación.
-6. La home pública **nunca crea clientes**. La ficha de cliente la crea o gestiona posteriormente el personal de Onion Support cuando corresponda.
-7. Crea la incidencia con el mismo generador canónico de IDs que el panel.
-8. Mantiene idempotencia y la política de una incidencia en curso por cuenta.
+3. Resuelve siempre la cuenta por **correo y teléfono enviados**, exista o no una sesión iniciada.
+4. Si ya existe usuario por esos identificadores, reutiliza ese mismo usuario **sin crear ni sobrescribir nada del perfil**.
+5. Si no existe usuario por ninguno de los dos identificadores, crea únicamente un usuario `user` pendiente y su activación, incluso si el navegador mantiene abierta la sesión de otra cuenta.
+6. Si correo y teléfono apuntan a cuentas distintas, falla de forma cerrada: no crea ticket, no crea usuario y no modifica ninguna cuenta.
+7. La sesión sólo habilita el tratamiento autenticado cuando la cuenta resuelta por contacto es el mismo usuario autenticado.
+8. La home pública **nunca crea clientes**. La ficha de cliente la crea o gestiona posteriormente el personal de Onion Support cuando corresponda.
+9. Crea la incidencia con el mismo generador canónico de IDs que el panel.
+10. Mantiene idempotencia y la política de una incidencia en curso por cuenta.
 
 ## Request
 
@@ -51,8 +53,7 @@ Cada envío lleva una cabecera `Idempotency-Key` con formato `YYYYMMDD:<nonce>`.
 
 La versión actual acepta únicamente teléfonos de España.
 
-- La interfaz muestra `+34` como prefijo visual externo al input.
-- El input contiene únicamente los 9 dígitos nacionales, con formato visual `XXX XXX XXX`.
+- La interfaz muestra el contexto español y el input contiene los 9 dígitos nacionales con formato visual `XXX XXX XXX`.
 - El payload se normaliza a `+34 XXX XXX XXX`.
 - Se admite numeración española cuyo primer dígito nacional sea `6`, `7`, `8` o `9`.
 - El backend vuelve a validar y normalizar el teléfono y nunca confía únicamente en el navegador.
@@ -67,31 +68,42 @@ WhatsApp permanece como canal alternativo independiente mediante sus enlaces y e
 
 La política productiva es **una única incidencia en curso por cuenta**.
 
-- El backend identifica la cuenta por `userId` canónico y es la autoridad definitiva.
+- El backend identifica la cuenta por el `userId` canónico obtenido después de resolver correo y teléfono enviados.
 - El frontend, después de una solicitud aceptada, bloquea durante la vista actual nuevos envíos si coincide **el mismo correo o el mismo teléfono**.
 - Cambiar solo el correo manteniendo el mismo teléfono, o viceversa, no debe levantar el bloqueo local.
-- Si el backend devuelve el conflicto canónico `PUBLIC_TICKET_ACTIVE_EXISTS`, una sesión autenticada puede mostrar el conflicto explícitamente y remitir al panel.
-- En modo anónimo la respuesta permanece neutra para evitar enumeración de cuentas o incidencias.
+- Si el backend devuelve `PUBLIC_TICKET_ACTIVE_EXISTS`, sólo una sesión que sea realmente la propietaria de la identidad resuelta puede recibir el conflicto explícito y la referencia al panel.
+- Cuando el contacto enviado pertenece a otra cuenta o el flujo no puede tratarse como autenticado, la respuesta permanece neutra para evitar enumeración de cuentas o incidencias.
 
 ## Reglas de identidad
 
-### Sesión autenticada
+### Autoridad de correo + teléfono
 
-Si existe sesión válida, el endpoint admite el `Authorization` normal del cliente HTTP y la identidad de seguridad de la sesión manda sobre los campos escritos en el formulario.
+Los campos enviados son la autoridad de vinculación del intake público. La existencia de una cookie o token válido **no sustituye** esta resolución.
 
-El correo o teléfono introducido en el formulario no cambia el propietario de una incidencia autenticada ni sobrescribe el perfil.
-
-La home no precarga automáticamente el nombre completo del usuario autenticado. Puede precargar otros datos de contacto ya disponibles únicamente como ayuda de formulario; el backend sigue siendo la autoridad canónica.
-
-### Visitante anónimo: resolución por correo O teléfono
-
-El backend busca coincidencias canónicas por ambos identificadores.
+El backend busca coincidencias canónicas por ambos identificadores en todos los casos:
 
 - Si solo coincide el correo, reutiliza ese usuario.
 - Si solo coincide el teléfono, reutiliza ese usuario.
 - Si correo y teléfono coinciden con el mismo usuario, reutiliza ese usuario.
 - Si el correo apunta a un usuario y el teléfono a otro distinto, la identidad es inconsistente: no se crea ticket, no se crea usuario y no se modifica ninguna cuenta.
-- La respuesta exterior de un visitante anónimo no revela cuál de estos casos ocurrió.
+- Si ninguno coincide, la identidad es nueva y se provisiona un usuario pendiente.
+
+La respuesta exterior no debe revelar a un tercero cuál de estos casos ocurrió.
+
+### Sesión autenticada
+
+El frontend puede enviar el `Authorization` normal del cliente HTTP cuando existe sesión, pero el backend usa esa sesión únicamente como contexto adicional.
+
+La sesión se clasifica como `AUTHENTICATED` **sólo** cuando el usuario encontrado mediante el correo/teléfono enviados es exactamente el mismo `userId` que el actor autenticado.
+
+Por tanto:
+
+- sesión A + correo/teléfono de A → incidencia de A y respuesta autenticada;
+- sesión A + correo/teléfono de una cuenta B existente → incidencia vinculada a B, sin sobrescribir B y sin atribuirla a A;
+- sesión A + correo/teléfono que no pertenecen a ninguna cuenta → alta pendiente nueva + incidencia de esa nueva identidad;
+- sesión A + correo de B y teléfono de C → identidad inconsistente, sin mutaciones.
+
+La home no precarga automáticamente el nombre completo del usuario autenticado. Puede precargar otros datos de contacto ya disponibles únicamente como ayuda de formulario; el visitante puede editarlos y el backend vuelve a resolver la identidad desde los valores finalmente enviados.
 
 ### Usuario nuevo
 
@@ -101,6 +113,8 @@ Solo cuando **no existe ningún usuario por correo ni por teléfono**, el backen
 - los lookups técnicos necesarios;
 - la incidencia;
 - una activación de un solo uso.
+
+Esta regla se mantiene aunque el navegador tenga iniciada la sesión de otra cuenta: una sesión ajena no puede secuestrar la propiedad del intake.
 
 El usuario nuevo nace con `clienteId: null`. No se crea documento de cliente desde la home.
 
@@ -128,7 +142,7 @@ Una cuenta existente sigue resolviéndose como la misma identidad y no se sobres
 
 ### Identidad inconsistente
 
-Si correo y teléfono identifican cuentas distintas, no se realiza ninguna mutación. La respuesta anónima permanece neutra para no revelar qué identificador existe.
+Si correo y teléfono identifican cuentas distintas, no se realiza ninguna mutación. La respuesta exterior permanece neutra para no revelar qué identificador existe.
 
 ## Ticket
 
@@ -145,7 +159,7 @@ El ticket público reutiliza el contrato canónico de incidencias del panel.
 - `source` persistido: `public_home`.
 - `channel`: `web`.
 - `requesterSnapshot`: generado desde identidad canónica del servidor.
-- `userId`: obligatorio y asignado por backend.
+- `userId`: obligatorio y asignado por backend después de resolver el contacto.
 - `clienteId`: opcional; solo se reutiliza si ya existe una relación válida. La home no lo crea.
 - técnico/asignación: política canónica del backend.
 - adjuntos en el intake inicial: ninguno.
@@ -154,7 +168,7 @@ La `Idempotency-Key` en claro no se persiste como identificador visible del tick
 
 ## Respuesta pública
 
-Para peticiones anónimas, la respuesta exterior es deliberadamente neutra. No confirma si el usuario era nuevo, activo, pendiente, desactivado, si coincidió por correo o por teléfono, ni si se detectó una identidad inconsistente.
+Cuando el backend no puede demostrar que la identidad resuelta pertenece al actor autenticado, la respuesta exterior es deliberadamente neutra. No confirma si el usuario era nuevo, activo, pendiente, desactivado, si coincidió por correo o por teléfono, ni si se detectó una identidad inconsistente.
 
 Forma canónica:
 
@@ -177,9 +191,21 @@ Por tanto, el frontend **no afirma que se creó una incidencia** cuando recibe e
 - no se crean fichas de cliente desde la home;
 - si ya existe una incidencia en curso, no se abre otra.
 
-En una sesión autenticada el backend puede devolver el identificador real del ticket y `activationRequired: false`, permitiendo indicar que la incidencia ya está disponible en el panel.
+Sólo cuando la identidad resuelta por contacto es exactamente la cuenta de la sesión el backend puede devolver el identificador real del ticket y `activationRequired: false`, permitiendo indicar que la incidencia ya está disponible en el panel.
 
 Nunca se devuelven tokens, hashes, información interna de Cosmos, datos de otras cuentas ni detalles útiles para enumeración.
+
+## Feedback de interfaz y reintentos
+
+La home distingue visual y semánticamente cuatro estados: `info`, `success`, `warning` y `error`.
+
+- Los errores de validación son `error` y deben conservar mensajes de campo.
+- Rate limit, indisponibilidad temporal y fallos de red son `warning`: no se presentan como una confirmación ni se borran los datos escritos.
+- En un fallo transitorio, el CTA pasa a `Reintentar incidencia`.
+- Mientras el formulario no cambie, se conserva la misma `Idempotency-Key`, por lo que el reintento reutiliza el mismo intento lógico para reducir el riesgo de duplicados.
+- `warning` y `error` usan semántica accesible de alerta; `info` y `success` permanecen como estados informativos.
+
+La UI también muestra una nota estática, no enumerativa, que explica que la cuenta se decide por correo y móvil aunque exista otra sesión iniciada.
 
 ## Seguridad obligatoria
 
@@ -189,6 +215,7 @@ Nunca se devuelven tokens, hashes, información interna de Cosmos, datos de otra
 - Teléfono normalizado y validado de nuevo en backend.
 - Honeypot y controles anti-spam/abuso.
 - No confiar en `source`, `channel` ni identificadores enviados por el cliente para autorización.
+- Nunca permitir que una sesión ajena sustituya la identidad obtenida del correo/teléfono enviados.
 - Nunca sobrescribir una cuenta existente desde una petición pública.
 - Nunca crear un cliente desde el intake público.
 - Token de activación aleatorio, de un solo uso y con expiración únicamente para altas nuevas.

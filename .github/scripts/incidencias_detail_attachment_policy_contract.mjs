@@ -5,6 +5,7 @@ import {
   detailAttachmentPolicyHelp,
   getIncidenciasDetailAttachmentPolicy,
   getIncidenciasDetailAttachmentPolicySnapshot,
+  syncIncidenciasDetailAttachmentHelp,
   validateIncidenciasDetailAttachmentSelection,
 } from "../../src/views/incidencias/incidencias.detail-attachment-policy.js";
 
@@ -94,7 +95,46 @@ assert.equal(snapshot.policy.earlyDropValidation, true);
 assert.equal(snapshot.policy.controllerSelectionPathPreserved, true);
 assert.equal(snapshot.policy.userMatchesProductionBackend, true);
 assert.equal(snapshot.policy.adminRemainsUiConservative, true);
+assert.equal(snapshot.policy.observerTextWritesIdempotent, true);
+assert.equal(snapshot.policy.mutationObserverSelfLoopPrevented, true);
 assert.equal(snapshot.policy.zeroHttp, true);
+
+let helpValue = "";
+let helpWrites = 0;
+const helpNode = {
+  get textContent() {
+    return helpValue;
+  },
+  set textContent(value) {
+    helpWrites += 1;
+    helpValue = String(value);
+  },
+};
+
+assert.equal(
+  syncIncidenciasDetailAttachmentHelp(helpNode, "user"),
+  true,
+  "la primera sincronización debe escribir el copy de usuario"
+);
+assert.equal(helpWrites, 1);
+assert.match(helpValue, /50 MB por archivo/);
+
+assert.equal(
+  syncIncidenciasDetailAttachmentHelp(helpNode, "user"),
+  false,
+  "una mutación observada con el mismo rol no debe volver a escribir textContent"
+);
+assert.equal(
+  helpWrites,
+  1,
+  "la segunda sincronización idéntica no puede emitir otra mutación childList"
+);
+
+assert.equal(syncIncidenciasDetailAttachmentHelp(helpNode, "admin"), true);
+assert.equal(helpWrites, 2);
+assert.match(helpValue, /100 MB por archivo/);
+assert.equal(syncIncidenciasDetailAttachmentHelp(helpNode, "admin"), false);
+assert.equal(helpWrites, 2);
 
 const policySource = await readFile(
   new URL("../../src/views/incidencias/incidencias.detail-attachment-policy.js", import.meta.url),
@@ -114,7 +154,7 @@ for (const required of [
   'documentLike.addEventListener("drop", onDrop, true)',
   'event.stopImmediatePropagation?.()',
   'data-detail-upload-policy-feedback',
-  'detailAttachmentPolicyHelp(role)',
+  'syncIncidenciasDetailAttachmentHelp(help, role)',
   'input.dataset.detailMaxFileSize',
   'input.dataset.detailMaxTotalSize',
 ]) {
@@ -125,6 +165,11 @@ assert.doesNotMatch(
   policySource,
   /(?:core\/http|\bHttp\.(?:get|post|put|patch|delete)\s*\(|\bfetch\s*\(|XMLHttpRequest)/,
   "la política de adjuntos no puede añadir HTTP"
+);
+assert.doesNotMatch(
+  policySource,
+  /if \(help\) help\.textContent\s*=/,
+  "syncDom no puede reescribir siempre el texto que observa su propio MutationObserver"
 );
 
 for (const required of [
@@ -148,5 +193,5 @@ for (const required of [
 }
 
 console.log(
-  "Incidencias Detail attachment policy OK · user 50/500MB · admin UI 100/1000MB · 10 files · early change/drop guard"
+  "Incidencias Detail attachment policy OK · observer idempotent · no self-loop · user 50/500MB · admin UI 100/1000MB"
 );

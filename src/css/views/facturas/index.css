@@ -336,8 +336,7 @@
 
 .facturas-infinite:focus-visible,
 .facturas-error:focus-visible,
-.facturas-empty:focus-visible,
-.facturas-loading-status:focus-visible {
+.facturas-empty:focus-visible {
   outline: none;
   border-radius: var(--radius-sm);
   box-shadow: var(--focus-ring);
@@ -361,13 +360,39 @@
   color: var(--error-strong, var(--error));
 }
 
+/*
+   Paridad de carga con Incidencias:
+   el estado polite existe para accesibilidad, pero no se pinta como un loader
+   independiente delante del historial. Sólo reaparece si recibe foco
+   programático como fallback accesible.
+*/
 .facturas-loading-status {
-  display: block;
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.facturas-loading-status:focus-visible {
+  position: relative;
+  inline-size: auto;
+  block-size: auto;
   margin: 0;
-  padding: 14px 18px 4px;
+  padding: 10px 14px;
+  overflow: visible;
+  clip-path: none;
+  white-space: normal;
   color: var(--text-muted);
   font-size: var(--font-sm);
   text-align: center;
+  outline: none;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--focus-ring);
 }
 
 .facturas-inline-loading,

@@ -529,6 +529,7 @@ function buildCommentCard(comment = {}) {
   author.textContent = text(comment.author, "Usuario");
 
   const date = document.createElement("span");
+  date.className = "incidencias-modal-description-comment-date";
   date.textContent = formatDate(comment.createdAt);
 
   const body = document.createElement("p");

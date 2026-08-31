@@ -17,6 +17,7 @@ core = read("src/core/config.js")
 boundary = read("src/views/incidencias/index.js")
 controller = read("src/views/incidencias/index.impl.js")
 api = read("src/views/incidencias/incidencias.api.impl.js")
+facets = read("src/views/incidencias/incidencias.filter-facets.js")
 template = read("src/views/incidencias/incidencias.template.js")
 styles = read("src/css/views/incidencias/index.css")
 
@@ -172,12 +173,22 @@ require(
 )
 require(
     "getListFilterQuery" in controller
-    and "{ closed: false }" in controller
-    and "{ closed: true }" in controller
-    and '{ priority: "urgent" }' in controller
+    and "getIncidenciasFacetFilterQuery" in controller
     and "getListPageQuery()" in controller
-    and "getListPageQuery({ cursor })" in controller,
-    "first and subsequent cursor pages must share the active server filter query",
+    and "getListPageQuery({ cursor })" in controller
+    and 'if (filter === "open") return { closed: false };' in facets
+    and 'if (filter === "closed") return { closed: true };' in facets
+    and 'if (filter === "urgent") return { priority: "high" };' in facets,
+    "first and subsequent cursor pages must share the canonical production facet query",
+)
+require(
+    "filterFacetCache" in controller
+    and "filterFacetSearchKey" in controller
+    and "getIncidenciasFacetRequestQuery" in controller
+    and "loadIncidenciasPage({" in controller
+    and "cacheNeutralPageQueries: true" in facets
+    and "searchDefinesFacetUniverse: true" in facets,
+    "facet totals must be cache-neutral, search-scoped, and independent of the selected facet",
 )
 require(
     "restartListQuery" in controller
@@ -297,5 +308,5 @@ require(
 
 print(
     "Incidencias scale contract OK · canonical API · continuous cursor scroll · "
-    "cycle/progress guards · stable focus/sort · server filters/search · bounded detail cache"
+    "cycle/progress guards · stable focus/sort · exact search facets · bounded detail cache"
 )

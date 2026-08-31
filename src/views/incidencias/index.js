@@ -23,9 +23,13 @@ import {
   installIncidenciasDetailAttachmentPolicy,
   INCIDENCIAS_DETAIL_ATTACHMENT_POLICY_VERSION,
 } from "./incidencias.detail-attachment-policy.js";
+import {
+  installIncidenciasHotList,
+  INCIDENCIAS_HOT_LIST_VERSION,
+} from "./incidencias.hot-list.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
-  `${Impl.INCIDENCIAS_INDEX_VERSION}.create-user-combobox.truthful-loaded-stats.detail-attachment-policy`;
+  `${Impl.INCIDENCIAS_INDEX_VERSION}.create-user-combobox.truthful-loaded-stats.detail-attachment-policy.hot-list`;
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
@@ -68,6 +72,11 @@ export async function IncidenciasView(host = null, context = {}) {
     getRole: resolveBoundaryRole,
   });
 
+  const uninstallHotList = installIncidenciasHotList({
+    host,
+    document: documentLike,
+  });
+
   const originalDestroy = typeof controller.destroy === "function"
     ? controller.destroy.bind(controller)
     : null;
@@ -77,6 +86,7 @@ export async function IncidenciasView(host = null, context = {}) {
     "__incidenciasCreateUserComboboxInstalled",
     "__incidenciasStatsScopeInstalled",
     "__incidenciasDetailAttachmentPolicyInstalled",
+    "__incidenciasHotListInstalled",
   ]) {
     Object.defineProperty(controller, key, {
       value: true,
@@ -86,6 +96,7 @@ export async function IncidenciasView(host = null, context = {}) {
   }
 
   controller.destroy = function destroyIncidenciasWithEnhancements() {
+    uninstallHotList?.();
     uninstallDetailAttachmentPolicy?.();
     uninstallStatsScope?.();
     uninstallCombobox?.();
@@ -115,6 +126,7 @@ export function getIncidenciasViewBoundarySnapshot() {
     createUserComboboxVersion: INCIDENCIAS_CREATE_USER_COMBOBOX_VERSION,
     statsScopeVersion: INCIDENCIAS_STATS_SCOPE_VERSION,
     detailAttachmentPolicyVersion: INCIDENCIAS_DETAIL_ATTACHMENT_POLICY_VERSION,
+    hotListVersion: INCIDENCIAS_HOT_LIST_VERSION,
     role: resolveBoundaryRole(),
     policy: Object.freeze({
       controllerImplementationPreserved1to1: true,
@@ -125,6 +137,8 @@ export function getIncidenciasViewBoundarySnapshot() {
       detailAttachmentLimitsEarly: true,
       canonicalRoleAuthority: true,
       zeroCopyRuntimeState: true,
+      searchFocusAndCaretStableAcrossListReconciliation: true,
+      hotListOwnsNoBusinessState: true,
     }),
   });
 }

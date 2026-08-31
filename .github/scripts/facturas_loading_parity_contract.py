@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Keep Facturas loading presentation aligned with Incidencias.
+"""Keep Facturas loading presentation aligned with the intended silent behavior.
 
-The list may expose an accessible live state and skeleton rows, but it must not
-paint a standalone visible loader between the history header and the table.
+Initial loading may expose an accessible live state plus skeleton rows. Refresh
+with existing rows must be visually silent: no standalone spinner, overlay or
+"Actualizando..." line may occupy the history surface.
 """
 
 from pathlib import Path
@@ -13,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[2]
 FACTURAS_INDEX = (ROOT / "src/views/facturas/index.js").read_text(encoding="utf-8")
 FACTURAS_TEMPLATE = (ROOT / "src/views/facturas/facturas.template.js").read_text(encoding="utf-8")
 FACTURAS_CSS = (ROOT / "src/css/views/facturas/index.css").read_text(encoding="utf-8")
+FACTURAS_RESEND_CSS = (ROOT / "src/css/views/facturas/resend-confirm.css").read_text(encoding="utf-8")
+FACTURAS_REFRESH_CSS = (ROOT / "src/css/views/facturas/refresh-silent.css").read_text(encoding="utf-8")
 INCIDENCIAS_TEMPLATE = (ROOT / "src/views/incidencias/incidencias.template.js").read_text(encoding="utf-8")
 
 
@@ -21,8 +24,9 @@ def require(condition: bool, message: str) -> None:
         raise SystemExit(f"FACTURAS_LOADING_PARITY_CONTRACT: {message}")
 
 
-# Incidencias is the behavioral reference: loading lives inside the history
-# surface and its status announcement is visually hidden while skeletons paint.
+# Incidencias remains the reference for initial loading ownership: loading lives
+# inside the history surface and the status announcement is visually hidden
+# while skeleton rows paint.
 require(
     "incidencias-visually-hidden" in INCIDENCIAS_TEMPLATE
     and "renderTableLoading(DEFAULT_VISIBLE_ROWS)" in INCIDENCIAS_TEMPLATE,
@@ -41,7 +45,7 @@ require("await load(" not in mount, "Facturas mount must not await the first-pag
 for forbidden in ("showLoader", "hideLoader", "Loader.show", "ui-loading-overlay"):
     require(forbidden not in FACTURAS_INDEX, f"standalone/global loader API is forbidden: {forbidden}")
 
-# The normal history shell owns initial loading, just like Incidencias.
+# The normal history shell owns initial loading.
 require(
     "const showInitialLoading = loading && !listState.visibleItems.length;" in FACTURAS_TEMPLATE,
     "Facturas must derive initial loading from list state",
@@ -86,7 +90,48 @@ focus_body = focus_match.group("body")
 require("clip-path: none;" in focus_body, "focused loading fallback must become visible")
 require("overflow: visible;" in focus_body, "focused loading fallback must be readable")
 
+# Refresh with already-rendered rows is deliberately silent. The template may
+# retain compatibility nodes, but they must never paint or affect layout.
+require(
+    '@import url("./refresh-silent.css");' in FACTURAS_RESEND_CSS,
+    "Facturas route must load the silent-refresh visual contract",
+)
+
+overlay_match = re.search(
+    r"\.facturas-refresh-overlay\s*\{(?P<body>.*?)\n\}",
+    FACTURAS_REFRESH_CSS,
+    re.DOTALL,
+)
+require(overlay_match is not None, "silent refresh overlay rule is missing")
+require(
+    "display: none;" in overlay_match.group("body"),
+    "refresh overlay must never be painted",
+)
+
+footer_match = re.search(
+    r"\.facturas-table-wrap\.is-refreshing\s+\.facturas-infinite\s*\{(?P<body>.*?)\n\}",
+    FACTURAS_REFRESH_CSS,
+    re.DOTALL,
+)
+require(footer_match is not None, "silent refresh footer rule is missing")
+footer_body = footer_match.group("body")
+for token in (
+    "position: absolute;",
+    "inline-size: 1px;",
+    "min-inline-size: 1px;",
+    "block-size: 1px;",
+    "min-block-size: 1px;",
+    "margin: -1px;",
+    "padding: 0;",
+    "overflow: hidden;",
+    "border: 0;",
+    "clip-path: inset(50%);",
+    "white-space: nowrap;",
+    "pointer-events: none;",
+):
+    require(token in footer_body, f"refresh footer must stay out of visual flow: {token}")
+
 print(
     "Facturas loading parity OK · non-blocking mount · inline history skeleton · "
-    "no standalone visible loader · accessible focus fallback"
+    "silent refresh · no standalone visible loader"
 )

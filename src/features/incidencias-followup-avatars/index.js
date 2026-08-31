@@ -23,7 +23,7 @@ import {
 } from "../incidencias-avatar-fallback/index.js";
 
 export const INCIDENCIAS_FOLLOWUP_AVATARS_VERSION =
-  "incidencias.followup-avatars.v4.canonical-visual";
+  "incidencias.followup-avatars.v5.identity-first-single-paint";
 
 const MODAL_SELECTOR =
   "[data-incidencias-modal-root='true']";
@@ -441,14 +441,13 @@ export function syncModal(modal = null) {
   const state = modalState.get(modal) || null;
 
   if (!state?.detail) {
-    let synced = 0;
-
-    for (const head of heads) {
-      if (syncHead(head)) synced += 1;
-    }
-
+    /*
+      Identity-first: no se monta un tono provisional basado sólo en el nombre.
+      El detalle ya contiene la identidad estable; al resolverlo, syncModal se
+      ejecuta de nuevo y crea cada fallback una única vez con su tono definitivo.
+    */
     queueHydration(modal);
-    return synced;
+    return 0;
   }
 
   const availableProfiles = profiles(modal, state.detail);

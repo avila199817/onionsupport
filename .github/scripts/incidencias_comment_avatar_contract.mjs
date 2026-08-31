@@ -100,8 +100,8 @@ assert.match(
 
 assert.match(
   followupSource,
-  /incidencias\.followup-avatars\.v4\.canonical-visual/u,
-  "Seguimiento debe versionar explícitamente la piel visual canónica compartida"
+  /incidencias\.followup-avatars\.v5\.identity-first-single-paint/u,
+  "Seguimiento debe versionar explícitamente la resolución identity-first de una sola pintura"
 );
 
 assert.match(
@@ -178,8 +178,14 @@ assert.match(
 
 assert.match(
   followupSource,
-  /if \(!state\?\.detail\)[\s\S]*?syncHead\(head\)[\s\S]*?queueHydration/u,
-  "las iniciales deben aparecer antes de terminar la hidratación de identidad"
+  /if \(!state\?\.detail\) \{[\s\S]*?queueHydration\(modal\);[\s\S]*?return 0;/u,
+  "sin identidad estable el modal debe hidratar y aplazar el primer paint del avatar"
+);
+
+assert.doesNotMatch(
+  followupSource,
+  /if \(!state\?\.detail\) \{\s*let synced/u,
+  "no se permite una primera pintura provisional basada sólo en el nombre"
 );
 
 assert.match(

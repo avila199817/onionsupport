@@ -146,6 +146,26 @@ assert.doesNotMatch(
   "abrir el diálogo nunca debe ejecutar el borrado"
 );
 
+const cancelStart = controllerSource.indexOf(
+  "function cancelAttachmentDeleteConfirm("
+);
+const cancelEnd = controllerSource.indexOf(
+  "async function confirmAttachmentDelete(",
+  cancelStart
+);
+const cancelSource = controllerSource.slice(cancelStart, cancelEnd);
+assert.ok(cancelStart >= 0 && cancelEnd > cancelStart);
+assert.match(
+  cancelSource,
+  /nextFrame\s*\(\s*\(\)\s*=>/,
+  "la restauración debe esperar a que el botón repintado esté conectado"
+);
+assert.match(
+  cancelSource,
+  /focusAfterRender\s*\(\s*focusSelector,\s*modalHost\s*\)/,
+  "cancelar debe devolver el foco al botón exacto de adjunto"
+);
+
 const confirmStart = controllerSource.indexOf(
   "async function confirmAttachmentDelete("
 );

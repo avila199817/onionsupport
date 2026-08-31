@@ -1146,6 +1146,37 @@ margin: 0;
   line-height: 1.5;
 }
 
+.incidencias-modal-confirm-filename {
+min-inline-size: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-xs);
+  background: var(--solid-bg-2);
+  color: var(--text-strong);
+}
+
+.incidencias-modal-confirm-filename > span {
+flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  color: var(--error-strong, var(--error));
+}
+
+.incidencias-modal-confirm-filename svg {
+inline-size: 15px;
+  block-size: 15px;
+}
+
+.incidencias-modal-confirm-filename strong {
+min-inline-size: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--font-sm);
+  line-height: 1.35;
+}
+
 .incidencias-modal-confirm-warning {
 padding: 9px 10px;
   border: 1px solid var(--border-warning);

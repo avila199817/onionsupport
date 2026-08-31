@@ -85,7 +85,7 @@ import {
 } from "./incidencias.filter-facets.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.extreme.v40-render-payload-authority";
+  "incidencias.index.extreme.v41-owned-attachment-delete-confirm";
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
@@ -135,8 +135,8 @@ const DETAIL_PREVIEW_SLOT_SELECTOR =
 const DETAIL_PREVIEW_CLOSE_SELECTOR =
   `[data-detail-action="${DETAIL_ACTIONS.PREVIEW_CLOSE}"]`;
 
-const DETAIL_CLOSE_CONFIRM_SELECTOR =
-  "[data-detail-close-confirm-dialog='true']";
+const DETAIL_CONFIRM_SELECTOR =
+  "[data-detail-confirm-dialog='true']";
 
 const FOCUSABLE_SELECTOR = [
   "a[href]",
@@ -271,6 +271,15 @@ function multilineValue(
   return String(value ?? "")
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n");
+}
+
+function escapeCssAttribute(
+  value = ""
+) {
+  return String(value ?? "")
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/[\r\n\f]/g, " ");
 }
 
 /*
@@ -1245,6 +1254,9 @@ function createIncidenciasController(
     operation: "",
     closeConfirmOpen: false,
     discardConfirmOpen: false,
+    attachmentDeleteConfirmOpen: false,
+    attachmentDeleteConfirmId: "",
+    attachmentDeleteConfirmName: "",
 
     commentDraft: "",
     pendingFiles: [],
@@ -1362,6 +1374,9 @@ function createIncidenciasController(
 
     detailModal.discardConfirmOpen = true;
     detailModal.closeConfirmOpen = false;
+    detailModal.attachmentDeleteConfirmOpen = false;
+    detailModal.attachmentDeleteConfirmId = "";
+    detailModal.attachmentDeleteConfirmName = "";
 
     detailModal.feedbackMessage = "";
     detailModal.feedbackType = "info";
@@ -1421,10 +1436,11 @@ function createIncidenciasController(
     if (detailModal.open) {
       if (
         detailModal.closeConfirmOpen ||
-        detailModal.discardConfirmOpen
+        detailModal.discardConfirmOpen ||
+        detailModal.attachmentDeleteConfirmOpen
       ) {
         return (
-          modalHost.querySelector(DETAIL_CLOSE_CONFIRM_SELECTOR) ||
+          modalHost.querySelector(DETAIL_CONFIRM_SELECTOR) ||
           modalHost.querySelector(DETAIL_MODAL_PANEL_SELECTOR)
         );
       }
@@ -4791,6 +4807,9 @@ async function load(options = {}) {
     detailModal.operation = "";
     detailModal.closeConfirmOpen = false;
     detailModal.discardConfirmOpen = false;
+    detailModal.attachmentDeleteConfirmOpen = false;
+    detailModal.attachmentDeleteConfirmId = "";
+    detailModal.attachmentDeleteConfirmName = "";
 
     detailModal.commentDraft = "";
     detailModal.pendingFiles = [];
@@ -4820,6 +4839,13 @@ async function load(options = {}) {
 
     const force =
       options.force === true;
+
+    if (
+      detailModal.attachmentDeleteConfirmOpen &&
+      !force
+    ) {
+      return cancelAttachmentDeleteConfirm();
+    }
 
     if (
       detailModal.discardConfirmOpen &&
@@ -4897,6 +4923,9 @@ async function load(options = {}) {
       detailModal.operation = "";
       detailModal.closeConfirmOpen = false;
       detailModal.discardConfirmOpen = false;
+      detailModal.attachmentDeleteConfirmOpen = false;
+      detailModal.attachmentDeleteConfirmId = "";
+      detailModal.attachmentDeleteConfirmName = "";
       detailModal.commentDraft = "";
       detailModal.pendingFiles = [];
 
@@ -5797,6 +5826,9 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
 
     detailModal.discardConfirmOpen = false;
     detailModal.closeConfirmOpen = true;
+    detailModal.attachmentDeleteConfirmOpen = false;
+    detailModal.attachmentDeleteConfirmId = "";
+    detailModal.attachmentDeleteConfirmName = "";
     detailModal.feedbackMessage = "";
     detailModal.feedbackType = "info";
 
@@ -6207,7 +6239,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
     }
   }
 
-  async function deleteAttachment(
+  function requestAttachmentDelete(
     attachmentId = ""
   ) {
     const id =
@@ -6242,30 +6274,126 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
     const attachment =
       getAttachmentById(id);
 
+    if (!attachment) {
+      detailModal.feedbackMessage =
+        "El adjunto ya no está disponible en esta incidencia.";
+      detailModal.feedbackType =
+        "error";
+      renderModals({ immediate: true });
+      return false;
+    }
+
     const filename =
       cleanText(
         first(
-          attachment?.name,
-          attachment?.filename,
-          attachment?.fileName,
+          attachment.name,
+          attachment.filename,
+          attachment.fileName,
           "este adjunto"
         ),
         "este adjunto"
       );
 
-    if (
-      isBrowser() &&
-      typeof window.confirm === "function"
-    ) {
-      const accepted = window.confirm(
-        `¿Eliminar definitivamente “${filename}”?\n\nSe quitará de la incidencia y del almacenamiento. Esta acción no se puede deshacer.`
-      );
+    detailModal.closeConfirmOpen = false;
+    detailModal.discardConfirmOpen = false;
+    detailModal.attachmentDeleteConfirmOpen = true;
+    detailModal.attachmentDeleteConfirmId = id;
+    detailModal.attachmentDeleteConfirmName = filename;
+    detailModal.feedbackMessage = "";
+    detailModal.feedbackType = "info";
 
-      if (!accepted) {
-        return false;
-      }
+    renderModals({
+      immediate: true,
+      focusSelector:
+        `[data-detail-action="${DETAIL_ACTIONS.ATTACHMENT_DELETE_CANCEL}"]`,
+    });
+
+    return true;
+  }
+
+  function clearAttachmentDeleteConfirm() {
+    detailModal.attachmentDeleteConfirmOpen = false;
+    detailModal.attachmentDeleteConfirmId = "";
+    detailModal.attachmentDeleteConfirmName = "";
+  }
+
+  function cancelAttachmentDeleteConfirm() {
+    if (
+      !detailModal.open ||
+      detailModal.submitting ||
+      !detailModal.attachmentDeleteConfirmOpen
+    ) {
+      return false;
     }
 
+    const attachmentId =
+      detailModal.attachmentDeleteConfirmId;
+
+    clearAttachmentDeleteConfirm();
+
+    renderModals({
+      immediate: true,
+      focusSelector:
+        attachmentId
+          ? `[data-detail-action="${DETAIL_ACTIONS.ATTACHMENT_DELETE}"][data-attachment-id="${escapeCssAttribute(attachmentId)}"]`
+          : `[data-detail-action="${DETAIL_ACTIONS.ATTACHMENT_DELETE}"]`,
+    });
+
+    return true;
+  }
+
+  async function confirmAttachmentDelete() {
+    const id =
+      cleanText(
+        detailModal.attachmentDeleteConfirmId,
+        ""
+      );
+
+    const ticketId =
+      getTicketId(
+        detailModal.detail
+      );
+
+    if (
+      !id ||
+      !ticketId ||
+      !detailModal.open ||
+      !detailModal.attachmentDeleteConfirmOpen ||
+      detailModal.submitting ||
+      detailModal.deletingAttachmentId ||
+      !isAdmin()
+    ) {
+      return false;
+    }
+
+    const attachment =
+      getAttachmentById(id);
+
+    if (!attachment) {
+      clearAttachmentDeleteConfirm();
+      detailModal.feedbackMessage =
+        "El adjunto ya no está disponible en esta incidencia.";
+      detailModal.feedbackType =
+        "error";
+      renderModals({ immediate: true });
+      return false;
+    }
+
+    const filename =
+      cleanText(
+        first(
+          detailModal.attachmentDeleteConfirmName,
+          attachment.name,
+          attachment.filename,
+          attachment.fileName,
+          "este adjunto"
+        ),
+        "este adjunto"
+      );
+
+    clearAttachmentDeleteConfirm();
+    detailModal.submitting = true;
+    detailModal.operation = "delete-attachment";
     detailModal.deletingAttachmentId = id;
     detailModal.feedbackMessage = "";
     detailModal.feedbackType = "info";
@@ -6287,6 +6415,8 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
         );
       }
 
+      detailModal.submitting = false;
+      detailModal.operation = "";
       detailModal.deletingAttachmentId = "";
       detailModal.detail = updated;
 
@@ -6328,6 +6458,8 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
 
       return true;
     } catch (deleteError) {
+      detailModal.submitting = false;
+      detailModal.operation = "";
       detailModal.deletingAttachmentId = "";
       detailModal.feedbackMessage =
         safeError(
@@ -6339,6 +6471,8 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
 
       renderModals({
         immediate: true,
+        focusSelector:
+          "[data-modal-files-slot='true'] button, [data-incidencias-modal-panel='true']",
       });
 
       return false;
@@ -7349,10 +7483,24 @@ async function loadMore(options = {}) {
       type ===
       DETAIL_ACTIONS.ATTACHMENT_DELETE
     ) {
-      return deleteAttachment(
+      return requestAttachmentDelete(
         node?.dataset?.attachmentId ||
         ""
       );
+    }
+
+    if (
+      type ===
+      DETAIL_ACTIONS.ATTACHMENT_DELETE_CANCEL
+    ) {
+      return cancelAttachmentDeleteConfirm();
+    }
+
+    if (
+      type ===
+      DETAIL_ACTIONS.ATTACHMENT_DELETE_CONFIRM
+    ) {
+      return confirmAttachmentDelete();
     }
 
     if (
@@ -7723,9 +7871,16 @@ async function loadMore(options = {}) {
 
         /*
            UX:
-           Escape cierra primero la preview de archivo.
-           Segundo Escape cierra el modal (con protección de borrador).
+           Escape cancela primero cualquier confirmación destructiva,
+           después cierra la preview y por último el modal.
         */
+        if (
+          detailModal.attachmentDeleteConfirmOpen
+        ) {
+          cancelAttachmentDeleteConfirm();
+          return;
+        }
+
         if (
           detailModal.closeConfirmOpen
         ) {

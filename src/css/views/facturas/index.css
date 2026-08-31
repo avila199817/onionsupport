@@ -1,5 +1,7 @@
 @import url("./resend-confirm.css");
 
+/* Imported domain component hooks: .facturas-resend-confirm-overlay · .facturas-resend-confirm-dialog */
+
 /* =========================================================
    ONION SUPPORT — FACTURAS · LISTADO
    DOMAIN-ONLY CSS · 2026-08-31
@@ -306,8 +308,40 @@
 }
 
 /* =========================================================
-   DOMAIN FEEDBACK / SKELETON
+   DOMAIN FEED / FEEDBACK / SKELETON
 ========================================================= */
+
+.facturas-infinite-retry {
+  appearance: none;
+  min-block-size: var(--btn-height-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 12px;
+  border: 1px solid var(--btn-secondary-border);
+  border-radius: var(--btn-radius);
+  background: var(--btn-secondary-bg);
+  color: var(--btn-secondary-text);
+  cursor: pointer;
+  font-size: var(--font-xs);
+  font-weight: var(--weight-bold);
+  line-height: 1;
+}
+
+.facturas-infinite-retry:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--btn-secondary-bg-hover);
+  color: var(--text-strong);
+}
+
+.facturas-infinite:focus-visible,
+.facturas-error:focus-visible,
+.facturas-empty:focus-visible,
+.facturas-loading-status:focus-visible {
+  outline: none;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--focus-ring);
+}
 
 .facturas-alert {
   display: flex;
@@ -403,6 +437,17 @@
     text-overflow: clip;
     white-space: normal;
     overflow-wrap: anywhere;
+  }
+}
+
+@media (forced-colors: active) {
+  .facturas-infinite:focus-visible,
+  .facturas-error:focus-visible,
+  .facturas-empty:focus-visible,
+  .facturas-loading-status:focus-visible {
+    outline: 2px solid CanvasText;
+    outline-offset: 2px;
+    box-shadow: none;
   }
 }
 

@@ -1,16 +1,23 @@
 /* =========================================================
    Onion Support - Incidencias Hot List Interaction Guard
 
-   HOT PATH · SEARCH FOCUS STABILITY · ZERO RERENDER OWNERSHIP
+   HOT PATH · PERSISTENT SEARCH DOM ISLAND · ZERO BUSINESS STATE
 
    Responsabilidad:
-   - preservar foco/caret del search mientras el controller reconcilia la lista;
-   - sobrevivir a list-patches y a un full render de transición de consulta;
+   - preservar físicamente el mismo <input> de búsqueda mientras el controller
+     reconcilia o vuelve a renderizar el historial;
+   - dejar que el navegador sea la autoridad del caret mientras el input sigue
+     conectado y enfocado;
+   - restaurar foco/selección sólo si una reconciliación reemplazó el nodo;
    - no filtrar datos, no hacer HTTP y no duplicar estado de negocio.
+
+   Invariante:
+   escribir nunca programa setTimeout/requestAnimationFrame ni reescribe value.
+   El hot path del teclado no toca el caret: sólo captura su última selección.
 ========================================================= */
 
 export const INCIDENCIAS_HOT_LIST_VERSION =
-  "incidencias.hot-list.v1.stable-search-focus";
+  "incidencias.hot-list.v2.persistent-search-dom-island";
 
 const SEARCH_INPUT_SELECTOR =
   "[data-incidencias-search-input='true']";
@@ -34,6 +41,13 @@ function clampSelection(value = null, length = 0) {
   return Math.max(0, Math.min(value, Math.max(0, length)));
 }
 
+function selectionDirection(value = "none") {
+  const direction = String(value || "none");
+  return ["forward", "backward", "none"].includes(direction)
+    ? direction
+    : "none";
+}
+
 export function installIncidenciasHotList({
   host = null,
   document: documentLike = null,
@@ -48,9 +62,11 @@ export function installIncidenciasHotList({
 
   let destroyed = false;
   let searchOwned = false;
-  let restoreTimer = 0;
-  let restoreFrame = 0;
+  let explicitExit = false;
+  let internalRestore = false;
+  let restoreQueued = false;
   let observer = null;
+  let ownedInput = null;
 
   const snapshot = {
     value: "",
@@ -60,15 +76,17 @@ export function installIncidenciasHotList({
   };
 
   function readSearchState(node = null) {
-    if (!isSearchInput(node)) return false;
+    if (!isSearchInput(node) || internalRestore) return false;
 
     searchOwned = true;
+    explicitExit = false;
+    ownedInput = node;
     snapshot.value = String(node.value ?? "");
 
     try {
       snapshot.start = integerOrNull(node.selectionStart);
       snapshot.end = integerOrNull(node.selectionEnd);
-      snapshot.direction = String(node.selectionDirection || "none");
+      snapshot.direction = selectionDirection(node.selectionDirection);
     } catch {
       snapshot.start = null;
       snapshot.end = null;
@@ -78,96 +96,191 @@ export function installIncidenciasHotList({
     return true;
   }
 
-  function restoreSearchFocus() {
-    if (destroyed || !searchOwned || !host?.isConnected) {
-      return false;
-    }
-
-    const input = host.querySelector?.(SEARCH_INPUT_SELECTOR) || null;
-    if (!input) return false;
+  function syncSafeAttributes(target = null, source = null) {
+    if (!target || !source) return false;
 
     try {
-      if (input.value !== snapshot.value) {
-        input.value = snapshot.value;
+      for (const attribute of Array.from(target.attributes || [])) {
+        if (attribute.name === "value") continue;
+        if (!source.hasAttribute(attribute.name)) {
+          target.removeAttribute(attribute.name);
+        }
       }
 
-      if (documentLike.activeElement !== input) {
-        input.focus({ preventScroll: true });
-      }
-
-      if (typeof input.setSelectionRange === "function") {
-        const length = String(input.value ?? "").length;
-        const start = clampSelection(snapshot.start, length);
-        const end = clampSelection(snapshot.end, length);
-
-        if (start !== null && end !== null) {
-          input.setSelectionRange(
-            start,
-            end,
-            ["forward", "backward", "none"].includes(snapshot.direction)
-              ? snapshot.direction
-              : "none"
-          );
+      for (const attribute of Array.from(source.attributes || [])) {
+        if (attribute.name === "value") continue;
+        if (target.getAttribute(attribute.name) !== attribute.value) {
+          target.setAttribute(attribute.name, attribute.value);
         }
       }
 
       return true;
     } catch {
+      return false;
+    }
+  }
+
+  function currentSearchInput() {
+    return host.querySelector?.(SEARCH_INPUT_SELECTOR) || null;
+  }
+
+  function transplantOwnedInput() {
+    const current = currentSearchInput();
+
+    if (
+      ownedInput &&
+      !ownedInput.isConnected &&
+      current &&
+      current !== ownedInput
+    ) {
+      syncSafeAttributes(ownedInput, current);
+
+      try {
+        current.replaceWith(ownedInput);
+        return ownedInput;
+      } catch {
+        return current;
+      }
+    }
+
+    if (ownedInput?.isConnected) {
+      return ownedInput;
+    }
+
+    if (current) {
+      ownedInput = current;
+    }
+
+    return current;
+  }
+
+  function restoreSearchAfterReplacement() {
+    restoreQueued = false;
+
+    if (
+      destroyed ||
+      !searchOwned ||
+      explicitExit ||
+      !host?.isConnected
+    ) {
+      return false;
+    }
+
+    const desired = {
+      value: snapshot.value,
+      start: snapshot.start,
+      end: snapshot.end,
+      direction: snapshot.direction,
+    };
+
+    const input = transplantOwnedInput();
+    if (!input) return false;
+
+    /*
+       Si el mismo input sigue siendo el activo, no hacemos absolutamente nada.
+       El navegador conserva caret, selección, IME y scroll horizontal mejor que
+       cualquier restauración manual.
+    */
+    if (documentLike.activeElement === input) {
+      ownedInput = input;
+      return true;
+    }
+
+    internalRestore = true;
+
+    try {
+      input.focus({ preventScroll: true });
+
+      /*
+         No reescribimos input.value. El controller ya sincroniza search de forma
+         síncrona en cada input event; tocar value aquí provocaría flicker/caret.
+      */
+      if (
+        typeof input.setSelectionRange === "function" &&
+        String(input.value ?? "") === desired.value
+      ) {
+        const length = String(input.value ?? "").length;
+        const start = clampSelection(desired.start, length);
+        const end = clampSelection(desired.end, length);
+
+        if (start !== null && end !== null) {
+          input.setSelectionRange(
+            start,
+            end,
+            selectionDirection(desired.direction)
+          );
+        }
+      }
+
+      ownedInput = input;
+      return true;
+    } catch {
       try {
         input.focus?.();
+        ownedInput = input;
         return true;
       } catch {
         return false;
       }
+    } finally {
+      internalRestore = false;
     }
   }
 
-  function cancelScheduledRestore() {
-    if (restoreTimer && windowLike?.clearTimeout) {
-      windowLike.clearTimeout(restoreTimer);
+  function enqueueMicrotask(callback) {
+    if (typeof windowLike?.queueMicrotask === "function") {
+      windowLike.queueMicrotask(callback);
+      return true;
     }
-    restoreTimer = 0;
 
-    if (restoreFrame && windowLike?.cancelAnimationFrame) {
-      windowLike.cancelAnimationFrame(restoreFrame);
+    if (typeof queueMicrotask === "function") {
+      queueMicrotask(callback);
+      return true;
     }
-    restoreFrame = 0;
+
+    Promise.resolve().then(callback);
+    return true;
   }
 
-  function scheduleRestore() {
-    if (destroyed || !searchOwned) return false;
-
-    cancelScheduledRestore();
-
-    if (windowLike?.setTimeout) {
-      restoreTimer = windowLike.setTimeout(() => {
-        restoreTimer = 0;
-        restoreSearchFocus();
-      }, 0);
+  function scheduleReplacementRestore() {
+    if (
+      destroyed ||
+      !searchOwned ||
+      explicitExit ||
+      restoreQueued
+    ) {
+      return false;
     }
 
-    if (windowLike?.requestAnimationFrame) {
-      restoreFrame = windowLike.requestAnimationFrame(() => {
-        restoreFrame = windowLike.requestAnimationFrame(() => {
-          restoreFrame = 0;
-          restoreSearchFocus();
-        });
-      });
-    }
+    restoreQueued = true;
+    enqueueMicrotask(() => {
+      restoreSearchAfterReplacement();
+    });
 
     return true;
   }
 
+  function abandonSearchOwnership() {
+    searchOwned = false;
+    explicitExit = true;
+    restoreQueued = false;
+    return true;
+  }
+
   function onFocusIn(event) {
-    if (isSearchInput(event.target)) {
+    if (isSearchInput(event.target) && !internalRestore) {
       readSearchState(event.target);
     }
   }
 
   function onInput(event) {
     if (!isSearchInput(event.target)) return;
+
+    /*
+       Sólo snapshot. No focus(), no setSelectionRange(), no timer, no frame.
+       Éste es el hot path que se ejecuta en cada pulsación.
+    */
     readSearchState(event.target);
-    scheduleRestore();
   }
 
   function onSelect(event) {
@@ -179,12 +292,11 @@ export function installIncidenciasHotList({
     if (!isSearchInput(event.target)) return;
 
     if (event.key === "Tab" || event.key === "Escape") {
-      searchOwned = false;
-      cancelScheduledRestore();
+      abandonSearchOwnership();
       return;
     }
 
-    readSearchState(event.target);
+    explicitExit = false;
   }
 
   function onPointerDown(event) {
@@ -195,10 +307,11 @@ export function installIncidenciasHotList({
     const searchRoot = target?.closest?.(SEARCH_ROOT_SELECTOR) || null;
 
     if (!searchRoot || !host.contains(searchRoot)) {
-      searchOwned = false;
-      cancelScheduledRestore();
+      abandonSearchOwnership();
       return;
     }
+
+    explicitExit = false;
 
     if (target?.closest?.(SEARCH_CLEAR_SELECTOR)) {
       searchOwned = true;
@@ -206,22 +319,28 @@ export function installIncidenciasHotList({
       snapshot.start = 0;
       snapshot.end = 0;
       snapshot.direction = "none";
-      scheduleRestore();
     }
   }
 
   function onFocusOut(event) {
-    if (!isSearchInput(event.target) || !searchOwned) return;
+    if (
+      !isSearchInput(event.target) ||
+      !searchOwned ||
+      explicitExit ||
+      internalRestore
+    ) {
+      return;
+    }
 
     const next = event.relatedTarget;
     if (next?.closest?.(SEARCH_ROOT_SELECTOR)) return;
 
     /*
-       Un list-patch puede mover el foco de forma transitoria a la tabla.
-       Si el usuario no inició una salida explícita (pointer/Tab/Escape),
-       recuperamos search + selección sin scroll-jump.
+       El controller puede enfocar temporalmente su fallback al reconciliar.
+       Recuperamos la isla en microtask, antes del siguiente paint, únicamente
+       si el usuario no inició una salida real del search.
     */
-    scheduleRestore();
+    scheduleReplacementRestore();
   }
 
   host.addEventListener("focusin", onFocusIn, true);
@@ -233,7 +352,23 @@ export function installIncidenciasHotList({
 
   if (typeof MutationObserver !== "undefined") {
     observer = new MutationObserver(() => {
-      if (searchOwned) scheduleRestore();
+      if (!searchOwned || explicitExit) return;
+
+      const current = currentSearchInput();
+      const inputWasReplaced = Boolean(
+        ownedInput &&
+        !ownedInput.isConnected &&
+        current &&
+        current !== ownedInput
+      );
+
+      /*
+         Una actualización de filas no programa ninguna restauración. Sólo una
+         sustitución real del input activa el trasplante de la isla DOM.
+      */
+      if (inputWasReplaced) {
+        scheduleReplacementRestore();
+      }
     });
 
     observer.observe(host, {
@@ -246,8 +381,10 @@ export function installIncidenciasHotList({
     if (destroyed) return false;
     destroyed = true;
     searchOwned = false;
+    explicitExit = true;
+    restoreQueued = false;
+    ownedInput = null;
 
-    cancelScheduledRestore();
     observer?.disconnect?.();
     observer = null;
 

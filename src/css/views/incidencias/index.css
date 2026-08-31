@@ -17,6 +17,13 @@
   --inc-updated-col: 16%;
   --inc-amount-col: 12%;
   --inc-attachments-col: 10%;
+
+  /*
+    Captura los tokens canónicos antes de que el placeholder principal
+    neutralice el shimmer genérico heredado desde layer(compositions).
+  */
+  --inc-skeleton-bg: var(--skeleton-bg);
+  --inc-skeleton-bg-strong: var(--skeleton-bg-strong);
 }
 
 .incidencias-hidden,
@@ -327,15 +334,23 @@
 }
 
 /*
-   El skeleton conserva exactamente la geometría semántica de la fila real.
-   Antes sólo `main` tenía altura; el resto de placeholders eran spans vacíos
-   con ancho pero 0px de alto. Además `main` era un único rectángulo de 42px,
-   muy distinto del avatar + copy + badges que realmente ocupa la celda.
+   Skeleton inicial · misma estructura lógica del listado.
+
+   La fundación genérica de skeletons vive en layer(compositions), por encima de
+   esta hoja layer(views). El placeholder `main` es deliberadamente complejo:
+   usa un contenedor transparente y pinta avatar/copy mediante pseudo-elementos.
+   Neutralizamos ÚNICAMENTE los tokens de fondo en ese contenedor para evitar
+   que la composición genérica vuelva a convertirlo en una cápsula gigante,
+   conservando los tokens canónicos capturados en --inc-skeleton-* para sus
+   pseudo-elementos.
 */
 .incidencias-row--skeleton {
   min-block-size: var(--private-admin-row-min);
   pointer-events: none;
 }
+
+/* Seis filas cubren el viewport sin crear un historial fantasma de 20 filas. */
+.incidencias-row--skeleton:nth-child(n+7) { display: none; }
 
 .incidencias-row--skeleton > .incidencias-cell {
   vertical-align: middle;
@@ -343,8 +358,13 @@
 
 .incidencias-skeleton--main {
   --inc-skeleton-copy-offset: calc(var(--private-admin-avatar-size) + var(--private-admin-main-gap));
+  --skeleton-bg: transparent;
+  --skeleton-bg-strong: transparent;
   position: relative;
+  inline-size: 100%;
+  min-inline-size: 0;
   block-size: 108px;
+  display: block;
   overflow: visible;
   border-radius: 0;
   background: none;
@@ -355,7 +375,8 @@
 .incidencias-skeleton--main::after {
   content: "";
   position: absolute;
-  background: linear-gradient(90deg, var(--skeleton-bg), var(--skeleton-bg-strong), var(--skeleton-bg));
+  pointer-events: none;
+  background: linear-gradient(90deg, var(--inc-skeleton-bg), var(--inc-skeleton-bg-strong), var(--inc-skeleton-bg));
   background-size: 220% 100%;
   animation: private-admin-shimmer 1.35s linear infinite;
 }

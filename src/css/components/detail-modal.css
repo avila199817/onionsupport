@@ -138,6 +138,10 @@ inline-size: var(--ui-detail-modal-avatar-size);
   letter-spacing: var(--letter-tight);
 }
 
+.ui-detail-modal-avatar-frame[data-fallback="true"][data-has-avatar="false"] {
+color: var(--text-on-accent, #fff);
+}
+
 .ui-detail-modal-avatar-frame[data-avatar-tone="0"] {
 --ui-detail-avatar-a: var(--accent); --ui-detail-avatar-b: var(--info);
 }

@@ -3,6 +3,7 @@
    DOMAIN-ONLY CSS · 2026-08-31
 
    Shell/listado compartido: private-admin-parity.css
+   Loading/skeleton paint: components/skeleton.css
    Esta hoja conserva columnas, identidad de cliente, contacto e importes.
 ========================================================= */
 
@@ -220,7 +221,7 @@
 }
 
 /* =========================================================
-   DOMAIN LOADING / FEEDBACK
+   DOMAIN LOADING / FEEDBACK / SKELETON GEOMETRY
 ========================================================= */
 
 .clientes-table-loading { display: grid; }
@@ -234,12 +235,13 @@
   border-block-end: 1px solid var(--border-soft);
 }
 .clientes-table-loading-copy { display: grid; gap: 7px; }
-.clientes-skeleton { block-size: 11px; }
-.clientes-skeleton--avatar { inline-size: 42px; block-size: 42px; border-radius: var(--radius-sm); }
+
+/* Sólo geometría horizontal. Alturas/radios/shimmer son canónicos. */
+.clientes-skeleton--avatar { inline-size: 42px; }
 .clientes-skeleton--xs { inline-size: 32%; }
-.clientes-skeleton--lg { inline-size: 72%; block-size: 14px; }
+.clientes-skeleton--lg { inline-size: 72%; }
 .clientes-skeleton--md { inline-size: 56%; }
-.clientes-skeleton--pill { inline-size: 76px; block-size: 28px; }
+.clientes-skeleton--pill { inline-size: 76px; }
 .clientes-skeleton--date { inline-size: 82px; }
 .clientes-skeleton--contact { inline-size: 150px; }
 .clientes-skeleton--amount { inline-size: 90px; justify-self: end; }

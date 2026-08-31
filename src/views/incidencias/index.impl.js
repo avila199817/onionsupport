@@ -85,7 +85,7 @@ import {
 } from "./incidencias.filter-facets.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.extreme.v39-server-filter-authority";
+  "incidencias.index.extreme.v40-render-payload-authority";
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
@@ -1614,6 +1614,8 @@ function createIncidenciasController(
       ),
 
       filter,
+      serverFilterApplied:
+        ["open", "closed", "urgent"].includes(filter),
       search,
       sortOrder,
       sortMode,

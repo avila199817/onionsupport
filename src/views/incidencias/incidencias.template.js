@@ -8,7 +8,7 @@
    - Acepta items/tickets/incidencias/rows/results/data.items/etc.
 ========================================================= */
 
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v32-server-filter-authority";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v33-render-payload-authority";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   CREATE_OPEN: "create-open",
@@ -1012,7 +1012,7 @@ function renderHistory(vm = {}) {
 export function renderIncidenciasLoadingState(input = {}) {
   const vm = buildVm({ ...obj(input), loading: true });
   return `
-    <section class="incidencias-view-root incidencias-view-root--loading is-loading" data-incidencias-scope="true" data-template-version="${at(INCIDENCIAS_TEMPLATE_VERSION)}" data-total="${at(String(vm.total))}" data-visible="${at(String(vm.visibleCount))}" data-filter="${at(vm.filter)}" data-selection="${at(vm.selection)}" data-sort-order="${at(vm.sortOrder)}" data-filter-facets-exact="${vm.filterFacetsExact ? "true" : "false"}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" aria-busy="true">
+    <section class="incidencias-view-root incidencias-view-root--loading is-loading" data-incidencias-scope="true" data-template-version="${at(INCIDENCIAS_TEMPLATE_VERSION)}" data-total="${at(String(vm.total))}" data-visible="${at(String(vm.visibleCount))}" data-filter="${at(vm.filter)}" data-server-filter-applied="${vm.serverFilterApplied ? "true" : "false"}" data-selection="${at(vm.selection)}" data-sort-order="${at(vm.sortOrder)}" data-filter-facets-exact="${vm.filterFacetsExact ? "true" : "false"}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" aria-busy="true">
       ${renderHeader(vm)}${renderHistory(vm)}
     </section>
   `;
@@ -1033,7 +1033,7 @@ export function renderIncidenciasErrorState(message = "No se pudieron cargar las
 export function renderIncidenciasTemplate(input = {}) {
   const vm = buildVm(input);
   return `
-    <section class="${cls("incidencias-view-root", vm.loading ? "is-loading" : "", vm.refreshing ? "is-refreshing" : "", vm.creating ? "is-creating" : "", vm.error ? "has-error" : "")}" data-incidencias-scope="true" data-template-version="${at(INCIDENCIAS_TEMPLATE_VERSION)}" data-route="${at(vm.route)}" data-total="${at(String(vm.total))}" data-visible="${at(String(vm.visibleCount))}" data-filter="${at(vm.filter)}" data-selection="${at(vm.selection)}" data-search-active="${vm.search ? "true" : "false"}" data-sort-order="${at(vm.sortOrder)}" data-filter-facets-exact="${vm.filterFacetsExact ? "true" : "false"}" data-loading="${vm.loading ? "true" : "false"}" data-refreshing="${vm.refreshing ? "true" : "false"}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" data-items-extracted="${at(String(vm.items.length))}" data-total-greater-than-items="${vm.diagnostics.totalGreaterThanItems ? "true" : "false"}" aria-busy="${vm.loading || vm.refreshing || vm.loadingMore || vm.listQueryPending ? "true" : "false"}">
+    <section class="${cls("incidencias-view-root", vm.loading ? "is-loading" : "", vm.refreshing ? "is-refreshing" : "", vm.creating ? "is-creating" : "", vm.error ? "has-error" : "")}" data-incidencias-scope="true" data-template-version="${at(INCIDENCIAS_TEMPLATE_VERSION)}" data-route="${at(vm.route)}" data-total="${at(String(vm.total))}" data-visible="${at(String(vm.visibleCount))}" data-filter="${at(vm.filter)}" data-server-filter-applied="${vm.serverFilterApplied ? "true" : "false"}" data-selection="${at(vm.selection)}" data-search-active="${vm.search ? "true" : "false"}" data-sort-order="${at(vm.sortOrder)}" data-filter-facets-exact="${vm.filterFacetsExact ? "true" : "false"}" data-loading="${vm.loading ? "true" : "false"}" data-refreshing="${vm.refreshing ? "true" : "false"}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" data-items-extracted="${at(String(vm.items.length))}" data-total-greater-than-items="${vm.diagnostics.totalGreaterThanItems ? "true" : "false"}" aria-busy="${vm.loading || vm.refreshing || vm.loadingMore || vm.listQueryPending ? "true" : "false"}">
       ${vm.error ? `<div class="incidencias-alert" role="alert">${icon("alert")}<span>${esc(vm.error)}</span></div>` : ""}
       ${renderHeader(vm)}${renderHistory(vm)}
     </section>

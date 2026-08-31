@@ -51,10 +51,15 @@ function maxKnown(...values) {
 }
 
 function firstArray(...values) {
+  let firstEmpty = null;
+
   for (const value of values) {
-    if (Array.isArray(value)) return value;
+    if (!Array.isArray(value)) continue;
+    if (value.length) return value;
+    if (firstEmpty === null) firstEmpty = value;
   }
-  return [];
+
+  return firstEmpty || [];
 }
 
 function ticketId(detail = {}) {

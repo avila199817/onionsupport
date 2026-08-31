@@ -9,8 +9,11 @@ const FOLLOWUP_STYLE_PATH =
   "src/features/incidencias-followup-avatars/style.css";
 const DETAIL_MODAL_STYLE_PATH =
   "src/css/components/detail-modal.css";
-const DETAIL_EXPERIENCE_PATH =
-  "src/features/incidencias-detail-experience/index.js";
+const DETAIL_COMMENT_RENDERER_PATHS = [
+  "src/features/incidencias-detail-experience/index.js",
+  "src/features/incidencias-detail-live-sync/index.js",
+  "src/features/incidencias-detail-state/index.js",
+];
 const PRIVATE_INTERACTIONS_STYLE_PATH =
   "src/css/compositions/private-admin-interactions.css";
 const ENHANCEMENTS_PATH =
@@ -20,7 +23,9 @@ const source = fs.readFileSync(FEATURE_PATH, "utf8");
 const followupSource = fs.readFileSync(FOLLOWUP_PATH, "utf8");
 const followupStyle = fs.readFileSync(FOLLOWUP_STYLE_PATH, "utf8");
 const detailModalStyle = fs.readFileSync(DETAIL_MODAL_STYLE_PATH, "utf8");
-const detailExperienceSource = fs.readFileSync(DETAIL_EXPERIENCE_PATH, "utf8");
+const detailCommentRendererSources = DETAIL_COMMENT_RENDERER_PATHS.map(
+  (rendererPath) => [rendererPath, fs.readFileSync(rendererPath, "utf8")]
+);
 const privateInteractionsStyle = fs.readFileSync(
   PRIVATE_INTERACTIONS_STYLE_PATH,
   "utf8"
@@ -219,11 +224,13 @@ assert.match(
   "Carlos debe conservar la pareja error-warning del mismo selector que el encabezado"
 );
 
-assert.match(
-  detailExperienceSource,
-  /date\.className\s*=\s*"incidencias-modal-description-comment-date"/u,
-  "la fecha del comentario debe exponer una clase semántica propia"
-);
+for (const [rendererPath, rendererSource] of detailCommentRendererSources) {
+  assert.match(
+    rendererSource,
+    /date\.className\s*=\s*"incidencias-modal-description-comment-date"/u,
+    `${rendererPath} debe exponer una clase semántica propia para la fecha`
+  );
+}
 
 assert.match(
   privateInteractionsStyle,

@@ -19,7 +19,7 @@
         "categories:performance": [
           "warn",
           {
-            "minScore": 0.9,
+            "minScore": 0.92,
             "aggregationMethod": "median-run"
           }
         ],
@@ -47,14 +47,14 @@
         "first-contentful-paint": [
           "warn",
           {
-            "maxNumericValue": 2500,
+            "maxNumericValue": 1800,
             "aggregationMethod": "median-run"
           }
         ],
         "largest-contentful-paint": [
           "warn",
           {
-            "maxNumericValue": 4000,
+            "maxNumericValue": 2500,
             "aggregationMethod": "median-run"
           }
         ],
@@ -68,7 +68,7 @@
         "total-blocking-time": [
           "warn",
           {
-            "maxNumericValue": 600,
+            "maxNumericValue": 300,
             "aggregationMethod": "median-run"
           }
         ]

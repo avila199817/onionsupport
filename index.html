@@ -142,16 +142,39 @@
   >
 
   <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "WebSite",
-      "@id": "https://onionsupport.com/#website",
-      "url": "https://onionsupport.com/",
-      "name": "Onion Support",
-      "alternateName": "Onion Support · Soluciones IT",
-      "inLanguage": "es"
-    }
-  </script>
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://onionsupport.com/#website",
+        "url": "https://onionsupport.com/",
+        "name": "Onion Support",
+        "alternateName": "Onion Support · Soluciones IT",
+        "inLanguage": "es",
+        "publisher": { "@id": "https://onionsupport.com/#business" }
+      },
+      {
+        "@type": "LocalBusiness",
+        "@id": "https://onionsupport.com/#business",
+        "name": "Onion Support",
+        "url": "https://onionsupport.com/",
+        "image": "https://onionsupport.com/src/media/img/Cristian_Avila_480.webp",
+        "logo": "https://onionsupport.com/src/media/img/favicon_black_circle_128.webp",
+        "email": "cristian@onionsupport.com",
+        "telephone": "+34629946615",
+        "areaServed": "Sant Vicenç de Castellet, Barcelona y alrededores",
+        "address": {
+          "@type": "PostalAddress",
+          "addressLocality": "Sant Vicenç de Castellet",
+          "postalCode": "08295",
+          "addressRegion": "Cataluña",
+          "addressCountry": "ES"
+        }
+      }
+    ]
+  }
+</script>
 
   <link
     rel="icon"

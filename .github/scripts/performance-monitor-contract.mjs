@@ -187,6 +187,18 @@ assert.equal(
   "el perfil desktop debe usar preset=desktop"
 );
 
+const mobileRules = assertions(mobile);
+const desktopRules = assertions(desktop);
+
+assert.equal(mobileRules["categories:performance"]?.[1]?.minScore, 0.92, "mobile performance warning budget must be 0.92");
+assert.equal(mobileRules["first-contentful-paint"]?.[1]?.maxNumericValue, 1800, "mobile FCP warning budget must be 1800ms");
+assert.equal(mobileRules["largest-contentful-paint"]?.[1]?.maxNumericValue, 2500, "mobile LCP warning budget must be 2500ms");
+assert.equal(mobileRules["total-blocking-time"]?.[1]?.maxNumericValue, 300, "mobile TBT warning budget must be 300ms");
+for (const [label, metricRules] of [["mobile", mobileRules], ["desktop", desktopRules]]) {
+  assert.equal(metricRules["cumulative-layout-shift"]?.[1]?.maxNumericValue, 0.1, `${label}: CLS warning budget must stay at 0.1`);
+  assert.ok(metricRules["largest-contentful-paint"]?.[1]?.maxNumericValue <= 2500, `${label}: LCP warning budget cannot exceed 2500ms`);
+}
+
 for (const token of [
   "onionsupport.lighthouse-summary.v2",
   "reportIdentity",

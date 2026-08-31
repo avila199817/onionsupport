@@ -217,6 +217,24 @@ def main() -> int:
         "index.html debe ejecutar únicamente /src/main.js como módulo",
     )
 
+    service_hierarchy = {
+        "seo/reparacion-ordenadores.html": ("/reparacion-ordenadores", "https://onionsupport.com/reparacion-ordenadores"),
+        "seo/soporte-informatico.html": ("/soporte-informatico", "https://onionsupport.com/soporte-informatico"),
+        "seo/redes-wifi.html": ("/redes-wifi", "https://onionsupport.com/redes-wifi"),
+        "seo/impresoras.html": ("/impresoras", "https://onionsupport.com/impresoras"),
+        "seo/soporte-empresas.html": ("/soporte-empresas", "https://onionsupport.com/soporte-empresas"),
+    }
+    require(errors, 'data-public-home-service-link="true"' in home_template, "Las tarjetas de servicio deben ser enlaces HTML rastreables")
+    require(errors, '"@id": `https://${BUSINESS.domain}/#business`' in home_template, "El LocalBusiness runtime debe reutilizar el @id canónico")
+    require(errors, '"publisher": { "@id": "https://onionsupport.com/#business" }' in index, "El WebSite raíz debe apuntar al LocalBusiness canónico")
+    for relative, (href, canonical) in service_hierarchy.items():
+        require(errors, f'href: "{href}"' in home_template, f"La landing debe enlazar semánticamente {href}")
+        source = read(relative)
+        require(errors, 'data-onion-schema="service-hierarchy"' in source, f"{relative} debe declarar jerarquía WebPage/BreadcrumbList")
+        require(errors, '"@type": "BreadcrumbList"' in source, f"{relative} debe declarar BreadcrumbList")
+        require(errors, f'"item": "{canonical}"' in source, f"{relative} debe cerrar el breadcrumb sobre su canonical")
+        require(errors, 'itemid="https://onionsupport.com/#business"' in source, f"{relative} debe reutilizar la identidad canónica del proveedor")
+
     for module_path in PUBLIC_ENHANCEMENTS:
         require(
             errors,

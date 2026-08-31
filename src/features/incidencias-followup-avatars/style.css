@@ -1,9 +1,9 @@
 /* =========================================================
    Onion Support · Incidencias Follow-up Avatars
 
-   Presentación del avatar real dentro de Seguimiento.
-   La identidad y el fallback pertenecen a index.js; este archivo sólo
-   gobierna geometría/presentación y se carga junto al enhancement lazy.
+   Avatar universal dentro de Seguimiento:
+   foto real cuando está disponible y fallback de iniciales en el mismo
+   frame circular, con los tonos canónicos del SPA.
 ========================================================= */
 
 .incidencias-modal-description-comment-head
@@ -25,20 +25,121 @@
 }
 
 .incidencias-modal-description-comment-avatar {
+  --followup-avatar-a: var(--accent);
+  --followup-avatar-b: var(--info);
+
+  position: relative;
   inline-size: 28px;
   block-size: 28px;
   min-inline-size: 28px;
   min-block-size: 28px;
-  display: block;
-  object-fit: cover;
-  object-position: center;
+  display: grid;
+  place-items: center;
+  isolation: isolate;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--border-strong) 72%, transparent);
+  border: 1px solid color-mix(
+    in srgb,
+    var(--followup-avatar-a) 44%,
+    var(--border-default)
+  );
   border-radius: 999px;
-  background: var(--surface-2, var(--card-bg));
+  background: linear-gradient(
+    135deg,
+    var(--followup-avatar-a),
+    var(--followup-avatar-b)
+  );
+  color: var(--text-on-accent, #fff);
   box-shadow:
     0 0 0 2px color-mix(in srgb, var(--card-bg) 86%, transparent),
     0 2px 8px rgba(0, 0, 0, .22);
+  font-size: 9px;
+  font-weight: var(--weight-bold);
+  line-height: 1;
+  letter-spacing: .02em;
+}
+
+.incidencias-modal-description-comment-avatar[data-avatar-tone="0"] {
+  --followup-avatar-a: var(--accent);
+  --followup-avatar-b: var(--info);
+}
+
+.incidencias-modal-description-comment-avatar[data-avatar-tone="1"] {
+  --followup-avatar-a: var(--success);
+  --followup-avatar-b: var(--info);
+}
+
+.incidencias-modal-description-comment-avatar[data-avatar-tone="2"] {
+  --followup-avatar-a: var(--warning);
+  --followup-avatar-b: var(--accent);
+}
+
+.incidencias-modal-description-comment-avatar[data-avatar-tone="3"] {
+  --followup-avatar-a: var(--error);
+  --followup-avatar-b: var(--warning);
+}
+
+.incidencias-modal-description-comment-avatar[data-avatar-tone="4"] {
+  --followup-avatar-a: var(--info);
+  --followup-avatar-b: var(--accent);
+}
+
+.incidencias-modal-description-comment-avatar[data-avatar-tone="5"] {
+  --followup-avatar-a: var(--success);
+  --followup-avatar-b: var(--accent);
+}
+
+.incidencias-modal-description-comment-avatar[data-avatar-tone="6"] {
+  --followup-avatar-a: var(--info);
+  --followup-avatar-b: var(--success);
+}
+
+.incidencias-modal-description-comment-avatar[data-avatar-tone="7"] {
+  --followup-avatar-a: var(--warning);
+  --followup-avatar-b: var(--error);
+}
+
+.incidencias-modal-description-comment-avatar[data-avatar-tone="8"] {
+  --followup-avatar-a: var(--error);
+  --followup-avatar-b: var(--accent);
+}
+
+.incidencias-modal-description-comment-avatar[data-avatar-tone="9"] {
+  --followup-avatar-a: var(--accent);
+  --followup-avatar-b: var(--success);
+}
+
+.incidencias-modal-description-comment-avatar-fallback,
+.incidencias-modal-description-comment-avatar-image {
+  grid-area: 1 / 1;
+  inline-size: 100%;
+  block-size: 100%;
+}
+
+.incidencias-modal-description-comment-avatar-fallback {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  user-select: none;
+}
+
+.incidencias-modal-description-comment-avatar-image {
+  position: relative;
+  z-index: 2;
+  display: block;
+  object-fit: cover;
+  object-position: center;
+  opacity: 0;
+}
+
+.incidencias-modal-description-comment-avatar[data-has-avatar="true"]
+  > .incidencias-modal-description-comment-avatar-image {
+  opacity: 1;
+}
+
+.incidencias-modal-description-comment-avatar[data-has-avatar="true"]
+  > .incidencias-modal-description-comment-avatar-fallback {
+  visibility: hidden;
 }
 
 @media (max-width: 720px) {
@@ -53,12 +154,15 @@
     block-size: 26px;
     min-inline-size: 26px;
     min-block-size: 26px;
+    font-size: 8px;
   }
 }
 
 @media (forced-colors: active) {
   .incidencias-modal-description-comment-avatar {
     border: 1px solid CanvasText;
+    background: Canvas;
+    color: CanvasText;
     box-shadow: none;
     forced-color-adjust: auto;
   }

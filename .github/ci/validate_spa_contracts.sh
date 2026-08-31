@@ -24,6 +24,7 @@ checks = {
     ),
     "src/views/public/login/template.js": (
         "LOGIN_TEMPLATE_VERSION",
+        "createLoginTemplate",
         "data-login-form",
         "login-identifier",
         "data-login-password",
@@ -119,6 +120,7 @@ print("Contratos SPA críticos OK.")
 PY
 
 python3 .github/scripts/private_css_authority_contract.py
+python3 .github/scripts/ui_loading_system_contract.py
 python3 .github/scripts/facturas_loading_parity_contract.py
 python3 .github/scripts/incidencias_skeleton_contract.py
 

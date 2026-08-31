@@ -53,6 +53,12 @@ function v2Response(items, {
   };
 }
 
+function executableSource(source = "") {
+  return String(source)
+    .replace(/\/\*[\s\S]*?\*\//gu, "")
+    .replace(/(^|\s)\/\/.*$/gmu, "$1");
+}
+
 const originalGet = Http.get;
 const requests = [];
 let nextResponse = v2Response([]);
@@ -182,31 +188,70 @@ try {
   );
 
   for (const token of [
+    "PERSISTENT SEARCH DOM ISLAND",
     "data-incidencias-search-input",
     "selectionStart",
     "selectionEnd",
     "setSelectionRange",
     "preventScroll",
-    "MutationObserver",
+    "transplantOwnedInput",
+    "current.replaceWith(ownedInput)",
+    "inputWasReplaced",
+    "queueMicrotask",
+    "internalRestore = true",
+    "documentLike.activeElement === input",
     "pointerdown",
     "Tab",
     "Escape",
   ]) {
     assert.match(
       hotListSource,
-      new RegExp(token),
-      `hot-list debe preservar el contrato de foco/caret: ${token}`
+      new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+      `hot-list debe preservar el contrato de isla DOM/caret: ${token}`
     );
   }
+
+  const hotExecutable = executableSource(hotListSource);
+
+  assert.doesNotMatch(
+    hotExecutable,
+    /setTimeout\s*\(|requestAnimationFrame\s*\(/u,
+    "el hot path del search no debe programar timers ni frames para restaurar caret"
+  );
+
+  assert.doesNotMatch(
+    hotExecutable,
+    /input\.value\s*=/u,
+    "la capa de foco no puede reescribir el value del search"
+  );
+
+  const desiredIndex = hotExecutable.indexOf("const desired = {");
+  const focusIndex = hotExecutable.indexOf("input.focus({ preventScroll: true });");
+  assert.ok(
+    desiredIndex >= 0 && focusIndex > desiredIndex,
+    "la selección deseada debe congelarse ANTES de focus(), porque focusin puede observar caret=0"
+  );
+
+  const inputHandlerStart = hotExecutable.indexOf("function onInput(event)");
+  const selectHandlerStart = hotExecutable.indexOf("function onSelect(event)");
+  const inputHandler = hotExecutable.slice(inputHandlerStart, selectHandlerStart);
+  assert.doesNotMatch(
+    inputHandler,
+    /focus\s*\(|setSelectionRange|scheduleReplacementRestore/u,
+    "cada pulsación sólo puede capturar estado; nunca restaurar foco/caret"
+  );
 
   assert.match(boundarySource, /installIncidenciasHotList/u);
   assert.match(boundarySource, /uninstallHotList/u);
   assert.match(boundarySource, /searchFocusAndCaretStableAcrossListReconciliation:\s*true/u);
+  assert.match(boundarySource, /searchInputPersistentDomIsland:\s*true/u);
+  assert.match(boundarySource, /keyboardHotPathNeverRestoresCaret:\s*true/u);
+  assert.match(boundarySource, /replacementRestoreRunsBeforePaint:\s*true/u);
 } finally {
   Http.get = originalGet;
   clearIncidenciasCache();
 }
 
 console.log(
-  "Incidencias hot-list contract: PASS · snap filters/search on complete universe · paginated truth guard · stable focus/caret"
+  "Incidencias hot-list contract: PASS · snap filters/search · paginated truth guard · persistent search DOM island · zero caret work per keystroke"
 );

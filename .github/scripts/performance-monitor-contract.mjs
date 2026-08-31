@@ -96,6 +96,7 @@ for (const token of [
   "temporaryPublicStorage: false",
   "https://onionsupport.com/",
   "https://onionsupport.com/login",
+  "https://onionsupport.com/reparacion-ordenadores",
   'LIGHTHOUSE_EXPECTED_SAMPLES: "5"',
   "node .github/scripts/performance-monitor-contract.mjs",
   "node .github/scripts/lighthouse-summary.mjs",

@@ -318,6 +318,7 @@
   .incidencias-spinner,
   .incidencias-inline-spinner,
   .facturas-inline-spinner,
+  .clientes-inline-spinner,
   .usuarios-inline-spinner,
   .facturas-detail-spinner
 ) {
@@ -369,15 +370,19 @@
     [data-correo-host="true"] .correo-message-skeleton i,
     [data-correo-host="true"] .correo-reader-skeleton-block,
     .facturas-detail-skeleton,
-    .incidencias-skeleton--main::before,
-    .incidencias-skeleton--main::after,
     .ui-progress-spinner,
     .incidencias-spinner,
     .incidencias-inline-spinner,
     .facturas-inline-spinner,
+    .clientes-inline-spinner,
     .usuarios-inline-spinner,
     .facturas-detail-spinner
   ) {
+    animation: none;
+  }
+
+  .incidencias-skeleton--main::before,
+  .incidencias-skeleton--main::after {
     animation: none;
   }
 }
@@ -385,7 +390,7 @@
 @media (forced-colors: active) {
   :where(
     .ui-skeleton,
-    .incidencias-skeleton,
+    .incidencias-skeleton:not(.incidencias-skeleton--main),
     .facturas-skeleton,
     .clientes-skeleton,
     .usuarios-skeleton,
@@ -400,10 +405,18 @@
     [data-correo-host="true"] .correo-message-skeleton > span,
     [data-correo-host="true"] .correo-message-skeleton i,
     [data-correo-host="true"] .correo-reader-skeleton-block,
-    .facturas-detail-skeleton,
-    .incidencias-skeleton--main::before,
-    .incidencias-skeleton--main::after
+    .facturas-detail-skeleton
   ) {
+    forced-color-adjust: none;
+    background: GrayText;
+  }
+
+  .incidencias-skeleton--main {
+    background: none;
+  }
+
+  .incidencias-skeleton--main::before,
+  .incidencias-skeleton--main::after {
     forced-color-adjust: none;
     background: GrayText;
   }

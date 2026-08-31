@@ -1,0 +1,40 @@
+/* =========================================================
+   ONION SUPPORT — FACTURAS · REFRESH SILENCIOSO
+   DOMAIN RUNTIME · 2026-08-31
+
+   El refresco conserva las filas actuales en pantalla y actualiza los datos
+   en background. No se pinta spinner, overlay ni texto "Actualizando...".
+   El footer mantiene su role=status fuera del flujo visual para accesibilidad.
+========================================================= */
+
+@layer views {
+
+/*
+   El template conserva este nodo por compatibilidad interna, pero es aria-hidden
+   y no debe ocupar ni un píxel durante un refresh con filas ya visibles.
+*/
+.facturas-refresh-overlay {
+  display: none;
+}
+
+/*
+   Durante refreshing el footer usa role=status. Lo conservamos para lectores de
+   pantalla, pero lo sacamos por completo del flujo visual para que el historial
+   permanezca estable y no aparezca una segunda línea de carga.
+*/
+.facturas-table-wrap.is-refreshing .facturas-infinite {
+  position: absolute;
+  inline-size: 1px;
+  min-inline-size: 1px;
+  block-size: 1px;
+  min-block-size: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+} /* @layer views */

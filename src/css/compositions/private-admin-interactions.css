@@ -467,7 +467,7 @@
   white-space: nowrap;
 }
 
-.incidencias-modal-description-comment-head span {
+.incidencias-modal-description-comment-date {
   flex: 0 0 auto;
   color: var(--text-muted);
   font-size: 9px;
@@ -814,7 +814,7 @@
     gap: 3px;
   }
 
-  .incidencias-modal-description-comment-head span {
+  .incidencias-modal-description-comment-date {
     white-space: normal;
   }
 

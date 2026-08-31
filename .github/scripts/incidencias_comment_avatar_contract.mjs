@@ -9,6 +9,10 @@ const FOLLOWUP_STYLE_PATH =
   "src/features/incidencias-followup-avatars/style.css";
 const DETAIL_MODAL_STYLE_PATH =
   "src/css/components/detail-modal.css";
+const DETAIL_EXPERIENCE_PATH =
+  "src/features/incidencias-detail-experience/index.js";
+const PRIVATE_INTERACTIONS_STYLE_PATH =
+  "src/css/compositions/private-admin-interactions.css";
 const ENHANCEMENTS_PATH =
   "src/app/enhancements.js";
 
@@ -16,6 +20,11 @@ const source = fs.readFileSync(FEATURE_PATH, "utf8");
 const followupSource = fs.readFileSync(FOLLOWUP_PATH, "utf8");
 const followupStyle = fs.readFileSync(FOLLOWUP_STYLE_PATH, "utf8");
 const detailModalStyle = fs.readFileSync(DETAIL_MODAL_STYLE_PATH, "utf8");
+const detailExperienceSource = fs.readFileSync(DETAIL_EXPERIENCE_PATH, "utf8");
+const privateInteractionsStyle = fs.readFileSync(
+  PRIVATE_INTERACTIONS_STYLE_PATH,
+  "utf8"
+);
 const enhancementsSource = fs.readFileSync(ENHANCEMENTS_PATH, "utf8");
 
 assert.match(
@@ -211,9 +220,21 @@ assert.match(
 );
 
 assert.match(
-  detailModalStyle,
-  /\.ui-detail-modal-avatar-frame\[data-fallback="true"\]\[data-has-avatar="false"\]\s*\{[\s\S]*?color:\s*var\(--text-on-accent, #fff\);/u,
-  "las iniciales deben conservar el blanco canónico aunque el contexto del comentario defina texto secundario"
+  detailExperienceSource,
+  /date\.className\s*=\s*"incidencias-modal-description-comment-date"/u,
+  "la fecha del comentario debe exponer una clase semántica propia"
+);
+
+assert.match(
+  privateInteractionsStyle,
+  /\.incidencias-modal-description-comment-date\s*\{[\s\S]*?color:\s*var\(--text-muted\);/u,
+  "sólo la fecha debe consumir la tipografía secundaria del comentario"
+);
+
+assert.doesNotMatch(
+  privateInteractionsStyle,
+  /\.incidencias-modal-description-comment-head\s+span\s*\{/u,
+  "la tipografía contextual no puede alcanzar avatares u otros spans del encabezado"
 );
 
 assert.doesNotMatch(

@@ -115,23 +115,31 @@ if not errors:
         if token not in skeleton_css:
             errors.append(f"{SKELETON_CSS}: falta paridad Incidencias {token!r}")
 
-    # Siete capas = jerarquía real completa, incluida la segunda pill inferior.
-    main_after = re.search(
-        r"(?m)^\.incidencias-skeleton--main::after\s*\{(?P<body>.*?)^\}",
-        skeleton_css,
-        re.DOTALL | re.MULTILINE,
-    )
-    if not main_after:
-        errors.append(f"{SKELETON_CSS}: falta silueta principal")
+    # Siete capas por mask = jerarquía real completa, incluida la segunda pill.
+    # Se usa slicing determinista, no regex anidado: el selector específico no
+    # contiene bloques hijos y debe cerrar antes de la sección CORREO.
+    selector = ".incidencias-skeleton--main::after {"
+    block_start = skeleton_css.find(selector)
+    block_end = skeleton_css.find("\n}\n\n/* =========================================================\n   CORREO", block_start)
+    if block_start < 0 or block_end < 0:
+        errors.append(f"{SKELETON_CSS}: falta bloque ::after canónico")
     else:
-        body = main_after.group("body")
-        mask_match = re.search(r"(?m)^\s*mask:\s*(?P<mask>.*?);", body, re.DOTALL)
-        if not mask_match:
-            errors.append(f"{SKELETON_CSS}: falta mask canónico")
-        elif mask_match.group("mask").count("linear-gradient") != 7:
+        body = skeleton_css[block_start:block_end]
+        if "-webkit-mask:" not in body or "\n  mask:" not in body:
+            errors.append(f"{SKELETON_CSS}: faltan masks webkit/estándar")
+        layer_count = body.count("linear-gradient(#000 0 0)")
+        if layer_count != 14:
             errors.append(
-                f"{SKELETON_CSS}: la silueta debe contener exactamente 7 piezas"
+                f"{SKELETON_CSS}: se esperaban 14 capas (7+7), hay {layer_count}"
             )
+        for token in (
+            "var(--inc-skeleton-priority-width)",
+            "var(--inc-skeleton-assigned-width)",
+        ):
+            if body.count(token) != 2:
+                errors.append(
+                    f"{SKELETON_CSS}: {token} debe existir una vez por cada mask"
+                )
 
     # Ningún bloque local incidencias-skeleton puede recuperar paint.
     for match in re.finditer(
@@ -160,6 +168,6 @@ if errors:
     sys.exit(1)
 
 print(
-    "Skeleton Incidencias 1:1 OK · silueta de fila real · 7 piezas main · "
+    "Skeleton Incidencias 1:1 OK · silueta de fila real · 7+7 capas mask · "
     "columnas calibradas · 6 filas visibles · paint global"
 )

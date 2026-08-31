@@ -2,12 +2,13 @@
    Onion Support - Incidencias Detail Truth Boundary
    Archivo: /src/views/incidencias/incidencias.template.modal.js
 
-   TRUTHFUL BOUNDED WINDOWS · TEMPLATE SAFE
+   TRUTHFUL BOUNDED WINDOWS · COMMENTS ALWAYS MATERIALIZED · TEMPLATE SAFE
 
    Responsabilidad:
    - Mantener el template visual existente 1:1 en .impl.js.
    - Consumir la metadata de ventana acotada que devuelve el backend.
    - Mostrar totales reales de historial/actividad y adjuntos.
+   - Materializar siempre la conversación del ticket en el body normal.
    - Explicar discretamente cuándo sólo se muestra la ventana reciente.
    - No introducir paginación, HTTP, DOM ni listeners nuevos.
 ========================================================= */
@@ -29,10 +30,13 @@ export {
 };
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.extreme.v37-owned-attachment-delete-confirm";
+  "incidencias.template.modal.extreme.v38-comments-always-visible";
 
 export const INCIDENCIAS_DETAIL_WINDOW_UI_VERSION =
   "incidencias.detail-window-ui.v1";
+
+export const INCIDENCIAS_DETAIL_COMMENTS_UI_VERSION =
+  "incidencias.detail-comments-ui.v1-always-materialized";
 
 /*
    Contrato visual delegado a incidencias.template.modal.impl.js.
@@ -61,6 +65,44 @@ function isObject(value) {
 
 function object(value, fallback = {}) {
   return isObject(value) ? value : fallback;
+}
+
+function array(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function text(value = "", fallback = "") {
+  const normalized = String(value ?? "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .trim();
+  return normalized || fallback;
+}
+
+function oneLine(value = "", fallback = "") {
+  const normalized = text(value, fallback)
+    .replace(/[\n\t]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return normalized || fallback;
+}
+
+function key(value = "") {
+  return oneLine(value, "")
+    .toLocaleLowerCase("es-ES")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/_+/g, "_");
+}
+
+function escapeHtml(value = "") {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function count(value = 0, fallback = 0) {
@@ -92,9 +134,9 @@ function collectionWindow(detail = {}, name = "", countKey = "", aliases = []) {
   const window = object(meta[name]);
 
   let values = [];
-  for (const key of [name, ...aliases]) {
-    if (Array.isArray(raw[key])) {
-      values = raw[key];
+  for (const alias of [name, ...aliases]) {
+    if (Array.isArray(raw[alias])) {
+      values = raw[alias];
       break;
     }
   }
@@ -112,6 +154,202 @@ function collectionWindow(detail = {}, name = "", countKey = "", aliases = []) {
     returned,
     truncated,
   };
+}
+
+function commentKind(item = {}) {
+  const source = object(item);
+  return key(
+    source.kind ||
+    source.type ||
+    source.action ||
+    source.event ||
+    ""
+  );
+}
+
+function normalizeComment(item = {}, index = 0) {
+  const source = object(item);
+  const body = text(
+    source.body ||
+    source.message ||
+    source.text ||
+    source.comment ||
+    source.description ||
+    source.descripcion ||
+    source.summary ||
+    "",
+    ""
+  );
+
+  if (!body) return null;
+
+  return {
+    id: oneLine(
+      source.id ||
+      source.commentId ||
+      source.eventId ||
+      `comment_${index}`,
+      `comment_${index}`
+    ),
+    body,
+    author: oneLine(
+      source.author ||
+      source.byName ||
+      source.createdByName ||
+      source.userName ||
+      source.name ||
+      source.by?.name ||
+      source.createdBy?.name ||
+      source.role ||
+      "Usuario",
+      "Usuario"
+    ),
+    createdAt:
+      source.createdAt ||
+      source.date ||
+      source.timestamp ||
+      source.updatedAt ||
+      null,
+  };
+}
+
+function commentTimestamp(item = {}) {
+  const value = item?.createdAt;
+  const parsed = value ? new Date(value).getTime() : 0;
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export function getIncidenciasDetailComments(input = {}) {
+  const detail = detailFromInput(input);
+  const raw = object(detail.raw);
+  const candidates = [];
+
+  for (const source of [detail, raw]) {
+    for (const alias of ["comments", "notes", "messages"]) {
+      for (const item of array(source[alias])) {
+        candidates.push(item);
+      }
+    }
+
+    for (const item of array(source.timeline)) {
+      const kind = commentKind(item);
+      if (kind === "comment" || kind === "comentario") {
+        candidates.push(item);
+      }
+    }
+  }
+
+  const unique = new Map();
+
+  candidates.forEach((item, index) => {
+    const normalized = normalizeComment(item, index);
+    if (!normalized) return;
+
+    const identity = oneLine(
+      normalized.id ||
+      `${normalized.createdAt || ""}:${normalized.author}:${normalized.body}`,
+      ""
+    );
+
+    if (!identity || unique.has(identity)) return;
+    unique.set(identity, normalized);
+  });
+
+  return [...unique.values()].sort(
+    (a, b) => commentTimestamp(b) - commentTimestamp(a)
+  );
+}
+
+function formatCommentDate(value = null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return oneLine(value, "");
+
+  try {
+    return new Intl.DateTimeFormat("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  } catch {
+    return date.toISOString();
+  }
+}
+
+function commentsLabel(window = {}, materialized = 0) {
+  const total = Math.max(count(window.total, 0), materialized);
+  const returned = Math.max(count(window.returned, 0), materialized);
+
+  if (!total) return "Sin comentarios todavía";
+  if (window.truncated === true || total > returned) {
+    return `${total} comentarios · mostrando ${returned} recientes`;
+  }
+  return `${total} comentario${total === 1 ? "" : "s"}`;
+}
+
+function renderCommentsSection(input = {}, state = {}) {
+  const comments = getIncidenciasDetailComments(input);
+  const window = object(state.comments);
+  const label = commentsLabel(window, comments.length);
+
+  return `
+    <section
+      class="incidencias-modal-history-section ui-detail-modal-history-section incidencias-modal-comments-section"
+      data-modal-comments-slot="true"
+      data-comments-ui-version="${INCIDENCIAS_DETAIL_COMMENTS_UI_VERSION}"
+      data-comments-materialized="${comments.length}"
+      aria-labelledby="incidencias-modal-comments-title"
+    >
+      <div class="incidencias-modal-section-head ui-detail-modal-section-head">
+        <h3 id="incidencias-modal-comments-title">Conversación</h3>
+        <span>${escapeHtml(label)}</span>
+      </div>
+
+      ${
+        comments.length
+          ? `
+            <div class="incidencias-timeline-list incidencias-modal-comments-list">
+              ${comments.map((comment) => `
+                <article
+                  class="incidencias-timeline-card tone-comment is-comment incidencias-modal-comment-card"
+                  data-timeline-tone="comment"
+                  data-comment-id="${escapeHtml(comment.id)}"
+                >
+                  <div class="incidencias-timeline-accent"></div>
+                  <div class="incidencias-timeline-main">
+                    <div class="incidencias-timeline-title-row">
+                      <strong class="incidencias-timeline-title">Comentario</strong>
+                      <span class="incidencias-timeline-kind">Comentario</span>
+                    </div>
+                    <p class="incidencias-timeline-body">${escapeHtml(comment.body)}</p>
+                  </div>
+                  <div class="incidencias-timeline-meta">
+                    <strong>${escapeHtml(comment.author)}</strong>
+                    <span>${escapeHtml(formatCommentDate(comment.createdAt))}</span>
+                  </div>
+                </article>
+              `).join("")}
+            </div>
+          `
+          : `
+            <div class="incidencias-modal-empty-box incidencias-modal-comments-empty">
+              No hay comentarios publicados en esta incidencia.
+            </div>
+          `
+      }
+    </section>
+  `;
+}
+
+function patchCommentsIntoTicketBody(html = "", input = {}, state = {}) {
+  const commentsSection = renderCommentsSection(input, state);
+
+  return String(html).replace(
+    /(<div\s+data-modal-files-slot="true">)/,
+    `$1${commentsSection}`
+  );
 }
 
 export function getIncidenciasDetailWindowUiState(input = {}) {
@@ -142,6 +380,11 @@ export function getIncidenciasDetailWindowUiState(input = {}) {
     "attachmentsCount",
     ["files", "adjuntos"]
   );
+
+  const materializedComments = getIncidenciasDetailComments(input).length;
+  comments.returned = Math.max(comments.returned, materializedComments);
+  comments.total = Math.max(comments.total, materializedComments);
+  comments.truncated = comments.truncated || comments.total > comments.returned;
 
   const timeline = {
     total: history.total + comments.total,
@@ -216,6 +459,7 @@ function patchRootContract(html = "", state = {}) {
   const contract =
     `data-attachment-view-policy="signed-view-only" ` +
     `data-detail-window-ui-version="${INCIDENCIAS_DETAIL_WINDOW_UI_VERSION}" ` +
+    `data-comments-ui-version="${INCIDENCIAS_DETAIL_COMMENTS_UI_VERSION}" ` +
     `data-detail-window-truncated="${state.truncated ? "true" : "false"}"`;
 
   return String(html)
@@ -234,11 +478,13 @@ export function renderIncidenciasDetailModal(input = {}) {
   if (!html) return html;
 
   const state = getIncidenciasDetailWindowUiState(input);
+  let output = patchRootContract(html, state);
+  output = patchCommentsIntoTicketBody(output, input, state);
+
   if (!state.hasWindowContract) {
-    return patchRootContract(html, state);
+    return output;
   }
 
-  let output = patchRootContract(html, state);
   output = patchHistoryJumpCount(output, state.timeline.total);
   output = patchHistoryHeading(output, state.timeline);
   output = patchAttachmentHeading(output, state.attachments);
@@ -260,11 +506,21 @@ export function getDetailTemplateSnapshot() {
       addsPagination: false,
       sharedVisualContract: INCIDENCIAS_DETAIL_SHARED_VISUAL_CONTRACT,
     },
+    commentsUi: {
+      version: INCIDENCIAS_DETAIL_COMMENTS_UI_VERSION,
+      alwaysMaterializedInTicketBody: true,
+      aliasCompatible: true,
+      timelineCommentCompatible: true,
+      patchesInsideExistingFilesSlot: true,
+      fullHistoryRemainsSeparate: true,
+    },
     policy: {
       ...(snapshot?.policy || {}),
       truthfulBoundedCollections: true,
       historyTotalUsesBackendWindowMetadata: true,
       attachmentsTotalUsesBackendWindowMetadata: true,
+      commentsAlwaysVisibleInTicketBody: true,
+      commentsPatchWithRemoteDetail: true,
       noSyntheticTimelineEntries: true,
     },
   };

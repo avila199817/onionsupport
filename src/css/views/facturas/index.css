@@ -1,9 +1,12 @@
+@import url("./resend-confirm.css");
+
 /* =========================================================
    ONION SUPPORT — FACTURAS · LISTADO
    DOMAIN-ONLY CSS · 2026-08-31
 
    Shell/listado compartido: private-admin-parity.css
    Esta hoja conserva columnas, identidad fiscal, estados y acciones de fila.
+   La confirmación de reenvío vive en resend-confirm.css.
 ========================================================= */
 
 @layer views {

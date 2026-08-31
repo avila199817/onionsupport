@@ -83,8 +83,8 @@ assert.match(
 
 assert.match(
   followupSource,
-  /incidencias\.followup-avatars\.v2\.premium-horizontal/u,
-  "Seguimiento debe versionar explícitamente la presentación premium horizontal"
+  /incidencias\.followup-avatars\.v3\.universal-initials/u,
+  "Seguimiento debe versionar explícitamente el avatar universal con iniciales"
 );
 
 assert.match(
@@ -125,8 +125,32 @@ assert.match(
 
 assert.match(
   followupSource,
-  /document\.createElement\("img"\)/u,
-  "Seguimiento debe insertar una foto real junto al autor"
+  /document\.createElement\("span"\)[\s\S]*?fallback\.textContent\s*=\s*avatarInitials\(authorText\)/u,
+  "cada autor debe recibir un frame estable con sus iniciales canónicas"
+);
+
+assert.match(
+  followupSource,
+  /if \(profile\?\.src\)[\s\S]*?document\.createElement\("img"\)/u,
+  "la foto real debe ser una mejora opcional sobre el fallback, no un requisito"
+);
+
+assert.doesNotMatch(
+  followupSource,
+  /if \(!profile\?\.src\)[\s\S]{0,120}removeAvatar/u,
+  "un autor sin foto nunca debe perder su avatar de iniciales"
+);
+
+assert.match(
+  followupSource,
+  /image\.addEventListener\([\s\S]*?"error"[\s\S]*?image\.remove\(\)[\s\S]*?setAvatarState/u,
+  "una foto rota debe volver al fallback conservando el frame"
+);
+
+assert.match(
+  followupSource,
+  /if \(!state\?\.detail\)[\s\S]*?syncHead\(head\)[\s\S]*?queueHydration/u,
+  "las iniciales deben aparecer antes de terminar la hidratación de identidad"
 );
 
 assert.match(
@@ -157,6 +181,24 @@ assert.match(
   followupStyle,
   /border-radius:\s*999px;/u,
   "el avatar debe ser inequívocamente circular"
+);
+
+assert.match(
+  followupStyle,
+  /background:\s*linear-gradient\([\s\S]*?var\(--followup-avatar-a\)[\s\S]*?var\(--followup-avatar-b\)/u,
+  "las iniciales deben usar el gradiente canónico del sistema de avatares"
+);
+
+assert.match(
+  followupStyle,
+  /\[data-avatar-tone="3"\][\s\S]*?--followup-avatar-a:\s*var\(--error\);[\s\S]*?--followup-avatar-b:\s*var\(--warning\);/u,
+  "el tono naranja de Carlos debe conservar la pareja error-warning del encabezado"
+);
+
+assert.match(
+  followupStyle,
+  /incidencias-modal-description-comment-avatar-fallback[\s\S]*?place-items:\s*center/u,
+  "las iniciales deben quedar centradas dentro del círculo"
 );
 
 assert.match(
@@ -206,9 +248,29 @@ const feature = await import(
 );
 
 const {
+  avatarInitials,
+  avatarToneFromIdentity,
   buildCommentIdentityIndex,
   resolveCommentProfile,
 } = feature.IncidenciasAvatarFallbackInternals;
+
+assert.equal(
+  avatarInitials("Carlos Yepes Garcia"),
+  "CY",
+  "Carlos debe usar las dos primeras iniciales, igual que el encabezado"
+);
+
+assert.equal(
+  avatarInitials("Pol Cabeza Sillero"),
+  "PC",
+  "el fallback debe funcionar para cualquier nombre, no sólo para Carlos"
+);
+
+assert.equal(
+  avatarToneFromIdentity("carlosgarciayepes16@gmail.com"),
+  3,
+  "la identidad de Carlos debe resolver el tono naranja canónico del encabezado"
+);
 
 const requester = Object.freeze({
   source: "requester",
@@ -281,5 +343,5 @@ const profiles = [requester, technician];
 }
 
 console.log(
-  "Incidencias comment avatar contract OK · Seguimiento premium horizontal · identity-first · 28/26px"
+  "Incidencias comment avatar contract OK · initials universal · tone parity · identity-first · 28/26px"
 );

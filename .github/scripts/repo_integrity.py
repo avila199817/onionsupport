@@ -271,11 +271,10 @@ def validate_css_references(errors: list[str]) -> None:
 
 
 def validate_ui_foundation_contract(errors: list[str]) -> None:
-    """Keep private SPA geometry governed by one final, non-view-specific layer.
+    """Keep private SPA geometry/loading governed by final non-view layers.
 
-    The route sheets remain free to paint their own domain UI, but they must not
-    be able to remove the shrink/overflow/scroll/mobile invariants that keep the
-    application stable with long content and compact viewports.
+    Route sheets may retain domain geometry, but they cannot remove the
+    shrink/overflow/scroll/mobile invariants or the global loading authority.
     """
 
     app_path = SRC / "css" / "app.css"
@@ -290,8 +289,9 @@ def validate_ui_foundation_contract(errors: list[str]) -> None:
         return
 
     required_app = (
-        "@layer tokens, reset, core, layout, components, views, auth, compositions, guardrails;",
+        "@layer tokens, reset, core, layout, components, views, auth, compositions, loading, guardrails;",
         '@import url("./compositions/mobile-datalist.css") layer(compositions);',
+        '@import url("./components/skeleton.css") layer(loading);',
         '@import url("./core/guardrails.css") layer(guardrails);',
     )
     for snippet in required_app:

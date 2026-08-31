@@ -7,6 +7,7 @@
    DOMAIN-ONLY CSS · 2026-08-31
 
    Shell/listado compartido: private-admin-parity.css
+   Loading/skeleton paint: components/skeleton.css
    Esta hoja conserva columnas, identidad fiscal, estados y acciones de fila.
    La confirmación de reenvío vive en resend-confirm.css.
 ========================================================= */
@@ -308,7 +309,7 @@
 }
 
 /* =========================================================
-   DOMAIN FEED / FEEDBACK / SKELETON
+   DOMAIN FEED / FEEDBACK / SKELETON GEOMETRY
 ========================================================= */
 
 .facturas-infinite-retry {
@@ -360,12 +361,7 @@
   color: var(--error-strong, var(--error));
 }
 
-/*
-   Paridad de carga con Incidencias:
-   el estado polite existe para accesibilidad, pero no se pinta como un loader
-   independiente delante del historial. Sólo reaparece si recibe foco
-   programático como fallback accesible.
-*/
+/* Accessibility-only live status; el paint de loading vive en skeleton.css. */
 .facturas-loading-status {
   position: absolute;
   inline-size: 1px;
@@ -403,16 +399,6 @@
   gap: 7px;
 }
 
-.facturas-inline-spinner {
-  inline-size: 14px;
-  block-size: 14px;
-  flex: 0 0 auto;
-  border: 2px solid color-mix(in srgb, currentColor 28%, transparent);
-  border-block-start-color: currentColor;
-  border-radius: 50%;
-  animation: facturas-spin .72s linear infinite;
-}
-
 .facturas-table-loading { display: grid; }
 .facturas-table-loading-row {
   min-block-size: 84px;
@@ -424,18 +410,17 @@
   border-block-end: 1px solid var(--data-table-row-border);
 }
 .facturas-table-loading-copy { display: grid; gap: 6px; }
-.facturas-skeleton { block-size: 11px; }
-.facturas-skeleton--avatar { inline-size: 42px; block-size: 42px; border-radius: var(--radius-sm); }
+
+/* Sólo geometría horizontal. Alturas/radios/shimmer son canónicos. */
+.facturas-skeleton--avatar { inline-size: 42px; }
 .facturas-skeleton--xs { inline-size: 38%; }
 .facturas-skeleton--lg { inline-size: 76%; }
 .facturas-skeleton--md { inline-size: 58%; }
-.facturas-skeleton--pill { inline-size: 70px; block-size: 25px; border-radius: var(--radius-pill); }
+.facturas-skeleton--pill { inline-size: 70px; }
 .facturas-skeleton--date { inline-size: 76px; }
 .facturas-skeleton--amount { inline-size: 88px; }
-.facturas-skeleton--ticket { inline-size: 104px; block-size: 30px; }
-.facturas-skeleton--actions { inline-size: 180px; block-size: 68px; }
-
-@keyframes facturas-spin { to { transform: rotate(1turn); } }
+.facturas-skeleton--ticket { inline-size: 104px; }
+.facturas-skeleton--actions { inline-size: 180px; }
 
 @media (max-width: 680px) {
   .ui-datalist[data-mobile-datalist-layout="facturas"] .facturas-main {
@@ -479,7 +464,6 @@
 @media (prefers-reduced-motion: reduce) {
   .facturas-action-btn,
   .facturas-incidencia-link { transition: none; }
-  .facturas-inline-spinner { animation: none; }
 }
 
 @media print {

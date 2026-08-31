@@ -6,10 +6,11 @@ import sys
 TEMPLATE = Path("src/views/incidencias/incidencias.template.js")
 CSS = Path("src/css/views/incidencias/index.css")
 APP_CSS = Path("src/css/app.css")
+SKELETON_CSS = Path("src/css/components/skeleton.css")
 
 errors = []
 
-for path in (TEMPLATE, CSS, APP_CSS):
+for path in (TEMPLATE, CSS, APP_CSS, SKELETON_CSS):
     if not path.is_file():
         errors.append(f"{path}: no existe")
 
@@ -17,6 +18,7 @@ if not errors:
     template = TEMPLATE.read_text(encoding="utf-8")
     css = CSS.read_text(encoding="utf-8")
     app_css = APP_CSS.read_text(encoding="utf-8")
+    skeleton_css = SKELETON_CSS.read_text(encoding="utf-8")
 
     required_template = (
         "function renderTableLoading(rows = DEFAULT_VISIBLE_ROWS)",
@@ -32,76 +34,61 @@ if not errors:
         if token not in template:
             errors.append(f"{TEMPLATE}: falta contrato {token!r}")
 
-    # La arquitectura declara compositions por encima de views. El main skeleton
-    # debe neutralizar únicamente el relleno genérico para que no vuelva a verse
-    # como una cápsula gigante alrededor de avatar + copy.
-    layer_contract = "@layer tokens, reset, core, layout, components, views, auth, compositions, guardrails;"
+    layer_contract = (
+        "@layer tokens, reset, core, layout, components, views, auth, "
+        "compositions, loading, guardrails;"
+    )
     if layer_contract not in app_css:
-        errors.append(
-            f"{APP_CSS}: cambió el orden de capas; revisar intencionadamente la protección del skeleton"
-        )
+        errors.append(f"{APP_CSS}: loading debe vivir después de compositions")
+    if '@import url("./components/skeleton.css") layer(loading);' not in app_css:
+        errors.append(f"{APP_CSS}: falta la autoridad global de skeleton")
 
-    required_css = (
-        "--inc-skeleton-bg: var(--skeleton-bg);",
-        "--inc-skeleton-bg-strong: var(--skeleton-bg-strong);",
+    # Incidencias conserva sólo layout/ancho del placeholder.
+    required_local = (
         ".incidencias-row--skeleton {",
         ".incidencias-row--skeleton:nth-child(n+7) { display: none; }",
+        ".incidencias-skeleton--main { inline-size: 100%; min-inline-size: 0; }",
+        ".incidencias-skeleton--status { inline-size: 72%; }",
+        ".incidencias-skeleton--created { inline-size: 66%; }",
+        ".incidencias-skeleton--updated { inline-size: 70%; }",
+        ".incidencias-skeleton--amount { inline-size: 64%; }",
+        ".incidencias-skeleton--attachments { inline-size: 52%; }",
+    )
+    for token in required_local:
+        if token not in css:
+            errors.append(f"{CSS}: falta geometría local {token!r}")
+
+    # Paint completo en la única autoridad global.
+    required_global = (
+        "SINGLE SKELETON AUTHORITY",
         ".incidencias-skeleton--main {",
-        "--skeleton-bg: transparent;",
-        "--skeleton-bg-strong: transparent;",
-        "inline-size: 100%;",
         "block-size: 108px;",
-        "display: block;",
+        "background: none;",
+        "animation: none;",
         ".incidencias-skeleton--main::before",
         ".incidencias-skeleton--main::after",
         "var(--private-admin-avatar-size)",
         "var(--private-admin-main-gap)",
-        "var(--inc-skeleton-bg)",
-        "var(--inc-skeleton-bg-strong)",
-        ".incidencias-skeleton--status,",
-        ".incidencias-skeleton--amount,",
-        ".incidencias-skeleton--attachments {",
-        "block-size: 25px;",
-        ".incidencias-skeleton--created,",
-        ".incidencias-skeleton--updated {",
-        "block-size: 11px;",
-        "private-admin-shimmer 1.35s linear infinite",
+        "var(--ui-skeleton-base)",
+        "var(--ui-skeleton-highlight)",
+        "block-size: var(--ui-skeleton-chip);",
+        "block-size: var(--ui-skeleton-line);",
+        "ui-skeleton-shimmer var(--ui-skeleton-duration)",
     )
-    for token in required_css:
-        if token not in css:
-            errors.append(f"{CSS}: falta geometría/protección skeleton {token!r}")
+    for token in required_global:
+        if token not in skeleton_css:
+            errors.append(f"{SKELETON_CSS}: falta autoridad Incidencias {token!r}")
 
-    main_match = re.search(
-        r"\.incidencias-skeleton--main\s*\{(?P<body>.*?)\n\}",
-        css,
-        re.DOTALL,
-    )
-    if main_match is None:
-        errors.append(f"{CSS}: no se pudo aislar el bloque main del skeleton")
-    else:
-        main_body = main_match.group("body")
-        for token in (
-            "--skeleton-bg: transparent;",
-            "--skeleton-bg-strong: transparent;",
-            "background: none;",
-            "animation: none;",
-        ):
-            if token not in main_body:
-                errors.append(f"{CSS}: main skeleton debe neutralizar la cápsula genérica: {token!r}")
-
-    pseudo_match = re.search(
-        r"\.incidencias-skeleton--main::before,\s*\n\.incidencias-skeleton--main::after\s*\{(?P<body>.*?)\n\}",
-        css,
-        re.DOTALL,
-    )
-    if pseudo_match is None:
-        errors.append(f"{CSS}: falta shimmer estructurado del main skeleton")
-    else:
-        pseudo_body = pseudo_match.group("body")
-        if "var(--inc-skeleton-bg)" not in pseudo_body or "var(--inc-skeleton-bg-strong)" not in pseudo_body:
-            errors.append(f"{CSS}: pseudo-elementos deben reutilizar los tokens canónicos capturados")
-        if "linear-gradient(90deg, var(--skeleton-bg), var(--skeleton-bg-strong)" in pseudo_body:
-            errors.append(f"{CSS}: pseudo-elementos no pueden heredar los tokens transparentes del contenedor")
+    # Ningún bloque local incidencias-skeleton puede recuperar paint.
+    for match in re.finditer(
+        r"\.incidencias-skeleton[^\{]*\{(?P<body>.*?)\}", css, re.DOTALL
+    ):
+        body = match.group("body")
+        for forbidden in ("background:", "animation:", "border-radius:", "block-size:"):
+            if forbidden in body:
+                errors.append(
+                    f"{CSS}: paint local prohibido en skeleton Incidencias: {forbidden!r}"
+                )
 
     forbidden_template = (
         "incidencias-global-loader",
@@ -113,18 +100,12 @@ if not errors:
         if token in template:
             errors.append(f"{TEMPLATE}: loader paralelo prohibido {token!r}")
 
-    # Cada celda vacía necesita altura explícita; evita placeholders colapsados.
-    for klass in ("status", "created", "updated", "amount", "attachments"):
-        selector = f".incidencias-skeleton--{klass}"
-        if selector not in css:
-            errors.append(f"{CSS}: falta selector {selector!r}")
-
 if errors:
     for item in errors:
         print(f"::error title=Contrato skeleton Incidencias inválido::{item}")
     sys.exit(1)
 
 print(
-    "Skeleton Incidencias 1:1 OK · sin cápsula genérica · shimmer canónico · "
-    "6 filas visibles · placeholders no colapsados"
+    "Skeleton Incidencias 1:1 OK · paint global · 6 filas visibles · "
+    "sin cápsula · sin autoridad visual local"
 )

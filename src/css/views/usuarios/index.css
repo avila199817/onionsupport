@@ -3,6 +3,7 @@
    DOMAIN-ONLY CSS · 2026-08-31
 
    Shell/listado compartido: private-admin-parity.css
+   Loading/skeleton paint: components/skeleton.css
    Esta hoja conserva columnas, identidad de usuario y estados del dominio.
 ========================================================= */
 
@@ -166,22 +167,13 @@
 .usuarios-activity-inline { color: var(--text-dim); }
 
 /* =========================================================
-   DOMAIN LOADING / FEED
+   DOMAIN LOADING / FEED / SKELETON GEOMETRY
 ========================================================= */
 
 .usuarios-inline-loading {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-}
-
-.usuarios-inline-spinner {
-  inline-size: 14px;
-  block-size: 14px;
-  border: 2px solid currentColor;
-  border-inline-end-color: transparent;
-  border-radius: 50%;
-  animation: usuarios-spin .72s linear infinite;
 }
 
 .usuarios-table-loading { display: grid; }
@@ -195,12 +187,13 @@
   border-block-end: 1px solid var(--border-soft);
 }
 .usuarios-table-loading-copy { display: grid; gap: 7px; }
-.usuarios-skeleton { block-size: 11px; }
-.usuarios-skeleton--avatar { inline-size: 42px; block-size: 42px; border-radius: var(--radius-sm); }
+
+/* Sólo geometría horizontal. Alturas/radios/shimmer son canónicos. */
+.usuarios-skeleton--avatar { inline-size: 42px; }
 .usuarios-skeleton--xs { inline-size: 32%; }
-.usuarios-skeleton--lg { inline-size: 72%; block-size: 14px; }
+.usuarios-skeleton--lg { inline-size: 72%; }
 .usuarios-skeleton--md { inline-size: 56%; }
-.usuarios-skeleton--pill { inline-size: 76px; block-size: 28px; }
+.usuarios-skeleton--pill { inline-size: 76px; }
 .usuarios-skeleton--date { inline-size: 82px; }
 .usuarios-skeleton--email { inline-size: 150px; }
 .usuarios-skeleton--location { inline-size: 70px; }
@@ -259,12 +252,6 @@
 .usuarios-feed-error {
   flex-wrap: wrap;
   color: var(--warning);
-}
-
-@keyframes usuarios-spin { to { transform: rotate(360deg); } }
-
-@media (prefers-reduced-motion: reduce) {
-  .usuarios-inline-spinner { animation: none; }
 }
 
 @media print {

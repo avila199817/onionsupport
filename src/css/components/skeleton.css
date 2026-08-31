@@ -1,0 +1,423 @@
+/* =========================================================
+   ONION SUPPORT — UI LOADING SYSTEM
+   Archivo: /src/css/components/skeleton.css
+
+   CANÓNICO · SINGLE SKELETON AUTHORITY · 2026-08-31
+
+   Objetivo:
+   - Una única gramática visual de skeleton para TODA la SPA.
+   - Una única animación, paleta, radios, alturas semánticas y accesibilidad.
+   - Light/Dark exclusivamente mediante tokens globales.
+   - Las vistas conservan sólo geometría de layout/ancho cuando sea necesario.
+
+   Política de producto:
+   - COLD_LOADING  -> skeleton estructural.
+   - READY         -> contenido real.
+   - REFRESHING    -> conservar datos; no sustituir por skeleton.
+   - LOADING_MORE  -> conservar datos; feedback incremental al final.
+   - ACTION_PENDING-> spinner localizado en el control afectado.
+   - EMPTY / ERROR -> estados reales, nunca skeleton infinito.
+
+   Compatibilidad:
+   Las clases históricas de cada vista quedan soportadas aquí como adaptadores.
+   Su paint local deja de ser autoritativo porque esta hoja vive en layer(loading),
+   después de views/compositions y antes de guardrails.
+========================================================= */
+
+:root {
+  --ui-skeleton-base: var(--skeleton-bg, var(--solid-bg-2));
+  --ui-skeleton-highlight: var(--skeleton-bg-strong, var(--skeleton-shine, color-mix(in srgb, var(--text-strong) 8%, transparent)));
+  --ui-skeleton-duration: 1.35s;
+  --ui-skeleton-ease: linear;
+
+  --ui-skeleton-radius-text: var(--radius-pill);
+  --ui-skeleton-radius-block: var(--radius-sm);
+  --ui-skeleton-radius-control: var(--input-radius);
+
+  --ui-skeleton-line-sm: 8px;
+  --ui-skeleton-line: 11px;
+  --ui-skeleton-line-strong: 14px;
+  --ui-skeleton-title: 24px;
+  --ui-skeleton-value: 28px;
+  --ui-skeleton-chip: 25px;
+  --ui-skeleton-control: 46px;
+  --ui-skeleton-avatar: 42px;
+}
+
+/* =========================================================
+   BASE PRIMITIVE + LEGACY ADAPTERS
+========================================================= */
+
+:where(
+  .ui-skeleton,
+  .incidencias-skeleton,
+  .facturas-skeleton,
+  .clientes-skeleton,
+  .usuarios-skeleton,
+  .cuenta-skeleton,
+  .home-skeleton,
+  .home-panel-loading-icon,
+  .home-panel-loading-title,
+  .home-panel-loading-meta,
+  [data-correo-host="true"] .correo-workspace--boot .correo-boot-account,
+  [data-correo-host="true"] .correo-workspace--boot .correo-boot-line,
+  [data-correo-host="true"] .correo-workspace--boot .correo-boot-title,
+  [data-correo-host="true"] .correo-message-skeleton > span,
+  [data-correo-host="true"] .correo-message-skeleton i,
+  [data-correo-host="true"] .correo-reader-skeleton-block,
+  .facturas-detail-skeleton
+) {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  color: transparent;
+  background: linear-gradient(
+    90deg,
+    var(--ui-skeleton-base) 0%,
+    var(--ui-skeleton-base) 34%,
+    var(--ui-skeleton-highlight) 50%,
+    var(--ui-skeleton-base) 66%,
+    var(--ui-skeleton-base) 100%
+  );
+  background-size: 220% 100%;
+  animation: ui-skeleton-shimmer var(--ui-skeleton-duration) var(--ui-skeleton-ease) infinite;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* El sistema canónico anima el propio placeholder. Se anulan shimmers
+   históricos por pseudo-elemento para impedir doble animación/composición. */
+.ui-skeleton::after,
+.home-skeleton::after,
+.facturas-detail-skeleton::after {
+  content: none;
+  animation: none;
+}
+
+/* =========================================================
+   SEMANTIC SHAPES
+========================================================= */
+
+:where(
+  .ui-skeleton,
+  .incidencias-skeleton,
+  .facturas-skeleton,
+  .clientes-skeleton,
+  .usuarios-skeleton,
+  .cuenta-skeleton,
+  .home-skeleton
+) {
+  block-size: var(--ui-skeleton-line);
+  border-radius: var(--ui-skeleton-radius-text);
+}
+
+:where(
+  .facturas-skeleton--avatar,
+  .clientes-skeleton--avatar,
+  .usuarios-skeleton--avatar
+) {
+  inline-size: var(--ui-skeleton-avatar);
+  block-size: var(--ui-skeleton-avatar);
+  border-radius: var(--ui-skeleton-radius-block);
+}
+
+:where(
+  .facturas-skeleton--pill,
+  .clientes-skeleton--pill,
+  .usuarios-skeleton--pill,
+  .incidencias-skeleton--status,
+  .incidencias-skeleton--amount,
+  .incidencias-skeleton--attachments
+) {
+  block-size: var(--ui-skeleton-chip);
+  border-radius: var(--radius-pill);
+}
+
+:where(
+  .facturas-skeleton--lg,
+  .clientes-skeleton--lg,
+  .usuarios-skeleton--lg
+) {
+  block-size: var(--ui-skeleton-line-strong);
+}
+
+:where(
+  .incidencias-skeleton--created,
+  .incidencias-skeleton--updated,
+  .facturas-skeleton--date,
+  .clientes-skeleton--date,
+  .clientes-skeleton--contact,
+  .clientes-skeleton--amount,
+  .usuarios-skeleton--date,
+  .usuarios-skeleton--email,
+  .usuarios-skeleton--location,
+  .usuarios-skeleton--activity
+) {
+  block-size: var(--ui-skeleton-line);
+}
+
+.facturas-skeleton--ticket {
+  block-size: 30px;
+  border-radius: var(--ui-skeleton-radius-block);
+}
+
+.facturas-skeleton--actions {
+  block-size: 68px;
+  border-radius: var(--ui-skeleton-radius-block);
+}
+
+.cuenta-skeleton--title {
+  block-size: var(--ui-skeleton-title);
+}
+
+.cuenta-skeleton--control {
+  block-size: var(--ui-skeleton-control);
+  border-radius: var(--ui-skeleton-radius-control);
+}
+
+.home-skeleton--icon,
+.home-panel-loading-icon {
+  inline-size: 38px;
+  block-size: 38px;
+  border-radius: var(--ui-skeleton-radius-block);
+}
+
+.home-skeleton--title,
+.home-panel-loading-title {
+  block-size: var(--ui-skeleton-line);
+}
+
+.home-skeleton--value {
+  block-size: var(--ui-skeleton-value);
+}
+
+.home-skeleton--text,
+.home-panel-loading-meta {
+  block-size: var(--ui-skeleton-line-sm);
+  opacity: 1;
+}
+
+.home-skeleton--billing-value {
+  block-size: 32px;
+  border-radius: var(--ui-skeleton-radius-block);
+}
+
+/* =========================================================
+   INCIDENCIAS · IDENTITY GEOMETRY
+   El contenedor principal NO es un skeleton pintado. Sólo sus piezas internas.
+========================================================= */
+
+.incidencias-skeleton--main {
+  --inc-skeleton-copy-offset: calc(var(--private-admin-avatar-size) + var(--private-admin-main-gap));
+  position: relative;
+  block-size: 108px;
+  overflow: visible;
+  border-radius: 0;
+  background: none;
+  animation: none;
+}
+
+.incidencias-skeleton--main::before,
+.incidencias-skeleton--main::after {
+  content: "";
+  position: absolute;
+  background: linear-gradient(
+    90deg,
+    var(--ui-skeleton-base),
+    var(--ui-skeleton-highlight),
+    var(--ui-skeleton-base)
+  );
+  background-size: 220% 100%;
+  animation: ui-skeleton-shimmer var(--ui-skeleton-duration) var(--ui-skeleton-ease) infinite;
+}
+
+.incidencias-skeleton--main::before {
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  inline-size: var(--private-admin-avatar-size);
+  block-size: var(--private-admin-avatar-size);
+  border-radius: var(--private-admin-avatar-radius);
+}
+
+.incidencias-skeleton--main::after {
+  inset-block: 0;
+  inset-inline-start: var(--inc-skeleton-copy-offset);
+  inline-size: max(0px, calc(100% - var(--inc-skeleton-copy-offset)));
+  -webkit-mask:
+    linear-gradient(#000 0 0) 0 0 / 28% 10px no-repeat,
+    linear-gradient(#000 0 0) 36% 0 / 22% 20px no-repeat,
+    linear-gradient(#000 0 0) 0 27px / 88% 13px no-repeat,
+    linear-gradient(#000 0 0) 0 48px / 74% 10px no-repeat,
+    linear-gradient(#000 0 0) 0 66px / 64% 10px no-repeat,
+    linear-gradient(#000 0 0) 0 83px / 34% 25px no-repeat;
+  mask:
+    linear-gradient(#000 0 0) 0 0 / 28% 10px no-repeat,
+    linear-gradient(#000 0 0) 36% 0 / 22% 20px no-repeat,
+    linear-gradient(#000 0 0) 0 27px / 88% 13px no-repeat,
+    linear-gradient(#000 0 0) 0 48px / 74% 10px no-repeat,
+    linear-gradient(#000 0 0) 0 66px / 64% 10px no-repeat,
+    linear-gradient(#000 0 0) 0 83px / 34% 25px no-repeat;
+}
+
+/* =========================================================
+   CORREO · DENSE ADAPTER
+   Conserva la densidad propia del cliente de correo pero usa el mismo paint.
+========================================================= */
+
+[data-correo-host="true"] .correo-message-skeleton > span {
+  border-radius: 50%;
+}
+
+[data-correo-host="true"] .correo-message-skeleton i {
+  block-size: 7px;
+  border-radius: var(--radius-pill);
+}
+
+[data-correo-host="true"] :is(
+  .correo-message-skeleton > span,
+  .correo-message-skeleton i,
+  .correo-workspace--boot .correo-boot-account,
+  .correo-workspace--boot .correo-boot-line,
+  .correo-workspace--boot .correo-boot-title,
+  .correo-reader-skeleton-block
+) {
+  animation-delay: 0s;
+}
+
+/* =========================================================
+   DETAIL / REGION SKELETON
+========================================================= */
+
+.facturas-detail-skeleton {
+  color: transparent;
+  background-color: var(--ui-skeleton-base);
+}
+
+/* =========================================================
+   ACCESSIBLE STATUS UTILITY
+========================================================= */
+
+.ui-loading-status {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* =========================================================
+   CANONICAL LOCAL SPINNER · ACTION_PENDING ONLY
+========================================================= */
+
+:where(
+  .ui-progress-spinner,
+  .incidencias-spinner,
+  .incidencias-inline-spinner,
+  .facturas-inline-spinner,
+  .clientes-inline-spinner,
+  .usuarios-inline-spinner,
+  .facturas-detail-spinner
+) {
+  inline-size: 14px;
+  block-size: 14px;
+  flex: 0 0 auto;
+  border: 2px solid color-mix(in srgb, currentColor 28%, transparent);
+  border-block-start-color: currentColor;
+  border-radius: 50%;
+  animation: ui-loading-spin .72s linear infinite;
+}
+
+/* Refresh con datos no debe cubrir el contenido. Las vistas que todavía emiten
+   un overlay histórico quedan visualmente alineadas con la política global. */
+.incidencias-refresh-overlay,
+.facturas-refresh-overlay {
+  display: none;
+}
+
+/* =========================================================
+   MOTION / HIGH CONTRAST
+========================================================= */
+
+@keyframes ui-skeleton-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -120% 0; }
+}
+
+@keyframes ui-loading-spin {
+  to { transform: rotate(1turn); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where(
+    .ui-skeleton,
+    .incidencias-skeleton,
+    .facturas-skeleton,
+    .clientes-skeleton,
+    .usuarios-skeleton,
+    .cuenta-skeleton,
+    .home-skeleton,
+    .home-panel-loading-icon,
+    .home-panel-loading-title,
+    .home-panel-loading-meta,
+    [data-correo-host="true"] .correo-workspace--boot .correo-boot-account,
+    [data-correo-host="true"] .correo-workspace--boot .correo-boot-line,
+    [data-correo-host="true"] .correo-workspace--boot .correo-boot-title,
+    [data-correo-host="true"] .correo-message-skeleton > span,
+    [data-correo-host="true"] .correo-message-skeleton i,
+    [data-correo-host="true"] .correo-reader-skeleton-block,
+    .facturas-detail-skeleton,
+    .ui-progress-spinner,
+    .incidencias-spinner,
+    .incidencias-inline-spinner,
+    .facturas-inline-spinner,
+    .clientes-inline-spinner,
+    .usuarios-inline-spinner,
+    .facturas-detail-spinner
+  ) {
+    animation: none;
+  }
+
+  .incidencias-skeleton--main::before,
+  .incidencias-skeleton--main::after {
+    animation: none;
+  }
+}
+
+@media (forced-colors: active) {
+  :where(
+    .ui-skeleton,
+    .incidencias-skeleton:not(.incidencias-skeleton--main),
+    .facturas-skeleton,
+    .clientes-skeleton,
+    .usuarios-skeleton,
+    .cuenta-skeleton,
+    .home-skeleton,
+    .home-panel-loading-icon,
+    .home-panel-loading-title,
+    .home-panel-loading-meta,
+    [data-correo-host="true"] .correo-workspace--boot .correo-boot-account,
+    [data-correo-host="true"] .correo-workspace--boot .correo-boot-line,
+    [data-correo-host="true"] .correo-workspace--boot .correo-boot-title,
+    [data-correo-host="true"] .correo-message-skeleton > span,
+    [data-correo-host="true"] .correo-message-skeleton i,
+    [data-correo-host="true"] .correo-reader-skeleton-block,
+    .facturas-detail-skeleton
+  ) {
+    forced-color-adjust: none;
+    background: GrayText;
+  }
+
+  .incidencias-skeleton--main {
+    background: none;
+  }
+
+  .incidencias-skeleton--main::before,
+  .incidencias-skeleton--main::after {
+    forced-color-adjust: none;
+    background: GrayText;
+  }
+}

@@ -4,6 +4,7 @@
 
    Shell/listado compartido: private-admin-parity.css
    Interacciones compartidas: private-admin-interactions.css
+   Loading/skeleton paint: components/skeleton.css
    Esta hoja conserva exclusivamente estructura y semántica de Incidencias.
 ========================================================= */
 
@@ -17,13 +18,6 @@
   --inc-updated-col: 16%;
   --inc-amount-col: 12%;
   --inc-attachments-col: 10%;
-
-  /*
-    Captura los tokens canónicos antes de que el placeholder principal
-    neutralice el shimmer genérico heredado desde layer(compositions).
-  */
-  --inc-skeleton-bg: var(--skeleton-bg);
-  --inc-skeleton-bg-strong: var(--skeleton-bg-strong);
 }
 
 .incidencias-hidden,
@@ -296,28 +290,6 @@
    DOMAIN LOADING / CONTINUOUS SCROLL / FEEDBACK
 ========================================================= */
 
-.incidencias-spinner,
-.incidencias-inline-spinner {
-  inline-size: 14px;
-  block-size: 14px;
-  flex: 0 0 auto;
-  border: 2px solid currentColor;
-  border-inline-end-color: transparent;
-  border-radius: 50%;
-  animation: incidencias-spin .72s linear infinite;
-}
-
-.incidencias-refresh-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-  display: grid;
-  place-items: start center;
-  padding-block-start: var(--space-md);
-  pointer-events: none;
-  background: color-mix(in srgb, var(--panel-bg) 68%, transparent);
-}
-
 .incidencias-inline-loading {
   min-block-size: 34px;
   display: inline-flex;
@@ -333,17 +305,8 @@
   font-weight: var(--weight-semibold);
 }
 
-/*
-   Skeleton inicial · misma estructura lógica del listado.
-
-   La fundación genérica de skeletons vive en layer(compositions), por encima de
-   esta hoja layer(views). El placeholder `main` es deliberadamente complejo:
-   usa un contenedor transparente y pinta avatar/copy mediante pseudo-elementos.
-   Neutralizamos ÚNICAMENTE los tokens de fondo en ese contenedor para evitar
-   que la composición genérica vuelva a convertirlo en una cápsula gigante,
-   conservando los tokens canónicos capturados en --inc-skeleton-* para sus
-   pseudo-elementos.
-*/
+/* Skeleton: esta vista conserva sólo layout/ancho. El paint completo vive en
+   components/skeleton.css dentro de layer(loading). */
 .incidencias-row--skeleton {
   min-block-size: var(--private-admin-row-min);
   pointer-events: none;
@@ -352,80 +315,13 @@
 /* Seis filas cubren el viewport sin crear un historial fantasma de 20 filas. */
 .incidencias-row--skeleton:nth-child(n+7) { display: none; }
 
-.incidencias-row--skeleton > .incidencias-cell {
-  vertical-align: middle;
-}
-
-.incidencias-skeleton--main {
-  --inc-skeleton-copy-offset: calc(var(--private-admin-avatar-size) + var(--private-admin-main-gap));
-  --skeleton-bg: transparent;
-  --skeleton-bg-strong: transparent;
-  position: relative;
-  inline-size: 100%;
-  min-inline-size: 0;
-  block-size: 108px;
-  display: block;
-  overflow: visible;
-  border-radius: 0;
-  background: none;
-  animation: none;
-}
-
-.incidencias-skeleton--main::before,
-.incidencias-skeleton--main::after {
-  content: "";
-  position: absolute;
-  pointer-events: none;
-  background: linear-gradient(90deg, var(--inc-skeleton-bg), var(--inc-skeleton-bg-strong), var(--inc-skeleton-bg));
-  background-size: 220% 100%;
-  animation: private-admin-shimmer 1.35s linear infinite;
-}
-
-.incidencias-skeleton--main::before {
-  inset-block-start: 0;
-  inset-inline-start: 0;
-  inline-size: var(--private-admin-avatar-size);
-  block-size: var(--private-admin-avatar-size);
-  border-radius: var(--private-admin-avatar-radius);
-}
-
-.incidencias-skeleton--main::after {
-  inset-block: 0;
-  inset-inline-start: var(--inc-skeleton-copy-offset);
-  inline-size: max(0px, calc(100% - var(--inc-skeleton-copy-offset)));
-  -webkit-mask:
-    linear-gradient(#000 0 0) 0 0 / 28% 10px no-repeat,
-    linear-gradient(#000 0 0) 36% 0 / 22% 20px no-repeat,
-    linear-gradient(#000 0 0) 0 27px / 88% 13px no-repeat,
-    linear-gradient(#000 0 0) 0 48px / 74% 10px no-repeat,
-    linear-gradient(#000 0 0) 0 66px / 64% 10px no-repeat,
-    linear-gradient(#000 0 0) 0 83px / 34% 25px no-repeat;
-  mask:
-    linear-gradient(#000 0 0) 0 0 / 28% 10px no-repeat,
-    linear-gradient(#000 0 0) 36% 0 / 22% 20px no-repeat,
-    linear-gradient(#000 0 0) 0 27px / 88% 13px no-repeat,
-    linear-gradient(#000 0 0) 0 48px / 74% 10px no-repeat,
-    linear-gradient(#000 0 0) 0 66px / 64% 10px no-repeat,
-    linear-gradient(#000 0 0) 0 83px / 34% 25px no-repeat;
-}
-
-.incidencias-skeleton--status,
-.incidencias-skeleton--amount,
-.incidencias-skeleton--attachments {
-  block-size: 25px;
-  border-radius: var(--radius-pill);
-}
-
+.incidencias-row--skeleton > .incidencias-cell { vertical-align: middle; }
+.incidencias-skeleton--main { inline-size: 100%; min-inline-size: 0; }
 .incidencias-skeleton--status { inline-size: 72%; }
 .incidencias-skeleton--created { inline-size: 66%; }
 .incidencias-skeleton--updated { inline-size: 70%; }
 .incidencias-skeleton--amount { inline-size: 64%; }
 .incidencias-skeleton--attachments { inline-size: 52%; }
-
-.incidencias-skeleton--created,
-.incidencias-skeleton--updated {
-  block-size: 11px;
-}
 
 .incidencias-alert {
   min-inline-size: 0;
@@ -520,23 +416,6 @@
 [data-incidencias-focus-fallback="true"]:focus-visible {
   outline: 2px solid var(--focus-ring-color, var(--accent));
   outline-offset: -2px;
-}
-
-@keyframes incidencias-spin { to { transform: rotate(360deg); } }
-
-@media (prefers-reduced-motion: reduce) {
-  .incidencias-spinner,
-  .incidencias-inline-spinner,
-  .incidencias-skeleton--main::before,
-  .incidencias-skeleton--main::after { animation: none; }
-}
-
-@media (forced-colors: active) {
-  .incidencias-skeleton--main::before,
-  .incidencias-skeleton--main::after {
-    forced-color-adjust: none;
-    background: GrayText;
-  }
 }
 
 @media print {

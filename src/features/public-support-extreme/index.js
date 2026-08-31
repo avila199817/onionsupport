@@ -134,8 +134,11 @@ function setRetryState(form = null, enabled = false) {
   const busy = form.dataset.submitting === "true";
   const blocked = form.dataset.activeTicket === "true";
   const label = form.querySelector(SUBMIT_LABEL);
+  const nextRetry = enabled ? "true" : "false";
 
-  form.dataset.publicSupportRetry = enabled ? "true" : "false";
+  if (form.dataset.publicSupportRetry !== nextRetry) {
+    form.dataset.publicSupportRetry = nextRetry;
+  }
 
   if (!label || busy || blocked) return false;
 
@@ -166,7 +169,9 @@ function normalizeFeedback(form = null) {
   const message = cleanText(node.textContent);
 
   if (!message || node.hidden) {
-    node.dataset.publicSupportFeedback = "idle";
+    if (node.dataset.publicSupportFeedback !== "idle") {
+      node.dataset.publicSupportFeedback = "idle";
+    }
     setRetryState(form, false);
     return true;
   }
@@ -179,17 +184,26 @@ function normalizeFeedback(form = null) {
     node.textContent = replacement;
   }
 
-  node.dataset.status = severity;
-  node.dataset.publicSupportFeedback = severity;
-  node.setAttribute(
-    "role",
-    severity === "error" || severity === "warning" ? "alert" : "status"
-  );
-  node.setAttribute(
-    "aria-live",
-    severity === "error" || severity === "warning" ? "assertive" : "polite"
-  );
-  node.setAttribute("aria-atomic", "true");
+  if (node.dataset.status !== severity) {
+    node.dataset.status = severity;
+  }
+
+  if (node.dataset.publicSupportFeedback !== severity) {
+    node.dataset.publicSupportFeedback = severity;
+  }
+
+  const role = severity === "error" || severity === "warning" ? "alert" : "status";
+  const live = severity === "error" || severity === "warning" ? "assertive" : "polite";
+
+  if (node.getAttribute("role") !== role) {
+    node.setAttribute("role", role);
+  }
+  if (node.getAttribute("aria-live") !== live) {
+    node.setAttribute("aria-live", live);
+  }
+  if (node.getAttribute("aria-atomic") !== "true") {
+    node.setAttribute("aria-atomic", "true");
+  }
 
   setRetryState(form, transient || severity === "warning");
   return true;
@@ -206,8 +220,12 @@ function enhanceHome(root = null) {
   });
 
   if (changed) {
-    root.dataset.publicSupportExtreme = "true";
-    root.dataset.publicSupportExtremeVersion = PUBLIC_SUPPORT_EXTREME_VERSION;
+    if (root.dataset.publicSupportExtreme !== "true") {
+      root.dataset.publicSupportExtreme = "true";
+    }
+    if (root.dataset.publicSupportExtremeVersion !== PUBLIC_SUPPORT_EXTREME_VERSION) {
+      root.dataset.publicSupportExtremeVersion = PUBLIC_SUPPORT_EXTREME_VERSION;
+    }
   }
 
   return changed;

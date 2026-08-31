@@ -28,7 +28,7 @@ import {
 
 assert.equal(
   APP_ENHANCEMENTS_VERSION,
-  "app.enhancements.v19-incidencias-followup-avatars"
+  "app.enhancements.v20-public-support-extreme"
 );
 assert.equal(
   ROUTE_INTENT_PRELOAD_VERSION,

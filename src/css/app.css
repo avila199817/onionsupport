@@ -16,6 +16,7 @@
    - Dejar TODAS las hojas específicas de ruta a src/router/styles.js.
    - Aplicar el tema público system/light como composición transversal Home + Auth.
    - Permitir composiciones responsive transversales sin parches por vista.
+   - Centralizar loading/skeleton en una capa propia posterior a las vistas.
    - Cerrar la cascada con invariantes geométricas transversales.
 
    Reglas:
@@ -29,7 +30,7 @@
    CASCADE LAYERS · menor -> mayor prioridad
 ========================================================= */
 
-@layer tokens, reset, core, layout, components, views, auth, compositions, guardrails;
+@layer tokens, reset, core, layout, components, views, auth, compositions, loading, guardrails;
 
 /* =========================================================
    TOKENS
@@ -98,6 +99,16 @@
 @import url("./compositions/private-create-modal.css") layer(compositions);
 @import url("./compositions/mobile-datalist.css") layer(compositions);
 @import url("./compositions/private-amounts.css") layer(compositions);
+
+/* =========================================================
+   LOADING SYSTEM · SINGLE SKELETON AUTHORITY
+
+   Se carga DESPUÉS de views/compositions para que ninguna vista pueda volver
+   a imponer shimmer, paleta, radio o altura visual divergente. Las vistas sólo
+   pueden conservar geometría semántica/ancho de su contenido.
+========================================================= */
+
+@import url("./components/skeleton.css") layer(loading);
 
 /* =========================================================
    FINAL UI FOUNDATION · LAYOUT GUARDRAILS

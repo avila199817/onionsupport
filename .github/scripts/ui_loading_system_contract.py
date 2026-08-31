@@ -18,10 +18,11 @@ CRUD_LOCAL = (
     ROOT / "src/css/views/usuarios/index.css",
 )
 
-# These still contain historical paint in source, but layer(loading) deliberately
-# supersedes it. No additional file is allowed to introduce another skeleton
-# animation; these adapters are a bounded compatibility surface, not authority.
+# These files already contained historical skeleton paint before the design
+# system migration. layer(loading) supersedes them at runtime. This bounded set
+# prevents proliferation while allowing cleanup to be performed deliberately.
 LEGACY_ADAPTER_FILES = {
+    ROOT / "src/css/tokens/variables.css",
     ROOT / "src/css/components/ui.css",
     ROOT / "src/css/compositions/private-admin-parity.css",
     ROOT / "src/css/views/home/index.css",

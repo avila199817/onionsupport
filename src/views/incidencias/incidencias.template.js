@@ -590,7 +590,10 @@ function buildVm(input = {}) {
         : filter === "all"
           ? ""
           : filter;
-  const visibleLimit = Math.max(1, num(d.visibleLimit, DEFAULT_VISIBLE_ROWS));
+  const visibleLimit = Math.max(
+    1,
+    num(d.visibleLimit ?? DEFAULT_VISIBLE_ROWS, DEFAULT_VISIBLE_ROWS)
+  );
   const serverFilterApplied = d.serverFilterApplied === true;
   const filterOwnedItems = serverFilterApplied
     ? items

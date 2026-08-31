@@ -138,6 +138,9 @@ export function getIncidenciasViewBoundarySnapshot() {
       canonicalRoleAuthority: true,
       zeroCopyRuntimeState: true,
       searchFocusAndCaretStableAcrossListReconciliation: true,
+      searchInputPersistentDomIsland: true,
+      keyboardHotPathNeverRestoresCaret: true,
+      replacementRestoreRunsBeforePaint: true,
       hotListOwnsNoBusinessState: true,
     }),
   });

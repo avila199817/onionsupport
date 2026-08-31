@@ -14,7 +14,7 @@
 ========================================================= */
 
 export const INCIDENCIAS_DETAIL_ATTACHMENT_POLICY_VERSION =
-  "incidencias.detail-attachment-policy.v1.production-parity";
+  "incidencias.detail-attachment-policy.v2.observer-idempotent";
 
 const MIB = 1024 * 1024;
 const GIB = 1024 * MIB;
@@ -115,6 +115,23 @@ export function detailAttachmentPolicyHelp(role = "user") {
   );
 }
 
+function setTextIfChanged(node = null, value = "") {
+  if (!node) return false;
+
+  const nextValue = String(value ?? "");
+  if (String(node.textContent ?? "") === nextValue) return false;
+
+  node.textContent = nextValue;
+  return true;
+}
+
+export function syncIncidenciasDetailAttachmentHelp(
+  node = null,
+  role = "user"
+) {
+  return setTextIfChanged(node, detailAttachmentPolicyHelp(role));
+}
+
 export function validateIncidenciasDetailAttachmentSelection({
   incoming = [],
   pending = [],
@@ -210,6 +227,8 @@ export function getIncidenciasDetailAttachmentPolicySnapshot() {
       controllerSelectionPathPreserved: true,
       userMatchesProductionBackend: true,
       adminRemainsUiConservative: true,
+      observerTextWritesIdempotent: true,
+      mutationObserverSelfLoopPrevented: true,
       zeroHttp: true,
       zeroStorage: true,
     }),
@@ -291,7 +310,7 @@ export function installIncidenciasDetailAttachmentPolicy({
     const messageNode = feedback.querySelector(
       "[data-detail-upload-policy-message='true']"
     );
-    if (messageNode) messageNode.textContent = String(message || "");
+    setTextIfChanged(messageNode, message);
     feedback.hidden = !message;
     return true;
   }
@@ -326,7 +345,7 @@ export function installIncidenciasDetailAttachmentPolicy({
     const role = currentRole();
     const policy = getIncidenciasDetailAttachmentPolicy(role);
     const help = root.querySelector("#incidencias-modal-attachments-help");
-    if (help) help.textContent = detailAttachmentPolicyHelp(role);
+    syncIncidenciasDetailAttachmentHelp(help, role);
 
     const input = root.querySelector(DETAIL_INPUT_SELECTOR);
     if (input) {

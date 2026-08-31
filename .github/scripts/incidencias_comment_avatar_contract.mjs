@@ -210,9 +210,15 @@ assert.match(
   "Carlos debe conservar la pareja error-warning del mismo selector que el encabezado"
 );
 
+assert.match(
+  detailModalStyle,
+  /\.ui-detail-modal-avatar-frame\[data-fallback="true"\]\[data-has-avatar="false"\]\s*\{[\s\S]*?color:\s*var\(--text-on-accent, #fff\);/u,
+  "las iniciales deben conservar el blanco canónico aunque el contexto del comentario defina texto secundario"
+);
+
 assert.doesNotMatch(
   followupStyle,
-  /--followup-avatar-|linear-gradient|box-shadow:\s|\[data-avatar-tone=/u,
+  /--followup-avatar-|linear-gradient|box-shadow:\s|\[data-avatar-tone=|(?:^|\n)\s*(?:color|background|border)\s*:/u,
   "Seguimiento no puede mantener una segunda paleta o textura visual"
 );
 

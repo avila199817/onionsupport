@@ -2,15 +2,16 @@
    Onion Support - Incidencias Detail Truth Boundary
    Archivo: /src/views/incidencias/incidencias.template.modal.js
 
-   TRUTHFUL BOUNDED WINDOWS · COMMENTS ALWAYS MATERIALIZED · TEMPLATE SAFE
+   TRUTHFUL BOUNDED WINDOWS · CANONICAL FOLLOW-UP · TEMPLATE SAFE
 
    Responsabilidad:
-   - Mantener el template visual existente 1:1 en .impl.js.
-   - Consumir la metadata de ventana acotada que devuelve el backend.
-   - Mostrar totales reales de historial/actividad y adjuntos.
-   - Materializar siempre la conversación del ticket en el body normal.
-   - Explicar discretamente cuándo sólo se muestra la ventana reciente.
-   - No introducir paginación, HTTP, DOM ni listeners nuevos.
+   - Mantener la implementación visual principal delegada en .impl.js.
+   - Consumir metadata de ventanas acotadas del backend.
+   - Mantener totales reales de historial/actividad y adjuntos.
+   - Materializar comentarios con el MISMO contrato DOM de Seguimiento que
+     usan live-sync, avatar fallback y user-update-turn.
+   - No acoplar conversación al slot de documentos/adjuntos.
+   - No introducir HTTP, DOM imperativo, listeners ni una segunda UI paralela.
 ========================================================= */
 
 import {
@@ -30,21 +31,14 @@ export {
 };
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.extreme.v38-comments-always-visible";
+  "incidencias.template.modal.extreme.v39-canonical-followup";
 
 export const INCIDENCIAS_DETAIL_WINDOW_UI_VERSION =
   "incidencias.detail-window-ui.v1";
 
 export const INCIDENCIAS_DETAIL_COMMENTS_UI_VERSION =
-  "incidencias.detail-comments-ui.v1-always-materialized";
+  "incidencias.detail-comments-ui.v2-canonical-followup";
 
-/*
-   Contrato visual delegado a incidencias.template.modal.impl.js.
-   Se mantiene declarado también en la frontera estable para que las
-   validaciones transversales puedan demostrar la autoridad V7 sin acoplarse
-   a la ubicación interna de la implementación. El contrato de render real se
-   verifica además en incidencias_detail_window_ui_contract.mjs.
-*/
 export const INCIDENCIAS_DETAIL_SHARED_VISUAL_CONTRACT = Object.freeze([
   "ui-detail-modal-root",
   "ui-detail-modal-overlay",
@@ -75,7 +69,10 @@ function text(value = "", fallback = "") {
   const normalized = String(value ?? "")
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{4,}/g, "\n\n\n")
     .trim();
+
   return normalized || fallback;
 }
 
@@ -84,6 +81,7 @@ function oneLine(value = "", fallback = "") {
     .replace(/[\n\t]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+
   return normalized || fallback;
 }
 
@@ -147,12 +145,11 @@ function collectionWindow(detail = {}, name = "", countKey = "", aliases = []) {
     count(window.total, 0),
     count(raw[countKey], 0)
   );
-  const truncated = window.truncated === true || total > returned;
 
   return {
     total,
     returned,
-    truncated,
+    truncated: window.truncated === true || total > returned,
   };
 }
 
@@ -167,8 +164,23 @@ function commentKind(item = {}) {
   );
 }
 
+function timestamp(value = null) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value < 100000000000 ? value * 1000 : value;
+  }
+
+  const parsed = Date.parse(String(value || ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function normalizeComment(item = {}, index = 0) {
   const source = object(item);
+  const kind = commentKind(source);
+
+  if (kind && kind !== "comment" && kind !== "comentario") {
+    return null;
+  }
+
   const body = text(
     source.body ||
     source.message ||
@@ -210,145 +222,142 @@ function normalizeComment(item = {}, index = 0) {
       source.timestamp ||
       source.updatedAt ||
       null,
+    sourceIndex: index,
   };
-}
-
-function commentTimestamp(item = {}) {
-  const value = item?.createdAt;
-  const parsed = value ? new Date(value).getTime() : 0;
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 export function getIncidenciasDetailComments(input = {}) {
   const detail = detailFromInput(input);
-  const raw = object(detail.raw);
-  const candidates = [];
+  const raw = object(detail.raw || detail.data || detail.item || detail);
+  const timeline = array(detail.timeline?.length ? detail.timeline : raw.timeline);
 
-  for (const source of [detail, raw]) {
-    for (const alias of ["comments", "notes", "messages"]) {
-      for (const item of array(source[alias])) {
-        candidates.push(item);
-      }
-    }
+  let source = [];
 
-    for (const item of array(source.timeline)) {
-      const kind = commentKind(item);
-      if (kind === "comment" || kind === "comentario") {
-        candidates.push(item);
+  if (timeline.length) {
+    source = timeline.filter((entry) => {
+      const kind = commentKind(entry);
+      return kind === "comment" || kind === "comentario";
+    });
+  } else {
+    for (const candidate of [detail, raw]) {
+      for (const alias of ["comments", "notes", "messages"]) {
+        const values = array(candidate[alias]);
+        if (values.length) {
+          source = values;
+          break;
+        }
       }
+      if (source.length) break;
     }
   }
 
   const unique = new Map();
 
-  candidates.forEach((item, index) => {
-    const normalized = normalizeComment(item, index);
-    if (!normalized) return;
+  source
+    .map(normalizeComment)
+    .filter(Boolean)
+    .forEach((comment) => {
+      const identity = oneLine(
+        comment.id ||
+        `${timestamp(comment.createdAt)}:${comment.author}:${comment.body}`,
+        ""
+      );
 
-    const identity = oneLine(
-      normalized.id ||
-      `${normalized.createdAt || ""}:${normalized.author}:${normalized.body}`,
-      ""
-    );
-
-    if (!identity || unique.has(identity)) return;
-    unique.set(identity, normalized);
-  });
+      if (!identity || unique.has(identity)) return;
+      unique.set(identity, comment);
+    });
 
   return [...unique.values()].sort(
-    (a, b) => commentTimestamp(b) - commentTimestamp(a)
+    (a, b) =>
+      timestamp(b.createdAt) - timestamp(a.createdAt) ||
+      b.sourceIndex - a.sourceIndex
   );
 }
 
 function formatCommentDate(value = null) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) return oneLine(value, "");
+  const at = timestamp(value);
+  if (!at) return "Fecha no disponible";
 
   try {
     return new Intl.DateTimeFormat("es-ES", {
       day: "2-digit",
-      month: "2-digit",
+      month: "short",
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
-    }).format(date);
+    }).format(new Date(at));
   } catch {
-    return date.toISOString();
+    return "Fecha no disponible";
   }
 }
 
-function commentsLabel(window = {}, materialized = 0) {
-  const total = Math.max(count(window.total, 0), materialized);
-  const returned = Math.max(count(window.returned, 0), materialized);
-
-  if (!total) return "Sin comentarios todavía";
-  if (window.truncated === true || total > returned) {
-    return `${total} comentarios · mostrando ${returned} recientes`;
-  }
-  return `${total} comentario${total === 1 ? "" : "s"}`;
+function commentSignature(comments = []) {
+  return array(comments)
+    .map((comment) =>
+      [
+        oneLine(comment.id, ""),
+        text(comment.body, ""),
+        timestamp(comment.createdAt),
+      ].join("::")
+    )
+    .join("||");
 }
 
-function renderCommentsSection(input = {}, state = {}) {
+function renderCanonicalFollowup(input = {}) {
   const comments = getIncidenciasDetailComments(input);
-  const window = object(state.comments);
-  const label = commentsLabel(window, comments.length);
+  if (!comments.length) return "";
+
+  const signature = commentSignature(comments);
 
   return `
     <section
-      class="incidencias-modal-history-section ui-detail-modal-history-section incidencias-modal-comments-section"
-      data-modal-comments-slot="true"
+      class="incidencias-modal-description-thread"
+      data-description-comments="true"
+      data-comment-signature="${escapeHtml(signature)}"
       data-comments-ui-version="${INCIDENCIAS_DETAIL_COMMENTS_UI_VERSION}"
-      data-comments-materialized="${comments.length}"
-      aria-labelledby="incidencias-modal-comments-title"
+      aria-label="Comentarios y seguimiento de la incidencia"
     >
-      <div class="incidencias-modal-section-head ui-detail-modal-section-head">
-        <h3 id="incidencias-modal-comments-title">Conversación</h3>
-        <span>${escapeHtml(label)}</span>
+      <div class="incidencias-modal-description-thread-head">
+        <strong>Seguimiento</strong>
+        <span>${comments.length} comentario${comments.length === 1 ? "" : "s"}</span>
       </div>
 
-      ${
-        comments.length
-          ? `
-            <div class="incidencias-timeline-list incidencias-modal-comments-list">
-              ${comments.map((comment) => `
-                <article
-                  class="incidencias-timeline-card tone-comment is-comment incidencias-modal-comment-card"
-                  data-timeline-tone="comment"
-                  data-comment-id="${escapeHtml(comment.id)}"
-                >
-                  <div class="incidencias-timeline-accent"></div>
-                  <div class="incidencias-timeline-main">
-                    <div class="incidencias-timeline-title-row">
-                      <strong class="incidencias-timeline-title">Comentario</strong>
-                      <span class="incidencias-timeline-kind">Comentario</span>
-                    </div>
-                    <p class="incidencias-timeline-body">${escapeHtml(comment.body)}</p>
-                  </div>
-                  <div class="incidencias-timeline-meta">
-                    <strong>${escapeHtml(comment.author)}</strong>
-                    <span>${escapeHtml(formatCommentDate(comment.createdAt))}</span>
-                  </div>
-                </article>
-              `).join("")}
+      <div class="incidencias-modal-description-comments">
+        ${comments.map((comment) => `
+          <article
+            class="incidencias-modal-description-comment"
+            data-description-comment="true"
+            data-comment-id="${escapeHtml(comment.id)}"
+          >
+            <span
+              class="incidencias-modal-description-comment-accent"
+              aria-hidden="true"
+            ></span>
+
+            <div class="incidencias-modal-description-comment-content">
+              <div class="incidencias-modal-description-comment-head">
+                <strong>${escapeHtml(comment.author)}</strong>
+                <span class="incidencias-modal-description-comment-date">
+                  ${escapeHtml(formatCommentDate(comment.createdAt))}
+                </span>
+              </div>
+
+              <p>${escapeHtml(comment.body)}</p>
             </div>
-          `
-          : `
-            <div class="incidencias-modal-empty-box incidencias-modal-comments-empty">
-              No hay comentarios publicados en esta incidencia.
-            </div>
-          `
-      }
+          </article>
+        `).join("")}
+      </div>
     </section>
   `;
 }
 
-function patchCommentsIntoTicketBody(html = "", input = {}, state = {}) {
-  const commentsSection = renderCommentsSection(input, state);
+function patchCanonicalFollowupIntoDescription(html = "", input = {}) {
+  const followup = renderCanonicalFollowup(input);
+  if (!followup) return String(html);
 
   return String(html).replace(
-    /(<div\s+data-modal-files-slot="true">)/,
-    `$1${commentsSection}`
+    /(<p\s+id="incidencias-modal-description"[\s\S]*?<\/p>)(\s*<\/section>)/,
+    `$1${followup}$2`
   );
 }
 
@@ -407,7 +416,6 @@ function timelineLabel(window = {}) {
   const returned = count(window.returned, 0);
 
   if (!total) return "Sin actividad registrada";
-
   if (window.truncated === true) {
     return `${total} registros · mostrando ${returned} recientes`;
   }
@@ -479,7 +487,7 @@ export function renderIncidenciasDetailModal(input = {}) {
 
   const state = getIncidenciasDetailWindowUiState(input);
   let output = patchRootContract(html, state);
-  output = patchCommentsIntoTicketBody(output, input, state);
+  output = patchCanonicalFollowupIntoDescription(output, input);
 
   if (!state.hasWindowContract) {
     return output;
@@ -508,10 +516,14 @@ export function getDetailTemplateSnapshot() {
     },
     commentsUi: {
       version: INCIDENCIAS_DETAIL_COMMENTS_UI_VERSION,
-      alwaysMaterializedInTicketBody: true,
+      materializesWhenAvailableInTicketBody: true,
+      canonicalFollowupMarkup: true,
       aliasCompatible: true,
       timelineCommentCompatible: true,
-      patchesInsideExistingFilesSlot: true,
+      liveSyncCompatible: true,
+      followupAvatarCompatible: true,
+      noFilesSlotCoupling: true,
+      noAttachmentMarkupInConversation: true,
       fullHistoryRemainsSeparate: true,
     },
     policy: {
@@ -519,8 +531,9 @@ export function getDetailTemplateSnapshot() {
       truthfulBoundedCollections: true,
       historyTotalUsesBackendWindowMetadata: true,
       attachmentsTotalUsesBackendWindowMetadata: true,
-      commentsAlwaysVisibleInTicketBody: true,
-      commentsPatchWithRemoteDetail: true,
+      commentsAlwaysVisibleWhenMaterialized: true,
+      commentsUseCanonicalFollowupSystem: true,
+      commentsNeverShareAttachmentSlot: true,
       noSyntheticTimelineEntries: true,
     },
   };

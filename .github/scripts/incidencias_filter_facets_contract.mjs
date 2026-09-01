@@ -6,6 +6,7 @@ import {
   getIncidenciasFacetFilterQuery,
   getIncidenciasFacetRequestQuery,
   getIncidenciasFilterFacetsSnapshot,
+  reconcileIncidenciasFilterFacetPresentation,
 } from "../../src/views/incidencias/incidencias.filter-facets.js";
 
 import {
@@ -135,6 +136,30 @@ assert.equal(
 assert.equal(facets.stats.invoiceTotal, 785.1);
 assert.equal(facets.exact, true);
 assert.equal(facets.aggregatePartial, true);
+
+const reconciledUrgentFacet = reconcileIncidenciasFilterFacetPresentation(
+  {
+    ...facets,
+    counts: { ...facets.counts, urgent: 3 },
+    stats: { ...facets.stats, urgent: 3 },
+  },
+  "urgent",
+  {
+    total: 2,
+    items: [{ id: "urgent-1" }, { id: "urgent-2" }],
+  }
+);
+assert.equal(
+  reconciledUrgentFacet.counts.urgent,
+  2,
+  "la respuesta activa debe corregir una faceta urgente cacheada obsoleta"
+);
+assert.equal(reconciledUrgentFacet.stats.urgent, 2);
+assert.equal(
+  reconciledUrgentFacet.counts.closed,
+  facets.counts.closed,
+  "reconciliar la faceta activa no debe alterar sus facetas hermanas"
+);
 
 const activeOpenRows = [
   {
@@ -284,10 +309,13 @@ for (const required of [
   "refreshFilterFacets",
   "filterFacetCache",
   "getIncidenciasFacetRequestQuery",
+  "reconcileIncidenciasFilterFacetPresentation",
   "buildIncidenciasFilterFacetPresentation",
   "syncActiveFacetUniverseFromItems",
   "serverFilterApplied",
   "activeResponse",
+  "authoritativeFacet",
+  "filterFacetCache.set(key, next)",
   "toggleSortOrder(\n        node?.dataset?.sortMode",
 ]) {
   assert.ok(controllerSource.includes(required), `falta integración de facetas: ${required}`);

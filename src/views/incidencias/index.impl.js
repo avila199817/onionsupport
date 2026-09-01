@@ -82,6 +82,7 @@ import {
   getIncidenciasFacetFilterQuery,
   getIncidenciasFacetRequestQuery,
   mergeIncidenciasFacetStats,
+  reconcileIncidenciasFilterFacetPresentation,
 } from "./incidencias.filter-facets.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
@@ -6643,6 +6644,45 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
   } = {}) {
     const key = filterFacetSearchKey();
     const cached = filterFacetCache.get(key);
+
+    const authoritativeFacet =
+      activeResponse &&
+      ["open", "closed", "urgent"].includes(filter)
+        ? filter
+        : baseResponse && filter === "all"
+          ? "all"
+          : "";
+    const authoritativeResponse =
+      authoritativeFacet === "all"
+        ? baseResponse
+        : activeResponse;
+
+    if (cached && !force && authoritativeFacet && authoritativeResponse) {
+      const reconciled =
+        reconcileIncidenciasFilterFacetPresentation(
+          cached,
+          authoritativeFacet,
+          authoritativeResponse
+        );
+      const next = Object.freeze({
+        ...reconciled,
+        updatedAt: Date.now(),
+      });
+
+      filterFacetCache.set(key, next);
+
+      if (
+        mounted &&
+        !loading &&
+        !listQueryPending
+      ) {
+        renderWithFilteredItems({
+          skipModals: true,
+        });
+      }
+
+      return next;
+    }
 
     if (cached && !force) return cached;
 

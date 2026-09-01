@@ -154,6 +154,32 @@ export function buildIncidenciasFilterFacetPresentation(
   });
 }
 
+export function reconcileIncidenciasFilterFacetPresentation(
+  presentation = {},
+  facet = "all",
+  response = {}
+) {
+  const current = object(presentation);
+  const key = normalizeIncidenciasFilterFacet(facet);
+  const currentCounts = object(current.counts);
+  const counts = Object.freeze({
+    ...currentCounts,
+    [key]: getIncidenciasFacetTotal(
+      response,
+      currentCounts[key]
+    ),
+  });
+
+  return Object.freeze({
+    ...current,
+    counts,
+    stats: mergeIncidenciasFacetStats(
+      current.stats,
+      counts
+    ),
+  });
+}
+
 export function getIncidenciasFilterFacetsSnapshot() {
   return Object.freeze({
     version: INCIDENCIAS_FILTER_FACETS_VERSION,
@@ -177,4 +203,5 @@ export default Object.freeze({
   getFilterQuery: getIncidenciasFacetFilterQuery,
   getRequestQuery: getIncidenciasFacetRequestQuery,
   buildPresentation: buildIncidenciasFilterFacetPresentation,
+  reconcilePresentation: reconcileIncidenciasFilterFacetPresentation,
 });

@@ -6718,7 +6718,8 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
           {
             search: serverSearch,
             limit:
-              facet === "all"
+              facet === "all" ||
+              facet === "urgent"
                 ? INCIDENCIAS_LIST_LIMIT
                 : 1,
           }

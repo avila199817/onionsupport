@@ -35,8 +35,8 @@ const COPY = Object.freeze({
   urgent: Object.freeze({
     completeLabel: "Urgentes",
     loadedLabel: "Urgentes cargadas",
-    completeText: "Incidencias marcadas como urgentes o críticas.",
-    loadedText: "Prioridades altas o urgentes entre las incidencias ya cargadas.",
+    completeText: "Incidencias con prioridad alta.",
+    loadedText: "Prioridades altas entre las incidencias ya cargadas.",
   }),
   amount: Object.freeze({
     completeLabel: "Importe asociado",

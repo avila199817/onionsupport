@@ -316,6 +316,7 @@ for (const required of [
   "activeResponse",
   "authoritativeFacet",
   "filterFacetCache.set(key, next)",
+  'facet === "urgent"',
   "toggleSortOrder(\n        node?.dataset?.sortMode",
 ]) {
   assert.ok(controllerSource.includes(required), `falta integración de facetas: ${required}`);

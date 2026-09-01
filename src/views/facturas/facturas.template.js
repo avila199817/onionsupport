@@ -1059,12 +1059,6 @@ export function renderHeader(input = {}) {
         ${canCreateFactura ? `<button type="button" id="facturas-create-btn" class="facturas-btn facturas-btn--create${creating ? " is-loading" : ""}" data-action="${FACTURAS_ACTIONS.CREATE_OPEN}" data-facturas-action="${FACTURAS_ACTIONS.CREATE_OPEN}" aria-label="Crear nueva factura" ${disabledAttrs(creating, creating)}>${creating ? renderSpinner("Abriendo...") : `${icon("plus")}<span class="facturas-btn-text">Crear factura</span>`}</button>` : ""}
       </div>
     </div>
-    <div class="facturas-hero-meta">
-      <span class="facturas-meta-pill">${icon("detail")}<span>${escapeHtml(`${remoteCount} facturas`)}</span></span>
-      <span class="facturas-meta-pill">${icon("refresh")}<span>${updatedAt ? escapeHtml(`Última actualización · ${formatRelativeDate(updatedAt)}`) : "Sin actualizaciones recientes"}</span></span>
-      <span class="facturas-meta-pill">${icon("pdf")}<span>${escapeHtml(`${stats.pdfCount} con PDF`)}</span></span>
-      <span class="facturas-meta-pill">${icon("mail")}<span>${escapeHtml(`${stats.sentCount} enviadas`)}</span></span>
-    </div>
     <div class="facturas-stats">
       <article class="facturas-stat-card facturas-stat-card--accent"><div class="facturas-stat-label">${stats.authoritative ? "Facturas totales" : "Facturas cargadas"}</div><div class="facturas-stat-value">${escapeHtml(String(stats.total))}</div><div class="facturas-stat-text">${stats.authoritative ? "Documentos contabilizados por el backend sobre todo el conjunto visible." : "Documentos disponibles en la sesión actual."}</div></article>
       <article class="facturas-stat-card facturas-stat-card--success"><div class="facturas-stat-label">${stats.authoritative ? "Total facturado" : "Importe visible"}</div><div class="facturas-stat-value">${escapeHtml(formatMoney(stats.totalImporte, DEFAULT_CURRENCY))}</div><div class="facturas-stat-text">${stats.authoritative ? "Importe global calculado por el backend, independiente del scroll." : "Suma de las facturas cargadas actualmente."}</div></article>

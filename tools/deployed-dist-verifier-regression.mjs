@@ -40,11 +40,25 @@ for (const unsafe of [
 }
 
 const routeMap = new Map(staticConfig.routes.map((entry) => [entry.route, entry]));
-const fallbackExclusions = new Set(staticConfig.navigationFallback.exclude);
-for (const path of ["/api", "/.auth", "/seo", "/src", "/assets"]) {
+assert.equal(
+  Object.hasOwn(staticConfig, "navigationFallback"),
+  false,
+  "A global navigation fallback would turn unknown URLs into HTTP 200 soft-404 responses."
+);
+for (const path of ["/api", "/api/*", "/.auth", "/seo", "/src", "/assets"]) {
   assert.equal(routeMap.get(path)?.statusCode, 404, `${path} must be denied exactly.`);
-  assert.equal(fallbackExclusions.has(path), true, `${path} must bypass navigation fallback.`);
 }
+for (const path of ["/es", "/es/*", "/ca", "/ca/*", "/en", "/en/*"]) {
+  assert.equal(routeMap.get(path)?.statusCode, 404, `${path} must fail closed with 404.`);
+  assert.equal(routeMap.get(path)?.redirect, undefined, `${path} must never consolidate into home.`);
+}
+const ticketsRoute = routeMap.get("/tickets*");
+assert.equal(ticketsRoute?.rewrite, "/index.html", "Ticket deep links must keep their SPA shell.");
+assert.match(
+  String(ticketsRoute?.headers?.["X-Robots-Tag"] || ""),
+  /noindex/i,
+  "Ticket deep links must remain outside the index."
+);
 
 for (const token of [
   'redirect: "manual"',
@@ -57,12 +71,15 @@ for (const token of [
   '["/index.html", "/"]',
   '["/login.html", "/login"]',
   '"/@ci-probe/incidencias/ci-ticket"',
+  '"/tickets/INC-CI-000001"',
   '"/activate-account/ci-verifier"',
   '"/password-reset/confirm/ci-verifier"',
   '"/reset-password/confirm/ci-verifier"',
   '"/staticwebapp.config.json"',
   '"/build-metadata/release-manifest.sha256"',
   '"/src/main.js"',
+  '"/es/legacy-probe"',
+  '"/__onion-not-found__/soft-404-probe"',
 ]) {
   assert.ok(deployedVerifier.includes(token), `Deployed verifier hardening missing: ${token}`);
 }
@@ -94,5 +111,6 @@ for (const token of [
 
 console.log("Deployed dist verifier regression: PASS");
 console.log("- redirects, URL ambiguity, MIME and denied paths fail closed");
+console.log("- unknown and legacy locale URLs are proven real HTTP 404 responses");
 console.log("- fingerprinted and private cache policies resist conflicting directives");
 console.log("- deep private SPA routes remain exact, no-store and noindex");

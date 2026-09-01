@@ -1,16 +1,6 @@
 # Onion Support · robots.txt
 # Superficie pública indexable: landing, servicios técnicos y acceso cliente.
-# Las rutas sensibles y el área privada permanecen fuera de indexación.
-
-User-agent: Googlebot
-Allow: /
-Disallow: /api/
-Disallow: /.auth/
-
-User-agent: bingbot
-Allow: /
-Disallow: /api/
-Disallow: /.auth/
+# Las rutas sensibles y el área privada permanecen fuera de rastreo.
 
 User-agent: *
 Allow: /
@@ -20,6 +10,7 @@ Disallow: /reset-password
 Disallow: /activate-account
 Disallow: /dashboard
 Disallow: /incidencias
+Disallow: /tickets
 Disallow: /facturas
 Disallow: /clientes
 Disallow: /usuarios

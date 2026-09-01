@@ -62,6 +62,7 @@ const privateSpaRoutes = [
   "/@ci-probe/incidencias/ci-ticket",
   "/incidencias",
   "/incidencias/ci-ticket",
+  "/tickets/INC-CI-000001",
   "/facturas",
   "/clientes",
   "/usuarios",
@@ -269,6 +270,13 @@ const deniedPaths = [
   "/README.md",
   "/manifest.json",
   "/sw.js",
+  "/es",
+  "/es/legacy-probe",
+  "/ca",
+  "/ca/legacy-probe",
+  "/en",
+  "/en/legacy-probe",
+  "/__onion-not-found__/soft-404-probe",
 ];
 
 async function verifyDenied(attempt) {
@@ -301,7 +309,7 @@ for (let attempt = 1; attempt <= 8; attempt += 1) {
       `Deployed dist verification: PASS (${artifactEntries.length} files; ` +
       `${privateSpaRoutes.length} exact SPA rewrites; ` +
       `${redirectRoutes.length} canonical redirects; ` +
-      `${deniedPaths.length} denied paths; manifest ${envelope.manifestDigest})`
+      `${deniedPaths.length} denied/not-found paths; manifest ${envelope.manifestDigest})`
     );
     process.exit(0);
   }

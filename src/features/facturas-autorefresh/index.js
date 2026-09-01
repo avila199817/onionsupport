@@ -11,6 +11,12 @@
    - No corregir ni borrar DOM generado por el template.
 ========================================================= */
 
+/*
+  Enhancement hermano y route-scoped: intercepta los IDs de incidencia antes
+  del handler legacy de Facturas y abre el modal canónico sin navegar de vista.
+*/
+import "../facturas-incidencia-modal/index.js";
+
 export const FACTURAS_AUTO_REFRESH_VERSION =
   "facturas.autorefresh.v4-router-view-interactions";
 

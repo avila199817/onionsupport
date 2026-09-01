@@ -4004,6 +4004,15 @@ async function load(options = {}) {
       );
 
       void refreshFilterFacets({
+        activeResponse:
+          ["open", "closed", "urgent"].includes(filter)
+            ? {
+                ...response,
+                items: safeArray(items),
+                total,
+                nextCursor,
+              }
+            : null,
         baseResponse:
           filter === "all"
             ? {
@@ -6629,6 +6638,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
 
   async function refreshFilterFacets({
     baseResponse = null,
+    activeResponse = null,
     force = false,
   } = {}) {
     const key = filterFacetSearchKey();
@@ -6653,6 +6663,10 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
     filterFacetController = requestController;
 
     const loadFacet = async (facet) => {
+      if (facet === filter && activeResponse) {
+        return activeResponse;
+      }
+
       if (facet === "all" && baseResponse) {
         return baseResponse;
       }
@@ -6892,17 +6906,9 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
       "open",
       "closed",
       "urgent",
-      "date",
     ].includes(normalized)
       ? normalized
       : "all";
-
-    if (
-      nextFilter === "date" &&
-      isListSortLocked()
-    ) {
-      return false;
-    }
 
     const currentServerContext =
       getListServerContextKey();
@@ -6926,12 +6932,6 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
 
     filter = nextFilter;
     serverSearch = nextServerSearch;
-
-    sortMode =
-      DEFAULT_SORT_MODE;
-
-    sortOrder =
-      DEFAULT_SORT_ORDER;
 
     visibleLimit =
       DEFAULT_VISIBLE_LIMIT;
@@ -6977,36 +6977,16 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
       return false;
     }
 
-    const previousServerContext =
-      getListServerContextKey();
-
-    search = "";
-    serverSearch = "";
-    listSearchSeq += 1;
-    const cancelledPendingSearch =
-      clearListSearchTimer();
-    visibleLimit =
-      DEFAULT_VISIBLE_LIMIT;
-
-    if (stat === "amount" || stat === "attachments") {
-      filter = "all";
-      sortMode = stat;
-      sortOrder = "desc";
-    } else {
-      filter = stat;
-      sortMode = DEFAULT_SORT_MODE;
-      sortOrder = DEFAULT_SORT_ORDER;
+    if (["open", "closed", "urgent"].includes(stat)) {
+      return setFilter(stat);
     }
 
-    if (
-      getListServerContextKey() !==
-        previousServerContext ||
-      cancelledPendingSearch
-    ) {
-      return restartListQuery(
-        "incidencias-stat-query-changed"
-      );
-    }
+    visibleLimit = DEFAULT_VISIBLE_LIMIT;
+    sortOrder =
+      sortMode === stat
+        ? getNextSortOrder(sortOrder)
+        : DEFAULT_SORT_ORDER;
+    sortMode = stat;
 
     renderWithFilteredItems();
     return true;
@@ -7041,15 +7021,30 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
     return true;
   }
 
-  function toggleSortOrder() {
+  function toggleSortOrder(
+    value = DEFAULT_SORT_MODE
+  ) {
     if (isListSortLocked()) {
       return false;
     }
 
-    sortOrder =
-      getNextSortOrder(
-        sortOrder
-      );
+    const nextMode = [
+      "date",
+      "amount",
+      "attachments",
+    ].includes(cleanText(value, "").toLowerCase())
+      ? cleanText(value, "").toLowerCase()
+      : DEFAULT_SORT_MODE;
+
+    if (sortMode === nextMode) {
+      sortOrder =
+        getNextSortOrder(
+          sortOrder
+        );
+    } else {
+      sortMode = nextMode;
+      sortOrder = DEFAULT_SORT_ORDER;
+    }
 
     renderWithFilteredItems();
 
@@ -7360,7 +7355,10 @@ async function loadMore(options = {}) {
       type ===
       INCIDENCIAS_ACTIONS.SORT_TOGGLE
     ) {
-      return toggleSortOrder();
+      return toggleSortOrder(
+        node?.dataset?.sortMode ||
+        DEFAULT_SORT_MODE
+      );
     }
 
     if (

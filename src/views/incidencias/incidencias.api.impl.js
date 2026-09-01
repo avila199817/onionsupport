@@ -881,8 +881,8 @@ export function normalizeIncidenciasListResponse(payload = null, requestMeta = {
     valueObjects.some((object) => object?.hasMore === true) ||
     Boolean(nextCursor);
   const rawCount = normalizeEnvelopeCount(rawCountEntry.value, rawItems.length);
-  const count = normalizeEnvelopeCount(countEntry.value, items.length);
-  const total = totalEntry.found
+  const reportedCount = normalizeEnvelopeCount(countEntry.value, items.length);
+  const reportedTotal = totalEntry.found
     ? totalEntry.value === null
       ? isV2
         ? null
@@ -894,12 +894,37 @@ export function normalizeIncidenciasListResponse(payload = null, requestMeta = {
             items.length
           )
     : totalFromPayload(payload, items.length);
+  const canonicalIdentityDuplicatesCollapsed = Math.max(
+    0,
+    rawItems.length - items.length
+  );
+  const reconcileCompleteCanonicalPage = Boolean(
+    isV2 &&
+    !hasMore &&
+    !nextCursor &&
+    canonicalIdentityDuplicatesCollapsed > 0
+  );
+  const reconcileCanonicalTotal = (value) => {
+    if (value === null) return null;
+
+    return Math.max(
+      items.length,
+      normalizeEnvelopeCount(value, items.length) -
+        canonicalIdentityDuplicatesCollapsed
+    );
+  };
+  const count = reconcileCompleteCanonicalPage
+    ? items.length
+    : reportedCount;
+  const total = reconcileCompleteCanonicalPage
+    ? reconcileCanonicalTotal(reportedTotal)
+    : reportedTotal;
   const totalIsLowerBound = totalIsLowerBoundEntry.value === true;
   const paginationHasOwnTotal = Object.prototype.hasOwnProperty.call(
     pagination,
     "total"
   );
-  const paginationTotal = paginationHasOwnTotal
+  const reportedPaginationTotal = paginationHasOwnTotal
     ? pagination.total === null
       ? isV2
         ? null
@@ -911,6 +936,11 @@ export function normalizeIncidenciasListResponse(payload = null, requestMeta = {
             total ?? items.length,
             items.length
           )
+    : total;
+  const paginationTotal = paginationHasOwnTotal
+    ? reconcileCompleteCanonicalPage
+      ? reconcileCanonicalTotal(reportedPaginationTotal)
+      : reportedPaginationTotal
     : total;
   const totalKnown = totalKnownEntry.found
     ? totalKnownEntry.value === true
@@ -956,6 +986,7 @@ export function normalizeIncidenciasListResponse(payload = null, requestMeta = {
       : null,
     totalKnown,
     totalIsLowerBound,
+    canonicalIdentityDuplicatesCollapsed,
   };
 }
 

@@ -804,25 +804,25 @@ function renderHeader(vm = {}) {
       </div>
       <div class="incidencias-hero-meta">
         <span class="incidencias-meta-pill" data-meta="total">${icon("ticket")}<span>${esc(`${formatNumber(s.total)} solicitudes registradas`)}</span></span>
-        <button type="button" class="incidencias-meta-pill incidencias-meta-pill--action${vm.selection === "attachments" ? " is-active" : ""}" data-meta="attachments" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="attachments" aria-pressed="${vm.selection === "attachments" ? "true" : "false"}" aria-label="${vm.sortLocked ? "Orden por adjuntos disponible al completar el historial" : "Ordenar incidencias de más adjuntos a menos"}" title="${vm.sortLocked ? "Disponible al completar el historial" : "Ordenar por número de adjuntos"}" ${vm.sortLocked ? 'disabled aria-disabled="true"' : ""}>${icon("paperclip")}<span>${esc(`${formatNumber(s.attachments)} adjuntos`)}</span></button>
+        <button type="button" class="incidencias-meta-pill incidencias-meta-pill--action${vm.sortMode === "attachments" ? " is-active" : ""}" data-meta="attachments" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="attachments" aria-pressed="${vm.sortMode === "attachments" ? "true" : "false"}" aria-label="${vm.sortLocked ? "Orden por adjuntos disponible al completar el historial" : vm.sortMode === "attachments" ? `Cambiar orden de adjuntos a ${vm.sortOrder === "desc" ? "menor a mayor" : "mayor a menor"}` : "Ordenar incidencias de más adjuntos a menos"}" title="${vm.sortLocked ? "Disponible al completar el historial" : "Ordenar por número de adjuntos"}" ${vm.sortLocked ? 'disabled aria-disabled="true"' : ""}>${icon("paperclip")}<span>${esc(`${formatNumber(s.attachments)} adjuntos`)}</span></button>
       </div>
       <div class="incidencias-stats" aria-label="Accesos rápidos del historial">
-        <button type="button" class="incidencias-stat-card incidencias-stat-card--open${vm.selection === "open" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="open" aria-pressed="${vm.selection === "open" ? "true" : "false"}" aria-label="Mostrar solo incidencias abiertas">
+        <button type="button" class="incidencias-stat-card incidencias-stat-card--open${vm.filter === "open" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="open" aria-pressed="${vm.filter === "open" ? "true" : "false"}" aria-label="Mostrar solo incidencias abiertas">
           <div class="incidencias-stat-label">Abiertas</div>
           <div class="incidencias-stat-value">${esc(formatNumber(s.open))}</div>
           <div class="incidencias-stat-text">Solicitudes activas, pendientes o en proceso.</div>
         </button>
-        <button type="button" class="incidencias-stat-card incidencias-stat-card--closed${vm.selection === "closed" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="closed" aria-pressed="${vm.selection === "closed" ? "true" : "false"}" aria-label="Mostrar solo incidencias cerradas">
+        <button type="button" class="incidencias-stat-card incidencias-stat-card--closed${vm.filter === "closed" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="closed" aria-pressed="${vm.filter === "closed" ? "true" : "false"}" aria-label="Mostrar solo incidencias cerradas">
           <div class="incidencias-stat-label">Cerradas</div>
           <div class="incidencias-stat-value">${esc(formatNumber(s.closed))}</div>
           <div class="incidencias-stat-text">Casos resueltos o cerrados.</div>
         </button>
-        <button type="button" class="incidencias-stat-card incidencias-stat-card--urgent${vm.selection === "urgent" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="urgent" aria-pressed="${vm.selection === "urgent" ? "true" : "false"}" aria-label="Mostrar solo incidencias urgentes o críticas">
+        <button type="button" class="incidencias-stat-card incidencias-stat-card--urgent${vm.filter === "urgent" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="urgent" aria-pressed="${vm.filter === "urgent" ? "true" : "false"}" aria-label="Mostrar solo incidencias urgentes o críticas">
           <div class="incidencias-stat-label">Urgentes</div>
           <div class="incidencias-stat-value">${esc(formatNumber(s.urgent))}</div>
           <div class="incidencias-stat-text">Incidencias marcadas como urgentes o críticas.</div>
         </button>
-        <button type="button" class="incidencias-stat-card incidencias-stat-card--amount${vm.selection === "amount" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="amount" aria-pressed="${vm.selection === "amount" ? "true" : "false"}" aria-label="${vm.sortLocked ? "Orden por importe disponible al completar el historial" : "Ordenar incidencias por importe asociado de mayor a menor"}" title="${vm.sortLocked ? "Disponible al completar el historial" : "Ordenar por importe"}" ${vm.sortLocked ? 'disabled aria-disabled="true"' : ""}>
+        <button type="button" class="incidencias-stat-card incidencias-stat-card--amount${vm.sortMode === "amount" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="amount" aria-pressed="${vm.sortMode === "amount" ? "true" : "false"}" aria-label="${vm.sortLocked ? "Orden por importe disponible al completar el historial" : vm.sortMode === "amount" ? `Cambiar orden de importe a ${vm.sortOrder === "desc" ? "menor a mayor" : "mayor a menor"}` : "Ordenar incidencias por importe asociado de mayor a menor"}" title="${vm.sortLocked ? "Disponible al completar el historial" : "Ordenar por importe"}" ${vm.sortLocked ? 'disabled aria-disabled="true"' : ""}>
           <div class="incidencias-stat-label">Importe asociado</div>
           <div class="incidencias-stat-value">${esc(formatMoney(s.invoiceTotal, DEFAULT_CURRENCY))}</div>
           <div class="incidencias-stat-text">Ordenar incidencias de mayor a menor importe.</div>
@@ -847,17 +847,14 @@ function renderSearch(vm = {}) {
 }
 
 function renderFilters(vm = {}) {
-  const dateActive = vm.selection === "date";
+  const dateActive = vm.sortMode === "date";
   const order = normalizeSort(vm.sortOrder);
-  const next = nextSort(order);
-  const currentDateLabel = sortLabel(order, "date");
+  const next = dateActive ? nextSort(order) : DEFAULT_SORT_ORDER;
+  const currentDateLabel = sortLabel(dateActive ? order : DEFAULT_SORT_ORDER, "date");
   const nextDateLabel = sortLabel(next, "date");
-  const dateAction = dateActive
-    ? INCIDENCIAS_ACTIONS.SORT_TOGGLE
-    : INCIDENCIAS_ACTIONS.FILTER;
   const dateAriaLabel = dateActive
     ? `Cambiar orden a ${nextDateLabel}`
-    : "Ordenar todas las incidencias por fecha, más recientes primero";
+    : "Ordenar las incidencias visibles por fecha, más recientes primero";
   const dateTitle = dateActive
     ? `Cambiar orden a ${nextDateLabel}`
     : "Ordenar por fecha, más recientes primero";
@@ -866,7 +863,7 @@ function renderFilters(vm = {}) {
     <div class="incidencias-filters" data-incidencias-filters="true" data-selected-control="${at(vm.selection)}">
       <div class="incidencias-filter-pills" role="tablist" aria-label="Filtrar incidencias">
         ${FILTERS.map((f) => {
-          const active = f.key !== "all" && f.key === vm.selection;
+          const active = f.key === vm.filter;
           const action = f.key === "all"
             ? INCIDENCIAS_ACTIONS.CLEAR_FILTERS
             : INCIDENCIAS_ACTIONS.FILTER;
@@ -874,7 +871,7 @@ function renderFilters(vm = {}) {
         }).join("")}
       </div>
       <div class="incidencias-sort-pills" data-incidencias-sort-pills="true">
-        <button type="button" class="incidencias-sort-pill${dateActive ? " is-active" : ""}" data-incidencias-action="${dateAction}" data-filter="date" data-sort-mode="date" data-sort-order="${at(order)}" data-next-sort-order="${at(next)}" aria-pressed="${dateActive ? "true" : "false"}" aria-label="${at(vm.sortLocked ? "El orden ascendente estará disponible al completar el historial" : dateAriaLabel)}" title="${at(vm.sortLocked ? "Disponible al completar el historial" : dateTitle)}" ${vm.sortLocked ? 'disabled aria-disabled="true"' : ""}>${icon("calendar")}<span>${esc(currentDateLabel)}</span></button>
+        <button type="button" class="incidencias-sort-pill${dateActive ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.SORT_TOGGLE}" data-sort-mode="date" data-sort-order="${at(order)}" data-next-sort-order="${at(next)}" aria-pressed="${dateActive ? "true" : "false"}" aria-label="${at(vm.sortLocked ? "El orden ascendente estará disponible al completar el historial" : dateAriaLabel)}" title="${at(vm.sortLocked ? "Disponible al completar el historial" : dateTitle)}" ${vm.sortLocked ? 'disabled aria-disabled="true"' : ""}>${icon("calendar")}<span>${esc(currentDateLabel)}</span></button>
       </div>
       ${renderSearch(vm)}
     </div>
@@ -986,7 +983,7 @@ function renderHistory(vm = {}) {
   const initialLoading = vm.loading && !vm.visibleItems.length;
   const refreshing = vm.refreshing && vm.visibleItems.length;
   const activeLabel = FILTERS.find((f) => f.key === vm.filter)?.label || "Todas";
-  const criteria = [vm.filter !== "all" ? activeLabel : "", vm.search ? `búsqueda “${vm.search}”` : ""].filter(Boolean);
+  const criteria = [vm.filter !== "all" ? activeLabel : ""].filter(Boolean);
   const activeSortLabel = sortLabel(vm.sortOrder, vm.sortMode).toLowerCase();
   const subtitle = initialLoading
     ? "Cargando incidencias..."

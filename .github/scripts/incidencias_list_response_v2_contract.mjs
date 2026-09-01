@@ -170,6 +170,53 @@ try {
   assert.equal(emptyV2.hasMore, false);
   assert.equal(emptyV2.total, 0);
 
+  const duplicateIdentityPayloadV2 = {
+    contractVersion: 2,
+    schema: "onionsupport.tickets-list.response.v2",
+    items: [
+      ticket("INC-DUPLICATE", "2026-08-28T09:00:00.000Z"),
+      ticket("INC-DUPLICATE", "2026-08-28T10:00:00.000Z"),
+      ticket("INC-SECOND", "2026-08-28T08:00:00.000Z"),
+    ],
+    rawCount: 3,
+    count: 3,
+    total: 3,
+    totalKnown: true,
+    totalIsLowerBound: false,
+    pagination: {
+      mode: "cursor",
+      nextCursor: "",
+      hasMore: false,
+      total: 3,
+      pageSize: 48,
+    },
+  };
+  const duplicateIdentityV2 = normalizeIncidenciasListResponse(
+    duplicateIdentityPayloadV2
+  );
+  assert.equal(duplicateIdentityV2.rawCount, 3);
+  assert.equal(duplicateIdentityV2.count, 2);
+  assert.equal(duplicateIdentityV2.total, 2);
+  assert.equal(duplicateIdentityV2.pagination.total, 2);
+  assert.equal(duplicateIdentityV2.canonicalIdentityDuplicatesCollapsed, 1);
+
+  const duplicateIdentityWithoutPaginationTotalV2 = normalizeIncidenciasListResponse({
+    ...duplicateIdentityPayloadV2,
+    pagination: {
+      hasMore: false,
+      nextCursor: null,
+    },
+  });
+
+  assert.equal(duplicateIdentityWithoutPaginationTotalV2.count, 2);
+  assert.equal(duplicateIdentityWithoutPaginationTotalV2.total, 2);
+  assert.equal(duplicateIdentityWithoutPaginationTotalV2.pagination.total, 2);
+  assert.deepEqual(
+    duplicateIdentityV2.items.map((item) => item.ticketId).sort(),
+    ["INC-DUPLICATE", "INC-SECOND"],
+    "una versión legacy con el mismo ticketId no puede inflar el total canónico"
+  );
+
   const v1Rows = normalizeIncidenciasListResponse({
     responseContract: "v1",
     rows: [ticket("INC-V1-ROWS")],

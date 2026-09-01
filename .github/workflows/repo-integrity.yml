@@ -58,6 +58,9 @@ jobs:
       - name: Validate repository contracts
         run: python3 .github/scripts/repo_integrity.py
 
+      - name: Validate public path hygiene
+        run: python3 -I .github/scripts/public_path_hygiene.py
+
       - name: Validate critical SPA contracts
         run: bash .github/ci/validate_spa_contracts.sh
 

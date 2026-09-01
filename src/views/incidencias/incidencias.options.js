@@ -22,7 +22,6 @@ export const INCIDENCIA_PRIORITY_OPTIONS = Object.freeze([
   option("low", "Baja"),
   option("medium", "Media"),
   option("high", "Alta"),
-  option("urgent", "Urgente"),
 ]);
 
 export const INCIDENCIA_CATEGORY_OPTIONS = Object.freeze([
@@ -89,12 +88,15 @@ const PRIORITY_ALIASES = Object.freeze({
 
   high: "high",
   alta: "high",
+  p1: "high",
 
-  urgent: "urgent",
-  urgente: "urgent",
-  critical: "urgent",
-  critica: "urgent",
-  critico: "urgent",
+  // Compatibilidad de lectura: la taxonomía actual sólo tiene tres niveles.
+  urgent: "high",
+  urgente: "high",
+  critical: "high",
+  critica: "high",
+  critico: "high",
+  p0: "high",
 });
 
 const CATEGORY_ALIASES = Object.freeze({

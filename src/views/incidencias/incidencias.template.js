@@ -365,14 +365,14 @@ const STATUS_LABELS = Object.freeze({ open: "Abierta", pending: "Pendiente", pro
 const PRIORITY_MAP = Object.freeze({
   low: "low", baja: "low", minor: "low", p3: "low",
   medium: "medium", media: "medium", normal: "medium", p2: "medium",
-  high: "urgent", alta: "urgent", p1: "urgent",
-  urgent: "urgent", urgente: "urgent",
-  critical: "critical", critica: "critical", critico: "critical", crítico: "critical", crítica: "critical", p0: "critical",
+  high: "high", alta: "high", p1: "high",
+  urgent: "high", urgente: "high",
+  critical: "high", critica: "high", critico: "high", crítico: "high", crítica: "high", p0: "high",
 });
-const PRIORITY_LABELS = Object.freeze({ low: "Baja", medium: "Media", urgent: "Urgente", critical: "Crítica" });
+const PRIORITY_LABELS = Object.freeze({ low: "Baja", medium: "Media", high: "Alta" });
 const OPEN_STATUS_KEYS = new Set(["open", "pending", "progress"]);
 const CLOSED_STATUS_KEYS = new Set(["resolved", "closed"]);
-const URGENT_PRIORITY_KEYS = new Set(["urgent", "critical"]);
+const URGENT_PRIORITY_KEYS = new Set(["high"]);
 
 function statusKey(v = "") {
   const k = key(v || "open");
@@ -387,8 +387,6 @@ function priorityKey(it = {}) {
   return PRIORITY_MAP[k] || k || "medium";
 }
 function priorityLabel(it = {}) {
-  const raw = key(getPriorityRaw(it));
-  if (raw === "high" || raw === "alta" || raw === "p1") return "Alta";
   const normalized = priorityKey(it);
   return PRIORITY_LABELS[normalized] || normalized;
 }
@@ -699,7 +697,7 @@ function renderPriorityBadge(it = {}) {
   const k = priorityKey(it);
   return `
     <span class="incidencias-priority-badge incidencias-priority-badge--${at(k)}" data-priority-badge="${at(k)}">
-      <span class="incidencias-badge-icon incidencias-priority-badge-icon" aria-hidden="true">${icon(k === "urgent" || k === "critical" ? "alert" : "ticket")}</span>
+      <span class="incidencias-badge-icon incidencias-priority-badge-icon" aria-hidden="true">${icon(k === "high" ? "alert" : "ticket")}</span>
       <span>${esc(priorityLabel(it))}</span>
     </span>
   `;

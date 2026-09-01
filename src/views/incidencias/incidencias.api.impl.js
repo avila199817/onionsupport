@@ -1316,14 +1316,14 @@ function normalizePriority(value = "") {
     alta: "high",
     high: "high",
     p1: "high",
-    urgente: "urgent",
-    urgent: "urgent",
-    critical: "urgent",
-    critica: "urgent",
-    critico: "urgent",
-    crítico: "urgent",
-    crítica: "urgent",
-    p0: "urgent",
+    urgente: "high",
+    urgent: "high",
+    critical: "high",
+    critica: "high",
+    critico: "high",
+    crítico: "high",
+    crítica: "high",
+    p0: "high",
   };
 
   return map[k] || k || DEFAULT_PRIORITY;
@@ -1675,8 +1675,8 @@ export function normalizeIncidencia(item = {}) {
 
     priority,
     prioridad: priority,
-    priorityKey: cleanText(first(raw.priorityKey, priority), priority),
-    severity: cleanText(first(raw.severity, priority), priority),
+    priorityKey: priority,
+    severity: priority,
 
     category,
     categoria: category,
@@ -2733,7 +2733,7 @@ function isOpenStatus(value = "") {
 }
 
 function isUrgentPriority(value = "") {
-  return ["urgent", "high"].includes(normalizePriority(value));
+  return normalizePriority(value) === "high";
 }
 
 export function computeIncidenciasStats(items = lastList.items) {

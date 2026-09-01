@@ -270,12 +270,7 @@ border-color: var(--border-success);
   color: var(--success-strong, var(--success));
 }
 
-.ui-detail-modal-chip--priority-high {
-border-color: var(--border-warning);
-  background: var(--warning-bg);
-  color: var(--warning-strong, var(--warning));
-}
-
+.ui-detail-modal-chip--priority-high,
 .ui-detail-modal-chip--priority-urgent,
 .ui-detail-modal-chip--priority-critical {
 border-color: var(--border-error);

@@ -1169,43 +1169,18 @@ function getPriority(
   const raw =
     getRaw(detail);
 
-  const priority =
-    normalizeKey(
-      first(
-        detail.priority,
-        detail.prioridad,
-        detail.severity,
+  return normalizeIncidenciaPriority(
+    first(
+      detail.priority,
+      detail.prioridad,
+      detail.severity,
 
-        raw.priority,
-        raw.prioridad,
-        raw.severity,
+      raw.priority,
+      raw.prioridad,
+      raw.severity,
 
-        "medium"
-      )
-    );
-
-  const map = {
-    low: "low",
-    baja: "low",
-
-    medium: "medium",
-    media: "medium",
-    normal: "medium",
-
-    high: "high",
-    alta: "high",
-
-    urgent: "urgent",
-    urgente: "urgent",
-
-    critical: "critical",
-    critica: "critical",
-    critico: "critical",
-  };
-
-  return (
-    map[priority] ||
-    priority ||
+      "medium"
+    ),
     "medium"
   );
 }
@@ -1218,8 +1193,6 @@ function priorityLabel(
       low: "Baja",
       medium: "Media",
       high: "Alta",
-      urgent: "Urgente",
-      critical: "Crítica",
     }[priority] ||
     cleanText(
       priority,
@@ -1231,10 +1204,7 @@ function priorityLabel(
 function priorityClass(
   priority = ""
 ) {
-  return (
-    priority ||
-    "medium"
-  );
+  return normalizeIncidenciaPriority(priority, "medium");
 }
 
 function getCategory(

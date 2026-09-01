@@ -13,7 +13,7 @@
 ========================================================= */
 
 export const HOME_TEMPLATE_VERSION =
-  "home.template.private.v12.entity-hit-targets";
+  "home.template.private.v13.clean-header";
 
 export const HOME_ACTIONS = Object.freeze({
   RETRY: "retry",
@@ -585,7 +585,6 @@ function header(vm) {
       <div class="home-header-main">
         ${avatar(vm.user)}
         <div class="home-header-copy">
-          <p class="home-panel-kicker">Inicio</p>
           <h1 class="home-title">Hola, ${escapeHtml(vm.user.displayName)}</h1>
           <p class="home-subtitle">${vm.admin
             ? "Resumen operativo de incidencias, facturas, clientes y usuarios."

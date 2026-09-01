@@ -4,7 +4,14 @@
    Permite abrir el modal canónico de Incidencias desde otras vistas sin
    navegar a /incidencias. El controller real de Incidencias sigue siendo la
    única autoridad sobre carga, acciones, adjuntos, foco y cierre del modal.
+
+   El bridge también carga las mejoras visuales de identidad que normalmente
+   aporta la ruta Incidencias. Así el mismo modal conserva avatares reales,
+   fallbacks e identidad de autores aunque la ruta activa siga siendo Facturas.
 ========================================================= */
+
+export const INCIDENCIA_MODAL_BRIDGE_VERSION =
+  "incidencia-modal-bridge.v2.avatar-parity";
 
 const BRIDGE_HOST_ID = "incidencias-modal-bridge-host";
 const MODAL_ROOT_SELECTOR = "[data-incidencias-modal-root='true']";
@@ -21,6 +28,8 @@ let bridgeController = null;
 let closeObserver = null;
 let openSequence = 0;
 let modulePromise = null;
+let avatarEnhancementsPromise = null;
+let avatarEnhancementsReady = false;
 
 const stylePromises = new Map();
 
@@ -104,6 +113,62 @@ function loadIncidenciasModule() {
     modulePromise = import("../../views/incidencias/index.js");
   }
   return modulePromise;
+}
+
+function loadIncidenciasAvatarEnhancements() {
+  if (avatarEnhancementsPromise) return avatarEnhancementsPromise;
+
+  const pending = Promise.all([
+    import("../incidencias-avatar-fallback/index.js"),
+    import("../incidencias-followup-avatars/index.js"),
+  ])
+    .then(([fallback, followup]) => {
+      fallback?.mountIncidenciasAvatarFallback?.();
+      followup?.mountIncidenciasFollowupAvatars?.();
+      avatarEnhancementsReady = true;
+
+      return Object.freeze({
+        fallback,
+        followup,
+      });
+    })
+    .catch(() => {
+      /*
+        Los avatares son mejora progresiva: un fallo de chunk/CSS no puede
+        bloquear la apertura del detalle canónico. Se permite reintento en la
+        siguiente apertura dejando el promise vacío.
+      */
+      avatarEnhancementsReady = false;
+      if (avatarEnhancementsPromise === pending) {
+        avatarEnhancementsPromise = null;
+      }
+      return null;
+    });
+
+  avatarEnhancementsPromise = pending;
+  return pending;
+}
+
+function syncIncidenciasAvatarEnhancements(enhancements = null) {
+  if (!isBrowser() || !enhancements) return false;
+
+  let synced = false;
+
+  try {
+    enhancements.fallback?.syncIncidenciasCommentAvatars?.(document);
+    synced = true;
+  } catch {
+    // noop
+  }
+
+  try {
+    enhancements.followup?.syncIncidenciasFollowupAvatars?.(document);
+    synced = true;
+  } catch {
+    // noop
+  }
+
+  return synced;
 }
 
 function ensureBridgeHost() {
@@ -217,9 +282,10 @@ export async function openIncidenciaModalFromCurrentView(
   const sequence = ++openSequence;
 
   try {
-    const [module] = await Promise.all([
+    const [module, , avatarEnhancements] = await Promise.all([
       loadIncidenciasModule(),
       ensureStyles(),
+      loadIncidenciasAvatarEnhancements(),
     ]);
 
     if (sequence !== openSequence) return false;
@@ -233,7 +299,11 @@ export async function openIncidenciaModalFromCurrentView(
         id,
         openerNode
       );
-      if (openedByOwner) return true;
+
+      if (openedByOwner) {
+        syncIncidenciasAvatarEnhancements(avatarEnhancements);
+        return true;
+      }
     }
 
     const controller = await ensureBridgeController(module, context);
@@ -248,8 +318,16 @@ export async function openIncidenciaModalFromCurrentView(
     const opened = Boolean(await controller.openDetail(id, openerNode));
     if (sequence !== openSequence) return false;
 
-    if (opened) watchBridgeModalClose();
-    else disposeBridge({ invalidate: false });
+    if (opened) {
+      /*
+        Sync inmediato además de los observers: cubre el primer paint y también
+        el caso en que el DOM del modal ya existía cuando terminó el import.
+      */
+      syncIncidenciasAvatarEnhancements(avatarEnhancements);
+      watchBridgeModalClose();
+    } else {
+      disposeBridge({ invalidate: false });
+    }
 
     return opened;
   } catch {
@@ -268,15 +346,18 @@ export function getIncidenciaModalBridgeSnapshot() {
   const snapshot = bridgeController?.getSnapshot?.() || null;
 
   return Object.freeze({
+    version: INCIDENCIA_MODAL_BRIDGE_VERSION,
     active: Boolean(bridgeController && bridgeHost?.isConnected),
     modalOpen: Boolean(
       isBrowser() && document.querySelector(MODAL_ROOT_SELECTOR)
     ),
+    avatarEnhancementsReady,
     controller: snapshot,
   });
 }
 
 export default Object.freeze({
+  version: INCIDENCIA_MODAL_BRIDGE_VERSION,
   open: openIncidenciaModalFromCurrentView,
   destroy: destroyIncidenciaModalBridge,
   getSnapshot: getIncidenciaModalBridgeSnapshot,

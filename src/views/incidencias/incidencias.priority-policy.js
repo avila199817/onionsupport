@@ -6,20 +6,19 @@
    Regla de producto:
    - la faceta visual "Urgentes" debe representar exactamente el mismo
      universo que consulta el backend de listado;
-   - ese contrato productivo es priority=high, cuyas variantes persistidas
-     son high / alta / p1;
-   - urgent / critical / p0 siguen siendo prioridades válidas del dominio,
-     pero NO se agregan artificialmente al contador de esta faceta.
+   - ese contrato productivo es priority=high;
+   - urgent / critical / p0 son aliases legacy de high, no prioridades
+     editables independientes;
 
    Motivo:
-   mezclar high + urgent/critical en memoria mientras el servidor filtraba
-   sólo high producía estados imposibles como "Urgentes 3" con 2 filas.
+   el frontend y el backend deben resolver el mismo conjunto de aliases para
+   que KPI, filtro y filas mantengan una única verdad.
 ========================================================= */
 
 "use strict";
 
 export const INCIDENCIAS_PRIORITY_POLICY_VERSION =
-  "incidencias.priority-policy.v1.server-facet-truth";
+  "incidencias.priority-policy.v2-three-level-canonical";
 
 export const INCIDENCIAS_URGENT_FACET_SERVER_PRIORITY = "high";
 
@@ -27,6 +26,12 @@ export const INCIDENCIAS_HIGH_PRIORITY_KEYS = Object.freeze([
   "high",
   "alta",
   "p1",
+  "urgent",
+  "urgente",
+  "critical",
+  "critica",
+  "critico",
+  "p0",
 ]);
 
 const HIGH_PRIORITY_KEYS = new Set(INCIDENCIAS_HIGH_PRIORITY_KEYS);
@@ -91,7 +96,7 @@ export function getIncidenciasPriorityPolicySnapshot() {
     urgentFacetServerPriority: INCIDENCIAS_URGENT_FACET_SERVER_PRIORITY,
     urgentFacetAliases: INCIDENCIAS_HIGH_PRIORITY_KEYS,
     urgentFacetMatchesServerExactly: true,
-    urgentAndCriticalAreNotImplicitlyCountedAsHigh: true,
+    legacyUrgentAndCriticalCanonicalizeToHigh: true,
   });
 }
 

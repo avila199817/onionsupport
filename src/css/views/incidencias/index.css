@@ -202,17 +202,12 @@
   color: var(--success-strong, var(--success));
 }
 
+.incidencias-priority-badge--high,
 .incidencias-priority-badge--urgent,
 .incidencias-priority-badge--critical {
   border-color: var(--border-error);
   background: var(--error-bg);
   color: var(--error-strong, var(--error));
-}
-
-.incidencias-priority-badge--high {
-  border-color: var(--border-warning);
-  background: var(--warning-bg);
-  color: var(--warning-strong, var(--warning));
 }
 
 .incidencias-priority-badge svg,

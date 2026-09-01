@@ -8,6 +8,7 @@ const [
   autorefresh,
   interceptor,
   bridge,
+  bridgeStyle,
   incidencias,
   avatarFallback,
   followupAvatars,
@@ -16,6 +17,7 @@ const [
   read("src/features/facturas-autorefresh/index.js"),
   read("src/features/facturas-incidencia-modal/index.js"),
   read("src/features/incidencia-modal-bridge/index.js"),
+  read("src/features/incidencia-modal-bridge/style.css"),
   read("src/views/incidencias/index.impl.js"),
   read("src/features/incidencias-avatar-fallback/index.js"),
   read("src/features/incidencias-followup-avatars/index.js"),
@@ -42,13 +44,49 @@ assert.match(interceptor, /close-factura-detail/);
 assert.doesNotMatch(bridge, /Router\.navigate|location\.href|location\.assign/);
 assert.match(bridge, /module\?\.IncidenciasView/);
 assert.match(bridge, /controller\.openDetail/);
-assert.match(bridge, /disposeBridge\(\{ invalidate: false \}\)/);
+assert.match(bridge, /disposeBridge\(\{ invalidate: false, feedback: false \}\)/);
 assert.match(bridge, /data-incidencias-modal-bridge-host/);
 
 /*
+  Primer paint transversal: el feedback debe existir ANTES del primer await
+  que puede bloquear por chunk/CSS/red. Un fallo nunca vuelve a ser silencioso.
+*/
+assert.match(bridge, /import\s+["']\.\/style\.css["']/);
+assert.match(bridge, /data-incidencias-modal-bridge-feedback/);
+assert.match(bridge, /showBridgeFeedback/);
+assert.match(bridge, /state:\s*["']loading["']/);
+assert.match(bridge, /state:\s*["']error["']/);
+assert.match(bridge, /Reintentar/);
+assert.match(bridge, /INCIDENCIA_MODAL_OPEN_FAILED/);
+assert.match(bridge, /INCIDENCIA_MODAL_CONTROLLER_UNAVAILABLE/);
+
+const openFunction = bridge.slice(
+  bridge.indexOf("export async function openIncidenciaModalFromCurrentView")
+);
+assert.ok(openFunction.length > 0, "Debe existir openIncidenciaModalFromCurrentView");
+assert.ok(
+  openFunction.indexOf("showBridgeFeedback(id") >= 0 &&
+    openFunction.indexOf("showBridgeFeedback(id") < openFunction.indexOf("await Promise.all"),
+  "El feedback de apertura debe pintarse antes del primer await bloqueante"
+);
+
+/* El bridge se precalienta al cargar la feature de Facturas. */
+assert.match(bridge, /export function primeIncidenciaModalBridge/);
+assert.match(bridge, /primeIncidenciaModalBridge\(\);/);
+assert.match(bridge, /void loadIncidenciasModule\(\)\.catch/);
+assert.match(bridge, /void ensureStyles\(\)\.catch/);
+
+/*
+  El singleton histórico sólo puede actuar como owner si /incidencias es la
+  ruta activa; un bridge previo no debe apropiarse de aperturas desde Facturas.
+*/
+assert.match(bridge, /function currentOwnerIsIncidencias/);
+assert.match(bridge, /currentOwnerIsIncidencias\(\)\s*&&/);
+
+/*
   Paridad visual transversal: Facturas mantiene su propia ruta, por lo que el
-  bridge debe cargar explícitamente las mejoras de avatar que normalmente
-  aporta el scope Incidencias y sincronizarlas tras el primer paint.
+  bridge carga explícitamente las mejoras de avatar que normalmente aporta
+  Incidencias. Son progresivas: nunca pertenecen al Promise.all crítico.
 */
 assert.match(
   bridge,
@@ -63,6 +101,21 @@ assert.match(bridge, /mountIncidenciasFollowupAvatars/);
 assert.match(bridge, /syncIncidenciasCommentAvatars/);
 assert.match(bridge, /syncIncidenciasFollowupAvatars/);
 assert.match(bridge, /avatarEnhancementsReady/);
+assert.match(
+  openFunction,
+  /const avatarEnhancements = loadIncidenciasAvatarEnhancements\(\)/
+);
+assert.doesNotMatch(
+  openFunction,
+  /Promise\.all\(\[\s*loadIncidenciasModule\(\),\s*ensureStyles\(\),\s*loadIncidenciasAvatarEnhancements\(\)/
+);
+
+/* El feedback tiene overlay propio, foco visible y reduced-motion. */
+assert.match(bridgeStyle, /\.incidencia-bridge-feedback-overlay/);
+assert.match(bridgeStyle, /\.incidencia-bridge-feedback-panel/);
+assert.match(bridgeStyle, /\.incidencia-bridge-feedback-spinner/);
+assert.match(bridgeStyle, /prefers-reduced-motion/);
+assert.match(bridgeStyle, /incidencias-modal-bridge-feedback-open/);
 
 /* Las capas importadas siguen siendo las autoridades canónicas de identidad. */
 assert.match(avatarFallback, /export function syncIncidenciasCommentAvatars/);

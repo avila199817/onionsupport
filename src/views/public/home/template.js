@@ -55,6 +55,7 @@ const LOCAL_BUSINESS_SCHEMA = {
   logo: `https://${BUSINESS.domain}/src/media/img/favicon_black_circle_128.webp`,
   email: BUSINESS.email,
   telephone: BUSINESS.phoneTel,
+  description: "Servicio técnico informático con diagnóstico, reparación y asistencia para particulares, autónomos y negocios.",
   areaServed: "Sant Vicenç de Castellet, Barcelona y alrededores",
   address: {
     "@type": "PostalAddress",
@@ -437,7 +438,7 @@ function renderHero() {
             Reparación informática <span>profesional</span>
           </h1>
           <p class="public-home-hero-text" data-public-home-reveal="true">
-            Ordenadores, portátiles, redes, impresoras y puesta a punto con diagnóstico claro, presupuesto previo, factura.
+            Servicio técnico informático en Sant Vicenç de Castellet y alrededores para ordenadores, portátiles, redes e impresoras, con diagnóstico claro y presupuesto previo.
           </p>
           <div class="public-home-hero-actions" data-public-home-reveal="true">
             <a class="public-home-button public-home-button--primary" href="${escapeAttr(whatsappHref())}" target="_blank" rel="noopener noreferrer" data-public-home-cta="true">

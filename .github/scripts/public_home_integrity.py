@@ -200,6 +200,7 @@ def main() -> int:
     home_preload = read("src/preboot/public-home-preload.js")
     public_shared = read("src/views/public/index.js")
     login_template = read("src/views/public/login/template.js")
+    support_css = read("src/css/views/public/support-request.css")
     experience_css = read("src/css/views/public/home-experience.css")
     progress_css = read("src/css/views/public/public-support-progress.css")
 
@@ -298,11 +299,12 @@ def main() -> int:
         ('intakeIconNode', "Falta icono interno de incidencia"),
         ('formatNationalSpanishPhone', "Falta formato nacional español del teléfono"),
         ('"tel-national"', "El teléfono debe usar autocomplete nacional"),
-        ('public-support.intake.v10-canonical-panel-handoff', "Falta versión final del contrato público"),
+        ('public-support.intake.v11-client-facing-compact', "Falta la versión compacta y orientada al cliente"),
         ('currentFormPhone(form)', "El bloqueo local debe observar el teléfono"),
         ('publicSupportBlockedPhone', "Falta lock local por teléfono"),
         ('lockMatchesCurrentIdentity(form)', "El lock debe resolver email O teléfono"),
-        ('Este formulario no crea ni modifica fichas de cliente.', "La UI debe declarar que no crea clientes"),
+        ('Te atiendo personalmente', "El paso 3 debe hablar de atención al cliente, no de lógica interna"),
+        ('Tus datos se usan únicamente para gestionar la incidencia', "La privacidad debe explicarse con lenguaje directo"),
         ('correo o teléfono', "La UI debe explicar la reutilización por correo O teléfono"),
         ('sin modificar el perfil', "La UI debe declarar no-overwrite de usuario existente"),
         ('"Enviando solicitud…"', "El estado busy debe permanecer neutro"),
@@ -311,6 +313,10 @@ def main() -> int:
         ('city: text(data.get("city")).slice(0, 90)', "Falta ciudad estructurada en payload"),
         ('province: text(data.get("province")).slice(0, 90)', "Falta provincia estructurada en payload"),
         ('country: "España"', "Falta país canónico en payload"),
+        ('labelAddon: postalInfo()', "El CP debe incluir su ayuda contextual junto a la etiqueta"),
+        ('aria-describedby="public-support-postal-help"', "La ayuda del CP debe ser accesible"),
+        ('role="tooltip"', "La ayuda del CP debe declarar semántica tooltip"),
+        ('rows="5"', "La descripción pública debe conservar la densidad compacta"),
         ('...addressParts(user)', "Falta prefill estructurado desde usuario existente"),
         ('new MutationObserver(queueScan)', "El intake debe coalescer mutaciones por frame"),
     ):
@@ -326,6 +332,19 @@ def main() -> int:
         'root.addEventListener("focusin", onFocusIn' not in intake,
         "El intake no debe mutar el teléfono al recibir focus",
     )
+    require(
+        errors,
+        "public-support-postal-hint" not in intake,
+        "La ayuda del CP no puede volver a ocupar una fila completa",
+    )
+
+    for snippet, message in (
+        ("grid-template-columns: repeat(12, minmax(0, 1fr));", "El intake desktop debe usar la retícula compacta de 12 columnas"),
+        (".public-support-info:hover .public-support-info-tooltip", "El tooltip del CP debe responder al puntero"),
+        (".public-support-info:focus-within .public-support-info-tooltip", "El tooltip del CP debe responder al teclado"),
+        ('.public-support-field[data-public-support-field] {', "Los campos deben volver a una columna en móvil"),
+    ):
+        require(errors, snippet in support_css, message)
     require(
         errors,
         'phone: normalizeSpanishPhone(data.get("phone"))' in intake,
@@ -586,11 +605,11 @@ def main() -> int:
     # Documentación: debe describir exactamente el backend productivo final.
     for snippet, message in (
         ("`POST /api/tickets/public`", "Docs: falta endpoint público"),
-        ("`+34` como prefijo visual", "Docs: falta alcance telefónico España"),
+        ("input contiene los 9 dígitos nacionales", "Docs: falta alcance telefónico España"),
         ("`Idempotency-Key`", "Docs: falta idempotencia"),
         ("autenticación opcional", "Docs: falta auth opcional"),
         ("no deben usar su icono", "Docs: falta separación CTA/WhatsApp"),
-        ("correo o teléfono", "Docs: falta resolución de identidad por correo O teléfono"),
+        ("correo y teléfono enviados", "Docs: falta resolución de identidad por correo y teléfono"),
         ("nunca crea clientes", "Docs: falta prohibición de creación de cliente"),
         ("`clienteId: null`", "Docs: falta alta nueva sin cliente"),
         ("reutilizar sin overwrite", "Docs: falta regla estricta de usuario existente"),

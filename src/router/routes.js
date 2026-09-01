@@ -1453,7 +1453,7 @@ const ROUTE_DEFINITIONS = Object.freeze([
   createRoute({
     path: ROUTE_PATHS.PUBLIC_HOME,
     name: ROUTE_NAMES.PUBLIC_HOME,
-    title: "Soluciones IT",
+    title: "Servicio técnico informático en Sant Vicenç",
     viewKey: "public-home",
     public: true,
     guestOnly: false,

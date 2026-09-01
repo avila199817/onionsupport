@@ -13,7 +13,7 @@
 import "../../css/views/public/support-extreme.css";
 
 export const PUBLIC_SUPPORT_EXTREME_VERSION =
-  "public-support.extreme.v1-contact-authority-feedback";
+  "public-support.extreme.v2-client-facing-feedback";
 
 const HOME = "[data-public-home]";
 const FORM = "[data-public-support-form]";
@@ -96,11 +96,11 @@ function ensureAuthorityNotice(form = null) {
   const copy = document.createElement("div");
 
   const title = document.createElement("strong");
-  title.textContent = "La cuenta se decide por correo y móvil";
+  title.textContent = "Tus datos vinculan la incidencia";
 
   const description = document.createElement("p");
   description.textContent =
-    "Aunque tengas una sesión iniciada, comprobamos siempre los datos escritos aquí. Si coinciden con una cuenta existente, usamos esa cuenta sin modificarla; si no existe, creamos un acceso pendiente.";
+    "Usaremos el correo y el móvil que indiques. Si ya tienes cuenta, la reutilizamos sin cambiar tus datos; si es tu primera vez, recibirás un acceso seguro.";
 
   copy.append(title, description);
   notice.append(icon, copy);
@@ -108,7 +108,7 @@ function ensureAuthorityNotice(form = null) {
 
   const secure = form.querySelector(".public-support-secure");
   if (secure && cleanText(secure.textContent) === "Acceso por email") {
-    secure.textContent = "Identidad por contacto";
+    secure.textContent = "Datos protegidos";
   }
 
   form.dataset.publicSupportAuthorityReady = "true";

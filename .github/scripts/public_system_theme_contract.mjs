@@ -56,7 +56,7 @@ for (const [token, message] of [
 for (const [token, message] of [
   ['<span>1</span><div><strong>Vinculamos el caso</strong>', "El flujo público debe mostrar el paso 1 sin cero inicial"],
   ['<span>2</span><div><strong>Creamos tu acceso si hace falta</strong>', "El flujo público debe mostrar el paso 2 sin cero inicial"],
-  ['<span>3</span><div><strong>Cliente, solo por Onion Support</strong>', "El flujo público debe mostrar el paso 3 sin cero inicial"],
+  ['<span>3</span><div><strong>Te atiendo personalmente</strong>', "El flujo público debe mostrar el paso 3 orientado al cliente y sin cero inicial"],
 ]) {
   assert.ok(publicSupport.includes(token), message);
 }

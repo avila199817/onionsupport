@@ -229,6 +229,38 @@ assert.equal(serverUrgentSnapshot.serverFilterApplied, true);
 assert.equal(serverUrgentSnapshot.filteredTotal, 2);
 assert.equal(serverUrgentSnapshot.filterCounts.urgent, 2);
 
+const filteredAndSortedHtml = renderIncidenciasTemplate({
+  ...serverUrgentInput,
+  filter: "closed",
+  search: "Javier",
+  sortMode: "date",
+  sortOrder: "asc",
+});
+assert.match(
+  filteredAndSortedHtml,
+  /class="incidencias-filter-pill is-active"[^>]*data-filter="closed"[^>]*aria-selected="true"/,
+  "el filtro Cerradas debe seguir activo mientras cambia el orden"
+);
+assert.match(
+  filteredAndSortedHtml,
+  /data-incidencias-action="sort-toggle"[^>]*data-sort-mode="date"[^>]*>[\s\S]*?Fecha ↑/,
+  "Fecha ascendente debe ser una acción ortogonal al filtro activo"
+);
+assert.doesNotMatch(
+  filteredAndSortedHtml.match(/class="incidencias-history-subtitle">([^<]*)<\/p>/)?.[1] || "",
+  /búsqueda|Javier/i,
+  "el resumen del historial no debe repetir el término escrito en el buscador"
+);
+
+const filteredAmountHtml = renderIncidenciasTemplate({
+  ...serverUrgentInput,
+  filter: "closed",
+  sortMode: "amount",
+  sortOrder: "desc",
+});
+assert.match(filteredAmountHtml, /incidencias-stat-card--closed is-active/);
+assert.match(filteredAmountHtml, /incidencias-stat-card--amount is-active/);
+
 const facetSnapshot = getIncidenciasFilterFacetsSnapshot();
 assert.equal(facetSnapshot.policy.selectedFacetExcludedFromCounts, true);
 assert.equal(facetSnapshot.policy.searchDefinesFacetUniverse, true);
@@ -255,6 +287,8 @@ for (const required of [
   "buildIncidenciasFilterFacetPresentation",
   "syncActiveFacetUniverseFromItems",
   "serverFilterApplied",
+  "activeResponse",
+  "toggleSortOrder(\n        node?.dataset?.sortMode",
 ]) {
   assert.ok(controllerSource.includes(required), `falta integración de facetas: ${required}`);
 }

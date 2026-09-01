@@ -193,7 +193,7 @@ require(
 require(
     "restartListQuery" in controller
     and '"incidencias-filter-query-changed"' in controller
-    and '"incidencias-stat-query-changed"' in controller
+    and "return setFilter(stat);" in controller
     and '"incidencias-search-query-restored"' in controller
     and "cancelledPendingSearch" in controller
     and "nextServerSearch" in controller,
@@ -219,12 +219,13 @@ require(
 )
 require(
     "getListServerContextKey" in controller
-    and '"date",\n    ].includes(normalized)' in controller
-    and 'nextFilter === "date" &&\n      isListSortLocked()' in controller
+    and "function toggleSortOrder" in controller
+    and "node?.dataset?.sortMode" in controller
     and "nextServerContext !==\n      currentServerContext" in controller
-    and 'rawFilter === "date"' in template
+    and 'data-incidencias-action="${INCIDENCIAS_ACTIONS.SORT_TOGGLE}" data-sort-mode="date"' in template
+    and 'data-filter="date"' not in template
     and "const queryChanged = nextFilter !== filter" not in controller,
-    "date sorting must keep its raw UI marker, compare semantic server context, and respect the remote sort lock",
+    "date sorting must remain orthogonal to the server filter and respect the remote sort lock",
 )
 require(
     "Boolean(nextCursor && filtered.length)" in template

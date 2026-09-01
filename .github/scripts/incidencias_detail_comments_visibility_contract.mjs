@@ -11,7 +11,7 @@ function baseDetail(extra = {}) {
   return {
     id: "INC-COMMENTS-VISIBLE-1",
     ticketId: "INC-COMMENTS-VISIBLE-1",
-    subject: "Ticket con conversación",
+    subject: "Ticket con seguimiento",
     description: "Detalle de prueba",
     status: "closed",
     priority: "medium",
@@ -31,14 +31,14 @@ const detail = baseDetail({
       id: "com-1",
       type: "comment",
       body: "Primer comentario materializado",
-      author: "Sergio Navas Tapia",
+      author: "Cliente Uno",
       createdAt: "2026-08-24T18:00:00.000Z",
     },
     {
       id: "com-2",
       type: "comment",
       body: "Segundo comentario materializado",
-      author: "Cristián Ávila Luque",
+      author: "Soporte",
       createdAt: "2026-08-24T19:00:00.000Z",
     },
   ],
@@ -62,7 +62,11 @@ const detail = baseDetail({
 
 const comments = getIncidenciasDetailComments({ detail });
 assert.equal(comments.length, 2);
-assert.equal(comments[0].id, "com-2", "la conversación debe ordenarse de más reciente a más antigua");
+assert.equal(
+  comments[0].id,
+  "com-2",
+  "Seguimiento debe ordenar comentarios de más reciente a más antiguo"
+);
 
 const html = renderIncidenciasDetailModal({
   open: true,
@@ -71,22 +75,41 @@ const html = renderIncidenciasDetailModal({
   historyOpen: false,
 });
 
-assert.match(html, /data-modal-comments-slot="true"/);
-assert.match(html, /data-comments-materialized="2"/);
-assert.match(html, />Conversación</);
+assert.match(html, /data-description-comments="true"/);
+assert.match(html, /class="incidencias-modal-description-thread"/);
+assert.match(html, /class="incidencias-modal-description-comments"/);
+assert.match(html, /class="incidencias-modal-description-comment"/);
+assert.match(html, /data-description-comment="true"/);
+assert.match(html, />Seguimiento</);
 assert.match(html, /Primer comentario materializado/);
 assert.match(html, /Segundo comentario materializado/);
 assert.match(html, /2 comentarios/);
-assert.match(html, /data-modal-files-slot="true"/);
+
 assert.match(
   html,
-  /data-modal-files-slot="true">[\s\S]*?data-modal-comments-slot="true"[\s\S]*?data-modal-current-files="true"/,
-  "la conversación debe vivir dentro del slot que el reconciliador reemplaza al llegar el Detail remoto"
+  /incidencias-modal-description-section[\s\S]*?data-description-comments="true"[\s\S]*?<\/section>/,
+  "Seguimiento debe vivir dentro de la sección canónica Descripción"
 );
+
+assert.doesNotMatch(
+  html,
+  /data-modal-files-slot="true">[\s\S]*?data-description-comments="true"/,
+  "Seguimiento no puede volver a vivir dentro del slot de documentos"
+);
+
+const followupMatch = html.match(
+  /<section\s+class="incidencias-modal-description-thread"[\s\S]*?<\/section>/
+);
+assert.ok(followupMatch, "debe existir el bloque canónico de Seguimiento");
+assert.doesNotMatch(followupMatch[0], /<img\b/i);
+assert.doesNotMatch(followupMatch[0], /incidencias-modal-image-thumb/);
+assert.doesNotMatch(followupMatch[0], /incidencias-modal-attachment-card/);
+assert.doesNotMatch(followupMatch[0], /incidencias-timeline-card/);
+
 assert.doesNotMatch(
   html,
   /data-modal-history-slot="true"/,
-  "el body normal no debe depender de abrir el modo Historial para materializar comentarios"
+  "el body normal no debe depender de abrir Historial para mostrar comentarios"
 );
 
 const aliases = getIncidenciasDetailComments({
@@ -129,39 +152,68 @@ const emptyHtml = renderIncidenciasDetailModal({
   admin: true,
   historyOpen: false,
 });
-assert.match(emptyHtml, /data-modal-comments-slot="true"/);
-assert.match(emptyHtml, /No hay comentarios publicados en esta incidencia\./);
+assert.doesNotMatch(
+  emptyHtml,
+  /data-description-comments="true"/,
+  "sin comentarios confirmados no se debe fabricar una conversación vacía"
+);
 
 const snapshot = getDetailTemplateSnapshot();
-assert.equal(snapshot.commentsUi?.alwaysMaterializedInTicketBody, true);
+assert.equal(snapshot.commentsUi?.materializesWhenAvailableInTicketBody, true);
+assert.equal(snapshot.commentsUi?.canonicalFollowupMarkup, true);
 assert.equal(snapshot.commentsUi?.aliasCompatible, true);
 assert.equal(snapshot.commentsUi?.timelineCommentCompatible, true);
-assert.equal(snapshot.commentsUi?.patchesInsideExistingFilesSlot, true);
+assert.equal(snapshot.commentsUi?.liveSyncCompatible, true);
+assert.equal(snapshot.commentsUi?.followupAvatarCompatible, true);
+assert.equal(snapshot.commentsUi?.noFilesSlotCoupling, true);
+assert.equal(snapshot.commentsUi?.noAttachmentMarkupInConversation, true);
 assert.equal(snapshot.commentsUi?.fullHistoryRemainsSeparate, true);
-assert.equal(snapshot.policy?.commentsAlwaysVisibleInTicketBody, true);
-assert.equal(snapshot.policy?.commentsPatchWithRemoteDetail, true);
+assert.equal(snapshot.policy?.commentsAlwaysVisibleWhenMaterialized, true);
+assert.equal(snapshot.policy?.commentsUseCanonicalFollowupSystem, true);
+assert.equal(snapshot.policy?.commentsNeverShareAttachmentSlot, true);
 
+const liveSync = await readFile(
+  new URL(
+    "../../src/features/incidencias-detail-live-sync/index.js",
+    import.meta.url
+  ),
+  "utf8"
+);
+const avatars = await readFile(
+  new URL(
+    "../../src/features/incidencias-followup-avatars/index.js",
+    import.meta.url
+  ),
+  "utf8"
+);
+const interactions = await readFile(
+  new URL(
+    "../../src/css/compositions/private-admin-interactions.css",
+    import.meta.url
+  ),
+  "utf8"
+);
 const controller = await readFile(
   new URL("../../src/views/incidencias/index.impl.js", import.meta.url),
   "utf8"
 );
 
+assert.match(liveSync, /COMMENT_THREAD\s*=\s*"\[data-description-comments='true'\]"/);
+assert.match(liveSync, /incidencias-modal-description-comment/);
+assert.match(avatars, /incidencias-modal-description-comment-head/);
+assert.match(interactions, /\.incidencias-modal-description-thread\s*\{/);
+assert.match(interactions, /\.incidencias-modal-description-comment\s*\{/);
 assert.match(
   controller,
-  /"\[data-modal-files-slot='true'\]"/,
-  "el reconciliador debe seguir reemplazando el slot que contiene Conversación al hidratar el Detail remoto"
+  /"\.incidencias-modal-description-section"/,
+  "la hidratación autoritativa debe reemplazar Descripción + Seguimiento como una unidad"
 );
 assert.match(
   controller,
   /detailModal\.detail\s*=\s*mergedDetail;/,
-  "el GET remoto debe seguir convirtiéndose en la autoridad visible del modal"
-);
-assert.match(
-  controller,
-  /renderModals\([\s\S]*?immediate:\s*true/,
-  "la hidratación remota debe reconciliar el modal inmediatamente"
+  "el GET remoto debe seguir siendo la autoridad visible del modal"
 );
 
 console.log(
-  "Incidencias Detail comments visibility: PASS · conversación siempre materializada · aliases/timeline · late remote Detail patch"
+  "Incidencias Detail comments: PASS · Seguimiento canónico · avatars/live-sync compatibles · adjuntos aislados"
 );

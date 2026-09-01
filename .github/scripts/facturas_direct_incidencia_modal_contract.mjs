@@ -10,6 +10,7 @@ const [
   bridge,
   bridgeStyle,
   incidencias,
+  incidenciasBoundary,
   avatarFallback,
   followupAvatars,
 ] = await Promise.all([
@@ -19,6 +20,7 @@ const [
   read("src/features/incidencia-modal-bridge/index.js"),
   read("src/features/incidencia-modal-bridge/style.css"),
   read("src/views/incidencias/index.impl.js"),
+  read("src/views/incidencias/index.js"),
   read("src/features/incidencias-avatar-fallback/index.js"),
   read("src/features/incidencias-followup-avatars/index.js"),
 ]);
@@ -129,5 +131,56 @@ assert.match(followupAvatars, /export function syncIncidenciasFollowupAvatars/);
 /* El modal real vive fuera del host técnico oculto. */
 assert.match(incidencias, /document\.body\.appendChild\(\s*modalHost\s*\)/);
 assert.match(incidencias, /data-incidencias-modal-host/);
+
+/*
+  Regresión crítica bridge -> ruta Incidencias:
+  cada controller recibe una lease de modal distinta antes de entrar en Impl.
+  Un bridge que se destruya tarde nunca puede retirar listeners/nodo del owner.
+*/
+assert.match(incidenciasBoundary, /function createDedicatedModalHost/);
+assert.match(incidenciasBoundary, /data-incidencias-modal-owner-id/);
+assert.match(incidenciasBoundary, /data-incidencias-modal-context/);
+assert.match(incidenciasBoundary, /data-incidencias-modal-host-superseded/);
+assert.match(
+  incidenciasBoundary,
+  /const lease = createDedicatedModalHost\([\s\S]*?controller = await Impl\.IncidenciasView/
+);
+assert.match(
+  incidenciasBoundary,
+  /modalHostNeverSharedWithBridge:\s*true/
+);
+
+/*
+  La API externa de apertura sólo usa el controller propietario de la ruta,
+  nunca Impl.lastInstance (que también puede ser un modalBridge).
+*/
+assert.match(incidenciasBoundary, /let routeOwnerController = null/);
+assert.match(
+  incidenciasBoundary,
+  /export async function openIncidenciaDetailById[\s\S]*?const controller = routeOwnerController/
+);
+assert.doesNotMatch(
+  incidenciasBoundary.slice(
+    incidenciasBoundary.indexOf("export async function openIncidenciaDetailById")
+  ),
+  /Impl\.openIncidenciaDetailById/
+);
+assert.match(
+  incidenciasBoundary,
+  /routeOwnerNeverUsesLastBridgeInstance:\s*true/
+);
+
+/*
+  Aunque un listener bubble desaparezca por una carrera, X y backdrop siguen
+  delegando al mismo closeDetailModal() canónico y respetan borradores.
+*/
+assert.match(incidenciasBoundary, /function installIncidenciasModalCloseFailsafe/);
+assert.match(incidenciasBoundary, /data-detail-action='detail-close'/);
+assert.match(incidenciasBoundary, /event\.stopImmediatePropagation\?\.\(\)/);
+assert.match(incidenciasBoundary, /controller\.closeDetailModal\(\)/);
+assert.match(
+  incidenciasBoundary,
+  /closeFailsafeDelegatesToController:\s*true/
+);
 
 console.log("facturas direct incidencia modal contract: ok");

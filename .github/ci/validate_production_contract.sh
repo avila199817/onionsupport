@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+python3 -I .github/scripts/public_path_hygiene.py
+
 python3 -I - <<'PY'
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlsplit
 import json
 import os
+import re
 import sys
 import xml.etree.ElementTree as ET
 
@@ -314,10 +317,17 @@ for denied_path in (
     if not denial or denial.get("statusCode") != 404:
         error(config_path, f"{denied_path} debe responder 404 de forma explícita.")
 
-for locale_path in ("/es", "/es/*", "/ca", "/ca/*", "/en", "/en/*"):
-    denial = routes.get(locale_path)
-    if not denial or denial.get("statusCode") != 404 or denial.get("redirect"):
-        error(config_path, f"{locale_path} debe responder 404 y nunca redirigir a la home.")
+language_route_pattern = re.compile(r"^/[a-z]{2}(?:/\*)?$", re.IGNORECASE)
+language_routes = sorted(
+    route_name
+    for route_name in route_names
+    if language_route_pattern.fullmatch(route_name)
+)
+if language_routes:
+    error(
+        config_path,
+        f"No deben existir rutas estáticas prefijadas por idioma: {language_routes!r}",
+    )
 
 root_route = routes.get("/")
 if not root_route or root_route.get("rewrite") != "/index.html":

@@ -10,8 +10,12 @@
 
    El host del modal se entrega mediante una lease exclusiva por controller:
    un bridge transversal y la ruta propietaria nunca comparten nodo, listeners
-   ni ciclo de vida. El cierre tiene además un fallback capturado que delega
-   siempre en closeDetailModal(), preservando borradores y confirmaciones.
+   ni ciclo de vida. Una lease reemplazada queda inmediatamente oculta, inert
+   y fuera del hit-testing para que jamás sobrevivan dos overlays interactivos.
+
+   El host activo también marca una frontera de intención: el Entity Overlay
+   global nunca puede reinterpretar un click en el backdrop como una nueva
+   solicitud de apertura de la misma incidencia.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -34,13 +38,15 @@ import {
 } from "./incidencias.hot-list.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
-  `${Impl.INCIDENCIAS_INDEX_VERSION}.create-user-combobox.truthful-loaded-stats.detail-attachment-policy.hot-list.modal-host-lease`;
+  `${Impl.INCIDENCIAS_INDEX_VERSION}.create-user-combobox.truthful-loaded-stats.detail-attachment-policy.hot-list.modal-host-lease.single-interactive-layer`;
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
 
 const MODAL_HOST_SELECTOR =
   "[data-incidencias-modal-host='true']";
+const MODAL_HOST_CANDIDATE_SELECTOR =
+  "[data-incidencias-modal-host]";
 const DETAIL_ROOT_SELECTOR =
   "[data-incidencias-modal-root='true']";
 const DETAIL_PANEL_SELECTOR =
@@ -49,6 +55,10 @@ const DETAIL_OVERLAY_SELECTOR =
   "[data-incidencias-modal-overlay='true']";
 const DETAIL_CLOSE_SELECTOR =
   "[data-detail-action='detail-close']";
+const ROUTER_EVENT_HANDLED_KEY =
+  "__onionRouterHandled";
+const ENTITY_OVERLAY_IGNORE_ATTRIBUTE =
+  "data-entity-overlay-ignore";
 
 let modalOwnerSequence = 0;
 let routeOwnerController = null;
@@ -93,6 +103,170 @@ function nextModalOwnerId(context = {}) {
   ].join("-");
 }
 
+function isActiveModalHost(modalHost = null) {
+  if (!modalHost?.getAttribute) {
+    return false;
+  }
+
+  return Boolean(
+    modalHost.isConnected &&
+    modalHost.getAttribute("data-incidencias-modal-host") === "true" &&
+    modalHost.getAttribute("data-incidencias-modal-active-layer") === "true" &&
+    modalHost.getAttribute("data-incidencias-modal-host-superseded") !== "true" &&
+    modalHost.hidden !== true &&
+    !modalHost.hasAttribute("inert")
+  );
+}
+
+/*
+  Una lease antigua debe seguir conectada hasta que su propio controller
+  termine el cleanup: así index.impl.js conserva su referencia directa y jamás
+  puede apropiarse del host nuevo. Pero conectada no significa interactiva:
+  queda fuera de accesibilidad, pintura y hit-testing de forma inmediata.
+
+  No vaciamos replaceChildren() aquí. El bridge observa el DOM para detectar el
+  cierre; eliminar transitoriamente todos los roots durante un cambio de owner
+  podría hacerle destruir por error el controller que acaba de montarse.
+*/
+function quarantineModalHost(modalHost = null) {
+  if (!modalHost?.setAttribute) {
+    return false;
+  }
+
+  modalHost.setAttribute(
+    "data-incidencias-modal-host",
+    "superseded"
+  );
+  modalHost.setAttribute(
+    "data-incidencias-modal-host-superseded",
+    "true"
+  );
+  modalHost.setAttribute(
+    "data-incidencias-modal-active-layer",
+    "false"
+  );
+  modalHost.setAttribute(
+    ENTITY_OVERLAY_IGNORE_ATTRIBUTE,
+    "true"
+  );
+  modalHost.setAttribute(
+    "aria-hidden",
+    "true"
+  );
+  modalHost.setAttribute(
+    "inert",
+    ""
+  );
+
+  try {
+    modalHost.hidden = true;
+  } catch {
+    // noop
+  }
+
+  try {
+    modalHost.style?.setProperty?.(
+      "display",
+      "none",
+      "important"
+    );
+    modalHost.style?.setProperty?.(
+      "visibility",
+      "hidden",
+      "important"
+    );
+    modalHost.style?.setProperty?.(
+      "pointer-events",
+      "none",
+      "important"
+    );
+  } catch {
+    // noop
+  }
+
+  return true;
+}
+
+function activateModalHost(modalHost = null) {
+  if (!modalHost?.setAttribute) {
+    return false;
+  }
+
+  modalHost.setAttribute(
+    "data-incidencias-modal-host",
+    "true"
+  );
+  modalHost.removeAttribute(
+    "data-incidencias-modal-host-superseded"
+  );
+  modalHost.setAttribute(
+    "data-incidencias-modal-active-layer",
+    "true"
+  );
+
+  /*
+    Entity Overlay escucha document en capture, antes que los listeners del
+    modal. Esta frontera evita que el backdrop herede data-ticket-id del root y
+    sea tratado como una nueva intención de apertura.
+  */
+  modalHost.setAttribute(
+    ENTITY_OVERLAY_IGNORE_ATTRIBUTE,
+    "true"
+  );
+  modalHost.setAttribute(
+    "aria-hidden",
+    "false"
+  );
+  modalHost.removeAttribute(
+    "inert"
+  );
+
+  try {
+    modalHost.hidden = false;
+  } catch {
+    // noop
+  }
+
+  try {
+    modalHost.style?.removeProperty?.(
+      "display"
+    );
+    modalHost.style?.removeProperty?.(
+      "visibility"
+    );
+    modalHost.style?.removeProperty?.(
+      "pointer-events"
+    );
+  } catch {
+    // noop
+  }
+
+  return true;
+}
+
+function quarantineExistingModalHosts(
+  documentLike = null
+) {
+  if (!isBrowserDocument(documentLike)) {
+    return 0;
+  }
+
+  let quarantined = 0;
+
+  for (
+    const current
+    of documentLike.querySelectorAll?.(
+      MODAL_HOST_CANDIDATE_SELECTOR
+    ) || []
+  ) {
+    if (quarantineModalHost(current)) {
+      quarantined += 1;
+    }
+  }
+
+  return quarantined;
+}
+
 /*
   index.impl.js conserva deliberadamente un único selector de host. Para que
   dos controllers concurrentes no puedan apropiarse del mismo nodo, la frontera
@@ -114,16 +288,10 @@ function createDedicatedModalHost({
     return null;
   }
 
-  for (const current of documentLike.querySelectorAll?.(MODAL_HOST_SELECTOR) || []) {
-    current.setAttribute(
-      "data-incidencias-modal-host",
-      "superseded"
+  const supersededCount =
+    quarantineExistingModalHosts(
+      documentLike
     );
-    current.setAttribute(
-      "data-incidencias-modal-host-superseded",
-      "true"
-    );
-  }
 
   const modalHost = documentLike.createElement("div");
   const ownerId = nextModalOwnerId(context);
@@ -131,10 +299,8 @@ function createDedicatedModalHost({
     ? "bridge"
     : "route";
 
-  modalHost.setAttribute(
-    "data-incidencias-modal-host",
-    "true"
-  );
+  activateModalHost(modalHost);
+
   modalHost.setAttribute(
     "data-incidencias-modal-owner-id",
     ownerId
@@ -161,6 +327,7 @@ function createDedicatedModalHost({
     modalHost,
     ownerId,
     mode,
+    supersededCount,
   };
 }
 
@@ -192,7 +359,12 @@ function installIncidenciasModalCloseFailsafe({
   let destroyed = false;
 
   function onClick(event) {
-    if (destroyed) return;
+    if (
+      destroyed ||
+      !isActiveModalHost(modalHost)
+    ) {
+      return;
+    }
 
     const target = modalTarget(event);
     if (!target?.closest || !modalHost.contains(target)) {
@@ -226,6 +398,12 @@ function installIncidenciasModalCloseFailsafe({
     event.preventDefault?.();
     event.stopPropagation?.();
     event.stopImmediatePropagation?.();
+
+    try {
+      event[ROUTER_EVENT_HANDLED_KEY] = true;
+    } catch {
+      // noop
+    }
 
     controller.closeDetailModal();
   }
@@ -284,11 +462,17 @@ export async function IncidenciasView(host = null, context = {}) {
   try {
     controller = await Impl.IncidenciasView(host, context);
   } catch (error) {
+    quarantineModalHost(
+      lease?.modalHost
+    );
     lease?.modalHost?.remove?.();
     throw error;
   }
 
   if (!controller) {
+    quarantineModalHost(
+      lease?.modalHost
+    );
     lease?.modalHost?.remove?.();
     return controller;
   }
@@ -359,7 +543,21 @@ export async function IncidenciasView(host = null, context = {}) {
     }
   );
 
+  Object.defineProperty(
+    controller,
+    "__incidenciasModalHost",
+    {
+      value: lease?.modalHost || null,
+      configurable: true,
+      enumerable: false,
+    }
+  );
+
   controller.destroy = function destroyIncidenciasWithEnhancements() {
+    quarantineModalHost(
+      lease?.modalHost
+    );
+
     uninstallModalCloseFailsafe?.();
     uninstallHotList?.();
     uninstallDetailAttachmentPolicy?.();
@@ -431,9 +629,52 @@ export const destroy = Impl.destroy;
 export const getSnapshot = Impl.getSnapshot;
 export const getDebugSnapshot = Impl.getDebugSnapshot;
 
+function getModalLayerSnapshot(
+  documentLike =
+    typeof document !== "undefined"
+      ? document
+      : null
+) {
+  if (!isBrowserDocument(documentLike)) {
+    return Object.freeze({
+      total: 0,
+      interactive: 0,
+      superseded: 0,
+      duplicateInteractive: false,
+    });
+  }
+
+  const hosts = Array.from(
+    documentLike.querySelectorAll?.(
+      MODAL_HOST_CANDIDATE_SELECTOR
+    ) || []
+  );
+
+  const interactive = hosts.filter(
+    isActiveModalHost
+  ).length;
+
+  const superseded = hosts.filter(
+    (modalHost) =>
+      modalHost.getAttribute?.(
+        "data-incidencias-modal-host-superseded"
+      ) === "true"
+  ).length;
+
+  return Object.freeze({
+    total: hosts.length,
+    interactive,
+    superseded,
+    duplicateInteractive:
+      interactive > 1,
+  });
+}
+
 export function getIncidenciasViewBoundarySnapshot() {
   const ownerSnapshot =
     routeOwnerController?.getSnapshot?.() || null;
+  const modalLayers =
+    getModalLayerSnapshot();
 
   return Object.freeze({
     version: INCIDENCIAS_VIEW_VERSION,
@@ -448,6 +689,7 @@ export function getIncidenciasViewBoundarySnapshot() {
       ownerSnapshot?.destroyed !== true &&
       ownerSnapshot?.mounted !== false
     ),
+    modalLayers,
     policy: Object.freeze({
       controllerImplementationPreserved1to1: true,
       enhancementsInstalledPerController: true,
@@ -466,6 +708,9 @@ export function getIncidenciasViewBoundarySnapshot() {
       modalHostNeverSharedWithBridge: true,
       routeOwnerNeverUsesLastBridgeInstance: true,
       closeFailsafeDelegatesToController: true,
+      supersededModalHostsAreInert: true,
+      singleInteractiveModalLayer: true,
+      backdropNeverCreatesEntityIntent: true,
     }),
   });
 }

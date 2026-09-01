@@ -12,7 +12,7 @@ import {
 } from "../incidencia-modal-bridge/index.js";
 
 export const FACTURAS_INCIDENCIA_MODAL_VERSION =
-  "facturas-incidencia-modal.v1.direct-canonical";
+  "facturas-incidencia-modal.v2.route-cleanup";
 
 const ACTION = "open-incidencia";
 const FACTURA_DETAIL_ROOT = "[data-facturas-detail-root='true']";
@@ -20,9 +20,11 @@ const FACTURA_DETAIL_HOST = "#facturas-detail-root";
 const FACTURA_CLOSE_ACTION = "close-factura-detail";
 const ROUTE_HOST_SELECTOR =
   "[data-route-host='true'][data-route-host-state='ready']:not([hidden])[data-route-path]";
+const ROUTE_OBSERVATION_ROOT = "#view-container, [data-view-container='true']";
 
 let installed = false;
 let opening = false;
+let routeObserver = null;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -145,10 +147,36 @@ async function onDocumentClick(event) {
   }
 }
 
+function installRouteCleanupObserver() {
+  if (!isBrowser() || routeObserver || typeof MutationObserver !== "function") {
+    return Boolean(routeObserver);
+  }
+
+  const root = document.querySelector(ROUTE_OBSERVATION_ROOT);
+  if (!root) return false;
+
+  routeObserver = new MutationObserver(() => {
+    queueMicrotask(() => {
+      if (!currentRouteIsFacturas()) {
+        opening = false;
+        destroyIncidenciaModalBridge();
+      }
+    });
+  });
+
+  routeObserver.observe(root, {
+    childList: true,
+    subtree: false,
+  });
+
+  return true;
+}
+
 export function installFacturasIncidenciaModal() {
   if (!isBrowser() || installed) return installed;
 
   document.addEventListener("click", onDocumentClick, true);
+  installRouteCleanupObserver();
   installed = true;
   return true;
 }
@@ -158,6 +186,8 @@ export function destroyFacturasIncidenciaModal() {
     document.removeEventListener("click", onDocumentClick, true);
   }
 
+  routeObserver?.disconnect?.();
+  routeObserver = null;
   installed = false;
   opening = false;
   destroyIncidenciaModalBridge();
@@ -169,6 +199,7 @@ export function getFacturasIncidenciaModalSnapshot() {
     version: FACTURAS_INCIDENCIA_MODAL_VERSION,
     installed,
     opening,
+    routeObserver: Boolean(routeObserver),
     directModal: true,
     routeNavigation: false,
   });

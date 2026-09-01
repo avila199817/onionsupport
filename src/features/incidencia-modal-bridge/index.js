@@ -18,7 +18,6 @@ const STYLE_PATHS = Object.freeze([
 
 let bridgeHost = null;
 let bridgeController = null;
-let bridgeContext = null;
 let closeObserver = null;
 let openSequence = 0;
 let modulePromise = null;
@@ -127,6 +126,30 @@ function stopCloseObserver() {
   closeObserver = null;
 }
 
+function disposeBridge({ invalidate = true } = {}) {
+  if (invalidate) openSequence += 1;
+  stopCloseObserver();
+
+  const controller = bridgeController;
+  bridgeController = null;
+
+  try {
+    controller?.destroy?.();
+  } catch {
+    // noop
+  }
+
+  try {
+    bridgeHost?.replaceChildren?.();
+    bridgeHost?.remove?.();
+  } catch {
+    // noop
+  }
+
+  bridgeHost = null;
+  return true;
+}
+
 function watchBridgeModalClose() {
   stopCloseObserver();
   if (!isBrowser() || typeof MutationObserver !== "function") return false;
@@ -142,7 +165,7 @@ function watchBridgeModalClose() {
     }
 
     if (modalSeen) {
-      destroyIncidenciaModalBridge();
+      disposeBridge({ invalidate: true });
     }
   });
 
@@ -164,14 +187,18 @@ async function ensureBridgeController(module, context = {}) {
     return bridgeController;
   }
 
-  destroyIncidenciaModalBridge();
+  /*
+    Limpia restos de una instancia anterior SIN invalidar la apertura actual.
+    La invalidación sólo pertenece a cierres externos o nuevas aperturas.
+  */
+  disposeBridge({ invalidate: false });
 
   const host = ensureBridgeHost();
   if (!host || typeof module?.IncidenciasView !== "function") return null;
 
-  bridgeContext = context && typeof context === "object" ? context : {};
+  const safeContext = context && typeof context === "object" ? context : {};
   bridgeController = await module.IncidenciasView(host, {
-    ...bridgeContext,
+    ...safeContext,
     modalBridge: true,
     source: "incidencia-modal-bridge",
   });
@@ -219,41 +246,22 @@ export async function openIncidenciaModalFromCurrentView(
     }
 
     const opened = Boolean(await controller.openDetail(id, openerNode));
+    if (sequence !== openSequence) return false;
+
     if (opened) watchBridgeModalClose();
-    else destroyIncidenciaModalBridge();
+    else disposeBridge({ invalidate: false });
 
     return opened;
   } catch {
     if (sequence === openSequence) {
-      destroyIncidenciaModalBridge();
+      disposeBridge({ invalidate: false });
     }
     return false;
   }
 }
 
 export function destroyIncidenciaModalBridge() {
-  openSequence += 1;
-  stopCloseObserver();
-
-  const controller = bridgeController;
-  bridgeController = null;
-  bridgeContext = null;
-
-  try {
-    controller?.destroy?.();
-  } catch {
-    // noop
-  }
-
-  try {
-    bridgeHost?.replaceChildren?.();
-    bridgeHost?.remove?.();
-  } catch {
-    // noop
-  }
-
-  bridgeHost = null;
-  return true;
+  return disposeBridge({ invalidate: true });
 }
 
 export function getIncidenciaModalBridgeSnapshot() {

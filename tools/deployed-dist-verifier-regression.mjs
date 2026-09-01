@@ -12,6 +12,10 @@ const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const deployedVerifier = await readFile(resolve(ROOT, "tools/verify-deployed-dist.mjs"), "utf8");
 const envelopeVerifier = await readFile(resolve(ROOT, "tools/verify-artifact-envelope.mjs"), "utf8");
 const productionVerifier = await readFile(resolve(ROOT, ".github/ci/verify_production.sh"), "utf8");
+const publicPathHygiene = await readFile(
+  resolve(ROOT, ".github/scripts/public_path_hygiene.py"),
+  "utf8"
+);
 const staticConfig = JSON.parse(
   await readFile(resolve(ROOT, "staticwebapp.config.json"), "utf8")
 );
@@ -48,9 +52,12 @@ assert.equal(
 for (const path of ["/api", "/api/*", "/.auth", "/seo", "/src", "/assets"]) {
   assert.equal(routeMap.get(path)?.statusCode, 404, `${path} must be denied exactly.`);
 }
-for (const path of ["/es", "/es/*", "/ca", "/ca/*", "/en", "/en/*"]) {
-  assert.equal(routeMap.get(path)?.statusCode, 404, `${path} must fail closed with 404.`);
-  assert.equal(routeMap.get(path)?.redirect, undefined, `${path} must never consolidate into home.`);
+for (const path of routeMap.keys()) {
+  assert.doesNotMatch(
+    path,
+    /^\/[a-z]{2}(?:\/\*)?$/i,
+    `${path} must not be declared as a language-prefixed static route.`
+  );
 }
 const ticketsRoute = routeMap.get("/tickets*");
 assert.equal(ticketsRoute?.rewrite, "/index.html", "Ticket deep links must keep their SPA shell.");
@@ -78,8 +85,9 @@ for (const token of [
   '"/staticwebapp.config.json"',
   '"/build-metadata/release-manifest.sha256"',
   '"/src/main.js"',
-  '"/es/legacy-probe"',
   '"/__onion-not-found__/soft-404-probe"',
+  '"/__onion-not-found__/nested/soft-404-probe"',
+  '"/__onion-not-found__-single"',
 ]) {
   assert.ok(deployedVerifier.includes(token), `Deployed verifier hardening missing: ${token}`);
 }
@@ -92,6 +100,15 @@ assert.ok(
   envelopeVerifier.includes("!/^[A-Za-z0-9._~/-]+$/.test(path)"),
   "Artifact paths must reject URL delimiters and percent-encoded ambiguity."
 );
+
+for (const token of [
+  "LANGUAGE_SEGMENT = bytes",
+  '"git", "-C", str(ROOT), "ls-files", "-z"',
+  "Public path hygiene: PASS",
+  "obsolete language-prefixed public path",
+]) {
+  assert.ok(publicPathHygiene.includes(token), `Public path hygiene hardening missing: ${token}`);
+}
 
 for (const token of [
   "hsts_max_age",
@@ -111,6 +128,7 @@ for (const token of [
 
 console.log("Deployed dist verifier regression: PASS");
 console.log("- redirects, URL ambiguity, MIME and denied paths fail closed");
-console.log("- unknown and legacy locale URLs are proven real HTTP 404 responses");
+console.log("- generic unknown URLs are proven real HTTP 404 responses");
+console.log("- obsolete language-prefixed paths are rejected across the tracked tree");
 console.log("- fingerprinted and private cache policies resist conflicting directives");
 console.log("- deep private SPA routes remain exact, no-store and noindex");

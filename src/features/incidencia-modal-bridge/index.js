@@ -5,16 +5,24 @@
    navegar a /incidencias. El controller real de Incidencias sigue siendo la
    única autoridad sobre carga, acciones, adjuntos, foco y cierre del modal.
 
-   El bridge también carga las mejoras visuales de identidad que normalmente
-   aporta la ruta Incidencias. Así el mismo modal conserva avatares reales,
-   fallbacks e identidad de autores aunque la ruta activa siga siendo Facturas.
+   Reglas de apertura transversal:
+   - feedback visible inmediato antes de imports/red/detalle;
+   - CSS y módulo canónico se precalientan al cargar la feature;
+   - avatares son mejora progresiva y nunca bloquean el primer paint;
+   - sólo se delega al owner global cuando /incidencias es realmente la ruta;
+   - cualquier fallo conserva una UI recuperable con Reintentar/Cerrar.
 ========================================================= */
 
+import "./style.css";
+
 export const INCIDENCIA_MODAL_BRIDGE_VERSION =
-  "incidencia-modal-bridge.v2.avatar-parity";
+  "incidencia-modal-bridge.v3.instant-feedback-resilient";
 
 const BRIDGE_HOST_ID = "incidencias-modal-bridge-host";
+const FEEDBACK_HOST_ID = "incidencias-modal-bridge-feedback";
 const MODAL_ROOT_SELECTOR = "[data-incidencias-modal-root='true']";
+const ROUTE_HOST_SELECTOR =
+  "[data-route-host='true'][data-route-host-state='ready']:not([hidden])[data-route-path]";
 const STYLE_TIMEOUT_MS = 4_000;
 
 const STYLE_PATHS = Object.freeze([
@@ -26,10 +34,14 @@ const STYLE_PATHS = Object.freeze([
 let bridgeHost = null;
 let bridgeController = null;
 let closeObserver = null;
+let feedbackHost = null;
+let activeFeedback = null;
 let openSequence = 0;
 let modulePromise = null;
 let avatarEnhancementsPromise = null;
 let avatarEnhancementsReady = false;
+let primed = false;
+let lastOpenFailed = false;
 
 const stylePromises = new Map();
 
@@ -51,6 +63,21 @@ function absoluteUrl(path = "") {
   } catch {
     return cleanText(path, "");
   }
+}
+
+function currentOwnerIsIncidencias() {
+  if (!isBrowser()) return false;
+
+  const committed = document.querySelector(ROUTE_HOST_SELECTOR);
+  const pathname = cleanText(
+    committed?.dataset?.routePath || window.location?.pathname || "",
+    ""
+  )
+    .split("?")[0]
+    .split("#")[0]
+    .toLowerCase();
+
+  return pathname.split("/").filter(Boolean).includes("incidencias");
 }
 
 function ensureStyle(path = "") {
@@ -100,18 +127,34 @@ function ensureStyle(path = "") {
   });
 
   stylePromises.set(href, promise);
+
+  void promise.then((ok) => {
+    if (!ok && stylePromises.get(href) === promise) {
+      stylePromises.delete(href);
+    }
+  });
+
   return promise;
 }
 
 async function ensureStyles() {
-  await Promise.all(STYLE_PATHS.map((path) => ensureStyle(path)));
-  return true;
+  const results = await Promise.all(
+    STYLE_PATHS.map((path) => ensureStyle(path))
+  );
+  return results.every(Boolean);
 }
 
 function loadIncidenciasModule() {
   if (!modulePromise) {
-    modulePromise = import("../../views/incidencias/index.js");
+    const pending = import("../../views/incidencias/index.js")
+      .catch((error) => {
+        if (modulePromise === pending) modulePromise = null;
+        throw error;
+      });
+
+    modulePromise = pending;
   }
+
   return modulePromise;
 }
 
@@ -186,12 +229,194 @@ function ensureBridgeHost() {
   return bridgeHost;
 }
 
+function ensureFeedbackHost() {
+  if (!isBrowser()) return null;
+  if (feedbackHost?.isConnected) return feedbackHost;
+
+  document.getElementById(FEEDBACK_HOST_ID)?.remove?.();
+
+  feedbackHost = document.createElement("div");
+  feedbackHost.id = FEEDBACK_HOST_ID;
+  feedbackHost.setAttribute("data-incidencias-modal-bridge-feedback", "true");
+  document.body.appendChild(feedbackHost);
+  return feedbackHost;
+}
+
+function clearBridgeFeedback() {
+  if (!isBrowser()) {
+    activeFeedback = null;
+    feedbackHost = null;
+    return false;
+  }
+
+  activeFeedback = null;
+
+  try {
+    feedbackHost?.replaceChildren?.();
+    feedbackHost?.remove?.();
+  } catch {
+    // noop
+  }
+
+  feedbackHost = null;
+  document.body?.classList?.remove("incidencias-modal-bridge-feedback-open");
+  return true;
+}
+
+function showBridgeFeedback(
+  ticketId = "",
+  {
+    state = "loading",
+    message = "",
+    openerNode = null,
+    context = {},
+  } = {}
+) {
+  if (!isBrowser()) return false;
+
+  const id = cleanText(ticketId, "");
+  if (!id) return false;
+
+  const mode = state === "error" ? "error" : "loading";
+  const host = ensureFeedbackHost();
+  if (!host) return false;
+
+  activeFeedback = {
+    ticketId: id,
+    state: mode,
+    openerNode: openerNode?.isConnected ? openerNode : null,
+    context: context && typeof context === "object" ? context : {},
+  };
+
+  host.replaceChildren();
+  host.dataset.state = mode;
+
+  const overlay = document.createElement("div");
+  overlay.className = "incidencia-bridge-feedback-overlay";
+  overlay.dataset.incidenciaBridgeFeedbackOverlay = "true";
+
+  const panel = document.createElement("section");
+  panel.className = "incidencia-bridge-feedback-panel";
+  panel.dataset.incidenciaBridgeFeedbackPanel = "true";
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "true");
+  panel.setAttribute("aria-labelledby", "incidencia-bridge-feedback-title");
+  panel.setAttribute("aria-describedby", "incidencia-bridge-feedback-description");
+  panel.tabIndex = -1;
+
+  const visual = document.createElement("div");
+  visual.className = `incidencia-bridge-feedback-visual incidencia-bridge-feedback-visual--${mode}`;
+  visual.setAttribute("aria-hidden", "true");
+
+  if (mode === "loading") {
+    const spinner = document.createElement("span");
+    spinner.className = "incidencia-bridge-feedback-spinner";
+    visual.appendChild(spinner);
+  } else {
+    visual.textContent = "!";
+  }
+
+  const copy = document.createElement("div");
+  copy.className = "incidencia-bridge-feedback-copy";
+
+  const eyebrow = document.createElement("span");
+  eyebrow.className = "incidencia-bridge-feedback-eyebrow";
+  eyebrow.textContent = `Incidencia ${id}`;
+
+  const title = document.createElement("h3");
+  title.id = "incidencia-bridge-feedback-title";
+  title.textContent = mode === "loading"
+    ? "Abriendo detalle"
+    : "No se pudo abrir la incidencia";
+
+  const description = document.createElement("p");
+  description.id = "incidencia-bridge-feedback-description";
+  description.setAttribute("aria-live", mode === "error" ? "assertive" : "polite");
+  description.textContent = cleanText(
+    message,
+    mode === "loading"
+      ? "Estamos cargando el detalle completo y verificando su información."
+      : "La incidencia no se ha perdido. Puedes reintentar la apertura ahora."
+  );
+
+  copy.append(eyebrow, title, description);
+
+  const actions = document.createElement("div");
+  actions.className = "incidencia-bridge-feedback-actions";
+
+  if (mode === "error") {
+    const retryButton = document.createElement("button");
+    retryButton.type = "button";
+    retryButton.className = "incidencia-bridge-feedback-button incidencia-bridge-feedback-button--primary";
+    retryButton.dataset.incidenciaBridgeFeedbackAction = "retry";
+    retryButton.textContent = "Reintentar";
+    retryButton.addEventListener("click", () => {
+      const retry = activeFeedback;
+      if (!retry?.ticketId) return;
+
+      const retryId = retry.ticketId;
+      const retryOpener = retry.openerNode;
+      const retryContext = retry.context;
+      clearBridgeFeedback();
+
+      void openIncidenciaModalFromCurrentView(
+        retryId,
+        retryOpener,
+        retryContext
+      );
+    });
+    actions.appendChild(retryButton);
+  }
+
+  const closeButton = document.createElement("button");
+  closeButton.type = "button";
+  closeButton.className = "incidencia-bridge-feedback-button incidencia-bridge-feedback-button--secondary";
+  closeButton.dataset.incidenciaBridgeFeedbackAction = "close";
+  closeButton.textContent = mode === "loading" ? "Cancelar" : "Cerrar";
+  closeButton.addEventListener("click", () => {
+    destroyIncidenciaModalBridge();
+  });
+  actions.appendChild(closeButton);
+
+  panel.append(visual, copy, actions);
+  overlay.appendChild(panel);
+  host.appendChild(overlay);
+  document.body?.classList?.add("incidencias-modal-bridge-feedback-open");
+
+  nextMicrotaskFocus(
+    mode === "error"
+      ? host.querySelector("[data-incidencia-bridge-feedback-action='retry']")
+      : panel
+  );
+
+  return true;
+}
+
+function nextMicrotaskFocus(node = null) {
+  if (!node?.focus) return false;
+
+  queueMicrotask(() => {
+    if (!node?.isConnected) return;
+    try {
+      node.focus({ preventScroll: true });
+    } catch {
+      try {
+        node.focus();
+      } catch {
+        // noop
+      }
+    }
+  });
+
+  return true;
+}
+
 function stopCloseObserver() {
   closeObserver?.disconnect?.();
   closeObserver = null;
 }
 
-function disposeBridge({ invalidate = true } = {}) {
+function disposeBridge({ invalidate = true, feedback = true } = {}) {
   if (invalidate) openSequence += 1;
   stopCloseObserver();
 
@@ -212,6 +437,11 @@ function disposeBridge({ invalidate = true } = {}) {
   }
 
   bridgeHost = null;
+
+  if (feedback) {
+    clearBridgeFeedback();
+  }
+
   return true;
 }
 
@@ -230,7 +460,7 @@ function watchBridgeModalClose() {
     }
 
     if (modalSeen) {
-      disposeBridge({ invalidate: true });
+      disposeBridge({ invalidate: true, feedback: true });
     }
   });
 
@@ -256,7 +486,7 @@ async function ensureBridgeController(module, context = {}) {
     Limpia restos de una instancia anterior SIN invalidar la apertura actual.
     La invalidación sólo pertenece a cierres externos o nuevas aperturas.
   */
-  disposeBridge({ invalidate: false });
+  disposeBridge({ invalidate: false, feedback: false });
 
   const host = ensureBridgeHost();
   if (!host || typeof module?.IncidenciasView !== "function") return null;
@@ -271,6 +501,36 @@ async function ensureBridgeController(module, context = {}) {
   return bridgeController;
 }
 
+function syncAvatarEnhancementsWhenReady(
+  promise = null,
+  sequence = openSequence
+) {
+  void Promise.resolve(promise)
+    .then((enhancements) => {
+      if (
+        sequence !== openSequence ||
+        !document.querySelector(MODAL_ROOT_SELECTOR)
+      ) {
+        return false;
+      }
+
+      return syncIncidenciasAvatarEnhancements(enhancements);
+    })
+    .catch(() => false);
+}
+
+export function primeIncidenciaModalBridge() {
+  if (!isBrowser()) return false;
+
+  primed = true;
+
+  void loadIncidenciasModule().catch(() => null);
+  void ensureStyles().catch(() => false);
+  void loadIncidenciasAvatarEnhancements().catch(() => null);
+
+  return true;
+}
+
 export async function openIncidenciaModalFromCurrentView(
   ticketId = "",
   openerNode = null,
@@ -280,38 +540,66 @@ export async function openIncidenciaModalFromCurrentView(
   if (!id || !isBrowser()) return false;
 
   const sequence = ++openSequence;
+  const safeContext = context && typeof context === "object" ? context : {};
+
+  lastOpenFailed = false;
+
+  /*
+    Primer paint inmediato: el usuario recibe feedback antes de esperar chunk,
+    CSS, controller, red o los reintentos de integridad del Detail.
+  */
+  showBridgeFeedback(id, {
+    state: "loading",
+    openerNode,
+    context: safeContext,
+  });
+
+  /*
+    Los avatares son estrictamente progresivos. Arrancan en paralelo pero
+    nunca forman parte del await que gobierna la apertura del modal.
+  */
+  const avatarEnhancements = loadIncidenciasAvatarEnhancements();
 
   try {
-    const [module, , avatarEnhancements] = await Promise.all([
+    const [module] = await Promise.all([
       loadIncidenciasModule(),
       ensureStyles(),
-      loadIncidenciasAvatarEnhancements(),
     ]);
 
     if (sequence !== openSequence) return false;
 
     /*
-      Si Incidencias ya es la vista propietaria activa, no creamos bridge:
-      delegamos directamente en su controller canónico.
+      El singleton histórico sólo es owner cuando /incidencias es realmente la
+      ruta activa. Un controller bridge previo nunca puede apropiarse de una
+      apertura lanzada desde Facturas.
     */
-    if (typeof module?.openIncidenciaDetailById === "function") {
+    if (
+      currentOwnerIsIncidencias() &&
+      typeof module?.openIncidenciaDetailById === "function"
+    ) {
       const openedByOwner = await module.openIncidenciaDetailById(
         id,
         openerNode
       );
 
+      if (sequence !== openSequence) return false;
+
       if (openedByOwner) {
-        syncIncidenciasAvatarEnhancements(avatarEnhancements);
+        clearBridgeFeedback();
+        syncAvatarEnhancementsWhenReady(avatarEnhancements, sequence);
         return true;
       }
     }
 
-    const controller = await ensureBridgeController(module, context);
+    const controller = await ensureBridgeController(module, safeContext);
     if (
       sequence !== openSequence ||
       !controller ||
       typeof controller.openDetail !== "function"
     ) {
+      if (sequence === openSequence) {
+        throw new Error("INCIDENCIA_MODAL_CONTROLLER_UNAVAILABLE");
+      }
       return false;
     }
 
@@ -319,27 +607,33 @@ export async function openIncidenciaModalFromCurrentView(
     if (sequence !== openSequence) return false;
 
     if (opened) {
-      /*
-        Sync inmediato además de los observers: cubre el primer paint y también
-        el caso en que el DOM del modal ya existía cuando terminó el import.
-      */
-      syncIncidenciasAvatarEnhancements(avatarEnhancements);
+      clearBridgeFeedback();
+      syncAvatarEnhancementsWhenReady(avatarEnhancements, sequence);
       watchBridgeModalClose();
-    } else {
-      disposeBridge({ invalidate: false });
+      return true;
     }
 
-    return opened;
+    throw new Error("INCIDENCIA_MODAL_OPEN_FAILED");
   } catch {
-    if (sequence === openSequence) {
-      disposeBridge({ invalidate: false });
-    }
+    if (sequence !== openSequence) return false;
+
+    lastOpenFailed = true;
+    disposeBridge({ invalidate: false, feedback: false });
+
+    showBridgeFeedback(id, {
+      state: "error",
+      message:
+        "No hemos podido completar la carga del detalle. Puedes reintentarlo sin salir de Facturas.",
+      openerNode,
+      context: safeContext,
+    });
+
     return false;
   }
 }
 
 export function destroyIncidenciaModalBridge() {
-  return disposeBridge({ invalidate: true });
+  return disposeBridge({ invalidate: true, feedback: true });
 }
 
 export function getIncidenciaModalBridgeSnapshot() {
@@ -351,13 +645,20 @@ export function getIncidenciaModalBridgeSnapshot() {
     modalOpen: Boolean(
       isBrowser() && document.querySelector(MODAL_ROOT_SELECTOR)
     ),
+    feedbackOpen: Boolean(feedbackHost?.isConnected),
+    feedbackState: cleanText(activeFeedback?.state, ""),
+    primed,
+    lastOpenFailed,
     avatarEnhancementsReady,
     controller: snapshot,
   });
 }
 
+primeIncidenciaModalBridge();
+
 export default Object.freeze({
   version: INCIDENCIA_MODAL_BRIDGE_VERSION,
+  prime: primeIncidenciaModalBridge,
   open: openIncidenciaModalFromCurrentView,
   destroy: destroyIncidenciaModalBridge,
   getSnapshot: getIncidenciaModalBridgeSnapshot,

@@ -1,0 +1,187 @@
+/* =========================================================
+   Onion Support - Facturas -> Incidencia bridge feedback
+
+   Feedback transitorio para aperturas cross-view. El modal canónico de
+   Incidencias sigue siendo la única UI de detalle una vez hidratado.
+========================================================= */
+
+body.incidencias-modal-bridge-feedback-open {
+  overflow: hidden;
+}
+
+[data-incidencias-modal-bridge-feedback="true"] {
+  position: relative;
+  z-index: 2600;
+}
+
+.incidencia-bridge-feedback-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2600;
+  display: grid;
+  place-items: center;
+  padding: clamp(16px, 4vw, 40px);
+  background: color-mix(in srgb, var(--bg, #0b0d10) 72%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.incidencia-bridge-feedback-panel {
+  width: min(100%, 460px);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+  padding: clamp(20px, 4vw, 28px);
+  border: 1px solid color-mix(in srgb, var(--border, #d7dce2) 84%, transparent);
+  border-radius: 22px;
+  background: var(--surface, #ffffff);
+  color: var(--text, #171a1f);
+  box-shadow:
+    0 24px 72px rgb(0 0 0 / 22%),
+    0 1px 0 rgb(255 255 255 / 45%) inset;
+  outline: none;
+}
+
+.incidencia-bridge-feedback-panel:focus-visible {
+  box-shadow:
+    0 24px 72px rgb(0 0 0 / 22%),
+    0 0 0 3px color-mix(in srgb, var(--accent, #2563eb) 26%, transparent);
+}
+
+.incidencia-bridge-feedback-visual {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 14px;
+  font: 800 1.05rem/1 system-ui, sans-serif;
+}
+
+.incidencia-bridge-feedback-visual--loading {
+  background: color-mix(in srgb, var(--accent, #2563eb) 10%, var(--surface, #fff));
+  color: var(--accent, #2563eb);
+}
+
+.incidencia-bridge-feedback-visual--error {
+  background: color-mix(in srgb, #dc2626 10%, var(--surface, #fff));
+  color: #b91c1c;
+}
+
+.incidencia-bridge-feedback-spinner {
+  width: 23px;
+  height: 23px;
+  display: block;
+  border: 2.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 999px;
+  animation: incidencia-bridge-feedback-spin 0.72s linear infinite;
+}
+
+.incidencia-bridge-feedback-copy {
+  min-width: 0;
+}
+
+.incidencia-bridge-feedback-eyebrow {
+  display: block;
+  margin-bottom: 5px;
+  overflow: hidden;
+  color: var(--text-muted, #657080);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.055em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.incidencia-bridge-feedback-copy h3 {
+  margin: 0;
+  color: inherit;
+  font-size: clamp(1.05rem, 2vw, 1.2rem);
+  line-height: 1.25;
+}
+
+.incidencia-bridge-feedback-copy p {
+  margin: 8px 0 0;
+  color: var(--text-muted, #657080);
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+.incidencia-bridge-feedback-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.incidencia-bridge-feedback-button {
+  min-height: 40px;
+  border-radius: 11px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  font: 700 0.88rem/1 system-ui, sans-serif;
+  cursor: pointer;
+  transition:
+    transform 140ms ease,
+    box-shadow 140ms ease,
+    background-color 140ms ease,
+    border-color 140ms ease;
+}
+
+.incidencia-bridge-feedback-button:hover {
+  transform: translateY(-1px);
+}
+
+.incidencia-bridge-feedback-button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent, #2563eb) 30%, transparent);
+  outline-offset: 2px;
+}
+
+.incidencia-bridge-feedback-button--primary {
+  background: var(--accent, #2563eb);
+  color: #fff;
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--accent, #2563eb) 22%, transparent);
+}
+
+.incidencia-bridge-feedback-button--secondary {
+  border-color: color-mix(in srgb, var(--border, #d7dce2) 90%, transparent);
+  background: var(--surface-raised, var(--surface, #fff));
+  color: var(--text, #171a1f);
+}
+
+@keyframes incidencia-bridge-feedback-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 520px) {
+  .incidencia-bridge-feedback-panel {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    border-radius: 18px;
+  }
+
+  .incidencia-bridge-feedback-visual {
+    width: 42px;
+    height: 42px;
+  }
+
+  .incidencia-bridge-feedback-actions {
+    grid-column: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .incidencia-bridge-feedback-spinner {
+    animation-duration: 1.4s;
+  }
+
+  .incidencia-bridge-feedback-button {
+    transition: none;
+  }
+}

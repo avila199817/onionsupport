@@ -236,54 +236,6 @@
       "statusCode": 404
     },
     {
-      "route": "/es",
-      "statusCode": 404,
-      "headers": {
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
-    },
-    {
-      "route": "/es/*",
-      "statusCode": 404,
-      "headers": {
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
-    },
-    {
-      "route": "/ca",
-      "statusCode": 404,
-      "headers": {
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
-    },
-    {
-      "route": "/ca/*",
-      "statusCode": 404,
-      "headers": {
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
-    },
-    {
-      "route": "/en",
-      "statusCode": 404,
-      "headers": {
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
-    },
-    {
-      "route": "/en/*",
-      "statusCode": 404,
-      "headers": {
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "X-Robots-Tag": "noindex, nofollow"
-      }
-    },
-    {
       "route": "/",
       "rewrite": "/index.html",
       "headers": {

@@ -270,13 +270,9 @@ const deniedPaths = [
   "/README.md",
   "/manifest.json",
   "/sw.js",
-  "/es",
-  "/es/legacy-probe",
-  "/ca",
-  "/ca/legacy-probe",
-  "/en",
-  "/en/legacy-probe",
   "/__onion-not-found__/soft-404-probe",
+  "/__onion-not-found__/nested/soft-404-probe",
+  "/__onion-not-found__-single",
 ];
 
 async function verifyDenied(attempt) {

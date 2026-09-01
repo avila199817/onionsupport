@@ -18,7 +18,17 @@ import {
 
 import {
   computeIncidenciasStats,
+  normalizeIncidencia,
 } from "../../src/views/incidencias/incidencias.api.js";
+
+import {
+  INCIDENCIA_PRIORITY_OPTIONS,
+  normalizeIncidenciaPriority,
+} from "../../src/views/incidencias/incidencias.options.js";
+
+import {
+  renderIncidenciasDetailModal,
+} from "../../src/views/incidencias/incidencias.template.modal.js";
 
 import {
   getIncidenciasTemplateSnapshot,
@@ -39,7 +49,17 @@ assert.deepEqual(
    PRIORITY TRUTH · KPI === PILL === SERVER ROWS
 ========================================================= */
 
-for (const value of ["high", "alta", "p1", "ALTA"] ) {
+for (const value of [
+  "high",
+  "alta",
+  "p1",
+  "ALTA",
+  "urgent",
+  "urgente",
+  "critical",
+  "critica",
+  "p0",
+] ) {
   assert.equal(
     isIncidenciasUrgentFacetPriority(value),
     true,
@@ -47,11 +67,11 @@ for (const value of ["high", "alta", "p1", "ALTA"] ) {
   );
 }
 
-for (const value of ["urgent", "urgente", "critical", "critica", "p0", "medium"] ) {
+for (const value of ["medium", "media", "low", "baja"] ) {
   assert.equal(
     isIncidenciasUrgentFacetPriority(value),
     false,
-    `${value} no puede inflar la faceta priority=high`
+    `${value} no puede pertenecer a la faceta priority=high`
   );
 }
 
@@ -67,16 +87,82 @@ assert.deepEqual(
   priorityUniverse
     .filter((item) => matchesIncidenciasPriorityQuery(item, "high"))
     .map((item) => item.id),
-  ["HIGH-1", "HIGH-2"],
-  "la proyección local de priority=high debe ser idéntica al backend"
+  ["HIGH-1", "HIGH-2", "TRUE-URGENT", "CRITICAL-1"],
+  "los aliases legacy deben pertenecer al mismo universo canónico high"
 );
 
 const canonicalStats = computeIncidenciasStats(priorityUniverse);
 assert.equal(
   canonicalStats.urgent,
-  2,
-  "el KPI Urgentes no puede contar urgent/critical si el facet remoto es priority=high"
+  4,
+  "el KPI Urgentes debe contar high y sus aliases legacy como una sola prioridad"
 );
+
+assert.deepEqual(
+  INCIDENCIA_PRIORITY_OPTIONS.map((item) => item.value),
+  ["low", "medium", "high"],
+  "el editor sólo debe ofrecer Baja, Media y Alta"
+);
+for (const legacy of ["urgent", "urgente", "critical", "critica", "p0"]) {
+  assert.equal(
+    normalizeIncidenciaPriority(legacy),
+    "high",
+    `${legacy} debe canonizarse como high`
+  );
+}
+
+const conflictingLegacyJson = normalizeIncidencia({
+  ticketId: "INC-LEGACY-PRIORITY",
+  subject: "Prioridad legacy contradictoria",
+  priority: "medium",
+  prioridad: "medium",
+  severity: "high",
+});
+assert.equal(conflictingLegacyJson.priority, "medium");
+assert.equal(conflictingLegacyJson.prioridad, "medium");
+assert.equal(
+  conflictingLegacyJson.severity,
+  "medium",
+  "severity no puede contradecir la prioridad canónica"
+);
+
+const legacyUrgentListHtml = renderIncidenciasTemplate({
+  canonical: true,
+  items: [{
+    id: "INC-LEGACY-URGENT",
+    subject: "Prioridad antigua",
+    status: "open",
+    priority: "urgent",
+  }],
+  total: 1,
+});
+const legacyBadge = legacyUrgentListHtml.match(
+  /<span class="incidencias-priority-badge[\s\S]*?<\/span>\s*<\/span>/
+)?.[0] || "";
+assert.match(legacyBadge, /data-priority-badge="high"/);
+assert.match(legacyBadge, />Alta</);
+assert.doesNotMatch(legacyBadge, />Urgente</);
+
+const legacyUrgentDetailHtml = renderIncidenciasDetailModal({
+  open: true,
+  admin: true,
+  detail: {
+    ticketId: "INC-LEGACY-URGENT",
+    subject: "Prioridad antigua",
+    description: "Detalle suficiente para probar la clasificación.",
+    status: "open",
+    priority: "urgent",
+    category: "general",
+    attachments: [],
+    comments: [],
+    history: [],
+  },
+});
+const prioritySelect = legacyUrgentDetailHtml.match(
+  /<select[^>]*name="priority"[\s\S]*?<\/select>/
+)?.[0] || "";
+assert.match(prioritySelect, /value="high" selected/);
+assert.doesNotMatch(prioritySelect, />Urgente</);
 
 assert.deepEqual(
   getIncidenciasFacetRequestQuery("closed", {
@@ -294,7 +380,7 @@ assert.equal(facetSnapshot.policy.urgentFacetServerPriority, "high");
 
 const prioritySnapshot = getIncidenciasPriorityPolicySnapshot();
 assert.equal(prioritySnapshot.urgentFacetMatchesServerExactly, true);
-assert.equal(prioritySnapshot.urgentAndCriticalAreNotImplicitlyCountedAsHigh, true);
+assert.equal(prioritySnapshot.legacyUrgentAndCriticalCanonicalizeToHigh, true);
 
 const controllerSource = await readFile(
   new URL("../../src/views/incidencias/index.impl.js", import.meta.url),
@@ -346,5 +432,5 @@ assert.match(
 );
 
 console.log(
-  "Incidencias filter facets OK · KPI/pill/server rows share priority=high truth · urgent/critical cannot inflate count"
+  "Incidencias filter facets OK · three priority levels · legacy urgent/critical canonicalize to high"
 );

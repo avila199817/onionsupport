@@ -11,6 +11,7 @@ const [
   bridgeStyle,
   incidencias,
   incidenciasBoundary,
+  entityIntent,
   avatarFallback,
   followupAvatars,
 ] = await Promise.all([
@@ -21,6 +22,7 @@ const [
   read("src/features/incidencia-modal-bridge/style.css"),
   read("src/views/incidencias/index.impl.js"),
   read("src/views/incidencias/index.js"),
+  read("src/features/entity-overlay/intent.js"),
   read("src/features/incidencias-avatar-fallback/index.js"),
   read("src/features/incidencias-followup-avatars/index.js"),
 ]);
@@ -109,7 +111,7 @@ assert.match(
 );
 assert.doesNotMatch(
   openFunction,
-  /Promise\.all\(\[\s*loadIncidenciasModule\(\),\s*ensureStyles\(\),\s*loadIncidenciasAvatarEnhancements\(\)/
+  /Promise\.all\(\[\s*loadIncidenciasModule\(\),\s*ensureStyles\(\),\s*loadIncidenciasAvatarEnhancements\(/
 );
 
 /* El feedback tiene overlay propio, foco visible y reduced-motion. */
@@ -151,6 +153,58 @@ assert.match(
 );
 
 /*
+  Sólo puede quedar una capa interactiva. Las leases sustituidas permanecen
+  conectadas para que su controller no robe el host nuevo, pero quedan ocultas,
+  inert y fuera de hit-testing antes de montar el siguiente owner.
+*/
+assert.match(incidenciasBoundary, /function quarantineModalHost/);
+assert.match(incidenciasBoundary, /function quarantineExistingModalHosts/);
+assert.match(incidenciasBoundary, /function isActiveModalHost/);
+assert.match(incidenciasBoundary, /modalHost\.hidden = true/);
+assert.match(
+  incidenciasBoundary,
+  /modalHost\.setAttribute\(\s*"inert",\s*""\s*\)/
+);
+assert.match(
+  incidenciasBoundary,
+  /modalHost\.style\?\.setProperty\?\.\(\s*"display",\s*"none",\s*"important"\s*\)/
+);
+assert.match(
+  incidenciasBoundary,
+  /modalHost\.style\?\.setProperty\?\.\(\s*"pointer-events",\s*"none",\s*"important"\s*\)/
+);
+assert.match(
+  incidenciasBoundary,
+  /singleInteractiveModalLayer:\s*true/
+);
+assert.match(
+  incidenciasBoundary,
+  /supersededModalHostsAreInert:\s*true/
+);
+
+/*
+  Entity Overlay escucha en document/capture. El host canónico debe ser una
+  frontera local para que pinchar el backdrop no herede data-ticket-id del root
+  y vuelva a lanzar exactamente la misma incidencia.
+*/
+assert.match(
+  entityIntent,
+  /\[data-entity-overlay-ignore='true'\]/
+);
+assert.match(
+  incidenciasBoundary,
+  /ENTITY_OVERLAY_IGNORE_ATTRIBUTE/
+);
+assert.match(
+  incidenciasBoundary,
+  /modalHost\.setAttribute\(\s*ENTITY_OVERLAY_IGNORE_ATTRIBUTE,\s*"true"\s*\)/
+);
+assert.match(
+  incidenciasBoundary,
+  /backdropNeverCreatesEntityIntent:\s*true/
+);
+
+/*
   La API externa de apertura sólo usa el controller propietario de la ruta,
   nunca Impl.lastInstance (que también puede ser un modalBridge).
 */
@@ -176,7 +230,9 @@ assert.match(
 */
 assert.match(incidenciasBoundary, /function installIncidenciasModalCloseFailsafe/);
 assert.match(incidenciasBoundary, /data-detail-action='detail-close'/);
+assert.match(incidenciasBoundary, /!isActiveModalHost\(modalHost\)/);
 assert.match(incidenciasBoundary, /event\.stopImmediatePropagation\?\.\(\)/);
+assert.match(incidenciasBoundary, /ROUTER_EVENT_HANDLED_KEY/);
 assert.match(incidenciasBoundary, /controller\.closeDetailModal\(\)/);
 assert.match(
   incidenciasBoundary,

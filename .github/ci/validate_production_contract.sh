@@ -79,11 +79,24 @@ BACKING_ALIAS_REDIRECTS = {
 # robots.txt
 robots_path = Path("robots.txt")
 robots_text = robots_path.read_text(encoding="utf-8")
-robots_lines = {
+robots_directives = [
     line.strip()
     for line in robots_text.splitlines()
     if line.strip() and not line.lstrip().startswith("#")
-}
+]
+robots_lines = set(robots_directives)
+user_agent_directives = [
+    line.lower()
+    for line in robots_directives
+    if line.lower().startswith("user-agent:")
+]
+
+if user_agent_directives != ["user-agent: *"]:
+    error(
+        robots_path,
+        "Debe existir un único grupo User-agent: *; los grupos específicos de Googlebot/Bingbot "
+        "no pueden omitir las reglas privadas del grupo global.",
+    )
 
 required_robots = {
     "User-agent: *",
@@ -94,6 +107,7 @@ required_robots = {
     "Disallow: /activate-account",
     "Disallow: /dashboard",
     "Disallow: /incidencias",
+    "Disallow: /tickets",
     "Disallow: /facturas",
     "Disallow: /clientes",
     "Disallow: /usuarios",
@@ -266,34 +280,44 @@ if expanded:
 # Static Web Apps config
 config_path = Path("staticwebapp.config.json")
 config = json.loads(config_path.read_text(encoding="utf-8"))
-routes = {
-    route.get("route"): route
+route_entries = [
+    route
     for route in config.get("routes", [])
     if isinstance(route, dict) and route.get("route")
-}
+]
+route_names = [route["route"] for route in route_entries]
+routes = {route["route"]: route for route in route_entries}
 
-exclusions = set(config.get("navigationFallback", {}).get("exclude", []))
-for item in (
+if len(route_names) != len(set(route_names)):
+    duplicates = sorted({name for name in route_names if route_names.count(name) > 1})
+    error(config_path, f"Rutas duplicadas en staticwebapp.config.json: {duplicates!r}")
+
+if "navigationFallback" in config:
+    error(
+        config_path,
+        "No debe existir navigationFallback: una SPA pública con fallback global convierte cualquier URL "
+        "desconocida en index.html con HTTP 200 y genera soft-404.",
+    )
+
+if "/*" in routes:
+    error(config_path, "La ruta wildcard global /* está prohibida; las rutas SPA deben declararse explícitamente.")
+
+for denied_path in (
     "/api",
     "/api/*",
     "/.auth",
-    "/.auth/*",
-    "/robots.txt",
-    "/sitemap.xml",
-    "/site.webmanifest",
-    "/favicon.ico",
-    "/src",
-    "/src/*",
-    "/assets",
     "/seo",
+    "/src",
+    "/assets",
 ):
-    if item not in exclusions:
-        error(config_path, f"navigationFallback.exclude debe contener {item}")
-
-for denied_path in ("/api", "/.auth", "/seo", "/src", "/assets"):
     denial = routes.get(denied_path)
     if not denial or denial.get("statusCode") != 404:
-        error(config_path, f"{denied_path} debe responder 404 sin caer en navigationFallback.")
+        error(config_path, f"{denied_path} debe responder 404 de forma explícita.")
+
+for locale_path in ("/es", "/es/*", "/ca", "/ca/*", "/en", "/en/*"):
+    denial = routes.get(locale_path)
+    if not denial or denial.get("statusCode") != 404 or denial.get("redirect"):
+        error(config_path, f"{locale_path} debe responder 404 y nunca redirigir a la home.")
 
 root_route = routes.get("/")
 if not root_route or root_route.get("rewrite") != "/index.html":
@@ -339,6 +363,7 @@ private_routes = [
     "/dashboard*",
     "/@*",
     "/incidencias*",
+    "/tickets*",
     "/facturas*",
     "/clientes*",
     "/usuarios*",
@@ -374,5 +399,8 @@ if errors:
     sys.exit(1)
 
 mode = "expanded-v2" if expanded else "legacy"
-print(f"Contrato SEO/routing productivo OK · mode={mode} · canonical={expected_home} · api={api}")
+print(
+    f"Contrato SEO/routing productivo OK · mode={mode} · canonical={expected_home} · "
+    f"api={api} · unknown-routes=404"
+)
 PY

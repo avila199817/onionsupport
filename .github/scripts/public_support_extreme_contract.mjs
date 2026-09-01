@@ -32,7 +32,7 @@ contains(
 
 contains(
   extreme,
-  '"public-support.extreme.v1-contact-authority-feedback"',
+  '"public-support.extreme.v2-client-facing-feedback"',
   "Falta versión del contrato extremo"
 );
 contains(
@@ -42,18 +42,18 @@ contains(
 );
 contains(
   extreme,
-  'title.textContent = "La cuenta se decide por correo y móvil";',
-  "La UI debe explicar la autoridad de correo + móvil"
+  'title.textContent = "Tus datos vinculan la incidencia";',
+  "La UI debe explicar la vinculación por contacto con lenguaje de cliente"
 );
 contains(
   extreme,
-  "Aunque tengas una sesión iniciada, comprobamos siempre los datos escritos aquí.",
-  "La UI debe aclarar que una sesión no sustituye al contacto enviado"
+  "Usaremos el correo y el móvil que indiques.",
+  "La UI debe explicar qué datos vinculan la incidencia"
 );
 contains(
   extreme,
-  "Si coinciden con una cuenta existente, usamos esa cuenta sin modificarla; si no existe, creamos un acceso pendiente.",
-  "La UI debe declarar reuse/no-overwrite/alta pendiente"
+  "Si ya tienes cuenta, la reutilizamos sin cambiar tus datos; si es tu primera vez, recibirás un acceso seguro.",
+  "La UI debe declarar reutilización segura y primer acceso"
 );
 contains(
   extreme,

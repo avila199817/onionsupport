@@ -22,7 +22,7 @@ import { AppCore } from "../../core/index.js";
 import Http from "../../core/http.js";
 
 export const PUBLIC_SUPPORT_VERSION =
-  "public-support.intake.v10-canonical-panel-handoff";
+  "public-support.intake.v11-client-facing-compact";
 export const PUBLIC_TICKET_ENDPOINT = "/api/tickets/public";
 const PUBLIC_SUPPORT_TECHNICIAN_PHOTO = "/src/media/img/Cristian_Avila_Formulario.png";
 const PUBLIC_SUPPORT_TECHNICIAN_PHOTO_WEBP_480 =
@@ -318,7 +318,7 @@ function formSection() {
         <div class="public-support-flow" aria-label="Qué ocurrirá después">
           <div class="public-support-flow-item"><span>1</span><div><strong>Vinculamos el caso</strong><p>Si reconocemos tu correo o teléfono, usamos esa misma cuenta sin sobrescribir tus datos.</p></div></div>
           <div class="public-support-flow-item"><span>2</span><div><strong>Creamos tu acceso si hace falta</strong><p>Solo si no existe usuario, creamos un usuario pendiente y enviamos el enlace seguro para definir la contraseña.</p></div></div>
-          <div class="public-support-flow-item"><span>3</span><div><strong>Cliente, solo por Onion Support</strong><p>La home no crea fichas de cliente. El equipo de Onion Support las gestiona después cuando corresponda.</p></div></div>
+          <div class="public-support-flow-item"><span>3</span><div><strong>Te atiendo personalmente</strong><p>Reviso tu incidencia y te contacto para confirmar el diagnóstico y el siguiente paso.</p></div></div>
         </div>
 
         <figure class="public-support-person">
@@ -345,15 +345,14 @@ function formSection() {
         </figure>
 
         <p class="public-support-privacy">
-          Los datos se usan para gestionar la incidencia y, solo si no existe usuario, crear tu acceso.
-          Este formulario no crea ni modifica fichas de cliente.
+          Tus datos se usan únicamente para gestionar la incidencia y mantenerte informado sobre ella.
         </p>
       </div>
 
       <form class="public-support-form" data-public-support-form="true" novalidate autocomplete="on">
         <div class="public-support-form-head">
           <div><span class="public-support-kicker">Nueva incidencia</span><h3>¿Qué necesitas?</h3></div>
-          <span class="public-support-secure">Acceso por email</span>
+          <span class="public-support-secure">Datos protegidos</span>
         </div>
 
         <div class="public-support-flow-item" data-public-support-one-open-policy="true">
@@ -370,25 +369,23 @@ function formSection() {
           ${field("phone", "Teléfono", "tel", "612 345 678", "tel-national", 11, "tel")}
           ${field("address", "Calle y número", "text", "Calle y número", "address-line1", 180)}
           ${field("addressLine2", "Piso / puerta", "text", "Piso, puerta, escalera (opcional)", "address-line2", 120, "", "", { required: false })}
-          ${field("postalCode", "Código postal", "text", "08001", "postal-code", 5, "numeric")}
+          ${field("postalCode", "CP", "text", "08001", "postal-code", 5, "numeric", "", {
+            labelAddon: postalInfo(),
+            describedBy: "public-support-postal-help",
+          })}
           ${field("city", "Ciudad", "text", "Barcelona", "address-level2", 90)}
           ${field("province", "Provincia", "text", "Barcelona", "address-level1", 90)}
 
-          <div class="public-support-postal-hint public-support-field--wide">
-            <span aria-hidden="true">i</span>
-            <p>El código postal completa la provincia automáticamente. La ciudad permanece editable para que puedas indicar la localidad correcta.</p>
-          </div>
-
-          <div class="public-support-field public-support-field--wide">
+          <div class="public-support-field public-support-field--wide" data-public-support-field="subject">
             <label for="public-support-subject">Asunto</label>
             <input id="public-support-subject" name="subject" type="text" maxlength="140" required
               placeholder="Ej. El portátil no arranca" autocomplete="off">
             ${errorNode("subject")}
           </div>
 
-          <div class="public-support-field public-support-field--wide">
+          <div class="public-support-field public-support-field--wide" data-public-support-field="description">
             <label for="public-support-description">Cuéntame qué ocurre</label>
-            <textarea id="public-support-description" name="description" rows="7" maxlength="4000" required
+            <textarea id="public-support-description" name="description" rows="5" maxlength="4000" required
               placeholder="Qué ocurre, desde cuándo, mensajes de error y cualquier detalle que pueda ayudar."></textarea>
             <div class="public-support-field-meta">
               <small>Cuanto más contexto, mejor diagnóstico inicial.</small>
@@ -423,6 +420,23 @@ function errorNode(name) {
     data-public-support-error-for="${name}" hidden></small>`;
 }
 
+function postalInfo() {
+  return `<span class="public-support-info">
+    <button class="public-support-info-button" type="button"
+      aria-label="Información sobre el código postal"
+      aria-describedby="public-support-postal-help">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <circle cx="12" cy="12" r="9"></circle>
+        <path d="M12 10.75v5"></path>
+        <path d="M12 7.5h.01"></path>
+      </svg>
+    </button>
+    <span id="public-support-postal-help" class="public-support-info-tooltip" role="tooltip">
+      El código postal completa la provincia automáticamente. La ciudad permanece editable para que puedas indicar la localidad correcta.
+    </span>
+  </span>`;
+}
+
 function field(
   name,
   label,
@@ -438,13 +452,20 @@ function field(
   const initialValue = value ? ` value="${value}"` : "";
   const required = options?.required === false ? "" : " required";
   const readonly = options?.readonly === true ? ` readonly aria-readonly="true"` : "";
+  const describedBy = options?.describedBy
+    ? ` aria-describedby="${options.describedBy}"`
+    : "";
+  const labelMarkup = `<label for="public-support-${name}">${label}</label>`;
+  const labelRow = options?.labelAddon
+    ? `<div class="public-support-label-row">${labelMarkup}${options.labelAddon}</div>`
+    : labelMarkup;
   const phoneAttrs = name === "phone"
     ? ` aria-label="Teléfono de España"`
     : "";
 
-  return `<div class="public-support-field">
-    <label for="public-support-${name}">${label}</label>
-    <input id="public-support-${name}" name="${name}" type="${type}"${mode}${initialValue}${phoneAttrs}${readonly}
+  return `<div class="public-support-field" data-public-support-field="${name}">
+    ${labelRow}
+    <input id="public-support-${name}" name="${name}" type="${type}"${mode}${initialValue}${phoneAttrs}${describedBy}${readonly}
       autocomplete="${autocomplete}" maxlength="${maxlength}"${required} placeholder="${placeholder}">
     ${errorNode(name)}
   </div>`;

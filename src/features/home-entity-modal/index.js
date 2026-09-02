@@ -277,6 +277,12 @@ async function openIntent(intent = null) {
       throw new Error("HOME_ENTITY_BRIDGE_OPEN_UNAVAILABLE");
     }
 
+    /*
+      La lease se activa antes de esperar red: una salida explícita del Home
+      cancela también aperturas lentas y feedback transitorio.
+    */
+    watchOriginLease(intent.originHost, intent.type);
+
     const opened = await open(
       intent.id,
       intent.opener,
@@ -291,12 +297,8 @@ async function openIntent(intent = null) {
 
     if (sequence !== openSequence) return false;
 
-    if (opened) {
-      metrics.opened += 1;
-      watchOriginLease(intent.originHost, intent.type);
-    } else {
-      metrics.failed += 1;
-    }
+    if (opened) metrics.opened += 1;
+    else metrics.failed += 1;
 
     return Boolean(opened);
   } catch {

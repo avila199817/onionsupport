@@ -16,13 +16,16 @@ import {
 } from "../entity-overlay/intent.js";
 
 export const HOME_ENTITY_MODAL_VERSION =
-  "home-entity-modal.v1-owner-controller-in-place";
+  "home-entity-modal.v2-owner-controller-origin-lease";
 
 const HOME_SCOPE_SELECTOR =
   "[data-home-scope='true']";
 
 const ROUTE_HOST_SELECTOR =
   "[data-route-host='true'][data-route-host-state='ready']:not([hidden])";
+
+const ROUTE_OBSERVATION_ROOT =
+  "#view-container, [data-view-container='true']";
 
 const HOME_TRIGGER_SELECTOR = [
   "[data-home-entity-source]",
@@ -51,6 +54,9 @@ const BRIDGES = Object.freeze({
 let installed = false;
 let context = {};
 let openSequence = 0;
+let originObserver = null;
+let activeOriginHost = null;
+let activeBridgeType = "";
 
 const bridgePromises = new Map();
 
@@ -59,6 +65,7 @@ const metrics = {
   opened: 0,
   failed: 0,
   ignored: 0,
+  originReleases: 0,
 };
 
 function isBrowser() {
@@ -139,6 +146,7 @@ function intentFromTrigger(trigger = null) {
       "home.entity"
     ),
     opener: trigger,
+    originHost: trigger.closest?.(ROUTE_HOST_SELECTOR) || null,
   });
 }
 
@@ -174,6 +182,85 @@ function loadBridge(type = "") {
   return bridgePromises.get(key);
 }
 
+function destroyBridge(type = "") {
+  const key = normalizeEntityType(type);
+  const definition = BRIDGES[key];
+  const pending = bridgePromises.get(key);
+
+  if (!definition || !pending) return false;
+
+  void Promise.resolve(pending)
+    .then((module) => {
+      const destroy =
+        module?.[definition.destroyName] ||
+        module?.default?.destroy;
+
+      destroy?.();
+    })
+    .catch(() => {});
+
+  return true;
+}
+
+function stopOriginObserver() {
+  originObserver?.disconnect?.();
+  originObserver = null;
+}
+
+function releaseOriginLease() {
+  const type = activeBridgeType;
+
+  openSequence += 1;
+  stopOriginObserver();
+  activeOriginHost = null;
+  activeBridgeType = "";
+  metrics.originReleases += 1;
+
+  if (type) destroyBridge(type);
+  return true;
+}
+
+function originStillCommitted() {
+  if (!activeOriginHost?.isConnected || activeOriginHost.hidden) return false;
+  if (activeOriginHost.getAttribute?.("data-route-host-state") !== "ready") return false;
+  if (!activeOriginHost.querySelector?.(HOME_SCOPE_SELECTOR)) return false;
+  return document.querySelector(ROUTE_HOST_SELECTOR) === activeOriginHost;
+}
+
+function watchOriginLease(originHost = null, type = "") {
+  stopOriginObserver();
+
+  activeOriginHost = originHost;
+  activeBridgeType = normalizeEntityType(type);
+
+  if (
+    !isBrowser() ||
+    !activeOriginHost ||
+    !activeBridgeType ||
+    typeof MutationObserver !== "function"
+  ) {
+    return false;
+  }
+
+  const root = document.querySelector(ROUTE_OBSERVATION_ROOT);
+  if (!root) return false;
+
+  originObserver = new MutationObserver(() => {
+    queueMicrotask(() => {
+      if (!originStillCommitted()) releaseOriginLease();
+    });
+  });
+
+  originObserver.observe(root, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["hidden", "data-route-host-state"],
+  });
+
+  return true;
+}
+
 async function openIntent(intent = null) {
   if (!intent) return false;
 
@@ -197,14 +284,19 @@ async function openIntent(intent = null) {
         ...context,
         source: intent.source,
         originView: "home",
+        originHost: intent.originHost,
         stayInView: true,
       }
     );
 
     if (sequence !== openSequence) return false;
 
-    if (opened) metrics.opened += 1;
-    else metrics.failed += 1;
+    if (opened) {
+      metrics.opened += 1;
+      watchOriginLease(intent.originHost, intent.type);
+    } else {
+      metrics.failed += 1;
+    }
 
     return Boolean(opened);
   } catch {
@@ -242,18 +334,12 @@ function onDocumentClick(event = null) {
 }
 
 function destroyLoadedBridges() {
-  for (const [type, pending] of bridgePromises) {
-    const definition = BRIDGES[type];
+  stopOriginObserver();
+  activeOriginHost = null;
+  activeBridgeType = "";
 
-    void Promise.resolve(pending)
-      .then((module) => {
-        const destroy =
-          module?.[definition.destroyName] ||
-          module?.default?.destroy;
-
-        destroy?.();
-      })
-      .catch(() => {});
+  for (const [type] of bridgePromises) {
+    destroyBridge(type);
   }
 
   bridgePromises.clear();
@@ -294,6 +380,7 @@ export function getHomeEntityModalSnapshot() {
     version: HOME_ENTITY_MODAL_VERSION,
     installed,
     loadedBridgeTypes: Object.freeze([...bridgePromises.keys()]),
+    originLease: Boolean(activeOriginHost && activeBridgeType),
     ...metrics,
     policy: Object.freeze({
       committedHomeOnly: true,
@@ -304,6 +391,8 @@ export function getHomeEntityModalSnapshot() {
       pathnameStable: true,
       documentCaptureAuthority: true,
       stopImmediatePropagation: true,
+      originRouteLease: true,
+      closesOnExplicitRouteLeave: true,
       rawIdentifiersInSnapshot: false,
     }),
   });

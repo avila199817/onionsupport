@@ -162,5 +162,6 @@ node .github/scripts/incidencias_detail_comments_visibility_contract.mjs
 node .github/scripts/incidencias_hot_list_contract.mjs
 node .github/scripts/incidencias_list_response_v2_contract.mjs
 node .github/scripts/facturas_document_flow_contract.mjs
+node .github/scripts/facturas_direct_incidencia_modal_contract.mjs
 
 node "${ROOT_DIR:-$(git rev-parse --show-toplevel)}/.github/scripts/entity_overlay_contract.mjs"

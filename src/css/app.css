@@ -53,6 +53,7 @@
 
    Sidebar/Topbar pintan sus componentes internos.
    sidebar.executive.css remata únicamente el interior visual del Sidebar.
+   sidebar.icons.css normaliza el sistema SVG 24×24 y sus cajas ópticas 1:1.
    sidebar.executive.interactions.css ancla las interacciones del rail.
    topbar.executive.css aplica la misma gramática ejecutiva al Topbar.
    chrome.css se carga el último dentro de layer(layout) y es la ÚNICA
@@ -62,6 +63,7 @@
 
 @import url("./layout/sidebar.css") layer(layout);
 @import url("./layout/sidebar.executive.css") layer(layout);
+@import url("./layout/sidebar.icons.css") layer(layout);
 @import url("./layout/sidebar.executive.interactions.css") layer(layout);
 @import url("./layout/topbar.css") layer(layout);
 @import url("./layout/topbar.executive.css") layer(layout);

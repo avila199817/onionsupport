@@ -1,0 +1,208 @@
+/* =========================================================
+   ONION SUPPORT — SIDEBAR ICON SYSTEM
+   Archivo: /src/css/layout/sidebar.icons.css
+
+   ICON SYSTEM · NORMALIZED 24 × 24 · PROGRESSIVE ENHANCEMENT
+
+   Objetivo:
+   - unificar todos los glifos del Sidebar en un único lenguaje visual;
+   - mantener una caja óptica cuadrada, estable y alineada 1:1;
+   - usar currentColor para heredar hover, active, tema y forced-colors;
+   - conservar los SVG inline actuales como fallback sin JS adicional;
+   - no alterar Router, Auth, DOM semántico ni geometría del App Chrome.
+========================================================= */
+
+.sidebar {
+  --sb-icon-canvas: 20px;
+  --sb-icon-chevron-canvas: 18px;
+
+  --sb-icon-panel-close:
+    url("../../media/icons/sidebar/panel-close.svg");
+  --sb-icon-panel-open:
+    url("../../media/icons/sidebar/panel-open.svg");
+  --sb-icon-home:
+    url("../../media/icons/sidebar/home.svg");
+  --sb-icon-incidencias:
+    url("../../media/icons/sidebar/ticket.svg");
+  --sb-icon-facturas:
+    url("../../media/icons/sidebar/receipt.svg");
+  --sb-icon-clientes:
+    url("../../media/icons/sidebar/building.svg");
+  --sb-icon-usuarios:
+    url("../../media/icons/sidebar/user.svg");
+  --sb-icon-correo:
+    url("../../media/icons/sidebar/mail.svg");
+  --sb-icon-servidor:
+    url("../../media/icons/sidebar/server.svg");
+  --sb-icon-cuenta:
+    url("../../media/icons/sidebar/account.svg");
+  --sb-icon-logout:
+    url("../../media/icons/sidebar/logout.svg");
+  --sb-icon-chevron:
+    url("../../media/icons/sidebar/chevron-right.svg");
+}
+
+@supports ((mask-image: linear-gradient(#000, #000)) or (-webkit-mask-image: linear-gradient(#000, #000))) {
+  /* =======================================================
+     SEMANTIC ICON MAPPING
+  ======================================================= */
+
+  .sidebar-link {
+    --sb-current-icon: var(--sb-icon-home);
+  }
+
+  .sidebar-link:is(
+    [data-sidebar-key="home"],
+    [data-sidebar-key="dashboard"]
+  ) {
+    --sb-current-icon: var(--sb-icon-home);
+  }
+
+  .sidebar-link:is(
+    [data-sidebar-key="incidencias"],
+    [data-sidebar-key="tickets"]
+  ) {
+    --sb-current-icon: var(--sb-icon-incidencias);
+  }
+
+  .sidebar-link[data-sidebar-key="facturas"] {
+    --sb-current-icon: var(--sb-icon-facturas);
+  }
+
+  .sidebar-link[data-sidebar-key="clientes"] {
+    --sb-current-icon: var(--sb-icon-clientes);
+  }
+
+  .sidebar-link[data-sidebar-key="usuarios"] {
+    --sb-current-icon: var(--sb-icon-usuarios);
+  }
+
+  .sidebar-link[data-sidebar-key="correo"] {
+    --sb-current-icon: var(--sb-icon-correo);
+  }
+
+  .sidebar-link:is(
+    [data-sidebar-key="servidor"],
+    [data-sidebar-key="server"]
+  ) {
+    --sb-current-icon: var(--sb-icon-servidor);
+  }
+
+  .sidebar-toggle {
+    --sb-current-icon: var(--sb-icon-panel-close);
+  }
+
+  .sidebar:is(
+    .is-collapsed,
+    [data-open="false"],
+    [data-sidebar-state="collapsed"]
+  ) .sidebar-toggle {
+    --sb-current-icon: var(--sb-icon-panel-open);
+  }
+
+  .sidebar-account-chevron {
+    --sb-current-icon: var(--sb-icon-chevron);
+  }
+
+  .sidebar-account-menu-item {
+    --sb-current-icon: var(--sb-icon-cuenta);
+  }
+
+  .sidebar-account-menu-item:is(
+    [data-sidebar-logout="true"],
+    [data-sidebar-action="logout"]
+  ) {
+    --sb-current-icon: var(--sb-icon-logout);
+  }
+
+  /* =======================================================
+     FIXED 1:1 OPTICAL BOX
+  ======================================================= */
+
+  .sidebar :is(
+    .sidebar-link-icon,
+    .sidebar-account-menu-icon,
+    .sidebar-account-chevron,
+    .sidebar-toggle
+  ) {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .sidebar :is(
+    .sidebar-link-svg,
+    .sidebar-account-menu-svg,
+    .sidebar-account-chevron-svg,
+    .sidebar-toggle-svg
+  ) {
+    opacity: 0;
+  }
+
+  .sidebar .sidebar-link .sidebar-link-icon::before,
+  .sidebar .sidebar-account-menu-item .sidebar-account-menu-icon::before,
+  .sidebar .sidebar-account-chevron::before,
+  .sidebar .sidebar-toggle::before {
+    content: "";
+
+    position: absolute;
+    inset-inline-start: 50%;
+    inset-block-start: 50%;
+
+    inline-size: var(--sb-icon-canvas);
+    block-size: var(--sb-icon-canvas);
+
+    border: 0;
+    border-radius: 0;
+
+    background: currentColor;
+
+    -webkit-mask-image: var(--sb-current-icon);
+    mask-image: var(--sb-current-icon);
+
+    -webkit-mask-position: center;
+    mask-position: center;
+
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+
+    -webkit-mask-size: 100% 100%;
+    mask-size: 100% 100%;
+
+    mask-mode: alpha;
+
+    transform: translate(-50%, -50%);
+
+    pointer-events: none;
+  }
+
+  .sidebar .sidebar-account-chevron::before {
+    inline-size: var(--sb-icon-chevron-canvas);
+    block-size: var(--sb-icon-chevron-canvas);
+
+    transition:
+      transform
+      var(--sb-fast, .14s)
+      var(--sb-ease-fast, cubic-bezier(.2, .72, .2, 1));
+  }
+
+  /* El giro pertenece al glifo, no a su caja de alineación. */
+  .sidebar.is-account-menu-open .sidebar-account-chevron {
+    transform: none;
+  }
+
+  .sidebar.is-account-menu-open .sidebar-account-chevron::before {
+    transform:
+      translate(-50%, -50%)
+      rotate(-90deg);
+  }
+
+  @media (forced-colors: active) {
+    .sidebar .sidebar-link .sidebar-link-icon::before,
+    .sidebar .sidebar-account-menu-item .sidebar-account-menu-icon::before,
+    .sidebar .sidebar-account-chevron::before,
+    .sidebar .sidebar-toggle::before {
+      background: CanvasText;
+      forced-color-adjust: none;
+    }
+  }
+}

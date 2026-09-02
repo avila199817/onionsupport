@@ -4,6 +4,7 @@
 
    Única puerta de entrada del chrome privado:
    - El build carga CSS, Sidebar, Topbar, AppChrome y overlays tras Auth.
+   - AvatarSystem sincroniza avatares ya montados y todo DOM posterior.
    - HomeEntityModal se instala antes de EntityOverlay para fijar el origen.
    - Precarga de entidad se activa sólo tras Auth y nunca captura navegación.
    - Las rutas públicas/anónimas del artefacto no descargan runtime privado.
@@ -16,7 +17,7 @@
 import { AppCore } from "../../core/index.js";
 
 export const PRIVATE_RUNTIME_UI_VERSION =
-  "private-runtime-ui.v5-home-owner-modal-authority";
+  "private-runtime-ui.v6-global-avatar-authority";
 
 const PRIVATE_STYLESHEET_HREF =
   "/src/css/private.css";
@@ -27,6 +28,7 @@ const PRIVATE_STYLESHEET_MARKER =
 let SidebarUI = null;
 let TopbarUI = null;
 let AppChromeUI = null;
+let AvatarSystemUI = null;
 let HomeEntityModalUI = null;
 let EntityOverlayUI = null;
 let EntityIntentPreloadUI = null;
@@ -205,6 +207,7 @@ async function loadPrivateModules() {
     sidebarModule,
     topbarModule,
     chromeModule,
+    avatarSystemModule,
     homeEntityModalModule,
     overlayModule,
     entityIntentPreloadModule,
@@ -212,6 +215,7 @@ async function loadPrivateModules() {
     import("../../ui/sidebar/index.js"),
     import("../../ui/topbar/index.js"),
     import("../../ui/chrome/index.js"),
+    import("../avatar-system/index.js"),
     import("../home-entity-modal/index.js"),
     import("../entity-overlay/index.js"),
     import("../entity-intent-preload/index.js"),
@@ -220,6 +224,10 @@ async function loadPrivateModules() {
   SidebarUI = sidebarModule?.SidebarUI || sidebarModule?.default || null;
   TopbarUI = topbarModule?.TopbarUI || topbarModule?.default || null;
   AppChromeUI = chromeModule?.AppChromeUI || chromeModule?.default || null;
+  AvatarSystemUI =
+    avatarSystemModule?.AvatarSystem ||
+    avatarSystemModule?.default ||
+    null;
   HomeEntityModalUI =
     homeEntityModalModule?.HomeEntityModal ||
     homeEntityModalModule?.default ||
@@ -233,6 +241,7 @@ async function loadPrivateModules() {
   return Boolean(
     SidebarUI &&
     TopbarUI &&
+    AvatarSystemUI &&
     HomeEntityModalUI &&
     EntityOverlayUI &&
     EntityIntentPreloadUI
@@ -253,6 +262,7 @@ export async function ensurePrivateRuntimeUI(context = {}) {
     stylesheetReady &&
     SidebarUI &&
     TopbarUI &&
+    AvatarSystemUI &&
     HomeEntityModalUI &&
     EntityOverlayUI &&
     EntityIntentPreloadUI
@@ -260,6 +270,7 @@ export async function ensurePrivateRuntimeUI(context = {}) {
     try { SidebarUI.sync?.(context); } catch {}
     try { TopbarUI.sync?.(context); } catch {}
     try { AppChromeUI?.sync?.(); } catch {}
+    try { AvatarSystemUI.sync?.(document); } catch {}
     return true;
   }
 
@@ -284,6 +295,12 @@ export async function ensurePrivateRuntimeUI(context = {}) {
     await initModule(SidebarUI, payload);
     await initModule(TopbarUI, payload);
     await initModule(AppChromeUI, payload);
+
+    /*
+      Sidebar y Topbar ya existen en este punto. AvatarSystem los sincroniza y
+      observa después todo el DOM dinámico de las vistas/modales privadas.
+    */
+    await initModule(AvatarSystemUI, payload);
 
     /*
       Orden contractual: Home corta su click in-place antes de que el overlay
@@ -320,6 +337,7 @@ export function destroyPrivateRuntimeUI() {
   destroyLoaded(EntityIntentPreloadUI);
   destroyLoaded(HomeEntityModalUI);
   destroyLoaded(EntityOverlayUI);
+  destroyLoaded(AvatarSystemUI);
   destroyLoaded(AppChromeUI);
   destroyLoaded(TopbarUI);
   destroyLoaded(SidebarUI);
@@ -341,12 +359,16 @@ export function getPrivateRuntimeUISnapshot() {
       sidebar: Boolean(SidebarUI),
       topbar: Boolean(TopbarUI),
       chrome: Boolean(AppChromeUI),
+      avatarSystem: Boolean(AvatarSystemUI),
       homeEntityModal: Boolean(HomeEntityModalUI),
       entityOverlay: Boolean(EntityOverlayUI),
       entityIntentPreload: Boolean(EntityIntentPreloadUI),
     }),
     policy: Object.freeze({
       authenticatedOnly: true,
+      avatarSystemAfterChrome: true,
+      avatarImageTransparencyAuthority: true,
+      avatarFallbackOnlyWithoutValidImage: true,
       homeEntityAuthorityBeforeGlobalOverlay: true,
       homeOwnerModalsStayInPlace: true,
     }),

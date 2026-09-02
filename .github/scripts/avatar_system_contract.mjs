@@ -4,13 +4,16 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 import {
+  AVATAR_IDENTITY_VERSION,
   AVATAR_SYSTEM_VERSION,
   getAvatarSystemSnapshot,
   isAvatarHostClassName,
   resolveAvatarImageState,
+  resolveAvatarPresentation,
 } from "../../src/features/avatar-system/index.js";
 
-assert.match(AVATAR_SYSTEM_VERSION, /transparent-alpha-authority/);
+assert.match(AVATAR_SYSTEM_VERSION, /deterministic-identity-authority/);
+assert.match(AVATAR_IDENTITY_VERSION, /^avatar-identity\.v1-/);
 
 for (const hostClass of [
   "ui-avatar",
@@ -66,17 +69,39 @@ assert.equal(
   "fallback"
 );
 
+const identityA = resolveAvatarPresentation({
+  userId: "ON-20260901024205",
+  email: "avila199817@gmail.com",
+  displayName: "Cristian Ávila Luque",
+});
+const identityB = resolveAvatarPresentation({
+  requesterUserId: "ON-20260901024205",
+  emailLower: "AVILA199817@GMAIL.COM",
+  name: "Cristian Ávila Luque",
+});
+
+assert.equal(identityA.tone, identityB.tone);
+assert.equal(identityA.initials, identityB.initials);
+assert.equal(identityA.fingerprint, identityB.fingerprint);
+assert.equal(identityA.initials, "CÁ");
+
 const snapshot = getAvatarSystemSnapshot();
 for (const key of [
+  "singleRuntimeAuthority",
+  "deterministicIdentityTone",
+  "deterministicInitials",
+  "legacyToneHintsAreSubordinate",
   "validImageClearsFallbackSurface",
   "transparentPixelsPreserved",
   "fallbackOnlyWithoutValidImage",
   "brokenImagesBecomeFallback",
   "dynamicSpaDomObserved",
+  "identityMutationsReconciled",
   "imageFormatsAreContentAgnostic",
   "noPixelInspection",
   "noNetwork",
   "noStorage",
+  "noPersistedColor",
 ]) {
   assert.equal(snapshot.policy[key], true, `Avatar policy ${key} must stay enabled`);
 }
@@ -124,9 +149,27 @@ assert.doesNotMatch(
 assert.match(avatarRuntime, /document\.addEventListener\("load", onImageLoad, true\)/);
 assert.match(avatarRuntime, /document\.addEventListener\("error", onImageError, true\)/);
 assert.match(avatarRuntime, /new MutationObserver\(onMutations\)/);
-assert.match(avatarRuntime, /attributeFilter:\s*\["src", "srcset", "hidden"\]/);
+for (const observedAttribute of [
+  '"src"',
+  '"srcset"',
+  '"hidden"',
+  '"class"',
+  '"data-avatar-tone"',
+  '"data-avatar-state"',
+  '"data-has-avatar"',
+]) {
+  assert.ok(
+    avatarRuntime.includes(observedAttribute),
+    `Avatar observer must reconcile ${observedAttribute}`
+  );
+}
+assert.match(avatarRuntime, /characterData:\s*true/);
 assert.match(avatarRuntime, /image\.naturalWidth/);
 assert.match(avatarRuntime, /image\.naturalHeight/);
+assert.match(avatarRuntime, /data-avatar-authority/);
+assert.match(avatarRuntime, /data-avatar-identity/);
+assert.match(avatarRuntime, /data-avatar-tone/);
+assert.match(avatarRuntime, /data-avatar-initials/);
 assert.match(avatarRuntime, /data-avatar-state/);
 assert.match(avatarRuntime, /data-has-avatar/);
 
@@ -139,6 +182,7 @@ for (const forbidden of [
   /\bgetImageData\b/,
   /\bcreateImageBitmap\b/,
   /\bFileReader\b/,
+  /\bMath\.random\s*\(/,
 ]) {
   assert.doesNotMatch(avatarRuntime, forbidden);
 }
@@ -149,5 +193,5 @@ assert.match(privateRuntime, /avatarImageTransparencyAuthority:\s*true/);
 assert.match(criticalGate, /node \.github\/scripts\/avatar_system_contract\.mjs/);
 
 console.log(
-  "Avatar system contract: PASS · one state machine · one visual authority · transparent alpha · SPA-wide"
+  "Avatar system contract: PASS · one identity/state/visual authority · transparent alpha · SPA-wide"
 );

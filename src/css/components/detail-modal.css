@@ -125,22 +125,6 @@ min-inline-size: 0;
   letter-spacing: var(--letter-tight);
 }
 
-
-.ui-detail-modal-avatar-frame {
---ui-detail-avatar-a: var(--accent);
-  --ui-detail-avatar-b: var(--info);
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--ui-detail-avatar-a) 44%, var(--border-default));
-  border-radius: var(--ui-detail-modal-avatar-radius);
-  background: linear-gradient(135deg, var(--ui-detail-avatar-a), var(--ui-detail-avatar-b));
-  color: var(--text-on-accent, #fff);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
-  font-size: var(--font-lg);
-  font-weight: var(--weight-black);
-  letter-spacing: var(--letter-tight);
-}
 .ui-detail-modal-hero-content {
 min-inline-size: 0;
   display: grid;
@@ -525,7 +509,10 @@ grid-template-columns: 46px minmax(0, 1fr);
     gap: 10px;
 }
 
-$1
+.ui-detail-modal-avatar,
+.ui-detail-modal-avatar-frame {
+inline-size: 46px;
+    block-size: 46px;
 }
 
 .ui-detail-modal-title {

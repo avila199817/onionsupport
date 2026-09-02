@@ -42,6 +42,9 @@ function statCard({ label, value, text, iconName, route, modifier }) {
         type="button"
         class="home-stat-card-button"
         data-home-action="${HOME_ACTIONS.NAVIGATE}"
+        data-home-navigation-control="true"
+        data-router-link="true"
+        data-entity-overlay-ignore="true"
         data-route="${attr(href)}"
         aria-label="${attr(`${label}: ${formattedValue}. ${text}`)}"
       >
@@ -64,7 +67,7 @@ export function stats(vm) {
     return `<section class="home-stats" data-home-section="stats">${loadingCards(vm.admin ? 4 : 2)}</section>`;
   }
 
-  const billedText = vm.counts.invoiceStatsAvailable
+  const invoiceText = vm.counts.invoiceStatsAvailable
     ? `Facturado: ${formatMoney(vm.counts.totalInvoiced, vm.counts.currency)}`
     : "Facturado pendiente de sincronizar";
 
@@ -80,7 +83,7 @@ export function stats(vm) {
     {
       label: "Facturas",
       value: vm.counts.facturas,
-      text: billedText,
+      text: invoiceText,
       iconName: "facturas",
       route: vm.routes.facturas,
       modifier: "facturas",
@@ -110,7 +113,3 @@ export function stats(vm) {
 
   return `<section class="home-stats" data-home-section="stats">${cards.map(statCard).join("")}</section>`;
 }
-
-/* =========================================================
-   ENTITY INTERACTION
-========================================================= */

@@ -1524,7 +1524,7 @@ const ROUTE_DEFINITIONS = Object.freeze([
     title: "Empleados",
     viewKey: "empleados",
     adminOnly: true,
-    order: 52,
+    order: 58,
   }),
 
   createRoute({

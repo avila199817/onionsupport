@@ -16,7 +16,7 @@ import {
 } from "../entity-overlay/intent.js";
 
 export const HOME_ENTITY_MODAL_VERSION =
-  "home-entity-modal.v3-origin-lease-overlay-boundary";
+  "home-entity-modal.v4-origin-lease-instant-owner-shell";
 
 const HOME_SCOPE_SELECTOR =
   "[data-home-scope='true']";
@@ -171,6 +171,43 @@ function stopHomeEntityClick(event = null) {
   }
 }
 
+function optimizeIncidenciaBridgeFeedback() {
+  if (!isBrowser()) return false;
+
+  const description = document.getElementById(
+    "incidencia-bridge-feedback-description"
+  );
+
+  if (
+    description &&
+    /sin salir de Facturas/i.test(description.textContent || "")
+  ) {
+    description.textContent =
+      "No hemos podido completar la carga del detalle. Puedes reintentarlo sin abandonar el inicio.";
+  }
+
+  const modalRoot = document.querySelector(
+    "[data-incidencias-modal-root='true']"
+  );
+
+  const feedback = document.querySelector(
+    "[data-incidencias-modal-bridge-feedback='true']"
+  );
+
+  if (!modalRoot || !feedback) return false;
+
+  try {
+    feedback.replaceChildren();
+    feedback.remove();
+    document.body?.classList?.remove(
+      "incidencias-modal-bridge-feedback-open"
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function sealBridgeBoundaries() {
   if (!isBrowser()) return 0;
 
@@ -183,6 +220,7 @@ function sealBridgeBoundaries() {
     sealed += 1;
   }
 
+  optimizeIncidenciaBridgeFeedback();
   return sealed;
 }
 
@@ -444,6 +482,7 @@ export function getHomeEntityModalSnapshot() {
       originRouteLease: true,
       closesOnExplicitRouteLeave: true,
       overlayBoundarySealed: true,
+      incidenciaOwnerShellUncoveredImmediately: true,
       rawIdentifiersInSnapshot: false,
     }),
   });

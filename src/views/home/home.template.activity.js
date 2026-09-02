@@ -14,6 +14,7 @@ import {
   isGenericInvoiceTitle,
   isObject,
   normalizeKey,
+  safeArray,
   safeDisplayId,
   ticketDisplayId,
   visibleText,
@@ -25,6 +26,11 @@ import {
   panelLoadingRows,
   statusBadge,
 } from "./home.template.shared.js";
+import {
+  homeRelationAccessibleName,
+  renderHomeEntityRelation,
+  resolveHomeEntityRelation,
+} from "./home.template.relation.js";
 
 function activityIcon(type = "") {
   const key = normalizeKey(type);
@@ -94,7 +100,7 @@ function entityKind(type = "") {
   }[entityType] || "Actividad";
 }
 
-function entityOpenLabel(type = "", id = "") {
+function entityOpenLabel(type = "", id = "", relation = null) {
   const entityType = overlayEntityType(type);
   const entityId = safeDisplayId(id, "");
 
@@ -106,10 +112,19 @@ function entityOpenLabel(type = "", id = "") {
   };
 
   const label = labels[entityType] || "detalle";
-  return entityId ? `Abrir ${label} ${entityId}` : `Abrir ${label}`;
+  const relationName = homeRelationAccessibleName(relation);
+  const target = entityId ? `${label} ${entityId}` : label;
+
+  return relationName
+    ? `Abrir ${target} · ${relationName}`
+    : `Abrir ${target}`;
 }
 
-export function entityTriggerAttributes(type = "", id = "", source = "home") {
+export function entityTriggerAttributes(
+  type = "",
+  id = "",
+  source = "home"
+) {
   const entityType = overlayEntityType(type);
   const entityId = safeDisplayId(id, "");
   const ownerInPlace = ["factura", "incidencia"].includes(entityType);
@@ -129,6 +144,22 @@ export function entityTriggerAttributes(type = "", id = "", source = "home") {
   `;
 }
 
+export function entityTriggerAttributesWithRelation(
+  attributes = "",
+  type = "",
+  id = "",
+  relation = null
+) {
+  const base = String(attributes || "");
+  const accessibleName = homeRelationAccessibleName(relation);
+  if (!base || !accessibleName) return base;
+
+  return base.replace(
+    /aria-label="[^"]*"/,
+    `aria-label="${attr(entityOpenLabel(type, id, relation))}"`
+  );
+}
+
 export function entityOpenAffordance(label = "Abrir") {
   return `
     <span class="home-entity-open" aria-hidden="true">
@@ -142,13 +173,58 @@ export function entityOpenAffordance(label = "Abrir") {
    ACTIVITY
 ========================================================= */
 
-function activityItem(item = {}) {
+function domainCollection(vm = {}, entityType = "") {
+  if (entityType === "incidencia") return safeArray(vm.incidencias);
+  if (entityType === "factura") return safeArray(vm.facturas);
+  return [];
+}
+
+function findActivityDomainSource(vm = {}, entityType = "", entityId = "") {
+  const id = safeDisplayId(entityId, "");
+  if (!id) return null;
+
+  return domainCollection(vm, entityType).find((candidate) => (
+    activityEntityId(entityType, candidate) === id
+  )) || null;
+}
+
+function relationSourceForActivity(
+  source = {},
+  vm = {},
+  entityType = "",
+  entityId = ""
+) {
+  const canonical = findActivityDomainSource(vm, entityType, entityId);
+  if (!canonical) return source;
+
+  /*
+    buildActivity() conserva una proyección pequeña para ordenar el feed.
+    La identidad relacional procede siempre de la entidad canónica que ya
+    está cargada en el mismo dashboard; no se inventa ni se solicita de nuevo.
+  */
+  return {
+    ...canonical,
+    ...source,
+    raw: isObject(canonical.raw)
+      ? canonical.raw
+      : source.raw,
+  };
+}
+
+function activityItem(item = {}, vm = {}) {
   const source = isObject(item) ? item : {};
   const type = normalizeKey(first(source.type, source.tipo, "activity"));
   const entityType = overlayEntityType(type);
   const isInvoice = entityType === "factura";
   const entityId = activityEntityId(entityType, source);
   const interactive = Boolean(entityType && entityId);
+
+  const relationSource = relationSourceForActivity(
+    source,
+    vm,
+    entityType,
+    entityId
+  );
 
   const rawTitle = visibleText(
     first(
@@ -162,9 +238,32 @@ function activityItem(item = {}) {
     isInvoice ? "Factura" : "Actividad registrada"
   );
 
-  const title = isInvoice && isGenericInvoiceTitle(rawTitle)
-    ? "Factura"
-    : rawTitle;
+  const canonicalInvoiceTitle = isInvoice
+    ? visibleText(
+        first(
+          relationSource.concepto,
+          relationSource.concept,
+          relationSource.description,
+          relationSource.descripcion,
+          relationSource.subject,
+          relationSource.asunto,
+          ""
+        ),
+        ""
+      )
+    : "";
+
+  const projectedTitleIsId = Boolean(
+    isInvoice &&
+    entityId &&
+    safeDisplayId(rawTitle, "") === entityId
+  );
+
+  const title =
+    isInvoice &&
+    (isGenericInvoiceTitle(rawTitle) || projectedTitleIsId)
+      ? canonicalInvoiceTitle || "Factura"
+      : rawTitle;
 
   const rawStatus = cleanText(first(source.status, source.estado, source.text, ""), "");
   const date = first(
@@ -174,6 +273,19 @@ function activityItem(item = {}) {
     source.createdAt,
     source.creadoEn,
     ""
+  );
+
+  const relation = resolveHomeEntityRelation(entityType, relationSource);
+  const relationHtml = renderHomeEntityRelation(relation);
+  const relationAttribute = relationHtml
+    ? 'data-home-has-relation="true"'
+    : 'data-home-has-relation="false"';
+  const baseTriggerAttributes = entityTriggerAttributes(entityType, entityId, "home.activity");
+  const triggerAttributes = entityTriggerAttributesWithRelation(
+    baseTriggerAttributes,
+    entityType,
+    entityId,
+    relation
   );
 
   const content = `
@@ -188,6 +300,8 @@ function activityItem(item = {}) {
       </span>
 
       <strong class="home-entity-title">${escapeHtml(title)}</strong>
+
+      ${relationHtml}
 
       <span class="home-entity-meta">
         ${statusBadge(rawStatus, "Actualizada")}
@@ -205,8 +319,8 @@ function activityItem(item = {}) {
       data-home-entity-id="${attr(entityId)}"
     >
       ${interactive
-        ? `<button type="button" class="home-entity-row home-entity-row--activity" ${entityTriggerAttributes(entityType, entityId, "home.activity")}>${content}</button>`
-        : `<div class="home-entity-row home-entity-row--activity home-entity-row--static">${content}</div>`}
+        ? `<button type="button" class="home-entity-row home-entity-row--activity" ${relationAttribute} ${triggerAttributes}>${content}</button>`
+        : `<div class="home-entity-row home-entity-row--activity home-entity-row--static" ${relationAttribute}>${content}</div>`}
     </li>
   `;
 }
@@ -232,7 +346,7 @@ export function activity(vm) {
       ${vm.loading
         ? panelLoadingRows("activity", 4)
         : items.length
-          ? `<ul class="home-activity-list">${items.map(activityItem).join("")}</ul>`
+          ? `<ul class="home-activity-list">${items.map((item) => activityItem(item, vm)).join("")}</ul>`
           : emptyState("Sin actividad reciente", "Todavía no hay movimientos visibles en el inicio.", "activity")}
     </section>
   `;

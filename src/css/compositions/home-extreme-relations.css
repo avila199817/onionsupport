@@ -1,0 +1,243 @@
+/* Onion Support · Home Extreme relationship identity module.
+   Loaded exclusively through home-extreme.css inside layer(compositions).
+
+   Visual parity:
+   - requester identity follows Incidencias;
+   - client/company identity follows Facturas;
+   - no card is nested inside another card.
+*/
+
+.home-view-root {
+  --home-relation-avatar-size: 30px;
+}
+
+.home-view-root .home-entity-row[data-home-has-relation="true"] {
+  min-block-size: 106px;
+  padding-block: 10px;
+}
+
+.home-view-root
+  .home-entity-row[data-home-has-relation="true"]
+  .home-entity-copy {
+  gap: 4px;
+}
+
+.home-view-root .home-entity-relation {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  inline-size: fit-content;
+
+  display: grid;
+  grid-template-columns:
+    var(--home-relation-avatar-size)
+    minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+
+  color: var(--text);
+}
+
+.home-view-root .home-entity-relation-avatar {
+  --home-relation-a: var(--accent);
+  --home-relation-b: var(--info);
+
+  position: relative;
+  inline-size: var(--home-relation-avatar-size);
+  block-size: var(--home-relation-avatar-size);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  flex: 0 0 auto;
+
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--home-relation-a) 52%,
+      var(--border-default)
+    );
+  border-radius: 50%;
+  background:
+    linear-gradient(
+      135deg,
+      var(--home-relation-a),
+      var(--home-relation-b)
+    );
+  color: var(--text-on-accent, #fff);
+  box-shadow:
+    0 0 0 2px var(--solid-bg-1, var(--card-bg)),
+    inset 0 1px 0 rgb(255 255 255 / 18%);
+}
+
+.home-view-root
+  .home-entity-relation-avatar[data-avatar-tone="0"] {
+  --home-relation-a: var(--accent);
+  --home-relation-b: var(--info);
+}
+
+.home-view-root
+  .home-entity-relation-avatar[data-avatar-tone="1"] {
+  --home-relation-a: var(--success);
+  --home-relation-b: var(--info);
+}
+
+.home-view-root
+  .home-entity-relation-avatar[data-avatar-tone="2"] {
+  --home-relation-a: var(--warning);
+  --home-relation-b: var(--accent);
+}
+
+.home-view-root
+  .home-entity-relation-avatar[data-avatar-tone="3"] {
+  --home-relation-a: var(--error);
+  --home-relation-b: var(--warning);
+}
+
+.home-view-root
+  .home-entity-relation-avatar[data-avatar-tone="4"] {
+  --home-relation-a: var(--info);
+  --home-relation-b: var(--accent);
+}
+
+.home-view-root
+  .home-entity-relation-avatar[data-avatar-tone="5"] {
+  --home-relation-a: var(--success);
+  --home-relation-b: var(--accent);
+}
+
+.home-view-root
+  .home-entity-relation-avatar[data-avatar-tone="6"] {
+  --home-relation-a: var(--info);
+  --home-relation-b: var(--success);
+}
+
+.home-view-root
+  .home-entity-relation-avatar[data-avatar-tone="7"] {
+  --home-relation-a: var(--warning);
+  --home-relation-b: var(--error);
+}
+
+.home-view-root
+  .home-entity-relation-avatar[data-avatar-tone="8"] {
+  --home-relation-a: var(--error);
+  --home-relation-b: var(--accent);
+}
+
+.home-view-root
+  .home-entity-relation-avatar[data-avatar-tone="9"] {
+  --home-relation-a: var(--accent);
+  --home-relation-b: var(--success);
+}
+
+.home-view-root .home-entity-relation-fallback {
+  position: relative;
+  z-index: 1;
+  inline-size: 100%;
+  block-size: 100%;
+  display: grid;
+  place-items: center;
+
+  font-size: 8px;
+  font-weight: var(--weight-bold);
+  line-height: 1;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+
+.home-view-root .home-entity-relation-img {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  inline-size: 100%;
+  block-size: 100%;
+  display: block;
+
+  border-radius: inherit;
+  background: transparent;
+  color: transparent;
+  font-size: 0;
+  object-fit: cover;
+}
+
+.home-view-root
+  .home-entity-relation-avatar[data-has-avatar="false"]
+  .home-entity-relation-img {
+  display: none;
+}
+
+.home-view-root .home-entity-relation-copy {
+  min-inline-size: 0;
+  display: grid;
+  align-content: center;
+  gap: 1px;
+}
+
+.home-view-root .home-entity-relation-name {
+  min-inline-size: 0;
+  color: var(--text-strong);
+  font-size: 10.5px;
+  font-weight: var(--weight-bold);
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.home-view-root .home-entity-relation-detail {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+
+  color: var(--text-muted);
+  font-size: 8.75px;
+  font-weight: var(--weight-medium);
+  line-height: 1.2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.home-view-root
+  .home-entity-relation-detail
+  > span:not(.home-entity-relation-separator) {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.home-view-root .home-entity-relation-separator {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+}
+
+@container (max-width: 760px) {
+  .home-view-root {
+    --home-relation-avatar-size: 28px;
+  }
+
+  .home-view-root .home-entity-row[data-home-has-relation="true"] {
+    min-block-size: 104px;
+  }
+
+  .home-view-root .home-entity-relation {
+    inline-size: 100%;
+  }
+}
+
+@media (forced-colors: active) {
+  .home-view-root .home-entity-relation-avatar {
+    border-color: CanvasText;
+    background: Canvas;
+    color: CanvasText;
+    box-shadow: none;
+  }
+
+  .home-view-root .home-entity-relation-img {
+    forced-color-adjust: none;
+  }
+}
+
+@media print {
+  .home-view-root .home-entity-relation-avatar {
+    box-shadow: none;
+  }
+}

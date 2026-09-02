@@ -21,14 +21,18 @@ import {
   actionButton,
   emptyState,
   entityIdBadge,
-  freshness,
   panelLoadingRows,
   statusBadge,
 } from "./home.template.shared.js";
 import {
   entityOpenAffordance,
   entityTriggerAttributes,
+  entityTriggerAttributesWithRelation,
 } from "./home.template.activity.js";
+import {
+  renderHomeEntityRelation,
+  resolveHomeEntityRelation,
+} from "./home.template.relation.js";
 
 import { billingOverview } from "./home.template.billing-overview.js";
 
@@ -75,6 +79,19 @@ function invoiceItem(invoice = {}) {
     ""
   );
 
+  const relation = resolveHomeEntityRelation("factura", source);
+  const relationHtml = renderHomeEntityRelation(relation);
+  const relationAttribute = relationHtml
+    ? 'data-home-has-relation="true"'
+    : 'data-home-has-relation="false"';
+  const baseTriggerAttributes = entityTriggerAttributes("factura", id, "home.invoices");
+  const triggerAttributes = entityTriggerAttributesWithRelation(
+    baseTriggerAttributes,
+    "factura",
+    id,
+    relation
+  );
+
   const content = `
     <span class="home-entity-leading home-entity-leading--factura" aria-hidden="true">
       ${icon("facturas")}
@@ -87,6 +104,8 @@ function invoiceItem(invoice = {}) {
       </span>
 
       <strong class="home-entity-title">${escapeHtml(label)}</strong>
+
+      ${relationHtml}
 
       <span class="home-entity-meta">
         ${statusBadge(rawStatus, "Emitida")}
@@ -107,8 +126,8 @@ function invoiceItem(invoice = {}) {
       data-home-entity-id="${attr(id)}"
     >
       ${interactive
-        ? `<button type="button" class="home-entity-row home-entity-row--invoice" ${entityTriggerAttributes("factura", id, "home.invoices")}>${content}</button>`
-        : `<div class="home-entity-row home-entity-row--invoice home-entity-row--static">${content}</div>`}
+        ? `<button type="button" class="home-entity-row home-entity-row--invoice" ${relationAttribute} ${triggerAttributes}>${content}</button>`
+        : `<div class="home-entity-row home-entity-row--invoice home-entity-row--static" ${relationAttribute}>${content}</div>`}
     </li>
   `;
 }

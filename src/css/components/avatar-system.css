@@ -1,0 +1,170 @@
+/* =========================================================
+   ONION SUPPORT — GLOBAL AVATAR SYSTEM
+   Archivo: /src/css/components/avatar-system.css
+
+   IDENTITY AUTHORITY · TRANSPARENT IMAGE SAFE · SPA-WIDE
+
+   Contrato:
+   - Una imagen válida elimina por completo la superficie fallback.
+   - Los píxeles alfa de PNG/WebP/AVIF muestran la superficie real inferior.
+   - Iniciales, gradientes y placeholders sólo existen en loading/fallback/error.
+   - La geometría (tamaño, radio y borde) sigue perteneciendo a cada contexto.
+   - Sin !important: esta hoja vive en la capa tardía identity.
+========================================================= */
+
+/* =========================================================
+   MANAGED HOST / IMAGE NORMALIZATION
+========================================================= */
+
+:where(
+  [data-avatar-system="true"],
+  [data-has-avatar]
+) {
+  box-sizing: border-box;
+  position: relative;
+  isolation: isolate;
+}
+
+:where(
+  [data-avatar-system="true"] [data-avatar-image="true"],
+  [data-has-avatar] img
+) {
+  max-inline-size: 100%;
+  display: block;
+  background: transparent;
+  background-color: transparent;
+  background-image: none;
+  color: transparent;
+  mix-blend-mode: normal;
+  -webkit-user-drag: none;
+}
+
+/* =========================================================
+   REAL IMAGE · ALPHA MUST REMAIN REAL
+========================================================= */
+
+:where(
+  [data-avatar-system="true"][data-avatar-state="image"],
+  [data-has-avatar="true"]
+) {
+  /*
+    No fallback paint may exist behind a valid image. This is deliberately a
+    complete background reset instead of a color override: transparent pixels
+    must expose the row/card beneath, never an invented avatar gradient.
+  */
+  background: transparent;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+}
+
+:where(
+  [data-avatar-system="true"][data-avatar-state="image"]
+    [data-avatar-image="true"],
+  [data-has-avatar="true"] img
+) {
+  display: block;
+  visibility: visible;
+  opacity: 1;
+  background: transparent;
+  background-color: transparent;
+  background-image: none;
+}
+
+:where(
+  [data-avatar-system="true"][data-avatar-state="image"],
+  [data-has-avatar="true"]
+) :where(
+  [data-avatar-fallback="true"],
+  [class*="avatar-fallback"],
+  [class*="avatar-initial"],
+  [class*="avatar-placeholder"]
+) {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* =========================================================
+   LOADING / FALLBACK / ERROR
+========================================================= */
+
+:where(
+  [data-avatar-system="true"][data-avatar-state="loading"],
+  [data-avatar-system="true"][data-avatar-state="fallback"],
+  [data-avatar-system="true"][data-avatar-state="error"]
+) :where(
+  [data-avatar-fallback="true"],
+  [class*="avatar-fallback"],
+  [class*="avatar-initial"],
+  [class*="avatar-placeholder"]
+) {
+  visibility: visible;
+  opacity: 1;
+}
+
+:where(
+  [data-avatar-system="true"][data-avatar-state="loading"]
+    [data-avatar-image="true"]
+) {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+:where(
+  [data-avatar-system="true"][data-avatar-state="fallback"]
+    [data-avatar-image="true"],
+  [data-avatar-system="true"][data-avatar-state="error"]
+    [data-avatar-image="true"]
+) {
+  display: none;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* =========================================================
+   EXPLICIT OPT-OUT
+
+   Sólo para elementos que contengan la palabra avatar pero no representen una
+   identidad personal/empresarial. El runtime nunca los gestiona.
+========================================================= */
+
+[data-avatar-system="off"] {
+  isolation: auto;
+}
+
+/* =========================================================
+   ACCESSIBILITY / PLATFORM MODES
+========================================================= */
+
+@media (forced-colors: active) {
+  :where(
+    [data-avatar-system="true"][data-avatar-state="image"],
+    [data-has-avatar="true"]
+  ) {
+    background: transparent;
+    box-shadow: none;
+    forced-color-adjust: none;
+  }
+
+  :where(
+    [data-avatar-system="true"][data-avatar-state="image"]
+      [data-avatar-image="true"],
+    [data-has-avatar="true"] img
+  ) {
+    forced-color-adjust: none;
+  }
+}
+
+@media print {
+  :where(
+    [data-avatar-system="true"][data-avatar-state="image"],
+    [data-has-avatar="true"]
+  ) {
+    background: transparent;
+    box-shadow: none;
+  }
+}

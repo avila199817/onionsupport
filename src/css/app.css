@@ -16,6 +16,7 @@
    - Dejar TODAS las hojas específicas de ruta a src/router/styles.js.
    - Aplicar el tema público system/light como composición transversal Home + Auth.
    - Permitir composiciones responsive transversales sin parches por vista.
+   - Centralizar el estado de avatares después de todas las vistas/composiciones.
    - Centralizar loading/skeleton en una capa propia posterior a las vistas.
    - Cerrar la cascada con invariantes geométricas transversales.
 
@@ -30,7 +31,7 @@
    CASCADE LAYERS · menor -> mayor prioridad
 ========================================================= */
 
-@layer tokens, reset, core, layout, components, views, auth, compositions, loading, guardrails;
+@layer tokens, reset, core, layout, components, views, auth, compositions, identity, loading, guardrails;
 
 /* =========================================================
    TOKENS
@@ -106,6 +107,17 @@
 @import url("./compositions/private-create-modal.css") layer(compositions);
 @import url("./compositions/mobile-datalist.css") layer(compositions);
 @import url("./compositions/private-amounts.css") layer(compositions);
+
+/* =========================================================
+   IDENTITY SYSTEM · SINGLE AVATAR STATE AUTHORITY
+
+   Esta capa se aplica después de views/compositions porque el estado real de
+   una imagen debe ganar siempre a cualquier gradiente fallback local. No fija
+   tamaños ni radios: sólo sincroniza image/loading/fallback/error y garantiza
+   que los píxeles alfa permanezcan transparentes.
+========================================================= */
+
+@import url("./components/avatar-system.css") layer(identity);
 
 /* =========================================================
    LOADING SYSTEM · SINGLE SKELETON AUTHORITY

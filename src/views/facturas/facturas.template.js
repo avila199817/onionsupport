@@ -9,6 +9,7 @@
    - Identidad visual de clientes alineada con Incidencias.
 ========================================================= */
 
+import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { renderFacturasCreateModal } from "./facturas.template.create.js";
 import { renderFacturasDetailModal } from "./facturas.template.modal.js";
 
@@ -190,16 +191,6 @@ function bool(value, fallback = false) {
 }
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
-
-function hashIdentity(value = "") {
-  const text = cleanText(value, "");
-  let hash = 0;
-  for (let index = 0; index < text.length; index += 1) {
-    hash = ((hash << 5) - hash) + text.charCodeAt(index);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
 
 function readPath(source = {}, path = "") {
   const parts = cleanText(path, "").split(".").filter(Boolean);
@@ -450,17 +441,16 @@ function getClientAvatar(item = {}) {
   return safeImageSrc(firstPath(item, paths) || firstPath(getRaw(item), paths));
 }
 
-function getInitials(value = "") {
-  const text = cleanText(value, "");
-  if (!text) return "ON";
-  const parts = text.split(/\s+/).filter(Boolean);
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || "ON";
-}
-
-function getAvatarToneClass(item = {}) {
-  const identity = getClientEmail(item) || getClientName(item);
-  return `facturas-avatar--tone-${hashIdentity(identity) % 10}`;
+function getAvatarPresentation(item = {}) {
+  const name = getClientName(item);
+  const email = getClientEmail(item);
+  return resolveAvatarPresentation({
+    ...item,
+    displayName: name,
+    name,
+    email,
+    userId: firstPath(item, ["clienteId", "clientId", "customerId", "userId", "id"]),
+  });
 }
 
 function getPaymentRaw(item = {}) {
@@ -850,12 +840,15 @@ function renderLoaderOnly(label = "Cargando") {
 function renderAvatar(item = {}) {
   const name = getClientName(item);
   const avatarUrl = getClientAvatar(item);
-  const toneClass = getAvatarToneClass(item);
+  const presentation = getAvatarPresentation(item);
   return `
-    <span class="facturas-avatar ${attr(toneClass)}${avatarUrl ? " has-image" : " facturas-avatar--fallback"}"
-      ${tooltipAttrs(name, name)} data-fallback="${avatarUrl ? "false" : "true"}" data-facturas-avatar="true" aria-hidden="true">
-      ${avatarUrl ? `<img class="facturas-avatar-img" src="${attr(avatarUrl)}" alt="" width="42" height="42" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false" data-facturas-avatar-img="true">` : ""}
-      <span class="facturas-avatar-fallback">${escapeHtml(getInitials(name))}</span>
+    <span class="facturas-avatar${avatarUrl ? " has-image" : " is-fallback"}"
+      ${tooltipAttrs(name, name)} data-facturas-avatar="true" aria-hidden="true"
+      data-avatar-system="true" data-avatar-host="true" data-avatar-tone="${attr(String(presentation.tone))}"
+      data-avatar-identity="${attr(presentation.fingerprint)}" data-avatar-initials="${attr(presentation.initials)}"
+      data-has-avatar="${avatarUrl ? "true" : "false"}">
+      ${avatarUrl ? `<img class="facturas-avatar-img" data-avatar-image="true" src="${attr(avatarUrl)}" alt="" width="42" height="42" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false" data-facturas-avatar-img="true">` : ""}
+      <span class="facturas-avatar-fallback" data-avatar-fallback="true">${escapeHtml(presentation.initials)}</span>
     </span>`;
 }
 

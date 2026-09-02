@@ -8,6 +8,8 @@
    - Acepta items/tickets/incidencias/rows/results/data.items/etc.
 ========================================================= */
 
+
+import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v33-render-payload-authority";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
@@ -152,17 +154,6 @@ function firstUrl(...values) {
     if (url) return url;
   }
   return "";
-}
-
-function hash(v = "") {
-  const s = txt(v, "");
-  let h = 0;
-  for (let i = 0; i < s.length; i += 1) { h = ((h << 5) - h) + s.charCodeAt(i); h |= 0; }
-  return Math.abs(h);
-}
-
-function initials(v = "") {
-  return txt(v, "").split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() || "").join("").slice(0, 2) || "ON";
 }
 
 function titleCaseLabel(v = "", fb = "General") {
@@ -673,12 +664,15 @@ function buildVm(input = {}) {
 function renderAvatar(it = {}) {
   const name = getClientName(it);
   const src = getAvatar(it);
-  const identity = getClientEmail(it) || name;
-  const tone = hash(identity) % 10;
+  const presentation = resolveAvatarPresentation({
+    displayName: name,
+    name,
+    email: getClientEmail(it),
+  });
   return `
-    <span class="incidencias-avatar${src ? " has-image" : " is-fallback"}" data-avatar-tone="${at(String(tone))}" data-has-avatar="${src ? "true" : "false"}" data-fallback="${src ? "false" : "true"}" title="${at(name)}" aria-hidden="true">
-      ${src ? `<img class="incidencias-avatar-img" src="${at(src)}" alt="" width="48" height="48" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}
-      <span class="incidencias-avatar-fallback">${esc(initials(name))}</span>
+    <span class="incidencias-avatar${src ? " has-image" : " is-fallback"}" data-avatar-system="true" data-avatar-host="true" data-avatar-tone="${at(String(presentation.tone))}" data-avatar-identity="${at(presentation.fingerprint)}" data-avatar-initials="${at(presentation.initials)}" data-has-avatar="${src ? "true" : "false"}" title="${at(name)}" aria-hidden="true">
+      ${src ? `<img class="incidencias-avatar-img" data-avatar-image="true" src="${at(src)}" alt="" width="48" height="48" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}
+      <span class="incidencias-avatar-fallback" data-avatar-fallback="true">${esc(presentation.initials)}</span>
     </span>
   `;
 }
@@ -708,13 +702,16 @@ function renderAssignedBadge(it = {}) {
   const norm = key(name);
   if (!name || norm === "no_asignado" || norm === "sin_asignar") return "";
   const avatar = getAssignedAvatar(it);
-  const identity = getAssignedEmail(it) || name;
-  const tone = hash(identity) % 10;
+  const presentation = resolveAvatarPresentation({
+    displayName: name,
+    name,
+    email: getAssignedEmail(it),
+  });
   return `
     <span class="incidencias-assigned-badge" data-assigned="true" title="${at(`Técnico: ${name}`)}">
-      <span class="incidencias-assigned-avatar${avatar ? " has-image" : " is-fallback"}" data-avatar-tone="${at(String(tone))}" aria-hidden="true">
-        ${avatar ? `<img src="${at(avatar)}" alt="" width="20" height="20" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}
-        <span>${esc(initials(name))}</span>
+      <span class="incidencias-assigned-avatar${avatar ? " has-image" : " is-fallback"}" data-avatar-system="true" data-avatar-host="true" data-avatar-tone="${at(String(presentation.tone))}" data-avatar-identity="${at(presentation.fingerprint)}" data-avatar-initials="${at(presentation.initials)}" data-has-avatar="${avatar ? "true" : "false"}" aria-hidden="true">
+        ${avatar ? `<img data-avatar-image="true" src="${at(avatar)}" alt="" width="20" height="20" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}
+        <span data-avatar-fallback="true">${esc(presentation.initials)}</span>
       </span>
       <span class="incidencias-assigned-name">${esc(name)}</span>
     </span>

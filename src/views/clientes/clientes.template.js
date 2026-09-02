@@ -3,6 +3,7 @@
    Server-backed cursor pagination · loaded-record semantics
 ========================================================= */
 
+import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import {
   normalizeClienteModel,
   normalizeClientesCollection,
@@ -238,22 +239,15 @@ function icon(name = "") {
   return `<svg ${common}>${paths[name] || paths.users}</svg>`;
 }
 
-function initials(value = "") {
-  const words = cleanText(value, "CL").split(/\s+/).filter(Boolean);
-  return (words.length > 1 ? `${words[0][0]}${words[1][0]}` : words[0].slice(0, 2)).toUpperCase();
-}
-
-function avatarTone(item = {}) {
+function avatarPresentation(item = {}, label = "Cliente") {
   const current = normalizeClienteModel(item);
-  const seed = cleanText(
-    first(current.email, current.clienteId, current.id, current.nombreFiscal, "cliente"),
-    "cliente",
-  );
-  let hash = 0;
-  for (let index = 0; index < seed.length; index += 1) {
-    hash = ((hash << 5) - hash + seed.charCodeAt(index)) | 0;
-  }
-  return Math.abs(hash) % 10;
+  return resolveAvatarPresentation({
+    ...current,
+    displayName: cleanText(label, "Cliente"),
+    name: cleanText(label, "Cliente"),
+    email: current.email,
+    userId: first(current.userId, current.clienteId, current.clientId, current.id, ""),
+  });
 }
 
 function safeAvatarUrl(value = "") {
@@ -278,10 +272,14 @@ function renderAvatar(item = {}) {
   const current = normalizeClienteModel(item);
   const label = cleanText(first(current.contactoNombre, current.nombreFiscal, "Cliente"), "Cliente");
   const src = safeAvatarUrl(first(current.avatar, current.avatarUrl, ""));
+  const presentation = avatarPresentation(current, label);
   return `
-    <span class="clientes-avatar clientes-avatar--tone-${avatarTone(current)}${src ? " has-image" : ""}" aria-hidden="true">
-      ${src ? `<img class="clientes-avatar-img" src="${attr(src)}" alt="" width="42" height="42" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : ""}
-      <span class="clientes-avatar-fallback">${escapeHtml(initials(label))}</span>
+    <span class="clientes-avatar${src ? " has-image" : " is-fallback"}" aria-hidden="true"
+      data-avatar-system="true" data-avatar-host="true" data-avatar-tone="${attr(String(presentation.tone))}"
+      data-avatar-identity="${attr(presentation.fingerprint)}" data-avatar-initials="${attr(presentation.initials)}"
+      data-has-avatar="${src ? "true" : "false"}">
+      ${src ? `<img class="clientes-avatar-img" data-avatar-image="true" src="${attr(src)}" alt="" width="42" height="42" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : ""}
+      <span class="clientes-avatar-fallback" data-avatar-fallback="true">${escapeHtml(presentation.initials)}</span>
     </span>
   `;
 }

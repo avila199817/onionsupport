@@ -162,16 +162,16 @@ function loadIncidenciasAvatarEnhancements() {
   if (avatarEnhancementsPromise) return avatarEnhancementsPromise;
 
   const pending = Promise.all([
-    import("../incidencias-avatar-fallback/index.js"),
+    import("../incidencias-comment-avatars/index.js"),
     import("../incidencias-followup-avatars/index.js"),
   ])
-    .then(([fallback, followup]) => {
-      fallback?.mountIncidenciasAvatarFallback?.();
+    .then(([comments, followup]) => {
+      comments?.mountIncidenciasCommentAvatars?.();
       followup?.mountIncidenciasFollowupAvatars?.();
       avatarEnhancementsReady = true;
 
       return Object.freeze({
-        fallback,
+        comments,
         followup,
       });
     })
@@ -198,7 +198,7 @@ function syncIncidenciasAvatarEnhancements(enhancements = null) {
   let synced = false;
 
   try {
-    enhancements.fallback?.syncIncidenciasCommentAvatars?.(document);
+    enhancements.comments?.syncIncidenciasCommentAvatars?.(document);
     synced = true;
   } catch {
     // noop

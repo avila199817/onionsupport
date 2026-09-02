@@ -28,6 +28,7 @@
      La SAS debe venir ya validada desde incidencias.api.js.
 ========================================================= */
 
+import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import {
   INCIDENCIA_STATUS_OPTIONS,
   INCIDENCIA_PRIORITY_OPTIONS,
@@ -661,45 +662,6 @@ function firstAttachmentUrl(
 /* =========================================================
    TEXT / FILE HELPERS
 ========================================================= */
-
-function hashText(value = "") {
-  const text =
-    cleanText(value, "");
-
-  let hash = 0;
-
-  for (
-    let index = 0;
-    index < text.length;
-    index += 1
-  ) {
-    hash =
-      ((hash << 5) - hash) +
-      text.charCodeAt(index);
-
-    hash |= 0;
-  }
-
-  return Math.abs(hash);
-}
-
-function initialsFrom(value = "") {
-  return (
-    cleanText(value, "")
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map(
-        (part) =>
-          part[0]
-            ?.toUpperCase() ||
-          ""
-      )
-      .join("")
-      .slice(0, 2) ||
-    "ON"
-  );
-}
 
 function safeFilename(
   value = "",
@@ -2731,12 +2693,13 @@ function renderAvatar(
   const avatarUrl =
     getClientAvatar(detail);
 
-  const identity =
-    email ||
-    name;
+  const presentation = resolveAvatarPresentation({
+    displayName: name,
+    name,
+    email,
+  });
 
-  const tone =
-    hashText(identity) % 10;
+  const tone = presentation.tone;
 
   return `
     <div
@@ -2774,7 +2737,7 @@ function renderAvatar(
 
         <span class="incidencias-modal-avatar-fallback ui-detail-modal-avatar-fallback">
           ${escapeHtml(
-            initialsFrom(name)
+            presentation.initials
           )}
         </span>
       </div>
@@ -2898,10 +2861,13 @@ function renderTechnicianValue(
   const emailHref =
     contactEmailHref(email);
 
-  const tone =
-    hashText(
-      `${name}:${email}`
-    ) % 10;
+  const presentation = resolveAvatarPresentation({
+    displayName: name,
+    name,
+    email,
+  });
+
+  const tone = presentation.tone;
 
   return `
     <span
@@ -2940,7 +2906,7 @@ function renderTechnicianValue(
 
         <span>
           ${escapeHtml(
-            initialsFrom(name)
+            presentation.initials
           )}
         </span>
       </span>

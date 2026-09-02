@@ -1,9 +1,10 @@
 /* =========================================================
    Onion Support · Incidencias Follow-up Avatars
 
-   Esta hoja sólo adapta geometría y composición para Seguimiento.
-   Color, gradiente, borde, brillo, peso y tonos pertenecen al componente
-   canónico .ui-detail-modal-avatar-frame de detail-modal.css.
+   CONTEXT ONLY
+   - Esta hoja decide composición y tamaño dentro de Seguimiento.
+   - Shape, color, borde, imagen/fallback y estados pertenecen a
+     components/avatar-system.css.
 ========================================================= */
 
 .incidencias-modal-description-comment-head
@@ -16,8 +17,7 @@
   justify-self: start;
 }
 
-.incidencias-modal-description-comment-author
-  > strong {
+.incidencias-modal-description-comment-author > strong {
   min-inline-size: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -25,36 +25,11 @@
 }
 
 .incidencias-modal-description-comment-avatar {
-  position: relative;
   inline-size: 28px;
   block-size: 28px;
   min-inline-size: 28px;
   min-block-size: 28px;
-  border-radius: 999px;
   font-size: 9px;
-}
-
-.incidencias-modal-description-comment-avatar-fallback,
-.incidencias-modal-description-comment-avatar-image {
-  grid-area: 1 / 1;
-}
-
-.incidencias-modal-description-comment-avatar-fallback {
-  position: relative;
-  z-index: 1;
-  user-select: none;
-}
-
-.incidencias-modal-description-comment-avatar-image {
-  position: relative;
-  z-index: 2;
-  object-position: center;
-  opacity: 0;
-}
-
-.incidencias-modal-description-comment-avatar[data-has-avatar="true"]
-  > .incidencias-modal-description-comment-avatar-image {
-  opacity: 1;
 }
 
 @media (max-width: 720px) {

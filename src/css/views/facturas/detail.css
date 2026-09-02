@@ -164,18 +164,6 @@ body.facturas-detail-open {
   font-weight: var(--weight-black, 800);
   letter-spacing: var(--letter-tight, -.02em);
 }
-
-.facturas-detail-avatar[data-avatar-tone="0"] { --fac-detail-avatar-a: var(--accent); --fac-detail-avatar-b: var(--info); }
-.facturas-detail-avatar[data-avatar-tone="1"] { --fac-detail-avatar-a: var(--success); --fac-detail-avatar-b: var(--info); }
-.facturas-detail-avatar[data-avatar-tone="2"] { --fac-detail-avatar-a: var(--warning); --fac-detail-avatar-b: var(--accent); }
-.facturas-detail-avatar[data-avatar-tone="3"] { --fac-detail-avatar-a: var(--error); --fac-detail-avatar-b: var(--warning); }
-.facturas-detail-avatar[data-avatar-tone="4"] { --fac-detail-avatar-a: var(--info); --fac-detail-avatar-b: var(--accent); }
-.facturas-detail-avatar[data-avatar-tone="5"] { --fac-detail-avatar-a: var(--success); --fac-detail-avatar-b: var(--accent); }
-.facturas-detail-avatar[data-avatar-tone="6"] { --fac-detail-avatar-a: var(--info); --fac-detail-avatar-b: var(--success); }
-.facturas-detail-avatar[data-avatar-tone="7"] { --fac-detail-avatar-a: var(--warning); --fac-detail-avatar-b: var(--error); }
-.facturas-detail-avatar[data-avatar-tone="8"] { --fac-detail-avatar-a: var(--error); --fac-detail-avatar-b: var(--accent); }
-.facturas-detail-avatar[data-avatar-tone="9"] { --fac-detail-avatar-a: var(--accent); --fac-detail-avatar-b: var(--success); }
-
 .facturas-detail-avatar[data-has-avatar="true"] { background: var(--solid-bg-2); }
 
 .facturas-detail-avatar-image {

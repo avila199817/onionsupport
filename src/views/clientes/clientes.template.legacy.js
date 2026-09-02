@@ -8,6 +8,8 @@ PRODUCTIVO · INCIDENCIAS / FACTURAS PARITY · V9
 - Cinco columnas: Cliente / Estado / Alta / Contacto / Importe.
 ========================================================= */
 
+
+import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 export const CLIENTES_TEMPLATE_VERSION =
   "clientes.template.productivo.v9.interactive-stats-parity";
 
@@ -798,55 +800,23 @@ function icon(name = "") {
   return `<svg ${common}>${paths[name] || paths.chevron}</svg>`;
 }
 
-function initials(value = "") {
-  const words = cleanText(value, "CL").split(/\s+/).filter(Boolean);
-
-  return (
-    (words.length >= 2
-      ? `${words[0][0]}${words[1][0]}`
-      : words[0].slice(0, 2)
-    ).toUpperCase()
-  );
-}
-
-function avatarTone(item = {}) {
+function avatarPresentation(item = {}, label = "Cliente") {
   const current = normalizeClienteModel(item);
-  const seed = cleanText(
-    first(current.email, current.nombreFiscal, current.clienteId, "cliente"),
-    "cliente"
-  );
-
-  let hash = 0;
-
-  for (let index = 0; index < seed.length; index += 1) {
-    hash = ((hash << 5) - hash + seed.charCodeAt(index)) | 0;
-  }
-
-  return Math.abs(hash) % 10;
+  return resolveAvatarPresentation({
+    ...current,
+    displayName: cleanText(label, "Cliente"),
+    name: cleanText(label, "Cliente"),
+    email: current.email,
+    userId: first(current.userId, current.clienteId, current.clientId, current.id, ""),
+  });
 }
 
 function renderAvatar(item = {}) {
   const current = normalizeClienteModel(item);
   const src = safeAvatarUrl(current.avatar);
-  const label = cleanText(
-    first(current.contactoNombre, current.nombreFiscal, current.email, "Cliente"),
-    "Cliente"
-  );
-
-  return `
-    <span
-      class="clientes-avatar clientes-avatar--tone-${avatarTone(current)}${src ? " has-image" : ""}"
-      data-has-avatar="${src ? "true" : "false"}"
-      aria-hidden="true"
-    >
-      ${
-        src
-          ? `<img class="clientes-avatar-img" src="${attr(src)}" alt="" width="42" height="42" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">`
-          : ""
-      }
-      <span class="clientes-avatar-fallback">${escapeHtml(initials(label))}</span>
-    </span>
-  `;
+  const label = cleanText(first(current.contactoNombre, current.nombreFiscal, current.email, "Cliente"), "Cliente");
+  const presentation = avatarPresentation(current, label);
+  return `<span class="clientes-avatar${src ? " has-image" : " is-fallback"}" aria-hidden="true" data-avatar-system="true" data-avatar-host="true" data-avatar-tone="${attr(String(presentation.tone))}" data-avatar-identity="${attr(presentation.fingerprint)}" data-avatar-initials="${attr(presentation.initials)}" data-has-avatar="${src ? "true" : "false"}">${src ? `<img class="clientes-avatar-img" data-avatar-image="true" src="${attr(src)}" alt="" width="42" height="42" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}<span class="clientes-avatar-fallback" data-avatar-fallback="true">${escapeHtml(presentation.initials)}</span></span>`;
 }
 
 function statusLabel(item = {}) {

@@ -171,8 +171,12 @@ require(INDEX, "readCreateLineItems", "Controller must read every invoice line b
 require(INDEX, "safeArray(breakdown.lineas).map", "Create payload must serialize every validated invoice line")
 require(INDEX, 'const TICKET_SEARCH_ENDPOINTS = Object.freeze([\n  "/api/search/incidencias",\n]);', "Invoice incidents must use the canonical client-scoped incidence search")
 require(INDEX, "autoSelectLatest: false", "Client incidents must remain an explicit choice instead of being auto-selected")
-require(CREATE_TEMPLATE, "fac-create-avatar--tone-${tone}", "Create invoice avatars must inherit the deterministic Facturas palette")
-require(CREATE_STYLE, ".fac-create-avatar--tone-7", "Create invoice must carry the full Facturas avatar tone palette")
+require(CREATE_TEMPLATE, "resolveAvatarPresentation", "Create invoice avatars must delegate identity and tone to AvatarSystem")
+require(CREATE_TEMPLATE, 'data-avatar-system="true"', "Create invoice avatars must be globally managed from first paint")
+require(CREATE_TEMPLATE, 'data-avatar-host="true"', "Create invoice avatars must expose the canonical avatar host")
+require(CREATE_TEMPLATE, 'data-avatar-tone="${attr(String(presentation.tone))}"', "Create invoice avatars must carry the uint32 tone resolved by AvatarSystem")
+reject(CREATE_TEMPLATE, "fac-create-avatar--tone-", "Create invoice must not reintroduce local tone classes")
+reject(CREATE_STYLE, ".fac-create-avatar--tone-", "Create invoice CSS must not own a local avatar palette")
 
 # Facturas resend UX must stay inside the product visual system, never browser chrome.
 reject(INDEX, "¿Quieres volver a enviarla?", "Resend confirmation must not use the browser-native confirm dialog")

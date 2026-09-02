@@ -12,6 +12,7 @@
    - Todos los iconos consumen components/app-icons.css.
    - Filas de entidad usan botones semánticos y abren el owner modal canónico.
    - Incidencias y Facturas permanecen sobre el Home, sin owner-route handoff.
+   - La identidad relacional procede sólo de los DTO ya cargados por cada dominio.
 ========================================================= */
 
 import {
@@ -29,8 +30,15 @@ import {
 import { header, stats } from "./home.template.stats.js";
 import { activity } from "./home.template.activity.js";
 import { invoices } from "./home.template.billing.js";
+import {
+  HOME_ENTITY_RELATION_VERSION,
+} from "./home.template.relation.js";
 
-export { HOME_ACTIONS, HOME_TEMPLATE_VERSION };
+export {
+  HOME_ACTIONS,
+  HOME_ENTITY_RELATION_VERSION,
+  HOME_TEMPLATE_VERSION,
+};
 
 export function renderHomeLoadingState(input = {}) {
   return renderHomeTemplate({ ...input, loading: true });
@@ -66,6 +74,7 @@ export function renderHomeTemplate(input = {}) {
       class="home-view-root ${stateClasses}"
       data-home-scope="true"
       data-home-template-version="${attr(HOME_TEMPLATE_VERSION)}"
+      data-home-relation-version="${attr(HOME_ENTITY_RELATION_VERSION)}"
       data-home-role="${vm.admin ? "admin" : "user"}"
       data-home-admin="${vm.admin ? "true" : "false"}"
       aria-busy="${vm.loading || vm.refreshing ? "true" : "false"}"
@@ -85,6 +94,7 @@ export function renderHomeTemplate(input = {}) {
 export function getHomeTemplateSnapshot() {
   return {
     version: HOME_TEMPLATE_VERSION,
+    relationVersion: HOME_ENTITY_RELATION_VERSION,
     actions: HOME_ACTIONS,
     policy: {
       templateOnly: true,
@@ -99,6 +109,10 @@ export function getHomeTemplateSnapshot() {
       ownerModalFallbackNavigation: false,
       focusRestorationReady: true,
       visibleEntityIds: true,
+      canonicalRelationIdentity: true,
+      relationIdentitySource: "loaded_domain_dto",
+      relationIdentityAddsNoRequests: true,
+      syntheticRelationData: false,
       invoiceTotalMeaning: "total_invoiced",
       invoiceStatsSource: "/api/facturas/stats",
       neverAggregateVisibleInvoiceRows: true,

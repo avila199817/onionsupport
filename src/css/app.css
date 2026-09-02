@@ -16,9 +16,8 @@
    - Dejar TODAS las hojas específicas de ruta a src/router/styles.js.
    - Aplicar el tema público system/light como composición transversal Home + Auth.
    - Permitir composiciones responsive transversales sin parches por vista.
-   - Centralizar el estado de avatares después de todas las vistas/composiciones.
    - Centralizar loading/skeleton en una capa propia posterior a las vistas.
-   - Cerrar la cascada con invariantes geométricas transversales.
+   - Cerrar la cascada con invariantes geométricas y de identidad transversales.
 
    Reglas:
    - Sin declaraciones CSS directas en este archivo.
@@ -31,7 +30,7 @@
    CASCADE LAYERS · menor -> mayor prioridad
 ========================================================= */
 
-@layer tokens, reset, core, layout, components, views, auth, compositions, identity, loading, guardrails;
+@layer tokens, reset, core, layout, components, views, auth, compositions, loading, guardrails;
 
 /* =========================================================
    TOKENS
@@ -51,15 +50,6 @@
 
 /* =========================================================
    APP CHROME GLOBAL
-
-   Sidebar/Topbar pintan sus componentes internos.
-   sidebar.executive.css remata únicamente el interior visual del Sidebar.
-   sidebar.icons.css consume el contrato iconográfico global 24×24.
-   sidebar.executive.interactions.css ancla las interacciones del rail.
-   topbar.executive.css aplica la misma gramática ejecutiva al Topbar.
-   chrome.css se carga el último dentro de layer(layout) y es la ÚNICA
-   autoridad geométrica: offsets, mounts, drawer, backdrop y transición
-   desktop/mobile. chrome.css NO puede autodeclarar otro @layer interno.
 ========================================================= */
 
 @import url("./layout/sidebar.css") layer(layout);
@@ -72,9 +62,6 @@
 
 /* =========================================================
    GLOBAL COMPONENTS
-
-   app-icons.css es la autoridad única de glifos compartidos. El Sidebar
-   define la geometría aprobada y las vistas consumen esas mismas máscaras.
 ========================================================= */
 
 @import url("./components/app-icons.css") layer(components);
@@ -82,19 +69,12 @@
 
 /* =========================================================
    ROUTE VIEWS
-
-   Ninguna hoja de vista se importa aquí. Públicas y privadas se cargan desde
-   src/router/styles.js y cada dominio conserva su propia capa de cascada.
 ========================================================= */
+
+/* Las hojas de ruta se cargan desde src/router/styles.js. */
 
 /* =========================================================
    COMPOSITIONS · RESPONSIVE CROSS-VIEW
-
-   Las composiciones pueden recomponer visualmente varios dominios después de
-   sus hojas de vista sin usar !important. No contienen lógica de negocio.
-
-   La familia public-system-theme-* es deliberadamente transversal: adapta todas las
-   superficies públicas Home + Auth al tema efectivo resuelto por preboot.
 ========================================================= */
 
 @import url("./compositions/public-system-theme-foundation.css") layer(compositions);
@@ -109,32 +89,19 @@
 @import url("./compositions/private-amounts.css") layer(compositions);
 
 /* =========================================================
-   IDENTITY SYSTEM · SINGLE AVATAR STATE AUTHORITY
-
-   Esta capa se aplica después de views/compositions porque el estado real de
-   una imagen debe ganar siempre a cualquier gradiente fallback local. No fija
-   tamaños ni radios: sólo sincroniza image/loading/fallback/error y garantiza
-   que los píxeles alfa permanezcan transparentes.
-========================================================= */
-
-@import url("./components/avatar-system.css") layer(identity);
-
-/* =========================================================
    LOADING SYSTEM · SINGLE SKELETON AUTHORITY
-
-   Se carga DESPUÉS de views/compositions para que ninguna vista pueda volver
-   a imponer shimmer, paleta, radio o altura visual divergente. Las vistas sólo
-   pueden conservar geometría semántica/ancho de su contenido.
 ========================================================= */
 
 @import url("./components/skeleton.css") layer(loading);
 
 /* =========================================================
-   FINAL UI FOUNDATION · LAYOUT GUARDRAILS
+   FINAL UI FOUNDATION · LAYOUT + AVATAR GUARDRAILS
 
-   Esta capa es deliberadamente la última capa declarada. No pinta una vista:
-   impone invariantes de shrink, overflow, scroll, viewport y responsive para
-   que ninguna hoja de ruta pueda volver a romper la geometría de la SPA.
+   Esta capa es deliberadamente la última. Primero fija las invariantes de
+   layout y después AvatarSystem impone una única gramática de identidad para
+   todo el SPA. Ninguna vista puede volver a pintar un fondo, radio, fallback
+   o estado alternativo por encima de una imagen real.
 ========================================================= */
 
 @import url("./core/guardrails.css") layer(guardrails);
+@import url("./components/avatar-system.css") layer(guardrails);

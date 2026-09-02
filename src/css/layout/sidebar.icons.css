@@ -23,6 +23,7 @@
   --sb-icon-facturas: var(--app-icon-facturas);
   --sb-icon-clientes: var(--app-icon-clientes);
   --sb-icon-usuarios: var(--app-icon-usuarios);
+  --sb-icon-empleados: var(--app-icon-empleados);
   --sb-icon-correo: var(--app-icon-correo);
   --sb-icon-servidor: var(--app-icon-servidor);
   --sb-icon-cuenta: var(--app-icon-cuenta);
@@ -63,6 +64,10 @@
 
   .sidebar-link[data-sidebar-key="usuarios"] {
     --sb-current-icon: var(--sb-icon-usuarios);
+  }
+
+  .sidebar-link[data-sidebar-key="empleados"] {
+    --sb-current-icon: var(--sb-icon-empleados);
   }
 
   .sidebar-link[data-sidebar-key="correo"] {

@@ -264,7 +264,7 @@
   display: none;
 }
 
-.sidebar-menu-item[data-route$="/servidor"] {
+.sidebar-menu-item[data-route$="/empleados"] {
   margin-block-start: 10px;
   padding-block-start: 9px;
   border-block-start: 1px solid var(--sb-divider);
@@ -456,7 +456,7 @@
   .is-collapsed,
   [data-open="false"],
   [data-sidebar-state="collapsed"]
-) .sidebar-menu-item[data-route$="/servidor"] {
+) .sidebar-menu-item[data-route$="/empleados"] {
   inline-size: 100%;
   margin-block-start: 8px;
   padding-block-start: 8px;
@@ -488,6 +488,10 @@
 
 .sidebar-link[data-sidebar-key="correo"] {
   --sb-tip: "Correo";
+}
+
+.sidebar-link[data-sidebar-key="empleados"] {
+  --sb-tip: "Empleados";
 }
 
 .sidebar-link[data-sidebar-key="servidor"] {
@@ -623,7 +627,7 @@
     padding-block: 3px;
   }
 
-  .sidebar-menu-item[data-route$="/servidor"] {
+  .sidebar-menu-item[data-route$="/empleados"] {
     margin-block-start: 6px;
     padding-block-start: 6px;
   }
@@ -675,7 +679,7 @@
 }
 
 @media (forced-colors: active) {
-  .sidebar-menu-item[data-route$="/servidor"],
+  .sidebar-menu-item[data-route$="/empleados"],
   .sidebar-footer {
     border-color: CanvasText;
   }

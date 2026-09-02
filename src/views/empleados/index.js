@@ -11,14 +11,14 @@
 "use strict";
 
 export const EMPLEADOS_VIEW_VERSION =
-  "empleados.placeholder.v1-reserved-domain";
+  "empleados.placeholder.v2-internal-company-polish";
 export const EMPLEADOS_VIEW_NAME =
   "EmpleadosView";
 
 const SVG_NS =
   "http://www.w3.org/2000/svg";
 const EMPLOYEE_ICON_PATH =
-  "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z M8 11a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z M5.5 16.5c.35-2.1 1.45-3.4 2.5-3.4s2.15 1.3 2.5 3.4 M13.5 8H18 M13.5 11.5H18 M13.5 15h3";
+  "M8.5 6V4.75A1.75 1.75 0 0 1 10.25 3h3.5a1.75 1.75 0 0 1 1.75 1.75V6 M5.25 6h13.5A2.25 2.25 0 0 1 21 8.25v9.5A2.25 2.25 0 0 1 18.75 20H5.25A2.25 2.25 0 0 1 3 17.75v-9.5A2.25 2.25 0 0 1 5.25 6Z M3 11.25c2.65 1.45 5.65 2.2 9 2.2s6.35-.75 9-2.2 M9.75 12.9v2.35h4.5V12.9 M18.25 2.75v2.5 M17 4h2.5";
 
 function isBrowser() {
   return (

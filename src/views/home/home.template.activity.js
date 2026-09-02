@@ -46,15 +46,6 @@ function overlayEntityType(type = "") {
   return "";
 }
 
-function entityOwnerRoute(type = "") {
-  return {
-    factura: "/facturas",
-    incidencia: "/incidencias",
-    cliente: "/clientes",
-    usuario: "/usuarios",
-  }[overlayEntityType(type)] || "";
-}
-
 function activityEntityId(type = "", source = {}) {
   const entityType = overlayEntityType(type);
   const raw = isObject(source) ? source : {};
@@ -121,9 +112,9 @@ function entityOpenLabel(type = "", id = "") {
 export function entityTriggerAttributes(type = "", id = "", source = "home") {
   const entityType = overlayEntityType(type);
   const entityId = safeDisplayId(id, "");
-  const ownerRoute = entityOwnerRoute(entityType);
+  const ownerInPlace = ["factura", "incidencia"].includes(entityType);
 
-  if (!entityType || !entityId || !ownerRoute) return "";
+  if (!entityType || !entityId) return "";
 
   return `
     data-entity-overlay-trigger="true"
@@ -131,9 +122,8 @@ export function entityTriggerAttributes(type = "", id = "", source = "home") {
     data-entity-type="${attr(entityType)}"
     data-entity-id="${attr(entityId)}"
     data-home-entity-source="${attr(source)}"
-    data-router-link="true"
-    data-route="${attr(ownerRoute)}"
-    ${entityType === "factura" ? 'data-entity-preload="detail"' : ""}
+    data-entity-stay-view="home"
+    ${ownerInPlace ? 'data-entity-overlay-ignore="true" data-entity-open-mode="in-place" data-entity-preload="detail"' : 'data-entity-open-mode="overlay"'}
     aria-haspopup="dialog"
     aria-label="${attr(entityOpenLabel(entityType, entityId))}"
   `;

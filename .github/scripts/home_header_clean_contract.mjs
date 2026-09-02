@@ -105,27 +105,44 @@ assert.match(
   "The large Facturas card must navigate and must never be interpreted as an invoice"
 );
 
+const entityTriggers =
+  html.match(/<button\b[^>]*data-entity-overlay-trigger="true"[^>]*>/g) || [];
+
 assert.equal(
-  (html.match(/data-entity-overlay-trigger="true"/g) || []).length,
+  entityTriggers.length,
   2,
-  "Home must expose one semantic canonical-modal trigger per sample entity"
+  "Home must expose one semantic modal trigger per sample entity"
 );
 assert.equal(
   (html.match(/aria-haspopup="dialog"/g) || []).length,
   2,
   "Home entity targets must announce their dialog behavior"
 );
+assert.equal(
+  (html.match(/data-entity-stay-view="home"/g) || []).length,
+  2,
+  "Every Home entity modal must preserve the Home as visible route"
+);
+
+for (const trigger of entityTriggers) {
+  assert.match(trigger, /data-entity-open-mode="in-place"/);
+  assert.match(trigger, /data-entity-preload="detail"/);
+  assert.match(trigger, /data-home-entity-source="home\.(?:activity|invoices)"/);
+  assert.doesNotMatch(trigger, /data-router-link="true"/);
+  assert.doesNotMatch(trigger, /data-route=/);
+}
+
 assert.match(html, /class="home-entity-row home-entity-row--activity"/);
 assert.match(html, /class="home-entity-row home-entity-row--invoice"/);
 assert.match(
   html,
-  /class="home-entity-row home-entity-row--activity"[^>]*data-entity-type="incidencia"[^>]*data-router-link="true"[^>]*data-route="\/incidencias"/,
-  "Incidencia rows must preload their canonical owner route"
+  /class="home-entity-row home-entity-row--activity"[^>]*data-entity-type="incidencia"[^>]*data-entity-stay-view="home"[^>]*data-entity-open-mode="in-place"/,
+  "Incidencia rows must open their canonical modal without owner-route navigation"
 );
 assert.match(
   html,
-  /class="home-entity-row home-entity-row--invoice"[^>]*data-entity-type="factura"[^>]*data-router-link="true"[^>]*data-route="\/facturas"[^>]*data-entity-preload="detail"/,
-  "Invoice rows must preload both the owner route and the bounded detail request"
+  /class="home-entity-row home-entity-row--invoice"[^>]*data-entity-type="factura"[^>]*data-entity-stay-view="home"[^>]*data-entity-open-mode="in-place"[^>]*data-entity-preload="detail"/,
+  "Invoice rows must open in-place and retain bounded detail intent preload"
 );
 assert.match(html, /<progress max="100"/);
 assert.match(html, />Pagado</);
@@ -167,7 +184,9 @@ const [
   homeExtremeResponsiveCss,
   appCss,
   privateRuntimeSource,
+  homeEntityModalSource,
   entityIntentPreloadSource,
+  facturaModalBridgeSource,
   facturasApiSource,
   ...templateModules
 ] = await Promise.all([
@@ -182,7 +201,9 @@ const [
   readFile("src/css/compositions/home-extreme-responsive.css", "utf8"),
   readFile("src/css/app.css", "utf8"),
   readFile("src/features/private-runtime-ui/index.js", "utf8"),
+  readFile("src/features/home-entity-modal/index.js", "utf8"),
   readFile("src/features/entity-intent-preload/index.js", "utf8"),
+  readFile("src/features/factura-modal-bridge/index.js", "utf8"),
   readFile("src/views/facturas/facturas.api.js", "utf8"),
   readFile("src/views/home/home.template.js", "utf8"),
   readFile("src/views/home/home.template.foundation.js", "utf8"),
@@ -278,14 +299,42 @@ assert.match(
 
 assert.match(
   privateRuntimeSource,
+  /import\("\.\.\/home-entity-modal\/index\.js"\)/,
+  "Authenticated runtime must load the Home modal authority"
+);
+assert.match(
+  privateRuntimeSource,
+  /initModule\(HomeEntityModalUI, payload\);[\s\S]*initModule\(EntityOverlayUI, payload\);/,
+  "Home modal authority must register before the global EntityOverlay capture listener"
+);
+assert.match(
+  homeEntityModalSource,
+  /document\.addEventListener\("click", onDocumentClick, true\)/
+);
+assert.match(homeEntityModalSource, /stopImmediatePropagation/);
+assert.match(homeEntityModalSource, /openFacturaModalFromCurrentView/);
+assert.match(homeEntityModalSource, /openIncidenciaModalFromCurrentView/);
+assert.doesNotMatch(homeEntityModalSource, /Router\.navigate|history\.(?:pushState|replaceState)|location\.(?:assign|replace)/);
+
+assert.match(
+  privateRuntimeSource,
   /import\("\.\.\/entity-intent-preload\/index\.js"\)/,
   "Authenticated runtime must own entity detail intent preload"
 );
 assert.match(entityIntentPreloadSource, /data-entity-preload='detail'/);
-assert.match(entityIntentPreloadSource, /prefetchFacturaDetail/);
-assert.match(entityIntentPreloadSource, /HOVER_DWELL_MS = 72/);
+assert.match(entityIntentPreloadSource, /factura-modal-bridge/);
+assert.match(entityIntentPreloadSource, /incidencia-modal-bridge/);
+assert.match(entityIntentPreloadSource, /HOVER_DWELL_MS = 64/);
+assert.doesNotMatch(entityIntentPreloadSource, /document\.addEventListener\("click"/);
 assert.doesNotMatch(entityIntentPreloadSource, /(^|[^A-Za-z0-9_$])fetch\s*\(/m);
 assert.doesNotMatch(entityIntentPreloadSource, /localStorage|sessionStorage|indexedDB/);
+
+assert.match(facturaModalBridgeSource, /module\?\.FacturasView/);
+assert.match(facturaModalBridgeSource, /controller\.openFactura/);
+assert.match(facturaModalBridgeSource, /prefetchFacturaDetail/);
+assert.match(facturaModalBridgeSource, /data-entity-modal-origin/);
+assert.match(facturaModalBridgeSource, /openIncidenciaModalFromCurrentView/);
+assert.doesNotMatch(facturaModalBridgeSource, /Router\.navigate|history\.(?:pushState|replaceState)|location\.(?:assign|replace)/);
 
 assert.match(facturasApiSource, /FACTURAS_DETAIL_PREFETCH_VERSION/);
 assert.match(facturasApiSource, /DETAIL_PREFETCH_TTL_MS = 20_000/);
@@ -311,5 +360,5 @@ assert.equal(snapshot.policy.canonicalEntityOwnerModals, true);
 assert.equal(snapshot.policy.noInlineSvg, true);
 
 console.log(
-  "Home extreme contract OK · greeting locked · pure card navigation · single-pill IDs · owner/detail intent preload"
+  "Home extreme contract OK · greeting locked · pure card navigation · single-pill IDs · owner modals stay in Home"
 );

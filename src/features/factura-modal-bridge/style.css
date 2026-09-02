@@ -1,0 +1,197 @@
+/* =========================================================
+   Onion Support - Home -> Factura bridge feedback
+
+   Feedback transitorio previo al shell canónico. Desaparece en cuanto el
+   controller de Facturas monta su modal real sobre el Home.
+========================================================= */
+
+body.factura-modal-bridge-feedback-open {
+  overflow: hidden;
+}
+
+[data-facturas-modal-bridge-feedback="true"] {
+  position: relative;
+  z-index: 2600;
+}
+
+.factura-bridge-feedback-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2600;
+  display: grid;
+  place-items: center;
+  padding: clamp(16px, 4vw, 40px);
+  background: color-mix(in srgb, var(--bg, #0b0d10) 72%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.factura-bridge-feedback-panel {
+  width: min(100%, 460px);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+  padding: clamp(20px, 4vw, 28px);
+  border: 1px solid color-mix(in srgb, var(--border, #d7dce2) 84%, transparent);
+  border-radius: 22px;
+  background: var(--surface, #fff);
+  color: var(--text, #171a1f);
+  box-shadow:
+    0 24px 72px rgb(0 0 0 / 22%),
+    0 1px 0 rgb(255 255 255 / 45%) inset;
+  outline: none;
+}
+
+.factura-bridge-feedback-panel:focus-visible {
+  box-shadow:
+    0 24px 72px rgb(0 0 0 / 22%),
+    0 0 0 3px color-mix(in srgb, var(--warning, #d4a000) 28%, transparent);
+}
+
+.factura-bridge-feedback-visual {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  font: 800 1.05rem/1 system-ui, sans-serif;
+}
+
+.factura-bridge-feedback-visual--loading {
+  background: color-mix(in srgb, var(--warning, #d4a000) 12%, var(--surface, #fff));
+  color: var(--warning-strong, var(--warning, #b88700));
+}
+
+.factura-bridge-feedback-visual--error {
+  background: color-mix(in srgb, #dc2626 10%, var(--surface, #fff));
+  color: #b91c1c;
+}
+
+.factura-bridge-feedback-spinner {
+  width: 23px;
+  height: 23px;
+  display: block;
+  border: 2.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 999px;
+  animation: factura-bridge-feedback-spin 0.72s linear infinite;
+}
+
+.factura-bridge-feedback-copy {
+  min-width: 0;
+}
+
+.factura-bridge-feedback-eyebrow {
+  display: block;
+  margin-bottom: 5px;
+  overflow: hidden;
+  color: var(--text-muted, #657080);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.055em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.factura-bridge-feedback-copy h3 {
+  margin: 0;
+  color: inherit;
+  font-size: clamp(1.05rem, 2vw, 1.2rem);
+  line-height: 1.25;
+}
+
+.factura-bridge-feedback-copy p {
+  margin: 8px 0 0;
+  color: var(--text-muted, #657080);
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+.factura-bridge-feedback-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.factura-bridge-feedback-button {
+  min-height: 40px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  padding: 0 16px;
+  font: 700 0.88rem/1 system-ui, sans-serif;
+  cursor: pointer;
+  transition:
+    transform 140ms ease,
+    box-shadow 140ms ease,
+    background-color 140ms ease,
+    border-color 140ms ease;
+}
+
+.factura-bridge-feedback-button:hover {
+  transform: translateY(-1px);
+}
+
+.factura-bridge-feedback-button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--warning, #d4a000) 32%, transparent);
+  outline-offset: 2px;
+}
+
+.factura-bridge-feedback-button--primary {
+  background: var(--warning-strong, var(--warning, #b88700));
+  color: var(--on-warning, #111);
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--warning, #d4a000) 22%, transparent);
+}
+
+.factura-bridge-feedback-button--secondary {
+  border-color: color-mix(in srgb, var(--border, #d7dce2) 90%, transparent);
+  background: var(--surface-raised, var(--surface, #fff));
+  color: var(--text, #171a1f);
+}
+
+@keyframes factura-bridge-feedback-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 520px) {
+  .factura-bridge-feedback-panel {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    border-radius: 18px;
+  }
+
+  .factura-bridge-feedback-visual {
+    width: 42px;
+    height: 42px;
+  }
+
+  .factura-bridge-feedback-actions {
+    grid-column: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .factura-bridge-feedback-spinner {
+    animation-duration: 1.4s;
+  }
+
+  .factura-bridge-feedback-button {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .factura-bridge-feedback-panel,
+  .factura-bridge-feedback-button {
+    border-color: CanvasText;
+  }
+
+  .factura-bridge-feedback-spinner {
+    forced-color-adjust: auto;
+  }
+}

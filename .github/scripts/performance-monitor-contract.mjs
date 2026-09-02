@@ -37,11 +37,6 @@ const summaryPath = path.join(
   "lighthouse-summary.mjs"
 );
 
-const KNOWN_SETUP_NODE_PINS = Object.freeze([
-  "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
-  "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
-]);
-
 const workflow = fs.readFileSync(workflowPath, "utf8");
 const mobile = JSON.parse(fs.readFileSync(mobilePath, "utf8"));
 const desktop = JSON.parse(fs.readFileSync(desktopPath, "utf8"));
@@ -67,23 +62,17 @@ for (const line of actionLines) {
   );
 }
 
-assert.equal(
-  workflow.split("actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803").length - 1,
-  2,
-  "checkout trusted debe aparecer 2 veces"
-);
-const setupPins = KNOWN_SETUP_NODE_PINS.filter((pin) => workflow.includes(pin));
-assert.equal(setupPins.length, 1, "Lighthouse debe usar exactamente un setup-node de migración conocido");
-assert.equal(
-  workflow.split(setupPins[0]).length - 1,
-  2,
-  "setup-node trusted debe aparecer 2 veces"
-);
-assert.equal(
-  workflow.split("treosh/lighthouse-ci-action@3e7e23fb74242897f95c0ba9cabad3d0227b9b18").length - 1,
-  1,
-  "Lighthouse action trusted debe aparecer una vez"
-);
+for (const [token, expectedCount] of Object.entries({
+  "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803": 2,
+  "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020": 2,
+  "treosh/lighthouse-ci-action@3e7e23fb74242897f95c0ba9cabad3d0227b9b18": 1,
+})) {
+  assert.equal(
+    workflow.split(token).length - 1,
+    expectedCount,
+    `${token} debe aparecer ${expectedCount} vez/veces`
+  );
+}
 
 const runnerLines = workflow
   .split(/\r?\n/u)
@@ -235,5 +224,5 @@ for (const token of [
 }
 
 console.log(
-  "Performance monitor contract OK · immutable migration pin · 5 unique samples · deduplicated · mobile/desktop · private artifacts · read-only"
+  "Performance monitor contract OK · strict immutable pin · 5 unique samples · deduplicated · mobile/desktop · private artifacts · read-only"
 );

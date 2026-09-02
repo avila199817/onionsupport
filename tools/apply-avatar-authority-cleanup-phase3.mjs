@@ -57,6 +57,14 @@ replaceExact(
   "migrar enhancement de comentarios"
 );
 
+if (!fs.existsSync("src/features/incidencias-avatar-fallback/index.js")) {
+  throw new Error("No existe el feature legacy de fallback esperado antes de retirarlo");
+}
+fs.rmSync("src/features/incidencias-avatar-fallback", {
+  recursive: true,
+  force: false,
+});
+
 // Perfil técnico: presentación global desde el primer markup.
 {
   const path = "src/features/incidencias-technician-profile/index.js";
@@ -160,10 +168,7 @@ replaceExact(
   replaceRegex(
     path,
     /function renderAssignedBadge\(it = \{\}\) \{[\s\S]*?\n\}\n\n(?=function render)/,
-    (match) => {
-      const nextFunction = match.match(/(?=function render)/);
-      return `function renderAssignedBadge(it = {}) {\n  const name = getAssignedName(it);\n  const norm = key(name);\n  if (!name || norm === "no_asignado" || norm === "sin_asignar") return "";\n  const avatar = getAssignedAvatar(it);\n  const presentation = resolveAvatarPresentation({\n    displayName: name,\n    name,\n    email: getAssignedEmail(it),\n  });\n  return \`\n    <span class="incidencias-assigned-badge" data-assigned="true" title="\${at(\`Técnico: \${name}\`)}">\n      <span class="incidencias-assigned-avatar\${avatar ? " has-image" : " is-fallback"}" data-avatar-system="true" data-avatar-host="true" data-avatar-tone="\${at(String(presentation.tone))}" data-avatar-identity="\${at(presentation.fingerprint)}" data-avatar-initials="\${at(presentation.initials)}" data-has-avatar="\${avatar ? "true" : "false"}" aria-hidden="true">\n        \${avatar ? \`<img data-avatar-image="true" src="\${at(avatar)}" alt="" width="20" height="20" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">\` : ""}\n        <span data-avatar-fallback="true">\${esc(presentation.initials)}</span>\n      </span>\n      <span class="incidencias-assigned-name">\${esc(name)}</span>\n    </span>\n  \`;\n}\n\n`;
-    },
+    `function renderAssignedBadge(it = {}) {\n  const name = getAssignedName(it);\n  const norm = key(name);\n  if (!name || norm === "no_asignado" || norm === "sin_asignar") return "";\n  const avatar = getAssignedAvatar(it);\n  const presentation = resolveAvatarPresentation({\n    displayName: name,\n    name,\n    email: getAssignedEmail(it),\n  });\n  return \`\n    <span class="incidencias-assigned-badge" data-assigned="true" title="\${at(\`Técnico: \${name}\`)}">\n      <span class="incidencias-assigned-avatar\${avatar ? " has-image" : " is-fallback"}" data-avatar-system="true" data-avatar-host="true" data-avatar-tone="\${at(String(presentation.tone))}" data-avatar-identity="\${at(presentation.fingerprint)}" data-avatar-initials="\${at(presentation.initials)}" data-has-avatar="\${avatar ? "true" : "false"}" aria-hidden="true">\n        \${avatar ? \`<img data-avatar-image="true" src="\${at(avatar)}" alt="" width="20" height="20" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">\` : ""}\n        <span data-avatar-fallback="true">\${esc(presentation.initials)}</span>\n      </span>\n      <span class="incidencias-assigned-name">\${esc(name)}</span>\n    </span>\n  \`;\n}\n\n`,
     1,
     "migrar avatar de técnico en listado"
   );

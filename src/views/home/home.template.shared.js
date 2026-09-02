@@ -48,9 +48,16 @@ export function entityIdBadge(kind = "ID", value = "") {
   const id = safeDisplayId(value, "");
   if (!id) return "";
 
+  const label = cleanText(kind, "ID");
+  const showLabel = normalizeKey(label) !== "id";
+
   return `
-    <span class="home-entity-id">
-      <span>${escapeHtml(kind)}</span>
+    <span
+      class="home-entity-id"
+      data-home-id-kind="${attr(normalizeKey(label) || "id")}"
+      title="${attr(`${label} ${id}`)}"
+    >
+      ${showLabel ? `<span>${escapeHtml(label)}</span>` : ""}
       <code>${escapeHtml(id)}</code>
     </span>
   `;

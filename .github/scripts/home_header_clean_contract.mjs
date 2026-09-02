@@ -98,12 +98,26 @@ assert.match(html, /<progress max="100"/);
 assert.match(html, />Pagado</);
 assert.match(html, />Pendiente</);
 
+assert.doesNotMatch(
+  html,
+  /<span>ID<\/span>/,
+  "The literal ID prefix must not be painted in entity badges"
+);
+assert.equal(
+  (html.match(/data-home-id-kind="id"/g) || []).length,
+  2,
+  "Entity identifiers must retain non-visual ID semantics"
+);
+assert.match(html, /<code>INC-20260001-ABC123<\/code>/);
+assert.match(html, /<code>202600052<\/code>/);
+
 const [
   appIconCss,
   sidebarIconCss,
   homeExtremeEntryCss,
   homeExtremeFoundationCss,
   homeExtremeEntitiesCss,
+  homeExtremeInteractionsCss,
   homeExtremeBillingCss,
   homeExtremeStatesCss,
   homeExtremeResponsiveCss,
@@ -115,6 +129,7 @@ const [
   readFile("src/css/compositions/home-extreme.css", "utf8"),
   readFile("src/css/compositions/home-extreme-foundation.css", "utf8"),
   readFile("src/css/compositions/home-extreme-entities.css", "utf8"),
+  readFile("src/css/compositions/home-extreme-interactions.css", "utf8"),
   readFile("src/css/compositions/home-extreme-billing.css", "utf8"),
   readFile("src/css/compositions/home-extreme-states.css", "utf8"),
   readFile("src/css/compositions/home-extreme-responsive.css", "utf8"),
@@ -132,6 +147,7 @@ const [
 const homeExtremeCss = [
   homeExtremeFoundationCss,
   homeExtremeEntitiesCss,
+  homeExtremeInteractionsCss,
   homeExtremeBillingCss,
   homeExtremeStatesCss,
   homeExtremeResponsiveCss,
@@ -195,6 +211,22 @@ assert.doesNotMatch(
 );
 
 assert.match(
+  homeExtremeEntryCss,
+  /home-extreme-entities\.css"\);[\s\S]*home-extreme-interactions\.css"\);[\s\S]*home-extreme-billing\.css"\);/,
+  "Semantic interaction ownership must load after entity geometry and before billing"
+);
+assert.match(
+  homeExtremeInteractionsCss,
+  /\.home-view-root\s+:is\([\s\S]*\.home-activity-item--interactive,[\s\S]*\.home-invoice-item--interactive[\s\S]*\)\s*>\s*\.home-entity-row\s*\{[\s\S]*pointer-events:\s*auto;/,
+  "Interactive Home rows must explicitly restore pointer events after the legacy view layer"
+);
+assert.match(
+  homeExtremeInteractionsCss,
+  /\.home-view-root\s+\.home-entity-hit-target\s*\{[\s\S]*display:\s*none;[\s\S]*pointer-events:\s*none;/,
+  "The retired absolute hit target must never cover semantic row buttons"
+);
+
+assert.match(
   appCss,
   /@import url\("\.\/components\/app-icons\.css"\) layer\(components\);/
 );
@@ -211,5 +243,5 @@ assert.equal(snapshot.policy.canonicalEntityOwnerModals, true);
 assert.equal(snapshot.policy.noInlineSvg, true);
 
 console.log(
-  "Home extreme contract OK · greeting locked · shared Sidebar icons · semantic owner modals · billing overview"
+  "Home extreme contract OK · greeting locked · shared Sidebar icons · clickable owner modals · clean entity IDs · billing overview"
 );

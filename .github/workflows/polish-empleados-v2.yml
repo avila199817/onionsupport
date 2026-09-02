@@ -24,7 +24,7 @@ jobs:
       - name: Apply and verify
         run: |
           set -euo pipefail
-          python3 .github/scripts/polish_empleados_once.py
+          python3 .github/scripts/polish_empleados_runner.py
           node --check src/router/routes.js
           node --check src/ui/sidebar/index.js
           node --check src/ui/sidebar/template.js
@@ -40,7 +40,8 @@ jobs:
           git rm \
             .github/workflows/polish-empleados-once.yml \
             .github/workflows/polish-empleados-v2.yml \
-            .github/scripts/polish_empleados_once.py
+            .github/scripts/polish_empleados_once.py \
+            .github/scripts/polish_empleados_runner.py
           git add \
             src/router/routes.js \
             src/css/components/app-icons.css \

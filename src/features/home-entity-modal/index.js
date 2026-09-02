@@ -16,7 +16,7 @@ import {
 } from "../entity-overlay/intent.js";
 
 export const HOME_ENTITY_MODAL_VERSION =
-  "home-entity-modal.v2-owner-controller-origin-lease";
+  "home-entity-modal.v3-origin-lease-overlay-boundary";
 
 const HOME_SCOPE_SELECTOR =
   "[data-home-scope='true']";
@@ -34,6 +34,15 @@ const HOME_TRIGGER_SELECTOR = [
   "[data-entity-type]",
   "[data-entity-id]",
 ].join("");
+
+const BRIDGE_BOUNDARY_SELECTOR = [
+  "[data-facturas-modal-bridge-host='true']",
+  "[data-facturas-modal-bridge-feedback='true']",
+  "[data-facturas-detail-root='true']",
+  "[data-incidencias-modal-bridge-host='true']",
+  "[data-incidencias-modal-bridge-feedback='true']",
+  "[data-incidencias-modal-root='true']",
+].join(",");
 
 const ROUTER_EVENT_HANDLED_KEY =
   "__onionRouterHandled";
@@ -55,6 +64,7 @@ let installed = false;
 let context = {};
 let openSequence = 0;
 let originObserver = null;
+let boundaryObserver = null;
 let activeOriginHost = null;
 let activeBridgeType = "";
 
@@ -161,6 +171,21 @@ function stopHomeEntityClick(event = null) {
   }
 }
 
+function sealBridgeBoundaries() {
+  if (!isBrowser()) return 0;
+
+  let sealed = 0;
+
+  for (const node of document.querySelectorAll(BRIDGE_BOUNDARY_SELECTOR)) {
+    if (node.getAttribute?.("data-entity-overlay-ignore") === "true") continue;
+    node.setAttribute?.("data-entity-overlay-ignore", "true");
+    node.setAttribute?.("data-entity-modal-origin", "home");
+    sealed += 1;
+  }
+
+  return sealed;
+}
+
 function loadBridge(type = "") {
   const key = normalizeEntityType(type);
   const definition = BRIDGES[key];
@@ -205,6 +230,9 @@ function destroyBridge(type = "") {
 function stopOriginObserver() {
   originObserver?.disconnect?.();
   originObserver = null;
+
+  boundaryObserver?.disconnect?.();
+  boundaryObserver = null;
 }
 
 function releaseOriginLease() {
@@ -245,6 +273,8 @@ function watchOriginLease(originHost = null, type = "") {
   const root = document.querySelector(ROUTE_OBSERVATION_ROOT);
   if (!root) return false;
 
+  sealBridgeBoundaries();
+
   originObserver = new MutationObserver(() => {
     queueMicrotask(() => {
       if (!originStillCommitted()) releaseOriginLease();
@@ -256,6 +286,15 @@ function watchOriginLease(originHost = null, type = "") {
     subtree: true,
     attributes: true,
     attributeFilter: ["hidden", "data-route-host-state"],
+  });
+
+  boundaryObserver = new MutationObserver(() => {
+    queueMicrotask(sealBridgeBoundaries);
+  });
+
+  boundaryObserver.observe(document.body, {
+    childList: true,
+    subtree: true,
   });
 
   return true;
@@ -283,17 +322,25 @@ async function openIntent(intent = null) {
     */
     watchOriginLease(intent.originHost, intent.type);
 
-    const opened = await open(
-      intent.id,
-      intent.opener,
-      {
-        ...context,
-        source: intent.source,
-        originView: "home",
-        originHost: intent.originHost,
-        stayInView: true,
-      }
+    const openTask = Promise.resolve(
+      open(
+        intent.id,
+        intent.opener,
+        {
+          ...context,
+          source: intent.source,
+          originView: "home",
+          originHost: intent.originHost,
+          stayInView: true,
+        }
+      )
     );
+
+    /* El feedback se sella antes de que exista un siguiente evento de usuario. */
+    sealBridgeBoundaries();
+
+    const opened = await openTask;
+    sealBridgeBoundaries();
 
     if (sequence !== openSequence) return false;
 
@@ -311,7 +358,7 @@ function onDocumentClick(event = null) {
   if (
     !installed ||
     !event ||
-    event.button !== 0 ||
+    (event.button !== undefined && event.button !== 0) ||
     hasModifierKey(event)
   ) {
     return;
@@ -383,6 +430,7 @@ export function getHomeEntityModalSnapshot() {
     installed,
     loadedBridgeTypes: Object.freeze([...bridgePromises.keys()]),
     originLease: Boolean(activeOriginHost && activeBridgeType),
+    boundaryObserver: Boolean(boundaryObserver),
     ...metrics,
     policy: Object.freeze({
       committedHomeOnly: true,
@@ -395,6 +443,7 @@ export function getHomeEntityModalSnapshot() {
       stopImmediatePropagation: true,
       originRouteLease: true,
       closesOnExplicitRouteLeave: true,
+      overlayBoundarySealed: true,
       rawIdentifiersInSnapshot: false,
     }),
   });

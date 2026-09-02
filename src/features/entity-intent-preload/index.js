@@ -2,26 +2,45 @@
    Onion Support - Entity Intent Preload
    Archivo: /src/features/entity-intent-preload/index.js
 
-   PRELOAD AUTENTICADO · FACTURA DETAIL · BOUNDED / BEST-EFFORT
+   PRELOAD AUTENTICADO · HOME OWNER MODALS · BOUNDED / BEST-EFFORT
 
-   Adelanta el detalle completo de una factura sólo cuando el usuario muestra
-   intención real sobre una fila del Home: hover estable, foco o pointerdown.
-   No captura clicks, no navega, no usa fetch propio y nunca persiste IDs.
+   Adelanta exclusivamente los recursos que necesita el siguiente modal del
+   Home. Facturas precarga bridge, controller, CSS y detalle canónico; las
+   Incidencias precalientan su bridge, controller, CSS y mejoras progresivas.
+
+   No captura clicks, no navega, no cambia history y nunca persiste IDs.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import {
+  normalizeEntityId,
+  normalizeEntityType,
+} from "../entity-overlay/intent.js";
 
 export const ENTITY_INTENT_PRELOAD_VERSION =
-  "entity-intent-preload.v1-factura-detail";
+  "entity-intent-preload.v2-home-owner-bridges";
 
-const DETAIL_SELECTOR =
-  "[data-entity-preload='detail'][data-entity-type='factura'][data-entity-id]";
-const HOVER_DWELL_MS = 72;
+const DETAIL_SELECTOR = [
+  "[data-home-scope='true'] ",
+  "[data-entity-preload='detail']",
+  "[data-entity-open-mode='in-place']",
+  "[data-entity-type]",
+  "[data-entity-id]",
+].join("");
+
+const HOVER_DWELL_MS = 64;
+
+const BRIDGE_LOADERS = Object.freeze({
+  factura: () => import("../factura-modal-bridge/index.js"),
+  incidencia: () => import("../incidencia-modal-bridge/index.js"),
+});
 
 let installed = false;
 let hoverTimer = 0;
 let hoverNode = null;
-let facturasApiPromise = null;
+
+const bridgePromises = new Map();
+const intentFlights = new Map();
 
 const metrics = {
   intents: 0,
@@ -31,6 +50,7 @@ const metrics = {
   skippedAuth: 0,
   skippedConnection: 0,
   skippedHidden: 0,
+  skippedUnsupported: 0,
 };
 
 function isBrowser() {
@@ -94,15 +114,23 @@ function intentNode(target = null) {
   }
 }
 
-function facturaId(node = null) {
-  return cleanText(
-    node?.dataset?.entityId ||
-      node?.getAttribute?.("data-entity-id") ||
-      "",
+function entityIntent(node = null) {
+  const type = normalizeEntityType(
+    node?.dataset?.entityType ||
+    node?.getAttribute?.("data-entity-type") ||
     ""
-  )
-    .replace(/[\r\n\t]/g, "")
-    .slice(0, 160);
+  );
+
+  const id = normalizeEntityId(
+    type,
+    node?.dataset?.entityId ||
+    node?.getAttribute?.("data-entity-id") ||
+    ""
+  );
+
+  return type && id && BRIDGE_LOADERS[type]
+    ? Object.freeze({ type, id })
+    : null;
 }
 
 function clearHoverIntent() {
@@ -114,21 +142,74 @@ function clearHoverIntent() {
   hoverNode = null;
 }
 
-function getFacturasApi() {
-  if (!facturasApiPromise) {
-    facturasApiPromise = import("../../views/facturas/facturas.api.js")
+function loadBridge(type = "") {
+  const key = normalizeEntityType(type);
+  const loader = BRIDGE_LOADERS[key];
+  if (!loader) return Promise.resolve(null);
+
+  if (!bridgePromises.has(key)) {
+    const pending = Promise.resolve()
+      .then(() => loader())
       .catch((error) => {
-        facturasApiPromise = null;
+        if (bridgePromises.get(key) === pending) {
+          bridgePromises.delete(key);
+        }
         throw error;
       });
+
+    bridgePromises.set(key, pending);
   }
 
-  return facturasApiPromise;
+  return bridgePromises.get(key);
+}
+
+async function warmIntent(intent = null, source = "intent") {
+  if (!intent) return false;
+
+  const module = await loadBridge(intent.type);
+  if (!module) return false;
+
+  if (intent.type === "factura") {
+    const preload =
+      module?.primeFacturaModalBridge ||
+      module?.preloadFacturaModalBridge ||
+      module?.default?.preload ||
+      module?.default?.prime;
+
+    if (typeof preload !== "function") return false;
+
+    preload(intent.id, {
+      source: `entity-intent-preload.${cleanText(source, "intent")}`,
+    });
+
+    return true;
+  }
+
+  if (intent.type === "incidencia") {
+    const prime =
+      module?.primeIncidenciaModalBridge ||
+      module?.default?.prime;
+
+    if (typeof prime !== "function") return false;
+
+    /*
+      El Detail de Incidencias exige lectura remota íntegra y abortable. Aquí
+      sólo calentamos código/CSS; el controller conserva la única petición de
+      datos para no duplicar su contrato de integridad.
+    */
+    prime();
+    return true;
+  }
+
+  return false;
 }
 
 async function preloadNode(node = null, source = "intent") {
-  const id = facturaId(node);
-  if (!id) return false;
+  const intent = entityIntent(node);
+  if (!intent) {
+    metrics.skippedUnsupported += 1;
+    return false;
+  }
 
   metrics.intents += 1;
 
@@ -147,24 +228,29 @@ async function preloadNode(node = null, source = "intent") {
     return false;
   }
 
+  const key = `${intent.type}:${intent.id}`;
+  if (intentFlights.has(key)) return intentFlights.get(key);
+
   metrics.started += 1;
 
-  try {
-    const module = await getFacturasApi();
-    const prefetch = module?.prefetchFacturaDetail || module?.default?.prefetchFacturaDetail;
-    if (typeof prefetch !== "function") return false;
-
-    const detail = await prefetch(id, {
-      source: `entity-intent-preload.${cleanText(source, "intent")}`,
+  const task = warmIntent(intent, source)
+    .then((ready) => {
+      if (ready) metrics.completed += 1;
+      else metrics.failed += 1;
+      return Boolean(ready);
+    })
+    .catch(() => {
+      metrics.failed += 1;
+      return false;
+    })
+    .finally(() => {
+      if (intentFlights.get(key) === task) {
+        intentFlights.delete(key);
+      }
     });
 
-    if (detail) metrics.completed += 1;
-    else metrics.failed += 1;
-    return Boolean(detail);
-  } catch {
-    metrics.failed += 1;
-    return false;
-  }
+  intentFlights.set(key, task);
+  return task;
 }
 
 function onPointerOver(event = null) {
@@ -230,17 +316,18 @@ export function initEntityIntentPreload() {
 }
 
 export function destroyEntityIntentPreload() {
-  if (!isBrowser() || !installed) return false;
+  if (isBrowser() && installed) {
+    clearHoverIntent();
+    document.removeEventListener("pointerover", onPointerOver, true);
+    document.removeEventListener("pointerout", onPointerOut, true);
+    document.removeEventListener("focusin", onFocusIn, true);
+    document.removeEventListener("pointerdown", onPointerDown, true);
+  }
 
-  clearHoverIntent();
-  document.removeEventListener("pointerover", onPointerOver, true);
-  document.removeEventListener("pointerout", onPointerOut, true);
-  document.removeEventListener("focusin", onFocusIn, true);
-  document.removeEventListener("pointerdown", onPointerDown, true);
-  installed = false;
-
-  if (facturasApiPromise) {
-    void facturasApiPromise
+  const facturasPromise = bridgePromises.get("factura");
+  if (facturasPromise) {
+    void Promise.resolve(facturasPromise)
+      .then(() => import("../../views/facturas/facturas.api.js"))
       .then((module) => {
         const clear =
           module?.clearFacturaDetailPrefetchCache ||
@@ -250,7 +337,9 @@ export function destroyEntityIntentPreload() {
       .catch(() => {});
   }
 
-  facturasApiPromise = null;
+  bridgePromises.clear();
+  intentFlights.clear();
+  installed = false;
   return true;
 }
 
@@ -258,22 +347,28 @@ export function getEntityIntentPreloadSnapshot() {
   return Object.freeze({
     version: ENTITY_INTENT_PRELOAD_VERSION,
     installed,
+    loadedBridgeTypes: Object.freeze([...bridgePromises.keys()]),
+    inFlight: intentFlights.size,
     ...metrics,
     policy: Object.freeze({
       authenticatedOnly: true,
-      explicitDetailIntentOnly: true,
-      facturaOnly: true,
+      explicitHomeDetailIntentOnly: true,
+      supportedTypes: Object.freeze(["factura", "incidencia"]),
+      ownerBridgeWarmup: true,
+      facturaDetailPrefetch: true,
+      incidenciaDataOwnedByController: true,
       hoverDwellMs: HOVER_DWELL_MS,
       focusIntent: true,
       pointerdownIntent: true,
       clickCapture: false,
+      routeNavigation: false,
+      historyMutation: false,
       saveDataAware: true,
       slow2gAware: true,
       documentVisibleOnly: true,
       directFetch: false,
       storage: false,
       rawIdentifiersInSnapshot: false,
-      cacheAuthority: "facturas.api.js",
     }),
   });
 }

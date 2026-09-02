@@ -100,6 +100,7 @@ const ICONS = Object.freeze({
   facturas: "facturas",
   clientes: "clientes",
   usuarios: "usuarios",
+  empleados: "empleados",
   cuenta: "cuenta",
   servidor: "servidor",
   logout: "logout",
@@ -120,6 +121,8 @@ const ICON_PATHS = Object.freeze({
     "M8.25 11.25a3.75 3.75 0 1 0 0-7.5 3.75 3.75 0 0 0 0 7.5Z M2.75 21c.45-3.35 2.85-5.65 5.5-5.65s5.05 2.3 5.5 5.65 M16.25 10.75a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M14.75 14.9c.55-.22 1.15-.35 1.85-.35 2.3 0 4.15 1.8 4.65 4.45",
   usuarios:
     "M12 11.5a4.25 4.25 0 1 0 0-8.5 4.25 4.25 0 0 0 0 8.5Z M4.25 21c.6-4.1 3.7-6.75 7.75-6.75S19.15 16.9 19.75 21",
+  empleados:
+    "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z M8 11a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z M5.5 16.5c.35-2.1 1.45-3.4 2.5-3.4s2.15 1.3 2.5 3.4 M13.5 8H18 M13.5 11.5H18 M13.5 15h3",
   cuenta:
     "M12 11.25a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z M4.75 20.75a7.25 7.25 0 0 1 14.5 0",
   servidor:

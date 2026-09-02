@@ -95,6 +95,7 @@ export const ROUTES = Object.freeze({
   facturas: "/facturas",
   clientes: "/clientes",
   usuarios: "/usuarios",
+  empleados: "/empleados",
   correo: "/correo",
   servidor: "/servidor",
   cuenta: "/cuenta",
@@ -113,6 +114,7 @@ export const TECHNICAL_PUBLIC_ROUTES = PUBLIC_ROUTES;
 export const ADMIN_ROUTES = Object.freeze([
   ROUTES.clientes,
   ROUTES.usuarios,
+  ROUTES.empleados,
   ROUTES.correo,
   ROUTES.servidor,
 ]);

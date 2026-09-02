@@ -1,0 +1,131 @@
+/* =========================================================
+   Onion Support - Empleados Placeholder
+   Archivo: /src/css/views/empleados/index.css
+========================================================= */
+
+@layer views {
+  .empleados-view {
+    min-inline-size: 0;
+    min-block-size: 100%;
+    display: grid;
+    place-items: center;
+    padding: clamp(var(--space-lg), 4vw, var(--space-4xl));
+  }
+
+  .empleados-placeholder {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    inline-size: min(100%, 720px);
+    min-block-size: 360px;
+    display: grid;
+    justify-items: center;
+    align-content: center;
+    gap: var(--space-md);
+    padding: clamp(var(--space-2xl), 6vw, var(--space-5xl));
+    border: 1px solid var(--panel-border);
+    border-radius: var(--panel-radius);
+    background:
+      radial-gradient(
+        circle at 50% 0%,
+        var(--accent-subtle),
+        transparent 58%
+      ),
+      var(--panel-bg);
+    box-shadow: var(--panel-shadow);
+    text-align: center;
+  }
+
+  .empleados-placeholder::after {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    inset-inline: 12%;
+    inset-block-end: -38%;
+    block-size: 62%;
+    border-radius: 50%;
+    background: var(--accent-ghost);
+    filter: blur(34px);
+    pointer-events: none;
+  }
+
+  .empleados-placeholder-icon {
+    inline-size: 68px;
+    block-size: 68px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-xl);
+    background: var(--surface-glass);
+    color: var(--text-strong);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .empleados-placeholder-icon svg {
+    inline-size: 36px;
+    block-size: 36px;
+  }
+
+  .empleados-placeholder-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    min-block-size: 28px;
+    padding-inline: var(--space-sm);
+    border: 1px solid var(--border-success);
+    border-radius: var(--radius-pill);
+    background: var(--success-soft);
+    color: var(--success-strong);
+    font-size: var(--font-xs);
+    font-weight: 700;
+    letter-spacing: .035em;
+    text-transform: uppercase;
+  }
+
+  .empleados-placeholder-badge::before {
+    content: "";
+    inline-size: 6px;
+    block-size: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 0 4px var(--success-soft);
+  }
+
+  .empleados-placeholder-title {
+    margin: 0;
+    color: var(--text-strong);
+    font-size: clamp(var(--font-3xl), 4vw, var(--font-4xl));
+    line-height: 1.05;
+    letter-spacing: -.035em;
+  }
+
+  .empleados-placeholder-description,
+  .empleados-placeholder-note {
+    margin: 0;
+    max-inline-size: 56ch;
+  }
+
+  .empleados-placeholder-description {
+    color: var(--text);
+    font-size: var(--font-lg);
+    line-height: 1.55;
+  }
+
+  .empleados-placeholder-note {
+    color: var(--text-muted);
+    font-size: var(--font-sm);
+    line-height: 1.5;
+  }
+
+  @media (max-width: 640px) {
+    .empleados-view {
+      place-items: start stretch;
+      padding: var(--space-md);
+    }
+
+    .empleados-placeholder {
+      min-block-size: 320px;
+      padding: var(--space-2xl) var(--space-lg);
+    }
+  }
+}

@@ -1265,6 +1265,13 @@ function routeIcon(
 
   if (
     clean ===
+    ROUTES.empleados
+  ) {
+    return "empleados";
+  }
+
+  if (
+    clean ===
     ROUTES.servidor
   ) {
     return "servidor";

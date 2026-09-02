@@ -110,6 +110,10 @@ const STYLE_MANIFEST = Object.freeze({
     "/src/css/views/usuarios/create.css",
   ]),
 
+  empleados: Object.freeze([
+    "/src/css/views/empleados/index.css",
+  ]),
+
   correo: Object.freeze([
     "/src/css/views/correo/index.css",
   ]),

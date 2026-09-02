@@ -71,6 +71,10 @@ export const ROUTE_PATHS = Object.freeze({
     ROUTES.usuarios ||
     "/usuarios",
 
+  EMPLEADOS:
+    ROUTES.empleados ||
+    "/empleados",
+
   CORREO:
     ROUTES.correo ||
     "/correo",
@@ -111,6 +115,7 @@ export const ROUTE_NAMES = Object.freeze({
   FACTURAS: "facturas",
   CLIENTES: "clientes",
   USUARIOS: "usuarios",
+  EMPLEADOS: "empleados",
   CORREO: "correo",
   SERVIDOR: "servidor",
   CUENTA: "cuenta",
@@ -815,6 +820,17 @@ const VIEW_SPECS = Object.freeze({
     ]),
   }),
 
+  empleados: Object.freeze({
+    moduleKey: "empleados",
+    loadModule: () =>
+      import(
+        "../views/empleados/index.js"
+      ),
+    names: Object.freeze([
+      "EmpleadosView",
+    ]),
+  }),
+
   correo: Object.freeze({
     moduleKey: "correo",
     loadModule: () =>
@@ -1500,6 +1516,15 @@ const ROUTE_DEFINITIONS = Object.freeze([
     viewKey: "usuarios",
     adminOnly: true,
     order: 50,
+  }),
+
+  createRoute({
+    path: ROUTE_PATHS.EMPLEADOS,
+    name: ROUTE_NAMES.EMPLEADOS,
+    title: "Empleados",
+    viewKey: "empleados",
+    adminOnly: true,
+    order: 52,
   }),
 
   createRoute({

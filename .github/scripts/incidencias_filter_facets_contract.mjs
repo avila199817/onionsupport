@@ -172,6 +172,7 @@ assert.deepEqual(
   {
     pageMode: "cursor",
     limit: 1,
+    includeTotal: true,
     closed: true,
     q: "José",
   },

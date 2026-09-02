@@ -78,9 +78,9 @@ const POST_ROUTER = Object.freeze([
     load: () => import("../features/incidencias-technician-profile/index.js"),
   }),
   Object.freeze({
-    key: "incidencias-avatar-fallback",
+    key: "incidencias-comment-avatars",
     scope: "incidencias",
-    load: () => import("../features/incidencias-avatar-fallback/index.js"),
+    load: () => import("../features/incidencias-comment-avatars/index.js"),
   }),
   Object.freeze({
     key: "incidencias-followup-avatars",

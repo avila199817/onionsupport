@@ -1,5 +1,7 @@
 /* Onion Support · Incidencias Technician Profile v7 */
 
+
+import { resolveAvatarPresentation } from "../avatar-system/identity.js";
 export const INCIDENCIAS_TECHNICIAN_PROFILE_VERSION =
   "incidencias-technician-profile.v7.canonical-technician-contact";
 
@@ -113,20 +115,6 @@ function safeAvatarUrl(value = "") {
 function safeError(error = null) {
   const raw = text(first(error?.message, error?.data?.message, error?.payload?.message), "No se pudo cargar el perfil del técnico.");
   return raw.replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1***").slice(0, 240);
-}
-
-function initials(value = "") {
-  return text(value, "Técnico").split(/\s+/).filter(Boolean).slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() || "").join("") || "TS";
-}
-
-function hash(value = "") {
-  let output = 0;
-  for (const char of text(value, "tecnico")) {
-    output = ((output << 5) - output) + char.charCodeAt(0);
-    output |= 0;
-  }
-  return Math.abs(output);
 }
 
 function numberLabel(value = 0) {
@@ -323,8 +311,15 @@ function eyeIcon() {
 
 function avatarMarkup(tech = {}) {
   const src = safeAvatarUrl(tech.avatar);
-  const tone = hash(tech.email || tech.userId || tech.name) % 10;
-  return `<div class="ui-detail-modal-avatar"><div class="ui-detail-modal-avatar-frame" data-avatar-tone="${tone}" data-has-avatar="${src ? "true" : "false"}" aria-hidden="true">${src ? `<img src="${attr(src)}" alt="" width="72" height="72" loading="eager" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}<span class="ui-detail-modal-avatar-fallback">${escapeHtml(initials(tech.name))}</span></div></div>`;
+  const presentation = resolveAvatarPresentation({
+    ...tech,
+    displayName: tech.name,
+    name: tech.name,
+    email: tech.email,
+    userId: tech.userId,
+    username: tech.username,
+  });
+  return `<div class="ui-detail-modal-avatar"><div class="ui-detail-modal-avatar-frame" data-avatar-system="true" data-avatar-host="true" data-avatar-tone="${presentation.tone}" data-avatar-identity="${attr(presentation.fingerprint)}" data-avatar-initials="${attr(presentation.initials)}" data-has-avatar="${src ? "true" : "false"}" aria-hidden="true">${src ? `<img data-avatar-image="true" src="${attr(src)}" alt="" width="72" height="72" loading="eager" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}<span class="ui-detail-modal-avatar-fallback" data-avatar-fallback="true">${escapeHtml(presentation.initials)}</span></div></div>`;
 }
 
 function statusChip(tech = {}) {

@@ -15,6 +15,7 @@
    - Las previews locales usan object URLs efímeras y se revocan al retirar/cerrar.
 ========================================================= */
 
+import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import {
   INCIDENCIA_CATEGORY_OPTIONS,
   INCIDENCIA_PRIORITY_OPTIONS,
@@ -206,28 +207,6 @@ function firstImageSrc(...values) {
   return "";
 }
 
-function hashText(value = "") {
-  const text = cleanText(value, "");
-  let hash = 0;
-
-  for (let index = 0; index < text.length; index += 1) {
-    hash = ((hash << 5) - hash) + text.charCodeAt(index);
-    hash |= 0;
-  }
-
-  return Math.abs(hash);
-}
-
-function initialsFrom(value = "") {
-  return cleanText(value, "")
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() || "")
-    .join("")
-    .slice(0, 2) || "ON";
-}
-
 function formatBytes(bytes = 0) {
   const size = number(bytes, 0);
   if (size <= 0) return "0 B";
@@ -330,7 +309,14 @@ function normalizeUserResult(user = {}) {
   ), "");
 
   const avatarUrl = firstImageSrc(raw, nested);
-  const avatarToneIdentity = email || userId || name;
+  const presentation = resolveAvatarPresentation({
+    ...raw,
+    displayName: name,
+    name,
+    email,
+    userId,
+    username,
+  });
 
   return {
     id: userId,
@@ -348,8 +334,9 @@ function normalizeUserResult(user = {}) {
     role: cleanText(first(raw.role, raw.rol, nested.role, nested.rol, "user"), "user"),
     avatarUrl,
     avatar: avatarUrl || null,
-    initials: initialsFrom(name),
-    tone: hashText(avatarToneIdentity) % 10,
+    initials: presentation.initials,
+    tone: presentation.tone,
+    avatarIdentity: presentation.fingerprint,
   };
 }
 
@@ -547,12 +534,9 @@ function renderUserAvatar(user = {}, className = "inc-create-user-avatar") {
   const safeUser = normalizeUserResult(user);
   const avatar = safeImageSrc(safeUser.avatarUrl || safeUser.avatar);
   const tone = attr(String(safeUser.tone));
+  const common = `data-avatar-system="true" data-avatar-host="true" data-avatar-tone="${tone}" data-avatar-identity="${attr(safeUser.avatarIdentity)}" data-avatar-initials="${attr(safeUser.initials)}" data-has-avatar="${avatar ? "true" : "false"}"`;
 
-  if (avatar) {
-    return `<span class="${attr(className)} has-image" data-user-tone="${tone}" data-avatar-tone="${tone}"><img src="${attr(avatar)}" alt="" loading="lazy" referrerpolicy="no-referrer"></span>`;
-  }
-
-  return `<span class="${attr(className)}" data-user-tone="${tone}" data-avatar-tone="${tone}">${escapeHtml(safeUser.initials)}</span>`;
+  return `<span class="${attr(className)} ${avatar ? "has-image" : "is-fallback"}" ${common}>${avatar ? `<img data-avatar-image="true" src="${attr(avatar)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : ""}<span data-avatar-fallback="true">${escapeHtml(safeUser.initials)}</span></span>`;
 }
 
 function renderSelectedUser(vm = {}) {

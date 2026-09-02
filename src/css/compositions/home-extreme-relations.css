@@ -1,10 +1,10 @@
 /* Onion Support · Home Extreme relationship identity module.
    Loaded exclusively through home-extreme.css inside layer(compositions).
 
-   Visual parity:
-   - requester identity follows Incidencias;
-   - client/company identity follows Facturas;
-   - no card is nested inside another card.
+   Contrato:
+   - este módulo sólo gobierna layout/tamaño/typography de la relación;
+   - AvatarSystem gobierna forma, borde, fondo, tone, imagen y fallback;
+   - no existe paleta local ni hash local de identidad.
 */
 
 .home-view-root {
@@ -37,95 +37,10 @@
   color: var(--text);
 }
 
+/* Paint is intentionally absent: AvatarSystem is the sole visual authority. */
 .home-view-root .home-entity-relation-avatar {
-  --home-relation-a: var(--accent);
-  --home-relation-b: var(--info);
-
-  position: relative;
-  inline-size: var(--home-relation-avatar-size);
-  block-size: var(--home-relation-avatar-size);
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  flex: 0 0 auto;
-
-  border: 1px solid
-    color-mix(
-      in srgb,
-      var(--home-relation-a) 52%,
-      var(--border-default)
-    );
-  border-radius: 50%;
-  background:
-    linear-gradient(
-      135deg,
-      var(--home-relation-a),
-      var(--home-relation-b)
-    );
-  color: var(--text-on-accent, #fff);
-  box-shadow:
-    0 0 0 2px var(--solid-bg-1, var(--card-bg)),
-    inset 0 1px 0 rgb(255 255 255 / 18%);
-}
-
-.home-view-root
-  .home-entity-relation-avatar[data-avatar-tone="0"] {
-  --home-relation-a: var(--accent);
-  --home-relation-b: var(--info);
-}
-
-.home-view-root
-  .home-entity-relation-avatar[data-avatar-tone="1"] {
-  --home-relation-a: var(--success);
-  --home-relation-b: var(--info);
-}
-
-.home-view-root
-  .home-entity-relation-avatar[data-avatar-tone="2"] {
-  --home-relation-a: var(--warning);
-  --home-relation-b: var(--accent);
-}
-
-.home-view-root
-  .home-entity-relation-avatar[data-avatar-tone="3"] {
-  --home-relation-a: var(--error);
-  --home-relation-b: var(--warning);
-}
-
-.home-view-root
-  .home-entity-relation-avatar[data-avatar-tone="4"] {
-  --home-relation-a: var(--info);
-  --home-relation-b: var(--accent);
-}
-
-.home-view-root
-  .home-entity-relation-avatar[data-avatar-tone="5"] {
-  --home-relation-a: var(--success);
-  --home-relation-b: var(--accent);
-}
-
-.home-view-root
-  .home-entity-relation-avatar[data-avatar-tone="6"] {
-  --home-relation-a: var(--info);
-  --home-relation-b: var(--success);
-}
-
-.home-view-root
-  .home-entity-relation-avatar[data-avatar-tone="7"] {
-  --home-relation-a: var(--warning);
-  --home-relation-b: var(--error);
-}
-
-.home-view-root
-  .home-entity-relation-avatar[data-avatar-tone="8"] {
-  --home-relation-a: var(--error);
-  --home-relation-b: var(--accent);
-}
-
-.home-view-root
-  .home-entity-relation-avatar[data-avatar-tone="9"] {
-  --home-relation-a: var(--accent);
-  --home-relation-b: var(--success);
+  --avatar-size: var(--home-relation-avatar-size);
+  flex: 0 0 var(--home-relation-avatar-size);
 }
 
 .home-view-root .home-entity-relation-fallback {
@@ -220,24 +135,5 @@
 
   .home-view-root .home-entity-relation {
     inline-size: 100%;
-  }
-}
-
-@media (forced-colors: active) {
-  .home-view-root .home-entity-relation-avatar {
-    border-color: CanvasText;
-    background: Canvas;
-    color: CanvasText;
-    box-shadow: none;
-  }
-
-  .home-view-root .home-entity-relation-img {
-    forced-color-adjust: none;
-  }
-}
-
-@media print {
-  .home-view-root .home-entity-relation-avatar {
-    box-shadow: none;
   }
 }

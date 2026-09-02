@@ -27,6 +27,7 @@ const [
 assert.match(template, /data-entity-stay-view="home"/);
 assert.match(template, /data-entity-open-mode="in-place"/);
 assert.match(template, /data-entity-preload="detail"/);
+assert.match(template, /data-entity-overlay-ignore="true"/);
 assert.doesNotMatch(
   template.slice(template.indexOf("export function entityTriggerAttributes")),
   /data-router-link="true"|data-route=/
@@ -38,6 +39,10 @@ assert.match(homeModal, /event\?\.stopImmediatePropagation\?\.\(\)/);
 assert.match(homeModal, /event\[ROUTER_EVENT_HANDLED_KEY\] = true/);
 assert.match(homeModal, /openFacturaModalFromCurrentView/);
 assert.match(homeModal, /openIncidenciaModalFromCurrentView/);
+assert.match(homeModal, /watchOriginLease\(intent\.originHost, intent\.type\)/);
+assert.match(homeModal, /BRIDGE_BOUNDARY_SELECTOR/);
+assert.match(homeModal, /sealBridgeBoundaries/);
+assert.match(homeModal, /optimizeIncidenciaBridgeFeedback/);
 assert.doesNotMatch(
   homeModal,
   /Router\.navigate|AppCore\.navigate|history\.(?:pushState|replaceState)|location\.(?:assign|replace)|window\.location\s*=/
@@ -81,10 +86,12 @@ assert.doesNotMatch(
   /Router\.navigate|AppCore\.navigate|history\.(?:pushState|replaceState)|location\.(?:assign|replace)/
 );
 
-/* Los roots modales bloquean la reinferencia del overlay global. */
+/* Los roots, hosts y feedback bloquean la reinferencia del overlay global. */
 assert.match(overlayIntent, /\[data-entity-overlay-ignore='true'\]/);
 assert.match(facturaBridge, /ENTITY_OVERLAY_IGNORE_ATTRIBUTE/);
+assert.match(homeModal, /data-incidencias-modal-bridge-feedback/);
+assert.match(homeModal, /data-facturas-modal-bridge-feedback/);
 
 console.log(
-  "Home owner modal stay contract: PASS · Home retained · canonical controllers · warm in-place flow"
+  "Home owner modal stay contract: PASS · Home retained · origin lease · sealed owner controllers · instant in-place flow"
 );

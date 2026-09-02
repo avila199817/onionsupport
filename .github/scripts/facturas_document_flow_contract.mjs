@@ -5,11 +5,13 @@ const apiPath = new URL("../../src/views/facturas/facturas.api.js", import.meta.
 const basePath = new URL("../../src/views/facturas/facturas.api.base.js", import.meta.url);
 const controllerPath = new URL("../../src/views/facturas/index.js", import.meta.url);
 const preloadPath = new URL("../../src/features/entity-intent-preload/index.js", import.meta.url);
+const bridgePath = new URL("../../src/features/factura-modal-bridge/index.js", import.meta.url);
 
 const api = fs.readFileSync(apiPath, "utf8");
 const base = fs.readFileSync(basePath, "utf8");
 const controller = fs.readFileSync(controllerPath, "utf8");
 const preload = fs.readFileSync(preloadPath, "utf8");
+const bridge = fs.readFileSync(bridgePath, "utf8");
 
 assert.match(api, /FACTURAS_DOCUMENT_FLOW_VERSION/);
 assert.match(api, /import \* as Base from "\.\/facturas\.api\.base\.js"/);
@@ -36,10 +38,17 @@ assert.match(api, /export function peekFacturaDetail/);
 assert.match(api, /export function clearFacturaDetailPrefetchCache/);
 assert.match(api, /function mutateFactura/);
 assert.match(api, /clearFacturaDetailPrefetchCache\(id\)/);
+
+// La intención del Home precalienta el bridge; el bridge es quien reutiliza la
+// caché canónica de detalle antes de montar el controller propietario.
 assert.match(preload, /data-entity-preload='detail'/);
-assert.match(preload, /prefetchFacturaDetail/);
-assert.match(preload, /HOVER_DWELL_MS = 72/);
+assert.match(preload, /primeFacturaModalBridge/);
+assert.match(preload, /HOVER_DWELL_MS = 64/);
+assert.match(bridge, /prefetchFacturaDetail/);
+assert.match(bridge, /controller\.openFactura/);
+assert.match(bridge, /shellBeforeRemoteHydration:\s*true/);
 assert.doesNotMatch(preload, /(^|[^A-Za-z0-9_$])fetch\s*\(/m);
+assert.doesNotMatch(bridge, /Router\.navigate|history\.(?:pushState|replaceState)/);
 
 // Un Azure Blob privado sin SAS nunca puede ser una URL de acción.
 assert.match(api, /isUnsignedAzureBlobUrl/);
@@ -60,9 +69,9 @@ assert.match(base, /export async function createFacturaRequest/);
 assert.match(base, /export async function viewFacturaPdfRequest/);
 assert.match(base, /export function syncFacturasListCache/);
 
-// El controlador sigue consumiendo exclusivamente facturas.api.js; por tanto
-// el boundary nuevo gobierna create/detail/PDF sin duplicar listeners o DOM.
+// El controller canónico sigue gobernando el modal y consume sólo el entry API.
 assert.match(controller, /from "\.\/facturas\.api\.js"/);
 assert.doesNotMatch(controller, /facturas\.api\.base\.js/);
+assert.match(bridge, /module\?\.FacturasView/);
 
-console.log("Facturas document flow contract: PASS · bounded intent-prefetch cache");
+console.log("Facturas document flow contract: PASS · bounded prefetch · canonical in-place owner modal");

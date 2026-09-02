@@ -12,7 +12,7 @@ const [
   incidencias,
   incidenciasBoundary,
   entityIntent,
-  avatarFallback,
+  commentAvatars,
   followupAvatars,
 ] = await Promise.all([
   read("src/views/facturas/index.js"),
@@ -23,7 +23,7 @@ const [
   read("src/views/incidencias/index.impl.js"),
   read("src/views/incidencias/index.js"),
   read("src/features/entity-overlay/intent.js"),
-  read("src/features/incidencias-avatar-fallback/index.js"),
+  read("src/features/incidencias-comment-avatars/index.js"),
   read("src/features/incidencias-followup-avatars/index.js"),
 ]);
 
@@ -89,18 +89,20 @@ assert.match(bridge, /currentOwnerIsIncidencias\(\)\s*&&/);
 
 /*
   Paridad visual transversal: Facturas mantiene su propia ruta, por lo que el
-  bridge carga explícitamente las mejoras de avatar que normalmente aporta
-  Incidencias. Son progresivas: nunca pertenecen al Promise.all crítico.
+  bridge carga explícitamente los adaptadores de comentario/seguimiento que
+  delegan toda identidad visual en AvatarSystem. Son progresivos: nunca
+  pertenecen al Promise.all crítico.
 */
 assert.match(
   bridge,
-  /import\(["']\.\.\/incidencias-avatar-fallback\/index\.js["']\)/
+  /import\(["']\.\.\/incidencias-comment-avatars\/index\.js["']\)/
 );
 assert.match(
   bridge,
   /import\(["']\.\.\/incidencias-followup-avatars\/index\.js["']\)/
 );
-assert.match(bridge, /mountIncidenciasAvatarFallback/);
+assert.doesNotMatch(bridge, /incidencias-avatar-fallback/);
+assert.match(bridge, /mountIncidenciasCommentAvatars/);
 assert.match(bridge, /mountIncidenciasFollowupAvatars/);
 assert.match(bridge, /syncIncidenciasCommentAvatars/);
 assert.match(bridge, /syncIncidenciasFollowupAvatars/);
@@ -121,8 +123,10 @@ assert.match(bridgeStyle, /\.incidencia-bridge-feedback-spinner/);
 assert.match(bridgeStyle, /prefers-reduced-motion/);
 assert.match(bridgeStyle, /incidencias-modal-bridge-feedback-open/);
 
-/* Las capas importadas siguen siendo las autoridades canónicas de identidad. */
-assert.match(avatarFallback, /export function syncIncidenciasCommentAvatars/);
+/* Las capas importadas siguen siendo adaptadores de la autoridad global. */
+assert.match(commentAvatars, /import\s+["']\.\/style\.css["']/);
+assert.match(commentAvatars, /resolveAvatarPresentation/);
+assert.match(commentAvatars, /export function syncIncidenciasCommentAvatars/);
 assert.match(followupAvatars, /import\s+["']\.\/style\.css["']/);
 assert.match(
   followupAvatars,

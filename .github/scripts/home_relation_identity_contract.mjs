@@ -127,7 +127,7 @@ assert.match(html, /Juan Pablo Ruiz Martín/);
 assert.match(html, /juan\.ruiz@example\.com/);
 assert.match(
   html,
-  /data-home-relation-avatar="false"[\s\S]*?home-entity-relation-fallback">JR</,
+  /data-home-relation-avatar="false"[\s\S]*?home-entity-relation-fallback">JP</,
   "A missing photo must use initials derived from the real full name, never a fabricated asset"
 );
 

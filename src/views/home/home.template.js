@@ -11,6 +11,7 @@
    - Sin CSS, SVG ni handlers inline.
    - Todos los iconos consumen components/app-icons.css.
    - Filas de entidad usan botones semánticos y abren el owner modal canónico.
+   - Incidencias y Facturas permanecen sobre el Home, sin owner-route handoff.
 ========================================================= */
 
 import {
@@ -93,6 +94,9 @@ export function getHomeTemplateSnapshot() {
       noInlineSvg: true,
       semanticEntityButtons: true,
       canonicalEntityOwnerModals: true,
+      ownerModalsStayInHome: true,
+      entityRowsHaveNoOwnerRoute: true,
+      ownerModalFallbackNavigation: false,
       focusRestorationReady: true,
       visibleEntityIds: true,
       invoiceTotalMeaning: "total_invoiced",

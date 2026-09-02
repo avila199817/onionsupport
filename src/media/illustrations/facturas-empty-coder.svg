@@ -1,0 +1,145 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 220" fill="none">
+  <defs>
+    <linearGradient id="screenFrame" x1="190" y1="42" x2="312" y2="152" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#263447"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="hoodie" x1="85" y1="96" x2="155" y2="177" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#60A5FA"/>
+      <stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="desk" x1="45" y1="163" x2="321" y2="183" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#334155"/>
+      <stop offset="1" stop-color="#1F2937"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0" cy="0" r="1" gradientTransform="translate(197 105) rotate(90) scale(97 145)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3B82F6" stop-opacity=".18"/>
+      <stop offset=".56" stop-color="#3B82F6" stop-opacity=".055"/>
+      <stop offset="1" stop-color="#3B82F6" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="softGlow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="7"/>
+    </filter>
+    <filter id="shadow" x="-30%" y="-50%" width="160%" height="220%">
+      <feDropShadow dx="0" dy="7" stdDeviation="6" flood-color="#020617" flood-opacity=".28"/>
+    </filter>
+    <style>
+      .dev-bob { animation: devBob 5.2s ease-in-out infinite; transform-origin: 140px 125px; }
+      .arm-l { animation: typeL .34s ease-in-out infinite alternate; transform-box: fill-box; transform-origin: 88% 78%; }
+      .arm-r { animation: typeR .29s ease-in-out .08s infinite alternate; transform-box: fill-box; transform-origin: 15% 78%; }
+      .key-a { animation: keyTap .34s ease-in-out infinite alternate; }
+      .key-b { animation: keyTap .29s ease-in-out .08s infinite alternate; }
+      .line-a { animation: codePulse 2.2s ease-in-out infinite; }
+      .line-b { animation: codePulse 2.2s ease-in-out .42s infinite; }
+      .line-c { animation: codePulse 2.2s ease-in-out .84s infinite; }
+      .cursor { animation: cursorBlink .82s steps(1,end) infinite; }
+      .status-dot { animation: statusPulse 1.9s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+      .token-l { animation: tokenFloat 4.4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+      .token-r { animation: tokenFloat 4.9s ease-in-out .8s infinite reverse; transform-box: fill-box; transform-origin: center; }
+      .screen-glow { animation: screenGlow 3.8s ease-in-out infinite; }
+      @keyframes devBob { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-2px) } }
+      @keyframes typeL { from { transform: rotate(-1.2deg) translateY(0) } to { transform: rotate(1.4deg) translateY(1.3px) } }
+      @keyframes typeR { from { transform: rotate(1.1deg) translateY(.7px) } to { transform: rotate(-1.5deg) translateY(0) } }
+      @keyframes keyTap { from { opacity:.35 } to { opacity:1 } }
+      @keyframes codePulse { 0%,100% { opacity:.34; transform:translateX(0) } 45%,62% { opacity:1; transform:translateX(2px) } }
+      @keyframes cursorBlink { 0%,48% { opacity:1 } 49%,100% { opacity:.12 } }
+      @keyframes statusPulse { 0%,100% { transform:scale(.92); opacity:.72 } 50% { transform:scale(1.18); opacity:1 } }
+      @keyframes tokenFloat { 0%,100% { transform:translateY(0) rotate(0deg); opacity:.45 } 50% { transform:translateY(-7px) rotate(3deg); opacity:.9 } }
+      @keyframes screenGlow { 0%,100% { opacity:.22 } 50% { opacity:.45 } }
+      @media (prefers-reduced-motion: reduce) {
+        .dev-bob,.arm-l,.arm-r,.key-a,.key-b,.line-a,.line-b,.line-c,.cursor,.status-dot,.token-l,.token-r,.screen-glow { animation:none !important; }
+      }
+    </style>
+  </defs>
+
+  <ellipse cx="182" cy="191" rx="130" ry="13" fill="#020617" opacity=".12"/>
+  <ellipse cx="197" cy="107" rx="154" ry="103" fill="url(#halo)"/>
+  <ellipse class="screen-glow" cx="252" cy="100" rx="67" ry="56" fill="#2563EB" opacity=".22" filter="url(#softGlow)"/>
+
+  <g class="token-l" opacity=".7" stroke="#60A5FA" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M54 79 43 89l11 10"/>
+    <path d="m68 79 11 10-11 10"/>
+  </g>
+  <g class="token-r" opacity=".58" stroke="#34D399" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M322 68h-8c-4 0-6 2-6 6v5c0 4-2 6-6 6 4 0 6 2 6 6v5c0 4 2 6 6 6h8"/>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="48" y="161" width="269" height="13" rx="6.5" fill="url(#desk)"/>
+    <path d="M72 174h11l-7 30H64l8-30ZM285 174h11l8 30h-12l-7-30Z" fill="#1F2937"/>
+  </g>
+
+  <g>
+    <rect x="190" y="42" width="124" height="100" rx="12" fill="url(#screenFrame)" stroke="#475569" stroke-width="1.6"/>
+    <rect x="199" y="51" width="106" height="77" rx="7" fill="#08111F"/>
+    <rect x="199" y="51" width="106" height="13" rx="7" fill="#111C2E"/>
+    <circle cx="208" cy="57.5" r="2.2" fill="#FB7185"/>
+    <circle cx="216" cy="57.5" r="2.2" fill="#FBBF24"/>
+    <circle cx="224" cy="57.5" r="2.2" fill="#34D399"/>
+    <circle class="status-dot" cx="295" cy="57.5" r="2.4" fill="#34D399"/>
+
+    <g stroke-linecap="round" stroke-width="4">
+      <path class="line-a" d="M211 74h24" stroke="#60A5FA"/>
+      <path class="line-a" d="M241 74h13" stroke="#34D399"/>
+      <path class="line-b" d="M216 84h39" stroke="#94A3B8"/>
+      <path class="line-b" d="M261 84h21" stroke="#60A5FA"/>
+      <path class="line-c" d="M211 94h17" stroke="#34D399"/>
+      <path class="line-c" d="M234 94h43" stroke="#60A5FA"/>
+      <path class="line-a" d="M216 104h31" stroke="#94A3B8"/>
+      <path class="line-b" d="M253 104h20" stroke="#34D399"/>
+      <path class="line-c" d="M211 114h43" stroke="#60A5FA"/>
+    </g>
+    <rect class="cursor" x="260" y="110" width="3.3" height="7.5" rx="1.6" fill="#E2E8F0"/>
+    <path d="M243 142h18l4 17h-26l4-17Z" fill="#334155"/>
+    <rect x="226" y="157" width="53" height="5" rx="2.5" fill="#475569"/>
+  </g>
+
+  <g class="dev-bob">
+    <path d="M95 99c7-16 19-24 37-24 18 0 31 9 39 27l8 46H89l6-49Z" fill="url(#hoodie)"/>
+    <path d="M104 108c9 8 17 11 27 11 11 0 22-4 31-12l6 39H96l8-38Z" fill="#1D4ED8" opacity=".55"/>
+
+    <path d="M119 78c-11-7-15-20-9-31 6-12 22-18 35-12 11 5 16 18 12 30-4 12-16 20-28 19-4 0-7-2-10-6Z" fill="#F2C7A5"/>
+    <path d="M107 56c0-17 12-29 30-29 16 0 27 9 29 22 1 9-3 17-9 23-1-8-3-13-8-18-7 3-19 4-30 1-3 7-3 14 0 23-8-5-12-12-12-22Z" fill="#1F2937"/>
+    <path d="M120 58c3 2 7 2 10 0M145 58c-3 2-7 2-10 0" stroke="#334155" stroke-width="2.2" stroke-linecap="round" opacity=".72"/>
+    <path d="M133 62v5" stroke="#D99B78" stroke-width="2" stroke-linecap="round"/>
+    <path d="M128 72c4 3 9 3 13 0" stroke="#C77F66" stroke-width="2" stroke-linecap="round"/>
+
+    <path d="M113 84c5 7 13 11 21 11 8 0 15-3 21-9" stroke="#BFDBFE" stroke-width="5" stroke-linecap="round" opacity=".85"/>
+    <path d="M98 119c-7 14-11 29-10 45h38l7-32-35-13Z" fill="#1E40AF" opacity=".52"/>
+    <path d="M166 119c7 13 11 28 12 45h-40l-5-32 33-13Z" fill="#1E40AF" opacity=".52"/>
+
+    <g class="arm-l">
+      <path d="M104 113c12 5 23 15 32 29l-13 7c-10-12-20-20-31-24l12-12Z" fill="#60A5FA"/>
+      <path d="M123 148c8 4 15 6 24 7l-1 9c-11 0-20-2-29-7l6-9Z" fill="#F2C7A5"/>
+      <ellipse cx="148" cy="159" rx="7" ry="4.7" fill="#F2C7A5"/>
+    </g>
+    <g class="arm-r">
+      <path d="M161 112c-9 7-17 18-23 31l13 6c8-12 16-20 25-25l-15-12Z" fill="#3B82F6"/>
+      <path d="M151 148c9 4 17 6 26 7l-1 9c-11 0-21-2-30-7l5-9Z" fill="#F2C7A5"/>
+      <ellipse cx="178" cy="159" rx="7" ry="4.7" fill="#F2C7A5"/>
+    </g>
+
+    <path d="M99 163h31l-5 22H91l8-22Z" fill="#1F2937"/>
+    <path d="M140 163h34l8 22h-37l-5-22Z" fill="#111827"/>
+  </g>
+
+  <g filter="url(#shadow)">
+    <path d="M121 158h78c3 0 5 2 6 5l3 9h-94l3-10c1-2 2-4 4-4Z" fill="#334155" stroke="#64748B" stroke-width="1.2"/>
+    <rect x="126" y="162" width="69" height="7" rx="3.5" fill="#172033"/>
+    <g fill="#60A5FA">
+      <rect class="key-a" x="132" y="164" width="5" height="2.5" rx="1.2"/>
+      <rect class="key-b" x="141" y="164" width="5" height="2.5" rx="1.2"/>
+      <rect class="key-a" x="150" y="164" width="5" height="2.5" rx="1.2"/>
+      <rect class="key-b" x="159" y="164" width="5" height="2.5" rx="1.2"/>
+      <rect class="key-a" x="168" y="164" width="5" height="2.5" rx="1.2"/>
+      <rect class="key-b" x="177" y="164" width="5" height="2.5" rx="1.2"/>
+      <rect class="key-a" x="186" y="164" width="4" height="2.5" rx="1.2"/>
+    </g>
+  </g>
+
+  <g transform="translate(290 150)">
+    <path d="M0 5h19v18H3c-2 0-3-1-3-3V5Z" fill="#1F2937" stroke="#475569" stroke-width="1.4"/>
+    <path d="M19 9h5c5 0 6 10 0 11h-5" stroke="#64748B" stroke-width="2" stroke-linecap="round"/>
+    <path d="M6 1c-2-4 3-5 1-9M13 1c-2-4 3-5 1-9" stroke="#60A5FA" stroke-width="1.6" stroke-linecap="round" opacity=".6"/>
+  </g>
+</svg>

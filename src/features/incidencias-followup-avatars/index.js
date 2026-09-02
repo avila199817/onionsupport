@@ -1,13 +1,14 @@
 /* =========================================================
-   Onion Support - Incidencias Follow-up Avatars
+   Onion Support · Incidencias Follow-up Avatars
+
+   VISUAL ADAPTER · GLOBAL AVATAR AUTHORITY
 
    Responsabilidad:
-   - Pintar el avatar de cada autor en la sección "Seguimiento" del modal.
-   - Actuar sobre las cards generadas por incidencias-detail-state.
-   - Resolver fotos por userId/email y usar nombre sólo para legacy.
-   - Reutilizar el tono vivo del solicitante o técnico ya renderizado en el modal.
-   - Completar cualquier autor sin foto con iniciales canónicas y tono determinista.
-   - Mantener presentación co-localizada en style.css, cargada con este feature.
+   - Montar el avatar de cada autor en "Seguimiento".
+   - Resolver identidad desde el detalle hidratado antes del primer paint.
+   - Reutilizar foto real de solicitante/técnico cuando existe.
+   - Delegar iniciales, tone, image/fallback y errores a AvatarSystem.
+   - No mantener paleta, hash, listeners de imagen ni internals ajenos.
 ========================================================= */
 
 "use strict";
@@ -19,11 +20,18 @@ import {
 } from "../../views/incidencias/incidencias.api.js";
 
 import {
-  IncidenciasAvatarFallbackInternals,
-} from "../incidencias-avatar-fallback/index.js";
+  resolveAvatarPresentation,
+} from "../avatar-system/identity.js";
+
+import {
+  buildCommentIdentityIndex,
+  requesterIdentity,
+  resolveCommentProfile,
+  technicianIdentity,
+} from "../incidencias-comment-identity/index.js";
 
 export const INCIDENCIAS_FOLLOWUP_AVATARS_VERSION =
-  "incidencias.followup-avatars.v5.identity-first-single-paint";
+  "incidencias.followup-avatars.v6.global-avatar-authority";
 
 const MODAL_SELECTOR =
   "[data-incidencias-modal-root='true']";
@@ -43,12 +51,6 @@ const REQUESTER_IMAGE_SELECTOR =
 const TECHNICIAN_IMAGE_SELECTOR =
   "[data-modal-technician-avatar-img='true']";
 
-const REQUESTER_FRAME_SELECTOR =
-  "[data-modal-avatar-frame='true']";
-
-const TECHNICIAN_FRAME_SELECTOR =
-  "[data-modal-technician-avatar-frame='true']";
-
 const AUTHOR_WRAP_CLASS =
   "incidencias-modal-description-comment-author";
 
@@ -61,28 +63,12 @@ const AVATAR_IMAGE_CLASS =
 const AVATAR_FALLBACK_CLASS =
   "incidencias-modal-description-comment-avatar-fallback";
 
-const CANONICAL_AVATAR_FRAME_CLASS =
-  "ui-detail-modal-avatar-frame";
-
-const CANONICAL_AVATAR_FALLBACK_CLASS =
-  "ui-detail-modal-avatar-fallback";
-
 const MOUNT_KEY =
   "__ONION_INCIDENCIAS_FOLLOWUP_AVATARS__";
 
 const modalState = new WeakMap();
-
 let observer = null;
 let queued = false;
-
-const {
-  avatarInitials,
-  avatarToneFromIdentity,
-  requesterIdentity,
-  technicianIdentity,
-  buildCommentIdentityIndex,
-  resolveCommentProfile,
-} = IncidenciasAvatarFallbackInternals;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -97,30 +83,7 @@ function text(value = "") {
 
 function cleanImageSrc(image = null) {
   if (!image || image.hidden === true) return "";
-
-  const src = text(image.getAttribute?.("src") || "");
-  if (!src) return "";
-
-  const host = image.closest?.("[data-has-avatar]") || null;
-  if (host?.dataset?.hasAvatar === "false") return "";
-
-  if (
-    image.complete === true &&
-    Number(image.naturalWidth || 0) === 0
-  ) {
-    return "";
-  }
-
-  return src;
-}
-
-function resolveAvatarTone(host = null, fallbackIdentity = "") {
-  const rawTone = text(host?.dataset?.avatarTone || "");
-  const tone = Number.parseInt(rawTone, 10);
-
-  return Number.isInteger(tone) && tone >= 0 && tone <= 9
-    ? tone
-    : avatarToneFromIdentity(fallbackIdentity);
+  return text(image.getAttribute?.("src") || "");
 }
 
 function ticketId(modal = null) {
@@ -151,9 +114,17 @@ function unwrapDetail(value = null) {
   return {};
 }
 
+function profilePresentation(name = "", identity = {}) {
+  return resolveAvatarPresentation({
+    displayName: name,
+    name,
+    email: identity.email,
+    userId: identity.userId,
+  });
+}
+
 function requesterProfile(modal = null, detail = {}) {
   const host = modal?.querySelector?.(REQUESTER_SELECTOR) || null;
-  const frame = host?.querySelector?.(REQUESTER_FRAME_SELECTOR) || null;
   const image = host?.querySelector?.(REQUESTER_IMAGE_SELECTOR) || null;
   const name = text(host?.getAttribute?.("title") || "");
   const identity = requesterIdentity(detail);
@@ -164,14 +135,13 @@ function requesterProfile(modal = null, detail = {}) {
     name,
     src: cleanImageSrc(image),
     source: "requester",
-    tone: resolveAvatarTone(frame, identity.email || name),
+    presentation: profilePresentation(name, identity),
     ...identity,
   });
 }
 
 function technicianProfile(modal = null, detail = {}) {
   const host = modal?.querySelector?.(TECHNICIAN_SELECTOR) || null;
-  const frame = host?.querySelector?.(TECHNICIAN_FRAME_SELECTOR) || null;
   const image = host?.querySelector?.(TECHNICIAN_IMAGE_SELECTOR) || null;
   const name = text(
     host?.querySelector?.(".incidencias-modal-technician-copy strong")?.textContent ||
@@ -186,7 +156,7 @@ function technicianProfile(modal = null, detail = {}) {
     name,
     src: cleanImageSrc(image),
     source: "technician",
-    tone: resolveAvatarTone(frame, identity.email || name),
+    presentation: profilePresentation(name, identity),
     ...identity,
   });
 }
@@ -238,22 +208,15 @@ function ensureAuthorWrap(head = null, author = null) {
   return wrap;
 }
 
-function setAvatarState(
-  avatar = null,
-  head = null,
-  {
-    hasAvatar = false,
-    source = "initials-fallback",
-  } = {}
-) {
-  if (!avatar || !head) return false;
+function presentationForAuthor(profile = null, authorText = "") {
+  if (profile?.presentation) return profile.presentation;
 
-  avatar.dataset.hasAvatar = hasAvatar ? "true" : "false";
-  avatar.dataset.fallback = hasAvatar ? "false" : "true";
-  avatar.dataset.followupAvatarSource = source;
-  head.dataset.followupAvatarSource = source;
-
-  return true;
+  return resolveAvatarPresentation({
+    displayName: authorText,
+    name: authorText,
+    email: profile?.email,
+    userId: profile?.userId,
+  });
 }
 
 function createAvatar(head = null, profile = null, authorText = "") {
@@ -262,35 +225,30 @@ function createAvatar(head = null, profile = null, authorText = "") {
 
   if (!wrap || !authorText) return null;
 
-  const tone = Number.isInteger(profile?.tone)
-    ? profile.tone
-    : avatarToneFromIdentity(profile?.email || profile?.name || authorText);
+  const presentation = presentationForAuthor(profile, authorText);
+  const hasImage = Boolean(profile?.src);
 
   const avatar = document.createElement("span");
-  avatar.className =
-    `${AVATAR_CLASS} ${CANONICAL_AVATAR_FRAME_CLASS}`;
+  avatar.className = AVATAR_CLASS;
   avatar.setAttribute("aria-hidden", "true");
   avatar.dataset.followupAvatar = "true";
-  avatar.dataset.avatarTone = String(tone);
+  avatar.dataset.avatarSystem = "true";
+  avatar.dataset.avatarHost = "true";
+  avatar.dataset.avatarTone = String(presentation.tone);
+  avatar.dataset.avatarIdentity = presentation.fingerprint;
+  avatar.dataset.avatarInitials = presentation.initials;
+  avatar.dataset.hasAvatar = hasImage ? "true" : "false";
 
   const fallback = document.createElement("span");
-  fallback.className =
-    `${AVATAR_FALLBACK_CLASS} ${CANONICAL_AVATAR_FALLBACK_CLASS}`;
-  fallback.textContent = avatarInitials(authorText);
+  fallback.className = AVATAR_FALLBACK_CLASS;
+  fallback.textContent = presentation.initials;
+  fallback.dataset.avatarFallback = "true";
   avatar.appendChild(fallback);
 
-  const fallbackSource = profile?.source
-    ? `${profile.source}-fallback`
-    : "initials-fallback";
-
-  setAvatarState(avatar, head, {
-    hasAvatar: false,
-    source: fallbackSource,
-  });
-
-  if (profile?.src) {
+  if (hasImage) {
     const image = document.createElement("img");
     image.className = AVATAR_IMAGE_CLASS;
+    image.src = profile.src;
     image.alt = "";
     image.width = 28;
     image.height = 28;
@@ -299,47 +257,12 @@ function createAvatar(head = null, profile = null, authorText = "") {
     image.referrerPolicy = "no-referrer";
     image.draggable = false;
     image.setAttribute("aria-hidden", "true");
-
-    image.addEventListener(
-      "load",
-      () => {
-        setAvatarState(avatar, head, {
-          hasAvatar: true,
-          source: profile.source,
-        });
-      },
-      { once: true }
-    );
-
-    image.addEventListener(
-      "error",
-      () => {
-        image.remove();
-        setAvatarState(avatar, head, {
-          hasAvatar: false,
-          source: fallbackSource,
-        });
-      },
-      { once: true }
-    );
-
-    image.src = profile.src;
+    image.dataset.avatarImage = "true";
     avatar.insertBefore(image, fallback);
-
-    if (image.complete && Number(image.naturalWidth || 0) > 0) {
-      setAvatarState(avatar, head, {
-        hasAvatar: true,
-        source: profile.source,
-      });
-    }
   }
 
-  /*
-    El avatar estable es siempre el primer hijo del wrapper y el nombre el segundo.
-    La fecha permanece hermana independiente a la derecha. El fallback ya ocupa
-    la geometría definitiva mientras una foto carga o si termina fallando.
-  */
   wrap.insertBefore(avatar, author || wrap.firstChild);
+  head.dataset.followupAvatarSource = profile?.source || "initials-fallback";
   head.dataset.followupAvatarAuthor = authorText;
 
   return avatar;
@@ -359,11 +282,8 @@ function syncHead(head = null, identityIndex = new Map(), availableProfiles = []
     identityIndex,
     availableProfiles
   );
-
+  const presentation = presentationForAuthor(profile, authorText);
   const expectedSrc = text(profile?.src || "");
-  const expectedTone = Number.isInteger(profile?.tone)
-    ? profile.tone
-    : avatarToneFromIdentity(profile?.email || profile?.name || authorText);
 
   const current = head.querySelector?.(`.${AVATAR_CLASS}`) || null;
   const currentImage = current?.querySelector?.(`.${AVATAR_IMAGE_CLASS}`) || null;
@@ -372,7 +292,7 @@ function syncHead(head = null, identityIndex = new Map(), availableProfiles = []
   if (
     current &&
     currentSrc === expectedSrc &&
-    current.dataset.avatarTone === String(expectedTone) &&
+    current.dataset.avatarIdentity === presentation.fingerprint &&
     head.dataset.followupAvatarAuthor === authorText
   ) {
     return true;
@@ -387,7 +307,6 @@ async function hydrate(modal = null) {
   if (!id || !modal) return null;
 
   let state = modalState.get(modal) || null;
-
   if (state?.detail) return state.detail;
   if (state?.promise) return state.promise;
 
@@ -441,18 +360,12 @@ export function syncModal(modal = null) {
   const state = modalState.get(modal) || null;
 
   if (!state?.detail) {
-    /*
-      Identity-first: no se monta un tono provisional basado sólo en el nombre.
-      El detalle ya contiene la identidad estable; al resolverlo, syncModal se
-      ejecuta de nuevo y crea cada fallback una única vez con su tono definitivo.
-    */
     queueHydration(modal);
     return 0;
   }
 
   const availableProfiles = profiles(modal, state.detail);
   const identityIndex = buildCommentIdentityIndex(state.detail);
-
   let synced = 0;
 
   for (const head of heads) {
@@ -466,7 +379,6 @@ export function syncIncidenciasFollowupAvatars(root = document) {
   if (!root?.querySelectorAll) return 0;
 
   const modals = [];
-
   if (root?.matches?.(MODAL_SELECTOR)) modals.push(root);
 
   for (const modal of root.querySelectorAll(MODAL_SELECTOR)) {
@@ -481,7 +393,6 @@ export function syncIncidenciasFollowupAvatars(root = document) {
 
 function queueSync() {
   if (!isBrowser() || queued) return false;
-
   queued = true;
 
   Promise.resolve().then(() => {
@@ -550,7 +461,8 @@ export function mountIncidenciasFollowupAvatars() {
     observerActive,
     target: "Seguimiento",
     selector: COMMENT_HEAD_SELECTOR,
-    presentation: "shared-canonical-visual",
+    identityFirst: true,
+    avatarAuthority: "global",
     mountedAt: new Date().toISOString(),
   });
 
@@ -558,16 +470,6 @@ export function mountIncidenciasFollowupAvatars() {
 }
 
 mountIncidenciasFollowupAvatars();
-
-export const IncidenciasFollowupAvatarInternals = Object.freeze({
-  ticketId,
-  requesterProfile,
-  technicianProfile,
-  directAuthor,
-  resolveAvatarTone,
-  createAvatar,
-  syncHead,
-});
 
 export default Object.freeze({
   version: INCIDENCIAS_FOLLOWUP_AVATARS_VERSION,

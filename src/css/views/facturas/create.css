@@ -559,19 +559,6 @@ body.facturas-create-open {
   font-size: var(--font-xs);
   font-weight: var(--weight-black);
 }
-
-
-.fac-create-avatar--tone-0 { --fac-avatar-a: var(--accent); --fac-avatar-b: var(--info); }
-.fac-create-avatar--tone-1 { --fac-avatar-a: var(--success); --fac-avatar-b: var(--info); }
-.fac-create-avatar--tone-2 { --fac-avatar-a: var(--warning); --fac-avatar-b: var(--accent); }
-.fac-create-avatar--tone-3 { --fac-avatar-a: var(--error); --fac-avatar-b: var(--warning); }
-.fac-create-avatar--tone-4 { --fac-avatar-a: var(--info); --fac-avatar-b: var(--accent); }
-.fac-create-avatar--tone-5 { --fac-avatar-a: var(--success); --fac-avatar-b: var(--accent); }
-.fac-create-avatar--tone-6 { --fac-avatar-a: var(--info); --fac-avatar-b: var(--success); }
-.fac-create-avatar--tone-7 { --fac-avatar-a: var(--warning); --fac-avatar-b: var(--error); }
-.fac-create-avatar--tone-8 { --fac-avatar-a: var(--error); --fac-avatar-b: var(--accent); }
-.fac-create-avatar--tone-9 { --fac-avatar-a: var(--accent); --fac-avatar-b: var(--success); }
-
 .fac-create-avatar img {
   position: absolute;
   inset: 0;

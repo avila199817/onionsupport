@@ -605,18 +605,6 @@ body.clientes-create-open {
 .cli-create-user-avatar:has(img) .cli-create-user-avatar-fallback {
   opacity: 0;
 }
-
-.cli-create-user-avatar-tone-0 { --cli-create-avatar-a: var(--accent); --cli-create-avatar-b: var(--info); }
-.cli-create-user-avatar-tone-1 { --cli-create-avatar-a: var(--info); --cli-create-avatar-b: var(--accent); }
-.cli-create-user-avatar-tone-2 { --cli-create-avatar-a: var(--success); --cli-create-avatar-b: var(--info); }
-.cli-create-user-avatar-tone-3 { --cli-create-avatar-a: var(--warning); --cli-create-avatar-b: var(--accent); }
-.cli-create-user-avatar-tone-4 { --cli-create-avatar-a: var(--accent); --cli-create-avatar-b: var(--success); }
-.cli-create-user-avatar-tone-5 { --cli-create-avatar-a: var(--info); --cli-create-avatar-b: var(--success); }
-.cli-create-user-avatar-tone-6 { --cli-create-avatar-a: var(--warning); --cli-create-avatar-b: var(--info); }
-.cli-create-user-avatar-tone-7 { --cli-create-avatar-a: var(--error); --cli-create-avatar-b: var(--accent); }
-.cli-create-user-avatar-tone-8 { --cli-create-avatar-a: var(--success); --cli-create-avatar-b: var(--accent); }
-.cli-create-user-avatar-tone-9 { --cli-create-avatar-a: var(--accent); --cli-create-avatar-b: var(--warning); }
-
 .cli-create-user-search-state,
 .cli-create-search-state {
   min-block-size: 40px;

@@ -215,18 +215,6 @@ body.clientes-detail-open {
 .clientes-modal-avatar-frame[data-has-avatar="true"] .clientes-modal-avatar-fallback {
   opacity: 0;
 }
-
-.clientes-modal-avatar-frame[data-avatar-tone="0"] { --cli-detail-avatar-a: var(--accent); --cli-detail-avatar-b: var(--info); }
-.clientes-modal-avatar-frame[data-avatar-tone="1"] { --cli-detail-avatar-a: var(--info); --cli-detail-avatar-b: var(--accent); }
-.clientes-modal-avatar-frame[data-avatar-tone="2"] { --cli-detail-avatar-a: var(--success); --cli-detail-avatar-b: var(--info); }
-.clientes-modal-avatar-frame[data-avatar-tone="3"] { --cli-detail-avatar-a: var(--warning); --cli-detail-avatar-b: var(--accent); }
-.clientes-modal-avatar-frame[data-avatar-tone="4"] { --cli-detail-avatar-a: var(--accent); --cli-detail-avatar-b: var(--success); }
-.clientes-modal-avatar-frame[data-avatar-tone="5"] { --cli-detail-avatar-a: var(--info); --cli-detail-avatar-b: var(--success); }
-.clientes-modal-avatar-frame[data-avatar-tone="6"] { --cli-detail-avatar-a: var(--warning); --cli-detail-avatar-b: var(--info); }
-.clientes-modal-avatar-frame[data-avatar-tone="7"] { --cli-detail-avatar-a: var(--error); --cli-detail-avatar-b: var(--accent); }
-.clientes-modal-avatar-frame[data-avatar-tone="8"] { --cli-detail-avatar-a: var(--success); --cli-detail-avatar-b: var(--accent); }
-.clientes-modal-avatar-frame[data-avatar-tone="9"] { --cli-detail-avatar-a: var(--accent); --cli-detail-avatar-b: var(--warning); }
-
 /* =========================================================
    CHIPS / ID
 ========================================================= */

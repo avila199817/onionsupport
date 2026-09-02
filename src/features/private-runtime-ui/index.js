@@ -4,6 +4,7 @@
 
    Única puerta de entrada del chrome privado:
    - El build carga CSS, Sidebar, Topbar, AppChrome y EntityOverlay tras Auth.
+   - Precarga de entidad se activa sólo tras Auth y nunca captura navegación.
    - Las rutas públicas/anónimas del artefacto no descargan runtime privado.
    - El source legacy conserva app.css completo para rollback y desarrollo.
    - Si falla el chunk CSS compilado, existe fallback same-origin CSP-clean.
@@ -14,7 +15,7 @@
 import { AppCore } from "../../core/index.js";
 
 export const PRIVATE_RUNTIME_UI_VERSION =
-  "private-runtime-ui.v3-built-css-boundary";
+  "private-runtime-ui.v4-entity-intent-preload";
 
 const PRIVATE_STYLESHEET_HREF =
   "/src/css/private.css";
@@ -26,6 +27,7 @@ let SidebarUI = null;
 let TopbarUI = null;
 let AppChromeUI = null;
 let EntityOverlayUI = null;
+let EntityIntentPreloadUI = null;
 let stylesheetPromise = null;
 let stylesheetReady = false;
 let ensurePromise = null;
@@ -197,19 +199,35 @@ async function ensurePrivateStylesheet() {
 }
 
 async function loadPrivateModules() {
-  const [sidebarModule, topbarModule, chromeModule, overlayModule] =
-    await Promise.all([
-      import("../../ui/sidebar/index.js"),
-      import("../../ui/topbar/index.js"),
-      import("../../ui/chrome/index.js"),
-      import("../entity-overlay/index.js"),
-    ]);
+  const [
+    sidebarModule,
+    topbarModule,
+    chromeModule,
+    overlayModule,
+    entityIntentPreloadModule,
+  ] = await Promise.all([
+    import("../../ui/sidebar/index.js"),
+    import("../../ui/topbar/index.js"),
+    import("../../ui/chrome/index.js"),
+    import("../entity-overlay/index.js"),
+    import("../entity-intent-preload/index.js"),
+  ]);
 
   SidebarUI = sidebarModule?.SidebarUI || sidebarModule?.default || null;
   TopbarUI = topbarModule?.TopbarUI || topbarModule?.default || null;
   AppChromeUI = chromeModule?.AppChromeUI || chromeModule?.default || null;
   EntityOverlayUI = overlayModule?.EntityOverlay || overlayModule?.default || null;
-  return Boolean(SidebarUI && TopbarUI);
+  EntityIntentPreloadUI =
+    entityIntentPreloadModule?.EntityIntentPreload ||
+    entityIntentPreloadModule?.default ||
+    null;
+
+  return Boolean(
+    SidebarUI &&
+    TopbarUI &&
+    EntityOverlayUI &&
+    EntityIntentPreloadUI
+  );
 }
 
 async function initModule(module, payload = {}) {
@@ -225,7 +243,8 @@ export async function ensurePrivateRuntimeUI(context = {}) {
     active &&
     stylesheetReady &&
     SidebarUI &&
-    TopbarUI
+    TopbarUI &&
+    EntityIntentPreloadUI
   ) {
     try { SidebarUI.sync?.(context); } catch {}
     try { TopbarUI.sync?.(context); } catch {}
@@ -255,6 +274,7 @@ export async function ensurePrivateRuntimeUI(context = {}) {
     await initModule(TopbarUI, payload);
     await initModule(AppChromeUI, payload);
     await initModule(EntityOverlayUI, payload);
+    await initModule(EntityIntentPreloadUI, payload);
     active = true;
     return true;
   })().finally(() => {
@@ -279,6 +299,7 @@ function destroyLoaded(module) {
 export function destroyPrivateRuntimeUI() {
   if (ensurePromise) return false;
 
+  destroyLoaded(EntityIntentPreloadUI);
   destroyLoaded(EntityOverlayUI);
   destroyLoaded(AppChromeUI);
   destroyLoaded(TopbarUI);
@@ -302,6 +323,7 @@ export function getPrivateRuntimeUISnapshot() {
       topbar: Boolean(TopbarUI),
       chrome: Boolean(AppChromeUI),
       entityOverlay: Boolean(EntityOverlayUI),
+      entityIntentPreload: Boolean(EntityIntentPreloadUI),
     }),
   });
 }

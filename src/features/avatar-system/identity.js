@@ -4,30 +4,23 @@
 
    PURE DOMAIN · SINGLE SOURCE OF TRUTH
 
-   Responsabilidad:
-   - Resolver una identidad visual estable sin depender de una vista concreta.
-   - Producir las mismas iniciales y el mismo tone para la misma persona.
-   - Mantener el algoritmo determinista: nunca Math.random(), nunca storage.
-   - No persistir color en backend/Cosmos: el color deriva de la identidad.
-   - No conocer DOM, Auth, Router, HTTP ni CSS de una vista concreta.
-
-   Prioridad del seed visual:
-   1. email normalizado: es el alias que hoy atraviesa más snapshots/vistas;
-   2. userId estable;
-   3. username/slug;
-   4. nombre normalizado como compatibilidad legacy.
-
-   IMPORTANTE:
-   El sistema global puede conocer además varios aliases de una misma persona,
-   pero todos deben terminar pasando por esta función pura.
+   Contrato:
+   - La misma persona produce la misma identidad visual en cualquier vista.
+   - No existe aleatoriedad runtime, storage, red ni color persistido.
+   - El color se deriva de una clave estable y usa todo el espacio uint32.
+   - Los snapshots parciales priorizan el nombre humano normalizado porque es
+     el alias que permanece visible incluso cuando Core/DTO omiten email/id.
+   - Si no hay nombre humano, username y local-part del email comparten handle.
 ========================================================= */
 
 "use strict";
 
 export const AVATAR_IDENTITY_VERSION =
-  "avatar-identity.v1-deterministic-single-authority";
+  "avatar-identity.v2-portable-seed-uint32-color";
 
-export const AVATAR_TONE_COUNT = 10;
+/* 2^32 perfiles deterministas antes de repetir el tone numérico. */
+export const AVATAR_TONE_COUNT = 0x1_0000_0000;
+export const AVATAR_COLOR_SPACE = AVATAR_TONE_COUNT;
 
 function isObject(value = null) {
   return Boolean(
@@ -105,10 +98,8 @@ function objectCandidates(input = {}) {
   return { source, profile, user, raw };
 }
 
-export function avatarNameFromIdentity(input = {}) {
-  if (!isObject(input)) {
-    return cleanAvatarText(input, "");
-  }
+function explicitAvatarNameFromIdentity(input = {}) {
+  if (!isObject(input)) return cleanAvatarText(input, "");
 
   const { source, profile, user, raw } = objectCandidates(input);
 
@@ -119,17 +110,42 @@ export function avatarNameFromIdentity(input = {}) {
     source.nombre,
     source.contactName,
     source.nombreContacto,
+    source.requesterName,
+    source.clienteNombre,
+    source.userNameDisplay,
     profile.displayName,
     profile.fullName,
     profile.name,
+    profile.nombre,
     user.displayName,
     user.fullName,
     user.name,
+    user.nombre,
     raw.displayName,
     raw.fullName,
     raw.name,
+    raw.nombre,
+    ""
+  );
+}
+
+export function avatarNameFromIdentity(input = {}) {
+  if (!isObject(input)) {
+    return cleanAvatarText(input, "");
+  }
+
+  const { source, profile, user, raw } = objectCandidates(input);
+
+  return firstText(
+    explicitAvatarNameFromIdentity(input),
     source.username,
+    profile.username,
+    user.username,
+    raw.username,
     source.email,
+    profile.email,
+    user.email,
+    raw.email,
     ""
   );
 }
@@ -148,12 +164,20 @@ export function avatarEmailFromIdentity(input = {}) {
       source.userEmail,
       source.clientEmail,
       source.clienteEmail,
+      source.emailAddress,
+      source.mail,
       profile.emailLower,
       profile.email,
+      profile.emailAddress,
+      profile.mail,
       user.emailLower,
       user.email,
+      user.emailAddress,
+      user.mail,
       raw.emailLower,
       raw.email,
+      raw.emailAddress,
+      raw.mail,
       ""
     )
   );
@@ -172,6 +196,8 @@ export function avatarUserIdFromIdentity(input = {}) {
       source.ownerUserId,
       source.requesterUserId,
       source.createdByUserId,
+      source.technicianUserId,
+      source.tecnicoUserId,
       profile.userId,
       profile.id,
       user.userId,
@@ -192,61 +218,93 @@ export function avatarUsernameFromIdentity(input = {}) {
     firstText(
       source.usernameLower,
       source.username,
+      source.userName,
+      source.user_name,
       source.slug,
       source.publicSlug,
       profile.username,
+      profile.userName,
       profile.slug,
       user.username,
+      user.userName,
       user.slug,
       raw.username,
+      raw.userName,
       raw.slug,
       ""
     )
   );
 }
 
+function emailHandle(value = "") {
+  const email = normalizeAvatarEmail(value);
+  if (!email) return "";
+  return normalizeAvatarUsername(email.split("@")[0] || "");
+}
+
+/*
+  El nombre humano es el alias visual más portable de los snapshots actuales:
+  Home/Sidebar pueden recibir un usuario público sin email mientras que
+  Incidencias/Facturas sí lo traen. Usarlo primero evita que una misma persona
+  cambie de color por la forma del DTO. Cuando no hay nombre, el local-part del
+  email y username comparten namespace para reconciliar snapshots parciales.
+*/
 export function avatarSeedFromIdentity(input = {}) {
+  const explicitName = normalizeAvatarName(
+    explicitAvatarNameFromIdentity(input)
+  );
+  if (explicitName) return `name:${explicitName}`;
+
+  const username = avatarUsernameFromIdentity(input);
   const email = avatarEmailFromIdentity(input);
-  if (email) return `email:${email}`;
+  const handle = username || emailHandle(email);
+  if (handle) return `handle:${handle}`;
 
   const userId = avatarUserIdFromIdentity(input);
   if (userId) return `user:${userId}`;
 
-  const username = avatarUsernameFromIdentity(input);
-  if (username) return `username:${username}`;
-
-  const name = normalizeAvatarName(avatarNameFromIdentity(input));
-  if (name) return `name:${name}`;
+  if (email) return `email:${email}`;
 
   return "avatar:onion-support";
 }
 
 /*
-  Conservamos deliberadamente el hash entero que ya usaban Incidencias,
-  Facturas/Home y varias vistas legacy. Centralizarlo aquí permite que el
-  takeover global mantenga el color existente y elimine diferencias visuales
-  sin una migración cromática inesperada para los usuarios actuales.
+  FNV-1a + avalanche uint32. Sigue siendo puro y determinista, pero distribuye
+  mucho mejor que el antiguo modulo 10 para perfiles cromáticos masivos.
 */
 export function hashAvatarSeed(value = "") {
   const seed = cleanAvatarText(value, "avatar:onion-support");
-  let hash = 0;
+  let hash = 0x811c9dc5;
 
   for (let index = 0; index < seed.length; index += 1) {
-    hash = ((hash << 5) - hash) + seed.charCodeAt(index);
-    hash |= 0;
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
   }
+
+  hash ^= hash >>> 16;
+  hash = Math.imul(hash, 0x85ebca6b);
+  hash ^= hash >>> 13;
+  hash = Math.imul(hash, 0xc2b2ae35);
+  hash ^= hash >>> 16;
 
   return hash >>> 0;
 }
 
 export function avatarToneFromSeed(value = "") {
-  return hashAvatarSeed(value) % AVATAR_TONE_COUNT;
+  const seed = cleanAvatarText(value, "avatar:onion-support");
+  return hashAvatarSeed(`onion-avatar-color:v2|${seed}`);
 }
 
 export function avatarToneFromIdentity(input = {}) {
   return avatarToneFromSeed(
     avatarSeedFromIdentity(input)
   );
+}
+
+export function avatarColorKeyFromSeed(value = "") {
+  return avatarToneFromSeed(value)
+    .toString(36)
+    .padStart(7, "0");
 }
 
 function unicodeChars(value = "") {
@@ -305,7 +363,7 @@ export function avatarInitials(value = "") {
 
 export function avatarIdentityFingerprint(input = {}) {
   return hashAvatarSeed(
-    `onion-avatar:v1|${avatarSeedFromIdentity(input)}`
+    `onion-avatar-fingerprint:v2|${avatarSeedFromIdentity(input)}`
   ).toString(36);
 }
 
@@ -332,6 +390,7 @@ export function resolveAvatarPresentation(input = {}) {
     username,
     seed,
     tone,
+    colorKey: avatarColorKeyFromSeed(seed),
     initials,
     fingerprint: avatarIdentityFingerprint({
       name,
@@ -345,6 +404,7 @@ export function resolveAvatarPresentation(input = {}) {
 export default Object.freeze({
   version: AVATAR_IDENTITY_VERSION,
   toneCount: AVATAR_TONE_COUNT,
+  colorSpace: AVATAR_COLOR_SPACE,
   cleanText: cleanAvatarText,
   normalizeEmail: normalizeAvatarEmail,
   normalizeUserId: normalizeAvatarUserId,
@@ -355,6 +415,7 @@ export default Object.freeze({
   hash: hashAvatarSeed,
   toneFromSeed: avatarToneFromSeed,
   tone: avatarToneFromIdentity,
+  colorKeyFromSeed: avatarColorKeyFromSeed,
   fingerprint: avatarIdentityFingerprint,
   resolve: resolveAvatarPresentation,
 });

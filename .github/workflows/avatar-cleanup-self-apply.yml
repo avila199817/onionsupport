@@ -29,34 +29,25 @@ jobs:
           node-version: '22'
           package-manager-cache: false
 
-      - name: Apply deterministic cleanup phase 3
-        run: node tools/apply-avatar-authority-cleanup-phase3.mjs
+      - name: Reconnect Incidencias modal bridge
+        run: node tools/apply-avatar-authority-cleanup-phase4.mjs
 
-      - name: Validate changed JavaScript syntax
-        shell: bash
-        run: |
-          set -euo pipefail
-          while IFS= read -r file; do
-            [[ -z "$file" ]] && continue
-            [[ -f "$file" ]] || continue
-            case "$file" in
-              *.js|*.mjs) node --check "$file" ;;
-            esac
-          done < <(git diff --name-only)
+      - name: Validate bridge JavaScript syntax
+        run: node --check src/features/incidencia-modal-bridge/index.js
 
       - name: Run avatar hygiene contract before commit
         run: node .github/scripts/avatar_authority_hygiene_contract.mjs
 
-      - name: Commit cleanup back to PR branch
+      - name: Commit bridge cleanup back to PR branch
         shell: bash
         run: |
           set -euo pipefail
           if git diff --quiet; then
-            echo "Cleanup already applied; nothing to commit."
+            echo "Bridge already migrated; nothing to commit."
             exit 0
           fi
           git config user.name "Onion Support"
           git config user.email "cristian@onionsupport.com"
-          git add src
-          git commit -m "Eliminar motores de avatar legacy restantes"
+          git add src/features/incidencia-modal-bridge/index.js
+          git commit -m "Reconectar bridge a avatares canónicos"
           git push origin HEAD:chore/system-hygiene-avatar-residue

@@ -8,9 +8,9 @@
    - La misma persona produce la misma identidad visual en cualquier vista.
    - No existe aleatoriedad runtime, storage, red ni color persistido.
    - El color se deriva de una clave estable y usa todo el espacio uint32.
-   - Los snapshots parciales priorizan el nombre humano normalizado porque es
-     el alias que permanece visible incluso cuando Core/DTO omiten email/id.
-   - Si no hay nombre humano, username y local-part del email comparten handle.
+   - Username y local-part del email comparten namespace de handle para que
+     snapshots parciales de Home/Sidebar y DTO de Incidencias converjan.
+   - Después se usan userId y nombre humano como compatibilidad progresiva.
 ========================================================= */
 
 "use strict";
@@ -243,18 +243,16 @@ function emailHandle(value = "") {
 }
 
 /*
-  El nombre humano es el alias visual más portable de los snapshots actuales:
-  Home/Sidebar pueden recibir un usuario público sin email mientras que
-  Incidencias/Facturas sí lo traen. Usarlo primero evita que una misma persona
-  cambie de color por la forma del DTO. Cuando no hay nombre, el local-part del
-  email y username comparten namespace para reconciliar snapshots parciales.
+  Prioridad portable:
+  1. username o local-part del email en el mismo namespace `handle:`;
+  2. userId estable cuando el handle no existe;
+  3. nombre humano como compatibilidad de snapshots realmente mínimos;
+  4. email completo sólo si su local-part no pudo normalizarse.
+
+  Así `avila199817` y `avila199817@gmail.com` son la MISMA clave sin hacer
+  depender la identidad de que una vista concreta conserve o no el email.
 */
 export function avatarSeedFromIdentity(input = {}) {
-  const explicitName = normalizeAvatarName(
-    explicitAvatarNameFromIdentity(input)
-  );
-  if (explicitName) return `name:${explicitName}`;
-
   const username = avatarUsernameFromIdentity(input);
   const email = avatarEmailFromIdentity(input);
   const handle = username || emailHandle(email);
@@ -262,6 +260,11 @@ export function avatarSeedFromIdentity(input = {}) {
 
   const userId = avatarUserIdFromIdentity(input);
   if (userId) return `user:${userId}`;
+
+  const explicitName = normalizeAvatarName(
+    explicitAvatarNameFromIdentity(input)
+  );
+  if (explicitName) return `name:${explicitName}`;
 
   if (email) return `email:${email}`;
 

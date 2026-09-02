@@ -8,7 +8,7 @@
    - la misma persona conserva presentation entre snapshots distintos;
    - AvatarSystem corrige hints legacy en DOM dinámico;
    - Sidebar/Home/listados están dentro del takeover global;
-   - no se introduce Math.random/storage/red para resolver colores.
+   - no se introduce aleatoriedad, storage ni red para resolver colores.
 ========================================================= */
 
 import assert from "node:assert/strict";
@@ -30,6 +30,12 @@ const ROOT = path.resolve(HERE, "../..");
 
 function read(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), "utf8");
+}
+
+function executableSource(source = "") {
+  return String(source ?? "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
 }
 
 function includesAll(source, values, label) {
@@ -130,19 +136,27 @@ assert.equal(
 );
 
 const identitySource = read("src/features/avatar-system/identity.js");
+const identityExecutableSource = executableSource(identitySource);
 const runtimeSource = read("src/features/avatar-system/index.js");
 const cssSource = read("src/css/components/avatar-system.css");
 const privateRuntimeSource = read("src/features/private-runtime-ui/index.js");
 const appCssSource = read("src/css/app.css");
 
+assert.equal(
+  executableSource("/* Math.random() localStorage sessionStorage fetch() */\nconst stable = true;").includes("Math.random("),
+  false,
+  "el detector debe ignorar tokens prohibidos cuando sólo aparecen en comentarios"
+);
+
 for (const forbidden of [
-  "Math.random(",
-  "localStorage",
-  "sessionStorage",
-  "fetch(",
+  /\bMath\.random\s*\(/,
+  /\blocalStorage\b/,
+  /\bsessionStorage\b/,
+  /\bfetch\s*\(/,
 ]) {
-  assert.ok(
-    !identitySource.includes(forbidden),
+  assert.doesNotMatch(
+    identityExecutableSource,
+    forbidden,
     `identity authority no puede depender de ${forbidden}`
   );
 }

@@ -3,7 +3,8 @@
    Archivo: /src/features/private-runtime-ui/index.js
 
    Única puerta de entrada del chrome privado:
-   - El build carga CSS, Sidebar, Topbar, AppChrome y EntityOverlay tras Auth.
+   - El build carga CSS, Sidebar, Topbar, AppChrome y overlays tras Auth.
+   - HomeEntityModal se instala antes de EntityOverlay para fijar el origen.
    - Precarga de entidad se activa sólo tras Auth y nunca captura navegación.
    - Las rutas públicas/anónimas del artefacto no descargan runtime privado.
    - El source legacy conserva app.css completo para rollback y desarrollo.
@@ -15,7 +16,7 @@
 import { AppCore } from "../../core/index.js";
 
 export const PRIVATE_RUNTIME_UI_VERSION =
-  "private-runtime-ui.v4-entity-intent-preload";
+  "private-runtime-ui.v5-home-owner-modal-authority";
 
 const PRIVATE_STYLESHEET_HREF =
   "/src/css/private.css";
@@ -26,6 +27,7 @@ const PRIVATE_STYLESHEET_MARKER =
 let SidebarUI = null;
 let TopbarUI = null;
 let AppChromeUI = null;
+let HomeEntityModalUI = null;
 let EntityOverlayUI = null;
 let EntityIntentPreloadUI = null;
 let stylesheetPromise = null;
@@ -203,12 +205,14 @@ async function loadPrivateModules() {
     sidebarModule,
     topbarModule,
     chromeModule,
+    homeEntityModalModule,
     overlayModule,
     entityIntentPreloadModule,
   ] = await Promise.all([
     import("../../ui/sidebar/index.js"),
     import("../../ui/topbar/index.js"),
     import("../../ui/chrome/index.js"),
+    import("../home-entity-modal/index.js"),
     import("../entity-overlay/index.js"),
     import("../entity-intent-preload/index.js"),
   ]);
@@ -216,6 +220,10 @@ async function loadPrivateModules() {
   SidebarUI = sidebarModule?.SidebarUI || sidebarModule?.default || null;
   TopbarUI = topbarModule?.TopbarUI || topbarModule?.default || null;
   AppChromeUI = chromeModule?.AppChromeUI || chromeModule?.default || null;
+  HomeEntityModalUI =
+    homeEntityModalModule?.HomeEntityModal ||
+    homeEntityModalModule?.default ||
+    null;
   EntityOverlayUI = overlayModule?.EntityOverlay || overlayModule?.default || null;
   EntityIntentPreloadUI =
     entityIntentPreloadModule?.EntityIntentPreload ||
@@ -225,6 +233,7 @@ async function loadPrivateModules() {
   return Boolean(
     SidebarUI &&
     TopbarUI &&
+    HomeEntityModalUI &&
     EntityOverlayUI &&
     EntityIntentPreloadUI
   );
@@ -244,6 +253,8 @@ export async function ensurePrivateRuntimeUI(context = {}) {
     stylesheetReady &&
     SidebarUI &&
     TopbarUI &&
+    HomeEntityModalUI &&
+    EntityOverlayUI &&
     EntityIntentPreloadUI
   ) {
     try { SidebarUI.sync?.(context); } catch {}
@@ -273,8 +284,15 @@ export async function ensurePrivateRuntimeUI(context = {}) {
     await initModule(SidebarUI, payload);
     await initModule(TopbarUI, payload);
     await initModule(AppChromeUI, payload);
+
+    /*
+      Orden contractual: Home corta su click in-place antes de que el overlay
+      global pueda convertirlo en una navegación al owner.
+    */
+    await initModule(HomeEntityModalUI, payload);
     await initModule(EntityOverlayUI, payload);
     await initModule(EntityIntentPreloadUI, payload);
+
     active = true;
     return true;
   })().finally(() => {
@@ -300,6 +318,7 @@ export function destroyPrivateRuntimeUI() {
   if (ensurePromise) return false;
 
   destroyLoaded(EntityIntentPreloadUI);
+  destroyLoaded(HomeEntityModalUI);
   destroyLoaded(EntityOverlayUI);
   destroyLoaded(AppChromeUI);
   destroyLoaded(TopbarUI);
@@ -322,8 +341,14 @@ export function getPrivateRuntimeUISnapshot() {
       sidebar: Boolean(SidebarUI),
       topbar: Boolean(TopbarUI),
       chrome: Boolean(AppChromeUI),
+      homeEntityModal: Boolean(HomeEntityModalUI),
       entityOverlay: Boolean(EntityOverlayUI),
       entityIntentPreload: Boolean(EntityIntentPreloadUI),
+    }),
+    policy: Object.freeze({
+      authenticatedOnly: true,
+      homeEntityAuthorityBeforeGlobalOverlay: true,
+      homeOwnerModalsStayInPlace: true,
     }),
   });
 }

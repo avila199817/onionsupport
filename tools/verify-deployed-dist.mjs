@@ -100,6 +100,7 @@ const allowedMimeTypes = new Map([
   [".js", new Set(["application/javascript", "text/javascript"])],
   [".json", new Set(["application/json"])],
   [".png", new Set(["image/png"])],
+  [".svg", new Set(["image/svg+xml"])],
   [".txt", new Set(["text/plain"])],
   [".webmanifest", new Set(["application/manifest+json", "application/json"])],
   [".webp", new Set(["image/webp"])],

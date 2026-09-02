@@ -46,6 +46,15 @@ function overlayEntityType(type = "") {
   return "";
 }
 
+function entityOwnerRoute(type = "") {
+  return {
+    factura: "/facturas",
+    incidencia: "/incidencias",
+    cliente: "/clientes",
+    usuario: "/usuarios",
+  }[overlayEntityType(type)] || "";
+}
+
 function activityEntityId(type = "", source = {}) {
   const entityType = overlayEntityType(type);
   const raw = isObject(source) ? source : {};
@@ -112,8 +121,9 @@ function entityOpenLabel(type = "", id = "") {
 export function entityTriggerAttributes(type = "", id = "", source = "home") {
   const entityType = overlayEntityType(type);
   const entityId = safeDisplayId(id, "");
+  const ownerRoute = entityOwnerRoute(entityType);
 
-  if (!entityType || !entityId) return "";
+  if (!entityType || !entityId || !ownerRoute) return "";
 
   return `
     data-entity-overlay-trigger="true"
@@ -121,6 +131,9 @@ export function entityTriggerAttributes(type = "", id = "", source = "home") {
     data-entity-type="${attr(entityType)}"
     data-entity-id="${attr(entityId)}"
     data-home-entity-source="${attr(source)}"
+    data-router-link="true"
+    data-route="${attr(ownerRoute)}"
+    ${entityType === "factura" ? 'data-entity-preload="detail"' : ""}
     aria-haspopup="dialog"
     aria-label="${attr(entityOpenLabel(entityType, entityId))}"
   `;
@@ -198,7 +211,7 @@ function activityItem(item = {}) {
   return `
     <li
       class="home-activity-item home-activity-item--${attr(type)} ${interactive ? "home-activity-item--interactive" : ""}"
-      data-home-entity-type="${attr(entityType || type || "activity")}"
+      data-home-entity-type="${attr(entityType || type || "activity")}" 
       data-home-entity-id="${attr(entityId)}"
     >
       ${interactive
@@ -234,7 +247,3 @@ export function activity(vm) {
     </section>
   `;
 }
-
-/* =========================================================
-   BILLING
-========================================================= */

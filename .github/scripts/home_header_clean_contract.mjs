@@ -82,6 +82,29 @@ for (const icon of [
   );
 }
 
+const navigationControls =
+  html.match(/<button\b[^>]*data-home-navigation-control="true"[^>]*>/g) || [];
+
+assert.equal(
+  navigationControls.length,
+  5,
+  "Four stat cards and Ver facturas must be explicit pure-navigation controls"
+);
+
+for (const control of navigationControls) {
+  assert.match(control, /data-home-action="navigate"/);
+  assert.match(control, /data-router-link="true"/);
+  assert.match(control, /data-entity-overlay-ignore="true"/);
+  assert.match(control, /data-route="\/(?:incidencias|facturas|clientes|usuarios)"/);
+  assert.doesNotMatch(control, /data-entity-overlay-trigger="true"/);
+}
+
+assert.match(
+  html,
+  /data-home-stat="facturas"[\s\S]*?<button\b[^>]*data-home-navigation-control="true"[^>]*data-entity-overlay-ignore="true"[^>]*data-route="\/facturas"/,
+  "The large Facturas card must navigate and must never be interpreted as an invoice"
+);
+
 assert.equal(
   (html.match(/data-entity-overlay-trigger="true"/g) || []).length,
   2,
@@ -94,6 +117,16 @@ assert.equal(
 );
 assert.match(html, /class="home-entity-row home-entity-row--activity"/);
 assert.match(html, /class="home-entity-row home-entity-row--invoice"/);
+assert.match(
+  html,
+  /class="home-entity-row home-entity-row--activity"[^>]*data-entity-type="incidencia"[^>]*data-router-link="true"[^>]*data-route="\/incidencias"/,
+  "Incidencia rows must preload their canonical owner route"
+);
+assert.match(
+  html,
+  /class="home-entity-row home-entity-row--invoice"[^>]*data-entity-type="factura"[^>]*data-router-link="true"[^>]*data-route="\/facturas"[^>]*data-entity-preload="detail"/,
+  "Invoice rows must preload both the owner route and the bounded detail request"
+);
 assert.match(html, /<progress max="100"/);
 assert.match(html, />Pagado</);
 assert.match(html, />Pendiente</);
@@ -103,13 +136,24 @@ assert.doesNotMatch(
   /<span>ID<\/span>/,
   "The literal ID prefix must not be painted in entity badges"
 );
+assert.doesNotMatch(
+  html,
+  /class="home-entity-id"[^>]*>[\s\S]*?<code>/,
+  "Entity identifiers must be one visual pill, never a card inside another card"
+);
 assert.equal(
   (html.match(/data-home-id-kind="id"/g) || []).length,
   2,
   "Entity identifiers must retain non-visual ID semantics"
 );
-assert.match(html, /<code>INC-20260001-ABC123<\/code>/);
-assert.match(html, /<code>202600052<\/code>/);
+assert.match(
+  html,
+  /class="home-entity-id"[^>]*data-home-id-kind="id"[^>]*>INC-20260001-ABC123<\/span>/
+);
+assert.match(
+  html,
+  /class="home-entity-id"[^>]*data-home-id-kind="id"[^>]*>202600052<\/span>/
+);
 
 const [
   appIconCss,
@@ -122,6 +166,9 @@ const [
   homeExtremeStatesCss,
   homeExtremeResponsiveCss,
   appCss,
+  privateRuntimeSource,
+  entityIntentPreloadSource,
+  facturasApiSource,
   ...templateModules
 ] = await Promise.all([
   readFile("src/css/components/app-icons.css", "utf8"),
@@ -134,6 +181,9 @@ const [
   readFile("src/css/compositions/home-extreme-states.css", "utf8"),
   readFile("src/css/compositions/home-extreme-responsive.css", "utf8"),
   readFile("src/css/app.css", "utf8"),
+  readFile("src/features/private-runtime-ui/index.js", "utf8"),
+  readFile("src/features/entity-intent-preload/index.js", "utf8"),
+  readFile("src/views/facturas/facturas.api.js", "utf8"),
   readFile("src/views/home/home.template.js", "utf8"),
   readFile("src/views/home/home.template.foundation.js", "utf8"),
   readFile("src/views/home/home.template.viewmodel.js", "utf8"),
@@ -227,6 +277,24 @@ assert.match(
 );
 
 assert.match(
+  privateRuntimeSource,
+  /import\("\.\.\/entity-intent-preload\/index\.js"\)/,
+  "Authenticated runtime must own entity detail intent preload"
+);
+assert.match(entityIntentPreloadSource, /data-entity-preload='detail'/);
+assert.match(entityIntentPreloadSource, /prefetchFacturaDetail/);
+assert.match(entityIntentPreloadSource, /HOVER_DWELL_MS = 72/);
+assert.doesNotMatch(entityIntentPreloadSource, /(^|[^A-Za-z0-9_$])fetch\s*\(/m);
+assert.doesNotMatch(entityIntentPreloadSource, /localStorage|sessionStorage|indexedDB/);
+
+assert.match(facturasApiSource, /FACTURAS_DETAIL_PREFETCH_VERSION/);
+assert.match(facturasApiSource, /DETAIL_PREFETCH_TTL_MS = 20_000/);
+assert.match(facturasApiSource, /DETAIL_PREFETCH_MAX_ENTRIES = 32/);
+assert.match(facturasApiSource, /export async function prefetchFacturaDetail/);
+assert.match(facturasApiSource, /export function clearFacturaDetailPrefetchCache/);
+assert.match(facturasApiSource, /options\?\.force !== true && options\?\.preferCache !== false/);
+
+assert.match(
   appCss,
   /@import url\("\.\/components\/app-icons\.css"\) layer\(components\);/
 );
@@ -243,5 +311,5 @@ assert.equal(snapshot.policy.canonicalEntityOwnerModals, true);
 assert.equal(snapshot.policy.noInlineSvg, true);
 
 console.log(
-  "Home extreme contract OK · greeting locked · shared Sidebar icons · clickable owner modals · clean entity IDs · billing overview"
+  "Home extreme contract OK · greeting locked · pure card navigation · single-pill IDs · owner/detail intent preload"
 );

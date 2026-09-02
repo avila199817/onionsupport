@@ -49,17 +49,13 @@ export function entityIdBadge(kind = "ID", value = "") {
   if (!id) return "";
 
   const label = cleanText(kind, "ID");
-  const showLabel = normalizeKey(label) !== "id";
 
   return `
     <span
       class="home-entity-id"
       data-home-id-kind="${attr(normalizeKey(label) || "id")}"
       title="${attr(`${label} ${id}`)}"
-    >
-      ${showLabel ? `<span>${escapeHtml(label)}</span>` : ""}
-      <code>${escapeHtml(id)}</code>
-    </span>
+    >${escapeHtml(id)}</span>
   `;
 }
 
@@ -71,6 +67,9 @@ export function actionButton({ label = "", route = "/", ariaLabel = "" } = {}) {
       type="button"
       class="home-link-button"
       data-home-action="${HOME_ACTIONS.NAVIGATE}"
+      data-home-navigation-control="true"
+      data-router-link="true"
+      data-entity-overlay-ignore="true"
       data-route="${attr(href)}"
       aria-label="${attr(ariaLabel || label)}"
     >

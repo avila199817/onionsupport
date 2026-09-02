@@ -361,6 +361,83 @@
   color: var(--error-strong, var(--error));
 }
 
+/* =========================================================
+   EMPTY STATE · ANIMATED CODER
+   Sólo el estado vacío real: errores y filtros conservan su iconografía.
+========================================================= */
+
+.facturas-empty[role="status"]:not(:has(.facturas-btn)) {
+  position: relative;
+  isolation: isolate;
+  min-block-size: 316px;
+  gap: 4px;
+  overflow: hidden;
+  padding: 17px clamp(18px, 4vw, 44px) 23px;
+}
+
+.facturas-empty[role="status"]:not(:has(.facturas-btn))::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset-block-start: 18px;
+  inset-inline-start: 50%;
+  inline-size: min(430px, 72%);
+  block-size: 196px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--info) 11%, transparent) 0%,
+    color-mix(in srgb, var(--info) 4%, transparent) 46%,
+    transparent 72%
+  );
+  filter: blur(10px);
+  pointer-events: none;
+  transform: translateX(-50%);
+  animation: facturas-empty-ambient 6.4s ease-in-out infinite;
+}
+
+.facturas-empty[role="status"]:not(:has(.facturas-btn)) > * {
+  position: relative;
+  z-index: 1;
+}
+
+.facturas-empty[role="status"]:not(:has(.facturas-btn)) .facturas-empty-icon {
+  inline-size: min(360px, 82vw);
+  block-size: 184px;
+  display: block;
+  margin: -8px 0 -2px;
+  background: url("../../../media/illustrations/facturas-empty-coder.svg") center / contain no-repeat;
+  color: transparent;
+  filter: drop-shadow(0 15px 28px color-mix(in srgb, var(--shadow-color, #000) 24%, transparent));
+  animation: facturas-empty-art-float 5.8s ease-in-out infinite;
+}
+
+.facturas-empty[role="status"]:not(:has(.facturas-btn)) .facturas-empty-icon > svg {
+  display: none;
+}
+
+.facturas-empty[role="status"]:not(:has(.facturas-btn)) .facturas-empty-title {
+  margin-block-start: -1px;
+  color: var(--text-strong);
+  font-weight: var(--weight-black);
+  letter-spacing: -.012em;
+}
+
+.facturas-empty[role="status"]:not(:has(.facturas-btn)) .facturas-empty-text {
+  max-inline-size: 680px;
+  text-wrap: balance;
+}
+
+@keyframes facturas-empty-art-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+@keyframes facturas-empty-ambient {
+  0%, 100% { opacity: .65; transform: translateX(-50%) scale(.96); }
+  50% { opacity: 1; transform: translateX(-50%) scale(1.04); }
+}
+
 /* Accessibility-only live status; el paint de loading vive en skeleton.css. */
 .facturas-loading-status {
   position: absolute;
@@ -448,6 +525,22 @@
     white-space: normal;
     overflow-wrap: anywhere;
   }
+
+  .facturas-empty[role="status"]:not(:has(.facturas-btn)) {
+    min-block-size: 300px;
+    padding: 14px 14px 21px;
+  }
+
+  .facturas-empty[role="status"]:not(:has(.facturas-btn)) .facturas-empty-icon {
+    inline-size: min(320px, 94vw);
+    block-size: 166px;
+    margin-block-start: -5px;
+  }
+
+  .facturas-empty[role="status"]:not(:has(.facturas-btn))::before {
+    inline-size: min(350px, 92%);
+    block-size: 176px;
+  }
 }
 
 @media (forced-colors: active) {
@@ -459,17 +552,57 @@
     outline-offset: 2px;
     box-shadow: none;
   }
+
+  .facturas-empty[role="status"]:not(:has(.facturas-btn))::before {
+    display: none;
+  }
+
+  .facturas-empty[role="status"]:not(:has(.facturas-btn)) .facturas-empty-icon {
+    inline-size: 32px;
+    block-size: 32px;
+    margin: 0 0 4px;
+    background: none;
+    color: CanvasText;
+    filter: none;
+    animation: none;
+  }
+
+  .facturas-empty[role="status"]:not(:has(.facturas-btn)) .facturas-empty-icon > svg {
+    inline-size: 22px;
+    block-size: 22px;
+    display: block;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .facturas-action-btn,
   .facturas-incidencia-link { transition: none; }
+
+  .facturas-empty[role="status"]:not(:has(.facturas-btn))::before,
+  .facturas-empty[role="status"]:not(:has(.facturas-btn)) .facturas-empty-icon {
+    animation: none;
+  }
 }
 
 @media print {
   .facturas-cell--actions,
   .facturas-table-col--actions { display: none; }
   .facturas-table { min-inline-size: 0; }
+
+  .facturas-empty[role="status"]:not(:has(.facturas-btn))::before { display: none; }
+  .facturas-empty[role="status"]:not(:has(.facturas-btn)) .facturas-empty-icon {
+    inline-size: 28px;
+    block-size: 28px;
+    margin: 0 0 4px;
+    background: none;
+    filter: none;
+    animation: none;
+  }
+  .facturas-empty[role="status"]:not(:has(.facturas-btn)) .facturas-empty-icon > svg {
+    inline-size: 20px;
+    block-size: 20px;
+    display: block;
+  }
 }
 
 } /* @layer views */

@@ -19,13 +19,14 @@ def fail(message: str) -> None:
 
 parity = read("src/css/compositions/private-admin-parity.css")
 create = read("src/css/compositions/private-create-modal.css")
+avatar_system = read("src/css/components/avatar-system.css")
 app = read("src/css/app.css")
 private_entry = read("src/css/private.css")
 users_create = read("src/css/views/usuarios/create.css")
 server = read("src/css/views/servidor/index.css")
 
 if "SINGLE VISUAL AUTHORITY" not in parity:
-    fail("private-admin-parity.css must explicitly be the single visual authority")
+    fail("private-admin-parity.css must explicitly be the single listing visual authority")
 
 for forbidden in (
     ".inc-create-overlay",
@@ -44,12 +45,34 @@ for entry_name, source in (("app.css", app), ("private.css", private_entry)):
         './compositions/private-admin-parity.css',
         './compositions/private-admin-interactions.css',
         './compositions/private-create-modal.css',
+        './components/avatar-system.css',
     ):
         if required not in source:
             fail(f"{entry_name} is missing canonical composition {required}")
 
 if "INCIDENCIAS CREATE AS VISUAL AUTHORITY" not in create:
     fail("private-create-modal.css must remain the Create visual authority")
+
+for required in (
+    "SINGLE VISUAL AUTHORITY · TRANSPARENT ALPHA SAFE · SPA-WIDE",
+    "UINT32 COLOR ENGINE · 4,294,967,296 TONES",
+    '[data-avatar-authority="global"][data-avatar-state="fallback"]',
+    "ONE FALLBACK PAINT AUTHORITY",
+):
+    if required not in avatar_system:
+        fail(f"avatar-system.css missing canonical avatar authority: {required}")
+
+for forbidden_avatar_owner in (
+    ".incidencias-avatar",
+    ".facturas-avatar",
+    ".clientes-avatar",
+    ".usuarios-avatar",
+):
+    if forbidden_avatar_owner in parity:
+        fail(
+            f"listing foundation must not paint avatar selector {forbidden_avatar_owner}; "
+            "components/avatar-system.css owns avatar geometry/state/paint"
+        )
 
 if (ROOT / "src/css/views/servidor/base.css").exists():
     fail("Servidor base.css was reintroduced")
@@ -125,16 +148,12 @@ for token in (
     ".clientes-hero",
     ".usuarios-hero",
     ".server-hero",
-    ".incidencias-avatar",
-    ".facturas-avatar",
-    ".clientes-avatar",
-    ".usuarios-avatar",
     ".server-summary-grid",
 ):
     if token not in parity:
         fail(f"canonical listing foundation missing {token}")
 
 print(
-    "Private CSS authority contract OK · one listing foundation · one Create foundation · "
-    "Servidor base removed · route CSS domain-only"
+    "Private CSS authority contract OK · one listing foundation · one AvatarSystem paint authority · "
+    "one Create foundation · Servidor base removed · route CSS domain-only"
 )

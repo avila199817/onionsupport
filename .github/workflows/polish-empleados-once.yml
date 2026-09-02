@@ -1,0 +1,254 @@
+name: Polish Empleados sidebar once
+
+on:
+  push:
+    branches:
+      - polish-empleados-sidebar-interno
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    name: Apply final Empleados polish
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: polish-empleados-sidebar-interno
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply exact source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          OLD_ICON_PATH = (
+              "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z "
+              "M8 11a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z "
+              "M5.5 16.5c.35-2.1 1.45-3.4 2.5-3.4s2.15 1.3 2.5 3.4 "
+              "M13.5 8H18 M13.5 11.5H18 M13.5 15h3"
+          )
+
+          NEW_ICON_PATH = (
+              "M8.5 6V4.75A1.75 1.75 0 0 1 10.25 3h3.5a1.75 1.75 0 0 1 1.75 1.75V6 "
+              "M5.25 6h13.5A2.25 2.25 0 0 1 21 8.25v9.5A2.25 2.25 0 0 1 18.75 20H5.25A2.25 2.25 0 0 1 3 17.75v-9.5A2.25 2.25 0 0 1 5.25 6Z "
+              "M3 11.25c2.65 1.45 5.65 2.2 9 2.2s6.35-.75 9-2.2 "
+              "M9.75 12.9v2.35h4.5V12.9 "
+              "M18.25 2.75v2.5 M17 4h2.5"
+          )
+
+          EMPLOYEE_ICON_BASE64 = (
+              "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNOC41IDZWNC43NUExLjc1IDEuNzUgMCAwIDEgMTAuMjUgM2gzLjVhMS43NSAxLjc1IDAgMCAxIDEuNzUgMS43NVY2Ii8+PHBhdGggZD0iTTUuMjUgNmgxMy41QTIuMjUgMi4yNSAwIDAgMSAyMSA4LjI1djkuNUEyLjI1IDIuMjUgMCAwIDEgMTguNzUgMjBINS4yNUEyLjI1IDIuMjUgMCAwIDEgMyAxNy43NXYtOS41QTIuMjUgMi4yNSAwIDAgMSA1LjI1IDZaIi8+PHBhdGggZD0iTTMgMTEuMjVjMi42NSAxLjQ1IDUuNjUgMi4yIDkgMi4yczYuMzUtLjc1IDktMi4yIi8+PHBhdGggZD0iTTkuNzUgMTIuOXYyLjM1aDQuNVYxMi45Ii8+PHBhdGggZD0iTTE4LjI1IDIuNzV2Mi41TTE3IDRoMi41Ii8+PC9zdmc+"
+          )
+
+          def read(path: str) -> str:
+              return Path(path).read_text(encoding="utf-8")
+
+          def write(path: str, text: str) -> None:
+              Path(path).write_text(text, encoding="utf-8")
+
+          def replace_exact(path: str, old: str, new: str, expected: int = 1) -> None:
+              text = read(path)
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(
+                      f"{path}: expected {expected} exact matches, found {count}"
+                  )
+              write(path, text.replace(old, new))
+
+          routes_path = "src/router/routes.js"
+          routes = read(routes_path)
+          routes, count = re.subn(
+              r"(path:\s*ROUTE_PATHS\.EMPLEADOS,[\s\S]*?order:\s*)52(,\s*\n\s*\}\),)",
+              r"\g<1>58\g<2>",
+              routes,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("routes.js: Empleados order block not found exactly once")
+          write(routes_path, routes)
+
+          executive_path = "src/css/layout/sidebar.executive.css"
+          executive = read(executive_path)
+          separator_selector = '.sidebar-menu-item[data-route$="/servidor"] {'
+          if executive.count(separator_selector) != 2:
+              raise SystemExit(
+                  "sidebar.executive.css: expected two Servidor separator selectors"
+              )
+          executive = executive.replace(
+              separator_selector,
+              '.sidebar-menu-item[data-route$="/empleados"] {',
+          )
+          tooltip_anchor = '''.sidebar-link[data-sidebar-key="correo"] {
+  --sb-tip: "Correo";
+}
+
+.sidebar-link[data-sidebar-key="servidor"] {'''
+          tooltip_replacement = '''.sidebar-link[data-sidebar-key="correo"] {
+  --sb-tip: "Correo";
+}
+
+.sidebar-link[data-sidebar-key="empleados"] {
+  --sb-tip: "Empleados";
+}
+
+.sidebar-link[data-sidebar-key="servidor"] {'''
+          if executive.count(tooltip_anchor) != 1:
+              raise SystemExit(
+                  "sidebar.executive.css: tooltip anchor not found exactly once"
+              )
+          executive = executive.replace(tooltip_anchor, tooltip_replacement)
+          write(executive_path, executive)
+
+          sidebar_icons_path = "src/css/layout/sidebar.icons.css"
+          replace_exact(
+              sidebar_icons_path,
+              "  --sb-icon-usuarios: var(--app-icon-usuarios);\n  --sb-icon-correo: var(--app-icon-correo);",
+              "  --sb-icon-usuarios: var(--app-icon-usuarios);\n  --sb-icon-empleados: var(--app-icon-empleados);\n  --sb-icon-correo: var(--app-icon-correo);",
+          )
+          replace_exact(
+              sidebar_icons_path,
+              '''  .sidebar-link[data-sidebar-key="usuarios"] {
+    --sb-current-icon: var(--sb-icon-usuarios);
+  }
+
+  .sidebar-link[data-sidebar-key="correo"] {''',
+              '''  .sidebar-link[data-sidebar-key="usuarios"] {
+    --sb-current-icon: var(--sb-icon-usuarios);
+  }
+
+  .sidebar-link[data-sidebar-key="empleados"] {
+    --sb-current-icon: var(--sb-icon-empleados);
+  }
+
+  .sidebar-link[data-sidebar-key="correo"] {''',
+          )
+
+          app_icons_path = "src/css/components/app-icons.css"
+          app_icons = read(app_icons_path)
+          if "--app-icon-empleados:" in app_icons:
+              raise SystemExit("app-icons.css: Empleados icon already exists unexpectedly")
+          app_icons, count = re.subn(
+              r'(  --app-icon-usuarios:\n    url\("[^"]+"\);\n)',
+              lambda match: (
+                  match.group(1)
+                  + "  --app-icon-empleados:\n"
+                  + f'    url("data:image/svg+xml;base64,{EMPLOYEE_ICON_BASE64}");\n'
+              ),
+              app_icons,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit("app-icons.css: Usuarios icon anchor not found exactly once")
+          write(app_icons_path, app_icons)
+
+          replace_exact(
+              "src/ui/sidebar/template.js",
+              OLD_ICON_PATH,
+              NEW_ICON_PATH,
+          )
+
+          empleados_view_path = "src/views/empleados/index.js"
+          replace_exact(
+              empleados_view_path,
+              OLD_ICON_PATH,
+              NEW_ICON_PATH,
+          )
+          replace_exact(
+              empleados_view_path,
+              '"empleados.placeholder.v1-reserved-domain"',
+              '"empleados.placeholder.v2-internal-company-polish"',
+          )
+
+          # Targeted invariants: order, block boundary and icon authority.
+          routes = read(routes_path)
+          def route_order(name: str) -> int:
+              match = re.search(
+                  rf"path:\s*ROUTE_PATHS\.{name},[\s\S]*?order:\s*(\d+)",
+                  routes,
+              )
+              if not match:
+                  raise SystemExit(f"routes.js: missing order for {name}")
+              return int(match.group(1))
+
+          order_sequence = [
+              route_order("USUARIOS"),
+              route_order("CORREO"),
+              route_order("EMPLEADOS"),
+              route_order("SERVIDOR"),
+          ]
+          if order_sequence != sorted(order_sequence):
+              raise SystemExit(
+                  f"Unexpected sidebar order: {order_sequence}"
+              )
+
+          executive = read(executive_path)
+          if executive.count(
+              '.sidebar-menu-item[data-route$="/empleados"] {'
+          ) != 2:
+              raise SystemExit("Empleados must own both open/collapsed separators")
+          if '.sidebar-menu-item[data-route$="/servidor"] {' in executive:
+              raise SystemExit("Servidor must no longer own the group separator")
+          if '--sb-tip: "Empleados";' not in executive:
+              raise SystemExit("Collapsed Empleados tooltip is missing")
+
+          sidebar_icons = read(sidebar_icons_path)
+          if '--sb-icon-empleados: var(--app-icon-empleados);' not in sidebar_icons:
+              raise SystemExit("Sidebar Empleados icon variable is missing")
+          if 'data-sidebar-key="empleados"' not in sidebar_icons:
+              raise SystemExit("Sidebar Empleados semantic mapping is missing")
+
+          app_icons = read(app_icons_path)
+          if app_icons.count("--app-icon-empleados:") != 1:
+              raise SystemExit("App Empleados icon authority must exist exactly once")
+
+          for path in (
+              "src/ui/sidebar/template.js",
+              empleados_view_path,
+          ):
+              text = read(path)
+              if OLD_ICON_PATH in text or NEW_ICON_PATH not in text:
+                  raise SystemExit(f"{path}: final SVG path invariant failed")
+          PY
+
+      - name: Validate syntax and diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check src/router/routes.js
+          node --check src/ui/sidebar/index.js
+          node --check src/ui/sidebar/template.js
+          node --check src/views/empleados/index.js
+          git diff --check
+          git diff --stat
+
+      - name: Commit final feature branch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+
+          git rm .github/workflows/polish-empleados-once.yml
+          git add \
+            src/router/routes.js \
+            src/css/components/app-icons.css \
+            src/css/layout/sidebar.icons.css \
+            src/css/layout/sidebar.executive.css \
+            src/ui/sidebar/template.js \
+            src/views/empleados/index.js
+
+          git diff --cached --check
+          git commit -m "Pulir icono y bloque interno de Empleados"
+          git push origin HEAD:polish-empleados-sidebar-interno

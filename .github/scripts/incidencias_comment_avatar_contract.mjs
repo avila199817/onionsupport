@@ -1,14 +1,32 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-const FEATURE_PATH =
+import {
+  buildCommentIdentityIndex,
+  resolveCommentProfile,
+} from "../../src/features/incidencias-comment-identity/index.js";
+
+import {
+  AVATAR_TONE_COUNT,
+  resolveAvatarPresentation,
+} from "../../src/features/avatar-system/identity.js";
+
+const LEGACY_FEATURE_PATH =
   "src/features/incidencias-avatar-fallback/index.js";
+const IDENTITY_PATH =
+  "src/features/incidencias-comment-identity/index.js";
+const COMMENT_AVATARS_PATH =
+  "src/features/incidencias-comment-avatars/index.js";
+const COMMENT_AVATARS_STYLE_PATH =
+  "src/features/incidencias-comment-avatars/style.css";
 const FOLLOWUP_PATH =
   "src/features/incidencias-followup-avatars/index.js";
 const FOLLOWUP_STYLE_PATH =
   "src/features/incidencias-followup-avatars/style.css";
 const DETAIL_MODAL_STYLE_PATH =
   "src/css/components/detail-modal.css";
+const ENHANCEMENTS_PATH =
+  "src/app/enhancements.js";
 const DETAIL_COMMENT_RENDERER_PATHS = [
   "src/features/incidencias-detail-experience/index.js",
   "src/features/incidencias-detail-live-sync/index.js",
@@ -16,303 +34,146 @@ const DETAIL_COMMENT_RENDERER_PATHS = [
 ];
 const PRIVATE_INTERACTIONS_STYLE_PATH =
   "src/css/compositions/private-admin-interactions.css";
-const ENHANCEMENTS_PATH =
-  "src/app/enhancements.js";
 
-const source = fs.readFileSync(FEATURE_PATH, "utf8");
+const identitySource = fs.readFileSync(IDENTITY_PATH, "utf8");
+const commentSource = fs.readFileSync(COMMENT_AVATARS_PATH, "utf8");
+const commentStyle = fs.readFileSync(COMMENT_AVATARS_STYLE_PATH, "utf8");
 const followupSource = fs.readFileSync(FOLLOWUP_PATH, "utf8");
 const followupStyle = fs.readFileSync(FOLLOWUP_STYLE_PATH, "utf8");
 const detailModalStyle = fs.readFileSync(DETAIL_MODAL_STYLE_PATH, "utf8");
-const detailCommentRendererSources = DETAIL_COMMENT_RENDERER_PATHS.map(
-  (rendererPath) => [rendererPath, fs.readFileSync(rendererPath, "utf8")]
-);
+const enhancementsSource = fs.readFileSync(ENHANCEMENTS_PATH, "utf8");
 const privateInteractionsStyle = fs.readFileSync(
   PRIVATE_INTERACTIONS_STYLE_PATH,
   "utf8"
 );
-const enhancementsSource = fs.readFileSync(ENHANCEMENTS_PATH, "utf8");
+const detailCommentRendererSources = DETAIL_COMMENT_RENDERER_PATHS.map(
+  (rendererPath) => [rendererPath, fs.readFileSync(rendererPath, "utf8")]
+);
 
-assert.match(
-  source,
-  /incidencias\.avatar-fallback\.v4\.comment-identity-modal-scope/u,
-  "la mejora debe versionar explícitamente identidad estable y scope de modal"
+assert.equal(
+  fs.existsSync(LEGACY_FEATURE_PATH),
+  false,
+  "incidencias-avatar-fallback debe permanecer eliminado: AvatarSystem ya gestiona fallos globales"
 );
 
 assert.match(
-  source,
-  /loadIncidenciaDetail/u,
-  "el enhancement debe reutilizar el coordinador canónico de detalle"
+  identitySource,
+  /incidencias\.comment-identity\.v1-pure-stable-aliases/u,
+  "la identidad de comentarios debe vivir en un módulo puro y versionado"
 );
-
+assert.doesNotMatch(identitySource, /\bdocument\b|\bwindow\b|MutationObserver|fetch\s*\(/u);
+assert.doesNotMatch(identitySource, /avatarTone|data-avatar-tone|%\s*10/u);
+assert.match(identitySource, /entry\.byUserId/u);
+assert.match(identitySource, /entry\.byEmail/u);
+assert.match(identitySource, /stableIdentity\?\.hasStableIdentity/u);
 assert.match(
-  source,
-  /const detailIdentityState = new WeakMap\(\)/u,
-  "la identidad hidratada debe vivir por nodo de modal y poder liberarse al cerrar"
-);
-
-assert.doesNotMatch(
-  source,
-  /detailIdentityCache\s*=\s*new Map/u,
-  "no se permite una caché eterna por ticketId para la identidad visual"
-);
-
-assert.match(
-  source,
-  /\.incidencias-timeline-card\.is-comment \.incidencias-timeline-meta/u,
-  "el historial independiente debe seguir admitiendo avatares"
-);
-
-assert.match(
-  source,
-  /\.incidencias-modal-avatar\[title\]/u,
-  "el avatar del solicitante debe reutilizar la identidad ya renderizada por el modal"
-);
-
-assert.match(
-  source,
-  /\[data-modal-technician='true'\]\[data-technician-assigned='true'\]/u,
-  "el avatar del técnico debe reutilizar el perfil asignado ya renderizado"
-);
-
-assert.match(
-  source,
-  /entry\.byUserId/u,
-  "los comentarios deben reconocer el userId estable persistido por backend"
-);
-
-assert.match(
-  source,
-  /entry\.byEmail/u,
-  "los comentarios deben reconocer el email estable persistido por backend"
-);
-
-assert.match(
-  source,
-  /stableIdentity\?\.hasStableIdentity/u,
-  "una identidad estable debe tener prioridad sobre el matching por nombre"
-);
-
-assert.match(
-  source,
+  identitySource,
   /return matchProfileByStableIdentity\(stableIdentity, profiles\)/u,
-  "cuando existe identidad estable no debe existir fallback silencioso por nombre"
+  "cuando existe identidad estable no se permite apropiarse de una foto sólo por nombre"
 );
+
+assert.match(
+  commentSource,
+  /incidencias\.comment-avatars\.v1-global-avatar-authority/u
+);
+assert.match(commentSource, /loadIncidenciaDetail/u);
+assert.match(commentSource, /const detailIdentityState = new WeakMap\(\)/u);
+assert.match(commentSource, /resolveAvatarPresentation/u);
+assert.match(commentSource, /buildCommentIdentityIndex/u);
+assert.match(commentSource, /resolveCommentProfile/u);
+assert.match(commentSource, /data(?:set)?\.avatarSystem|dataset\.avatarSystem/u);
+assert.match(commentSource, /dataset\.avatarHost/u);
+assert.match(commentSource, /dataset\.avatarTone/u);
+assert.match(commentSource, /dataset\.avatarIdentity/u);
+assert.match(commentSource, /dataset\.avatarInitials/u);
+assert.match(commentSource, /dataset\.avatarImage/u);
+assert.match(commentSource, /dataset\.avatarFallback/u);
+assert.match(commentSource, /MutationObserver/u);
+assert.doesNotMatch(commentSource, /document\.addEventListener\(\s*["']error["']/u);
+assert.doesNotMatch(commentSource, /IncidenciasAvatarFallbackInternals/u);
+assert.doesNotMatch(commentSource, /avatarToneFromIdentity|resolveAvatarTone|%\s*10/u);
+assert.doesNotMatch(commentSource, /createElement\(["']style["']\)/u);
 
 assert.match(
   followupSource,
-  /incidencias\.followup-avatars\.v5\.identity-first-single-paint/u,
-  "Seguimiento debe versionar explícitamente la resolución identity-first de una sola pintura"
+  /incidencias\.followup-avatars\.v6\.global-avatar-authority/u
 );
+assert.match(followupSource, /import\s+["']\.\/style\.css["'];/u);
+assert.match(followupSource, /resolveAvatarPresentation/u);
+assert.match(followupSource, /incidencias-comment-identity\/index\.js/u);
+assert.match(followupSource, /dataset\.avatarSystem/u);
+assert.match(followupSource, /dataset\.avatarHost/u);
+assert.match(followupSource, /dataset\.avatarImage/u);
+assert.match(followupSource, /dataset\.avatarFallback/u);
+assert.match(followupSource, /MutationObserver/u);
+assert.doesNotMatch(followupSource, /IncidenciasAvatarFallbackInternals/u);
+assert.doesNotMatch(followupSource, /avatarToneFromIdentity|resolveAvatarTone|%\s*10/u);
+assert.doesNotMatch(followupSource, /addEventListener\([\s\S]{0,80}["']error["']/u);
+assert.doesNotMatch(followupSource, /createElement\(["']style["']\)/u);
 
-assert.match(
-  followupSource,
-  /import\s+"\.\/style\.css";/u,
-  "la presentación del avatar debe estar co-localizada como CSS del feature"
-);
-
-assert.doesNotMatch(
-  followupSource,
-  /createElement\("style"\)/u,
-  "el feature no debe inyectar CSS dinámico desde JavaScript"
-);
-
-assert.match(
-  followupSource,
-  /avatar\.className\s*=\s*[\s\S]*?AVATAR_CLASS[\s\S]*?CANONICAL_AVATAR_FRAME_CLASS/u,
-  "el comentario debe montar el mismo frame ui-detail-modal-avatar-frame del encabezado"
-);
-
-assert.match(
-  followupSource,
-  /fallback\.className\s*=\s*[\s\S]*?AVATAR_FALLBACK_CLASS[\s\S]*?CANONICAL_AVATAR_FALLBACK_CLASS/u,
-  "las iniciales deben reutilizar el fallback estructural canónico"
-);
-
-assert.match(
-  followupSource,
-  /\.incidencias-modal-description-comment-head/u,
-  "la foto debe apuntar al renderer real de Seguimiento visible en Details"
-);
-
-assert.match(
-  followupSource,
-  /IncidenciasAvatarFallbackInternals/u,
-  "Seguimiento debe reutilizar la política identity-first ya validada"
-);
-
-assert.match(
-  followupSource,
-  /buildCommentIdentityIndex/u,
-  "Seguimiento debe resolver comentarios desde identidad estable del detalle"
-);
-
-assert.match(
-  followupSource,
-  /resolveCommentProfile/u,
-  "Seguimiento debe fallar cerrado cuando la identidad no coincide"
-);
-
-assert.match(
-  followupSource,
-  /document\.createElement\("span"\)[\s\S]*?fallback\.textContent\s*=\s*avatarInitials\(authorText\)/u,
-  "cada autor debe recibir un frame estable con sus iniciales canónicas"
-);
-
-assert.match(
-  followupSource,
-  /if \(profile\?\.src\)[\s\S]*?document\.createElement\("img"\)/u,
-  "la foto real debe ser una mejora opcional sobre el fallback, no un requisito"
-);
-
-assert.doesNotMatch(
-  followupSource,
-  /if \(!profile\?\.src\)[\s\S]{0,120}removeAvatar/u,
-  "un autor sin foto nunca debe perder su avatar de iniciales"
-);
-
-assert.match(
-  followupSource,
-  /image\.addEventListener\([\s\S]*?"error"[\s\S]*?image\.remove\(\)[\s\S]*?setAvatarState/u,
-  "una foto rota debe volver al fallback conservando el frame"
-);
-
-assert.match(
-  followupSource,
-  /if \(!state\?\.detail\) \{[\s\S]*?queueHydration\(modal\);[\s\S]*?return 0;/u,
-  "sin identidad estable el modal debe hidratar y aplazar el primer paint del avatar"
-);
-
-assert.doesNotMatch(
-  followupSource,
-  /if \(!state\?\.detail\) \{\s*let synced/u,
-  "no se permite una primera pintura provisional basada sólo en el nombre"
-);
-
-assert.match(
-  followupSource,
-  /incidencias-modal-description-comment-author/u,
-  "foto y nombre deben viajar juntos sin alterar la fecha del comentario"
-);
-
-assert.match(
-  followupSource,
-  /image\.width\s*=\s*28;[\s\S]*?image\.height\s*=\s*28;/u,
-  "el elemento img debe declarar 28x28 para reservar geometría antes de cargar"
-);
-
-assert.match(
-  followupStyle,
-  /grid-template-columns:\s*28px\s+minmax\(0,\s*1fr\)/u,
-  "el wrapper de autor debe reservar una primera columna fija para la foto"
-);
-
-assert.match(
-  followupStyle,
-  /inline-size:\s*28px;[\s\S]*?block-size:\s*28px;/u,
-  "el avatar premium de escritorio debe medir 28px"
-);
-
-assert.match(
-  followupStyle,
-  /border-radius:\s*999px;/u,
-  "el avatar debe ser inequívocamente circular"
-);
-
-assert.match(
-  detailModalStyle,
-  /\.ui-detail-modal-avatar-frame\s*\{[\s\S]*?border:\s*1px solid color-mix[\s\S]*?background:\s*linear-gradient\(135deg,[\s\S]*?box-shadow:\s*inset 0 1px 0 color-mix/u,
-  "gradiente, borde y brillo deben pertenecer al componente canónico compartido"
-);
-
-assert.match(
-  detailModalStyle,
-  /\.ui-detail-modal-avatar-frame\[data-avatar-tone="3"\][\s\S]*?--ui-detail-avatar-a:\s*var\(--error\);[\s\S]*?--ui-detail-avatar-b:\s*var\(--warning\);/u,
-  "Carlos debe conservar la pareja error-warning del mismo selector que el encabezado"
-);
-
-for (const [rendererPath, rendererSource] of detailCommentRendererSources) {
-  assert.match(
-    rendererSource,
-    /date\.className\s*=\s*"incidencias-modal-description-comment-date"/u,
-    `${rendererPath} debe exponer una clase semántica propia para la fecha`
+for (const [label, source] of [
+  ["timeline comments", commentStyle],
+  ["Seguimiento", followupStyle],
+]) {
+  assert.doesNotMatch(
+    source,
+    /\[data-avatar-tone=|linear-gradient|box-shadow\s*:|(?:^|\n)\s*(?:color|background|border(?:-color)?)\s*:/u,
+    `${label} sólo puede adaptar contexto/tamaño; AvatarSystem posee el paint`
   );
+  assert.doesNotMatch(source, /!important/u);
 }
 
+assert.match(commentStyle, /inline-size:\s*22px/u);
+assert.match(commentStyle, /block-size:\s*22px/u);
+assert.match(followupStyle, /inline-size:\s*28px/u);
+assert.match(followupStyle, /block-size:\s*28px/u);
 assert.match(
-  privateInteractionsStyle,
-  /\.incidencias-modal-description-comment-date\s*\{[\s\S]*?color:\s*var\(--text-muted\);/u,
-  "sólo la fecha debe consumir la tipografía secundaria del comentario"
+  followupStyle,
+  /@media \(max-width: 720px\)[\s\S]*?inline-size:\s*26px;[\s\S]*?block-size:\s*26px;/u
 );
 
 assert.doesNotMatch(
-  privateInteractionsStyle,
-  /\.incidencias-modal-description-comment-head\s+span\s*\{/u,
-  "la tipografía contextual no puede alcanzar avatares u otros spans del encabezado"
+  detailModalStyle,
+  /\[data-avatar-tone=["'][0-9]["']\]/u,
+  "detail-modal no puede reintroducir una paleta enumerada de avatar"
 );
-
 assert.doesNotMatch(
-  followupStyle,
-  /--followup-avatar-|linear-gradient|box-shadow:\s|\[data-avatar-tone=|(?:^|\n)\s*(?:color|background|border)\s*:/u,
-  "Seguimiento no puede mantener una segunda paleta o textura visual"
+  detailModalStyle,
+  /--ui-detail-avatar-(?:a|b)\s*:/u,
+  "detail-modal no puede conservar su viejo motor de gradientes de avatar"
 );
-
-assert.match(
-  followupStyle,
-  /@media \(max-width: 720px\)[\s\S]*?inline-size:\s*26px;[\s\S]*?block-size:\s*26px;/u,
-  "móvil debe compactar el avatar a 26px manteniendo la relación horizontal"
-);
-
 assert.match(
   detailModalStyle,
-  /@media \(forced-colors: active\)[\s\S]*?\.ui-detail-modal-avatar-frame\s*\{[\s\S]*?background:\s*Canvas;[\s\S]*?box-shadow:\s*none;/u,
-  "la alternativa forced-colors también debe pertenecer al componente compartido"
-);
-
-assert.doesNotMatch(
-  followupStyle,
-  /!important/u,
-  "el CSS del avatar no debe depender de !important"
-);
-
-assert.match(
-  followupSource,
-  /MutationObserver/u,
-  "las fotos de Seguimiento deben sobrevivir rerenders y comentarios nuevos"
+  /\.ui-detail-modal-avatar-frame\s*\{[\s\S]*?display:\s*grid;/u,
+  "detail-modal puede conservar únicamente contexto tipográfico/layout del frame"
 );
 
 assert.match(
   enhancementsSource,
-  /key:\s*"incidencias-followup-avatars"[\s\S]*?scope:\s*"incidencias"[\s\S]*?features\/incidencias-followup-avatars\/index\.js/u,
-  "la mejora visible de Seguimiento debe cargarse únicamente en Incidencias"
+  /key:\s*["']incidencias-comment-avatars["'][\s\S]*?scope:\s*["']incidencias["'][\s\S]*?features\/incidencias-comment-avatars\/index\.js/u,
+  "el timeline debe cargar el nuevo adaptador y no el fallback global retirado"
 );
-
-const feature = await import(
-  new URL(`../../${FEATURE_PATH}`, import.meta.url)
+assert.match(
+  enhancementsSource,
+  /key:\s*["']incidencias-followup-avatars["'][\s\S]*?scope:\s*["']incidencias["'][\s\S]*?features\/incidencias-followup-avatars\/index\.js/u
 );
+assert.doesNotMatch(enhancementsSource, /incidencias-avatar-fallback/u);
 
-const {
-  avatarInitials,
-  avatarToneFromIdentity,
-  buildCommentIdentityIndex,
-  resolveCommentProfile,
-} = feature.IncidenciasAvatarFallbackInternals;
-
-assert.equal(
-  avatarInitials("Carlos Yepes Garcia"),
-  "CY",
-  "Carlos debe usar las dos primeras iniciales, igual que el encabezado"
+for (const [rendererPath, rendererSource] of detailCommentRendererSources) {
+  assert.match(
+    rendererSource,
+    /date\.className\s*=\s*["']incidencias-modal-description-comment-date["']/u,
+    `${rendererPath} debe mantener una clase semántica propia para la fecha`
+  );
+}
+assert.match(
+  privateInteractionsStyle,
+  /\.incidencias-modal-description-comment-date\s*\{[\s\S]*?color:\s*var\(--text-muted\);/u
 );
-
-assert.equal(
-  avatarInitials("Pol Cabeza Sillero"),
-  "PC",
-  "el fallback debe funcionar para cualquier nombre, no sólo para Carlos"
-);
-
-assert.equal(
-  avatarToneFromIdentity("carlosgarciayepes16@gmail.com"),
-  3,
-  "la identidad de Carlos debe resolver el tono naranja canónico del encabezado"
+assert.doesNotMatch(
+  privateInteractionsStyle,
+  /\.incidencias-modal-description-comment-head\s+span\s*\{/u,
+  "la tipografía contextual no puede alcanzar avatares u otros spans del encabezado"
 );
 
 const requester = Object.freeze({
@@ -322,7 +183,6 @@ const requester = Object.freeze({
   email: "requester@example.com",
   src: "https://example.test/requester.jpg",
 });
-
 const technician = Object.freeze({
   source: "technician",
   name: "Cristian Ávila",
@@ -330,61 +190,63 @@ const technician = Object.freeze({
   email: "technician@example.com",
   src: "https://example.test/technician.jpg",
 });
-
 const profiles = [requester, technician];
 
 {
   const index = buildCommentIdentityIndex({
-    comments: [
-      {
-        byName: "Cristian Ávila",
-        byUserId: "on-technician",
-        byEmail: "technician@example.com",
-      },
-    ],
+    comments: [{
+      byName: "Cristian Ávila",
+      byUserId: "on-technician",
+      byEmail: "technician@example.com",
+    }],
   });
-
   assert.equal(
     resolveCommentProfile("Cristian Ávila", index, profiles)?.source,
-    "technician",
-    "el userId/email estable debe resolver el técnico aunque los nombres se solapen"
+    "technician"
   );
 }
 
 {
   const index = buildCommentIdentityIndex({
-    comments: [
-      {
-        byName: "Cristian Ávila",
-        byUserId: "on-third-person",
-        byEmail: "third@example.com",
-      },
-    ],
+    comments: [{
+      byName: "Cristian Ávila",
+      byUserId: "on-third-person",
+      byEmail: "third@example.com",
+    }],
   });
-
   assert.equal(
     resolveCommentProfile("Cristian Ávila", index, profiles),
     null,
-    "un ID/email estable que no coincide debe fallar cerrado y no apropiarse de una foto por nombre"
+    "una identidad estable que no coincide debe fallar cerrado"
   );
 }
 
 {
   const index = buildCommentIdentityIndex({
-    comments: [
-      {
-        byName: "Cristian Ávila Luque",
-      },
-    ],
+    comments: [{ byName: "Cristian Ávila Luque" }],
   });
-
   assert.equal(
     resolveCommentProfile("Cristian Ávila Luque", index, profiles)?.source,
     "requester",
-    "los comentarios legacy sin identidad estable deben conservar compatibilidad por nombre exacto"
+    "comentarios legacy sin ID/email conservan compatibilidad por nombre"
   );
 }
 
+const presentation = resolveAvatarPresentation({
+  displayName: "Cristian Ávila Luque",
+  username: "avila199817",
+});
+const emailPresentation = resolveAvatarPresentation({
+  name: "Cristian Ávila Luque",
+  email: "avila199817@gmail.com",
+});
+
+assert.equal(presentation.initials, "CÁ");
+assert.equal(presentation.tone, emailPresentation.tone);
+assert.equal(presentation.fingerprint, emailPresentation.fingerprint);
+assert.ok(presentation.tone >= 0 && presentation.tone < AVATAR_TONE_COUNT);
+assert.ok(AVATAR_TONE_COUNT > 4_000_000_000);
+
 console.log(
-  "Incidencias comment avatar contract OK · canonical visual owner · stable tones · identity-first · 28/26px"
+  "Incidencias comment avatar contract OK · pure stable identity · global AvatarSystem paint · no legacy fallback engine"
 );

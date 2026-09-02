@@ -111,6 +111,39 @@ try {
   assert.equal(closed.localProjection, true);
   assert.deepEqual(closed.items.map((item) => item.ticketId), ["INC-CLOSED"]);
 
+  const closedFacetCount = await loadIncidenciasPage({
+    query: { pageMode: "cursor", limit: 1, closed: true },
+  });
+  assert.equal(
+    requests.length,
+    1,
+    "la faceta Cerradas limit=1 no debe tocar HTTP con universo completo"
+  );
+  assert.equal(closedFacetCount.localProjection, true);
+  assert.equal(closedFacetCount.total, 1);
+
+  const openFacetCount = await loadIncidenciasPage({
+    query: { pageMode: "cursor", limit: 1, closed: false },
+  });
+  assert.equal(
+    requests.length,
+    1,
+    "la faceta Abiertas limit=1 no debe tocar HTTP con universo completo"
+  );
+  assert.equal(openFacetCount.localProjection, true);
+  assert.equal(openFacetCount.total, 2);
+
+  const urgentFacetCount = await loadIncidenciasPage({
+    query: { pageMode: "cursor", limit: 1, priority: "high" },
+  });
+  assert.equal(
+    requests.length,
+    1,
+    "la faceta Urgentes limit=1 no debe tocar HTTP con universo completo"
+  );
+  assert.equal(urgentFacetCount.localProjection, true);
+  assert.equal(urgentFacetCount.total, 1);
+
   const open = await loadIncidenciasPage({
     query: { pageMode: "cursor", limit: 48, closed: false },
   });

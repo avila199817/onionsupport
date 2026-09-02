@@ -6657,6 +6657,85 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
         ? baseResponse
         : activeResponse;
 
+    /*
+       P0 PERF: si la respuesta base demuestra que TODO el universo cabe en la
+       primera página, las facetas exactas salen de memoria. Cero HTTP extra,
+       cero COUNT remoto y cero enriquecimiento redundante.
+
+       La optimización sólo se activa con prueba fuerte de completitud:
+       - estamos en "all";
+       - no existe continuation cursor;
+       - hasMore no es true;
+       - total remoto es finito;
+       - total remoto === items recibidos.
+
+       En cuanto el dataset supere una página, el flujo remoto histórico queda
+       intacto como fallback.
+    */
+    const baseItems = safeArray(baseResponse?.items);
+    const baseTotal = Number(baseResponse?.total);
+    const baseUniverseComplete = Boolean(
+      baseResponse &&
+      filter === "all" &&
+      !cleanText(baseResponse?.nextCursor, "") &&
+      baseResponse?.hasMore !== true &&
+      Number.isFinite(baseTotal) &&
+      baseTotal === baseItems.length
+    );
+
+    if (baseUniverseComplete) {
+      const universeStats = computeIncidenciasStats(baseItems);
+      const localResponse = (total, response = {}) => ({
+        ...response,
+        total,
+        items: safeArray(response?.items),
+        nextCursor: "",
+        hasMore: false,
+        pagination: {
+          ...response?.pagination,
+          nextCursor: null,
+          hasMore: false,
+          total,
+        },
+      });
+
+      const presentation = buildIncidenciasFilterFacetPresentation(
+        {
+          all: localResponse(universeStats.total, baseResponse),
+          open: localResponse(universeStats.open),
+          closed: localResponse(universeStats.closed),
+          urgent: localResponse(universeStats.urgent),
+        },
+        {
+          universeStats,
+          universeLoaded: baseItems.length,
+        }
+      );
+
+      const next = Object.freeze({
+        ...presentation,
+        aggregatePartial: false,
+        universeLoaded: baseItems.length,
+        source: "complete-first-page",
+        zeroExtraHttp: true,
+        updatedAt: Date.now(),
+      });
+
+      filterFacetCache.set(key, next);
+
+      if (
+        mounted &&
+        !loading &&
+        !listQueryPending
+      ) {
+        renderWithFilteredItems({
+          skipModals: true,
+        });
+      }
+
+      return next;
+    }
+
     if (cached && !force && authoritativeFacet && authoritativeResponse) {
       const reconciled =
         reconcileIncidenciasFilterFacetPresentation(

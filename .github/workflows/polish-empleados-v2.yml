@@ -37,7 +37,7 @@ jobs:
           set -euo pipefail
           git config user.name "Onion Support"
           git config user.email "cristian@onionsupport.com"
-          git rm \
+          git rm -f \
             .github/workflows/polish-empleados-once.yml \
             .github/workflows/polish-empleados-v2.yml \
             .github/scripts/polish_empleados_once.py \

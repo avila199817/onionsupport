@@ -13,6 +13,11 @@ const verificationWorkflow = await readFile(
   "utf8"
 );
 
+const KNOWN_UPLOAD_ARTIFACT_PINS = Object.freeze([
+  "actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4",
+  "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+]);
+
 function jobSection(name, nextName = "") {
   const start = workflow.indexOf(`  ${name}:\n`);
   const end = nextName
@@ -20,6 +25,15 @@ function jobSection(name, nextName = "") {
     : workflow.length;
   assert.ok(start >= 0 && end > start, `Workflow job boundary missing: ${name}`);
   return workflow.slice(start, end);
+}
+
+function assertExactlyOneKnownPin(source, pins, label) {
+  const matches = pins.filter((pin) => source.includes(pin));
+  assert.equal(
+    matches.length,
+    1,
+    `${label} must use exactly one known immutable migration pin`
+  );
 }
 
 const validateJob = jobSection("validate", "deploy_production");
@@ -43,10 +57,14 @@ for (const token of [
   "Materialize exact production artifact",
   "candidate/production-artifact/dist",
   "candidate/production-artifact/build-metadata",
-  "actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4",
 ]) {
   assert.ok(validateJob.includes(token), `Secretless production build contract missing: ${token}`);
 }
+assertExactlyOneKnownPin(
+  validateJob,
+  KNOWN_UPLOAD_ARTIFACT_PINS,
+  "Production build upload-artifact"
+);
 assert.doesNotMatch(
   validateJob,
   /\$\{\{\s*secrets\./,

@@ -1,0 +1,54 @@
+/* =========================================================
+   ONION SUPPORT — HOME EXTREME INTERACTIONS
+   Archivo: /src/css/compositions/home-extreme-interactions.css
+
+   SEMANTIC WHOLE-ROW BUTTONS · OWNER MODALS · LEGACY-SAFE
+
+   El Home anterior utilizaba una capa absoluta `.home-entity-hit-target`.
+   La vista extrema usa ahora el propio botón de fila como superficie completa.
+   Esta composición declara esa autoridad después de `layer(views)` para que
+   ninguna regla legacy pueda desactivar sus eventos de puntero.
+========================================================= */
+
+.home-view-root :is(
+  .home-activity-item--interactive,
+  .home-invoice-item--interactive
+) > .home-entity-row {
+  position: relative;
+  z-index: 3;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.home-view-root :is(
+  .home-activity-item--interactive,
+  .home-invoice-item--interactive
+) > .home-entity-row * {
+  pointer-events: none;
+}
+
+/*
+  Defensa de compatibilidad: un DOM antiguo conservado por caché nunca puede
+  superponerse al botón semántico ni capturar el click destinado a EntityOverlay.
+*/
+.home-view-root .home-entity-hit-target {
+  display: none;
+  pointer-events: none;
+}
+
+.home-view-root .home-entity-row[aria-haspopup="dialog"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.home-view-root .home-entity-row[aria-haspopup="dialog"]:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+@media (forced-colors: active) {
+  .home-view-root .home-entity-row[aria-haspopup="dialog"]:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+}

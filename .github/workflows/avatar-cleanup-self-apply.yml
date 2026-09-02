@@ -38,6 +38,7 @@ jobs:
           set -euo pipefail
           while IFS= read -r file; do
             [[ -z "$file" ]] && continue
+            [[ -f "$file" ]] || continue
             case "$file" in
               *.js|*.mjs) node --check "$file" ;;
             esac

@@ -873,7 +873,6 @@ def validate_private_admin_visual_parity_v16_contract(errors: list[str]) -> None
         ),
         "src/views/clientes/clientes.template.js": (
             "clientes.template.cursor.v12.private-admin-visual-parity",
-            "clientes-avatar--tone-${avatarTone(current)}",
             "clientes-table-loading-row",
             "clientes-refresh-overlay",
         ),
@@ -889,6 +888,23 @@ def validate_private_admin_visual_parity_v16_contract(errors: list[str]) -> None
         for token in tokens:
             if token not in source:
                 errors.append(f"{relative} :: hook presentacional V16 ausente: {token}")
+
+    clientes_template = (ROOT / "src/views/clientes/clientes.template.js").read_text(encoding="utf-8")
+    legacy_avatar_contract = "clientes-avatar--tone-${avatarTone(current)}" in clientes_template
+    global_avatar_contract = all(
+        token in clientes_template
+        for token in (
+            "resolveAvatarPresentation",
+            'data-avatar-system="true"',
+            'data-avatar-host="true"',
+            'data-avatar-tone="${attr(String(presentation.tone))}"',
+        )
+    )
+
+    if legacy_avatar_contract == global_avatar_contract:
+        errors.append(
+            "src/views/clientes/clientes.template.js :: V16 exige exactamente una autoridad de avatar conocida: legacy o AvatarSystem global"
+        )
 
     for relative in (
         "src/css/views/facturas/index.css",

@@ -91,6 +91,12 @@ for (const token of [
 ]) {
   assert.ok(deployedVerifier.includes(token), `Deployed verifier hardening missing: ${token}`);
 }
+
+assert.ok(
+  deployedVerifier.includes('[".svg", new Set(["image/svg+xml"])]'),
+  "Exact-byte verification must accept SVG only as image/svg+xml."
+);
+
 assert.doesNotMatch(
   deployedVerifier,
   /redirect:\s*["']follow["']/,
@@ -128,6 +134,7 @@ for (const token of [
 
 console.log("Deployed dist verifier regression: PASS");
 console.log("- redirects, URL ambiguity, MIME and denied paths fail closed");
+console.log("- SVG assets are accepted only with the exact image/svg+xml MIME type");
 console.log("- generic unknown URLs are proven real HTTP 404 responses");
 console.log("- obsolete language-prefixed paths are rejected across the tracked tree");
 console.log("- fingerprinted and private cache policies resist conflicting directives");

@@ -8,6 +8,7 @@
    - unificar todos los glifos del Sidebar en un único lenguaje visual;
    - mantener una caja óptica cuadrada, estable y alineada 1:1;
    - usar currentColor para heredar hover, active, tema y forced-colors;
+   - encapsular los SVG como data URI para no ampliar el contrato MIME;
    - conservar los SVG inline actuales como fallback sin JS adicional;
    - no alterar Router, Auth, DOM semántico ni geometría del App Chrome.
 ========================================================= */
@@ -17,29 +18,29 @@
   --sb-icon-chevron-canvas: 18px;
 
   --sb-icon-panel-close:
-    url("../../media/icons/sidebar/panel-close.svg");
+    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8cmVjdCB4PSIzLjI1IiB5PSIzLjI1IiB3aWR0aD0iMTcuNSIgaGVpZ2h0PSIxNy41IiByeD0iMi43NSIvPgogIDxwYXRoIGQ9Ik04Ljc1IDMuMjV2MTcuNSIvPgogIDxwYXRoIGQ9Im0xNS41IDguNzUtMy4yNSAzLjI1IDMuMjUgMy4yNSIvPgo8L3N2Zz4K");
   --sb-icon-panel-open:
-    url("../../media/icons/sidebar/panel-open.svg");
+    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8cmVjdCB4PSIzLjI1IiB5PSIzLjI1IiB3aWR0aD0iMTcuNSIgaGVpZ2h0PSIxNy41IiByeD0iMi43NSIvPgogIDxwYXRoIGQ9Ik04Ljc1IDMuMjV2MTcuNSIvPgogIDxwYXRoIGQ9Im0xMi41IDguNzUgMy4yNSAzLjI1LTMuMjUgMy4yNSIvPgo8L3N2Zz4K");
   --sb-icon-home:
-    url("../../media/icons/sidebar/home.svg");
+    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8cGF0aCBkPSJtMy41IDEwLjc1IDguNS03IDguNSA3Ii8+CiAgPHBhdGggZD0iTTUuMjUgOS41djkuMjVBMS43NSAxLjc1IDAgMCAwIDcgMjAuNWgxMGExLjc1IDEuNzUgMCAwIDAgMS43NS0xLjc1VjkuNSIvPgogIDxwYXRoIGQ9Ik05LjI1IDIwLjV2LTZoNS41djYiLz4KPC9zdmc+Cg==");
   --sb-icon-incidencias:
-    url("../../media/icons/sidebar/ticket.svg");
+    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8cGF0aCBkPSJNNS4yNSA1aDEzLjVhMS43NSAxLjc1IDAgMCAxIDEuNzUgMS43NVY5YTMgMyAwIDAgMCAwIDZ2Mi4yNUExLjc1IDEuNzUgMCAwIDEgMTguNzUgMTlINS4yNWExLjc1IDEuNzUgMCAwIDEtMS43NS0xLjc1VjE1YTMgMyAwIDAgMCAwLTZWNi43NUExLjc1IDEuNzUgMCAwIDEgNS4yNSA1WiIvPgogIDxwYXRoIGQ9Ik05IDguMjVoNk05IDEyaDZNOSAxNS43NWgzLjc1Ii8+Cjwvc3ZnPgo=");
   --sb-icon-facturas:
-    url("../../media/icons/sidebar/receipt.svg");
+    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8cGF0aCBkPSJNNi4yNSAzLjVoMTEuNXYxN2wtMS45LTEuMjUtMS45MyAxLjI1TDEyIDE5LjI1bC0xLjkyIDEuMjUtMS45My0xLjI1LTEuOSAxLjI1di0xN1oiLz4KICA8cGF0aCBkPSJNOSA4aDZNOSAxMS43NWg2TTkgMTUuNWg0LjI1Ii8+Cjwvc3ZnPgo=");
   --sb-icon-clientes:
-    url("../../media/icons/sidebar/building.svg");
+    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8cGF0aCBkPSJNNCAyMC41aDE2Ii8+CiAgPHBhdGggZD0iTTUuNSAyMC41VjZBMiAyIDAgMCAxIDcuNSA0aDdBMiAyIDAgMCAxIDE2LjUgNnYxNC41Ii8+CiAgPHBhdGggZD0iTTE2LjUgOC41aDEuNzVBMS43NSAxLjc1IDAgMCAxIDIwIDEwLjI1VjIwLjUiLz4KICA8cGF0aCBkPSJNOC41IDhoLjVNMTIuNSA4aC41TTguNSAxMS43NWguNU0xMi41IDExLjc1aC41Ii8+CiAgPHBhdGggZD0iTTkuMjUgMjAuNXYtNC4yNWgzLjV2NC4yNSIvPgo8L3N2Zz4K");
   --sb-icon-usuarios:
-    url("../../media/icons/sidebar/user.svg");
+    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8Y2lyY2xlIGN4PSIxMiIgY3k9IjgiIHI9IjMuNzUiLz4KICA8cGF0aCBkPSJNNC43NSAyMC4yNWE3LjI1IDcuMjUgMCAwIDEgMTQuNSAwIi8+Cjwvc3ZnPgo=");
   --sb-icon-correo:
-    url("../../media/icons/sidebar/mail.svg");
+    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8cmVjdCB4PSIzLjI1IiB5PSI1LjI1IiB3aWR0aD0iMTcuNSIgaGVpZ2h0PSIxMy41IiByeD0iMi4yNSIvPgogIDxwYXRoIGQ9Im00LjUgNyA2LjE1IDUuMDVhMi4xIDIuMSAwIDAgMCAyLjcgMEwxOS41IDciLz4KPC9zdmc+Cg==");
   --sb-icon-servidor:
-    url("../../media/icons/sidebar/server.svg");
+    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8cmVjdCB4PSIzLjI1IiB5PSIzLjc1IiB3aWR0aD0iMTcuNSIgaGVpZ2h0PSI2LjUiIHJ4PSIxLjc1Ii8+CiAgPHJlY3QgeD0iMy4yNSIgeT0iMTMuNzUiIHdpZHRoPSIxNy41IiBoZWlnaHQ9IjYuNSIgcng9IjEuNzUiLz4KICA8Y2lyY2xlIGN4PSI3IiBjeT0iNyIgcj0iLjciIGZpbGw9IiMwMDAiIHN0cm9rZT0ibm9uZSIvPgogIDxjaXJjbGUgY3g9IjciIGN5PSIxNyIgcj0iLjciIGZpbGw9IiMwMDAiIHN0cm9rZT0ibm9uZSIvPgogIDxwYXRoIGQ9Ik0xMC4yNSA3aDYuNU0xMC4yNSAxN2g2LjUiLz4KPC9zdmc+Cg==");
   --sb-icon-cuenta:
-    url("../../media/icons/sidebar/account.svg");
+    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSI5Ii8+CiAgPGNpcmNsZSBjeD0iMTIiIGN5PSI5IiByPSIzIi8+CiAgPHBhdGggZD0iTTYuNSAxOWE2LjI1IDYuMjUgMCAwIDEgMTEgMCIvPgo8L3N2Zz4K");
   --sb-icon-logout:
-    url("../../media/icons/sidebar/logout.svg");
+    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8cGF0aCBkPSJtMTUuMjUgNy4yNSA0Ljc1IDQuNzUtNC43NSA0Ljc1Ii8+CiAgPHBhdGggZD0iTTE5LjUgMTJIOSIvPgogIDxwYXRoIGQ9Ik0xMS4yNSAyMC4yNUg2LjVBMi43NSAyLjc1IDAgMCAxIDMuNzUgMTcuNXYtMTFBMi43NSAyLjc1IDAgMCAxIDYuNSAzLjc1aDQuNzUiLz4KPC9zdmc+Cg==");
   --sb-icon-chevron:
-    url("../../media/icons/sidebar/chevron-right.svg");
+    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8cGF0aCBkPSJtOS4yNSA1LjUgNi41IDYuNS02LjUgNi41Ii8+Cjwvc3ZnPgo=");
 }
 
 @supports ((mask-image: linear-gradient(#000, #000)) or (-webkit-mask-image: linear-gradient(#000, #000))) {

@@ -104,7 +104,7 @@ const html = renderHomeTemplate({
 
 assert.match(
   html,
-  /data-home-relation-version="home\.entity-relation\.v1-domain-identity-parity"/
+  /data-home-relation-version="home\.entity-relation\.v2-global-avatar-authority"/
 );
 
 assert.equal(
@@ -119,6 +119,17 @@ assert.equal(
   "Only rows backed by a real relation in the loaded domain DTO may claim relation data"
 );
 
+assert.equal(
+  (html.match(/data-avatar-authority="global"/g) || []).length >= 5,
+  true,
+  "Home hero plus relation avatars must declare the same global authority before runtime reconciliation"
+);
+assert.equal(
+  (html.match(/data-avatar-system="true"/g) || []).length >= 5,
+  true,
+  "Home avatars must enter the single AvatarSystem contract at render time"
+);
+
 assert.match(html, /María del Carmen López García/);
 assert.match(html, /maria\.lopez@example\.com/);
 assert.match(html, new RegExp(requesterAvatar.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -127,8 +138,8 @@ assert.match(html, /Juan Pablo Ruiz Martín/);
 assert.match(html, /juan\.ruiz@example\.com/);
 assert.match(
   html,
-  /data-home-relation-avatar="false"[\s\S]*?home-entity-relation-fallback">JP</,
-  "A missing photo must use initials derived from the real full name, never a fabricated asset"
+  /data-home-relation-avatar="false"[\s\S]*?data-avatar-initials="JP"[\s\S]*?home-entity-relation-fallback[^>]*>JP</,
+  "A missing photo must use initials from global AvatarSystem, never a fabricated asset"
 );
 
 assert.match(
@@ -163,12 +174,14 @@ assert.match(
 
 const [
   relationSource,
+  sharedSource,
   activitySource,
   billingSource,
   relationCss,
   compositionEntry,
 ] = await Promise.all([
   readFile("src/views/home/home.template.relation.js", "utf8"),
+  readFile("src/views/home/home.template.shared.js", "utf8"),
   readFile("src/views/home/home.template.activity.js", "utf8"),
   readFile("src/views/home/home.template.billing.js", "utf8"),
   readFile("src/css/compositions/home-extreme-relations.css", "utf8"),
@@ -202,6 +215,16 @@ assert.doesNotMatch(
   "Home must not promote an email address into a fabricated full name"
 );
 
+for (const source of [relationSource, sharedSource]) {
+  assert.match(source, /resolveAvatarPresentation/);
+  assert.match(source, /data-avatar-authority="global"/);
+  assert.match(source, /data-avatar-tone=/);
+  assert.match(source, /data-avatar-identity=/);
+}
+assert.doesNotMatch(relationSource, /function identityHash/);
+assert.doesNotMatch(relationSource, /%\s*10/);
+assert.doesNotMatch(relationSource, /Math\.min\(9/);
+
 assert.match(activitySource, /function findActivityDomainSource/);
 assert.match(activitySource, /entityTriggerAttributesWithRelation/);
 assert.match(activitySource, /domainCollection\(vm, entityType\)/);
@@ -234,13 +257,20 @@ assert.match(
 );
 assert.match(
   relationCss,
-  /\.home-view-root \.home-entity-relation-avatar\s*\{[\s\S]*border-radius:\s*50%;/
+  /\.home-view-root \.home-entity-relation-avatar\s*\{[\s\S]*--avatar-size:/
 );
 assert.match(
   relationCss,
   /\.home-view-root \.home-entity-relation-name\s*\{[\s\S]*white-space:\s*normal;[\s\S]*overflow-wrap:\s*anywhere;/
 );
 assert.doesNotMatch(relationCss, /!important/);
+assert.doesNotMatch(relationCss, /data-avatar-tone="[0-9]"/);
+assert.doesNotMatch(relationCss, /--home-relation-(?:a|b)\b/);
+assert.doesNotMatch(
+  relationCss,
+  /\.home-entity-relation-avatar[^}]*\b(?:background|background-color|border|box-shadow)\s*:/s,
+  "Home relation CSS may size the avatar but may not paint its identity"
+);
 assert.doesNotMatch(
   relationCss,
   /\.home-(?:header|header-main|header-copy|title|subtitle|current-user-avatar)\b/
@@ -263,5 +293,5 @@ assert.equal(snapshot.policy.relationIdentityAddsNoRequests, true);
 assert.equal(snapshot.policy.syntheticRelationData, false);
 
 console.log(
-  "Home relation identity contract: PASS · full names · truthful avatars · domain alias parity · zero synthetic data"
+  "Home relation identity contract: PASS · global AvatarSystem · full names · truthful avatars · zero local palettes"
 );

@@ -4,13 +4,15 @@
 ========================================================= */
 
 import {
+  resolveAvatarPresentation,
+} from "../../features/avatar-system/identity.js";
+import {
   HOME_ACTIONS,
   attr,
   cleanText,
   escapeHtml,
   formatDate,
   icon,
-  initialsFrom,
   normalizeKey,
   safeDisplayId,
   safeImageSrc,
@@ -22,17 +24,29 @@ import {
 
 export function avatar(user = {}) {
   const image = safeImageSrc(user.avatarUrl);
-  const name = cleanText(user.displayName, "Usuario");
-  const initials = cleanText(user.initials, initialsFrom(name));
+  const presentation = resolveAvatarPresentation(user);
+  const name = cleanText(presentation.name || user.displayName, "Usuario");
 
   return `
     <span
       class="home-current-user-avatar ${image ? "has-image" : "is-fallback"}"
       aria-label="${attr(name)}"
+      data-avatar-system="true"
+      data-avatar-host="true"
+      data-avatar-authority="global"
+      data-avatar-state="${image ? "image" : "fallback"}"
       data-has-avatar="${image ? "true" : "false"}"
+      data-avatar-tone="${attr(String(presentation.tone))}"
+      data-avatar-identity="${attr(presentation.fingerprint)}"
+      data-avatar-color-key="${attr(presentation.colorKey)}"
+      data-avatar-initials="${attr(presentation.initials)}"
+      data-avatar-name="${attr(name)}"
+      ${presentation.email ? `data-avatar-email="${attr(presentation.email)}"` : ""}
+      ${presentation.userId ? `data-avatar-user-id="${attr(presentation.userId)}"` : ""}
+      ${presentation.username ? `data-avatar-username="${attr(presentation.username)}"` : ""}
     >
-      ${image ? `<img src="${attr(image)}" alt="" loading="eager" decoding="async" fetchpriority="high" referrerpolicy="no-referrer" draggable="false">` : ""}
-      <span class="home-avatar-initials" aria-hidden="true">${escapeHtml(initials)}</span>
+      ${image ? `<img data-avatar-image="true" src="${attr(image)}" alt="" loading="eager" decoding="async" fetchpriority="high" referrerpolicy="no-referrer" draggable="false">` : ""}
+      <span class="home-avatar-initials" data-avatar-fallback="true" aria-hidden="true">${escapeHtml(presentation.initials)}</span>
     </span>
   `;
 }

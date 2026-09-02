@@ -30,3 +30,9 @@
 @import url("./compositions/private-admin-interactions.css") layer(compositions);
 @import url("./compositions/private-create-modal.css") layer(compositions);
 @import url("./compositions/private-amounts.css") layer(compositions);
+
+/* =========================================================
+   IDENTIDAD PRIVADA · ÚLTIMA AUTORIDAD DE PINTURA
+========================================================= */
+
+@import url("./components/avatar-system.css") layer(guardrails);

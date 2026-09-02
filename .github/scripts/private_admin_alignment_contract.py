@@ -31,6 +31,7 @@ mobile_js = read("src/features/mobile-datalist/index.js")
 mobile_css = read("src/css/compositions/mobile-datalist.css")
 parity_css = read("src/css/compositions/private-admin-parity.css")
 interactions_css = read("src/css/compositions/private-admin-interactions.css")
+avatar_css = read("src/css/components/avatar-system.css")
 server_css = read("src/css/views/servidor/index.css")
 
 for entry_name, entry in (("app.css", app_css), ("private.css", private_css)):
@@ -38,16 +39,26 @@ for entry_name, entry in (("app.css", app_css), ("private.css", private_css)):
         './compositions/private-admin-parity.css',
         './compositions/private-admin-interactions.css',
         './compositions/private-create-modal.css',
+        './components/avatar-system.css',
     ):
         require(shared_css in entry, f"{entry_name} must import {shared_css}")
 
 require("PRIVATE UI FOUNDATION" in parity_css, "shared composition must declare the single private UI foundation")
-require("SINGLE VISUAL AUTHORITY" in parity_css, "shared composition must declare single visual authority")
+require("SINGLE VISUAL AUTHORITY" in parity_css, "shared composition must declare single listing visual authority")
 require(".server-hero" in parity_css, "Servidor hero must consume the shared private foundation")
 require(".server-summary-grid" in parity_css, "Servidor KPI shell must consume the shared private foundation")
 require(".server-panel" in parity_css, "Servidor panels must consume the shared private foundation")
 require("@import" not in server_css, "Servidor domain CSS must not import a parallel base stylesheet")
 require(not (ROOT / "src/css/views/servidor/base.css").exists(), "obsolete Servidor base.css must stay deleted")
+
+require(
+    "SINGLE VISUAL AUTHORITY · TRANSPARENT ALPHA SAFE · SPA-WIDE" in avatar_css,
+    "AvatarSystem must remain the independent cross-view avatar paint authority",
+)
+require(
+    "UINT32 COLOR ENGINE · 4,294,967,296 TONES" in avatar_css,
+    "AvatarSystem must retain the uint32 color engine",
+)
 
 for view in CRUD_VIEWS:
     index_path = (
@@ -100,17 +111,25 @@ for domain in ("facturas", "clientes", "usuarios"):
         f".{domain}-stats",
         f".{domain}-history",
         f".{domain}-table",
-        f".{domain}-avatar",
     ):
         require(token in parity_css, f"shared parity missing {token}")
+
+    require(
+        f".{domain}-avatar" not in parity_css,
+        f"{domain} avatar paint must remain outside shared listing parity",
+    )
 
 for token in (
     ".incidencias-stats",
     ".incidencias-history",
     ".incidencias-table",
-    ".incidencias-avatar",
 ):
-    require(token in parity_css, f"Incidencias shared authority missing {token}")
+    require(token in parity_css, f"Incidencias shared listing authority missing {token}")
+
+require(
+    ".incidencias-avatar" not in parity_css,
+    "Incidencias avatar paint must remain owned by AvatarSystem",
+)
 
 for breakpoint in (
     "@container (max-width: 1120px)",
@@ -122,5 +141,5 @@ for breakpoint in (
 
 print(
     "Private admin alignment contract OK · 4 CRUD views + Servidor · continuous scroll · "
-    "IME-safe search · single listing foundation · shared interactions · mobile datalist"
+    "IME-safe search · single listing foundation · independent AvatarSystem authority · mobile datalist"
 )

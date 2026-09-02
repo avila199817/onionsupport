@@ -12,6 +12,8 @@
    - Ningún contador de subconjunto cargado se presenta como total global.
 ========================================================= */
 
+
+import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 export const USUARIOS_TEMPLATE_VERSION =
   "usuarios.template.v27.private-admin-visual-parity";
 export const USUARIOS_TABLE_TEMPLATE_VERSION = USUARIOS_TEMPLATE_VERSION;
@@ -236,20 +238,23 @@ function statusLabel(item = {}) {
 function roleLabel(item = {}) {
   return normalizeKey(first(item.role, item.rol, "user")) === "admin" ? "Admin" : "Usuario";
 }
-function initials(value = "") {
-  const words = cleanText(value, "US").split(/\s+/).filter(Boolean);
-  return (words.length > 1 ? `${words[0][0]}${words[1][0]}` : words[0].slice(0, 2)).toUpperCase();
-}
-function avatarTone(item = {}) {
-  const seed = cleanText(first(item.email, item.username, getName(item), getId(item), "usuario"), "usuario");
-  let hash = 0;
-  for (let index = 0; index < seed.length; index += 1) hash = ((hash << 5) - hash + seed.charCodeAt(index)) | 0;
-  return Math.abs(hash) % 10;
+function avatarPresentation(item = {}) {
+  const name = getName(item);
+  const email = cleanText(first(item.email, item.emailLower, item.mail, ""), "").toLowerCase();
+  return resolveAvatarPresentation({
+    ...item,
+    displayName: name,
+    name,
+    email,
+    userId: getId(item),
+    username: first(item.username, item.userName, item.slug, ""),
+  });
 }
 function renderAvatar(item = {}) {
   const name = getName(item);
   const src = safeAvatarUrl(first(item.avatarUrl, item.avatar, item.photoUrl, item.picture, ""));
-  return `<span class="usuarios-avatar usuarios-avatar--tone-${avatarTone(item)}${src ? " has-image" : ""}" aria-hidden="true">${src ? `<img class="usuarios-avatar-img" src="${attr(src)}" alt="" width="42" height="42" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}<span class="usuarios-avatar-fallback">${escapeHtml(initials(name))}</span></span>`;
+  const presentation = avatarPresentation(item);
+  return `<span class="usuarios-avatar${src ? " has-image" : " is-fallback"}" aria-hidden="true" data-avatar-system="true" data-avatar-host="true" data-avatar-tone="${attr(String(presentation.tone))}" data-avatar-identity="${attr(presentation.fingerprint)}" data-avatar-initials="${attr(presentation.initials)}" data-has-avatar="${src ? "true" : "false"}">${src ? `<img class="usuarios-avatar-img" data-avatar-image="true" src="${attr(src)}" alt="" width="42" height="42" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}<span class="usuarios-avatar-fallback" data-avatar-fallback="true">${escapeHtml(presentation.initials)}</span></span>`;
 }
 function renderStatusChip(item = {}) {
   const status = getStatus(item);

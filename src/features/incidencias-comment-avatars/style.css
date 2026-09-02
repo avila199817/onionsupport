@@ -1,0 +1,55 @@
+/* =========================================================
+   Onion Support · Incidencias Comment Avatars
+
+   CONTEXT ONLY
+   - Esta hoja decide únicamente colocación y tamaño del avatar en el timeline.
+   - Identidad, shape, color, borde, imagen/fallback y estados pertenecen a
+     components/avatar-system.css.
+========================================================= */
+
+.incidencias-timeline-meta.has-comment-avatar {
+  grid-template-columns: 22px minmax(0, auto);
+  grid-template-rows: auto auto;
+  align-items: center;
+  justify-content: end;
+  justify-items: end;
+  column-gap: 7px;
+  row-gap: 2px;
+}
+
+.incidencias-timeline-meta.has-comment-avatar
+  > .incidencias-timeline-comment-avatar {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  inline-size: 22px;
+  block-size: 22px;
+  min-inline-size: 22px;
+  min-block-size: 22px;
+  align-self: center;
+  justify-self: end;
+  font-size: 8px;
+}
+
+.incidencias-timeline-meta.has-comment-avatar > strong {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.incidencias-timeline-meta.has-comment-avatar
+  > span:not(.incidencias-timeline-comment-avatar) {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+@media (max-width: 720px) {
+  .incidencias-timeline-meta.has-comment-avatar {
+    justify-content: start;
+    justify-items: start;
+    text-align: start;
+  }
+
+  .incidencias-timeline-meta.has-comment-avatar
+    > .incidencias-timeline-comment-avatar {
+    justify-self: start;
+  }
+}

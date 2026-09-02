@@ -14,6 +14,8 @@
    Template puro: sin HTTP, Router, Store, listeners ni DOM API.
 ========================================================= */
 
+
+import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 export const FACTURAS_CREATE_TEMPLATE_VERSION =
   "facturas.template.create.v7.multi-line-billing";
 
@@ -263,13 +265,6 @@ function formatMoney(value = 0) {
   }
 }
 
-function initialsFrom(value = "", fallback = "CL") {
-  const parts = cleanText(value, fallback).split(/\s+/).filter(Boolean);
-  if (!parts.length) return fallback;
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase() || fallback;
-}
-
 function icon(name = "") {
   const common =
     'aria-hidden="true" focusable="false" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"';
@@ -498,7 +493,6 @@ function normalizeClient(item = {}) {
     username: cleanText(first(raw.username, raw.slug, email ? email.split("@")[0] : ""), ""),
     avatarUrl,
     avatar: avatarUrl,
-    initials: initialsFrom(name, "CL"),
   };
 
   const taxProfile = getFacturaCreateTaxProfile(normalized);
@@ -750,25 +744,25 @@ function renderFieldError(message = "") {
   return text ? `<p class="fac-create-field-error" role="alert">${escapeHtml(text)}</p>` : "";
 }
 
-function getCreateAvatarTone(client = {}) {
-  const current = normalizeClient(client);
-  const identity = cleanText(first(current.email, current.name), "cliente");
-  let hash = 0;
-  for (let index = 0; index < identity.length; index += 1) {
-    hash = ((hash << 5) - hash + identity.charCodeAt(index)) | 0;
-  }
-  return Math.abs(hash) % 10;
-}
-
 function renderAvatar(client = {}) {
   const current = normalizeClient(client);
   const src = safeImageSrc(current.avatarUrl);
-  const tone = getCreateAvatarTone(current);
+  const presentation = resolveAvatarPresentation({
+    ...current,
+    displayName: current.name,
+    name: current.name,
+    email: current.email,
+    username: current.username,
+    userId: first(current.userId, current.clienteUserId, current.id, current.clienteId, ""),
+  });
 
   return `
-    <span class="fac-create-avatar fac-create-avatar--tone-${tone}${src ? " has-image" : ""}" aria-hidden="true">
-      ${src ? `<img src="${attr(src)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : ""}
-      <span>${escapeHtml(current.initials)}</span>
+    <span class="fac-create-avatar${src ? " has-image" : " is-fallback"}" aria-hidden="true"
+      data-avatar-system="true" data-avatar-host="true" data-avatar-tone="${attr(String(presentation.tone))}"
+      data-avatar-identity="${attr(presentation.fingerprint)}" data-avatar-initials="${attr(presentation.initials)}"
+      data-has-avatar="${src ? "true" : "false"}">
+      ${src ? `<img data-avatar-image="true" src="${attr(src)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : ""}
+      <span data-avatar-fallback="true">${escapeHtml(presentation.initials)}</span>
     </span>
   `;
 }

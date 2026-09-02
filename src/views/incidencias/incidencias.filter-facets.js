@@ -77,6 +77,13 @@ export function getIncidenciasFacetRequestQuery(
   const query = {
     pageMode: "cursor",
     limit: Math.max(1, Math.trunc(number(limit, 1))),
+    /*
+       P0 PERF + TRUTH:
+       Las facetas sólo llegan aquí por HTTP cuando NO existe un universo
+       completo local. En ese fallback remoto sí necesitamos el total exacto
+       del filtro, aunque el listado normal y P2+ nunca deban pagar COUNT.
+    */
+    includeTotal: true,
     ...getIncidenciasFacetFilterQuery(value),
   };
   const normalizedSearch = text(search);

@@ -29,19 +29,11 @@ jobs:
           node-version: '22'
           package-manager-cache: false
 
-      - name: Apply deterministic cleanup
-        run: node tools/apply-avatar-authority-cleanup.mjs
+      - name: Apply deterministic cleanup phase 2
+        run: node tools/apply-avatar-authority-cleanup-phase2.mjs
 
-      - name: Validate changed JavaScript syntax
-        shell: bash
-        run: |
-          set -euo pipefail
-          while IFS= read -r file; do
-            [[ -z "$file" ]] && continue
-            case "$file" in
-              *.js|*.mjs) node --check "$file" ;;
-            esac
-          done < <(git diff --name-only)
+      - name: Validate Python contract syntax
+        run: python3 -m py_compile .github/scripts/repo_integrity.py
 
       - name: Commit cleanup back to PR branch
         shell: bash
@@ -53,6 +45,6 @@ jobs:
           fi
           git config user.name "Onion Support"
           git config user.email "cristian@onionsupport.com"
-          git add src
-          git commit -m "Eliminar residuos legacy de AvatarSystem"
+          git add .github/scripts/repo_integrity.py
+          git commit -m "Actualizar contrato V16 a AvatarSystem global"
           git push origin HEAD:chore/system-hygiene-avatar-residue

@@ -6,6 +6,8 @@
    Garantiza que:
    - identidad/tone/iniciales salen del dominio global;
    - la misma persona conserva presentation entre snapshots distintos;
+   - Home/Sidebar sin email y actividad con email convergen igualmente;
+   - el espacio cromático ya no es una paleta discreta de 10 buckets;
    - AvatarSystem corrige hints legacy en DOM dinámico;
    - Sidebar/Home/listados están dentro del takeover global;
    - no se introduce aleatoriedad, storage ni red para resolver colores.
@@ -17,8 +19,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  AVATAR_COLOR_SPACE,
   AVATAR_IDENTITY_VERSION,
   AVATAR_TONE_COUNT,
+  avatarColorKeyFromSeed,
   avatarInitials,
   avatarSeedFromIdentity,
   avatarToneFromIdentity,
@@ -49,11 +53,24 @@ function includesAll(source, values, label) {
 
 assert.match(
   AVATAR_IDENTITY_VERSION,
-  /^avatar-identity\.v1-/,
-  "identity version debe ser explícita y versionada"
+  /^avatar-identity\.v2-/,
+  "identity version debe reflejar la autoridad portable uint32"
 );
 
-assert.equal(AVATAR_TONE_COUNT, 10, "la paleta global actual tiene 10 tones");
+assert.equal(
+  AVATAR_TONE_COUNT,
+  0x1_0000_0000,
+  "el tone debe usar el espacio uint32 completo"
+);
+assert.equal(
+  AVATAR_COLOR_SPACE,
+  0x1_0000_0000,
+  "el espacio cromático debe exponer 2^32 perfiles deterministas"
+);
+assert.ok(
+  AVATAR_COLOR_SPACE > 4_000_000_000,
+  "la identidad no puede volver a una paleta pequeña"
+);
 
 const canonical = resolveAvatarPresentation({
   userId: "ON-20260901024205",
@@ -81,15 +98,27 @@ const nestedSnapshot = resolveAvatarPresentation({
   },
 });
 
+/* Reproduce el fallo visual observado: usuario público sin email vs DTO con email. */
+const homeSidebarSnapshot = resolveAvatarPresentation({
+  displayName: "Cristian Ávila Luque",
+  username: "avila199817",
+});
+const activitySnapshot = resolveAvatarPresentation({
+  name: "Cristian Ávila Luque",
+  email: "avila199817@gmail.com",
+});
+
 for (const presentation of [
   incidenciaSnapshot,
   facturaSnapshot,
   nestedSnapshot,
+  homeSidebarSnapshot,
+  activitySnapshot,
 ]) {
   assert.equal(
     presentation.tone,
     canonical.tone,
-    "misma persona debe conservar tone entre snapshots"
+    "misma persona debe conservar tone entre snapshots parciales"
   );
 
   assert.equal(
@@ -103,49 +132,56 @@ for (const presentation of [
     canonical.fingerprint,
     "misma persona debe terminar en la misma identidad visual"
   );
+
+  assert.equal(
+    presentation.colorKey,
+    canonical.colorKey,
+    "misma persona debe conservar la misma clave cromática"
+  );
 }
 
+assert.equal(canonical.initials, "CÁ");
+assert.equal(avatarInitials("Onion"), "ON");
 assert.equal(
-  canonical.initials,
-  "CÁ",
-  "Cristian Ávila Luque debe usar el contrato global de las dos primeras palabras"
+  homeSidebarSnapshot.seed,
+  activitySnapshot.seed,
+  "nombre humano portable debe reconciliar Home/Sidebar con actividad"
+);
+assert.equal(
+  avatarToneFromIdentity({ displayName: "Cristian Ávila Luque" }),
+  canonical.tone
+);
+assert.equal(
+  avatarColorKeyFromSeed(canonical.seed),
+  canonical.colorKey
 );
 
-assert.equal(
-  avatarInitials("Onion"),
-  "ON",
-  "un nombre de una palabra usa hasta dos caracteres"
-);
-
-assert.equal(
-  avatarSeedFromIdentity({
-    email: " AVILA199817@GMAIL.COM ",
-    userId: "ON-OTHER",
-  }),
-  avatarSeedFromIdentity({
-    email: "avila199817@gmail.com",
-    userId: "ON-20260901024205",
-  }),
-  "email normalizado es el alias transversal prioritario"
-);
-
-assert.equal(
-  avatarToneFromIdentity({ email: "avila199817@gmail.com" }),
-  canonical.tone,
-  "tone puro debe coincidir con presentation"
+/* La antigua paleta de 10 colisionaba casi inmediatamente. */
+const syntheticTones = new Set();
+for (let index = 0; index < 4096; index += 1) {
+  syntheticTones.add(
+    resolveAvatarPresentation({
+      displayName: `Persona Sintética ${index}`,
+      email: `persona.${index}@example.test`,
+    }).tone
+  );
+}
+assert.ok(
+  syntheticTones.size >= 4080,
+  `diversidad uint32 degradada: sólo ${syntheticTones.size}/4096 tones únicos`
 );
 
 const identitySource = read("src/features/avatar-system/identity.js");
 const identityExecutableSource = executableSource(identitySource);
 const runtimeSource = read("src/features/avatar-system/index.js");
 const cssSource = read("src/css/components/avatar-system.css");
+const privateCssSource = read("src/css/private.css");
 const privateRuntimeSource = read("src/features/private-runtime-ui/index.js");
 const appCssSource = read("src/css/app.css");
 
 assert.equal(
   executableSource("/* Math.random() localStorage sessionStorage fetch() */\nconst stable = true;").includes("Math.random("),
-  false,
-  "el detector debe ignorar tokens prohibidos cuando sólo aparecen en comentarios"
+  false
 );
 
 for (const forbidden of [
@@ -162,21 +198,33 @@ for (const forbidden of [
 }
 
 includesAll(
+  identitySource,
+  [
+    "0x1_0000_0000",
+    "FNV-1a + avalanche uint32",
+    "onion-avatar-color:v2|",
+    "explicitAvatarNameFromIdentity",
+    "emailHandle",
+  ],
+  "Avatar identity domain"
+);
+
+includesAll(
   runtimeSource,
   [
-    'data-avatar-authority',
-    'data-avatar-identity-version',
-    'data-avatar-identity',
-    'data-avatar-tone',
-    'data-avatar-initials',
-    'identityMutationsReconciled: true',
-    'legacyToneHintsAreSubordinate: true',
-    '.sidebar-user-avatar',
-    '.home-current-user-avatar',
-    '.incidencias-main',
-    '.facturas-main',
-    '.clientes-main',
-    '.usuarios-main',
+    "data-avatar-authority",
+    "data-avatar-identity-version",
+    "data-avatar-identity",
+    "data-avatar-tone",
+    "data-avatar-initials",
+    "identityMutationsReconciled: true",
+    "legacyToneHintsAreSubordinate: true",
+    ".sidebar-user-avatar",
+    ".home-current-user-avatar",
+    ".incidencias-main",
+    ".facturas-main",
+    ".clientes-main",
+    ".usuarios-main",
   ],
   "AvatarSystem runtime authority"
 );
@@ -184,20 +232,36 @@ includesAll(
 includesAll(
   cssSource,
   [
-    '[data-avatar-system="true"]',
-    '[data-avatar-tone="0"]',
-    '[data-avatar-tone="9"]',
-    'VALID IMAGE · NOTHING MAY PAINT BEHIND ALPHA',
-    'ONE FALLBACK PALETTE',
+    "UINT32 COLOR ENGINE",
+    "4,294,967,296 TONES",
+    "attr(data-avatar-tone type(<number>), 0)",
+    "mod(var(--avatar-tone-number), 360)",
+    '[data-avatar-authority="global"][data-avatar-state="fallback"]',
+    "VALID IMAGE · NOTHING MAY PAINT BEHIND ALPHA",
+    "ONE FALLBACK PAINT AUTHORITY",
   ],
   "AvatarSystem CSS guardrail"
+);
+assert.doesNotMatch(
+  cssSource,
+  /\[data-avatar-tone="[0-9]"\]/,
+  "el guardrail global no puede volver a enumerar una paleta de 10 tones"
+);
+
+assert.ok(
+  privateCssSource.includes('./components/avatar-system.css'),
+  "el chunk privado debe transportar su propia autoridad visual de avatar"
+);
+assert.ok(
+  privateCssSource.indexOf("./components/avatar-system.css") >
+    privateCssSource.indexOf("./compositions/private-amounts.css"),
+  "AvatarSystem debe cerrar el chunk privado en guardrails"
 );
 
 assert.ok(
   privateRuntimeSource.includes('import("../avatar-system/index.js")'),
   "private runtime debe cargar la autoridad global"
 );
-
 assert.ok(
   privateRuntimeSource.includes("AvatarSystemUI.sync?.(document)"),
   "private runtime debe resincronizar el documento"
@@ -205,9 +269,8 @@ assert.ok(
 
 const guardrailIndex = appCssSource.indexOf("./components/avatar-system.css");
 const viewCommentIndex = appCssSource.indexOf("ROUTE VIEWS");
-
-assert.ok(guardrailIndex > viewCommentIndex, "avatar-system.css debe cerrar la cascada después de vistas");
-assert.ok(appCssSource.includes("layer(guardrails)"), "AvatarSystem debe vivir en guardrails");
+assert.ok(guardrailIndex > viewCommentIndex);
+assert.ok(appCssSource.includes("layer(guardrails)"));
 
 console.log("✅ avatar identity authority contract: OK");
 console.log(JSON.stringify({
@@ -216,6 +279,11 @@ console.log(JSON.stringify({
   sample: {
     initials: canonical.initials,
     tone: canonical.tone,
+    colorKey: canonical.colorKey,
     fingerprint: canonical.fingerprint,
+  },
+  diversity: {
+    checked: 4096,
+    uniqueTones: syntheticTones.size,
   },
 }, null, 2));

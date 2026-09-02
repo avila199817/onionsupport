@@ -145,10 +145,20 @@ assert.equal(avatarInitials("Onion"), "ON");
 assert.equal(
   homeSidebarSnapshot.seed,
   activitySnapshot.seed,
-  "nombre humano portable debe reconciliar Home/Sidebar con actividad"
+  "username y local-part de email deben reconciliar Home/Sidebar con actividad"
 );
 assert.equal(
-  avatarToneFromIdentity({ displayName: "Cristian Ávila Luque" }),
+  avatarToneFromIdentity({
+    displayName: "Cristian Ávila Luque",
+    username: "avila199817",
+  }),
+  canonical.tone
+);
+assert.equal(
+  avatarToneFromIdentity({
+    name: "Cristian Ávila Luque",
+    email: "avila199817@gmail.com",
+  }),
   canonical.tone
 );
 assert.equal(

@@ -298,6 +298,12 @@ export function resolveCommentProfile(
     return matchProfileByStableIdentity(stableIdentity, profiles);
   }
 
+  const exact = profiles.filter(
+    (profile) => normalizeAvatarName(profile?.name) === key
+  );
+  if (exact.length === 1) return exact[0];
+  if (exact.length > 1) return null;
+
   const legacy = profiles.filter(
     (profile) => samePerson(author, profile?.name)
   );

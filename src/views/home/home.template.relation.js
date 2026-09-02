@@ -2,7 +2,7 @@
    Onion Support - Home Entity Relationship Presentation
 
    Identidad compacta y canónica para las filas de Inicio.
-   Replica las prioridades de identidad ya usadas por Incidencias y Facturas:
+   Toda presentación de avatar se delega en AvatarSystem:
    - Incidencia: solicitante/cliente y su avatar real.
    - Factura: empresa, contacto, email y avatar del cliente.
 
@@ -10,11 +10,13 @@
 ========================================================= */
 
 import {
+  resolveAvatarPresentation,
+} from "../../features/avatar-system/identity.js";
+import {
   attr,
   cleanText,
   escapeHtml,
   first,
-  initialsFrom,
   isObject,
   normalizeKey,
   safeArray,
@@ -22,7 +24,7 @@ import {
 } from "./home.template.foundation.js";
 
 export const HOME_ENTITY_RELATION_VERSION =
-  "home.entity-relation.v1-domain-identity-parity";
+  "home.entity-relation.v2-global-avatar-authority";
 
 const INVOICE_COMPANY_PATHS = Object.freeze([
   "clienteEmpresa",
@@ -173,18 +175,6 @@ function firstImage(values = [], seen = new WeakSet()) {
   return "";
 }
 
-function identityHash(value = "") {
-  const text = cleanText(value, "");
-  let hash = 0;
-
-  for (let index = 0; index < text.length; index += 1) {
-    hash = ((hash << 5) - hash) + text.charCodeAt(index);
-    hash |= 0;
-  }
-
-  return Math.abs(hash);
-}
-
 function sameIdentityText(left = "", right = "") {
   const a = normalizeKey(left);
   const b = normalizeKey(right);
@@ -221,16 +211,23 @@ function finalizeRelation({
       : "";
 
   const avatar = firstImage([avatarUrl]);
-  const identity = visibleEmail || safeSecondary || primary;
+  const presentation = resolveAvatarPresentation({
+    displayName: primary,
+    name: primary,
+    email: safeEmail,
+  });
 
   return Object.freeze({
     kind: normalizeKey(kind) || "relacion",
     name: primary,
     secondaryName: safeSecondary,
     email: visibleEmail,
+    identityEmail: presentation.email,
     avatarUrl: avatar,
-    initials: initialsFrom(primary),
-    tone: identityHash(identity) % 10,
+    initials: presentation.initials,
+    tone: presentation.tone,
+    colorKey: presentation.colorKey,
+    fingerprint: presentation.fingerprint,
   });
 }
 
@@ -508,8 +505,18 @@ export function renderHomeEntityRelation(relation = null) {
 
   const avatarUrl = safeImageSrc(relation.avatarUrl);
   const accessibleName = homeRelationAccessibleName(relation) || name;
-  const initials = cleanText(relation.initials, initialsFrom(name));
-  const tone = Math.max(0, Math.min(9, Number(relation.tone) || 0));
+  const presentation = resolveAvatarPresentation({
+    displayName: name,
+    name,
+    email: relation.identityEmail || relation.email || "",
+  });
+  const tone = Number(relation.tone ?? presentation.tone) >>> 0;
+  const initials = cleanText(relation.initials, presentation.initials);
+  const fingerprint = cleanText(relation.fingerprint, presentation.fingerprint);
+  const colorKey = cleanText(relation.colorKey, presentation.colorKey);
+  const identityEmail = normalizedEmail(
+    relation.identityEmail || relation.email || presentation.email
+  );
 
   return `
     <span
@@ -521,14 +528,24 @@ export function renderHomeEntityRelation(relation = null) {
     >
       <span
         class="home-entity-relation-avatar ${avatarUrl ? "has-image" : "is-fallback"}"
+        data-avatar-system="true"
+        data-avatar-host="true"
+        data-avatar-authority="global"
+        data-avatar-state="${avatarUrl ? "image" : "fallback"}"
         data-avatar-tone="${attr(String(tone))}"
+        data-avatar-identity="${attr(fingerprint)}"
+        data-avatar-color-key="${attr(colorKey)}"
+        data-avatar-initials="${attr(initials)}"
+        data-avatar-name="${attr(name)}"
+        ${identityEmail ? `data-avatar-email="${attr(identityEmail)}"` : ""}
         data-has-avatar="${avatarUrl ? "true" : "false"}"
         aria-hidden="true"
       >
-        <span class="home-entity-relation-fallback">${escapeHtml(initials)}</span>
+        <span class="home-entity-relation-fallback" data-avatar-fallback="true">${escapeHtml(initials)}</span>
         ${avatarUrl ? `
           <img
             class="home-entity-relation-img"
+            data-avatar-image="true"
             src="${attr(avatarUrl)}"
             alt=""
             width="30"

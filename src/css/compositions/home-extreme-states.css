@@ -1,0 +1,56 @@
+/* Onion Support · Home Extreme composition module.
+   Loaded exclusively through home-extreme.css inside layer(compositions). */
+
+/* =========================================================
+   EMPTY / LOADING / ALERT DETAIL
+========================================================= */
+
+.home-view-root .home-empty-state {
+  min-block-size: 260px;
+}
+
+.home-view-root .home-empty-state-icon {
+  inline-size: 54px;
+  block-size: 54px;
+  border-radius: var(--radius-lg, 14px);
+}
+
+.home-view-root .home-empty-state-icon .app-icon {
+  inline-size: 23px;
+  block-size: 23px;
+}
+
+.home-view-root .home-panel-loading {
+  gap: 8px;
+  padding: var(--home-extreme-panel-padding);
+}
+
+.home-view-root .home-panel-loading-row {
+  min-block-size: var(--home-extreme-row-min);
+  border-radius: var(--home-extreme-row-radius);
+}
+
+.home-view-root .home-panel-loading-row--activity,
+.home-view-root .home-panel-loading-row--invoice {
+  grid-template-columns:
+    var(--home-extreme-icon-size)
+    minmax(0, 1fr)
+    92px;
+  gap: 13px;
+}
+
+.home-view-root .home-panel-loading-icon {
+  inline-size: var(--home-extreme-icon-size);
+  block-size: var(--home-extreme-icon-size);
+  border-radius: var(--radius-lg, 14px);
+}
+
+.home-view-root .home-alert .home-btn {
+  gap: 7px;
+}
+
+.home-view-root .home-alert .home-btn .app-icon {
+  inline-size: 14px;
+  block-size: 14px;
+}
+

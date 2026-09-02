@@ -150,6 +150,7 @@ node .github/scripts/login_accessibility_contract.mjs
 node .github/scripts/view_runtime_state_contract.mjs
 node .github/scripts/home_runtime_state_contract.mjs
 node .github/scripts/home_view_runtime_context_contract.mjs
+node .github/scripts/home_header_clean_contract.mjs
 node .github/scripts/navigation_performance_contract.mjs
 node .github/scripts/incidencias_detail_request_contract.mjs
 node .github/scripts/incidencias_detail_comments_visibility_contract.mjs

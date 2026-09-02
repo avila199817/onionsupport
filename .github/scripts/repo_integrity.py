@@ -873,7 +873,10 @@ def validate_private_admin_visual_parity_v16_contract(errors: list[str]) -> None
         ),
         "src/views/clientes/clientes.template.js": (
             "clientes.template.cursor.v12.private-admin-visual-parity",
-            "clientes-avatar--tone-${avatarTone(current)}",
+            "resolveAvatarPresentation",
+            'data-avatar-system="true"',
+            'data-avatar-host="true"',
+            'data-avatar-tone="${attr(String(presentation.tone))}"',
             "clientes-table-loading-row",
             "clientes-refresh-overlay",
         ),

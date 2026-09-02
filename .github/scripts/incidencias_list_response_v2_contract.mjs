@@ -79,6 +79,23 @@ try {
     "el listado no debe introducir un Accept privado"
   );
 
+  await loadIncidenciasPage({ query: { status: "open" } });
+  assert.equal(
+    requests.at(-1).options.query.includeTotal,
+    false,
+    "P1 tampoco debe ejecutar COUNT: el cursor es autoridad de paginación"
+  );
+
+  await loadIncidenciasPage({
+    query: { cursor: "CURSOR-FORCED-TOTAL", includeTotal: true },
+  });
+  assert.equal(
+    requests.at(-1).options.query.includeTotal,
+    true,
+    "el override explícito debe seguir disponible"
+  );
+
+
   await fetchIncidenciasRequest({ responseContract: "v1" });
   assert.equal(
     requests.at(-1).options.query.responseContract,
@@ -370,6 +387,11 @@ try {
   assert.equal(requests.at(-1).options.query.pageMode, "cursor");
   assert.equal(requests.at(-1).options.query.cursor, "CURSOR-P2");
   assert.equal(requests.at(-1).options.query.closed, true);
+  assert.equal(
+    requests.at(-1).options.query.includeTotal,
+    false,
+    "P2+ no debe repetir el COUNT exacto de Cosmos"
+  );
   assert.deepEqual(p2.items.map((item) => item.ticketId), ["INC-P2"]);
   assert.equal(p2.nextCursor, "CURSOR-P3");
   assert.equal(p2.hasMore, true, "un cursor confirma P3 aunque hasMore sea false");

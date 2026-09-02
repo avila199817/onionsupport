@@ -2191,12 +2191,32 @@ export async function fetchIncidenciasRequest(options = {}) {
 }
 
 export async function loadIncidenciasPage(options = {}) {
+  const pageQuery = safeObject(options?.query);
+  const continuationCursor = normalizeOpaqueCursor(pageQuery.cursor);
+
+  /*
+     P0 PERF:
+     El total exacto pertenece a la primera página del contexto.
+     Las páginas posteriores ya arrastran ese total en el controller y no deben
+     volver a ejecutar el COUNT remoto de Cosmos.
+
+     Un caller puede seguir forzando includeTotal explícitamente si existe un
+     caso excepcional que realmente lo necesite.
+  */
   const response = await fetchIncidenciasRequest({
     ...safeObject(options),
     query: {
       pageMode: "cursor",
       limit: INCIDENCIAS_LIST_LIMIT,
-      ...safeObject(options?.query),
+      /*
+         P0 EXTREME:
+         El cursor ya es la autoridad para saber si existe otra página.
+         El listado no necesita un COUNT exacto para pintar ni para continuar.
+         Esto elimina el COUNT de Cosmos también en P1. Un caller excepcional
+         conserva la posibilidad de pedir includeTotal=true explícitamente.
+      */
+      includeTotal: false,
+      ...pageQuery,
     },
   });
 

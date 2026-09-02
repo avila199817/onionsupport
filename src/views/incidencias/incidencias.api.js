@@ -205,13 +205,17 @@ function rememberCompleteUniverse(response = {}, query = {}) {
   const items = array(source.items);
   const total = responseTotal(source, items.length);
   const cursor = responseCursor(source);
+  const hasMore =
+    source.hasMore === true ||
+    source.pagination?.hasMore === true;
 
   /*
      Sólo activamos el fast-path cuando no hay ninguna página pendiente.
-     En un dataset paginado el servidor sigue siendo autoridad y nunca se
-     simula que la primera página sea el universo completo.
+     El cursor/hasMore son autoridad de paginación; el total exacto ya no es
+     necesario para demostrar que una primera página sin continuación contiene
+     el universo completo.
   */
-  if (cursor || total > items.length) {
+  if (cursor || hasMore || total > items.length) {
     completeUniverse = null;
     return false;
   }
@@ -333,7 +337,12 @@ function itemMatchesSearch(item = {}, search = "") {
 }
 
 function projectCompleteUniverse(query = {}) {
-  if (!completeUniverse || !isMainListFirstPageQuery(query)) return null;
+  if (
+    !completeUniverse ||
+    !(isMainListFirstPageQuery(query) || isFacetCountQuery(query))
+  ) {
+    return null;
+  }
 
   const source = object(query);
   const hasClosed = Object.prototype.hasOwnProperty.call(source, "closed");
@@ -421,8 +430,7 @@ export async function loadIncidenciasPage(options = {}) {
     source.force === true ||
     source.forceRefresh === true ||
     source.cache === false ||
-    source.noCache === true ||
-    isFacetCountQuery(query)
+    source.noCache === true
   );
   const projected = authoritative
     ? null

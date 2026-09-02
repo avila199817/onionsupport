@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """Static and production contract for Onion Support Google measurement.
 
-The contract deliberately locks the Google Analytics destination, Google Ads
-destination, public-contact conversion destination and WhatsApp conversion
-destination that are configured in the Google Ads account. It also proves that
-the shared bootstrap is loaded by every public marketing surface and can
-optionally compare the deployed bootstrap with exact bytes from the expected
-revision.
+The contract locks the active GA4 and Google Ads destinations, Consent Mode v2,
+privacy-safe public-route measurement, direct lead conversions, the accessible
+consent UI and byte-exact production deployment. It deliberately prevents
+duplicate Google tags, legacy identifiers and accidental measurement of private
+SPA routes.
 """
 
 from __future__ import annotations
@@ -25,7 +24,11 @@ GA4_TAG_ID = "G-RQ77310QBH"
 GOOGLE_ADS_TAG_ID = "AW-18395700376"
 CONTACT_CONVERSION_DESTINATION = "AW-18395700376/WjQvCIe1tuMcEJi54MNE"
 WHATSAPP_CONVERSION_DESTINATION = "AW-18395700376/6zBcCL3zo-ccEJi54MNE"
+
 BOOTSTRAP_PATH = "src/analytics/google-tag.js"
+CONSENT_STYLESHEET_PATH = "src/analytics/google-consent.css"
+PRODUCTION_ASSETS = (BOOTSTRAP_PATH, CONSENT_STYLESHEET_PATH)
+
 PUBLIC_SURFACES = (
     "index.html",
     "seo/reparacion-ordenadores.html",
@@ -34,11 +37,44 @@ PUBLIC_SURFACES = (
     "seo/impresoras.html",
     "seo/soporte-empresas.html",
 )
+
+PUBLIC_MARKETING_PATHS = (
+    "/",
+    "/reparacion-ordenadores",
+    "/soporte-informatico",
+    "/redes-wifi",
+    "/impresoras",
+    "/soporte-empresas",
+)
+
 SCRIPT_TAG = '<script defer src="/src/analytics/google-tag.js"></script>'
 REQUEST_TIMEOUT_SECONDS = 20.0
+
 CLICK_CAPTURE_PATTERN = re.compile(
     r'document\.addEventListener\(\s*"click"\s*,.*?\}\s*,\s*true\s*\);',
     re.DOTALL,
+)
+GA_CONFIG_PATTERN = re.compile(
+    rf'window\.gtag\(\s*"config"\s*,\s*GOOGLE_ANALYTICS_TAG_ID\s*,\s*\{{'
+)
+ADS_CONFIG_PATTERN = re.compile(
+    rf'window\.gtag\(\s*"config"\s*,\s*GOOGLE_ADS_TAG_ID\s*,\s*\{{'
+)
+CONSENT_DEFAULT_PATTERN = re.compile(
+    r'window\.gtag\(\s*"consent"\s*,\s*"default"\s*,',
+    re.DOTALL,
+)
+CONSENT_UPDATE_PATTERN = re.compile(
+    r'window\.gtag\(\s*"consent"\s*,\s*"update"\s*,',
+    re.DOTALL,
+)
+
+GA_ID_PATTERN = re.compile(r"\bG-[A-Z0-9]{8,}\b")
+ADS_ID_PATTERN = re.compile(r"\bAW-\d{6,}\b")
+RUNTIME_ID_GLOBS = (
+    "*.html",
+    "seo/*.html",
+    "src/**/*.js",
 )
 
 
@@ -46,44 +82,111 @@ def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def position_or_error(text: str, pattern: re.Pattern[str], label: str) -> tuple[int, str | None]:
+    match = pattern.search(text)
+    if not match:
+        return -1, f"{BOOTSTRAP_PATH}: falta {label}"
+    return match.start(), None
+
+
+def validate_runtime_ids(root: Path) -> list[str]:
+    errors: list[str] = []
+    files: set[Path] = set()
+
+    for pattern in RUNTIME_ID_GLOBS:
+        files.update(path for path in root.glob(pattern) if path.is_file())
+
+    for path in sorted(files):
+        relative = path.relative_to(root).as_posix()
+        text = path.read_text(encoding="utf-8")
+
+        unexpected_ga = sorted(set(GA_ID_PATTERN.findall(text)) - {GA4_TAG_ID})
+        unexpected_ads = sorted(
+            set(ADS_ID_PATTERN.findall(text)) - {GOOGLE_ADS_TAG_ID}
+        )
+
+        for identifier in unexpected_ga:
+            errors.append(
+                f"{relative}: identificador GA4 antiguo o no autorizado: "
+                f"{identifier}"
+            )
+
+        for identifier in unexpected_ads:
+            errors.append(
+                f"{relative}: identificador Google Ads antiguo o no autorizado: "
+                f"{identifier}"
+            )
+
+    return errors
+
+
 def validate_source(root: Path) -> list[str]:
     errors: list[str] = []
+    errors.extend(validate_runtime_ids(root))
     bootstrap = root / BOOTSTRAP_PATH
+    consent_css = root / CONSENT_STYLESHEET_PATH
 
     if not bootstrap.is_file():
         return [f"{BOOTSTRAP_PATH}: archivo obligatorio inexistente"]
+    if not consent_css.is_file():
+        return [f"{CONSENT_STYLESHEET_PATH}: archivo obligatorio inexistente"]
 
     text = bootstrap.read_text(encoding="utf-8")
-    required_snippets = (
+    css = consent_css.read_text(encoding="utf-8")
+
+    required_literals = (
         f'const GOOGLE_ANALYTICS_TAG_ID = "{GA4_TAG_ID}";',
         f'const GOOGLE_ADS_TAG_ID = "{GOOGLE_ADS_TAG_ID}";',
         f'"{CONTACT_CONVERSION_DESTINATION}";',
         f'"{WHATSAPP_CONVERSION_DESTINATION}";',
-        "https://www.googletagmanager.com/gtag/js?id=",
+        'const CONSENT_STORAGE_KEY = "onion_google_consent_v2";',
+        'const CONSENT_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;',
+        'const CONSENT_STYLESHEET_URL = "/src/analytics/google-consent.css";',
+        "const PUBLIC_MARKETING_PATHS = new Set([",
+        "const ALLOWED_CAMPAIGN_QUERY_KEYS = new Set([",
+        "analytics_storage:",
+        "ad_storage:",
+        "ad_user_data:",
+        "ad_personalization:",
+        'window.gtag("set", "ads_data_redaction", true);',
+        'window.gtag("set", "url_passthrough", true);',
+        'window.gtag("set", "allow_google_signals", false);',
+        'window.gtag("set", "allow_ad_personalization_signals", false);',
         'window.gtag("js", new Date());',
-        'window.gtag("config", GOOGLE_ANALYTICS_TAG_ID);',
-        'window.gtag("config", GOOGLE_ADS_TAG_ID);',
-        'function sendGoogleAdsConversion(destination) {',
-        'window.gtag("event", "conversion", {',
-        "send_to: destination,",
-        'sendGoogleAdsConversion(WHATSAPP_CONVERSION_DESTINATION);',
+        "send_page_view: false,",
+        "function sanitizePageLocation() {",
+        "function isPublicMarketingRoute(",
+        "function updateRouteMeasurementGuard(",
+        "function ensureGoogleProductsConfigured() {",
+        "function trackCurrentPageView(",
+        "function sendGoogleAdsConversion(destination, parameters = {}) {",
         'window.addEventListener("onion:public-support:accepted", () => {',
-        'sendGoogleAdsConversion(CONTACT_CONVERSION_DESTINATION);',
-        'if (/^whatsapp:/i.test(href)) return true;',
-        'host === "wa.me"',
-        'host.endsWith(".wa.me")',
-        'host === "whatsapp.com"',
-        'host.endsWith(".whatsapp.com")',
-        "const REMOTE_FALLBACK_DELAY_MS = 15000;",
-        'const ANALYTICS_CONSENT_EVENT = "onion:analytics:consent-granted";',
-        "function promoteAnalyticsOnSignificantInteraction(event) {",
-        "if (event?.isTrusted !== true) return;",
-        "scheduleRemoteGoogleTag();",
+        'trackAnalyticsEvent("generate_lead", {',
+        'trackAnalyticsEvent("click_to_call", {',
+        'trackAnalyticsEvent("contact_email", {',
+        "sendGoogleAdsConversion(WHATSAPP_CONVERSION_DESTINATION",
+        "sendGoogleAdsConversion(CONTACT_CONVERSION_DESTINATION",
+        "window.OnionGoogleConsent = Object.freeze({",
+        'data-consent-action="reject"',
+        'data-consent-action="accept"',
+        'data-consent-action="settings"',
+        "No activamos publicidad",
+        "La preferencia técnica se guarda localmente durante",
+        "https://www.googletagmanager.com/gtag/js?id=",
     )
 
-    for snippet in required_snippets:
-        if snippet not in text:
-            errors.append(f"{BOOTSTRAP_PATH}: falta contrato obligatorio: {snippet}")
+    for literal in required_literals:
+        if literal not in text:
+            errors.append(f"{BOOTSTRAP_PATH}: falta contrato obligatorio: {literal}")
+
+    for path in PUBLIC_MARKETING_PATHS:
+        literal = f'"{path}",'
+        if path == "/":
+            literal = '"/",'
+        if literal not in text:
+            errors.append(
+                f"{BOOTSTRAP_PATH}: falta superficie pública permitida: {path}"
+            )
 
     if text.count("googletagmanager.com/gtag/js?id=") != 1:
         errors.append(
@@ -92,31 +195,119 @@ def validate_source(root: Path) -> list[str]:
 
     if text.count(CONTACT_CONVERSION_DESTINATION) != 1:
         errors.append(
-            f"{BOOTSTRAP_PATH}: el destino de conversión de Contacto debe existir exactamente una vez"
+            f"{BOOTSTRAP_PATH}: Contacto debe existir exactamente una vez"
         )
 
     if text.count(WHATSAPP_CONVERSION_DESTINATION) != 1:
         errors.append(
-            f"{BOOTSTRAP_PATH}: el destino de conversión de WhatsApp debe existir exactamente una vez"
+            f"{BOOTSTRAP_PATH}: WhatsApp debe existir exactamente una vez"
         )
+
+    consent_default_pos, error = position_or_error(
+        text, CONSENT_DEFAULT_PATTERN, "Consent Mode v2 default"
+    )
+    if error:
+        errors.append(error)
+
+    consent_update_pos, error = position_or_error(
+        text, CONSENT_UPDATE_PATTERN, "Consent Mode v2 update"
+    )
+    if error:
+        errors.append(error)
+
+    ga_config_pos, error = position_or_error(
+        text, GA_CONFIG_PATTERN, "configuración GA4"
+    )
+    if error:
+        errors.append(error)
+
+    ads_config_pos, error = position_or_error(
+        text, ADS_CONFIG_PATTERN, "configuración Google Ads"
+    )
+    if error:
+        errors.append(error)
+
+    js_pos = text.find('window.gtag("js", new Date());')
+    if min(consent_default_pos, js_pos, ga_config_pos, ads_config_pos) >= 0:
+        if not consent_default_pos < js_pos < ga_config_pos < ads_config_pos:
+            errors.append(
+                f"{BOOTSTRAP_PATH}: orden inválido; consentimiento debe preceder "
+                "a js, GA4 y Google Ads"
+            )
+
+    send_conversion_pos = text.find(
+        "function sendGoogleAdsConversion(destination, parameters = {}) {"
+    )
+    if ads_config_pos >= 0 and send_conversion_pos >= 0:
+        if ads_config_pos > send_conversion_pos:
+            errors.append(
+                f"{BOOTSTRAP_PATH}: Google Ads debe configurarse de forma "
+                "sitewide antes del helper de conversiones"
+            )
+
+    if consent_update_pos >= 0 and consent_default_pos >= 0:
+        if consent_update_pos < consent_default_pos:
+            errors.append(
+                f"{BOOTSTRAP_PATH}: consent update aparece antes de consent default"
+            )
 
     if not CLICK_CAPTURE_PATTERN.search(text):
         errors.append(
-            f"{BOOTSTRAP_PATH}: el listener de WhatsApp debe ejecutarse en fase de captura"
+            f"{BOOTSTRAP_PATH}: el listener de contactos debe ejecutarse en captura"
         )
 
     if not text.rstrip().endswith("})();"):
         errors.append(f"{BOOTSTRAP_PATH}: bootstrap IIFE incompleto")
 
-    for forbidden in (
-        "ADS_AUTO_CONFIG_DELAY_MS",
-        "REMOTE_LOAD_MIN_DELAY_MS",
-        '["pointerdown", "keydown", "touchstart"]',
-    ):
-        if forbidden in text:
+    private_markers = (
+        'window[`ga-disable-${GOOGLE_ANALYTICS_TAG_ID}`] = disabled;',
+        "if (!isPublicMarketingRoute()) return;",
+        "page_location: sanitizePageLocation(),",
+    )
+    for marker in private_markers:
+        if marker not in text:
             errors.append(
-                f"{BOOTSTRAP_PATH}: carga remota prematura restaurada: {forbidden}"
+                f"{BOOTSTRAP_PATH}: falta protección de rutas/datos privados: {marker}"
             )
+
+    forbidden_literals = (
+        "ADS_AUTO_CONFIG_DELAY_MS",
+        "REMOTE_FALLBACK_DELAY_MS = 15000",
+        "REMOTE_LOAD_MIN_DELAY_MS",
+        'window.gtag("config", GOOGLE_ANALYTICS_TAG_ID);',
+        'window.gtag("config", GOOGLE_ADS_TAG_ID);',
+        "send_page_view: true",
+        'ad_personalization: "granted"',
+        "allow_google_signals: true",
+        "allow_ad_personalization_signals: true",
+    )
+    for literal in forbidden_literals:
+        if literal in text:
+            errors.append(
+                f"{BOOTSTRAP_PATH}: regresión de privacidad/medición detectada: {literal}"
+            )
+
+    required_css_literals = (
+        ".onion-google-consent__banner",
+        ".onion-google-consent__button--decision",
+        ".onion-google-consent__preferences",
+        ".onion-google-consent__dialog",
+        ".onion-google-consent__backdrop",
+        ':focus-visible',
+        "@media (max-width: 760px)",
+        "@media (prefers-reduced-motion: reduce)",
+        "[hidden]",
+    )
+    for literal in required_css_literals:
+        if literal not in css:
+            errors.append(
+                f"{CONSENT_STYLESHEET_PATH}: falta contrato visual/accesible: {literal}"
+            )
+
+    if "url(" in css.lower():
+        errors.append(
+            f"{CONSENT_STYLESHEET_PATH}: no debe depender de recursos remotos"
+        )
 
     for relative in PUBLIC_SURFACES:
         page = root / relative
@@ -128,7 +319,8 @@ def validate_source(root: Path) -> list[str]:
         count = page_text.count(SCRIPT_TAG)
         if count != 1:
             errors.append(
-                f"{relative}: debe cargar {SCRIPT_TAG!r} exactamente una vez; encontrado {count}"
+                f"{relative}: debe cargar {SCRIPT_TAG!r} exactamente una vez; "
+                f"encontrado {count}"
             )
             continue
 
@@ -139,17 +331,33 @@ def validate_source(root: Path) -> list[str]:
                 f"{relative}: el bootstrap de medición debe cargarse dentro de <head>"
             )
 
+        if "googletagmanager.com/gtag/js" in page_text:
+            errors.append(
+                f"{relative}: no debe instalar una segunda etiqueta remota"
+            )
+
     return errors
 
 
-def fetch_live(base_url: str, revision: str, attempt: int) -> bytes:
+def fetch_live(
+    base_url: str,
+    relative_path: str,
+    revision: str,
+    attempt: int,
+) -> bytes:
     base = base_url.rstrip("/") + "/"
-    url = urljoin(base, BOOTSTRAP_PATH)
-    query = urlencode({"deploy_check": revision, "attempt": attempt})
+    url = urljoin(base, relative_path)
+    query = urlencode(
+        {
+            "deploy_check": revision,
+            "asset": Path(relative_path).name,
+            "attempt": attempt,
+        }
+    )
     request = Request(
         f"{url}?{query}",
         headers={
-            "User-Agent": "OnionSupport-Google-Measurement-Contract/1.0",
+            "User-Agent": "OnionSupport-Google-Measurement-Contract/2.0",
             "Cache-Control": "no-cache",
             "Pragma": "no-cache",
             "Accept-Encoding": "identity",
@@ -161,15 +369,15 @@ def fetch_live(base_url: str, revision: str, attempt: int) -> bytes:
         with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
             if int(response.status) != 200:
                 raise RuntimeError(
-                    f"{BOOTSTRAP_PATH}: HTTP {response.status}, esperado 200"
+                    f"{relative_path}: HTTP {response.status}, esperado 200"
                 )
             return response.read()
     except HTTPError as error:
         raise RuntimeError(
-            f"{BOOTSTRAP_PATH}: HTTP {error.code}, esperado 200"
+            f"{relative_path}: HTTP {error.code}, esperado 200"
         ) from error
     except (URLError, TimeoutError, OSError) as error:
-        raise RuntimeError(f"{BOOTSTRAP_PATH}: error de red: {error}") from error
+        raise RuntimeError(f"{relative_path}: error de red: {error}") from error
 
 
 def verify_production(
@@ -179,31 +387,46 @@ def verify_production(
     attempts: int,
     delay: float,
 ) -> list[str]:
-    expected = (root / BOOTSTRAP_PATH).read_bytes()
-    last_error = ""
+    errors: list[str] = []
 
-    for attempt in range(1, attempts + 1):
-        try:
-            deployed = fetch_live(base_url, revision, attempt)
-        except RuntimeError as error:
-            last_error = str(error)
-        else:
-            if deployed == expected:
-                print(
-                    "Google measurement production bytes: PASS · "
-                    f"sha256={sha256(deployed)[:16]} · attempt={attempt}/{attempts}"
+    for relative_path in PRODUCTION_ASSETS:
+        expected = (root / relative_path).read_bytes()
+        last_error = ""
+
+        for attempt in range(1, attempts + 1):
+            try:
+                deployed = fetch_live(
+                    base_url,
+                    relative_path,
+                    revision,
+                    attempt,
                 )
-                return []
+            except RuntimeError as error:
+                last_error = str(error)
+            else:
+                if deployed == expected:
+                    print(
+                        "Google measurement production bytes: PASS · "
+                        f"asset={relative_path} · "
+                        f"sha256={sha256(deployed)[:16]} · "
+                        f"attempt={attempt}/{attempts}"
+                    )
+                    last_error = ""
+                    break
 
-            last_error = (
-                f"{BOOTSTRAP_PATH}: contenido productivo distinto al commit "
-                f"(prod={sha256(deployed)[:16]} local={sha256(expected)[:16]})"
-            )
+                last_error = (
+                    f"{relative_path}: contenido productivo distinto al commit "
+                    f"(prod={sha256(deployed)[:16]} "
+                    f"local={sha256(expected)[:16]})"
+                )
 
-        if attempt < attempts:
-            time.sleep(delay)
+            if attempt < attempts:
+                time.sleep(delay)
 
-    return [last_error or f"{BOOTSTRAP_PATH}: verificación productiva fallida"]
+        if last_error:
+            errors.append(last_error)
+
+    return errors
 
 
 def parse_args() -> argparse.Namespace:
@@ -250,7 +473,9 @@ def main() -> int:
         f"GA4={GA4_TAG_ID} · Ads={GOOGLE_ADS_TAG_ID} · "
         f"Contact={CONTACT_CONVERSION_DESTINATION} · "
         f"WhatsApp={WHATSAPP_CONVERSION_DESTINATION} · "
-        f"public-surfaces={len(PUBLIC_SURFACES)}"
+        "ConsentMode=v2 · AdsPersonalization=denied · "
+        f"public-surfaces={len(PUBLIC_SURFACES)} · "
+        f"production-assets={len(PRODUCTION_ASSETS)}"
     )
     return 0
 

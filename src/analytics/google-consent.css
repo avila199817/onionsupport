@@ -1,0 +1,349 @@
+:root {
+  --onion-consent-bg: #ffffff;
+  --onion-consent-surface: #f6f7f9;
+  --onion-consent-text: #111827;
+  --onion-consent-muted: #4b5563;
+  --onion-consent-border: rgba(17, 24, 39, 0.16);
+  --onion-consent-action: #111827;
+  --onion-consent-action-text: #ffffff;
+  --onion-consent-focus: #2563eb;
+  --onion-consent-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --onion-consent-bg: #101318;
+    --onion-consent-surface: #171b22;
+    --onion-consent-text: #f8fafc;
+    --onion-consent-muted: #cbd5e1;
+    --onion-consent-border: rgba(248, 250, 252, 0.18);
+    --onion-consent-action: #f8fafc;
+    --onion-consent-action-text: #101318;
+    --onion-consent-shadow: 0 24px 70px rgba(0, 0, 0, 0.52);
+  }
+}
+
+html[data-theme="light"] {
+  --onion-consent-bg: #ffffff;
+  --onion-consent-surface: #f6f7f9;
+  --onion-consent-text: #111827;
+  --onion-consent-muted: #4b5563;
+  --onion-consent-border: rgba(17, 24, 39, 0.16);
+  --onion-consent-action: #111827;
+  --onion-consent-action-text: #ffffff;
+  --onion-consent-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
+}
+
+html[data-theme="dark"] {
+  --onion-consent-bg: #101318;
+  --onion-consent-surface: #171b22;
+  --onion-consent-text: #f8fafc;
+  --onion-consent-muted: #cbd5e1;
+  --onion-consent-border: rgba(248, 250, 252, 0.18);
+  --onion-consent-action: #f8fafc;
+  --onion-consent-action-text: #101318;
+  --onion-consent-shadow: 0 24px 70px rgba(0, 0, 0, 0.52);
+}
+
+.onion-google-consent,
+.onion-google-consent * {
+  box-sizing: border-box;
+}
+
+.onion-google-consent {
+  position: relative;
+  z-index: 2147483000;
+  color: var(--onion-consent-text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+
+.onion-google-consent [hidden] {
+  display: none !important;
+}
+
+.onion-google-consent button,
+.onion-google-consent input,
+.onion-google-consent summary,
+.onion-google-consent a {
+  font: inherit;
+}
+
+.onion-google-consent__banner {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  left: max(16px, env(safe-area-inset-left));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 24px;
+  align-items: center;
+  width: min(1120px, calc(100vw - 32px));
+  margin-inline: auto;
+  padding: 20px;
+  border: 1px solid var(--onion-consent-border);
+  border-radius: 18px;
+  background: var(--onion-consent-bg);
+  box-shadow: var(--onion-consent-shadow);
+}
+
+.onion-google-consent__copy {
+  min-width: 0;
+}
+
+.onion-google-consent__eyebrow {
+  margin: 0 0 4px;
+  color: var(--onion-consent-muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.onion-google-consent h2 {
+  margin: 0;
+  color: var(--onion-consent-text);
+  font-size: clamp(1.05rem, 2vw, 1.32rem);
+  line-height: 1.2;
+}
+
+.onion-google-consent p {
+  margin: 8px 0 0;
+  color: var(--onion-consent-muted);
+  font-size: 0.92rem;
+}
+
+.onion-google-consent__actions,
+.onion-google-consent__dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.onion-google-consent__button,
+.onion-google-consent__preferences,
+.onion-google-consent__close {
+  min-height: 44px;
+  border: 1px solid var(--onion-consent-border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition:
+    transform 150ms ease,
+    box-shadow 150ms ease,
+    background-color 150ms ease;
+}
+
+.onion-google-consent__button {
+  padding: 10px 16px;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.onion-google-consent__button--decision {
+  border-color: var(--onion-consent-action);
+  background: var(--onion-consent-action);
+  color: var(--onion-consent-action-text);
+}
+
+.onion-google-consent__button--settings {
+  background: var(--onion-consent-surface);
+  color: var(--onion-consent-text);
+}
+
+.onion-google-consent__button:hover,
+.onion-google-consent__preferences:hover,
+.onion-google-consent__close:hover {
+  transform: translateY(-1px);
+}
+
+.onion-google-consent__button:focus-visible,
+.onion-google-consent__preferences:focus-visible,
+.onion-google-consent__close:focus-visible,
+.onion-google-consent input:focus-visible,
+.onion-google-consent summary:focus-visible,
+.onion-google-consent a:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--onion-consent-focus) 70%, transparent);
+  outline-offset: 3px;
+}
+
+.onion-google-consent__preferences {
+  position: fixed;
+  left: max(14px, env(safe-area-inset-left));
+  bottom: max(14px, env(safe-area-inset-bottom));
+  min-width: 72px;
+  padding: 9px 13px;
+  background: var(--onion-consent-bg);
+  color: var(--onion-consent-text);
+  font-size: 0.82rem;
+  font-weight: 780;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.16);
+}
+
+.onion-google-consent__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 7, 18, 0.62);
+  backdrop-filter: blur(4px);
+}
+
+.onion-google-consent__dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  width: min(620px, calc(100vw - 32px));
+  max-height: min(760px, calc(100dvh - 32px));
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid var(--onion-consent-border);
+  border-radius: 18px;
+  background: var(--onion-consent-bg);
+  box-shadow: var(--onion-consent-shadow);
+  transform: translate(-50%, -50%);
+}
+
+.onion-google-consent__dialog-head {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.onion-google-consent__close {
+  display: grid;
+  flex: 0 0 44px;
+  place-items: center;
+  padding: 0;
+  background: var(--onion-consent-surface);
+  color: var(--onion-consent-text);
+  font-size: 1.65rem;
+  line-height: 1;
+}
+
+.onion-google-consent__options {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.onion-google-consent__option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 14px;
+  border: 1px solid var(--onion-consent-border);
+  border-radius: 14px;
+  background: var(--onion-consent-surface);
+  cursor: pointer;
+}
+
+.onion-google-consent__option strong,
+.onion-google-consent__option small {
+  display: block;
+}
+
+.onion-google-consent__option strong {
+  color: var(--onion-consent-text);
+}
+
+.onion-google-consent__option small {
+  margin-top: 3px;
+  color: var(--onion-consent-muted);
+  font-size: 0.84rem;
+}
+
+.onion-google-consent__option input {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--onion-consent-action);
+}
+
+.onion-google-consent__details {
+  margin-top: 16px;
+  border: 1px solid var(--onion-consent-border);
+  border-radius: 14px;
+  background: var(--onion-consent-surface);
+}
+
+.onion-google-consent__details summary {
+  padding: 13px 14px;
+  color: var(--onion-consent-text);
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.onion-google-consent__details > div {
+  padding: 0 14px 14px;
+}
+
+.onion-google-consent__details a {
+  color: var(--onion-consent-text);
+  font-weight: 720;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.onion-google-consent__dialog-actions {
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
+html[data-onion-consent-dialog="open"] {
+  overflow: hidden;
+}
+
+@media (max-width: 760px) {
+  .onion-google-consent__banner {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    padding: 18px;
+  }
+
+  .onion-google-consent__actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .onion-google-consent__button {
+    width: 100%;
+    white-space: normal;
+  }
+
+  .onion-google-consent__button--settings {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+@media (max-width: 440px) {
+  .onion-google-consent__actions,
+  .onion-google-consent__dialog-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .onion-google-consent__button--settings {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .onion-google-consent__dialog {
+    padding: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onion-google-consent__button,
+  .onion-google-consent__preferences,
+  .onion-google-consent__close {
+    transition: none;
+  }
+
+  .onion-google-consent__button:hover,
+  .onion-google-consent__preferences:hover,
+  .onion-google-consent__close:hover {
+    transform: none;
+  }
+}

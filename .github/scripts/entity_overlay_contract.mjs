@@ -118,7 +118,6 @@ assert.equal(
 );
 assert.match(spaContract, /entity_overlay_contract\.mjs/);
 
-
 const overlayStyles = await read("src/features/entity-overlay/styles.generated.js");
 assert.doesNotMatch(overlayStyles, /^\s*incidencia:/m);
 assert.doesNotMatch(overlayStyles, /^\s*factura:/m);
@@ -127,33 +126,71 @@ const facturasIndex = await read("src/views/facturas/index.js");
 assert.match(facturasIndex, /export async function openFacturaDetailById/);
 assert.match(facturasIndex, /const DEFAULT_BATCH_SIZE = 50;/);
 
-const [homeTemplate, homeCss] = await Promise.all([
+/*
+  Home is a synchronous facade backed by domain modules. The entity contract
+  validates the complete reachable template surface rather than assuming every
+  trigger remains physically embedded in home.template.js.
+*/
+const [
+  homeTemplateFacade,
+  homeTemplateActivity,
+  homeTemplateBilling,
+  homeCss,
+  homeExtremeEntitiesCss,
+] = await Promise.all([
   read("src/views/home/home.template.js"),
+  read("src/views/home/home.template.activity.js"),
+  read("src/views/home/home.template.billing.js"),
   read("src/css/views/home/index.css"),
+  read("src/css/compositions/home-extreme-entities.css"),
 ]);
 
+const homeTemplate = [
+  homeTemplateFacade,
+  homeTemplateActivity,
+  homeTemplateBilling,
+].join("\n");
+
+assert.match(homeTemplateFacade, /import \{ activity \} from "\.\/home\.template\.activity\.js"/);
+assert.match(homeTemplateFacade, /import \{ invoices \} from "\.\/home\.template\.billing\.js"/);
 assert.match(homeTemplate, /data-entity-overlay-trigger="true"/);
+assert.match(homeTemplate, /data-entity-overlay-open="true"/);
+assert.match(homeTemplate, /aria-haspopup="dialog"/);
 assert.match(homeTemplate, /function activityEntityId/);
 assert.match(homeTemplate, /raw\.clientId/);
 assert.match(homeTemplate, /raw\.userId/);
-assert.match(homeTemplate, /function entityHitTarget/);
-assert.match(homeTemplate, /class="home-entity-hit-target"/);
-assert.match(homeTemplate, /entityHitTarget\(entityType, entityId\)/);
-assert.match(homeTemplate, /entityHitTarget\("factura", id\)/);
+assert.match(homeTemplate, /function entityTriggerAttributes/);
+assert.match(
+  homeTemplate,
+  /entityTriggerAttributes\(entityType, entityId, "home\.activity"\)/
+);
+assert.match(
+  homeTemplate,
+  /entityTriggerAttributes\("factura", id, "home\.invoices"\)/
+);
+assert.match(homeTemplate, /class="home-entity-row home-entity-row--activity"/);
+assert.match(homeTemplate, /class="home-entity-row home-entity-row--invoice"/);
+assert.doesNotMatch(homeTemplate, /class="home-entity-hit-target"/);
 assert.doesNotMatch(homeTemplate, /home-activity-entity-button/);
 assert.doesNotMatch(homeTemplate, /home-invoice-entity-button/);
+
 assert.match(homeCss, /HOME ENTITY INTERACTION LAYER/);
 assert.match(
-  homeCss,
-  /\.home-activity-item\s*\{[\s\S]*?grid-template-columns:\s*38px minmax\(0,\s*1fr\) auto;/
+  homeExtremeEntitiesCss,
+  /\.home-view-root \.home-entity-row\s*\{[\s\S]*?appearance:\s*none;[\s\S]*?display:\s*grid;/
 );
 assert.match(
-  homeCss,
-  /\.home-entity-hit-target\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?inset:\s*0;/
+  homeExtremeEntitiesCss,
+  /\.home-view-root \.home-entity-row:focus-visible\s*\{[\s\S]*?box-shadow:\s*var\(--focus-ring\);/
 );
-assert.doesNotMatch(homeCss, /home-activity-entity-button/);
-assert.doesNotMatch(homeCss, /home-invoice-entity-button/);
+assert.match(
+  homeExtremeEntitiesCss,
+  /\.home-view-root \.home-entity-row:hover\s*\{[\s\S]*?transform:\s*translateX\(2px\);/
+);
+assert.doesNotMatch(homeExtremeEntitiesCss, /home-entity-hit-target/);
+assert.doesNotMatch(homeExtremeEntitiesCss, /home-activity-entity-button/);
+assert.doesNotMatch(homeExtremeEntitiesCss, /home-invoice-entity-button/);
 
 console.log(
-  "Entity overlay contract: PASS · factura/incidencia owner authority · lazy simple overlays · canonical deeplinks"
+  "Entity overlay contract: PASS · factura/incidencia owner authority · modular Home semantic triggers · canonical deeplinks"
 );

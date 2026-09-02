@@ -1,0 +1,198 @@
+/* Onion Support · Home Extreme composition module.
+   Loaded exclusively through home-extreme.css inside layer(compositions). */
+
+/* =========================================================
+   RESPONSIVE · CONTAINER-FIRST
+========================================================= */
+
+@container (max-width: 1180px) {
+  .home-view-root--admin .home-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .home-view-root .home-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@container (max-width: 760px) {
+  .home-view-root .home-stats,
+  .home-view-root--admin .home-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .home-view-root .home-panel-header {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .home-view-root .home-panel-actions {
+    justify-content: flex-start;
+  }
+
+  .home-view-root .home-billing-overview {
+    grid-template-columns: 1fr;
+  }
+
+  .home-view-root .home-billing-progress {
+    grid-column: 1;
+  }
+
+  .home-view-root .home-entity-row {
+    grid-template-columns:
+      40px
+      minmax(0, 1fr)
+      auto;
+    gap: 10px;
+    min-block-size: 78px;
+    padding: 10px;
+  }
+
+  .home-view-root .home-entity-leading {
+    inline-size: 40px;
+    block-size: 40px;
+  }
+
+  .home-view-root .home-entity-open {
+    min-inline-size: 32px;
+    inline-size: 32px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .home-view-root .home-entity-open > span:first-child {
+    display: none;
+  }
+
+  .home-view-root .home-invoice-summary {
+    min-inline-size: 76px;
+  }
+}
+
+@container (max-width: 520px) {
+  .home-view-root .home-stat-card,
+  .home-view-root .home-stat-card-button {
+    min-block-size: 126px;
+  }
+
+  .home-view-root .home-panel-count,
+  .home-view-root .home-panel-freshness {
+    max-inline-size: 100%;
+  }
+
+  .home-view-root .home-panel-freshness span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .home-view-root .home-entity-row--invoice {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .home-view-root .home-invoice-summary {
+    grid-column: 2;
+    justify-items: start;
+    min-inline-size: 0;
+  }
+
+  .home-view-root .home-invoice-summary .home-entity-open {
+    display: none;
+  }
+
+  .home-view-root .home-billing-primary {
+    grid-template-columns: 42px minmax(0, 1fr);
+  }
+
+  .home-view-root .home-billing-primary-icon {
+    inline-size: 42px;
+    block-size: 42px;
+  }
+
+  .home-view-root .home-billing-breakdown {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Viewport fallback for browsers without container-query evaluation. */
+@media (max-width: 1180px) {
+  .home-view-root--admin .home-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .home-view-root .home-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .home-view-root .home-stats,
+  .home-view-root--admin .home-stats {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* =========================================================
+   ACCESSIBILITY / PRINT
+========================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  .home-view-root .home-stat-card,
+  .home-view-root .home-stat-open,
+  .home-view-root .home-link-button-icon,
+  .home-view-root .home-entity-row,
+  .home-view-root .home-entity-open,
+  .home-view-root .home-entity-open .app-icon {
+    transition: none;
+  }
+
+  .home-view-root .home-stat-card:hover,
+  .home-view-root .home-entity-row:hover,
+  .home-view-root .home-entity-row:active {
+    transform: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .home-view-root .home-stat-card,
+  .home-view-root .home-panel,
+  .home-view-root .home-entity-row,
+  .home-view-root .home-billing-overview,
+  .home-view-root .home-billing-breakdown-item,
+  .home-view-root .home-panel-count,
+  .home-view-root .home-panel-freshness {
+    border-color: CanvasText;
+  }
+
+  .home-view-root .home-stat-card::before {
+    background: Highlight;
+  }
+
+  .home-view-root .home-billing-progress progress,
+  .home-view-root .home-billing-progress progress::-webkit-progress-bar {
+    background: Canvas;
+  }
+
+  .home-view-root .home-billing-progress progress::-webkit-progress-value,
+  .home-view-root .home-billing-progress progress::-moz-progress-bar {
+    background: Highlight;
+  }
+}
+
+@media print {
+  .home-view-root .home-stat-open,
+  .home-view-root .home-entity-open,
+  .home-view-root .home-panel-freshness,
+  .home-view-root .home-panel-count {
+    display: none;
+  }
+
+  .home-view-root .home-entity-row {
+    min-block-size: 0;
+    transform: none;
+  }
+
+  .home-view-root .home-billing-progress progress {
+    border: 1px solid #777;
+  }
+}
+

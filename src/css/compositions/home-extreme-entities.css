@@ -1,0 +1,254 @@
+/* Onion Support · Home Extreme composition module.
+   Loaded exclusively through home-extreme.css inside layer(compositions). */
+
+/* =========================================================
+   ENTITY LISTS / SEMANTIC MODAL TARGETS
+========================================================= */
+
+.home-view-root .home-activity-list,
+.home-view-root .home-invoice-list {
+  min-inline-size: 0;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: var(--home-extreme-panel-padding);
+  list-style: none;
+}
+
+.home-view-root .home-activity-item,
+.home-view-root .home-invoice-item {
+  min-inline-size: 0;
+  min-block-size: 0;
+  display: block;
+  margin: 0;
+  padding: 0;
+
+  border: 0;
+  border-radius: var(--home-extreme-row-radius);
+  background: transparent;
+  box-shadow: none;
+}
+
+.home-view-root .home-activity-item:hover,
+.home-view-root .home-invoice-item:hover {
+  border: 0;
+  background: transparent;
+}
+
+.home-view-root .home-entity-row {
+  appearance: none;
+  inline-size: 100%;
+  min-inline-size: 0;
+  min-block-size: var(--home-extreme-row-min);
+
+  display: grid;
+  grid-template-columns:
+    var(--home-extreme-icon-size)
+    minmax(0, 1fr)
+    auto;
+  align-items: center;
+  gap: 13px;
+
+  margin: 0;
+  padding: 11px 12px;
+
+  border: 1px solid var(--data-table-row-border, var(--border-default));
+  border-radius: inherit;
+  background: var(--solid-bg-1, transparent);
+  color: var(--text);
+  box-shadow: inset 0 1px 0 var(--border-subtle, transparent);
+
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+
+.home-view-root .home-entity-row:hover {
+  border-color: var(--border-strong);
+  background: var(--data-table-row-hover, var(--solid-hover));
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 var(--border-subtle, transparent);
+  transform: translateX(2px);
+}
+
+.home-view-root .home-entity-row:active {
+  transform: translateX(1px) scale(.997);
+}
+
+.home-view-root .home-entity-row:focus-visible {
+  outline: none;
+  border-color: var(--border-info, var(--border-strong));
+  box-shadow: var(--focus-ring);
+}
+
+.home-view-root .home-entity-row--static {
+  cursor: default;
+}
+
+.home-view-root .home-entity-row--static:hover {
+  transform: none;
+}
+
+.home-view-root .home-entity-leading {
+  inline-size: var(--home-extreme-icon-size);
+  block-size: var(--home-extreme-icon-size);
+  display: grid;
+  place-items: center;
+
+  border: 1px solid var(--badge-border);
+  border-radius: var(--radius-lg, 14px);
+  background: var(--badge-bg);
+  color: var(--badge-text);
+  box-shadow: inset 0 1px 0 var(--border-subtle, transparent);
+}
+
+.home-view-root .home-entity-leading .app-icon {
+  inline-size: 19px;
+  block-size: 19px;
+}
+
+.home-view-root .home-entity-leading--incidencia {
+  border-color: var(--border-info);
+  background: var(--info-bg);
+  color: var(--info-strong, var(--info));
+}
+
+.home-view-root .home-entity-leading--factura {
+  border-color: var(--border-warning);
+  background: var(--warning-bg);
+  color: var(--warning-strong, var(--warning));
+}
+
+.home-view-root .home-entity-leading--cliente {
+  border-color: var(--border-success);
+  background: var(--success-bg);
+  color: var(--success-strong, var(--success));
+}
+
+.home-view-root .home-entity-leading--usuario {
+  border-color: var(--border-strong);
+  background: var(--solid-selected, var(--badge-bg));
+  color: var(--text-strong);
+}
+
+.home-view-root .home-entity-copy {
+  min-inline-size: 0;
+  display: grid;
+  align-content: center;
+  gap: 6px;
+}
+
+.home-view-root .home-entity-eyebrow,
+.home-view-root .home-entity-meta {
+  min-inline-size: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.home-view-root .home-entity-kind {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: var(--weight-bold);
+  line-height: 1;
+  letter-spacing: .085em;
+  text-transform: uppercase;
+}
+
+.home-view-root .home-entity-title {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: var(--weight-bold);
+  line-height: 1.35;
+  text-wrap: pretty;
+
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.home-view-root .home-entity-meta time {
+  color: var(--text-muted);
+  font-size: 9.5px;
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.home-view-root .home-entity-id,
+.home-view-root .home-status {
+  padding: 3px 7px;
+  font-size: 9px;
+}
+
+.home-view-root .home-entity-open {
+  min-inline-size: 88px;
+  min-block-size: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  padding-inline: 10px 7px;
+
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+
+  font-size: 9.5px;
+  font-weight: var(--weight-semibold);
+  line-height: 1;
+  white-space: nowrap;
+
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.home-view-root .home-entity-open .app-icon {
+  inline-size: 14px;
+  block-size: 14px;
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+
+.home-view-root .home-entity-row:is(:hover, :focus-visible) .home-entity-open {
+  border-color: var(--border-default);
+  background: var(--solid-selected, var(--badge-bg));
+  color: var(--text-strong);
+}
+
+.home-view-root .home-entity-row:is(:hover, :focus-visible) .home-entity-open .app-icon {
+  transform: translateX(2px);
+}
+
+.home-view-root .home-invoice-summary {
+  min-inline-size: 108px;
+  display: grid;
+  justify-items: end;
+  gap: 7px;
+}
+
+.home-view-root .home-invoice-amount {
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: var(--weight-bold);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.home-view-root .home-invoice-summary .home-entity-open {
+  min-inline-size: 0;
+}
+

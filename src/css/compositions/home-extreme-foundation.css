@@ -1,0 +1,311 @@
+/* Onion Support · Home Extreme composition module.
+   Loaded exclusively through home-extreme.css inside layer(compositions). */
+
+/* =========================================================
+   LOCAL TOKENS · HEADER EXPLICITLY OUT OF SCOPE
+========================================================= */
+
+.home-view-root {
+  --home-extreme-gap: clamp(12px, 1.15vw, 18px);
+  --home-extreme-panel-padding: clamp(12px, 1vw, 16px);
+  --home-extreme-row-radius: var(--radius-lg, 14px);
+  --home-extreme-icon-size: 44px;
+  --home-extreme-row-min: 84px;
+}
+
+/* =========================================================
+   STAT CARDS
+========================================================= */
+
+.home-view-root .home-stats {
+  gap: var(--home-extreme-gap);
+}
+
+.home-view-root .home-stat-card {
+  --home-card-accent: var(--text-strong);
+  --home-card-accent-bg: var(--solid-selected, var(--badge-bg));
+  --home-card-accent-border: var(--border-strong);
+
+  position: relative;
+  min-block-size: 138px;
+  overflow: hidden;
+
+  border: 1px solid var(--border-default);
+  border-radius: var(--card-radius-lg);
+  background:
+    linear-gradient(
+      145deg,
+      var(--card-bg),
+      var(--solid-bg-1, var(--card-bg))
+    );
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 var(--border-subtle, transparent);
+
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+
+.home-view-root .home-stat-card::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: 3px;
+  background: var(--home-card-accent);
+  opacity: .78;
+  pointer-events: none;
+}
+
+.home-view-root .home-stat-card[data-home-stat="incidencias"] {
+  --home-card-accent: var(--info-strong, var(--info));
+  --home-card-accent-bg: var(--info-bg);
+  --home-card-accent-border: var(--border-info);
+}
+
+.home-view-root .home-stat-card[data-home-stat="facturas"] {
+  --home-card-accent: var(--warning-strong, var(--warning));
+  --home-card-accent-bg: var(--warning-bg);
+  --home-card-accent-border: var(--border-warning);
+}
+
+.home-view-root .home-stat-card[data-home-stat="clientes"] {
+  --home-card-accent: var(--success-strong, var(--success));
+  --home-card-accent-bg: var(--success-bg);
+  --home-card-accent-border: var(--border-success);
+}
+
+.home-view-root .home-stat-card[data-home-stat="usuarios"] {
+  --home-card-accent: var(--text-strong);
+  --home-card-accent-bg: var(--solid-selected, var(--badge-bg));
+  --home-card-accent-border: var(--border-strong);
+}
+
+.home-view-root .home-stat-card:hover {
+  border-color: var(--home-card-accent-border);
+  background:
+    linear-gradient(
+      145deg,
+      var(--solid-hover, var(--card-bg)),
+      var(--card-bg)
+    );
+  box-shadow:
+    var(--shadow-md, var(--shadow-sm)),
+    inset 0 1px 0 var(--border-subtle, transparent);
+  transform: translateY(-2px);
+}
+
+.home-view-root .home-stat-card-button {
+  min-block-size: 138px;
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: auto 1fr;
+  align-items: stretch;
+  gap: 12px;
+  padding: 16px 17px 15px 19px;
+}
+
+.home-view-root .home-stat-card-top {
+  min-inline-size: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.home-view-root .home-stat-icon {
+  inline-size: var(--home-extreme-icon-size);
+  block-size: var(--home-extreme-icon-size);
+  display: grid;
+  place-items: center;
+
+  border: 1px solid var(--home-card-accent-border);
+  border-radius: var(--radius-lg, 14px);
+  background: var(--home-card-accent-bg);
+  color: var(--home-card-accent);
+  box-shadow: inset 0 1px 0 var(--border-subtle, transparent);
+}
+
+.home-view-root .home-stat-icon .app-icon {
+  inline-size: 20px;
+  block-size: 20px;
+}
+
+.home-view-root .home-stat-open {
+  inline-size: 30px;
+  block-size: 30px;
+  display: grid;
+  place-items: center;
+
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  opacity: .72;
+  transform: translateX(-2px);
+
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+
+.home-view-root .home-stat-open .app-icon {
+  inline-size: 15px;
+  block-size: 15px;
+}
+
+.home-view-root .home-stat-card:is(:hover, :focus-within) .home-stat-open {
+  border-color: var(--border-default);
+  background: var(--solid-hover, var(--badge-bg));
+  color: var(--text-strong);
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.home-view-root .home-stat-content {
+  align-content: end;
+  gap: 5px;
+}
+
+.home-view-root .home-stat-label {
+  color: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: .09em;
+}
+
+.home-view-root .home-stat-value {
+  font-size: clamp(31px, 2.25vw, 42px);
+  line-height: .95;
+}
+
+.home-view-root .home-stat-text {
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+/* =========================================================
+   MAIN GRID / PANELS
+========================================================= */
+
+.home-view-root .home-grid {
+  grid-template-columns:
+    minmax(0, 1.08fr)
+    minmax(420px, .92fr);
+  align-items: stretch;
+  gap: var(--home-extreme-gap);
+}
+
+.home-view-root .home-panel {
+  min-block-size: 0;
+  display: flex;
+  flex-direction: column;
+
+  border-color: var(--border-default);
+  border-radius: var(--data-table-radius, var(--card-radius-lg));
+  background:
+    linear-gradient(
+      180deg,
+      var(--data-table-bg, var(--card-bg)),
+      var(--solid-bg-1, var(--card-bg))
+    );
+  box-shadow:
+    var(--shadow-md, var(--shadow-sm)),
+    inset 0 1px 0 var(--border-subtle, transparent);
+}
+
+.home-view-root .home-panel-header {
+  min-block-size: 86px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+
+  padding:
+    15px
+    clamp(15px, 1.2vw, 20px);
+
+  border-block-end: 1px solid var(--border-default);
+  background:
+    linear-gradient(
+      180deg,
+      var(--surface-2, var(--card-bg)),
+      var(--solid-bg-1, var(--card-bg))
+    );
+}
+
+.home-view-root .home-panel-heading {
+  min-inline-size: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.home-view-root .home-panel-header h2 {
+  font-size: clamp(17px, 1.2vw, 20px);
+  letter-spacing: -.02em;
+}
+
+.home-view-root .home-panel-description {
+  min-inline-size: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: var(--weight-medium);
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-view-root .home-panel-actions {
+  min-inline-size: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.home-view-root .home-panel-count,
+.home-view-root .home-panel-freshness {
+  min-block-size: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-inline: 9px;
+
+  border: 1px solid var(--badge-border);
+  border-radius: var(--radius-pill);
+  background: var(--badge-bg);
+  color: var(--text-muted);
+
+  font-size: 9.5px;
+  font-weight: var(--weight-semibold);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.home-view-root .home-panel-freshness .app-icon {
+  inline-size: 13px;
+  block-size: 13px;
+}
+
+.home-view-root .home-link-button {
+  min-block-size: 36px;
+  padding-inline: 12px 10px;
+  border-radius: var(--radius-pill);
+}
+
+.home-view-root .home-link-button-icon {
+  inline-size: 14px;
+  block-size: 14px;
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+
+.home-view-root .home-link-button:hover .home-link-button-icon {
+  transform: translateX(2px);
+}
+

@@ -22,7 +22,7 @@
    Reglas:
    - Sin declaraciones CSS directas en este archivo.
    - Sin imports externos ni fuentes remotas.
-   - Sin imports de una única vista/ruta; las composiciones deben ser transversales.
+   - Las composiciones globales deben quedar estrictamente scopeadas y sin fugas.
    - Sin imports duplicados.
 ========================================================= */
 
@@ -53,7 +53,7 @@
 
    Sidebar/Topbar pintan sus componentes internos.
    sidebar.executive.css remata únicamente el interior visual del Sidebar.
-   sidebar.icons.css normaliza el sistema SVG 24×24 y sus cajas ópticas 1:1.
+   sidebar.icons.css consume el contrato iconográfico global 24×24.
    sidebar.executive.interactions.css ancla las interacciones del rail.
    topbar.executive.css aplica la misma gramática ejecutiva al Topbar.
    chrome.css se carga el último dentro de layer(layout) y es la ÚNICA
@@ -71,8 +71,12 @@
 
 /* =========================================================
    GLOBAL COMPONENTS
+
+   app-icons.css es la autoridad única de glifos compartidos. El Sidebar
+   define la geometría aprobada y las vistas consumen esas mismas máscaras.
 ========================================================= */
 
+@import url("./components/app-icons.css") layer(components);
 @import url("./components/ui.css") layer(components);
 
 /* =========================================================
@@ -98,6 +102,7 @@
 @import url("./compositions/public-system-theme-auth.css") layer(compositions);
 @import url("./compositions/private-admin-parity.css") layer(compositions);
 @import url("./compositions/private-admin-interactions.css") layer(compositions);
+@import url("./compositions/home-extreme.css") layer(compositions);
 @import url("./compositions/private-create-modal.css") layer(compositions);
 @import url("./compositions/mobile-datalist.css") layer(compositions);
 @import url("./compositions/private-amounts.css") layer(compositions);

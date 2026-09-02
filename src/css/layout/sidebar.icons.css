@@ -2,46 +2,32 @@
    ONION SUPPORT — SIDEBAR ICON SYSTEM
    Archivo: /src/css/layout/sidebar.icons.css
 
-   ICON SYSTEM · NORMALIZED 24 × 24 · PROGRESSIVE ENHANCEMENT
+   SIDEBAR CONSUMER · SHARED APP ICON AUTHORITY
 
-   Objetivo:
-   - unificar todos los glifos del Sidebar en un único lenguaje visual;
-   - mantener una caja óptica cuadrada, estable y alineada 1:1;
-   - usar currentColor para heredar hover, active, tema y forced-colors;
-   - encapsular los SVG como data URI para no ampliar el contrato MIME;
-   - conservar los SVG inline actuales como fallback sin JS adicional;
-   - neutralizar el antiguo tratamiento CSS específico de Correo;
-   - no alterar Router, Auth, DOM semántico ni geometría del App Chrome.
+   Contrato:
+   - El Sidebar conserva la geometría visual que aprobó el producto.
+   - Las máscaras SVG viven una sola vez en components/app-icons.css.
+   - El resto de la SPA consume las mismas variables --app-icon-*.
+   - Los SVG inline del template quedan como fallback sin gobernar la pintura.
+   - Sin cambios de Router, Auth, DOM semántico ni App Chrome.
 ========================================================= */
 
 .sidebar {
   --sb-icon-canvas: 20px;
   --sb-icon-chevron-canvas: 18px;
 
-  --sb-icon-panel-close:
-    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8cmVjdCB4PSIzLjI1IiB5PSIzLjI1IiB3aWR0aD0iMTcuNSIgaGVpZ2h0PSIxNy41IiByeD0iMi43NSIvPgogIDxwYXRoIGQ9Ik04Ljc1IDMuMjV2MTcuNSIvPgogIDxwYXRoIGQ9Im0xNS41IDguNzUtMy4yNSAzLjI1IDMuMjUgMy4yNSIvPgo8L3N2Zz4=");
-  --sb-icon-panel-open:
-    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8cmVjdCB4PSIzLjI1IiB5PSIzLjI1IiB3aWR0aD0iMTcuNSIgaGVpZ2h0PSIxNy41IiByeD0iMi43NSIvPgogIDxwYXRoIGQ9Ik04Ljc1IDMuMjV2MTcuNSIvPgogIDxwYXRoIGQ9Im0xMi41IDguNzUgMy4yNSAzLjI1LTMuMjUgMy4yNSIvPgo8L3N2Zz4=");
-  --sb-icon-home:
-    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8cGF0aCBkPSJtMy41IDEwLjc1IDguNS03IDguNSA3Ii8+CiAgPHBhdGggZD0iTTUuMjUgOS41djkuMjVBMS43NSAxLjc1IDAgMCAwIDcgMjAuNWgxMGExLjc1IDEuNzUgMCAwIDAgMS43NS0xLjc1VjkuNSIvPgogIDxwYXRoIGQ9Ik05LjI1IDIwLjV2LTZoNS41djYiLz4KPC9zdmc+");
-  --sb-icon-incidencias:
-    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8cGF0aCBkPSJNNS4yNSA1aDEzLjVBMS43NSAxLjc1IDAgMCAxIDIwLjUgNi43NVY5YTMgMyAwIDAgMCAwIDZ2Mi4yNUExLjc1IDEuNzUgMCAwIDEgMTguNzUgMTlINS4yNUExLjc1IDEuNzUgMCAwIDEgMy41IDE3LjI1VjE1YTMgMyAwIDAgMCAwLTZWNi43NUExLjc1IDEuNzUgMCAwIDEgNS4yNSA1WiIvPgogIDxwYXRoIGQ9Ik05IDguMjVoNk05IDEyaDZNOSAxNS43NWgzLjc1Ii8+Cjwvc3ZnPg==");
-  --sb-icon-facturas:
-    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8cGF0aCBkPSJNNi4yNSAzLjVoMTEuNXYxN2wtMS45LTEuMjUtMS45MyAxLjI1TDEyIDE5LjI1bC0xLjkyIDEuMjUtMS45My0xLjI1LTEuOSAxLjI1di0xN1oiLz4KICA8cGF0aCBkPSJNOSA4aDZNOSAxMS43NWg2TTkgMTUuNWg0LjI1Ii8+Cjwvc3ZnPg==");
-  --sb-icon-clientes:
-    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8cGF0aCBkPSJNNCAyMC41aDE2Ii8+CiAgPHBhdGggZD0iTTUuNSAyMC41VjZBMiAyIDAgMCAxIDcuNSA0aDdBMiAyIDAgMCAxIDE2LjUgNnYxNC41Ii8+CiAgPHBhdGggZD0iTTE2LjUgOC41aDEuNzVBMS43NSAxLjc1IDAgMCAxIDIwIDEwLjI1VjIwLjUiLz4KICA8cGF0aCBkPSJNOC41IDhoLjVNMTIuNSA4aC41TTguNSAxMS43NWguNU0xMi41IDExLjc1aC41Ii8+CiAgPHBhdGggZD0iTTkuMjUgMjAuNXYtNC4yNWgzLjV2NC4yNSIvPgo8L3N2Zz4=");
-  --sb-icon-usuarios:
-    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8Y2lyY2xlIGN4PSIxMiIgY3k9IjgiIHI9IjMuNzUiLz4KICA8cGF0aCBkPSJNNC43NSAyMC4yNWE3LjI1IDcuMjUgMCAwIDEgMTQuNSAwIi8+Cjwvc3ZnPg==");
-  --sb-icon-correo:
-    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8cGF0aCBkPSJNNS4yNSA1Ljc1aDEzLjVBMi4yNSAyLjI1IDAgMCAxIDIxIDh2OGEyLjI1IDIuMjUgMCAwIDEtMi4yNSAyLjI1SDUuMjVBMi4yNSAyLjI1IDAgMCAxIDMgMTZWOGEyLjI1IDIuMjUgMCAwIDEgMi4yNS0yLjI1WiBNNC4yNSA3LjI1bDYuMyA1LjFhMi4zIDIuMyAwIDAgMCAyLjkgMGw2LjMtNS4xIi8+Cjwvc3ZnPg==");
-  --sb-icon-servidor:
-    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8cmVjdCB4PSIzLjI1IiB5PSIzLjc1IiB3aWR0aD0iMTcuNSIgaGVpZ2h0PSI2LjUiIHJ4PSIxLjc1Ii8+CiAgPHJlY3QgeD0iMy4yNSIgeT0iMTMuNzUiIHdpZHRoPSIxNy41IiBoZWlnaHQ9IjYuNSIgcng9IjEuNzUiLz4KICA8Y2lyY2xlIGN4PSI3IiBjeT0iNyIgcj0iLjciIGZpbGw9IiMwMDAiIHN0cm9rZT0ibm9uZSIvPgogIDxjaXJjbGUgY3g9IjciIGN5PSIxNyIgcj0iLjciIGZpbGw9IiMwMDAiIHN0cm9rZT0ibm9uZSIvPgogIDxwYXRoIGQ9Ik0xMC4yNSA3aDYuNU0xMC4yNSAxN2g2LjUiLz4KPC9zdmc+");
-  --sb-icon-cuenta:
-    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSI5Ii8+CiAgPGNpcmNsZSBjeD0iMTIiIGN5PSI5IiByPSIzIi8+CiAgPHBhdGggZD0iTTYuNSAxOWE2LjI1IDYuMjUgMCAwIDEgMTEgMCIvPgo8L3N2Zz4=");
-  --sb-icon-logout:
-    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8cGF0aCBkPSJtMTUuMjUgNy4yNSA0Ljc1IDQuNzUtNC43NSA0Ljc1Ii8+CiAgPHBhdGggZD0iTTE5LjUgMTJIOSIvPgogIDxwYXRoIGQ9Ik0xMS4yNSAyMC4yNUg2LjVBMi43NSAyLjc1IDAgMCAxIDMuNzUgMTcuNXYtMTFBMi43NSAyLjc1IDAgMCAxIDYuNSAzLjc1aDQuNzUiLz4KPC9zdmc+");
-  --sb-icon-chevron:
-    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj4KICA8cGF0aCBkPSJtOS4yNSA1LjUgNi41IDYuNS02LjUgNi41Ii8+Cjwvc3ZnPg==");
+  --sb-icon-panel-close: var(--app-icon-panel-close);
+  --sb-icon-panel-open: var(--app-icon-panel-open);
+  --sb-icon-home: var(--app-icon-home);
+  --sb-icon-incidencias: var(--app-icon-incidencias);
+  --sb-icon-facturas: var(--app-icon-facturas);
+  --sb-icon-clientes: var(--app-icon-clientes);
+  --sb-icon-usuarios: var(--app-icon-usuarios);
+  --sb-icon-correo: var(--app-icon-correo);
+  --sb-icon-servidor: var(--app-icon-servidor);
+  --sb-icon-cuenta: var(--app-icon-cuenta);
+  --sb-icon-logout: var(--app-icon-logout);
+  --sb-icon-chevron: var(--app-icon-chevron-right);
 }
 
 @supports ((mask-image: linear-gradient(#000, #000)) or (-webkit-mask-image: linear-gradient(#000, #000))) {
@@ -182,9 +168,9 @@
   }
 
   /*
-    El Sidebar base contenía un pseudo-elemento artesanal exclusivo para Correo.
-    Esta regla, más específica que aquel legado, reinicia por completo su caja
-    de pintura y garantiza que el sobre canónico no herede borde ni gradientes.
+    Correo conserva una regla histórica en sidebar.css. Esta autoridad moderna,
+    más específica, reinicia por completo su caja de pintura y evita cualquier
+    mezcla entre gradientes legacy y la máscara canónica compartida.
   */
   .sidebar
   .sidebar-link[data-sidebar-key="correo"]

@@ -1,0 +1,15 @@
+/* =========================================================
+   ONION SUPPORT — PRIVATE HOME EXTREME
+   Archivo: /src/css/compositions/home-extreme.css
+
+   COMPOSITION ENTRYPOINT · GREETING LOCKED · SIDEBAR-FIRST ICONS
+
+   Esta fachada carga módulos de presentación estrictamente scopeados al Home.
+   El greeting aprobado permanece fuera del alcance de todos ellos.
+========================================================= */
+
+@import url("./home-extreme-foundation.css");
+@import url("./home-extreme-entities.css");
+@import url("./home-extreme-billing.css");
+@import url("./home-extreme-states.css");
+@import url("./home-extreme-responsive.css");

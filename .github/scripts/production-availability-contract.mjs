@@ -10,6 +10,25 @@ const repoIntegrityPath = path.join(ROOT, ".github/workflows/repo-integrity.yml"
 const probePath = path.join(ROOT, ".github/scripts/production-availability-probe.mjs");
 const incidentPath = path.join(ROOT, ".github/scripts/production-availability-incident.mjs");
 
+const KNOWN_SETUP_NODE_PINS = Object.freeze([
+  "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
+  "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+]);
+const KNOWN_UPLOAD_ARTIFACT_PINS = Object.freeze([
+  "actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4",
+  "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+]);
+
+function assertKnownPinCount(source, pins, expectedCount, label) {
+  const matches = pins.filter((pin) => source.includes(pin));
+  assert.equal(matches.length, 1, `${label} debe usar exactamente un pin de migración conocido`);
+  assert.equal(
+    source.split(matches[0]).length - 1,
+    expectedCount,
+    `${label} debe aparecer ${expectedCount} vez/veces`
+  );
+}
+
 for (const requiredPath of [workflowPath, repoIntegrityPath, probePath, incidentPath]) {
   assert.ok(fs.existsSync(requiredPath), `falta archivo de disponibilidad: ${path.relative(ROOT, requiredPath)}`);
 }
@@ -42,17 +61,13 @@ for (const line of actionLines) {
   assert.match(reference, /@[0-9a-f]{40}$/u, `action no fijada a SHA: ${reference}`);
 }
 
-for (const [token, expected] of Object.entries({
-  "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803": 2,
-  "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e": 2,
-  "actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4": 1,
-})) {
-  assert.equal(
-    workflow.split(token).length - 1,
-    expected,
-    `${token} debe aparecer ${expected} vez/veces`
-  );
-}
+assert.equal(
+  workflow.split("actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803").length - 1,
+  2,
+  "checkout trusted debe aparecer 2 veces"
+);
+assertKnownPinCount(workflow, KNOWN_SETUP_NODE_PINS, 2, "setup-node trusted");
+assertKnownPinCount(workflow, KNOWN_UPLOAD_ARTIFACT_PINS, 1, "upload-artifact trusted");
 
 const runnerLines = workflow
   .split(/\r?\n/u)
@@ -139,5 +154,5 @@ assert.ok(
 );
 
 console.log(
-  "Production availability contract OK · 3 rounds · 2 required · asset graph · Azure headers · deduplicated incident · no blind redeploy"
+  "Production availability contract OK · immutable migration pins · 3 rounds · 2 required · asset graph · Azure headers · deduplicated incident · no blind redeploy"
 );

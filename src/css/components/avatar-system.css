@@ -10,7 +10,8 @@
    - Una imagen válida elimina cualquier superficie de fallback detrás.
    - PNG/WebP/AVIF con alfa conservan alfa real; no se inyecta fondo blanco.
    - Iniciales y gradientes sólo existen sin imagen válida.
-   - Esta hoja se carga como último guardrail de toda la cascada.
+   - El tone es uint32 y se convierte a color de forma determinista en CSS.
+   - Esta hoja se carga como último guardrail de toda la cascada privada.
 ========================================================= */
 
 :root {
@@ -22,9 +23,9 @@
   --avatar-size-preview: 96px;
 
   --avatar-border: var(--border-default);
-  --avatar-fallback-a: var(--accent);
-  --avatar-fallback-b: var(--info);
-  --avatar-fallback-text: var(--text-on-accent, #fff);
+  --avatar-fallback-a: hsl(215 78% 29%);
+  --avatar-fallback-b: hsl(255 74% 31%);
+  --avatar-fallback-text: #fff;
 }
 
 /* =========================================================
@@ -73,9 +74,7 @@
   --avatar-size: var(--avatar-size-compact);
 }
 
-:where(
-  .home-entity-relation-avatar
-) {
+:where(.home-entity-relation-avatar) {
   --avatar-size: var(--avatar-size-relation);
 }
 
@@ -117,6 +116,51 @@
 
 :where(.home-current-user-avatar) {
   --avatar-size: var(--home-avatar-size, clamp(72px, 5vw, 94px));
+}
+
+/* =========================================================
+   UINT32 COLOR ENGINE · 4,294,967,296 TONES
+
+   No se enumeran paletas. El atributo data-avatar-tone contiene un uint32 y
+   se reparte por hue/saturación/luz. En navegadores sin typed attr()/mod(),
+   se conserva el fallback global azul-violeta de :root.
+========================================================= */
+
+@supports (width: calc(attr(data-avatar-tone type(<number>), 0) * 1px)) and
+          (width: calc(mod(10, 3) * 1px)) {
+  :where([data-avatar-tone]) {
+    --avatar-tone-number: attr(data-avatar-tone type(<number>), 0);
+
+    --avatar-hue-a:
+      mod(var(--avatar-tone-number), 360);
+    --avatar-hue-b:
+      mod(calc((var(--avatar-tone-number) / 997) + 47), 360);
+
+    --avatar-saturation-a:
+      calc(68% + (mod(calc(var(--avatar-tone-number) / 360), 20) * 1%));
+    --avatar-saturation-b:
+      calc(64% + (mod(calc(var(--avatar-tone-number) / 7200), 22) * 1%));
+
+    /* Mantiene suficiente oscuridad para iniciales blancas en cualquier hue. */
+    --avatar-lightness-a:
+      calc(24% + (mod(calc(var(--avatar-tone-number) / 158400), 7) * 1%));
+    --avatar-lightness-b:
+      calc(26% + (mod(calc(var(--avatar-tone-number) / 1108800), 7) * 1%));
+
+    --avatar-fallback-a:
+      hsl(
+        var(--avatar-hue-a)
+        var(--avatar-saturation-a)
+        var(--avatar-lightness-a)
+      );
+    --avatar-fallback-b:
+      hsl(
+        var(--avatar-hue-b)
+        var(--avatar-saturation-b)
+        var(--avatar-lightness-b)
+      );
+    --avatar-fallback-text: #fff;
+  }
 }
 
 /* =========================================================
@@ -162,6 +206,7 @@
    VALID IMAGE · NOTHING MAY PAINT BEHIND ALPHA
 ========================================================= */
 
+[data-avatar-authority="global"][data-avatar-state="image"],
 :where(
   [data-avatar-system="true"][data-avatar-state="image"],
   [data-avatar-host="true"][data-avatar-state="image"],
@@ -188,7 +233,6 @@
   background-image: none;
 }
 
-/* Explicit and legacy fallback nodes disappear behind a real image. */
 :where(
   [data-avatar-system="true"][data-avatar-state="image"],
   [data-avatar-host="true"][data-avatar-state="image"],
@@ -211,9 +255,12 @@
 }
 
 /* =========================================================
-   ONE FALLBACK PALETTE
+   ONE FALLBACK PAINT AUTHORITY
 ========================================================= */
 
+[data-avatar-authority="global"][data-avatar-state="loading"],
+[data-avatar-authority="global"][data-avatar-state="fallback"],
+[data-avatar-authority="global"][data-avatar-state="error"],
 :where(
   [data-avatar-system="true"][data-avatar-state="loading"],
   [data-avatar-system="true"][data-avatar-state="fallback"],
@@ -240,17 +287,6 @@
     inset 0 1px 0 color-mix(in srgb, #fff 16%, transparent);
   color: var(--avatar-fallback-text);
 }
-
-:where([data-avatar-tone="0"]) { --avatar-fallback-a: var(--accent); --avatar-fallback-b: var(--info); }
-:where([data-avatar-tone="1"]) { --avatar-fallback-a: var(--success); --avatar-fallback-b: var(--info); }
-:where([data-avatar-tone="2"]) { --avatar-fallback-a: var(--warning); --avatar-fallback-b: var(--accent); }
-:where([data-avatar-tone="3"]) { --avatar-fallback-a: var(--error); --avatar-fallback-b: var(--warning); }
-:where([data-avatar-tone="4"]) { --avatar-fallback-a: var(--info); --avatar-fallback-b: var(--accent); }
-:where([data-avatar-tone="5"]) { --avatar-fallback-a: var(--success); --avatar-fallback-b: var(--accent); }
-:where([data-avatar-tone="6"]) { --avatar-fallback-a: var(--info); --avatar-fallback-b: var(--success); }
-:where([data-avatar-tone="7"]) { --avatar-fallback-a: var(--warning); --avatar-fallback-b: var(--error); }
-:where([data-avatar-tone="8"]) { --avatar-fallback-a: var(--error); --avatar-fallback-b: var(--accent); }
-:where([data-avatar-tone="9"]) { --avatar-fallback-a: var(--accent); --avatar-fallback-b: var(--success); }
 
 :where(
   [data-avatar-system="true"][data-avatar-state="loading"],
@@ -312,6 +348,21 @@
     [data-has-avatar]
   ) {
     border-color: CanvasText;
+  }
+
+  :where(
+    [data-avatar-system="true"][data-avatar-state="loading"],
+    [data-avatar-system="true"][data-avatar-state="fallback"],
+    [data-avatar-system="true"][data-avatar-state="error"],
+    [data-avatar-host="true"][data-avatar-state="loading"],
+    [data-avatar-host="true"][data-avatar-state="fallback"],
+    [data-avatar-host="true"][data-avatar-state="error"],
+    [data-has-avatar="false"]
+  ) {
+    background: Canvas;
+    color: CanvasText;
+    border-color: CanvasText;
+    box-shadow: none;
   }
 
   :where(

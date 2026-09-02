@@ -133,6 +133,9 @@ jobs:
       - name: Validate production verifier syntax
         run: python3 -m py_compile .github/scripts/production_verify.py
 
+      - name: Validate production dist workflow regression
+        run: node tools/production-dist-workflow-regression.mjs
+
       - name: Validate production availability monitor
         run: node .github/scripts/production-availability-contract.mjs
 

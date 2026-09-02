@@ -61,7 +61,7 @@ assert.ok(
 );
 
 for (const token of [
-  "actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53",
+  "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
   "artifact-ids: ${{ needs.validate.outputs.production_artifact_id }}",
   "Validate exact production artifact before token access",
   "node tools/verify-artifact-envelope.mjs",

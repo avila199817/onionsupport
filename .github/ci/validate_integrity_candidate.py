@@ -33,6 +33,10 @@ SWA_PRODUCTION_WORKFLOW = (
 WORKFLOW_DIR = ".github/workflows"
 EXPECTED_RUNNER = "ubuntu-24.04"
 EXPECTED_NODE_VERSION = "22.23.2"
+REMOTE_ACTION_RE = re.compile(
+    r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*@[0-9a-f]{40}$"
+)
+DOCKER_ACTION_RE = re.compile(r"^docker://[^@\s]+@sha256:[0-9a-f]{64}$")
 
 
 def candidate_root() -> Path:
@@ -149,8 +153,36 @@ def validate_swa_provenance_contract(root: Path, errors: list[str]) -> None:
         )
 
 
+def normalize_uses_value(raw: str) -> str:
+    value = raw.strip()
+    if " #" in value:
+        value = value.split(" #", 1)[0].rstrip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        value = value[1:-1].strip()
+    return value
+
+
+def validate_action_reference(relative: str, line_number: int, value: str, errors: list[str]) -> None:
+    if value.startswith("./"):
+        return
+
+    if value.startswith("docker://"):
+        if not DOCKER_ACTION_RE.fullmatch(value):
+            errors.append(
+                f"{relative}:{line_number}: acción Docker no inmutable '{value}'; "
+                "debe usar @sha256:<64 hex>"
+            )
+        return
+
+    if not REMOTE_ACTION_RE.fullmatch(value):
+        errors.append(
+            f"{relative}:{line_number}: action uses no inmutable '{value}'; "
+            "debe fijarse a un commit SHA de 40 hex"
+        )
+
+
 def validate_workflow_runtime_pinning(root: Path, errors: list[str]) -> None:
-    """Keep GitHub-hosted runners and Node deterministic across every workflow."""
+    """Keep runners, Node and third-party actions deterministic across workflows."""
 
     workflow_root = root / WORKFLOW_DIR
     if workflow_root.is_symlink() or not workflow_root.is_dir():
@@ -171,6 +203,7 @@ def validate_workflow_runtime_pinning(root: Path, errors: list[str]) -> None:
         r'^\s*node-version:\s*["\']?([^"\'\s#]+)',
         re.MULTILINE,
     )
+    uses_pattern = re.compile(r"^\s*(?:-\s*)?uses:\s*(?P<value>.+?)\s*$")
 
     for path in workflows:
         relative = path.relative_to(root).as_posix()
@@ -200,6 +233,16 @@ def validate_workflow_runtime_pinning(root: Path, errors: list[str]) -> None:
                     f"{relative}: node-version '{node_version}' no permitido; "
                     f"debe ser {EXPECTED_NODE_VERSION}"
                 )
+
+        for line_number, line in enumerate(source.splitlines(), start=1):
+            match = uses_pattern.match(line)
+            if not match:
+                continue
+            value = normalize_uses_value(match.group("value"))
+            if not value:
+                errors.append(f"{relative}:{line_number}: uses vacío")
+                continue
+            validate_action_reference(relative, line_number, value, errors)
 
 
 def main() -> int:
@@ -253,7 +296,7 @@ def main() -> int:
         "Candidate CI/static syntax OK · "
         f"Python={len(PYTHON_FILES)} · JSON={len(JSON_FILES)} · "
         f"SWA provenance=locked · workflow runner={EXPECTED_RUNNER} · "
-        f"Node={EXPECTED_NODE_VERSION}"
+        f"Node={EXPECTED_NODE_VERSION} · action refs=immutable"
     )
     return 0
 

@@ -18,6 +18,7 @@
 #   - Make production verification blocking.
 #   - Keep PR preview lifecycle deterministic.
 #   - Pin third-party actions by immutable commit SHA.
+#   - Ignore pushes that can only change CI/docs and cannot alter release bytes.
 # =========================================================
 
 name: Azure Static Web Apps CI/CD
@@ -28,6 +29,9 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - ".github/**"
+      - "docs/**"
 
   workflow_dispatch:
     inputs:

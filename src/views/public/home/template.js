@@ -12,7 +12,7 @@ export const PUBLIC_HOME_TEMPLATE_VERSION = "public.home.template.final.producti
 
 const APP_NAME = "Onion Support";
 
-const CRISTIAN_PROFILE_PHOTO = "src/media/img/Cristian_Avila.png";
+const CRISTIAN_PROFILE_PHOTO = "src/media/img/Cristian_Avila_960.webp";
 const CRISTIAN_PROFILE_PHOTO_WEBP_224 = "src/media/img/Cristian_Avila_224.webp";
 const CRISTIAN_PROFILE_PHOTO_WEBP_480 = "src/media/img/Cristian_Avila_480.webp";
 const CRISTIAN_PROFILE_PHOTO_WEBP_640 = "src/media/img/Cristian_Avila_640.webp";

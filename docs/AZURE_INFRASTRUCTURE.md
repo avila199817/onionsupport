@@ -28,6 +28,7 @@ La autoridad operativa es Azure y el código de `main` de los repositorios corre
 ```mermaid
 flowchart TD
   USER[Usuarios / Internet]
+  OPS[Operaciones]
 
   SWA[Azure Static Web Apps\nonion-panel]
   DNS[Azure DNS\nonionsupport.com]
@@ -59,10 +60,12 @@ flowchart TD
   ENV --> LAW
   COSMOS --> LAW
   STORAGE --> LAW
-  ALERTS --> LAW
 
-  BACKUP -. backup data .-> STORAGE
+  API -. RestartCount .-> ALERTS
+  ALERTS --> OPS
 ```
+
+`stoniontechbackup` se representa como recurso independiente porque la auditoría confirmó actividad de backup, pero no estableció en este documento un flujo único de origen que deba dibujarse como dependencia canónica.
 
 ## 3. Resource Groups
 

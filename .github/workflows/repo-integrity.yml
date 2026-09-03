@@ -20,7 +20,7 @@ concurrency:
 jobs:
   integrity:
     name: Repository integrity
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 7
 
     steps:
@@ -32,10 +32,10 @@ jobs:
           lfs: false
           persist-credentials: false
 
-      - name: Use Node 22
+      - name: Use exact Node 22
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "22"
+          node-version: "22.23.2"
           package-manager-cache: false
 
       - name: Validate JavaScript syntax
@@ -57,6 +57,11 @@ jobs:
 
       - name: Validate repository contracts
         run: python3 .github/scripts/repo_integrity.py
+
+      - name: Validate workflow runtime and production provenance contracts
+        env:
+          ONION_REPO_ROOT: ${{ github.workspace }}
+        run: python3 .github/ci/validate_integrity_candidate.py
 
       - name: Validate public path hygiene
         run: python3 -I .github/scripts/public_path_hygiene.py

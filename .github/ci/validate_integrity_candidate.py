@@ -6,6 +6,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -29,6 +30,9 @@ JSON_FILES = (
 SWA_PRODUCTION_WORKFLOW = (
     ".github/workflows/azure-static-web-apps-polite-bay-086469a1e.yml"
 )
+WORKFLOW_DIR = ".github/workflows"
+EXPECTED_RUNNER = "ubuntu-24.04"
+EXPECTED_NODE_VERSION = "22.23.2"
 
 
 def candidate_root() -> Path:
@@ -145,6 +149,59 @@ def validate_swa_provenance_contract(root: Path, errors: list[str]) -> None:
         )
 
 
+def validate_workflow_runtime_pinning(root: Path, errors: list[str]) -> None:
+    """Keep GitHub-hosted runners and Node deterministic across every workflow."""
+
+    workflow_root = root / WORKFLOW_DIR
+    if workflow_root.is_symlink() or not workflow_root.is_dir():
+        errors.append(f"{WORKFLOW_DIR}: directorio inexistente o inválido")
+        return
+
+    workflows = sorted(
+        path
+        for pattern in ("*.yml", "*.yaml")
+        for path in workflow_root.glob(pattern)
+    )
+    if not workflows:
+        errors.append(f"{WORKFLOW_DIR}: no contiene workflows")
+        return
+
+    runner_pattern = re.compile(r"^\s*runs-on:\s*([^\s#]+)", re.MULTILINE)
+    node_pattern = re.compile(
+        r'^\s*node-version:\s*["\']?([^"\'\s#]+)',
+        re.MULTILINE,
+    )
+
+    for path in workflows:
+        relative = path.relative_to(root).as_posix()
+        if path.is_symlink():
+            errors.append(f"{relative}: symlink prohibido")
+            continue
+
+        try:
+            source = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            errors.append(f"{relative}: workflow ilegible: {exc}")
+            continue
+
+        runners = runner_pattern.findall(source)
+        if not runners:
+            errors.append(f"{relative}: falta runs-on explícito")
+        for runner in runners:
+            if runner != EXPECTED_RUNNER:
+                errors.append(
+                    f"{relative}: runner '{runner}' no permitido; "
+                    f"debe ser {EXPECTED_RUNNER}"
+                )
+
+        for node_version in node_pattern.findall(source):
+            if node_version != EXPECTED_NODE_VERSION:
+                errors.append(
+                    f"{relative}: node-version '{node_version}' no permitido; "
+                    f"debe ser {EXPECTED_NODE_VERSION}"
+                )
+
+
 def main() -> int:
     try:
         root = candidate_root()
@@ -185,6 +242,7 @@ def main() -> int:
             )
 
     validate_swa_provenance_contract(root, errors)
+    validate_workflow_runtime_pinning(root, errors)
 
     if errors:
         for error in errors:
@@ -194,7 +252,8 @@ def main() -> int:
     print(
         "Candidate CI/static syntax OK · "
         f"Python={len(PYTHON_FILES)} · JSON={len(JSON_FILES)} · "
-        "SWA provenance=locked"
+        f"SWA provenance=locked · workflow runner={EXPECTED_RUNNER} · "
+        f"Node={EXPECTED_NODE_VERSION}"
     )
     return 0
 

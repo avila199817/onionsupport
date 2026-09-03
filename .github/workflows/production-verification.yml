@@ -21,7 +21,7 @@ concurrency:
 jobs:
   verify-production:
     name: Verify production matches expected main
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 12
 
     if: >-

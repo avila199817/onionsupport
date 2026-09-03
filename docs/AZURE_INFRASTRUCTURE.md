@@ -1,7 +1,7 @@
 # ONION SUPPORT — INFRAESTRUCTURA AZURE
 
 > Actualizado: 2026-09-04.
-> Este documento describe el estado productivo validado de la infraestructura Azure de Onion Support después de la auditoría y limpieza de septiembre de 2026.
+> Este documento describe el estado productivo validado de la infraestructura Azure de Onion Support después de la auditoría, limpieza y migración DNS de septiembre de 2026.
 >
 > **Regla de seguridad:** los identificadores de tenant, suscripción, App Registration, principal y otros IDs internos se omiten intencionadamente de esta documentación pública. No son necesarios para comprender ni operar la arquitectura.
 
@@ -9,17 +9,22 @@
 
 La infraestructura productiva de Onion Support usa principalmente **Spain Central**, con servicios auxiliares en **West Europe** y **West US 2** cuando el servicio Azure lo requiere.
 
-Estado validado al cierre de la auditoría:
+Estado validado:
 
 - 7 Resource Groups;
-- 32 recursos ARM visibles;
+- 32 recursos ARM visibles antes del cierre de la auditoría de limpieza;
 - 0 Managed Disks huérfanos;
 - 0 NIC huérfanas;
 - 0 Public IPs huérfanas;
-- 0 snapshots;
-- un único stack legacy conservado expresamente como rollback;
+- 0 snapshots ARM;
+- un único stack ACA legacy conservado expresamente como rollback;
 - locks `CanNotDelete` consolidados a una sola protección por recurso crítico;
-- IAM/CI-CD separado por responsabilidad y autenticado mediante OIDC.
+- IAM/CI-CD separado por responsabilidad y autenticado mediante OIDC;
+- **Azure DNS es la única autoridad DNS pública de `onionsupport.com`**;
+- **Squarespace queda como registrador del dominio**, no como DNS operativo;
+- DNSSEC está habilitado en Azure DNS y delegado desde `.com` mediante DS;
+- SPF raíz y SPF de ACS usan `-all`;
+- CAA permite DigiCert y bloquea explícitamente certificados wildcard.
 
 La autoridad operativa es Azure y el código de `main` de los repositorios correspondientes. Si este documento diverge de la infraestructura real, debe actualizarse después de verificar Azure.
 
@@ -29,9 +34,11 @@ La autoridad operativa es Azure y el código de `main` de los repositorios corre
 flowchart TD
   USER[Usuarios / Internet]
   OPS[Operaciones]
+  REG[Squarespace\nRegistrar only]
+  PARENT[.com registry\nNS + DS]
 
+  DNS[Azure DNS\nonionsupport.com\nDNSSEC]
   SWA[Azure Static Web Apps\nonion-panel]
-  DNS[Azure DNS\nonionsupport.com]
   API[Azure Container Apps\noniontech-aca-zr]
   ENV[ACA Managed Environment\nonion-aca-env-zr\nZone Redundant]
   VNET[VNet vnet-onion-prod]
@@ -41,11 +48,17 @@ flowchart TD
   LAW[Log Analytics\nlaw-onionsupport-prod]
   ACS[Azure Communication Services\nonion-acs]
   EMAIL[ACS Email\nonionsupport-mail]
+  M365[Microsoft 365\nMail]
   ALERTS[Azure Monitor\nHealth + Restart Alerts]
 
+  REG --> PARENT
+  PARENT --> DNS
   USER --> DNS
+
   DNS --> SWA
   DNS --> API
+  DNS --> M365
+  DNS --> EMAIL
 
   API --> ENV
   ENV --> VNET
@@ -65,7 +78,7 @@ flowchart TD
   ALERTS --> OPS
 ```
 
-`stoniontechbackup` se representa como recurso independiente porque la auditoría confirmó actividad de backup, pero no estableció en este documento un flujo único de origen que deba dibujarse como dependencia canónica.
+`stoniontechbackup` se representa como recurso independiente porque la auditoría confirmó actividad de backup, pero no estableció un flujo único de origen que deba dibujarse como dependencia canónica.
 
 ## 3. Resource Groups
 
@@ -101,7 +114,12 @@ Recurso productivo:
 - dominios personalizados:
   - `onionsupport.com`
   - `www.onionsupport.com`
-- entornos activos: sólo `default`
+- ambos dominios personalizados en estado `Ready`;
+- entornos activos: sólo `default`.
+
+El apex usa **Azure DNS Alias** al recurso `onion-panel`, no un A record fijado manualmente.
+
+Los certificados públicos de `onionsupport.com` y `www.onionsupport.com` fueron verificados como emitidos por DigiCert/GeoTrust y administrados por Azure Static Web Apps.
 
 No se detectaron staging environments o previews abandonados en la auditoría.
 
@@ -125,9 +143,11 @@ Container App:
 - CPU: `1.0`
 - memoria: `2 GiB`
 - escalado: mínimo `2`, máximo `3` réplicas
-- estado validado: 2 réplicas `Running`
+- estado validado: 2 réplicas `Running`.
 
-El dominio productivo `api.onionsupport.com` resuelve al FQDN generado de `oniontech-aca-zr`.
+El dominio productivo `api.onionsupport.com` resuelve directamente al FQDN generado de `oniontech-aca-zr`.
+
+El certificado público de `api.onionsupport.com` fue verificado como emitido por DigiCert/GeoTrust.
 
 ### 5.2 Imagen
 
@@ -147,7 +167,7 @@ Recursos legacy:
 - Diagnostic Setting del environment legacy
 - System Assigned Managed Identity legacy y sus role assignments
 - Contributor del principal de deploy sobre el Container App legacy
-- locks `CanNotDelete` del Container App y del environment
+- locks `CanNotDelete` del Container App y del environment.
 
 Estado validado:
 
@@ -155,7 +175,9 @@ Estado validado:
 - `maxReplicas = 3`
 - 0 réplicas activas
 - fuera del DNS productivo
-- conserva binding de `api.onionsupport.com` sólo como capacidad de rollback
+- conserva binding de `api.onionsupport.com` sólo como capacidad de rollback.
+
+OLD y ZR comparten el mismo `customDomainVerificationId`, por lo que el registro `asuid.api` productivo continúa siendo válido durante y después del decommission del legacy.
 
 El stack legacy **no debe eliminarse hasta cerrar formalmente la ventana de rollback**.
 
@@ -166,7 +188,7 @@ El stack legacy **no debe eliminarse hasta cerrar formalmente la ventana de roll
 VNet productiva:
 
 - `vnet-onion-prod`
-- address space: `10.42.0.0/16`
+- address space: `10.42.0.0/16`.
 
 Subnets:
 
@@ -180,26 +202,21 @@ Subnets:
 Private Endpoints productivos:
 
 - `pe-cosmos-onionsupport`
-- `pe-onionassets-blob`
+- `pe-onionassets-blob`.
 
-NIC asociadas:
-
-- NIC del Private Endpoint de Cosmos DB
-- NIC del Private Endpoint de Blob Storage
-
-Estas NIC no son huérfanas y no deben eliminarse de forma independiente.
+Las NIC asociadas pertenecen a esos Private Endpoints y no son huérfanas.
 
 ### 7.3 Private DNS
 
 Zonas privadas:
 
 - `privatelink.documents.azure.com`
-- `privatelink.blob.core.windows.net`
+- `privatelink.blob.core.windows.net`.
 
 Virtual Network Links:
 
 - `link-cosmos-onion-prod`
-- `link-blob-onion-prod`
+- `link-blob-onion-prod`.
 
 ## 8. Azure Cosmos DB
 
@@ -213,11 +230,9 @@ Cuenta productiva:
 - Public Network Access: deshabilitado
 - autenticación local: deshabilitada
 - backup: `Continuous`
-- tier de backup: `Continuous30Days`
+- tier de backup: `Continuous30Days`.
 
-Base de datos SQL:
-
-- `onionsupport`
+Base de datos SQL: `onionsupport`.
 
 Containers conocidos:
 
@@ -249,22 +264,20 @@ Storage Account:
 - Change Feed: habilitado
 - Blob Soft Delete: 30 días
 - Container Soft Delete: 30 días
-- lifecycle: elimina versiones antiguas después de 30 días
+- lifecycle: elimina versiones antiguas después de 30 días.
 
 Capacidad observada durante la auditoría: aproximadamente **753 MiB**.
 
-### 9.1 Containers públicos y privados
-
-Públicos por diseño (`PublicAccess=blob`):
+Containers públicos por diseño (`PublicAccess=blob`):
 
 - `$web`
 - `avatars`
-- `bimi`
+- `bimi`.
 
 Privados:
 
 - `facturasonionsupport`
-- `tickets`
+- `tickets`.
 
 Por este motivo no debe deshabilitarse globalmente el acceso público de blobs sin rediseñar antes la separación entre assets públicos y datos privados.
 
@@ -285,11 +298,11 @@ Storage Account:
 - Change Feed: habilitado
 - Blob Soft Delete: 90 días
 - Container Soft Delete: 90 días
-- lifecycle: elimina versiones antiguas después de 90 días
+- lifecycle: elimina versiones antiguas después de 90 días.
 
 Capacidad observada durante la auditoría: aproximadamente **47 MiB**.
 
-Se verificó actividad real de backup mediante métricas de Storage, incluyendo operaciones `PutBlob` y `CreateContainer`, además de ingress/egress. Por tanto, este recurso no es residual.
+Se verificó actividad real de backup mediante métricas de Storage, incluyendo operaciones de escritura/creación e ingress/egress. Por tanto, este recurso no es residual.
 
 ## 11. Cloud Shell Storage
 
@@ -298,13 +311,9 @@ Storage Account:
 - `csb100320058483f6e2`
 - Resource Group: `cloud-shell-storage-westeurope`
 - SKU: `Standard_LRS`
-- región: West Europe
+- región: West Europe.
 
-File Share persistente:
-
-- `cs-cristian-onionsupport-com-100320058483f6e2`
-
-El uso observado de aproximadamente **5 GiB** es coherente con la persistencia de Cloud Shell y no debe considerarse residuo.
+El File Share persistente de Cloud Shell tiene uso real y no debe considerarse residuo.
 
 ## 12. Observabilidad
 
@@ -316,52 +325,23 @@ Workspace:
 - región: Spain Central
 - SKU: `PerGB2018`
 - retención: 30 días
-- daily quota: `0.1 GB`
+- daily quota: `0.1 GB`.
 
-Durante la auditoría se observaron aproximadamente **117 MB ingeridos en 7 días**, incluyendo:
-
-- Container App Console Logs
-- Container App HTTP Logs
-- Container App System Logs
-- Azure Metrics
-- Cosmos DB Data Plane Requests
-- Cosmos DB Query Runtime Statistics
-- Cosmos DB Partition Key Statistics
-- Cosmos DB Partition Key RU Consumption
-- Cosmos DB Control Plane Requests
-- Storage Blob Logs
+Durante la auditoría se observaron aproximadamente **117 MB ingeridos en 7 días**, incluyendo logs de Container Apps, métricas Azure, Cosmos DB y Storage.
 
 El workspace está activo y no es un recurso residual.
 
 ### 12.2 Diagnostic Settings
 
-`onion-aca-env-zr`:
+`onion-aca-env-zr` envía:
 
 - `ContainerAppHTTPLogs`
 - `AllMetrics`
-- destino: `law-onionsupport-prod`
+- destino: `law-onionsupport-prod`.
 
 El mismo setting se mantiene temporalmente en `onion-aca-env` mientras exista el rollback.
 
-Cosmos DB envía al workspace:
-
-- `DataPlaneRequests`
-- `QueryRuntimeStatistics`
-- `PartitionKeyStatistics`
-- `PartitionKeyRUConsumption`
-- `ControlPlaneRequests`
-- métricas `SLI`
-- métricas `Requests`
-
-Storage Accounts productivos envían métricas `Capacity` y `Transaction`.
-
-`blobServices/default` envía:
-
-- `StorageRead`
-- `StorageWrite`
-- `StorageDelete`
-- métricas `Capacity`
-- métricas `Transaction`
+Cosmos DB y Storage también mantienen Diagnostic Settings productivos hacia Log Analytics.
 
 ## 13. Alertas
 
@@ -369,14 +349,12 @@ Action Group:
 
 - `ag-onionsupport-ops`
 - habilitado
-- receptor principal por email
+- receptor principal por email.
 
 Activity Log Alerts:
 
 - `service-health-onionsupport`
-- `resource-health-onionsupport`
-
-Ambas cubren la suscripción y notifican al Action Group.
+- `resource-health-onionsupport`.
 
 Metric Alert:
 
@@ -386,39 +364,118 @@ Metric Alert:
 - condición: `> 3`
 - ventana: 5 minutos
 - frecuencia: 1 minuto
-- severidad: 2
+- severidad: 2.
 
 Durante la auditoría esta alerta fue migrada desde el ACA legacy al ACA ZR productivo.
 
-## 14. DNS público
+## 14. Dominio y DNS público
 
-Zona:
+### 14.1 Registrar y autoridad
 
-- `onionsupport.com`
+`onionsupport.com` está registrado en **Squarespace**, pero Squarespace **no es la autoridad DNS productiva**.
 
-Resolución funcional validada:
+Responsabilidades canónicas:
 
-- apex `onionsupport.com` -> Azure Static Web Apps
-- `www.onionsupport.com` -> Azure Static Web Apps
-- `api.onionsupport.com` -> `oniontech-aca-zr`
-- `autodiscover.onionsupport.com` -> Microsoft 365 / Outlook
-- MX -> Microsoft 365
-- DKIM selector 1/2 -> Microsoft 365
-- DKIM específico de Azure Communication Services -> Azure Communication Services
+- **Squarespace**: registrar del dominio, custodia administrativa, custom nameservers y publicación del DS DNSSEC.
+- **Azure DNS**: única autoridad DNS pública y única zona que debe modificarse operativamente.
 
-DMARC de dominio raíz:
+Delegación pública:
+
+```text
+ns1-06.azure-dns.com
+ns2-06.azure-dns.net
+ns3-06.azure-dns.org
+ns4-06.azure-dns.info
+```
+
+La delegación fue validada directamente contra el parent `.com` y contra resolvers públicos.
+
+La antigua zona DNS de Squarespace/Google Domains se mantiene únicamente como **rollback temporal para caches de delegación anteriores al cutover**. No debe volver a considerarse fuente de verdad ni editarse como zona productiva. Una vez vencida la ventana de compatibilidad de caché, sus Custom Records deben eliminarse.
+
+### 14.2 DNSSEC
+
+Azure DNS firma `onionsupport.com` mediante DNSSEC.
+
+Estado validado:
+
+- provisioning state: `Succeeded`;
+- algoritmo: ECDSAP256SHA256 (`13`);
+- KSK publicada y DS delegado en `.com`;
+- digest type: SHA-256 (`2`);
+- resolvers `1.1.1.1`, `8.8.8.8` y `9.9.9.9` responden con flag `ad` para la zona.
+
+El DS está publicado en Squarespace porque Squarespace es el registrar. **No modificar ni eliminar el DS mientras DNSSEC esté habilitado en Azure DNS.**
+
+### 14.3 Resolución productiva
+
+- apex `onionsupport.com` -> Azure DNS Alias -> `onion-panel`;
+- `www.onionsupport.com` -> Azure Static Web Apps;
+- `api.onionsupport.com` -> `oniontech-aca-zr`;
+- `autodiscover.onionsupport.com` -> Microsoft 365 / Outlook;
+- MX -> Microsoft 365;
+- DKIM selector 1/2 -> Microsoft 365;
+- `mail.onionsupport.com` -> dominio de ACS Email;
+- DKIM1/DKIM2 de ACS están bajo `*.mail.onionsupport.com`, no en el root.
+
+### 14.4 SPF, DMARC, BIMI y CAA
+
+SPF raíz:
+
+```text
+v=spf1 include:spf.protection.outlook.com -all
+```
+
+SPF de ACS `mail.onionsupport.com`:
+
+```text
+v=spf1 include:spf.protection.outlook.com -all
+```
+
+DMARC raíz:
 
 ```text
 v=DMARC1; p=quarantine; pct=100; rua=mailto:dmarc@onionsupport.com
 ```
 
-Durante la auditoría se eliminó un TXT mal formado cuyo nombre relativo generaba accidentalmente:
+BIMI:
+
+```text
+v=BIMI1; l=https://onionassets.blob.core.windows.net/bimi/logo.svg
+```
+
+CAA final:
+
+```text
+0 issue "digicert.com"
+0 issuewild ";"
+```
+
+Sólo DigiCert queda autorizado para emisión normal y la emisión wildcard queda explícitamente denegada.
+
+Los certificados públicos activos inspeccionados para apex, `www` y `api` fueron emitidos por DigiCert/GeoTrust.
+
+### 14.5 TXT de validación
+
+El apex mantiene únicamente los TXT que siguen teniendo una función administrativa o de ownership conocida:
+
+- Google site verification;
+- OpenAI domain verification;
+- SPF raíz.
+
+Se retiraron como residuos demostrados:
+
+- `MS=...` de verificación inicial de Microsoft 365;
+- tokens SWA antiguos y de validación ya completada;
+- `_dnsauth`, `_dnsauth.www` y `_dnsauth.api`;
+- `asuid` del apex.
+
+Se conserva `asuid.api` porque coincide con el `customDomainVerificationId` del ACA productivo.
+
+Durante la auditoría también se eliminó un TXT DMARC mal formado cuyo nombre relativo generaba accidentalmente:
 
 ```text
 _dmarc.mail.onionsupport.com.onionsupport.com
 ```
-
-La eliminación se verificó tanto en el control plane de Azure como directamente contra los cuatro nameservers autoritativos de Azure DNS.
 
 La zona `onionsupport.com` mantiene un lock `CanNotDelete`.
 
@@ -427,13 +484,12 @@ La zona `onionsupport.com` mantiene un lock `CanNotDelete`.
 Communication Service:
 
 - `onion-acs`
-- data location: Europe
-- enlazado al dominio de correo de ACS
+- data location: Europe.
 
 Email Service:
 
 - `onionsupport-mail`
-- data location: Europe
+- data location: Europe.
 
 Dominio:
 
@@ -443,13 +499,19 @@ Dominio:
 - SPF: `Verified`
 - DKIM: `Verified`
 - DKIM2: `Verified`
+- DMARC en ACS: `NotStarted` — la política DMARC se gestiona en DNS raíz.
+
+Después del cutover de nameservers se forzó una nueva verificación de `Domain`, `SPF`, `DKIM` y `DKIM2`; todos regresaron a `Verified` contra Azure DNS.
+
+DKIM de ACS:
+
+- `selector1-azurecomm-prod-net._domainkey.mail.onionsupport.com`
+- `selector2-azurecomm-prod-net._domainkey.mail.onionsupport.com`.
 
 Sender configurado:
 
 - username: `DoNotReply`
-- display name: `Onion Support`
-
-No se detectaron sender identities o dominios de prueba sobrantes.
+- display name: `Onion Support`.
 
 ## 16. IAM y principio de mínimo privilegio
 
@@ -468,7 +530,7 @@ Producción `oniontech-aca-zr`:
 
 - `Cost Management Reader` en suscripción
 - `Storage Blob Data Contributor` sobre `onionassets`
-- `Cosmos DB Built-in Data Contributor` sobre `onionsupport-db-es`
+- `Cosmos DB Built-in Data Contributor` sobre `onionsupport-db-es`.
 
 Legacy `oniontech-aca` mantiene temporalmente permisos equivalentes sólo para preservar rollback.
 
@@ -495,7 +557,7 @@ El backend privado usa GitHub Actions y OIDC para Azure.
 Variables operativas verificadas:
 
 - Resource Group productivo: `onion-web`
-- Container App productivo: `oniontech-aca-zr`
+- Container App productivo: `oniontech-aca-zr`.
 
 Workflows principales:
 
@@ -503,7 +565,7 @@ Workflows principales:
   - identidad de deploy;
   - construye imagen inmutable;
   - despliega sólo cuando corresponde;
-  - tiene provenance gate que rechaza producción automática desde pushes directos que no proceden de un PR mergeado.
+  - provenance gate que rechaza producción automática desde pushes directos que no proceden de un PR mergeado.
 
 - `azure-readonly-audit.yml`
   - identidad Reader dedicada;
@@ -515,7 +577,7 @@ Workflows principales:
   - ejecuta auditoría de sólo lectura dentro de la réplica productiva mediante `az containerapp exec`;
   - no utiliza la identidad Contributor de deploy.
 
-Un cambio de workflow CI-only no debe requerir nuevo despliegue de imagen. La lógica `production-deploy-impact` clasifica `.github/` como `github-automation` / no-runtime.
+Un cambio de workflow CI-only o `docs/**` no debe requerir nuevo despliegue de runtime frontend/backend cuando el workflow correspondiente lo excluye expresamente.
 
 ## 18. Locks de producción
 
@@ -537,18 +599,18 @@ Protegidos actualmente:
 - `stoniontechbackup`
 - `onion-panel`
 - `onionsupport-mail`
-- zona DNS `onionsupport.com`
+- zona DNS `onionsupport.com`.
 
 No volver a apilar varios locks `CanNotDelete` sobre el mismo recurso sin una razón operativa explícita.
 
-## 19. Limpieza realizada — septiembre de 2026
+## 19. Limpieza y hardening realizados — septiembre de 2026
 
 Cambios realizados durante la auditoría:
 
 1. inventario completo de Resource Groups y recursos;
 2. verificación de ausencia de discos, NICs, Public IPs y snapshots huérfanos;
 3. identificación de ACA legacy vs nuevo ACA Zone Redundant;
-4. validación de DNS y tráfico de la migración;
+4. validación de DNS y tráfico de la migración ACA;
 5. comparación OLD/ZR de imagen, CPU/RAM, env vars, secrets, registry y RBAC;
 6. `oniontech-aca` reducido de `minReplicas=1` a `minReplicas=0`;
 7. verificación posterior de 0 réplicas legacy;
@@ -561,7 +623,20 @@ Cambios realizados durante la auditoría:
 14. separación de identidad de deploy e identidad Azure Reader;
 15. eliminación del FIC OIDC legacy basado en nombre;
 16. creación de identidad dedicada `Container Apps Operator` para Factura Audit;
-17. validación del destino CI/CD productivo `oniontech-aca-zr`.
+17. validación del destino CI/CD productivo `oniontech-aca-zr`;
+18. migración de la delegación pública desde Squarespace/Google Domains hacia Azure DNS;
+19. verificación de los cuatro nameservers de Azure contra `.com`, Cloudflare, Google y Quad9;
+20. corrección de `api.onionsupport.com` para apuntar exclusivamente al ACA ZR;
+21. corrección de DKIM1/DKIM2 de ACS bajo `mail.onionsupport.com`;
+22. revalidación post-cutover de Domain/SPF/DKIM/DKIM2 en ACS;
+23. habilitación de DNSSEC en Azure DNS;
+24. publicación del DS en Squarespace como registrar;
+25. validación DNSSEC end-to-end con flag `ad` en resolvers públicos;
+26. eliminación de TXT de validación y residuos DNS demostrados;
+27. endurecimiento SPF raíz de `~all` a `-all`;
+28. CAA reducido a DigiCert y wildcard issuance bloqueada;
+29. captura de snapshots post-cutover y extreme-state con verificación SHA-256;
+30. restauración y validación del lock `CanNotDelete` después de cada ventana de mantenimiento DNS.
 
 ## 20. Plan de decommission del ACA legacy
 
@@ -602,7 +677,7 @@ Después del decommission deben desaparecer:
 - identidad gestionada OLD y sus role assignments
 - Contributor GitHub sobre OLD
 - Diagnostic Setting OLD
-- locks OLD
+- locks OLD.
 
 El stack ZR y todos sus recursos administrados deben permanecer intactos.
 
@@ -645,6 +720,18 @@ az containerapp list -g onion-web \
   -o table
 ```
 
+### DNS authority + DNSSEC
+
+```bash
+dig +short NS onionsupport.com | sort
+dig +short DS onionsupport.com
+
+for DNS in 1.1.1.1 8.8.8.8 9.9.9.9; do
+  printf '%-10s ' "$DNS"
+  dig @"$DNS" onionsupport.com A +dnssec +adflag | awk '/flags:/{print; exit}'
+done
+```
+
 ### Locks
 
 ```bash
@@ -672,10 +759,17 @@ az role assignment list \
 6. **Observabilidad no se elimina para ahorrar céntimos.** Log Analytics y Diagnostic Settings actuales tienen uso demostrado.
 7. **Los recursos administrados por Azure no se limpian manualmente.** Especialmente el RG `ME_...` de Container Apps.
 8. **Rollback debe tener fecha de caducidad.** El stack legacy existe temporalmente y debe retirarse después de cerrar la ventana de seguridad.
-9. **Documentar después de cada cambio estructural.** Este archivo debe reflejar el estado real de Azure, no una intención histórica.
+9. **Squarespace es registrar, Azure DNS es autoridad.** No mantener dos zonas DNS operativas editables.
+10. **DNSSEC requiere coordinación registrar/autoridad.** Si se deshabilita DNSSEC en Azure, retirar antes el DS del parent; si se rota KSK, coordinar la actualización del DS.
+11. **CAA debe reflejar emisores reales.** No autorizar CAs que no tengan un consumidor demostrado.
+12. **Documentar después de cada cambio estructural.** Este archivo debe reflejar el estado real, no una intención histórica.
 
 ## 23. Próximas acciones
 
+- [ ] Cerrar la ventana de compatibilidad de caché y eliminar los Custom Records legacy de Squarespace; mantener únicamente registrar, custom nameservers y DS DNSSEC.
+- [ ] Confirmar si el TXT de OpenAI puede retirarse sin perder ninguna asociación administrativa necesaria.
+- [ ] Mantener Google site verification mientras Google Search Console dependa de ese método de ownership.
+- [ ] Evaluar `DMARC p=reject` sólo después de revisar alineación real y reportes DMARC.
 - [ ] Cerrar formalmente la ventana de rollback del ACA legacy.
 - [ ] Ejecutar el decommission siguiendo la sección 20.
 - [ ] Repetir Resource Graph + orphan check + IAM después del decommission.
@@ -684,4 +778,4 @@ az role assignment list \
 
 ---
 
-**Estado de la auditoría:** infraestructura productiva validada y limpia; único residuo deliberado: stack ACA legacy conservado temporalmente como rollback.
+**Estado de la auditoría:** infraestructura productiva validada, Azure DNS autoritativo con DNSSEC end-to-end y hardening aplicado. Pendientes deliberados: retirada de la copia DNS legacy no autoritativa de Squarespace tras expirar la compatibilidad de caché y decommission del stack ACA legacy cuando se cierre su ventana de rollback.

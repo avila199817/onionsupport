@@ -58,6 +58,11 @@ jobs:
       - name: Validate repository contracts
         run: python3 .github/scripts/repo_integrity.py
 
+      - name: Validate workflow runtime and production provenance contracts
+        env:
+          ONION_REPO_ROOT: ${{ github.workspace }}
+        run: python3 .github/ci/validate_integrity_candidate.py
+
       - name: Validate public path hygiene
         run: python3 -I .github/scripts/public_path_hygiene.py
 

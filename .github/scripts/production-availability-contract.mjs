@@ -54,6 +54,33 @@ for (const [token, expected] of Object.entries({
   );
 }
 
+const exactMonitorRef = "ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}";
+assert.equal(
+  workflow.split(exactMonitorRef).length - 1,
+  2,
+  "contract y probe deben hacer checkout del SHA exacto que están auditando"
+);
+assert.equal(
+  workflow.split("- name: Assert immutable monitor source").length - 1,
+  2,
+  "contract y probe deben demostrar el checkout inmutable"
+);
+assert.equal(
+  workflow.split("EXPECTED_MONITOR_SHA:").length - 1,
+  2,
+  "contract y probe deben ligar la aserción al SHA auditado"
+);
+assert.equal(
+  workflow.split('git rev-parse HEAD').length - 1,
+  2,
+  "contract y probe deben comparar HEAD con el SHA auditado"
+);
+assert.equal(
+  workflow.split('git status --porcelain --untracked-files=all').length - 1,
+  2,
+  "contract y probe deben exigir un checkout limpio"
+);
+
 const runnerLines = workflow
   .split(/\r?\n/u)
   .map((line) => line.trim())
@@ -139,5 +166,5 @@ assert.ok(
 );
 
 console.log(
-  "Production availability contract OK · strict immutable pins · 3 rounds · 2 required · asset graph · Azure headers · deduplicated incident · no blind redeploy"
+  "Production availability contract OK · exact audited SHA source · strict immutable pins · 3 rounds · 2 required · asset graph · Azure headers · deduplicated incident · no blind redeploy"
 );

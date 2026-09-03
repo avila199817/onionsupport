@@ -74,6 +74,33 @@ for (const [token, expectedCount] of Object.entries({
   );
 }
 
+const exactMonitorRef = "ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}";
+assert.equal(
+  workflow.split(exactMonitorRef).length - 1,
+  2,
+  "ambos jobs deben hacer checkout del SHA exacto que están auditando"
+);
+assert.equal(
+  workflow.split("- name: Assert immutable monitor source").length - 1,
+  2,
+  "ambos jobs deben demostrar el checkout inmutable"
+);
+assert.equal(
+  workflow.split("EXPECTED_MONITOR_SHA:").length - 1,
+  2,
+  "ambos jobs deben ligar la aserción al SHA auditado"
+);
+assert.equal(
+  workflow.split('git rev-parse HEAD').length - 1,
+  2,
+  "ambos jobs deben comparar HEAD con el SHA auditado"
+);
+assert.equal(
+  workflow.split('git status --porcelain --untracked-files=all').length - 1,
+  2,
+  "ambos jobs deben exigir un checkout limpio"
+);
+
 const runnerLines = workflow
   .split(/\r?\n/u)
   .map((line) => line.trim())
@@ -224,5 +251,5 @@ for (const token of [
 }
 
 console.log(
-  "Performance monitor contract OK · strict immutable pin · 5 unique samples · deduplicated · mobile/desktop · private artifacts · read-only"
+  "Performance monitor contract OK · exact audited SHA source · strict immutable pin · 5 unique samples · deduplicated · mobile/desktop · private artifacts · read-only"
 );

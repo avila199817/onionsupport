@@ -41,13 +41,40 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - name: Checkout monitor source
+      - name: Checkout exact monitored revision
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 1
           submodules: false
           lfs: false
           persist-credentials: false
+
+      - name: Assert immutable monitor source
+        env:
+          EXPECTED_MONITOR_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${EXPECTED_MONITOR_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error title=SHA monitor inválido::Revision no inmutable: '${EXPECTED_MONITOR_SHA}'."
+            exit 1
+          fi
+
+          actual="$(git rev-parse HEAD)"
+          if [[ "${actual}" != "${EXPECTED_MONITOR_SHA}" ]]; then
+            echo "::error title=Monitor checkout incorrecto::Esperado ${EXPECTED_MONITOR_SHA}, obtenido ${actual}."
+            exit 1
+          fi
+
+          if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
+            echo "::error title=Monitor checkout sucio::Se detectaron mutaciones inesperadas."
+            git status --short
+            exit 1
+          fi
+
+          echo "Immutable monitor source: ${actual}"
 
       - name: Use exact Node 22
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -79,6 +106,32 @@ jobs:
           submodules: false
           lfs: false
           persist-credentials: false
+
+      - name: Assert immutable monitor source
+        env:
+          EXPECTED_MONITOR_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${EXPECTED_MONITOR_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error title=SHA monitor inválido::Revision no inmutable: '${EXPECTED_MONITOR_SHA}'."
+            exit 1
+          fi
+
+          actual="$(git rev-parse HEAD)"
+          if [[ "${actual}" != "${EXPECTED_MONITOR_SHA}" ]]; then
+            echo "::error title=Monitor checkout incorrecto::Esperado ${EXPECTED_MONITOR_SHA}, obtenido ${actual}."
+            exit 1
+          fi
+
+          if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
+            echo "::error title=Monitor checkout sucio::Se detectaron mutaciones inesperadas."
+            git status --short
+            exit 1
+          fi
+
+          echo "Immutable monitor source: ${actual}"
 
       - name: Use exact Node 22
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0

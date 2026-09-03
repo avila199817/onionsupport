@@ -24,7 +24,7 @@ import Http from "../../core/http.js";
 export const PUBLIC_SUPPORT_VERSION =
   "public-support.intake.v11-client-facing-compact";
 export const PUBLIC_TICKET_ENDPOINT = "/api/tickets/public";
-const PUBLIC_SUPPORT_TECHNICIAN_PHOTO = "/src/media/img/Cristian_Avila_Formulario.png";
+const PUBLIC_SUPPORT_TECHNICIAN_PHOTO = "/src/media/img/Cristian_Avila_Formulario_960.webp";
 const PUBLIC_SUPPORT_TECHNICIAN_PHOTO_WEBP_480 =
   "/src/media/img/Cristian_Avila_Formulario_480.webp";
 const PUBLIC_SUPPORT_TECHNICIAN_PHOTO_WEBP_960 =
@@ -330,8 +330,8 @@ function formSection() {
                 sizes="(max-width: 460px) min(82vw, 248px), (max-width: 720px) min(76vw, 286px), (max-width: 980px) min(64vw, 330px), (max-width: 1180px) min(23vw, 286px), min(24vw, 340px)">
               <img
                 src="${PUBLIC_SUPPORT_TECHNICIAN_PHOTO}"
-                width="1122"
-                height="1402"
+                width="960"
+                height="1200"
                 alt="Cristian Ávila, soporte técnico de Onion Support"
                 loading="lazy"
                 decoding="async"

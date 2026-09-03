@@ -14,6 +14,19 @@ LEGACY_DIMENSION_MESSAGES = frozenset(
     }
 )
 
+WEBP_FALLBACK = (
+    'const PUBLIC_SUPPORT_TECHNICIAN_PHOTO = '
+    '"/src/media/img/Cristian_Avila_Formulario_960.webp";'
+)
+LEGACY_PNG_FALLBACK = (
+    'const PUBLIC_SUPPORT_TECHNICIAN_PHOTO = '
+    '"/src/media/img/Cristian_Avila_Formulario.png";'
+)
+LEGACY_PNG_PATHS = (
+    "src/media/img/Cristian_Avila.png",
+    "src/media/img/Cristian_Avila_Formulario.png",
+)
+
 
 def resolve_core_path() -> Path:
     sibling = Path(__file__).resolve().with_name("public_home_integrity_core.py")
@@ -44,33 +57,24 @@ def load_core():
     return module
 
 
-def transition_errors(core) -> list[str]:
+def photo_policy_errors(core) -> list[str]:
     errors: list[str] = []
     intake = core.read("src/features/public-support/index.js")
 
-    legacy_fallback = (
-        'const PUBLIC_SUPPORT_TECHNICIAN_PHOTO = "/src/media/img/Cristian_Avila_Formulario.png";'
-        in intake
-    )
-    webp_fallback = (
-        'const PUBLIC_SUPPORT_TECHNICIAN_PHOTO = "/src/media/img/Cristian_Avila_Formulario_960.webp";'
-        in intake
-    )
-    legacy_dimensions = 'width="1122"' in intake and 'height="1402"' in intake
-    webp_dimensions = 'width="960"' in intake and 'height="1200"' in intake
+    if WEBP_FALLBACK not in intake:
+        errors.append("El fallback del técnico debe ser exclusivamente WebP 960")
+    if LEGACY_PNG_FALLBACK in intake:
+        errors.append("El fallback PNG legado del técnico no puede reintroducirse")
 
-    if legacy_fallback == webp_fallback:
-        errors.append(
-            "El fallback del técnico debe ser exactamente PNG legado o WebP 960 durante la transición"
-        )
-    if legacy_dimensions == webp_dimensions:
-        errors.append(
-            "Las dimensiones del técnico deben ser exactamente 1122×1402 o 960×1200 durante la transición"
-        )
-    if webp_fallback != webp_dimensions:
-        errors.append(
-            "El fallback WebP 960 y sus dimensiones 960×1200 deben migrar de forma atómica"
-        )
+    if 'width="960"' not in intake or 'height="1200"' not in intake:
+        errors.append("Las dimensiones intrínsecas del técnico deben ser 960×1200")
+    if 'width="1122"' in intake or 'height="1402"' in intake:
+        errors.append("Las dimensiones legacy 1122×1402 no pueden reintroducirse")
+
+    root = Path(core.ROOT)
+    for relative in LEGACY_PNG_PATHS:
+        if (root / relative).exists():
+            errors.append(f"Asset PNG legado reintroducido: {relative}")
 
     for relative, expected in (
         ("src/media/img/Cristian_Avila_Formulario_480.webp", (480, 600)),
@@ -91,30 +95,30 @@ def transition_errors(core) -> list[str]:
 
 def main() -> int:
     core = load_core()
-    errors = transition_errors(core)
+    errors = photo_policy_errors(core)
     if errors:
-        print("\nPublic home transition policy: FAIL")
+        print("\nPublic home photo policy: FAIL")
         for error in errors:
             print(f"- {error}")
         return 1
 
     original_require = core.require
 
-    def require_with_dimension_transition(
+    def require_with_modern_dimensions(
         contract_errors: list[str], condition: bool, message: str
     ) -> None:
         if message in LEGACY_DIMENSION_MESSAGES:
             return
         original_require(contract_errors, condition, message)
 
-    core.require = require_with_dimension_transition
+    core.require = require_with_modern_dimensions
     status = core.main()
     if status != 0:
         return status
 
     print(
-        "Public home transition policy: PASS · technician fallback/dimensions bounded · "
-        "WebP 480×600 + 960×1200 verified"
+        "Public home photo policy: PASS · WebP-only fallback 960×1200 enforced · "
+        "WebP 480×600 + 960×1200 bytes verified"
     )
     return 0
 

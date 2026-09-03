@@ -33,6 +33,7 @@ SWA_PRODUCTION_WORKFLOW = (
 WORKFLOW_DIR = ".github/workflows"
 EXPECTED_RUNNER = "ubuntu-24.04"
 EXPECTED_NODE_VERSION = "22.23.2"
+EXPECTED_SWA_IGNORED_PATHS = (".github/**", "docs/**")
 REMOTE_ACTION_RE = re.compile(
     r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*@[0-9a-f]{40}$"
 )
@@ -73,6 +74,49 @@ def checked_file(root: Path, relative: str) -> Path:
         raise RuntimeError(f"{relative}: no es un archivo regular")
 
     return resolved
+
+
+def validate_swa_push_filter(source: str, errors: list[str]) -> None:
+    push_match = re.search(
+        r"^  push:\n(?P<body>[\s\S]*?)\n  workflow_dispatch:\n",
+        source,
+        re.MULTILINE,
+    )
+    if not push_match:
+        errors.append(
+            f"{SWA_PRODUCTION_WORKFLOW}: no se pudo aislar el trigger push de producción"
+        )
+        return
+
+    push_body = push_match.group("body")
+    if not re.search(r"^    branches:\n      - main$", push_body, re.MULTILINE):
+        errors.append(
+            f"{SWA_PRODUCTION_WORKFLOW}: el push productivo debe seguir limitado a main"
+        )
+
+    ignored_match = re.search(
+        r"^    paths-ignore:\n(?P<items>(?:      - [^\n]+\n?)+)",
+        push_body,
+        re.MULTILINE,
+    )
+    if not ignored_match:
+        errors.append(
+            f"{SWA_PRODUCTION_WORKFLOW}: falta paths-ignore para cambios CI/docs"
+        )
+        return
+
+    ignored = []
+    for line in ignored_match.group("items").splitlines():
+        value = line.split("-", 1)[1].strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        ignored.append(value)
+
+    if tuple(ignored) != EXPECTED_SWA_IGNORED_PATHS:
+        errors.append(
+            f"{SWA_PRODUCTION_WORKFLOW}: paths-ignore debe ser exactamente "
+            f"{EXPECTED_SWA_IGNORED_PATHS}; obtenido {tuple(ignored)}"
+        )
 
 
 def validate_swa_provenance_contract(root: Path, errors: list[str]) -> None:
@@ -127,6 +171,8 @@ def validate_swa_provenance_contract(root: Path, errors: list[str]) -> None:
     for marker, message in required_markers:
         if marker not in source:
             errors.append(f"{SWA_PRODUCTION_WORKFLOW}: {message}")
+
+    validate_swa_push_filter(source, errors)
 
     lock_marker = "      - name: Lock validated revision"
     gate_marker = "      - name: Require merged pull request for automatic production"
@@ -295,8 +341,9 @@ def main() -> int:
     print(
         "Candidate CI/static syntax OK · "
         f"Python={len(PYTHON_FILES)} · JSON={len(JSON_FILES)} · "
-        f"SWA provenance=locked · workflow runner={EXPECTED_RUNNER} · "
-        f"Node={EXPECTED_NODE_VERSION} · action refs=immutable"
+        f"SWA provenance=locked · SWA CI/docs push filter=exact · "
+        f"workflow runner={EXPECTED_RUNNER} · Node={EXPECTED_NODE_VERSION} · "
+        "action refs=immutable"
     )
     return 0
 

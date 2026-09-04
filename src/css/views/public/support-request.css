@@ -959,30 +959,6 @@
   max-inline-size: 100%;
 }
 
-.public-home .public-support-account-avatar {
-  --public-account-avatar-a: var(--public-home-accent);
-  --public-account-avatar-b: var(--public-home-accent-2);
-  position: relative;
-  display: grid;
-  place-items: center;
-  flex: 0 0 36px;
-
-  inline-size: 36px;
-  block-size: 36px;
-
-  overflow: hidden;
-  border: 1px solid rgb(255 255 255 / .14);
-  border-radius: 12px;
-
-  color: #dff8ff;
-  background:
-    radial-gradient(circle at 30% 18%, rgb(255 255 255 / .24), transparent 34%),
-    linear-gradient(135deg, var(--public-account-avatar-a), var(--public-account-avatar-b));
-
-  font-size: 11px;
-  font-weight: 950;
-  letter-spacing: .03em;
-}
 
 .public-home .public-support-account-avatar img {
   position: absolute;

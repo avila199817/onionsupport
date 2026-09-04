@@ -310,7 +310,16 @@ def check_exact_files(root: Path, base_url: str, revision: str, attempt: int) ->
     return errors
 
 
-def check_routes(base_url: str, revision: str, attempt: int) -> list[str]:
+def public_site_v3(root: Path) -> bool:
+    marker = root / ".github/ci/public-site-v3"
+    if not marker.is_file():
+        return False
+    if marker.read_text(encoding="utf-8") != "public-site-v3\n":
+        raise ValueError("Invalid public-site-v3 marker")
+    return True
+
+
+def check_routes(base_url: str, revision: str, attempt: int, *, v3: bool = False) -> list[str]:
     errors: list[str] = []
     cache: dict[str, tuple[int, bytes, dict[str, str]]] = {}
 
@@ -332,6 +341,8 @@ def check_routes(base_url: str, revision: str, attempt: int) -> list[str]:
             errors.append(f"{route}: no devolvió el shell SPA canónico")
 
     for route in INDEXABLE_ROUTES:
+        if v3 and route == "/login":
+            continue
         if route not in cache:
             continue
         status, _, headers = cache[route]
@@ -339,10 +350,13 @@ def check_routes(base_url: str, revision: str, attempt: int) -> list[str]:
             errors.append(f"{route}: HTTP {status}, esperado 200")
             continue
         x_robots = headers.get("x-robots-tag", "").lower()
-        if "index" not in x_robots or "follow" not in x_robots or "noindex" in x_robots:
+        if v3:
+            if {item.strip() for item in x_robots.split(",") if item.strip()} != {"index", "follow"}:
+                errors.append(f"{route}: X-Robots-Tag indexable inválido: {x_robots!r}")
+        elif "index" not in x_robots or "follow" not in x_robots or "noindex" in x_robots:
             errors.append(f"{route}: X-Robots-Tag indexable inválido: {x_robots!r}")
 
-    for route in NOINDEX_ROUTES:
+    for route in NOINDEX_ROUTES + (("/login",) if v3 else ()):
         if route not in cache:
             continue
         status, _, headers = cache[route]
@@ -350,7 +364,10 @@ def check_routes(base_url: str, revision: str, attempt: int) -> list[str]:
             errors.append(f"{route}: HTTP {status}, esperado 200")
             continue
         x_robots = headers.get("x-robots-tag", "").lower()
-        if "noindex" not in x_robots or "nofollow" not in x_robots:
+        if v3 and route == "/login":
+            if {item.strip() for item in x_robots.split(",") if item.strip()} != {"noindex", "follow"}:
+                errors.append(f"{route}: X-Robots-Tag de acceso inválido: {x_robots!r}")
+        elif "noindex" not in x_robots or "nofollow" not in x_robots:
             errors.append(f"{route}: X-Robots-Tag privado inválido: {x_robots!r}")
 
     return errors
@@ -514,7 +531,7 @@ def check_seo(base_url: str, revision: str, attempt: int) -> list[str]:
 def verify_once(root: Path, base_url: str, revision: str, attempt: int) -> list[str]:
     return (
         check_exact_files(root, base_url, revision, attempt)
-        + check_routes(base_url, revision, attempt)
+        + check_routes(base_url, revision, attempt, v3=public_site_v3(root))
         + check_aliases(base_url, revision, attempt)
         + check_denied_build_paths(base_url, revision, attempt)
         + check_seo(base_url, revision, attempt)

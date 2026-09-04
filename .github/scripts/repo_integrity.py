@@ -809,6 +809,52 @@ def validate_sidebar_runtime_v15_contract(errors: list[str]) -> None:
         errors.append(f"{relative} :: versión de recuperación V15 ausente")
 
 
+def validate_loading_authority_transition(parity: str, errors: list[str]) -> None:
+    """Support the reviewed CSS migration without weakening the old baseline.
+
+    Trusted PR validation reads this verifier from base. The explicit candidate
+    marker selects the new authority contract; candidate code is never run.
+    """
+    marker = ROOT / ".github/ci/ui-authorities-v1"
+    if not marker.exists():
+        for pattern in (
+            r"@keyframes\s+private-admin-shimmer\s*\{",
+            r"animation\s*:\s*private-admin-shimmer\s",
+        ):
+            if not re.search(pattern, re.sub(r"/\*.*?\*/", "", parity, flags=re.S)):
+                errors.append("private-admin-parity.css :: legacy loading contract missing")
+        return
+
+    if marker.read_text(encoding="utf-8").strip() != "onion-ui-authorities.v1":
+        errors.append(".github/ci/ui-authorities-v1 :: invalid migration contract version")
+        return
+
+    authority = SRC / "css/components/skeleton.css"
+    app = SRC / "css/app.css"
+    authority_text = authority.read_text(encoding="utf-8") if authority.is_file() else ""
+    app_text = app.read_text(encoding="utf-8") if app.is_file() else ""
+    authority_text = re.sub(r"/\*.*?\*/", "", authority_text, flags=re.S)
+    app_text = re.sub(r"/\*.*?\*/", "", app_text, flags=re.S)
+    if '@import url("./components/skeleton.css") layer(loading);' not in app_text:
+        errors.append("app.css :: canonical loading authority must be imported")
+    for name in ("ui-skeleton-shimmer", "ui-loading-spin"):
+        if not re.search(r"@keyframes\s+" + name + r"\s*\{", authority_text):
+            errors.append(f"skeleton.css :: missing canonical animation {name}")
+
+    legacy_spinner_names = (
+        "private-create-spin", "inc-create-spin", "cli-create-spin",
+        "fac-create-spin", "usr-create-spin", "incidencias-detail-spin",
+        "facturas-detail-spin",
+    )
+    for path in (SRC / "css").rglob("*.css"):
+        if path == authority:
+            continue
+        css = re.sub(r"/\*.*?\*/", "", path.read_text(encoding="utf-8"), flags=re.S)
+        for name in re.findall(r"@keyframes\s+([\w-]+)", css):
+            if re.search(r"skeleton|shimmer", name, re.I) or name in legacy_spinner_names:
+                errors.append(f"{path.relative_to(ROOT)} :: duplicate loading animation {name}")
+
+
 def validate_private_admin_visual_parity_v16_contract(errors: list[str]) -> None:
     """Keep the Incidencias listing grammar shared without touching domain logic."""
     interaction_path = SRC / "css/compositions/private-admin-interactions.css"
@@ -846,11 +892,12 @@ def validate_private_admin_visual_parity_v16_contract(errors: list[str]) -> None
                 f"{interaction_path.relative_to(ROOT)} :: contrato visual V16 ausente: {token}"
             )
 
+    validate_loading_authority_transition(parity, errors)
+
     for token in (
         "TARGET LISTINGS — INCIDENCIAS EFFECTIVE VALUES 1:1",
         "padding: 12px var(--table-cell-padding-x);",
         "font-size: var(--font-base);",
-        "private-admin-shimmer",
         "@container (max-width: 1120px)",
         "@container (max-width: 820px)",
         "@media (max-width: 680px)",

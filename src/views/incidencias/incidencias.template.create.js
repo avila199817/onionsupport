@@ -2,13 +2,15 @@
    Onion Support - Incidencias Create Contract Boundary
    Archivo: /src/views/incidencias/incidencias.template.create.js
 
-   ROLE LIMITS · BACKEND PARITY · TEMPLATE SAFE
+   ROLE LIMITS · BACKEND PARITY · TEMPLATE SAFE · AVATAR IDENTITY SAFE
 
    Responsabilidad:
    - Mantener el template visual existente 1:1 en .impl.js.
    - Alinear la validación previa con los límites efectivos del backend.
    - Evitar submits que el backend rechazará por longitud/tamaño total.
    - Conservar el límite visual actual de 100 MB por archivo también en admin.
+   - Sellar la identidad real de los avatares del selector de usuario antes de
+     que AvatarSystem reconcilie el DOM dinámico de la SPA.
 ========================================================= */
 
 import {
@@ -19,11 +21,16 @@ import {
   renderIncidenciasCreateModalClosed,
   validateCreateForm as validateCreateFormImpl,
 } from "./incidencias.template.create.impl.js";
+import {
+  INCIDENCIAS_CREATE_AVATAR_IDENTITY_VERSION,
+  getIncidenciasCreateAvatarIdentitySnapshot,
+  sealIncidenciasCreateAvatarMarkup,
+} from "./incidencias.create-avatar-identity.js";
 
 export { CREATE_ACTIONS, getCreateFormDefaults, renderIncidenciasCreateModalClosed };
 
 export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =
-  "incidencias.template.create.extreme.v27.backend-limit-parity";
+  "incidencias.template.create.extreme.v28.global-avatar-identity";
 
 const MIB = 1024 * 1024;
 
@@ -87,7 +94,8 @@ function formatBytes(bytes = 0) {
 }
 
 export function renderIncidenciasCreateModal(input = {}) {
-  return renderIncidenciasCreateModalImpl(input);
+  const html = renderIncidenciasCreateModalImpl(input);
+  return sealIncidenciasCreateAvatarMarkup(html, input);
 }
 
 export function validateCreateForm(form = {}) {
@@ -144,6 +152,7 @@ export function validateCreateForm(form = {}) {
 
 export function getCreateTemplateSnapshot() {
   const snapshot = getCreateTemplateSnapshotImpl();
+  const avatarIdentity = getIncidenciasCreateAvatarIdentitySnapshot();
 
   return {
     ...snapshot,
@@ -153,6 +162,10 @@ export function getCreateTemplateSnapshot() {
       client: INCIDENCIAS_CREATE_LIMITS.client,
       admin: INCIDENCIAS_CREATE_LIMITS.admin,
     },
+    avatarIdentity: {
+      version: INCIDENCIAS_CREATE_AVATAR_IDENTITY_VERSION,
+      ...(avatarIdentity || {}),
+    },
     policy: {
       ...(snapshot?.policy || {}),
       backendLimitParity: true,
@@ -160,6 +173,9 @@ export function getCreateTemplateSnapshot() {
       roleAwareTextMaximums: true,
       clientAttachmentTotalMatchesBackend: true,
       adminFileSizeRemainsUiConservative: true,
+      createAvatarGlobalAuthority: true,
+      createAvatarIdentityExplicit: true,
+      createAvatarFallbackTextNeverBecomesName: true,
     },
   };
 }

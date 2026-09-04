@@ -1,7 +1,52 @@
 # ONION SUPPORT — CONTEXTO CANÓNICO DEL FRONTEND
 
 > Actualizado: 2026-09-04.
-> Describe la arquitectura productiva esperada del repositorio `avila199817/onionsupport`. Si documentación y código divergen, el código de `main` es la autoridad.
+> Corte de evidencia: 2026-09-04, UTC. Describe el estado observado y las reglas del repositorio `avila199817/onionsupport`. El código de `main` define la implementación; los runs enlazados acreditan la revisión desplegada. Una regla objetivo no acredita por sí sola que todos los consumidores la cumplan.
+
+## Estado del proyecto y evidencia
+
+La última versión funcional verificada de esta sesión es [`5d82b0d0f5757868b52be156cbf8d38a28a7e276`](https://github.com/avila199817/onionsupport/commit/5d82b0d0f5757868b52be156cbf8d38a28a7e276). Los commits posteriores que sólo actualicen documentación deben distinguirse de esta referencia de runtime.
+
+Usamos cuatro estados: **implementado** significa presente en el código; **desplegado**, publicado por el pipeline; **verificado**, contrastado mediante la evidencia y el alcance indicados; **pendiente/propuesto**, trabajo futuro. Ningún módulo queda certificado de extremo a extremo sólo porque su build o un health check sea correcto.
+
+| Trabajo | Estado al corte | Evidencia y límite |
+| --- | --- | --- |
+| Avatar autenticado en topbar y prioridades Baja/Media/Alta | Integrado antes de la consolidación | La revisión de [PR #482](https://github.com/avila199817/onionsupport/pull/482) confirma los commits ya integrados y sus tres contratos dirigidos. Se cerró sin fusionar una segunda implementación. |
+| AvatarSystem, modales, AsyncScope, carga visual y SEO nacional | Implementado y desplegado | [PR #487](https://github.com/avila199817/onionsupport/pull/487), commit `26f546ab`; la consolidación retiró duplicaciones y dejó las autoridades descritas en este documento. No significa que cada normalizador o política de URL privada ya esté migrado. |
+| Validadores compatibles y verificación SEO por checkout | Implementado y desplegado | [PR #486](https://github.com/avila199817/onionsupport/pull/486), [PR #488](https://github.com/avila199817/onionsupport/pull/488) y commit [`0ad1500f`](https://github.com/avila199817/onionsupport/commit/0ad1500f): `/login` noindex se comprueba sin relajar los presupuestos Lighthouse. |
+| Salto visual del consentimiento | Corregido, desplegado y medido | [PR #490](https://github.com/avila199817/onionsupport/pull/490), commit `5d82b0d0`; CSS preparado antes de mostrar y apertura cancelable. El CLS móvil de la portada pasó a 0,000 en la medición descrita abajo. |
+| Flujos privados con cuentas reales | Implementación existente; validación vertical completa pendiente | No se ha certificado en esta sesión login/refresh/logout, ACL, creación de tickets, adjuntos, facturación, correo real y avatar como un único recorrido contra producción. |
+| Resultados visibles en Google | Política técnica publicada; evolución del índice pendiente de observar | No consta una inspección autenticada de Search Console ni una solicitud manual de reindexación en esta sesión. IndexNow correcto no acredita rastreo de Google ni sitelinks. |
+
+La publicación de `5d82b0d0` tiene evidencias separadas:
+
+- [Azure Static Web Apps, run 33924499365](https://github.com/avila199817/onionsupport/actions/runs/33924499365): despliegue correcto.
+- [Production Verification Gate, run 33924660120](https://github.com/avila199817/onionsupport/actions/runs/33924660120): verificación de producción correcta.
+- [Disponibilidad, run 33924660130](https://github.com/avila199817/onionsupport/actions/runs/33924660130): comprobación correcta.
+- [IndexNow, run 33924660157](https://github.com/avila199817/onionsupport/actions/runs/33924660157): ejecución correcta del envío previsto por el workflow.
+- [Lighthouse, run 33924660177](https://github.com/avila199817/onionsupport/actions/runs/33924660177): 30 muestras, incluidos HTML y HTTP `noindex, follow` en las diez muestras del acceso.
+
+### Rendimiento: resultado y trabajo abierto
+
+Estas son medianas sintéticas de **cinco muestras de portada por perfil**, comparando la revisión inicial `808a536` con `5d82b0d0`. La comparación y sus condiciones constan en [PR #490](https://github.com/avila199817/onionsupport/pull/490) y el [run de Lighthouse](https://github.com/avila199817/onionsupport/actions/runs/33924660177); no son métricas de usuarios reales ni una garantía para todas las páginas.
+
+| Métrica de portada | Antes móvil | Después móvil | Antes escritorio | Después escritorio |
+| --- | --- | --- | --- | --- |
+| Rendimiento Lighthouse | 75 | 87 | 92 | 100 |
+| CLS | 0,217 | 0,000 | 0,172 | 0,006 |
+| Accesibilidad / buenas prácticas / SEO público después | — | 100 / 100 / 100 | — | 100 / 100 / 100 |
+
+Siguen abiertos dos avisos del perfil móvil: **TBT de portada 404 ms frente a 300 ms** y **LCP de acceso 2.573 ms frente a 2.500 ms**. El workflow finalizó correctamente con esos avisos; no se redujeron umbrales. La comparación local alternada no reprodujo el aumento de TBT observado en CI y no aporta evidencia suficiente para atribuirlo a AvatarSystem o a la consolidación. El siguiente cambio de rendimiento debe partir de una reproducción controlada, como establece el [roadmap](ROADMAP.md).
+
+### Decisiones vigentes
+
+1. Una autoridad por responsabilidad, con controladores de dominio separados. No se hará una macroreescritura ni se reunirá toda la aplicación en una función universal.
+2. El backend conserva autenticación efectiva, ACL y negocio. Compartir un componente visual no comparte automáticamente permisos o cachés.
+3. Se corrige la fuente responsable y se retira la implementación sustituida; los adaptadores con consumidores reales se eliminan sólo después de migrarlos y verificar compatibilidad.
+4. El siguiente bloque es el recorrido vertical frontend/backend. Las mejoras posteriores se entregan por módulo con criterios de aceptación y evidencia de release.
+5. Un PR superado se cierra con motivo y referencia a su sustituto. Los workflows y los controles siguen activos; cerrar la cola no significa que nunca se puedan abrir nuevos PR legítimos.
+
+El plan de trabajo vive únicamente en [ROADMAP.md](ROADMAP.md). La evidencia operativa del backend vive en [oniontech](https://github.com/avila199817/oniontech/blob/main/docs/COMO_LO_TENEMOS_AHORA.md); no se duplica aquí su inventario Azure.
 
 ## 1. Alcance
 
@@ -133,7 +178,7 @@ No existen ni deben reaparecer `mobile-shell.css` o `features/mobile-shell/index
 
 ## 7. AvatarSystem
 
-AvatarSystem es la única autoridad transversal de identidad visual, estado de imagen y paint de avatares en la SPA autenticada.
+AvatarSystem es la autoridad transversal de identidad visual, estado de imagen y paint de avatares. Incluye las superficies privadas y el avatar de cuenta visible en la portada con sesión; no arranca como motor de avatares en la portada anónima.
 
 Autoridades:
 
@@ -176,7 +221,7 @@ Listado, alta administrativa, detalle y política segura de avatares/SAS runtime
 
 ### Correo
 
-Integración Microsoft a través del backend Onion, sin tokens Microsoft en navegador; carpeta/lista/lector, compose, replies, forward, drafts, adjuntos, scroll infinito y cache efímera. La única persistencia browser intencional es la preferencia booleana de notificaciones.
+Integración Microsoft a través del backend Onion, sin tokens Microsoft en navegador; carpeta/lista/lector, compose, replies, forward, drafts, adjuntos, scroll infinito y caché de mensajes en memoria. El código también persiste en `localStorage` la preferencia de notificaciones, el buzón elegido por propietario y la firma de texto por propietario/buzón. No debe describirse como si sólo persistiera un booleano. La revisión de retención y cambio de cuenta está pendiente en el roadmap.
 
 ### Servidor
 
@@ -294,7 +339,24 @@ No persistir:
 - credenciales Microsoft;
 - snapshots de seguridad.
 
-Sólo se persisten preferencias no sensibles que realmente deban sobrevivir a un reload.
+La política objetivo es persistir únicamente preferencias justificadas y minimizar los datos privados. El código actual todavía contiene excepciones que requieren una entrega específica:
+
+| Consumidor observado | Persistencia presente | Trabajo pendiente |
+| --- | --- | --- |
+| `src/views/clientes/clientes.api.legacy.js` | Caché proyectada de clientes con datos identificativos y de contacto; elimina URLs temporales de avatar en su proyección | Verificar lectura, retención, aislamiento entre sesiones y borrado; decidir su sustitución por memoria. |
+| `src/views/usuarios/usuarios.api.js` | Caché proyectada de usuarios con identidad, contacto y metadatos de cuenta/seguridad; no es un almacén de tokens | Aplicar la misma revisión y reducir los campos persistidos; su TTL de frescura no prueba borrado físico. |
+| `src/views/correo/index.js` | Preferencias de notificación/buzón y firma, además de caché de mensajes en memoria | Comprobar necesidad, alcance por propietario y limpieza al cambiar de cuenta. |
+| `src/views/cuenta/index.js` | Preferencias de tema e idioma | Mantener el contrato de preferencias y evitar que absorba datos de sesión. |
+
+Esta revisión de fuente no demuestra una fuga entre usuarios ni certifica su ausencia. La validación vertical debe comprobar los límites con cuentas de prueba y aportar evidencia antes de modificar la política.
+
+### Hallazgos históricos que no se arrastran sin comprobar
+
+- Core actual (`core.minimal.v9-specialized-snapshot`) mantiene estado en memoria, snapshots saneados y puentes hacia módulos. Ya no expone un event bus `on/off/emit` genérico. Los eventos DOM de dominio que permanecen se revisan por consumidor.
+- `first(...values)` conserva arrays. Los `flat(Infinity)` todavía presentes en Core pertenecen a normalización explícita de roles/permisos, no al selector `first`; no se clasifican automáticamente como el error antiguo.
+- Facturas conserva `fetch` para un `blob:` local y para descargar un PDF desde una URL validada con `credentials: "omit"`. Eso no acredita un segundo cliente de API autenticada; la política de documentos sí debe entrar en la futura revisión de URLs.
+- El inventario histórico de CSS —77 hojas, 1,29 MB, 194 `!important` y 3.079 colores— no es un inventario actual ni una medida del artefacto servido. Antes de una limpieza adicional se medirá de nuevo el SHA, fuente/build, bytes transferidos y cobertura por ruta.
+- El doble motor de avatar quedó sustituido por la autoridad actual; PR #482 no se reabre para recuperar código que esa consolidación retiró.
 
 ## 15. Flujo de cambios
 

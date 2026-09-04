@@ -1,7 +1,20 @@
 /* =========================================================
    Onion Support · Incidencias Technician Profile
-   CLIENT TRUST · ROLE-SCOPED HISTORY · GLOBAL AVATAR AUTHORITY
+
+   PUBLIC-SAFE METRICS · FIVE-STAR READY · GLOBAL AVATAR AUTHORITY
+
+   Contrato visual/productivo:
+   - El modal presenta al técnico, no el historial privado de sus clientes.
+   - Usuarios no admin pueden ver un cómputo agregado de resoluciones cuando el
+     backend expone el agregado público; nunca se pintan tickets de terceros.
+   - Si el backend aún no expone el agregado público, se muestra únicamente el
+     total que la sesión actual puede conocer, claramente marcado como ámbito.
+   - Valoración preparada para 5 estrellas: empieza en 0,0 / 5 y 0 opiniones.
+   - Sin formulario de valoración en esta versión.
+   - Avatar delegado al AvatarSystem global y al bridge canónico de técnico.
 ========================================================= */
+
+"use strict";
 
 import "./style.css";
 
@@ -13,26 +26,31 @@ import {
 } from "../avatar-system/index.js";
 
 export const INCIDENCIAS_TECHNICIAN_PROFILE_VERSION =
-  "incidencias-technician-profile.v8.client-trust-resolved-history";
+  "incidencias-technician-profile.v9-public-metrics-rating-ready";
+
+export const TECHNICIAN_RATING_MAX = 5;
+export const TECHNICIAN_RATING_INITIAL = Object.freeze({
+  average: 0,
+  count: 0,
+  max: TECHNICIAN_RATING_MAX,
+});
 
 const VIEW = "#view-container, [data-router-view='true']";
-const LIST_TECH_BADGE = ".incidencias-assigned-badge[data-assigned='true']";
-const DETAIL_TECHNICIAN = ".incidencias-modal-technician-inline[data-modal-technician='true'][data-technician-assigned='true']";
-const DETAIL_TECH_CARD = ".incidencias-modal-technician-card[data-technician-profile-trigger='true'][data-assigned='true']";
+const LIST_TECH_BADGE =
+  ".incidencias-assigned-badge[data-assigned='true']";
+const DETAIL_TECHNICIAN =
+  ".incidencias-modal-technician-inline[data-modal-technician='true'][data-technician-assigned='true']";
+const DETAIL_TECH_CARD =
+  ".incidencias-modal-technician-card[data-technician-profile-trigger='true'][data-assigned='true']";
 const TECH_TRIGGER = `${LIST_TECH_BADGE}, ${DETAIL_TECH_CARD}`;
-const PRIORITY_BADGE = ".incidencias-priority-badge[data-priority-badge]";
-const DETAIL_PRIORITY = ".incidencias-modal-chip[class*='incidencias-modal-chip--priority-']";
-const ROW = "[data-ticket-row='true']";
 const DETAIL_ROOT = "[data-incidencias-modal-root='true']";
 const MODAL_HOST = "[data-incidencias-modal-host='true']";
+const ROW = "[data-ticket-row='true']";
 const HOST_ID = "incidencias-technician-profile-host";
 const ROOT_ID = "incidencias-technician-profile-root";
 const PANEL_ID = "incidencias-technician-profile-panel";
 const TRUSTED_BLOB_HOST = "onionassets.blob.core.windows.net";
-const HISTORY_PAGE_LIMIT = 48;
-const HISTORY_SEARCH_MAX_PAGES = 4;
-const HISTORY_FALLBACK_MAX_PAGES = 8;
-const HISTORY_CARD_LIMIT = 4;
+const PUBLIC_METRIC_LIMIT = 1;
 const FOCUSABLE = [
   "a[href]",
   "button:not([disabled])",
@@ -40,9 +58,8 @@ const FOCUSABLE = [
 ].join(",");
 
 /*
-  Fuente: perfil público canónico de Onion Support.
-  No se inventan valoraciones ni testimonios. El modal reutiliza literalmente
-  la fotografía, experiencia y método publicados en la Home.
+  Sólo datos profesionales ya publicados por Onion Support. No contiene foto:
+  el retrato del modal debe proceder del usuario/ticket o del AvatarSystem.
 */
 export const CRISTIAN_PUBLIC_TECHNICIAN_PROFILE = Object.freeze({
   id: "cristian-avila",
@@ -50,26 +67,10 @@ export const CRISTIAN_PUBLIC_TECHNICIAN_PROFILE = Object.freeze({
   role: "Técnico informático",
   email: "cristian@onionsupport.com",
   username: "cristian",
-  photo: "/src/media/img/Cristian_Avila_224.webp",
-  summary: "Diagnóstico claro, trato directo y reparación con criterio antes de tocar nada.",
   experienceValue: "+8",
   experienceLabel: "años de experiencia",
   clientsValue: "+300",
   clientsLabel: "clientes atendidos",
-  method: Object.freeze([
-    Object.freeze({
-      title: "Diagnóstico primero",
-      text: "Reviso síntomas, urgencia y contexto antes de tocar nada. Claridad antes que prisas.",
-    }),
-    Object.freeze({
-      title: "Solución con criterio",
-      text: "Te explico qué merece la pena reparar, qué conviene mejorar y qué no compensa.",
-    }),
-    Object.freeze({
-      title: "Presupuesto y factura",
-      text: "Intervención formal, presupuesto previo y factura disponible para particulares y negocios.",
-    }),
-  ]),
 });
 
 let mounted = false;
@@ -99,15 +100,6 @@ const object = (value, fallback = {}) =>
   value && typeof value === "object" && !Array.isArray(value)
     ? value
     : fallback;
-
-const array = (value) => {
-  if (Array.isArray(value)) return value;
-  try {
-    return value ? Array.from(value) : [];
-  } catch {
-    return [];
-  }
-};
 
 function first(...values) {
   for (const value of values) {
@@ -161,12 +153,6 @@ function normalizeEmail(value = "") {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : "";
 }
 
-function displayLabel(value = "", fallback = "") {
-  const raw = text(value, fallback);
-  if (!raw) return "";
-  return `${raw.charAt(0).toUpperCase()}${raw.slice(1)}`;
-}
-
 function safeAvatarUrl(value = "") {
   const raw = text(value, "");
   if (!raw || raw.startsWith("//") || /[\r\n\t\\]/.test(raw)) return "";
@@ -196,17 +182,28 @@ function safeAvatarUrl(value = "") {
 }
 
 function safeError(error = null) {
-  const raw = text(
+  return text(
     first(
       error?.message,
       error?.data?.message,
       error?.payload?.message
     ),
     "No se pudo cargar el perfil del técnico."
-  );
-  return raw
+  )
     .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1***")
     .slice(0, 240);
+}
+
+function number(value = null, fallback = null) {
+  if (value === null || value === undefined || value === "") return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function nonNegativeInteger(value = null, fallback = null) {
+  const parsed = number(value, fallback);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, Math.trunc(parsed));
 }
 
 function numberLabel(value = 0) {
@@ -217,31 +214,15 @@ function numberLabel(value = 0) {
   }
 }
 
-function percentLabel(value = 0) {
-  return `${Math.round(Math.max(0, Math.min(100, Number(value) || 0)))} %`;
-}
-
-function dateValue(value = null) {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value < 100000000000 ? value * 1000 : value;
-  }
-  const parsed = Date.parse(String(value || ""));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function dateTimeLabel(value = null, fallback = "Sin actividad registrada") {
-  const stamp = dateValue(value);
-  if (!stamp) return fallback;
+function ratingLabel(value = 0) {
+  const safe = Math.max(0, Math.min(TECHNICIAN_RATING_MAX, Number(value) || 0));
   try {
-    return new Intl.DateTimeFormat("es-ES", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(stamp));
+    return new Intl.NumberFormat("es-ES", {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    }).format(safe);
   } catch {
-    return fallback;
+    return safe.toFixed(1).replace(".", ",");
   }
 }
 
@@ -293,16 +274,8 @@ function technicianFromTicket(ticket = {}) {
       raw.assignedToPhone,
       raw.technicianPhone,
       raw.tecnicoPhone,
-      raw.agentPhone,
       assignment.assignedToPhone,
       assignment.technicianPhone,
-      assignment.agentPhone,
-      assignment.phone,
-      assignment.telefono,
-      assignment.technician?.phone,
-      assignment.technician?.telefono,
-      assignment.assignedTo?.phone,
-      assignment.assignedTo?.telefono,
       nested.phone,
       nested.telefono,
       nested.phoneE164,
@@ -316,138 +289,30 @@ function technicianFromTicket(ticket = {}) {
       raw.technicianAvatar,
       raw.tecnicoAvatarUrl,
       raw.tecnicoAvatar,
-      raw.agentAvatarUrl,
       assignment.assignedToAvatarUrl,
       assignment.technicianAvatarUrl,
       nested.avatarUrl,
-      nested.avatar
+      nested.avatar,
+      nested.picture
     )),
     username: text(first(
       nested.username,
       nested.userName,
       assignment.username
     ), ""),
-    role: text(first(nested.role, nested.rol, assignment.role), ""),
+    role: text(first(
+      nested.profile?.position,
+      nested.position,
+      nested.role,
+      nested.rol,
+      assignment.role
+    ), ""),
+    status: text(first(
+      nested.status,
+      nested.estado,
+      nested.active === false ? "inactive" : "active"
+    ), "active"),
   };
-}
-
-function ticketId(ticket = {}) {
-  return text(first(
-    ticket.ticketId,
-    ticket.incidenciaId,
-    ticket.id,
-    ticket.code,
-    ticket.numero
-  ), "");
-}
-
-function ticketStatus(ticket = {}) {
-  return normalizeKey(first(
-    ticket.status,
-    ticket.estado,
-    ticket.statusKey,
-    ticket.lifecycle?.status,
-    "open"
-  ));
-}
-
-function isClosedTicket(ticket = {}) {
-  return [
-    "closed", "resolved", "cerrada", "cerrado", "resuelta", "resuelto",
-  ].includes(ticketStatus(ticket));
-}
-
-function ticketPriority(ticket = {}) {
-  return normalizeKey(first(
-    ticket.priority,
-    ticket.prioridad,
-    ticket.priorityKey,
-    ticket.severity,
-    "medium"
-  ));
-}
-
-function ticketTitle(ticket = {}) {
-  return text(first(
-    ticket.subject,
-    ticket.asunto,
-    ticket.title,
-    ticket.titulo,
-    ticket.summary,
-    ticket.resumen
-  ), "Sin asunto");
-}
-
-function ticketCreatedAt(ticket = {}) {
-  return first(
-    ticket.createdAt,
-    ticket.created_at,
-    ticket.fechaCreacion,
-    ticket.created,
-    ticket.audit?.createdAt,
-    ticket._ts
-  );
-}
-
-function ticketClosedAt(ticket = {}) {
-  return first(
-    ticket.closedAt,
-    ticket.closed_at,
-    ticket.resolvedAt,
-    ticket.resolved_at,
-    ticket.lifecycle?.closedAt,
-    ticket.lifecycle?.resolvedAt,
-    ticket.updatedAt,
-    ticket.updated_at,
-    ticketCreatedAt(ticket)
-  );
-}
-
-function ticketActivityAt(ticket = {}) {
-  return first(
-    isClosedTicket(ticket) ? ticketClosedAt(ticket) : null,
-    ticket.lastActivityAt,
-    ticket.updatedAt,
-    ticket.updated_at,
-    ticketCreatedAt(ticket)
-  );
-}
-
-function ticketStatusLabel(ticket = {}) {
-  const key = ticketStatus(ticket);
-  if (isClosedTicket(ticket)) return "Resuelta";
-  if (["pending", "pendiente", "new", "nueva", "nuevo"].includes(key)) {
-    return "Pendiente";
-  }
-  if ([
-    "in_progress", "inprogress", "progress", "assigned", "proceso", "en_proceso",
-  ].includes(key)) return "En curso";
-  return "Abierta";
-}
-
-function priorityLabel(ticket = {}) {
-  const key = ticketPriority(ticket);
-  if ([
-    "urgent", "urgente", "critical", "critica", "critico", "p0", "p1",
-  ].includes(key)) return "Urgente";
-  if (["high", "alta", "alto"].includes(key)) return "Alta";
-  if (["low", "baja", "bajo"].includes(key)) return "Baja";
-  return "Media";
-}
-
-export function isSameTechnician(ticket = {}, tech = {}) {
-  const current = technicianFromTicket(ticket);
-  if (tech.userId && current.userId) {
-    return tech.userId.toLowerCase() === current.userId.toLowerCase();
-  }
-  if (tech.email && current.email) return tech.email === current.email;
-  if (tech.username && current.username) {
-    return normalizeKey(tech.username) === normalizeKey(current.username);
-  }
-  if (tech.name && current.name) {
-    return normalizeName(tech.name) === normalizeName(current.name);
-  }
-  return false;
 }
 
 export function publicTechnicianProfileFor(tech = {}) {
@@ -465,11 +330,14 @@ export function publicTechnicianProfileFor(tech = {}) {
 
 function mergeTechnician(snapshot = {}, user = {}) {
   const source = object(user);
+  const raw = object(source.raw);
   const merged = {
     userId: text(first(
       source.userId,
       source.usuarioId,
       source.id,
+      raw.userId,
+      raw.id,
       snapshot.userId
     ), ""),
     name: text(first(
@@ -477,11 +345,15 @@ function mergeTechnician(snapshot = {}, user = {}) {
       source.fullName,
       source.name,
       source.nombre,
+      raw.displayName,
+      raw.name,
       snapshot.name
     ), "Técnico"),
     email: normalizeEmail(first(
       source.email,
       source.emailLower,
+      raw.email,
+      raw.emailLower,
       snapshot.email
     )),
     phone: text(first(
@@ -490,17 +362,17 @@ function mergeTechnician(snapshot = {}, user = {}) {
       source.phoneE164,
       source.mobile,
       source.movil,
-      source.contacto?.phone,
-      source.contacto?.telefono,
       source.profile?.phone,
       source.profile?.telefono,
-      source.profile?.mobile,
+      raw.phone,
+      raw.telefono,
       snapshot.phone
     ), ""),
     username: text(first(
       source.username,
       source.userName,
       source.slug,
+      raw.username,
       snapshot.username
     ), ""),
     role: text(first(
@@ -509,6 +381,8 @@ function mergeTechnician(snapshot = {}, user = {}) {
       source.cargo,
       source.role,
       source.rol,
+      raw.position,
+      raw.role,
       snapshot.role
     ), ""),
     avatar: safeAvatarUrl(first(
@@ -518,20 +392,22 @@ function mergeTechnician(snapshot = {}, user = {}) {
       source.photoUrl,
       source.profile?.avatarUrl,
       source.profile?.avatar,
-      source.profile?.picture,
+      raw.avatarUrl,
+      raw.avatar,
+      raw.picture,
       snapshot.avatar
     )),
     status: text(first(
       source.status,
       source.estado,
-      source.active === false ? "inactive" : "active"
+      raw.status,
+      source.active === false ? "inactive" : "active",
+      snapshot.status
     ), "active"),
+    rawUser: source,
   };
 
   const publicProfile = publicTechnicianProfileFor(merged);
-  if (!merged.avatar && publicProfile?.photo) {
-    merged.avatar = safeAvatarUrl(publicProfile.photo);
-  }
   if (publicProfile?.role) merged.publicRole = publicProfile.role;
   return merged;
 }
@@ -542,188 +418,180 @@ function statusLabel(value = "") {
   ].includes(normalizeKey(value)) ? "Inactivo" : "Activo";
 }
 
-function responseCursor(response = {}) {
+function metricScopeKey(value = "") {
+  return normalizeKey(value).replace(/[.:/]+/g, "_");
+}
+
+function aggregateScopeIsPublic(response = {}) {
+  const summary = object(response.summary);
+  const meta = object(response.meta);
+  const markers = [
+    summary.scope,
+    summary.visibility,
+    meta.scope,
+    meta.visibility,
+    meta.metricScope,
+    meta.aggregateScope,
+  ].map(metricScopeKey);
+
+  return Boolean(
+    summary.public === true ||
+    summary.publicTechnicianStats === true ||
+    meta.public === true ||
+    meta.publicTechnicianStats === true ||
+    markers.some((value) =>
+      value.includes("technician_public") ||
+      value.includes("public_technician") ||
+      value.includes("technician_aggregate_public")
+    )
+  );
+}
+
+function resolvedCountFromSummary(response = {}) {
+  const summary = object(response.summary);
+  const meta = object(response.meta);
+  const technicianSummary = object(first(
+    summary.technician,
+    summary.technicianStats,
+    meta.technician,
+    meta.technicianStats,
+    {}
+  ));
+
+  for (const candidate of [
+    technicianSummary.resolvedTotal,
+    technicianSummary.resolvedCount,
+    technicianSummary.closedTotal,
+    technicianSummary.closedCount,
+    summary.technicianResolvedTotal,
+    summary.technicianResolvedCount,
+    summary.resolvedTotal,
+    summary.resolvedCount,
+    meta.technicianResolvedTotal,
+    meta.technicianResolvedCount,
+  ]) {
+    const parsed = nonNegativeInteger(candidate, null);
+    if (parsed !== null) return parsed;
+  }
+
+  return null;
+}
+
+export function normalizePublicTechnicianMetrics(response = null) {
+  const source = object(response);
+  const publicScope = aggregateScopeIsPublic(source);
+  const explicitResolved = resolvedCountFromSummary(source);
+  const responseTotal = nonNegativeInteger(
+    first(
+      source.total,
+      source.totalCount,
+      source.count,
+      source.pagination?.total,
+      source.meta?.total
+    ),
+    null
+  );
+
+  const resolved = explicitResolved !== null
+    ? explicitResolved
+    : responseTotal !== null
+      ? responseTotal
+      : 0;
+
+  return Object.freeze({
+    resolvedTotal: resolved,
+    resolvedTotalKnown: explicitResolved !== null || responseTotal !== null,
+    scope: publicScope ? "public-total" : "session-total",
+    publicTotal: publicScope,
+    ratingAverage: TECHNICIAN_RATING_INITIAL.average,
+    ratingCount: TECHNICIAN_RATING_INITIAL.count,
+    ratingMax: TECHNICIAN_RATING_INITIAL.max,
+  });
+}
+
+function metricSearchTerm(tech = {}) {
   return text(first(
-    response.nextCursor,
-    response.pagination?.nextCursor,
-    response.meta?.nextCursor
+    tech.userId,
+    tech.email,
+    tech.username,
+    tech.name
   ), "");
 }
 
-function historySearchTerm(tech = {}) {
-  return text(first(tech.email, tech.username, tech.name), "");
-}
-
-function dedupeTickets(items = []) {
-  const map = new Map();
-  for (const ticket of array(items)) {
-    const id = ticketId(ticket);
-    if (!id) continue;
-    map.set(id, ticket);
-  }
-  return [...map.values()];
-}
-
-async function collectHistoryWindow(
-  api,
-  tech = {},
-  {
-    closed = false,
-    queryText = "",
-    maxPages = HISTORY_SEARCH_MAX_PAGES,
-  } = {}
-) {
-  const matches = new Map();
-  let cursor = "";
-  let pages = 0;
-  let exhausted = false;
-
-  do {
-    const response = await api.loadIncidenciasPage({
-      force: true,
-      cache: false,
-      query: {
-        pageMode: "cursor",
-        limit: HISTORY_PAGE_LIMIT,
-        includeTotal: false,
-        responseContract: "v2",
-        assigned: true,
-        closed,
-        ...(queryText ? { q: queryText } : {}),
-        ...(cursor ? { cursor } : {}),
-      },
-    });
-
-    pages += 1;
-    for (const ticket of array(response?.items)) {
-      if (isSameTechnician(ticket, tech)) {
-        const id = ticketId(ticket);
-        if (id) matches.set(id, ticket);
-      }
-    }
-
-    cursor = responseCursor(response);
-    exhausted = !cursor && response?.hasMore !== true;
-  } while (cursor && pages < maxPages);
-
-  return {
-    items: [...matches.values()],
-    pages,
-    exhausted,
-    queryText,
+async function requestTechnicianResolvedAggregate(api, tech = {}, publicHints = true) {
+  const search = metricSearchTerm(tech);
+  const query = {
+    pageMode: "cursor",
+    limit: PUBLIC_METRIC_LIMIT,
+    includeTotal: true,
+    responseContract: "v2",
+    assigned: true,
+    closed: true,
+    ...(search ? { q: search } : {}),
   };
+
+  if (publicHints) {
+    Object.assign(query, {
+      aggregate: "technician-public",
+      aggregateOnly: true,
+      summaryOnly: true,
+      includeItems: false,
+      publicMetrics: true,
+      technicianUserId: text(tech.userId, ""),
+      assignedToUserId: text(tech.userId, ""),
+      technicianEmail: normalizeEmail(tech.email),
+    });
+  }
+
+  return api.loadIncidenciasPage({
+    force: true,
+    cache: false,
+    query,
+  });
 }
 
-async function loadStatusHistory(api, tech = {}, closed = false) {
-  const queryText = historySearchTerm(tech);
-  let window = await collectHistoryWindow(api, tech, {
-    closed,
-    queryText,
-    maxPages: HISTORY_SEARCH_MAX_PAGES,
-  });
+export async function loadPublicTechnicianMetrics(api, tech = {}) {
+  if (!api || typeof api.loadIncidenciasPage !== "function") {
+    return normalizePublicTechnicianMetrics(null);
+  }
 
   /*
-    Algunas versiones antiguas del backend no buscaban por técnico dentro de q.
-    Si el resultado filtrado no aporta ninguna coincidencia, hacemos fallback
-    cursor-safe sobre el conjunto role-scoped. Nunca saltamos el RBAC del API.
+    Intento 1: contrato de agregado público. Si el backend lo reconoce, devuelve
+    únicamente un resumen/cómputo y nunca necesitamos documentos de terceros.
   */
-  if (!window.items.length && queryText) {
-    window = await collectHistoryWindow(api, tech, {
-      closed,
-      queryText: "",
-      maxPages: HISTORY_FALLBACK_MAX_PAGES,
-    });
+  try {
+    const response = await requestTechnicianResolvedAggregate(api, tech, true);
+    const metrics = normalizePublicTechnicianMetrics(response);
+    if (metrics.publicTotal) return metrics;
+
+    /*
+      Si el backend aún no ha activado el scope público, seguimos pudiendo usar
+      el total role-scoped de esta respuesta SIN pintar ninguno de sus items.
+    */
+    if (metrics.resolvedTotalKnown) return metrics;
+  } catch {
+    /* Compatibilidad con backend que rechace parámetros de agregado nuevos. */
   }
 
-  return window;
-}
-
-export function summarizeTechnicianTickets(
-  activeItems = [],
-  closedItems = [],
-  tech = {},
-  sourceTicket = null,
-  {
-    activeExhausted = false,
-    closedExhausted = false,
-    partial = false,
-  } = {}
-) {
-  const active = dedupeTickets(activeItems)
-    .filter((ticket) => !isClosedTicket(ticket) && isSameTechnician(ticket, tech));
-  const closed = dedupeTickets(closedItems)
-    .filter((ticket) => isClosedTicket(ticket) && isSameTechnician(ticket, tech));
-
-  if (sourceTicket && isSameTechnician(sourceTicket, tech)) {
-    const target = isClosedTicket(sourceTicket) ? closed : active;
-    const sourceId = ticketId(sourceTicket);
-    if (sourceId && !target.some((ticket) => ticketId(ticket) === sourceId)) {
-      target.push(sourceTicket);
-    }
+  /*
+    Fallback actual: una única página con includeTotal=true, sin paginar y sin
+    renderizar tickets. El número queda etiquetado como ámbito de la sesión.
+  */
+  try {
+    const response = await requestTechnicianResolvedAggregate(api, tech, false);
+    return normalizePublicTechnicianMetrics(response);
+  } catch {
+    return normalizePublicTechnicianMetrics(null);
   }
-
-  const activeUnique = dedupeTickets(active);
-  const closedUnique = dedupeTickets(closed);
-  const all = dedupeTickets([...activeUnique, ...closedUnique]);
-  const urgent = activeUnique.filter((ticket) => [
-    "urgent", "urgente", "critical", "critica", "critico", "high", "alta", "p0", "p1",
-  ].includes(ticketPriority(ticket))).length;
-  const resolutionRate = all.length ? (closedUnique.length / all.length) * 100 : 0;
-  const activeRate = all.length ? (activeUnique.length / all.length) * 100 : 0;
-  const recent = [...all]
-    .sort((a, b) => dateValue(ticketActivityAt(b)) - dateValue(ticketActivityAt(a)))
-    .slice(0, HISTORY_CARD_LIMIT);
-  const resolvedRecent = [...closedUnique]
-    .sort((a, b) => dateValue(ticketClosedAt(b)) - dateValue(ticketClosedAt(a)))
-    .slice(0, HISTORY_CARD_LIMIT);
-
-  return {
-    assigned: all.length,
-    active: activeUnique.length,
-    closed: closedUnique.length,
-    urgent,
-    resolutionRate,
-    activeRate,
-    exact: activeExhausted && closedExhausted && !partial,
-    partial: partial || !activeExhausted || !closedExhausted,
-    recent,
-    resolvedRecent,
-  };
-}
-
-async function loadTechnicianHistory(api, tech = {}, sourceTicket = null) {
-  const results = await Promise.allSettled([
-    loadStatusHistory(api, tech, false),
-    loadStatusHistory(api, tech, true),
-  ]);
-
-  const activeWindow = results[0].status === "fulfilled"
-    ? results[0].value
-    : { items: [], exhausted: false };
-  const closedWindow = results[1].status === "fulfilled"
-    ? results[1].value
-    : { items: [], exhausted: false };
-
-  return summarizeTechnicianTickets(
-    activeWindow.items,
-    closedWindow.items,
-    tech,
-    sourceTicket,
-    {
-      activeExhausted: activeWindow.exhausted,
-      closedExhausted: closedWindow.exhausted,
-      partial: results.some((result) => result.status === "rejected"),
-    }
-  );
 }
 
 function sectionHeader(title = "", subtitle = "") {
   return `<div class="ui-detail-modal-section-head"><h3>${escapeHtml(title)}</h3>${subtitle ? `<span>${escapeHtml(subtitle)}</span>` : ""}</div>`;
 }
 
-function metaCard(label = "", value = "—", hint = "") {
+function metaCard(label = "", value = "—", hint = "", extraClass = "") {
   const safeValue = text(value, "—");
-  return `<div class="ui-detail-modal-meta-card"><span>${escapeHtml(label)}</span><strong title="${attr(safeValue)}">${escapeHtml(safeValue)}</strong>${hint ? `<span class="inc-technician-meta-hint">${escapeHtml(hint)}</span>` : ""}</div>`;
+  return `<div class="ui-detail-modal-meta-card ${attr(extraClass)}"><span>${escapeHtml(label)}</span><strong title="${attr(safeValue)}">${escapeHtml(safeValue)}</strong>${hint ? `<span class="inc-technician-meta-hint">${escapeHtml(hint)}</span>` : ""}</div>`;
 }
 
 function contactActionIcon(kind = "mail") {
@@ -753,9 +621,19 @@ function eyeIcon() {
   return `<svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>`;
 }
 
+function starIcon(filled = false, index = 0) {
+  return `<span class="inc-technician-star" data-star-index="${index + 1}" data-star-filled="${filled ? "true" : "false"}" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="m12 2.75 2.78 5.63 6.22.91-4.5 4.38 1.06 6.19L12 16.94 6.44 19.86 7.5 13.67 3 9.29l6.22-.91L12 2.75Z"/></svg></span>`;
+}
+
+function ratingStars(average = 0) {
+  const safe = Math.max(0, Math.min(TECHNICIAN_RATING_MAX, Number(average) || 0));
+  return Array.from({ length: TECHNICIAN_RATING_MAX }, (_, index) =>
+    starIcon(index + 1 <= Math.floor(safe), index)
+  ).join("");
+}
+
 function avatarMarkup(tech = {}) {
-  const publicProfile = publicTechnicianProfileFor(tech);
-  const src = safeAvatarUrl(first(tech.avatar, publicProfile?.photo));
+  const src = safeAvatarUrl(tech.avatar);
   const presentation = resolveAvatarPresentation({
     ...tech,
     displayName: tech.name,
@@ -765,7 +643,11 @@ function avatarMarkup(tech = {}) {
     username: tech.username,
   });
 
-  return `<div class="ui-detail-modal-avatar"><div class="ui-detail-modal-avatar-frame" data-avatar-system="true" data-avatar-host="true" data-avatar-authority="global" data-avatar-source="incidencias-technician-profile" data-avatar-name="${attr(tech.name)}" data-avatar-email="${attr(tech.email)}" data-avatar-user-id="${attr(tech.userId)}" data-avatar-username="${attr(tech.username)}" data-avatar-tone="${presentation.tone}" data-avatar-identity="${attr(presentation.fingerprint)}" data-avatar-initials="${attr(presentation.initials)}" data-has-avatar="${src ? "true" : "false"}" aria-hidden="true">${src ? `<img data-avatar-image="true" src="${attr(src)}" alt="" width="224" height="280" loading="eager" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}<span class="ui-detail-modal-avatar-fallback" data-avatar-fallback="true">${escapeHtml(presentation.initials)}</span></div></div>`;
+  /*
+    El wrapper de layout entra explícitamente en opt-out para que nunca pueda
+    convertirse en un segundo host anidado. El frame interior es el único host.
+  */
+  return `<div class="ui-detail-modal-avatar" data-avatar-system="off" data-avatar-managed="false"><div class="ui-detail-modal-avatar-frame" data-avatar-system="true" data-avatar-host="true" data-avatar-authority="global" data-avatar-source="incidencias-technician-profile" data-avatar-name="${attr(tech.name)}" data-avatar-email="${attr(tech.email)}" data-avatar-user-id="${attr(tech.userId)}" data-avatar-username="${attr(tech.username)}" data-avatar-tone="${presentation.tone}" data-avatar-identity="${attr(presentation.fingerprint)}" data-avatar-initials="${attr(presentation.initials)}" data-has-avatar="${src ? "true" : "false"}" aria-hidden="true">${src ? `<img data-avatar-image="true" src="${attr(src)}" alt="" width="224" height="280" loading="eager" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}<span class="ui-detail-modal-avatar-fallback" data-avatar-fallback="true">${escapeHtml(presentation.initials)}</span></div></div>`;
 }
 
 function statusChip(tech = {}) {
@@ -776,55 +658,34 @@ function statusChip(tech = {}) {
   return `<span class="ui-detail-modal-chip ${modifier}">${active ? "Activo" : "Inactivo"}</span>`;
 }
 
-function ticketStatusChip(ticket = {}) {
-  const label = ticketStatusLabel(ticket);
-  const modifier = label === "Resuelta"
-    ? "incidencias-status-chip--resolved"
-    : label === "Pendiente"
-      ? "incidencias-status-chip--pending"
-      : "incidencias-status-chip--open";
-  return `<span class="ui-detail-modal-chip ${modifier}">${escapeHtml(label)}</span>`;
+function renderRating(metrics = {}) {
+  const average = Number(metrics.ratingAverage) || 0;
+  const count = nonNegativeInteger(metrics.ratingCount, 0) || 0;
+  const label = `${ratingLabel(average)} de ${TECHNICIAN_RATING_MAX}, ${numberLabel(count)} valoraciones`;
+
+  return `<div class="inc-technician-rating-card" data-technician-rating="true" data-rating-average="${average}" data-rating-count="${count}" data-rating-max="${TECHNICIAN_RATING_MAX}" aria-label="${attr(`Valoración media ${label}`)}"><div class="inc-technician-rating-score"><strong>${escapeHtml(ratingLabel(average))}</strong><span>/ ${TECHNICIAN_RATING_MAX}</span></div><div class="inc-technician-rating-main"><div class="inc-technician-stars" aria-hidden="true">${ratingStars(average)}</div><strong>${count ? `${numberLabel(count)} valoración${count === 1 ? "" : "es"}` : "Sin valoraciones todavía"}</strong><span>La valoración se activará en una fase posterior al cierre de incidencias. Este modal ya está preparado para mostrarla.</span></div></div>`;
 }
 
-function priorityChip(ticket = {}) {
-  const label = priorityLabel(ticket);
-  const modifier = label === "Urgente"
-    ? "incidencias-priority-badge--critical"
-    : label === "Alta"
-      ? "incidencias-priority-badge--high"
-      : "";
-  return `<span class="ui-detail-modal-chip ${modifier}">${escapeHtml(label)}</span>`;
-}
-
-function progressRow(label = "", value = 0, detail = "", tone = "info") {
-  const safe = Math.max(0, Math.min(100, Number(value) || 0));
-  return `<div class="inc-technician-progress" data-tone="${tone === "success" ? "success" : "info"}"><div class="inc-technician-progress-head"><span>${escapeHtml(label)}</span><strong>${escapeHtml(percentLabel(safe))}</strong></div><progress class="inc-technician-progress-meter" max="100" value="${safe.toFixed(2)}" aria-label="${attr(label)}"></progress>${detail ? `<span class="inc-technician-progress-detail">${escapeHtml(detail)}</span>` : ""}</div>`;
-}
-
-function ticketCard(ticket = {}, { resolved = false } = {}) {
-  const id = ticketId(ticket) || "Incidencia";
-  const subject = ticketTitle(ticket);
-  const date = resolved ? ticketClosedAt(ticket) : ticketActivityAt(ticket);
-  return `<article class="ui-detail-modal-meta-card inc-technician-ticket-card" data-ticket-id="${attr(id)}" data-ticket-resolved="${resolved ? "true" : "false"}"><span>${escapeHtml(id)}</span><strong title="${attr(subject)}">${escapeHtml(subject)}</strong><div class="ui-detail-modal-hero-chips">${ticketStatusChip(ticket)}${priorityChip(ticket)}</div><span class="inc-technician-ticket-date">${escapeHtml(dateTimeLabel(date, "Fecha no disponible"))}</span></article>`;
-}
-
-function renderPublicTrust(tech = {}, stats = {}) {
+function renderMetrics(tech = {}, metrics = {}) {
   const profile = publicTechnicianProfileFor(tech);
-  if (!profile) return "";
+  const resolvedKnown = metrics.resolvedTotalKnown === true;
+  const resolved = resolvedKnown ? numberLabel(metrics.resolvedTotal) : "—";
+  const publicTotal = metrics.publicTotal === true;
+  const resolvedHint = publicTotal
+    ? "Cómputo agregado público · sin tickets ni datos de clientes"
+    : resolvedKnown
+      ? "Cómputo disponible en el ámbito de tu sesión"
+      : "El backend aún no ha publicado un cómputo agregado";
 
-  const feedback = stats.closed > 0
-    ? `<strong>${numberLabel(stats.closed)} incidencia${stats.closed === 1 ? "" : "s"} resuelta${stats.closed === 1 ? "" : "s"} visible${stats.closed === 1 ? "" : "s"}.</strong> El historial de abajo te permite ver trabajo ya cerrado por este técnico dentro de los permisos de tu cuenta.`
-    : `<strong>Este es tu técnico asignado.</strong> Cuando una incidencia quede resuelta aparecerá en el historial visible de abajo.`;
-
-  return `<section class="ui-detail-modal-description-section" data-technician-public-profile="${attr(profile.id)}">${sectionHeader("Tu técnico", "Quién te atiende y cómo trabaja")}<div class="inc-technician-trust-card"><div class="inc-technician-trust-copy"><strong>${escapeHtml(profile.role)} · Onion Support</strong><p>${escapeHtml(profile.summary)}</p></div><div class="inc-technician-proof-grid"><div class="inc-technician-proof"><strong>${escapeHtml(profile.experienceValue)}</strong><span>${escapeHtml(profile.experienceLabel)}</span></div><div class="inc-technician-proof"><strong>${escapeHtml(profile.clientsValue)}</strong><span>${escapeHtml(profile.clientsLabel)}</span></div></div></div><div class="inc-technician-method-grid">${profile.method.map((step) => `<div class="inc-technician-method-item"><strong>${escapeHtml(step.title)}</strong><span>${escapeHtml(step.text)}</span></div>`).join("")}</div><div class="inc-technician-feedback">${feedback}</div></section>`;
+  return `<section class="ui-detail-modal-description-section inc-technician-performance" data-technician-public-metrics="true" data-resolved-scope="${attr(metrics.scope || "unknown")}">${sectionHeader("Rendimiento y valoración", "Información pública y segura")}<div class="inc-technician-overview-grid">${metaCard("Incidencias resueltas", resolved, resolvedHint, "inc-technician-resolved-metric")}${metaCard("Valoración", `${ratingLabel(metrics.ratingAverage)} / ${TECHNICIAN_RATING_MAX}`, "Sistema preparado para 5 estrellas")}${metaCard("Opiniones", numberLabel(metrics.ratingCount || 0), "Se habilitarán con el flujo de cierre")}${profile ? metaCard("Experiencia", `${profile.experienceValue} ${profile.experienceLabel}`, "Trayectoria profesional publicada") : metaCard("Estado", statusLabel(tech.status), "Técnico asignado")}</div>${renderRating(metrics)}</section>`;
 }
 
 function renderLoading(seed = {}) {
   const tech = mergeTechnician(seed, {});
   return renderShell({
     tech,
-    summary: "Cargando perfil y actividad visible…",
-    body: `<section class="ui-detail-modal-description-section" aria-busy="true">${sectionHeader("Preparando perfil", "Sin modificar ningún dato")}<div class="ui-detail-modal-meta-grid">${metaCard("Perfil", "Cargando…")}${metaCard("Incidencias", "Buscando…")}${metaCard("Resueltas", "Buscando…")}${metaCard("Contacto", "Validando…")}</div></section>`,
+    summary: "Cargando perfil del técnico…",
+    body: `<section class="ui-detail-modal-description-section" aria-busy="true">${sectionHeader("Preparando perfil", "Sólo métricas agregadas")}<div class="inc-technician-overview-grid">${metaCard("Incidencias resueltas", "…")}${metaCard("Valoración", "0,0 / 5")}${metaCard("Opiniones", "0")}${metaCard("Perfil", "Cargando…")}</div></section>`,
   });
 }
 
@@ -833,44 +694,26 @@ function renderError(seed = {}, message = "") {
   return renderShell({
     tech,
     summary: "Perfil parcialmente disponible",
-    body: `<section class="ui-detail-modal-description-section" role="alert">${sectionHeader("No se pudo completar el perfil", "La incidencia no se ha modificado")}<p class="inc-technician-empty">${escapeHtml(message || "No se pudo cargar la información del técnico.")}</p></section>`,
+    body: `<section class="ui-detail-modal-description-section" role="alert">${sectionHeader("No se pudo completar el perfil", "No se ha expuesto ningún dato de terceros")}<p class="inc-technician-empty">${escapeHtml(message || "No se pudo cargar la información del técnico.")}</p></section>`,
   });
 }
 
-function renderProfile(tech = {}, stats = {}) {
+function renderProfile(tech = {}, metrics = {}) {
   const profile = publicTechnicianProfileFor(tech);
   const email = normalizeEmail(tech.email);
   const phone = text(tech.phone, "");
   const dialPhone = phone.replace(/[^+\d]/g, "");
-  const roleLabel = text(first(tech.publicRole, profile?.role, displayLabel(tech.role, "Técnico")), "Técnico");
-  const recent = array(stats.recent);
-  const resolvedRecent = array(stats.resolvedRecent);
-  const scopeLabel = stats.exact
-    ? `${numberLabel(stats.assigned)} incidencias en el historial accesible`
-    : `${numberLabel(stats.assigned)} incidencias visibles en la muestra accesible`;
-  const historyHint = stats.partial
-    ? "La API ha devuelto una ventana parcial; no se presentan estos datos como histórico total."
-    : "El historial respeta exactamente los permisos de la sesión actual.";
+  const roleLabel = text(first(
+    tech.publicRole,
+    profile?.role,
+    tech.role,
+    "Técnico"
+  ), "Técnico");
 
   const body = `
-    ${renderPublicTrust(tech, stats)}
+    ${renderMetrics(tech, metrics)}
 
-    <section class="ui-detail-modal-description-section">
-      ${sectionHeader("Resumen operativo", scopeLabel)}
-      <div class="ui-detail-modal-meta-grid">
-        ${metaCard("Visibles", numberLabel(stats.assigned), stats.exact ? "Historial accesible" : "Ventana cargada")}
-        ${metaCard("Activas", numberLabel(stats.active), stats.active ? "Requieren seguimiento" : "Sin pendientes activas")}
-        ${metaCard("Resueltas", numberLabel(stats.closed), "Cerradas o resueltas visibles")}
-        ${metaCard("Urgentes", numberLabel(stats.urgent), stats.urgent ? "Prioridad alta o crítica" : "Sin urgencias activas")}
-      </div>
-      <div class="inc-technician-progress-grid">
-        ${progressRow("Resolución en historial visible", stats.resolutionRate, `${numberLabel(stats.closed)} de ${numberLabel(stats.assigned)} visibles resueltas`, "success")}
-        ${progressRow("Carga activa visible", stats.activeRate, `${numberLabel(stats.active)} en seguimiento`, "info")}
-      </div>
-      <p class="inc-technician-section-copy">${escapeHtml(historyHint)}</p>
-    </section>
-
-    <section class="ui-detail-modal-contact-section">
+    <section class="ui-detail-modal-contact-section inc-technician-profile-contact">
       ${sectionHeader("Perfil y contacto", "Datos útiles para el cliente")}
       <div class="ui-detail-modal-meta-grid">
         ${metaCard("Función", roleLabel)}
@@ -882,21 +725,12 @@ function renderProfile(tech = {}, stats = {}) {
         ${contactCard("Correo", email || "No disponible", email ? `mailto:${email}` : "", email ? `Enviar correo a ${email}` : "", "mail")}
         ${contactCard("Teléfono", phone || "No disponible", dialPhone ? `tel:${dialPhone}` : "", phone ? `Llamar a ${phone}` : "", "phone")}
       </div>
-    </section>
-
-    <section class="ui-detail-modal-history-section" data-technician-resolved-history="true">
-      ${sectionHeader("Incidencias resueltas", resolvedRecent.length ? `${numberLabel(resolvedRecent.length)} cierres recientes visibles` : "Sin cierres visibles todavía")}
-      ${resolvedRecent.length ? `<div class="inc-technician-ticket-grid">${resolvedRecent.map((ticket) => ticketCard(ticket, { resolved: true })).join("")}</div>` : `<p class="inc-technician-empty">Todavía no hay incidencias resueltas visibles para este técnico en el ámbito de tu cuenta.</p>`}
-    </section>
-
-    <section class="ui-detail-modal-history-section">
-      ${sectionHeader("Actividad reciente", recent.length ? `${numberLabel(recent.length)} últimas incidencias visibles` : "Sin actividad reciente")}
-      ${recent.length ? `<div class="inc-technician-ticket-grid">${recent.map((ticket) => ticketCard(ticket)).join("")}</div>` : `<p class="inc-technician-empty">No hay actividad reciente disponible para este técnico.</p>`}
     </section>`;
 
-  const summary = stats.closed > 0
-    ? `${numberLabel(stats.active)} activa${stats.active === 1 ? "" : "s"} · ${numberLabel(stats.closed)} resuelta${stats.closed === 1 ? "" : "s"} visible${stats.closed === 1 ? "" : "s"}`
-    : `${numberLabel(stats.active)} incidencia${stats.active === 1 ? "" : "s"} activa${stats.active === 1 ? "" : "s"} · seguimiento en curso`;
+  const resolvedSummary = metrics.resolvedTotalKnown
+    ? `${numberLabel(metrics.resolvedTotal)} resuelta${metrics.resolvedTotal === 1 ? "" : "s"}`
+    : "resoluciones sin publicar";
+  const summary = `${resolvedSummary} · ${ratingLabel(metrics.ratingAverage)} / ${TECHNICIAN_RATING_MAX}`;
 
   return renderShell({ tech, body, summary });
 }
@@ -904,7 +738,13 @@ function renderProfile(tech = {}, stats = {}) {
 function renderShell({ tech = {}, body = "", summary = "" } = {}) {
   const name = text(tech.name, "Técnico");
   const profile = publicTechnicianProfileFor(tech);
-  const role = text(first(tech.publicRole, profile?.role, displayLabel(tech.role, "Técnico")), "Técnico");
+  const role = text(first(
+    tech.publicRole,
+    profile?.role,
+    tech.role,
+    "Técnico"
+  ), "Técnico");
+
   return `
     <section id="${ROOT_ID}" class="ui-detail-modal-root" data-technician-profile-root="true" data-technician-profile-version="${INCIDENCIAS_TECHNICIAN_PROFILE_VERSION}">
       <div class="ui-detail-modal-overlay" data-technician-profile-overlay="true">
@@ -968,6 +808,7 @@ function modalPanel() {
 function paint(html = "", { focus = false } = {}) {
   const host = ensureHost();
   if (!host) return false;
+
   const template = document.createElement("template");
   template.innerHTML = String(html || "").trim();
   const nextRoot = template.content.querySelector(`#${ROOT_ID}`);
@@ -986,6 +827,7 @@ function paint(html = "", { focus = false } = {}) {
 
   lockBody();
   queueMicrotask(() => synchronizeAvatars(host));
+
   if (focus) {
     queueMicrotask(() => modalPanel()?.focus?.({ preventScroll: true }));
   }
@@ -1050,22 +892,6 @@ function isSupportedTrigger(trigger = null) {
   if (mountRoot?.contains?.(trigger)) return true;
   if (observedModalHost?.contains?.(trigger)) return true;
   return Boolean(trigger.closest?.(DETAIL_ROOT));
-}
-
-function decoratePriorityBadges(root = mountRoot) {
-  for (const badge of root?.querySelectorAll?.(PRIORITY_BADGE) || []) {
-    const label = text(badge.textContent, "");
-    badge.classList.add("incidencias-meta-pill--action");
-    if (label) badge.title = `Prioridad: ${label}`;
-  }
-}
-
-function decorateDetailPriorityChips(root = observedModalHost) {
-  for (const chip of root?.querySelectorAll?.(DETAIL_PRIORITY) || []) {
-    const label = text(chip.textContent, "");
-    chip.classList.add("incidencias-meta-pill--action");
-    if (label) chip.title = `Prioridad: ${label}`;
-  }
 }
 
 function decorateTechnicianBadges(root = mountRoot) {
@@ -1141,9 +967,7 @@ function sync() {
   frame = 0;
   if (!browser() || !mounted) return;
   syncModalObserver();
-  decoratePriorityBadges();
   decorateTechnicianBadges();
-  decorateDetailPriorityChips();
   decorateDetailTechnicianCards();
 
   if (
@@ -1183,11 +1007,10 @@ async function loadProfile(trigger = null) {
 
   try {
     const api = await incidenceApi();
-    let sourceTicket = null;
     let snapshot = seed;
 
     try {
-      sourceTicket = await api.loadIncidenciaDetail(id, {
+      const sourceTicket = await api.loadIncidenciaDetail(id, {
         force: false,
         cache: true,
       });
@@ -1198,7 +1021,7 @@ async function loadProfile(trigger = null) {
         };
       }
     } catch {
-      /* El perfil puede continuar con la identidad del trigger. */
+      /* El perfil puede continuar con la identidad segura del trigger. */
     }
 
     if (sequence !== requestSeq) return false;
@@ -1211,6 +1034,7 @@ async function loadProfile(trigger = null) {
           { dedupe: true }
         );
       } catch {
+        /* Los usuarios no admin pueden no tener acceso al detalle de Usuarios. */
         user = null;
       }
     }
@@ -1218,10 +1042,10 @@ async function loadProfile(trigger = null) {
     if (sequence !== requestSeq) return false;
 
     const tech = mergeTechnician(snapshot, user || {});
-    const history = await loadTechnicianHistory(api, tech, sourceTicket);
+    const metrics = await loadPublicTechnicianMetrics(api, tech);
 
     if (sequence !== requestSeq) return false;
-    paint(renderProfile(tech, history));
+    paint(renderProfile(tech, metrics));
     return true;
   } catch (error) {
     if (sequence !== requestSeq) return false;
@@ -1371,11 +1195,15 @@ export function getIncidenciasTechnicianProfileSnapshot() {
     observerScope: "router-view+incidencias-modal-host",
     cssAuthority: "ui-detail-modal+feature-token-composition",
     avatarAuthority: "global-avatar-system",
-    historyAuthority: "role-scoped-incidencias-api",
-    resolvedHistory: true,
-    canonicalPublicProfile: true,
-    syntheticRatings: false,
-    clientSafeProfileFields: true,
+    metricAuthority: "aggregate-first-incidencias-api",
+    publicSafeSurface: true,
+    thirdPartyTicketDetailsRendered: false,
+    resolvedTicketCardsRendered: false,
+    activityTicketCardsRendered: false,
+    ratingMax: TECHNICIAN_RATING_MAX,
+    ratingInitialAverage: TECHNICIAN_RATING_INITIAL.average,
+    ratingInitialCount: TECHNICIAN_RATING_INITIAL.count,
+    ratingSubmissionEnabled: false,
     detailModalIntegrated: Boolean(observedModalHost),
     modalOpen: Boolean(browser() && document.getElementById(ROOT_ID)),
   });

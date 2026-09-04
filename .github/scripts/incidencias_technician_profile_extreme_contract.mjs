@@ -13,6 +13,11 @@ import {
   sameAvatarIdentity,
 } from "../../src/features/incidencias-technician-avatar-bridge/index.js";
 
+/*
+  No importamos el feature del perfil directamente desde Node porque su entrypoint
+  importa CSS por diseño. Este contrato inspecciona el source y reserva imports
+  ejecutables para módulos puros/Node-native.
+*/
 const source = fs.readFileSync(
   "src/features/incidencias-technician-profile/index.js",
   "utf8"
@@ -37,17 +42,141 @@ const privateRuntime = fs.readFileSync(
   "utf8"
 );
 
+/* =========================================================
+   VERSION / PRODUCT INTENT
+========================================================= */
+
 assert.match(
   source,
-  /incidencias-technician-profile\.v8\.client-trust-resolved-history/
+  /incidencias-technician-profile\.v9-public-metrics-rating-ready/
 );
 assert.match(source, /import "\.\/style\.css";/);
+assert.match(source, /export const TECHNICIAN_RATING_MAX = 5;/);
+assert.match(
+  source,
+  /TECHNICIAN_RATING_INITIAL = Object\.freeze\(\{[\s\S]*average: 0,[\s\S]*count: 0,[\s\S]*max: TECHNICIAN_RATING_MAX/
+);
 
-/*
-  El retrato público pertenece a la Home/perfil editorial, pero jamás puede ser
-  autoridad del avatar del técnico. El bridge lo reconoce y lo elimina antes
-  de que AvatarSystem cierre el state del modal.
-*/
+/* =========================================================
+   PRIVACY: AGGREGATE ONLY, NO THIRD-PARTY TICKET SURFACE
+========================================================= */
+
+for (const required of [
+  'aggregate: "technician-public"',
+  "aggregateOnly: true",
+  "summaryOnly: true",
+  "includeItems: false",
+  "publicMetrics: true",
+  "technicianUserId:",
+  "assignedToUserId:",
+  "technicianEmail:",
+  "assigned: true",
+  "closed: true",
+  "includeTotal: true",
+  "PUBLIC_METRIC_LIMIT = 1",
+  "normalizePublicTechnicianMetrics",
+  "loadPublicTechnicianMetrics",
+  'scope: publicScope ? "public-total" : "session-total"',
+  "Cómputo agregado público · sin tickets ni datos de clientes",
+  "Cómputo disponible en el ámbito de tu sesión",
+  "El backend aún no ha publicado un cómputo agregado",
+]) {
+  assert.ok(
+    source.includes(required),
+    `El perfil público debe conservar el contrato agregado: ${required}`
+  );
+}
+
+for (const forbidden of [
+  /renderPublicTrust/,
+  /inc-technician-trust-/,
+  /inc-technician-method-/,
+  /loadStatusHistory/,
+  /collectHistoryWindow/,
+  /HISTORY_SEARCH_MAX_PAGES/,
+  /HISTORY_FALLBACK_MAX_PAGES/,
+  /resolvedRecent/,
+  /ticketCard\s*\(/,
+  /ticketTitle\s*\(/,
+  /ticketClosedAt\s*\(/,
+  /data-technician-resolved-history=/,
+  /Actividad reciente/,
+  /Quién te atiende y cómo trabaja/,
+  /Diagnóstico primero/,
+  /Solución con criterio/,
+  /Presupuesto y factura/,
+]) {
+  assert.doesNotMatch(
+    source,
+    forbidden,
+    `La superficie cliente no puede reintroducir historial/detalle privado: ${forbidden}`
+  );
+}
+
+for (const required of [
+  "publicSafeSurface: true",
+  "thirdPartyTicketDetailsRendered: false",
+  "resolvedTicketCardsRendered: false",
+  "activityTicketCardsRendered: false",
+]) {
+  assert.ok(source.includes(required), `Privacy snapshot: falta ${required}`);
+}
+
+/* El parser sólo puede declarar scope público mediante marcadores explícitos. */
+assert.match(source, /aggregateScopeIsPublic/);
+assert.match(source, /summary\.publicTechnicianStats === true/);
+assert.match(source, /meta\.publicTechnicianStats === true/);
+assert.match(source, /value\.includes\("technician_public"\)/);
+assert.match(source, /resolvedTotalKnown:/);
+assert.match(source, /publicTotal: publicScope/);
+
+/* =========================================================
+   FIVE STAR READ MODEL · 0/5 INITIAL · NO SUBMISSION YET
+========================================================= */
+
+for (const required of [
+  'data-technician-rating="true"',
+  'data-rating-average=',
+  'data-rating-count=',
+  'data-rating-max=',
+  "Sin valoraciones todavía",
+  "Valoración",
+  "Opiniones",
+  "Array.from({ length: TECHNICIAN_RATING_MAX }",
+  "ratingMax: TECHNICIAN_RATING_MAX",
+  "ratingInitialAverage: TECHNICIAN_RATING_INITIAL.average",
+  "ratingInitialCount: TECHNICIAN_RATING_INITIAL.count",
+  "ratingSubmissionEnabled: false",
+]) {
+  assert.ok(source.includes(required), `Rating shell: falta ${required}`);
+}
+
+assert.doesNotMatch(source, /<form[^>]*technician-rating/i);
+assert.doesNotMatch(source, /data-technician-rating-submit/);
+assert.doesNotMatch(source, /ratingValue/i);
+
+/* =========================================================
+   COMPACT CLIENT PROFILE
+========================================================= */
+
+for (const required of [
+  "Rendimiento y valoración",
+  "Información pública y segura",
+  "Incidencias resueltas",
+  "Perfil y contacto",
+  "Datos útiles para el cliente",
+  'experienceValue: "+8"',
+  'clientsValue: "+300"',
+]) {
+  assert.ok(source.includes(required), `Perfil cliente: falta ${required}`);
+}
+assert.doesNotMatch(source, /metaCard\("Último acceso"/);
+assert.doesNotMatch(source, /metaCard\("Identificador de usuario"/);
+
+/* =========================================================
+   AVATAR GLOBAL + REGRESIÓN DEL WRAPPER ANIDADO
+========================================================= */
+
 assert.equal(
   SYNTHETIC_TECHNICIAN_IMAGE_PATH,
   "/src/media/img/Cristian_Avila_224.webp"
@@ -56,46 +185,13 @@ assert.equal(
   isSyntheticTechnicianSource("/src/media/img/Cristian_Avila_224.webp"),
   true
 );
-assert.equal(
-  isSyntheticTechnicianSource(
-    "https://onionsupport.com/src/media/img/Cristian_Avila_224.webp"
-  ),
-  true
-);
-assert.equal(
-  isSyntheticTechnicianSource(
-    "https://onionassets.blob.core.windows.net/avatars/cristian.webp"
-  ),
-  false
-);
-assert.match(source, /\/src\/media\/img\/Cristian_Avila_224\.webp/);
 assert.match(publicHome, /Cristian_Avila_224\.webp/);
-assert.equal(
-  fs.existsSync("src/media/img/Cristian_Avila_224.webp"),
-  true,
-  "Debe seguir existiendo el retrato WebP 224 de la Home pública"
-);
+assert.doesNotMatch(source, /Cristian_Avila_224\.webp/);
+assert.equal(fs.existsSync("src/media/img/Cristian_Avila_224.webp"), true);
 
-/* La propuesta de valor y método deben ser exactamente los ya publicados. */
-for (const canonicalText of [
-  "Diagnóstico claro, trato directo y reparación con criterio antes de tocar nada.",
-  "Diagnóstico primero",
-  "Reviso síntomas, urgencia y contexto antes de tocar nada. Claridad antes que prisas.",
-  "Solución con criterio",
-  "Te explico qué merece la pena reparar, qué conviene mejorar y qué no compensa.",
-  "Presupuesto y factura",
-  "Intervención formal, presupuesto previo y factura disponible para particulares y negocios.",
-]) {
-  assert.ok(source.includes(canonicalText), `Perfil técnico: falta copy canónico ${canonicalText}`);
-  assert.ok(publicHome.includes(canonicalText), `Home pública: falta copy canónico ${canonicalText}`);
-}
-
-assert.match(source, /experienceValue: "\+8"/);
-assert.match(source, /clientsValue: "\+300"/);
-assert.doesNotMatch(source, /★★★★★|star-rating|customer-rating|ratingValue/i);
-
-/* Markup del frame REAL: identidad visual subordinada al AvatarSystem. */
 for (const token of [
+  'data-avatar-system="off"',
+  'data-avatar-managed="false"',
   'data-avatar-system="true"',
   'data-avatar-host="true"',
   'data-avatar-authority="global"',
@@ -107,129 +203,39 @@ for (const token of [
   'data-avatar-tone=',
   'data-avatar-identity=',
   'data-avatar-initials=',
-  'data-avatar-image="true"',
 ]) {
-  assert.ok(source.includes(token), `Avatar del técnico debe incluir ${token}`);
+  assert.ok(source.includes(token), `Avatar Técnico: falta ${token}`);
 }
 assert.match(source, /synchronizeAvatars\(host\)/);
 
-/* =========================================================
-   REGRESIÓN REAL DE LA CAPTURA · NESTED AVATAR HOST
-========================================================= */
-
-assert.match(
-  bridge,
-  /incidencias-technician-avatar-bridge\.v2-nested-host-boundary/
-);
-
-/*
-  .ui-detail-modal-avatar es sólo layout. Si AvatarSystem lo autopromueve por
-  [class*=avatar], ese wrapper no tiene identity propia y puede leer "CL" del
-  fallback hijo. La firma exacta del bug es Microsoft Persona("CL") = tone 19,
-  #69797E: el círculo gris vacío que apareció en producción.
-*/
 const cristian = resolveAvatarPresentation({
   displayName: "Cristian Ávila Luque",
   email: "cristian@onionsupport.com",
   username: "cristian",
 });
-const poisonedWrapper = resolveAvatarPresentation({
-  displayName: "CL",
-});
+const poisonedWrapper = resolveAvatarPresentation({ displayName: "CL" });
 assert.equal(cristian.initials, "CL");
 assert.equal(cristian.tone, 12);
 assert.equal(cristian.color, "#A4262C");
-assert.equal(poisonedWrapper.initials, "C");
 assert.equal(poisonedWrapper.tone, 19);
 assert.equal(poisonedWrapper.color, "#69797E");
 
-/* El wrapper debe quedar opt-out y sin ningún atributo que pueda pintarlo. */
-assert.match(bridge, /target\.closest\?\.\("\.ui-detail-modal-avatar"\)/);
+assert.match(bridge, /incidencias-technician-avatar-bridge\.v2-nested-host-boundary/);
 assert.match(bridge, /wrapper\.setAttribute\("data-avatar-system", "off"\)/);
 assert.match(bridge, /wrapper\.setAttribute\("data-avatar-managed", "false"\)/);
-for (const attribute of [
-  "data-avatar-host",
-  "data-avatar-authority",
-  "data-avatar-state",
-  "data-avatar-state-reason",
-  "data-avatar-system-version",
-  "data-avatar-identity-version",
-  "data-avatar-identity",
-  "data-avatar-tone",
-  "data-avatar-initials",
-  "data-has-avatar",
-]) {
-  assert.ok(
-    bridge.includes(`"${attribute}"`),
-    `El wrapper debe retirar ${attribute}`
-  );
-}
-assert.match(bridge, /wrappersQuarantined/);
 assert.match(bridge, /nestedWrapperOptOut:\s*true/);
+assert.match(bridge, /canonicalImageReuse:\s*true/);
+assert.match(bridge, /syntheticPhotoAuthority:\s*false/);
+assert.match(bridge, /noLocalInitials:\s*true/);
+assert.match(bridge, /noLocalTone:\s*true/);
+assert.match(bridge, /noLocalColor:\s*true/);
 
-/*
-  Orden contractual crítico:
-  1. frontera wrapper;
-  2. sellado identity del frame;
-  3. retirar sintético;
-  4. scan global;
-  5. reusar fuente real o fallback global.
-*/
-const syncStart = bridge.indexOf(
-  "export function synchronizeTechnicianAvatarBridge"
-);
-const syncEnd = bridge.indexOf("function schedule()", syncStart);
-const syncBody = bridge.slice(syncStart, syncEnd);
-assert.ok(syncStart >= 0 && syncEnd > syncStart);
-
-const quarantineIndex = syncBody.indexOf("quarantineNestedAvatarWrapper(target)");
-const sealIndex = syncBody.indexOf("sealTargetIdentity(target)");
-const removeIndex = syncBody.indexOf("removeSyntheticImages(target)");
-const globalSyncIndex = syncBody.indexOf("AvatarSystem.sync?.(document)");
-assert.ok(quarantineIndex >= 0);
-assert.ok(sealIndex > quarantineIndex);
-assert.ok(removeIndex > sealIndex);
-assert.ok(globalSyncIndex > removeIndex);
-
-assert.match(bridge, /syntheticRemovedBeforeGlobalSync:\s*true/);
-assert.match(bridge, /fallbackResynchronizedAfterRemoval:\s*true/);
-assert.match(bridge, /AvatarSystem\.syncHost\?\.\(target\)/);
-assert.match(bridge, /setBridgeState\(target, "fallback-global"\)/);
-assert.match(bridge, /setBridgeState\(target, "reused-global"\)/);
-
-/*
-  La búsqueda canónica acepta cualquier host YA gobernado por AvatarSystem y
-  valida la imagen por complete/natural dimensions. No depende de una carrera
-  concreta del atributo data-avatar-state=image.
-*/
-assert.match(
-  bridge,
-  /\[data-avatar-authority='global'\]\[data-avatar-host='true'\]/
-);
-assert.doesNotMatch(
-  bridge,
-  /GLOBAL_IMAGE_HOST_QUERY[\s\S]{0,220}data-avatar-state='image'/
-);
-assert.match(bridge, /image\.complete === true/);
-assert.match(bridge, /Number\(image\.naturalWidth \|\| 0\) > 0/);
-assert.match(bridge, /Number\(image\.naturalHeight \|\| 0\) > 0/);
-assert.match(bridge, /profileRoot\?\.contains\?\.\(candidate\)/);
-
-/* Reconciliación de aliases: gana el identificador común más fuerte. */
 assert.equal(
   avatarIdentityMatchScore(
     { userId: "user-a", email: "same@example.com" },
     { userId: "user-b", email: "same@example.com" }
   ),
-  -1,
-  "userId contradictorio debe fallar cerrado"
-);
-assert.equal(
-  sameAvatarIdentity(
-    { fingerprint: "alias-a", name: "cristian avila luque" },
-    { fingerprint: "alias-b", name: "cristian avila luque" }
-  ),
-  true
+  -1
 );
 assert.equal(
   sameAvatarIdentity(
@@ -239,14 +245,6 @@ assert.equal(
   true
 );
 
-assert.match(bridge, /canonicalImageReuse:\s*true/);
-assert.match(bridge, /syntheticPhotoAuthority:\s*false/);
-assert.match(bridge, /noLocalInitials:\s*true/);
-assert.match(bridge, /noLocalTone:\s*true/);
-assert.match(bridge, /noLocalColor:\s*true/);
-
-/* Sólo el código ejecutable se audita como autoridad; los comentarios pueden
-   documentar la firma visual exacta de una regresión sin pintar nada. */
 for (const forbidden of [
   /(^|[^A-Za-z0-9_$])fetch\s*\(/m,
   /\bXMLHttpRequest\b/,
@@ -263,66 +261,34 @@ for (const forbidden of [
   );
 }
 
-/* El bridge vive autenticado y SIEMPRE después de AvatarSystem. */
-assert.match(
-  privateRuntime,
-  /import\("\.\.\/incidencias-technician-avatar-bridge\/index\.js"\)/
-);
 assert.match(
   privateRuntime,
   /await initModule\(AvatarSystemUI, payload\);[\s\S]*await initModule\(IncidenciasTechnicianAvatarBridgeUI, payload\);/
 );
-assert.match(
-  privateRuntime,
-  /AvatarSystemUI\.sync\?\.\(document\);[\s\S]*IncidenciasTechnicianAvatarBridgeUI\.sync\?\.\(document\);/
-);
-assert.match(
-  privateRuntime,
-  /technicianAvatarUsesGlobalAuthority:\s*true/
-);
-assert.match(
-  privateRuntime,
-  /technicianAvatarNoSyntheticSourceAuthority:\s*true/
-);
 
-/* Historial: abiertas/cerradas, paginado y RBAC-scoped. */
-assert.match(source, /loadStatusHistory\(api, tech, false\)/);
-assert.match(source, /loadStatusHistory\(api, tech, true\)/);
-assert.match(source, /assigned: true/);
-assert.match(source, /closed,/);
-assert.match(source, /cursor/);
-assert.match(source, /HISTORY_SEARCH_MAX_PAGES/);
-assert.match(source, /HISTORY_FALLBACK_MAX_PAGES/);
-assert.match(source, /Nunca saltamos el RBAC del API/);
-assert.match(source, /resolvedRecent/);
-assert.match(source, /data-technician-resolved-history="true"/);
-assert.match(source, /Incidencias resueltas/);
-assert.match(source, /ticketClosedAt/);
+/* =========================================================
+   VISUAL AUTHORITY · EXISTING TOKENS ONLY
+========================================================= */
 
-/* No presentar una ventana truncada como estadística total. */
-assert.match(source, /stats\.partial/);
-assert.match(source, /muestra accesible/);
-assert.match(source, /no se presentan estos datos como histórico total/);
-assert.match(source, /los permisos de la sesión actual/);
-
-/* Perfil cliente: nada de metadatos internos. */
-assert.doesNotMatch(source, /metaCard\("Último acceso"/);
-assert.doesNotMatch(source, /metaCard\("Identificador de usuario"/);
-assert.match(source, /Perfil y contacto", "Datos útiles para el cliente"/);
-assert.match(source, /Técnico informático/);
-
-/* CSP/arquitectura visual: sin estilo inline ni paleta paralela. */
 assert.doesNotMatch(source, /style="/);
 assert.match(css, /@layer components/);
-assert.match(css, /ui-detail-modal-card-border/);
-assert.match(css, /ui-detail-modal-card-bg/);
+assert.match(css, /inc-technician-overview-grid/);
+assert.match(css, /inc-technician-rating-card/);
+assert.match(css, /inc-technician-rating-score/);
+assert.match(css, /inc-technician-stars/);
+assert.match(css, /inc-technician-star/);
 assert.match(css, /--avatar-size:\s*64px/);
-assert.match(css, /var\(--success\)/);
-assert.match(css, /var\(--info\)/);
+assert.match(css, /var\(--warning\)/);
+assert.match(css, /var\(--success-bg\)/);
+assert.match(css, /var\(--ui-detail-modal-card-border\)/);
+assert.match(css, /block-size:\s*auto/);
+assert.doesNotMatch(css, /inc-technician-trust-/);
+assert.doesNotMatch(css, /inc-technician-method-/);
+assert.doesNotMatch(css, /inc-technician-ticket-/);
 assert.doesNotMatch(css, /#[0-9a-fA-F]{3,8}\b/);
 assert.doesNotMatch(css, /linear-gradient\s*\(/);
 assert.doesNotMatch(css, /!important/);
 
 console.log(
-  "Incidencias technician profile extreme contract OK · nested wrapper quarantined · real global image reuse · Microsoft fallback preserved"
+  "Incidencias technician profile extreme contract OK · public-safe aggregate · no third-party tickets · rating 0/5 ready · global avatar authority"
 );

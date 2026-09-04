@@ -86,7 +86,13 @@
   max-block-size: 48px;
   margin: 0;
   padding: 0;
-  border-radius: 16px;
+  border: 0;
+  border-color: transparent;
+  border-radius: 50%;
+  background: transparent;
+  background-image: none;
+  box-shadow: none;
+  transition: none;
 }
 
 .public-home .public-home-nav-account-slot .public-support-account {
@@ -200,6 +206,29 @@
 .public-home .public-home-account-menu-wrap.is-open > [data-public-home-account-toggle]::before {
   opacity: 1;
   transform: translateY(-25%) rotate(225deg);
+}
+
+/*
+  El avatar del topbar queda flotando: el área de clic sigue siendo 48px,
+  pero el toggle ya no dibuja caja, hover ni flecha alrededor del avatar.
+*/
+.public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle],
+.public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]:hover,
+.public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]:focus-visible,
+.public-home .public-home-nav-account-slot .public-home-account-menu-wrap.is-open > [data-public-home-account-toggle] {
+  border: 0;
+  border-color: transparent;
+  border-radius: 50%;
+  background: transparent;
+  background-image: none;
+  box-shadow: none;
+  transform: none;
+  transition: none;
+}
+
+.public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]:focus-visible {
+  outline: 2px solid rgb(52 212 255 / .78);
+  outline-offset: 3px;
 }
 
 .public-home .public-support-account-name {

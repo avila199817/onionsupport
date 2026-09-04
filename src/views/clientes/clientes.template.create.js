@@ -1,3 +1,4 @@
+import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 /* =========================================================
    Onion Support - Clientes Create Template
    Archivo: /src/views/clientes/clientes.template.create.js
@@ -432,52 +433,6 @@ function normalizeClienteType(
   }
 
   return "";
-}
-
-function hashText(
-  value = ""
-) {
-  const text =
-    cleanText(
-      value,
-      ""
-    );
-
-  let hash = 0;
-
-  for (
-    let index = 0;
-    index < text.length;
-    index += 1
-  ) {
-    hash =
-      ((hash << 5) - hash) +
-      text.charCodeAt(index);
-
-    hash |= 0;
-  }
-
-  return Math.abs(hash);
-}
-
-function initialsFrom(
-  value = ""
-) {
-  return (
-    cleanText(value, "")
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map(
-        (part) =>
-          part[0]
-            ?.toUpperCase() ||
-          ""
-      )
-      .join("")
-      .slice(0, 2) ||
-    "ON"
-  );
 }
 
 /* =========================================================
@@ -961,6 +916,8 @@ function normalizeUserResult(
       "user"
     );
 
+  const presentation = resolveAvatarPresentation({ name, email, userId, username });
+
   return {
     ...raw,
 
@@ -1023,17 +980,8 @@ function normalizeUserResult(
       avatarUrl ||
       "",
 
-    initials:
-      trimField(
-        raw.initials,
-        2,
-        initialsFrom(name)
-      ),
-
-    tone:
-      hashText(
-        `${userId}:${clienteId}:${email}:${name}`
-      ) % 10,
+    initials: presentation.initials,
+    tone: presentation.tone,
   };
 }
 
@@ -1962,29 +1910,24 @@ function renderUserAvatar(
     current.userId ||
     "Usuario";
 
-  const initials =
-    current.initials ||
-    initialsFrom(name);
-
-  const tone =
-    Number.isFinite(
-      Number(
-        current.tone
-      )
-    )
-      ? Math.abs(
-          Number(
-            current.tone
-          )
-        ) % 10
-      : hashText(
-          `${current.userId}:${name}`
-        ) % 10;
+  const presentation = resolveAvatarPresentation({
+    ...current,
+    name,
+    displayName: name,
+  });
 
   return `
     <span
-      class="cli-create-user-avatar inc-create-user-avatar cli-create-user-avatar-tone-${attr(String(tone))} ${attr(extraClass)}"
-      data-avatar-tone="${attr(String(tone))}"
+      class="cli-create-user-avatar inc-create-user-avatar ${attr(extraClass)}"
+      data-avatar-system="true"
+      data-avatar-host="true"
+      data-avatar-name="${attr(presentation.name)}"
+      data-avatar-email="${attr(presentation.email)}"
+      data-avatar-user-id="${attr(presentation.userId)}"
+      data-avatar-username="${attr(presentation.username)}"
+      data-avatar-initials="${attr(presentation.initials)}"
+      data-avatar-identity="${attr(presentation.fingerprint)}"
+      data-avatar-tone="${attr(String(presentation.tone))}"
       aria-hidden="true"
     >
       ${
@@ -2004,7 +1947,7 @@ function renderUserAvatar(
       }
 
       <span class="cli-create-user-avatar-fallback inc-create-user-avatar-fallback">
-        ${escapeHtml(initials)}
+        ${escapeHtml(presentation.initials)}
       </span>
     </span>
   `;

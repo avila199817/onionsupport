@@ -1,3 +1,4 @@
+import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
 /* =========================================================
    Onion Support - Usuarios Detail Modal
    Archivo: /src/views/usuarios/usuarios.template.modal.js
@@ -25,6 +26,7 @@
 
 import { AppCore } from "../../core/index.js";
 import { normalizeUsuarioModel } from "./usuarios.api.js";
+import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 
 /* =========================================================
    META / ACTIONS
@@ -71,17 +73,18 @@ const modalState = {
 
   lastActiveElement: null,
 
-  bodyLocked: false,
-  previousBodyOverflow: "",
-  previousBodyClasses: new Map(),
 
   clickHandler: null,
-  errorHandler: null,
-  keydownHandler: null,
 
   refreshSeq: 0,
   refreshTimer: 0,
 };
+
+const modalLifecycle = createModalLifecycle({
+  getPanel: () => modalState.panel,
+  onEscape: () => closeUsuariosModal(),
+  bodyClasses: BODY_LOCK_CLASSES,
+});
 
 let busAttached = false;
 const busUnsubscribers = [];
@@ -213,54 +216,6 @@ function escapeHtml(value = "") {
 function attr(value = "") {
   return escapeHtml(
     cleanText(value, "")
-  );
-}
-
-function hashText(value = "") {
-  const text =
-    cleanText(value, "usuario");
-
-  let hash = 2166136261;
-
-  for (
-    let index = 0;
-    index < text.length;
-    index += 1
-  ) {
-    hash ^= text.charCodeAt(index);
-
-    hash +=
-      (hash << 1) +
-      (hash << 4) +
-      (hash << 7) +
-      (hash << 8) +
-      (hash << 24);
-  }
-
-  return Math.abs(
-    hash >>> 0
-  );
-}
-
-function initialsFrom(value = "") {
-  const parts =
-    cleanText(value, "US")
-      .split(/\s+/)
-      .filter(Boolean);
-
-  if (parts.length >= 2) {
-    return (
-      `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`
-        .toUpperCase() ||
-      "US"
-    );
-  }
-
-  return (
-    parts[0]
-      ?.slice(0, 2)
-      .toUpperCase() ||
-    "US"
   );
 }
 
@@ -1351,13 +1306,13 @@ function renderAvatar(detail = {}) {
   const avatar =
     getAvatar(detail);
 
-  const initials =
-    initialsFrom(name);
-
-  const tone =
-    hashText(
-      `${getUserId(detail)}:${getEmail(detail)}:${name}`
-    ) % 10;
+  const presentation = resolveAvatarPresentation({
+    ...detail,
+    name,
+    displayName: name,
+    userId: getUserId(detail),
+    email: getEmail(detail),
+  });
 
   return `
     <div
@@ -1367,9 +1322,17 @@ function renderAvatar(detail = {}) {
       <div
         class="usuarios-modal-avatar-frame ui-detail-modal-avatar-frame${avatar ? "" : " usuarios-modal-avatar-frame--fallback ui-detail-modal-avatar-frame--fallback"}"
         data-usuarios-avatar-frame="true"
+        data-avatar-system="true"
+        data-avatar-host="true"
+        data-avatar-name="${attr(presentation.name)}"
+        data-avatar-email="${attr(presentation.email)}"
+        data-avatar-user-id="${attr(presentation.userId)}"
+        data-avatar-username="${attr(presentation.username)}"
+        data-avatar-initials="${attr(presentation.initials)}"
+        data-avatar-identity="${attr(presentation.fingerprint)}"
         data-has-avatar="${avatar ? "true" : "false"}"
         data-fallback="${avatar ? "false" : "true"}"
-        data-avatar-tone="${attr(String(tone))}"
+        data-avatar-tone="${attr(String(presentation.tone))}"
       >
         ${
           avatar
@@ -1393,7 +1356,7 @@ function renderAvatar(detail = {}) {
         <span
           class="usuarios-modal-avatar-fallback ui-detail-modal-avatar-fallback"
         >
-          ${escapeHtml(initials)}
+          ${escapeHtml(presentation.initials)}
         </span>
       </div>
     </div>
@@ -2943,103 +2906,11 @@ function patchMountedShell(
 ========================================================= */
 
 function lockBody() {
-  if (!isBrowser()) {
-    return false;
-  }
-
-  if (
-    modalState.bodyLocked
-  ) {
-    return true;
-  }
-
-  try {
-    modalState.previousBodyOverflow =
-      document.body.style.overflow ||
-      "";
-
-    modalState.previousBodyClasses =
-      new Map();
-
-    for (
-      const className
-      of BODY_LOCK_CLASSES
-    ) {
-      modalState.previousBodyClasses.set(
-        className,
-        document.body.classList.contains(
-          className
-        )
-      );
-
-      document.body.classList.add(
-        className
-      );
-    }
-
-    document.body.style.overflow =
-      "hidden";
-
-    modalState.bodyLocked =
-      true;
-
-    return true;
-  } catch {
-    return false;
-  }
+  return modalLifecycle.activate({ opener: modalState.lastActiveElement });
 }
 
 function unlockBody() {
-  if (!isBrowser()) {
-    modalState.bodyLocked =
-      false;
-
-    return false;
-  }
-
-  if (
-    !modalState.bodyLocked
-  ) {
-    return true;
-  }
-
-  try {
-    for (
-      const className
-      of BODY_LOCK_CLASSES
-    ) {
-      const existedBefore =
-        modalState.previousBodyClasses.get(
-          className
-        ) === true;
-
-      if (!existedBefore) {
-        document.body.classList.remove(
-          className
-        );
-      }
-    }
-
-    document.body.style.overflow =
-      modalState.previousBodyOverflow ||
-      "";
-
-    modalState.previousBodyOverflow =
-      "";
-
-    modalState.previousBodyClasses =
-      new Map();
-
-    modalState.bodyLocked =
-      false;
-
-    return true;
-  } catch {
-    modalState.bodyLocked =
-      false;
-
-    return false;
-  }
+  return modalLifecycle.deactivate({ restoreFocus: false });
 }
 
 /* =========================================================
@@ -3095,134 +2966,10 @@ function focusPanel() {
 }
 
 function restoreFocus() {
-  const target =
-    modalState.lastActiveElement;
-
-  modalState.lastActiveElement =
-    null;
-
-  if (
-    !target?.focus ||
-    !target?.isConnected
-  ) {
-    return false;
-  }
-
-  try {
-    target.focus({
-      preventScroll: true,
-    });
-
-    return true;
-  } catch {
-    try {
-      target.focus();
-      return true;
-    } catch {
-      return false;
-    }
-  }
+  const target = modalState.lastActiveElement;
+  modalState.lastActiveElement = null;
+  return restoreModalFocus(target);
 }
-
-function getFocusableElements() {
-  const panel =
-    modalState.panel;
-
-  if (!panel) {
-    return [];
-  }
-
-  return Array.from(
-    panel.querySelectorAll(
-      [
-        "a[href]",
-        "button:not([disabled])",
-        "input:not([disabled])",
-        "select:not([disabled])",
-        "textarea:not([disabled])",
-        "[tabindex]:not([tabindex='-1'])",
-      ].join(",")
-    )
-  ).filter(
-    (element) =>
-      element &&
-      !element.hidden &&
-      element.getAttribute?.(
-        "aria-hidden"
-      ) !== "true" &&
-      element.getAttribute?.(
-        "aria-disabled"
-      ) !== "true"
-  );
-}
-
-function trapFocus(event = null) {
-  if (
-    event?.key !== "Tab" ||
-    !modalState.isOpen
-  ) {
-    return false;
-  }
-
-  const focusable =
-    getFocusableElements();
-
-  if (!focusable.length) {
-    event.preventDefault?.();
-    focusPanel();
-
-    return true;
-  }
-
-  const firstElement =
-    focusable[0];
-
-  const lastElement =
-    focusable[
-      focusable.length - 1
-    ];
-
-  const active =
-    document.activeElement;
-
-  if (
-    event.shiftKey &&
-    (
-      active ===
-        firstElement ||
-      !modalState.panel?.contains?.(
-        active
-      )
-    )
-  ) {
-    event.preventDefault?.();
-    lastElement.focus?.();
-
-    return true;
-  }
-
-  if (
-    !event.shiftKey &&
-    (
-      active ===
-        lastElement ||
-      !modalState.panel?.contains?.(
-        active
-      )
-    )
-  ) {
-    event.preventDefault?.();
-    firstElement.focus?.();
-
-    return true;
-  }
-
-  return false;
-}
-
-/* =========================================================
-   ROOT BINDINGS
-========================================================= */
 
 function onRootClick(event = null) {
   const target =
@@ -3295,71 +3042,6 @@ function onRootClick(event = null) {
   }
 }
 
-function onRootError(event = null) {
-  const target =
-    event?.target;
-
-  if (
-    typeof HTMLImageElement ===
-      "undefined" ||
-    !(
-      target instanceof
-      HTMLImageElement
-    ) ||
-    !target.matches(
-      "[data-usuarios-avatar-img='true']"
-    )
-  ) {
-    return;
-  }
-
-  const frame =
-    target.closest(
-      "[data-usuarios-avatar-frame='true']"
-    );
-
-  if (!frame) {
-    return;
-  }
-
-  target.hidden =
-    true;
-
-  frame.setAttribute(
-    "data-has-avatar",
-    "false"
-  );
-
-  frame.setAttribute(
-    "data-fallback",
-    "true"
-  );
-
-  frame.classList.add(
-    "usuarios-modal-avatar-frame--fallback",
-    "ui-detail-modal-avatar-frame--fallback"
-  );
-}
-
-function onDocumentKeydown(event = null) {
-  if (
-    !modalState.isOpen
-  ) {
-    return;
-  }
-
-  if (
-    event?.key ===
-    "Escape"
-  ) {
-    event.preventDefault?.();
-    closeUsuariosModal();
-    return;
-  }
-
-  trapFocus(event);
-}
-
 function attachRootBindings() {
   if (!isBrowser()) {
     return false;
@@ -3378,26 +3060,9 @@ function attachRootBindings() {
   modalState.clickHandler =
     onRootClick;
 
-  modalState.errorHandler =
-    onRootError;
-
-  modalState.keydownHandler =
-    onDocumentKeydown;
-
   host.addEventListener(
     "click",
     modalState.clickHandler
-  );
-
-  host.addEventListener(
-    "error",
-    modalState.errorHandler,
-    true
-  );
-
-  document.addEventListener(
-    "keydown",
-    modalState.keydownHandler
   );
 
   return true;
@@ -3406,12 +3071,6 @@ function attachRootBindings() {
 function detachRootBindings() {
   if (!isBrowser()) {
     modalState.clickHandler =
-      null;
-
-    modalState.errorHandler =
-      null;
-
-    modalState.keydownHandler =
       null;
 
     return false;
@@ -3431,36 +3090,11 @@ function detachRootBindings() {
       );
     }
 
-    if (
-      host &&
-      modalState.errorHandler
-    ) {
-      host.removeEventListener(
-        "error",
-        modalState.errorHandler,
-        true
-      );
-    }
-
-    if (
-      modalState.keydownHandler
-    ) {
-      document.removeEventListener(
-        "keydown",
-        modalState.keydownHandler
-      );
-    }
   } catch {
     // noop
   }
 
   modalState.clickHandler =
-    null;
-
-  modalState.errorHandler =
-    null;
-
-  modalState.keydownHandler =
     null;
 
   return true;
@@ -4025,12 +3659,12 @@ export function openUsuariosModal(detail = {}) {
 
   clearRefreshTimer();
 
-  lockBody();
-
   renderMounted({
     focus: !wasOpen,
     forceMount: !wasOpen,
   });
+
+  lockBody();
 
   safeEmit(
     wasOpen

@@ -1,3 +1,4 @@
+import { createModalLifecycle, restoreModalFocus as restoreSharedModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
 /* =========================================================
    Onion Support - Correo View
    Archivo: /src/views/correo/index.js
@@ -11,6 +12,8 @@
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import { avatarInitials as initialsFrom } from "../../features/avatar-system/identity.js";
+import { createAsyncScope } from "../../core/async-scope.js";
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 import { Auth as DefaultAuth } from "../../features/auth/index.js";
 import CorreoApi from "./correo.api.js";
@@ -205,10 +208,6 @@ function parseRecipients(value = "") {
 
 function isLikelyEmail(value = "") {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ""));
-}
-
-function initialsFrom(value = "") {
-  return cleanText(value, "ON").split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() || "").join("").slice(0, 2) || "ON";
 }
 
 function readOnionUser() {
@@ -467,21 +466,18 @@ async function requestNotifications() {
 }
 
 function createCorreoController(host, context = {}) {
-  const externalSignal = context?.signal || null;
-  const aborter = new AbortController();
-  const signal = aborter.signal;
+  const scope = createAsyncScope({ signal: context?.signal });
+  const signal = scope.signal;
+  let mailboxContext = scope.begin("mailbox-context");
 
   let mounted = false;
   let destroyed = false;
   let searchTimer = null;
   let searchComposing = false;
-  let listSequence = 0;
-  let readerSequence = 0;
-  let listAbortController = null;
-  let readerAbortController = null;
   let infiniteScheduled = false;
   let modalReturnFocus = null;
   let confirmResolver = null;
+  let busyOperation = null;
 
   const initialAccountUser = readOnionUser();
   const state = {
@@ -513,6 +509,50 @@ function createCorreoController(host, context = {}) {
   function apiOptions(extra = {}) {
     const mailbox = cleanText(state.activeMailbox, "").toLowerCase();
     return { signal, ...extra, ...(mailbox ? { mailbox } : {}) };
+  }
+
+  // Every write retains the mailbox and message it was issued for. A confirmed
+  // result may update that row, but must never replace another selected reader.
+  function beginMailOperation(messageId = "", form = null) {
+    const mailbox = apiOptions().mailbox || "";
+    const key = messageId ? JSON.stringify(["mail-write", mailbox, messageId]) : Symbol("mail-operation");
+    if (scope.isPending(key)) {
+      toast("Espera a que termine la operación anterior de este mensaje.", "info");
+      return null;
+    }
+    const request = scope.begin(key);
+    const context = mailboxContext;
+    const options = apiOptions({ signal: request.signal });
+    const owner = state.accountUser.cacheKey;
+    const folder = state.selectedFolderId;
+    const isCurrent = () => request.isCurrent() && context.isCurrent()
+      && owner === state.accountUser.cacheKey
+      && (options.mailbox || "") === (apiOptions().mailbox || "")
+      && (!form || (form.isConnected && host.contains(form)));
+    return {
+      options,
+      messageId,
+      isCurrent,
+      sameFolder: () => isCurrent() && folder === state.selectedFolderId,
+      selected: () => isCurrent() && messageId === state.selectedMessageId,
+      finish: request.finish,
+    };
+  }
+
+  function removeConfirmedMessage(operation) {
+    if (!operation.isCurrent()) return false;
+    const selected = operation.selected();
+    state.messages = state.messages.filter((item) => item.id !== operation.messageId);
+    if (selected) {
+      scope.cancel("reader", "message-removed");
+      state.selectedMessageId = "";
+      state.selectedMessage = null;
+      state.attachments = [];
+      state.loadingReader = false;
+      renderReaderRegion();
+    }
+    renderList();
+    return selected;
   }
 
   function notice(message = "", tone = "info") {
@@ -589,8 +629,11 @@ function createCorreoController(host, context = {}) {
     writeViewCache(state);
   }
 
-  function setBusy(action = "") {
+  function setBusy(action = "", owner = null, { paint = true } = {}) {
+    if (!action && owner && busyOperation !== owner) return;
+    busyOperation = action ? owner : null;
     state.busyAction = action;
+    if (!paint) return;
     const modal = host.querySelector("[data-correo-compose-form]");
     if (!modal) return;
     for (const element of modal.querySelectorAll("button, input, textarea")) element.disabled = Boolean(action);
@@ -598,42 +641,17 @@ function createCorreoController(host, context = {}) {
     if (status) status.textContent = action ? "Procesando…" : "";
   }
 
-  function focusableElements(container) {
-    if (!container) return [];
-    return [...container.querySelectorAll(
-      'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
-    )].filter((element) => !element.hidden && element.getClientRects().length > 0);
-  }
+  const modalLifecycle = createModalLifecycle({
+    getPanel: () => host.querySelector('[data-correo-modal-root] [role="dialog"], [data-correo-modal-root] [role="alertdialog"]'),
+    onEscape: () => confirmResolver ? closeConfirm(false) : closeModal(),
+    onDetached: () => { if (confirmResolver) closeConfirm(false); },
+    bodyClasses: ['correo-modal-open'],
+  });
 
   function restoreModalFocus() {
     const target = modalReturnFocus;
     modalReturnFocus = null;
-    if (target instanceof HTMLElement && target.isConnected) {
-      requestAnimationFrame(() => target.focus({ preventScroll: true }));
-    }
-  }
-
-  function trapModalFocus(event, container) {
-    if (event.key !== "Tab" || !container) return false;
-    const items = focusableElements(container);
-    if (!items.length) {
-      event.preventDefault();
-      container.focus?.({ preventScroll: true });
-      return true;
-    }
-    const first = items[0];
-    const last = items[items.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-      return true;
-    }
-    if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-      return true;
-    }
-    return false;
+    requestAnimationFrame(() => restoreSharedModalFocus(target));
   }
 
   function closeConfirm(result = false) {
@@ -642,7 +660,7 @@ function createCorreoController(host, context = {}) {
     confirmResolver = null;
     const root = host.querySelector("[data-correo-modal-root]");
     if (root) root.replaceChildren();
-    document.documentElement.classList.remove("correo-modal-open");
+    modalLifecycle.deactivate({ restoreFocus: false });
     restoreModalFocus();
     resolve(Boolean(result));
     return true;
@@ -654,7 +672,7 @@ function createCorreoController(host, context = {}) {
     if (!root) return Promise.resolve(false);
     modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     root.innerHTML = renderConfirmModal(input);
-    document.documentElement.classList.add("correo-modal-open");
+    modalLifecycle.activate({ opener: modalReturnFocus });
     requestAnimationFrame(() => root.querySelector("[data-correo-confirm-dialog]")?.focus());
     return new Promise((resolve) => { confirmResolver = resolve; });
   }
@@ -681,8 +699,11 @@ function createCorreoController(host, context = {}) {
   }
 
   async function loadStatus({ probe = false } = {}) {
+    if (!scope.isActive()) return;
+    const request = scope.begin("status");
     try {
-      const next = await CorreoApi.getStatus(apiOptions({ probe }));
+      const next = await CorreoApi.getStatus(apiOptions({ probe, signal: request.signal }));
+      if (!request.isCurrent()) return;
       state.statusKnown = true;
       state.status = next;
       state.mailboxes = [...(next.mailboxes || [])];
@@ -698,6 +719,7 @@ function createCorreoController(host, context = {}) {
         if (!host.querySelector(".correo-workspace") || host.querySelector(".correo-workspace--boot")) renderAll();
         await loadWorkspace({ initial: false });
       } else {
+        for (const key of ["workspace", "folders", "messages", "reader"]) scope.cancel(key);
         stopMailWatcher({ clear: true });
         clearViewCache();
         state.folders = [];
@@ -707,7 +729,7 @@ function createCorreoController(host, context = {}) {
         renderAll();
       }
     } catch (error) {
-      if (signal.aborted) return;
+      if (!request.isCurrent()) return;
       state.loading = false;
       if (!state.statusKnown) {
         state.statusKnown = true;
@@ -718,17 +740,23 @@ function createCorreoController(host, context = {}) {
         renderAccount();
       }
       toast(errorMessage(error, "No se pudo comprobar Microsoft 365."), "error");
+    } finally {
+      request.finish();
     }
   }
 
   async function loadWorkspace({ initial = false } = {}) {
-    if (initial && !state.status.connected) return;
+    if (!scope.isActive() || (initial && !state.status.connected)) return;
+    const request = scope.begin("workspace");
+    scope.cancel("folders", "workspace-refresh");
+    const options = apiOptions({ signal: request.signal });
     notice(`Sincronizando ${state.activeMailbox || state.status.mailbox || "Microsoft 365"}…`);
     try {
       const [folders, profile] = await Promise.all([
-        CorreoApi.folders(apiOptions()),
-        CorreoApi.profile(apiOptions()).catch(() => null),
+        CorreoApi.folders(options),
+        CorreoApi.profile(options).catch(() => null),
       ]);
+      if (!request.isCurrent()) return;
 
       if (profile?.displayName && profile.displayName !== state.status.displayName) {
         state.status = Object.freeze({ ...state.status, displayName: profile.displayName, healthy: true });
@@ -745,6 +773,7 @@ function createCorreoController(host, context = {}) {
       renderAccount();
       renderFolders();
       await loadMessages({ openFirst: !state.selectedMessageId });
+      if (!request.isCurrent()) return;
 
       const inbox = findInbox(state.folders);
       configureMailWatcher({
@@ -755,7 +784,7 @@ function createCorreoController(host, context = {}) {
       notice(`Outlook conectado · ${state.activeMailbox || state.status.mailbox || "Microsoft 365"}`, "success");
       writeViewCache(state);
     } catch (error) {
-      if (signal.aborted) return;
+      if (!request.isCurrent()) return;
       const code = errorCode(error);
       const primaryMailbox = cleanText(state.status.mailbox, "").toLowerCase();
       const sharedSelected = Boolean(state.activeMailbox && primaryMailbox && state.activeMailbox !== primaryMailbox);
@@ -763,9 +792,11 @@ function createCorreoController(host, context = {}) {
         writeMailboxPreference(state.accountUser.cacheKey, state.activeMailbox);
         toast("Microsoft necesita confirmar una vez los permisos del buzón compartido.", "info", 5000);
         try {
-          const connection = await CorreoApi.connect({ signal });
+          const connection = await CorreoApi.connect({ signal: request.signal });
+          if (!request.isCurrent()) return;
           window.location.assign(connection.authorizationUrl);
         } catch (connectError) {
+          if (!request.isCurrent()) return;
           toast(errorMessage(connectError, "No se pudo renovar el permiso Microsoft."), "error", 6000);
         }
         return;
@@ -781,18 +812,16 @@ function createCorreoController(host, context = {}) {
         renderAccount();
       }
       toast(errorMessage(error, "No se pudo sincronizar Outlook."), "error");
+    } finally {
+      request.finish();
     }
   }
 
   async function loadMessages({ append = false, openFirst = false } = {}) {
     if (!state.status.connected) return;
     if (append && (!state.nextCursor || state.loadingMore || state.loadingMessages)) return;
-    const sequence = ++listSequence;
-    listAbortController?.abort();
-    const requestAbort = new AbortController();
-    listAbortController = requestAbort;
-    if (signal.aborted) requestAbort.abort();
-    else signal.addEventListener("abort", () => requestAbort.abort(), { once: true });
+    if (!scope.isActive()) return;
+    const request = scope.begin("messages");
 
     if (append) {
       state.loadingMore = true;
@@ -808,7 +837,7 @@ function createCorreoController(host, context = {}) {
 
     try {
       const result = await CorreoApi.messages(apiOptions({
-        signal: requestAbort.signal,
+        signal: request.signal,
         cursor: append ? state.nextCursor : "",
         folder: state.selectedFolderId || "inbox",
         top: 35,
@@ -816,7 +845,7 @@ function createCorreoController(host, context = {}) {
         filter: state.searchTerm ? "" : state.activeFilter === "all" ? "" : state.activeFilter,
       }));
 
-      if (sequence !== listSequence || destroyed) return;
+      if (!request.isCurrent()) return;
       state.messages = append
         ? [...state.messages, ...result.messages.filter((item) => !state.messages.some((current) => current.id === item.id))]
         : [...result.messages];
@@ -825,6 +854,8 @@ function createCorreoController(host, context = {}) {
       state.loadingMore = false;
 
       if (!state.messages.some((item) => item.id === state.selectedMessageId)) {
+        scope.cancel("reader", "selection-removed");
+        state.loadingReader = false;
         state.selectedMessageId = "";
         state.selectedMessage = null;
         state.attachments = [];
@@ -834,23 +865,21 @@ function createCorreoController(host, context = {}) {
       if (openFirst && !state.selectedMessageId && state.messages[0]?.id) await openMessage(state.messages[0].id);
       else renderReaderRegion();
     } catch (error) {
-      if (sequence !== listSequence || signal.aborted || requestAbort.signal.aborted) return;
+      if (!request.isCurrent()) return;
       state.loadingMessages = false;
       state.loadingMore = false;
       renderList();
       toast(errorMessage(error, "No se pudieron cargar los mensajes."), "error");
+    } finally {
+      request.finish();
     }
   }
 
   async function openMessage(id = "") {
     const messageId = cleanText(id, "");
     if (!messageId) return;
-    const sequence = ++readerSequence;
-    readerAbortController?.abort();
-    const requestAbort = new AbortController();
-    readerAbortController = requestAbort;
-    if (signal.aborted) requestAbort.abort();
-    else signal.addEventListener("abort", () => requestAbort.abort(), { once: true });
+    if (!scope.isActive()) return;
+    const request = scope.begin("reader");
     state.selectedMessageId = messageId;
     state.loadingReader = true;
     state.selectedMessage = null;
@@ -861,15 +890,15 @@ function createCorreoController(host, context = {}) {
     try {
       const summary = state.messages.find((item) => item.id === messageId) || null;
       const attachmentPromise = summary?.hasAttachments
-        ? CorreoApi.attachments(messageId, apiOptions({ signal: requestAbort.signal })).catch(() => [])
+        ? CorreoApi.attachments(messageId, apiOptions({ signal: request.signal })).catch(() => [])
         : null;
-      const detail = await CorreoApi.message(messageId, apiOptions({ signal: requestAbort.signal }));
+      const detail = await CorreoApi.message(messageId, apiOptions({ signal: request.signal }));
       const attachments = attachmentPromise
         ? await attachmentPromise
         : detail.hasAttachments
-          ? await CorreoApi.attachments(messageId, apiOptions({ signal: requestAbort.signal })).catch(() => [])
+          ? await CorreoApi.attachments(messageId, apiOptions({ signal: request.signal })).catch(() => [])
           : [];
-      if (sequence !== readerSequence || destroyed) return;
+      if (!request.isCurrent()) return;
 
       state.selectedMessage = detail;
       state.attachments = [...attachments];
@@ -880,9 +909,11 @@ function createCorreoController(host, context = {}) {
       renderReaderRegion();
 
       if (!detail.isRead && !detail.isDraft) {
+        const operation = beginMailOperation(messageId);
+        if (!operation) return;
         try {
-          const updated = await CorreoApi.updateMessage(messageId, { isRead: true }, apiOptions({ signal: requestAbort.signal }));
-          if (sequence !== readerSequence || destroyed) return;
+          const updated = await CorreoApi.updateMessage(messageId, { isRead: true }, operation.options);
+          if (!request.isCurrent() || !operation.isCurrent()) return;
           state.selectedMessage = updated;
           const current = state.messages.findIndex((item) => item.id === messageId);
           if (current >= 0) state.messages[current] = updated;
@@ -897,43 +928,57 @@ function createCorreoController(host, context = {}) {
           renderReaderRegion();
         } catch {
           // El mensaje sigue siendo legible aunque falle el marcado de leído.
+        } finally {
+          operation.finish();
         }
       }
     } catch (error) {
-      if (sequence !== readerSequence || signal.aborted || requestAbort.signal.aborted) return;
+      if (!request.isCurrent()) return;
       state.loadingReader = false;
       state.selectedMessage = null;
       renderReaderRegion();
       toast(errorMessage(error, "No se pudo abrir el mensaje."), "error");
+    } finally {
+      request.finish();
     }
   }
 
   async function connect() {
-    if (state.busyAction) return;
+    if (state.busyAction || !scope.isActive()) return;
+    const operation = beginMailOperation();
     state.busyAction = "connect";
     try {
-      const connection = await CorreoApi.connect(apiOptions());
+      const connection = await CorreoApi.connect(operation.options);
+      if (!operation.isCurrent()) return;
       window.location.assign(connection.authorizationUrl);
     } catch (error) {
+      if (!operation.isCurrent()) return;
       state.busyAction = "";
       toast(errorMessage(error, "No se pudo iniciar Microsoft OAuth."), "error");
+    } finally {
+      operation.finish();
     }
   }
 
   async function disconnect() {
-    const accepted = await confirmAction({
-      eyebrow: "Cuenta Microsoft",
-      title: "¿Desconectar Outlook?",
-      message: state.status.mailbox
-        ? `Onion Support dejará de acceder a ${state.status.mailbox} hasta que vuelvas a conectarla.`
-        : "Onion Support dejará de acceder a esta cuenta hasta que vuelvas a conectarla.",
-      confirmLabel: "Desconectar",
-      danger: true,
-      iconName: "logout",
-    });
-    if (!accepted) return;
+    if (!scope.isActive()) return;
+    const operation = beginMailOperation();
     try {
-      await CorreoApi.disconnect(apiOptions());
+      const accepted = await confirmAction({
+        eyebrow: "Cuenta Microsoft",
+        title: "¿Desconectar Outlook?",
+        message: state.status.mailbox
+          ? `Onion Support dejará de acceder a ${state.status.mailbox} hasta que vuelvas a conectarla.`
+          : "Onion Support dejará de acceder a esta cuenta hasta que vuelvas a conectarla.",
+        confirmLabel: "Desconectar",
+        danger: true,
+        iconName: "logout",
+      });
+      if (!accepted || !operation.isCurrent()) return;
+      await CorreoApi.disconnect(operation.options);
+      if (!operation.isCurrent()) return;
+      for (const key of ["status", "workspace", "folders", "messages", "reader"]) scope.cancel(key);
+      mailboxContext = scope.begin("mailbox-context");
       state.statusKnown = true;
       state.status = Object.freeze({ connected: false, healthy: null, mailbox: state.status.mailbox });
       state.folders = [];
@@ -945,13 +990,15 @@ function createCorreoController(host, context = {}) {
       renderAll();
       toast("Outlook desconectado.", "success");
     } catch (error) {
-      toast(errorMessage(error, "No se pudo desconectar Outlook."), "error");
+      if (operation.isCurrent()) toast(errorMessage(error, "No se pudo desconectar Outlook."), "error");
+    } finally {
+      operation.finish();
     }
   }
 
   function openCompose(mode = "compose") {
     const modalRoot = host.querySelector("[data-correo-modal-root]");
-    if (!modalRoot || confirmResolver) return;
+    if (!modalRoot || confirmResolver || state.busyAction) return;
     const message = state.selectedMessage || {};
     let input = { mode, messageId: message.id || "" };
     if (mode === "forward") input = { ...input, subject: message.subject || "", body: "" };
@@ -969,7 +1016,7 @@ function createCorreoController(host, context = {}) {
     }
     modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     modalRoot.innerHTML = renderComposeModal(input);
-    document.documentElement.classList.add("correo-modal-open");
+    modalLifecycle.activate({ opener: modalReturnFocus });
     requestAnimationFrame(() => {
       const preferred = mode === "compose" || mode === "forward"
         ? modalRoot.querySelector("input[name='to']")
@@ -986,7 +1033,7 @@ function createCorreoController(host, context = {}) {
     const preference = readSignaturePreference(state.accountUser.cacheKey, state.activeMailbox, state.status.mailbox);
     modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     modalRoot.innerHTML = renderSignatureModal(preference);
-    document.documentElement.classList.add("correo-modal-open");
+    modalLifecycle.activate({ opener: modalReturnFocus });
     requestAnimationFrame(() => modalRoot.querySelector("[data-correo-signature-input]")?.focus());
   }
 
@@ -1019,7 +1066,7 @@ function createCorreoController(host, context = {}) {
     if (state.busyAction || confirmResolver) return;
     const root = host.querySelector("[data-correo-modal-root]");
     if (root) root.replaceChildren();
-    document.documentElement.classList.remove("correo-modal-open");
+    modalLifecycle.deactivate({ restoreFocus: false });
     restoreModalFocus();
   }
 
@@ -1045,9 +1092,11 @@ function createCorreoController(host, context = {}) {
   }
 
   async function sendCompose(form) {
-    if (state.busyAction) return;
+    if (state.busyAction || !scope.isActive()) return;
     const mode = cleanText(form.dataset.correoComposeMode, "compose");
     const messageId = cleanText(form.dataset.correoMessageId, "");
+    const operation = beginMailOperation(messageId, form);
+    if (!operation) return;
 
     try {
       // IMPORTANTE: FormData ignora controles disabled. Capturamos antes de setBusy().
@@ -1055,125 +1104,157 @@ function createCorreoController(host, context = {}) {
       const files = selectedFiles(form);
       if ((mode === "compose" || mode === "forward" || mode === "draft-edit") && !payload.to.length) throw new Error("Indica al menos un destinatario válido.");
       if (files.some((file) => file.size > 25 * 1024 * 1024)) throw new Error("Cada adjunto debe ser de 25 MB o menos.");
-      setBusy("send");
+      setBusy("send", operation);
 
       if (mode === "draft-edit") {
         if (!messageId) throw new Error("No hay borrador que actualizar.");
-        await CorreoApi.updateDraft(messageId, payload, apiOptions());
+        await CorreoApi.updateDraft(messageId, payload, operation.options);
+        if (!operation.isCurrent()) return;
         const status = form.querySelector("[data-correo-compose-status]");
         for (let index = 0; index < files.length; index += 1) {
           if (status) status.textContent = `Adjuntando ${index + 1}/${files.length}: ${files[index].name}`;
-          await CorreoApi.uploadAttachment(messageId, files[index], apiOptions());
+          await CorreoApi.uploadAttachment(messageId, files[index], operation.options);
+          if (!operation.isCurrent()) return;
         }
         if (status) status.textContent = "Enviando borrador…";
-        await CorreoApi.sendDraft(messageId, apiOptions());
+        await CorreoApi.sendDraft(messageId, operation.options);
+        if (!operation.isCurrent()) return;
         toast("Borrador enviado.", "success");
       } else if (mode === "reply" || mode === "reply-all") {
         if (!messageId) throw new Error("No hay mensaje al que responder.");
-        if (mode === "reply-all") await CorreoApi.replyAll(messageId, payload.body, apiOptions());
-        else await CorreoApi.reply(messageId, payload.body, apiOptions());
+        await (mode === "reply-all"
+          ? CorreoApi.replyAll(messageId, payload.body, operation.options)
+          : CorreoApi.reply(messageId, payload.body, operation.options));
+        if (!operation.isCurrent()) return;
         toast("Respuesta enviada.", "success");
       } else if (mode === "forward") {
         if (!messageId) throw new Error("No hay mensaje que reenviar.");
-        await CorreoApi.forward(messageId, { to: payload.to, comment: payload.body }, apiOptions());
+        await CorreoApi.forward(messageId, { to: payload.to, comment: payload.body }, operation.options);
+        if (!operation.isCurrent()) return;
         toast("Mensaje reenviado.", "success");
       } else if (!files.length) {
-        await CorreoApi.send(payload, apiOptions());
+        await CorreoApi.send(payload, operation.options);
+        if (!operation.isCurrent()) return;
         toast("Correo enviado.", "success");
       } else {
-        const draft = await CorreoApi.createDraft(payload, apiOptions());
+        const draft = await CorreoApi.createDraft(payload, operation.options);
+        if (!operation.isCurrent()) return;
         if (!draft.id) throw new Error("No se pudo crear el borrador para adjuntar archivos.");
         const status = form.querySelector("[data-correo-compose-status]");
         for (let index = 0; index < files.length; index += 1) {
           if (status) status.textContent = `Subiendo ${index + 1}/${files.length}: ${files[index].name}`;
-          await CorreoApi.uploadAttachment(draft.id, files[index], apiOptions());
+          await CorreoApi.uploadAttachment(draft.id, files[index], operation.options);
+          if (!operation.isCurrent()) return;
         }
         if (status) status.textContent = "Enviando mensaje…";
-        await CorreoApi.sendDraft(draft.id, apiOptions());
+        await CorreoApi.sendDraft(draft.id, operation.options);
+        if (!operation.isCurrent()) return;
         toast("Correo enviado.", "success");
       }
 
-      setBusy("");
+      setBusy("", operation);
       closeModal();
       await loadMessages({ openFirst: false });
     } catch (error) {
-      setBusy("");
+      if (!operation.isCurrent()) return;
+      setBusy("", operation);
       const status = form.querySelector("[data-correo-compose-status]");
       if (status) status.textContent = errorMessage(error);
       toast(errorMessage(error, "No se pudo enviar el correo."), "error", 6000);
+    } finally {
+      // Release only this operation's busy state, even if its form disappeared.
+      setBusy("", operation, { paint: operation.isCurrent() });
+      operation.finish();
     }
   }
 
   async function saveDraft(form) {
-    if (state.busyAction) return;
+    if (state.busyAction || !scope.isActive()) return;
+    const mode = cleanText(form.dataset.correoComposeMode, "compose");
+    const messageId = cleanText(form.dataset.correoMessageId, "");
+    const operation = beginMailOperation(messageId, form);
+    if (!operation) return;
     try {
       const payload = composePayload(form);
       const files = selectedFiles(form);
-      const mode = cleanText(form.dataset.correoComposeMode, "compose");
-      const messageId = cleanText(form.dataset.correoMessageId, "");
       for (const file of files) if (file.size > 25 * 1024 * 1024) throw new Error(`${file.name} supera 25 MB.`);
-      setBusy("draft");
+      setBusy("draft", operation);
       const draft = mode === "draft-edit"
-        ? await CorreoApi.updateDraft(messageId, payload, apiOptions())
-        : await CorreoApi.createDraft(payload, apiOptions());
+        ? await CorreoApi.updateDraft(messageId, payload, operation.options)
+        : await CorreoApi.createDraft(payload, operation.options);
+      if (!operation.isCurrent()) return;
       if (!draft.id) throw new Error("No se pudo guardar el borrador.");
       const status = form.querySelector("[data-correo-compose-status]");
       for (let index = 0; index < files.length; index += 1) {
         if (status) status.textContent = `Adjuntando ${index + 1}/${files.length}…`;
-        await CorreoApi.uploadAttachment(draft.id, files[index], apiOptions());
+        await CorreoApi.uploadAttachment(draft.id, files[index], operation.options);
+        if (!operation.isCurrent()) return;
       }
-      setBusy("");
+      setBusy("", operation);
       closeModal();
       toast(mode === "draft-edit" ? "Cambios del borrador guardados." : "Borrador guardado en Outlook.", "success");
       await loadMessages({ openFirst: false });
     } catch (error) {
-      setBusy("");
+      if (!operation.isCurrent()) return;
+      setBusy("", operation);
       const status = form.querySelector("[data-correo-compose-status]");
       if (status) status.textContent = errorMessage(error);
       toast(errorMessage(error, "No se pudo guardar el borrador."), "error");
+    } finally {
+      // Release only this operation's busy state, even if its form disappeared.
+      setBusy("", operation, { paint: operation.isCurrent() });
+      operation.finish();
     }
   }
 
   async function updateSelected(patch = {}, successText = "Mensaje actualizado.") {
     const id = state.selectedMessage?.id;
-    if (!id) return;
+    if (!id || !scope.isActive()) return;
+    const operation = beginMailOperation(id);
+    if (!operation) return;
     try {
-      const updated = await CorreoApi.updateMessage(id, patch, apiOptions());
-      state.selectedMessage = updated;
+      const updated = await CorreoApi.updateMessage(id, patch, operation.options);
+      if (!operation.isCurrent()) return;
       const index = state.messages.findIndex((item) => item.id === id);
       if (index >= 0) state.messages[index] = updated;
       renderList();
-      renderReaderRegion();
+      if (operation.selected()) {
+        state.selectedMessage = updated;
+        renderReaderRegion();
+      }
       if (successText) toast(successText, "success", 2800);
     } catch (error) {
-      toast(errorMessage(error, "No se pudo actualizar el mensaje."), "error");
+      if (operation.isCurrent()) toast(errorMessage(error, "No se pudo actualizar el mensaje."), "error");
+    } finally {
+      operation.finish();
     }
   }
 
   async function deleteSelected() {
     const message = state.selectedMessage;
-    if (!message?.id) return;
-    const accepted = await confirmAction({
-      eyebrow: "Eliminar mensaje",
-      title: `¿Eliminar “${message.subject || "este mensaje"}”?`,
-      message: "El mensaje se eliminará de Outlook. Esta acción no se puede deshacer desde Onion Support.",
-      confirmLabel: "Eliminar",
-      danger: true,
-      iconName: "trash",
-    });
-    if (!accepted) return;
+    if (!message?.id || !scope.isActive()) return;
+    const operation = beginMailOperation(message.id);
+    if (!operation) return;
     try {
-      await CorreoApi.deleteMessage(message.id, apiOptions());
-      state.messages = state.messages.filter((item) => item.id !== message.id);
-      state.selectedMessageId = "";
-      state.selectedMessage = null;
-      state.attachments = [];
-      renderList();
-      renderReaderRegion();
+      const accepted = await confirmAction({
+        eyebrow: "Eliminar mensaje",
+        title: `¿Eliminar “${message.subject || "este mensaje"}”?`,
+        message: "El mensaje se eliminará de Outlook. Esta acción no se puede deshacer desde Onion Support.",
+        confirmLabel: "Eliminar",
+        danger: true,
+        iconName: "trash",
+      });
+      if (!accepted || !operation.isCurrent()) return;
+      const deleted = await CorreoApi.deleteMessage(message.id, operation.options);
+      if (!operation.isCurrent()) return;
+      if (!deleted) throw new Error("Outlook no confirmó la eliminación del mensaje.");
+      const removedSelection = removeConfirmedMessage(operation);
       toast("Mensaje eliminado.", "success");
-      if (state.messages[0]?.id) await openMessage(state.messages[0].id);
+      if (removedSelection && operation.sameFolder() && state.messages[0]?.id) await openMessage(state.messages[0].id);
     } catch (error) {
-      toast(errorMessage(error, "No se pudo eliminar el mensaje."), "error");
+      if (operation.isCurrent()) toast(errorMessage(error, "No se pudo eliminar el mensaje."), "error");
+    } finally {
+      operation.finish();
     }
   }
 
@@ -1188,20 +1269,21 @@ function createCorreoController(host, context = {}) {
 
   async function moveSelected(destinationId = "") {
     const id = state.selectedMessage?.id;
-    if (!id || !destinationId) return;
+    if (!id || !destinationId || !scope.isActive()) return;
+    const operation = beginMailOperation(id);
+    if (!operation) return;
+    // The menu belongs to this click, not to a later reader selection.
+    host.querySelector("[data-correo-move-popover]")?.remove();
     try {
-      await CorreoApi.moveMessage(id, destinationId, apiOptions());
-      host.querySelector("[data-correo-move-popover]")?.remove();
-      state.messages = state.messages.filter((item) => item.id !== id);
-      state.selectedMessageId = "";
-      state.selectedMessage = null;
-      state.attachments = [];
-      renderList();
-      renderReaderRegion();
+      await CorreoApi.moveMessage(id, destinationId, operation.options);
+      if (!operation.isCurrent()) return;
+      const removedSelection = removeConfirmedMessage(operation);
       toast("Mensaje movido.", "success");
-      await loadWorkspace({ initial: false });
+      if (removedSelection && operation.sameFolder()) await loadWorkspace({ initial: false });
     } catch (error) {
-      toast(errorMessage(error, "No se pudo mover el mensaje."), "error");
+      if (operation.isCurrent()) toast(errorMessage(error, "No se pudo mover el mensaje."), "error");
+    } finally {
+      operation.finish();
     }
   }
 
@@ -1223,29 +1305,38 @@ function createCorreoController(host, context = {}) {
   }
 
   async function sendOpenDraft() {
-    const id = state.selectedMessage?.id;
-    if (!id || !state.selectedMessage?.isDraft) return;
-    const accepted = await confirmAction({
-      eyebrow: "Borrador",
-      title: "¿Enviar este borrador ahora?",
-      message: state.selectedMessage.subject || "El mensaje se enviará con su contenido actual.",
-      confirmLabel: "Enviar borrador",
-      danger: false,
-      iconName: "send",
-    });
-    if (!accepted) return;
+    const message = state.selectedMessage;
+    if (!message?.id || !message.isDraft || !scope.isActive()) return;
+    const operation = beginMailOperation(message.id);
+    if (!operation) return;
     try {
-      await CorreoApi.sendDraft(id, apiOptions());
+      const accepted = await confirmAction({
+        eyebrow: "Borrador",
+        title: "¿Enviar este borrador ahora?",
+        message: message.subject || "El mensaje se enviará con su contenido actual.",
+        confirmLabel: "Enviar borrador",
+        danger: false,
+        iconName: "send",
+      });
+      if (!accepted || !operation.isCurrent()) return;
+      const sent = await CorreoApi.sendDraft(message.id, operation.options);
+      if (!operation.isCurrent()) return;
+      if (!sent) throw new Error("Outlook no confirmó el envío del borrador.");
+      const removedSelection = removeConfirmedMessage(operation);
       toast("Borrador enviado.", "success");
-      await loadMessages({ openFirst: true });
+      if (removedSelection && operation.sameFolder()) await loadMessages({ openFirst: true });
     } catch (error) {
-      toast(errorMessage(error, "No se pudo enviar el borrador."), "error");
+      if (operation.isCurrent()) toast(errorMessage(error, "No se pudo enviar el borrador."), "error");
+    } finally {
+      operation.finish();
     }
   }
 
   async function selectFolder(button) {
     const id = cleanText(button.dataset.correoFolderId, "");
     if (!id || id === state.selectedFolderId) return;
+    scope.cancel("reader", "folder-changed");
+    state.loadingReader = false;
     state.selectedFolderId = id;
     state.selectedFolderName = cleanText(button.dataset.correoFolderName, "Correo");
     state.selectedMessageId = "";
@@ -1274,10 +1365,12 @@ function createCorreoController(host, context = {}) {
     }
 
     closeAccountMenu();
-    listSequence += 1;
-    readerSequence += 1;
-    listAbortController?.abort();
-    readerAbortController?.abort();
+    mailboxContext = scope.begin("mailbox-context");
+    scope.cancel("messages");
+    scope.cancel("reader");
+    scope.cancel("workspace");
+    scope.cancel("folders");
+    scope.cancel("status");
     stopMailWatcher({ clear: true });
 
     state.activeMailbox = mailbox;
@@ -1319,6 +1412,7 @@ function createCorreoController(host, context = {}) {
   async function toggleNotifications() {
     closeAccountMenu();
     const result = await requestNotifications();
+    if (!scope.isActive()) return;
     state.notifications = notificationUiState();
     renderAccount();
     syncNotificationHeader();
@@ -1458,33 +1552,10 @@ function createCorreoController(host, context = {}) {
 
   function onKeydown(event) {
     if (destroyed) return;
-    const confirmDialog = host.querySelector("[data-correo-confirm-dialog]");
     const composeDialog = host.querySelector(".correo-compose[role='dialog']");
-    const signatureDialog = host.querySelector("[data-correo-signature-dialog]");
-    const modalOpen = Boolean(composeDialog || signatureDialog);
-    if (confirmDialog && event.key === "Tab") {
-      trapModalFocus(event, confirmDialog);
-      return;
-    }
-    if (composeDialog && event.key === "Tab") {
-      trapModalFocus(event, composeDialog);
-      return;
-    }
-    if (signatureDialog && event.key === "Tab") {
-      trapModalFocus(event, signatureDialog);
-      return;
-    }
-    if (event.key === "Escape") {
-      if (confirmDialog) {
-        event.preventDefault();
-        closeConfirm(false);
-      } else if (modalOpen && !state.busyAction) {
-        event.preventDefault();
-        closeModal();
-      } else {
-        host.querySelector("[data-correo-move-popover]")?.remove();
-        closeAccountMenu();
-      }
+    if (event.key === "Escape" && !modalLifecycle.isActive()) {
+      host.querySelector("[data-correo-move-popover]")?.remove();
+      closeAccountMenu();
       return;
     }
     if ((event.metaKey || event.ctrlKey) && safeLower(event.key) === "k") {
@@ -1513,31 +1584,32 @@ function createCorreoController(host, context = {}) {
   }
 
   function onNewMail() {
-    if (destroyed || !mounted || !state.status.connected) return;
+    if (!scope.isActive() || !mounted || !state.status.connected) return;
     const inbox = findInbox(state.folders);
     if (inbox?.id === state.selectedFolderId) loadMessages({ openFirst: false });
-    CorreoApi.folders(apiOptions()).then((folders) => {
-      if (destroyed) return;
+    const request = scope.begin("folders");
+    CorreoApi.folders(apiOptions({ signal: request.signal })).then((folders) => {
+      if (!request.isCurrent()) return;
       state.folders = sortFolders(folders);
       renderFolders();
       writeViewCache(state);
-    }).catch(() => {});
+    }).catch(() => {}).finally(request.finish);
   }
 
   async function mount() {
     if (destroyed || mounted || !host) return controller;
-    if (externalSignal?.aborted) return controller;
-    if (externalSignal) externalSignal.addEventListener("abort", () => aborter.abort(), { once: true });
+    if (!scope.isActive()) { destroy(); return controller; }
+    scope.onDispose(() => destroy());
 
-    host.addEventListener("click", onClick);
-    host.addEventListener("input", onInput);
-    host.addEventListener("compositionstart", onCompositionStart);
-    host.addEventListener("compositionend", onCompositionEnd);
-    host.addEventListener("submit", onSubmit);
-    host.addEventListener("scroll", onScroll, true);
-    document.addEventListener("keydown", onKeydown);
-    document.addEventListener("click", onDocumentClick);
-    window.addEventListener("onion:correo-new-message", onNewMail);
+    scope.listen(host, "click", onClick);
+    scope.listen(host, "input", onInput);
+    scope.listen(host, "compositionstart", onCompositionStart);
+    scope.listen(host, "compositionend", onCompositionEnd);
+    scope.listen(host, "submit", onSubmit);
+    scope.listen(host, "scroll", onScroll, true);
+    scope.listen(document, "keydown", onKeydown);
+    scope.listen(document, "click", onDocumentClick);
+    scope.listen(window, "onion:correo-new-message", onNewMail);
 
     mounted = true;
     renderAll();
@@ -1553,24 +1625,13 @@ function createCorreoController(host, context = {}) {
     destroyed = true;
     mounted = false;
     clearTimeout(searchTimer);
-    listAbortController?.abort();
-    readerAbortController?.abort();
     if (confirmResolver) {
       const resolve = confirmResolver;
       confirmResolver = null;
       resolve(false);
     }
-    aborter.abort();
-    host.removeEventListener("click", onClick);
-    host.removeEventListener("input", onInput);
-    host.removeEventListener("compositionstart", onCompositionStart);
-    host.removeEventListener("compositionend", onCompositionEnd);
-    host.removeEventListener("submit", onSubmit);
-    host.removeEventListener("scroll", onScroll, true);
-    document.removeEventListener("keydown", onKeydown);
-    document.removeEventListener("click", onDocumentClick);
-    window.removeEventListener("onion:correo-new-message", onNewMail);
-    document.documentElement.classList.remove("correo-modal-open");
+    scope.dispose();
+    modalLifecycle.deactivate({ restoreFocus: false });
     if (options?.clear === true || options?.keepDom === false) host.replaceChildren();
     if (INSTANCES.get(host) === controller) INSTANCES.delete(host);
     return true;

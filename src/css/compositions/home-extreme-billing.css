@@ -230,12 +230,9 @@
 
 .home-view-root .home-skeleton--billing-icon {
   inline-size: 46px;
-  block-size: 46px;
-  border-radius: var(--radius-lg, 14px);
 }
 
 .home-view-root .home-skeleton--billing-line {
   inline-size: min(180px, 60%);
-  block-size: 9px;
 }
 

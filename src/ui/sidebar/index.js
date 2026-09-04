@@ -22,6 +22,7 @@
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import { avatarInitials as initialsFrom } from "../../features/avatar-system/identity.js";
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 import { Auth as DefaultAuth } from "../../features/auth/index.js";
 import { Router as DefaultRouter } from "../../router/index.js";
@@ -718,37 +719,6 @@ function safeImageUrl(
       allowAzureBlob: true,
       allowAzureBlobSas: true,
     }
-  );
-}
-
-function initialsFrom(
-  value = ""
-) {
-  return (
-    cleanText(
-      value,
-      ""
-    )
-      .split(
-        /\s+/
-      )
-      .filter(Boolean)
-      .slice(
-        0,
-        2
-      )
-      .map(
-        (part) =>
-          part[0]
-            ?.toUpperCase() ||
-          ""
-      )
-      .join("")
-      .slice(
-        0,
-        2
-      ) ||
-    "ON"
   );
 }
 

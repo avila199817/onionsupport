@@ -1,6 +1,6 @@
 # Onion Support · UI Loading System
 
-Estado: **CANÓNICO · SINGLE SKELETON AUTHORITY · 2026-08-31**
+Estado: **CANÓNICO · SKELETON E INDICADORES COMPARTIDOS · 2026-09-04**
 
 Este documento define la única política válida de loading para toda la SPA de Onion Support. No es una guía opcional: el código y CI deben mantener este contrato.
 
@@ -47,6 +47,10 @@ La petición terminó con error. Se muestra el estado de error real y, cuando pr
 Todos los skeletons comparten los mismos tokens de base/highlight, una única animación `ui-skeleton-shimmer`, la misma duración y el mismo criterio de radios. Las diferencias permitidas son semánticas: texto, título, valor, avatar, chip, control o bloque/region.
 
 Las vistas pueden variar el ancho del placeholder para aproximar el contenido final. Esa variación es layout, no paint. Por ejemplo, una línea de cliente puede ocupar 72% y un identificador 32%, pero ambos siguen siendo la misma primitiva visual.
+
+Los indicadores de actividad usan únicamente `ui-loading-spin`, con duración global de 0,72 segundos y `--ui-loading-animation`. La variable pasa a `none` con reducción de movimiento, también en SVG, pseudoelementos y componentes sin layer. Los adaptadores conservan su tamaño y color contextual. `loginOrbitSpin` es una animación decorativa, no otro indicador de carga.
+
+La consolidación retira 26 keyframes duplicados y las siete excepciones de skeleton heredadas. El contrato de navegador cubre 55 primitivas en ocho combinaciones de viewport, tema y movimiento, además de alto contraste. La comparación inicial con la base anterior comprobó 220 dimensiones sin diferencias.
 
 Incidencias conserva una composición de identidad más rica (avatar + varias líneas + badge) porque ésa es la geometría real de su fila. El contenedor no se pinta como una cápsula: únicamente se pintan las piezas internas mediante el mismo shimmer global.
 

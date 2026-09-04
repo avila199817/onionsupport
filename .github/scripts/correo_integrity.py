@@ -19,9 +19,11 @@ for forbidden in ('window.confirm(', 'cristian@onionsupport.com', 'data-correo-a
         errors.append(f"marcador legado/prohibido en Correo: {forbidden}")
 for required in (
     'VIEW_CACHE_TTL_MS = 60_000', 'ownerKey', 'cacheKey',
-    'listAbortController', 'readerAbortController',
+    'createAsyncScope', 'scope.begin("messages")', 'scope.begin("reader")',
+    'request.isCurrent()', 'scope.dispose()',
     'compositionstart', 'compositionend', 'searchComposing',
-    'focusableElements', 'trapModalFocus', 'confirmAction', 'renderConfirmModal',
+    'createModalLifecycle', 'modalLifecycle.activate(', 'modalLifecycle.deactivate(',
+    'confirmAction', 'renderConfirmModal',
     'CorreoApi.updateDraft(', 'draft-edit', 'routeCommitNonBlocking: true',
     'MAILBOX_PREF_STORAGE_PREFIX', 'activeMailbox', 'selectMailbox',
     'readMailboxPreference', 'writeMailboxPreference', 'MAIL_WATCHER.mailbox',

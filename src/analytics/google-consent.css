@@ -290,10 +290,6 @@ html[data-theme="dark"] {
   margin-top: 18px;
 }
 
-html[data-onion-consent-dialog="open"] {
-  overflow: hidden;
-}
-
 @media (max-width: 760px) {
   .onion-google-consent__banner {
     grid-template-columns: 1fr;

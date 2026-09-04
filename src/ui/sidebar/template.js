@@ -22,6 +22,7 @@ import {
   normalizeUserSlug,
 } from "../../core/config.js";
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
+import { avatarInitials, synchronizeAvatarHost } from "../../features/avatar-system/index.js";
 
 export const SIDEBAR_TEMPLATE_VERSION =
   "sidebar.template.unified.v6-core-role-authority";
@@ -410,16 +411,6 @@ function isAdminUser(user = {}) {
   return user.isAdmin === true || roles.includes(ROLE_ADMIN);
 }
 
-function initialsFromName(value = "") {
-  const parts = text(value).split(/\s+/).filter(Boolean);
-  if (!parts.length) return "ON";
-
-  const first = parts[0]?.[0] || "";
-  const last = parts.length > 1 ? parts.at(-1)?.[0] || "" : "";
-
-  return `${first}${last}`.toUpperCase().slice(0, 2) || "ON";
-}
-
 function normalizeUser(user = {}) {
   const source = isObject(user) ? user : {};
   const name = text(
@@ -458,7 +449,7 @@ function normalizeUser(user = {}) {
     ...source,
     name,
     displayName: name,
-    initials: text(source.initials, initialsFromName(name)).slice(0, 2).toUpperCase(),
+    initials: avatarInitials(name),
     slug,
     avatarUrl,
     hasAvatar: Boolean(avatarUrl),
@@ -621,22 +612,6 @@ export function createSidebarBrandLogo() {
   return logo;
 }
 
-function markAvatarFallback(avatar = null, img = null) {
-  if (!avatar) return false;
-
-  setClass(avatar, "has-image", false);
-  setClass(avatar, "is-fallback", true);
-  setData(avatar, "fallback", "true");
-  setData(avatar, "avatarState", "fallback");
-
-  if (img) {
-    setHidden(img, true);
-    if (img.hasAttribute?.("src")) img.removeAttribute("src");
-  }
-
-  return true;
-}
-
 function createUserAvatar(
   user = {},
   className = CLASSES.userAvatar,
@@ -650,8 +625,12 @@ function createUserAvatar(
     attrs: {
       "aria-hidden": "true",
       "data-sidebar-user-avatar": "true",
-      "data-fallback": hasImage ? "false" : "true",
-      "data-avatar-state": hasImage ? "image" : "fallback",
+      "data-avatar-system": "true",
+      "data-avatar-host": "true",
+      "data-avatar-name": currentUser.name,
+      "data-avatar-email": currentUser.email || "",
+      "data-avatar-user-id": currentUser.userId || currentUser.id || "",
+      "data-avatar-username": currentUser.username || "",
     },
   });
 
@@ -669,12 +648,6 @@ function createUserAvatar(
       },
     });
 
-    img.addEventListener(
-      "error",
-      () => markAvatarFallback(avatar, img),
-      { once: true }
-    );
-
     append(avatar, img);
   }
 
@@ -687,6 +660,7 @@ function createUserAvatar(
     )
   );
 
+  synchronizeAvatarHost(avatar);
   return avatar;
 }
 

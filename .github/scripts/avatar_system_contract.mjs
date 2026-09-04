@@ -142,6 +142,7 @@ const [
   avatarRuntime,
   privateRuntime,
   criticalGate,
+  publicSupport,
 ] = await Promise.all([
   readFile("src/css/app.css", "utf8"),
   readFile("src/css/private.css", "utf8"),
@@ -149,6 +150,7 @@ const [
   readFile("src/features/avatar-system/index.js", "utf8"),
   readFile("src/features/private-runtime-ui/index.js", "utf8"),
   readFile(".github/ci/validate_spa_contracts.sh", "utf8"),
+  readFile("src/features/public-support/index.js", "utf8"),
 ]);
 
 assert.match(
@@ -204,6 +206,10 @@ for (const observedAttribute of [
   '"data-avatar-tone"',
   '"data-avatar-state"',
   '"data-has-avatar"',
+  '"data-avatar-name"',
+  '"data-avatar-email"',
+  '"data-avatar-user-id"',
+  '"data-avatar-username"',
 ]) {
   assert.ok(
     avatarRuntime.includes(observedAttribute),
@@ -232,6 +238,55 @@ for (const forbidden of [
   /\bMath\.random\s*\(/,
 ]) {
   assert.doesNotMatch(avatarRuntime, forbidden);
+}
+
+assert.match(publicSupport, /AvatarSystem\.mount\(\{ AppCore \}\)/);
+assert.match(publicSupport, /AvatarSystem\.syncHost\(mark\)/);
+assert.match(publicSupport, /sanitizeRuntimeImageUrl/);
+assert.doesNotMatch(publicSupport, /img\.addEventListener\(["'](?:load|error)["']/);
+assert.doesNotMatch(publicSupport, /mark\.dataset\.(?:hasAvatar|avatarState)\s*=/);
+
+for (const consumerPath of [
+  "src/views/facturas/facturas.template.js",
+  "src/features/incidencias-detail-state/index.js",
+]) {
+  const consumer = await readFile(consumerPath, "utf8");
+  assert.match(consumer, /synchronizeAvatars\(/);
+  assert.doesNotMatch(consumer, /addEventListener\(["']error["']/);
+  assert.doesNotMatch(consumer, /fallbackTechnicianAvatar|repairTechnicianAvatar|facturasAvatarBound/);
+}
+
+const sidebarTemplate = await readFile("src/ui/sidebar/template.js", "utf8");
+assert.match(sidebarTemplate, /synchronizeAvatarHost\(avatar\)/);
+assert.match(sidebarTemplate, /initials:\s*avatarInitials\(name\)/);
+assert.doesNotMatch(sidebarTemplate, /markAvatarFallback|function initialsFromName/);
+assert.doesNotMatch(sidebarTemplate, /addEventListener\(\s*["']error["']/);
+
+const userModal = await readFile("src/views/usuarios/usuarios.template.modal.js", "utf8");
+assert.doesNotMatch(userModal, /onRootError|errorHandler|function hashText|function initialsFrom/);
+assert.match(userModal, /resolveAvatarPresentation\(/);
+
+const [clientCreate, clientDetail, mailTemplate, homeFoundation] = await Promise.all([
+  import("../../src/views/clientes/clientes.template.create.js"),
+  import("../../src/views/clientes/clientes.template.modal.js"),
+  import("../../src/views/correo/correo.template.js"),
+  import("../../src/views/home/home.template.foundation.js"),
+]);
+for (const name of ["Javier Harandou", "Ana Maria López", "Maria del Carmen Ortiz"]) {
+  const user = { id: "fixture-user", userId: "fixture-user", name, displayName: name, email: "fixture@example.test", username: "fixture" };
+  const expected = resolveAvatarPresentation(user);
+  const createHtml = clientCreate.renderClientesCreateModal({ open: true, role: "admin", userSearch: { query: name, results: [user], selectedUser: user }, form: { targetUserId: user.userId, targetUserName: name, targetUserEmail: user.email } });
+  const detailHtml = clientDetail.renderClientesDetailModal({ open: true, detail: { clienteId: "fixture-client", userId: user.userId, nombreFiscal: "Empresa Fixture", contactoNombre: name, email: user.email } });
+  const mailHtml = mailTemplate.renderMessageRows([{ id: "fixture-message", from: { name, address: user.email }, receivedDateTime: "2026-01-01T12:00:00Z" }]);
+  for (const [context, html] of [["client-create", createHtml], ["client-detail", detailHtml], ["mail-sender", mailHtml]]) {
+    const hosts = [...html.matchAll(/<(?:span|div)\b[^>]*data-avatar-host="true"[^>]*>/g)].map((match) => match[0]);
+    assert.ok(hosts.length > 0, `${context} must declare its identity to AvatarSystem`);
+    for (const host of hosts) {
+      assert.ok(host.includes(`data-avatar-initials="${expected.initials}"`), `${context} initials for ${name}`);
+      assert.ok(host.includes(`data-avatar-tone="${expected.tone}"`), `${context} tone for ${name}`);
+    }
+  }
+  assert.equal(homeFoundation.initialsFrom(name), expected.initials);
 }
 
 assert.match(privateRuntime, /import\("\.\.\/avatar-system\/index\.js"\)/);

@@ -25,6 +25,7 @@
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
+import { createAsyncScope } from "../core/async-scope.js";
 
 import {
   ROUTES,
@@ -49,6 +50,8 @@ import {
 export const ROUTER_VERSION =
   "router.minimal.v16-private-runtime-after-guard";
 
+import { syncPageMetadata } from "./page-metadata.js";
+
 const PUBLIC_HOME_PATH = "/";
 
 const PRIVATE_HOME_PATH =
@@ -63,9 +66,6 @@ const HOME_PATH =
 const LOGIN_PATH =
   ROUTES.login ||
   "/login";
-
-const APP_TITLE =
-  "Onion Support";
 
 const ROUTE_HOST_CLASS =
   "route-view-host";
@@ -2335,154 +2335,19 @@ function createTransition(
   seq = renderSeq,
   externalSignal = null
 ) {
-  const performanceId =
-    `nav:${Math.max(
-      0,
-      Number(seq) || 0
-    ).toString(36)}`;
-
-  if (
-    typeof AbortController ===
-    "undefined"
-  ) {
-    const transition = {
-      seq,
-      performanceId,
-      performanceViewKey:
-        "",
-
-      signal:
-        externalSignal ||
-        null,
-
-      abort:
-        () => false,
-
-      cleanup:
-        () => {},
-
-      isCurrent:
-        () =>
-          seq ===
-          renderSeq &&
-          !externalSignal
-            ?.aborted,
-    };
-
-    activeTransition =
-      transition;
-
-    return transition;
-  }
-
-  const controller =
-    new AbortController();
-
-  let externalListener =
-    null;
-
-  const abort =
-    (reason = undefined) => {
-      if (
-        controller.signal.aborted
-      ) {
-        return false;
-      }
-
-      try {
-        controller.abort(
-          reason
-        );
-      } catch {
-        try {
-          controller.abort();
-        } catch {
-          return false;
-        }
-      }
-
-      return true;
-    };
-
-  if (
-    externalSignal
-  ) {
-    if (
-      externalSignal.aborted
-    ) {
-      abort(
-        externalSignal.reason
-      );
-    } else if (
-      isFunction(
-        externalSignal
-          .addEventListener
-      )
-    ) {
-      externalListener =
-        () => {
-          abort(
-            externalSignal.reason
-          );
-        };
-
-      externalSignal.addEventListener(
-        "abort",
-        externalListener,
-        {
-          once: true,
-        }
-      );
-    }
-  }
-
+  const scope = createAsyncScope({ signal: externalSignal });
   const transition = {
     seq,
-    performanceId,
-    performanceViewKey:
-      "",
-
-    signal:
-      controller.signal,
-
-    abort,
-
-    isCurrent:
-      () =>
-        seq ===
-          renderSeq &&
-        !controller.signal
-          .aborted,
-
-    cleanup:
-      () => {
-        if (
-          externalSignal &&
-          externalListener &&
-          isFunction(
-            externalSignal
-              .removeEventListener
-          )
-        ) {
-          try {
-            externalSignal
-              .removeEventListener(
-                "abort",
-                externalListener
-              );
-          } catch {
-            // noop
-          }
-        }
-
-        externalListener =
-          null;
-      },
+    performanceId: `nav:${Math.max(0, Number(seq) || 0).toString(36)}`,
+    performanceViewKey: "",
+    signal: scope.signal,
+    abort: scope.dispose,
+    isCurrent: () => seq === renderSeq && scope.isActive(),
+    // The transition is complete; detach the caller's signal without aborting
+    // the successfully mounted view. Its controller owns unmount cleanup.
+    cleanup: scope.release,
   };
-
-  activeTransition =
-    transition;
-
+  activeTransition = transition;
   return transition;
 }
 
@@ -3004,37 +2869,8 @@ function setShell(
   return true;
 }
 
-function setDocumentTitle(
-  route = null
-) {
-  if (!isBrowser()) {
-    return false;
-  }
-
-  const title =
-    cleanText(
-      route?.title ||
-      route?.name ||
-      "",
-      ""
-    );
-
-  const next =
-    title
-      ? `${title} · ${APP_TITLE}`
-      : APP_TITLE;
-
-  if (
-    document.title ===
-    next
-  ) {
-    return false;
-  }
-
-  document.title =
-    next;
-
-  return true;
+function setDocumentTitle(route = null) {
+  return isBrowser() ? syncPageMetadata(route) : false;
 }
 
 function setActiveMenu(

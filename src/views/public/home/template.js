@@ -1,3 +1,5 @@
+import { PUBLIC_SITE } from "../../../core/public-site.js";
+
 import {
   PUBLIC_AUTH_LOGO,
   PUBLIC_AUTH_LOGO_WEBP,
@@ -10,7 +12,7 @@ import {
 
 export const PUBLIC_HOME_TEMPLATE_VERSION = "public.home.template.final.productivo.2026.25-login-anchor-canonical";
 
-const APP_NAME = "Onion Support";
+const APP_NAME = PUBLIC_SITE.name;
 
 const CRISTIAN_PROFILE_PHOTO = "src/media/img/Cristian_Avila_960.webp";
 const CRISTIAN_PROFILE_PHOTO_WEBP_224 = "src/media/img/Cristian_Avila_224.webp";
@@ -19,21 +21,10 @@ const CRISTIAN_PROFILE_PHOTO_WEBP_640 = "src/media/img/Cristian_Avila_640.webp";
 const CRISTIAN_PROFILE_PHOTO_WEBP_960 = "src/media/img/Cristian_Avila_960.webp";
 
 const BUSINESS = {
-  name: "Onion Support",
+  ...PUBLIC_SITE,
   legalServiceName: "Servicio técnico informático",
-  domain: "onionsupport.com",
-  email: "cristian@onionsupport.com",
-  phoneDisplay: "629 946 615",
-  phoneInternational: "34629946615",
-  phoneTel: "+34629946615",
-  locationShort: "Barcelona",
-  locationFull: "Sant Vicenç de Castellet (Barcelona)",
-  postalCode: "08295",
-  region: "Cataluña",
-  country: "España",
   copyrightYear: "2026",
   loginPath: "/login",
-  ownerName: "Cristian Ávila",
   profileRole: "Técnico informático",
   profilePhoto: CRISTIAN_PROFILE_PHOTO,
   profileExperienceValue: "+8",
@@ -45,26 +36,6 @@ const BUSINESS = {
 const DEFAULT_INCIDENT_MESSAGE =
   "Hola Cristian, vengo desde Onion Support. Quiero solicitar un diagnóstico técnico.";
 
-const LOCAL_BUSINESS_SCHEMA = {
-  "@context": "https://schema.org",
-  "@type": "LocalBusiness",
-  "@id": `https://${BUSINESS.domain}/#business`,
-  name: BUSINESS.name,
-  url: `https://${BUSINESS.domain}/`,
-  image: `https://${BUSINESS.domain}/src/media/img/Cristian_Avila_480.webp`,
-  logo: `https://${BUSINESS.domain}/src/media/img/favicon_black_circle_128.webp`,
-  email: BUSINESS.email,
-  telephone: BUSINESS.phoneTel,
-  description: "Servicio técnico informático con diagnóstico, reparación y asistencia para particulares, autónomos y negocios.",
-  areaServed: "Sant Vicenç de Castellet, Barcelona y alrededores",
-  address: {
-    "@type": "PostalAddress",
-    addressLocality: "Sant Vicenç de Castellet",
-    postalCode: BUSINESS.postalCode,
-    addressRegion: BUSINESS.region,
-    addressCountry: "ES",
-  },
-};
 
 function text(value = "", fallback = "") {
   const output = String(value ?? "").replace(/[\r\n\t]/g, " ").replace(/\s+/g, " ").trim();
@@ -87,11 +58,6 @@ function mailHref(subject = "Diagnóstico desde Onion Support") {
   return `mailto:${BUSINESS.email}?subject=${encodeURIComponent(text(subject, "Diagnóstico desde Onion Support"))}`;
 }
 
-function renderJsonLd() {
-  const json = JSON.stringify(LOCAL_BUSINESS_SCHEMA).replace(/</g, "\\u003c");
-
-  return `<script type="application/ld+json" data-public-home-schema="local-business">${json}</script>`;
-}
 
 function renderIcon(name = "") {
   const icons = {
@@ -438,10 +404,10 @@ function renderHero() {
       <div class="public-home-hero-grid">
         <div class="public-home-hero-copy">
           <h1 class="public-home-title" id="public-home-title" data-public-home-reveal="true">
-            Reparación informática <span>profesional</span>
+            Soporte informático <span>para avanzar</span>
           </h1>
           <p class="public-home-hero-text" data-public-home-reveal="true">
-            Servicio técnico informático en Sant Vicenç de Castellet y alrededores para ordenadores, portátiles, redes e impresoras, con diagnóstico claro y presupuesto previo.
+            ${escapeHtml(PUBLIC_SITE.description)}
           </p>
           <div class="public-home-hero-actions" data-public-home-reveal="true">
             <a class="public-home-button public-home-button--primary" href="${escapeAttr(whatsappHref())}" target="_blank" rel="noopener noreferrer" data-public-home-cta="true">
@@ -592,7 +558,6 @@ export function createPublicHomeTemplate() {
         data-business-whatsapp="${escapeAttr(BUSINESS.phoneInternational)}"
         data-business-email="${escapeAttr(BUSINESS.email)}"
       >
-        ${renderJsonLd()}
         <div class="public-home-background" aria-hidden="true">
           <span class="public-home-bg-orb public-home-bg-orb--one"></span>
           <span class="public-home-bg-orb public-home-bg-orb--two"></span>

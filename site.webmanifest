@@ -1,26 +1,21 @@
 {
   "id": "/",
   "name": "Onion Support",
-  "short_name": "Onion",
-  "description": "Onion Support · Servicio técnico informático en Sant Vicenç de Castellet. Reparación de ordenadores, portátiles, optimización, redes, impresoras y asistencia a domicilio.",
+  "short_name": "Onion Support",
+  "description": "Soporte informático para particulares, autónomos y empresas en España. Asistencia remota, diagnóstico claro y soluciones para que tu tecnología funcione.",
   "lang": "es-ES",
   "dir": "ltr",
-
   "start_url": "/",
   "scope": "/",
-
   "display": "standalone",
   "orientation": "any",
-
   "background_color": "#0a0c11",
   "theme_color": "#0a0c11",
-
   "categories": [
     "business",
     "productivity",
     "utilities"
   ],
-
   "icons": [
     {
       "src": "/favicon.ico",

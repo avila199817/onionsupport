@@ -1,5 +1,10 @@
+import { createModalLifecycle, focusModalElement } from "../features/entity-overlay/modal-lifecycle.js";
+
 (() => {
   "use strict";
+
+  if (typeof window === "undefined" || typeof document === "undefined") return;
+  if (window.OnionGoogleConsent) return;
 
   const GOOGLE_ANALYTICS_TAG_ID = "G-RQ77310QBH";
   const GOOGLE_ADS_TAG_ID = "AW-18395700376";
@@ -69,8 +74,12 @@
   let lastPageViewKey = "";
   let currentDialog = null;
   let consentRoot = null;
-  let previousFocusedElement = null;
   let routeRefreshQueued = false;
+  const modalLifecycle = createModalLifecycle({
+    getPanel: () => currentDialog,
+    onEscape: () => closeConsentDialog(),
+    onDetached: () => closeConsentDialog({ restoreFocus: false }),
+  });
 
   function safeNow() {
     return Date.now();
@@ -724,44 +733,8 @@
     if (!consentRoot) return null;
 
     consentRoot.addEventListener("click", handleConsentClick);
-    consentRoot.addEventListener("keydown", trapDialogFocus);
     document.body.appendChild(consentRoot);
     return consentRoot;
-  }
-
-  function focusableDialogElements() {
-    if (!currentDialog || currentDialog.hidden) return [];
-
-    return [...currentDialog.querySelectorAll(
-      'button:not([disabled]), input:not([disabled]), summary, a[href], [tabindex]:not([tabindex="-1"])'
-    )].filter(
-      (element) => !element.hidden && element.getClientRects().length > 0
-    );
-  }
-
-  function trapDialogFocus(event) {
-    if (event.key !== "Tab" || !currentDialog || currentDialog.hidden) return;
-
-    const focusable = focusableDialogElements();
-    if (!focusable.length) {
-      event.preventDefault();
-      currentDialog.focus();
-      return;
-    }
-
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-      return;
-    }
-
-    if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
   }
 
   function openConsentDialog() {
@@ -775,20 +748,16 @@
 
     if (!dialog || !backdrop || !analytics || !ads) return;
 
-    previousFocusedElement =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-
     analytics.checked = consentChoice.analytics;
     ads.checked = consentChoice.ads;
     dialog.hidden = false;
     backdrop.hidden = false;
     document.documentElement.dataset.onionConsentDialog = "open";
     currentDialog = dialog;
+    modalLifecycle.activate();
 
     window.requestAnimationFrame(() => {
-      dialog.focus();
+      if (modalLifecycle.isTop() && currentDialog === dialog) focusModalElement(dialog);
     });
   }
 
@@ -803,15 +772,7 @@
     delete document.documentElement.dataset.onionConsentDialog;
     currentDialog = null;
 
-    if (
-      restoreFocus &&
-      previousFocusedElement?.isConnected &&
-      typeof previousFocusedElement.focus === "function"
-    ) {
-      previousFocusedElement.focus();
-    }
-
-    previousFocusedElement = null;
+    modalLifecycle.deactivate({ restoreFocus });
   }
 
   function handleConsentClick(event) {
@@ -884,13 +845,6 @@
 
     if (preferences) {
       preferences.hidden = !consentWasDecided;
-    }
-  }
-
-  function handleGlobalKeydown(event) {
-    if (event.key === "Escape" && currentDialog && !currentDialog.hidden) {
-      event.preventDefault();
-      closeConsentDialog();
     }
   }
 
@@ -987,7 +941,6 @@
     },
   });
 
-  document.addEventListener("keydown", handleGlobalKeydown);
   installHistoryObserver();
   mountConsentUiWhenReady();
   scheduleRemoteGoogleTag();

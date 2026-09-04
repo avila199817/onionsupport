@@ -1,3 +1,4 @@
+import { createModalLifecycle, modalFocusableElements, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
 /* =========================================================
    Onion Support · Incidencias Attachment Viewer
    Archivo: /src/features/incidencias-video-preview/index.js
@@ -41,19 +42,6 @@ const VIDEO_THUMB_CANDIDATE =
   ".incidencias-modal-file-square[data-renderable-thumbnail='false']";
 const VIDEO_THUMB_FRAME = "[data-modal-video-thumb-frame='true']";
 
-const FOCUSABLE = [
-  "a[href]",
-  "button:not([disabled])",
-  "input:not([disabled]):not([type='hidden'])",
-  "select:not([disabled])",
-  "textarea:not([disabled])",
-  "iframe",
-  "audio[controls]",
-  "video[controls]",
-  "[contenteditable='true']",
-  "[tabindex]:not([tabindex='-1'])",
-].join(",");
-
 const VIDEO_EXT_RE = /\.(mov|qt|mp4|m4v|webm|ogv|ogg)$/i;
 const VIDEO_MIME_RE = /(?:^|\s)(video\/[a-z0-9.+-]+)(?:\s|·|$)/i;
 const VIDEO_LABEL_RE = /^(MOV|QT|MP4|M4V|WEBM|OGV|OGG)$/i;
@@ -75,6 +63,11 @@ let apiPromise = null;
 let epoch = 0;
 
 let activeViewer = null;
+const modalLifecycle = createModalLifecycle({
+  getPanel: () => activeViewer?.layer,
+  onEscape: () => requestViewerClose(),
+  bodyClasses: ['incidencias-media-viewer-open'],
+});
 let mediaSession = null;
 let closeTimer = 0;
 let controllerClosePass = false;
@@ -247,26 +240,6 @@ function prefersReducedMotion() {
   }
 }
 
-function visibleFocusables(root = null) {
-  if (!root) return [];
-
-  return Array.from(root.querySelectorAll(FOCUSABLE)).filter((node) => {
-    if (
-      !node?.isConnected ||
-      node.hidden ||
-      node.getAttribute("aria-hidden") === "true"
-    ) {
-      return false;
-    }
-
-    try {
-      const style = window.getComputedStyle(node);
-      return style.display !== "none" && style.visibility !== "hidden";
-    } catch {
-      return true;
-    }
-  });
-}
 
 function releaseMediaSession(session = mediaSession) {
   const body = session?.body;
@@ -492,21 +465,7 @@ function finalizeReturnToTicket(
       ? resolveOpener(session, root)
       : null;
 
-    if (opener?.isConnected && typeof opener.focus === "function") {
-      try {
-        opener.focus({ preventScroll: true });
-      } catch {
-        /*
-           En navegadores viejos el fallback puede desplazar. La restauración
-           del siguiente frame corrige esa diferencia antes de liberar el ancla.
-        */
-        try {
-          opener.focus();
-        } catch {
-          // noop
-        }
-      }
-    }
+    restoreModalFocus(opener);
 
     restoreSessionScroll(session);
 
@@ -605,7 +564,6 @@ function createViewerLayer(root = null) {
   layer.appendChild(stage);
   root.appendChild(layer);
 
-  document.body?.classList.add("incidencias-media-viewer-open");
 
   return { layer, stage };
 }
@@ -643,7 +601,7 @@ function focusViewer() {
   if (!layer?.isConnected || !preview?.isConnected) return false;
 
   const close = preview.querySelector(ACTION_CLOSE);
-  const target = close || visibleFocusables(layer)[0] || preview;
+  const target = close || modalFocusableElements(layer)[0] || preview;
 
   if (target === preview && !preview.hasAttribute("tabindex")) {
     preview.setAttribute("tabindex", "-1");
@@ -688,7 +646,7 @@ function cleanupViewer({
   }
 
   activeViewer = null;
-  document.body?.classList.remove("incidencias-media-viewer-open");
+  modalLifecycle.deactivate({ restoreFocus: false });
 
   if (routeTeardown) {
     if (mediaSession) {
@@ -798,7 +756,7 @@ function adoptPreview(root = null, preview = null) {
       setPanelInert(stale.root, false);
       try { stale.layer?.remove?.(); } catch { /* noop */ }
       activeViewer = null;
-      document.body?.classList.remove("incidencias-media-viewer-open");
+      modalLifecycle.deactivate({ restoreFocus: false });
     }
 
     ({ layer, stage } = createViewerLayer(root));
@@ -828,6 +786,7 @@ function adoptPreview(root = null, preview = null) {
   stage.replaceChildren(preview);
 
   activeViewer = { root, layer, stage, preview, opener };
+  modalLifecycle.activate({ opener });
 
   stabilizeOpen(root, preview);
   setPanelInert(root, true);
@@ -1511,55 +1470,6 @@ function syncVideoThumbnails(root = null) {
    INPUT / FOCUS
 ========================================================= */
 
-function trapViewerFocus(event = null) {
-  if (!activeViewer?.layer?.isConnected) return false;
-
-  if (event.key === "Escape") {
-    event.preventDefault();
-    event.stopPropagation();
-    requestViewerClose();
-    return true;
-  }
-
-  if (event.key !== "Tab") return false;
-
-  const focusables = visibleFocusables(activeViewer.layer);
-
-  if (!focusables.length) {
-    event.preventDefault();
-    event.stopPropagation();
-    focusViewer();
-    return true;
-  }
-
-  const first = focusables[0];
-  const last = focusables[focusables.length - 1];
-  const active = document.activeElement;
-
-  if (!activeViewer.layer.contains(active)) {
-    event.preventDefault();
-    event.stopPropagation();
-    (event.shiftKey ? last : first).focus?.();
-    return true;
-  }
-
-  if (event.shiftKey && active === first) {
-    event.preventDefault();
-    event.stopPropagation();
-    last.focus?.();
-    return true;
-  }
-
-  if (!event.shiftKey && active === last) {
-    event.preventDefault();
-    event.stopPropagation();
-    first.focus?.();
-    return true;
-  }
-
-  event.stopPropagation();
-  return false;
-}
 
 function onClickCapture(event) {
   const close = event.target?.closest?.(ACTION_CLOSE);
@@ -1754,7 +1664,6 @@ export function mountIncidenciasVideoPreview() {
   mounted = true;
 
   document.addEventListener("click", onClickCapture, true);
-  document.addEventListener("keydown", trapViewerFocus, true);
   document.addEventListener("scroll", enforceSessionScroll, true);
 
   viewObserver = new MutationObserver(() => {
@@ -1779,7 +1688,6 @@ export function destroyIncidenciasVideoPreview() {
   epoch += 1;
 
   document.removeEventListener("click", onClickCapture, true);
-  document.removeEventListener("keydown", trapViewerFocus, true);
   document.removeEventListener("scroll", enforceSessionScroll, true);
 
   viewObserver?.disconnect?.();

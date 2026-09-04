@@ -391,14 +391,6 @@ body.facturas-detail-open {
 
 .facturas-detail-action-loading { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
 
-.facturas-detail-spinner {
-  inline-size: 14px;
-  block-size: 14px;
-  border: 2px solid color-mix(in srgb, currentColor 28%, transparent);
-  border-block-start-color: currentColor;
-  border-radius: 50%;
-  animation: facturas-detail-spin .72s linear infinite;
-}
 
 /* =========================================================
    HERO META
@@ -712,24 +704,6 @@ body.facturas-detail-open {
   background: var(--panel-bg);
 }
 
-.facturas-detail-skeleton {
-  position: relative;
-  overflow: hidden;
-  border: 1px solid var(--border-default);
-  border-radius: var(--fdm-section-radius);
-  background: var(--skeleton-bg, var(--solid-bg-2));
-}
-
-.facturas-detail-skeleton::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  transform: translateX(-100%);
-  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text-strong) 7%, transparent), transparent);
-  animation: facturas-detail-shimmer 1.45s ease-in-out infinite;
-}
-
-.facturas-detail-skeleton--hero { border-color: var(--border-info); }
 
 .facturas-detail-layout--empty .facturas-detail-body-shell { display: grid; place-items: center; }
 .facturas-detail-layout--empty .facturas-detail-body { inline-size: min(520px, 100%); }
@@ -866,9 +840,7 @@ body.facturas-detail-open {
 
 @media (prefers-reduced-motion: reduce) {
   .facturas-detail-overlay,
-  .facturas-detail-modal,
-  .facturas-detail-skeleton::after,
-  .facturas-detail-spinner { animation: none; }
+  .facturas-detail-modal { animation: none; }
 
   .facturas-detail-btn,
   .facturas-detail-section,
@@ -934,7 +906,5 @@ body.facturas-detail-open {
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-@keyframes facturas-detail-shimmer { to { transform: translateX(100%); } }
-@keyframes facturas-detail-spin { to { transform: rotate(1turn); } }
 
 } /* @layer views */

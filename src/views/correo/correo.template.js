@@ -1,3 +1,4 @@
+import { avatarInitials as initials, resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 /* =========================================================
    Onion Support - Correo Template
    Archivo: /src/views/correo/correo.template.js
@@ -67,8 +68,9 @@ function attr(value = "") {
   return escapeHtml(cleanText(value, ""));
 }
 
-function initials(value = "") {
-  return cleanText(value, "?").split(/\s+/).filter(Boolean).slice(0, 2).map((item) => item[0] || "").join("").toUpperCase().slice(0, 2) || "?";
+function avatarIdentityAttributes(identity = {}) {
+  const presentation = resolveAvatarPresentation(identity);
+  return `data-avatar-system="true" data-avatar-host="true" data-avatar-name="${attr(presentation.name)}" data-avatar-email="${attr(presentation.email)}" data-avatar-user-id="${attr(presentation.userId)}" data-avatar-username="${attr(presentation.username)}" data-avatar-initials="${attr(presentation.initials)}" data-avatar-tone="${attr(String(presentation.tone))}" data-avatar-identity="${attr(presentation.fingerprint)}"`;
 }
 
 function safeImageSrc(value = "") {
@@ -167,7 +169,7 @@ export function renderMessageRows(messages = [], selectedId = "") {
     return `
       <button class="correo-message-row${selected ? " is-selected" : ""}${message.isRead ? "" : " is-unread"}" type="button"
         data-correo-action="select-message" data-correo-message-id="${attr(message.id)}" aria-pressed="${selected ? "true" : "false"}">
-        <span class="correo-message-avatar" aria-hidden="true">${escapeHtml(initials(name || address))}</span>
+        <span class="correo-message-avatar" ${avatarIdentityAttributes({ name, email: address })} aria-hidden="true"><span data-avatar-fallback="true">${escapeHtml(initials(name || address))}</span></span>
         <span class="correo-message-copy">
           <span class="correo-message-line correo-message-line--top"><strong title="${attr(address)}">${escapeHtml(name)}</strong><time datetime="${attr(date)}">${escapeHtml(formatMessageTime(date, now))}</time></span>
           <span class="correo-message-subject">${escapeHtml(message.subject || "(Sin asunto)")}</span>
@@ -235,7 +237,7 @@ export function renderReader(message = null, attachments = [], loading = false) 
         </div>
       </header>
       <div class="correo-sender">
-        <span class="correo-sender-avatar" aria-hidden="true">${escapeHtml(initials(name || address))}</span>
+        <span class="correo-sender-avatar" ${avatarIdentityAttributes({ name, email: address })} aria-hidden="true"><span data-avatar-fallback="true">${escapeHtml(initials(name || address))}</span></span>
         <span class="correo-sender-copy"><strong>${escapeHtml(name)}</strong><span>${escapeHtml(address)}</span><small>${renderRecipients("Para", message.toRecipients)} ${renderRecipients("Cc", message.ccRecipients)}</small></span>
         <time datetime="${attr(date)}">${escapeHtml(formatLongDate(date))}</time>
       </div>
@@ -251,8 +253,7 @@ export function renderReader(message = null, attachments = [], loading = false) 
 function renderAccountAvatar(account = {}) {
   const src = safeImageSrc(account.avatarUrl || "");
   const label = cleanText(account.displayName || account.name, "Usuario");
-  if (src) return `<img class="correo-account-avatar-img" src="${attr(src)}" alt="" loading="eager" referrerpolicy="no-referrer">`;
-  return `<span class="correo-account-avatar-fallback" aria-hidden="true">${escapeHtml(account.initials || initials(label))}</span>`;
+  return `${src ? `<img class="correo-account-avatar-img" data-avatar-image="true" src="${attr(src)}" alt="" loading="eager" referrerpolicy="no-referrer">` : ""}<span class="correo-account-avatar-fallback" data-avatar-fallback="true" aria-hidden="true">${escapeHtml(initials(label))}</span>`;
 }
 
 
@@ -273,7 +274,7 @@ function normalizeMailboxEntries(status = {}) {
 function renderMailboxAvatar(mailbox = {}, account = {}, primaryMailbox = "") {
   const isPrimary = mailbox.type !== "shared" && mailbox.mailbox === primaryMailbox;
   if (isPrimary) return renderAccountAvatar(account);
-  return `<span class="correo-mailbox-avatar-fallback" aria-hidden="true">${escapeHtml(initials(mailbox.displayName || mailbox.mailbox))}</span>`;
+  return `<span class="correo-mailbox-avatar-fallback" data-avatar-fallback="true" aria-hidden="true">${escapeHtml(initials(mailbox.displayName || mailbox.mailbox))}</span>`;
 }
 
 function renderMailboxOptions(status = {}, account = {}, activeMailbox = "") {
@@ -286,7 +287,7 @@ function renderMailboxOptions(status = {}, account = {}, activeMailbox = "") {
       ${entries.map((mailbox) => {
         const selected = mailbox.mailbox === activeMailbox;
         return `<button class="correo-mailbox-option${selected ? " is-selected" : ""}" type="button" role="menuitemradio" aria-checked="${selected ? "true" : "false"}" data-correo-action="mailbox" data-correo-mailbox="${attr(mailbox.mailbox)}">
-          <span class="correo-mailbox-option-avatar">${renderMailboxAvatar(mailbox, account, primaryMailbox)}</span>
+          <span class="correo-mailbox-option-avatar" ${avatarIdentityAttributes(mailbox.type !== "shared" && mailbox.mailbox === primaryMailbox ? account : { name: mailbox.displayName, email: mailbox.mailbox })}>${renderMailboxAvatar(mailbox, account, primaryMailbox)}</span>
           <span><strong>${escapeHtml(mailbox.displayName)}</strong><small>${escapeHtml(mailbox.mailbox)}</small></span>
           <i class="correo-mailbox-option-check" aria-hidden="true">${selected ? icon("check") : ""}</i>
         </button>`;
@@ -308,19 +309,20 @@ export function renderConnectionCard(status = {}, account = {}, notifications = 
     ? cleanText(selectedMailbox.displayName, "Soporte")
     : cleanText(status.displayName || account.displayName, connected ? "Microsoft 365" : "Microsoft Outlook");
   const activeAvatar = shared ? renderMailboxAvatar(selectedMailbox, account, primaryMailbox) : renderAccountAvatar(account);
+  const activeIdentity = shared ? { name: selectedMailbox.displayName, email: selectedMailbox.mailbox } : account;
   const notificationEnabled = notifications.enabled === true;
   const notificationSupported = notifications.supported !== false;
 
   return `
     <div class="correo-account-wrap${connected ? " is-connected" : ""}" data-correo-account-wrap>
       <button class="correo-account-card" type="button" data-correo-action="account-menu" aria-haspopup="menu" aria-expanded="false">
-        <span class="correo-account-avatar${shared ? " is-shared" : ""}">${activeAvatar}</span>
+        <span class="correo-account-avatar${shared ? " is-shared" : ""}" ${avatarIdentityAttributes(activeIdentity)}>${activeAvatar}</span>
         <span class="correo-account-copy"><strong>${escapeHtml(label)}</strong><span>${escapeHtml(mailbox)}</span></span>
         <span class="correo-account-state${connected && healthy ? " is-online" : ""}" title="${connected && healthy ? "Conectado" : "Sin conexión"}"></span>
         <span class="correo-account-chevron">${icon("chevronDown")}</span>
       </button>
       <div class="correo-account-menu" data-correo-account-menu role="menu" hidden>
-        <div class="correo-account-menu-current"><span>${activeAvatar}</span><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(mailbox)}</small></div></div>
+        <div class="correo-account-menu-current"><span ${avatarIdentityAttributes(activeIdentity)}>${activeAvatar}</span><div><strong>${escapeHtml(label)}</strong><small>${escapeHtml(mailbox)}</small></div></div>
         ${renderMailboxOptions(status, account, mailbox)}
         <button class="correo-account-menu-notifications${notificationEnabled ? " is-enabled" : ""}" type="button" role="menuitemcheckbox" aria-checked="${notificationEnabled ? "true" : "false"}" data-correo-action="notifications">${icon("bell")}<span><strong>${notificationEnabled ? "Notificaciones activadas" : "Activar notificaciones"}</strong><small>${notificationSupported ? "Avisos del navegador cuando llegue correo" : "Este navegador no admite notificaciones"}</small></span><i class="correo-account-menu-check" aria-hidden="true">${notificationEnabled ? icon("check") : ""}</i></button>
         <button class="correo-account-menu-signature" type="button" role="menuitem" data-correo-action="signature">${icon("edit")}<span><strong>Firma de correo</strong><small>Configura la firma que Onion añade al redactar</small></span></button>

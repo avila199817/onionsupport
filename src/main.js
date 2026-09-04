@@ -1,3 +1,5 @@
+import "./analytics/google-tag.js";
+
 /* =========================================================
    Onion Support - Main
    Archivo: /src/main.js

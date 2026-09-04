@@ -1932,7 +1932,7 @@
     inset 0 0 0 1px color-mix(in srgb, var(--text-strong), transparent 98%),
     0 0 10px color-mix(in srgb, var(--accent), transparent 82%);
 
-  animation: uiToastSpin .84s linear infinite;
+  animation: var(--ui-loading-animation) var(--ui-loading-duration) linear infinite;
 }
 
 .toast-content {
@@ -2759,75 +2759,13 @@
   background: var(--btn-primary-bg-hover);
 }
 
-
 /* =========================================================
    SKELETON
 ========================================================= */
 
-.ui-skeleton {
-  position: relative;
-
-  overflow: hidden;
-
-  border-radius: inherit;
-
-  background: var(--skeleton-bg);
-}
-
-.ui-skeleton::after {
-  content: "";
-
-  position: absolute;
-  inset: 0;
-
-  background:
-    linear-gradient(
-      90deg,
-      transparent 0%,
-      var(--skeleton-shine) 50%,
-      transparent 100%
-    );
-
-  transform: translateX(-100%);
-
-  animation: uiShimmer 1.2s linear infinite;
-}
-
-.ui-skeleton.text {
-  block-size: 1em;
-
-  border-radius: var(--radius-pill);
-}
 
 .ui-skeleton.title {
-  block-size: 1.35em;
   inline-size: min(320px, 70%);
-  border-radius: var(--radius-pill);
-}
-
-.ui-skeleton.circle {
-  border-radius: 50%;
-}
-
-.ui-skeleton.card {
-  min-block-size: 120px;
-
-  border-radius: var(--card-radius);
-}
-
-.ui-skeleton.line-sm {
-  block-size: var(--skeleton-height-sm);
-  border-radius: var(--radius-pill);
-}
-
-.ui-skeleton.line-md {
-  block-size: var(--skeleton-height-md);
-  border-radius: var(--radius-pill);
-}
-
-.ui-skeleton.line-lg {
-  block-size: var(--skeleton-height-lg);
-  border-radius: var(--radius-pill);
 }
 
 
@@ -2858,7 +2796,7 @@
   border-inline-end-color: var(--accent-3);
   border-radius: 50%;
 
-  animation: uiToastSpin .84s linear infinite;
+  animation: var(--ui-loading-animation) var(--ui-loading-duration) linear infinite;
 }
 
 .ui-spinner.sm {
@@ -3056,18 +2994,6 @@
   }
 }
 
-@keyframes uiShimmer {
-  to {
-    transform: translateX(100%);
-  }
-}
-
-@keyframes uiToastSpin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 
 /* =========================================================
    RESPONSIVE
@@ -3234,7 +3160,6 @@
   .ui-dropdown .dropdown-item,
   .ui-dropdown-item,
   .error-saas .error-actions button,
-  .ui-skeleton::after,
   .ui-spinner,
   .toast.loading .toast-icon::before,
   .ui-page-btn,

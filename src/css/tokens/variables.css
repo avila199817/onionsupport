@@ -1204,9 +1204,6 @@
   --skeleton-height-md: calc(14px * var(--ui-scale));
   --skeleton-height-lg: calc(20px * var(--ui-scale));
 
-  --skeleton-animation:
-    skeletonShimmer 1.35s var(--ease-standard) infinite;
-
 
   /* =========================================================
      EMPTY / ERROR / SUCCESS STATES
@@ -1696,22 +1693,5 @@ body[data-route-mode="app"] {
     --loader-duration-fade: 1ms;
     --loader-duration-bar: 1ms;
     --loader-duration-orbit: 1ms;
-
-    --skeleton-animation: none;
-  }
-}
-
-
-/* =========================================================
-   KEYFRAMES SUPPORT
-========================================================= */
-
-@keyframes skeletonShimmer {
-  0% {
-    background-position: 120% 0;
-  }
-
-  100% {
-    background-position: -120% 0;
   }
 }

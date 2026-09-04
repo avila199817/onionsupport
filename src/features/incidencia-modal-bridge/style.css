@@ -76,7 +76,7 @@ body.incidencias-modal-bridge-feedback-open {
   border: 2.5px solid currentColor;
   border-right-color: transparent;
   border-radius: 999px;
-  animation: incidencia-bridge-feedback-spin 0.72s linear infinite;
+  animation: var(--ui-loading-animation) var(--ui-loading-duration) linear infinite;
 }
 
 .incidencia-bridge-feedback-copy {
@@ -153,11 +153,6 @@ body.incidencias-modal-bridge-feedback-open {
   color: var(--text, #171a1f);
 }
 
-@keyframes incidencia-bridge-feedback-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 
 @media (max-width: 520px) {
   .incidencia-bridge-feedback-panel {
@@ -177,9 +172,6 @@ body.incidencias-modal-bridge-feedback-open {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .incidencia-bridge-feedback-spinner {
-    animation-duration: 1.4s;
-  }
 
   .incidencia-bridge-feedback-button {
     transition: none;

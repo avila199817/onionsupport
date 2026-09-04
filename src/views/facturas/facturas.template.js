@@ -9,7 +9,7 @@
    - Identidad visual de clientes alineada con Incidencias.
 ========================================================= */
 
-import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
+import { resolveAvatarPresentation, synchronizeAvatars } from "../../features/avatar-system/index.js";
 import { renderFacturasCreateModal } from "./facturas.template.create.js";
 import { renderFacturasDetailModal } from "./facturas.template.modal.js";
 
@@ -1144,21 +1144,8 @@ export function bindFacturasTemplateDom(root = null) {
   const scope = root || (typeof document !== "undefined" ? document.querySelector(".facturas-view-root, [data-facturas-scope]") : null);
   if (!scope || typeof scope.querySelectorAll !== "function") return false;
 
-  scope.querySelectorAll("[data-facturas-avatar-img='true']").forEach((img) => {
-    if (!img || img.dataset.facturasAvatarBound === "true") return;
-    img.dataset.facturasAvatarBound = "true";
-    const avatar = img.closest("[data-facturas-avatar='true']");
-    const setFallback = () => {
-      if (avatar) {
-        avatar.setAttribute("data-fallback", "true");
-        avatar.classList.add("facturas-avatar--fallback");
-        avatar.classList.remove("has-image");
-      }
-      try { img.hidden = true; } catch { /* noop */ }
-    };
-    img.addEventListener("error", setFallback, { passive: true });
-    if (img.complete && img.naturalWidth === 0) setFallback();
-  });
+  // The caller retains its DOM hook; identity and image lifecycle are global.
+  synchronizeAvatars(scope);
 
   return true;
 }

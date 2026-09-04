@@ -1662,7 +1662,7 @@ body.auth-screen.auth-no-scroll {
   border-block-start-color: #ffffff;
   border-radius: 50%;
 
-  animation: authButtonSpin .72s linear infinite;
+  animation: var(--ui-loading-animation) var(--ui-loading-duration) linear infinite;
 }
 
 .login-arrow-svg {
@@ -1875,11 +1875,6 @@ body.auth-screen.auth-no-scroll {
    16. ANIMATION
 ========================================================= */
 
-@keyframes authButtonSpin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 
 @keyframes loginOrbFloat {
   0%,

@@ -20,7 +20,8 @@
 
 import { AppCore } from "../../core/index.js";
 import Http from "../../core/http.js";
-import { resolveAvatarPresentation } from "../avatar-system/index.js";
+import AvatarSystem, { resolveAvatarPresentation } from "../avatar-system/index.js";
+import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 
 export const PUBLIC_SUPPORT_VERSION =
   "public-support.intake.v11-client-facing-compact";
@@ -135,7 +136,7 @@ function addressParts(user) {
 }
 
 function avatar(user) {
-  const raw = text(first(
+  return sanitizeRuntimeImageUrl(first(
     user?.avatarUrl,
     user?.avatar,
     user?.picture,
@@ -143,19 +144,7 @@ function avatar(user) {
     user?.profile?.avatarUrl,
     user?.profile?.avatar,
     ""
-  ));
-
-  if (!raw || /[\r\n\t\\]/.test(raw) || /^(javascript|data|vbscript|file):/i.test(raw)) return "";
-  if (raw.startsWith("/")) return raw.replace(/\/{2,}/g, "/");
-
-  try {
-    const url = new URL(raw, window.location.origin);
-    if (url.protocol === "https:" || url.origin === window.location.origin) return url.href;
-  } catch {
-    // noop
-  }
-
-  return "";
+  ), { allowBlobObjectUrl: false });
 }
 
 function internalPanelPath(value = "") {
@@ -209,20 +198,22 @@ function identityNode(name, src, presentation = {}) {
   const resolved = presentation && typeof presentation === "object"
     ? presentation
     : {};
-  const tone = Number.isFinite(resolved.tone) ? resolved.tone : 1;
   const wrap = document.createElement("span");
   wrap.className = "public-support-account";
 
   const mark = document.createElement("span");
-  mark.className = `public-support-account-avatar ${src ? "has-image" : "is-fallback"}`;
+  mark.className = "public-support-account-avatar";
   mark.setAttribute("aria-hidden", "true");
-  mark.dataset.avatarTone = String(tone);
-  mark.dataset.hasAvatar = src ? "true" : "false";
-  mark.dataset.fallback = src ? "false" : "true";
-  mark.dataset.avatarState = src ? "image" : "fallback";
+  mark.dataset.avatarSystem = "true";
+  mark.dataset.avatarHost = "true";
+  mark.dataset.avatarName = resolved.name || name;
+  mark.dataset.avatarEmail = resolved.email || "";
+  mark.dataset.avatarUserId = resolved.userId || "";
+  mark.dataset.avatarUsername = resolved.username || "";
 
   const fallback = document.createElement("span");
   fallback.className = "public-support-account-avatar-fallback";
+  fallback.dataset.avatarFallback = "true";
   fallback.textContent = resolved.initials || "ON";
   fallback.setAttribute("aria-hidden", "true");
   mark.appendChild(fallback);
@@ -234,31 +225,9 @@ function identityNode(name, src, presentation = {}) {
     img.decoding = "async";
     img.referrerPolicy = "no-referrer";
     img.draggable = false;
-    img.addEventListener("load", () => {
-      mark.classList.add("has-image");
-      mark.classList.remove("is-fallback");
-      mark.dataset.hasAvatar = "true";
-      mark.dataset.fallback = "false";
-      mark.dataset.avatarState = "image";
-    }, { once: true });
-    img.addEventListener("error", () => {
-      img.remove();
-      mark.classList.remove("has-image");
-      mark.classList.add("is-fallback");
-      mark.dataset.hasAvatar = "false";
-      mark.dataset.fallback = "true";
-      mark.dataset.avatarState = "fallback";
-    }, { once: true });
+    img.dataset.avatarImage = "true";
     mark.insertBefore(img, fallback);
     img.src = src;
-
-    if (img.complete && Number(img.naturalWidth || 0) > 0) {
-      mark.classList.add("has-image");
-      mark.classList.remove("is-fallback");
-      mark.dataset.hasAvatar = "true";
-      mark.dataset.fallback = "false";
-      mark.dataset.avatarState = "image";
-    }
   }
 
   const copy = document.createElement("span");
@@ -274,6 +243,7 @@ function identityNode(name, src, presentation = {}) {
 
   copy.append(strong, small);
   wrap.append(mark, copy);
+  AvatarSystem.syncHost(mark);
   return wrap;
 }
 
@@ -324,6 +294,9 @@ function syncIdentity(root) {
     link.replaceChildren(identityNode(name, src, presentation));
   }
 
+  // The public and private shells share this idempotent runtime authority.
+  // Image state, fallback and later DOM changes belong to AvatarSystem.
+  AvatarSystem.mount({ AppCore });
   root.dataset.publicSupportAuthenticated = "true";
   return true;
 }

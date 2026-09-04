@@ -479,10 +479,9 @@
   border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
   border-block-start-color: currentColor;
   border-radius: 50%;
-  animation: server-spin .72s linear infinite;
+  animation: var(--ui-loading-animation) var(--ui-loading-duration) linear infinite;
 }
 
-@keyframes server-spin { to { transform: rotate(1turn); } }
 
 /* =========================================================
    FINOPS

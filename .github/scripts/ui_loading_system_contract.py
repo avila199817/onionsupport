@@ -18,18 +18,15 @@ CRUD_LOCAL = (
     ROOT / "src/css/views/usuarios/index.css",
 )
 
-# These files already contained historical skeleton paint before the design
-# system migration. layer(loading) supersedes them at runtime. This bounded set
-# prevents proliferation while allowing cleanup to be performed deliberately.
-LEGACY_ADAPTER_FILES = {
-    ROOT / "src/css/tokens/variables.css",
-    ROOT / "src/css/components/ui.css",
-    ROOT / "src/css/compositions/private-admin-parity.css",
-    ROOT / "src/css/views/home/index.css",
-    ROOT / "src/css/views/cuenta/index.css",
-    ROOT / "src/css/views/correo/index.css",
-    ROOT / "src/css/views/facturas/detail.css",
-}
+SPINNER_ADAPTERS = (
+    ".inc-create-spinner", ".inc-create-loading-spinner",
+    ".cli-create-spinner", ".cli-create-loading-spinner",
+    ".fac-create-spinner", ".fac-create-loading-spinner",
+    ".usr-create-spinner", ".usr-create-loading-spinner",
+    ".usr-create-submit-spinner", ".facturas-detail-spinner",
+    ".incidencias-modal-inline-spinner > span:first-child",
+    ".incidencias-modal-loading-box > span:first-child",
+)
 
 errors = []
 
@@ -63,6 +60,9 @@ if not errors:
         "--ui-skeleton-base:",
         "--ui-skeleton-highlight:",
         "--ui-skeleton-duration:",
+        "--ui-loading-animation: ui-loading-spin;",
+        "--ui-loading-animation: none;",
+        "--ui-loading-duration: .72s;",
         ".ui-skeleton,",
         ".incidencias-skeleton,",
         ".facturas-skeleton,",
@@ -115,18 +115,49 @@ if not errors:
                     f"{path.relative_to(ROOT)}: skeleton local recuperó paint {prop!r}",
                 )
 
-    # Stop proliferation. Existing legacy files are bounded adapters; any new
-    # skeleton keyframe elsewhere is a hard regression.
-    skeleton_keyframes = re.compile(r"@keyframes\s+[\w-]*skeleton[\w-]*", re.I)
-    for path in (ROOT / "src/css").rglob("*.css"):
+    # The migration is complete: compatibility classes are selectors in the
+    # authority, never an exception allowing another paint or animation engine.
+    skeleton_keyframes = re.compile(r"@keyframes\s+[\w-]*(?:skeleton|shimmer)[\w-]*", re.I)
+    placeholder_selector = re.compile(
+        r"\.(?:(?:ui|incidencias|facturas|clientes|usuarios|cuenta|home)-skeleton"
+        r"|facturas-detail-skeleton|home-panel-loading-(?:icon|title|meta|date|amount)"
+        r"|correo-boot-(?:account|line|title)|correo-reader-skeleton-block"
+        r"|correo-message-skeleton[^,]*(?: > span| i))"
+    )
+    visual_property = re.compile(
+        r"(?<![\w-])(?:background(?:-[\w-]+)?|animation(?:-[\w-]+)?"
+        r"|border(?:-[\w-]+)?|block-size|color|opacity)\s*:"
+    )
+    for path in (*((ROOT / "src/css").rglob("*.css")), *((ROOT / "src/features").rglob("*.css"))):
         if path == SKELETON:
             continue
-        text = path.read_text(encoding="utf-8")
-        if skeleton_keyframes.search(text):
+        text = re.sub(r"/\*.*?\*/", "", path.read_text(encoding="utf-8"), flags=re.S)
+        require(
+            not skeleton_keyframes.search(text),
+            f"{path.relative_to(ROOT)}: @keyframes skeleton/shimmer fuera de la autoridad global",
+        )
+        for animation_name in re.findall(r"@keyframes\s+([\w-]+)", text):
             require(
-                path in LEGACY_ADAPTER_FILES,
-                f"{path.relative_to(ROOT)}: nuevo @keyframes skeleton fuera de la autoridad global",
+                "spin" not in animation_name.lower() or animation_name == "loginOrbitSpin",
+                f"{path.relative_to(ROOT)}: animación de indicador paralela {animation_name}",
             )
+        for selector, body in re.findall(r"([^{}]+)\{([^{}]*)\}", text):
+            if placeholder_selector.search(selector):
+                require(
+                    not visual_property.search(body),
+                    f"{path.relative_to(ROOT)}: paint o forma de skeleton fuera de la autoridad global: {selector.strip()}",
+                )
+            if any(adapter in selector for adapter in SPINNER_ADAPTERS):
+                require(
+                    not visual_property.search(body),
+                    f"{path.relative_to(ROOT)}: spinner CRUD redefinido fuera de la autoridad global",
+                )
+
+    for selector in SPINNER_ADAPTERS:
+        require(
+            skeleton.count(selector) >= 2,
+            f"skeleton.css: {selector} debe compartir spinner canónico y reduced motion",
+        )
 
     # The loading policy is part of the product contract, not tribal knowledge.
     for token in (
@@ -150,5 +181,5 @@ if errors:
 
 print(
     "UI Loading System OK · single skeleton authority · canonical shimmer/spinner · "
-    "CRUD paint centralized · legacy adapters bounded · accessibility/motion policy locked"
+    "CRUD paint centralized · no legacy paint exceptions · accessibility/motion policy locked"
 )

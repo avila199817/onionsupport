@@ -99,9 +99,10 @@
 
    Esta capa es deliberadamente la última. Primero fija las invariantes de
    layout y después AvatarSystem impone una única gramática de identidad para
-   todo el SPA. Ninguna vista puede volver a pintar un fondo, radio, fallback
-   o estado alternativo por encima de una imagen real.
+   todo el SPA. avatar-system-contexts.css sólo aporta tamaños contextuales;
+   no puede pintar ni decidir identidad/color.
 ========================================================= */
 
 @import url("./core/guardrails.css") layer(guardrails);
 @import url("./components/avatar-system.css") layer(guardrails);
+@import url("./components/avatar-system-contexts.css") layer(guardrails);

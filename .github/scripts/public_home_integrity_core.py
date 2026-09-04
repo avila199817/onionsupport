@@ -598,6 +598,9 @@ def main() -> int:
         ("public-home-nav-account-slot", "Falta el avatar autenticado fuera del drawer"),
         (".public-home .public-home-nav-account-slot {\n  position: relative;\n  display: grid;", "El slot del topbar debe centrar su contenido"),
         ("padding: 0;", "El toggle del topbar no debe desplazar el avatar con padding interno"),
+        (".public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle],\n.public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]:hover", "El topbar debe mantener el avatar sin caja hover"),
+        ("background: transparent;\n  background-image: none;\n  box-shadow: none;", "El toggle del topbar no debe pintar fondo ni sombra"),
+        ("outline-offset: 3px;", "El foco de teclado debe rodear el avatar, no recuperar la caja"),
     ):
         require(errors, snippet in experience_css, message)
 

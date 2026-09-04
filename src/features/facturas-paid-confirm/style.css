@@ -248,7 +248,7 @@ body.facturas-payment-confirm-open {
   border: 2px solid color-mix(in srgb, var(--accent) 24%, transparent);
   border-block-start-color: var(--accent);
   border-radius: 50%;
-  animation: fpc-spin .72s linear infinite;
+  animation: var(--ui-loading-animation) var(--ui-loading-duration) linear infinite;
 }
 
 .fpc-spinner--button {
@@ -638,8 +638,5 @@ body.facturas-payment-confirm-open {
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-@keyframes fpc-spin {
-  to { transform: rotate(1turn); }
-}
 
 } /* @layer views */

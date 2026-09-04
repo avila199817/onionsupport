@@ -41,8 +41,6 @@
 
 .home-view-root .home-panel-loading-icon {
   inline-size: var(--home-extreme-icon-size);
-  block-size: var(--home-extreme-icon-size);
-  border-radius: var(--radius-lg, 14px);
 }
 
 .home-view-root .home-alert .home-btn {

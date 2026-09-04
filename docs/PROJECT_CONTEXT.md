@@ -1,6 +1,6 @@
 # ONION SUPPORT — CONTEXTO CANÓNICO DEL FRONTEND
 
-> Actualizado: 2026-09-02.
+> Actualizado: 2026-09-04.
 > Describe la arquitectura productiva esperada del repositorio `avila199817/onionsupport`. Si documentación y código divergen, el código de `main` es la autoridad.
 
 ## 1. Alcance
@@ -19,8 +19,13 @@ Onion Support es una SPA JavaScript modular desplegada en Azure Static Web Apps.
 - HTTP: `src/core/http.js`
 - Auth: `src/features/auth/`
 - AvatarSystem: `src/features/avatar-system/`
+- Modales: `src/features/entity-overlay/modal-lifecycle.js`
+- Concurrencia y desmontaje: `src/core/async-scope.js`
+- Marca y SEO: `src/core/public-site.js` y `src/router/page-metadata.js`
 
 Este repositorio es exclusivamente frontend. No debe duplicar, simular ni inventar lógica del backend.
+
+La consolidación y sus límites están documentados en `docs/FRONTEND_SHARED_SYSTEMS.md`. La portada usa la marca **Onion Support**, los servicios comparten catálogo y plantilla, y `/login` es accesible pero no indexable. El consentimiento se importa desde `src/main.js` y comparte la autoridad modal; las páginas estáticas de servicios compilan el mismo módulo.
 
 ## 2. Regla arquitectónica
 

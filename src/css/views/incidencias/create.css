@@ -1028,16 +1028,6 @@ body.incidencias-create-open {
    LOADERS
 ========================================================= */
 
-.inc-create-spinner,
-.inc-create-loading-spinner {
-  inline-size: 16px;
-  block-size: 16px;
-  flex: 0 0 auto;
-  border: 2px solid currentColor;
-  border-inline-end-color: transparent;
-  border-radius: 50%;
-  animation: inc-create-spin .72s linear infinite;
-}
 
 .inc-create-loading-overlay {
   position: absolute;
@@ -1066,11 +1056,6 @@ body.incidencias-create-open {
   color: var(--text-strong);
 }
 
-.inc-create-loading-spinner {
-  inline-size: 24px;
-  block-size: 24px;
-  border-width: 3px;
-}
 
 .inc-create-loading-copy {
   min-inline-size: 0;
@@ -1226,9 +1211,6 @@ body.incidencias-create-open {
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-@keyframes inc-create-spin {
-  to { transform: rotate(360deg); }
-}
 
 @media (prefers-reduced-motion: reduce) {
   .inc-create-overlay,
@@ -1246,10 +1228,6 @@ body.incidencias-create-open {
     transition-duration: 0ms;
   }
 
-  .inc-create-spinner,
-  .inc-create-loading-spinner {
-    animation-duration: 1.4s;
-  }
 }
 
 @media (forced-colors: active) {

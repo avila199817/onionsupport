@@ -1,3 +1,4 @@
+import { createModalLifecycle, modalFocusableElements, restoreModalFocus } from "./modal-lifecycle.js";
 /* =========================================================
    Onion Support - Global Entity Overlay
 
@@ -103,19 +104,6 @@ const BACKDROP_SELECTOR = [
   "[data-usuarios-detail-overlay='true']",
 ].join(",");
 
-const FOCUSABLE_SELECTOR = [
-  "a[href]",
-  "button:not([disabled])",
-  "input:not([disabled]):not([type='hidden'])",
-  "select:not([disabled])",
-  "textarea:not([disabled])",
-  "iframe",
-  "audio[controls]",
-  "video[controls]",
-  "[contenteditable='true']",
-  "[tabindex]:not([tabindex='-1'])",
-].join(",");
-
 let initialized = false;
 let root = null;
 let context = {};
@@ -124,9 +112,12 @@ let tokenSequence = 0;
 let renderSequence = 0;
 let closeFallbackTimer = 0;
 let lastGlobalOpener = null;
-let bodySnapshot = null;
+const modalLifecycle = createModalLifecycle({
+  getPanel: () => root?.querySelector(PANEL_SELECTOR),
+  onEscape: () => close(),
+  bodyClasses: [BODY_CLASS],
+});
 let documentClickBound = false;
-let documentKeydownBound = false;
 let popstateBound = false;
 
 const stylePromises = new Map();
@@ -199,59 +190,17 @@ function ensureRoot() {
 }
 
 function lockBody() {
-  if (!isBrowser() || bodySnapshot) return false;
-
-  const body = document.body;
-  if (!body) return false;
-
-  bodySnapshot = {
-    overflow: body.style.overflow,
-    overscrollBehavior: body.style.overscrollBehavior,
-  };
-
-  body.classList.add(BODY_CLASS);
-  body.style.overflow = "hidden";
-  body.style.overscrollBehavior = "contain";
-  return true;
+  return modalLifecycle.activate({ opener: lastGlobalOpener });
 }
 
 function unlockBody() {
-  if (!isBrowser()) return false;
-
-  const body = document.body;
-  if (!body) return false;
-
-  body.classList.remove(BODY_CLASS);
-
-  if (bodySnapshot) {
-    body.style.overflow = bodySnapshot.overflow;
-    body.style.overscrollBehavior = bodySnapshot.overscrollBehavior;
-  } else {
-    body.style.removeProperty("overflow");
-    body.style.removeProperty("overscroll-behavior");
-  }
-
-  bodySnapshot = null;
-  return true;
+  return modalLifecycle.deactivate({ restoreFocus: false });
 }
 
 function restoreFocus() {
   const target = lastGlobalOpener;
   lastGlobalOpener = null;
-
-  if (!target?.isConnected || typeof target.focus !== "function") return false;
-
-  try {
-    target.focus({ preventScroll: true });
-    return true;
-  } catch {
-    try {
-      target.focus();
-      return true;
-    } catch {
-      return false;
-    }
-  }
+  return restoreModalFocus(target);
 }
 
 function normalizeOpenInput(input = {}) {
@@ -526,7 +475,7 @@ function focusTop(entry = null) {
 
   const target =
     panel.querySelector("[autofocus]") ||
-    panel.querySelector(FOCUSABLE_SELECTOR) ||
+    modalFocusableElements(panel)[0] ||
     panel;
 
   if (!(target instanceof HTMLElement)) return false;
@@ -557,8 +506,6 @@ async function renderTop({ focus = false } = {}) {
   host.dataset.entityType = entry.type;
   host.dataset.entityId = entry.id;
   host.dataset.entityDepth = String(stack.length);
-  lockBody();
-
   let html = "";
 
   try {
@@ -593,6 +540,7 @@ async function renderTop({ focus = false } = {}) {
   if (sequence !== renderSequence || !entryIsCurrent(entry)) return false;
 
   host.innerHTML = String(html || "");
+  lockBody();
 
   try {
     await entry.adapter?.afterRender?.(host, {
@@ -1267,51 +1215,6 @@ function onDocumentClick(event) {
   });
 }
 
-function focusableNodes(panel = null) {
-  if (!panel) return [];
-
-  return Array.from(panel.querySelectorAll(FOCUSABLE_SELECTOR)).filter((node) => {
-    if (!(node instanceof HTMLElement)) return false;
-    if (node.hidden || node.getAttribute("aria-hidden") === "true") return false;
-    if (node.getAttribute("aria-disabled") === "true") return false;
-    return node.getClientRects().length > 0;
-  });
-}
-
-function onDocumentKeydown(event) {
-  if (!stack.length || !root?.contains?.(event.target)) return;
-
-  if (event.key === "Escape") {
-    event.preventDefault();
-    event.stopPropagation();
-    close();
-    return;
-  }
-
-  if (event.key !== "Tab") return;
-
-  const panel = root.querySelector(PANEL_SELECTOR);
-  if (!panel) return;
-
-  const nodes = focusableNodes(panel);
-  if (!nodes.length) {
-    event.preventDefault();
-    panel.focus?.({ preventScroll: true });
-    return;
-  }
-
-  const first = nodes[0];
-  const last = nodes[nodes.length - 1];
-
-  if (event.shiftKey && document.activeElement === first) {
-    event.preventDefault();
-    last.focus({ preventScroll: true });
-  } else if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault();
-    first.focus({ preventScroll: true });
-  }
-}
-
 function onPopstate() {
   clearCloseFallback();
 
@@ -1405,11 +1308,6 @@ export function init(options = {}) {
     documentClickBound = true;
   }
 
-  if (!documentKeydownBound) {
-    document.addEventListener("keydown", onDocumentKeydown, true);
-    documentKeydownBound = true;
-  }
-
   if (!popstateBound) {
     window.addEventListener("popstate", onPopstate);
     popstateBound = true;
@@ -1441,11 +1339,6 @@ export function destroy() {
   if (documentClickBound) {
     document.removeEventListener("click", onDocumentClick, true);
     documentClickBound = false;
-  }
-
-  if (documentKeydownBound) {
-    document.removeEventListener("keydown", onDocumentKeydown, true);
-    documentKeydownBound = false;
   }
 
   if (popstateBound) {

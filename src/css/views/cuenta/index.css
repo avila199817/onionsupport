@@ -833,32 +833,17 @@
 }
 
 .cuenta-skeleton {
-  display: block;
   inline-size: 100%;
-  block-size: 13px;
-  border-radius: var(--radius-pill);
-  background: var(--skeleton-bg, var(--solid-bg-2));
-  animation: cuenta-skeleton-pulse 1.25s ease-in-out infinite alternate;
 }
 
 .cuenta-skeleton--title {
   inline-size: 46%;
-  block-size: 24px;
 }
 
 .cuenta-skeleton--short {
   inline-size: 62%;
 }
 
-.cuenta-skeleton--control {
-  block-size: 46px;
-  border-radius: var(--input-radius);
-}
-
-@keyframes cuenta-skeleton-pulse {
-  from { opacity: .52; }
-  to { opacity: 1; }
-}
 
 /* =========================================================
    RESPONSIVE
@@ -873,7 +858,7 @@
   .cuenta-card--security,
   .cuenta-card--skeleton-wide {
     grid-column: auto;
-  }
+}
 
   .cuenta-password-grid,
   .cuenta-preference-grid {
@@ -934,7 +919,7 @@
   .cuenta-card--security,
   .cuenta-card--skeleton-wide {
     grid-column: auto;
-  }
+}
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -947,9 +932,6 @@
     transform: none;
   }
 
-  .cuenta-skeleton {
-    animation-duration: 1.6s;
-  }
 }
 
 @media (forced-colors: active) {

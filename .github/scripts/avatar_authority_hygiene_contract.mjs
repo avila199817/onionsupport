@@ -40,6 +40,17 @@ function executableJs(source = "") {
     .replace(/^\s*\/\/.*$/gm, "");
 }
 
+const LOCAL_AVATAR_PALETTE_HASH = /\b(?:Math\.abs\([^;]*?\)|hash(?:Identity|Text)?\([^;]*?\))\s*%\s*(?:10|20)\b/g;
+
+// Formatting must not hide a second palette engine from the architectural gate.
+for (const sample of [
+  'hashText("person") % 10',
+  'hashText(\n  `${userId}:${email}:${name}`\n) % 10',
+  'Math.abs(\n  Number(current.tone)\n) % 20',
+]) {
+  assert.equal(new RegExp(LOCAL_AVATAR_PALETTE_HASH).test(sample), true);
+}
+
 const violations = [];
 
 function report(file, rule, detail) {
@@ -65,11 +76,15 @@ for (const file of walk(SRC)) {
       "local-avatar-tone-function",
     ],
     [
-      /\b(?:Math\.abs\([^\n;]*\)|hash(?:Identity|Text)?\([^\n;]*\))\s*%\s*(?:10|20)\b/g,
+      LOCAL_AVATAR_PALETTE_HASH,
       "local-avatar-palette-hash",
     ],
     [
-      /(?:avatar[^\n{]*--tone-|avatar-tone-)[0-9]\b/g,
+      /\bfunction\s+(?:avatarInitials|initials|initialsFrom(?:Name)?)\s*\(/g,
+      "local-avatar-initials-function",
+    ],
+    [
+      /(?:avatar[^\n{]*--tone-|avatar-tone-)(?:[0-9]\b|\$\{)/g,
       "legacy-tone-class",
     ],
     [

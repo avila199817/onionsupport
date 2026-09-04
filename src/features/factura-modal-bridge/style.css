@@ -75,7 +75,7 @@ body.factura-modal-bridge-feedback-open {
   border: 2.5px solid currentColor;
   border-right-color: transparent;
   border-radius: 999px;
-  animation: factura-bridge-feedback-spin 0.72s linear infinite;
+  animation: var(--ui-loading-animation) var(--ui-loading-duration) linear infinite;
 }
 
 .factura-bridge-feedback-copy {
@@ -152,11 +152,6 @@ body.factura-modal-bridge-feedback-open {
   color: var(--text, #171a1f);
 }
 
-@keyframes factura-bridge-feedback-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 
 @media (max-width: 520px) {
   .factura-bridge-feedback-panel {
@@ -176,9 +171,6 @@ body.factura-modal-bridge-feedback-open {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .factura-bridge-feedback-spinner {
-    animation-duration: 1.4s;
-  }
 
   .factura-bridge-feedback-button {
     transition: none;

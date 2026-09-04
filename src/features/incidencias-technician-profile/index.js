@@ -1,3 +1,4 @@
+import { createModalLifecycle, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
 /* =========================================================
    Onion Support · Incidencias Technician Profile
 
@@ -51,11 +52,7 @@ const ROOT_ID = "incidencias-technician-profile-root";
 const PANEL_ID = "incidencias-technician-profile-panel";
 const TRUSTED_BLOB_HOST = "onionassets.blob.core.windows.net";
 const PUBLIC_METRIC_LIMIT = 1;
-const FOCUSABLE = [
-  "a[href]",
-  "button:not([disabled])",
-  "[tabindex]:not([tabindex='-1'])",
-].join(",");
+
 
 /*
   Sólo datos profesionales ya publicados por Onion Support. No contiene foto:
@@ -83,9 +80,11 @@ let requestSeq = 0;
 let returnFocus = null;
 let incidenceApiPromise = null;
 let usersApiPromise = null;
-let previousBodyOverflow = "";
-let previousBodyClasses = new Map();
-let bodyLocked = false;
+const modalLifecycle = createModalLifecycle({
+  getPanel: () => modalPanel(),
+  onEscape: () => closeProfile(),
+  bodyClasses: ['ui-detail-modal-open'],
+});
 
 const browser = () =>
   typeof window !== "undefined" && typeof document !== "undefined";
@@ -779,26 +778,11 @@ function ensureHost() {
 }
 
 function lockBody() {
-  if (!browser() || bodyLocked) return;
-  previousBodyOverflow = document.body.style.overflow || "";
-  previousBodyClasses = new Map([
-    ["modal-open", document.body.classList.contains("modal-open")],
-    ["ui-detail-modal-open", document.body.classList.contains("ui-detail-modal-open")],
-  ]);
-  document.body.classList.add("modal-open", "ui-detail-modal-open");
-  document.body.style.overflow = "hidden";
-  bodyLocked = true;
+  return modalLifecycle.activate({ opener: returnFocus });
 }
 
 function unlockBody() {
-  if (!browser() || !bodyLocked) return;
-  for (const [name, existed] of previousBodyClasses.entries()) {
-    if (!existed) document.body.classList.remove(name);
-  }
-  document.body.style.overflow = previousBodyOverflow;
-  previousBodyClasses = new Map();
-  previousBodyOverflow = "";
-  bodyLocked = false;
+  return modalLifecycle.deactivate({ restoreFocus: false });
 }
 
 function modalPanel() {
@@ -840,13 +824,7 @@ function closeProfile() {
   unlockBody();
   const target = returnFocus;
   returnFocus = null;
-  if (target?.isConnected && typeof target.focus === "function") {
-    try {
-      target.focus({ preventScroll: true });
-    } catch {
-      /* noop */
-    }
-  }
+  restoreModalFocus(target);
   return true;
 }
 
@@ -1093,46 +1071,7 @@ function onClick(event) {
   void loadProfile(trigger);
 }
 
-function trapFocus(event) {
-  const panel = modalPanel();
-  if (!panel) return false;
-  const items = [...panel.querySelectorAll(FOCUSABLE)]
-    .filter((node) => !node.disabled && node.getAttribute("aria-hidden") !== "true");
-
-  if (!items.length) {
-    event.preventDefault();
-    panel.focus();
-    return true;
-  }
-
-  const firstItem = items[0];
-  const lastItem = items.at(-1);
-  if (event.shiftKey && document.activeElement === firstItem) {
-    event.preventDefault();
-    lastItem.focus();
-    return true;
-  }
-  if (!event.shiftKey && document.activeElement === lastItem) {
-    event.preventDefault();
-    firstItem.focus();
-    return true;
-  }
-  return false;
-}
-
 function onKeydown(event) {
-  if (document.getElementById(ROOT_ID)) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeProfile();
-      return;
-    }
-    if (event.key === "Tab") {
-      trapFocus(event);
-      return;
-    }
-  }
-
   if (event.key !== "Enter" && event.key !== " ") return;
   const trigger = profileTriggerFromTarget(event.target);
   if (

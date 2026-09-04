@@ -817,16 +817,6 @@ body.clientes-create-open {
    LOADERS
 ========================================================= */
 
-.cli-create-spinner,
-.cli-create-loading-spinner {
-  inline-size: 16px;
-  block-size: 16px;
-  flex: 0 0 auto;
-  border: 2px solid currentColor;
-  border-inline-end-color: transparent;
-  border-radius: 50%;
-  animation: cli-create-spin .72s linear infinite;
-}
 
 .cli-create-loading-overlay {
   position: absolute;
@@ -860,11 +850,6 @@ body.clientes-create-open {
   font-weight: var(--weight-bold);
 }
 
-.cli-create-loading-spinner {
-  inline-size: 24px;
-  block-size: 24px;
-  border-width: 3px;
-}
 
 /* =========================================================
    LIGHT OVERLAY ONLY
@@ -985,9 +970,6 @@ body.clientes-create-open {
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-@keyframes cli-create-spin {
-  to { transform: rotate(360deg); }
-}
 
 @media (prefers-reduced-motion: reduce) {
   .cli-create-overlay,
@@ -1001,10 +983,6 @@ body.clientes-create-open {
     transition-duration: 0ms;
   }
 
-  .cli-create-spinner,
-  .cli-create-loading-spinner {
-    animation-duration: 1.4s;
-  }
 }
 
 @media (forced-colors: active) {

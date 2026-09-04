@@ -45,22 +45,5 @@
   gap: 8px;
 }
 
-.usr-create-submit-spinner {
-  inline-size: 16px;
-  block-size: 16px;
-  flex: 0 0 16px;
-  border: 2px solid color-mix(in srgb, currentColor 28%, transparent);
-  border-block-start-color: currentColor;
-  border-radius: 50%;
-  animation: usr-create-spin .72s linear infinite;
-}
-
-@keyframes usr-create-spin {
-  to { transform: rotate(1turn); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .usr-create-submit-spinner { animation: none; }
-}
 
 } /* @layer views */

@@ -900,67 +900,42 @@
 }
 
 .home-skeleton {
-  position: relative;
-  display: block;
   inline-size: 100%;
-  block-size: 12px;
-  overflow: hidden;
-  border-radius: var(--skeleton-radius);
-  background: var(--skeleton-bg);
 }
 
-.home-skeleton::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, transparent, var(--skeleton-shine), transparent);
-  transform: translateX(-100%);
-  animation: home-skeleton 1.2s var(--ease-standard) infinite;
-}
 
 .home-skeleton--icon,
 .home-panel-loading-icon {
   inline-size: 38px;
-  block-size: 38px;
-  border-radius: var(--radius-md);
 }
 
 .home-skeleton--title,
 .home-panel-loading-title {
   inline-size: min(250px, 70%);
-  block-size: 10px;
 }
 
 .home-skeleton--value {
   inline-size: 42%;
-  block-size: 28px;
 }
 
 .home-skeleton--text,
 .home-panel-loading-meta {
   inline-size: min(200px, 54%);
-  block-size: 8px;
-  opacity: .75;
 }
 
 .home-panel-loading-date {
   inline-size: 88px;
-  block-size: 8px;
   justify-self: end;
-  opacity: .7;
 }
 
 .home-panel-loading-amount {
   inline-size: 76px;
-  block-size: 10px;
   justify-self: end;
-  opacity: .8;
 }
 
 .home-skeleton--billing-value {
   inline-size: min(220px, 48%);
   min-inline-size: 140px;
-  block-size: 32px;
 }
 
 /* =========================================================
@@ -1072,8 +1047,7 @@
   .home-btn,
   .home-link-button,
   .home-activity-item,
-  .home-invoice-item,
-  .home-skeleton::after {
+  .home-invoice-item {
     animation: none;
     transition: none;
   }
@@ -1121,10 +1095,6 @@
   .home-billing-total {
     border: 1px solid #ccc;
   }
-}
-
-@keyframes home-skeleton {
-  to { transform: translateX(100%); }
 }
 
 

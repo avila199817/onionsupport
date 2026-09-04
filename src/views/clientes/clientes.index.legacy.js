@@ -1,3 +1,4 @@
+import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
 /* =========================================================
 Onion Support - Clientes Index
 Archivo: /src/views/clientes/index.js
@@ -358,6 +359,11 @@ errors: {},
 form: getCreateFormDefaults(),
 userSearch: { query: "", loading: false, error: "", results: [], selectedUser: null, empty: false },
 };
+const modalLifecycle = createModalLifecycle({
+getPanel: () => modalHost?.querySelector(CREATE_MODAL_PANEL_SELECTOR),
+onEscape: () => { if (!createModal.submitting) closeCreate(); },
+bodyClasses: ['clientes-modal-open', 'clientes-create-open'],
+});
 function alive() {
 return !destroyed && isClientesRoute(context);
 }
@@ -591,7 +597,6 @@ modalHost.addEventListener("click", handleModalClick, true);
 modalHost.addEventListener("submit", handleModalSubmit, true);
 modalHost.addEventListener("input", handleModalInput, true);
 modalHost.addEventListener("change", handleModalInput, true);
-modalHost.addEventListener("keydown", handleModalKeydown, true);
 document.body.appendChild(modalHost);
 return modalHost;
 }
@@ -604,7 +609,6 @@ modalHost.removeEventListener("click", handleModalClick, true);
 modalHost.removeEventListener("submit", handleModalSubmit, true);
 modalHost.removeEventListener("input", handleModalInput, true);
 modalHost.removeEventListener("change", handleModalInput, true);
-modalHost.removeEventListener("keydown", handleModalKeydown, true);
 modalHost.remove();
 } catch { /* noop */ }
 modalHost = null;
@@ -688,18 +692,18 @@ resetCreateModal();
 createModal.open = true;
 firstModalPaint = true;
 renderCreateModalNow();
-try { document.body?.classList.add("modal-open", "clientes-modal-open", "clientes-create-open"); } catch { /* noop */ }
+modalLifecycle.activate({ opener: returnFocus });
 return true;
 }
 function closeCreate({ reset = true } = {}) {
 if (!createModal.open && !modalHost) return false;
 createModal.open = false;
 removeModalHost();
-try { document.body?.classList.remove("clientes-create-open"); if (!document.querySelector("[data-clientes-detail-modal-host='true'] [data-open='true']")) document.body?.classList.remove("modal-open", "clientes-modal-open"); } catch { /* noop */ }
+modalLifecycle.deactivate({ restoreFocus: false });
 if (reset) resetCreateModal();
 const target = returnFocus;
 returnFocus = null;
-if (target?.isConnected) nextFrame(() => { try { target.focus({ preventScroll: true }); } catch { target.focus?.(); } });
+if (target?.isConnected) nextFrame(() => restoreModalFocus(target));
 if (deferredRender) renderNow({ force: true });
 return true;
 }
@@ -895,22 +899,6 @@ if (createModal.serverError) {
 createModal.serverError = "";
 modalHost.querySelector?.(".cli-create-alert.is-error, .inc-create-alert.is-error")?.remove?.();
 }
-}
-function handleModalKeydown(event) {
-if (!modalHost?.contains(event.target)) return;
-if (event.key === "Tab") {
-const panel = modalHost.querySelector(CREATE_MODAL_PANEL_SELECTOR);
-const nodes = panel ? Array.from(panel.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter((node) => !node.hidden && node.getAttribute("aria-hidden") !== "true") : [];
-if (nodes.length) {
-const firstNode = nodes[0];
-const lastNode = nodes[nodes.length - 1];
-const active = document.activeElement;
-if (event.shiftKey && active === firstNode) { event.preventDefault(); lastNode.focus(); }
-else if (!event.shiftKey && active === lastNode) { event.preventDefault(); firstNode.focus(); }
-}
-return;
-}
-if (event.key === "Escape" && !createModal.submitting) { event.preventDefault(); event.stopPropagation(); closeCreate(); }
 }
 function actionInfo(target) {
 if (!isElement(target)) return null;

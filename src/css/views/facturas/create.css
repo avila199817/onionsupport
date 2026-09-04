@@ -1182,18 +1182,6 @@ body.facturas-create-open {
   gap: 7px;
 }
 
-.fac-create-spinner {
-  inline-size: 14px;
-  block-size: 14px;
-  border: 2px solid currentColor;
-  border-inline-end-color: transparent;
-  border-radius: 50%;
-  animation: fac-create-spin .7s linear infinite;
-}
-
-@keyframes fac-create-spin {
-  to { transform: rotate(360deg); }
-}
 
 @keyframes fac-create-overlay-in {
   from { opacity: 0; }

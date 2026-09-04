@@ -1737,9 +1737,7 @@
   border-radius:
     var(--radius-pill, 999px);
 
-  animation:
-    topbarSearchSpin
-    .78s linear infinite;
+  animation: var(--ui-loading-animation) var(--ui-loading-duration) linear infinite;
 }
 
 :where(
@@ -1801,12 +1799,6 @@
 .topbar-search-error-title {
   color:
     var(--topbar-accent-error);
-}
-
-@keyframes topbarSearchSpin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 

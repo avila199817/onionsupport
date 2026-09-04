@@ -110,7 +110,7 @@ body.public-support-submission-active {
     0 0 0 8px rgb(64 188 255 / .035),
     0 0 32px rgb(38 175 255 / .18);
 
-  animation: public-support-submit-spin .82s linear infinite;
+  animation: var(--ui-loading-animation) var(--ui-loading-duration) linear infinite;
 }
 
 .public-support-submit-overlay-kicker {
@@ -159,11 +159,6 @@ body.public-support-submission-active {
   opacity: .56;
 }
 
-@keyframes public-support-submit-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 
 @keyframes public-support-feedback-in {
   from {

@@ -20,8 +20,8 @@
 
    Compatibilidad:
    Las clases históricas de cada vista quedan soportadas aquí como adaptadores.
-   Su paint local deja de ser autoritativo porque esta hoja vive en layer(loading),
-   después de views/compositions y antes de guardrails.
+   Su paint y movimiento sólo se definen aquí, en layer(loading), después de
+   views/compositions y antes de guardrails. Las vistas conservan geometría.
 ========================================================= */
 
 :root {
@@ -29,6 +29,8 @@
   --ui-skeleton-highlight: var(--skeleton-bg-strong, var(--skeleton-shine, color-mix(in srgb, var(--text-strong) 8%, transparent)));
   --ui-skeleton-duration: 1.35s;
   --ui-skeleton-ease: linear;
+  --ui-loading-animation: ui-loading-spin;
+  --ui-loading-duration: .72s;
 
   --ui-skeleton-radius-text: var(--radius-pill);
   --ui-skeleton-radius-block: var(--radius-sm);
@@ -84,15 +86,6 @@
   animation: ui-skeleton-shimmer var(--ui-skeleton-duration) var(--ui-skeleton-ease) infinite;
   pointer-events: none;
   user-select: none;
-}
-
-/* El sistema canónico anima el propio placeholder. Se anulan shimmers
-   históricos por pseudo-elemento para impedir doble animación/composición. */
-.ui-skeleton::after,
-.home-skeleton::after,
-.facturas-detail-skeleton::after {
-  content: none;
-  animation: none;
 }
 
 /* =========================================================
@@ -203,6 +196,31 @@
   border-radius: var(--ui-skeleton-radius-block);
 }
 
+/* Compatibilidad de las variantes semánticas; las vistas sólo fijan anchos. */
+.ui-skeleton.card {
+  min-block-size: 120px;
+}
+
+.correo-workspace--boot .correo-boot-account {
+  block-size: 54px;
+  border-radius: var(--ui-skeleton-radius-block);
+}
+
+.correo-workspace--boot .correo-boot-line {
+  block-size: 34px;
+  border-radius: var(--ui-skeleton-radius-block);
+}
+
+.correo-workspace--boot .correo-boot-title {
+  block-size: 38px;
+  border-radius: var(--ui-skeleton-radius-block);
+}
+
+[data-correo-host="true"] .correo-message-skeleton > span {
+  inline-size: 34px;
+  block-size: 34px;
+}
+
 /* =========================================================
    INCIDENCIAS · REAL ROW SILHOUETTE
 
@@ -288,24 +306,17 @@
   border-radius: var(--radius-pill);
 }
 
-[data-correo-host="true"] :is(
-  .correo-message-skeleton > span,
-  .correo-message-skeleton i,
-  .correo-workspace--boot .correo-boot-account,
-  .correo-workspace--boot .correo-boot-line,
-  .correo-workspace--boot .correo-boot-title,
-  .correo-reader-skeleton-block
-) {
-  animation-delay: 0s;
-}
-
 /* =========================================================
    DETAIL / REGION SKELETON
 ========================================================= */
 
 .facturas-detail-skeleton {
-  color: transparent;
-  background-color: var(--ui-skeleton-base);
+  border: 1px solid var(--border-default);
+  border-radius: var(--fdm-section-radius, var(--ui-skeleton-radius-block));
+}
+
+.facturas-detail-skeleton--hero {
+  border-color: var(--border-info);
 }
 
 /* =========================================================
@@ -335,15 +346,52 @@
   .facturas-inline-spinner,
   .clientes-inline-spinner,
   .usuarios-inline-spinner,
-  .facturas-detail-spinner
+  .facturas-detail-spinner,
+  .inc-create-spinner,
+  .inc-create-loading-spinner,
+  .cli-create-spinner,
+  .cli-create-loading-spinner,
+  .fac-create-spinner,
+  .fac-create-loading-spinner,
+  .usr-create-spinner,
+  .usr-create-loading-spinner,
+  .usr-create-submit-spinner,
+  .incidencias-modal-inline-spinner > span:first-child,
+  .incidencias-modal-loading-box > span:first-child
 ) {
-  inline-size: 14px;
-  block-size: 14px;
+  inline-size: var(--ui-progress-size, 14px);
+  block-size: var(--ui-progress-size, 14px);
   flex: 0 0 auto;
-  border: 2px solid color-mix(in srgb, currentColor 28%, transparent);
+  border: var(--ui-progress-stroke, 2px) solid color-mix(in srgb, currentColor 28%, transparent);
   border-block-start-color: currentColor;
   border-radius: 50%;
-  animation: ui-loading-spin .72s linear infinite;
+  animation: var(--ui-loading-animation) var(--ui-loading-duration) linear infinite;
+}
+
+/* Existing form controls use 16px, region loaders 24px; same spinner engine. */
+:where(
+  .inc-create-spinner,
+  .cli-create-spinner,
+  .fac-create-spinner,
+  .usr-create-spinner,
+  .usr-create-submit-spinner
+) {
+  --ui-progress-size: 16px;
+}
+
+:where(
+  .inc-create-loading-spinner,
+  .cli-create-loading-spinner,
+  .fac-create-loading-spinner,
+  .usr-create-loading-spinner
+) {
+  --ui-progress-size: 24px;
+  --ui-progress-stroke: 3px;
+}
+
+.incidencias-modal-loading-box > span:first-child {
+  --ui-progress-size: 20px;
+  --ui-progress-stroke: 3px;
 }
 
 /* Refresh con datos no debe cubrir el contenido. Las vistas que todavía emiten
@@ -367,6 +415,12 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /* Inherited name also disables SVG/pseudo-element and unlayered feature
+     adapters. A local animation shorthand cannot override the motion policy. */
+  :root {
+    --ui-loading-animation: none;
+  }
+
   :where(
     .ui-skeleton,
     .incidencias-skeleton,
@@ -391,7 +445,18 @@
     .facturas-inline-spinner,
     .clientes-inline-spinner,
     .usuarios-inline-spinner,
-    .facturas-detail-spinner
+    .facturas-detail-spinner,
+    .inc-create-spinner,
+    .inc-create-loading-spinner,
+    .cli-create-spinner,
+    .cli-create-loading-spinner,
+    .fac-create-spinner,
+    .fac-create-loading-spinner,
+    .usr-create-spinner,
+    .usr-create-loading-spinner,
+    .usr-create-submit-spinner,
+    .incidencias-modal-inline-spinner > span:first-child,
+    .incidencias-modal-loading-box > span:first-child
   ) {
     animation: none;
   }

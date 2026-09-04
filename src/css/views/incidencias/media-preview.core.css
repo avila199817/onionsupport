@@ -419,7 +419,7 @@ body.incidencias-media-viewer-open {
   border-inline-end-color: transparent;
   border-radius: 50%;
 
-  animation: incidencias-live-spin .72s linear infinite;
+  animation: var(--ui-loading-animation) var(--ui-loading-duration) linear infinite;
 }
 
 .incidencias-modal-video-loader > strong {
@@ -549,9 +549,6 @@ body.incidencias-media-viewer-open {
    MOTION / ACCESSIBILITY
 ======================================================= */
 
-@keyframes incidencias-live-spin {
-  to { transform: rotate(360deg); }
-}
 
 @media (prefers-reduced-motion: reduce) {
   .incidencias-media-viewer,
@@ -561,11 +558,6 @@ body.incidencias-media-viewer-open {
 
   .incidencias-modal-preview.incidencias-modal-preview--viewer {
     transform: none;
-  }
-
-  .incidencias-modal-video-loader > span,
-  .incidencias-modal-live-sync-spinner {
-    animation-duration: 1.8s;
   }
 }
 

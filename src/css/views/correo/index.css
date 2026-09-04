@@ -493,9 +493,8 @@
 .correo-infinite-sentinel { display:none; }
 
 .correo-message-skeleton { min-block-size:82px; display:grid; grid-template-columns:34px 1fr; gap:9px; padding:9px 10px; border-block-end:1px solid #383838; }
-.correo-message-skeleton > span { inline-size:34px; block-size:34px; border-radius:50%; background:#3a3a3a; }
 .correo-message-skeleton > div { display:grid; align-content:start; gap:8px; padding-block-start:2px; }
-.correo-message-skeleton i { display:block; block-size:7px; border-radius:3px; background:#3a3a3a; }
+
 .correo-message-skeleton i:nth-child(1) { inline-size:45%; }
 .correo-message-skeleton i:nth-child(2) { inline-size:72%; }
 .correo-message-skeleton i:nth-child(3) { inline-size:88%; }
@@ -590,7 +589,6 @@
 .correo-move-menu button svg { inline-size:14px; block-size:14px; }
 
 /* ---------- Compose / Outlook window ---------- */
-html.correo-modal-open { overflow:hidden; }
 .correo-modal-backdrop {
   position:fixed;
   inset:0;
@@ -700,9 +698,9 @@ html.correo-modal-open { overflow:hidden; }
 
 /* ---------- Boot / disconnected ---------- */
 .correo-workspace--boot { pointer-events:none; }
-.correo-boot-account { block-size:58px; margin-block-end:8px; border-radius:6px; background:#333; }
-.correo-boot-line { block-size:42px; margin-block:2px; border-radius:4px; background:#303030; }
-.correo-boot-title { inline-size:45%; block-size:18px; margin:20px 12px 16px; border-radius:3px; background:#3a3a3a; }
+.correo-boot-account { margin-block-end:8px; }
+.correo-boot-line { margin-block:2px; }
+.correo-boot-title { inline-size:45%;  margin:20px 12px 16px; }
 .correo-connect-stage { block-size:100%; min-block-size:520px; display:grid; place-items:center; border:0; border-radius:0; background:#1f1f1f; box-shadow:none; }
 .correo-connect-stage::before,.correo-connect-orbit { display:none; }
 .correo-connect-card { inline-size:min(430px,calc(100% - 28px)); display:grid; justify-items:center; gap:11px; padding:34px; border:1px solid #424242; border-radius:8px; background:#292929; box-shadow:0 16px 50px rgba(0,0,0,.28); text-align:center; backdrop-filter:none; }
@@ -713,8 +711,8 @@ html.correo-modal-open { overflow:hidden; }
 .correo-connect-card > p:not(.correo-kicker) { margin:0; max-inline-size:340px; color:#aaa; font-size:11px; line-height:1.5; }
 .correo-connect-cta { min-block-size:36px; margin-block-start:5px; }
 
-.correo-spin { animation:correo-spin 900ms linear infinite; }
-@keyframes correo-spin { to { transform:rotate(360deg); } }
+.correo-spin { animation: var(--ui-loading-animation) var(--ui-loading-duration) linear infinite; }
+
 
 /* ---------- Short laptops ---------- */
 @media (min-width:1280px) and (max-height:760px) {
@@ -1227,34 +1225,20 @@ body[data-theme="light"] .correo-field--body textarea { color:#242424; }
   -webkit-appearance: none;
 }
 
+/* Skeleton layout only; paint, shapes and motion belong to skeleton.css. */
 
-/* Skeletons: mismas medidas que el contenido real, shimmer discreto. */
-[data-correo-host="true"] .correo-workspace--boot .correo-boot-account,
-[data-correo-host="true"] .correo-workspace--boot .correo-boot-line,
-[data-correo-host="true"] .correo-workspace--boot .correo-boot-title,
-[data-correo-host="true"] .correo-message-skeleton > span,
-[data-correo-host="true"] .correo-message-skeleton i,
-[data-correo-host="true"] .correo-reader-skeleton-block {
-  background-image: linear-gradient(90deg, #303030 0%, #303030 28%, #3b3b3b 42%, #303030 58%, #303030 100%);
-  background-size: 280% 100%;
-  animation: correo-final-skeleton 1.35s ease-in-out infinite;
-}
 
 [data-correo-host="true"] .correo-workspace--boot .correo-boot-account {
-  block-size: 54px;
   margin-block-end: 7px;
 }
 
 [data-correo-host="true"] .correo-workspace--boot .correo-boot-line {
-  block-size: 34px;
   margin-block: 1px;
 }
 
 [data-correo-host="true"] .correo-workspace--boot .correo-boot-title {
   inline-size: calc(100% - 20px);
-  block-size: 38px;
   margin: 8px 10px 6px;
-  border-radius: 5px;
 }
 
 [data-correo-host="true"] .correo-message-skeleton {
@@ -1264,24 +1248,10 @@ body[data-theme="light"] .correo-field--body textarea { color:#242424; }
   padding: 10px 11px;
 }
 
-[data-correo-host="true"] .correo-message-skeleton > span {
-  inline-size: 34px;
-  block-size: 34px;
-}
-
 [data-correo-host="true"] .correo-message-skeleton > div {
   gap: 7px;
 }
 
-[data-correo-host="true"] .correo-message-skeleton i {
-  block-size: 7px;
-}
-
-[data-correo-host="true"] .correo-message-skeleton:nth-child(2n) > span,
-[data-correo-host="true"] .correo-message-skeleton:nth-child(2n) i,
-[data-correo-host="true"] .correo-workspace--boot .correo-boot-line:nth-child(2n) {
-  animation-delay: -0.32s;
-}
 
 [data-correo-host="true"] .correo-reader-loading {
   gap: 9px;
@@ -1472,10 +1442,6 @@ body[data-theme="light"] .correo-signature-field textarea { background: #fff; co
 html[data-theme="light"] .correo-signature-preview > div,
 body[data-theme="light"] .correo-signature-preview > div { color: #424242; }
 
-@keyframes correo-final-skeleton {
-  0% { background-position: 100% 0; }
-  100% { background-position: -100% 0; }
-}
 
 html[data-theme="light"] [data-correo-host="true"] .correo-search,
 body[data-theme="light"] [data-correo-host="true"] .correo-search {
@@ -1494,18 +1460,6 @@ body[data-theme="light"] [data-correo-host="true"] .correo-account-menu-check {
   border-color: #a9a9a9;
 }
 
-html[data-theme="light"] [data-correo-host="true"] .correo-workspace--boot .correo-boot-account,
-html[data-theme="light"] [data-correo-host="true"] .correo-workspace--boot .correo-boot-line,
-html[data-theme="light"] [data-correo-host="true"] .correo-workspace--boot .correo-boot-title,
-html[data-theme="light"] [data-correo-host="true"] .correo-message-skeleton > span,
-html[data-theme="light"] [data-correo-host="true"] .correo-message-skeleton i,
-body[data-theme="light"] [data-correo-host="true"] .correo-workspace--boot .correo-boot-account,
-body[data-theme="light"] [data-correo-host="true"] .correo-workspace--boot .correo-boot-line,
-body[data-theme="light"] [data-correo-host="true"] .correo-workspace--boot .correo-boot-title,
-body[data-theme="light"] [data-correo-host="true"] .correo-message-skeleton > span,
-body[data-theme="light"] [data-correo-host="true"] .correo-message-skeleton i {
-  background-image: linear-gradient(90deg, #e6e6e6 0%, #e6e6e6 28%, #f4f4f4 42%, #e6e6e6 58%, #e6e6e6 100%);
-}
 
 @media (max-height: 760px) and (min-width: 1280px) {
   [data-correo-host="true"] .correo-folder {
@@ -1517,16 +1471,6 @@ body[data-theme="light"] [data-correo-host="true"] .correo-message-skeleton i {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  [data-correo-host="true"] .correo-workspace--boot .correo-boot-account,
-  [data-correo-host="true"] .correo-workspace--boot .correo-boot-line,
-  [data-correo-host="true"] .correo-workspace--boot .correo-boot-title,
-  [data-correo-host="true"] .correo-message-skeleton > span,
-  [data-correo-host="true"] .correo-message-skeleton i,
-  [data-correo-host="true"] .correo-reader-skeleton-block {
-    animation: none !important;
-  }
-}
 
 /* ---------- Canonical structural primitives ---------- */
 .correo-field { min-inline-size: 0; display: grid; }

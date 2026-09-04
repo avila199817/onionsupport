@@ -857,24 +857,6 @@ body.usuarios-create-modal-open {
    LOADING — SAME PANEL OVERLAY EVERYWHERE
 ========================================================= */
 
-:is(
-  .inc-create-spinner,
-  .inc-create-loading-spinner,
-  .cli-create-spinner,
-  .cli-create-loading-spinner,
-  .fac-create-spinner,
-  .fac-create-loading-spinner,
-  .usr-create-spinner,
-  .usr-create-loading-spinner
-) {
-  inline-size: 16px;
-  block-size: 16px;
-  flex: 0 0 auto;
-  border: 2px solid currentColor;
-  border-inline-end-color: transparent;
-  border-radius: 50%;
-  animation: private-create-spin .72s linear infinite;
-}
 
 :is(
   .inc-create-loading-overlay,
@@ -913,16 +895,6 @@ body.usuarios-create-modal-open {
   color: var(--text-strong);
 }
 
-:is(
-  .inc-create-loading-spinner,
-  .cli-create-loading-spinner,
-  .fac-create-loading-spinner,
-  .usr-create-loading-spinner
-) {
-  inline-size: 24px;
-  block-size: 24px;
-  border-width: 3px;
-}
 
 :is(
   .inc-create-loading-copy,
@@ -1074,9 +1046,6 @@ body.usuarios-create-modal-open {
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-@keyframes private-create-spin {
-  to { transform: rotate(360deg); }
-}
 
 @media (prefers-reduced-motion: reduce) {
   :is(
@@ -1101,18 +1070,6 @@ body.usuarios-create-modal-open {
     transition-duration: 0ms;
   }
 
-  :is(
-    .inc-create-spinner,
-    .inc-create-loading-spinner,
-    .cli-create-spinner,
-    .cli-create-loading-spinner,
-    .fac-create-spinner,
-    .fac-create-loading-spinner,
-    .usr-create-spinner,
-    .usr-create-loading-spinner
-  ) {
-    animation-duration: 1.4s;
-  }
 }
 
 @media (forced-colors: active) {

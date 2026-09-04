@@ -1,3 +1,5 @@
+import { PUBLIC_SITE } from "../core/public-site.js";
+
 /* =========================================================
    Onion Support - Routes
    Archivo: /src/router/routes.js
@@ -1469,7 +1471,7 @@ const ROUTE_DEFINITIONS = Object.freeze([
   createRoute({
     path: ROUTE_PATHS.PUBLIC_HOME,
     name: ROUTE_NAMES.PUBLIC_HOME,
-    title: "Servicio técnico informático en Sant Vicenç",
+    title: PUBLIC_SITE.name,
     viewKey: "public-home",
     public: true,
     guestOnly: false,

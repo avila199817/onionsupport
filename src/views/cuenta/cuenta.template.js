@@ -1,3 +1,4 @@
+import { avatarInitials as initials } from "../../features/avatar-system/identity.js";
 /* =========================================================
    Onion Support - Cuenta Template
    Archivo: /src/views/cuenta/cuenta.template.js
@@ -322,12 +323,6 @@ function getStatus(detail = {}, state = {}) {
     return { label: c.disabled, tone: "danger" };
   }
   return { label: c.active, tone: "success" };
-}
-
-function initials(name = "") {
-  const parts = safeText(name, "ON").split(/\s+/).filter(Boolean);
-  if (parts.length < 2) return parts[0].slice(0, 2).toUpperCase();
-  return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase();
 }
 
 function icon(name = "") {

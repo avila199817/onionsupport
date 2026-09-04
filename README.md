@@ -49,6 +49,9 @@ Puntos principales:
 - `src/views/`: vistas de producto y sus contratos de dominio.
 - `src/css/`: tokens, core, App Chrome, componentes, composiciones y CSS de vista.
 - `src/features/avatar-system/`: autoridad única de identidad, estado y presentación de avatares.
+- `src/features/entity-overlay/modal-lifecycle.js`: interacción compartida de modales.
+- `src/core/async-scope.js`: cancelación, vigencia de respuestas y limpieza de recursos.
+- `src/core/public-site.js`: marca, servicios y política de metadatos públicos.
 - `.github/`: contratos, verificadores y workflows de release.
 - `tools/`: tooling de build reproducible, inventario y verificación del artefacto.
 
@@ -80,6 +83,8 @@ No deben quedar helpers, workflows ni archivos temporales de migración en `main
 - [`docs/UI_FOUNDATION.md`](docs/UI_FOUNDATION.md) — foundation visual.
 - [`docs/UI_CHROME.md`](docs/UI_CHROME.md) — autoridad de App Chrome.
 - [`docs/UI_LOADING_SYSTEM.md`](docs/UI_LOADING_SYSTEM.md) — sistema de loading.
+- [`docs/UI_MODAL_SYSTEM.md`](docs/UI_MODAL_SYSTEM.md) — pila, foco y cierre de modales.
+- [`docs/FRONTEND_SHARED_SYSTEMS.md`](docs/FRONTEND_SHARED_SYSTEMS.md) — autoridades, límites y verificaciones de la consolidación.
 - [`docs/CONTINUOUS_SCROLL.md`](docs/CONTINUOUS_SCROLL.md) — contrato de colecciones progresivas.
 - [`docs/PUBLIC_TICKET_INTAKE.md`](docs/PUBLIC_TICKET_INTAKE.md) — intake público de incidencias.
 

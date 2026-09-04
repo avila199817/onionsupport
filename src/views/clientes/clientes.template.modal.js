@@ -1,3 +1,5 @@
+import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
+import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
 /* =========================================================
    Onion Support - Clientes Detail Template
    Archivo: /src/views/clientes/clientes.template.modal.js
@@ -49,11 +51,7 @@ const DEFAULT_CURRENCY =
 const MODAL_HOST_SELECTOR =
   "[data-clientes-detail-modal-host='true']";
 
-const CREATE_MODAL_OPEN_SELECTOR =
-  [
-    "[data-clientes-modal-host='true'] [data-clientes-create-root='true'][data-open='true']",
-    "[data-clientes-modal-host='true'] [data-clientes-create-modal-panel='true']",
-  ].join(", ");
+
 
 const BRIDGE_HOST_OWNER_KEY =
   Symbol.for(
@@ -745,68 +743,6 @@ function firstAvatarUrl(
   }
 
   return "";
-}
-
-function hashText(
-  value = ""
-) {
-  const text =
-    cleanText(
-      value,
-      ""
-    );
-
-  let hash = 0;
-
-  for (
-    let index = 0;
-    index < text.length;
-    index += 1
-  ) {
-    hash =
-      ((hash << 5) - hash) +
-      text.charCodeAt(index);
-
-    hash |= 0;
-  }
-
-  return Math.abs(hash);
-}
-
-function initialsFrom(
-  value = "",
-  fallback = "CL"
-) {
-  const parts =
-    cleanText(
-      value,
-      ""
-    )
-      .split(/\s+/)
-      .filter(Boolean);
-
-  if (
-    parts.length >= 2
-  ) {
-    return (
-      `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`
-        .toUpperCase() ||
-      fallback
-    );
-  }
-
-  if (
-    parts.length === 1
-  ) {
-    return (
-      parts[0]
-        .slice(0, 2)
-        .toUpperCase() ||
-      fallback
-    );
-  }
-
-  return fallback;
 }
 
 function redactIban(
@@ -2507,17 +2443,11 @@ function renderAvatar(
       detail
     );
 
-  const tone =
-    hashText(
-      `${name}:${contactName}:${email}:${getClienteId(detail)}`
-    ) % 10;
-
-  const initials =
-    initialsFrom(
-      contactName ||
-      name,
-      "CL"
-    );
+  const presentation = resolveAvatarPresentation({
+    name: contactName || name,
+    email,
+    userId: getUserId(detail),
+  });
 
   return `
     <div
@@ -2532,9 +2462,16 @@ function renderAvatar(
             : "clientes-modal-avatar-frame--fallback incidencias-modal-avatar-frame--fallback"
         )}"
         data-modal-avatar-frame="true"
+        data-avatar-system="true"
+        data-avatar-host="true"
+        data-avatar-name="${attr(presentation.name)}"
+        data-avatar-email="${attr(presentation.email)}"
+        data-avatar-user-id="${attr(presentation.userId)}"
+        data-avatar-initials="${attr(presentation.initials)}"
+        data-avatar-identity="${attr(presentation.fingerprint)}"
         data-has-avatar="${avatarUrl ? "true" : "false"}"
         data-fallback="${avatarUrl ? "false" : "true"}"
-        data-avatar-tone="${attr(String(tone))}"
+        data-avatar-tone="${attr(String(presentation.tone))}"
       >
         ${
           avatarUrl
@@ -2552,7 +2489,7 @@ function renderAvatar(
 
         <span
           class="clientes-modal-avatar-fallback incidencias-modal-avatar-fallback"
-        >${escapeHtml(initials)}</span>
+        >${escapeHtml(presentation.initials)}</span>
       </div>
     </div>
   `;
@@ -4277,12 +4214,6 @@ function bindBridgeHost(
     options
   );
 
-  host.addEventListener(
-    "keydown",
-    onBridgeKeydown,
-    options
-  );
-
   return true;
 }
 
@@ -4315,11 +4246,6 @@ function unbindBridgeHost(
       true
     );
 
-    host.removeEventListener(
-      "keydown",
-      onBridgeKeydown,
-      true
-    );
   } catch {
     // noop
   }
@@ -4420,114 +4346,16 @@ function ensureBridgeHost() {
   return bridgeHost;
 }
 
-function isCreateModalOpen() {
-  if (
-    !isBrowser()
-  ) {
-    return false;
-  }
+const modalLifecycle = createModalLifecycle({
+  getPanel: () => bridgeHost?.querySelector("[data-clientes-modal-panel='true']"),
+  onEscape: () => closeBridge(),
+  bodyClasses: ['clientes-modal-open', 'clientes-detail-open'],
+});
 
-  try {
-    return Boolean(
-      document.querySelector(
-        CREATE_MODAL_OPEN_SELECTOR
-      )
-    );
-  } catch {
-    return false;
-  }
-}
-
-function isOtherModalOpen() {
-  if (
-    !isBrowser()
-  ) {
-    return false;
-  }
-
-  try {
-    return Array.from(
-      document.querySelectorAll(
-        '[aria-modal="true"]'
-      )
-    ).some(
-      (node) => {
-        if (
-          !node ||
-          !node.isConnected
-        ) {
-          return false;
-        }
-
-        if (
-          bridgeHost
-            ?.contains?.(
-              node
-            )
-        ) {
-          return false;
-        }
-
-        return true;
-      }
-    );
-  } catch {
-    return false;
-  }
-}
-
-function syncBodyModalClass(
-  detailOpen = false
-) {
-  if (
-    !isBrowser()
-  ) {
-    return false;
-  }
-
-  try {
-    const createOpen =
-      isCreateModalOpen();
-
-    const anyClientesModalOpen =
-      Boolean(
-        detailOpen ||
-        createOpen
-      );
-
-    const anyModalOpen =
-      Boolean(
-        anyClientesModalOpen ||
-        isOtherModalOpen()
-      );
-
-    document.body
-      ?.classList
-      .toggle(
-        "modal-open",
-        anyModalOpen
-      );
-
-    document.body
-      ?.classList
-      .toggle(
-        "clientes-modal-open",
-        anyClientesModalOpen
-      );
-
-    document.body
-      ?.classList
-      .toggle(
-        "clientes-detail-open",
-        Boolean(
-          detailOpen
-        )
-      );
-
-    return true;
-  } catch {
-    return false;
-  }
+function syncBodyModalClass(detailOpen = false) {
+  return detailOpen
+    ? modalLifecycle.activate({ opener: bridgeReturnFocus })
+    : modalLifecycle.deactivate({ restoreFocus: false });
 }
 
 function paintBridge({
@@ -4603,72 +4431,10 @@ function updateFeedbackSlot() {
   return true;
 }
 
-function getFocusableElements() {
-  const panel =
-    bridgeHost
-      ?.querySelector?.(
-        "[data-clientes-modal-panel='true']"
-      );
-
-  if (!panel) {
-    return [];
-  }
-
-  return Array.from(
-    panel.querySelectorAll(
-      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    )
-  ).filter(
-    (element) => {
-      if (
-        !element ||
-        element.hidden
-      ) {
-        return false;
-      }
-
-      if (
-        element.getAttribute?.(
-          "aria-hidden"
-        ) === "true"
-      ) {
-        return false;
-      }
-
-      return true;
-    }
-  );
-}
-
 function restoreBridgeFocus() {
-  const target =
-    bridgeReturnFocus;
-
-  bridgeReturnFocus =
-    null;
-
-  if (
-    !target?.focus ||
-    !target?.isConnected
-  ) {
-    return false;
-  }
-
-  try {
-    target.focus({
-      preventScroll:
-        true,
-    });
-
-    return true;
-  } catch {
-    try {
-      target.focus();
-      return true;
-    } catch {
-      return false;
-    }
-  }
+  const target = bridgeReturnFocus;
+  bridgeReturnFocus = null;
+  return restoreModalFocus(target);
 }
 
 function clearFeedbackTimer() {
@@ -5001,119 +4767,6 @@ async function onBridgeClick(
         ? "success"
         : "warning"
     );
-  }
-}
-
-function onBridgeKeydown(
-  event = null
-) {
-  if (
-    !bridgeState.open
-  ) {
-    return;
-  }
-
-  if (
-    event?.key ===
-      "Escape"
-  ) {
-    event
-      .preventDefault?.();
-
-    event
-      .stopPropagation?.();
-
-    closeBridge();
-
-    return;
-  }
-
-  if (
-    event?.key !==
-      "Tab"
-  ) {
-    return;
-  }
-
-  const panel =
-    bridgeHost
-      ?.querySelector?.(
-        "[data-clientes-modal-panel='true']"
-      );
-
-  if (!panel) {
-    return;
-  }
-
-  const focusable =
-    getFocusableElements();
-
-  if (
-    !focusable.length
-  ) {
-    event
-      .preventDefault?.();
-
-    panel
-      .focus?.({
-        preventScroll:
-          true,
-      });
-
-    return;
-  }
-
-  const firstElement =
-    focusable[0];
-
-  const lastElement =
-    focusable[
-      focusable.length - 1
-    ];
-
-  const active =
-    document.activeElement;
-
-  if (
-    !panel.contains(active)
-  ) {
-    event
-      .preventDefault?.();
-
-    (
-      event.shiftKey
-        ? lastElement
-        : firstElement
-    )
-      .focus?.();
-
-    return;
-  }
-
-  if (
-    event.shiftKey &&
-    active ===
-      firstElement
-  ) {
-    event
-      .preventDefault?.();
-
-    lastElement
-      .focus?.();
-
-    return;
-  }
-
-  if (
-    !event.shiftKey &&
-    active ===
-      lastElement
-  ) {
-    event
-      .preventDefault?.();
-
-    firstElement
-      .focus?.();
   }
 }
 

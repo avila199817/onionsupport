@@ -81,7 +81,7 @@ body.entity-overlay-open {
   border: 3px solid color-mix(in srgb, currentColor 18%, transparent);
   border-top-color: currentColor;
   border-radius: 999px;
-  animation: entity-overlay-spin 0.85s linear infinite;
+  animation: var(--ui-loading-animation) var(--ui-loading-duration) linear infinite;
 }
 
 .entity-overlay-generic-header {
@@ -222,11 +222,6 @@ body.entity-overlay-open {
   max-height: calc(100dvh - 24px);
 }
 
-@keyframes entity-overlay-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 
 @media (max-width: 720px) {
   .entity-overlay-backdrop {
@@ -256,9 +251,6 @@ body.entity-overlay-open {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .entity-overlay-spinner {
-    animation-duration: 1.8s;
-  }
 }
 
 @media (forced-colors: active) {

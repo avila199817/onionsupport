@@ -304,15 +304,7 @@ export function formatDate(value = "") {
   }
 }
 
-export function initialsFrom(value = "") {
-  return cleanText(value, "")
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() || "")
-    .join("")
-    .slice(0, 2) || "ON";
-}
+export { avatarInitials as initialsFrom } from "../../features/avatar-system/identity.js";
 
 /* =========================================================
    SAFETY / IDENTIFIERS

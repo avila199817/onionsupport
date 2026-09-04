@@ -137,12 +137,17 @@ python3 .github/scripts/facturas_loading_parity_contract.py
 python3 .github/scripts/incidencias_skeleton_contract.py
 python3 .github/scripts/public_site_policy_regression.py
 python3 .github/scripts/ui_authority_transition_contract.py
+python3 .github/scripts/google_measurement_wiring_contract.py
 
 node .github/scripts/core_runtime_contract.mjs
 node .github/scripts/core_snapshot_contract.mjs
 node .github/scripts/auth_selector_contract.mjs
 node .github/scripts/auth_logout_contract.mjs
 node .github/scripts/router_runtime_contract.mjs
+node .github/scripts/async_scope_contract.mjs
+node .github/scripts/modal_authority_contract.mjs
+node tools/sync-public-site.mjs --check
+node tools/public-site-contract.mjs
 node .github/scripts/shell_runtime_contract.mjs
 node .github/scripts/private_runtime_auth_contract.mjs
 node .github/scripts/avatar_system_contract.mjs

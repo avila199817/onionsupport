@@ -1,3 +1,4 @@
+import { createModalLifecycle, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
 /* =========================================================
    Onion Support · Facturas · Paid Confirmation Experience
    Archivo: /src/features/facturas-paid-confirm/index.js
@@ -25,21 +26,17 @@ const DETAIL_ROOT_SELECTOR = "[data-facturas-detail-root='true']";
 const DETAIL_PANEL_SELECTOR =
   "[data-facturas-detail-modal='true'], [data-role='facturas-detail-modal']";
 const ACTIONS_SELECTOR = ".facturas-detail-actions";
-const FOCUSABLE_SELECTOR = [
-  "a[href]",
-  "button:not([disabled])",
-  "input:not([disabled]):not([type='hidden'])",
-  "select:not([disabled])",
-  "textarea:not([disabled])",
-  "[tabindex]:not([tabindex='-1'])",
-].join(",");
-
 let installed = false;
 let observer = null;
 let reconcileFrame = 0;
 let dialogLookupSeq = 0;
 let reconcileLookupSeq = 0;
 let state = null;
+const modalLifecycle = createModalLifecycle({
+  getPanel: () => document.querySelector(`#${ROOT_ID} [data-fpc-dialog='true']`),
+  onEscape: () => { if (!state?.submitting) closeDialog(); },
+  bodyClasses: ['facturas-payment-confirm-open'],
+});
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -473,7 +470,8 @@ function render({ focus = false } = {}) {
   if (!root) return false;
 
   root.innerHTML = renderDialog();
-  document.body?.classList.toggle("facturas-payment-confirm-open", Boolean(state?.open));
+  if (state?.open) modalLifecycle.activate({ opener: state.opener });
+  else modalLifecycle.deactivate({ restoreFocus: false });
   if (focus && state?.open) requestAnimationFrame(focusDialog);
   return true;
 }
@@ -484,15 +482,7 @@ function closeDialog({ restoreFocus = true } = {}) {
   dialogLookupSeq += 1;
   render();
 
-  if (restoreFocus && opener?.isConnected && typeof opener.focus === "function") {
-    requestAnimationFrame(() => {
-      try {
-        opener.focus({ preventScroll: true });
-      } catch {
-        opener.focus?.();
-      }
-    });
-  }
+  if (restoreFocus) requestAnimationFrame(() => restoreModalFocus(opener));
   return true;
 }
 
@@ -712,48 +702,6 @@ function onDocumentClick(event) {
   }
 }
 
-function onDocumentKeydown(event) {
-  if (!state?.open) return;
-
-  const dialog = document.querySelector(`#${ROOT_ID} [data-fpc-dialog='true']`);
-  if (!dialog) return;
-
-  if (event.key === "Escape") {
-    if (!state.submitting) {
-      event.preventDefault();
-      event.stopPropagation();
-      closeDialog();
-    }
-    return;
-  }
-
-  if (event.key !== "Tab") return;
-
-  const focusables = Array.from(dialog.querySelectorAll(FOCUSABLE_SELECTOR))
-    .filter((node) => !node.disabled && node.getAttribute("aria-disabled") !== "true");
-
-  if (!focusables.length) {
-    event.preventDefault();
-    dialog.focus();
-    return;
-  }
-
-  const firstNode = focusables[0];
-  const lastNode = focusables[focusables.length - 1];
-  const active = document.activeElement;
-
-  if (!dialog.contains(active)) {
-    event.preventDefault();
-    (event.shiftKey ? lastNode : firstNode).focus();
-  } else if (event.shiftKey && active === firstNode) {
-    event.preventDefault();
-    lastNode.focus();
-  } else if (!event.shiftKey && active === lastNode) {
-    event.preventDefault();
-    firstNode.focus();
-  }
-}
-
 function onRootClick(event) {
   if (!state?.open || state.submitting) return;
   const overlay = event.target?.closest?.("[data-fpc-overlay='true']");
@@ -769,7 +717,6 @@ export function installFacturasPaidConfirm() {
   if (!root) return false;
 
   document.addEventListener("click", onDocumentClick, true);
-  document.addEventListener("keydown", onDocumentKeydown, true);
   root.addEventListener("click", onRootClick);
 
   observer = new MutationObserver(scheduleReconcile);
@@ -785,7 +732,6 @@ export function destroyFacturasPaidConfirm() {
 
   installed = false;
   document.removeEventListener("click", onDocumentClick, true);
-  document.removeEventListener("keydown", onDocumentKeydown, true);
   document.getElementById(ROOT_ID)?.removeEventListener("click", onRootClick);
   observer?.disconnect?.();
   observer = null;

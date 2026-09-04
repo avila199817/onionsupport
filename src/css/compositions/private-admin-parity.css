@@ -1185,19 +1185,6 @@
   white-space: nowrap;
 }
 
-:is(
-  .incidencias-skeleton,
-  .facturas-skeleton,
-  .clientes-skeleton,
-  .usuarios-skeleton
-) {
-  display: block;
-  overflow: hidden;
-  border-radius: var(--radius-pill);
-  background: linear-gradient(90deg, var(--skeleton-bg), var(--skeleton-bg-strong), var(--skeleton-bg));
-  background-size: 220% 100%;
-  animation: private-admin-shimmer 1.35s linear infinite;
-}
 
 :is(
   .incidencias-empty,
@@ -1489,9 +1476,6 @@
    ACCESSIBILITY / PRINT
 ========================================================= */
 
-@keyframes private-admin-shimmer {
-  to { background-position: -220% 0; }
-}
 
 @media (prefers-reduced-motion: reduce) {
   :is(
@@ -1516,9 +1500,6 @@
     transition: none;
   }
 
-  :is(.incidencias-skeleton, .facturas-skeleton, .clientes-skeleton, .usuarios-skeleton) {
-    animation: none;
-  }
 }
 
 @media (forced-colors: active) {

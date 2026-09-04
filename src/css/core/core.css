@@ -2301,12 +2301,6 @@ pre::-webkit-scrollbar-thumb:hover {
   }
 }
 
-@keyframes coreSpin {
-  to {
-    transform:
-      rotate(360deg);
-  }
-}
 
 .animate-fade-in {
   animation:
@@ -2325,11 +2319,7 @@ pre::-webkit-scrollbar-thumb:hover {
 }
 
 .animate-spin {
-  animation:
-    coreSpin
-    .84s
-    linear
-    infinite;
+  animation: var(--ui-loading-animation) var(--ui-loading-duration) linear infinite;
 }
 
 

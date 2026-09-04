@@ -1,3 +1,4 @@
+import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
 /* =========================================================
    Onion Support - Incidencias Index
    Archivo: /src/views/incidencias/index.js
@@ -138,20 +139,6 @@ const DETAIL_PREVIEW_CLOSE_SELECTOR =
 
 const DETAIL_CONFIRM_SELECTOR =
   "[data-detail-confirm-dialog='true']";
-
-const FOCUSABLE_SELECTOR = [
-  "a[href]",
-  "area[href]",
-  "button:not([disabled])",
-  "input:not([disabled]):not([type='hidden'])",
-  "select:not([disabled])",
-  "textarea:not([disabled])",
-  "iframe",
-  "audio[controls]",
-  "video[controls]",
-  "[contenteditable='true']",
-  "[tabindex]:not([tabindex='-1'])",
-].join(",");
 
 const INSTANCES = new WeakMap();
 let lastInstance = null;
@@ -769,37 +756,6 @@ function isElementVisible(
   }
 }
 
-function focusableElements(
-  root = null
-) {
-  if (
-    !root ||
-    !isBrowser()
-  ) {
-    return [];
-  }
-
-  try {
-    return Array.from(
-      root.querySelectorAll(
-        FOCUSABLE_SELECTOR
-      )
-    ).filter((node) => {
-      if (
-        node.disabled ||
-        node.getAttribute?.("aria-disabled") ===
-          "true"
-      ) {
-        return false;
-      }
-
-      return isElementVisible(node);
-    });
-  } catch {
-    return [];
-  }
-}
-
 /* =========================================================
    DETAIL TEMPLATE LIMITS
 ========================================================= */
@@ -1353,19 +1309,7 @@ function createIncidenciasController(
       return false;
     }
 
-    nextFrame(() => {
-      try {
-        target.focus({
-          preventScroll: true,
-        });
-      } catch {
-        try {
-          target.focus();
-        } catch {
-          // noop
-        }
-      }
-    });
+    nextFrame(() => restoreModalFocus(target));
 
     return true;
   }
@@ -1467,83 +1411,6 @@ function createIncidenciasController(
     return null;
   }
 
-  function trapFocus(event) {
-    if (
-      event?.key !== "Tab" ||
-      !modalsOpen()
-    ) {
-      return false;
-    }
-
-    const panel =
-      currentModalPanel();
-
-    if (!panel) {
-      return false;
-    }
-
-    const focusables =
-      focusableElements(panel);
-
-    if (!focusables.length) {
-      event.preventDefault();
-
-      try {
-        panel.focus({
-          preventScroll: true,
-        });
-      } catch {
-        panel.focus?.();
-      }
-
-      return true;
-    }
-
-    const firstNode =
-      focusables[0];
-
-    const lastNode =
-      focusables[
-        focusables.length - 1
-      ];
-
-    const active =
-      document.activeElement;
-
-    if (
-      !panel.contains(active)
-    ) {
-      event.preventDefault();
-
-      (
-        event.shiftKey
-          ? lastNode
-          : firstNode
-      ).focus?.();
-
-      return true;
-    }
-
-    if (
-      event.shiftKey &&
-      active === firstNode
-    ) {
-      event.preventDefault();
-      lastNode.focus?.();
-      return true;
-    }
-
-    if (
-      !event.shiftKey &&
-      active === lastNode
-    ) {
-      event.preventDefault();
-      firstNode.focus?.();
-      return true;
-    }
-
-    return false;
-  }
 
   function onBeforeUnload(event) {
     if (
@@ -1705,42 +1572,28 @@ function createIncidenciasController(
     );
   }
 
+  const modalLifecycle = createModalLifecycle({
+    getPanel: currentModalPanel,
+    onEscape() {
+      if (createModal.open) return closeCreateModal();
+      if (!detailModal.open) return false;
+      if (detailModal.attachmentDeleteConfirmOpen) return cancelAttachmentDeleteConfirm();
+      if (detailModal.closeConfirmOpen) return cancelDetailTicketClose();
+      if (detailModal.previewFile) return closePreview();
+      return closeDetailModal();
+    },
+  });
+
   function syncBodyModalClass() {
-    if (!isBrowser()) {
-      return false;
-    }
-
-    try {
-      document.body?.classList.toggle(
-        "modal-open",
-        modalsOpen()
-      );
-
-      document.body?.classList.toggle(
-        "incidencias-modal-open",
-        modalsOpen()
-      );
-
-      document.body?.classList.toggle(
-        "incidencias-create-open",
-        createModal.open
-      );
-
-      document.body?.classList.toggle(
-        "incidencias-detail-open",
-        detailModal.open
-      );
-
-      document.body?.classList.toggle(
-        "incidencias-detail-dirty",
-        detailModal.open &&
-          detailHasDraft()
-      );
-
-      return true;
-    } catch {
-      return false;
-    }
+    if (!modalsOpen()) return modalLifecycle.deactivate({ restoreFocus: false });
+    return modalLifecycle.activate({
+      classes: [
+        'incidencias-modal-open',
+        createModal.open && 'incidencias-create-open',
+        detailModal.open && 'incidencias-detail-open',
+        detailModal.open && detailHasDraft() && 'incidencias-detail-dirty',
+      ],
+    });
   }
 
   /* =======================================================
@@ -8033,57 +7886,6 @@ async function loadMore(options = {}) {
   function onKeydown(event) {
     if (!ownsNode(event.target)) {
       return;
-    }
-
-    if (
-      event.key === "Tab" &&
-      modalsOpen()
-    ) {
-      trapFocus(event);
-      return;
-    }
-
-    if (
-      event.key === "Escape"
-    ) {
-      if (createModal.open) {
-        event.preventDefault();
-        closeCreateModal();
-        return;
-      }
-
-      if (detailModal.open) {
-        event.preventDefault();
-
-        /*
-           UX:
-           Escape cancela primero cualquier confirmación destructiva,
-           después cierra la preview y por último el modal.
-        */
-        if (
-          detailModal.attachmentDeleteConfirmOpen
-        ) {
-          cancelAttachmentDeleteConfirm();
-          return;
-        }
-
-        if (
-          detailModal.closeConfirmOpen
-        ) {
-          cancelDetailTicketClose();
-          return;
-        }
-
-        if (
-          detailModal.previewFile
-        ) {
-          closePreview();
-          return;
-        }
-
-        closeDetailModal();
-        return;
-      }
     }
 
     if (

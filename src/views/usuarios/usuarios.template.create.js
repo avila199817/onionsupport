@@ -1,3 +1,4 @@
+import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
 /* =========================================================
    Onion Support - Usuarios Create Modal
    Archivo: /src/views/usuarios/usuarios.template.create.js
@@ -115,7 +116,6 @@ const state = {
   clickHandler: null,
   inputHandler: null,
   submitHandler: null,
-  keydownHandler: null,
 
   openSequence: 0,
   submitSequence: 0,
@@ -423,29 +423,16 @@ function removeDuplicateRoots(keep = null) {
   return removed;
 }
 
+const modalLifecycle = createModalLifecycle({
+  getPanel: () => state.panel,
+  onEscape: () => { if (!state.submitting) close(); },
+  bodyClasses: ['usuarios-modal-open', 'usuarios-create-modal-open'],
+});
+
 function setBodyLock(open = false) {
-  if (!isBrowser()) return false;
-
-  try {
-    document.body.classList.toggle(
-      "modal-open",
-      Boolean(open)
-    );
-
-    document.body.classList.toggle(
-      "usuarios-modal-open",
-      Boolean(open)
-    );
-
-    document.body.classList.toggle(
-      "usuarios-create-modal-open",
-      Boolean(open)
-    );
-
-    return true;
-  } catch {
-    return false;
-  }
+  return open
+    ? modalLifecycle.activate({ opener: state.lastActiveElement })
+    : modalLifecycle.deactivate({ restoreFocus: false });
 }
 
 function emitEvent(
@@ -1248,82 +1235,6 @@ function restoreFocus(snapshot = null) {
   }
 }
 
-function getFocusableElements() {
-  const panel =
-    state.panel;
-
-  if (!panel) return [];
-
-  return Array.from(
-    panel.querySelectorAll(
-      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    )
-  ).filter((element) => {
-    if (!element || element.hidden) {
-      return false;
-    }
-
-    if (
-      element.getAttribute?.(
-        "aria-hidden"
-      ) === "true"
-    ) {
-      return false;
-    }
-
-    return true;
-  });
-}
-
-function trapFocus(event = null) {
-  if (
-    event?.key !== "Tab" ||
-    !state.isOpen
-  ) {
-    return false;
-  }
-
-  const focusable =
-    getFocusableElements();
-
-  if (!focusable.length) {
-    event.preventDefault?.();
-    state.panel?.focus?.();
-    return true;
-  }
-
-  const firstElement =
-    focusable[0];
-
-  const lastElement =
-    focusable[
-      focusable.length - 1
-    ];
-
-  const active =
-    document.activeElement;
-
-  if (
-    event.shiftKey &&
-    active === firstElement
-  ) {
-    event.preventDefault?.();
-    lastElement.focus?.();
-    return true;
-  }
-
-  if (
-    !event.shiftKey &&
-    active === lastElement
-  ) {
-    event.preventDefault?.();
-    firstElement.focus?.();
-    return true;
-  }
-
-  return false;
-}
-
 function render({
   preserveFocus = true,
 } = {}) {
@@ -1573,21 +1484,6 @@ function bind() {
       void submit();
     };
 
-  state.keydownHandler =
-    (event) => {
-      if (
-        event.key === "Escape" &&
-        state.isOpen &&
-        !state.submitting
-      ) {
-        event.preventDefault();
-        close();
-        return;
-      }
-
-      trapFocus(event);
-    };
-
   root.addEventListener(
     "click",
     state.clickHandler
@@ -1611,11 +1507,6 @@ function bind() {
   form?.addEventListener(
     "submit",
     state.submitHandler
-  );
-
-  window.addEventListener(
-    "keydown",
-    state.keydownHandler
   );
 
   return true;
@@ -1665,15 +1556,6 @@ function unbind() {
       );
     }
 
-    if (
-      isBrowser() &&
-      state.keydownHandler
-    ) {
-      window.removeEventListener(
-        "keydown",
-        state.keydownHandler
-      );
-    }
   } catch {
     // noop
   }
@@ -1681,7 +1563,6 @@ function unbind() {
   state.clickHandler = null;
   state.inputHandler = null;
   state.submitHandler = null;
-  state.keydownHandler = null;
 
   return true;
 }
@@ -1728,11 +1609,11 @@ export async function open(options = {}) {
   state.lastActiveElement =
     document.activeElement;
 
-  setBodyLock(true);
-
   render({
     preserveFocus: false,
   });
+
+  setBodyLock(true);
 
   try {
     const firstField =
@@ -1821,17 +1702,7 @@ export function close() {
 
   setBodyLock(false);
 
-  try {
-    if (
-      previousFocus?.isConnected
-    ) {
-      previousFocus.focus({
-        preventScroll: true,
-      });
-    }
-  } catch {
-    // noop
-  }
+  restoreModalFocus(previousFocus);
 
   emitMany(
     CREATE_CLOSE_EVENTS,

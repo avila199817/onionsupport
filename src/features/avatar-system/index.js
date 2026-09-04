@@ -923,9 +923,9 @@ function applyImageVisibility(image = null, state = "fallback") {
   }
 
   if (state === "error") {
-    image.setAttribute("data-avatar-failed", "true");
-    image.setAttribute("data-avatar-hidden-by-system", "true");
-    image.hidden = true;
+    setAttribute(image, "data-avatar-failed", "true");
+    setAttribute(image, "data-avatar-hidden-by-system", "true");
+    if (!image.hidden) image.hidden = true;
   }
 }
 
@@ -1085,7 +1085,12 @@ function queueScan(root = null) {
     const roots = [...pendingRoots];
     pendingRoots.clear();
 
-    for (const item of roots) {
+    // A containing scan already covers nested hosts/images queued in this turn.
+    // Skip detached roots: their former host is queued by the childList record.
+    for (const item of roots.filter((root) =>
+      (isDocument(root) || root.isConnected) &&
+      !roots.some((other) => other !== root && other.contains?.(root))
+    )) {
       synchronizeAvatars(item);
     }
   });
@@ -1124,6 +1129,11 @@ function onImageError(event = null) {
 function onMutations(records = []) {
   for (const record of records) {
     if (record.type === "childList") {
+      // Removing/replacing an image or fallback also changes the host state.
+      const host = isLikelyAvatarHost(record.target)
+        ? record.target
+        : nearestAvatarHost(record.target);
+      if (host) queueScan(host);
       for (const node of record.addedNodes || []) {
         if (isElement(node)) queueScan(node);
       }
@@ -1132,7 +1142,7 @@ function onMutations(records = []) {
 
     if (record.type === "characterData") {
       const parent = record.target?.parentElement || null;
-      const host = nearestAvatarHost(parent);
+      const host = isLikelyAvatarHost(parent) ? parent : nearestAvatarHost(parent);
       if (host) queueScan(host);
       continue;
     }
@@ -1150,6 +1160,9 @@ function onMutations(records = []) {
           ? target
           : nearestAvatarHost(target);
         if (host) queueScan(host);
+        // Identity may live on a row/context containing several avatar hosts.
+        // Limit reconciliation to that subtree instead of rescanning the SPA.
+        else queueScan(target);
       }
     }
   }
@@ -1179,6 +1192,26 @@ function installObserver() {
       "data-usuario-id",
       "data-user-email",
       "data-email",
+      "data-email-lower",
+      "data-avatar-name",
+      "data-avatar-email",
+      "data-avatar-user-id",
+      "data-avatar-username",
+      "data-user-name",
+      "data-display-name",
+      "data-full-name",
+      "data-name",
+      "data-username",
+      "data-username-lower",
+      "data-slug",
+      "data-user-slug",
+      "data-owner-user-id",
+      "data-requester-user-id",
+      "data-created-by-user-id",
+      "data-technician-user-id",
+      "data-tecnico-user-id",
+      "data-client-email",
+      "data-cliente-email",
     ],
   });
 

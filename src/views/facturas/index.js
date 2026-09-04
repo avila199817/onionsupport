@@ -1,3 +1,4 @@
+import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
 /* =========================================================
    Onion Support - Facturas Index
    Archivo: /src/views/facturas/index.js
@@ -90,20 +91,6 @@ const CREATE_MODAL_SCROLL_SELECTOR =
   "[data-facturas-create-body='true']";
 const CREATE_MODAL_OVERLAY_SELECTOR =
   "[data-facturas-create-modal-overlay='true']";
-
-const FOCUSABLE_SELECTOR = [
-  "a[href]",
-  "area[href]",
-  "button:not([disabled])",
-  "input:not([disabled]):not([type='hidden'])",
-  "select:not([disabled])",
-  "textarea:not([disabled])",
-  "iframe",
-  "audio[controls]",
-  "video[controls]",
-  "[contenteditable='true']",
-  "[tabindex]:not([tabindex='-1'])",
-].join(",");
 
 const FACTURAS_CONTROLLER_KEY =
   Symbol.for("onion.support.facturas.controller");
@@ -318,25 +305,6 @@ function isElementVisible(element = null) {
   }
 }
 
-function focusableElements(root = null) {
-  if (!root || !isBrowser()) return [];
-
-  try {
-    return Array.from(root.querySelectorAll(FOCUSABLE_SELECTOR))
-      .filter((node) => {
-        if (
-          node.disabled ||
-          node.getAttribute?.("aria-disabled") === "true"
-        ) {
-          return false;
-        }
-
-        return isElementVisible(node);
-      });
-  } catch {
-    return [];
-  }
-}
 
 const FACTURAS_RESEND_CONFIRM_ROOT_ID = "facturas-resend-confirm-root";
 let activeResendConfirm = null;
@@ -444,7 +412,13 @@ function confirmFacturaResend({ factura = {}, recipient = "" } = {}) {
     dialog.append(iconBox, copy, actions);
     overlay.appendChild(dialog);
     root.appendChild(overlay);
-    document.body.classList.add("facturas-resend-confirm-open");
+    const confirmationLifecycle = createModalLifecycle({
+      getPanel: () => dialog,
+      onEscape: () => settle(false),
+      onDetached: () => settle(false),
+      bodyClasses: ['facturas-resend-confirm-open'],
+    });
+    confirmationLifecycle.activate({ opener });
 
     let settled = false;
 
@@ -454,31 +428,7 @@ function confirmFacturaResend({ factura = {}, recipient = "" } = {}) {
     const onOverlayClick = (event) => {
       if (event.target === overlay) settle(false);
     };
-    const onKeydown = (event) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        settle(false);
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const focusables = focusableElements(dialog);
-      if (!focusables.length) {
-        event.preventDefault();
-        dialog.focus({ preventScroll: true });
-        return;
-      }
-      const firstNode = focusables[0];
-      const lastNode = focusables[focusables.length - 1];
-      if (event.shiftKey && document.activeElement === firstNode) {
-        event.preventDefault();
-        lastNode.focus({ preventScroll: true });
-      } else if (!event.shiftKey && document.activeElement === lastNode) {
-        event.preventDefault();
-        firstNode.focus({ preventScroll: true });
-      }
-    };
     const cleanup = () => {
-      dialog.removeEventListener("keydown", onKeydown);
       overlay.removeEventListener("click", onOverlayClick);
       cancelButton.removeEventListener("click", onCancel);
       confirmButton.removeEventListener("click", onConfirm);
@@ -486,18 +436,17 @@ function confirmFacturaResend({ factura = {}, recipient = "" } = {}) {
       window.removeEventListener("hashchange", onRouteChange);
       window.removeEventListener("pagehide", onRouteChange);
       root.replaceChildren();
-      document.body.classList.remove("facturas-resend-confirm-open");
+      confirmationLifecycle.deactivate({ restoreFocus: false });
     };
     function settle(value) {
       if (settled) return;
       settled = true;
       cleanup();
       activeResendConfirm = null;
-      try { opener?.focus?.({ preventScroll: true }); } catch { /* noop */ }
+      restoreModalFocus(opener);
       resolve(Boolean(value));
     }
 
-    dialog.addEventListener("keydown", onKeydown);
     overlay.addEventListener("click", onOverlayClick);
     cancelButton.addEventListener("click", onCancel);
     confirmButton.addEventListener("click", onConfirm);
@@ -1318,28 +1267,6 @@ async function searchTickets(query = "", selectedClientes = []) {
 /* =========================================================
    BODY / DOCUMENTS
 ========================================================= */
-
-function syncBodyModalClass(
-  open = false,
-  { detailOpen = false, createOpen = false } = {}
-) {
-  if (!isBrowser()) return false;
-
-  try {
-    document.body?.classList.toggle("modal-open", open);
-    document.body?.classList.toggle("facturas-modal-open", open);
-    document.body?.classList.toggle("facturas-detail-open", detailOpen);
-    document.body?.classList.toggle("facturas-create-open", createOpen);
-    document.body?.classList.toggle(
-      "facturas-create-modal-open",
-      createOpen
-    );
-
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function safeDocumentUrl(value = "") {
   const raw = cleanText(value, "");
@@ -2310,14 +2237,19 @@ function createFacturasController(host = null, context = {}) {
     );
   }
 
+  const modalLifecycle = createModalLifecycle({
+    getPanel: currentModalPanel,
+    onEscape: () => detailModalIsOpen() ? closeDetailModal() : closeCreateModal(),
+  });
+
   function syncModalBodyState() {
-    return syncBodyModalClass(
-      createModal.open || detailModalIsOpen(),
-      {
-        createOpen: createModal.open,
-        detailOpen: detailModalIsOpen(),
-      }
-    );
+    if (!anyModalIsOpen()) return modalLifecycle.deactivate({ restoreFocus: false });
+    return modalLifecycle.activate({ classes: [
+      'facturas-modal-open',
+      detailModalIsOpen() && 'facturas-detail-open',
+      createModal.open && 'facturas-create-open',
+      createModal.open && 'facturas-create-modal-open',
+    ] });
   }
 
   function ownsNode(node = null) {
@@ -2439,15 +2371,7 @@ function createFacturasController(host = null, context = {}) {
 
       if (!target || !isFunction(target.focus)) return;
 
-      try {
-        target.focus({ preventScroll: true });
-      } catch {
-        try {
-          target.focus();
-        } catch {
-          // noop
-        }
-      }
+      restoreModalFocus(target);
     });
 
     return true;
@@ -2467,51 +2391,6 @@ function createFacturasController(host = null, context = {}) {
     }
 
     return null;
-  }
-
-  function trapModalFocus(event = null) {
-    if (event?.key !== "Tab" || !anyModalIsOpen()) return false;
-
-    const panel = currentModalPanel();
-    if (!panel) return false;
-
-    const focusables = focusableElements(panel);
-
-    if (!focusables.length) {
-      event.preventDefault();
-
-      try {
-        panel.focus({ preventScroll: true });
-      } catch {
-        panel.focus?.();
-      }
-
-      return true;
-    }
-
-    const firstNode = focusables[0];
-    const lastNode = focusables[focusables.length - 1];
-    const active = document.activeElement;
-
-    if (!panel.contains(active)) {
-      event.preventDefault();
-      (event.shiftKey ? lastNode : firstNode).focus?.();
-      return true;
-    }
-
-    if (event.shiftKey && active === firstNode) {
-      event.preventDefault();
-      lastNode.focus?.();
-      return true;
-    }
-
-    if (!event.shiftKey && active === lastNode) {
-      event.preventDefault();
-      firstNode.focus?.();
-      return true;
-    }
-
-    return false;
   }
 
   /* ---------------------------------------------------------
@@ -6473,29 +6352,6 @@ function createFacturasController(host = null, context = {}) {
   }
 
   function onKeydown(event) {
-    if (anyModalIsOpen() && event.key === "Tab") {
-      trapModalFocus(event);
-      return;
-    }
-
-    if (event.key === "Escape") {
-      if (detailModalIsOpen()) {
-        event.preventDefault();
-        event.stopPropagation();
-
-        closeDetailModal();
-        return;
-      }
-
-      if (createModal.open) {
-        event.preventDefault();
-        event.stopPropagation();
-
-        closeCreateModal();
-        return;
-      }
-    }
-
     if (
       event.key !== "Enter" &&
       event.key !== " "
@@ -6698,10 +6554,7 @@ function createFacturasController(host = null, context = {}) {
 
       revokeObjectUrls();
 
-      syncBodyModalClass(false, {
-        createOpen: false,
-        detailOpen: false,
-      });
+      modalLifecycle.deactivate({ restoreFocus: false });
 
       modalReturnFocus = null;
 

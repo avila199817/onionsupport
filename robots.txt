@@ -1,6 +1,7 @@
 # Onion Support · robots.txt
 # Superficie pública indexable: landing, servicios técnicos y acceso cliente.
 # Las rutas sensibles y el área privada permanecen fuera de rastreo.
+# Release visual: avatares sin foto con Microsoft Fluent Persona.
 
 User-agent: *
 Allow: /

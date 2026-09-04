@@ -54,26 +54,38 @@
 
 .public-home .public-home-nav-account-slot {
   position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  inline-size: 48px;
+  block-size: 48px;
+  min-inline-size: 48px;
+  min-block-size: 48px;
+  flex: 0 0 48px;
 }
 
 .public-home .public-home-nav-account-slot .public-home-account-menu-wrap {
+  display: grid;
+  place-items: center;
   inline-size: 48px;
+  block-size: 48px;
   min-inline-size: 48px;
+  min-block-size: 48px;
+  max-inline-size: 48px;
+  max-block-size: 48px;
 }
 
 .public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle] {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
   inline-size: 48px;
   block-size: 48px;
+  min-inline-size: 48px;
   min-block-size: 48px;
-  max-inline-size: none;
-  padding: 5px;
+  max-inline-size: 48px;
+  max-block-size: 48px;
+  margin: 0;
+  padding: 0;
   border-radius: 16px;
 }
 
@@ -82,19 +94,20 @@
   place-items: center;
   inline-size: 100%;
   block-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
   gap: 0;
+  margin: 0;
 }
 
 .public-home .public-home-nav-account-slot .public-support-account-copy {
   display: none;
 }
 
-.public-home .public-home-nav-account-slot .public-support-account-avatar {
-  inline-size: 36px;
-  block-size: 36px;
-  flex-basis: 36px;
-  border-radius: 12px;
-}
+/*
+  El host recibe .topbar-avatar para que AvatarSystem aplique su tamaño
+  shell (36px), su círculo y su fallback canónico sin desplazamientos.
+*/
 
 .public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]::before,
 .public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]::after {

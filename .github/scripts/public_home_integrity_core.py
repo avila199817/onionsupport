@@ -575,6 +575,7 @@ def main() -> int:
         ('"/cuenta"', "Falta acceso a Cuenta"),
         ("public-home.experience.v5-avatar-topbar-account", "Falta versión coalescida del Home"),
         ("data-public-home-account-slot", "Falta slot de cuenta en el topbar público"),
+        ('avatarHost.classList.add("topbar-avatar")', "El avatar del topbar debe heredar el tamaño global shell"),
         ("new MutationObserver(queueScan)", "El Home debe coalescer mutaciones por frame"),
         ("formatNationalPhone", "Falta formato progresivo nacional de teléfono"),
         ("+34 612 345 678", "Falta ejemplo telefónico español"),
@@ -595,6 +596,8 @@ def main() -> int:
         ("@media (max-width: 1040px)", "Falta breakpoint del drawer público"),
         (".public-home .public-home-nav-panel", "Falta contrato del drawer público"),
         ("public-home-nav-account-slot", "Falta el avatar autenticado fuera del drawer"),
+        (".public-home .public-home-nav-account-slot {\n  position: relative;\n  display: grid;", "El slot del topbar debe centrar su contenido"),
+        ("padding: 0;", "El toggle del topbar no debe desplazar el avatar con padding interno"),
     ):
         require(errors, snippet in experience_css, message)
 

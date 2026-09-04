@@ -393,6 +393,9 @@ function ensureAccountMenu(root = null, state = {}) {
     slot.appendChild(wrapper);
   }
 
+  const avatarHost = link.querySelector(".public-support-account-avatar");
+  if (avatarHost) avatarHost.classList.add("topbar-avatar");
+
   setAccountSlotState(slot, true);
 
   return true;

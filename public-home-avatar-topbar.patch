@@ -1,0 +1,660 @@
+From 23d01c498b2cfd62ac9c3b454b7df832242dace8 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Fri, 4 Sep 2026 15:45:49 +0200
+Subject: [PATCH] feat(public-home): move authenticated avatar into topbar
+
+---
+ .github/ci/validate_static_release.sh         |   1 +
+ .github/scripts/public_home_integrity.py      |   4 +-
+ src/core/avatar.js                            |  45 +++++++
+ src/css/views/public/home-experience.css      | 118 ++++++++++++++++--
+ src/css/views/public/index.css                |  20 +++
+ src/css/views/public/support-request.css      |  17 ++-
+ .../incidencias-avatar-fallback/index.js      |  29 +----
+ src/features/public-home-experience/index.js  |  52 ++++++--
+ src/features/public-support/index.js          |  71 ++++++++---
+ src/views/public/home/template.js             |  11 +-
+ 10 files changed, 304 insertions(+), 64 deletions(-)
+ create mode 100644 src/core/avatar.js
+
+diff --git a/.github/ci/validate_static_release.sh b/.github/ci/validate_static_release.sh
+index f175f85d..8215d111 100755
+--- a/.github/ci/validate_static_release.sh
++++ b/.github/ci/validate_static_release.sh
+@@ -23,6 +23,7 @@ required_files=(
+   "src/app/index.js"
+   "src/app/loader.js"
+   "src/core/config.js"
++  "src/core/avatar.js"
+   "src/core/http.js"
+   "src/core/index.js"
+   "src/core/media.js"
+diff --git a/.github/scripts/public_home_integrity.py b/.github/scripts/public_home_integrity.py
+index 3eb24e55..8dc973bf 100644
+--- a/.github/scripts/public_home_integrity.py
++++ b/.github/scripts/public_home_integrity.py
+@@ -573,7 +573,8 @@ def main() -> int:
+         ('"/incidencias"', "Falta acceso a Incidencias"),
+         ('"/facturas"', "Falta acceso a Facturas"),
+         ('"/cuenta"', "Falta acceso a Cuenta"),
+-        ("public-home.experience.v4-canonical-session-handoff", "Falta versión coalescida del Home"),
++        ("public-home.experience.v5-avatar-topbar-account", "Falta versión coalescida del Home"),
++        ("data-public-home-account-slot", "Falta slot de cuenta en el topbar público"),
+         ("new MutationObserver(queueScan)", "El Home debe coalescer mutaciones por frame"),
+         ("formatNationalPhone", "Falta formato progresivo nacional de teléfono"),
+         ("+34 612 345 678", "Falta ejemplo telefónico español"),
+@@ -593,6 +594,7 @@ def main() -> int:
+         ("shape-rendering: geometricPrecision", "Falta precisión de SVG inline"),
+         ("@media (max-width: 1040px)", "Falta breakpoint del drawer público"),
+         (".public-home .public-home-nav-panel", "Falta contrato del drawer público"),
++        ("public-home-nav-account-slot", "Falta el avatar autenticado fuera del drawer"),
+     ):
+         require(errors, snippet in experience_css, message)
+ 
+diff --git a/src/core/avatar.js b/src/core/avatar.js
+new file mode 100644
+index 00000000..dfeac3b5
+--- /dev/null
++++ b/src/core/avatar.js
+@@ -0,0 +1,45 @@
++/* =========================================================
++   Onion Support - Shared Avatar Rules
++
++   Fuente única para avatares sin fotografía:
++   - iniciales deterministas y acotadas a dos caracteres;
++   - tono determinista a partir de una identidad estable;
++   - sin dependencias de DOM ni efectos de montaje.
++========================================================= */
++
++function cleanText(value = "") {
++  return String(value ?? "")
++    .replace(/[\r\n\t]/g, " ")
++    .replace(/\s+/g, " ")
++    .trim();
++}
++
++export function avatarInitials(value = "") {
++  return (
++    cleanText(value)
++      .split(/\s+/)
++      .filter(Boolean)
++      .slice(0, 2)
++      .map((part) => part[0]?.toUpperCase() || "")
++      .join("")
++      .slice(0, 2) ||
++    "ON"
++  );
++}
++
++export function avatarToneFromIdentity(value = "") {
++  const identity = cleanText(value);
++  let hash = 0;
++
++  for (let index = 0; index < identity.length; index += 1) {
++    hash = ((hash << 5) - hash) + identity.charCodeAt(index);
++    hash |= 0;
++  }
++
++  return Math.abs(hash) % 10;
++}
++
++export default Object.freeze({
++  avatarInitials,
++  avatarToneFromIdentity,
++});
+diff --git a/src/css/views/public/home-experience.css b/src/css/views/public/home-experience.css
+index 34e45bc5..bd69c797 100644
+--- a/src/css/views/public/home-experience.css
++++ b/src/css/views/public/home-experience.css
+@@ -4,7 +4,8 @@
+ 
+    Sistema visual/UX canónico de la landing:
+    - Landing ancha y respirada.
+-   - Login/Cuenta a la izquierda de Abrir incidencia.
++   - Visitante: login junto a Abrir incidencia en el drawer.
++   - Sesión activa: avatar único en el header y menú fuera del drawer.
+    - Dropdown autenticado premium tipo command-card.
+    - Navegación móvil contenida y estable.
+    - Teléfono España con bandera + prefijo +34 permanentes.
+@@ -27,7 +28,7 @@
+ }
+ 
+ /* =========================================================
+-   2. HEADER ACTION ORDER / CTA
++   2. HEADER ACTION ORDER / CTA / AUTHENTICATED AVATAR
+ ========================================================= */
+ 
+ .public-home .public-home-price-link {
+@@ -51,6 +52,107 @@
+   isolation: isolate;
+ }
+ 
++.public-home .public-home-nav-account-slot {
++  position: relative;
++  display: inline-flex;
++  align-items: center;
++  justify-content: flex-end;
++  flex: 0 0 auto;
++}
++
++.public-home .public-home-nav-account-slot .public-home-account-menu-wrap {
++  inline-size: 48px;
++  min-inline-size: 48px;
++}
++
++.public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle] {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  inline-size: 48px;
++  block-size: 48px;
++  min-block-size: 48px;
++  max-inline-size: none;
++  padding: 5px;
++  border-radius: 16px;
++}
++
++.public-home .public-home-nav-account-slot .public-support-account {
++  display: grid;
++  place-items: center;
++  inline-size: 100%;
++  block-size: 100%;
++  gap: 0;
++}
++
++.public-home .public-home-nav-account-slot .public-support-account-copy {
++  display: none;
++}
++
++.public-home .public-home-nav-account-slot .public-support-account-avatar {
++  inline-size: 36px;
++  block-size: 36px;
++  flex-basis: 36px;
++  border-radius: 12px;
++}
++
++.public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]::before,
++.public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]::after {
++  display: none;
++  content: none;
++}
++
++/* Misma paleta determinista que los avatares privados canónicos. */
++.public-home .public-support-account-avatar[data-avatar-tone="0"] {
++  --public-account-avatar-a: var(--public-home-accent);
++  --public-account-avatar-b: var(--public-home-accent-2);
++}
++
++.public-home .public-support-account-avatar[data-avatar-tone="1"] {
++  --public-account-avatar-a: var(--public-home-success);
++  --public-account-avatar-b: var(--public-home-accent-2);
++}
++
++.public-home .public-support-account-avatar[data-avatar-tone="2"] {
++  --public-account-avatar-a: var(--warning, #f2b84b);
++  --public-account-avatar-b: var(--public-home-accent);
++}
++
++.public-home .public-support-account-avatar[data-avatar-tone="3"] {
++  --public-account-avatar-a: var(--public-home-danger);
++  --public-account-avatar-b: var(--warning, #f2b84b);
++}
++
++.public-home .public-support-account-avatar[data-avatar-tone="4"] {
++  --public-account-avatar-a: var(--public-home-accent-2);
++  --public-account-avatar-b: var(--public-home-accent);
++}
++
++.public-home .public-support-account-avatar[data-avatar-tone="5"] {
++  --public-account-avatar-a: var(--public-home-success);
++  --public-account-avatar-b: var(--public-home-accent);
++}
++
++.public-home .public-support-account-avatar[data-avatar-tone="6"] {
++  --public-account-avatar-a: var(--public-home-accent-2);
++  --public-account-avatar-b: var(--public-home-success);
++}
++
++.public-home .public-support-account-avatar[data-avatar-tone="7"] {
++  --public-account-avatar-a: var(--warning, #f2b84b);
++  --public-account-avatar-b: var(--public-home-danger);
++}
++
++.public-home .public-support-account-avatar[data-avatar-tone="8"] {
++  --public-account-avatar-a: var(--public-home-danger);
++  --public-account-avatar-b: var(--public-home-accent);
++}
++
++.public-home .public-support-account-avatar[data-avatar-tone="9"] {
++  --public-account-avatar-a: var(--public-home-accent);
++  --public-account-avatar-b: var(--public-home-success);
++}
++
+ .public-home .public-home-account-menu-wrap > .public-home-login-link {
+   inline-size: 100%;
+ }
+@@ -659,17 +761,17 @@
+     justify-content: flex-start;
+   }
+ 
+-  .public-home .public-home-account-menu-wrap {
++  .public-home .public-home-nav-actions > .public-home-account-menu-wrap {
+     inline-size: 100%;
+   }
+ 
+-  .public-home .public-home-account-menu-wrap > .public-home-login-link,
+-  .public-home .public-home-account-menu-wrap > [data-public-home-account-toggle] {
++  .public-home .public-home-nav-actions > .public-home-account-menu-wrap > .public-home-login-link,
++  .public-home .public-home-nav-actions > .public-home-account-menu-wrap > [data-public-home-account-toggle] {
+     inline-size: 100%;
+     max-inline-size: none;
+   }
+ 
+-  .public-home .public-home-account-menu {
++  .public-home .public-home-nav-actions > .public-home-account-menu {
+     inset-inline-start: 0;
+     inset-inline-end: auto;
+     inline-size: min(254px, calc(100vw - 32px));
+@@ -722,11 +824,11 @@
+     max-inline-size: min(238px, calc(100vw - 28px));
+   }
+ 
+-  .public-home .public-home-account-menu-wrap {
++  .public-home .public-home-nav-actions > .public-home-account-menu-wrap {
+     flex-direction: column;
+   }
+ 
+-  .public-home .public-home-account-menu {
++  .public-home .public-home-nav-actions > .public-home-account-menu {
+     position: static;
+     inline-size: 100%;
+     margin-block-start: 8px;
+diff --git a/src/css/views/public/index.css b/src/css/views/public/index.css
+index 79acc581..ebcd23c9 100644
+--- a/src/css/views/public/index.css
++++ b/src/css/views/public/index.css
+@@ -567,6 +567,26 @@ body.public-home-no-scroll .main-content {
+   margin-inline: auto;
+ }
+ 
++.public-home-nav-tools {
++  display: inline-flex;
++  align-items: center;
++  justify-content: flex-end;
++  gap: 10px;
++  flex: 0 0 auto;
++}
++
++.public-home-nav-account-slot {
++  position: relative;
++  display: none;
++  align-items: center;
++  flex: 0 0 auto;
++  min-inline-size: 0;
++}
++
++.public-home-nav-account-slot:not([hidden]) {
++  display: inline-flex;
++}
++
+ .public-home-brand,
+ .public-home-footer-brand {
+   display: inline-flex;
+diff --git a/src/css/views/public/support-request.css b/src/css/views/public/support-request.css
+index 75a2f951..c14c0bb7 100644
+--- a/src/css/views/public/support-request.css
++++ b/src/css/views/public/support-request.css
+@@ -960,6 +960,9 @@
+ }
+ 
+ .public-home .public-support-account-avatar {
++  --public-account-avatar-a: var(--public-home-accent);
++  --public-account-avatar-b: var(--public-home-accent-2);
++  position: relative;
+   display: grid;
+   place-items: center;
+   flex: 0 0 36px;
+@@ -974,7 +977,7 @@
+   color: #dff8ff;
+   background:
+     radial-gradient(circle at 30% 18%, rgb(255 255 255 / .24), transparent 34%),
+-    linear-gradient(135deg, #0d75ef, #0a45d8);
++    linear-gradient(135deg, var(--public-account-avatar-a), var(--public-account-avatar-b));
+ 
+   font-size: 11px;
+   font-weight: 950;
+@@ -982,12 +985,24 @@
+ }
+ 
+ .public-home .public-support-account-avatar img {
++  position: absolute;
++  z-index: 2;
++  inset: 0;
+   display: block;
+   inline-size: 100%;
+   block-size: 100%;
+   object-fit: cover;
+ }
+ 
++.public-home .public-support-account-avatar-fallback {
++  position: relative;
++  z-index: 1;
++  display: grid;
++  place-items: center;
++  inline-size: 100%;
++  block-size: 100%;
++}
++
+ .public-home .public-support-account-copy {
+   display: grid;
+   gap: 1px;
+diff --git a/src/features/incidencias-avatar-fallback/index.js b/src/features/incidencias-avatar-fallback/index.js
+index dfe8a8b4..6292a6ba 100644
+--- a/src/features/incidencias-avatar-fallback/index.js
++++ b/src/features/incidencias-avatar-fallback/index.js
+@@ -21,6 +21,10 @@
+ import {
+   loadIncidenciaDetail,
+ } from "../../views/incidencias/incidencias.api.js";
++import {
++  avatarInitials,
++  avatarToneFromIdentity,
++} from "../../core/avatar.js";
+ 
+ export const INCIDENCIAS_AVATAR_FALLBACK_VERSION =
+   "incidencias.avatar-fallback.v4.comment-identity-modal-scope";
+@@ -113,31 +117,6 @@ function firstObject(...values) {
+   return {};
+ }
+ 
+-function avatarInitials(value = "") {
+-  return (
+-    cleanText(value)
+-      .split(/\s+/)
+-      .filter(Boolean)
+-      .slice(0, 2)
+-      .map((part) => part[0]?.toUpperCase() || "")
+-      .join("")
+-      .slice(0, 2) ||
+-    "ON"
+-  );
+-}
+-
+-function avatarToneFromIdentity(value = "") {
+-  const identity = cleanText(value);
+-  let hash = 0;
+-
+-  for (let index = 0; index < identity.length; index += 1) {
+-    hash = ((hash << 5) - hash) + identity.charCodeAt(index);
+-    hash |= 0;
+-  }
+-
+-  return Math.abs(hash) % 10;
+-}
+-
+ function normalizePersonName(value = "") {
+   return cleanText(value)
+     .toLowerCase()
+diff --git a/src/features/public-home-experience/index.js b/src/features/public-home-experience/index.js
+index e472517a..c967c7e2 100644
+--- a/src/features/public-home-experience/index.js
++++ b/src/features/public-home-experience/index.js
+@@ -3,9 +3,9 @@
+    Archivo: /src/features/public-home-experience/index.js
+ 
+    Remate UX de la landing pública:
+-   - Login/Cuenta siempre a la izquierda de "Abrir incidencia".
+-   - Dropdown autenticado con toggle no navegable y accesos rápidos.
+-   - Nombre compacto: "Nombre I." preservando tildes.
++   - Visitante: login junto a "Abrir incidencia" dentro del menú público.
++   - Sesión activa: sólo avatar en el topbar y dropdown fuera del drawer móvil.
++   - El nombre queda disponible para accesibilidad, no se pinta en el topbar.
+    - Footer sin login/cuenta.
+    - Teléfono España: bandera/+34 fijos y campo nacional sin prefijo duplicado.
+    - SVGs inline afinados sin alterar su semántica.
+@@ -14,12 +14,13 @@
+ import { AppCore } from "../../core/index.js";
+ 
+ export const PUBLIC_HOME_EXPERIENCE_VERSION =
+-  "public-home.experience.v4-canonical-session-handoff";
++  "public-home.experience.v5-avatar-topbar-account";
+ 
+ const HOME = "[data-public-home]";
+ const FORM = "[data-public-support-form]";
+ const PHONE = `${FORM} [name="phone"]`;
+ const LOGIN = "[data-public-home-login]";
++const ACCOUNT_SLOT = "[data-public-home-account-slot]";
+ const ACCOUNT_WRAP = "[data-public-home-account-wrap]";
+ const ACCOUNT_MENU = "[data-public-home-account-menu]";
+ const ACCOUNT_TOGGLE = "[data-public-home-account-toggle]";
+@@ -304,12 +305,31 @@ function resetAccountWrapper(link = null) {
+   return true;
+ }
+ 
++function setAccountSlotState(slot = null, visible = false) {
++  if (!slot) return false;
++
++  const hidden = !visible;
++  const changed =
++    slot.hidden !== hidden ||
++    slot.getAttribute("aria-hidden") !== String(hidden);
++
++  slot.hidden = hidden;
++  slot.setAttribute("aria-hidden", String(hidden));
++  return changed;
++}
++
+ function ensureAccountMenu(root = null, state = {}) {
+   if (!root) return false;
+ 
+   const actions = root.querySelector(".public-home-nav-actions");
+-  const link = actions?.querySelector(LOGIN);
+-  if (!actions || !link) return false;
++  const slot = root.querySelector(ACCOUNT_SLOT);
++  const link =
++    slot?.querySelector(LOGIN) ||
++    actions?.querySelector(LOGIN);
++  if (!actions || !link) {
++    setAccountSlotState(slot, false);
++    return false;
++  }
+ 
+   const isAccount =
+     authenticated(state) ||
+@@ -318,6 +338,10 @@ function ensureAccountMenu(root = null, state = {}) {
+ 
+   if (!isAccount) {
+     resetAccountWrapper(link);
++    if (!actions.contains(link)) {
++      actions.insertBefore(link, actions.firstElementChild || null);
++    }
++    setAccountSlotState(slot, false);
+     return false;
+   }
+ 
+@@ -365,6 +389,12 @@ function ensureAccountMenu(root = null, state = {}) {
+     homeLink.dataset.href = home;
+   }
+ 
++  if (slot && wrapper.parentElement !== slot) {
++    slot.appendChild(wrapper);
++  }
++
++  setAccountSlotState(slot, true);
++
+   return true;
+ }
+ 
+@@ -372,12 +402,18 @@ function enforceHeaderActionOrder(root = null) {
+   const actions = root?.querySelector?.(".public-home-nav-actions");
+   if (!actions) return false;
+ 
++  const slot = root.querySelector(ACCOUNT_SLOT);
+   const account =
+     actions.querySelector(":scope > .public-home-account-menu-wrap") ||
+     actions.querySelector(`:scope > ${LOGIN}`);
+   const incidence = actions.querySelector(":scope > .public-home-nav-cta");
++  const accountInTopbar = Boolean(slot?.querySelector(ACCOUNT_WRAP));
++
++  actions.dataset.publicHomeActionOrder = accountInTopbar
++    ? "account-slot-incidence"
++    : "login-incidence";
+ 
+-  actions.dataset.publicHomeActionOrder = "login-incidence";
++  if (accountInTopbar) return false;
+ 
+   if (account && incidence && account.nextElementSibling !== incidence) {
+     actions.insertBefore(account, incidence);
+@@ -818,4 +854,4 @@ export default Object.freeze({
+   version: PUBLIC_HOME_EXPERIENCE_VERSION,
+   scan,
+   destroy: destroyPublicHomeExperience,
+-});
+\ No newline at end of file
++});
+diff --git a/src/features/public-support/index.js b/src/features/public-support/index.js
+index e88fa4c5..003f13c0 100644
+--- a/src/features/public-support/index.js
++++ b/src/features/public-support/index.js
+@@ -20,6 +20,10 @@
+ 
+ import { AppCore } from "../../core/index.js";
+ import Http from "../../core/http.js";
++import {
++  avatarInitials,
++  avatarToneFromIdentity,
++} from "../../core/avatar.js";
+ 
+ export const PUBLIC_SUPPORT_VERSION =
+   "public-support.intake.v11-client-facing-compact";
+@@ -157,15 +161,6 @@ function avatar(user) {
+   return "";
+ }
+ 
+-function initials(name) {
+-  return text(name)
+-    .split(" ")
+-    .filter(Boolean)
+-    .slice(0, 2)
+-    .map((part) => part[0]?.toUpperCase() || "")
+-    .join("") || "OS";
+-}
+-
+ function internalPanelPath(value = "") {
+   const raw = text(value, "");
+   if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "";
+@@ -213,23 +208,56 @@ function panelHref(current, user) {
+   return slug ? `/@${encodeURIComponent(slug)}` : "/dashboard";
+ }
+ 
+-function identityNode(name, src) {
++function identityNode(name, src, tone = 0) {
+   const wrap = document.createElement("span");
+   wrap.className = "public-support-account";
+ 
+   const mark = document.createElement("span");
+-  mark.className = "public-support-account-avatar";
++  mark.className = `public-support-account-avatar ${src ? "has-image" : "is-fallback"}`;
+   mark.setAttribute("aria-hidden", "true");
++  mark.dataset.avatarTone = String(tone);
++  mark.dataset.hasAvatar = src ? "true" : "false";
++  mark.dataset.fallback = src ? "false" : "true";
++  mark.dataset.avatarState = src ? "image" : "fallback";
++
++  const fallback = document.createElement("span");
++  fallback.className = "public-support-account-avatar-fallback";
++  fallback.textContent = avatarInitials(name);
++  fallback.setAttribute("aria-hidden", "true");
++  mark.appendChild(fallback);
+ 
+   if (src) {
+     const img = document.createElement("img");
+-    img.src = src;
+     img.alt = "";
+     img.loading = "eager";
+     img.decoding = "async";
+-    mark.appendChild(img);
+-  } else {
+-    mark.textContent = initials(name);
++    img.referrerPolicy = "no-referrer";
++    img.draggable = false;
++    img.addEventListener("load", () => {
++      mark.classList.add("has-image");
++      mark.classList.remove("is-fallback");
++      mark.dataset.hasAvatar = "true";
++      mark.dataset.fallback = "false";
++      mark.dataset.avatarState = "image";
++    }, { once: true });
++    img.addEventListener("error", () => {
++      img.remove();
++      mark.classList.remove("has-image");
++      mark.classList.add("is-fallback");
++      mark.dataset.hasAvatar = "false";
++      mark.dataset.fallback = "true";
++      mark.dataset.avatarState = "fallback";
++    }, { once: true });
++    mark.insertBefore(img, fallback);
++    img.src = src;
++
++    if (img.complete && Number(img.naturalWidth || 0) > 0) {
++      mark.classList.add("has-image");
++      mark.classList.remove("is-fallback");
++      mark.dataset.hasAvatar = "true";
++      mark.dataset.fallback = "false";
++      mark.dataset.avatarState = "image";
++    }
+   }
+ 
+   const copy = document.createElement("span");
+@@ -272,7 +300,16 @@ function syncIdentity(root) {
+   const name = fullName(user) || email(user) || "Mi cuenta";
+   const src = avatar(user);
+   const href = panelHref(current, user);
+-  const key = `${href}|${name}|${src}`;
++  const identity = email(user) || text(first(
++    user?.userId,
++    user?.id,
++    user?.slug,
++    user?.username,
++    name,
++    ""
++  ));
++  const tone = avatarToneFromIdentity(identity);
++  const key = `${href}|${name}|${src}|${tone}`;
+ 
+   for (const link of links) {
+     if (
+@@ -287,7 +324,7 @@ function syncIdentity(root) {
+     link.dataset.publicSupportIdentityKey = key;
+     link.classList.add("public-support-account-link");
+     link.setAttribute("aria-label", `Abrir el panel de ${name}`);
+-    link.replaceChildren(identityNode(name, src));
++    link.replaceChildren(identityNode(name, src, tone));
+   }
+ 
+   root.dataset.publicSupportAuthenticated = "true";
+diff --git a/src/views/public/home/template.js b/src/views/public/home/template.js
+index 1c11c3b3..c756bb69 100644
+--- a/src/views/public/home/template.js
++++ b/src/views/public/home/template.js
+@@ -342,10 +342,13 @@ function renderHeader() {
+             </a>
+           </div>
+         </nav>
+-        <button class="public-home-nav-toggle" type="button" aria-label="Abrir menú" aria-controls="public-home-nav-panel" aria-expanded="false" data-public-home-nav-toggle="true">
+-          <span class="public-home-nav-toggle-icon public-home-nav-toggle-icon--open" aria-hidden="true">${renderIcon("menu")}</span>
+-          <span class="public-home-nav-toggle-icon public-home-nav-toggle-icon--close" aria-hidden="true">${renderIcon("close")}</span>
+-        </button>
++        <div class="public-home-nav-tools" data-public-home-nav-tools="true">
++          <div class="public-home-nav-account-slot" data-public-home-account-slot="true" hidden aria-hidden="true"></div>
++          <button class="public-home-nav-toggle" type="button" aria-label="Abrir menú" aria-controls="public-home-nav-panel" aria-expanded="false" data-public-home-nav-toggle="true">
++            <span class="public-home-nav-toggle-icon public-home-nav-toggle-icon--open" aria-hidden="true">${renderIcon("menu")}</span>
++            <span class="public-home-nav-toggle-icon public-home-nav-toggle-icon--close" aria-hidden="true">${renderIcon("close")}</span>
++          </button>
++        </div>
+       </div>
+     </header>
+   `;
+-- 
+2.51.1
+

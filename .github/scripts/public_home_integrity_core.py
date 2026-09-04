@@ -596,7 +596,7 @@ def main() -> int:
         ("@media (max-width: 1040px)", "Falta breakpoint del drawer público"),
         (".public-home .public-home-nav-panel", "Falta contrato del drawer público"),
         ("public-home-nav-account-slot", "Falta el avatar autenticado fuera del drawer"),
-        (".public-home .public-home-nav-account-slot {\n  position: relative,\n  display: grid;", "El slot del topbar debe centrar su contenido"),
+        (".public-home .public-home-nav-account-slot {\n  position: relative;\n  display: grid;", "El slot del topbar debe centrar su contenido"),
         ("padding: 0;", "El toggle del topbar no debe desplazar el avatar con padding interno"),
     ):
         require(errors, snippet in experience_css, message)

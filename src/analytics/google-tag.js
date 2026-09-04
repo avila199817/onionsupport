@@ -1,4 +1,5 @@
 import { createModalLifecycle, focusModalElement } from "../features/entity-overlay/modal-lifecycle.js";
+import { createAsyncScope } from "../core/async-scope.js";
 
 (() => {
   "use strict";
@@ -74,6 +75,8 @@ import { createModalLifecycle, focusModalElement } from "../features/entity-over
   let lastPageViewKey = "";
   let currentDialog = null;
   let consentRoot = null;
+  let consentStylesheetReady = null;
+  const consentScope = createAsyncScope();
   let routeRefreshQueued = false;
   const modalLifecycle = createModalLifecycle({
     getPanel: () => currentDialog,
@@ -550,19 +553,36 @@ import { createModalLifecycle, focusModalElement } from "../features/entity-over
   });
 
   function ensureConsentStylesheet() {
-    if (
-      document.querySelector(
-        `link[data-onion-google-consent-style="${CONSENT_VERSION}"]`
-      )
-    ) {
-      return;
-    }
+    if (consentStylesheetReady) return consentStylesheetReady;
 
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = CONSENT_STYLESHEET_URL;
-    link.dataset.onionGoogleConsentStyle = String(CONSENT_VERSION);
-    document.head.appendChild(link);
+    const existing = document.querySelector(
+      `link[data-onion-google-consent-style="${CONSENT_VERSION}"]`
+    );
+    const link = existing || document.createElement("link");
+
+    consentStylesheetReady = new Promise((resolve) => {
+      if (link.sheet) {
+        resolve();
+        return;
+      }
+
+      const settle = () => {
+        link.removeEventListener("load", settle);
+        link.removeEventListener("error", settle);
+        resolve();
+      };
+      link.addEventListener("load", settle, { once: true });
+      // A failed stylesheet must not leave the privacy controls hidden forever.
+      link.addEventListener("error", settle, { once: true });
+
+      if (!existing) {
+        link.rel = "stylesheet";
+        link.href = CONSENT_STYLESHEET_URL;
+        link.dataset.onionGoogleConsentStyle = String(CONSENT_VERSION);
+        document.head.appendChild(link);
+      }
+    });
+    return consentStylesheetReady;
   }
 
   function consentRootMarkup() {
@@ -723,7 +743,7 @@ import { createModalLifecycle, focusModalElement } from "../features/entity-over
     if (consentRoot?.isConnected) return consentRoot;
     if (!document.body) return null;
 
-    ensureConsentStylesheet();
+    const stylesheetReady = ensureConsentStylesheet();
 
     const host = document.createElement("div");
     host.innerHTML = consentRootMarkup().trim();
@@ -732,36 +752,57 @@ import { createModalLifecycle, focusModalElement } from "../features/entity-over
 
     if (!consentRoot) return null;
 
+    // The banner is fixed only after its stylesheet loads. Do not paint its
+    // temporary document-flow position while that request is pending.
+    consentRoot.hidden = true;
     consentRoot.addEventListener("click", handleConsentClick);
     document.body.appendChild(consentRoot);
+    const root = consentRoot;
+    stylesheetReady.then(() => {
+      if (root.isConnected) root.hidden = false;
+    });
     return consentRoot;
   }
 
-  function openConsentDialog() {
+  async function openConsentDialog() {
+    if (!isPublicMarketingRoute()) return;
     const root = ensureConsentRoot();
     if (!root) return;
 
-    const dialog = root.querySelector("[data-consent-dialog]");
-    const backdrop = root.querySelector("[data-consent-backdrop]");
-    const analytics = root.querySelector('[data-consent-option="analytics"]');
-    const ads = root.querySelector('[data-consent-option="ads"]');
+    const request = consentScope.begin("dialog");
+    try {
+      await ensureConsentStylesheet();
+      if (
+        !request.isCurrent() ||
+        !root.isConnected ||
+        !isPublicMarketingRoute()
+      ) return;
 
-    if (!dialog || !backdrop || !analytics || !ads) return;
+      const dialog = root.querySelector("[data-consent-dialog]");
+      const backdrop = root.querySelector("[data-consent-backdrop]");
+      const analytics = root.querySelector('[data-consent-option="analytics"]');
+      const ads = root.querySelector('[data-consent-option="ads"]');
 
-    analytics.checked = consentChoice.analytics;
-    ads.checked = consentChoice.ads;
-    dialog.hidden = false;
-    backdrop.hidden = false;
-    document.documentElement.dataset.onionConsentDialog = "open";
-    currentDialog = dialog;
-    modalLifecycle.activate();
+      if (!dialog || !backdrop || !analytics || !ads) return;
 
-    window.requestAnimationFrame(() => {
-      if (modalLifecycle.isTop() && currentDialog === dialog) focusModalElement(dialog);
-    });
+      analytics.checked = consentChoice.analytics;
+      ads.checked = consentChoice.ads;
+      dialog.hidden = false;
+      backdrop.hidden = false;
+      document.documentElement.dataset.onionConsentDialog = "open";
+      currentDialog = dialog;
+      modalLifecycle.activate();
+
+      window.requestAnimationFrame(() => {
+        if (modalLifecycle.isTop() && currentDialog === dialog) focusModalElement(dialog);
+      });
+    } finally {
+      request.finish();
+    }
   }
 
   function closeConsentDialog({ restoreFocus = true } = {}) {
+    consentScope.cancel("dialog", "closed");
     if (!consentRoot) return;
 
     const dialog = consentRoot.querySelector("[data-consent-dialog]");

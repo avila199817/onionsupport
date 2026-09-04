@@ -7,7 +7,7 @@ Una autoridad por responsabilidad permite corregir un comportamiento en un solo 
 | Identidad, iniciales, color y estado de imagen | `src/features/avatar-system/index.js` | Los consumidores describen la identidad; no gestionan otro fallback de imagen. |
 | Escape, Tab, pila, foco y scroll modal | `src/features/entity-overlay/modal-lifecycle.js` | Cada propietario conserva render, borradores, confirmación y política de cierre. |
 | Navegación, guards y commit de vista | `src/router/index.js` | Se conserva un Router y un host de vista comprometida. |
-| Cancelación y respuestas vigentes | `src/core/async-scope.js` | Router y Correo comparten lifecycle; cada canal identifica su operación más reciente. |
+| Cancelación y respuestas vigentes | `src/core/async-scope.js` | Router, Correo y consentimiento comparten lifecycle; cada canal identifica su operación más reciente. |
 | Carga visual | `src/css/components/skeleton.css` | Una capa global aporta pintura y animaciones; las vistas conservan la geometría necesaria. |
 | Tokens y CSS de ruta | `src/css/app.css` y `src/router/styles.js` | No se añade otro cargador global ni otra paleta por pantalla. |
 | Marca y páginas públicas | `src/core/public-site.js` | Catálogo consumido por generación estática y navegación SPA. |
@@ -19,6 +19,7 @@ Una autoridad por responsabilidad permite corregir un comportamiento en un solo 
 - Los modales anidados no liberan el scroll ni devuelven el foco mientras otro modal sigue siendo propietario. Escape se procesa una vez y respeta los componentes que ya lo han consumido.
 - El sistema de avatares detecta cambios de identidad y sustitución de imagen. Un fallo de carga no impide recuperar la foto al recibir una URL nueva.
 - Los indicadores comparten sus animaciones y respetan reducción de movimiento. Las reglas de carga fría, refresco y carga incremental siguen separadas para conservar datos visibles.
+- El consentimiento espera su hoja de estilos antes de mostrarse, evitando el salto desde su posición temporal en el documento. Si la hoja falla, los controles siguen disponibles sin estilo. Abrir preferencias durante la carga usa el scope asíncrono compartido y se cancela al cerrar o abandonar la ruta pública.
 
 ## Marca e indexación
 
@@ -41,6 +42,6 @@ Referencias oficiales: [sitelinks](https://developers.google.com/search/docs/app
 
 ## Verificación y límites
 
-`npm run validate:ci` ejecuta contratos de fuente, pruebas de carreras asíncronas, compilación reproducible, inventario del artefacto y pruebas de navegador. `npm run test:browser:ui` cubre avatares, modales, carga visual y transiciones reales de metadatos. Se requiere Chrome/Chromium; puede indicarse su ejecutable con `CHROME_BIN`.
+`npm run validate:ci` ejecuta contratos de fuente, pruebas de carreras asíncronas, compilación reproducible, inventario del artefacto y pruebas de navegador. `npm run test:browser:ui` cubre avatares, modales, carga visual, consentimiento con CSS lento o fallido y transiciones reales de metadatos. Se requiere Chrome/Chromium; puede indicarse su ejecutable con `CHROME_BIN`.
 
 El alcance no es reescribir cada API de dominio ni fusionar todas las máquinas de estado. Las nuevas vistas deben consumir estas autoridades; los controladores históricos conservan reglas de dominio y adaptadores que no son intercambiables. La autenticación, la autorización efectiva y los datos de negocio siguen siendo responsabilidad del backend.

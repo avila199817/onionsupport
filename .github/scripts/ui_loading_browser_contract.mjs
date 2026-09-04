@@ -69,6 +69,52 @@ ${spinners.map(([klass, height], i) => `<div class="sample"><span id="p${i}" dat
 <div class="toast loading"><span class="toast-icon" data-pseudo="before" data-kind="spinner"></span></div>
 </body></html>`;
 
+async function settlePresentation(page) {
+  await page.evaluate(async () => {
+    const frame = () => new Promise((done) => requestAnimationFrame(done));
+    const transitions = () => {
+      // Flush styles for elements and pseudo-elements after viewport/media
+      // changes, so newly created transitions exist before we enumerate them.
+      for (const node of document.querySelectorAll("[data-kind]")) {
+        getComputedStyle(node, node.dataset.pseudo ? `::${node.dataset.pseudo}` : null).blockSize;
+      }
+      return document.getAnimations().filter((animation) =>
+        animation instanceof CSSTransition &&
+        animation.playState !== "finished" && animation.playState !== "idle"
+      );
+    };
+    // A CDP viewport/media command can complete before the next paint. Require
+    // two consecutive frames without a finite CSS transition before sampling.
+    // CSSAnimation (including every spinner/shimmer under test) keeps running.
+    let expired = false;
+    let timeout;
+    const settled = (async () => {
+      let stableFrames = 0;
+      while (!expired && stableFrames < 2) {
+        await frame();
+        const pending = transitions();
+        if (pending.length) {
+          stableFrames = 0;
+          await Promise.all(pending.map((animation) => animation.finished.catch(() => {})));
+        } else {
+          stableFrames++;
+        }
+      }
+    })();
+    const deadline = new Promise((_, reject) => {
+      timeout = setTimeout(() => {
+        expired = true;
+        reject(new Error("UI loading fixture did not settle within 5 seconds"));
+      }, 5000);
+    });
+    try {
+      await Promise.race([settled, deadline]);
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+}
+
 const server = createServer(async (request, response) => {
   try {
     const pathname = new URL(request.url, "http://localhost").pathname;
@@ -101,6 +147,7 @@ try {
       await page.evaluate((value) => { document.documentElement.dataset.theme = value; document.body.dataset.theme = value; }, theme);
       for (const reducedMotion of ["no-preference", "reduce"]) {
         await page.emulateMedia({ colorScheme: theme, reducedMotion, forcedColors: "none" });
+        await settlePresentation(page);
         const samples = await page.locator("[data-kind]").evaluateAll((nodes) => nodes.map((node) => {
           const style = getComputedStyle(node, node.dataset.pseudo ? `::${node.dataset.pseudo}` : null);
           return {
@@ -138,9 +185,7 @@ try {
   }
   assert.notEqual(themePaint.get("dark"), themePaint.get("light"), "Both themes must resolve their own global tokens");
   await page.emulateMedia({ forcedColors: "active", reducedMotion: "reduce" });
-  // The reset retains a 1ms transition under reduced motion. Let the new
-  // system color paint once before inspecting the resulting visible state.
-  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+  await settlePresentation(page);
   const highContrast = await page.locator('[data-kind="skeleton"]').evaluateAll((nodes) => nodes.map((node) => ({ name: node.className, paint: getComputedStyle(node).backgroundImage, color: getComputedStyle(node).backgroundColor })));
   assert.deepEqual(highContrast.filter((sample) => sample.paint !== "none" || ["transparent", "rgba(0, 0, 0, 0)"].includes(sample.color)), [], "High contrast placeholders must remain solid and visible");
   console.log(`UI loading browser OK · ${scenarios} viewport/theme/motion combinations · ${skeletons.length + spinners.length + 15} primitives · single paint/motion · forced colors`);

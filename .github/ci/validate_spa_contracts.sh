@@ -46,8 +46,8 @@ checks = {
         "data-password-reset-form",
         "data-password-reset-submit",
         "password-reset-identifier",
-        "data-password-reset-password",
-        "data-password-reset-confirm",
+        "password-reset-password",
+        "password-reset-confirm",
     ),
     "src/router/routes.js": (
         "ROUTES_VERSION",

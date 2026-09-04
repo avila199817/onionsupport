@@ -21,6 +21,10 @@
 import {
   loadIncidenciaDetail,
 } from "../../views/incidencias/incidencias.api.js";
+import {
+  avatarInitials,
+  avatarToneFromIdentity,
+} from "../../core/avatar.js";
 
 export const INCIDENCIAS_AVATAR_FALLBACK_VERSION =
   "incidencias.avatar-fallback.v4.comment-identity-modal-scope";
@@ -111,31 +115,6 @@ function firstObject(...values) {
   }
 
   return {};
-}
-
-function avatarInitials(value = "") {
-  return (
-    cleanText(value)
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase() || "")
-      .join("")
-      .slice(0, 2) ||
-    "ON"
-  );
-}
-
-function avatarToneFromIdentity(value = "") {
-  const identity = cleanText(value);
-  let hash = 0;
-
-  for (let index = 0; index < identity.length; index += 1) {
-    hash = ((hash << 5) - hash) + identity.charCodeAt(index);
-    hash |= 0;
-  }
-
-  return Math.abs(hash) % 10;
 }
 
 function normalizePersonName(value = "") {

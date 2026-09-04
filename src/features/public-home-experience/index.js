@@ -3,9 +3,9 @@
    Archivo: /src/features/public-home-experience/index.js
 
    Remate UX de la landing pública:
-   - Login/Cuenta siempre a la izquierda de "Abrir incidencia".
-   - Dropdown autenticado con toggle no navegable y accesos rápidos.
-   - Nombre compacto: "Nombre I." preservando tildes.
+   - Visitante: login junto a "Abrir incidencia" dentro del menú público.
+   - Sesión activa: sólo avatar en el topbar y dropdown fuera del drawer móvil.
+   - El nombre queda disponible para accesibilidad, no se pinta en el topbar.
    - Footer sin login/cuenta.
    - Teléfono España: bandera/+34 fijos y campo nacional sin prefijo duplicado.
    - SVGs inline afinados sin alterar su semántica.
@@ -14,12 +14,13 @@
 import { AppCore } from "../../core/index.js";
 
 export const PUBLIC_HOME_EXPERIENCE_VERSION =
-  "public-home.experience.v4-canonical-session-handoff";
+  "public-home.experience.v5-avatar-topbar-account";
 
 const HOME = "[data-public-home]";
 const FORM = "[data-public-support-form]";
 const PHONE = `${FORM} [name="phone"]`;
 const LOGIN = "[data-public-home-login]";
+const ACCOUNT_SLOT = "[data-public-home-account-slot]";
 const ACCOUNT_WRAP = "[data-public-home-account-wrap]";
 const ACCOUNT_MENU = "[data-public-home-account-menu]";
 const ACCOUNT_TOGGLE = "[data-public-home-account-toggle]";
@@ -304,12 +305,31 @@ function resetAccountWrapper(link = null) {
   return true;
 }
 
+function setAccountSlotState(slot = null, visible = false) {
+  if (!slot) return false;
+
+  const hidden = !visible;
+  const changed =
+    slot.hidden !== hidden ||
+    slot.getAttribute("aria-hidden") !== String(hidden);
+
+  slot.hidden = hidden;
+  slot.setAttribute("aria-hidden", String(hidden));
+  return changed;
+}
+
 function ensureAccountMenu(root = null, state = {}) {
   if (!root) return false;
 
   const actions = root.querySelector(".public-home-nav-actions");
-  const link = actions?.querySelector(LOGIN);
-  if (!actions || !link) return false;
+  const slot = root.querySelector(ACCOUNT_SLOT);
+  const link =
+    slot?.querySelector(LOGIN) ||
+    actions?.querySelector(LOGIN);
+  if (!actions || !link) {
+    setAccountSlotState(slot, false);
+    return false;
+  }
 
   const isAccount =
     authenticated(state) ||
@@ -318,6 +338,10 @@ function ensureAccountMenu(root = null, state = {}) {
 
   if (!isAccount) {
     resetAccountWrapper(link);
+    if (!actions.contains(link)) {
+      actions.insertBefore(link, actions.firstElementChild || null);
+    }
+    setAccountSlotState(slot, false);
     return false;
   }
 
@@ -365,6 +389,12 @@ function ensureAccountMenu(root = null, state = {}) {
     homeLink.dataset.href = home;
   }
 
+  if (slot && wrapper.parentElement !== slot) {
+    slot.appendChild(wrapper);
+  }
+
+  setAccountSlotState(slot, true);
+
   return true;
 }
 
@@ -372,12 +402,18 @@ function enforceHeaderActionOrder(root = null) {
   const actions = root?.querySelector?.(".public-home-nav-actions");
   if (!actions) return false;
 
+  const slot = root.querySelector(ACCOUNT_SLOT);
   const account =
     actions.querySelector(":scope > .public-home-account-menu-wrap") ||
     actions.querySelector(`:scope > ${LOGIN}`);
   const incidence = actions.querySelector(":scope > .public-home-nav-cta");
+  const accountInTopbar = Boolean(slot?.querySelector(ACCOUNT_WRAP));
 
-  actions.dataset.publicHomeActionOrder = "login-incidence";
+  actions.dataset.publicHomeActionOrder = accountInTopbar
+    ? "account-slot-incidence"
+    : "login-incidence";
+
+  if (accountInTopbar) return false;
 
   if (account && incidence && account.nextElementSibling !== incidence) {
     actions.insertBefore(account, incidence);

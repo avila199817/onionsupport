@@ -12,6 +12,8 @@
      usan live-sync, avatar fallback y user-update-turn.
    - No acoplar conversación al slot de documentos/adjuntos.
    - No introducir HTTP, DOM imperativo, listeners ni una segunda UI paralela.
+   - Sellar en render la identidad de avatar del solicitante y del técnico
+     para que AvatarSystem nunca mezcle personas dentro del mismo modal.
 ========================================================= */
 
 import {
@@ -31,13 +33,16 @@ export {
 };
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
-  "incidencias.template.modal.extreme.v39-canonical-followup";
+  "incidencias.template.modal.extreme.v40-avatar-identity-boundary";
 
 export const INCIDENCIAS_DETAIL_WINDOW_UI_VERSION =
   "incidencias.detail-window-ui.v1";
 
 export const INCIDENCIAS_DETAIL_COMMENTS_UI_VERSION =
   "incidencias.detail-comments-ui.v2-canonical-followup";
+
+export const INCIDENCIAS_DETAIL_AVATAR_UI_VERSION =
+  "incidencias.detail-avatar-ui.v1-global-identity-boundary";
 
 export const INCIDENCIAS_DETAIL_SHARED_VISUAL_CONTRACT = Object.freeze([
   "ui-detail-modal-root",
@@ -124,6 +129,177 @@ function detailFromInput(input = {}) {
   }
 
   return {};
+}
+
+function rawDetail(detail = {}) {
+  const source = object(detail);
+  return object(source.raw || source.data || source.item || source, source);
+}
+
+function requesterAvatarIdentity(detail = {}) {
+  const source = object(detail);
+  const raw = rawDetail(source);
+  const requester = object(
+    source.requesterSnapshot ||
+    source.cliente ||
+    source.receptor ||
+    source.user ||
+    raw.requesterSnapshot ||
+    raw.cliente ||
+    raw.receptor ||
+    raw.user ||
+    {}
+  );
+
+  return {
+    name: oneLine(
+      source.displayName ||
+      source.name ||
+      source.nombre ||
+      source.clientName ||
+      source.clienteNombre ||
+      requester.displayName ||
+      requester.name ||
+      requester.nombre ||
+      raw.displayName ||
+      raw.name ||
+      raw.nombre ||
+      raw.email ||
+      "Usuario",
+      "Usuario"
+    ),
+    email: oneLine(
+      source.email ||
+      source.emailLower ||
+      source.userEmail ||
+      source.clienteEmail ||
+      requester.email ||
+      requester.emailLower ||
+      raw.email ||
+      raw.emailLower ||
+      "",
+      ""
+    ),
+    userId: oneLine(
+      source.requesterUserId ||
+      source.userId ||
+      source.usuarioId ||
+      requester.userId ||
+      requester.id ||
+      raw.requesterUserId ||
+      raw.userId ||
+      raw.usuarioId ||
+      "",
+      ""
+    ),
+  };
+}
+
+function technicianAvatarIdentity(detail = {}) {
+  const source = object(detail);
+  const raw = rawDetail(source);
+  const assignment = object(source.assignment || raw.assignment || {});
+  const technician = object(
+    source.tecnico ||
+    source.assignedTo ||
+    source.technician ||
+    assignment.technician ||
+    raw.tecnico ||
+    raw.assignedTo ||
+    raw.technician ||
+    {}
+  );
+
+  return {
+    name: oneLine(
+      source.assignedToName ||
+      source.technicianName ||
+      source.tecnicoName ||
+      assignment.assignedToName ||
+      technician.displayName ||
+      technician.name ||
+      technician.nombre ||
+      "Técnico asignado",
+      "Técnico asignado"
+    ),
+    email: oneLine(
+      source.assignedToEmail ||
+      source.technicianEmail ||
+      source.tecnicoEmail ||
+      assignment.assignedToEmail ||
+      technician.email ||
+      technician.emailLower ||
+      "",
+      ""
+    ),
+    userId: oneLine(
+      source.assignedToUserId ||
+      source.technicianUserId ||
+      source.tecnicoUserId ||
+      assignment.assignedToUserId ||
+      assignment.technicianUserId ||
+      technician.userId ||
+      technician.id ||
+      "",
+      ""
+    ),
+  };
+}
+
+function avatarIdentityAttributes(identity = {}, source = "") {
+  const person = object(identity);
+  const attrs = [
+    'data-avatar-system="true"',
+    'data-avatar-host="true"',
+    `data-avatar-contract="${escapeHtml(INCIDENCIAS_DETAIL_AVATAR_UI_VERSION)}"`,
+    `data-avatar-identity-source="${escapeHtml(source)}"`,
+  ];
+
+  if (person.name) {
+    attrs.push(`data-avatar-name="${escapeHtml(person.name)}"`);
+  }
+
+  if (person.email) {
+    attrs.push(`data-avatar-email="${escapeHtml(person.email)}"`);
+  }
+
+  if (person.userId) {
+    attrs.push(`data-avatar-user-id="${escapeHtml(person.userId)}"`);
+  }
+
+  return attrs.join(" ");
+}
+
+function patchAvatarIdentityBoundary(html = "", input = {}) {
+  const detail = detailFromInput(input);
+  const requester = requesterAvatarIdentity(detail);
+  const technician = technicianAvatarIdentity(detail);
+  let output = String(html);
+
+  output = output.replace(
+    'data-modal-avatar-frame="true"',
+    `data-modal-avatar-frame="true"\n        ${avatarIdentityAttributes(
+      requester,
+      "incidencias-detail-requester"
+    )}`
+  );
+
+  if (output.includes('data-technician-assigned="true"')) {
+    output = output.replace(
+      'data-modal-technician-avatar-frame="true"',
+      `data-modal-technician-avatar-frame="true"\n          ${avatarIdentityAttributes(
+        technician,
+        "incidencias-detail-technician"
+      )}\n          style="--avatar-size:32px;--avatar-font-size:14px"`
+    );
+  } else {
+    output = output.replace(
+      'data-modal-technician-avatar-frame="true"',
+      'data-modal-technician-avatar-frame="true"\n          data-avatar-system="off"\n          data-avatar-managed="false"'
+    );
+  }
+
+  return output;
 }
 
 function collectionWindow(detail = {}, name = "", countKey = "", aliases = []) {
@@ -468,6 +644,7 @@ function patchRootContract(html = "", state = {}) {
     `data-attachment-view-policy="signed-view-only" ` +
     `data-detail-window-ui-version="${INCIDENCIAS_DETAIL_WINDOW_UI_VERSION}" ` +
     `data-comments-ui-version="${INCIDENCIAS_DETAIL_COMMENTS_UI_VERSION}" ` +
+    `data-detail-avatar-ui-version="${INCIDENCIAS_DETAIL_AVATAR_UI_VERSION}" ` +
     `data-detail-window-truncated="${state.truncated ? "true" : "false"}"`;
 
   return String(html)
@@ -487,6 +664,7 @@ export function renderIncidenciasDetailModal(input = {}) {
 
   const state = getIncidenciasDetailWindowUiState(input);
   let output = patchRootContract(html, state);
+  output = patchAvatarIdentityBoundary(output, input);
   output = patchCanonicalFollowupIntoDescription(output, input);
 
   if (!state.hasWindowContract) {
@@ -526,6 +704,14 @@ export function getDetailTemplateSnapshot() {
       noAttachmentMarkupInConversation: true,
       fullHistoryRemainsSeparate: true,
     },
+    avatarUi: {
+      version: INCIDENCIAS_DETAIL_AVATAR_UI_VERSION,
+      requesterUsesOwnIdentity: true,
+      technicianUsesOwnIdentity: true,
+      technicianSizePx: 32,
+      unassignedTechnicianOptOut: true,
+      globalAvatarSystem: true,
+    },
     policy: {
       ...(snapshot?.policy || {}),
       truthfulBoundedCollections: true,
@@ -535,6 +721,9 @@ export function getDetailTemplateSnapshot() {
       commentsUseCanonicalFollowupSystem: true,
       commentsNeverShareAttachmentSlot: true,
       noSyntheticTimelineEntries: true,
+      requesterAvatarIdentityBoundAtRender: true,
+      technicianAvatarIdentityBoundAtRender: true,
+      unassignedTechnicianNeverStealsRequesterIdentity: true,
     },
   };
 }

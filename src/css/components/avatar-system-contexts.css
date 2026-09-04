@@ -1,0 +1,19 @@
+/* =========================================================
+   ONION SUPPORT — AVATAR SYSTEM CONTEXT SIZING
+   Archivo: /src/css/components/avatar-system-contexts.css
+
+   GUARDRAIL · GEOMETRY ONLY · NO IDENTITY PAINT
+
+   Este archivo extiende AvatarSystem únicamente con tamaños contextuales.
+   No define colores, fondos, gradientes, bordes, hash, tonos ni iniciales.
+   La pintura y la identidad siguen perteneciendo exclusivamente a
+   components/avatar-system.css + features/avatar-system/identity.js.
+========================================================= */
+
+:where(
+  .inc-create-user-avatar,
+  .inc-create-target-user-avatar
+) {
+  --avatar-size: 36px;
+  --avatar-font-size: 14px;
+}

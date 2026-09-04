@@ -233,12 +233,13 @@ jobs:
 
       - name: Verify compiled production security, routing and backend
         if: steps.release.outputs.mode == 'compiled-dist'
+        working-directory: verification-tooling
         env:
           PUBLIC_SITE_URL: ${{ steps.canonical.outputs.site_url }}
           DIRECT_API_URL: https://api.onionsupport.com
           VALIDATED_SHA: ${{ steps.revision.outputs.sha }}
         shell: bash
-        run: bash verification-tooling/.github/ci/verify_production.sh
+        run: bash .github/ci/verify_production.sh
 
       - name: Verify Google measurement bootstrap exactly
         shell: bash

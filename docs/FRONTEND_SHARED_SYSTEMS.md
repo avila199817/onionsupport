@@ -1,5 +1,7 @@
 # Sistemas compartidos del frontend
 
+> Consolidación implementada en [PR #487](https://github.com/avila199817/onionsupport/pull/487), con corrección de consentimiento en [PR #490](https://github.com/avila199817/onionsupport/pull/490). Estado de release, métricas y límites: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md). Próximas entregas: [ROADMAP.md](ROADMAP.md).
+
 Una autoridad por responsabilidad permite corregir un comportamiento en un solo lugar. No exige reunir toda la aplicación en un archivo: las vistas conservan su contenido y sus reglas de negocio, mientras delegan las operaciones comunes.
 
 | Responsabilidad | Autoridad | Integración |

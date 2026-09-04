@@ -1,7 +1,7 @@
 # ONION SUPPORT — INFRAESTRUCTURA AZURE
 
 > Actualizado: 2026-09-04.
-> Este documento describe el estado productivo validado de la infraestructura Azure de Onion Support después de la auditoría, limpieza y migración DNS de septiembre de 2026.
+> Este documento conserva el inventario validado durante la auditoría, limpieza y migración DNS de septiembre de 2026. No es una lectura continua de Azure ni acredita por sí solo la revisión desplegada después de aquella auditoría. El release frontend está en [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md); revisiones, imagen y probes del backend se mantienen en el [estado operativo de oniontech](https://github.com/avila199817/oniontech/blob/main/docs/COMO_LO_TENEMOS_AHORA.md).
 >
 > **Regla de seguridad:** los identificadores de tenant, suscripción, App Registration, principal y otros IDs internos se omiten intencionadamente de esta documentación pública. No son necesarios para comprender ni operar la arquitectura.
 

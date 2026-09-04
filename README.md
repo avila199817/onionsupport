@@ -10,6 +10,17 @@ Frontend productivo de **Onion Support**, una SPA JavaScript modular desplegada 
 
 > Este repositorio contiene únicamente el frontend. La autorización, las ACL y las reglas de negocio sensibles pertenecen al backend.
 
+## Estado y siguiente paso
+
+Corte verificado: **4 de septiembre de 2026, UTC**. La versión funcional desplegada y verificada es [`5d82b0d0`](https://github.com/avila199817/onionsupport/commit/5d82b0d0f5757868b52be156cbf8d38a28a7e276). Una actualización posterior de documentación no equivale a un cambio del runtime.
+
+- Implementado y desplegado: autoridades compartidas de avatares, modales, navegación, concurrencia y carga visual; marca nacional **Onion Support**, cinco servicios públicos y `/login` fuera del índice por contrato.
+- Verificado en producción: despliegue, bytes, disponibilidad y política SEO. Portada Lighthouse: rendimiento **87 móvil / 100 escritorio**; CLS móvil **0,000**. Quedan avisos de TBT móvil y LCP del acceso; una ejecución verde no elimina esos avisos.
+- Próximo trabajo: validar un recorrido real y controlado **acceso → incidencia → avatar → cierre de sesión**, coordinado con el backend. Después se abordarán rendimiento, persistencia privada, contratos y limpieza por módulos, con entregas pequeñas.
+- La PR antigua [#482](https://github.com/avila199817/onionsupport/pull/482) se cerró como superada: sus mejoras ya estaban integradas y recuperaba lógica de avatar retirada.
+
+Leer primero [estado, evidencias y límites](docs/PROJECT_CONTEXT.md), después [plan por fases y criterios de aceptación](docs/ROADMAP.md). El backend mantiene su [estado operativo](https://github.com/avila199817/oniontech/blob/main/docs/COMO_LO_TENEMOS_AHORA.md) y su [roadmap coordinado](https://github.com/avila199817/oniontech/blob/main/docs/ROADMAP.md).
+
 ## Puesta en marcha
 
 ```bash
@@ -78,7 +89,8 @@ No deben quedar helpers, workflows ni archivos temporales de migración en `main
 
 ## Documentación de referencia
 
-- [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md) — arquitectura canónica y reglas del frontend.
+- [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md) — estado verificado, evidencias, límites y arquitectura canónica.
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — prioridades, dependencias, alcance y cierre de las próximas entregas.
 - [`docs/BUILD_FOUNDATION.md`](docs/BUILD_FOUNDATION.md) — foundation del build.
 - [`docs/UI_FOUNDATION.md`](docs/UI_FOUNDATION.md) — foundation visual.
 - [`docs/UI_CHROME.md`](docs/UI_CHROME.md) — autoridad de App Chrome.

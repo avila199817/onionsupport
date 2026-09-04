@@ -14,6 +14,7 @@ on:
       - ".github/lighthouse/**"
       - ".github/scripts/lighthouse-summary.mjs"
       - ".github/scripts/performance-monitor-contract.mjs"
+      - ".github/scripts/lighthouse-indexing-contract.mjs"
 
   workflow_run:
     workflows:
@@ -174,6 +175,12 @@ jobs:
           uploadArtifacts: true
           artifactName: lighthouse-${{ matrix.profile }}-${{ github.run_id }}-${{ github.run_attempt }}
           temporaryPublicStorage: false
+
+      - name: Verify intentional login noindex in every sample
+        env:
+          LIGHTHOUSE_RESULTS_PATH: ${{ steps.lighthouse.outputs.resultsPath }}
+          LIGHTHOUSE_EXPECTED_SAMPLES: "5"
+        run: node .github/scripts/lighthouse-indexing-contract.mjs "${LIGHTHOUSE_RESULTS_PATH}"
 
       - name: Publish median and worst-sample summary
         env:

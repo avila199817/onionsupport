@@ -14,6 +14,22 @@
     max-block-size: calc(92dvh - 118px);
   }
 
+  /*
+    Jerarquía visual del perfil:
+    1. Perfil y contacto
+    2. Rendimiento y valoración
+
+    Se conserva el mismo markup, datos y componentes; sólo cambia el orden
+    visual de las dos cards principales solicitado para esta superficie.
+  */
+  [data-technician-profile-root="true"] .inc-technician-profile-contact {
+    order: 1;
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-performance {
+    order: 2;
+  }
+
   [data-technician-profile-root="true"] .ui-detail-modal-avatar-frame {
     --avatar-size: 64px;
     --avatar-font-size: 21px;

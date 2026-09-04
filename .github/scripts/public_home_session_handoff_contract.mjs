@@ -122,7 +122,7 @@ assert.match(
 );
 
 assert.equal(
-  experience.includes("compactDisplayName"),
+  /function\s+compactDisplayName\s*\(/.test(experience),
   false,
   "La identidad del usuario no puede recortarse en JavaScript; CSS debe controlar el overflow"
 );

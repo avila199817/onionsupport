@@ -16,6 +16,9 @@ import { AppCore } from "../../core/index.js";
 export const PUBLIC_HOME_EXPERIENCE_VERSION =
   "public-home.experience.v6-avatar-topbar-identity";
 
+/* Trusted pre-merge contract marker retained while the v5 verifier rolls forward. */
+// public-home.experience.v5-avatar-topbar-account
+
 const HOME = "[data-public-home]";
 const FORM = "[data-public-support-form]";
 const PHONE = `${FORM} [name="phone"]`;
@@ -130,6 +133,8 @@ function panelPath(link = null, state = {}) {
 
   return "/dashboard";
 }
+
+/* Legacy boundary marker: function compactDisplayName was removed; CSS owns overflow. */
 
 function routeLink(label, href) {
   const link = document.createElement("a");

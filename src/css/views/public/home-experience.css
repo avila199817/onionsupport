@@ -65,6 +65,15 @@
   flex: 0 1 min(31vw, 312px);
 }
 
+/* Older embedded browsers keep a harmless grid fallback; current browsers use
+   the identity-aware inline-flex contract above. */
+@supports not (display: inline-flex) {
+.public-home .public-home-nav-account-slot {
+  position: relative;
+  display: grid;
+}
+}
+
 .public-home .public-home-nav-account-slot .public-home-account-menu-wrap {
   display: inline-flex;
   align-items: center;

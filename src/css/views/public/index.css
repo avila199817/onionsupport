@@ -567,6 +567,26 @@ body.public-home-no-scroll .main-content {
   margin-inline: auto;
 }
 
+.public-home-nav-tools {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.public-home-nav-account-slot {
+  position: relative;
+  display: none;
+  align-items: center;
+  flex: 0 0 auto;
+  min-inline-size: 0;
+}
+
+.public-home-nav-account-slot:not([hidden]) {
+  display: inline-flex;
+}
+
 .public-home-brand,
 .public-home-footer-brand {
   display: inline-flex;

@@ -20,6 +20,10 @@
 
 import { AppCore } from "../../core/index.js";
 import Http from "../../core/http.js";
+import {
+  avatarInitials,
+  avatarToneFromIdentity,
+} from "../../core/avatar.js";
 
 export const PUBLIC_SUPPORT_VERSION =
   "public-support.intake.v11-client-facing-compact";
@@ -157,15 +161,6 @@ function avatar(user) {
   return "";
 }
 
-function initials(name) {
-  return text(name)
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() || "")
-    .join("") || "OS";
-}
-
 function internalPanelPath(value = "") {
   const raw = text(value, "");
   if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "";
@@ -213,23 +208,56 @@ function panelHref(current, user) {
   return slug ? `/@${encodeURIComponent(slug)}` : "/dashboard";
 }
 
-function identityNode(name, src) {
+function identityNode(name, src, tone = 0) {
   const wrap = document.createElement("span");
   wrap.className = "public-support-account";
 
   const mark = document.createElement("span");
-  mark.className = "public-support-account-avatar";
+  mark.className = `public-support-account-avatar ${src ? "has-image" : "is-fallback"}`;
   mark.setAttribute("aria-hidden", "true");
+  mark.dataset.avatarTone = String(tone);
+  mark.dataset.hasAvatar = src ? "true" : "false";
+  mark.dataset.fallback = src ? "false" : "true";
+  mark.dataset.avatarState = src ? "image" : "fallback";
+
+  const fallback = document.createElement("span");
+  fallback.className = "public-support-account-avatar-fallback";
+  fallback.textContent = avatarInitials(name);
+  fallback.setAttribute("aria-hidden", "true");
+  mark.appendChild(fallback);
 
   if (src) {
     const img = document.createElement("img");
-    img.src = src;
     img.alt = "";
     img.loading = "eager";
     img.decoding = "async";
-    mark.appendChild(img);
-  } else {
-    mark.textContent = initials(name);
+    img.referrerPolicy = "no-referrer";
+    img.draggable = false;
+    img.addEventListener("load", () => {
+      mark.classList.add("has-image");
+      mark.classList.remove("is-fallback");
+      mark.dataset.hasAvatar = "true";
+      mark.dataset.fallback = "false";
+      mark.dataset.avatarState = "image";
+    }, { once: true });
+    img.addEventListener("error", () => {
+      img.remove();
+      mark.classList.remove("has-image");
+      mark.classList.add("is-fallback");
+      mark.dataset.hasAvatar = "false";
+      mark.dataset.fallback = "true";
+      mark.dataset.avatarState = "fallback";
+    }, { once: true });
+    mark.insertBefore(img, fallback);
+    img.src = src;
+
+    if (img.complete && Number(img.naturalWidth || 0) > 0) {
+      mark.classList.add("has-image");
+      mark.classList.remove("is-fallback");
+      mark.dataset.hasAvatar = "true";
+      mark.dataset.fallback = "false";
+      mark.dataset.avatarState = "image";
+    }
   }
 
   const copy = document.createElement("span");
@@ -272,7 +300,16 @@ function syncIdentity(root) {
   const name = fullName(user) || email(user) || "Mi cuenta";
   const src = avatar(user);
   const href = panelHref(current, user);
-  const key = `${href}|${name}|${src}`;
+  const identity = email(user) || text(first(
+    user?.userId,
+    user?.id,
+    user?.slug,
+    user?.username,
+    name,
+    ""
+  ));
+  const tone = avatarToneFromIdentity(identity);
+  const key = `${href}|${name}|${src}|${tone}`;
 
   for (const link of links) {
     if (
@@ -287,7 +324,7 @@ function syncIdentity(root) {
     link.dataset.publicSupportIdentityKey = key;
     link.classList.add("public-support-account-link");
     link.setAttribute("aria-label", `Abrir el panel de ${name}`);
-    link.replaceChildren(identityNode(name, src));
+    link.replaceChildren(identityNode(name, src, tone));
   }
 
   root.dataset.publicSupportAuthenticated = "true";

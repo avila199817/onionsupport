@@ -960,6 +960,9 @@
 }
 
 .public-home .public-support-account-avatar {
+  --public-account-avatar-a: var(--public-home-accent);
+  --public-account-avatar-b: var(--public-home-accent-2);
+  position: relative;
   display: grid;
   place-items: center;
   flex: 0 0 36px;
@@ -974,7 +977,7 @@
   color: #dff8ff;
   background:
     radial-gradient(circle at 30% 18%, rgb(255 255 255 / .24), transparent 34%),
-    linear-gradient(135deg, #0d75ef, #0a45d8);
+    linear-gradient(135deg, var(--public-account-avatar-a), var(--public-account-avatar-b));
 
   font-size: 11px;
   font-weight: 950;
@@ -982,10 +985,22 @@
 }
 
 .public-home .public-support-account-avatar img {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
   display: block;
   inline-size: 100%;
   block-size: 100%;
   object-fit: cover;
+}
+
+.public-home .public-support-account-avatar-fallback {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  inline-size: 100%;
+  block-size: 100%;
 }
 
 .public-home .public-support-account-copy {

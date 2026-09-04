@@ -1,15 +1,16 @@
 /* =========================================================
    Onion Support · Incidencias Technician Avatar Bridge
 
-   GLOBAL AVATAR SOURCE REUSE · NO SYNTHETIC PHOTO AUTHORITY
+   GLOBAL AVATAR AUTHORITY · NESTED HOST SAFE · NO SYNTHETIC PHOTO
 
    Responsabilidad:
-   - Hacer que el perfil de Técnico reutilice la misma imagen válida que el
-     AvatarSystem ya conoce/renderiza para esa identidad en otra superficie.
-   - Nunca decidir iniciales, tone, color ni estado visual: eso pertenece al
-     AvatarSystem global.
-   - Retirar el fallback editorial histórico de Cristian cuando no existe una
-     imagen canónica de usuario que lo respalde en el runtime.
+   - El único host de avatar del perfil Técnico es su frame interior.
+   - El wrapper visual .ui-detail-modal-avatar nunca puede ser promovido por
+     el descubrimiento legacy de AvatarSystem como un segundo avatar anidado.
+   - Una foto real ya validada por AvatarSystem para la misma identidad puede
+     reutilizarse en el perfil.
+   - El retrato editorial histórico NO es una autoridad de avatar.
+   - Iniciales, tone, color y state pertenecen exclusivamente a AvatarSystem.
    - Sin HTTP, storage, persistencia ni paletas locales.
 ========================================================= */
 
@@ -23,38 +24,53 @@ import AvatarSystem, {
 } from "../avatar-system/index.js";
 
 export const INCIDENCIAS_TECHNICIAN_AVATAR_BRIDGE_VERSION =
-  "incidencias-technician-avatar-bridge.v1-global-source-authority";
+  "incidencias-technician-avatar-bridge.v2-nested-host-boundary";
 
-/*
-  Este path NO es una fuente que el bridge pueda inyectar. Es justo lo
-  contrario: identifica el fallback editorial que el perfil v8 heredó de la
-  Home para poder retirarlo. La autoridad real debe venir de otro avatar global
-  válido de la misma identidad o del avatar de usuario ya recibido por el modal.
-*/
 export const SYNTHETIC_TECHNICIAN_IMAGE_PATH =
   "/src/media/img/Cristian_Avila_224.webp";
 
-const TARGET_QUERY =
-  "[data-technician-profile-root='true'] [data-avatar-source='incidencias-technician-profile'][data-avatar-host='true']";
+const PROFILE_ROOT_QUERY =
+  "[data-technician-profile-root='true']";
 
-const GLOBAL_IMAGE_HOST_QUERY = [
-  "[data-avatar-authority='global'][data-avatar-state='image'][data-avatar-host='true']",
-  "[data-avatar-authority='global'][data-avatar-state='image'][data-avatar-system='true']",
-].join(",");
+const TARGET_QUERY =
+  `${PROFILE_ROOT_QUERY} [data-avatar-source='incidencias-technician-profile'][data-avatar-host='true']`;
+
+/*
+  Deliberadamente NO exigimos data-avatar-state=image aquí. Una imagen puede
+  haber terminado de cargar antes de que el state attribute se reconcilie. La
+  validación real se hace contra complete/naturalWidth/naturalHeight y contra
+  los flags del propio AvatarSystem.
+*/
+const GLOBAL_IMAGE_HOST_QUERY =
+  "[data-avatar-authority='global'][data-avatar-host='true']";
 
 const IDENTITY_SCOPE_QUERY = [
   "[data-modal-technician='true']",
   ".incidencias-assigned-badge",
   "[data-ticket-row='true']",
   "[data-incidencias-modal-root='true']",
-  "[data-technician-profile-root='true']",
+  PROFILE_ROOT_QUERY,
 ].join(",");
+
+const WRAPPER_AVATAR_ATTRIBUTES = Object.freeze([
+  "data-avatar-host",
+  "data-avatar-authority",
+  "data-avatar-state",
+  "data-avatar-state-reason",
+  "data-avatar-system-version",
+  "data-avatar-identity-version",
+  "data-avatar-identity",
+  "data-avatar-tone",
+  "data-avatar-initials",
+  "data-has-avatar",
+]);
 
 const OBSERVED_ATTRIBUTES = Object.freeze([
   "src",
   "srcset",
   "hidden",
   "data-avatar-state",
+  "data-avatar-authority",
   "data-avatar-identity",
   "data-avatar-user-id",
   "data-avatar-email",
@@ -69,6 +85,8 @@ let frame = 0;
 const counters = {
   scans: 0,
   targets: 0,
+  wrappersQuarantined: 0,
+  identitiesSealed: 0,
   canonicalReuses: 0,
   syntheticRemoved: 0,
   nativePreserved: 0,
@@ -139,6 +157,7 @@ function imageSource(image = null) {
   return clean(
     image.currentSrc ||
     image.getAttribute("src") ||
+    image.getAttribute("srcset") ||
     ""
   );
 }
@@ -176,12 +195,29 @@ function scopeFor(host = null) {
 function datasetValue(nodes = [], keys = []) {
   for (const node of nodes) {
     if (!element(node)) continue;
+
     for (const key of keys) {
       const value = clean(node.dataset?.[key] || "");
       if (value) return value;
     }
   }
+
   return "";
+}
+
+function mailFromHref(value = "") {
+  const href = clean(value);
+  if (!/^mailto:/i.test(href)) return "";
+
+  try {
+    return normalizeAvatarEmail(
+      decodeURIComponent(
+        href.replace(/^mailto:/i, "").split("?")[0] || ""
+      )
+    );
+  } catch {
+    return "";
+  }
 }
 
 function scopedEmail(scope = null) {
@@ -192,22 +228,10 @@ function scopedEmail(scope = null) {
   );
   if (!element(node)) return "";
 
-  const href = clean(node.getAttribute?.("href") || "");
-  if (/^mailto:/i.test(href)) {
-    try {
-      const value = decodeURIComponent(
-        href.replace(/^mailto:/i, "").split("?")[0] || ""
-      );
-      const normalized = normalizeAvatarEmail(value);
-      if (normalized) return normalized;
-    } catch {
-      /* text fallback below */
-    }
-  }
-
   return normalizeAvatarEmail(
     node.dataset?.avatarEmail ||
     node.dataset?.userEmail ||
+    mailFromHref(node.getAttribute?.("href") || "") ||
     node.textContent ||
     ""
   );
@@ -217,7 +241,7 @@ function scopedName(scope = null) {
   if (!element(scope)) return "";
 
   const node = scope.querySelector?.(
-    ".incidencias-assigned-name, .incidencias-modal-technician-copy strong, [data-avatar-name], [data-user-name]"
+    ".incidencias-assigned-name, .incidencias-modal-technician-copy strong, [data-avatar-name], [data-user-name], #inc-technician-title"
   );
 
   return normalizeAvatarName(
@@ -271,28 +295,130 @@ function hostIdentity(host = null) {
   });
 }
 
-export function sameAvatarIdentity(left = {}, right = {}) {
+export function avatarIdentityMatchScore(left = {}, right = {}) {
   const a = left || {};
   const b = right || {};
+
+  if (a.userId && b.userId) {
+    return a.userId === b.userId ? 1000 : -1;
+  }
+
+  if (a.email && b.email) {
+    return a.email === b.email ? 900 : -1;
+  }
+
+  if (a.username && b.username) {
+    return a.username === b.username ? 800 : -1;
+  }
 
   if (
     a.fingerprint &&
     b.fingerprint &&
     a.fingerprint === b.fingerprint
   ) {
-    return true;
+    return 700;
   }
 
-  if (a.userId && b.userId) return a.userId === b.userId;
-  if (a.email && b.email) return a.email === b.email;
-  if (a.username && b.username) return a.username === b.username;
-
-  return Boolean(
+  if (
     a.name &&
     b.name &&
     a.name.length >= 5 &&
     a.name === b.name
+  ) {
+    return 500;
+  }
+
+  return -1;
+}
+
+export function sameAvatarIdentity(left = {}, right = {}) {
+  return avatarIdentityMatchScore(left, right) >= 0;
+}
+
+function profileRootFor(target = null) {
+  return element(target)
+    ? target.closest?.(PROFILE_ROOT_QUERY) || null
+    : null;
+}
+
+function sealTargetIdentity(target = null) {
+  if (!element(target)) return false;
+
+  const root = profileRootFor(target);
+  let changed = false;
+
+  target.setAttribute("data-avatar-system", "true");
+  target.setAttribute("data-avatar-host", "true");
+
+  if (!clean(target.dataset?.avatarName || "")) {
+    const name = clean(
+      root?.querySelector?.("#inc-technician-title")?.textContent || ""
+    );
+    if (name) {
+      target.dataset.avatarName = name;
+      changed = true;
+    }
+  }
+
+  if (!normalizeAvatarEmail(target.dataset?.avatarEmail || "")) {
+    const emailNode = root?.querySelector?.(
+      "a.inc-technician-contact-card[href^='mailto:'], a[href^='mailto:']"
+    );
+    const email = mailFromHref(emailNode?.getAttribute?.("href") || "");
+    if (email) {
+      target.dataset.avatarEmail = email;
+      changed = true;
+    }
+  }
+
+  const fallback = target.querySelector?.(
+    "[data-avatar-fallback='true'], .ui-detail-modal-avatar-fallback"
   );
+  if (element(fallback)) {
+    fallback.setAttribute("data-avatar-fallback", "true");
+  }
+
+  if (changed) counters.identitiesSealed += 1;
+  return true;
+}
+
+/*
+  CAUSA RAÍZ DEL BUG DE LA CAPTURA:
+  .ui-detail-modal-avatar es un wrapper de layout que contiene el frame real.
+  El descubrimiento legacy `[class*=avatar]` podía promover también ese wrapper.
+  Al no tener identidad propia, acababa leyendo el texto "CL" del fallback del
+  hijo como nombre. Fluent Persona("CL") => tone 19 (#69797E). Además el wrapper
+  no tiene fallback propio, por eso se veía exactamente un círculo gris vacío.
+
+  Lo convertimos en frontera explícita opt-out y retiramos cualquier estado que
+  una pasada anterior hubiera pintado sobre él.
+*/
+export function quarantineNestedAvatarWrapper(target = null) {
+  if (!element(target)) return false;
+
+  const wrapper = target.closest?.(".ui-detail-modal-avatar") || null;
+  if (!element(wrapper) || wrapper === target) return false;
+
+  const alreadyQuarantined =
+    wrapper.getAttribute("data-avatar-system") === "off" &&
+    wrapper.getAttribute("data-avatar-managed") === "false";
+
+  wrapper.setAttribute("data-avatar-system", "off");
+  wrapper.setAttribute("data-avatar-managed", "false");
+
+  for (const name of WRAPPER_AVATAR_ATTRIBUTES) {
+    wrapper.removeAttribute(name);
+  }
+
+  wrapper.classList?.remove?.(
+    "has-image",
+    "is-fallback",
+    "is-avatar-loading",
+    "is-avatar-error"
+  );
+
+  if (!alreadyQuarantined) counters.wrappersQuarantined += 1;
+  return true;
 }
 
 function targetImages(target = null) {
@@ -304,33 +430,67 @@ function currentTargetImage(target = null) {
   return targetImages(target)[0] || null;
 }
 
+function removeSyntheticImages(target = null) {
+  if (!element(target)) return 0;
+
+  let removed = 0;
+  for (const image of targetImages(target)) {
+    if (!isSyntheticTechnicianSource(imageSource(image))) continue;
+    image.remove();
+    removed += 1;
+  }
+
+  if (removed) counters.syntheticRemoved += removed;
+  return removed;
+}
+
+function candidateImage(host = null) {
+  if (!element(host)) return null;
+
+  for (const image of host.querySelectorAll?.("[data-avatar-image='true'], img") || []) {
+    if (usableImage(image)) return image;
+  }
+
+  return null;
+}
+
 function globalSourceFor(target = null) {
   if (!element(target) || !browser()) return null;
 
   const identity = hostIdentity(target);
-  const profileRoot =
-    target.closest?.("[data-technician-profile-root='true']") || null;
+  const profileRoot = profileRootFor(target);
+  const matches = [];
 
   for (const candidate of document.querySelectorAll(GLOBAL_IMAGE_HOST_QUERY)) {
     if (!element(candidate) || candidate === target) continue;
+    if (candidate.getAttribute("data-avatar-system") === "off") continue;
     if (profileRoot?.contains?.(candidate)) continue;
-    if (!sameAvatarIdentity(identity, hostIdentity(candidate))) continue;
 
-    const image =
-      candidate.querySelector?.("[data-avatar-image='true'], img") || null;
-    if (!usableImage(image)) continue;
+    const score = avatarIdentityMatchScore(
+      identity,
+      hostIdentity(candidate)
+    );
+    if (score < 0) continue;
+
+    const image = candidateImage(candidate);
+    if (!image) continue;
 
     const source = imageSource(image);
     if (!source) continue;
 
-    return Object.freeze({
-      host: candidate,
-      image,
-      source,
-    });
+    matches.push({ candidate, image, source, score });
   }
 
-  return null;
+  matches.sort((a, b) => b.score - a.score);
+  const best = matches[0];
+  if (!best) return null;
+
+  return Object.freeze({
+    host: best.candidate,
+    image: best.image,
+    source: best.source,
+    score: best.score,
+  });
 }
 
 function ensureImage(target = null, source = "") {
@@ -346,8 +506,7 @@ function ensureImage(target = null, source = "") {
     image.draggable = false;
     image.setAttribute("data-avatar-image", "true");
 
-    const fallback =
-      target.querySelector?.("[data-avatar-fallback='true']") || null;
+    const fallback = target.querySelector?.("[data-avatar-fallback='true']") || null;
     target.insertBefore(image, fallback || target.firstChild || null);
   }
 
@@ -364,58 +523,77 @@ function ensureImage(target = null, source = "") {
   return image;
 }
 
-function removeSyntheticImages(target = null) {
-  if (!element(target)) return 0;
-
-  let removed = 0;
-  for (const image of targetImages(target)) {
-    if (!isSyntheticTechnicianSource(imageSource(image))) continue;
-    image.remove();
-    removed += 1;
-  }
-  return removed;
+function setBridgeState(target = null, state = "") {
+  if (!element(target)) return;
+  if (state) target.dataset.avatarBridgeState = state;
+  else delete target.dataset.avatarBridgeState;
 }
 
 function synchronizeTarget(target = null) {
   if (!element(target)) return false;
   counters.targets += 1;
 
+  quarantineNestedAvatarWrapper(target);
+  sealTargetIdentity(target);
+
   const current = currentTargetImage(target);
   const currentSource = imageSource(current);
+  const currentFailed =
+    current?.getAttribute?.("data-avatar-failed") === "true" ||
+    current?.hidden === true;
 
   /*
-    Un avatar ya recibido del usuario/backend es canónico para este host.
-    Sólo el path editorial conocido se considera sintético y se subordina.
+    Si el perfil ya recibió una fuente real del ticket / usuario, no la
+    sustituimos. AvatarSystem decide loading -> image | error.
   */
   if (
     current &&
     currentSource &&
-    !isSyntheticTechnicianSource(currentSource)
+    !isSyntheticTechnicianSource(currentSource) &&
+    !currentFailed
   ) {
     AvatarSystem.syncHost?.(target, current);
+    setBridgeState(target, "native");
     counters.nativePreserved += 1;
     return true;
   }
 
+  /* La foto editorial nunca participa en el matching ni en el state global. */
+  removeSyntheticImages(target);
+  AvatarSystem.syncHost?.(target);
+
   const canonical = globalSourceFor(target);
   if (canonical?.source) {
-    removeSyntheticImages(target);
     const image = ensureImage(target, canonical.source);
     AvatarSystem.syncHost?.(target, image);
+    setBridgeState(target, "reused-global");
     counters.canonicalReuses += 1;
     return true;
   }
 
-  const removed = removeSyntheticImages(target);
-  if (removed) counters.syntheticRemoved += removed;
-
   /*
-    Sin imagen canónica no inventamos una. AvatarSystem decide el fallback,
-    incluidas iniciales, Microsoft tone, estado y clases.
+    Sin fuente canónica, no inventamos imagen. Este segundo sync es deliberado:
+    garantiza que una imagen sintética recién eliminada no deje state=image
+    ni el fallback oculto por una carrera de MutationObserver.
   */
   AvatarSystem.syncHost?.(target);
+  setBridgeState(target, "fallback-global");
   counters.fallbacks += 1;
   return true;
+}
+
+function collectTargets(scope = document) {
+  const targets = new Set();
+
+  if (element(scope) && scope.matches?.(TARGET_QUERY)) {
+    targets.add(scope);
+  }
+
+  for (const target of scope.querySelectorAll?.(TARGET_QUERY) || []) {
+    targets.add(target);
+  }
+
+  return targets;
 }
 
 export function synchronizeTechnicianAvatarBridge(root = null) {
@@ -424,18 +602,24 @@ export function synchronizeTechnicianAvatarBridge(root = null) {
   const scope = root || document;
   if (!element(scope) && !documentNode(scope)) return 0;
 
-  /*
-    Primero dejamos que la autoridad global selle identity/state en todas las
-    superficies. Después sólo reutilizamos una imagen cuya identidad coincida.
-  */
-  AvatarSystem.sync?.(scope);
   counters.scans += 1;
+  const targets = collectTargets(scope);
+  if (!targets.size && scope !== document) return 0;
 
-  const targets = new Set();
-  if (element(scope) && scope.matches?.(TARGET_QUERY)) targets.add(scope);
-  for (const target of scope.querySelectorAll?.(TARGET_QUERY) || []) {
-    targets.add(target);
+  /*
+    1) Cerramos primero la frontera anidada para que el scan global nunca pueda
+       volver a convertir el wrapper de layout en otro avatar.
+    2) Retiramos la fuente editorial ANTES del scan global.
+    3) AvatarSystem reconcilia el documento y deja candidatos reales sellados.
+    4) Sólo entonces reutilizamos una fuente global de la misma identidad.
+  */
+  for (const target of targets) {
+    quarantineNestedAvatarWrapper(target);
+    sealTargetIdentity(target);
+    removeSyntheticImages(target);
   }
+
+  AvatarSystem.sync?.(document);
 
   let synchronized = 0;
   for (const target of targets) {
@@ -477,6 +661,7 @@ function onMutations(records = []) {
 
 export function mountIncidenciasTechnicianAvatarBridge() {
   if (!browser()) return false;
+
   if (mounted) {
     synchronizeTechnicianAvatarBridge(document);
     return true;
@@ -517,8 +702,11 @@ export function getIncidenciasTechnicianAvatarBridgeSnapshot() {
     counters: Object.freeze({ ...counters }),
     policy: Object.freeze({
       avatarAuthority: "global-avatar-system",
+      nestedWrapperOptOut: true,
       canonicalImageReuse: true,
       syntheticPhotoAuthority: false,
+      syntheticRemovedBeforeGlobalSync: true,
+      fallbackResynchronizedAfterRemoval: true,
       noNetwork: true,
       noStorage: true,
       noLocalInitials: true,

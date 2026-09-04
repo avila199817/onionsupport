@@ -23,7 +23,6 @@ required_files=(
   "src/app/index.js"
   "src/app/loader.js"
   "src/core/config.js"
-  "src/core/avatar.js"
   "src/core/http.js"
   "src/core/index.js"
   "src/core/media.js"

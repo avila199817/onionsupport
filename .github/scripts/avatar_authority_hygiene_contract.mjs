@@ -11,6 +11,9 @@ const SRC = path.join(ROOT, "src");
 const AUTHORITY_ROOT = path.normalize(
   path.join(SRC, "features/avatar-system")
 );
+const AUTHORITY_FILES = new Set([
+  path.normalize(path.join(SRC, "css/components/avatar-system.css")),
+]);
 
 const SOURCE_EXTENSIONS = new Set([".js", ".mjs", ".css"]);
 
@@ -47,7 +50,8 @@ for (const file of walk(SRC)) {
   const normalized = path.normalize(file);
   if (
     normalized === AUTHORITY_ROOT ||
-    normalized.startsWith(`${AUTHORITY_ROOT}${path.sep}`)
+    normalized.startsWith(`${AUTHORITY_ROOT}${path.sep}`) ||
+    AUTHORITY_FILES.has(normalized)
   ) {
     continue;
   }
@@ -61,16 +65,16 @@ for (const file of walk(SRC)) {
       "local-avatar-tone-function",
     ],
     [
-      /\b(?:Math\.abs\([^\n;]*\)|hash(?:Identity|Text)?\([^\n;]*\))\s*%\s*10\b/g,
-      "legacy-10-tone-hash",
+      /\b(?:Math\.abs\([^\n;]*\)|hash(?:Identity|Text)?\([^\n;]*\))\s*%\s*(?:10|20)\b/g,
+      "local-avatar-palette-hash",
     ],
     [
       /(?:avatar[^\n{]*--tone-|avatar-tone-)[0-9]\b/g,
       "legacy-tone-class",
     ],
     [
-      /\[data-avatar-tone=["'][0-9]["']\]/g,
-      "enumerated-data-avatar-tone",
+      /\[data-avatar-tone=["'][0-9]+["']\]/g,
+      "enumerated-data-avatar-tone-outside-authority",
     ],
     [
       /IncidenciasAvatarFallbackInternals/g,
@@ -95,9 +99,9 @@ if (violations.length) {
 assert.equal(
   violations.length,
   0,
-  "Toda identidad/paleta de avatar debe delegar en src/features/avatar-system"
+  "Toda identidad/paleta de avatar debe delegar en la autoridad global de AvatarSystem"
 );
 
 console.log(
-  "Avatar authority hygiene: PASS · no local tone engines · no 10-bucket palettes · no legacy tone classes"
+  "Avatar authority hygiene: PASS · Microsoft Persona palette only in global authority · no local avatar color engines"
 );

@@ -53,23 +53,22 @@ const detailCommentRendererSources = DETAIL_COMMENT_RENDERER_PATHS.map(
 assert.equal(
   fs.existsSync(LEGACY_FEATURE_PATH),
   false,
-  "incidencias-avatar-fallback debe permanecer eliminado: AvatarSystem ya gestiona fallos globales"
+  "incidencias-avatar-fallback debe permanecer eliminado: AvatarSystem gestiona fallos globales"
 );
 
 assert.match(
   identitySource,
-  /incidencias\.comment-identity\.v1-pure-stable-aliases/u,
-  "la identidad de comentarios debe vivir en un módulo puro y versionado"
+  /incidencias\.comment-identity\.v1-pure-stable-aliases/u
 );
 assert.doesNotMatch(identitySource, /\bdocument\b|\bwindow\b|MutationObserver|fetch\s*\(/u);
-assert.doesNotMatch(identitySource, /avatarTone|data-avatar-tone|%\s*10/u);
+assert.doesNotMatch(identitySource, /avatarTone|data-avatar-tone|%\s*(?:10|20)/u);
 assert.match(identitySource, /entry\.byUserId/u);
 assert.match(identitySource, /entry\.byEmail/u);
 assert.match(identitySource, /stableIdentity\?\.hasStableIdentity/u);
 assert.match(
   identitySource,
   /return matchProfileByStableIdentity\(stableIdentity, profiles\)/u,
-  "cuando existe identidad estable no se permite apropiarse de una foto sólo por nombre"
+  "con identidad estable no se permite apropiarse de una foto sólo por nombre"
 );
 
 assert.match(
@@ -91,7 +90,7 @@ assert.match(commentSource, /dataset\.avatarFallback/u);
 assert.match(commentSource, /MutationObserver/u);
 assert.doesNotMatch(commentSource, /document\.addEventListener\(\s*["']error["']/u);
 assert.doesNotMatch(commentSource, /IncidenciasAvatarFallbackInternals/u);
-assert.doesNotMatch(commentSource, /avatarToneFromIdentity|resolveAvatarTone|%\s*10/u);
+assert.doesNotMatch(commentSource, /avatarToneFromIdentity|resolveAvatarTone|%\s*(?:10|20)/u);
 assert.doesNotMatch(commentSource, /createElement\(["']style["']\)/u);
 
 assert.match(
@@ -107,7 +106,7 @@ assert.match(followupSource, /dataset\.avatarImage/u);
 assert.match(followupSource, /dataset\.avatarFallback/u);
 assert.match(followupSource, /MutationObserver/u);
 assert.doesNotMatch(followupSource, /IncidenciasAvatarFallbackInternals/u);
-assert.doesNotMatch(followupSource, /avatarToneFromIdentity|resolveAvatarTone|%\s*10/u);
+assert.doesNotMatch(followupSource, /avatarToneFromIdentity|resolveAvatarTone|%\s*(?:10|20)/u);
 assert.doesNotMatch(followupSource, /addEventListener\([\s\S]{0,80}["']error["']/u);
 assert.doesNotMatch(followupSource, /createElement\(["']style["']\)/u);
 
@@ -134,24 +133,22 @@ assert.match(
 
 assert.doesNotMatch(
   detailModalStyle,
-  /\[data-avatar-tone=["'][0-9]["']\]/u,
-  "detail-modal no puede reintroducir una paleta enumerada de avatar"
+  /\[data-avatar-tone=["'][0-9]+["']\]/u,
+  "detail-modal no puede reintroducir una paleta enumerada; sólo AvatarSystem puede poseerla"
 );
 assert.doesNotMatch(
   detailModalStyle,
   /--ui-detail-avatar-(?:a|b)\s*:/u,
-  "detail-modal no puede conservar su viejo motor de gradientes de avatar"
+  "detail-modal no puede conservar su viejo motor de gradientes"
 );
 assert.match(
   detailModalStyle,
-  /\.ui-detail-modal-avatar-frame\s*\{[\s\S]*?display:\s*grid;/u,
-  "detail-modal puede conservar únicamente contexto tipográfico/layout del frame"
+  /\.ui-detail-modal-avatar-frame\s*\{[\s\S]*?display:\s*grid;/u
 );
 
 assert.match(
   enhancementsSource,
-  /key:\s*["']incidencias-comment-avatars["'][\s\S]*?scope:\s*["']incidencias["'][\s\S]*?features\/incidencias-comment-avatars\/index\.js/u,
-  "el timeline debe cargar el nuevo adaptador y no el fallback global retirado"
+  /key:\s*["']incidencias-comment-avatars["'][\s\S]*?scope:\s*["']incidencias["'][\s\S]*?features\/incidencias-comment-avatars\/index\.js/u
 );
 assert.match(
   enhancementsSource,
@@ -163,7 +160,7 @@ for (const [rendererPath, rendererSource] of detailCommentRendererSources) {
   assert.match(
     rendererSource,
     /date\.className\s*=\s*["']incidencias-modal-description-comment-date["']/u,
-    `${rendererPath} debe mantener una clase semántica propia para la fecha`
+    `${rendererPath} debe mantener clase semántica propia para la fecha`
   );
 }
 assert.match(
@@ -172,8 +169,7 @@ assert.match(
 );
 assert.doesNotMatch(
   privateInteractionsStyle,
-  /\.incidencias-modal-description-comment-head\s+span\s*\{/u,
-  "la tipografía contextual no puede alcanzar avatares u otros spans del encabezado"
+  /\.incidencias-modal-description-comment-head\s+span\s*\{/u
 );
 
 const requester = Object.freeze({
@@ -227,8 +223,7 @@ const profiles = [requester, technician];
   });
   assert.equal(
     resolveCommentProfile("Cristian Ávila Luque", index, profiles)?.source,
-    "requester",
-    "comentarios legacy sin ID/email conservan compatibilidad por nombre"
+    "requester"
   );
 }
 
@@ -241,12 +236,16 @@ const emailPresentation = resolveAvatarPresentation({
   email: "avila199817@gmail.com",
 });
 
-assert.equal(presentation.initials, "CÁ");
+assert.equal(presentation.initials, "CL");
+assert.equal(presentation.tone, 12);
+assert.equal(presentation.colorKey, "darkRed");
+assert.equal(presentation.color, "#A4262C");
 assert.equal(presentation.tone, emailPresentation.tone);
+assert.equal(presentation.color, emailPresentation.color);
 assert.equal(presentation.fingerprint, emailPresentation.fingerprint);
 assert.ok(presentation.tone >= 0 && presentation.tone < AVATAR_TONE_COUNT);
-assert.ok(AVATAR_TONE_COUNT > 4_000_000_000);
+assert.equal(AVATAR_TONE_COUNT, 20);
 
 console.log(
-  "Incidencias comment avatar contract OK · pure stable identity · global AvatarSystem paint · no legacy fallback engine"
+  "Incidencias comment avatar contract OK · global AvatarSystem · Microsoft Fluent Persona fallback · stable photo identity"
 );

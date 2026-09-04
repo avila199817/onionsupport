@@ -55,7 +55,7 @@ if "INCIDENCIAS CREATE AS VISUAL AUTHORITY" not in create:
 
 for required in (
     "SINGLE VISUAL AUTHORITY · TRANSPARENT ALPHA SAFE · SPA-WIDE",
-    "UINT32 COLOR ENGINE · 4,294,967,296 TONES",
+    "MICROSOFT FLUENT UI V8 PERSONA AUTO-COLOR PALETTE",
     '[data-avatar-authority="global"][data-avatar-state="fallback"]',
     "ONE FALLBACK PAINT AUTHORITY",
 ):

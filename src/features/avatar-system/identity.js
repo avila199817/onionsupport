@@ -4,22 +4,49 @@
 
    PURE DOMAIN · SINGLE SOURCE OF TRUTH
 
-   Contrato:
-   - La misma persona produce la misma identidad visual en cualquier vista.
-   - No existe aleatoriedad runtime, storage, red ni color persistido.
-   - El color se deriva de una clave estable y usa todo el espacio uint32.
-   - Username y local-part del email comparten namespace de handle para que
-     snapshots parciales de Home/Sidebar y DTO de Incidencias converjan.
-   - Después se usan userId y nombre humano como compatibilidad progresiva.
+   Microsoft Fluent UI Persona parity:
+   - Iniciales: misma regla que Fluent UI/Persona para nombres latinos.
+   - Colores: misma paleta y mismo hash determinista de PersonaInitialsColor.
+   - Misma persona/nombre => mismo color en cualquier vista.
+   - Sin aleatoriedad, storage, red ni color persistido.
 ========================================================= */
 
 "use strict";
 
 export const AVATAR_IDENTITY_VERSION =
-  "avatar-identity.v2-portable-seed-uint32-color";
+  "avatar-identity.v3-microsoft-fluent-persona-v8";
 
-/* 2^32 perfiles deterministas antes de repetir el tone numérico. */
-export const AVATAR_TONE_COUNT = 0x1_0000_0000;
+/*
+  Fluent UI v8 Persona auto-colors.
+  Orden y valores hex exactos de Microsoft:
+  lightBlue, blue, darkBlue, teal, green, darkGreen, lightPink, pink,
+  magenta, purple, orange, lightRed, darkRed, violet, gold, burgundy,
+  warmGray, cyan, rust, coolGray.
+*/
+export const MICROSOFT_PERSONA_COLORS = Object.freeze([
+  Object.freeze({ key: "lightBlue", hex: "#4F6BED" }),
+  Object.freeze({ key: "blue", hex: "#0078D4" }),
+  Object.freeze({ key: "darkBlue", hex: "#004E8C" }),
+  Object.freeze({ key: "teal", hex: "#038387" }),
+  Object.freeze({ key: "green", hex: "#498205" }),
+  Object.freeze({ key: "darkGreen", hex: "#0B6A0B" }),
+  Object.freeze({ key: "lightPink", hex: "#C239B3" }),
+  Object.freeze({ key: "pink", hex: "#E3008C" }),
+  Object.freeze({ key: "magenta", hex: "#881798" }),
+  Object.freeze({ key: "purple", hex: "#5C2E91" }),
+  Object.freeze({ key: "orange", hex: "#CA5010" }),
+  Object.freeze({ key: "lightRed", hex: "#D13438" }),
+  Object.freeze({ key: "darkRed", hex: "#A4262C" }),
+  Object.freeze({ key: "violet", hex: "#8764B8" }),
+  Object.freeze({ key: "gold", hex: "#986F0B" }),
+  Object.freeze({ key: "burgundy", hex: "#750B1C" }),
+  Object.freeze({ key: "warmGray", hex: "#7A7574" }),
+  Object.freeze({ key: "cyan", hex: "#005B70" }),
+  Object.freeze({ key: "rust", hex: "#8E562E" }),
+  Object.freeze({ key: "coolGray", hex: "#69797E" }),
+]);
+
+export const AVATAR_TONE_COUNT = MICROSOFT_PERSONA_COLORS.length;
 export const AVATAR_COLOR_SPACE = AVATAR_TONE_COUNT;
 
 function isObject(value = null) {
@@ -243,14 +270,9 @@ function emailHandle(value = "") {
 }
 
 /*
-  Prioridad portable:
-  1. username o local-part del email en el mismo namespace `handle:`;
-  2. userId estable cuando el handle no existe;
-  3. nombre humano como compatibilidad de snapshots realmente mínimos;
-  4. email completo sólo si su local-part no pudo normalizarse.
-
-  Así `avila199817` y `avila199817@gmail.com` son la MISMA clave sin hacer
-  depender la identidad de que una vista concreta conserve o no el email.
+  Identidad estable de Onion Support. Se mantiene separada del color:
+  Microsoft calcula el color desde displayName; Onion usa esta seed para
+  fingerprint/reconciliación de la misma persona entre DTOs.
 */
 export function avatarSeedFromIdentity(input = {}) {
   const username = avatarUsernameFromIdentity(input);
@@ -271,10 +293,7 @@ export function avatarSeedFromIdentity(input = {}) {
   return "avatar:onion-support";
 }
 
-/*
-  FNV-1a + avalanche uint32. Sigue siendo puro y determinista, pero distribuye
-  mucho mejor que el antiguo modulo 10 para perfiles cromáticos masivos.
-*/
+/* Fingerprint estable de identidad; no decide el color visual. */
 export function hashAvatarSeed(value = "") {
   const seed = cleanAvatarText(value, "avatar:onion-support");
   let hash = 0x811c9dc5;
@@ -293,80 +312,147 @@ export function hashAvatarSeed(value = "") {
   return hash >>> 0;
 }
 
-export function avatarToneFromSeed(value = "") {
-  const seed = cleanAvatarText(value, "avatar:onion-support");
-  return hashAvatarSeed(`onion-avatar-color:v2|${seed}`);
+/*
+  Hash exacto usado por Microsoft Fluent UI Persona para el auto-color.
+  Se recorre el displayName de derecha a izquierda y se combinan sus UTF-16
+  charCode con un shift i % 8.
+*/
+export function microsoftPersonaHash(displayName = "") {
+  const name = cleanAvatarText(displayName, "");
+  let hashCode = 0;
+
+  for (let index = name.length - 1; index >= 0; index -= 1) {
+    const charCode = name.charCodeAt(index);
+    const shift = index % 8;
+    hashCode ^= (charCode << shift) + (charCode >> (8 - shift));
+  }
+
+  return hashCode;
 }
 
-export function avatarToneFromIdentity(input = {}) {
-  return avatarToneFromSeed(
-    avatarSeedFromIdentity(input)
+export function avatarToneFromName(displayName = "") {
+  const name = cleanAvatarText(displayName, "");
+  if (!name) return 1;
+  return microsoftPersonaHash(name) % AVATAR_TONE_COUNT;
+}
+
+/*
+  Compatibilidad para consumidores que sólo tienen una seed textual.
+  La presentación normal debe usar avatarToneFromIdentity(), que hashea el
+  displayName como Microsoft.
+*/
+export function avatarToneFromSeed(value = "") {
+  return avatarToneFromName(
+    cleanAvatarText(value, "avatar:onion-support")
   );
 }
 
+export function avatarToneFromIdentity(input = {}) {
+  return avatarToneFromName(
+    avatarNameFromIdentity(input)
+  );
+}
+
+export function avatarColorFromTone(value = 1) {
+  const numeric = Number(value);
+  const tone = Number.isFinite(numeric)
+    ? ((Math.trunc(numeric) % AVATAR_TONE_COUNT) + AVATAR_TONE_COUNT) %
+      AVATAR_TONE_COUNT
+    : 1;
+
+  return MICROSOFT_PERSONA_COLORS[tone]?.hex || "#0078D4";
+}
+
+export function avatarColorKeyFromTone(value = 1) {
+  const numeric = Number(value);
+  const tone = Number.isFinite(numeric)
+    ? ((Math.trunc(numeric) % AVATAR_TONE_COUNT) + AVATAR_TONE_COUNT) %
+      AVATAR_TONE_COUNT
+    : 1;
+
+  return MICROSOFT_PERSONA_COLORS[tone]?.key || "blue";
+}
+
 export function avatarColorKeyFromSeed(value = "") {
-  return avatarToneFromSeed(value)
-    .toString(36)
-    .padStart(7, "0");
+  return avatarColorKeyFromTone(
+    avatarToneFromSeed(value)
+  );
 }
 
-function unicodeChars(value = "") {
-  return Array.from(cleanAvatarText(value, ""));
+export function avatarColorFromIdentity(input = {}) {
+  return avatarColorFromTone(
+    avatarToneFromIdentity(input)
+  );
 }
 
-function letterFromToken(value = "") {
-  return unicodeChars(value)
-    .find((char) => /[\p{L}\p{N}]/u.test(char)) || "";
+export function avatarColorKeyFromIdentity(input = {}) {
+  return avatarColorKeyFromTone(
+    avatarToneFromIdentity(input)
+  );
+}
+
+/* =========================================================
+   MICROSOFT FLUENT UI PERSONA INITIALS
+========================================================= */
+
+const UNWANTED_ENCLOSURES_REGEX =
+  /[\(\[\{\<][^\)\]\}\>]*[\)\]\}\>]/g;
+
+const UNWANTED_CHARS_REGEX =
+  /[\0-\u001F\!-/:-@\[-`\{-\u00BF\u0250-\u036F\uD800-\uFFFF]/g;
+
+const PHONENUMBER_REGEX =
+  /^\d+[\d\s]*(:?ext|x|)\s*\d+$/i;
+
+const MULTIPLE_WHITESPACES_REGEX = /\s+/g;
+
+const UNSUPPORTED_TEXT_REGEX =
+  /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\u1100-\u11FF\u3130-\u318F\uA960-\uA97F\uAC00-\uD7AF\uD7B0-\uD7FF\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]|[\uD840-\uD869][\uDC00-\uDED6]/;
+
+function cleanupMicrosoftDisplayName(value = "") {
+  return cleanAvatarText(value, "")
+    .replace(UNWANTED_ENCLOSURES_REGEX, "")
+    .replace(UNWANTED_CHARS_REGEX, "")
+    .replace(MULTIPLE_WHITESPACES_REGEX, " ")
+    .trim();
 }
 
 export function avatarInitials(value = "") {
-  const name = isObject(value)
+  const rawName = isObject(value)
     ? avatarNameFromIdentity(value)
     : cleanAvatarText(value, "");
 
-  const words = name
-    .split(/\s+/)
-    .map((part) => part.trim())
-    .filter(Boolean);
+  if (!rawName) return "ON";
 
-  if (words.length >= 2) {
-    const first = letterFromToken(words[0]);
-    const second = letterFromToken(words[1]);
-    const output = `${first}${second}`.toLocaleUpperCase("es-ES");
-    if (output) return unicodeChars(output).slice(0, 2).join("");
+  const displayName = cleanupMicrosoftDisplayName(rawName);
+  if (!displayName) return "ON";
+
+  if (
+    UNSUPPORTED_TEXT_REGEX.test(displayName) ||
+    PHONENUMBER_REGEX.test(displayName)
+  ) {
+    return "ON";
   }
 
-  if (words.length === 1) {
-    const output = unicodeChars(words[0])
-      .filter((char) => /[\p{L}\p{N}]/u.test(char))
-      .slice(0, 2)
-      .join("")
-      .toLocaleUpperCase("es-ES");
+  const splits = displayName.split(" ");
+  let initials = "";
 
-    if (output) return output;
+  if (splits.length === 2) {
+    initials += splits[0].charAt(0).toUpperCase();
+    initials += splits[1].charAt(0).toUpperCase();
+  } else if (splits.length === 3) {
+    initials += splits[0].charAt(0).toUpperCase();
+    initials += splits[2].charAt(0).toUpperCase();
+  } else if (splits.length !== 0) {
+    initials += splits[0].charAt(0).toUpperCase();
   }
 
-  const email = isObject(value)
-    ? avatarEmailFromIdentity(value)
-    : normalizeAvatarEmail(value);
-
-  if (email) {
-    const local = email.split("@")[0] || "";
-    const output = unicodeChars(local)
-      .filter((char) => /[\p{L}\p{N}]/u.test(char))
-      .slice(0, 2)
-      .join("")
-      .toUpperCase();
-
-    if (output) return output;
-  }
-
-  return "ON";
+  return initials || "ON";
 }
 
 export function avatarIdentityFingerprint(input = {}) {
   return hashAvatarSeed(
-    `onion-avatar-fingerprint:v2|${avatarSeedFromIdentity(input)}`
+    `onion-avatar-fingerprint:v3|${avatarSeedFromIdentity(input)}`
   ).toString(36);
 }
 
@@ -376,7 +462,13 @@ export function resolveAvatarPresentation(input = {}) {
   const userId = avatarUserIdFromIdentity(input);
   const username = avatarUsernameFromIdentity(input);
   const seed = avatarSeedFromIdentity(input);
-  const tone = avatarToneFromSeed(seed);
+  const tone = avatarToneFromIdentity({
+    ...(isObject(input) ? input : {}),
+    name,
+    email,
+    userId,
+    username,
+  });
   const initials = avatarInitials({
     ...(isObject(input) ? input : {}),
     name,
@@ -393,7 +485,8 @@ export function resolveAvatarPresentation(input = {}) {
     username,
     seed,
     tone,
-    colorKey: avatarColorKeyFromSeed(seed),
+    colorKey: avatarColorKeyFromTone(tone),
+    color: avatarColorFromTone(tone),
     initials,
     fingerprint: avatarIdentityFingerprint({
       name,
@@ -408,6 +501,7 @@ export default Object.freeze({
   version: AVATAR_IDENTITY_VERSION,
   toneCount: AVATAR_TONE_COUNT,
   colorSpace: AVATAR_COLOR_SPACE,
+  colors: MICROSOFT_PERSONA_COLORS,
   cleanText: cleanAvatarText,
   normalizeEmail: normalizeAvatarEmail,
   normalizeUserId: normalizeAvatarUserId,
@@ -416,8 +510,14 @@ export default Object.freeze({
   initials: avatarInitials,
   seed: avatarSeedFromIdentity,
   hash: hashAvatarSeed,
+  microsoftHash: microsoftPersonaHash,
+  toneFromName: avatarToneFromName,
   toneFromSeed: avatarToneFromSeed,
   tone: avatarToneFromIdentity,
+  colorFromTone: avatarColorFromTone,
+  colorKeyFromTone: avatarColorKeyFromTone,
+  colorFromIdentity: avatarColorFromIdentity,
+  colorKeyFromIdentity: avatarColorKeyFromIdentity,
   colorKeyFromSeed: avatarColorKeyFromSeed,
   fingerprint: avatarIdentityFingerprint,
   resolve: resolveAvatarPresentation,

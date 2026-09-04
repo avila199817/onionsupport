@@ -138,8 +138,8 @@ assert.match(html, /Juan Pablo Ruiz Martín/);
 assert.match(html, /juan\.ruiz@example\.com/);
 assert.match(
   html,
-  /data-home-relation-avatar="false"[\s\S]*?data-avatar-initials="JP"[\s\S]*?home-entity-relation-fallback[^>]*>JP</,
-  "A missing photo must use initials from global AvatarSystem, never a fabricated asset"
+  /data-home-relation-avatar="false"[\s\S]*?data-avatar-initials="J"[\s\S]*?home-entity-relation-fallback[^>]*>J</,
+  "A missing photo must use Microsoft Persona initials from global AvatarSystem, never a fabricated asset"
 );
 
 assert.match(
@@ -222,7 +222,7 @@ for (const source of [relationSource, sharedSource]) {
   assert.match(source, /data-avatar-identity=/);
 }
 assert.doesNotMatch(relationSource, /function identityHash/);
-assert.doesNotMatch(relationSource, /%\s*10/);
+assert.doesNotMatch(relationSource, /%\s*(?:10|20)/);
 assert.doesNotMatch(relationSource, /Math\.min\(9/);
 
 assert.match(activitySource, /function findActivityDomainSource/);
@@ -293,5 +293,5 @@ assert.equal(snapshot.policy.relationIdentityAddsNoRequests, true);
 assert.equal(snapshot.policy.syntheticRelationData, false);
 
 console.log(
-  "Home relation identity contract: PASS · global AvatarSystem · full names · truthful avatars · zero local palettes"
+  "Home relation identity contract: PASS · global AvatarSystem · Microsoft Persona initials · full names · truthful avatars · zero local palettes"
 );

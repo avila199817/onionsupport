@@ -56,8 +56,12 @@ require(
     "AvatarSystem must remain the independent cross-view avatar paint authority",
 )
 require(
-    "UINT32 COLOR ENGINE · 4,294,967,296 TONES" in avatar_css,
-    "AvatarSystem must retain the uint32 color engine",
+    "MICROSOFT FLUENT UI V8 PERSONA AUTO-COLOR PALETTE" in avatar_css,
+    "AvatarSystem must retain the Microsoft Fluent Persona color engine",
+)
+require(
+    '[data-avatar-tone="19"]' in avatar_css,
+    "AvatarSystem must retain the complete 20-tone Microsoft Persona palette",
 )
 
 for view in CRUD_VIEWS:

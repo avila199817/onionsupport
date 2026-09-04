@@ -14,8 +14,11 @@ import {
 } from "../../src/features/avatar-system/index.js";
 
 assert.match(AVATAR_SYSTEM_VERSION, /deterministic-identity-authority/);
-assert.match(AVATAR_IDENTITY_VERSION, /^avatar-identity\.v2-/);
-assert.equal(AVATAR_TONE_COUNT, 0x1_0000_0000);
+assert.equal(
+  AVATAR_IDENTITY_VERSION,
+  "avatar-identity.v3-microsoft-fluent-persona-v8"
+);
+assert.equal(AVATAR_TONE_COUNT, 20);
 
 for (const hostClass of [
   "ui-avatar",
@@ -90,11 +93,26 @@ const identityHomeSidebar = resolveAvatarPresentation({
 for (const candidate of [identityB, identityHomeSidebar]) {
   assert.equal(identityA.tone, candidate.tone);
   assert.equal(identityA.colorKey, candidate.colorKey);
+  assert.equal(identityA.color, candidate.color);
   assert.equal(identityA.initials, candidate.initials);
   assert.equal(identityA.fingerprint, candidate.fingerprint);
 }
-assert.equal(identityA.initials, "CÁ");
-assert.ok(identityA.tone >= 0 && identityA.tone <= 0xffffffff);
+
+assert.equal(identityA.initials, "CL");
+assert.equal(identityA.tone, 12);
+assert.equal(identityA.colorKey, "darkRed");
+assert.equal(identityA.color, "#A4262C");
+
+for (const [name, initials, tone, color] of [
+  ["DMARC Reports", "DR", 4, "#498205"],
+  ["No Reply", "NR", 5, "#0B6A0B"],
+  ["Soporte Onion Support", "SS", 15, "#750B1C"],
+]) {
+  const presentation = resolveAvatarPresentation({ displayName: name });
+  assert.equal(presentation.initials, initials);
+  assert.equal(presentation.tone, tone);
+  assert.equal(presentation.color, color);
+}
 
 const snapshot = getAvatarSystemSnapshot();
 for (const key of [
@@ -154,32 +172,26 @@ assert.ok(
 );
 
 assert.match(avatarCss, /SINGLE VISUAL AUTHORITY/);
-assert.match(avatarCss, /UINT32 COLOR ENGINE/);
-assert.match(avatarCss, /4,294,967,296 TONES/);
-assert.match(avatarCss, /attr\(data-avatar-tone type\(<number>\), 0\)/);
-assert.match(avatarCss, /mod\(var\(--avatar-tone-number\), 360\)/);
-assert.match(avatarCss, /\[data-avatar-authority="global"\]\[data-avatar-state="fallback"\]/);
-assert.doesNotMatch(avatarCss, /\[data-avatar-tone="[0-9]"\]/);
+assert.match(avatarCss, /MICROSOFT FLUENT UI V8 PERSONA AUTO-COLOR PALETTE/);
+assert.match(avatarCss, /\[data-avatar-tone="0"\]/);
+assert.match(avatarCss, /\[data-avatar-tone="19"\]/);
+assert.match(avatarCss, /--avatar-fallback-color:\s*#A4262C;/);
+assert.match(avatarCss, /--avatar-fallback-color:\s*#498205;/);
+assert.match(avatarCss, /--avatar-fallback-color:\s*#0B6A0B;/);
+assert.match(avatarCss, /--avatar-fallback-color:\s*#750B1C;/);
 assert.match(avatarCss, /border-radius:\s*50%;/);
 assert.match(avatarCss, /--avatar-size-default:\s*42px;/);
 assert.match(avatarCss, /--avatar-size-shell:\s*36px;/);
 assert.match(avatarCss, /--avatar-size-relation:\s*30px;/);
 assert.match(avatarCss, /--avatar-size-detail:\s*56px;/);
-assert.match(avatarCss, /\.home-current-user-avatar/);
-assert.match(avatarCss, /\.sidebar-user-avatar/);
-assert.match(avatarCss, /\.incidencias-avatar/);
-assert.match(avatarCss, /\.facturas-avatar/);
-assert.match(avatarCss, /\.clientes-avatar/);
-assert.match(avatarCss, /\.usuarios-avatar/);
-assert.match(avatarCss, /background:\s*transparent;/);
+assert.match(avatarCss, /font-family:\s*"Segoe UI"/);
+assert.match(avatarCss, /font-weight:\s*600;/);
+assert.match(avatarCss, /background:\s*var\(--avatar-fallback-color\);/);
 assert.match(avatarCss, /background-image:\s*none;/);
 assert.match(avatarCss, /box-shadow:\s*none;/);
 assert.match(avatarCss, /object-fit:\s*var\(--avatar-object-fit\);/);
+assert.doesNotMatch(avatarCss, /linear-gradient\s*\(/);
 assert.doesNotMatch(avatarCss, /!important/);
-assert.doesNotMatch(
-  avatarCss,
-  /(?:background|background-color)\s*:\s*(?:#fff|white|rgb\(255\s+255\s+255)/i
-);
 
 assert.match(avatarRuntime, /document\.addEventListener\("load", onImageLoad, true\)/);
 assert.match(avatarRuntime, /document\.addEventListener\("error", onImageError, true\)/);
@@ -227,7 +239,8 @@ assert.match(privateRuntime, /AvatarSystemUI\.sync\?\.\(document\)/);
 assert.match(privateRuntime, /avatarImageTransparencyAuthority:\s*true/);
 assert.match(criticalGate, /node \.github\/scripts\/avatar_system_contract\.mjs/);
 assert.match(criticalGate, /node \.github\/scripts\/avatar_identity_authority_contract\.mjs/);
+assert.match(criticalGate, /node \.github\/scripts\/avatar_authority_hygiene_contract\.mjs/);
 
 console.log(
-  "Avatar system contract: PASS · one identity/state/visual authority · uint32 colors · transparent alpha · SPA-wide"
+  "Avatar system contract: PASS · Microsoft Fluent Persona initials/colors · flat fallback · transparent image alpha · SPA-wide"
 );

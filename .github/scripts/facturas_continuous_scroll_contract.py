@@ -182,8 +182,17 @@ reject(CREATE_STYLE, ".fac-create-avatar--tone-", "Create invoice CSS must not o
 reject(INDEX, "¿Quieres volver a enviarla?", "Resend confirmation must not use the browser-native confirm dialog")
 require(INDEX, "function confirmFacturaResend", "Resend must expose an accessible custom confirmation flow")
 require(INDEX, 'dialog.setAttribute("role", "alertdialog")', "Resend confirmation must be an alertdialog")
-require(INDEX, 'event.key === "Escape"', "Resend confirmation must support Escape cancellation")
-require(INDEX, "focusableElements(dialog)", "Resend confirmation must trap keyboard focus")
+# Keyboard, focus and scroll ownership belong to the shared modal lifecycle.
+# Scope the wiring check to resend so another modal cannot satisfy this contract.
+RESEND = INDEX.split("function confirmFacturaResend", 1)[-1].split("\nfunction ", 1)[0]
+require(RESEND, "const confirmationLifecycle = createModalLifecycle({", "Resend confirmation must use the shared modal lifecycle")
+require(RESEND, "getPanel: () => dialog", "Shared focus management must own the actual resend dialog")
+require(RESEND, "onEscape: () => settle(false)", "Resend Escape must cancel through its owner")
+require(RESEND, "onDetached: () => settle(false)", "Removing the resend dialog must settle its pending confirmation")
+require(RESEND, "confirmationLifecycle.activate({ opener })", "Resend must register its opener and acquire shared interaction")
+require(RESEND, "confirmationLifecycle.deactivate({ restoreFocus: false })", "Resend cleanup must release shared interaction before restoring owner focus")
+require(RESEND, "restoreModalFocus(opener)", "Resend must return focus through the shared guard")
+reject(RESEND, "focusableElements(dialog)", "Resend must not duplicate the shared focus trap")
 require(STYLE, ".facturas-resend-confirm-overlay", "Resend confirmation must use the Facturas themed overlay")
 require(STYLE, ".facturas-resend-confirm-dialog", "Resend confirmation must use the Facturas themed dialog")
 require(STYLE, '.ui-datalist[data-mobile-datalist-layout="facturas"]', "Mobile Facturas identity must have a dedicated no-clipping contract")

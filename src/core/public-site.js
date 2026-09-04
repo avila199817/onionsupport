@@ -5,7 +5,7 @@ export const PUBLIC_SITE = Object.freeze({
   name: "Onion Support",
   origin: "https://onionsupport.com",
   domain: "onionsupport.com",
-  description: "Soporte informático para particulares, autónomos y empresas en España. Asistencia remota, diagnóstico claro y soluciones para que tu tecnología siga funcionando.",
+  description: "Soporte informático para particulares, autónomos y empresas en España. Asistencia remota, diagnóstico claro y soluciones para que tu tecnología funcione.",
   coverage: "Asistencia remota en España. La atención presencial se acuerda según el servicio y la ubicación.",
   email: "cristian@onionsupport.com",
   phoneDisplay: "629 946 615",

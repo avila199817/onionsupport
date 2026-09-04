@@ -139,6 +139,22 @@ python3 .github/scripts/public_site_policy_regression.py
 python3 .github/scripts/ui_authority_transition_contract.py
 python3 .github/scripts/google_measurement_wiring_contract.py
 
+# Keep the local source gate aligned with the UI checks required by PR CI.
+python3 .github/scripts/google_measurement_contract.py
+python3 .github/scripts/incidencias_scale_contract.py
+python3 .github/scripts/clientes_scale_contract.py
+python3 .github/scripts/facturas_continuous_scroll_contract.py
+python3 .github/scripts/usuarios_scale_contract.py
+python3 .github/scripts/private_admin_alignment_contract.py
+python3 .github/scripts/private_create_modal_contract.py
+python3 .github/scripts/correo_integrity.py
+python3 .github/scripts/app_entrypoint_integrity.py
+python3 .github/scripts/boot_visual_integrity.py
+python3 .github/scripts/cuenta_integrity.py
+python3 .github/scripts/public_home_integrity.py
+python3 .github/scripts/public_home_performance.py
+node .github/scripts/continuous_scroll_smoke.mjs
+
 node .github/scripts/core_runtime_contract.mjs
 node .github/scripts/core_snapshot_contract.mjs
 node .github/scripts/auth_selector_contract.mjs

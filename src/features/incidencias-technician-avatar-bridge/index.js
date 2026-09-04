@@ -42,6 +42,14 @@ const GLOBAL_IMAGE_HOST_QUERY = [
   "[data-avatar-authority='global'][data-avatar-state='image'][data-avatar-system='true']",
 ].join(",");
 
+const IDENTITY_SCOPE_QUERY = [
+  "[data-modal-technician='true']",
+  ".incidencias-assigned-badge",
+  "[data-ticket-row='true']",
+  "[data-incidencias-modal-root='true']",
+  "[data-technician-profile-root='true']",
+].join(",");
+
 const OBSERVED_ATTRIBUTES = Object.freeze([
   "src",
   "srcset",
@@ -95,7 +103,10 @@ function absoluteSource(value = "") {
   if (!raw) return "";
 
   try {
-    return new URL(raw, browser() ? window.location.href : "https://onionsupport.com/").href;
+    return new URL(
+      raw,
+      browser() ? window.location.href : "https://onionsupport.com/"
+    ).href;
   } catch {
     return "";
   }
@@ -118,7 +129,10 @@ export function isSyntheticTechnicianSource(value = "") {
 }
 
 function imageSource(image = null) {
-  if (!element(image) || String(image.tagName || "").toUpperCase() !== "IMG") {
+  if (
+    !element(image) ||
+    String(image.tagName || "").toUpperCase() !== "IMG"
+  ) {
     return "";
   }
 
@@ -130,7 +144,10 @@ function imageSource(image = null) {
 }
 
 function usableImage(image = null) {
-  if (!element(image) || String(image.tagName || "").toUpperCase() !== "IMG") {
+  if (
+    !element(image) ||
+    String(image.tagName || "").toUpperCase() !== "IMG"
+  ) {
     return false;
   }
 
@@ -146,22 +163,110 @@ function usableImage(image = null) {
   );
 }
 
+function scopeFor(host = null) {
+  if (!element(host)) return null;
+
+  try {
+    return host.closest?.(IDENTITY_SCOPE_QUERY) || host.parentElement || host;
+  } catch {
+    return host.parentElement || host;
+  }
+}
+
+function datasetValue(nodes = [], keys = []) {
+  for (const node of nodes) {
+    if (!element(node)) continue;
+    for (const key of keys) {
+      const value = clean(node.dataset?.[key] || "");
+      if (value) return value;
+    }
+  }
+  return "";
+}
+
+function scopedEmail(scope = null) {
+  if (!element(scope)) return "";
+
+  const node = scope.querySelector?.(
+    ".incidencias-modal-technician-email, a[href^='mailto:'], [data-avatar-email], [data-user-email]"
+  );
+  if (!element(node)) return "";
+
+  const href = clean(node.getAttribute?.("href") || "");
+  if (/^mailto:/i.test(href)) {
+    try {
+      const value = decodeURIComponent(
+        href.replace(/^mailto:/i, "").split("?")[0] || ""
+      );
+      const normalized = normalizeAvatarEmail(value);
+      if (normalized) return normalized;
+    } catch {
+      /* text fallback below */
+    }
+  }
+
+  return normalizeAvatarEmail(
+    node.dataset?.avatarEmail ||
+    node.dataset?.userEmail ||
+    node.textContent ||
+    ""
+  );
+}
+
+function scopedName(scope = null) {
+  if (!element(scope)) return "";
+
+  const node = scope.querySelector?.(
+    ".incidencias-assigned-name, .incidencias-modal-technician-copy strong, [data-avatar-name], [data-user-name]"
+  );
+
+  return normalizeAvatarName(
+    node?.dataset?.avatarName ||
+    node?.dataset?.userName ||
+    node?.textContent ||
+    ""
+  );
+}
+
 function hostIdentity(host = null) {
   if (!element(host)) return Object.freeze({});
+
+  const scope = scopeFor(host);
+  const nodes = [host, scope];
 
   return Object.freeze({
     fingerprint: clean(host.dataset?.avatarIdentity || ""),
     userId: normalizeAvatarUserId(
-      host.dataset?.avatarUserId || host.dataset?.userId || ""
+      datasetValue(nodes, [
+        "avatarUserId",
+        "technicianUserId",
+        "tecnicoUserId",
+        "userId",
+        "usuarioId",
+      ])
     ),
     email: normalizeAvatarEmail(
-      host.dataset?.avatarEmail || host.dataset?.userEmail || host.dataset?.email || ""
+      datasetValue(nodes, [
+        "avatarEmail",
+        "technicianEmail",
+        "userEmail",
+        "email",
+      ]) || scopedEmail(scope)
     ),
     username: normalizeAvatarUsername(
-      host.dataset?.avatarUsername || host.dataset?.username || ""
+      datasetValue(nodes, [
+        "avatarUsername",
+        "username",
+        "usernameLower",
+      ])
     ),
     name: normalizeAvatarName(
-      host.dataset?.avatarName || host.dataset?.userName || ""
+      datasetValue(nodes, [
+        "avatarName",
+        "technicianName",
+        "userName",
+        "displayName",
+      ]) || scopedName(scope)
     ),
   });
 }
@@ -170,9 +275,14 @@ export function sameAvatarIdentity(left = {}, right = {}) {
   const a = left || {};
   const b = right || {};
 
-  if (a.fingerprint && b.fingerprint) {
-    return a.fingerprint === b.fingerprint;
+  if (
+    a.fingerprint &&
+    b.fingerprint &&
+    a.fingerprint === b.fingerprint
+  ) {
+    return true;
   }
+
   if (a.userId && b.userId) return a.userId === b.userId;
   if (a.email && b.email) return a.email === b.email;
   if (a.username && b.username) return a.username === b.username;
@@ -198,14 +308,16 @@ function globalSourceFor(target = null) {
   if (!element(target) || !browser()) return null;
 
   const identity = hostIdentity(target);
-  const profileRoot = target.closest?.("[data-technician-profile-root='true']") || null;
+  const profileRoot =
+    target.closest?.("[data-technician-profile-root='true']") || null;
 
   for (const candidate of document.querySelectorAll(GLOBAL_IMAGE_HOST_QUERY)) {
     if (!element(candidate) || candidate === target) continue;
     if (profileRoot?.contains?.(candidate)) continue;
     if (!sameAvatarIdentity(identity, hostIdentity(candidate))) continue;
 
-    const image = candidate.querySelector?.("[data-avatar-image='true'], img") || null;
+    const image =
+      candidate.querySelector?.("[data-avatar-image='true'], img") || null;
     if (!usableImage(image)) continue;
 
     const source = imageSource(image);
@@ -234,7 +346,8 @@ function ensureImage(target = null, source = "") {
     image.draggable = false;
     image.setAttribute("data-avatar-image", "true");
 
-    const fallback = target.querySelector?.("[data-avatar-fallback='true']") || null;
+    const fallback =
+      target.querySelector?.("[data-avatar-fallback='true']") || null;
     target.insertBefore(image, fallback || target.firstChild || null);
   }
 
@@ -274,7 +387,11 @@ function synchronizeTarget(target = null) {
     Un avatar ya recibido del usuario/backend es canónico para este host.
     Sólo el path editorial conocido se considera sintético y se subordina.
   */
-  if (current && currentSource && !isSyntheticTechnicianSource(currentSource)) {
+  if (
+    current &&
+    currentSource &&
+    !isSyntheticTechnicianSource(currentSource)
+  ) {
     AvatarSystem.syncHost?.(target, current);
     counters.nativePreserved += 1;
     return true;
@@ -341,7 +458,10 @@ function schedule() {
 function onMutations(records = []) {
   for (const record of records) {
     if (record.type === "childList") {
-      if ((record.addedNodes?.length || 0) > 0 || (record.removedNodes?.length || 0) > 0) {
+      if (
+        (record.addedNodes?.length || 0) > 0 ||
+        (record.removedNodes?.length || 0) > 0
+      ) {
         schedule();
         return;
       }

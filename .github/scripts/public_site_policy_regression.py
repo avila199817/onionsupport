@@ -81,6 +81,33 @@ class PublicSitePolicy(unittest.TestCase):
         self.mutate("login.html", 'content="index, follow"', 'content="noindex, follow"')
         self.run_validator(False, "Meta robots")
 
+    def test_postdeploy_reads_policy_from_immutable_checkout(self):
+        workflow = (ROOT / ".github/workflows/production-verification.yml").read_text()
+        step = workflow.split("- name: Verify compiled production security, routing and backend", 1)[1].split("- name:", 1)[0]
+        self.assertRegex(step, r"(?m)^\s+working-directory: verification-tooling$")
+        self.assertRegex(step, r"(?m)^\s+run: bash \.github/ci/verify_production\.sh$")
+        checkout = self.root / "verification-tooling"
+        marker = checkout / ".github/ci/public-site-v3"
+        marker.parent.mkdir(parents=True)
+        # Execute the real verifier's policy selection, before any HTTP probes.
+        bootstrap = (ROOT / ".github/ci/verify_production.sh").read_text().split("legacy_frontend=", 1)[0]
+        command = bootstrap + '\nprintf "%s" "$public_site_v3"\n'
+        env = {**os.environ, "PUBLIC_SITE_URL": "https://onionsupport.com", "DIRECT_API_URL": "https://api.onionsupport.com"}
+        parent_marker = self.root / ".github/ci/public-site-v3"
+        for selected_v3 in (True, False):
+            if selected_v3:
+                marker.write_text("public-site-v3\n")
+                parent_marker.unlink(missing_ok=True)
+            else:
+                marker.unlink(missing_ok=True)
+                parent_marker.write_text("public-site-v3\n")
+            result = subprocess.run(["bash", "-c", command], cwd=checkout, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, str(selected_v3).lower(), "The workspace parent must not choose the deployed policy")
+        marker.write_text("invalid-version\n")
+        result = subprocess.run(["bash", "-c", command], cwd=checkout, env=env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0, "An invalid checkout marker must still fail")
+
     def test_v3_accepts_noindex_login(self):
         self.make_mode(True)
         self.run_validator()

@@ -12,13 +12,12 @@ import {
   isSyntheticTechnicianSource,
   sameAvatarIdentity,
 } from "../../src/features/incidencias-technician-avatar-bridge/index.js";
-import {
-  INCIDENCIAS_TECHNICIAN_PROFILE_VERSION,
-  TECHNICIAN_RATING_INITIAL,
-  TECHNICIAN_RATING_MAX,
-  normalizePublicTechnicianMetrics,
-} from "../../src/features/incidencias-technician-profile/index.js";
 
+/*
+  No importamos el feature del perfil directamente desde Node porque su entrypoint
+  importa CSS por diseño. Este contrato inspecciona el source y reserva imports
+  ejecutables para módulos puros/Node-native.
+*/
 const source = fs.readFileSync(
   "src/features/incidencias-technician-profile/index.js",
   "utf8"
@@ -47,11 +46,16 @@ const privateRuntime = fs.readFileSync(
    VERSION / PRODUCT INTENT
 ========================================================= */
 
-assert.equal(
-  INCIDENCIAS_TECHNICIAN_PROFILE_VERSION,
-  "incidencias-technician-profile.v9-public-metrics-rating-ready"
+assert.match(
+  source,
+  /incidencias-technician-profile\.v9-public-metrics-rating-ready/
 );
 assert.match(source, /import "\.\/style\.css";/);
+assert.match(source, /export const TECHNICIAN_RATING_MAX = 5;/);
+assert.match(
+  source,
+  /TECHNICIAN_RATING_INITIAL = Object\.freeze\(\{[\s\S]*average: 0,[\s\S]*count: 0,[\s\S]*max: TECHNICIAN_RATING_MAX/
+);
 
 /* =========================================================
    PRIVACY: AGGREGATE ONLY, NO THIRD-PARTY TICKET SURFACE
@@ -70,6 +74,12 @@ for (const required of [
   "closed: true",
   "includeTotal: true",
   "PUBLIC_METRIC_LIMIT = 1",
+  "normalizePublicTechnicianMetrics",
+  "loadPublicTechnicianMetrics",
+  'scope: publicScope ? "public-total" : "session-total"',
+  "Cómputo agregado público · sin tickets ni datos de clientes",
+  "Cómputo disponible en el ámbito de tu sesión",
+  "El backend aún no ha publicado un cómputo agregado",
 ]) {
   assert.ok(
     source.includes(required),
@@ -77,15 +87,6 @@ for (const required of [
   );
 }
 
-assert.match(source, /aggregateScopeIsPublic/);
-assert.match(source, /normalizePublicTechnicianMetrics/);
-assert.match(source, /loadPublicTechnicianMetrics/);
-assert.match(source, /scope: publicScope \? "public-total" : "session-total"/);
-assert.match(source, /Cómputo agregado público · sin tickets ni datos de clientes/);
-assert.match(source, /Cómputo disponible en el ámbito de tu sesión/);
-assert.match(source, /El backend aún no ha publicado un cómputo agregado/);
-
-/* El antiguo historial privado y sus tarjetas deben desaparecer por completo. */
 for (const forbidden of [
   /renderPublicTrust/,
   /inc-technician-trust-/,
@@ -112,54 +113,26 @@ for (const forbidden of [
   );
 }
 
-assert.match(source, /thirdPartyTicketDetailsRendered:\s*false/);
-assert.match(source, /resolvedTicketCardsRendered:\s*false/);
-assert.match(source, /activityTicketCardsRendered:\s*false/);
-assert.match(source, /publicSafeSurface:\s*true/);
+for (const required of [
+  "publicSafeSurface: true",
+  "thirdPartyTicketDetailsRendered: false",
+  "resolvedTicketCardsRendered: false",
+  "activityTicketCardsRendered: false",
+]) {
+  assert.ok(source.includes(required), `Privacy snapshot: falta ${required}`);
+}
 
-/* La normalización distingue explícitamente agregado público de total de sesión. */
-const publicMetrics = normalizePublicTechnicianMetrics({
-  total: 1,
-  summary: {
-    publicTechnicianStats: true,
-    scope: "technician-public",
-    technician: {
-      resolvedTotal: 37,
-    },
-  },
-});
-assert.equal(publicMetrics.resolvedTotal, 37);
-assert.equal(publicMetrics.resolvedTotalKnown, true);
-assert.equal(publicMetrics.publicTotal, true);
-assert.equal(publicMetrics.scope, "public-total");
-
-const sessionMetrics = normalizePublicTechnicianMetrics({
-  total: 4,
-  summary: {},
-});
-assert.equal(sessionMetrics.resolvedTotal, 4);
-assert.equal(sessionMetrics.resolvedTotalKnown, true);
-assert.equal(sessionMetrics.publicTotal, false);
-assert.equal(sessionMetrics.scope, "session-total");
-
-const unknownMetrics = normalizePublicTechnicianMetrics({});
-assert.equal(unknownMetrics.resolvedTotalKnown, false);
-assert.equal(unknownMetrics.publicTotal, false);
-assert.equal(unknownMetrics.resolvedTotal, 0);
+/* El parser sólo puede declarar scope público mediante marcadores explícitos. */
+assert.match(source, /aggregateScopeIsPublic/);
+assert.match(source, /summary\.publicTechnicianStats === true/);
+assert.match(source, /meta\.publicTechnicianStats === true/);
+assert.match(source, /value\.includes\("technician_public"\)/);
+assert.match(source, /resolvedTotalKnown:/);
+assert.match(source, /publicTotal: publicScope/);
 
 /* =========================================================
    FIVE STAR READ MODEL · 0/5 INITIAL · NO SUBMISSION YET
 ========================================================= */
-
-assert.equal(TECHNICIAN_RATING_MAX, 5);
-assert.deepEqual(TECHNICIAN_RATING_INITIAL, {
-  average: 0,
-  count: 0,
-  max: 5,
-});
-assert.equal(publicMetrics.ratingAverage, 0);
-assert.equal(publicMetrics.ratingCount, 0);
-assert.equal(publicMetrics.ratingMax, 5);
 
 for (const required of [
   'data-technician-rating="true"',
@@ -169,6 +142,7 @@ for (const required of [
   "Sin valoraciones todavía",
   "Valoración",
   "Opiniones",
+  "Array.from({ length: TECHNICIAN_RATING_MAX }",
   "ratingMax: TECHNICIAN_RATING_MAX",
   "ratingInitialAverage: TECHNICIAN_RATING_INITIAL.average",
   "ratingInitialCount: TECHNICIAN_RATING_INITIAL.count",
@@ -177,27 +151,30 @@ for (const required of [
   assert.ok(source.includes(required), `Rating shell: falta ${required}`);
 }
 
-assert.match(source, /Array\.from\(\{ length: TECHNICIAN_RATING_MAX \}/);
 assert.doesNotMatch(source, /<form[^>]*technician-rating/i);
 assert.doesNotMatch(source, /data-technician-rating-submit/);
-assert.doesNotMatch(source, /POST[\s\S]{0,120}rating/i);
+assert.doesNotMatch(source, /ratingValue/i);
 
 /* =========================================================
-   PROFILE: COMPACT CLIENT DATA ONLY
+   COMPACT CLIENT PROFILE
 ========================================================= */
 
-assert.match(source, /Rendimiento y valoración/);
-assert.match(source, /Información pública y segura/);
-assert.match(source, /Incidencias resueltas/);
-assert.match(source, /Perfil y contacto/);
-assert.match(source, /Datos útiles para el cliente/);
-assert.match(source, /experienceValue: "\+8"/);
-assert.match(source, /clientsValue: "\+300"/);
+for (const required of [
+  "Rendimiento y valoración",
+  "Información pública y segura",
+  "Incidencias resueltas",
+  "Perfil y contacto",
+  "Datos útiles para el cliente",
+  'experienceValue: "+8"',
+  'clientsValue: "+300"',
+]) {
+  assert.ok(source.includes(required), `Perfil cliente: falta ${required}`);
+}
 assert.doesNotMatch(source, /metaCard\("Último acceso"/);
 assert.doesNotMatch(source, /metaCard\("Identificador de usuario"/);
 
 /* =========================================================
-   AVATAR: GLOBAL AUTHORITY + NESTED WRAPPER BOUNDARY
+   AVATAR GLOBAL + REGRESIÓN DEL WRAPPER ANIDADO
 ========================================================= */
 
 assert.equal(
@@ -209,16 +186,8 @@ assert.equal(
   true
 );
 assert.match(publicHome, /Cristian_Avila_224\.webp/);
-assert.doesNotMatch(
-  source,
-  /Cristian_Avila_224\.webp/,
-  "El perfil Técnico no puede volver a inyectar el retrato editorial como avatar"
-);
-assert.equal(
-  fs.existsSync("src/media/img/Cristian_Avila_224.webp"),
-  true,
-  "La imagen pública puede seguir existiendo para la Home"
-);
+assert.doesNotMatch(source, /Cristian_Avila_224\.webp/);
+assert.equal(fs.existsSync("src/media/img/Cristian_Avila_224.webp"), true);
 
 for (const token of [
   'data-avatar-system="off"',

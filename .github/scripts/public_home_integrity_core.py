@@ -32,7 +32,6 @@ REQUIRED = (
     "src/media/img/Cristian_Avila_Formulario_960.webp",
     "src/features/public-support-progress/index.js",
     "src/features/public-home-experience/index.js",
-    "src/core/avatar.js",
     "src/media/img/Cristian_Avila_224.webp",
     "src/media/img/Cristian_Avila_480.webp",
     "src/media/img/Cristian_Avila_640.webp",

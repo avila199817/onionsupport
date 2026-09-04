@@ -20,10 +20,7 @@
 
 import { AppCore } from "../../core/index.js";
 import Http from "../../core/http.js";
-import {
-  avatarInitials,
-  avatarToneFromIdentity,
-} from "../../core/avatar.js";
+import { resolveAvatarPresentation } from "../avatar-system/index.js";
 
 export const PUBLIC_SUPPORT_VERSION =
   "public-support.intake.v11-client-facing-compact";
@@ -208,7 +205,11 @@ function panelHref(current, user) {
   return slug ? `/@${encodeURIComponent(slug)}` : "/dashboard";
 }
 
-function identityNode(name, src, tone = 0) {
+function identityNode(name, src, presentation = {}) {
+  const resolved = presentation && typeof presentation === "object"
+    ? presentation
+    : {};
+  const tone = Number.isFinite(resolved.tone) ? resolved.tone : 1;
   const wrap = document.createElement("span");
   wrap.className = "public-support-account";
 
@@ -222,7 +223,7 @@ function identityNode(name, src, tone = 0) {
 
   const fallback = document.createElement("span");
   fallback.className = "public-support-account-avatar-fallback";
-  fallback.textContent = avatarInitials(name);
+  fallback.textContent = resolved.initials || "ON";
   fallback.setAttribute("aria-hidden", "true");
   mark.appendChild(fallback);
 
@@ -300,16 +301,12 @@ function syncIdentity(root) {
   const name = fullName(user) || email(user) || "Mi cuenta";
   const src = avatar(user);
   const href = panelHref(current, user);
-  const identity = email(user) || text(first(
-    user?.userId,
-    user?.id,
-    user?.slug,
-    user?.username,
-    name,
-    ""
-  ));
-  const tone = avatarToneFromIdentity(identity);
-  const key = `${href}|${name}|${src}|${tone}`;
+  const presentation = resolveAvatarPresentation({
+    ...(user && typeof user === "object" ? user : {}),
+    displayName: name,
+    email: email(user),
+  });
+  const key = `${href}|${name}|${src}|${presentation.fingerprint}`;
 
   for (const link of links) {
     if (
@@ -324,7 +321,7 @@ function syncIdentity(root) {
     link.dataset.publicSupportIdentityKey = key;
     link.classList.add("public-support-account-link");
     link.setAttribute("aria-label", `Abrir el panel de ${name}`);
-    link.replaceChildren(identityNode(name, src, tone));
+    link.replaceChildren(identityNode(name, src, presentation));
   }
 
   root.dataset.publicSupportAuthenticated = "true";

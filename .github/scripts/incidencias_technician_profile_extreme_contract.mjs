@@ -29,6 +29,9 @@ const bridge = fs.readFileSync(
   "src/features/incidencias-technician-avatar-bridge/index.js",
   "utf8"
 );
+const bridgeExecutable = bridge
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .replace(/^\s*\/\/.*$/gm, "");
 const privateRuntime = fs.readFileSync(
   "src/features/private-runtime-ui/index.js",
   "utf8"
@@ -242,6 +245,8 @@ assert.match(bridge, /noLocalInitials:\s*true/);
 assert.match(bridge, /noLocalTone:\s*true/);
 assert.match(bridge, /noLocalColor:\s*true/);
 
+/* Sólo el código ejecutable se audita como autoridad; los comentarios pueden
+   documentar la firma visual exacta de una regresión sin pintar nada. */
 for (const forbidden of [
   /(^|[^A-Za-z0-9_$])fetch\s*\(/m,
   /\bXMLHttpRequest\b/,
@@ -252,7 +257,7 @@ for (const forbidden of [
   /#[0-9a-fA-F]{3,8}\b/,
 ]) {
   assert.doesNotMatch(
-    bridge,
+    bridgeExecutable,
     forbidden,
     `El bridge no puede introducir autoridad paralela: ${forbidden}`
   );

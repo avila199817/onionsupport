@@ -573,7 +573,8 @@ def main() -> int:
         ('"/incidencias"', "Falta acceso a Incidencias"),
         ('"/facturas"', "Falta acceso a Facturas"),
         ('"/cuenta"', "Falta acceso a Cuenta"),
-        ("public-home.experience.v4-canonical-session-handoff", "Falta versión coalescida del Home"),
+        ("public-home.experience.v5-avatar-topbar-account", "Falta versión coalescida del Home"),
+        ("data-public-home-account-slot", "Falta slot de cuenta en el topbar público"),
         ("new MutationObserver(queueScan)", "El Home debe coalescer mutaciones por frame"),
         ("formatNationalPhone", "Falta formato progresivo nacional de teléfono"),
         ("+34 612 345 678", "Falta ejemplo telefónico español"),
@@ -593,6 +594,7 @@ def main() -> int:
         ("shape-rendering: geometricPrecision", "Falta precisión de SVG inline"),
         ("@media (max-width: 1040px)", "Falta breakpoint del drawer público"),
         (".public-home .public-home-nav-panel", "Falta contrato del drawer público"),
+        ("public-home-nav-account-slot", "Falta el avatar autenticado fuera del drawer"),
     ):
         require(errors, snippet in experience_css, message)
 

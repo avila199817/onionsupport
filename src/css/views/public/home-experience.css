@@ -4,7 +4,8 @@
 
    Sistema visual/UX canónico de la landing:
    - Landing ancha y respirada.
-   - Login/Cuenta a la izquierda de Abrir incidencia.
+   - Visitante: login junto a Abrir incidencia en el drawer.
+   - Sesión activa: avatar único en el header y menú fuera del drawer.
    - Dropdown autenticado premium tipo command-card.
    - Navegación móvil contenida y estable.
    - Teléfono España con bandera + prefijo +34 permanentes.
@@ -27,7 +28,7 @@
 }
 
 /* =========================================================
-   2. HEADER ACTION ORDER / CTA
+   2. HEADER ACTION ORDER / CTA / AUTHENTICATED AVATAR
 ========================================================= */
 
 .public-home .public-home-price-link {
@@ -49,6 +50,56 @@
   align-items: stretch;
   min-inline-size: 0;
   isolation: isolate;
+}
+
+.public-home .public-home-nav-account-slot {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+}
+
+.public-home .public-home-nav-account-slot .public-home-account-menu-wrap {
+  inline-size: 48px;
+  min-inline-size: 48px;
+}
+
+.public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 48px;
+  block-size: 48px;
+  min-block-size: 48px;
+  max-inline-size: none;
+  padding: 5px;
+  border-radius: 16px;
+}
+
+.public-home .public-home-nav-account-slot .public-support-account {
+  display: grid;
+  place-items: center;
+  inline-size: 100%;
+  block-size: 100%;
+  gap: 0;
+}
+
+.public-home .public-home-nav-account-slot .public-support-account-copy {
+  display: none;
+}
+
+.public-home .public-home-nav-account-slot .public-support-account-avatar {
+  inline-size: 36px;
+  block-size: 36px;
+  flex-basis: 36px;
+  border-radius: 12px;
+}
+
+.public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]::before,
+.public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]::after {
+  display: none;
+  content: none;
 }
 
 .public-home .public-home-account-menu-wrap > .public-home-login-link {
@@ -659,17 +710,17 @@
     justify-content: flex-start;
   }
 
-  .public-home .public-home-account-menu-wrap {
+  .public-home .public-home-nav-actions > .public-home-account-menu-wrap {
     inline-size: 100%;
   }
 
-  .public-home .public-home-account-menu-wrap > .public-home-login-link,
-  .public-home .public-home-account-menu-wrap > [data-public-home-account-toggle] {
+  .public-home .public-home-nav-actions > .public-home-account-menu-wrap > .public-home-login-link,
+  .public-home .public-home-nav-actions > .public-home-account-menu-wrap > [data-public-home-account-toggle] {
     inline-size: 100%;
     max-inline-size: none;
   }
 
-  .public-home .public-home-account-menu {
+  .public-home .public-home-nav-actions > .public-home-account-menu {
     inset-inline-start: 0;
     inset-inline-end: auto;
     inline-size: min(254px, calc(100vw - 32px));
@@ -722,11 +773,11 @@
     max-inline-size: min(238px, calc(100vw - 28px));
   }
 
-  .public-home .public-home-account-menu-wrap {
+  .public-home .public-home-nav-actions > .public-home-account-menu-wrap {
     flex-direction: column;
   }
 
-  .public-home .public-home-account-menu {
+  .public-home .public-home-nav-actions > .public-home-account-menu {
     position: static;
     inline-size: 100%;
     margin-block-start: 8px;

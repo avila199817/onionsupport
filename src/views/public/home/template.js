@@ -342,10 +342,13 @@ function renderHeader() {
             </a>
           </div>
         </nav>
-        <button class="public-home-nav-toggle" type="button" aria-label="Abrir menú" aria-controls="public-home-nav-panel" aria-expanded="false" data-public-home-nav-toggle="true">
-          <span class="public-home-nav-toggle-icon public-home-nav-toggle-icon--open" aria-hidden="true">${renderIcon("menu")}</span>
-          <span class="public-home-nav-toggle-icon public-home-nav-toggle-icon--close" aria-hidden="true">${renderIcon("close")}</span>
-        </button>
+        <div class="public-home-nav-tools" data-public-home-nav-tools="true">
+          <div class="public-home-nav-account-slot" data-public-home-account-slot="true" hidden aria-hidden="true"></div>
+          <button class="public-home-nav-toggle" type="button" aria-label="Abrir menú" aria-controls="public-home-nav-panel" aria-expanded="false" data-public-home-nav-toggle="true">
+            <span class="public-home-nav-toggle-icon public-home-nav-toggle-icon--open" aria-hidden="true">${renderIcon("menu")}</span>
+            <span class="public-home-nav-toggle-icon public-home-nav-toggle-icon--close" aria-hidden="true">${renderIcon("close")}</span>
+          </button>
+        </div>
       </div>
     </header>
   `;

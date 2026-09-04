@@ -1,39 +1,279 @@
 @layer components {
-  [data-technician-profile-root="true"] .ui-detail-modal-avatar-frame { --avatar-size: 64px; --avatar-font-size: 21px; }
-  [data-technician-profile-root="true"] .inc-technician-section-copy { margin:0; color:var(--text-muted); font-size:var(--font-sm); line-height:1.55; }
-  [data-technician-profile-root="true"] .inc-technician-trust-card { display:grid; grid-template-columns:minmax(0,1.45fr) minmax(240px,.55fr); gap:var(--space-md); min-inline-size:0; padding:var(--space-md); border:1px solid var(--ui-detail-modal-card-border); border-radius:var(--card-radius); background:var(--ui-detail-modal-card-bg); }
-  [data-technician-profile-root="true"] .inc-technician-trust-copy { display:grid; align-content:start; gap:8px; min-inline-size:0; }
-  [data-technician-profile-root="true"] .inc-technician-trust-copy strong { color:var(--text-strong); font-size:var(--font-md); line-height:1.3; }
-  [data-technician-profile-root="true"] .inc-technician-trust-copy p { margin:0; color:var(--text-muted); font-size:var(--font-sm); line-height:1.55; }
-  [data-technician-profile-root="true"] .inc-technician-proof-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-sm); min-inline-size:0; }
-  [data-technician-profile-root="true"] .inc-technician-proof { display:grid; align-content:center; gap:2px; min-inline-size:0; padding:12px; border:1px solid var(--ui-detail-modal-card-border); border-radius:var(--radius-sm); background:var(--surface-2,var(--ui-detail-modal-card-bg)); }
-  [data-technician-profile-root="true"] .inc-technician-proof strong { color:var(--text-strong); font-size:var(--font-lg); line-height:1; }
-  [data-technician-profile-root="true"] .inc-technician-proof span { color:var(--text-muted); font-size:11px; line-height:1.3; }
-  [data-technician-profile-root="true"] .inc-technician-method-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:var(--space-sm); min-inline-size:0; margin-block-start:var(--space-sm); }
-  [data-technician-profile-root="true"] .inc-technician-method-item { display:grid; align-content:start; gap:5px; min-inline-size:0; padding:12px; border:1px solid var(--ui-detail-modal-card-border); border-radius:var(--radius-sm); background:var(--surface-1,var(--ui-detail-modal-card-bg)); }
-  [data-technician-profile-root="true"] .inc-technician-method-item strong { color:var(--text-strong); font-size:var(--font-sm); line-height:1.35; }
-  [data-technician-profile-root="true"] .inc-technician-method-item span { color:var(--text-muted); font-size:var(--font-xs); line-height:1.45; }
-  [data-technician-profile-root="true"] .inc-technician-feedback { display:flex; align-items:flex-start; gap:9px; margin-block-start:var(--space-sm); padding:11px 12px; border:1px solid var(--border-success); border-radius:var(--radius-sm); background:var(--success-bg); color:var(--text-soft); font-size:var(--font-xs); line-height:1.45; }
-  [data-technician-profile-root="true"] .inc-technician-feedback strong { color:var(--text-strong); }
-  [data-technician-profile-root="true"] .inc-technician-progress-grid, [data-technician-profile-root="true"] .inc-technician-contact-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-sm); min-inline-size:0; }
-  [data-technician-profile-root="true"] .inc-technician-progress-grid { margin-block-start:var(--space-md); }
-  [data-technician-profile-root="true"] .inc-technician-progress { display:grid; gap:7px; min-inline-size:0; }
-  [data-technician-profile-root="true"] .inc-technician-progress-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
-  [data-technician-profile-root="true"] .inc-technician-progress-head span, [data-technician-profile-root="true"] .inc-technician-progress-detail { color:var(--text-muted); font-size:var(--font-xs); }
-  [data-technician-profile-root="true"] .inc-technician-progress-head strong { color:var(--text-strong); font-size:var(--font-xs); }
-  [data-technician-profile-root="true"] .inc-technician-progress-track { block-size:8px; overflow:hidden; border:1px solid var(--ui-detail-modal-card-border); border-radius:var(--radius-pill); background:var(--surface-3,var(--ui-detail-modal-card-bg)); }
-  [data-technician-profile-root="true"] .inc-technician-progress-fill { display:block; block-size:100%; border-radius:inherit; background:var(--info); }
-  [data-technician-profile-root="true"] .inc-technician-progress[data-tone="success"] .inc-technician-progress-fill { background:var(--success); }
-  [data-technician-profile-root="true"] .inc-technician-meta-hint, [data-technician-profile-root="true"] .inc-technician-ticket-date { color:var(--text-muted); font-size:11px; font-weight:var(--weight-medium); line-height:1.3; }
-  [data-technician-profile-root="true"] .inc-technician-contact-card { position:relative; padding-inline-end:48px; }
-  [data-technician-profile-root="true"] .inc-technician-contact-icon { position:absolute; inset-block-start:14px; inset-inline-end:14px; display:inline-grid; place-items:center; color:var(--text-muted); pointer-events:none; }
-  [data-technician-profile-root="true"] a.inc-technician-contact-card .inc-technician-contact-icon { color:var(--link); }
-  [data-technician-profile-root="true"] .inc-technician-ticket-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-sm); min-inline-size:0; }
-  [data-technician-profile-root="true"] .inc-technician-ticket-card { align-content:start; gap:8px; min-block-size:118px; }
-  [data-technician-profile-root="true"] .inc-technician-ticket-card > strong { display:-webkit-box; overflow:hidden; white-space:normal; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
-  [data-technician-profile-root="true"] .inc-technician-ticket-card .ui-detail-modal-hero-chips { margin-block-start:auto; }
-  [data-technician-profile-root="true"] .inc-technician-empty { margin:0; color:var(--text-muted); font-size:var(--font-sm); line-height:1.5; }
-  @media (max-width:820px) { [data-technician-profile-root="true"] .inc-technician-trust-card, [data-technician-profile-root="true"] .inc-technician-progress-grid, [data-technician-profile-root="true"] .inc-technician-contact-grid { grid-template-columns:1fr; } [data-technician-profile-root="true"] .inc-technician-method-grid { grid-template-columns:1fr; } }
-  @media (max-width:620px) { [data-technician-profile-root="true"] .inc-technician-ticket-grid, [data-technician-profile-root="true"] .inc-technician-proof-grid { grid-template-columns:1fr; } [data-technician-profile-root="true"] .ui-detail-modal-avatar-frame { --avatar-size:56px; --avatar-font-size:21px; } }
-  @media (forced-colors:active) { [data-technician-profile-root="true"] .inc-technician-trust-card, [data-technician-profile-root="true"] .inc-technician-proof, [data-technician-profile-root="true"] .inc-technician-method-item, [data-technician-profile-root="true"] .inc-technician-feedback, [data-technician-profile-root="true"] .inc-technician-progress-track { border-color:CanvasText; } }
+  [data-technician-profile-root="true"] .ui-detail-modal-avatar-frame {
+    --avatar-size: 64px;
+    --avatar-font-size: 21px;
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-section-copy,
+  [data-technician-profile-root="true"] .inc-technician-empty {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: var(--font-sm);
+    line-height: 1.55;
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-trust-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1.45fr) minmax(240px, .55fr);
+    gap: var(--space-md);
+    min-inline-size: 0;
+    padding: var(--space-md);
+    border: 1px solid var(--ui-detail-modal-card-border);
+    border-radius: var(--card-radius);
+    background: var(--ui-detail-modal-card-bg);
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-trust-copy {
+    display: grid;
+    align-content: start;
+    gap: 8px;
+    min-inline-size: 0;
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-trust-copy strong {
+    color: var(--text-strong);
+    font-size: var(--font-md);
+    line-height: 1.3;
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-trust-copy p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: var(--font-sm);
+    line-height: 1.55;
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-proof-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-sm);
+    min-inline-size: 0;
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-proof {
+    display: grid;
+    align-content: center;
+    gap: 2px;
+    min-inline-size: 0;
+    padding: 12px;
+    border: 1px solid var(--ui-detail-modal-card-border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2, var(--ui-detail-modal-card-bg));
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-proof strong {
+    color: var(--text-strong);
+    font-size: var(--font-lg);
+    line-height: 1;
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-proof span {
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 1.3;
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-method-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-sm);
+    min-inline-size: 0;
+    margin-block-start: var(--space-sm);
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-method-item {
+    display: grid;
+    align-content: start;
+    gap: 5px;
+    min-inline-size: 0;
+    padding: 12px;
+    border: 1px solid var(--ui-detail-modal-card-border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-1, var(--ui-detail-modal-card-bg));
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-method-item strong {
+    color: var(--text-strong);
+    font-size: var(--font-sm);
+    line-height: 1.35;
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-method-item span {
+    color: var(--text-muted);
+    font-size: var(--font-xs);
+    line-height: 1.45;
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-feedback {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    margin-block-start: var(--space-sm);
+    padding: 11px 12px;
+    border: 1px solid var(--border-success);
+    border-radius: var(--radius-sm);
+    background: var(--success-bg);
+    color: var(--text-soft);
+    font-size: var(--font-xs);
+    line-height: 1.45;
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-feedback strong {
+    color: var(--text-strong);
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-progress-grid,
+  [data-technician-profile-root="true"] .inc-technician-contact-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-sm);
+    min-inline-size: 0;
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-progress-grid {
+    margin-block-start: var(--space-md);
+    margin-block-end: var(--space-sm);
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-progress {
+    display: grid;
+    gap: 7px;
+    min-inline-size: 0;
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-progress-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-progress-head span,
+  [data-technician-profile-root="true"] .inc-technician-progress-detail {
+    color: var(--text-muted);
+    font-size: var(--font-xs);
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-progress-head strong {
+    color: var(--text-strong);
+    font-size: var(--font-xs);
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-progress-meter {
+    appearance: none;
+    inline-size: 100%;
+    block-size: 8px;
+    overflow: hidden;
+    border: 1px solid var(--ui-detail-modal-card-border);
+    border-radius: var(--radius-pill);
+    background: var(--surface-3, var(--ui-detail-modal-card-bg));
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-progress-meter::-webkit-progress-bar {
+    background: var(--surface-3, var(--ui-detail-modal-card-bg));
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-progress-meter::-webkit-progress-value {
+    border-radius: inherit;
+    background: var(--info);
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-progress-meter::-moz-progress-bar {
+    border-radius: inherit;
+    background: var(--info);
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-progress[data-tone="success"] .inc-technician-progress-meter::-webkit-progress-value {
+    background: var(--success);
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-progress[data-tone="success"] .inc-technician-progress-meter::-moz-progress-bar {
+    background: var(--success);
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-meta-hint,
+  [data-technician-profile-root="true"] .inc-technician-ticket-date {
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: var(--weight-medium);
+    line-height: 1.3;
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-contact-card {
+    position: relative;
+    padding-inline-end: 48px;
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-contact-icon {
+    position: absolute;
+    inset-block-start: 14px;
+    inset-inline-end: 14px;
+    display: inline-grid;
+    place-items: center;
+    color: var(--text-muted);
+    pointer-events: none;
+  }
+
+  [data-technician-profile-root="true"] a.inc-technician-contact-card .inc-technician-contact-icon {
+    color: var(--link);
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-ticket-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-sm);
+    min-inline-size: 0;
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-ticket-card {
+    align-content: start;
+    gap: 8px;
+    min-block-size: 118px;
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-ticket-card > strong {
+    display: -webkit-box;
+    overflow: hidden;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  [data-technician-profile-root="true"] .inc-technician-ticket-card .ui-detail-modal-hero-chips {
+    margin-block-start: auto;
+  }
+
+  @media (max-width: 820px) {
+    [data-technician-profile-root="true"] .inc-technician-trust-card,
+    [data-technician-profile-root="true"] .inc-technician-progress-grid,
+    [data-technician-profile-root="true"] .inc-technician-contact-grid {
+      grid-template-columns: 1fr;
+    }
+
+    [data-technician-profile-root="true"] .inc-technician-method-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 620px) {
+    [data-technician-profile-root="true"] .inc-technician-ticket-grid,
+    [data-technician-profile-root="true"] .inc-technician-proof-grid {
+      grid-template-columns: 1fr;
+    }
+
+    [data-technician-profile-root="true"] .ui-detail-modal-avatar-frame {
+      --avatar-size: 56px;
+      --avatar-font-size: 21px;
+    }
+  }
+
+  @media (forced-colors: active) {
+    [data-technician-profile-root="true"] .inc-technician-trust-card,
+    [data-technician-profile-root="true"] .inc-technician-proof,
+    [data-technician-profile-root="true"] .inc-technician-method-item,
+    [data-technician-profile-root="true"] .inc-technician-feedback,
+    [data-technician-profile-root="true"] .inc-technician-progress-meter {
+      border-color: CanvasText;
+    }
+  }
 }

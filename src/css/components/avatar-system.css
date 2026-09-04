@@ -2,16 +2,14 @@
    ONION SUPPORT — GLOBAL AVATAR SYSTEM
    Archivo: /src/css/components/avatar-system.css
 
-   SINGLE VISUAL AUTHORITY · TRANSPARENT ALPHA SAFE · SPA-WIDE
+   SINGLE VISUAL AUTHORITY · MICROSOFT FLUENT PERSONA · SPA-WIDE
 
-   Contrato definitivo:
-   - Toda identidad visual gestionada termina con la misma forma y estados.
-   - El tamaño cambia por contexto semántico; la lógica visual no.
-   - Una imagen válida elimina cualquier superficie de fallback detrás.
-   - PNG/WebP/AVIF con alfa conservan alfa real; no se inyecta fondo blanco.
-   - Iniciales y gradientes sólo existen sin imagen válida.
-   - El tone es uint32 y se convierte a color de forma determinista en CSS.
-   - Esta hoja se carga como último guardrail de toda la cascada privada.
+   Contrato:
+   - Toda identidad gestionada usa el mismo fallback en toda la aplicación.
+   - Con foto válida se conserva la imagen y su alfa real.
+   - Sin foto: círculo plano + iniciales + color determinista Microsoft.
+   - Paleta/orden/hash compatibles con Fluent UI v8 Persona.
+   - Sin gradientes, brillos, sombras decorativas ni bordes en fallback normal.
 ========================================================= */
 
 :root {
@@ -22,14 +20,14 @@
   --avatar-size-detail: 56px;
   --avatar-size-preview: 96px;
 
-  --avatar-border: var(--border-default);
-  --avatar-fallback-a: hsl(215 78% 29%);
-  --avatar-fallback-b: hsl(255 74% 31%);
+  /* Fluent UI Persona defaults */
+  --avatar-fallback-color: #0078D4;
   --avatar-fallback-text: #fff;
+  --avatar-font-size: 16px;
 }
 
 /* =========================================================
-   ONE GEOMETRY CONTRACT
+   ONE GEOMETRY + TYPOGRAPHY CONTRACT
 ========================================================= */
 
 :where(
@@ -56,26 +54,35 @@
   flex: 0 0 var(--avatar-size);
   overflow: hidden;
 
-  border: 1px solid var(--avatar-border);
+  border: 0;
   border-radius: 50%;
 
   color: var(--avatar-fallback-text);
+  font-family: "Segoe UI", "Segoe UI Variable", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: var(--avatar-font-size);
+  font-weight: 600;
   line-height: 1;
   text-align: center;
   vertical-align: middle;
 }
 
-/* Context only chooses size. Shape/state/paint remain global. */
+/*
+  Fluent UI Persona font sizing:
+  <32px => 10px · 32–39 => 14px · 40–55 => 16px
+  · 56–71 => 21px · 72–99 => 28px.
+*/
 :where(
   .incidencias-assigned-avatar,
   .incidencias-timeline-comment-avatar,
   .incidencias-modal-description-comment-avatar
 ) {
   --avatar-size: var(--avatar-size-compact);
+  --avatar-font-size: 10px;
 }
 
 :where(.home-entity-relation-avatar) {
   --avatar-size: var(--avatar-size-relation);
+  --avatar-font-size: 10px;
 }
 
 :where(
@@ -85,6 +92,7 @@
   .topbar-avatar
 ) {
   --avatar-size: var(--avatar-size-shell);
+  --avatar-font-size: 14px;
 }
 
 :where(
@@ -95,6 +103,7 @@
   .ui-avatar
 ) {
   --avatar-size: var(--avatar-size-default);
+  --avatar-font-size: 16px;
 }
 
 :where(
@@ -105,6 +114,7 @@
   .usuarios-modal-avatar-frame
 ) {
   --avatar-size: var(--avatar-size-detail);
+  --avatar-font-size: 21px;
 }
 
 :where(
@@ -112,56 +122,41 @@
   .cuenta-avatar-preview
 ) {
   --avatar-size: var(--avatar-size-preview);
+  --avatar-font-size: 28px;
 }
 
 :where(.home-current-user-avatar) {
   --avatar-size: var(--home-avatar-size, clamp(72px, 5vw, 94px));
+  --avatar-font-size: 28px;
 }
 
 /* =========================================================
-   UINT32 COLOR ENGINE · 4,294,967,296 TONES
+   MICROSOFT FLUENT UI V8 PERSONA AUTO-COLOR PALETTE
 
-   No se enumeran paletas. El atributo data-avatar-tone contiene un uint32 y
-   se reparte por hue/saturación/luz. En navegadores sin typed attr()/mod(),
-   se conserva el fallback global azul-violeta de :root.
+   El data-avatar-tone lo resuelve identity.js con el mismo hash que Persona.
+   Orden/hex exactos del COLOR_SWATCHES_LOOKUP de Microsoft.
 ========================================================= */
 
-@supports (width: calc(attr(data-avatar-tone type(<number>), 0) * 1px)) and
-          (width: calc(mod(10, 3) * 1px)) {
-  :where([data-avatar-tone]) {
-    --avatar-tone-number: attr(data-avatar-tone type(<number>), 0);
-
-    --avatar-hue-a:
-      mod(var(--avatar-tone-number), 360);
-    --avatar-hue-b:
-      mod(calc((var(--avatar-tone-number) / 997) + 47), 360);
-
-    --avatar-saturation-a:
-      calc(68% + (mod(calc(var(--avatar-tone-number) / 360), 20) * 1%));
-    --avatar-saturation-b:
-      calc(64% + (mod(calc(var(--avatar-tone-number) / 7200), 22) * 1%));
-
-    /* Mantiene suficiente oscuridad para iniciales blancas en cualquier hue. */
-    --avatar-lightness-a:
-      calc(24% + (mod(calc(var(--avatar-tone-number) / 158400), 7) * 1%));
-    --avatar-lightness-b:
-      calc(26% + (mod(calc(var(--avatar-tone-number) / 1108800), 7) * 1%));
-
-    --avatar-fallback-a:
-      hsl(
-        var(--avatar-hue-a)
-        var(--avatar-saturation-a)
-        var(--avatar-lightness-a)
-      );
-    --avatar-fallback-b:
-      hsl(
-        var(--avatar-hue-b)
-        var(--avatar-saturation-b)
-        var(--avatar-lightness-b)
-      );
-    --avatar-fallback-text: #fff;
-  }
-}
+:where([data-avatar-tone="0"])  { --avatar-fallback-color: #4F6BED; }
+:where([data-avatar-tone="1"])  { --avatar-fallback-color: #0078D4; }
+:where([data-avatar-tone="2"])  { --avatar-fallback-color: #004E8C; }
+:where([data-avatar-tone="3"])  { --avatar-fallback-color: #038387; }
+:where([data-avatar-tone="4"])  { --avatar-fallback-color: #498205; }
+:where([data-avatar-tone="5"])  { --avatar-fallback-color: #0B6A0B; }
+:where([data-avatar-tone="6"])  { --avatar-fallback-color: #C239B3; }
+:where([data-avatar-tone="7"])  { --avatar-fallback-color: #E3008C; }
+:where([data-avatar-tone="8"])  { --avatar-fallback-color: #881798; }
+:where([data-avatar-tone="9"])  { --avatar-fallback-color: #5C2E91; }
+:where([data-avatar-tone="10"]) { --avatar-fallback-color: #CA5010; }
+:where([data-avatar-tone="11"]) { --avatar-fallback-color: #D13438; }
+:where([data-avatar-tone="12"]) { --avatar-fallback-color: #A4262C; }
+:where([data-avatar-tone="13"]) { --avatar-fallback-color: #8764B8; }
+:where([data-avatar-tone="14"]) { --avatar-fallback-color: #986F0B; }
+:where([data-avatar-tone="15"]) { --avatar-fallback-color: #750B1C; }
+:where([data-avatar-tone="16"]) { --avatar-fallback-color: #7A7574; }
+:where([data-avatar-tone="17"]) { --avatar-fallback-color: #005B70; }
+:where([data-avatar-tone="18"]) { --avatar-fallback-color: #8E562E; }
+:where([data-avatar-tone="19"]) { --avatar-fallback-color: #69797E; }
 
 /* =========================================================
    ONE IMAGE CONTRACT
@@ -215,7 +210,7 @@
   background: transparent;
   background-color: transparent;
   background-image: none;
-  border-color: color-mix(in srgb, var(--avatar-border) 72%, transparent);
+  border-color: transparent;
   box-shadow: none;
   text-shadow: none;
 }
@@ -255,7 +250,7 @@
 }
 
 /* =========================================================
-   ONE FALLBACK PAINT AUTHORITY
+   ONE FALLBACK PAINT AUTHORITY · MICROSOFT PERSONA
 ========================================================= */
 
 [data-avatar-authority="global"][data-avatar-state="loading"],
@@ -270,22 +265,14 @@
   [data-avatar-host="true"][data-avatar-state="error"],
   [data-has-avatar="false"]
 ) {
-  background:
-    linear-gradient(
-      135deg,
-      var(--avatar-fallback-a),
-      var(--avatar-fallback-b)
-    );
-  background-color: var(--avatar-fallback-a);
-  border-color:
-    color-mix(
-      in srgb,
-      var(--avatar-fallback-a) 44%,
-      var(--avatar-border)
-    );
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 16%, transparent);
+  background: var(--avatar-fallback-color);
+  background-color: var(--avatar-fallback-color);
+  background-image: none;
+  border: 0;
+  border-color: transparent;
+  box-shadow: none;
   color: var(--avatar-fallback-text);
+  text-shadow: none;
 }
 
 :where(
@@ -309,6 +296,13 @@
   visibility: visible;
   opacity: 1;
   color: inherit;
+  font-family: inherit;
+  font-size: var(--avatar-font-size);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: none;
+  user-select: none;
 }
 
 :where(
@@ -347,7 +341,7 @@
     [data-avatar-host="true"],
     [data-has-avatar]
   ) {
-    border-color: CanvasText;
+    border: 1px solid CanvasText;
   }
 
   :where(

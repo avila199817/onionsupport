@@ -61,11 +61,14 @@ if [[ "$(cat .github/ci/canonical-apex-v1)" != "canonical-apex-v1" ]]; then
   exit 1
 fi
 
+# La política de origen canónico protege código/configuración desplegable. La
+# documentación de infraestructura puede describir hosts de redirección o
+# dominios alternativos sin convertirlos en referencias públicas del runtime.
 for forbidden_origin in \
   "www"".""onionsupport.com" \
   "http://onionsupport"".""com" \
   "http%3A%2F%2Fonionsupport"".""com"; do
-  if git grep -n -I -i -F "${forbidden_origin}" -- .; then
+  if git grep -n -I -i -F "${forbidden_origin}" -- . ':(exclude)docs/**'; then
     echo "::error title=Origen público no canónico::Se detectó '${forbidden_origin}'."
     exit 1
   fi

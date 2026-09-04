@@ -5,6 +5,8 @@
    Única puerta de entrada del chrome privado:
    - El build carga CSS, Sidebar, Topbar, AppChrome y overlays tras Auth.
    - AvatarSystem sincroniza avatares ya montados y todo DOM posterior.
+   - El bridge de técnico reutiliza únicamente fuentes de imagen ya validadas
+     por AvatarSystem para la misma identidad.
    - HomeEntityModal se instala antes de EntityOverlay para fijar el origen.
    - Precarga de entidad se activa sólo tras Auth y nunca captura navegación.
    - Las rutas públicas/anónimas del artefacto no descargan runtime privado.
@@ -17,7 +19,7 @@
 import { AppCore } from "../../core/index.js";
 
 export const PRIVATE_RUNTIME_UI_VERSION =
-  "private-runtime-ui.v6-global-avatar-authority";
+  "private-runtime-ui.v7-technician-avatar-bridge";
 
 const PRIVATE_STYLESHEET_HREF =
   "/src/css/private.css";
@@ -29,6 +31,7 @@ let SidebarUI = null;
 let TopbarUI = null;
 let AppChromeUI = null;
 let AvatarSystemUI = null;
+let IncidenciasTechnicianAvatarBridgeUI = null;
 let HomeEntityModalUI = null;
 let EntityOverlayUI = null;
 let EntityIntentPreloadUI = null;
@@ -208,6 +211,7 @@ async function loadPrivateModules() {
     topbarModule,
     chromeModule,
     avatarSystemModule,
+    technicianAvatarBridgeModule,
     homeEntityModalModule,
     overlayModule,
     entityIntentPreloadModule,
@@ -216,6 +220,7 @@ async function loadPrivateModules() {
     import("../../ui/topbar/index.js"),
     import("../../ui/chrome/index.js"),
     import("../avatar-system/index.js"),
+    import("../incidencias-technician-avatar-bridge/index.js"),
     import("../home-entity-modal/index.js"),
     import("../entity-overlay/index.js"),
     import("../entity-intent-preload/index.js"),
@@ -227,6 +232,10 @@ async function loadPrivateModules() {
   AvatarSystemUI =
     avatarSystemModule?.AvatarSystem ||
     avatarSystemModule?.default ||
+    null;
+  IncidenciasTechnicianAvatarBridgeUI =
+    technicianAvatarBridgeModule?.IncidenciasTechnicianAvatarBridge ||
+    technicianAvatarBridgeModule?.default ||
     null;
   HomeEntityModalUI =
     homeEntityModalModule?.HomeEntityModal ||
@@ -242,6 +251,7 @@ async function loadPrivateModules() {
     SidebarUI &&
     TopbarUI &&
     AvatarSystemUI &&
+    IncidenciasTechnicianAvatarBridgeUI &&
     HomeEntityModalUI &&
     EntityOverlayUI &&
     EntityIntentPreloadUI
@@ -263,6 +273,7 @@ export async function ensurePrivateRuntimeUI(context = {}) {
     SidebarUI &&
     TopbarUI &&
     AvatarSystemUI &&
+    IncidenciasTechnicianAvatarBridgeUI &&
     HomeEntityModalUI &&
     EntityOverlayUI &&
     EntityIntentPreloadUI
@@ -271,6 +282,7 @@ export async function ensurePrivateRuntimeUI(context = {}) {
     try { TopbarUI.sync?.(context); } catch {}
     try { AppChromeUI?.sync?.(); } catch {}
     try { AvatarSystemUI.sync?.(document); } catch {}
+    try { IncidenciasTechnicianAvatarBridgeUI.sync?.(document); } catch {}
     return true;
   }
 
@@ -301,6 +313,13 @@ export async function ensurePrivateRuntimeUI(context = {}) {
       observa después todo el DOM dinámico de las vistas/modales privadas.
     */
     await initModule(AvatarSystemUI, payload);
+
+    /*
+      El bridge se monta sólo después de AvatarSystem: no calcula identidad ni
+      estado visual, únicamente reutiliza una imagen global ya validada para la
+      misma persona y vuelve a entregar el host a la autoridad global.
+    */
+    await initModule(IncidenciasTechnicianAvatarBridgeUI, payload);
 
     /*
       Orden contractual: Home corta su click in-place antes de que el overlay
@@ -337,6 +356,7 @@ export function destroyPrivateRuntimeUI() {
   destroyLoaded(EntityIntentPreloadUI);
   destroyLoaded(HomeEntityModalUI);
   destroyLoaded(EntityOverlayUI);
+  destroyLoaded(IncidenciasTechnicianAvatarBridgeUI);
   destroyLoaded(AvatarSystemUI);
   destroyLoaded(AppChromeUI);
   destroyLoaded(TopbarUI);
@@ -360,6 +380,7 @@ export function getPrivateRuntimeUISnapshot() {
       topbar: Boolean(TopbarUI),
       chrome: Boolean(AppChromeUI),
       avatarSystem: Boolean(AvatarSystemUI),
+      technicianAvatarBridge: Boolean(IncidenciasTechnicianAvatarBridgeUI),
       homeEntityModal: Boolean(HomeEntityModalUI),
       entityOverlay: Boolean(EntityOverlayUI),
       entityIntentPreload: Boolean(EntityIntentPreloadUI),
@@ -369,6 +390,8 @@ export function getPrivateRuntimeUISnapshot() {
       avatarSystemAfterChrome: true,
       avatarImageTransparencyAuthority: true,
       avatarFallbackOnlyWithoutValidImage: true,
+      technicianAvatarUsesGlobalAuthority: true,
+      technicianAvatarNoSyntheticSourceAuthority: true,
       homeEntityAuthorityBeforeGlobalOverlay: true,
       homeOwnerModalsStayInPlace: true,
     }),

@@ -5,9 +5,31 @@ from __future__ import annotations
 
 from html.parser import HTMLParser
 import os
+import json
 from pathlib import Path
 import re
 import sys
+
+def validate_public_site_graph(errors, source, canonical, label):
+    scripts = re.findall(r'<script\b[^>]*type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>', source)
+    require(errors, len(scripts) == 1, f"{label}: debe existir exactamente un grafo JSON-LD")
+    try:
+        graph = json.loads(scripts[0]).get("@graph", []) if len(scripts) == 1 else []
+    except (ValueError, TypeError):
+        graph = []
+    nodes = {item.get("@type"): item for item in graph if isinstance(item, dict)}
+    home = "https://onionsupport.com/"
+    expected = {"WebSite", "Organization", "WebPage"} | ({"Service", "BreadcrumbList"} if canonical != home else set())
+    require(errors, set(nodes) == expected and len(graph) == len(expected), f"{label}: tipos o nodos de schema duplicados/incorrectos")
+    require(errors, nodes.get("WebSite", {}).get("name") == "Onion Support", f"{label}: nombre WebSite incorrecto")
+    require(errors, nodes.get("WebSite", {}).get("publisher") == {"@id": home + "#business"}, f"{label}: publisher no canónico")
+    require(errors, nodes.get("Organization", {}).get("@id") == home + "#business", f"{label}: identidad empresarial no canónica")
+    require(errors, nodes.get("WebPage", {}).get("url") == canonical, f"{label}: URL WebPage no canónica")
+    if canonical != home:
+        require(errors, nodes.get("Service", {}).get("provider") == {"@id": home + "#business"}, f"{label}: proveedor de servicio no canónico")
+        items = nodes.get("BreadcrumbList", {}).get("itemListElement", [])
+        require(errors, len(items) == 2 and items[0].get("item") == home and items[1].get("item") == canonical, f"{label}: breadcrumb incorrecto")
+
 
 ROOT = Path(
     os.environ.get(
@@ -226,8 +248,16 @@ def main() -> int:
         "seo/soporte-empresas.html": ("/soporte-empresas", "https://onionsupport.com/soporte-empresas"),
     }
     require(errors, 'data-public-home-service-link="true"' in home_template, "Las tarjetas de servicio deben ser enlaces HTML rastreables")
-    require(errors, '"@id": `https://${BUSINESS.domain}/#business`' in home_template, "El LocalBusiness runtime debe reutilizar el @id canónico")
-    require(errors, '"publisher": { "@id": "https://onionsupport.com/#business" }' in index, "El WebSite raíz debe apuntar al LocalBusiness canónico")
+    site_marker = ROOT / ".github/ci/public-site-v3"
+    site_v3 = site_marker.is_file()
+    if site_v3:
+        require(errors, site_marker.read_text(encoding="utf-8") == "public-site-v3\n", "Marcador public-site-v3 inválido")
+        require(errors, 'import { PUBLIC_SITE }' in home_template and '...PUBLIC_SITE' in home_template, "La landing debe consumir la marca central PUBLIC_SITE")
+        require(errors, 'renderJsonLd' not in home_template and 'application/ld+json' not in home_template, "La landing no puede emitir un segundo schema fuera del motor de metadatos")
+        validate_public_site_graph(errors, index, "https://onionsupport.com/", "index.html")
+    else:
+        require(errors, '"@id": `https://${BUSINESS.domain}/#business`' in home_template, "El LocalBusiness runtime debe reutilizar el @id canónico")
+        require(errors, '"publisher": { "@id": "https://onionsupport.com/#business" }' in index, "El WebSite raíz debe apuntar al LocalBusiness canónico")
     canonical_login_anchor = 'data-public-home-login="true">Iniciar sesión</a>'
     require(errors, home_template.count(canonical_login_anchor) == 2, "La landing debe nombrar /login como Iniciar sesión en header y footer")
     require(errors, 'data-public-home-login="true">Panel cliente</a>' not in home_template, "La landing no puede reintroducir Panel cliente como anchor de /login")
@@ -238,7 +268,10 @@ def main() -> int:
         require(errors, 'data-onion-schema="service-hierarchy"' in source, f"{relative} debe declarar jerarquía WebPage/BreadcrumbList")
         require(errors, '"@type": "BreadcrumbList"' in source, f"{relative} debe declarar BreadcrumbList")
         require(errors, f'"item": "{canonical}"' in source, f"{relative} debe cerrar el breadcrumb sobre su canonical")
-        require(errors, 'itemid="https://onionsupport.com/#business"' in source, f"{relative} debe reutilizar la identidad canónica del proveedor")
+        if site_v3:
+            validate_public_site_graph(errors, source, canonical, relative)
+        else:
+            require(errors, 'itemid="https://onionsupport.com/#business"' in source, f"{relative} debe reutilizar la identidad canónica del proveedor")
         login_anchor = '<a href="/login">Iniciar sesión</a>'
         require(errors, source.count(login_anchor) == 2, f"{relative} debe usar Iniciar sesión en sus dos enlaces a /login")
         require(errors, "Panel cliente" not in source and "Acceso al panel cliente" not in source, f"{relative} no puede usar anchors alternativos para /login")
@@ -560,12 +593,13 @@ def main() -> int:
         "La navegación interna debe reemplazar hash sin apilar historial",
     )
 
-    for snippet, message in (
-        ('domain: "onionsupport.com"', "Schema LocalBusiness: dominio canónico incorrecto"),
-        ('url: `https://${BUSINESS.domain}/`', "Schema LocalBusiness: URL HTTPS canónica ausente"),
-        ('type="application/ld+json"', "Schema LocalBusiness: script JSON-LD ausente"),
-    ):
-        require(errors, snippet in home_template, message)
+    if not site_v3:
+        for snippet, message in (
+            ('domain: "onionsupport.com"', "Schema LocalBusiness: dominio canónico incorrecto"),
+            ('url: `https://${BUSINESS.domain}/`', "Schema LocalBusiness: URL HTTPS canónica ausente"),
+            ('type="application/ld+json"', "Schema LocalBusiness: script JSON-LD ausente"),
+        ):
+            require(errors, snippet in home_template, message)
 
     for snippet, message in (
         ("data-public-home-account-menu", "Falta menú autenticado"),

@@ -5,6 +5,15 @@ base="${PUBLIC_SITE_URL%/}"
 api="${DIRECT_API_URL%/}"
 legacy_domain="onionit"".""net"
 
+public_site_v3=false
+if [[ -f .github/ci/public-site-v3 ]]; then
+  if ! cmp -s .github/ci/public-site-v3 <(printf 'public-site-v3\n'); then
+    echo "::error::Invalid public-site-v3 marker"
+    exit 1
+  fi
+  public_site_v3=true
+fi
+
 if [[ "${base}" != "https://onionsupport.com" ]]; then
   echo "::error title=Canonical productivo inválido::PUBLIC_SITE_URL='${base}'; esperado https://onionsupport.com."
   exit 1
@@ -87,6 +96,16 @@ assert_route_headers() {
     index)
       if [[ "${xrobots,,}" != *"index"* || "${xrobots,,}" != *"follow"* || "${xrobots,,}" == *"noindex"* ]]; then
         echo "::error title=Ruta indexable inválida::${route} envía X-Robots-Tag='${xrobots}'."
+        return 1
+      fi
+      ;;
+    access-noindex)
+      if [[ "${xrobots,,}" != "noindex, follow" ]]; then
+        echo "::error::${route} must send X-Robots-Tag: noindex, follow"
+        return 1
+      fi
+      if [[ "${cache_control,,}" != *"no-cache"* || "${cache_control,,}" != *"no-store"* ]]; then
+        echo "::error::${route} must preserve private cache controls"
         return 1
       fi
       ;;
@@ -339,7 +358,11 @@ indexable_routes=(
 )
 
 for route in "${indexable_routes[@]}"; do
-  assert_route_headers "${route}" index
+  if [[ "${public_site_v3}" == true && "${route}" == /login ]]; then
+    assert_route_headers "${route}" access-noindex
+  else
+    assert_route_headers "${route}" index
+  fi
 done
 
 while IFS='|' read -r alias destination; do

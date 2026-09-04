@@ -48,6 +48,7 @@ PUBLIC_MARKETING_PATHS = (
 )
 
 SCRIPT_TAG = '<script defer src="/src/analytics/google-tag.js"></script>'
+MODULE_SCRIPT_TAG = '<script type="module" src="/src/analytics/google-tag.js"></script>'
 REQUEST_TIMEOUT_SECONDS = 20.0
 
 CLICK_CAPTURE_PATTERN = re.compile(
@@ -133,6 +134,31 @@ def validate_source(root: Path) -> list[str]:
 
     text = bootstrap.read_text(encoding="utf-8")
     css = consent_css.read_text(encoding="utf-8")
+    # The trusted contract supports the existing classic release and the
+    # public-site-v3 migration. Build tooling and compatibility-copy bytes stay
+    # identical; v3 executes the Vite module graph from the single SPA entry.
+    index_path = root / "index.html"
+    index_text = index_path.read_text(encoding="utf-8") if index_path.is_file() else ""
+    module_bootstrap = '<!-- public-site-v3: generated metadata -->' in index_text
+    if module_bootstrap:
+        for literal in (
+            'from "../features/entity-overlay/modal-lifecycle.js";',
+            'const modalLifecycle = createModalLifecycle({',
+            'modalLifecycle.activate()',
+            'modalLifecycle.deactivate({ restoreFocus })',
+        ):
+            if literal not in text:
+                errors.append(f"{BOOTSTRAP_PATH}: falta autoridad modal compartida: {literal}")
+        for obsolete in ('function trapDialogFocus(', 'function focusableDialogElements(', 'function handleGlobalKeydown('):
+            if obsolete in text:
+                errors.append(f"{BOOTSTRAP_PATH}: no debe reintroducir motor modal propio: {obsolete}")
+        main_path = root / "src/main.js"
+        main_text = main_path.read_text(encoding="utf-8") if main_path.is_file() else ""
+        bootstrap_import = 'import "./analytics/google-tag.js";'
+        if main_text.count(bootstrap_import) != 1 or not main_text.lstrip().startswith(bootstrap_import):
+            errors.append("src/main.js: debe importar una vez el módulo canónico de consentimiento antes del boot")
+    elif re.search(r'^\s*(?:import\s|export\s)', text, re.MULTILINE):
+        errors.append(f"{BOOTSTRAP_PATH}: el modo clásico no puede ejecutar imports/exports de módulo")
 
     required_literals = (
         f'const GOOGLE_ANALYTICS_TAG_ID = "{GA4_TAG_ID}";',
@@ -316,15 +342,28 @@ def validate_source(root: Path) -> list[str]:
             continue
 
         page_text = page.read_text(encoding="utf-8")
-        count = page_text.count(SCRIPT_TAG)
+        if module_bootstrap and relative == "index.html":
+            if '/src/analytics/google-tag.js' in page_text:
+                errors.append("index.html: Google debe ejecutarse desde src/main.js, sin segunda etiqueta")
+            main_tags = re.findall(r'<script\b[^>]*type=["\']module["\'][^>]*>', page_text, re.IGNORECASE)
+            if len(main_tags) != 1 or 'src="/src/main.js"' not in main_tags[0]:
+                errors.append("index.html: debe conservar src/main.js como única entrada módulo")
+            if "googletagmanager.com/gtag/js" in page_text:
+                errors.append("index.html: no debe instalar una segunda etiqueta remota")
+            continue
+
+        expected_tag = MODULE_SCRIPT_TAG if module_bootstrap else SCRIPT_TAG
+        count = page_text.count(expected_tag)
         if count != 1:
             errors.append(
-                f"{relative}: debe cargar {SCRIPT_TAG!r} exactamente una vez; "
+                f"{relative}: debe cargar {expected_tag!r} exactamente una vez; "
                 f"encontrado {count}"
             )
             continue
 
-        script_pos = page_text.find(SCRIPT_TAG)
+        if module_bootstrap and SCRIPT_TAG in page_text:
+            errors.append(f"{relative}: no puede ejecutar además el bootstrap clásico")
+        script_pos = page_text.find(expected_tag)
         head_close = page_text.lower().find("</head>")
         if head_close < 0 or script_pos > head_close:
             errors.append(

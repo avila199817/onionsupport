@@ -22,11 +22,19 @@ canonical_host = urlsplit(expected_home).netloc
 marker_path = Path(".github/ci/seo-public-surface-v2")
 apex_marker_path = Path(".github/ci/canonical-apex-v1")
 expanded = marker_path.is_file()
+public_site_marker = Path(".github/ci/public-site-v3")
+public_site_v3 = public_site_marker.is_file()
 
 errors = []
 
 def error(path, message):
     errors.append((str(path), message))
+
+if public_site_v3:
+    if public_site_marker.read_text(encoding="utf-8") != "public-site-v3\n":
+        error(public_site_marker, "El marcador debe contener exactamente public-site-v3 seguido de newline.")
+    if not expanded:
+        error(public_site_marker, "public-site-v3 requiere seo-public-surface-v2.")
 
 if base != canonical_base:
     error("PUBLIC_SITE_URL", f"Origen canónico {base!r}; esperado {canonical_base!r}.")
@@ -131,6 +139,9 @@ for directive in sorted(required_robots):
     if directive not in robots_lines:
         error(robots_path, f"Falta directiva obligatoria: {directive}")
 
+if public_site_v3 and robots_lines != required_robots:
+    error(robots_path, "public-site-v3 requiere las directivas exactas públicas/privadas; /login debe permanecer rastreable.")
+
 if expanded and "Disallow: /login" in robots_lines:
     error(robots_path, "/login es público/indexable en seo-public-surface-v2 y no puede estar bloqueado.")
 
@@ -157,7 +168,7 @@ if root is not None:
     ]
 
     expected_urls = (
-        [f"{base}{path}" if path != "/" else expected_home for path in PUBLIC_PATHS]
+        [f"{base}{path}" if path != "/" else expected_home for path in PUBLIC_PATHS if not (public_site_v3 and path == "/login")]
         if expanded
         else [expected_home]
     )
@@ -181,6 +192,7 @@ class SeoParser(HTMLParser):
         self.og_urls = []
         self.itemprop_urls = []
         self.robots = {}
+        self.robots_count = {}
         self.descriptions = []
         self.titles = []
         self.h1_count = 0
@@ -210,6 +222,7 @@ class SeoParser(HTMLParser):
             itemprop = attrs.get("itemprop", "").strip().lower()
             if name in {"robots", "googlebot", "bingbot"}:
                 self.robots[name] = attrs.get("content", "").strip().lower()
+                self.robots_count[name] = self.robots_count.get(name, 0) + 1
             if name == "description":
                 self.descriptions.append(attrs.get("content", "").strip())
             if property_name == "og:url":
@@ -254,9 +267,20 @@ def validate_public_html(path, expected_url, *, require_h1=False, require_intern
         error(path, "Debe contener exactamente un <title> no vacío.")
     if len(parser.descriptions) != 1 or not parser.descriptions[0]:
         error(path, "Debe contener exactamente una meta description no vacía.")
-    for name in ("robots", "googlebot"):
+    if public_site_v3:
+        if expected_url == expected_home and parser.titles != ["Onion Support"]:
+            error(path, "El título principal debe ser exactamente Onion Support.")
+        if any("Sant Vicenç" in title for title in parser.titles):
+            error(path, "La marca pública no puede limitarse a Sant Vicenç en el título.")
+    for name in (("robots", "googlebot", "bingbot") if public_site_v3 else ("robots", "googlebot")):
         directives = {item.strip() for item in parser.robots.get(name, "").split(",") if item.strip()}
-        if not {"index", "follow"}.issubset(directives):
+        if public_site_v3:
+            if parser.robots_count.get(name) != 1:
+                error(path, f"Meta {name} debe aparecer exactamente una vez.")
+            expected_robots = {"noindex", "follow"} if expected_url == f"{base}/login" else {"index", "follow"}
+            if directives != expected_robots:
+                error(path, f"Meta {name} debe contener exactamente {sorted(expected_robots)}.")
+        elif not {"index", "follow"}.issubset(directives):
             error(path, f"Meta {name} debe contener index, follow.")
     if require_h1 and parser.h1_count != 1:
         error(path, f"Debe contener exactamente un H1; encontrados {parser.h1_count}.")
@@ -346,7 +370,11 @@ if expanded:
         if route.get("rewrite") != rewrite:
             error(config_path, f"{public_path} debe reescribir exactamente a {rewrite}.")
         xrobots = str(route.get("headers", {}).get("X-Robots-Tag", "")).lower()
-        if "index" not in xrobots or "follow" not in xrobots or "noindex" in xrobots:
+        if public_site_v3:
+            expected_robots = {"noindex", "follow"} if public_path == "/login" else {"index", "follow"}
+            if {item.strip() for item in xrobots.split(",") if item.strip()} != expected_robots:
+                error(config_path, f"{public_path} debe enviar X-Robots-Tag: {sorted(expected_robots)}.")
+        elif "index" not in xrobots or "follow" not in xrobots or "noindex" in xrobots:
             error(config_path, f"{public_path} debe enviar X-Robots-Tag: index, follow.")
 
     for alias, destination in BACKING_ALIAS_REDIRECTS.items():
@@ -408,7 +436,7 @@ if errors:
         print(f"::error file={path},title=Contrato productivo inválido::{message}")
     sys.exit(1)
 
-mode = "expanded-v2" if expanded else "legacy"
+mode = "public-site-v3" if public_site_v3 else ("expanded-v2" if expanded else "legacy")
 print(
     f"Contrato SEO/routing productivo OK · mode={mode} · canonical={expected_home} · "
     f"api={api} · unknown-routes=404"

@@ -102,57 +102,6 @@
   content: none;
 }
 
-/* Misma paleta determinista que los avatares privados canónicos. */
-.public-home .public-support-account-avatar[data-avatar-tone="0"] {
-  --public-account-avatar-a: var(--public-home-accent);
-  --public-account-avatar-b: var(--public-home-accent-2);
-}
-
-.public-home .public-support-account-avatar[data-avatar-tone="1"] {
-  --public-account-avatar-a: var(--public-home-success);
-  --public-account-avatar-b: var(--public-home-accent-2);
-}
-
-.public-home .public-support-account-avatar[data-avatar-tone="2"] {
-  --public-account-avatar-a: var(--warning, #f2b84b);
-  --public-account-avatar-b: var(--public-home-accent);
-}
-
-.public-home .public-support-account-avatar[data-avatar-tone="3"] {
-  --public-account-avatar-a: var(--public-home-danger);
-  --public-account-avatar-b: var(--warning, #f2b84b);
-}
-
-.public-home .public-support-account-avatar[data-avatar-tone="4"] {
-  --public-account-avatar-a: var(--public-home-accent-2);
-  --public-account-avatar-b: var(--public-home-accent);
-}
-
-.public-home .public-support-account-avatar[data-avatar-tone="5"] {
-  --public-account-avatar-a: var(--public-home-success);
-  --public-account-avatar-b: var(--public-home-accent);
-}
-
-.public-home .public-support-account-avatar[data-avatar-tone="6"] {
-  --public-account-avatar-a: var(--public-home-accent-2);
-  --public-account-avatar-b: var(--public-home-success);
-}
-
-.public-home .public-support-account-avatar[data-avatar-tone="7"] {
-  --public-account-avatar-a: var(--warning, #f2b84b);
-  --public-account-avatar-b: var(--public-home-danger);
-}
-
-.public-home .public-support-account-avatar[data-avatar-tone="8"] {
-  --public-account-avatar-a: var(--public-home-danger);
-  --public-account-avatar-b: var(--public-home-accent);
-}
-
-.public-home .public-support-account-avatar[data-avatar-tone="9"] {
-  --public-account-avatar-a: var(--public-home-accent);
-  --public-account-avatar-b: var(--public-home-success);
-}
-
 .public-home .public-home-account-menu-wrap > .public-home-login-link {
   inline-size: 100%;
 }

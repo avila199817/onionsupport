@@ -88,7 +88,7 @@ html:is([data-theme="light"], .theme-light) .public-home .public-support-flow > 
 html:is([data-theme="light"], .theme-light) .public-home .public-support-flow-item p,
 html:is([data-theme="light"], .theme-light) .public-home .public-support-privacy,
 html:is([data-theme="light"], .theme-light) .public-home .public-support-field-meta,
-html:is([data-theme="light"], .theme-light) .public-home .public-support-account-label {
+html:is([data-theme="light"], .theme-light) .public-home .public-support-account-email {
   color: var(--public-home-text-muted);
 }
 

@@ -207,6 +207,50 @@ try {
   assert.equal(await page.evaluate(() => publicHost.dataset.avatarInitials), "AL");
   assert.equal(await page.evaluate(() => publicHost.closest("[data-public-home-account-slot]") !== null), true);
   assert.equal(await page.evaluate(() => getComputedStyle(publicHost).width), "36px", "Public topbar must use the shared shell avatar geometry");
+  assert.deepEqual(
+    await page.evaluate(() => ({
+      name: document.querySelector(".public-support-account-name")?.textContent,
+      email: document.querySelector(".public-support-account-email")?.textContent,
+      tooltip: document.querySelector(".public-support-account")?.dataset.publicSupportAccountTooltip,
+      ariaLabel: document.querySelector("[data-public-home-account-toggle]")?.getAttribute("aria-label"),
+    })),
+    {
+      name: "Ana López",
+      email: "ana@example.test",
+      tooltip: "Ana López · ana@example.test",
+      ariaLabel: "Abrir accesos rápidos de Ana López, ana@example.test",
+    },
+    "La cuenta pública debe mostrar nombre completo y correo en la misma identidad del avatar"
+  );
+  await page.evaluate(() => {
+    const state = publicCore.getState();
+    publicCore.runtimeState.write({
+      user: {
+        ...state.user,
+        name: "Cristian Ávila Luque",
+        email: "CRISTIAN@ONIONSUPPORT.COM",
+      },
+    });
+    publicSupport.scan();
+    publicExperience.scan();
+    window.publicHost = document.querySelector(".public-support-account-avatar");
+  });
+  await page.waitForFunction(() => document.querySelector(".public-support-account-name")?.textContent === "Cristian Ávila Luque");
+  assert.deepEqual(
+    await page.evaluate(() => ({
+      name: document.querySelector(".public-support-account-name")?.textContent,
+      email: document.querySelector(".public-support-account-email")?.textContent,
+      tooltip: document.querySelector(".public-support-account")?.dataset.publicSupportAccountTooltip,
+      ariaLabel: document.querySelector("[data-public-home-account-toggle]")?.getAttribute("aria-label"),
+    })),
+    {
+      name: "Cristian Ávila Luque",
+      email: "cristian@onionsupport.com",
+      tooltip: "Cristian Ávila Luque · cristian@onionsupport.com",
+      ariaLabel: "Abrir accesos rápidos de Cristian Ávila Luque, cristian@onionsupport.com",
+    },
+    "La identidad larga debe conservar nombre y correo normalizado sin compactarse en JavaScript"
+  );
   await page.evaluate(() => {
     const state = publicCore.getState();
     publicCore.runtimeState.write({ user: { ...state.user, avatarUrl: "/transparent.svg" } });

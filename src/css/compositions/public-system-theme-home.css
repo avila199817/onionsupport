@@ -315,6 +315,27 @@ html:is([data-theme="light"], .theme-light) .public-home .public-home-account-me
   border-color: #0877c7;
 }
 
+/* El topbar conserva la identidad expandida sin convertirla en una píldora. */
+html:is([data-theme="light"], .theme-light) .public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle] {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+html:is([data-theme="light"], .theme-light) .public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]:is(:hover, :focus-visible),
+html:is([data-theme="light"], .theme-light) .public-home .public-home-nav-account-slot .public-home-account-menu-wrap.is-open > [data-public-home-account-toggle] {
+  border-color: transparent;
+  background: rgb(19 148 255 / .08);
+  box-shadow: 0 0 0 3px rgb(19 148 255 / .06);
+}
+
+html:is([data-theme="light"], .theme-light) .public-home .public-home-nav-account-slot .public-support-account::after {
+  color: var(--public-home-text-strong);
+  border-color: rgb(19 148 255 / .20);
+  background: rgb(255 255 255 / .98);
+  box-shadow: 0 12px 30px rgb(31 67 103 / .16), inset 0 1px 0 #ffffff;
+}
+
 html:is([data-theme="light"], .theme-light) .public-home .public-home-account-menu {
   border-color: rgb(19 148 255 / .20);
   background:

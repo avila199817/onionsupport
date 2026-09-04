@@ -54,35 +54,39 @@
 
 .public-home .public-home-nav-account-slot {
   position: relative;
-  display: grid;
-  place-items: center;
-  inline-size: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  inline-size: min(100%, 312px);
   block-size: 48px;
-  min-inline-size: 48px;
+  min-inline-size: 0;
   min-block-size: 48px;
-  flex: 0 0 48px;
+  max-inline-size: min(31vw, 312px);
+  flex: 0 1 min(31vw, 312px);
 }
 
 .public-home .public-home-nav-account-slot .public-home-account-menu-wrap {
-  display: grid;
-  place-items: center;
-  inline-size: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  inline-size: 100%;
   block-size: 48px;
-  min-inline-size: 48px;
+  min-inline-size: 0;
   min-block-size: 48px;
-  max-inline-size: 48px;
+  max-inline-size: 100%;
   max-block-size: 48px;
 }
 
 .public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle] {
   box-sizing: border-box;
-  display: grid;
-  place-items: center;
-  inline-size: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  inline-size: 100%;
   block-size: 48px;
-  min-inline-size: 48px;
+  min-inline-size: 0;
   min-block-size: 48px;
-  max-inline-size: 48px;
+  max-inline-size: 100%;
   max-block-size: 48px;
   margin: 0;
   padding: 0;
@@ -96,18 +100,56 @@
 }
 
 .public-home .public-home-nav-account-slot .public-support-account {
-  display: grid;
-  place-items: center;
+  position: relative;
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  justify-content: flex-start;
   inline-size: 100%;
   block-size: 100%;
   min-inline-size: 0;
   min-block-size: 0;
-  gap: 0;
+  max-inline-size: 100%;
+  gap: 10px;
   margin: 0;
 }
 
 .public-home .public-home-nav-account-slot .public-support-account-copy {
-  display: none;
+  display: grid;
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  gap: 2px;
+  text-align: end;
+}
+
+.public-home .public-home-nav-account-slot .public-support-account-name,
+.public-home .public-home-nav-account-slot .public-support-account-email {
+  display: block;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  overflow: hidden;
+  text-align: end;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.public-home .public-home-nav-account-slot .public-support-account-name {
+  color: var(--public-home-text-strong);
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.2;
+}
+
+.public-home .public-home-nav-account-slot .public-support-account-email {
+  color: var(--public-home-text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.public-home .public-home-nav-account-slot .public-support-account-avatar {
+  flex: 0 0 var(--avatar-size-shell);
 }
 
 /*
@@ -209,21 +251,32 @@
 }
 
 /*
-  El avatar del topbar queda flotando: el área de clic sigue siendo 48px,
-  pero el toggle ya no dibuja caja, hover ni flecha alrededor del avatar.
+  El bloque de identidad conserva un área de clic estable de 48px de alto.
+  El texto vive a la izquierda del avatar y el recorte se resuelve sólo por
+  CSS; el tooltip devuelve el valor completo sin alterar el layout.
 */
 .public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle],
 .public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]:hover,
 .public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]:focus-visible,
 .public-home .public-home-nav-account-slot .public-home-account-menu-wrap.is-open > [data-public-home-account-toggle] {
+  inline-size: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  padding: 0;
   border: 0;
   border-color: transparent;
-  border-radius: 50%;
+  border-radius: 14px;
   background: transparent;
   background-image: none;
   box-shadow: none;
   transform: none;
-  transition: none;
+  transition: background .18s ease, box-shadow .18s ease;
+}
+
+.public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]:is(:hover, :focus-visible),
+.public-home .public-home-nav-account-slot .public-home-account-menu-wrap.is-open > [data-public-home-account-toggle] {
+  background: rgb(19 148 255 / .075);
+  box-shadow: 0 0 0 3px rgb(19 148 255 / .06);
 }
 
 .public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]:focus-visible {
@@ -231,8 +284,43 @@
   outline-offset: 3px;
 }
 
-.public-home .public-support-account-name {
-  max-inline-size: 112px;
+.public-home .public-home-nav-account-slot .public-support-account::after {
+  content: attr(data-public-support-account-tooltip);
+  position: absolute;
+  inset-block-start: calc(100% + 10px);
+  inset-inline-end: 0;
+  z-index: 190;
+  inline-size: max-content;
+  max-inline-size: min(360px, calc(100vw - 24px));
+  padding: 8px 10px;
+  border: 1px solid rgb(82 198 255 / .24);
+  border-radius: 10px;
+  color: var(--public-home-text-strong);
+  background: rgb(3 13 27 / .96);
+  box-shadow: 0 12px 30px rgb(0 0 0 / .24);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-align: end;
+  white-space: normal;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity .16s ease, visibility .16s ease, transform .16s ease;
+}
+
+.public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]:is(:hover, :focus-visible) .public-support-account::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.public-home .public-home-nav-account-slot .public-home-account-menu-wrap.is-open .public-support-account::after {
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
 }
 
 @media (min-width: 1041px) {
@@ -815,6 +903,30 @@
     max-inline-size: min(238px, calc(100vw - 28px));
   }
 
+  .public-home .public-home-nav-account-slot {
+    inline-size: 48px;
+    max-inline-size: 48px;
+    flex: 0 0 48px;
+  }
+
+  .public-home .public-home-nav-account-slot .public-home-account-menu-wrap,
+  .public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle] {
+    inline-size: 48px;
+    max-inline-size: 48px;
+    padding-inline: 0;
+  }
+
+  .public-home .public-home-nav-account-slot .public-support-account-copy,
+  .public-home .public-home-nav-account-slot .public-support-account::after {
+    display: none;
+  }
+
+  .public-home .public-home-nav-account-slot .public-support-account {
+    inline-size: 48px;
+    max-inline-size: 48px;
+    gap: 0;
+  }
+
   .public-home .public-home-nav-actions > .public-home-account-menu-wrap {
     flex-direction: column;
   }
@@ -884,6 +996,7 @@
   .public-home .public-home-account-menu-wrap > [data-public-home-account-toggle],
   .public-home .public-home-account-menu-wrap > [data-public-home-account-toggle]::before,
   .public-home .public-home-account-menu-wrap > [data-public-home-account-toggle]::after,
+  .public-home .public-home-nav-account-slot .public-support-account::after,
   .public-home .public-support-phone-control {
     transition: none;
   }

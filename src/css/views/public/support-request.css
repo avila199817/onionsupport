@@ -987,11 +987,13 @@
 }
 
 .public-home .public-support-account-name,
-.public-home .public-support-account-label {
+.public-home .public-support-account-email {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-inline-size: 0;
+  max-inline-size: 100%;
 }
 
 .public-home .public-support-account-name {
@@ -1001,7 +1003,7 @@
   line-height: 1.25;
 }
 
-.public-home .public-support-account-label {
+.public-home .public-support-account-email {
   color: var(--public-home-text-muted);
   font-size: 10px;
   font-weight: 760;

@@ -4,8 +4,8 @@
 
    Remate UX de la landing pública:
    - Visitante: login junto a "Abrir incidencia" dentro del menú público.
-   - Sesión activa: sólo avatar en el topbar y dropdown fuera del drawer móvil.
-   - El nombre queda disponible para accesibilidad, no se pinta en el topbar.
+   - Sesión activa: identidad completa (nombre + correo) junto al avatar y
+     dropdown fuera del drawer móvil.
    - Footer sin login/cuenta.
    - Teléfono España: bandera/+34 fijos y campo nacional sin prefijo duplicado.
    - SVGs inline afinados sin alterar su semántica.
@@ -14,7 +14,7 @@
 import { AppCore } from "../../core/index.js";
 
 export const PUBLIC_HOME_EXPERIENCE_VERSION =
-  "public-home.experience.v5-avatar-topbar-account";
+  "public-home.experience.v6-avatar-topbar-identity";
 
 const HOME = "[data-public-home]";
 const FORM = "[data-public-support-form]";
@@ -129,45 +129,6 @@ function panelPath(link = null, state = {}) {
   if (fromLink) return fromLink;
 
   return "/dashboard";
-}
-
-function compactDisplayName(value = "") {
-  const clean = text(value, "");
-  if (!clean) return "";
-
-  const parts = clean.split(" ").filter(Boolean);
-  if (parts.length < 2) return parts[0];
-
-  const initial = Array.from(parts[1])[0]?.toLocaleUpperCase("es-ES") || "";
-  return initial ? `${parts[0]} ${initial}.` : parts[0];
-}
-
-function compactAccountIdentity(root = null) {
-  if (!root) return false;
-
-  let changed = false;
-
-  root.querySelectorAll(".public-support-account-name").forEach((node) => {
-    const original =
-      text(node.dataset.publicHomeFullName || "") || text(node.textContent || "");
-
-    if (!original) return;
-
-    if (!node.dataset.publicHomeFullName) {
-      node.dataset.publicHomeFullName = original;
-    }
-
-    const compact = compactDisplayName(original);
-
-    if (compact && text(node.textContent) !== compact) {
-      node.textContent = compact;
-      changed = true;
-    }
-
-    if (node.title !== original) node.title = original;
-  });
-
-  return changed;
 }
 
 function routeLink(label, href) {
@@ -364,7 +325,16 @@ function ensureAccountMenu(root = null, state = {}) {
   link.setAttribute("tabindex", "0");
   link.setAttribute("aria-haspopup", "menu");
   link.setAttribute("aria-expanded", "false");
-  link.setAttribute("aria-label", "Abrir accesos rápidos de cuenta");
+  const identity = link.querySelector(".public-support-account");
+  const identityName = text(identity?.dataset?.publicSupportAccountName, "");
+  const identityEmail = text(identity?.dataset?.publicSupportAccountEmail, "");
+  const identityLabel = [identityName, identityEmail].filter(Boolean).join(", ");
+  link.setAttribute(
+    "aria-label",
+    identityLabel
+      ? `Abrir accesos rápidos de ${identityLabel}`
+      : "Abrir accesos rápidos de cuenta"
+  );
 
   // Un toggle de menú nunca debe conservar semántica de navegación.
   link.removeAttribute("href");
@@ -372,11 +342,6 @@ function ensureAccountMenu(root = null, state = {}) {
   delete link.dataset.routerLink;
   delete link.dataset.route;
   delete link.dataset.href;
-
-  const label = link.querySelector(".public-support-account-label");
-  if (label && text(label.textContent) !== "Accesos rápidos") {
-    label.textContent = "Accesos rápidos";
-  }
 
   let menu = wrapper.querySelector(ACCOUNT_MENU);
   if (!menu) menu = buildAccountMenu(wrapper, home);
@@ -622,7 +587,6 @@ function enhance(root = null, state = {}) {
 
   removeFooterLogin(root);
   ensureAccountMenu(root, state);
-  compactAccountIdentity(root);
   enforceHeaderActionOrder(root);
   enhancePhone(root);
   polishInlineIcons(root);

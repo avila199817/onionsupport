@@ -352,6 +352,8 @@ def main() -> int:
         ('rows="5"', "La descripción pública debe conservar la densidad compacta"),
         ('...addressParts(user)', "Falta prefill estructurado desde usuario existente"),
         ('new MutationObserver(queueScan)', "El intake debe coalescer mutaciones por frame"),
+        ('className = "public-support-account-email"', "La identidad autenticada debe mostrar el correo canónico"),
+        ("publicSupportAccountTooltip", "La identidad larga debe tener una salida hover/focus completa"),
     ):
         require(errors, snippet in intake, message)
 
@@ -607,7 +609,7 @@ def main() -> int:
         ('"/incidencias"', "Falta acceso a Incidencias"),
         ('"/facturas"', "Falta acceso a Facturas"),
         ('"/cuenta"', "Falta acceso a Cuenta"),
-        ("public-home.experience.v5-avatar-topbar-account", "Falta versión coalescida del Home"),
+        ("public-home.experience.v6-avatar-topbar-identity", "Falta versión coalescida del Home"),
         ("data-public-home-account-slot", "Falta slot de cuenta en el topbar público"),
         ('avatarHost.classList.add("topbar-avatar")', "El avatar del topbar debe heredar el tamaño global shell"),
         ("new MutationObserver(queueScan)", "El Home debe coalescer mutaciones por frame"),
@@ -630,11 +632,13 @@ def main() -> int:
         ("@media (max-width: 1040px)", "Falta breakpoint del drawer público"),
         (".public-home .public-home-nav-panel", "Falta contrato del drawer público"),
         ("public-home-nav-account-slot", "Falta el avatar autenticado fuera del drawer"),
-        (".public-home .public-home-nav-account-slot {\n  position: relative;\n  display: grid;", "El slot del topbar debe centrar su contenido"),
+        (".public-home .public-home-nav-account-slot {\n  position: relative;\n  display: inline-flex;", "El slot del topbar debe contener identidad y avatar"),
         ("padding: 0;", "El toggle del topbar no debe desplazar el avatar con padding interno"),
         (".public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle],\n.public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]:hover", "El topbar debe mantener el avatar sin caja hover"),
         ("background: transparent;\n  background-image: none;\n  box-shadow: none;", "El toggle del topbar no debe pintar fondo ni sombra"),
         ("outline-offset: 3px;", "El foco de teclado debe rodear el avatar, no recuperar la caja"),
+        ("text-overflow: ellipsis;", "Los nombres/correos largos no deben romper el topbar"),
+        ("overflow-wrap: anywhere;", "El hover debe envolver correos/nombres extremos sin desbordar"),
     ):
         require(errors, snippet in experience_css, message)
 

@@ -91,7 +91,7 @@ assert.match(
 );
 
 const panelPathStart = experience.indexOf("function panelPath(");
-const panelPathEnd = experience.indexOf("function compactDisplayName", panelPathStart);
+const panelPathEnd = experience.indexOf("function routeLink", panelPathStart);
 assert.ok(panelPathStart >= 0 && panelPathEnd > panelPathStart, "Falta panelPath en Public Home Experience");
 
 const panelPath = experience.slice(panelPathStart, panelPathEnd);
@@ -119,6 +119,22 @@ assert.match(
   experience,
   /document\.addEventListener\(PUBLIC_HOME_SESSION_EVENT, queueScan, true\)/,
   "El menú debe reconstruirse al terminar la hidratación de sesión"
+);
+
+assert.equal(
+  experience.includes("compactDisplayName"),
+  false,
+  "La identidad del usuario no puede recortarse en JavaScript; CSS debe controlar el overflow"
+);
+assert.equal(
+  experience.includes("compactAccountIdentity"),
+  false,
+  "La home debe reutilizar la identidad completa del AvatarSystem"
+);
+assert.match(
+  support,
+  /className = "public-support-account-email"/,
+  "La cuenta pública debe pintar el correo bajo el nombre"
 );
 
 for (const [name, source] of [

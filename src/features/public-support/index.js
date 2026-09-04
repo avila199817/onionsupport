@@ -198,16 +198,27 @@ function identityNode(name, src, presentation = {}) {
   const resolved = presentation && typeof presentation === "object"
     ? presentation
     : {};
+  const displayName = text(resolved.name || name, "Mi cuenta");
+  const displayEmail = text(resolved.email, "").toLowerCase();
   const wrap = document.createElement("span");
   wrap.className = "public-support-account";
+  wrap.dataset.publicSupportAccountName = displayName;
+  wrap.dataset.publicSupportAccountEmail = displayEmail;
+  wrap.dataset.publicSupportAccountTooltip = displayEmail
+    ? `${displayName} · ${displayEmail}`
+    : displayName;
+  wrap.setAttribute(
+    "aria-label",
+    displayEmail ? `${displayName}, ${displayEmail}` : displayName
+  );
 
   const mark = document.createElement("span");
   mark.className = "public-support-account-avatar";
   mark.setAttribute("aria-hidden", "true");
   mark.dataset.avatarSystem = "true";
   mark.dataset.avatarHost = "true";
-  mark.dataset.avatarName = resolved.name || name;
-  mark.dataset.avatarEmail = resolved.email || "";
+  mark.dataset.avatarName = displayName;
+  mark.dataset.avatarEmail = displayEmail;
   mark.dataset.avatarUserId = resolved.userId || "";
   mark.dataset.avatarUsername = resolved.username || "";
 
@@ -235,11 +246,13 @@ function identityNode(name, src, presentation = {}) {
 
   const strong = document.createElement("strong");
   strong.className = "public-support-account-name";
-  strong.textContent = name;
+  strong.textContent = displayName;
+  strong.title = displayName;
 
   const small = document.createElement("small");
-  small.className = "public-support-account-label";
-  small.textContent = "Ir al panel";
+  small.className = "public-support-account-email";
+  small.textContent = displayEmail;
+  if (displayEmail) small.title = displayEmail;
 
   copy.append(strong, small);
   wrap.append(mark, copy);

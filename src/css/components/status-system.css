@@ -7,7 +7,7 @@
    Contrato:
    - Abierto / en curso => azul operativo.
    - Pendiente / borrador / parcial => ámbar de atención.
-   - Cerrado / resuelto / pagado / activo => verde de éxito.
+   - Cerrado / resuelto / finalizado / terminado / pagado / activo => verde de éxito.
    - Vencido / bloqueado / crítico => rojo de error.
    - Cancelado => neutral, nunca falso éxito.
    - Sólo pinta estados; IDs, categorías, roles y metadatos quedan fuera.
@@ -49,23 +49,23 @@
 html[data-theme="light"],
 body[data-theme="light"] {
   --ui-status-open-fg: #0b5cad;
-  --ui-status-open-bg: rgba(15, 108, 189, .13);
-  --ui-status-open-border: rgba(15, 108, 189, .42);
+  --ui-status-open-bg: rgba(15, 108, 189, .14);
+  --ui-status-open-border: rgba(15, 108, 189, .44);
   --ui-status-open-dot: #0f6cbd;
 
   --ui-status-success-fg: #0b6a0b;
-  --ui-status-success-bg: rgba(16, 124, 16, .13);
-  --ui-status-success-border: rgba(16, 124, 16, .40);
+  --ui-status-success-bg: rgba(16, 124, 16, .15);
+  --ui-status-success-border: rgba(16, 124, 16, .44);
   --ui-status-success-dot: #107c10;
 
   --ui-status-pending-fg: #7a4e00;
-  --ui-status-pending-bg: rgba(202, 138, 4, .15);
-  --ui-status-pending-border: rgba(161, 98, 7, .42);
+  --ui-status-pending-bg: rgba(202, 138, 4, .16);
+  --ui-status-pending-border: rgba(161, 98, 7, .46);
   --ui-status-pending-dot: #a16207;
 
   --ui-status-danger-fg: #a4262c;
-  --ui-status-danger-bg: rgba(196, 43, 28, .12);
-  --ui-status-danger-border: rgba(164, 38, 44, .40);
+  --ui-status-danger-bg: rgba(196, 43, 28, .13);
+  --ui-status-danger-border: rgba(164, 38, 44, .42);
   --ui-status-danger-dot: #c42b1c;
 
   --ui-status-neutral-fg: #525252;
@@ -111,7 +111,8 @@ body[data-theme="light"] {
   --ui-status-border: var(--ui-status-neutral-border);
   --ui-status-dot: var(--ui-status-neutral-dot);
 
-  min-block-size: 26px;
+  min-block-size: 27px;
+  gap: 6px;
   padding-inline: 9px;
   border-color: var(--ui-status-border);
   background: var(--ui-status-bg);
@@ -186,17 +187,45 @@ body[data-theme="light"] {
   .incidencias-status-chip--resolved,
   .incidencias-status-chip.is-closed,
   .incidencias-status-chip.is-resolved,
+  .incidencias-status-chip--finalizado,
+  .incidencias-status-chip--finalizada,
+  .incidencias-status-chip--terminado,
+  .incidencias-status-chip--terminada,
+  .incidencias-status-chip--completed,
+  .incidencias-status-chip--done,
+  .incidencias-status-chip--finished,
   .facturas-chip--paid,
   .clientes-chip--active,
   .usuarios-chip--active,
   .usuarios-status-chip--active,
   .usuarios-status-chip.is-active,
   .home-status--success,
+  .home-status[data-home-status="finalizado"],
+  .home-status[data-home-status="finalizada"],
+  .home-status[data-home-status="terminado"],
+  .home-status[data-home-status="terminada"],
+  .home-status[data-home-status="completed"],
+  .home-status[data-home-status="done"],
+  .home-status[data-home-status="finished"],
   .cuenta-chip--success,
   .ui-detail-modal-chip--status-closed,
   .ui-detail-modal-chip--status_closed,
   .ui-detail-modal-chip--status-resolved,
   .ui-detail-modal-chip--status_resolved,
+  .ui-detail-modal-chip--status-finalizado,
+  .ui-detail-modal-chip--status_finalizado,
+  .ui-detail-modal-chip--status-finalizada,
+  .ui-detail-modal-chip--status_finalizada,
+  .ui-detail-modal-chip--status-terminado,
+  .ui-detail-modal-chip--status_terminado,
+  .ui-detail-modal-chip--status-terminada,
+  .ui-detail-modal-chip--status_terminada,
+  .ui-detail-modal-chip--status-completed,
+  .ui-detail-modal-chip--status_completed,
+  .ui-detail-modal-chip--status-done,
+  .ui-detail-modal-chip--status_done,
+  .ui-detail-modal-chip--status-finished,
+  .ui-detail-modal-chip--status_finished,
   .clientes-modal-chip--status-active,
   .clientes-modal-chip--status_active,
   .facturas-detail-chip--success,
@@ -342,9 +371,9 @@ body[data-theme="light"] {
     .facturas-chip-dot,
     .clientes-chip-dot,
     .usuarios-chip-dot,
-    .usuarios-status-dot,
-    .server-status-chip::before
-  ) {
+    .usuarios-status-dot
+  ),
+  .server-status-chip::before {
     box-shadow: none;
   }
 }

@@ -95,21 +95,44 @@ function directCountBadge(button = null) {
   return null;
 }
 
+function setStableBadgeText(badge = null, value = "0") {
+  if (!badge) return false;
+
+  const next = String(value);
+  const onlyChild = badge.childNodes?.length === 1
+    ? badge.firstChild
+    : null;
+
+  if (onlyChild?.nodeType === 3) {
+    if (onlyChild.nodeValue !== next) onlyChild.nodeValue = next;
+    return true;
+  }
+
+  if (badge.textContent === next) return true;
+
+  badge.replaceChildren(document.createTextNode(next));
+  return true;
+}
+
 function syncButton(button = null, count = 0) {
   if (!button) return false;
 
+  const next = String(Math.max(0, Number(count) || 0));
   let badge = directCountBadge(button);
+
   if (!badge) {
     badge = document.createElement("strong");
     badge.dataset.facturasFilterCount = "true";
+    setStableBadgeText(badge, next);
     button.append(badge);
-  } else if (badge.dataset?.facturasFilterCount !== "true") {
+    return true;
+  }
+
+  if (badge.dataset?.facturasFilterCount !== "true") {
     badge.dataset.facturasFilterCount = "true";
   }
 
-  const next = String(Math.max(0, Number(count) || 0));
-  if (badge.textContent !== next) badge.textContent = next;
-
+  setStableBadgeText(badge, next);
   return true;
 }
 
@@ -195,8 +218,8 @@ function onMutations(mutations = []) {
   syncFacturasFilterCounts(root);
 
   /*
-    Descartamos únicamente los records generados por nuestros propios <strong>.
-    Así evitamos una segunda vuelta del observer sin silenciar mutaciones reales.
+    La única mutación que generamos en el camino normal es insertar el <strong>
+    ya completo. La retiramos del queue para que no provoque una segunda vuelta.
   */
   const pending = observer?.takeRecords?.() || [];
   ignoredMutations += pending.filter(mutationOnlyContainsOwnBadges).length;

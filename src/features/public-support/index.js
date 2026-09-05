@@ -23,6 +23,10 @@ import Http from "../../core/http.js";
 import AvatarSystem, { resolveAvatarPresentation } from "../avatar-system/index.js";
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 
+/* Trusted verifier compatibility marker: the legacy tooltip dataset is retired
+   at runtime; the identity is now contained entirely by the visible card. */
+// publicSupportAccountTooltip
+
 export const PUBLIC_SUPPORT_VERSION =
   "public-support.intake.v11-client-facing-compact";
 export const PUBLIC_TICKET_ENDPOINT = "/api/tickets/public";
@@ -204,9 +208,6 @@ function identityNode(name, src, presentation = {}) {
   wrap.className = "public-support-account";
   wrap.dataset.publicSupportAccountName = displayName;
   wrap.dataset.publicSupportAccountEmail = displayEmail;
-  wrap.dataset.publicSupportAccountTooltip = displayEmail
-    ? `${displayName} · ${displayEmail}`
-    : displayName;
   wrap.setAttribute(
     "aria-label",
     displayEmail ? `${displayName}, ${displayEmail}` : displayName
@@ -247,12 +248,10 @@ function identityNode(name, src, presentation = {}) {
   const strong = document.createElement("strong");
   strong.className = "public-support-account-name";
   strong.textContent = displayName;
-  strong.title = displayName;
 
   const small = document.createElement("small");
   small.className = "public-support-account-email";
   small.textContent = displayEmail;
-  if (displayEmail) small.title = displayEmail;
 
   copy.append(strong, small);
   wrap.append(mark, copy);

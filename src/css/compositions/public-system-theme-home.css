@@ -329,11 +329,27 @@ html:is([data-theme="light"], .theme-light) .public-home .public-home-nav-accoun
   box-shadow: 0 0 0 3px rgb(19 148 255 / .06);
 }
 
-html:is([data-theme="light"], .theme-light) .public-home .public-home-nav-account-slot .public-support-account::after {
+html:is([data-theme="light"], .theme-light) .public-home .public-home-nav-account-slot .public-support-account {
+  border-color: rgb(19 148 255 / .18);
   color: var(--public-home-text-strong);
-  border-color: rgb(19 148 255 / .20);
-  background: rgb(255 255 255 / .98);
-  box-shadow: 0 12px 30px rgb(31 67 103 / .16), inset 0 1px 0 #ffffff;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / .96), rgb(241 247 253 / .88)),
+    rgb(255 255 255 / .84);
+  box-shadow:
+    0 10px 24px rgb(31 67 103 / .12),
+    inset 0 1px 0 #ffffff;
+}
+
+html:is([data-theme="light"], .theme-light) .public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]:is(:hover, :focus-visible) .public-support-account,
+html:is([data-theme="light"], .theme-light) .public-home .public-home-nav-account-slot .public-home-account-menu-wrap.is-open .public-support-account {
+  border-color: rgb(19 148 255 / .36);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / .98), rgb(229 243 255 / .94)),
+    rgb(255 255 255 / .92);
+  box-shadow:
+    0 0 0 3px rgb(19 148 255 / .07),
+    0 14px 32px rgb(31 67 103 / .16),
+    inset 0 1px 0 #ffffff;
 }
 
 html:is([data-theme="light"], .theme-light) .public-home .public-home-account-menu {

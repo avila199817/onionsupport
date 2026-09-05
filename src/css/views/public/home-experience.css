@@ -5,7 +5,7 @@
    Sistema visual/UX canónico de la landing:
    - Landing ancha y respirada.
    - Visitante: login junto a Abrir incidencia en el drawer.
-   - Sesión activa: avatar único en el header y menú fuera del drawer.
+   - Sesión activa: tarjeta de identidad con avatar en el header y menú fuera del drawer.
    - Dropdown autenticado premium tipo command-card.
    - Navegación móvil contenida y estable.
    - Teléfono España con bandera + prefijo +34 permanentes.
@@ -109,6 +109,7 @@
 }
 
 .public-home .public-home-nav-account-slot .public-support-account {
+  box-sizing: border-box;
   position: relative;
   display: flex;
   flex-direction: row-reverse;
@@ -119,8 +120,28 @@
   min-inline-size: 0;
   min-block-size: 0;
   max-inline-size: 100%;
+  padding: 5px 8px 5px 12px;
+  overflow: hidden;
+
+  border: 1px solid rgb(82 198 255 / .22);
+  border-radius: 14px;
+
+  color: var(--public-home-text-strong);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / .055), rgb(255 255 255 / .025)),
+    rgb(3 12 25 / .72);
+
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .055),
+    0 10px 24px rgb(0 0 0 / .15);
+
   gap: 10px;
   margin: 0;
+
+  transition:
+    border-color .18s ease,
+    background .18s ease,
+    box-shadow .18s ease;
 }
 
 .public-home .public-home-nav-account-slot .public-support-account-copy {
@@ -138,6 +159,7 @@
   min-inline-size: 0;
   max-inline-size: 100%;
   overflow: hidden;
+  overflow-wrap: anywhere;
   text-align: end;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -159,6 +181,18 @@
 
 .public-home .public-home-nav-account-slot .public-support-account-avatar {
   flex: 0 0 var(--avatar-size-shell);
+}
+
+.public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]:is(:hover, :focus-visible) .public-support-account,
+.public-home .public-home-nav-account-slot .public-home-account-menu-wrap.is-open .public-support-account {
+  border-color: rgb(52 212 255 / .48);
+  background:
+    linear-gradient(180deg, rgb(52 212 255 / .075), rgb(19 148 255 / .025)),
+    rgb(3 14 30 / .92);
+  box-shadow:
+    0 0 0 3px rgb(19 148 255 / .065),
+    0 14px 36px rgb(0 0 0 / .20),
+    inset 0 1px 0 rgb(255 255 255 / .075);
 }
 
 /*
@@ -260,9 +294,9 @@
 }
 
 /*
-  El bloque de identidad conserva un área de clic estable de 48px de alto.
+  El bloque de identidad es una única tarjeta estable de 48px de alto.
   El texto vive a la izquierda del avatar y el recorte se resuelve sólo por
-  CSS; el tooltip devuelve el valor completo sin alterar el layout.
+  CSS, sin titles ni detalles flotantes que dupliquen la información.
 */
 .public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle],
 .public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]:hover,
@@ -291,45 +325,6 @@
 .public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]:focus-visible {
   outline: 2px solid rgb(52 212 255 / .78);
   outline-offset: 3px;
-}
-
-.public-home .public-home-nav-account-slot .public-support-account::after {
-  content: attr(data-public-support-account-tooltip);
-  position: absolute;
-  inset-block-start: calc(100% + 10px);
-  inset-inline-end: 0;
-  z-index: 190;
-  inline-size: max-content;
-  max-inline-size: min(360px, calc(100vw - 24px));
-  padding: 8px 10px;
-  border: 1px solid rgb(82 198 255 / .24);
-  border-radius: 10px;
-  color: var(--public-home-text-strong);
-  background: rgb(3 13 27 / .96);
-  box-shadow: 0 12px 30px rgb(0 0 0 / .24);
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-  text-align: end;
-  white-space: normal;
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  transform: translateY(-4px);
-  transition: opacity .16s ease, visibility .16s ease, transform .16s ease;
-}
-
-.public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]:is(:hover, :focus-visible) .public-support-account::after {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0);
-}
-
-.public-home .public-home-nav-account-slot .public-home-account-menu-wrap.is-open .public-support-account::after {
-  opacity: 0;
-  visibility: hidden;
-  transform: translateY(-4px);
 }
 
 @media (min-width: 1041px) {
@@ -925,8 +920,7 @@
     padding-inline: 0;
   }
 
-  .public-home .public-home-nav-account-slot .public-support-account-copy,
-  .public-home .public-home-nav-account-slot .public-support-account::after {
+  .public-home .public-home-nav-account-slot .public-support-account-copy {
     display: none;
   }
 
@@ -1005,7 +999,6 @@
   .public-home .public-home-account-menu-wrap > [data-public-home-account-toggle],
   .public-home .public-home-account-menu-wrap > [data-public-home-account-toggle]::before,
   .public-home .public-home-account-menu-wrap > [data-public-home-account-toggle]::after,
-  .public-home .public-home-nav-account-slot .public-support-account::after,
   .public-home .public-support-phone-control {
     transition: none;
   }

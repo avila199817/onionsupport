@@ -17,7 +17,7 @@
    - Aplicar el tema público system/light como composición transversal Home + Auth.
    - Permitir composiciones responsive transversales sin parches por vista.
    - Centralizar loading/skeleton en una capa propia posterior a las vistas.
-   - Cerrar la cascada con invariantes geométricas y de identidad transversales.
+   - Cerrar la cascada con invariantes geométricas, estados e identidad transversales.
 
    Reglas:
    - Sin declaraciones CSS directas en este archivo.
@@ -95,14 +95,15 @@
 @import url("./components/skeleton.css") layer(loading);
 
 /* =========================================================
-   FINAL UI FOUNDATION · LAYOUT + AVATAR GUARDRAILS
+   FINAL UI FOUNDATION · LAYOUT + STATUS + AVATAR GUARDRAILS
 
    Esta capa es deliberadamente la última. Primero fija las invariantes de
-   layout y después AvatarSystem impone una única gramática de identidad para
-   todo el SPA. avatar-system-contexts.css sólo aporta tamaños contextuales;
-   no puede pintar ni decidir identidad/color.
+   layout, después StatusSystem impone una única gramática semántica de estado
+   y finalmente AvatarSystem impone una única gramática de identidad para
+   todo el SPA. Los contextos de avatar sólo aportan tamaños.
 ========================================================= */
 
 @import url("./core/guardrails.css") layer(guardrails);
+@import url("./components/status-system.css") layer(guardrails);
 @import url("./components/avatar-system.css") layer(guardrails);
 @import url("./components/avatar-system-contexts.css") layer(guardrails);

@@ -403,6 +403,35 @@ html:is([data-theme="light"], .theme-light) .public-home .public-home-account-me
     inset 0 1px 0 #ffffff;
 }
 
+/* En móvil la identidad no necesita una segunda tarjeta alrededor del
+   avatar: la superficie interactiva queda transparente y sólo se escala el
+   círculo gestionado por AvatarSystem. */
+@media (max-width: 720px) {
+  html:is([data-theme="light"], .theme-light) .public-home .public-home-nav-account-slot .public-support-account {
+    padding: 0;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  html:is([data-theme="light"], .theme-light) .public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]:is(:hover, :focus-visible) .public-support-account,
+  html:is([data-theme="light"], .theme-light) .public-home .public-home-nav-account-slot .public-home-account-menu-wrap.is-open .public-support-account {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  html:is([data-theme="light"], .theme-light) .public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]:is(:hover, :focus-visible),
+  html:is([data-theme="light"], .theme-light) .public-home .public-home-nav-account-slot .public-home-account-menu-wrap.is-open > [data-public-home-account-toggle] {
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+  }
+}
+
 /* =========================================================
    7. FLOATING WHATSAPP · LIGHT CONTRAST
 ========================================================= */

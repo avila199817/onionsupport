@@ -927,7 +927,34 @@
   .public-home .public-home-nav-account-slot .public-support-account {
     inline-size: 48px;
     max-inline-size: 48px;
+    padding: 0;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
     gap: 0;
+    justify-content: center;
+  }
+
+  .public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]:is(:hover, :focus-visible) .public-support-account,
+  .public-home .public-home-nav-account-slot .public-home-account-menu-wrap.is-open .public-support-account {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  /* En móvil desaparece el contenedor visual: sólo queda el avatar circular,
+     ligeramente mayor para equilibrar el botón hamburguesa de 48px. */
+  .public-home .public-home-nav-account-slot .public-support-account-avatar {
+    flex: 0 0 42px;
+  }
+
+  .public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]:is(:hover, :focus-visible),
+  .public-home .public-home-nav-account-slot .public-home-account-menu-wrap.is-open > [data-public-home-account-toggle] {
+    background: transparent;
+    box-shadow: none;
   }
 
   .public-home .public-home-nav-actions > .public-home-account-menu-wrap {

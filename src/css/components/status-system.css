@@ -1,0 +1,350 @@
+/* =========================================================
+   ONION SUPPORT — SEMANTIC STATUS SYSTEM
+   Archivo: /src/css/components/status-system.css
+
+   SINGLE STATUS PAINT AUTHORITY · SPA-WIDE
+
+   Contrato:
+   - Abierto / en curso => azul operativo.
+   - Pendiente / borrador / parcial => ámbar de atención.
+   - Cerrado / resuelto / pagado / activo => verde de éxito.
+   - Vencido / bloqueado / crítico => rojo de error.
+   - Cancelado => neutral, nunca falso éxito.
+   - Sólo pinta estados; IDs, categorías, roles y metadatos quedan fuera.
+   - No cambia la semántica de negocio ni el texto de los estados.
+   - Light/Dark mantienen contraste y reconocimiento inmediato.
+========================================================= */
+
+:root {
+  --ui-status-open-fg: #93c5fd;
+  --ui-status-open-bg: rgba(37, 99, 235, .18);
+  --ui-status-open-border: rgba(96, 165, 250, .48);
+  --ui-status-open-dot: #60a5fa;
+
+  --ui-status-success-fg: #86efac;
+  --ui-status-success-bg: rgba(22, 163, 74, .18);
+  --ui-status-success-border: rgba(74, 222, 128, .46);
+  --ui-status-success-dot: #4ade80;
+
+  --ui-status-pending-fg: #fde68a;
+  --ui-status-pending-bg: rgba(217, 119, 6, .18);
+  --ui-status-pending-border: rgba(245, 158, 11, .50);
+  --ui-status-pending-dot: #f59e0b;
+
+  --ui-status-danger-fg: #fca5a5;
+  --ui-status-danger-bg: rgba(220, 38, 38, .18);
+  --ui-status-danger-border: rgba(248, 113, 113, .48);
+  --ui-status-danger-dot: #f87171;
+
+  --ui-status-neutral-fg: var(--text-muted);
+  --ui-status-neutral-bg: color-mix(in srgb, var(--text-muted) 10%, transparent);
+  --ui-status-neutral-border: color-mix(in srgb, var(--text-muted) 30%, var(--border-default));
+  --ui-status-neutral-dot: var(--text-muted);
+
+  --ui-status-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .08),
+    0 1px 2px rgba(0, 0, 0, .08);
+}
+
+html[data-theme="light"],
+body[data-theme="light"] {
+  --ui-status-open-fg: #0b5cad;
+  --ui-status-open-bg: rgba(15, 108, 189, .13);
+  --ui-status-open-border: rgba(15, 108, 189, .42);
+  --ui-status-open-dot: #0f6cbd;
+
+  --ui-status-success-fg: #0b6a0b;
+  --ui-status-success-bg: rgba(16, 124, 16, .13);
+  --ui-status-success-border: rgba(16, 124, 16, .40);
+  --ui-status-success-dot: #107c10;
+
+  --ui-status-pending-fg: #7a4e00;
+  --ui-status-pending-bg: rgba(202, 138, 4, .15);
+  --ui-status-pending-border: rgba(161, 98, 7, .42);
+  --ui-status-pending-dot: #a16207;
+
+  --ui-status-danger-fg: #a4262c;
+  --ui-status-danger-bg: rgba(196, 43, 28, .12);
+  --ui-status-danger-border: rgba(164, 38, 44, .40);
+  --ui-status-danger-dot: #c42b1c;
+
+  --ui-status-neutral-fg: #525252;
+  --ui-status-neutral-bg: rgba(82, 82, 82, .08);
+  --ui-status-neutral-border: rgba(82, 82, 82, .24);
+  --ui-status-neutral-dot: #696969;
+
+  --ui-status-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .62),
+    0 1px 2px rgba(13, 13, 13, .05);
+}
+
+/* =========================================================
+   BASE · ONLY REAL STATUS BADGES
+========================================================= */
+
+:where(
+  .incidencias-status-chip,
+  .incidencias-priority-badge,
+  .facturas-chip,
+  .clientes-chip,
+  .usuarios-chip,
+  .usuarios-status-chip,
+  .home-status,
+  .cuenta-chip--success,
+  .cuenta-chip--warning,
+  .cuenta-chip--danger,
+  .ui-detail-modal-chip[class*="--status-"],
+  .ui-detail-modal-chip[class*="--status_"],
+  .clientes-modal-chip[class*="--status-"],
+  .clientes-modal-chip[class*="--status_"],
+  .facturas-detail-chip--success,
+  .facturas-detail-chip--warning,
+  .facturas-detail-chip--danger,
+  .facturas-detail-chip--error,
+  .server-meta-pill--healthy,
+  .server-meta-pill--warning,
+  .server-meta-pill--critical,
+  .server-status-chip
+) {
+  --ui-status-fg: var(--ui-status-neutral-fg);
+  --ui-status-bg: var(--ui-status-neutral-bg);
+  --ui-status-border: var(--ui-status-neutral-border);
+  --ui-status-dot: var(--ui-status-neutral-dot);
+
+  min-block-size: 26px;
+  padding-inline: 9px;
+  border-color: var(--ui-status-border);
+  background: var(--ui-status-bg);
+  color: var(--ui-status-fg);
+  box-shadow: var(--ui-status-shadow);
+  font-weight: var(--weight-bold, 700);
+  letter-spacing: .005em;
+}
+
+/* =========================================================
+   OPEN / IN PROGRESS · BLUE
+========================================================= */
+
+:where(
+  .incidencias-status-chip--open,
+  .incidencias-status-chip.is-open,
+  .incidencias-status-chip--in_progress,
+  .incidencias-status-chip--in-progress,
+  .incidencias-status-chip.is-in_progress,
+  .incidencias-status-chip.is-in-progress,
+  .home-status--info,
+  .ui-detail-modal-chip--status-open,
+  .ui-detail-modal-chip--status_open,
+  .ui-detail-modal-chip--status-progress,
+  .ui-detail-modal-chip--status_progress,
+  .ui-detail-modal-chip--status-in-progress,
+  .ui-detail-modal-chip--status_in_progress
+) {
+  --ui-status-fg: var(--ui-status-open-fg);
+  --ui-status-bg: var(--ui-status-open-bg);
+  --ui-status-border: var(--ui-status-open-border);
+  --ui-status-dot: var(--ui-status-open-dot);
+}
+
+/* =========================================================
+   PENDING / PARTIAL / DRAFT · AMBER
+========================================================= */
+
+:where(
+  .incidencias-status-chip--pending,
+  .incidencias-status-chip.is-pending,
+  .facturas-chip--pending,
+  .facturas-chip--partial,
+  .facturas-chip--draft,
+  .clientes-chip--pending,
+  .usuarios-chip--pending,
+  .usuarios-status-chip--pending,
+  .usuarios-status-chip.is-pending,
+  .home-status--warning,
+  .cuenta-chip--warning,
+  .ui-detail-modal-chip--status-pending,
+  .ui-detail-modal-chip--status_pending,
+  .clientes-modal-chip--status-pending,
+  .clientes-modal-chip--status_pending,
+  .facturas-detail-chip--warning,
+  .server-meta-pill--warning,
+  .server-service-card[data-state="warning"] .server-status-chip,
+  .server-service-card.is-warning .server-status-chip
+) {
+  --ui-status-fg: var(--ui-status-pending-fg);
+  --ui-status-bg: var(--ui-status-pending-bg);
+  --ui-status-border: var(--ui-status-pending-border);
+  --ui-status-dot: var(--ui-status-pending-dot);
+}
+
+/* =========================================================
+   SUCCESS / DONE · GREEN
+========================================================= */
+
+:where(
+  .incidencias-status-chip--closed,
+  .incidencias-status-chip--resolved,
+  .incidencias-status-chip.is-closed,
+  .incidencias-status-chip.is-resolved,
+  .facturas-chip--paid,
+  .clientes-chip--active,
+  .usuarios-chip--active,
+  .usuarios-status-chip--active,
+  .usuarios-status-chip.is-active,
+  .home-status--success,
+  .cuenta-chip--success,
+  .ui-detail-modal-chip--status-closed,
+  .ui-detail-modal-chip--status_closed,
+  .ui-detail-modal-chip--status-resolved,
+  .ui-detail-modal-chip--status_resolved,
+  .clientes-modal-chip--status-active,
+  .clientes-modal-chip--status_active,
+  .facturas-detail-chip--success,
+  .server-meta-pill--healthy,
+  .server-service-card[data-state="healthy"] .server-status-chip,
+  .server-service-card.is-healthy .server-status-chip
+) {
+  --ui-status-fg: var(--ui-status-success-fg);
+  --ui-status-bg: var(--ui-status-success-bg);
+  --ui-status-border: var(--ui-status-success-border);
+  --ui-status-dot: var(--ui-status-success-dot);
+}
+
+/* =========================================================
+   DANGER / BLOCKED / OVERDUE / CRITICAL · RED
+========================================================= */
+
+:where(
+  .incidencias-priority-badge--high,
+  .incidencias-priority-badge--urgent,
+  .incidencias-priority-badge--critical,
+  .facturas-chip--overdue,
+  .clientes-chip--blocked,
+  .usuarios-chip--blocked,
+  .usuarios-chip--inactive,
+  .usuarios-status-chip--blocked,
+  .usuarios-status-chip--inactive,
+  .usuarios-status-chip.is-blocked,
+  .usuarios-status-chip.is-inactive,
+  .home-status--error,
+  .cuenta-chip--danger,
+  .ui-detail-modal-chip--priority-high,
+  .ui-detail-modal-chip--priority-urgent,
+  .ui-detail-modal-chip--priority-critical,
+  .clientes-modal-chip--status-blocked,
+  .clientes-modal-chip--status_blocked,
+  .clientes-modal-chip--status-inactive,
+  .clientes-modal-chip--status_inactive,
+  .facturas-detail-chip--danger,
+  .facturas-detail-chip--error,
+  .server-meta-pill--critical,
+  .server-service-card[data-state="critical"] .server-status-chip,
+  .server-service-card.is-critical .server-status-chip
+) {
+  --ui-status-fg: var(--ui-status-danger-fg);
+  --ui-status-bg: var(--ui-status-danger-bg);
+  --ui-status-border: var(--ui-status-danger-border);
+  --ui-status-dot: var(--ui-status-danger-dot);
+}
+
+/* Cancelled is terminal but not successful. */
+.facturas-chip--cancelled {
+  --ui-status-fg: var(--ui-status-neutral-fg);
+  --ui-status-bg: var(--ui-status-neutral-bg);
+  --ui-status-border: var(--ui-status-neutral-border);
+  --ui-status-dot: var(--ui-status-neutral-dot);
+}
+
+/* =========================================================
+   DOT LANGUAGE · FAST SCANNING
+========================================================= */
+
+:where(
+  .incidencias-status-dot,
+  .facturas-chip-dot,
+  .clientes-chip-dot,
+  .usuarios-chip-dot,
+  .usuarios-status-dot
+) {
+  inline-size: 7px;
+  block-size: 7px;
+  background: var(--ui-status-dot, currentColor);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-status-dot, currentColor) 14%, transparent);
+}
+
+:where(
+  .home-status,
+  .ui-detail-modal-chip[class*="--status-"],
+  .ui-detail-modal-chip[class*="--status_"],
+  .clientes-modal-chip[class*="--status-"],
+  .clientes-modal-chip[class*="--status_"],
+  .facturas-detail-chip--success,
+  .facturas-detail-chip--warning,
+  .facturas-detail-chip--danger,
+  .facturas-detail-chip--error,
+  .cuenta-chip--success,
+  .cuenta-chip--warning,
+  .cuenta-chip--danger
+)::before {
+  content: "";
+  inline-size: 7px;
+  block-size: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: var(--ui-status-dot, currentColor);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-status-dot, currentColor) 14%, transparent);
+}
+
+.server-status-chip::before {
+  inline-size: 7px;
+  block-size: 7px;
+  background: var(--ui-status-dot, currentColor);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-status-dot, currentColor) 14%, transparent);
+}
+
+/* =========================================================
+   ACCESSIBILITY
+========================================================= */
+
+@media (forced-colors: active) {
+  :where(
+    .incidencias-status-chip,
+    .incidencias-priority-badge,
+    .facturas-chip,
+    .clientes-chip,
+    .usuarios-chip,
+    .usuarios-status-chip,
+    .home-status,
+    .cuenta-chip--success,
+    .cuenta-chip--warning,
+    .cuenta-chip--danger,
+    .ui-detail-modal-chip[class*="--status-"],
+    .ui-detail-modal-chip[class*="--status_"],
+    .clientes-modal-chip[class*="--status-"],
+    .clientes-modal-chip[class*="--status_"],
+    .facturas-detail-chip--success,
+    .facturas-detail-chip--warning,
+    .facturas-detail-chip--danger,
+    .facturas-detail-chip--error,
+    .server-meta-pill--healthy,
+    .server-meta-pill--warning,
+    .server-meta-pill--critical,
+    .server-status-chip
+  ) {
+    border-color: CanvasText;
+    background: Canvas;
+    color: CanvasText;
+    box-shadow: none;
+  }
+
+  :where(
+    .incidencias-status-dot,
+    .facturas-chip-dot,
+    .clientes-chip-dot,
+    .usuarios-chip-dot,
+    .usuarios-status-dot,
+    .server-status-chip::before
+  ) {
+    box-shadow: none;
+  }
+}

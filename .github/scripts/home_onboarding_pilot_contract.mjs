@@ -153,8 +153,8 @@ assert.match(
 assert.match(adminHtml, /Tu progreso se guarda en tu cuenta\./);
 assert.equal(
   (adminHtml.match(/data-home-navigation-control="true"/g) || []).length,
-  4,
-  "Admin Home keeps exactly four canonical stat navigation controls"
+  5,
+  "Onboarding choices must not alter the five canonical Home navigation controls"
 );
 
 assert.doesNotMatch(

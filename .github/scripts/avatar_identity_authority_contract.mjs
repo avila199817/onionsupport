@@ -3,12 +3,13 @@
 /* =========================================================
    Onion Support · Avatar Identity Authority Contract
 
-   Garantiza paridad visual con Microsoft Fluent UI Persona:
-   - iniciales compatibles con getInitials() de Persona;
-   - auto-color compatible con PersonaInitialsColor;
-   - paleta oficial de 20 swatches y hash determinista;
-   - AvatarSystem sigue siendo autoridad única SPA-wide;
-   - sin aleatoriedad, storage ni red.
+   Garantiza:
+   - una identidad de usuario estable produce un único tone SPA-wide;
+   - cambios de acentos/capitalización del nombre NO cambian color cuando
+     existe email/userId/username;
+   - iniciales y paleta siguen siendo compatibles con Fluent UI Persona;
+   - AvatarSystem sigue siendo autoridad única;
+   - sin aleatoriedad, storage, red ni color persistido.
 ========================================================= */
 
 import assert from "node:assert/strict";
@@ -24,6 +25,7 @@ import {
   avatarColorFromIdentity,
   avatarColorKeyFromIdentity,
   avatarInitials,
+  avatarSeedFromIdentity,
   avatarToneFromIdentity,
   microsoftPersonaHash,
   resolveAvatarPresentation,
@@ -51,12 +53,10 @@ function includesAll(source, values, label) {
   }
 }
 
-assert.match(
+assert.equal(
   AVATAR_IDENTITY_VERSION,
-  /^avatar-identity\.v3-microsoft-fluent-persona-v8$/,
-  "identity version debe declarar paridad Microsoft Fluent Persona"
+  "avatar-identity.v4-stable-user-tone"
 );
-
 assert.equal(AVATAR_TONE_COUNT, 20);
 assert.equal(AVATAR_COLOR_SPACE, 20);
 assert.equal(MICROSOFT_PERSONA_COLORS.length, 20);
@@ -69,7 +69,7 @@ assert.deepEqual(
     "#CA5010", "#D13438", "#A4262C", "#8764B8", "#986F0B",
     "#750B1C", "#7A7574", "#005B70", "#8E562E", "#69797E",
   ],
-  "la paleta automática debe ser exactamente la de Fluent UI Persona"
+  "la paleta debe conservar exactamente los 20 swatches Fluent Persona"
 );
 
 const canonical = resolveAvatarPresentation({
@@ -87,24 +87,25 @@ const incidenciaSnapshot = resolveAvatarPresentation({
 
 const facturaSnapshot = resolveAvatarPresentation({
   clienteEmail: "avila199817@gmail.com",
-  nombre: "Cristian Ávila Luque",
+  nombre: "Cristian Avila Luque",
 });
 
 const nestedSnapshot = resolveAvatarPresentation({
   user: {
     userId: "ON-20260901024205",
     email: "avila199817@gmail.com",
-    fullName: "Cristian Ávila Luque",
+    fullName: "CRISTIAN AVILA LUQUE",
   },
 });
 
 const homeSidebarSnapshot = resolveAvatarPresentation({
   displayName: "Cristian Ávila Luque",
+  email: "avila199817@gmail.com",
   username: "avila199817",
 });
 
 const activitySnapshot = resolveAvatarPresentation({
-  name: "Cristian Ávila Luque",
+  name: "Cristian Avila Luque",
   email: "avila199817@gmail.com",
 });
 
@@ -116,25 +117,54 @@ for (const presentation of [
   activitySnapshot,
 ]) {
   assert.equal(
-    presentation.tone,
-    canonical.tone,
-    "mismo displayName debe conservar color Microsoft entre vistas"
+    presentation.seed,
+    canonical.seed,
+    "el mismo email debe resolver la misma seed aunque cambie el nombre visible"
   );
+  assert.equal(presentation.tone, canonical.tone);
   assert.equal(presentation.color, canonical.color);
   assert.equal(presentation.colorKey, canonical.colorKey);
-  assert.equal(presentation.initials, canonical.initials);
   assert.equal(
     presentation.fingerprint,
     canonical.fingerprint,
-    "la reconciliación de identidad Onion debe seguir siendo estable"
+    "la misma persona debe conservar fingerprint entre DTOs"
   );
 }
 
+assert.equal(canonical.seed, "email:avila199817@gmail.com");
 assert.equal(canonical.initials, "CL");
-assert.equal(canonical.tone, 12);
-assert.equal(canonical.colorKey, "darkRed");
-assert.equal(canonical.color, "#A4262C");
+assert.equal(canonical.tone, 18);
+assert.equal(canonical.colorKey, "rust");
+assert.equal(canonical.color, "#8E562E");
 
+/* Regression exacta del caso observado en producción. */
+const carlosPlain = resolveAvatarPresentation({
+  userId: "ON-CARLOS-FIXTURE",
+  email: "carlosgarciayepes16@gmail.com",
+  displayName: "Carlos Yepes Garcia",
+});
+const carlosAccent = resolveAvatarPresentation({
+  clienteEmail: "CARLOSGARCIAYEPES16@GMAIL.COM",
+  nombre: "Carlos Yepes García",
+});
+
+assert.notEqual(
+  microsoftPersonaHash("Carlos Yepes Garcia") % AVATAR_TONE_COUNT,
+  microsoftPersonaHash("Carlos Yepes García") % AVATAR_TONE_COUNT,
+  "el displayName crudo reproduce el drift histórico de acento"
+);
+assert.equal(carlosPlain.seed, "email:carlosgarciayepes16@gmail.com");
+assert.equal(carlosAccent.seed, carlosPlain.seed);
+assert.equal(carlosAccent.fingerprint, carlosPlain.fingerprint);
+assert.equal(carlosAccent.tone, carlosPlain.tone);
+assert.equal(carlosAccent.color, carlosPlain.color);
+assert.equal(carlosPlain.tone, 2);
+assert.equal(carlosPlain.colorKey, "darkBlue");
+assert.equal(carlosPlain.color, "#004E8C");
+assert.equal(carlosPlain.initials, "CG");
+assert.equal(carlosAccent.initials, "CG");
+
+/* Nombre sin identidad estable conserva comportamiento Persona legacy. */
 const microsoftSamples = [
   ["Cristian Ávila Luque", "CL", 12, "darkRed", "#A4262C"],
   ["DMARC Reports", "DR", 4, "green", "#498205"],
@@ -157,6 +187,13 @@ assert.equal(microsoftPersonaHash("Cristian Ávila Luque"), 512);
 assert.equal(microsoftPersonaHash("DMARC Reports"), 8364);
 assert.equal(microsoftPersonaHash("No Reply"), 11645);
 assert.equal(microsoftPersonaHash("Soporte Onion Support"), 10735);
+assert.equal(
+  avatarSeedFromIdentity({
+    email: " Test.User+tag@Example.COM ",
+    displayName: "Cualquier Nombre",
+  }),
+  "email:test.user+tag@example.com"
+);
 
 const identitySource = read("src/features/avatar-system/identity.js");
 const identityExecutableSource = executableSource(identitySource);
@@ -184,15 +221,16 @@ includesAll(
   [
     "MICROSOFT_PERSONA_COLORS",
     "microsoftPersonaHash",
-    "(charCode << shift) + (charCode >> (8 - shift))",
-    "#A4262C",
-    "#498205",
-    "#0B6A0B",
-    "#750B1C",
+    "avatarSeedFromIdentity",
+    "avatarToneFromSeed",
+    "email:${email}",
+    "user:${userId}",
+    "username:${username}",
+    "identified users never derive color from displayName",
     "UNWANTED_ENCLOSURES_REGEX",
     "UNSUPPORTED_TEXT_REGEX",
   ],
-  "Avatar Microsoft Persona identity domain"
+  "Avatar stable identity domain"
 );
 
 includesAll(
@@ -237,7 +275,7 @@ includesAll(
 assert.doesNotMatch(
   cssSource,
   /linear-gradient\s*\(/,
-  "el fallback Microsoft Persona debe ser plano, sin gradientes"
+  "el fallback debe ser plano, sin gradientes"
 );
 
 assert.ok(
@@ -249,7 +287,6 @@ assert.ok(
     privateCssSource.indexOf("./compositions/private-amounts.css"),
   "AvatarSystem debe cerrar el chunk privado en guardrails"
 );
-
 assert.ok(
   privateRuntimeSource.includes('import("../avatar-system/index.js")'),
   "private runtime debe cargar la autoridad global"
@@ -264,15 +301,22 @@ const viewCommentIndex = appCssSource.indexOf("ROUTE VIEWS");
 assert.ok(guardrailIndex > viewCommentIndex);
 assert.ok(appCssSource.includes("layer(guardrails)"));
 
-console.log("✅ avatar identity authority contract: Microsoft Fluent Persona parity OK");
+console.log("✅ avatar identity authority: one stable user = one tone SPA-wide");
 console.log(JSON.stringify({
   identityVersion: AVATAR_IDENTITY_VERSION,
   paletteSize: AVATAR_TONE_COUNT,
-  sample: {
+  canonical: {
+    seed: canonical.seed,
     initials: canonical.initials,
     tone: canonical.tone,
     colorKey: canonical.colorKey,
     color: canonical.color,
     fingerprint: canonical.fingerprint,
+  },
+  carlosRegression: {
+    seed: carlosPlain.seed,
+    initials: carlosPlain.initials,
+    tone: carlosPlain.tone,
+    color: carlosPlain.color,
   },
 }, null, 2));

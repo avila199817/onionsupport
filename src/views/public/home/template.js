@@ -404,7 +404,7 @@ function renderHero() {
       <div class="public-home-hero-grid">
         <div class="public-home-hero-copy">
           <h1 class="public-home-title" id="public-home-title" data-public-home-reveal="true">
-            Soporte informático <span>para avanzar</span>
+            Servicio técnico <span>informático</span>
           </h1>
           <p class="public-home-hero-text" data-public-home-reveal="true">
             ${escapeHtml(PUBLIC_SITE.description)}

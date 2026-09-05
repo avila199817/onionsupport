@@ -200,9 +200,17 @@
 }
 
 /* Standard user: the lower panels must share the exact same 50/50 tracks as
-   the two summary cards above. Admin keeps its existing composition. */
+   the two summary cards above. */
 .home-view-root--user .home-stats,
 .home-view-root--user .home-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* Admin: the midpoint between the two lower panels must land on the same
+   vertical axis as the boundary between summary cards 2 and 3. Because both
+   rows use --home-extreme-gap, equal 50/50 lower tracks line up pixel-for-pixel
+   with the four equal cards above. */
+.home-view-root--admin .home-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 

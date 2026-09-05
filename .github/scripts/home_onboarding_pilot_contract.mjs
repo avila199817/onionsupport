@@ -70,7 +70,7 @@ assert.match(
 assert.match(adminHtml, /Hola, Marta/);
 assert.match(adminHtml, /aria-label="Paso 1 de 5">1 de 5</);
 assert.match(adminHtml, /<form method="dialog" class="home-welcome-pilot__surface">/);
-assert.match(adminHtml, />Ahora no<\/button>/);
+assert.match(adminHtml, />\s*Ahora no\s*<\/button>/);
 assert.match(
   adminHtml,
   /data-onboarding-pilot-primary="true"/,
@@ -131,7 +131,11 @@ assert.equal(
   "Home onboarding pilot CSS must have one composition entry"
 );
 assert.doesNotMatch(pilotCss, /!important/);
-assert.doesNotMatch(pilotCss, /#[0-9a-f]{3,8}\b/i, "Pilot CSS must consume global theme tokens, not a local palette");
+assert.doesNotMatch(
+  pilotCss,
+  /#[0-9a-f]{3,8}\b/i,
+  "Pilot CSS must consume global theme tokens, not a local palette"
+);
 assert.match(pilotCss, /\.home-view-root \.home-welcome-pilot \{/);
 assert.match(pilotCss, /@media \(max-width: 640px\)/);
 assert.match(pilotCss, /@media \(forced-colors: active\)/);

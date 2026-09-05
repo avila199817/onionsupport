@@ -85,6 +85,8 @@ assert.match(commentSource, /dataset\.avatarHost/u);
 assert.match(commentSource, /dataset\.avatarTone/u);
 assert.match(commentSource, /dataset\.avatarIdentity/u);
 assert.match(commentSource, /dataset\.avatarInitials/u);
+assert.match(commentSource, /dataset\.avatarEmail/u);
+assert.match(commentSource, /dataset\.avatarUserId/u);
 assert.match(commentSource, /dataset\.avatarImage/u);
 assert.match(commentSource, /dataset\.avatarFallback/u);
 assert.match(commentSource, /MutationObserver/u);
@@ -102,6 +104,8 @@ assert.match(followupSource, /resolveAvatarPresentation/u);
 assert.match(followupSource, /incidencias-comment-identity\/index\.js/u);
 assert.match(followupSource, /dataset\.avatarSystem/u);
 assert.match(followupSource, /dataset\.avatarHost/u);
+assert.match(followupSource, /dataset\.avatarEmail/u);
+assert.match(followupSource, /dataset\.avatarUserId/u);
 assert.match(followupSource, /dataset\.avatarImage/u);
 assert.match(followupSource, /dataset\.avatarFallback/u);
 assert.match(followupSource, /MutationObserver/u);
@@ -229,17 +233,20 @@ const profiles = [requester, technician];
 
 const presentation = resolveAvatarPresentation({
   displayName: "Cristian Ávila Luque",
+  email: "avila199817@gmail.com",
   username: "avila199817",
 });
 const emailPresentation = resolveAvatarPresentation({
-  name: "Cristian Ávila Luque",
-  email: "avila199817@gmail.com",
+  name: "CRISTIAN AVILA LUQUE",
+  email: "AVILA199817@GMAIL.COM",
 });
 
+assert.equal(presentation.seed, "email:avila199817@gmail.com");
 assert.equal(presentation.initials, "CL");
-assert.equal(presentation.tone, 12);
-assert.equal(presentation.colorKey, "darkRed");
-assert.equal(presentation.color, "#A4262C");
+assert.equal(presentation.tone, 18);
+assert.equal(presentation.colorKey, "rust");
+assert.equal(presentation.color, "#8E562E");
+assert.equal(presentation.seed, emailPresentation.seed);
 assert.equal(presentation.tone, emailPresentation.tone);
 assert.equal(presentation.color, emailPresentation.color);
 assert.equal(presentation.fingerprint, emailPresentation.fingerprint);
@@ -247,5 +254,5 @@ assert.ok(presentation.tone >= 0 && presentation.tone < AVATAR_TONE_COUNT);
 assert.equal(AVATAR_TONE_COUNT, 20);
 
 console.log(
-  "Incidencias comment avatar contract OK · global AvatarSystem · Microsoft Fluent Persona fallback · stable photo identity"
+  "Incidencias comment avatar contract OK · global AvatarSystem · stable user tone · Fluent Persona palette"
 );

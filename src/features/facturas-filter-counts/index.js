@@ -7,16 +7,18 @@
    - Mostrar un badge numérico en Todas, Pendientes, Pagadas y Vencidas.
    - Reutilizar los KPIs ya renderizados por la vista como autoridad de conteo.
    - Mantener los badges sincronizados tras refresh, filtros y rerenders SPA.
-   - No modificar filtros, orden, búsqueda ni lógica de negocio.
+   - Aplicar la sincronización antes del siguiente paint para evitar flicker.
+   - No interceptar clicks, no redisparar eventos y no alterar lógica de negocio.
 ========================================================= */
 
 export const FACTURAS_FILTER_COUNTS_VERSION =
-  "facturas.filter-counts.v1.incident-parity";
+  "facturas.filter-counts.v2.pre-paint-stable";
 
 const VIEW_HOST_SELECTOR = "[data-view-container='true'], #view-container";
 const ROOT_SELECTOR = ".facturas-view-root, [data-facturas-scope='true']";
 const FILTER_SELECTOR = ".facturas-filter-pill[data-filter]";
 const VALUE_SELECTOR = ".facturas-stat-value";
+const OWN_BADGE_SELECTOR = "strong[data-facturas-filter-count='true']";
 
 const COUNT_CARD_SELECTORS = Object.freeze({
   all: ".facturas-stat-card--accent",
@@ -27,7 +29,8 @@ const COUNT_CARD_SELECTORS = Object.freeze({
 let installed = false;
 let observer = null;
 let observedHost = null;
-let syncFrame = 0;
+let syncRuns = 0;
+let ignoredMutations = 0;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -85,24 +88,51 @@ function directCountBadge(button = null) {
   if (!button) return null;
 
   for (const child of button.children || []) {
+    if (child?.matches?.(OWN_BADGE_SELECTOR)) return child;
     if (child?.tagName === "STRONG") return child;
   }
 
   return null;
 }
 
+function setStableBadgeText(badge = null, value = "0") {
+  if (!badge) return false;
+
+  const next = String(value);
+  const onlyChild = badge.childNodes?.length === 1
+    ? badge.firstChild
+    : null;
+
+  if (onlyChild?.nodeType === 3) {
+    if (onlyChild.nodeValue !== next) onlyChild.nodeValue = next;
+    return true;
+  }
+
+  if (badge.textContent === next) return true;
+
+  badge.replaceChildren(document.createTextNode(next));
+  return true;
+}
+
 function syncButton(button = null, count = 0) {
   if (!button) return false;
 
+  const next = String(Math.max(0, Number(count) || 0));
   let badge = directCountBadge(button);
+
   if (!badge) {
     badge = document.createElement("strong");
+    badge.dataset.facturasFilterCount = "true";
+    setStableBadgeText(badge, next);
     button.append(badge);
+    return true;
   }
 
-  const next = String(Math.max(0, Number(count) || 0));
-  if (badge.textContent !== next) badge.textContent = next;
+  if (badge.dataset?.facturasFilterCount !== "true") {
+    badge.dataset.facturasFilterCount = "true";
+  }
 
+  setStableBadgeText(badge, next);
   return true;
 }
 
@@ -119,18 +149,88 @@ export function syncFacturasFilterCounts(root = viewRoot()) {
     if (syncButton(button, counts[key])) synced += 1;
   }
 
+  if (synced > 0) syncRuns += 1;
   return synced > 0;
 }
 
-function queueSync() {
-  if (!isBrowser() || syncFrame) return false;
+function isElementNode(node = null) {
+  return Boolean(node && node.nodeType === 1);
+}
 
-  syncFrame = window.requestAnimationFrame(() => {
-    syncFrame = 0;
-    syncFacturasFilterCounts();
+function isOwnBadgeNode(node = null) {
+  return Boolean(isElementNode(node) && node.matches?.(OWN_BADGE_SELECTOR));
+}
+
+function mutationOnlyContainsOwnBadges(mutation = null) {
+  const added = Array.from(mutation?.addedNodes || []);
+  const removed = Array.from(mutation?.removedNodes || []);
+
+  return Boolean(
+    added.length > 0 &&
+    removed.length === 0 &&
+    added.every(isOwnBadgeNode)
+  );
+}
+
+function mutationTouchesFacturas(mutation = null, root = null) {
+  if (!mutation || mutation.type !== "childList") return false;
+  if (mutationOnlyContainsOwnBadges(mutation)) return false;
+
+  const target = mutation.target;
+  if (isElementNode(target) && (target === root || target.closest?.(ROOT_SELECTOR))) {
+    return true;
+  }
+
+  const nodes = [
+    ...Array.from(mutation.addedNodes || []),
+    ...Array.from(mutation.removedNodes || []),
+  ];
+
+  return nodes.some((node) => {
+    if (!isElementNode(node)) return false;
+    return Boolean(
+      node.matches?.(ROOT_SELECTOR) ||
+      node.matches?.(FILTER_SELECTOR) ||
+      node.querySelector?.(ROOT_SELECTOR) ||
+      node.querySelector?.(FILTER_SELECTOR)
+    );
   });
+}
 
-  return true;
+function onMutations(mutations = []) {
+  const root = viewRoot();
+  if (!root) return;
+
+  const relevant = mutations.some((mutation) =>
+    mutationTouchesFacturas(mutation, root)
+  );
+
+  if (!relevant) {
+    ignoredMutations += mutations.length;
+    return;
+  }
+
+  /*
+    MutationObserver se ejecuta al cierre del microtask y antes del siguiente
+    render del navegador. Sin requestAnimationFrame no existe un frame intermedio
+    donde los filtros aparezcan sin conteo, eliminando el parpadeo al filtrar.
+  */
+  syncFacturasFilterCounts(root);
+
+  /*
+    La única mutación que generamos en el camino normal es insertar el <strong>
+    ya completo. La retiramos del queue para que no provoque una segunda vuelta.
+  */
+  const pending = observer?.takeRecords?.() || [];
+  ignoredMutations += pending.filter(mutationOnlyContainsOwnBadges).length;
+
+  const externalPending = pending.filter(
+    (mutation) => !mutationOnlyContainsOwnBadges(mutation)
+  );
+
+  if (externalPending.some((mutation) => mutationTouchesFacturas(mutation, root))) {
+    syncFacturasFilterCounts(root);
+  }
 }
 
 export function installFacturasFilterCounts() {
@@ -141,12 +241,11 @@ export function installFacturasFilterCounts() {
 
   installed = true;
   observedHost = host;
+
+  /* Primer paint estable cuando la feature se monta sobre una vista ya lista. */
   syncFacturasFilterCounts();
 
-  observer = new MutationObserver(() => {
-    queueSync();
-  });
-
+  observer = new MutationObserver(onMutations);
   observer.observe(host, {
     childList: true,
     subtree: true,
@@ -162,11 +261,6 @@ export function destroyFacturasFilterCounts() {
   observer?.disconnect?.();
   observer = null;
   observedHost = null;
-
-  if (syncFrame && isBrowser()) {
-    window.cancelAnimationFrame(syncFrame);
-  }
-  syncFrame = 0;
 
   return true;
 }
@@ -184,6 +278,11 @@ export const FacturasFilterCounts = Object.freeze({
       installed,
       observing: Boolean(observer && observedHost?.isConnected),
       counts: readFacturasFilterCounts(),
+      syncRuns,
+      ignoredMutations,
+      scheduledFrames: 0,
+      clickInterception: false,
+      dispatchedEvents: 0,
     });
   },
 });

@@ -1,0 +1,203 @@
+/* =========================================================
+   ONION SUPPORT — HOME ONBOARDING PILOT
+   Archivo: /src/css/compositions/home-onboarding-pilot.css
+
+   PILOTO VISUAL · PRIMER COACHMARK · SIN PERSISTENCIA
+
+   Contrato:
+   - Sólo estiliza el primer box de bienvenida del Home privado.
+   - Consume exclusivamente tokens globales dark/light.
+   - No altera el greeting, estadísticas, paneles ni navegación existentes.
+   - No usa !important, paleta local ni backdrop bloqueante.
+========================================================= */
+
+.home-view-root .home-welcome-pilot {
+  position: fixed;
+  z-index: calc(var(--z-modal) + 2);
+  inset-block-start: calc(var(--topbar-height, 58px) + clamp(14px, 2vw, 26px));
+  inset-inline-end: clamp(12px, 2vw, 28px);
+  inline-size: min(430px, calc(100vw - 24px));
+  max-inline-size: none;
+  max-block-size: calc(100dvh - var(--topbar-height, 58px) - 44px);
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-2xl, 24px);
+  background: var(--surface-elevated, var(--surface-1));
+  color: var(--text);
+  box-shadow: var(--shadow-xl);
+  font-family: var(--font-family);
+}
+
+.home-view-root .home-welcome-pilot:not([open]) {
+  display: none;
+}
+
+.home-view-root .home-welcome-pilot__surface {
+  display: grid;
+  gap: var(--space-lg);
+  margin: 0;
+  padding: clamp(20px, 2.2vw, 28px);
+}
+
+.home-view-root .home-welcome-pilot__meta {
+  min-inline-size: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.home-view-root .home-welcome-pilot__eyebrow,
+.home-view-root .home-welcome-pilot__step,
+.home-view-root .home-welcome-pilot__note {
+  margin: 0;
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+  line-height: var(--line-snug);
+}
+
+.home-view-root .home-welcome-pilot__eyebrow {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  letter-spacing: var(--letter-wide);
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.home-view-root .home-welcome-pilot__step {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.home-view-root .home-welcome-pilot__copy {
+  min-inline-size: 0;
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.home-view-root .home-welcome-pilot__copy h2 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: clamp(25px, 2.2vw, 31px);
+  font-weight: var(--weight-black, 800);
+  line-height: var(--line-tight);
+  letter-spacing: var(--letter-tight);
+  overflow-wrap: anywhere;
+}
+
+.home-view-root .home-welcome-pilot__copy p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-base);
+  font-weight: var(--weight-regular);
+  line-height: var(--line-relaxed);
+}
+
+.home-view-root .home-welcome-pilot__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.home-view-root .home-welcome-pilot__dismiss,
+.home-view-root .home-welcome-pilot__primary {
+  min-block-size: 42px;
+}
+
+.home-view-root .home-welcome-pilot__primary {
+  border-color: var(--accent-border-strong);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  box-shadow: var(--shadow-sm);
+}
+
+.home-view-root .home-welcome-pilot__primary:hover:not(:disabled) {
+  border-color: var(--accent-border-strong);
+  background: var(--accent-hover);
+  color: var(--accent-contrast);
+}
+
+.home-view-root .home-welcome-pilot__primary:active:not(:disabled) {
+  background: var(--accent-active);
+}
+
+.home-view-root .home-welcome-pilot__note {
+  color: var(--text-dim);
+  text-align: end;
+}
+
+@media (max-width: 640px) {
+  .home-view-root .home-welcome-pilot {
+    inset-block-start: auto;
+    inset-block-end: calc(12px + var(--app-safe-bottom, 0px));
+    inset-inline: 12px;
+    inline-size: auto;
+    max-block-size: min(72dvh, 620px);
+    border-radius: var(--radius-xl, 20px);
+  }
+
+  .home-view-root .home-welcome-pilot__surface {
+    gap: var(--space-md);
+    padding: 20px;
+  }
+
+  .home-view-root .home-welcome-pilot__actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .home-view-root .home-welcome-pilot__actions .home-btn {
+    inline-size: 100%;
+    min-inline-size: 0;
+    padding-inline: var(--space-sm);
+    white-space: normal;
+  }
+
+  .home-view-root .home-welcome-pilot__note {
+    text-align: start;
+  }
+}
+
+@media (max-width: 390px) {
+  .home-view-root .home-welcome-pilot__meta {
+    align-items: flex-start;
+  }
+
+  .home-view-root .home-welcome-pilot__eyebrow {
+    white-space: normal;
+  }
+
+  .home-view-root .home-welcome-pilot__actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (forced-colors: active) {
+  .home-view-root .home-welcome-pilot,
+  .home-view-root .home-welcome-pilot__step,
+  .home-view-root .home-welcome-pilot__primary {
+    border-color: CanvasText;
+  }
+
+  .home-view-root .home-welcome-pilot__primary {
+    background: ButtonFace;
+    color: ButtonText;
+  }
+}
+
+@media print {
+  .home-view-root .home-welcome-pilot {
+    display: none;
+  }
+}

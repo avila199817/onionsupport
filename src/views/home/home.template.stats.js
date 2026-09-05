@@ -35,9 +35,12 @@ function statCard({ label, value, text, iconName, route, modifier }) {
   const href = safeRoute(route, "/");
   const key = normalizeKey(modifier || label || "stat");
   const formattedValue = formatNumber(value);
+  const onboardingTarget = key === "incidencias"
+    ? ' data-home-onboarding-target="step-1"'
+    : "";
 
   return `
-    <article class="home-stat-card" data-home-stat="${attr(key)}">
+    <article class="home-stat-card" data-home-stat="${attr(key)}"${onboardingTarget}>
       <button
         type="button"
         class="home-stat-card-button"

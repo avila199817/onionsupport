@@ -17,3 +17,12 @@
   --avatar-size: 36px;
   --avatar-font-size: 14px;
 }
+
+/* La identidad del topbar conserva la misma autoridad de AvatarSystem en
+   móvil, pero gana unos píxeles para equilibrarse con el botón hamburguesa. */
+@media (max-width: 720px) {
+  :where(.public-home .public-support-account-avatar.topbar-avatar) {
+    --avatar-size: 42px;
+    --avatar-font-size: 16px;
+  }
+}

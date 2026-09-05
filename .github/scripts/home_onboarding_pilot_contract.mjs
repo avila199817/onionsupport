@@ -5,6 +5,56 @@ import {
   getHomeTemplateSnapshot,
   renderHomeTemplate,
 } from "../../src/views/home/home.template.js";
+import {
+  HOME_ONBOARDING_ACTIONS,
+  HOME_ONBOARDING_ENDPOINT,
+  normalizeHomeOnboarding,
+} from "../../src/views/home/home.onboarding.js";
+
+const legacyOnboarding = {
+  schemaVersion: 1,
+  assignedVersion: 0,
+  completedVersion: 0,
+  completedStep: 0,
+  completedAt: null,
+  outcome: null,
+};
+
+const assignedOnboarding = {
+  schemaVersion: 1,
+  assignedVersion: 1,
+  completedVersion: 0,
+  completedStep: 0,
+  completedAt: null,
+  outcome: null,
+  required: true,
+  nextStep: 1,
+  availableSteps: 1,
+  autoPrompt: true,
+};
+
+const progressedOnboarding = {
+  ...assignedOnboarding,
+  completedStep: 1,
+  outcome: "in_progress",
+  nextStep: 2,
+  autoPrompt: false,
+};
+
+function dashboard(admin) {
+  return {
+    admin,
+    summary: {
+      incidencias: 0,
+      facturas: 0,
+      clientes: admin ? 0 : undefined,
+      usuarios: admin ? 0 : undefined,
+      invoiceStatsAvailable: false,
+    },
+    activity: [],
+    facturas: [],
+  };
+}
 
 const adminHtml = renderHomeTemplate({
   user: {
@@ -15,36 +65,45 @@ const adminHtml = renderHomeTemplate({
   routes: {
     incidencias: "/incidencias",
   },
-  dashboard: {
-    admin: true,
-    summary: {
-      incidencias: 0,
-      facturas: 0,
-      clientes: 0,
-      usuarios: 0,
-      invoiceStatsAvailable: false,
-    },
-    activity: [],
-    facturas: [],
-  },
+  dashboard: dashboard(true),
+  onboarding: legacyOnboarding,
+  onboardingLoaded: true,
 });
 
-const userHtml = renderHomeTemplate({
+const legacyUserHtml = renderHomeTemplate({
   user: {
     displayName: "Marta García López",
     role: "user",
   },
   role: "user",
-  dashboard: {
-    admin: false,
-    summary: {
-      incidencias: 0,
-      facturas: 0,
-      invoiceStatsAvailable: false,
-    },
-    activity: [],
-    facturas: [],
+  dashboard: dashboard(false),
+  onboarding: legacyOnboarding,
+  onboardingLoaded: true,
+});
+
+const assignedUserHtml = renderHomeTemplate({
+  user: {
+    displayName: "Marta García López",
+    role: "user",
   },
+  role: "user",
+  routes: {
+    incidencias: "/incidencias",
+  },
+  dashboard: dashboard(false),
+  onboarding: assignedOnboarding,
+  onboardingLoaded: true,
+});
+
+const progressedUserHtml = renderHomeTemplate({
+  user: {
+    displayName: "Marta García López",
+    role: "user",
+  },
+  role: "user",
+  dashboard: dashboard(false),
+  onboarding: progressedOnboarding,
+  onboardingLoaded: true,
 });
 
 const loadingHtml = renderHomeTemplate({
@@ -54,57 +113,108 @@ const loadingHtml = renderHomeTemplate({
   },
   role: "admin",
   loading: true,
-  dashboard: {
-    admin: true,
-    summary: {},
-    activity: [],
-    facturas: [],
+  dashboard: dashboard(true),
+  onboarding: legacyOnboarding,
+  onboardingLoaded: true,
+});
+
+const savingHtml = renderHomeTemplate({
+  user: {
+    displayName: "Marta García López",
+    role: "admin",
   },
+  role: "admin",
+  dashboard: dashboard(true),
+  onboarding: legacyOnboarding,
+  onboardingLoaded: true,
+  onboardingSaving: true,
 });
 
 assert.match(
   adminHtml,
   /data-home-onboarding-pilot="welcome-v1"/,
-  "Admin Home must expose the first visual onboarding pilot"
+  "Legacy admin pilot must remain available until the first choice is persisted"
 );
+assert.match(adminHtml, /data-home-onboarding-active="welcome-v1"/);
 assert.match(adminHtml, /Hola, Marta/);
 assert.match(adminHtml, /aria-label="Paso 1 de 5">1 de 5</);
-assert.match(adminHtml, /<form method="dialog" class="home-welcome-pilot__surface">/);
+assert.match(adminHtml, /data-home-onboarding-target="step-1"/);
 assert.match(adminHtml, />\s*Ahora no\s*<\/button>/);
 assert.match(
   adminHtml,
-  /data-onboarding-pilot-primary="true"/,
-  "Pilot must expose a unique primary CTA marker"
+  /data-home-action="onboarding-choice"[\s\S]*data-onboarding-action="dismiss"/,
+  "Dismiss must be a persisted onboarding choice"
 );
 assert.match(
   adminHtml,
-  /data-home-action="navigate"[\s\S]*data-route="\/incidencias"[\s\S]*data-onboarding-pilot-primary="true"/,
-  "Pilot CTA must reuse Home canonical navigation and point to Incidencias"
+  /data-home-action="onboarding-choice"[\s\S]*data-onboarding-action="open_incidencias"[\s\S]*data-route="\/incidencias"[\s\S]*data-onboarding-pilot-primary="true"/,
+  "Primary CTA must persist the choice before the controller navigates"
 );
+assert.match(adminHtml, /Tu progreso se guarda en tu cuenta\./);
 assert.equal(
   (adminHtml.match(/data-home-navigation-control="true"/g) || []).length,
-  5,
-  "Pilot CTA must not become a sixth canonical Home navigation control"
+  4,
+  "Admin Home keeps exactly four canonical stat navigation controls"
+);
+
+assert.doesNotMatch(
+  legacyUserHtml,
+  /data-home-onboarding-pilot=/,
+  "Explicit legacy users with assignedVersion 0 must not be prompted"
+);
+assert.match(
+  assignedUserHtml,
+  /data-home-onboarding-pilot="welcome-v1"/,
+  "Post-cutover assigned users must receive the first onboarding step"
 );
 assert.doesNotMatch(
-  userHtml,
+  progressedUserHtml,
   /data-home-onboarding-pilot=/,
-  "Visual pilot must remain admin-only until the persisted onboarding contract is activated"
+  "Step 1 must never repeat after it has been persisted"
 );
 assert.doesNotMatch(
   loadingHtml,
   /data-home-onboarding-pilot=/,
-  "Pilot must not flash over the initial loading state"
+  "Onboarding must not flash over the initial loading state"
+);
+assert.match(savingHtml, /aria-busy="true"/);
+assert.match(savingHtml, /Guardando tu elección…/);
+assert.equal(
+  (savingHtml.match(/\sdisabled(?:\s|>)/g) || []).length >= 2,
+  true,
+  "Both onboarding choices must be disabled while persistence is in flight"
 );
 
 const snapshot = getHomeTemplateSnapshot();
 assert.equal(snapshot.onboardingPilotVersion, "welcome-v1");
-assert.equal(snapshot.policy.onboardingPilotAdminOnly, true);
-assert.equal(snapshot.policy.onboardingPilotVisualOnly, true);
-assert.equal(snapshot.policy.onboardingPilotPersistsProgress, false);
+assert.equal(snapshot.policy.onboardingAssignmentDriven, true);
+assert.equal(snapshot.policy.onboardingLegacyAdminPilot, true);
+assert.equal(snapshot.policy.onboardingPilotVisualOnly, false);
+assert.equal(snapshot.policy.onboardingPilotPersistsProgress, true);
+assert.equal(snapshot.policy.onboardingFirstLiveStep, 1);
+assert.equal(snapshot.policy.onboardingGuideVersion, 1);
+assert.equal(snapshot.policy.onboardingChoiceAction, "onboarding-choice");
 
-const [templateSource, entryCss, pilotCss] = await Promise.all([
+const normalized = normalizeHomeOnboarding(assignedOnboarding);
+assert.equal(normalized.assignedVersion, 1);
+assert.equal(normalized.completedStep, 0);
+assert.equal(normalized.autoPrompt, true);
+assert.equal(HOME_ONBOARDING_ENDPOINT, "/api/users/me/onboarding");
+assert.equal(HOME_ONBOARDING_ACTIONS.OPEN_INCIDENCIAS, "open_incidencias");
+assert.equal(HOME_ONBOARDING_ACTIONS.DISMISS, "dismiss");
+
+const [
+  templateSource,
+  indexSource,
+  onboardingSource,
+  statsSource,
+  entryCss,
+  pilotCss,
+] = await Promise.all([
   readFile("src/views/home/home.template.js", "utf8"),
+  readFile("src/views/home/index.js", "utf8"),
+  readFile("src/views/home/home.onboarding.js", "utf8"),
+  readFile("src/views/home/home.template.stats.js", "utf8"),
   readFile("src/css/compositions/home-extreme.css", "utf8"),
   readFile("src/css/compositions/home-onboarding-pilot.css", "utf8"),
 ]);
@@ -121,20 +231,39 @@ for (const forbidden of [
   assert.doesNotMatch(
     templateSource,
     forbidden,
-    `Home onboarding pilot template must remain declarative: ${forbidden}`
+    `Home onboarding template must remain declarative: ${forbidden}`
   );
 }
+
+assert.match(indexSource, /loadHomeOnboarding/);
+assert.match(indexSource, /saveHomeOnboardingChoice/);
+assert.match(indexSource, /onboardingSaving = true/);
+assert.match(indexSource, /await saveHomeOnboardingChoice/);
+assert.match(indexSource, /await navigateTo\(route\)/);
+assert.doesNotMatch(indexSource, /Http\./);
+assert.doesNotMatch(indexSource, /localStorage|sessionStorage/);
+
+assert.match(onboardingSource, /Http\.get\(HOME_ONBOARDING_ENDPOINT/);
+assert.match(onboardingSource, /Http\.put\(/);
+assert.match(onboardingSource, /version:\s*cleanVersion/);
+assert.match(onboardingSource, /step:\s*cleanStep/);
+assert.match(onboardingSource, /action:\s*cleanAction/);
+assert.doesNotMatch(onboardingSource, /fetch\s*\(/);
+assert.doesNotMatch(onboardingSource, /localStorage|sessionStorage/);
+assert.doesNotMatch(onboardingSource, /document\.|window\./);
+
+assert.match(statsSource, /data-home-onboarding-target=\\?"step-1\\?"/);
 
 assert.equal(
   (entryCss.match(/@import url\("\.\/home-onboarding-pilot\.css"\);/g) || []).length,
   1,
-  "Home onboarding pilot CSS must have one composition entry"
+  "Home onboarding CSS must have one composition entry"
 );
 assert.doesNotMatch(pilotCss, /!important/);
 assert.doesNotMatch(
   pilotCss,
   /#[0-9a-f]{3,8}\b/i,
-  "Pilot CSS must consume global theme tokens, not a local palette"
+  "Onboarding CSS must consume global theme tokens, not a local palette"
 );
 assert.doesNotMatch(
   pilotCss,
@@ -146,6 +275,10 @@ assert.doesNotMatch(
   /calc\(var\(--z-modal\)/,
   "A non-modal coachmark must never outrank the modal authority"
 );
+assert.match(pilotCss, /data-home-onboarding-active="welcome-v1"/);
+assert.match(pilotCss, /data-home-onboarding-target="step-1"/);
+assert.match(pilotCss, /0 0 0 100vmax var\(--overlay-bg\)/);
+assert.match(pilotCss, /var\(--focus-ring-strong\)/);
 assert.match(pilotCss, /\.home-view-root \.home-welcome-pilot \{/);
 assert.match(
   pilotCss,
@@ -165,7 +298,7 @@ assert.match(
 assert.match(
   pilotCss,
   /background:\s*var\(--solid-bg-0,\s*var\(--card-bg\)\)/,
-  "Coachmark must use a solid design-system surface"
+  "Coachmark and target must use a solid design-system surface"
 );
 assert.match(pilotCss, /border:\s*1px solid var\(--card-border\)/);
 assert.match(pilotCss, /border-radius:\s*var\(--card-radius-lg\)/);
@@ -178,4 +311,4 @@ assert.match(pilotCss, /var\(--app-safe-bottom,\s*0px\)/);
 assert.match(pilotCss, /@media \(forced-colors: active\)/);
 assert.match(pilotCss, /@media print/);
 
-console.log("home onboarding welcome pilot contract: PASS");
+console.log("home onboarding persisted step-1 contract: PASS");

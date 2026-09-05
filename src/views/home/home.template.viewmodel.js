@@ -123,6 +123,17 @@ export function buildVm(input = {}) {
     summary.invoiceStatsAvailable === true &&
     totalInvoiced !== null;
 
+  const onboardingCandidate = first(
+    data.onboarding,
+    dashboard.onboarding,
+    user.onboarding,
+    {}
+  );
+
+  const onboarding = isObject(onboardingCandidate)
+    ? { ...onboardingCandidate }
+    : {};
+
   return {
     user: {
       ...user,
@@ -153,6 +164,10 @@ export function buildVm(input = {}) {
     stale: dashboard.stale === true,
     partial: dashboard.partial === true,
     warnings: safeArray(dashboard.warnings),
+    onboarding,
+    onboardingLoaded: data.onboardingLoaded === true,
+    onboardingSaving: data.onboardingSaving === true,
+    onboardingError: cleanText(data.onboardingError, ""),
     counts: {
       incidencias: number(first(summary.incidencias, summary.tickets, incidencias.length, 0), 0),
       facturas: number(first(summary.facturas, summary.invoices, facturas.length, 0), 0),
@@ -176,4 +191,3 @@ export function buildVm(input = {}) {
 /* =========================================================
    SHARED PARTS
 ========================================================= */
-

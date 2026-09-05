@@ -199,6 +199,13 @@
   gap: var(--home-extreme-gap);
 }
 
+/* Standard user: the lower panels must share the exact same 50/50 tracks as
+   the two summary cards above. Admin keeps its existing composition. */
+.home-view-root--user .home-stats,
+.home-view-root--user .home-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .home-view-root .home-panel {
   min-block-size: 0;
   display: flex;
@@ -308,4 +315,3 @@
 .home-view-root .home-link-button:hover .home-link-button-icon {
   transform: translateX(2px);
 }
-

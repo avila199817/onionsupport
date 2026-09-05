@@ -6,6 +6,7 @@
    - seguimiento: más reciente -> más antiguo
    - adjuntos actuales: más reciente -> más antiguo
    - turno de usuario pendiente de revisión
+   - composer fail-closed mientras se resuelve la política de usuario
    - ocultación completa del composer mientras soporte no responde
    - indicador amarillo accesible con explicación del bloqueo
    - ID completo y affordance del técnico
@@ -18,7 +19,7 @@
 import { synchronizeAvatars } from "../avatar-system/index.js";
 
 export const INCIDENCIAS_DETAIL_STATE_VERSION =
-  "incidencias-detail-state.v3.final-polish";
+  "incidencias-detail-state.v4.backend-policy-fail-closed";
 
 const VIEW = "#view-container, [data-router-view='true']";
 const HOST = "[data-incidencias-modal-host='true']";
@@ -28,6 +29,7 @@ const COMPOSER = "[data-modal-composer='true']";
 const HEADER_CHIPS = "[data-modal-header-chips='true'], .ui-detail-modal-hero-chips";
 const PENDING_CHIP = "[data-ticket-review-state='pending']";
 const SUCCESS = ".incidencias-modal-feedback--success";
+const ERROR = ".incidencias-modal-feedback--error";
 const DESCRIPTION_SECTION = ".incidencias-modal-description-section";
 const DESCRIPTION_TEXT = ".incidencias-modal-description";
 const COMMENT_THREAD = "[data-description-comments='true']";
@@ -44,6 +46,8 @@ const POLL_MS = 90000;
 const PENDING_TITLE = "Pendiente de revisión";
 const PENDING_MESSAGE =
   "Tu última actualización está pendiente de revisión. Podrás volver a actualizar esta incidencia cuando el equipo de soporte responda.";
+const BACKEND_WAITING_MESSAGE =
+  "Ya has enviado una actualización. Podrás iniciar otra cuando el equipo de soporte responda en esta incidencia.";
 
 const SUPPORT_ROLES = new Set([
   "admin",
@@ -257,6 +261,59 @@ function supportIdentity(detail = {}) {
   };
 }
 
+/*
+  Los comentarios/history legacy no siempre conservaron source o role. En ese
+  caso reconciliamos también contra la identidad del propietario. No usamos
+  cliente.id porque puede ser el CON-* de la ficha y no el userId real.
+*/
+function requesterIdentity(detail = {}) {
+  const raw = object(first(detail?.raw, detail));
+  const createdBy = object(raw.createdBy);
+  const receptor = object(raw.receptor);
+  const requester = object(raw.requesterSnapshot);
+  const usuario = object(raw.usuario);
+  const owner = object(raw.owner);
+  const cliente = object(raw.cliente);
+
+  return {
+    ids: new Set([
+      raw.userId,
+      raw.usuarioId,
+      raw.ownerUserId,
+      raw.createdByUserId,
+      raw.receptorUserId,
+      raw.requesterUserId,
+      createdBy.userId,
+      createdBy.id,
+      receptor.userId,
+      receptor.id,
+      requester.userId,
+      requester.id,
+      usuario.userId,
+      usuario.id,
+      owner.userId,
+      owner.id,
+      cliente.userId,
+    ].map(text).filter(Boolean)),
+
+    emails: new Set([
+      raw.email,
+      raw.emailLower,
+      raw.userEmail,
+      raw.clienteEmail,
+      raw.requesterEmail,
+      createdBy.email,
+      receptor.email,
+      requester.email,
+      requester.emailLower,
+      usuario.email,
+      owner.email,
+      cliente.email,
+      cliente.emailLower,
+    ].map(lower).filter(Boolean)),
+  };
+}
+
 function eventSide(entry = {}, detail = {}) {
   const raw = object(entry);
   const source = lower(raw.source || raw.origin || raw.actorType);
@@ -276,8 +333,6 @@ function eventSide(entry = {}, detail = {}) {
   if (SUPPORT_ROLES.has(role)) return "support";
   if (USER_ROLES.has(role)) return "user";
 
-  const identity = supportIdentity(detail);
-
   const actorId = text(
     raw.byUserId ||
     raw.userId ||
@@ -286,10 +341,6 @@ function eventSide(entry = {}, detail = {}) {
     raw.createdBy?.userId ||
     raw.uploadedBy?.userId
   );
-
-  if (actorId && identity.ids.has(actorId)) {
-    return "support";
-  }
 
   const actorEmail = lower(
     raw.byEmail ||
@@ -300,9 +351,14 @@ function eventSide(entry = {}, detail = {}) {
     raw.uploadedBy?.email
   );
 
-  if (actorEmail && identity.emails.has(actorEmail)) {
-    return "support";
-  }
+  /* Soporte gana siempre ante una identidad accidentalmente ambigua. */
+  const support = supportIdentity(detail);
+  if (actorId && support.ids.has(actorId)) return "support";
+  if (actorEmail && support.emails.has(actorEmail)) return "support";
+
+  const requester = requesterIdentity(detail);
+  if (actorId && requester.ids.has(actorId)) return "user";
+  if (actorEmail && requester.emails.has(actorEmail)) return "user";
 
   return "";
 }
@@ -337,7 +393,7 @@ function historyKinds(entry = {}) {
   return kinds;
 }
 
-function resolveConversationPolicy(detail = {}) {
+export function resolveConversationPolicy(detail = {}) {
   const raw = object(first(detail?.raw, detail));
   const explicit = object(
     first(
@@ -952,6 +1008,77 @@ function refreshAfterSuccess(root) {
   return true;
 }
 
+/*
+  Defensa de carrera: si otra pestaña ganó el turno entre el GET y el submit,
+  el backend devuelve el 409 canónico. En cuanto ese mensaje llega al modal,
+  convertimos la política local en pendiente y retiramos el composer sin
+  esperar al siguiente polling. El force-poll posterior vuelve a consultar la
+  autoridad del backend y puede reabrir el composer cuando soporte responda.
+*/
+function refreshAfterBlockedError(root) {
+  if (!root || root.querySelector(ADMIN)) return false;
+
+  const feedback = root.querySelector(ERROR);
+  const message = lower(feedback?.textContent);
+  const expected = lower(BACKEND_WAITING_MESSAGE);
+
+  if (
+    !message ||
+    !(
+      message.includes(expected) ||
+      (
+        message.includes("ya has enviado una actualización") &&
+        message.includes("equipo de soporte responda")
+      )
+    )
+  ) {
+    return false;
+  }
+
+  const id = ticketId(root);
+  const currentDetail = object(hydration?.detail, {});
+  const currentPolicy = object(
+    first(
+      currentDetail.userUpdatePolicy,
+      currentDetail.meta?.userUpdatePolicy,
+      {}
+    )
+  );
+
+  if (currentPolicy.awaitingSupportResponse === true) {
+    return false;
+  }
+
+  const policy = {
+    ...currentPolicy,
+    awaitingSupportResponse: true,
+    canUserUpdate: false,
+    canUserAddComment: false,
+    canUserAddAttachment: false,
+    message: BACKEND_WAITING_MESSAGE,
+    source: "backend-rejection",
+  };
+
+  const nextDetail = {
+    ...currentDetail,
+    userUpdatePolicy: policy,
+    meta: {
+      ...object(currentDetail.meta, {}),
+      userUpdatePolicy: policy,
+    },
+  };
+
+  if (hydration?.ticketId === id) {
+    hydration.detail = nextDetail;
+    hydration.resolved = true;
+    hydration.stable = true;
+  }
+
+  project(root, nextDetail);
+  if (id) planPoll(id, nextDetail);
+  return true;
+}
+
 function nodeTouches(node, selectors = []) {
   if (!(node instanceof Element)) return false;
 
@@ -967,6 +1094,7 @@ function modalMutationMatters(mutations = []) {
   const selectors = [
     ROOT,
     SUCCESS,
+    ERROR,
     FILES,
     HEADER_CHIPS,
   ];
@@ -1047,10 +1175,23 @@ function sync() {
     lastSuccessKey = "";
 
     /*
-       El controller ya ha hidratado el detalle al abrir el modal, por lo que
-       el cache suele resolver aquí sin red y evita flashes de estado.
+      FAIL CLOSED para usuario estándar: el listado no contiene la política
+      conversacional completa. Hasta que el GET de detalle confirme que puede
+      escribir, el formulario no se ofrece. Admin nunca pasa por este cierre.
     */
+    if (!root.querySelector(ADMIN)) {
+      hideComposer(root);
+      removePendingChip(root);
+      root.dataset.ticketReviewState = "checking";
+    } else {
+      root.dataset.ticketReviewState = "ready";
+    }
+
     hydrate(id, { force: false });
+    return true;
+  }
+
+  if (refreshAfterBlockedError(root)) {
     return true;
   }
 
@@ -1158,6 +1299,7 @@ export function getIncidenciasDetailStateSnapshot() {
       attachments: "newest_first",
     }),
     pendingIndicator: "warning_clock_chip",
+    composerPolicy: "fail_closed_until_backend_detail_policy",
     technicianAvatarFallback: "global_avatar_system",
     closedTicketCanReceiveFutureUpdate: true,
     backendIsWriteAuthority: true,

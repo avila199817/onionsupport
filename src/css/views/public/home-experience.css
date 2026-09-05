@@ -937,6 +937,7 @@
     justify-content: center;
   }
 
+  /* El slot conserva el mismo espacio de interacción que el menú móvil. */
   .public-home .public-home-nav-account-slot .public-home-account-menu-wrap > [data-public-home-account-toggle]:is(:hover, :focus-visible) .public-support-account,
   .public-home .public-home-nav-account-slot .public-home-account-menu-wrap.is-open .public-support-account {
     border: 0;

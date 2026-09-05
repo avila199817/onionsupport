@@ -8,7 +8,7 @@
    - Sólo estiliza el primer box de bienvenida del Home privado.
    - Consume exclusivamente tokens globales dark/light.
    - No altera el greeting, estadísticas, paneles ni navegación existentes.
-   - No usa !important, paleta local ni backdrop bloqueante.
+   - No usa prioridades forzadas, paleta local ni backdrop bloqueante.
 ========================================================= */
 
 .home-view-root .home-welcome-pilot {

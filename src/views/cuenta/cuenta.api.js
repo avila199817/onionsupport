@@ -23,6 +23,10 @@
 import { AppCore } from "../../core/index.js";
 import Http from "../../core/http.js";
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
+import {
+  AUTH_PASSWORD_POLICY,
+  validateAuthPassword,
+} from "../../features/auth/password-policy.js";
 
 export const CUENTA_API_VERSION =
   "cuenta.api.backend-contract.v5-canonical-runtime";
@@ -42,12 +46,7 @@ export const CUENTA_UPLOAD_TIMEOUT = 60_000;
 export const CUENTA_SELF_UPDATE_SUPPORTED = false;
 
 export const CUENTA_PASSWORD_POLICY = Object.freeze({
-  minLength: 10,
-  maxLength: 256,
-  requiresLowercase: true,
-  requiresUppercase: true,
-  requiresNumber: true,
-  requiresSymbol: true,
+  ...AUTH_PASSWORD_POLICY,
   currentPasswordRequiredByDefault: true,
 });
 
@@ -649,26 +648,19 @@ export function validateCuentaPasswordPayload(payload = {}) {
     };
   }
 
-  if (!password.trim()) {
-    return { ok: false, code: "INVALID_INPUT", message: "Introduce una nueva contraseña." };
-  }
-  if (password.length < CUENTA_PASSWORD_POLICY.minLength) {
+  const passwordValidation = validateAuthPassword(password);
+
+  if (!passwordValidation.ok) {
     return {
       ok: false,
-      code: "WEAK_PASSWORD",
-      message: `La contraseña debe tener al menos ${CUENTA_PASSWORD_POLICY.minLength} caracteres.`,
+      code:
+        passwordValidation.code === "PASSWORD_REQUIRED"
+          ? "INVALID_INPUT"
+          : passwordValidation.code,
+      message: passwordValidation.message,
     };
   }
-  if (password.length > CUENTA_PASSWORD_POLICY.maxLength) {
-    return { ok: false, code: "PASSWORD_TOO_LONG", message: "La contraseña es demasiado larga." };
-  }
-  if (!/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z\d]/.test(password)) {
-    return {
-      ok: false,
-      code: "WEAK_PASSWORD",
-      message: "La contraseña debe incluir mayúscula, minúscula, número y símbolo.",
-    };
-  }
+
   if (normalized.confirmPassword && normalized.confirmPassword !== password) {
     return { ok: false, code: "PASSWORD_MISMATCH", message: "Las contraseñas no coinciden." };
   }

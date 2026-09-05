@@ -8,6 +8,7 @@
    No define colores, fondos, gradientes, bordes, hash, tonos ni iniciales.
    La pintura y la identidad siguen perteneciendo exclusivamente a
    components/avatar-system.css + features/avatar-system/identity.js.
+   AvatarIdentity v4 mantiene un único tone por identidad estable SPA-wide.
 ========================================================= */
 
 :where(

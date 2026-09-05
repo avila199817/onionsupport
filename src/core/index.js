@@ -39,6 +39,10 @@ function cleanText(value = "", fallback = "") {
   const output = String(value ?? "").replace(/[\r\n\t]/g, " ").replace(/\s+/g, " ").trim();
   return output || fallback;
 }
+function normalizeUserEmail(value = "") {
+  const email = cleanText(value, "").toLowerCase().replace(/\s+/g, "");
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : "";
+}
 function normalizeKey(value = "") { return cleanText(value, "").replace(/[-_\s]/g, "").toLowerCase(); }
 function first(...values) {
   for (const value of values) {
@@ -221,6 +225,7 @@ function publicUser(user = null) {
     id: first(user.id, user.userId, null), userId: first(user.userId, user.id, null),
     username: first(user.username, user.userName, user.user_name, null), slug,
     displayName: first(user.displayName, user.fullName, user.name, user.nombre, user.profile?.displayName, user.profile?.name, user.username, "Usuario"),
+    email: normalizeUserEmail(first(user.emailLower, user.email, user.emailAddress, user.profile?.emailLower, user.profile?.email, user.lookup?.emailLower, user.lookup?.email, "")),
     role, rol: role, roles: [role],
     avatarUrl: cleanText(first(user.avatarUrl, user.avatar, user.picture, user.photoUrl, user.profile?.avatarUrl, user.profile?.avatar, ""), ""), status,
   };
@@ -637,3 +642,4 @@ Object.defineProperties(AppCore, {
 for (const [name, registryName] of [["auth", "auth"], ["Auth", "auth"], ["router", "router"], ["Router", "router"], ["toast", "toast"], ["Toast", "toast"], ["sidebar", "sidebar"], ["Sidebar", "sidebar"], ["topbar", "topbar"], ["Topbar", "topbar"]]) defineModuleAlias(name, registryName);
 
 export default AppCore;
+

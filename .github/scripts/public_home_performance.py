@@ -138,7 +138,7 @@ def main() -> int:
             if token in auth_selector:
                 fail(errors, f"authenticated() contiene reread de Core: {token}")
 
-    panel_path = function_body(experience, "panelPath", "compactDisplayName")
+    panel_path = function_body(experience, "panelPath", "routeLink")
     if not panel_path:
         fail(errors, "no se pudo localizar panelPath() en public-home experience")
     else:

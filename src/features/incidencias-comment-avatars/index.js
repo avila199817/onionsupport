@@ -168,6 +168,20 @@ function removeCommentAvatar(meta = null) {
   return Boolean(current);
 }
 
+function applyStableAvatarIdentityDataset(avatar = null, profile = null, author = "") {
+  if (!avatar) return;
+
+  const name = cleanText(profile?.name || author || "");
+  const email = cleanText(profile?.email || "").toLowerCase();
+  const userId = cleanText(profile?.userId || profile?.id || "");
+  const username = cleanText(profile?.username || profile?.userName || "");
+
+  if (name) avatar.dataset.avatarName = name;
+  if (email) avatar.dataset.avatarEmail = email;
+  if (userId) avatar.dataset.avatarUserId = userId;
+  if (username) avatar.dataset.avatarUsername = username;
+}
+
 function createCommentAvatar(meta = null, profile = null, author = "") {
   if (!meta || !profile?.src || !author) return null;
 
@@ -176,6 +190,7 @@ function createCommentAvatar(meta = null, profile = null, author = "") {
     name: author,
     email: profile.email,
     userId: profile.userId,
+    username: profile.username,
   });
 
   const avatar = document.createElement("span");
@@ -190,6 +205,7 @@ function createCommentAvatar(meta = null, profile = null, author = "") {
   avatar.dataset.avatarIdentity = presentation.fingerprint;
   avatar.dataset.avatarInitials = presentation.initials;
   avatar.dataset.hasAvatar = "true";
+  applyStableAvatarIdentityDataset(avatar, profile, author);
 
   const image = document.createElement("img");
   image.src = profile.src;
@@ -239,6 +255,7 @@ function syncCommentMeta(meta = null, profiles = [], identityIndex = new Map()) 
     name: author,
     email: profile.email,
     userId: profile.userId,
+    username: profile.username,
   });
 
   const current = meta.querySelector?.(`.${COMMENT_AVATAR_CLASS}`) || null;
@@ -251,6 +268,7 @@ function syncCommentMeta(meta = null, profiles = [], identityIndex = new Map()) 
     current.dataset.avatarIdentity === presentation.fingerprint &&
     meta.dataset.commentAvatarAuthor === author
   ) {
+    applyStableAvatarIdentityDataset(current, profile, author);
     meta.classList.add(COMMENT_AVATAR_META_CLASS);
     return true;
   }

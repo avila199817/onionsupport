@@ -4,25 +4,22 @@
 
    PURE DOMAIN · SINGLE SOURCE OF TRUTH
 
-   Microsoft Fluent UI Persona parity:
-   - Iniciales: misma regla que Fluent UI/Persona para nombres latinos.
-   - Colores: misma paleta y mismo hash determinista de PersonaInitialsColor.
-   - Misma persona/nombre => mismo color en cualquier vista.
+   Contrato visual:
+   - Iniciales compatibles con Microsoft Fluent UI Persona.
+   - Paleta de 20 colores compatible con Fluent UI Persona.
+   - Usuario identificable => el color nace de una identidad estable, nunca
+     del spelling visible del nombre.
+   - El nombre sólo decide color como fallback final cuando no existe alias
+     estable (email, userId o username).
    - Sin aleatoriedad, storage, red ni color persistido.
 ========================================================= */
 
 "use strict";
 
 export const AVATAR_IDENTITY_VERSION =
-  "avatar-identity.v3-microsoft-fluent-persona-v8";
+  "avatar-identity.v4-stable-user-tone";
 
-/*
-  Fluent UI v8 Persona auto-colors.
-  Orden y valores hex exactos de Microsoft:
-  lightBlue, blue, darkBlue, teal, green, darkGreen, lightPink, pink,
-  magenta, purple, orange, lightRed, darkRed, violet, gold, burgundy,
-  warmGray, cyan, rust, coolGray.
-*/
+/* Fluent UI v8 Persona colors: exact order/hex. */
 export const MICROSOFT_PERSONA_COLORS = Object.freeze([
   Object.freeze({ key: "lightBlue", hex: "#4F6BED" }),
   Object.freeze({ key: "blue", hex: "#0078D4" }),
@@ -263,37 +260,32 @@ export function avatarUsernameFromIdentity(input = {}) {
   );
 }
 
-function emailHandle(value = "") {
-  const email = normalizeAvatarEmail(value);
-  if (!email) return "";
-  return normalizeAvatarUsername(email.split("@")[0] || "");
-}
-
 /*
-  Identidad estable de Onion Support. Se mantiene separada del color:
-  Microsoft calcula el color desde displayName; Onion usa esta seed para
-  fingerprint/reconciliación de la misma persona entre DTOs.
+  Canonical identity key for visual presentation.
+
+  Email wins because it is the alias that is consistently projected today
+  through Usuarios, Clientes, Incidencias, Facturas, Home and runtime DOM.
+  That makes old snapshots that lack userId converge with live user DTOs.
+  userId/username remain deterministic fallbacks when email is unavailable.
 */
 export function avatarSeedFromIdentity(input = {}) {
-  const username = avatarUsernameFromIdentity(input);
   const email = avatarEmailFromIdentity(input);
-  const handle = username || emailHandle(email);
-  if (handle) return `handle:${handle}`;
+  if (email) return `email:${email}`;
 
   const userId = avatarUserIdFromIdentity(input);
   if (userId) return `user:${userId}`;
+
+  const username = avatarUsernameFromIdentity(input);
+  if (username) return `username:${username}`;
 
   const explicitName = normalizeAvatarName(
     explicitAvatarNameFromIdentity(input)
   );
   if (explicitName) return `name:${explicitName}`;
 
-  if (email) return `email:${email}`;
-
   return "avatar:onion-support";
 }
 
-/* Fingerprint estable de identidad; no decide el color visual. */
 export function hashAvatarSeed(value = "") {
   const seed = cleanAvatarText(value, "avatar:onion-support");
   let hash = 0x811c9dc5;
@@ -312,11 +304,7 @@ export function hashAvatarSeed(value = "") {
   return hash >>> 0;
 }
 
-/*
-  Hash exacto usado por Microsoft Fluent UI Persona para el auto-color.
-  Se recorre el displayName de derecha a izquierda y se combinan sus UTF-16
-  charCode con un shift i % 8.
-*/
+/* Exact Microsoft Fluent UI Persona display-name hash. */
 export function microsoftPersonaHash(displayName = "") {
   const name = cleanAvatarText(displayName, "");
   let hashCode = 0;
@@ -337,9 +325,8 @@ export function avatarToneFromName(displayName = "") {
 }
 
 /*
-  Compatibilidad para consumidores que sólo tienen una seed textual.
-  La presentación normal debe usar avatarToneFromIdentity(), que hashea el
-  displayName como Microsoft.
+  Stable identity aliases use the same deterministic Microsoft hash function,
+  but over the canonical Onion identity seed instead of the mutable displayName.
 */
 export function avatarToneFromSeed(value = "") {
   return avatarToneFromName(
@@ -348,6 +335,20 @@ export function avatarToneFromSeed(value = "") {
 }
 
 export function avatarToneFromIdentity(input = {}) {
+  const email = avatarEmailFromIdentity(input);
+  const userId = avatarUserIdFromIdentity(input);
+  const username = avatarUsernameFromIdentity(input);
+
+  if (email || userId || username) {
+    return avatarToneFromSeed(
+      avatarSeedFromIdentity(input)
+    );
+  }
+
+  /*
+    Anonymous/name-only records preserve Fluent Persona behavior. This is a
+    fallback only; identified users never derive color from displayName.
+  */
   return avatarToneFromName(
     avatarNameFromIdentity(input)
   );
@@ -452,7 +453,7 @@ export function avatarInitials(value = "") {
 
 export function avatarIdentityFingerprint(input = {}) {
   return hashAvatarSeed(
-    `onion-avatar-fingerprint:v3|${avatarSeedFromIdentity(input)}`
+    `onion-avatar-fingerprint:v4|${avatarSeedFromIdentity(input)}`
   ).toString(36);
 }
 

@@ -120,6 +120,7 @@ function profilePresentation(name = "", identity = {}) {
     name,
     email: identity.email,
     userId: identity.userId,
+    username: identity.username,
   });
 }
 
@@ -216,7 +217,22 @@ function presentationForAuthor(profile = null, authorText = "") {
     name: authorText,
     email: profile?.email,
     userId: profile?.userId,
+    username: profile?.username,
   });
+}
+
+function applyStableAvatarIdentityDataset(avatar = null, profile = null, authorText = "") {
+  if (!avatar) return;
+
+  const name = text(profile?.name || authorText || "");
+  const email = text(profile?.email || "").toLowerCase();
+  const userId = text(profile?.userId || profile?.id || "");
+  const username = text(profile?.username || profile?.userName || "");
+
+  if (name) avatar.dataset.avatarName = name;
+  if (email) avatar.dataset.avatarEmail = email;
+  if (userId) avatar.dataset.avatarUserId = userId;
+  if (username) avatar.dataset.avatarUsername = username;
 }
 
 function createAvatar(head = null, profile = null, authorText = "") {
@@ -238,6 +254,7 @@ function createAvatar(head = null, profile = null, authorText = "") {
   avatar.dataset.avatarIdentity = presentation.fingerprint;
   avatar.dataset.avatarInitials = presentation.initials;
   avatar.dataset.hasAvatar = hasImage ? "true" : "false";
+  applyStableAvatarIdentityDataset(avatar, profile, authorText);
 
   const fallback = document.createElement("span");
   fallback.className = AVATAR_FALLBACK_CLASS;
@@ -295,6 +312,7 @@ function syncHead(head = null, identityIndex = new Map(), availableProfiles = []
     current.dataset.avatarIdentity === presentation.fingerprint &&
     head.dataset.followupAvatarAuthor === authorText
   ) {
+    applyStableAvatarIdentityDataset(current, profile, authorText);
     return true;
   }
 

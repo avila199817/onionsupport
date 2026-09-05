@@ -5,6 +5,7 @@
    Responsabilidad:
    - Controlar el ciclo de vida DOM de la vista Inicio.
    - Delegar datos/cache/dedupe exclusivamente a home.api.js.
+   - Delegar onboarding HTTP exclusivamente a home.onboarding.js.
    - Delegar HTML exclusivamente a home.template.js.
    - Mantener un único listener delegado de acciones sobre el host.
    - Navegar mediante Router/AppCore, sin HTTP, Store ni Storage propios.
@@ -24,11 +25,19 @@ import {
 } from "./home.api.js";
 
 import {
+  HOME_ONBOARDING_ACTIONS,
+  HOME_ONBOARDING_GUIDE_VERSION,
+  HOME_ONBOARDING_STEP,
+  loadHomeOnboarding,
+  saveHomeOnboardingChoice,
+} from "./home.onboarding.js";
+
+import {
   renderHomeTemplate,
   renderHomeErrorState,
 } from "./home.template.js";
 
-export const HOME_INDEX_VERSION = "home.index.v12-runtime-context";
+export const HOME_INDEX_VERSION = "home.index.v13-persisted-onboarding";
 export const HOME_VIEW_VERSION = HOME_INDEX_VERSION;
 
 const SOURCE = "home.view";
@@ -37,6 +46,7 @@ const ROUTER_EVENT_HANDLED_KEY = "__onionRouterHandled";
 const ACTIONS = Object.freeze({
   RETRY: "retry",
   NAVIGATE: "navigate",
+  ONBOARDING_CHOICE: "onboarding-choice",
 });
 
 const REFRESH_ACTIONS = new Set([
@@ -54,6 +64,10 @@ const NAVIGATION_ACTIONS = new Set([
   "abrir",
   "ir",
 ]);
+
+const ONBOARDING_ACTIONS = new Set(
+  Object.values(HOME_ONBOARDING_ACTIONS)
+);
 
 const INSTANCES = new WeakMap();
 let lastInstance = null;
@@ -431,7 +445,11 @@ function actionFrom(node = null) {
 }
 
 function isKnownAction(action = "") {
-  return REFRESH_ACTIONS.has(action) || NAVIGATION_ACTIONS.has(action);
+  return (
+    action === ACTIONS.ONBOARDING_CHOICE ||
+    REFRESH_ACTIONS.has(action) ||
+    NAVIGATION_ACTIONS.has(action)
+  );
 }
 
 /* =========================================================
@@ -485,9 +503,15 @@ function createHomeController(host = null, context = {}) {
   let refreshing = false;
   let error = "";
 
+  let onboarding = null;
+  let onboardingLoaded = false;
+  let onboardingSaving = false;
+  let onboardingError = "";
+
   let mountedFrom = "";
   let lastRenderAt = 0;
   let loadSeq = 0;
+  let onboardingSeq = 0;
 
   const renderState = {
     lastHTML: "",
@@ -501,6 +525,10 @@ function createHomeController(host = null, context = {}) {
       loading: data.loading ?? loading,
       refreshing: data.refreshing ?? refreshing,
       error: data.error ?? error,
+      onboarding: data.onboarding ?? onboarding,
+      onboardingLoaded: data.onboardingLoaded ?? onboardingLoaded,
+      onboardingSaving: data.onboardingSaving ?? onboardingSaving,
+      onboardingError: data.onboardingError ?? onboardingError,
     });
   }
 
@@ -658,6 +686,32 @@ function createHomeController(host = null, context = {}) {
     });
   }
 
+  async function loadOnboardingState() {
+    const seq = ++onboardingSeq;
+
+    try {
+      const next = await loadHomeOnboarding();
+
+      if (destroyed || seq !== onboardingSeq) return next || null;
+
+      onboarding = next;
+      onboardingLoaded = true;
+      onboardingError = "";
+      render();
+      return onboarding;
+    } catch (loadError) {
+      if (destroyed || seq !== onboardingSeq) return null;
+
+      onboardingLoaded = true;
+      onboardingError = safeError(
+        loadError,
+        "No se pudo consultar el estado de la guía."
+      );
+      render();
+      return null;
+    }
+  }
+
   async function navigateTo(path = "") {
     const route = safeRoute(path, "");
     if (!route) return false;
@@ -688,8 +742,73 @@ function createHomeController(host = null, context = {}) {
     }
   }
 
+  async function handleOnboardingChoice(node = null) {
+    if (onboardingSaving) return true;
+
+    const onboardingAction = cleanText(
+      node?.dataset?.onboardingAction ||
+        node?.getAttribute?.("data-onboarding-action") ||
+        "",
+      ""
+    ).toLowerCase();
+
+    if (!ONBOARDING_ACTIONS.has(onboardingAction)) {
+      onboardingError = "La opción de bienvenida no es válida.";
+      render();
+      return true;
+    }
+
+    const route = cleanText(
+      node?.dataset?.route || node?.getAttribute?.("data-route") || "",
+      ""
+    );
+
+    onboardingSaving = true;
+    onboardingError = "";
+    render();
+
+    try {
+      const saved = await saveHomeOnboardingChoice({
+        version: HOME_ONBOARDING_GUIDE_VERSION,
+        step: HOME_ONBOARDING_STEP,
+        action: onboardingAction,
+      });
+
+      if (destroyed) return true;
+
+      onboarding = saved;
+      onboardingLoaded = true;
+      onboardingSaving = false;
+      onboardingError = "";
+      render();
+
+      if (
+        onboardingAction === HOME_ONBOARDING_ACTIONS.OPEN_INCIDENCIAS &&
+        route
+      ) {
+        await navigateTo(route);
+      }
+
+      return true;
+    } catch (saveError) {
+      if (destroyed) return true;
+
+      onboardingSaving = false;
+      onboardingError = safeError(
+        saveError,
+        "No se pudo guardar tu elección. Inténtalo de nuevo."
+      );
+      render();
+      return true;
+    }
+  }
+
   async function handleAction(action = "", node = null) {
     const type = cleanText(action, "");
+
+    if (type === ACTIONS.ONBOARDING_CHOICE) {
+      return handleOnboardingChoice(node);
+    }
 
     if (REFRESH_ACTIONS.has(type)) {
       await refresh();
@@ -769,6 +888,8 @@ function createHomeController(host = null, context = {}) {
       renderInitialLoading();
     }
 
+    void loadOnboardingState();
+
     if (force || !initial.fresh) {
       void load({
         ...opts,
@@ -792,7 +913,9 @@ function createHomeController(host = null, context = {}) {
     mounted = false;
     loading = false;
     refreshing = false;
+    onboardingSaving = false;
     loadSeq += 1;
+    onboardingSeq += 1;
 
     unbind();
 
@@ -834,6 +957,14 @@ function createHomeController(host = null, context = {}) {
         role: getCurrentRole(context),
         error: redact(error),
         lastRenderAt,
+        onboarding: {
+          loaded: onboardingLoaded,
+          saving: onboardingSaving,
+          error: redact(onboardingError),
+          assignedVersion: Number(onboarding?.assignedVersion || 0),
+          completedVersion: Number(onboarding?.completedVersion || 0),
+          completedStep: Number(onboarding?.completedStep || 0),
+        },
         cache: getCacheState(),
       };
     },

@@ -32,8 +32,8 @@ const JAVIER = Object.freeze({
 });
 
 assert.equal(avatarInitials(JAVIER.displayName), "JH");
-assert.equal(avatarToneFromIdentity(JAVIER), 11);
-assert.equal(avatarColorFromIdentity(JAVIER), "#D13438");
+assert.equal(avatarToneFromIdentity(JAVIER), 13);
+assert.equal(avatarColorFromIdentity(JAVIER), "#8764B8");
 
 const legacyMisread = resolveAvatarPresentation({ displayName: "JH" });
 assert.equal(
@@ -78,7 +78,7 @@ assert.match(targetTag, /data-avatar-name="Javier Harandou"/);
 assert.match(targetTag, /data-avatar-email="harandou@efcusa\.com"/);
 assert.match(targetTag, /data-avatar-user-id="ON-1770551914523"/);
 assert.match(targetTag, /data-avatar-initials="JH"/);
-assert.match(targetTag, /data-avatar-tone="11"/);
+assert.match(targetTag, /data-avatar-tone="13"/);
 assert.match(
   targetTag,
   new RegExp(`data-avatar-identity-contract="${INCIDENCIAS_CREATE_AVATAR_IDENTITY_VERSION}"`)
@@ -109,7 +109,7 @@ assert.match(resultAvatarTag, /data-avatar-name="Javier Harandou"/);
 assert.match(resultAvatarTag, /data-avatar-email="harandou@efcusa\.com"/);
 assert.match(resultAvatarTag, /data-avatar-user-id="ON-1770551914523"/);
 assert.match(resultAvatarTag, /data-avatar-initials="JH"/);
-assert.match(resultAvatarTag, /data-avatar-tone="11"/);
+assert.match(resultAvatarTag, /data-avatar-tone="13"/);
 
 for (const required of [
   ".inc-create-user-avatar",
@@ -154,5 +154,5 @@ assert.equal(snapshot.policy.noFallbackTextAsIdentitySeed, true);
 assert.equal(snapshot.policy.noLocalPalette, true);
 
 console.log(
-  "Incidencias Create avatar identity: PASS · Javier Harandou = JH · tone 11 · #D13438 · global AvatarSystem"
+  "Incidencias Create avatar identity: PASS · Javier Harandou = JH · stable tone 13 · #8764B8 · global AvatarSystem"
 );

@@ -13,7 +13,7 @@
    - Filas de entidad usan botones semánticos y abren el owner modal canónico.
    - Incidencias y Facturas permanecen sobre el Home, sin owner-route handoff.
    - La identidad relacional procede sólo de los DTO ya cargados por cada dominio.
-   - El piloto de bienvenida es visual, admin-only y no persiste progreso.
+   - El onboarding consume estado autoritativo ya resuelto por el controller.
 ========================================================= */
 
 import {
@@ -42,6 +42,9 @@ export {
 };
 
 const HOME_ONBOARDING_PILOT_VERSION = "welcome-v1";
+const HOME_ONBOARDING_ACTION = "onboarding-choice";
+const HOME_ONBOARDING_GUIDE_VERSION = 1;
+const HOME_ONBOARDING_STEP = 1;
 
 function welcomeFirstName(vm = {}) {
   const displayName = cleanText(vm?.user?.displayName, "Usuario");
@@ -49,18 +52,57 @@ function welcomeFirstName(vm = {}) {
   return cleanText(firstName, "Usuario").slice(0, 48);
 }
 
+function onboardingInteger(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number >= 0 ? number : fallback;
+}
+
+function welcomePilotActive(vm = {}) {
+  if (vm.loading || vm.error || vm.onboardingLoaded !== true) return false;
+
+  const onboarding = vm?.onboarding && typeof vm.onboarding === "object"
+    ? vm.onboarding
+    : {};
+
+  const completedVersion = onboardingInteger(onboarding.completedVersion, 0);
+  const completedStep = onboardingInteger(onboarding.completedStep, 0);
+
+  if (
+    completedVersion >= HOME_ONBOARDING_GUIDE_VERSION ||
+    completedStep >= HOME_ONBOARDING_STEP
+  ) {
+    return false;
+  }
+
+  const assignedVersion = onboardingInteger(onboarding.assignedVersion, 0);
+
+  return (
+    assignedVersion >= HOME_ONBOARDING_GUIDE_VERSION ||
+    vm.admin === true
+  );
+}
+
 function welcomePilot(vm = {}) {
-  if (vm.loading || vm.error || vm.admin !== true) return "";
+  if (!welcomePilotActive(vm)) return "";
 
   const firstName = welcomeFirstName(vm);
   const incidenciasRoute = cleanText(vm?.routes?.incidencias, "/incidencias");
+  const saving = vm.onboardingSaving === true;
+  const onboardingError = cleanText(vm.onboardingError, "");
+  const disabled = saving ? " disabled" : "";
+  const note = onboardingError
+    ? onboardingError
+    : saving
+      ? "Guardando tu elección…"
+      : "Tu progreso se guarda en tu cuenta.";
 
   return `
     <dialog
       class="home-welcome-pilot"
       data-home-onboarding-pilot="${attr(HOME_ONBOARDING_PILOT_VERSION)}"
       aria-labelledby="home-welcome-pilot-title"
-      aria-describedby="home-welcome-pilot-copy"
+      aria-describedby="home-welcome-pilot-copy home-welcome-pilot-note"
+      aria-busy="${saving ? "true" : "false"}"
       open
     >
       <form method="dialog" class="home-welcome-pilot__surface">
@@ -80,24 +122,37 @@ function welcomePilot(vm = {}) {
 
         <div class="home-welcome-pilot__actions">
           <button
-            type="submit"
-            value="dismiss"
+            type="button"
             class="home-btn home-welcome-pilot__dismiss"
+            data-home-action="${attr(HOME_ONBOARDING_ACTION)}"
+            data-onboarding-action="dismiss"
+            data-onboarding-version="${HOME_ONBOARDING_GUIDE_VERSION}"
+            data-onboarding-step="${HOME_ONBOARDING_STEP}"
+            ${disabled}
           >
             Ahora no
           </button>
           <button
             type="button"
             class="home-btn home-welcome-pilot__primary"
-            data-home-action="${attr(HOME_ACTIONS.NAVIGATE)}"
+            data-home-action="${attr(HOME_ONBOARDING_ACTION)}"
+            data-onboarding-action="open_incidencias"
+            data-onboarding-version="${HOME_ONBOARDING_GUIDE_VERSION}"
+            data-onboarding-step="${HOME_ONBOARDING_STEP}"
             data-route="${attr(incidenciasRoute)}"
             data-onboarding-pilot-primary="true"
+            ${disabled}
           >
             Ir a Incidencias
           </button>
         </div>
 
-        <p class="home-welcome-pilot__note">Vista piloto · todavía no guarda progreso.</p>
+        <p
+          id="home-welcome-pilot-note"
+          class="home-welcome-pilot__note${onboardingError ? " is-error" : ""}"
+          role="${onboardingError ? "alert" : "status"}"
+          aria-live="polite"
+        >${attr(note)}</p>
       </form>
     </dialog>
   `;
@@ -122,6 +177,7 @@ export function renderHomeErrorState(message = "No se pudo cargar el inicio.") {
 
 export function renderHomeTemplate(input = {}) {
   const vm = buildVm(input);
+  const onboardingActive = welcomePilotActive(vm);
 
   const stateClasses = [
     vm.admin ? "home-view-root--admin" : "home-view-root--user",
@@ -140,6 +196,7 @@ export function renderHomeTemplate(input = {}) {
       data-home-relation-version="${attr(HOME_ENTITY_RELATION_VERSION)}"
       data-home-role="${vm.admin ? "admin" : "user"}"
       data-home-admin="${vm.admin ? "true" : "false"}"
+      ${onboardingActive ? `data-home-onboarding-active="${attr(HOME_ONBOARDING_PILOT_VERSION)}"` : ""}
       aria-busy="${vm.loading || vm.refreshing ? "true" : "false"}"
     >
       ${errorBanner(vm.error)}
@@ -164,9 +221,13 @@ export function getHomeTemplateSnapshot() {
     policy: {
       templateOnly: true,
       greetingLocked: true,
-      onboardingPilotAdminOnly: true,
-      onboardingPilotVisualOnly: true,
-      onboardingPilotPersistsProgress: false,
+      onboardingAssignmentDriven: true,
+      onboardingLegacyAdminPilot: true,
+      onboardingPilotVisualOnly: false,
+      onboardingPilotPersistsProgress: true,
+      onboardingFirstLiveStep: HOME_ONBOARDING_STEP,
+      onboardingGuideVersion: HOME_ONBOARDING_GUIDE_VERSION,
+      onboardingChoiceAction: HOME_ONBOARDING_ACTION,
       sharedIconAuthority: "/src/css/components/app-icons.css",
       sidebarFirstIconContract: true,
       noInlineSvg: true,

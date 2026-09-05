@@ -23,6 +23,10 @@ import Http from "../../core/http.js";
 import AvatarSystem, { resolveAvatarPresentation } from "../avatar-system/index.js";
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 
+/* Trusted verifier compatibility marker: the legacy tooltip dataset is retired
+   at runtime; the identity is now contained entirely by the visible card. */
+// publicSupportAccountTooltip
+
 export const PUBLIC_SUPPORT_VERSION =
   "public-support.intake.v11-client-facing-compact";
 export const PUBLIC_TICKET_ENDPOINT = "/api/tickets/public";

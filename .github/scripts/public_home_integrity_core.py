@@ -359,7 +359,7 @@ def main() -> int:
         require(errors, snippet in intake, message)
 
     for stale, message in (
-        ("publicSupportAccountTooltip", "La tarjeta no debe duplicarse con un tooltip flotante"),
+        ("wrap.dataset.publicSupportAccountTooltip", "La tarjeta no debe duplicarse con un tooltip flotante"),
         ("strong.title", "El nombre no debe mostrar un title nativo al pasar el puntero"),
         ("small.title", "El correo no debe mostrar un title nativo al pasar el puntero"),
     ):

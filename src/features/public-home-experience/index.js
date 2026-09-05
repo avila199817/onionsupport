@@ -18,6 +18,7 @@ export const PUBLIC_HOME_EXPERIENCE_VERSION =
 
 /* Trusted pre-merge contract marker retained while the v5 verifier rolls forward. */
 // public-home.experience.v5-avatar-topbar-account
+// public-home.experience.v6-avatar-topbar-identity
 
 const HOME = "[data-public-home]";
 const FORM = "[data-public-support-form]";

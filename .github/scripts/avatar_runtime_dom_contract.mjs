@@ -169,7 +169,14 @@ try {
     if (image) image.loading = "eager";
   });
   await page.waitForFunction(() => userHost?.dataset.avatarState === "error");
-  assert.equal(await page.evaluate(() => userHost.dataset.avatarTone), String(await page.evaluate(() => avatars.resolveAvatarPresentation({ name: "Usuario Persona" }).tone)));
+  assert.equal(
+    await page.evaluate(() => userHost.dataset.avatarTone),
+    String(await page.evaluate(() => avatars.resolveAvatarPresentation({
+      name: "Usuario Persona",
+      email: "fixture@example.test",
+      userId: "fixture-user",
+    }).tone))
+  );
   assert.equal(await page.evaluate(() => userHost.dataset.avatarInitials), "UP");
   await page.evaluate(() => { userHost.querySelector("img").src = "/transparent.svg"; });
   await page.waitForFunction(() => userHost.dataset.avatarState === "image");

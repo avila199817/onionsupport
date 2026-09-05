@@ -211,7 +211,7 @@ try {
     await page.evaluate(() => ({
       name: document.querySelector(".public-support-account-name")?.textContent,
       email: document.querySelector(".public-support-account-email")?.textContent,
-      cardChildren: [...(document.querySelector(".public-support-account")?.children || [])].map((node) => node.className),
+      cardChildren: [...(document.querySelector(".public-support-account")?.children || [])].map((node) => node.classList.contains("public-support-account-avatar") ? "public-support-account-avatar" : node.className),
       nameHasTitle: document.querySelector(".public-support-account-name")?.hasAttribute("title"),
       emailHasTitle: document.querySelector(".public-support-account-email")?.hasAttribute("title"),
       hasHoverTooltip: "publicSupportAccountTooltip" in (document.querySelector(".public-support-account")?.dataset || {}),
@@ -247,7 +247,7 @@ try {
     await page.evaluate(() => ({
       name: document.querySelector(".public-support-account-name")?.textContent,
       email: document.querySelector(".public-support-account-email")?.textContent,
-      cardChildren: [...(document.querySelector(".public-support-account")?.children || [])].map((node) => node.className),
+      cardChildren: [...(document.querySelector(".public-support-account")?.children || [])].map((node) => node.classList.contains("public-support-account-avatar") ? "public-support-account-avatar" : node.className),
       nameHasTitle: document.querySelector(".public-support-account-name")?.hasAttribute("title"),
       emailHasTitle: document.querySelector(".public-support-account-email")?.hasAttribute("title"),
       hasHoverTooltip: "publicSupportAccountTooltip" in (document.querySelector(".public-support-account")?.dataset || {}),

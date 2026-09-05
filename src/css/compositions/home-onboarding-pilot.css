@@ -2,16 +2,50 @@
    ONION SUPPORT — HOME ONBOARDING PILOT
    Archivo: /src/css/compositions/home-onboarding-pilot.css
 
-   PILOTO VISUAL · PRIMER COACHMARK · SIN PERSISTENCIA
+   ONBOARDING V1 · PRIMER COACHMARK · PERSISTENCIA SERVER-SIDE
 
    Contrato:
-   - Sólo estiliza el primer box de bienvenida del Home privado.
+   - Sólo estiliza el primer box y su target en el Home privado.
    - Consume exclusivamente tokens globales dark/light.
    - Mantiene una superficie sólida y legible sobre el contenido.
    - Un coachmark nunca compite en stacking con un modal real.
    - La posición lógica es explícita y no depende del centrado UA de <dialog>.
+   - El foco visual usa el overlay/focus ring global, no una paleta local.
    - No altera greeting, estadísticas, paneles ni navegación existentes.
-   - No usa prioridades forzadas, paleta local ni backdrop bloqueante.
+   - No usa prioridades forzadas, paleta local ni backdrop modal bloqueante.
+========================================================= */
+
+/* =========================================================
+   TARGET FOCUS · PASO 1
+========================================================= */
+
+.home-view-root[data-home-onboarding-active="welcome-v1"]
+.home-stat-card[data-home-onboarding-target="step-1"] {
+  position: relative;
+  z-index: calc(var(--z-tooltip) - 1);
+  isolation: isolate;
+  border-color: var(--border-info);
+  background: var(--solid-bg-0, var(--card-bg));
+  box-shadow:
+    var(--focus-ring-strong),
+    0 0 0 100vmax var(--overlay-bg),
+    var(--shadow-lg);
+  transform: none;
+}
+
+.home-view-root[data-home-onboarding-active="welcome-v1"]
+.home-stat-card[data-home-onboarding-target="step-1"]:hover {
+  border-color: var(--border-info);
+  background: var(--solid-bg-0, var(--card-bg));
+  transform: none;
+  box-shadow:
+    var(--focus-ring-strong),
+    0 0 0 100vmax var(--overlay-bg),
+    var(--shadow-lg);
+}
+
+/* =========================================================
+   COACHMARK
 ========================================================= */
 
 .home-view-root .home-welcome-pilot {
@@ -37,6 +71,10 @@
 
 .home-view-root .home-welcome-pilot:not([open]) {
   display: none;
+}
+
+.home-view-root .home-welcome-pilot[aria-busy="true"] {
+  cursor: progress;
 }
 
 .home-view-root .home-welcome-pilot__surface {
@@ -139,6 +177,10 @@
   text-align: start;
 }
 
+.home-view-root .home-welcome-pilot__note.is-error {
+  color: var(--error-strong, var(--error));
+}
+
 @media (max-width: 640px) {
   .home-view-root .home-welcome-pilot {
     inset-block-start: auto;
@@ -187,10 +229,19 @@
 }
 
 @media (forced-colors: active) {
+  .home-view-root[data-home-onboarding-active="welcome-v1"]
+  .home-stat-card[data-home-onboarding-target="step-1"],
   .home-view-root .home-welcome-pilot,
   .home-view-root .home-welcome-pilot__step,
   .home-view-root .home-welcome-pilot__primary {
     border-color: CanvasText;
+  }
+
+  .home-view-root[data-home-onboarding-active="welcome-v1"]
+  .home-stat-card[data-home-onboarding-target="step-1"] {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+    box-shadow: none;
   }
 
   .home-view-root .home-welcome-pilot__primary {
@@ -202,5 +253,10 @@
 @media print {
   .home-view-root .home-welcome-pilot {
     display: none;
+  }
+
+  .home-view-root[data-home-onboarding-active="welcome-v1"]
+  .home-stat-card[data-home-onboarding-target="step-1"] {
+    box-shadow: none;
   }
 }

@@ -31,6 +31,7 @@ mobile_js = read("src/features/mobile-datalist/index.js")
 mobile_css = read("src/css/compositions/mobile-datalist.css")
 parity_css = read("src/css/compositions/private-admin-parity.css")
 interactions_css = read("src/css/compositions/private-admin-interactions.css")
+status_css = read("src/css/components/status-system.css")
 avatar_css = read("src/css/components/avatar-system.css")
 server_css = read("src/css/views/servidor/index.css")
 
@@ -42,6 +43,58 @@ for entry_name, entry in (("app.css", app_css), ("private.css", private_css)):
         './components/avatar-system.css',
     ):
         require(shared_css in entry, f"{entry_name} must import {shared_css}")
+
+require(
+    './components/status-system.css' in app_css,
+    "app.css must load the SPA-wide semantic StatusSystem",
+)
+require(
+    "SINGLE STATUS PAINT AUTHORITY · SPA-WIDE" in status_css,
+    "StatusSystem must declare one SPA-wide semantic paint authority",
+)
+require(
+    "!important" not in status_css,
+    "StatusSystem must remain layer-native without !important",
+)
+
+# Semantic state contract: operational=open blue, pending amber, done green,
+# exceptional/error red. These exact light-theme anchors prevent a future
+# graphite regression where Open and Closed become visually indistinguishable.
+for token in (
+    "--ui-status-open-dot: #0f6cbd;",
+    "--ui-status-success-dot: #107c10;",
+    "--ui-status-pending-dot: #a16207;",
+    "--ui-status-danger-dot: #c42b1c;",
+):
+    require(token in status_css, f"semantic status token drifted: {token}")
+
+for selector in (
+    ".incidencias-status-chip--open",
+    ".incidencias-status-chip--closed",
+    ".facturas-chip--paid",
+    ".facturas-chip--pending",
+    ".clientes-chip--active",
+    ".clientes-chip--pending",
+    ".usuarios-status-chip--active",
+    ".usuarios-status-chip--pending",
+    ".home-status--success",
+    ".ui-detail-modal-chip--status_open",
+    ".ui-detail-modal-chip--status_closed",
+    ".clientes-modal-chip--status-active",
+    ".facturas-detail-chip--success",
+    ".cuenta-chip--success",
+    ".server-meta-pill--healthy",
+):
+    require(selector in status_css, f"StatusSystem missing cross-view mapping: {selector}")
+
+require(
+    ".facturas-chip--cancelled" in status_css and "--ui-status-neutral-fg" in status_css,
+    "cancelled invoices must stay neutral instead of becoming false success",
+)
+require(
+    "color-mix(in srgb, var(--ui-status-dot, currentColor) 14%, transparent)" in status_css,
+    "status dots must retain the fast-scanning halo language",
+)
 
 require("PRIVATE UI FOUNDATION" in parity_css, "shared composition must declare the single private UI foundation")
 require("SINGLE VISUAL AUTHORITY" in parity_css, "shared composition must declare single listing visual authority")
@@ -145,5 +198,5 @@ for breakpoint in (
 
 print(
     "Private admin alignment contract OK · 4 CRUD views + Servidor · continuous scroll · "
-    "IME-safe search · single listing foundation · independent AvatarSystem authority · mobile datalist"
+    "IME-safe search · single listing foundation · semantic StatusSystem · independent AvatarSystem authority · mobile datalist"
 )

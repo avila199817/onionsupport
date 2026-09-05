@@ -227,7 +227,7 @@ function renderLogo({ compact = false } = {}) {
     </span>
     <span class="public-home-brand-copy">
       <span class="public-home-brand-name"><span>ONION</span><strong>SUPPORT</strong></span>
-      ${compact ? "": `<span class="public-home-brand-subtitle">${escapeHtml(BUSINESS.legalServiceName)}</span>`}
+      ${compact ? "" : `<span class="public-home-brand-subtitle">${escapeHtml(BUSINESS.legalServiceName)}</span>`}
     </span>
   `;
 }
@@ -242,7 +242,7 @@ function renderNavLinks() {
 
 function renderTrustItems() {
   return TRUST_ITEMS.map((item, index) => `
-    <li class="public-home-trust-item${item.blue ? " public-home-trust-item--blue": ""}" data-public-home-reveal="true" style="--public-home-reveal-index:${escapeAttr(index)};">
+    <li class="public-home-trust-item${item.blue ? " public-home-trust-item--blue" : ""}" data-public-home-reveal="true" style="--public-home-reveal-index:${escapeAttr(index)};">
       <span class="public-home-trust-icon" aria-hidden="true">${renderIcon(item.icon)}</span>
       <span>${escapeHtml(item.label)}</span>
     </li>
@@ -265,8 +265,8 @@ function renderPriceCards() {
     const message = `Hola Cristian, quiero solicitar un diagnóstico sobre: ${card.title}.`;
 
     return `
-      <article class="public-home-price-card ${featured ? "public-home-price-card--featured": ""}" data-featured="${featured ? "true": "false"}" data-public-home-reveal="true" data-public-home-magnetic="true" style="--public-home-reveal-index:${escapeAttr(index)};">
-        ${featured ? `<span class="public-home-price-badge">Recomendado</span>`: ""}
+      <article class="public-home-price-card ${featured ? "public-home-price-card--featured" : ""}" data-featured="${featured ? "true" : "false"}" data-public-home-reveal="true" data-public-home-magnetic="true" style="--public-home-reveal-index:${escapeAttr(index)};">
+        ${featured ? `<span class="public-home-price-badge">Recomendado</span>` : ""}
         <p class="public-home-price-eyebrow">${escapeHtml(card.eyebrow)}</p>
         <h3>${escapeHtml(card.title)}</h3>
         <p>${escapeHtml(card.text)}</p>
@@ -404,7 +404,7 @@ function renderHero() {
       <div class="public-home-hero-grid">
         <div class="public-home-hero-copy">
           <h1 class="public-home-title" id="public-home-title" data-public-home-reveal="true">
-            Soporte informático <span>para avanzar</span>
+            Servicio técnico <span>informático</span>
           </h1>
           <p class="public-home-hero-text" data-public-home-reveal="true">
             ${escapeHtml(PUBLIC_SITE.description)}

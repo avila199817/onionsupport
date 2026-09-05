@@ -282,6 +282,22 @@ assert.doesNotMatch(
 );
 
 assert.match(
+  homeExtremeFoundationCss,
+  /\.home-view-root--user\s+\.home-stats,\s*\.home-view-root--user\s+\.home-grid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/,
+  "Standard user Home must keep its two summary cards and two lower panels on identical 50/50 tracks"
+);
+assert.match(
+  homeExtremeFoundationCss,
+  /\.home-view-root--admin\s+\.home-grid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/,
+  "Admin Home lower split must align exactly with the boundary between stat cards 2 and 3"
+);
+assert.match(
+  homeExtremeResponsiveCss,
+  /@container \(max-width: 1180px\)[\s\S]*?\.home-view-root\s+\.home-grid\s*\{\s*grid-template-columns:\s*1fr;/,
+  "Home symmetry must still collapse safely below the desktop breakpoint"
+);
+
+assert.match(
   homeExtremeEntryCss,
   /home-extreme-entities\.css"\);[\s\S]*home-extreme-interactions\.css"\);[\s\S]*home-extreme-billing\.css"\);/,
   "Semantic interaction ownership must load after entity geometry and before billing"
@@ -360,5 +376,5 @@ assert.equal(snapshot.policy.canonicalEntityOwnerModals, true);
 assert.equal(snapshot.policy.noInlineSvg, true);
 
 console.log(
-  "Home extreme contract OK · greeting locked · pure card navigation · single-pill IDs · owner modals stay in Home"
+  "Home extreme contract OK · greeting locked · admin/user grid symmetry · pure card navigation · single-pill IDs · owner modals stay in Home"
 );

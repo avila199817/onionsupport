@@ -7,24 +7,29 @@
    Contrato:
    - Sólo estiliza el primer box de bienvenida del Home privado.
    - Consume exclusivamente tokens globales dark/light.
-   - No altera el greeting, estadísticas, paneles ni navegación existentes.
+   - Mantiene una superficie sólida y legible sobre el contenido.
+   - Un coachmark nunca compite en stacking con un modal real.
+   - La posición lógica es explícita y no depende del centrado UA de <dialog>.
+   - No altera greeting, estadísticas, paneles ni navegación existentes.
    - No usa prioridades forzadas, paleta local ni backdrop bloqueante.
 ========================================================= */
 
 .home-view-root .home-welcome-pilot {
   position: fixed;
-  z-index: calc(var(--z-modal) + 2);
-  inset-block-start: calc(var(--topbar-height, 58px) + clamp(14px, 2vw, 26px));
-  inset-inline-end: clamp(12px, 2vw, 28px);
-  inline-size: min(430px, calc(100vw - 24px));
-  max-inline-size: none;
-  max-block-size: calc(100dvh - var(--topbar-height, 58px) - 44px);
+  z-index: var(--z-tooltip);
+  inset-block-start: calc(var(--topbar-height, 58px) + var(--space-md));
+  inset-block-end: auto;
+  inset-inline-start: auto;
+  inset-inline-end: max(var(--space-md), var(--app-safe-right, 0px));
+  inline-size: min(390px, calc(100dvw - 24px));
+  max-block-size: calc(100dvh - var(--topbar-height, 58px) - var(--space-2xl));
   margin: 0;
   padding: 0;
   overflow: auto;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-2xl, 24px);
-  background: var(--surface-elevated, var(--surface-1));
+  overscroll-behavior: contain;
+  border: 1px solid var(--card-border);
+  border-radius: var(--card-radius-lg);
+  background: var(--solid-bg-0, var(--card-bg));
   color: var(--text);
   box-shadow: var(--shadow-xl);
   font-family: var(--font-family);
@@ -36,9 +41,9 @@
 
 .home-view-root .home-welcome-pilot__surface {
   display: grid;
-  gap: var(--space-lg);
+  gap: var(--space-md);
   margin: 0;
-  padding: clamp(20px, 2.2vw, 28px);
+  padding: var(--space-lg);
 }
 
 .home-view-root .home-welcome-pilot__meta {
@@ -54,7 +59,6 @@
 .home-view-root .home-welcome-pilot__note {
   margin: 0;
   font-size: var(--font-xs);
-  font-weight: var(--weight-semibold);
   line-height: var(--line-snug);
 }
 
@@ -62,6 +66,7 @@
   min-inline-size: 0;
   overflow: hidden;
   color: var(--text-muted);
+  font-weight: var(--weight-bold);
   letter-spacing: var(--letter-wide);
   text-overflow: ellipsis;
   text-transform: uppercase;
@@ -70,26 +75,27 @@
 
 .home-view-root .home-welcome-pilot__step {
   flex: 0 0 auto;
-  padding: 5px 9px;
-  border: 1px solid var(--accent-border);
+  padding: 4px 8px;
+  border: 1px solid var(--badge-border);
   border-radius: var(--radius-pill);
-  background: var(--accent-soft);
-  color: var(--text-strong);
+  background: var(--badge-bg);
+  color: var(--badge-text);
+  font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;
 }
 
 .home-view-root .home-welcome-pilot__copy {
   min-inline-size: 0;
   display: grid;
-  gap: var(--space-sm);
+  gap: var(--space-xs);
 }
 
 .home-view-root .home-welcome-pilot__copy h2 {
   margin: 0;
   color: var(--text-strong);
-  font-size: clamp(25px, 2.2vw, 31px);
-  font-weight: var(--weight-black, 800);
-  line-height: var(--line-tight);
+  font-size: var(--font-2xl);
+  font-weight: var(--weight-black);
+  line-height: 1.1;
   letter-spacing: var(--letter-tight);
   overflow-wrap: anywhere;
 }
@@ -110,46 +116,47 @@
   flex-wrap: wrap;
 }
 
-.home-view-root .home-welcome-pilot__dismiss,
 .home-view-root .home-welcome-pilot__primary {
-  min-block-size: 42px;
-}
-
-.home-view-root .home-welcome-pilot__primary {
-  border-color: var(--accent-border-strong);
-  background: var(--accent);
-  color: var(--accent-contrast);
-  box-shadow: var(--shadow-sm);
+  border-color: var(--btn-primary-border);
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  box-shadow: var(--btn-primary-shadow);
 }
 
 .home-view-root .home-welcome-pilot__primary:hover:not(:disabled) {
-  border-color: var(--accent-border-strong);
-  background: var(--accent-hover);
-  color: var(--accent-contrast);
+  border-color: var(--btn-primary-border);
+  background: var(--btn-primary-bg-hover);
+  color: var(--btn-primary-text);
 }
 
 .home-view-root .home-welcome-pilot__primary:active:not(:disabled) {
-  background: var(--accent-active);
+  background: var(--btn-primary-bg-active);
 }
 
 .home-view-root .home-welcome-pilot__note {
   color: var(--text-dim);
-  text-align: end;
+  font-weight: var(--weight-medium);
+  text-align: start;
 }
 
 @media (max-width: 640px) {
   .home-view-root .home-welcome-pilot {
     inset-block-start: auto;
-    inset-block-end: calc(12px + var(--app-safe-bottom, 0px));
-    inset-inline: 12px;
+    inset-block-end: max(12px, var(--app-safe-bottom, 0px));
+    inset-inline-start: max(12px, var(--app-safe-left, 0px));
+    inset-inline-end: max(12px, var(--app-safe-right, 0px));
     inline-size: auto;
-    max-block-size: min(72dvh, 620px);
-    border-radius: var(--radius-xl, 20px);
+    max-block-size: min(70dvh, 520px);
+    border-radius: var(--card-radius-lg);
   }
 
   .home-view-root .home-welcome-pilot__surface {
-    gap: var(--space-md);
-    padding: 20px;
+    gap: var(--space-sm);
+    padding: var(--space-md);
+  }
+
+  .home-view-root .home-welcome-pilot__copy h2 {
+    font-size: var(--font-xl);
   }
 
   .home-view-root .home-welcome-pilot__actions {
@@ -162,10 +169,6 @@
     min-inline-size: 0;
     padding-inline: var(--space-sm);
     white-space: normal;
-  }
-
-  .home-view-root .home-welcome-pilot__note {
-    text-align: start;
   }
 }
 

@@ -136,8 +136,45 @@ assert.doesNotMatch(
   /#[0-9a-f]{3,8}\b/i,
   "Pilot CSS must consume global theme tokens, not a local palette"
 );
+assert.doesNotMatch(
+  pilotCss,
+  /var\(--surface-elevated(?:-strong)?\)/,
+  "Coachmark must not use translucent elevated surfaces over readable Home content"
+);
+assert.doesNotMatch(
+  pilotCss,
+  /calc\(var\(--z-modal\)/,
+  "A non-modal coachmark must never outrank the modal authority"
+);
 assert.match(pilotCss, /\.home-view-root \.home-welcome-pilot \{/);
+assert.match(
+  pilotCss,
+  /z-index:\s*var\(--z-tooltip\)/,
+  "Coachmark must use the semantic non-modal stacking token"
+);
+assert.match(
+  pilotCss,
+  /inset-inline-start:\s*auto/,
+  "Coachmark must explicitly neutralize native dialog inline-start centering"
+);
+assert.match(
+  pilotCss,
+  /inset-inline-end:\s*max\(var\(--space-md\),\s*var\(--app-safe-right,\s*0px\)\)/,
+  "Desktop coachmark must stay on the logical trailing edge and respect safe area"
+);
+assert.match(
+  pilotCss,
+  /background:\s*var\(--solid-bg-0,\s*var\(--card-bg\)\)/,
+  "Coachmark must use a solid design-system surface"
+);
+assert.match(pilotCss, /border:\s*1px solid var\(--card-border\)/);
+assert.match(pilotCss, /border-radius:\s*var\(--card-radius-lg\)/);
+assert.match(pilotCss, /background:\s*var\(--btn-primary-bg\)/);
+assert.match(pilotCss, /background:\s*var\(--btn-primary-bg-hover\)/);
+assert.match(pilotCss, /background:\s*var\(--btn-primary-bg-active\)/);
 assert.match(pilotCss, /@media \(max-width: 640px\)/);
+assert.match(pilotCss, /var\(--app-safe-left,\s*0px\)/);
+assert.match(pilotCss, /var\(--app-safe-bottom,\s*0px\)/);
 assert.match(pilotCss, /@media \(forced-colors: active\)/);
 assert.match(pilotCss, /@media print/);
 

@@ -353,9 +353,17 @@ def main() -> int:
         ('...addressParts(user)', "Falta prefill estructurado desde usuario existente"),
         ('new MutationObserver(queueScan)', "El intake debe coalescer mutaciones por frame"),
         ('className = "public-support-account-email"', "La identidad autenticada debe mostrar el correo canónico"),
-        ("publicSupportAccountTooltip", "La identidad larga debe tener una salida hover/focus completa"),
+        ('className = "public-support-account-copy"', "Nombre y correo deben vivir en la tarjeta única del avatar"),
+        ('copy.append(strong, small)', "La tarjeta del avatar debe englobar nombre y correo"),
     ):
         require(errors, snippet in intake, message)
+
+    for stale, message in (
+        ("wrap.dataset.publicSupportAccountTooltip", "La tarjeta no debe duplicarse con un tooltip flotante"),
+        ("strong.title", "El nombre no debe mostrar un title nativo al pasar el puntero"),
+        ("small.title", "El correo no debe mostrar un title nativo al pasar el puntero"),
+    ):
+        require(errors, stale not in intake, message)
 
     require(
         errors,
@@ -380,6 +388,12 @@ def main() -> int:
         ('.public-support-field[data-public-support-field] {', "Los campos deben volver a una columna en móvil"),
     ):
         require(errors, snippet in support_css, message)
+
+    for stale, message in (
+        (".public-home .public-home-nav-account-slot .public-support-account::after", "La identidad del avatar no debe pintar un tooltip flotante"),
+        ("data-public-support-account-tooltip", "La identidad del avatar no debe duplicarse en un detalle hover"),
+    ):
+        require(errors, stale not in experience_css, message)
     require(
         errors,
         'phone: normalizeSpanishPhone(data.get("phone"))' in intake,
@@ -609,7 +623,7 @@ def main() -> int:
         ('"/incidencias"', "Falta acceso a Incidencias"),
         ('"/facturas"', "Falta acceso a Facturas"),
         ('"/cuenta"', "Falta acceso a Cuenta"),
-        ("public-home.experience.v6-avatar-topbar-identity", "Falta versión coalescida del Home"),
+        ("public-home.experience.v7-avatar-topbar-card", "Falta versión coalescida del Home"),
         ("data-public-home-account-slot", "Falta slot de cuenta en el topbar público"),
         ('avatarHost.classList.add("topbar-avatar")', "El avatar del topbar debe heredar el tamaño global shell"),
         ("new MutationObserver(queueScan)", "El Home debe coalescer mutaciones por frame"),

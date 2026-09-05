@@ -211,16 +211,22 @@ try {
     await page.evaluate(() => ({
       name: document.querySelector(".public-support-account-name")?.textContent,
       email: document.querySelector(".public-support-account-email")?.textContent,
-      tooltip: document.querySelector(".public-support-account")?.dataset.publicSupportAccountTooltip,
+      cardChildren: [...(document.querySelector(".public-support-account")?.children || [])].map((node) => node.classList.contains("public-support-account-avatar") ? "public-support-account-avatar" : node.className),
+      nameHasTitle: document.querySelector(".public-support-account-name")?.hasAttribute("title"),
+      emailHasTitle: document.querySelector(".public-support-account-email")?.hasAttribute("title"),
+      hasHoverTooltip: "publicSupportAccountTooltip" in (document.querySelector(".public-support-account")?.dataset || {}),
       ariaLabel: document.querySelector("[data-public-home-account-toggle]")?.getAttribute("aria-label"),
     })),
     {
       name: "Ana López",
       email: "ana@example.test",
-      tooltip: "Ana López · ana@example.test",
+      cardChildren: ["public-support-account-avatar", "public-support-account-copy"],
+      nameHasTitle: false,
+      emailHasTitle: false,
+      hasHoverTooltip: false,
       ariaLabel: "Abrir accesos rápidos de Ana López, ana@example.test",
     },
-    "La cuenta pública debe mostrar nombre completo y correo en la misma identidad del avatar"
+    "La cuenta pública debe mostrar nombre completo y correo dentro de una única tarjeta del avatar"
   );
   await page.evaluate(() => {
     const state = publicCore.getState();
@@ -241,16 +247,22 @@ try {
     await page.evaluate(() => ({
       name: document.querySelector(".public-support-account-name")?.textContent,
       email: document.querySelector(".public-support-account-email")?.textContent,
-      tooltip: document.querySelector(".public-support-account")?.dataset.publicSupportAccountTooltip,
+      cardChildren: [...(document.querySelector(".public-support-account")?.children || [])].map((node) => node.classList.contains("public-support-account-avatar") ? "public-support-account-avatar" : node.className),
+      nameHasTitle: document.querySelector(".public-support-account-name")?.hasAttribute("title"),
+      emailHasTitle: document.querySelector(".public-support-account-email")?.hasAttribute("title"),
+      hasHoverTooltip: "publicSupportAccountTooltip" in (document.querySelector(".public-support-account")?.dataset || {}),
       ariaLabel: document.querySelector("[data-public-home-account-toggle]")?.getAttribute("aria-label"),
     })),
     {
       name: "Cristian Ávila Luque",
       email: "cristian@onionsupport.com",
-      tooltip: "Cristian Ávila Luque · cristian@onionsupport.com",
+      cardChildren: ["public-support-account-avatar", "public-support-account-copy"],
+      nameHasTitle: false,
+      emailHasTitle: false,
+      hasHoverTooltip: false,
       ariaLabel: "Abrir accesos rápidos de Cristian Ávila Luque, cristian@onionsupport.com",
     },
-    "La identidad larga debe conservar nombre y correo normalizado sin compactarse en JavaScript"
+    "La identidad larga debe conservarse dentro de una única tarjeta sin titles ni tooltip duplicado"
   );
   await page.evaluate(() => {
     const state = publicCore.getState();

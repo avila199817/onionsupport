@@ -16,7 +16,7 @@ import {
 assert.match(AVATAR_SYSTEM_VERSION, /deterministic-identity-authority/);
 assert.equal(
   AVATAR_IDENTITY_VERSION,
-  "avatar-identity.v3-microsoft-fluent-persona-v8"
+  "avatar-identity.v4-stable-user-tone"
 );
 assert.equal(AVATAR_TONE_COUNT, 20);
 
@@ -83,25 +83,27 @@ const identityA = resolveAvatarPresentation({
 const identityB = resolveAvatarPresentation({
   requesterUserId: "ON-20260901024205",
   emailLower: "AVILA199817@GMAIL.COM",
-  name: "Cristian Ávila Luque",
+  name: "Cristian Avila Luque",
 });
 const identityHomeSidebar = resolveAvatarPresentation({
-  displayName: "Cristian Ávila Luque",
+  displayName: "CRISTIAN ÁVILA LUQUE",
+  email: "avila199817@gmail.com",
   username: "avila199817",
 });
 
 for (const candidate of [identityB, identityHomeSidebar]) {
+  assert.equal(identityA.seed, candidate.seed);
   assert.equal(identityA.tone, candidate.tone);
   assert.equal(identityA.colorKey, candidate.colorKey);
   assert.equal(identityA.color, candidate.color);
-  assert.equal(identityA.initials, candidate.initials);
   assert.equal(identityA.fingerprint, candidate.fingerprint);
 }
 
+assert.equal(identityA.seed, "email:avila199817@gmail.com");
 assert.equal(identityA.initials, "CL");
-assert.equal(identityA.tone, 12);
-assert.equal(identityA.colorKey, "darkRed");
-assert.equal(identityA.color, "#A4262C");
+assert.equal(identityA.tone, 18);
+assert.equal(identityA.colorKey, "rust");
+assert.equal(identityA.color, "#8E562E");
 
 for (const [name, initials, tone, color] of [
   ["DMARC Reports", "DR", 4, "#498205"],
@@ -113,6 +115,19 @@ for (const [name, initials, tone, color] of [
   assert.equal(presentation.tone, tone);
   assert.equal(presentation.color, color);
 }
+
+const carlosPlain = resolveAvatarPresentation({
+  email: "carlosgarciayepes16@gmail.com",
+  displayName: "Carlos Yepes Garcia",
+});
+const carlosAccent = resolveAvatarPresentation({
+  emailLower: "CARLOSGARCIAYEPES16@GMAIL.COM",
+  name: "Carlos Yepes García",
+});
+assert.equal(carlosPlain.seed, carlosAccent.seed);
+assert.equal(carlosPlain.tone, carlosAccent.tone);
+assert.equal(carlosPlain.color, carlosAccent.color);
+assert.equal(carlosPlain.fingerprint, carlosAccent.fingerprint);
 
 const snapshot = getAvatarSystemSnapshot();
 for (const key of [
@@ -297,5 +312,5 @@ assert.match(criticalGate, /node \.github\/scripts\/avatar_identity_authority_co
 assert.match(criticalGate, /node \.github\/scripts\/avatar_authority_hygiene_contract\.mjs/);
 
 console.log(
-  "Avatar system contract: PASS · Microsoft Fluent Persona initials/colors · flat fallback · transparent image alpha · SPA-wide"
+  "Avatar system contract: PASS · stable user tone · Fluent Persona palette/initials · flat fallback · transparent image alpha · SPA-wide"
 );

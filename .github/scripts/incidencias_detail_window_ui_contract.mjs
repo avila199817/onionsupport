@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   INCIDENCIAS_DETAIL_SHARED_VISUAL_CONTRACT,
@@ -7,6 +8,10 @@ import {
   getIncidenciasDetailWindowUiState,
   renderIncidenciasDetailModal,
 } from "../../src/views/incidencias/incidencias.template.modal.js";
+import {
+  INCIDENCIAS_DETAIL_STATE_VERSION,
+  resolveConversationPolicy,
+} from "../../src/features/incidencias-detail-state/index.js";
 
 function sequence(prefix, count) {
   return Array.from({ length: count }, (_value, index) => ({
@@ -112,6 +117,108 @@ assert.deepEqual(state.attachments, {
   truncated: true,
 });
 assert.equal(state.truncated, true);
+
+/* =========================================================
+   USER UPDATE TURN · BACKEND POLICY + LEGACY FALLBACK
+========================================================= */
+
+assert.match(
+  INCIDENCIAS_DETAIL_STATE_VERSION,
+  /backend-policy-fail-closed/
+);
+
+/* Backend policy wins over any client-side historical inference. */
+{
+  const policy = resolveConversationPolicy({
+    userUpdatePolicy: {
+      awaitingSupportResponse: true,
+      lastUserUpdateAt: "2026-09-05T10:00:00.000Z",
+    },
+    comments: [{
+      source: "support",
+      createdAt: "2026-09-05T11:00:00.000Z",
+    }],
+  });
+
+  assert.equal(policy.awaitingSupportResponse, true);
+  assert.equal(policy.source, "backend");
+}
+
+/*
+  Regresión del caso real: un comentario legacy sin source/role se reconoce
+  como turno del usuario por su identidad estable.
+*/
+{
+  const policy = resolveConversationPolicy({
+    userId: "ON-USER-LEGACY",
+    email: "legacy@example.test",
+    comments: [{
+      byUserId: "ON-USER-LEGACY",
+      byEmail: "LEGACY@EXAMPLE.TEST",
+      message: "Actualización legacy",
+      createdAt: "2026-09-05T10:00:00.000Z",
+    }],
+  });
+
+  assert.equal(policy.awaitingSupportResponse, true);
+  assert.equal(policy.source, "history");
+}
+
+/* Una respuesta posterior del técnico libera el siguiente turno. */
+{
+  const policy = resolveConversationPolicy({
+    userId: "ON-USER-LEGACY",
+    email: "legacy@example.test",
+    assignment: {
+      technician: {
+        userId: "ON-SUPPORT-1",
+        email: "support@example.test",
+      },
+    },
+    comments: [
+      {
+        byUserId: "ON-USER-LEGACY",
+        createdAt: "2026-09-05T10:00:00.000Z",
+        message: "Usuario",
+      },
+      {
+        byUserId: "ON-SUPPORT-1",
+        createdAt: "2026-09-05T10:05:00.000Z",
+        message: "Soporte",
+      },
+    ],
+  });
+
+  assert.equal(policy.awaitingSupportResponse, false);
+}
+
+/*
+  El primer frame de un usuario estándar debe cerrar el composer antes de
+  hidratar la política; admin queda fuera. Un 409 canónico también fuerza el
+  estado pendiente inmediatamente para cubrir carreras entre pestañas.
+*/
+{
+  const source = readFileSync(
+    new URL(
+      "../../src/features/incidencias-detail-state/index.js",
+      import.meta.url
+    ),
+    "utf8"
+  );
+
+  assert.match(
+    source,
+    /if \(!root\.querySelector\(ADMIN\)\) \{[\s\S]*hideComposer\(root\);[\s\S]*ticketReviewState = "checking";[\s\S]*hydrate\(id, \{ force: false \}\)/
+  );
+  assert.match(
+    source,
+    /refreshAfterBlockedError\(root\)/
+  );
+  assert.match(
+    source,
+    /ya has enviado una actualización/
+  );
+}
 
 /* =========================================================
    TICKET VIEW · TRUE ATTACHMENT TOTAL
@@ -221,5 +328,5 @@ assert.deepEqual(
 );
 
 console.log(
-  "Incidencias Detail window UI OK · truthful history/attachment totals · shared V7 render contract · explicit recent window · no pagination"
+  "Incidencias Detail window UI OK · pending user composer fail-closed · backend policy authority · truthful bounded history · shared V7 contract"
 );

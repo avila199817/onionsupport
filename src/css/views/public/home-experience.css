@@ -25,6 +25,17 @@
 .public-auth-shell--home {
   --public-home-shell-max: 1600px;
   --public-home-page-gutter: clamp(18px, 3vw, 56px);
+  --public-home-title-main-size: clamp(54px, 5.2vw, 86px);
+  --public-home-title-accent-size: clamp(70px, 6.7vw, 112px);
+}
+
+.public-home .public-home-title {
+  font-size: var(--public-home-title-main-size);
+  white-space: nowrap;
+}
+
+.public-home .public-home-title span {
+  font-size: var(--public-home-title-accent-size);
 }
 
 /* =========================================================
@@ -894,6 +905,8 @@
 @media (max-width: 720px) {
   .public-auth-shell--home {
     --public-home-page-gutter: clamp(14px, 4vw, 22px);
+    --public-home-title-main-size: clamp(34px, 9.5vw, 52px);
+    --public-home-title-accent-size: clamp(40px, 12.5vw, 72px);
   }
 
   .public-home .public-home-account-menu {

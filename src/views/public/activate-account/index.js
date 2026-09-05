@@ -26,6 +26,12 @@
 
 import { AppCore } from "../../../core/index.js";
 import { Auth as DefaultAuth } from "../../../features/auth/index.js";
+import {
+  AUTH_PASSWORD_POLICY,
+  AUTH_PASSWORD_POLICY_HELP,
+  AUTH_PASSWORD_POLICY_MESSAGE,
+  validateAuthPassword,
+} from "../../../features/auth/password-policy.js";
 
 import {
   ROUTES,
@@ -51,8 +57,8 @@ const LOGIN_ROUTE =
   ROUTES.login ||
   "/login";
 
-const PASSWORD_MIN_LENGTH = 8;
-const PASSWORD_MAX_LENGTH = 256;
+const PASSWORD_MIN_LENGTH = AUTH_PASSWORD_POLICY.minLength;
+const PASSWORD_MAX_LENGTH = AUTH_PASSWORD_POLICY.maxLength;
 const TOKEN_MAX_LENGTH = 4096;
 
 const TOKEN_PARAM_NAMES = Object.freeze([
@@ -86,8 +92,8 @@ function isFunction(value) {
 function isObject(value) {
   return Boolean(
     value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
+      typeof value === "object" &&
+      !Array.isArray(value)
   );
 }
 
@@ -494,8 +500,7 @@ function resolveTemplate(context = {}) {
   if (policy) {
     policy.classList.add("activate-account-password-policy");
     policy.dataset.activateAccountPolicy = "true";
-    policy.textContent =
-      `Mínimo ${PASSWORD_MIN_LENGTH} caracteres, con al menos una letra y un número.`;
+    policy.textContent = AUTH_PASSWORD_POLICY_HELP;
   }
 
   const message = view.querySelector(
@@ -523,6 +528,11 @@ function resolveTemplate(context = {}) {
   const confirmPassword = view.querySelector(
     "[data-password-reset-confirm]"
   );
+
+  for (const input of [password, confirmPassword].filter(Boolean)) {
+    input.setAttribute("minlength", String(PASSWORD_MIN_LENGTH));
+    input.setAttribute("maxlength", String(PASSWORD_MAX_LENGTH));
+  }
 
   password?.setAttribute(
     "data-activate-account-password",
@@ -960,16 +970,9 @@ function validatePayload(payload = {}) {
       "El enlace de activación no es válido o ha caducado.";
   }
 
-  if (!password.trim()) {
-    errors.password = "Introduce una contraseña nueva.";
-  } else if (password.length < PASSWORD_MIN_LENGTH) {
-    errors.password =
-      `La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres.`;
-  } else if (password.length > PASSWORD_MAX_LENGTH) {
-    errors.password = "La contraseña es demasiado larga.";
-  } else if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) {
-    errors.password =
-      "La contraseña debe incluir al menos una letra y un número.";
+  const passwordValidation = validateAuthPassword(password);
+  if (!passwordValidation.ok) {
+    errors.password = passwordValidation.message;
   }
 
   if (!confirmPassword) {
@@ -1063,8 +1066,7 @@ function activationError(error = null) {
   if (code === "WEAK_PASSWORD") {
     return {
       field: "password",
-      message:
-        `La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres e incluir letras y números.`,
+      message: AUTH_PASSWORD_POLICY_MESSAGE,
       completed: false,
     };
   }

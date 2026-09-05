@@ -27,6 +27,11 @@
 
 import { AppCore } from "../../../core/index.js";
 import { Auth as DefaultAuth } from "../../../features/auth/index.js";
+import {
+  AUTH_PASSWORD_POLICY,
+  AUTH_PASSWORD_POLICY_HELP,
+  validateAuthPassword,
+} from "../../../features/auth/password-policy.js";
 
 import {
   ROUTES,
@@ -56,7 +61,8 @@ const LOGIN_ROUTE =
 const MODE_REQUEST = "request";
 const MODE_CONFIRM = "confirm";
 
-const MIN_PASSWORD_LENGTH = 8;
+const MIN_PASSWORD_LENGTH = AUTH_PASSWORD_POLICY.minLength;
+const MAX_PASSWORD_LENGTH = AUTH_PASSWORD_POLICY.maxLength;
 const MAX_TOKEN_LENGTH = 8192;
 
 const TOKEN_PARAM_NAMES = Object.freeze([
@@ -583,6 +589,19 @@ function resolveTemplate(context = {}) {
     throw new Error(
       "[PasswordResetView] createPasswordResetTemplate() debe devolver un nodo DOM."
     );
+  }
+
+  if (mode === MODE_CONFIRM) {
+    const policy = view.querySelector?.("[data-password-reset-policy]");
+    if (policy) policy.textContent = AUTH_PASSWORD_POLICY_HELP;
+
+    for (const input of [
+      view.querySelector?.("[data-password-reset-password]"),
+      view.querySelector?.("[data-password-reset-confirm]"),
+    ].filter(Boolean)) {
+      input.setAttribute("minlength", String(MIN_PASSWORD_LENGTH));
+      input.setAttribute("maxlength", String(MAX_PASSWORD_LENGTH));
+    }
   }
 
   return {
@@ -1564,25 +1583,9 @@ function validatePayload(
         ""
       );
 
-    if (!password) {
-      errors.password =
-        "Introduce una nueva contraseña.";
-    } else if (
-      password.length <
-      MIN_PASSWORD_LENGTH
-    ) {
-      errors.password =
-        `La contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres.`;
-    } else if (
-      !/[A-Za-z]/.test(
-        password
-      ) ||
-      !/\d/.test(
-        password
-      )
-    ) {
-      errors.password =
-        "La contraseña debe incluir al menos una letra y un número.";
+    const passwordValidation = validateAuthPassword(password);
+    if (!passwordValidation.ok) {
+      errors.password = passwordValidation.message;
     }
 
     if (!confirmation) {

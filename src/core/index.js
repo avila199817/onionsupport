@@ -642,4 +642,3 @@ Object.defineProperties(AppCore, {
 for (const [name, registryName] of [["auth", "auth"], ["Auth", "auth"], ["router", "router"], ["Router", "router"], ["toast", "toast"], ["Toast", "toast"], ["sidebar", "sidebar"], ["Sidebar", "sidebar"], ["topbar", "topbar"], ["Topbar", "topbar"]]) defineModuleAlias(name, registryName);
 
 export default AppCore;
-

@@ -5,7 +5,8 @@
    Scope:
    - loader fullscreen del formulario público;
    - bloqueo visual/interacción durante el POST real;
-   - pequeños remates de foco/feedback del intake.
+   - pequeños remates de foco/feedback del intake;
+   - composición tipográfica móvil de los títulos públicos.
 ========================================================= */
 
 @layer auth {
@@ -186,22 +187,21 @@ body.public-support-submission-active {
   }
 
   .public-home .public-support-intro h2.public-support-title {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: max-content max-content;
     max-inline-size: 100%;
-    column-gap: .16em;
+    column-gap: .12em;
     row-gap: 0;
-    font-size: clamp(32px, 10vw, 50px);
+    font-size: clamp(31px, 9.8vw, 50px);
     white-space: nowrap;
   }
 
   .public-home .public-support-intro h2.public-support-title > span {
     display: block;
-    flex: 0 0 auto;
   }
 
   .public-home .public-support-intro h2.public-support-title > .public-support-title-accent {
-    flex-basis: 100%;
+    grid-column: 1 / -1;
   }
 }
 

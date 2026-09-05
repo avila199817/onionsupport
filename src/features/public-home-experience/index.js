@@ -14,7 +14,7 @@
 import { AppCore } from "../../core/index.js";
 
 export const PUBLIC_HOME_EXPERIENCE_VERSION =
-  "public-home.experience.v6-avatar-topbar-identity";
+  "public-home.experience.v7-avatar-topbar-card";
 
 /* Trusted pre-merge contract marker retained while the v5 verifier rolls forward. */
 // public-home.experience.v5-avatar-topbar-account

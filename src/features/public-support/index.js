@@ -204,9 +204,6 @@ function identityNode(name, src, presentation = {}) {
   wrap.className = "public-support-account";
   wrap.dataset.publicSupportAccountName = displayName;
   wrap.dataset.publicSupportAccountEmail = displayEmail;
-  wrap.dataset.publicSupportAccountTooltip = displayEmail
-    ? `${displayName} · ${displayEmail}`
-    : displayName;
   wrap.setAttribute(
     "aria-label",
     displayEmail ? `${displayName}, ${displayEmail}` : displayName
@@ -247,12 +244,10 @@ function identityNode(name, src, presentation = {}) {
   const strong = document.createElement("strong");
   strong.className = "public-support-account-name";
   strong.textContent = displayName;
-  strong.title = displayName;
 
   const small = document.createElement("small");
   small.className = "public-support-account-email";
   small.textContent = displayEmail;
-  if (displayEmail) small.title = displayEmail;
 
   copy.append(strong, small);
   wrap.append(mark, copy);

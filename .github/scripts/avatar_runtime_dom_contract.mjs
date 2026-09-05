@@ -228,6 +228,7 @@ try {
       user: {
         ...state.user,
         name: "Cristian Ávila Luque",
+        displayName: "Cristian Ávila Luque",
         email: "CRISTIAN@ONIONSUPPORT.COM",
       },
     });

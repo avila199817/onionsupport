@@ -122,7 +122,6 @@ for (const required of [
   assert.ok(source.includes(required), `Privacy snapshot: falta ${required}`);
 }
 
-/* El parser sólo puede declarar scope público mediante marcadores explícitos. */
 assert.match(source, /aggregateScopeIsPublic/);
 assert.match(source, /summary\.publicTechnicianStats === true/);
 assert.match(source, /meta\.publicTechnicianStats === true/);
@@ -214,9 +213,10 @@ const cristian = resolveAvatarPresentation({
   username: "cristian",
 });
 const poisonedWrapper = resolveAvatarPresentation({ displayName: "CL" });
+assert.equal(cristian.seed, "email:cristian@onionsupport.com");
 assert.equal(cristian.initials, "CL");
-assert.equal(cristian.tone, 12);
-assert.equal(cristian.color, "#A4262C");
+assert.equal(cristian.tone, 4);
+assert.equal(cristian.color, "#498205");
 assert.equal(poisonedWrapper.tone, 19);
 assert.equal(poisonedWrapper.color, "#69797E");
 

@@ -359,7 +359,7 @@ La política objetivo es persistir únicamente preferencias justificadas y minim
 
 | Consumidor observado | Persistencia presente | Trabajo pendiente |
 | --- | --- | --- |
-| `src/views/clientes/clientes.api.js` | Página y detalle en memoria; caché persistente de dataset deshabilitada. `clientes.api.legacy.js` sólo reexporta la API | Verificar aislamiento y borrado entre sesiones; retirar la fachada sin consumidores en una entrega acotada. |
+| `src/views/clientes/clientes.api.js` | Página y detalle en memoria; caché persistente de dataset deshabilitada. | Verificar aislamiento y borrado entre sesiones; no queda una segunda ruta de compatibilidad de API. |
 | `src/views/usuarios/usuarios.api.js` | Caché proyectada de usuarios con identidad, contacto y metadatos de cuenta/seguridad; no es un almacén de tokens | Aplicar la misma revisión y reducir los campos persistidos; su TTL de frescura no prueba borrado físico. |
 | `src/views/correo/index.js` | Preferencias de notificación/buzón y firma, además de caché de mensajes en memoria | Comprobar necesidad, alcance por propietario y limpieza al cambiar de cuenta. |
 | `src/views/cuenta/index.js` | Preferencias de tema e idioma | Mantener el contrato de preferencias y evitar que absorba datos de sesión. |

@@ -1,0 +1,41 @@
+/* =========================================================
+   ONION SUPPORT — PUBLIC HOME ACCOUNT IDENTITY
+   Archivo: /src/css/compositions/public-home-account-identity.css
+
+   DESKTOP IDENTITY PARITY · AZURE-LIKE TEXT TRACK
+
+   Objetivo:
+   - Nombre y correo comparten exactamente la misma pista horizontal.
+   - Ambos arrancan en el mismo eje y recortan contra el mismo límite.
+   - Avatar permanece a la derecha, como en el patrón de cuenta de Azure.
+   - El comportamiento móvil canónico (avatar solo) sigue perteneciendo a
+     home-experience.css y no se toca aquí.
+========================================================= */
+
+@media (min-width: 721px) {
+  .public-home .public-home-nav-account-slot .public-support-account-copy {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: stretch;
+    flex: 1 1 0%;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    gap: 2px;
+    text-align: start;
+  }
+
+  .public-home .public-home-nav-account-slot :is(
+    .public-support-account-name,
+    .public-support-account-email
+  ) {
+    box-sizing: border-box;
+    display: block;
+    inline-size: 100%;
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    overflow: hidden;
+    text-align: start;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}

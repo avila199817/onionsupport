@@ -16,7 +16,7 @@ import {
 assert.match(AVATAR_SYSTEM_VERSION, /deterministic-identity-authority/);
 assert.equal(
   AVATAR_IDENTITY_VERSION,
-  "avatar-identity.v4-stable-user-tone"
+  "avatar-identity.v5-user-id-first"
 );
 assert.equal(AVATAR_TONE_COUNT, 20);
 
@@ -86,6 +86,7 @@ const identityB = resolveAvatarPresentation({
   name: "Cristian Avila Luque",
 });
 const identityHomeSidebar = resolveAvatarPresentation({
+  userId: "ON-20260901024205",
   displayName: "CRISTIAN ÁVILA LUQUE",
   email: "avila199817@gmail.com",
   username: "avila199817",
@@ -99,11 +100,11 @@ for (const candidate of [identityB, identityHomeSidebar]) {
   assert.equal(identityA.fingerprint, candidate.fingerprint);
 }
 
-assert.equal(identityA.seed, "email:avila199817@gmail.com");
+assert.equal(identityA.seed, "user:on-20260901024205");
 assert.equal(identityA.initials, "CL");
-assert.equal(identityA.tone, 18);
-assert.equal(identityA.colorKey, "rust");
-assert.equal(identityA.color, "#8E562E");
+assert.equal(identityA.tone, 13);
+assert.equal(identityA.colorKey, "violet");
+assert.equal(identityA.color, "#8764B8");
 
 for (const [name, initials, tone, color] of [
   ["DMARC Reports", "DR", 4, "#498205"],
@@ -294,11 +295,13 @@ for (const name of ["Javier Harandou", "Ana Maria López", "Maria del Carmen Ort
   const detailHtml = clientDetail.renderClientesDetailModal({ open: true, detail: { clienteId: "fixture-client", userId: user.userId, nombreFiscal: "Empresa Fixture", contactoNombre: name, email: user.email } });
   const mailHtml = mailTemplate.renderMessageRows([{ id: "fixture-message", from: { name, address: user.email }, receivedDateTime: "2026-01-01T12:00:00Z" }]);
   for (const [context, html] of [["client-create", createHtml], ["client-detail", detailHtml], ["mail-sender", mailHtml]]) {
+    // External message addresses have no proven Onion user ID.
+    const contextIdentity = context === "mail-sender" ? resolveAvatarPresentation({ name, email: user.email }) : expected;
     const hosts = [...html.matchAll(/<(?:span|div)\b[^>]*data-avatar-host="true"[^>]*>/g)].map((match) => match[0]);
     assert.ok(hosts.length > 0, `${context} must declare its identity to AvatarSystem`);
     for (const host of hosts) {
-      assert.ok(host.includes(`data-avatar-initials="${expected.initials}"`), `${context} initials for ${name}`);
-      assert.ok(host.includes(`data-avatar-tone="${expected.tone}"`), `${context} tone for ${name}`);
+      assert.ok(host.includes(`data-avatar-initials="${contextIdentity.initials}"`), `${context} initials for ${name}`);
+      assert.ok(host.includes(`data-avatar-tone="${contextIdentity.tone}"`), `${context} tone for ${name}`);
     }
   }
   assert.equal(homeFoundation.initialsFrom(name), expected.initials);

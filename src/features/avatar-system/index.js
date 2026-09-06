@@ -22,7 +22,6 @@ import {
   avatarInitials,
   cleanAvatarText,
   normalizeAvatarEmail,
-  normalizeAvatarName,
   normalizeAvatarUserId,
   normalizeAvatarUsername,
   resolveAvatarPresentation,
@@ -736,27 +735,13 @@ function isCurrentUserHost(host = null) {
 }
 
 function sameKnownPerson(left = {}, right = {}) {
-  const leftEmail = normalizeAvatarEmail(left?.email || left?.emailLower || "");
-  const rightEmail = normalizeAvatarEmail(right?.email || right?.emailLower || "");
-  if (leftEmail && rightEmail && leftEmail === rightEmail) return true;
-
   const leftId = normalizeAvatarUserId(left?.userId || left?.id || "");
   const rightId = normalizeAvatarUserId(right?.userId || right?.id || "");
-  if (leftId && rightId && leftId === rightId) return true;
+  if (leftId || rightId) return Boolean(leftId && rightId && leftId === rightId);
 
-  const leftName = normalizeAvatarName(
-    left?.displayName || left?.fullName || left?.name || ""
-  );
-  const rightName = normalizeAvatarName(
-    right?.displayName || right?.fullName || right?.name || ""
-  );
-
-  return Boolean(
-    leftName &&
-    rightName &&
-    leftName.length >= 5 &&
-    leftName === rightName
-  );
+  const leftEmail = normalizeAvatarEmail(left?.email || left?.emailLower || "");
+  const rightEmail = normalizeAvatarEmail(right?.email || right?.emailLower || "");
+  return Boolean(leftEmail && rightEmail && leftEmail === rightEmail);
 }
 
 function resolveHostIdentity(host = null) {

@@ -7,17 +7,16 @@
    Contrato visual:
    - Iniciales compatibles con Microsoft Fluent UI Persona.
    - Paleta de 20 colores compatible con Fluent UI Persona.
-   - Usuario identificable => el color nace de una identidad estable, nunca
-     del spelling visible del nombre.
+   - Con userId, el color nace del ID estable aunque cambien email o username.
    - El nombre sólo decide color como fallback final cuando no existe alias
-     estable (email, userId o username).
+     de identidad (userId, email o username).
    - Sin aleatoriedad, storage, red ni color persistido.
 ========================================================= */
 
 "use strict";
 
 export const AVATAR_IDENTITY_VERSION =
-  "avatar-identity.v4-stable-user-tone";
+  "avatar-identity.v5-user-id-first";
 
 /* Fluent UI v8 Persona colors: exact order/hex. */
 export const MICROSOFT_PERSONA_COLORS = Object.freeze([
@@ -263,17 +262,17 @@ export function avatarUsernameFromIdentity(input = {}) {
 /*
   Canonical identity key for visual presentation.
 
-  Email wins because it is the alias that is consistently projected today
-  through Usuarios, Clientes, Incidencias, Facturas, Home and runtime DOM.
-  That makes old snapshots that lack userId converge with live user DTOs.
-  userId/username remain deterministic fallbacks when email is unavailable.
+  The immutable Onion userId wins over mutable email/username aliases.
+  Domain consumers must project a real user ID, never a client/ticket/invoice
+  ID. Historical records without a proven user link keep deterministic alias
+  fallbacks; the visual authority does not invent links or perform lookups.
 */
 export function avatarSeedFromIdentity(input = {}) {
-  const email = avatarEmailFromIdentity(input);
-  if (email) return `email:${email}`;
-
   const userId = avatarUserIdFromIdentity(input);
   if (userId) return `user:${userId}`;
+
+  const email = avatarEmailFromIdentity(input);
+  if (email) return `email:${email}`;
 
   const username = avatarUsernameFromIdentity(input);
   if (username) return `username:${username}`;
@@ -453,7 +452,7 @@ export function avatarInitials(value = "") {
 
 export function avatarIdentityFingerprint(input = {}) {
   return hashAvatarSeed(
-    `onion-avatar-fingerprint:v4|${avatarSeedFromIdentity(input)}`
+    `onion-avatar-fingerprint:v5|${avatarSeedFromIdentity(input)}`
   ).toString(36);
 }
 

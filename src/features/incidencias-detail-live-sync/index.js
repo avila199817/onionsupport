@@ -20,6 +20,8 @@
    - indicador sólo para red perceptible y silencio total si no cambió nada.
 ========================================================= */
 
+import { persistedCommentId } from "../incidencias-comment-identity/index.js";
+
 export const INCIDENCIAS_DETAIL_LIVE_SYNC_VERSION =
   "incidencias-detail-live-sync.v3.stable-media-slots";
 
@@ -355,6 +357,7 @@ function normalizeComment(item = {}, index = 0) {
       first(raw.id, raw.commentId, raw.eventId, `comment_${index}`),
       `comment_${index}`
     ),
+    persistedCommentId: persistedCommentId(raw),
     body,
     author: text(
       first(
@@ -438,7 +441,7 @@ function formatDate(value = null) {
 function commentsSignature(comments = []) {
   return comments
     .map((item) =>
-      [item.id, item.body, timestamp(item.createdAt)].join("::")
+      [item.id, item.persistedCommentId, item.author, item.body, timestamp(item.createdAt)].join("::")
     )
     .join("||");
 }
@@ -447,6 +450,7 @@ function buildCommentCard(comment = {}) {
   const article = document.createElement("article");
   article.className = "incidencias-modal-description-comment";
   article.dataset.descriptionComment = "true";
+  if (comment.persistedCommentId) article.dataset.commentId = comment.persistedCommentId;
 
   const accent = document.createElement("span");
   accent.className = "incidencias-modal-description-comment-accent";

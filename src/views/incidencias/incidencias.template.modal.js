@@ -16,6 +16,8 @@
      para que AvatarSystem nunca mezcle personas dentro del mismo modal.
 ========================================================= */
 
+import { persistedCommentId, requesterIdentity, technicianIdentity } from "../../features/incidencias-comment-identity/index.js";
+
 import {
   DETAIL_ACTIONS,
   getDetailCommentValue,
@@ -152,6 +154,7 @@ function requesterAvatarIdentity(detail = {}) {
   );
 
   return {
+    ...requesterIdentity(source),
     name: oneLine(
       source.displayName ||
       source.name ||
@@ -180,18 +183,6 @@ function requesterAvatarIdentity(detail = {}) {
       "",
       ""
     ),
-    userId: oneLine(
-      source.requesterUserId ||
-      source.userId ||
-      source.usuarioId ||
-      requester.userId ||
-      requester.id ||
-      raw.requesterUserId ||
-      raw.userId ||
-      raw.usuarioId ||
-      "",
-      ""
-    ),
   };
 }
 
@@ -211,6 +202,13 @@ function technicianAvatarIdentity(detail = {}) {
   );
 
   return {
+    ...technicianIdentity(source),
+    lookupUserId: oneLine(
+      source.assignedToUserId || source.technicianUserId || source.tecnicoUserId ||
+      assignment.assignedToUserId || assignment.technicianUserId ||
+      technician.userId || technician.id ||
+      raw.assignedToUserId || raw.technicianUserId || raw.tecnicoUserId || ""
+    ),
     name: oneLine(
       source.assignedToName ||
       source.technicianName ||
@@ -229,17 +227,6 @@ function technicianAvatarIdentity(detail = {}) {
       assignment.assignedToEmail ||
       technician.email ||
       technician.emailLower ||
-      "",
-      ""
-    ),
-    userId: oneLine(
-      source.assignedToUserId ||
-      source.technicianUserId ||
-      source.tecnicoUserId ||
-      assignment.assignedToUserId ||
-      assignment.technicianUserId ||
-      technician.userId ||
-      technician.id ||
       "",
       ""
     ),
@@ -265,6 +252,14 @@ function avatarIdentityAttributes(identity = {}, source = "") {
 
   if (person.userId) {
     attrs.push(`data-avatar-user-id="${escapeHtml(person.userId)}"`);
+  }
+
+  if (person.username) {
+    attrs.push(`data-avatar-username="${escapeHtml(person.username)}"`);
+  }
+
+  if (person.lookupUserId) {
+    attrs.push(`data-technician-user-id="${escapeHtml(person.lookupUserId)}"`);
   }
 
   return attrs.join(" ");
@@ -379,6 +374,7 @@ function normalizeComment(item = {}, index = 0) {
       `comment_${index}`,
       `comment_${index}`
     ),
+    persistedCommentId: persistedCommentId(source),
     body,
     author: oneLine(
       source.author ||
@@ -433,11 +429,9 @@ export function getIncidenciasDetailComments(input = {}) {
     .map(normalizeComment)
     .filter(Boolean)
     .forEach((comment) => {
-      const identity = oneLine(
-        comment.id ||
-        `${timestamp(comment.createdAt)}:${comment.author}:${comment.body}`,
-        ""
-      );
+      const identity = comment.persistedCommentId
+        ? `persisted:${comment.persistedCommentId}`
+        : `synthetic:${comment.sourceIndex}`;
 
       if (!identity || unique.has(identity)) return;
       unique.set(identity, comment);
@@ -472,6 +466,8 @@ function commentSignature(comments = []) {
     .map((comment) =>
       [
         oneLine(comment.id, ""),
+        oneLine(comment.persistedCommentId, ""),
+        oneLine(comment.author, ""),
         text(comment.body, ""),
         timestamp(comment.createdAt),
       ].join("::")
@@ -503,7 +499,7 @@ function renderCanonicalFollowup(input = {}) {
           <article
             class="incidencias-modal-description-comment"
             data-description-comment="true"
-            data-comment-id="${escapeHtml(comment.id)}"
+            ${comment.persistedCommentId ? `data-comment-id="${escapeHtml(comment.persistedCommentId)}"` : ""}
           >
             <span
               class="incidencias-modal-description-comment-accent"

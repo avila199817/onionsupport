@@ -15,6 +15,7 @@
 ========================================================= */
 
 import { synchronizeAvatars } from "../avatar-system/index.js";
+import { persistedCommentId } from "../incidencias-comment-identity/index.js";
 
 export const INCIDENCIAS_DETAIL_STATE_VERSION =
   "incidencias-detail-state.v5.route-lease-authoritative";
@@ -534,6 +535,7 @@ function normalizeComment(item = {}, index = 0) {
       first(raw.id, raw.commentId, raw.eventId, `comment_${index}`),
       `comment_${index}`
     ),
+    persistedCommentId: persistedCommentId(raw),
     body,
     author: text(
       first(
@@ -618,7 +620,7 @@ function formatDate(value = null) {
 function commentSignature(comments = []) {
   return comments
     .map((comment) =>
-      [comment.id, comment.body, timestamp(comment.createdAt)].join("::")
+      [comment.id, comment.persistedCommentId, comment.author, comment.body, timestamp(comment.createdAt)].join("::")
     )
     .join("||");
 }
@@ -627,6 +629,7 @@ function buildCommentCard(comment = {}) {
   const article = document.createElement("article");
   article.className = "incidencias-modal-description-comment";
   article.dataset.descriptionComment = "true";
+  if (comment.persistedCommentId) article.dataset.commentId = comment.persistedCommentId;
 
   const accent = document.createElement("span");
   accent.className = "incidencias-modal-description-comment-accent";

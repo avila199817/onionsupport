@@ -25,7 +25,9 @@ import {
 
 import {
   buildCommentIdentityIndex,
+  commentAvatarIdentity,
   requesterIdentity,
+  resolveCommentIdentity,
   resolveCommentProfile,
   technicianIdentity,
 } from "../incidencias-comment-identity/index.js";
@@ -114,16 +116,6 @@ function unwrapDetail(value = null) {
   return {};
 }
 
-function profilePresentation(name = "", identity = {}) {
-  return resolveAvatarPresentation({
-    displayName: name,
-    name,
-    email: identity.email,
-    userId: identity.userId,
-    username: identity.username,
-  });
-}
-
 function requesterProfile(modal = null, detail = {}) {
   const host = modal?.querySelector?.(REQUESTER_SELECTOR) || null;
   const image = host?.querySelector?.(REQUESTER_IMAGE_SELECTOR) || null;
@@ -136,7 +128,6 @@ function requesterProfile(modal = null, detail = {}) {
     name,
     src: cleanImageSrc(image),
     source: "requester",
-    presentation: profilePresentation(name, identity),
     ...identity,
   });
 }
@@ -157,7 +148,6 @@ function technicianProfile(modal = null, detail = {}) {
     name,
     src: cleanImageSrc(image),
     source: "technician",
-    presentation: profilePresentation(name, identity),
     ...identity,
   });
 }
@@ -209,39 +199,31 @@ function ensureAuthorWrap(head = null, author = null) {
   return wrap;
 }
 
-function presentationForAuthor(profile = null, authorText = "") {
-  if (profile?.presentation) return profile.presentation;
-
-  return resolveAvatarPresentation({
-    displayName: authorText,
-    name: authorText,
-    email: profile?.email,
-    userId: profile?.userId,
-    username: profile?.username,
-  });
+function presentationForAuthor(profile = null, authorText = "", identity = null) {
+  return resolveAvatarPresentation(commentAvatarIdentity(authorText, identity, profile));
 }
 
-function applyStableAvatarIdentityDataset(avatar = null, profile = null, authorText = "") {
+function applyStableAvatarIdentityDataset(avatar = null, presentation = {}) {
   if (!avatar) return;
 
-  const name = text(profile?.name || authorText || "");
-  const email = text(profile?.email || "").toLowerCase();
-  const userId = text(profile?.userId || profile?.id || "");
-  const username = text(profile?.username || profile?.userName || "");
+  const name = presentation.name || "";
+  const email = presentation.email || "";
+  const userId = presentation.userId || "";
+  const username = presentation.username || "";
 
-  if (name) avatar.dataset.avatarName = name;
-  if (email) avatar.dataset.avatarEmail = email;
-  if (userId) avatar.dataset.avatarUserId = userId;
-  if (username) avatar.dataset.avatarUsername = username;
+  if (avatar.dataset.avatarName !== name) avatar.dataset.avatarName = name;
+  if (avatar.dataset.avatarEmail !== email) avatar.dataset.avatarEmail = email;
+  if (avatar.dataset.avatarUserId !== userId) avatar.dataset.avatarUserId = userId;
+  if (avatar.dataset.avatarUsername !== username) avatar.dataset.avatarUsername = username;
 }
 
-function createAvatar(head = null, profile = null, authorText = "") {
+function createAvatar(head = null, profile = null, authorText = "", identity = null) {
   const author = directAuthor(head);
   const wrap = ensureAuthorWrap(head, author);
 
   if (!wrap || !authorText) return null;
 
-  const presentation = presentationForAuthor(profile, authorText);
+  const presentation = presentationForAuthor(profile, authorText, identity);
   const hasImage = Boolean(profile?.src);
 
   const avatar = document.createElement("span");
@@ -254,7 +236,7 @@ function createAvatar(head = null, profile = null, authorText = "") {
   avatar.dataset.avatarIdentity = presentation.fingerprint;
   avatar.dataset.avatarInitials = presentation.initials;
   avatar.dataset.hasAvatar = hasImage ? "true" : "false";
-  applyStableAvatarIdentityDataset(avatar, profile, authorText);
+  applyStableAvatarIdentityDataset(avatar, presentation);
 
   const fallback = document.createElement("span");
   fallback.className = AVATAR_FALLBACK_CLASS;
@@ -294,12 +276,15 @@ function syncHead(head = null, identityIndex = new Map(), availableProfiles = []
     return false;
   }
 
+  const commentId = text(head.closest?.("[data-comment-id]")?.dataset?.commentId || "");
+  const identity = resolveCommentIdentity(authorText, identityIndex, commentId);
   const profile = resolveCommentProfile(
     authorText,
     identityIndex,
-    availableProfiles
+    availableProfiles,
+    commentId
   );
-  const presentation = presentationForAuthor(profile, authorText);
+  const presentation = presentationForAuthor(profile, authorText, identity);
   const expectedSrc = text(profile?.src || "");
 
   const current = head.querySelector?.(`.${AVATAR_CLASS}`) || null;
@@ -312,12 +297,12 @@ function syncHead(head = null, identityIndex = new Map(), availableProfiles = []
     current.dataset.avatarIdentity === presentation.fingerprint &&
     head.dataset.followupAvatarAuthor === authorText
   ) {
-    applyStableAvatarIdentityDataset(current, profile, authorText);
+    applyStableAvatarIdentityDataset(current, presentation);
     return true;
   }
 
   removeAvatar(head);
-  return Boolean(createAvatar(head, profile, authorText));
+  return Boolean(createAvatar(head, profile, authorText, identity));
 }
 
 async function hydrate(modal = null) {

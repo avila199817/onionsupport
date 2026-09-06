@@ -1178,6 +1178,7 @@ function getClienteAvatar(
     getPayloadSources(factura);
 
   for (const source of sources) {
+    if (source.hasAvatar === false) return "";
     const url =
       firstUrl(
         source?.cliente?.avatarUrl,

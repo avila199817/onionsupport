@@ -3,8 +3,16 @@ import fs from "node:fs";
 
 import {
   buildCommentIdentityIndex,
+  commentAvatarIdentity,
+  persistedCommentId,
+  requesterIdentity,
+  resolveCommentIdentity,
   resolveCommentProfile,
+  stableCommentIdentity,
+  technicianIdentity,
 } from "../../src/features/incidencias-comment-identity/index.js";
+
+import { getIncidenciasDetailComments } from "../../src/views/incidencias/incidencias.template.modal.js";
 
 import {
   AVATAR_TONE_COUNT,
@@ -58,7 +66,7 @@ assert.equal(
 
 assert.match(
   identitySource,
-  /incidencias\.comment-identity\.v1-pure-stable-aliases/u
+  /incidencias\.comment-identity\.v2-comment-id-user-authority/u
 );
 assert.doesNotMatch(identitySource, /\bdocument\b|\bwindow\b|MutationObserver|fetch\s*\(/u);
 assert.doesNotMatch(identitySource, /avatarTone|data-avatar-tone|%\s*(?:10|20)/u);
@@ -163,6 +171,16 @@ assert.doesNotMatch(enhancementsSource, /incidencias-avatar-fallback/u);
 for (const [rendererPath, rendererSource] of detailCommentRendererSources) {
   assert.match(
     rendererSource,
+    /if \(comment\.persistedCommentId\) article\.dataset\.commentId = comment\.persistedCommentId/u,
+    `${rendererPath} debe conservar la asociación al comentario cuando hay homónimos`
+  );
+  assert.match(
+    rendererSource,
+    /\[(?:comment|item)\.id, (?:comment|item)\.persistedCommentId, (?:comment|item)\.author, (?:comment|item)\.body, timestamp\(/u,
+    `${rendererPath} debe invalidar la firma al cambiar autor o procedencia del ID`
+  );
+  assert.match(
+    rendererSource,
     /date\.className\s*=\s*["']incidencias-modal-description-comment-date["']/u,
     `${rendererPath} debe mantener clase semántica propia para la fecha`
   );
@@ -191,6 +209,114 @@ const technician = Object.freeze({
   src: "https://example.test/technician.jpg",
 });
 const profiles = [requester, technician];
+
+assert.equal(requesterIdentity({ createdByUserId: "admin-author", cliente: { id: "client-record" } }).userId, "");
+for (const key of ["requesterSnapshot", "requester", "receptor", "cliente"]) {
+  assert.equal(requesterIdentity({ [key]: { id: "CLI-1" } }).userId, "", `${key}.id is not a proven user ID`);
+  assert.equal(requesterIdentity({ raw: { [key]: { id: "CLI-1" } } }).userId, "", `raw.${key}.id is not a proven user ID`);
+}
+assert.equal(requesterIdentity({ requesterUserId: "requester-user", createdByUserId: "admin-author" }).userId, "requester-user");
+assert.equal(requesterIdentity({ raw: { requesterSnapshot: { userId: "requester-user", username: "@Requester" } } }).userId, "requester-user");
+assert.equal(requesterIdentity({ raw: { requesterSnapshot: { userId: "requester-user", username: "@Requester" } } }).username, "requester");
+assert.equal(requesterIdentity({ cliente: { id: "client-record", userId: "client-contact-user" } }).userId, "client-contact-user");
+assert.equal(requesterIdentity({ user: { id: "user-record" } }).userId, "user-record");
+assert.equal(technicianIdentity({ assignment: { technicianUserId: "assigned-user", username: "@Assigned" } }).userId, "assigned-user");
+assert.equal(technicianIdentity({ assignment: { technicianUserId: "assigned-user", username: "@Assigned" } }).username, "assigned");
+assert.equal(stableCommentIdentity({ by: "Visible Author", authorUserId: "author-user" }).userId, "author-user");
+for (const by of ["Visible Author", "legacy@example.test", "ON-UNPROVEN-ID"]) {
+  assert.equal(stableCommentIdentity({ by }).userId, "", "by escalar no acredita un ID de usuario");
+}
+
+for (const legacy of [{ byEmail: "b@example.test" }, { byEmail: "a@example.test" }, {}]) {
+  const index = buildCommentIdentityIndex({ comments: [
+    { byName: "Alex Gómez", byUserId: "user-a", byEmail: "a@example.test" },
+    { byName: "Alex Gómez", ...legacy },
+  ] });
+  assert.equal(resolveCommentIdentity("Alex Gómez", index).ambiguous, true, "un registro sin UID no hereda el UID del homónimo, coincida el email o no");
+  assert.equal(resolveCommentProfile("Alex Gómez", index, [{ name: "Alex Gómez", userId: "user-a", email: "a@example.test", src: "/photo.svg" }]), null);
+  assert.equal(commentAvatarIdentity("Alex Gómez", resolveCommentIdentity("Alex Gómez", index)).userId, "");
+}
+
+{
+  const index = buildCommentIdentityIndex({ comments: [
+    { id: "known-event", byName: "Alex Gómez", byUserId: "user-a", byEmail: "a@example.test" },
+    { id: "legacy-event", byName: "Alex Gómez", byEmail: "a@example.test" },
+  ] });
+  assert.equal(resolveCommentIdentity("Alex Gómez", index).ambiguous, true);
+  assert.equal(commentAvatarIdentity("Alex Gómez", resolveCommentIdentity("Alex Gómez", index, "known-event")).userId, "user-a");
+  assert.equal(commentAvatarIdentity("Alex Gómez", resolveCommentIdentity("Alex Gómez", index, "legacy-event")).userId, "");
+}
+
+{
+  const live = { name: "Legacy Author", userId: "live-user", email: "legacy@example.test", username: "live", src: "/photo.svg" };
+  const index = buildCommentIdentityIndex({ comments: [
+    { byName: live.name, byEmail: live.email },
+  ] });
+  const identity = resolveCommentIdentity(live.name, index);
+  const photoProfile = resolveCommentProfile(live.name, index, [live]);
+  assert.equal(photoProfile, live, "la foto legacy puede coincidir inequívocamente por email");
+  const aliases = commentAvatarIdentity(live.name, identity, photoProfile);
+  assert.equal(aliases.userId, "", "coincidencia por email no acredita UID");
+  assert.equal(aliases.username, "", "no se importan aliases del perfil por coincidencia legacy");
+  assert.equal(resolveAvatarPresentation(aliases).seed, "email:legacy@example.test");
+  assert.equal(resolveAvatarPresentation(commentAvatarIdentity(live.name, null, live)).seed, resolveAvatarPresentation({ name: live.name }).seed, "legacy por nombre conserva su fallback propio");
+}
+
+{
+  const detail = { comments: [
+    { byName: "First Person", byUserId: "user-a", body: "First body" },
+    { id: "comment_0", byName: "Second Person", byUserId: "user-b", body: "Second body" },
+  ] };
+  const normalized = getIncidenciasDetailComments({ detail });
+  assert.equal(normalized.length, 2, "un ID sintético de UI no elimina un comentario persistido con ese mismo texto");
+  const first = normalized.find((item) => item.author === "First Person");
+  const second = normalized.find((item) => item.author === "Second Person");
+  assert.equal(first.id, "comment_0", "el ID de UI puede conservarse para firmas visuales");
+  assert.equal(persistedCommentId(first), "");
+  assert.equal(persistedCommentId(second), "comment_0");
+  const index = buildCommentIdentityIndex(detail);
+  assert.equal(resolveCommentIdentity(first.author, index, persistedCommentId(first)).userId, "user-a");
+  assert.equal(resolveCommentIdentity(second.author, index, persistedCommentId(second)).userId, "user-b");
+}
+
+{
+  const sharedEmail = "shared@example.test";
+  const sameNameProfiles = profiles.map((profile) => ({ ...profile, name: "Alex Gómez", email: sharedEmail }));
+  const index = buildCommentIdentityIndex({ comments: [
+    { id: "requester-comment", byName: "Alex Gómez", byUserId: requester.userId, byEmail: sharedEmail },
+    { id: "technician-comment", byName: "Alex Gómez", byUserId: technician.userId, byEmail: sharedEmail },
+    { id: "third-comment", byName: "Alex Gómez", byUserId: "third-user", byEmail: sharedEmail },
+  ] });
+  assert.equal(resolveCommentProfile("Alex Gómez", index, sameNameProfiles), null, "homónimos sin asociación al comentario no toman un perfil prestado");
+  assert.equal(resolveCommentProfile("Alex Gómez", index, sameNameProfiles, "requester-comment")?.userId, requester.userId);
+  assert.equal(resolveCommentProfile("Alex Gómez", index, sameNameProfiles, "technician-comment")?.userId, technician.userId);
+  assert.equal(resolveCommentProfile("Alex Gómez", index, sameNameProfiles, "third-comment"), null, "IDs distintos no se emparejan por compartir email");
+  const third = commentAvatarIdentity("Alex Gómez", resolveCommentIdentity("Alex Gómez", index, "third-comment"));
+  assert.equal(third.userId, "third-user", "el autor tercero conserva su identidad aunque no haya perfil con foto");
+  assert.equal(third.src, undefined, "una identidad de comentario no inventa foto");
+  assert.equal(resolveAvatarPresentation(third).seed, "user:third-user");
+}
+
+{
+  const identity = { userId: "same-user", email: "old@example.test", username: "old-user" };
+  const before = resolveAvatarPresentation(commentAvatarIdentity("Ana Prueba", identity, identity));
+  for (const current of [
+    { userId: identity.userId, email: "new@example.test", username: "new-user" },
+    { userId: identity.userId, email: "", username: "" },
+  ]) {
+    const aliases = commentAvatarIdentity("Ana Prueba", identity, current);
+    const after = resolveAvatarPresentation(aliases);
+    assert.equal(aliases.email, current.email);
+    assert.equal(aliases.username, current.username);
+    assert.equal(after.fingerprint, before.fingerprint);
+    assert.equal(after.tone, before.tone);
+  }
+  const index = buildCommentIdentityIndex({ comments: [
+    { id: "before", byName: "Ana Prueba", byUserId: identity.userId, byEmail: identity.email },
+    { id: "after", byName: "Ana Prueba", byUserId: identity.userId, byEmail: "new@example.test" },
+  ] });
+  assert.equal(resolveCommentIdentity("Ana Prueba", index).ambiguous, false, "un mismo UID con emails históricos distintos sigue siendo una persona");
+}
 
 {
   const index = buildCommentIdentityIndex({

@@ -12,7 +12,7 @@ import { createModalLifecycle, restoreModalFocus } from "../entity-overlay/modal
      total que la sesión actual puede conocer, claramente marcado como ámbito.
    - Valoración preparada para 5 estrellas: empieza en 0,0 / 5 y 0 opiniones.
    - Sin formulario de valoración en esta versión.
-   - Avatar delegado al AvatarSystem global y al bridge canónico de técnico.
+   - Avatar delegado al AvatarSystem global; foto del ticket/usuario.
 ========================================================= */
 
 "use strict";
@@ -20,6 +20,7 @@ import { createModalLifecycle, restoreModalFocus } from "../entity-overlay/modal
 import "./style.css";
 
 import {
+  normalizeAvatarUserId,
   resolveAvatarPresentation,
 } from "../avatar-system/identity.js";
 import {
@@ -114,6 +115,11 @@ function first(...values) {
     return value;
   }
   return null;
+}
+
+// Missing fields may inherit a snapshot. Null/empty values are explicit clears.
+function firstDefined(...values) {
+  return values.find((value) => value !== undefined);
 }
 
 function escapeHtml(value = "") {
@@ -237,6 +243,45 @@ function technicianFromTicket(ticket = {}) {
     assignment.assignedTo,
     {}
   ));
+  const email = firstDefined(
+    raw.assignedToEmail,
+    raw.technicianEmail,
+    raw.tecnicoEmail,
+    raw.agentEmail,
+    assignment.assignedToEmail,
+    assignment.technicianEmail,
+    nested.email,
+    nested.emailLower
+  );
+  const username = firstDefined(
+    raw.assignedToUsername,
+    raw.technicianUsername,
+    raw.tecnicoUsername,
+    nested.username,
+    nested.userName,
+    assignment.username
+  );
+  const avatar = firstDefined(
+    raw.assignedToAvatarUrl,
+    raw.assignedToAvatar,
+    raw.technicianAvatarUrl,
+    raw.technicianAvatar,
+    raw.tecnicoAvatarUrl,
+    raw.tecnicoAvatar,
+    assignment.assignedToAvatarUrl,
+    assignment.technicianAvatarUrl,
+    nested.avatarUrl,
+    nested.avatar,
+    nested.picture
+  );
+  const hasAvatar = firstDefined(
+    raw.assignedToHasAvatar,
+    raw.technicianHasAvatar,
+    raw.tecnicoHasAvatar,
+    assignment.hasAvatar,
+    assignment.technicianHasAvatar,
+    nested.hasAvatar
+  );
 
   return {
     userId: text(first(
@@ -259,16 +304,7 @@ function technicianFromTicket(ticket = {}) {
       nested.name,
       nested.nombre
     ), ""),
-    email: normalizeEmail(first(
-      raw.assignedToEmail,
-      raw.technicianEmail,
-      raw.tecnicoEmail,
-      raw.agentEmail,
-      assignment.assignedToEmail,
-      assignment.technicianEmail,
-      nested.email,
-      nested.emailLower
-    )),
+    email: email === undefined ? undefined : normalizeEmail(email),
     phone: text(first(
       raw.assignedToPhone,
       raw.technicianPhone,
@@ -281,24 +317,8 @@ function technicianFromTicket(ticket = {}) {
       nested.mobile,
       nested.movil
     ), ""),
-    avatar: safeAvatarUrl(first(
-      raw.assignedToAvatarUrl,
-      raw.assignedToAvatar,
-      raw.technicianAvatarUrl,
-      raw.technicianAvatar,
-      raw.tecnicoAvatarUrl,
-      raw.tecnicoAvatar,
-      assignment.assignedToAvatarUrl,
-      assignment.technicianAvatarUrl,
-      nested.avatarUrl,
-      nested.avatar,
-      nested.picture
-    )),
-    username: text(first(
-      nested.username,
-      nested.userName,
-      assignment.username
-    ), ""),
+    avatar: hasAvatar === false ? "" : avatar === undefined ? undefined : safeAvatarUrl(avatar),
+    username: username === undefined ? undefined : text(username, ""),
     role: text(first(
       nested.profile?.position,
       nested.position,
@@ -311,6 +331,23 @@ function technicianFromTicket(ticket = {}) {
       nested.estado,
       nested.active === false ? "inactive" : "active"
     ), "active"),
+  };
+}
+
+function mergeTicketTechnician(seed = {}, ticket = {}) {
+  const incoming = technicianFromTicket(ticket);
+  // Ticket IDs retain their domain spelling; visual aliases never create one.
+  incoming.lookupUserId = incoming.userId;
+  if (seed.userId && incoming.userId && normalizeAvatarUserId(seed.userId) !== normalizeAvatarUserId(incoming.userId)) {
+    // Reassignment starts a new person; never inherit the previous contact/photo.
+    return incoming;
+  }
+
+  return {
+    ...seed,
+    ...Object.fromEntries(Object.entries(incoming).filter(([key, value]) =>
+      value !== undefined && (value !== "" || ["email", "username", "avatar"].includes(key))
+    )),
   };
 }
 
@@ -328,9 +365,34 @@ export function publicTechnicianProfileFor(tech = {}) {
 }
 
 function mergeTechnician(snapshot = {}, user = {}) {
-  const source = object(user);
+  const candidate = object(user);
+  const candidateId = text(first(
+    candidate.userId,
+    candidate.usuarioId,
+    candidate.id,
+    candidate.raw?.userId,
+    candidate.raw?.id
+  ), "");
+  // The user request is by snapshot.lookupUserId. A different returned ID cannot
+  // enrich this person, even if an email or display name happens to match.
+  const source = snapshot.userId && candidateId && normalizeAvatarUserId(snapshot.userId) !== normalizeAvatarUserId(candidateId)
+    ? {}
+    : candidate;
   const raw = object(source.raw);
+  const avatar = firstDefined(
+    source.avatarUrl,
+    source.avatar,
+    source.picture,
+    source.photoUrl,
+    source.profile?.avatarUrl,
+    source.profile?.avatar,
+    raw.avatarUrl,
+    raw.avatar,
+    raw.picture
+  );
+  const hasAvatar = firstDefined(source.hasAvatar, source.profile?.hasAvatar, raw.hasAvatar);
   const merged = {
+    lookupUserId: text(snapshot.lookupUserId, ""),
     userId: text(first(
       source.userId,
       source.usuarioId,
@@ -348,7 +410,7 @@ function mergeTechnician(snapshot = {}, user = {}) {
       raw.name,
       snapshot.name
     ), "Técnico"),
-    email: normalizeEmail(first(
+    email: normalizeEmail(firstDefined(
       source.email,
       source.emailLower,
       raw.email,
@@ -367,7 +429,7 @@ function mergeTechnician(snapshot = {}, user = {}) {
       raw.telefono,
       snapshot.phone
     ), ""),
-    username: text(first(
+    username: text(firstDefined(
       source.username,
       source.userName,
       source.slug,
@@ -384,18 +446,7 @@ function mergeTechnician(snapshot = {}, user = {}) {
       raw.role,
       snapshot.role
     ), ""),
-    avatar: safeAvatarUrl(first(
-      source.avatarUrl,
-      source.avatar,
-      source.picture,
-      source.photoUrl,
-      source.profile?.avatarUrl,
-      source.profile?.avatar,
-      raw.avatarUrl,
-      raw.avatar,
-      raw.picture,
-      snapshot.avatar
-    )),
+    avatar: hasAvatar === false ? "" : safeAvatarUrl(avatar === undefined ? snapshot.avatar : avatar),
     status: text(first(
       source.status,
       source.estado,
@@ -510,7 +561,7 @@ export function normalizePublicTechnicianMetrics(response = null) {
 
 function metricSearchTerm(tech = {}) {
   return text(first(
-    tech.userId,
+    tech.lookupUserId,
     tech.email,
     tech.username,
     tech.name
@@ -536,8 +587,8 @@ async function requestTechnicianResolvedAggregate(api, tech = {}, publicHints = 
       summaryOnly: true,
       includeItems: false,
       publicMetrics: true,
-      technicianUserId: text(tech.userId, ""),
-      assignedToUserId: text(tech.userId, ""),
+      technicianUserId: text(tech.lookupUserId, ""),
+      assignedToUserId: text(tech.lookupUserId, ""),
       technicianEmail: normalizeEmail(tech.email),
     });
   }
@@ -828,7 +879,16 @@ function closeProfile() {
   return true;
 }
 
+function technicianTriggerAvatar(trigger = null) {
+  const selector = "[data-avatar-user-id], [data-avatar-name], [data-avatar-email], [data-avatar-username]";
+  return trigger?.matches?.(selector) ? trigger : trigger?.querySelector?.(selector);
+}
+
 function technicianTriggerName(trigger = null) {
+  const avatar = technicianTriggerAvatar(trigger);
+  if (avatar?.hasAttribute("data-avatar-name")) {
+    return text(avatar.dataset.avatarName, "Técnico");
+  }
   return text(first(
     trigger?.querySelector?.(".incidencias-assigned-name")?.textContent,
     trigger?.querySelector?.(".incidencias-modal-technician-copy strong")?.textContent,
@@ -838,6 +898,10 @@ function technicianTriggerName(trigger = null) {
 }
 
 function technicianTriggerEmail(trigger = null) {
+  const avatar = technicianTriggerAvatar(trigger);
+  if (avatar?.hasAttribute("data-avatar-email")) {
+    return normalizeEmail(avatar.dataset.avatarEmail);
+  }
   const node = trigger?.querySelector?.(".incidencias-modal-technician-email");
   return normalizeEmail(first(
     node?.textContent,
@@ -845,12 +909,26 @@ function technicianTriggerEmail(trigger = null) {
   ));
 }
 
-function technicianTriggerUserId(trigger = null) {
+function technicianTriggerLookupUserId(trigger = null) {
   return text(first(
     trigger?.dataset?.technicianUserId,
-    trigger?.dataset?.userId,
     trigger?.querySelector?.("[data-technician-user-id]")?.dataset?.technicianUserId
   ), "");
+}
+
+function technicianTriggerUserId(trigger = null) {
+  const lookupUserId = technicianTriggerLookupUserId(trigger);
+  if (lookupUserId) return lookupUserId;
+  const avatar = technicianTriggerAvatar(trigger);
+  if (avatar?.hasAttribute("data-avatar-user-id")) {
+    return text(avatar.dataset.avatarUserId, "");
+  }
+  return text(trigger?.dataset?.userId, "");
+}
+
+function technicianTriggerUsername(trigger = null) {
+  const avatar = technicianTriggerAvatar(trigger);
+  return text(avatar?.dataset?.avatarUsername, "");
 }
 
 function ticketIdFromTrigger(trigger = null) {
@@ -973,9 +1051,11 @@ async function loadProfile(trigger = null) {
   if (!id) return false;
 
   const seed = {
+    lookupUserId: technicianTriggerLookupUserId(trigger),
     userId: technicianTriggerUserId(trigger),
     name: technicianTriggerName(trigger),
     email: technicianTriggerEmail(trigger),
+    username: technicianTriggerUsername(trigger),
     avatar: safeAvatarUrl(trigger?.querySelector?.("img")?.src || ""),
   };
 
@@ -993,10 +1073,7 @@ async function loadProfile(trigger = null) {
         cache: true,
       });
       if (sourceTicket) {
-        snapshot = {
-          ...seed,
-          ...technicianFromTicket(sourceTicket),
-        };
+        snapshot = mergeTicketTechnician(seed, sourceTicket);
       }
     } catch {
       /* El perfil puede continuar con la identidad segura del trigger. */
@@ -1005,10 +1082,10 @@ async function loadProfile(trigger = null) {
     if (sequence !== requestSeq) return false;
 
     let user = null;
-    if (snapshot.userId) {
+    if (snapshot.lookupUserId) {
       try {
         user = await (await usersApi()).getUsuarioByIdRequest(
-          snapshot.userId,
+          snapshot.lookupUserId,
           { dedupe: true }
         );
       } catch {

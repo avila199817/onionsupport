@@ -432,6 +432,7 @@ function getClientEmail(item = {}) {
 const getClientEmailLabel = (item = {}) => getClientEmail(item) || "Sin email";
 
 function getClientAvatar(item = {}) {
+  if (item.hasAvatar === false) return "";
   const paths = [
     "clienteAvatar", "clientAvatar", "avatar", "avatarUrl", "logo", "logoUrl",
     "photo", "photoUrl", "picture", "pictureUrl", "cliente.avatar", "cliente.avatarUrl",

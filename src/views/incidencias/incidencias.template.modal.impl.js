@@ -29,6 +29,7 @@
 ========================================================= */
 
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
+import { persistedCommentId, requesterIdentity, technicianIdentity } from "../../features/incidencias-comment-identity/index.js";
 import {
   INCIDENCIA_STATUS_OPTIONS,
   INCIDENCIA_PRIORITY_OPTIONS,
@@ -2024,6 +2025,7 @@ function normalizeTimelineEntry(
         ),
         `entry_${index}`
       ),
+    persistedCommentId: persistedCommentId(raw),
 
     kind:
       isComment
@@ -2694,6 +2696,7 @@ function renderAvatar(
     getClientAvatar(detail);
 
   const presentation = resolveAvatarPresentation({
+    ...requesterIdentity(detail),
     displayName: name,
     name,
     email,
@@ -2718,6 +2721,8 @@ function renderAvatar(
         data-has-avatar="${avatarUrl ? "true" : "false"}"
         data-fallback="${avatarUrl ? "false" : "true"}"
         data-avatar-tone="${attr(String(tone))}"
+        data-avatar-identity="${attr(presentation.fingerprint)}"
+        data-avatar-initials="${attr(presentation.initials)}"
       >
         ${
           avatarUrl
@@ -2862,6 +2867,7 @@ function renderTechnicianValue(
     contactEmailHref(email);
 
   const presentation = resolveAvatarPresentation({
+    ...technicianIdentity(detail),
     displayName: name,
     name,
     email,
@@ -2887,6 +2893,8 @@ function renderTechnicianValue(
         data-has-avatar="${avatarUrl ? "true" : "false"}"
         data-fallback="${avatarUrl ? "false" : "true"}"
         data-avatar-tone="${attr(String(tone))}"
+        data-avatar-identity="${attr(presentation.fingerprint)}"
+        data-avatar-initials="${attr(presentation.initials)}"
       >
         ${
           avatarUrl
@@ -4233,6 +4241,7 @@ function renderTimeline(
                     : ""
                 )}"
                 data-timeline-tone="${attr(tone)}"
+                ${isComment && entry.persistedCommentId ? `data-comment-id="${attr(entry.persistedCommentId)}"` : ""}
               >
                 <div class="incidencias-timeline-accent"></div>
 

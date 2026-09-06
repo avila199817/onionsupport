@@ -1,6 +1,6 @@
 # Onion Support · plan de evolución gradual
 
-> Documento único de planificación del frontend. Actualizado el 2026-09-04 (UTC).
+> Documento único de planificación del frontend. Actualizado el 2026-09-06 (UTC).
 > El estado implementado se contrasta con [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) y
 > el código de `main`; este archivo describe el siguiente trabajo, no funcionalidades
 > ya entregadas.
@@ -29,8 +29,8 @@ la estabilidad de lo ya publicado.
 
 ## Estado del corte
 
-La versión funcional desplegada y verificada es
-[5d82b0d0](https://github.com/avila199817/onionsupport/commit/5d82b0d0f5757868b52be156cbf8d38a28a7e276).
+La base funcional desplegada y verificada al iniciar el bloque de identidad estable es
+[b3662615](https://github.com/avila199817/onionsupport/commit/b3662615743e542c1467102a6fc706d2b310a3d6), con evidencias de publicación en [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md).
 
 | Área | Estado | Fuente de verdad |
 |---|---|---|
@@ -49,11 +49,30 @@ y la corrección del consentimiento mediante [PR #490](https://github.com/avila1
 La [PR #482](https://github.com/avila199817/onionsupport/pull/482) se cerró como superada:
 no debe reabrirse para recuperar una segunda autoridad de avatar.
 
+## Bloque actual y siguiente cierre
+
+El bloque de identidad establece userId como semilla visual estable y una selección
+canónica del avatar del perfil en backend. Se migran consumidores, proyecciones y
+cachés de contenido; se retiran selectores duplicados y el puente de avatar técnico. El borrado de una foto actual
+debe prevalecer frente a alias o snapshots antiguos. Los contratos y fixtures comprueban
+cambio de correo, perfil sin foto, IDs de cliente/usuario distintos y aislamiento
+entre identidades. No completa por sí solo F1.
+
+Tras verificar esta release, el siguiente bloque acotado de código es retirar las
+fachadas `clientes.index.legacy.js`, `clientes.template.legacy.js` y
+`clientes.api.legacy.js`: la vista debe abrir y desmontar directamente el controlador
+canónico de alta, conservar validaciones y refrescar el listado tras crear. La revisión
+debe confirmar todos los consumidores y reemplazar los guards que exigen esas fachadas,
+con una prueba de apertura, cancelación, creación y reapertura del modal.
+
+En paralelo al plan, permanecen pendientes la prueba vertical autenticada y el diagnóstico
+controlado del TBT móvil; no se certifican con un health check ni con Lighthouse en verde.
+
 ## Fases
 
 ### F1 · Recorrido vertical de identidad y soporte
 
-**Estado:** siguiente entrega. **Responsables:** frontend y backend.
+**Estado:** consolidación de identidad en curso; recorrido autenticado completo pendiente. **Responsables:** frontend y backend.
 **Dependencia:** cuentas de prueba, fixtures controlados y un entorno donde puedan
 revisarse request IDs sin exponer datos privados.
 

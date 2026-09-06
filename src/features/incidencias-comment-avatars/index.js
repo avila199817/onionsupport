@@ -24,7 +24,9 @@ import {
 
 import {
   buildCommentIdentityIndex,
+  commentAvatarIdentity,
   requesterIdentity,
+  resolveCommentIdentity,
   resolveCommentProfile,
   technicianIdentity,
 } from "../incidencias-comment-identity/index.js";
@@ -168,30 +170,24 @@ function removeCommentAvatar(meta = null) {
   return Boolean(current);
 }
 
-function applyStableAvatarIdentityDataset(avatar = null, profile = null, author = "") {
+function applyStableAvatarIdentityDataset(avatar = null, presentation = {}) {
   if (!avatar) return;
 
-  const name = cleanText(profile?.name || author || "");
-  const email = cleanText(profile?.email || "").toLowerCase();
-  const userId = cleanText(profile?.userId || profile?.id || "");
-  const username = cleanText(profile?.username || profile?.userName || "");
+  const name = presentation.name || "";
+  const email = presentation.email || "";
+  const userId = presentation.userId || "";
+  const username = presentation.username || "";
 
-  if (name) avatar.dataset.avatarName = name;
-  if (email) avatar.dataset.avatarEmail = email;
-  if (userId) avatar.dataset.avatarUserId = userId;
-  if (username) avatar.dataset.avatarUsername = username;
+  if (avatar.dataset.avatarName !== name) avatar.dataset.avatarName = name;
+  if (avatar.dataset.avatarEmail !== email) avatar.dataset.avatarEmail = email;
+  if (avatar.dataset.avatarUserId !== userId) avatar.dataset.avatarUserId = userId;
+  if (avatar.dataset.avatarUsername !== username) avatar.dataset.avatarUsername = username;
 }
 
-function createCommentAvatar(meta = null, profile = null, author = "") {
+function createCommentAvatar(meta = null, profile = null, author = "", identity = null) {
   if (!meta || !profile?.src || !author) return null;
 
-  const presentation = resolveAvatarPresentation({
-    displayName: author,
-    name: author,
-    email: profile.email,
-    userId: profile.userId,
-    username: profile.username,
-  });
+  const presentation = resolveAvatarPresentation(commentAvatarIdentity(author, identity, profile));
 
   const avatar = document.createElement("span");
   avatar.className = COMMENT_AVATAR_CLASS;
@@ -205,7 +201,7 @@ function createCommentAvatar(meta = null, profile = null, author = "") {
   avatar.dataset.avatarIdentity = presentation.fingerprint;
   avatar.dataset.avatarInitials = presentation.initials;
   avatar.dataset.hasAvatar = "true";
-  applyStableAvatarIdentityDataset(avatar, profile, author);
+  applyStableAvatarIdentityDataset(avatar, presentation);
 
   const image = document.createElement("img");
   image.src = profile.src;
@@ -243,20 +239,16 @@ function syncCommentMeta(meta = null, profiles = [], identityIndex = new Map()) 
     return false;
   }
 
-  const profile = resolveCommentProfile(author, identityIndex, profiles);
+  const commentId = cleanText(meta.closest?.("[data-comment-id]")?.dataset?.commentId || "");
+  const identity = resolveCommentIdentity(author, identityIndex, commentId);
+  const profile = resolveCommentProfile(author, identityIndex, profiles, commentId);
 
   if (!profile?.src) {
     removeCommentAvatar(meta);
     return false;
   }
 
-  const presentation = resolveAvatarPresentation({
-    displayName: author,
-    name: author,
-    email: profile.email,
-    userId: profile.userId,
-    username: profile.username,
-  });
+  const presentation = resolveAvatarPresentation(commentAvatarIdentity(author, identity, profile));
 
   const current = meta.querySelector?.(`.${COMMENT_AVATAR_CLASS}`) || null;
   const currentImage = current?.querySelector?.("[data-avatar-image='true']") || null;
@@ -268,13 +260,13 @@ function syncCommentMeta(meta = null, profiles = [], identityIndex = new Map()) 
     current.dataset.avatarIdentity === presentation.fingerprint &&
     meta.dataset.commentAvatarAuthor === author
   ) {
-    applyStableAvatarIdentityDataset(current, profile, author);
+    applyStableAvatarIdentityDataset(current, presentation);
     meta.classList.add(COMMENT_AVATAR_META_CLASS);
     return true;
   }
 
   removeCommentAvatar(meta);
-  return Boolean(createCommentAvatar(meta, profile, author));
+  return Boolean(createCommentAvatar(meta, profile, author, identity));
 }
 
 function getModalIdentityState(modal = null) {

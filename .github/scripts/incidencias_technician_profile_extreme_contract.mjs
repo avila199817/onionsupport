@@ -6,12 +6,7 @@ import fs from "node:fs";
 import {
   resolveAvatarPresentation,
 } from "../../src/features/avatar-system/identity.js";
-import {
-  SYNTHETIC_TECHNICIAN_IMAGE_PATH,
-  avatarIdentityMatchScore,
-  isSyntheticTechnicianSource,
-  sameAvatarIdentity,
-} from "../../src/features/incidencias-technician-avatar-bridge/index.js";
+
 
 /*
   No importamos el feature del perfil directamente desde Node porque su entrypoint
@@ -30,13 +25,6 @@ const publicHome = fs.readFileSync(
   "src/views/public/home/template.js",
   "utf8"
 );
-const bridge = fs.readFileSync(
-  "src/features/incidencias-technician-avatar-bridge/index.js",
-  "utf8"
-);
-const bridgeExecutable = bridge
-  .replace(/\/\*[\s\S]*?\*\//g, "")
-  .replace(/^\s*\/\/.*$/gm, "");
 const privateRuntime = fs.readFileSync(
   "src/features/private-runtime-ui/index.js",
   "utf8"
@@ -176,14 +164,6 @@ assert.doesNotMatch(source, /metaCard\("Identificador de usuario"/);
    AVATAR GLOBAL + REGRESIÓN DEL WRAPPER ANIDADO
 ========================================================= */
 
-assert.equal(
-  SYNTHETIC_TECHNICIAN_IMAGE_PATH,
-  "/src/media/img/Cristian_Avila_224.webp"
-);
-assert.equal(
-  isSyntheticTechnicianSource("/src/media/img/Cristian_Avila_224.webp"),
-  true
-);
 assert.match(publicHome, /Cristian_Avila_224\.webp/);
 assert.doesNotMatch(source, /Cristian_Avila_224\.webp/);
 assert.equal(fs.existsSync("src/media/img/Cristian_Avila_224.webp"), true);
@@ -220,51 +200,9 @@ assert.equal(cristian.color, "#498205");
 assert.equal(poisonedWrapper.tone, 19);
 assert.equal(poisonedWrapper.color, "#69797E");
 
-assert.match(bridge, /incidencias-technician-avatar-bridge\.v2-nested-host-boundary/);
-assert.match(bridge, /wrapper\.setAttribute\("data-avatar-system", "off"\)/);
-assert.match(bridge, /wrapper\.setAttribute\("data-avatar-managed", "false"\)/);
-assert.match(bridge, /nestedWrapperOptOut:\s*true/);
-assert.match(bridge, /canonicalImageReuse:\s*true/);
-assert.match(bridge, /syntheticPhotoAuthority:\s*false/);
-assert.match(bridge, /noLocalInitials:\s*true/);
-assert.match(bridge, /noLocalTone:\s*true/);
-assert.match(bridge, /noLocalColor:\s*true/);
-
-assert.equal(
-  avatarIdentityMatchScore(
-    { userId: "user-a", email: "same@example.com" },
-    { userId: "user-b", email: "same@example.com" }
-  ),
-  -1
-);
-assert.equal(
-  sameAvatarIdentity(
-    { email: "cristian@onionsupport.com" },
-    { email: "cristian@onionsupport.com", name: "cristian avila luque" }
-  ),
-  true
-);
-
-for (const forbidden of [
-  /(^|[^A-Za-z0-9_$])fetch\s*\(/m,
-  /\bXMLHttpRequest\b/,
-  /\blocalStorage\b/,
-  /\bsessionStorage\b/,
-  /\bindexedDB\b/,
-  /\bMath\.random\s*\(/,
-  /#[0-9a-fA-F]{3,8}\b/,
-]) {
-  assert.doesNotMatch(
-    bridgeExecutable,
-    forbidden,
-    `El bridge no puede introducir autoridad paralela: ${forbidden}`
-  );
-}
-
-assert.match(
-  privateRuntime,
-  /await initModule\(AvatarSystemUI, payload\);[\s\S]*await initModule\(IncidenciasTechnicianAvatarBridgeUI, payload\);/
-);
+assert.equal(fs.existsSync("src/features/incidencias-technician-avatar-bridge/index.js"), false);
+assert.doesNotMatch(privateRuntime, /technician-avatar-bridge|TechnicianAvatarBridge/);
+assert.match(privateRuntime, /await initModule\(AvatarSystemUI, payload\);/);
 
 /* =========================================================
    VISUAL AUTHORITY · EXISTING TOKENS ONLY

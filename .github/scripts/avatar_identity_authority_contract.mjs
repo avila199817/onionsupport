@@ -55,7 +55,7 @@ function includesAll(source, values, label) {
 
 assert.equal(
   AVATAR_IDENTITY_VERSION,
-  "avatar-identity.v4-stable-user-tone"
+  "avatar-identity.v5-user-id-first"
 );
 assert.equal(AVATAR_TONE_COUNT, 20);
 assert.equal(AVATAR_COLOR_SPACE, 20);
@@ -86,6 +86,7 @@ const incidenciaSnapshot = resolveAvatarPresentation({
 });
 
 const facturaSnapshot = resolveAvatarPresentation({
+  userId: "ON-20260901024205",
   clienteEmail: "avila199817@gmail.com",
   nombre: "Cristian Avila Luque",
 });
@@ -99,12 +100,14 @@ const nestedSnapshot = resolveAvatarPresentation({
 });
 
 const homeSidebarSnapshot = resolveAvatarPresentation({
+  userId: "ON-20260901024205",
   displayName: "Cristian Ávila Luque",
   email: "avila199817@gmail.com",
   username: "avila199817",
 });
 
 const activitySnapshot = resolveAvatarPresentation({
+  userId: "ON-20260901024205",
   name: "Cristian Avila Luque",
   email: "avila199817@gmail.com",
 });
@@ -119,7 +122,7 @@ for (const presentation of [
   assert.equal(
     presentation.seed,
     canonical.seed,
-    "el mismo email debe resolver la misma seed aunque cambie el nombre visible"
+    "el mismo userId debe resolver la misma seed aunque cambien los aliases visibles"
   );
   assert.equal(presentation.tone, canonical.tone);
   assert.equal(presentation.color, canonical.color);
@@ -131,11 +134,28 @@ for (const presentation of [
   );
 }
 
-assert.equal(canonical.seed, "email:avila199817@gmail.com");
+assert.equal(canonical.seed, "user:on-20260901024205");
 assert.equal(canonical.initials, "CL");
-assert.equal(canonical.tone, 18);
-assert.equal(canonical.colorKey, "rust");
-assert.equal(canonical.color, "#8E562E");
+assert.equal(canonical.tone, 13);
+assert.equal(canonical.colorKey, "violet");
+assert.equal(canonical.color, "#8764B8");
+
+for (const aliases of [
+  { email: "new-address@example.test", username: "new-alias" },
+  { email: "", username: "" },
+]) {
+  const updated = resolveAvatarPresentation({ userId: canonical.userId, name: canonical.name, ...aliases });
+  assert.equal(updated.seed, canonical.seed, "mutable aliases cannot replace a known user identity");
+  assert.equal(updated.fingerprint, canonical.fingerprint);
+  assert.equal(updated.tone, canonical.tone);
+  assert.equal(updated.color, canonical.color);
+}
+const reassignedEmail = resolveAvatarPresentation({ userId: "another-user", email: canonical.email });
+assert.notEqual(reassignedEmail.seed, canonical.seed, "the same email does not merge distinct IDs");
+assert.notEqual(reassignedEmail.fingerprint, canonical.fingerprint);
+const historicalAlias = resolveAvatarPresentation({ email: canonical.email, name: canonical.name });
+assert.equal(historicalAlias.seed, `email:${canonical.email}`, "unlinked history retains the deterministic email fallback");
+assert.notEqual(historicalAlias.fingerprint, canonical.fingerprint, "missing user IDs must not be invented from an email");
 
 /* Regression exacta del caso observado en producción. */
 const carlosPlain = resolveAvatarPresentation({
@@ -144,6 +164,7 @@ const carlosPlain = resolveAvatarPresentation({
   displayName: "Carlos Yepes Garcia",
 });
 const carlosAccent = resolveAvatarPresentation({
+  userId: "ON-CARLOS-FIXTURE",
   clienteEmail: "CARLOSGARCIAYEPES16@GMAIL.COM",
   nombre: "Carlos Yepes García",
 });
@@ -153,14 +174,14 @@ assert.notEqual(
   microsoftPersonaHash("Carlos Yepes García") % AVATAR_TONE_COUNT,
   "el displayName crudo reproduce el drift histórico de acento"
 );
-assert.equal(carlosPlain.seed, "email:carlosgarciayepes16@gmail.com");
+assert.equal(carlosPlain.seed, "user:on-carlos-fixture");
 assert.equal(carlosAccent.seed, carlosPlain.seed);
 assert.equal(carlosAccent.fingerprint, carlosPlain.fingerprint);
 assert.equal(carlosAccent.tone, carlosPlain.tone);
 assert.equal(carlosAccent.color, carlosPlain.color);
-assert.equal(carlosPlain.tone, 2);
-assert.equal(carlosPlain.colorKey, "darkBlue");
-assert.equal(carlosPlain.color, "#004E8C");
+assert.equal(carlosPlain.tone, 13);
+assert.equal(carlosPlain.colorKey, "violet");
+assert.equal(carlosPlain.color, "#8764B8");
 assert.equal(carlosPlain.initials, "CG");
 assert.equal(carlosAccent.initials, "CG");
 

@@ -55,8 +55,6 @@ jobs:
                   raise SystemExit(f"{path}: expected {expected} regex matches, found {count}: {pattern}")
               write(path, updated)
 
-          Path("validation-error.txt").unlink(missing_ok=True)
-
           index_path = "src/views/clientes/index.js"
           replace_regex(
               index_path,
@@ -224,10 +222,6 @@ jobs:
                   raise SystemExit(f"expected legacy facade before removal: {legacy}")
               legacy.unlink()
 
-          workflow = Path(".github/workflows/codex-clientes-legacy-cleanup.yml")
-          if workflow.exists():
-              workflow.unlink()
-
           checked = [
               Path("src/views/clientes/index.js"),
               Path("src/views/clientes/clientes.template.js"),
@@ -246,33 +240,19 @@ jobs:
               raise SystemExit("retired facade references remain:\n" + "\n".join(leftovers))
           PY
 
+      - name: Retire helper files from candidate index
+        shell: bash
+        run: |
+          git rm -f .github/workflows/codex-clientes-legacy-cleanup.yml
+          git rm -f validation-error.txt || true
+
       - name: Install dependencies
         run: npm ci
 
       - name: Validate source contracts
-        id: validate
-        continue-on-error: true
-        shell: bash
-        run: |
-          set +e
-          npm run validate:source > /tmp/clientes-validate.log 2>&1
-          code=$?
-          cat /tmp/clientes-validate.log
-          exit "$code"
-
-      - name: Capture validation diagnostic
-        if: steps.validate.outcome != 'success'
-        shell: bash
-        run: |
-          tail -n 250 /tmp/clientes-validate.log > validation-error.txt
-          git config user.name "Onion Support"
-          git config user.email "cristian@onionsupport.com"
-          git add validation-error.txt
-          git commit -m "chore: capture Clientes validation diagnostic"
-          git push origin HEAD:codex/clientes-remove-legacy-facades
+        run: npm run validate:source
 
       - name: Commit cleanup
-        if: steps.validate.outcome == 'success'
         shell: bash
         run: |
           git config user.name "Onion Support"
@@ -282,7 +262,3 @@ jobs:
           git diff --cached --quiet && { echo "No changes generated"; exit 1; }
           git commit -m "refactor(clientes): retirar fachadas legacy finales"
           git push origin HEAD:codex/clientes-remove-legacy-facades
-
-      - name: Enforce validation
-        if: steps.validate.outcome != 'success'
-        run: exit 1

@@ -12,7 +12,7 @@ Traceback (most recent call last):
   File "/usr/lib/python3.12/pathlib.py", line 1015, in open
     return io.open(self, mode, buffering, encoding, errors, newline)
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-FileNotFoundError: [Errno 2] No such file or directory: '/home/runner/work/onionsupport/onionsupport/.github/workflows/codex-clientes-legacy-cleanup.yml'
+FileNotFoundError: [Errno 2] No such file or directory: '/home/runner/work/onionsupport/onionsupport/src/views/clientes/clientes.api.legacy.js'
 
 The above exception was the direct cause of the following exception:
 
@@ -25,4 +25,4 @@ Traceback (most recent call last):
            ^^^^^^^^^^^^^^^^^^^^^^^^^
   File "/home/runner/work/onionsupport/onionsupport/.github/scripts/public_path_hygiene.py", line 49, in read_text_candidate
     raise RuntimeError(f"cannot read tracked file: {error}") from error
-RuntimeError: cannot read tracked file: [Errno 2] No such file or directory: '/home/runner/work/onionsupport/onionsupport/.github/workflows/codex-clientes-legacy-cleanup.yml'
+RuntimeError: cannot read tracked file: [Errno 2] No such file or directory: '/home/runner/work/onionsupport/onionsupport/src/views/clientes/clientes.api.legacy.js'

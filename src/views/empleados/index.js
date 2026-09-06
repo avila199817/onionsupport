@@ -1,142 +1,396 @@
 /* =========================================================
-   Onion Support - Empleados Placeholder
+   Onion Support - Empleados
    Archivo: /src/views/empleados/index.js
 
-   Objetivo:
-   - Reservar el dominio Empleados dentro de la navegación privada.
-   - Separar desde el inicio equipo interno, usuarios y clientes.
-   - No consumir API, Store, Auth ni datos hasta definir el contrato.
+   USUARIOS VISUAL PARITY · CURRENT EMPLOYEE · V4
+   - Reutiliza template, modelo y Detail Modal canónicos de Usuarios.
+   - El equipo interno actual es el usuario admin autenticado.
 ========================================================= */
 
 "use strict";
 
-export const EMPLEADOS_VIEW_VERSION =
-  "empleados.placeholder.v3-id-card-final";
-export const EMPLEADOS_VIEW_NAME =
-  "EmpleadosView";
+import { AppCore } from "../../core/index.js";
+import { renderUsuariosTableTemplate, USUARIOS_ACTIONS } from "../usuarios/usuarios.template.js";
+import UsuariosDetailModal from "../usuarios/usuarios.template.modal.js";
+import { loadUsuarioDetail, normalizeUsuarioModel } from "../usuarios/usuarios.api.js";
 
-const SVG_NS =
-  "http://www.w3.org/2000/svg";
-const EMPLOYEE_ICON_PATH =
-  "M4.5 5.25h15a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2v-9.5a2 2 0 0 1 2-2Z M8.25 12.25a2.1 2.1 0 1 0 0-4.2 2.1 2.1 0 0 0 0 4.2Z M5.25 16.25c.35-1.75 1.55-2.8 3-2.8s2.65 1.05 3 2.8 M14 8.5h3.75 M14 11.75h3.75 M14 15h2.5";
+export const EMPLEADOS_VIEW_VERSION = "empleados.view.v4.usuarios-parity-current-employee";
+export const EMPLEADOS_VIEW_NAME = "EmpleadosView";
+export const EMPLEADOS_CANONICAL_PATH = "/empleados";
 
-function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+const ACTIONS = USUARIOS_ACTIONS;
+const SEARCH_DEBOUNCE_MS = 160;
+
+const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
+const isObject = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
+const safeObject = (value, fallback = {}) => (isObject(value) ? value : fallback);
+const cleanText = (value = "", fallback = "") => {
+  const output = String(value ?? "").replace(/[\r\n\t]/g, " ").replace(/\s+/g, " ").trim();
+  return output || fallback;
+};
+const first = (...values) => {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+    if (typeof value === "string" && !value.trim()) continue;
+    if (Array.isArray(value) && !value.length) continue;
+    if (isObject(value) && !Object.keys(value).length) continue;
+    return value;
+  }
+  return null;
+};
+const normalizeKey = (value = "") => cleanText(value, "")
+  .toLowerCase()
+  .normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "")
+  .replace(/[\s-]+/g, "_")
+  .replace(/[^\w:.]/g, "")
+  .replace(/^_+|_+$/g, "");
+
+function getAppState() {
+  try {
+    return typeof AppCore?.runtimeState?.read === "function"
+      ? safeObject(AppCore.runtimeState.read(), {})
+      : {};
+  } catch {
+    return {};
+  }
 }
 
-function isHost(value = null) {
-  return Boolean(
-    isBrowser() &&
-    value &&
-    value.nodeType === 1 &&
-    typeof value.replaceChildren === "function"
-  );
+function currentUser(context = {}) {
+  const state = getAppState();
+  return safeObject(first(
+    context.user,
+    context.currentUser,
+    state.user,
+    state.currentUser,
+    state.auth?.user,
+    state.session?.user,
+    {}
+  ), {});
 }
 
-function element(
-  tag = "div",
-  className = "",
-  text = ""
-) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text) node.textContent = text;
-  return node;
+function currentRole(context = {}, user = currentUser(context)) {
+  const state = getAppState();
+  const raw = first(context.role, context.rol, user.role, user.rol, state.role, state.rol, state.roles, "user");
+  try {
+    if (typeof AppCore?.normalizeRole === "function") return cleanText(AppCore.normalizeRole(raw), "user");
+  } catch {
+    // fallback below
+  }
+  return normalizeKey(Array.isArray(raw) ? raw[0] : raw) === "admin" ? "admin" : "user";
 }
 
-function createEmployeeIcon() {
-  const shell = element(
-    "span",
-    "empleados-placeholder-icon"
-  );
-  shell.setAttribute("aria-hidden", "true");
+const employeeId = (item = {}) => cleanText(first(item.userId, item.usuarioId, item.id, item.uid, item.email, ""), "");
+const isAdmin = (context = {}, user = currentUser(context)) => context.admin === true || currentRole(context, user) === "admin";
 
-  const svg = document.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("fill", "none");
-  svg.setAttribute("stroke", "currentColor");
-  svg.setAttribute("stroke-width", "1.8");
-  svg.setAttribute("stroke-linecap", "round");
-  svg.setAttribute("stroke-linejoin", "round");
-  svg.setAttribute("focusable", "false");
-
-  const path = document.createElementNS(SVG_NS, "path");
-  path.setAttribute("d", EMPLOYEE_ICON_PATH);
-  svg.append(path);
-  shell.append(svg);
-
-  return shell;
+function statusOf(item = {}) {
+  const status = normalizeKey(first(item.status, item.estado, item.state, ""));
+  if (["pending", "pendiente", "invited", "invitado", "new", "unverified", "awaiting_activation"].includes(status)) return "pending";
+  if (["blocked", "bloqueado", "inactive", "inactivo", "disabled", "archived", "deleted", "suspended", "banned", "revoked"].includes(status)) return "blocked";
+  if (item.blocked === true || item.disabled === true || item.active === false || item.enabled === false || item.isActive === false) return "blocked";
+  return "active";
 }
 
-export function EmpleadosView(
-  host = null
-) {
-  if (!isHost(host)) return null;
+function searchBlob(item = {}) {
+  return [
+    item.userId, item.usuarioId, item.id, item.uid,
+    item.fullName, item.displayName, item.name, item.nombre, item.username,
+    item.email, item.emailLower, item.phone, item.telefono,
+    item.city, item.ciudad, item.direccion?.ciudad, item.address?.city,
+  ].map(normalizeKey).filter(Boolean).join(" ");
+}
 
-  const root = element(
-    "section",
-    "empleados-view"
-  );
+function replaceCopy(value = "") {
+  return String(value ?? "")
+    .replace(/\bUsuarios\b/g, "Empleados")
+    .replace(/\busuarios\b/g, "empleados")
+    .replace(/\bUsuario\b/g, "Empleado")
+    .replace(/\busuario\b/g, "empleado");
+}
+
+function applyEmployeeCopy(root) {
+  if (!root?.querySelectorAll) return;
+  const walker = document.createTreeWalker(root, window.NodeFilter?.SHOW_TEXT || 4);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const next = replaceCopy(node.nodeValue);
+    if (next !== node.nodeValue) node.nodeValue = next;
+  }
+  for (const element of root.querySelectorAll("[aria-label], [title], [placeholder]")) {
+    for (const attr of ["aria-label", "title", "placeholder"]) {
+      if (!element.hasAttribute(attr)) continue;
+      element.setAttribute(attr, replaceCopy(element.getAttribute(attr)));
+    }
+  }
+  const title = root.querySelector(".usuarios-page-title");
+  const subtitle = root.querySelector(".usuarios-page-subtitle");
+  const history = root.querySelector(".usuarios-history-title");
+  const search = root.querySelector(".usuarios-search-input");
+  if (title) title.textContent = "Empleados";
+  if (subtitle) subtitle.textContent = "Gestiona el equipo interno con la misma vista operativa de Usuarios.";
+  if (history) history.textContent = "Historial de empleados";
+  if (search) search.placeholder = "Buscar empleado, email, ciudad...";
+  root.querySelector(`[data-usuarios-action="${ACTIONS.CREATE}"]`)?.remove();
+  root.dataset.empleadosScope = "true";
   root.dataset.view = "empleados";
-  root.setAttribute(
-    "aria-labelledby",
-    "empleados-view-title"
-  );
+}
 
-  const card = element(
-    "article",
-    "empleados-placeholder"
-  );
+function errorText(error) {
+  return cleanText(first(
+    error?.message,
+    error?.data?.message,
+    error?.payload?.message,
+    error?.response?.message,
+    error?.code,
+    "No se pudo actualizar el empleado."
+  ), "No se pudo actualizar el empleado.");
+}
 
-  const badge = element(
-    "span",
-    "empleados-placeholder-badge",
-    "Módulo reservado"
-  );
+function showToast(message, type = "info") {
+  const text = cleanText(message, "");
+  if (!text) return false;
+  for (const toast of [AppCore?.toast, AppCore?.ui?.toast, AppCore?.Toast]) {
+    try {
+      if (typeof toast?.[type] === "function") return Boolean(toast[type](text) ?? true);
+      if (typeof toast?.show === "function") return Boolean(toast.show(text, type) ?? true);
+    } catch {
+      // noop
+    }
+  }
+  return false;
+}
 
-  const title = element(
-    "h1",
-    "empleados-placeholder-title",
-    "Empleados"
-  );
-  title.id = "empleados-view-title";
+function csvCell(value = "") {
+  let text = String(value ?? "").replace(/[\r\n\t]+/g, " ").trim();
+  if (/^[=+\-@]/.test(text)) text = `'${text}`;
+  return `"${text.replace(/"/g, '""')}"`;
+}
 
-  const description = element(
-    "p",
-    "empleados-placeholder-description",
-    "Aquí vivirá la gestión del equipo interno, separada de Usuarios y Clientes."
-  );
+function exportEmployee(item = {}) {
+  if (!isBrowser() || !employeeId(item)) return false;
+  const row = [
+    employeeId(item),
+    first(item.fullName, item.displayName, item.name, item.nombre, item.username, ""),
+    first(item.email, item.emailLower, item.mail, ""),
+    first(item.phone, item.telefono, item.mobile, ""),
+    first(item.city, item.ciudad, item.direccion?.ciudad, item.address?.city, ""),
+    first(item.role, item.rol, "admin"),
+    first(item.status, item.estado, item.state, item.active === false ? "inactive" : "active"),
+  ];
+  const csv = [
+    ["ID", "Nombre", "Email", "Teléfono", "Ciudad", "Rol", "Estado"],
+    row,
+  ].map((cells) => cells.map(csvCell).join(",")).join("\r\n");
 
-  const note = element(
-    "p",
-    "empleados-placeholder-note",
-    "La ruta ya está preparada. Todavía no carga datos ni conecta con ninguna API."
-  );
+  try {
+    const href = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = href;
+    anchor.download = `empleados-${new Date().toISOString().slice(0, 10)}.csv`;
+    anchor.hidden = true;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    queueMicrotask(() => URL.revokeObjectURL(href));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-  card.append(
-    createEmployeeIcon(),
-    badge,
-    title,
-    description,
-    note
-  );
-  root.append(card);
-  host.replaceChildren(root);
+export function EmpleadosView(host = null, context = {}) {
+  if (!isBrowser() || !host || host.nodeType !== 1 || typeof host.replaceChildren !== "function") return null;
 
+  const authUser = currentUser(context);
+  const admin = isAdmin(context, authUser);
+  let employee = Object.keys(authUser).length ? normalizeUsuarioModel({ ...authUser }) : null;
+  let loading = Boolean(admin && employeeId(employee || authUser));
+  let error = "";
+  let search = "";
+  let filter = "all";
+  let lastSyncAt = 0;
+  let openingUserId = "";
+  let exporting = false;
   let destroyed = false;
+  let loadEpoch = 0;
+  let detailEpoch = 0;
+  let searchTimer = null;
+
+  const visibleItems = () => {
+    if (!employee) return [];
+    const query = normalizeKey(search);
+    const filterOk = filter === "all" || statusOf(employee) === filter;
+    return filterOk && (!query || searchBlob(employee).includes(query)) ? [employee] : [];
+  };
+
+  function render({ focusSearch = false, caret = null, focusFilter = "" } = {}) {
+    if (destroyed) return false;
+    const count = employee ? 1 : 0;
+    const state = {
+      loading, error, search, searchQuery: search, filter, activeFilter: filter,
+      hasMore: false, loadingMore: false, totalKnown: true,
+      totalCount: count, remoteCount: count, lastSyncAt,
+      openingUserId, exporting, creating: false,
+    };
+    const template = document.createElement("template");
+    template.innerHTML = renderUsuariosTableTemplate({
+      items: visibleItems(), state, ...state, admin,
+      role: admin ? "admin" : currentRole(context, authUser),
+      forbidden: !admin, restricted: !admin, accessDenied: !admin,
+      route: EMPLEADOS_CANONICAL_PATH,
+      source: "views.empleados.index",
+      version: EMPLEADOS_VIEW_VERSION,
+    }).trim();
+    applyEmployeeCopy(template.content.firstElementChild);
+    host.replaceChildren(template.content);
+
+    if (focusSearch) {
+      const input = host.querySelector("[data-usuarios-search-input='true']");
+      if (input) {
+        input.focus({ preventScroll: true });
+        const end = String(input.value || "").length;
+        const position = Math.min(Number.isFinite(caret) ? caret : end, end);
+        try { input.setSelectionRange(position, position); } catch { /* noop */ }
+      }
+    }
+    if (focusFilter) {
+      host.querySelector(`[data-usuarios-action="${ACTIONS.FILTER}"][data-filter="${focusFilter}"]`)?.focus?.({ preventScroll: true });
+    }
+    return true;
+  }
+
+  async function refresh({ force = false } = {}) {
+    if (destroyed || !admin) return employee;
+    const source = employee || currentUser(context);
+    const id = employeeId(source);
+    if (!id) {
+      loading = false;
+      error = employee ? "" : "No se pudo resolver el empleado autenticado.";
+      render();
+      return employee;
+    }
+
+    const epoch = ++loadEpoch;
+    loading = true;
+    if (force) error = "";
+    render();
+    try {
+      const detail = await loadUsuarioDetail(id, { force: true, dedupe: true, allowCacheFallback: true });
+      if (destroyed || epoch !== loadEpoch) return employee;
+      if (detail) employee = normalizeUsuarioModel({ ...safeObject(source), ...safeObject(detail) });
+      error = "";
+      lastSyncAt = Date.now();
+      return employee;
+    } catch (requestError) {
+      if (!destroyed && epoch === loadEpoch) error = errorText(requestError);
+      return employee;
+    } finally {
+      if (!destroyed && epoch === loadEpoch) {
+        loading = false;
+        render();
+      }
+    }
+  }
+
+  async function openDetail(id = "") {
+    const resolvedId = cleanText(id, "");
+    if (!resolvedId || !employee || destroyed) return null;
+    const epoch = ++detailEpoch;
+    openingUserId = resolvedId;
+    render();
+    try { UsuariosDetailModal?.open?.(normalizeUsuarioModel(employee)); } catch { /* refresh can recover */ }
+    try {
+      const detail = await loadUsuarioDetail(resolvedId, { force: true, dedupe: true, allowCacheFallback: true });
+      if (destroyed || epoch !== detailEpoch) return null;
+      if (detail) {
+        employee = normalizeUsuarioModel({ ...safeObject(employee), ...safeObject(detail) });
+        error = "";
+        lastSyncAt = Date.now();
+        UsuariosDetailModal?.open?.(employee);
+      }
+      return employee;
+    } catch (requestError) {
+      if (!destroyed && epoch === detailEpoch) {
+        error = errorText(requestError);
+        showToast(error, "error");
+      }
+      return null;
+    } finally {
+      if (!destroyed && epoch === detailEpoch) {
+        openingUserId = "";
+        render();
+      }
+    }
+  }
+
+  const onClick = (event) => {
+    const trigger = event?.target?.closest?.("[data-usuarios-action], [data-action]");
+    if (!trigger || !host.contains(trigger) || destroyed) return;
+    const action = cleanText(trigger.dataset.usuariosAction || trigger.dataset.action, "");
+    if (action === ACTIONS.DETAIL || action === "open-user") {
+      void openDetail(trigger.closest?.("[data-user-id]")?.dataset?.userId || "");
+    } else if (action === ACTIONS.REFRESH || action === ACTIONS.RETRY) {
+      void refresh({ force: true });
+    } else if (action === ACTIONS.EXPORT && employee && !exporting) {
+      exporting = true;
+      render();
+      const ok = exportEmployee(employee);
+      exporting = false;
+      render();
+      if (!ok) showToast("No se pudo exportar el empleado.", "error");
+    } else if (action === ACTIONS.FILTER) {
+      filter = normalizeKey(trigger.dataset.filter) || "all";
+      render({ focusFilter: filter });
+    } else if (action === ACTIONS.CLEAR_SEARCH) {
+      search = "";
+      render({ focusSearch: true });
+    }
+  };
+
+  const onInput = (event) => {
+    const input = event?.target?.closest?.("[data-usuarios-search-input='true']");
+    if (!input || !host.contains(input) || destroyed) return;
+    search = String(input.value ?? "");
+    if (searchTimer) clearTimeout(searchTimer);
+    const caret = Number.isFinite(input.selectionStart) ? input.selectionStart : search.length;
+    searchTimer = setTimeout(() => {
+      searchTimer = null;
+      render({ focusSearch: true, caret });
+    }, SEARCH_DEBOUNCE_MS);
+  };
+
+  const onKeyDown = (event) => {
+    const row = event?.target?.closest?.("[data-user-row='true'][data-user-id]");
+    if (!row || !host.contains(row) || !["Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    void openDetail(row.dataset.userId || "");
+  };
+
+  host.addEventListener("click", onClick);
+  host.addEventListener("input", onInput);
+  host.addEventListener("keydown", onKeyDown);
+  render();
+  if (admin) void refresh();
 
   return Object.freeze({
-    root,
+    get root() { return host.querySelector("[data-empleados-scope='true']"); },
+    refresh,
+    openDetail,
+    getEmployee: () => (employee ? { ...employee } : null),
     destroy() {
       if (destroyed) return false;
       destroyed = true;
-      if (root.parentNode) root.remove();
+      loadEpoch += 1;
+      detailEpoch += 1;
+      if (searchTimer) clearTimeout(searchTimer);
+      host.removeEventListener("click", onClick);
+      host.removeEventListener("input", onInput);
+      host.removeEventListener("keydown", onKeyDown);
+      try { UsuariosDetailModal?.close?.(); } catch { /* noop */ }
+      host.replaceChildren();
       return true;
     },
   });
 }
 
+export const page = EmpleadosView;
 export default EmpleadosView;

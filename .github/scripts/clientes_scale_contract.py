@@ -327,9 +327,23 @@ require(
     "template must not slice the server-backed result set",
 )
 require(
+    'width="16" height="16"' in template
+    and 'focusable="false"' in template
+    and 'stroke-width="2"' in template
+    and "Cambiar orden a ${nextSortLabel}" in template,
+    "Clientes icons must have bounded intrinsic geometry and the date sort control must expose its next action",
+)
+require(
     ".clientes-history-subtitle:focus-visible" in style
     and "outline: 2px solid CanvasText" in style,
     "the stable live-status focus target must remain visible in forced colors",
+)
+require(
+    ".clientes-date-inline {\n  color: var(--text-muted);" in style
+    and ".clientes-total-value {\n  color: var(--text-strong);" in style
+    and "font-weight: var(--weight-bold);" in style
+    and ".clientes-total-caption {\n  color: var(--text-dim);\n  font-size: 8.5px;" in style,
+    "Clientes date and amount microtypography must stay aligned with the private invoice-table language",
 )
 
 # ---------------------------------------------------------------------------
@@ -357,6 +371,10 @@ for required in (
         f"global status-system.css must own {required}",
     )
 require(
+    ".usuarios-status-dot\n) {\n  inline-size: 7px;\n  block-size: 7px;\n  flex: 0 0 7px;\n  border-radius: 50%;" in status_style,
+    "global status-system.css must own circular, non-shrinking geometry for direct status dots",
+)
+require(
     "Shell/listado compartido: private-admin-parity.css" in style
     and "Estados y dots: components/status-system.css" in style
     and "Avatares: components/avatar-system.css" in style,
@@ -365,5 +383,6 @@ require(
 
 print(
     "Clientes scale contract OK · one model/API/create authority · shared status paint · "
-    "cursor pages · server query · abort/sequence · continuous scroll · loaded-only CSV/stats"
+    "bounded SVG geometry · micro visual parity · cursor pages · server query · "
+    "abort/sequence · continuous scroll · loaded-only CSV/stats"
 )

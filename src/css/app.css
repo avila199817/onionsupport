@@ -79,6 +79,7 @@
 
 @import url("./compositions/public-system-theme-foundation.css") layer(compositions);
 @import url("./compositions/public-system-theme-home.css") layer(compositions);
+@import url("./compositions/public-home-account-identity.css") layer(compositions);
 @import url("./compositions/public-system-theme-support.css") layer(compositions);
 @import url("./compositions/public-system-theme-auth.css") layer(compositions);
 @import url("./compositions/private-admin-parity.css") layer(compositions);

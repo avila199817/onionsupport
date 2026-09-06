@@ -1,0 +1,28 @@
+
+> onionsupport-frontend@1.0.0 validate:source
+> PUBLIC_SITE_URL=https://onionsupport.com DIRECT_API_URL=https://api.onionsupport.com bash .github/ci/validate_static_release.sh && PUBLIC_SITE_URL=https://onionsupport.com DIRECT_API_URL=https://api.onionsupport.com bash .github/ci/validate_production_contract.sh && bash .github/ci/validate_spa_contracts.sh && node .github/scripts/avatar_identity_authority_contract.mjs && node .github/scripts/facturas_technical_record_guard_contract.mjs && node .github/scripts/facturas_authoritative_stats_contract.mjs && node .github/scripts/facturas_direct_incidencia_modal_contract.mjs && node .github/scripts/incidencias_comment_avatar_contract.mjs && node .github/scripts/incidencias_create_user_selection_contract.mjs && node .github/scripts/incidencias_create_validation_contract.mjs && node .github/scripts/incidencias_create_combobox_contract.mjs && node .github/scripts/incidencias_stats_scope_contract.mjs && node .github/scripts/incidencias_filter_facets_contract.mjs && node .github/scripts/incidencias_datetime_contract.mjs && node .github/scripts/incidencias_detail_attachment_policy_contract.mjs && node .github/scripts/incidencias_attachment_delete_confirm_contract.mjs && node .github/scripts/incidencias_media_gallery_observer_contract.mjs && node .github/scripts/incidencias_detail_window_ui_contract.mjs && node .github/scripts/public_login_layout_contract.mjs && node .github/scripts/public_profile_photo_contract.mjs && node .github/scripts/public_system_theme_contract.mjs && node .github/scripts/public_support_extreme_contract.mjs && node .github/scripts/home_onboarding_pilot_contract.mjs && node .github/scripts/auth_password_policy_contract.mjs && python3 .github/scripts/repo_integrity.py && python3 .github/scripts/artifact_hygiene.py
+
+Bootstrap build paths denied · routes=17
+Paths del release OK.
+Referencias públicas locales OK.
+Traceback (most recent call last):
+  File "/home/runner/work/onionsupport/onionsupport/.github/scripts/public_path_hygiene.py", line 43, in read_text_candidate
+    with path.open("rb") as handle:
+         ^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1015, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/home/runner/work/onionsupport/onionsupport/.github/workflows/codex-clientes-legacy-cleanup.yml'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/runner/work/onionsupport/onionsupport/.github/scripts/public_path_hygiene.py", line 91, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/home/runner/work/onionsupport/onionsupport/.github/scripts/public_path_hygiene.py", line 62, in main
+    data = read_text_candidate(path)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/work/onionsupport/onionsupport/.github/scripts/public_path_hygiene.py", line 49, in read_text_candidate
+    raise RuntimeError(f"cannot read tracked file: {error}") from error
+RuntimeError: cannot read tracked file: [Errno 2] No such file or directory: '/home/runner/work/onionsupport/onionsupport/.github/workflows/codex-clientes-legacy-cleanup.yml'

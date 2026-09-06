@@ -15,8 +15,8 @@
   --cli-table-min: 980px;
   --cli-main-col: 38%;
   --cli-status-col: 12%;
-  --cli-date-col: 13%;
-  --cli-contact-col: 24%;
+  --cli-date-col: 14%;
+  --cli-contact-col: 23%;
   --cli-amount-col: 13%;
 }
 
@@ -122,9 +122,24 @@
 
 .clientes-date-inline {
   color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--font-xs);
   font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.clientes-date-separator {
+  color: var(--text-dim);
+  font-weight: var(--weight-medium);
+}
+
+.clientes-date-time {
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .01em;
 }
 
 .clientes-contact-stack {
@@ -152,10 +167,17 @@
 }
 
 .clientes-contact-link svg {
-  inline-size: 13px;
-  block-size: 13px;
+  inline-size: 14px;
+  block-size: 14px;
   flex: 0 0 auto;
   color: var(--text-dim);
+  stroke-width: 1.8;
+  vector-effect: non-scaling-stroke;
+}
+
+.clientes-contact-link[data-contact-kind="phone"] svg[data-icon="phone"] {
+  color: var(--text-muted);
+  stroke-width: 1.9;
 }
 
 .clientes-contact-link:hover { color: var(--text-strong); }

@@ -15,7 +15,7 @@ export {
 } from "./clientes.template.legacy.js";
 
 export const CLIENTES_TEMPLATE_VERSION =
-  "clientes.template.cursor.v12.private-admin-visual-parity";
+  "clientes.template.cursor.v13.micro-visual-parity";
 export const CLIENTES_TABLE_TEMPLATE_VERSION = CLIENTES_TEMPLATE_VERSION;
 export const CLIENTES_VIEW_TEMPLATE_VERSION = CLIENTES_TEMPLATE_VERSION;
 
@@ -219,7 +219,7 @@ function typeLabel(item = {}) {
 
 function icon(name = "") {
   const common =
-    'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
+    'aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
   const paths = {
     plus: '<path d="M12 5v14M5 12h14"/>',
     export: '<path d="M12 3v12"/><path d="m8 7 4-4 4 4"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/>',
@@ -456,13 +456,14 @@ function renderHeader(vm) {
 }
 
 function renderFilters(vm) {
+  const nextSortLabel = vm.nextSortOrder === "asc" ? "fecha ascendente" : "fecha descendente";
   return `
     <div class="clientes-filters" aria-label="Filtros, orden y búsqueda de clientes">
       <div class="clientes-filter-pills" role="group" aria-label="Filtrar clientes por estado">
         ${FILTERS.map((entry) => `<button type="button" class="clientes-filter-pill${vm.filter === entry.key ? " is-active" : ""}" data-clientes-action="${CLIENTES_ACTIONS.FILTER}" data-action="${CLIENTES_ACTIONS.FILTER}" data-filter="${entry.key}" aria-pressed="${vm.filter === entry.key ? "true" : "false"}"><span>${escapeHtml(entry.label)}</span></button>`).join("")}
       </div>
       <div class="clientes-sort-pills" role="group" aria-label="Ordenar listado">
-        <button type="button" class="clientes-sort-pill is-active" data-clientes-action="${CLIENTES_ACTIONS.SORT_TOGGLE}" data-action="${CLIENTES_ACTIONS.SORT_TOGGLE}" data-next-sort-order="${vm.nextSortOrder}" aria-pressed="true">
+        <button type="button" class="clientes-sort-pill is-active" data-clientes-action="${CLIENTES_ACTIONS.SORT_TOGGLE}" data-action="${CLIENTES_ACTIONS.SORT_TOGGLE}" data-next-sort-order="${vm.nextSortOrder}" aria-pressed="true" aria-label="Cambiar orden a ${nextSortLabel}" title="Cambiar orden a ${nextSortLabel}">
           ${icon("calendar")}<span>${vm.sortOrder === "asc" ? "Fecha ↑" : "Fecha ↓"}</span>
         </button>
       </div>

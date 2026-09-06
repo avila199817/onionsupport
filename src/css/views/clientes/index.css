@@ -121,10 +121,10 @@
 */
 
 .clientes-date-inline {
+  color: var(--text-muted);
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--text-muted);
   font-size: var(--font-xs);
   font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;

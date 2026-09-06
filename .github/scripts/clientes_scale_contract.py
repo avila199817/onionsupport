@@ -14,19 +14,16 @@ def require(condition: bool, message: str) -> None:
 
 
 api = read("src/views/clientes/clientes.api.js")
-api_compat = read("src/views/clientes/clientes.api.legacy.js")
 model = read("src/views/clientes/clientes.model.js")
 controller = read("src/views/clientes/index.js")
 create_controller = read("src/views/clientes/clientes.create-controller.js")
 template = read("src/views/clientes/clientes.template.js")
-template_compat = read("src/views/clientes/clientes.template.legacy.js")
 style = read("src/css/views/clientes/index.css")
 status_style = read("src/css/components/status-system.css")
-legacy_controller = read("src/views/clientes/clientes.index.legacy.js")
 
 # ---------------------------------------------------------------------------
 # SINGLE AUTHORITIES: one model, one HTTP adapter, one create controller.
-# Compatibility files may re-export/delegate only; they must not own logic.
+# Retired Clientes compatibility paths must stay absent after consumer migration.
 # ---------------------------------------------------------------------------
 require(
     'from "./clientes.model.js"' in api
@@ -46,19 +43,6 @@ require(
     "clientes.model.js must be the pure model authority",
 )
 require(
-    'export * from "./clientes.api.js";' in api_compat
-    and 'export { default } from "./clientes.api.js";' in api_compat
-    and "Http." not in api_compat
-    and "normalizeClienteModel(" not in api_compat,
-    "legacy API path must be a zero-logic facade over the canonical API",
-)
-require(
-    'export * from "./clientes.model.js";' in template_compat
-    and 'export { default } from "./clientes.model.js";' in template_compat
-    and "renderClientesTemplate" not in template_compat,
-    "legacy template path must be a zero-logic facade over the canonical model",
-)
-require(
     "createClientesCreateController" in create_controller
     and "createModalLifecycle" in create_controller
     and "fetchUsuariosRequest" in create_controller
@@ -68,14 +52,30 @@ require(
     and "IntersectionObserver" not in create_controller,
     "Clientes Create must be a create-only controller using shared modal lifecycle and canonical API",
 )
+
+# Retired compatibility paths must remain absent after the final consumer migration.
+for legacy_path in (
+    "src/views/clientes/clientes.index.legacy.js",
+    "src/views/clientes/clientes.template.legacy.js",
+    "src/views/clientes/clientes.api.legacy.js",
+):
+    require(
+        not (ROOT / legacy_path).exists(),
+        f"retired Clientes facade must stay removed: {legacy_path}",
+    )
+
 require(
-    "COMPAT ONLY · NO SECOND CLIENTES VIEW" in legacy_controller
-    and 'from "./clientes.api.js"' in legacy_controller
-    and 'from "./clientes.create-controller.js"' in legacy_controller
-    and "fetchClientesPage" not in legacy_controller
-    and "IntersectionObserver" not in legacy_controller
-    and "visibleLimit" not in legacy_controller,
-    "legacy index path must be a thin compatibility facade, never a second listing controller",
+    'from "./clientes.model.js"' in template
+    and "clientes.template.legacy.js" not in template,
+    "Clientes template must import the canonical model directly",
+)
+require(
+    'from "./clientes.create-controller.js"' in controller
+    and "createClientesCreateController" in controller
+    and "clientes.index.legacy.js" not in controller
+    and "legacyBridge" not in controller
+    and "onCreated," in controller,
+    "main Clientes controller must own create lifecycle directly and refresh after creation",
 )
 
 # ---------------------------------------------------------------------------

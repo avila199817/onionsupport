@@ -24,7 +24,7 @@ La resolución de un botón de retorno que se ha vuelto a renderizar, el scroll 
 | Incidencias: alta, detalle y confirmaciones internas | `views/incidencias/index.impl.js` |
 | Facturas: alta, detalle y confirmación de reenvío | `views/facturas/index.js` |
 | Confirmación de cobro | `features/facturas-paid-confirm/index.js` |
-| Clientes: alta y detalle | `views/clientes/clientes.index.legacy.js`, `clientes.template.modal.js` |
+| Clientes: alta y detalle | `views/clientes/clientes.create-controller.js`, `clientes.template.modal.js` |
 | Usuarios: alta y detalle | `views/usuarios/usuarios.template.create.js`, `usuarios.template.modal.js` |
 | Correo: redacción, firma y confirmaciones | `views/correo/index.js` |
 | Perfil del técnico | `features/incidencias-technician-profile/index.js` |

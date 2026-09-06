@@ -58,12 +58,14 @@ debe prevalecer frente a alias o snapshots antiguos. Los contratos y fixtures co
 cambio de correo, perfil sin foto, IDs de cliente/usuario distintos y aislamiento
 entre identidades. No completa por sí solo F1.
 
-Tras verificar esta release, el siguiente bloque acotado de código es retirar las
-fachadas `clientes.index.legacy.js`, `clientes.template.legacy.js` y
-`clientes.api.legacy.js`: la vista debe abrir y desmontar directamente el controlador
-canónico de alta, conservar validaciones y refrescar el listado tras crear. La revisión
-debe confirmar todos los consumidores y reemplazar los guards que exigen esas fachadas,
-con una prueba de apertura, cancelación, creación y reapertura del modal.
+Las tres fachadas legacy de Clientes quedan retiradas tras migrar sus últimos
+consumidores. La vista abre y desmonta directamente el controlador canónico de alta,
+conserva las validaciones existentes y refresca el listado mediante el callback de
+creación; el contrato impide reintroducir rutas de compatibilidad paralelas.
+
+Tras publicar y verificar este corte, el siguiente bloque acotado es F1: ejecutar el
+recorrido vertical autenticado frontend/backend con cuentas y fixtures controlados y
+registrar request IDs y limpieza sin exponer datos privados.
 
 En paralelo al plan, permanecen pendientes la prueba vertical autenticada y el diagnóstico
 controlado del TBT móvil; no se certifican con un health check ni con Lighthouse en verde.
@@ -72,7 +74,7 @@ controlado del TBT móvil; no se certifican con un health check ni con Lighthous
 
 ### F1 · Recorrido vertical de identidad y soporte
 
-**Estado:** consolidación de identidad en curso; recorrido autenticado completo pendiente. **Responsables:** frontend y backend.
+**Estado:** identidad y fachadas de Clientes consolidadas en código; recorrido autenticado completo pendiente. **Responsables:** frontend y backend.
 **Dependencia:** cuentas de prueba, fixtures controlados y un entorno donde puedan
 revisarse request IDs sin exponer datos privados.
 

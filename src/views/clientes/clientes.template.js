@@ -7,12 +7,12 @@ import { resolveAvatarPresentation } from "../../features/avatar-system/identity
 import {
   normalizeClienteModel,
   normalizeClientesCollection,
-} from "./clientes.template.legacy.js";
+} from "./clientes.model.js";
 
 export {
   normalizeClienteModel,
   normalizeClientesCollection,
-} from "./clientes.template.legacy.js";
+} from "./clientes.model.js";
 
 export const CLIENTES_TEMPLATE_VERSION =
   "clientes.template.cursor.v12.private-admin-visual-parity";

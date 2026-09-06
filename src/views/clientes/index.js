@@ -27,11 +27,7 @@ import {
   openClientesDetailModal,
   closeClientesDetailModal,
 } from "./clientes.template.modal.js";
-import {
-  init as initLegacyCreateBridge,
-  openCreate as openLegacyCreate,
-  destroy as destroyLegacyCreateBridge,
-} from "./clientes.index.legacy.js";
+import { createClientesCreateController } from "./clientes.create-controller.js";
 
 export const CLIENTES_MODULE_NAME = "clientes";
 export const CLIENTES_VIEW_NAME = "ClientesView";
@@ -446,8 +442,7 @@ function createClientesController(host = null, initialContext = {}) {
   let renderFrame = 0;
   let infiniteObserver = null;
   let detailSeq = 0;
-  let legacyBridgeHost = null;
-  let legacyBridgeReady = false;
+  let createController = null;
 
   function alive() {
     return !destroyed && isClientesRoute(context);
@@ -1353,35 +1348,27 @@ function createClientesController(host = null, initialContext = {}) {
     }
   }
 
-  async function ensureLegacyCreateBridge() {
-    if (!isBrowser()) return false;
-    if (legacyBridgeReady && legacyBridgeHost) return true;
+function ensureCreateController() {
+  if (createController) return createController;
 
-    legacyBridgeHost = document.createElement("div");
-    legacyBridgeHost.setAttribute("data-clientes-create-bridge", "true");
+  createController = createClientesCreateController({
+    getRole: () => getCurrentRole(context),
+    getUser: getCurrentUser,
+    isAdmin: () => isAdmin(context),
+    showToast,
+    emitEvent,
+    onCreated,
+  });
+  return createController;
+}
 
-    await initLegacyCreateBridge(legacyBridgeHost, {
-      ...context,
-      host: legacyBridgeHost,
-      root: legacyBridgeHost,
-      container: legacyBridgeHost,
-      canonicalPath: CLIENTES_CANONICAL_PATH,
-      routePath: CLIENTES_CANONICAL_PATH,
-      path: CLIENTES_CANONICAL_PATH,
-    });
-
-    legacyBridgeReady = true;
-    return true;
-  }
-
-  async function openCreate() {
+async function openCreate() {
     if (!isAdmin(context) || creating) return false;
     creating = true;
     scheduleRender();
 
     try {
-      if (!(await ensureLegacyCreateBridge())) return false;
-      return (await openLegacyCreate()) !== false;
+      return ensureCreateController().open() !== false;
     } catch (createError) {
       showToast(
         safeError(createError, "No se pudo abrir la creación de cliente."),
@@ -1567,9 +1554,6 @@ function createClientesController(host = null, initialContext = {}) {
     root.addEventListener("compositionstart", handleCompositionStart);
     root.addEventListener("compositionend", handleCompositionEnd);
     root.addEventListener("keydown", handleKeydown);
-    if (isBrowser()) {
-      window.addEventListener("clientes:create:success", onCreated);
-    }
     mounted = true;
   }
 
@@ -1581,7 +1565,6 @@ function createClientesController(host = null, initialContext = {}) {
       root?.removeEventListener("compositionend", handleCompositionEnd);
       root?.removeEventListener("keydown", handleKeydown);
       if (isBrowser()) {
-        window.removeEventListener("clientes:create:success", onCreated);
         clearSearchTimer();
       }
     } catch {
@@ -1621,11 +1604,8 @@ function createClientesController(host = null, initialContext = {}) {
 
     try { closeClientesDetailModal(); } catch { /* noop */ }
 
-    if (legacyBridgeReady) {
-      try { await destroyLegacyCreateBridge({ clear: true }); } catch { /* noop */ }
-    }
-    legacyBridgeReady = false;
-    legacyBridgeHost = null;
+    try { createController?.destroy?.(); } catch { /* noop */ }
+    createController = null;
 
     if (clear && root) root.replaceChildren();
     if (root && INSTANCES.get(root) === controller) INSTANCES.delete(root);

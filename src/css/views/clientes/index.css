@@ -1,10 +1,12 @@
 /* =========================================================
    ONION SUPPORT — CLIENTES · LISTADO
-   DOMAIN-ONLY CSS · 2026-08-31
+   DOMAIN-ONLY CSS · 2026-09-06
 
    Shell/listado compartido: private-admin-parity.css
+   Estados y dots: components/status-system.css
+   Avatares: components/avatar-system.css
    Loading/skeleton paint: components/skeleton.css
-   Esta hoja conserva columnas, identidad de cliente, contacto e importes.
+   Esta hoja conserva sólo columnas, identidad de cliente, contacto e importes.
 ========================================================= */
 
 @layer views {
@@ -112,41 +114,11 @@
 .clientes-avatar.has-image .clientes-avatar-fallback,
 .clientes-avatar[data-has-avatar="true"] .clientes-avatar-fallback { display: none; }
 
-/* =========================================================
-   DOMAIN STATUS / CONTACT / AMOUNT
-========================================================= */
-
-.clientes-chip {
-  min-block-size: 25px;
-  padding-inline: 8px;
-  font-size: 9.5px;
-}
-
-.clientes-chip-dot {
-  inline-size: 6px;
-  block-size: 6px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.clientes-chip--active {
-  border-color: var(--border-success);
-  background: var(--success-bg);
-  color: var(--success-strong, var(--success));
-}
-
-.clientes-chip--pending {
-  border-color: var(--border-warning);
-  background: var(--warning-bg);
-  color: var(--warning-strong, var(--warning));
-}
-
-.clientes-chip--blocked {
-  border-color: var(--border-error);
-  background: var(--error-bg);
-  color: var(--error-strong, var(--error));
-}
+/*
+   STATUS SYSTEM
+   .clientes-chip, .clientes-chip--* y .clientes-chip-dot se pintan únicamente
+   desde components/status-system.css, igual que Facturas e Incidencias.
+*/
 
 .clientes-date-inline {
   color: var(--text);

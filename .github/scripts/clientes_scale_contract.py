@@ -14,11 +14,73 @@ def require(condition: bool, message: str) -> None:
 
 
 api = read("src/views/clientes/clientes.api.js")
+api_compat = read("src/views/clientes/clientes.api.legacy.js")
+model = read("src/views/clientes/clientes.model.js")
 controller = read("src/views/clientes/index.js")
+create_controller = read("src/views/clientes/clientes.create-controller.js")
 template = read("src/views/clientes/clientes.template.js")
+template_compat = read("src/views/clientes/clientes.template.legacy.js")
 style = read("src/css/views/clientes/index.css")
+status_style = read("src/css/components/status-system.css")
 legacy_controller = read("src/views/clientes/clientes.index.legacy.js")
 
+# ---------------------------------------------------------------------------
+# SINGLE AUTHORITIES: one model, one HTTP adapter, one create controller.
+# Compatibility files may re-export/delegate only; they must not own logic.
+# ---------------------------------------------------------------------------
+require(
+    'from "./clientes.model.js"' in api
+    and "CLIENTES_MODEL_VERSION" in api
+    and "singleModelAuthority: true" in api
+    and "singleHttpAuthority: true" in api,
+    "canonical API must consume the single Clientes model authority",
+)
+require(
+    "CLIENTES_MODEL_VERSION" in model
+    and "export function normalizeClienteModel" in model
+    and "export function normalizeClientesCollection" in model
+    and "export function statusBucket" in model
+    and "Http." not in model
+    and "document." not in model
+    and "window." not in model,
+    "clientes.model.js must be the pure model authority",
+)
+require(
+    'export * from "./clientes.api.js";' in api_compat
+    and 'export { default } from "./clientes.api.js";' in api_compat
+    and "Http." not in api_compat
+    and "normalizeClienteModel(" not in api_compat,
+    "legacy API path must be a zero-logic facade over the canonical API",
+)
+require(
+    'export * from "./clientes.model.js";' in template_compat
+    and 'export { default } from "./clientes.model.js";' in template_compat
+    and "renderClientesTemplate" not in template_compat,
+    "legacy template path must be a zero-logic facade over the canonical model",
+)
+require(
+    "createClientesCreateController" in create_controller
+    and "createModalLifecycle" in create_controller
+    and "fetchUsuariosRequest" in create_controller
+    and "createClienteRequest" in create_controller
+    and "loadClienteDetailRequest" in create_controller
+    and "fetchClientesPage" not in create_controller
+    and "IntersectionObserver" not in create_controller,
+    "Clientes Create must be a create-only controller using shared modal lifecycle and canonical API",
+)
+require(
+    "COMPAT ONLY · NO SECOND CLIENTES VIEW" in legacy_controller
+    and 'from "./clientes.api.js"' in legacy_controller
+    and 'from "./clientes.create-controller.js"' in legacy_controller
+    and "fetchClientesPage" not in legacy_controller
+    and "IntersectionObserver" not in legacy_controller
+    and "visibleLimit" not in legacy_controller,
+    "legacy index path must be a thin compatibility facade, never a second listing controller",
+)
+
+# ---------------------------------------------------------------------------
+# LIST API / CURSOR SCALE CONTRACT.
+# ---------------------------------------------------------------------------
 require(
     'CLIENTES_PAGE_ENDPOINT = "/api/clientes/page"' in api,
     "list adapter must target /api/clientes/page",
@@ -201,6 +263,9 @@ require(
     "CSV export must explicitly cover loaded records only",
 )
 
+# ---------------------------------------------------------------------------
+# TEMPLATE / ACCESSIBILITY / INFINITE SCROLL CONTRACT.
+# ---------------------------------------------------------------------------
 require(
     "vm.hasMore" in template and "vm.nextCursor" not in template,
     "template continuation state must come from controller/backend state",
@@ -267,12 +332,38 @@ require(
     "the stable live-status focus target must remain visible in forced colors",
 )
 
+# ---------------------------------------------------------------------------
+# SHARED PRIVATE VISUAL AUTHORITIES.
+# ---------------------------------------------------------------------------
+for forbidden in (
+    ".clientes-chip--active {",
+    ".clientes-chip--pending {",
+    ".clientes-chip--blocked {",
+    ".clientes-chip-dot {",
+):
+    require(
+        forbidden not in style,
+        f"Clientes route CSS must not repaint shared status selector {forbidden}",
+    )
+for required in (
+    ".clientes-chip--active",
+    ".clientes-chip--pending",
+    ".clientes-chip--blocked",
+    ".clientes-chip-dot",
+    "SINGLE STATUS PAINT AUTHORITY · SPA-WIDE",
+):
+    require(
+        required in status_style,
+        f"global status-system.css must own {required}",
+    )
 require(
-    'from "./clientes.api.js"' in legacy_controller,
-    "creation bridge must route any compatibility list read through the new page adapter",
+    "Shell/listado compartido: private-admin-parity.css" in style
+    and "Estados y dots: components/status-system.css" in style
+    and "Avatares: components/avatar-system.css" in style,
+    "Clientes route CSS must explicitly defer shared shell/status/avatar paint",
 )
 
 print(
-    "Clientes scale contract OK · cursor pages · server query · abort/sequence · "
-    "continuous scroll · retry-safe observer · loaded-only CSV/stats"
+    "Clientes scale contract OK · one model/API/create authority · shared status paint · "
+    "cursor pages · server query · abort/sequence · continuous scroll · loaded-only CSV/stats"
 )

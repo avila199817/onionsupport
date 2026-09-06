@@ -119,12 +119,12 @@ assert.deepEqual(state.attachments, {
 assert.equal(state.truncated, true);
 
 /* =========================================================
-   USER UPDATE TURN · BACKEND POLICY + LEGACY FALLBACK
+   USER UPDATE TURN · BACKEND POLICY + ROUTE LEASE
 ========================================================= */
 
 assert.match(
   INCIDENCIAS_DETAIL_STATE_VERSION,
-  /backend-policy-fail-closed/
+  /route-lease-authoritative/
 );
 
 /* Backend policy wins over any client-side historical inference. */
@@ -132,6 +132,7 @@ assert.match(
   const policy = resolveConversationPolicy({
     userUpdatePolicy: {
       awaitingSupportResponse: true,
+      canUserUpdate: false,
       lastUserUpdateAt: "2026-09-05T10:00:00.000Z",
     },
     comments: [{
@@ -141,12 +142,26 @@ assert.match(
   });
 
   assert.equal(policy.awaitingSupportResponse, true);
+  assert.equal(policy.canUserUpdate, false);
+  assert.equal(policy.blocked, true);
+  assert.equal(policy.source, "backend");
+}
+
+/* canUserUpdate=false también es autoridad aunque awaiting no venga explícito. */
+{
+  const policy = resolveConversationPolicy({
+    userUpdatePolicy: {
+      canUserUpdate: false,
+    },
+  });
+
+  assert.equal(policy.blocked, true);
   assert.equal(policy.source, "backend");
 }
 
 /*
-  Regresión del caso real: un comentario legacy sin source/role se reconoce
-  como turno del usuario por su identidad estable.
+  Regresión del caso legacy: un comentario sin source/role se reconoce como
+  turno del usuario por identidad estable.
 */
 {
   const policy = resolveConversationPolicy({
@@ -161,6 +176,7 @@ assert.match(
   });
 
   assert.equal(policy.awaitingSupportResponse, true);
+  assert.equal(policy.blocked, true);
   assert.equal(policy.source, "history");
 }
 
@@ -190,12 +206,64 @@ assert.match(
   });
 
   assert.equal(policy.awaitingSupportResponse, false);
+  assert.equal(policy.blocked, false);
 }
 
 /*
-  El primer frame de un usuario estándar debe cerrar el composer antes de
-  hidratar la política; admin queda fuera. Un 409 canónico también fuerza el
-  estado pendiente inmediatamente para cubrir carreras entre pestañas.
+  Algunos detalles materializan conversación sólo en timeline[]. La política no
+  puede quedar libre por perder los aliases comments/history al cambiar ruta.
+*/
+{
+  const policy = resolveConversationPolicy({
+    userId: "ON-USER-TIMELINE",
+    email: "timeline@example.test",
+    timeline: [{
+      kind: "comment",
+      source: "user",
+      byUserId: "ON-USER-TIMELINE",
+      createdAt: "2026-09-05T12:00:00.000Z",
+      message: "Actualización desde timeline",
+    }],
+  });
+
+  assert.equal(policy.awaitingSupportResponse, true);
+  assert.equal(policy.blocked, true);
+}
+
+{
+  const policy = resolveConversationPolicy({
+    userId: "ON-USER-TIMELINE",
+    assignment: {
+      technician: {
+        userId: "ON-SUPPORT-TIMELINE",
+      },
+    },
+    timeline: [
+      {
+        kind: "comment",
+        source: "user",
+        byUserId: "ON-USER-TIMELINE",
+        createdAt: "2026-09-05T12:00:00.000Z",
+      },
+      {
+        kind: "comment",
+        source: "support",
+        byUserId: "ON-SUPPORT-TIMELINE",
+        createdAt: "2026-09-05T12:05:00.000Z",
+      },
+    ],
+  });
+
+  assert.equal(policy.awaitingSupportResponse, false);
+  assert.equal(policy.blocked, false);
+}
+
+/*
+  Regresión exacta Incidencias -> Home -> Incidencias:
+  - el host vive como hijo directo de body, no dentro de #view-container;
+  - una lease nueva invalida hidratación anterior;
+  - un root nuevo se cierra antes del GET y fuerza verdad remota;
+  - una Promise resuelta jamás queda reutilizable como request activa.
 */
 {
   const source = readFileSync(
@@ -208,7 +276,31 @@ assert.match(
 
   assert.match(
     source,
-    /if \(!root\.querySelector\(ADMIN\)\) \{[\s\S]*hideComposer\(root\);[\s\S]*ticketReviewState = "checking";[\s\S]*hydrate\(id, \{ force: false \}\)/
+    /mountRoot\s*=\s*document\.body\s*\|\|\s*null/
+  );
+  assert.match(
+    source,
+    /hostLeaseObserver\.observe\(mountRoot,\s*\{[\s\S]*?childList:\s*true,[\s\S]*?subtree:\s*false/
+  );
+  assert.match(
+    source,
+    /function resetForHostLease\([\s\S]*?clearActiveState\(\{\s*clearHydration:\s*true\s*\}\)/
+  );
+  assert.match(
+    source,
+    /if \(activeRoot !== root \|\| activeTicketId !== id\)[\s\S]*?failClosed\(root\);[\s\S]*?hydrate\(id, \{ force: true \}\)/
+  );
+  assert.match(
+    source,
+    /force:\s*true,[\s\S]*?forceRefresh:\s*true,[\s\S]*?cache:\s*false,[\s\S]*?noCache:\s*true/
+  );
+  assert.match(
+    source,
+    /current\.inFlight\s*=\s*null;[\s\S]*?requestController\s*=\s*null;[\s\S]*?schedule\(\)/
+  );
+  assert.match(
+    source,
+    /if \(!root \|\| !id\)[\s\S]*?clearActiveState\(\{\s*clearHydration:\s*true\s*\}\)/
   );
   assert.match(
     source,
@@ -251,10 +343,6 @@ assert.match(
   "la tarjeta meta de adjuntos debe mostrar el total real"
 );
 
-/*
-  La frontera delega el chrome a .impl.js, pero el HTML final debe conservar
-  exactamente las parejas V7 que protegen la autoridad visual transversal.
-*/
 for (const pair of [
   "incidencias-modal-root ui-detail-modal-root",
   "incidencias-modal-overlay ui-detail-modal-overlay",
@@ -328,5 +416,5 @@ assert.deepEqual(
 );
 
 console.log(
-  "Incidencias Detail window UI OK · pending user composer fail-closed · backend policy authority · truthful bounded history · shared V7 contract"
+  "Incidencias Detail window UI OK · route lease authoritative · pending composer survives route changes · timeline fallback · truthful bounded history"
 );

@@ -61,27 +61,6 @@
   white-space: nowrap;
 }
 
-.usuarios-role-pill {
-  min-block-size: 20px;
-  padding-inline: 7px;
-  font-size: 9px;
-}
-
-/*
-   En el directorio Usuarios el rol "Usuario" es redundante: todas las filas
-   visibles pertenecen ya a ese dominio. Empleados reutiliza el mismo template,
-   así que conserva su badge de rol al marcar data-empleados-scope="true".
-*/
-.usuarios-view-root:not([data-empleados-scope="true"]) .usuarios-role-pill {
-  display: none;
-}
-
-.usuarios-role-pill--admin {
-  border-color: var(--accent-border);
-  background: var(--accent-soft);
-  color: var(--accent-active, var(--accent));
-}
-
 .usuarios-user-name,
 .usuarios-user-subject {
   min-inline-size: 0;

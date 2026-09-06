@@ -235,9 +235,6 @@ function statusLabel(item = {}) {
   if (status === "blocked") return "Bloqueado";
   return "Activo";
 }
-function roleLabel(item = {}) {
-  return normalizeKey(first(item.role, item.rol, "user")) === "admin" ? "Admin" : "Usuario";
-}
 function avatarPresentation(item = {}) {
   const name = getName(item);
   const email = cleanText(first(item.email, item.emailLower, item.mail, ""), "").toLowerCase();
@@ -266,7 +263,7 @@ function renderRow(item = {}, state = {}) {
   const opening = Boolean(id && cleanText(state.openingUserId, "") === id);
   const lastLoginAt = first(item.lastLoginAt, item.lastAccessAt, null);
   return `<tr class="usuarios-table-row usuarios-table-row--${attr(getStatus(item))}${opening ? " is-loading" : ""}" data-user-row="true" data-user-id="${attr(id)}" ${id ? `data-usuarios-action="${USUARIOS_ACTIONS.DETAIL}" data-action="open-user" tabindex="0" role="button" aria-label="Abrir usuario ${attr(name)}"` : 'aria-disabled="true"'} aria-busy="${opening ? "true" : "false"}">
-    <td class="usuarios-cell usuarios-cell--main" data-column="main"><div class="usuarios-main">${renderAvatar(item)}<div class="usuarios-main-copy"><div class="usuarios-user-line-top"><span class="usuarios-user-id">${escapeHtml(getCode(item))}</span><span class="usuarios-role-pill usuarios-role-pill--${normalizeKey(roleLabel(item)) === "admin" ? "admin" : "user"}">${escapeHtml(roleLabel(item))}</span></div><div class="usuarios-user-name">${escapeHtml(name)}</div><div class="usuarios-user-description">${escapeHtml(cleanText(first(item.phone, item.telefono, item.tipo, "Usuario Onion Support"), "Usuario Onion Support"))}</div></div></div></td>
+    <td class="usuarios-cell usuarios-cell--main" data-column="main"><div class="usuarios-main">${renderAvatar(item)}<div class="usuarios-main-copy"><div class="usuarios-user-line-top"><span class="usuarios-user-id">${escapeHtml(getCode(item))}</span></div><div class="usuarios-user-name">${escapeHtml(name)}</div><div class="usuarios-user-description">${escapeHtml(cleanText(first(item.phone, item.telefono, item.tipo, "Usuario Onion Support"), "Usuario Onion Support"))}</div></div></div></td>
     <td class="usuarios-cell usuarios-cell--status" data-column="status">${renderStatusChip(item)}</td>
     <td class="usuarios-cell usuarios-cell--date" data-column="date"><span class="usuarios-date-inline" title="${attr(formatDateTime(item.createdAt))}">${escapeHtml(formatDateShort(item.createdAt))}</span></td>
     <td class="usuarios-cell usuarios-cell--email" data-column="email"><span class="usuarios-email-inline" title="${attr(getEmail(item))}">${escapeHtml(getEmail(item))}</span></td>

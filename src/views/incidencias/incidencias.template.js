@@ -10,7 +10,7 @@
 
 
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v33-render-payload-authority";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v34-visible-date-minute-precision";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   CREATE_OPEN: "create-open",
@@ -168,7 +168,7 @@ function titleCaseLabel(v = "", fb = "General") {
 const ICON_COMMON = `aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
 const ICONS = Object.freeze({
   ticket: `<svg ${ICON_COMMON}><path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z"/><path d="M13 5v14"/></svg>`,
-  refresh: `<svg ${ICON_COMMON}><path d="M21 12a9 9 0 0 0-15-6.7L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 15 6.7l3-2.7"/><path d="M21 21v-5h-5"/></svg>`,
+  refresh: `<svg ${ICON_COMMON}><path d="M21 12a9 9 0 0 0-15-6.7L3 8"/><path d="M3 3v5h5"/></svg>`,
   plus: `<svg ${ICON_COMMON}><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
   search: `<svg ${ICON_COMMON}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
   close: `<svg ${ICON_COMMON}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
@@ -186,8 +186,9 @@ function icon(name = "") { return ICONS[name] || ICONS.ticket; }
 ========================================================= */
 
 const NUMBER_FORMATTER = new Intl.NumberFormat("es-ES");
-const DATE_FORMATTER = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+const DATE_FORMATTER = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 const SHORT_DATE_FORMATTER = new Intl.DateTimeFormat("es-ES", { day: "2-digit", month: "short", year: "numeric" });
+const TIME_FORMATTER = new Intl.DateTimeFormat("es-ES", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 const MONEY_FORMATTERS = new Map();
 function formatNumber(v = 0) { return NUMBER_FORMATTER.format(num(v, 0)); }
 function formatMoney(v = 0, currency = DEFAULT_CURRENCY) {
@@ -224,7 +225,7 @@ function formatShortDate(v = "") {
   if (!raw) return "—";
   const d = new Date(raw);
   if (!Number.isFinite(d.getTime())) return txt(raw, "—");
-  try { return SHORT_DATE_FORMATTER.format(d); } catch { return d.toISOString().slice(0, 10); }
+  try { return `${SHORT_DATE_FORMATTER.format(d)} · ${TIME_FORMATTER.format(d)}`; } catch { return d.toISOString().replace("T", " ").slice(0, 16); }
 }
 
 function formatRelativeDate(v = "") {
@@ -233,14 +234,17 @@ function formatRelativeDate(v = "") {
   const d = new Date(raw);
   const ms = d.getTime();
   if (!Number.isFinite(ms)) return txt(raw, "—");
+  let exactTime = "";
+  try { exactTime = TIME_FORMATTER.format(d); } catch { exactTime = d.toISOString().slice(11, 16); }
+  const withTime = (label = "") => `${label} · ${exactTime}`;
   const diff = Math.abs(Date.now() - ms);
   const minute = 60000;
   const hour = 60 * minute;
   const day = 24 * hour;
-  if (diff < minute) return "ahora";
-  if (diff < hour) return `hace ${Math.max(1, Math.round(diff / minute))} min`;
-  if (diff < day) return `hace ${Math.max(1, Math.round(diff / hour))} h`;
-  if (diff < 7 * day) return `hace ${Math.max(1, Math.round(diff / day))} d`;
+  if (diff < minute) return withTime("ahora");
+  if (diff < hour) return withTime(`hace ${Math.max(1, Math.round(diff / minute))} min`);
+  if (diff < day) return withTime(`hace ${Math.max(1, Math.round(diff / hour))} h`);
+  if (diff < 7 * day) return withTime(`hace ${Math.max(1, Math.round(diff / day))} d`);
   return formatShortDate(raw);
 }
 

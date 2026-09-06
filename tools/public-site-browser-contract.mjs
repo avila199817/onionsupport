@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
-import { PUBLIC_SITE } from "../src/core/public-site.js";
+import { PUBLIC_SITE, pageMetadata } from "../src/core/public-site.js";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".webp": "image/webp", ".svg": "image/svg+xml", ".ico": "image/x-icon" };
@@ -36,11 +36,12 @@ try {
   async function inspect(path) {
     await page.waitForFunction((expected) => window.location.pathname === expected && document.documentElement.dataset.appReady === "true", path, { timeout: 30000 });
     const actual = await page.evaluate(() => ({ title: document.title, canonical: [...document.querySelectorAll('head link[rel="canonical"]')].map((node) => node.href), robots: ["robots", "googlebot", "bingbot"].map((name) => [...document.querySelectorAll(`meta[name="${name}"]`)].map((node) => node.content)), description: document.querySelector('meta[name="description"]')?.content, schemaCount: document.querySelectorAll('script[type="application/ld+json"]').length }));
-    assert.equal(actual.title, path === "/" ? "Onion Support" : "Iniciar sesión · Onion Support");
+    const expected = pageMetadata(path);
+    assert.equal(actual.title, expected.title);
     assert.deepEqual(actual.canonical, [PUBLIC_SITE.origin + path]);
     assert.deepEqual(actual.robots, Array(3).fill([path === "/" ? "index, follow" : "noindex, follow"]));
     assert.equal(actual.schemaCount, path === "/" ? 1 : 0);
-    if (path === "/") assert.equal(actual.description, PUBLIC_SITE.description);
+    assert.equal(actual.description, expected.description);
   }
   await page.goto(origin, { waitUntil: "domcontentloaded" });
   await inspect("/");

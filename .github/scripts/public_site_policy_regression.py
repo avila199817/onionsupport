@@ -12,6 +12,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 PUBLIC = ("/", "/reparacion-ordenadores", "/soporte-informatico", "/redes-wifi", "/impresoras", "/soporte-empresas", "/login")
+HOME_TITLE = "Soporte informático y asistencia técnica | Onion Support"
 
 
 def load_module(name, file):
@@ -55,7 +56,7 @@ class PublicSitePolicy(unittest.TestCase):
             target = next(route for route in config["routes"] if route["route"] == path)
             target["headers"]["X-Robots-Tag"] = robots
             url = "https://onionsupport.com" + path
-            title = "Onion Support" if path == "/" else "Servicio | Onion Support"
+            title = HOME_TITLE if path == "/" else "Servicio | Onion Support"
             html = f'<html><head><title>{title}</title><meta name="description" content="Soporte informático remoto en España."><link rel="canonical" href="{url}"><meta property="og:url" content="{url}">' + "".join(f'<meta name="{name}" content="{robots}">' for name in ("robots", "googlebot", "bingbot")) + '</head><body><h1>Soporte</h1><a href="/">Inicio</a><a href="/login">Iniciar sesión</a></body></html>'
             relative = "index.html" if path == "/" else ("login.html" if path == "/login" else "seo" + path + ".html")
             (self.root / relative).write_text(html)
@@ -144,8 +145,8 @@ class PublicSitePolicy(unittest.TestCase):
 
     def test_v3_rejects_wrong_home_title(self):
         self.make_mode(True)
-        self.mutate("index.html", "<title>Onion Support</title>", "<title>Otra marca</title>")
-        self.run_validator(False, "exactamente Onion Support")
+        self.mutate("index.html", f"<title>{HOME_TITLE}</title>", "<title>Otra marca</title>")
+        self.run_validator(False, "título SEO canónico")
 
     def test_v3_rejects_marker_drift(self):
         self.make_mode(True)

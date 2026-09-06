@@ -55,6 +55,8 @@ jobs:
                   raise SystemExit(f"{path}: expected {expected} regex matches, found {count}: {pattern}")
               write(path, updated)
 
+          Path("validation-error.txt").unlink(missing_ok=True)
+
           index_path = "src/views/clientes/index.js"
           replace_regex(
               index_path,
@@ -110,12 +112,7 @@ jobs:
           )
 
           template_path = "src/views/clientes/clientes.template.js"
-          replace_exact(
-              template_path,
-              '"./clientes.template.legacy.js"',
-              '"./clientes.model.js"',
-              expected=2,
-          )
+          replace_exact(template_path, '"./clientes.template.legacy.js"', '"./clientes.model.js"', expected=2)
 
           contract_path = ".github/scripts/clientes_scale_contract.py"
           contract = read(contract_path)
@@ -181,7 +178,6 @@ jobs:
               and "onCreated," in controller,
               "main Clientes controller must own create lifecycle directly and refresh after creation",
           )
-
           ''') + "\n\n"
           contract = contract.replace(marker, direct_contract + marker, 1)
           write(contract_path, contract)
@@ -228,12 +224,10 @@ jobs:
                   raise SystemExit(f"expected legacy facade before removal: {legacy}")
               legacy.unlink()
 
-          # The helper workflow must not remain in the candidate tree.
           workflow = Path(".github/workflows/codex-clientes-legacy-cleanup.yml")
           if workflow.exists():
               workflow.unlink()
 
-          # Runtime and user-facing docs must not retain consumers/references to retired paths.
           checked = [
               Path("src/views/clientes/index.js"),
               Path("src/views/clientes/clientes.template.js"),
@@ -241,11 +235,7 @@ jobs:
               Path("docs/PROJECT_CONTEXT.md"),
               Path("docs/ROADMAP.md"),
           ]
-          retired = (
-              "clientes.index.legacy.js",
-              "clientes.template.legacy.js",
-              "clientes.api.legacy.js",
-          )
+          retired = ("clientes.index.legacy.js", "clientes.template.legacy.js", "clientes.api.legacy.js")
           leftovers = []
           for path in checked:
               text = path.read_text(encoding="utf-8")
@@ -260,9 +250,29 @@ jobs:
         run: npm ci
 
       - name: Validate source contracts
-        run: npm run validate:source
+        id: validate
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          npm run validate:source > /tmp/clientes-validate.log 2>&1
+          code=$?
+          cat /tmp/clientes-validate.log
+          exit "$code"
+
+      - name: Capture validation diagnostic
+        if: steps.validate.outcome != 'success'
+        shell: bash
+        run: |
+          tail -n 250 /tmp/clientes-validate.log > validation-error.txt
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git add validation-error.txt
+          git commit -m "chore: capture Clientes validation diagnostic"
+          git push origin HEAD:codex/clientes-remove-legacy-facades
 
       - name: Commit cleanup
+        if: steps.validate.outcome == 'success'
         shell: bash
         run: |
           git config user.name "Onion Support"
@@ -272,3 +282,7 @@ jobs:
           git diff --cached --quiet && { echo "No changes generated"; exit 1; }
           git commit -m "refactor(clientes): retirar fachadas legacy finales"
           git push origin HEAD:codex/clientes-remove-legacy-facades
+
+      - name: Enforce validation
+        if: steps.validate.outcome != 'success'
+        run: exit 1

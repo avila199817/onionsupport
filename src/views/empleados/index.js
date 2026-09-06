@@ -2,7 +2,7 @@
    Onion Support - Empleados
    Archivo: /src/views/empleados/index.js
 
-   USUARIOS VISUAL PARITY · CURRENT EMPLOYEE · V4
+   USUARIOS VISUAL PARITY · CURRENT EMPLOYEE · V5
    - Reutiliza template, modelo y Detail Modal canónicos de Usuarios.
    - El equipo interno actual es el usuario admin autenticado.
 ========================================================= */
@@ -14,7 +14,7 @@ import { renderUsuariosTableTemplate, USUARIOS_ACTIONS } from "../usuarios/usuar
 import UsuariosDetailModal from "../usuarios/usuarios.template.modal.js";
 import { loadUsuarioDetail, normalizeUsuarioModel } from "../usuarios/usuarios.api.js";
 
-export const EMPLEADOS_VIEW_VERSION = "empleados.view.v4.usuarios-parity-current-employee";
+export const EMPLEADOS_VIEW_VERSION = "empleados.view.v5.usuarios-parity-current-employee";
 export const EMPLEADOS_VIEW_NAME = "EmpleadosView";
 export const EMPLEADOS_CANONICAL_PATH = "/empleados";
 
@@ -105,7 +105,8 @@ function replaceCopy(value = "") {
     .replace(/\bUsuarios\b/g, "Empleados")
     .replace(/\busuarios\b/g, "empleados")
     .replace(/\bUsuario\b/g, "Empleado")
-    .replace(/\busuario\b/g, "empleado");
+    .replace(/\busuario\b/g, "empleado")
+    .replace(/\b1 empleados\b/g, "1 empleado");
 }
 
 function applyEmployeeCopy(root) {

@@ -61,11 +61,7 @@ jobs:
               r'import \{\n\s+init as initLegacyCreateBridge,\n\s+openCreate as openLegacyCreate,\n\s+destroy as destroyLegacyCreateBridge,\n\} from "\./clientes\.index\.legacy\.js";',
               'import { createClientesCreateController } from "./clientes.create-controller.js";',
           )
-          replace_regex(
-              index_path,
-              r'  let legacyBridgeHost = null;\n  let legacyBridgeReady = false;',
-              '  let createController = null;',
-          )
+          replace_regex(index_path, r'  let legacyBridgeHost = null;\n  let legacyBridgeReady = false;', '  let createController = null;')
           replace_regex(
               index_path,
               r'  async function ensureLegacyCreateBridge\(\) \{.*?\n  \}\n\n  async function openCreate\(\) \{',
@@ -109,8 +105,7 @@ jobs:
               '    try { createController?.destroy?.(); } catch { /* noop */ }\n    createController = null;',
           )
 
-          template_path = "src/views/clientes/clientes.template.js"
-          replace_exact(template_path, '"./clientes.template.legacy.js"', '"./clientes.model.js"', expected=2)
+          replace_exact("src/views/clientes/clientes.template.js", '"./clientes.template.legacy.js"', '"./clientes.model.js"', expected=2)
 
           contract_path = ".github/scripts/clientes_scale_contract.py"
           contract = read(contract_path)
@@ -190,10 +185,8 @@ jobs:
               '| `src/views/clientes/clientes.api.js` | Página y detalle en memoria; caché persistente de dataset deshabilitada. `clientes.api.legacy.js` sólo reexporta la API | Verificar aislamiento y borrado entre sesiones; retirar la fachada sin consumidores en una entrega acotada. |',
               '| `src/views/clientes/clientes.api.js` | Página y detalle en memoria; caché persistente de dataset deshabilitada. | Verificar aislamiento y borrado entre sesiones; no queda una segunda ruta de compatibilidad de API. |',
           )
-
-          roadmap_path = "docs/ROADMAP.md"
           replace_regex(
-              roadmap_path,
+              "docs/ROADMAP.md",
               r'Tras verificar esta release, el siguiente bloque acotado de código es retirar las\nfachadas `clientes\.index\.legacy\.js`, `clientes\.template\.legacy\.js` y\n`clientes\.api\.legacy\.js`:.*?con una prueba de apertura, cancelación, creación y reapertura del modal\.\n',
               block('''
               Las tres fachadas legacy de Clientes quedan retiradas tras migrar sus últimos
@@ -208,7 +201,7 @@ jobs:
               flags=re.S,
           )
           replace_exact(
-              roadmap_path,
+              "docs/ROADMAP.md",
               '**Estado:** consolidación de identidad en curso; recorrido autenticado completo pendiente. **Responsables:** frontend y backend.',
               '**Estado:** identidad y fachadas de Clientes consolidadas en código; recorrido autenticado completo pendiente. **Responsables:** frontend y backend.',
           )
@@ -250,9 +243,31 @@ jobs:
         run: npm ci
 
       - name: Validate source contracts
-        run: npm run validate:source
+        id: validate
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          npm run validate:source > /tmp/clientes-validate.log 2>&1
+          code=$?
+          cat /tmp/clientes-validate.log
+          exit "$code"
+
+      - name: Capture clean diagnostic
+        if: steps.validate.outcome != 'success'
+        shell: bash
+        run: |
+          tail -n 300 /tmp/clientes-validate.log > /tmp/validation-error.txt
+          git reset --hard HEAD
+          cp /tmp/validation-error.txt validation-error.txt
+          git config user.name "Onion Support"
+          git config user.email "cristian@onionsupport.com"
+          git add validation-error.txt
+          git commit -m "chore: refresh Clientes validation diagnostic"
+          git push origin HEAD:codex/clientes-remove-legacy-facades
 
       - name: Commit cleanup
+        if: steps.validate.outcome == 'success'
         shell: bash
         run: |
           git config user.name "Onion Support"
@@ -262,3 +277,7 @@ jobs:
           git diff --cached --quiet && { echo "No changes generated"; exit 1; }
           git commit -m "refactor(clientes): retirar fachadas legacy finales"
           git push origin HEAD:codex/clientes-remove-legacy-facades
+
+      - name: Enforce validation
+        if: steps.validate.outcome != 'success'
+        run: exit 1

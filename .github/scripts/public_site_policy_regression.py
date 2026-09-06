@@ -12,7 +12,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 PUBLIC = ("/", "/reparacion-ordenadores", "/soporte-informatico", "/redes-wifi", "/impresoras", "/soporte-empresas", "/login")
-HOME_TITLE = "Soporte informático y asistencia técnica | Onion Support"
+HOME_TITLE = "Onion Support | Servicio técnico informático"
 
 
 def load_module(name, file):

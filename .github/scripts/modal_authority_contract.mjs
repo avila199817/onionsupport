@@ -8,7 +8,7 @@ const owners = [
   'src/features/facturas-paid-confirm/index.js',
   'src/features/incidencias-technician-profile/index.js',
   'src/features/incidencias-video-preview/core.js',
-  'src/views/clientes/clientes.index.legacy.js',
+  'src/views/clientes/clientes.create-controller.js',
   'src/views/clientes/clientes.template.modal.js',
   'src/views/usuarios/usuarios.template.create.js',
   'src/views/usuarios/usuarios.template.modal.js',

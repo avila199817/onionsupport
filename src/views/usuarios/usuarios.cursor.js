@@ -26,20 +26,18 @@ export const USUARIOS_CURSOR_MAX_PAGE_SIZE = 200;
 export const USUARIOS_CURSOR_TIMEOUT = 20_000;
 
 /*
-  El backend de identidad sigue devolviendo cuentas internas junto al resto de
-  usuarios. Hasta que /api/users exponga un scope de audiencia propio, esta
-  frontera mantiene Empleados fuera de la vista Usuarios sin alterar su cuenta
-  ni el modelo canónico compartido por otros dominios.
+  Empleados reutiliza el usuario interno con rol administrativo. Hasta que el
+  backend exponga una audiencia separada en /api/users, la vista Usuarios no
+  debe mezclar cuentas internas con usuarios funcionales.
 */
-const INTERNAL_EMPLOYEE_USER_IDS = new Set([
-  "on-20260901024205",
-]);
-
-const INTERNAL_EMPLOYEE_USERNAMES = new Set([
-  "avila199817",
-]);
-
 const INTERNAL_EMPLOYEE_MARKERS = new Set([
+  "admin",
+  "administrator",
+  "administrador",
+  "superadmin",
+  "super_admin",
+  "root",
+  "owner",
   "employee",
   "empleado",
   "staff",
@@ -88,10 +86,6 @@ function directoryKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
-function identityKey(value = "") {
-  return cleanText(value, "").toLowerCase();
-}
-
 export function isInternalEmployeeUsuario(item = {}) {
   const source = safeObject(item);
 
@@ -104,29 +98,35 @@ export function isInternalEmployeeUsuario(item = {}) {
     return true;
   }
 
-  const marker = directoryKey(
-    source.personType ||
-      source.accountType ||
-      source.audience ||
-      source.kind ||
-      source.profileType ||
-      source.employmentType ||
-      source.employeeType ||
-      source.tipo ||
-      ""
-  );
+  const roleMarkers = [
+    source.role,
+    source.rol,
+    ...safeArray(source.roles),
+    source.profile?.role,
+    source.profile?.rol,
+    ...safeArray(source.profile?.roles),
+  ]
+    .map(directoryKey)
+    .filter(Boolean);
 
-  if (INTERNAL_EMPLOYEE_MARKERS.has(marker)) return true;
+  if (roleMarkers.some((marker) => INTERNAL_EMPLOYEE_MARKERS.has(marker))) {
+    return true;
+  }
 
-  const userId = identityKey(
-    source.userId || source.usuarioId || source.id || source.uid || ""
-  );
-  if (userId && INTERNAL_EMPLOYEE_USER_IDS.has(userId)) return true;
+  const audienceMarkers = [
+    source.personType,
+    source.accountType,
+    source.audience,
+    source.kind,
+    source.profileType,
+    source.employmentType,
+    source.employeeType,
+    source.tipo,
+  ]
+    .map(directoryKey)
+    .filter(Boolean);
 
-  const username = identityKey(
-    source.username || source.userName || source.slug || ""
-  );
-  return Boolean(username && INTERNAL_EMPLOYEE_USERNAMES.has(username));
+  return audienceMarkers.some((marker) => INTERNAL_EMPLOYEE_MARKERS.has(marker));
 }
 
 export function filterUsuariosDirectoryItems(items = []) {
@@ -276,9 +276,9 @@ export async function fetchUsuariosCursorPage(options = {}) {
   const continuationToken = pickToken(response);
 
   /*
-    El total remoto cuenta cuentas de identidad, incluidas las internas. Como
-    Usuarios muestra sólo su directorio funcional, no presentamos ese total
-    bruto como si fuera un total exacto de usuarios visibles.
+    El total remoto cuenta todas las cuentas de identidad, incluidas las
+    internas. Como Usuarios muestra sólo su directorio funcional, no
+    presentamos ese total bruto como total exacto de usuarios visibles.
   */
   const totalKnown = false;
   const total = null;

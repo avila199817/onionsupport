@@ -3,30 +3,28 @@
    Archivo: /src/features/incidencias-detail-state/index.js
 
    Única autoridad de presentación progresiva del Modal Details:
-   - seguimiento: más reciente -> más antiguo
-   - adjuntos actuales: más reciente -> más antiguo
-   - turno de usuario pendiente de revisión
-   - composer fail-closed mientras se resuelve la política de usuario
-   - ocultación completa del composer mientras soporte no responde
-   - indicador amarillo accesible con explicación del bloqueo
-   - ID completo y affordance del técnico
-   - coordinación segura del cierre durante la hidratación inicial
+   - turno de usuario pendiente de revisión;
+   - composer fail-closed hasta confirmar política remota;
+   - lease de modal estable entre navegaciones SPA;
+   - seguimiento y adjuntos más recientes primero;
+   - indicador accesible de turno pendiente;
+   - ID completo y affordance del técnico.
 
    El backend sigue siendo la autoridad de permisos y escrituras.
-   El estado CLOSED no bloquea por sí mismo una actualización futura.
+   CLOSED no bloquea por sí mismo una actualización futura.
 ========================================================= */
 
 import { synchronizeAvatars } from "../avatar-system/index.js";
 
 export const INCIDENCIAS_DETAIL_STATE_VERSION =
-  "incidencias-detail-state.v4.backend-policy-fail-closed";
+  "incidencias-detail-state.v5.route-lease-authoritative";
 
-const VIEW = "#view-container, [data-router-view='true']";
 const HOST = "[data-incidencias-modal-host='true']";
 const ROOT = "[data-incidencias-modal-root='true']";
 const ADMIN = "[data-modal-admin-editor='true']";
 const COMPOSER = "[data-modal-composer='true']";
-const HEADER_CHIPS = "[data-modal-header-chips='true'], .ui-detail-modal-hero-chips";
+const HEADER_CHIPS =
+  "[data-modal-header-chips='true'], .ui-detail-modal-hero-chips";
 const PENDING_CHIP = "[data-ticket-review-state='pending']";
 const SUCCESS = ".incidencias-modal-feedback--success";
 const ERROR = ".incidencias-modal-feedback--error";
@@ -38,10 +36,14 @@ const FILES = ".incidencias-modal-attachments-grid";
 const FILE = ".incidencias-modal-attachment-card[data-attachment-id]";
 const ID_CHIP = ".incidencias-modal-id-chip[data-ticket-id]";
 const ID_TEXT = ".incidencias-modal-id-chip-text";
-const TECH_CARD = ".incidencias-modal-technician-card[data-technician-profile-trigger='true']";
-const TECH_INLINE = ".incidencias-modal-technician-inline[data-technician-assigned='true']";
+const TECH_CARD =
+  ".incidencias-modal-technician-card[data-technician-profile-trigger='true']";
+const TECH_INLINE =
+  ".incidencias-modal-technician-inline[data-technician-assigned='true']";
 const TECH_EYE = "[data-technician-profile-eye='true']";
-const POLL_MS = 90000;
+
+const POLL_MS = 90_000;
+const RETRY_MS = 30_000;
 
 const PENDING_TITLE = "Pendiente de revisión";
 const PENDING_MESSAGE =
@@ -103,11 +105,12 @@ const ATTACHMENT_FIELDS = new Set([
 let mounted = false;
 let mountRoot = null;
 let host = null;
-let viewObserver = null;
+let hostLeaseObserver = null;
 let modalObserver = null;
 let frame = 0;
 let pollTimer = 0;
 let requestSeq = 0;
+let requestController = null;
 let hydration = null;
 let activeRoot = null;
 let activeTicketId = "";
@@ -161,7 +164,6 @@ function first(...values) {
     ) {
       continue;
     }
-
     return value;
   }
 
@@ -170,15 +172,11 @@ function first(...values) {
 
 function timestamp(value = null) {
   if (typeof value === "number" && Number.isFinite(value)) {
-    return value < 100000000000
-      ? value * 1000
-      : value;
+    return value < 100000000000 ? value * 1000 : value;
   }
 
   const parsed = Date.parse(String(value || ""));
-  return Number.isFinite(parsed)
-    ? parsed
-    : 0;
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function eventTime(entry = {}) {
@@ -261,11 +259,6 @@ function supportIdentity(detail = {}) {
   };
 }
 
-/*
-  Los comentarios/history legacy no siempre conservaron source o role. En ese
-  caso reconciliamos también contra la identidad del propietario. No usamos
-  cliente.id porque puede ser el CON-* de la ficha y no el userId real.
-*/
 function requesterIdentity(detail = {}) {
   const raw = object(first(detail?.raw, detail));
   const createdBy = object(raw.createdBy);
@@ -351,7 +344,6 @@ function eventSide(entry = {}, detail = {}) {
     raw.uploadedBy?.email
   );
 
-  /* Soporte gana siempre ante una identidad accidentalmente ambigua. */
   const support = supportIdentity(detail);
   if (actorId && support.ids.has(actorId)) return "support";
   if (actorEmail && support.emails.has(actorEmail)) return "support";
@@ -386,11 +378,39 @@ function historyKinds(entry = {}) {
     kinds.add("comment");
   }
 
-  if (["attachments_added", "attachment_added", "attachment_uploaded"].includes(type)) {
+  if (
+    [
+      "attachments_added",
+      "attachment_added",
+      "attachment_uploaded",
+    ].includes(type)
+  ) {
     kinds.add("attachment");
   }
 
   return kinds;
+}
+
+function updateConversationClock(
+  clocks,
+  entry,
+  detail,
+  {
+    requireConversationKind = false,
+  } = {}
+) {
+  if (requireConversationKind && !historyKinds(entry).size) {
+    return false;
+  }
+
+  const at = eventTime(entry);
+  if (!at) return false;
+
+  const side = eventSide(entry, detail);
+  if (side === "user") clocks.user = Math.max(clocks.user, at);
+  if (side === "support") clocks.support = Math.max(clocks.support, at);
+
+  return Boolean(side);
 }
 
 export function resolveConversationPolicy(detail = {}) {
@@ -405,57 +425,90 @@ export function resolveConversationPolicy(detail = {}) {
     )
   );
 
-  if (typeof explicit.awaitingSupportResponse === "boolean") {
+  const hasBackendAwaiting =
+    typeof explicit.awaitingSupportResponse === "boolean";
+  const hasBackendCanUpdate =
+    typeof explicit.canUserUpdate === "boolean";
+
+  if (hasBackendAwaiting || hasBackendCanUpdate) {
+    const awaitingSupportResponse =
+      explicit.awaitingSupportResponse === true;
+    const canUserUpdate = hasBackendCanUpdate
+      ? explicit.canUserUpdate === true
+      : !awaitingSupportResponse;
+
     return {
-      awaitingSupportResponse:
-        explicit.awaitingSupportResponse === true,
+      awaitingSupportResponse,
+      canUserUpdate,
+      blocked:
+        awaitingSupportResponse || !canUserUpdate,
       lastUserUpdateAt:
         explicit.lastUserUpdateAt || null,
       lastSupportResponseAt:
         explicit.lastSupportResponseAt || null,
+      message:
+        text(explicit.message, ""),
       source: "backend",
     };
   }
 
-  let latestUser = 0;
-  let latestSupport = 0;
+  const clocks = {
+    user: 0,
+    support: 0,
+  };
 
   for (const comment of array(first(detail?.comments, raw.comments, []))) {
-    const at = eventTime(comment);
-    const side = eventSide(comment, raw);
-
-    if (side === "user") latestUser = Math.max(latestUser, at);
-    if (side === "support") latestSupport = Math.max(latestSupport, at);
+    updateConversationClock(clocks, comment, raw);
   }
 
   for (const entry of array(first(detail?.history, raw.history, []))) {
-    if (!historyKinds(entry).size) continue;
-
-    const at = eventTime(entry);
-    const side = eventSide(entry, raw);
-
-    if (side === "user") latestUser = Math.max(latestUser, at);
-    if (side === "support") latestSupport = Math.max(latestSupport, at);
+    updateConversationClock(
+      clocks,
+      entry,
+      raw,
+      { requireConversationKind: true }
+    );
   }
 
+  /*
+    El contrato de detalle puede materializar la conversación exclusivamente
+    en timeline[]. No depender de que comments/history se dupliquen evita que
+    una nueva navegación pueda inferir falsamente que el turno está libre.
+  */
+  for (const entry of array(first(detail?.timeline, raw.timeline, []))) {
+    updateConversationClock(
+      clocks,
+      entry,
+      raw,
+      { requireConversationKind: true }
+    );
+  }
+
+  const awaitingSupportResponse =
+    clocks.user > clocks.support;
+
   return {
-    awaitingSupportResponse:
-      latestUser > latestSupport,
+    awaitingSupportResponse,
+    canUserUpdate: !awaitingSupportResponse,
+    blocked: awaitingSupportResponse,
     lastUserUpdateAt:
-      latestUser
-        ? new Date(latestUser).toISOString()
+      clocks.user
+        ? new Date(clocks.user).toISOString()
         : null,
     lastSupportResponseAt:
-      latestSupport
-        ? new Date(latestSupport).toISOString()
+      clocks.support
+        ? new Date(clocks.support).toISOString()
         : null,
+    message: "",
     source: "history",
   };
 }
 
 function normalizeComment(item = {}, index = 0) {
   const raw = object(item);
-  const type = lower(first(raw.kind, raw.type, raw.action, raw.event, "comment"));
+  const type = lower(
+    first(raw.kind, raw.type, raw.action, raw.event, "comment")
+  );
 
   if (type && !["comment", "comentario"].includes(type)) {
     return null;
@@ -510,27 +563,31 @@ function commentsFromDetail(detail = {}) {
   const raw = object(first(detail?.raw, detail?.data, detail?.item, detail));
   const timeline = array(first(detail?.timeline, raw.timeline, []));
 
-  let source = [];
-
-  if (timeline.length) {
-    source = timeline.filter((entry) =>
-      ["comment", "comentario"].includes(
-        lower(first(entry?.kind, entry?.type, entry?.action, entry?.event, ""))
+  const source = timeline.length
+    ? timeline.filter((entry) =>
+        ["comment", "comentario"].includes(
+          lower(
+            first(
+              entry?.kind,
+              entry?.type,
+              entry?.action,
+              entry?.event,
+              ""
+            )
+          )
+        )
       )
-    );
-  } else {
-    source = array(
-      first(
-        detail?.comments,
-        detail?.notes,
-        detail?.messages,
-        raw.comments,
-        raw.notes,
-        raw.messages,
-        []
-      )
-    );
-  }
+    : array(
+        first(
+          detail?.comments,
+          detail?.notes,
+          detail?.messages,
+          raw.comments,
+          raw.notes,
+          raw.messages,
+          []
+        )
+      );
 
   return source
     .map(normalizeComment)
@@ -589,7 +646,10 @@ function buildCommentCard(comment = {}) {
   date.textContent = formatDate(comment.createdAt);
 
   const body = document.createElement("p");
-  body.textContent = multiline(comment.body, "Actualización registrada.");
+  body.textContent = multiline(
+    comment.body,
+    "Actualización registrada."
+  );
 
   head.append(author, date);
   content.append(head, body);
@@ -645,7 +705,7 @@ function renderComments(root, detail = {}) {
       `${comments.length} comentario${comments.length === 1 ? "" : "s"}`;
 
     const list = document.createElement("div");
-    list.className = "incidencias-modal-description-comments";
+    list.className = COMMENTS.slice(1);
 
     for (const comment of comments) {
       list.appendChild(buildCommentCard(comment));
@@ -679,7 +739,9 @@ function sortAttachments(root, detail = {}) {
   const grid = root?.querySelector?.(FILES);
   if (!grid) return false;
 
-  const cards = Array.from(grid.querySelectorAll(`:scope > ${FILE}`));
+  const cards = Array.from(
+    grid.querySelectorAll(`:scope > ${FILE}`)
+  );
   if (cards.length < 2) return true;
 
   const raw = object(first(detail?.raw, detail));
@@ -714,8 +776,7 @@ function sortAttachments(root, detail = {}) {
   }));
 
   const desired = [...ranked].sort((a, b) =>
-    b.time - a.time ||
-    b.index - a.index
+    b.time - a.time || b.index - a.index
   );
 
   if (!desired.some((entry, index) => entry.card !== cards[index])) {
@@ -735,7 +796,6 @@ function hideComposer(root) {
   if (!root || root.querySelector(ADMIN)) return false;
 
   const state = detachedComposers.get(root);
-
   if (state?.marker?.isConnected && !state.composer?.isConnected) {
     return true;
   }
@@ -754,7 +814,10 @@ function hideComposer(root) {
 }
 
 function showComposer(root) {
-  if (!root || root.querySelector(ADMIN)) return false;
+  if (!root) return false;
+  if (root.querySelector(ADMIN)) {
+    return Boolean(root.querySelector(COMPOSER));
+  }
 
   const state = detachedComposers.get(root);
 
@@ -772,7 +835,7 @@ function showComposer(root) {
   return true;
 }
 
-function ensurePendingChip(root) {
+function ensurePendingChip(root, policy = {}) {
   if (!root || root.querySelector(ADMIN)) return false;
 
   const chips = root.querySelector(HEADER_CHIPS);
@@ -804,10 +867,11 @@ function ensurePendingChip(root) {
     });
   }
 
-  chip.title = PENDING_MESSAGE;
+  const message = text(policy?.message, PENDING_MESSAGE);
+  chip.title = message;
   chip.setAttribute(
     "aria-label",
-    `${PENDING_TITLE}. ${PENDING_MESSAGE}`
+    `${PENDING_TITLE}. ${message}`
   );
 
   return true;
@@ -870,23 +934,19 @@ function project(root, detail = {}) {
   const policy = resolveConversationPolicy(detail);
   const admin = Boolean(root.querySelector(ADMIN));
 
-  /*
-     CLOSED nunca decide el composer. Sólo el turno conversacional pendiente.
-     Una incidencia cerrada sin turno pendiente sigue siendo actualizable y el
-     backend la reabre al recibir nueva información del propietario.
-  */
   if (admin) {
+    showComposer(root);
     removePendingChip(root);
-  } else if (policy.awaitingSupportResponse) {
+  } else if (policy.blocked) {
     hideComposer(root);
-    ensurePendingChip(root);
+    ensurePendingChip(root, policy);
   } else {
     showComposer(root);
     removePendingChip(root);
   }
 
   root.dataset.ticketReviewState =
-    !admin && policy.awaitingSupportResponse
+    !admin && policy.blocked
       ? "pending"
       : "ready";
 
@@ -907,13 +967,14 @@ function clearPoll() {
   return true;
 }
 
-function planPoll(id, detail = {}) {
+function planPoll(id, detail = null, delay = POLL_MS) {
   clearPoll();
 
-  const policy = resolveConversationPolicy(detail);
+  if (!browser() || !id) return false;
 
-  if (!browser() || !policy.awaitingSupportResponse) {
-    return false;
+  if (detail) {
+    const policy = resolveConversationPolicy(detail);
+    if (!policy.blocked) return false;
   }
 
   pollTimer = window.setTimeout(() => {
@@ -923,7 +984,39 @@ function planPoll(id, detail = {}) {
     if (root && ticketId(root) === id) {
       hydrate(id, { force: true });
     }
-  }, POLL_MS);
+  }, Math.max(1_000, Number(delay) || POLL_MS));
+
+  return true;
+}
+
+function abortHydration() {
+  requestSeq += 1;
+
+  try {
+    requestController?.abort?.();
+  } catch {
+    // noop
+  }
+
+  requestController = null;
+
+  if (hydration) {
+    hydration.inFlight = null;
+  }
+
+  return true;
+}
+
+function clearActiveState({ clearHydration = true } = {}) {
+  clearPoll();
+  activeRoot = null;
+  activeTicketId = "";
+  lastSuccessKey = "";
+
+  if (clearHydration) {
+    abortHydration();
+    hydration = null;
+  }
 
   return true;
 }
@@ -933,14 +1026,24 @@ function hydrate(id, { force = false } = {}) {
   if (!cleanId) return null;
 
   if (
+    !force &&
     hydration?.ticketId === cleanId &&
-    hydration?.promise &&
-    !force
+    hydration?.inFlight
   ) {
     return hydration;
   }
 
+  if (force) {
+    abortHydration();
+  }
+
   const sequence = ++requestSeq;
+  const controller =
+    typeof AbortController !== "undefined"
+      ? new AbortController()
+      : null;
+
+  requestController = controller;
 
   const current = {
     ticketId: cleanId,
@@ -952,41 +1055,65 @@ function hydrate(id, { force = false } = {}) {
         ? hydration.detail
         : null,
     error: null,
-    promise: null,
+    inFlight: null,
   };
 
-  current.promise = (async () => {
+  const task = (async () => {
     try {
       const source = await api();
       const detail = await source.loadIncidenciaDetail(cleanId, {
-        force,
-        cache: !force,
+        force: true,
+        forceRefresh: true,
+        cache: false,
+        noCache: true,
+        signal: controller?.signal,
       });
 
-      if (sequence !== requestSeq) return null;
+      if (
+        sequence !== requestSeq ||
+        hydration !== current
+      ) {
+        return null;
+      }
 
       current.detail = detail || null;
       current.resolved = true;
-      current.stable = true;
+      current.stable = Boolean(detail);
+      current.error = null;
 
       if (current.detail) {
         planPoll(cleanId, current.detail);
+      } else {
+        planPoll(cleanId, null, RETRY_MS);
       }
 
       return current.detail;
     } catch (error) {
-      if (sequence === requestSeq) {
+      if (
+        sequence === requestSeq &&
+        hydration === current &&
+        error?.name !== "AbortError"
+      ) {
         current.error = error;
         current.resolved = true;
-        current.stable = true;
+        current.stable = false;
+        planPoll(cleanId, null, RETRY_MS);
       }
 
       return null;
     } finally {
-      schedule();
+      if (
+        sequence === requestSeq &&
+        hydration === current
+      ) {
+        current.inFlight = null;
+        requestController = null;
+        schedule();
+      }
     }
   })();
 
+  current.inFlight = task;
   hydration = current;
   return current;
 }
@@ -1008,13 +1135,6 @@ function refreshAfterSuccess(root) {
   return true;
 }
 
-/*
-  Defensa de carrera: si otra pestaña ganó el turno entre el GET y el submit,
-  el backend devuelve el 409 canónico. En cuanto ese mensaje llega al modal,
-  convertimos la política local en pendiente y retiramos el composer sin
-  esperar al siguiente polling. El force-poll posterior vuelve a consultar la
-  autoridad del backend y puede reabrir el composer cuando soporte responda.
-*/
 function refreshAfterBlockedError(root) {
   if (!root || root.querySelector(ADMIN)) return false;
 
@@ -1045,10 +1165,6 @@ function refreshAfterBlockedError(root) {
     )
   );
 
-  if (currentPolicy.awaitingSupportResponse === true) {
-    return false;
-  }
-
   const policy = {
     ...currentPolicy,
     awaitingSupportResponse: true,
@@ -1072,6 +1188,16 @@ function refreshAfterBlockedError(root) {
     hydration.detail = nextDetail;
     hydration.resolved = true;
     hydration.stable = true;
+  } else if (id) {
+    hydration = {
+      ticketId: id,
+      sequence: requestSeq,
+      resolved: true,
+      stable: true,
+      detail: nextDetail,
+      error: null,
+      inFlight: null,
+    };
   }
 
   project(root, nextDetail);
@@ -1079,8 +1205,16 @@ function refreshAfterBlockedError(root) {
   return true;
 }
 
+function isElement(node) {
+  return Boolean(
+    node &&
+    node.nodeType === 1 &&
+    typeof node.matches === "function"
+  );
+}
+
 function nodeTouches(node, selectors = []) {
-  if (!(node instanceof Element)) return false;
+  if (!isElement(node)) return false;
 
   return selectors.some((selector) =>
     node.matches?.(selector) ||
@@ -1120,15 +1254,11 @@ function modalMutationMatters(mutations = []) {
   return false;
 }
 
-function syncHostObserver() {
-  const nextHost = document.querySelector(HOST);
-
-  if (nextHost === host) {
-    return Boolean(nextHost);
-  }
-
+function resetForHostLease(nextHost = null) {
   modalObserver?.disconnect?.();
   modalObserver = null;
+
+  clearActiveState({ clearHydration: true });
   host = nextHost || null;
 
   if (host && typeof MutationObserver !== "undefined") {
@@ -1149,8 +1279,27 @@ function syncHostObserver() {
   return Boolean(host);
 }
 
+function syncHostObserver() {
+  const nextHost = document.querySelector(HOST);
+
+  if (nextHost === host) {
+    return Boolean(nextHost);
+  }
+
+  return resetForHostLease(nextHost);
+}
+
+function failClosed(root) {
+  if (!root || root.querySelector(ADMIN)) return false;
+
+  hideComposer(root);
+  removePendingChip(root);
+  root.dataset.ticketReviewState = "checking";
+  return true;
+}
+
 function sync() {
-  if (!browser()) return false;
+  if (!browser() || !mounted) return false;
 
   syncHostObserver();
 
@@ -1158,10 +1307,9 @@ function sync() {
   const id = ticketId(root);
 
   if (!root || !id) {
-    clearPoll();
-    activeRoot = null;
-    activeTicketId = "";
-    lastSuccessKey = "";
+    if (activeRoot || activeTicketId || hydration) {
+      clearActiveState({ clearHydration: true });
+    }
     return false;
   }
 
@@ -1170,24 +1318,23 @@ function sync() {
   synchronizeAvatars(root);
 
   if (activeRoot !== root || activeTicketId !== id) {
+    clearPoll();
     activeRoot = root;
     activeTicketId = id;
     lastSuccessKey = "";
 
-    /*
-      FAIL CLOSED para usuario estándar: el listado no contiene la política
-      conversacional completa. Hasta que el GET de detalle confirme que puede
-      escribir, el formulario no se ofrece. Admin nunca pasa por este cierre.
-    */
     if (!root.querySelector(ADMIN)) {
-      hideComposer(root);
-      removePendingChip(root);
-      root.dataset.ticketReviewState = "checking";
+      failClosed(root);
+      /*
+        Cada root nuevo corresponde a una nueva apertura/lease. Se consulta de
+        nuevo la autoridad remota incluso si es el mismo ticket que antes de
+        navegar a Home. No se reutiliza una Promise resuelta de otra vista.
+      */
+      hydrate(id, { force: true });
     } else {
       root.dataset.ticketReviewState = "ready";
     }
 
-    hydrate(id, { force: false });
     return true;
   }
 
@@ -1199,19 +1346,33 @@ function sync() {
     return true;
   }
 
+  if (root.querySelector(ADMIN)) {
+    root.dataset.ticketReviewState = "ready";
+    return true;
+  }
+
   if (hydration?.ticketId === id && hydration?.detail) {
     return project(root, hydration.detail);
   }
 
-  if (!hydration?.promise) {
-    hydrate(id, { force: false });
+  /*
+    Mientras la autoridad no esté disponible, nunca reaparece el composer.
+    Un error de red conserva el fail-closed y el retry programado.
+  */
+  failClosed(root);
+
+  if (
+    hydration?.ticketId !== id ||
+    (!hydration?.inFlight && !hydration?.resolved)
+  ) {
+    hydrate(id, { force: true });
   }
 
   return true;
 }
 
 function schedule() {
-  if (!browser() || frame) return false;
+  if (!browser() || !mounted || frame) return false;
 
   frame = window.requestAnimationFrame(() => {
     frame = 0;
@@ -1221,35 +1382,49 @@ function schedule() {
   return true;
 }
 
+function hostLeaseMutationMatters(mutations = []) {
+  for (const mutation of mutations) {
+    if (mutation.type !== "childList") continue;
+
+    for (const node of [
+      ...mutation.addedNodes,
+      ...mutation.removedNodes,
+    ]) {
+      if (nodeTouches(node, [HOST])) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 export function mountIncidenciasDetailState() {
   if (!browser()) return false;
   if (mounted) return true;
 
-  mountRoot = document.querySelector(VIEW) || document.body;
+  /*
+    El modal host es una lease que index.js inserta como hijo DIRECTO de body,
+    fuera de #view-container. Observar únicamente la vista dejaba ciego este
+    feature después de Incidencias -> Home -> Incidencias.
+  */
+  mountRoot = document.body || null;
   if (!mountRoot) return false;
 
   mounted = true;
 
   if (typeof MutationObserver !== "undefined") {
-    viewObserver = new MutationObserver((mutations) => {
+    hostLeaseObserver = new MutationObserver((mutations) => {
       if (internalMutations > 0) return;
 
-      for (const mutation of mutations) {
-        for (const node of [
-          ...mutation.addedNodes,
-          ...mutation.removedNodes,
-        ]) {
-          if (nodeTouches(node, [HOST, ROOT])) {
-            schedule();
-            return;
-          }
-        }
+      if (hostLeaseMutationMatters(mutations)) {
+        schedule();
       }
     });
 
-    viewObserver.observe(mountRoot, {
+    hostLeaseObserver.observe(mountRoot, {
       childList: true,
-      subtree: true,
+      subtree: false,
     });
   }
 
@@ -1259,8 +1434,9 @@ export function mountIncidenciasDetailState() {
 
 export function destroyIncidenciasDetailState() {
   clearPoll();
+  abortHydration();
 
-  viewObserver?.disconnect?.();
+  hostLeaseObserver?.disconnect?.();
   modalObserver?.disconnect?.();
 
   if (frame && browser()) {
@@ -1270,10 +1446,9 @@ export function destroyIncidenciasDetailState() {
   mounted = false;
   mountRoot = null;
   host = null;
-  viewObserver = null;
+  hostLeaseObserver = null;
   modalObserver = null;
   frame = 0;
-  requestSeq += 1;
   hydration = null;
   activeRoot = null;
   activeTicketId = "";
@@ -1293,6 +1468,8 @@ export function getIncidenciasDetailStateSnapshot() {
     mounted,
     ticketId: activeTicketId,
     hydrated: Boolean(hydration?.detail),
+    hydrating: Boolean(hydration?.inFlight),
+    hostLeaseObserved: Boolean(hostLeaseObserver),
     policy: policy ? Object.freeze({ ...policy }) : null,
     ordering: Object.freeze({
       comments: "newest_first",
@@ -1300,6 +1477,10 @@ export function getIncidenciasDetailStateSnapshot() {
     }),
     pendingIndicator: "warning_clock_chip",
     composerPolicy: "fail_closed_until_backend_detail_policy",
+    hostLeasePolicy: "body_direct_child_authoritative",
+    newRootPolicy: "force_remote_revalidation",
+    staleHydrationPolicy: "discard_on_modal_or_route_lease_change",
+    timelineFallback: true,
     technicianAvatarFallback: "global_avatar_system",
     closedTicketCanReceiveFutureUpdate: true,
     backendIsWriteAuthority: true,

@@ -5,7 +5,7 @@
 
 ## Estado del proyecto y evidencia
 
-La última versión funcional desplegada y verificada al abrir este bloque es [`b3662615743e542c1467102a6fc706d2b310a3d6`](https://github.com/avila199817/onionsupport/commit/b3662615743e542c1467102a6fc706d2b310a3d6). Los commits posteriores que sólo actualicen documentación deben distinguirse de esta referencia de runtime.
+La última versión funcional desplegada y verificada es [`1f220dc51d53a50212ef1b415707388fa030abf7`](https://github.com/avila199817/onionsupport/commit/1f220dc51d53a50212ef1b415707388fa030abf7), cierre de [PR #525](https://github.com/avila199817/onionsupport/pull/525). El corte backend coordinado para identidad es [`d5ccad6b1debd99391a0c0dcacdc617f92ec14c8`](https://github.com/avila199817/oniontech/commit/d5ccad6b1debd99391a0c0dcacdc617f92ec14c8), integrado mediante [oniontech #496](https://github.com/avila199817/oniontech/pull/496). Los commits posteriores que sólo actualicen documentación deben distinguirse de estas referencias de runtime.
 
 Usamos cuatro estados: **implementado** significa presente en el código; **desplegado**, publicado por el pipeline; **verificado**, contrastado mediante la evidencia y el alcance indicados; **pendiente/propuesto**, trabajo futuro. Ningún módulo queda certificado de extremo a extremo sólo porque su build o un health check sea correcto.
 
@@ -16,9 +16,19 @@ Usamos cuatro estados: **implementado** significa presente en el código; **desp
 | Validadores compatibles y verificación SEO por checkout | Implementado y desplegado | [PR #486](https://github.com/avila199817/onionsupport/pull/486), [PR #488](https://github.com/avila199817/onionsupport/pull/488) y commit [`0ad1500f`](https://github.com/avila199817/onionsupport/commit/0ad1500f): `/login` noindex se comprueba sin relajar los presupuestos Lighthouse. |
 | Salto visual del consentimiento | Corregido, desplegado y medido | [PR #490](https://github.com/avila199817/onionsupport/pull/490), commit `5d82b0d0`; CSS preparado antes de mostrar y apertura cancelable. El CLS móvil de la portada pasó a 0,000 en la medición descrita abajo. |
 | Identidad explícita de avatares y perfiles actuales de Clientes | Desplegado y verificado en el alcance de sus contratos | [Frontend #523](https://github.com/avila199817/onionsupport/pull/523) y [backend #495](https://github.com/avila199817/oniontech/pull/495). Las identidades explícitas vacías no heredan datos del DOM vecino y una foto eliminada en Users no revive desde el snapshot de Clientes. |
-| Identidad visual estable por userId | Implementado en este bloque; release acreditada por el workflow de su commit | AvatarSystem prioriza userId; se migran primera pintura de detalle, comentarios, seguimiento, perfil técnico y caché de soporte. Los contratos cubren cambios de correo, alias vacíos, IDs conflictivos y transporte del ID original a la API. |
+| Identidad visual estable por userId | Desplegada y verificada en producción | [Frontend #524](https://github.com/avila199817/onionsupport/pull/524) y [backend #496](https://github.com/avila199817/oniontech/pull/496). AvatarSystem prioriza userId; se migraron primera pintura de detalle, comentarios, seguimiento, perfil técnico y caché de soporte. Los contratos cubren cambios de correo, alias vacíos, IDs conflictivos y transporte del ID original a la API. |
+| Fachadas legacy de Clientes | Retiradas, desplegadas y verificadas | [Frontend #525](https://github.com/avila199817/onionsupport/pull/525) eliminó `clientes.index.legacy.js`, `clientes.template.legacy.js` y `clientes.api.legacy.js`. `index.js` abre directamente `clientes.create-controller.js`, conserva el refresco tras crear y el contrato impide reintroducir esas rutas. |
 | Flujos privados con cuentas reales | Implementación existente; validación vertical completa pendiente | No se ha certificado en esta sesión login/refresh/logout, ACL, creación de tickets, adjuntos, facturación, correo real y avatar como un único recorrido contra producción. |
 | Resultados visibles en Google | Política técnica publicada; evolución del índice pendiente de observar | No consta una inspección autenticada de Search Console ni una solicitud manual de reindexación en esta sesión. IndexNow correcto no acredita rastreo de Google ni sitelinks. |
+
+La publicación de `1f220dc5` tiene evidencias separadas:
+
+- [Repository Integrity, run 34022425774](https://github.com/avila199817/onionsupport/actions/runs/34022425774): contratos, sintaxis, higiene, SPA crítica y contrato de Clientes correctos.
+- [Azure Static Web Apps, run 34022425762](https://github.com/avila199817/onionsupport/actions/runs/34022425762): artefacto exacto validado y despliegue de producción correcto; después se verificaron canonicalización, bytes, seguridad, routing y backend.
+- [Production Verification, run 34022531542](https://github.com/avila199817/onionsupport/actions/runs/34022531542): rebuild reproducible, bytes canónicos, seguridad/routing/backend y Google Measurement correctos contra el SHA desplegado.
+- [Disponibilidad, run 34022531443](https://github.com/avila199817/onionsupport/actions/runs/34022531443): monitor y tres rondas sobre HTML/grafo crítico correctos, sin incidente persistente.
+- [Lighthouse, run 34022531451](https://github.com/avila199817/onionsupport/actions/runs/34022531451): móvil y escritorio completaron cinco muestras por superficie; `/login` mantuvo `noindex, follow`. Los avisos móviles permanecen documentados abajo.
+- [IndexNow, run 34022531455](https://github.com/avila199817/onionsupport/actions/runs/34022531455): clave y payload validados y URLs enviadas correctamente.
 
 La publicación de `b3662615` tiene evidencias separadas:
 
@@ -47,7 +57,7 @@ Estas son medianas sintéticas de **cinco muestras de portada por perfil**, comp
 
 En esa medición histórica quedaron dos avisos del perfil móvil: **TBT de portada 404 ms frente a 300 ms** y **LCP de acceso 2.573 ms frente a 2.500 ms**. El workflow finalizó correctamente con esos avisos; no se redujeron umbrales. La comparación local alternada no reprodujo el aumento de TBT observado en CI y no aporta evidencia suficiente para atribuirlo a AvatarSystem o a la consolidación. El siguiente cambio de rendimiento debe partir de una reproducción controlada, como establece el [roadmap](ROADMAP.md).
 
-En la revisión más reciente `b3662615`, Lighthouse midió rendimiento móvil de portada **83** y TBT mediano **518 ms**; acceso tuvo LCP mediano **2.525 ms**. Las medianas de rendimiento de escritorio fueron 99/99/100 para portada/acceso/servicio. Frente al monitor anterior, portada móvil pasó de 86 a 83 y TBT de 205 a 518 ms. Son observaciones sintéticas y no demuestran causalidad de AvatarSystem. Estos avisos siguen abiertos sin rebajar presupuestos.
+En la revisión desplegada `1f220dc5`, el [run Lighthouse 34022531451](https://github.com/avila199817/onionsupport/actions/runs/34022531451) midió en móvil una mediana de rendimiento de portada **85**, CLS **0,000** y TBT **474 ms** frente al presupuesto de 300 ms; `/login` obtuvo rendimiento **97** y LCP mediano **2.520 ms** frente a 2.500 ms. `reparacion-ordenadores` obtuvo rendimiento móvil **100**. En escritorio las medianas de rendimiento fueron **99/99/100** para portada/acceso/servicio, con TBT mediano de portada de **23 ms**. Son observaciones sintéticas y no demuestran causalidad de AvatarSystem ni de la retirada de fachadas; los avisos móviles siguen abiertos sin rebajar presupuestos.
 
 ### Decisiones vigentes
 

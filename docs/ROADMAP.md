@@ -29,8 +29,9 @@ la estabilidad de lo ya publicado.
 
 ## Estado del corte
 
-La base funcional desplegada y verificada al iniciar el bloque de identidad estable es
-[b3662615](https://github.com/avila199817/onionsupport/commit/b3662615743e542c1467102a6fc706d2b310a3d6), con evidencias de publicación en [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md).
+La base funcional desplegada y verificada para iniciar F1 es
+[1f220dc5](https://github.com/avila199817/onionsupport/commit/1f220dc51d53a50212ef1b415707388fa030abf7), con evidencias de publicación en [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md). El backend coordinado de identidad está en
+[d5ccad6b](https://github.com/avila199817/oniontech/commit/d5ccad6b1debd99391a0c0dcacdc617f92ec14c8).
 
 | Área | Estado | Fuente de verdad |
 |---|---|---|
@@ -51,12 +52,7 @@ no debe reabrirse para recuperar una segunda autoridad de avatar.
 
 ## Bloque actual y siguiente cierre
 
-El bloque de identidad establece userId como semilla visual estable y una selección
-canónica del avatar del perfil en backend. Se migran consumidores, proyecciones y
-cachés de contenido; se retiran selectores duplicados y el puente de avatar técnico. El borrado de una foto actual
-debe prevalecer frente a alias o snapshots antiguos. Los contratos y fixtures comprueban
-cambio de correo, perfil sin foto, IDs de cliente/usuario distintos y aislamiento
-entre identidades. No completa por sí solo F1.
+El bloque de identidad quedó cerrado mediante [frontend #524](https://github.com/avila199817/onionsupport/pull/524) y [backend #496](https://github.com/avila199817/oniontech/pull/496): userId es la semilla visual estable, la selección de avatar de perfil es canónica y se migraron consumidores, proyecciones y cachés de contenido. Se retiraron selectores duplicados y el puente de avatar técnico; un borrado actual prevalece frente a alias o snapshots antiguos. Los contratos cubren cambio de correo, perfil sin foto, IDs de cliente/usuario distintos y aislamiento entre identidades. Este cierre no sustituye la prueba autenticada F1.
 
 Las tres fachadas legacy de Clientes quedan retiradas tras migrar sus últimos
 consumidores. La vista abre y desmonta directamente el controlador canónico de alta,
@@ -127,10 +123,10 @@ acaso” ni cambiar endpoints del backend desde la vista.
 **Estado:** pendiente con señales concretas. **Dependencia:** F1; no depende de
 reescribir CSS.
 
-Repetir la medición en CI con el mismo SHA y condiciones antes de optimizar. El corte
-actual dejó portada Lighthouse en **87 móvil / 100 escritorio**, CLS móvil **0,000**,
-TBT móvil **404 ms frente a 300 ms** y LCP del acceso **2.573 ms frente a 2.500 ms**.
-Son muestras sintéticas, no telemetría de usuarios.
+Repetir la medición en CI con el mismo SHA y condiciones antes de optimizar. En el corte
+`1f220dc5`, la portada obtuvo mediana Lighthouse **85 móvil / 99 escritorio**, CLS móvil **0,000**,
+TBT móvil **474 ms frente a 300 ms** y `/login` LCP móvil **2.520 ms frente a 2.500 ms**.
+El servicio auditado obtuvo **100** de rendimiento en móvil y escritorio. Son muestras sintéticas, no telemetría de usuarios.
 
 **Cierre:** reproducción estable de la regresión o explicación respaldada por perfiles,
 presupuesto acordado sin relajar gates, mejora medible y ausencia de regresión en

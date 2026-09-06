@@ -15,7 +15,7 @@ export {
 } from "./clientes.model.js";
 
 export const CLIENTES_TEMPLATE_VERSION =
-  "clientes.template.cursor.v12.private-admin-visual-parity";
+  "clientes.template.cursor.v13.contact-datetime-polish";
 export const CLIENTES_TABLE_TEMPLATE_VERSION = CLIENTES_TEMPLATE_VERSION;
 export const CLIENTES_VIEW_TEMPLATE_VERSION = CLIENTES_TEMPLATE_VERSION;
 
@@ -158,6 +158,19 @@ function formatDateShort(value = null) {
   }
 }
 
+function formatTimeShort(value = null) {
+  const timestamp = toTimestamp(value);
+  if (!timestamp) return "";
+  try {
+    return new Intl.DateTimeFormat("es-ES", {
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(timestamp));
+  } catch {
+    return new Date(timestamp).toISOString().slice(11, 16);
+  }
+}
+
 function formatDateTime(value = null) {
   const timestamp = toTimestamp(value);
   if (!timestamp) return "—";
@@ -229,14 +242,14 @@ function icon(name = "") {
     close: '<path d="m6 6 12 12M18 6 6 18"/>',
     calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/>',
     mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
-    phone: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72"/>',
+    phone: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>',
     check: '<path d="m5 12 4 4L19 6"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     lock: '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
     euro: '<path d="M4 10h10M4 14h9"/><path d="M18 6.5A7 7 0 1 0 18 17.5"/>',
     refresh: '<path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5"/>',
   };
-  return `<svg ${common}>${paths[name] || paths.users}</svg>`;
+  return `<svg ${common} data-icon="${attr(name)}">${paths[name] || paths.users}</svg>`;
 }
 
 function avatarPresentation(item = {}, label = "Cliente") {
@@ -291,8 +304,8 @@ function renderContact(item = {}) {
   if (!email && !phone) return '<span class="clientes-contact-empty">Sin contacto</span>';
   return `
     <div class="clientes-contact-stack">
-      ${email ? `<a class="clientes-contact-link" href="mailto:${attr(encodeURIComponent(email))}" data-stop-row="true">${icon("mail")}<span>${escapeHtml(email)}</span></a>` : ""}
-      ${phone ? `<a class="clientes-contact-link" href="tel:${attr(phone.replace(/[^\d+]/g, ""))}" data-stop-row="true">${icon("phone")}<span>${escapeHtml(phone)}</span></a>` : ""}
+      ${email ? `<a class="clientes-contact-link" data-contact-kind="email" href="mailto:${attr(encodeURIComponent(email))}" data-stop-row="true">${icon("mail")}<span>${escapeHtml(email)}</span></a>` : ""}
+      ${phone ? `<a class="clientes-contact-link" data-contact-kind="phone" href="tel:${attr(phone.replace(/[^\d+]/g, ""))}" data-stop-row="true">${icon("phone")}<span>${escapeHtml(phone)}</span></a>` : ""}
     </div>
   `;
 }
@@ -304,6 +317,8 @@ function renderRow(item = {}, vm = {}) {
   const code = cleanText(first(current.code, current.codigo, id, "CLI-SIN-ID"), "CLI-SIN-ID");
   const name = cleanText(first(current.nombreFiscal, current.razonSocial, current.displayName, "Cliente"), "Cliente");
   const secondary = [current.email, current.nif].filter(Boolean).join(" · ") || "Sin datos fiscales";
+  const createdDate = formatDateShort(current.createdAt);
+  const createdTime = formatTimeShort(current.createdAt);
   return `
     <tr
       class="clientes-table-row clientes-table-row--${attr(statusBucket(current))}${opening ? " is-loading" : ""}"
@@ -343,7 +358,8 @@ function renderRow(item = {}, vm = {}) {
       </td>
       <td class="clientes-cell clientes-cell--date">
         <span class="clientes-date-inline" title="${attr(formatDateTime(current.createdAt))}">
-          ${escapeHtml(formatDateShort(current.createdAt))}
+          <span class="clientes-date-day">${escapeHtml(createdDate)}</span>
+          ${createdTime ? `<span class="clientes-date-separator" aria-hidden="true">·</span><span class="clientes-date-time">${escapeHtml(createdTime)}</span>` : ""}
         </span>
       </td>
       <td class="clientes-cell clientes-cell--contact">${renderContact(current)}</td>

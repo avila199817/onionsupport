@@ -233,9 +233,13 @@ jobs:
               raise SystemExit("retired facade references remain:\n" + "\n".join(leftovers))
           PY
 
-      - name: Retire helper files from candidate index
+      - name: Retire deleted paths from candidate index
         shell: bash
         run: |
+          git update-index --force-remove \
+            src/views/clientes/clientes.index.legacy.js \
+            src/views/clientes/clientes.template.legacy.js \
+            src/views/clientes/clientes.api.legacy.js
           git rm -f .github/workflows/codex-clientes-legacy-cleanup.yml
           git rm -f validation-error.txt || true
 

@@ -191,6 +191,8 @@ function finalizeRelation({
   name = "",
   secondaryName = "",
   email = "",
+  userId = "",
+  username = "",
   avatarUrl = "",
 } = {}) {
   const primary = cleanText(name, "");
@@ -215,6 +217,8 @@ function finalizeRelation({
     displayName: primary,
     name: primary,
     email: safeEmail,
+    userId,
+    username,
   });
 
   return Object.freeze({
@@ -223,6 +227,8 @@ function finalizeRelation({
     secondaryName: safeSecondary,
     email: visibleEmail,
     identityEmail: presentation.email,
+    userId: presentation.userId,
+    username: presentation.username,
     avatarUrl: avatar,
     initials: presentation.initials,
     tone: presentation.tone,
@@ -328,6 +334,8 @@ function incidenciaRelation(source = {}) {
     kind: "solicitante",
     name,
     email,
+    userId: first(declared.userId, root.userId, root.usuarioId, root.ownerUserId, requesterSnapshot.userId, cliente.userId, receptor.userId, user.userId, user.id, ""),
+    username: first(declared.username, root.username, root.requesterUsername, requesterSnapshot.username, cliente.username, receptor.username, user.username, ""),
     avatarUrl,
   });
 }
@@ -384,6 +392,8 @@ function facturaRelation(source = {}) {
         ? contact
         : "",
     email,
+    userId: first(declared.userId, firstPathAcross(root, ["userId", "usuarioId", "cliente.userId", "clienteSnapshot.userId"]), ""),
+    username: first(declared.username, firstPathAcross(root, ["username", "cliente.username", "clienteSnapshot.username"]), ""),
     avatarUrl,
   });
 }
@@ -436,6 +446,8 @@ function genericRelation(source = {}, kind = "relacion") {
     kind,
     name,
     email,
+    userId: first(declared.userId, root.userId, root.usuarioId, kind === "usuario" ? root.id : "", ""),
+    username: first(declared.username, root.username, ""),
     avatarUrl,
   });
 }
@@ -509,6 +521,8 @@ export function renderHomeEntityRelation(relation = null) {
     displayName: name,
     name,
     email: relation.identityEmail || relation.email || "",
+    userId: relation.userId,
+    username: relation.username,
   });
   const tone = Number(relation.tone ?? presentation.tone) >>> 0;
   const initials = cleanText(relation.initials, presentation.initials);
@@ -538,6 +552,8 @@ export function renderHomeEntityRelation(relation = null) {
         data-avatar-initials="${attr(initials)}"
         data-avatar-name="${attr(name)}"
         ${identityEmail ? `data-avatar-email="${attr(identityEmail)}"` : ""}
+        data-avatar-user-id="${attr(presentation.userId)}"
+        data-avatar-username="${attr(presentation.username)}"
         data-has-avatar="${avatarUrl ? "true" : "false"}"
         aria-hidden="true"
       >

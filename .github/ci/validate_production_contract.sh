@@ -268,8 +268,8 @@ def validate_public_html(path, expected_url, *, require_h1=False, require_intern
     if len(parser.descriptions) != 1 or not parser.descriptions[0]:
         error(path, "Debe contener exactamente una meta description no vacía.")
     if public_site_v3:
-        if expected_url == expected_home and parser.titles != ["Onion Support"]:
-            error(path, "El título principal debe ser exactamente Onion Support.")
+        if expected_url == expected_home and parser.titles != ["Soporte informático y asistencia técnica | Onion Support"]:
+            error(path, "El título principal debe ser exactamente el título SEO canónico de Onion Support.")
         if any("Sant Vicenç" in title for title in parser.titles):
             error(path, "La marca pública no puede limitarse a Sant Vicenç en el título.")
     for name in (("robots", "googlebot", "bingbot") if public_site_v3 else ("robots", "googlebot")):

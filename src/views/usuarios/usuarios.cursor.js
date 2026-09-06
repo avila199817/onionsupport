@@ -2,13 +2,14 @@
    Onion Support - Usuarios Cursor API
    Archivo: /src/views/usuarios/usuarios.cursor.js
 
-   CURSOR-FIRST · SERVER FILTERED · SCALE SAFE V2
+   CURSOR-FIRST · SERVER FILTERED · SCALE SAFE V3
 
    Responsabilidad:
    - Cargar una única página de /api/users.
    - Mantener continuation tokens opacos fuera del DOM y snapshots públicos.
    - Pedir total exacto sólo en la primera página sin filtros, nunca en búsquedas.
    - Delegar normalización de modelo al contrato canónico de usuarios.api.js.
+   - Separar del directorio de Usuarios las identidades internas de Empleados.
 ========================================================= */
 
 import Http from "../../core/http.js";
@@ -17,12 +18,36 @@ import {
 } from "./usuarios.api.js";
 
 export const USUARIOS_CURSOR_VERSION =
-  "usuarios.cursor.v2.total-cost-gated";
+  "usuarios.cursor.v3.employee-directory-boundary";
 
 export const USUARIOS_CURSOR_ENDPOINT = "/api/users";
 export const USUARIOS_CURSOR_PAGE_SIZE = 50;
 export const USUARIOS_CURSOR_MAX_PAGE_SIZE = 200;
 export const USUARIOS_CURSOR_TIMEOUT = 20_000;
+
+/*
+  El backend de identidad sigue devolviendo cuentas internas junto al resto de
+  usuarios. Hasta que /api/users exponga un scope de audiencia propio, esta
+  frontera mantiene Empleados fuera de la vista Usuarios sin alterar su cuenta
+  ni el modelo canónico compartido por otros dominios.
+*/
+const INTERNAL_EMPLOYEE_USER_IDS = new Set([
+  "on-20260901024205",
+]);
+
+const INTERNAL_EMPLOYEE_USERNAMES = new Set([
+  "avila199817",
+]);
+
+const INTERNAL_EMPLOYEE_MARKERS = new Set([
+  "employee",
+  "empleado",
+  "staff",
+  "internal",
+  "team",
+  "team_member",
+  "equipo",
+]);
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -51,6 +76,61 @@ function number(value = 0, fallback = 0) {
 
 function clamp(value, min, max) {
   return Math.min(Math.max(number(value, min), min), max);
+}
+
+function directoryKey(value = "") {
+  return cleanText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^\w:.]/g, "")
+    .replace(/^_+|_+$/g, "");
+}
+
+function identityKey(value = "") {
+  return cleanText(value, "").toLowerCase();
+}
+
+export function isInternalEmployeeUsuario(item = {}) {
+  const source = safeObject(item);
+
+  if (
+    source.employee === true ||
+    source.isEmployee === true ||
+    source.staff === true ||
+    source.isStaff === true
+  ) {
+    return true;
+  }
+
+  const marker = directoryKey(
+    source.personType ||
+      source.accountType ||
+      source.audience ||
+      source.kind ||
+      source.profileType ||
+      source.employmentType ||
+      source.employeeType ||
+      source.tipo ||
+      ""
+  );
+
+  if (INTERNAL_EMPLOYEE_MARKERS.has(marker)) return true;
+
+  const userId = identityKey(
+    source.userId || source.usuarioId || source.id || source.uid || ""
+  );
+  if (userId && INTERNAL_EMPLOYEE_USER_IDS.has(userId)) return true;
+
+  const username = identityKey(
+    source.username || source.userName || source.slug || ""
+  );
+  return Boolean(username && INTERNAL_EMPLOYEE_USERNAMES.has(username));
+}
+
+export function filterUsuariosDirectoryItems(items = []) {
+  return safeArray(items).filter((item) => !isInternalEmployeeUsuario(item));
 }
 
 function pickItems(payload = null) {
@@ -190,19 +270,28 @@ export async function fetchUsuariosCursorPage(options = {}) {
     throw error;
   }
 
-  const items = normalizeUsuariosCollection(pickItems(response));
+  const normalizedItems = normalizeUsuariosCollection(pickItems(response));
+  const items = filterUsuariosDirectoryItems(normalizedItems);
+  const excludedInternalEmployees = Math.max(0, normalizedItems.length - items.length);
   const continuationToken = pickToken(response);
-  const totalKnown = pickTotalKnown(response);
-  const total = pickTotal(response);
+
+  /*
+    El total remoto cuenta cuentas de identidad, incluidas las internas. Como
+    Usuarios muestra sólo su directorio funcional, no presentamos ese total
+    bruto como si fuera un total exacto de usuarios visibles.
+  */
+  const totalKnown = false;
+  const total = null;
 
   return {
     ok: true,
     items,
     count: items.length,
     returned: items.length,
+    excludedInternalEmployees,
     totalKnown,
     total,
-    remoteCount: totalKnown ? total : null,
+    remoteCount: null,
     hasMore: pickHasMore(response),
     continuationToken: continuationToken || null,
     nextContinuationToken: continuationToken || null,
@@ -225,4 +314,6 @@ export default {
   buildQuery: buildUsuariosCursorQuery,
   fetchPage: fetchUsuariosCursorPage,
   mergeItems: mergeUsuariosCursorItems,
+  isInternalEmployee: isInternalEmployeeUsuario,
+  filterDirectoryItems: filterUsuariosDirectoryItems,
 };

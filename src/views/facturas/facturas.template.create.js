@@ -453,7 +453,7 @@ function normalizeClient(item = {}) {
     ""
   ).toLowerCase();
 
-  const userId = cleanText(first(raw.userId, raw.usuarioId, raw.uid, raw.id), "");
+  const userId = cleanText(first(raw.userId, raw.usuarioId), "");
   const clienteId = cleanText(first(raw.clienteId, raw.clientId, raw.customerId, id), id);
   const tipo = cleanText(first(raw.clienteTipo, raw.tipo, raw.type, raw.clienteType, raw.segmento), "");
   const nif = cleanText(first(raw.nif, raw.cif, raw.taxId, raw.vatId), "").toUpperCase();
@@ -748,17 +748,16 @@ function renderAvatar(client = {}) {
   const current = normalizeClient(client);
   const src = safeImageSrc(current.avatarUrl);
   const presentation = resolveAvatarPresentation({
-    ...current,
     displayName: current.name,
     name: current.name,
     email: current.email,
     username: current.username,
-    userId: first(current.userId, current.clienteUserId, current.id, current.clienteId, ""),
+    userId: current.userId,
   });
 
   return `
     <span class="fac-create-avatar${src ? " has-image" : " is-fallback"}" aria-hidden="true"
-      data-avatar-system="true" data-avatar-host="true" data-avatar-tone="${attr(String(presentation.tone))}"
+      data-avatar-system="true" data-avatar-host="true" data-avatar-name="${attr(presentation.name)}" data-avatar-email="${attr(presentation.email)}" data-avatar-user-id="${attr(presentation.userId)}" data-avatar-username="${attr(presentation.username)}" data-avatar-tone="${attr(String(presentation.tone))}"
       data-avatar-identity="${attr(presentation.fingerprint)}" data-avatar-initials="${attr(presentation.initials)}"
       data-has-avatar="${src ? "true" : "false"}">
       ${src ? `<img data-avatar-image="true" src="${attr(src)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : ""}

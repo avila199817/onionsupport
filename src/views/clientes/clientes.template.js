@@ -242,11 +242,11 @@ function icon(name = "") {
 function avatarPresentation(item = {}, label = "Cliente") {
   const current = normalizeClienteModel(item);
   return resolveAvatarPresentation({
-    ...current,
     displayName: cleanText(label, "Cliente"),
     name: cleanText(label, "Cliente"),
     email: current.email,
-    userId: first(current.userId, current.clienteId, current.clientId, current.id, ""),
+    userId: current.userId,
+    username: current.username,
   });
 }
 
@@ -275,7 +275,7 @@ function renderAvatar(item = {}) {
   const presentation = avatarPresentation(current, label);
   return `
     <span class="clientes-avatar${src ? " has-image" : " is-fallback"}" aria-hidden="true"
-      data-avatar-system="true" data-avatar-host="true" data-avatar-tone="${attr(String(presentation.tone))}"
+      data-avatar-system="true" data-avatar-host="true" data-avatar-name="${attr(presentation.name)}" data-avatar-email="${attr(presentation.email)}" data-avatar-user-id="${attr(presentation.userId)}" data-avatar-username="${attr(presentation.username)}" data-avatar-tone="${attr(String(presentation.tone))}"
       data-avatar-identity="${attr(presentation.fingerprint)}" data-avatar-initials="${attr(presentation.initials)}"
       data-has-avatar="${src ? "true" : "false"}">
       ${src ? `<img class="clientes-avatar-img" data-avatar-image="true" src="${attr(src)}" alt="" width="42" height="42" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : ""}

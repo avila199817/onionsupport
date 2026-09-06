@@ -766,6 +766,18 @@ function resolveHostIdentity(host = null) {
     return currentUser;
   }
 
+  // A projected identity is a complete boundary, including empty aliases.
+  // Never borrow a requester's email/userId for a nested technician avatar.
+  // Hosts without identity metadata retain the legacy DOM discovery below.
+  if (["data-avatar-name", "data-avatar-email", "data-avatar-user-id", "data-avatar-username"].some((name) => host.hasAttribute(name))) {
+    return {
+      name: datasetValue(host, ["avatarName"]),
+      email: normalizeAvatarEmail(datasetValue(host, ["avatarEmail"])),
+      userId: normalizeAvatarUserId(datasetValue(host, ["avatarUserId"])),
+      username: normalizeAvatarUsername(datasetValue(host, ["avatarUsername"])),
+    };
+  }
+
   const scope = closestIdentityScope(host);
 
   const hostEmail = emailFromNode(host);

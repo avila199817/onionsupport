@@ -15,6 +15,8 @@ Una autoridad por responsabilidad permite corregir un comportamiento en un solo 
 | Marca y páginas públicas | `src/core/public-site.js` | Catálogo consumido por generación estática y navegación SPA. |
 | Escritura de metadatos DOM | `src/router/page-metadata.js` | Actualiza título, canonical, robots, Open Graph, Twitter y JSON-LD al navegar. |
 
+Los hosts de avatar proyectan los campos usados por `resolveAvatarPresentation` en `data-avatar-name`, `data-avatar-email`, `data-avatar-user-id` y `data-avatar-username`. El fingerprint y el tono no sustituyen esos aliases: el runtime necesita la identidad original para reconciliar cambios sin perder el email situado en otra celda ni inferir datos de una entidad contigua. Una proyección explícita delimita la identidad completa, incluidos aliases vacíos; sólo los hosts sin metadatos conservan el descubrimiento legacy. Las listas de gestión y los selectores/detalle de Facturas usan esta proyección. Home conserva también userId/username en sus relaciones cuando faltan emails; los demás detalles mantienen sus aliases explícitos. Los IDs de factura y cliente no se utilizan como IDs de usuario. La prioridad canónica sigue siendo email, userId y username: cambiar el email puede cambiar el fingerprint o color aunque el userId sea el mismo.
+
 ## Errores corregidos
 
 - En Correo, cambiar de carpeta invalida el lector anterior. Una respuesta tardía de mensajes, estado o buzones no puede escribir sobre otra operación ni después de desmontar la vista, incluso cuando el transporte ignora la cancelación.
@@ -44,6 +46,6 @@ Referencias oficiales: [sitelinks](https://developers.google.com/search/docs/app
 
 ## Verificación y límites
 
-`npm run validate:ci` ejecuta contratos de fuente, pruebas de carreras asíncronas, compilación reproducible, inventario del artefacto y pruebas de navegador. `npm run test:browser:ui` cubre avatares, modales, carga visual, consentimiento con CSS lento o fallido y transiciones reales de metadatos. Se requiere Chrome/Chromium; puede indicarse su ejecutable con `CHROME_BIN`.
+`npm run validate:ci` ejecuta contratos de fuente, pruebas de carreras asíncronas, compilación reproducible, inventario del artefacto y pruebas de navegador. `npm run test:browser:ui` cubre avatares, modales, carga visual, consentimiento con CSS lento o fallido y transiciones reales de metadatos. El contrato de avatares compara también la identidad antes y después de sincronizar templates reales de Home, Incidencias, Facturas, Clientes y Usuarios, incluido el técnico separado del solicitante y los detalles de Usuarios/Facturas. Se requiere Chrome/Chromium; puede indicarse su ejecutable con `CHROME_BIN`.
 
 El alcance no es reescribir cada API de dominio ni fusionar todas las máquinas de estado. Las nuevas vistas deben consumir estas autoridades; los controladores históricos conservan reglas de dominio y adaptadores que no son intercambiables. La autenticación, la autorización efectiva y los datos de negocio siguen siendo responsabilidad del backend.

@@ -445,11 +445,11 @@ function getAvatarPresentation(item = {}) {
   const name = getClientName(item);
   const email = getClientEmail(item);
   return resolveAvatarPresentation({
-    ...item,
     displayName: name,
     name,
     email,
-    userId: firstPath(item, ["clienteId", "clientId", "customerId", "userId", "id"]),
+    userId: firstPath(item, ["userId", "usuarioId", "cliente.userId", "clienteSnapshot.userId"]),
+    username: firstPath(item, ["username", "cliente.username", "clienteSnapshot.username"]),
   });
 }
 
@@ -844,7 +844,7 @@ function renderAvatar(item = {}) {
   return `
     <span class="facturas-avatar${avatarUrl ? " has-image" : " is-fallback"}"
       ${tooltipAttrs(name, name)} data-facturas-avatar="true" aria-hidden="true"
-      data-avatar-system="true" data-avatar-host="true" data-avatar-tone="${attr(String(presentation.tone))}"
+      data-avatar-system="true" data-avatar-host="true" data-avatar-name="${attr(presentation.name)}" data-avatar-email="${attr(presentation.email)}" data-avatar-user-id="${attr(presentation.userId)}" data-avatar-username="${attr(presentation.username)}" data-avatar-tone="${attr(String(presentation.tone))}"
       data-avatar-identity="${attr(presentation.fingerprint)}" data-avatar-initials="${attr(presentation.initials)}"
       data-has-avatar="${avatarUrl ? "true" : "false"}">
       ${avatarUrl ? `<img class="facturas-avatar-img" data-avatar-image="true" src="${attr(avatarUrl)}" alt="" width="42" height="42" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false" data-facturas-avatar-img="true">` : ""}

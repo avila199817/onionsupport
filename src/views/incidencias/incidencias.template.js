@@ -672,9 +672,11 @@ function renderAvatar(it = {}) {
     displayName: name,
     name,
     email: getClientEmail(it),
+    userId: unwrap(it).userId,
+    username: unwrap(it).username,
   });
   return `
-    <span class="incidencias-avatar${src ? " has-image" : " is-fallback"}" data-avatar-system="true" data-avatar-host="true" data-avatar-tone="${at(String(presentation.tone))}" data-avatar-identity="${at(presentation.fingerprint)}" data-avatar-initials="${at(presentation.initials)}" data-has-avatar="${src ? "true" : "false"}" title="${at(name)}" aria-hidden="true">
+    <span class="incidencias-avatar${src ? " has-image" : " is-fallback"}" data-avatar-system="true" data-avatar-host="true" data-avatar-name="${at(presentation.name)}" data-avatar-email="${at(presentation.email)}" data-avatar-user-id="${at(presentation.userId)}" data-avatar-username="${at(presentation.username)}" data-avatar-tone="${at(String(presentation.tone))}" data-avatar-identity="${at(presentation.fingerprint)}" data-avatar-initials="${at(presentation.initials)}" data-has-avatar="${src ? "true" : "false"}" title="${at(name)}" aria-hidden="true">
       ${src ? `<img class="incidencias-avatar-img" data-avatar-image="true" src="${at(src)}" alt="" width="48" height="48" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}
       <span class="incidencias-avatar-fallback" data-avatar-fallback="true">${esc(presentation.initials)}</span>
     </span>
@@ -710,10 +712,11 @@ function renderAssignedBadge(it = {}) {
     displayName: name,
     name,
     email: getAssignedEmail(it),
+    userId: unwrap(it).assignedToUserId,
   });
   return `
     <span class="incidencias-assigned-badge" data-assigned="true" title="${at(`Técnico: ${name}`)}">
-      <span class="incidencias-assigned-avatar${avatar ? " has-image" : " is-fallback"}" data-avatar-system="true" data-avatar-host="true" data-avatar-tone="${at(String(presentation.tone))}" data-avatar-identity="${at(presentation.fingerprint)}" data-avatar-initials="${at(presentation.initials)}" data-has-avatar="${avatar ? "true" : "false"}" aria-hidden="true">
+      <span class="incidencias-assigned-avatar${avatar ? " has-image" : " is-fallback"}" data-avatar-system="true" data-avatar-host="true" data-avatar-name="${at(presentation.name)}" data-avatar-email="${at(presentation.email)}" data-avatar-user-id="${at(presentation.userId)}" data-avatar-username="${at(presentation.username)}" data-avatar-tone="${at(String(presentation.tone))}" data-avatar-identity="${at(presentation.fingerprint)}" data-avatar-initials="${at(presentation.initials)}" data-has-avatar="${avatar ? "true" : "false"}" aria-hidden="true">
         ${avatar ? `<img data-avatar-image="true" src="${at(avatar)}" alt="" width="20" height="20" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}
         <span data-avatar-fallback="true">${esc(presentation.initials)}</span>
       </span>

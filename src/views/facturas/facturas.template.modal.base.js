@@ -33,6 +33,8 @@
      y feedback de operaciones viven en index.js.
 ========================================================= */
 
+import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
+
 export const FACTURAS_MODAL_TEMPLATE_VERSION =
   "facturas.template.modal.productivo.v4.admin-payment";
 
@@ -3223,7 +3225,7 @@ export function renderSectionCard({
 function renderAvatar(
   factura = {}
 ) {
-  const raw =
+  const name =
     cleanText(
       first(
         getClienteEmpresa(factura),
@@ -3232,18 +3234,17 @@ function renderAvatar(
       "ON"
     );
 
-  const parts =
-    raw
-      .split(/\s+/)
-      .filter(Boolean);
-
-  const initials =
-    parts.length >= 2
-      ? `${parts[0][0] || ""}${parts[1][0] || ""}`
-          .toUpperCase()
-      : raw
-          .slice(0, 2)
-          .toUpperCase();
+  const presentation = resolveAvatarPresentation({
+    displayName: name,
+    name,
+    email: getClienteEmail(factura),
+    userId: firstFromSources(getPayloadSources(factura), [
+      "userId", "usuarioId", "cliente.userId", "clienteSnapshot.userId",
+    ]),
+    username: firstFromSources(getPayloadSources(factura), [
+      "username", "cliente.username", "clienteSnapshot.username",
+    ]),
+  });
 
   const avatarUrl =
     getClienteAvatar(
@@ -3253,6 +3254,15 @@ function renderAvatar(
   return `
     <div
       class="facturas-detail-avatar"
+      data-avatar-system="true"
+      data-avatar-host="true"
+      data-avatar-name="${attr(presentation.name)}"
+      data-avatar-email="${attr(presentation.email)}"
+      data-avatar-user-id="${attr(presentation.userId)}"
+      data-avatar-username="${attr(presentation.username)}"
+      data-avatar-tone="${attr(String(presentation.tone))}"
+      data-avatar-identity="${attr(presentation.fingerprint)}"
+      data-avatar-initials="${attr(presentation.initials)}"
       data-has-avatar="${avatarUrl ? "true" : "false"}"
       aria-hidden="true"
     >
@@ -3267,14 +3277,15 @@ function renderAvatar(
               referrerpolicy="no-referrer"
               draggable="false"
               class="facturas-detail-avatar-image"
+              data-avatar-image="true"
             >
           `
           : ""
       }
 
-      <span class="facturas-detail-avatar-fallback">
+      <span class="facturas-detail-avatar-fallback" data-avatar-fallback="true">
         ${escapeHtml(
-          initials || "ON"
+          presentation.initials
         )}
       </span>
     </div>

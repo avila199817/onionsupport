@@ -182,6 +182,77 @@ try {
   await page.waitForFunction(() => userHost.dataset.avatarState === "image");
   await page.evaluate(() => userModal.closeUsuariosModal());
 
+  // Real templates must retain their resolved identity after runtime discovery.
+  // Emails in another table cell and requester/technician pairs exposed a drift
+  // that the generic data-avatar-name fixture above cannot detect.
+  const consumerIdentities = await page.evaluate(async () => {
+    const [users, clients, invoices, tickets, home, invoiceCreate, invoiceDetail] = await Promise.all([
+      import("/src/views/usuarios/usuarios.template.js"),
+      import("/src/views/clientes/clientes.template.js"),
+      import("/src/views/facturas/facturas.template.js"),
+      import("/src/views/incidencias/incidencias.template.js"),
+      import("/src/views/home/home.template.relation.js"),
+      import("/src/views/facturas/facturas.template.create.js"),
+      import("/src/views/facturas/facturas.template.modal.js"),
+    ]);
+    const user = { id: "fixture-user-314", userId: "fixture-user-314", name: "Ana López", email: "ana@example.test", role: "user", status: "active" };
+    const technician = { userId: "fixture-technician-271", name: "Beatriz Moreno", email: "beatriz@example.test" };
+    const client = { ...user, id: "fixture-client-628", clienteId: "fixture-client-628", contactoNombre: user.name, nombreFiscal: user.name };
+    const ticket = { ...user, id: "fixture-ticket-159", ticketId: "fixture-ticket-159", assignedToUserId: technician.userId, assignedToName: technician.name, assignedToEmail: technician.email };
+    const invoice = { id: "fixture-invoice-265", clienteId: client.id, userId: user.userId, clienteNombre: user.name, clienteEmail: user.email };
+    const ticketWithoutTechnicianEmail = { ...ticket, assignedToUserId: "", assignedToEmail: "" };
+    const clientWithoutEmail = { userId: user.id, name: "Ana María López" };
+    const snapshot = (host) => host && ({ tone: host.dataset.avatarTone, identity: host.dataset.avatarIdentity, initials: host.dataset.avatarInitials });
+    const expected = (identity) => {
+      const value = avatars.resolveAvatarPresentation(identity);
+      return { tone: String(value.tone), identity: value.fingerprint, initials: value.initials };
+    };
+    const cases = [
+      ["Usuarios list", users.renderUsuariosTableTemplate({ items: [user], admin: true }), ".usuarios-avatar", user],
+      ["Clientes list", clients.renderClientesTemplate({ items: [client], admin: true }), ".clientes-avatar", user],
+      ["Clientes unlinked identity", clients.renderClientesTemplate({ items: [{ clienteId: client.id, nombreFiscal: clientWithoutEmail.name }], admin: true }), ".clientes-avatar", { name: clientWithoutEmail.name }],
+      ["Facturas list", invoices.renderFacturasTemplate({ items: [invoice] }), ".facturas-avatar", user],
+      ["Facturas client search", invoiceCreate.renderFacturaCreateClientSearchSlot({ clientSearch: { query: "Ana", results: [client] } }), ".fac-create-avatar", user],
+      ["Facturas selected client", invoiceCreate.renderFacturaCreateSelectedClientsSlot({ selectedClientes: [client] }), ".fac-create-avatar", user],
+      ["Facturas selected client without email", invoiceCreate.renderFacturaCreateSelectedClientsSlot({ selectedClientes: [{ ...client, ...clientWithoutEmail, email: "" }] }), ".fac-create-avatar", clientWithoutEmail],
+      ["Facturas unlinked client", invoiceCreate.renderFacturaCreateClientSearchSlot({ clientSearch: { query: "Ana", results: [clients.normalizeClienteModel({ clienteId: client.id, nombreFiscal: clientWithoutEmail.name })] } }), ".fac-create-avatar", { name: clientWithoutEmail.name }],
+      ["Facturas detail", invoiceDetail.renderFacturasDetailModal({ open: true, factura: invoice }), ".facturas-detail-avatar", user],
+      ["Facturas detail without email", invoiceDetail.renderFacturasDetailModal({ open: true, factura: { ...invoice, clienteNombre: clientWithoutEmail.name, clienteEmail: "" } }), ".facturas-detail-avatar", clientWithoutEmail],
+      ["Facturas list without email", invoices.renderFacturasTemplate({ items: [{ ...invoice, clienteNombre: clientWithoutEmail.name, clienteEmail: "" }] }), ".facturas-avatar", clientWithoutEmail],
+      ["Facturas without user identity", invoiceDetail.renderFacturasDetailModal({ open: true, factura: { id: invoice.id, clienteId: client.id, clienteNombre: clientWithoutEmail.name } }), ".facturas-detail-avatar", { name: clientWithoutEmail.name }],
+      ["Incidencias requester", tickets.renderIncidenciasTemplate({ items: [ticket] }), ".incidencias-avatar", user],
+      ["Incidencias technician", tickets.renderIncidenciasTemplate({ items: [ticket] }), ".incidencias-assigned-avatar", technician],
+      ["Incidencias technician by user ID", tickets.renderIncidenciasTemplate({ items: [{ ...ticket, assignedToEmail: "" }] }), ".incidencias-assigned-avatar", { ...technician, email: "" }],
+      ["Incidencias technician without aliases", tickets.renderIncidenciasTemplate({ items: [ticketWithoutTechnicianEmail] }), ".incidencias-assigned-avatar", { name: technician.name }],
+      ["Home relation", home.renderHomeEntityRelation(home.resolveHomeEntityRelation("incidencia", ticket)), ".home-entity-relation-avatar", user],
+      ["Home ticket without email", home.renderHomeEntityRelation(home.resolveHomeEntityRelation("incidencia", { ...ticket, email: "" })), ".home-entity-relation-avatar", { ...user, email: "" }],
+      ["Home invoice without email", home.renderHomeEntityRelation(home.resolveHomeEntityRelation("factura", { ...invoice, clienteEmail: "" })), ".home-entity-relation-avatar", { ...user, email: "" }],
+      ["Incidencias requester without email", tickets.renderIncidenciasTemplate({ items: [{ ...ticket, email: "" }] }), ".incidencias-avatar", { ...user, email: "" }],
+    ];
+    const results = [];
+    for (const [label, html, selector, identity] of cases) {
+      const container = document.createElement("section");
+      container.innerHTML = html;
+      document.querySelector("#fixture").append(container);
+      const avatar = container.querySelector(selector);
+      // A requester ID on an enclosing entity must not become a technician ID.
+      if (label === "Incidencias technician without aliases") avatar.closest("[data-ticket-row='true']").dataset.userId = user.userId;
+      const before = snapshot(avatar);
+      avatars.synchronizeAvatars(container);
+      results.push({ label, before, after: snapshot(avatar), expected: expected(identity) });
+      container.remove();
+    }
+    userModal.openUsuariosModal(user);
+    avatars.synchronizeAvatars(document);
+    results.push({ label: "Usuarios detail", after: snapshot(document.querySelector("[data-usuarios-avatar-frame='true']")), expected: expected(user) });
+    userModal.closeUsuariosModal();
+    return results;
+  });
+  for (const result of consumerIdentities) {
+    if (result.before) assert.deepEqual(result.before, result.expected, `${result.label}: template identity`);
+    assert.deepEqual(result.after, result.expected, `${result.label}: runtime must preserve the consumer identity`);
+  }
+
   await page.evaluate(async () => {
     const mail = await import("/src/views/correo/correo.template.js");
     const container = document.createElement("div");
@@ -283,7 +354,7 @@ try {
   await page.evaluate(() => { publicHost.querySelector("img").remove(); });
   await page.waitForFunction(() => publicHost.dataset.avatarState === "fallback");
   assert.deepEqual(failures, []);
-  console.log("Avatar DOM contract: PASS · public/shared authority · dynamic identity · loading/error/recovery · image removal · transparent alpha · observer settles · teardown/remount · media policy");
+  console.log("Avatar DOM contract: PASS · real consumer identity parity · distinct entity IDs · public/shared authority · dynamic identity · loading/error/recovery · image removal · transparent alpha · observer settles · teardown/remount · media policy");
 } finally {
   await browser?.close();
   await new Promise((resolveClose) => server.close(resolveClose));

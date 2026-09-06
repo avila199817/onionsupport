@@ -55,6 +55,14 @@
   padding-inline: var(--login-page-gutter);
 }
 
+.public-auth-shell--login .login-showcase-title {
+  text-transform: uppercase;
+}
+
+.public-auth-shell--login .login-showcase-title > span {
+  text-transform: none;
+}
+
 /* =========================================================
    2. DESKTOP CARD · VIEWPORT CENTER BALANCE
 

@@ -1,6 +1,6 @@
 /* =========================================================
    ONION SUPPORT — USUARIOS · LISTADO
-   DOMAIN-ONLY CSS · 2026-08-31
+   DOMAIN-ONLY CSS · 2026-09-06
 
    Shell/listado compartido: private-admin-parity.css
    Loading/skeleton paint: components/skeleton.css
@@ -11,10 +11,10 @@
 
 :where(.panel-content[data-view="usuarios"], .usuarios-view-root, [data-usuarios-scope="true"]) {
   --usr-table-min: 1080px;
-  --usr-main-col: 34%;
+  --usr-main-col: 33%;
   --usr-status-col: 11%;
-  --usr-date-col: 12%;
-  --usr-email-col: 20%;
+  --usr-date-col: 14%;
+  --usr-email-col: 19%;
   --usr-location-col: 10%;
   --usr-activity-col: 13%;
 }
@@ -162,7 +162,31 @@
   white-space: nowrap;
 }
 
-.usuarios-date-inline { color: var(--text); font-weight: var(--weight-semibold); }
+/*
+   El template ya conserva fecha + hora completa en title. En la celda de Alta
+   mostramos ese valor exacto para añadir HH:mm sin duplicar lógica de fechas ni
+   alterar el tooltip/accesibilidad del dato original.
+*/
+.usuarios-date-inline {
+  display: inline-flex;
+  align-items: center;
+  max-inline-size: none;
+  overflow: visible;
+  color: transparent;
+  font-size: 0;
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.usuarios-date-inline::before {
+  content: attr(title);
+  color: var(--text);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+  line-height: 1.3;
+}
+
 .usuarios-email-inline { color: var(--text); }
 .usuarios-activity-inline { color: var(--text-dim); }
 
@@ -180,7 +204,7 @@
 .usuarios-table-loading-row {
   min-block-size: 84px;
   display: grid;
-  grid-template-columns: 42px minmax(220px, 1fr) 90px 90px minmax(170px, .7fr) 90px 110px;
+  grid-template-columns: 42px minmax(220px, 1fr) 90px 110px minmax(170px, .7fr) 90px 110px;
   align-items: center;
   gap: 12px;
   padding: 10px var(--space-md);
@@ -194,7 +218,7 @@
 .usuarios-skeleton--lg { inline-size: 72%; }
 .usuarios-skeleton--md { inline-size: 56%; }
 .usuarios-skeleton--pill { inline-size: 76px; }
-.usuarios-skeleton--date { inline-size: 82px; }
+.usuarios-skeleton--date { inline-size: 102px; }
 .usuarios-skeleton--email { inline-size: 150px; }
 .usuarios-skeleton--location { inline-size: 70px; }
 .usuarios-skeleton--activity { inline-size: 96px; }

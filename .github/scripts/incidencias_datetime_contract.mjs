@@ -27,7 +27,7 @@ function renderItem(overrides = {}) {
 function cell(html, column) {
   return (
     html.match(
-      new RegExp(`data-column="${column}">([\\s\\S]*?)<\\/td>`)
+      new RegExp(`<td[^>]*data-column="${column}"[^>]*>([\\s\\S]*?)<\\/td>`)
     )?.[1] || ""
   );
 }

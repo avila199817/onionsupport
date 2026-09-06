@@ -6,6 +6,7 @@
    - Reutilizada por creación y edición admin del detalle.
    - Valores enviados al backend sin inventar taxonomías nuevas.
    - Alias únicamente para compatibilidad con datos legacy/español.
+   - Release 2026-09-06: precisión temporal visible HH:MM validada por contrato.
 ========================================================= */
 
 function option(value, label) {

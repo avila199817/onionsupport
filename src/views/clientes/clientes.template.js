@@ -15,7 +15,7 @@ export {
 } from "./clientes.model.js";
 
 export const CLIENTES_TEMPLATE_VERSION =
-  "clientes.template.cursor.v13.contact-datetime-polish";
+  "clientes.template.cursor.v12.private-admin-visual-parity";
 export const CLIENTES_TABLE_TEMPLATE_VERSION = CLIENTES_TEMPLATE_VERSION;
 export const CLIENTES_VIEW_TEMPLATE_VERSION = CLIENTES_TEMPLATE_VERSION;
 

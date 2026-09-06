@@ -1,8 +1,8 @@
 /* Service content; shared layout and metadata are generated centrally. */
 export default {
   "/reparacion-ordenadores": {
-    "heading": "Reparación de ordenadores y portátiles con diagnóstico técnico",
-    "lead": "Problemas de arranque, lentitud, sobrecalentamiento, almacenamiento, SSD, RAM o batería. Revisamos la causa antes de cambiar piezas y te indicamos qué reparación o mejora tiene sentido.",
+    "heading": "Reparación de ordenadores con diagnóstico claro",
+    "lead": "Ordenadores de sobremesa y portátiles que no arrancan, van lentos, se calientan o fallan de forma intermitente. Primero se identifica la causa; después se decide qué compensa reparar.",
     "highlights": [
       "Diagnóstico antes de intervenir",
       "SSD, RAM, batería y almacenamiento",
@@ -25,8 +25,8 @@ export default {
     ]
   },
   "/impresoras": {
-    "heading": "Instalación y soporte de impresoras, escáneres y periféricos",
-    "lead": "Configuración, drivers, USB, WiFi, red, escáner y colas de impresión. Revisamos el recorrido completo para localizar el fallo y dejar una instalación estable.",
+    "heading": "Impresoras y periféricos que vuelven a responder",
+    "lead": "Instalación, drivers, conexión por USB o red, escáner y colas de impresión. Se revisa el conjunto completo para evitar el clásico ciclo de reinstalar sin saber qué estaba fallando.",
     "highlights": [
       "Instalación y drivers",
       "USB, WiFi y red local",
@@ -53,8 +53,8 @@ export default {
     ]
   },
   "/soporte-informatico": {
-    "heading": "Soporte informático remoto y mantenimiento para particulares y empresas",
-    "lead": "Resolvemos incidencias de equipos, programas, cuentas y periféricos mediante asistencia remota, configuración y mantenimiento. Primero identificamos la causa y después aplicamos la solución adecuada.",
+    "heading": "Soporte y mantenimiento informático para seguir adelante",
+    "lead": "Asistencia remota en España para particulares, autónomos y empresas. Revisamos equipos, programas, cuentas y periféricos para encontrar la causa de cada incidencia y aplicar una solución adecuada al caso.",
     "highlights": [
       "Incidencias de software y hardware",
       "Configuración y mantenimiento de equipos",
@@ -86,8 +86,8 @@ export default {
     ]
   },
   "/redes-wifi": {
-    "heading": "Solución de problemas WiFi y redes: cobertura, cortes y velocidad",
-    "lead": "Revisamos routers, repetidores, cobertura, interferencias, velocidad y dispositivos conectados para localizar el cuello de botella antes de añadir hardware o cambiar equipos.",
+    "heading": "WiFi y redes estables, con cobertura y continuidad",
+    "lead": "Diagnóstico de cobertura, velocidad, cortes, repetidores y dispositivos que no se entienden entre sí. La prioridad es encontrar el cuello de botella real antes de añadir más hardware.",
     "highlights": [
       "Cobertura y estabilidad",
       "Routers y repetidores",
@@ -114,8 +114,8 @@ export default {
     ]
   },
   "/soporte-empresas": {
-    "heading": "Soporte informático para empresas, autónomos y pequeños negocios",
-    "lead": "Incidencias en ordenadores, red, impresoras y herramientas de trabajo. Priorizamos recuperar la operativa, aplicar una solución proporcionada y dejar claro qué se ha hecho.",
+    "heading": "Soporte informático para autónomos y pequeños negocios",
+    "lead": "Cuando el ordenador, la red o la impresora fallan, el problema no es solo técnico: también es tiempo de trabajo perdido. Se prioriza recuperar el servicio y dejar claro qué se ha hecho.",
     "highlights": [
       "Equipos de trabajo",
       "WiFi, red e impresoras",

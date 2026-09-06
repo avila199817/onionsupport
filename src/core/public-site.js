@@ -37,7 +37,7 @@ export const PUBLIC_SERVICES = Object.freeze([
 ]);
 
 export const PUBLIC_PAGES = Object.freeze([
-  Object.freeze({ path: "/", file: "index.html", label: PUBLIC_SITE.name, title: "Soporte informático y asistencia técnica | Onion Support", description: "Soporte informático para particulares, autónomos y empresas. Asistencia remota, reparación, redes y mantenimiento IT con soluciones claras y eficaces.", indexable: true }),
+  Object.freeze({ path: "/", file: "index.html", label: PUBLIC_SITE.name, title: "Onion Support | Servicio técnico informático", description: "Soporte informático para particulares, autónomos y empresas. Asistencia remota, reparación, redes y mantenimiento IT con soluciones claras y eficaces.", indexable: true }),
   ...PUBLIC_SERVICES,
   Object.freeze({ path: "/login", file: "login.html", label: "Iniciar sesión", title: `Iniciar sesión · ${PUBLIC_SITE.name}`, description: "Inicia sesión en Onion Support para consultar tus servicios, incidencias y datos de tu cuenta.", indexable: false }),
 ]);

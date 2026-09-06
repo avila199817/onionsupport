@@ -9,6 +9,8 @@ const [
   homeModal,
   facturaBridge,
   incidenciaBridge,
+  incidenciaDetailState,
+  enhancements,
   preload,
   runtime,
   template,
@@ -17,6 +19,8 @@ const [
   read("src/features/home-entity-modal/index.js"),
   read("src/features/factura-modal-bridge/index.js"),
   read("src/features/incidencia-modal-bridge/index.js"),
+  read("src/features/incidencias-detail-state/index.js"),
+  read("src/app/enhancements.js"),
   read("src/features/entity-intent-preload/index.js"),
   read("src/features/private-runtime-ui/index.js"),
   read("src/views/home/home.template.activity.js"),
@@ -67,9 +71,50 @@ assert.doesNotMatch(
   /Router\.navigate|AppCore\.navigate|history\.(?:pushState|replaceState)|location\.(?:assign|replace)|window\.location\s*=/
 );
 
-/* Incidencias ya dispone de bridge owner sin navegación. */
+/*
+  Incidencias usa SIEMPRE la misma autoridad de Detail State, también desde
+  Home/Facturas. El bridge sólo asegura que ese mismo módulo ESM esté montado
+  antes de crear/abrir el controller transversal; no replica la política.
+*/
 assert.match(incidenciaBridge, /module\?\.IncidenciasView/);
 assert.match(incidenciaBridge, /controller\.openDetail/);
+assert.match(incidenciaBridge, /loadIncidenciasDetailStateAuthority/);
+assert.match(
+  incidenciaBridge,
+  /import\(["']\.\.\/incidencias-detail-state\/index\.js["']\)/
+);
+assert.match(
+  incidenciaBridge,
+  /authority\.mountIncidenciasDetailState\(\)/
+);
+
+const incidenciaOpen = incidenciaBridge.slice(
+  incidenciaBridge.indexOf("export async function openIncidenciaModalFromCurrentView")
+);
+assert.match(
+  incidenciaOpen,
+  /Promise\.all\(\[[\s\S]*?loadIncidenciasModule\(\)[\s\S]*?loadIncidenciasDetailStateAuthority\(\)[\s\S]*?ensureStyles\(\)[\s\S]*?\]\)/
+);
+assert.match(
+  incidenciaDetailState,
+  /export function resolveConversationPolicy/
+);
+assert.match(
+  incidenciaDetailState,
+  /export function mountIncidenciasDetailState/
+);
+assert.match(
+  incidenciaDetailState,
+  /mountRoot\s*=\s*document\.body/
+);
+assert.match(
+  enhancements,
+  /key:\s*["']incidencias-detail-state["'][\s\S]*?load:\s*\(\)\s*=>\s*import\(["']\.\.\/features\/incidencias-detail-state\/index\.js["']\)/
+);
+assert.doesNotMatch(
+  incidenciaBridge,
+  /function\s+resolveConversationPolicy|function\s+eventSide|function\s+requesterIdentity/
+);
 assert.doesNotMatch(
   incidenciaBridge,
   /Router\.navigate|AppCore\.navigate|history\.(?:pushState|replaceState)|location\.(?:assign|replace)|window\.location\s*=/
@@ -93,5 +138,5 @@ assert.match(homeModal, /data-incidencias-modal-bridge-feedback/);
 assert.match(homeModal, /data-facturas-modal-bridge-feedback/);
 
 console.log(
-  "Home owner modal stay contract: PASS · Home retained · origin lease · sealed owner controllers · instant in-place flow"
+  "Home owner modal stay contract: PASS · Home retained · single canonical Incidencias Detail State authority · sealed owner controllers"
 );

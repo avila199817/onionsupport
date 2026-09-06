@@ -10,6 +10,7 @@
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import ClientesApi from "./clientes.api.js";
 import {
   createClientesCreateController,
   CLIENTES_CREATE_CONTROLLER_VERSION,
@@ -175,9 +176,11 @@ export const dispose = destroy;
 export function getSnapshot() {
   return Object.freeze({
     version: CLIENTES_LEGACY_FACADE_VERSION,
+    apiVersion: ClientesApi?.version || "",
     createControllerVersion: CLIENTES_CREATE_CONTROLLER_VERSION,
     compatibilityOnly: true,
     listingAuthority: "./index.js",
+    apiAuthority: "./clientes.api.js",
     createAuthority: "./clientes.create-controller.js",
     create: createController?.getSnapshot?.() || null,
   });

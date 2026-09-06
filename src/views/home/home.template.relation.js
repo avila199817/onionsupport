@@ -316,7 +316,7 @@ function incidenciaRelation(source = {}) {
     )
   );
 
-  const avatarUrl = firstImage([
+  const avatarUrl = root.hasAvatar === false ? "" : firstImage([
     declared,
     root.avatarUrl,
     root.avatar,
@@ -378,7 +378,7 @@ function facturaRelation(source = {}) {
     )
   );
 
-  const avatarUrl = firstImage([
+  const avatarUrl = root.hasAvatar === false ? "" : firstImage([
     declared,
     firstPath(root, INVOICE_AVATAR_PATHS),
     firstPath(raw, INVOICE_AVATAR_PATHS),
@@ -430,7 +430,7 @@ function genericRelation(source = {}, kind = "relacion") {
     )
   );
 
-  const avatarUrl = firstImage([
+  const avatarUrl = root.hasAvatar === false ? "" : firstImage([
     declared,
     root.avatarUrl,
     root.avatar,

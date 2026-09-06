@@ -1,11 +1,11 @@
 # ONION SUPPORT — CONTEXTO CANÓNICO DEL FRONTEND
 
-> Actualizado: 2026-09-04.
-> Corte de evidencia: 2026-09-04, UTC. Describe el estado observado y las reglas del repositorio `avila199817/onionsupport`. El código de `main` define la implementación; los runs enlazados acreditan la revisión desplegada. Una regla objetivo no acredita por sí sola que todos los consumidores la cumplan.
+> Actualizado: 2026-09-06.
+> Corte de evidencia: 2026-09-06, UTC. Describe el estado observado y las reglas del repositorio `avila199817/onionsupport`. El código de `main` define la implementación; los runs enlazados acreditan la revisión desplegada. Una regla objetivo no acredita por sí sola que todos los consumidores la cumplan.
 
 ## Estado del proyecto y evidencia
 
-La última versión funcional verificada de esta sesión es [`5d82b0d0f5757868b52be156cbf8d38a28a7e276`](https://github.com/avila199817/onionsupport/commit/5d82b0d0f5757868b52be156cbf8d38a28a7e276). Los commits posteriores que sólo actualicen documentación deben distinguirse de esta referencia de runtime.
+La última versión funcional desplegada y verificada al abrir este bloque es [`b3662615743e542c1467102a6fc706d2b310a3d6`](https://github.com/avila199817/onionsupport/commit/b3662615743e542c1467102a6fc706d2b310a3d6). Los commits posteriores que sólo actualicen documentación deben distinguirse de esta referencia de runtime.
 
 Usamos cuatro estados: **implementado** significa presente en el código; **desplegado**, publicado por el pipeline; **verificado**, contrastado mediante la evidencia y el alcance indicados; **pendiente/propuesto**, trabajo futuro. Ningún módulo queda certificado de extremo a extremo sólo porque su build o un health check sea correcto.
 
@@ -15,10 +15,19 @@ Usamos cuatro estados: **implementado** significa presente en el código; **desp
 | AvatarSystem, modales, AsyncScope, carga visual y SEO nacional | Implementado y desplegado | [PR #487](https://github.com/avila199817/onionsupport/pull/487), commit `26f546ab`; la consolidación retiró duplicaciones y dejó las autoridades descritas en este documento. No significa que cada normalizador o política de URL privada ya esté migrado. |
 | Validadores compatibles y verificación SEO por checkout | Implementado y desplegado | [PR #486](https://github.com/avila199817/onionsupport/pull/486), [PR #488](https://github.com/avila199817/onionsupport/pull/488) y commit [`0ad1500f`](https://github.com/avila199817/onionsupport/commit/0ad1500f): `/login` noindex se comprueba sin relajar los presupuestos Lighthouse. |
 | Salto visual del consentimiento | Corregido, desplegado y medido | [PR #490](https://github.com/avila199817/onionsupport/pull/490), commit `5d82b0d0`; CSS preparado antes de mostrar y apertura cancelable. El CLS móvil de la portada pasó a 0,000 en la medición descrita abajo. |
+| Identidad explícita de avatares y perfiles actuales de Clientes | Desplegado y verificado en el alcance de sus contratos | [Frontend #523](https://github.com/avila199817/onionsupport/pull/523) y [backend #495](https://github.com/avila199817/oniontech/pull/495). Las identidades explícitas vacías no heredan datos del DOM vecino y una foto eliminada en Users no revive desde el snapshot de Clientes. |
+| Identidad visual estable por userId | Implementado en este bloque; release acreditada por el workflow de su commit | AvatarSystem prioriza userId; se migran primera pintura de detalle, comentarios, seguimiento, perfil técnico y caché de soporte. Los contratos cubren cambios de correo, alias vacíos, IDs conflictivos y transporte del ID original a la API. |
 | Flujos privados con cuentas reales | Implementación existente; validación vertical completa pendiente | No se ha certificado en esta sesión login/refresh/logout, ACL, creación de tickets, adjuntos, facturación, correo real y avatar como un único recorrido contra producción. |
 | Resultados visibles en Google | Política técnica publicada; evolución del índice pendiente de observar | No consta una inspección autenticada de Search Console ni una solicitud manual de reindexación en esta sesión. IndexNow correcto no acredita rastreo de Google ni sitelinks. |
 
-La publicación de `5d82b0d0` tiene evidencias separadas:
+La publicación de `b3662615` tiene evidencias separadas:
+
+- [Azure Static Web Apps, run 34020310187](https://github.com/avila199817/onionsupport/actions/runs/34020310187): despliegue correcto.
+- [Production Verification, run 34020391469](https://github.com/avila199817/onionsupport/actions/runs/34020391469): 185 archivos publicados, 20 rutas SPA, 12 redirecciones y 37 rutas bloqueadas comprobados.
+- [Disponibilidad, run 34020391497](https://github.com/avila199817/onionsupport/actions/runs/34020391497): tres rondas de 16 comprobaciones, cero fallos.
+- [Lighthouse, run 34020391492](https://github.com/avila199817/onionsupport/actions/runs/34020391492): finaliza correctamente con los avisos móviles documentados abajo.
+
+Evidencia histórica de la corrección de consentimiento en `5d82b0d0`:
 
 - [Azure Static Web Apps, run 33924499365](https://github.com/avila199817/onionsupport/actions/runs/33924499365): despliegue correcto.
 - [Production Verification Gate, run 33924660120](https://github.com/avila199817/onionsupport/actions/runs/33924660120): verificación de producción correcta.
@@ -36,7 +45,9 @@ Estas son medianas sintéticas de **cinco muestras de portada por perfil**, comp
 | CLS | 0,217 | 0,000 | 0,172 | 0,006 |
 | Accesibilidad / buenas prácticas / SEO público después | — | 100 / 100 / 100 | — | 100 / 100 / 100 |
 
-Siguen abiertos dos avisos del perfil móvil: **TBT de portada 404 ms frente a 300 ms** y **LCP de acceso 2.573 ms frente a 2.500 ms**. El workflow finalizó correctamente con esos avisos; no se redujeron umbrales. La comparación local alternada no reprodujo el aumento de TBT observado en CI y no aporta evidencia suficiente para atribuirlo a AvatarSystem o a la consolidación. El siguiente cambio de rendimiento debe partir de una reproducción controlada, como establece el [roadmap](ROADMAP.md).
+En esa medición histórica quedaron dos avisos del perfil móvil: **TBT de portada 404 ms frente a 300 ms** y **LCP de acceso 2.573 ms frente a 2.500 ms**. El workflow finalizó correctamente con esos avisos; no se redujeron umbrales. La comparación local alternada no reprodujo el aumento de TBT observado en CI y no aporta evidencia suficiente para atribuirlo a AvatarSystem o a la consolidación. El siguiente cambio de rendimiento debe partir de una reproducción controlada, como establece el [roadmap](ROADMAP.md).
+
+En la revisión más reciente `b3662615`, Lighthouse midió rendimiento móvil de portada **83** y TBT mediano **518 ms**; acceso tuvo LCP mediano **2.525 ms**. Las medianas de rendimiento de escritorio fueron 99/99/100 para portada/acceso/servicio. Frente al monitor anterior, portada móvil pasó de 86 a 83 y TBT de 205 a 518 ms. Son observaciones sintéticas y no demuestran causalidad de AvatarSystem. Estos avisos siguen abiertos sin rebajar presupuestos.
 
 ### Decisiones vigentes
 
@@ -188,6 +199,9 @@ Autoridades:
 
 Reglas:
 
+- el ID estable del usuario tiene prioridad sobre correo/username/nombre; cambiar correo no cambia la clave visual. La transición desde la semilla por correo puede reasignar el tono una vez dentro de la paleta existente, sin guardar un mapa paralelo;
+- los IDs de factura, cliente o lookup no son userId. El ID normalizado para comparar avatares no sustituye el ID original usado en peticiones HTTP;
+- el fingerprint visual no es una caché de contenido: nombre, email, username y foto deben actualizarse aunque el usuario siga siendo el mismo;
 - mismo usuario => misma identidad visual en Sidebar, Home, Incidencias, Facturas, Clientes, Usuarios, Cuenta y DOM dinámico;
 - una imagen real válida gana al fallback y conserva alfa transparente;
 - no existen motores locales `avatarTone`, paletas 0..9, hashes `% 10` ni clases tone enumeradas por vista;
@@ -195,6 +209,8 @@ Reglas:
 - los templates pueden aportar identidad de dominio, pero delegan iniciales, tone y presentación a AvatarSystem;
 - `src/features/incidencias-comment-identity/` es dominio puro: resuelve aliases/identidad estable, sin DOM, HTTP ni paint;
 - `incidencias-comment-avatars` e `incidencias-followup-avatars` son adaptadores contextuales y no una segunda autoridad de avatar;
+- la ficha técnica usa el perfil de dominio y AvatarSystem. Se retira `incidencias-technician-avatar-bridge` y su registro de runtime; una ausencia actual no obtiene otra foto desde el DOM vecino;
+- un evento histórico sin userId acreditado conserva fallback por alias. Sus IDs de presentación no se usan como identificadores persistidos de autor;
 - en compatibilidad legacy por nombre, una coincidencia normalizada exacta tiene prioridad; el matching flexible sólo se usa si no hay una coincidencia exacta única.
 
 Los guards `avatar_authority_hygiene_contract.mjs` e `incidencias_comment_avatar_contract.mjs` impiden reintroducir autoridades visuales paralelas y fijan la compatibilidad de comentarios.
@@ -343,7 +359,7 @@ La política objetivo es persistir únicamente preferencias justificadas y minim
 
 | Consumidor observado | Persistencia presente | Trabajo pendiente |
 | --- | --- | --- |
-| `src/views/clientes/clientes.api.legacy.js` | Caché proyectada de clientes con datos identificativos y de contacto; elimina URLs temporales de avatar en su proyección | Verificar lectura, retención, aislamiento entre sesiones y borrado; decidir su sustitución por memoria. |
+| `src/views/clientes/clientes.api.js` | Página y detalle en memoria; caché persistente de dataset deshabilitada. `clientes.api.legacy.js` sólo reexporta la API | Verificar aislamiento y borrado entre sesiones; retirar la fachada sin consumidores en una entrega acotada. |
 | `src/views/usuarios/usuarios.api.js` | Caché proyectada de usuarios con identidad, contacto y metadatos de cuenta/seguridad; no es un almacén de tokens | Aplicar la misma revisión y reducir los campos persistidos; su TTL de frescura no prueba borrado físico. |
 | `src/views/correo/index.js` | Preferencias de notificación/buzón y firma, además de caché de mensajes en memoria | Comprobar necesidad, alcance por propietario y limpieza al cambiar de cuenta. |
 | `src/views/cuenta/index.js` | Preferencias de tema e idioma | Mantener el contrato de preferencias y evitar que absorba datos de sesión. |

@@ -10,6 +10,7 @@
 
 
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
+import { technicianIdentity } from "../../features/incidencias-comment-identity/index.js";
 export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v34-visible-date-minute-precision";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
@@ -709,13 +710,13 @@ function renderAssignedBadge(it = {}) {
   if (!name || norm === "no_asignado" || norm === "sin_asignar") return "";
   const avatar = getAssignedAvatar(it);
   const presentation = resolveAvatarPresentation({
+    ...technicianIdentity(unwrap(it)),
     displayName: name,
     name,
     email: getAssignedEmail(it),
-    userId: unwrap(it).assignedToUserId,
   });
   return `
-    <span class="incidencias-assigned-badge" data-assigned="true" title="${at(`Técnico: ${name}`)}">
+    <span class="incidencias-assigned-badge" data-assigned="true" data-technician-user-id="${at(unwrap(it).assignedToUserId || "")}" title="${at(`Técnico: ${name}`)}">
       <span class="incidencias-assigned-avatar${avatar ? " has-image" : " is-fallback"}" data-avatar-system="true" data-avatar-host="true" data-avatar-name="${at(presentation.name)}" data-avatar-email="${at(presentation.email)}" data-avatar-user-id="${at(presentation.userId)}" data-avatar-username="${at(presentation.username)}" data-avatar-tone="${at(String(presentation.tone))}" data-avatar-identity="${at(presentation.fingerprint)}" data-avatar-initials="${at(presentation.initials)}" data-has-avatar="${avatar ? "true" : "false"}" aria-hidden="true">
         ${avatar ? `<img data-avatar-image="true" src="${at(avatar)}" alt="" width="20" height="20" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}
         <span data-avatar-fallback="true">${esc(presentation.initials)}</span>

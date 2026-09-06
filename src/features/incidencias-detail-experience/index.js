@@ -17,6 +17,8 @@
    - sólo se añade presentación derivada y coordinación de interacción.
 ========================================================= */
 
+import { persistedCommentId } from "../incidencias-comment-identity/index.js";
+
 export const INCIDENCIAS_DETAIL_EXPERIENCE_VERSION =
   "incidencias-detail-experience.v1.stable-detail-lifecycle";
 
@@ -182,6 +184,7 @@ function normalizeComment(item = {}, index = 0) {
 
   return {
     id: text(first(raw.id, raw.commentId, raw.eventId, `comment_${index}`), `comment_${index}`),
+    persistedCommentId: persistedCommentId(raw),
     body,
     author: text(
       first(
@@ -235,7 +238,7 @@ function commentsFromDetail(detail = {}) {
 
 function commentSignature(comments = []) {
   return array(comments)
-    .map((item) => [item.id, item.body, timestamp(item.createdAt)].join("::"))
+    .map((item) => [item.id, item.persistedCommentId, item.author, item.body, timestamp(item.createdAt)].join("::"))
     .join("||");
 }
 
@@ -243,6 +246,7 @@ function buildCommentCard(comment = {}) {
   const article = document.createElement("article");
   article.className = "incidencias-modal-description-comment";
   article.dataset.descriptionComment = "true";
+  if (comment.persistedCommentId) article.dataset.commentId = comment.persistedCommentId;
 
   const accent = document.createElement("span");
   accent.className = "incidencias-modal-description-comment-accent";

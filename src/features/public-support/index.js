@@ -288,7 +288,15 @@ function syncIdentity(root) {
     displayName: name,
     email: email(user),
   });
-  const key = `${href}|${name}|${src}|${presentation.fingerprint}`;
+  // Identity stays stable when account aliases change; the card content must not.
+  const key = JSON.stringify([
+    href,
+    name,
+    src,
+    presentation.fingerprint,
+    presentation.email,
+    presentation.username,
+  ]);
 
   for (const link of links) {
     if (

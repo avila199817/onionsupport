@@ -121,7 +121,7 @@
 */
 
 .clientes-date-inline {
-  color: var(--text);
+  color: var(--text-muted);
   font-size: var(--font-xs);
   font-weight: var(--weight-semibold);
   white-space: nowrap;
@@ -173,20 +173,20 @@
 .clientes-total-stack {
   display: grid;
   justify-items: end;
-  gap: 3px;
+  gap: 2px;
 }
 
 .clientes-total-value {
-  color: var(--success);
+  color: var(--text-strong);
   font-size: var(--font-md);
-  font-weight: var(--weight-black);
+  font-weight: var(--weight-bold);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 .clientes-total-caption {
   color: var(--text-dim);
-  font-size: 9px;
+  font-size: 8.5px;
   font-weight: var(--weight-semibold);
   line-height: 1.2;
   white-space: nowrap;

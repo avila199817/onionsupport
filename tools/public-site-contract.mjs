@@ -4,7 +4,7 @@ import { PUBLIC_SITE, PUBLIC_PAGES, pageMetadata, publicPageSchema } from "../sr
 import { synchronize } from "./sync-public-site.mjs";
 
 await synchronize({ check: true });
-assert.equal(pageMetadata("/").title, "Soporte informático y asistencia técnica | Onion Support");
+assert.equal(pageMetadata("/").title, "Onion Support | Servicio técnico informático");
 assert.equal(pageMetadata("/login?returnTo=%2Fcuenta").robots, "noindex, follow");
 assert.equal(pageMetadata("/@private-person?token=secret", "Cuenta").canonical, null);
 assert.equal(publicPageSchema(pageMetadata("/login")), null);

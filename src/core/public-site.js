@@ -29,11 +29,11 @@ const service = (slug, label, title, description) => Object.freeze({
 });
 
 export const PUBLIC_SERVICES = Object.freeze([
-  service("reparacion-ordenadores", "Reparación de ordenadores", "Reparación de ordenadores y portátiles", "Diagnóstico y reparación de ordenadores y portátiles: arranque, SSD, RAM, temperatura y sistema. Valoramos tu caso y la modalidad de atención antes de intervenir."),
-  service("soporte-informatico", "Soporte informático", "Soporte y mantenimiento informático", "Soporte informático remoto en España para particulares, autónomos y empresas. Resolvemos incidencias, configuramos equipos y prevenimos fallos recurrentes."),
-  service("redes-wifi", "WiFi y redes", "WiFi y redes", "Diagnóstico de redes y WiFi: cobertura, routers, cortes y conexiones inestables. Asesoramiento remoto y atención presencial según el caso y la ubicación."),
-  service("impresoras", "Impresoras", "Instalación y soporte de impresoras", "Instalación y soporte de impresoras, escáneres y periféricos. Revisamos drivers, WiFi, impresión compartida y fallos de conexión con diagnóstico claro."),
-  service("soporte-empresas", "Soporte para empresas", "Soporte informático para autónomos y empresas", "Soporte informático para autónomos y empresas en España: asistencia remota, equipos, redes y mantenimiento. Atención directa y soluciones proporcionadas."),
+  service("reparacion-ordenadores", "Reparación de ordenadores", "Reparación de ordenadores y portátiles", "Reparación de ordenadores y portátiles: diagnóstico de arranque, lentitud, SSD, RAM, temperatura y sistema con soluciones claras y proporcionadas."),
+  service("soporte-informatico", "Soporte informático", "Soporte informático remoto y mantenimiento", "Soporte informático para particulares, autónomos y empresas. Asistencia remota, configuración, mantenimiento y solución de incidencias técnicas."),
+  service("redes-wifi", "WiFi y redes", "WiFi y redes: diagnóstico y solución", "Solución de problemas WiFi y redes: cobertura, velocidad, cortes, routers, repetidores y dispositivos conectados con diagnóstico técnico claro."),
+  service("impresoras", "Impresoras", "Instalación y soporte de impresoras", "Instalación y soporte de impresoras, escáneres y periféricos. Resolvemos drivers, WiFi, impresión compartida, colas y fallos de conexión."),
+  service("soporte-empresas", "Soporte para empresas", "Soporte informático para empresas", "Soporte informático para empresas y autónomos: equipos, redes, impresoras, incidencias y mantenimiento IT con atención directa y soluciones claras."),
 ]);
 
 export const PUBLIC_PAGES = Object.freeze([

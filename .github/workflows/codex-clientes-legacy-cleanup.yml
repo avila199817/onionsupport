@@ -30,6 +30,7 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import re
+          import textwrap
 
           def read(path):
               return Path(path).read_text(encoding="utf-8")
@@ -37,91 +38,84 @@ jobs:
           def write(path, text):
               Path(path).write_text(text, encoding="utf-8")
 
-          def replace_once(path, old, new):
+          def block(text):
+              return textwrap.dedent(text).strip("\n")
+
+          def replace_exact(path, old, new, expected=1):
               text = read(path)
               count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"{path}: expected one exact match, found {count}: {old[:80]!r}")
-              write(path, text.replace(old, new, 1))
+              if count != expected:
+                  raise SystemExit(f"{path}: expected {expected} exact matches, found {count}: {old[:100]!r}")
+              write(path, text.replace(old, new))
 
-          def regex_once(path, pattern, repl, flags=0):
+          def replace_regex(path, pattern, repl, expected=1, flags=0):
               text = read(path)
-              updated, count = re.subn(pattern, repl, text, count=1, flags=flags)
-              if count != 1:
-                  raise SystemExit(f"{path}: expected one regex match, found {count}: {pattern}")
+              updated, count = re.subn(pattern, repl, text, flags=flags)
+              if count != expected:
+                  raise SystemExit(f"{path}: expected {expected} regex matches, found {count}: {pattern}")
               write(path, updated)
 
           index_path = "src/views/clientes/index.js"
-          replace_once(
+          replace_regex(
               index_path,
-              '''import {
-            init as initLegacyCreateBridge,
-            openCreate as openLegacyCreate,
-            destroy as destroyLegacyCreateBridge,
-          } from "./clientes.index.legacy.js";''',
+              r'import \{\n\s+init as initLegacyCreateBridge,\n\s+openCreate as openLegacyCreate,\n\s+destroy as destroyLegacyCreateBridge,\n\} from "\./clientes\.index\.legacy\.js";',
               'import { createClientesCreateController } from "./clientes.create-controller.js";',
           )
-          replace_once(
+          replace_regex(
               index_path,
-              '''  let legacyBridgeHost = null;
-            let legacyBridgeReady = false;''',
+              r'  let legacyBridgeHost = null;\n  let legacyBridgeReady = false;',
               '  let createController = null;',
           )
-          regex_once(
+          replace_regex(
               index_path,
-              r'''  async function ensureLegacyCreateBridge\(\) \{.*?\n  \}\n\n  async function openCreate\(\) \{''',
-              '''  function ensureCreateController() {
-            if (createController) return createController;
+              r'  async function ensureLegacyCreateBridge\(\) \{.*?\n  \}\n\n  async function openCreate\(\) \{',
+              block('''
+              function ensureCreateController() {
+                if (createController) return createController;
 
-            createController = createClientesCreateController({
-              getRole: () => getCurrentRole(context),
-              getUser: getCurrentUser,
-              isAdmin: () => isAdmin(context),
-              showToast,
-              emitEvent,
-              onCreated,
-            });
-            return createController;
-          }
+                createController = createClientesCreateController({
+                  getRole: () => getCurrentRole(context),
+                  getUser: getCurrentUser,
+                  isAdmin: () => isAdmin(context),
+                  showToast,
+                  emitEvent,
+                  onCreated,
+                });
+                return createController;
+              }
 
-          async function openCreate() {''',
+              async function openCreate() {
+              '''),
               flags=re.S,
           )
-          replace_once(
+          replace_regex(
               index_path,
-              '''      if (!(await ensureLegacyCreateBridge())) return false;
-                return (await openLegacyCreate()) !== false;''',
+              r'      if \(!\(await ensureLegacyCreateBridge\(\)\)\) return false;\n      return \(await openLegacyCreate\(\)\) !== false;',
               '      return ensureCreateController().open() !== false;',
           )
-          replace_once(
+          replace_regex(
               index_path,
-              '''    if (isBrowser()) {
-                window.addEventListener("clientes:create:success", onCreated);
-              }
-          ''',
+              r'\n    if \(isBrowser\(\)\) \{\n      window\.addEventListener\("clientes:create:success", onCreated\);\n    \}',
               '',
           )
-          replace_once(
+          replace_regex(
               index_path,
-              '        window.removeEventListener("clientes:create:success", onCreated);\n',
-              '',
+              r'\n      if \(isBrowser\(\)\) \{\n        window\.removeEventListener\("clientes:create:success", onCreated\);\n        clearSearchTimer\(\);\n      \}',
+              '\n      if (isBrowser()) {\n        clearSearchTimer();\n      }',
           )
-          replace_once(
+          replace_regex(
               index_path,
-              '''    if (legacyBridgeReady) {
-                try { await destroyLegacyCreateBridge({ clear: true }); } catch { /* noop */ }
-              }
-              legacyBridgeReady = false;
-              legacyBridgeHost = null;''',
-              '''    try { createController?.destroy?.(); } catch { /* noop */ }
-              createController = null;''',
+              r'    if \(legacyBridgeReady\) \{\n      try \{ await destroyLegacyCreateBridge\(\{ clear: true \}\); \} catch \{ /\* noop \*/ \}\n    \}\n    legacyBridgeReady = false;\n    legacyBridgeHost = null;',
+              '    try { createController?.destroy?.(); } catch { /* noop */ }\n    createController = null;',
           )
 
           template_path = "src/views/clientes/clientes.template.js"
-          template = read(template_path)
-          if template.count('"./clientes.template.legacy.js"') != 2:
-              raise SystemExit("clientes.template.js: expected exactly two legacy model-facade imports")
-          write(template_path, template.replace('"./clientes.template.legacy.js"', '"./clientes.model.js"'))
+          replace_exact(
+              template_path,
+              '"./clientes.template.legacy.js"',
+              '"./clientes.model.js"',
+              expected=2,
+          )
 
           contract_path = ".github/scripts/clientes_scale_contract.py"
           contract = read(contract_path)
@@ -156,13 +150,14 @@ jobs:
 
           contract = contract.replace(
               "# Compatibility files may re-export/delegate only; they must not own logic.",
-              "# Legacy Clientes compatibility facades are forbidden after consumer migration.",
+              "# Retired Clientes compatibility paths must stay absent after consumer migration.",
               1,
           )
           marker = "# ---------------------------------------------------------------------------\n# LIST API / CURSOR SCALE CONTRACT."
           if contract.count(marker) != 1:
               raise SystemExit("contract: LIST API marker not found exactly once")
-          direct_contract = '''# No legacy Clientes facade may remain after the final consumer migration.
+          direct_contract = block('''
+          # Retired compatibility paths must remain absent after the final consumer migration.
           for legacy_path in (
               "src/views/clientes/clientes.index.legacy.js",
               "src/views/clientes/clientes.template.legacy.js",
@@ -187,45 +182,39 @@ jobs:
               "main Clientes controller must own create lifecycle directly and refresh after creation",
           )
 
-          '''
+          ''') + "\n\n"
           contract = contract.replace(marker, direct_contract + marker, 1)
           write(contract_path, contract)
 
-          ui_modal = "docs/UI_MODAL_SYSTEM.md"
-          replace_once(
-              ui_modal,
+          replace_exact(
+              "docs/UI_MODAL_SYSTEM.md",
               '| Clientes: alta y detalle | `views/clientes/clientes.index.legacy.js`, `clientes.template.modal.js` |',
               '| Clientes: alta y detalle | `views/clientes/clientes.create-controller.js`, `clientes.template.modal.js` |',
           )
-
-          project_context = "docs/PROJECT_CONTEXT.md"
-          replace_once(
-              project_context,
+          replace_exact(
+              "docs/PROJECT_CONTEXT.md",
               '| `src/views/clientes/clientes.api.js` | Página y detalle en memoria; caché persistente de dataset deshabilitada. `clientes.api.legacy.js` sólo reexporta la API | Verificar aislamiento y borrado entre sesiones; retirar la fachada sin consumidores en una entrega acotada. |',
-              '| `src/views/clientes/clientes.api.js` | Página y detalle en memoria; caché persistente de dataset deshabilitada. | Verificar aislamiento y borrado entre sesiones; no queda fachada legacy de API. |',
+              '| `src/views/clientes/clientes.api.js` | Página y detalle en memoria; caché persistente de dataset deshabilitada. | Verificar aislamiento y borrado entre sesiones; no queda una segunda ruta de compatibilidad de API. |',
           )
 
-          roadmap = "docs/ROADMAP.md"
-          old_roadmap = '''Tras verificar esta release, el siguiente bloque acotado de código es retirar las
-          fachadas `clientes.index.legacy.js`, `clientes.template.legacy.js` y
-          `clientes.api.legacy.js`: la vista debe abrir y desmontar directamente el controlador
-          canónico de alta, conservar validaciones y refrescar el listado tras crear. La revisión
-          debe confirmar todos los consumidores y reemplazar los guards que exigen esas fachadas,
-          con una prueba de apertura, cancelación, creación y reapertura del modal.
-          '''
-          new_roadmap = '''Las fachadas `clientes.index.legacy.js`, `clientes.template.legacy.js` y
-          `clientes.api.legacy.js` quedan retiradas tras migrar sus últimos consumidores. La vista
-          abre y desmonta directamente el controlador canónico de alta, conserva sus validaciones y
-          refresca el listado mediante el callback de creación; el contrato impide reintroducir las
-          rutas de compatibilidad.
+          roadmap_path = "docs/ROADMAP.md"
+          replace_regex(
+              roadmap_path,
+              r'Tras verificar esta release, el siguiente bloque acotado de código es retirar las\nfachadas `clientes\.index\.legacy\.js`, `clientes\.template\.legacy\.js` y\n`clientes\.api\.legacy\.js`:.*?con una prueba de apertura, cancelación, creación y reapertura del modal\.\n',
+              block('''
+              Las tres fachadas legacy de Clientes quedan retiradas tras migrar sus últimos
+              consumidores. La vista abre y desmonta directamente el controlador canónico de alta,
+              conserva las validaciones existentes y refresca el listado mediante el callback de
+              creación; el contrato impide reintroducir rutas de compatibilidad paralelas.
 
-          Tras publicar y verificar este corte, el siguiente bloque acotado es F1: ejecutar el
-          recorrido vertical autenticado frontend/backend con cuentas y fixtures controlados y
-          registrar request IDs y limpieza sin exponer datos privados.
-          '''
-          replace_once(roadmap, old_roadmap, new_roadmap)
-          replace_once(
-              roadmap,
+              Tras publicar y verificar este corte, el siguiente bloque acotado es F1: ejecutar el
+              recorrido vertical autenticado frontend/backend con cuentas y fixtures controlados y
+              registrar request IDs y limpieza sin exponer datos privados.
+              ''') + "\n",
+              flags=re.S,
+          )
+          replace_exact(
+              roadmap_path,
               '**Estado:** consolidación de identidad en curso; recorrido autenticado completo pendiente. **Responsables:** frontend y backend.',
               '**Estado:** identidad y fachadas de Clientes consolidadas en código; recorrido autenticado completo pendiente. **Responsables:** frontend y backend.',
           )
@@ -239,28 +228,30 @@ jobs:
                   raise SystemExit(f"expected legacy facade before removal: {legacy}")
               legacy.unlink()
 
-          # The helper workflow must not remain in the final branch tree.
+          # The helper workflow must not remain in the candidate tree.
           workflow = Path(".github/workflows/codex-clientes-legacy-cleanup.yml")
           if workflow.exists():
               workflow.unlink()
 
-          # Final source-level guard: no runtime or docs may retain the retired filenames.
+          # Runtime and user-facing docs must not retain consumers/references to retired paths.
+          checked = [
+              Path("src/views/clientes/index.js"),
+              Path("src/views/clientes/clientes.template.js"),
+              Path("docs/UI_MODAL_SYSTEM.md"),
+              Path("docs/PROJECT_CONTEXT.md"),
+              Path("docs/ROADMAP.md"),
+          ]
+          retired = (
+              "clientes.index.legacy.js",
+              "clientes.template.legacy.js",
+              "clientes.api.legacy.js",
+          )
           leftovers = []
-          for root in (Path("src"), Path("docs"), Path(".github/scripts")):
-              for path in root.rglob("*"):
-                  if not path.is_file():
-                      continue
-                  try:
-                      text = path.read_text(encoding="utf-8")
-                  except UnicodeDecodeError:
-                      continue
-                  for name in (
-                      "clientes.index.legacy.js",
-                      "clientes.template.legacy.js",
-                      "clientes.api.legacy.js",
-                  ):
-                      if name in text:
-                          leftovers.append(f"{path}: {name}")
+          for path in checked:
+              text = path.read_text(encoding="utf-8")
+              for name in retired:
+                  if name in text:
+                      leftovers.append(f"{path}: {name}")
           if leftovers:
               raise SystemExit("retired facade references remain:\n" + "\n".join(leftovers))
           PY

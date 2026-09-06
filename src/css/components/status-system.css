@@ -297,6 +297,8 @@ body[data-theme="light"] {
 ) {
   inline-size: 7px;
   block-size: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
   background: var(--ui-status-dot, currentColor);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-status-dot, currentColor) 14%, transparent);
 }

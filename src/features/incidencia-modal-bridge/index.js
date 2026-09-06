@@ -5,9 +5,15 @@
    navegar a /incidencias. El controller real de Incidencias sigue siendo la
    única autoridad sobre carga, acciones, adjuntos, foco y cierre del modal.
 
+   La política conversacional del usuario NO se replica aquí:
+   `incidencias-detail-state` es la única autoridad de presentación para
+   permitir/bloquear nuevas actualizaciones, tanto en la ruta Incidencias como
+   cuando el mismo modal se abre transversalmente desde Home/Facturas.
+
    Reglas de apertura transversal:
    - feedback visible inmediato antes de imports/red/detalle;
-   - CSS y módulo canónico se precalientan al cargar la feature;
+   - CSS, controller y autoridad canónica de Detail State se precalientan;
+   - la autoridad conversacional debe estar montada ANTES de abrir el modal;
    - avatares son mejora progresiva y nunca bloquean el primer paint;
    - sólo se delega al owner global cuando /incidencias es realmente la ruta;
    - cualquier fallo conserva una UI recuperable con Reintentar/Cerrar.
@@ -16,7 +22,7 @@
 import "./style.css";
 
 export const INCIDENCIA_MODAL_BRIDGE_VERSION =
-  "incidencia-modal-bridge.v3.instant-feedback-resilient";
+  "incidencia-modal-bridge.v4.canonical-detail-authority";
 
 const BRIDGE_HOST_ID = "incidencias-modal-bridge-host";
 const FEEDBACK_HOST_ID = "incidencias-modal-bridge-feedback";
@@ -38,6 +44,8 @@ let feedbackHost = null;
 let activeFeedback = null;
 let openSequence = 0;
 let modulePromise = null;
+let detailStateAuthorityPromise = null;
+let detailStateAuthorityReady = false;
 let avatarEnhancementsPromise = null;
 let avatarEnhancementsReady = false;
 let primed = false;
@@ -156,6 +164,52 @@ function loadIncidenciasModule() {
   }
 
   return modulePromise;
+}
+
+/*
+  AUTORIDAD ÚNICA DE TURNO/COMPOSER.
+
+  La ruta /incidencias ya carga este mismo módulo desde App Enhancements. El
+  bridge no calcula permisos ni mantiene un segundo estado: importa exactamente
+  la misma autoridad y exige que esté montada antes de crear/abrir el controller
+  transversal. El cache nativo de ESM garantiza una única instancia de módulo.
+*/
+function loadIncidenciasDetailStateAuthority() {
+  if (detailStateAuthorityPromise) {
+    return detailStateAuthorityPromise;
+  }
+
+  const pending = import("../incidencias-detail-state/index.js")
+    .then((authority) => {
+      if (typeof authority?.mountIncidenciasDetailState !== "function") {
+        throw new Error("INCIDENCIA_DETAIL_STATE_AUTHORITY_UNAVAILABLE");
+      }
+
+      const mounted = authority.mountIncidenciasDetailState();
+      const snapshot =
+        authority.getIncidenciasDetailStateSnapshot?.() ||
+        authority.default?.getSnapshot?.() ||
+        {};
+
+      if (mounted !== true && snapshot?.mounted !== true) {
+        throw new Error("INCIDENCIA_DETAIL_STATE_AUTHORITY_NOT_MOUNTED");
+      }
+
+      detailStateAuthorityReady = true;
+      return authority;
+    })
+    .catch((error) => {
+      detailStateAuthorityReady = false;
+
+      if (detailStateAuthorityPromise === pending) {
+        detailStateAuthorityPromise = null;
+      }
+
+      throw error;
+    });
+
+  detailStateAuthorityPromise = pending;
+  return pending;
 }
 
 function loadIncidenciasAvatarEnhancements() {
@@ -525,6 +579,7 @@ export function primeIncidenciaModalBridge() {
   primed = true;
 
   void loadIncidenciasModule().catch(() => null);
+  void loadIncidenciasDetailStateAuthority().catch(() => null);
   void ensureStyles().catch(() => false);
   void loadIncidenciasAvatarEnhancements().catch(() => null);
 
@@ -561,8 +616,14 @@ export async function openIncidenciaModalFromCurrentView(
   const avatarEnhancements = loadIncidenciasAvatarEnhancements();
 
   try {
+    /*
+      Detail State es dependencia dura del Modal Details transversal. Así el
+      controller nunca llega a pintar un composer antes de que la MISMA
+      autoridad que usa /incidencias esté observando las leases en body.
+    */
     const [module] = await Promise.all([
       loadIncidenciasModule(),
+      loadIncidenciasDetailStateAuthority(),
       ensureStyles(),
     ]);
 
@@ -571,7 +632,7 @@ export async function openIncidenciaModalFromCurrentView(
     /*
       El singleton histórico sólo es owner cuando /incidencias es realmente la
       ruta activa. Un controller bridge previo nunca puede apropiarse de una
-      apertura lanzada desde Facturas.
+      apertura lanzada desde otra vista.
     */
     if (
       currentOwnerIsIncidencias() &&
@@ -623,7 +684,7 @@ export async function openIncidenciaModalFromCurrentView(
     showBridgeFeedback(id, {
       state: "error",
       message:
-        "No hemos podido completar la carga del detalle. Puedes reintentarlo sin salir de Facturas.",
+        "No hemos podido completar la carga del detalle. Puedes reintentarlo sin salir de esta vista.",
       openerNode,
       context: safeContext,
     });
@@ -649,6 +710,7 @@ export function getIncidenciaModalBridgeSnapshot() {
     feedbackState: cleanText(activeFeedback?.state, ""),
     primed,
     lastOpenFailed,
+    detailStateAuthorityReady,
     avatarEnhancementsReady,
     controller: snapshot,
   });

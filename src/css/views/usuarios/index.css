@@ -67,6 +67,15 @@
   font-size: 9px;
 }
 
+/*
+   En el directorio Usuarios el rol "Usuario" es redundante: todas las filas
+   visibles pertenecen ya a ese dominio. Empleados reutiliza el mismo template,
+   así que conserva su badge de rol al marcar data-empleados-scope="true".
+*/
+.usuarios-view-root:not([data-empleados-scope="true"]) .usuarios-role-pill {
+  display: none;
+}
+
 .usuarios-role-pill--admin {
   border-color: var(--accent-border);
   background: var(--accent-soft);

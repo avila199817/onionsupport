@@ -11,6 +11,7 @@
    - El orden por defecto es DESC: sesión iniciada más recientemente primero.
    - Usuarios que nunca iniciaron sesión permanecen al final en ambos sentidos.
    - Refresh, búsqueda y paginación incremental no muestran loaders sobre datos existentes.
+   - El progreso de revalidación queda sólo en la región sr-only para accesibilidad.
    - state.hasMore controla el cursor remoto; no se infiere de filas ocultas.
    - state.totalKnown distingue total exacto de conteo cargado.
    - Ningún contador de subconjunto cargado se presenta como total global.
@@ -356,8 +357,6 @@ function filterValue(input = {}) {
 function searchValue(input = {}) {
   const data = safeObject(input);
   const state = stateFrom(data);
-  // This value is written back into the live search input. Preserve its exact
-  // spacing so a synchronous pending-state render cannot move the caret.
   return String(
     data.search ?? data.searchQuery ?? state.search ?? state.searchQuery ?? ""
   );
@@ -375,6 +374,12 @@ function isRestricted(input = {}) {
   const data = safeObject(input);
   const state = stateFrom(data);
   return Boolean(first(data.forbidden, data.restricted, data.accessDenied, state.forbidden, state.restricted, state.accessDenied, false));
+}
+function silentProgressLabel(state = {}) {
+  if (state.searchPending === true) return "Preparando la búsqueda de usuarios";
+  if (state.loadingMore === true) return "Cargando usuarios automáticamente";
+  if (state.refreshing === true) return "Actualizando usuarios";
+  return "";
 }
 
 export function renderHeader(input = {}) {
@@ -482,6 +487,8 @@ export function renderTable(input = {}) {
       : loading && !items.length
         ? "Cargando usuarios..."
         : stableSummary;
+  const silentProgress = items.length ? silentProgressLabel(state) : "";
+  const liveStatus = `${escapeHtml(subtitle)}${silentProgress ? `<span class="sr-only" data-usuarios-silent-progress="true"> · ${escapeHtml(silentProgress)}</span>` : ""}`;
 
   const inlineError = error && items.length
     ? `<div class="usuarios-inline-error" role="alert" aria-atomic="true"><span class="usuarios-inline-error-icon" aria-hidden="true">${icon("alert")}</span><span>${escapeHtml(error)}</span></div>`
@@ -492,7 +499,7 @@ export function renderTable(input = {}) {
       ? `<div class="usuarios-table-wrap"><div class="usuarios-table-shell"><table class="usuarios-table" data-table-columns="6" data-table-scale="${TABLE_SCALE}" data-sort-field="lastLoginAt" data-sort-order="${attr(order)}">${renderColgroup()}${renderThead()}<tbody>${items.map((item) => renderRow(item, state)).join("")}</tbody></table></div></div>${renderFooter(data, items)}`
       : renderEmptyContent({ error, filtering, restricted: isRestricted(data), admin: data.admin !== false });
 
-  return `<section class="usuarios-history${loading ? " is-loading" : ""}${error ? " has-error" : ""}" data-usuarios-history="true" aria-busy="${busy ? "true" : "false"}"><div class="usuarios-history-head"><div class="usuarios-history-copy"><h2 class="usuarios-history-title">Historial de usuarios</h2><p class="usuarios-history-subtitle" tabindex="-1" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(subtitle)}</p></div>${renderFilters(data)}</div>${inlineError}${content}</section>`;
+  return `<section class="usuarios-history${loading ? " is-loading" : ""}${error ? " has-error" : ""}" data-usuarios-history="true" aria-busy="${busy ? "true" : "false"}"><div class="usuarios-history-head"><div class="usuarios-history-copy"><h2 class="usuarios-history-title">Historial de usuarios</h2><p class="usuarios-history-subtitle" tabindex="-1" role="status" aria-live="polite" aria-atomic="true">${liveStatus}</p></div>${renderFilters(data)}</div>${inlineError}${content}</section>`;
 }
 
 export function renderUsuariosTableTemplate(input = {}) {
@@ -554,6 +561,7 @@ export function getUsuariosTableTemplateSnapshot(input = {}) {
       safeAvatarUrls: true,
       silentRefreshPresentation: true,
       sessionStartOrdering: true,
+      screenReaderOnlyProgress: true,
     },
   };
 }

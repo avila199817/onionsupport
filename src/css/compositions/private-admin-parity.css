@@ -2,12 +2,13 @@
    ONION SUPPORT — PRIVATE UI FOUNDATION
    Archivo: /src/css/compositions/private-admin-parity.css
 
-   CANÓNICO · SINGLE VISUAL AUTHORITY · 2026-08-31
+   CANÓNICO · SINGLE VISUAL AUTHORITY · 2026-09-07
 
    Responsabilidad única:
    - Shell visual de los listados privados y Servidor.
    - Hero, títulos, acciones, KPIs, paneles, filtros, búsqueda, tablas,
      avatares fallback, estados vacíos/loading e invariantes responsive.
+   - Geometría de iconos dentro de controles compartidos de listado.
    - Incidencias sigue siendo la referencia de producto, pero la autoridad CSS
      ya no vive duplicada dentro de cada vista: vive aquí.
 
@@ -781,6 +782,26 @@
     border-color var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard),
     box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+/*
+   Iconos de controles compactos: una sola autoridad para todas las vistas.
+   Los SVG inline no pueden depender de width/height locales ni de valores
+   intrínsecos del navegador (300×150), que fue la causa del icono gigante en
+   el orden por inicio de sesión de Usuarios.
+*/
+:is(
+  .incidencias-filter-pill,
+  .incidencias-sort-pill,
+  .facturas-filter-pill,
+  .facturas-sort-pill,
+  .clientes-filter-pill,
+  .clientes-sort-pill,
+  .usuarios-filter-pill
+) > svg {
+  inline-size: 14px;
+  block-size: 14px;
+  flex: 0 0 auto;
 }
 
 :is(

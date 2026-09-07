@@ -19,7 +19,7 @@ Corte verificado: **4 de septiembre de 2026, UTC**. La versión funcional desple
 - Próximo trabajo: validar un recorrido real y controlado **acceso → incidencia → avatar → cierre de sesión**, coordinado con el backend. Después se abordarán rendimiento, persistencia privada, contratos y limpieza por módulos, con entregas pequeñas.
 - La PR antigua [#482](https://github.com/avila199817/onionsupport/pull/482) se cerró como superada: sus mejoras ya estaban integradas y recuperaba lógica de avatar retirada.
 
-Leer primero [estado, evidencias y límites](docs/PROJECT_CONTEXT.md), después [plan por fases y criterios de aceptación](docs/ROADMAP.md). El backend mantiene su [estado operativo](https://github.com/avila199817/oniontech/blob/main/docs/COMO_LO_TENEMOS_AHORA.md) y su [roadmap coordinado](https://github.com/avila199817/oniontech/blob/main/docs/ROADMAP.md).
+Leer primero [estado, evidencias y límites](docs/PROJECT_CONTEXT.md), después [plan por fases y criterios de aceptación](docs/ROADMAP.md). El estado Azure estructural más reciente vive en [AZURE_CURRENT_STATE.md](docs/AZURE_CURRENT_STATE.md). El backend mantiene su [estado operativo](https://github.com/avila199817/oniontech/blob/main/docs/COMO_LO_TENEMOS_AHORA.md) y su [roadmap coordinado](https://github.com/avila199817/oniontech/blob/main/docs/ROADMAP.md).
 
 ## Puesta en marcha
 
@@ -90,6 +90,8 @@ No deben quedar helpers, workflows ni archivos temporales de migración en `main
 ## Documentación de referencia
 
 - [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md) — estado verificado, evidencias, límites y arquitectura canónica.
+- [`docs/AZURE_CURRENT_STATE.md`](docs/AZURE_CURRENT_STATE.md) — estado Azure estructural vigente después de la limpieza y decommission legacy del 2026-09-07.
+- [`docs/AZURE_INFRASTRUCTURE.md`](docs/AZURE_INFRASTRUCTURE.md) — inventario y auditoría Azure histórica de septiembre de 2026.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — prioridades, dependencias, alcance y cierre de las próximas entregas.
 - [`docs/BUILD_FOUNDATION.md`](docs/BUILD_FOUNDATION.md) — foundation del build.
 - [`docs/UI_FOUNDATION.md`](docs/UI_FOUNDATION.md) — foundation visual.

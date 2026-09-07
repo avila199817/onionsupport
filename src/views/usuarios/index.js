@@ -2,12 +2,15 @@
    Onion Support - Usuarios Index
    Archivo: /src/views/usuarios/index.js
 
-   CURSOR-FIRST · SERVER FILTERED · INFINITE SCROLL · RACE SAFE V13
+   CURSOR-FIRST · SERVER FILTERED · SILENT REVALIDATION · SESSION ORDER V14
 
    Objetivos:
    - No precargar el dataset completo.
    - Buscar y filtrar en backend.
    - Cargar páginas mediante continuation token opaco.
+   - Mantener las filas actuales durante refresh/búsqueda/filtro silencioso.
+   - No mostrar un loader de actualización encima de una tabla ya cargada.
+   - Orden visual por inicio de sesión real (lastLoginAt), DESC por defecto.
    - No presentar un subconjunto local como dataset completo.
    - Preservar detalle, alta, foco, scroll y protección de controladores.
 ========================================================= */
@@ -16,7 +19,9 @@ import { AppCore } from "../../core/index.js";
 
 import {
   renderUsuariosTableTemplate,
+  sortBySessionStart,
   USUARIOS_ACTIONS,
+  USUARIOS_DEFAULT_SORT_ORDER,
   USUARIOS_DEFAULT_VISIBLE_ROWS,
 } from "./usuarios.template.js";
 
@@ -72,7 +77,7 @@ export const USUARIOS_MODULE_NAME = "usuarios";
 export const USUARIOS_VIEW_NAME = "UsuariosView";
 export const USUARIOS_CANONICAL_PATH = "/usuarios";
 export const USUARIOS_INDEX_VERSION =
-  "usuarios.index.v13.nonblocking-route-commit";
+  "usuarios.index.v14.session-order-silent-refresh";
 export const USUARIOS_VIEW_VERSION = USUARIOS_INDEX_VERSION;
 export const USUARIOS_MODULE_VERSION = USUARIOS_INDEX_VERSION;
 export const USUARIOS_INDEX_SOURCE = "views.usuarios.index";
@@ -112,6 +117,7 @@ const ACTIONS = Object.freeze({
   RETRY: USUARIOS_ACTIONS?.RETRY || "retry",
   EXPORT: USUARIOS_ACTIONS?.EXPORT || "export",
   FILTER: USUARIOS_ACTIONS?.FILTER || "filter",
+  SORT_TOGGLE: USUARIOS_ACTIONS?.SORT_TOGGLE || "sort-toggle",
   CLEAR_SEARCH: USUARIOS_ACTIONS?.CLEAR_SEARCH || "clear-search",
   CLEAR_FILTERS: USUARIOS_ACTIONS?.CLEAR_FILTERS || "clear-filters",
   RETRY_PAGE: USUARIOS_ACTIONS?.RETRY_PAGE || "retry-page",
@@ -128,6 +134,9 @@ const ACTION_ALIASES = Object.freeze({
   export_csv: ACTIONS.EXPORT,
   filter: ACTIONS.FILTER,
   filter_usuarios: ACTIONS.FILTER,
+  sort: ACTIONS.SORT_TOGGLE,
+  sort_toggle: ACTIONS.SORT_TOGGLE,
+  session_sort: ACTIONS.SORT_TOGGLE,
   clear_search: ACTIONS.CLEAR_SEARCH,
   clear_filters: ACTIONS.CLEAR_FILTERS,
   retry_page: ACTIONS.RETRY_PAGE,
@@ -197,6 +206,9 @@ function normalizeKey(value = "") {
 }
 function normalizeAction(value = "") {
   return ACTION_ALIASES[normalizeKey(value)] || "";
+}
+function normalizeSessionSortOrder(value = USUARIOS_DEFAULT_SORT_ORDER) {
+  return normalizeKey(value) === "asc" ? "asc" : "desc";
 }
 function safeError(error = null, fallback = "No se pudieron cargar los usuarios.") {
   return cleanText(
@@ -419,7 +431,6 @@ function getUsuarioId(item = {}) {
   return cleanText(first(item.userId, item.usuarioId, item.id, item.uid, item.email, ""), "");
 }
 function mergeUsuariosFreshPageFirst(previousItems = [], freshPage = []) {
-  /* Incoming fresh values win; the normalizer restores updatedAt DESC order. */
   return mergeUsuariosCursorItems(previousItems, freshPage);
 }
 function csvSafeCell(value = "") {
@@ -439,9 +450,10 @@ function buildUsuariosCsv(items = []) {
     first(item.city, item.ciudad, item.direccion?.ciudad, item.address?.city, ""),
     first(item.role, item.rol, "user"),
     first(item.status, item.estado, item.state, item.active === false ? "inactive" : "active"),
+    first(item.lastLoginAt, ""),
   ]);
   return [
-    ["ID", "Nombre", "Email", "Teléfono", "Ciudad", "Rol", "Estado"],
+    ["ID", "Nombre", "Email", "Teléfono", "Ciudad", "Rol", "Estado", "Inicio de sesión"],
     ...rows,
   ].map((row) => row.map(csvEscape).join(";")).join("\r\n");
 }
@@ -492,6 +504,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
   let filter = "all";
   let search = "";
   let searchDraft = "";
+  let sortOrder = normalizeSessionSortOrder(USUARIOS_DEFAULT_SORT_ORDER);
 
   let queryEpoch = 0;
   let detailEpoch = 0;
@@ -528,9 +541,10 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       status: filter,
     };
   }
+  function displayItems() {
+    return sortBySessionStart(items, sortOrder);
+  }
   function stateSnapshot() {
-    // Keep the exact input draft visible across synchronous rerenders. The
-    // committed `search` value remains normalized only for the API query.
     const visibleSearch = searchDraft;
     return {
       loading,
@@ -546,6 +560,8 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       search: visibleSearch,
       searchQuery: visibleSearch,
       searchPending: Boolean(searchTimer) || searchComposing,
+      sortField: "lastLoginAt",
+      sortOrder,
       totalKnown,
       totalCount,
       remoteCount: totalKnown ? totalCount : null,
@@ -622,6 +638,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         ""
       ),
       filter: cleanText(action?.getAttribute?.("data-filter"), ""),
+      sortOrder: cleanText(action?.getAttribute?.("data-sort-order"), ""),
       actionScope: actionFocusScope(action),
       actionIndex: action ? actionNodes.indexOf(action) : -1,
       elementId: cleanText(active?.id, ""),
@@ -664,7 +681,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
           host.querySelectorAll("[data-usuarios-action], [data-action]")
         );
         const matchesActionIdentity = (candidate) => {
-          const action = cleanText(
+          const actionName = cleanText(
             first(
               candidate.getAttribute("data-usuarios-action"),
               candidate.getAttribute("data-action"),
@@ -672,11 +689,13 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
             ),
             ""
           );
-          const filter = cleanText(candidate.getAttribute("data-filter"), "");
+          const filterValue = cleanText(candidate.getAttribute("data-filter"), "");
+          const candidateSort = cleanText(candidate.getAttribute("data-sort-order"), "");
           const scope = actionFocusScope(candidate);
           return (
-            action === snapshot.action &&
-            (!snapshot.filter || filter === snapshot.filter) &&
+            actionName === snapshot.action &&
+            (!snapshot.filter || filterValue === snapshot.filter) &&
+            (!snapshot.sortOrder || candidateSort === snapshot.sortOrder || actionName === ACTIONS.SORT_TOGGLE) &&
             (!snapshot.actionScope || scope === snapshot.actionScope)
           );
         };
@@ -735,9 +754,6 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     queryEpoch += 1;
     loadMoreTask = null;
     loadingMore = false;
-    continuationToken = "";
-    hasMore = false;
-    seenPageCursors = new Set();
     loadMoreError = "";
     disconnectInfiniteObserver();
     return true;
@@ -874,12 +890,17 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
   async function loadFirstPage({ silent = false, preservePages = false } = {}) {
     if (destroyed || !routeActive() || !admin()) return items;
     const keepAccumulatedPages = preservePages === true && items.length > 0;
+    const keepVisibleRows = items.length > 0 && (silent === true || keepAccumulatedPages);
     const preservedToken = continuationToken;
     const preservedHasMore = hasMore;
     const epoch = ++queryEpoch;
     loadMoreTask = null;
     loadingMore = false;
-    if (!keepAccumulatedPages) {
+
+    // Stale-while-revalidate: una actualización silenciosa nunca vacía una
+    // tabla que el administrador ya está leyendo. La respuesta fresca la
+    // sustituye al completar la consulta.
+    if (!keepVisibleRows) {
       items = [];
       continuationToken = "";
       hasMore = false;
@@ -887,9 +908,10 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       totalKnown = false;
       totalCount = null;
     }
+
     loadMoreError = "";
-    loading = !keepAccumulatedPages;
-    refreshing = keepAccumulatedPages;
+    loading = !keepVisibleRows;
+    refreshing = keepVisibleRows;
     error = "";
     render();
 
@@ -923,6 +945,8 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         totalCount,
         hasMore,
         cursorDriven: true,
+        sortField: "lastLoginAt",
+        sortOrder,
         lastSyncAt,
       });
       return items;
@@ -931,6 +955,15 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       error = safeError(loadError);
       loading = false;
       refreshing = false;
+      if (keepVisibleRows && !keepAccumulatedPages) {
+        // La query nueva falló: conservamos las filas antiguas como fallback,
+        // pero no reutilizamos su cursor con los filtros nuevos.
+        continuationToken = "";
+        hasMore = false;
+        seenPageCursors = new Set();
+        totalKnown = false;
+        totalCount = null;
+      }
       render();
       if (!silent) showToast(error, "error");
       emitEvent("usuarios:error", { source: USUARIOS_INDEX_SOURCE, message: error });
@@ -1016,6 +1049,8 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
           totalCount,
           hasMore,
           cursorDriven: true,
+          sortField: "lastLoginAt",
+          sortOrder,
         });
         return items.length;
       } catch (pageError) {
@@ -1077,11 +1112,27 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     render();
     return true;
   }
+  function setSortOrder(value = USUARIOS_DEFAULT_SORT_ORDER) {
+    sortOrder = normalizeSessionSortOrder(value);
+    render();
+    return sortOrder;
+  }
+  function toggleSortOrder(value = "") {
+    const requested = normalizeKey(value);
+    sortOrder = requested === "asc" || requested === "desc"
+      ? requested
+      : sortOrder === "desc"
+        ? "asc"
+        : "desc";
+    render();
+    return sortOrder;
+  }
   function clearFilters() {
     cancelSearchDebounce();
     filter = "all";
     search = "";
     searchDraft = "";
+    sortOrder = "desc";
     void loadFirstPage({ silent: true });
     return true;
   }
@@ -1205,7 +1256,8 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     render();
     try {
       const date = new Date().toISOString().slice(0, 10);
-      if (!downloadTextFile(buildUsuariosCsv(items), `usuarios-cargados-${date}.csv`)) {
+      const orderedItems = displayItems();
+      if (!downloadTextFile(buildUsuariosCsv(orderedItems), `usuarios-cargados-${date}.csv`)) {
         throw new Error("USUARIOS_CSV_DOWNLOAD_FAILED");
       }
       showToast(`CSV generado con ${items.length} usuarios cargados.`, "success");
@@ -1256,6 +1308,10 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       case ACTIONS.FILTER:
         event?.preventDefault?.();
         setFilter(node?.getAttribute?.("data-filter") || "all");
+        return true;
+      case ACTIONS.SORT_TOGGLE:
+        event?.preventDefault?.();
+        toggleSortOrder(node?.getAttribute?.("data-next-sort-order") || "");
         return true;
       case ACTIONS.CLEAR_SEARCH:
         event?.preventDefault?.();
@@ -1459,8 +1515,8 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         render({ preserveDom: false });
         return controller;
       }
-      // loadFirstPage paints the loading shell synchronously before its first await.
-      // Start that work now, but never keep the atomic router commit waiting on network.
+      // Sólo la primera entrada sin datos usa el estado de carga inicial.
+      // Las revalidaciones posteriores mantienen las filas y son visualmente silenciosas.
       void load({ silent: false });
       return controller;
     },
@@ -1480,6 +1536,8 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     exportCsv,
     setFilter,
     setSearch,
+    setSortOrder,
+    toggleSortOrder,
     clearFilters,
     setVisibleLimit(value = DEFAULT_VISIBLE_ROWS) {
       if (number(value, DEFAULT_VISIBLE_ROWS) > items.length && hasMore) void loadMore();
@@ -1501,16 +1559,16 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       return controller.setVisibleLimit(value);
     },
     getItems() {
-      return cloneItems(items);
+      return cloneItems(displayItems());
     },
     getFilteredItems() {
-      return cloneItems(items);
+      return cloneItems(displayItems());
     },
     getPageItems() {
-      return cloneItems(items);
+      return cloneItems(displayItems());
     },
     getVisibleItems() {
-      return cloneItems(items);
+      return cloneItems(displayItems());
     },
     getPagination() {
       return {
@@ -1533,7 +1591,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       return findUsuarioById(items, id) || null;
     },
     getState() {
-      return { ...stateSnapshot(), items: cloneItems(items) };
+      return { ...stateSnapshot(), items: cloneItems(displayItems()) };
     },
     isAdmin: admin,
     isInitialized() {
@@ -1573,6 +1631,8 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         cursorPresent: Boolean(continuationToken),
         continuationTokenHidden: true,
         filter,
+        sortField: "lastLoginAt",
+        sortOrder,
         searchPresent: Boolean(search),
         lastSyncAt,
         error,
@@ -1591,6 +1651,9 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
           duplicateMountProtected: true,
           routeCommitNonBlocking: true,
           csvLoadedRowsOnly: true,
+          silentStaleWhileRevalidate: true,
+          sessionStartVisualOrder: true,
+          neverLoggedInAlwaysLast: true,
         },
       };
     },
@@ -1724,6 +1787,8 @@ export const submitCreateUsuario = (payloadValue = {}) => {
 };
 export const exportCsv = () => getActiveUsuariosController()?.exportCsv?.() || Promise.resolve(false);
 export const loadMore = () => getActiveUsuariosController()?.loadMore?.() || Promise.resolve(0);
+export const setSortOrder = (order = USUARIOS_DEFAULT_SORT_ORDER) => getActiveUsuariosController()?.setSortOrder?.(order) || normalizeSessionSortOrder(order);
+export const toggleSortOrder = (order = "") => getActiveUsuariosController()?.toggleSortOrder?.(order) || normalizeSessionSortOrder(order || USUARIOS_DEFAULT_SORT_ORDER);
 export const setVisibleLimit = (limit = DEFAULT_VISIBLE_ROWS) => getActiveUsuariosController()?.setVisibleLimit?.(limit) || 0;
 export const goToPage = (pageNumber = 1) => getActiveUsuariosController()?.goToPage?.(pageNumber) || 1;
 export const goPrevPage = () => getActiveUsuariosController()?.goPrevPage?.() || 1;
@@ -1746,7 +1811,7 @@ export async function loadUsuarios(options = {}) {
     includeTotal: options.includeTotal !== false,
     limit: options.limit || USUARIOS_CURSOR_PAGE_SIZE,
   });
-  return result.items;
+  return sortBySessionStart(result.items, options.sortOrder || USUARIOS_DEFAULT_SORT_ORDER);
 }
 export const listUsuarios = loadUsuarios;
 export const loadUsuarioDetail = (id = "", options = {}) => loadUsuarioDetailApi(id, options);
@@ -1763,8 +1828,8 @@ export const getUsuarios = () => {
 export const getSortedUsuariosStore = () => {
   const controller = getActiveUsuariosController();
   return controller?.getItems
-    ? normalizeUsuariosCollection(controller.getItems())
-    : cloneItems(getSortedUsuariosApiStore());
+    ? controller.getItems()
+    : sortBySessionStart(cloneItems(getSortedUsuariosApiStore()), USUARIOS_DEFAULT_SORT_ORDER);
 };
 export const getUsuariosCount = () => {
   const controller = getActiveUsuariosController();
@@ -1787,6 +1852,8 @@ export const getUsuariosStoreSnapshot = () => {
     totalKnown: state.totalKnown === true,
     remoteCount: state.totalKnown ? state.totalCount : null,
     hasMore: state.hasMore === true,
+    sortField: state.sortField,
+    sortOrder: state.sortOrder,
     lastSyncAt: number(state.lastSyncAt, 0),
   };
 };
@@ -1813,6 +1880,8 @@ export const getSnapshot = () => getActiveUsuariosController()?.getSnapshot?.() 
     backendPagination: true,
     legacyFetchAllUsed: false,
     localDatasetCeiling: false,
+    silentStaleWhileRevalidate: true,
+    sessionStartVisualOrder: true,
   },
 };
 export const isAdmin = () => getActiveUsuariosController()?.isAdmin?.() || isAdminContext({});
@@ -1836,6 +1905,8 @@ export const getUsuariosRouteDebug = (context = {}) => {
     cursorFirst: true,
     serverFiltered: true,
     localDatasetCeiling: false,
+    sortField: "lastLoginAt",
+    defaultSortOrder: USUARIOS_DEFAULT_SORT_ORDER,
   };
 };
 
@@ -1882,6 +1953,8 @@ export const UsuariosModule = {
   submitCreateUsuario,
   exportCsv,
   loadMore,
+  setSortOrder,
+  toggleSortOrder,
   setVisibleLimit,
   goToPage,
   goPrevPage,
@@ -1940,6 +2013,7 @@ export const UsuariosModule = {
     findUsuarioById,
     paginateUsuarios,
     computeUsuariosStats,
+    sortBySessionStart,
   },
   state: usuariosState,
 };
@@ -1980,6 +2054,8 @@ export function registerGlobalBridge(controller = null) {
     cursorFirst: true,
     serverFiltered: true,
     localDatasetCeiling: false,
+    silentStaleWhileRevalidate: true,
+    sessionStartVisualOrder: true,
   });
   return UsuariosModule;
 }

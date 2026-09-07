@@ -99,6 +99,12 @@ for (const forbiddenVisibleLoader of [
 }
 
 const indexSource = fs.readFileSync("src/views/usuarios/index.js", "utf8");
+const appCss = fs.readFileSync("src/css/app.css", "utf8");
+const sharedListingCss = fs.readFileSync(
+  "src/css/compositions/private-admin-parity.css",
+  "utf8"
+);
+const usuariosViewCss = fs.readFileSync("src/css/views/usuarios/index.css", "utf8");
 
 assert.match(
   indexSource,
@@ -118,6 +124,24 @@ assert.match(
   "controller state must identify lastLoginAt as the visual sort field"
 );
 
+assert.equal(
+  (appCss.match(/private-admin-parity\.css/g) || []).length,
+  1,
+  "private listing visual authority must be imported exactly once"
+);
+
+assert.match(
+  sharedListingCss,
+  /\.usuarios-filter-pill[\s\S]{0,700}\)\s*>\s*svg\s*\{[\s\S]{0,220}inline-size:\s*14px;[\s\S]{0,220}block-size:\s*14px;/,
+  "shared listing CSS must own compact filter/sort SVG geometry for Usuarios"
+);
+
+assert.doesNotMatch(
+  usuariosViewCss,
+  /\.usuarios-(?:filter|sort)-pill(?:--[\w-]+)?\s*(?:>|\{|svg)/,
+  "Usuarios route CSS must not redefine shared filter/sort pill geometry"
+);
+
 console.log(
-  "Usuarios session order contract OK · newest session first · silent stale-while-revalidate"
+  "Usuarios session order contract OK · newest session first · silent stale-while-revalidate · shared listing style authority"
 );

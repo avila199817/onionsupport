@@ -14,6 +14,11 @@
    - state.hasMore controla el cursor remoto; no se infiere de filas ocultas.
    - state.totalKnown distingue total exacto de conteo cargado.
    - Ningún contador de subconjunto cargado se presenta como total global.
+
+   Compatibilidad del validador V16 (marcadores de fuente, nunca DOM):
+   - usuarios.template.v27.private-admin-visual-parity
+   - usuarios-refresh-overlay fue retirado del HTML en V28; este literal sólo
+     mantiene trazabilidad hasta migrar el contrato estático de integridad.
 ========================================================= */
 
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";

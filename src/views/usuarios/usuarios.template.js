@@ -268,7 +268,7 @@ function renderRow(item = {}, state = {}) {
     <td class="usuarios-cell usuarios-cell--date" data-column="date"><span class="usuarios-date-inline" title="${attr(formatDateTime(item.createdAt))}">${escapeHtml(formatDateShort(item.createdAt))}</span></td>
     <td class="usuarios-cell usuarios-cell--email" data-column="email"><span class="usuarios-email-inline" title="${attr(getEmail(item))}">${escapeHtml(getEmail(item))}</span></td>
     <td class="usuarios-cell usuarios-cell--location" data-column="location"><span class="usuarios-location-inline" title="${attr(getCity(item))}">${escapeHtml(getCity(item))}</span></td>
-    <td class="usuarios-cell usuarios-cell--activity" data-column="activity"><span class="usuarios-activity-inline" title="${attr(formatDateTime(lastLoginAt))}">${escapeHtml(lastLoginAt ? formatRelativeDate(lastLoginAt) : "Sin acceso")}</span></td>
+    <td class="usuarios-cell usuarios-cell--activity" data-column="activity"><span class="usuarios-activity-inline" title="${attr(formatDateTime(lastLoginAt))}">${escapeHtml(lastLoginAt ? formatRelativeDate(lastLoginAt) : "Nunca")}</span></td>
   </tr>`;
 }
 function renderColgroup() {

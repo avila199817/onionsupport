@@ -13,13 +13,16 @@ API = (ROOT / "src/views/usuarios/usuarios.api.js").read_text(encoding="utf-8")
 
 errors: list[str] = []
 
+
 def require(source: str, snippet: str, message: str) -> None:
     if snippet not in source:
         errors.append(message)
 
+
 def reject(source: str, snippet: str, message: str) -> None:
     if snippet in source:
         errors.append(message)
+
 
 require(INDEX, 'from "./usuarios.cursor.js"', "Usuarios index must use cursor list client")
 require(INDEX, "fetchUsuariosCursorPage", "Usuarios index must fetch cursor pages")
@@ -32,7 +35,7 @@ reject(INDEX, "loadUsuariosApi(", "Usuarios index must not call legacy all-pages
 reject(INDEX, "all: true", "Usuarios index must not request all pages")
 
 # Route-open performance: the router awaits route.render() before committing the hidden host.
-# Usuarios must paint its loading shell synchronously, then let the first page resolve in background.
+# Usuarios must paint its initial loading shell synchronously, then let the first page resolve in background.
 require(INDEX, "void load({ silent: false });\n      return controller;", "Usuarios mount must start the first page without blocking the router commit")
 reject(INDEX, "await load({ silent: false });", "Usuarios mount must never await first-page network before route commit")
 reject(INDEX, "loading = true;\n      render({ preserveDom: false });\n      await load", "Usuarios mount must not perform a redundant preflight render before loadFirstPage")
@@ -47,10 +50,29 @@ require(INDEX, "cursor !== continuationToken", "Cursor responses must be rejecte
 require(INDEX, "loadMoreTaskIdentityProtected: true", "Usuarios snapshot must declare load-more identity protection")
 require(INDEX, "loadMoreTask = null;\n    loadingMore = false;", "A new query must release continuation loading state")
 require(INDEX, "mergeUsuariosFreshPageFirst(items, page.items)", "Fresh first-page values must refresh preserved continuation rows")
-require(INDEX, "mergeUsuariosCursorItems(previousItems, freshPage)", "Fresh incoming values must win before global updatedAt ordering")
-require(INDEX, "items = [];\n      continuationToken = \"\";", "A new filter/search query must not display stale rows")
-require(INDEX, "loading = !keepAccumulatedPages;", "A reset query must render an explicit loading state")
+require(INDEX, "mergeUsuariosCursorItems(previousItems, freshPage)", "Fresh incoming values must win while preserved pages are revalidated")
+
+# Stale-while-revalidate: once rows exist, search/filter/refresh keep them painted and
+# update atomically when the new first page arrives. Only an empty first entry may skeleton.
+require(
+    INDEX,
+    "const keepVisibleRows = items.length > 0 && (silent === true || keepAccumulatedPages);",
+    "Silent revalidation must preserve currently painted users",
+)
+require(INDEX, "if (!keepVisibleRows) {\n      items = [];", "Only an empty initial/reset load may clear the visible rows")
+require(INDEX, "loading = !keepVisibleRows;", "A query with visible rows must not return to initial-loading presentation")
+require(INDEX, "refreshing = keepVisibleRows;", "Visible-row revalidation must be tracked separately from initial loading")
+require(INDEX, "silentStaleWhileRevalidate: true", "Usuarios snapshot must declare silent stale-while-revalidate")
 require(INDEX, "return loadFirstPage({ silent: false });", "A failed first-page query must have a real retry path")
+
+# Session-start ordering is a visual invariant over the loaded cursor window.
+require(INDEX, 'sortField: "lastLoginAt"', "Usuarios state must declare lastLoginAt as the session ordering authority")
+require(INDEX, "sortBySessionStart(items, sortOrder)", "Usuarios must sort loaded rows by projected session start")
+require(INDEX, "sessionStartVisualOrder: true", "Usuarios snapshot must declare session-start visual ordering")
+require(INDEX, "neverLoggedInAlwaysLast: true", "Usuarios snapshot must keep never-login users at the bottom")
+require(TEMPLATE, 'SORT_TOGGLE: "sort-toggle"', "Usuarios template must expose the session-date sort action")
+require(TEMPLATE, "Inicio sesión ↓", "Usuarios default session sort control must be newest-first")
+require(TEMPLATE, 'data-sort-field="lastLoginAt"', "Usuarios table must identify lastLoginAt as its date sort field")
 
 # Infinite continuation must be automatic, disposable and rooted in the real scroll container.
 require(INDEX, 'USUARIOS_INFINITE_ROOT_MARGIN = "0px 0px 900px 0px"', "Usuarios must prefetch continuation pages 900px before the feed end")
@@ -79,7 +101,7 @@ require(INDEX, "matchesActionIdentity(indexedCandidate)", "Usuarios must restore
 require(INDEX, "[ACTIONS.RETRY_PAGE, ACTIONS.RETRY, ACTIONS.REFRESH].includes", "Usuarios page retry and refresh focus must move through the stable status target")
 require(INDEX, "function invalidateContinuationForPendingSearch()", "Search debounce must invalidate the previous continuation")
 require(INDEX, "queryEpoch += 1;\n    loadMoreTask = null;", "Search debounce must invalidate in-flight continuation responses")
-require(INDEX, 'continuationToken = "";\n    hasMore = false;', "Search debounce must retire the previous cursor")
+require(INDEX, "disconnectInfiniteObserver();", "Search debounce must retire the previous continuation observer immediately")
 require(INDEX, "Boolean(searchTimer)", "Observer and resume guards must block while search debounce is pending")
 if INDEX.count("Boolean(searchTimer) ||") < 4:
     errors.append("Search debounce must block observer sync, observer callback, load-more and resume revalidation")
@@ -129,13 +151,21 @@ require(TEMPLATE, 'aria-live="polite"', "Infinite-scroll status must be announce
 require(TEMPLATE, 'usuarios-history-subtitle" tabindex="-1" role="status" aria-live="polite" aria-atomic="true"', "Usuarios must use one small atomic live region and focus fallback")
 require(TEMPLATE, 'RETRY_PAGE: "retry-page"', "Failed continuation pages must expose a dedicated retry action")
 require(TEMPLATE, "state.loadMoreError", "Template must distinguish continuation failure from initial-load failure")
-require(TEMPLATE, 'state.loadingMore || state.refreshing ? "" : \'<div class="usuarios-feed-sentinel"', "Loading or refreshing must not keep a live sentinel")
-require(TEMPLATE, 'if (state.searchPending) return "";', "Pending search must not expose a stale sentinel or false end marker")
+require(
+    TEMPLATE,
+    "const listBusy = state.loadingMore === true || state.refreshing === true || state.searchPending === true;",
+    "Loading, refreshing and pending search must suppress the live continuation sentinel",
+)
+require(TEMPLATE, '${listBusy ? "" : \'<div class="usuarios-feed-sentinel"', "Busy users feed must not keep a live sentinel")
 require(TEMPLATE, "data.search ?? data.searchQuery ?? state.search ?? state.searchQuery", "Search markup must preserve exact draft spacing and caret offsets")
 require(TEMPLATE, 'value="${escapeHtml(search)}"', "Search input attributes must escape without trimming or collapsing the active draft")
 require(TEMPLATE, 'Boolean(cleanText(search, ""))', "Whitespace-only drafts must not become an active server filter")
 require(TEMPLATE, '"Has visto todos los usuarios de la consulta."', "The single live region must announce the confirmed end")
 require(TEMPLATE, "? finalSummary", "The scoped live region must consume the explicit final message")
+reject(TEMPLATE, "Actualizando usuarios...", "Loaded Usuarios must not render a visible refresh message")
+reject(TEMPLATE, "Cargando más usuarios...", "Loaded Usuarios must not render a visible continuation loader message")
+reject(TEMPLATE, "Preparando la búsqueda de usuarios...", "Loaded Usuarios must not render a visible search loader message")
+reject(TEMPLATE, "function renderRefreshOverlay()", "Usuarios must not retain a rendered refresh-overlay helper")
 reject(TEMPLATE, "filteredItems.length > pageItems.length", "Template must not infer remote pagination from local rows")
 reject(TEMPLATE, "usuarios-load-more-btn", "Template must not expose a manual continuation button")
 reject(TEMPLATE, "Cargar 50 más", "Template must not expose manual continuation copy")

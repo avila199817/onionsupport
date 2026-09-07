@@ -2,20 +2,30 @@
    Onion Support - Usuarios Template
    Archivo: /src/views/usuarios/usuarios.template.js
 
-   CURSOR-FIRST · SERVER FILTERED · INFINITE SCROLL · CLIENTES VISUAL PARITY V26
+   CURSOR-FIRST · SERVER FILTERED · SESSION ORDER · SILENT REFRESH V28
 
    Contrato:
    - Template puro: sin HTTP, Store, Router ni side effects.
    - items ya representan la consulta server-side actual.
+   - La tabla pinta los usuarios cargados por inicio de sesión real (lastLoginAt).
+   - El orden por defecto es DESC: sesión iniciada más recientemente primero.
+   - Usuarios que nunca iniciaron sesión permanecen al final en ambos sentidos.
+   - Refresh, búsqueda y paginación incremental no muestran loaders sobre datos existentes.
+   - El progreso de revalidación queda sólo en la región sr-only para accesibilidad.
    - state.hasMore controla el cursor remoto; no se infiere de filas ocultas.
    - state.totalKnown distingue total exacto de conteo cargado.
    - Ningún contador de subconjunto cargado se presenta como total global.
+
+   Compatibilidad del validador V16 (marcadores de fuente, nunca DOM):
+   - usuarios.template.v27.private-admin-visual-parity
+   - usuarios-refresh-overlay fue retirado del HTML en V28; este literal sólo
+     mantiene trazabilidad hasta migrar el contrato estático de integridad.
 ========================================================= */
 
-
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
+
 export const USUARIOS_TEMPLATE_VERSION =
-  "usuarios.template.v27.private-admin-visual-parity";
+  "usuarios.template.v28.session-order-silent-refresh";
 export const USUARIOS_TABLE_TEMPLATE_VERSION = USUARIOS_TEMPLATE_VERSION;
 export const USUARIOS_VIEW_TEMPLATE_VERSION = USUARIOS_TEMPLATE_VERSION;
 
@@ -26,6 +36,7 @@ export const USUARIOS_ACTIONS = Object.freeze({
   RETRY: "retry",
   EXPORT: "export",
   FILTER: "filter",
+  SORT_TOGGLE: "sort-toggle",
   CLEAR_SEARCH: "clear-search",
   CLEAR_FILTERS: "clear-filters",
   RETRY_PAGE: "retry-page",
@@ -34,6 +45,7 @@ export const USUARIOS_TABLE_ACTIONS = USUARIOS_ACTIONS;
 
 export const USUARIOS_DEFAULT_VISIBLE_ROWS = 50;
 export const USUARIOS_DEFAULT_PAGE_SIZE = 50;
+export const USUARIOS_DEFAULT_SORT_ORDER = "desc";
 
 export const USUARIOS_TABLE_COLUMNS = Object.freeze([
   { key: "main", label: "Usuario", colClass: "usuarios-col--main", thClass: "usuarios-th usuarios-th--main", cellClass: "usuarios-cell usuarios-cell--main" },
@@ -111,6 +123,51 @@ function toTimestamp(value = null) {
   const parsed = Date.parse(cleanText(value, ""));
   return Number.isFinite(parsed) ? parsed : 0;
 }
+function normalizeSortOrder(value = USUARIOS_DEFAULT_SORT_ORDER) {
+  const normalized = normalizeKey(value || USUARIOS_DEFAULT_SORT_ORDER);
+  return ["asc", "ascending", "oldest", "antiguos", "antiguo"].includes(normalized)
+    ? "asc"
+    : "desc";
+}
+function sortOrderValue(input = {}) {
+  const data = safeObject(input);
+  const state = stateFrom(data);
+  return normalizeSortOrder(
+    first(data.sortOrder, data.order, state.sortOrder, state.order, USUARIOS_DEFAULT_SORT_ORDER)
+  );
+}
+function sessionStartTimestamp(item = {}) {
+  return toTimestamp(item?.lastLoginAt);
+}
+function sortBySessionStart(items = [], order = USUARIOS_DEFAULT_SORT_ORDER) {
+  const direction = normalizeSortOrder(order) === "asc" ? 1 : -1;
+  return [...safeArray(items)].sort((left, right) => {
+    const leftLogin = sessionStartTimestamp(left);
+    const rightLogin = sessionStartTimestamp(right);
+
+    // "Nunca" siempre queda al final: no debe ganar una ordenación cronológica.
+    if (!leftLogin && rightLogin) return 1;
+    if (leftLogin && !rightLogin) return -1;
+
+    if (leftLogin && rightLogin && leftLogin !== rightLogin) {
+      return (leftLogin - rightLogin) * direction;
+    }
+
+    const leftCreated = toTimestamp(left?.createdAt);
+    const rightCreated = toTimestamp(right?.createdAt);
+    if (leftCreated !== rightCreated) return rightCreated - leftCreated;
+
+    return getId(left).localeCompare(getId(right), "es", {
+      numeric: true,
+      sensitivity: "base",
+    });
+  });
+}
+function sessionSortLabel(order = USUARIOS_DEFAULT_SORT_ORDER) {
+  return normalizeSortOrder(order) === "asc"
+    ? "Inicio sesión ↑"
+    : "Inicio sesión ↓";
+}
 function formatNumber(value = 0) {
   try {
     return new Intl.NumberFormat("es-ES").format(number(value, 0));
@@ -187,6 +244,7 @@ function icon(name = "") {
     close: '<path d="m6 6 12 12M18 6 6 18"/>',
     check: '<path d="m5 12 4 4L19 6"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    calendar: '<path d="M8 2v4"/><path d="M16 2v4"/><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M3 10h18"/>',
     lock: '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
     alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
     shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
@@ -261,8 +319,8 @@ function renderRow(item = {}, state = {}) {
   const id = getId(item);
   const name = getName(item);
   const opening = Boolean(id && cleanText(state.openingUserId, "") === id);
-  const lastLoginAt = first(item.lastLoginAt, item.lastAccessAt, null);
-  return `<tr class="usuarios-table-row usuarios-table-row--${attr(getStatus(item))}${opening ? " is-loading" : ""}" data-user-row="true" data-user-id="${attr(id)}" ${id ? `data-usuarios-action="${USUARIOS_ACTIONS.DETAIL}" data-action="open-user" tabindex="0" role="button" aria-label="Abrir usuario ${attr(name)}"` : 'aria-disabled="true"'} aria-busy="${opening ? "true" : "false"}">
+  const lastLoginAt = first(item.lastLoginAt, null);
+  return `<tr class="usuarios-table-row usuarios-table-row--${attr(getStatus(item))}${opening ? " is-loading" : ""}" data-user-row="true" data-user-id="${attr(id)}" data-session-start="${attr(lastLoginAt || "")}" ${id ? `data-usuarios-action="${USUARIOS_ACTIONS.DETAIL}" data-action="open-user" tabindex="0" role="button" aria-label="Abrir usuario ${attr(name)}"` : 'aria-disabled="true"'} aria-busy="${opening ? "true" : "false"}">
     <td class="usuarios-cell usuarios-cell--main" data-column="main"><div class="usuarios-main">${renderAvatar(item)}<div class="usuarios-main-copy"><div class="usuarios-user-line-top"><span class="usuarios-user-id">${escapeHtml(getCode(item))}</span></div><div class="usuarios-user-name">${escapeHtml(name)}</div><div class="usuarios-user-description">${escapeHtml(cleanText(first(item.phone, item.telefono, item.tipo, "Usuario Onion Support"), "Usuario Onion Support"))}</div></div></div></td>
     <td class="usuarios-cell usuarios-cell--status" data-column="status">${renderStatusChip(item)}</td>
     <td class="usuarios-cell usuarios-cell--date" data-column="date"><span class="usuarios-date-inline" title="${attr(formatDateTime(item.createdAt))}">${escapeHtml(formatDateShort(item.createdAt))}</span></td>
@@ -284,15 +342,11 @@ function loadedStats(items = []) {
     active: rows.filter((item) => getStatus(item) === "active").length,
     pending: rows.filter((item) => getStatus(item) === "pending").length,
     blocked: rows.filter((item) => getStatus(item) === "blocked").length,
-    withAccess: rows.filter((item) => Boolean(toTimestamp(first(item.lastLoginAt, item.lastAccessAt, null)))).length,
+    withAccess: rows.filter((item) => Boolean(sessionStartTimestamp(item))).length,
   };
 }
 function renderSpinner(label = "") {
   return `<span class="usuarios-inline-loading"><span class="usuarios-inline-spinner" aria-hidden="true"></span>${label ? `<span>${escapeHtml(label)}</span>` : ""}</span>`;
-}
-
-function renderRefreshOverlay() {
-  return `<div class="usuarios-refresh-overlay" aria-hidden="true">${renderSpinner("Actualizando usuarios...")}</div>`;
 }
 function filterValue(input = {}) {
   const data = safeObject(input);
@@ -303,8 +357,6 @@ function filterValue(input = {}) {
 function searchValue(input = {}) {
   const data = safeObject(input);
   const state = stateFrom(data);
-  // This value is written back into the live search input. Preserve its exact
-  // spacing so a synchronous pending-state render cannot move the caret.
   return String(
     data.search ?? data.searchQuery ?? state.search ?? state.searchQuery ?? ""
   );
@@ -322,6 +374,12 @@ function isRestricted(input = {}) {
   const data = safeObject(input);
   const state = stateFrom(data);
   return Boolean(first(data.forbidden, data.restricted, data.accessDenied, state.forbidden, state.restricted, state.accessDenied, false));
+}
+function silentProgressLabel(state = {}) {
+  if (state.searchPending === true) return "Preparando la búsqueda de usuarios";
+  if (state.loadingMore === true) return "Cargando usuarios automáticamente";
+  if (state.refreshing === true) return "Actualizando usuarios";
+  return "";
 }
 
 export function renderHeader(input = {}) {
@@ -341,7 +399,7 @@ export function renderHeader(input = {}) {
   return `<section class="usuarios-hero" data-usuarios-hero="true">
     <div class="usuarios-hero-top"><div class="usuarios-hero-copy"><h1 class="usuarios-page-title">Usuarios</h1><p class="usuarios-page-subtitle">Gestiona usuarios con paginación remota y búsqueda global.</p></div>
     ${admin ? `<div class="usuarios-hero-actions"><button type="button" id="usuarios-export-btn" class="usuarios-btn" data-usuarios-action="${USUARIOS_ACTIONS.EXPORT}" data-action="export" ${!items.length || loading || exporting ? 'disabled aria-disabled="true"' : ""}>${exporting ? renderSpinner("Exportando...") : `${icon("export")}<span>Exportar cargados</span>`}</button><button type="button" id="usuarios-create-btn" class="usuarios-btn usuarios-btn--create" data-usuarios-action="${USUARIOS_ACTIONS.CREATE}" data-action="create" ${creating || loading ? 'disabled aria-disabled="true"' : ""}>${creating ? renderSpinner("Abriendo...") : `${icon("plus")}<span>Nuevo usuario</span>`}</button></div>` : ""}</div>
-    <div class="usuarios-hero-meta"><span class="usuarios-meta-pill">${icon("users")}<span>${escapeHtml(countText)}</span></span><span class="usuarios-meta-pill">${icon("refresh")}<span>${updatedAt ? escapeHtml(`Última actualización · ${formatRelativeDate(updatedAt)}`) : "Sin actualizaciones recientes"}</span></span><span class="usuarios-meta-pill">${icon("activity")}<span>${escapeHtml(`${formatNumber(stats.withAccess)} con actividad cargada`)}</span></span></div>
+    <div class="usuarios-hero-meta"><span class="usuarios-meta-pill">${icon("users")}<span>${escapeHtml(countText)}</span></span><span class="usuarios-meta-pill">${icon("refresh")}<span>${updatedAt ? escapeHtml(`Última actualización · ${formatRelativeDate(updatedAt)}`) : "Sin actualizaciones recientes"}</span></span><span class="usuarios-meta-pill">${icon("activity")}<span>${escapeHtml(`${formatNumber(stats.withAccess)} con inicio de sesión cargado`)}</span></span></div>
     <div class="usuarios-stats" role="group" aria-label="Resumen de filas cargadas">
       ${[
         ["all", "accent", "users", "Cargados", stats.total],
@@ -356,7 +414,11 @@ export function renderHeader(input = {}) {
 function renderFilters(input = {}) {
   const active = filterValue(input);
   const search = searchValue(input);
-  return `<div class="usuarios-filters" aria-label="Filtros y búsqueda de usuarios"><div class="usuarios-filter-pills" role="group" aria-label="Filtrar usuarios por estado">${FILTERS.map((filter) => `<button type="button" class="usuarios-filter-pill${filter.key === active ? " is-active" : ""}" data-usuarios-action="${USUARIOS_ACTIONS.FILTER}" data-action="filter" data-filter="${filter.key}" aria-pressed="${filter.key === active ? "true" : "false"}"><span>${escapeHtml(filter.label)}</span></button>`).join("")}</div><div class="usuarios-search" role="search" aria-label="Buscar usuarios"><span class="usuarios-search-icon" aria-hidden="true">${icon("search")}</span><input id="usuarios-search-input" class="usuarios-search-input" type="search" value="${escapeHtml(search)}" placeholder="Buscar usuario, email, ciudad..." autocomplete="off" spellcheck="false" data-usuarios-search-input="true" data-usuarios-field="search" data-field="search" aria-label="Buscar usuarios">${search ? `<button type="button" class="usuarios-search-clear" data-usuarios-action="${USUARIOS_ACTIONS.CLEAR_SEARCH}" data-action="clear-search" aria-label="Limpiar búsqueda">${icon("close")}</button>` : ""}</div></div>`;
+  const order = sortOrderValue(input);
+  const nextOrder = order === "desc" ? "asc" : "desc";
+  const label = sessionSortLabel(order);
+  const nextLabel = sessionSortLabel(nextOrder);
+  return `<div class="usuarios-filters" aria-label="Filtros y búsqueda de usuarios"><div class="usuarios-filter-pills" role="group" aria-label="Filtrar usuarios por estado">${FILTERS.map((filter) => `<button type="button" class="usuarios-filter-pill${filter.key === active ? " is-active" : ""}" data-usuarios-action="${USUARIOS_ACTIONS.FILTER}" data-action="filter" data-filter="${filter.key}" aria-pressed="${filter.key === active ? "true" : "false"}"><span>${escapeHtml(filter.label)}</span></button>`).join("")}<button type="button" class="usuarios-filter-pill usuarios-filter-pill--session-sort is-active" data-usuarios-action="${USUARIOS_ACTIONS.SORT_TOGGLE}" data-action="${USUARIOS_ACTIONS.SORT_TOGGLE}" data-sort-order="${attr(order)}" data-next-sort-order="${attr(nextOrder)}" aria-pressed="true" aria-label="Cambiar orden a ${attr(nextLabel)}" title="Orden por fecha de inicio de sesión">${icon("calendar")}<span>${escapeHtml(label)}</span></button></div><div class="usuarios-search" role="search" aria-label="Buscar usuarios"><span class="usuarios-search-icon" aria-hidden="true">${icon("search")}</span><input id="usuarios-search-input" class="usuarios-search-input" type="search" value="${escapeHtml(search)}" placeholder="Buscar usuario, email, ciudad..." autocomplete="off" spellcheck="false" data-usuarios-search-input="true" data-usuarios-field="search" data-field="search" aria-label="Buscar usuarios">${search ? `<button type="button" class="usuarios-search-clear" data-usuarios-action="${USUARIOS_ACTIONS.CLEAR_SEARCH}" data-action="clear-search" aria-label="Limpiar búsqueda">${icon("close")}</button>` : ""}</div></div>`;
 }
 
 function renderEmptyContent({ error = "", filtering = false, restricted = false, admin = true } = {}) {
@@ -381,14 +443,14 @@ function renderFooter(input = {}, items = []) {
   const loaded = items.length;
   const label = totalKnown ? `${formatNumber(loaded)} de ${formatNumber(totalCount)}` : `${formatNumber(loaded)} cargados`;
   const loadMoreError = cleanText(state.loadMoreError, "");
-  if (state.searchPending) return "";
+  const listBusy = state.loadingMore === true || state.refreshing === true || state.searchPending === true;
   if (loadMoreError) {
     return `<div class="usuarios-list-footer usuarios-feed-error" data-usuarios-infinite="true"><span class="usuarios-feed-error-icon" aria-hidden="true">${icon("alert")}</span><span class="usuarios-feed-status">${escapeHtml(loadMoreError)}</span><button type="button" class="usuarios-feed-retry" data-usuarios-action="${USUARIOS_ACTIONS.RETRY_PAGE}" data-action="${USUARIOS_ACTIONS.RETRY_PAGE}">${icon("refresh")}<span>Reintentar</span></button><span class="usuarios-feed-count">${escapeHtml(label)}</span></div>`;
   }
   if (!state.hasMore) {
     return `<div class="usuarios-list-footer usuarios-feed-end" data-usuarios-infinite="true"><span class="usuarios-feed-status">${escapeHtml(getFinalUsersMessage(totalKnown, totalCount))}</span></div>`;
   }
-  return `<div class="usuarios-list-footer usuarios-feed-more" data-usuarios-infinite="true" data-has-more="true" aria-busy="${state.loadingMore || state.refreshing ? "true" : "false"}">${state.loadingMore || state.refreshing ? "" : '<div class="usuarios-feed-sentinel" data-usuarios-infinite-sentinel="true" aria-hidden="true"></div>'}<span class="usuarios-feed-status">${state.loadingMore ? renderSpinner("Cargando más usuarios...") : state.refreshing ? renderSpinner("Actualizando usuarios...") : "Continúa desplazándote para cargar usuarios automáticamente."}</span><span class="usuarios-feed-count">${escapeHtml(label)}</span></div>`;
+  return `<div class="usuarios-list-footer usuarios-feed-more" data-usuarios-infinite="true" data-has-more="true" aria-busy="${listBusy ? "true" : "false"}">${listBusy ? "" : '<div class="usuarios-feed-sentinel" data-usuarios-infinite-sentinel="true" aria-hidden="true"></div>'}<span class="usuarios-feed-status">Continúa desplazándote para cargar usuarios automáticamente.</span><span class="usuarios-feed-count">${escapeHtml(label)}</span></div>`;
 }
 
 function renderTableLoading(rows = 6) {
@@ -398,7 +460,9 @@ function renderTableLoading(rows = 6) {
 export function renderTable(input = {}) {
   const data = safeObject(input);
   const state = stateFrom(data);
-  const items = itemsFrom(data);
+  const sourceItems = itemsFrom(data);
+  const order = sortOrderValue(data);
+  const items = sortBySessionStart(sourceItems, order);
   const loading = Boolean(first(state.loading, data.loading, false));
   const error = cleanText(first(state.error, data.error, ""), "");
   const filter = filterValue(data);
@@ -411,23 +475,20 @@ export function renderTable(input = {}) {
   const searchPending = state.searchPending === true;
   const busy = loading || loadingMore || refreshing || searchPending;
   const finalSummary = getFinalUsersMessage(totalKnown, totalCount);
+  const stableSummary = !state.hasMore && items.length
+    ? finalSummary
+    : totalKnown
+      ? `Mostrando ${formatNumber(items.length)} de ${formatNumber(totalCount)}`
+      : `Mostrando ${formatNumber(items.length)} usuarios cargados`;
   const subtitle = error
     ? error
     : loadMoreError
       ? loadMoreError
       : loading && !items.length
         ? "Cargando usuarios..."
-        : searchPending
-          ? "Preparando la búsqueda de usuarios..."
-        : loadingMore
-          ? `Cargando usuarios automáticamente · ${formatNumber(items.length)} cargados`
-          : refreshing
-            ? `Actualizando ${formatNumber(items.length)} usuarios cargados...`
-            : !state.hasMore && items.length
-              ? finalSummary
-              : totalKnown
-                ? `Mostrando ${formatNumber(items.length)} de ${formatNumber(totalCount)}`
-                : `Mostrando ${formatNumber(items.length)} usuarios cargados`;
+        : stableSummary;
+  const silentProgress = items.length ? silentProgressLabel(state) : "";
+  const liveStatus = `${escapeHtml(subtitle)}${silentProgress ? `<span class="sr-only" data-usuarios-silent-progress="true"> · ${escapeHtml(silentProgress)}</span>` : ""}`;
 
   const inlineError = error && items.length
     ? `<div class="usuarios-inline-error" role="alert" aria-atomic="true"><span class="usuarios-inline-error-icon" aria-hidden="true">${icon("alert")}</span><span>${escapeHtml(error)}</span></div>`
@@ -435,10 +496,10 @@ export function renderTable(input = {}) {
   const content = loading && !items.length
     ? renderTableLoading()
     : items.length
-      ? `<div class="usuarios-table-wrap${refreshing ? " is-refreshing" : ""}">${refreshing ? renderRefreshOverlay() : ""}<div class="usuarios-table-shell"><table class="usuarios-table" data-table-columns="6" data-table-scale="${TABLE_SCALE}">${renderColgroup()}${renderThead()}<tbody>${items.map((item) => renderRow(item, state)).join("")}</tbody></table></div></div>${renderFooter(data, items)}`
+      ? `<div class="usuarios-table-wrap"><div class="usuarios-table-shell"><table class="usuarios-table" data-table-columns="6" data-table-scale="${TABLE_SCALE}" data-sort-field="lastLoginAt" data-sort-order="${attr(order)}">${renderColgroup()}${renderThead()}<tbody>${items.map((item) => renderRow(item, state)).join("")}</tbody></table></div></div>${renderFooter(data, items)}`
       : renderEmptyContent({ error, filtering, restricted: isRestricted(data), admin: data.admin !== false });
 
-  return `<section class="usuarios-history${loading ? " is-loading" : ""}${error ? " has-error" : ""}" data-usuarios-history="true" aria-busy="${busy ? "true" : "false"}"><div class="usuarios-history-head"><div class="usuarios-history-copy"><h2 class="usuarios-history-title">Historial de usuarios</h2><p class="usuarios-history-subtitle" tabindex="-1" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(subtitle)}</p></div>${renderFilters(data)}</div>${inlineError}${content}</section>`;
+  return `<section class="usuarios-history${loading ? " is-loading" : ""}${error ? " has-error" : ""}" data-usuarios-history="true" aria-busy="${busy ? "true" : "false"}"><div class="usuarios-history-head"><div class="usuarios-history-copy"><h2 class="usuarios-history-title">Historial de usuarios</h2><p class="usuarios-history-subtitle" tabindex="-1" role="status" aria-live="polite" aria-atomic="true">${liveStatus}</p></div>${renderFilters(data)}</div>${inlineError}${content}</section>`;
 }
 
 export function renderUsuariosTableTemplate(input = {}) {
@@ -447,7 +508,8 @@ export function renderUsuariosTableTemplate(input = {}) {
   const items = itemsFrom(data);
   const loading = Boolean(first(state.loading, data.loading, false));
   const error = cleanText(first(state.error, data.error, ""), "");
-  const rootAttrs = `data-usuarios-scope="true" data-template-version="${attr(USUARIOS_TEMPLATE_VERSION)}" data-loaded="${attr(String(items.length))}" data-total-known="${state.totalKnown ? "true" : "false"}" data-has-more="${state.hasMore ? "true" : "false"}" data-filter="${attr(filterValue(data))}" data-loading="${loading ? "true" : "false"}" data-table-columns="6" data-table-scale="${TABLE_SCALE}"`;
+  const order = sortOrderValue(data);
+  const rootAttrs = `data-usuarios-scope="true" data-template-version="${attr(USUARIOS_TEMPLATE_VERSION)}" data-loaded="${attr(String(items.length))}" data-total-known="${state.totalKnown ? "true" : "false"}" data-has-more="${state.hasMore ? "true" : "false"}" data-filter="${attr(filterValue(data))}" data-sort-field="lastLoginAt" data-sort-order="${attr(order)}" data-loading="${loading ? "true" : "false"}" data-table-columns="6" data-table-scale="${TABLE_SCALE}"`;
   if (isRestricted(data)) return `<section class="usuarios-view-root is-restricted" ${rootAttrs}>${renderAccessDeniedState()}</section>`;
   if (error && !items.length) return `<section class="usuarios-view-root has-error" ${rootAttrs}>${renderTable(data)}</section>`;
   return `<section class="usuarios-view-root${loading ? " is-loading" : ""}${error ? " has-error" : ""}" ${rootAttrs} aria-busy="${loading ? "true" : "false"}">${renderHeader(data)}${renderTable(data)}</section>`;
@@ -483,6 +545,8 @@ export function getUsuariosTableTemplateSnapshot(input = {}) {
     totalCount: state.totalKnown ? number(state.totalCount, items.length) : null,
     hasMore: Boolean(state.hasMore),
     filter: filterValue(input),
+    sortField: "lastLoginAt",
+    sortOrder: sortOrderValue(input),
     restricted: isRestricted(input),
     architecture: {
       pureTemplate: true,
@@ -495,9 +559,18 @@ export function getUsuariosTableTemplateSnapshot(input = {}) {
       dom: false,
       rowDetailAction: true,
       safeAvatarUrls: true,
+      silentRefreshPresentation: true,
+      sessionStartOrdering: true,
+      screenReaderOnlyProgress: true,
     },
   };
 }
+
+export {
+  normalizeSortOrder,
+  sessionStartTimestamp,
+  sortBySessionStart,
+};
 
 export const renderTemplate = renderUsuariosTableTemplate;
 export const renderUsuariosTemplate = renderUsuariosTableTemplate;

@@ -66,7 +66,7 @@ export const SERVER_VIEW_NAME = "ServerView";
 export const SERVIDOR_CANONICAL_PATH = "/servidor";
 
 export const SERVIDOR_INDEX_VERSION =
-  "servidor.index.api-boundary.v2.health-internal";
+  "servidor.index.api-boundary.v3.nonblocking-observability";
 
 export const SERVER_INDEX_VERSION =
   SERVIDOR_INDEX_VERSION;
@@ -835,6 +835,7 @@ function createController(
 
     loadSequence: 0,
     loadTask: null,
+    loadAbortController: null,
 
     clickHandler: null,
   };
@@ -1113,9 +1114,64 @@ function createController(
     return state.snapshot;
   }
 
+  function abortLoad(
+    reason = "server-load-aborted"
+  ) {
+    const requestController =
+      state.loadAbortController;
+
+    state.loadAbortController =
+      null;
+
+    if (!requestController) {
+      return false;
+    }
+
+    try {
+      if (
+        requestController.signal
+          ?.aborted !== true
+      ) {
+        requestController.abort(
+          reason
+        );
+      }
+    } catch {
+      try {
+        requestController.abort();
+      } catch {
+        // noop
+      }
+    }
+
+    return true;
+  }
+
+  function createLoadSignal() {
+    abortLoad(
+      "server-load-replaced"
+    );
+
+    if (
+      typeof AbortController ===
+      "undefined"
+    ) {
+      return null;
+    }
+
+    const requestController =
+      new AbortController();
+
+    state.loadAbortController =
+      requestController;
+
+    return requestController.signal;
+  }
+
   async function load({
     silent = false,
     force = false,
+    paintPending = true,
   } = {}) {
     if (
       state.destroyed ||
@@ -1163,6 +1219,9 @@ function createController(
           ?.checkedAt
       );
 
+    const requestSignal =
+      createLoadSignal();
+
     state.error = "";
 
     state.loading =
@@ -1173,12 +1232,14 @@ function createController(
       silent ||
       hadSnapshot;
 
-    paint({
-      mode:
-        state.loading
-          ? "loading"
-          : "auto",
-    });
+    if (paintPending) {
+      paint({
+        mode:
+          state.loading
+            ? "loading"
+            : "auto",
+      });
+    }
 
     let task = null;
 
@@ -1189,10 +1250,14 @@ function createController(
             ? await refreshServerSnapshotApi({
                 source:
                   `${SERVIDOR_INDEX_SOURCE}.refresh`,
+                signal:
+                  requestSignal,
               })
             : await loadServerSnapshotApi({
                 source:
                   `${SERVIDOR_INDEX_SOURCE}.load`,
+                signal:
+                  requestSignal,
               });
 
         if (
@@ -1293,6 +1358,15 @@ function createController(
                 ? "error"
                 : "auto",
           });
+        }
+
+        if (
+          state.loadAbortController
+            ?.signal ===
+          requestSignal
+        ) {
+          state.loadAbortController =
+            null;
         }
 
         if (
@@ -1970,15 +2044,16 @@ function createController(
       });
     }
 
-    await load({
+    void load({
       force: false,
       silent:
         Boolean(
           cached
         ),
+      paintPending: false,
     });
 
-    return getSnapshot();
+    return controller;
   }
 
   async function destroy({
@@ -1994,6 +2069,10 @@ function createController(
       true;
 
     state.loadSequence += 1;
+
+    abortLoad(
+      "server-view-destroyed"
+    );
 
     stopLive({
       silent: true,

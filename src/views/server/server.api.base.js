@@ -969,6 +969,10 @@ async function httpGet(
               options.source,
               "views.server.api"
             ),
+
+          signal:
+            options.signal ||
+            null,
         }
       );
   } else if (
@@ -1003,6 +1007,10 @@ async function httpGet(
               options.source,
               "views.server.api"
             ),
+
+          signal:
+            options.signal ||
+            null,
         }
       );
   } else {

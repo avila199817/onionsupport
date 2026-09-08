@@ -3642,6 +3642,9 @@ function commitRouteHost(
     nextView ||
     null;
 
+  // A deep link may open only after its real origin has been committed.
+  AppCore.getModule?.("entities")?.activateOrigin?.(nextHost);
+
   cleanupView(
     previousView
   );

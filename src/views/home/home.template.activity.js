@@ -127,7 +127,6 @@ export function entityTriggerAttributes(
 ) {
   const entityType = overlayEntityType(type);
   const entityId = safeDisplayId(id, "");
-  const ownerInPlace = ["factura", "incidencia"].includes(entityType);
 
   if (!entityType || !entityId) return "";
 
@@ -138,7 +137,7 @@ export function entityTriggerAttributes(
     data-entity-id="${attr(entityId)}"
     data-home-entity-source="${attr(source)}"
     data-entity-stay-view="home"
-    ${ownerInPlace ? 'data-entity-open-mode="in-place" data-entity-preload="detail"' : 'data-entity-open-mode="overlay"'}
+    data-entity-open-mode="in-place" data-entity-preload="detail"
     aria-haspopup="dialog"
     aria-label="${attr(entityOpenLabel(entityType, entityId))}"
   `;

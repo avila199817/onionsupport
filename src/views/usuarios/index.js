@@ -16,6 +16,7 @@
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import { onDomainChanged } from "../../core/domain-events.js";
 
 import {
   renderUsuariosTableTemplate,
@@ -152,10 +153,6 @@ const CREATE_CLOSE_EVENTS = Object.freeze([
   "usuarios:create:closed",
   "usuarios:create:close",
 ]);
-const DETAIL_CLOSE_EVENTS = Object.freeze([
-  "usuarios:modal:closed",
-]);
-
 let controllerSequence = 0;
 let lastController = null;
 
@@ -409,9 +406,6 @@ function subscribeEvent(name = "", handler = null) {
     }
   };
 }
-function eventPayload(event = null) {
-  return safeObject(first(event?.detail?.detail, event?.detail?.payload, event?.detail, event?.payload, event, {}), {});
-}
 function safeCall(target = null, method = "", args = [], fallback = null) {
   try {
     const fn = target?.[method];
@@ -477,9 +471,16 @@ function downloadTextFile(content = "", filename = "usuarios.csv") {
   }
 }
 
+async function dispatchUsuarioDetail(id, opener = null, originHost = null) {
+  if (!cleanText(id, "")) return false;
+  const { EntityOverlay } = await import("../../features/entity-overlay/index.js");
+  return EntityOverlay.open({ type: "usuario", id, opener, originHost });
+}
+
 function createUsuariosController(rawHost = null, rawContext = {}) {
   const context = safeObject(rawContext, {});
-  const host = resolveHost(rawHost, context);
+  const detailOnly = context.detailOnly === true;
+  const host = detailOnly ? null : resolveHost(rawHost, context);
   const ownerId = `${USUARIOS_VIEW_VERSION}:${++controllerSequence}`;
 
   let mounted = false;
@@ -509,6 +510,12 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
   let queryEpoch = 0;
   let detailEpoch = 0;
   let detailRefreshEpoch = 0;
+  let detailModalOpen = false;
+  let detailId = "";
+  let detailTask = null;
+  let detailRequest = null;
+  let deferredListRender = false;
+  let domainDirty = false;
   let loadTask = null;
   let loadMoreTask = null;
   let infiniteObserver = null;
@@ -523,6 +530,14 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
   let hostKeydownHandler = null;
   const unsubscribers = [];
 
+  function originModalOpen() {
+    return detailModalOpen || Boolean(host && AppCore.getModule?.("entities")?.isOriginOpen?.(host));
+  }
+  function refreshChangedDomain() {
+    if (detailOnly || destroyed || !domainDirty || originModalOpen() || loading || refreshing || loadTask || loadMoreTask) return;
+    domainDirty = false;
+    void refresh();
+  }
   function ownsHost() {
     return Boolean(host && host[USUARIOS_CONTROLLER_KEY] === controller);
   }
@@ -530,7 +545,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     return getGlobalObject()?.[USUARIOS_GLOBAL_CONTROLLER_KEY] === controller;
   }
   function routeActive() {
-    return isUsuariosRoute(context);
+    return !context.signal?.aborted && (detailOnly || isUsuariosRoute(context));
   }
   function admin() {
     return isAdminContext(context);
@@ -780,6 +795,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       !routeActive() ||
       !admin() ||
       !ownsHost() ||
+      originModalOpen() ||
       loading ||
       refreshing ||
       loadingMore ||
@@ -812,6 +828,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
             !routeActive() ||
             !admin() ||
             !ownsHost() ||
+            originModalOpen() ||
             loading ||
             refreshing ||
             loadingMore ||
@@ -843,8 +860,11 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     }
   }
   function render({ preserveDom = true } = {}) {
+    if (detailOnly) return false;
     disconnectInfiniteObserver();
     if (destroyed || !host || !routeActive() || !ownsHost()) return false;
+    if (openingUserId || originModalOpen()) { deferredListRender = true; return false; }
+    deferredListRender = false;
     const dom = preserveDom ? captureDomState() : {};
     const template = document.createElement("template");
     template.innerHTML = renderUsuariosTableTemplate(viewPayload()).trim();
@@ -888,7 +908,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     return items;
   }
   async function loadFirstPage({ silent = false, preservePages = false } = {}) {
-    if (destroyed || !routeActive() || !admin()) return items;
+    if (detailOnly || destroyed || !routeActive() || !admin()) return items;
     const keepAccumulatedPages = preservePages === true && items.length > 0;
     const keepVisibleRows = items.length > 0 && (silent === true || keepAccumulatedPages);
     const preservedToken = continuationToken;
@@ -968,21 +988,26 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       if (!silent) showToast(error, "error");
       emitEvent("usuarios:error", { source: USUARIOS_INDEX_SOURCE, message: error });
       return items;
+    } finally {
+      if (epoch === queryEpoch) refreshChangedDomain();
     }
   }
   function load(options = {}) {
-    if (destroyed || !routeActive()) return Promise.resolve(items);
+    if (detailOnly || destroyed || !routeActive()) return Promise.resolve(items);
     if (loadTask) return loadTask;
     loadTask = loadFirstPage(options).finally(() => {
       loadTask = null;
+      refreshChangedDomain();
     });
     return loadTask;
   }
   async function loadMore({ retry = false } = {}) {
     if (
+      detailOnly ||
       destroyed ||
       !routeActive() ||
       !admin() ||
+      originModalOpen() ||
       loading ||
       refreshing ||
       Boolean(loadTask) ||
@@ -1072,6 +1097,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       return await task;
     } finally {
       if (loadMoreTask === task) loadMoreTask = null;
+      refreshChangedDomain();
     }
   }
   function retryLoadMore() {
@@ -1136,87 +1162,134 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     void loadFirstPage({ silent: true });
     return true;
   }
-  async function openUsuario(userId = "") {
+  function abortDetail() {
+    detailRequest?.abort();
+    detailRequest = null;
+    detailTask = null;
+  }
+  function onDetailClosed({ notify = true } = {}) {
+    const closedId = detailId;
+    detailModalOpen = false;
+    detailId = "";
+    detailEpoch += 1;
+    detailRefreshEpoch += 1;
+    openingUserId = "";
+    abortDetail();
+    if (notify && !destroyed) context.onDetailClosed?.({ controller, id: closedId });
+  }
+  function closeDetailModal({ notify = true, restoreFocus = true } = {}) {
+    if (!detailOnly) return AppCore.getModule?.("entities")?.close?.() ?? false;
+    if (detailModalOpen) {
+      return UsuariosDetailModal.close({ notify, restoreFocus });
+    }
+    detailEpoch += 1;
+    detailRefreshEpoch += 1;
+    openingUserId = "";
+    abortDetail();
+    return true;
+  }
+  function mountDetail(detail, opener = null) {
+    detailId = getUsuarioId(detail);
+    detailModalOpen = true;
+    const opened = UsuariosDetailModal.open(detail, {
+      controller,
+      opener,
+      onClosed: onDetailClosed,
+    });
+    if (opened === false) {
+      detailModalOpen = false;
+      detailId = "";
+      return false;
+    }
+    context.onDetailShell?.({ controller, id: detailId, modalHost: document.querySelector("[data-usuarios-modal-host='true']") });
+    return true;
+  }
+  function openUsuario(userId = "", opener = null) {
     const id = cleanText(userId, "");
-    if (!id || destroyed) return null;
+    if (!id || destroyed || !routeActive() || !admin()) return Promise.resolve(null);
+    if (!detailOnly) return dispatchUsuarioDetail(id, opener, host);
+    if (openingUserId === id && detailTask) return detailTask;
+    if (detailModalOpen && detailId === id) {
+      return Promise.resolve(UsuariosDetailModal.getState().detail);
+    }
+    if (detailModalOpen) closeDetailModal({ restoreFocus: false, notify: false });
+    abortDetail();
     const epoch = ++detailEpoch;
     detailRefreshEpoch += 1;
+    const request = new AbortController();
+    detailRequest = request;
     openingUserId = id;
-    render();
-    const cached = findUsuarioById(items, id) || getUsuarioByIdApiStore(id) || null;
-    if (cached) UsuariosDetailModal?.open?.(normalizeUsuarioModel(cached));
-    try {
-      const detail = await loadUsuarioDetailApi(id, {
-        force: true,
-        dedupe: true,
-        allowCacheFallback: true,
-      });
-      if (destroyed || epoch !== detailEpoch || !routeActive()) return null;
-      if (!detail) throw new Error("USUARIO_DETAIL_NOT_FOUND");
-      const normalized = normalizeUsuarioModel(detail);
-      items = mergeUsuariosCursorItems(items, [normalized]);
-      const modalState = safeObject(UsuariosDetailModal?.getState?.(), {});
-      const modalUserId = cleanText(first(modalState.userId, getUsuarioId(modalState.detail), ""), "");
-      if (modalState.isOpen === true) {
-        if (modalUserId === id) UsuariosDetailModal?.update?.(normalized);
-      } else {
-        UsuariosDetailModal?.open?.(normalized);
+    const cached = getUsuarioByIdApiStore(id) || null;
+    if (cached) mountDetail(normalizeUsuarioModel(cached), opener);
+    const task = (async () => {
+      try {
+        const detail = await loadUsuarioDetailApi(id, {
+          force: true,
+          dedupe: false,
+          signal: request.signal,
+          allowCacheFallback: true,
+        });
+        if (destroyed || request.signal.aborted || epoch !== detailEpoch || !routeActive()) return null;
+        if (!detail) throw new Error("USUARIO_DETAIL_NOT_FOUND");
+        const normalized = normalizeUsuarioModel(detail);
+        if (getUsuarioId(normalized) !== id) throw new Error("USUARIO_DETAIL_ID_MISMATCH");
+        if (detailModalOpen && detailId === id) UsuariosDetailModal.update(normalized);
+        else mountDetail(normalized, opener);
+        return normalized;
+      } catch (detailError) {
+        if (destroyed || request.signal.aborted || epoch !== detailEpoch || !routeActive()) return null;
+        if (!cached) showToast(safeError(detailError, "No se pudo abrir el usuario."), "error");
+        return cached;
+      } finally {
+        if (detailRequest === request) detailRequest = null;
+        if (epoch === detailEpoch) {
+          openingUserId = "";
+          if (!detailModalOpen && deferredListRender) render();
+        }
       }
-      render();
-      return normalized;
-    } catch (detailError) {
-      if (!cached) showToast(safeError(detailError, "No se pudo abrir el usuario."), "error");
-      return cached;
-    } finally {
-      if (epoch === detailEpoch) {
-        openingUserId = "";
-        render();
-      }
-    }
+    })();
+    detailTask = task;
+    void task.finally(() => { if (detailTask === task) detailTask = null; });
+    return task;
   }
   async function refreshUsuario(userId = "") {
-    const modalState = safeObject(UsuariosDetailModal?.getState?.(), {});
-    const id = cleanText(first(userId, modalState.userId, getUsuarioId(modalState.detail), ""), "");
-    if (!id || destroyed) return null;
+    const id = cleanText(first(userId, detailId, ""), "");
+    if (!id || destroyed || !routeActive() || !detailModalOpen || detailId !== id) return null;
+    // The shell can be used during its initial cache revalidation. Refresh
+    // shares that request instead of fetching and painting the same user twice.
+    if (openingUserId === id && detailTask) return detailTask;
+    abortDetail();
     const epoch = ++detailRefreshEpoch;
+    const request = new AbortController();
+    detailRequest = request;
     try {
       const detail = await loadUsuarioDetailApi(id, {
         force: true,
-        dedupe: true,
+        dedupe: false,
+        signal: request.signal,
         allowCacheFallback: true,
       });
-      if (!detail || destroyed || epoch !== detailRefreshEpoch || !routeActive()) return null;
+      if (!detail || destroyed || request.signal.aborted || epoch !== detailRefreshEpoch || !routeActive() || !detailModalOpen || detailId !== id) return null;
       const normalized = normalizeUsuarioModel(detail);
-      items = mergeUsuariosCursorItems(items, [normalized]);
-      const live = safeObject(UsuariosDetailModal?.getState?.(), {});
-      const liveModalUserId = cleanText(first(live.userId, getUsuarioId(live.detail), ""), "");
-      if (live.isOpen === true && liveModalUserId === id) {
-        UsuariosDetailModal?.update?.(normalized);
-      }
-      render();
+      if (getUsuarioId(normalized) !== id) throw new Error("USUARIO_DETAIL_ID_MISMATCH");
+      UsuariosDetailModal.update(normalized);
       return normalized;
     } catch (refreshError) {
-      if (epoch === detailRefreshEpoch && !destroyed) {
+      if (!request.signal.aborted && epoch === detailRefreshEpoch && !destroyed) {
         showToast(safeError(refreshError, "No se pudo actualizar el usuario."), "error");
       }
       return null;
+    } finally {
+      if (detailRequest === request) detailRequest = null;
     }
   }
   async function copyUsuarioId(userId = "") {
-    const modalState = safeObject(UsuariosDetailModal?.getState?.(), {});
-    const id = cleanText(first(userId, modalState.userId, getUsuarioId(modalState.detail), ""), "");
-    if (!id || !isBrowser()) return false;
-    try {
-      await navigator.clipboard.writeText(id);
-      showToast("ID de usuario copiado.", "success");
-      return true;
-    } catch {
-      showToast("No se pudo copiar el ID del usuario.", "error");
-      return false;
-    }
+    const id = cleanText(first(userId, detailId, ""), "");
+    if (!detailModalOpen || id !== detailId) return false;
+    return UsuariosDetailModal.copyId();
   }
   async function openCreate() {
-    if (destroyed || creating || createOpen) return false;
+    if (detailOnly || destroyed || creating || createOpen) return false;
     creating = true;
     render();
     try {
@@ -1287,7 +1360,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     switch (action) {
       case ACTIONS.DETAIL:
         event?.preventDefault?.();
-        await openUsuario(userId);
+        await openUsuario(userId, node);
         return true;
       case ACTIONS.CREATE:
         event?.preventDefault?.();
@@ -1387,7 +1460,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         target.matches("[data-user-row='true'][data-user-id]")
       ) {
         event.preventDefault();
-        await openUsuario(target.getAttribute("data-user-id"));
+        await openUsuario(target.getAttribute("data-user-id"), target);
       }
     };
     host.addEventListener("click", hostClickHandler);
@@ -1416,24 +1489,6 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     return true;
   }
   function bindEvents() {
-    unsubscribers.push(
-      subscribeEvent("usuarios:modal:refresh", async (event) => {
-        const data = eventPayload(event);
-        await refreshUsuario(first(data.userId, data.usuarioId, data.id, ""));
-      }),
-      subscribeEvent("usuarios:modal:copy", async (event) => {
-        const data = eventPayload(event);
-        await copyUsuarioId(first(data.userId, data.usuarioId, data.id, ""));
-      })
-    );
-    for (const eventName of DETAIL_CLOSE_EVENTS) {
-      unsubscribers.push(subscribeEvent(eventName, () => {
-        detailEpoch += 1;
-        detailRefreshEpoch += 1;
-        openingUserId = "";
-        render();
-      }));
-    }
     for (const eventName of CREATE_SUCCESS_EVENTS) {
       unsubscribers.push(subscribeEvent(eventName, () => {
         createOpen = false;
@@ -1464,6 +1519,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         !mounted ||
         !routeActive() ||
         !admin() ||
+        originModalOpen() ||
         loading ||
         refreshing ||
         loadTask ||
@@ -1505,11 +1561,29 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     context,
     async mount() {
       if (destroyed || mounted) return controller;
-      if (!host) throw new Error("USUARIOS_HOST_REQUIRED");
+      if (context.signal?.aborted) { controller.destroy(); return controller; }
+      if (!host && !detailOnly) throw new Error("USUARIOS_HOST_REQUIRED");
       mounted = true;
+      context.signal?.addEventListener("abort", controller.destroy, { once: true });
+      if (detailOnly) return controller;
       bindHost();
       bindEvents();
       bindResumeSignals();
+      unsubscribers.push(onDomainChanged((domain) => {
+        if (domain !== "usuarios" || creating || UsuariosCreateModal.getState?.().submitting) return;
+        domainDirty = true;
+        refreshChangedDomain();
+      }));
+      const unsubscribeModal = AppCore.getModule?.("entities")?.subscribe?.((event) => {
+        if (event.originHost !== host) return;
+        if (event.phase === "opened") disconnectInfiniteObserver();
+        else if (event.phase === "closed") {
+          if (deferredListRender) render();
+          refreshChangedDomain();
+          syncInfiniteObserver();
+        }
+      });
+      if (unsubscribeModal) unsubscribers.push(unsubscribeModal);
       if (!routeActive()) return controller;
       if (!admin()) {
         render({ preserveDom: false });
@@ -1528,6 +1602,8 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     retryLoadMore,
     retryFirstPage,
     openUsuario,
+    openDetail: openUsuario,
+    closeDetailModal,
     refreshUsuario,
     copyUsuarioId,
     openCreate,
@@ -1612,6 +1688,10 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
         apiVersion: USUARIOS_API_VERSION,
         cursorVersion: USUARIOS_CURSOR_VERSION,
         ownerId,
+        detailOnly,
+        detailModalOpen,
+        originModalOpen: originModalOpen(),
+        detailId,
         mounted,
         destroyed,
         hostOwner: ownsHost(),
@@ -1667,6 +1747,11 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       queryEpoch += 1;
       detailEpoch += 1;
       detailRefreshEpoch += 1;
+      abortDetail();
+      context.signal?.removeEventListener("abort", controller.destroy);
+      if (detailModalOpen) closeDetailModal({ notify: false, restoreFocus: false });
+      detailModalOpen = false;
+      detailId = "";
       cancelSearchDebounce();
       loadTask = null;
       loadMoreTask = null;
@@ -1674,14 +1759,10 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
       unbindHost();
       unbindEvents();
       unbindResumeSignals();
+      if (!detailOnly && host) AppCore.getModule?.("entities")?.releaseOrigin?.(host);
       if (wasActiveOwner) {
         createOpen = false;
         openingUserId = "";
-        try {
-          UsuariosDetailModal?.close?.();
-        } catch {
-          // noop
-        }
         try {
           UsuariosCreateModal?.close?.();
         } catch {
@@ -1713,9 +1794,16 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     cleanup() {
       return controller.destroy();
     },
+    dispose() {
+      return controller.destroy();
+    },
   };
 
   return controller;
+}
+
+export async function createUsuarioDetailController(context = {}) {
+  return createUsuariosController(null, { ...context, detailOnly: true }).mount();
 }
 
 export async function UsuariosView(host = null, context = {}) {
@@ -1768,9 +1856,15 @@ export const refresh = () => getActiveUsuariosController()?.refresh?.() || Promi
 export const destroy = () => getActiveUsuariosController()?.destroy?.() || true;
 export const unmount = destroy;
 export const dispose = destroy;
-export const openUsuario = (userId = "") => getActiveUsuariosController()?.openUsuario?.(userId) || Promise.resolve(null);
-export const refreshUsuario = (userId = "") => getActiveUsuariosController()?.refreshUsuario?.(userId) || Promise.resolve(null);
-export const copyUsuarioId = (userId = "") => getActiveUsuariosController()?.copyUsuarioId?.(userId) || Promise.resolve(false);
+export const openUsuario = (userId = "", opener = null) => dispatchUsuarioDetail(userId, opener);
+export const refreshUsuario = (userId = "") => {
+  const modal = UsuariosDetailModal.getState();
+  return !userId || modal.userId === userId ? UsuariosDetailModal.refresh() : Promise.resolve(null);
+};
+export const copyUsuarioId = (userId = "") => {
+  const modal = UsuariosDetailModal.getState();
+  return !userId || modal.userId === userId ? UsuariosDetailModal.copyId() : Promise.resolve(false);
+};
 export const openCreate = () => getActiveUsuariosController()?.openCreate?.() || Promise.resolve(false);
 export const createUsuario = openCreate;
 export const createUsuarioView = openCreate;
@@ -1914,8 +2008,8 @@ export const getUsuariosRouteDebug = (context = {}) => {
    MODAL COMPAT
 ========================================================= */
 
-export const openModal = (detail = {}) => UsuariosDetailModal?.open?.(normalizeUsuarioModel(detail)) || false;
-export const closeModal = () => UsuariosDetailModal?.close?.() || true;
+export const openModal = (detail = {}, opener = null) => openUsuario(getUsuarioId(normalizeUsuarioModel(detail)), opener);
+export const closeModal = () => AppCore.getModule?.("entities")?.close?.() ?? UsuariosDetailModal.close();
 export const refreshModal = () => UsuariosDetailModal?.refresh?.() || false;
 export const updateModal = (detail = {}) => UsuariosDetailModal?.update?.(normalizeUsuarioModel(detail)) || false;
 export const getModalState = () => UsuariosDetailModal?.getState?.() || null;
@@ -2060,5 +2154,5 @@ export function registerGlobalBridge(controller = null) {
   return UsuariosModule;
 }
 
-export const bridge = registerGlobalBridge();
+export const bridge = UsuariosModule;
 export const ready = true;

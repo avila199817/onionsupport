@@ -460,12 +460,24 @@ async function mountIncidenciasOwner(host = null, context = {}) {
       ...context,
       modalHost: lease?.modalHost || null,
       onDetailShell(detail) {
-        // Supersede only when the new controller has actually painted its
-        // requested detail. Creating or rolling back an empty route lease
-        // never changes the current owner's accessibility, focus or state.
-        quarantineExistingModalHosts(documentLike, lease?.modalHost);
-        activateModalHost(lease?.modalHost);
         context.onDetailShell?.(detail);
+      },
+      onDetailBeforePatch(detail) {
+        if (detailOnly) detailStateFeature?.restoreIncidenciasDetailComposer?.(detail.modalHost);
+      },
+      onDetailRendered(detail) {
+        // An empty staged route never supersedes the visible modal owner.
+        if (detail.open || detail.createOpen) {
+          quarantineExistingModalHosts(documentLike, lease?.modalHost);
+          activateModalHost(lease?.modalHost);
+        }
+        if (detailOnly) {
+          detailStateFeature?.syncIncidenciasDetailState?.(detail);
+          detailLiveSyncFeature?.syncIncidenciasDetailLiveSync?.(detail);
+          detailCommentAvatarsFeature?.syncIncidenciasCommentAvatars?.(detail.modalHost, detail);
+          detailFollowupAvatarsFeature?.syncIncidenciasFollowupAvatars?.(detail.modalHost, detail);
+        }
+        context.onDetailRendered?.(detail);
       },
     };
     controller = detailOnly
@@ -605,18 +617,35 @@ export async function IncidenciasView(host = null, context = {}) {
 }
 
 let detailPreparation = null;
+let detailStateFeature = null;
+let detailLiveSyncFeature = null;
+let detailCommentAvatarsFeature = null;
+let detailFollowupAvatarsFeature = null;
 
 export function prepareIncidenciaDetail() {
   if (!detailPreparation) {
-    detailPreparation = import("../../features/incidencias-detail-state/index.js")
-      .catch((error) => {
-        detailPreparation = null;
-        throw error;
-      });
+    detailPreparation = Promise.all([
+      import("../../features/incidencias-detail-state/index.js"),
+      import("../../features/incidencias-detail-live-sync/index.js"),
+      import("../../features/incidencias-comment-avatars/index.js"),
+      import("../../features/incidencias-followup-avatars/index.js"),
+    ]).then(([state, liveSync, comments, followup]) => {
+      detailStateFeature = state;
+      detailLiveSyncFeature = liveSync;
+      detailCommentAvatarsFeature = comments;
+      detailFollowupAvatarsFeature = followup;
+      return state;
+    }).catch((error) => {
+      detailPreparation = null;
+      throw error;
+    });
   }
   return detailPreparation.then((module) => {
     // This authority can have been torn down on a previous session.
     module.mountIncidenciasDetailState();
+    detailLiveSyncFeature?.mountIncidenciasDetailLiveSync?.();
+    detailCommentAvatarsFeature?.mountIncidenciasCommentAvatars?.();
+    detailFollowupAvatarsFeature?.mountIncidenciasFollowupAvatars?.();
     return true;
   });
 }
@@ -628,59 +657,14 @@ export async function createIncidenciaDetailController(context = {}) {
   return mountIncidenciasOwner(null, {
     ...context,
     detailOnly: true,
-    onDetailShell(detail) {
-      // Decorations use the same route enhancements and are progressive.
-      // A delayed import never restores a closed or replaced modal.
-      void Promise.all([
-        import("../../features/incidencias-comment-avatars/index.js"),
-        import("../../features/incidencias-followup-avatars/index.js"),
-      ]).then(([comments, followup]) => {
-        if (context.signal?.aborted || detail.controller.getSnapshot().destroyed ||
-            !detail.modalHost?.isConnected) return;
-        comments.mountIncidenciasCommentAvatars();
-        followup.mountIncidenciasFollowupAvatars();
-        comments.syncIncidenciasCommentAvatars(detail.modalHost);
-        followup.syncIncidenciasFollowupAvatars(detail.modalHost);
-      }).catch(() => { /* Text identities remain visible without decoration. */ });
-      context.onDetailShell?.(detail);
-    },
   });
 }
 
 export const IncidenciasIndex = IncidenciasView;
 
-/*
-  Aperturas externas sólo se delegan al controller propietario de la ruta.
-  Un controller de detalle nunca sustituye esta autoridad por ser la última
-  instancia creada.
-*/
-export async function openIncidenciaDetailById(
-  ticketId = "",
-  openerNode = null
-) {
-  const controller = routeOwnerController;
-  const snapshot = controller?.getSnapshot?.() || {};
-
-  if (
-    !controller ||
-    typeof controller.openDetail !== "function" ||
-    snapshot.destroyed === true ||
-    snapshot.mounted === false
-  ) {
-    return false;
-  }
-
-  try {
-    return Boolean(
-      await controller.openDetail(
-        ticketId,
-        openerNode
-      )
-    );
-  } catch {
-    return false;
-  }
-}
+// Public callers and list interactions use the same application dispatcher.
+// Only createIncidenciaDetailController exposes the primitive owner method.
+export const openIncidenciaDetailById = Impl.openIncidenciaDetailById;
 
 /*
   Impl.destroy() termina invocando el destroy del controller almacenado.

@@ -40,6 +40,7 @@ export const FACTURAS_MODAL_TEMPLATE_VERSION =
 
 export const FACTURA_MODAL_ACTIONS = Object.freeze({
   CLOSE: "close-factura-detail",
+  RETRY: "retry-factura-detail",
   VIEW_PDF: "view-factura-pdf",
   DOWNLOAD_PDF: "download-factura",
   SEND: "send-factura",
@@ -4155,6 +4156,10 @@ export function renderFacturasDetailContent({
 } = {}) {
   if (loading) {
     return `
+      <h2 id="facturas-detail-modal-title" class="sr-only">Detalle de factura</h2>
+      <button type="button" class="facturas-detail-btn facturas-detail-btn--close"
+        data-facturas-action="${FACTURA_MODAL_ACTIONS.CLOSE}"
+        aria-label="Cerrar detalle de factura">${icon("close")}</button>
       <div
         class="facturas-detail-loading"
         aria-live="polite"
@@ -4212,10 +4217,13 @@ export function renderFacturasDetailContent({
 
         <div class="facturas-detail-body-shell">
           <main class="facturas-detail-body">
+            ${renderFeedback({ message: feedbackMessage, type: feedbackType })}
             ${renderMiniMeta(
               "Detalle",
               "No disponible"
             )}
+            <button type="button" class="facturas-detail-btn"
+              data-facturas-action="${FACTURA_MODAL_ACTIONS.RETRY}">Reintentar</button>
           </main>
         </div>
       </div>

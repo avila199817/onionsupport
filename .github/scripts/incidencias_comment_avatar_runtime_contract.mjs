@@ -69,12 +69,15 @@ try {
     avatars.mountAvatarSystem();
     window.timeline = await import("/src/features/incidencias-comment-avatars/index.js");
     window.followup = await import("/src/features/incidencias-followup-avatars/index.js");
+    window.detailTemplates = await import("/src/views/incidencias/incidencias.template.modal.js");
     window.commentHost = (id, kind = "followup") => document.querySelector(`[data-comment-id="${id}"] .${kind === "timeline" ? "incidencias-timeline-comment-avatar" : "incidencias-modal-description-comment-avatar"}`);
     window.syncComments = () => {
-      timeline.syncIncidenciasCommentAvatars(document);
-      followup.syncIncidenciasFollowupAvatars(document);
+      const payload = { detail: window.detail, loading: false, error: "", open: true };
+      timeline.syncIncidenciasCommentAvatars(document, payload);
+      followup.syncIncidenciasFollowupAvatars(document, payload);
       avatars.synchronizeAvatars(document);
     };
+    syncComments();
   });
   await page.waitForFunction(() => commentHost("third-comment")?.dataset.avatarUserId === "third-user");
   await page.evaluate(() => syncComments());
@@ -117,19 +120,18 @@ try {
   }
 
   async function renderRealDetail(comments, { historyOpen = false, name = "First Person", email = "a@example.test", assigned = true } = {}) {
-    const previousLoads = await page.evaluate(async ({ comments, historyOpen, name, email, assigned }) => {
-      const previousLoads = window.detailLoads || 0;
+    // Production prepares modules once, then renders and supplies owner data
+    // synchronously before mutation observers decorate the new modal.
+    await page.evaluate(({ comments, historyOpen, name, email, assigned }) => {
       window.detail = {
         ticketId: "real-comment-fixture", id: "real-comment-fixture", subject: "Identity fixture", description: "Real template",
         status: "open", userId: "user-a", name, displayName: name, email, avatarUrl: "/photo.svg", comments,
         ...(assigned ? { assignedToUserId: "user-b", assignedToName: "Second Person", assignedToEmail: "b@example.test", assignedToAvatarUrl: "/photo.svg" } : {}),
       };
-      const templates = await import("/src/views/incidencias/incidencias.template.modal.js");
-      document.querySelector("#fixture").innerHTML = templates.renderIncidenciasDetailModal({ open: true, detail, admin: true, historyOpen });
+      document.querySelector("#fixture").innerHTML = detailTemplates.renderIncidenciasDetailModal({ open: true, detail, admin: true, historyOpen });
       syncComments();
-      return previousLoads;
     }, { comments, historyOpen, name, email, assigned });
-    await page.waitForFunction((previous) => window.detailLoads > previous, previousLoads);
+    assert.equal(await page.evaluate(() => window.detailLoads || 0), 0, "avatar decoration consumes the owner's detail without a GET");
     if (!historyOpen) await page.waitForFunction((count) => document.querySelectorAll(".incidencias-modal-description-comment-avatar").length === count, comments.length);
     await page.evaluate(() => syncComments());
     return page.evaluate((historyOpen) => [...document.querySelectorAll(historyOpen ? ".incidencias-timeline-card.is-comment" : ".incidencias-modal-description-comment")].map((card) => {
@@ -189,10 +191,9 @@ try {
     assert.equal(cards[0].identity, expected);
   }
 
-  const signatures = await page.evaluate(async () => {
-    const templates = await import("/src/views/incidencias/incidencias.template.modal.js");
+  const signatures = await page.evaluate(() => {
     const signatureFor = (comment) => {
-      const html = templates.renderIncidenciasDetailModal({ open: true, detail: { ticketId: "signature-fixture", description: "Fixture", comments: [comment] } });
+      const html = detailTemplates.renderIncidenciasDetailModal({ open: true, detail: { ticketId: "signature-fixture", description: "Fixture", comments: [comment] } });
       return new DOMParser().parseFromString(html, "text/html").querySelector("[data-description-comments='true']")?.dataset.commentSignature;
     };
     const base = { byName: "Original Author", body: "Unchanged body", createdAt: "2026-09-01T10:00:00Z" };

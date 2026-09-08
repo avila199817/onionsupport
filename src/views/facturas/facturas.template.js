@@ -877,7 +877,7 @@ function renderIncidenciaLink(item = {}) {
   if (!incidenciaId) return `<span class="facturas-incidencia-empty">—</span>`;
   const subject = getIncidenciaSubject(item);
   const tooltip = subject ? `Abrir incidencia · ${subject}` : "Abrir incidencia relacionada";
-  return `<button type="button" class="facturas-incidencia-link" ${actionAttrs(FACTURAS_ACTIONS.OPEN_INCIDENCIA, getFacturaId(item))} data-ticket-id="${attr(incidenciaId)}" data-incidencia-id="${attr(incidenciaId)}" ${tooltipAttrs(tooltip, tooltip)}>${icon("ticket")}<span>${escapeHtml(incidenciaId)}</span></button>`;
+  return `<button type="button" class="facturas-incidencia-link" ${actionAttrs(FACTURAS_ACTIONS.OPEN_INCIDENCIA, getFacturaId(item))} data-entity-type="incidencia" data-entity-id="${attr(incidenciaId)}" data-ticket-id="${attr(incidenciaId)}" data-incidencia-id="${attr(incidenciaId)}" ${tooltipAttrs(tooltip, tooltip)}>${icon("ticket")}<span>${escapeHtml(incidenciaId)}</span></button>`;
 }
 
 function renderActionButton({ klass = "", action = "", facturaId = "", label = "", loadingLabel = "", iconName = "", loading = false, disabled = false, tooltip = "" } = {}) {

@@ -124,7 +124,7 @@ assert.equal(state.truncated, true);
 
 assert.match(
   INCIDENCIAS_DETAIL_STATE_VERSION,
-  /route-lease-authoritative/
+  /controller-authoritative/
 );
 
 /* Backend policy wins over any client-side historical inference. */
@@ -259,57 +259,23 @@ assert.match(
 }
 
 /*
-  Regresión exacta Incidencias -> Home -> Incidencias:
-  - el host vive como hijo directo de body, no dentro de #view-container;
-  - una lease nueva invalida hidratación anterior;
-  - un root nuevo se cierra antes del GET y fuerza verdad remota;
-  - una Promise resuelta jamás queda reutilizable como request activa.
+  Cada apertura recibe la validación remota del controller compartido.
+  La presentación no crea otro GET ni hereda permisos de la apertura anterior.
 */
 {
   const source = readFileSync(
-    new URL(
-      "../../src/features/incidencias-detail-state/index.js",
-      import.meta.url
-    ),
+    new URL("../../src/features/incidencias-detail-state/index.js", import.meta.url),
     "utf8"
   );
-
-  assert.match(
-    source,
-    /mountRoot\s*=\s*document\.body\s*\|\|\s*null/
-  );
-  assert.match(
-    source,
-    /hostLeaseObserver\.observe\(mountRoot,\s*\{[\s\S]*?childList:\s*true,[\s\S]*?subtree:\s*false/
-  );
-  assert.match(
-    source,
-    /function resetForHostLease\([\s\S]*?clearActiveState\(\{\s*clearHydration:\s*true\s*\}\)/
-  );
-  assert.match(
-    source,
-    /if \(activeRoot !== root \|\| activeTicketId !== id\)[\s\S]*?failClosed\(root\);[\s\S]*?hydrate\(id, \{ force: true \}\)/
-  );
-  assert.match(
-    source,
-    /force:\s*true,[\s\S]*?forceRefresh:\s*true,[\s\S]*?cache:\s*false,[\s\S]*?noCache:\s*true/
-  );
-  assert.match(
-    source,
-    /current\.inFlight\s*=\s*null;[\s\S]*?requestController\s*=\s*null;[\s\S]*?schedule\(\)/
-  );
-  assert.match(
-    source,
-    /if \(!root \|\| !id\)[\s\S]*?clearActiveState\(\{\s*clearHydration:\s*true\s*\}\)/
-  );
-  assert.match(
-    source,
-    /refreshAfterBlockedError\(root\)/
-  );
-  assert.match(
-    source,
-    /ya has enviado una actualización/
-  );
+  assert.match(source, /export function syncIncidenciasDetailState/);
+  assert.doesNotMatch(source, /loadIncidenciaDetail|incidencias\.api|MutationObserver|fetch\s*\(/);
+  assert.match(source, /if \(leaseChanged \|\| !payload\.open\) clearActiveState\(\)/);
+  assert.match(source, /payload\.detail && !payload\.loading && !payload\.error/);
+  assert.match(source, /if \(stable\) project\(root, detail\);\s*else failClosed\(root\)/);
+  assert.match(source, /controller\.refreshDetail\(\{/);
+  assert.match(source, /if \(refreshInFlight === pending\) refreshInFlight = null/);
+  assert.match(source, /refreshAfterBlockedError\(root\)/);
+  assert.match(source, /ya has enviado una actualización/);
 }
 
 /* =========================================================
@@ -416,5 +382,5 @@ assert.deepEqual(
 );
 
 console.log(
-  "Incidencias Detail window UI OK · route lease authoritative · pending composer survives route changes · timeline fallback · truthful bounded history"
+  "Incidencias Detail window UI OK · controller authoritative · pending composer survives owner changes · timeline fallback · truthful bounded history"
 );

@@ -25,6 +25,7 @@ import { createModalLifecycle, restoreModalFocus } from "../../features/entity-o
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import { onDomainChanged } from "../../core/domain-events.js";
 
 import {
   ROUTES,
@@ -87,7 +88,7 @@ import {
 } from "./incidencias.filter-facets.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.extreme.v44-shared-detail-controller";
+  "incidencias.index.extreme.v45-single-detail-authority";
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
@@ -1173,6 +1174,14 @@ export function createIncidenciasController(
   let loadController = null;
   let detailController = null;
   let detailLoadSeq = 0;
+  let detailRequest = null;
+  let detailRequestError = "";
+  let lastDetailTemplateRoot = null;
+  let entityOverlay = null;
+  let unsubscribeDomain = null;
+  let unsubscribeOverlay = null;
+  let domainRefreshPending = false;
+  let deferredListRender = null;
 
   /*
      Elemento al que devolvemos el foco al cerrar el modal.
@@ -2780,96 +2789,24 @@ export function createIncidenciasController(
   ======================================================= */
 
 
-  function syncDetailCloseConfirmOverlay(
-    currentRoot = null,
-    nextRoot = null
-  ) {
-    const currentPanel =
-      currentRoot?.querySelector?.(
-        DETAIL_MODAL_PANEL_SELECTOR
-      );
-
-    const nextPanel =
-      nextRoot?.querySelector?.(
-        DETAIL_MODAL_PANEL_SELECTOR
-      );
-
-    if (!currentPanel || !nextPanel) {
-      return false;
-    }
-
-    try {
-      currentPanel
-        .querySelectorAll(
-          ":scope > .incidencias-modal-confirm-overlay"
-        )
-        .forEach((node) => node.remove());
-
-      const nextOverlay =
-        nextPanel.querySelector(
-          ":scope > .incidencias-modal-confirm-overlay"
-        );
-
-      if (nextOverlay) {
-        currentPanel.insertBefore(
-          nextOverlay.cloneNode(true),
-          currentPanel.firstChild
-        );
-      }
-
-      return true;
-    } catch {
-      return false;
-    }
+  function syncDetailPanelOverlay(currentRoot, nextRoot, selector) {
+    const currentPanel = currentRoot?.querySelector?.(DETAIL_MODAL_PANEL_SELECTOR);
+    const nextPanel = nextRoot?.querySelector?.(DETAIL_MODAL_PANEL_SELECTOR);
+    if (!currentPanel || !nextPanel) return false;
+    const current = currentPanel.querySelector(selector);
+    const next = nextPanel.querySelector(selector);
+    if ((!current && !next) || current?.isEqualNode(next)) return true;
+    currentPanel.querySelectorAll(selector).forEach((node) => node.remove());
+    if (next) currentPanel.prepend(next.cloneNode(true));
+    return true;
   }
 
-  function syncDetailLoadingOverlay(
-    currentRoot = null,
-    nextRoot = null
-  ) {
-    const currentPanel =
-      currentRoot?.querySelector?.(
-        DETAIL_MODAL_PANEL_SELECTOR
-      );
+  function syncDetailCloseConfirmOverlay(currentRoot = null, nextRoot = null) {
+    return syncDetailPanelOverlay(currentRoot, nextRoot, ":scope > .incidencias-modal-confirm-overlay");
+  }
 
-    const nextPanel =
-      nextRoot?.querySelector?.(
-        DETAIL_MODAL_PANEL_SELECTOR
-      );
-
-    if (
-      !currentPanel ||
-      !nextPanel
-    ) {
-      return false;
-    }
-
-    try {
-      currentPanel
-        .querySelectorAll(
-          ":scope > .incidencias-modal-loading-overlay"
-        )
-        .forEach(
-          (node) =>
-            node.remove()
-        );
-
-      const nextOverlay =
-        nextPanel.querySelector(
-          ":scope > .incidencias-modal-loading-overlay"
-        );
-
-      if (nextOverlay) {
-        currentPanel.insertBefore(
-          nextOverlay.cloneNode(true),
-          currentPanel.firstChild
-        );
-      }
-
-      return true;
-    } catch {
-      return false;
-    }
+  function syncDetailLoadingOverlay(currentRoot = null, nextRoot = null) {
+    return syncDetailPanelOverlay(currentRoot, nextRoot, ":scope > .incidencias-modal-loading-overlay");
   }
 
   function syncDetailTextarea(
@@ -2968,6 +2905,9 @@ export function createIncidenciasController(
     }
 
     try {
+      // A policy-hidden composer participates in this synchronous patch;
+      // onDetailRendered reapplies its visibility before the browser paints.
+      context.onDetailBeforePatch?.({ controller, modalHost });
       const currentPanel =
         currentRoot.querySelector(
           DETAIL_MODAL_PANEL_SELECTOR
@@ -3003,6 +2943,16 @@ export function createIncidenciasController(
          data-history-mode del nextBody al currentBody perdemos precisamente
          la transición que debemos detectar.
       */
+      const currentLoadState = currentRoot.dataset.detailLoadState || "ready";
+      const nextLoadState = nextRoot.dataset.detailLoadState || "ready";
+      const previousTemplateRoot = lastDetailTemplateRoot;
+      const patchPart = (selector, partOptions = {}) => {
+        const previous = previousTemplateRoot?.querySelector(selector);
+        const next = nextRoot.querySelector(selector);
+        if (previous?.outerHTML === next?.outerHTML) return true;
+        return replacePart(currentRoot, nextRoot, selector, partOptions);
+      };
+
       const currentHistoryMode =
         cleanText(
           currentBody?.dataset?.historyMode,
@@ -3035,6 +2985,20 @@ export function createIncidenciasController(
         nextComposer
       );
 
+      // Loading, error, retry and hydration share one root, backdrop and panel.
+      // Updating the content never restarts the modal lifecycle or focus trap.
+      if (currentLoadState !== "ready" || nextLoadState !== "ready") {
+        const currentHeader = currentPanel?.querySelector(".incidencias-modal-header");
+        const nextHeader = nextPanel?.querySelector(".incidencias-modal-header");
+        if (!currentHeader || !nextHeader || !currentBody || !nextBody) return false;
+        syncAttributes(currentHeader, nextHeader);
+        currentHeader.replaceChildren(...Array.from(nextHeader.childNodes).map((node) => node.cloneNode(true)));
+        currentBody.replaceChildren(...Array.from(nextBody.childNodes).map((node) => node.cloneNode(true)));
+        lastDetailTemplateRoot = nextRoot;
+        if (options.focusSelector) focusAfterRender(options.focusSelector, currentRoot);
+        return true;
+      }
+
       syncDetailCloseConfirmOverlay(
         currentRoot,
         nextRoot
@@ -3056,9 +3020,7 @@ export function createIncidenciasController(
            el host y sus listeners. Así no hay parpadeo del panel y el
            histórico nunca puede quedar fuera del viewport detrás del composer.
         */
-        replacePart(
-          currentRoot,
-          nextRoot,
+        patchPart(
           "[data-modal-header-actions='true']",
           {
             preserveFocus: false,
@@ -3076,12 +3038,15 @@ export function createIncidenciasController(
           );
         }
 
+        lastDetailTemplateRoot = nextRoot;
         return true;
       }
 
       for (
         const selector
         of [
+          ".incidencias-modal-avatar",
+          ".incidencias-modal-title",
           "[data-modal-feedback-slot='true']",
           "[data-modal-preview-slot='true']",
           "[data-modal-header-chips='true']",
@@ -3102,9 +3067,7 @@ export function createIncidenciasController(
           continue;
         }
 
-        replacePart(
-          currentRoot,
-          nextRoot,
+        patchPart(
           selector,
           {
             preserveFocus: false,
@@ -3127,9 +3090,7 @@ export function createIncidenciasController(
           "[data-modal-footer='true']",
         ]
       ) {
-        replacePart(
-          currentRoot,
-          nextRoot,
+        patchPart(
           selector,
           {
             preserveFocus: false,
@@ -3164,6 +3125,7 @@ export function createIncidenciasController(
         );
       }
 
+      lastDetailTemplateRoot = nextRoot;
       return true;
     } catch {
       return false;
@@ -3194,6 +3156,24 @@ export function createIncidenciasController(
     modalFrame = 0;
 
     return true;
+  }
+
+  function notifyDetailRendered() {
+    try {
+      context.onDetailRendered?.({
+        controller,
+        modalHost,
+        detail: detailModal.detail,
+        loading: detailModal.loading,
+        error: detailModal.error || detailRequestError,
+        id: getTicketId(detailModal.detail) || detailModal.loadingId,
+        open: detailModal.open,
+        createOpen: createModal.open,
+        admin: isAdmin(),
+      });
+    } catch {
+      // Presentation enhancements cannot turn a committed operation into failure.
+    }
   }
 
   function renderModalsNow(
@@ -3263,6 +3243,7 @@ export function createIncidenciasController(
       )
     ) {
       syncBodyModalClass();
+      notifyDetailRendered();
       return true;
     }
 
@@ -3274,13 +3255,16 @@ export function createIncidenciasController(
       )
     ) {
       syncBodyModalClass();
+      notifyDetailRendered();
       return true;
     }
 
     target.innerHTML =
       `${createHtml}${detailHtml}`;
 
+    lastDetailTemplateRoot = detailHtml ? cloneTemplateRoot(detailHtml, DETAIL_ROOT_SELECTOR) : null;
     syncBodyModalClass();
+    notifyDetailRendered();
 
     if (options.focusSelector) {
       focusAfterRender(
@@ -3298,6 +3282,7 @@ export function createIncidenciasController(
     if (
       options.immediate === true
     ) {
+      cancelScheduledModalRender();
       return renderModalsNow(
         options
       );
@@ -3371,6 +3356,7 @@ export function createIncidenciasController(
       creating ||
       createModal.open ||
       detailModal.open ||
+      entityOverlay?.isOriginOpen?.(host) ||
       openingTicketId ||
       listSearchTimer ||
       listSearchComposing ||
@@ -3413,6 +3399,7 @@ export function createIncidenciasController(
             creating ||
             createModal.open ||
             detailModal.open ||
+            entityOverlay?.isOriginOpen?.(host) ||
             openingTicketId ||
             listSearchTimer ||
             listSearchComposing ||
@@ -3452,6 +3439,11 @@ export function createIncidenciasController(
 
   function renderNow(options = {}) {
     if (destroyed || !host) return false;
+    if (entityOverlay?.isOriginOpen?.(host)) {
+      deferredListRender = { ...(deferredListRender || {}), ...options };
+      cancelScheduledRender();
+      return true;
+    }
 
     disconnectInfiniteObserver();
     cancelScheduledRender();
@@ -3776,6 +3768,8 @@ async function load(options = {}) {
     try {
       const response = await loadIncidenciasPage({
         signal: requestController?.signal,
+        force,
+        cache: options.cache !== false && !force,
         query: getListPageQuery(),
       });
 
@@ -3985,6 +3979,7 @@ async function load(options = {}) {
     });
 
     restoreModalReturnFocus();
+    flushDomainRefresh();
     syncInfiniteObserver();
 
     return true;
@@ -4654,10 +4649,16 @@ async function load(options = {}) {
      DETAIL MODAL
   ======================================================= */
 
-  function resetDetailModal() {
+  function abortDetailRequest() {
     detailController?.abort?.();
     detailController = null;
+    detailRequest = null;
+    detailRequestError = "";
     detailLoadSeq += 1;
+  }
+
+  function resetDetailModal() {
+    abortDetailRequest();
     attachmentPreviewSeq += 1;
 
     detailModal.open = false;
@@ -4752,30 +4753,77 @@ async function load(options = {}) {
     return true;
   }
 
-  async function openDetail(
-    ticketId = "",
-    openerNode = null
-  ) {
+  function requestDetail(id, { local = null, force = false, silent = false } = {}) {
+    if (detailRequest?.id === id) return detailRequest.promise;
+    const detailSeq = ++detailLoadSeq;
+    const requestController = typeof AbortController !== "undefined" ? new AbortController() : null;
+    detailController = requestController;
+    const request = { id, promise: null };
+    const requestIsCurrent = () => !destroyed && !context.signal?.aborted &&
+      !requestController?.signal.aborted && detailSeq === detailLoadSeq &&
+      detailModal.open && detailModal.loadingId === id && Boolean(modalHost?.isConnected);
+
+    request.promise = (async () => {
+      try {
+        const detail = await loadIncidenciaDetail(id, { force, signal: requestController?.signal });
+        if (!requestIsCurrent()) return null;
+        const mergedDetail = detail ? mergeTicketData(local || {}, detail) : local;
+        if (!mergedDetail) throw new Error("No se pudo cargar la incidencia.");
+
+        // Hydration updates remote data only. Drafts, pending files and preview
+        // remain in this same controller across open, retry and refresh.
+        detailModal.detail = mergedDetail;
+        detailRequestError = "";
+        detailModal.loading = false;
+        detailModal.error = "";
+        if (!detailOnly) items = upsertByTicketId(items, mergedDetail);
+        openingTicketId = "";
+        render({ skipModals: true });
+        renderModals({ immediate: true });
+        return mergedDetail;
+      } catch (detailError) {
+        if (!requestIsCurrent()) return null;
+        detailRequestError = safeError(detailError, "No se pudo actualizar el detalle.");
+        openingTicketId = "";
+        detailModal.loading = false;
+        if (local) {
+          if (!silent) {
+            detailModal.feedbackMessage = safeError(detailError, "No se pudo actualizar el detalle.");
+            detailModal.feedbackType = "error";
+          }
+        } else {
+          detailModal.error = safeError(detailError, "No se pudo abrir el detalle.");
+        }
+        render({ skipModals: true });
+        renderModals({ immediate: true });
+        return null;
+      } finally {
+        if (detailController === requestController) detailController = null;
+        if (detailRequest === request) detailRequest = null;
+      }
+    })();
+    detailRequest = request;
+    return request.promise;
+  }
+
+  async function openDetail(ticketId = "", openerNode = null) {
     const id = cleanText(ticketId, "");
-    if (
-      !id || destroyed || !mounted || context.signal?.aborted ||
-      !ensureModalHost()
-    ) return false;
+    if (!id || destroyed || !mounted || context.signal?.aborted || !ensureModalHost()) return false;
 
     const currentId = getTicketId(detailModal.detail) || detailModal.loadingId;
-    if (detailModal.open && currentId === id && !detailModal.error) return true;
+    if (detailModal.open && currentId === id && !detailModal.error) {
+      return detailRequest?.id === id ? Boolean(await detailRequest.promise) : true;
+    }
     if (detailModal.open && (detailModal.submitting || detailHasDraft())) {
       if (!detailModal.submitting) openDiscardDetailConfirm();
       return false;
     }
 
     disconnectInfiniteObserver();
+    const retrying = detailModal.open && currentId === id;
     resetDetailModal();
-    const detailSeq = ++detailLoadSeq;
     rememberModalReturnFocus();
-    if (openerNode?.isConnected && !modalHost?.contains?.(openerNode)) {
-      modalReturnFocus = openerNode;
-    }
+    if (openerNode?.isConnected && !modalHost?.contains?.(openerNode)) modalReturnFocus = openerNode;
 
     const local = items.find((item) => getTicketId(item) === id) || null;
     openingTicketId = id;
@@ -4785,64 +4833,21 @@ async function load(options = {}) {
     detailModal.loadingId = id;
 
     render({ skipModals: true });
-    renderModals({
-      immediate: true,
-      fullRender: true,
-      focusSelector: DETAIL_MODAL_PANEL_SELECTOR,
-    });
-    try {
-      context.onDetailShell?.({ controller, id, modalHost });
-    } catch {
-      // Rendering and request ownership do not depend on the consumer callback.
+    renderModals({ immediate: true, fullRender: !retrying, focusSelector: DETAIL_MODAL_PANEL_SELECTOR });
+    try { context.onDetailShell?.({ controller, id, modalHost }); } catch { /* The owner retains its request. */ }
+    if (destroyed || context.signal?.aborted || !detailModal.open) return false;
+    return Boolean(await requestDetail(id, { local }));
+  }
+
+  function refreshDetail({ force = true, silent = true } = {}) {
+    if (destroyed || !mounted || !detailModal.open || detailModal.submitting ||
+        detailModal.closeConfirmOpen || detailModal.discardConfirmOpen ||
+        detailModal.attachmentDeleteConfirmOpen || context.signal?.aborted) {
+      return Promise.resolve(null);
     }
-    if (destroyed || context.signal?.aborted || detailSeq !== detailLoadSeq) return false;
-
-    const requestController = typeof AbortController !== "undefined" ? new AbortController() : null;
-    detailController = requestController;
-    const requestIsCurrent = () => !destroyed && !context.signal?.aborted &&
-      !requestController?.signal.aborted && detailSeq === detailLoadSeq &&
-      openingTicketId === id && Boolean(ensureModalHost());
-
-    try {
-      const detail = await loadIncidenciaDetail(id, { signal: requestController?.signal });
-      if (!requestIsCurrent()) return false;
-      const mergedDetail = detail ? mergeTicketData(local || {}, detail) : local;
-      if (!mergedDetail) throw new Error("No se pudo cargar la incidencia.");
-
-      // Hydration changes remote data only; drafts and attachment operations
-      // remain owned by the current, still-open controller.
-      detailModal.detail = mergedDetail;
-      detailModal.loading = false;
-      detailModal.error = "";
-      if (!detailOnly) items = upsertByTicketId(items, mergedDetail);
-      openingTicketId = "";
-      render({ skipModals: true });
-      renderModals({
-        immediate: true,
-        fullRender: !local,
-        ...(!local ? { focusSelector: DETAIL_MODAL_PANEL_SELECTOR } : {}),
-      });
-      return true;
-    } catch (detailError) {
-      if (!requestIsCurrent()) return false;
-      openingTicketId = "";
-      detailModal.loading = false;
-      if (local) {
-        detailModal.feedbackMessage = safeError(detailError, "No se pudo actualizar el detalle.");
-        detailModal.feedbackType = "error";
-      } else {
-        detailModal.error = safeError(detailError, "No se pudo abrir el detalle.");
-      }
-      render({ skipModals: true });
-      renderModals({
-        immediate: true,
-        fullRender: !local,
-        ...(!local ? { focusSelector: DETAIL_MODAL_PANEL_SELECTOR } : {}),
-      });
-      return false;
-    } finally {
-      if (detailController === requestController) detailController = null;
-    }
+    const id = getTicketId(detailModal.detail) || detailModal.loadingId;
+    if (!id) return Promise.resolve(null);
+    return requestDetail(id, { local: detailModal.detail, force, silent });
   }
 
   function patchDetailComment(
@@ -5101,6 +5106,8 @@ async function load(options = {}) {
         detailModal.pendingFiles
       );
 
+    // A pre-write refresh must never overwrite the mutation's response.
+    abortDetailRequest();
     detailModal.submitting = true;
     detailModal.operation = "update";
     detailModal.closeConfirmOpen = false;
@@ -5419,6 +5426,8 @@ async function load(options = {}) {
     }
 
     detailModal.adminDraft = { ...desired };
+    // A pre-write refresh must never overwrite the mutation's response.
+    abortDetailRequest();
     detailModal.submitting = true;
     detailModal.operation = "admin-update";
     detailModal.closeConfirmOpen = false;
@@ -5665,6 +5674,8 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
     detailModal.closeConfirmOpen = false;
 
     detailModal.discardConfirmOpen = false;
+    // A pre-write refresh must never overwrite the mutation's response.
+    abortDetailRequest();
     detailModal.submitting = true;
     detailModal.operation = "close";
     detailModal.feedbackMessage = "";
@@ -6224,6 +6235,8 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
       );
 
     clearAttachmentDeleteConfirm();
+    // A pre-write refresh must never overwrite the mutation's response.
+    abortDetailRequest();
     detailModal.submitting = true;
     detailModal.operation = "delete-attachment";
     detailModal.deletingAttachmentId = id;
@@ -7086,7 +7099,8 @@ async function loadMore(options = {}) {
       Boolean(incrementalError) ||
       creating ||
       createModal.submitting ||
-      detailModal.submitting
+      detailModal.submitting ||
+      entityOverlay?.isOriginOpen?.(host)
     ) {
       return false;
     }
@@ -7262,7 +7276,7 @@ async function loadMore(options = {}) {
       type ===
       INCIDENCIAS_ACTIONS.OPEN_DETAIL
     ) {
-      return openDetail(
+      return openIncidenciaDetailById(
         node?.dataset?.ticketId ||
         node?.dataset?.incidenciaId ||
         "",
@@ -7538,7 +7552,7 @@ async function loadMore(options = {}) {
         ROUTER_EVENT_HANDLED_KEY
       ] = true;
 
-      void openDetail(
+      void openIncidenciaDetailById(
         row.dataset.ticketId ||
         row.dataset.incidenciaId ||
         "",
@@ -7821,7 +7835,7 @@ async function loadMore(options = {}) {
       ROUTER_EVENT_HANDLED_KEY
     ] = true;
 
-    void openDetail(
+    void openIncidenciaDetailById(
       row.dataset.ticketId ||
       row.dataset.incidenciaId ||
       "",
@@ -8062,6 +8076,40 @@ async function loadMore(options = {}) {
      CONTROLLER PUBLIC
   ======================================================= */
 
+  function flushDomainRefresh() {
+    if (!domainRefreshPending || detailOnly || destroyed || !mounted ||
+        creating || createModal.open || entityOverlay?.isOriginOpen?.(host)) return false;
+    domainRefreshPending = false;
+    // A changed status/priority can remove a row from a server-filtered list.
+    // Reconcile from that query's response instead of retaining stale rows.
+    void load({ force: true, silent: true, refreshFacets: true, source: "incidencias.domain-change" });
+    return true;
+  }
+
+  function bindDomainRefresh() {
+    unsubscribeDomain = onDomainChanged((domain) => {
+      if (domain !== "incidencias" || destroyed || creating) return;
+      domainRefreshPending = true;
+      queueMicrotask(flushDomainRefresh);
+    });
+    void import("../../features/entity-overlay/index.js").then(({ EntityOverlay }) => {
+      if (destroyed) return;
+      entityOverlay = EntityOverlay;
+      unsubscribeOverlay = EntityOverlay.subscribe?.(({ phase, originHost }) => {
+        if (originHost !== host) return;
+        if (phase === "opened") disconnectInfiniteObserver();
+        if (phase === "closed") {
+          const pendingRender = deferredListRender;
+          deferredListRender = null;
+          if (pendingRender) renderNow({ ...pendingRender, skipModals: true });
+          flushDomainRefresh();
+          syncInfiniteObserver();
+        }
+      });
+      flushDomainRefresh();
+    });
+  }
+
   function onContextAbort() {
     controller.destroy();
   }
@@ -8083,7 +8131,10 @@ async function loadMore(options = {}) {
       mounted = true;
       destroyed = false;
 
-      if (!detailOnly) bindTarget(host);
+      if (!detailOnly) {
+        bindTarget(host);
+        bindDomainRefresh();
+      }
       ensureModalHost();
       context.signal?.addEventListener?.("abort", onContextAbort, { once: true });
 
@@ -8133,6 +8184,12 @@ async function loadMore(options = {}) {
       destroyed = true;
       context.signal?.removeEventListener?.("abort", onContextAbort);
       mounted = false;
+      unsubscribeDomain?.();
+      unsubscribeOverlay?.();
+      unsubscribeDomain = null;
+      unsubscribeOverlay = null;
+      domainRefreshPending = false;
+      deferredListRender = null;
 
       loadSeq += 1;
       userSearchSeq += 1;
@@ -8186,6 +8243,8 @@ async function loadMore(options = {}) {
       */
       resetCreateModal();
       resetDetailModal();
+      notifyDetailRendered();
+      lastDetailTemplateRoot = null;
 
       removeModalHost();
       syncBodyModalClass();
@@ -8218,7 +8277,8 @@ async function loadMore(options = {}) {
     openCreateModal,
     closeCreateModal,
 
-    openDetail,
+    openDetail: detailOnly ? openDetail : openIncidenciaDetailById,
+    refreshDetail,
     closeDetailModal,
 
     getSnapshot() {
@@ -8478,24 +8538,12 @@ export const IncidenciasIndex =
   IncidenciasView;
 
 
-export async function openIncidenciaDetailById(
-  ticketId = "",
-  openerNode = null
-) {
+export async function openIncidenciaDetailById(ticketId = "", openerNode = null) {
+  const id = cleanText(ticketId, "");
+  if (!id) return false;
   try {
-    if (
-      !lastInstance ||
-      typeof lastInstance.openDetail !== "function"
-    ) {
-      return false;
-    }
-
-    return Boolean(
-      await lastInstance.openDetail(
-        ticketId,
-        openerNode
-      )
-    );
+    const { EntityOverlay } = await import("../../features/entity-overlay/index.js");
+    return Boolean(await EntityOverlay.open({ type: "incidencia", id, opener: openerNode, source: "incidencias.detail" }));
   } catch {
     return false;
   }

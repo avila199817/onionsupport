@@ -46,7 +46,6 @@ const HOST_ID = "usuarios-detail-modal-host";
 const MODAL_ID = "usuarios-detail-modal-root";
 const PANEL_ID = "usuarios-detail-modal-panel";
 
-const REFRESH_FALLBACK_TIMEOUT_MS = 15_000;
 
 const TRUSTED_BLOB_HOST =
   "onionassets.blob.core.windows.net";
@@ -73,6 +72,8 @@ const modalState = {
   panel: null,
 
   lastActiveElement: null,
+  controller: null,
+  onClosed: null,
 
 
   clickHandler: null,
@@ -84,11 +85,10 @@ const modalState = {
 const modalLifecycle = createModalLifecycle({
   getPanel: () => modalState.panel,
   onEscape: () => closeUsuariosModal(),
+  onDetached: () => closeUsuariosModal({ restoreFocus: false }),
   bodyClasses: BODY_LOCK_CLASSES,
 });
 
-let busAttached = false;
-const busUnsubscribers = [];
 
 /* =========================================================
    BASICS
@@ -543,88 +543,6 @@ function safeEmit(
   }
 }
 
-function subscribeEvent(
-  eventName = "",
-  handler = null
-) {
-  const name =
-    cleanText(
-      eventName,
-      ""
-    );
-
-  if (
-    !name ||
-    !isFunction(handler)
-  ) {
-    return () => {};
-  }
-
-  let appBound = false;
-  let windowBound = false;
-
-  try {
-    if (
-      isFunction(
-        AppCore?.events?.on
-      )
-    ) {
-      AppCore.events.on(
-        name,
-        handler
-      );
-
-      appBound = true;
-    }
-  } catch {
-    // noop
-  }
-
-  if (isBrowser()) {
-    try {
-      window.addEventListener(
-        name,
-        handler
-      );
-
-      windowBound = true;
-    } catch {
-      // noop
-    }
-  }
-
-  return () => {
-    try {
-      if (
-        appBound &&
-        isFunction(
-          AppCore?.events?.off
-        )
-      ) {
-        AppCore.events.off(
-          name,
-          handler
-        );
-      }
-    } catch {
-      // noop
-    }
-
-    if (isBrowser()) {
-      try {
-        if (windowBound) {
-          window.removeEventListener(
-            name,
-            handler
-          );
-        }
-      } catch {
-        // noop
-      }
-    }
-  };
-}
-
 function showToast(
   message = "",
   type = "info"
@@ -675,73 +593,6 @@ function showToast(
   }
 
   return false;
-}
-
-function unwrapEventDetail(event = null) {
-  const payload =
-    safeObject(
-      first(
-        event?.detail,
-        event?.payload,
-        event,
-        {}
-      ),
-      {}
-    );
-
-  return safeObject(
-    first(
-      payload.detail,
-      payload.user,
-      payload.usuario,
-      payload.item,
-      payload.data,
-      payload,
-      {}
-    ),
-    {}
-  );
-}
-
-/* =========================================================
-   ACTIVE CONTROLLER BRIDGE
-========================================================= */
-
-function getActiveUsuariosController() {
-  const root =
-    typeof globalThis !== "undefined"
-      ? globalThis
-      : {};
-
-  const candidates = [
-    root?.OnionUsuarios?.controller,
-    root?.OnionUsuariosController,
-    AppCore?.modules?.Usuarios?.controller,
-  ];
-
-  for (const candidate of candidates) {
-    if (
-      !candidate ||
-      !isObject(candidate)
-    ) {
-      continue;
-    }
-
-    try {
-      if (
-        candidate.isDestroyed?.() ===
-        true
-      ) {
-        continue;
-      }
-    } catch {
-      // Si no puede consultar estado, seguimos evaluando métodos.
-    }
-
-    return candidate;
-  }
-
-  return null;
 }
 
 /* =========================================================
@@ -2955,12 +2806,6 @@ function focusPanel() {
   }
 }
 
-function restoreFocus() {
-  const target = modalState.lastActiveElement;
-  modalState.lastActiveElement = null;
-  return restoreModalFocus(target);
-}
-
 function onRootClick(event = null) {
   const target =
     event?.target;
@@ -3247,40 +3092,6 @@ function finishRefresh(
   return true;
 }
 
-function armRefreshFallback(
-  sequence = 0
-) {
-  if (!isBrowser()) {
-    return false;
-  }
-
-  clearRefreshTimer();
-
-  modalState.refreshTimer =
-    window.setTimeout(
-      () => {
-        if (
-          !modalState.isOpen ||
-          !modalState.isRefreshing ||
-          modalState.refreshSeq !==
-            sequence
-        ) {
-          return;
-        }
-
-        finishRefresh(
-          sequence,
-          {
-            render: true,
-          }
-        );
-      },
-      REFRESH_FALLBACK_TIMEOUT_MS
-    );
-
-  return true;
-}
-
 /* =========================================================
    CLIPBOARD
 ========================================================= */
@@ -3386,28 +3197,6 @@ async function handleCopyId() {
     return false;
   }
 
-  const controller =
-    getActiveUsuariosController();
-
-  if (
-    isFunction(
-      controller?.copyUsuarioId
-    )
-  ) {
-    try {
-      const result =
-        await controller.copyUsuarioId(
-          userId
-        );
-
-      if (result !== false) {
-        return true;
-      }
-    } catch {
-      // clipboard local debajo
-    }
-  }
-
   const copied =
     await writeClipboardText(
       userId
@@ -3472,7 +3261,7 @@ async function handleRefresh() {
   });
 
   const controller =
-    getActiveUsuariosController();
+    modalState.controller;
 
   if (
     isFunction(
@@ -3548,56 +3337,15 @@ async function handleRefresh() {
     }
   }
 
-  /*
-    Compatibilidad con controladores antiguos:
-    delegamos por event bus y usamos timeout defensivo.
-  */
-  const emitted =
-    safeEmit(
-      "usuarios:modal:refresh",
-      {
-        userId,
-
-        detail:
-          cloneDetail(
-            modalState.detail
-          ),
-
-        source:
-          USUARIOS_MODAL_TEMPLATE_VERSION,
-      }
-    );
-
-  if (!emitted) {
-    finishRefresh(
-      sequence,
-      {
-        render: true,
-      }
-    );
-
-    showToast(
-      "No se pudo solicitar la actualización del usuario.",
-      "error"
-    );
-
-    return false;
-  }
-
-  armRefreshFallback(
-    sequence
-  );
-
-  return true;
+  finishRefresh(sequence, { render: true });
+  return false;
 }
 
 /* =========================================================
    PUBLIC OPEN / CLOSE / UPDATE
 ========================================================= */
 
-export function openUsuariosModal(detail = {}) {
-  attachBus();
-
+export function openUsuariosModal(detail = {}, options = {}) {
   const normalized =
     normalizeDetail(detail);
 
@@ -3614,8 +3362,12 @@ export function openUsuariosModal(detail = {}) {
     return false;
   }
 
-  const wasOpen =
-    modalState.isOpen;
+  if (modalState.isOpen && modalState.onClosed && modalState.onClosed !== options.onClosed) {
+    closeUsuariosModal({ restoreFocus: false });
+  }
+  const wasOpen = modalState.isOpen;
+  modalState.controller = options.controller || null;
+  modalState.onClosed = typeof options.onClosed === "function" ? options.onClosed : null;
 
   if (isBrowser()) {
     const host =
@@ -3631,8 +3383,7 @@ export function openUsuariosModal(detail = {}) {
       elemento al que debemos devolver el foco al cerrar.
     */
     if (!wasOpen) {
-      modalState.lastActiveElement =
-        captureActiveElement();
+      modalState.lastActiveElement = options.opener || captureActiveElement();
     }
   }
 
@@ -3679,78 +3430,38 @@ export function openUsuariosModal(detail = {}) {
   return true;
 }
 
-export function closeUsuariosModal() {
-  const wasOpen =
-    modalState.isOpen;
-
-  const userId =
-    getUserId(
-      modalState.detail ||
-      {}
-    );
-
-  modalState.isOpen =
-    false;
-
-  modalState.isRefreshing =
-    false;
-
+export function closeUsuariosModal({ notify = true, restoreFocus = true } = {}) {
+  const wasOpen = modalState.isOpen;
+  const userId = getUserId(modalState.detail || {});
+  const onClosed = modalState.onClosed;
+  const opener = modalState.lastActiveElement;
+  modalState.isOpen = false;
+  modalState.isRefreshing = false;
   modalState.refreshSeq += 1;
-
+  const closeSequence = modalState.refreshSeq;
   clearRefreshTimer();
-
-  modalState.detail =
-    null;
-
+  modalState.detail = null;
+  modalState.controller = null;
+  modalState.onClosed = null;
+  modalState.lastActiveElement = null;
   detachRootBindings();
-
-  const host =
-    modalState.host ||
-    getHost();
-
-  try {
-    host?.replaceChildren?.();
-  } catch {
-    try {
-      if (host) {
-        host.innerHTML = "";
-      }
-    } catch {
-      // noop
-    }
-  }
-
-  modalState.root =
-    null;
-
-  modalState.panel =
-    null;
-
+  const host = modalState.host || getHost();
+  host?.replaceChildren?.();
+  modalState.root = null;
+  modalState.panel = null;
   unlockBody();
-
-  if (isBrowser()) {
-    window.setTimeout(
-      () =>
-        restoreFocus(),
-      0
-    );
-  } else {
-    modalState.lastActiveElement =
-      null;
-  }
-
   if (wasOpen) {
-    safeEmit(
-      "usuarios:modal:closed",
-      {
-        userId,
-
-        source:
-          USUARIOS_MODAL_TEMPLATE_VERSION,
-      }
-    );
+    onClosed?.({ userId, notify, restoreFocus });
+    if (notify) safeEmit("usuarios:modal:closed", {
+      userId,
+      source: USUARIOS_MODAL_TEMPLATE_VERSION,
+    });
   }
-
+  if (restoreFocus && wasOpen && isBrowser()) {
+    window.setTimeout(() => {
+      if (!modalState.isOpen && closeSequence === modalState.refreshSeq) restoreModalFocus(opener);
+    }, 0);
+  }
   return true;
 }
 
@@ -3836,166 +3547,6 @@ export async function refreshUsuariosModal() {
 
 export async function copyUsuariosModalId() {
   return handleCopyId();
-}
-
-/* =========================================================
-   EVENT BUS BRIDGE
-========================================================= */
-
-function handleOpenEvent(event) {
-  const detail =
-    unwrapEventDetail(
-      event
-    );
-
-  if (
-    !Object.keys(detail)
-      .length
-  ) {
-    return;
-  }
-
-  openUsuariosModal(
-    detail
-  );
-}
-
-function handleCloseEvent() {
-  closeUsuariosModal();
-}
-
-function handleUpdateEvent(event) {
-  const detail =
-    unwrapEventDetail(
-      event
-    );
-
-  if (
-    !Object.keys(detail)
-      .length
-  ) {
-    return;
-  }
-
-  updateUsuariosModal(
-    detail
-  );
-}
-
-function handleDetailRefreshEvent(event) {
-  const detail =
-    unwrapEventDetail(
-      event
-    );
-
-  if (
-    !Object.keys(detail).length ||
-    !modalState.isOpen
-  ) {
-    return;
-  }
-
-  const currentId =
-    getUserId(
-      modalState.detail ||
-      {}
-    );
-
-  const normalized =
-    normalizeDetail(
-      detail
-    );
-
-  const incomingId =
-    getUserId(
-      normalized
-    );
-
-  if (
-    currentId &&
-    incomingId &&
-    currentId !==
-      incomingId
-  ) {
-    return;
-  }
-
-  updateUsuariosModal(
-    normalized
-  );
-}
-
-function attachBus() {
-  if (busAttached) {
-    return true;
-  }
-
-  const subscriptions = [
-    [
-      "usuarios:modal:open",
-      handleOpenEvent,
-    ],
-
-    [
-      "usuarios:modal:close",
-      handleCloseEvent,
-    ],
-
-    [
-      "usuarios:modal:update",
-      handleUpdateEvent,
-    ],
-
-    [
-      "usuarios:detail:refresh",
-      handleDetailRefreshEvent,
-    ],
-
-    [
-      "usuarios:detail:success",
-      handleDetailRefreshEvent,
-    ],
-  ];
-
-  for (
-    const [
-      eventName,
-      handler,
-    ]
-    of subscriptions
-  ) {
-    busUnsubscribers.push(
-      subscribeEvent(
-        eventName,
-        handler
-      )
-    );
-  }
-
-  busAttached =
-    true;
-
-  return true;
-}
-
-function detachBus() {
-  while (
-    busUnsubscribers.length
-  ) {
-    const unsubscribe =
-      busUnsubscribers.pop();
-
-    try {
-      unsubscribe?.();
-    } catch {
-      // noop
-    }
-  }
-
-  busAttached =
-    false;
-
-  return true;
 }
 
 /* =========================================================
@@ -4156,10 +3707,10 @@ export function getUsuariosModalSnapshot() {
       refreshViaController:
         true,
 
-      refreshEventFallback:
+      explicitControllerOwner:
         true,
 
-      copyViaControllerOrClipboard:
+      copyViaClipboard:
         true,
 
       publicStateRawRemoved:
@@ -4176,78 +3727,10 @@ export const getSnapshot =
 ========================================================= */
 
 function destroyUsuariosModal() {
-  const wasOpen =
-    modalState.isOpen;
-
-  const userId =
-    getUserId(
-      modalState.detail ||
-      {}
-    );
-
-  clearRefreshTimer();
-
-  detachRootBindings();
-
-  modalState.isOpen =
-    false;
-
-  modalState.isRefreshing =
-    false;
-
-  modalState.detail =
-    null;
-
-  modalState.refreshSeq += 1;
-
-  unlockBody();
-
-  const host =
-    modalState.host ||
-    getHost();
-
-  try {
-    host?.remove?.();
-  } catch {
-    // noop
-  }
-
-  modalState.host =
-    null;
-
-  modalState.root =
-    null;
-
-  modalState.panel =
-    null;
-
-  if (
-    wasOpen &&
-    isBrowser()
-  ) {
-    window.setTimeout(
-      () =>
-        restoreFocus(),
-      0
-    );
-  } else {
-    modalState.lastActiveElement =
-      null;
-  }
-
-  detachBus();
-
-  if (wasOpen) {
-    safeEmit(
-      "usuarios:modal:destroyed",
-      {
-        userId,
-        source:
-          USUARIOS_MODAL_TEMPLATE_VERSION,
-      }
-    );
-  }
-
+  closeUsuariosModal();
+  const host = modalState.host || getHost();
+  host?.remove?.();
+  modalState.host = null;
   return true;
 }
 
@@ -4263,14 +3746,12 @@ export const OnionUsuariosModal =
     actions:
       USUARIOS_DETAIL_ACTIONS,
 
-    open(detail = {}) {
-      return openUsuariosModal(
-        detail
-      );
+    open(detail = {}, options = {}) {
+      return openUsuariosModal(detail, options);
     },
 
-    close() {
-      return closeUsuariosModal();
+    close(options = {}) {
+      return closeUsuariosModal(options);
     },
 
     update(detail = {}) {
@@ -4320,30 +3801,6 @@ export const copyId =
 
 export const destroy =
   destroyUsuariosModal;
-
-/* =========================================================
-   GLOBAL BRIDGE / AUTO BOOT
-========================================================= */
-
-if (isBrowser()) {
-  try {
-    window.OnionUsuariosModal =
-      OnionUsuariosModal;
-
-    window.renderUsuarioDetailModal =
-      OnionUsuariosModal.open;
-
-    window.renderUsuarioModal =
-      OnionUsuariosModal.open;
-
-    window.renderUsuariosModal =
-      OnionUsuariosModal.open;
-  } catch {
-    // noop
-  }
-}
-
-attachBus();
 
 /* =========================================================
    DEFAULT EXPORT

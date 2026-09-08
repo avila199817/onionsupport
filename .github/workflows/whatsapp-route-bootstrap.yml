@@ -39,7 +39,6 @@ jobs:
                   raise SystemExit(f"{path}: expected exactly one anchor, found {count}: {old!r}")
               p.write_text(text.replace(old, new, 1), encoding="utf-8")
 
-          # Core route authority: /whatsapp is a real private admin route.
           replace_once(
               "src/core/config.js",
               '  empleados: "/empleados",\n  correo: "/correo",',
@@ -51,7 +50,6 @@ jobs:
               '  ROUTES.empleados,\n  ROUTES.whatsapp,\n  ROUTES.correo,',
           )
 
-          # Router: canonical path/name + lazy loader + admin-only route.
           replace_once(
               "src/router/routes.js",
               '  EMPLEADOS:\n    ROUTES.empleados ||\n    "/empleados",\n\n  CORREO:',
@@ -73,14 +71,12 @@ jobs:
               '  createRoute({\n    path: ROUTE_PATHS.WHATSAPP,\n    name: ROUTE_NAMES.WHATSAPP,\n    title: "WhatsApp",\n    viewKey: "whatsapp",\n    adminOnly: true,\n    order: 54,\n  }),\n\n  createRoute({\n    path: ROUTE_PATHS.CORREO,',
           )
 
-          # Route CSS manifest: every real view keeps the same loader contract.
           replace_once(
               "src/router/styles.js",
               '  correo: Object.freeze([\n    "/src/css/views/correo/index.css",\n  ]),',
               '  whatsapp: Object.freeze([\n    "/src/css/views/whatsapp/index.css",\n  ]),\n\n  correo: Object.freeze([\n    "/src/css/views/correo/index.css",\n  ]),',
           )
 
-          # Sidebar: consume the core route when available and preserve the icon fallback.
           replace_once(
               "src/ui/sidebar/index.js",
               'const WHATSAPP_SIDEBAR_PATH =\n  "/whatsapp";',
@@ -92,7 +88,6 @@ jobs:
               '  if (\n    clean ===\n    ROUTES.whatsapp\n  ) {\n    return "whatsapp";\n  }\n\n  if (\n    clean ===\n    ROUTES.empleados\n  ) {\n    return "empleados";\n  }',
           )
 
-          # Minimal routed surface only. No inbox, no API calls, no provider logic yet.
           view = r'''/* =========================================================
              Onion Support - WhatsApp
              Archivo: /src/views/whatsapp/index.js
@@ -305,7 +300,7 @@ jobs:
 
           const whatsappRouteIndex = routes.indexOf("path: ROUTE_PATHS.WHATSAPP");
           const correoRouteIndex = routes.indexOf("path: ROUTE_PATHS.CORREO");
-          assert.ok(whatsappRouteIndex >= 0 && correoRouteIndex > whatsappRouteIndex, "WhatsApp must remain immediately ahead of Correo in route order");
+          assert.ok(whatsappRouteIndex >= 0 && correoRouteIndex > whatsappRouteIndex, "WhatsApp must remain ahead of Correo in route order");
 
           assert.match(styles, /whatsapp:\s*Object\.freeze\(\[\s*"\/src\/css\/views\/whatsapp\/index\.css"/);
           assert.match(sidebar, /const WHATSAPP_SIDEBAR_PATH =\s*ROUTES\.whatsapp\s*\|\|\s*"\/whatsapp"/);
@@ -334,9 +329,6 @@ jobs:
               'node .github/scripts/usuarios_session_order_contract.mjs && python3 .github/scripts/repo_integrity.py',
               'node .github/scripts/usuarios_session_order_contract.mjs && node .github/scripts/whatsapp_route_contract.mjs && python3 .github/scripts/repo_integrity.py',
           )
-
-          # Remove this one-shot workflow before validating/committing so the final PR has no bootstrap machinery.
-          Path(".github/workflows/whatsapp-route-bootstrap.yml").unlink()
           PY
 
       - name: Validate prepared route
@@ -355,23 +347,31 @@ jobs:
           npm --version
           npm ci --ignore-scripts
 
-      - name: Validate source contracts
-        shell: bash
-        env:
-          PUBLIC_SITE_URL: https://onionsupport.com
-          DIRECT_API_URL: https://api.onionsupport.com
-        run: |
-          set -euo pipefail
-          npm run validate:source
-
-      - name: Commit prepared route
+      - name: Create final local commit
         shell: bash
         run: |
           set -euo pipefail
+          rm .github/workflows/whatsapp-route-bootstrap.yml
           git config user.name "Onion Support Automation"
           git config user.email "cristian@onionsupport.com"
           git add -A
           git diff --cached --check
           git diff --cached --stat
           git commit -m "feat(whatsapp): connect prepared admin route"
+
+      - name: Validate final committed candidate
+        shell: bash
+        env:
+          PUBLIC_SITE_URL: https://onionsupport.com
+          DIRECT_API_URL: https://api.onionsupport.com
+        run: |
+          set -euo pipefail
+          test ! -e .github/workflows/whatsapp-route-bootstrap.yml
+          git status --short
+          npm run validate
+
+      - name: Push validated candidate
+        shell: bash
+        run: |
+          set -euo pipefail
           git push origin HEAD:feat/whatsapp-route-ready

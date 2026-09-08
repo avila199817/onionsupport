@@ -1317,7 +1317,10 @@ function initInitialPosition(refs, host, activeState, cleanups) {
     if (!frame) frame = requestFrame(position);
   };
   addEvent(cleanups, refs.root, "public-support:ready", () => {
-    if (window.location.hash === "#incidencia") schedule();
+    // Inserting intake also moves every section after the hero, including
+    // legal disclosures. Restore a requested destination once that insertion
+    // is complete; legal information remains usable even if intake fails.
+    if (window.location.hash && window.location.hash !== "#inicio") schedule();
   });
   addEvent(cleanups, window, "hashchange", schedule);
   cleanups.push(() => cancelFrame(frame));

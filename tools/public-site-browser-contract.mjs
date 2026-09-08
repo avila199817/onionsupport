@@ -119,6 +119,19 @@ try {
   await inspect("/login");
 
   async function inspectPublicLayout() {
+    // appReady is set when the shell mounts, before the router reveals its
+    // new host. Inspect the committed page, while still failing hidden titles.
+    try {
+      await page.locator("h1").waitFor({ state: "visible", timeout: 10000 });
+    } catch (error) {
+      console.error("Public heading readiness", await page.locator("h1").evaluateAll((headings) => headings.map((heading) => ({
+        html: heading.outerHTML,
+        ancestors: [...(function* () { for (let node = heading; node; node = node.parentElement) yield node; })()].map((node) => ({
+          tag: node.tagName, hidden: node.hidden, display: getComputedStyle(node).display, visibility: getComputedStyle(node).visibility,
+        })),
+      }))));
+      throw error;
+    }
     const reject = page.getByRole("button", { name: "Rechazar", exact: true });
     if (await reject.isVisible()) await reject.click();
     const layout = await page.evaluate(() => {
@@ -177,6 +190,7 @@ try {
   for (const hash of ["#incidencia", "#public-privacy"]) {
     await page.goto(origin + "/" + hash, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(hash);
+    await page.waitForSelector("[data-public-support-form]");
     await page.waitForFunction((targetHash) => {
       const host = document.querySelector(".main-content");
       const target = document.querySelector(targetHash);

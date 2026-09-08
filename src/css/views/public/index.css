@@ -124,8 +124,6 @@ body.public-home-no-scroll .main-content {
 
   --public-home-nav-height: 92px;
   --public-home-scroll-offset: 118px;
-  --public-home-scroll-progress: 0;
-  --public-home-scroll-progress-percent: 0%;
 
   --public-home-shell-max: 1460px;
   --public-home-page-gutter: clamp(18px, 4vw, 72px);
@@ -349,7 +347,7 @@ body.public-home-no-scroll .main-content {
   --public-home-scrollbar-bottom: 18px;
   --public-home-scrollbar-thumb-size: 86px;
   --public-home-scrollbar-thumb-top: 0px;
-  --public-home-scrollbar-thumb-center: 0px;
+  --public-home-scroll-progress-percent: 0%;
 
   position: fixed;
   inset-block-start: var(--public-home-scrollbar-top);
@@ -359,6 +357,7 @@ body.public-home-no-scroll .main-content {
 
   inline-size: 14px;
   overflow: hidden;
+  contain: layout style;
 
   border: 1px solid rgb(91 218 255 / .34);
   border-radius: 999px;
@@ -413,13 +412,13 @@ body.public-home-no-scroll .main-content {
 
   opacity: .38;
   pointer-events: none;
-  transition: block-size .08s linear, opacity .18s ease;
+  transition: opacity .18s ease;
 }
 
 .public-home-scrollbar-thumb {
   position: absolute;
   inset-inline: 2px;
-  inset-block-start: var(--public-home-scrollbar-thumb-top, 0px);
+  inset-block-start: 0;
   z-index: 2;
 
   display: block;
@@ -439,11 +438,10 @@ body.public-home-no-scroll .main-content {
     inset 0 1px 0 rgb(255 255 255 / .78),
     inset 0 -12px 22px rgb(0 32 94 / .34);
 
-  transform: translate3d(0, 0, 0);
+  transform: translate3d(0, var(--public-home-scrollbar-thumb-top, 0px), 0);
 
   transition:
-    inset-block-start .055s linear,
-    block-size .12s ease,
+    transform .055s linear,
     filter .18s ease,
     box-shadow .18s ease;
 }

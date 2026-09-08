@@ -695,7 +695,6 @@ function initScrollPipeline(refs, cleanups, host) {
     progressValue: null,
     progressPercent: null,
     thumbTop: null,
-    thumbCenter: null,
     scrolled: null,
   };
 
@@ -764,12 +763,11 @@ function initScrollPipeline(refs, cleanups, host) {
     const scrolled = top > 14;
     const thumbTopNumber = Math.round(state.travel * progress);
     const thumbTop = `${thumbTopNumber}px`;
-    const thumbCenter = `${Math.round(thumbTopNumber + state.thumbSize / 2)}px`;
 
-    // Complete geometry and scroll reads before invalidating styles.
+    // Complete reads first. These variables belong only to the rail: putting
+    // them on the root would invalidate inherited styles across the home.
     if (state.trackRect) {
       const thumbSize = `${Math.round(state.thumbSize)}px`;
-      setCssMetric(refs.root, "--public-home-scrollbar-thumb-size", thumbSize);
       setCssMetric(refs.customScrollbar, "--public-home-scrollbar-thumb-size", thumbSize);
     }
 
@@ -784,29 +782,17 @@ function initScrollPipeline(refs, cleanups, host) {
       state.progressValue = progressValue;
       setDataset(refs.root, "scrollProgress", progressValue);
       setDataset(refs.customScrollbar, "scrollProgress", progressValue);
-      setCssMetric(refs.root, "--public-home-scroll-progress", progressValue);
-      setCssMetric(refs.customScrollbar, "--public-home-scroll-progress", progressValue);
-      setCssMetric(refs.nav, "--public-home-scroll-progress", progressValue);
     }
 
     if (state.progressPercent !== progressPercent) {
       state.progressPercent = progressPercent;
       setDataset(refs.root, "scrollProgressPercent", progressPercent);
-      setCssMetric(refs.root, "--public-home-scroll-progress-percent", progressPercent);
       setCssMetric(refs.customScrollbar, "--public-home-scroll-progress-percent", progressPercent);
-      setCssMetric(refs.nav, "--public-home-scroll-progress-percent", progressPercent);
     }
 
     if (state.thumbTop !== thumbTop) {
       state.thumbTop = thumbTop;
-      setCssMetric(refs.root, "--public-home-scrollbar-thumb-top", thumbTop);
       setCssMetric(refs.customScrollbar, "--public-home-scrollbar-thumb-top", thumbTop);
-    }
-
-    if (state.thumbCenter !== thumbCenter) {
-      state.thumbCenter = thumbCenter;
-      setCssMetric(refs.root, "--public-home-scrollbar-thumb-center", thumbCenter);
-      setCssMetric(refs.customScrollbar, "--public-home-scrollbar-thumb-center", thumbCenter);
     }
   }
 
@@ -911,16 +897,12 @@ function initScrollPipeline(refs, cleanups, host) {
   cleanups.push(() => {
     scheduler.cancel();
 
-    for (const node of [refs.root, refs.customScrollbar, refs.nav]) {
-      for (const key of [
-        "--public-home-scroll-progress",
-        "--public-home-scroll-progress-percent",
-        "--public-home-scrollbar-thumb-top",
-        "--public-home-scrollbar-thumb-center",
-        "--public-home-scrollbar-thumb-size",
-      ]) {
-        removeCssMetric(node, key);
-      }
+    for (const key of [
+      "--public-home-scroll-progress-percent",
+      "--public-home-scrollbar-thumb-top",
+      "--public-home-scrollbar-thumb-size",
+    ]) {
+      removeCssMetric(refs.customScrollbar, key);
     }
 
     setClass(refs.root, CLASSES.scrolled, false);

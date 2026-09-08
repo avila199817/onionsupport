@@ -43,6 +43,25 @@ try {
     assert.equal(actual.schemaCount, path === "/" ? 1 : 0);
     assert.equal(actual.description, expected.description);
   }
+  async function inspectHomeScroll() {
+    await page.waitForFunction(() => Number(document.querySelector("[data-public-home]")?.dataset.scrollProgress) === 0);
+    await page.getByRole("link", { name: "Ver servicios", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector(".main-content").scrollTop > 20);
+    const rail = page.locator("[data-public-home-scrollbar]");
+    if (await rail.isVisible()) {
+      const bounds = await rail.boundingBox();
+      await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+      await page.waitForFunction(() => {
+        const host = document.querySelector(".main-content");
+        const progress = host.scrollTop / (host.scrollHeight - host.clientHeight);
+        const track = document.querySelector("[data-public-home-scrollbar]").getBoundingClientRect();
+        const thumb = document.querySelector("[data-public-home-scrollbar-thumb]").getBoundingClientRect();
+        return progress > 0.35 && progress < 0.65 && thumb.top > track.top + 5 && thumb.bottom < track.bottom;
+      });
+    }
+    const rootMetrics = await page.locator("[data-public-home]").evaluate((root) => [...root.style].filter((name) => name.startsWith("--public-home-scroll")));
+    assert.deepEqual(rootMetrics, [], "scrollbar metrics must not invalidate the entire home through inherited CSS variables");
+  }
   await page.goto(origin, { waitUntil: "domcontentloaded" });
   await inspect("/");
   await page.waitForSelector("[data-public-support-form] [name='phone']");
@@ -73,6 +92,7 @@ try {
   assert.deepEqual(mutationInvalidation, { textChanges: 0, replacement: true, identityChange: true, navigation: true }, "typing must not rescan the home, while form/identity replacements and SPA mounts still do");
   await page.waitForFunction(() => window.__ONION_MAIN__?.enhancementsReady === true);
   assert.equal(await page.evaluate(() => performance.getEntriesByType("resource").some((entry) => entry.name.includes("/mobile-datalist/"))), false, "public home must not load private table enhancement");
+  await inspectHomeScroll();
   const navigationToken = await page.evaluate(() => (window.__metadataNavigationProbe = Math.random()));
   for (const path of ["/login", "/", "/login", "/"]) {
     await page.evaluate(async (target) => { const { default: router } = await import("/src/router/index.js"); await router.navigate(target); }, path);
@@ -81,8 +101,13 @@ try {
     if (path === "/") {
       await page.waitForSelector("[data-public-support-form] [name='phone']");
       assert.equal(await page.locator("[data-public-support-form]").count(), 1, "returning to home must mount one support form");
+      await inspectHomeScroll();
     }
   }
+  await page.setViewportSize({ width: 412, height: 915 });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await inspect("/");
+  await inspectHomeScroll();
   await page.goto(origin + "/login", { waitUntil: "domcontentloaded" });
   await inspect("/login");
   assert.deepEqual(errors, [], "frontend must not throw during metadata navigation");

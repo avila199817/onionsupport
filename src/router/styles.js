@@ -119,6 +119,10 @@ const STYLE_MANIFEST = Object.freeze({
     "/src/css/views/empleados/index.css",
   ]),
 
+  whatsapp: Object.freeze([
+    "/src/css/views/whatsapp/index.css",
+  ]),
+
   correo: Object.freeze([
     "/src/css/views/correo/index.css",
   ]),

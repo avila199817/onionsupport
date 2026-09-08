@@ -96,6 +96,7 @@ export const ROUTES = Object.freeze({
   clientes: "/clientes",
   usuarios: "/usuarios",
   empleados: "/empleados",
+  whatsapp: "/whatsapp",
   correo: "/correo",
   servidor: "/servidor",
   cuenta: "/cuenta",
@@ -115,6 +116,7 @@ export const ADMIN_ROUTES = Object.freeze([
   ROUTES.clientes,
   ROUTES.usuarios,
   ROUTES.empleados,
+  ROUTES.whatsapp,
   ROUTES.correo,
   ROUTES.servidor,
 ]);

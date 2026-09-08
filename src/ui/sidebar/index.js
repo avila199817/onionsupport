@@ -62,6 +62,7 @@ const BRAND_LABEL =
   "Onion Support";
 
 const WHATSAPP_SIDEBAR_PATH =
+  ROUTES.whatsapp ||
   "/whatsapp";
 
 const WHATSAPP_SIDEBAR_ORDER =
@@ -1226,6 +1227,13 @@ function routeIcon(
     ROUTES.usuarios
   ) {
     return "usuarios";
+  }
+
+  if (
+    clean ===
+    ROUTES.whatsapp
+  ) {
+    return "whatsapp";
   }
 
   if (

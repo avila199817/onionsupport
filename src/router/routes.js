@@ -77,6 +77,10 @@ export const ROUTE_PATHS = Object.freeze({
     ROUTES.empleados ||
     "/empleados",
 
+  WHATSAPP:
+    ROUTES.whatsapp ||
+    "/whatsapp",
+
   CORREO:
     ROUTES.correo ||
     "/correo",
@@ -118,6 +122,7 @@ export const ROUTE_NAMES = Object.freeze({
   CLIENTES: "clientes",
   USUARIOS: "usuarios",
   EMPLEADOS: "empleados",
+  WHATSAPP: "whatsapp",
   CORREO: "correo",
   SERVIDOR: "servidor",
   CUENTA: "cuenta",
@@ -833,6 +838,17 @@ const VIEW_SPECS = Object.freeze({
     ]),
   }),
 
+  whatsapp: Object.freeze({
+    moduleKey: "whatsapp",
+    loadModule: () =>
+      import(
+        "../views/whatsapp/index.js"
+      ),
+    names: Object.freeze([
+      "WhatsAppView",
+    ]),
+  }),
+
   correo: Object.freeze({
     moduleKey: "correo",
     loadModule: () =>
@@ -1527,6 +1543,15 @@ const ROUTE_DEFINITIONS = Object.freeze([
     viewKey: "empleados",
     adminOnly: true,
     order: 58,
+  }),
+
+  createRoute({
+    path: ROUTE_PATHS.WHATSAPP,
+    name: ROUTE_NAMES.WHATSAPP,
+    title: "WhatsApp",
+    viewKey: "whatsapp",
+    adminOnly: true,
+    order: 54,
   }),
 
   createRoute({

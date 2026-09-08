@@ -1,0 +1,55 @@
+/* =========================================================
+   ONION SUPPORT — WHATSAPP ROUTED PLACEHOLDER
+   Superficie mínima. La futura bandeja sustituirá este bloque.
+========================================================= */
+
+.whatsapp-page {
+  min-block-size: 100%;
+  display: grid;
+  place-items: center;
+  padding: clamp(24px, 5vw, 64px);
+}
+
+.whatsapp-prepared {
+  inline-size: min(100%, 680px);
+  padding: clamp(24px, 4vw, 42px);
+  border: 1px solid var(--border, rgba(255, 255, 255, .10));
+  border-radius: 18px;
+  background: var(--surface-raised, var(--card-bg, rgba(255, 255, 255, .035)));
+  box-shadow: var(--shadow-sm, 0 16px 40px rgba(0, 0, 0, .12));
+}
+
+.whatsapp-prepared-badge {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 28px;
+  padding-inline: 10px;
+  border: 1px solid var(--border, rgba(255, 255, 255, .10));
+  border-radius: 999px;
+  color: var(--text-muted, #a7a7a7);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.whatsapp-prepared-title {
+  margin: 18px 0 8px;
+  color: var(--text-strong, #f7f7f7);
+  font-size: clamp(28px, 4vw, 40px);
+  line-height: 1.05;
+  letter-spacing: -.03em;
+}
+
+.whatsapp-prepared-copy {
+  max-inline-size: 58ch;
+  margin: 0;
+  color: var(--text-muted, #a7a7a7);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+@media (forced-colors: active) {
+  .whatsapp-prepared,
+  .whatsapp-prepared-badge {
+    border-color: CanvasText;
+  }
+}

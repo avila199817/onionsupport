@@ -676,12 +676,6 @@ function createFrameScheduler(task) {
       return true;
     },
 
-    flush() {
-      if (frame) cancelFrame(frame);
-      frame = 0;
-      task();
-    },
-
     cancel() {
       cancelFrame(frame);
       frame = 0;
@@ -909,7 +903,10 @@ function initScrollPipeline(refs, cleanups, host) {
     addEvent(cleanups, refs.customScrollbar, "lostpointercapture", stop);
   }
 
-  scheduler.flush();
+  // The Router is still preparing a hidden host here. Measure in the next
+  // frame, after the rest of the mount/commit writes have been batched, instead
+  // of forcing a whole-page layout in the middle of renderPublicHomeView().
+  scheduler.schedule();
 
   cleanups.push(() => {
     scheduler.cancel();

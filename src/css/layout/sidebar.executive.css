@@ -255,6 +255,14 @@
   font-weight: 700;
 }
 
+/*
+  El slot de WhatsApp ya pertenece al sistema visual, pero permanece
+  deliberadamente no navegable hasta que exista la vista canónica.
+*/
+.sidebar-link[data-sidebar-key="whatsapp"][aria-disabled="true"] {
+  opacity: .78;
+}
+
 /* =========================================================
    NAV HIERARCHY
    Cuenta vive en el perfil inferior, como en ChatGPT.
@@ -484,6 +492,10 @@
 
 .sidebar-link[data-sidebar-key="usuarios"] {
   --sb-tip: "Usuarios";
+}
+
+.sidebar-link[data-sidebar-key="whatsapp"] {
+  --sb-tip: "WhatsApp";
 }
 
 .sidebar-link[data-sidebar-key="correo"] {

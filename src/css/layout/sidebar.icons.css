@@ -24,6 +24,7 @@
   --sb-icon-clientes: var(--app-icon-clientes);
   --sb-icon-usuarios: var(--app-icon-usuarios);
   --sb-icon-empleados: var(--app-icon-empleados);
+  --sb-icon-whatsapp: var(--app-icon-whatsapp);
   --sb-icon-correo: var(--app-icon-correo);
   --sb-icon-servidor: var(--app-icon-servidor);
   --sb-icon-cuenta: var(--app-icon-cuenta);
@@ -68,6 +69,10 @@
 
   .sidebar-link[data-sidebar-key="empleados"] {
     --sb-current-icon: var(--sb-icon-empleados);
+  }
+
+  .sidebar-link[data-sidebar-key="whatsapp"] {
+    --sb-current-icon: var(--sb-icon-whatsapp);
   }
 
   .sidebar-link[data-sidebar-key="correo"] {

@@ -35,10 +35,10 @@
 
 .public-legal-footer p { margin: 0 0 10px; }
 .public-legal-footer p:last-child { margin-bottom: 0; }
-.public-legal-footer a { color: inherit; text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.public-legal-footer a[href] { color: inherit; text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
 .public-legal-footer a:hover { color: var(--legal-accent); }
 .public-legal-footer address { max-width: 48ch; font-style: normal; }
-.public-legal-footer .public-legal-footer__brand { display: inline-block; margin-bottom: 8px; color: var(--legal-heading); font-size: 21px; font-weight: 700; letter-spacing: -.025em; text-decoration: none; }
+.public-legal-footer a.public-legal-footer__brand { display: inline-block; margin-bottom: 8px; color: var(--legal-heading); font-size: 21px; font-weight: 700; letter-spacing: -.025em; text-decoration: none; }
 .public-legal-footer__label { color: var(--legal-heading); font-weight: 650; }
 .public-legal-footer__section { border-top: 1px solid var(--legal-border); scroll-margin-block-start: 100px; }
 .public-legal-footer__section summary { padding: 15px 2px; color: var(--legal-heading); font-weight: 600; cursor: pointer; }

@@ -471,10 +471,6 @@ body.public-home-no-scroll .main-content {
   opacity: .62;
 }
 
-.public-home.is-footer-visible .public-home-scrollbar {
-  opacity: .48;
-}
-
 .public-home.is-scrollbar-dragging .public-home-scrollbar {
   inline-size: 18px;
   border-color: rgb(168 242 255 / .82);
@@ -892,22 +888,6 @@ body.public-home-no-scroll .main-content {
   transform: scale(1) rotate(0deg);
 }
 
-.public-home.is-footer-visible .public-home-nav,
-.public-home-nav.is-footer-visible {
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  transform: translate3d(0, calc(-1 * var(--public-home-nav-height) - 18px), 0);
-}
-
-body.public-home-menu-open .public-home.is-footer-visible .public-home-nav,
-body.public-home-menu-open .public-home-nav.is-footer-visible {
-  opacity: 1;
-  visibility: visible;
-  pointer-events: auto;
-  transform: translate3d(0, 0, 0);
-}
-
 
 /* =========================================================
    8. CONTENT / SECTION SYSTEM
@@ -987,7 +967,7 @@ body.public-home-menu-open .public-home-nav.is-footer-visible {
   inline-size: 100%;
   max-inline-size: none;
 
-  min-block-size: 0;
+  min-block-size: calc(100svh - var(--public-home-nav-height));
 
   padding:
     clamp(24px, 3vw, 44px)

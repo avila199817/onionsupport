@@ -40,7 +40,6 @@ const CLASSES = Object.freeze({
   visible: "is-visible",
   menuOpen: "is-menu-open",
   scrolled: "is-scrolled",
-  footerVisible: "is-footer-visible",
   copied: "is-copied",
   counterReady: "is-counter-ready",
   magnetic: "is-magnetic",
@@ -1004,40 +1003,6 @@ function initReveal(refs, cleanups, host) {
   cleanups.push(() => observer.disconnect());
 }
 
-function initFooterVisibility(refs, cleanups, host) {
-  const footer = refs.root.querySelector(".public-legal-footer");
-  if (!footer || !("IntersectionObserver" in window)) return;
-
-  let visible = null;
-
-  const observer = new IntersectionObserver(
-    (entries) => {
-      const next = entries.some((entry) => entry.isIntersecting);
-      if (next === visible) return;
-
-      visible = next;
-      setClass(refs.root, CLASSES.footerVisible, next);
-      setClass(refs.nav, CLASSES.footerVisible, next);
-      setDataset(refs.root, "footerVisible", next ? "true" : "false");
-      dispatchHomeEvent(refs.root, "public-home:footer-visibility", { visible: next });
-    },
-    {
-      root: isWindowHost(host) ? null : host,
-      rootMargin: "0px",
-      threshold: [0, 0.01, 0.08],
-    }
-  );
-
-  observer.observe(footer);
-
-  cleanups.push(() => {
-    observer.disconnect();
-    setClass(refs.root, CLASSES.footerVisible, false);
-    setClass(refs.nav, CLASSES.footerVisible, false);
-    removeDataset(refs.root, "footerVisible");
-  });
-}
-
 function initPointerFx(refs, cleanups) {
   if (reducedMotion()) return;
 
@@ -1366,7 +1331,6 @@ export function renderPublicHomeView(container, context = {}) {
   initAnchorScroll(refs, cleanups, host, activeState, menu);
   initCtaTracking(refs, cleanups);
   initScrollPipeline(refs, cleanups, host);
-  initFooterVisibility(refs, cleanups, host);
   initActiveSection(refs, cleanups, host, activeState);
   initReveal(refs, cleanups, host);
   initPointerFx(refs, cleanups);

@@ -187,7 +187,7 @@ try {
     }
   }
 
-  for (const hash of ["#incidencia", "#public-privacy"]) {
+  for (const hash of ["#incidencia", "#public-privacy", "#incidencia"]) {
     await page.goto(origin + "/" + hash, { waitUntil: "domcontentloaded" });
     await page.waitForSelector(hash);
     await page.waitForSelector("[data-public-support-form]");
@@ -199,6 +199,17 @@ try {
     }, hash);
     assert.equal(new URL(page.url()).hash, hash, "deep links must survive mounting Home");
     if (hash === "#public-privacy") assert.equal(await page.locator(hash).evaluate((node) => node.open), true, "privacy deep link must open the disclosure");
+    // The navigation remains usable at the legal footer and after returning
+    // to the intake. Inspect paint and hit testing, not only DOM presence.
+    const navigationVisible = await page.locator("[data-public-home-nav]").evaluate(async (node) => {
+      await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+      const style = getComputedStyle(node);
+      const bounds = node.getBoundingClientRect();
+      return style.visibility === "visible" && Number(style.opacity) > .9 &&
+        style.pointerEvents !== "none" && bounds.top >= 0 &&
+        bounds.bottom > bounds.top && bounds.bottom <= window.innerHeight;
+    });
+    assert.equal(navigationVisible, true, `navigation must stay visible and interactive at ${hash}`);
   }
   assert.deepEqual(errors, [], "frontend must not throw during metadata navigation");
   await context.close();

@@ -28,6 +28,7 @@
      La SAS debe venir ya validada desde incidencias.api.js.
 ========================================================= */
 
+import { userNameFromIdentity } from "../../core/user-identity.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { persistedCommentId, requesterIdentity, technicianIdentity } from "../../features/incidencias-comment-identity/index.js";
 import {
@@ -1215,36 +1216,10 @@ function getRequester(
   );
 }
 
-function getClientName(
-  detail = {}
-) {
-  const raw =
-    getRaw(detail);
-
-  const requester =
-    getRequester(detail);
-
-  return cleanText(
-    first(
-      detail.displayName,
-      detail.name,
-      detail.nombre,
-      detail.clientName,
-      detail.clienteNombre,
-
-      requester.displayName,
-      requester.name,
-      requester.nombre,
-
-      raw.displayName,
-      raw.name,
-      raw.nombre,
-      raw.email,
-
-      getTicketId(detail)
-    ),
-    "Usuario"
-  );
+function getClientName(detail = {}) {
+  return userNameFromIdentity(detail) || userNameFromIdentity(getRequester(detail)) ||
+    userNameFromIdentity(getRaw(detail)) ||
+    cleanText(first(detail.requesterName, detail.clientName, detail.clienteNombre, detail.email), "Usuario");
 }
 
 function getClientEmail(
@@ -4413,9 +4388,37 @@ function renderTicketBody(
    TEMPLATE
 ========================================================= */
 
+function renderDetailLoadState(input = {}) {
+  const failed = Boolean(input.error);
+  const title = failed ? "No se pudo cargar la incidencia" : "Cargando incidencia…";
+  return `
+    <section id="${MODAL_ID}" class="incidencias-modal-root ui-detail-modal-root"
+      data-incidencias-modal-root="true" data-detail-load-state="${failed ? "error" : "loading"}"
+      data-open="true" data-submitting="false" data-ticket-id="${attr(input.loadingId || "")}">
+      <div class="incidencias-modal-overlay ui-detail-modal-overlay" data-incidencias-modal-overlay="true">
+        <div id="${PANEL_ID}" class="incidencias-modal-panel ui-detail-modal-panel"
+          role="dialog" aria-modal="true" aria-labelledby="${TITLE_ID}"
+          aria-describedby="${DESCRIPTION_ID}" tabindex="-1" data-incidencias-modal-panel="true">
+          <header class="incidencias-modal-header ui-detail-modal-header">
+            <h2 id="${TITLE_ID}" class="incidencias-modal-title ui-detail-modal-title">${title}</h2>
+            <button type="button" class="incidencias-modal-close-btn ui-detail-modal-close-btn" data-detail-action="detail-close" aria-label="Cerrar detalle">${icon("close")}</button>
+          </header>
+          <div class="incidencias-modal-body ui-detail-modal-body" aria-busy="${failed ? "false" : "true"}">
+            <p id="${DESCRIPTION_ID}" role="${failed ? "alert" : "status"}">${escapeHtml(failed ? input.error : "Preparando el detalle y sus actualizaciones.")}</p>
+            ${failed ? '<button type="button" class="incidencias-modal-confirm-btn" data-detail-action="detail-retry">Reintentar</button>' : ''}
+          </div>
+        </div>
+      </div>
+    </section>`;
+}
+
 export function renderIncidenciasDetailModal(
   input = {}
 ) {
+  if (input.open && !input.detail && (input.loading || input.error)) {
+    return renderDetailLoadState(input);
+  }
+
   const vm =
     buildVm(input);
 

@@ -48,7 +48,7 @@ class Host {
 
 try {
   globalThis.Node = Host;
-  AppCore.setUser(person);
+  AppCore.applySession({ user: person, token: "fixture-events-token", session: { sessionId: "fixture-events-session" } });
   Http.get = async (path) => {
     if (path === "/api/tickets") {
       ticketListReads += 1;
@@ -69,9 +69,9 @@ try {
     if (path === "/api/users/me/onboarding") return { ok: true, onboarding: { assignedVersion: 0 } };
     throw new Error(`Unexpected fixture read: ${path}`);
   };
-  Http.patch = async (path) => {
+  Http.patch = async (path, body) => {
     if (rejectWrite) throw new Error("HTTP fixture rejected write");
-    if (path.startsWith("/api/users/")) return { ok: true, user: person };
+    if (path.startsWith("/api/users/")) return { ok: true, user: { ...person, ...body } };
     if (path.startsWith("/api/tickets/")) return { ok: true, ticket };
     throw new Error(`Unexpected fixture write: ${path}`);
   };
@@ -117,7 +117,9 @@ try {
 
   await loadHomeDashboard({ force: true });
   const host = new Host();
-  controller = HomeView(host);
+  controller = HomeView(host, { user: { ...person, name: "Contexto antiguo" }, role: "admin" });
+  assert.equal(controller.getSnapshot().role, "user", "retained route context cannot override the Core role");
+  assert.ok(!host.innerHTML.includes("Contexto antiguo"), "Core identity wins over route seeds");
   await until(() => controller.getSnapshot().onboarding.loaded, "Home lifecycle did not settle");
   const initialReads = ticketListReads;
   await Promise.all([
@@ -138,6 +140,11 @@ try {
   listGate.resolve();
   await until(() => getHomeCacheState().fresh && ticketListReads === beforeConcurrent + 2, "a write during reload was lost");
   assert.equal(controller.getSnapshot().error, "", "discarding a stale epoch is not a user-facing load failure");
+
+  await updateUsuarioRequest(person.userId, { name: "Nombre propio después de editar" });
+  await until(() => getHomeCacheState().fresh && host.innerHTML.includes("Nombre propio después de editar"),
+    "Home greeting retained an old context user after self edit");
+  assert.ok(!host.innerHTML.includes("Contexto antiguo"));
 
   // Destruction cancels queued work and unsubscribes; no background Home view.
   const beforeDestroy = ticketListReads;

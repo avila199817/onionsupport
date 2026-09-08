@@ -3427,6 +3427,8 @@ function destroyActiveView() {
   activeView = null;
   activeHost = null;
 
+  AppCore.getModule?.("entities")?.releaseOrigin?.(previousHost);
+
   cleanupView(
     previousView
   );
@@ -3620,6 +3622,10 @@ function commitRouteHost(
       root.appendChild(
         nextHost
       );
+    }
+
+    if (previousHost && previousHost !== nextHost) {
+      AppCore.getModule?.("entities")?.releaseOrigin?.(previousHost);
     }
 
     root.replaceChildren(

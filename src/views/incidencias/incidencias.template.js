@@ -9,6 +9,7 @@
 ========================================================= */
 
 
+import { userNameFromIdentity } from "../../core/user-identity.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { technicianIdentity } from "../../features/incidencias-comment-identity/index.js";
 export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v34-visible-date-minute-precision";
@@ -291,8 +292,10 @@ function getCategory(it = {}) {
 }
 
 function getClientName(it = {}) {
-  const r = unwrap(it), rs = obj(r.requesterSnapshot), c = obj(r.cliente), rec = obj(r.receptor), u = obj(r.user);
-  return txt(first(r.displayName, r.name, r.nombre, r.clientName, r.clienteNombre, r.requesterName, rs.displayName, rs.name, rs.nombre, c.displayName, c.name, c.nombre, rec.displayName, rec.name, rec.nombre, u.displayName, u.name, u.nombre, r.email, getId(r), "Usuario"), "Usuario");
+  const r = unwrap(it);
+  return userNameFromIdentity(r) || userNameFromIdentity(r.requesterSnapshot) ||
+    userNameFromIdentity(r.cliente) || userNameFromIdentity(r.receptor) ||
+    txt(first(r.requesterName, r.clientName, r.clienteNombre, r.email, "Usuario"), "Usuario");
 }
 
 function getClientEmail(it = {}) {

@@ -15,6 +15,8 @@
 
 "use strict";
 
+import { userNameFromIdentity } from "../../core/user-identity.js";
+
 export const AVATAR_IDENTITY_VERSION =
   "avatar-identity.v5-user-id-first";
 
@@ -124,30 +126,15 @@ function objectCandidates(input = {}) {
 function explicitAvatarNameFromIdentity(input = {}) {
   if (!isObject(input)) return cleanAvatarText(input, "");
 
-  const { source, profile, user, raw } = objectCandidates(input);
+  const { source } = objectCandidates(input);
 
   return firstText(
-    source.displayName,
-    source.fullName,
-    source.name,
-    source.nombre,
+    userNameFromIdentity(input),
     source.contactName,
     source.nombreContacto,
     source.requesterName,
     source.clienteNombre,
     source.userNameDisplay,
-    profile.displayName,
-    profile.fullName,
-    profile.name,
-    profile.nombre,
-    user.displayName,
-    user.fullName,
-    user.name,
-    user.nombre,
-    raw.displayName,
-    raw.fullName,
-    raw.name,
-    raw.nombre,
     ""
   );
 }

@@ -9,7 +9,7 @@
    su cleanup junto al controller existente.
 
    El host del modal se entrega mediante una lease exclusiva por controller:
-   un bridge transversal y la ruta propietaria nunca comparten nodo, listeners
+   un detalle transversal y la ruta propietaria nunca comparten nodo, listeners
    ni ciclo de vida. Una lease reemplazada queda inmediatamente oculta, inert
    y fuera del hit-testing para que jamás sobrevivan dos overlays interactivos.
 
@@ -80,19 +80,19 @@ function cleanText(value = "", fallback = "") {
   return output || fallback;
 }
 
-function isModalBridgeContext(context = {}) {
+function isDetailOnlyContext(context = {}) {
   return Boolean(
     context &&
     typeof context === "object" &&
-    context.modalBridge === true
+    context.detailOnly === true
   );
 }
 
 function nextModalOwnerId(context = {}) {
   modalOwnerSequence += 1;
 
-  const kind = isModalBridgeContext(context)
-    ? "bridge"
+  const kind = isDetailOnlyContext(context)
+    ? "detail"
     : "route";
 
   return [
@@ -124,9 +124,7 @@ function isActiveModalHost(modalHost = null) {
   puede apropiarse del host nuevo. Pero conectada no significa interactiva:
   queda fuera de accesibilidad, pintura y hit-testing de forma inmediata.
 
-  No vaciamos replaceChildren() aquí. El bridge observa el DOM para detectar el
-  cierre; eliminar transitoriamente todos los roots durante un cambio de owner
-  podría hacerle destruir por error el controller que acaba de montarse.
+  El nodo se elimina únicamente durante el cleanup de su controller.
 */
 function quarantineModalHost(modalHost = null) {
   if (!modalHost?.setAttribute) {
@@ -268,11 +266,8 @@ function quarantineExistingModalHosts(
 }
 
 /*
-  index.impl.js conserva deliberadamente un único selector de host. Para que
-  dos controllers concurrentes no puedan apropiarse del mismo nodo, la frontera
-  reserva un host nuevo y retira el selector canónico de cualquier lease vieja
-  antes de montar el controller. Los controllers antiguos conservan su referencia
-  directa y pueden destruirla con seguridad, pero nunca vuelven a ser elegidos.
+  La frontera asigna una referencia explícita y exclusiva. La implementación
+  jamás busca un host global ni toma el de otro controller.
 */
 function createDedicatedModalHost({
   host = null,
@@ -281,9 +276,9 @@ function createDedicatedModalHost({
 } = {}) {
   if (
     !isBrowserDocument(documentLike) ||
-    !host ||
-    typeof host !== "object" ||
-    typeof host.nodeType !== "number"
+    (!isDetailOnlyContext(context) && (
+      !host || typeof host !== "object" || typeof host.nodeType !== "number"
+    ))
   ) {
     return null;
   }
@@ -295,8 +290,8 @@ function createDedicatedModalHost({
 
   const modalHost = documentLike.createElement("div");
   const ownerId = nextModalOwnerId(context);
-  const mode = isModalBridgeContext(context)
-    ? "bridge"
+  const mode = isDetailOnlyContext(context)
+    ? "detail"
     : "route";
 
   activateModalHost(modalHost);
@@ -443,7 +438,9 @@ function resolveBoundaryRole() {
   );
 }
 
-export async function IncidenciasView(host = null, context = {}) {
+async function mountIncidenciasOwner(host = null, context = {}) {
+  if (context.signal?.aborted) return null;
+  const detailOnly = isDetailOnlyContext(context);
   const documentLike = host?.ownerDocument ||
     (typeof document !== "undefined" ? document : null);
 
@@ -460,7 +457,10 @@ export async function IncidenciasView(host = null, context = {}) {
   let controller = null;
 
   try {
-    controller = await Impl.IncidenciasView(host, context);
+    const ownerContext = { ...context, modalHost: lease?.modalHost || null };
+    controller = detailOnly
+      ? Impl.createIncidenciasController(null, ownerContext).mount()
+      : await Impl.IncidenciasView(host, ownerContext);
   } catch (error) {
     quarantineModalHost(
       lease?.modalHost
@@ -469,33 +469,35 @@ export async function IncidenciasView(host = null, context = {}) {
     throw error;
   }
 
-  if (!controller) {
+  if (!controller || context.signal?.aborted || controller.getSnapshot?.().destroyed) {
+    controller?.destroy?.();
     quarantineModalHost(
       lease?.modalHost
     );
     lease?.modalHost?.remove?.();
-    return controller;
+    return null;
   }
 
   if (controller.__incidenciasViewEnhancementsInstalled === true) {
     return controller;
   }
 
-  const uninstallCombobox = installIncidenciasCreateUserCombobox({
+  const uninstallCombobox = detailOnly ? null : installIncidenciasCreateUserCombobox({
     document: documentLike,
   });
 
-  const uninstallStatsScope = installIncidenciasStatsScope({
+  const uninstallStatsScope = detailOnly ? null : installIncidenciasStatsScope({
     host,
     document: documentLike,
   });
 
   const uninstallDetailAttachmentPolicy = installIncidenciasDetailAttachmentPolicy({
     document: documentLike,
+    root: lease?.modalHost,
     getRole: resolveBoundaryRole,
   });
 
-  const uninstallHotList = installIncidenciasHotList({
+  const uninstallHotList = detailOnly ? null : installIncidenciasHotList({
     host,
     document: documentLike,
   });
@@ -507,7 +509,7 @@ export async function IncidenciasView(host = null, context = {}) {
     });
 
   const isRouteOwner =
-    !isModalBridgeContext(context);
+    !isDetailOnlyContext(context);
 
   if (isRouteOwner) {
     routeOwnerController = controller;
@@ -519,12 +521,14 @@ export async function IncidenciasView(host = null, context = {}) {
 
   for (const key of [
     "__incidenciasViewEnhancementsInstalled",
-    "__incidenciasCreateUserComboboxInstalled",
-    "__incidenciasStatsScopeInstalled",
     "__incidenciasDetailAttachmentPolicyInstalled",
-    "__incidenciasHotListInstalled",
     "__incidenciasModalHostLeaseInstalled",
     "__incidenciasModalCloseFailsafeInstalled",
+    ...(!detailOnly ? [
+      "__incidenciasCreateUserComboboxInstalled",
+      "__incidenciasStatsScopeInstalled",
+      "__incidenciasHotListInstalled",
+    ] : []),
   ]) {
     Object.defineProperty(controller, key, {
       value: true,
@@ -586,12 +590,59 @@ export async function IncidenciasView(host = null, context = {}) {
   return controller;
 }
 
+export async function IncidenciasView(host = null, context = {}) {
+  return mountIncidenciasOwner(host, { ...context, detailOnly: false });
+}
+
+let detailPreparation = null;
+
+export function prepareIncidenciaDetail() {
+  if (!detailPreparation) {
+    detailPreparation = import("../../features/incidencias-detail-state/index.js")
+      .catch((error) => {
+        detailPreparation = null;
+        throw error;
+      });
+  }
+  return detailPreparation.then((module) => {
+    // This authority can have been torn down on a previous session.
+    module.mountIncidenciasDetailState();
+    return true;
+  });
+}
+
+export async function createIncidenciaDetailController(context = {}) {
+  if (context.signal?.aborted) return null;
+  await prepareIncidenciaDetail();
+  if (context.signal?.aborted) return null;
+  return mountIncidenciasOwner(null, {
+    ...context,
+    detailOnly: true,
+    onDetailShell(detail) {
+      // Decorations use the same route enhancements and are progressive.
+      // A delayed import never restores a closed or replaced modal.
+      void Promise.all([
+        import("../../features/incidencias-comment-avatars/index.js"),
+        import("../../features/incidencias-followup-avatars/index.js"),
+      ]).then(([comments, followup]) => {
+        if (context.signal?.aborted || detail.controller.getSnapshot().destroyed ||
+            !detail.modalHost?.isConnected) return;
+        comments.mountIncidenciasCommentAvatars();
+        followup.mountIncidenciasFollowupAvatars();
+        comments.syncIncidenciasCommentAvatars(detail.modalHost);
+        followup.syncIncidenciasFollowupAvatars(detail.modalHost);
+      }).catch(() => { /* Text identities remain visible without decoration. */ });
+      context.onDetailShell?.(detail);
+    },
+  });
+}
+
 export const IncidenciasIndex = IncidenciasView;
 
 /*
   Aperturas externas sólo se delegan al controller propietario de la ruta.
-  Un controller modalBridge nunca puede sustituir esta autoridad por haber sido
-  la última instancia creada.
+  Un controller de detalle nunca sustituye esta autoridad por ser la última
+  instancia creada.
 */
 export async function openIncidenciaDetailById(
   ticketId = "",
@@ -705,8 +756,8 @@ export function getIncidenciasViewBoundarySnapshot() {
       replacementRestoreRunsBeforePaint: true,
       hotListOwnsNoBusinessState: true,
       modalHostLeasePerController: true,
-      modalHostNeverSharedWithBridge: true,
-      routeOwnerNeverUsesLastBridgeInstance: true,
+      modalHostNeverSharedWithDetailOwner: true,
+      routeOwnerNeverUsesLastDetailInstance: true,
       closeFailsafeDelegatesToController: true,
       supersededModalHostsAreInert: true,
       singleInteractiveModalLayer: true,

@@ -23,6 +23,8 @@
    - Sin eventos.
 ========================================================= */
 
+import { userNameFromIdentity } from "../../core/user-identity.js";
+
 export const TOPBAR_TEMPLATE_VERSION =
   "topbar.template.backend-search.v5-hardened";
 
@@ -832,6 +834,7 @@ function normalizeResult(
 
   const label =
     text(
+      (normalizeType(source.type || source.kind || source.entity) === "user" ? userNameFromIdentity(source) : "") ||
       source.label ||
       source.title ||
       source.name ||

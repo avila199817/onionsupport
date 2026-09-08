@@ -22,6 +22,8 @@
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import { userNameFromIdentity } from "../../core/user-identity.js";
+import { onDomainChanged } from "../../core/domain-events.js";
 import { avatarInitials as initialsFrom } from "../../features/avatar-system/identity.js";
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 import { Auth as DefaultAuth } from "../../features/auth/index.js";
@@ -63,6 +65,7 @@ const LEGACY_RESET_TOKEN_PATH =
   /(\/(?:reset-password|password-reset)\/confirm\/)([^/?#\s]+)/gi;
 
 let initialized = false;
+let unsubscribeDomainChanges = null;
 let mounted = false;
 let sidebarOpen = true;
 let logoutInFlight = false;
@@ -777,22 +780,8 @@ function getUserViewModel(
       authRoleFallback()
     );
 
-  const displayName =
-    cleanText(
-      publicUser
-        ?.displayName ||
-      publicUser
-        ?.fullName ||
-      publicUser
-        ?.name ||
-      raw.displayName ||
-      raw.fullName ||
-      raw.name ||
-      raw.nombre ||
-      raw.username ||
-      "Usuario",
-      "Usuario"
-    );
+  const displayName = userNameFromIdentity(publicUser) ||
+    userNameFromIdentity(raw, raw.username || "Usuario");
 
   const slug =
     normalizeUserSlug(
@@ -2824,6 +2813,9 @@ function init() {
       true;
 
     registerModule();
+    unsubscribeDomainChanges = onDomainChanged((domain) => {
+      if (domain === "usuarios") sync();
+    });
   }
 
   sync();
@@ -2832,6 +2824,8 @@ function init() {
 }
 
 function destroy() {
+  unsubscribeDomainChanges?.();
+  unsubscribeDomainChanges = null;
   unbindTemplate();
 
   try {

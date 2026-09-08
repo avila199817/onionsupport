@@ -23,6 +23,8 @@
 ========================================================= */
 
 import Http from "../../core/http.js";
+import { userNameFromIdentity } from "../../core/user-identity.js";
+import { notifyDomainChanged } from "../../core/domain-events.js";
 
 export const INCIDENCIAS_API_VERSION = "incidencias.api.extreme.v24.cursor-scale-safe";
 export const INCIDENCIAS_ENDPOINT = "/api/tickets";
@@ -51,6 +53,7 @@ const ATTACHMENT_BLOB_CONTAINER = "tickets";
 const ATTACHMENT_BLOB_PATH_PREFIX = `/${ATTACHMENT_BLOB_CONTAINER}/`;
 
 let loading = false;
+let cacheEpoch = 0;
 let lastLoadedAt = null;
 let lastError = null;
 let lastCacheKey = "";
@@ -671,6 +674,7 @@ export function hydrateIncidenciasFromCache() {
 }
 
 export function clearIncidenciasCache() {
+  cacheEpoch += 1;
   lastList = { items: [], total: 0, response: {} };
   lastLoadedAt = null;
   lastError = null;
@@ -1135,28 +1139,10 @@ function normalizeCreateSearchUser(user = {}) {
     ""
   );
 
-  const name = cleanText(
-    first(
-      raw.displayName,
-      raw.fullName,
-      raw.name,
-      raw.nombre,
-      raw.publicName,
-      raw.clienteNombre,
-      raw.clientName,
-      [raw.firstName, raw.lastName].filter(Boolean).join(" "),
-      [raw.nombre, raw.apellidos].filter(Boolean).join(" "),
-      raw.profile?.displayName,
-      raw.profile?.name,
-      raw.lookup?.displayName,
-      raw.raw?.displayName,
-      raw.raw?.name,
-      raw.raw?.nombre,
-      raw.username,
-      userId
-    ),
-    "Usuario"
-  );
+  const name = userNameFromIdentity(raw, first(
+    raw.publicName, raw.clienteNombre, raw.clientName,
+    userNameFromIdentity(raw.lookup), raw.username, userId, "Usuario"
+  ));
 
   const email = firstEmail(raw.email, raw.emailLower, raw.userEmail, raw.clienteEmail, raw.clientEmail, raw.profile?.email, raw.lookup?.email, raw.raw?.email, raw.raw?.emailLower);
   const username = cleanText(first(raw.username, raw.usernameLower, raw.profile?.username, raw.raw?.username), "");
@@ -1336,7 +1322,7 @@ function normalizeCategory(value = "") {
 function normalizePerson(value = {}) {
   const raw = safeObject(value);
   const userId = cleanText(first(raw.userId, raw.id, raw.uid, raw.sub), "");
-  const name = cleanText(first(raw.name, raw.nombre, raw.displayName, raw.fullName), "");
+  const name = userNameFromIdentity(raw);
   const email = firstEmail(raw.email, raw.emailLower, raw.mail);
   const avatar = firstUrl(raw.avatarUrl, raw.avatar, raw.picture, raw.photoUrl, raw.photoURL, raw.imageUrl, raw);
   const role = normalizeKey(first(raw.role, raw.rol, ""));
@@ -1509,7 +1495,12 @@ function normalizeRequester(item = {}) {
 
   const userId = cleanText(first(raw.userId, raw.usuarioId, raw.ownerUserId, snap.userId, snap.id, snap.uid), "");
   const clienteId = cleanText(first(raw.clienteId, raw.clientId, raw.customerId, snap.clienteId, snap.clientId), "");
-  const name = safePublicText(first(raw.displayName, raw.name, raw.nombre, raw.clientName, raw.clienteNombre, snap.displayName, snap.name, snap.nombre, raw.email, userId), "Usuario");
+  const name = safePublicText(
+    userNameFromIdentity({ ...raw, profile: snap }, first(
+      raw.requesterName, raw.clientName, raw.clienteNombre, raw.email, userId
+    )),
+    "Usuario"
+  );
   const email = firstEmail(raw.email, raw.emailLower, raw.userEmail, raw.clienteEmail, snap.email, snap.emailLower);
   const username = cleanText(first(raw.username, raw.usernameLower, snap.username, snap.usernameLower), "");
   const phone = cleanText(first(raw.phone, raw.telefono, snap.phone, snap.telefono), "");
@@ -2261,6 +2252,7 @@ export async function listIncidencias(options = {}) {
   loading = true;
   lastError = null;
 
+  const epoch = cacheEpoch;
   const task = (async () => {
     try {
       const response = await fetchIncidenciasRequest(options);
@@ -2272,7 +2264,7 @@ export async function listIncidencias(options = {}) {
       const cacheTotal = normalized.total === null
         ? normalized.items.length
         : normalized.total;
-      setListCache({
+      if (epoch === cacheEpoch) setListCache({
         items: normalized.items,
         total: cacheTotal,
         key,
@@ -2284,20 +2276,21 @@ export async function listIncidencias(options = {}) {
         ok: true,
         cached: false,
         stale: false,
-        items: lastList.items,
+        items: normalized.items,
         loadedAt: lastLoadedAt,
         cache: {
-          hydrated: true,
+          hydrated: epoch === cacheEpoch,
           key: lastCacheKey,
           ageMs: 0,
           ttlMs: number(
             options.ttlMs ?? options.cacheTtlMs ?? INCIDENCIAS_CACHE_TTL_MS,
             INCIDENCIAS_CACHE_TTL_MS
           ),
-          fresh: true,
+          fresh: epoch === cacheEpoch,
         },
       };
     } catch (error) {
+      if (epoch !== cacheEpoch) throw error;
       lastError = normalizeError(error);
       if (
         returnStaleOnError &&
@@ -2345,6 +2338,7 @@ export async function getIncidenciaByIdRequest(id = "", options = {}) {
   if (!force && useCache && cached && now() - cached.at <= ttl) return cached.item;
   if (!force && !options.signal && detailInFlight.has(key)) return detailInFlight.get(key);
 
+  const epoch = cacheEpoch;
   const task = (async () => {
     const response = await getJson(getIncidenciaEndpoint(key), {
       timeout: options.timeout || INCIDENCIAS_DETAIL_TIMEOUT,
@@ -2357,7 +2351,8 @@ export async function getIncidenciaByIdRequest(id = "", options = {}) {
     }
 
     const detail = detailFromPayload(response);
-    return detail ? upsertCachedIncidencia(detail) : null;
+    if (!detail) return null;
+    return epoch === cacheEpoch ? upsertCachedIncidencia(detail) : normalizeIncidencia(detail);
   })();
 
   if (options.signal) return task;
@@ -2393,6 +2388,8 @@ export async function createIncidenciaRequest(payload = {}, { timeout = INCIDENC
 
   if (responseLooksFailed(response)) throw new Error(responseErrorMessage(response, "No se pudo crear la incidencia."));
 
+  notifyDomainChanged("incidencias");
+
   const detail = detailFromPayload(response);
   return detail ? normalizeIncidencia(detail) : null;
 }
@@ -2411,6 +2408,8 @@ export async function updateIncidenciaRequest(id = "", payload = {}, { timeout =
     : await patchJson(endpoint, safeObject(payload), { timeout, source: "views.incidencias.update", signal });
 
   if (responseLooksFailed(response)) throw new Error(responseErrorMessage(response, "No se pudo actualizar la incidencia."));
+
+  notifyDomainChanged("incidencias");
 
   const detail = detailFromPayload(response);
   return detail ? normalizeIncidencia(detail) : null;
@@ -2463,6 +2462,8 @@ export async function commentIncidenciaRequest(id = "", message = "", { timeout 
 
   if (responseLooksFailed(response)) throw new Error(responseErrorMessage(response, "No se pudo comentar la incidencia."));
 
+  notifyDomainChanged("incidencias");
+
   const detail = detailFromPayload(response);
   return detail ? normalizeIncidencia(detail) : null;
 }
@@ -2480,6 +2481,8 @@ export async function reopenIncidenciaRequest(id = "", { timeout = INCIDENCIAS_T
   );
 
   if (responseLooksFailed(response)) throw new Error(responseErrorMessage(response, "No se pudo reabrir la incidencia."));
+
+  notifyDomainChanged("incidencias");
 
   const detail = detailFromPayload(response);
   return detail ? normalizeIncidencia(detail) : null;
@@ -2507,6 +2510,8 @@ export async function uploadIncidenciaAttachmentsRequest(id = "", files = [], { 
   });
 
   if (responseLooksFailed(response)) throw new Error(responseErrorMessage(response, "No se pudieron subir los adjuntos."));
+
+  notifyDomainChanged("incidencias");
 
   const detail = detailFromPayload(response);
   return detail ? normalizeIncidencia(detail) : null;

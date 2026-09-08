@@ -19,6 +19,7 @@
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import { userNameFromIdentity } from "../../core/user-identity.js";
 import Http from "../../core/http.js";
 
 import {
@@ -3126,6 +3127,7 @@ function normalizeBackendResult(
   const label =
     cleanText(
       first(
+        type === RESULT_TYPES.USER ? userNameFromIdentity(source) || userNameFromIdentity(raw) : "",
         source.label,
         source.title,
         source.name,

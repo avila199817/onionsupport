@@ -22,6 +22,7 @@ import {
   routePathFromUrlLike as configRoutePathFromUrlLike,
 } from "./config.js";
 import Http from "./http.js";
+import { userNameFromIdentity } from "./user-identity.js";
 
 export const CORE_VERSION = "core.minimal.v9-specialized-snapshot";
 const RUNTIME_STATE_VERSION = "core.runtime-state.v2-dirty-guard";
@@ -221,10 +222,11 @@ function publicUser(user = null) {
   const role = normalizeRole(first(user.role, user.rol, user.roles, "")) || "user";
   const slug = extractUserSlug(user);
   const status = userStatus(user) || (userLooksDisabledByFlag(user) ? "disabled" : "active");
+  const name = userNameFromIdentity(user, first(user.username, "Usuario"));
   return {
     id: first(user.id, user.userId, null), userId: first(user.userId, user.id, null),
     username: first(user.username, user.userName, user.user_name, null), slug,
-    displayName: first(user.displayName, user.fullName, user.name, user.nombre, user.profile?.displayName, user.profile?.name, user.username, "Usuario"),
+    name, displayName: name,
     email: normalizeUserEmail(first(user.emailLower, user.email, user.emailAddress, user.profile?.emailLower, user.profile?.email, user.lookup?.emailLower, user.lookup?.email, "")),
     role, rol: role, roles: [role],
     avatarUrl: cleanText(first(user.avatarUrl, user.avatar, user.picture, user.photoUrl, user.profile?.avatarUrl, user.profile?.avatar, ""), ""), status,

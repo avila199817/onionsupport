@@ -138,7 +138,7 @@ export function entityTriggerAttributes(
     data-entity-id="${attr(entityId)}"
     data-home-entity-source="${attr(source)}"
     data-entity-stay-view="home"
-    ${ownerInPlace ? 'data-entity-overlay-ignore="true" data-entity-open-mode="in-place" data-entity-preload="detail"' : 'data-entity-open-mode="overlay"'}
+    ${ownerInPlace ? 'data-entity-open-mode="in-place" data-entity-preload="detail"' : 'data-entity-open-mode="overlay"'}
     aria-haspopup="dialog"
     aria-label="${attr(entityOpenLabel(entityType, entityId))}"
   `;

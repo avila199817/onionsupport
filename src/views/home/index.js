@@ -14,6 +14,7 @@
 
 import { AppCore } from "../../core/index.js";
 import { ROUTES } from "../../core/config.js";
+import { onDomainChanged } from "../../core/domain-events.js";
 
 import {
   HOME_CACHE_TTL_MS,
@@ -189,17 +190,9 @@ function cloneRuntimeUser(state = {}) {
 }
 
 function getCurrentUser(context = {}, state = getCoreState()) {
-  const ctx = safeObject(context);
-  const contextualUser = first(
-    ctx.user,
-    ctx.currentUser,
-    ctx.session?.user,
-    null
-  );
-
-  return contextualUser !== null
-    ? contextualUser
-    : cloneRuntimeUser(state);
+  // Router context may outlive a profile edit. Core owns identity, including
+  // an empty/guest session; retained context must never resurrect a user.
+  return cloneRuntimeUser(state);
 }
 
 function getCurrentRole(
@@ -207,26 +200,11 @@ function getCurrentRole(
   state = getCoreState(),
   user = getCurrentUser(context, state)
 ) {
-  const ctx = safeObject(context);
   const safeUser = safeObject(user, {});
-
-  return (
-    AppCore.normalizeRole(
-      first(
-        ctx.role,
-        ctx.rol,
-        ctx.roles,
-        ctx.userRole,
-        safeUser.role,
-        safeUser.rol,
-        safeUser.roles,
-        state.role,
-        state.rol,
-        state.roles,
-        "user"
-      )
-    ) || "user"
-  );
+  return AppCore.normalizeRole(first(
+    safeUser.role, safeUser.rol, safeUser.roles,
+    state.role, state.rol, state.roles, "user"
+  )) || "user";
 }
 
 function safeRoute(value = "", fallback = "/") {
@@ -512,6 +490,10 @@ function createHomeController(host = null, context = {}) {
   let lastRenderAt = 0;
   let loadSeq = 0;
   let onboardingSeq = 0;
+  let unsubscribeDomainChanges = null;
+  let domainRefreshTimer = null;
+  let domainRefreshRunning = false;
+  let domainRefreshPending = false;
 
   const renderState = {
     lastHTML: "",
@@ -637,6 +619,7 @@ function createHomeController(host = null, context = {}) {
       return dashboard;
     } catch (loadError) {
       if (destroyed || seq !== loadSeq) return null;
+      if (loadError?.code === "HOME_CONTEXT_CHANGED") return null;
 
       loading = false;
       refreshing = false;
@@ -686,6 +669,28 @@ function createHomeController(host = null, context = {}) {
     });
   }
 
+  function scheduleDomainRefresh() {
+    if (destroyed || !mounted) return;
+    domainRefreshPending = true;
+    if (domainRefreshRunning || domainRefreshTimer !== null) return;
+
+    // Several confirmed writes in the same turn share one domain reload.
+    // Owners mount their dialogs outside this host, so updating the summary
+    // never closes a modal or replaces its form/draft/focus trap.
+    domainRefreshTimer = setTimeout(async () => {
+      domainRefreshTimer = null;
+      if (destroyed || !mounted) return;
+      domainRefreshPending = false;
+      domainRefreshRunning = true;
+      try {
+        await load({ force: true, silent: true, source: `${SOURCE}.domain-change` });
+      } finally {
+        domainRefreshRunning = false;
+        if (domainRefreshPending) scheduleDomainRefresh();
+      }
+    }, 0);
+  }
+
   async function loadOnboardingState() {
     const seq = ++onboardingSeq;
 
@@ -715,29 +720,16 @@ function createHomeController(host = null, context = {}) {
   async function navigateTo(path = "") {
     const route = safeRoute(path, "");
     if (!route) return false;
-
     const router = getRouter(context);
 
-    for (const method of ["navigate", "go", "push"]) {
-      if (!isFunction(router?.[method])) continue;
-
-      await router[method](route, { source: SOURCE });
-      return true;
-    }
-
-    if (isFunction(AppCore?.navigate)) {
-      await AppCore.navigate(route, { source: SOURCE });
-      return true;
-    }
-
-    if (!isBrowser()) return false;
-
     try {
-      const state = { source: SOURCE, route };
-      window.history.pushState(state, "", route);
-      window.dispatchEvent(new PopStateEvent("popstate", { state }));
-      return true;
-    } catch {
+      if (!isFunction(router?.navigate)) throw new Error("La navegación no está disponible.");
+      return (await router.navigate(route, { source: SOURCE })) !== false;
+    } catch (navigationError) {
+      if (!destroyed) {
+        error = safeError(navigationError, "No se pudo abrir la vista.");
+        render({ error });
+      }
       return false;
     }
   }
@@ -850,6 +842,7 @@ function createHomeController(host = null, context = {}) {
   function bind() {
     if (bound || !host) return false;
     host.addEventListener("click", onClick);
+    unsubscribeDomainChanges = onDomainChanged(scheduleDomainRefresh);
     bound = true;
     return true;
   }
@@ -857,6 +850,11 @@ function createHomeController(host = null, context = {}) {
   function unbind() {
     if (!bound || !host) return false;
     host.removeEventListener("click", onClick);
+    unsubscribeDomainChanges?.();
+    unsubscribeDomainChanges = null;
+    if (domainRefreshTimer !== null) clearTimeout(domainRefreshTimer);
+    domainRefreshTimer = null;
+    domainRefreshPending = false;
     bound = false;
     return true;
   }

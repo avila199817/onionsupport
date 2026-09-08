@@ -64,7 +64,7 @@ for (const line of actionLines) {
 }
 
 for (const [token, expectedCount] of Object.entries({
-  "actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803": 2,
+  "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1": 2,
   "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020": 2,
   "treosh/lighthouse-ci-action@3e7e23fb74242897f95c0ba9cabad3d0227b9b18": 1,
 })) {

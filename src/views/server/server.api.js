@@ -280,6 +280,7 @@ export async function fetchServerCostsRequest(options = {}) {
       query: safeObject(options.query),
       headers: safeObject(options.headers),
       source: safeText(options.source, "views.server.api.costs"),
+      signal: options.signal || null,
     });
   } else if (typeof Http?.request === "function") {
     response = await Http.request(SERVER_ENDPOINTS.costs, {
@@ -288,6 +289,7 @@ export async function fetchServerCostsRequest(options = {}) {
       query: safeObject(options.query),
       headers: safeObject(options.headers),
       source: safeText(options.source, "views.server.api.costs"),
+      signal: options.signal || null,
     });
   } else {
     throw new Error("SERVER_HTTP_UNAVAILABLE");

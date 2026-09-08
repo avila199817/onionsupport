@@ -5,6 +5,8 @@
   --legal-heading: #f2f7ff;
   --legal-border: rgb(177 204 235 / .18);
   --legal-accent: #78c8ff;
+  position: relative;
+  z-index: 1;
   width: 100%;
   min-width: 0;
   color: var(--legal-text);

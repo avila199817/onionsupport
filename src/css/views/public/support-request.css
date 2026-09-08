@@ -487,14 +487,6 @@
   min-inline-size: 0;
 }
 
-.public-home .public-support-field[data-public-support-field="phone"] {
-  grid-column: span 4;
-}
-
-.public-home .public-support-field[data-public-support-field="address"] {
-  grid-column: span 8;
-}
-
 .public-home .public-support-field[data-public-support-field="addressLine2"] {
   grid-column: span 4;
 }

@@ -234,6 +234,7 @@ jobs:
                 const diagnostics = Object.fromEntries([
                   'largest-contentful-paint-element', 'lcp-breakdown-insight',
                   'lcp-discovery-insight', 'layout-shift-elements',
+                  'layout-shifts', 'cls-culprits-insight',
                   'render-blocking-resources', 'mainthread-work-breakdown',
                 ].filter((id) => report.audits[id]?.details).map((id) => [id, report.audits[id].details]));
                 console.log(`DIAGNOSTICS ${variant} round=${round} ${JSON.stringify(diagnostics)}`);

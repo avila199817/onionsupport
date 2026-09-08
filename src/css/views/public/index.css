@@ -1804,7 +1804,7 @@ body.public-home-menu-open .public-home-nav.is-footer-visible {
 }
 
 .public-home-method-number {
-  color: rgb(52 212 255 / .48);
+  color: var(--public-home-accent-2);
   font-size: 13px;
   font-weight: 800;
   letter-spacing: .08em;

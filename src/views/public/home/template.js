@@ -347,7 +347,7 @@ function renderHeroVisual() {
           </div>
 
           <div class="public-home-command-copy">
-            <p class="public-home-profile-eyebrow">Servicio técnico informático</p>
+            <p class="public-home-profile-eyebrow">Servicio técnico</p>
             <h2><span>Cristian</span><span>Ávila</span></h2>
             <p>Diagnóstico claro, trato directo y reparación con criterio antes de tocar nada.</p>
             <div class="public-home-command-tags" aria-label="Especialidades principales">

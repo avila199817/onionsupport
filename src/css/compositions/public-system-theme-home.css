@@ -29,6 +29,19 @@ html:is([data-theme="light"], .theme-light) .public-home-title span {
   text-shadow: 0 6px 28px rgb(19 148 255 / .08);
 }
 
+/* Text accents need their own contrast; cyan remains on decorative surfaces. */
+html:is([data-theme="light"], .theme-light) :is(
+  .public-home-price-eyebrow,
+  .public-home-command-copy .public-home-profile-eyebrow,
+  .public-home-command-stat > span,
+  .public-home-command-stat strong,
+  .public-home-method-number,
+  .public-home-price-badge
+) {
+  color: #075fa8;
+  text-shadow: none;
+}
+
 html:is([data-theme="light"], .theme-light) .public-home-hero-text,
 html:is([data-theme="light"], .theme-light) .public-home-trust-item {
   color: var(--public-home-text);

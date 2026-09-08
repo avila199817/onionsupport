@@ -29,7 +29,7 @@ la estabilidad de lo ya publicado.
 
 ## Estado del corte
 
-La entrega actual de apertura modal se describe en [2026-09-08-single-modal-session.md](releases/2026-09-08-single-modal-session.md), donde se separan implementación, contratos locales y evidencia de publicación. La trazabilidad histórica frontend/backend permanece en [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md). F1 debe registrar el SHA efectivamente desplegado al ejecutar el recorrido, en lugar de reutilizar una revisión histórica de este plan.
+La entrega actual de apertura modal se describe en [2026-09-08-single-modal-session.md](releases/2026-09-08-single-modal-session.md), donde se separan implementación, contratos locales y de CI del candidato, y evidencia de publicación. La trazabilidad histórica frontend/backend permanece en [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md). F1 debe registrar el SHA efectivamente desplegado al ejecutar el recorrido, en lugar de reutilizar una revisión histórica de este plan.
 
 | Área | Estado | Fuente de verdad |
 |---|---|---|
@@ -50,7 +50,7 @@ no debe reabrirse para recuperar una segunda autoridad de avatar.
 
 ## Bloque actual y siguiente cierre
 
-La apertura modal del 2026-09-08 está centralizada en código y verificada localmente con los cuatro dominios desde Home y sus listas. La integración y la publicación se siguen en el registro de esa entrega. Este bloque retira puentes/adaptadores de detalle y conserva formularios y acciones reales; no queda una tarea pendiente para volver a unificar esas mismas entradas.
+La apertura modal del 2026-09-08 está centralizada en código y verificada localmente y en CI del candidato con los cuatro dominios desde Home y sus listas. La [PR #552](https://github.com/avila199817/onionsupport/pull/552) se fusionó en `822784b3` con preview y comparación de Home correctos; el despliegue productivo y sus contratos de artefacto son correctos. La verificación productiva independiente y la disponibilidad posterior también son correctas, con sus evidencias en el registro de esa entrega. Los avisos móviles preexistentes permanecen abiertos. Este bloque retira puentes/adaptadores de detalle y conserva formularios y acciones reales; no queda una tarea pendiente para volver a unificar esas mismas entradas.
 
 El bloque de identidad quedó cerrado mediante [frontend #524](https://github.com/avila199817/onionsupport/pull/524) y [backend #496](https://github.com/avila199817/oniontech/pull/496): userId es la semilla visual estable, la selección de avatar de perfil es canónica y se migraron consumidores, proyecciones y cachés de contenido. Se retiraron selectores duplicados y el puente de avatar técnico; un borrado actual prevalece frente a alias o snapshots antiguos. Los contratos cubren cambio de correo, perfil sin foto, IDs de cliente/usuario distintos y aislamiento entre identidades. Este cierre no sustituye la prueba autenticada F1.
 
@@ -59,7 +59,7 @@ consumidores. La vista abre y desmonta directamente el controlador canónico de 
 conserva las validaciones existentes y refresca el listado mediante el callback de
 creación; el contrato impide reintroducir rutas de compatibilidad paralelas.
 
-Tras publicar y verificar este corte, el siguiente bloque acotado es F1: ejecutar el
+Publicado y verificado este corte, el siguiente bloque acotado es F1: ejecutar el
 recorrido vertical autenticado frontend/backend con cuentas y fixtures controlados y
 registrar request IDs y limpieza sin exponer datos privados.
 

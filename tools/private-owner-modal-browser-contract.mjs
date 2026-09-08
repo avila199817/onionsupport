@@ -362,6 +362,30 @@ try {
     await expectClosed("open-incidencia");
   });
 
+  await scenario("failed staged route mount leaves the current Home incident modal interactive", async () => {
+    await load(); await resolvedOpen("incidencia");
+    const result = await page.evaluate(async () => {
+      const { IncidenciasView, getIncidenciasViewBoundarySnapshot } = await import("/src/views/incidencias/index.js");
+      const previousPanel = document.querySelector("[data-incidencias-modal-panel='true']");
+      const previousHost = previousPanel.closest("[data-incidencias-modal-owner-id]");
+      const staged = document.createElement("section");
+      Object.assign(staged.dataset, { routeHost:"true", routeHostState:"preparing", viewKey:"incidencias" });
+      staged.addEventListener = () => { throw new Error("Fixture failure while mounting the staged route"); };
+      let failed = false;
+      try { await IncidenciasView(staged); } catch { failed = true; }
+      const layers = getIncidenciasViewBoundarySnapshot().modalLayers;
+      return {
+        failed, samePanel:document.querySelector("[data-incidencias-modal-panel='true']") === previousPanel,
+        hidden:previousHost.hidden, inert:previousHost.hasAttribute("inert"),
+        superseded:previousHost.getAttribute("data-incidencias-modal-host-superseded"),
+        interactive:layers.interactive, duplicate:layers.duplicateInteractive,
+      };
+    });
+    assert.deepEqual(result, { failed:true, samePanel:true, hidden:false, inert:false, superseded:null, interactive:1, duplicate:false });
+    await invariant();
+    await page.keyboard.press("Escape"); await expectClosed("open-incidencia");
+  });
+
   for (const width of [1280, 390]) {
     for (const type of ["factura", "incidencia"]) {
       await scenario(`${type}: in-place single modal, viewport ${width}, keyboard and close focus`, async () => {

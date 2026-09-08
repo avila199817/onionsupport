@@ -114,7 +114,8 @@ function isActiveModalHost(modalHost = null) {
     modalHost.getAttribute("data-incidencias-modal-active-layer") === "true" &&
     modalHost.getAttribute("data-incidencias-modal-host-superseded") !== "true" &&
     modalHost.hidden !== true &&
-    !modalHost.hasAttribute("inert")
+    !modalHost.hasAttribute("inert") &&
+    Boolean(modalHost.querySelector?.("[role='dialog'], [role='alertdialog']"))
   );
 }
 
@@ -243,7 +244,8 @@ function activateModalHost(modalHost = null) {
 }
 
 function quarantineExistingModalHosts(
-  documentLike = null
+  documentLike = null,
+  activeHost = null
 ) {
   if (!isBrowserDocument(documentLike)) {
     return 0;
@@ -257,7 +259,7 @@ function quarantineExistingModalHosts(
       MODAL_HOST_CANDIDATE_SELECTOR
     ) || []
   ) {
-    if (quarantineModalHost(current)) {
+    if (current !== activeHost && quarantineModalHost(current)) {
       quarantined += 1;
     }
   }
@@ -283,11 +285,8 @@ function createDedicatedModalHost({
     return null;
   }
 
-  const supersededCount =
-    quarantineExistingModalHosts(
-      documentLike
-    );
-
+  // A staged route owns an empty lease only. Mounting can still fail before
+  // Router commits it; the currently visible owner's modal must survive.
   const modalHost = documentLike.createElement("div");
   const ownerId = nextModalOwnerId(context);
   const mode = isDetailOnlyContext(context)
@@ -322,7 +321,7 @@ function createDedicatedModalHost({
     modalHost,
     ownerId,
     mode,
-    supersededCount,
+    supersededCount: 0,
   };
 }
 
@@ -457,7 +456,18 @@ async function mountIncidenciasOwner(host = null, context = {}) {
   let controller = null;
 
   try {
-    const ownerContext = { ...context, modalHost: lease?.modalHost || null };
+    const ownerContext = {
+      ...context,
+      modalHost: lease?.modalHost || null,
+      onDetailShell(detail) {
+        // Supersede only when the new controller has actually painted its
+        // requested detail. Creating or rolling back an empty route lease
+        // never changes the current owner's accessibility, focus or state.
+        quarantineExistingModalHosts(documentLike, lease?.modalHost);
+        activateModalHost(lease?.modalHost);
+        context.onDetailShell?.(detail);
+      },
+    };
     controller = detailOnly
       ? Impl.createIncidenciasController(null, ownerContext).mount()
       : await Impl.IncidenciasView(host, ownerContext);
@@ -761,6 +771,7 @@ export function getIncidenciasViewBoundarySnapshot() {
       closeFailsafeDelegatesToController: true,
       supersededModalHostsAreInert: true,
       singleInteractiveModalLayer: true,
+      stagedRoutePreservesCurrentModal: true,
       backdropNeverCreatesEntityIntent: true,
     }),
   });

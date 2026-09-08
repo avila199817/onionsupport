@@ -106,7 +106,7 @@ assert.match(css, /\.whatsapp-workspace/);
 assert.match(css, /\.whatsapp-message\.is-outbound/);
 assert.match(css, /@container \(max-width: 780px\)/);
 assert.doesNotMatch(css, /#[0-9a-f]{3,8}\b/i);
-assert.doesNotMatch(css, /!important/);
+assert.doesNotMatch(css, /:[^;{}]*!important\b/i);
 assert.doesNotMatch(css, /@import/);
 assert.doesNotMatch(css, /data:image|<svg/i);
 

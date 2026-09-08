@@ -26,7 +26,7 @@ import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 import { avatarInitials, synchronizeAvatarHost } from "../../features/avatar-system/index.js";
 
 export const SIDEBAR_TEMPLATE_VERSION =
-  "sidebar.template.unified.v7-whatsapp-icon-contract";
+  "sidebar.template.unified.v6-core-role-authority";
 
 const SIDEBAR_ROOT_ID = "app-sidebar";
 const BRAND_LABEL = "Onion Support";

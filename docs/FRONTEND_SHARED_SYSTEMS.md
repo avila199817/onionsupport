@@ -1,15 +1,16 @@
 # Sistemas compartidos del frontend
 
-> Consolidación implementada en [PR #487](https://github.com/avila199817/onionsupport/pull/487), con corrección de consentimiento en [PR #490](https://github.com/avila199817/onionsupport/pull/490). Estado de release, métricas y límites: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md). Próximas entregas: [ROADMAP.md](ROADMAP.md).
+> Consolidación implementada en [PR #487](https://github.com/avila199817/onionsupport/pull/487), con corrección de consentimiento en [PR #490](https://github.com/avila199817/onionsupport/pull/490). La [entrega del 2026-09-08](releases/2026-09-08-single-modal-session.md) amplía la autoridad de modales a una sola sesión de detalle para los cuatro dominios. Estado de release, métricas y límites: [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md). Próximas entregas: [ROADMAP.md](ROADMAP.md).
 
 Una autoridad por responsabilidad permite corregir un comportamiento en un solo lugar. No exige reunir toda la aplicación en un archivo: las vistas conservan su contenido y sus reglas de negocio, mientras delegan las operaciones comunes.
 
 | Responsabilidad | Autoridad | Integración |
 | --- | --- | --- |
 | Identidad, iniciales, color y estado de imagen | `src/features/avatar-system/index.js` | Los consumidores describen la identidad; no gestionan otro fallback de imagen. |
+| Apertura de detalle, origen y sustitución de entidad | `src/features/entity-overlay/index.js` | Home, listas, relaciones y APIs públicas invocan `EntityOverlay.open`; una sesión y un controlador de detalle. |
 | Escape, Tab, pila, foco y scroll modal | `src/features/entity-overlay/modal-lifecycle.js` | Cada propietario conserva render, borradores, confirmación y política de cierre. |
 | Navegación, guards y commit de vista | `src/router/index.js` | Se conserva un Router y un host de vista comprometida. |
-| Cancelación y respuestas vigentes | `src/core/async-scope.js` | Router, Correo y consentimiento comparten lifecycle; cada canal identifica su operación más reciente. |
+| Cancelación y respuestas vigentes | `src/core/async-scope.js` | Router, EntityOverlay, Correo y consentimiento comparten lifecycle; cada canal identifica su operación más reciente. |
 | Carga visual | `src/css/components/skeleton.css` | Una capa global aporta pintura y animaciones; las vistas conservan la geometría necesaria. |
 | Tokens y CSS de ruta | `src/css/app.css` y `src/router/styles.js` | No se añade otro cargador global ni otra paleta por pantalla. |
 | Marca y páginas públicas | `src/core/public-site.js` | Catálogo consumido por generación estática y navegación SPA. |
@@ -25,6 +26,14 @@ Los hosts de avatar proyectan los campos usados por `resolveAvatarPresentation` 
 - El perfil técnico selecciona su foto desde las proyecciones de ticket/Usuarios y delega su estado a AvatarSystem. Se retira `incidencias-technician-avatar-bridge`: copiar una foto de otro host del DOM podía recuperar una imagen obsoleta después de borrarla. Home y Facturas respetan `hasAvatar=false` antes de buscar fuentes antiguas en raw/snapshots.
 - La normalización visual del ID no sustituye al identificador de transporte. El perfil técnico conserva el ID original de la entidad de usuario para las peticiones HTTP, incluidas sus mayúsculas; el alias visual normalizado no se usa para inventar un identificador de lectura.
 - El backend debe proyectar el userId real cuando ya ha resuelto un vínculo cliente→usuario. El frontend no trata `clienteId`, `facturaId`, `ticketId` o metadata sin procedencia probada como identidad de usuario. Los históricos sin vínculo recuperable quedan como fallback explícito y no se equiparan a perfiles identificados.
+
+## Contrato de detalle transversal
+
+`EntityOverlay` prepara los módulos y estilos, valida el origen comprometido y posee la cancelación de una sesión. Las factories `createFacturaDetailController`, `createIncidenciaDetailController`, `createClienteDetailController` y `createUsuarioDetailController` conservan los modales reales del dominio en modo `detailOnly`, sin montar listados. La ruta de origen permanece visible y sólo el Router escribe navegación.
+
+Cada apertura tiene una sola invocación inicial a la API de detalle. Incidencias y Facturas conservan el panel conectado en carga, error, reintento y refresco. Estado, live sync y avatares de Incidencias reciben la proyección del controlador; las señales solicitan el refresco a ese mismo propietario. Las listas posponen su reconciliación mientras su detalle está abierto y aplican los cambios al cerrar.
+
+Las entradas, callbacks, contratos y ubicaciones para intervenir están definidos en [UI_MODAL_SYSTEM.md](UI_MODAL_SYSTEM.md). Se retiraron los puentes de apertura de Home/Facturas/Incidencias y los adaptadores de detalle de lectura de Clientes/Usuarios. Los adaptadores contextuales de identidad visual tienen otra responsabilidad y se conservan.
 
 ## Errores corregidos
 

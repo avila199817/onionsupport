@@ -1,17 +1,20 @@
 # ONION SUPPORT — CONTEXTO CANÓNICO DEL FRONTEND
 
-> Actualizado: 2026-09-06.
-> Corte de evidencia: 2026-09-06, UTC. Describe el estado observado y las reglas del repositorio `avila199817/onionsupport`. El código de `main` define la implementación; los runs enlazados acreditan la revisión desplegada. Una regla objetivo no acredita por sí sola que todos los consumidores la cumplan.
+> Actualizado: 2026-09-08.
+> Corte de implementación: 2026-09-08, UTC. Las evidencias de publicación anteriores conservan su propia fecha y revisión. Describe el estado observado y las reglas del repositorio `avila199817/onionsupport`. El código de `main` define la implementación; los runs enlazados acreditan la revisión desplegada. Una regla objetivo no acredita por sí sola que todos los consumidores la cumplan.
 
 ## Estado del proyecto y evidencia
 
-La última versión funcional desplegada y verificada es [`1f220dc51d53a50212ef1b415707388fa030abf7`](https://github.com/avila199817/onionsupport/commit/1f220dc51d53a50212ef1b415707388fa030abf7), cierre de [PR #525](https://github.com/avila199817/onionsupport/pull/525). El corte backend coordinado para identidad es [`d5ccad6b1debd99391a0c0dcacdc617f92ec14c8`](https://github.com/avila199817/oniontech/commit/d5ccad6b1debd99391a0c0dcacdc617f92ec14c8), integrado mediante [oniontech #496](https://github.com/avila199817/oniontech/pull/496). Los commits posteriores que sólo actualicen documentación deben distinguirse de estas referencias de runtime.
+La entrega actual centraliza la apertura de detalle en una sola sesión para Home, listas y relaciones de Incidencias, Facturas, Clientes y Usuarios. Su implementación y resultados locales constan en [2026-09-08-single-modal-session.md](releases/2026-09-08-single-modal-session.md); las referencias de PR, SHA integrado, CI, despliegue y verificación de producción están pendientes de completar en ese registro. El contrato de mantenimiento está en [UI_MODAL_SYSTEM.md](UI_MODAL_SYSTEM.md).
+
+Como evidencia histórica del corte del 2026-09-06, la versión funcional desplegada y verificada era [`1f220dc51d53a50212ef1b415707388fa030abf7`](https://github.com/avila199817/onionsupport/commit/1f220dc51d53a50212ef1b415707388fa030abf7), cierre de [PR #525](https://github.com/avila199817/onionsupport/pull/525). El corte backend coordinado para identidad es [`d5ccad6b1debd99391a0c0dcacdc617f92ec14c8`](https://github.com/avila199817/oniontech/commit/d5ccad6b1debd99391a0c0dcacdc617f92ec14c8), integrado mediante [oniontech #496](https://github.com/avila199817/oniontech/pull/496). Los commits posteriores que sólo actualicen documentación deben distinguirse de estas referencias de runtime.
 
 Usamos cuatro estados: **implementado** significa presente en el código; **desplegado**, publicado por el pipeline; **verificado**, contrastado mediante la evidencia y el alcance indicados; **pendiente/propuesto**, trabajo futuro. Ningún módulo queda certificado de extremo a extremo sólo porque su build o un health check sea correcto.
 
 | Trabajo | Estado al corte | Evidencia y límite |
 | --- | --- | --- |
 | Avatar autenticado en topbar y prioridades Baja/Media/Alta | Integrado antes de la consolidación | La revisión de [PR #482](https://github.com/avila199817/onionsupport/pull/482) confirma los commits ya integrados y sus tres contratos dirigidos. Se cerró sin fusionar una segunda implementación. |
+| Apertura de detalle centralizada en los cuatro dominios | Implementada y verificada localmente; publicación pendiente de evidencia | [Entrega 2026-09-08](releases/2026-09-08-single-modal-session.md): controladores/templates reales, sesión única, origen estable, lecturas iniciales deduplicadas y matriz de navegador. No sustituye F1 autenticado. |
 | AvatarSystem, modales, AsyncScope, carga visual y SEO nacional | Implementado y desplegado | [PR #487](https://github.com/avila199817/onionsupport/pull/487), commit `26f546ab`; la consolidación retiró duplicaciones y dejó las autoridades descritas en este documento. No significa que cada normalizador o política de URL privada ya esté migrado. |
 | Validadores compatibles y verificación SEO por checkout | Implementado y desplegado | [PR #486](https://github.com/avila199817/onionsupport/pull/486), [PR #488](https://github.com/avila199817/onionsupport/pull/488) y commit [`0ad1500f`](https://github.com/avila199817/onionsupport/commit/0ad1500f): `/login` noindex se comprueba sin relajar los presupuestos Lighthouse. |
 | Salto visual del consentimiento | Corregido, desplegado y medido | [PR #490](https://github.com/avila199817/onionsupport/pull/490), commit `5d82b0d0`; CSS preparado antes de mostrar y apertura cancelable. El CLS móvil de la portada pasó a 0,000 en la medición descrita abajo. |
@@ -85,7 +88,8 @@ Onion Support es una SPA JavaScript modular desplegada en Azure Static Web Apps.
 - HTTP: `src/core/http.js`
 - Auth: `src/features/auth/`
 - AvatarSystem: `src/features/avatar-system/`
-- Modales: `src/features/entity-overlay/modal-lifecycle.js`
+- Apertura de detalle y sesión de entidades: `src/features/entity-overlay/index.js`
+- Interacción modal: `src/features/entity-overlay/modal-lifecycle.js`
 - Concurrencia y desmontaje: `src/core/async-scope.js`
 - Marca y SEO: `src/core/public-site.js` y `src/router/page-metadata.js`
 
@@ -226,6 +230,8 @@ Reglas:
 Los guards `avatar_authority_hygiene_contract.mjs` e `incidencias_comment_avatar_contract.mjs` impiden reintroducir autoridades visuales paralelas y fijan la compatibilidad de comentarios.
 
 ## 8. Vistas productivas
+
+Los cuatro dominios de detalle comparten `EntityOverlay.open` desde cualquier origen de la SPA. Cada factory `create*DetailController` monta el mismo controlador en modo `detailOnly`; las vistas no crean otra implementación modal. El dispatcher posee origen/cancelación/sustitución y el lifecycle posee teclado/foco/scroll. [UI_MODAL_SYSTEM.md](UI_MODAL_SYSTEM.md) documenta callbacks, panel estable, reconciliación de listas y los contratos que impiden reintroducir caminos paralelos.
 
 ### Incidencias
 

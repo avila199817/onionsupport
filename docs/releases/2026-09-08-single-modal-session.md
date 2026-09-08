@@ -1,5 +1,18 @@
 # Una apertura de detalle para toda la SPA
 
+## Estado y trazabilidad
+
+| Referencia | Evidencia |
+| --- | --- |
+| Implementación | Commit local `3d513970`, rama `codex/spa-modal-single-lifecycle`. |
+| Base de revisión | `5358d6c493c43c7f97618c5cc6cc52cd8a41cf2d`. |
+| Publicación autorizada | El titular autorizó el 2026-09-08 la integración y publicación en producción, con documentación actualizada. |
+| PR y SHA integrado | Pendientes de integración. |
+| CI y preview | Pendientes de los runs de esta publicación. |
+| Despliegue y verificación de producción | Pendientes de los runs y comprobaciones del SHA integrado. |
+
+Este registro debe enlazar el SHA de runtime y sus runs una vez finalizados. Una actualización documental posterior no cambia por sí misma la revisión funcional verificada.
+
 La revisión parte del árbol publicado en `5358d6c493c43c7f97618c5cc6cc52cd8a41cf2d`.
 
 ## Problemas corregidos
@@ -28,3 +41,32 @@ Los listados aplazan sus renders mientras hay un detalle sobre su origen y aplic
 - Contrato de avatares ejecutado en Chromium: identidad estable y cero lecturas de detalle adicionales.
 
 Los contratos cargan controllers, templates y ciclo de vida reales. Sustituyen sesión y fronteras de API con datos sintéticos; no realizan operaciones contra producción. Los tests estáticos se han ajustado para exigir la única autoridad y rechazar el retorno de adaptadores, historial de modal o aperturas dependientes de la ruta.
+
+Comandos de la entrega:
+
+```bash
+npm ci --ignore-scripts --no-audit --no-fund
+npm run validate:ci
+```
+
+Para repetir sólo la comprobación funcional de apertura durante una intervención:
+
+```bash
+node tools/private-domain-contracts.mjs --browser
+node .github/scripts/modal_lifecycle_contract.mjs
+node .github/scripts/incidencias_comment_avatar_runtime_contract.mjs
+```
+
+Los contratos de navegador requieren Chrome/Chromium, configurable mediante `CHROME_BIN`. La versión del lockfile y los umbrales de validación se mantienen como referencia. Los resultados locales de esta sección no sustituyen las evidencias de CI y publicación de la tabla superior.
+
+## Continuidad de mantenimiento
+
+[UI_MODAL_SYSTEM.md](../UI_MODAL_SYSTEM.md) define las entradas públicas, factories, callbacks, origen, cierre, foco, peticiones y estabilidad del panel. [FRONTEND_SHARED_SYSTEMS.md](../FRONTEND_SHARED_SYSTEMS.md) sitúa esta autoridad junto al Router, AvatarSystem y AsyncScope. [PROJECT_CONTEXT.md](../PROJECT_CONTEXT.md), [ROADMAP.md](../ROADMAP.md) y el README apuntan a esta entrega para evitar varias afirmaciones incompatibles de versión vigente.
+
+El recorrido autenticado completo frontend/backend sigue pendiente y conserva su alcance en F1 del roadmap. Esta refactorización no acredita escrituras reales, correo, pagos ni el modelo de permisos del backend.
+
+## Publicación y reversión
+
+La rama pasa por PR, integridad del repositorio y preview confiable antes de fusionarse a `main`. El workflow de Azure Static Web Apps compila y publica el SHA integrado; Production Verification Gate acredita por separado el artefacto publicado. Los cambios limitados a `docs/**` y `.github/**` están excluidos del disparador de SWA; un cambio en `README.md` sí puede iniciarlo. El cierre de evidencias se limita a `docs/**` y su SHA debe distinguirse del SHA funcional de esta tabla.
+
+Si esta entrega necesita revertirse, revertir su PR mediante el mismo pipeline y verificar el nuevo SHA publicado. El modo de emergencia `legacy-root` de [BUILD_FOUNDATION.md](../BUILD_FOUNDATION.md) está fijado a una revisión mucho más antigua y no constituye una reversión específica de esta refactorización.

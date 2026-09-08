@@ -18,7 +18,7 @@
    - Toast sólo para comunicar un fallo explícito de revocación.
    - Sin Store.
    - Sin Services.
-   - Sin rutas inventadas.
+   - Sin rutas navegables inventadas; un placeholder disabled puede reservar una vista futura.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -50,7 +50,7 @@ import {
 } from "./template.js";
 
 export const SIDEBAR_VERSION =
-  "sidebar.controller.v7-logout-fail-closed";
+  "sidebar.controller.v8-whatsapp-sidebar-placeholder";
 
 const SIDEBAR_ROOT_ID =
   "app-sidebar";
@@ -60,6 +60,12 @@ const SIDEBAR_MOUNT_ID =
 
 const BRAND_LABEL =
   "Onion Support";
+
+const WHATSAPP_SIDEBAR_PATH =
+  "/whatsapp";
+
+const WHATSAPP_SIDEBAR_ORDER =
+  54;
 
 const LEGACY_RESET_TOKEN_PATH =
   /(\/(?:reset-password|password-reset)\/confirm\/)([^/?#\s]+)/gi;
@@ -1500,6 +1506,9 @@ function getMenuItems(
               route
             ),
 
+          disabled:
+            false,
+
           order:
             Number(
               route.order ||
@@ -1510,6 +1519,54 @@ function getMenuItems(
       }
     )
     .filter(Boolean)
+    .concat(
+      user.isAdmin === true &&
+      seen.has(
+        routeLookupPath(
+          ROUTES.correo ||
+          "/correo"
+        )
+      ) &&
+      !seen.has(
+        routeLookupPath(
+          WHATSAPP_SIDEBAR_PATH
+        )
+      )
+        ? [
+            {
+              key:
+                "whatsapp",
+
+              href:
+                routeHref(
+                  WHATSAPP_SIDEBAR_PATH,
+                  user
+                ),
+
+              path:
+                WHATSAPP_SIDEBAR_PATH,
+
+              label:
+                "WhatsApp",
+
+              icon:
+                "whatsapp",
+
+              active:
+                false,
+
+              adminOnly:
+                true,
+
+              disabled:
+                true,
+
+              order:
+                WHATSAPP_SIDEBAR_ORDER,
+            },
+          ]
+        : []
+    )
     .sort(
       (a, b) =>
         a.order -
@@ -2181,6 +2238,9 @@ function getSidebarStructureSignature(
             item.label,
             item.icon,
             item.adminOnly
+              ? "1"
+              : "0",
+            item.disabled
               ? "1"
               : "0",
             item.order,
@@ -2999,6 +3059,10 @@ function getSnapshot() {
 
           adminOnly:
             item.adminOnly,
+
+          disabled:
+            item.disabled ===
+            true,
         })
       ),
 

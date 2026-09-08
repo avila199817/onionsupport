@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import { PUBLIC_SITE, PUBLIC_SERVICES, pageMetadata } from "../src/core/public-site.js";
 
-const ROOT = fileURLToPath(new URL("../", import.meta.url));
+const ROOT = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const DIST = resolve(ROOT, process.env.ONION_BUILD_OUT_DIR || "dist");
 let serveDist = false;
 const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".webp": "image/webp", ".svg": "image/svg+xml", ".ico": "image/x-icon" };

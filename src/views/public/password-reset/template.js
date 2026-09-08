@@ -29,9 +29,17 @@ import {
 } from "../../../core/config.js";
 
 import {
+  AUTH_PASSWORD_POLICY,
+  AUTH_PASSWORD_POLICY_HELP,
+} from "../../../features/auth/password-policy.js";
+
+import {
+  PUBLIC_AUTH_LOGO,
+  PUBLIC_AUTH_LOGO_WEBP,
   escapeAttr,
   escapeHtml,
   renderPublicShell,
+  safeAssetSrc,
   safeInternalHref,
 } from "../index.js";
 
@@ -50,8 +58,9 @@ const LOGIN_HREF =
 const MODE_REQUEST = "request";
 const MODE_CONFIRM = "confirm";
 
-const PASSWORD_MIN_LENGTH = 8;
-const PASSWORD_MAX_LENGTH = 256;
+const PASSWORD_MIN_LENGTH = AUTH_PASSWORD_POLICY.minLength;
+const PASSWORD_MAX_LENGTH = AUTH_PASSWORD_POLICY.maxLength;
+const PASSWORD_POLICY_ID = "password-reset-policy";
 
 /* =========================================================
    BASICS
@@ -181,6 +190,31 @@ function renderMessage() {
   `;
 }
 
+function renderHomeLink() {
+  const homeHref = safeInternalHref("/", "/");
+  const logo = safeAssetSrc(PUBLIC_AUTH_LOGO, PUBLIC_AUTH_LOGO);
+  const logoWebp = safeAssetSrc(PUBLIC_AUTH_LOGO_WEBP, PUBLIC_AUTH_LOGO_WEBP);
+
+  return `
+    <a
+      class="auth-home-link"
+      href="${escapeAttr(homeHref)}"
+      data-spa="true"
+      data-router-link="true"
+      data-route="${escapeAttr(homeHref)}"
+      aria-label="Onion Support · Ir a Inicio"
+    >
+      <span class="login-card-logo-shell auth-home-logo-shell" aria-hidden="true">
+        <picture>
+          <source type="image/webp" srcset="${escapeAttr(logoWebp)}">
+          <img class="login-card-logo auth-home-logo" src="${escapeAttr(logo)}" alt="" width="48" height="48" decoding="async">
+        </picture>
+      </span>
+      <span class="auth-home-copy"><strong>Onion Support</strong><span>Ir a Inicio</span></span>
+    </a>
+  `;
+}
+
 function renderTextField({
   id,
   name,
@@ -256,6 +290,7 @@ function renderPasswordField({
   dataKey = "",
   errorFor = name,
   autocomplete = "new-password",
+  disabled = false,
 } = {}) {
   const errorId =
     `${id}-error`;
@@ -299,10 +334,11 @@ function renderPasswordField({
           minlength="${PASSWORD_MIN_LENGTH}"
           maxlength="${PASSWORD_MAX_LENGTH}"
           required
+          ${disabled ? "disabled" : ""}
           spellcheck="false"
           autocapitalize="none"
           aria-invalid="false"
-          aria-describedby="${escapeAttr(`${capsId} ${errorId}`)}"
+          aria-describedby="${escapeAttr(`${PASSWORD_POLICY_ID} ${capsId} ${errorId}`)}"
           data-password-input="true"
           data-password-reset-input="${escapeAttr(errorFor)}"
           ${dataFlag(dataKey)}
@@ -311,6 +347,7 @@ function renderPasswordField({
         <button
           class="password-toggle login-password-toggle password-reset-password-toggle"
           type="button"
+          ${disabled ? "disabled" : ""}
           aria-label="Mostrar contraseña"
           aria-controls="${escapeAttr(id)}"
           aria-pressed="false"
@@ -408,6 +445,7 @@ function renderConfirmFields({
       placeholder: "Nueva contraseña",
       dataKey: "password-reset-password",
       errorFor: "password",
+      disabled: !tokenPresent,
     })}
 
     ${renderPasswordField({
@@ -418,28 +456,45 @@ function renderConfirmFields({
       placeholder: "Confirmar contraseña",
       dataKey: "password-reset-confirm",
       errorFor: "confirm-password",
+      disabled: !tokenPresent,
     })}
 
     <p
       class="auth-help password-reset-password-policy"
+      id="${PASSWORD_POLICY_ID}"
       data-password-reset-policy="true"
     >
-      Mínimo ${PASSWORD_MIN_LENGTH} caracteres, con al menos una letra y un número.
+      ${escapeHtml(AUTH_PASSWORD_POLICY_HELP)}
     </p>
   `;
 }
 
-function renderBackLink() {
+function renderBackLink({ isConfirm = false } = {}) {
   const loginHref =
     safeInternalHref(
       LOGIN_HREF,
       "/login"
     );
+  const recoveryHref = safeInternalHref(
+    ROUTES.passwordRequest || "/password-request",
+    "/password-request"
+  );
 
   return `
-    <p
+    <nav
       class="auth-links password-reset-links login-links"
+      aria-label="Ayuda con el acceso"
     >
+      ${isConfirm ? `
+        <a
+          class="auth-link login-link password-reset-link password-reset-recovery-link"
+          href="${escapeAttr(recoveryHref)}"
+          data-spa="true"
+          data-router-link="true"
+          data-route="${escapeAttr(recoveryHref)}"
+          data-password-reset-recovery="true"
+        >Solicitar otro enlace</a>
+      ` : ""}
       <a
         class="auth-link login-link password-reset-link"
         href="${escapeAttr(loginHref)}"
@@ -449,7 +504,7 @@ function renderBackLink() {
       >
         Volver al acceso
       </a>
-    </p>
+    </nav>
   `;
 }
 
@@ -540,12 +595,14 @@ export function getPasswordResetTemplate(
           <header
             class="login-card-header password-reset-card-header"
           >
-            <h2
+            ${renderHomeLink()}
+
+            <h1
               class="login-card-title password-reset-title"
               id="password-reset-title"
             >
               ${escapeHtml(title)}
-            </h2>
+            </h1>
 
             <p
               class="login-card-subtitle password-reset-subtitle"
@@ -577,6 +634,7 @@ export function getPasswordResetTemplate(
             <button
               class="auth-button auth-submit login-submit password-reset-submit"
               type="submit"
+              ${isConfirm && !tokenPresent ? "disabled" : ""}
               data-password-reset-submit="true"
               data-reset-password-submit="true"
               data-default-text="${escapeAttr(submitLabel)}"
@@ -585,7 +643,7 @@ export function getPasswordResetTemplate(
               ${escapeHtml(submitLabel)}
             </button>
 
-            ${renderBackLink()}
+            ${renderBackLink({ isConfirm })}
           </form>
         </section>
       </section>

@@ -720,6 +720,9 @@ function getRefs(
         "[data-reset-password-error-for='token']"
       ),
 
+    recoveryLink:
+      root.querySelector("[data-password-reset-recovery]"),
+
     identifierError:
       root.querySelector(
         "[data-password-reset-error-for='identifier']"
@@ -1436,7 +1439,8 @@ function clearErrors(
 function setLoading(
   refs,
   loading = false,
-  passwordControls = null
+  passwordControls = null,
+  unavailable = false
 ) {
   const value =
     Boolean(loading);
@@ -1450,12 +1454,12 @@ function setLoading(
       refs.submit,
     ].filter(Boolean)
   ) {
-    node.disabled = value;
+    node.disabled = value || unavailable;
   }
 
   passwordControls
     ?.setDisabled?.(
-      value
+      value || unavailable
     );
 
   if (refs.submit) {
@@ -1909,6 +1913,8 @@ export function renderPasswordResetView(
   const token =
     mountedTemplate.token;
 
+  const missingToken = mode === MODE_CONFIRM && !token;
+
   const refs =
     getRefs(
       mountedTemplate.view,
@@ -1934,7 +1940,8 @@ export function renderPasswordResetView(
     setLoading(
       refs,
       submitting,
-      passwordControls
+      passwordControls,
+      missingToken || completed
     );
   }
 
@@ -1946,7 +1953,8 @@ export function renderPasswordResetView(
     if (
       !mounted ||
       submitting ||
-      completed
+      completed ||
+      missingToken
     ) {
       return false;
     }
@@ -2179,7 +2187,7 @@ export function renderPasswordResetView(
   }
 
   function onInput() {
-    if (!submitting) {
+    if (!submitting && !completed && !missingToken) {
       clearErrors(
         refs
       );
@@ -2209,27 +2217,21 @@ export function renderPasswordResetView(
     En modo confirm sin token mantenemos la vista de reset para explicar
     el error al usuario, en vez de enviarlo silenciosamente al login.
   */
-  if (
-    mode === MODE_CONFIRM &&
-    !token
-  ) {
-    setFieldError(
-      refs,
-      "token",
-      "El enlace no es válido o ha caducado."
-    );
-
+  if (missingToken) {
+    setSubmitting(false);
     setMessage(
       refs,
-      "El enlace de recuperación no contiene un token válido.",
+      "Este enlace de recuperación no es válido. Solicita otro enlace para continuar.",
       "error"
     );
   }
 
   focusSafe(
-    mode === MODE_CONFIRM
-      ? refs.password
-      : refs.identifier
+    missingToken
+      ? refs.recoveryLink
+      : mode === MODE_CONFIRM
+        ? refs.password
+        : refs.identifier
   );
 
   const instance = {
@@ -2244,12 +2246,13 @@ export function renderPasswordResetView(
     submit,
 
     unlock() {
+      if (!mounted || missingToken) return false;
+
+      completed = false;
+
       setSubmitting(
         false
       );
-
-      completed =
-        false;
 
       redirecting =
         false;
@@ -2289,7 +2292,8 @@ export function renderPasswordResetView(
         setLoading(
           refs,
           false,
-          passwordControls
+          passwordControls,
+          missingToken || completed
         );
       } catch {
         // noop

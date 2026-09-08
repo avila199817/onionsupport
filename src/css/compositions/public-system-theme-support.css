@@ -16,7 +16,7 @@ html:is([data-theme="light"], .theme-light) .public-home .public-support-layout 
     radial-gradient(circle at 94% 92%, rgb(16 112 255 / .08), transparent 38%),
     linear-gradient(145deg, rgb(255 255 255 / .97), rgb(235 244 252 / .98));
   box-shadow:
-    0 42px 112px rgb(31 67 103 / .16),
+    0 24px 64px rgb(31 67 103 / .12),
     0 0 0 1px rgb(19 148 255 / .025),
     inset 0 1px 0 #ffffff;
 }
@@ -48,6 +48,12 @@ html:is([data-theme="light"], .theme-light) .public-home .public-support-person-
 html:is([data-theme="light"], .theme-light) .public-home .public-support-account-name {
   color: var(--public-home-text-strong);
   text-shadow: none;
+}
+
+html:is([data-theme="light"], .theme-light) .public-home .public-support-title-accent {
+  color: #0873c7;
+  background: none;
+  filter: none;
 }
 
 html:is([data-theme="light"], .theme-light) .public-home .public-support-lead {
@@ -115,8 +121,8 @@ html:is([data-theme="light"], .theme-light) .public-home .public-support-form {
     radial-gradient(circle at 0% 100%, rgb(24 103 255 / .05), transparent 36%),
     linear-gradient(158deg, rgb(255 255 255 / .98), rgb(237 245 252 / .97));
   box-shadow:
-    0 28px 74px rgb(31 67 103 / .15),
-    0 0 54px rgb(19 148 255 / .04),
+    0 18px 46px rgb(31 67 103 / .11),
+    0 0 32px rgb(19 148 255 / .025),
     inset 0 1px 0 #ffffff,
     inset 0 0 0 1px rgb(255 255 255 / .68);
 }
@@ -143,8 +149,8 @@ html:is([data-theme="light"], .theme-light) .public-home .public-support-phone-p
   background:
     linear-gradient(
       135deg,
-      var(--public-home-accent-2),
-      var(--public-home-accent) 46%,
+      color-mix(in srgb, var(--public-home-accent-2) 25%, #06458c),
+      color-mix(in srgb, var(--public-home-accent) 55%, #06458c) 46%,
       var(--public-home-accent-3)
     );
   box-shadow:
@@ -171,7 +177,7 @@ html:is([data-theme="light"], .theme-light) .public-home .public-support-field t
 
 html:is([data-theme="light"], .theme-light) .public-home .public-support-field input::placeholder,
 html:is([data-theme="light"], .theme-light) .public-home .public-support-field textarea::placeholder {
-  color: #8393a5;
+  color: #5f7289;
 }
 
 html:is([data-theme="light"], .theme-light) .public-home .public-support-field input:hover,

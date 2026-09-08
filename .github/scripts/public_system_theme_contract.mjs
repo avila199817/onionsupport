@@ -54,8 +54,8 @@ for (const [token, message] of [
 }
 
 for (const [token, message] of [
-  ['<span>1</span><div><strong>Vinculamos el caso</strong>', "El flujo público debe mostrar el paso 1 sin cero inicial"],
-  ['<span>2</span><div><strong>Creamos tu acceso si hace falta</strong>', "El flujo público debe mostrar el paso 2 sin cero inicial"],
+  ['<span>1</span><div><strong>Cuéntame el problema</strong>', "El flujo público debe mostrar el paso 1 sin cero inicial"],
+  ['<span>2</span><div><strong>Recibe el seguimiento</strong>', "El flujo público debe mostrar el paso 2 sin cero inicial"],
   ['<span>3</span><div><strong>Te atiendo personalmente</strong>', "El flujo público debe mostrar el paso 3 orientado al cliente y sin cero inicial"],
 ]) {
   assert.ok(publicSupport.includes(token), message);
@@ -106,7 +106,6 @@ for (const selector of [
   ".public-home-price-card",
   ".public-home-contact-panel",
   ".public-home-faq-item",
-  ".public-home-footer",
   ".public-home-account-menu",
   ".public-home-floating-whatsapp",
   '[data-public-support-intake-link="true"]',
@@ -123,6 +122,10 @@ for (const selector of [
     `El tema público light debe cubrir ${selector}`
   );
 }
+
+const legalCss = stripComments(read("src/css/views/public/legal-footer.css"));
+assert.match(legalCss, /html:is\(\[data-theme="light"\], \.theme-light\) \.public-legal-footer\s*\{/, "El footer compartido debe responder al tema efectivo");
+assert.match(legalCss, /@media \(prefers-color-scheme: light\)/, "El footer estático debe respetar el sistema sin JavaScript");
 
 for (const { path, source } of themeFiles) {
   const executable = stripComments(source);

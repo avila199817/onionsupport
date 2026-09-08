@@ -113,6 +113,7 @@ function syncProvince(form = null) {
   if (!next) {
     if (wasAutofilled && previousPostal !== digits) {
       province.value = "";
+      province.dispatchEvent(new Event("input", { bubbles: true }));
       clearProvinceAutofill(province);
     }
     return false;
@@ -120,7 +121,12 @@ function syncProvince(form = null) {
 
   if (province.value && !wasAutofilled) return false;
 
-  province.value = next;
+  if (province.value !== next) {
+    province.value = next;
+    // Let the intake clear its own error/idempotency state. Mark ownership
+    // afterwards because the delegated province input listener clears it.
+    province.dispatchEvent(new Event("input", { bubbles: true }));
+  }
   province.dataset.publicPostalAutofill = "true";
   province.dataset.publicPostalCode = digits;
   return true;

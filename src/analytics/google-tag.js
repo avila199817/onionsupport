@@ -1,5 +1,6 @@
 import { createModalLifecycle, focusModalElement } from "../features/entity-overlay/modal-lifecycle.js";
 import { createAsyncScope } from "../core/async-scope.js";
+import { PUBLIC_LEGAL } from "../core/public-legal.js";
 
 (() => {
   "use strict";
@@ -32,6 +33,17 @@ import { createAsyncScope } from "../core/async-scope.js";
     "/redes-wifi",
     "/impresoras",
     "/soporte-empresas",
+  ]);
+
+  // Public account pages may edit consent without enabling Google measurement.
+  const PUBLIC_CONSENT_PATHS = new Set([
+    "/login",
+    "/password-request",
+    "/password-reset",
+    "/reset-password",
+    "/password-reset/confirm",
+    "/reset-password/confirm",
+    "/activate-account",
   ]);
 
   const ALLOWED_CAMPAIGN_QUERY_KEYS = new Set([
@@ -67,6 +79,7 @@ import { createAsyncScope } from "../core/async-scope.js";
   const storedConsent = readStoredConsent();
   let consentChoice = storedConsent || { ...EMPTY_CHOICE };
   let consentWasDecided = Boolean(storedConsent);
+  let googleConsentUpdatePending = false;
   let productsConfigured = false;
   let remoteState = "idle";
   let remoteAttempts = 0;
@@ -78,6 +91,7 @@ import { createAsyncScope } from "../core/async-scope.js";
   let consentStylesheetReady = null;
   const consentScope = createAsyncScope();
   let routeRefreshQueued = false;
+  let consentUiPath = normalizePathname(window.location.pathname);
   const modalLifecycle = createModalLifecycle({
     getPanel: () => currentDialog,
     onEscape: () => closeConsentDialog(),
@@ -99,6 +113,13 @@ import { createAsyncScope } from "../core/async-scope.js";
 
   function isPublicMarketingRoute(value = window.location.pathname) {
     return PUBLIC_MARKETING_PATHS.has(normalizePathname(value));
+  }
+
+  function isPublicConsentRoute(value = window.location.pathname) {
+    const path = normalizePathname(value);
+    return isPublicMarketingRoute(path) ||
+      PUBLIC_CONSENT_PATHS.has(path) ||
+      /^\/(?:activate-account|(?:password-reset|reset-password)\/confirm)\/[^/]+$/.test(path);
   }
 
   function isTagAssistantSession() {
@@ -247,7 +268,9 @@ import { createAsyncScope } from "../core/async-scope.js";
     incidencias, clientes, facturas y URLs con tokens.
   */
   function ensureGoogleProductsConfigured() {
-    if (productsConfigured || !isPublicMarketingRoute()) return;
+    if (!isPublicMarketingRoute()) return;
+    flushPendingConsentUpdate();
+    if (productsConfigured) return;
 
     updateRouteMeasurementGuard();
     productsConfigured = true;
@@ -438,16 +461,24 @@ import { createAsyncScope } from "../core/async-scope.js";
     });
   }
 
-  function applyConsent(nextChoice, { persist = true, source = "ui" } = {}) {
-    const previous = { ...consentChoice };
-    consentChoice = normalizeChoice(nextChoice);
-    consentWasDecided = true;
-
+  function flushPendingConsentUpdate() {
+    // A loaded Google tag can react to consent updates. Keep account/token URLs
+    // out of that flow; apply their saved choice before any later marketing hit.
+    if (!googleConsentUpdatePending || !isPublicMarketingRoute()) return;
     window.gtag(
       "consent",
       "update",
       consentCommandState(consentChoice, false)
     );
+    googleConsentUpdatePending = false;
+  }
+
+  function applyConsent(nextChoice, { persist = true, source = "ui" } = {}) {
+    const previous = { ...consentChoice };
+    consentChoice = normalizeChoice(nextChoice);
+    consentWasDecided = true;
+    googleConsentUpdatePending = true;
+    flushPendingConsentUpdate();
 
     if (persist) {
       writeStoredConsent(consentChoice);
@@ -498,7 +529,20 @@ import { createAsyncScope } from "../core/async-scope.js";
   document.addEventListener(
     "click",
     (event) => {
+      const cookieSettings = event.target?.closest?.("[data-public-cookie-settings]");
+      if (cookieSettings && isPublicConsentRoute()) {
+        event.preventDefault();
+        openConsentDialog();
+        return;
+      }
+
       const anchor = event.target?.closest?.("a[href]");
+      if (anchor?.closest("[data-consent-dialog]")) {
+        const destination = new URL(anchor.href, window.location.href);
+        if (destination.origin === window.location.origin && destination.pathname === "/" && /^#public-(?:privacy|cookies|legal-notice)$/.test(destination.hash)) {
+          closeConsentDialog({ restoreFocus: false });
+        }
+      }
       if (!anchor || !isPublicMarketingRoute()) return;
 
       const href = String(anchor.getAttribute("href") || "").trim();
@@ -608,6 +652,7 @@ import { createAsyncScope } from "../core/async-scope.js";
               Usamos Google Analytics y Google Ads para saber qué páginas ayudan
               y qué contactos proceden de campañas. No activamos publicidad
               personalizada y puedes cambiar tu decisión cuando quieras.
+              <a href="/#public-cookies">Más información sobre cookies</a>.
             </p>
           </div>
           <div class="onion-google-consent__actions" aria-label="Decisión de privacidad">
@@ -693,8 +738,13 @@ import { createAsyncScope } from "../core/async-scope.js";
             <summary>Información sobre el tratamiento</summary>
             <div>
               <p>
-                Responsable: Onion Support, Cristian Ávila.
-                Contacto: cristian@onionsupport.com.
+                Responsable: ${PUBLIC_LEGAL.owner} (${PUBLIC_LEGAL.name}).
+                Contacto: <a href="mailto:${PUBLIC_LEGAL.email}">${PUBLIC_LEGAL.email}</a>.
+              </p>
+              <p>
+                <a href="/#public-privacy">Privacidad de Onion Support</a>
+                <span aria-hidden="true"> · </span>
+                <a href="/#public-cookies">Información sobre cookies</a>
               </p>
               <p>
                 Proveedor tecnológico: Google. Finalidad: medición agregada y
@@ -765,7 +815,7 @@ import { createAsyncScope } from "../core/async-scope.js";
   }
 
   async function openConsentDialog() {
-    if (!isPublicMarketingRoute()) return;
+    if (!isPublicConsentRoute()) return;
     const root = ensureConsentRoot();
     if (!root) return;
 
@@ -775,7 +825,7 @@ import { createAsyncScope } from "../core/async-scope.js";
       if (
         !request.isCurrent() ||
         !root.isConnected ||
-        !isPublicMarketingRoute()
+        !isPublicConsentRoute()
       ) return;
 
       const dialog = root.querySelector("[data-consent-dialog]");
@@ -865,7 +915,7 @@ import { createAsyncScope } from "../core/async-scope.js";
   }
 
   function refreshConsentUi() {
-    if (!isPublicMarketingRoute()) {
+    if (!isPublicConsentRoute()) {
       closeConsentDialog({ restoreFocus: false });
       consentRoot?.remove();
       consentRoot = null;
@@ -881,11 +931,11 @@ import { createAsyncScope } from "../core/async-scope.js";
     );
 
     if (banner) {
-      banner.hidden = consentWasDecided;
+      banner.hidden = consentWasDecided || !isPublicMarketingRoute();
     }
 
     if (preferences) {
-      preferences.hidden = !consentWasDecided;
+      preferences.hidden = !consentWasDecided || !isPublicMarketingRoute();
     }
   }
 
@@ -895,6 +945,11 @@ import { createAsyncScope } from "../core/async-scope.js";
 
     window.queueMicrotask(() => {
       routeRefreshQueued = false;
+      const nextPath = normalizePathname(window.location.pathname);
+      if (nextPath !== consentUiPath) {
+        closeConsentDialog({ restoreFocus: false });
+        consentUiPath = nextPath;
+      }
       updateRouteMeasurementGuard();
 
       if (isPublicMarketingRoute()) {
@@ -949,7 +1004,7 @@ import { createAsyncScope } from "../core/async-scope.js";
   }
 
   function mountConsentUiWhenReady() {
-    if (!isPublicMarketingRoute()) return;
+    if (!isPublicConsentRoute()) return;
 
     const mount = () => {
       refreshConsentUi();

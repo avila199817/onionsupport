@@ -7,7 +7,7 @@
    - un único POST público al backend;
    - autenticación opcional: visitante anónimo o sesión existente;
    - idempotencia estable por intento/reintento del mismo formulario;
-   - identidad existente por email O teléfono => reutilización sin overwrite;
+   - identidad existente por correo o teléfono => reutilización sin modificar el perfil;
    - alta nueva => usuario pendiente + activación; nunca crea cliente;
    - formulario sin exponer automáticamente el nombre del usuario;
    - teléfono limitado a España (+34) con input nacional de 9 dígitos;
@@ -20,6 +20,7 @@
 
 import { AppCore } from "../../core/index.js";
 import { mutationsTouchSelector } from "../../core/dom-mutations.js";
+import { createAsyncScope } from "../../core/async-scope.js";
 import Http from "../../core/http.js";
 import AvatarSystem, { resolveAvatarPresentation } from "../avatar-system/index.js";
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
@@ -50,6 +51,8 @@ const ACTIVE_TICKET_ERROR_CODES = new Set([
   "ACTIVE_TICKET_EXISTS",
 ]);
 const enhanced = new WeakSet();
+const submissions = createAsyncScope();
+const pendingForms = new Map();
 
 let observer = null;
 let scanFrame = 0;
@@ -339,13 +342,13 @@ function formSection() {
           <span class="public-support-title-accent">ahora.</span>
         </h2>
         <p class="public-support-lead">
-          Cuéntame el problema y dejo el caso registrado desde el primer minuto.
-          Si ya tienes cuenta, la reutilizamos por correo o teléfono sin modificar tu perfil.
+          Cuéntame qué ocurre y te ayudaré a encontrar el siguiente paso.
+          Deja tus datos y una breve descripción para preparar el diagnóstico.
         </p>
 
         <div class="public-support-flow" aria-label="Qué ocurrirá después">
-          <div class="public-support-flow-item"><span>1</span><div><strong>Vinculamos el caso</strong><p>Si reconocemos tu correo o teléfono, usamos esa misma cuenta sin sobrescribir tus datos.</p></div></div>
-          <div class="public-support-flow-item"><span>2</span><div><strong>Creamos tu acceso si hace falta</strong><p>Solo si no existe usuario, creamos un usuario pendiente y enviamos el enlace seguro para definir la contraseña.</p></div></div>
+          <div class="public-support-flow-item"><span>1</span><div><strong>Cuéntame el problema</strong><p>Explica qué falla, desde cuándo y cómo podemos contactar contigo.</p></div></div>
+          <div class="public-support-flow-item"><span>2</span><div><strong>Recibe el seguimiento</strong><p>Podrás consultar el caso desde tu panel. Si es tu primera vez, recibirás un enlace para activar tu acceso.</p></div></div>
           <div class="public-support-flow-item"><span>3</span><div><strong>Te atiendo personalmente</strong><p>Reviso tu incidencia y te contacto para confirmar el diagnóstico y el siguiente paso.</p></div></div>
         </div>
 
@@ -372,9 +375,6 @@ function formSection() {
           </figcaption>
         </figure>
 
-        <p class="public-support-privacy">
-          Tus datos se usan únicamente para gestionar la incidencia y mantenerte informado sobre ella.
-        </p>
       </div>
 
       <form class="public-support-form" data-public-support-form="true" novalidate autocomplete="on">
@@ -437,6 +437,11 @@ function formSection() {
             <span class="public-support-submit-arrow" aria-hidden="true">→</span>
           </button>
         </div>
+        <p class="public-support-privacy public-support-privacy--form">
+          Tus datos se usan únicamente para gestionar la incidencia y mantenerte informado sobre ella.
+          Responsable: Cristian Ávila Luque (Onion Support).
+          <a href="/#public-privacy">Más información sobre privacidad y tus derechos</a>.
+        </p>
       </form>
     </div>`;
 
@@ -577,33 +582,22 @@ function retargetCtas(root) {
   root.querySelectorAll(selector).forEach(syncIntakeCta);
 }
 
-function syncFaq(root) {
-  for (const item of root.querySelectorAll(".public-home-faq-item")) {
-    const summary = text(item.querySelector("summary")?.textContent).toLowerCase();
-    if (summary !== "¿cómo solicito un diagnóstico?") continue;
-
-    const answer = item.querySelector("p");
-    if (answer) {
-      answer.textContent =
-        "Completa el formulario de la web. Si tu correo o teléfono ya corresponde a una cuenta, vincularemos la incidencia a esa cuenta sin modificar el perfil. Si no existe usuario, crearemos el usuario pendiente y enviaremos un email de activación. La ficha de cliente la gestiona Onion Support.";
-    }
-    break;
-  }
-}
-
 function nationalSpanishDigits(value = "") {
-  let valueDigits = String(value ?? "").replace(/\D/g, "");
+  const raw = String(value ?? "");
+  let valueDigits = raw.replace(/\D/g, "");
 
   if (valueDigits.startsWith("0034")) valueDigits = valueDigits.slice(4);
+  else if (/^\s*\+34/.test(raw)) valueDigits = valueDigits.slice(2);
   else if (valueDigits.startsWith("34") && valueDigits.length === 11) valueDigits = valueDigits.slice(2);
 
-  return valueDigits.slice(0, 9);
+  return valueDigits;
 }
 
 function formatNationalSpanishPhone(value = "") {
   const national = nationalSpanishDigits(value);
   if (!national) return "";
-  return [national.slice(0, 3), national.slice(3, 6), national.slice(6, 9)]
+  if (national.length > 9) return String(value ?? "").trim();
+  return [national.slice(0, 3), national.slice(3, 6), national.slice(6)]
     .filter(Boolean)
     .join(" ");
 }
@@ -617,7 +611,7 @@ function normalizeSpanishPhone(value = "") {
 
 function prefill(root) {
   const form = root?.querySelector?.(FORM);
-  if (!form) return;
+  if (!form || form.dataset.submitting === "true") return;
 
   const phoneInput = form.elements.namedItem("phone");
   const { user, authenticated } = session();
@@ -649,9 +643,9 @@ function enhance(root) {
   if (!enhanced.has(root)) {
     ensureForm(root);
     retargetCtas(root);
-    syncFaq(root);
     enhanced.add(root);
     root.dataset.publicSupportReady = "true";
+    root.dispatchEvent(new CustomEvent("public-support:ready", { bubbles: true }));
   }
 
   syncIdentity(root);
@@ -674,6 +668,7 @@ function queueScan(mutations = null) {
   if (Array.isArray(mutations) && !mutationsTouchSelector(mutations, `${HOME}, ${FORM}`)) {
     return false;
   }
+  cancelDetachedSubmissions();
   if (destroyed || typeof window === "undefined" || scanFrame) return false;
   scanFrame = window.requestAnimationFrame(() => {
     scanFrame = 0;
@@ -696,8 +691,11 @@ function setFieldError(form, input, message = "") {
   if (error) {
     error.textContent = message;
     error.hidden = !invalid;
-    if (invalid) input.setAttribute("aria-describedby", error.id);
-    else if (input.getAttribute("aria-describedby") === error.id) input.removeAttribute("aria-describedby");
+    const descriptions = new Set((input.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean));
+    descriptions.delete(error.id);
+    if (invalid) descriptions.add(error.id);
+    if (descriptions.size) input.setAttribute("aria-describedby", [...descriptions].join(" "));
+    else input.removeAttribute("aria-describedby");
   }
 }
 
@@ -706,6 +704,9 @@ function status(form, message = "", type = "info") {
   if (!node) return;
 
   const clean = text(message);
+  const alert = type === "warning" || type === "error";
+  node.setAttribute("role", alert ? "alert" : "status");
+  node.setAttribute("aria-live", alert ? "assertive" : "polite");
   node.textContent = clean;
   node.hidden = !clean;
   node.dataset.status = clean ? type : "";
@@ -799,7 +800,7 @@ function syncSubmitState(form) {
     label.textContent = busy
       ? "Enviando solicitud…"
       : locked
-        ? "Incidencia en curso"
+        ? text(form.dataset.publicSupportBlockedLabel, "Incidencia en curso")
         : "Crear incidencia";
   }
 
@@ -811,7 +812,8 @@ function setSubmissionLock(
   emailValue,
   phoneValue,
   message,
-  type = "info"
+  type = "info",
+  label = "Incidencia en curso"
 ) {
   const cleanEmail = text(emailValue).toLowerCase();
   const cleanPhone = normalizeSpanishPhone(phoneValue);
@@ -825,6 +827,7 @@ function setSubmissionLock(
 
   form.dataset.publicSupportBlockedMessage = text(message);
   form.dataset.publicSupportBlockedStatus = text(type, "info");
+  form.dataset.publicSupportBlockedLabel = label;
   syncSubmitState(form);
   return true;
 }
@@ -837,7 +840,7 @@ function showSubmissionLock(form) {
 }
 
 function neutralSubmissionMessage() {
-  return "Solicitud recibida. Si los datos identifican de forma coherente una cuenta existente, la solicitud se vinculará a esa cuenta sin modificar el perfil. Si no existe usuario, recibirás un email para activar el nuevo acceso. No se crean fichas de cliente desde este formulario.";
+  return "Solicitud recibida. Revisa tu correo para continuar. Si es tu primera vez, recibirás un enlace para activar tu acceso; si ya tienes cuenta, puedes entrar en tu panel. Si existe una incidencia en curso, no se abrirá otra.";
 }
 
 function activeTicketMessage() {
@@ -856,7 +859,7 @@ function validate(form) {
     fullName: (v) => hasFullName(v) ? "" : "Introduce tu nombre y apellidos.",
     email: (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? "" : "Introduce un correo válido.",
     phone: (v) => normalizeSpanishPhone(v) ? "" : "Introduce un teléfono de España válido (9 dígitos).",
-    address: (v) => v.length >= 5 ? "" : "Introduce la calle y el número.",
+    address: (v) => v.length >= 8 ? "" : "Introduce la calle y el número (al menos 8 caracteres).",
     postalCode: (v) => /^\d{5}$/.test(v) ? "" : "Introduce un código postal español válido de 5 dígitos.",
     city: (v) => v.length >= 2 ? "" : "Introduce la ciudad.",
     province: (v) => v.length >= 2 ? "" : "Introduce la provincia.",
@@ -873,12 +876,27 @@ function validate(form) {
   for (const [name, rule] of Object.entries(rules)) {
     const input = form.elements.namedItem(name);
     if (!input) continue;
-    const message = rule(text(input.value));
+    const value = name === "description" ? descriptionText(input.value) : text(input.value);
+    const limit = name === "phone" ? 18 : input.maxLength;
+    const message = limit > 0 && value.length > limit
+      ? `Usa como máximo ${limit} caracteres.`
+      : rule(value);
     setFieldError(form, input, message);
     if (message) failures.push(input);
   }
 
   return failures;
+}
+
+function descriptionText(value = "") {
+  return String(value ?? "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\t+/g, " ")
+    .split("\n")
+    .map((line) => line.replace(/ +/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function payload(form) {
@@ -894,7 +912,7 @@ function payload(form) {
     province: text(data.get("province")).slice(0, 90),
     country: "España",
     subject: text(data.get("subject")).slice(0, 140),
-    description: text(data.get("description")).slice(0, 4000),
+    description: descriptionText(data.get("description")).slice(0, 4000),
     source: "public-home",
     channel: "web",
   };
@@ -979,17 +997,36 @@ function neutralAccepted(response) {
   return accepted && !ticketId(response) && activation(response) === null;
 }
 
+function acceptedResponse(response) {
+  const envelope = object(response);
+  const body = object(envelope?.data) || envelope;
+  if (!body || [envelope, body].some((value) => (
+    value.ok === false || value.success === false || value.accepted === false
+  ))) return null;
+  if (body.ok !== true || body.success !== true || body.accepted !== true) return null;
+
+  // The public endpoint confirms either neutral reception or the authenticated
+  // owner's canonical ticket. HTTP 2xx alone never confirms acceptance.
+  if (neutralAccepted(body)) {
+    return body.ticketId === null && body.incidenciaId === null && body.activationRequired === null
+      ? body
+      : null;
+  }
+
+  return (
+    typeof body.ticketId === "string" &&
+    /^INC-\d{8}-[a-f\d]{6}$/i.test(body.ticketId) &&
+    body.incidenciaId === body.ticketId &&
+    body.activationRequired === false
+  ) ? body : null;
+}
+
 function successMessage(response) {
   if (neutralAccepted(response)) {
     return neutralSubmissionMessage();
   }
 
-  const id = ticketId(response);
-  const prefix = id ? `Incidencia ${id} creada.` : "Incidencia creada.";
-
-  return activation(response) === false
-    ? `${prefix} Ya puedes consultarla desde tu panel.`
-    : `${prefix} Revisa tu correo para activar tu usuario. La ficha de cliente, si corresponde, la gestiona Onion Support.`;
+  return `Incidencia ${ticketId(response)} creada. Ya puedes consultarla desde tu panel.`;
 }
 
 function errorMessage(error) {
@@ -1016,7 +1053,32 @@ function clearAcceptedIssueFields(form) {
   if (counter) counter.textContent = "0 / 4000";
 }
 
+function formIsMounted(form) {
+  return Boolean(!destroyed && form?.isConnected && mountRoot?.contains(form));
+}
+
+function cancelDetachedSubmissions() {
+  for (const [form] of pendingForms) {
+    if (formIsMounted(form)) continue;
+    submissions.cancel(form, "public-form-unmounted");
+    pendingForms.delete(form);
+    submitting(form, false);
+  }
+}
+
+function showServerFieldErrors(form, error) {
+  const errors = error?.payload?.errors;
+  if (!Array.isArray(errors)) return;
+  for (const item of errors) {
+    const input = form.elements.namedItem(text(item?.field));
+    if (input?.matches?.("input[name], textarea[name]") && input.name !== "website") {
+      setFieldError(form, input, text(item?.message, "Revisa este dato.").slice(0, 240));
+    }
+  }
+}
+
 async function send(form) {
+  if (!formIsMounted(form)) return false;
   if (form.dataset.submitting === "true") return false;
   if (showSubmissionLock(form)) return false;
   status(form);
@@ -1029,7 +1091,8 @@ async function send(form) {
       currentFormEmail(form),
       currentFormPhone(form),
       message,
-      "success"
+      "success",
+      "Solicitud recibida"
     );
     return true;
   }
@@ -1044,19 +1107,28 @@ async function send(form) {
   const body = payload(form);
   const requestKey = idempotencyKey(form);
   const useAuth = session().authenticated === true;
+  const task = submissions.begin(form);
+  const isCurrent = () => task.isCurrent() && formIsMounted(form);
+  pendingForms.set(form, task);
   submitting(form, true);
 
   try {
-    const response = await Http.post(PUBLIC_TICKET_ENDPOINT, body, {
+    const received = await Http.post(PUBLIC_TICKET_ENDPOINT, body, {
       auth: useAuth,
       noAutoRefresh: !useAuth,
       headers: {
         "Idempotency-Key": requestKey,
       },
       timeout: 50000,
+      signal: task.signal,
       source: "public-support.intake",
     });
 
+    if (!isCurrent()) return false;
+    const response = acceptedResponse(received);
+    if (!response) {
+      throw new Error("PUBLIC_TICKET_RESPONSE_UNCONFIRMED");
+    }
     const message = successMessage(response);
     status(form, message, "success");
 
@@ -1074,12 +1146,15 @@ async function send(form) {
       body.email,
       body.phone,
       message,
-      "success"
+      "success",
+      neutralAccepted(response) ? "Solicitud recibida" : "Incidencia en curso"
     );
     return true;
   } catch (error) {
+    if (!isCurrent()) return false;
     const isActive = activeTicketConflict(error);
     const message = errorMessage(error);
+    showServerFieldErrors(form, error);
     status(form, message, isActive ? "info" : "error");
 
     if (isActive) {
@@ -1099,7 +1174,9 @@ async function send(form) {
 
     return false;
   } finally {
-    submitting(form, false);
+    if (isCurrent()) submitting(form, false);
+    if (pendingForms.get(form) === task) pendingForms.delete(form);
+    task.finish();
   }
 }
 
@@ -1144,6 +1221,7 @@ function bindFormEvents(root) {
 
   root.addEventListener("submit", onSubmit, true);
   root.addEventListener("input", onInput, true);
+  root.addEventListener("change", onInput, true);
   root.addEventListener("focusout", onFocusOut, true);
   return true;
 }
@@ -1153,6 +1231,7 @@ function unbindFormEvents(root) {
 
   root.removeEventListener("submit", onSubmit, true);
   root.removeEventListener("input", onInput, true);
+  root.removeEventListener("change", onInput, true);
   root.removeEventListener("focusout", onFocusOut, true);
   return true;
 }
@@ -1181,6 +1260,8 @@ function install() {
 export function destroyPublicSupport() {
   if (typeof window === "undefined" || destroyed) return false;
   destroyed = true;
+  cancelDetachedSubmissions();
+  submissions.dispose("public-support-destroyed");
 
   unbindFormEvents(mountRoot);
   window.removeEventListener("onion:main:ready", queueScan);

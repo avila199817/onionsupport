@@ -65,6 +65,7 @@ def main():
         reject("bootstrap below boot", "src/main.js", lambda text: text.replace(IMPORT, "") + "\n" + IMPORT, "antes del boot")
         reject("unmarked ESM migration", "index.html", lambda text: text.replace(MARKER, "<!-- public-site-v2 -->"), "modo clásico")
         reject("ESM in classic", contract.BOOTSTRAP_PATH, lambda text: 'import "./module.js";\n' + text, "modo clásico", legacy)
+        reject("account page added to measurement", contract.BOOTSTRAP_PATH, lambda text: text.replace('const PUBLIC_MARKETING_PATHS = new Set([', 'const PUBLIC_MARKETING_PATHS = new Set(["/login",'), "exactamente a las seis rutas comerciales")
         reject("duplicate classic tag", "seo/impresoras.html", lambda text: text.replace(contract.SCRIPT_TAG, contract.SCRIPT_TAG * 2), "encontrado 2", legacy)
         print(f"Google wiring contract: PASS (2 wiring modes + {len(checks)} rejected mutations)")
 

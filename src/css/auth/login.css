@@ -154,6 +154,7 @@ body.auth-screen.auth-no-scroll {
   z-index: 1;
 
   display: grid;
+  grid-template-rows: minmax(min-content, 1fr) auto;
   place-items: center;
 
   inline-size: 100%;
@@ -310,7 +311,8 @@ body.auth-screen.auth-no-scroll {
 }
 
 .public-auth-shell--login .public-auth-body {
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .login-pro--portal {
@@ -917,7 +919,7 @@ body.auth-screen.auth-no-scroll {
 
   font-size: clamp(27px, 2.8vw, 36px);
   font-weight: 950;
-  line-height: 1;
+  line-height: 1.12;
   letter-spacing: -.05em;
 
   text-wrap: balance;
@@ -930,7 +932,7 @@ body.auth-screen.auth-no-scroll {
 
   color: var(--auth-text-soft);
 
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 520;
   line-height: 1.5;
 }
@@ -976,7 +978,7 @@ body.auth-screen.auth-no-scroll {
 .password-reset-label {
   color: #dbe9f8;
 
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 720;
   line-height: 1.25;
   letter-spacing: -.01em;
@@ -1177,7 +1179,7 @@ body.auth-screen.auth-no-scroll {
 
   color: #ff8297;
 
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   line-height: 1.3;
 }
@@ -1443,7 +1445,7 @@ body.auth-screen.auth-no-scroll {
 
   text-decoration: none;
 
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 780;
   line-height: 1.25;
 
@@ -1468,7 +1470,8 @@ body.auth-screen.auth-no-scroll {
 .password-reset-link:focus-visible,
 .auth-reset a:focus-visible,
 .login-reset a:focus-visible {
-  outline: none;
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
 
   border-radius: 7px;
   box-shadow: 0 0 0 4px rgb(19 148 255 / .13);
@@ -1488,7 +1491,7 @@ body.auth-screen.auth-no-scroll {
   color: #7f92aa;
   background: rgb(255 255 255 / .018);
 
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 620;
   line-height: 1.4;
 }
@@ -1720,7 +1723,7 @@ body.auth-screen.auth-no-scroll {
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / .05);
 
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 680;
   line-height: 1.4;
 }
@@ -1769,7 +1772,7 @@ body.auth-screen.auth-no-scroll {
 
   color: #6f8199;
 
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 650;
   line-height: 1.35;
   letter-spacing: .02em;
@@ -1802,19 +1805,76 @@ body.auth-screen.auth-no-scroll {
   inline-size: 100%;
 }
 
+.auth-home-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-block-size: 48px;
+  margin-block-end: 8px;
+  border-radius: 14px;
+  color: var(--auth-text-strong);
+  text-decoration: none;
+  touch-action: manipulation;
+}
+
+.auth-home-link:focus-visible {
+  outline: 2px solid var(--auth-accent-2);
+  outline-offset: 5px;
+}
+
+.auth-home-link .auth-home-logo-shell {
+  inline-size: 48px;
+  block-size: 48px;
+  flex: none;
+  border-radius: 15px;
+}
+
+.auth-home-link .auth-home-logo {
+  inline-size: 36px;
+  block-size: 36px;
+}
+
+.auth-home-copy {
+  display: grid;
+  gap: 3px;
+  text-align: start;
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.auth-home-copy > span {
+  color: var(--auth-text-soft);
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .password-reset-password-policy,
 .auth-help {
   margin: -2px 0 0;
 
-  color: #7f92aa;
+  color: var(--auth-text-soft);
 
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   line-height: 1.45;
 }
 
 .password-reset-links {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
   text-align: center;
+}
+
+.password-reset-links > a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-block-size: 44px;
+  padding: 6px 10px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 /* =========================================================
@@ -2238,11 +2298,11 @@ body.auth-screen.auth-no-scroll {
   }
 
   .login-card-security {
-    font-size: 9px;
+    font-size: 12px;
   }
 
   .login-card-footer {
-    font-size: 8px;
+    font-size: 11px;
   }
 
   .public-auth-shell--password-request,
@@ -2346,7 +2406,7 @@ body.auth-screen.auth-no-scroll {
   }
 
   .login-card-subtitle {
-    font-size: 12px;
+    font-size: 14px;
   }
 
   .login-form--portal {
@@ -2383,6 +2443,38 @@ body.auth-screen.auth-no-scroll {
 /* =========================================================
    20. FALLBACK / REDUCED MOTION / PRINT
 ========================================================= */
+
+@media (forced-colors: active) {
+  .public-auth-shell .login-card-panel,
+  .public-auth-shell .login-input-shell,
+  .public-auth-shell .login-card-security,
+  .public-auth-shell .auth-message {
+    border-color: CanvasText;
+    box-shadow: none;
+  }
+
+  .public-auth-shell :is(a, button, input):focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 3px;
+  }
+
+  .public-auth-shell :is(button, input):disabled {
+    color: GrayText;
+    border-color: GrayText;
+    opacity: 1;
+  }
+
+  .public-auth-shell .auth-submit {
+    border-color: ButtonText;
+  }
+
+  .login-page-glow,
+  .login-orb,
+  .login-grid-glow,
+  .login-card-sheen {
+    display: none;
+  }
+}
 
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .login-portal-frame,

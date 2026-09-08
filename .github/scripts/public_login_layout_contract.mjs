@@ -13,6 +13,7 @@ const BASE_AUTH_CSS =
   "/src/css/auth/login.css";
 const PORTAL_LAYOUT_CSS =
   "/src/css/auth/login.portal-layout.css";
+const PUBLIC_LEGAL_CSS = "/src/css/views/public/legal-footer.css";
 
 const layoutCss =
   read("src/css/auth/login.portal-layout.css");
@@ -75,6 +76,7 @@ assert.equal(
 assert.deepEqual(
   getRouteStyleHrefs("login"),
   [
+    PUBLIC_LEGAL_CSS,
     BASE_AUTH_CSS,
     PORTAL_LAYOUT_CSS,
   ],
@@ -88,7 +90,7 @@ for (const siblingRoute of [
 ]) {
   assert.deepEqual(
     getRouteStyleHrefs(siblingRoute),
-    [BASE_AUTH_CSS],
+    [PUBLIC_LEGAL_CSS, BASE_AUTH_CSS],
     `${siblingRoute} no debe heredar la composición exclusiva del login`
   );
 }

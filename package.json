@@ -21,7 +21,7 @@
     "test:browser:ui": "node .github/scripts/avatar_runtime_dom_contract.mjs && node .github/scripts/avatar_consumer_identity_contract.mjs && node .github/scripts/incidencias_comment_avatar_runtime_contract.mjs && node .github/scripts/modal_lifecycle_contract.mjs && node .github/scripts/consent_layout_browser_contract.mjs && node .github/scripts/ui_loading_browser_contract.mjs && node tools/public-site-browser-contract.mjs && node tools/public-support-browser-contract.mjs && node tools/private-domain-contracts.mjs --browser"
   },
   "devDependencies": {
-    "playwright-core": "1.62.1",
+    "playwright-core": "1.63.0",
     "vite": "8.2.2"
   }
 }

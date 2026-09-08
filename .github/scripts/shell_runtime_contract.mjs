@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 const files = [
   {
     path: "src/ui/sidebar/index.js",
-    version: "sidebar.controller.v7-logout-fail-closed",
+    version: "sidebar.controller.v8-whatsapp-sidebar-placeholder",
     reader: "readCoreState",
   },
   {

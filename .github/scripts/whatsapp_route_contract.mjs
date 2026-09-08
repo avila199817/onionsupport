@@ -71,7 +71,10 @@ assert.doesNotMatch(api, /localStorage|sessionStorage|WebSocket|EventSource/);
 // Template consumes the global avatar/media authorities instead of inventing one.
 assert.match(template, /resolveAvatarPresentation/);
 assert.match(template, /sanitizeRuntimeImageUrl/);
-assert.match(template, /class="ui-avatar/);
+assert.match(template, /className = "ui-avatar"/);
+assert.match(template, /"ui-avatar whatsapp-conversation-avatar"/);
+assert.match(template, /"ui-avatar whatsapp-thread-avatar"/);
+assert.match(template, /"ui-avatar whatsapp-contact-avatar"/);
 assert.match(template, /data-avatar-system="true"/);
 assert.match(template, /data-avatar-fallback="true"/);
 assert.match(template, /data-avatar-image="true"/);

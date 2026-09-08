@@ -70,7 +70,8 @@ assert.match(api, /signal:\s*options\.signal/);
 assert.doesNotMatch(api, /graph\.facebook|facebook\.com|graph\.whatsapp|wa\.me/i);
 assert.doesNotMatch(api, /localStorage|sessionStorage|WebSocket|EventSource/);
 
-// Template consumes the global avatar/media authorities instead of inventing one.
+// Template consumes shared authorities and is a true full-view workspace.
+assert.match(template, /WHATSAPP_TEMPLATE_VERSION[\s\S]*correo-fullview/);
 assert.match(template, /resolveAvatarPresentation/);
 assert.match(template, /sanitizeRuntimeImageUrl/);
 assert.match(template, /className = "ui-avatar"/);
@@ -83,33 +84,48 @@ assert.match(template, /data-avatar-image="true"/);
 assert.match(template, /class="ui-btn ui-btn-primary/);
 assert.match(template, /class="ui-input whatsapp-search-input/);
 assert.match(template, /class="ui-textarea whatsapp-composer-input/);
-assert.match(template, /class="ui-card no-hover whatsapp-pane/);
+assert.match(template, /class="whatsapp-pane whatsapp-conversations-pane/);
+assert.match(template, /class="whatsapp-pane whatsapp-thread-pane/);
+assert.match(template, /class="whatsapp-pane whatsapp-info-pane/);
 assert.match(template, /data-app-icon="wa"/);
+assert.match(template, /data-app-icon="reload"/);
+assert.match(template, /aria-label="WhatsApp Business"/);
+assert.doesNotMatch(template, /whatsapp-page-head|<h1|whatsapp-page-title/);
+assert.doesNotMatch(template, /class="ui-card/);
 assert.doesNotMatch(template, /style=/i);
 assert.doesNotMatch(template, /\bfetch\s*\(|\bHttp\s*\.|\/api\/whatsapp/);
 
-// Existing global systems actually expose the contracts WhatsApp consumes.
+// Existing global systems expose everything WhatsApp consumes.
 assert.match(avatarSystem, /export function synchronizeAvatars/);
 assert.match(avatarSystem, /resolveAvatarPresentation/);
 assert.match(avatarCss, /\.ui-avatar/);
-assert.match(uiCss, /\.ui-card/);
 assert.match(uiCss, /\.ui-btn-primary/);
+assert.match(uiCss, /\.ui-btn-ghost/);
 assert.match(uiCss, /\.ui-input/);
 assert.match(uiCss, /\.ui-textarea/);
+assert.match(uiCss, /\.ui-chip/);
+assert.match(uiCss, /\.ui-spinner/);
 assert.match(appIcons, /--app-icon-whatsapp/);
+assert.match(appIcons, /--app-icon-refresh/);
 assert.match(appIcons, /data-app-icon="wa"/);
+assert.match(appIcons, /data-app-icon="reload"/);
 
-// Domain CSS: geometry only, all visual paint comes from existing tokens/systems.
+// Domain CSS: Correo-like viewport discipline, geometry only, shared paint.
 assert.match(css, /DOMAIN-ONLY CSS/);
+assert.match(css, /CORREO FULL-VIEW PARITY/);
 assert.match(css, /components\/ui\.css/);
 assert.match(css, /components\/avatar-system\.css/);
 assert.match(css, /components\/app-icons\.css/);
+assert.match(cssCode, /\.panel-content\[data-view="whatsapp"\]/);
+assert.match(cssCode, /\.main-content:has\(\.whatsapp-page\)/);
 assert.match(cssCode, /\.whatsapp-workspace/);
+assert.match(cssCode, /grid-template-columns:[\s\S]*clamp\(300px, 23vw, 380px\)[\s\S]*minmax\(500px, 1fr\)/);
 assert.match(cssCode, /\.whatsapp-message\.is-outbound/);
+assert.match(cssCode, /\.whatsapp-pane-actions/);
 assert.match(cssCode, /@container \(max-width: 780px\)/);
 assert.doesNotMatch(cssCode, /#[0-9a-f]{3,8}\b/i);
 assert.doesNotMatch(cssCode, /!important\b/i);
 assert.doesNotMatch(cssCode, /@import/);
 assert.doesNotMatch(cssCode, /data:image|<svg/i);
 
-console.log("WhatsApp route contract: PASS · professional Onion inbox · centralized backend · shared UI/avatar authority");
+console.log("WhatsApp route contract: PASS · Correo-parity full view · centralized backend · shared UI/avatar authority");

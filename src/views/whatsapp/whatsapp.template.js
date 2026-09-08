@@ -2,8 +2,11 @@
    Onion Support - WhatsApp Template
    Archivo: /src/views/whatsapp/whatsapp.template.js
 
-   PURE TEMPLATE · GLOBAL UI + AVATAR SYSTEM CONSUMER
-   No HTTP, Router, storage ni listeners.
+   FULL-VIEW INBOX · CORREO PARITY · GLOBAL UI/AUTHORITY CONSUMER
+   - Sin header de página: el workspace ocupa toda la vista útil.
+   - Tres paneles continuos: conversaciones, hilo y ficha.
+   - Sin HTTP, Router, storage ni listeners.
+   - Avatar System, media sanitizer, UI controls y app-icons existentes.
 ========================================================= */
 
 "use strict";
@@ -14,7 +17,7 @@ import {
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 
 export const WHATSAPP_TEMPLATE_VERSION =
-  "whatsapp.template.v1.professional-inbox";
+  "whatsapp.template.v2.correo-fullview";
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -90,9 +93,11 @@ function formatConversationTime(value = "") {
     date.getDate() === now.getDate();
 
   try {
-    return new Intl.DateTimeFormat("es-ES", sameDay
-      ? { hour: "2-digit", minute: "2-digit" }
-      : { day: "2-digit", month: "short" }
+    return new Intl.DateTimeFormat(
+      "es-ES",
+      sameDay
+        ? { hour: "2-digit", minute: "2-digit" }
+        : { day: "2-digit", month: "short" }
     ).format(date);
   } catch {
     return "";
@@ -113,7 +118,9 @@ function formatPhone(value = "") {
 
 function conversationById(items = [], id = "") {
   const target = text(id, "");
-  return safeArray(items).find((item) => text(item?.conversationId, "") === target) || null;
+  return safeArray(items).find(
+    (item) => text(item?.conversationId, "") === target
+  ) || null;
 }
 
 function identityName(identity = {}) {
@@ -250,41 +257,14 @@ function metaReady(meta = {}) {
   );
 }
 
-function renderHeader(state = {}) {
-  const ready = metaReady(state.meta);
-  const metaLoading = state.loadingMeta === true;
-  const stateText = metaLoading
-    ? "Comprobando canal…"
-    : ready
-      ? "Cloud API lista"
-      : "Canal pendiente";
-
-  return `
-    <header class="whatsapp-page-head">
-      <div class="whatsapp-page-title-wrap">
-        <span class="whatsapp-channel-icon app-icon" data-app-icon="wa" aria-hidden="true"></span>
-        <div class="whatsapp-page-copy">
-          <h1>WhatsApp</h1>
-          <p>Conversaciones de WhatsApp Business atendidas desde Onion Support.</p>
-        </div>
-      </div>
-
-      <div class="whatsapp-page-actions">
-        <span class="ui-chip whatsapp-channel-state" data-state="${ready ? "ready" : "pending"}">
-          <span class="whatsapp-state-dot" aria-hidden="true"></span>
-          ${escapeHtml(stateText)}
-        </span>
-        <button
-          class="ui-btn ui-btn-secondary"
-          type="button"
-          data-whatsapp-action="refresh"
-          ${state.refreshing ? "disabled aria-busy=\"true\"" : ""}
-        >
-          ${state.refreshing ? "Actualizando…" : "Actualizar"}
-        </button>
-      </div>
-    </header>
-  `;
+function channelState(state = {}) {
+  if (state.loadingMeta === true) {
+    return { key: "loading", label: "Comprobando Cloud API" };
+  }
+  if (metaReady(state.meta)) {
+    return { key: "ready", label: "Cloud API lista" };
+  }
+  return { key: "pending", label: "Canal pendiente" };
 }
 
 function renderConversationRow(conversation = {}, state = {}) {
@@ -309,7 +289,6 @@ function renderConversationRow(conversation = {}, state = {}) {
       aria-pressed="${selected ? "true" : "false"}"
     >
       ${renderAvatar(conversation, identity, "ui-avatar whatsapp-conversation-avatar")}
-
       <span class="whatsapp-conversation-copy">
         <span class="whatsapp-conversation-headline">
           <strong>${escapeHtml(name)}</strong>
@@ -360,14 +339,41 @@ function renderConversationList(state = {}) {
 }
 
 function renderConversationPane(state = {}) {
+  const channel = channelState(state);
+  const count = safeArray(state.filteredConversations).length;
+
   return `
-    <aside class="ui-card no-hover whatsapp-pane whatsapp-conversations-pane" data-whatsapp-panel="list">
+    <aside class="whatsapp-pane whatsapp-conversations-pane" data-whatsapp-panel="list">
       <div class="whatsapp-pane-head">
-        <div>
-          <span class="whatsapp-pane-kicker">Bandeja</span>
-          <strong>Conversaciones</strong>
+        <div class="whatsapp-pane-title">
+          <span class="whatsapp-pane-title-icon app-icon" data-app-icon="wa" aria-hidden="true"></span>
+          <span class="whatsapp-pane-title-copy">
+            <span class="whatsapp-pane-kicker">Bandeja</span>
+            <strong>Conversaciones</strong>
+          </span>
         </div>
-        <span class="ui-chip">${escapeHtml(String(safeArray(state.filteredConversations).length))}</span>
+        <div class="whatsapp-pane-actions">
+          <span
+            class="whatsapp-channel-mini"
+            data-state="${attr(channel.key)}"
+            role="status"
+            aria-label="${attr(channel.label)}"
+            title="${attr(channel.label)}"
+          ><span class="whatsapp-channel-mini-dot" aria-hidden="true"></span></span>
+          <span class="ui-chip">${escapeHtml(String(count))}</span>
+          <button
+            class="ui-btn ui-btn-ghost whatsapp-refresh-button"
+            type="button"
+            data-whatsapp-action="refresh"
+            aria-label="Actualizar conversaciones"
+            title="Actualizar"
+            ${state.refreshing ? "disabled aria-busy=\"true\"" : ""}
+          >
+            ${state.refreshing
+              ? `<span class="ui-spinner" aria-hidden="true"></span>`
+              : `<span class="app-icon" data-app-icon="reload" aria-hidden="true"></span>`}
+          </button>
+        </div>
       </div>
 
       <div class="whatsapp-search-wrap">
@@ -599,7 +605,7 @@ function renderComposer(state = {}) {
 
 function renderThreadPane(state = {}) {
   return `
-    <main class="ui-card no-hover whatsapp-pane whatsapp-thread-pane" data-whatsapp-panel="thread">
+    <main class="whatsapp-pane whatsapp-thread-pane" data-whatsapp-panel="thread">
       ${renderThreadHeader(state)}
       <div class="whatsapp-thread-scroll" data-whatsapp-thread-scroll="true" aria-live="polite">
         ${renderThreadBody(state)}
@@ -622,7 +628,7 @@ function renderInfoPane(state = {}) {
   const conversation = conversationById(state.conversations, state.selectedConversationId);
   if (!conversation) {
     return `
-      <aside class="ui-card no-hover whatsapp-pane whatsapp-info-pane" data-whatsapp-panel="info">
+      <aside class="whatsapp-pane whatsapp-info-pane" data-whatsapp-panel="info">
         <div class="whatsapp-pane-head"><div><span class="whatsapp-pane-kicker">Ficha</span><strong>Contacto</strong></div></div>
         <div class="whatsapp-pane-state"><span>Selecciona una conversación para ver su información.</span></div>
       </aside>
@@ -635,7 +641,7 @@ function renderInfoPane(state = {}) {
   const phone = formatPhone(conversation.waId || conversation.phone);
 
   return `
-    <aside class="ui-card no-hover whatsapp-pane whatsapp-info-pane" data-whatsapp-panel="info">
+    <aside class="whatsapp-pane whatsapp-info-pane" data-whatsapp-panel="info">
       <div class="whatsapp-pane-head">
         <div><span class="whatsapp-pane-kicker">Ficha</span><strong>Contacto</strong></div>
         <span class="ui-chip">${escapeHtml(identityLabel(conversation))}</span>
@@ -676,9 +682,8 @@ export function renderWhatsAppInbox(input = {}) {
       data-view="whatsapp"
       data-whatsapp-phase="inbox"
       data-whatsapp-mobile-panel="${attr(mobilePanel)}"
-      aria-labelledby="whatsapp-page-title"
+      aria-label="WhatsApp Business"
     >
-      ${renderHeader(state).replace("<h1>", '<h1 id="whatsapp-page-title">')}
       <div class="whatsapp-workspace">
         ${renderConversationPane(state)}
         ${renderThreadPane(state)}

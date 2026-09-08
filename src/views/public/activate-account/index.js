@@ -456,6 +456,7 @@ function resolveTemplate(context = {}) {
   const form = view.querySelector("[data-password-reset-form]");
   const submit = view.querySelector("[data-password-reset-submit]");
   const policy = view.querySelector("[data-password-reset-policy]");
+  const recoveryLink = view.querySelector("[data-password-reset-recovery]");
 
   pro?.classList.add("activate-account-pro");
   panel?.classList.add("activate-account-card-panel");
@@ -501,6 +502,14 @@ function resolveTemplate(context = {}) {
     policy.classList.add("activate-account-password-policy");
     policy.dataset.activateAccountPolicy = "true";
     policy.textContent = AUTH_PASSWORD_POLICY_HELP;
+  }
+
+  if (recoveryLink) {
+    recoveryLink.href = "/#incidencia";
+    recoveryLink.dataset.route = "/#incidencia";
+    recoveryLink.dataset.activateAccountHelp = "true";
+    recoveryLink.removeAttribute("data-password-reset-recovery");
+    recoveryLink.textContent = "Solicitar ayuda con la activación";
   }
 
   const message = view.querySelector(
@@ -1249,7 +1258,8 @@ export function renderActivateAccountView(
     if (
       !mounted ||
       submitting ||
-      completed
+      completed ||
+      !token
     ) {
       return false;
     }
@@ -1396,7 +1406,7 @@ export function renderActivateAccountView(
   }
 
   function onPasswordInput() {
-    if (submitting || completed) return;
+    if (submitting || completed || !token) return;
 
     clearMessage(refs);
     clearFieldError(refs, "password");
@@ -1410,7 +1420,7 @@ export function renderActivateAccountView(
   }
 
   function onConfirmInput() {
-    if (submitting || completed) return;
+    if (submitting || completed || !token) return;
 
     clearMessage(refs);
     clearFieldError(refs, "confirmPassword");
@@ -1424,16 +1434,17 @@ export function renderActivateAccountView(
     Si el token no está disponible, fallamos cerrado antes de tocar backend.
   */
   if (!token) {
-    setFieldError(
+    setMessage(
       refs,
-      "token",
-      "El enlace de activación no es válido o ha caducado."
+      "Este enlace de activación no es válido. Solicita ayuda para activar tu cuenta.",
+      "error"
     );
 
     refs.password.disabled = true;
     refs.confirmPassword.disabled = true;
     refs.submit.disabled = true;
     passwordControls.setDisabled(true);
+    focusSafe(view.querySelector("[data-activate-account-help]"));
   } else {
     focusSafe(refs.password);
   }

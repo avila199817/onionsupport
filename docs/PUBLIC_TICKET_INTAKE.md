@@ -230,3 +230,11 @@ Usuarios, lookups y tickets viven en contenedores/particiones diferentes, por lo
 El contenedor de clientes es de solo lectura/reutilización para este flujo: puede consultarse una relación ya existente, pero la home no crea ni modifica clientes.
 
 Para una identidad `NEW`, el correo de activación es crítico porque contiene el token raw. Si ese correo falla después de crear el ticket, el backend intenta revertir de forma segura el ticket y la identidad recién provisionada. Los correos informativos de creación de incidencia son fail-soft y no cambian la autoridad de los datos persistidos.
+
+## Conservación de datos y ciclo de vida del navegador
+
+La interfaz sólo confirma aceptación cuando la respuesta cumple el contrato positivo del endpoint (`ok`, `success` y `accepted` verdaderos). La respuesta neutra exige IDs y activación nulos; la respuesta al propietario autenticado confirma el mismo ID canónico en `ticketId` e `incidenciaId` y `activationRequired: false`. Una respuesta HTTP2xx vacía, negativa o inesperada conserva los campos y la clave de idempotencia para permitir un reintento.
+
+El envío utiliza `createAsyncScope` y `AbortSignal`. Al desmontar el formulario se cancela su operación; una resolución tardía no puede modificar la nueva vista ni emitir aceptación. Los saltos de línea de la descripción se conservan. Al pegar un teléfono internacional se procesa el texto completo antes del límite visual y se conserva cualquier exceso para que la validación lo rechace, sin convertirlo en otra identidad.
+
+El aviso resumido de privacidad está junto al envío y enlaza a `/#public-privacy`. No se solicita consentimiento publicitario como condición para recibir soporte.

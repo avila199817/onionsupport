@@ -28,7 +28,7 @@ html:is([data-theme="light"], .theme-light) {
   --public-light-text: #142338;
   --public-light-text-strong: #081423;
   --public-light-text-soft: #52667c;
-  --public-light-text-muted: #708298;
+  --public-light-text-muted: #5f7289;
 
   --public-light-border: rgb(18 57 94 / .12);
   --public-light-border-strong: rgb(19 148 255 / .34);
@@ -38,8 +38,8 @@ html:is([data-theme="light"], .theme-light) {
   --public-light-surface-soft: rgb(244 249 254 / .86);
 
   --public-light-shadow:
-    0 28px 78px rgb(31 67 103 / .14),
-    0 12px 30px rgb(19 148 255 / .07),
+    0 18px 52px rgb(31 67 103 / .10),
+    0 8px 24px rgb(19 148 255 / .04),
     inset 0 1px 0 rgb(255 255 255 / .92);
 }
 
@@ -66,14 +66,14 @@ html:is([data-theme="light"], .theme-light) .public-auth-shell--home {
   --public-home-text: #142338;
   --public-home-text-strong: #081423;
   --public-home-text-soft: #52667c;
-  --public-home-text-muted: #708298;
+  --public-home-text-muted: #5f7289;
 
   --public-home-border: rgb(18 57 94 / .12);
   --public-home-border-strong: rgb(19 148 255 / .34);
 
   --public-home-shadow:
-    0 30px 86px rgb(31 67 103 / .14),
-    0 12px 32px rgb(19 148 255 / .07),
+    0 20px 56px rgb(31 67 103 / .10),
+    0 8px 24px rgb(19 148 255 / .04),
     inset 0 1px 0 rgb(255 255 255 / .90);
 
   color: var(--public-home-text);
@@ -180,7 +180,6 @@ html:is([data-theme="light"], .theme-light) .public-home-nav.is-scrolled {
 
 html:is([data-theme="light"], .theme-light) :is(
   .public-home-brand,
-  .public-home-footer-brand,
   .public-home-brand-name
 ) {
   color: var(--public-home-text-strong);

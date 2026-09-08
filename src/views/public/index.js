@@ -17,6 +17,8 @@
    - Sin lógica de vistas concretas.
 ========================================================= */
 
+import { renderPublicLegalFooter } from "../../core/public-legal.js";
+
 import {
   ROUTES,
   SENSITIVE_QUERY_PARAMS,
@@ -398,6 +400,7 @@ export function renderPublicShell({
   title = "",
   subtitle = "",
   header = true,
+  footer = true,
   body = "",
   ariaLabel = "",
   ariaLabelledBy = "",
@@ -437,6 +440,7 @@ export function renderPublicShell({
         data-public-body="true"
       >
         ${cleanBody}
+        ${footer ? renderPublicLegalFooter() : ""}
       </div>
     </section>
   `;

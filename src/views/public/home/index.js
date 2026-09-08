@@ -40,7 +40,6 @@ const CLASSES = Object.freeze({
   visible: "is-visible",
   menuOpen: "is-menu-open",
   scrolled: "is-scrolled",
-  footerVisible: "is-footer-visible",
   copied: "is-copied",
   counterReady: "is-counter-ready",
   magnetic: "is-magnetic",
@@ -449,6 +448,14 @@ function scrollToHash(hash, refs, host, activeState, options = {}) {
   const clean = normalizeHash(hash);
   const target = getHashTarget(clean, refs);
   if (!target) return false;
+
+  // Fragment links to legal information must reveal the content before its
+  // geometry is measured, including entry from an auth or service page.
+  let disclosure = target.closest("details");
+  while (disclosure) {
+    disclosure.open = true;
+    disclosure = disclosure.parentElement?.closest("details");
+  }
 
   const behavior = options.behavior || (reducedMotion() ? "auto" : "smooth");
   const offset = getScrollOffset(refs);
@@ -996,40 +1003,6 @@ function initReveal(refs, cleanups, host) {
   cleanups.push(() => observer.disconnect());
 }
 
-function initFooterVisibility(refs, cleanups, host) {
-  const footer = refs.root.querySelector(".public-home-footer");
-  if (!footer || !("IntersectionObserver" in window)) return;
-
-  let visible = null;
-
-  const observer = new IntersectionObserver(
-    (entries) => {
-      const next = entries.some((entry) => entry.isIntersecting);
-      if (next === visible) return;
-
-      visible = next;
-      setClass(refs.root, CLASSES.footerVisible, next);
-      setClass(refs.nav, CLASSES.footerVisible, next);
-      setDataset(refs.root, "footerVisible", next ? "true" : "false");
-      dispatchHomeEvent(refs.root, "public-home:footer-visibility", { visible: next });
-    },
-    {
-      root: isWindowHost(host) ? null : host,
-      rootMargin: "0px",
-      threshold: [0, 0.01, 0.08],
-    }
-  );
-
-  observer.observe(footer);
-
-  cleanups.push(() => {
-    observer.disconnect();
-    setClass(refs.root, CLASSES.footerVisible, false);
-    setClass(refs.nav, CLASSES.footerVisible, false);
-    removeDataset(refs.root, "footerVisible");
-  });
-}
-
 function initPointerFx(refs, cleanups) {
   if (reducedMotion()) return;
 
@@ -1280,29 +1253,43 @@ function initFaqCollapsed(refs, cleanups) {
   });
 }
 
-function initInitialTop(refs, host, activeState) {
+function initInitialPosition(refs, host, activeState, cleanups) {
   try {
     if ("scrollRestoration" in window.history) {
       window.history.scrollRestoration = "manual";
-    }
-
-    if (window.location.hash && window.location.hash !== "#") {
-      window.history.replaceState(
-        { source: SOURCE, reason: "public-home-initial-top" },
-        "",
-        `${window.location.pathname}${window.location.search}`
-      );
     }
   } catch {
     // navigation remains usable
   }
 
-  requestFrame(() => {
+  let frame = 0;
+  const position = () => {
+    frame = 0;
+    if (!refs.root.isConnected) return;
+    const hash = window.location.hash;
+    if (hash && scrollToHash(hash, refs, host, activeState, {
+      behavior: "auto", replace: false, focus: true, cleanups,
+    })) return;
+    // Intake mounts after the Home template. Its ready event resolves this
+    // requested fragment without polling, an observer, or losing the URL.
+    if (hash === "#incidencia") return;
     hostScrollTo(host, 0, "auto");
     const first =
       refs.sections.find((section) => sectionHash(section) === "#inicio") || refs.sections[0];
     if (first) setActiveHash(refs, sectionHash(first), activeState);
+  };
+  const schedule = () => {
+    if (!frame) frame = requestFrame(position);
+  };
+  addEvent(cleanups, refs.root, "public-support:ready", () => {
+    // Inserting intake also moves every section after the hero, including
+    // legal disclosures. Restore a requested destination once that insertion
+    // is complete; legal information remains usable even if intake fails.
+    if (window.location.hash && window.location.hash !== "#inicio") schedule();
   });
+  addEvent(cleanups, window, "hashchange", schedule);
+  cleanups.push(() => cancelFrame(frame));
+  schedule();
 }
 
 function appAuth() {
@@ -1344,7 +1331,6 @@ export function renderPublicHomeView(container, context = {}) {
   initAnchorScroll(refs, cleanups, host, activeState, menu);
   initCtaTracking(refs, cleanups);
   initScrollPipeline(refs, cleanups, host);
-  initFooterVisibility(refs, cleanups, host);
   initActiveSection(refs, cleanups, host, activeState);
   initReveal(refs, cleanups, host);
   initPointerFx(refs, cleanups);
@@ -1352,7 +1338,7 @@ export function renderPublicHomeView(container, context = {}) {
   initMetricCounters(refs, cleanups, host);
   initMagneticCards(refs, cleanups);
   initFaqCollapsed(refs, cleanups);
-  initInitialTop(refs, host, activeState);
+  initInitialPosition(refs, host, activeState, cleanups);
 
   const instance = {
     version: PUBLIC_HOME_VIEW_VERSION,

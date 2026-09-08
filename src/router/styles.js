@@ -53,6 +53,7 @@ const MEDIA_INACTIVE =
 
 const STYLE_MANIFEST = Object.freeze({
   "public-home": Object.freeze([
+    "/src/css/views/public/legal-footer.css",
     "/src/css/views/public/index.css",
     "/src/css/views/public/support-request.css",
     "/src/css/views/public/public-support-progress.css",
@@ -60,19 +61,23 @@ const STYLE_MANIFEST = Object.freeze({
   ]),
 
   login: Object.freeze([
+    "/src/css/views/public/legal-footer.css",
     "/src/css/auth/login.css",
     "/src/css/auth/login.portal-layout.css",
   ]),
 
   "password-request": Object.freeze([
+    "/src/css/views/public/legal-footer.css",
     "/src/css/auth/login.css",
   ]),
 
   "password-reset": Object.freeze([
+    "/src/css/views/public/legal-footer.css",
     "/src/css/auth/login.css",
   ]),
 
   "activate-account": Object.freeze([
+    "/src/css/views/public/legal-footer.css",
     "/src/css/auth/login.css",
   ]),
 

@@ -420,31 +420,34 @@ function nationalSpanishDigits(value = "") {
     digits = digits.slice(4);
   } else if (/^\s*\+34/.test(raw)) {
     digits = digits.slice(2);
-  } else if (digits.startsWith("34") && digits.length > 9) {
+  } else if (digits.startsWith("34") && digits.length === 11) {
     digits = digits.slice(2);
   }
 
-  return digits.slice(0, 9);
+  return digits;
 }
 
 function formatNationalPhone(value = "") {
   const digits = nationalSpanishDigits(value);
   if (!digits) return "";
+  if (digits.length > 9) return String(value ?? "").trim();
 
-  return [digits.slice(0, 3), digits.slice(3, 6), digits.slice(6, 9)]
+  return [digits.slice(0, 3), digits.slice(3, 6), digits.slice(6)]
     .filter(Boolean)
     .join(" ");
 }
 
 function nationalDigitsBeforeCaret(value = "", caret = 0) {
-  const before = String(value ?? "").slice(0, Math.max(0, Number(caret) || 0));
-  return nationalSpanishDigits(before).length;
+  const raw = String(value ?? "");
+  const before = raw.slice(0, Math.max(0, Number(caret) || 0));
+  const prefixLength = raw.replace(/\D/g, "").length - nationalSpanishDigits(raw).length;
+  return Math.max(0, before.replace(/\D/g, "").length - prefixLength);
 }
 
 function caretForNationalCount(formatted = "", count = 0) {
   if (!formatted || count <= 0) return 0;
 
-  let seen = 0;
+  let seen = nationalSpanishDigits(formatted).length - formatted.replace(/\D/g, "").length;
 
   for (let index = 0; index < formatted.length; index += 1) {
     if (!/\d/.test(formatted[index])) continue;
@@ -461,25 +464,101 @@ function formatPhoneControl(input = null, keepCaret = true) {
   const raw = String(input.value ?? "");
   const active = document.activeElement === input;
   const selectionStart = active ? input.selectionStart : null;
+  const selectionEnd = active ? input.selectionEnd : null;
+  const selectionDirection = active ? input.selectionDirection : "none";
   const digitCount =
     selectionStart === null
       ? null
       : nationalDigitsBeforeCaret(raw, selectionStart);
+  const endDigitCount =
+    selectionEnd === null
+      ? digitCount
+      : nationalDigitsBeforeCaret(raw, selectionEnd);
   const formatted = formatNationalPhone(raw);
 
   if (raw !== formatted) input.value = formatted;
 
   if (active && keepCaret && digitCount !== null) {
     const caret = caretForNationalCount(formatted, digitCount);
+    const endCaret = caretForNationalCount(formatted, endDigitCount);
 
     try {
-      input.setSelectionRange(caret, caret);
+      input.setSelectionRange(caret, endCaret, selectionDirection);
     } catch {
       // input type/capability fallback
     }
   }
 
   return true;
+}
+
+function commitPhoneEdit(input, value, caretCount) {
+  input.value = formatNationalPhone(value);
+  const caret = caretForNationalCount(input.value, caretCount);
+
+  try {
+    input.setSelectionRange(caret, caret);
+  } catch {
+    // input type/capability fallback
+  }
+
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function onPhonePaste(event) {
+  const input = event?.target;
+  if (!input?.matches?.(PHONE) || input.readOnly || input.disabled) return;
+  if (!event.clipboardData || event.defaultPrevented || event.cancelable === false) return;
+
+  const pasted = event.clipboardData.getData("text/plain");
+  if (!pasted) return;
+
+  const raw = String(input.value ?? "");
+  const start = nationalDigitsBeforeCaret(raw, input.selectionStart ?? raw.length);
+  const end = nationalDigitsBeforeCaret(raw, input.selectionEnd ?? raw.length);
+  const digits = nationalSpanishDigits(raw);
+  const inserted = nationalSpanishDigits(pasted);
+  const nextDigits = digits.slice(0, start) + inserted + digits.slice(end);
+  const nextValue = nextDigits.length > 9
+    ? raw.slice(0, input.selectionStart ?? raw.length) + pasted + raw.slice(input.selectionEnd ?? raw.length)
+    : nextDigits;
+
+  // Read the full clipboard before maxlength can truncate an international number.
+  // Keep excess digits visible so validation can reject them without changing identity.
+  event.preventDefault();
+  commitPhoneEdit(
+    input,
+    nextValue,
+    start + inserted.length
+  );
+}
+
+function onPhoneBeforeInput(event) {
+  const input = event?.target;
+  if (!input?.matches?.(PHONE) || input.readOnly || input.disabled) return;
+  if (event.defaultPrevented || event.cancelable === false || event.isComposing) return;
+
+  const backward = event.inputType === "deleteContentBackward";
+  const forward = event.inputType === "deleteContentForward";
+  if (!backward && !forward) return;
+
+  const raw = String(input.value ?? "");
+  const start = input.selectionStart;
+  if (start === null || start !== input.selectionEnd) return;
+  if (!/\s/.test(raw[backward ? start - 1 : start] || "")) return;
+
+  const digits = nationalSpanishDigits(raw);
+  const count = nationalDigitsBeforeCaret(raw, start);
+  const removeIndex = backward ? count - 1 : count;
+  if (removeIndex < 0 || removeIndex >= digits.length) return;
+  const removeCaret = caretForNationalCount(raw, removeIndex + 1) - 1;
+
+  event.preventDefault();
+  commitPhoneEdit(
+    input,
+    raw.slice(0, removeCaret) + raw.slice(removeCaret + 1),
+    removeIndex
+  );
 }
 
 function removeLegacyPhoneHelp(field = null) {
@@ -783,6 +862,8 @@ function install() {
 
   document.addEventListener("click", onDocumentClick, true);
   document.addEventListener("keydown", onDocumentKeydown, true);
+  document.addEventListener("paste", onPhonePaste, true);
+  document.addEventListener("beforeinput", onPhoneBeforeInput, true);
   document.addEventListener("input", onInput, true);
   document.addEventListener("focusin", onFocusIn, true);
   document.addEventListener("focusout", onFocusOut, true);
@@ -809,6 +890,8 @@ export function destroyPublicHomeExperience() {
 
   document.removeEventListener("click", onDocumentClick, true);
   document.removeEventListener("keydown", onDocumentKeydown, true);
+  document.removeEventListener("paste", onPhonePaste, true);
+  document.removeEventListener("beforeinput", onPhoneBeforeInput, true);
   document.removeEventListener("input", onInput, true);
   document.removeEventListener("focusin", onFocusIn, true);
   document.removeEventListener("focusout", onFocusOut, true);

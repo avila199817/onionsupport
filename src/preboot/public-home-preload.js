@@ -39,6 +39,7 @@
         href: "/src/css/views/public/home-critical.css",
         fetchPriority: "high",
       },
+      { rel: "preload", as: "style", href: "/src/css/views/public/legal-footer.css" },
       { rel: "preload", as: "style", href: "/src/css/views/public/index.css" },
       { rel: "preload", as: "style", href: "/src/css/views/public/support-request.css" },
       { rel: "preload", as: "style", href: "/src/css/views/public/public-support-progress.css" },

@@ -1,4 +1,5 @@
 import { PUBLIC_SITE } from "../../../core/public-site.js";
+import { renderPublicLegalFooter } from "../../../core/public-legal.js";
 
 import {
   PUBLIC_AUTH_LOGO,
@@ -10,7 +11,7 @@ import {
   safeInternalHref,
 } from "../index.js";
 
-export const PUBLIC_HOME_TEMPLATE_VERSION = "public.home.template.final.productivo.2026.25-login-anchor-canonical";
+export const PUBLIC_HOME_TEMPLATE_VERSION = "public.home.template.2026.26-public-experience";
 
 const APP_NAME = PUBLIC_SITE.name;
 
@@ -23,7 +24,6 @@ const CRISTIAN_PROFILE_PHOTO_WEBP_960 = "src/media/img/Cristian_Avila_960.webp";
 const BUSINESS = {
   ...PUBLIC_SITE,
   legalServiceName: "Servicio técnico informático",
-  copyrightYear: "2026",
   loginPath: "/login",
   profileRole: "Técnico informático",
   profilePhoto: CRISTIAN_PROFILE_PHOTO,
@@ -87,15 +87,15 @@ const NAV_ITEMS = [
   { label: "Inicio", href: "#inicio" },
   { label: "Servicios", href: "#servicios" },
   { label: "Método", href: "#metodo" },
-  { label: "Precios", href: "#precios" },
+  { label: "Presupuesto", href: "#precios" },
   { label: "Contacto", href: "#contacto" },
   { label: "FAQ", href: "#faq" },
 ];
 
 const TRUST_ITEMS = [
-  { icon: "bolt", label: "Respuesta ágil" },
-  { icon: "shield", label: "Profesional" },
-  { icon: "invoice", label: "Factura disponible" },
+  { icon: "bolt", label: "Trato directo" },
+  { icon: "shield", label: "Presupuesto previo" },
+  { icon: "invoice", label: "Servicio con factura" },
 ];
 
 const SERVICES = [
@@ -103,55 +103,37 @@ const SERVICES = [
     icon: "laptop",
     title: "Ordenadores y portátiles",
     href: "/reparacion-ordenadores",
-    text: "Arranque, lentitud, pantallazos, temperatura, batería, disco, periféricos y fallos de uso diario.",
-  },
-  {
-    icon: "chip",
-    title: "SSD, RAM y componentes",
-    href: "/reparacion-ordenadores",
-    text: "Mejoras con sentido para ganar velocidad, estabilidad y vida útil sin cambiar de equipo.",
+    text: "Resolvemos fallos de arranque, lentitud y problemas de hardware. Valoramos reparar o mejorar tu equipo antes de sustituirlo.",
   },
   {
     icon: "system",
-    title: "Sistema operativo",
+    title: "Sistema y rendimiento",
     href: "/soporte-informatico",
-    text: "Instalación limpia, drivers, actualizaciones, configuración base y equipo listo para trabajar.",
-  },
-  {
-    icon: "speed",
-    title: "Optimización real",
-    href: "/soporte-informatico",
-    text: "Inicio, almacenamiento, programas pesados y ajustes para recuperar fluidez sin humo.",
+    text: "Instalación, actualizaciones y puesta a punto para recuperar fluidez y trabajar con un sistema estable.",
   },
   {
     icon: "wifi",
     title: "WiFi y redes",
     href: "/redes-wifi",
-    text: "Red doméstica, repetidores, conexión estable, configuración de dispositivos y pequeños entornos.",
+    text: "Cobertura, cortes de conexión y configuración de redes para que tus dispositivos se conecten como necesitas.",
   },
   {
     icon: "printer",
     title: "Impresoras y periféricos",
     href: "/impresoras",
-    text: "Instalación, conexión, drivers, escáner, impresoras compartidas y periféricos de trabajo.",
-  },
-  {
-    icon: "shield",
-    title: "Diagnóstico técnico",
-    href: "/soporte-informatico",
-    text: "Primero claridad: qué falla, qué merece la pena reparar y qué no conviene tocar.",
+    text: "Impresión, escaneado y equipos compartidos. Instalación y solución de errores de conexión o configuración.",
   },
   {
     icon: "lock",
     title: "Seguridad y limpieza",
     href: "/soporte-informatico",
-    text: "Revisión básica, limpieza de software, permisos, navegador, programas no deseados y estabilidad.",
+    text: "Revisión de software, programas no deseados y ajustes de seguridad para un uso más tranquilo de tu equipo.",
   },
   {
     icon: "portfolio",
-    title: "Portfolio técnico",
+    title: "Soporte para negocios",
     href: "/soporte-empresas",
-    text: "Soluciones reales para particulares, autónomos, comercios y equipos que tienen que funcionar.",
+    text: "Asistencia y mantenimiento para autónomos, comercios y empresas. Menos interrupciones en tu trabajo diario.",
   },
 ];
 
@@ -183,7 +165,7 @@ const PRICE_CARDS = [
   {
     eyebrow: "Mejora",
     title: "SSD, RAM y rendimiento",
-    text: "La opción fuerte para equipos lentos que todavía pueden trabajar muy bien.",
+    text: "Valoramos una mejora de componentes cuando puede alargar la vida útil de tu equipo.",
     points: ["Componentes adecuados", "Instalación limpia", "Prueba final"],
     featured: true,
   },
@@ -198,19 +180,27 @@ const PRICE_CARDS = [
 const FAQS = [
   {
     question: "¿Cómo solicito un diagnóstico?",
-    answer: "Pulsa en Solicitar diagnóstico y se abrirá WhatsApp con un mensaje preparado para explicar el problema.",
+    answer: "Pulsa en Abrir incidencia y completa el formulario con tus datos y el problema del equipo. Revisaré tu solicitud y te contactaré para concretar el siguiente paso. También puedes escribirme por WhatsApp.",
   },
   {
     question: "¿Hay presupuesto antes de reparar?",
-    answer: "Sí. Primero se revisa el caso y se propone la solución antes de avanzar.",
+    answer: "Sí. El coste depende de la avería, el trabajo y los componentes necesarios. Te explicaré las opciones y el presupuesto para que decidas antes de la reparación.",
   },
   {
     question: "¿Emites factura?",
-    answer: "Sí. El servicio está preparado para particulares, autónomos y negocios.",
+    answer: "Sí. Emitimos factura por los servicios prestados a particulares, autónomos y empresas.",
   },
   {
     question: "¿Qué datos conviene enviar?",
     answer: "Modelo del equipo, qué ocurre, desde cuándo pasa, mensajes de error y nivel de urgencia.",
+  },
+  {
+    question: "¿Necesito crear una cuenta antes?",
+    answer: "No necesitas iniciar sesión para enviar la solicitud. Si es tu primera vez, recibirás un enlace seguro por correo para activar tu acceso. Si ya tienes cuenta, podrás consultar tus incidencias desde tu panel.",
+  },
+  {
+    question: "¿Qué debo hacer antes de entregar el equipo?",
+    answer: "Siempre que sea posible, prepara una copia de seguridad actualizada de tus archivos. Una avería de almacenamiento puede impedir recuperar los datos. No envíes contraseñas ni información sensible en el formulario.",
   },
 ];
 
@@ -262,7 +252,6 @@ function renderServices() {
 function renderPriceCards() {
   return PRICE_CARDS.map((card, index) => {
     const featured = Boolean(card.featured);
-    const message = `Hola Cristian, quiero solicitar un diagnóstico sobre: ${card.title}.`;
 
     return `
       <article class="public-home-price-card ${featured ? "public-home-price-card--featured": ""}" data-featured="${featured ? "true": "false"}" data-public-home-reveal="true" data-public-home-magnetic="true" style="--public-home-reveal-index:${escapeAttr(index)};">
@@ -273,8 +262,8 @@ function renderPriceCards() {
         <ul class="public-home-price-points">
           ${(card.points || []).map((point) => `<li><span aria-hidden="true">${renderIcon("check")}</span><span>${escapeHtml(point)}</span></li>`).join("")}
         </ul>
-        <a class="public-home-price-link" href="${escapeAttr(whatsappHref(message))}" target="_blank" rel="noopener noreferrer" data-public-home-cta="true">
-          Solicitar diagnóstico ${renderIcon("arrow")}
+        <a class="public-home-price-link" href="#incidencia" data-public-home-scroll-link="true" data-public-home-cta="true" aria-label="${escapeAttr(`Abrir incidencia sobre ${card.title}`)}">
+          Abrir incidencia ${renderIcon("arrow")}
         </a>
       </article>
     `;
@@ -303,8 +292,8 @@ function renderHeader() {
           <div class="public-home-nav-menu" data-public-home-menu="true">${renderNavLinks()}</div>
           <div class="public-home-nav-actions">
             <a class="public-home-login-link" href="${escapeAttr(loginHref)}" data-spa="true" data-router-link="true" data-route="${escapeAttr(loginHref)}" data-href="${escapeAttr(loginHref)}" data-public-home-login="true">Iniciar sesión</a>
-            <a class="public-home-nav-cta" href="${escapeAttr(whatsappHref())}" target="_blank" rel="noopener noreferrer" data-public-home-cta="true">
-              ${renderIcon("whatsapp")}<span>Solicitar diagnóstico</span>
+            <a class="public-home-nav-cta" href="#incidencia" data-public-home-scroll-link="true" data-public-home-cta="true">
+              ${renderIcon("invoice")}<span>Abrir incidencia</span>
             </a>
           </div>
         </nav>
@@ -358,7 +347,7 @@ function renderHeroVisual() {
           </div>
 
           <div class="public-home-command-copy">
-            <p class="public-home-profile-eyebrow">Servicio técnico informático</p>
+            <p class="public-home-profile-eyebrow">Servicio técnico</p>
             <h2><span>Cristian</span><span>Ávila</span></h2>
             <p>Diagnóstico claro, trato directo y reparación con criterio antes de tocar nada.</p>
             <div class="public-home-command-tags" aria-label="Especialidades principales">
@@ -403,15 +392,16 @@ function renderHero() {
       <div class="public-home-hero-bg" aria-hidden="true"></div>
       <div class="public-home-hero-grid">
         <div class="public-home-hero-copy">
+          <p class="public-home-price-eyebrow" data-public-home-reveal="true">Trato directo. Soluciones claras.</p>
           <h1 class="public-home-title" id="public-home-title" data-public-home-reveal="true">
             Servicio técnico <span>informático</span>
           </h1>
           <p class="public-home-hero-text" data-public-home-reveal="true">
-            ${escapeHtml(PUBLIC_SITE.description)}
+            Recupera tu equipo y la tranquilidad de que todo funcione. Diagnóstico, reparación y asistencia remota para particulares, autónomos y empresas en España.
           </p>
           <div class="public-home-hero-actions" data-public-home-reveal="true">
-            <a class="public-home-button public-home-button--primary" href="${escapeAttr(whatsappHref())}" target="_blank" rel="noopener noreferrer" data-public-home-cta="true">
-              <span>Pedir diagnóstico</span>${renderIcon("whatsapp")}
+            <a class="public-home-button public-home-button--primary" href="#incidencia" data-public-home-scroll-link="true" data-public-home-cta="true">
+              <span>Abrir incidencia</span>${renderIcon("invoice")}
             </a>
             <a class="public-home-button public-home-button--secondary" href="#servicios" data-public-home-scroll-link="true">
               <span>Ver servicios</span>${renderIcon("arrow")}
@@ -453,8 +443,9 @@ function renderServiceSection() {
   return `
     <section class="public-home-section public-home-services" id="servicios" data-public-home-section="servicios" aria-labelledby="public-home-services-title">
       <div class="public-home-section-head" data-public-home-reveal="true">
+        <p class="public-home-price-eyebrow">Servicios informáticos</p>
         <h2 id="public-home-services-title">Todo lo que tu equipo necesita.</h2>
-        <p>Soluciones IT pensadas para recuperar rendimiento, estabilidad y confianza desde el primer diagnóstico.</p>
+        <p>Desde un ordenador que no arranca hasta la red de tu negocio. Encuentra la ayuda que necesitas.</p>
       </div>
       <div class="public-home-service-grid">${renderServices()}</div>
     </section>
@@ -465,8 +456,9 @@ function renderPricesSection() {
   return `
     <section class="public-home-section public-home-prices" id="precios" data-public-home-section="precios" aria-labelledby="public-home-prices-title">
       <div class="public-home-section-head" data-public-home-reveal="true">
-        <h2 id="public-home-prices-title">Primero claridad. Después reparación.</h2>
-        <p>Antes de tocar nada: diagnóstico, opciones claras y presupuesto previo.</p>
+        <p class="public-home-price-eyebrow">Presupuesto a medida</p>
+        <h2 id="public-home-prices-title">Decide con toda la información.</h2>
+        <p>Cada equipo y cada avería son distintos. Revisamos tu caso y concretamos el coste del trabajo y los componentes antes de reparar.</p>
       </div>
       <div class="public-home-price-grid">${renderPriceCards()}</div>
     </section>
@@ -483,8 +475,8 @@ function renderContactSection() {
           <p>Envíame modelo, síntomas, urgencia y cualquier mensaje de error. Te respondo con el siguiente paso claro.</p>
         </div>
         <div class="public-home-contact-actions">
-          <a class="public-home-button public-home-button--primary" href="${escapeAttr(whatsappHref())}" target="_blank" rel="noopener noreferrer" data-public-home-cta="true">
-            ${renderIcon("whatsapp")}<span>Solicitar diagnóstico</span>
+          <a class="public-home-button public-home-button--primary" href="#incidencia" data-public-home-scroll-link="true" data-public-home-cta="true">
+            ${renderIcon("invoice")}<span>Abrir incidencia</span>
           </a>
           <a class="public-home-button public-home-button--secondary" href="${escapeAttr(mailHref())}" data-public-home-cta="true">
             ${renderIcon("mail")}<span>Enviar email</span>
@@ -499,39 +491,11 @@ function renderFaqSection() {
   return `
     <section class="public-home-section public-home-faq" id="faq" data-public-home-section="faq" aria-labelledby="public-home-faq-title">
       <div class="public-home-section-head" data-public-home-reveal="true">
-        <h2 id="public-home-faq-title">Dudas rápidas antes de solicitar diagnóstico.</h2>
+        <p class="public-home-price-eyebrow">Preguntas frecuentes</p>
+        <h2 id="public-home-faq-title">Antes de empezar.</h2>
       </div>
       <div class="public-home-faq-list">${renderFaqs()}</div>
     </section>
-  `;
-}
-
-function renderFooter() {
-  const loginHref = safeInternalHref(BUSINESS.loginPath, "/login");
-
-  return `
-    <footer class="public-home-footer">
-      <div class="public-home-footer-inner">
-        <div class="public-home-footer-brand">${renderLogo()}</div>
-        <div class="public-home-footer-links">
-          <a href="#inicio" data-public-home-scroll-link="true">Inicio</a>
-          <a href="#servicios" data-public-home-scroll-link="true">Servicios</a>
-          <a href="#metodo" data-public-home-scroll-link="true">Método</a>
-          <a href="#precios" data-public-home-scroll-link="true">Precios</a>
-          <a href="#contacto" data-public-home-scroll-link="true">Contacto</a>
-          <a href="#faq" data-public-home-scroll-link="true">FAQ</a>
-          <a href="${escapeAttr(loginHref)}" data-spa="true" data-router-link="true" data-route="${escapeAttr(loginHref)}" data-public-home-login="true">Iniciar sesión</a>
-        </div>
-        <div class="public-home-footer-contact">
-          <a href="${escapeAttr(whatsappHref())}" target="_blank" rel="noopener noreferrer" data-public-home-cta="true">${renderIcon("whatsapp")}<span>Solicitar diagnóstico</span></a>
-          <a href="${escapeAttr(mailHref())}" data-public-home-cta="true">${renderIcon("mail")}<span>${escapeHtml(BUSINESS.email)}</span></a>
-        </div>
-      </div>
-      <div class="public-home-footer-bottom">
-        <p>© ${escapeHtml(BUSINESS.copyrightYear)} ${escapeHtml(BUSINESS.name)}. Servicio técnico informático profesional.</p>
-        <p>${escapeHtml(BUSINESS.domain)}</p>
-      </div>
-    </footer>
   `;
 }
 
@@ -548,6 +512,7 @@ export function createPublicHomeTemplate() {
     view: "home",
     appName: APP_NAME,
     header: false,
+    footer: false,
     ariaLabelledBy: "public-home-title",
     body: `
       <div
@@ -575,7 +540,7 @@ export function createPublicHomeTemplate() {
           ${renderContactSection()}
           ${renderFaqSection()}
         </div>
-        ${renderFooter()}
+        ${renderPublicLegalFooter()}
         ${renderFloatingWhatsApp()}
       </div>
     `,

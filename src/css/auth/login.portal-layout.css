@@ -51,6 +51,17 @@
   transform: none;
 }
 
+.public-auth-shell--login .login-pro--portal,
+.public-auth-shell--login .login-portal-frame {
+  block-size: auto;
+  min-block-size: 100dvh;
+}
+
+.public-auth-shell--login .login-portal-frame {
+  grid-template-rows: auto minmax(min-content, 1fr);
+  overflow: visible;
+}
+
 .public-auth-shell--login .login-portal-main {
   padding-inline: var(--login-page-gutter);
 }
@@ -67,7 +78,7 @@
 @media (min-width: 861px) {
   .public-auth-shell--login .login-showcase-title {
     font-size: clamp(40px, 3.6vw, 54px);
-    white-space: nowrap;
+    overflow-wrap: anywhere;
   }
 
   .public-auth-shell--login .login-showcase-title > span {
@@ -117,6 +128,8 @@
 }
 
 .public-auth-shell--login .login-card-home-link:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 4px;
   box-shadow:
     0 0 0 4px rgb(52 212 255 / .18),
     0 14px 34px rgb(19 148 255 / .18);

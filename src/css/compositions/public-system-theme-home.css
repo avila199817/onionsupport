@@ -25,10 +25,21 @@ html:is([data-theme="light"], .theme-light) :is(
 }
 
 html:is([data-theme="light"], .theme-light) .public-home-title span {
-  color: var(--public-home-accent);
-  text-shadow:
-    0 0 28px rgb(19 148 255 / .16),
-    0 0 58px rgb(19 148 255 / .08);
+  color: #0873c7;
+  text-shadow: 0 6px 28px rgb(19 148 255 / .08);
+}
+
+/* Text accents need their own contrast; cyan remains on decorative surfaces. */
+html:is([data-theme="light"], .theme-light) :is(
+  .public-home-price-eyebrow,
+  .public-home-command-copy .public-home-profile-eyebrow,
+  .public-home-command-stat > span,
+  .public-home-command-stat strong,
+  .public-home-method-number,
+  .public-home-price-badge
+) {
+  color: #075fa8;
+  text-shadow: none;
 }
 
 html:is([data-theme="light"], .theme-light) .public-home-hero-text,
@@ -71,7 +82,7 @@ html:is([data-theme="light"], .theme-light) .public-home-profile-card--command {
     radial-gradient(circle at 94% 20%, rgb(19 148 255 / .09), transparent 36%),
     linear-gradient(145deg, rgb(255 255 255 / .96), rgb(241 247 253 / .98) 66%, rgb(230 239 248 / .98));
   box-shadow:
-    0 32px 86px rgb(31 67 103 / .16),
+    0 20px 56px rgb(31 67 103 / .12),
     0 0 64px rgb(19 148 255 / .08),
     inset 0 1px 0 rgb(255 255 255 / .96);
 }
@@ -147,7 +158,7 @@ html:is([data-theme="light"], .theme-light) .public-home-profile-bottom {
 }
 
 /* =========================================================
-   5. PUBLIC HOME · SERVICES / METHOD / PRICES / FAQ / FOOTER
+   5. PUBLIC HOME · SERVICES / METHOD / PRICES / FAQ
 ========================================================= */
 
 html:is([data-theme="light"], .theme-light) :is(
@@ -160,7 +171,7 @@ html:is([data-theme="light"], .theme-light) :is(
     linear-gradient(180deg, rgb(255 255 255 / .98), rgb(244 249 254 / .90)),
     var(--public-home-card);
   box-shadow:
-    0 18px 46px rgb(31 67 103 / .10),
+    0 10px 28px rgb(31 67 103 / .07),
     inset 0 1px 0 rgb(255 255 255 / .96);
 }
 
@@ -177,7 +188,7 @@ html:is([data-theme="light"], .theme-light) :is(
     ),
     var(--public-home-card-hover);
   box-shadow:
-    0 24px 58px rgb(31 67 103 / .14),
+    0 16px 38px rgb(31 67 103 / .10),
     0 0 0 1px rgb(19 148 255 / .05),
     inset 0 1px 0 rgb(255 255 255 / .96);
 }
@@ -201,7 +212,7 @@ html:is([data-theme="light"], .theme-light) .public-home-method-card {
     linear-gradient(180deg, rgb(255 255 255 / .97), rgb(242 248 253 / .90)),
     rgb(255 255 255 / .82);
   box-shadow:
-    0 18px 46px rgb(31 67 103 / .10),
+    0 10px 28px rgb(31 67 103 / .07),
     inset 0 1px 0 rgb(255 255 255 / .96);
 }
 
@@ -216,7 +227,7 @@ html:is([data-theme="light"], .theme-light) .public-home-method-card:hover {
     linear-gradient(180deg, #ffffff, #edf6fd),
     #ffffff;
   box-shadow:
-    0 26px 60px rgb(31 67 103 / .14),
+    0 16px 40px rgb(31 67 103 / .10),
     0 10px 28px rgb(19 148 255 / .07),
     inset 0 1px 0 #ffffff;
 }
@@ -233,8 +244,8 @@ html:is([data-theme="light"], .theme-light) .public-home-price-card--featured {
     linear-gradient(180deg, #ffffff, #eef7fd),
     var(--public-home-card-hover);
   box-shadow:
-    0 28px 76px rgb(31 67 103 / .16),
-    0 0 60px rgb(19 148 255 / .09),
+    0 18px 46px rgb(31 67 103 / .12),
+    0 0 36px rgb(19 148 255 / .05),
     inset 0 1px 0 #ffffff;
 }
 
@@ -261,27 +272,6 @@ html:is([data-theme="light"], .theme-light) .public-home-faq-item[open] summary:
   background: rgb(19 148 255 / .10);
 }
 
-html:is([data-theme="light"], .theme-light) .public-home-footer {
-  border-block-start-color: rgb(19 148 255 / .10);
-  background:
-    radial-gradient(circle at 14% 0%, rgb(19 148 255 / .09), transparent 34%),
-    linear-gradient(180deg, rgb(247 251 255 / .96), rgb(229 238 247 / .98));
-}
-
-html:is([data-theme="light"], .theme-light) .public-home-footer-links a:hover,
-html:is([data-theme="light"], .theme-light) .public-home-footer-contact a:hover {
-  color: var(--public-home-text-strong);
-}
-
-html:is([data-theme="light"], .theme-light) .public-home-footer-contact a {
-  color: var(--public-home-text);
-  border-color: rgb(18 57 94 / .11);
-  background: rgb(255 255 255 / .64);
-}
-
-html:is([data-theme="light"], .theme-light) .public-home-footer-bottom {
-  border-block-start-color: rgb(18 57 94 / .08);
-}
 
 /* =========================================================
    6. PUBLIC HOME EXPERIENCE · ACCOUNT MENU

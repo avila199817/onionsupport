@@ -4,17 +4,23 @@ import { createServer } from "node:http";
 import { extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
-import { PUBLIC_SITE, pageMetadata } from "../src/core/public-site.js";
+import { PUBLIC_SITE, PUBLIC_SERVICES, pageMetadata } from "../src/core/public-site.js";
 
-const ROOT = fileURLToPath(new URL("../", import.meta.url));
+const ROOT = resolve(fileURLToPath(new URL("../", import.meta.url)));
+const DIST = resolve(ROOT, process.env.ONION_BUILD_OUT_DIR || "dist");
+let serveDist = false;
 const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".webp": "image/webp", ".svg": "image/svg+xml", ".ico": "image/x-icon" };
 const server = createServer(async (request, response) => {
   try {
     let path = new URL(request.url, "http://localhost").pathname;
     if (path === "/") path = "/index.html";
     if (path === "/login") path = "/login.html";
-    const target = resolve(ROOT, "." + path);
-    if (!target.startsWith(ROOT) || /\/\.[^/]/.test(path)) throw new Error("Invalid test path");
+    const service = PUBLIC_SERVICES.find((item) => item.path === path);
+    if (service) path = "/" + service.file;
+    if (["/password-request", "/password-reset", "/activate-account"].includes(path)) path = "/index.html";
+    const directory = serveDist ? DIST : ROOT;
+    const target = resolve(directory, "." + path);
+    if (!target.startsWith(directory + "/") || /\/\.[^/]/.test(path)) throw new Error("Invalid test path");
     const data = await readFile(target);
     response.writeHead(200, { "Content-Type": types[extname(target)] || "application/octet-stream", "Cache-Control": "no-store" }).end(data);
   } catch { response.writeHead(404).end(); }
@@ -44,6 +50,7 @@ try {
     assert.equal(actual.description, expected.description);
   }
   async function inspectHomeScroll() {
+    await page.locator(".public-home-brand").click();
     await page.waitForFunction(() => Number(document.querySelector("[data-public-home]")?.dataset.scrollProgress) === 0);
     await page.getByRole("link", { name: "Ver servicios", exact: true }).click();
     await page.waitForFunction(() => document.querySelector(".main-content").scrollTop > 20);
@@ -110,9 +117,103 @@ try {
   await inspectHomeScroll();
   await page.goto(origin + "/login", { waitUntil: "domcontentloaded" });
   await inspect("/login");
+
+  async function inspectPublicLayout() {
+    // appReady is set when the shell mounts, before the router reveals its
+    // new host. Inspect the committed page, while still failing hidden titles.
+    try {
+      await page.locator("h1").waitFor({ state: "visible", timeout: 10000 });
+    } catch (error) {
+      console.error("Public heading readiness", await page.locator("h1").evaluateAll((headings) => headings.map((heading) => ({
+        html: heading.outerHTML,
+        ancestors: [...(function* () { for (let node = heading; node; node = node.parentElement) yield node; })()].map((node) => ({
+          tag: node.tagName, hidden: node.hidden, display: getComputedStyle(node).display, visibility: getComputedStyle(node).visibility,
+        })),
+      }))));
+      throw error;
+    }
+    const reject = page.getByRole("button", { name: "Rechazar", exact: true });
+    if (await reject.isVisible()) await reject.click();
+    const layout = await page.evaluate(() => {
+      const visible = (node) => node.getClientRects().length > 0 && getComputedStyle(node).visibility !== "hidden";
+      const ids = [...document.querySelectorAll("[id]")].map((node) => node.id);
+      const headings = [...document.querySelectorAll("h1")].filter(visible);
+      const footer = document.querySelector(".public-legal-footer");
+      const clippedHeadings = [...document.querySelectorAll("h1,h2")].filter(visible).filter((node) => {
+        const range = document.createRange(); range.selectNodeContents(node);
+        const text = range.getBoundingClientRect(); const box = node.getBoundingClientRect();
+        return text.width > box.width + 3 && getComputedStyle(node).overflowX !== "visible";
+      }).map((node) => node.textContent.trim());
+      return {
+        visibleH1: headings.length,
+        nestedMain: document.querySelectorAll("main main").length,
+        duplicateIds: ids.filter((id, index) => ids.indexOf(id) !== index),
+        overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+        innerOverflow: [...document.querySelectorAll(".main-content,.public-auth-body")].some((node) => node.scrollWidth > node.clientWidth + 1),
+        footerCount: document.querySelectorAll(".public-legal-footer").length,
+        footerLogin: !!footer?.querySelector('a[href="/login"]'),
+        clippedHeadings,
+      };
+    });
+    assert.deepEqual(layout, { visibleH1: 1, nestedMain: 0, duplicateIds: [], overflow: false, innerOverflow: false, footerCount: 1, footerLogin: false, clippedHeadings: [] }, `${page.url()} must remain readable and coherent at ${JSON.stringify(page.viewportSize())}`);
+    for (const id of ["public-legal-notice", "public-privacy", "public-cookies"]) {
+      const disclosure = page.locator(`#${id}`);
+      await disclosure.locator("summary").click();
+      assert.equal(await disclosure.evaluate((node) => node.open), true);
+      await disclosure.locator("summary").click();
+    }
+  }
+
+  // Responsive and theme coverage of every public surface, using source and
+  // the actual compiled release with isolated network fixtures. These checks
+  // never submit real credentials or substitute the public page markup.
+  await access(resolve(DIST, "index.html"));
+  serveDist = true;
+  for (const colorScheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme, reducedMotion: "reduce" });
+    for (const width of [360, 900, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const path of ["/", "/login", "/password-request", "/password-reset", "/activate-account", ...PUBLIC_SERVICES.map((service) => service.path)]) {
+        await page.goto(origin + path, { waitUntil: "domcontentloaded" });
+        if (!PUBLIC_SERVICES.some((service) => service.path === path)) {
+          await page.waitForFunction(() => document.documentElement.dataset.appReady === "true");
+        }
+        await inspectPublicLayout();
+        if (path === "/password-reset" || path === "/activate-account") {
+          const form = page.locator("form");
+          assert.equal(await form.locator('input[type="password"]:enabled, button[type="submit"]:enabled').count(), 0, "a missing token must disable unusable controls");
+        }
+      }
+    }
+  }
+
+  for (const hash of ["#incidencia", "#public-privacy", "#incidencia"]) {
+    await page.goto(origin + "/" + hash, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(hash);
+    await page.waitForSelector("[data-public-support-form]");
+    await page.waitForFunction((targetHash) => {
+      const host = document.querySelector(".main-content");
+      const target = document.querySelector(targetHash);
+      const bounds = target.getBoundingClientRect();
+      return host.scrollTop > 20 && bounds.top >= 0 && bounds.top < 200;
+    }, hash);
+    assert.equal(new URL(page.url()).hash, hash, "deep links must survive mounting Home");
+    if (hash === "#public-privacy") assert.equal(await page.locator(hash).evaluate((node) => node.open), true, "privacy deep link must open the disclosure");
+    // The navigation remains usable at the legal footer and after returning
+    // to the intake. Inspect paint and hit testing, not only DOM presence.
+    const navigationVisible = await page.locator("[data-public-home-nav]").evaluate(async (node) => {
+      await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+      const style = getComputedStyle(node);
+      const bounds = node.getBoundingClientRect();
+      return style.visibility === "visible" && Number(style.opacity) > .9 &&
+        style.pointerEvents !== "none" && bounds.top >= 0 &&
+        bounds.bottom > bounds.top && bounds.bottom <= window.innerHeight;
+    });
+    assert.equal(navigationVisible, true, `navigation must stay visible and interactive at ${hash}`);
+  }
   assert.deepEqual(errors, [], "frontend must not throw during metadata navigation");
   await context.close();
-  console.log("Public site browser: PASS · direct home/login · real Router home↔login twice · same document · no inherited metadata");
+  console.log("Public site browser: PASS · real Router home↔login · 10 public routes × 3 widths × 2 themes · unique visible headings/footer · disclosures · safe invalid tokens · intake/privacy deep links");
 } finally {
   if (browser) await browser.close();
   await new Promise((done) => server.close(done));

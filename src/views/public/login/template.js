@@ -395,13 +395,13 @@ function renderShowcase() {
           Área privada · Onion Support
         </p>
 
-        <h1
+        <h2
           class="login-showcase-title"
           id="login-showcase-title"
         >
           Bienvenido de nuevo a
           <span>Onion Support</span>
-        </h1>
+        </h2>
 
         <p class="login-showcase-text">
           Accede a tu panel para gestionar soporte, incidencias
@@ -512,12 +512,12 @@ function renderLoginCard() {
           ${renderLoginCardHomeLogo()}
         </div>
 
-        <h2
+        <h1
           class="login-card-title"
           id="login-panel-title"
         >
           Iniciar sesión
-        </h2>
+        </h1>
 
         <p class="login-card-subtitle">
           Accede a tu cuenta de Onion Support.
@@ -621,10 +621,10 @@ export function getLoginTemplate() {
         <div class="login-portal-frame">
           ${renderTopbar()}
 
-          <main class="login-portal-main">
+          <div class="login-portal-main">
             ${renderShowcase()}
             ${renderLoginCard()}
-          </main>
+          </div>
         </div>
       </section>
     `,

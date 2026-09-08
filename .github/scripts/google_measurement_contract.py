@@ -214,6 +214,11 @@ def validate_source(root: Path) -> list[str]:
                 f"{BOOTSTRAP_PATH}: falta superficie pública permitida: {path}"
             )
 
+    marketing_block = re.search(r"const PUBLIC_MARKETING_PATHS = new Set\(\[([\s\S]*?)\]\);", text)
+    configured_paths = re.findall(r'"([^\"]+)"', marketing_block.group(1)) if marketing_block else []
+    if sorted(configured_paths) != sorted(PUBLIC_MARKETING_PATHS):
+        errors.append(f"{BOOTSTRAP_PATH}: la medición debe limitarse exactamente a las seis rutas comerciales")
+
     if text.count("googletagmanager.com/gtag/js?id=") != 1:
         errors.append(
             f"{BOOTSTRAP_PATH}: gtag.js debe declararse exactamente una vez"

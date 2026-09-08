@@ -110,50 +110,124 @@
   </script>
   <!-- /public-site-v3 -->
   <link rel="icon" href="/favicon.ico" sizes="any">
+  <script src="/src/preboot/theme.js"></script>
   <link rel="stylesheet" href="/src/css/seo/public-service.css">
+  <link rel="stylesheet" href="/src/css/views/public/legal-footer.css">
   <script type="module" src="/src/analytics/google-tag.js"></script>
 </head>
 <body>
+  <a class="seo-skip-link" href="#contenido">Saltar al contenido</a>
   <header class="seo-header"><div class="seo-shell seo-header-inner">
-    <a class="seo-brand" href="/" aria-label="Onion Support, inicio"><img src="/favicon.ico" alt="" width="48" height="48"><span><span class="seo-brand-name">ONION <strong>SUPPORT</strong></span><small>Soporte informático</small></span></a>
-    <nav class="seo-nav" aria-label="Servicios de Onion Support">
-        <a href="/reparacion-ordenadores">Reparación de ordenadores</a>
-        <a href="/soporte-informatico">Soporte informático</a>
-        <a href="/redes-wifi">WiFi y redes</a>
-        <a href="/impresoras">Impresoras</a>
-        <a href="/soporte-empresas" aria-current="page">Soporte para empresas</a>
-        <a href="/login">Iniciar sesión</a>
+    <a class="seo-brand" href="/" aria-label="Onion Support, inicio"><img src="/src/media/img/favicon_black_circle_128.webp" alt="" width="44" height="44"><span class="seo-brand-name">ONION <strong>SUPPORT</strong></span></a>
+    <nav class="seo-nav" aria-label="Navegación principal">
+      <a href="#otros-servicios">Servicios</a>
+      <a href="/#contacto">Contacto</a>
+      <a class="seo-nav-access" href="/login">Iniciar sesión</a>
     </nav>
   </div></header>
-  <main class="seo-shell">
-    <div class="seo-hero"><div>
+  <main class="seo-shell" id="contenido" tabindex="-1">
+    <nav class="seo-breadcrumb" aria-label="Ruta de navegación"><a href="/">Inicio</a><span aria-hidden="true">/</span><span aria-current="page">Soporte para empresas</span></nav>
+    <div class="seo-hero"><div class="seo-hero-copy">
       <p class="seo-eyebrow">Soporte para empresas</p>
       <h1>Soporte informático para autónomos y pequeños negocios</h1>
       <p class="seo-lead">Cuando el ordenador, la red o la impresora fallan, el problema no es solo técnico: también es tiempo de trabajo perdido. Se prioriza recuperar el servicio y dejar claro qué se ha hecho.</p>
-      <p>Asistencia remota en España. La atención presencial se acuerda según el servicio y la ubicación.</p>
       <div class="seo-actions">
-        <a class="seo-button seo-button--primary" href="https://wa.me/34629946615?text=Hola%20Cristian%2C%20vengo%20desde%20https%3A%2F%2Fonionsupport.com%2Fsoporte-empresas.%20Quiero%20consultar%20el%20servicio%20de%20soporte%20para%20empresas." target="_blank" rel="noopener noreferrer">Consultar mi caso</a>
-        <a class="seo-button seo-button--secondary" href="mailto:cristian@onionsupport.com">Enviar email</a>
+        <a class="seo-button seo-button--primary" href="/#incidencia">Solicitar soporte <span aria-hidden="true">→</span></a>
+        <a class="seo-button seo-button--secondary" href="https://wa.me/34629946615?text=Hola%20Cristian%2C%20vengo%20desde%20https%3A%2F%2Fonionsupport.com%2Fsoporte-empresas.%20Quiero%20consultar%20el%20servicio%20de%20soporte%20para%20empresas." target="_blank" rel="noopener noreferrer">Consultar por WhatsApp <span aria-hidden="true">↗</span></a>
       </div>
-    </div><aside class="seo-card" aria-label="Resumen del servicio"><strong>Diagnóstico claro y atención directa</strong><ul><li>Equipos de trabajo</li><li>WiFi, red e impresoras</li><li>Incidencias y mantenimiento</li><li>Presupuesto previo y factura</li></ul></aside></div>
-    <div class="seo-content">
-      <section><h2>Continuidad de trabajo</h2><p>Se atienden incidencias que afectan al uso diario de ordenadores, aplicaciones, red y periféricos. El objetivo es reducir el tiempo improductivo y evitar cambios que compliquen todavía más el entorno.</p></section>
-      <section><h2>Entornos pequeños, soluciones proporcionadas</h2><p>Un comercio o autónomo no necesita una infraestructura sobredimensionada para resolver problemas básicos. Se proponen soluciones acordes al tamaño, uso y criticidad real de cada equipo o servicio.</p></section>
-      <section><h2>Mantenimiento comprensible</h2><p>Actualizaciones, almacenamiento, configuración y puntos básicos de seguridad se revisan cuando aportan valor. Cada cambio debe poder explicarse y mantenerse sin depender de una cadena de parches.</p></section>
-      <section><h2>Trato directo</h2><p>El contacto es con el técnico que revisa el caso. Esto facilita entender el contexto, priorizar correctamente y documentar qué se ha reparado o configurado cuando el equipo forma parte del trabajo diario.</p></section>
-      <section><h2>Atención adaptada a tu caso</h2><p>Asistencia remota en España. La atención presencial se acuerda según el servicio y la ubicación. Antes de intervenir, confirmamos contigo el alcance, la modalidad de atención y el presupuesto.</p></section>
+      <p class="seo-coverage">Asistencia remota en España. La atención presencial se acuerda según el servicio y la ubicación.</p>
+    </div><aside class="seo-card" aria-labelledby="resumen-servicio">
+      <span class="seo-service-icon" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="10" width="26" height="18" rx="3"></rect><path d="M11 10V5h10v5M3 18a34 34 0 0 0 26 0M16 17v5"></path></svg></span>
+      <p class="seo-card-kicker">El servicio, de un vistazo</p>
+      <h2 id="resumen-servicio">Diagnóstico claro.<br>Atención directa.</h2>
+      <ul><li><span aria-hidden="true">✓</span>Equipos de trabajo</li><li><span aria-hidden="true">✓</span>WiFi, red e impresoras</li><li><span aria-hidden="true">✓</span>Incidencias y mantenimiento</li><li><span aria-hidden="true">✓</span>Presupuesto previo y factura</li></ul>
+    </aside></div>
+    <section class="seo-detail" aria-labelledby="detalle-servicio">
+      <div class="seo-section-heading"><p class="seo-eyebrow">En qué puedo ayudarte</p><h2 id="detalle-servicio">Una solución adaptada al problema.</h2></div>
+      <div class="seo-content">
+      <section><span class="seo-section-number" aria-hidden="true">01</span><h3>Continuidad de trabajo</h3><p>Se atienden incidencias que afectan al uso diario de ordenadores, aplicaciones, red y periféricos. El objetivo es reducir el tiempo improductivo y evitar cambios que compliquen todavía más el entorno.</p></section>
+      <section><span class="seo-section-number" aria-hidden="true">02</span><h3>Entornos pequeños, soluciones proporcionadas</h3><p>Un comercio o autónomo no necesita una infraestructura sobredimensionada para resolver problemas básicos. Se proponen soluciones acordes al tamaño, uso y criticidad real de cada equipo o servicio.</p></section>
+      <section><span class="seo-section-number" aria-hidden="true">03</span><h3>Mantenimiento comprensible</h3><p>Actualizaciones, almacenamiento, configuración y puntos básicos de seguridad se revisan cuando aportan valor. Cada cambio debe poder explicarse y mantenerse sin depender de una cadena de parches.</p></section>
+      <section><span class="seo-section-number" aria-hidden="true">04</span><h3>Trato directo</h3><p>El contacto es con el técnico que revisa el caso. Esto facilita entender el contexto, priorizar correctamente y documentar qué se ha reparado o configurado cuando el equipo forma parte del trabajo diario.</p></section>
+      <section><span class="seo-section-number" aria-hidden="true">05</span><h3>Antes de intervenir</h3><p>Confirmamos contigo el alcance, la modalidad de atención y el presupuesto. La atención presencial se acuerda según el servicio y la ubicación.</p></section>
+      </div>
+    </section>
+    <section class="seo-contact" aria-labelledby="contacto"><div><p class="seo-eyebrow">El siguiente paso</p><h2 id="contacto">Cuéntame qué está fallando.</h2><p>Describe el equipo, el síntoma y desde cuándo ocurre. Te indicaré cómo podemos resolverlo antes de intervenir.</p><div class="seo-contact-details"><a href="tel:+34629946615">629 946 615</a><a href="mailto:cristian@onionsupport.com">cristian@onionsupport.com</a></div></div><a class="seo-button seo-button--primary" href="/#incidencia">Explicar mi incidencia <span aria-hidden="true">→</span></a></section>
+    <section class="seo-links" aria-labelledby="otros-servicios"><div class="seo-section-heading"><p class="seo-eyebrow">También puedo ayudarte con</p><h2 id="otros-servicios">Otros servicios</h2></div><div class="seo-link-grid">
+        <a href="/reparacion-ordenadores"><span>Reparación de ordenadores</span><span aria-hidden="true">↗</span></a>
+        <a href="/soporte-informatico"><span>Soporte informático</span><span aria-hidden="true">↗</span></a>
+        <a href="/redes-wifi"><span>WiFi y redes</span><span aria-hidden="true">↗</span></a>
+        <a href="/impresoras"><span>Impresoras</span><span aria-hidden="true">↗</span></a>
     </div>
-    <section class="seo-links" aria-labelledby="otros-servicios"><h2 id="otros-servicios">Otros servicios de Onion Support</h2><div class="seo-link-grid">
-        <a href="/reparacion-ordenadores">Reparación de ordenadores</a>
-        <a href="/soporte-informatico">Soporte informático</a>
-        <a href="/redes-wifi">WiFi y redes</a>
-        <a href="/impresoras">Impresoras</a>
-        <a href="/soporte-empresas">Soporte para empresas</a>
-        <a href="/">Inicio</a>
-        <a href="/login">Iniciar sesión</a>
-    </div></section>
-    <section class="seo-contact" aria-labelledby="contacto"><div><h2 id="contacto">¿Tienes una incidencia concreta?</h2><p>Describe el equipo, el síntoma y desde cuándo ocurre. Te indicamos el siguiente paso antes de intervenir.</p></div><a class="seo-button seo-button--primary" href="https://wa.me/34629946615?text=Hola%20Cristian%2C%20vengo%20desde%20https%3A%2F%2Fonionsupport.com%2Fsoporte-empresas.%20Quiero%20consultar%20el%20servicio%20de%20soporte%20para%20empresas." target="_blank" rel="noopener noreferrer">Hablar por WhatsApp</a></section>
+    </section>
   </main>
-  <footer class="seo-footer"><div class="seo-shell"><span>© 2026 Onion Support · Soporte informático</span><span>·</span><a href="tel:+34629946615">629 946 615</a><span>·</span><a href="mailto:cristian@onionsupport.com">cristian@onionsupport.com</a></div></footer>
+  <footer class="public-legal-footer " aria-label="Información de Onion Support">
+      <div class="public-legal-footer__inner">
+        <div class="public-legal-footer__overview">
+          <div class="public-legal-footer__identity">
+            <a class="public-legal-footer__brand" href="/">Onion Support</a>
+            <p>Servicio técnico informático para particulares y empresas.</p>
+            <p>Cristian Ávila Luque · Profesional autónomo<br>NIF 20568568J</p>
+            <address>C/ Rafael de Casanova, 54, 1.º 3.ª, 08295 Sant Vicenç de Castellet (Barcelona)</address>
+          </div>
+          <div>
+            <p class="public-legal-footer__label">Atención al cliente</p>
+            <p><a href="mailto:soporte@onionsupport.com">soporte@onionsupport.com</a><br><a href="tel:+34629946615">629 946 615</a></p>
+            <a href="/#incidencia">Solicitar asistencia</a>
+          </div>
+          <div>
+            <p class="public-legal-footer__label">Horario de atención</p>
+            <p>Lunes a viernes<br>9:00–14:00 y 16:00–20:00</p>
+            <p>Sábados · 10:00–14:00<br>Domingos cerrado</p>
+          </div>
+        </div>
+
+        <div class="public-legal-footer__disclosures">
+          <details id="public-legal-notice" class="public-legal-footer__section">
+            <summary>Aviso legal y servicio</summary>
+            <div class="public-legal-footer__content">
+              <p>Onion Support es el nombre comercial de Cristian Ávila Luque, profesional autónomo con NIF 20568568J y domicilio profesional en C/ Rafael de Casanova, 54, 1.º 3.ª, 08295 Sant Vicenç de Castellet (Barcelona).</p>
+              <p>Prestamos servicios de soporte microinformático, mantenimiento, diagnóstico, reparación, configuración y asistencia tecnológica para particulares y empresas. Los servicios se rigen por el presupuesto, pedido o parte de trabajo aceptado y por las condiciones aplicables.</p>
+              <p>Antes de entregar un dispositivo para su revisión o reparación, recomendamos disponer de una copia de seguridad actualizada. Cuando una avería afecte al almacenamiento, no siempre podrá garantizarse la conservación o recuperación de los datos, sin perjuicio de los derechos que legalmente correspondan al cliente.</p>
+              <p>Si contratas como consumidor a distancia o fuera del establecimiento, dispones, con carácter general, de catorce días naturales desde la contratación del servicio para desistir, con las excepciones y ampliaciones legalmente previstas. Para comenzar durante ese plazo se requiere tu solicitud expresa; la pérdida del derecho una vez completado el servicio requiere tu reconocimiento previo. Estas condiciones se concretan al contratar.</p>
+              <p>Para consultas y reclamaciones, contacta mediante <a href="mailto:soporte@onionsupport.com">soporte@onionsupport.com</a> o el 629 946 615. Las hojas oficiales de reclamación están a disposición de las personas consumidoras y usuarias. Puedes consultar los <a href="https://consum.gencat.cat/ca/empreses/requisits-obligatoris/descarrega-de-cartells-i-documents/" target="_blank" rel="noopener noreferrer">formularios oficiales de la Agència Catalana del Consum</a>.</p>
+            </div>
+          </details>
+
+          <details id="public-privacy" class="public-legal-footer__section">
+            <summary>Privacidad y datos personales</summary>
+            <div class="public-legal-footer__content">
+              <p><strong>Responsable.</strong> Cristian Ávila Luque (Onion Support), NIF 20568568J, en el domicilio profesional indicado arriba. Contacto para privacidad y ejercicio de derechos: <a href="mailto:soporte@onionsupport.com">soporte@onionsupport.com</a>.</p>
+              <p><strong>Solicitudes y servicios.</strong> Tratamos los datos que facilitas para gestionar solicitudes, presupuestos, servicios contratados, facturación y atención al cliente. El formulario de soporte recoge nombre, correo, teléfono, dirección y la información del problema. Los campos obligatorios son necesarios para tramitar la solicitud; evita incluir contraseñas o información personal que no sea necesaria.</p>
+              <p><strong>Cuenta y comunicaciones.</strong> La solicitud se vincula a tu cuenta de acceso. Si todavía no tienes una, se prepara una cuenta pendiente y se envía por correo su activación para que puedas continuar la gestión. También se utilizan los datos de contacto para las comunicaciones relacionadas con tu solicitud y el servicio.</p>
+              <p><strong>Base del tratamiento.</strong> La gestión de solicitudes, presupuestos y servicios se basa en las medidas previas a la contratación que solicitas y, cuando procede, en la ejecución del contrato. La facturación responde a las obligaciones legales aplicables. Los controles de seguridad y prevención del abuso protegen el servicio sobre la base del interés legítimo. El uso de cookies opcionales se basa en tu consentimiento y se explica en el apartado de cookies.</p>
+              <p><strong>Conservación.</strong> Los criterios de conservación dependen de la gestión de la solicitud, la relación de servicio y los plazos legales aplicables a la documentación y a posibles responsabilidades. Puedes pedir información sobre la conservación de tus datos concretos en <a href="mailto:soporte@onionsupport.com">soporte@onionsupport.com</a>.</p>
+              <p><strong>Destinatarios y proveedores.</strong> Para prestar el servicio intervienen proveedores de alojamiento, infraestructura y comunicaciones, y las autoridades u organismos que deban recibir información por obligación legal. La medición de la web utiliza Google Analytics y Google Ads según las preferencias y el funcionamiento descritos en cookies. Google informa sobre el tratamiento internacional y sus garantías en sus <a href="https://policies.google.com/privacy/frameworks?hl=es" target="_blank" rel="noopener noreferrer">marcos de transferencia de datos</a>. Puedes solicitar información adicional sobre los proveedores que intervienen en tu servicio.</p>
+              <p><strong>Tus derechos.</strong> Puedes solicitar acceso, rectificación, supresión, oposición, limitación del tratamiento y portabilidad cuando correspondan, escribiendo a <a href="mailto:soporte@onionsupport.com">soporte@onionsupport.com</a>. Puedes retirar tu consentimiento en cualquier momento, sin afectar a la licitud del tratamiento anterior, y presentar una reclamación ante la <a href="https://www.aepd.es/" target="_blank" rel="noopener noreferrer">Agencia Española de Protección de Datos</a>.</p>
+            </div>
+          </details>
+
+          <details id="public-cookies" class="public-legal-footer__section">
+            <summary>Cookies y medición de la web</summary>
+            <div class="public-legal-footer__content">
+              <p>Las cookies y tecnologías similares guardan o consultan información en tu dispositivo. Esta web distingue las funciones técnicas necesarias de las opciones de medición. Puedes aceptar, rechazar o configurar las opciones de medición y cambiar tu decisión cuando quieras.</p>
+              <ul>
+                <li><strong>Preferencia técnica propia.</strong> Recordamos tu elección de medición en el almacenamiento local del navegador durante 180 días.</li>
+                <li><strong>Analítica de Google.</strong> Si aceptas esta categoría, medimos visitas, páginas vistas y uso de las páginas públicas comerciales con Google Analytics.</li>
+                <li><strong>Medición publicitaria de Google.</strong> Si aceptas esta categoría, utilizamos Google Ads para atribuir contactos a campañas. La personalización publicitaria permanece desactivada.</li>
+              </ul>
+              <p>La etiqueta de Google se carga en las páginas públicas comerciales con el almacenamiento de analítica y publicidad denegado por defecto. Antes de aceptar o si rechazas, Google puede recibir señales sin cookies sobre el consentimiento y la navegación. Aceptar una categoría permite el uso de sus cookies; rechazarla mantiene denegado ese almacenamiento. El formulario y el acceso a tu cuenta siguen disponibles cualquiera que sea tu decisión.</p>
+              <p>La preferencia de 180 días corresponde a tu elección en esta web. La duración de las cookies de Google depende de su tipo y configuración; Google detalla sus finalidades y duraciones en <a href="https://policies.google.com/technologies/cookies?hl=es" target="_blank" rel="noopener noreferrer">Cómo utiliza Google las cookies</a>. Consulta también su <a href="https://policies.google.com/privacy?hl=es" target="_blank" rel="noopener noreferrer">política de privacidad</a>.</p>
+              <p>Puedes retirar o cambiar las opciones desde «Configurar cookies». Para eliminar datos ya guardados, utiliza también los ajustes de cookies y datos de sitios de tu navegador. Si borras la preferencia o utilizas otro navegador, tendrás que decidir de nuevo.</p>
+            </div>
+          </details>
+        </div>
+
+        <div class="public-legal-footer__bottom">
+          <p>Información de Onion Support</p>
+          <button type="button" data-public-cookie-settings>Configurar cookies</button>
+        </div>
+      </div>
+    </footer>
 </body>
 </html>

@@ -26,6 +26,7 @@ let activeForm = null;
 let activeHome = null;
 let homeWasInert = false;
 let previousFocus = null;
+let focusFrame = 0;
 let destroyed = false;
 
 function isBrowser() {
@@ -125,14 +126,8 @@ function focusAfterSubmission(form) {
 
   const status = form.querySelector?.(STATUS_SELECTOR) || null;
   if (status && status.hidden !== true && String(status.textContent || "").trim()) {
-    const hadTabindex = status.hasAttribute("tabindex");
-    if (!hadTabindex) status.setAttribute("tabindex", "-1");
-
+    if (!status.hasAttribute("tabindex")) status.setAttribute("tabindex", "-1");
     focusNode(status);
-
-    if (!hadTabindex) {
-      window.setTimeout(() => status.removeAttribute("tabindex"), 0);
-    }
     return true;
   }
 
@@ -165,7 +160,9 @@ function show(form) {
   overlay.dataset.active = "true";
   overlay.setAttribute("aria-hidden", "false");
 
-  window.requestAnimationFrame(() => {
+  if (focusFrame) window.cancelAnimationFrame(focusFrame);
+  focusFrame = window.requestAnimationFrame(() => {
+    focusFrame = 0;
     if (activeForm === form && !overlay.hidden) focusNode(overlay);
   });
 
@@ -174,6 +171,8 @@ function show(form) {
 
 function hide({ restoreFocus = true } = {}) {
   if (!isBrowser()) return false;
+  if (focusFrame) window.cancelAnimationFrame(focusFrame);
+  focusFrame = 0;
 
   const form = activeForm;
   const overlay = document.querySelector(OVERLAY_SELECTOR);
@@ -216,6 +215,18 @@ function onPageHide() {
   hide({ restoreFocus: false });
 }
 
+function onPendingFocus(event) {
+  if (!activeForm) return;
+  const overlay = document.querySelector(OVERLAY_SELECTOR);
+  if (overlay && !overlay.contains(event.target)) focusNode(overlay);
+}
+
+function onPendingKeydown(event) {
+  if (!activeForm || event.key !== "Tab") return;
+  event.preventDefault();
+  focusNode(document.querySelector(OVERLAY_SELECTOR));
+}
+
 function install() {
   if (!isBrowser() || destroyed || observer) return false;
 
@@ -232,6 +243,9 @@ function install() {
   });
 
   window.addEventListener("pagehide", onPageHide);
+  window.addEventListener("pageshow", syncPublicSupportProgress);
+  document.addEventListener("focusin", onPendingFocus, true);
+  document.addEventListener("keydown", onPendingKeydown, true);
   syncPublicSupportProgress();
   return true;
 }
@@ -243,6 +257,9 @@ export function destroyPublicSupportProgress() {
   observer?.disconnect();
   observer = null;
   window.removeEventListener("pagehide", onPageHide);
+  window.removeEventListener("pageshow", syncPublicSupportProgress);
+  document.removeEventListener("focusin", onPendingFocus, true);
+  document.removeEventListener("keydown", onPendingKeydown, true);
 
   hide({ restoreFocus: false });
   document.querySelector(OVERLAY_SELECTOR)?.remove?.();

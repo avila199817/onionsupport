@@ -29,6 +29,8 @@ const [
   readFile("src/css/components/app-icons.css", "utf8"),
 ]);
 
+const cssCode = css.replace(/\/\*[\s\S]*?\*\//g, "");
+
 // Route remains private/admin and uses the existing route-style boundary.
 assert.match(config, /whatsapp:\s*"\/whatsapp"/);
 assert.match(config, /ADMIN_ROUTES[\s\S]*ROUTES\.whatsapp/);
@@ -102,12 +104,12 @@ assert.match(css, /DOMAIN-ONLY CSS/);
 assert.match(css, /components\/ui\.css/);
 assert.match(css, /components\/avatar-system\.css/);
 assert.match(css, /components\/app-icons\.css/);
-assert.match(css, /\.whatsapp-workspace/);
-assert.match(css, /\.whatsapp-message\.is-outbound/);
-assert.match(css, /@container \(max-width: 780px\)/);
-assert.doesNotMatch(css, /#[0-9a-f]{3,8}\b/i);
-assert.doesNotMatch(css, /:[^;{}]*!important\b/i);
-assert.doesNotMatch(css, /@import/);
-assert.doesNotMatch(css, /data:image|<svg/i);
+assert.match(cssCode, /\.whatsapp-workspace/);
+assert.match(cssCode, /\.whatsapp-message\.is-outbound/);
+assert.match(cssCode, /@container \(max-width: 780px\)/);
+assert.doesNotMatch(cssCode, /#[0-9a-f]{3,8}\b/i);
+assert.doesNotMatch(cssCode, /!important\b/i);
+assert.doesNotMatch(cssCode, /@import/);
+assert.doesNotMatch(cssCode, /data:image|<svg/i);
 
 console.log("WhatsApp route contract: PASS · professional Onion inbox · centralized backend · shared UI/avatar authority");

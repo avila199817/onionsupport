@@ -39,7 +39,7 @@ const POST_ROUTER = Object.freeze([
   }),
   Object.freeze({
     key: "mobile-datalist",
-    scope: "global",
+    scope: "data-list",
     load: () => import("../features/mobile-datalist/index.js"),
   }),
   Object.freeze({
@@ -228,6 +228,11 @@ function hasPathSegment(pathname = "/", segment = "") {
 function routeScopes(pathname = activeRoutePathname()) {
   const path = cleanPathname(pathname);
   const scopes = new Set(["global"]);
+
+  if (["incidencias", "tickets", "facturas", "clientes", "usuarios"]
+    .some((segment) => hasPathSegment(path, segment))) {
+    scopes.add("data-list");
+  }
 
   if (hasPathSegment(path, "facturas")) {
     scopes.add("facturas");

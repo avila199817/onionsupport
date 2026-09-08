@@ -6,6 +6,8 @@
    su containing block para que el tooltip nazca junto al control real.
 ========================================================= */
 
+@import url("./sidebar.icons.css");
+
 .sidebar-toggle,
 .sidebar-account-trigger {
   position: relative;

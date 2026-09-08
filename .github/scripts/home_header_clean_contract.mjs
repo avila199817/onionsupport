@@ -183,6 +183,8 @@ const [
   homeExtremeStatesCss,
   homeExtremeResponsiveCss,
   appCss,
+  homeRouteCss,
+  sidebarInteractionsCss,
   privateRuntimeSource,
   homeEntityModalSource,
   entityIntentPreloadSource,
@@ -200,6 +202,8 @@ const [
   readFile("src/css/compositions/home-extreme-states.css", "utf8"),
   readFile("src/css/compositions/home-extreme-responsive.css", "utf8"),
   readFile("src/css/app.css", "utf8"),
+  readFile("src/css/views/home/index.css", "utf8"),
+  readFile("src/css/layout/sidebar.executive.interactions.css", "utf8"),
   readFile("src/features/private-runtime-ui/index.js", "utf8"),
   readFile("src/features/home-entity-modal/index.js", "utf8"),
   readFile("src/features/entity-intent-preload/index.js", "utf8"),
@@ -364,9 +368,11 @@ assert.match(
   /@import url\("\.\/components\/app-icons\.css"\) layer\(components\);/
 );
 assert.match(
-  appCss,
-  /@import url\("\.\/compositions\/home-extreme\.css"\) layer\(compositions\);/
+  homeRouteCss,
+  /@import url\("\.\.\/\.\.\/compositions\/home-extreme\.css"\) layer\(compositions\);/
 );
+assert.doesNotMatch(appCss, /home-extreme\.css|sidebar\.icons\.css/);
+assert.match(sidebarInteractionsCss, /@import url\("\.\/sidebar\.icons\.css"\);/);
 
 const snapshot = getHomeTemplateSnapshot();
 assert.equal(snapshot.policy.greetingLocked, true);

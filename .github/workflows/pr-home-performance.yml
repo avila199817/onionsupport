@@ -1,0 +1,282 @@
+name: PR Home Performance
+
+run-name: Home comparison · PR ${{ github.event.pull_request.number }}
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "index.html"
+      - "src/**"
+      - "package.json"
+      - "package-lock.json"
+      - "vite.config.js"
+      - "tools/**"
+      - ".github/lighthouse/**"
+      - ".github/workflows/pr-home-performance.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-home-performance-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    name: Compare home ${{ matrix.profile }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [desktop, mobile]
+
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PROFILE: ${{ matrix.profile }}
+
+    steps:
+      - name: Checkout exact trusted base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+          persist-credentials: false
+
+      - name: Checkout exact candidate as build data
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: head
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+          persist-credentials: false
+
+      # The action ships its LHCI dependency tree at this immutable revision.
+      # Reuse that engine to alternate samples without floating npm installs.
+      - name: Checkout pinned Lighthouse engine
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: treosh/lighthouse-ci-action
+          ref: 3e7e23fb74242897f95c0ba9cabad3d0227b9b18
+          path: lighthouse-engine
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+          persist-credentials: false
+
+      - name: Use exact Node 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.23.2"
+          package-manager-cache: false
+
+      - name: Verify revisions and use exact npm
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$(git -C base rev-parse HEAD)" == "${BASE_SHA}" ]]
+          [[ "$(git -C head rev-parse HEAD)" == "${HEAD_SHA}" ]]
+          [[ "$(git -C lighthouse-engine rev-parse HEAD)" == "3e7e23fb74242897f95c0ba9cabad3d0227b9b18" ]]
+          corepack enable
+          corepack prepare npm@10.9.8 --activate
+          [[ "$(node --version)" == "v22.23.2" ]]
+          [[ "$(npm --version)" == "10.9.8" ]]
+
+      - name: Build both revisions with the same trusted base tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          for variant in base head; do
+            source_dir="${GITHUB_WORKSPACE}/${variant}"
+            ONION_REPO_ROOT="${source_dir}" \
+              python3 base/.github/ci/validate_candidate_paths.py
+            ONION_TRUSTED_SOURCE_DIR="${GITHUB_WORKSPACE}/base" \
+              ONION_CANDIDATE_SOURCE_DIR="${source_dir}" \
+              ONION_STAGED_BUILD_DIR="${GITHUB_WORKSPACE}/build-${variant}" \
+              node base/tools/stage-trusted-build.mjs
+            release_sha="${BASE_SHA}"
+            if [[ "${variant}" == head ]]; then release_sha="${HEAD_SHA}"; fi
+            (
+              cd "build-${variant}"
+              npm ci --ignore-scripts --no-audit --no-fund
+              export ONION_RELEASE_SHA="${release_sha}"
+              export ONION_CANDIDATE_SOURCE_DIR="${source_dir}"
+              npm run build
+              npm run check:dist
+            )
+          done
+
+      # Candidate JavaScript executes only in this unprivileged measurement job.
+      # No browser interception, API mocks, consent overrides or request blocking.
+      - name: Measure five alternating cold samples per revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { createHash } from 'node:crypto';
+          import { createServer } from 'node:http';
+          import { spawn } from 'node:child_process';
+          import { appendFile, copyFile, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
+          import { extname, resolve, sep } from 'node:path';
+          import { gzipSync } from 'node:zlib';
+
+          const root = process.cwd();
+          const profile = process.env.PROFILE;
+          assert.ok(['desktop', 'mobile'].includes(profile));
+          const config = resolve(root, `base/.github/lighthouse/${profile}.json`);
+          const cli = resolve(root, 'lighthouse-engine/node_modules/@lhci/cli/src/cli.js');
+          const output = resolve(root, 'home-performance', profile);
+          const origin = 'http://127.0.0.1:4173';
+          const variants = ['base', 'head'];
+          const samples = { base: [], head: [] };
+          const css = {};
+          let activeRoot;
+          let engine;
+          let failed = false;
+          await mkdir(output, { recursive: true });
+
+          async function command(args, cwd, logName) {
+            const child = spawn(process.execPath, [cli, ...args], { cwd, env: process.env });
+            let log = '';
+            for (const stream of [child.stdout, child.stderr]) {
+              stream.on('data', (chunk) => { log += chunk; process.stdout.write(chunk); });
+            }
+            const code = await new Promise((done, reject) => {
+              child.once('error', reject);
+              child.once('close', (status) => done(status ?? 1));
+            });
+            await writeFile(resolve(output, logName), log);
+            return code;
+          }
+
+          const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.txt': 'text/plain' };
+          const server = createServer(async (request, response) => {
+            try {
+              const pathname = decodeURIComponent(new URL(request.url, origin).pathname);
+              const target = await realpath(resolve(activeRoot, '.' + (pathname === '/' ? '/index.html' : pathname)));
+              if (!target.startsWith(activeRoot + sep)) throw new Error('Invalid path');
+              let bytes = await readFile(target);
+              const headers = { 'Content-Type': types[extname(target)] || 'application/octet-stream', 'Cache-Control': 'no-store' };
+              if (/\bgzip\b/.test(request.headers['accept-encoding'] || '') && /\.(html|js|css|json|svg|txt)$/.test(target)) {
+                bytes = gzipSync(bytes);
+                headers['Content-Encoding'] = 'gzip';
+                headers.Vary = 'Accept-Encoding';
+              }
+              headers['Content-Length'] = bytes.length;
+              response.writeHead(200, headers).end(bytes);
+            } catch { response.writeHead(404).end('Not found'); }
+          });
+          await new Promise((done, reject) => {
+            server.once('error', reject);
+            server.listen(4173, '127.0.0.1', done);
+          });
+
+          try {
+            for (const variant of variants) {
+              await mkdir(resolve(output, variant, '.lighthouseci'), { recursive: true });
+              const dist = resolve(root, `build-${variant}/dist`);
+              const html = await readFile(resolve(dist, 'index.html'), 'utf8');
+              const links = [...html.matchAll(/<link\b[^>]*>/gi)].map(([tag]) => tag);
+              const paths = new Set(links.filter((tag) => /\brel=["']stylesheet["']/.test(tag)).map((tag) => tag.match(/\bhref=["']([^"']+)["']/)?.[1]).filter((url) => url?.startsWith('/assets/css/')));
+              css[variant] = await Promise.all([...paths].map(async (url) => {
+                const bytes = await readFile(resolve(dist, '.' + url));
+                return { url, bytes: bytes.length, gzipBytes: gzipSync(bytes).length };
+              }));
+            }
+            for (let round = 1; round <= 5; round++) {
+              const order = round % 2 ? variants : [...variants].reverse();
+              for (const variant of order) {
+                activeRoot = await realpath(resolve(root, `build-${variant}/dist`));
+                const directory = resolve(output, `round-${round}-${variant}`);
+                await mkdir(directory);
+                console.log(`\nROUND ${round} ${variant} ${profile} ${origin}`);
+                const code = await command(['collect', `--config=${config}`, `--url=${origin}/`, '--numberOfRuns=1'], directory, `round-${round}-${variant}.log`);
+                assert.equal(code, 0, `Lighthouse collection failed: round ${round} ${variant}`);
+                const reportsDir = resolve(directory, '.lighthouseci');
+                const files = await readdir(reportsDir);
+                const reports = [];
+                for (const name of files.filter((name) => name.endsWith('.json'))) {
+                  const report = JSON.parse(await readFile(resolve(reportsDir, name), 'utf8'));
+                  if (report.categories?.performance && report.audits) reports.push(report);
+                }
+                assert.equal(reports.length, 1, 'Each cold collection must produce exactly one report');
+                const report = reports[0];
+                assert.ok(!report.runtimeError, JSON.stringify(report.runtimeError));
+                assert.equal(new URL(report.finalDisplayedUrl || report.finalUrl).origin, origin);
+                const observedEngine = { lighthouseVersion: report.lighthouseVersion, userAgent: report.userAgent || report.environment?.networkUserAgent || report.environment?.hostUserAgent, hostUserAgent: report.environment?.hostUserAgent };
+                if (engine) assert.deepEqual(observedEngine, engine, 'Lighthouse and Chrome must match across all samples');
+                else engine = observedEngine;
+                const metrics = Object.fromEntries(['first-contentful-paint', 'largest-contentful-paint', 'total-blocking-time', 'cumulative-layout-shift'].map((id) => {
+                  const value = report.audits[id]?.numericValue;
+                  assert.ok(Number.isFinite(value), `Missing metric ${id}`);
+                  return [id, value];
+                }));
+                assert.ok(Number.isFinite(report.categories.performance.score));
+                samples[variant].push({ round, performance: report.categories.performance.score * 100, ...metrics });
+                await writeFile(resolve(output, variant, '.lighthouseci', `lhr-${round}.json`), JSON.stringify(report));
+                for (const name of files.filter((name) => name.endsWith('.html'))) {
+                  await copyFile(resolve(reportsDir, name), resolve(output, variant, '.lighthouseci', `lhr-${round}.html`));
+                }
+                console.log(`SAMPLE ${variant} ${JSON.stringify(samples[variant].at(-1))}`);
+              }
+            }
+            // Apply the immutable base's unchanged thresholds to all five reports.
+            for (const variant of variants) {
+              const code = await command(['assert', `--config=${config}`], resolve(output, variant), `${variant}-assertions.log`);
+              failed ||= code !== 0;
+            }
+            const stats = (values, lowerIsWorse = false) => {
+              const sorted = [...values].sort((a, b) => a - b);
+              assert.equal(sorted.length, 5);
+              return { median: sorted[2], worst: lowerIsWorse ? sorted[0] : sorted[4] };
+            };
+            const summary = {
+              schema: 'onionsupport.pr-home-performance.v1', profile, origin,
+              baseSha: process.env.BASE_SHA, headSha: process.env.HEAD_SHA,
+              toolingSha: process.env.BASE_SHA,
+              lighthouseEngineSha: '3e7e23fb74242897f95c0ba9cabad3d0227b9b18',
+              configSha256: createHash('sha256').update(await readFile(config)).digest('hex'),
+              method: 'Five alternating cold runs per revision, same runner and loopback origin; base tooling and budgets; normal third-party requests. Local comparison, not production scores.',
+              engine, samples, css, results: {},
+            };
+            const metrics = ['performance', 'first-contentful-paint', 'largest-contentful-paint', 'total-blocking-time', 'cumulative-layout-shift'];
+            for (const variant of variants) summary.results[variant] = Object.fromEntries(metrics.map((metric) => [metric, stats(samples[variant].map((sample) => sample[metric]), metric === 'performance')]));
+            const format = (value) => Number(value.toFixed(3));
+            const rows = metrics.map((metric) => {
+              const before = summary.results.base[metric], after = summary.results.head[metric];
+              return `| ${metric} | ${format(before.median)} / ${format(before.worst)} | ${format(after.median)} / ${format(after.worst)} | ${format(after.median - before.median)} |`;
+            });
+            const cssTotal = (variant, key) => css[variant].reduce((total, item) => total + item[key], 0);
+            for (const key of ['bytes', 'gzipBytes']) rows.push(`| Initial CSS ${key} | ${cssTotal('base', key)} | ${cssTotal('head', key)} | ${cssTotal('head', key) - cssTotal('base', key)} |`);
+            const markdown = [`## Home comparison · ${profile}`, '', `Base: \`${summary.baseSha}\` · Head: \`${summary.headSha}\``, '', `Lighthouse: ${engine.lighthouseVersion} · User agent: ${engine.userAgent} · Host: ${engine.hostUserAgent}`, '', summary.method, '', 'Timing metrics are milliseconds; CLS is unitless. Performance is 0–100. No preview/production score is used as a comparative gate.', '', '| Metric | Base median / worst | Head median / worst | Median delta (head − base) |', '|---|---:|---:|---:|', ...rows, ''].join('\n');
+            await writeFile(resolve(output, 'comparison.json'), JSON.stringify(summary, null, 2));
+            await writeFile(resolve(output, 'comparison.md'), markdown);
+            console.log(markdown);
+            if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, markdown);
+          } finally {
+            server.closeAllConnections();
+            await new Promise((done) => server.close(done));
+          }
+          if (failed) process.exitCode = 1;
+          NODE
+
+      - name: Upload complete comparison reports and logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pr-home-${{ matrix.profile }}-${{ github.event.pull_request.head.sha }}-${{ github.run_attempt }}
+          path: home-performance/${{ matrix.profile }}
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14

@@ -676,12 +676,6 @@ function createFrameScheduler(task) {
       return true;
     },
 
-    flush() {
-      if (frame) cancelFrame(frame);
-      frame = 0;
-      task();
-    },
-
     cancel() {
       cancelFrame(frame);
       frame = 0;
@@ -701,7 +695,6 @@ function initScrollPipeline(refs, cleanups, host) {
     progressValue: null,
     progressPercent: null,
     thumbTop: null,
-    thumbCenter: null,
     scrolled: null,
   };
 
@@ -748,9 +741,6 @@ function initScrollPipeline(refs, cleanups, host) {
         );
         state.travel = Math.max(1, trackSize - state.thumbSize);
 
-        const thumbSize = `${Math.round(state.thumbSize)}px`;
-        setCssMetric(refs.root, "--public-home-scrollbar-thumb-size", thumbSize);
-        setCssMetric(track, "--public-home-scrollbar-thumb-size", thumbSize);
       } else {
         state.trackRect = null;
         state.thumbSize = 0;
@@ -773,7 +763,13 @@ function initScrollPipeline(refs, cleanups, host) {
     const scrolled = top > 14;
     const thumbTopNumber = Math.round(state.travel * progress);
     const thumbTop = `${thumbTopNumber}px`;
-    const thumbCenter = `${Math.round(thumbTopNumber + state.thumbSize / 2)}px`;
+
+    // Complete reads first. These variables belong only to the rail: putting
+    // them on the root would invalidate inherited styles across the home.
+    if (state.trackRect) {
+      const thumbSize = `${Math.round(state.thumbSize)}px`;
+      setCssMetric(refs.customScrollbar, "--public-home-scrollbar-thumb-size", thumbSize);
+    }
 
     if (state.scrolled !== scrolled) {
       state.scrolled = scrolled;
@@ -786,29 +782,17 @@ function initScrollPipeline(refs, cleanups, host) {
       state.progressValue = progressValue;
       setDataset(refs.root, "scrollProgress", progressValue);
       setDataset(refs.customScrollbar, "scrollProgress", progressValue);
-      setCssMetric(refs.root, "--public-home-scroll-progress", progressValue);
-      setCssMetric(refs.customScrollbar, "--public-home-scroll-progress", progressValue);
-      setCssMetric(refs.nav, "--public-home-scroll-progress", progressValue);
     }
 
     if (state.progressPercent !== progressPercent) {
       state.progressPercent = progressPercent;
       setDataset(refs.root, "scrollProgressPercent", progressPercent);
-      setCssMetric(refs.root, "--public-home-scroll-progress-percent", progressPercent);
       setCssMetric(refs.customScrollbar, "--public-home-scroll-progress-percent", progressPercent);
-      setCssMetric(refs.nav, "--public-home-scroll-progress-percent", progressPercent);
     }
 
     if (state.thumbTop !== thumbTop) {
       state.thumbTop = thumbTop;
-      setCssMetric(refs.root, "--public-home-scrollbar-thumb-top", thumbTop);
       setCssMetric(refs.customScrollbar, "--public-home-scrollbar-thumb-top", thumbTop);
-    }
-
-    if (state.thumbCenter !== thumbCenter) {
-      state.thumbCenter = thumbCenter;
-      setCssMetric(refs.root, "--public-home-scrollbar-thumb-center", thumbCenter);
-      setCssMetric(refs.customScrollbar, "--public-home-scrollbar-thumb-center", thumbCenter);
     }
   }
 
@@ -905,21 +889,20 @@ function initScrollPipeline(refs, cleanups, host) {
     addEvent(cleanups, refs.customScrollbar, "lostpointercapture", stop);
   }
 
-  scheduler.flush();
+  // The Router is still preparing a hidden host here. Measure in the next
+  // frame, after the rest of the mount/commit writes have been batched, instead
+  // of forcing a whole-page layout in the middle of renderPublicHomeView().
+  scheduler.schedule();
 
   cleanups.push(() => {
     scheduler.cancel();
 
-    for (const node of [refs.root, refs.customScrollbar, refs.nav]) {
-      for (const key of [
-        "--public-home-scroll-progress",
-        "--public-home-scroll-progress-percent",
-        "--public-home-scrollbar-thumb-top",
-        "--public-home-scrollbar-thumb-center",
-        "--public-home-scrollbar-thumb-size",
-      ]) {
-        removeCssMetric(node, key);
-      }
+    for (const key of [
+      "--public-home-scroll-progress-percent",
+      "--public-home-scrollbar-thumb-top",
+      "--public-home-scrollbar-thumb-size",
+    ]) {
+      removeCssMetric(refs.customScrollbar, key);
     }
 
     setClass(refs.root, CLASSES.scrolled, false);

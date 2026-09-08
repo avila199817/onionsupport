@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import re
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -23,7 +24,7 @@ styles = read("src/css/views/incidencias/index.css")
 
 require(
     'import * as Impl from "./index.impl.js"' in boundary
-    and "Impl.IncidenciasView(host, context)" in boundary,
+    and ("Impl.IncidenciasView(host, context)" in boundary or ("Impl.IncidenciasView(host, ownerContext)" in boundary and "modalHost: lease?.modalHost || null" in boundary)),
     "stable Incidencias boundary must delegate to the full controller implementation",
 )
 require(
@@ -119,8 +120,8 @@ require(
 )
 require(
     "event.isComposing || listSearchComposing" in controller
-    and '"compositionstart",\n      onCompositionStart' in controller
-    and '"compositionend",\n      onCompositionEnd' in controller,
+    and re.search(r'"compositionstart",\s*onCompositionStart', controller)
+    and re.search(r'"compositionend",\s*onCompositionEnd', controller),
     "search must wait for IME composition to finish",
 )
 require(

@@ -3,6 +3,11 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
+import { directDomainOwners, assertDirectDomainOwners } from "./private_domain_owner_contract.mjs";
+
+if (directDomainOwners) {
+  await assertDirectDomainOwners();
+} else {
 const read = (path) => readFile(path, "utf8");
 
 const [
@@ -140,3 +145,5 @@ assert.match(homeModal, /data-facturas-modal-bridge-feedback/);
 console.log(
   "Home owner modal stay contract: PASS · Home retained · single canonical Incidencias Detail State authority · sealed owner controllers"
 );
+
+}

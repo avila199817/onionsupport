@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { directDomainOwners, assertDirectDomainOwners } from "./private_domain_owner_contract.mjs";
 const read = (path) => readFile(path, "utf8");
 const [
   app,
@@ -22,7 +23,7 @@ const [
   read("src/css/layout/chrome.css"),
   read("src/css/tokens/variables.css"),
   read("src/features/private-runtime-ui/index.js"),
-  read("src/features/home-entity-modal/index.js"),
+  directDomainOwners ? "" : read("src/features/home-entity-modal/index.js"),
   read("src/features/entity-intent-preload/index.js"),
 ]);
 assert.doesNotMatch(app, /await\s+initGlobalUI\s*\(/);
@@ -33,6 +34,9 @@ assert.match(privateRuntime, /isAuthenticated\(context\)/);
 assert.match(privateRuntime, /import\("\.\.\/\.\.\/ui\/sidebar\/index\.js"\)/);
 assert.match(privateRuntime, /import\("\.\.\/\.\.\/ui\/topbar\/index\.js"\)/);
 assert.match(privateRuntime, /import\("\.\.\/\.\.\/ui\/chrome\/index\.js"\)/);
+if (directDomainOwners) {
+  await assertDirectDomainOwners();
+} else {
 assert.match(privateRuntime, /import\("\.\.\/home-entity-modal\/index\.js"\)/);
 assert.match(privateRuntime, /import\("\.\.\/entity-overlay\/index\.js"\)/);
 assert.match(privateRuntime, /import\("\.\.\/entity-intent-preload\/index\.js"\)/);
@@ -48,6 +52,7 @@ assert.doesNotMatch(homeEntityModal, /Router\.navigate|history\.(?:pushState|rep
 assert.match(entityIntentPreload, /authenticated\(\)/);
 assert.match(entityIntentPreload, /primeFacturaModalBridge/);
 assert.match(entityIntentPreload, /primeIncidenciaModalBridge/);
+}
 assert.doesNotMatch(entityIntentPreload, /document\.addEventListener\("click"/);
 assert.doesNotMatch(entityIntentPreload, /(^|[^A-Za-z0-9_$])fetch\s*\(/m);
 assert.doesNotMatch(entityIntentPreload, /localStorage|sessionStorage|indexedDB/);

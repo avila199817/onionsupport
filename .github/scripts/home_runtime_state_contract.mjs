@@ -113,11 +113,19 @@ assert.equal(
   "Home must preserve the post-await session/context race guard"
 );
 
+if (source.includes('from "../clientes/clientes.api.js"')) {
+  const clientesApi = await readFile("src/views/clientes/clientes.api.js", "utf8");
+  assert.match(clientesApi, /["']\/api\/clientes\/stats["']/);
+  assert.match(source, /loadAdminCount\(fetchClientesStatsRequest/);
+  assert.match(source, /loadAdminCount\(fetchUsuariosStatsRequest/);
+  assert.doesNotMatch(source, /Http\.get|from ["'].*http/);
+} else {
 assert.equal(
   source.includes('clientes: "/api/clientes/stats"'),
   true,
   "Home admin cliente count must use the exact /api/clientes/stats endpoint, never a one-item cursor page"
 );
+}
 
 assert.equal(
   source.includes('import FacturasApi from "../facturas/facturas.api.js";'),

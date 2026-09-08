@@ -319,15 +319,31 @@ function blocksEntityIntentFromElement(element = null) {
     "[data-entity-overlay-ignore='true'], [data-create-action]"
   );
 
-  if (!localInteraction) return false;
+  if (localInteraction) {
+    const explicitlyAllowed =
+      cleanText(attribute(localInteraction, "data-entity-overlay-allow"), "").toLowerCase() === "true" ||
+      cleanText(attribute(localInteraction, "data-entity-overlay-action"), "").toLowerCase() === "open";
+    if (!explicitlyAllowed) return true;
+  }
 
-  const explicitlyAllowed =
-    cleanText(attribute(localInteraction, "data-entity-overlay-allow"), "")
-      .toLowerCase() === "true" ||
-    cleanText(attribute(localInteraction, "data-entity-overlay-action"), "")
-      .toLowerCase() === "open";
-
-  return !explicitlyAllowed;
+  // IDs on a command or its row describe the command target. They must not
+  // turn PDF, copy, payment or form interactions into a detail opening.
+  if (element.closest("[data-stop-row='true'], [disabled], [aria-disabled='true'], input, textarea, select, [contenteditable='true']")) return true;
+  const actionNode = element.closest([
+    "[data-entity-overlay-action]", "[data-action]",
+    "[data-facturas-action]", "[data-factura-action]",
+    "[data-incidencias-action]", "[data-incidencia-action]", "[data-ticket-action]",
+    "[data-clientes-action]", "[data-cliente-action]",
+    "[data-usuarios-action]", "[data-usuario-action]", "[data-detail-action]",
+  ].join(","));
+  if (!actionNode) return false;
+  const data = datasetSnapshot(actionNode);
+  const action = cleanText(first(data.entityOverlayAction, data.facturasAction, data.facturaAction,
+    data.incidenciasAction, data.incidenciaAction, data.ticketAction, data.clientesAction,
+    data.clienteAction, data.usuariosAction, data.usuarioAction, data.detailAction, data.action, ""))
+    .toLowerCase().replace(/_/g, "-");
+  return !["open", "detail", "open-detail", "open-factura", "open-incidencia", "open-cliente",
+    "open-usuario", "open-user", "open-client", "open-ticket", "open-invoice"].includes(action);
 }
 
 export function inferEntityIntentFromElement(target = null) {

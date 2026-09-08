@@ -198,8 +198,15 @@ const controller = await readFile(
   "utf8"
 );
 
-assert.match(liveSync, /COMMENT_THREAD\s*=\s*"\[data-description-comments='true'\]"/);
-assert.match(liveSync, /incidencias-modal-description-comment/);
+const detailState = await readFile(
+  new URL("../../src/features/incidencias-detail-state/index.js", import.meta.url),
+  "utf8"
+);
+assert.match(detailState, /COMMENT_THREAD\s*=\s*"\[data-description-comments='true'\]"/);
+assert.match(detailState, /incidencias-modal-description-comment/);
+assert.match(liveSync, /commentsFromDetail,[\s\S]*?commentSignature,[\s\S]*?incidencias-detail-state/);
+assert.doesNotMatch(liveSync, /loadIncidenciaDetail|incidencias\.api|projectRemoteSlots|renderFreshComments/);
+assert.match(liveSync, /controller\.refreshDetail\(\{/);
 assert.match(avatars, /incidencias-modal-description-comment-head/);
 assert.match(interactions, /\.incidencias-modal-description-thread\s*\{/);
 assert.match(interactions, /\.incidencias-modal-description-comment\s*\{/);

@@ -119,15 +119,14 @@ require(INDEX, 'setSearch("");\n        focusSearchInput();', "Clear-search must
 require(INDEX, "let detailRefreshEpoch = 0", "Detail refreshes need an independent race epoch")
 require(INDEX, "const epoch = ++detailRefreshEpoch", "Each detail refresh must advance its race epoch")
 require(INDEX, "epoch !== detailRefreshEpoch", "Stale detail refresh responses must be rejected")
-require(INDEX, "const liveModalUserId", "Detail refresh must inspect the live modal identity")
-require(INDEX, "liveModalUserId === id", "Detail refresh may update only the same live user")
+require(INDEX, "!detailModalOpen || detailId !== id", "Detail refresh must require the currently owned modal identity")
 require(INDEX, "detailRefreshEpoch += 1", "Open/close/destroy transitions must invalidate old detail refreshes")
 require(INDEX, "detailRefreshRaceProtected: true", "Usuarios snapshot must declare detail refresh race protection")
 
 # Controller teardown must close modal islands only when this controller is the active owner.
 require(INDEX, "const wasActiveOwner", "Destroy must establish whether the controller owns active modal islands")
 require(INDEX, "if (wasActiveOwner)", "Modal teardown must be conditional on active controller ownership")
-require(INDEX, "UsuariosDetailModal?.close?.()", "Destroy must close the detail modal owned by the view")
+require(INDEX, "if (detailModalOpen) closeDetailModal({ notify: false, restoreFocus: false });", "Destroy must close only its owned detail without restoring stale focus")
 require(INDEX, "UsuariosCreateModal?.close?.()", "Destroy must close the create modal owned by the view")
 require(INDEX, "modalDestroyCleanup: true", "Usuarios snapshot must declare modal teardown protection")
 

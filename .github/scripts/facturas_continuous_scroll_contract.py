@@ -29,7 +29,11 @@ def reject(source: str, snippet: str, message: str) -> None:
 # Owner authority and first-render performance.
 require(INDEX, "const DEFAULT_BATCH_SIZE = 50;", "Facturas initial batch must stay bounded for a light first render")
 require(INDEX, "export async function openFacturaDetailById", "Facturas must expose its canonical detail opener")
-require(INDEX, "routeOwnerController" if "export async function createFacturaDetailController" in INDEX else "lastFacturasController", "Facturas canonical opener must target the mounted route controller")
+opener = INDEX[INDEX.index("export async function openFacturaDetailById"):]
+require(opener, 'EntityOverlay.open({ type: "factura", id: facturaId, opener: openerNode })', "Facturas public opener must use the shared SPA dispatcher")
+require(INDEX, "if (!detailOnly) return openFacturaDetailById(id, openerNode);", "Listing actions must share the same detail entry as Home")
+require(INDEX, 'isOriginOpen?.(host)', "Listing renders must respect the active shared modal")
+reject(opener, "routeOwnerController", "Route-specific modal bypasses must not return")
 require(TEMPLATE, "Exportar cargadas", "Partial CSV export must say that only loaded invoices are exported")
 require(TEMPLATE, "Actualización detenida.", "Refresh failure must expose actionable copy")
 require(TEMPLATE, 'data-facturas-action="${FACTURAS_ACTIONS.REFRESH}"', "Refresh failure must expose a retry action")

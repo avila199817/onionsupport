@@ -4403,10 +4403,10 @@ function renderDetailLoadState(input = {}) {
             <h2 id="${TITLE_ID}" class="incidencias-modal-title ui-detail-modal-title">${title}</h2>
             <button type="button" class="incidencias-modal-close-btn ui-detail-modal-close-btn" data-detail-action="detail-close" aria-label="Cerrar detalle">${icon("close")}</button>
           </header>
-          <div class="incidencias-modal-body ui-detail-modal-body" aria-busy="${failed ? "false" : "true"}">
+          <main class="incidencias-modal-body ui-detail-modal-body" data-modal-body="true" data-history-mode="ticket" aria-busy="${failed ? "false" : "true"}">
             <p id="${DESCRIPTION_ID}" role="${failed ? "alert" : "status"}">${escapeHtml(failed ? input.error : "Preparando el detalle y sus actualizaciones.")}</p>
             ${failed ? '<button type="button" class="incidencias-modal-confirm-btn" data-detail-action="detail-retry">Reintentar</button>' : ''}
-          </div>
+          </main>
         </div>
       </div>
     </section>`;

@@ -12,19 +12,18 @@ Frontend productivo de **Onion Support**, una SPA JavaScript modular desplegada 
 
 ## Estado y siguiente paso
 
-Corte verificado: **4 de septiembre de 2026, UTC**. La versión funcional desplegada y verificada es [`5d82b0d0`](https://github.com/avila199817/onionsupport/commit/5d82b0d0f5757868b52be156cbf8d38a28a7e276). Una actualización posterior de documentación no equivale a un cambio del runtime.
+Corte de implementación: **8 de septiembre de 2026, UTC**. La apertura de detalle de Home, listas y relaciones de Incidencias, Facturas, Clientes y Usuarios usa una única sesión `EntityOverlay`. El [registro de esta entrega](docs/releases/2026-09-08-single-modal-session.md) separa los contratos locales de las evidencias de integración, despliegue y comprobación de producción. Las referencias de publicación y verificación se mantienen en ese registro.
 
-- Implementado y desplegado: autoridades compartidas de avatares, modales, navegación, concurrencia y carga visual; marca nacional **Onion Support**, cinco servicios públicos y `/login` fuera del índice por contrato.
-- Verificado en producción: despliegue, bytes, disponibilidad y política SEO. Portada Lighthouse: rendimiento **87 móvil / 100 escritorio**; CLS móvil **0,000**. Quedan avisos de TBT móvil y LCP del acceso; una ejecución verde no elimina esos avisos.
-- Próximo trabajo: validar un recorrido real y controlado **acceso → incidencia → avatar → cierre de sesión**, coordinado con el backend. Después se abordarán rendimiento, persistencia privada, contratos y limpieza por módulos, con entregas pequeñas.
-- La PR antigua [#482](https://github.com/avila199817/onionsupport/pull/482) se cerró como superada: sus mejoras ya estaban integradas y recuperaba lógica de avatar retirada.
+- Implementado: una entrada de apertura, cuatro controladores de dominio y un lifecycle compartido de teclado, foco y scroll. Se retiraron los puentes de Home y los detalles alternativos de lectura.
+- Verificado localmente para esta entrega: contratos de fuente, compilación, distribución y navegador con controladores/templates reales y fronteras de API sintéticas. El alcance y los comandos figuran en el registro de release.
+- Siguiente trabajo pendiente: recorrido real y controlado **acceso → incidencia → avatar → cierre de sesión**, coordinado con el backend. Las métricas y los avisos Lighthouse históricos permanecen identificados por revisión en `PROJECT_CONTEXT.md`.
 
 Leer primero [estado, evidencias y límites](docs/PROJECT_CONTEXT.md), después [plan por fases y criterios de aceptación](docs/ROADMAP.md). El estado Azure estructural más reciente vive en [AZURE_CURRENT_STATE.md](docs/AZURE_CURRENT_STATE.md). El backend mantiene su [estado operativo](https://github.com/avila199817/oniontech/blob/main/docs/COMO_LO_TENEMOS_AHORA.md) y su [roadmap coordinado](https://github.com/avila199817/oniontech/blob/main/docs/ROADMAP.md).
 
 ## Puesta en marcha
 
 ```bash
-npm ci
+npm ci --ignore-scripts --no-audit --no-fund
 npm run validate:ci
 ```
 
@@ -60,7 +59,8 @@ Puntos principales:
 - `src/views/`: vistas de producto y sus contratos de dominio.
 - `src/css/`: tokens, core, App Chrome, componentes, composiciones y CSS de vista.
 - `src/features/avatar-system/`: autoridad única de identidad, estado y presentación de avatares.
-- `src/features/entity-overlay/modal-lifecycle.js`: interacción compartida de modales.
+- `src/features/entity-overlay/index.js`: única sesión y entrada de apertura de detalle para los cuatro dominios.
+- `src/features/entity-overlay/modal-lifecycle.js`: teclado, pila, foco y scroll compartidos de todos los diálogos.
 - `src/core/async-scope.js`: cancelación, vigencia de respuestas y limpieza de recursos.
 - `src/core/public-site.js`: marca, servicios y política de metadatos públicos.
 - `.github/`: contratos, verificadores y workflows de release.
@@ -97,7 +97,7 @@ No deben quedar helpers, workflows ni archivos temporales de migración en `main
 - [`docs/UI_FOUNDATION.md`](docs/UI_FOUNDATION.md) — foundation visual.
 - [`docs/UI_CHROME.md`](docs/UI_CHROME.md) — autoridad de App Chrome.
 - [`docs/UI_LOADING_SYSTEM.md`](docs/UI_LOADING_SYSTEM.md) — sistema de loading.
-- [`docs/UI_MODAL_SYSTEM.md`](docs/UI_MODAL_SYSTEM.md) — pila, foco y cierre de modales.
+- [`docs/UI_MODAL_SYSTEM.md`](docs/UI_MODAL_SYSTEM.md) — entradas, controladores, callbacks, pila, foco, cierre y verificación de modales.
 - [`docs/FRONTEND_SHARED_SYSTEMS.md`](docs/FRONTEND_SHARED_SYSTEMS.md) — autoridades, límites y verificaciones de la consolidación.
 - [`docs/CONTINUOUS_SCROLL.md`](docs/CONTINUOUS_SCROLL.md) — contrato de colecciones progresivas.
 - [`docs/PUBLIC_TICKET_INTAKE.md`](docs/PUBLIC_TICKET_INTAKE.md) — intake público de incidencias.

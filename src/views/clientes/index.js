@@ -5,6 +5,7 @@
 
 import { AppCore } from "../../core/index.js";
 import { ROUTES } from "../../core/config.js";
+import { onDomainChanged } from "../../core/domain-events.js";
 import {
   CLIENTES_API_VERSION,
   CLIENTES_ENDPOINT,
@@ -406,10 +407,12 @@ function csvEscape(value = "") {
 
 function createClientesController(host = null, initialContext = {}) {
   const id = ++controllerSequence;
-  let root = resolveHost(host, initialContext);
+  const detailOnly = initialContext.detailOnly === true;
+  let root = detailOnly ? null : resolveHost(host, initialContext);
   let context = safeObject(initialContext);
   let destroyed = false;
   let mounted = false;
+  const ownerSignal = context.signal;
 
   let items = [];
   let nextCursor = "";
@@ -443,9 +446,27 @@ function createClientesController(host = null, initialContext = {}) {
   let infiniteObserver = null;
   let detailSeq = 0;
   let createController = null;
+  let activeDetailController = null;
+  let detailPromise = null;
+  let detailModalOpen = false;
+  let detailClienteId = "";
+  let deferredListRender = false;
+  let unsubscribeDomain = null;
+  let unsubscribeModal = null;
+  let domainDirty = false;
 
   function alive() {
-    return !destroyed && isClientesRoute(context);
+    return !destroyed && !ownerSignal?.aborted && (detailOnly || isClientesRoute(context));
+  }
+
+  function originModalIsOpen() {
+    return Boolean(root && AppCore.getModule?.("entities")?.isOriginOpen?.(root));
+  }
+
+  function refreshChangedDomain() {
+    if (detailOnly || !alive() || !domainDirty || originModalIsOpen()) return;
+    domainDirty = false;
+    void refresh();
   }
 
   function payload(extra = {}) {
@@ -477,6 +498,9 @@ function createClientesController(host = null, initialContext = {}) {
       searchPending: Boolean(searchTimer) || searchContextDirty,
       sortOrder,
       openingClienteId,
+      detailOnly,
+      detailModalOpen,
+      detailClienteId,
       reconcilingHistory: Array.isArray(freshReconciliationItems),
       queryVersion,
       apiVersion: CLIENTES_API_VERSION,
@@ -689,6 +713,7 @@ function createClientesController(host = null, initialContext = {}) {
       !isBrowser() ||
       !root ||
       destroyed ||
+      originModalIsOpen() ||
       loading ||
       refreshing ||
       loadingMore ||
@@ -718,6 +743,7 @@ function createClientesController(host = null, initialContext = {}) {
           }
           if (
             destroyed ||
+            originModalIsOpen() ||
             loading ||
             refreshing ||
             loadingMore ||
@@ -754,6 +780,11 @@ function createClientesController(host = null, initialContext = {}) {
 
   function renderNow() {
     if (!root || destroyed || !isClientesRoute(context)) return false;
+    if (originModalIsOpen()) {
+      deferredListRender = true;
+      return false;
+    }
+    deferredListRender = false;
     cancelFrame(renderFrame);
     renderFrame = 0;
     disconnectInfiniteObserver();
@@ -831,7 +862,7 @@ function createClientesController(host = null, initialContext = {}) {
     cursorOverride = null,
     preservePages = false,
   } = {}) {
-    if (!alive()) return snapshot();
+    if (detailOnly || !alive()) return snapshot();
 
     if (
       append &&
@@ -1301,51 +1332,98 @@ function createClientesController(host = null, initialContext = {}) {
     }
   }
 
-  async function openCliente(idValue = "") {
+  function abortDetail(reason = "clientes-detail-replaced") {
+    const request = activeDetailController;
+    activeDetailController = null;
+    request?.abort(reason);
+  }
+
+  function detailClosed({ notify = true } = {}) {
+    detailSeq += 1;
+    abortDetail("clientes-detail-closed");
+    detailPromise = null;
+    openingClienteId = "";
+    detailModalOpen = false;
+    detailClienteId = "";
+    if (notify) context.onDetailClosed?.({ controller });
+  }
+
+  function closeDetailModal(options = {}) {
+    if (!detailOnly) return AppCore.getModule?.("entities")?.close?.() ?? false;
+    if (!detailModalOpen && !openingClienteId) return false;
+    if (detailModalOpen) return closeClientesDetailModal(options);
+    detailClosed(options);
+    return true;
+  }
+
+  function openCliente(idValue = "", opener = null) {
     const clienteId = cleanText(idValue, "");
-    if (!clienteId || openingClienteId === clienteId) return Boolean(clienteId);
+    if (!clienteId || !alive()) return Promise.resolve(false);
+    if (!detailOnly) {
+      return import("../../features/entity-overlay/index.js").then(({ EntityOverlay }) => {
+        if (!alive()) return false;
+        return EntityOverlay.open({ type: "cliente", id: clienteId, opener, originHost: root });
+      });
+    }
+    if (openingClienteId === clienteId && detailPromise) return detailPromise;
+    if (detailModalOpen && detailClienteId === clienteId) return Promise.resolve(true);
+
+    if (detailModalOpen) closeDetailModal({ restoreFocus: false, notify: false });
+    abortDetail();
 
     const seq = ++detailSeq;
+    const request = typeof AbortController === "function" ? new AbortController() : null;
+    const returnFocus = opener || (isBrowser() ? document.activeElement : null);
+    activeDetailController = request;
     openingClienteId = clienteId;
-    scheduleRender();
 
-    try {
-      let current = findClienteByIdApi(items, clienteId);
+    const task = (async () => {
+      try {
+        if (!isAdmin(context)) return false;
+        const current = await loadClienteDetailRequest(clienteId, {
+          dedupe: false,
+          signal: request?.signal,
+        });
 
-      if (isAdmin(context)) {
-        try {
-          current = await loadClienteDetailRequest(clienteId, { dedupe: true });
-        } catch {
-          // Loaded page snapshot remains a valid fallback.
+        if (seq !== detailSeq || !alive() || request?.signal.aborted || !current) return false;
+
+        const normalized = normalizeClienteModel(current);
+        if (getClienteId(normalized).toLowerCase() !== clienteId.toLowerCase()) return false;
+
+        detailModalOpen = true;
+        detailClienteId = clienteId;
+        const opened = openClientesDetailModal(normalized, {
+          opener: returnFocus,
+          restoreFocus: context.restoreFocus !== false,
+          onClosed: detailClosed,
+        }) !== false;
+        if (!opened) {
+          detailModalOpen = false;
+          detailClienteId = "";
+          return false;
+        }
+        if (seq !== detailSeq || !alive() || !detailModalOpen) return false;
+        context.onDetailShell?.({
+          controller,
+          id: clienteId,
+          modalHost: document.querySelector("[data-clientes-detail-modal-host='true']"),
+        });
+        return seq === detailSeq && alive() && detailModalOpen;
+      } catch (detailError) {
+        if (seq === detailSeq && alive() && !isAbortError(detailError) && !request?.signal.aborted) {
+          showToast(safeError(detailError, "No se pudo abrir el cliente."), "error");
+        }
+        return false;
+      } finally {
+        if (seq === detailSeq) {
+          openingClienteId = "";
+          activeDetailController = null;
+          detailPromise = null;
         }
       }
-
-      if (seq !== detailSeq || !alive() || !current) return false;
-
-      const normalized = normalizeClienteModel(current);
-      if (getClienteId(normalized) !== clienteId) return false;
-
-      const index = items.findIndex(
-        (item) => getClienteId(item).toLowerCase() === clienteId.toLowerCase()
-      );
-      if (index >= 0) {
-        items = [
-          ...items.slice(0, index),
-          normalized,
-          ...items.slice(index + 1),
-        ];
-      }
-
-      return openClientesDetailModal(normalized) !== false;
-    } catch (detailError) {
-      showToast(safeError(detailError, "No se pudo abrir el cliente."), "error");
-      return false;
-    } finally {
-      if (seq === detailSeq) {
-        openingClienteId = "";
-        scheduleRender();
-      }
-    }
+    })();
+    detailPromise = task;
+    return task;
   }
 
 function ensureCreateController() {
@@ -1363,7 +1441,7 @@ function ensureCreateController() {
 }
 
 async function openCreate() {
-    if (!isAdmin(context) || creating) return false;
+    if (detailOnly || !alive() || !isAdmin(context) || creating) return false;
     creating = true;
     scheduleRender();
 
@@ -1423,7 +1501,8 @@ async function openCreate() {
         element.getAttribute("data-cliente-id") ||
         row?.getAttribute("data-client-id") ||
         row?.getAttribute("data-cliente-id") ||
-        ""
+        "",
+        element
       );
       return;
     }
@@ -1543,7 +1622,8 @@ async function openCreate() {
     void openCliente(
       row.getAttribute("data-client-id") ||
       row.getAttribute("data-cliente-id") ||
-      ""
+      "",
+      row
     );
   }
 
@@ -1578,11 +1658,35 @@ async function openCreate() {
   async function mount(nextHost = null, nextContext = {}) {
     if (destroyed) return snapshot();
     context = { ...context, ...safeObject(nextContext) };
+    if (detailOnly) {
+      mounted = true;
+      return snapshot();
+    }
     root = resolveHost(nextHost, context) || root;
     if (!root) throw new Error("CLIENTES_HOST_NOT_FOUND");
     if (!isClientesRoute(context)) return snapshot();
 
     attach();
+    unsubscribeDomain?.();
+    unsubscribeModal?.();
+    unsubscribeDomain = onDomainChanged((domain) => {
+      if (domain !== "clientes" || creating || createController?.getSnapshot?.().submitting) return;
+      domainDirty = true;
+      refreshChangedDomain();
+    });
+    unsubscribeModal = AppCore.getModule?.("entities")?.subscribe?.((event) => {
+      if (event.originHost !== root) return;
+      if (event.phase === "opened") {
+        if (renderFrame) deferredListRender = true;
+        cancelFrame(renderFrame);
+        renderFrame = 0;
+        disconnectInfiniteObserver();
+      } else if (event.phase === "closed") {
+        if (deferredListRender) renderNow();
+        refreshChangedDomain();
+        syncInfiniteObserver();
+      }
+    });
     clearPageState();
 
     // Incidencias pattern: paint immediately; network revalidation must not block route commit.
@@ -1596,13 +1700,22 @@ async function openCreate() {
     requestSeq += 1;
     queryVersion += 1;
     detailSeq += 1;
+    unsubscribeDomain?.();
+    unsubscribeModal?.();
+    unsubscribeDomain = null;
+    unsubscribeModal = null;
+    if (!detailOnly && root) AppCore.getModule?.("entities")?.releaseOrigin?.(root);
+    ownerSignal?.removeEventListener?.("abort", handleOwnerAbort);
     abortList("clientes-controller-destroyed");
+    abortDetail("clientes-controller-destroyed");
     cancelFrame(renderFrame);
     disconnectInfiniteObserver();
     freshReconciliationItems = null;
     detach();
 
-    try { closeClientesDetailModal(); } catch { /* noop */ }
+    if (detailOnly) {
+      try { closeDetailModal({ restoreFocus: false, notify: false }); } catch { /* noop */ }
+    }
 
     try { createController?.destroy?.(); } catch { /* noop */ }
     createController = null;
@@ -1636,8 +1749,10 @@ async function openCreate() {
     clearSearch: () => setSearch(""),
     clearFilters,
     loadMore,
+    openDetail: openCliente,
     openCliente,
     openClient: openCliente,
+    closeDetailModal,
     openCreate,
     createCliente: openCreate,
     createClient: openCreate,
@@ -1647,10 +1762,23 @@ async function openCreate() {
     dispose: destroy,
   };
 
+  function handleOwnerAbort() {
+    void destroy({ clear: false });
+  }
+  if (ownerSignal?.aborted) handleOwnerAbort();
+  else ownerSignal?.addEventListener?.("abort", handleOwnerAbort, { once: true });
+
+  return controller;
+}
+
+export async function createClienteDetailController(context = {}) {
+  const controller = createClientesController(null, { ...context, detailOnly: true });
+  await controller.mount();
   return controller;
 }
 
 function ensureController(host = null, context = {}) {
+  registerClientesView();
   const resolved = resolveHost(host, context);
   if (resolved) {
     const existing = INSTANCES.get(resolved);
@@ -1744,8 +1872,10 @@ export function loadMoreClientes() {
   return ensureController().loadMore();
 }
 
-export async function openCliente(id = "") {
-  return ensureController().openCliente(id);
+export async function openCliente(id = "", opener = null) {
+  if (!cleanText(id, "")) return false;
+  const { EntityOverlay } = await import("../../features/entity-overlay/index.js");
+  return EntityOverlay.open({ type: "cliente", id, opener });
 }
 
 export async function openCreate() {
@@ -1791,18 +1921,20 @@ export const ClientesView = {
   exportCsv,
 };
 
-try {
-  const global = getGlobalObject();
-  global.ClientesView = ClientesView;
-  global.OnionClientesView = ClientesView;
-  global.OnionClientes = ClientesView;
+function registerClientesView() {
+  try {
+    const global = getGlobalObject();
+    global.ClientesView = ClientesView;
+    global.OnionClientesView = ClientesView;
+    global.OnionClientes = ClientesView;
 
-  if (AppCore?.modules && typeof AppCore.modules === "object") {
-    AppCore.modules.Clientes = ClientesView;
-    AppCore.modules.clientes = ClientesView;
+    if (AppCore?.modules && typeof AppCore.modules === "object") {
+      AppCore.modules.Clientes = ClientesView;
+      AppCore.modules.clientes = ClientesView;
+    }
+  } catch {
+    // noop
   }
-} catch {
-  // noop
 }
 
 export default ClientesView;

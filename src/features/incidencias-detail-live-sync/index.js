@@ -1,49 +1,25 @@
 /* =========================================================
    Onion Support · Incidencias Detail Live Sync
-   Archivo: /src/features/incidencias-detail-live-sync/index.js
 
-   DETAIL LIVE DATA · V3 · STABLE MEDIA SLOTS
-   - stale-while-revalidate al abrir;
-   - sin polling periódico agresivo;
-   - invalidación por señales: fila/listado, mutación confirmada, foco,
-     visibilidad y recuperación de red;
-   - read-after-write único después de mutaciones;
-   - proyección granular: sólo se reemplaza un slot si su contenido remoto
-     cambió de verdad;
-   - "Documentos actuales" usa firma semántica que ignora SAS, loaders,
-     clases de enhancement y estados transitorios;
-   - si los adjuntos no cambiaron, el DOM multimedia permanece físicamente vivo:
-     no se destruyen <img>, <video>, frames decodificados ni caché del navegador;
-   - toda proyección conserva scrollTop/scrollLeft del body del Modal Details;
-   - borrador, input file, preview, foco y confirmaciones siguen fuera de la
-     autoridad del live sync;
-   - indicador sólo para red perceptible y silencio total si no cambió nada.
+   Signals and perceptible refresh feedback for the shared detail controller.
+   The controller alone fetches data, owns mutations and projects modal slots.
 ========================================================= */
 
-import { persistedCommentId } from "../incidencias-comment-identity/index.js";
+import {
+  commentsFromDetail,
+  commentSignature,
+} from "../incidencias-detail-state/index.js";
 
 export const INCIDENCIAS_DETAIL_LIVE_SYNC_VERSION =
-  "incidencias-detail-live-sync.v3.stable-media-slots";
+  "incidencias-detail-live-sync.v4.controller-signals";
 
 const VIEW = "#view-container, [data-router-view='true']";
-const HOST = "[data-incidencias-modal-host='true']";
 const ROOT = "[data-incidencias-modal-root='true']";
 const PANEL = "[data-incidencias-modal-panel='true']";
-const BODY = "[data-modal-body='true']";
-const ADMIN = "[data-modal-admin-editor='true']";
-const DESCRIPTION_SECTION = ".incidencias-modal-description-section";
-const DESCRIPTION_TEXT = ".incidencias-modal-description";
-const COMMENT_THREAD = "[data-description-comments='true']";
-const SUCCESS = ".incidencias-modal-feedback--success";
 const LIVE = "[data-detail-live-sync='true']";
 const ROW = "[data-ticket-row='true']";
-const FILES = "[data-modal-files-slot='true']";
-const ATTACHMENT_COPY = ".incidencias-modal-attachment-copy";
-const HISTORY = "[data-modal-history-slot='true']";
-
 const STALE_AFTER_MS = 20_000;
 const WAKE_DEDUPE_MS = 4_000;
-const MUTATION_CONFIRM_DELAY_MS = 650;
 const LIST_SIGNAL_DEBOUNCE_MS = 120;
 const INDICATOR_DELAY_MS = 450;
 const INDICATOR_SETTLE_MS = 900;
@@ -52,26 +28,15 @@ const ERROR_SETTLE_MS = 1_600;
 let mounted = false;
 let mountRoot = null;
 let host = null;
+let owner = null;
 let viewObserver = null;
-let modalObserver = null;
-let frame = 0;
-let mutationConfirmTimer = 0;
 let listSignalTimer = 0;
 let indicatorDelayTimer = 0;
 let indicatorSettleTimer = 0;
-let requestSeq = 0;
-let requestController = null;
 let inflight = null;
-let apiPromise = null;
-let templatePromise = null;
-let internalMutations = 0;
-
-let activeRoot = null;
 let activeTicketId = "";
 let lastDetail = null;
 let lastSignature = "";
-let lastAttachmentSignature = "";
-let lastSuccessKey = "";
 let lastListFingerprint = "";
 let lastSyncedAt = 0;
 let lastWakeAt = 0;
@@ -79,8 +44,6 @@ let lastError = null;
 let syncCount = 0;
 let changeCount = 0;
 let signalRefreshCount = 0;
-let mediaSlotPreserveCount = 0;
-let mediaSlotReplaceCount = 0;
 
 const browser = () =>
   typeof window !== "undefined" && typeof document !== "undefined";
@@ -89,14 +52,6 @@ const text = (value = "", fallback = "") =>
   String(value ?? "")
     .replace(/[\r\n\t]/g, " ")
     .replace(/\s+/g, " ")
-    .trim() || fallback;
-
-const multiline = (value = "", fallback = "") =>
-  String(value ?? "")
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{4,}/g, "\n\n\n")
     .trim() || fallback;
 
 const object = (value, fallback = {}) =>
@@ -157,33 +112,10 @@ function isStale() {
   return !lastSyncedAt || Date.now() - lastSyncedAt >= STALE_AFTER_MS;
 }
 
-const api = () =>
-  apiPromise ||= import("../../views/incidencias/incidencias.api.js");
-
-const template = () =>
-  templatePromise ||= import("../../views/incidencias/incidencias.template.modal.js");
-
-function ownMutation(callback) {
-  internalMutations += 1;
-
-  try {
-    return callback();
-  } finally {
-    queueMicrotask(() => {
-      internalMutations = Math.max(0, internalMutations - 1);
-    });
-  }
-}
-
-/* =========================================================
-   TIMERS / INDICATOR
-========================================================= */
-
 function clearTimer(name = "") {
   if (!browser()) return false;
 
   const map = {
-    mutation: mutationConfirmTimer,
     list: listSignalTimer,
     indicatorDelay: indicatorDelayTimer,
     indicatorSettle: indicatorSettleTimer,
@@ -194,7 +126,6 @@ function clearTimer(name = "") {
 
   window.clearTimeout(id);
 
-  if (name === "mutation") mutationConfirmTimer = 0;
   if (name === "list") listSignalTimer = 0;
   if (name === "indicatorDelay") indicatorDelayTimer = 0;
   if (name === "indicatorSettle") indicatorSettleTimer = 0;
@@ -235,7 +166,7 @@ function ensureIndicator(root = currentRoot()) {
   label.textContent = "Actualizando…";
 
   live.append(spinner, label);
-  ownMutation(() => panel.appendChild(live));
+  panel.appendChild(live);
 
   return live;
 }
@@ -324,226 +255,6 @@ function finishIndicator(root, { changed = false, error = false } = {}) {
   }, INDICATOR_SETTLE_MS);
 }
 
-/* =========================================================
-   COMMENTS / SIGNATURES
-========================================================= */
-
-function normalizeComment(item = {}, index = 0) {
-  const raw = object(item);
-  const kind = text(
-    first(raw.kind, raw.type, raw.action, raw.event, "comment"),
-    ""
-  ).toLowerCase();
-
-  if (kind && !["comment", "comentario"].includes(kind)) return null;
-
-  const body = multiline(
-    first(
-      raw.body,
-      raw.message,
-      raw.text,
-      raw.comment,
-      raw.description,
-      raw.descripcion,
-      raw.summary
-    ),
-    ""
-  );
-
-  if (!body) return null;
-
-  return {
-    id: text(
-      first(raw.id, raw.commentId, raw.eventId, `comment_${index}`),
-      `comment_${index}`
-    ),
-    persistedCommentId: persistedCommentId(raw),
-    body,
-    author: text(
-      first(
-        raw.author,
-        raw.byName,
-        raw.createdByName,
-        raw.userName,
-        raw.name,
-        raw.by?.name,
-        raw.createdBy?.name,
-        raw.role
-      ),
-      "Usuario"
-    ),
-    createdAt: first(
-      raw.createdAt,
-      raw.date,
-      raw.timestamp,
-      raw.updatedAt,
-      null
-    ),
-    sourceIndex: index,
-  };
-}
-
-function commentsFromDetail(detail = {}) {
-  const raw = object(first(detail?.raw, detail?.data, detail?.item, detail));
-  const timeline = array(first(detail?.timeline, raw.timeline, []));
-
-  let source;
-
-  if (timeline.length) {
-    source = timeline.filter((entry) =>
-      ["comment", "comentario"].includes(
-        text(
-          first(entry?.kind, entry?.type, entry?.action, entry?.event, ""),
-          ""
-        ).toLowerCase()
-      )
-    );
-  } else {
-    source = array(
-      first(
-        detail?.comments,
-        detail?.notes,
-        detail?.messages,
-        raw.comments,
-        raw.notes,
-        raw.messages,
-        []
-      )
-    );
-  }
-
-  return source
-    .map(normalizeComment)
-    .filter(Boolean)
-    .sort((a, b) =>
-      timestamp(b.createdAt) - timestamp(a.createdAt) ||
-      b.sourceIndex - a.sourceIndex
-    );
-}
-
-function formatDate(value = null) {
-  const at = timestamp(value);
-  if (!at) return "Fecha no disponible";
-
-  try {
-    return new Intl.DateTimeFormat("es-ES", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(at));
-  } catch {
-    return "Fecha no disponible";
-  }
-}
-
-function commentsSignature(comments = []) {
-  return comments
-    .map((item) =>
-      [item.id, item.persistedCommentId, item.author, item.body, timestamp(item.createdAt)].join("::")
-    )
-    .join("||");
-}
-
-function buildCommentCard(comment = {}) {
-  const article = document.createElement("article");
-  article.className = "incidencias-modal-description-comment";
-  article.dataset.descriptionComment = "true";
-  if (comment.persistedCommentId) article.dataset.commentId = comment.persistedCommentId;
-
-  const accent = document.createElement("span");
-  accent.className = "incidencias-modal-description-comment-accent";
-  accent.setAttribute("aria-hidden", "true");
-
-  const content = document.createElement("div");
-  content.className = "incidencias-modal-description-comment-content";
-
-  const head = document.createElement("div");
-  head.className = "incidencias-modal-description-comment-head";
-
-  const author = document.createElement("strong");
-  author.textContent = text(comment.author, "Usuario");
-
-  const date = document.createElement("span");
-  date.className = "incidencias-modal-description-comment-date";
-  date.textContent = formatDate(comment.createdAt);
-
-  const body = document.createElement("p");
-  body.textContent = multiline(
-    comment.body,
-    "Actualización registrada."
-  );
-
-  head.append(author, date);
-  content.append(head, body);
-  article.append(accent, content);
-
-  return article;
-}
-
-function renderFreshComments(root, detail = {}) {
-  const section = root?.querySelector?.(DESCRIPTION_SECTION);
-  const description = section?.querySelector?.(DESCRIPTION_TEXT);
-
-  if (!section || !description) return false;
-
-  const comments = commentsFromDetail(detail);
-  const signature = commentsSignature(comments);
-  let thread = section.querySelector(COMMENT_THREAD);
-
-  if (!comments.length) {
-    if (thread) ownMutation(() => thread.remove());
-    section.dataset.hasDescriptionComments = "false";
-    return true;
-  }
-
-  if (thread?.dataset?.commentSignature === signature) {
-    section.dataset.hasDescriptionComments = "true";
-    return true;
-  }
-
-  const nextThread = document.createElement("section");
-  nextThread.className = "incidencias-modal-description-thread";
-  nextThread.dataset.descriptionComments = "true";
-  nextThread.dataset.commentSignature = signature;
-  nextThread.setAttribute(
-    "aria-label",
-    "Comentarios y seguimiento de la incidencia"
-  );
-
-  const head = document.createElement("div");
-  head.className = "incidencias-modal-description-thread-head";
-
-  const title = document.createElement("strong");
-  title.textContent = "Seguimiento";
-
-  const count = document.createElement("span");
-  count.textContent =
-    `${comments.length} comentario${comments.length === 1 ? "" : "s"}`;
-
-  const list = document.createElement("div");
-  list.className = "incidencias-modal-description-comments";
-
-  for (const comment of comments) {
-    list.appendChild(buildCommentCard(comment));
-  }
-
-  head.append(title, count);
-  nextThread.append(head, list);
-
-  ownMutation(() => {
-    if (thread) {
-      thread.replaceWith(nextThread);
-    } else {
-      description.insertAdjacentElement("afterend", nextThread);
-    }
-  });
-
-  section.dataset.hasDescriptionComments = "true";
-  return true;
-}
-
 function attachmentsFromDetail(detail = {}) {
   const raw = object(first(detail?.raw, detail));
 
@@ -603,254 +314,10 @@ function detailSignature(detail = {}) {
       ""
     ),
     timestamp(detail?.lastActivityAt || detail?.updatedAt),
-    commentsSignature(comments),
+    commentSignature(comments),
     attachmentDetailSignature(detail),
   ].join("###");
 }
-
-function fileSlotSignature(slot = null) {
-  if (!slot) return "";
-
-  return Array.from(
-    slot.querySelectorAll(
-      ".incidencias-modal-attachment-card[data-attachment-id]"
-    )
-  )
-    .map((card, index) => {
-      const id = text(card.dataset?.attachmentId, `att_${index}`);
-      const copy = card.querySelector(ATTACHMENT_COPY);
-      const name = text(copy?.querySelector?.("strong")?.textContent, "");
-      const meta = text(copy?.querySelector?.("span")?.textContent, "");
-
-      return [id, name, meta].join("::");
-    })
-    .join("||");
-}
-
-function cloneRootFromHtml(html = "") {
-  if (!html || !browser()) return null;
-
-  const holder = document.createElement("template");
-  holder.innerHTML = String(html).trim();
-
-  return holder.content.querySelector(ROOT);
-}
-
-function activeInside(node = null) {
-  if (!node || !browser()) return false;
-
-  try {
-    return Boolean(
-      document.activeElement &&
-      node.contains(document.activeElement)
-    );
-  } catch {
-    return false;
-  }
-}
-
-function htmlEquivalent(current = null, next = null) {
-  if (!current || !next) return current === next;
-
-  try {
-    return current.outerHTML === next.outerHTML;
-  } catch {
-    return false;
-  }
-}
-
-/* =========================================================
-   SCROLL-STABLE PROJECTION
-========================================================= */
-
-function withPreservedBodyScroll(root = null, callback = () => {}) {
-  const body = root?.querySelector?.(BODY);
-
-  if (!body?.isConnected) {
-    return callback();
-  }
-
-  const top = Number(body.scrollTop || 0);
-  const left = Number(body.scrollLeft || 0);
-  const previousOverflowAnchor = body.style.overflowAnchor || "";
-  const viewerOwnsAnchor =
-    body.dataset.mediaViewerScrollAnchor === "true";
-
-  if (!viewerOwnsAnchor) {
-    body.style.overflowAnchor = "none";
-  }
-
-  const restore = () => {
-    if (!body.isConnected) return;
-
-    try {
-      body.scrollTop = top;
-      body.scrollLeft = left;
-    } catch {
-      try {
-        body.scrollTo?.({
-          top,
-          left,
-          behavior: "auto",
-        });
-      } catch {
-        // noop
-      }
-    }
-  };
-
-  try {
-    const result = callback();
-    restore();
-
-    queueMicrotask(() => {
-      restore();
-
-      if (!body.isConnected || viewerOwnsAnchor) return;
-
-      if (previousOverflowAnchor) {
-        body.style.overflowAnchor = previousOverflowAnchor;
-      } else {
-        body.style.removeProperty("overflow-anchor");
-      }
-    });
-
-    return result;
-  } catch (error) {
-    restore();
-
-    if (!viewerOwnsAnchor) {
-      if (previousOverflowAnchor) {
-        body.style.overflowAnchor = previousOverflowAnchor;
-      } else {
-        body.style.removeProperty("overflow-anchor");
-      }
-    }
-
-    throw error;
-  }
-}
-
-function replaceIfChanged(
-  root,
-  nextRoot,
-  selector,
-  {
-    preserveFocus = true,
-  } = {}
-) {
-  const current = root?.querySelector?.(selector);
-  const next = nextRoot?.querySelector?.(selector);
-
-  if (!current || !next) return false;
-  if (preserveFocus && activeInside(current)) return false;
-  if (htmlEquivalent(current, next)) return false;
-
-  current.replaceWith(next.cloneNode(true));
-  return true;
-}
-
-async function projectRemoteSlots(root, detail = {}) {
-  if (!root?.isConnected || rootBusy(root)) return false;
-
-  let renderer = null;
-
-  try {
-    renderer = (await template()).renderIncidenciasDetailModal;
-  } catch {
-    renderer = null;
-  }
-
-  if (typeof renderer !== "function") {
-    renderFreshComments(root, detail);
-    return false;
-  }
-
-  const admin = Boolean(root.querySelector(ADMIN));
-  const historyOpen =
-    root.querySelector(BODY)?.dataset?.historyMode === "history";
-
-  const html = renderer({
-    open: true,
-    detail,
-    admin,
-    role: admin ? "admin" : "user",
-    historyOpen,
-    commentDraft: "",
-    pendingFiles: [],
-    submitting: false,
-    operation: "",
-    feedbackMessage: "",
-    feedbackType: "info",
-  });
-
-  const nextRoot = cloneRootFromHtml(html);
-
-  if (!nextRoot || ticketId(root) !== ticketId(nextRoot)) {
-    return false;
-  }
-
-  withPreservedBodyScroll(root, () => {
-    ownMutation(() => {
-      for (const selector of [
-        "[data-modal-updated='true']",
-        ".incidencias-modal-meta-grid",
-        ".incidencias-modal-contact-section",
-      ]) {
-        replaceIfChanged(root, nextRoot, selector);
-      }
-
-      const currentFiles = root.querySelector(FILES);
-      const nextFiles = nextRoot.querySelector(FILES);
-
-      if (
-        currentFiles &&
-        nextFiles &&
-        !activeInside(currentFiles) &&
-        !currentFiles.querySelector("[aria-busy='true']")
-      ) {
-        const currentSig = fileSlotSignature(currentFiles);
-        const nextSig = fileSlotSignature(nextFiles);
-
-        if (currentSig === nextSig) {
-          /*
-             Ésta es la pieza clave: un refresh de comentarios/estado NO toca
-             "Documentos actuales". El <img>/<video> que ya está decodificado
-             permanece exactamente en el mismo nodo DOM.
-          */
-          mediaSlotPreserveCount += 1;
-        } else {
-          currentFiles.replaceWith(nextFiles.cloneNode(true));
-          mediaSlotReplaceCount += 1;
-        }
-      }
-
-      replaceIfChanged(root, nextRoot, HISTORY);
-
-      const currentAdmin = root.querySelector(ADMIN);
-      const nextAdmin = nextRoot.querySelector(ADMIN);
-      const adminDirty =
-        currentAdmin?.dataset?.adminTicketDirty === "true";
-
-      if (
-        currentAdmin &&
-        nextAdmin &&
-        !adminDirty &&
-        !activeInside(currentAdmin) &&
-        !htmlEquivalent(currentAdmin, nextAdmin)
-      ) {
-        currentAdmin.replaceWith(nextAdmin.cloneNode(true));
-      }
-    });
-  });
-
-  renderFreshComments(root, detail);
-  return true;
-}
-
-/* =========================================================
-   LIST AS COARSE CHANGE FEED
-========================================================= */
 
 function rowForTicket(id = activeTicketId) {
   if (!mountRoot || !id) return null;
@@ -917,423 +384,135 @@ function scheduleListSignalCheck() {
   return true;
 }
 
-/* =========================================================
-   REQUEST LIFECYCLE
-========================================================= */
-
-function abortRequest() {
-  requestSeq += 1;
-
-  try {
-    requestController?.abort?.();
-  } catch {
-    // noop
-  }
-
-  requestController = null;
-  inflight = null;
-}
-
-function shouldRefresh(reason = "signal", force = false) {
-  if (force) return true;
-
-  return (
-    ["open", "mutation-success", "list-change"].includes(reason) ||
-    isStale()
-  );
-}
-
-async function refreshDetail(
-  id = "",
-  {
-    reason = "signal",
-    force = false,
-  } = {}
-) {
-  const cleanId = text(id, "");
+async function refreshDetail(id, { reason = "signal", force = false } = {}) {
   const root = currentRoot();
-
+  const controller = owner?.controller;
+  const modalHost = host;
   if (
-    !cleanId ||
-    !root?.isConnected ||
-    ticketId(root) !== cleanId ||
-    rootBusy(root) ||
-    !pageVisible() ||
-    !shouldRefresh(reason, force)
-  ) {
-    return false;
-  }
+    !controller?.refreshDetail || !id || id !== activeTicketId ||
+    !root?.isConnected || rootBusy(root) || !pageVisible() ||
+    owner.loading || (!force && !isStale())
+  ) return false;
 
-  if (inflight?.ticketId === cleanId && inflight?.promise) {
-    return inflight.promise;
-  }
-
-  const sequence = ++requestSeq;
-
-  const controller =
-    typeof AbortController !== "undefined"
-      ? new AbortController()
-      : null;
-
-  requestController = controller;
+  if (inflight) return inflight;
+  const previousSignature = lastSignature;
   beginIndicator(root);
 
-  const task = (async () => {
-    try {
-      const source = await api();
+  const pending = Promise.resolve().then(() => controller.refreshDetail({
+    force: true,
+    silent: true,
+    reason,
+  }));
+  inflight = pending;
 
-      const detail = await source.loadIncidenciaDetail(cleanId, {
-        force: true,
-        cache: false,
-        signal: controller?.signal,
-      });
-
-      if (
-        sequence !== requestSeq ||
-        !detail ||
-        !root.isConnected ||
-        root !== currentRoot() ||
-        ticketId(root) !== cleanId
-      ) {
-        return false;
-      }
-
-      const signature = detailSignature(detail);
-      const attachmentSignature = attachmentDetailSignature(detail);
-      const changed = Boolean(
-        lastSignature &&
-        signature !== lastSignature
-      );
-
-      await projectRemoteSlots(root, detail);
-
-      if (
-        sequence !== requestSeq ||
-        !root.isConnected ||
-        root !== currentRoot()
-      ) {
-        return false;
-      }
-
-      lastDetail = detail;
-      lastSignature = signature;
-      lastAttachmentSignature = attachmentSignature;
-      lastSyncedAt = Date.now();
-      lastError = null;
-      syncCount += 1;
-
-      if (changed) {
-        changeCount += 1;
-      }
-
-      root.dataset.liveSyncLastSuccessAt =
-        new Date(lastSyncedAt).toISOString();
-
-      root.dataset.liveSyncReason =
-        text(reason, "signal");
-
-      captureListFingerprint();
-
-      finishIndicator(root, {
-        changed,
-        error: false,
-      });
-
-      return true;
-    } catch (error) {
-      if (sequence !== requestSeq) return false;
-
-      if (error?.name !== "AbortError") {
-        lastError = error || new Error("LIVE_SYNC_FAILED");
-        finishIndicator(root, { error: true });
-      }
-
-      return false;
-    } finally {
-      if (sequence === requestSeq) {
-        requestController = null;
-        inflight = null;
-      }
-    }
-  })();
-
-  inflight = {
-    ticketId: cleanId,
-    promise: task,
-  };
-
-  return task;
-}
-
-/* =========================================================
-   SIGNALS
-========================================================= */
-
-function successKey(root = currentRoot()) {
-  const success = root?.querySelector?.(SUCCESS);
-  const id = ticketId(root);
-  const value = text(success?.textContent, "");
-
-  return id && value
-    ? `${id}::${value}`
-    : "";
-}
-
-function scheduleMutationConfirmation(id = activeTicketId) {
-  if (!browser() || !id) return false;
-
-  clearTimer("mutation");
-
-  mutationConfirmTimer = window.setTimeout(() => {
-    mutationConfirmTimer = 0;
-
-    if (
-      activeTicketId === id &&
-      currentRoot()?.isConnected &&
-      !rootBusy(currentRoot())
-    ) {
-      signalRefreshCount += 1;
-
-      void refreshDetail(id, {
-        reason: "mutation-success",
-        force: true,
-      });
-    }
-  }, MUTATION_CONFIRM_DELAY_MS);
-
-  return true;
-}
-
-function syncHostObserver() {
-  if (!browser()) return false;
-
-  const nextHost = document.querySelector(HOST);
-  if (nextHost === host) return Boolean(nextHost);
-
-  modalObserver?.disconnect?.();
-  modalObserver = null;
-  host = nextHost || null;
-
-  if (host && typeof MutationObserver !== "undefined") {
-    modalObserver = new MutationObserver(() => {
-      if (!internalMutations) schedule();
+  try {
+    const detail = await pending;
+    if (owner?.controller !== controller || host !== modalHost || activeTicketId !== id) return false;
+    const current = currentRoot();
+    finishIndicator(current, {
+      changed: Boolean(detail && previousSignature && previousSignature !== lastSignature),
+      error: Boolean(lastError),
     });
-
-    modalObserver.observe(host, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: [
-        "data-submitting",
-        "data-history-mode",
-        "data-open",
-      ],
-    });
+    if (current) current.dataset.liveSyncReason = reason;
+    return Boolean(detail);
+  } catch (error) {
+    if (owner?.controller === controller && host === modalHost && activeTicketId === id) {
+      lastError = error;
+      finishIndicator(currentRoot(), { error: true });
+    }
+    return false;
+  } finally {
+    if (inflight === pending) inflight = null;
   }
-
-  return Boolean(host);
 }
 
 function resetActive() {
-  clearTimer("mutation");
   clearTimer("list");
   clearIndicatorTimers();
-  abortRequest();
-
-  activeRoot = null;
+  inflight = null;
   activeTicketId = "";
   lastDetail = null;
   lastSignature = "";
-  lastAttachmentSignature = "";
-  lastSuccessKey = "";
   lastListFingerprint = "";
   lastSyncedAt = 0;
   lastWakeAt = 0;
   lastError = null;
 }
 
-function sync() {
-  frame = 0;
-
-  if (!browser() || !mounted) return false;
-
-  syncHostObserver();
-
-  const root = currentRoot();
-  const id = ticketId(root);
-
-  if (!root || !id) {
-    if (activeTicketId) resetActive();
-    return false;
+/** Record the same authoritative response already rendered by the controller. */
+export function syncIncidenciasDetailLiveSync(payload = {}) {
+  if (!browser()) return false;
+  mountIncidenciasDetailLiveSync();
+  const nextHost = payload.modalHost || null;
+  const nextId = text(payload.id || ticketId(nextHost?.querySelector?.(ROOT)), "");
+  if (host !== nextHost || owner?.controller !== payload.controller || activeTicketId !== nextId || !payload.open) {
+    resetActive();
   }
+  host = nextHost;
+  owner = payload;
+  if (!payload.open || !nextId) return false;
+  activeTicketId = nextId;
 
-  if (activeRoot !== root || activeTicketId !== id) {
-    abortRequest();
+  if (payload.error) lastError = payload.error;
+  if (payload.loading || payload.error || !payload.detail) return false;
 
-    activeRoot = root;
-    activeTicketId = id;
-    lastDetail = null;
-    lastSignature = "";
-    lastAttachmentSignature = fileSlotSignature(root.querySelector(FILES));
-    lastSuccessKey = successKey(root);
-    lastListFingerprint = rowFingerprint(rowForTicket(id));
-    lastSyncedAt = 0;
-    lastWakeAt = 0;
+  if (payload.detail !== lastDetail || !lastSyncedAt) {
+    const signature = detailSignature(payload.detail);
+    if (lastSignature && signature !== lastSignature) changeCount += 1;
+    lastDetail = payload.detail;
+    lastSignature = signature;
+    lastSyncedAt = Date.now();
     lastError = null;
-
-    /*
-       SWR: el contenido disponible se queda pintado y la validación del
-       servidor se hace detrás, sin vaciar ni reconstruir el modal.
-    */
-    signalRefreshCount += 1;
-
-    void refreshDetail(id, {
-      reason: "open",
-      force: true,
-    });
-
-    return true;
+    syncCount += 1;
+    const root = currentRoot();
+    if (root) root.dataset.liveSyncLastSuccessAt = new Date(lastSyncedAt).toISOString();
+    captureListFingerprint();
   }
-
-  const currentSuccessKey = successKey(root);
-
-  if (
-    currentSuccessKey &&
-    currentSuccessKey !== lastSuccessKey
-  ) {
-    lastSuccessKey = currentSuccessKey;
-    scheduleMutationConfirmation(id);
-  }
-
-  return true;
-}
-
-function schedule() {
-  if (!browser() || !mounted || frame) return false;
-
-  frame = window.requestAnimationFrame(sync);
   return true;
 }
 
 function onWake(event = null) {
   if (!mounted || !pageVisible() || !activeTicketId) return;
-
   const now = Date.now();
-
   if (now - lastWakeAt < WAKE_DEDUPE_MS) return;
-
   lastWakeAt = now;
-
-  const reason =
-    event?.type === "online"
-      ? "online"
-      : event?.type === "visibilitychange"
-        ? "visibility"
-        : "focus";
-
   if (!isStale()) return;
-
   signalRefreshCount += 1;
-
   void refreshDetail(activeTicketId, {
-    reason,
-    force: false,
+    reason: event?.type === "online" ? "online" : event?.type === "visibilitychange" ? "visibility" : "focus",
   });
 }
 
-/* =========================================================
-   LIFECYCLE
-========================================================= */
-
 export function mountIncidenciasDetailLiveSync() {
-  if (!browser() || mounted) return false;
-
+  if (!browser()) return false;
+  if (mounted) return true;
   mountRoot = document.querySelector(VIEW) || document.body;
-
-  if (
-    !mountRoot ||
-    typeof MutationObserver === "undefined"
-  ) {
-    return false;
-  }
-
+  if (!mountRoot) return false;
   mounted = true;
-
-  viewObserver = new MutationObserver((mutations) => {
-    if (internalMutations) return;
-
-    let modalTouched = false;
-    let listTouched = false;
-
-    for (const mutation of mutations) {
-      for (
-        const node
-        of [...mutation.addedNodes, ...mutation.removedNodes]
-      ) {
-        if (node?.nodeType !== 1) continue;
-
-        if (
-          node.matches?.(HOST) ||
-          node.matches?.(ROOT) ||
-          node.querySelector?.(HOST) ||
-          node.querySelector?.(ROOT)
-        ) {
-          modalTouched = true;
-        }
-
-        if (
-          node.matches?.(ROW) ||
-          node.querySelector?.(ROW)
-        ) {
-          listTouched = true;
-        }
-      }
-    }
-
-    if (modalTouched) schedule();
-
-    if (listTouched || activeTicketId) {
-      scheduleListSignalCheck();
-    }
-  });
-
-  viewObserver.observe(mountRoot, {
-    childList: true,
-    subtree: true,
-  });
-
+  if (typeof MutationObserver !== "undefined") {
+    viewObserver = new MutationObserver(() => {
+      if (activeTicketId) scheduleListSignalCheck();
+    });
+    viewObserver.observe(mountRoot, { childList: true, subtree: true });
+  }
   window.addEventListener("focus", onWake);
   window.addEventListener("online", onWake);
   document.addEventListener("visibilitychange", onWake);
-
-  schedule();
   return true;
 }
 
 export function destroyIncidenciasDetailLiveSync() {
   if (!browser()) return false;
-
-  mounted = false;
   resetActive();
-
   viewObserver?.disconnect?.();
-  modalObserver?.disconnect?.();
-
   viewObserver = null;
-  modalObserver = null;
-
   window.removeEventListener("focus", onWake);
   window.removeEventListener("online", onWake);
   document.removeEventListener("visibilitychange", onWake);
-
-  if (frame) {
-    window.cancelAnimationFrame?.(frame);
-  }
-
-  frame = 0;
+  mounted = false;
   host = null;
+  owner = null;
   mountRoot = null;
-
   return true;
 }
 
@@ -1342,29 +521,22 @@ export function getIncidenciasDetailLiveSyncSnapshot() {
     version: INCIDENCIAS_DETAIL_LIVE_SYNC_VERSION,
     mounted,
     ticketId: activeTicketId ? "***" : "",
-    syncing: Boolean(inflight?.promise),
-    lastSyncedAt:
-      lastSyncedAt
-        ? new Date(lastSyncedAt).toISOString()
-        : null,
+    syncing: Boolean(inflight),
+    controllerOwned: Boolean(owner?.controller),
+    lastSyncedAt: lastSyncedAt ? new Date(lastSyncedAt).toISOString() : null,
     syncCount,
     changeCount,
     signalRefreshCount,
-    mediaSlotPreserveCount,
-    mediaSlotReplaceCount,
-    hasAttachmentSignature: Boolean(lastAttachmentSignature),
     hasError: Boolean(lastError),
     staleAfterMs: STALE_AFTER_MS,
-
     policy: Object.freeze({
-      staleWhileRevalidate: true,
+      dataAndRenderingAuthority: "shared_detail_controller",
       forceServerRevalidationOnOpen: true,
       periodicPolling: false,
       signalDriven: true,
       listActsAsCoarseChangeFeed: true,
       refreshOnListChange: true,
-      refreshAfterMutationSuccess: true,
-      readAfterWriteDelayMs: MUTATION_CONFIRM_DELAY_MS,
+      mutationAuthority: "shared_detail_controller",
       refreshOnFocusWhenStale: true,
       refreshOnVisibilityWhenStale: true,
       refreshOnOnlineWhenStale: true,
@@ -1372,15 +544,6 @@ export function getIncidenciasDetailLiveSyncSnapshot() {
       slowRequestIndicatorDelayMs: INDICATOR_DELAY_MS,
       unchangedRequestsRemainSilent: true,
       retryLoop: false,
-
-      atomicRemoteSlotProjection: true,
-      replaceOnlyChangedRemoteSlots: true,
-      mediaSlotSemanticDiff: true,
-      mediaSlotPreservedWhenAttachmentsUnchanged: true,
-      signedUrlChangesDoNotInvalidateMediaSlot: true,
-      decodedMediaNodesSurviveUnrelatedRefresh: true,
-      bodyScrollPreservedDuringProjection: true,
-
       draftPreserved: true,
       previewPreserved: true,
       focusPreserved: true,
@@ -1389,13 +552,10 @@ export function getIncidenciasDetailLiveSyncSnapshot() {
   });
 }
 
-if (browser()) {
-  mountIncidenciasDetailLiveSync();
-}
-
 export default Object.freeze({
   version: INCIDENCIAS_DETAIL_LIVE_SYNC_VERSION,
   mount: mountIncidenciasDetailLiveSync,
+  sync: syncIncidenciasDetailLiveSync,
   destroy: destroyIncidenciasDetailLiveSync,
   getSnapshot: getIncidenciasDetailLiveSyncSnapshot,
 });

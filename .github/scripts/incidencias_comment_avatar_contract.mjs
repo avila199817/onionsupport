@@ -37,7 +37,6 @@ const ENHANCEMENTS_PATH =
   "src/app/enhancements.js";
 const DETAIL_COMMENT_RENDERER_PATHS = [
   "src/features/incidencias-detail-experience/index.js",
-  "src/features/incidencias-detail-live-sync/index.js",
   "src/features/incidencias-detail-state/index.js",
 ];
 const PRIVATE_INTERACTIONS_STYLE_PATH =
@@ -83,7 +82,12 @@ assert.match(
   commentSource,
   /incidencias\.comment-avatars\.v1-global-avatar-authority/u
 );
-assert.match(commentSource, /loadIncidenciaDetail/u);
+assert.doesNotMatch(commentSource, /loadIncidenciaDetail|incidencias\.api|fetch\s*\(/u);
+assert.match(commentSource, /syncIncidenciasCommentAvatars\(root = document, payload = null\)/u);
+assert.match(commentSource, /unwrapDetail\(payload\.detail\)/u);
+assert.doesNotMatch(followupSource, /loadIncidenciaDetail|incidencias\.api|fetch\s*\(/u);
+assert.match(followupSource, /syncIncidenciasFollowupAvatars\(root = document, payload = null\)/u);
+assert.match(followupSource, /unwrapDetail\(payload\.detail\)/u);
 assert.match(commentSource, /const detailIdentityState = new WeakMap\(\)/u);
 assert.match(commentSource, /resolveAvatarPresentation/u);
 assert.match(commentSource, /buildCommentIdentityIndex/u);

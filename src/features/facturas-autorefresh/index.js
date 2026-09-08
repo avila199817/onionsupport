@@ -23,12 +23,6 @@ export const FACTURAS_AUTO_REFRESH_VERSION =
 const CONTROLLER_KEY = Symbol.for("onion.support.facturas.controller");
 const ROOT_SELECTOR = ".facturas-view-root, [data-facturas-scope='true']";
 const VIEW_HOST_SELECTOR = "[data-view-container='true'], #view-container";
-const MODAL_SELECTOR = [
-  "[data-facturas-detail-modal='true']",
-  "[data-role='facturas-detail-modal']",
-  "[data-facturas-create-modal-panel='true']",
-  "[data-facturas-create-root='true']",
-].join(",");
 const EDITABLE_SELECTOR =
   "input, textarea, select, [contenteditable='true'], [role='textbox']";
 
@@ -79,10 +73,6 @@ function findController(root = viewRoot()) {
   }
 }
 
-function modalOpen(root = viewRoot()) {
-  return Boolean(root?.querySelector?.(MODAL_SELECTOR));
-}
-
 function userIsInteracting(root = viewRoot(), now = Date.now()) {
   if (!root) return false;
 
@@ -104,6 +94,7 @@ function controllerBusy(controller = null) {
       snapshot.refreshing ||
       snapshot.loadingMore ||
       snapshot.creating ||
+      snapshot.originModalOpen ||
       snapshot.destroyed ||
       snapshot.mounted === false
     );
@@ -117,7 +108,7 @@ export async function refreshIfSafe({ forceStale = false } = {}) {
   if (navigator.onLine === false) return false;
 
   const root = viewRoot();
-  if (!root?.isConnected || modalOpen(root)) return false;
+  if (!root?.isConnected) return false;
 
   const now = Date.now();
   if (userIsInteracting(root, now)) return false;

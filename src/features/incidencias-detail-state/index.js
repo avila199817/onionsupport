@@ -5,7 +5,7 @@
    Única autoridad de presentación progresiva del Modal Details:
    - turno de usuario pendiente de revisión;
    - composer fail-closed hasta confirmar política remota;
-   - lease de modal estable entre navegaciones SPA;
+   - estado recibido del controller único en cualquier vista SPA;
    - seguimiento y adjuntos más recientes primero;
    - indicador accesible de turno pendiente;
    - ID completo y affordance del técnico.
@@ -18,16 +18,14 @@ import { synchronizeAvatars } from "../avatar-system/index.js";
 import { persistedCommentId } from "../incidencias-comment-identity/index.js";
 
 export const INCIDENCIAS_DETAIL_STATE_VERSION =
-  "incidencias-detail-state.v5.route-lease-authoritative";
+  "incidencias-detail-state.v6.controller-authoritative";
 
-const HOST = "[data-incidencias-modal-host='true']";
 const ROOT = "[data-incidencias-modal-root='true']";
 const ADMIN = "[data-modal-admin-editor='true']";
 const COMPOSER = "[data-modal-composer='true']";
 const HEADER_CHIPS =
   "[data-modal-header-chips='true'], .ui-detail-modal-hero-chips";
 const PENDING_CHIP = "[data-ticket-review-state='pending']";
-const SUCCESS = ".incidencias-modal-feedback--success";
 const ERROR = ".incidencias-modal-feedback--error";
 const DESCRIPTION_SECTION = ".incidencias-modal-description-section";
 const DESCRIPTION_TEXT = ".incidencias-modal-description";
@@ -104,20 +102,13 @@ const ATTACHMENT_FIELDS = new Set([
 ]);
 
 let mounted = false;
-let mountRoot = null;
 let host = null;
-let hostLeaseObserver = null;
-let modalObserver = null;
-let frame = 0;
 let pollTimer = 0;
-let requestSeq = 0;
-let requestController = null;
 let hydration = null;
-let activeRoot = null;
 let activeTicketId = "";
-let lastSuccessKey = "";
-let internalMutations = 0;
-let apiPromise = null;
+let owner = null;
+let ownerDetail = null;
+let refreshInFlight = null;
 
 const detachedComposers = new WeakMap();
 
@@ -193,6 +184,12 @@ function eventTime(entry = {}) {
   );
 }
 
+function isAdminRoot(root) {
+  return typeof owner?.admin === "boolean"
+    ? owner.admin
+    : Boolean(root?.querySelector?.(ADMIN));
+}
+
 function currentRoot() {
   return host?.querySelector?.(ROOT) || null;
 }
@@ -207,19 +204,8 @@ function ticketId(root = currentRoot()) {
   );
 }
 
-const api = () =>
-  apiPromise ||= import("../../views/incidencias/incidencias.api.js");
-
 function ownMutation(callback) {
-  internalMutations += 1;
-
-  try {
-    return callback();
-  } finally {
-    queueMicrotask(() => {
-      internalMutations = Math.max(0, internalMutations - 1);
-    });
-  }
+  return callback();
 }
 
 function supportIdentity(detail = {}) {
@@ -561,7 +547,7 @@ function normalizeComment(item = {}, index = 0) {
   };
 }
 
-function commentsFromDetail(detail = {}) {
+export function commentsFromDetail(detail = {}) {
   const raw = object(first(detail?.raw, detail?.data, detail?.item, detail));
   const timeline = array(first(detail?.timeline, raw.timeline, []));
 
@@ -617,7 +603,7 @@ function formatDate(value = null) {
   }
 }
 
-function commentSignature(comments = []) {
+export function commentSignature(comments = []) {
   return comments
     .map((comment) =>
       [comment.id, comment.persistedCommentId, comment.author, comment.body, timestamp(comment.createdAt)].join("::")
@@ -796,7 +782,7 @@ function sortAttachments(root, detail = {}) {
 }
 
 function hideComposer(root) {
-  if (!root || root.querySelector(ADMIN)) return false;
+  if (!root || isAdminRoot(root)) return false;
 
   const state = detachedComposers.get(root);
   if (state?.marker?.isConnected && !state.composer?.isConnected) {
@@ -818,7 +804,7 @@ function hideComposer(root) {
 
 function showComposer(root) {
   if (!root) return false;
-  if (root.querySelector(ADMIN)) {
+  if (isAdminRoot(root)) {
     return Boolean(root.querySelector(COMPOSER));
   }
 
@@ -839,7 +825,7 @@ function showComposer(root) {
 }
 
 function ensurePendingChip(root, policy = {}) {
-  if (!root || root.querySelector(ADMIN)) return false;
+  if (!root || isAdminRoot(root)) return false;
 
   const chips = root.querySelector(HEADER_CHIPS);
   if (!chips) return false;
@@ -935,7 +921,7 @@ function project(root, detail = {}) {
   if (!root?.isConnected) return false;
 
   const policy = resolveConversationPolicy(detail);
-  const admin = Boolean(root.querySelector(ADMIN));
+  const admin = isAdminRoot(root);
 
   if (admin) {
     showComposer(root);
@@ -964,182 +950,77 @@ function project(root, detail = {}) {
 
 function clearPoll() {
   if (!pollTimer || !browser()) return false;
-
   window.clearTimeout(pollTimer);
   pollTimer = 0;
   return true;
 }
 
 function planPoll(id, detail = null, delay = POLL_MS) {
-  clearPoll();
+  if (!browser() || !id || !owner?.controller?.refreshDetail) return false;
 
-  if (!browser() || !id) return false;
-
-  if (detail) {
-    const policy = resolveConversationPolicy(detail);
-    if (!policy.blocked) return false;
+  if (detail && !resolveConversationPolicy(detail).blocked) {
+    clearPoll();
+    return false;
   }
+
+  if (pollTimer) return true;
 
   pollTimer = window.setTimeout(() => {
     pollTimer = 0;
-
-    const root = currentRoot();
-    if (root && ticketId(root) === id) {
-      hydrate(id, { force: true });
+    if (activeTicketId === id && currentRoot()?.isConnected) {
+      void refreshFromController(id);
     }
   }, Math.max(1_000, Number(delay) || POLL_MS));
 
   return true;
 }
 
-function abortHydration() {
-  requestSeq += 1;
+async function refreshFromController(id) {
+  if (!owner?.controller?.refreshDetail || activeTicketId !== id) return null;
+  if (refreshInFlight) return refreshInFlight;
+
+  const controller = owner.controller;
+  const modalHost = host;
+  const pending = Promise.resolve().then(() => controller.refreshDetail({
+    force: true,
+    silent: true,
+    reason: "conversation-policy",
+  }));
+  refreshInFlight = pending;
 
   try {
-    requestController?.abort?.();
-  } catch {
-    // noop
-  }
-
-  requestController = null;
-
-  if (hydration) {
-    hydration.inFlight = null;
-  }
-
-  return true;
-}
-
-function clearActiveState({ clearHydration = true } = {}) {
-  clearPoll();
-  activeRoot = null;
-  activeTicketId = "";
-  lastSuccessKey = "";
-
-  if (clearHydration) {
-    abortHydration();
-    hydration = null;
-  }
-
-  return true;
-}
-
-function hydrate(id, { force = false } = {}) {
-  const cleanId = text(id, "");
-  if (!cleanId) return null;
-
-  if (
-    !force &&
-    hydration?.ticketId === cleanId &&
-    hydration?.inFlight
-  ) {
-    return hydration;
-  }
-
-  if (force) {
-    abortHydration();
-  }
-
-  const sequence = ++requestSeq;
-  const controller =
-    typeof AbortController !== "undefined"
-      ? new AbortController()
-      : null;
-
-  requestController = controller;
-
-  const current = {
-    ticketId: cleanId,
-    sequence,
-    resolved: false,
-    stable: false,
-    detail:
-      !force && hydration?.ticketId === cleanId
-        ? hydration.detail
-        : null,
-    error: null,
-    inFlight: null,
-  };
-
-  const task = (async () => {
-    try {
-      const source = await api();
-      const detail = await source.loadIncidenciaDetail(cleanId, {
-        force: true,
-        forceRefresh: true,
-        cache: false,
-        noCache: true,
-        signal: controller?.signal,
-      });
-
-      if (
-        sequence !== requestSeq ||
-        hydration !== current
-      ) {
-        return null;
-      }
-
-      current.detail = detail || null;
-      current.resolved = true;
-      current.stable = Boolean(detail);
-      current.error = null;
-
-      if (current.detail) {
-        planPoll(cleanId, current.detail);
-      } else {
-        planPoll(cleanId, null, RETRY_MS);
-      }
-
-      return current.detail;
-    } catch (error) {
-      if (
-        sequence === requestSeq &&
-        hydration === current &&
-        error?.name !== "AbortError"
-      ) {
-        current.error = error;
-        current.resolved = true;
-        current.stable = false;
-        planPoll(cleanId, null, RETRY_MS);
-      }
-
-      return null;
-    } finally {
-      if (
-        sequence === requestSeq &&
-        hydration === current
-      ) {
-        current.inFlight = null;
-        requestController = null;
-        schedule();
+    const detail = await pending;
+    if (owner?.controller === controller && host === modalHost && activeTicketId === id) {
+      // A busy controller can defer a poll. Every successful response is
+      // projected exclusively by its onDetailRendered callback.
+      if (!detail) {
+        clearPoll();
+        planPoll(id, null, RETRY_MS);
       }
     }
-  })();
-
-  current.inFlight = task;
-  hydration = current;
-  return current;
+    return detail;
+  } catch {
+    if (owner?.controller === controller && host === modalHost && activeTicketId === id) {
+      failClosed(currentRoot());
+      clearPoll();
+      planPoll(id, null, RETRY_MS);
+    }
+    return null;
+  } finally {
+    if (refreshInFlight === pending) refreshInFlight = null;
+  }
 }
 
-function refreshAfterSuccess(root) {
-  const success = root?.querySelector?.(SUCCESS);
-  const id = ticketId(root);
-
-  if (!success || !id) return false;
-
-  const key = `${id}::${text(success.textContent)}`;
-
-  if (!key || key === lastSuccessKey) {
-    return false;
-  }
-
-  lastSuccessKey = key;
-  hydrate(id, { force: true });
-  return true;
+function clearActiveState() {
+  clearPoll();
+  activeTicketId = "";
+  hydration = null;
+  ownerDetail = null;
+  refreshInFlight = null;
 }
 
 function refreshAfterBlockedError(root) {
-  if (!root || root.querySelector(ADMIN)) return false;
+  if (!root || isAdminRoot(root)) return false;
 
   const feedback = root.querySelector(ERROR);
   const message = lower(feedback?.textContent);
@@ -1194,12 +1075,10 @@ function refreshAfterBlockedError(root) {
   } else if (id) {
     hydration = {
       ticketId: id,
-      sequence: requestSeq,
       resolved: true,
       stable: true,
       detail: nextDetail,
       error: null,
-      inFlight: null,
     };
   }
 
@@ -1208,92 +1087,8 @@ function refreshAfterBlockedError(root) {
   return true;
 }
 
-function isElement(node) {
-  return Boolean(
-    node &&
-    node.nodeType === 1 &&
-    typeof node.matches === "function"
-  );
-}
-
-function nodeTouches(node, selectors = []) {
-  if (!isElement(node)) return false;
-
-  return selectors.some((selector) =>
-    node.matches?.(selector) ||
-    node.querySelector?.(selector)
-  );
-}
-
-function modalMutationMatters(mutations = []) {
-  if (internalMutations > 0) return false;
-
-  const selectors = [
-    ROOT,
-    SUCCESS,
-    ERROR,
-    FILES,
-    HEADER_CHIPS,
-  ];
-
-  for (const mutation of mutations) {
-    if (
-      mutation.type === "attributes" &&
-      mutation.attributeName === "data-submitting"
-    ) {
-      return true;
-    }
-
-    for (const node of [
-      ...mutation.addedNodes,
-      ...mutation.removedNodes,
-    ]) {
-      if (nodeTouches(node, selectors)) {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
-function resetForHostLease(nextHost = null) {
-  modalObserver?.disconnect?.();
-  modalObserver = null;
-
-  clearActiveState({ clearHydration: true });
-  host = nextHost || null;
-
-  if (host && typeof MutationObserver !== "undefined") {
-    modalObserver = new MutationObserver((mutations) => {
-      if (modalMutationMatters(mutations)) {
-        schedule();
-      }
-    });
-
-    modalObserver.observe(host, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ["data-submitting"],
-    });
-  }
-
-  return Boolean(host);
-}
-
-function syncHostObserver() {
-  const nextHost = document.querySelector(HOST);
-
-  if (nextHost === host) {
-    return Boolean(nextHost);
-  }
-
-  return resetForHostLease(nextHost);
-}
-
 function failClosed(root) {
-  if (!root || root.querySelector(ADMIN)) return false;
+  if (!root || isAdminRoot(root)) return false;
 
   hideComposer(root);
   removePendingChip(root);
@@ -1301,163 +1096,77 @@ function failClosed(root) {
   return true;
 }
 
-function sync() {
-  if (!browser() || !mounted) return false;
+/** Reattach only for the owner's synchronous patch; its render callback gates it again. */
+export function restoreIncidenciasDetailComposer(modalHost = null) {
+  if (!modalHost || modalHost !== host) return false;
+  return showComposer(modalHost.querySelector?.(ROOT));
+}
 
-  syncHostObserver();
+/** Consume the controller's completed render; never issue a second initial GET. */
+export function syncIncidenciasDetailState(payload = {}) {
+  if (!browser()) return false;
+  mountIncidenciasDetailState();
+
+  const nextHost = payload.modalHost || null;
+  const nextId = text(payload.id || ticketId(nextHost?.querySelector?.(ROOT)), "");
+  const leaseChanged = host !== nextHost || owner?.controller !== payload.controller || activeTicketId !== nextId;
+
+  if (leaseChanged || !payload.open) clearActiveState();
+  owner = payload;
+  host = nextHost;
+
+  if (!payload.open || !nextId) return false;
 
   const root = currentRoot();
-  const id = ticketId(root);
+  const detailChanged = ownerDetail !== payload.detail;
+  const wasResolved = hydration?.resolved;
+  const previousError = hydration?.error;
+  const stable = Boolean(payload.detail && !payload.loading && !payload.error);
+  const detail = stable
+    ? (!detailChanged && hydration?.detail ? hydration.detail : payload.detail)
+    : null;
 
-  if (!root || !id) {
-    if (activeRoot || activeTicketId || hydration) {
-      clearActiveState({ clearHydration: true });
-    }
-    return false;
-  }
+  activeTicketId = nextId;
+  ownerDetail = payload.detail || null;
+  hydration = {
+    ticketId: nextId,
+    detail,
+    stable,
+    resolved: !payload.loading,
+    error: payload.error || null,
+  };
 
-  syncTicketId(root);
-  syncTechnicianEye(root);
-  synchronizeAvatars(root);
+  if (!root) return false;
 
-  if (activeRoot !== root || activeTicketId !== id) {
+  if (stable) project(root, detail);
+  else failClosed(root);
+
+  const authorityChanged = leaseChanged || detailChanged || wasResolved !== hydration.resolved || previousError !== hydration.error;
+  if (authorityChanged) clearPoll();
+
+  if (refreshAfterBlockedError(root)) return true;
+
+  if (isAdminRoot(root)) {
     clearPoll();
-    activeRoot = root;
-    activeTicketId = id;
-    lastSuccessKey = "";
-
-    if (!root.querySelector(ADMIN)) {
-      failClosed(root);
-      /*
-        Cada root nuevo corresponde a una nueva apertura/lease. Se consulta de
-        nuevo la autoridad remota incluso si es el mismo ticket que antes de
-        navegar a Home. No se reutiliza una Promise resuelta de otra vista.
-      */
-      hydrate(id, { force: true });
-    } else {
-      root.dataset.ticketReviewState = "ready";
-    }
-
     return true;
   }
 
-  if (refreshAfterBlockedError(root)) {
-    return true;
-  }
-
-  if (refreshAfterSuccess(root)) {
-    return true;
-  }
-
-  if (root.querySelector(ADMIN)) {
-    root.dataset.ticketReviewState = "ready";
-    return true;
-  }
-
-  if (hydration?.ticketId === id && hydration?.detail) {
-    return project(root, hydration.detail);
-  }
-
-  /*
-    Mientras la autoridad no esté disponible, nunca reaparece el composer.
-    Un error de red conserva el fail-closed y el retry programado.
-  */
-  failClosed(root);
-
-  if (
-    hydration?.ticketId !== id ||
-    (!hydration?.inFlight && !hydration?.resolved)
-  ) {
-    hydrate(id, { force: true });
-  }
-
+  if (stable) planPoll(nextId, detail);
+  else if (!payload.loading) planPoll(nextId, null, RETRY_MS);
   return true;
-}
-
-function schedule() {
-  if (!browser() || !mounted || frame) return false;
-
-  frame = window.requestAnimationFrame(() => {
-    frame = 0;
-    sync();
-  });
-
-  return true;
-}
-
-function hostLeaseMutationMatters(mutations = []) {
-  for (const mutation of mutations) {
-    if (mutation.type !== "childList") continue;
-
-    for (const node of [
-      ...mutation.addedNodes,
-      ...mutation.removedNodes,
-    ]) {
-      if (nodeTouches(node, [HOST])) {
-        return true;
-      }
-    }
-  }
-
-  return false;
 }
 
 export function mountIncidenciasDetailState() {
   if (!browser()) return false;
-  if (mounted) return true;
-
-  /*
-    El modal host es una lease que index.js inserta como hijo DIRECTO de body,
-    fuera de #view-container. Observar únicamente la vista dejaba ciego este
-    feature después de Incidencias -> Home -> Incidencias.
-  */
-  mountRoot = document.body || null;
-  if (!mountRoot) return false;
-
   mounted = true;
-
-  if (typeof MutationObserver !== "undefined") {
-    hostLeaseObserver = new MutationObserver((mutations) => {
-      if (internalMutations > 0) return;
-
-      if (hostLeaseMutationMatters(mutations)) {
-        schedule();
-      }
-    });
-
-    hostLeaseObserver.observe(mountRoot, {
-      childList: true,
-      subtree: false,
-    });
-  }
-
-  schedule();
   return true;
 }
 
 export function destroyIncidenciasDetailState() {
-  clearPoll();
-  abortHydration();
-
-  hostLeaseObserver?.disconnect?.();
-  modalObserver?.disconnect?.();
-
-  if (frame && browser()) {
-    window.cancelAnimationFrame?.(frame);
-  }
-
+  clearActiveState();
   mounted = false;
-  mountRoot = null;
   host = null;
-  hostLeaseObserver = null;
-  modalObserver = null;
-  frame = 0;
-  hydration = null;
-  activeRoot = null;
-  activeTicketId = "";
-  lastSuccessKey = "";
-  internalMutations = 0;
-
+  owner = null;
   return true;
 }
 
@@ -1471,8 +1180,8 @@ export function getIncidenciasDetailStateSnapshot() {
     mounted,
     ticketId: activeTicketId,
     hydrated: Boolean(hydration?.detail),
-    hydrating: Boolean(hydration?.inFlight),
-    hostLeaseObserved: Boolean(hostLeaseObserver),
+    hydrating: Boolean(owner?.loading || refreshInFlight),
+    controllerOwned: Boolean(owner?.controller),
     policy: policy ? Object.freeze({ ...policy }) : null,
     ordering: Object.freeze({
       comments: "newest_first",
@@ -1480,9 +1189,9 @@ export function getIncidenciasDetailStateSnapshot() {
     }),
     pendingIndicator: "warning_clock_chip",
     composerPolicy: "fail_closed_until_backend_detail_policy",
-    hostLeasePolicy: "body_direct_child_authoritative",
-    newRootPolicy: "force_remote_revalidation",
-    staleHydrationPolicy: "discard_on_modal_or_route_lease_change",
+    hostLeasePolicy: "controller_owned",
+    newRootPolicy: "consume_controller_remote_revalidation",
+    staleHydrationPolicy: "discard_on_controller_or_ticket_change",
     timelineFallback: true,
     technicianAvatarFallback: "global_avatar_system",
     closedTicketCanReceiveFutureUpdate: true,
@@ -1490,13 +1199,11 @@ export function getIncidenciasDetailStateSnapshot() {
   });
 }
 
-if (browser()) {
-  mountIncidenciasDetailState();
-}
-
 export default Object.freeze({
   version: INCIDENCIAS_DETAIL_STATE_VERSION,
   mount: mountIncidenciasDetailState,
+  sync: syncIncidenciasDetailState,
+  restoreComposer: restoreIncidenciasDetailComposer,
   destroy: destroyIncidenciasDetailState,
   getSnapshot: getIncidenciasDetailStateSnapshot,
 });

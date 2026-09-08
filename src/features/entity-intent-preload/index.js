@@ -30,7 +30,7 @@ const DETAIL_SELECTOR = [
 
 const HOVER_DWELL_MS = 64;
 
-const DETAIL_TYPES = new Set(["factura", "incidencia"]);
+const DETAIL_TYPES = new Set(["factura", "incidencia", "cliente", "usuario"]);
 
 let installed = false;
 let hoverTimer = 0;
@@ -279,7 +279,7 @@ export function getEntityIntentPreloadSnapshot() {
     policy: Object.freeze({
       authenticatedOnly: true,
       explicitHomeDetailIntentOnly: true,
-      supportedTypes: Object.freeze(["factura", "incidencia"]),
+      supportedTypes: Object.freeze([...DETAIL_TYPES]),
       domainCodeWarmup: true,
       domainDataReadOnOpen: true,
       incidenciaDataOwnedByController: true,

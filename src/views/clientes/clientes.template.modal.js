@@ -71,6 +71,8 @@ let bridgeReturnFocus = null;
 let bridgeAbortController = null;
 let feedbackTimer = 0;
 let bridgeSession = 0;
+let bridgeOnClosed = null;
+let bridgeRestoreFocus = true;
 
 let bridgeState = {
   open: false,
@@ -4349,6 +4351,7 @@ function ensureBridgeHost() {
 const modalLifecycle = createModalLifecycle({
   getPanel: () => bridgeHost?.querySelector("[data-clientes-modal-panel='true']"),
   onEscape: () => closeBridge(),
+  onDetached: () => closeBridge({ restoreFocus: false }),
   bodyClasses: ['clientes-modal-open', 'clientes-detail-open'],
 });
 
@@ -4459,7 +4462,8 @@ function clearFeedbackTimer() {
 
 function closeBridge({
   emit = true,
-  restoreFocus = true,
+  restoreFocus = bridgeRestoreFocus,
+  notify = true,
 } = {}) {
   if (
     !bridgeState.open &&
@@ -4479,6 +4483,9 @@ function closeBridge({
 
   const previousDetail =
     bridgeState.detail;
+  const onClosed = bridgeOnClosed;
+  bridgeOnClosed = null;
+  bridgeRestoreFocus = true;
 
   const clienteId =
     getClienteId(
@@ -4517,6 +4524,10 @@ function closeBridge({
     false
   );
 
+  unbindBridgeHost();
+  if (bridgeHost && hostIsOwned(bridgeHost)) bridgeHost.remove();
+  bridgeHost = null;
+
   if (emit) {
     emitBridgeEvent(
       "clientes:modal:closed",
@@ -4554,6 +4565,8 @@ function closeBridge({
     bridgeReturnFocus =
       null;
   }
+
+  onClosed?.({ clienteId, notify, restoreFocus });
 
   return true;
 }
@@ -4754,10 +4767,13 @@ async function onBridgeClick(
         ""
       );
 
+    const session = bridgeSession;
     const ok =
       await copyText(
         value
       );
+
+    if (session !== bridgeSession || !bridgeState.open) return;
 
     setFeedback(
       ok
@@ -4792,6 +4808,10 @@ export function openClientesDetailModal(
     return false;
   }
 
+  if (bridgeState.open && bridgeOnClosed && bridgeOnClosed !== options.onClosed) {
+    closeBridge({ restoreFocus: false });
+  }
+
   const wasOpen =
     bridgeState.open;
 
@@ -4814,7 +4834,7 @@ export function openClientesDetailModal(
     !wasOpen
   ) {
     const active =
-      document.activeElement;
+      options.opener || document.activeElement;
 
     bridgeReturnFocus =
       active &&
@@ -4824,6 +4844,9 @@ export function openClientesDetailModal(
         ? active
         : null;
   }
+
+  bridgeOnClosed = typeof options.onClosed === "function" ? options.onClosed : null;
+  bridgeRestoreFocus = options.restoreFocus !== false;
 
   bridgeSession += 1;
 
@@ -4874,10 +4897,14 @@ export function openClientesDetailModal(
     return true;
   }
 
-  paintBridge({
+  const painted = paintBridge({
     focusPanel:
       !wasOpen,
   });
+  if (!painted) {
+    closeBridge({ emit: false, restoreFocus: false, notify: false });
+    return false;
+  }
 
   emitBridgeEvent(
     "clientes:modal:open",
@@ -4918,8 +4945,8 @@ export function renderClientesModal(
   );
 }
 
-export function closeClientesDetailModal() {
-  return closeBridge();
+export function closeClientesDetailModal(options = {}) {
+  return closeBridge(options);
 }
 
 export function destroyClientesDetailModalBridge({

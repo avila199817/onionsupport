@@ -110,7 +110,7 @@ assert.match(
 );
 assert.match(
   incidenciaDetailState,
-  /mountRoot\s*=\s*document\.body/
+  /export function syncIncidenciasDetailState/
 );
 assert.match(
   enhancements,

@@ -9,6 +9,7 @@ import { resolveRouteLookupPath } from "../../src/router/routes.js";
 
 import {
   inferEntityIntent,
+  inferEntityIntentFromElement,
   normalizeEntityId,
   normalizeEntityType,
 } from "../../src/features/entity-overlay/intent.js";
@@ -38,6 +39,43 @@ assert.deepEqual(
     source: "route",
   }
 );
+
+// Exercise the same DOM inference used by capture clicks and focus recovery.
+// A command nested in an entity row must remain the domain's command.
+function element(attributes = {}, parent = null, tagName = "button") {
+  const dataset = Object.fromEntries(Object.entries(attributes).filter(([key]) => key.startsWith("data-"))
+    .map(([key, value]) => [key.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()), value]));
+  const node = {
+    nodeType: 1, dataset, textContent: "",
+    getAttribute: (name) => attributes[name] || "",
+    closest(selector) {
+      for (const part of selector.split(",").map((value) => value.trim())) {
+        const match = part.match(/^\[([^=\]]+)(?:=['"]([^'"]+)['"])?\]$/);
+        if (part === tagName || match && Object.hasOwn(attributes, match[1]) &&
+            (match[2] === undefined || attributes[match[1]] === match[2])) return node;
+      }
+      return parent?.closest(selector) || null;
+    },
+  };
+  return node;
+}
+const invoiceRow = element({ "data-factura-id": "2026000052", role: "button" }, null, "tr");
+assert.equal(inferEntityIntentFromElement(invoiceRow).type, "factura");
+for (const action of ["view-pdf", "download-pdf", "send-factura", "mark-paid", "copy-id"]) {
+  const command = element({ "data-facturas-action": action, "data-factura-id": "2026000052" }, invoiceRow);
+  assert.equal(inferEntityIntentFromElement(element({}, command, "span")), null, `${action} must not open another modal`);
+}
+const relation = element({
+  "data-facturas-action": "open-incidencia", "data-factura-id": "2026000052",
+  "data-ticket-id": "INC-20260827-D03089", "data-entity-type": "incidencia", "data-entity-id": "INC-20260827-D03089",
+}, invoiceRow);
+assert.deepEqual(inferEntityIntentFromElement(element({}, relation, "span")), {
+  type: "incidencia", id: "INC-20260827-D03089", source: "dom",
+});
+const userRow = element({ "data-user-id": "user-123", "data-usuarios-action": "detail" }, null, "tr");
+assert.equal(inferEntityIntentFromElement(element({}, userRow, "td")).type, "usuario");
+assert.equal(inferEntityIntentFromElement(element({ "data-stop-row": "true", href: "mailto:test@example.test" }, userRow, "a")), null);
+assert.equal(inferEntityIntentFromElement(element({ disabled: "", "data-usuarios-action": "detail", "data-user-id": "user-123" }, userRow)), null);
 
 assert.deepEqual(
   inferEntityIntent({
@@ -73,35 +111,24 @@ const [overlay, privateRuntime, app, main, html, deeplink, spaContract] = await 
   read(".github/ci/validate_spa_contracts.sh"),
 ]);
 
-for (const type of ["cliente", "usuario"]) {
-  assert.match(overlay, new RegExp(`${type}:\\s*\\(\\)\\s*=>\\s*import`));
+for (const type of ["factura", "incidencia", "cliente", "usuario"]) {
+  assert.match(overlay, new RegExp(`${type}:\\s*Object\\.freeze\\(\\{`));
 }
 
 assert.match(overlay, /document\.addEventListener\("click",\s*onDocumentClick,\s*true\)/);
 assert.match(overlay, /OWNER_DEFINITIONS/);
 assert.match(overlay, /factura:\s*Object\.freeze\(\{/);
 assert.match(overlay, /incidencia:\s*Object\.freeze\(\{/);
-assert.match(overlay, /openFacturaDetailById/);
 assert.match(overlay, /openCanonicalOwner/);
-assert.match(overlay, /openIncidenciaDetailById/);
-assert.match(overlay, /ownerModalOpen/);
-if (directDomainOwners) {
-  await assertDirectDomainOwners();
-} else {
-assert.match(overlay, /context\?\.Router \|\| context\?\.router/);
-assert.match(overlay, /navigateWithRouter\(target,/);
-assert.match(
-  overlay,
-  /navigateBack:\s*Boolean\(session\.returnPath\)\s*&&\s*isOwnerRoute\(session\.type\)/
-);
-}
-assert.doesNotMatch(overlay, /adapters\/incidencia\.js/);
-assert.doesNotMatch(overlay, /adapters\/factura\.js/);
-assert.match(overlay, /pushState|writeUrlForEntry/);
+assert.ok(directDomainOwners, "Every entity must use the shared session dispatcher");
+await assertDirectDomainOwners();
+assert.doesNotMatch(overlay, /adapters\//);
+assert.doesNotMatch(overlay, /pushState|writeUrlForEntry|isCanonicalOwnerRoute|hasExplicitOverlayTrigger|routeOpenName/);
 assert.match(overlay, /data-entity-overlay-panel/);
-assert.match(overlay, /isCanonicalOwnerRoute/);
-assert.match(overlay, /hasExplicitOverlayTrigger/);
-assert.match(overlay, /syncUrl: options\?\.syncUrl !== false/);
+assert.match(overlay, /controller\[definition\.openName\]\(id, opener\)/);
+assert.match(overlay, /controller\.getSnapshot\(\)\.detailModalOpen/);
+assert.match(overlay, /session\.scope\.dispose\(reason\)/);
+assert.match(overlay, /clearPending\(session\)/);
 assert.match(privateRuntime, /import\("\.\.\/entity-overlay\/index\.js"\)/);
 assert.doesNotMatch(app, /features\/entity-overlay\/index\.js/);
 assert.doesNotMatch(main, /features\/entity-overlay\/index\.js/);
@@ -198,5 +225,5 @@ assert.doesNotMatch(homeExtremeEntitiesCss, /home-activity-entity-button/);
 assert.doesNotMatch(homeExtremeEntitiesCss, /home-invoice-entity-button/);
 
 console.log(
-  "Entity overlay contract: PASS · factura/incidencia owner authority · modular Home semantic triggers · canonical deeplinks"
+  "Entity overlay contract: PASS · four owners in one session · semantic Home triggers · committed-origin deeplinks"
 );

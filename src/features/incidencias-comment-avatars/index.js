@@ -5,7 +5,7 @@
 
    Responsabilidad:
    - Decorar autores del timeline con la foto real del solicitante/técnico.
-   - Hidratar identidad estable por modal mediante el coordinador de detalle.
+   - Recibir la identidad estable del mismo controller que abrió el detalle.
    - Delegar iniciales, tone, image/fallback y errores a AvatarSystem.
    - No escuchar errores globales de imagen ni mantener paletas propias.
 ========================================================= */
@@ -13,10 +13,6 @@
 "use strict";
 
 import "./style.css";
-
-import {
-  loadIncidenciaDetail,
-} from "../../views/incidencias/incidencias.api.js";
 
 import {
   resolveAvatarPresentation,
@@ -274,56 +270,7 @@ function getModalIdentityState(modal = null) {
   return detailIdentityState.get(modal) || null;
 }
 
-async function hydrateDetailIdentity(modal = null) {
-  const ticketId = ticketIdFromModal(modal);
-  if (!ticketId || !modal) return null;
-
-  let state = getModalIdentityState(modal);
-  if (state?.detail) return state.detail;
-  if (state?.promise) return state.promise;
-
-  state = {
-    ticketId,
-    detail: null,
-    promise: null,
-    failed: false,
-  };
-
-  state.promise = Promise.resolve()
-    .then(() => loadIncidenciaDetail(ticketId))
-    .then((result) => {
-      const detail = unwrapDetail(result);
-      state.detail = detail && Object.keys(detail).length ? detail : null;
-      state.failed = !state.detail;
-      return state.detail;
-    })
-    .catch(() => {
-      state.failed = true;
-      state.detail = null;
-      return null;
-    })
-    .finally(() => {
-      state.promise = null;
-    });
-
-  detailIdentityState.set(modal, state);
-  return state.promise;
-}
-
-function queueIdentityHydration(modal = null) {
-  const ticketId = ticketIdFromModal(modal);
-  const state = getModalIdentityState(modal);
-
-  if (!ticketId || state?.detail || state?.promise || state?.failed) return false;
-
-  void hydrateDetailIdentity(modal).then(() => {
-    if (modal?.isConnected) syncIncidenciasCommentAvatars(modal);
-  });
-
-  return true;
-}
-
-export function syncIncidenciasCommentAvatars(root = document) {
+export function syncIncidenciasCommentAvatars(root = document, payload = null) {
   if (!root?.querySelectorAll) return 0;
 
   const modals = [];
@@ -336,16 +283,21 @@ export function syncIncidenciasCommentAvatars(root = document) {
   let synced = 0;
 
   for (const modal of modals) {
+    if (payload) {
+      const detail = !payload.loading && !payload.error && payload.detail
+        ? unwrapDetail(payload.detail)
+        : null;
+      detailIdentityState.set(modal, {
+        detail: detail && Object.keys(detail).length ? detail : null,
+      });
+    }
     const state = getModalIdentityState(modal);
     const detail = state?.detail || {};
     const identityReady = Boolean(detail && Object.keys(detail).length);
-    const identityFailed = state?.failed === true;
-
-    if (!identityReady && !identityFailed) {
+    if (!identityReady) {
       for (const meta of modal.querySelectorAll(COMMENT_META_SELECTOR)) {
         removeCommentAvatar(meta);
       }
-      queueIdentityHydration(modal);
       continue;
     }
 

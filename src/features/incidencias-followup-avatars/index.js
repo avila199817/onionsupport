@@ -5,7 +5,7 @@
 
    Responsabilidad:
    - Montar el avatar de cada autor en "Seguimiento".
-   - Resolver identidad desde el detalle hidratado antes del primer paint.
+   - Resolver identidad desde el detalle del controller antes del primer paint.
    - Reutilizar foto real de solicitante/técnico cuando existe.
    - Delegar iniciales, tone, image/fallback y errores a AvatarSystem.
    - No mantener paleta, hash, listeners de imagen ni internals ajenos.
@@ -14,10 +14,6 @@
 "use strict";
 
 import "./style.css";
-
-import {
-  loadIncidenciaDetail,
-} from "../../views/incidencias/incidencias.api.js";
 
 import {
   resolveAvatarPresentation,
@@ -305,55 +301,6 @@ function syncHead(head = null, identityIndex = new Map(), availableProfiles = []
   return Boolean(createAvatar(head, profile, authorText, identity));
 }
 
-async function hydrate(modal = null) {
-  const id = ticketId(modal);
-  if (!id || !modal) return null;
-
-  let state = modalState.get(modal) || null;
-  if (state?.detail) return state.detail;
-  if (state?.promise) return state.promise;
-
-  state = {
-    detail: null,
-    promise: null,
-    failed: false,
-  };
-
-  state.promise = Promise.resolve()
-    .then(() => loadIncidenciaDetail(id))
-    .then((value) => {
-      const detail = unwrapDetail(value);
-      state.detail = Object.keys(detail).length ? detail : null;
-      state.failed = !state.detail;
-      return state.detail;
-    })
-    .catch(() => {
-      state.failed = true;
-      state.detail = null;
-      return null;
-    })
-    .finally(() => {
-      state.promise = null;
-    });
-
-  modalState.set(modal, state);
-  return state.promise;
-}
-
-function queueHydration(modal = null) {
-  const state = modalState.get(modal) || null;
-
-  if (!modal || state?.detail || state?.promise || state?.failed) {
-    return false;
-  }
-
-  void hydrate(modal).then(() => {
-    if (modal?.isConnected) syncModal(modal);
-  });
-
-  return true;
-}
-
 export function syncModal(modal = null) {
   if (!modal?.querySelectorAll) return 0;
 
@@ -363,7 +310,7 @@ export function syncModal(modal = null) {
   const state = modalState.get(modal) || null;
 
   if (!state?.detail) {
-    queueHydration(modal);
+    for (const head of heads) removeAvatar(head);
     return 0;
   }
 
@@ -378,7 +325,7 @@ export function syncModal(modal = null) {
   return synced;
 }
 
-export function syncIncidenciasFollowupAvatars(root = document) {
+export function syncIncidenciasFollowupAvatars(root = document, payload = null) {
   if (!root?.querySelectorAll) return 0;
 
   const modals = [];
@@ -386,6 +333,17 @@ export function syncIncidenciasFollowupAvatars(root = document) {
 
   for (const modal of root.querySelectorAll(MODAL_SELECTOR)) {
     if (!modals.includes(modal)) modals.push(modal);
+  }
+
+  if (payload) {
+    const detail = !payload.loading && !payload.error && payload.detail
+      ? unwrapDetail(payload.detail)
+      : null;
+    for (const modal of modals) {
+      modalState.set(modal, {
+        detail: detail && Object.keys(detail).length ? detail : null,
+      });
+    }
   }
 
   return modals.reduce(

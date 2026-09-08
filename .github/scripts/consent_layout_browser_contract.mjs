@@ -17,7 +17,7 @@ const server = createServer(async (request, response) => {
   const url = new URL(request.url, 'http://localhost');
   if (['/', '/soporte-informatico', '/login', '/password-request', '/password-reset', '/activate-account/opaque-fixture'].includes(url.pathname)) {
     return response.writeHead(200, {
-      'Content-Type': 'text/html',
+      'Content-Type': 'text/html; charset=utf-8',
       'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'",
     }).end(`<!doctype html><html lang="es"><head><title>Consent layout</title><link rel="stylesheet" href="/fixture.css"><link rel="stylesheet" href="/src/css/views/public/legal-footer.css">${url.searchParams.has('preloaded') ? '<link rel="stylesheet" href="/src/analytics/google-consent.css" data-onion-google-consent-style="2">' : ''}</head><body><main><button id="opener">Preferencias</button></main>${renderPublicLegalFooter()}<script type="module" src="/src/analytics/google-tag.js"></script></body></html>`);
   }

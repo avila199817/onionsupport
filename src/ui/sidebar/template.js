@@ -26,7 +26,7 @@ import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 import { avatarInitials, synchronizeAvatarHost } from "../../features/avatar-system/index.js";
 
 export const SIDEBAR_TEMPLATE_VERSION =
-  "sidebar.template.unified.v6-core-role-authority";
+  "sidebar.template.unified.v7-whatsapp-icon-contract";
 
 const SIDEBAR_ROOT_ID = "app-sidebar";
 const BRAND_LABEL = "Onion Support";
@@ -102,6 +102,7 @@ const ICONS = Object.freeze({
   facturas: "facturas",
   clientes: "clientes",
   usuarios: "usuarios",
+  whatsapp: "whatsapp",
   empleados: "empleados",
   cuenta: "cuenta",
   servidor: "servidor",
@@ -123,6 +124,8 @@ const ICON_PATHS = Object.freeze({
     "M8.25 11.25a3.75 3.75 0 1 0 0-7.5 3.75 3.75 0 0 0 0 7.5Z M2.75 21c.45-3.35 2.85-5.65 5.5-5.65s5.05 2.3 5.5 5.65 M16.25 10.75a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M14.75 14.9c.55-.22 1.15-.35 1.85-.35 2.3 0 4.15 1.8 4.65 4.45",
   usuarios:
     "M12 11.5a4.25 4.25 0 1 0 0-8.5 4.25 4.25 0 0 0 0 8.5Z M4.25 21c.6-4.1 3.7-6.75 7.75-6.75S19.15 16.9 19.75 21",
+  whatsapp:
+    "M20.25 11.5a8.25 8.25 0 0 1-12.1 7.3L3.75 20l1.2-4.05A8.25 8.25 0 1 1 20.25 11.5Z M8.25 8.1c.35 3.3 2.35 5.3 5.65 5.65 M8.25 8.1l1.35-.8 1.15 1.9-1 .95 M13.9 13.75l.95-1 1.9 1.15-.8 1.35",
   empleados:
     "M4.5 5.25h15a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2v-9.5a2 2 0 0 1 2-2Z M8.25 12.25a2.1 2.1 0 1 0 0-4.2 2.1 2.1 0 0 0 0 4.2Z M5.25 16.25c.35-1.75 1.55-2.8 3-2.8s2.65 1.05 3 2.8 M14 8.5h3.75 M14 11.75h3.75 M14 15h2.5",
   cuenta:

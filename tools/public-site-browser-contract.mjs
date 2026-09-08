@@ -61,12 +61,17 @@ try {
     const form = root.querySelector("form");
     form.replaceWith(form.cloneNode(true));
     const replacement = mutationsTouchSelector(observer.takeRecords(), relevant);
+    const identity = document.createElement("span");
+    identity.className = "public-support-account";
+    root.querySelector("section").append(identity);
+    const identityChange = mutationsTouchSelector(observer.takeRecords(), ".public-support-account");
     root.innerHTML = '<div class="route-view-host"><section data-public-home></section></div>';
     const navigation = mutationsTouchSelector(observer.takeRecords(), relevant);
     observer.disconnect();
-    return { textChanges: counts.filter(Boolean).length, replacement, navigation };
+    return { textChanges: counts.filter(Boolean).length, replacement, identityChange, navigation };
   });
-  assert.deepEqual(mutationInvalidation, { textChanges: 0, replacement: true, navigation: true }, "typing must not rescan the home, while form replacements and SPA mounts still do");
+  assert.deepEqual(mutationInvalidation, { textChanges: 0, replacement: true, identityChange: true, navigation: true }, "typing must not rescan the home, while form/identity replacements and SPA mounts still do");
+  await page.waitForFunction(() => window.__ONION_MAIN__?.enhancementsReady === true);
   assert.equal(await page.evaluate(() => performance.getEntriesByType("resource").some((entry) => entry.name.includes("/mobile-datalist/"))), false, "public home must not load private table enhancement");
   const navigationToken = await page.evaluate(() => (window.__metadataNavigationProbe = Math.random()));
   for (const path of ["/login", "/", "/login", "/"]) {

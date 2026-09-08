@@ -29,6 +29,7 @@ const ACCOUNT_SLOT = "[data-public-home-account-slot]";
 const ACCOUNT_WRAP = "[data-public-home-account-wrap]";
 const ACCOUNT_MENU = "[data-public-home-account-menu]";
 const ACCOUNT_TOGGLE = "[data-public-home-account-toggle]";
+const ACCOUNT_IDENTITY = ".public-support-account";
 const LOGOUT_ACTION = "[data-public-home-logout]";
 const PUBLIC_HOME_SESSION_EVENT = "public-home:session-hydrated";
 const PHONE_CONTROL = "[data-public-support-phone-control]";
@@ -619,7 +620,7 @@ function scan() {
 }
 
 function queueScan(mutations = null) {
-  if (Array.isArray(mutations) && !mutationsTouchSelector(mutations, `${HOME}, ${FORM}, ${LOGIN}, ${ACCOUNT_SLOT}`)) {
+  if (Array.isArray(mutations) && !mutationsTouchSelector(mutations, `${HOME}, ${FORM}, ${LOGIN}, ${ACCOUNT_SLOT}, ${ACCOUNT_IDENTITY}`)) {
     return false;
   }
   if (destroyed || typeof window === "undefined" || scanFrame) return false;

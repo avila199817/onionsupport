@@ -1194,6 +1194,9 @@ function onInput(event) {
   const input = event.target;
   const form = input?.closest?.(FORM);
   if (!form || !input?.name) return;
+  // Disabling a focused field can deliver a late change event. The submitted
+  // payload is already fixed; keep its retry key until editing is enabled again.
+  if (form.dataset.submitting === "true") return;
 
   if (input.name !== "website") {
     clearIdempotency(form);

@@ -139,6 +139,24 @@ let scenarios = 0;
   assert.equal(f.fields.address.getAttribute("aria-invalid"), "true");
   scenarios++;
 }
+{
+  const f = fixture();
+  const first = f.run("send(form)");
+  const key = f.requests[0].options.headers["Idempotency-Key"];
+  f.context.lateChange = {
+    type: "change",
+    target: { ...f.fields.description, closest: () => f.form },
+  };
+  f.run("onInput(lateChange)");
+  assert.equal(f.form.dataset.publicSupportIdempotencyKey, key, "late change from disabling a focused field must preserve the pending attempt");
+  f.requests[0].reject({ status: 503 });
+  assert.equal(await first, false);
+  const retry = f.run("send(form)");
+  assert.equal(f.requests[1].options.headers["Idempotency-Key"], key);
+  f.requests[1].resolve(accepted);
+  assert.equal(await retry, true);
+  scenarios++;
+}
 for (const response of [null, "OK", {}, { ok: false }, { ...accepted, success: false }, { ...accepted, accepted: false }, { ok: true, success: true, accepted: true }, { ...ownerAccepted, incidenciaId: "INC-20260908-999999" }]) {
   const f = fixture();
   const promise = f.run("send(form)");

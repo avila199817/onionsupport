@@ -229,6 +229,14 @@ jobs:
                   await copyFile(resolve(reportsDir, name), resolve(output, variant, '.lighthouseci', `lhr-${round}.html`));
                 }
                 console.log(`SAMPLE ${variant} ${JSON.stringify(samples[variant].at(-1))}`);
+                // Keep the causal diagnostics readable even when artifact ZIPs
+                // cannot be downloaded. Measurements and budgets stay unchanged.
+                const diagnostics = Object.fromEntries([
+                  'largest-contentful-paint-element', 'lcp-breakdown-insight',
+                  'lcp-discovery-insight', 'layout-shift-elements',
+                  'render-blocking-resources', 'mainthread-work-breakdown',
+                ].filter((id) => report.audits[id]?.details).map((id) => [id, report.audits[id].details]));
+                console.log(`DIAGNOSTICS ${variant} round=${round} ${JSON.stringify(diagnostics)}`);
               }
             }
             // Apply the immutable base's unchanged thresholds to all five reports.

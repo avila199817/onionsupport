@@ -45,11 +45,38 @@ try {
   }
   await page.goto(origin, { waitUntil: "domcontentloaded" });
   await inspect("/");
+  await page.waitForSelector("[data-public-support-form] [name='phone']");
+  const mutationInvalidation = await page.evaluate(async () => {
+    const { mutationsTouchSelector } = await import("/src/core/dom-mutations.js");
+    const root = document.createElement("div");
+    root.innerHTML = '<section data-public-home><form data-public-support-form><p>0 / 4000</p></form></section>';
+    const observer = new MutationObserver(() => {});
+    observer.observe(root, { childList: true, subtree: true });
+    const relevant = "[data-public-home], [data-public-support-form]";
+    const counts = [];
+    for (let index = 1; index <= 20; index += 1) {
+      root.querySelector("p").textContent = `${index} / 4000`;
+      counts.push(mutationsTouchSelector(observer.takeRecords(), relevant));
+    }
+    const form = root.querySelector("form");
+    form.replaceWith(form.cloneNode(true));
+    const replacement = mutationsTouchSelector(observer.takeRecords(), relevant);
+    root.innerHTML = '<div class="route-view-host"><section data-public-home></section></div>';
+    const navigation = mutationsTouchSelector(observer.takeRecords(), relevant);
+    observer.disconnect();
+    return { textChanges: counts.filter(Boolean).length, replacement, navigation };
+  });
+  assert.deepEqual(mutationInvalidation, { textChanges: 0, replacement: true, navigation: true }, "typing must not rescan the home, while form replacements and SPA mounts still do");
+  assert.equal(await page.evaluate(() => performance.getEntriesByType("resource").some((entry) => entry.name.includes("/mobile-datalist/"))), false, "public home must not load private table enhancement");
   const navigationToken = await page.evaluate(() => (window.__metadataNavigationProbe = Math.random()));
   for (const path of ["/login", "/", "/login", "/"]) {
     await page.evaluate(async (target) => { const { default: router } = await import("/src/router/index.js"); await router.navigate(target); }, path);
     await inspect(path);
     assert.equal(await page.evaluate(() => window.__metadataNavigationProbe), navigationToken, "navigation must stay in the same document");
+    if (path === "/") {
+      await page.waitForSelector("[data-public-support-form] [name='phone']");
+      assert.equal(await page.locator("[data-public-support-form]").count(), 1, "returning to home must mount one support form");
+    }
   }
   await page.goto(origin + "/login", { waitUntil: "domcontentloaded" });
   await inspect("/login");

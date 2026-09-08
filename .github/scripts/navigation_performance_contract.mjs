@@ -257,6 +257,27 @@ assert.equal(
   "enhancements must not observe internal view mutations"
 );
 
+// Public entry and login must not activate private table enhancements; direct
+// and user-scoped listing routes must retain them after a committed navigation.
+const previousWindow = globalThis.window;
+const previousDocument = globalThis.document;
+try {
+  globalThis.document = { querySelector: () => null };
+  for (const path of ["/", "/index.html", "/login", "/reset-password", "/support"]) {
+    globalThis.window = { location: { pathname: path } };
+    assert.equal(getAppEnhancementsSnapshot().routeScopes.includes("data-list"), false, path);
+  }
+  for (const path of ["/incidencias", "/tickets", "/facturas", "/clientes", "/usuarios", "/@fixture/incidencias", "/@fixture/facturas?status=paid"]) {
+    globalThis.window = { location: { pathname: path } };
+    assert.equal(getAppEnhancementsSnapshot().routeScopes.includes("data-list"), true, path);
+  }
+} finally {
+  if (previousWindow === undefined) delete globalThis.window;
+  else globalThis.window = previousWindow;
+  if (previousDocument === undefined) delete globalThis.document;
+  else globalThis.document = previousDocument;
+}
+
 const preloadSource = await readFile(
   "src/features/route-intent-preload/index.js",
   "utf8"

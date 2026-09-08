@@ -748,9 +748,6 @@ function initScrollPipeline(refs, cleanups, host) {
         );
         state.travel = Math.max(1, trackSize - state.thumbSize);
 
-        const thumbSize = `${Math.round(state.thumbSize)}px`;
-        setCssMetric(refs.root, "--public-home-scrollbar-thumb-size", thumbSize);
-        setCssMetric(track, "--public-home-scrollbar-thumb-size", thumbSize);
       } else {
         state.trackRect = null;
         state.thumbSize = 0;
@@ -774,6 +771,13 @@ function initScrollPipeline(refs, cleanups, host) {
     const thumbTopNumber = Math.round(state.travel * progress);
     const thumbTop = `${thumbTopNumber}px`;
     const thumbCenter = `${Math.round(thumbTopNumber + state.thumbSize / 2)}px`;
+
+    // Complete geometry and scroll reads before invalidating styles.
+    if (state.trackRect) {
+      const thumbSize = `${Math.round(state.thumbSize)}px`;
+      setCssMetric(refs.root, "--public-home-scrollbar-thumb-size", thumbSize);
+      setCssMetric(refs.customScrollbar, "--public-home-scrollbar-thumb-size", thumbSize);
+    }
 
     if (state.scrolled !== scrolled) {
       state.scrolled = scrolled;

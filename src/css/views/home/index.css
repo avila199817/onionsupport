@@ -13,6 +13,8 @@
    - Responsive, reduced-motion, forced-colors y print.
 ========================================================= */
 
+@import url("../../compositions/home-extreme.css") layer(compositions);
+
 @layer views {
 
 /* =========================================================

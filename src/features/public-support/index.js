@@ -19,6 +19,7 @@
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import { mutationsTouchSelector } from "../../core/dom-mutations.js";
 import Http from "../../core/http.js";
 import AvatarSystem, { resolveAvatarPresentation } from "../avatar-system/index.js";
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
@@ -669,7 +670,10 @@ function scan() {
   return found;
 }
 
-function queueScan() {
+function queueScan(mutations = null) {
+  if (Array.isArray(mutations) && !mutationsTouchSelector(mutations, `${HOME}, ${FORM}`)) {
+    return false;
+  }
   if (destroyed || typeof window === "undefined" || scanFrame) return false;
   scanFrame = window.requestAnimationFrame(() => {
     scanFrame = 0;

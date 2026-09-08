@@ -12,6 +12,7 @@
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import { mutationsTouchSelector } from "../../core/dom-mutations.js";
 
 export const PUBLIC_HOME_EXPERIENCE_VERSION =
   "public-home.experience.v7-avatar-topbar-card";
@@ -617,7 +618,10 @@ function scan() {
   return found;
 }
 
-function queueScan() {
+function queueScan(mutations = null) {
+  if (Array.isArray(mutations) && !mutationsTouchSelector(mutations, `${HOME}, ${FORM}, ${LOGIN}, ${ACCOUNT_SLOT}`)) {
+    return false;
+  }
   if (destroyed || typeof window === "undefined" || scanFrame) return false;
   scanFrame = window.requestAnimationFrame(() => {
     scanFrame = 0;

@@ -4,12 +4,11 @@ import { directDomainOwners, assertDirectDomainOwners } from "../.github/scripts
 // The direct-owner release must pass real domain and controller regressions.
 if (directDomainOwners) {
   await assertDirectDomainOwners();
+  await import("./private-user-identity-contract.mjs");
+  await import("./home-domain-counts-contract.mjs");
+  await import("./private-domain-events-contract.mjs");
   if (process.argv.includes("--browser")) {
     await import("./private-owner-modal-browser-contract.mjs");
-  } else {
-    await import("./private-user-identity-contract.mjs");
-    await import("./home-domain-counts-contract.mjs");
-    await import("./private-domain-events-contract.mjs");
   }
 } else {
   console.log("Private domain transition: legacy architecture covered by existing owner contracts");

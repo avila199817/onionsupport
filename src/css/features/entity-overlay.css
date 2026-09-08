@@ -261,3 +261,20 @@ body.entity-overlay-open {
     forced-color-adjust: auto;
   }
 }
+
+.entity-overlay-action-button {
+  appearance: none;
+  min-block-size: 44px;
+  padding: 10px 18px;
+  border: 1px solid var(--entity-overlay-border);
+  border-radius: 10px;
+  color: inherit;
+  background: var(--entity-overlay-surface-2);
+  font: inherit;
+  cursor: pointer;
+}
+
+.entity-overlay-action-button:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}

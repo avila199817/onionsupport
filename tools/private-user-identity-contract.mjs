@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import Http from "../src/core/http.js";
 import { AppCore } from "../src/core/index.js";
+import { SidebarUI } from "../src/ui/sidebar/index.js";
 import { userNameFromIdentity } from "../src/core/user-identity.js";
 import { resolveAvatarPresentation } from "../src/features/avatar-system/identity.js";
 import { normalizeUsuarioModel, updateUsuarioRequest } from "../src/views/usuarios/usuarios.api.js";
@@ -102,9 +103,48 @@ try {
   assert.equal(search[0].name, person.name, "el selector de solicitante comparte el nombre de Usuarios");
   await updateUsuarioRequest(person.userId, { name: person.name, displayName: "Alias antiguo", fullName: "Otro alias" });
   assert.deepEqual(writes[0].body, { name: person.name }, "la edición solo persiste el campo canónico name");
+
+  let additionalReads = 0;
+  Http.get = async () => { additionalReads += 1; throw new Error("No extra profile lookup is allowed"); };
+  const account = { ...person, role: "admin", permissions: ["tickets:write", "users:write"] };
+  const other = { ...person, userId: "ON-OTHER-USER", name: "Otra Persona" };
+  AppCore.applySession({ user: account, token: "fixture-token-one", session: { sessionId: "fixture-session-one" } });
+  Http.patch = async (path, body) => ({ ok: true, user: { ...(path.endsWith(other.userId) ? other : person), ...body } });
+  await updateUsuarioRequest(person.userId, { name: "Nombre propio actualizado" });
+  let current = AppCore.runtimeState.read();
+  assert.equal(current.user.name, "Nombre propio actualizado", "la edición propia llega al saludo mediante Core");
+  assert.equal(current.user.displayName, current.user.name);
+  assert.equal(SidebarUI.getSnapshot().user.displayName, current.user.name, "Sidebar consume la misma identidad canónica que Home");
+  assert.equal(current.role, "admin", "la respuesta de perfil no redefine la autoridad de sesión");
+  assert.deepEqual(current.user.permissions, account.permissions);
+  assert.equal(current.token, "fixture-token-one");
+  assert.equal(current.sessionId, "fixture-session-one");
+  await updateUsuarioRequest(other.userId, { name: "Nombre ajeno actualizado" });
+  assert.equal(AppCore.runtimeState.read().user.name, "Nombre propio actualizado", "editar otro usuario no altera la sesión actual");
+
+  let release;
+  Http.patch = async () => new Promise((done) => { release = done; });
+  const pendingOtherSession = updateUsuarioRequest(person.userId, { name: "Respuesta tardía" });
+  AppCore.applySession({ user: other, token: "fixture-token-two", session: { sessionId: "fixture-session-two" } });
+  release({ ok: true, user: { ...person, name: "Respuesta tardía" } });
+  await pendingOtherSession;
+  assert.equal(AppCore.runtimeState.read().user.name, other.name, "una respuesta de la sesión anterior no modifica otra cuenta");
+
+  AppCore.applySession({ user: account, token: "fixture-token-three", session: { sessionId: "fixture-session-three" } });
+  const pendingSameUser = updateUsuarioRequest(person.userId, { name: "Nombre de sesión antigua" });
+  AppCore.clearSession();
+  AppCore.applySession({ user: { ...account, name: "Nombre de sesión nueva" }, token: "fixture-token-four", session: { sessionId: "fixture-session-four" } });
+  release({ ok: true, user: { ...person, name: "Nombre de sesión antigua" } });
+  await pendingSameUser;
+  assert.equal(AppCore.runtimeState.read().user.name, "Nombre de sesión nueva", "volver a entrar con el mismo ID tampoco acepta una respuesta de otra sesión");
+  Http.patch = async () => ({ success: false, user: { ...person, name: "Cambio rechazado" } });
+  await assert.rejects(updateUsuarioRequest(person.userId, { name: "Cambio rechazado" }));
+  assert.equal(AppCore.runtimeState.read().user.name, "Nombre de sesión nueva");
+  assert.equal(additionalReads, 0, "la reconciliación usa la respuesta confirmada, sin N+1 ni consultas de sesión");
 } finally {
   Http.get = originalGet;
   Http.patch = originalPatch;
+  AppCore.clearSession();
 }
 
 console.log("Private user identity: PASS · one canonical name across Core/users/tickets/Home · stable avatar · fiscal snapshot preserved · no network");

@@ -22,6 +22,7 @@
      mantiene trazabilidad hasta migrar el contrato estático de integridad.
 ========================================================= */
 
+import { userNameFromIdentity } from "../../core/user-identity.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 
 export const USUARIOS_TEMPLATE_VERSION =
@@ -267,7 +268,7 @@ function getId(item = {}) {
   return cleanText(first(item.userId, item.usuarioId, item.id, item.uid, item.email, ""), "");
 }
 function getName(item = {}) {
-  return cleanText(first(item.fullName, item.displayName, item.name, item.nombre, item.username, item.email, "Usuario"), "Usuario");
+  return userNameFromIdentity(item, first(item.username, item.email, "Usuario"));
 }
 function getCode(item = {}) {
   return cleanText(first(item.code, item.username, getId(item), "USR-SIN-ID"), "USR-SIN-ID");

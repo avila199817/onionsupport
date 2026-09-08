@@ -26,6 +26,7 @@ import { createModalLifecycle, restoreModalFocus } from "../../features/entity-o
 
 import { AppCore } from "../../core/index.js";
 import { normalizeUsuarioModel } from "./usuarios.api.js";
+import { userNameFromIdentity } from "../../core/user-identity.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 
 /* =========================================================
@@ -940,18 +941,7 @@ function getUserId(detail = {}) {
 }
 
 function getName(detail = {}) {
-  return cleanText(
-    first(
-      detail.fullName,
-      detail.displayName,
-      detail.name,
-      detail.nombre,
-      detail.username,
-      detail.email,
-      "Usuario"
-    ),
-    "Usuario"
-  );
+  return userNameFromIdentity(detail, first(detail.username, detail.email, "Usuario"));
 }
 
 function getUsername(detail = {}) {

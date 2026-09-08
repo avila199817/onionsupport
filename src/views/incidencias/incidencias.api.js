@@ -21,6 +21,7 @@
 "use strict";
 
 import * as Impl from "./incidencias.api.impl.js";
+import { onDomainChanged } from "../../core/domain-events.js";
 import {
   INCIDENCIAS_DETAIL_INTEGRITY_VERSION,
   createDetailIntegrityLoader,
@@ -62,6 +63,7 @@ const HOT_LIST_REVALIDATE_MIN_INTERVAL_MS = 12000;
 let completeUniverse = null;
 let universeRevalidationPromise = null;
 let universeRevalidatedAt = 0;
+let universeEpoch = 0;
 
 function cleanKey(value = "") {
   return String(value ?? "")
@@ -232,6 +234,7 @@ function rememberCompleteUniverse(response = {}, query = {}) {
 }
 
 function invalidateCompleteUniverse() {
+  universeEpoch += 1;
   completeUniverse = null;
   universeRevalidatedAt = 0;
   return true;
@@ -399,6 +402,7 @@ function revalidateCompleteUniverse() {
   const age = Date.now() - universeRevalidatedAt;
   if (age < HOT_LIST_REVALIDATE_MIN_INTERVAL_MS) return null;
 
+  const epoch = universeEpoch;
   universeRevalidationPromise = Promise.resolve().then(async () => {
     const response = await Impl.loadIncidenciasPage({
       query: {
@@ -407,7 +411,7 @@ function revalidateCompleteUniverse() {
       },
     });
 
-    rememberCompleteUniverse(response, {});
+    if (epoch === universeEpoch) rememberCompleteUniverse(response, {});
     return response;
   }).catch(() => null).finally(() => {
     universeRevalidationPromise = null;
@@ -441,8 +445,9 @@ export async function loadIncidenciasPage(options = {}) {
     return projected;
   }
 
+  const epoch = universeEpoch;
   const response = await Impl.loadIncidenciasPage(options);
-  rememberCompleteUniverse(response, query);
+  if (epoch === universeEpoch) rememberCompleteUniverse(response, query);
   return response;
 }
 
@@ -629,6 +634,11 @@ export function clearIncidenciasCache(...args) {
   invalidateCompleteUniverse();
   return Impl.clearIncidenciasCache(...args);
 }
+
+onDomainChanged((domain) => {
+  if (domain === "usuarios") clearIncidenciasCache();
+  if (domain === "incidencias") invalidateCompleteUniverse();
+});
 
 export async function createIncidencia(...args) {
   return authoritativeMutationResult(

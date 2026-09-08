@@ -28,6 +28,9 @@
 ========================================================= */
 
 import Http from "../../core/http.js";
+import { AppCore } from "../../core/index.js";
+import { userNameFromIdentity } from "../../core/user-identity.js";
+import { notifyDomainChanged } from "../../core/domain-events.js";
 
 /* =========================================================
    META / CONFIG
@@ -1484,39 +1487,10 @@ export function normalizeUsuarioModel(
       ""
     );
 
-  const composedName =
-    cleanText(
-      [
-        firstName,
-        lastName,
-      ]
-        .filter(Boolean)
-        .join(" "),
-      ""
-    );
-
-  const name =
-    cleanText(
-      first(
-        raw.name,
-        raw.displayName,
-        raw.fullName,
-        raw.nombre,
-        raw.nombreCompleto,
-        composedName,
-        profile.name,
-        profile.displayName,
-        profile.fullName,
-        raw.username,
-        raw.email,
-        userId,
-        "Usuario"
-      ),
-      "Usuario"
-    ).slice(
-      0,
-      160
-    );
+  const name = userNameFromIdentity(
+    { ...raw, profile },
+    first(raw.username, raw.email, userId, "Usuario")
+  ).slice(0, 160);
 
   const email =
     firstEmail(
@@ -4060,20 +4034,7 @@ function buildCreateUsuarioBody(
   const source =
     safeObject(payload);
 
-  const name =
-    cleanText(
-      first(
-        source.name,
-        source.displayName,
-        source.fullName,
-        source.nombre,
-        ""
-      ),
-      ""
-    ).slice(
-      0,
-      140
-    );
+  const name = userNameFromIdentity(source).slice(0, 140);
 
   const email =
     firstEmail(
@@ -4196,20 +4157,7 @@ function buildUpdateUsuarioBody(
     hasOwn(source, "fullName") ||
     hasOwn(source, "nombre")
   ) {
-    const value =
-      cleanText(
-        first(
-          source.name,
-          source.displayName,
-          source.fullName,
-          source.nombre,
-          ""
-        ),
-        ""
-      ).slice(
-        0,
-        140
-      );
+    const value = userNameFromIdentity(source).slice(0, 140);
 
     if (!value) {
       throw createContractError(
@@ -4915,7 +4863,30 @@ export async function createUsuarioRequest(
     Nunca devolvemos el envelope superior:
     contiene activationUrl en el backend actual.
   */
+  notifyDomainChanged("usuarios");
   return detail;
+}
+
+function selfEditContext(userId) {
+  const state = AppCore.runtimeState.read();
+  const currentId = cleanText(state.user?.userId || state.user?.id, "").toLowerCase();
+  if (!state.authenticated || !currentId || currentId !== userId.toLowerCase()) return null;
+  return { userId: currentId, token: state.token, sessionId: state.sessionId };
+}
+
+function applyConfirmedSelfName(detail, context) {
+  if (!context) return;
+  const state = AppCore.runtimeState.read();
+  const currentId = cleanText(state.user?.userId || state.user?.id, "").toLowerCase();
+  const detailId = cleanText(detail.userId || detail.id, "").toLowerCase();
+  if (!state.authenticated || currentId !== context.userId || detailId !== context.userId ||
+      state.token !== context.token || state.sessionId !== context.sessionId) return;
+  const name = userNameFromIdentity(detail);
+  if (!name) return;
+
+  // Same canonical setter used by Cuenta. Only the confirmed name changes;
+  // the session owner retains token, role, permissions and routing identity.
+  try { AppCore.setUser({ ...state.user, name, displayName: name }); } catch { /* A committed write is not retried for a UI sync failure. */ }
 }
 
 export async function updateUsuarioRequest(
@@ -4925,6 +4896,7 @@ export async function updateUsuarioRequest(
 ) {
   const userId =
     normalizeUsuarioId(id);
+  const editContext = selfEditContext(userId);
 
   const body =
     buildUpdateUsuarioBody(
@@ -4972,8 +4944,9 @@ export async function updateUsuarioRequest(
     );
 
   if (
-    safeObject(response)?.ok ===
-    false
+    safeObject(response)?.ok === false ||
+    safeObject(response)?.success === false ||
+    safeObject(response)?.error === true
   ) {
     throw createResponseError(
       response,
@@ -5005,6 +4978,8 @@ export async function updateUsuarioRequest(
     );
   }
 
+  applyConfirmedSelfName(detail, editContext);
+  notifyDomainChanged("usuarios");
   return detail;
 }
 
@@ -5370,8 +5345,9 @@ export async function fetchUsuariosStatsRequest(
     );
 
   if (
-    safeObject(response)?.ok ===
-    false
+    safeObject(response)?.ok === false ||
+    safeObject(response)?.success === false ||
+    safeObject(response)?.error === true
   ) {
     throw createResponseError(
       response,
@@ -5388,20 +5364,15 @@ export async function fetchUsuariosStatsRequest(
   const source =
     safeObject(response);
 
-  const total =
-    Math.max(
-      0,
-      number(
-        first(
-          source.total,
-          source.totalCount,
-          source.remoteCount,
-          source.count,
-          0
-        ),
-        0
-      )
-    );
+  const totalKey = ["total", "totalCount", "remoteCount", "count"]
+    .find((key) => Object.prototype.hasOwnProperty.call(source, key));
+  const totalValue = totalKey ? source[totalKey] : null;
+  const parsedTotal = typeof totalValue === "number" ||
+    (typeof totalValue === "string" && /^\d+$/.test(totalValue.trim()))
+    ? Number(totalValue)
+    : Number.NaN;
+  const total = source.totalKnown !== false && source.totalIsLowerBound !== true &&
+    Number.isSafeInteger(parsedTotal) && parsedTotal >= 0 ? parsedTotal : null;
 
   return {
     ok:
@@ -5409,6 +5380,7 @@ export async function fetchUsuariosStatsRequest(
       false,
 
     total,
+    totalKnown: total !== null,
     count: total,
     totalCount: total,
     remoteCount: total,

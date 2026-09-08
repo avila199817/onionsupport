@@ -12,6 +12,7 @@
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import { userNameFromIdentity } from "../../core/user-identity.js";
 import {
   ROUTES,
   USER_HOME_PREFIX,
@@ -413,10 +414,7 @@ function isAdminUser(user = {}) {
 
 function normalizeUser(user = {}) {
   const source = isObject(user) ? user : {};
-  const name = text(
-    source.displayName || source.name || source.fullName || source.username,
-    "Usuario"
-  );
+  const name = userNameFromIdentity(source, source.username || "Usuario");
 
   const slug = normalizeUserSlug(
     source.slug ||

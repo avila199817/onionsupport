@@ -15,23 +15,19 @@
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
-import Http from "../../core/http.js";
+import { onDomainChanged } from "../../core/domain-events.js";
 
 import IncidenciasApi from "../incidencias/incidencias.api.js";
 import FacturasApi from "../facturas/facturas.api.js";
+import { fetchClientesStatsRequest } from "../clientes/clientes.api.js";
+import { fetchUsuariosStatsRequest } from "../usuarios/usuarios.api.js";
 
 export const HOME_API_VERSION =
-  "home.api.domain-aggregator.v12-runtime-context";
+  "home.api.domain-aggregator.v13-domain-counts";
 
 export const HOME_TIMEOUT_MS = 15_000;
 export const HOME_LIST_LIMIT = 8;
-export const HOME_ADMIN_COUNT_LIMIT = 1;
 export const HOME_CACHE_TTL_MS = 60_000;
-
-export const HOME_ENDPOINTS = Object.freeze({
-  clientes: "/api/clientes/stats",
-  usuarios: "/api/users",
-});
 
 const LIST_KEYS = Object.freeze([
   "items", "rows", "results", "records", "docs", "documents",
@@ -41,10 +37,6 @@ const LIST_KEYS = Object.freeze([
 
 const WRAPPER_KEYS = Object.freeze([
   "data", "payload", "result", "response", "body",
-]);
-
-const TOTAL_KEYS = Object.freeze([
-  "total", "totalCount", "remoteCount", "totalMatched", "count",
 ]);
 
 const cacheState = {
@@ -318,6 +310,8 @@ export function clearHomeDashboardCache() {
   return true;
 }
 
+onDomainChanged(() => clearHomeDashboardCache());
+
 /* =========================================================
    GENERIC RESPONSE READERS
 ========================================================= */
@@ -341,59 +335,37 @@ function unwrapList(value = null, depth = 0) {
   return [];
 }
 
-function totalFromPayload(value = null, fallback = 0, depth = 0) {
-  if (!isObject(value) || depth > 4) {
-    return Math.max(0, number(fallback, 0));
-  }
-
-  let total = Math.max(0, number(fallback, 0));
-
-  for (const key of TOTAL_KEYS) {
-    total = Math.max(total, number(value[key], 0));
-  }
-
-  for (const nested of [value.meta, value.pagination, value.paging, value.pageInfo]) {
-    if (!isObject(nested)) continue;
-    for (const key of TOTAL_KEYS) {
-      total = Math.max(total, number(nested[key], 0));
-    }
-  }
-
-  for (const key of WRAPPER_KEYS) {
-    if (isObject(value[key])) {
-      total = Math.max(total, totalFromPayload(value[key], total, depth + 1));
-    }
-  }
-
-  return total;
+function exactCount(value) {
+  if (typeof value !== "number" &&
+      !(typeof value === "string" && /^\d+$/.test(value.trim()))) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
 }
 
 function collectionFromResponse(response = null) {
-  const items = unwrapList(response);
-  const object = safeObject(response, {});
+  const object = safeObject(response);
+  const totalKnown = first(
+    object.totalKnown, object.meta?.totalKnown, object.pagination?.totalKnown
+  ) === true;
+  const lowerBound = [object, object.meta, object.pagination]
+    .some((value) => value?.totalIsLowerBound === true);
 
   return {
-    items,
-    total: Math.max(items.length, totalFromPayload(response, items.length)),
+    items: unwrapList(response),
+    // Domain pagination metadata is authoritative. A page's count/length is
+    // never an exact total, including an empty page after an unavailable count.
+    total: totalKnown && !lowerBound ? exactCount(object.total) : null,
     stale: object.stale === true,
     error: object.error || null,
   };
 }
 
 function invoiceCountFromStats(stats = {}) {
-  return Math.max(
-    0,
-    number(
-      first(
-        stats.invoiceCount,
-        stats.countTotal,
-        stats.totalCount,
-        stats.count,
-        0
-      ),
-      0
-    )
-  );
+  if (stats.ok === false || stats.success === false || stats.totalKnown === false || stats.totalIsLowerBound === true) return null;
+  for (const key of ["invoiceCount", "countTotal", "totalCount", "count"]) {
+    if (Object.hasOwn(stats, key)) return exactCount(stats[key]);
+  }
+  return null;
 }
 
 function totalInvoicedFromStats(stats = {}) {
@@ -465,7 +437,7 @@ function forceRequested(options = {}) {
 }
 
 async function loadIncidenciasForHome(options = {}) {
-  return IncidenciasApi.listIncidencias({
+  const response = await IncidenciasApi.listIncidencias({
     timeout: options.timeout || HOME_TIMEOUT_MS,
     force: forceRequested(options),
     returnStaleOnError: options.returnStaleOnError !== false,
@@ -479,6 +451,7 @@ async function loadIncidenciasForHome(options = {}) {
       ...safeObject(options.incidenciasQuery),
     },
   });
+  return collectionFromResponse(response);
 }
 
 async function loadFacturasForHome(options = {}) {
@@ -515,7 +488,7 @@ async function loadFacturasForHome(options = {}) {
 
   const collection = listResult.status === "fulfilled"
     ? collectionFromResponse(listResult.value)
-    : { items: [], total: 0, stale: false, error: listResult.reason || null };
+    : { items: [], total: null, stale: false, error: listResult.reason || null };
 
   const stats = statsResult.status === "fulfilled"
     ? safeObject(statsResult.value)
@@ -539,24 +512,16 @@ async function loadFacturasForHome(options = {}) {
   };
 }
 
-async function loadAdminCount(endpoint = "", source = "views.home.count", options = {}) {
-  const response = await Http.get(endpoint, {
+async function loadAdminCount(loader, options = {}) {
+  const response = safeObject(await loader({
     timeout: options.timeout || HOME_TIMEOUT_MS,
-    source,
-    query: {
-      limit: HOME_ADMIN_COUNT_LIMIT,
-      includeTotal: true,
-      ...safeObject(options.query),
-    },
-  });
-
-  const items = unwrapList(response);
-
+    signal: options.signal,
+  }));
   return {
     items: [],
-    total: Math.max(items.length, totalFromPayload(response, items.length)),
-    stale: safeObject(response).stale === true,
-    error: safeObject(response).error || null,
+    total: response.totalKnown === true ? exactCount(response.total) : null,
+    stale: response.stale === true,
+    error: response.error || null,
   };
 }
 
@@ -570,10 +535,9 @@ async function loadDomain(domain = "home", loader = null) {
       items: safeArray(result.items).length
         ? safeArray(result.items)
         : collection.items,
-      total: Math.max(
-        safeArray(result.items).length,
-        number(result.total, collection.total)
-      ),
+      total: Object.hasOwn(result, "total")
+        ? exactCount(result.total)
+        : collection.total,
       stats: safeObject(result.stats),
       statsAvailable: result.statsAvailable === true,
       stale: result.stale === true,
@@ -586,7 +550,7 @@ async function loadDomain(domain = "home", loader = null) {
     return {
       domain,
       items: [],
-      total: 0,
+      total: null,
       stats: {},
       statsAvailable: false,
       stale: false,
@@ -735,11 +699,10 @@ function buildDashboard({
     usuariosResult,
   ].some((result) => result?.stale === true);
 
-  const invoiceCount = Math.max(
-    facturas.length,
-    number(facturasResult?.total, 0),
-    invoiceCountFromStats(invoiceStats)
-  );
+  const invoiceCount = invoiceCountFromStats(invoiceStats);
+  const ticketCount = exactCount(incidenciasResult?.total);
+  const clientCount = context.admin ? exactCount(clientesResult?.total) : null;
+  const userCount = context.admin ? exactCount(usuariosResult?.total) : null;
 
   return {
     role: context.role,
@@ -760,14 +723,14 @@ function buildDashboard({
     facturasStats: invoiceStats,
 
     summary: {
-      tickets: Math.max(incidencias.length, number(incidenciasResult?.total, 0)),
-      incidencias: Math.max(incidencias.length, number(incidenciasResult?.total, 0)),
+      tickets: ticketCount,
+      incidencias: ticketCount,
       facturas: invoiceCount,
       invoices: invoiceCount,
-      clientes: context.admin ? number(clientesResult?.total, 0) : 0,
-      clients: context.admin ? number(clientesResult?.total, 0) : 0,
-      usuarios: context.admin ? number(usuariosResult?.total, 0) : 0,
-      users: context.admin ? number(usuariosResult?.total, 0) : 0,
+      clientes: clientCount,
+      clients: clientCount,
+      usuarios: userCount,
+      users: userCount,
 
       totalInvoiced,
       totalAmount: totalInvoiced,
@@ -805,7 +768,7 @@ async function fetchDashboard(options = {}, context = currentContext()) {
   const emptyDomain = (domain) => ({
     domain,
     items: [],
-    total: 0,
+    total: null,
     stats: {},
     statsAvailable: false,
     stale: false,
@@ -818,24 +781,10 @@ async function fetchDashboard(options = {}, context = currentContext()) {
       loadDomain("incidencias", () => loadIncidenciasForHome(options)),
       loadDomain("facturas", () => loadFacturasForHome(options)),
       context.admin
-        ? loadDomain("clientes", () => loadAdminCount(
-            HOME_ENDPOINTS.clientes,
-            "views.home.clientes.count",
-            { timeout: options.timeout, query: safeObject(options.clientesQuery) }
-          ))
+        ? loadDomain("clientes", () => loadAdminCount(fetchClientesStatsRequest, options))
         : Promise.resolve(emptyDomain("clientes")),
       context.admin
-        ? loadDomain("usuarios", () => loadAdminCount(
-            HOME_ENDPOINTS.usuarios,
-            "views.home.usuarios.count",
-            {
-              timeout: options.timeout,
-              query: {
-                ...safeObject(options.usersQuery),
-                ...safeObject(options.usuariosQuery),
-              },
-            }
-          ))
+        ? loadDomain("usuarios", () => loadAdminCount(fetchUsuariosStatsRequest, options))
         : Promise.resolve(emptyDomain("usuarios")),
     ]);
 

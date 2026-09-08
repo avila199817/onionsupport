@@ -252,8 +252,9 @@ function filesFromList(value = null) {
 export function installIncidenciasDetailAttachmentPolicy({
   document: documentLike = typeof document !== "undefined" ? document : null,
   getRole = () => "user",
+  root: scopeRoot = documentLike,
 } = {}) {
-  if (!documentLike?.addEventListener || !documentLike?.querySelector) {
+  if (!scopeRoot?.addEventListener || !scopeRoot?.querySelector) {
     return () => false;
   }
 
@@ -323,7 +324,7 @@ export function installIncidenciasDetailAttachmentPolicy({
     syncQueued = false;
     if (destroyed) return false;
 
-    const root = documentLike.querySelector(DETAIL_ROOT_SELECTOR);
+    const root = scopeRoot.querySelector(DETAIL_ROOT_SELECTOR);
     if (!root) {
       pending.clear();
       ticketId = "";
@@ -448,9 +449,9 @@ export function installIncidenciasDetailAttachmentPolicy({
     queueSync();
   }
 
-  documentLike.addEventListener("change", onChange, true);
-  documentLike.addEventListener("drop", onDrop, true);
-  documentLike.addEventListener("click", onClick, true);
+  scopeRoot.addEventListener("change", onChange, true);
+  scopeRoot.addEventListener("drop", onDrop, true);
+  scopeRoot.addEventListener("click", onClick, true);
 
   const MutationObserverCtor =
     documentLike.defaultView?.MutationObserver ||
@@ -460,7 +461,7 @@ export function installIncidenciasDetailAttachmentPolicy({
     ? new MutationObserverCtor(queueSync)
     : null;
 
-  observer?.observe?.(documentLike.body || documentLike.documentElement, {
+  observer?.observe?.(scopeRoot === documentLike ? documentLike.body || documentLike.documentElement : scopeRoot, {
     childList: true,
     subtree: true,
   });
@@ -471,9 +472,9 @@ export function installIncidenciasDetailAttachmentPolicy({
     if (destroyed) return false;
     destroyed = true;
     observer?.disconnect?.();
-    documentLike.removeEventListener("change", onChange, true);
-    documentLike.removeEventListener("drop", onDrop, true);
-    documentLike.removeEventListener("click", onClick, true);
+    scopeRoot.removeEventListener("change", onChange, true);
+    scopeRoot.removeEventListener("drop", onDrop, true);
+    scopeRoot.removeEventListener("click", onClick, true);
     pending.clear();
     return true;
   };

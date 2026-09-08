@@ -1,13 +1,16 @@
+import "../../css/features/entity-overlay.css";
+import { createAsyncScope } from "../../core/async-scope.js";
 import { createModalLifecycle, modalFocusableElements, restoreModalFocus } from "./modal-lifecycle.js";
 /* =========================================================
    Onion Support - Global Entity Overlay
 
-   Despacha entidades desde cualquier punto de la SPA. Incidencias y Facturas
-   pertenecen siempre a sus vistas/controladores canónicos; las entidades simples
-   conservan overlay lazy mientras migran al mismo contrato propietario.
+   Un único despachador para todas las vistas privadas. Incidencias y Facturas
+   montan el mismo controller de detalle que su vista, sin navegar ni montar
+   listados invisibles. Los datos y las acciones pertenecen al dominio.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import { getRouteByViewKey } from "../../router/routes.js";
 
 import {
   inferEntityIntent,
@@ -26,7 +29,7 @@ import {
 } from "./adapters/adapter-utils.js";
 
 export const ENTITY_OVERLAY_VERSION =
-  "entity-overlay.v3-factura-incidencia-owner-authority";
+  "entity-overlay.v4-central-domain-detail";
 
 const ROOT_ID = "entity-overlay-root";
 const ROOT_SELECTOR = `#${ROOT_ID}`;
@@ -43,32 +46,32 @@ const ADAPTER_LOADERS = Object.freeze({
   usuario: () => import("./adapters/usuario.js"),
 });
 
-/*
-  Los dominios con controller completo nunca vuelven a renderizar su template
-  directamente desde el overlay global. El overlay sólo conserva la intención,
-  navega a la vista propietaria y delega la apertura en su controller real.
-*/
 const OWNER_DEFINITIONS = Object.freeze({
   factura: Object.freeze({
-    routeSegment: "facturas",
-    modalSelector: "[data-facturas-detail-root='true']",
     load: () => import("../../views/facturas/index.js"),
-    openerName: "openFacturaDetailById",
-    detailPath: false,
+    createName: "createFacturaDetailController",
+    openName: "openFactura",
+    routeOpenName: "openFacturaDetailById",
+    modalSelector: "[data-facturas-detail-root='true']",
+    styles: Object.freeze(["/src/css/views/facturas/detail.css"]),
   }),
   incidencia: Object.freeze({
-    routeSegment: "incidencias",
-    modalSelector: "[data-incidencias-modal-root='true']",
     load: () => import("../../views/incidencias/index.js"),
-    openerName: "openIncidenciaDetailById",
-    detailPath: true,
+    createName: "createIncidenciaDetailController",
+    prepareName: "prepareIncidenciaDetail",
+    openName: "openDetail",
+    routeOpenName: "openIncidenciaDetailById",
+    modalSelector: "[data-incidencias-modal-root='true']",
+    styles: Object.freeze([
+      "/src/css/components/detail-modal.css",
+      "/src/css/views/incidencias/detail.css",
+      "/src/css/views/incidencias/media-preview.css",
+    ]),
   }),
 });
-const OWNER_ROUTED_TYPES = new Set(Object.keys(OWNER_DEFINITIONS));
-const OWNER_ROUTE_ROOT_SELECTOR = "#view-container, [data-router-view='true']";
-const OWNER_OPEN_TIMEOUT_MS = 12_000;
-
-let ownerSequence = 0;
+const OWNER_TYPES = new Set(Object.keys(OWNER_DEFINITIONS));
+const ROUTE_HOST_SELECTOR = "[data-route-host='true'][data-route-host-state='ready']:not([hidden])";
+const ownerPromises = new Map();
 let ownerSession = null;
 
 const ACTION_SELECTOR = [
@@ -125,6 +128,22 @@ const adapterPromises = new Map();
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
+}
+
+function authenticated() {
+  try {
+    return AppCore.isAuthenticated?.() === true ||
+      AppCore.runtimeState?.read?.()?.authenticated === true;
+  } catch { return false; }
+}
+
+function canAccessEntity(type = "") {
+  const viewKey = { factura: "facturas", incidencia: "incidencias", cliente: "clientes", usuario: "usuarios" }[type];
+  const route = viewKey && getRouteByViewKey(viewKey);
+  if (!route || !authenticated()) return false;
+  const roles = Array.isArray(route.roles) ? route.roles : [];
+  // The route table and Core own role policy. Quick views cannot expand it.
+  return roles.length === 0 || AppCore.hasRole?.(roles) === true;
 }
 
 function currentUrl() {
@@ -207,7 +226,7 @@ function normalizeOpenInput(input = {}) {
   const type = normalizeEntityType(input?.type || input?.entityType || "");
   const id = normalizeEntityId(type, input?.id || input?.entityId || "");
 
-  if (!type || !id || (!ADAPTER_LOADERS[type] && !OWNER_ROUTED_TYPES.has(type))) return null;
+  if (!type || !id || (!ADAPTER_LOADERS[type] && !OWNER_TYPES.has(type))) return null;
 
   return {
     type,
@@ -220,6 +239,7 @@ function normalizeOpenInput(input = {}) {
       : "push",
     token: cleanText(input?.token, "") || createToken(),
     opener: input?.opener || safeActiveElement(),
+    signal: input?.signal || null,
   };
 }
 
@@ -228,10 +248,7 @@ function stylePaths(type = "") {
     ? ENTITY_STYLE_PATHS[type]
     : [];
 
-  return [
-    "/src/css/features/entity-overlay.css",
-    ...domainPaths,
-  ].filter(Boolean);
+  return domainPaths.filter(Boolean);
 }
 
 function absolutePath(path = "") {
@@ -251,9 +268,7 @@ function ensureStyle(path = "") {
     .find((link) => link.href === href);
 
   if (existing?.sheet) {
-    const ready = Promise.resolve(true);
-    stylePromises.set(href, ready);
-    return ready;
+    return Promise.resolve(true);
   }
 
   const promise = new Promise((resolve) => {
@@ -266,6 +281,8 @@ function ensureStyle(path = "") {
       window.clearTimeout(timeoutId);
       link.removeEventListener("load", onLoad);
       link.removeEventListener("error", onError);
+      stylePromises.delete(href);
+      if (!ok && !existing) link.remove();
       resolve(ok);
     };
 
@@ -596,279 +613,176 @@ async function hydrateEntry(entry = null, { silent = false } = {}) {
   return !entry.error;
 }
 
-function currentPublicPathWithoutEntityQuery() {
-  const url = currentUrl();
-  if (!url) return "/";
-
-  url.searchParams.delete(TYPE_QUERY);
-  url.searchParams.delete(ID_QUERY);
-
-  return `${url.pathname || "/"}${url.search || ""}${url.hash || ""}`;
-}
-
-function currentScopePrefix() {
-  const pathname = currentUrl()?.pathname || "";
-  const match = pathname.match(/^\/@([^/]+)/);
-  return match?.[1] ? `/@${match[1]}` : "";
-}
-
-function ownerDefinition(type = "") {
-  const entityType = normalizeEntityType(type);
-  return OWNER_DEFINITIONS[entityType] || null;
-}
-
-function ownerBasePath(type = "") {
-  const definition = ownerDefinition(type);
-  if (!definition) return "";
-
-  return `${currentScopePrefix()}/${definition.routeSegment}`
-    .replace(/\/{2,}/g, "/");
-}
-
-function ownerTargetPath(type = "", id = "") {
-  const entityType = normalizeEntityType(type);
-  const entityId = normalizeEntityId(entityType, id);
-  const definition = ownerDefinition(entityType);
-  const base = ownerBasePath(entityType);
-
-  if (!entityId || !definition || !base) return "";
-  return definition.detailPath
-    ? `${base}/${encodeURIComponent(entityId)}`
-    : base;
-}
-
-function ownerRouteRoot() {
-  if (!isBrowser()) return null;
-  return document.querySelector(OWNER_ROUTE_ROOT_SELECTOR) || document.body || null;
-}
-
-function ownerCloseObservationRoot() {
-  if (!isBrowser()) return null;
-  return document.body || ownerRouteRoot();
-}
-
 function ownerModalOpen(type = "") {
-  if (!isBrowser()) return false;
-  const selector = ownerDefinition(type)?.modalSelector;
-  return Boolean(selector && document.querySelector(selector));
+  const selector = OWNER_DEFINITIONS[type]?.modalSelector;
+  return Boolean(isBrowser() && selector && document.querySelector(selector));
 }
 
-function isOwnerRoute(type = "") {
-  return isCanonicalOwnerRoute(type);
+function committedOrigin(opener = null) {
+  return opener?.closest?.(ROUTE_HOST_SELECTOR) || document.querySelector(ROUTE_HOST_SELECTOR);
 }
 
-async function navigateWithRouter(path = "", options = {}) {
-  const target = cleanText(path, "");
-  if (!target || !isBrowser()) return false;
-
-  const router = context?.Router || context?.router || null;
-  if (typeof router?.navigate === "function") {
-    await Promise.resolve(router.navigate(target, options));
-    return true;
-  }
-
-  /* Fallback de seguridad: no fabricamos un modal huérfano si Router falta. */
-  try {
-    window.location.assign(target);
-    return true;
-  } catch {
-    return false;
-  }
+function ownerIsCurrent(session) {
+  return ownerSession === session && session.scope.isActive() &&
+    session.originHost?.isConnected && !session.originHost.hidden &&
+    session.originHost.getAttribute("data-route-host-state") === "ready";
 }
 
-function stopOwnerSession({ navigateBack = false } = {}) {
+function ownerReturnTarget(session) {
+  if (session.opener?.isConnected) return session.opener;
+  if (!session.originHost?.isConnected) return null;
+  // Home can legitimately refresh after a successful command. Recover the
+  // same semantic row, never a detached button or an arbitrary sidebar item.
+  const row = Array.from(session.originHost.querySelectorAll("[data-entity-type][data-entity-id]"))
+    .find((node) => node.dataset.entityType === session.openerType &&
+      node.dataset.entityId === session.openerId);
+  if (row) return row;
+  const heading = session.originHost.querySelector("h1");
+  if (heading && !heading.hasAttribute("tabindex")) heading.tabIndex = -1;
+  return heading || null;
+}
+
+function stopOwnerSession({ restore = false } = {}) {
   const session = ownerSession;
-  ownerSession = null;
-
   if (!session) return false;
-
-  session.openObserver?.disconnect?.();
-  session.closeObserver?.disconnect?.();
-
-  if (session.timeoutId) {
-    window.clearTimeout(session.timeoutId);
-    session.timeoutId = 0;
-  }
-
-  if (session.readyHandler) {
-    window.removeEventListener("onion:main:ready", session.readyHandler);
-    session.readyHandler = null;
-  }
-
-  if (navigateBack && session.returnPath) {
-    const returnPath = session.returnPath;
-    const scrollY = Number(session.scrollY) || 0;
-
-    void navigateWithRouter(returnPath).then(() => {
-      window.requestAnimationFrame?.(() => {
-        try { window.scrollTo({ top: scrollY, left: 0, behavior: "auto" }); } catch { /* noop */ }
-      });
-    });
-  }
-
+  ownerSession = null;
+  session.scope.dispose("detail-closed");
+  clearRoot();
+  unlockBody();
+  if (restore) restoreModalFocus(ownerReturnTarget(session));
   return true;
 }
 
-async function tryOpenCanonicalOwner(session = null) {
-  if (!session || ownerSession !== session || session.sequence !== ownerSequence) {
-    return false;
-  }
-
-  const definition = ownerDefinition(session.type);
-  if (!definition || typeof definition.load !== "function") return false;
-
-  try {
-    const module = await definition.load();
-    const opener = module?.[definition.openerName];
-    if (typeof opener !== "function") return false;
-
-    return Boolean(await opener(session.id, null));
-  } catch {
-    return false;
-  }
+export function releaseOrigin(host = null) {
+  if (!host || ownerSession?.originHost !== host) return false;
+  return stopOwnerSession();
 }
 
-function watchCanonicalOwnerClose(session = null) {
-  if (!session || ownerSession !== session || !isBrowser()) return false;
-
-  const root = ownerCloseObservationRoot();
-  if (!root || typeof MutationObserver !== "function") return false;
-
-  session.modalSeen = ownerModalOpen(session.type);
-  session.closeObserver?.disconnect?.();
-  session.closeObserver = new MutationObserver(() => {
-    if (ownerSession !== session) return;
-
-    const openNow = ownerModalOpen(session.type);
-    if (openNow) {
-      session.modalSeen = true;
-      return;
-    }
-
-    if (!session.modalSeen) return;
-
-    /*
-      El controller propietario ya ha cerrado y limpiado el modal. Sólo vuelve
-      al origen transversal si el usuario sigue en esa vista propietaria; una
-      navegación explícita por sidebar/router siempre tiene prioridad.
-    */
-    stopOwnerSession({
-      navigateBack: Boolean(session.returnPath) && isOwnerRoute(session.type),
-    });
-  });
-
-  session.closeObserver.observe(root, { childList: true, subtree: true });
+export async function preload(type = "") {
+  const key = normalizeEntityType(type);
+  const definition = OWNER_DEFINITIONS[key];
+  if (!definition || !isBrowser() || !canAccessEntity(key)) return false;
+  if (!ownerPromises.has(key)) {
+    const task = definition.load().catch((error) => { ownerPromises.delete(key); throw error; });
+    ownerPromises.set(key, task);
+  }
+  const [module, styles] = await Promise.all([
+    ownerPromises.get(key),
+    Promise.all(definition.styles.map(ensureStyle)),
+  ]);
+  if (!styles.every(Boolean)) throw new Error("No se pudieron cargar los estilos del detalle.");
+  if (definition.prepareName) await module[definition.prepareName]();
   return true;
 }
 
-async function waitAndOpenCanonicalOwner(session = null) {
-  if (!session || !isBrowser()) return false;
+function renderOwnerPending(session, error = null) {
+  if (!ownerIsCurrent(session)) return false;
+  const host = ensureRoot();
+  session.error = error;
+  host.hidden = false;
+  host.innerHTML = error
+    ? renderAdapterError({ type: session.type, error: safeError(error) })
+    : renderAdapterLoading({ type: session.type, id: session.id });
+  const panel = host.querySelector(PANEL_SELECTOR);
+  // The common loading surface only owns chunk loading. The domain takes
+  // over with its own shell before any detail data is awaited.
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "entity-overlay-action-button";
+  button.dataset.entityOverlayAction = error ? "retry" : "close";
+  button.textContent = error ? "Reintentar" : "Cancelar";
+  (panel.querySelector(".entity-overlay-generic-body") || panel).append(button);
+  lastGlobalOpener = session.opener;
+  lockBody();
+  panel.focus({ preventScroll: true });
+  return true;
+}
 
-  if (await tryOpenCanonicalOwner(session)) {
-    watchCanonicalOwnerClose(session);
-    return true;
+function closeOwnerSession() {
+  const session = ownerSession;
+  if (!session) return false;
+  if (session.controller) {
+    const controller = session.controller;
+    const closed = controller.closeDetailModal();
+    // A draft confirmation can return true while the detail remains open.
+    if (closed === false || controller.getSnapshot?.().detailModalOpen) return false;
   }
-
-  const root = ownerRouteRoot();
-  if (!root || typeof MutationObserver !== "function") return false;
-
-  return new Promise((resolve) => {
-    let settled = false;
-    let attempting = false;
-
-    const finish = (ok) => {
-      if (settled) return;
-      settled = true;
-      session.openObserver?.disconnect?.();
-      session.openObserver = null;
-      if (session.timeoutId) {
-        window.clearTimeout(session.timeoutId);
-        session.timeoutId = 0;
-      }
-      if (session.readyHandler) {
-        window.removeEventListener("onion:main:ready", session.readyHandler);
-        session.readyHandler = null;
-      }
-      if (ok) watchCanonicalOwnerClose(session);
-      resolve(ok);
-    };
-
-    const attempt = async () => {
-      if (attempting || settled || ownerSession !== session) return;
-      attempting = true;
-      try {
-        if (await tryOpenCanonicalOwner(session)) finish(true);
-      } finally {
-        attempting = false;
-      }
-    };
-
-    session.openObserver = new MutationObserver(() => { void attempt(); });
-    session.openObserver.observe(root, { childList: true, subtree: true });
-
-    session.readyHandler = () => { void attempt(); };
-    window.addEventListener("onion:main:ready", session.readyHandler);
-
-    session.timeoutId = window.setTimeout(() => finish(false), OWNER_OPEN_TIMEOUT_MS);
-    void attempt();
-  });
+  if (ownerSession === session) stopOwnerSession({ restore: true });
+  return true;
 }
 
 async function openCanonicalOwner(input = {}) {
-  const type = normalizeEntityType(input?.type || input?.entityType || "");
-  const id = normalizeEntityId(type, input?.id || input?.entityId || "");
-  if (!type || !id || !OWNER_ROUTED_TYPES.has(type) || !isBrowser()) return false;
-
-  /* Un overlay previo nunca debe convivir con un controller propietario. */
+  const type = normalizeEntityType(input.type);
+  const id = normalizeEntityId(type, input.id);
+  const definition = OWNER_DEFINITIONS[type];
+  if (!definition || !id || !isBrowser() || !canAccessEntity(type) || input.signal?.aborted) return false;
+  if (ownerSession?.type === type && ownerSession.id === id && !ownerSession.error) {
+    return ownerSession.task || true;
+  }
+  if (ownerSession && !closeOwnerSession()) return false;
+  const originHost = committedOrigin(input.opener);
+  if (!originHost) return false;
   clearStack({ restore: false });
-  writeUrlForEntry(null, "replace");
-  stopOwnerSession();
-
-  const alreadyOwner = isOwnerRoute(type);
-  const returnPath = alreadyOwner ? "" : currentPublicPathWithoutEntityQuery();
-  const target = ownerTargetPath(type, id);
-  if (!target) return false;
-
   const session = {
-    sequence: ++ownerSequence,
-    type,
-    id,
-    source: cleanText(input?.source, "api"),
-    target,
-    returnPath,
-    scrollY: Number(window.scrollY) || 0,
-    openObserver: null,
-    closeObserver: null,
-    timeoutId: 0,
-    readyHandler: null,
-    modalSeen: false,
+    type, id, originHost, opener: input.opener || safeActiveElement(),
+    openerType: input.opener?.dataset?.entityType || "",
+    openerId: input.opener?.dataset?.entityId || "",
+    scope: createAsyncScope({ signal: input.signal }), controller: null,
+    source: cleanText(input.source, "api"), error: null, task: null,
   };
-
   ownerSession = session;
-
-  if (!alreadyOwner) {
-    const navigated = await navigateWithRouter(target, {
-      source: `entity-overlay.owner.${type}`,
-    });
-    if (!navigated || ownerSession !== session) {
-      stopOwnerSession();
+  session.scope.onDispose(() => {
+    session.controller?.destroy?.();
+    session.controller = null;
+  });
+  // Own the origin before the first await: leaving during a slow import must
+  // cancel just as leaving during an HTTP request does.
+  renderOwnerPending(session);
+  const task = (async () => {
+    try {
+      await preload(type);
+      if (!ownerIsCurrent(session)) return false;
+      const module = await ownerPromises.get(type);
+      if (!ownerIsCurrent(session)) return false;
+      if (isCanonicalOwnerRoute(type)) {
+        // An already mounted route owns its lifecycle and its sole controller.
+        stopOwnerSession();
+        return Boolean(await module[definition.routeOpenName](id, session.opener));
+      }
+      const controller = await module[definition.createName]({
+        ...context,
+        signal: session.scope.signal,
+        onDetailShell() {
+          if (!ownerIsCurrent(session)) return;
+          clearRoot();
+          unlockBody();
+        },
+        onDetailClosed() {
+          if (ownerSession === session) stopOwnerSession({ restore: true });
+        },
+        openEntityDetail(relation) {
+          return open({ ...relation, opener: ownerReturnTarget(session), source: `${type}.relation` });
+        },
+      });
+      if (!ownerIsCurrent(session)) { controller?.destroy?.(); return false; }
+      session.controller = controller;
+      if (!controller || typeof controller[definition.openName] !== "function") {
+        throw new Error("No se pudo preparar el detalle. Puedes reintentarlo.");
+      }
+      const opened = await controller[definition.openName](id, session.opener);
+      if (!ownerIsCurrent(session)) return false;
+      if (opened || ownerModalOpen(type)) return Boolean(opened);
+      throw new Error("No se pudo cargar el detalle. Puedes reintentarlo.");
+    } catch (error) {
+      if (!ownerIsCurrent(session)) return false;
+      session.controller?.destroy?.();
+      session.controller = null;
+      renderOwnerPending(session, error);
       return false;
     }
-  }
-
-  const opened = await waitAndOpenCanonicalOwner(session);
-  if (!opened && ownerSession === session) {
-    stopOwnerSession({ navigateBack: Boolean(returnPath) });
-    return false;
-  }
-
-  return Object.freeze({
-    type,
-    id,
-    ownerRouted: true,
-    source: session.source,
-    target,
-  });
+  })();
+  session.task = task;
+  return task;
 }
 
 async function open(input = {}) {
@@ -879,7 +793,9 @@ async function open(input = {}) {
     throw new TypeError("Entidad o identificador no válidos.");
   }
 
-  if (OWNER_ROUTED_TYPES.has(normalized.type)) {
+  if (!canAccessEntity(normalized.type)) return false;
+
+  if (OWNER_TYPES.has(normalized.type)) {
     return openCanonicalOwner(normalized);
   }
 
@@ -953,6 +869,7 @@ function removeTop({ syncUrl = true, restore = true } = {}) {
 }
 
 function close(options = {}) {
+  if (ownerSession) return closeOwnerSession();
   const entry = topEntry();
   if (!entry) return false;
 
@@ -1008,8 +925,8 @@ function setFeedback(feedback = null) {
 function canOpen(type = "", id = "") {
   const entityType = normalizeEntityType(type);
   return Boolean(
-    entityType &&
-    (ADAPTER_LOADERS[entityType] || OWNER_ROUTED_TYPES.has(entityType)) &&
+    entityType && canAccessEntity(entityType) &&
+    (ADAPTER_LOADERS[entityType] || OWNER_TYPES.has(entityType)) &&
     normalizeEntityId(entityType, id)
   );
 }
@@ -1018,7 +935,7 @@ function snapshot() {
   return Object.freeze({
     version: ENTITY_OVERLAY_VERSION,
     initialized,
-    open: Boolean(stack.length),
+    open: Boolean(stack.length || ownerSession),
     depth: stack.length,
     current: topEntry()
       ? Object.freeze({
@@ -1031,10 +948,10 @@ function snapshot() {
       : null,
     registeredTypes: Object.freeze([
       ...Object.keys(ADAPTER_LOADERS),
-      ...OWNER_ROUTED_TYPES,
+      ...OWNER_TYPES,
     ]),
     loadedAdapters: Object.freeze([...adapterPromises.keys()]),
-    ownerRouted: ownerSession
+    ownerDetail: ownerSession
       ? Object.freeze({ type: ownerSession.type, active: true })
       : null,
   });
@@ -1071,6 +988,22 @@ function stopEntityClick(event = null) {
 }
 
 async function handleOverlayClick(event = null) {
+  if (ownerSession) {
+    const target = event?.target?.nodeType === 3 ? event.target.parentElement : event.target;
+    const action = target?.closest?.("[data-entity-overlay-action]")?.dataset.entityOverlayAction;
+    if (action === "retry") {
+      stopEntityClick(event);
+      const { type, id, opener } = ownerSession;
+      stopOwnerSession();
+      void open({ type, id, opener, source: "detail.retry" });
+      return true;
+    }
+    if (action === "close" || target?.matches?.("[data-entity-overlay-backdrop='true']")) {
+      stopEntityClick(event);
+      return closeOwnerSession();
+    }
+    return false;
+  }
   const entry = topEntry();
   if (!entry || !root) return false;
 
@@ -1183,7 +1116,7 @@ function hasExplicitOverlayTrigger(target = null) {
 }
 
 function onDocumentClick(event) {
-  if (!event || event.button !== 0) return;
+  if (!event || event.defaultPrevented || event.__onionRouterHandled || event.button !== 0) return;
   if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
 
   const host = ensureRoot();
@@ -1218,9 +1151,7 @@ function onDocumentClick(event) {
 function onPopstate() {
   clearCloseFallback();
 
-  if (ownerSession && !isOwnerRoute(ownerSession.type)) {
-    stopOwnerSession();
-  }
+  if (ownerSession) stopOwnerSession();
 
   const marker = currentMarker();
 
@@ -1363,6 +1294,8 @@ export const EntityOverlay = Object.freeze({
   setBusy,
   setFeedback,
   canOpen,
+  preload,
+  releaseOrigin,
   getSnapshot: snapshot,
   normalizeType: normalizeEntityType,
   normalizeId: normalizeEntityId,

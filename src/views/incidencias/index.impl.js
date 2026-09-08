@@ -87,7 +87,7 @@ import {
 } from "./incidencias.filter-facets.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
-  "incidencias.index.extreme.v43-stable-attachment-delete-focus";
+  "incidencias.index.extreme.v44-shared-detail-controller";
 
 export const INCIDENCIAS_VIEW_VERSION =
   INCIDENCIAS_INDEX_VERSION;
@@ -107,8 +107,6 @@ const INFINITE_ROOT_MARGIN = "900px 0px 900px 0px";
 const ROUTER_EVENT_HANDLED_KEY =
   "__onionRouterHandled";
 
-const MODAL_HOST_SELECTOR =
-  "[data-incidencias-modal-host='true']";
 
 const CREATE_ROOT_SELECTOR =
   "[data-incidencias-create-root='true']";
@@ -1098,12 +1096,14 @@ function destroyPrevious(
    CONTROLLER
 ========================================================= */
 
-function createIncidenciasController(
+export function createIncidenciasController(
   host = null,
   context = {}
 ) {
-  const cached =
-    hydrateIncidenciasFromCache();
+  const detailOnly = context.detailOnly === true;
+  const cached = detailOnly
+    ? { items: [], total: 0 }
+    : hydrateIncidenciasFromCache();
 
   let destroyed = false;
   let mounted = false;
@@ -1148,7 +1148,7 @@ function createIncidenciasController(
   let visibleLimit =
     DEFAULT_VISIBLE_LIMIT;
 
-  let itemsContextKey =
+  let itemsContextKey = detailOnly ? "" :
     getListServerContextKey(
       filter,
       serverSearch
@@ -1159,7 +1159,8 @@ function createIncidenciasController(
   let renderFrame = 0;
   let infiniteObserver = null;
   let modalFrame = 0;
-  let modalHost = null;
+  // The boundary allocates this controller's host; never adopt a global host.
+  let modalHost = context.modalHost || null;
   let modalHostBound = false;
 
   let loadSeq = 0;
@@ -1212,6 +1213,9 @@ function createIncidenciasController(
   const detailModal = {
     open: false,
     detail: null,
+    loading: false,
+    loadingId: "",
+    error: "",
 
     submitting: false,
     operation: "",
@@ -1601,42 +1605,16 @@ function createIncidenciasController(
   ======================================================= */
 
   function ensureModalHost() {
-    if (!isBrowser()) {
+    if (
+      destroyed ||
+      !isBrowser() ||
+      !modalHost?.isConnected ||
+      modalHost.getAttribute("data-incidencias-modal-host-superseded") === "true"
+    ) {
       return null;
     }
 
-    if (
-      modalHost?.isConnected
-    ) {
-      return modalHost;
-    }
-
-    modalHost =
-      document.querySelector(
-        MODAL_HOST_SELECTOR
-      ) ||
-      document.createElement("div");
-
-    modalHost.setAttribute(
-      "data-incidencias-modal-host",
-      "true"
-    );
-
-    modalHost.setAttribute(
-      "data-owner",
-      INCIDENCIAS_VIEW_VERSION
-    );
-
-    if (!modalHost.isConnected) {
-      document.body.appendChild(
-        modalHost
-      );
-    }
-
-    if (
-      mounted &&
-      !modalHostBound
-    ) {
+    if (mounted && !modalHostBound) {
       bindTarget(modalHost);
       modalHostBound = true;
     }
@@ -3511,6 +3489,8 @@ function createIncidenciasController(
   function render(
     options = {}
   ) {
+    if (detailOnly || destroyed) return false;
+
     if (
       options.immediate === true
     ) {
@@ -3712,6 +3692,7 @@ function countNewTicketIds(
 }
 
 async function load(options = {}) {
+    if (detailOnly || destroyed || !mounted) return false;
     const seq = ++loadSeq;
     const silent = options.silent === true;
     const force = options.force === true;
@@ -3956,6 +3937,8 @@ async function load(options = {}) {
   function openCreateModal(
     openerNode = null
   ) {
+    if (detailOnly || destroyed || !mounted) return false;
+
     disconnectInfiniteObserver();
     rememberModalReturnFocus();
 
@@ -4679,6 +4662,9 @@ async function load(options = {}) {
 
     detailModal.open = false;
     detailModal.detail = null;
+    detailModal.loading = false;
+    detailModal.loadingId = "";
+    detailModal.error = "";
 
     detailModal.submitting = false;
     detailModal.operation = "";
@@ -4709,6 +4695,8 @@ async function load(options = {}) {
   function closeDetailModal(
     options = {}
   ) {
+    if (destroyed || !detailModal.open) return false;
+
     if (
       detailModal.submitting
     ) {
@@ -4746,6 +4734,7 @@ async function load(options = {}) {
       return openDiscardDetailConfirm();
     }
 
+    const closedId = getTicketId(detailModal.detail) || detailModal.loadingId;
     resetDetailModal();
 
     renderModals({
@@ -4754,6 +4743,11 @@ async function load(options = {}) {
 
     restoreModalReturnFocus();
     syncInfiniteObserver();
+    try {
+      context.onDetailClosed?.({ controller, id: closedId });
+    } catch {
+      // A consumer callback cannot undo an already completed close.
+    }
 
     return true;
   }
@@ -4762,184 +4756,92 @@ async function load(options = {}) {
     ticketId = "",
     openerNode = null
   ) {
-    const id =
-      cleanText(
-        ticketId,
-        ""
-      );
+    const id = cleanText(ticketId, "");
+    if (
+      !id || destroyed || !mounted || context.signal?.aborted ||
+      !ensureModalHost()
+    ) return false;
 
-    if (!id) {
+    const currentId = getTicketId(detailModal.detail) || detailModal.loadingId;
+    if (detailModal.open && currentId === id && !detailModal.error) return true;
+    if (detailModal.open && (detailModal.submitting || detailHasDraft())) {
+      if (!detailModal.submitting) openDiscardDetailConfirm();
       return false;
     }
 
     disconnectInfiniteObserver();
+    resetDetailModal();
     const detailSeq = ++detailLoadSeq;
     rememberModalReturnFocus();
-
-    if (
-      openerNode?.isConnected &&
-      !modalHost?.contains?.(openerNode)
-    ) {
-      modalReturnFocus =
-        openerNode;
+    if (openerNode?.isConnected && !modalHost?.contains?.(openerNode)) {
+      modalReturnFocus = openerNode;
     }
 
-    const local =
-      items.find(
-        (item) =>
-          getTicketId(item) === id
-      ) ||
-      null;
-
+    const local = items.find((item) => getTicketId(item) === id) || null;
     openingTicketId = id;
+    detailModal.open = true;
+    detailModal.detail = local;
+    detailModal.loading = !local;
+    detailModal.loadingId = id;
 
-    if (local) {
-      detailModal.open = true;
-      detailModal.detail = local;
-
-      detailModal.submitting = false;
-      detailModal.operation = "";
-      detailModal.closeConfirmOpen = false;
-      detailModal.discardConfirmOpen = false;
-      detailModal.attachmentDeleteConfirmOpen = false;
-      detailModal.attachmentDeleteConfirmId = "";
-      detailModal.attachmentDeleteConfirmName = "";
-      attachmentDeleteReturnFocus = null;
-      detailModal.commentDraft = "";
-      detailModal.pendingFiles = [];
-
-      detailModal.feedbackMessage = "";
-      detailModal.feedbackType = "info";
-
-      detailModal.openingAttachmentId = "";
-      detailModal.downloadingAttachmentId = "";
-      detailModal.deletingAttachmentId = "";
-
-      detailModal.previewFile = null;
-      detailModal.historyOpen = false;
-
-      render({
-        skipModals: true,
-      });
-
-      renderModals({
-        immediate: true,
-        focusSelector:
-          DETAIL_MODAL_PANEL_SELECTOR,
-      });
-    } else {
-      render();
+    render({ skipModals: true });
+    renderModals({
+      immediate: true,
+      fullRender: true,
+      focusSelector: DETAIL_MODAL_PANEL_SELECTOR,
+    });
+    try {
+      context.onDetailShell?.({ controller, id, modalHost });
+    } catch {
+      // Rendering and request ownership do not depend on the consumer callback.
     }
+    if (destroyed || context.signal?.aborted || detailSeq !== detailLoadSeq) return false;
 
-    detailController?.abort?.();
     const requestController = typeof AbortController !== "undefined" ? new AbortController() : null;
     detailController = requestController;
+    const requestIsCurrent = () => !destroyed && !context.signal?.aborted &&
+      !requestController?.signal.aborted && detailSeq === detailLoadSeq &&
+      openingTicketId === id && Boolean(ensureModalHost());
 
     try {
-      const detail =
-        await loadIncidenciaDetail(
-          id,
-          { signal: requestController?.signal }
-        );
+      const detail = await loadIncidenciaDetail(id, { signal: requestController?.signal });
+      if (!requestIsCurrent()) return false;
+      const mergedDetail = detail ? mergeTicketData(local || {}, detail) : local;
+      if (!mergedDetail) throw new Error("No se pudo cargar la incidencia.");
 
-      if (
-        destroyed ||
-        detailSeq !== detailLoadSeq ||
-        openingTicketId !== id
-      ) {
-        return false;
-      }
-
-      const mergedDetail =
-        detail
-          ? mergeTicketData(
-              local || {},
-              detail
-            )
-          : local;
-
-      /*
-         La respuesta de hidratación sólo tiene autoridad sobre los datos
-         remotos del ticket. El estado de interacción pertenece al usuario:
-         comentario, archivos, confirmaciones, preview, historial y foco.
-      */
-      detailModal.open =
-        Boolean(mergedDetail);
-
-      detailModal.detail =
-        mergedDetail;
-
-      if (mergedDetail) {
-        items =
-          upsertByTicketId(
-            items,
-            mergedDetail
-          );
-      }
-
+      // Hydration changes remote data only; drafts and attachment operations
+      // remain owned by the current, still-open controller.
+      detailModal.detail = mergedDetail;
+      detailModal.loading = false;
+      detailModal.error = "";
+      if (!detailOnly) items = upsertByTicketId(items, mergedDetail);
       openingTicketId = "";
-
-      render({
-        skipModals: true,
+      render({ skipModals: true });
+      renderModals({
+        immediate: true,
+        fullRender: !local,
+        ...(!local ? { focusSelector: DETAIL_MODAL_PANEL_SELECTOR } : {}),
       });
-
-      renderModals(
-        local
-          ? {
-              immediate: true,
-            }
-          : {
-              immediate: true,
-              focusSelector:
-                DETAIL_MODAL_PANEL_SELECTOR,
-            }
-      );
-
       return true;
     } catch (detailError) {
-      if (
-        destroyed ||
-        detailSeq !== detailLoadSeq ||
-        openingTicketId !== id
-      ) {
-        return false;
-      }
-
+      if (!requestIsCurrent()) return false;
       openingTicketId = "";
-
+      detailModal.loading = false;
       if (local) {
-        detailModal.feedbackMessage =
-          safeError(
-            detailError,
-            "No se pudo actualizar el detalle."
-          );
-
-        detailModal.feedbackType =
-          "error";
-
-        render({
-          skipModals: true,
-        });
-
-        renderModals({
-          immediate: true,
-        });
-
-        return false;
+        detailModal.feedbackMessage = safeError(detailError, "No se pudo actualizar el detalle.");
+        detailModal.feedbackType = "error";
+      } else {
+        detailModal.error = safeError(detailError, "No se pudo abrir el detalle.");
       }
-
-      resetDetailModal();
-
-      error =
-        safeError(
-          detailError,
-          "No se pudo abrir el detalle."
-        );
-
-      render();
-      restoreModalReturnFocus();
-
+      render({ skipModals: true });
+      renderModals({
+        immediate: true,
+        fullRender: !local,
+        ...(!local ? { focusSelector: DETAIL_MODAL_PANEL_SELECTOR } : {}),
+      });
       return false;
+    } finally {
+      if (detailController === requestController) detailController = null;
     }
   }
 
@@ -7172,6 +7074,7 @@ async function loadMore(options = {}) {
 
   async function refreshInBackground() {
     if (
+      detailOnly ||
       destroyed ||
       !mounted ||
       !pageIsVisible() ||
@@ -7216,7 +7119,7 @@ async function loadMore(options = {}) {
   }
 
   function startAutoRefresh() {
-    if (!isBrowser()) {
+    if (detailOnly || !isBrowser()) {
       return false;
     }
 
@@ -7413,6 +7316,10 @@ async function loadMore(options = {}) {
       return removeCreateAttachment(
         fileIndexFromNode(node)
       );
+    }
+
+    if (type === "detail-retry") {
+      return openDetail(detailModal.loadingId, modalReturnFocus);
     }
 
     if (
@@ -8076,30 +7983,18 @@ async function loadMore(options = {}) {
       onInput
     );
 
-    target?.addEventListener?.(
-      "compositionstart",
-      onCompositionStart
-    );
+    if (!detailOnly) target?.addEventListener?.("compositionstart", onCompositionStart);
 
-    target?.addEventListener?.(
-      "compositionend",
-      onCompositionEnd
-    );
+    if (!detailOnly) target?.addEventListener?.("compositionend", onCompositionEnd);
 
     target?.addEventListener?.(
       "change",
       onChange
     );
 
-    target?.addEventListener?.(
-      "submit",
-      onSubmit
-    );
+    if (!detailOnly) target?.addEventListener?.("submit", onSubmit);
 
-    target?.addEventListener?.(
-      "keydown",
-      onKeydown
-    );
+    if (!detailOnly) target?.addEventListener?.("keydown", onKeydown);
 
     target?.addEventListener?.(
       "dragover",
@@ -8132,30 +8027,18 @@ async function loadMore(options = {}) {
       onInput
     );
 
-    target?.removeEventListener?.(
-      "compositionstart",
-      onCompositionStart
-    );
+    if (!detailOnly) target?.removeEventListener?.("compositionstart", onCompositionStart);
 
-    target?.removeEventListener?.(
-      "compositionend",
-      onCompositionEnd
-    );
+    if (!detailOnly) target?.removeEventListener?.("compositionend", onCompositionEnd);
 
     target?.removeEventListener?.(
       "change",
       onChange
     );
 
-    target?.removeEventListener?.(
-      "submit",
-      onSubmit
-    );
+    if (!detailOnly) target?.removeEventListener?.("submit", onSubmit);
 
-    target?.removeEventListener?.(
-      "keydown",
-      onKeydown
-    );
+    if (!detailOnly) target?.removeEventListener?.("keydown", onKeydown);
 
     target?.removeEventListener?.(
       "dragover",
@@ -8179,6 +8062,10 @@ async function loadMore(options = {}) {
      CONTROLLER PUBLIC
   ======================================================= */
 
+  function onContextAbort() {
+    controller.destroy();
+  }
+
   const controller = {
     version:
       INCIDENCIAS_VIEW_VERSION,
@@ -8187,7 +8074,8 @@ async function loadMore(options = {}) {
       if (
         destroyed ||
         mounted ||
-        !host
+        context.signal?.aborted ||
+        (!detailOnly && !host)
       ) {
         return controller;
       }
@@ -8195,8 +8083,9 @@ async function loadMore(options = {}) {
       mounted = true;
       destroyed = false;
 
-      bindTarget(host);
+      if (!detailOnly) bindTarget(host);
       ensureModalHost();
+      context.signal?.addEventListener?.("abort", onContextAbort, { once: true });
 
       if (isBrowser()) {
         window.addEventListener(
@@ -8204,18 +8093,14 @@ async function loadMore(options = {}) {
           onBeforeUnload
         );
 
-        window.addEventListener(
-          "focus",
-          onWindowFocus
-        );
-
-        document.addEventListener(
-          "visibilitychange",
-          onVisibilityChange
-        );
-
-        startAutoRefresh();
+        if (!detailOnly) {
+          window.addEventListener("focus", onWindowFocus);
+          document.addEventListener("visibilitychange", onVisibilityChange);
+          startAutoRefresh();
+        }
       }
+
+      if (detailOnly) return controller;
 
       const hasCache =
         items.length > 0;
@@ -8244,7 +8129,9 @@ async function loadMore(options = {}) {
     },
 
     destroy() {
+      if (destroyed) return false;
       destroyed = true;
+      context.signal?.removeEventListener?.("abort", onContextAbort);
       mounted = false;
 
       loadSeq += 1;
@@ -8335,7 +8222,9 @@ async function loadMore(options = {}) {
     closeDetailModal,
 
     getSnapshot() {
-      const list = currentListSnapshot();
+      const list = detailOnly
+        ? { visibleCount: 0, filteredTotal: 0 }
+        : currentListSnapshot();
 
       return {
         version:
@@ -8343,6 +8232,9 @@ async function loadMore(options = {}) {
 
         mounted,
         destroyed,
+        detailOnly,
+        detailLoading: detailModal.loading,
+        detailError: Boolean(detailModal.error),
 
         loading,
         refreshing,
@@ -8359,17 +8251,17 @@ async function loadMore(options = {}) {
           Boolean(incrementalError),
 
         continuousScroll: {
-          enabled: true,
+          enabled: !detailOnly,
           observing:
             Boolean(infiniteObserver),
           rootMargin:
             INFINITE_ROOT_MARGIN,
           rootIsMainContent:
             Boolean(
-              getInfiniteScrollRoot()
+              !detailOnly && getInfiniteScrollRoot()
             ),
           hasMore:
-            hasIncrementalContent(),
+            !detailOnly && hasIncrementalContent(),
           seenCursorCount:
             seenCursors.size,
         },
@@ -8520,9 +8412,9 @@ async function loadMore(options = {}) {
           focusRestore: true,
           dirtyCloseProtection: true,
           beforeUnloadProtection: true,
-          autonomousRefresh: true,
-          refreshOnWindowFocus: true,
-          refreshOnVisibilityReturn: true,
+          autonomousRefresh: !detailOnly,
+          refreshOnWindowFocus: !detailOnly,
+          refreshOnVisibilityReturn: !detailOnly,
           manualRefreshButton: false,
 
           detailMultilinePreserved: true,

@@ -15,6 +15,7 @@
 ========================================================= */
 
 import Http from "../../core/http.js";
+import { notifyDomainChanged } from "../../core/domain-events.js";
 import {
   CLIENTES_MODEL_VERSION,
   normalizeClienteModel,
@@ -44,6 +45,7 @@ export const CLIENTES_API_VERSION =
 
 export const CLIENTES_ENDPOINT = "/api/clientes";
 export const CLIENTES_PAGE_ENDPOINT = "/api/clientes/page";
+export const CLIENTES_STATS_ENDPOINT = "/api/clientes/stats";
 
 export const CLIENTES_FETCH_LIMIT = 50;
 export const CLIENTES_LIST_LIMIT = CLIENTES_FETCH_LIMIT;
@@ -666,6 +668,7 @@ export function createCliente(payload = {}, options = {}) {
       lastPageContext = null;
       lastSyncAt = 0;
       lastError = "";
+      notifyDomainChanged("clientes");
 
       return {
         ok: true,
@@ -728,6 +731,33 @@ export function getClientesCount() {
 export function hasClientes() {
   return getClientesCount() > 0;
 }
+// Global count belongs to the domain's dedicated endpoint. Keep the existing
+// loadClientesStats() as page-local UI statistics for the Clientes view.
+export async function fetchClientesStatsRequest(options = {}) {
+  const response = await Http.get(CLIENTES_STATS_ENDPOINT, {
+    timeout: clampInt(options.timeout, CLIENTES_TIMEOUT, 1000, 120_000),
+    source: "views.clientes.api.stats",
+    signal: options.signal,
+  });
+  if (responseLooksFailed(response)) {
+    const error = new Error(errorMessage(response, "No se pudieron cargar las estadísticas de clientes."));
+    error.code = cleanText(response?.code, "CLIENTES_STATS_REJECTED").toUpperCase();
+    error.status = Number(response?.status || 400) || 400;
+    throw error;
+  }
+
+  const raw = safeObject(response).total;
+  const count = typeof raw === "number" ||
+      (typeof raw === "string" && /^\d+$/.test(raw.trim()))
+    ? Number(raw)
+    : Number.NaN;
+  const total = Number.isSafeInteger(count) && count >= 0 &&
+      response?.totalKnown !== false && response?.totalIsLowerBound !== true
+    ? count
+    : null;
+  return Object.freeze({ ok: true, total, totalKnown: total !== null });
+}
+
 export async function loadClientesStats() {
   return computeClientesStats(lastPageItems);
 }
@@ -772,6 +802,7 @@ export function getClientesApiSnapshot() {
     modelVersion: CLIENTES_MODEL_VERSION,
     endpoint: CLIENTES_ENDPOINT,
     pageEndpoint: CLIENTES_PAGE_ENDPOINT,
+    statsEndpoint: CLIENTES_STATS_ENDPOINT,
     cacheKey: CLIENTES_CACHE_KEY,
     cacheSchemaVersion: CLIENTES_CACHE_SCHEMA_VERSION,
     pageContext: lastPageContext,
@@ -813,6 +844,7 @@ export default Object.freeze({
   modelVersion: CLIENTES_MODEL_VERSION,
   endpoint: CLIENTES_ENDPOINT,
   pageEndpoint: CLIENTES_PAGE_ENDPOINT,
+  statsEndpoint: CLIENTES_STATS_ENDPOINT,
   fetchClientesPage,
   loadClientes,
   refreshClientes,
@@ -820,6 +852,7 @@ export default Object.freeze({
   listClientes,
   getClientes,
   fetchClientesRequest,
+  fetchClientesStatsRequest,
   hydrateClientesFromCache,
   getClienteById,
   getClienteByIdRequest,

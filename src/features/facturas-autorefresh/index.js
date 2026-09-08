@@ -12,12 +12,6 @@
 ========================================================= */
 
 /*
-  Enhancement hermano y route-scoped: intercepta los IDs de incidencia antes
-  del handler legacy de Facturas y abre el modal canónico sin navegar de vista.
-*/
-import "../facturas-incidencia-modal/index.js";
-
-/*
   Paridad visual con Incidencias: añade y mantiene los badges de conteo de los
   filtros de Facturas usando los KPIs que la propia vista ya renderiza.
 */

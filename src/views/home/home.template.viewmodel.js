@@ -3,6 +3,7 @@
    Shared by /src/views/home/home.template.js
 ========================================================= */
 
+import { userNameFromIdentity } from "../../core/user-identity.js";
 import {
   DEFAULT_ROUTES,
   clamp,
@@ -11,7 +12,6 @@ import {
   initialsFrom,
   isObject,
   normalizeKey,
-  number,
   optionalNumber,
   safeArray,
   safeImageSrc,
@@ -43,17 +43,16 @@ export function buildVm(input = {}) {
   const facturas = safeArray(first(dashboard.facturas, dashboard.invoices, []));
   const activity = safeArray(first(dashboard.activity, dashboard.actividad, dashboard.movimientos, []));
 
-  const displayName = cleanText(
-    first(
-      user.displayName,
-      user.name,
-      user.fullName,
-      user.nombre,
-      user.username,
-      data.displayName
-    ),
-    "Usuario"
-  );
+  const displayName = userNameFromIdentity(user, first(user.username, data.displayName, "Usuario"));
+
+  function summaryCount(...keys) {
+    for (const key of keys) {
+      if (Object.prototype.hasOwnProperty.call(summary, key)) {
+        return optionalNumber(summary[key]);
+      }
+    }
+    return null;
+  }
 
   const totalInvoiced = optionalNumber(
     first(
@@ -137,6 +136,7 @@ export function buildVm(input = {}) {
   return {
     user: {
       ...user,
+      name: displayName,
       displayName,
       initials: cleanText(user.initials, initialsFrom(displayName)),
       avatarUrl: safeImageSrc(
@@ -169,10 +169,10 @@ export function buildVm(input = {}) {
     onboardingSaving: data.onboardingSaving === true,
     onboardingError: cleanText(data.onboardingError, ""),
     counts: {
-      incidencias: number(first(summary.incidencias, summary.tickets, incidencias.length, 0), 0),
-      facturas: number(first(summary.facturas, summary.invoices, facturas.length, 0), 0),
-      clientes: admin ? number(first(summary.clientes, summary.clients, 0), 0) : 0,
-      usuarios: admin ? number(first(summary.usuarios, summary.users, 0), 0) : 0,
+      incidencias: summaryCount("incidencias", "tickets"),
+      facturas: summaryCount("facturas", "invoices"),
+      clientes: admin ? summaryCount("clientes", "clients") : null,
+      usuarios: admin ? summaryCount("usuarios", "users") : null,
       totalInvoiced,
       currency,
       invoiceStatsAvailable,

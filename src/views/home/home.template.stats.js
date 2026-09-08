@@ -34,7 +34,10 @@ export function header(vm) {
 function statCard({ label, value, text, iconName, route, modifier }) {
   const href = safeRoute(route, "/");
   const key = normalizeKey(modifier || label || "stat");
-  const formattedValue = formatNumber(value);
+  const available = typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+  const formattedValue = available ? formatNumber(value) : "—";
+  const description = available ? text : "No disponible";
+  const ariaLabel = available ? `${label}: ${formattedValue}. ${text}` : `${label}: No disponible`;
   const onboardingTarget = key === "incidencias"
     ? ' data-home-onboarding-target="step-1"'
     : "";
@@ -49,7 +52,7 @@ function statCard({ label, value, text, iconName, route, modifier }) {
         data-router-link="true"
         data-entity-overlay-ignore="true"
         data-route="${attr(href)}"
-        aria-label="${attr(`${label}: ${formattedValue}. ${text}`)}"
+        aria-label="${attr(ariaLabel)}"
       >
         <span class="home-stat-card-top">
           <span class="home-stat-icon" aria-hidden="true">${icon(iconName)}</span>
@@ -58,7 +61,7 @@ function statCard({ label, value, text, iconName, route, modifier }) {
         <span class="home-stat-content">
           <span class="home-stat-label">${escapeHtml(label)}</span>
           <strong class="home-stat-value">${escapeHtml(formattedValue)}</strong>
-          <span class="home-stat-text">${escapeHtml(text)}</span>
+          <span class="home-stat-text">${escapeHtml(description)}</span>
         </span>
       </button>
     </article>
@@ -72,13 +75,13 @@ export function stats(vm) {
 
   const invoiceText = vm.counts.invoiceStatsAvailable
     ? `Facturado: ${formatMoney(vm.counts.totalInvoiced, vm.counts.currency)}`
-    : "Facturado pendiente de sincronizar";
+    : "Facturación no disponible";
 
   const cards = [
     {
       label: "Incidencias",
       value: vm.counts.incidencias,
-      text: "Tickets visibles en el panel",
+      text: vm.admin ? "Incidencias registradas" : "Tus incidencias",
       iconName: "incidencias",
       route: vm.routes.incidencias,
       modifier: "incidencias",

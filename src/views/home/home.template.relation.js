@@ -9,6 +9,7 @@
    No consulta APIs, no completa datos ausentes y no crea identidades sintéticas.
 ========================================================= */
 
+import { userNameFromIdentity } from "../../core/user-identity.js";
 import {
   resolveAvatarPresentation,
 } from "../../features/avatar-system/identity.js";
@@ -263,38 +264,10 @@ function incidenciaRelation(source = {}) {
   const receptor = object(root.receptor);
   const user = object(root.user);
 
-  const name = cleanText(
-    first(
-      declared.displayName,
-      declared.fullName,
-      declared.name,
-      declared.nombre,
-      root.displayName,
-      root.name,
-      root.nombre,
-      root.clientName,
-      root.clienteNombre,
-      root.requesterName,
-      requesterSnapshot.displayName,
-      requesterSnapshot.fullName,
-      requesterSnapshot.name,
-      requesterSnapshot.nombre,
-      cliente.displayName,
-      cliente.fullName,
-      cliente.name,
-      cliente.nombre,
-      receptor.displayName,
-      receptor.fullName,
-      receptor.name,
-      receptor.nombre,
-      user.displayName,
-      user.fullName,
-      user.name,
-      user.nombre,
-      ""
-    ),
-    ""
-  );
+  const name = userNameFromIdentity(root) || userNameFromIdentity(declared) ||
+    userNameFromIdentity(requesterSnapshot) || userNameFromIdentity(cliente) ||
+    userNameFromIdentity(receptor) || userNameFromIdentity(user) ||
+    cleanText(first(root.requesterName, root.clientName, root.clienteNombre), "");
 
   const email = normalizedEmail(
     first(
@@ -402,7 +375,9 @@ function genericRelation(source = {}, kind = "relacion") {
   const root = object(source);
   const declared = object(first(root.relation, root.entityRelation, {}));
 
-  const name = cleanText(
+  const name = kind === "usuario"
+    ? userNameFromIdentity(root) || userNameFromIdentity(declared)
+    : cleanText(
     first(
       declared.displayName,
       declared.fullName,

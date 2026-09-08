@@ -5,8 +5,8 @@
    PRELOAD AUTENTICADO · HOME OWNER MODALS · BOUNDED / BEST-EFFORT
 
    Adelanta exclusivamente los recursos que necesita el siguiente modal del
-   Home. Facturas precarga bridge, controller, CSS y detalle canónico; las
-   Incidencias precalientan su bridge, controller, CSS y mejoras progresivas.
+   Home. La autoridad global prepara los módulos y estilos de cada dominio;
+   la carga de datos pertenece exclusivamente al controller de detalle.
 
    No captura clicks, no navega, no cambia history y nunca persiste IDs.
 ========================================================= */
@@ -18,7 +18,7 @@ import {
 } from "../entity-overlay/intent.js";
 
 export const ENTITY_INTENT_PRELOAD_VERSION =
-  "entity-intent-preload.v2-home-owner-bridges";
+  "entity-intent-preload.v3-domain-authority";
 
 const DETAIL_SELECTOR = [
   "[data-home-scope='true'] ",
@@ -30,16 +30,13 @@ const DETAIL_SELECTOR = [
 
 const HOVER_DWELL_MS = 64;
 
-const BRIDGE_LOADERS = Object.freeze({
-  factura: () => import("../factura-modal-bridge/index.js"),
-  incidencia: () => import("../incidencia-modal-bridge/index.js"),
-});
+const DETAIL_TYPES = new Set(["factura", "incidencia"]);
 
 let installed = false;
 let hoverTimer = 0;
 let hoverNode = null;
 
-const bridgePromises = new Map();
+
 const intentFlights = new Map();
 
 const metrics = {
@@ -128,7 +125,7 @@ function entityIntent(node = null) {
     ""
   );
 
-  return type && id && BRIDGE_LOADERS[type]
+  return type && id && DETAIL_TYPES.has(type)
     ? Object.freeze({ type, id })
     : null;
 }
@@ -142,66 +139,10 @@ function clearHoverIntent() {
   hoverNode = null;
 }
 
-function loadBridge(type = "") {
-  const key = normalizeEntityType(type);
-  const loader = BRIDGE_LOADERS[key];
-  if (!loader) return Promise.resolve(null);
-
-  if (!bridgePromises.has(key)) {
-    const pending = Promise.resolve()
-      .then(() => loader())
-      .catch((error) => {
-        if (bridgePromises.get(key) === pending) {
-          bridgePromises.delete(key);
-        }
-        throw error;
-      });
-
-    bridgePromises.set(key, pending);
-  }
-
-  return bridgePromises.get(key);
-}
-
-async function warmIntent(intent = null, source = "intent") {
+async function warmIntent(intent = null) {
   if (!intent) return false;
-
-  const module = await loadBridge(intent.type);
-  if (!module) return false;
-
-  if (intent.type === "factura") {
-    const preload =
-      module?.primeFacturaModalBridge ||
-      module?.preloadFacturaModalBridge ||
-      module?.default?.preload ||
-      module?.default?.prime;
-
-    if (typeof preload !== "function") return false;
-
-    preload(intent.id, {
-      source: `entity-intent-preload.${cleanText(source, "intent")}`,
-    });
-
-    return true;
-  }
-
-  if (intent.type === "incidencia") {
-    const prime =
-      module?.primeIncidenciaModalBridge ||
-      module?.default?.prime;
-
-    if (typeof prime !== "function") return false;
-
-    /*
-      El Detail de Incidencias exige lectura remota íntegra y abortable. Aquí
-      sólo calentamos código/CSS; el controller conserva la única petición de
-      datos para no duplicar su contrato de integridad.
-    */
-    prime();
-    return true;
-  }
-
-  return false;
+  const { EntityOverlay } = await import("../entity-overlay/index.js");
+  return EntityOverlay.preload(intent.type);
 }
 
 async function preloadNode(node = null, source = "intent") {
@@ -324,20 +265,6 @@ export function destroyEntityIntentPreload() {
     document.removeEventListener("pointerdown", onPointerDown, true);
   }
 
-  const facturasPromise = bridgePromises.get("factura");
-  if (facturasPromise) {
-    void Promise.resolve(facturasPromise)
-      .then(() => import("../../views/facturas/facturas.api.js"))
-      .then((module) => {
-        const clear =
-          module?.clearFacturaDetailPrefetchCache ||
-          module?.default?.clearFacturaDetailPrefetchCache;
-        clear?.();
-      })
-      .catch(() => {});
-  }
-
-  bridgePromises.clear();
   intentFlights.clear();
   installed = false;
   return true;
@@ -347,15 +274,14 @@ export function getEntityIntentPreloadSnapshot() {
   return Object.freeze({
     version: ENTITY_INTENT_PRELOAD_VERSION,
     installed,
-    loadedBridgeTypes: Object.freeze([...bridgePromises.keys()]),
     inFlight: intentFlights.size,
     ...metrics,
     policy: Object.freeze({
       authenticatedOnly: true,
       explicitHomeDetailIntentOnly: true,
       supportedTypes: Object.freeze(["factura", "incidencia"]),
-      ownerBridgeWarmup: true,
-      facturaDetailPrefetch: true,
+      domainCodeWarmup: true,
+      domainDataReadOnOpen: true,
       incidenciaDataOwnedByController: true,
       hoverDwellMs: HOVER_DWELL_MS,
       focusIntent: true,

@@ -16,6 +16,7 @@
 ========================================================= */
 
 import Http from "../../core/http.js";
+import { notifyDomainChanged } from "../../core/domain-events.js";
 
 export const FACTURAS_API_VERSION =
   "facturas.api.production.v9.continuous-list-snapshot";
@@ -1290,20 +1291,29 @@ async function getJson(endpoint = "", options = {}) {
   return httpRequest("GET", endpoint, null, options);
 }
 
+async function confirmedWrite(method, endpoint, body, options) {
+  const response = await httpRequest(method, endpoint, body, options);
+  if (response?.ok === false || response?.success === false || response?.error === true) {
+    throw new Error(cleanText(response?.message, "El backend rechazó la operación de factura."));
+  }
+  notifyDomainChanged("facturas");
+  return response;
+}
+
 async function postJson(endpoint = "", body = {}, options = {}) {
-  return httpRequest("POST", endpoint, body, options);
+  return confirmedWrite("POST", endpoint, body, options);
 }
 
 async function putJson(endpoint = "", body = {}, options = {}) {
-  return httpRequest("PUT", endpoint, body, options);
+  return confirmedWrite("PUT", endpoint, body, options);
 }
 
 async function patchJson(endpoint = "", body = {}, options = {}) {
-  return httpRequest("PATCH", endpoint, body, options);
+  return confirmedWrite("PATCH", endpoint, body, options);
 }
 
 async function deleteJson(endpoint = "", options = {}) {
-  return httpRequest("DELETE", endpoint, null, options);
+  return confirmedWrite("DELETE", endpoint, null, options);
 }
 
 /* =========================================================

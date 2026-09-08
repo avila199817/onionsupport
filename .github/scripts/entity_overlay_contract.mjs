@@ -13,6 +13,8 @@ import {
   normalizeEntityType,
 } from "../../src/features/entity-overlay/intent.js";
 
+import { directDomainOwners, assertDirectDomainOwners } from "./private_domain_owner_contract.mjs";
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const read = (relative) => readFile(path.join(root, relative), "utf8");
 
@@ -83,12 +85,16 @@ assert.match(overlay, /openFacturaDetailById/);
 assert.match(overlay, /openCanonicalOwner/);
 assert.match(overlay, /openIncidenciaDetailById/);
 assert.match(overlay, /ownerModalOpen/);
+if (directDomainOwners) {
+  await assertDirectDomainOwners();
+} else {
 assert.match(overlay, /context\?\.Router \|\| context\?\.router/);
 assert.match(overlay, /navigateWithRouter\(target,/);
 assert.match(
   overlay,
   /navigateBack:\s*Boolean\(session\.returnPath\)\s*&&\s*isOwnerRoute\(session\.type\)/
 );
+}
 assert.doesNotMatch(overlay, /adapters\/incidencia\.js/);
 assert.doesNotMatch(overlay, /adapters\/factura\.js/);
 assert.match(overlay, /pushState|writeUrlForEntry/);

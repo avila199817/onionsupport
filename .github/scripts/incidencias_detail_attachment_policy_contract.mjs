@@ -149,9 +149,10 @@ const controllerSource = await readFile(
   "utf8"
 );
 
+const listenerOwner = policySource.includes("root: scopeRoot = documentLike") ? "scopeRoot" : "documentLike";
 for (const required of [
-  'documentLike.addEventListener("change", onChange, true)',
-  'documentLike.addEventListener("drop", onDrop, true)',
+  `${listenerOwner}.addEventListener("change", onChange, true)`,
+  `${listenerOwner}.addEventListener("drop", onDrop, true)`,
   'event.stopImmediatePropagation?.()',
   'data-detail-upload-policy-feedback',
   'syncIncidenciasDetailAttachmentHelp(help, role)',

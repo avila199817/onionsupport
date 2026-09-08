@@ -1,3 +1,4 @@
+import { directDomainOwners, assertDirectDomainOwners } from "./private_domain_owner_contract.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
@@ -205,9 +206,9 @@ const [
   readFile("src/css/views/home/index.css", "utf8"),
   readFile("src/css/layout/sidebar.executive.interactions.css", "utf8"),
   readFile("src/features/private-runtime-ui/index.js", "utf8"),
-  readFile("src/features/home-entity-modal/index.js", "utf8"),
+  directDomainOwners ? "" : readFile("src/features/home-entity-modal/index.js", "utf8"),
   readFile("src/features/entity-intent-preload/index.js", "utf8"),
-  readFile("src/features/factura-modal-bridge/index.js", "utf8"),
+  directDomainOwners ? "" : readFile("src/features/factura-modal-bridge/index.js", "utf8"),
   readFile("src/views/facturas/facturas.api.js", "utf8"),
   readFile("src/views/home/home.template.js", "utf8"),
   readFile("src/views/home/home.template.foundation.js", "utf8"),
@@ -317,6 +318,9 @@ assert.match(
   "The retired absolute hit target must never cover semantic row buttons"
 );
 
+if (directDomainOwners) {
+  await assertDirectDomainOwners();
+} else {
 assert.match(
   privateRuntimeSource,
   /import\("\.\.\/home-entity-modal\/index\.js"\)/,
@@ -355,6 +359,8 @@ assert.match(facturaModalBridgeSource, /prefetchFacturaDetail/);
 assert.match(facturaModalBridgeSource, /data-entity-modal-origin/);
 assert.match(facturaModalBridgeSource, /openIncidenciaModalFromCurrentView/);
 assert.doesNotMatch(facturaModalBridgeSource, /Router\.navigate|history\.(?:pushState|replaceState)|location\.(?:assign|replace)/);
+
+}
 
 assert.match(facturasApiSource, /FACTURAS_DETAIL_PREFETCH_VERSION/);
 assert.match(facturasApiSource, /DETAIL_PREFETCH_TTL_MS = 20_000/);

@@ -5,6 +5,8 @@ import { resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 
+import { directDomainOwners, assertDirectDomainOwners } from "./private_domain_owner_contract.mjs";
+
 // Real cascade, without starting auth, HTTP or any application enhancement.
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const candidates = [process.env.CHROME_BIN, "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/opt/google/chrome/chrome"].filter(Boolean);
@@ -37,15 +39,14 @@ const spinners = [
   ["server-spinner", 18], ["topbar-search-loading-dot", 26],
   ["incidencias-modal-live-sync-spinner", 16],
   ["entity-overlay-spinner", 32],
-  ["incidencia-bridge-feedback-spinner", 23],
-  ["factura-bridge-feedback-spinner", 23],
+  ...(!directDomainOwners ? [["incidencia-bridge-feedback-spinner", 23], ["factura-bridge-feedback-spinner", 23]] : []),
   ["fpc-spinner", 22], ["fpc-spinner fpc-spinner--button", 15],
 ];
 const styles = [
   "/src/css/app.css",
   ...["home/index", "cuenta/index", "correo/index", "servidor/index", "incidencias/create", "incidencias/detail", "incidencias/media-preview", "clientes/create", "facturas/create", "facturas/detail", "usuarios/create", "public/public-support-progress"].map((name) => `/src/css/views/${name}.css`),
   "/src/css/auth/login.css", "/src/css/features/entity-overlay.css",
-  ...["factura-modal-bridge", "incidencia-modal-bridge", "facturas-paid-confirm"].map((name) => `/src/features/${name}/style.css`),
+  ...[...(!directDomainOwners ? ["factura-modal-bridge", "incidencia-modal-bridge"] : []), "facturas-paid-confirm"].map((name) => `/src/features/${name}/style.css`),
 ];
 const fixture = `<!doctype html><html><head><meta charset="utf-8">${styles.map((href) => `<link rel="stylesheet" href="${href}">`).join("")}
 <style>.sample { display: flex; align-items: center; inline-size: 300px; min-block-size: 50px; color: var(--text-strong); } body { overflow: auto; }</style>

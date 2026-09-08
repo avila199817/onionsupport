@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
+import { directDomainOwners, assertDirectDomainOwners } from "./private_domain_owner_contract.mjs";
+
 const apiPath = new URL("../../src/views/facturas/facturas.api.js", import.meta.url);
 const basePath = new URL("../../src/views/facturas/facturas.api.base.js", import.meta.url);
 const controllerPath = new URL("../../src/views/facturas/index.js", import.meta.url);
@@ -11,7 +13,7 @@ const api = fs.readFileSync(apiPath, "utf8");
 const base = fs.readFileSync(basePath, "utf8");
 const controller = fs.readFileSync(controllerPath, "utf8");
 const preload = fs.readFileSync(preloadPath, "utf8");
-const bridge = fs.readFileSync(bridgePath, "utf8");
+const bridge = directDomainOwners ? "" : fs.readFileSync(bridgePath, "utf8");
 
 assert.match(api, /FACTURAS_DOCUMENT_FLOW_VERSION/);
 assert.match(api, /import \* as Base from "\.\/facturas\.api\.base\.js"/);
@@ -42,6 +44,9 @@ assert.match(api, /clearFacturaDetailPrefetchCache\(id\)/);
 // La intención del Home precalienta el bridge; el bridge es quien reutiliza la
 // caché canónica de detalle antes de montar el controller propietario.
 assert.match(preload, /data-entity-preload='detail'/);
+if (directDomainOwners) {
+  await assertDirectDomainOwners();
+} else {
 assert.match(preload, /primeFacturaModalBridge/);
 assert.match(preload, /HOVER_DWELL_MS = 64/);
 assert.match(bridge, /prefetchFacturaDetail/);
@@ -49,6 +54,8 @@ assert.match(bridge, /controller\.openFactura/);
 assert.match(bridge, /shellBeforeRemoteHydration:\s*true/);
 assert.doesNotMatch(preload, /(^|[^A-Za-z0-9_$])fetch\s*\(/m);
 assert.doesNotMatch(bridge, /Router\.navigate|history\.(?:pushState|replaceState)/);
+
+}
 
 // Un Azure Blob privado sin SAS nunca puede ser una URL de acción.
 assert.match(api, /isUnsignedAzureBlobUrl/);
@@ -72,6 +79,6 @@ assert.match(base, /export function syncFacturasListCache/);
 // El controller canónico sigue gobernando el modal y consume sólo el entry API.
 assert.match(controller, /from "\.\/facturas\.api\.js"/);
 assert.doesNotMatch(controller, /facturas\.api\.base\.js/);
-assert.match(bridge, /module\?\.FacturasView/);
+if (!directDomainOwners) assert.match(bridge, /module\?\.FacturasView/);
 
 console.log("Facturas document flow contract: PASS · bounded prefetch · canonical in-place owner modal");

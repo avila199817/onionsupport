@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
+import { directDomainOwners, assertDirectDomainOwners } from "./private_domain_owner_contract.mjs";
+
+if (directDomainOwners) {
+  await assertDirectDomainOwners();
+} else {
 const read = (path) => readFile(new URL(`../../${path}`, import.meta.url), "utf8");
 
 const [
@@ -244,3 +249,4 @@ assert.match(
 );
 
 console.log("facturas direct incidencia modal contract: ok");
+}

@@ -1,0 +1,25 @@
+name: SPA modal source snapshot
+on:
+  push:
+    branches:
+      - fix/spa-modal-attachments-home-20260909
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Archive tracked source only
+        shell: bash
+        run: git archive --format=tar HEAD > "${RUNNER_TEMP}/spa-modal-source.tar"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: spa-modal-source-${{ github.sha }}
+          path: ${{ runner.temp }}/spa-modal-source.tar
+          retention-days: 1
+          if-no-files-found: error

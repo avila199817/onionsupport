@@ -37,3 +37,14 @@
      await page.locator(closeViewer).click();
      await page.locator(viewer).waitFor({ state: "detached" });
      assert.equal(await page.locator(panel).count(), 1);
+--- a/src/views/home/home.template.billing.js
++++ b/src/views/home/home.template.billing.js
+@@ -102,7 +102,7 @@
+     <span class="home-entity-copy">
+       <span class="home-entity-eyebrow">
+         <span class="home-entity-kind">Factura</span>
+-        ${displayId ? entityIdBadge("Factura", displayId) : ""}
++        ${displayId ? entityIdBadge("ID", displayId) : ""}
+       </span>
+ 
+       <strong class="home-entity-title">${escapeHtml(label)}</strong>

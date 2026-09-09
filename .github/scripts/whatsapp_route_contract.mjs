@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 const [
   config,
   routes,
+  router,
   styles,
   sidebar,
   view,
@@ -19,6 +20,7 @@ const [
 ] = await Promise.all([
   readFile("src/core/config.js", "utf8"),
   readFile("src/router/routes.js", "utf8"),
+  readFile("src/router/index.js", "utf8"),
   readFile("src/router/styles.js", "utf8"),
   readFile("src/ui/sidebar/index.js", "utf8"),
   readFile("src/views/whatsapp/index.js", "utf8"),
@@ -48,6 +50,12 @@ const correoRouteIndex = routes.indexOf("path: ROUTE_PATHS.CORREO");
 assert.ok(whatsappRouteIndex >= 0 && correoRouteIndex > whatsappRouteIndex, "WhatsApp must remain ahead of Correo in route order");
 assert.match(styles, /whatsapp:\s*Object\.freeze\(\[\s*"\/src\/css\/views\/whatsapp\/index\.css"/);
 assert.match(sidebar, /const WHATSAPP_SIDEBAR_PATH =\s*ROUTES\.whatsapp\s*\|\|\s*"\/whatsapp"/);
+
+// Router commits every view through one canonical intermediate host.
+assert.match(router, /const ROUTE_HOST_CLASS\s*=\s*\n\s*"route-view-host"/);
+assert.match(router, /host\.dataset\.routeHost\s*=\s*\n\s*"true"/);
+assert.match(router, /host\.dataset\.viewKey\s*=\s*\n\s*route\?\.viewKey/);
+assert.match(router, /root\.replaceChildren\(\s*nextHost\s*\)/);
 
 // View owns UI lifecycle only. Network is background work, never a Router gate.
 assert.match(view, /export function WhatsAppView\(host = null, context = \{\}\)/);
@@ -138,12 +146,16 @@ assert.doesNotMatch(cssCode, /!important\b/i);
 assert.doesNotMatch(cssCode, /@import/);
 assert.doesNotMatch(cssCode, /data:image|<svg/i);
 
-// Cross-view geometry closes the full-height chain on every viewport.
+// Cross-view geometry closes every real DOM level, including Router route-view-host.
 assert.match(appCss, /@import url\("\.\/compositions\/private-fullview-routes\.css"\) layer\(compositions\);/);
 assert.match(fullViewComposition, /FULL-VIEW CHAIN · ALL VIEWPORTS/);
 assert.match(fullViewCode, /\.main-content:has\(\.whatsapp-page\)/);
 assert.match(fullViewCode, /#app-content:has\(\.whatsapp-page\)[\s\S]*block-size:\s*100%/);
 assert.match(fullViewCode, /#view-container:has\(\.whatsapp-page\)[\s\S]*display:\s*flex/);
+assert.match(fullViewCode, /\.route-view-host\[data-view-key="whatsapp"\]/);
+assert.match(fullViewCode, /\[data-route-host="true"\]\[data-view-key="whatsapp"\]/);
+assert.match(fullViewCode, /#view-container:has\(\.whatsapp-page\)[\s\S]*\.route-view-host\[data-view-key="whatsapp"\][\s\S]*:not\(\[hidden\]\)[\s\S]*flex:\s*1 1 0/);
+assert.match(fullViewCode, /\.route-view-host\[data-view-key="whatsapp"\][\s\S]*> \.whatsapp-page[\s\S]*block-size:\s*auto[\s\S]*flex:\s*1 1 0/);
 assert.match(fullViewCode, /\.content-wrapper:has\(\.whatsapp-page\)[\s\S]*padding:\s*0/);
 assert.match(fullViewCode, /\.panel-content\[data-view="whatsapp"\]:has\(\.whatsapp-page\)[\s\S]*block-size:\s*100%/);
 assert.match(fullViewCode, /\.whatsapp-page,[\s\S]*\.whatsapp-workspace,[\s\S]*\.whatsapp-pane[\s\S]*max-block-size:\s*100%/);
@@ -158,4 +170,4 @@ assert.match(fullViewCode, /@media \(max-height: 560px\)/);
 assert.doesNotMatch(fullViewCode, /!important\b/i);
 assert.doesNotMatch(fullViewCode, /#[0-9a-f]{3,8}\b/i);
 
-console.log("WhatsApp route contract: PASS · full-view desktop/tablet/mobile · centralized backend · shared UI/avatar authority");
+console.log("WhatsApp route contract: PASS · real route-host full-view · desktop/tablet/mobile · centralized backend · shared UI/avatar authority");

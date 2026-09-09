@@ -53,6 +53,47 @@
   overflow: hidden;
 }
 
+/*
+  Router monta cada vista dentro de un route-view-host real entre
+  #view-container y el contenido de dominio. Ese nivel forma parte de la
+  cadena geométrica: si queda con block-size:auto, WhatsApp se queda a la
+  altura intrínseca de sus paneles y aparece el hueco inferior.
+
+  :not([hidden]) evita que esta composición anule el atributo hidden mientras
+  Router prepara el host antes del swap atómico.
+*/
+#view-container:has(.whatsapp-page)
+> :where(
+  .route-view-host[data-view-key="whatsapp"],
+  [data-route-host="true"][data-view-key="whatsapp"]
+):not([hidden]) {
+  min-inline-size: 0;
+  min-block-size: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  flex: 1 1 0;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+:where(
+  .route-view-host[data-view-key="whatsapp"],
+  [data-route-host="true"][data-view-key="whatsapp"]
+)
+> .whatsapp-page {
+  min-block-size: 0;
+  block-size: auto;
+  max-block-size: none;
+  flex: 1 1 0;
+  align-self: stretch;
+}
+
+/*
+  Compatibilidad con hosts legacy/fixture que todavía puedan envolver la
+  vista con content-wrapper + panel-content.
+*/
 #view-container:has(.whatsapp-page) > .content-wrapper,
 .content-wrapper:has(.whatsapp-page) {
   min-block-size: 0;

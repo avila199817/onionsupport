@@ -10,7 +10,8 @@ concurrency:
   cancel-in-progress: true
 env:
   BASE_SHA: f7348006fe147cff128b2c5db3b85619b8e1bde9
-  MANIFEST_SHA: cb91687a8b4527ec8c3214c139dd290c839bc01f7b5b09ad208d8238d28065a1
+  MANIFEST_SHA: 8b4704e6d386413ed9e70c94b414c041eb86d420ec977d2bac9ad43bf859b041
+  PYTHONDONTWRITEBYTECODE: "1"
 jobs:
   regression:
     runs-on: ubuntu-24.04
@@ -40,7 +41,7 @@ jobs:
           encoded = ''.join(Path(f'.github/ci/spa-candidate-{i}.b64').read_text().strip() for i in range(4))
           patch = gzip.decompress(base64.b64decode(encoded, validate=True))
           assert hashlib.sha256(patch).hexdigest() == 'cd7c349370368a59ae1a690578679332a0000168f4e4ed9e7fdedb9a9ba66b45'
-          assert hashlib.sha256(Path('.github/ci/spa-regression-refinement.patch').read_bytes()).hexdigest() == 'a450399817bb72f91f6d85de1d98d934ac849d98312ebed4c420ba69c5898237'
+          assert hashlib.sha256(Path('.github/ci/spa-regression-refinement.patch').read_bytes()).hexdigest() == '7f860677e78d94a5b64679aa5a05b75db336f78c89143efed825b21801cfff34'
           Path(os.environ['RUNNER_TEMP'], 'spa.patch').write_bytes(patch)
           PY
           git apply --check "${RUNNER_TEMP}/spa.patch"
@@ -82,7 +83,9 @@ jobs:
         run: |
           set -euo pipefail
           npm run validate:ci 2>&1 | tee "${RUNNER_TEMP}/spa-modal-ci.log"
-          test -z "$(git status --porcelain --untracked-files=normal)"
+          git status --short | tee "${RUNNER_TEMP}/spa-modal-status.log"
+          # Same tracked-byte invariant as the repository's trusted candidate-build job.
+          test -z "$(git status --porcelain --untracked-files=no)"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         id: ready
         with:

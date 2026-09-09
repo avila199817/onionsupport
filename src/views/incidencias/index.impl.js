@@ -1,3 +1,4 @@
+import { getIncidenciaEntityId } from "../../core/entity-identity.js";
 import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
 /* =========================================================
    Onion Support - Incidencias Index
@@ -378,20 +379,7 @@ function safeError(
 }
 
 function getTicketId(item = {}) {
-  const raw =
-    safeObject(item);
-
-  return cleanText(
-    first(
-      raw.ticketId,
-      raw.incidenciaId,
-      raw.id,
-      raw.code,
-      raw.numero,
-      raw.ticketCode
-    ),
-    ""
-  );
+  return getIncidenciaEntityId(item);
 }
 
 function shouldPreserveExisting(

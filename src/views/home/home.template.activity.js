@@ -1,3 +1,5 @@
+import { normalizeEntityId } from "../../features/entity-overlay/intent.js";
+import { getIncidenciaEntityId, getFacturaEntityId } from "../../core/entity-identity.js";
 /* =========================================================
    Onion Support - Home Template · generated domain module
    Shared by /src/views/home/home.template.js
@@ -56,8 +58,8 @@ function activityEntityId(type = "", source = {}) {
   const entityType = overlayEntityType(type);
   const raw = isObject(source) ? source : {};
 
-  if (entityType === "factura") return invoiceDisplayId(raw);
-  if (entityType === "incidencia") return ticketDisplayId(raw);
+  if (entityType === "factura") return cleanText(first(raw.entityId, getFacturaEntityId(raw)), "");
+  if (entityType === "incidencia") return cleanText(first(raw.entityId, getIncidenciaEntityId(raw)), "");
 
   if (entityType === "cliente") {
     return safeDisplayId(
@@ -102,7 +104,7 @@ function entityKind(type = "") {
 
 function entityOpenLabel(type = "", id = "", relation = null) {
   const entityType = overlayEntityType(type);
-  const entityId = safeDisplayId(id, "");
+  const entityId = normalizeEntityId(entityType, id);
 
   const labels = {
     factura: "factura",
@@ -126,7 +128,7 @@ export function entityTriggerAttributes(
   source = "home"
 ) {
   const entityType = overlayEntityType(type);
-  const entityId = safeDisplayId(id, "");
+  const entityId = normalizeEntityId(entityType, id);
 
   if (!entityType || !entityId) return "";
 
@@ -274,6 +276,8 @@ function activityItem(item = {}, vm = {}) {
     ""
   );
 
+  const displayId = cleanText(first(source.displayId,
+    isInvoice ? invoiceDisplayId(relationSource) : ticketDisplayId(relationSource), entityId), "");
   const relation = resolveHomeEntityRelation(entityType, relationSource);
   const relationHtml = renderHomeEntityRelation(relation);
   const relationAttribute = relationHtml
@@ -295,7 +299,7 @@ function activityItem(item = {}, vm = {}) {
     <span class="home-entity-copy">
       <span class="home-entity-eyebrow">
         <span class="home-entity-kind">${escapeHtml(entityKind(entityType))}</span>
-        ${entityIdBadge(isInvoice ? "Factura" : "ID", entityId)}
+        ${entityIdBadge(isInvoice ? "Factura" : "ID", displayId)}
       </span>
 
       <strong class="home-entity-title">${escapeHtml(title)}</strong>

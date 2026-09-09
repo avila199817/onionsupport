@@ -10,12 +10,13 @@
    - Deduplica cargas concurrentes y protege cambios de sesión.
    - Tolera fallos parciales sin ocultar dominios disponibles.
    - Facturación global siempre desde /api/facturas/stats.
-   - La actividad conserva identificadores humanos de ticket/factura.
+   - La actividad separa IDs canónicos de apertura y números visibles de ticket/factura.
    - Sin DOM, Router, Store, Storage ni fetch propio.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import { onDomainChanged } from "../../core/domain-events.js";
+import { getIncidenciaEntityId, getFacturaEntityId } from "../../core/entity-identity.js";
 
 import IncidenciasApi from "../incidencias/incidencias.api.js";
 import FacturasApi from "../facturas/facturas.api.js";
@@ -599,7 +600,8 @@ function invoiceDisplayId(invoice = {}) {
 function buildActivity({ incidencias = [], facturas = [] } = {}) {
   const ticketItems = safeArray(incidencias).map((ticket) => ({
     type: "ticket",
-    entityId: ticketDisplayId(ticket),
+    entityId: getIncidenciaEntityId(ticket),
+    displayId: ticketDisplayId(ticket),
     title: cleanText(
       first(ticket.subject, ticket.asunto, ticket.title),
       "Incidencia"
@@ -619,7 +621,8 @@ function buildActivity({ incidencias = [], facturas = [] } = {}) {
 
   const invoiceItems = safeArray(facturas).map((invoice) => ({
     type: "invoice",
-    entityId: invoiceDisplayId(invoice),
+    entityId: getFacturaEntityId(invoice),
+    displayId: invoiceDisplayId(invoice),
     title: cleanText(
       first(
         invoice.numeroFacturaLegal,

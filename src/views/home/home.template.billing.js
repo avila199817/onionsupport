@@ -1,3 +1,4 @@
+import { getFacturaEntityId } from "../../core/entity-identity.js";
 /* =========================================================
    Onion Support - Home Template · generated domain module
    Shared by /src/views/home/home.template.js
@@ -38,7 +39,8 @@ import { billingOverview } from "./home.template.billing-overview.js";
 
 function invoiceItem(invoice = {}) {
   const source = isObject(invoice) ? invoice : {};
-  const id = invoiceDisplayId(source);
+  const id = getFacturaEntityId(source);
+  const displayId = invoiceDisplayId(source);
   const interactive = Boolean(id);
 
   const concept = cleanText(
@@ -100,7 +102,7 @@ function invoiceItem(invoice = {}) {
     <span class="home-entity-copy">
       <span class="home-entity-eyebrow">
         <span class="home-entity-kind">Factura</span>
-        ${id ? entityIdBadge("ID", id) : ""}
+        ${displayId ? entityIdBadge("ID", displayId) : ""}
       </span>
 
       <strong class="home-entity-title">${escapeHtml(label)}</strong>

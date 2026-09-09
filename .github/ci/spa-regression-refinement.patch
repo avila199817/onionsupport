@@ -48,3 +48,21 @@
        </span>
  
        <strong class="home-entity-title">${escapeHtml(label)}</strong>
+--- a/tools/spa-modal-regression.mjs
++++ b/tools/spa-modal-regression.mjs
+@@ -233,7 +233,14 @@
+       await load(); await openIncident(); await mediaOpen(id);
+       await page.locator(`${viewer} ${selector}`).waitFor({ state: "visible" });
+       if (id === "video-webm") await page.waitForFunction((viewer) => document.querySelector(`${viewer} video`)?.readyState >= 2, viewer);
+-      if (id === "document-pdf") assert.match(await page.locator(`${viewer} iframe`).getAttribute("src"), /\/@media\/pdf/);
++      if (id === "document-pdf") {
++        assert.match(await page.locator(`${viewer} iframe`).getAttribute("src"), /\/@media\/pdf/);
++        // Wait for the browser's native PDF renderer, not just an empty iframe.
++        const nativePdfUrl = (frame) => frame.url().startsWith("chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/");
++        const pdfFrame = page.frames().find(nativePdfUrl) || await page.waitForEvent("framenavigated", { predicate: nativePdfUrl });
++        await pdfFrame.waitForFunction(() => document.querySelector("pdf-viewer")?.getLoadSucceededForTesting?.() === true);
++        await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
++      }
+       if (id === "document-other") assert.match(await page.locator(`${viewer} ${selector}`).innerText(), /descargar|documento/i);
+       await page.screenshot({ path: `${evidence}/${id}.png` });
+       await page.locator(closeViewer).click();

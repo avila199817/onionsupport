@@ -11,7 +11,7 @@ concurrency:
 jobs:
   regression:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -23,20 +23,58 @@ jobs:
           package-manager-cache: false
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Browser regressions
+      - name: Verify exact candidate patch
         shell: bash
         run: |
           set -euo pipefail
-          node tools/private-domain-contracts.mjs --browser 2>&1 | tee "${RUNNER_TEMP}/spa-modal-tests.log"
-          if test -f tools/spa-modal-regression.mjs; then
-            node tools/spa-modal-regression.mjs 2>&1 | tee -a "${RUNNER_TEMP}/spa-modal-tests.log"
-          fi
+          python3 - <<'PY'
+          import base64, gzip, hashlib, os
+          from pathlib import Path
+          encoded = ''.join(Path(f'.github/ci/spa-candidate-{i}.b64').read_text().strip() for i in range(4))
+          patch = gzip.decompress(base64.b64decode(encoded, validate=True))
+          assert hashlib.sha256(patch).hexdigest() == 'cd7c349370368a59ae1a690578679332a0000168f4e4ed9e7fdedb9a9ba66b45'
+          Path(os.environ['RUNNER_TEMP'], 'spa.patch').write_bytes(patch)
+          PY
+      - name: Reproduce before fixing
+        shell: bash
+        env:
+          SPA_MODAL_EVIDENCE: /tmp/spa-modal-evidence/before
+        run: |
+          set -euo pipefail
+          git apply --include=tools/spa-modal-regression.mjs --include=tools/spa-modal-media-fixtures.mjs "${RUNNER_TEMP}/spa.patch"
+          set +e
+          node tools/spa-modal-regression.mjs > "${RUNNER_TEMP}/spa-modal-before.log" 2>&1
+          status=$?
+          set -e
+          cat "${RUNNER_TEMP}/spa-modal-before.log"
+          test "$status" -ne 0
+          git apply -R --include=tools/spa-modal-regression.mjs --include=tools/spa-modal-media-fixtures.mjs "${RUNNER_TEMP}/spa.patch"
+      - name: Apply reviewed candidate and remove temporary diagnostics files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --check "${RUNNER_TEMP}/spa.patch"
+          git apply "${RUNNER_TEMP}/spa.patch"
+          rm .github/ci/spa-candidate-{0,1,2,3}.b64 .github/workflows/spa-modal-source-snapshot.yml
+          git diff --check
+      - name: Exercise exact fixed attachment and Home flows
+        shell: bash
+        env:
+          SPA_MODAL_EVIDENCE: /tmp/spa-modal-evidence/after
+        run: |
+          set -euo pipefail
+          node tools/private-domain-contracts.mjs --browser 2>&1 | tee "${RUNNER_TEMP}/spa-modal-after.log"
+      - name: Validate full production candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run validate:ci 2>&1 | tee "${RUNNER_TEMP}/spa-modal-ci.log"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
           name: spa-modal-diagnostics-${{ github.sha }}
           path: |
-            ${{ runner.temp }}/spa-modal-tests.log
+            ${{ runner.temp }}/spa-modal-*.log
             /tmp/spa-modal-evidence
           retention-days: 3
           if-no-files-found: error

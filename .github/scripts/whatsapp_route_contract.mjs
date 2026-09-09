@@ -10,6 +10,8 @@ const [
   api,
   template,
   css,
+  fullViewComposition,
+  appCss,
   avatarSystem,
   avatarCss,
   uiCss,
@@ -23,6 +25,8 @@ const [
   readFile("src/views/whatsapp/whatsapp.api.js", "utf8"),
   readFile("src/views/whatsapp/whatsapp.template.js", "utf8"),
   readFile("src/css/views/whatsapp/index.css", "utf8"),
+  readFile("src/css/compositions/private-fullview-routes.css", "utf8"),
+  readFile("src/css/app.css", "utf8"),
   readFile("src/features/avatar-system/index.js", "utf8"),
   readFile("src/css/components/avatar-system.css", "utf8"),
   readFile("src/css/components/ui.css", "utf8"),
@@ -30,6 +34,7 @@ const [
 ]);
 
 const cssCode = css.replace(/\/\*[\s\S]*?\*\//g, "");
+const fullViewCode = fullViewComposition.replace(/\/\*[\s\S]*?\*\//g, "");
 
 // Route remains private/admin and uses the existing route-style boundary.
 assert.match(config, /whatsapp:\s*"\/whatsapp"/);
@@ -54,6 +59,9 @@ assert.match(view, /abortAll\(controllers\)/);
 assert.match(view, /loadUsuarioDetail/);
 assert.match(view, /loadClienteDetail/);
 assert.match(view, /synchronizeAvatars\(host\)/);
+assert.match(view, /mobilePanel:\s*"list"/);
+assert.match(view, /state\.mobilePanel\s*=\s*"thread"/);
+assert.match(view, /action === "back-to-list"[\s\S]*state\.mobilePanel\s*=\s*"list"/);
 assert.doesNotMatch(view, /\bfetch\s*\(/);
 assert.doesNotMatch(view, /\bHttp\s*\./);
 assert.doesNotMatch(view, /\/api\/whatsapp/);
@@ -87,6 +95,8 @@ assert.match(template, /class="ui-textarea whatsapp-composer-input/);
 assert.match(template, /class="whatsapp-pane whatsapp-conversations-pane/);
 assert.match(template, /class="whatsapp-pane whatsapp-thread-pane/);
 assert.match(template, /class="whatsapp-pane whatsapp-info-pane/);
+assert.match(template, /data-whatsapp-mobile-panel=/);
+assert.match(template, /data-whatsapp-action="back-to-list"/);
 assert.match(template, /data-app-icon="wa"/);
 assert.match(template, /data-app-icon="reload"/);
 assert.match(template, /aria-label="WhatsApp Business"/);
@@ -128,4 +138,24 @@ assert.doesNotMatch(cssCode, /!important\b/i);
 assert.doesNotMatch(cssCode, /@import/);
 assert.doesNotMatch(cssCode, /data:image|<svg/i);
 
-console.log("WhatsApp route contract: PASS · Correo-parity full view · centralized backend · shared UI/avatar authority");
+// Cross-view geometry closes the full-height chain on every viewport.
+assert.match(appCss, /@import url\("\.\/compositions\/private-fullview-routes\.css"\) layer\(compositions\);/);
+assert.match(fullViewComposition, /FULL-VIEW CHAIN · ALL VIEWPORTS/);
+assert.match(fullViewCode, /\.main-content:has\(\.whatsapp-page\)/);
+assert.match(fullViewCode, /#app-content:has\(\.whatsapp-page\)[\s\S]*block-size:\s*100%/);
+assert.match(fullViewCode, /#view-container:has\(\.whatsapp-page\)[\s\S]*display:\s*flex/);
+assert.match(fullViewCode, /\.content-wrapper:has\(\.whatsapp-page\)[\s\S]*padding:\s*0/);
+assert.match(fullViewCode, /\.panel-content\[data-view="whatsapp"\]:has\(\.whatsapp-page\)[\s\S]*block-size:\s*100%/);
+assert.match(fullViewCode, /\.whatsapp-page,[\s\S]*\.whatsapp-workspace,[\s\S]*\.whatsapp-pane[\s\S]*max-block-size:\s*100%/);
+assert.match(fullViewCode, /@container \(max-width: 1180px\)/);
+assert.match(fullViewCode, /@container \(max-width: 780px\)[\s\S]*\.whatsapp-workspace[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\)/);
+assert.match(fullViewCode, /@container \(max-width: 780px\)[\s\S]*\.whatsapp-thread-scroll[\s\S]*min-block-size:\s*0/);
+assert.match(fullViewCode, /@container \(max-width: 780px\)[\s\S]*\.whatsapp-composer-row[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\) auto/);
+assert.match(fullViewCode, /\.whatsapp-refresh-button[\s\S]*min-block-size:\s*44px/);
+assert.match(fullViewCode, /\.whatsapp-mobile-back[\s\S]*min-block-size:\s*44px/);
+assert.match(fullViewCode, /@container \(max-width: 520px\)[\s\S]*\.whatsapp-thread-link[\s\S]*display:\s*none/);
+assert.match(fullViewCode, /@media \(max-height: 560px\)/);
+assert.doesNotMatch(fullViewCode, /!important\b/i);
+assert.doesNotMatch(fullViewCode, /#[0-9a-f]{3,8}\b/i);
+
+console.log("WhatsApp route contract: PASS · full-view desktop/tablet/mobile · centralized backend · shared UI/avatar authority");

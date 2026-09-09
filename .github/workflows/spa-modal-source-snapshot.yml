@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 env:
   BASE_SHA: f7348006fe147cff128b2c5db3b85619b8e1bde9
-  MANIFEST_SHA: dee512ede82f4aa9a0a86815653ab71ecf3a5cda5b1fffa8583f1dcddcc1cc1c
+  MANIFEST_SHA: cb91687a8b4527ec8c3214c139dd290c839bc01f7b5b09ad208d8238d28065a1
 jobs:
   regression:
     runs-on: ubuntu-24.04
@@ -40,7 +40,7 @@ jobs:
           encoded = ''.join(Path(f'.github/ci/spa-candidate-{i}.b64').read_text().strip() for i in range(4))
           patch = gzip.decompress(base64.b64decode(encoded, validate=True))
           assert hashlib.sha256(patch).hexdigest() == 'cd7c349370368a59ae1a690578679332a0000168f4e4ed9e7fdedb9a9ba66b45'
-          assert hashlib.sha256(Path('.github/ci/spa-regression-refinement.patch').read_bytes()).hexdigest() == 'd59627d5b17346b6b02aa4b5d6b443e96f836d2d92a964079fe9b25ad11feeff'
+          assert hashlib.sha256(Path('.github/ci/spa-regression-refinement.patch').read_bytes()).hexdigest() == 'a450399817bb72f91f6d85de1d98d934ac849d98312ebed4c420ba69c5898237'
           Path(os.environ['RUNNER_TEMP'], 'spa.patch').write_bytes(patch)
           PY
           git apply --check "${RUNNER_TEMP}/spa.patch"

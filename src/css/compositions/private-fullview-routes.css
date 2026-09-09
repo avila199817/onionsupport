@@ -6,66 +6,279 @@
    - Cerrar la cadena de altura del shell para superficies privadas full-view.
    - Evitar huecos verticales entre la vista y el borde inferior del viewport.
    - Mantener el scroll dentro de los paneles de dominio, no en la página.
+   - Hacer que WhatsApp conserve una composición productiva en desktop,
+     tablet, móvil y landscape sin crear un segundo viewport de página.
 
-   Esta composición NO define estética de WhatsApp. Sólo resuelve la relación
-   geométrica entre el shell global y una vista que necesita ocupar el alto útil.
+   Esta composición NO redefine la estética de WhatsApp. Sólo resuelve
+   geometría, scroll, densidad responsive y targets táctiles.
 ========================================================= */
 
-@media (min-width: 1280px) and (min-height: 620px) {
+/* =========================================================
+   FULL-VIEW CHAIN · ALL VIEWPORTS
+========================================================= */
+
+:where(
   .main-content:has(.whatsapp-page),
-  .main-content:has(.panel-content[data-view="whatsapp"]) {
-    min-block-size: 0;
-    overflow: hidden;
-    scrollbar-gutter: auto;
-  }
+  .main-content:has(.panel-content[data-view="whatsapp"])
+) {
+  min-block-size: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+  scrollbar-gutter: auto;
+}
 
-  .main-content:has(.whatsapp-page) > #app-content,
-  .main-content:has(.panel-content[data-view="whatsapp"]) > #app-content,
-  #app-content:has(.whatsapp-page) {
-    min-block-size: 0;
-    block-size: 100%;
-    flex: 1 1 auto;
-    overflow: hidden;
-  }
+.main-content:has(.whatsapp-page) > #app-content,
+.main-content:has(.panel-content[data-view="whatsapp"]) > #app-content,
+#app-content:has(.whatsapp-page) {
+  min-block-size: 0;
+  block-size: 100%;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
 
-  #app-content:has(.whatsapp-page) > #view-container,
-  #view-container:has(.whatsapp-page) {
-    min-block-size: 0;
-    block-size: 100%;
-    flex: 1 1 auto;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
+#app-content:has(.whatsapp-page) > #view-container,
+#view-container:has(.whatsapp-page) {
+  min-block-size: 0;
+  block-size: 100%;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 
-  #view-container:has(.whatsapp-page) > .content-wrapper,
-  .content-wrapper:has(.whatsapp-page) {
-    min-block-size: 0;
-    block-size: 100%;
-    flex: 1 1 auto;
-    padding: 0;
-    gap: 0;
-    overflow: hidden;
-  }
+#view-container:has(.whatsapp-page) > .content-wrapper,
+.content-wrapper:has(.whatsapp-page) {
+  min-block-size: 0;
+  block-size: 100%;
+  flex: 1 1 auto;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
 
-  .content-wrapper:has(.whatsapp-page) > .panel-content[data-view="whatsapp"],
-  .panel-content[data-view="whatsapp"]:has(.whatsapp-page) {
-    min-block-size: 0;
-    block-size: 100%;
-    flex: 1 1 auto;
-    overflow: hidden;
-  }
+.content-wrapper:has(.whatsapp-page) > .panel-content[data-view="whatsapp"],
+.panel-content[data-view="whatsapp"]:has(.whatsapp-page) {
+  min-block-size: 0;
+  block-size: 100%;
+  flex: 1 1 auto;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+}
 
-  .panel-content[data-view="whatsapp"] > .whatsapp-page,
-  .whatsapp-page,
+.panel-content[data-view="whatsapp"] > .whatsapp-page,
+.whatsapp-page,
+.whatsapp-workspace,
+.whatsapp-pane {
+  min-block-size: 0;
+  block-size: 100%;
+  max-block-size: 100%;
+}
+
+.whatsapp-page {
+  flex: 1 1 auto;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.whatsapp-workspace,
+.whatsapp-pane {
+  overflow: hidden;
+}
+
+.whatsapp-conversation-list,
+.whatsapp-thread-scroll,
+.whatsapp-info-grid {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* =========================================================
+   TABLET / COMPACT DESKTOP
+========================================================= */
+
+@container (max-width: 1180px) {
   .whatsapp-workspace,
   .whatsapp-pane {
     min-block-size: 0;
     block-size: 100%;
+    max-block-size: 100%;
+    overflow: hidden;
+  }
+}
+
+/* =========================================================
+   MOBILE · ONE PANEL, SAME FULL HEIGHT
+========================================================= */
+
+@container (max-width: 780px) {
+  .whatsapp-workspace {
+    min-block-size: 0;
+    block-size: 100%;
+    max-block-size: 100%;
+    grid-template-columns: minmax(0, 1fr);
+    overflow: hidden;
   }
 
-  .whatsapp-page {
-    flex: 1 1 auto;
+  .whatsapp-pane {
+    min-block-size: 0;
+    block-size: 100%;
+    max-block-size: 100%;
+    border-inline-end: 0;
     overflow: hidden;
+  }
+
+  .whatsapp-conversation-list,
+  .whatsapp-thread-scroll {
+    min-block-size: 0;
+    overscroll-behavior: contain;
+  }
+
+  .whatsapp-thread-scroll {
+    padding: 14px 12px;
+  }
+
+  .whatsapp-search-input {
+    min-block-size: 44px;
+  }
+
+  .whatsapp-conversation {
+    min-block-size: 64px;
+    touch-action: manipulation;
+  }
+
+  .whatsapp-mobile-back {
+    min-inline-size: 44px;
+    min-block-size: 44px;
+    touch-action: manipulation;
+  }
+
+  .whatsapp-refresh-button {
+    inline-size: 44px;
+    min-inline-size: 44px;
+    block-size: 44px;
+    min-block-size: 44px;
+    touch-action: manipulation;
+  }
+
+  .whatsapp-thread-head {
+    gap: 8px;
+  }
+
+  .whatsapp-thread-link {
+    max-inline-size: 38%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .whatsapp-composer {
+    min-block-size: 0;
+  }
+
+  .whatsapp-composer-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 8px;
+  }
+
+  .whatsapp-composer-input {
+    min-block-size: 52px;
+    max-block-size: 132px;
+    resize: none;
+  }
+
+  .whatsapp-send-button {
+    inline-size: auto;
+    min-inline-size: 86px;
+    min-block-size: 44px;
+    touch-action: manipulation;
+  }
+
+  .whatsapp-composer-meta {
+    align-items: center;
+    flex-direction: row;
+    gap: 8px;
+  }
+}
+
+/* =========================================================
+   PHONE
+========================================================= */
+
+@container (max-width: 520px) {
+  .whatsapp-pane-head,
+  .whatsapp-thread-head {
+    min-block-size: 58px;
+    padding-inline: 10px;
+  }
+
+  .whatsapp-thread-link {
+    display: none;
+  }
+
+  .whatsapp-thread-avatar {
+    inline-size: 36px;
+    block-size: 36px;
+  }
+
+  .whatsapp-composer {
+    gap: 5px;
+    padding: 8px 10px;
+  }
+
+  .whatsapp-composer-row {
+    gap: 8px;
+  }
+
+  .whatsapp-composer-input {
+    min-block-size: 50px;
+    max-block-size: 120px;
+  }
+
+  .whatsapp-send-button {
+    min-inline-size: 74px;
+    padding-inline: 12px;
+  }
+
+  .whatsapp-composer-meta {
+    justify-content: flex-end;
+  }
+
+  .whatsapp-composer-meta span:first-child {
+    display: none;
+  }
+}
+
+/* =========================================================
+   SHORT / LANDSCAPE VIEWPORTS
+========================================================= */
+
+@media (max-height: 560px) {
+  .main-content:has(.whatsapp-page) .whatsapp-pane-head,
+  .main-content:has(.whatsapp-page) .whatsapp-thread-head {
+    min-block-size: 52px;
+    padding-block: 6px;
+  }
+
+  .main-content:has(.whatsapp-page) .whatsapp-contact-summary {
+    padding-block: 12px 10px;
+  }
+
+  .main-content:has(.whatsapp-page) .whatsapp-composer {
+    gap: 4px;
+    padding-block: 6px;
+  }
+
+  .main-content:has(.whatsapp-page) .whatsapp-composer-input {
+    min-block-size: 44px;
+    max-block-size: 96px;
+  }
+
+  .main-content:has(.whatsapp-page) .whatsapp-composer-meta {
+    justify-content: flex-end;
+  }
+
+  .main-content:has(.whatsapp-page) .whatsapp-composer-meta span:first-child {
+    display: none;
   }
 }

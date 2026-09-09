@@ -27,12 +27,18 @@
   scrollbar-gutter: auto;
 }
 
+/*
+  La cadena se resuelve por flex-basis 0, no por el tamaño intrínseco del
+  contenido. Así cada nivel consume exactamente el alto útil que publica
+  .main-content y no puede quedarse en una altura parcial dejando un hueco.
+*/
 .main-content:has(.whatsapp-page) > #app-content,
 .main-content:has(.panel-content[data-view="whatsapp"]) > #app-content,
 #app-content:has(.whatsapp-page) {
   min-block-size: 0;
   block-size: 100%;
-  flex: 1 1 auto;
+  flex: 1 1 0;
+  align-self: stretch;
   overflow: hidden;
 }
 
@@ -40,7 +46,8 @@
 #view-container:has(.whatsapp-page) {
   min-block-size: 0;
   block-size: 100%;
-  flex: 1 1 auto;
+  flex: 1 1 0;
+  align-self: stretch;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -50,7 +57,8 @@
 .content-wrapper:has(.whatsapp-page) {
   min-block-size: 0;
   block-size: 100%;
-  flex: 1 1 auto;
+  flex: 1 1 0;
+  align-self: stretch;
   padding: 0;
   gap: 0;
   overflow: hidden;
@@ -60,7 +68,8 @@
 .panel-content[data-view="whatsapp"]:has(.whatsapp-page) {
   min-block-size: 0;
   block-size: 100%;
-  flex: 1 1 auto;
+  flex: 1 1 0;
+  align-self: stretch;
   padding: 0;
   margin: 0;
   overflow: hidden;
@@ -76,7 +85,8 @@
 }
 
 .whatsapp-page {
-  flex: 1 1 auto;
+  flex: 1 1 0;
+  align-self: stretch;
   overflow: hidden;
   overscroll-behavior: none;
 }

@@ -1,0 +1,39 @@
+--- a/tools/spa-modal-regression.mjs
++++ b/tools/spa-modal-regression.mjs
+@@ -39,6 +39,11 @@
+   const outside = [];
+   await context.route("**/*", async (route) => {
+     const url = new URL(route.request().url());
++    // Chromium's built-in PDF viewer is local browser UI, not network egress.
++    // Keep every HTTP(S) request outside the fixture origin blocked.
++    if (url.protocol === "chrome:" || (
++      url.protocol === "chrome-extension:" && url.hostname === "mhjfbmdgcfjbbpaeojofohoefgiehjai"
++    )) return route.continue();
+     if (url.origin !== origin) { outside.push(url.href); return route.abort(); }
+     if (url.pathname.startsWith("/@media/")) {
+       const kind = url.pathname.split("/").at(-1);
+@@ -204,10 +209,21 @@
+   await scenario("gallery replaces attachment content without creating another viewer", async () => {
+     await load(); await openIncident(); await mediaOpen();
+     const layer = await page.locator(viewer).elementHandle();
+-    await page.locator(`${viewer} [data-media-gallery-action='next']`).click();
+-    await page.waitForFunction((viewer) => document.querySelector(`${viewer} [data-preview-attachment-id]`)?.dataset.previewAttachmentId === "image-two", viewer);
++    // Gallery order follows the domain's rendered list, not fixture input order.
++    const ids = await page.locator(`${panel} .incidencias-modal-view-btn[data-attachment-id]`).evaluateAll((nodes) =>
++      [...new Set(nodes.map((node) => node.dataset.attachmentId))].filter((id) => id !== "document-other"));
++    assert.equal(ids.length, 4);
++    const index = ids.indexOf("image-one");
++    assert.ok(index >= 0);
++    const direction = index + 1 < ids.length ? "next" : "previous";
++    const target = index + (direction === "next" ? 1 : -1);
++    await page.locator(`${viewer} [data-media-gallery-action='${direction}']`).click();
++    await page.waitForFunction(({ viewer, id }) => document.querySelector(`${viewer} [data-preview-attachment-id]`)?.dataset.previewAttachmentId === id, { viewer, id: ids[target] });
+     assert.equal(await page.locator(viewer).evaluate((node, previous) => node === previous, layer), true);
+-    assert.match(await page.locator(`${viewer} [data-media-gallery-counter='true']`).innerText(), /2 \/ 4/);
++    assert.equal(await page.locator(`${viewer} [data-media-gallery-counter='true']`).innerText(), `${target + 1} / ${ids.length}`);
++    await page.locator(`${viewer} [data-media-gallery-action='${direction === "next" ? "previous" : "next"}']`).click();
++    await page.waitForFunction((viewer) => document.querySelector(`${viewer} [data-preview-attachment-id]`)?.dataset.previewAttachmentId === "image-one", viewer);
++    assert.equal(await page.locator(viewer).evaluate((node, previous) => node === previous, layer), true);
+     await page.locator(closeViewer).click();
+     await page.locator(viewer).waitFor({ state: "detached" });
+     assert.equal(await page.locator(panel).count(), 1);

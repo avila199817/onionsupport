@@ -1,0 +1,71 @@
+/* =========================================================
+   ONION SUPPORT — PRIVATE FULL-VIEW ROUTES
+   SHELL GEOMETRY COMPOSITION · 2026-09-09
+
+   Responsabilidad:
+   - Cerrar la cadena de altura del shell para superficies privadas full-view.
+   - Evitar huecos verticales entre la vista y el borde inferior del viewport.
+   - Mantener el scroll dentro de los paneles de dominio, no en la página.
+
+   Esta composición NO define estética de WhatsApp. Sólo resuelve la relación
+   geométrica entre el shell global y una vista que necesita ocupar el alto útil.
+========================================================= */
+
+@media (min-width: 1280px) and (min-height: 620px) {
+  .main-content:has(.whatsapp-page),
+  .main-content:has(.panel-content[data-view="whatsapp"]) {
+    min-block-size: 0;
+    overflow: hidden;
+    scrollbar-gutter: auto;
+  }
+
+  .main-content:has(.whatsapp-page) > #app-content,
+  .main-content:has(.panel-content[data-view="whatsapp"]) > #app-content,
+  #app-content:has(.whatsapp-page) {
+    min-block-size: 0;
+    block-size: 100%;
+    flex: 1 1 auto;
+    overflow: hidden;
+  }
+
+  #app-content:has(.whatsapp-page) > #view-container,
+  #view-container:has(.whatsapp-page) {
+    min-block-size: 0;
+    block-size: 100%;
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  #view-container:has(.whatsapp-page) > .content-wrapper,
+  .content-wrapper:has(.whatsapp-page) {
+    min-block-size: 0;
+    block-size: 100%;
+    flex: 1 1 auto;
+    padding: 0;
+    gap: 0;
+    overflow: hidden;
+  }
+
+  .content-wrapper:has(.whatsapp-page) > .panel-content[data-view="whatsapp"],
+  .panel-content[data-view="whatsapp"]:has(.whatsapp-page) {
+    min-block-size: 0;
+    block-size: 100%;
+    flex: 1 1 auto;
+    overflow: hidden;
+  }
+
+  .panel-content[data-view="whatsapp"] > .whatsapp-page,
+  .whatsapp-page,
+  .whatsapp-workspace,
+  .whatsapp-pane {
+    min-block-size: 0;
+    block-size: 100%;
+  }
+
+  .whatsapp-page {
+    flex: 1 1 auto;
+    overflow: hidden;
+  }
+}

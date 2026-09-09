@@ -10,7 +10,7 @@
   "src/views/facturas/index.js": "ded11636e5e1db9bef160e1014e2e053f6b37e9c5e5598caa4c959971fca64a9",
   "src/views/home/home.api.js": "887fa09ace74229c5a90191781aa13a3beb6b801b61f80b7f5a3f77413df2ed3",
   "src/views/home/home.template.activity.js": "f3c1f55675904b824b4373d601e23210a7c9edabba7447ce7488dea92c78d60f",
-  "src/views/home/home.template.billing.js": "d1aa40d7ba08ddb3a05ff70808d5e53e8e1862753abd62084df8c9f88c240ec3",
+  "src/views/home/home.template.billing.js": "0883e23c8b48ef487fe5e8def5a8d3d35dab6665093ae849123ddf8a9340a8b5",
   "src/views/home/home.template.foundation.js": "2757af1d897f0f24464fb029fa9269ae4f4c3bd90fca6a5d705fdedaa94ce83a",
   "src/views/incidencias/index.impl.js": "dec813122bd09107149097efc396efc016bdeadb27f8b301b7d8d155781d215e",
   "src/views/incidencias/index.js": "7f8846d7c294c16cb8d7529809c584013f9a5bf40f0e8852f354f2f1e8ead9d9",

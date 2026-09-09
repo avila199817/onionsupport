@@ -17,5 +17,5 @@
   "tools/home-entity-identity-contract.mjs": "5cf9de19695924307f270adcf2b6dd4f030080cc80c1377d32054fdee8ec0be1",
   "tools/private-domain-contracts.mjs": "ad5d583fcb3c707496312317d26eb8189df80ef269a51413a83b38aeff3b687d",
   "tools/spa-modal-media-fixtures.mjs": "7556990030ee27d046b05768ec481e245688c2d374f18cace9bf580985bf2cc4",
-  "tools/spa-modal-regression.mjs": "009c356b38997f8d7ac3695a58e8d1cd06735a02a65f3aee96bf7b19e7344b43"
+  "tools/spa-modal-regression.mjs": "6ff75941e9bc3415e248317ec4be71e916a33ef3423912e64d780cbc2d888b56"
 }

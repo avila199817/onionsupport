@@ -1,0 +1,21 @@
+{
+  ".github/scripts/app_entrypoint_integrity.py": "f841402d1f270307d8d6d999d8495149112dfc72b40c9898c5aae1f07bdcbfc3",
+  "docs/UI_MODAL_SYSTEM.md": "2f0bab1d1d5595b628c69ba97b7741dca0156bd65786337c44e8d5a0c7929624",
+  "src/app/enhancements.js": "f5a02ed7a2d079e2977a750e8cec2e07ffb4003670f7bed3f8be1580d53db2de",
+  "src/core/entity-identity.js": "b26927ec6cc59163847e291ef487d4681ffd3f4e393d6044c34e1588c0676204",
+  "src/features/incidencias-media-preview/index.js": "853230e856bb528c3de337b6507133336b56053b4e19ed3f4986be4e6f4bf943",
+  "src/features/incidencias-video-preview/core.js": "17c069feb8bfff91167dd4283010cc110ff453770eba8fb931db23fa96c2edea",
+  "src/features/incidencias-video-preview/gallery.js": "9c34a2d72bf2bcf0382ac5c8aed6f75598729cd2070aec90839a5e8757a47379",
+  "src/features/incidencias-video-preview/index.js": "7a1b0a54fa036acb5716a026da7b00928c4bd1d7bb9206fb500ee9d3224f3f9d",
+  "src/views/facturas/index.js": "ded11636e5e1db9bef160e1014e2e053f6b37e9c5e5598caa4c959971fca64a9",
+  "src/views/home/home.api.js": "887fa09ace74229c5a90191781aa13a3beb6b801b61f80b7f5a3f77413df2ed3",
+  "src/views/home/home.template.activity.js": "f3c1f55675904b824b4373d601e23210a7c9edabba7447ce7488dea92c78d60f",
+  "src/views/home/home.template.billing.js": "d1aa40d7ba08ddb3a05ff70808d5e53e8e1862753abd62084df8c9f88c240ec3",
+  "src/views/home/home.template.foundation.js": "2757af1d897f0f24464fb029fa9269ae4f4c3bd90fca6a5d705fdedaa94ce83a",
+  "src/views/incidencias/index.impl.js": "dec813122bd09107149097efc396efc016bdeadb27f8b301b7d8d155781d215e",
+  "src/views/incidencias/index.js": "7f8846d7c294c16cb8d7529809c584013f9a5bf40f0e8852f354f2f1e8ead9d9",
+  "tools/home-entity-identity-contract.mjs": "5cf9de19695924307f270adcf2b6dd4f030080cc80c1377d32054fdee8ec0be1",
+  "tools/private-domain-contracts.mjs": "ad5d583fcb3c707496312317d26eb8189df80ef269a51413a83b38aeff3b687d",
+  "tools/spa-modal-media-fixtures.mjs": "7556990030ee27d046b05768ec481e245688c2d374f18cace9bf580985bf2cc4",
+  "tools/spa-modal-regression.mjs": "009c356b38997f8d7ac3695a58e8d1cd06735a02a65f3aee96bf7b19e7344b43"
+}

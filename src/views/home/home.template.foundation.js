@@ -353,12 +353,13 @@ export function safeDisplayId(value = "", fallback = "") {
 export function ticketDisplayId(source = {}) {
   return safeDisplayId(
     first(
-      source.entityId,
+      source.displayId,
       source.ticketId,
       source.incidenciaId,
       source.code,
       source.numero,
       source.id,
+      source.entityId,
       ""
     ),
     ""
@@ -368,13 +369,14 @@ export function ticketDisplayId(source = {}) {
 export function invoiceDisplayId(source = {}) {
   return safeDisplayId(
     first(
-      source.entityId,
+      source.displayId,
       source.numeroFacturaLegal,
       source.invoiceNumber,
       source.number,
       source.facturaId,
       source.invoiceId,
       source.id,
+      source.entityId,
       ""
     ),
     ""

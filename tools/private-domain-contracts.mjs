@@ -7,8 +7,10 @@ if (directDomainOwners) {
   await import("./private-user-identity-contract.mjs");
   await import("./home-domain-counts-contract.mjs");
   await import("./private-domain-events-contract.mjs");
+  await import("./home-entity-identity-contract.mjs");
   if (process.argv.includes("--browser")) {
     await import("./private-owner-modal-browser-contract.mjs");
+    await import("./spa-modal-regression.mjs");
   }
 } else {
   console.log("Private domain transition: legacy architecture covered by existing owner contracts");

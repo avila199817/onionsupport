@@ -17,7 +17,6 @@
 export const INCIDENCIAS_MEDIA_PREVIEW_VERSION =
   "incidencias-media-preview.v5.decoded-image-cache";
 
-const VIEW = "#view-container, [data-router-view='true']";
 const MODAL_HOST = "[data-incidencias-modal-host='true']";
 const ROOT = "[data-incidencias-modal-root='true']";
 const INPUT =
@@ -50,7 +49,6 @@ const remoteInflight = new Map();
 const remoteFailureAt = new Map();
 const visualCache = new Map();
 
-let observer = null;
 let modalObserver = null;
 let observedModalHost = null;
 let frame = 0;
@@ -114,12 +112,6 @@ const labelFor = (file = {}) => {
     ? "PDF"
     : "DOC";
 };
-
-function viewRoot() {
-  return browser()
-    ? document.querySelector(VIEW)
-    : null;
-}
 
 function objectUrl(file) {
   if (!browser() || !imageFile(file)) return "";
@@ -983,8 +975,7 @@ function syncRemote(root) {
 function syncModalObserver() {
   if (!browser()) return false;
 
-  const nextHost =
-    document.querySelector(MODAL_HOST);
+  const nextHost = mountRoot?.isConnected ? mountRoot : null;
 
   if (nextHost === observedModalHost) {
     return Boolean(nextHost);
@@ -1099,62 +1090,33 @@ function onClick(event) {
   schedule();
 }
 
-export function mountIncidenciasMediaPreview() {
-  if (!browser() || mounted) return false;
-
-  const root = viewRoot();
-
-  if (
-    !root ||
-    typeof MutationObserver === "undefined"
-  ) {
-    return false;
-  }
+export function mountIncidenciasMediaPreview(host = null) {
+  if (!browser() || !host?.isConnected || !host.matches?.(MODAL_HOST) ||
+      typeof MutationObserver === "undefined") return false;
+  if (mounted && mountRoot === host) return true;
+  if (mounted) destroyIncidenciasMediaPreview();
 
   mounted = true;
-  mountRoot = root;
-
-  document.addEventListener("change", onChange, true);
-  document.addEventListener("drop", onDrop, true);
-  document.addEventListener("click", onClick, true);
-
-  observer = new MutationObserver(() => {
-    const modalRoot =
-      document.querySelector(MODAL_HOST)
-        ?.querySelector?.(ROOT) || null;
-
-    if (modalRoot) {
-      fastRestoreCachedImages(modalRoot);
-    }
-
-    schedule();
-  });
-
-  observer.observe(
-    mountRoot,
-    {
-      childList: true,
-      subtree: true,
-    }
-  );
-
+  mountRoot = host;
+  mountRoot.addEventListener("change", onChange, true);
+  mountRoot.addEventListener("drop", onDrop, true);
+  mountRoot.addEventListener("click", onClick, true);
+  syncModalObserver();
   schedule();
   return true;
 }
 
-export function destroyIncidenciasMediaPreview() {
-  if (!browser() || !mounted) return false;
+export function destroyIncidenciasMediaPreview(host = null) {
+  if (!browser() || !mounted || (host && host !== mountRoot)) return false;
 
   mounted = false;
 
-  document.removeEventListener("change", onChange, true);
-  document.removeEventListener("drop", onDrop, true);
-  document.removeEventListener("click", onClick, true);
+  mountRoot?.removeEventListener("change", onChange, true);
+  mountRoot?.removeEventListener("drop", onDrop, true);
+  mountRoot?.removeEventListener("click", onClick, true);
 
-  observer?.disconnect?.();
   modalObserver?.disconnect?.();
 
-  observer = null;
   modalObserver = null;
   observedModalHost = null;
 
@@ -1177,9 +1139,9 @@ export function getIncidenciasMediaPreviewSnapshot() {
   return Object.freeze({
     version: INCIDENCIAS_MEDIA_PREVIEW_VERSION,
     mounted,
-    observerScope: "router-view",
+    observerScope: "modal-owner",
     modalObserverScope: "incidencias-modal-host",
-    cssAuthority: "router-styles",
+    cssAuthority: "entity-and-router-styles",
     pendingFiles: pending.order.length,
     remoteCacheEntries: remoteCache.size,
     decodedImageCacheEntries: visualCache.size,
@@ -1198,9 +1160,6 @@ export function getIncidenciasMediaPreviewSnapshot() {
   });
 }
 
-if (browser()) {
-  mountIncidenciasMediaPreview();
-}
 
 export default Object.freeze({
   version: INCIDENCIAS_MEDIA_PREVIEW_VERSION,

@@ -1,17 +1,11 @@
-/* =========================================================
-   Onion Support · Incidencias Attachment Viewer
-   Entrada canónica del feature de media.
-
-   core.js conserva la autoridad del visor, vídeo, cache y sesión de scroll.
-   gallery.js compone navegación sólida, teclado y controles internos.
-========================================================= */
+/* Onion Support · canonical owner-scoped attachment viewer.
+   The domain controller supplies its exclusive host; importing/preloading does
+   not install observers or listeners and never depends on a visited route. */
+import core from "./core.js";
+import gallery from "./gallery.js";
 
 export const INCIDENCIAS_ATTACHMENT_VIEWER_SUITE_VERSION =
-  "incidencias-attachment-viewer.v7.solid-inner-gallery";
-
-import core from "./core.js";
-import "./gallery.js";
-
+  "incidencias-attachment-viewer.v8.explicit-modal-owner";
 export * from "./core.js";
 export {
   INCIDENCIAS_MEDIA_GALLERY_VERSION,
@@ -20,4 +14,21 @@ export {
   getIncidenciasMediaGallerySnapshot,
 } from "./gallery.js";
 
-export default core;
+export function mountIncidenciasAttachmentViewer(host = null) {
+  if (!core.mount(host)) return false;
+  if (gallery.mount(host)) return true;
+  core.destroy(host);
+  return false;
+}
+
+export function destroyIncidenciasAttachmentViewer(host = null) {
+  gallery.destroy(host);
+  return core.destroy(host);
+}
+
+export default Object.freeze({
+  version: INCIDENCIAS_ATTACHMENT_VIEWER_SUITE_VERSION,
+  mount: mountIncidenciasAttachmentViewer,
+  destroy: destroyIncidenciasAttachmentViewer,
+  getSnapshot: () => Object.freeze({ core: core.getSnapshot(), gallery: gallery.getSnapshot() }),
+});

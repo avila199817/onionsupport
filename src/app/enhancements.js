@@ -53,16 +53,6 @@ const POST_ROUTER = Object.freeze([
     load: () => import("../features/facturas-autorefresh/index.js"),
   }),
   Object.freeze({
-    key: "incidencias-media-preview",
-    scope: "incidencias",
-    load: () => import("../features/incidencias-media-preview/index.js"),
-  }),
-  Object.freeze({
-    key: "incidencias-video-preview",
-    scope: "incidencias",
-    load: () => import("../features/incidencias-video-preview/index.js"),
-  }),
-  Object.freeze({
     key: "incidencias-detail-state",
     scope: "incidencias",
     load: () => import("../features/incidencias-detail-state/index.js"),

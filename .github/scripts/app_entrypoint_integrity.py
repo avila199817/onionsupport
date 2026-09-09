@@ -86,31 +86,6 @@ def public_home_manifest(route_styles: str) -> str:
     return match.group("body") if match else ""
 
 
-def owner_scoped_media(preview: str) -> bool:
-    """Permit the reviewed route-to-owner transition without accepting a global observer."""
-    owner_path = ROOT / "src/views/incidencias/index.js"
-    if not owner_path.is_file():
-        return False
-    owner = owner_path.read_text(encoding="utf-8")
-    registry = ENHANCEMENTS.read_text(encoding="utf-8")
-    return (
-        "modalObserver.observe(" in preview
-        and "document.querySelector(MODAL_HOST)" not in preview
-        and "document.addEventListener(" not in preview
-        and 'observerScope: "modal-owner"' in preview
-        and 'mountRoot.addEventListener("click", onClick, true)' in preview
-        and "host !== mountRoot" in preview
-        and 'cssAuthority: "entity-and-router-styles"' in preview
-        and registry.count("../features/incidencias-media-preview/index.js") == 0
-        and registry.count("../features/incidencias-video-preview/index.js") == 0
-        and owner.count('import("../../features/incidencias-media-preview/index.js")') == 1
-        and owner.count('import("../../features/incidencias-video-preview/index.js")') == 1
-        and "detailMediaFeature?.default.mount(lease?.modalHost)" in owner
-        and "detailViewerFeature?.default.mount(lease?.modalHost)" in owner
-        and "releaseDetailMedia(lease?.modalHost)" in owner
-    )
-
-
 def validate_runtime_boundaries(errors: list[str], runtime: dict[str, str]) -> None:
     loader = runtime["loader"]
     deeplink = runtime["deeplink"]
@@ -165,15 +140,13 @@ def validate_runtime_boundaries(errors: list[str], runtime: dict[str, str]) -> N
 
     require(
         errors,
-        owner_scoped_media(preview) or (
-            re.search(r"observer\.observe\s*\(\s*mountRoot\b", preview) is not None
-            and "observer.observe(document.body" not in preview
-            and 'observerScope: "router-view"' in preview
-            and ENHANCEMENTS.read_text(encoding="utf-8").count(
-                "../features/incidencias-media-preview/index.js"
-            ) == 1
-        ),
-        "incidencias-media-preview requiere una única autoridad: ruta actual o modal explícito",
+        "modalObserver.observe(" in preview
+        and "document.querySelector(MODAL_HOST)" not in preview
+        and "document.addEventListener(" not in preview
+        and 'observerScope: "modal-owner"' in preview
+        and 'mountRoot.addEventListener("click", onClick, true)' in preview
+        and "host !== mountRoot" in preview,
+        "incidencias-media-preview debe pertenecer al host explícito y exclusivo del modal",
     )
 
     require(
@@ -182,8 +155,8 @@ def validate_runtime_boundaries(errors: list[str], runtime: dict[str, str]) -> N
         and "STYLE_HREF" not in preview
         and "ensureCss" not in preview
         and 'document.createElement("link")' not in preview
-        and ('cssAuthority: "router-styles"' in preview or owner_scoped_media(preview)),
-        "Incidencias media preview debe recibir CSS exclusivamente del manifest de ruta",
+        and 'cssAuthority: "entity-and-router-styles"' in preview,
+        "Incidencias media preview recibe CSS del manifest de ruta o del dispatcher canónico",
     )
 
     require(

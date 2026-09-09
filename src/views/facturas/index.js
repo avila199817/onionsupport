@@ -1,3 +1,4 @@
+import { getFacturaEntityId } from "../../core/entity-identity.js";
 import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
 /* =========================================================
    Onion Support - Facturas Index
@@ -537,21 +538,7 @@ function getRoutes() {
 ========================================================= */
 
 function getFacturaId(item = {}) {
-  const raw = safeObject(item);
-
-  return cleanText(
-    first(
-      raw.id,
-      raw.facturaId,
-      raw.invoiceId,
-      raw.numeroFacturaLegal,
-      raw.numeroFacturaSistema,
-      raw.numeroFactura,
-      raw.numero,
-      raw.number
-    ),
-    ""
-  );
+  return getFacturaEntityId(item);
 }
 
 function getFacturaLabel(item = {}) {

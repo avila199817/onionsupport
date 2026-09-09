@@ -471,6 +471,12 @@ async function mountIncidenciasOwner(host = null, context = {}) {
           quarantineExistingModalHosts(documentLike, lease?.modalHost);
           activateModalHost(lease?.modalHost);
         }
+        if (detail.open) {
+          detailMediaFeature?.default.mount(lease?.modalHost);
+          detailViewerFeature?.default.mount(lease?.modalHost);
+        } else {
+          releaseDetailMedia(lease?.modalHost);
+        }
         if (detailOnly) {
           detailStateFeature?.syncIncidenciasDetailState?.(detail);
           detailLiveSyncFeature?.syncIncidenciasDetailLiveSync?.(detail);
@@ -580,6 +586,7 @@ async function mountIncidenciasOwner(host = null, context = {}) {
   );
 
   controller.destroy = function destroyIncidenciasWithEnhancements() {
+    releaseDetailMedia(lease?.modalHost);
     quarantineModalHost(
       lease?.modalHost
     );
@@ -621,6 +628,15 @@ let detailStateFeature = null;
 let detailLiveSyncFeature = null;
 let detailCommentAvatarsFeature = null;
 let detailFollowupAvatarsFeature = null;
+let detailMediaFeature = null;
+let detailViewerFeature = null;
+
+function releaseDetailMedia(host) {
+  // A stale route/controller cannot tear down the next owner's media session.
+  if (!host) return;
+  detailViewerFeature?.default.destroy(host);
+  detailMediaFeature?.default.destroy(host);
+}
 
 export function prepareIncidenciaDetail() {
   if (!detailPreparation) {
@@ -629,11 +645,15 @@ export function prepareIncidenciaDetail() {
       import("../../features/incidencias-detail-live-sync/index.js"),
       import("../../features/incidencias-comment-avatars/index.js"),
       import("../../features/incidencias-followup-avatars/index.js"),
-    ]).then(([state, liveSync, comments, followup]) => {
+      import("../../features/incidencias-media-preview/index.js"),
+      import("../../features/incidencias-video-preview/index.js"),
+    ]).then(([state, liveSync, comments, followup, media, viewer]) => {
       detailStateFeature = state;
       detailLiveSyncFeature = liveSync;
       detailCommentAvatarsFeature = comments;
       detailFollowupAvatarsFeature = followup;
+      detailMediaFeature = media;
+      detailViewerFeature = viewer;
       return state;
     }).catch((error) => {
       detailPreparation = null;

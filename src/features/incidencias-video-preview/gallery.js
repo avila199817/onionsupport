@@ -9,13 +9,12 @@
    - conserva el visor canónico y delega la apertura al controller;
    - mantiene el frame anterior como buffer visual hasta que el nuevo media está listo;
    - evita parpadeos, fondos negros y saltos de tamaño durante navegación;
-   - observer operativo limitado a la isla del modal y descubrimiento al Router view.
+   - observer y ciclo de vida limitados al host explícito del controller.
 ========================================================= */
 
 export const INCIDENCIAS_MEDIA_GALLERY_VERSION =
   "incidencias-media-gallery.v2.1.observer-idempotent";
 
-const VIEW = "#view-container, [data-router-view='true']";
 const HOST = "[data-incidencias-modal-host='true']";
 const ROOT = "[data-incidencias-modal-root='true']";
 const VIEWER = "[data-incidencias-media-viewer='true']";
@@ -38,7 +37,6 @@ const HOLD_RELEASE_MS = 110;
 let mounted = false;
 let modalHost = null;
 let observer = null;
-let viewObserver = null;
 let mountRoot = null;
 let frame = 0;
 
@@ -731,7 +729,7 @@ function bindHost(host = modalHost) {
 }
 
 function syncModalHost() {
-  const nextHost = document.querySelector(HOST);
+  const nextHost = mountRoot?.isConnected ? mountRoot : null;
   if (nextHost === modalHost) return Boolean(nextHost);
 
   if (modalHost) unbindHost(modalHost);
@@ -801,30 +799,22 @@ function schedule() {
   return true;
 }
 
-export function mountIncidenciasMediaGallery() {
-  if (!browser() || mounted || typeof MutationObserver === "undefined") {
-    return false;
-  }
-
-  mountRoot = document.querySelector(VIEW) || document.body;
-  if (!mountRoot) return false;
+export function mountIncidenciasMediaGallery(host = null) {
+  if (!browser() || !host?.isConnected || !host.matches?.(HOST) ||
+      typeof MutationObserver === "undefined") return false;
+  if (mounted && mountRoot === host) return true;
+  if (mounted) destroyIncidenciasMediaGallery();
 
   mounted = true;
+  mountRoot = host;
   document.addEventListener("keydown", onDocumentKeyDown, true);
-
-  viewObserver = new MutationObserver(schedule);
-  viewObserver.observe(mountRoot, {
-    childList: true,
-    subtree: true,
-  });
-
   syncModalHost();
   schedule();
   return true;
 }
 
-export function destroyIncidenciasMediaGallery() {
-  if (!browser() || !mounted) return false;
+export function destroyIncidenciasMediaGallery(host = null) {
+  if (!browser() || !mounted || (host && host !== mountRoot)) return false;
 
   mounted = false;
   navigationEpoch += 1;
@@ -834,9 +824,7 @@ export function destroyIncidenciasMediaGallery() {
   clearHold(currentViewer(), { immediate: true });
 
   observer?.disconnect?.();
-  viewObserver?.disconnect?.();
   observer = null;
-  viewObserver = null;
   modalHost = null;
   mountRoot = null;
 
@@ -884,12 +872,11 @@ export function getIncidenciasMediaGallerySnapshot() {
       observerTextWritesIdempotent: true,
       mutationObserverFrameLoopPrevented: true,
       observerScope: "modal-island",
-      hostDiscoveryScope: "stable-router-view",
+      hostDiscoveryScope: "explicit-modal-owner",
     }),
   });
 }
 
-if (browser()) mountIncidenciasMediaGallery();
 
 export default Object.freeze({
   version: INCIDENCIAS_MEDIA_GALLERY_VERSION,

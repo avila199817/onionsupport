@@ -126,3 +126,29 @@ node .github/scripts/incidencias_comment_avatar_runtime_contract.mjs
 `private-domain-contracts.mjs --browser` ejecuta los contratos de propietarios, identidad de usuario, contadores de Home, eventos de dominio y la matriz de controladores reales de los cuatro dominios. El registro de release conserva los resultados de la revisión concreta. Las fronteras de sesión/API usan datos sintéticos y no acreditan un recorrido autenticado contra el backend de producción.
 
 `.github/scripts/modal_lifecycle_contract.mjs` ejecuta en Chromium escenarios de anidamiento, cierre en orden inverso, guardas de operación pendiente, foco visible, diálogos vacíos, combobox, rerender, desmontaje y eliminación de listeners. También abre los módulos reales de Usuarios, Clientes y confirmación de reenvío de Facturas. Comprueba además consentimiento Google denegado antes de configurar etiquetas, exclusión de rutas privadas, saneamiento de URLs y foco/teclado del diálogo real de preferencias. Las solicitudes Google se interceptan localmente. No realiza mutaciones de dominio ni envía correos.
+
+## Attachment owner lifecycle and Home identifiers
+
+Ticket attachments share the same detail owner whether opened from Home, a
+list or an invoice relation. `prepareIncidenciaDetail()` loads the thumbnail and
+viewer modules without installing them. The Incidencias boundary passes its
+exclusive, active modal host to their `mount(host)` methods when the detail is
+rendered; close/disposal calls `destroy(host)` before removing that host. A
+stale controller cannot dispose a newer owner's media session. Thumbnail,
+viewer and gallery observers are confined to that host, not the route tree or
+an automatically discovered global host. Gallery and viewer are composed by
+the existing attachment feature; the ticket controller remains the authority
+for `/view`, preview state, errors and close actions.
+
+`core/entity-identity.js` selects the record ID used by Home and by the actual
+Incidencias/Facturas controllers. Home projects `entityId` separately from
+`displayId`; legal invoice numbers remain visible but never replace an existing
+record ID. Truncation for presentation must not truncate a modal request target.
+
+Regression coverage lives in `tools/home-entity-identity-contract.mjs` and
+`tools/spa-modal-regression.mjs`, integrated into `private-domain-contracts.mjs`.
+The browser harness uses production templates/controllers/features and isolates
+only HTTP/session boundaries. It covers real Home markup, nested clicks, media
+at desktop/mobile widths, gallery, close/focus/scroll, permission errors, late
+responses and owner replacement. These tests are not a claim of authenticated
+verification against production data.

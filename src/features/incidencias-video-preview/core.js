@@ -23,7 +23,6 @@ import { createModalLifecycle, modalFocusableElements, restoreModalFocus } from 
 export const INCIDENCIAS_VIDEO_PREVIEW_VERSION =
   "incidencias-video-preview.v5.media-session-stable-cache";
 
-const VIEW = "#view-container, [data-router-view='true']";
 const HOST = "[data-incidencias-modal-host='true']";
 const ROOT = "[data-incidencias-modal-root='true']";
 const PANEL = "[data-incidencias-modal-panel='true']";
@@ -55,7 +54,6 @@ const MAX_THUMB_CACHE = 32;
 
 let mounted = false;
 let mountRoot = null;
-let viewObserver = null;
 let modalObserver = null;
 let modalHost = null;
 let frame = 0;
@@ -1512,7 +1510,7 @@ function onClickCapture(event) {
 function syncModalObserver() {
   if (!browser()) return false;
 
-  const nextHost = document.querySelector(HOST);
+  const nextHost = mountRoot?.isConnected ? mountRoot : null;
 
   if (nextHost === modalHost) {
     return Boolean(nextHost);
@@ -1652,48 +1650,32 @@ function schedule() {
    LIFECYCLE
 ========================================================= */
 
-export function mountIncidenciasVideoPreview() {
-  if (!browser() || mounted) return false;
-
-  mountRoot = document.querySelector(VIEW) || document.body;
-
-  if (!mountRoot || typeof MutationObserver === "undefined") {
-    return false;
-  }
+export function mountIncidenciasVideoPreview(host = null) {
+  if (!browser() || !host?.isConnected || !host.matches?.(HOST) ||
+      typeof MutationObserver === "undefined") return false;
+  if (mounted && mountRoot === host) return true;
+  if (mounted) destroyIncidenciasVideoPreview();
 
   mounted = true;
-
-  document.addEventListener("click", onClickCapture, true);
+  mountRoot = host;
+  mountRoot.addEventListener("click", onClickCapture, true);
   document.addEventListener("scroll", enforceSessionScroll, true);
-
-  viewObserver = new MutationObserver(() => {
-    const root = document.querySelector(HOST)?.querySelector?.(ROOT) || null;
-    if (root) fastRestoreCachedThumbnails(root);
-    schedule();
-  });
-
-  viewObserver.observe(mountRoot, {
-    childList: true,
-    subtree: true,
-  });
-
+  syncModalObserver();
   schedule();
   return true;
 }
 
-export function destroyIncidenciasVideoPreview() {
-  if (!browser()) return false;
+export function destroyIncidenciasVideoPreview(host = null) {
+  if (!browser() || (host && host !== mountRoot)) return false;
 
   mounted = false;
   epoch += 1;
 
-  document.removeEventListener("click", onClickCapture, true);
+  mountRoot?.removeEventListener("click", onClickCapture, true);
   document.removeEventListener("scroll", enforceSessionScroll, true);
 
-  viewObserver?.disconnect?.();
   modalObserver?.disconnect?.();
 
-  viewObserver = null;
   modalObserver = null;
   modalHost = null;
 
@@ -1791,7 +1773,6 @@ export function getIncidenciasVideoPreviewSnapshot() {
   });
 }
 
-if (browser()) mountIncidenciasVideoPreview();
 
 export default Object.freeze({
   version: INCIDENCIAS_VIDEO_PREVIEW_VERSION,

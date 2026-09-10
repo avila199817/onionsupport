@@ -1,0 +1,44 @@
+name: Apply verified paid-panel source correction
+on:
+  push:
+    branches: [fix/paid-detail-projection-20260910]
+    paths: [.github/workflows/paid-projection-apply.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.repository == 'avila199817/onionsupport' && github.ref == 'refs/heads/fix/paid-detail-projection-20260910'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+      - name: Apply the bounded modal correction and verify its exact hash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          def blob(b): return hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()
+          p=Path('src/features/facturas-paid-confirm/index.js');raw=p.read_bytes();assert blob(raw)=='4d22270a628b848bd6e431b2e3f6fbbadd0e6d79'
+          s=raw.decode()
+          edits=[
+           ('import { getFinalization }','import { getFinalization, reconcilePaymentResult }'),
+           ('  if (facturaIsPaid(factura)) {\n    return ["error",','  if (facturaIsPaid(factura) && !fin.known) {\n    return ["warning", "Cobro registrado; estado documental no disponible", "La consulta no incluye el estado del PDF y del correo. Esto no confirma un fallo ni justifica reenviar. Actualiza el estado antes de reintentar."];\n  }\n  if (facturaIsPaid(factura)) {\n    return ["error",'),
+           ('const retryable = facturaIsPaid(factura) && !fin.completed && !fin.processing;','const retryable = facturaIsPaid(factura) && fin.known && !fin.completed && !fin.processing;'),
+           ('      ${retryable ? `<button','      ${facturaIsPaid(factura) && !fin.known ? `<button type="button" class="fpc-btn fpc-btn--secondary" data-fpc-action="refresh-status">Actualizar estado</button>` : ""}\n      ${retryable ? `<button'),
+           ('    state.factura = factura;\n    state.loading = false;','    state.factura = factura;\n    state.loading = false;\n    state.result = facturaIsPaid(factura);'),
+           ('    await markFacturaPaid(id, {}, { timeout: 120_000 });\n\n    const latest = await getFacturaById(id, {\n      force: true,\n      cache: false,\n    });','    const committed = await markFacturaPaid(id, {}, { timeout: 120_000 });\n    // The financial command succeeded. A refresh failure must not turn it into\n    // another payment command or discard its authoritative finalization state.\n    let latest = null;\n    try { latest = await getFacturaById(id, { force: true, cache: false }); } catch {}\n    const resolved = reconcilePaymentResult(committed, latest);'),
+           ('state.factura = latest || state.factura;','state.factura = resolved || state.factura;'),
+           ('    void executePayment();\n    return;\n  }\n  if (action === "done")','    void executePayment();\n    return;\n  }\n  if (action === "refresh-status") {\n    void refreshPaymentStatus();\n    return;\n  }\n  if (action === "done")'),
+           ('async function reconcileRetryAction() {','async function refreshPaymentStatus() {\n  if (!state?.open || state.submitting) return false;\n  const currentState = state;\n  state.submitting = true;\n  state.error = "";\n  render();\n  try {\n    const latest = await getFacturaById(state.facturaId, { force: true, cache: false });\n    if (state !== currentState) return false;\n    state.factura = reconcilePaymentResult(state.factura, latest);\n    state.result = true;\n    return true;\n  } catch {\n    if (state === currentState) state.error = "No se pudo consultar el estado. No se ha reenviado ningún correo ni registrado otro pago.";\n    return false;\n  } finally {\n    if (state === currentState) { state.submitting = false; render({ focus: true }); }\n  }\n}\n\nasync function reconcileRetryAction() {')]
+          for a,b in edits:
+              assert s.count(a)==1,a
+              s=s.replace(a,b,1)
+          data=s.encode();assert blob(data)=='4017d56fc75430f5bfcdfca9afb22b25cd48b110',blob(data);p.write_bytes(data)
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/features/facturas-paid-confirm/index.js
+          git commit -m 'fix(billing): retain command truth and make absent state a read-only refresh, not a failed document'
+          git push origin HEAD:refs/heads/fix/paid-detail-projection-20260910

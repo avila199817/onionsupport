@@ -11,3 +11,16 @@ assert.equal(getFinalization(wrap({status:'processing',heartbeatAt:'2000-01-01'}
 assert.equal(getFinalization(wrap({status:'processing'})).processing,false);
 assert.equal(getFinalization(wrap({delivery:{status:'failed',results:[{status:'sending'}]}})).uncertain,true);
 console.log('Paid frontend state contracts: 12 assertions passed.');
+
+const { reconcilePaymentResult } = await import('../src/features/facturas-paid-confirm/payment-state.js');
+const invoice={id:'F-TEST',paymentStatus:'paid',payment:{finalization:{...complete,heartbeatAt:'2026-09-10T18:26:00Z'}}};
+assert.equal(getFinalization({paymentStatus:'paid'}).known,false);
+assert.equal(getFinalization(invoice).known,true);
+assert.equal(reconcilePaymentResult(invoice,{id:'F-TEST',paymentStatus:'paid'}),invoice);
+assert.equal(reconcilePaymentResult(invoice,null),invoice);
+assert.equal(reconcilePaymentResult(invoice,{id:'ANOTHER-INVOICE',payment:{finalization:complete}}),invoice);
+assert.equal(reconcilePaymentResult(invoice,{id:'F-TEST',payment:{finalization:{status:'pending',heartbeatAt:'2026-09-10T18:25:00Z'}}}),invoice);
+const newer={id:'F-TEST',payment:{finalization:{status:'partial',heartbeatAt:'2026-09-10T18:27:00Z'}}};
+assert.equal(reconcilePaymentResult(invoice,newer),newer);
+assert.equal(reconcilePaymentResult({factura:invoice},null),invoice);
+console.log('Paid result reconciliation: 8 assertions PASS; missing/older GET cannot erase the command result; newer known failures are not hidden.');

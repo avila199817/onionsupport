@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import { getFinalization } from '../src/features/facturas-paid-confirm/payment-state.js';
+const wrap=f=>({payment:{finalization:f}});
+const complete={schemaVersion:2,status:'completed',document:{status:'ready'},delivery:{status:'sent'}};
+assert.equal(getFinalization(wrap(complete)).completed,true);
+for(const state of ['skipped','blocked','failed','uncertain','sending'])assert.equal(getFinalization(wrap({...complete,delivery:{status:state}})).completed,false);
+assert.equal(getFinalization(wrap({...complete,schemaVersion:1})).completed,false);
+assert.equal(getFinalization(wrap({...complete,document:{status:'failed'}})).completed,false);
+assert.equal(getFinalization(wrap({status:'processing',heartbeatAt:new Date().toISOString()})).processing,true);
+assert.equal(getFinalization(wrap({status:'processing',heartbeatAt:'2000-01-01'})).processing,false);
+assert.equal(getFinalization(wrap({status:'processing'})).processing,false);
+assert.equal(getFinalization(wrap({delivery:{status:'failed',results:[{status:'sending'}]}})).uncertain,true);
+console.log('Paid frontend state contracts: 12 assertions passed.');

@@ -11,18 +11,18 @@ const server=createServer(async(req,res)=>{try {
  if(path==='/') {
   res.setHeader('Content-Type','text/html');res.end(`<html><body><main><div data-facturas-detail-root="true" data-factura-id="F-TEST"><div class="facturas-detail-actions"><button data-action="mark-factura-paid" data-factura-id="F-TEST">Marcar pagada</button></div></div></main><script>
    window.invoice={id:'F-TEST',facturaId:'F-TEST',tipoDocumento:'factura',numeroFacturaLegal:'PRUEBA-522',total:121,currency:'EUR',paymentStatus:${JSON.stringify(url.searchParams.has('paid')?'paid':'pending')},cliente:{razonSocial:'PRUEBA',email:'test@example.test'}};
-   window.calls=0;window.reads=0;window.role='admin';window.getMode='complete';window.fin={schemaVersion:2,status:'completed',heartbeatAt:'2026-09-10T18:26:00Z',document:{status:'ready'},delivery:{status:'sent'}};
+   window.reviewCalls=0;window.reviewReads=0;window.reviewError=false;window.reviewData={ok:true,facturaId:'F-TEST',summary:{status:'not_requested'},services:[]};window.calls=0;window.reads=0;window.role='admin';window.getMode='complete';window.fin={schemaVersion:2,status:'completed',heartbeatAt:'2026-09-10T18:26:00Z',document:{status:'ready'},delivery:{status:'sent'}};
   </script><script type="module">import '/src/features/facturas-paid-confirm/index.js';</script></body></html>`);return;
  }
  // Keep every invoice API/normalizer/cache layer real. Only the HTTP boundary is isolated.
  if(path==='/src/core/http.js') {
   res.setHeader('Content-Type','text/javascript');res.end(`export default {
-   async get(){window.reads++;let item=structuredClone(window.invoice);if(item.paymentStatus==='paid'){
+   async get(endpoint){if(endpoint.endsWith('/valoraciones')){window.reviewReads++;if(window.reviewError)throw Error('review read unavailable');return structuredClone(window.reviewData);}window.reads++;let item=structuredClone(window.invoice);if(item.paymentStatus==='paid'){
     if(window.getMode==='error')throw Error('injected refresh failure');
     if(window.getMode==='missing')delete item.payment;
     if(window.getMode==='stale')item.payment={finalization:{schemaVersion:2,status:'pending',heartbeatAt:'2026-09-10T18:25:00Z'}};
    }return {ok:true,factura:item,item,data:item};},
-   async post(){window.calls++;await new Promise(r=>setTimeout(r,100));window.invoice.paymentStatus='paid';window.invoice.payment={finalization:structuredClone(window.fin)};
+   async post(endpoint){if(endpoint.endsWith('/valoraciones/solicitar')){window.reviewCalls++;await new Promise(r=>setTimeout(r,100));window.reviewData.summary.status='pending';return structuredClone(window.reviewData);}window.calls++;await new Promise(r=>setTimeout(r,100));window.invoice.paymentStatus='paid';window.invoice.payment={finalization:structuredClone(window.fin)};
     const item=structuredClone(window.invoice);return {ok:true,success:true,factura:item,item,finalization:{completed:window.fin.status==='completed'},meta:{paymentCommitted:true}};}
   };`);return;
  }
@@ -45,5 +45,21 @@ try {
  }
  await open('/?paid=1');await page.getByText('Cobro registrado; estado documental no disponible',{exact:true}).waitFor();assert.equal(await page.locator('[data-fpc-action="retry"]').count(),0);await page.locator('[data-fpc-action="refresh-status"]').click();await page.waitForTimeout(200);assert.equal(await page.evaluate(()=>window.calls),0);
  await open();await page.evaluate(()=>{window.role='user';});await page.locator('[data-fpc-action="confirm"]').click();await page.waitForTimeout(200);assert.equal(await page.evaluate(()=>window.calls),0);
- assert.deepEqual(errors,[]);console.log('Paid browser: 8 scenarios PASS through the real invoice API, normalizers, cache and modal; missing/stale/failed GET cannot fabricate a failed PDF or duplicate POST.');
+ await open();await page.locator('[data-fpc-action="confirm"]').click();await page.getByText('Factura pagada; envío aceptado',{exact:true}).waitFor();
+ await page.locator('[data-fpc-action="request-reviews"]').waitFor();
+ await page.locator('[data-fpc-action="request-reviews"]').evaluate(b=>{b.click();b.click();});
+ await page.getByText('Solicitud registrada; se enviará después de verificar la factura y su correo.',{exact:true}).waitFor();
+ assert.equal(await page.evaluate(()=>window.reviewCalls),1);assert.equal(await page.evaluate(()=>window.calls),1);
+ await page.evaluate(()=>{window.reviewData.summary.status='sent';window.reviewData.services=[{serviceId:'INC-TEST',context:{technicianDisplayName:'Técnico de prueba'},response:{ratings:{overall:1},comment:'<img src=x onerror="window.xss=1">',requestContact:true}}];});
+ await page.locator('[data-fpc-action="refresh-reviews"]').click();
+ await page.getByText('1 / 5 · Valoración privada',{exact:true}).waitFor();
+ await page.getByText('El cliente solicita contacto.',{exact:true}).waitFor();
+ assert.equal(await page.locator('[data-review-panel] img').count(),0);assert.equal(await page.evaluate(()=>window.xss),undefined);
+ await page.evaluate(()=>window.reviewError=true);await page.locator('[data-fpc-action="refresh-reviews"]').click();
+ await page.getByText('No se han podido consultar las valoraciones. El estado de la factura no cambia.',{exact:true}).waitFor();
+ assert.equal(await page.getByText('Factura pagada; envío aceptado',{exact:true}).count(),1);assert.equal(await page.evaluate(()=>window.calls),1);
+ await page.locator('[data-fpc-action="done"]').click();await page.waitForTimeout(250);
+ await page.locator('[data-action="mark-factura-paid"]').first().click();await page.getByText('Factura pagada; envío aceptado',{exact:true}).waitFor();
+ assert.equal(await page.locator('[data-fpc-action="confirm"]').count(),0);assert.equal(await page.evaluate(()=>window.calls),1);
+ assert.deepEqual(errors,[]);console.log('Paid browser: 12 scenarios PASS through the real invoice API, normalizers, cache and modal; missing/stale/failed GET cannot fabricate a failed PDF or duplicate POST.');
 }finally{await browser.close();await new Promise(r=>server.close(r));}

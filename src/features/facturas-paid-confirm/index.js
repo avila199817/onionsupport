@@ -1,4 +1,6 @@
 import { getFinalization, reconcilePaymentResult } from "./payment-state.js";
+import { renderReviewPanel } from "./review-panel.js";
+import { getFacturaReviews, requestFacturaReviews } from "../../views/facturas/facturas.reviews.api.js";
 import { AppCore } from "../../core/index.js";
 import { createModalLifecycle, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
 /* =========================================================
@@ -35,6 +37,7 @@ let retryPollTimer = 0;
 let dialogLookupSeq = 0;
 let reconcileLookupSeq = 0;
 let state = null;
+let reviewPollTimer = 0;
 const modalLifecycle = createModalLifecycle({
   getPanel: () => document.querySelector(`#${ROOT_ID} [data-fpc-dialog='true']`),
   onEscape: () => { if (!state?.submitting) closeDialog(); },
@@ -389,8 +392,9 @@ function renderDialog() {
   const factura = safeObject(state.factura, {});
   const alreadyPaid = facturaIsPaid(factura);
   const busy = state.loading || state.submitting;
-  const title = alreadyPaid ? "Finalizar factura pagada" : "Confirmar cobro completo";
-  const intro = alreadyPaid
+  const complete = getFinalization(factura).completed;
+  const title = complete ? "Factura pagada" : alreadyPaid ? "Finalizar factura pagada" : "Confirmar cobro completo";
+  const intro = complete ? "Cobro y envío de factura confirmados. Aquí puedes consultar las valoraciones del servicio." : alreadyPaid
     ? "El cobro ya consta registrado. Se completará o reparará la factura definitiva sin volver a registrar el pago."
     : "Al confirmar, se registrará el cobro completo y se generará la versión definitiva de la factura.";
 
@@ -419,6 +423,7 @@ function renderDialog() {
                   </button>
                 </div>`
               : ""}
+          ${!state.loading && state.result && facturaIsPaid(factura) && AppCore.getState()?.role === "admin" ? renderReviewPanel({ data: state.reviews, loading: state.reviewsLoading, error: state.reviewsError, canRequest: complete }) : ""}
         </div>
       </section>
     </div>
@@ -457,6 +462,8 @@ function render({ focus = false } = {}) {
 
 function closeDialog({ restoreFocus = true } = {}) {
   const opener = state?.opener || null;
+  clearTimeout(reviewPollTimer); reviewPollTimer = 0;
+  state?.reviewController?.abort();
   state = null;
   dialogLookupSeq += 1;
   render();
@@ -469,6 +476,8 @@ async function openDialog(node = null) {
   const id = nodeFacturaId(node);
   if (!id || state?.submitting) return false;
 
+  clearTimeout(reviewPollTimer); reviewPollTimer = 0;
+  state?.reviewController?.abort();
   const seq = ++dialogLookupSeq;
   state = {
     open: true,
@@ -479,6 +488,7 @@ async function openDialog(node = null) {
     result: false,
     error: "",
     opener: node,
+    reviews: null, reviewsLoading: false, reviewsError: "", reviewPolls: 0,
   };
   render({ focus: true });
 
@@ -491,6 +501,7 @@ async function openDialog(node = null) {
     state.loading = false;
     state.result = facturaIsPaid(factura);
     render({ focus: true });
+    if (state.result) void loadReviews();
     return true;
   } catch (error) {
     if (!state?.open || seq !== dialogLookupSeq) return false;
@@ -545,6 +556,7 @@ async function executePayment() {
     await syncController(id);
     render({ focus: true });
     scheduleReconcile();
+    void loadReviews();
     return true;
   } catch (error) {
     if (!state?.open || state.facturaId !== id) return false;
@@ -594,6 +606,35 @@ async function refreshPaymentStatus() {
   }
 }
 
+async function loadReviews(request = false) {
+  if (!state?.open || state.reviewsLoading || AppCore.getState()?.role !== "admin" || !facturaIsPaid(state.factura)) return false;
+  if (request && (!getFinalization(state.factura).completed || state.reviews?.summary?.status !== "not_requested")) return false;
+  const current = state;
+  clearTimeout(reviewPollTimer); reviewPollTimer = 0;
+  current.reviewsLoading = true; current.reviewsError = "";
+  current.reviewController = new AbortController();
+  render();
+  try {
+    const result = await (request ? requestFacturaReviews : getFacturaReviews)(current.facturaId, { signal: current.reviewController.signal });
+    if (state !== current) return false;
+    current.reviews = result;
+    return true;
+  } catch {
+    if (state === current && request) current.reviews = null;
+    if (state === current) current.reviewsError = request
+      ? "No se ha confirmado la solicitud. Actualiza el estado antes de intentarlo de nuevo. El pago no se ha modificado."
+      : "No se han podido consultar las valoraciones. El estado de la factura no cambia.";
+    return false;
+  } finally {
+    if (state === current) {
+      current.reviewsLoading = false; render();
+      if (["pending", "preparing", "sending", "uncertain"].includes(current.reviews?.summary?.status) && current.reviewPolls++ < 12) {
+        reviewPollTimer = setTimeout(() => void loadReviews(), 10000);
+      }
+    }
+  }
+}
+
 async function reconcileRetryAction() {
   reconcileFrame = 0;
 
@@ -628,7 +669,7 @@ async function reconcileRetryAction() {
 
     const fin = getFinalization(factura || {});
     if (fin.processing) retryPollTimer = setTimeout(scheduleReconcile, Math.min(15000, fin.remainingMs + 100));
-    const shouldRetry = facturaIsPaid(factura || {}) && !fin.completed;
+    const shouldRetry = facturaIsPaid(factura || {});
 
     if (!shouldRetry) {
       retry?.remove?.();
@@ -640,7 +681,7 @@ async function reconcileRetryAction() {
       retry.disabled = fin.processing;
       retry.setAttribute("aria-disabled", fin.processing ? "true" : "false");
       const label = retry.querySelector("span:last-child");
-      const retryLabel = fin.processing ? "Finalizando…" : fin.uncertain ? "Consultar envío" : "Finalizar factura";
+      const retryLabel = fin.completed ? "Valoraciones" : fin.processing ? "Finalizando…" : fin.uncertain ? "Consultar envío" : "Finalizar factura";
       if (label && label.textContent !== retryLabel) label.textContent = retryLabel;
       return true;
     }
@@ -652,11 +693,11 @@ async function reconcileRetryAction() {
     button.dataset.facturasAction = ACTION;
     button.dataset.facturaId = id;
     button.dataset.fpcRetryAction = "true";
-    button.title = "Completar el PDF definitivo pagado y su envío";
-    button.setAttribute("aria-label", "Finalizar factura pagada");
+    button.title = fin.completed ? "Consultar las valoraciones del servicio" : "Completar el PDF definitivo pagado y su envío";
+    button.setAttribute("aria-label", fin.completed ? "Consultar valoraciones" : "Finalizar factura pagada");
     button.disabled = fin.processing;
     button.setAttribute("aria-disabled", fin.processing ? "true" : "false");
-    button.innerHTML = `<span class="facturas-detail-btn-icon" aria-hidden="true">${icon("check")}</span><span>${fin.processing ? "Finalizando…" : "Finalizar factura"}</span>`;
+    button.innerHTML = `<span class="facturas-detail-btn-icon" aria-hidden="true">${icon("check")}</span><span>${fin.completed ? "Valoraciones" : fin.processing ? "Finalizando…" : "Finalizar factura"}</span>`;
 
     const closeButton = actions.querySelector(".facturas-detail-btn--close");
     actions.insertBefore(button, closeButton || null);
@@ -705,6 +746,10 @@ function onDocumentClick(event) {
   }
   if (action === "refresh-status") {
     void refreshPaymentStatus();
+    return;
+  }
+  if (action === "refresh-reviews" || action === "request-reviews") {
+    void loadReviews(action === "request-reviews");
     return;
   }
   if (action === "done") {

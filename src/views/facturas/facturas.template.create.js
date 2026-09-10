@@ -1,3 +1,4 @@
+import { normalizeClienteModel } from "../clientes/clientes.model.js";
 /* =========================================================
    Onion Support - Facturas Create Template
    Archivo: /src/views/facturas/facturas.template.create.js
@@ -427,15 +428,16 @@ export function getFacturaCreateTaxProfile(source = {}) {
 ========================================================= */
 
 function normalizeClient(item = {}) {
-  const raw = safeObject(item);
+  const raw = normalizeClienteModel(item);
 
   const id = cleanText(
-    first(raw.clienteId, raw.clientId, raw.customerId, raw.id, raw.userId, raw.username),
+    first(raw.clienteId, raw.id),
     ""
   );
 
   const name = cleanText(
     first(
+      raw.nombreFiscal,
       raw.name,
       raw.nombre,
       raw.displayName,
@@ -856,7 +858,7 @@ function renderSelectedClientes(vm = {}) {
   return `
     <div class="fac-create-selected-stack">
       ${vm.selectedClientes.map((client, index) => `
-        <article class="fac-create-selected-card${index === 0 ? " is-primary" : ""}">
+        <article data-render-key="client:${attr(client.clienteId)}" class="fac-create-selected-card${index === 0 ? " is-primary" : ""}">
           ${renderAvatar(client)}
           <div class="fac-create-selected-copy">
             <div class="fac-create-selected-top">
@@ -872,6 +874,7 @@ function renderSelectedClientes(vm = {}) {
                 type="button"
                 class="fac-create-chip-btn"
                 data-factura-create-action="${FACTURA_CREATE_ACTIONS.CLIENT_PRIMARY}"
+                ${vm.submitting ? "disabled" : ""}
                 data-client-index="${index}"
               >Principal</button>
             ` : ""}
@@ -879,6 +882,7 @@ function renderSelectedClientes(vm = {}) {
               type="button"
               class="fac-create-icon-btn"
               data-factura-create-action="${FACTURA_CREATE_ACTIONS.CLIENT_REMOVE}"
+                ${vm.submitting ? "disabled" : ""}
               data-client-index="${index}"
               aria-label="Quitar ${attr(client.name)}"
             >${icon("close")}</button>
@@ -895,7 +899,7 @@ function renderSelectedTickets(vm = {}) {
   return `
     <div class="fac-create-selected-stack">
       ${vm.selectedTickets.map((ticket, index) => `
-        <article class="fac-create-selected-card fac-create-selected-card--ticket${index === 0 ? " is-primary" : ""}">
+        <article data-render-key="ticket:${attr(ticket.id)}" class="fac-create-selected-card fac-create-selected-card--ticket${index === 0 ? " is-primary" : ""}">
           <span class="fac-create-result-icon" aria-hidden="true">${icon("ticket")}</span>
           <div class="fac-create-selected-copy">
             <div class="fac-create-selected-top">
@@ -910,6 +914,7 @@ function renderSelectedTickets(vm = {}) {
                 type="button"
                 class="fac-create-chip-btn"
                 data-factura-create-action="${FACTURA_CREATE_ACTIONS.TICKET_PRIMARY}"
+                ${vm.submitting ? "disabled" : ""}
                 data-ticket-index="${index}"
               >Principal</button>
             ` : ""}
@@ -917,6 +922,7 @@ function renderSelectedTickets(vm = {}) {
               type="button"
               class="fac-create-icon-btn"
               data-factura-create-action="${FACTURA_CREATE_ACTIONS.TICKET_REMOVE}"
+                ${vm.submitting ? "disabled" : ""}
               data-ticket-index="${index}"
               aria-label="Quitar incidencia ${attr(ticket.id)}"
             >${icon("close")}</button>
@@ -940,7 +946,7 @@ function renderInput({
   disabled = false,
 } = {}) {
   return `
-    <label class="fac-create-field">
+    <label data-render-key="field:${attr(name)}" class="fac-create-field">
       <span class="fac-create-label">${escapeHtml(label)}${required ? " *" : ""}</span>
       <input
         class="fac-create-input${error ? " is-error" : ""}"
@@ -961,7 +967,7 @@ function renderInput({
 
 function renderSelect({ label, name, value = "", options = [], error = "", disabled = false } = {}) {
   return `
-    <label class="fac-create-field">
+    <label data-render-key="field:${attr(name)}" class="fac-create-field">
       <span class="fac-create-label">${escapeHtml(label)}</span>
       <select
         class="fac-create-input fac-create-select${error ? " is-error" : ""}"
@@ -993,7 +999,7 @@ function renderLineItems(vm = {}, disabled = false) {
       ${lines.map((linea, index) => {
         const base = round2(number(linea.cantidad, 0) * number(linea.precioUnitario, 0));
         return `
-          <article class="fac-create-line-item" data-line-item="true" data-line-index="${index}">
+          <article data-render-key="line:${attr(linea.id)}" class="fac-create-line-item" data-line-item="true" data-line-index="${index}">
             <header class="fac-create-line-head">
               <div>
                 <span class="fac-create-line-kicker">Partida ${String(index + 1).padStart(2, "0")}</span>
@@ -1026,20 +1032,20 @@ function renderLineItems(vm = {}, disabled = false) {
                 <input class="fac-create-input" type="text" value="${attr(linea.descripcion)}" data-line-index="${index}" data-line-field="descripcion" autocomplete="off" placeholder="Detalle opcional de la partida" ${disabled ? "disabled" : ""}>
               </label>
 
-              <label class="fac-create-field">
+              <label data-render-key="line-field:cantidad" class="fac-create-field">
                 <span class="fac-create-label">Cantidad *</span>
                 <input class="fac-create-input${lineError(vm.errors, index, "cantidad") ? " is-error" : ""}" type="number" min="0.01" step="0.01" value="${attr(linea.cantidad)}" data-line-index="${index}" data-line-field="cantidad" ${disabled ? "disabled" : ""}>
                 ${renderFieldError(lineError(vm.errors, index, "cantidad"))}
               </label>
 
-              <label class="fac-create-field">
+              <label data-render-key="line-field:unidad" class="fac-create-field">
                 <span class="fac-create-label">Unidad</span>
                 <select class="fac-create-input fac-create-select" data-line-index="${index}" data-line-field="unidad" ${disabled ? "disabled" : ""}>
                   ${LINE_UNIT_OPTIONS.map((option) => `<option value="${attr(option.value)}"${option.value === linea.unidad ? " selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
                 </select>
               </label>
 
-              <label class="fac-create-field">
+              <label data-render-key="line-field:precioUnitario" class="fac-create-field">
                 <span class="fac-create-label">Precio unitario *</span>
                 <input class="fac-create-input${lineError(vm.errors, index, "precioUnitario") ? " is-error" : ""}" type="number" min="0.01" step="0.01" value="${attr(linea.precioUnitario)}" data-line-index="${index}" data-line-field="precioUnitario" ${disabled ? "disabled" : ""}>
                 ${renderFieldError(lineError(vm.errors, index, "precioUnitario"))}
@@ -1147,7 +1153,7 @@ export function renderFacturasCreateModal(input = {}) {
             ${vm.successMessage ? `<div class="fac-create-alert is-success" role="status">${escapeHtml(vm.successMessage)}</div>` : ""}
 
             <form id="${FORM_ID}" class="fac-create-form" data-facturas-create-form="true" novalidate>
-              <section class="fac-create-section">
+              <section data-render-key="clients" class="fac-create-section">
                 <div class="fac-create-section-head">
                   <div>
                     <span>Cliente</span>
@@ -1196,7 +1202,7 @@ export function renderFacturasCreateModal(input = {}) {
                 ` : ""}
               </section>
 
-              <section class="fac-create-section">
+              <section data-render-key="tickets" class="fac-create-section">
                 <div class="fac-create-section-head">
                   <div>
                     <span>Incidencia</span>
@@ -1243,7 +1249,7 @@ export function renderFacturasCreateModal(input = {}) {
                 >${renderTicketSearchResults(vm)}</div>
               </section>
 
-              <section class="fac-create-section">
+              <section data-render-key="billing" class="fac-create-section">
                 <div class="fac-create-section-head">
                   <div>
                     <span>Facturación</span>

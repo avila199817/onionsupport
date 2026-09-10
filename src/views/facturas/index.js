@@ -1,3 +1,5 @@
+import { normalizeClienteModel } from "../clientes/clientes.model.js";
+import { patchFacturaCreateDom } from "./facturas.create-dom.js";
 import { getFacturaEntityId } from "../../core/entity-identity.js";
 import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
 /* =========================================================
@@ -49,6 +51,7 @@ import {
   getFacturaCreateFormDefaults,
   validateFacturaCreateForm,
   getFacturaCreateBreakdown,
+  getFacturaCreateTaxProfile,
   renderFacturaCreateClientSearchSlot,
   renderFacturaCreateTicketSearchSlot,
 } from "./facturas.template.create.js";
@@ -60,7 +63,7 @@ import {
 } from "./facturas.template.modal.js";
 
 export const FACTURAS_INDEX_VERSION =
-  "facturas.index.productivo.v21.owner-authority-performance";
+  "facturas.index.productivo.v22.stable-create-client-relations";
 
 export const FACTURAS_VIEW_VERSION = FACTURAS_INDEX_VERSION;
 
@@ -837,167 +840,33 @@ async function requestGet(
 
 function unwrapList(payload = null) {
   if (Array.isArray(payload)) return payload;
-
-  const object = safeObject(payload, {});
-
-  return safeArray(
-    first(
-      object.items,
-      object.rows,
-      object.results,
-      object.records,
-      object.list,
-      object.data,
-      object.clientes,
-      object.clients,
-      object.customers,
-      object.users,
-      object.usuarios,
-      object.tickets,
-      object.incidencias,
-      object.data?.items,
-      object.data?.rows,
-      object.data?.results,
-      object.data?.clientes,
-      object.data?.clients,
-      object.data?.customers,
-      object.data?.users,
-      object.data?.usuarios,
-      object.data?.tickets,
-      object.data?.incidencias,
-      object.payload?.items,
-      object.payload?.clientes,
-      object.payload?.users,
-      object.payload?.tickets,
-      object.payload?.incidencias,
-      object.result?.items,
-      object.result?.clientes,
-      object.result?.users,
-      object.result?.tickets,
-      object.result?.incidencias,
-      []
-    )
-  );
+  const object = safeObject(payload);
+  // A nested envelope is not a list. An explicit empty list is authoritative.
+  const keys = ["items", "rows", "results", "records", "list", "data",
+    "clientes", "clients", "customers", "users", "usuarios", "tickets", "incidencias"];
+  for (const envelope of [object, object.data, object.payload, object.result]) {
+    if (Array.isArray(envelope)) return envelope;
+    if (!isObject(envelope)) continue;
+    for (const key of keys) {
+      if (Array.isArray(envelope[key])) return envelope[key];
+    }
+  }
+  return [];
 }
 
 function normalizeClientCandidate(raw = {}) {
-  const item = safeObject(raw);
-
-  const id = cleanText(
-    first(
-      item.clienteId,
-      item.clientId,
-      item.customerId,
-      item.id,
-      item.userId,
-      item.username
-    ),
-    ""
-  );
-
-  const userId = cleanText(
-    first(item.userId, item.usuarioId, item.uid, item.id),
-    ""
-  );
-
-  const clienteId = cleanText(
-    first(item.clienteId, item.clientId, item.customerId, id),
-    id
-  );
-
-  if (!id && !clienteId && !userId) return null;
-
-  const name = cleanText(
-    first(
-      item.name,
-      item.nombre,
-      item.displayName,
-      item.nombreContacto,
-      item.fullName,
-      item.razonSocial,
-      item.companyName,
-      item.empresa,
-      item.username
-    ),
-    id ? `Cliente ${id}` : "Cliente"
-  );
-
-  const email = cleanText(
-    first(
-      item.email,
-      item.mail,
-      item.emailCliente,
-      item.clienteEmail,
-      item.clientEmail,
-      item.emailLower
-    ),
-    ""
-  ).toLowerCase();
-
-  const avatarUrl = cleanText(
-    first(
-      item.avatarUrl,
-      item.avatar,
-      item.logoUrl,
-      item.logo,
-      item.photoUrl,
-      item.picture,
-      item.userAvatarUrl,
-      item.clientAvatarUrl,
-      item.profile?.avatarUrl,
-      ""
-    ),
-    ""
-  );
-
+  // Billing clients and login users are different entities. Reuse the canonical
+  // client model; an absent userId must never fall back to the client's id/uid.
+  const item = normalizeClienteModel(raw);
+  if (!item.clienteId) return null;
   return {
     ...item,
-    id: clienteId || userId || id,
-    clienteId: clienteId || id,
-    clientId: clienteId || id,
-    userId,
-    name,
-    nombre: name,
-    displayName: name,
-    nombreContacto: cleanText(
-      first(item.nombreContacto, item.contactName, name),
-      name
-    ),
-    razonSocial: cleanText(
-      first(item.razonSocial, item.companyName, item.empresa, name),
-      name
-    ),
-    email,
-    telefono: cleanText(
-      first(item.telefono, item.phone, item.mobile, item.movil),
-      ""
-    ),
-    nif: cleanText(
-      first(item.nif, item.cif, item.taxId, item.vatId),
-      ""
-    ),
-    username: cleanText(
-      first(
-        item.username,
-        item.slug,
-        email ? email.split("@")[0] : ""
-      ),
-      ""
-    ),
-    avatarUrl,
-    avatar: avatarUrl,
-    subtitle: cleanText(
-      first(
-        email,
-        item.razonSocial && item.razonSocial !== name
-          ? item.razonSocial
-          : "",
-        item.telefono,
-        item.nif,
-        clienteId || userId || id
-      ),
-      clienteId || userId || id
-    ),
+    id: item.clienteId,
+    clientId: item.clienteId,
+    name: item.nombreFiscal,
+    nombre: item.nombreFiscal,
+    displayName: item.nombreFiscal,
+    subtitle: cleanText(first(item.email, item.telefono, item.nif, item.clienteId), ""),
   };
 }
 
@@ -1042,11 +911,14 @@ function normalizeTicketCandidate(raw = {}) {
     asunto: subject,
     title: subject,
     clienteId: cleanText(
-      first(item.clienteId, item.clientId, item.cliente?.clienteId),
+      first(item.clienteId, item.clientId, item.customerId,
+        item.cliente?.clienteId, item.cliente?.id, item.client?.clienteId,
+        item.client?.id, item.clienteRef?.clienteId, item.clienteRef?.id),
       ""
     ),
     userId: cleanText(
-      first(item.userId, item.usuarioId, item.userRef?.userId),
+      first(item.userId, item.usuarioId, item.userRef?.userId,
+        item.userRef?.id, item.user?.userId, item.user?.id),
       ""
     ),
     status,
@@ -1113,24 +985,22 @@ function selectedUserIds(clients = []) {
   ];
 }
 
+function createClientSelectionKey(clients = []) {
+  return JSON.stringify([
+    selectedClienteIds(clients).sort(),
+    selectedUserIds(clients).sort(),
+  ]);
+}
+
 function ticketBelongsToClients(ticket = {}, clients = []) {
   const selected = safeArray(clients);
-  if (!selected.length) return true;
-
+  if (!selected.length) return false;
   const ticketClienteId = cleanText(ticket.clienteId, "");
   const ticketUserId = cleanText(ticket.userId, "");
-
-  if (!ticketClienteId && !ticketUserId) return false;
-
-  return selected.some((client) => {
-    const clienteId = cleanText(first(client.clienteId, client.id), "");
-    const userId = cleanText(client.userId, "");
-
-    return (
-      (clienteId && ticketClienteId === clienteId) ||
-      (userId && ticketUserId === userId)
-    );
-  });
+  // An explicit billing-client relationship wins, even for shared user accounts.
+  // Only legacy tickets without a client relationship may use a proven user link.
+  if (ticketClienteId) return selectedClienteIds(selected).includes(ticketClienteId);
+  return Boolean(ticketUserId && selectedUserIds(selected).includes(ticketUserId));
 }
 
 function dedupeTickets(items = [], selectedClientes = []) {
@@ -1142,7 +1012,7 @@ function dedupeTickets(items = [], selectedClientes = []) {
     if (!normalized?.id) continue;
     if (!ticketBelongsToClients(normalized, selectedClientes)) continue;
 
-    if (!map.has(normalized.id)) {
+    if (!map.has(normalized.id) || (!map.get(normalized.id).clienteId && normalized.clienteId)) {
       map.set(normalized.id, normalized);
     }
   }
@@ -1188,6 +1058,7 @@ async function searchClients(query = "") {
         "views.facturas.client-search"
       );
 
+      if (response?.ok === false) throw new Error(safeError(response, "No se pudo buscar cliente."));
       const items = dedupeClients(unwrapList(response));
       if (items.length) return items;
     } catch (error) {
@@ -1201,49 +1072,37 @@ async function searchClients(query = "") {
 
 async function searchTickets(query = "", selectedClientes = []) {
   const q = cleanText(query, "");
-  const clienteIds = selectedClienteIds(selectedClientes);
-  const userIds = selectedUserIds(selectedClientes);
-
-  if (!safeArray(selectedClientes).length) return [];
-
-  let lastError = null;
-
-  for (const endpoint of TICKET_SEARCH_ENDPOINTS) {
-    try {
-      const response = await requestGet(
-        endpoint,
-        {
-          ...(q ? { q, search: q } : {}),
-          limit: TICKET_LIMIT,
-          includeTotal: false,
-          includeClosed: true,
-          includeAll: true,
-          onlyMine: false,
-          ...(clienteIds[0] ? { clienteId: clienteIds[0] } : {}),
-          ...(userIds[0] ? { userId: userIds[0] } : {}),
-          ...(clienteIds.length
-            ? { clienteIds: clienteIds.join(",") }
-            : {}),
-          ...(userIds.length
-            ? { userIds: userIds.join(",") }
-            : {}),
-        },
-        "views.facturas.ticket-search"
-      );
-
-      const items = dedupeTickets(
-        unwrapList(response),
-        selectedClientes
-      );
-
-      if (items.length) return items;
-    } catch (error) {
-      lastError = error;
+  if (!isAdmin() || !safeArray(selectedClientes).length) return [];
+  // Scalar filters can be ANDed by the backend. Query each authoritative scope
+  // separately, then merge; never send only the first client's id alongside CSVs.
+  const scopes = [
+    ...selectedClienteIds(selectedClientes).map((clienteId) => ({ clienteId })),
+    ...selectedUserIds(selectedClientes).map((userId) => ({ userId })),
+  ];
+  const pages = new Array(scopes.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < scopes.length) {
+      const index = cursor++;
+      const response = await requestGet(TICKET_SEARCH_ENDPOINTS[0], {
+        ...(q ? { q, search: q } : {}),
+        limit: TICKET_LIMIT,
+        includeTotal: false,
+        includeClosed: true,
+        includeAll: true,
+        onlyMine: false,
+        ...scopes[index],
+      }, "views.facturas.ticket-search");
+      if (response?.ok === false) {
+        throw new Error(safeError(response, "No se pudieron cargar incidencias."));
+      }
+      pages[index] = unwrapList(response);
     }
-  }
-
-  if (lastError) throw lastError;
-  return [];
+  };
+  // Bound concurrency without dropping any selected client. A failed scope is
+  // an error, not an apparently successful empty/partial list.
+  await Promise.all(Array.from({ length: Math.min(4, scopes.length) }, worker));
+  return dedupeTickets(pages.flat(), selectedClientes);
 }
 
 /* =========================================================
@@ -3215,9 +3074,9 @@ function createFacturasController(host = null, context = {}) {
       CREATE_MODAL_SCROLL_SELECTOR
     );
 
-    target.innerHTML = renderFacturasCreateModal(
+    patchFacturaCreateDom(target, renderFacturasCreateModal(
       createModalRenderPayload()
-    );
+    ));
 
     syncModalBodyState();
 
@@ -4305,7 +4164,10 @@ function createFacturasController(host = null, context = {}) {
 
   function openCreateModal(openerNode = null) {
     if (destroyed || detailOnly || !isAdmin()) return false;
+    if (createModal.open) return true;
 
+    clientSearchSeq += 1;
+    ticketSearchSeq += 1;
     rememberModalReturnFocus(openerNode);
     suspendScheduledMainRender();
     disconnectInfiniteObserver();
@@ -4411,9 +4273,16 @@ function createFacturasController(host = null, context = {}) {
 
   function syncPrimaryClientToForm() {
     const primary = createModal.selectedClientes[0] || null;
+    const taxProfile = getFacturaCreateTaxProfile(primary || {});
 
     createModal.form = {
       ...createModal.form,
+      clienteTipo: primary?.clienteTipo || primary?.tipo || "",
+      clienteNif: primary?.nif || "",
+      clienteEsEmpresa: taxProfile.isBusiness,
+      aplicaIrpf: taxProfile.aplicaIrpf,
+      ivaRate: taxProfile.ivaRate,
+      irpfRate: taxProfile.irpfRate,
       clienteId: cleanText(
         first(primary?.clienteId, primary?.id, ""),
         ""
@@ -4565,12 +4434,7 @@ function createFacturasController(host = null, context = {}) {
 
     const exists = createModal.selectedClientes.some(
       (client) =>
-        client.id === item.id ||
-        client.clienteId === item.clienteId ||
-        (
-          client.userId &&
-          client.userId === item.userId
-        )
+        client.clienteId === item.clienteId
     );
 
     if (!exists) {
@@ -4623,6 +4487,10 @@ function createFacturasController(host = null, context = {}) {
     }
 
     ticketSearchSeq += 1;
+    if (ticketSearchTimer) {
+      window.clearTimeout(ticketSearchTimer);
+      ticketSearchTimer = null;
+    }
 
     createModal.selectedClientes =
       createModal.selectedClientes.filter(
@@ -4662,8 +4530,7 @@ function createFacturasController(host = null, context = {}) {
 
     if (createModal.selectedClientes.length) {
       void loadTicketsForSelectedClients({
-        autoSelectLatest:
-          createModal.selectedTickets.length === 0,
+        autoSelectLatest: false,
       });
     }
 
@@ -4752,6 +4619,7 @@ function createFacturasController(host = null, context = {}) {
     }
 
     createModal.ticketSearch.loading = true;
+    createModal.ticketSearch.results = [];
     patchCreateTicketSearchDom();
 
     ticketSearchTimer = window.setTimeout(() => {
@@ -4772,6 +4640,13 @@ function createFacturasController(host = null, context = {}) {
     autoSelectLatest = false,
     seq = null,
   } = {}) {
+    // A queued debounce from an old selection must not mutate state at all.
+    if (destroyed || !createModal.open ||
+        (Number.isInteger(seq) && seq !== ticketSearchSeq)) return [];
+    if (ticketSearchTimer) {
+      window.clearTimeout(ticketSearchTimer);
+      ticketSearchTimer = null;
+    }
     if (!createModal.selectedClientes.length) {
       createModal.ticketSearch.loading = false;
       createModal.ticketSearch.results = [];
@@ -4787,12 +4662,8 @@ function createFacturasController(host = null, context = {}) {
         ? seq
         : ++ticketSearchSeq;
 
-    const clientKey = [
-      ...selectedClienteIds(createModal.selectedClientes),
-      ...selectedUserIds(createModal.selectedClientes),
-    ]
-      .sort()
-      .join("|");
+    const requestClients = [...createModal.selectedClientes];
+    const clientKey = createClientSelectionKey(requestClients);
 
     createModal.ticketSearch.query = requestQuery;
     createModal.ticketSearch.loading = true;
@@ -4804,19 +4675,15 @@ function createFacturasController(host = null, context = {}) {
     try {
       const results = await searchTickets(
         requestQuery,
-        createModal.selectedClientes
+        requestClients
       );
 
-      const currentClientKey = [
-        ...selectedClienteIds(createModal.selectedClientes),
-        ...selectedUserIds(createModal.selectedClientes),
-      ]
-        .sort()
-        .join("|");
+      const currentClientKey = createClientSelectionKey(createModal.selectedClientes);
 
       if (
         requestSeq !== ticketSearchSeq ||
         clientKey !== currentClientKey ||
+        requestQuery !== createModal.ticketSearch.query ||
         destroyed ||
         !createModal.open
       ) {
@@ -4848,6 +4715,8 @@ function createFacturasController(host = null, context = {}) {
     } catch (searchError) {
       if (
         requestSeq !== ticketSearchSeq ||
+        clientKey !== createClientSelectionKey(createModal.selectedClientes) ||
+        requestQuery !== createModal.ticketSearch.query ||
         destroyed ||
         !createModal.open
       ) {
@@ -4855,7 +4724,7 @@ function createFacturasController(host = null, context = {}) {
       }
 
       createModal.ticketSearch.loading = false;
-      createModal.ticketSearch.empty = createModal.ticketSearch.results.length === 0;
+      createModal.ticketSearch.empty = false;
       createModal.ticketSearch.error = safeError(
         searchError,
         "No se pudieron cargar incidencias."
@@ -4868,7 +4737,8 @@ function createFacturasController(host = null, context = {}) {
 
   function selectTicket(index = -1) {
     const item = createModal.ticketSearch.results[index];
-    if (!item?.id) return false;
+    if (!item?.id || createModal.ticketSearch.loading || createModal.ticketSearch.error ||
+        !ticketBelongsToClients(item, createModal.selectedClientes)) return false;
 
     const exists = createModal.selectedTickets.some(
       (ticket) =>
@@ -6016,6 +5886,7 @@ function createFacturasController(host = null, context = {}) {
   async function handleAction(action = "", node = null) {
     const type = cleanText(action, "");
     if (!type) return false;
+    if (createModal.submitting && Object.values(FACTURA_CREATE_ACTIONS).includes(type)) return false;
 
     if (type === FACTURAS_ACTIONS.REFRESH) return refresh();
     if (type === FACTURAS_ACTIONS.EXPORT) return exportCsv(items);

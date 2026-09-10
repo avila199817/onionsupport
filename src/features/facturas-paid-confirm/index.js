@@ -1,4 +1,4 @@
-import { getFinalization } from "./payment-state.js";
+import { getFinalization, reconcilePaymentResult } from "./payment-state.js";
 import { AppCore } from "../../core/index.js";
 import { createModalLifecycle, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
 /* =========================================================
@@ -356,6 +356,9 @@ function getResultCopy(factura = {}) {
   if (fin.documentReady) {
     return ["warning", "PDF pagado listo; envío pendiente", "El documento definitivo ya está actualizado en el sistema, pero el correo al cliente necesita reintento."];
   }
+  if (facturaIsPaid(factura) && !fin.known) {
+    return ["warning", "Cobro registrado; estado documental no disponible", "La consulta no incluye el estado del PDF y del correo. Esto no confirma un fallo ni justifica reenviar. Actualiza el estado antes de reintentar."];
+  }
   if (facturaIsPaid(factura)) {
     return ["error", "Cobro registrado; falta finalizar el documento", "La factura consta como pagada, pero el PDF definitivo no quedó completado. Puedes reintentar sin duplicar el cobro."];
   }
@@ -365,7 +368,7 @@ function getResultCopy(factura = {}) {
 function renderResult(factura = {}) {
   const [tone, title, text] = getResultCopy(factura);
   const fin = getFinalization(factura);
-  const retryable = facturaIsPaid(factura) && !fin.completed && !fin.processing;
+  const retryable = facturaIsPaid(factura) && fin.known && !fin.completed && !fin.processing;
 
   return `
     <div class="fpc-result fpc-result--${escapeHtml(tone)}" role="status" aria-live="polite">
@@ -373,6 +376,7 @@ function renderResult(factura = {}) {
       <div><strong>${escapeHtml(title)}</strong><p>${escapeHtml(text)}</p></div>
     </div>
     <div class="fpc-actions">
+      ${facturaIsPaid(factura) && !fin.known ? `<button type="button" class="fpc-btn fpc-btn--secondary" data-fpc-action="refresh-status">Actualizar estado</button>` : ""}
       ${retryable ? `<button type="button" class="fpc-btn fpc-btn--secondary" data-fpc-action="retry">Reintentar finalización</button>` : ""}
       <button type="button" class="fpc-btn fpc-btn--primary" data-fpc-action="done">Cerrar</button>
     </div>
@@ -485,6 +489,7 @@ async function openDialog(node = null) {
 
     state.factura = factura;
     state.loading = false;
+    state.result = facturaIsPaid(factura);
     render({ focus: true });
     return true;
   } catch (error) {
@@ -525,16 +530,16 @@ async function executePayment() {
   render({ focus: true });
 
   try {
-    await markFacturaPaid(id, {}, { timeout: 120_000 });
-
-    const latest = await getFacturaById(id, {
-      force: true,
-      cache: false,
-    });
+    const committed = await markFacturaPaid(id, {}, { timeout: 120_000 });
+    // The financial command succeeded. A refresh failure must not turn it into
+    // another payment command or discard its authoritative finalization state.
+    let latest = null;
+    try { latest = await getFacturaById(id, { force: true, cache: false }); } catch {}
+    const resolved = reconcilePaymentResult(committed, latest);
 
     if (!state?.open || state.facturaId !== id) return false;
 
-    state.factura = latest || state.factura;
+    state.factura = resolved || state.factura;
     state.submitting = false;
     state.result = true;
     await syncController(id);
@@ -566,6 +571,26 @@ async function executePayment() {
     render({ focus: true });
     scheduleReconcile();
     return false;
+  }
+}
+
+async function refreshPaymentStatus() {
+  if (!state?.open || state.submitting) return false;
+  const currentState = state;
+  state.submitting = true;
+  state.error = "";
+  render();
+  try {
+    const latest = await getFacturaById(state.facturaId, { force: true, cache: false });
+    if (state !== currentState) return false;
+    state.factura = reconcilePaymentResult(state.factura, latest);
+    state.result = true;
+    return true;
+  } catch {
+    if (state === currentState) state.error = "No se pudo consultar el estado. No se ha reenviado ningún correo ni registrado otro pago.";
+    return false;
+  } finally {
+    if (state === currentState) { state.submitting = false; render({ focus: true }); }
   }
 }
 
@@ -676,6 +701,10 @@ function onDocumentClick(event) {
   }
   if (action === "confirm" || action === "retry") {
     void executePayment();
+    return;
+  }
+  if (action === "refresh-status") {
+    void refreshPaymentStatus();
     return;
   }
   if (action === "done") {

@@ -1,0 +1,60 @@
+name: Apply review panel integration
+on:
+  push:
+    branches: [feat/paid-review-invitations-v1]
+    paths: [.github/workflows/review-release-apply.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.repository == 'avila199817/onionsupport' && github.ref == 'refs/heads/feat/paid-review-invitations-v1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 22.23.2
+      - name: Apply only exact ordinary source changes
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor 13bee3c805adb89a7bc4c52543fc46037f0e3351 HEAD
+          python3 - <<'PY'
+          import json,hashlib
+          from pathlib import Path
+          data=json.loads(Path('tools/review-release-edits.json').read_text())
+          assert {i['path'] for i in data['edits']}=={'src/features/facturas-paid-confirm/index.js','tools/facturas-paid-browser-contract.mjs'} and len(data['edits'])==2
+          assert data['delete']==[]
+          def sha(b):return hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()
+          pending=[]
+          for item in data['edits']:
+              p=Path(item['path']);before=p.read_bytes()
+              assert not p.is_symlink() and sha(before)==item['base'],('preimage',str(p))
+              lines=before.decode().splitlines(keepends=True);last=len(lines)+1
+              for edit in sorted(item['edits'],key=lambda e:e['start'],reverse=True):
+                  start,end=edit['start'],edit['end'];assert 0<=start<=end<=len(lines) and end<=last
+                  lines[start:end]=edit['text'].splitlines(keepends=True);last=start
+              after=''.join(lines).encode();assert sha(after)==item['after'],('postimage',str(p),sha(after))
+              pending.append((p,after))
+          for p,b in pending:p.write_bytes(b);print('VERIFIED',p,sha(b))
+          PY
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Build and run real payment and review panel browser contracts
+        run: |
+          npm run build
+          npm run check:dist
+          node tools/facturas-paid-state-contract.mjs
+          node tools/facturas-paid-browser-contract.mjs
+      - name: Commit only verified ordinary changes
+        run: |
+          set -euo pipefail
+          git rm tools/review-release-edits.json
+          git add src/features/facturas-paid-confirm/index.js tools/facturas-paid-browser-contract.mjs
+          test -z "$(git diff --cached --name-only -- .github/workflows)"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(reviews): integrate private feedback and separate invitation actions into paid invoice panel'
+          git push origin HEAD:refs/heads/feat/paid-review-invitations-v1

@@ -1,0 +1,48 @@
+name: Apply verified paid UI edits
+on:
+  push:
+    branches: [fix/paid-finalization-safety-522]
+    paths: [.github/workflows/paid-review-apply.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.repository == 'avila199817/onionsupport' && github.ref == 'refs/heads/fix/paid-finalization-safety-522'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+      - name: Apply exact preimage and postimage verified edits
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,hashlib,gzip,base64
+          from pathlib import Path
+          allowed={'package.json','src/features/facturas-paid-confirm/index.js','src/features/facturas-paid-confirm/payment-state.js','tools/facturas-paid-state-contract.mjs','tools/facturas-paid-browser-contract.mjs'}
+          data=gzip.decompress(base64.b64decode(Path('tools/paid-522-transfer.b64').read_text(),validate=True))
+          assert len(data)==12424 and hashlib.sha256(data).hexdigest()=='bde0042d8c473a7d5d267459f1f5834dc1498d6e8655882b3f2b9ec897978d3f'
+          edits=json.loads(data);assert len(edits)==len(allowed) and {i['path'] for i in edits}==allowed
+          def blob(b):return hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()
+          pending=[]
+          for item in edits:
+              p=Path(item['path']);assert not p.is_symlink()
+              before=p.read_bytes() if p.exists() else b''
+              assert (blob(before) if p.exists() else None)==item['base'], ('preimage',str(p))
+              lines=before.decode().splitlines(keepends=True);limit=len(lines)+1
+              for edit in sorted(item['edits'],key=lambda x:x['start'],reverse=True):
+                  a,b=edit['start'],edit['end'];assert 0<=a<=b<=len(lines) and b<limit
+                  lines[a:b]=edit['text'].splitlines(keepends=True);limit=a
+              after=''.join(lines).encode();assert blob(after)==item['expected'], ('postimage',str(p))
+              pending.append((p,after))
+          for p,data in pending:p.write_bytes(data);print('VERIFIED',p,blob(data))
+          PY
+          git rm tools/paid-522-transfer.b64
+          git add package.json src/features/facturas-paid-confirm/index.js src/features/facturas-paid-confirm/payment-state.js tools/facturas-paid-state-contract.mjs tools/facturas-paid-browser-contract.mjs
+          test -z "$(git diff --cached --name-only -- .github/workflows)"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(billing): distinguish verified paid receipt, blocked and uncertain delivery in UI'
+          git push origin HEAD:refs/heads/fix/paid-finalization-safety-522

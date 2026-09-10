@@ -1,0 +1,548 @@
+diff --git a/package.json b/package.json
+index 9a1b7ce..87087e3 100644
+--- a/package.json
++++ b/package.json
+@@ -20,3 +20,3 @@
+     "validate:ci": "npm run validate && npm run build:repro && npm run test:browser:dist",
+-    "test:browser:ui": "node .github/scripts/avatar_runtime_dom_contract.mjs && node .github/scripts/avatar_consumer_identity_contract.mjs && node .github/scripts/incidencias_comment_avatar_runtime_contract.mjs && node .github/scripts/modal_lifecycle_contract.mjs && node .github/scripts/consent_layout_browser_contract.mjs && node .github/scripts/ui_loading_browser_contract.mjs && node tools/public-site-browser-contract.mjs && node tools/public-support-browser-contract.mjs && node tools/private-domain-contracts.mjs --browser"
++    "test:browser:ui": "node .github/scripts/avatar_runtime_dom_contract.mjs && node .github/scripts/avatar_consumer_identity_contract.mjs && node .github/scripts/incidencias_comment_avatar_runtime_contract.mjs && node .github/scripts/modal_lifecycle_contract.mjs && node .github/scripts/consent_layout_browser_contract.mjs && node .github/scripts/ui_loading_browser_contract.mjs && node tools/public-site-browser-contract.mjs && node tools/public-support-browser-contract.mjs && node tools/private-domain-contracts.mjs --browser && node tools/factura-create-browser-contract.mjs"
+   },
+diff --git a/src/views/facturas/facturas.template.create.js b/src/views/facturas/facturas.template.create.js
+index 6607c1e..4b67672 100644
+--- a/src/views/facturas/facturas.template.create.js
++++ b/src/views/facturas/facturas.template.create.js
+@@ -1 +1,2 @@
++import { normalizeClienteModel } from "../clientes/clientes.model.js";
+ /* =========================================================
+@@ -429,6 +430,6 @@ export function getFacturaCreateTaxProfile(source = {}) {
+ function normalizeClient(item = {}) {
+-  const raw = safeObject(item);
++  const raw = normalizeClienteModel(item);
+ 
+   const id = cleanText(
+-    first(raw.clienteId, raw.clientId, raw.customerId, raw.id, raw.userId, raw.username),
++    first(raw.clienteId, raw.id),
+     ""
+@@ -438,2 +439,3 @@ function normalizeClient(item = {}) {
+     first(
++      raw.nombreFiscal,
+       raw.name,
+@@ -858,3 +860,3 @@ function renderSelectedClientes(vm = {}) {
+       ${vm.selectedClientes.map((client, index) => `
+-        <article class="fac-create-selected-card${index === 0 ? " is-primary" : ""}">
++        <article data-render-key="client:${attr(client.clienteId)}" class="fac-create-selected-card${index === 0 ? " is-primary" : ""}">
+           ${renderAvatar(client)}
+@@ -874,2 +876,3 @@ function renderSelectedClientes(vm = {}) {
+                 data-factura-create-action="${FACTURA_CREATE_ACTIONS.CLIENT_PRIMARY}"
++                ${vm.submitting ? "disabled" : ""}
+                 data-client-index="${index}"
+@@ -881,2 +884,3 @@ function renderSelectedClientes(vm = {}) {
+               data-factura-create-action="${FACTURA_CREATE_ACTIONS.CLIENT_REMOVE}"
++                ${vm.submitting ? "disabled" : ""}
+               data-client-index="${index}"
+@@ -897,3 +901,3 @@ function renderSelectedTickets(vm = {}) {
+       ${vm.selectedTickets.map((ticket, index) => `
+-        <article class="fac-create-selected-card fac-create-selected-card--ticket${index === 0 ? " is-primary" : ""}">
++        <article data-render-key="ticket:${attr(ticket.id)}" class="fac-create-selected-card fac-create-selected-card--ticket${index === 0 ? " is-primary" : ""}">
+           <span class="fac-create-result-icon" aria-hidden="true">${icon("ticket")}</span>
+@@ -912,2 +916,3 @@ function renderSelectedTickets(vm = {}) {
+                 data-factura-create-action="${FACTURA_CREATE_ACTIONS.TICKET_PRIMARY}"
++                ${vm.submitting ? "disabled" : ""}
+                 data-ticket-index="${index}"
+@@ -919,2 +924,3 @@ function renderSelectedTickets(vm = {}) {
+               data-factura-create-action="${FACTURA_CREATE_ACTIONS.TICKET_REMOVE}"
++                ${vm.submitting ? "disabled" : ""}
+               data-ticket-index="${index}"
+@@ -942,3 +948,3 @@ function renderInput({
+   return `
+-    <label class="fac-create-field">
++    <label data-render-key="field:${attr(name)}" class="fac-create-field">
+       <span class="fac-create-label">${escapeHtml(label)}${required ? " *" : ""}</span>
+@@ -963,3 +969,3 @@ function renderSelect({ label, name, value = "", options = [], error = "", disab
+   return `
+-    <label class="fac-create-field">
++    <label data-render-key="field:${attr(name)}" class="fac-create-field">
+       <span class="fac-create-label">${escapeHtml(label)}</span>
+@@ -995,3 +1001,3 @@ function renderLineItems(vm = {}, disabled = false) {
+         return `
+-          <article class="fac-create-line-item" data-line-item="true" data-line-index="${index}">
++          <article data-render-key="line:${attr(linea.id)}" class="fac-create-line-item" data-line-item="true" data-line-index="${index}">
+             <header class="fac-create-line-head">
+@@ -1028,3 +1034,3 @@ function renderLineItems(vm = {}, disabled = false) {
+ 
+-              <label class="fac-create-field">
++              <label data-render-key="line-field:cantidad" class="fac-create-field">
+                 <span class="fac-create-label">Cantidad *</span>
+@@ -1034,3 +1040,3 @@ function renderLineItems(vm = {}, disabled = false) {
+ 
+-              <label class="fac-create-field">
++              <label data-render-key="line-field:unidad" class="fac-create-field">
+                 <span class="fac-create-label">Unidad</span>
+@@ -1041,3 +1047,3 @@ function renderLineItems(vm = {}, disabled = false) {
+ 
+-              <label class="fac-create-field">
++              <label data-render-key="line-field:precioUnitario" class="fac-create-field">
+                 <span class="fac-create-label">Precio unitario *</span>
+@@ -1149,3 +1155,3 @@ export function renderFacturasCreateModal(input = {}) {
+             <form id="${FORM_ID}" class="fac-create-form" data-facturas-create-form="true" novalidate>
+-              <section class="fac-create-section">
++              <section data-render-key="clients" class="fac-create-section">
+                 <div class="fac-create-section-head">
+@@ -1198,3 +1204,3 @@ export function renderFacturasCreateModal(input = {}) {
+ 
+-              <section class="fac-create-section">
++              <section data-render-key="tickets" class="fac-create-section">
+                 <div class="fac-create-section-head">
+@@ -1245,3 +1251,3 @@ export function renderFacturasCreateModal(input = {}) {
+ 
+-              <section class="fac-create-section">
++              <section data-render-key="billing" class="fac-create-section">
+                 <div class="fac-create-section-head">
+diff --git a/src/views/facturas/index.js b/src/views/facturas/index.js
+index d44b383..6be32e3 100644
+--- a/src/views/facturas/index.js
++++ b/src/views/facturas/index.js
+@@ -1 +1,3 @@
++import { normalizeClienteModel } from "../clientes/clientes.model.js";
++import { patchFacturaCreateDom } from "./facturas.create-dom.js";
+ import { getFacturaEntityId } from "../../core/entity-identity.js";
+@@ -51,2 +53,3 @@ import {
+   getFacturaCreateBreakdown,
++  getFacturaCreateTaxProfile,
+   renderFacturaCreateClientSearchSlot,
+@@ -62,3 +65,3 @@ import {
+ export const FACTURAS_INDEX_VERSION =
+-  "facturas.index.productivo.v21.owner-authority-performance";
++  "facturas.index.productivo.v22.stable-create-client-relations";
+ 
+@@ -839,43 +842,14 @@ function unwrapList(payload = null) {
+   if (Array.isArray(payload)) return payload;
+-
+-  const object = safeObject(payload, {});
+-
+-  return safeArray(
+-    first(
+-      object.items,
+-      object.rows,
+-      object.results,
+-      object.records,
+-      object.list,
+-      object.data,
+-      object.clientes,
+-      object.clients,
+-      object.customers,
+-      object.users,
+-      object.usuarios,
+-      object.tickets,
+-      object.incidencias,
+-      object.data?.items,
+-      object.data?.rows,
+-      object.data?.results,
+-      object.data?.clientes,
+-      object.data?.clients,
+-      object.data?.customers,
+-      object.data?.users,
+-      object.data?.usuarios,
+-      object.data?.tickets,
+-      object.data?.incidencias,
+-      object.payload?.items,
+-      object.payload?.clientes,
+-      object.payload?.users,
+-      object.payload?.tickets,
+-      object.payload?.incidencias,
+-      object.result?.items,
+-      object.result?.clientes,
+-      object.result?.users,
+-      object.result?.tickets,
+-      object.result?.incidencias,
+-      []
+-    )
+-  );
++  const object = safeObject(payload);
++  // A nested envelope is not a list. An explicit empty list is authoritative.
++  const keys = ["items", "rows", "results", "records", "list", "data",
++    "clientes", "clients", "customers", "users", "usuarios", "tickets", "incidencias"];
++  for (const envelope of [object, object.data, object.payload, object.result]) {
++    if (Array.isArray(envelope)) return envelope;
++    if (!isObject(envelope)) continue;
++    for (const key of keys) {
++      if (Array.isArray(envelope[key])) return envelope[key];
++    }
++  }
++  return [];
+ }
+@@ -883,119 +857,14 @@ function unwrapList(payload = null) {
+ function normalizeClientCandidate(raw = {}) {
+-  const item = safeObject(raw);
+-
+-  const id = cleanText(
+-    first(
+-      item.clienteId,
+-      item.clientId,
+-      item.customerId,
+-      item.id,
+-      item.userId,
+-      item.username
+-    ),
+-    ""
+-  );
+-
+-  const userId = cleanText(
+-    first(item.userId, item.usuarioId, item.uid, item.id),
+-    ""
+-  );
+-
+-  const clienteId = cleanText(
+-    first(item.clienteId, item.clientId, item.customerId, id),
+-    id
+-  );
+-
+-  if (!id && !clienteId && !userId) return null;
+-
+-  const name = cleanText(
+-    first(
+-      item.name,
+-      item.nombre,
+-      item.displayName,
+-      item.nombreContacto,
+-      item.fullName,
+-      item.razonSocial,
+-      item.companyName,
+-      item.empresa,
+-      item.username
+-    ),
+-    id ? `Cliente ${id}` : "Cliente"
+-  );
+-
+-  const email = cleanText(
+-    first(
+-      item.email,
+-      item.mail,
+-      item.emailCliente,
+-      item.clienteEmail,
+-      item.clientEmail,
+-      item.emailLower
+-    ),
+-    ""
+-  ).toLowerCase();
+-
+-  const avatarUrl = cleanText(
+-    first(
+-      item.avatarUrl,
+-      item.avatar,
+-      item.logoUrl,
+-      item.logo,
+-      item.photoUrl,
+-      item.picture,
+-      item.userAvatarUrl,
+-      item.clientAvatarUrl,
+-      item.profile?.avatarUrl,
+-      ""
+-    ),
+-    ""
+-  );
+-
++  // Billing clients and login users are different entities. Reuse the canonical
++  // client model; an absent userId must never fall back to the client's id/uid.
++  const item = normalizeClienteModel(raw);
++  if (!item.clienteId) return null;
+   return {
+     ...item,
+-    id: clienteId || userId || id,
+-    clienteId: clienteId || id,
+-    clientId: clienteId || id,
+-    userId,
+-    name,
+-    nombre: name,
+-    displayName: name,
+-    nombreContacto: cleanText(
+-      first(item.nombreContacto, item.contactName, name),
+-      name
+-    ),
+-    razonSocial: cleanText(
+-      first(item.razonSocial, item.companyName, item.empresa, name),
+-      name
+-    ),
+-    email,
+-    telefono: cleanText(
+-      first(item.telefono, item.phone, item.mobile, item.movil),
+-      ""
+-    ),
+-    nif: cleanText(
+-      first(item.nif, item.cif, item.taxId, item.vatId),
+-      ""
+-    ),
+-    username: cleanText(
+-      first(
+-        item.username,
+-        item.slug,
+-        email ? email.split("@")[0] : ""
+-      ),
+-      ""
+-    ),
+-    avatarUrl,
+-    avatar: avatarUrl,
+-    subtitle: cleanText(
+-      first(
+-        email,
+-        item.razonSocial && item.razonSocial !== name
+-          ? item.razonSocial
+-          : "",
+-        item.telefono,
+-        item.nif,
+-        clienteId || userId || id
+-      ),
+-      clienteId || userId || id
+-    ),
++    id: item.clienteId,
++    clientId: item.clienteId,
++    name: item.nombreFiscal,
++    nombre: item.nombreFiscal,
++    displayName: item.nombreFiscal,
++    subtitle: cleanText(first(item.email, item.telefono, item.nif, item.clienteId), ""),
+   };
+@@ -1044,3 +913,5 @@ function normalizeTicketCandidate(raw = {}) {
+     clienteId: cleanText(
+-      first(item.clienteId, item.clientId, item.cliente?.clienteId),
++      first(item.clienteId, item.clientId, item.customerId,
++        item.cliente?.clienteId, item.cliente?.id, item.client?.clienteId,
++        item.client?.id, item.clienteRef?.clienteId, item.clienteRef?.id),
+       ""
+@@ -1048,3 +919,4 @@ function normalizeTicketCandidate(raw = {}) {
+     userId: cleanText(
+-      first(item.userId, item.usuarioId, item.userRef?.userId),
++      first(item.userId, item.usuarioId, item.userRef?.userId,
++        item.userRef?.id, item.user?.userId, item.user?.id),
+       ""
+@@ -1115,20 +987,18 @@ function selectedUserIds(clients = []) {
+ 
++function createClientSelectionKey(clients = []) {
++  return JSON.stringify([
++    selectedClienteIds(clients).sort(),
++    selectedUserIds(clients).sort(),
++  ]);
++}
++
+ function ticketBelongsToClients(ticket = {}, clients = []) {
+   const selected = safeArray(clients);
+-  if (!selected.length) return true;
+-
++  if (!selected.length) return false;
+   const ticketClienteId = cleanText(ticket.clienteId, "");
+   const ticketUserId = cleanText(ticket.userId, "");
+-
+-  if (!ticketClienteId && !ticketUserId) return false;
+-
+-  return selected.some((client) => {
+-    const clienteId = cleanText(first(client.clienteId, client.id), "");
+-    const userId = cleanText(client.userId, "");
+-
+-    return (
+-      (clienteId && ticketClienteId === clienteId) ||
+-      (userId && ticketUserId === userId)
+-    );
+-  });
++  // An explicit billing-client relationship wins, even for shared user accounts.
++  // Only legacy tickets without a client relationship may use a proven user link.
++  if (ticketClienteId) return selectedClienteIds(selected).includes(ticketClienteId);
++  return Boolean(ticketUserId && selectedUserIds(selected).includes(ticketUserId));
+ }
+@@ -1144,3 +1014,3 @@ function dedupeTickets(items = [], selectedClientes = []) {
+ 
+-    if (!map.has(normalized.id)) {
++    if (!map.has(normalized.id) || (!map.get(normalized.id).clienteId && normalized.clienteId)) {
+       map.set(normalized.id, normalized);
+@@ -1190,2 +1060,3 @@ async function searchClients(query = "") {
+ 
++      if (response?.ok === false) throw new Error(safeError(response, "No se pudo buscar cliente."));
+       const items = dedupeClients(unwrapList(response));
+@@ -1203,45 +1074,33 @@ async function searchTickets(query = "", selectedClientes = []) {
+   const q = cleanText(query, "");
+-  const clienteIds = selectedClienteIds(selectedClientes);
+-  const userIds = selectedUserIds(selectedClientes);
+-
+-  if (!safeArray(selectedClientes).length) return [];
+-
+-  let lastError = null;
+-
+-  for (const endpoint of TICKET_SEARCH_ENDPOINTS) {
+-    try {
+-      const response = await requestGet(
+-        endpoint,
+-        {
+-          ...(q ? { q, search: q } : {}),
+-          limit: TICKET_LIMIT,
+-          includeTotal: false,
+-          includeClosed: true,
+-          includeAll: true,
+-          onlyMine: false,
+-          ...(clienteIds[0] ? { clienteId: clienteIds[0] } : {}),
+-          ...(userIds[0] ? { userId: userIds[0] } : {}),
+-          ...(clienteIds.length
+-            ? { clienteIds: clienteIds.join(",") }
+-            : {}),
+-          ...(userIds.length
+-            ? { userIds: userIds.join(",") }
+-            : {}),
+-        },
+-        "views.facturas.ticket-search"
+-      );
+-
+-      const items = dedupeTickets(
+-        unwrapList(response),
+-        selectedClientes
+-      );
+-
+-      if (items.length) return items;
+-    } catch (error) {
+-      lastError = error;
++  if (!isAdmin() || !safeArray(selectedClientes).length) return [];
++  // Scalar filters can be ANDed by the backend. Query each authoritative scope
++  // separately, then merge; never send only the first client's id alongside CSVs.
++  const scopes = [
++    ...selectedClienteIds(selectedClientes).map((clienteId) => ({ clienteId })),
++    ...selectedUserIds(selectedClientes).map((userId) => ({ userId })),
++  ];
++  const pages = new Array(scopes.length);
++  let cursor = 0;
++  const worker = async () => {
++    while (cursor < scopes.length) {
++      const index = cursor++;
++      const response = await requestGet(TICKET_SEARCH_ENDPOINTS[0], {
++        ...(q ? { q, search: q } : {}),
++        limit: TICKET_LIMIT,
++        includeTotal: false,
++        includeClosed: true,
++        includeAll: true,
++        onlyMine: false,
++        ...scopes[index],
++      }, "views.facturas.ticket-search");
++      if (response?.ok === false) {
++        throw new Error(safeError(response, "No se pudieron cargar incidencias."));
++      }
++      pages[index] = unwrapList(response);
+     }
+-  }
+-
+-  if (lastError) throw lastError;
+-  return [];
++  };
++  // Bound concurrency without dropping any selected client. A failed scope is
++  // an error, not an apparently successful empty/partial list.
++  await Promise.all(Array.from({ length: Math.min(4, scopes.length) }, worker));
++  return dedupeTickets(pages.flat(), selectedClientes);
+ }
+@@ -3217,5 +3076,5 @@ function createFacturasController(host = null, context = {}) {
+ 
+-    target.innerHTML = renderFacturasCreateModal(
++    patchFacturaCreateDom(target, renderFacturasCreateModal(
+       createModalRenderPayload()
+-    );
++    ));
+ 
+@@ -4307,3 +4166,6 @@ function createFacturasController(host = null, context = {}) {
+     if (destroyed || detailOnly || !isAdmin()) return false;
++    if (createModal.open) return true;
+ 
++    clientSearchSeq += 1;
++    ticketSearchSeq += 1;
+     rememberModalReturnFocus(openerNode);
+@@ -4413,2 +4275,3 @@ function createFacturasController(host = null, context = {}) {
+     const primary = createModal.selectedClientes[0] || null;
++    const taxProfile = getFacturaCreateTaxProfile(primary || {});
+ 
+@@ -4416,2 +4279,8 @@ function createFacturasController(host = null, context = {}) {
+       ...createModal.form,
++      clienteTipo: primary?.clienteTipo || primary?.tipo || "",
++      clienteNif: primary?.nif || "",
++      clienteEsEmpresa: taxProfile.isBusiness,
++      aplicaIrpf: taxProfile.aplicaIrpf,
++      ivaRate: taxProfile.ivaRate,
++      irpfRate: taxProfile.irpfRate,
+       clienteId: cleanText(
+@@ -4567,8 +4436,3 @@ function createFacturasController(host = null, context = {}) {
+       (client) =>
+-        client.id === item.id ||
+-        client.clienteId === item.clienteId ||
+-        (
+-          client.userId &&
+-          client.userId === item.userId
+-        )
++        client.clienteId === item.clienteId
+     );
+@@ -4625,2 +4489,6 @@ function createFacturasController(host = null, context = {}) {
+     ticketSearchSeq += 1;
++    if (ticketSearchTimer) {
++      window.clearTimeout(ticketSearchTimer);
++      ticketSearchTimer = null;
++    }
+ 
+@@ -4664,4 +4532,3 @@ function createFacturasController(host = null, context = {}) {
+       void loadTicketsForSelectedClients({
+-        autoSelectLatest:
+-          createModal.selectedTickets.length === 0,
++        autoSelectLatest: false,
+       });
+@@ -4754,2 +4621,3 @@ function createFacturasController(host = null, context = {}) {
+     createModal.ticketSearch.loading = true;
++    createModal.ticketSearch.results = [];
+     patchCreateTicketSearchDom();
+@@ -4774,2 +4642,9 @@ function createFacturasController(host = null, context = {}) {
+   } = {}) {
++    // A queued debounce from an old selection must not mutate state at all.
++    if (destroyed || !createModal.open ||
++        (Number.isInteger(seq) && seq !== ticketSearchSeq)) return [];
++    if (ticketSearchTimer) {
++      window.clearTimeout(ticketSearchTimer);
++      ticketSearchTimer = null;
++    }
+     if (!createModal.selectedClientes.length) {
+@@ -4789,8 +4664,4 @@ function createFacturasController(host = null, context = {}) {
+ 
+-    const clientKey = [
+-      ...selectedClienteIds(createModal.selectedClientes),
+-      ...selectedUserIds(createModal.selectedClientes),
+-    ]
+-      .sort()
+-      .join("|");
++    const requestClients = [...createModal.selectedClientes];
++    const clientKey = createClientSelectionKey(requestClients);
+ 
+@@ -4806,11 +4677,6 @@ function createFacturasController(host = null, context = {}) {
+         requestQuery,
+-        createModal.selectedClientes
++        requestClients
+       );
+ 
+-      const currentClientKey = [
+-        ...selectedClienteIds(createModal.selectedClientes),
+-        ...selectedUserIds(createModal.selectedClientes),
+-      ]
+-        .sort()
+-        .join("|");
++      const currentClientKey = createClientSelectionKey(createModal.selectedClientes);
+ 
+@@ -4819,2 +4685,3 @@ function createFacturasController(host = null, context = {}) {
+         clientKey !== currentClientKey ||
++        requestQuery !== createModal.ticketSearch.query ||
+         destroyed ||
+@@ -4850,2 +4717,4 @@ function createFacturasController(host = null, context = {}) {
+         requestSeq !== ticketSearchSeq ||
++        clientKey !== createClientSelectionKey(createModal.selectedClientes) ||
++        requestQuery !== createModal.ticketSearch.query ||
+         destroyed ||
+@@ -4857,3 +4726,3 @@ function createFacturasController(host = null, context = {}) {
+       createModal.ticketSearch.loading = false;
+-      createModal.ticketSearch.empty = createModal.ticketSearch.results.length === 0;
++      createModal.ticketSearch.empty = false;
+       createModal.ticketSearch.error = safeError(
+@@ -4870,3 +4739,4 @@ function createFacturasController(host = null, context = {}) {
+     const item = createModal.ticketSearch.results[index];
+-    if (!item?.id) return false;
++    if (!item?.id || createModal.ticketSearch.loading || createModal.ticketSearch.error ||
++        !ticketBelongsToClients(item, createModal.selectedClientes)) return false;
+ 
+@@ -6018,2 +5888,3 @@ function createFacturasController(host = null, context = {}) {
+     if (!type) return false;
++    if (createModal.submitting && Object.values(FACTURA_CREATE_ACTIONS).includes(type)) return false;
+ 

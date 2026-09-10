@@ -1,3 +1,5 @@
+import { getFinalization } from "./payment-state.js";
+import { AppCore } from "../../core/index.js";
 import { createModalLifecycle, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
 /* =========================================================
    Onion Support · Facturas · Paid Confirmation Experience
@@ -14,7 +16,7 @@ import {
 } from "../../views/facturas/facturas.api.js";
 
 export const FACTURAS_PAID_CONFIRM_VERSION =
-  "facturas.paid-confirm.v1.1.definitive-document";
+  "facturas.paid-confirm.v2.verified-resumable";
 
 const CONTROLLER_KEY = Symbol.for("onion.support.facturas.controller");
 const ACTION = "mark-factura-paid";
@@ -29,6 +31,7 @@ const ACTIONS_SELECTOR = ".facturas-detail-actions";
 let installed = false;
 let observer = null;
 let reconcileFrame = 0;
+let retryPollTimer = 0;
 let dialogLookupSeq = 0;
 let reconcileLookupSeq = 0;
 let state = null;
@@ -219,37 +222,6 @@ function facturaIsPaid(factura = {}) {
   ].includes(status);
 }
 
-function getFinalization(factura = {}) {
-  const raw = safeObject(
-    first(
-      factura?.payment?.finalization,
-      factura?.paymentFinalization,
-      factura?.finalization,
-      {}
-    ),
-    {}
-  );
-
-  const status = normalizeKey(raw.status || "");
-  const documentStatus = normalizeKey(raw.document?.status || "");
-  const deliveryStatus = normalizeKey(raw.delivery?.status || "");
-
-  return {
-    raw,
-    status,
-    documentStatus,
-    deliveryStatus,
-    completed:
-      status === "completed" &&
-      documentStatus === "ready" &&
-      ["sent", "skipped"].includes(deliveryStatus),
-    processing: status === "processing",
-    documentReady: documentStatus === "ready",
-    emailSent: deliveryStatus === "sent",
-    emailSkipped: deliveryStatus === "skipped",
-  };
-}
-
 function ensureStyle() {
   if (!isBrowser() || document.getElementById(STYLE_ID)) return true;
 
@@ -359,9 +331,9 @@ function renderFlow() {
     <div class="fpc-flow" aria-label="Proceso que se realizará">
       <div class="fpc-flow-item"><span class="fpc-flow-icon" aria-hidden="true">${icon("check")}</span><div><strong>Cobro completo</strong><small>Estado Pagada y pendiente 0,00 €.</small></div></div>
       <span class="fpc-flow-line" aria-hidden="true"></span>
-      <div class="fpc-flow-item"><span class="fpc-flow-icon" aria-hidden="true">${icon("file")}</span><div><strong>PDF definitivo</strong><small>Se regenera y sustituye el PDF pendiente.</small></div></div>
+      <div class="fpc-flow-item"><span class="fpc-flow-icon" aria-hidden="true">${icon("file")}</span><div><strong>PDF definitivo</strong><small>Se valida, se conserva una copia y se verifica el PDF guardado.</small></div></div>
       <span class="fpc-flow-line" aria-hidden="true"></span>
-      <div class="fpc-flow-item"><span class="fpc-flow-icon" aria-hidden="true">${icon("mail")}</span><div><strong>Entrega al cliente</strong><small>Se envía la factura pagada actualizada.</small></div></div>
+      <div class="fpc-flow-item"><span class="fpc-flow-icon" aria-hidden="true">${icon("mail")}</span><div><strong>Entrega al cliente</strong><small>Se registra el envío y se consulta su aceptación.</small></div></div>
     </div>
   `;
 }
@@ -370,10 +342,13 @@ function getResultCopy(factura = {}) {
   const fin = getFinalization(factura);
 
   if (fin.completed && fin.emailSent) {
-    return ["success", "Factura pagada y enviada", "El cobro está registrado, el PDF definitivo ya muestra el estado Pagada y se ha enviado al cliente."];
+    return ["success", "Factura pagada; envío aceptado", "El cobro está registrado, el PDF definitivo se ha verificado y el proveedor ha aceptado el correo. La entrega al buzón depende del servicio de correo."];
   }
-  if (fin.completed && fin.emailSkipped) {
-    return ["warning", "Factura pagada y actualizada", "El PDF definitivo ya está actualizado. El envío automático se omitió porque no había un destinatario o servicio de correo disponible."];
+  if (fin.blocked || fin.emailSkipped) {
+    return ["warning", "Factura pagada y actualizada", "El envío no está completado: falta un destinatario o configuración de correo. El cobro permanece registrado."];
+  }
+  if (fin.uncertain) {
+    return ["warning", "Envío pendiente de confirmación", "El cobro está registrado. Consultaremos al proveedor sin reenviar a ciegas un correo que podría estar aceptado."];
   }
   if (fin.processing) {
     return ["info", "Finalización en curso", "El cobro ya está registrado y el backend está terminando la versión definitiva de la factura."];
@@ -543,6 +518,7 @@ async function executePayment() {
     return false;
   }
 
+  if (AppCore.getState()?.role !== "admin") return false;
   const id = state.facturaId;
   state.submitting = true;
   state.error = "";
@@ -596,7 +572,10 @@ async function executePayment() {
 async function reconcileRetryAction() {
   reconcileFrame = 0;
 
+  clearTimeout(retryPollTimer);
+  retryPollTimer = 0;
   const detail = detailRoot();
+  if (AppCore.getState()?.role !== "admin") { detail?.querySelector("[data-fpc-retry-action='true']")?.remove(); return false; }
   if (!detail?.isConnected) return false;
 
   const id = safeString(
@@ -623,6 +602,7 @@ async function reconcileRetryAction() {
     if (seq !== reconcileLookupSeq || !detail?.isConnected) return false;
 
     const fin = getFinalization(factura || {});
+    if (fin.processing) retryPollTimer = setTimeout(scheduleReconcile, Math.min(15000, fin.remainingMs + 100));
     const shouldRetry = facturaIsPaid(factura || {}) && !fin.completed;
 
     if (!shouldRetry) {
@@ -635,7 +615,8 @@ async function reconcileRetryAction() {
       retry.disabled = fin.processing;
       retry.setAttribute("aria-disabled", fin.processing ? "true" : "false");
       const label = retry.querySelector("span:last-child");
-      if (label) label.textContent = fin.processing ? "Finalizando…" : "Finalizar factura";
+      const retryLabel = fin.processing ? "Finalizando…" : fin.uncertain ? "Consultar envío" : "Finalizar factura";
+      if (label && label.textContent !== retryLabel) label.textContent = retryLabel;
       return true;
     }
 
@@ -731,6 +712,7 @@ export function destroyFacturasPaidConfirm() {
   if (!isBrowser() || !installed) return false;
 
   installed = false;
+  clearTimeout(retryPollTimer); retryPollTimer = 0;
   document.removeEventListener("click", onDocumentClick, true);
   document.getElementById(ROOT_ID)?.removeEventListener("click", onRootClick);
   observer?.disconnect?.();

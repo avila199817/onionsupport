@@ -1,0 +1,71 @@
+name: Temporary immutable source workbench
+
+# Branch-only transport for the owner-authorized refactor. Never merge this
+# workflow into main. No deployment, repository writes, or secrets are used.
+on:
+  push:
+    branches: [refactor/source-workbench-20260911]
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Checkout accepted immutable source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 00c5a88c147d6773e71a2fb496b41fbaa4042d89
+          fetch-depth: 1
+          submodules: false
+          lfs: false
+          persist-credentials: false
+      - name: Export committed files only
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "00c5a88c147d6773e71a2fb496b41fbaa4042d89" ]]
+          mkdir -p "${RUNNER_TEMP}/source-export"
+          git archive --format=zip --output="${RUNNER_TEMP}/source-export/source.zip" HEAD
+          git ls-tree -r -z HEAD > "${RUNNER_TEMP}/source-export/tree.bin"
+          git rev-parse HEAD HEAD^{tree} > "${RUNNER_TEMP}/source-export/revisions.txt"
+          cd "${RUNNER_TEMP}/source-export"
+          sha256sum source.zip tree.bin revisions.txt > SHA256SUMS
+      - name: Upload immutable source transport
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: refactor-source-00c5a88c
+          path: ${{ runner.temp }}/source-export
+          retention-days: 1
+          if-no-files-found: error
+      - name: Use repository Node version
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "22.23.2"
+          package-manager-cache: false
+      - name: Prepare locked offline diagnostic dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare npm@10.9.8 --activate
+          [[ "$(node --version)" == "v22.23.2" ]]
+          [[ "$(npm --version)" == "10.9.8" ]]
+          npm ci --ignore-scripts --no-audit --no-fund
+          mkdir -p "${RUNNER_TEMP}/diagnostic-environment"
+          cp "$(command -v node)" "${RUNNER_TEMP}/diagnostic-environment/node"
+          tar -czf "${RUNNER_TEMP}/diagnostic-environment/node_modules.tar.gz" node_modules
+          node --version > "${RUNNER_TEMP}/diagnostic-environment/versions.txt"
+          npm --version >> "${RUNNER_TEMP}/diagnostic-environment/versions.txt"
+          sha256sum package-lock.json >> "${RUNNER_TEMP}/diagnostic-environment/versions.txt"
+          cd "${RUNNER_TEMP}/diagnostic-environment"
+          sha256sum node node_modules.tar.gz versions.txt > SHA256SUMS
+      - name: Upload isolated diagnostic environment
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: refactor-diagnostic-environment-00c5a88c
+          path: ${{ runner.temp }}/diagnostic-environment
+          retention-days: 1
+          if-no-files-found: error

@@ -3,6 +3,10 @@
 The frontend build is pinned to Node 22.23.2, npm 10.9.8 and Vite 8.2.2.
 It emits fingerprinted production assets together with a private release envelope.
 
+The [canonical cleanup execution record](releases/2026-09-11-repository-cleanup.md)
+tracks R01–R17/A00–A17, accepted build preparations/activations, measured budgets,
+exact revisions, verification results and remaining scope across both repositories.
+
 ## Pull request trust boundary
 
 1. Candidate source is built and exercised in a job with no secrets, no write

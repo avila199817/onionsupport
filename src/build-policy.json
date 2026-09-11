@@ -1,0 +1,4 @@
+{
+  "schema": "onionsupport.build-policy.v1",
+  "invoiceApiSplit": true
+}

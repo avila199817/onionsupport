@@ -1,3 +1,5 @@
+import { PUBLIC_SITE } from "./public-site.js";
+
 /* Public legal identity shared with oniontech/template/base.template.js.
    Verified against the transactional template and delivered mail, September 2026.
    Pure HTML renderer: safe for static documents and public SPA views. */
@@ -35,6 +37,7 @@ export function renderPublicLegalFooter({ className = "" } = {}) {
             <p class="public-legal-footer__label">Atención al cliente</p>
             <p>${supportLink()}<br><a href="tel:${PUBLIC_LEGAL.phoneHref}">${PUBLIC_LEGAL.phone}</a></p>
             <a href="/#incidencia">Solicitar asistencia</a>
+            <p><a href="${escape(PUBLIC_SITE.googleMapsUrl)}" target="_blank" rel="noopener noreferrer">Onion Support en Google Maps</a></p>
           </div>
           <div>
             <p class="public-legal-footer__label">Horario de atención</p>

@@ -10,9 +10,13 @@ const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const SOURCE = resolve(process.env.ONION_CANDIDATE_SOURCE_DIR || ROOT);
 const DIST = resolve(ROOT, process.env.ONION_BUILD_OUT_DIR || "dist");
 const JS_ROOT = resolve(DIST, "assets/js");
-// Measured on trusted artifact 10192069668 / df6001fdb92307620011e1035363ff2853ed7a2f.
-// Raw byte ceilings, not latency claims. Tighten only after A01 is measured and accepted.
-const BUDGETS = Object.freeze({ app: 223271, auth: 129805, bootstrapPublicHome: 282223 });
+// R03/A01: remeasured production artifact 10196534557, run 34593129204,
+// source b8e4ed28e7286d638528a36e36a0a9b1059c4430 (2026-09-11).
+// Observed raw closures: app 156433, auth 62960, bootstrap/Home union 215407.
+// Ceilings allow 1567 / 1040 / 2593 bytes (1.00% / 1.65% / 1.20%) for
+// bounded maintenance, not another invoice graph. Groups overlap; never add
+// them or interpret source bytes as latency. See the canonical cleanup log.
+const BUDGETS = Object.freeze({ app: 158000, auth: 64000, bootstrapPublicHome: 218000 });
 
 function staticImports(code, identifier) {
   // PARSE ONLY. Never link, evaluate or supply a dynamic-import callback.

@@ -123,6 +123,28 @@ assert.equal(
   "Home/Login no pueden enlazar el chunk CSS privado"
 );
 
+// R06 is activated by declarative candidate CSS only after the trusted tooling
+// preparation is accepted. Keep this check inactive for byte-identical setup.
+const privateSource = read(activationMarker).replace(/\/\*[\s\S]*?\*\//g, "");
+const fullviewImports = (privateSource.match(/@import\b[^;]*;/g) || [])
+  .filter((statement) => statement.includes("private-fullview-routes.css"));
+if (fullviewImports.length) {
+  assert.deepEqual(fullviewImports, [
+    '@import url("./compositions/private-fullview-routes.css") layer(compositions);',
+  ], "la geometría privada debe tener un único import canónico");
+  const privateCss = read(privateAsset);
+  for (const sentinel of [
+    "#app-content:has(.whatsapp-page)",
+    "#view-container:has(.whatsapp-page)",
+    ".whatsapp-composer-row",
+  ]) {
+    assert.equal(publicCss.includes(sentinel), false,
+      `la geometría WhatsApp no debe entrar en el CSS público: ${sentinel}`);
+    assert.equal(privateCss.includes(sentinel), true,
+      `el chunk privado debe conservar la geometría WhatsApp: ${sentinel}`);
+  }
+}
+
 console.log(
   `CSS entry split dist contract OK: ${privateAsset}`
 );

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 import { defineConfig } from "vite";
+import { invoiceApiSplitOutput } from "./tools/invoice-api-split.mjs";
 
 const ROOT = fileURLToPath(new URL(".", import.meta.url));
 
@@ -311,6 +312,7 @@ export default defineConfig({
         ])
       ),
       output: {
+        ...invoiceApiSplitOutput(ROOT),
         entryFileNames: "assets/js/[name]-[hash].js",
         chunkFileNames: "assets/js/[name]-[hash].js",
         assetFileNames(assetInfo) {

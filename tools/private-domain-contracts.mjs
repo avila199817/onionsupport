@@ -5,6 +5,8 @@ import { directDomainOwners, assertDirectDomainOwners } from "../.github/scripts
 if (directDomainOwners) {
   await assertDirectDomainOwners();
   await import("./private-user-identity-contract.mjs");
+  await import("./confirmed-user-write-contract.mjs");
+  await import("./confirmed-user-lifetime-contract.mjs");
   await import("./home-domain-counts-contract.mjs");
   await import("./private-domain-events-contract.mjs");
   await import("./home-entity-identity-contract.mjs");

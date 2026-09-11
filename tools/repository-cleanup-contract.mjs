@@ -11,6 +11,7 @@ const SELF = "tools/repository-cleanup-contract.mjs";
 const RECORD = "docs/releases/2026-09-11-repository-cleanup.md";
 const RETIRED = Object.freeze([
   { id: "A02", path: "src/features/incidencias-user-update-turn/index.js", tokens: ["incidencias-user-update-turn", "onion-user-update-turn"] },
+  { id: "A03", path: "src/features/incidencias-detail-experience/index.js", tokens: ["incidencias-detail-experience"] },
 ]);
 const normalize = (text) => String(text).toLowerCase().replace(/[^a-z0-9]/g, "");
 

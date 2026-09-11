@@ -36,7 +36,6 @@ const DETAIL_MODAL_STYLE_PATH =
 const ENHANCEMENTS_PATH =
   "src/app/enhancements.js";
 const DETAIL_COMMENT_RENDERER_PATHS = [
-  "src/features/incidencias-detail-experience/index.js",
   "src/features/incidencias-detail-state/index.js",
 ];
 const PRIVATE_INTERACTIONS_STYLE_PATH =

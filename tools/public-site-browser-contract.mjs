@@ -48,6 +48,12 @@ try {
     assert.deepEqual(actual.robots, Array(3).fill([path === "/" ? "index, follow" : "noindex, follow"]));
     assert.equal(actual.schemaCount, path === "/" ? 1 : 0);
     assert.equal(actual.description, expected.description);
+    await page.locator("[data-public-noscript-summary]").waitFor({ state: "detached", timeout: 10000 });
+    assert.equal(await page.locator("[data-public-noscript-summary]").count(), 0, "no-script alternative must not appear in the JavaScript application");
+    if (path === "/") {
+      const identities = await page.locator('script[type="application/ld+json"]').evaluate((node) => JSON.parse(node.textContent)["@graph"].find((item) => item["@type"] === "Organization").sameAs);
+      assert.deepEqual(identities, [PUBLIC_SITE.googleMapsUrl], "rendered schema preserves Maps identity");
+    }
   }
   async function inspectHomeScroll() {
     await page.locator(".public-home-brand").click();
@@ -119,6 +125,7 @@ try {
   await inspect("/login");
 
   async function inspectPublicLayout() {
+    await page.locator("[data-public-noscript-summary]").waitFor({ state: "detached", timeout: 10000 });
     // appReady is set when the shell mounts, before the router reveals its
     // new host. Inspect the committed page, while still failing hidden titles.
     try {
@@ -156,6 +163,10 @@ try {
       };
     });
     assert.deepEqual(layout, { visibleH1: 1, nestedMain: 0, duplicateIds: [], overflow: false, innerOverflow: false, footerCount: 1, footerLogin: false, clippedHeadings: [] }, `${page.url()} must remain readable and coherent at ${JSON.stringify(page.viewportSize())}`);
+    const maps = page.locator(`.public-legal-footer a[href="${PUBLIC_SITE.googleMapsUrl}"]`);
+    assert.equal(await maps.count(), 1, "one Maps link in the shared public footer");
+    assert.equal(await maps.getAttribute("rel"), "noopener noreferrer");
+    assert.equal(await page.locator("[data-public-noscript-summary]").count(), 0, "no no-script alternative rendered on public application routes");
     for (const id of ["public-legal-notice", "public-privacy", "public-cookies"]) {
       const disclosure = page.locator(`#${id}`);
       await disclosure.locator("summary").click();
@@ -212,8 +223,39 @@ try {
     assert.equal(navigationVisible, true, `navigation must stay visible and interactive at ${hash}`);
   }
   assert.deepEqual(errors, [], "frontend must not throw during metadata navigation");
+  // No-JS access must be genuinely usable, not merely present in source.
+  const noScript = await browser.newContext({ javaScriptEnabled: false });
+  await noScript.route("**/*", (route) => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+  try {
+    const staticPage = await noScript.newPage();
+    for (const compiled of [false, true]) {
+      serveDist = compiled;
+      for (const width of [360, 1440]) {
+        await staticPage.setViewportSize({ width, height: 900 });
+        await staticPage.goto(origin, { waitUntil: "load" });
+        assert.equal(await staticPage.locator("#app-loader").isVisible(), false, "no permanent loader without JavaScript");
+        assert.equal(await staticPage.locator("#app-shell").isVisible(), false, "no dynamic shell without JavaScript");
+        assert.equal(await staticPage.locator("#noscript-root .noscript-title").isVisible(), true);
+        const summary = staticPage.locator("#noscript-root [data-public-noscript-summary]");
+        assert.equal(await summary.isVisible(), true);
+        for (const service of PUBLIC_SERVICES) assert.equal(await summary.locator(`a[href="${service.path}"]`).isVisible(), true);
+        for (const href of [PUBLIC_SITE.googleMapsUrl, `tel:${PUBLIC_SITE.phoneTel}`, `mailto:${PUBLIC_SITE.email}`, `https://wa.me/${PUBLIC_SITE.phoneInternational}`]) {
+          assert.equal(await summary.locator(`a[href="${href}"]`).isVisible(), true);
+        }
+        assert.equal(await staticPage.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, "no-script page fits mobile and desktop");
+        const lastLink = summary.locator('a[href="/login"]');
+        await lastLink.scrollIntoViewIfNeeded();
+        const lastBounds = await lastLink.boundingBox();
+        assert.ok(lastBounds && lastBounds.y >= 0 && lastBounds.y + lastBounds.height <= 901, "no-script page can scroll to its last action");
+        await summary.locator('a[href="/reparacion-ordenadores"]').click();
+        assert.equal(await staticPage.locator("h1:visible").count(), 1, "service pages work without JavaScript");
+        await staticPage.getByRole("link", { name: "Contacto", exact: true }).click();
+        assert.equal(new URL(staticPage.url()).hash, "#contacto", "service contact does not require the SPA");
+      }
+    }
+  } finally { await noScript.close(); }
   await context.close();
-  console.log("Public site browser: PASS · real Router home↔login · 10 public routes × 3 widths × 2 themes · unique visible headings/footer · disclosures · safe invalid tokens · intake/privacy deep links");
+  console.log("Public site browser: PASS · real Router home↔login · 10 public routes × 3 widths × 2 themes · unique visible headings/footer · disclosures · safe invalid tokens · intake/privacy deep links · Maps links/schema · empty boot container preserved · source/dist without JavaScript");
 } finally {
   if (browser) await browser.close();
   await new Promise((done) => server.close(done));

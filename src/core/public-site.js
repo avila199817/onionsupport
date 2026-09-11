@@ -5,6 +5,8 @@ export const PUBLIC_SITE = Object.freeze({
   name: "Onion Support",
   origin: "https://onionsupport.com",
   domain: "onionsupport.com",
+  // Business Profile link supplied by the owner; no inferred place IDs or ratings.
+  googleMapsUrl: "https://maps.app.goo.gl/s41pMKVjSr6pDg6F9",
   description: "Soporte informático para particulares, autónomos y empresas en España. Asistencia remota, diagnóstico claro y soluciones para que tu tecnología funcione.",
   coverage: "Asistencia remota en España. La atención presencial se acuerda según el servicio y la ubicación.",
   email: "cristian@onionsupport.com",
@@ -56,7 +58,18 @@ export function publicPageSchema(page) {
   const home = `${PUBLIC_SITE.origin}/`;
   const graph = [
     { "@type": "WebSite", "@id": `${home}#website`, url: home, name: PUBLIC_SITE.name, alternateName: PUBLIC_SITE.domain, inLanguage: "es", publisher: { "@id": `${home}#business` } },
-    { "@type": "Organization", "@id": `${home}#business`, name: PUBLIC_SITE.name, url: home, image: PUBLIC_SITE.origin + PUBLIC_SITE.image, logo: PUBLIC_SITE.origin + PUBLIC_SITE.logo, email: PUBLIC_SITE.email, telephone: PUBLIC_SITE.phoneTel, description: PUBLIC_SITE.description, address: PUBLIC_SITE.address },
+    {
+      "@type": "Organization", "@id": `${home}#business`, name: PUBLIC_SITE.name, url: home,
+      image: PUBLIC_SITE.origin + PUBLIC_SITE.image, logo: PUBLIC_SITE.origin + PUBLIC_SITE.logo,
+      email: PUBLIC_SITE.email, telephone: PUBLIC_SITE.phoneTel,
+      description: PUBLIC_SITE.description, address: PUBLIC_SITE.address,
+      sameAs: [PUBLIC_SITE.googleMapsUrl],
+      contactPoint: {
+        "@type": "ContactPoint", contactType: "soporte técnico",
+        telephone: PUBLIC_SITE.phoneTel, email: PUBLIC_SITE.email,
+        availableLanguage: "es", url: `${home}#contacto`,
+      },
+    },
     { "@type": "WebPage", "@id": `${page.canonical}#webpage`, url: page.canonical, name: page.title, description: page.description, inLanguage: "es", isPartOf: { "@id": `${home}#website` }, about: { "@id": `${home}#business` }, ...(page.path === "/" ? {} : { breadcrumb: { "@id": `${page.canonical}#breadcrumb` } }) },
   ];
   if (page.path !== "/") graph.push(

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { PUBLIC_SITE, PUBLIC_PAGES, PUBLIC_SERVICES, pageMetadata, publicPageSchema } from "../src/core/public-site.js";
-import { synchronize, renderHomeSummary, materializeDocument } from "./sync-public-site.mjs";
+import { synchronize, renderNoScriptSummary, materializeDocument } from "./sync-public-site.mjs";
 
 await synchronize({ check: true });
 const ownerMapsUrl = "https://maps.app.goo.gl/s41pMKVjSr6pDg6F9";
@@ -47,26 +47,25 @@ for (const entry of PUBLIC_PAGES) {
   assert.doesNotMatch(head.match(/<title>(.*?)<\/title>/)?.[1] || "", /Sant Vicenç|Barcelona/);
 }
 const home = await readFile(new URL("../index.html", import.meta.url), "utf8");
-for (const location of ["initial", "noscript"]) {
-  const start = `<!-- public-home-summary:${location} -->`;
-  const end = `<!-- /public-home-summary:${location} -->`;
-  const summary = home.split(start)[1]?.split(end)[0]?.trim();
-  assert.equal(summary, renderHomeSummary(), `${location}: generated from the same public catalog`);
-  assert.equal([...summary.matchAll(/<h1\b/g)].length, 1);
-  assert.doesNotMatch(summary, /<script|<iframe|<form|\sid=/, "no embeds, inactive forms or duplicate IDs");
-  for (const service of PUBLIC_SERVICES) assert.ok(summary.includes(`href="${service.path}"`));
-  for (const href of [ownerMapsUrl, `tel:${PUBLIC_SITE.phoneTel}`, `mailto:${PUBLIC_SITE.email}`, `https://wa.me/${PUBLIC_SITE.phoneInternational}`]) {
-    assert.ok(summary.includes(`href="${href}"`), `${location}: usable contact ${href}`);
-  }
+const start = "<!-- public-home-summary:noscript -->";
+const end = "<!-- /public-home-summary:noscript -->";
+const summary = home.split(start)[1]?.split(end)[0]?.trim();
+assert.equal(summary, renderNoScriptSummary(), "no-script alternative comes from the public catalog");
+assert.doesNotMatch(summary, /<h1\b|<script|<iframe|<form|\sid=/, "preserve the runtime H1 and avoid embeds, inactive forms or duplicate IDs");
+for (const service of PUBLIC_SERVICES) assert.ok(summary.includes(`href="${service.path}"`));
+for (const href of [ownerMapsUrl, `tel:${PUBLIC_SITE.phoneTel}`, `mailto:${PUBLIC_SITE.email}`, `https://wa.me/${PUBLIC_SITE.phoneInternational}`]) {
+  assert.ok(summary.includes(`href="${href}"`), `no-script alternative: usable contact ${href}`);
 }
 assert.equal(materializeDocument(home, pageMetadata("/")), home, "generation is idempotent");
-assert.throws(() => materializeDocument(home.replace("<!-- public-home-summary:initial -->", ""), pageMetadata("/")), /home summary boundary/, "missing generation boundary fails closed");
+assert.throws(() => materializeDocument(home.replace(start, ""), pageMetadata("/")), /no-script summary boundary/, "missing generation boundary fails closed");
 const initial = home.replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, "");
-assert.equal([...initial.matchAll(/data-public-home-summary="true"/g)].length, 1, "initial HTML outside noscript has commercial content");
+assert.doesNotMatch(initial, /data-public-noscript-summary/, "alternative content must not compete with the Router");
+assert.match(initial, /id="view-container"[^>]*>\s*<\/div>/, "preserve the empty boot container");
+assert.doesNotMatch(home, /<h1\b/i, "the canonical H1 still belongs to the mounted Home");
 
 const robots = await readFile(new URL("../robots.txt", import.meta.url), "utf8");
 assert.doesNotMatch(robots, /Disallow:\s*\/login/);
 const sitemap = await readFile(new URL("../sitemap.xml", import.meta.url), "utf8");
 assert.doesNotMatch(sitemap, /\/login/);
 assert.deepEqual([...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]), PUBLIC_PAGES.filter((page) => page.indexable).map((page) => PUBLIC_SITE.origin + page.path), "sitemap contains exactly the canonical public URLs");
-console.log("Public site contract: PASS · generated documents · one metadata owner · canonical services · crawlable noindex login · preserved legal address · Maps identity · generated initial/no-script home · contact and sitemap links");
+console.log("Public site contract: PASS · generated documents · one metadata owner · canonical services · crawlable noindex login · preserved legal address · Maps identity · generated no-script home · empty boot container · contact and sitemap links");

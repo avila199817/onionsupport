@@ -15,12 +15,12 @@ export function renderMetadata(page) {
   return `${START}\n  <title>${escape(page.title)}</title>\n${pageMetaEntries(page).filter(([, , value]) => value != null).map(([attribute, key, value]) => `  <meta ${attribute}="${key}" content="${escape(value)}">`).join("\n")}\n  <link rel="canonical" href="${escape(page.canonical)}">${page.indexable ? `\n  <link rel="alternate" hreflang="es-ES" href="${escape(page.canonical)}">\n  <link rel="alternate" hreflang="x-default" href="${escape(page.canonical)}">` : ""}${schema ? `\n  <script type="application/ld+json" data-onion-site-metadata="v3" data-onion-schema="service-hierarchy">\n${JSON.stringify(schema, null, 2).replace(/</g, "\\u003c")}\n  </script>` : ""}\n  ${END}`;
 }
 
-// Commercial essentials are present before JS; the Router replaces the initial
-// summary on mount. The no-script copy uses the same catalog and has no forms,
-// duplicate IDs, tracking embeds or claims about a public storefront.
-export function renderHomeSummary() {
-  return `<section class="noscript-box" lang="es" data-public-home-summary="true">
-          <h1 class="noscript-title">${escape(PUBLIC_SITE.name)}: servicio técnico informático</h1>
+// Keep the established empty Router root and its single runtime H1. The
+// no-script alternative uses the public catalog without forms, duplicate IDs,
+// tracking embeds or unverified claims about a public storefront.
+export function renderNoScriptSummary() {
+  return `<section class="noscript-box" lang="es" data-public-noscript-summary="true">
+          <p class="noscript-title">${escape(PUBLIC_SITE.name)}: servicio técnico informático</p>
           <p>${escape(PUBLIC_SITE.description)}</p>
           <p>Atención directa de ${escape(PUBLIC_SITE.ownerName)}, técnico informático de ${escape(PUBLIC_SITE.name)}.</p>
           <p>Base en ${escape(PUBLIC_SITE.address.addressLocality)}. ${escape(PUBLIC_SITE.coverage)}</p>
@@ -41,23 +41,20 @@ export function renderHomeSummary() {
         </section>`;
 }
 
-function materializeHomeSummary(source) {
-  for (const location of ["initial", "noscript"]) {
-    const start = `<!-- public-home-summary:${location} -->`;
-    const end = `<!-- /public-home-summary:${location} -->`;
-    if (source.split(start).length !== 2 || source.split(end).length !== 2) {
-      throw new Error(`Expected one ${location} home summary boundary`);
-    }
-    const first = source.indexOf(start);
-    const last = source.indexOf(end);
-    if (last < first) throw new Error(`Invalid ${location} home summary boundary`);
-    source = source.slice(0, first) + start + "\n        " + renderHomeSummary() + "\n        " + source.slice(last);
+function materializeNoScriptSummary(source) {
+  const start = "<!-- public-home-summary:noscript -->";
+  const end = "<!-- /public-home-summary:noscript -->";
+  if (source.split(start).length !== 2 || source.split(end).length !== 2) {
+    throw new Error("Expected one no-script summary boundary");
   }
-  return source;
+  const first = source.indexOf(start);
+  const last = source.indexOf(end);
+  if (last < first) throw new Error("Invalid no-script summary boundary");
+  return source.slice(0, first) + start + "\n        " + renderNoScriptSummary() + "\n        " + source.slice(last);
 }
 
 export function materializeDocument(source, page) {
-  if (page.path === "/") source = materializeHomeSummary(source);
+  if (page.path === "/") source = materializeNoScriptSummary(source);
   const generated = renderMetadata(page);
   if (source.includes(START)) return source.replace(/<!-- public-site-v3: generated metadata -->[\s\S]*?<!-- \/public-site-v3 -->/, generated);
   // One-time migration of existing public documents. Unowned head/body stays intact.

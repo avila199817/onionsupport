@@ -48,8 +48,8 @@ try {
     assert.deepEqual(actual.robots, Array(3).fill([path === "/" ? "index, follow" : "noindex, follow"]));
     assert.equal(actual.schemaCount, path === "/" ? 1 : 0);
     assert.equal(actual.description, expected.description);
-    await page.locator("[data-public-home-summary]").waitFor({ state: "detached", timeout: 10000 });
-    assert.equal(await page.locator("[data-public-home-summary]").count(), 0, "the Router replaces the initial summary, including on login navigation");
+    await page.locator("[data-public-noscript-summary]").waitFor({ state: "detached", timeout: 10000 });
+    assert.equal(await page.locator("[data-public-noscript-summary]").count(), 0, "no-script alternative must not appear in the JavaScript application");
     if (path === "/") {
       const identities = await page.locator('script[type="application/ld+json"]').evaluate((node) => JSON.parse(node.textContent)["@graph"].find((item) => item["@type"] === "Organization").sameAs);
       assert.deepEqual(identities, [PUBLIC_SITE.googleMapsUrl], "rendered schema preserves Maps identity");
@@ -125,7 +125,7 @@ try {
   await inspect("/login");
 
   async function inspectPublicLayout() {
-    await page.locator("[data-public-home-summary]").waitFor({ state: "detached", timeout: 10000 });
+    await page.locator("[data-public-noscript-summary]").waitFor({ state: "detached", timeout: 10000 });
     // appReady is set when the shell mounts, before the router reveals its
     // new host. Inspect the committed page, while still failing hidden titles.
     try {
@@ -166,7 +166,7 @@ try {
     const maps = page.locator(`.public-legal-footer a[href="${PUBLIC_SITE.googleMapsUrl}"]`);
     assert.equal(await maps.count(), 1, "one Maps link in the shared public footer");
     assert.equal(await maps.getAttribute("rel"), "noopener noreferrer");
-    assert.equal(await page.locator("[data-public-home-summary]").count(), 0, "no stale summary after any public route mounts");
+    assert.equal(await page.locator("[data-public-noscript-summary]").count(), 0, "no no-script alternative rendered on public application routes");
     for (const id of ["public-legal-notice", "public-privacy", "public-cookies"]) {
       const disclosure = page.locator(`#${id}`);
       await disclosure.locator("summary").click();
@@ -234,9 +234,9 @@ try {
         await staticPage.setViewportSize({ width, height: 900 });
         await staticPage.goto(origin, { waitUntil: "load" });
         assert.equal(await staticPage.locator("#app-loader").isVisible(), false, "no permanent loader without JavaScript");
-        assert.equal(await staticPage.locator("#app-shell").isVisible(), false, "no duplicated initial summary without JavaScript");
-        assert.equal(await staticPage.locator("h1:visible").count(), 1);
-        const summary = staticPage.locator("#noscript-root [data-public-home-summary]");
+        assert.equal(await staticPage.locator("#app-shell").isVisible(), false, "no dynamic shell without JavaScript");
+        assert.equal(await staticPage.locator("#noscript-root .noscript-title").isVisible(), true);
+        const summary = staticPage.locator("#noscript-root [data-public-noscript-summary]");
         assert.equal(await summary.isVisible(), true);
         for (const service of PUBLIC_SERVICES) assert.equal(await summary.locator(`a[href="${service.path}"]`).isVisible(), true);
         for (const href of [PUBLIC_SITE.googleMapsUrl, `tel:${PUBLIC_SITE.phoneTel}`, `mailto:${PUBLIC_SITE.email}`, `https://wa.me/${PUBLIC_SITE.phoneInternational}`]) {
@@ -255,7 +255,7 @@ try {
     }
   } finally { await noScript.close(); }
   await context.close();
-  console.log("Public site browser: PASS · real Router home↔login · 10 public routes × 3 widths × 2 themes · unique visible headings/footer · disclosures · safe invalid tokens · intake/privacy deep links · Maps links/schema · initial summary replacement · source/dist without JavaScript");
+  console.log("Public site browser: PASS · real Router home↔login · 10 public routes × 3 widths × 2 themes · unique visible headings/footer · disclosures · safe invalid tokens · intake/privacy deep links · Maps links/schema · empty boot container preserved · source/dist without JavaScript");
 } finally {
   if (browser) await browser.close();
   await new Promise((done) => server.close(done));

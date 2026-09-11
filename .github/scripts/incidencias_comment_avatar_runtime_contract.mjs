@@ -70,6 +70,8 @@ try {
     window.timeline = await import("/src/features/incidencias-comment-avatars/index.js");
     window.followup = await import("/src/features/incidencias-followup-avatars/index.js");
     window.detailTemplates = await import("/src/views/incidencias/incidencias.template.modal.js");
+    window.detailState = await import("/src/features/incidencias-detail-state/index.js");
+    window.detailController = {};
     window.commentHost = (id, kind = "followup") => document.querySelector(`[data-comment-id="${id}"] .${kind === "timeline" ? "incidencias-timeline-comment-avatar" : "incidencias-modal-description-comment-avatar"}`);
     window.syncComments = () => {
       const payload = { detail: window.detail, loading: false, error: "", open: true };
@@ -128,7 +130,14 @@ try {
         status: "open", userId: "user-a", name, displayName: name, email, avatarUrl: "/photo.svg", comments,
         ...(assigned ? { assignedToUserId: "user-b", assignedToName: "Second Person", assignedToEmail: "b@example.test", assignedToAvatarUrl: "/photo.svg" } : {}),
       };
-      document.querySelector("#fixture").innerHTML = detailTemplates.renderIncidenciasDetailModal({ open: true, detail, admin: true, historyOpen });
+      const modalHost = document.querySelector("#fixture");
+      modalHost.innerHTML = detailTemplates.renderIncidenciasDetailModal({ open: true, detail, admin: true, historyOpen });
+      // Force the active projector to build follow-up cards, not reuse the
+      // template's matching signature. All existing identity assertions apply.
+      if (!historyOpen) modalHost.querySelector("[data-description-comments='true']")?.remove();
+      if (!detailState.syncIncidenciasDetailState({ modalHost, id: detail.ticketId, controller: detailController, admin: true, open: true, detail, loading: false, error: "" })) {
+        throw new Error("The active detail-state projection did not run.");
+      }
       syncComments();
     }, { comments, historyOpen, name, email, assigned });
     assert.equal(await page.evaluate(() => window.detailLoads || 0), 0, "avatar decoration consumes the owner's detail without a GET");
@@ -207,6 +216,13 @@ try {
   assert.ok(Object.values(signatures).every(Boolean));
   assert.notEqual(signatures.synthetic, signatures.persisted, "persisting a formerly synthetic UI id must refresh the comment's DOM association");
   assert.notEqual(signatures.original, signatures.renamed, "correcting author text must refresh the thread with unchanged id/body/date");
+  await renderRealDetail([{ id: "escaped-comment", byName: "<b>Unicode Ávila</b>", byUserId: "user-a", body: "<img src=x onerror=alert(1)> & café" }]);
+  const escaped = await page.evaluate(() => {
+    const card = document.querySelector("[data-comment-id='escaped-comment']");
+    return { author: card.querySelector("strong").textContent, body: card.querySelector("p").textContent, injected: Boolean(card.querySelector("b, [onerror]")) };
+  });
+  assert.deepEqual(escaped, { author: "<b>Unicode Ávila</b>", body: "<img src=x onerror=alert(1)> & café", injected: false });
+  await page.evaluate(() => detailState.destroyIncidenciasDetailState());
   assert.deepEqual(errors, []);
   console.log("Incidencias comment avatar runtime contract: PASS · persisted comment IDs · partial homonyms isolated · no legacy UID promotion · stable UID alias updates");
 } finally {

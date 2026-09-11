@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { readdir, readFile, lstat } from "node:fs/promises";
 import { basename, dirname, resolve, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
@@ -104,6 +104,24 @@ function privateCssSplitEnabled() {
 function onionPrivateCssEntrySplit() {
   const appCssId = resolve(ROOT, "src/css/app.css");
   const statements = PRIVATE_CSS_IMPORTS.map(privateCssImportStatement);
+
+  // R06: prepare trusted tooling before private.css activates the full-view
+  // composition. Candidate CSS is declarative data, never executable tooling.
+  // Keep the source-mode import and all pre-activation release bytes unchanged.
+  const fullviewStatement = privateCssImportStatement(
+    "./compositions/private-fullview-routes.css"
+  );
+  const privateSource = readFileSync(PRIVATE_CSS_ENTRY, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
+  const fullviewImports = (privateSource.match(/@import\b[^;]*;/g) || [])
+    .filter((statement) => statement.includes("private-fullview-routes.css"));
+
+  if (fullviewImports.length > 0) {
+    if (fullviewImports.length !== 1 || fullviewImports[0] !== fullviewStatement) {
+      throw new Error("Private full-view CSS must have one canonical compositions import.");
+    }
+    statements.push(fullviewStatement);
+  }
 
   return {
     name: "onion-private-css-entry-split",

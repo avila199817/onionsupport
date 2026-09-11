@@ -1,3 +1,6 @@
+import { cleanText, escapeHtml } from "../../core/presentation-text.js";
+export { cleanText, escapeHtml };
+
 /* =========================================================
    Onion Support - Home Template · generated domain module
    Shared by /src/views/home/home.template.js
@@ -120,15 +123,6 @@ export function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-export function cleanText(value = "", fallback = "") {
-  const text = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return text || fallback;
-}
-
 export function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
@@ -157,15 +151,6 @@ export function optionalNumber(value) {
 
 export function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
-}
-
-export function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 export function attr(value = "") {

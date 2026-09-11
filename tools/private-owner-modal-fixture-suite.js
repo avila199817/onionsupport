@@ -34,6 +34,9 @@ async function load(width = 1280) {
   frame.style.width = width + 'px';
   frame.src = '/@fixture?case=' + (++sequence);
   await wait(() => app().__fixtureReady === true && app().location.search === '?case=' + sequence, 'fixture ready');
+  // Keep the synthetic Core boundary aligned with the runtime session-scope capability.
+  const { AppCore } = await app().eval('import("/src/core/index.js")');
+  AppCore.getSessionEpoch = () => 0;
   const main = node('#main-content');
   main.scrollTop = 260;
   app().__initialScrollTop = main.scrollTop;

@@ -1,6 +1,8 @@
 /* Public legal identity shared with oniontech/template/base.template.js.
    Verified against the transactional template and delivered mail, September 2026.
-   Pure HTML renderer: safe for static documents and public SPA views. */
+   Pure HTML renderer: safe for static documents and public SPA views.
+   The Maps href is literal to preserve the trusted no-import/interpolation
+   policy; public-site source/browser contracts check it against PUBLIC_SITE. */
 export const PUBLIC_LEGAL = Object.freeze({
   name: "Onion Support",
   owner: "Cristian Ávila Luque",
@@ -35,6 +37,7 @@ export function renderPublicLegalFooter({ className = "" } = {}) {
             <p class="public-legal-footer__label">Atención al cliente</p>
             <p>${supportLink()}<br><a href="tel:${PUBLIC_LEGAL.phoneHref}">${PUBLIC_LEGAL.phone}</a></p>
             <a href="/#incidencia">Solicitar asistencia</a>
+            <p><a href="https://maps.app.goo.gl/s41pMKVjSr6pDg6F9" target="_blank" rel="noopener noreferrer">Onion Support en Google Maps</a></p>
           </div>
           <div>
             <p class="public-legal-footer__label">Horario de atención</p>

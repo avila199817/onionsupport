@@ -93,6 +93,30 @@ let httpClient = null;
 let toastBridge = null;
 let activeRequestClient = null;
 let activeRequestBound = null;
+let sessionEpoch = 0;
+let sessionScopeKey = "";
+
+// The kernel owns session lifetime, not entity caches. Existing registered
+// owners release their own data/resources when the authorization scope changes.
+function reconcileSessionScope() {
+  const key = JSON.stringify([
+    state.authenticated, state.user?.userId || state.user?.id || null,
+    state.sessionId || state.token, state.role,
+    [...(state.user?.permissions || [])].sort(),
+  ]);
+  if (key === sessionScopeKey) return;
+  sessionScopeKey = key;
+  sessionEpoch += 1;
+  for (const owner of new Set(moduleRegistry.values())) {
+    try { owner?.onSessionInvalidated?.(); }
+    catch { console.warn("[Core] A session owner failed to release its resources."); }
+  }
+}
+function getSessionEpoch() {
+  getRuntimeState();
+  reconcileSessionScope();
+  return sessionEpoch;
+}
 
 const runtimeMetrics = { reads: 0, reconciliations: 0, legacyRepairs: 0, writes: 0 };
 const authSignal = {
@@ -267,6 +291,7 @@ function captureAuthInputs() {
   authSignal.userFlags = userFlagBits(user);
   authSignal.session = state.session; authSignal.sessionId = state.sessionId; authSignal.sessionUserId = state.sessionUserId;
   authSignal.fallbackRole = state.role; authSignal.fallbackRol = state.rol;
+  reconcileSessionScope();
 }
 function syncAuthDerivedState(options = {}) {
   runtimeMetrics.reconciliations += 1;
@@ -624,7 +649,7 @@ export const AppCore = {
   CORE_VERSION, version: CORE_VERSION, config, state, runtimeState, dom, ui, modules,
   init, ready, getState, setState, patchState, getRuntimeState, setRuntimeState,
   isAuthenticated, getCurrentUser, getCurrentRole, hasRole, getAuthHeader,
-  setRoute, setPublicPath, setUser, setToken, applySession, clearSession,
+  setRoute, setPublicPath, setUser, setToken, applySession, clearSession, getSessionEpoch,
   setTheme, setLang, setSidebarOpen, setLoading, setError,
   setShowToast, showToast, registerModule, getModule,
   installHttpBridge, setHttpClient, getHttpClient, getActiveRequest, getActiveApiClient, request,

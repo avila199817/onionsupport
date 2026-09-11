@@ -15,7 +15,46 @@ export function renderMetadata(page) {
   return `${START}\n  <title>${escape(page.title)}</title>\n${pageMetaEntries(page).filter(([, , value]) => value != null).map(([attribute, key, value]) => `  <meta ${attribute}="${key}" content="${escape(value)}">`).join("\n")}\n  <link rel="canonical" href="${escape(page.canonical)}">${page.indexable ? `\n  <link rel="alternate" hreflang="es-ES" href="${escape(page.canonical)}">\n  <link rel="alternate" hreflang="x-default" href="${escape(page.canonical)}">` : ""}${schema ? `\n  <script type="application/ld+json" data-onion-site-metadata="v3" data-onion-schema="service-hierarchy">\n${JSON.stringify(schema, null, 2).replace(/</g, "\\u003c")}\n  </script>` : ""}\n  ${END}`;
 }
 
+// Keep the established empty Router root and its single runtime H1. The
+// no-script alternative uses the public catalog without forms, duplicate IDs,
+// tracking embeds or unverified claims about a public storefront.
+export function renderNoScriptSummary() {
+  return `<section class="noscript-box" lang="es" data-public-noscript-summary="true">
+          <p class="noscript-title">${escape(PUBLIC_SITE.name)}: servicio técnico informático</p>
+          <p>${escape(PUBLIC_SITE.description)}</p>
+          <p>Atención directa de ${escape(PUBLIC_SITE.ownerName)}, técnico informático de ${escape(PUBLIC_SITE.name)}.</p>
+          <p>Base en ${escape(PUBLIC_SITE.address.addressLocality)}. ${escape(PUBLIC_SITE.coverage)}</p>
+          <h2 class="noscript-services-label">Servicios informáticos</h2>
+          <nav class="noscript-services" aria-label="Servicios técnicos de Onion Support">
+            ${PUBLIC_SERVICES.map((service) => `<a href="${escape(service.path)}">${escape(service.label)}</a>`).join("\n            ")}
+          </nav>
+          <h2 class="noscript-services-label">Contacto y atención</h2>
+          <p>Cuéntanos qué está fallando. Antes de intervenir confirmamos el alcance, la modalidad de atención y el presupuesto.</p>
+          <nav class="noscript-services" aria-label="Contactar con Onion Support">
+            <a href="tel:${escape(PUBLIC_SITE.phoneTel)}">Llamar al ${escape(PUBLIC_SITE.phoneDisplay)}</a>
+            <a href="mailto:${escape(PUBLIC_SITE.email)}">${escape(PUBLIC_SITE.email)}</a>
+            <a href="https://wa.me/${escape(PUBLIC_SITE.phoneInternational)}" target="_blank" rel="noopener noreferrer">Consultar por WhatsApp</a>
+            <a href="${escape(PUBLIC_SITE.googleMapsUrl)}" target="_blank" rel="noopener noreferrer">Onion Support en Google Maps</a>
+          </nav>
+          <p class="noscript-services-label">El formulario de asistencia y el área de clientes necesitan JavaScript. También puedes solicitar atención por teléfono, correo o WhatsApp.</p>
+          <nav class="noscript-services" aria-label="Área de clientes"><a href="/login">Iniciar sesión</a></nav>
+        </section>`;
+}
+
+function materializeNoScriptSummary(source) {
+  const start = "<!-- public-home-summary:noscript -->";
+  const end = "<!-- /public-home-summary:noscript -->";
+  if (source.split(start).length !== 2 || source.split(end).length !== 2) {
+    throw new Error("Expected one no-script summary boundary");
+  }
+  const first = source.indexOf(start);
+  const last = source.indexOf(end);
+  if (last < first) throw new Error("Invalid no-script summary boundary");
+  return source.slice(0, first) + start + "\n        " + renderNoScriptSummary() + "\n        " + source.slice(last);
+}
+
 export function materializeDocument(source, page) {
+  if (page.path === "/") source = materializeNoScriptSummary(source);
   const generated = renderMetadata(page);
   if (source.includes(START)) return source.replace(/<!-- public-site-v3: generated metadata -->[\s\S]*?<!-- \/public-site-v3 -->/, generated);
   // One-time migration of existing public documents. Unowned head/body stays intact.
@@ -63,7 +102,7 @@ export function renderService(page) {
     <a class="seo-brand" href="/" aria-label="Onion Support, inicio"><img src="${PUBLIC_SITE.logo}" alt="" width="44" height="44"><span class="seo-brand-name">ONION <strong>SUPPORT</strong></span></a>
     <nav class="seo-nav" aria-label="Navegación principal">
       <a href="#otros-servicios">Servicios</a>
-      <a href="/#contacto">Contacto</a>
+      <a href="#contacto">Contacto</a>
       <a class="seo-nav-access" href="/login">Iniciar sesión</a>
     </nav>
   </div></header>

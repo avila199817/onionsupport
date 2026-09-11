@@ -62,7 +62,7 @@ export const USUARIOS_MAX_PAGES = 20;
 export const USUARIOS_DEFAULT_SORT_BY = "updatedAt";
 export const USUARIOS_DEFAULT_SORT_DIR = "DESC";
 
-const CACHE_SCHEMA_VERSION = 4;
+const CACHE_SCHEMA_VERSION = 5;
 
 const ALLOWED_ROLES = new Set([
   "admin",
@@ -166,6 +166,42 @@ export const usuariosState = {
 };
 
 let usuariosStore = [];
+let storeEpoch = -1;
+let confirmedRevision = 0;
+let cacheLifetime = 0;
+const identityRevisions = new Map();
+const pendingUpdates = new Map();
+
+function ensureStoreScope() {
+  const epoch = AppCore.getSessionEpoch();
+  if (storeEpoch !== epoch) {
+    clearUsuariosCache();
+    storeEpoch = epoch;
+  }
+  return epoch;
+}
+
+function isCurrentStoreScope(epoch) {
+  return ensureStoreScope() === epoch;
+}
+
+function cacheOwner() {
+  const state = AppCore.runtimeState.read();
+  // No token/session secret is persisted. The epoch owns in-memory work;
+  // persisted data is additionally tied to this user's authorization scope.
+  return JSON.stringify([
+    state.authenticated, state.user?.userId || state.user?.id || null,
+    state.role, [...(state.user?.permissions || [])].sort(),
+  ]);
+}
+
+function discardOldRead() {
+  const error = new Error("La lectura pertenece a una sesión anterior.");
+  error.name = "AbortError";
+  error.code = "USUARIOS_READ_SCOPE_CHANGED";
+  return error;
+}
+
 
 /* =========================================================
    BASICS
@@ -1593,7 +1629,7 @@ export function normalizeUsuarioModel(
         32
       );
 
-  const avatar =
+  const avatar = raw.hasAvatar === false ? "" :
     safeAvatarUrl(
       first(
         raw.avatarUrl,
@@ -1858,8 +1894,7 @@ export function normalizeUsuarioModel(
 
     hasAvatar:
       Boolean(
-        avatar ||
-        raw.hasAvatar
+        raw.hasAvatar !== false && (avatar || raw.hasAvatar === true)
       ),
 
     avatarUpdatedAt:
@@ -3529,6 +3564,8 @@ function writeCachePayload() {
         schemaVersion:
           CACHE_SCHEMA_VERSION,
 
+        owner: cacheOwner(),
+
         apiVersion:
           USUARIOS_API_VERSION,
 
@@ -3556,6 +3593,7 @@ function writeCachePayload() {
 function hydrateStateFromCache({
   freshOnly = true,
 } = {}) {
+  ensureStoreScope();
   const payload =
     readCachePayload();
 
@@ -3568,7 +3606,8 @@ function hydrateStateFromCache({
       payload.schemaVersion,
       0
     ) !==
-    CACHE_SCHEMA_VERSION
+    CACHE_SCHEMA_VERSION ||
+    payload.owner !== cacheOwner()
   ) {
     removeCachePayload();
     return false;
@@ -3828,12 +3867,14 @@ function clearInflightLoad(
 }
 
 export function getUsuarios() {
+  ensureStoreScope();
   return usuariosStore;
 }
 
 export function replaceUsuariosStore(
   items = []
 ) {
+  ensureStoreScope();
   const list =
     normalizeUsuariosCollection(
       items
@@ -3858,6 +3899,7 @@ export function replaceUsuariosStore(
 export function upsertUsuarioStore(
   item = {}
 ) {
+  ensureStoreScope();
   const normalized =
     normalizeUsuarioModel(
       item
@@ -3917,6 +3959,7 @@ export function upsertUsuarioStore(
 export function getUsuarioByIdStore(
   id = ""
 ) {
+  ensureStoreScope();
   return findUsuarioById(
     usuariosStore,
     id
@@ -4516,6 +4559,7 @@ async function fetchUsuariosPageRequest(
 export async function fetchUsuariosRequest(
   options = {}
 ) {
+  const epoch = ensureStoreScope();
   const all =
     options.all !== false;
 
@@ -4525,6 +4569,7 @@ export async function fetchUsuariosRequest(
         options
       );
 
+    if (!isCurrentStoreScope(epoch)) throw discardOldRead();
     if (
       safeObject(response)?.ok ===
       false
@@ -4647,6 +4692,7 @@ export async function fetchUsuariosRequest(
             : false,
       });
 
+    if (!isCurrentStoreScope(epoch)) throw discardOldRead();
     if (
       safeObject(response)?.ok ===
       false
@@ -4699,11 +4745,14 @@ export async function getUsuarioByIdRequest(
   id = "",
   options = {}
 ) {
+  const epoch = ensureStoreScope();
   const userId =
     normalizeUsuarioId(id);
 
   const key =
     `detail:${userId.toLowerCase()}`;
+  const revision = identityRevisions.get(userId.toLowerCase()) || 0;
+  const lifetime = cacheLifetime;
 
   if (
     options.dedupe !== false &&
@@ -4738,6 +4787,7 @@ export async function getUsuarioByIdRequest(
           }
         );
 
+      if (!isCurrentStoreScope(epoch) || lifetime !== cacheLifetime) throw discardOldRead();
       if (
         safeObject(response)?.ok ===
         false
@@ -4754,22 +4804,27 @@ export async function getUsuarioByIdRequest(
         );
       }
 
-      const detail =
-        normalizeDetailResponse(
-          response
-        );
+      // Reject access failures and foreign DTOs before applying a newer local
+      // revision. A confirmed write is not permission to conceal a failed read.
+      const source = pickDetail(response);
+      const returnedId = cleanText(first(source?.userId, source?.usuarioId, source?.id, source?.uid), "");
+      const detail = normalizeDetailResponse(response);
 
       if (
-        !detail ||
-        !getUsuarioStableId(
-          detail
-        )
+        !detail || !returnedId ||
+        returnedId.toLowerCase() !== userId.toLowerCase()
       ) {
         throw createContractError(
           "USUARIO_DETAIL_INVALID_RESPONSE",
           "El backend no devolvió un usuario válido.",
           502
         );
+      }
+
+      if ((identityRevisions.get(userId.toLowerCase()) || 0) !== revision) {
+        const current = getUsuarioByIdStore(userId);
+        if (current) return current;
+        throw discardOldRead();
       }
 
       return detail;
@@ -4871,7 +4926,7 @@ function selfEditContext(userId) {
   const state = AppCore.runtimeState.read();
   const currentId = cleanText(state.user?.userId || state.user?.id, "").toLowerCase();
   if (!state.authenticated || !currentId || currentId !== userId.toLowerCase()) return null;
-  return { userId: currentId, token: state.token, sessionId: state.sessionId };
+  return { userId: currentId, epoch: AppCore.getSessionEpoch() };
 }
 
 function applyConfirmedSelfName(detail, context) {
@@ -4880,7 +4935,7 @@ function applyConfirmedSelfName(detail, context) {
   const currentId = cleanText(state.user?.userId || state.user?.id, "").toLowerCase();
   const detailId = cleanText(detail.userId || detail.id, "").toLowerCase();
   if (!state.authenticated || currentId !== context.userId || detailId !== context.userId ||
-      state.token !== context.token || state.sessionId !== context.sessionId) return;
+      AppCore.getSessionEpoch() !== context.epoch) return;
   const name = userNameFromIdentity(detail);
   if (!name) return;
 
@@ -4894,6 +4949,7 @@ export async function updateUsuarioRequest(
   payload = {},
   options = {}
 ) {
+  const epoch = ensureStoreScope();
   const userId =
     normalizeUsuarioId(id);
   const editContext = selfEditContext(userId);
@@ -4921,66 +4977,107 @@ export async function updateUsuarioRequest(
     );
   }
 
-  const response =
-    await httpRequest(
-      method,
-      getUsuarioEndpoint(
-        userId
-      ),
-      body,
-      {
-        timeout:
-          number(
-            options.timeout,
-            USUARIOS_UPDATE_TIMEOUT
-          ),
+  const key = userId.toLowerCase();
+  const execute = async () => {
+    if (!isCurrentStoreScope(epoch)) return null;
+    if (options.signal?.aborted) throw discardOldRead();
+    let response;
+    try {
+      response = await httpRequest(
+        method,
+        getUsuarioEndpoint(
+          userId
+        ),
+        body,
+        {
+          timeout:
+            number(
+              options.timeout,
+              USUARIOS_UPDATE_TIMEOUT
+            ),
 
-        source:
-          `views.usuarios.api.update.${method.toLowerCase()}`,
+          source:
+            `views.usuarios.api.update.${method.toLowerCase()}`,
 
-        signal:
-          options.signal,
-      }
-    );
+          signal:
+            options.signal,
+        }
+      );
+    } catch (error) {
+      if (!isCurrentStoreScope(epoch)) return null;
+      throw error;
+    }
+    if (!isCurrentStoreScope(epoch)) return null;
 
-  if (
-    safeObject(response)?.ok === false ||
-    safeObject(response)?.success === false ||
-    safeObject(response)?.error === true
-  ) {
-    throw createResponseError(
-      response,
-      {
-        fallbackCode:
-          "USUARIO_UPDATE_REJECTED",
+    if (
+      safeObject(response)?.ok === false ||
+      safeObject(response)?.success === false ||
+      safeObject(response)?.error === true
+    ) {
+      throw createResponseError(
+        response,
+        {
+          fallbackCode:
+            "USUARIO_UPDATE_REJECTED",
 
-        fallbackMessage:
-          "El backend rechazó la actualización del usuario.",
-      }
-    );
-  }
+          fallbackMessage:
+            "El backend rechazó la actualización del usuario.",
+        }
+      );
+    }
 
-  const detail =
-    normalizeDetailResponse(
-      response
-    );
+    const source = pickDetail(response);
+    const returnedId = cleanText(first(source?.userId, source?.usuarioId, source?.id, source?.uid), "");
+    if (!source || !returnedId || returnedId.toLowerCase() !== userId.toLowerCase() ||
+        (hasOwn(source, "name") && source.name !== undefined &&
+          (typeof source.name !== "string" || !cleanText(source.name)))) {
+      throw createContractError(
+        "USUARIO_UPDATE_INVALID_RESPONSE",
+        "El backend no devolvió el usuario actualizado.",
+        502
+      );
+    }
 
-  if (
-    !detail ||
-    !getUsuarioStableId(
-      detail
-    )
-  ) {
+    const previous = getUsuarioByIdStore(returnedId);
+    const merged = { ...safeObject(previous) };
+    for (const [field, value] of Object.entries(source)) {
+      if (value !== undefined) merged[field] = value;
+    }
+    // Explicit URL/flag changes govern all old aliases. Missing/undefined photo
+    // fields are partial data, not deletions; name-only PATCH keeps a real photo.
+    const photoKey = ["avatarUrl", "avatar", "photoUrl", "picture"]
+      .find((key) => hasOwn(source, key) && source[key] !== undefined);
+    if (source.hasAvatar === false || photoKey) {
+      const photo = source.hasAvatar === false ? "" : safeAvatarUrl(source[photoKey]);
+      Object.assign(merged, { avatarUrl: photo, avatar: photo, photoUrl: photo, picture: photo, hasAvatar: Boolean(photo) });
+    }
+    const detail = normalizeUsuarioModel(merged);
+
+    // Commit before publishing. The revision also prevents a GET/list begun
+    // before this write from repopulating the previous identity.
+    identityRevisions.set(userId.toLowerCase(), ++confirmedRevision);
+    detailInflight.delete(`detail:${userId.toLowerCase()}`);
+    lastLoadToken += 1;
+    setLoading(false);
+    setRefreshing(false);
+    setInflightLoad(null);
+    syncUsuarioDetail(detail);
+    applyConfirmedSelfName(detail, editContext);
+    notifyDomainChanged("usuarios");
+    return detail;
+  };
+  const predecessor = pendingUpdates.get(key);
+  const task = predecessor ? predecessor.then(execute, () => {
+    if (!isCurrentStoreScope(epoch)) return null;
     throw createContractError(
-      "USUARIO_UPDATE_INVALID_RESPONSE",
-      "El backend no devolvió el usuario actualizado.",
-      502
+      "USUARIO_UPDATE_QUEUE_STOPPED",
+      "No se ha enviado este cambio. Revisa el resultado de la actualización anterior antes de continuar.",
+      409
     );
-  }
-
-  applyConfirmedSelfName(detail, editContext);
-  notifyDomainChanged("usuarios");
-  return detail;
+  }) : execute();
+  pendingUpdates.set(key, task);
+  try { return await task; }
+  finally { if (pendingUpdates.get(key) === task) pendingUpdates.delete(key); }
 }
 
 export async function deleteUsuarioRequest(
@@ -5155,13 +5252,11 @@ export async function loadUsuarios({
       )
       .catch(
         (error) => {
-          lastError =
-            error;
-
           if (
             loadToken ===
             lastLoadToken
           ) {
+            lastError = error;
             setError(
               safeError(
                 error,
@@ -5212,6 +5307,8 @@ export async function loadUsuarioDetail(
   userId = "",
   options = {}
 ) {
+  const epoch = ensureStoreScope();
+  const lifetime = cacheLifetime;
   const id =
     normalizeUsuarioId(
       userId
@@ -5248,18 +5345,13 @@ export async function loadUsuarioDetail(
         options
       );
 
-    return syncUsuarioDetail(
-      detail
-    );
+    if (!isCurrentStoreScope(epoch) || lifetime !== cacheLifetime) throw discardOldRead();
+    return syncUsuarioDetail(detail);
   } catch (error) {
-    if (
-      cached &&
-      options.allowCacheFallback !==
-        false
-    ) {
-      return cached;
-    }
-
+    if (!isCurrentStoreScope(epoch) || lifetime !== cacheLifetime) throw discardOldRead();
+    if ([401, 403].includes(getErrorStatus(error))) throw error;
+    const current = getUsuarioByIdStore(id);
+    if (current && options.allowCacheFallback !== false) return current;
     throw error;
   }
 }
@@ -5290,22 +5382,7 @@ export async function createUsuario(
   );
 }
 
-export async function updateUsuario(
-  id = "",
-  payload = {},
-  options = {}
-) {
-  const detail =
-    await updateUsuarioRequest(
-      id,
-      payload,
-      options
-    );
-
-  return syncUsuarioDetail(
-    detail
-  );
-}
+export const updateUsuario = updateUsuarioRequest;
 
 export async function deleteUsuario(
   id = "",
@@ -5412,6 +5489,7 @@ export function unwrapUsuariosPayload(
 }
 
 export function getUsuariosStateSnapshot() {
+  ensureStoreScope();
   return {
     ...usuariosState,
 
@@ -5434,6 +5512,7 @@ export function getUsuariosStateSnapshot() {
 }
 
 export function getUsuariosStoreSnapshot() {
+  ensureStoreScope();
   return {
     items: [
       ...usuariosStore,
@@ -5457,6 +5536,7 @@ export function getUsuariosStoreSnapshot() {
 }
 
 export function getUsuariosCount() {
+  ensureStoreScope();
   return usuariosStore.length;
 }
 
@@ -5468,6 +5548,7 @@ export function hasUsuarios() {
 }
 
 export function getSortedUsuariosStore() {
+  ensureStoreScope();
   return normalizeUsuariosCollection(
     usuariosStore
   );
@@ -5607,6 +5688,7 @@ export function computeUsuariosStats(
 ========================================================= */
 
 export function getUsuariosApiSnapshot() {
+  ensureStoreScope();
   return {
     version:
       USUARIOS_API_VERSION,
@@ -5766,6 +5848,11 @@ export function getUsuariosApiSnapshot() {
 
 export function clearUsuariosCache() {
   lastLoadToken += 1;
+  storeEpoch = AppCore.getSessionEpoch();
+  confirmedRevision += 1;
+  cacheLifetime += 1;
+  identityRevisions.clear();
+  pendingUpdates.clear();
 
   usuariosState.items = [];
   usuariosState.remoteCount = 0;
@@ -5789,6 +5876,10 @@ export function clearUsuariosCache() {
 
   return true;
 }
+
+AppCore.registerModule("usuarios.session", Object.freeze({
+  onSessionInvalidated: clearUsuariosCache,
+}), { overwrite: false });
 
 /* =========================================================
    DEFAULT EXPORT

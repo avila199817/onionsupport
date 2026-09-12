@@ -3,6 +3,10 @@
 > Actualizado: 2026-09-08.
 > Corte de implementación: 2026-09-08, UTC. Las evidencias de publicación anteriores conservan su propia fecha y revisión. Describe el estado observado y las reglas del repositorio `avila199817/onionsupport`. El código de `main` define la implementación; los runs enlazados acreditan la revisión desplegada. Una regla objetivo no acredita por sí sola que todos los consumidores la cumplan.
 
+## Actualización pública — 2026-09-12
+
+El [refinamiento de Home, acceso y servicios](releases/2026-09-12-public-polish.md) parte de `8d9dab86` y conserva las autoridades existentes. El registro distingue las pruebas locales con Auth inyectado, la evidencia de publicación por PR/run y los límites de Google. No cierra el recorrido autenticado F1 ni acredita sitelinks o prerenderizado del Home.
+
 ## Estado del proyecto y evidencia
 
 La entrega actual centraliza la apertura de detalle en una sola sesión para Home, listas y relaciones de Incidencias, Facturas, Clientes y Usuarios. Su implementación, resultados locales y evidencia de CI del candidato de [PR #552](https://github.com/avila199817/onionsupport/pull/552) constan en [2026-09-08-single-modal-session.md](releases/2026-09-08-single-modal-session.md).

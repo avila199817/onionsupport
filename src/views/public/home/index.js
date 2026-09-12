@@ -1282,7 +1282,7 @@ function initInitialPosition(refs, host, activeState, cleanups) {
     if (!frame) frame = requestFrame(position);
   };
   addEvent(cleanups, refs.root, "public-support:ready", () => {
-    // Inserting intake also moves every section after the hero, including
+    // Inserting intake moves contact and the following sections, including
     // legal disclosures. Restore a requested destination once that insertion
     // is complete; legal information remains usable even if intake fails.
     if (window.location.hash && window.location.hash !== "#inicio") schedule();

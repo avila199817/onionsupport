@@ -46,7 +46,7 @@ body.auth-screen.auth-no-scroll {
   --auth-text: #eaf4ff;
   --auth-text-strong: #ffffff;
   --auth-text-soft: #b8c8dd;
-  --auth-text-muted: #8191aa;
+  --auth-text-muted: #a3b3c9;
 
   --auth-accent: #1394ff;
   --auth-accent-2: #34d4ff;
@@ -86,10 +86,8 @@ body.auth-screen.auth-no-scroll {
     sans-serif;
 
   background:
-    radial-gradient(circle at 10% 8%, rgb(19 148 255 / .24), transparent 30%),
-    radial-gradient(circle at 86% 12%, rgb(52 212 255 / .15), transparent 26%),
-    radial-gradient(circle at 72% 92%, rgb(11 97 255 / .20), transparent 34%),
-    linear-gradient(135deg, #030712 0%, #071121 52%, #02040a 100%);
+    radial-gradient(ellipse at 18% 20%, rgb(19 148 255 / .09), transparent 52%),
+    var(--auth-bg);
 }
 
 .public-auth-shell,
@@ -120,7 +118,7 @@ body.auth-screen.auth-no-scroll {
   mask-image: radial-gradient(circle at 50% 40%, black, transparent 88%);
   -webkit-mask-image: radial-gradient(circle at 50% 40%, black, transparent 88%);
 
-  opacity: .72;
+  opacity: .28;
 }
 
 .public-auth-shell::after {
@@ -139,7 +137,7 @@ body.auth-screen.auth-no-scroll {
     112px 112px,
     148px 148px;
 
-  opacity: .28;
+  opacity: .12;
 }
 
 .public-auth-background {
@@ -164,6 +162,7 @@ body.auth-screen.auth-no-scroll {
   min-block-size: 0;
 
   overflow: auto;
+  scroll-padding-block: 24px;
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: rgb(19 148 255 / .55) transparent;
@@ -240,20 +239,13 @@ body.auth-screen.auth-no-scroll {
   overflow: hidden;
 
   border: 1px solid rgb(255 255 255 / .14);
-  border-radius: 28px;
+  border-radius: 24px;
 
-  background:
-    radial-gradient(circle at 50% 0%, rgb(255 255 255 / .10), transparent 32%),
-    linear-gradient(180deg, rgb(255 255 255 / .065), rgb(255 255 255 / .022)),
-    rgb(7 17 31 / .92);
+  background: var(--auth-surface-strong);
 
   box-shadow:
-    0 34px 100px rgb(0 0 0 / .52),
-    0 18px 48px rgb(19 148 255 / .10),
-    inset 0 1px 0 rgb(255 255 255 / .12);
-
-  backdrop-filter: blur(24px) saturate(1.16);
-  -webkit-backdrop-filter: blur(24px) saturate(1.16);
+    0 24px 64px rgb(0 0 0 / .24),
+    inset 0 1px 0 rgb(255 255 255 / .05);
 }
 
 .login-card-panel::before,
@@ -288,7 +280,7 @@ body.auth-screen.auth-no-scroll {
     linear-gradient(125deg, transparent 5%, rgb(255 255 255 / .06) 18%, transparent 32%),
     radial-gradient(circle at 86% 4%, rgb(19 148 255 / .10), transparent 24%);
 
-  opacity: .82;
+  opacity: .20;
 }
 
 .login-card-header,
@@ -589,9 +581,9 @@ body.auth-screen.auth-no-scroll {
   color: #ffffff;
 
   font-size: clamp(42px, 4.7vw, 72px);
-  font-weight: 1000;
-  line-height: .96;
-  letter-spacing: -.07em;
+  font-weight: 760;
+  line-height: 1.08;
+  letter-spacing: -.045em;
 
   text-wrap: balance;
 }
@@ -635,10 +627,10 @@ body.auth-screen.auth-no-scroll {
   gap: 12px;
 
   min-inline-size: 0;
-  padding: 14px;
+  padding: 16px;
 
   border: 1px solid rgb(255 255 255 / .09);
-  border-radius: 18px;
+  border-radius: 14px;
 
   background:
     linear-gradient(180deg, rgb(255 255 255 / .035), rgb(255 255 255 / .012)),
@@ -691,14 +683,14 @@ body.auth-screen.auth-no-scroll {
   color: #ffffff;
 
   font-size: 13px;
-  font-weight: 860;
-  line-height: 1.2;
+  font-weight: 700;
+  line-height: 1.4;
 }
 
 .login-showcase-feature-copy span {
   color: var(--auth-text-muted);
 
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 540;
   line-height: 1.45;
 }
@@ -819,15 +811,11 @@ body.auth-screen.auth-no-scroll {
 
   border-color: rgb(100 178 255 / .26);
 
-  background:
-    radial-gradient(circle at 50% -8%, rgb(19 148 255 / .15), transparent 34%),
-    linear-gradient(180deg, rgb(255 255 255 / .055), rgb(255 255 255 / .018)),
-    rgb(6 16 30 / .93);
+  background: var(--auth-surface-strong);
 
   box-shadow:
-    0 36px 100px rgb(0 0 0 / .52),
-    0 20px 56px rgb(19 148 255 / .10),
-    inset 0 1px 0 rgb(255 255 255 / .10);
+    0 24px 72px rgb(0 0 0 / .28),
+    inset 0 1px 0 rgb(255 255 255 / .05);
 }
 
 .login-card-panel--portal::after {
@@ -918,9 +906,9 @@ body.auth-screen.auth-no-scroll {
   color: #ffffff;
 
   font-size: clamp(27px, 2.8vw, 36px);
-  font-weight: 950;
-  line-height: 1.12;
-  letter-spacing: -.05em;
+  font-weight: 750;
+  line-height: 1.2;
+  letter-spacing: -.035em;
 
   text-wrap: balance;
 }
@@ -1103,7 +1091,7 @@ body.auth-screen.auth-no-scroll {
   box-shadow: inset 0 1px 0 rgb(255 255 255 / .04);
 
   font: inherit;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 520;
   line-height: 1;
 }
@@ -1400,7 +1388,16 @@ body.auth-screen.auth-no-scroll {
 }
 
 .login-form-row {
-  min-block-size: 22px;
+  min-block-size: 44px;
+  justify-content: flex-end;
+}
+
+.login-forgot-link {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 44px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .login-form-note {
@@ -1488,7 +1485,7 @@ body.auth-screen.auth-no-scroll {
   border: 1px solid rgb(255 255 255 / .07);
   border-radius: 13px;
 
-  color: #7f92aa;
+  color: var(--auth-text-muted);
   background: rgb(255 255 255 / .018);
 
   font-size: 12px;
@@ -1538,25 +1535,22 @@ body.auth-screen.auth-no-scroll {
   overflow: hidden;
 
   border: 1px solid rgb(112 195 255 / .46);
-  border-radius: 15px;
+  border-radius: 12px;
   outline: none;
 
   color: #ffffff;
 
-  background:
-    radial-gradient(circle at 30% 0%, rgb(255 255 255 / .32), transparent 34%),
-    linear-gradient(135deg, #279fff 0%, #0d70ff 56%, #0754db 100%);
+  background: #1263d6;
 
   box-shadow:
-    0 18px 42px rgb(19 148 255 / .24),
-    inset 0 1px 0 rgb(255 255 255 / .24),
-    inset 0 -1px 0 rgb(0 0 0 / .14);
+    0 6px 18px rgb(19 99 214 / .18),
+    inset 0 1px 0 rgb(255 255 255 / .14);
 
   cursor: pointer;
 
   font: inherit;
   font-size: 14px;
-  font-weight: 900;
+  font-weight: 720;
   letter-spacing: -.012em;
 
   text-shadow: 0 1px 1px rgb(0 0 0 / .18);
@@ -1623,6 +1617,8 @@ body.auth-screen.auth-no-scroll {
 .auth-submit:focus-visible,
 .login-submit:focus-visible,
 .password-reset-submit:focus-visible {
+  outline: 2px solid var(--auth-accent-2);
+  outline-offset: 4px;
   box-shadow:
     0 18px 42px rgb(19 148 255 / .24),
     0 0 0 5px rgb(52 212 255 / .16);
@@ -1770,7 +1766,7 @@ body.auth-screen.auth-no-scroll {
 
   padding-block-start: 2px;
 
-  color: #6f8199;
+  color: var(--auth-text-muted);
 
   font-size: 11px;
   font-weight: 650;
@@ -1803,6 +1799,29 @@ body.auth-screen.auth-no-scroll {
 
 .password-reset-card-panel {
   inline-size: 100%;
+}
+
+.public-auth-shell:is([data-auth-state="success"], [data-auth-state="invalid"]) :is(
+  .password-reset-field,
+  .password-reset-password-policy,
+  .password-reset-submit
+) {
+  display: none;
+}
+
+.auth-retry-link {
+  min-block-size: 44px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.auth-retry-link[hidden] {
+  display: none;
 }
 
 .auth-home-link {
@@ -2291,8 +2310,8 @@ body.auth-screen.auth-no-scroll {
   }
 
   .login-form-row {
-    align-items: flex-start;
-    flex-direction: column;
+    align-items: center;
+    flex-direction: row;
 
     gap: 8px;
   }

@@ -277,21 +277,21 @@ async function navigateWithRouter(
   };
 
   if (isFunction(router.replace)) {
-    await router.replace(
+    const result = await router.replace(
       route,
       navigationOptions
     );
 
-    return true;
+    return result !== false && result?.ok !== false;
   }
 
   if (isFunction(router.navigate)) {
-    await router.navigate(
+    const result = await router.navigate(
       route,
       navigationOptions
     );
 
-    return true;
+    return result !== false && result?.ok !== false;
   }
 
   return false;
@@ -642,6 +642,10 @@ function getRefs(
 
   const refs = {
     root,
+    title: root.querySelector(".password-reset-title"),
+    subtitle: root.querySelector(".password-reset-subtitle"),
+    retry: root.querySelector("[data-password-reset-retry]"),
+    back: root.querySelector("[data-password-reset-back]"),
 
     form:
       root.querySelector(
@@ -1372,6 +1376,9 @@ function setMessage(
   refs.message.textContent =
     clean;
 
+  refs.message.setAttribute("role", type === "error" ? "alert" : "status");
+  refs.message.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
+
   setHidden(
     refs.message,
     !hasMessage
@@ -1684,6 +1691,13 @@ function errorCode(
   ).toUpperCase();
 }
 
+function tokenIsUnavailable(error = null) {
+  const code = errorCode(error);
+  const status = Number(error?.status || error?.statusCode || error?.response?.status || 0);
+  return status === 401 || status === 410 ||
+    /^(?:RESET_)?TOKEN_(?:EXPIRED|INVALID|INVALID_OR_EXPIRED|ALREADY_USED)$/.test(code);
+}
+
 function authErrorMessage(
   error = null,
   fallback =
@@ -1749,10 +1763,7 @@ function authErrorMessage(
       "PASSWORD_TOO_LONG"
   ) {
     return (
-      cleanText(
-        error?.message,
-        "La contraseña no cumple la política de seguridad."
-      )
+      AUTH_PASSWORD_POLICY_HELP
     );
   }
 
@@ -1783,10 +1794,7 @@ function authErrorMessage(
     status === 403
   ) {
     return (
-      cleanText(
-        error?.message,
-        "No tienes permisos para realizar esta operación."
-      )
+      "No se puede completar esta solicitud. Contacta con Onion Support si necesitas ayuda."
     );
   }
 
@@ -1798,13 +1806,15 @@ function authErrorMessage(
     );
   }
 
-  return cleanText(
-    error?.message ||
-      error?.payload?.message ||
-      error?.data?.message ||
-      "",
-    fallback
-  );
+  if (status === 429 || code.includes("RATE_LIMIT")) {
+    return "Has realizado demasiados intentos. Espera unos minutos y vuelve a intentarlo.";
+  }
+
+  if (!status || code.includes("NETWORK") || code.includes("TIMEOUT")) {
+    return "No hemos podido conectar. Comprueba tu conexión y vuelve a intentarlo.";
+  }
+
+  return fallback;
 }
 
 /* =========================================================
@@ -1930,6 +1940,15 @@ export function renderPasswordResetView(
   let submitting = false;
   let completed = false;
   let redirecting = false;
+  let tokenUnavailable = missingToken;
+  const initialTitle = refs.title?.textContent;
+  const initialSubtitle = refs.subtitle?.textContent;
+
+  function presentState(state, title, subtitle) {
+    refs.root.dataset.authState = state;
+    if (refs.title) refs.title.textContent = title;
+    if (refs.subtitle) refs.subtitle.textContent = subtitle;
+  }
 
   function setSubmitting(
     value = false
@@ -1941,7 +1960,7 @@ export function renderPasswordResetView(
       refs,
       submitting,
       passwordControls,
-      missingToken || completed
+      tokenUnavailable || completed
     );
   }
 
@@ -1954,7 +1973,7 @@ export function renderPasswordResetView(
       !mounted ||
       submitting ||
       completed ||
-      missingToken
+      tokenUnavailable
     ) {
       return false;
     }
@@ -1997,7 +2016,7 @@ export function renderPasswordResetView(
     ) {
       setMessage(
         refs,
-        "Auth no permite restablecer contraseña.",
+        "El cambio de contraseña no está disponible. Recarga la página e inténtalo de nuevo.",
         "error"
       );
 
@@ -2012,7 +2031,7 @@ export function renderPasswordResetView(
     ) {
       setMessage(
         refs,
-        "Auth no permite solicitar recuperación.",
+        "La recuperación no está disponible. Recarga la página e inténtalo de nuevo.",
         "error"
       );
 
@@ -2069,6 +2088,9 @@ export function renderPasswordResetView(
         }
 
         completed = true;
+        refs.password.value = "";
+        refs.confirmPassword.value = "";
+        presentState("success", "Contraseña actualizada", "Tu cuenta ya tiene una nueva contraseña.");
 
         setMessage(
           refs,
@@ -2095,7 +2117,7 @@ export function renderPasswordResetView(
                 "password-reset-success",
               replaceState: true,
             }
-          );
+          ).catch(() => false);
 
         redirecting = false;
 
@@ -2114,6 +2136,7 @@ export function renderPasswordResetView(
             "Contraseña actualizada. Ya puedes iniciar sesión.",
             "success"
           );
+          focusSafe(refs.message);
         }
 
         return true;
@@ -2154,16 +2177,25 @@ export function renderPasswordResetView(
       }
 
       completed = true;
+      presentState("success", "Revisa tu correo", "La solicitud se ha enviado correctamente.");
+      setHidden(refs.retry, false);
 
       setMessage(
         refs,
-        "Si el usuario existe, recibirás las instrucciones para recuperar el acceso.",
+        "Si existe una cuenta asociada, recibirás un enlace de recuperación. Revisa también la carpeta de correo no deseado.",
         "success"
       );
+      focusSafe(refs.message);
 
       return true;
     } catch (error) {
       if (mounted) {
+        if (mode === MODE_CONFIRM && tokenIsUnavailable(error)) {
+          tokenUnavailable = true;
+          refs.password.value = "";
+          refs.confirmPassword.value = "";
+          presentState("invalid", "Necesitas un nuevo enlace", "Solicita otro enlace para cambiar tu contraseña.");
+        }
         setMessage(
           refs,
           authErrorMessage(
@@ -2171,6 +2203,7 @@ export function renderPasswordResetView(
           ),
           "error"
         );
+        focusSafe(refs.message);
       }
 
       return false;
@@ -2187,12 +2220,25 @@ export function renderPasswordResetView(
   }
 
   function onInput() {
-    if (!submitting && !completed && !missingToken) {
+    if (!submitting && !completed && !tokenUnavailable) {
       clearErrors(
         refs
       );
     }
   }
+
+  function retryRequest() {
+    if (!mounted || submitting || mode !== MODE_REQUEST) return false;
+    completed = false;
+    presentState("ready", initialTitle, initialSubtitle);
+    setHidden(refs.retry, true);
+    clearErrors(refs);
+    setSubmitting(false);
+    focusSafe(refs.identifier);
+    return true;
+  }
+
+  refs.retry?.addEventListener("click", retryRequest);
 
   refs.form.addEventListener(
     "submit",
@@ -2218,6 +2264,7 @@ export function renderPasswordResetView(
     el error al usuario, en vez de enviarlo silenciosamente al login.
   */
   if (missingToken) {
+    presentState("invalid", "Necesitas un nuevo enlace", "Solicita otro enlace para cambiar tu contraseña.");
     setSubmitting(false);
     setMessage(
       refs,
@@ -2246,7 +2293,8 @@ export function renderPasswordResetView(
     submit,
 
     unlock() {
-      if (!mounted || missingToken) return false;
+      if (!mounted || tokenUnavailable || (completed && mode === MODE_CONFIRM)) return false;
+      if (mode === MODE_REQUEST) return retryRequest();
 
       completed = false;
 
@@ -2266,6 +2314,7 @@ export function renderPasswordResetView(
       redirecting = false;
 
       try {
+        refs.retry?.removeEventListener("click", retryRequest);
         refs.form.removeEventListener(
           "submit",
           submit
@@ -2302,6 +2351,8 @@ export function renderPasswordResetView(
       try {
         passwordControls
           .destroy();
+        if (refs.password) refs.password.value = "";
+        if (refs.confirmPassword) refs.confirmPassword.value = "";
       } catch {
         // noop
       }

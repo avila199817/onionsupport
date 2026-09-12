@@ -32,6 +32,7 @@ html:is([data-theme="light"], .theme-light) .public-home-title span {
 /* Text accents need their own contrast; cyan remains on decorative surfaces. */
 html:is([data-theme="light"], .theme-light) :is(
   .public-home-price-eyebrow,
+  .public-home-service-link,
   .public-home-command-copy .public-home-profile-eyebrow,
   .public-home-command-stat > span,
   .public-home-command-stat strong,
@@ -148,7 +149,7 @@ html:is([data-theme="light"], .theme-light) .public-home-command-tags span {
 }
 
 html:is([data-theme="light"], .theme-light) .public-home-command-checklist li,
-html:is([data-theme="light"], .theme-light) .public-home-profile-bottom span {
+html:is([data-theme="light"], .theme-light) .public-home-profile-bottom :is(span, a) {
   color: var(--public-home-text-soft);
 }
 
@@ -176,7 +177,7 @@ html:is([data-theme="light"], .theme-light) :is(
 }
 
 html:is([data-theme="light"], .theme-light) :is(
-  .public-home-service-card:hover,
+  a.public-home-service-card:hover,
   .public-home-price-card:hover
 ) {
   border-color: var(--public-home-border-strong);

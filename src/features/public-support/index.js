@@ -509,10 +509,10 @@ function ensureForm(root) {
   if (found) return found;
 
   const section = formSection();
-  const hero = root.querySelector(".public-home-hero");
+  const contact = root.querySelector(".public-home-contact");
 
-  if (hero?.parentNode) hero.insertAdjacentElement("afterend", section);
-  else root.querySelector(".public-home-content")?.prepend(section);
+  if (contact?.parentNode) contact.insertAdjacentElement("beforebegin", section);
+  else root.querySelector(".public-home-content")?.append(section);
 
   return section;
 }

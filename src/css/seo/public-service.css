@@ -144,6 +144,7 @@ button {
 }
 
 .seo-header-inner {
+  position: relative;
   min-block-size: 84px;
   display: flex;
   align-items: center;
@@ -188,7 +189,8 @@ button {
   font-weight: 650;
 }
 
-.seo-nav a {
+.seo-nav a,
+.seo-service-menu summary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -197,6 +199,58 @@ button {
   border: 1px solid transparent;
   border-radius: 10px;
   text-decoration: none;
+}
+
+.seo-service-menu summary {
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.seo-service-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.seo-service-menu summary svg {
+  inline-size: 16px;
+  block-size: 16px;
+  flex-shrink: 0;
+}
+
+.seo-service-menu[open] summary {
+  border-color: var(--seo-border-strong);
+  background: var(--seo-accent-soft);
+}
+
+.seo-service-menu[open] summary svg {
+  transform: rotate(180deg);
+}
+
+.seo-service-options {
+  position: absolute;
+  inset-block-start: calc(100% + 8px);
+  inset-inline-end: var(--seo-gutter);
+  inline-size: min(340px, calc(100vw - 40px));
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--seo-border);
+  border-radius: 14px;
+  background: var(--seo-surface);
+  box-shadow: var(--seo-shadow);
+  list-style: none;
+}
+
+.seo-service-options a {
+  justify-content: flex-start;
+  inline-size: 100%;
+  padding-block: 10px;
+  line-height: 1.5;
+}
+
+.seo-service-options a[aria-current="page"] {
+  color: var(--seo-accent);
+  border-color: var(--seo-border-strong);
+  background: var(--seo-accent-soft);
 }
 
 .seo-nav .seo-nav-access {
@@ -458,6 +512,21 @@ h1 {
   font-size: 14px;
 }
 
+.seo-contact-preparation {
+  display: grid;
+  gap: 8px;
+  max-inline-size: 58ch;
+  margin-block: 16px 0;
+  padding-inline-start: 20px;
+  color: var(--seo-text-soft);
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.seo-contact-preparation li::marker {
+  color: var(--seo-accent);
+}
+
 .seo-contact-details a {
   display: inline-flex;
   align-items: center;
@@ -497,6 +566,7 @@ h1 {
 
 @media (hover: hover) and (pointer: fine) {
   .seo-nav a:hover,
+  .seo-service-menu summary:hover,
   .seo-link-grid a:hover,
   .seo-button--secondary:hover {
     border-color: var(--seo-border-strong);
@@ -559,7 +629,8 @@ h1 {
     font-size: 13px;
   }
 
-  .seo-nav a {
+  .seo-nav a,
+  .seo-service-menu summary {
     padding-inline: 12px;
   }
 
@@ -601,7 +672,8 @@ h1 {
 }
 
 @media (max-width: 480px) {
-  .seo-nav a {
+  .seo-nav a,
+  .seo-service-menu summary {
     padding-inline: 10px;
   }
 

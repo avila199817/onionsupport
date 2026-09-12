@@ -27,6 +27,10 @@ No se abrirán tareas para “unificarlo todo” sin un límite comprobable. Una
 cuando cumple sus criterios de aceptación; las siguientes pueden esperar sin bloquear
 la estabilidad de lo ya publicado.
 
+## Entrega pública — 2026-09-12
+
+El [refinamiento público](releases/2026-09-12-public-polish.md) concentra Home, navegación de servicios y estados de acceso/recuperación/activación. Usa contratos de fuente y navegador; mantiene el presupuesto del grafo inicial. La verificación de correo/cuentas reales y la observación del índice en Search Console conservan su alcance pendiente. La publicación se sigue por la PR y el SHA exacto del pipeline.
+
 ## Estado del corte
 
 La entrega actual de apertura modal se describe en [2026-09-08-single-modal-session.md](releases/2026-09-08-single-modal-session.md), donde se separan implementación, contratos locales y de CI del candidato, y evidencia de publicación. La trazabilidad histórica frontend/backend permanece en [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md). F1 debe registrar el SHA efectivamente desplegado al ejecutar el recorrido, en lugar de reutilizar una revisión histórica de este plan.

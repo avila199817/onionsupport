@@ -3,6 +3,11 @@ export default {
   "/reparacion-ordenadores": {
     "heading": "Reparación de ordenadores con diagnóstico claro",
     "lead": "Ordenadores de sobremesa y portátiles que no arrancan, van lentos, se calientan o fallan de forma intermitente. Primero se identifica la causa; después se decide qué compensa reparar.",
+    "preparation": [
+      "Marca y modelo del ordenador, si los conoces.",
+      "Qué ocurre al encenderlo y el mensaje de error, si aparece alguno.",
+      "Desde cuándo falla y si hubo una caída, actualización o cambio reciente."
+    ],
     "highlights": [
       "Diagnóstico antes de intervenir",
       "SSD, RAM, batería y almacenamiento",
@@ -27,6 +32,11 @@ export default {
   "/impresoras": {
     "heading": "Impresoras y periféricos que vuelven a responder",
     "lead": "Instalación, drivers, conexión por USB o red, escáner y colas de impresión. Se revisa el conjunto completo para evitar el clásico ciclo de reinstalar sin saber qué estaba fallando.",
+    "preparation": [
+      "Modelo de impresora y sistema del ordenador o móvil desde el que imprimes.",
+      "Si la conexión es por USB, WiFi o cable de red.",
+      "El error que aparece y si puedes imprimir desde otros dispositivos."
+    ],
     "highlights": [
       "Instalación y drivers",
       "USB, WiFi y red local",
@@ -55,6 +65,11 @@ export default {
   "/soporte-informatico": {
     "heading": "Soporte y mantenimiento informático para seguir adelante",
     "lead": "Asistencia remota en España para particulares, autónomos y empresas. Revisamos equipos, programas, cuentas y periféricos para encontrar la causa de cada incidencia y aplicar una solución adecuada al caso.",
+    "preparation": [
+      "El equipo, programa o dispositivo que está dando problemas.",
+      "Qué intentabas hacer y el mensaje de error, si lo hay.",
+      "Desde cuándo ocurre y si el equipo puede conectarse a Internet."
+    ],
     "highlights": [
       "Incidencias de software y hardware",
       "Configuración y mantenimiento de equipos",
@@ -88,6 +103,11 @@ export default {
   "/redes-wifi": {
     "heading": "WiFi y redes estables, con cobertura y continuidad",
     "lead": "Diagnóstico de cobertura, velocidad, cortes, repetidores y dispositivos que no se entienden entre sí. La prioridad es encontrar el cuello de botella real antes de añadir más hardware.",
+    "preparation": [
+      "Si falla un dispositivo o varios y en qué zonas ocurre.",
+      "Si notas cortes, lentitud o falta de cobertura.",
+      "Qué router o repetidores utilizas y si también falla la conexión por cable."
+    ],
     "highlights": [
       "Cobertura y estabilidad",
       "Routers y repetidores",
@@ -116,6 +136,11 @@ export default {
   "/soporte-empresas": {
     "heading": "Soporte informático para autónomos y pequeños negocios",
     "lead": "Cuando el ordenador, la red o la impresora fallan, el problema no es solo técnico: también es tiempo de trabajo perdido. Se prioriza recuperar el servicio y dejar claro qué se ha hecho.",
+    "preparation": [
+      "Qué tarea del negocio está bloqueada o funciona de forma irregular.",
+      "Cuántos equipos o personas están afectados y desde cuándo.",
+      "Si el fallo está en un programa, la red, una impresora o el equipo completo."
+    ],
     "highlights": [
       "Equipos de trabajo",
       "WiFi, red e impresoras",

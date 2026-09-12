@@ -212,7 +212,7 @@ function renderLoginCardHomeLogo() {
 function renderIdentifierField() {
   const id = "login-identifier";
   const name = "identifier";
-  const label = "Usuario o email";
+  const label = "Usuario o correo electrónico";
 
   return `
     <div
@@ -399,13 +399,13 @@ function renderShowcase() {
           class="login-showcase-title"
           id="login-showcase-title"
         >
-          Bienvenido de nuevo a
-          <span>Onion Support</span>
+          Tu soporte técnico,
+          <span>en un solo lugar.</span>
         </h2>
 
         <p class="login-showcase-text">
-          Accede a tu panel para gestionar soporte, incidencias
-          y documentación desde un entorno rápido y seguro.
+          Consulta tus incidencias, habla con tu técnico y encuentra
+          la documentación que necesitas. Te acompañamos en cada paso.
         </p>
       </div>
 
@@ -415,20 +415,20 @@ function renderShowcase() {
       >
         ${renderFeature(
           "bolt",
-          "Respuesta ágil",
-          "Seguimiento claro y comunicación directa."
+          "Incidencias",
+          "Consulta el estado de cada solicitud."
         )}
 
         ${renderFeature(
           "shield",
-          "Profesional",
-          "Soporte técnico con criterio y trazabilidad."
+          "Seguimiento",
+          "Mantén el contacto con tu técnico."
         )}
 
         ${renderFeature(
           "invoice",
-          "Factura disponible",
-          "Documentación y facturación cuando corresponda."
+          "Documentación",
+          "Encuentra tus facturas y archivos."
         )}
       </div>
 
@@ -520,7 +520,7 @@ function renderLoginCard() {
         </h1>
 
         <p class="login-card-subtitle">
-          Accede a tu cuenta de Onion Support.
+          Continúa con tu usuario o correo electrónico.
         </p>
       </header>
 
@@ -528,7 +528,8 @@ function renderLoginCard() {
         class="auth-error login-global-error"
         data-login-global-error="true"
         role="alert"
-        aria-live="polite"
+        aria-atomic="true"
+        tabindex="-1"
         hidden
       ></p>
 
@@ -543,10 +544,6 @@ function renderLoginCard() {
         ${renderPasswordField()}
 
         <div class="login-form-row">
-          <span class="login-form-note">
-            Acceso seguro
-          </span>
-
           <a
             class="auth-link login-link login-forgot-link"
             href="${escapeAttr(forgotHref)}"
@@ -579,7 +576,7 @@ function renderLoginCard() {
           </span>
 
           <span>
-            Tus credenciales se envían mediante la sesión segura de Onion Support.
+            ¿Es tu primera vez? Activa tu cuenta desde el enlace que recibiste por correo.
           </span>
         </div>
       </form>

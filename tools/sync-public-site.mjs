@@ -20,7 +20,7 @@ export function renderMetadata(page) {
 // tracking embeds or unverified claims about a public storefront.
 export function renderNoScriptSummary() {
   return `<section class="noscript-box" lang="es" data-public-noscript-summary="true">
-          <p class="noscript-title">${escape(PUBLIC_SITE.name)}: servicio técnico informático</p>
+          <p class="noscript-title" role="heading" aria-level="1">${escape(PUBLIC_SITE.name)}: servicio técnico informático</p>
           <p>${escape(PUBLIC_SITE.description)}</p>
           <p>Atención directa de ${escape(PUBLIC_SITE.ownerName)}, técnico informático de ${escape(PUBLIC_SITE.name)}.</p>
           <p>Base en ${escape(PUBLIC_SITE.address.addressLocality)}. ${escape(PUBLIC_SITE.coverage)}</p>
@@ -82,6 +82,7 @@ export function renderService(page) {
     "/soporte-empresas": '<rect x="3" y="10" width="26" height="18" rx="3"></rect><path d="M11 10V5h10v5M3 18a34 34 0 0 0 26 0M16 17v5"></path>',
   };
   const relatedLinks = PUBLIC_SERVICES.filter((item) => item.path !== page.path).map((item) => `<a href="${item.path}"><span>${escape(item.label)}</span><span aria-hidden="true">↗</span></a>`).join("\n        ");
+  const serviceNavigation = PUBLIC_SERVICES.map((item) => `<li><a href="${escape(item.path)}"${item.path === page.path ? ' aria-current="page"' : ""}>${escape(item.label)}</a></li>`).join("\n          ");
   return `<!doctype html>
 <html lang="es" dir="ltr">
 <head>
@@ -101,7 +102,12 @@ export function renderService(page) {
   <header class="seo-header"><div class="seo-shell seo-header-inner">
     <a class="seo-brand" href="/" aria-label="Onion Support, inicio"><img src="${PUBLIC_SITE.logo}" alt="" width="44" height="44"><span class="seo-brand-name">ONION <strong>SUPPORT</strong></span></a>
     <nav class="seo-nav" aria-label="Navegación principal">
-      <a href="#otros-servicios">Servicios</a>
+      <details class="seo-service-menu">
+        <summary>Servicios <svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m4 6 4 4 4-4"></path></svg></summary>
+        <ul class="seo-service-options" aria-label="Servicios informáticos">
+          ${serviceNavigation}
+        </ul>
+      </details>
       <a href="#contacto">Contacto</a>
       <a class="seo-nav-access" href="/login">Iniciar sesión</a>
     </nav>
@@ -130,7 +136,7 @@ export function renderService(page) {
       <section><span class="seo-section-number" aria-hidden="true">${String(details.sections.length + 1).padStart(2, "0")}</span><h3>Antes de intervenir</h3><p>Confirmamos contigo el alcance, la modalidad de atención y el presupuesto. La atención presencial se acuerda según el servicio y la ubicación.</p></section>
       </div>
     </section>
-    <section class="seo-contact" aria-labelledby="contacto"><div><p class="seo-eyebrow">El siguiente paso</p><h2 id="contacto">Cuéntame qué está fallando.</h2><p>Describe el equipo, el síntoma y desde cuándo ocurre. Te indicaré cómo podemos resolverlo antes de intervenir.</p><div class="seo-contact-details"><a href="tel:${PUBLIC_SITE.phoneTel}">${PUBLIC_SITE.phoneDisplay}</a><a href="mailto:${PUBLIC_SITE.email}">${PUBLIC_SITE.email}</a></div></div><a class="seo-button seo-button--primary" href="/#incidencia">Explicar mi incidencia <span aria-hidden="true">→</span></a></section>
+    <section class="seo-contact" aria-labelledby="contacto"><div><p class="seo-eyebrow">El siguiente paso</p><h2 id="contacto">Cuéntame qué está fallando.</h2><p>Estos detalles ayudan a orientar la primera revisión:</p><ul class="seo-contact-preparation">${details.preparation.map((item) => `<li>${escape(item)}</li>`).join("")}</ul><p>Antes de intervenir, confirmamos el alcance, la modalidad de atención y el presupuesto.</p><div class="seo-contact-details"><a href="tel:${PUBLIC_SITE.phoneTel}">${PUBLIC_SITE.phoneDisplay}</a><a href="mailto:${PUBLIC_SITE.email}">${PUBLIC_SITE.email}</a></div></div><a class="seo-button seo-button--primary" href="/#incidencia">Explicar mi incidencia <span aria-hidden="true">→</span></a></section>
     <section class="seo-links" aria-labelledby="otros-servicios"><div class="seo-section-heading"><p class="seo-eyebrow">También puedo ayudarte con</p><h2 id="otros-servicios">Otros servicios</h2></div><div class="seo-link-grid">
         ${relatedLinks}
     </div>

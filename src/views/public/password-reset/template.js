@@ -185,6 +185,7 @@ function renderMessage() {
       role="status"
       aria-live="polite"
       aria-atomic="true"
+      tabindex="-1"
       hidden
     ></p>
   `;
@@ -262,6 +263,7 @@ function renderTextField({
           required
           spellcheck="false"
           autocapitalize="none"
+          enterkeyhint="send"
           aria-invalid="false"
           aria-describedby="${escapeAttr(errorId)}"
           data-password-reset-input="${escapeAttr(errorFor)}"
@@ -337,6 +339,7 @@ function renderPasswordField({
           ${disabled ? "disabled" : ""}
           spellcheck="false"
           autocapitalize="none"
+          enterkeyhint="${errorFor === "confirm-password" ? "done" : "next"}"
           aria-invalid="false"
           aria-describedby="${escapeAttr(`${PASSWORD_POLICY_ID} ${capsId} ${errorId}`)}"
           data-password-input="true"
@@ -407,7 +410,7 @@ function renderRequestFields() {
   return renderTextField({
     id: "password-reset-identifier",
     name: "identifier",
-    label: "Usuario o email",
+    label: "Usuario o correo electrónico",
     type: "text",
     autocomplete: "username",
     placeholder: "usuario@empresa.com",
@@ -451,9 +454,9 @@ function renderConfirmFields({
     ${renderPasswordField({
       id: "password-reset-confirm-password",
       name: "confirmPassword",
-      label: "Confirmar contraseña",
+      label: "Repite la nueva contraseña",
       autocomplete: "new-password",
-      placeholder: "Confirmar contraseña",
+      placeholder: "Repite la nueva contraseña",
       dataKey: "password-reset-confirm",
       errorFor: "confirm-password",
       disabled: !tokenPresent,
@@ -499,6 +502,7 @@ function renderBackLink({ isConfirm = false } = {}) {
         class="auth-link login-link password-reset-link"
         href="${escapeAttr(loginHref)}"
         data-spa="true"
+        data-router-link="true"
         data-route="${escapeAttr(loginHref)}"
         data-password-reset-back="true"
       >
@@ -534,7 +538,7 @@ export function getPasswordResetTemplate(
   const subtitle =
     isConfirm
       ? "Define una nueva contraseña para tu cuenta."
-      : "Introduce tu usuario o email y te enviaremos las instrucciones.";
+      : "Te enviaremos un enlace para crear una nueva contraseña.";
 
   const submitLabel =
     isConfirm
@@ -543,8 +547,8 @@ export function getPasswordResetTemplate(
 
   const loadingLabel =
     isConfirm
-      ? "Cambiando..."
-      : "Enviando...";
+      ? "Guardando contraseña…"
+      : "Enviando enlace…";
 
   return renderPublicShell({
     view:
@@ -645,6 +649,12 @@ export function getPasswordResetTemplate(
 
             ${renderBackLink({ isConfirm })}
           </form>
+
+          ${!isConfirm ? `
+            <button class="auth-link auth-retry-link" type="button" data-password-reset-retry="true" hidden>
+              Usar otro usuario o correo
+            </button>
+          ` : ""}
         </section>
       </section>
     `,

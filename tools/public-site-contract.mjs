@@ -1,9 +1,19 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { runInNewContext } from "node:vm";
 import { PUBLIC_SITE, PUBLIC_PAGES, PUBLIC_SERVICES, pageMetadata, publicPageSchema } from "../src/core/public-site.js";
 import { synchronize, renderNoScriptSummary, materializeDocument } from "./sync-public-site.mjs";
 
 await synchronize({ check: true });
+const preload = await readFile(new URL("../src/preboot/public-home-preload.js", import.meta.url), "utf8");
+for (const pathname of ["/password-request", "/password-reset", "/password-reset/confirm/example", "/reset-password/confirm/example", "/activate-account", "/activate-account/example", "/dashboard", "/incidencias"]) {
+  const links = [];
+  const head = { querySelector: () => null, appendChild: (link) => links.push(link) };
+  const document = { head, createElement: () => ({ dataset: {}, setAttribute() {} }) };
+  runInNewContext(preload, { document, window: { location: { pathname } } });
+  assert.ok(links.some((link) => link.href.includes("ticket-deeplink")), "preserve token/deeplink boot hints");
+  assert.equal(links.some((link) => link.href.includes("/ui/chrome/")), ["/dashboard", "/incidencias"].includes(pathname), `${pathname}: private chrome hints only where useful`);
+}
 const ownerMapsUrl = "https://maps.app.goo.gl/s41pMKVjSr6pDg6F9";
 assert.equal(PUBLIC_SITE.googleMapsUrl, ownerMapsUrl, "preserve the owner-supplied profile URL");
 assert.equal(pageMetadata("/").title, "Onion Support | Servicio técnico informático");
@@ -39,6 +49,13 @@ for (const entry of PUBLIC_PAGES) {
     if (entry.path !== "/") {
       assert.ok(html.includes(`href="${ownerMapsUrl}" target="_blank" rel="noopener noreferrer"`));
       assert.ok(html.includes('<a href="#contacto">Contacto</a>'), "service contact works without a SPA transition");
+      assert.equal([...html.matchAll(/<h1\b/g)].length, 1, `${entry.path}: one primary service heading in delivered HTML`);
+      const navigation = html.match(/<nav class="seo-nav"[\s\S]*?<\/nav>/)?.[0] || "";
+      assert.match(navigation, /<details\b/, "service navigation works without JavaScript");
+      assert.ok(navigation.includes(`href="${entry.path}" aria-current="page"`), "service navigation identifies the current page");
+      assert.equal([...navigation.matchAll(/aria-current="page"/g)].length, 1, "only one service is current");
+      for (const service of PUBLIC_SERVICES) assert.ok(navigation.includes(`href="${service.path}"`), "every service is available from primary navigation");
+      assert.match(html, /<ul class="seo-contact-preparation"><li>[^<]+<\/li>/, "contact includes useful service-specific preparation");
       for (const service of PUBLIC_SERVICES.filter((item) => item.path !== entry.path)) {
         assert.ok(html.includes(`href="${service.path}"`), `${entry.path}: discoverable ${service.path}`);
       }
@@ -51,6 +68,7 @@ const start = "<!-- public-home-summary:noscript -->";
 const end = "<!-- /public-home-summary:noscript -->";
 const summary = home.split(start)[1]?.split(end)[0]?.trim();
 assert.equal(summary, renderNoScriptSummary(), "no-script alternative comes from the public catalog");
+assert.match(summary, /class="noscript-title" role="heading" aria-level="1"/, "no-script content has a semantic primary heading");
 assert.doesNotMatch(summary, /<h1\b|<script|<iframe|<form|\sid=/, "preserve the runtime H1 and avoid embeds, inactive forms or duplicate IDs");
 for (const service of PUBLIC_SERVICES) assert.ok(summary.includes(`href="${service.path}"`));
 for (const href of [ownerMapsUrl, `tel:${PUBLIC_SITE.phoneTel}`, `mailto:${PUBLIC_SITE.email}`, `https://wa.me/${PUBLIC_SITE.phoneInternational}`]) {

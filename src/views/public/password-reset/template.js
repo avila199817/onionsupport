@@ -6,7 +6,7 @@
    - Construir únicamente el DOM del flujo público de recuperación.
    - Mantener los data-* consumidos por el controlador.
    - No exponer tokens en markup, inputs ni datasets.
-   - Compartir el sistema visual del login sin añadir chrome innecesario.
+   - Simplificar /password-request sin alterar el diseño de confirmación.
 ========================================================= */
 
 import { ROUTES } from "../../../core/config.js";
@@ -107,7 +107,7 @@ function renderMessage() {
   `;
 }
 
-function renderHomeLogo() {
+function renderMinimalHomeLogo() {
   const homeHref = safeInternalHref("/", "/");
   const logo = safeAssetSrc(PUBLIC_AUTH_LOGO, PUBLIC_AUTH_LOGO);
   const logoWebp = safeAssetSrc(PUBLIC_AUTH_LOGO_WEBP, PUBLIC_AUTH_LOGO_WEBP);
@@ -137,6 +137,39 @@ function renderHomeLogo() {
         </picture>
       </span>
     </a>
+  `;
+}
+
+function renderConfirmHomeLink() {
+  const homeHref = safeInternalHref("/", "/");
+  const logo = safeAssetSrc(PUBLIC_AUTH_LOGO, PUBLIC_AUTH_LOGO);
+  const logoWebp = safeAssetSrc(PUBLIC_AUTH_LOGO_WEBP, PUBLIC_AUTH_LOGO_WEBP);
+
+  return `
+    <a
+      class="auth-home-link"
+      href="${escapeAttr(homeHref)}"
+      data-spa="true"
+      data-router-link="true"
+      data-route="${escapeAttr(homeHref)}"
+      aria-label="Onion Support · Ir a Inicio"
+    >
+      <span class="login-card-logo-shell auth-home-logo-shell" aria-hidden="true">
+        <picture>
+          <source type="image/webp" srcset="${escapeAttr(logoWebp)}">
+          <img class="login-card-logo auth-home-logo" src="${escapeAttr(logo)}" alt="" width="48" height="48" decoding="async">
+        </picture>
+      </span>
+      <span class="auth-home-copy"><strong>Onion Support</strong><span>Ir a Inicio</span></span>
+    </a>
+  `;
+}
+
+function renderConfirmDecorations() {
+  return `
+    <div class="login-orb login-orb-primary" aria-hidden="true"></div>
+    <div class="login-orb login-orb-secondary" aria-hidden="true"></div>
+    <div class="login-grid-glow" aria-hidden="true"></div>
   `;
 }
 
@@ -245,6 +278,7 @@ function renderPasswordField({
           aria-label="Mostrar contraseña"
           aria-controls="${escapeAttr(id)}"
           aria-pressed="false"
+          tabindex="0"
           data-password-toggle="true"
           data-reset-password-toggle="true"
           data-password-reset-toggle="${escapeAttr(errorFor)}"
@@ -374,7 +408,7 @@ export function getPasswordResetTemplate(options = {}) {
     view: isConfirm ? "password-reset" : "password-request",
     appName: APP_NAME,
     header: false,
-    footer: false,
+    footer: isConfirm,
     ariaLabelledBy: "password-reset-title",
     body: `
       <section
@@ -383,6 +417,8 @@ export function getPasswordResetTemplate(options = {}) {
         data-password-reset-template-version="${escapeAttr(PASSWORD_RESET_TEMPLATE_VERSION)}"
         data-password-reset-mode="${escapeAttr(mode)}"
       >
+        ${isConfirm ? renderConfirmDecorations() : ""}
+
         <section
           class="login-card-panel password-reset-card-panel"
           aria-labelledby="password-reset-title"
@@ -390,7 +426,7 @@ export function getPasswordResetTemplate(options = {}) {
           <div class="login-card-sheen" aria-hidden="true"></div>
 
           <header class="login-card-header password-reset-card-header">
-            ${renderHomeLogo()}
+            ${isConfirm ? renderConfirmHomeLink() : renderMinimalHomeLogo()}
 
             <h1 class="login-card-title password-reset-title" id="password-reset-title">
               ${escapeHtml(title)}

@@ -12,7 +12,7 @@ import {
   safeInternalHref,
 } from "../index.js";
 
-export const PUBLIC_HOME_TEMPLATE_VERSION = "public.home.template.2026.28-home-hero-polish";
+export const PUBLIC_HOME_TEMPLATE_VERSION = "public.home.template.2026.29-method-clean";
 
 const APP_NAME = PUBLIC_SITE.name;
 
@@ -418,7 +418,6 @@ function renderHero() {
 function renderMethodSteps() {
   return METHOD_STEPS.map((step, index) => `
     <article class="public-home-method-card" data-public-home-reveal="true" style="--public-home-reveal-index:${escapeAttr(index)};">
-      <span class="public-home-method-number">0${escapeHtml(index + 1)}</span>
       <span class="public-home-method-icon" aria-hidden="true">${renderIcon(step.icon)}</span>
       <h3>${escapeHtml(step.title)}</h3>
       <p>${escapeHtml(step.text)}</p>

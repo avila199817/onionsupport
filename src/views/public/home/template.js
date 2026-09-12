@@ -12,7 +12,7 @@ import {
   safeInternalHref,
 } from "../index.js";
 
-export const PUBLIC_HOME_TEMPLATE_VERSION = "public.home.template.2026.27-public-polish";
+export const PUBLIC_HOME_TEMPLATE_VERSION = "public.home.template.2026.28-home-hero-polish";
 
 const APP_NAME = PUBLIC_SITE.name;
 
@@ -333,8 +333,7 @@ function renderHeroVisual() {
 
   return `
     <article class="public-home-profile-card public-home-profile-card--command" aria-label="Perfil profesional de ${escapeAttr(BUSINESS.ownerName)}" data-public-home-card="true">
-      <div class="public-home-profile-top" aria-hidden="true">
-        <span class="public-home-profile-top-label">Tu técnico de confianza</span>
+      <div class="public-home-profile-top" aria-hidden="true" style="justify-content:flex-end;">
         <strong>ONION SUPPORT</strong>
       </div>
 
@@ -349,7 +348,7 @@ function renderHeroVisual() {
 
           <div class="public-home-command-copy">
             <p class="public-home-profile-eyebrow">${escapeHtml(BUSINESS.profileRole)}</p>
-            <h2><span>Cristian</span><span>Ávila</span></h2>
+            <h2><span>Cristian&nbsp;Ávila</span></h2>
             <p>Soy Cristian. Me ocupo de tu consulta y te explico cada paso con claridad.</p>
             <div class="public-home-command-tags" aria-label="Especialidades principales">
               <span>${renderIcon("shield")} Diagnóstico</span>
@@ -392,8 +391,7 @@ function renderHero() {
     <section class="public-home-section public-home-hero" id="inicio" data-public-home-section="inicio" aria-labelledby="public-home-title">
       <div class="public-home-hero-grid">
         <div class="public-home-hero-copy">
-          <p class="public-home-price-eyebrow" data-public-home-reveal="true">Soporte para particulares y empresas en España</p>
-          <h1 class="public-home-title" id="public-home-title" data-public-home-reveal="true">
+          <h1 class="public-home-title" id="public-home-title" data-public-home-reveal="true" style="--public-home-title-main-size:clamp(30px,8.5vw,76px);--public-home-title-accent-size:clamp(40px,11.1vw,99px);">
             Servicio técnico <span>informático</span>
           </h1>
           <p class="public-home-hero-text" data-public-home-reveal="true">

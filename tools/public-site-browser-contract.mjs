@@ -216,6 +216,46 @@ try {
     }
   }
 
+  // A late intake module must not push already visible service content away.
+  // Hold its real request so both source and dist reproduce that loading order.
+  for (const compiled of [false, true]) {
+    serveDist = compiled;
+    const stableContext = await browser.newContext({ viewport: { width: 1350, height: 940 } });
+    let releaseIntake;
+    let markIntakeRequested;
+    const intakeGate = new Promise((done) => { releaseIntake = done; });
+    const intakeRequested = new Promise((done) => { markIntakeRequested = done; });
+    await stableContext.route("**/*", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.origin !== origin) return route.abort();
+      if (url.pathname === "/src/features/public-support/index.js" ||
+          /^\/assets\/js\/public-support-(?!extreme-|progress-)[^/]+\.js$/.test(url.pathname)) {
+        markIntakeRequested();
+        await intakeGate;
+      }
+      return route.continue();
+    });
+    try {
+      const stablePage = await stableContext.newPage();
+      await stablePage.goto(origin, { waitUntil: "domcontentloaded" });
+      await stablePage.locator("#public-home-title").waitFor({ state: "visible" });
+      await intakeRequested;
+      await stablePage.evaluate(() => document.fonts.ready);
+      const before = await stablePage.locator("#servicios").boundingBox();
+      assert.equal(await stablePage.locator("#incidencia").count(), 0, "intake has not mounted before its module loads");
+      releaseIntake();
+      await stablePage.waitForFunction(() => window.__ONION_MAIN__?.enhancementsReady === true);
+      await stablePage.locator("[data-public-support-form] [name='phone']").waitFor();
+      const after = await stablePage.locator("#servicios").boundingBox();
+      assert.ok(Math.abs(after.y - before.y) < 1, "late intake must preserve the visible services position");
+      const order = await stablePage.locator(".public-home-content > section").evaluateAll((nodes) => nodes.map((node) => node.id));
+      assert.deepEqual(order.slice(0, 6), ["inicio", "servicios", "metodo", "precios", "incidencia", "contacto"]);
+    } finally {
+      releaseIntake();
+      await stableContext.close();
+    }
+  }
+
   // Responsive and theme coverage of every public surface, using source and
   // the actual compiled release with isolated network fixtures. These checks
   // never submit real credentials or substitute the public page markup.

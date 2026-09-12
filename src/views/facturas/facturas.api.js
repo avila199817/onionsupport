@@ -11,6 +11,8 @@
 ========================================================= */
 
 import FacturasCanonical, * as Base from "./facturas.api.canonical.js";
+import { AppCore } from "../../core/index.js";
+import { onDomainChanged } from "../../core/domain-events.js";
 
 export * from "./facturas.api.canonical.js";
 
@@ -63,6 +65,26 @@ export const FACTURAS_DETAIL_PREFETCH_VERSION =
 const DETAIL_PREFETCH_TTL_MS = 20_000;
 const DETAIL_PREFETCH_MAX_ENTRIES = 32;
 const detailPrefetchCache = new Map();
+const detailRequestInflight = new Map();
+let storeEpoch = -1;
+let cacheLifetime = 0;
+
+function ensureDetailScope() {
+  const epoch = AppCore.getSessionEpoch();
+  if (storeEpoch !== epoch) clearFacturaDetailPrefetchCache();
+  return epoch;
+}
+
+function isCurrentDetail(scope) {
+  return ensureDetailScope() === scope.epoch && cacheLifetime === scope.lifetime;
+}
+
+function discardOldDetail() {
+  const error = new Error("La lectura de la factura ya no está vigente.");
+  error.name = "AbortError";
+  error.code = "FACTURAS_DETAIL_SCOPE_CHANGED";
+  return error;
+}
 
 function cleanId(value = "") {
   return String(value ?? "")
@@ -134,6 +156,7 @@ function rememberFacturaDetail(requestedId = "", response = null) {
 }
 
 function readFacturaDetailEntry(id = "") {
+  ensureDetailScope();
   const key = cleanId(id);
   if (!key) return null;
 
@@ -154,7 +177,10 @@ export function clearFacturaDetailPrefetchCache(id = "") {
   const key = cleanId(id);
 
   if (!key) {
+    storeEpoch = AppCore.getSessionEpoch();
+    cacheLifetime += 1;
     detailPrefetchCache.clear();
+    detailRequestInflight.clear();
     return true;
   }
 
@@ -168,6 +194,7 @@ export function clearFacturaDetailPrefetchCache(id = "") {
 }
 
 export async function fetchFacturaDetailRequest(id = "", options = {}) {
+  const scope = { epoch: ensureDetailScope(), lifetime: cacheLifetime };
   const key = cleanId(id);
   const useCache = options?.force !== true && options?.preferCache !== false;
   const cached = useCache ? readFacturaDetailEntry(key) : null;
@@ -183,13 +210,39 @@ export async function fetchFacturaDetailRequest(id = "", options = {}) {
     };
   }
 
-  const response = await Base.fetchFacturaDetailRequest(id, {
-    ...options,
-    dedupe: options?.dedupe !== false,
-  });
+  const canDedupe = options?.dedupe !== false && !options?.signal;
+  if (canDedupe && detailRequestInflight.has(key)) return detailRequestInflight.get(key);
 
-  return rememberFacturaDetail(key, response);
+  // The prefetch owner scopes single-flight work. The lower transport's ID-only
+  // dedupe must not join a request started before a user/session invalidation.
+  const task = (async () => {
+    try {
+      const response = await Base.fetchFacturaDetailRequest(id, {
+        ...options,
+        dedupe: false,
+      });
+      if (!isCurrentDetail(scope)) throw discardOldDetail();
+      // Keep the invoice's authoritative fiscal snapshot exactly as received.
+      return rememberFacturaDetail(key, response);
+    } catch (error) {
+      if (!isCurrentDetail(scope)) throw discardOldDetail();
+      throw error;
+    }
+  })();
+  if (canDedupe) detailRequestInflight.set(key, task);
+  try { return await task; }
+  finally {
+    if (detailRequestInflight.get(key) === task) detailRequestInflight.delete(key);
+  }
 }
+
+onDomainChanged((domain) => {
+  if (domain === "usuarios") clearFacturaDetailPrefetchCache();
+});
+
+AppCore.registerModule("facturas.identity-cache", Object.freeze({
+  onSessionInvalidated: () => clearFacturaDetailPrefetchCache(),
+}), { overwrite: false });
 
 export async function getFacturaById(id = "", options = {}) {
   const response = await fetchFacturaDetailRequest(id, options);

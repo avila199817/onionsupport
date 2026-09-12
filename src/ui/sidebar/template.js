@@ -24,6 +24,8 @@ import {
 } from "../../core/config.js";
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 import { avatarInitials, synchronizeAvatarHost } from "../../features/avatar-system/index.js";
+import { cleanText as text } from "../../core/presentation-text.js";
+
 
 export const SIDEBAR_TEMPLATE_VERSION =
   "sidebar.template.unified.v6-core-role-authority";
@@ -171,14 +173,7 @@ function isFunction(value) {
   return typeof value === "function";
 }
 
-function text(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
 
-  return output || fallback;
-}
 
 function normalizeKey(value = "") {
   return text(value).replace(/[-_\s]/g, "").toLowerCase();

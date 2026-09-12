@@ -15,6 +15,7 @@
    - Las previews locales usan object URLs efímeras y se revocan al retirar/cerrar.
 ========================================================= */
 
+import { cleanText, escapeHtml } from "../../core/presentation-text.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import {
   INCIDENCIA_CATEGORY_OPTIONS,
@@ -79,15 +80,6 @@ const isObject = (value) => Boolean(value && typeof value === "object" && !Array
 const safeObject = (value, fallback = {}) => (isObject(value) ? value : fallback);
 const safeArray = (value) => (Array.isArray(value) ? value : []);
 
-function cleanText(value = "", fallback = "") {
-  const text = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return text || fallback;
-}
-
 function cleanMultiline(value = "", fallback = "") {
   const text = String(value ?? "")
     .replace(/\r\n/g, "\n")
@@ -111,15 +103,6 @@ function first(...values) {
 function number(value = 0, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 const attr = (value = "") => escapeHtml(cleanText(value, ""));

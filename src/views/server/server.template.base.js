@@ -1,3 +1,5 @@
+
+import { cleanText as safeText, escapeHtml } from "../../core/presentation-text.js";
 /* =========================================================
    Onion Support - Servidor Template
    Archivo: /src/views/server/server.template.js
@@ -84,25 +86,7 @@ function safeArray(value) {
     : [];
 }
 
-function safeText(
-  value = "",
-  fallback = ""
-) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
 
-  const text =
-    String(value)
-      .replace(/[\r\n\t]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-  return text || fallback;
-}
 
 function safeNumber(
   value = null,
@@ -144,14 +128,7 @@ function clamp(
   );
 }
 
-function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+
 
 function attr(value = "") {
   return escapeHtml(

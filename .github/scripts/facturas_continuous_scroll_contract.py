@@ -186,17 +186,20 @@ reject(CREATE_STYLE, ".fac-create-avatar--tone-", "Create invoice CSS must not o
 reject(INDEX, "¿Quieres volver a enviarla?", "Resend confirmation must not use the browser-native confirm dialog")
 require(INDEX, "function confirmFacturaResend", "Resend must expose an accessible custom confirmation flow")
 require(INDEX, 'dialog.setAttribute("role", "alertdialog")', "Resend confirmation must be an alertdialog")
-# Keyboard, focus and scroll ownership belong to the shared modal lifecycle.
-# Scope the wiring check to resend so another modal cannot satisfy this contract.
+# Domain content delegates mounting/settlement to the private helper; only the
+# established lifecycle owns keyboard, focus and scroll interactions.
+CONFIRMATION = (ROOT / "src/features/entity-overlay/modal-confirmation.js").read_text(encoding="utf-8")
 RESEND = INDEX.split("function confirmFacturaResend", 1)[-1].split("\nfunction ", 1)[0]
-require(RESEND, "const confirmationLifecycle = createModalLifecycle({", "Resend confirmation must use the shared modal lifecycle")
-require(RESEND, "getPanel: () => dialog", "Shared focus management must own the actual resend dialog")
-require(RESEND, "onEscape: () => settle(false)", "Resend Escape must cancel through its owner")
-require(RESEND, "onDetached: () => settle(false)", "Removing the resend dialog must settle its pending confirmation")
-require(RESEND, "confirmationLifecycle.activate({ opener })", "Resend must register its opener and acquire shared interaction")
-require(RESEND, "confirmationLifecycle.deactivate({ restoreFocus: false })", "Resend cleanup must release shared interaction before restoring owner focus")
-require(RESEND, "restoreModalFocus(opener)", "Resend must return focus through the shared guard")
-reject(RESEND, "focusableElements(dialog)", "Resend must not duplicate the shared focus trap")
+require(RESEND, 'return confirmFacturaAction({ ...options, kind: "resend" })', "Resend must use the domain confirmation entry")
+require(INDEX, "const promise = openModalConfirmation({", "Domain confirmation must delegate to the canonical private helper")
+require(CONFIRMATION, "const lifecycle = createModalLifecycle({", "Confirmations must use the shared modal lifecycle")
+require(CONFIRMATION, "getPanel: () => panel", "Shared focus management must own the actual confirmation panel")
+require(CONFIRMATION, "onEscape: () => settle(false)", "Confirmation Escape must cancel through its owner")
+require(CONFIRMATION, "onDetached: () => settle(false)", "Removing a confirmation must settle its pending promise")
+require(CONFIRMATION, "lifecycle.activate({ opener })", "Confirmation must register its opener and acquire shared interaction")
+require(CONFIRMATION, "lifecycle.deactivate({ restoreFocus: false })", "Cleanup must release shared interaction before restoring owner focus")
+require(CONFIRMATION, "restoreModalFocus(opener)", "Confirmation must return focus through the shared guard")
+reject(INDEX, "window.confirm(", "Payment and resend must both use the product confirmation")
 require(STYLE, ".facturas-resend-confirm-overlay", "Resend confirmation must use the Facturas themed overlay")
 require(STYLE, ".facturas-resend-confirm-dialog", "Resend confirmation must use the Facturas themed dialog")
 require(STYLE, '.ui-datalist[data-mobile-datalist-layout="facturas"]', "Mobile Facturas identity must have a dedicated no-clipping contract")

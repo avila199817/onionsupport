@@ -12,6 +12,7 @@ import {
   INCIDENCIAS_PRIORITY_POLICY_VERSION,
   INCIDENCIAS_URGENT_FACET_SERVER_PRIORITY,
 } from "./incidencias.priority-policy.js";
+import { exactCount, exactTotal } from "../../core/statistics.js";
 
 export const INCIDENCIAS_FILTER_FACETS_VERSION =
   "incidencias.filter-facets.v2-priority-truth";
@@ -94,13 +95,7 @@ export function getIncidenciasFacetRequestQuery(
 export function getIncidenciasFacetTotal(response = {}, fallback = 0) {
   const source = object(response);
   const rows = array(source.items);
-  const candidate = source.total;
-
-  if (candidate !== null && candidate !== undefined && candidate !== "") {
-    return Math.max(rows.length, Math.trunc(number(candidate, rows.length)));
-  }
-
-  return Math.max(rows.length, Math.trunc(number(fallback, rows.length)));
+  return Math.max(rows.length, exactTotal(source) ?? exactCount(fallback) ?? rows.length);
 }
 
 export function mergeIncidenciasFacetStats(
@@ -134,25 +129,23 @@ export function buildIncidenciasFilterFacetPresentation(
     ? allItems.length
     : Math.max(0, Math.trunc(number(universeLoaded, allItems.length)));
 
-  const counts = Object.freeze({
+  const loadedCounts = Object.freeze({ all: loaded, open: exactCount(fallback.open) ?? 0, closed: exactCount(fallback.closed) ?? 0, urgent: exactCount(fallback.urgent) ?? 0 });
+  const exact = INCIDENCIAS_FILTER_FACET_KEYS.every((key) => exactTotal(source[key]) !== null);
+  const counts = exact ? Object.freeze({
     all: getIncidenciasFacetTotal(allResponse, fallback.total),
     open: getIncidenciasFacetTotal(source.open, fallback.open),
     closed: getIncidenciasFacetTotal(source.closed, fallback.closed),
     urgent: getIncidenciasFacetTotal(source.urgent, fallback.urgent),
-  });
-
-  const exact = INCIDENCIAS_FILTER_FACET_KEYS.every((key) => {
-    const response = object(source[key]);
-    return response.total !== null &&
-      response.total !== undefined &&
-      response.total !== "";
-  });
+  }) : loadedCounts;
 
   return Object.freeze({
     counts,
+    loadedCounts,
     stats: mergeIncidenciasFacetStats(fallback, counts),
     exact,
     aggregatePartial: Boolean(
+      !exact ||
+      allResponse.hasMore === true ||
       allResponse.nextCursor ||
       allResponse.pagination?.nextCursor ||
       counts.all > loaded
@@ -169,17 +162,20 @@ export function reconcileIncidenciasFilterFacetPresentation(
   const current = object(presentation);
   const key = normalizeIncidenciasFilterFacet(facet);
   const currentCounts = object(current.counts);
-  const counts = Object.freeze({
+  const exact = current.exact === true && exactTotal(response) !== null;
+  const counts = exact ? Object.freeze({
     ...currentCounts,
     [key]: getIncidenciasFacetTotal(
       response,
       currentCounts[key]
     ),
-  });
+  }) : object(current.loadedCounts);
 
   return Object.freeze({
     ...current,
     counts,
+    exact,
+    aggregatePartial: !exact || current.aggregatePartial === true,
     stats: mergeIncidenciasFacetStats(
       current.stats,
       counts

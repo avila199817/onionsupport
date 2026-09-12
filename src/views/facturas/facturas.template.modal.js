@@ -7,6 +7,7 @@
    gobierne el primer paint o el detalle hidratado del modal.
 ========================================================= */
 
+import { cleanText as text } from "../../core/presentation-text.js";
 import BaseDefault, * as Base from "./facturas.template.modal.base.js";
 
 export * from "./facturas.template.modal.base.js";
@@ -89,14 +90,6 @@ function isObject(value) {
 
 function object(value, fallback = null) {
   return isObject(value) ? value : fallback;
-}
-
-function text(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return output || fallback;
 }
 
 function key(value = "") {

@@ -23,6 +23,15 @@
 import { AppCore } from "../../core/index.js";
 import Http from "../../core/http.js";
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
+import { userNameFromIdentity } from "../../core/user-identity.js";
+import { notifyDomainChanged } from "../../core/domain-events.js";
+import {
+  applyConfirmedUserProfile,
+  captureUserProfileScope,
+  isUserProfileScopeCurrent,
+  mergeConfirmedUserProfile,
+  runUserProfileMutation,
+} from "../../features/user-profile/index.js";
 import {
   AUTH_PASSWORD_POLICY,
   validateAuthPassword,
@@ -326,7 +335,7 @@ function extractCliente(payload = null) {
 export function normalizeCuentaDetail(payload = {}, fallback = {}) {
   const fallbackUser = extractUser(fallback);
   const user = extractUser(payload);
-  const source = { ...fallbackUser, ...user };
+  const source = mergeConfirmedUserProfile(fallbackUser, user);
 
   if (!looksLikeUser(source)) return null;
 
@@ -342,15 +351,7 @@ export function normalizeCuentaDetail(payload = {}, fallback = {}) {
   const email = safeLower(first(source.email, source.emailLower, ""), "");
   const username = safeText(first(source.username, source.usernameLower, ""), "");
   const slug = safeLower(first(routing.slug, source.slug, username, ""), "").replace(/^@+/, "");
-  const name = safeText(first(
-    source.name,
-    source.displayName,
-    source.fullName,
-    source.nombre,
-    username,
-    email,
-    "Usuario Onion"
-  ), "Usuario Onion");
+  const name = userNameFromIdentity(source, username || email || "Usuario Onion");
   const phone = safeText(first(source.phone, source.telefono, ""), "");
   const role = AppCore.normalizeRole(first(source.role, source.rol, safeArray(source.roles)[0], DEFAULT_ROLE)) || DEFAULT_ROLE;
   const status = normalizeStatus(source);
@@ -367,7 +368,8 @@ export function normalizeCuentaDetail(payload = {}, fallback = {}) {
     cliente.id,
     ""
   ), "");
-  const avatarUrl = sanitizeRuntimeImageUrl(first(source.avatarUrl, source.avatar, source.picture, ""));
+  const avatarUrl = source.hasAvatar === false ? "" :
+    sanitizeRuntimeImageUrl(first(source.avatarUrl, source.avatar, source.photoUrl, source.picture, ""));
 
   const darkMode = normalizeBoolean(first(preferences.darkMode, source.darkMode, false), false);
   const privacyMode = normalizeBoolean(first(preferences.privacyMode, source.privacyMode, false), false);
@@ -532,47 +534,17 @@ function getCurrentCuentaFallback() {
   return normalizeCuentaDetail(getCurrentCoreUser(), {}) || null;
 }
 
-function applyCuentaToCore(item = null) {
-  const detail = normalizeCuentaDetail(item, getCurrentCoreUser());
-  if (!detail) return null;
-
-  try {
-    const previous = getCurrentCoreUser();
-    AppCore?.setUser?.({
-      ...previous,
-      id: detail.id,
-      userId: detail.userId,
-      uid: detail.userId,
-      username: detail.username,
-      usernameLower: detail.usernameLower,
-      slug: detail.slug,
-      name: detail.name,
-      displayName: detail.displayName,
-      fullName: detail.fullName,
-      email: detail.email,
-      emailLower: detail.emailLower,
-      phone: detail.phone,
-      avatar: detail.avatarUrl,
-      avatarUrl: detail.avatarUrl,
-      picture: detail.avatarUrl,
-      hasAvatar: detail.hasAvatar,
-      role: detail.role,
-      rol: detail.role,
-      roles: detail.roles,
-      status: detail.status,
-      active: detail.active,
-      clienteId: detail.clienteId,
-      darkMode: detail.darkMode,
-      privacyMode: detail.privacyMode,
-      theme: detail.theme,
-      lang: detail.lang,
-      preferences: detail.preferences,
-    });
-  } catch {
-    // El bridge de UI no invalida la operación de Cuenta.
+function checkedCuentaUser(response, scope) {
+  if (response?.ok === false || response?.success === false || response?.error === true) {
+    throw createCuentaError(response, "El backend rechazó la operación de cuenta.");
   }
-
-  return detail;
+  const user = extractUser(response);
+  const id = safeLower(first(user.userId, user.id, user.uid, user.sub, ""));
+  if (id && id !== scope.userId) {
+    throw createCuentaError({ code: "CUENTA_IDENTITY_MISMATCH", status: 502,
+      message: "La respuesta no corresponde a la cuenta actual." });
+  }
+  return user;
 }
 
 async function requestJson(method = "GET", endpoint = "", {
@@ -689,8 +661,11 @@ export function validateCuentaAvatarFile(file = null) {
   return { ok: true, mimeType, size };
 }
 
-async function fetchCuentaRequest({ timeout = CUENTA_TIMEOUT, force = false } = {}) {
-  if (inflightMe && !force) return inflightMe;
+async function fetchCuentaRequest({ timeout = CUENTA_TIMEOUT, force = false, scope } = {}) {
+  if (inflightMe && !force && inflightMe.epoch === scope.epoch && inflightMe.revision === scope.revision) {
+    return inflightMe.task;
+  }
+  const fallback = getCurrentCoreUser();
 
   let task = null;
   task = (async () => {
@@ -700,7 +675,14 @@ async function fetchCuentaRequest({ timeout = CUENTA_TIMEOUT, force = false } = 
         source: "views.cuenta.api.me",
       });
 
-      const detail = normalizeCuentaDetail(response, getCurrentCoreUser());
+      if (!isUserProfileScopeCurrent(scope)) return null;
+      const source = checkedCuentaUser(response, scope);
+      if (!looksLikeUser(source)) {
+        throw createCuentaError({ code: "CUENTA_ME_INVALID_RESPONSE", status: 502,
+          message: "El backend no devolvió una cuenta válida." });
+      }
+      if (!isUserProfileScopeCurrent(scope, { unchanged: true })) return getCurrentCuentaFallback();
+      const detail = normalizeCuentaDetail(response, fallback);
       if (!detail) {
         throw createCuentaError({
           code: "CUENTA_ME_INVALID_RESPONSE",
@@ -710,14 +692,15 @@ async function fetchCuentaRequest({ timeout = CUENTA_TIMEOUT, force = false } = 
       }
       return detail;
     } catch (error) {
+      if (!isUserProfileScopeCurrent(scope)) return null;
       if (error?.name === "CuentaApiError") throw error;
       throw createCuentaError(error, "No se pudo cargar la cuenta.");
     } finally {
-      if (inflightMe === task) inflightMe = null;
+      if (inflightMe?.task === task) inflightMe = null;
     }
   })();
 
-  if (!force) inflightMe = task;
+  if (!force) inflightMe = { task, epoch: scope.epoch, revision: scope.revision };
   return task;
 }
 
@@ -726,24 +709,32 @@ export function hydrateCuentaFromCache() {
 }
 
 export async function loadCuenta({ force = false } = {}) {
+  const scope = captureUserProfileScope();
+  if (!scope.userId) return null;
   const loadToken = nextLoadToken();
 
   try {
     const detail = await fetchCuentaRequest({
       timeout: CUENTA_TIMEOUT,
       force: Boolean(force),
+      scope,
     });
 
+    if (!isUserProfileScopeCurrent(scope)) return null;
     if (!isActiveLoadToken(loadToken)) return getCurrentCuentaFallback();
-    applyCuentaToCore(detail);
+    if (!isUserProfileScopeCurrent(scope, { unchanged: true })) return getCurrentCuentaFallback();
+    applyConfirmedUserProfile(detail, scope, { read: true });
     return detail;
   } catch (error) {
+    if (!isUserProfileScopeCurrent(scope)) return null;
     if (!isActiveLoadToken(loadToken)) return getCurrentCuentaFallback();
     throw error;
   }
 }
 
 export async function changePassword(payload = {}, { timeout = CUENTA_TIMEOUT } = {}) {
+  const scope = captureUserProfileScope();
+  if (!scope.userId) return null;
   const validation = validateCuentaPasswordPayload(payload);
   if (!validation.ok) {
     throw createCuentaError({
@@ -760,8 +751,9 @@ export async function changePassword(payload = {}, { timeout = CUENTA_TIMEOUT } 
       source: "views.cuenta.api.password",
     });
 
+    if (!isUserProfileScopeCurrent(scope)) return null;
+    checkedCuentaUser(response, scope);
     const item = normalizeCuentaDetail(response, getCurrentCoreUser());
-    if (item) applyCuentaToCore(item);
 
     const versionChanged =
       response?.tokenVersion !== undefined &&
@@ -778,8 +770,39 @@ export async function changePassword(payload = {}, { timeout = CUENTA_TIMEOUT } 
       item,
     };
   } catch (error) {
+    if (!isUserProfileScopeCurrent(scope)) return null;
     if (error?.name === "CuentaApiError") throw error;
     throw createCuentaError(error, "No se pudo cambiar la contraseña.");
+  }
+}
+
+async function mutateCuentaAvatar(method, body, timeout) {
+  const scope = captureUserProfileScope();
+  if (!scope.userId) return null;
+  try {
+    return await runUserProfileMutation(scope, async () => {
+      const response = await requestJson(method, CUENTA_ENDPOINTS.usersAvatar, {
+        timeout, body, source: `views.cuenta.api.avatar.${method === "DELETE" ? "delete" : "upload"}`,
+      });
+      if (!isUserProfileScopeCurrent(scope)) return null;
+      const source = checkedCuentaUser(response, scope);
+      const patch = method === "DELETE"
+        ? { ...source, avatarUrl: "", hasAvatar: false }
+        : source;
+      const merged = mergeConfirmedUserProfile(getCurrentCoreUser(), patch);
+      const updated = normalizeCuentaDetail(merged);
+      if (method !== "DELETE" && !normalizeCuentaDetail(source)?.avatarUrl) {
+        throw createCuentaError({ code: "CUENTA_AVATAR_INVALID_RESPONSE", status: 502,
+          message: "El backend no devolvió la imagen actualizada." });
+      }
+      applyConfirmedUserProfile(patch, scope);
+      notifyDomainChanged("usuarios");
+      return updated;
+    });
+  } catch (error) {
+    if (!isUserProfileScopeCurrent(scope)) return null;
+    if (error?.name === "CuentaApiError") throw error;
+    throw createCuentaError(error, "No se pudo actualizar la foto de perfil.");
   }
 }
 
@@ -808,53 +831,16 @@ export async function uploadCuentaAvatar(file, { timeout = CUENTA_UPLOAD_TIMEOUT
     safeText(file?.name, "avatar")
   );
 
-  try {
-    const response = await requestJson("POST", CUENTA_ENDPOINTS.usersAvatar, {
-      timeout,
-      body: formData,
-      source: "views.cuenta.api.avatar.upload",
-    });
-
-    const returnedAvatar = sanitizeRuntimeImageUrl(first(response?.avatarUrl, response?.avatar, ""));
-    const updated = normalizeCuentaDetail(response, {
-      ...getCurrentCoreUser(),
-      avatar: returnedAvatar,
-      avatarUrl: returnedAvatar,
-      hasAvatar: Boolean(returnedAvatar),
-    });
-
-    if (updated) applyCuentaToCore(updated);
-    return updated;
-  } catch (error) {
-    if (error?.name === "CuentaApiError") throw error;
-    throw createCuentaError(error, "No se pudo subir el avatar.");
-  }
+  return mutateCuentaAvatar("POST", formData, timeout);
 }
 
 export async function deleteCuentaAvatar({ timeout = CUENTA_TIMEOUT } = {}) {
-  try {
-    const response = await requestJson("DELETE", CUENTA_ENDPOINTS.usersAvatar, {
-      timeout,
-      source: "views.cuenta.api.avatar.delete",
-    });
-
-    const updated = normalizeCuentaDetail(response, {
-      ...getCurrentCoreUser(),
-      avatar: "",
-      avatarUrl: "",
-      picture: "",
-      hasAvatar: false,
-    });
-
-    if (updated) applyCuentaToCore(updated);
-    return updated;
-  } catch (error) {
-    if (error?.name === "CuentaApiError") throw error;
-    throw createCuentaError(error, "No se pudo eliminar el avatar.");
-  }
+  return mutateCuentaAvatar("DELETE", undefined, timeout);
 }
 
 export async function deactivateCuenta(payload = {}, { timeout = CUENTA_TIMEOUT } = {}) {
+  const scope = captureUserProfileScope();
+  if (!scope.userId) return null;
   const password = String(safeObject(payload).password ?? "");
 
   if (!password.trim()) {
@@ -880,6 +866,9 @@ export async function deactivateCuenta(payload = {}, { timeout = CUENTA_TIMEOUT 
       source: "views.cuenta.api.deactivate",
     });
 
+    if (!isUserProfileScopeCurrent(scope)) return null;
+    checkedCuentaUser(response, scope);
+
     const item = normalizeCuentaDetail(response, {
       ...getCurrentCoreUser(),
       active: false,
@@ -899,6 +888,7 @@ export async function deactivateCuenta(payload = {}, { timeout = CUENTA_TIMEOUT 
       item,
     };
   } catch (error) {
+    if (!isUserProfileScopeCurrent(scope)) return null;
     if (error?.name === "CuentaApiError") throw error;
     throw createCuentaError(error, "No se pudo desactivar la cuenta.");
   }

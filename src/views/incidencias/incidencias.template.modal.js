@@ -16,6 +16,7 @@
      para que AvatarSystem nunca mezcle personas dentro del mismo modal.
 ========================================================= */
 
+import { escapeHtml } from "../../core/presentation-text.js";
 import { persistedCommentId, requesterIdentity, technicianIdentity } from "../../features/incidencias-comment-identity/index.js";
 
 import {
@@ -99,15 +100,6 @@ function key(value = "") {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[\s-]+/g, "_")
     .replace(/_+/g, "_");
-}
-
-function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 function count(value = 0, fallback = 0) {

@@ -48,6 +48,8 @@ import {
   setSidebarTemplateOpen,
   closeSidebarDropdown,
 } from "./template.js";
+import { cleanText } from "../../core/presentation-text.js";
+
 
 export const SIDEBAR_VERSION =
   "sidebar.controller.v8-whatsapp-sidebar-placeholder";
@@ -115,27 +117,7 @@ function isFunction(value) {
   );
 }
 
-function cleanText(
-  value = "",
-  fallback = ""
-) {
-  const output =
-    String(value ?? "")
-      .replace(
-        /[\r\n\t]/g,
-        " "
-      )
-      .replace(
-        /\s+/g,
-        " "
-      )
-      .trim();
 
-  return (
-    output ||
-    fallback
-  );
-}
 
 function redact(
   value = ""

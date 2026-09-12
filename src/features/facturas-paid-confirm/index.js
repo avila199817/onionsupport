@@ -3,6 +3,7 @@ import { renderReviewPanel } from "./review-panel.js";
 import { getFacturaReviews, requestFacturaReviews } from "../../views/facturas/facturas.reviews.api.js";
 import { AppCore } from "../../core/index.js";
 import { createModalLifecycle, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
+import { createModalHost, renderModalContent } from "../entity-overlay/modal-host.js";
 /* =========================================================
    Onion Support · Facturas · Paid Confirmation Experience
    Archivo: /src/features/facturas-paid-confirm/index.js
@@ -38,9 +39,16 @@ let dialogLookupSeq = 0;
 let reconcileLookupSeq = 0;
 let state = null;
 let reviewPollTimer = 0;
+const confirmationHost = createModalHost({
+  id: ROOT_ID,
+  attributes: { "data-fpc-root": "true" },
+  onMount: root => root.addEventListener("click", onRootClick),
+  onRemove: root => root.removeEventListener("click", onRootClick),
+});
 const modalLifecycle = createModalLifecycle({
   getPanel: () => document.querySelector(`#${ROOT_ID} [data-fpc-dialog='true']`),
   onEscape: () => { if (!state?.submitting) closeDialog(); },
+  onDetached: () => closeDialog({ restoreFocus: false }),
   bodyClasses: ['facturas-payment-confirm-open'],
 });
 
@@ -237,16 +245,7 @@ function ensureStyle() {
 }
 
 function ensureRoot() {
-  if (!isBrowser()) return null;
-
-  let root = document.getElementById(ROOT_ID);
-  if (!root) {
-    root = document.createElement("div");
-    root.id = ROOT_ID;
-    root.dataset.fpcRoot = "true";
-    document.body.appendChild(root);
-  }
-  return root;
+  return isBrowser() ? confirmationHost.ensure() : null;
 }
 
 function viewRoot() {
@@ -450,10 +449,15 @@ function focusDialog() {
 }
 
 function render({ focus = false } = {}) {
-  const root = ensureRoot();
+  const root = state?.open ? ensureRoot() : confirmationHost.get();
   if (!root) return false;
 
-  root.innerHTML = renderDialog();
+  renderModalContent(root, renderDialog(), {
+    rootSelector: "[data-fpc-overlay='true']",
+    panelSelector: "[data-fpc-dialog='true']",
+    focusAttributes: ["id", "data-fpc-action"],
+    scrollSelector: ".fpc-body",
+  });
   if (state?.open) modalLifecycle.activate({ opener: state.opener });
   else modalLifecycle.deactivate({ restoreFocus: false });
   if (focus && state?.open) requestAnimationFrame(focusDialog);
@@ -772,7 +776,6 @@ export function installFacturasPaidConfirm() {
   if (!root) return false;
 
   document.addEventListener("click", onDocumentClick, true);
-  root.addEventListener("click", onRootClick);
 
   observer = new MutationObserver(scheduleReconcile);
   observer.observe(document.body, { childList: true, subtree: true });
@@ -788,13 +791,13 @@ export function destroyFacturasPaidConfirm() {
   installed = false;
   clearTimeout(retryPollTimer); retryPollTimer = 0;
   document.removeEventListener("click", onDocumentClick, true);
-  document.getElementById(ROOT_ID)?.removeEventListener("click", onRootClick);
   observer?.disconnect?.();
   observer = null;
 
   if (reconcileFrame) cancelAnimationFrame(reconcileFrame);
   reconcileFrame = 0;
   closeDialog({ restoreFocus: false });
+  confirmationHost.remove();
   return true;
 }
 

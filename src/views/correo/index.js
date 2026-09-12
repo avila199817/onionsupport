@@ -1,4 +1,5 @@
 import { createModalLifecycle, restoreModalFocus as restoreSharedModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
+import { renderModalContent } from "../../features/entity-overlay/modal-host.js";
 /* =========================================================
    Onion Support - Correo View
    Archivo: /src/views/correo/index.js
@@ -32,6 +33,8 @@ import {
   renderShell,
   renderSignatureModal,
 } from "./correo.template.js";
+import { cleanText } from "../../core/presentation-text.js";
+
 
 export const CORREO_VIEW_VERSION = "correo.view.microsoft.production.v6-canonical-user";
 
@@ -162,10 +165,7 @@ function isDomNode(value = null) {
   return Boolean(typeof Node !== "undefined" && value && value instanceof Node);
 }
 
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "").replace(/[\r\n\t]/g, " ").replace(/\s+/g, " ").trim();
-  return output || fallback;
-}
+
 
 function safeLower(value = "") {
   return cleanText(value, "").toLocaleLowerCase("es-ES");
@@ -654,26 +654,36 @@ function createCorreoController(host, context = {}) {
     requestAnimationFrame(() => restoreSharedModalFocus(target));
   }
 
+  function mountModal(html, focusSelector) {
+    const root = host.querySelector("[data-correo-modal-root]");
+    if (!root || destroyed || confirmResolver || state.busyAction) return false;
+    modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // The route shell owns this inline host; delegated mail actions remain on
+    // the route. Each new intent supplies its own complete modal content.
+    renderModalContent(root, html, { forceMount: true });
+    modalLifecycle.activate({ opener: modalReturnFocus });
+    requestAnimationFrame(() => restoreSharedModalFocus(root.querySelector(focusSelector)));
+    return true;
+  }
+
+  function clearMountedModal({ restoreFocus = true } = {}) {
+    host.querySelector("[data-correo-modal-root]")?.replaceChildren();
+    modalLifecycle.deactivate({ restoreFocus: false });
+    if (restoreFocus) restoreModalFocus();
+    else modalReturnFocus = null;
+  }
+
   function closeConfirm(result = false) {
     if (!confirmResolver) return false;
     const resolve = confirmResolver;
     confirmResolver = null;
-    const root = host.querySelector("[data-correo-modal-root]");
-    if (root) root.replaceChildren();
-    modalLifecycle.deactivate({ restoreFocus: false });
-    restoreModalFocus();
+    clearMountedModal();
     resolve(Boolean(result));
     return true;
   }
 
   function confirmAction(input = {}) {
-    if (confirmResolver || state.busyAction) return Promise.resolve(false);
-    const root = host.querySelector("[data-correo-modal-root]");
-    if (!root) return Promise.resolve(false);
-    modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    root.innerHTML = renderConfirmModal(input);
-    modalLifecycle.activate({ opener: modalReturnFocus });
-    requestAnimationFrame(() => root.querySelector("[data-correo-confirm-dialog]")?.focus());
+    if (!mountModal(renderConfirmModal(input), "[data-correo-action='confirm-cancel']")) return Promise.resolve(false);
     return new Promise((resolve) => { confirmResolver = resolve; });
   }
 
@@ -1014,15 +1024,8 @@ function createCorreoController(host, context = {}) {
     if (mode !== "draft-edit") {
       input = { ...input, body: applySignature(input.body || "", readSignaturePreference(state.accountUser.cacheKey, state.activeMailbox, state.status.mailbox)) };
     }
-    modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    modalRoot.innerHTML = renderComposeModal(input);
-    modalLifecycle.activate({ opener: modalReturnFocus });
-    requestAnimationFrame(() => {
-      const preferred = mode === "compose" || mode === "forward"
-        ? modalRoot.querySelector("input[name='to']")
-        : modalRoot.querySelector("textarea[name='body']");
-      preferred?.focus();
-    });
+    mountModal(renderComposeModal(input), mode === "compose" || mode === "forward"
+      ? "input[name='to']" : "textarea[name='body']");
   }
 
 
@@ -1031,10 +1034,7 @@ function createCorreoController(host, context = {}) {
     if (!modalRoot || confirmResolver || state.busyAction) return;
     closeAccountMenu();
     const preference = readSignaturePreference(state.accountUser.cacheKey, state.activeMailbox, state.status.mailbox);
-    modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    modalRoot.innerHTML = renderSignatureModal(preference);
-    modalLifecycle.activate({ opener: modalReturnFocus });
-    requestAnimationFrame(() => modalRoot.querySelector("[data-correo-signature-input]")?.focus());
+    mountModal(renderSignatureModal(preference), "[data-correo-signature-input]");
   }
 
   function updateSignaturePreview(target) {
@@ -1064,10 +1064,7 @@ function createCorreoController(host, context = {}) {
 
   function closeModal() {
     if (state.busyAction || confirmResolver) return;
-    const root = host.querySelector("[data-correo-modal-root]");
-    if (root) root.replaceChildren();
-    modalLifecycle.deactivate({ restoreFocus: false });
-    restoreModalFocus();
+    clearMountedModal();
   }
 
   function composePayload(form) {
@@ -1631,7 +1628,7 @@ function createCorreoController(host, context = {}) {
       resolve(false);
     }
     scope.dispose();
-    modalLifecycle.deactivate({ restoreFocus: false });
+    clearMountedModal({ restoreFocus: false });
     if (options?.clear === true || options?.keepDom === false) host.replaceChildren();
     if (INSTANCES.get(host) === controller) INSTANCES.delete(host);
     return true;

@@ -2,6 +2,8 @@ import { normalizeClienteModel } from "../clientes/clientes.model.js";
 import { patchFacturaCreateDom } from "./facturas.create-dom.js";
 import { getFacturaEntityId } from "../../core/entity-identity.js";
 import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
+import { createModalHost as createPrivateModalHost } from "../../features/entity-overlay/modal-host.js";
+import { openModalConfirmation } from "../../features/entity-overlay/modal-confirmation.js";
 /* =========================================================
    Onion Support - Facturas Index
    Archivo: /src/views/facturas/index.js
@@ -312,164 +314,111 @@ function isElementVisible(element = null) {
 
 
 const FACTURAS_RESEND_CONFIRM_ROOT_ID = "facturas-resend-confirm-root";
-let activeResendConfirm = null;
+let activeFacturaConfirm = null;
 
-function ensureFacturaResendConfirmRoot() {
-  if (!isBrowser()) return null;
-  let root = document.getElementById(FACTURAS_RESEND_CONFIRM_ROOT_ID);
-  if (!root) {
-    root = document.createElement("div");
-    root.id = FACTURAS_RESEND_CONFIRM_ROOT_ID;
-    root.dataset.facturasResendConfirmRoot = "true";
-    document.body.appendChild(root);
+function renderFacturaConfirmation(root, { factura, recipient, kind, amount }) {
+  const overlay = document.createElement("div");
+  overlay.className = "facturas-resend-confirm-overlay";
+  overlay.dataset.facturasResendConfirmOverlay = "true";
+  overlay.dataset.facturasConfirmationKind = kind;
+
+  const dialog = document.createElement("section");
+  dialog.className = "facturas-resend-confirm-dialog";
+  dialog.dataset[kind === "payment" ? "facturasPaymentConfirmDialog" : "facturasResendConfirmDialog"] = "true";
+  dialog.setAttribute("role", "alertdialog");
+  dialog.setAttribute("aria-modal", "true");
+  dialog.setAttribute("aria-labelledby", "facturas-resend-confirm-title");
+  dialog.setAttribute("aria-describedby", "facturas-resend-confirm-description");
+  dialog.tabIndex = -1;
+
+  const iconBox = document.createElement("div");
+  iconBox.className = "facturas-resend-confirm-icon";
+  iconBox.setAttribute("aria-hidden", "true");
+  const iconMark = document.createElement("span");
+  iconMark.textContent = kind === "payment" ? "✓" : "↻";
+  iconBox.appendChild(iconMark);
+
+  const copy = document.createElement("div");
+  copy.className = "facturas-resend-confirm-copy";
+
+  const eyebrow = document.createElement("span");
+  eyebrow.className = "facturas-resend-confirm-eyebrow";
+  eyebrow.textContent = kind === "payment" ? "Registro de cobro" : "Reenvío de factura";
+
+  const title = document.createElement("h3");
+  title.id = "facturas-resend-confirm-title";
+  title.textContent = kind === "payment" ? "Confirmar cobro completo" : "Esta factura ya fue enviada";
+
+  const description = document.createElement("p");
+  description.id = "facturas-resend-confirm-description";
+  description.textContent = kind === "payment"
+    ? `¿Marcar la factura ${getFacturaLabel(factura)} como pagada por ${amount}? Se registrará el cobro completo y el pendiente quedará a 0. Esta acción no reenviará la factura ni regenerará el PDF.`
+    : recipient
+    ? `Ya existe un envío a ${recipient}. Confirma solo si quieres volver a enviar la misma factura.`
+    : "Ya existe un envío registrado. Confirma solo si quieres volver a enviar la misma factura.";
+
+  const meta = document.createElement("div");
+  meta.className = "facturas-resend-confirm-meta";
+
+  const invoiceChip = document.createElement("span");
+  invoiceChip.textContent = getFacturaLabel(factura) || "Factura";
+  meta.appendChild(invoiceChip);
+
+  if (recipient) {
+    const recipientChip = document.createElement("span");
+    recipientChip.textContent = recipient;
+    meta.appendChild(recipientChip);
   }
-  return root;
+
+  copy.append(eyebrow, title, description, meta);
+
+  const actions = document.createElement("div");
+  actions.className = "facturas-resend-confirm-actions";
+
+  const cancelButton = document.createElement("button");
+  cancelButton.type = "button";
+  cancelButton.className = "facturas-resend-confirm-btn facturas-resend-confirm-btn--cancel";
+  cancelButton.dataset[kind === "payment" ? "facturasPaymentConfirmAction" : "facturasResendConfirmAction"] = "cancel";
+  cancelButton.textContent = "Cancelar";
+
+  const confirmButton = document.createElement("button");
+  confirmButton.type = "button";
+  confirmButton.className = "facturas-resend-confirm-btn facturas-resend-confirm-btn--confirm";
+  confirmButton.dataset[kind === "payment" ? "facturasPaymentConfirmAction" : "facturasResendConfirmAction"] = "confirm";
+  confirmButton.textContent = kind === "payment" ? "Registrar cobro" : "Reenviar factura";
+
+  actions.append(cancelButton, confirmButton);
+  dialog.append(iconBox, copy, actions);
+  overlay.appendChild(dialog);
+  root.appendChild(overlay);
+  return { panel: dialog, overlay, cancel: cancelButton, confirm: confirmButton };
 }
 
-function confirmFacturaResend({ factura = {}, recipient = "", signal = null } = {}) {
+function confirmFacturaAction({ factura = {}, recipient = "", signal = null, kind = "resend", amount = "" } = {}) {
   if (signal?.aborted) return Promise.resolve(false);
   if (!isBrowser()) return Promise.resolve(true);
-
   const facturaId = getFacturaId(factura);
-  if (activeResendConfirm) {
-    return activeResendConfirm.facturaId === facturaId && activeResendConfirm.signal === signal
-      ? activeResendConfirm.promise
+  if (activeFacturaConfirm) {
+    return activeFacturaConfirm.facturaId === facturaId && activeFacturaConfirm.signal === signal && activeFacturaConfirm.kind === kind
+      ? activeFacturaConfirm.promise
       : Promise.resolve(false);
   }
-
-  const root = ensureFacturaResendConfirmRoot();
-  if (!root) return Promise.resolve(false);
-
-  const opener = document.activeElement instanceof HTMLElement
-    ? document.activeElement
-    : null;
-
-  const promise = new Promise((resolve) => {
-    root.replaceChildren();
-
-    const overlay = document.createElement("div");
-    overlay.className = "facturas-resend-confirm-overlay";
-    overlay.dataset.facturasResendConfirmOverlay = "true";
-
-    const dialog = document.createElement("section");
-    dialog.className = "facturas-resend-confirm-dialog";
-    dialog.dataset.facturasResendConfirmDialog = "true";
-    dialog.setAttribute("role", "alertdialog");
-    dialog.setAttribute("aria-modal", "true");
-    dialog.setAttribute("aria-labelledby", "facturas-resend-confirm-title");
-    dialog.setAttribute("aria-describedby", "facturas-resend-confirm-description");
-    dialog.tabIndex = -1;
-
-    const iconBox = document.createElement("div");
-    iconBox.className = "facturas-resend-confirm-icon";
-    iconBox.setAttribute("aria-hidden", "true");
-    const iconMark = document.createElement("span");
-    iconMark.textContent = "↻";
-    iconBox.appendChild(iconMark);
-
-    const copy = document.createElement("div");
-    copy.className = "facturas-resend-confirm-copy";
-
-    const eyebrow = document.createElement("span");
-    eyebrow.className = "facturas-resend-confirm-eyebrow";
-    eyebrow.textContent = "Reenvío de factura";
-
-    const title = document.createElement("h3");
-    title.id = "facturas-resend-confirm-title";
-    title.textContent = "Esta factura ya fue enviada";
-
-    const description = document.createElement("p");
-    description.id = "facturas-resend-confirm-description";
-    description.textContent = recipient
-      ? `Ya existe un envío a ${recipient}. Confirma solo si quieres volver a enviar la misma factura.`
-      : "Ya existe un envío registrado. Confirma solo si quieres volver a enviar la misma factura.";
-
-    const meta = document.createElement("div");
-    meta.className = "facturas-resend-confirm-meta";
-
-    const invoiceChip = document.createElement("span");
-    invoiceChip.textContent = getFacturaLabel(factura) || "Factura";
-    meta.appendChild(invoiceChip);
-
-    if (recipient) {
-      const recipientChip = document.createElement("span");
-      recipientChip.textContent = recipient;
-      meta.appendChild(recipientChip);
-    }
-
-    copy.append(eyebrow, title, description, meta);
-
-    const actions = document.createElement("div");
-    actions.className = "facturas-resend-confirm-actions";
-
-    const cancelButton = document.createElement("button");
-    cancelButton.type = "button";
-    cancelButton.className = "facturas-resend-confirm-btn facturas-resend-confirm-btn--cancel";
-    cancelButton.dataset.facturasResendConfirmAction = "cancel";
-    cancelButton.textContent = "Cancelar";
-
-    const confirmButton = document.createElement("button");
-    confirmButton.type = "button";
-    confirmButton.className = "facturas-resend-confirm-btn facturas-resend-confirm-btn--confirm";
-    confirmButton.dataset.facturasResendConfirmAction = "confirm";
-    confirmButton.textContent = "Reenviar factura";
-
-    actions.append(cancelButton, confirmButton);
-    dialog.append(iconBox, copy, actions);
-    overlay.appendChild(dialog);
-    root.appendChild(overlay);
-    const confirmationLifecycle = createModalLifecycle({
-      getPanel: () => dialog,
-      onEscape: () => settle(false),
-      onDetached: () => settle(false),
-      bodyClasses: ['facturas-resend-confirm-open'],
-    });
-    confirmationLifecycle.activate({ opener });
-
-    let settled = false;
-
-    const onRouteChange = () => settle(false);
-    const onCancel = () => settle(false);
-    const onConfirm = () => settle(true);
-    const onOverlayClick = (event) => {
-      if (event.target === overlay) settle(false);
-    };
-    const cleanup = () => {
-      overlay.removeEventListener("click", onOverlayClick);
-      cancelButton.removeEventListener("click", onCancel);
-      confirmButton.removeEventListener("click", onConfirm);
-      window.removeEventListener("popstate", onRouteChange);
-      window.removeEventListener("hashchange", onRouteChange);
-      window.removeEventListener("pagehide", onRouteChange);
-      signal?.removeEventListener("abort", onCancel);
-      root.replaceChildren();
-      confirmationLifecycle.deactivate({ restoreFocus: false });
-    };
-    function settle(value) {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      activeResendConfirm = null;
-      restoreModalFocus(opener);
-      resolve(Boolean(value));
-    }
-
-    overlay.addEventListener("click", onOverlayClick);
-    cancelButton.addEventListener("click", onCancel);
-    confirmButton.addEventListener("click", onConfirm);
-    window.addEventListener("popstate", onRouteChange, { once: true });
-    window.addEventListener("hashchange", onRouteChange, { once: true });
-    window.addEventListener("pagehide", onRouteChange, { once: true });
-    signal?.addEventListener("abort", onCancel, { once: true });
-
-    nextFrame(() => {
-      if (settled) return;
-      try { cancelButton.focus({ preventScroll: true }); } catch { /* noop */ }
-    });
+  const promise = openModalConfirmation({
+    host: { id: FACTURAS_RESEND_CONFIRM_ROOT_ID, attributes: { "data-facturas-resend-confirm-root": "true" } },
+    render: (root) => renderFacturaConfirmation(root, { factura, recipient, kind, amount }),
+    opener: document.activeElement,
+    signal,
+    bodyClasses: ['facturas-resend-confirm-open'],
   });
-
-  activeResendConfirm = { facturaId, promise, signal };
+  const active = { facturaId, promise, signal, kind };
+  activeFacturaConfirm = active;
+  const release = () => { if (activeFacturaConfirm === active) activeFacturaConfirm = null; };
+  promise.then(release, release);
   return promise;
+}
+
+function confirmFacturaResend(options = {}) {
+  return confirmFacturaAction({ ...options, kind: "resend" });
 }
 
 /* =========================================================
@@ -1883,6 +1832,7 @@ function createFacturasController(host = null, context = {}) {
   let authoritativeStats = null;
   let authoritativeStatsLoading = false;
   let authoritativeStatsSeq = 0;
+  let authoritativeStatsDirty = false;
 
   let loading = false;
   let refreshing = false;
@@ -1953,6 +1903,7 @@ function createFacturasController(host = null, context = {}) {
 
   let modalReturnFocus = null;
   let resendConfirmationAbort = null;
+  let paymentConfirmationAbort = null;
 
   const objectUrls = new Set();
 
@@ -2092,8 +2043,8 @@ function createFacturasController(host = null, context = {}) {
   function refreshChangedDomain() {
     if (destroyed || detailOnly || !domainDirty || listModalIsOpen()) return;
     domainDirty = false;
-    void refreshAuthoritativeStats();
-    void reloadFromStart({ force: true, silent: true, keepItems: true });
+    if (authoritativeStatsDirty) void refreshAuthoritativeStats();
+    void reloadFromStart({ force: true, silent: true, keepItems: itemsBelongToCurrentQuery() });
   }
 
   const modalLifecycle = createModalLifecycle({
@@ -2746,9 +2697,11 @@ function createFacturasController(host = null, context = {}) {
       );
 
       if (destroyed || seq !== authoritativeStatsSeq) return null;
-      if (Object.keys(stats).length) authoritativeStats = stats;
+      authoritativeStats = stats;
+      authoritativeStatsDirty = false;
       return authoritativeStats;
     } catch {
+      if (!destroyed && seq === authoritativeStatsSeq) authoritativeStats = {};
       return null;
     } finally {
       if (!destroyed && seq === authoritativeStatsSeq) {
@@ -2911,54 +2864,32 @@ function createFacturasController(host = null, context = {}) {
     return true;
   }
 
+  const createHost = createPrivateModalHost({
+    id: CREATE_MODAL_HOST_ID,
+    selector: CREATE_MODAL_HOST_SELECTOR,
+    attributes: { "data-facturas-create-host": "true", "data-owner": controllerOwner },
+    owns: (node) => node.dataset.owner === controllerOwner,
+    onMount(node) {
+      createModalHost = node;
+      if (mounted) {
+        bindTarget(node);
+        createModalHostBound = true;
+      }
+    },
+    onRemove(node) {
+      if (createModalHostBound) unbindTarget(node);
+      createModalHostBound = false;
+      if (createModalHost === node) createModalHost = null;
+    },
+  });
+
   function ensureCreateModalHost() {
-    if (!isBrowser()) return null;
-
-    if (createModalHost?.isConnected) {
-      return createModalHost;
-    }
-
-    // A later controller must never take over or delete another owner's host.
-    if (document.querySelector(CREATE_MODAL_HOST_SELECTOR)) return null;
-
-    createModalHost = document.createElement("div");
-    createModalHost.id = CREATE_MODAL_HOST_ID;
-    createModalHost.setAttribute(
-      "data-facturas-create-host",
-      "true"
-    );
-    createModalHost.setAttribute("data-owner", controllerOwner);
-
-    document.body.appendChild(createModalHost);
-
-    if (mounted && !createModalHostBound) {
-      bindTarget(createModalHost);
-      createModalHostBound = true;
-    }
-
-    return createModalHost;
+    return createHost.ensure();
   }
 
   function removeCreateModalHost() {
     cancelScheduledCreateRender();
-
-    const current = createModalHost;
-    if (!current || current.dataset.owner !== controllerOwner) return false;
-
-    try {
-      if (createModalHostBound) {
-        unbindTarget(current);
-      }
-
-      current.replaceChildren();
-      current.remove();
-    } catch {
-      // noop
-    }
-
-    createModalHost = null;
-    createModalHostBound = false;
-    return true;
+    return createHost.remove();
   }
 
   function createModalRenderPayload() {
@@ -3182,55 +3113,32 @@ function createFacturasController(host = null, context = {}) {
     return true;
   }
 
+  const detailHost = createPrivateModalHost({
+    id: DETAIL_MODAL_HOST_ID,
+    selector: DETAIL_MODAL_HOST_SELECTOR,
+    attributes: { "data-facturas-detail-host": "true", "data-owner": controllerOwner, "data-entity-overlay-ignore": "true" },
+    owns: (node) => node.dataset.owner === controllerOwner,
+    onMount(node) {
+      detailModalHost = node;
+      if (mounted) {
+        bindTarget(node);
+        detailModalHostBound = true;
+      }
+    },
+    onRemove(node) {
+      if (detailModalHostBound) unbindTarget(node);
+      detailModalHostBound = false;
+      if (detailModalHost === node) detailModalHost = null;
+    },
+  });
+
   function ensureDetailModalHost() {
-    if (!isBrowser()) return null;
-
-    if (detailModalHost?.isConnected) {
-      return detailModalHost;
-    }
-
-    // A later controller must never take over or delete another owner's host.
-    if (document.querySelector(DETAIL_MODAL_HOST_SELECTOR)) return null;
-
-    detailModalHost = document.createElement("div");
-    detailModalHost.id = DETAIL_MODAL_HOST_ID;
-    detailModalHost.setAttribute(
-      "data-facturas-detail-host",
-      "true"
-    );
-    detailModalHost.setAttribute("data-owner", controllerOwner);
-    detailModalHost.setAttribute("data-entity-overlay-ignore", "true");
-
-    document.body.appendChild(detailModalHost);
-
-    if (mounted && !detailModalHostBound) {
-      bindTarget(detailModalHost);
-      detailModalHostBound = true;
-    }
-
-    return detailModalHost;
+    return detailHost.ensure();
   }
 
   function removeDetailModalHost() {
     cancelScheduledDetailRender();
-
-    const current = detailModalHost;
-    if (!current || current.dataset.owner !== controllerOwner) return false;
-
-    try {
-      if (detailModalHostBound) {
-        unbindTarget(current);
-      }
-
-      current.replaceChildren();
-      current.remove();
-    } catch {
-      // noop
-    }
-
-    detailModalHost = null;
-    detailModalHostBound = false;
-    return true;
+    return detailHost.remove();
   }
 
   function detailContentPayload() {
@@ -4201,6 +4109,7 @@ function createFacturasController(host = null, context = {}) {
     const flushedMain = flushDeferredMainRender({ immediate: true });
     if (!flushedMain) syncInfiniteObserver();
     restoreModalReturnFocus();
+    refreshChangedDomain();
 
     return true;
   }
@@ -5215,11 +5124,9 @@ function createFacturasController(host = null, context = {}) {
       });
 
       restoreModalReturnFocus();
-      void reloadFromStart({
-        force: true,
-        silent: true,
-        keepItems: itemsBelongToCurrentQuery(),
-      });
+      domainDirty = true;
+      authoritativeStatsDirty = true;
+      refreshChangedDomain();
       return true;
     } catch (createError) {
       creating = false;
@@ -5270,6 +5177,8 @@ function createFacturasController(host = null, context = {}) {
     scope.cancel("detail", "detail-closed");
     resendConfirmationAbort?.abort();
     resendConfirmationAbort = null;
+    paymentConfirmationAbort?.abort();
+    paymentConfirmationAbort = null;
 
     resetDetailModal();
 
@@ -5714,8 +5623,10 @@ function createFacturasController(host = null, context = {}) {
 
     if (
       !id ||
+      destroyed ||
       !isAdmin() ||
-      markingPaidFacturaId
+      markingPaidFacturaId ||
+      paymentConfirmationAbort
     ) {
       return false;
     }
@@ -5735,7 +5646,6 @@ function createFacturasController(host = null, context = {}) {
     }
 
     if (isBrowser()) {
-      const label = getFacturaLabel(before);
       const amount = number(
         first(
           before.total,
@@ -5767,14 +5677,21 @@ function createFacturasController(host = null, context = {}) {
           .replace(".", ",")} ${currency}`;
       }
 
-      const question =
-        `¿Marcar la factura ${label} como pagada por ${formattedAmount}?\n\n` +
-        "Se registrará el cobro completo y el pendiente quedará a 0. " +
-        "Esta acción no reenviará la factura ni regenerará el PDF.";
-
-      if (!window.confirm(question)) {
-        return false;
+      const abort = new AbortController();
+      paymentConfirmationAbort = abort;
+      let confirmed = false;
+      try {
+        confirmed = await confirmFacturaAction({
+          factura: before,
+          amount: formattedAmount,
+          kind: "payment",
+          signal: abort.signal,
+        });
+      } finally {
+        if (paymentConfirmationAbort === abort) paymentConfirmationAbort = null;
       }
+      if (!confirmed || abort.signal.aborted || destroyed || !isAdmin() || markingPaidFacturaId) return false;
+      if (isFacturaPaidState(getFacturaForAction(id) || {})) return true;
     }
 
     markingPaidFacturaId = id;
@@ -6364,9 +6281,14 @@ function createFacturasController(host = null, context = {}) {
       if (detailOnly) return controller;
       bind();
       unsubscribeDomain = onDomainChanged((domain) => {
-        if (domain !== "facturas" || creating) return;
+        if (!["facturas", "usuarios"].includes(domain)) return;
+        if (domain === "facturas") {
+          authoritativeStatsSeq += 1;
+          authoritativeStats = {};
+          authoritativeStatsDirty = true;
+        }
         domainDirty = true;
-        refreshChangedDomain();
+        if (!creating) refreshChangedDomain();
       });
       unsubscribeModal = AppCore.getModule?.("entities")?.subscribe?.((event) => {
         if (event.originHost !== host) return;
@@ -6423,6 +6345,8 @@ function createFacturasController(host = null, context = {}) {
       scope.dispose("controller-destroyed");
       resendConfirmationAbort?.abort();
       resendConfirmationAbort = null;
+      paymentConfirmationAbort?.abort();
+      paymentConfirmationAbort = null;
 
       listSeq += 1;
       clientSearchSeq += 1;

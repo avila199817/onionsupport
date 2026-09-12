@@ -1,6 +1,6 @@
 # Onion Support · plan de evolución gradual
 
-> Documento único de planificación del frontend. Actualizado el 2026-09-08 (UTC).
+> Documento único de planificación del frontend. Actualizado el 2026-09-12 (UTC).
 > El estado implementado se contrasta con [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) y
 > el código de `main`; este archivo describe el siguiente trabajo, no funcionalidades
 > ya entregadas.
@@ -32,6 +32,8 @@ la estabilidad de lo ya publicado.
 El [refinamiento público](releases/2026-09-12-public-polish.md) concentra Home, navegación de servicios y estados de acceso/recuperación/activación. Usa contratos de fuente y navegador; mantiene el presupuesto del grafo inicial. La verificación de correo/cuentas reales y la observación del índice en Search Console conservan su alcance pendiente. La publicación se sigue por la PR y el SHA exacto del pipeline.
 
 ## Estado del corte
+
+La [consolidación privada del 2026-09-12](releases/2026-09-12-private-centralization.md) amplía las autoridades existentes a montaje modal, perfil confirmado y métricas compartidas. Corrige carreras reproducidas de sesión, caché y respuestas antiguas, y retira duplicaciones de presentación. El detalle del cambio y la evidencia de publicación se siguen por su PR; F1, el inventario completo de persistencia F2 y R04/R05 financieros mantienen sus propios criterios de cierre.
 
 La entrega actual de apertura modal se describe en [2026-09-08-single-modal-session.md](releases/2026-09-08-single-modal-session.md), donde se separan implementación, contratos locales y de CI del candidato, y evidencia de publicación. La trazabilidad histórica frontend/backend permanece en [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md). F1 debe registrar el SHA efectivamente desplegado al ejecutar el recorrido, en lugar de reutilizar una revisión histórica de este plan.
 

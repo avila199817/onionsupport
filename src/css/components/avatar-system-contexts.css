@@ -19,6 +19,16 @@
   --avatar-font-size: 14px;
 }
 
+:where(.cuenta-avatar--hero) {
+  --avatar-size: calc(62px * var(--ui-scale));
+  --avatar-font-size: 21px;
+}
+
+:where(.cuenta-avatar--card) {
+  --avatar-size: calc(58px * var(--ui-scale));
+  --avatar-font-size: 21px;
+}
+
 /* La identidad del topbar conserva la misma autoridad de AvatarSystem en
    móvil, pero gana unos píxeles para equilibrarse con el botón hamburguesa. */
 @media (max-width: 720px) {

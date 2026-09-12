@@ -36,6 +36,8 @@ import {
   renderCuentaTemplate,
   renderAppearanceCard,
 } from "./cuenta.template.js";
+import { onDomainChanged } from "../../core/domain-events.js";
+import { captureUserProfileScope, isUserProfileScopeCurrent } from "../../features/user-profile/index.js";
 
 export const CUENTA_INDEX_VERSION =
   "cuenta.index.productivo.v8.canonical-surface";
@@ -288,6 +290,7 @@ function clearSensitiveInputs(host) {
 
 function createCuentaController(host, context = {}) {
   const controllerId = `cuenta-${++controllerSequence}`;
+  const profileScope = captureUserProfileScope();
   const localContext = { ...safeObject(context) };
   let destroyed = false;
   let mounted = false;
@@ -309,6 +312,9 @@ function createCuentaController(host, context = {}) {
   let lastRenderHtml = "";
   let renderFrame = 0;
   let pendingRender = false;
+  let unsubscribeDomain = null;
+
+  function ownsSession() { return isUserProfileScopeCurrent(profileScope); }
 
   function ownsHost() {
     return Boolean(host && host.dataset?.cuentaControllerId === controllerId);
@@ -430,7 +436,7 @@ function createCuentaController(host, context = {}) {
   }
 
   async function runLoad({ force = false, silent = false } = {}) {
-    if (destroyed) return item;
+    if (destroyed || !ownsSession()) return null;
     const sequence = ++loadSequence;
     const hadItem = hasContent(item);
     const before = signature(item);
@@ -441,7 +447,7 @@ function createCuentaController(host, context = {}) {
     }
     try {
       const result = await loadCuentaApi({ force });
-      if (destroyed || sequence !== loadSequence) return item;
+      if (destroyed || sequence !== loadSequence || !ownsSession() || !result) return null;
       commit(result);
       lastNetworkAt = Date.now();
       loading = false;
@@ -456,7 +462,7 @@ function createCuentaController(host, context = {}) {
       emitCuentaEvent("cuenta:loaded", { source: CUENTA_INDEX_SOURCE, silent, force, changed });
       return item;
     } catch (loadError) {
-      if (destroyed || sequence !== loadSequence) return item;
+      if (destroyed || sequence !== loadSequence || !ownsSession()) return null;
       loading = false;
       if (!hadItem) {
         error = safeError(loadError, "No se pudo cargar la cuenta.");
@@ -495,7 +501,7 @@ function createCuentaController(host, context = {}) {
   }
 
   async function uploadAvatar(input = null) {
-    if (destroyed || saving) return null;
+    if (destroyed || saving || !ownsSession()) return null;
     const file = input && typeof input === "object" && typeof input.type === "string" && Number.isFinite(Number(input.size))
       ? input
       : input?.files?.[0] || readField(host, "avatar");
@@ -509,14 +515,13 @@ function createCuentaController(host, context = {}) {
     setActionBusy("avatar", true);
     try {
       const result = await uploadCuentaAvatarApi(file, { source: `${CUENTA_INDEX_SOURCE}.avatar.upload` });
-      if (destroyed || sequence !== actionSequence) return null;
+      if (destroyed || sequence !== actionSequence || !ownsSession()) return null;
       commit(result);
       setActionBusy("avatar", false);
       setFeedback({ nextSuccess: "Foto de perfil actualizada correctamente." });
-      emitCuentaEvent("cuenta:avatar:updated", { source: CUENTA_INDEX_SOURCE, hasAvatar: item?.hasAvatar === true });
       return item;
     } catch (actionError) {
-      if (destroyed || sequence !== actionSequence) return null;
+      if (destroyed || sequence !== actionSequence || !ownsSession()) return null;
       setActionBusy("avatar", false);
       setFeedback({ nextError: safeError(actionError, "No se pudo cambiar la foto."), nextErrorCode: safeErrorCode(actionError) });
       return null;
@@ -524,20 +529,19 @@ function createCuentaController(host, context = {}) {
   }
 
   async function deleteAvatar() {
-    if (destroyed || saving) return null;
+    if (destroyed || saving || !ownsSession()) return null;
     const sequence = ++actionSequence;
     clearFeedback();
     setActionBusy("avatar", true);
     try {
       const result = await deleteCuentaAvatarApi({ source: `${CUENTA_INDEX_SOURCE}.avatar.delete` });
-      if (destroyed || sequence !== actionSequence) return null;
+      if (destroyed || sequence !== actionSequence || !ownsSession()) return null;
       commit(result);
       setActionBusy("avatar", false);
       setFeedback({ nextSuccess: "Foto de perfil eliminada." });
-      emitCuentaEvent("cuenta:avatar:deleted", { source: CUENTA_INDEX_SOURCE });
       return item;
     } catch (actionError) {
-      if (destroyed || sequence !== actionSequence) return null;
+      if (destroyed || sequence !== actionSequence || !ownsSession()) return null;
       setActionBusy("avatar", false);
       setFeedback({ nextError: safeError(actionError, "No se pudo eliminar la foto."), nextErrorCode: safeErrorCode(actionError) });
       return null;
@@ -553,7 +557,7 @@ function createCuentaController(host, context = {}) {
   }
 
   async function changePassword(explicitPayload = null) {
-    if (destroyed || saving) return false;
+    if (destroyed || saving || !ownsSession()) return false;
     const payload = isObject(explicitPayload)
       ? {
           currentPassword: String(explicitPayload.currentPassword ?? ""),
@@ -572,7 +576,7 @@ function createCuentaController(host, context = {}) {
     setActionBusy("password", true);
     try {
       const result = await changePasswordApi(payload, { source: `${CUENTA_INDEX_SOURCE}.password` });
-      if (destroyed || sequence !== actionSequence) return false;
+      if (destroyed || sequence !== actionSequence || !ownsSession()) return false;
       if (result?.item) commit(result.item);
       authRefreshRequired = result?.authRefreshRequired === true;
       clearSensitiveInputs(host);
@@ -585,7 +589,7 @@ function createCuentaController(host, context = {}) {
       emitCuentaEvent("cuenta:password:changed", { source: CUENTA_INDEX_SOURCE, authRefreshRequired });
       return true;
     } catch (actionError) {
-      if (destroyed || sequence !== actionSequence) return false;
+      if (destroyed || sequence !== actionSequence || !ownsSession()) return false;
       clearSensitiveInputs(host);
       setActionBusy("password", false);
       setFeedback({ nextError: safeError(actionError, "No se pudo cambiar la contraseña."), nextErrorCode: safeErrorCode(actionError) });
@@ -594,7 +598,7 @@ function createCuentaController(host, context = {}) {
   }
 
   async function deactivateAccount(explicitPayload = null) {
-    if (destroyed || saving) return false;
+    if (destroyed || saving || !ownsSession()) return false;
     const password = isObject(explicitPayload)
       ? String(explicitPayload.password ?? "")
       : String(first(readField(host, "deactivatePassword"), readField(host, "password"), "") ?? "");
@@ -607,7 +611,7 @@ function createCuentaController(host, context = {}) {
     setActionBusy("deactivate", true);
     try {
       const result = await deactivateCuentaApi({ password }, { source: `${CUENTA_INDEX_SOURCE}.deactivate` });
-      if (destroyed || sequence !== actionSequence) return false;
+      if (destroyed || sequence !== actionSequence || !ownsSession()) return false;
       const nextItem = result?.item || result?.user || result?.account || result?.profile || null;
       if (nextItem) commit(nextItem);
       deactivated = result?.deactivated === true || result?.alreadyDisabled === true;
@@ -623,7 +627,7 @@ function createCuentaController(host, context = {}) {
       });
       return true;
     } catch (actionError) {
-      if (destroyed || sequence !== actionSequence) return false;
+      if (destroyed || sequence !== actionSequence || !ownsSession()) return false;
       clearSensitiveInputs(host);
       setActionBusy("deactivate", false);
       setFeedback({ nextError: safeError(actionError, "No se pudo desactivar la cuenta."), nextErrorCode: safeErrorCode(actionError) });
@@ -708,6 +712,11 @@ function createCuentaController(host, context = {}) {
     host.addEventListener("change", handleChange);
     host.addEventListener("submit", handleSubmit);
     host.addEventListener("focusout", handleFocusOut);
+    unsubscribeDomain = onDomainChanged((domain) => {
+      if (domain === "usuarios" && ownsSession() && mounted && !saving && !destroyed) {
+        void load({ force: true, silent: true });
+      }
+    });
     if (isBrowser()) {
       window.addEventListener("focus", handleResume);
       window.addEventListener("onion:preferences:changed", handleExternalPreferences);
@@ -719,6 +728,8 @@ function createCuentaController(host, context = {}) {
 
   function unbind() {
     if (!bound) return false;
+    unsubscribeDomain?.();
+    unsubscribeDomain = null;
     host?.removeEventListener("click", handleClick);
     host?.removeEventListener("change", handleChange);
     host?.removeEventListener("submit", handleSubmit);

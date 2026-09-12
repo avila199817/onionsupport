@@ -1,4 +1,5 @@
 import { createModalLifecycle, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
+import { createModalHost, renderModalContent } from "../entity-overlay/modal-host.js";
 /* =========================================================
    Onion Support · Incidencias Technician Profile
 
@@ -79,10 +80,13 @@ let observedModalHost = null;
 let frame = 0;
 let requestSeq = 0;
 let returnFocus = null;
+let profileOrigin = null;
+const profileHost = createModalHost({ id: HOST_ID, attributes: { "data-technician-profile-host": "true" } });
 let incidenceApiPromise = null;
 let usersApiPromise = null;
 const modalLifecycle = createModalLifecycle({
-  getPanel: () => modalPanel(),
+  getPanel: () => profileOrigin?.isConnected ? modalPanel() : null,
+  onDetached: () => closeProfile({ restoreFocus: false }),
   onEscape: () => closeProfile(),
   bodyClasses: ['ui-detail-modal-open'],
 });
@@ -816,18 +820,6 @@ function renderShell({ tech = {}, body = "", summary = "" } = {}) {
     </section>`;
 }
 
-function ensureHost() {
-  if (!browser()) return null;
-  let host = document.getElementById(HOST_ID);
-  if (!host) {
-    host = document.createElement("div");
-    host.id = HOST_ID;
-    host.dataset.technicianProfileHost = "true";
-    document.body.appendChild(host);
-  }
-  return host;
-}
-
 function lockBody() {
   return modalLifecycle.activate({ opener: returnFocus });
 }
@@ -841,41 +833,28 @@ function modalPanel() {
 }
 
 function paint(html = "", { focus = false } = {}) {
-  const host = ensureHost();
+  if (!profileOrigin?.isConnected) return false;
+  const host = profileHost.ensure();
   if (!host) return false;
-
-  const template = document.createElement("template");
-  template.innerHTML = String(html || "").trim();
-  const nextRoot = template.content.querySelector(`#${ROOT_ID}`);
-  const nextPanel = nextRoot?.querySelector?.(`#${PANEL_ID}`) || null;
-  const currentRoot = host.querySelector(`#${ROOT_ID}`);
-  const currentPanel = currentRoot?.querySelector?.(`#${PANEL_ID}`) || null;
-
-  if (currentRoot && currentPanel && nextPanel) {
-    for (const attribute of Array.from(nextPanel.attributes || [])) {
-      currentPanel.setAttribute(attribute.name, attribute.value);
-    }
-    currentPanel.replaceChildren(...Array.from(nextPanel.childNodes));
-  } else {
-    host.replaceChildren(template.content);
-  }
-
+  renderModalContent(host, html, {
+    rootSelector: `#${ROOT_ID}`,
+    panelSelector: `#${PANEL_ID}`,
+    focusAttributes: ["id", "data-technician-profile-action", "href"],
+  });
   lockBody();
   queueMicrotask(() => synchronizeAvatars(host));
-
-  if (focus) {
-    queueMicrotask(() => modalPanel()?.focus?.({ preventScroll: true }));
-  }
+  if (focus) queueMicrotask(() => restoreModalFocus(modalPanel()));
   return true;
 }
 
-function closeProfile() {
+function closeProfile({ restoreFocus = true } = {}) {
   requestSeq += 1;
-  document.getElementById(HOST_ID)?.replaceChildren();
+  profileHost.clear();
   unlockBody();
   const target = returnFocus;
   returnFocus = null;
-  restoreModalFocus(target);
+  profileOrigin = null;
+  if (restoreFocus) restoreModalFocus(target);
   return true;
 }
 
@@ -1060,6 +1039,7 @@ async function loadProfile(trigger = null) {
   };
 
   returnFocus = trigger;
+  profileOrigin = trigger?.closest(DETAIL_ROOT) || trigger?.closest("[data-route-host='true']") || mountRoot;
   const sequence = ++requestSeq;
   paint(renderLoading(seed), { focus: true });
 
@@ -1199,7 +1179,7 @@ export function destroyIncidenciasTechnicianProfile() {
   if (frame) window.cancelAnimationFrame(frame);
   frame = 0;
   closeProfile();
-  document.getElementById(HOST_ID)?.remove?.();
+  profileHost.remove();
   mountRoot = null;
   return true;
 }

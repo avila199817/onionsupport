@@ -139,6 +139,27 @@ run.addEventListener('click', async () => {
     invariant({ closed:true });
   });
   for (const type of types) {
+    for (const pending of [true, false]) await scenario(`${type}: authorization invalidation tears down ${pending ? 'pending' : 'painted'} owner and rejects stale results`, async () => {
+      await load(); await open(type);
+      if (!pending) await resolved(type);
+      if (!pending && type === 'incidencia') {
+        const comment = node("[data-detail-field='comment']");
+        comment.value = 'Borrador de la sesión anterior';
+        comment.dispatchEvent(new (app().Event)('input', { bubbles:true }));
+      }
+      app().__overlay.subscribe(event => {
+        if (event.phase === 'closed') app().__operations.push(app().__overlay.open({ type, id:app().__fixtureData[type].id, opener:node('#open-' + type) }));
+      });
+      app().__overlay.onSessionInvalidated();
+      if (pending) settle(0);
+      await Promise.all(app().__operations);
+      await tick();
+      equal(app().__overlay.getSnapshot().open, false, 'old authorization scope owns no detail');
+      equal(app().__requests.length, 1, 'closed subscriber cannot reopen while invalidating');
+      invariant({ closed:true });
+    });
+  }
+  for (const type of types) {
     await scenario(`${type}: immediately resolved API still mounts exactly one owner panel`, async () => {
       await load();
       app().__autoResolve = { [type]:true };

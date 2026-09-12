@@ -1,3 +1,4 @@
+import { cleanText, escapeHtml } from "../../core/presentation-text.js";
 import { normalizeClienteModel } from "../clientes/clientes.model.js";
 /* =========================================================
    Onion Support - Facturas Create Template
@@ -131,15 +132,6 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
-}
-
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
@@ -210,15 +202,6 @@ function parseBoolean(value, fallback = false) {
 function parseOptionalBoolean(value) {
   if (value === undefined || value === null || value === "") return null;
   return parseBoolean(value, null);
-}
-
-function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 function attr(value = "") {

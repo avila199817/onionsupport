@@ -32,6 +32,8 @@ import {
 import renderWhatsAppInbox, {
   WHATSAPP_TEMPLATE_VERSION,
 } from "./whatsapp.template.js";
+import { cleanText } from "../../core/presentation-text.js";
+
 
 export const WHATSAPP_VIEW_VERSION =
   "whatsapp.view.v2.professional-inbox";
@@ -57,13 +59,7 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return output || fallback;
-}
+
 
 function normalizeSearch(value = "") {
   return cleanText(value, "")

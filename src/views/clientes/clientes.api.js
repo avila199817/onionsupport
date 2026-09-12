@@ -15,7 +15,9 @@
 ========================================================= */
 
 import Http from "../../core/http.js";
-import { notifyDomainChanged } from "../../core/domain-events.js";
+import { AppCore } from "../../core/index.js";
+import { notifyDomainChanged, onDomainChanged } from "../../core/domain-events.js";
+import { exactTotal } from "../../core/statistics.js";
 import {
   CLIENTES_MODEL_VERSION,
   normalizeClienteModel,
@@ -84,6 +86,39 @@ let lastPageItems = [];
 let lastPageContext = null;
 let lastSyncAt = 0;
 let lastError = "";
+let storeEpoch = -1;
+let cacheLifetime = 0;
+
+function ensureStoreScope() {
+  const epoch = AppCore.getSessionEpoch();
+  if (storeEpoch !== epoch) clearClientesCache();
+  return epoch;
+}
+
+function readScope() {
+  return { epoch: ensureStoreScope(), lifetime: cacheLifetime };
+}
+
+function isCurrentRead(scope) {
+  return ensureStoreScope() === scope.epoch && cacheLifetime === scope.lifetime;
+}
+
+function discardOldRead() {
+  const error = new Error("La lectura del cliente ya no está vigente.");
+  error.name = "AbortError";
+  error.code = "CLIENTES_READ_SCOPE_CHANGED";
+  return error;
+}
+
+function invalidateIdentityCache() {
+  cacheLifetime += 1;
+  detailInflight.clear();
+  detailStore.clear();
+  lastPageItems = [];
+  lastPageContext = null;
+  lastSyncAt = 0;
+  lastError = "";
+}
 
 function cleanText(value = "", fallback = "") {
   const text = String(value ?? "")
@@ -304,6 +339,7 @@ function createAckFromResponse(response = null) {
 }
 
 export async function fetchClientesPage(options = {}) {
+  const scope = readScope();
   const limit = clampInt(
     first(options.limit, options.pageSize, CLIENTES_FETCH_LIMIT),
     CLIENTES_FETCH_LIMIT,
@@ -328,9 +364,11 @@ export async function fetchClientesPage(options = {}) {
       signal: options.signal,
     });
   } catch (requestError) {
+    if (!isCurrentRead(scope)) throw discardOldRead();
     lastError = errorMessage(requestError);
     throw normalizePageError(requestError);
   }
+  if (!isCurrentRead(scope)) throw discardOldRead();
 
   if (responseLooksFailed(response)) {
     const error = new Error(errorMessage(response));
@@ -459,6 +497,7 @@ function detailKey(id = "") {
 }
 
 export function getClienteByIdRequest(id = "", options = {}) {
+  const scope = readScope();
   const clienteId = cleanText(id, "").slice(0, MAX_ID_LENGTH);
   if (!clienteId) {
     const error = new Error("Falta el identificador del cliente.");
@@ -478,6 +517,7 @@ export function getClienteByIdRequest(id = "", options = {}) {
     signal: options.signal,
   })
     .then((response) => {
+      if (!isCurrentRead(scope)) throw discardOldRead();
       if (responseLooksFailed(response)) {
         const error = new Error(errorMessage(response, "No se pudo cargar el cliente."));
         error.code = cleanText(response?.code, "CLIENTE_DETAIL_REJECTED").toUpperCase();
@@ -502,6 +542,7 @@ export function getClienteByIdRequest(id = "", options = {}) {
       return detail;
     })
     .catch((error) => {
+      if (!isCurrentRead(scope)) throw discardOldRead();
       lastError = errorMessage(error, "No se pudo cargar el cliente.");
       throw error;
     })
@@ -514,6 +555,7 @@ export function getClienteByIdRequest(id = "", options = {}) {
 }
 
 export async function getClienteById(id = "", options = {}) {
+  ensureStoreScope();
   const key = detailKey(id);
   const cached = detailStore.get(key) || findClienteById(lastPageItems, id);
   if (cached && options.force !== true && options.preferCache !== false) {
@@ -625,6 +667,7 @@ function buildCreateClienteBody(payload = {}) {
 }
 
 export function createCliente(payload = {}, options = {}) {
+  const epoch = ensureStoreScope();
   let body;
   try {
     body = buildCreateClienteBody(payload);
@@ -644,6 +687,7 @@ export function createCliente(payload = {}, options = {}) {
     signal: options.signal,
   })
     .then((response) => {
+      if (ensureStoreScope() !== epoch) throw discardOldRead();
       if (responseLooksFailed(response)) {
         const error = new Error(errorMessage(response, "El backend rechazó la creación del cliente."));
         error.code = cleanText(response?.code, "CLIENTE_CREATE_REJECTED").toUpperCase();
@@ -680,6 +724,7 @@ export function createCliente(payload = {}, options = {}) {
       };
     })
     .catch((error) => {
+      if (ensureStoreScope() !== epoch) throw discardOldRead();
       lastError = errorMessage(error, "No se pudo crear el cliente.");
       throw error;
     })
@@ -719,13 +764,16 @@ export async function deleteCliente() {
 export const deleteClienteRequest = deleteCliente;
 
 export function getClienteByIdStore(id = "") {
+  ensureStoreScope();
   return detailStore.get(detailKey(id)) || findClienteById(lastPageItems, id);
 }
 
 export function getItems() {
+  ensureStoreScope();
   return lastPageItems.map((item) => ({ ...item }));
 }
 export function getClientesCount() {
+  ensureStoreScope();
   return lastPageItems.length;
 }
 export function hasClientes() {
@@ -746,15 +794,7 @@ export async function fetchClientesStatsRequest(options = {}) {
     throw error;
   }
 
-  const raw = safeObject(response).total;
-  const count = typeof raw === "number" ||
-      (typeof raw === "string" && /^\d+$/.test(raw.trim()))
-    ? Number(raw)
-    : Number.NaN;
-  const total = Number.isSafeInteger(count) && count >= 0 &&
-      response?.totalKnown !== false && response?.totalIsLowerBound !== true
-    ? count
-    : null;
+  const total = exactTotal(response);
   return Object.freeze({ ok: true, total, totalKnown: total !== null });
 }
 
@@ -763,15 +803,19 @@ export async function loadClientesStats() {
 }
 
 export function clearClientesCache() {
-  detailInflight.clear();
+  storeEpoch = AppCore.getSessionEpoch();
+  invalidateIdentityCache();
   createInflight.clear();
-  detailStore.clear();
-  lastPageItems = [];
-  lastPageContext = null;
-  lastSyncAt = 0;
-  lastError = "";
   return true;
 }
+
+onDomainChanged((domain) => {
+  if (domain === "usuarios") invalidateIdentityCache();
+});
+
+AppCore.registerModule("clientes.identity-cache", Object.freeze({
+  onSessionInvalidated: clearClientesCache,
+}), { overwrite: false });
 
 export function getClientesStoreSnapshot() {
   const items = getItems();

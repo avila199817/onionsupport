@@ -13,6 +13,8 @@
 ========================================================= */
 
 import Http from "../../core/http.js";
+import { cleanText } from "../../core/presentation-text.js";
+
 
 export const CORREO_API_VERSION = "correo.api.microsoft.production.v3-pure-http";
 export const MICROSOFT_ENDPOINT = "/api/microsoft";
@@ -21,13 +23,7 @@ const DEFAULT_TIMEOUT = 20000;
 const SEND_TIMEOUT = 45000;
 const UPLOAD_TIMEOUT = 120000;
 
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return output || fallback;
-}
+
 
 function safeArray(value) {
   return Array.isArray(value) ? value : [];

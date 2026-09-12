@@ -1,5 +1,6 @@
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
+import { createModalHost, renderModalContent } from "../../features/entity-overlay/modal-host.js";
 /* =========================================================
    Onion Support - Clientes Detail Template
    Archivo: /src/views/clientes/clientes.template.modal.js
@@ -4255,96 +4256,23 @@ function unbindBridgeHost(
   return true;
 }
 
+const bridgeHostHandle = createModalHost({
+  selector: MODAL_HOST_SELECTOR,
+  attributes: {
+    "data-clientes-detail-modal-host": "true",
+    "data-owner": CLIENTES_MODAL_TEMPLATE_VERSION,
+    "data-runtime-owner": "clientes-detail-modal-v4",
+  },
+  owns: hostIsOwned,
+  onMount(host) {
+    host[BRIDGE_HOST_OWNER_KEY] = BRIDGE_OWNER_TOKEN;
+    bindBridgeHost(host);
+  },
+  onRemove: unbindBridgeHost,
+});
+
 function ensureBridgeHost() {
-  if (
-    !isBrowser()
-  ) {
-    return null;
-  }
-
-  if (
-    bridgeHost
-      ?.isConnected &&
-    hostIsOwned(
-      bridgeHost
-    )
-  ) {
-    return bridgeHost;
-  }
-
-  let candidate =
-    document.querySelector(
-      MODAL_HOST_SELECTOR
-    );
-
-  /*
-    Hot reload / versión anterior:
-    no heredamos listeners ni ownership de otro módulo.
-  */
-  if (
-    candidate &&
-    !hostIsOwned(
-      candidate
-    )
-  ) {
-    try {
-      candidate.remove();
-    } catch {
-      try {
-        candidate.innerHTML =
-          "";
-      } catch {
-        // noop
-      }
-    }
-
-    candidate =
-      null;
-  }
-
-  bridgeHost =
-    candidate ||
-    document.createElement(
-      "div"
-    );
-
-  try {
-    bridgeHost[
-      BRIDGE_HOST_OWNER_KEY
-    ] =
-      BRIDGE_OWNER_TOKEN;
-  } catch {
-    // noop
-  }
-
-  bridgeHost.setAttribute(
-    "data-clientes-detail-modal-host",
-    "true"
-  );
-
-  bridgeHost.setAttribute(
-    "data-owner",
-    CLIENTES_MODAL_TEMPLATE_VERSION
-  );
-
-  bridgeHost.setAttribute(
-    "data-runtime-owner",
-    "clientes-detail-modal-v4"
-  );
-
-  if (
-    !bridgeHost.isConnected
-  ) {
-    document.body
-      .appendChild(
-        bridgeHost
-      );
-  }
-
-  bindBridgeHost(
-    bridgeHost
-  );
-
+  bridgeHost = isBrowser() ? bridgeHostHandle.ensure() : null;
   return bridgeHost;
 }
 
@@ -4371,24 +4299,18 @@ function paintBridge({
     return false;
   }
 
-  host.innerHTML =
-    bridgeState.open
-      ? renderClientesDetailModal({
-          open:
-            true,
-
-          detail:
-            bridgeState.detail,
-
-          feedbackMessage:
-            bridgeState
-              .feedbackMessage,
-
-          feedbackType:
-            bridgeState
-              .feedbackType,
-        })
-      : "";
+  renderModalContent(host, bridgeState.open ? renderClientesDetailModal({
+    open: true,
+    detail: bridgeState.detail,
+    feedbackMessage: bridgeState.feedbackMessage,
+    feedbackType: bridgeState.feedbackType,
+  }) : "", {
+    rootSelector: "[data-clientes-modal-root='true']",
+    overlaySelector: "[data-clientes-modal-overlay='true']",
+    panelSelector: "[data-clientes-modal-panel='true']",
+    identityAttribute: "data-cliente-id",
+    focusAttributes: ["id", "data-detail-action", "href"],
+  });
 
   syncBodyModalClass(
     bridgeState.open
@@ -4510,22 +4432,9 @@ function closeBridge({
       "info",
   };
 
-  if (
-    bridgeHost &&
-    hostIsOwned(
-      bridgeHost
-    )
-  ) {
-    bridgeHost.innerHTML =
-      "";
-  }
-
-  syncBodyModalClass(
-    false
-  );
-
-  unbindBridgeHost();
-  if (bridgeHost && hostIsOwned(bridgeHost)) bridgeHost.remove();
+  bridgeHostHandle.clear();
+  syncBodyModalClass(false);
+  bridgeHostHandle.remove();
   bridgeHost = null;
 
   if (emit) {
@@ -4959,28 +4868,8 @@ export function destroyClientesDetailModalBridge({
   });
 
   clearFeedbackTimer();
-  unbindBridgeHost();
-
-  if (
-    bridgeHost &&
-    hostIsOwned(
-      bridgeHost
-    )
-  ) {
-    try {
-      bridgeHost.remove();
-    } catch {
-      try {
-        bridgeHost.innerHTML =
-          "";
-      } catch {
-        // noop
-      }
-    }
-  }
-
-  bridgeHost =
-    null;
+  bridgeHostHandle.remove();
+  bridgeHost = null;
 
   bridgeReturnFocus =
     null;

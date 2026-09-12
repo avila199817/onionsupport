@@ -9,9 +9,11 @@
    - Identidad visual de clientes alineada con Incidencias.
 ========================================================= */
 
+import { cleanText, escapeHtml } from "../../core/presentation-text.js";
 import { resolveAvatarPresentation, synchronizeAvatars } from "../../features/avatar-system/index.js";
 import { renderFacturasCreateModal } from "./facturas.template.create.js";
 import { renderFacturasDetailModal } from "./facturas.template.modal.js";
+import { selectFacturasStats } from "./facturas.stats.js";
 
 export const FACTURAS_TEMPLATE_VERSION =
   "facturas.template.private.v7.admin-visual-parity";
@@ -64,14 +66,6 @@ const isObject = (value) => Boolean(value && typeof value === "object" && !Array
 const safeObject = (value, fallback = {}) => (isObject(value) ? value : fallback);
 const safeArray = (value) => (Array.isArray(value) ? value : []);
 
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return output || fallback;
-}
-
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
@@ -114,15 +108,6 @@ function number(value = 0, fallback = 0) {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 const attr = (value = "") => escapeHtml(cleanText(value, ""));
@@ -735,28 +720,12 @@ function computeStats(items = []) {
 function resolveHeaderStats(input = {}, rows = []) {
   const data = safeObject(input);
   const runtime = getRuntimeState(data);
-  const local = computeStats(rows);
   const source = safeObject(data.stats);
   const authoritative = Boolean(first(data.statsAuthoritative, runtime.statsAuthoritative, false));
 
-  if (!authoritative || !Object.keys(source).length) {
-    return { ...local, authoritative: false };
-  }
-
-  return {
-    total: number(first(source.invoiceCount, source.countTotal, source.total), local.total),
-    totalImporte: number(first(source.totalAmount, source.totalFacturado, source.totalImporte), local.totalImporte),
-    totalPagado: number(first(source.paidAmount, source.totalPagado, source.paidTotal), local.totalPagado),
-    totalPendiente: number(first(source.outstandingAmount, source.pendingAmount, source.totalPendiente, source.pendingTotal), local.totalPendiente),
-    totalVencido: number(first(source.overdueAmount, source.totalVencido, source.overdueTotal), local.totalVencido),
-    pendingCount: number(first(source.pendingCount, source.countPendientes), local.pendingCount),
-    paidCount: number(first(source.paidCount, source.countPagadas), local.paidCount),
-    overdueCount: number(first(source.overdueCount, source.countVencidas), local.overdueCount),
-    pdfCount: number(first(source.countWithPdf, source.countConPdf), local.pdfCount),
-    sentCount: number(first(source.sentCount, source.countEnviadas), local.sentCount),
-    incidenciaCount: number(first(source.linkedTicketCount, source.countConIncidencia), local.incidenciaCount),
-    authoritative: true,
-  };
+  return authoritative
+    ? { ...selectFacturasStats(source), authoritative: true }
+    : { ...computeStats(rows), authoritative: false };
 }
 
 function getRemoteTotal(input = {}, fallback = 0) {
@@ -1044,6 +1013,8 @@ export function renderHeader(input = {}) {
   const refreshing = Boolean(first(runtime.refreshing, data.refreshing));
   const loading = Boolean(first(runtime.loading, data.loading));
   const creating = Boolean(first(runtime.creating, runtime.creatingFactura, data.creating));
+  const metricCount = (value) => value === null ? "—" : String(value);
+  const metricMoney = stats.totalImporte === null ? "—" : formatMoney(stats.totalImporte, DEFAULT_CURRENCY);
 
   return `<section class="facturas-hero">
     <div class="facturas-hero-top">
@@ -1054,10 +1025,10 @@ export function renderHeader(input = {}) {
       </div>
     </div>
     <div class="facturas-stats">
-      <article class="facturas-stat-card facturas-stat-card--accent"><div class="facturas-stat-label">${stats.authoritative ? "Facturas totales" : "Facturas cargadas"}</div><div class="facturas-stat-value">${escapeHtml(String(stats.total))}</div><div class="facturas-stat-text">${stats.authoritative ? "Documentos contabilizados por el backend sobre todo el conjunto visible." : "Documentos disponibles en la sesión actual."}</div></article>
-      <article class="facturas-stat-card facturas-stat-card--success"><div class="facturas-stat-label">${stats.authoritative ? "Total facturado" : "Importe visible"}</div><div class="facturas-stat-value">${escapeHtml(formatMoney(stats.totalImporte, DEFAULT_CURRENCY))}</div><div class="facturas-stat-text">${stats.authoritative ? "Importe global calculado por el backend, independiente del scroll." : "Suma de las facturas cargadas actualmente."}</div></article>
-      <article class="facturas-stat-card facturas-stat-card--warning"><div class="facturas-stat-label">Pendientes</div><div class="facturas-stat-value">${escapeHtml(String(stats.pendingCount))}</div><div class="facturas-stat-text">Cobro pendiente, parcial o documento en borrador.</div></article>
-      <article class="facturas-stat-card facturas-stat-card--danger"><div class="facturas-stat-label">Vencidas / pagadas</div><div class="facturas-stat-value">${escapeHtml(`${stats.overdueCount} / ${stats.paidCount}`)}</div><div class="facturas-stat-text">Balance rápido del estado de cobro.</div></article>
+      <article class="facturas-stat-card facturas-stat-card--accent"><div class="facturas-stat-label">${stats.authoritative ? "Facturas totales" : "Facturas cargadas"}</div><div class="facturas-stat-value">${escapeHtml(metricCount(stats.total))}</div><div class="facturas-stat-text">${stats.total === null ? "Total no disponible." : stats.authoritative ? "Documentos contabilizados por el backend sobre todo el conjunto visible." : "Documentos disponibles en la sesión actual."}</div></article>
+      <article class="facturas-stat-card facturas-stat-card--success"><div class="facturas-stat-label">${stats.authoritative ? "Total facturado" : "Importe visible"}</div><div class="facturas-stat-value">${escapeHtml(metricMoney)}</div><div class="facturas-stat-text">${stats.totalImporte === null ? "Importe global no disponible." : stats.authoritative ? "Importe global calculado por el backend, independiente del scroll." : "Suma de las facturas cargadas actualmente."}</div></article>
+      <article class="facturas-stat-card facturas-stat-card--warning"><div class="facturas-stat-label">${stats.authoritative ? "Pendientes" : "Pendientes cargadas"}</div><div class="facturas-stat-value">${escapeHtml(metricCount(stats.pendingCount))}</div><div class="facturas-stat-text">Cobro pendiente, parcial o documento en borrador.</div></article>
+      <article class="facturas-stat-card facturas-stat-card--danger"><div class="facturas-stat-label">${stats.authoritative ? "Vencidas / pagadas" : "Vencidas / pagadas cargadas"}</div><div class="facturas-stat-value">${escapeHtml(`${metricCount(stats.overdueCount)} / ${metricCount(stats.paidCount)}`)}</div><div class="facturas-stat-text">Balance rápido del estado de cobro.</div></article>
     </div>
   </section>`;
 }

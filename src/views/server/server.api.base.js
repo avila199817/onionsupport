@@ -39,6 +39,8 @@
 ========================================================= */
 
 import Http from "../../core/http.js";
+import { cleanText } from "../../core/presentation-text.js";
+
 
 /* =========================================================
    META / CONFIG
@@ -152,18 +154,7 @@ function safeArray(value) {
     : [];
 }
 
-function cleanText(
-  value = "",
-  fallback = ""
-) {
-  const output =
-    String(value ?? "")
-      .replace(/[\r\n\t]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
 
-  return output || fallback;
-}
 
 function first(...values) {
   for (const value of values) {

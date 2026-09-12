@@ -23,6 +23,10 @@ const server = createServer(async (req, res) => {
     if (path === '/src/views/facturas/index.js' && req.url.endsWith('?modal-contract=1')) {
       source += '\nexport { confirmFacturaResend as testConfirmFacturaResend };\n';
     }
+    if (path === '/src/features/incidencias-technician-profile/index.js' && req.url.endsWith('?modal-contract=1')) {
+      source = source.replace('import "./style.css";', '');
+      source += '\nexport { loadProfile as testOpenProfile }; export function testProfileApi(api) { incidenceApiPromise = Promise.resolve(api); }\n';
+    }
     res.writeHead(200, { 'Content-Type': path.endsWith('.css') ? 'text/css' : 'text/javascript' }).end(source);
   } catch { res.writeHead(404).end(); }
 });
@@ -157,6 +161,104 @@ try {
   await scenario('closing the last modal removes its keyboard listener', async (page) => {
     await page.evaluate(() => { window.calls = 0; const panel = makePanel('panel'); const life = modal.createModalLifecycle({ getPanel: () => panel, onEscape: () => calls++ }); life.activate(); life.deactivate(); document.querySelector('#opener').focus(); });
     await page.keyboard.press('Escape'); assert.equal(await page.evaluate(() => calls), 0);
+  });
+
+  await scenario('private host leases never adopt or delete a foreign portal', async (page) => {
+    const result = await page.evaluate(async () => {
+      const { createModalHost } = await import('/src/features/entity-overlay/modal-host.js');
+      const events = [];
+      const a = createModalHost({ id:'leased-host', onMount:node => events.push(['mount', node.id]), onRemove:node => events.push(['remove', node.id]) });
+      const b = createModalHost({ id:'leased-host' });
+      const first = a.ensure();
+      const repeated = a.ensure() === first;
+      const refused = b.ensure() === null && b.remove() === false && first.isConnected;
+      first.remove();
+      const second = a.ensure();
+      const recreated = second !== first && second.isConnected;
+      a.remove();
+      const successor = b.ensure();
+      const staleSafe = a.remove() === false && successor.isConnected;
+      b.remove();
+      return { repeated, refused, recreated, staleSafe, events };
+    });
+    assert.deepEqual(result, { repeated:true, refused:true, recreated:true, staleSafe:true, events:[['mount','leased-host'],['remove','leased-host'],['mount','leased-host'],['remove','leased-host']] });
+  });
+
+  await scenario('private stable shell preserves identity, attributes, scroll, focus and selection', async (page) => {
+    const result = await page.evaluate(async () => {
+      const { createModalHost, renderModalContent } = await import('/src/features/entity-overlay/modal-host.js');
+      const host = createModalHost().ensure();
+      const options = { rootSelector:'.root', overlaySelector:'.overlay', panelSelector:'.panel', identityAttribute:'data-entity-id', focusAttributes:['data-field'], scrollSelector:'.body' };
+      const html = (id, stale = false, disabled = false) => `<div class="root" data-entity-id="${id}" ${stale ? 'data-stale="true"' : ''}><div class="overlay"></div><section class="panel" tabindex="-1" role="dialog" ${stale ? 'aria-busy="true"' : ''}><div class="body" style="height:100px;width:140px;overflow:auto"><div style="height:900px;width:900px"><input data-field="name" value="abcdef" ${disabled ? 'disabled' : ''}></div></div></section></div>`;
+      const first = renderModalContent(host, html('one', true), options);
+      const life = modal.createModalLifecycle({ getPanel:() => host.querySelector('.panel') });
+      life.activate();
+      const input = first.panel.querySelector('input'); input.focus(); input.setSelectionRange(1,4,'backward');
+      first.panel.querySelector('.body').scrollTop = 81; first.panel.querySelector('.body').scrollLeft = 33;
+      const next = renderModalContent(host, html('one'), options);
+      const stable = next.panel === first.panel && next.root === first.root && next.patched;
+      const restored = [next.root.hasAttribute('data-stale'), next.panel.hasAttribute('aria-busy'), next.panel.querySelector('.body').scrollTop, next.panel.querySelector('.body').scrollLeft, document.activeElement.dataset.field, document.activeElement.selectionStart, document.activeElement.selectionEnd, document.activeElement.selectionDirection];
+      renderModalContent(host, html('one', false, true), options);
+      const disabledFallback = document.activeElement === first.panel;
+      const child = makePanel('nested-child');
+      const childLife = modal.createModalLifecycle({ getPanel:() => child }); childLife.activate(); child.focus();
+      renderModalContent(host, html('one'), options);
+      const nestedFocus = document.activeElement === child;
+      childLife.deactivate({ restoreFocus:false }); child.remove();
+      const changed = renderModalContent(host, html('two'), options);
+      const replaced = !changed.patched && changed.panel !== first.panel;
+      life.deactivate({ restoreFocus:false });
+      return { stable, restored, disabledFallback, nestedFocus, replaced };
+    });
+    assert.deepEqual(result, { stable:true, restored:[false,false,81,33,'name',1,4,'backward'], disabledFallback:true, nestedFocus:true, replaced:true });
+  });
+
+  await scenario('technician child closes with its parent and ignores a late profile result', async (page) => {
+    await page.evaluate(async () => {
+      window.profile = await import('/src/features/incidencias-technician-profile/index.js?modal-contract=1');
+      const parent = makePanel('ticket-owner', '<button id="technician-opener" data-ticket-id="INC-FIXTURE">Técnico</button>');
+      parent.dataset.incidenciasModalRoot = 'true';
+      window.ticketLife = modal.createModalLifecycle({ getPanel:() => parent }); ticketLife.activate();
+      document.querySelector('#technician-opener').focus();
+      profile.testProfileApi({ loadIncidenciaDetail:() => new Promise(resolve => { window.resolveProfile = resolve; }) });
+      window.profileTask = profile.testOpenProfile(document.querySelector('#technician-opener'));
+    });
+    await page.locator('#incidencias-technician-profile-panel').waitFor();
+    assert.equal(await page.locator('[role="dialog"]').count(), 2);
+    await page.evaluate(() => document.querySelector('#ticket-owner').remove());
+    await page.waitForFunction(() => !document.querySelector('#incidencias-technician-profile-panel') && document.body.style.overflow === '');
+    await page.evaluate(async () => { resolveProfile({ id:'INC-FIXTURE', assignedToName:'Respuesta anterior' }); await profileTask; });
+    assert.equal(await page.locator('[role="dialog"]').count(), 0);
+    assert.equal(await page.evaluate(() => document.body.classList.contains('modal-open')), false);
+  });
+
+  await scenario('actual Usuarios create keeps its physical shell and draft across conditional fields', async (page) => {
+    await page.evaluate(async () => {
+      window.create = await import('/src/views/usuarios/usuarios.template.create.js');
+      create.open();
+      window.createPanel = document.querySelector('[data-usuarios-create-panel="true"]');
+      const name = document.querySelector('[data-usr-create-field="name"]'); name.value = 'Usuario de prueba'; name.dispatchEvent(new Event('input', { bubbles:true }));
+      const type = document.querySelector('[data-usr-create-field="tipo"]'); type.focus(); type.value = 'empresa'; type.dispatchEvent(new Event('change', { bubbles:true }));
+    });
+    assert.deepEqual(await page.evaluate(() => [document.querySelector('[data-usuarios-create-panel="true"]') === createPanel, document.querySelector('[data-usr-create-field="name"]').value, document.activeElement.dataset.usrCreateField]), [true,'Usuario de prueba','tipo']);
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('[data-usuarios-create-portal]').count(), 0);
+    assert.equal(await page.evaluate(() => document.body.style.overflow), '');
+  });
+
+  await scenario('actual Clientes create releases detached forms and reopens with one owned host', async (page) => {
+    await page.evaluate(async () => {
+      const { createClientesCreateController } = await import('/src/views/clientes/clientes.create-controller.js');
+      window.clientCreate = createClientesCreateController({ isAdmin:() => true, getRole:() => 'admin' });
+      clientCreate.open(document.querySelector('#opener'));
+      document.querySelector('[data-clientes-create-controller]').remove();
+    });
+    await page.waitForFunction(() => !clientCreate.getSnapshot().open && document.body.style.overflow === '');
+    await page.evaluate(() => clientCreate.open(document.querySelector('#opener')));
+    assert.equal(await page.locator('[data-clientes-create-controller]').count(), 1);
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('[data-clientes-create-controller]').count(), 0);
+    await page.waitForFunction(() => document.activeElement.id === 'opener');
   });
 
   await scenario('actual Usuarios detail supports repeated open and close', async (page) => {

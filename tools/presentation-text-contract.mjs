@@ -9,6 +9,10 @@ import { renderFacturasCreateModal } from "../src/views/facturas/facturas.templa
 import { renderFacturasDetailModal } from "../src/views/facturas/facturas.template.modal.js";
 import { renderIncidenciasCreateModal } from "../src/views/incidencias/incidencias.template.create.impl.js";
 import { renderIncidenciasDetailModal } from "../src/views/incidencias/incidencias.template.modal.js";
+import { renderClientesCreateModal } from "../src/views/clientes/clientes.template.create.js";
+import { renderClientesDetailModal } from "../src/views/clientes/clientes.template.modal.js";
+import { renderUsuariosDetailModal } from "../src/views/usuarios/usuarios.template.modal.js";
+import { renderFeedback as renderCuentaFeedback, renderErrorState as renderCuentaError } from "../src/views/cuenta/cuenta.template.js";
 
 // Literal expectations characterize the two former owners independently of
 // the candidate implementation. Escaping and whitespace normalization remain
@@ -120,4 +124,19 @@ assert.ok(ticketCreate.includes(`>${bodyHtml}</textarea>`), "The description kee
 assert.ok(ticketDetail.includes(bodyHtml), "Ticket detail does not flatten the description");
 assert.ok(ticketDetail.includes(`data-description-comment="true"`));
 assert.ok(ticketDetail.includes(`<p>${bodyHtml}</p>`), "Canonical follow-up keeps multiline comments escaped");
+
+// The remaining private templates share the authority without flattening a
+// deliberately multiline error or letting a remote label become HTML.
+const clientesCreate = renderClientesCreateModal({ open: true, serverError: remoteLabel });
+const clientesDetail = renderClientesDetailModal({ open: true,
+  detail: { clienteId: "CL-TEXT-FIXTURE", name: remoteLabel }, feedbackMessage: remoteLabel,
+});
+const usuariosDetail = renderUsuariosDetailModal({ detail: { userId: "ON-TEXT-FIXTURE", name: remoteLabel } });
+const cuentaFeedback = renderCuentaFeedback({ state: { error: remoteLabel } });
+for (const markup of [clientesCreate, clientesDetail, usuariosDetail, cuentaFeedback]) {
+  assert.ok(markup.includes(labelHtml), "Actual private presentation preserves normalization and escaping");
+  assert.equal(markup.includes("<img src=x>"), false);
+}
+const cuentaError = renderCuentaError(remoteBody);
+assert.ok(cuentaError.includes(`<p>${bodyHtml}</p>`), "Direct Cuenta error retains multiline content");
 console.log("Presentation text contract: PASS · Unicode/coercion/fallback identity · canonical reexports · actual pending, Correo, Servidor, Facturas and Incidencias markup · multiline body/comments · redaction");

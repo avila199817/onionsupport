@@ -1,3 +1,4 @@
+import { escapeHtml } from "../../core/presentation-text.js";
 import { getFinalization, reconcilePaymentResult } from "./payment-state.js";
 import { renderReviewPanel } from "./review-panel.js";
 import { getFacturaReviews, requestFacturaReviews } from "../../views/facturas/facturas.reviews.api.js";
@@ -90,14 +91,6 @@ function normalizeKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
-function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
 
 function formatMoney(value = 0, currency = "EUR") {
   const amount = Number(value);

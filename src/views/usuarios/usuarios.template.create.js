@@ -1,3 +1,4 @@
+import { cleanText, escapeHtml } from "../../core/presentation-text.js";
 import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
 import { createModalHost, renderModalContent } from "../../features/entity-overlay/modal-host.js";
 /* =========================================================
@@ -151,14 +152,6 @@ function safeObject(value, fallback = {}) {
     : fallback;
 }
 
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
-}
 
 function normalizeKey(value = "") {
   return cleanText(value, "")
@@ -226,14 +219,6 @@ function parseBoolean(value, fallback = false) {
   return fallback;
 }
 
-function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
 
 function attr(value = "") {
   return escapeHtml(

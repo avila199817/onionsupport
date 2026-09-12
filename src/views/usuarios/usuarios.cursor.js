@@ -12,6 +12,7 @@
    - Separar del directorio de Usuarios las identidades internas de Empleados.
 ========================================================= */
 
+import { cleanText } from "../../core/presentation-text.js";
 import Http from "../../core/http.js";
 import {
   normalizeUsuariosCollection,
@@ -59,13 +60,6 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return output || fallback;
-}
 
 function number(value = 0, fallback = 0) {
   const parsed = Number(value);

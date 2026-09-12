@@ -12,6 +12,7 @@
    - Mantener el DOM al desmontar para evitar parpadeos entre rutas.
 ========================================================= */
 
+import { cleanText } from "../../core/presentation-text.js";
 import { AppCore } from "../../core/index.js";
 import { ROUTES } from "../../core/config.js";
 import { onDomainChanged } from "../../core/domain-events.js";
@@ -101,14 +102,6 @@ function safeObject(value, fallback = {}) {
   return isObject(value) ? value : fallback;
 }
 
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
-}
 
 /* No aplanar arrays: pueden ser datos válidos completos. */
 function first(...values) {

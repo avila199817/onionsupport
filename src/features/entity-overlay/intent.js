@@ -1,3 +1,4 @@
+import { cleanText } from "../../core/presentation-text.js";
 /* =========================================================
    Onion Support - Global Entity Intent
 
@@ -98,14 +99,6 @@ const ROUTE_PARAM_KEYS = Object.freeze({
   ]),
 });
 
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
-}
 
 function safeDecode(value = "") {
   try {

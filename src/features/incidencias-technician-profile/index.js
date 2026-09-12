@@ -1,3 +1,4 @@
+import { escapeHtml } from "../../core/presentation-text.js";
 import { createModalLifecycle, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
 import { createModalHost, renderModalContent } from "../entity-overlay/modal-host.js";
 /* =========================================================
@@ -126,14 +127,6 @@ function firstDefined(...values) {
   return values.find((value) => value !== undefined);
 }
 
-function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
 
 const attr = (value = "") => escapeHtml(text(value, ""));
 

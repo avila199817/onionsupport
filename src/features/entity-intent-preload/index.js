@@ -11,6 +11,7 @@
    No captura clicks, no navega, no cambia history y nunca persiste IDs.
 ========================================================= */
 
+import { cleanText } from "../../core/presentation-text.js";
 import { AppCore } from "../../core/index.js";
 import {
   normalizeEntityId,
@@ -54,14 +55,6 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
-}
 
 function authenticated() {
   try {

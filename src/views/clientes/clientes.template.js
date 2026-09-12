@@ -3,6 +3,7 @@
    Server-backed cursor pagination · loaded-record semantics
 ========================================================= */
 
+import { cleanText, escapeHtml } from "../../core/presentation-text.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import {
   normalizeClienteModel,
@@ -60,13 +61,6 @@ function safeObject(value, fallback = {}) {
     : fallback;
 }
 
-function cleanText(value = "", fallback = "") {
-  const text = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return text || fallback;
-}
 
 function first(...values) {
   for (const value of values) {
@@ -92,14 +86,6 @@ function normalizeKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
-function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
 
 function attr(value = "") {
   return escapeHtml(cleanText(value, ""));

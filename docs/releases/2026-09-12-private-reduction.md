@@ -12,7 +12,7 @@ El objetivo es que cada template produzca su representación correcta desde el m
 
 | Bloque | Sustitución | Estado |
 | --- | --- | --- |
-| Texto de presentación privado | Copias equivalentes → `core/presentation-text.js` | Pendiente |
+| Texto de presentación privado | 22 copias equivalentes en 16 consumidores → `core/presentation-text.js` | Validado: 3.234 comparaciones, templates reales y `npm run validate` |
 | Alta de Incidencias | Reparador de HTML de avatares → atributos explícitos en el render original | Pendiente |
 | Filtros de Facturas | Conteos leídos del DOM y observer → selector de la cabecera en el template | Pendiente |
 | Alcance de KPI de Incidencias | Postprocesador/observer → copy generado desde el alcance del modelo | Pendiente |

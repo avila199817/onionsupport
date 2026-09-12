@@ -1,3 +1,4 @@
+import { cleanText, escapeHtml } from "../../core/presentation-text.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
 import { createModalHost, renderModalContent } from "../../features/entity-overlay/modal-host.js";
@@ -132,18 +133,6 @@ function safeArray(value) {
   return [];
 }
 
-function cleanText(
-  value = "",
-  fallback = ""
-) {
-  const output =
-    String(value ?? "")
-      .replace(/[\r\n\t]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-  return output || fallback;
-}
 
 /*
   No aplanar arrays:
@@ -353,16 +342,6 @@ function parseBoolean(
   return fallback;
 }
 
-function escapeHtml(
-  value = ""
-) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
 
 function attr(
   value = ""

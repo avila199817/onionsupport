@@ -75,6 +75,8 @@ La resolución de un botón de retorno que se ha vuelto a renderizar, el scroll 
 
 `modal-host.js` aporta `createModalHost` y `renderModalContent`. El primero crea y retira sólo el nodo de su propietario; no adopta ni elimina el portal de un controlador posterior. El segundo actualiza un panel compatible sin sustituir su root, overlay o panel conectado. Conserva atributos, foco, selección de texto y scroll del cuerpo; un cambio explícito de entidad o tipo de formulario permite un montaje nuevo.
 
+El detalle de Facturas usa directamente `renderModalContent` para carga, resultado, error y refresco; el callback de montaje sólo se emite al crear el shell. Su alta conserva reconciliación de controles por claves para mantener identidad y valores de entrada, dentro del mismo host y lifecycle.
+
 Los formularios y las peticiones permanecen en su controlador. Incidencias conserva sus slots y borradores, Correo usa el host inline de su shell y los visores mantienen la propiedad de blobs y medios. Este helper privado no se carga con el consentimiento público ni crea otra sesión o registro de teclado.
 
 `modal-confirmation.js` resuelve las confirmaciones asíncronas con el lifecycle compartido. Cancelar, retirar el origen o desmontar el diálogo resuelve la espera una sola vez. La confirmación de cobro y la de reenvío de Facturas conservan su contenido y sus acciones; una apertura desde Home no cae en `window.confirm`.

@@ -33,6 +33,8 @@ El [refinamiento público](releases/2026-09-12-public-polish.md) concentra Home,
 
 ## Estado del corte
 
+La [simplificación incremental de PRIVATE](releases/2026-09-12-private-reduction.md) continúa desde #588 (`7adf5035`) tras verificar que no quedaron diffs de código perdidos. Retira 22 helpers equivalentes, tres módulos completos y los reparadores de estadísticas/avatar; el detalle de Facturas reutiliza el renderer común. La reducción es de 1.026 líneas netas de runtime. Sus bloques tienen commits y contratos separados; la PR registra validación conjunta y publicación. F1, F2 y R04/R05 conservan sus criterios de cierre.
+
 La [consolidación privada del 2026-09-12](releases/2026-09-12-private-centralization.md) amplía las autoridades existentes a montaje modal, perfil confirmado y métricas compartidas. Corrige carreras reproducidas de sesión, caché y respuestas antiguas, y retira duplicaciones de presentación. El detalle del cambio y la evidencia de publicación se siguen por su PR; F1, el inventario completo de persistencia F2 y R04/R05 financieros mantienen sus propios criterios de cierre.
 
 La entrega actual de apertura modal se describe en [2026-09-08-single-modal-session.md](releases/2026-09-08-single-modal-session.md), donde se separan implementación, contratos locales y de CI del candidato, y evidencia de publicación. La trazabilidad histórica frontend/backend permanece en [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md). F1 debe registrar el SHA efectivamente desplegado al ejecutar el recorrido, en lugar de reutilizar una revisión histórica de este plan.

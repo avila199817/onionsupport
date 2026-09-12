@@ -24,6 +24,8 @@ Los hosts de avatar proyectan los campos usados por `resolveAvatarPresentation` 
 
 ## Contrato de identidad visual
 
+La [simplificación incremental](releases/2026-09-12-private-reduction.md) elimina el postprocesador HTML del alta de Incidencias: su renderer emite directamente todos los aliases, incluidos los vacíos, y delega la normalización en la autoridad existente. No hay otro registro de identidad.
+
 La [consolidación privada del 2026-09-12](releases/2026-09-12-private-centralization.md) incorpora Cuenta al contrato de avatar explícito. Las respuestas de perfil se aplican sólo a su sesión e ID de origen; un GET anterior a una escritura confirmada no puede restaurar datos antiguos. La autoridad privada conserva revisión y operación pendiente, nunca una segunda copia del perfil. Las vistas y cachés de Clientes, Usuarios, Incidencias y Facturas reaccionan a la confirmación mediante sus propietarios existentes.
 
 - `identity.js` resuelve la presentación; `AvatarSystem` reconcilia el DOM. Los IDs de usuario explícitos distintos nunca se unen por email o nombre. Un snapshot sin vínculo de usuario demostrado mantiene el fallback por email/username/nombre; no se inventan IDs ni se crea un registro de correspondencias.
@@ -42,6 +44,8 @@ Cada apertura tiene una sola invocación inicial a la API de detalle. Incidencia
 Las entradas, callbacks, contratos y ubicaciones para intervenir están definidos en [UI_MODAL_SYSTEM.md](UI_MODAL_SYSTEM.md). Se retiraron los puentes de apertura de Home/Facturas/Incidencias y los adaptadores de detalle de lectura de Clientes/Usuarios. Los adaptadores contextuales de identidad visual tienen otra responsabilidad y se conservan.
 
 ## Contrato de estadísticas
+
+Cabecera y filtros de Facturas reciben la misma proyección en el render inicial y las actualizaciones. Incidencias genera el alcance y el copy desde su modelo tanto en carga como en datos. Se retiran los observers locales y la lectura de cifras desde HTML; el DOM representa el estado, no calcula estadísticas.
 
 El backend determina los totales autorizados. `statistics.js` interpreta valores declarados sin sustituir ausencias por cero ni ignorar mínimos explícitos. `facturas.stats.js` proyecta esos campos para Home y Facturas; las filas paginadas no completan cantidades globales ausentes. Los indicadores de filas cargadas conservan su alcance visible.
 

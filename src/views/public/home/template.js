@@ -12,7 +12,7 @@ import {
   safeInternalHref,
 } from "../index.js";
 
-export const PUBLIC_HOME_TEMPLATE_VERSION = "public.home.template.2026.29-method-clean";
+export const PUBLIC_HOME_TEMPLATE_VERSION = "public.home.template.2026.30-profile-card-logo";
 
 const APP_NAME = PUBLIC_SITE.name;
 
@@ -21,6 +21,7 @@ const CRISTIAN_PROFILE_PHOTO_WEBP_224 = "src/media/img/Cristian_Avila_224.webp";
 const CRISTIAN_PROFILE_PHOTO_WEBP_480 = "src/media/img/Cristian_Avila_480.webp";
 const CRISTIAN_PROFILE_PHOTO_WEBP_640 = "src/media/img/Cristian_Avila_640.webp";
 const CRISTIAN_PROFILE_PHOTO_WEBP_960 = "src/media/img/Cristian_Avila_960.webp";
+const PROFILE_HEADER_LOGO = "src/media/img/favicon_support.png";
 
 const BUSINESS = {
   ...PUBLIC_SITE,
@@ -324,6 +325,7 @@ function renderHeader() {
 
 function renderHeroVisual() {
   const profilePhoto = safeAssetSrc(BUSINESS.profilePhoto, BUSINESS.profilePhoto);
+  const profileHeaderLogo = safeAssetSrc(PROFILE_HEADER_LOGO, PROFILE_HEADER_LOGO);
   const profilePhotoWebp224 = CRISTIAN_PROFILE_PHOTO_WEBP_224;
   const profilePhotoWebp480 = CRISTIAN_PROFILE_PHOTO_WEBP_480;
   const profilePhotoWebp640 = CRISTIAN_PROFILE_PHOTO_WEBP_640;
@@ -333,7 +335,8 @@ function renderHeroVisual() {
 
   return `
     <article class="public-home-profile-card public-home-profile-card--command" aria-label="Perfil profesional de ${escapeAttr(BUSINESS.ownerName)}" data-public-home-card="true">
-      <div class="public-home-profile-top" aria-hidden="true" style="justify-content:flex-end;">
+      <div class="public-home-profile-top" aria-hidden="true">
+        <img class="public-home-brand-logo" src="${escapeAttr(profileHeaderLogo)}" alt="" width="34" height="34" loading="eager" decoding="async" draggable="false">
         <strong>ONION SUPPORT</strong>
       </div>
 

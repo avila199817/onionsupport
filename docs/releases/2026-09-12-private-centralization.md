@@ -25,6 +25,7 @@ Esta entrega corrige duplicaciones y carreras reproducidas en modales, perfiles 
 - La deduplicación de estadísticas de Facturas no distinguía la sesión ni las escrituras posteriores. Home podía reutilizar su snapshot para consultas con filtros diferentes. Las lecturas se aíslan por contexto y las consultas especiales no sustituyen el dashboard estándar.
 - Las facetas de Incidencias podían presentar mínimos como conteos exactos. Una respuesta remota antigua podía sobrescribir un resultado local completo; la invalidación precede también a las salidas por caché o primera página completa.
 - Las señales recibidas durante el alta de una entidad se conservan hasta que el formulario permite reconciliar. Guardar o cancelar consume los cambios pendientes mediante el refresco existente; no exige una actualización manual ni añade una segunda recarga.
+- El buscador privado llamaba a un normalizador de roles inexistente. Reutiliza el de Core y su propietario invalida resultados y peticiones al cambiar de sesión o confirmarse cambios de usuarios; una respuesta antigua no repone nombres anteriores.
 
 ## Alcance y verificación
 

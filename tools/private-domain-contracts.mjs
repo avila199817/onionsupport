@@ -15,6 +15,7 @@ if (directDomainOwners) {
   await import("./private-domain-events-contract.mjs");
   await import("./home-entity-identity-contract.mjs");
   if (process.argv.includes("--browser")) {
+    await import("./topbar-search-browser-contract.mjs");
     await import("./private-owner-modal-browser-contract.mjs");
     await import("./private-profile-browser-contract.mjs");
     await import("./spa-modal-regression.mjs");

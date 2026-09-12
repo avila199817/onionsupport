@@ -20,6 +20,7 @@
 
 import { AppCore } from "../../core/index.js";
 import { userNameFromIdentity } from "../../core/user-identity.js";
+import { onDomainChanged } from "../../core/domain-events.js";
 import Http from "../../core/http.js";
 
 import {
@@ -322,6 +323,7 @@ let mounted = false;
 
 let root = null;
 let cleanupEvents = null;
+let stopDomainRefresh = null;
 
 let lastOptions = {};
 let lastTitle = "";
@@ -764,7 +766,7 @@ function normalizeRoleList(
     ...new Set(
       raw
         .map(
-          normalizeRole
+          AppCore.normalizeRole
         )
         .filter(Boolean)
     ),
@@ -1936,6 +1938,7 @@ function buildCacheKey(
 
     identity.role,
     identity.userId,
+    AppCore.getSessionEpoch(),
   ].join("|");
 }
 
@@ -2044,6 +2047,16 @@ function clearSearchCache() {
   backendCache.clear();
 
   return true;
+}
+
+function invalidateSearch({ refresh = false } = {}) {
+  const refs = getRefs();
+  const query = refresh && root?.isConnected && !root.hidden &&
+    refs.searchInput?.getAttribute("aria-expanded") === "true"
+    ? cleanText(refs.searchInput.value || lastSearchQuery) : "";
+  clearSearchCache();
+  clearSearch({ input: !refresh, focus: false });
+  if (query) scheduleSearch(query, { immediate: true, force: true });
 }
 
 /* =========================================================
@@ -3663,6 +3676,7 @@ async function executeSearch(
   query = "",
   options = {}
 ) {
+  const epoch = AppCore.getSessionEpoch();
   const clean =
     cleanText(
       query,
@@ -3756,7 +3770,7 @@ async function executeSearch(
 
     if (
       seq !==
-      backendSeq
+      backendSeq || epoch !== AppCore.getSessionEpoch()
     ) {
       return [];
     }
@@ -3807,7 +3821,7 @@ async function executeSearch(
   } catch (error) {
     if (
       seq !==
-      backendSeq
+      backendSeq || epoch !== AppCore.getSessionEpoch()
     ) {
       return [];
     }
@@ -4853,6 +4867,9 @@ function init(
   };
 
   registerModule();
+  stopDomainRefresh = onDomainChanged((domain) => {
+    if (domain === "usuarios") invalidateSearch({ refresh: true });
+  });
 
   /*
     App inicializa UI antes de que Router resuelva la ruta.
@@ -4909,6 +4926,8 @@ function refresh(
 function destroy(
   options = {}
 ) {
+  stopDomainRefresh?.();
+  stopDomainRefresh = null;
   unbindEvents();
   abortBackendSearch();
   clearSearchCache();
@@ -5181,6 +5200,7 @@ export const TopbarUI = {
   refresh,
   sync,
   destroy,
+  onSessionInvalidated: invalidateSearch,
 
   mountTopbar:
     ensureRoot,

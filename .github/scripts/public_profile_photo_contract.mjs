@@ -19,6 +19,14 @@ const homeCss = read(HOME_PATH);
 const homeTemplate = read(HOME_TEMPLATE_PATH);
 const publicSupport = read(PUBLIC_SUPPORT_PATH);
 
+// The preload and picture must select the same candidate; otherwise the LCP
+// path can download two photographs or overfetch the 960w image on a phone.
+const preboot = read("src/preboot/public-home-preload.js");
+const pictureSizes = homeTemplate.match(/const profilePhotoSizes = "([^"]+)";/)?.[1];
+const preloadSizes = preboot.match(/const heroImageSizes = "([^"]+)";/)?.[1];
+assert.ok(pictureSizes, "La fotografía debe declarar un sizes explícito");
+assert.equal(preloadSizes, pictureSizes, "Preload y picture deben compartir exactamente sizes");
+
 assert.equal(
   executableCriticalCss.includes("!important"),
   false,

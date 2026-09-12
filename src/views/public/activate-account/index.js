@@ -479,7 +479,7 @@ function resolveTemplate(context = {}) {
 
   if (subtitle) {
     subtitle.textContent =
-      "Crea una contraseña para terminar de activar tu usuario.";
+      "Crea tu contraseña para acceder al seguimiento de tus incidencias.";
   }
 
   if (form) {
@@ -494,7 +494,7 @@ function resolveTemplate(context = {}) {
     submit.classList.add("activate-account-submit");
     submit.dataset.activateAccountSubmit = "true";
     submit.dataset.defaultText = "Activar cuenta";
-    submit.dataset.loadingText = "Activando...";
+    submit.dataset.loadingText = "Activando cuenta…";
     submit.textContent = "Activar cuenta";
   }
 
@@ -590,6 +590,9 @@ function getRefs(root = null) {
 
   const refs = {
     root,
+    title: root.querySelector(".password-reset-title"),
+    subtitle: root.querySelector(".password-reset-subtitle"),
+    help: root.querySelector("[data-activate-account-help]"),
 
     form:
       root.querySelector("[data-activate-account-form]") ||
@@ -727,6 +730,8 @@ function setMessage(
   const success = type === "success";
 
   node.textContent = text;
+  node.setAttribute("role", success ? "status" : "alert");
+  node.setAttribute("aria-live", success ? "polite" : "assertive");
   node.classList.toggle("is-success", success);
   node.classList.toggle("is-error", !success && Boolean(text));
 
@@ -838,6 +843,7 @@ function initPasswordControls(refs) {
     if (!input) continue;
 
     const onToggle = () => {
+      if (input.disabled || toggle.disabled) return;
       const visible = input.type === "password";
       input.type = visible ? "text" : "password";
       syncToggleVisual(toggle, visible);
@@ -946,6 +952,8 @@ function setLoading(
     "aria-busy",
     value ? "true" : "false"
   );
+  refs.submit.setAttribute("aria-busy", value ? "true" : "false");
+  refs.submit.dataset.loading = value ? "true" : "false";
 
   return true;
 }
@@ -1034,7 +1042,7 @@ function activationError(error = null) {
   const code = codeOf(error);
   const status = statusOf(error);
 
-  if (code === "TOKEN_EXPIRED") {
+  if (code === "TOKEN_EXPIRED" || status === 410) {
     return {
       field: "token",
       message: "El enlace de activación ha caducado.",
@@ -1043,15 +1051,12 @@ function activationError(error = null) {
   }
 
   if (
-    code === "TOKEN_INVALID_OR_EXPIRED" ||
+    code === "TOKEN_INVALID_OR_EXPIRED" || code === "TOKEN_INVALID" || status === 401 ||
     code === "ACTIVATION_STATE_CHANGED"
   ) {
     return {
       field: "token",
-      message:
-        code === "ACTIVATION_STATE_CHANGED"
-          ? "El enlace de activación ya no es válido. Solicita uno nuevo."
-          : "El enlace de activación no es válido o ha caducado.",
+      message: "El enlace de activación no es válido o ya se ha utilizado. Solicita ayuda para continuar.",
       completed: false,
     };
   }
@@ -1122,13 +1127,9 @@ function activationError(error = null) {
 
   return {
     field: "",
-    message: cleanText(
-      error?.message ||
-      error?.data?.message ||
-      error?.payload?.message ||
-      "",
-      "No se pudo activar la cuenta."
-    ),
+    message: !status
+      ? "No hemos podido conectar. Comprueba tu conexión y vuelve a intentarlo."
+      : "No se pudo activar la cuenta. Vuelve a intentarlo o solicita ayuda.",
     completed: false,
   };
 }
@@ -1199,11 +1200,19 @@ export function renderActivateAccountView(
   let mounted = true;
   let submitting = false;
   let completed = false;
+  let tokenUnavailable = !token;
   let redirectTimer = null;
 
   function setSubmitting(value = false) {
     submitting = Boolean(value);
     setLoading(refs, submitting, passwordControls);
+    if (tokenUnavailable || completed) lockCompletedForm(refs, passwordControls);
+  }
+
+  function presentState(state, title, subtitle) {
+    view.dataset.authState = state;
+    if (refs.title) refs.title.textContent = title;
+    if (refs.subtitle) refs.subtitle.textContent = subtitle;
   }
 
   async function goToLogin(result = {}) {
@@ -1244,6 +1253,7 @@ export function renderActivateAccountView(
             "Cuenta activada correctamente. Pulsa «Volver al acceso» para iniciar sesión.",
             "success"
           );
+          focusSafe(refs.message);
         }
       },
       650
@@ -1259,7 +1269,7 @@ export function renderActivateAccountView(
       !mounted ||
       submitting ||
       completed ||
-      !token
+      tokenUnavailable
     ) {
       return false;
     }
@@ -1331,6 +1341,7 @@ export function renderActivateAccountView(
       }
 
       completed = true;
+      presentState("success", "Tu cuenta está activada", "Ya puedes entrar y consultar tus incidencias.");
       setSubmitting(false);
       lockCompletedForm(refs, passwordControls);
 
@@ -1339,12 +1350,10 @@ export function renderActivateAccountView(
 
       setMessage(
         refs,
-        cleanText(
-          result?.message,
-          "Cuenta activada correctamente. Ya puedes iniciar sesión."
-        ),
+        "Cuenta activada correctamente. Ya puedes iniciar sesión.",
         "success"
       );
+      focusSafe(refs.message);
 
       scheduleLogin(result);
       return true;
@@ -1357,6 +1366,7 @@ export function renderActivateAccountView(
 
       if (mapped.completed) {
         completed = true;
+        presentState("success", "Tu cuenta está activada", "Ya puedes entrar y consultar tus incidencias.");
         setSubmitting(false);
         lockCompletedForm(refs, passwordControls);
 
@@ -1368,6 +1378,7 @@ export function renderActivateAccountView(
           mapped.message,
           "success"
         );
+        focusSafe(refs.message);
 
         scheduleLogin({
           redirectTo: LOGIN_ROUTE,
@@ -1377,12 +1388,22 @@ export function renderActivateAccountView(
       }
 
       if (mapped.field) {
+        if (mapped.field === "token") {
+          tokenUnavailable = true;
+          presentState("invalid", "El enlace ya no está disponible", "Solicita ayuda para completar la activación de tu cuenta.");
+          refs.password.value = "";
+          refs.confirmPassword.value = "";
+          setMessage(refs, mapped.message, "error");
+          focusSafe(refs.message);
+          return false;
+        }
         setFieldError(
           refs,
           mapped.field,
           mapped.message
         );
 
+        setSubmitting(false);
         focusSafe(
           inputFor(refs, mapped.field)
         );
@@ -1392,6 +1413,7 @@ export function renderActivateAccountView(
           mapped.message,
           "error"
         );
+        focusSafe(refs.message);
       }
 
       return false;
@@ -1406,7 +1428,7 @@ export function renderActivateAccountView(
   }
 
   function onPasswordInput() {
-    if (submitting || completed || !token) return;
+    if (submitting || completed || tokenUnavailable) return;
 
     clearMessage(refs);
     clearFieldError(refs, "password");
@@ -1420,7 +1442,7 @@ export function renderActivateAccountView(
   }
 
   function onConfirmInput() {
-    if (submitting || completed || !token) return;
+    if (submitting || completed || tokenUnavailable) return;
 
     clearMessage(refs);
     clearFieldError(refs, "confirmPassword");
@@ -1434,6 +1456,7 @@ export function renderActivateAccountView(
     Si el token no está disponible, fallamos cerrado antes de tocar backend.
   */
   if (!token) {
+    presentState("invalid", "Necesitas un enlace de activación", "Abre el enlace de tu correo o solicita ayuda para continuar.");
     setMessage(
       refs,
       "Este enlace de activación no es válido. Solicita ayuda para activar tu cuenta.",
@@ -1455,7 +1478,7 @@ export function renderActivateAccountView(
     submit,
 
     unlock() {
-      if (completed || !token) return false;
+      if (completed || tokenUnavailable) return false;
       setSubmitting(false);
       return true;
     },

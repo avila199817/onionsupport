@@ -11,10 +11,14 @@
     if (!head) return;
 
     if (window.location.pathname !== "/") {
-      for (const href of [
-        "/src/features/ticket-deeplink/index.js",
-        "/src/ui/chrome/index.js",
+      // Public credential screens retain their token/deeplink boot barrier,
+      // but never mount App Chrome. Do not fetch its private UI speculatively.
+      const publicAuthPath = /^\/(?:login|password-request|password-reset|reset-password|activate-account)(?:\/|$)/i.test(window.location.pathname);
+      for (const { href, privateChrome } of [
+        { href: "/src/features/ticket-deeplink/index.js" },
+        { href: "/src/ui/chrome/index.js", privateChrome: true },
       ]) {
+        if (publicAuthPath && privateChrome) continue;
         if (head.querySelector(`link[href="${href}"]`)) continue;
         const link = document.createElement("link");
         link.rel = "modulepreload";
@@ -31,7 +35,7 @@
       ["/src/media/img/Cristian_Avila_640.webp", "640w"].join(" "),
       ["/src/media/img/Cristian_Avila_960.webp", "960w"].join(" "),
     ].join(", ");
-    const heroImageSizes = "(max-width: 720px) calc(100vw - 90px), (max-width: 1040px) 206px, (max-width: 1240px) 176px, 196px";
+    const heroImageSizes = "(max-width: 720px) min(594px, calc(100vw - 106px)), (max-width: 1040px) 206px, (max-width: 1240px) 176px, 196px";
 
     const hints = [
       {

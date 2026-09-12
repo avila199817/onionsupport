@@ -508,6 +508,12 @@ function initPasswordControls(refs) {
   setCapsVisible(refs, false);
 
   return {
+    conceal() {
+      visible = false;
+      setPasswordVisible(refs, false);
+      setCapsVisible(refs, false);
+    },
+
     setDisabled(disabled = false) {
       if (refs.passwordToggle) {
         refs.passwordToggle.disabled = Boolean(disabled);
@@ -613,6 +619,7 @@ function setGlobalError(refs, message = "") {
     "No se pudo iniciar sesión."
   );
   refs.globalError.hidden = false;
+  focusSafe(refs.globalError);
 
   return true;
 }
@@ -662,6 +669,8 @@ function setLoading(refs, loading = false, passwordControls = null) {
     refs.form.dataset.loading = busy;
     refs.form.setAttribute("aria-busy", busy);
   }
+
+  if (value) passwordControls?.conceal?.();
 
   return true;
 }
@@ -721,7 +730,7 @@ function authErrorMessage(error = null) {
     code.includes("INVALID") ||
     code.includes("UNAUTHORIZED")
   ) {
-    return "Credenciales incorrectas.";
+    return "El usuario o la contraseña no son correctos. Revísalos e inténtalo de nuevo.";
   }
 
   if (
@@ -735,17 +744,22 @@ function authErrorMessage(error = null) {
     code.includes("SUSPENDED") ||
     code.includes("REVOKED")
   ) {
-    return "Tu usuario no tiene acceso activo.";
+    return "Tu cuenta no tiene acceso activo. Revisa el correo de activación o contacta con Onion Support.";
+  }
+
+  if (status === 429 || code.includes("RATE_LIMIT")) {
+    return "Has realizado demasiados intentos. Espera unos minutos antes de volver a entrar.";
+  }
+
+  if (!status || code.includes("NETWORK") || code.includes("TIMEOUT")) {
+    return "No hemos podido conectar. Comprueba tu conexión y vuelve a intentarlo.";
   }
 
   if (status >= 500) {
     return "El servidor no respondió correctamente. Inténtalo de nuevo.";
   }
 
-  return cleanText(
-    error?.message || "",
-    "No se pudo iniciar sesión."
-  );
+  return "No hemos podido iniciar sesión. Vuelve a intentarlo en unos minutos.";
 }
 
 /* =========================================================
@@ -824,7 +838,7 @@ export function renderLoginView(container, context = {}) {
     }
 
     if (!isFunction(auth?.login)) {
-      setGlobalError(refs, "Auth no disponible.");
+      setGlobalError(refs, "El acceso no está disponible en este momento. Recarga la página e inténtalo de nuevo.");
       return false;
     }
 
@@ -924,6 +938,7 @@ export function renderLoginView(container, context = {}) {
 
       try {
         passwordControls.destroy();
+        refs.password.value = "";
       } catch {
         // noop
       }

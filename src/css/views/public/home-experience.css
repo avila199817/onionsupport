@@ -18,18 +18,6 @@
 @layer auth {
 
 /* =========================================================
-   1. WIDTH / GLOBAL BREATHING ROOM
-========================================================= */
-
-.public-auth-shell--home {
-  --public-home-shell-max: 1600px;
-  --public-home-page-gutter: clamp(18px, 3vw, 56px);
-  --public-home-title-main-size: clamp(42px, 4.35vw, 70px);
-  --public-home-title-accent-size: clamp(52px, 5.25vw, 86px);
-}
-
-
-/* =========================================================
    2. HEADER ACTION ORDER / CTA / AUTHENTICATED AVATAR
 ========================================================= */
 
@@ -804,12 +792,6 @@
    7. RESPONSIVE · PUBLIC HOME CANONICAL
 ========================================================= */
 
-@media (max-width: 1280px) {
-  .public-auth-shell--home {
-    --public-home-page-gutter: clamp(18px, 2.5vw, 38px);
-  }
-}
-
 @media (max-width: 1040px) {
   .public-home .public-home-nav-panel {
     inline-size: fit-content;
@@ -883,12 +865,6 @@
 }
 
 @media (max-width: 720px) {
-  .public-auth-shell--home {
-    --public-home-page-gutter: clamp(14px, 4vw, 22px);
-    --public-home-title-main-size: clamp(30px, 8.4vw, 48px);
-    --public-home-title-accent-size: clamp(38px, 10.6vw, 60px);
-  }
-
   .public-home .public-home-account-menu {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;

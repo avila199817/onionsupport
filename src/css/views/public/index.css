@@ -125,8 +125,10 @@ body.public-home-no-scroll .main-content {
   --public-home-nav-height: 92px;
   --public-home-scroll-offset: 118px;
 
-  --public-home-shell-max: 1460px;
-  --public-home-page-gutter: clamp(18px, 4vw, 72px);
+  --public-home-shell-max: 1480px;
+  --public-home-page-gutter: clamp(20px, 4vw, 64px);
+  --public-home-title-main-size: clamp(42px, 4.6vw, 68px);
+  --public-home-title-accent-size: clamp(50px, 5.2vw, 80px);
 
   --public-home-brand-mark-size: 48px;
   --public-home-brand-logo-size: 34px;
@@ -929,7 +931,7 @@ body.public-home-no-scroll .main-content {
   text-wrap: balance;
 }
 
-.public-home-section-head p {
+.public-home-section-head p:not(.public-home-price-eyebrow) {
   max-inline-size: 64ch;
   margin: 0;
   color: var(--public-home-text-soft);
@@ -967,29 +969,25 @@ body.public-home-no-scroll .main-content {
   inline-size: 100%;
   max-inline-size: none;
 
-  min-block-size: calc(100svh - var(--public-home-nav-height));
+  min-block-size: 0;
 
   padding:
-    clamp(24px, 3vw, 44px)
+    clamp(36px, 4.2vw, 64px)
     var(--public-home-page-gutter)
-    clamp(36px, 4.2vw, 64px);
+    clamp(40px, 5vw, 76px);
 
   overflow: clip;
   background: transparent;
 }
 
-.public-home-hero-bg {
-  display: none;
-}
-
 .public-home-hero-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(430px, .72fr);
+  grid-template-columns: minmax(0, 1.08fr) minmax(440px, .92fr);
   align-items: center;
-  gap: clamp(30px, 4vw, 76px);
+  gap: clamp(32px, 4.5vw, 72px);
 
   inline-size: min(100%, var(--public-home-shell-max));
-  min-block-size: min(650px, calc(100svh - 124px));
+  min-block-size: 0;
 
   margin-inline: auto;
 }
@@ -1000,7 +998,7 @@ body.public-home-no-scroll .main-content {
 
   display: grid;
   justify-items: start;
-  gap: clamp(20px, 2vw, 28px);
+  gap: 22px;
 
   min-inline-size: 0;
 }
@@ -1008,14 +1006,13 @@ body.public-home-no-scroll .main-content {
 .public-home-title {
   max-inline-size: 980px;
   margin: 0;
-  padding-block: .07em .09em;
+  padding-block: .03em .06em;
 
-  color: #ffffff;
+  color: var(--public-home-text-strong);
   font-size: var(--public-home-title-main-size);
   font-weight: 800;
   line-height: 1.06;
-  letter-spacing: -.04em;
-  text-transform: uppercase;
+  letter-spacing: -.045em;
   text-wrap: balance;
 }
 
@@ -1027,13 +1024,81 @@ body.public-home-no-scroll .main-content {
 }
 
 .public-home-hero-text {
-  max-inline-size: 58ch;
+  max-inline-size: 51ch;
   margin: 0;
 
-  color: var(--public-home-text);
-  font-size: clamp(17px, 1.55vw, 20px);
+  color: var(--public-home-text-soft);
+  font-size: clamp(17px, 1.4vw, 19px);
   font-weight: 500;
   line-height: 1.65;
+}
+
+.public-home-hero-text strong {
+  display: block;
+  margin-block-end: 6px;
+  color: var(--public-home-text);
+  font-weight: 650;
+}
+
+.public-home-hero-note {
+  max-inline-size: 54ch;
+  margin: -10px 0 0;
+  color: var(--public-home-text-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.public-home-quick-services {
+  inline-size: 100%;
+  padding-block: 20px;
+  border-block: 1px solid var(--public-home-border);
+}
+
+.public-home-quick-services p {
+  margin: 0 0 12px;
+  color: var(--public-home-text-soft);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.public-home-quick-services ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.public-home-quick-services a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-block-size: 42px;
+  padding: 9px 13px;
+  border: 1px solid var(--public-home-border);
+  border-radius: 11px;
+  color: var(--public-home-text);
+  background: var(--public-home-surface);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.4;
+  transition: border-color .18s ease, background .18s ease;
+}
+
+.public-home-quick-services a:is(:hover, :focus-visible) {
+  border-color: var(--public-home-border-strong);
+  background: var(--public-home-card-hover);
+}
+
+.public-home-quick-services .public-home-icon {
+  flex: 0 0 auto;
+  inline-size: 15px;
+  block-size: 15px;
+  color: var(--public-home-accent);
 }
 
 .public-home-hero-actions {
@@ -1074,7 +1139,7 @@ body.public-home-no-scroll .main-content {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 14px 22px;
+  gap: 12px 18px;
 
   margin: 0;
   padding: 0;
@@ -1086,20 +1151,21 @@ body.public-home-no-scroll .main-content {
   align-items: center;
   gap: 9px;
 
-  color: var(--public-home-text);
-  font-size: 15px;
-  font-weight: 650;
+  color: var(--public-home-text-soft);
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .public-home-trust-icon {
   display: grid;
   place-items: center;
 
-  inline-size: 34px;
-  block-size: 34px;
+  flex: 0 0 auto;
+  inline-size: 28px;
+  block-size: 28px;
 
   border: 1px solid rgb(75 184 255 / .18);
-  border-radius: 12px;
+  border-radius: 9px;
 
   color: var(--public-home-accent);
   background: rgb(19 148 255 / .08);
@@ -1135,17 +1201,16 @@ body.public-home-no-scroll .main-content {
   inline-size: min(100%, 580px);
   max-inline-size: 580px;
   min-inline-size: 0;
-  min-block-size: clamp(654px, 44vw, 716px);
+  min-block-size: 0;
 
   perspective: 1200px;
 }
 
 .public-home-profile-card--command {
-  position: absolute;
-  inset: 0;
+  position: relative;
 
   display: grid;
-  grid-template-rows: 52px minmax(0, 1fr) 54px;
+  grid-template-rows: 52px auto 54px;
 
   inline-size: 100%;
   min-inline-size: 0;
@@ -1225,19 +1290,11 @@ body.public-home-no-scroll .main-content {
   background: linear-gradient(180deg, rgb(255 255 255 / .05), transparent);
 }
 
-.public-home-profile-top > span {
-  inline-size: 9px;
-  block-size: 9px;
-  border-radius: 999px;
-  background: var(--public-home-accent-2);
-}
-
-.public-home-profile-top > span:nth-child(2) {
-  background: var(--public-home-accent);
-}
-
-.public-home-profile-top > span:nth-child(3) {
-  background: var(--public-home-success);
+.public-home-profile-top-label {
+  color: var(--public-home-text-soft);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
 }
 
 .public-home-profile-top strong {
@@ -1247,9 +1304,9 @@ body.public-home-no-scroll .main-content {
   overflow: hidden;
   color: #ffffff;
 
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: .14em;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: .1em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1379,7 +1436,6 @@ body.public-home-no-scroll .main-content {
   font-weight: 800;
   line-height: 1;
   letter-spacing: -.035em;
-  text-transform: uppercase;
 }
 
 .public-home-command-copy h2 span {
@@ -1397,8 +1453,8 @@ body.public-home-no-scroll .main-content {
   color: var(--public-home-text-soft);
 
   font-size: clamp(13px, .92vw, 14px);
-  font-weight: 720;
-  line-height: 1.44;
+  font-weight: 500;
+  line-height: 1.55;
 }
 
 .public-home-command-tags {
@@ -1572,7 +1628,8 @@ body.public-home-no-scroll .main-content {
   background: linear-gradient(180deg, transparent, rgb(2 6 14 / .34));
 }
 
-.public-home-profile-bottom span {
+.public-home-profile-bottom span,
+.public-home-profile-bottom a {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -1586,6 +1643,16 @@ body.public-home-no-scroll .main-content {
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.public-home-profile-bottom a {
+  min-block-size: 44px;
+}
+
+.public-home-profile-bottom a:hover {
+  color: var(--public-home-text-strong);
+  text-decoration: underline;
+  text-underline-offset: 4px;
 }
 
 .public-home-profile-bottom .public-home-icon {
@@ -1643,10 +1710,11 @@ body.public-home-no-scroll .main-content {
 
 .public-home-service-card {
   display: grid;
+  grid-template-rows: auto auto 1fr auto;
   align-content: start;
-  gap: 14px;
+  gap: 16px;
 
-  min-block-size: 220px;
+  min-block-size: 286px;
   padding: 26px;
 
   transition:
@@ -1656,7 +1724,7 @@ body.public-home-no-scroll .main-content {
     box-shadow .2s ease;
 }
 
-.public-home-service-card:hover,
+a.public-home-service-card:hover,
 .public-home-price-card:hover {
   transform: translateY(-3px);
   border-color: var(--public-home-border-strong);
@@ -1673,6 +1741,32 @@ body.public-home-no-scroll .main-content {
     0 16px 38px rgb(0 0 0 / .22),
     0 0 0 1px rgb(75 184 255 / .08),
     inset 0 1px 0 rgb(255 255 255 / .12);
+}
+
+.public-home-service-link {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 10px;
+  min-block-size: 44px;
+  margin-block-start: 2px;
+  color: var(--public-home-accent-2);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.public-home-service-card > a.public-home-service-link {
+  text-decoration: underline;
+  text-underline-offset: 5px;
+}
+
+.public-home-service-link .public-home-icon {
+  inline-size: 17px;
+  block-size: 17px;
+}
+
+.public-home-service-card--help {
+  border-style: dashed;
 }
 
 .public-home-service-icon {
@@ -1710,7 +1804,7 @@ body.public-home-no-scroll .main-content {
 }
 
 .public-home-service-card p,
-.public-home-price-card p,
+.public-home-price-card p:not(.public-home-price-eyebrow),
 .public-home-faq-item p {
   margin: 0;
   color: var(--public-home-text-soft);
@@ -1908,6 +2002,7 @@ body.public-home-no-scroll .main-content {
 
 .public-home-price-points {
   display: grid;
+  align-content: start;
   gap: 11px;
 
   margin: 0;
@@ -2052,6 +2147,47 @@ body.public-home-no-scroll .main-content {
 }
 
 
+.public-home-contact-details {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 28px;
+  padding-block-start: 20px;
+  border-block-start: 1px solid var(--public-home-border);
+}
+
+.public-home-contact-details a {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-block-size: 44px;
+  min-inline-size: 0;
+  color: var(--public-home-text);
+  font-size: 15px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.public-home-contact-details a:hover {
+  text-decoration: underline;
+  text-underline-offset: 5px;
+}
+
+.public-home-contact-details .public-home-icon {
+  flex: 0 0 auto;
+  color: var(--public-home-accent);
+}
+
+.public-home-contact-details p:not(.public-home-price-eyebrow) {
+  flex-basis: 100%;
+  max-inline-size: 80ch;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+
 /* =========================================================
    15. FAQ
 ========================================================= */
@@ -2176,17 +2312,25 @@ body.public-home-no-scroll .main-content {
 
 .public-home [data-public-home-reveal],
 .public-home [data-reveal] {
-  opacity: 0;
-  transform: translateY(22px);
+  opacity: 1;
+  transform: none;
 
   transition:
-    opacity .62s ease,
+    opacity .45s ease,
     transform .62s cubic-bezier(.2, .8, .2, 1);
 
   transition-delay:
     calc(var(--public-home-reveal-index, 0) * 45ms);
 }
 
+.public-home.is-ready [data-public-home-reveal]:not(.is-visible):not([data-visible="true"]):not(:focus-within),
+.public-home.is-ready [data-reveal]:not(.is-visible):not([data-visible="true"]):not(:focus-within) {
+  opacity: 0;
+  transform: translateY(16px);
+}
+
+.public-home [data-public-home-reveal]:focus-within,
+.public-home [data-reveal]:focus-within,
 .public-home.is-ready [data-public-home-reveal].is-visible,
 .public-home.is-ready [data-reveal].is-visible,
 .public-home [data-public-home-reveal][data-visible="true"],
@@ -2214,6 +2358,12 @@ body.public-home-no-scroll .main-content {
    19. RESPONSIVE — TABLET / MOBILE NAV
 ========================================================= */
 
+@media (max-width: 1280px) {
+  .public-auth-shell--home {
+    --public-home-page-gutter: clamp(18px, 2.5vw, 38px);
+  }
+}
+
 @media (max-width: 1240px) {
   .public-home-hero-grid {
     grid-template-columns: minmax(0, 1fr) minmax(400px, .70fr);
@@ -2224,7 +2374,7 @@ body.public-home-no-scroll .main-content {
   .public-home-hero-visual--profile {
     inline-size: min(100%, 548px);
     max-inline-size: 548px;
-    min-block-size: clamp(650px, 52vw, 704px);
+    min-block-size: 0;
   }
 
   .public-home-command-hero {
@@ -2369,21 +2519,13 @@ body.public-home-no-scroll .main-content {
     grid-template-columns: 1fr;
   }
 
-  /*
-     En tablet la card deja de ser absoluta:
-     crece por contenido y eliminamos alturas mágicas.
-  */
+  /* La tarjeta conserva su tamaño natural al pasar a una columna. */
   .public-home-hero-visual,
   .public-home-hero-visual--profile {
     justify-self: center;
     inline-size: min(100%, 660px);
     max-inline-size: 660px;
     min-block-size: 0;
-  }
-
-  .public-home-profile-card--command {
-    position: relative;
-    inset: auto;
   }
 
   .public-home-command-hero {
@@ -2424,7 +2566,9 @@ body.public-home-no-scroll .main-content {
   .public-auth-shell--home {
     --public-home-nav-height: 78px;
     --public-home-scroll-offset: 96px;
-    --public-home-page-gutter: 14px;
+    --public-home-page-gutter: 20px;
+    --public-home-title-main-size: clamp(30px, 8.5vw, 48px);
+    --public-home-title-accent-size: clamp(40px, 11.1vw, 64px);
 
     --public-home-brand-mark-size: 42px;
     --public-home-brand-logo-size: 30px;
@@ -2528,16 +2672,60 @@ body.public-home-no-scroll .main-content {
     font-size: 16px;
   }
 
-  .public-home-hero-actions,
+  .public-home-hero-copy {
+    gap: 20px;
+  }
+
+  .public-home-hero-copy > .public-home-price-eyebrow {
+    max-inline-size: 36ch;
+    font-size: 11px;
+    line-height: 1.5;
+  }
+
+  .public-home-hero-actions {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr;
+    gap: 10px;
+    inline-size: 100%;
+  }
+
+  .public-home-hero-actions .public-home-button {
+    min-inline-size: 0;
+    min-block-size: 52px;
+    padding-inline: 10px;
+    gap: 8px;
+    font-size: 13px;
+  }
+
   .public-home-button {
     inline-size: 100%;
   }
 
-  .public-home-trust-list {
+  .public-home-quick-services {
+    padding-block: 16px;
+  }
+
+  .public-home-quick-services ul {
     display: grid;
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .public-home-quick-services a {
     inline-size: 100%;
-    gap: 10px;
+    block-size: 100%;
+    gap: 6px;
+    padding-inline: 10px;
+    font-size: 12px;
+  }
+
+  .public-home-trust-list {
+    inline-size: 100%;
+    gap: 10px 14px;
+  }
+
+  .public-home-trust-item {
+    gap: 7px;
+    font-size: 12px;
   }
 
   /*
@@ -2725,7 +2913,9 @@ body.public-home-no-scroll .main-content {
   }
 
   .public-home [data-public-home-reveal],
-  .public-home [data-reveal] {
+  .public-home [data-reveal],
+  .public-home.is-ready [data-public-home-reveal]:not(.is-visible):not([data-visible="true"]):not(:focus-within),
+  .public-home.is-ready [data-reveal]:not(.is-visible):not([data-visible="true"]):not(:focus-within) {
     opacity: 1;
     transform: none;
   }

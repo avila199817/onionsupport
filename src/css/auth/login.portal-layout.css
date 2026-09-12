@@ -82,7 +82,7 @@
   }
 
   .public-auth-shell--login .login-showcase-title > span {
-    font-size: clamp(52px, 4.7vw, 72px);
+    font-size: inherit;
   }
 
   .public-auth-shell--login .login-card-panel--portal {

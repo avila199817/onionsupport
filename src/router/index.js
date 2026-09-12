@@ -5547,6 +5547,8 @@ function onClick(
 
   if (
     !element ||
+    // Some public destinations are complete static documents, not SPA views.
+    element.getAttribute?.("data-document-navigation") === "true" ||
     element
       .hasAttribute?.(
         "download"

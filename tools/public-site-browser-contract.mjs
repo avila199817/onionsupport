@@ -175,6 +175,47 @@ try {
     }
   }
 
+  async function inspectServiceNavigation(targetPage, path) {
+    const menu = targetPage.locator(".seo-service-menu");
+    const summary = menu.locator("summary");
+    assert.equal(await menu.count(), 1, "one native service chooser");
+    assert.equal(await menu.evaluate((node) => node.open), false, "service menu starts collapsed");
+    await summary.focus();
+    await summary.press("Enter");
+    assert.equal(await menu.evaluate((node) => node.open), true, "service menu opens from the keyboard");
+    for (const service of PUBLIC_SERVICES) {
+      const link = menu.getByRole("link", { name: service.label, exact: true });
+      assert.equal(await link.isVisible(), true, `service chooser exposes ${service.path}`);
+      assert.equal(await link.getAttribute("href"), service.path);
+    }
+    assert.equal(await menu.locator('[aria-current="page"]').count(), 1);
+    assert.equal(await menu.locator('[aria-current="page"]').getAttribute("href"), path);
+    const bounds = await menu.locator(".seo-service-options").boundingBox();
+    assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= targetPage.viewportSize().width + 1, "open service menu stays within the viewport");
+    await summary.press("Enter");
+    assert.equal(await menu.evaluate((node) => node.open), false, "service menu closes from the keyboard");
+  }
+
+  // Service pages are static documents, outside the SPA route table. A valid
+  // href alone is insufficient: normal clicks must reach the service document.
+  await access(resolve(DIST, "index.html"));
+  for (const compiled of [false, true]) {
+    serveDist = compiled;
+    for (const service of PUBLIC_SERVICES) {
+      await page.goto(origin, { waitUntil: "domcontentloaded" });
+      const link = page.locator(`.public-home-quick-services a[href="${service.path}"]`);
+      await link.waitFor({ state: "visible" });
+      await page.evaluate(() => { window.__publicDocumentNavigationProbe = true; });
+      await Promise.all([
+        page.waitForURL(origin + service.path, { waitUntil: "domcontentloaded" }),
+        link.click(),
+      ]);
+      assert.equal(await page.title(), service.title, "normal Home clicks reach the chosen service");
+      assert.equal(await page.evaluate(() => window.__publicDocumentNavigationProbe), undefined, "service navigation loads its real static document");
+      assert.equal(await page.locator("h1:visible").count(), 1);
+    }
+  }
+
   // Responsive and theme coverage of every public surface, using source and
   // the actual compiled release with isolated network fixtures. These checks
   // never submit real credentials or substitute the public page markup.
@@ -190,6 +231,26 @@ try {
           await page.waitForFunction(() => document.documentElement.dataset.appReady === "true");
         }
         await inspectPublicLayout();
+        if (path === "/") {
+          const quick = page.getByRole("navigation", { name: "Encuentra tu servicio" });
+          assert.equal(await quick.locator("a[href]").count(), PUBLIC_SERVICES.length, "five direct service choices in the hero");
+          for (const service of PUBLIC_SERVICES) {
+            const link = quick.locator(`a[href="${service.path}"]`);
+            assert.equal(await link.isVisible(), true, "hero service link is visible");
+            const box = await link.boundingBox();
+            assert.ok(box.x >= 0 && box.x + box.width <= width + 1, "hero service choice fits the viewport");
+            assert.equal(await page.locator(`.public-home-service-grid > a[href="${service.path}"]`).count(), 1, "one service card per canonical service");
+          }
+          assert.equal(await page.locator('.public-home-service-card--help a[href="#incidencia"]').count(), 1, "visitors can request help without choosing a service");
+          for (const prefix of ["tel:", "mailto:", "https://wa.me/"]) {
+            assert.ok(await page.locator(`.public-home-contact a[href^="${prefix}"]`).count() > 0, "direct contact remains available alongside the intake");
+          }
+        }
+        if (["/password-request", "/password-reset", "/activate-account"].includes(path)) {
+          const chromeResources = await page.evaluate(() => performance.getEntriesByType("resource").filter((entry) => /\/assets\/js\/chrome-[^/]+\.js$/.test(new URL(entry.name).pathname)).length);
+          assert.equal(chromeResources, 0, "credential screens must not download the private App Chrome chunk");
+        }
+        if (PUBLIC_SERVICES.some((service) => service.path === path)) await inspectServiceNavigation(page, path);
         if (path === "/password-reset" || path === "/activate-account") {
           const form = page.locator("form");
           assert.equal(await form.locator('input[type="password"]:enabled, button[type="submit"]:enabled').count(), 0, "a missing token must disable unusable controls");
@@ -223,6 +284,26 @@ try {
     assert.equal(navigationVisible, true, `navigation must stay visible and interactive at ${hash}`);
   }
   assert.deepEqual(errors, [], "frontend must not throw during metadata navigation");
+  const mobilePhoto = await browser.newContext({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 2 });
+  await mobilePhoto.route("**/*", (route) => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+  try {
+    const photoPage = await mobilePhoto.newPage();
+    const requestedPhotos = [];
+    photoPage.on("request", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (/\/Cristian_Avila_\d+\.webp$/.test(path)) requestedPhotos.push(path);
+    });
+    await photoPage.goto(origin, { waitUntil: "domcontentloaded" });
+    await photoPage.waitForFunction(() => {
+      const photo = document.querySelector(".public-home-command-photo");
+      return photo?.complete && photo.naturalWidth > 0 && photo.getBoundingClientRect().width > 0;
+    });
+    const photo = await photoPage.locator(".public-home-command-photo").evaluate((node) => ({ width: node.getBoundingClientRect().width, source: new URL(node.currentSrc).pathname }));
+    assert.ok(photo.width > 0 && photo.width <= 320, "mobile portrait fits a 640px image at DPR 2");
+    assert.equal(photo.source, "/src/media/img/Cristian_Avila_640.webp", "mobile must avoid the unnecessary 960px download");
+    assert.deepEqual(requestedPhotos, [photo.source], "matching preload and picture download the portrait once");
+  } finally { await mobilePhoto.close(); }
+
   // No-JS access must be genuinely usable, not merely present in source.
   const noScript = await browser.newContext({ javaScriptEnabled: false });
   await noScript.route("**/*", (route) => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
@@ -236,6 +317,7 @@ try {
         assert.equal(await staticPage.locator("#app-loader").isVisible(), false, "no permanent loader without JavaScript");
         assert.equal(await staticPage.locator("#app-shell").isVisible(), false, "no dynamic shell without JavaScript");
         assert.equal(await staticPage.locator("#noscript-root .noscript-title").isVisible(), true);
+        assert.equal(await staticPage.getByRole("heading", { level: 1 }).count(), 1, "no-script home has one accessible primary heading");
         const summary = staticPage.locator("#noscript-root [data-public-noscript-summary]");
         assert.equal(await summary.isVisible(), true);
         for (const service of PUBLIC_SERVICES) assert.equal(await summary.locator(`a[href="${service.path}"]`).isVisible(), true);
@@ -249,6 +331,11 @@ try {
         assert.ok(lastBounds && lastBounds.y >= 0 && lastBounds.y + lastBounds.height <= 901, "no-script page can scroll to its last action");
         await summary.locator('a[href="/reparacion-ordenadores"]').click();
         assert.equal(await staticPage.locator("h1:visible").count(), 1, "service pages work without JavaScript");
+        await inspectServiceNavigation(staticPage, "/reparacion-ordenadores");
+        await staticPage.locator(".seo-service-menu summary").click();
+        await staticPage.locator('.seo-service-menu a[href="/redes-wifi"]').click();
+        assert.equal(new URL(staticPage.url()).pathname, "/redes-wifi", "service chooser navigates without JavaScript");
+        assert.equal(await staticPage.locator("h1:visible").count(), 1);
         await staticPage.getByRole("link", { name: "Contacto", exact: true }).click();
         assert.equal(new URL(staticPage.url()).hash, "#contacto", "service contact does not require the SPA");
       }

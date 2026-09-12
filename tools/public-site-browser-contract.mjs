@@ -141,6 +141,8 @@ try {
     }
     const reject = page.getByRole("button", { name: "Rechazar", exact: true });
     if (await reject.isVisible()) await reject.click();
+    const pathname = new URL(page.url()).pathname;
+    const expectsFooter = pathname !== "/password-request";
     const layout = await page.evaluate(() => {
       const visible = (node) => node.getClientRects().length > 0 && getComputedStyle(node).visibility !== "hidden";
       const ids = [...document.querySelectorAll("[id]")].map((node) => node.id);
@@ -162,16 +164,21 @@ try {
         clippedHeadings,
       };
     });
-    assert.deepEqual(layout, { visibleH1: 1, nestedMain: 0, duplicateIds: [], overflow: false, innerOverflow: false, footerCount: 1, footerLogin: false, clippedHeadings: [] }, `${page.url()} must remain readable and coherent at ${JSON.stringify(page.viewportSize())}`);
+    assert.deepEqual(layout, { visibleH1: 1, nestedMain: 0, duplicateIds: [], overflow: false, innerOverflow: false, footerCount: expectsFooter ? 1 : 0, footerLogin: false, clippedHeadings: [] }, `${page.url()} must remain readable and coherent at ${JSON.stringify(page.viewportSize())}`);
     const maps = page.locator(`.public-legal-footer a[href="${PUBLIC_SITE.googleMapsUrl}"]`);
-    assert.equal(await maps.count(), 1, "one Maps link in the shared public footer");
-    assert.equal(await maps.getAttribute("rel"), "noopener noreferrer");
+    assert.equal(await maps.count(), expectsFooter ? 1 : 0, expectsFooter ? "one Maps link in the shared public footer" : "password request intentionally has no public footer");
     assert.equal(await page.locator("[data-public-noscript-summary]").count(), 0, "no no-script alternative rendered on public application routes");
-    for (const id of ["public-legal-notice", "public-privacy", "public-cookies"]) {
-      const disclosure = page.locator(`#${id}`);
-      await disclosure.locator("summary").click();
-      assert.equal(await disclosure.evaluate((node) => node.open), true);
-      await disclosure.locator("summary").click();
+    if (expectsFooter) {
+      assert.equal(await maps.getAttribute("rel"), "noopener noreferrer");
+      for (const id of ["public-legal-notice", "public-privacy", "public-cookies"]) {
+        const disclosure = page.locator(`#${id}`);
+        await disclosure.locator("summary").click();
+        assert.equal(await disclosure.evaluate((node) => node.open), true);
+        await disclosure.locator("summary").click();
+      }
+    } else {
+      assert.equal(await page.locator(".public-legal-footer").count(), 0, "password request must render no footer chrome");
+      assert.equal(await page.locator("#public-legal-notice,#public-privacy,#public-cookies").count(), 0, "password request must render no legal footer disclosures");
     }
   }
 
@@ -382,7 +389,7 @@ try {
     }
   } finally { await noScript.close(); }
   await context.close();
-  console.log("Public site browser: PASS · real Router home↔login · 10 public routes × 3 widths × 2 themes · unique visible headings/footer · disclosures · safe invalid tokens · intake/privacy deep links · Maps links/schema · empty boot container preserved · source/dist without JavaScript");
+  console.log("Public site browser: PASS · real Router home↔login · 10 public routes × 3 widths × 2 themes · unique visible headings · route-specific footer policy · disclosures · safe invalid tokens · intake/privacy deep links · Maps links/schema · empty boot container preserved · source/dist without JavaScript");
 } finally {
   if (browser) await browser.close();
   await new Promise((done) => server.close(done));

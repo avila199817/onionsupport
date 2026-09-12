@@ -12,6 +12,8 @@ import { PUBLIC_LEGAL } from "../core/public-legal.js";
   const GOOGLE_ADS_TAG_ID = "AW-18395700376";
   const CONTACT_CONVERSION_DESTINATION =
     "AW-18395700376/WjQvCIe1tuMcEJi54MNE";
+  const LEAD_FORM_CONVERSION_DESTINATION =
+    "AW-18395700376/tEy-CIKov_UcEJi54MNE";
   const WHATSAPP_CONVERSION_DESTINATION =
     "AW-18395700376/6zBcCL3zo-ccEJi54MNE";
 
@@ -581,6 +583,10 @@ import { PUBLIC_LEGAL } from "../core/public-legal.js";
       method: "public_support_form",
     });
     sendGoogleAdsConversion(CONTACT_CONVERSION_DESTINATION);
+    sendGoogleAdsConversion(LEAD_FORM_CONVERSION_DESTINATION, {
+      value: 1.0,
+      currency: "EUR",
+    });
   });
 
   window.addEventListener(LEGACY_ANALYTICS_CONSENT_EVENT, () => {

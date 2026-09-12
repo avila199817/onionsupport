@@ -114,6 +114,131 @@ PICTURE_PATTERN = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 HERO_WEBP_PATTERN = re.compile(r"/?src/media/img/Cristian_Avila_(\d+)\.webp")
+HERO_SIZES_LEGACY = (
+    "(max-width: 720px) calc(100vw - 90px), "
+    "(max-width: 1040px) 206px, "
+    "(max-width: 1240px) 176px, 196px"
+)
+HERO_SIZES_MEASURED = (
+    "(max-width: 720px) min(594px, calc(100vw - 106px)), "
+    "(max-width: 1040px) 206px, "
+    "(max-width: 1240px) 176px, 196px"
+)
+
+
+def css_declaration_blocks(source: str):
+    """Read declaration blocks and enclosing at-rules without executing CSS.
+
+    Only plain selectors/properties are used by the geometry policy below.
+    Comments and string contents cannot satisfy its required declarations.
+    This is a source guard, not a replacement for browser layout verification.
+    """
+    source = re.sub(r'/\*.*?\*/|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'', " ", source, flags=re.DOTALL)
+
+    def blocks(body, context=()):
+        cursor = 0
+        while cursor < len(body):
+            opening = body.find("{", cursor)
+            if opening < 0:
+                break
+            header = body[cursor:opening].strip().split(";")[-1].strip()
+            depth, end = 1, opening + 1
+            while end < len(body) and depth:
+                depth += (body[end] == "{") - (body[end] == "}")
+                end += 1
+            if depth:
+                raise ValueError("CSS del hero contiene un bloque sin cerrar")
+            content = body[opening + 1:end - 1]
+            if header.startswith("@"):
+                yield from blocks(content, (*context, re.sub(r"\s+", "", header)))
+            elif "{" not in content:
+                declarations = re.findall(r"([-\w]+)\s*:\s*([^;]+)(?:;|$)", content)
+                yield context, [selector.strip() for selector in header.split(",")], declarations
+            cursor = end
+
+    return list(blocks(source))
+
+
+def hero_sizes_policy_errors(template_sizes, preload_sizes, home_css, experience_css):
+    """Allow the published sizing or the explicitly measured mobile geometry."""
+    if len(template_sizes) != 1 or len(preload_sizes) != 1 or template_sizes != preload_sizes:
+        return ["Los sizes del hero deben declararse una vez y coincidir con el preload"]
+    if template_sizes[0] not in (HERO_SIZES_LEGACY, HERO_SIZES_MEASURED):
+        return ["Los sizes del hero no corresponden a una geometría admitida"]
+    if template_sizes[0] == HERO_SIZES_LEGACY:
+        return []
+
+    try:
+        rules = css_declaration_blocks(home_css)
+        extra_rules = css_declaration_blocks(experience_css)
+    except ValueError as error:
+        return [str(error)]
+    errors = []
+    mobile = "@media(max-width:720px)"
+    # 40px outer gutters + 28px profile padding + 32px hero padding +
+    # three 1px borders on both sides = 106px. The 660px visual cap leaves
+    # 594px for the picture; neither formula changes the desktop branches.
+    requirements = (
+        (mobile, ".public-auth-shell--home", "--public-home-page-gutter", "20px"),
+        (mobile, ".public-home-hero-visual", "inline-size", "100%"),
+        (mobile, ".public-home-hero-visual", "max-inline-size", "660px"),
+        (mobile, ".public-home-hero-visual--profile", "max-inline-size", "660px"),
+        (mobile, ".public-home-profile-command", "padding", "14px"),
+        (mobile, ".public-home-command-hero", "padding", "16px"),
+        (mobile, ".public-home-command-hero", "grid-template-columns", "1fr"),
+    )
+    for scope, selector, property_name, expected in requirements:
+        values = [re.sub(r"\s+", "", value) for context, selectors, declarations in rules
+                  if scope in context and selector in selectors
+                  for name, value in declarations if name == property_name]
+        if values != [expected]:
+            errors.append(f"Geometría móvil del hero inválida: {selector} {property_name} debe ser {expected}")
+    for selector, property_name, expected in (
+        (".public-auth-shell--home *", "box-sizing", "border-box"),
+        (".public-home-profile-card--command", "inline-size", "100%"),
+        (".public-home-command-photo", "inline-size", "100%"),
+    ):
+        values = [value.strip() for _, selectors, declarations in rules if selector in selectors
+                  for name, value in declarations if name == property_name]
+        if values != [expected]:
+            errors.append(f"Geometría del hero inválida: {selector} {property_name} debe ser {expected}")
+    hero_padding = [value for context, selectors, declarations in rules
+                    if not any(part.startswith("@media") for part in context) and ".public-home-hero" in selectors
+                    for name, value in declarations if name == "padding"]
+    if len(hero_padding) != 1 or not re.fullmatch(r"clamp\([^)]*\)\s+var\(--public-home-page-gutter\)\s+clamp\([^)]*\)", hero_padding[0].strip()):
+        errors.append("El padding horizontal del hero debe consumir el gutter canónico")
+    for selector in (".public-home-profile-card--command", ".public-home-command-hero", ".public-home-command-portrait"):
+        values = [value.strip() for context, selectors, declarations in rules
+                  if not any(part.startswith("@media") for part in context) and selector in selectors
+                  for name, value in declarations if name == "border"]
+        if len(values) != 1 or not re.match(r"^1px\s+solid\s+", values[0]):
+            errors.append(f"Geometría móvil del hero inválida: {selector} requiere borde de 1px")
+        if any((name.startswith("border-") and name not in ("border-color", "border-radius")) or
+               (name == "border" and any(part.startswith("@media") for part in context))
+               for context, selectors, declarations in rules if selector in selectors for name, _ in declarations):
+            errors.append(f"El borde del hero no puede redefinirse fuera de su autoridad: {selector}")
+    geometry_selectors = {selector for _, selector, _, _ in requirements} | {
+        ".public-home-hero", ".public-home-profile-card--command", ".public-home-command-portrait", ".public-home-command-photo",
+    }
+    geometry_properties = {"width", "min-width", "max-width", "inline-size", "min-inline-size", "max-inline-size",
+                           "padding", "padding-inline", "padding-inline-start", "padding-inline-end", "padding-left", "padding-right",
+                           "border", "border-width", "border-inline", "border-inline-width", "box-sizing", "grid-template-columns"}
+    for context, selectors, declarations in rules:
+        if not geometry_selectors.intersection(selectors):
+            continue
+        for name, value in declarations:
+            if name in {"padding-inline", "padding-inline-start", "padding-inline-end", "padding-left", "padding-right", "width", "max-width"} or (name == "box-sizing" and value.strip() != "border-box"):
+                errors.append("La geometría del hero contiene una redefinición horizontal incompatible")
+            narrower = any(re.fullmatch(r"@media\(max-width:(\d+)px\)", part) and
+                           int(re.fullmatch(r"@media\(max-width:(\d+)px\)", part).group(1)) < 720 for part in context)
+            if narrower and name in geometry_properties:
+                errors.append("La geometría del hero no puede cambiar por debajo de 720px sin actualizar sizes")
+    if any(name == "--public-home-page-gutter" for _, _, declarations in extra_rules for name, _ in declarations):
+        errors.append("El gutter del hero debe tener una sola autoridad en public/index.css")
+    if any(any(selector in branch for selector in geometry_selectors) and name in geometry_properties
+           for _, selectors, declarations in extra_rules for branch in selectors for name, _ in declarations):
+        errors.append("home-experience.css no puede redefinir la geometría horizontal del hero")
+    return errors
 
 
 def picture_uses_modern_source(
@@ -454,11 +579,6 @@ def main() -> int:
     # template y preload deben describir el mismo hero, y los assets no pueden
     # recuperar el peso que Lighthouse acaba de eliminar.
     expected_hero_widths = [224, 480, 640, 960]
-    expected_hero_sizes = (
-        "(max-width: 720px) calc(100vw - 90px), "
-        "(max-width: 1040px) 206px, "
-        "(max-width: 1240px) 176px, 196px"
-    )
     template_hero_widths = sorted(
         {int(width) for width in HERO_WEBP_PATTERN.findall(home_template)}
     )
@@ -498,19 +618,15 @@ def main() -> int:
     ):
         require(errors, snippet in home_preload, message)
 
-    template_sizes = re.search(
-        r'const profilePhotoSizes = "(?P<value>[^"]+)"', home_template
+    template_sizes = re.findall(
+        r'^\s*const profilePhotoSizes = "([^"\n]+)";', home_template, re.MULTILINE
     )
-    preload_sizes = re.search(
-        r'const heroImageSizes = "(?P<value>[^"]+)"', home_preload
+    preload_sizes = re.findall(
+        r'^\s*const heroImageSizes = "([^"\n]+)";', home_preload, re.MULTILINE
     )
-    require(
-        errors,
-        bool(template_sizes and preload_sizes)
-        and template_sizes.group("value") == preload_sizes.group("value")
-        and template_sizes.group("value") == expected_hero_sizes,
-        "Los sizes del hero deben reflejar la geometría CSS y coincidir con el preload",
-    )
+    errors.extend(hero_sizes_policy_errors(
+        template_sizes, preload_sizes, read("src/css/views/public/index.css"), experience_css,
+    ))
 
     for source, modern_reference, fallback_reference, label in (
         (index, "/src/media/img/favicon_black_circle_128.webp", "/favicon.ico", "loader home"),

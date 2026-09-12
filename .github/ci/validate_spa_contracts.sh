@@ -152,6 +152,7 @@ python3 .github/scripts/app_entrypoint_integrity.py
 python3 .github/scripts/boot_visual_integrity.py
 python3 .github/scripts/cuenta_integrity.py
 python3 .github/scripts/public_home_integrity.py
+python3 .github/scripts/public_home_image_sizes_regression.py
 python3 .github/scripts/public_home_performance.py
 node .github/scripts/continuous_scroll_smoke.mjs
 

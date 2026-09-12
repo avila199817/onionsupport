@@ -23,13 +23,14 @@ const mocks = new Map([
   `],
   ["/src/core/http.js", `const forbidden=()=>{throw Error("Unexpected HTTP boundary")}; export default {get:forbidden,request:forbidden};`],
   ["/src/views/facturas/facturas.api.js", `
+    import { notifyDomainChanged } from '/src/core/domain-events.js';
     export const hydrateFacturasFromCache=()=>({items:[],total:0,totalKnown:true});
     export const getFacturasListContextKey=()=>"fixture-admin";
     export const computeFacturasStats=()=>({total:0,totalAmount:0,paidAmount:0,pendingAmount:0});
-    export const listFacturas=()=>Promise.resolve({items:[],total:0,totalKnown:true,hasMore:false});
-    export const loadFacturasStats=()=>Promise.resolve(computeFacturasStats());
+    export const listFacturas=()=>{window.listReads++;return Promise.resolve({items:[],total:window.fixtureTotal,totalKnown:true,hasMore:false})};
+    export const loadFacturasStats=()=>{window.statsReads++;return Promise.resolve({invoiceCount:window.fixtureTotal,totalAmount:window.fixtureTotal*100})};
     export const syncFacturasListCache=()=>true;
-    export const createFactura=(payload)=>window.fixtureCreate(payload);
+    export const createFactura=async(payload)=>{const result=await window.fixtureCreate(payload);notifyDomainChanged('facturas');return result};
     ${["getFacturaById","sendFactura","markFacturaPaid","viewFacturaPdfRequest","downloadFacturaPdfRequest"].map(n=>`export const ${n}=()=>{throw Error("Unexpected ${n}")};`).join("\n")}
   `],
 ]);
@@ -41,7 +42,9 @@ const html = `<!doctype html><html lang="es" data-theme="dark"><head><meta chars
 </head><body><button id="opener">Nueva factura</button><main id="host"></main>
 <script type="module">
   import * as internals from '/src/views/facturas/index.js';
+  import { notifyDomainChanged } from '/src/core/domain-events.js';
   window.internals=internals;
+  window.notifyDomainChanged=notifyDomainChanged;
   window.clients=[
     {id:'CON-NEW',nombreFiscal:'Nuevo particular',contacto:{email:'nuevo@example.test'},tipo:'particular'},
     {clienteId:'CON-BIZ',nombreFiscal:'Empresa vinculada',user:{id:'ON-REAL'},contactoEmail:'empresa@example.test',tipo:'empresa'},
@@ -55,6 +58,7 @@ const html = `<!doctype html><html lang="es" data-theme="dark"><head><meta chars
     {ticketId:'INC-OTHER',clienteId:'CON-OTHER',userId:'ON-REAL',subject:'Ajena no facturable',updatedAt:'2026-09-06'},
   ];
   window.calls=[];window.pending=[];window.creates=[];window.failTickets=false;window.holdTickets=false;
+  window.listReads=0;window.statsReads=0;window.fixtureTotal=0;
   window.fixtureRequest=(url,{query})=>{
     calls.push({url,query});
     if(url==='/api/search/clientes') return Promise.resolve({data:{items:clients.filter(c=>c.nombreFiscal.toLowerCase().includes(query.q.toLowerCase()))}});
@@ -106,6 +110,18 @@ async function fresh(viewport={width:1366,height:900}){
 async function idle(page){await page.waitForFunction(()=>document.querySelector('[data-slot="ticket-search-results"]')?.getAttribute('aria-busy')==='false');}
 async function choose(page,q){await page.locator(clientInput).fill(q);await page.locator(action('client-select')).first().waitFor();await page.locator(action('client-select')).first().click();await idle(page);}
 async function ticketIds(page){return page.locator(slot+' '+action('ticket-select')).evaluateAll(nodes=>nodes.map(n=>n.textContent.trim()));}
+async function resetReadCounts(page){
+  await page.waitForFunction(()=>!controller.getSnapshot().loading&&!controller.getSnapshot().refreshing&&listReads===1&&statsReads===1);
+  await page.evaluate(()=>{listReads=0;statsReads=0});
+}
+async function readCounts(page){
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  return page.evaluate(()=>({list:listReads,stats:statsReads}));
+}
+async function submitSelectedTicket(page){
+  await choose(page,'Nuevo');await page.locator(action('ticket-select')).first().click();
+  await page.locator(action('submit')).evaluate(node=>node.click());await page.waitForFunction(()=>creates.length===1);
+}
 async function check(name,fn){if(process.env.ONION_FACTURA_TEST && !name.includes(process.env.ONION_FACTURA_TEST))return;await fn();passed++;console.log(`ok ${passed} - ${name}`);}
 try {
   await check('canonical client identity and nested/empty response envelopes',async()=>{
@@ -206,6 +222,39 @@ try {
     await p.evaluate(()=>{controller.openCreateModal(document.querySelector('#opener'));pending[0].resolve({items:pending[0].rows})});
     await p.waitForTimeout(30);assert.equal(await p.locator(selected).count(),0);assert.equal(await p.locator(ticketInput).isDisabled(),true);
     await p.evaluate(()=>controller.destroy());assert.equal(await p.locator('.fac-create-root').count(),0);await p.close();
+  });
+  await check('KPI cancel consumes deferred domain changes once and a clean cancel reads nothing',async()=>{
+    for(const domain of [null,'usuarios','facturas']){
+      const p=await fresh();await resetReadCounts(p);
+      if(domain)await p.evaluate(domain=>{fixtureTotal=7;notifyDomainChanged(domain);notifyDomainChanged(domain)},domain);
+      assert.deepEqual(await readCounts(p),{list:0,stats:0},'an open create modal defers reads');
+      await p.keyboard.press('Escape');await p.waitForFunction(()=>!controller.getSnapshot().createModalOpen);
+      if(domain)await p.waitForFunction(()=>listReads===1&&!controller.getSnapshot().refreshing);
+      assert.deepEqual(await readCounts(p),{list:domain?1:0,stats:domain==='facturas'?1:0});
+      if(domain==='facturas')assert.equal(await p.locator('.facturas-stat-value').first().innerText(),'7');
+      await p.close();
+    }
+  });
+  await check('KPI confirmed submit closes the modal and refreshes list and global total exactly once',async()=>{
+    const p=await fresh();await resetReadCounts(p);await submitSelectedTicket(p);
+    await p.evaluate(()=>{notifyDomainChanged('facturas');notifyDomainChanged('usuarios')});
+    assert.equal(await p.evaluate(()=>controller.closeCreateModal()),false,'pending submit cannot close');
+    assert.deepEqual(await readCounts(p),{list:0,stats:0});
+    await p.evaluate(()=>{fixtureTotal=1;createResolve({facturaId:'202600001',total:100,paymentStatus:'pending'})});
+    await p.waitForFunction(()=>!controller.getSnapshot().createModalOpen&&document.querySelector('.facturas-stat-value')?.textContent==='1');
+    assert.deepEqual(await readCounts(p),{list:1,stats:1});
+    await p.close();
+  });
+  await check('KPI failed submit retains the draft and defers external changes until real cancel',async()=>{
+    const p=await fresh();await resetReadCounts(p);await submitSelectedTicket(p);
+    await p.evaluate(()=>{fixtureTotal=5;notifyDomainChanged('facturas');createReject(Error('Creacion rechazada de prueba'))});
+    await p.waitForFunction(()=>!controller.getSnapshot().creating);
+    assert.equal(await p.locator(selected).count(),1);assert.equal(await p.locator('.fac-create-root').count(),1);
+    assert.deepEqual(await readCounts(p),{list:0,stats:0});
+    await p.keyboard.press('Escape');
+    await p.waitForFunction(()=>document.querySelector('.facturas-stat-value')?.textContent==='5');
+    assert.deepEqual(await readCounts(p),{list:1,stats:1});
+    await p.close();
   });
   await check('mobile viewport has one stable scroll owner and no horizontal overflow',async()=>{
     const p=await fresh({width:390,height:844});await choose(p,'Nuevo');

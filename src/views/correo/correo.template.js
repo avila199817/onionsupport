@@ -1,4 +1,7 @@
 import { avatarInitials as initials, resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
+import { cleanText, escapeHtml } from "../../core/presentation-text.js";
+export { escapeHtml };
+
 /* =========================================================
    Onion Support - Correo Template
    Archivo: /src/views/correo/correo.template.js
@@ -50,19 +53,9 @@ export function icon(name = "mail") {
   return ICONS[name] || ICONS.mail;
 }
 
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "").replace(/[\r\n\t]/g, " ").replace(/\s+/g, " ").trim();
-  return output || fallback;
-}
 
-export function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+
+
 
 function attr(value = "") {
   return escapeHtml(cleanText(value, ""));

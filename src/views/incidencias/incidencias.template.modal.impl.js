@@ -28,6 +28,7 @@
      La SAS debe venir ya validada desde incidencias.api.js.
 ========================================================= */
 
+import { cleanText, escapeHtml } from "../../core/presentation-text.js";
 import { userNameFromIdentity } from "../../core/user-identity.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { persistedCommentId, requesterIdentity, technicianIdentity } from "../../features/incidencias-comment-identity/index.js";
@@ -136,19 +137,6 @@ function safeArray(value) {
   }
 
   return [];
-}
-
-function cleanText(
-  value = "",
-  fallback = ""
-) {
-  const output =
-    String(value ?? "")
-      .replace(/[\r\n\t]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-  return output || fallback;
 }
 
 function cleanMultiline(
@@ -288,15 +276,6 @@ function number(
   return Number.isFinite(parsed)
     ? parsed
     : fallback;
-}
-
-function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 function attr(value = "") {

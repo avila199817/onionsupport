@@ -15,6 +15,8 @@ import {
   resolveAvatarPresentation,
 } from "../../features/avatar-system/identity.js";
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
+import { cleanText as text, escapeHtml } from "../../core/presentation-text.js";
+
 
 export const WHATSAPP_TEMPLATE_VERSION =
   "whatsapp.template.v2.correo-fullview";
@@ -31,13 +33,7 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function text(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return output || fallback;
-}
+
 
 function first(...values) {
   for (const value of values) {
@@ -48,14 +44,7 @@ function first(...values) {
   return null;
 }
 
-function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+
 
 function attr(value = "") {
   return escapeHtml(text(value, ""));

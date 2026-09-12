@@ -1,4 +1,5 @@
 import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
+import { createModalHost, renderModalContent } from "../../features/entity-overlay/modal-host.js";
 /* =========================================================
    Onion Support - Usuarios Detail Modal
    Archivo: /src/views/usuarios/usuarios.template.modal.js
@@ -2205,541 +2206,16 @@ export const renderUsuarioDetailModalClosed =
    HOST / ROOT
 ========================================================= */
 
-function getHost() {
-  if (!isBrowser()) {
-    return null;
-  }
-
-  const host =
-    document.getElementById(
-      HOST_ID
-    ) ||
-    document.querySelector(
-      "[data-usuarios-modal-host='true']"
-    );
-
-  if (host) {
-    modalState.host =
-      host;
-  }
-
-  return host;
-}
+const modalHostHandle = createModalHost({
+  id: HOST_ID,
+  selector: "[data-usuarios-modal-host='true']",
+  attributes: { "data-usuarios-modal-host": "true" },
+  onRemove: () => detachRootBindings(),
+});
 
 function ensureHost() {
-  if (!isBrowser()) {
-    return null;
-  }
-
-  let host =
-    getHost();
-
-  if (host) {
-    return host;
-  }
-
-  host =
-    document.createElement(
-      "div"
-    );
-
-  host.id =
-    HOST_ID;
-
-  host.setAttribute(
-    "data-usuarios-modal-host",
-    "true"
-  );
-
-  document.body.appendChild(
-    host
-  );
-
-  modalState.host =
-    host;
-
-  return host;
-}
-
-function getModalRoot() {
-  if (!isBrowser()) {
-    return null;
-  }
-
-  const host =
-    modalState.host ||
-    getHost();
-
-  const root =
-    host?.querySelector?.(
-      `#${MODAL_ID}`
-    ) ||
-    null;
-
-  modalState.root =
-    root;
-
-  modalState.panel =
-    root?.querySelector?.(
-      "[data-usuarios-modal-panel='true']"
-    ) ||
-    null;
-
-  return root;
-}
-
-function removeDuplicateHosts(keep = null) {
-  if (!isBrowser()) {
-    return 0;
-  }
-
-  let removed = 0;
-
-  for (
-    const node
-    of document.querySelectorAll(
-      "[data-usuarios-modal-host='true']"
-    )
-  ) {
-    if (node === keep) {
-      continue;
-    }
-
-    try {
-      node.remove();
-      removed += 1;
-    } catch {
-      // noop
-    }
-  }
-
-  return removed;
-}
-
-function htmlFragment(html = "") {
-  if (!isBrowser()) {
-    return null;
-  }
-
-  const template =
-    document.createElement(
-      "template"
-    );
-
-  template.innerHTML =
-    String(
-      html ||
-      ""
-    ).trim();
-
-  return template.content;
-}
-
-
-function syncElementAttributes(
-  current = null,
-  next = null
-) {
-  if (
-    !current ||
-    !next
-  ) {
-    return false;
-  }
-
-  try {
-    for (
-      const attribute
-      of Array.from(
-        current.attributes ||
-        []
-      )
-    ) {
-      if (
-        !next.hasAttribute(
-          attribute.name
-        )
-      ) {
-        current.removeAttribute(
-          attribute.name
-        );
-      }
-    }
-
-    for (
-      const attribute
-      of Array.from(
-        next.attributes ||
-        []
-      )
-    ) {
-      current.setAttribute(
-        attribute.name,
-        attribute.value
-      );
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function captureMountedScroll(
-  panel = null
-) {
-  if (!panel) {
-    return null;
-  }
-
-  const body =
-    panel.querySelector(
-      ".usuarios-modal-body, .ui-detail-modal-body"
-    );
-
-  return {
-    bodyTop:
-      Number(
-        body?.scrollTop ||
-        0
-      ),
-
-    bodyLeft:
-      Number(
-        body?.scrollLeft ||
-        0
-      ),
-  };
-}
-
-function restoreMountedScroll(
-  panel = null,
-  snapshot = null
-) {
-  if (
-    !panel ||
-    !snapshot
-  ) {
-    return false;
-  }
-
-  const body =
-    panel.querySelector(
-      ".usuarios-modal-body, .ui-detail-modal-body"
-    );
-
-  if (!body) {
-    return false;
-  }
-
-  try {
-    body.scrollTop =
-      Number(
-        snapshot.bodyTop ||
-        0
-      );
-
-    body.scrollLeft =
-      Number(
-        snapshot.bodyLeft ||
-        0
-      );
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function captureMountedFocus(
-  panel = null
-) {
-  if (
-    !isBrowser() ||
-    !panel
-  ) {
-    return null;
-  }
-
-  const active =
-    document.activeElement;
-
-  if (
-    !active ||
-    !panel.contains(active)
-  ) {
-    return null;
-  }
-
-  if (active === panel) {
-    return {
-      panel: true,
-    };
-  }
-
-  return {
-    panel: false,
-
-    id:
-      cleanText(
-        active.id,
-        ""
-      ),
-
-    action:
-      cleanText(
-        active.getAttribute?.(
-          "data-usuarios-modal-action"
-        ),
-        ""
-      ),
-
-    href:
-      cleanText(
-        active.getAttribute?.(
-          "href"
-        ),
-        ""
-      ),
-
-    tag:
-      cleanText(
-        active.tagName,
-        ""
-      ).toLowerCase(),
-  };
-}
-
-function restoreMountedFocus(
-  panel = null,
-  snapshot = null
-) {
-  if (
-    !panel ||
-    !snapshot
-  ) {
-    return false;
-  }
-
-  if (
-    snapshot.panel ===
-    true
-  ) {
-    try {
-      panel.focus?.({
-        preventScroll: true,
-      });
-
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  let target = null;
-
-  try {
-    if (snapshot.id) {
-      target =
-        panel.querySelector(
-          `#${globalThis?.CSS?.escape ? globalThis.CSS.escape(snapshot.id) : snapshot.id}`
-        );
-    }
-
-    if (
-      !target &&
-      snapshot.action
-    ) {
-      target =
-        panel.querySelector(
-          `[data-usuarios-modal-action="${snapshot.action}"]`
-        );
-    }
-
-    if (
-      !target &&
-      snapshot.href
-    ) {
-      target =
-        Array.from(
-          panel.querySelectorAll(
-            "a[href]"
-          )
-        ).find(
-          (node) =>
-            cleanText(
-              node.getAttribute(
-                "href"
-              ),
-              ""
-            ) === snapshot.href
-        ) ||
-        null;
-    }
-
-    if (
-      target?.focus &&
-      target.getAttribute?.(
-        "aria-disabled"
-      ) !== "true" &&
-      !target.disabled
-    ) {
-      target.focus({
-        preventScroll: true,
-      });
-
-      return true;
-    }
-  } catch {
-    // panel fallback debajo
-  }
-
-  try {
-    panel.focus?.({
-      preventScroll: true,
-    });
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function patchMountedShell(
-  host = null,
-  fragment = null
-) {
-  if (
-    !host ||
-    !fragment
-  ) {
-    return false;
-  }
-
-  const currentRoot =
-    host.querySelector(
-      `#${MODAL_ID}`
-    );
-
-  const currentOverlay =
-    currentRoot?.querySelector?.(
-      "[data-usuarios-modal-overlay='true']"
-    );
-
-  const currentPanel =
-    currentRoot?.querySelector?.(
-      "[data-usuarios-modal-panel='true']"
-    );
-
-  const nextRoot =
-    fragment.querySelector?.(
-      `#${MODAL_ID}`
-    );
-
-  const nextOverlay =
-    nextRoot?.querySelector?.(
-      "[data-usuarios-modal-overlay='true']"
-    );
-
-  const nextPanel =
-    nextRoot?.querySelector?.(
-      "[data-usuarios-modal-panel='true']"
-    );
-
-  if (
-    !currentRoot ||
-    !currentOverlay ||
-    !currentPanel ||
-    !nextRoot ||
-    !nextOverlay ||
-    !nextPanel
-  ) {
-    return false;
-  }
-
-  const currentId =
-    cleanText(
-      currentRoot.getAttribute(
-        "data-user-id"
-      ),
-      ""
-    );
-
-  const nextId =
-    cleanText(
-      nextRoot.getAttribute(
-        "data-user-id"
-      ),
-      ""
-    );
-
-  /*
-    Para el mismo usuario hacemos patch estable.
-    Si cambia la identidad explícitamente, permitimos un mount limpio.
-  */
-  if (
-    currentId &&
-    nextId &&
-    currentId !== nextId
-  ) {
-    return false;
-  }
-
-  const scrollSnapshot =
-    captureMountedScroll(
-      currentPanel
-    );
-
-  const focusSnapshot =
-    captureMountedFocus(
-      currentPanel
-    );
-
-  syncElementAttributes(
-    currentRoot,
-    nextRoot
-  );
-
-  syncElementAttributes(
-    currentOverlay,
-    nextOverlay
-  );
-
-  syncElementAttributes(
-    currentPanel,
-    nextPanel
-  );
-
-  /*
-    ANTI-PARPADEO:
-    NO sustituimos root/overlay/panel.
-    incidencias/detail.css anima overlay y panel al entrar; si esos nodos
-    se recrean tras el GET de detalle, la animación vuelve a empezar y el
-    usuario ve un doble open/flicker.
-  */
-  currentPanel.replaceChildren(
-    ...Array.from(
-      nextPanel.childNodes
-    )
-  );
-
-  modalState.root =
-    currentRoot;
-
-  modalState.panel =
-    currentPanel;
-
-  restoreMountedScroll(
-    currentPanel,
-    scrollSnapshot
-  );
-
-  restoreMountedFocus(
-    currentPanel,
-    focusSnapshot
-  );
-
-  return true;
+  modalState.host = isBrowser() ? modalHostHandle.ensure() : null;
+  return modalState.host;
 }
 
 /* =========================================================
@@ -2780,11 +2256,7 @@ function focusPanel() {
     return false;
   }
 
-  const panel =
-    modalState.panel ||
-    getModalRoot()?.querySelector?.(
-      "[data-usuarios-modal-panel='true']"
-    );
+  const panel = modalState.panel;
 
   if (!panel) {
     return false;
@@ -2939,100 +2411,26 @@ function detachRootBindings() {
    RENDER CONTROL
 ========================================================= */
 
-function renderMounted({
-  focus = false,
-  forceMount = false,
-} = {}) {
-  if (!isBrowser()) {
-    return null;
-  }
-
-  const host =
-    ensureHost();
-
-  if (!host) {
-    return null;
-  }
-
-  removeDuplicateHosts(
-    host
-  );
-
-  const html =
-    modalState.isOpen
-      ? renderUsuariosDetailModal({
-          detail:
-            modalState.detail,
-
-          isRefreshing:
-            modalState.isRefreshing,
-        })
-      : "";
-
-  const fragment =
-    htmlFragment(html);
-
-  if (!fragment) {
-    return null;
-  }
-
-  const hasMountedPanel =
-    Boolean(
-      host.querySelector(
-        "[data-usuarios-modal-panel='true']"
-      )
-    );
-
-  /*
-    Primer open:
-      mount completo -> la animación CSS se ejecuta una sola vez.
-
-    update()/refresh():
-      root, overlay y panel permanecen físicamente iguales.
-      Sólo cambia el interior del panel.
-  */
-  const patched =
-    (
-      !forceMount &&
-      hasMountedPanel
-    )
-      ? patchMountedShell(
-          host,
-          fragment
-        )
-      : false;
-
-  if (!patched) {
-    detachRootBindings();
-
-    host.replaceChildren(
-      fragment
-    );
-
-    modalState.root =
-      host.querySelector(
-        `#${MODAL_ID}`
-      );
-
-    modalState.panel =
-      host.querySelector(
-        "[data-usuarios-modal-panel='true']"
-      );
-  }
-
-  modalState.host =
-    host;
-
-  /*
-    Los listeners viven en el host/document, no dentro del contenido
-    sustituido, así que el patch estable no necesita desmontarlos.
-  */
-  attachRootBindings();
-
-  if (focus) {
-    focusPanel();
-  }
-
+function renderMounted({ focus = false, forceMount = false } = {}) {
+  const host = ensureHost();
+  if (!host) return null;
+  const html = modalState.isOpen
+    ? renderUsuariosDetailModal({ detail: modalState.detail, isRefreshing: modalState.isRefreshing })
+    : "";
+  const rendered = renderModalContent(host, html, {
+    rootSelector: `#${MODAL_ID}`,
+    overlaySelector: "[data-usuarios-modal-overlay='true']",
+    panelSelector: "[data-usuarios-modal-panel='true']",
+    identityAttribute: "data-user-id",
+    focusAttributes: ["id", "data-usuarios-modal-action", "href"],
+    scrollSelector: ".usuarios-modal-body, .ui-detail-modal-body",
+    forceMount,
+  });
+  modalState.root = rendered.root;
+  modalState.panel = rendered.panel;
+  // Delegated actions live on the host and survive content patches.
+  if (!modalState.clickHandler) attachRootBindings();
+  if (focus) focusPanel();
   return host;
 }
 
@@ -3370,12 +2768,7 @@ export function openUsuariosModal(detail = {}, options = {}) {
   modalState.onClosed = typeof options.onClosed === "function" ? options.onClosed : null;
 
   if (isBrowser()) {
-    const host =
-      ensureHost();
-
-    removeDuplicateHosts(
-      host
-    );
+    if (!ensureHost()) return false;
 
     /*
       Sólo capturamos el foco externo al abrir de verdad.
@@ -3445,8 +2838,7 @@ export function closeUsuariosModal({ notify = true, restoreFocus = true } = {}) 
   modalState.onClosed = null;
   modalState.lastActiveElement = null;
   detachRootBindings();
-  const host = modalState.host || getHost();
-  host?.replaceChildren?.();
+  modalHostHandle.clear();
   modalState.root = null;
   modalState.panel = null;
   unlockBody();
@@ -3728,8 +3120,7 @@ export const getSnapshot =
 
 function destroyUsuariosModal() {
   closeUsuariosModal();
-  const host = modalState.host || getHost();
-  host?.remove?.();
+  modalHostHandle.remove();
   modalState.host = null;
   return true;
 }

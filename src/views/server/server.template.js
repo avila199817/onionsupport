@@ -9,6 +9,8 @@
 ========================================================= */
 
 import * as Base from "./server.template.base.js";
+import { cleanText as safeText, escapeHtml } from "../../core/presentation-text.js";
+
 
 export const SERVER_TEMPLATE_VERSION =
   "server.template.observability.v4-health-finops";
@@ -30,14 +32,7 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function safeText(value = "", fallback = "") {
-  if (value === null || value === undefined) return fallback;
-  const text = String(value)
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return text || fallback;
-}
+
 
 function safeNumber(value = null, fallback = null) {
   if (value === null || value === undefined || value === "") return fallback;
@@ -45,14 +40,7 @@ function safeNumber(value = null, fallback = null) {
   return Number.isFinite(number) ? number : fallback;
 }
 
-function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+
 
 function attr(value = "") {
   return escapeHtml(safeText(value, ""));

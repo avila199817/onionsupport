@@ -7,6 +7,7 @@ import { resolveAvatarPresentation } from "../../features/avatar-system/identity
 import {
   normalizeClienteModel,
   normalizeClientesCollection,
+  computeClientesStats,
 } from "./clientes.model.js";
 
 export {
@@ -398,12 +399,9 @@ function buildVm(input = {}) {
   const filterKey = normalizeKey(data.filter);
   const filter = FILTERS.some((entry) => entry.key === filterKey) ? filterKey : "all";
   const sortOrder = normalizeKey(data.sortOrder) === "asc" ? "asc" : "desc";
-  const counts = { all: items.length, active: 0, pending: 0, blocked: 0 };
-  let amount = 0;
-  for (const item of items) {
-    counts[statusBucket(item)] += 1;
-    amount += number(first(item.totalAmount, item.totalImporte, 0), 0);
-  }
+  const loadedStats = computeClientesStats(items);
+  const counts = { all: loadedStats.total, active: loadedStats.activeCount, pending: loadedStats.pendingCount, blocked: loadedStats.blockedCount };
+  const amount = loadedStats.totalAmount;
   return {
     ...data,
     items,

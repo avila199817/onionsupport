@@ -18,7 +18,7 @@ const OWNER_DEFINITIONS = Object.freeze({
   factura: Object.freeze({
     viewKey: "facturas", load: () => import("../../views/facturas/index.js"),
     createName: "createFacturaDetailController", openName: "openFactura",
-    styles: Object.freeze(["/src/css/views/facturas/detail.css"]),
+    styles: Object.freeze(["/src/css/views/facturas/detail.css", "/src/css/views/facturas/resend-confirm.css"]),
   }),
   incidencia: Object.freeze({
     viewKey: "incidencias", load: () => import("../../views/incidencias/index.js"),
@@ -343,6 +343,14 @@ export function init(options = {}) {
   activateOrigin(document.querySelector(ROUTE_HOST_SELECTOR));
   return EntityOverlay;
 }
+export function onSessionInvalidated() {
+  if (destroying) return false;
+  // Authorization loss is teardown, not a user close subject to draft guards.
+  // Block synchronous closed subscribers from reopening during invalidation.
+  destroying = true;
+  try { return stopOwnerSession({ reason: "session-invalidated" }); }
+  finally { destroying = false; }
+}
 export function destroy() {
   if (destroying) return false;
   destroying = true;
@@ -364,7 +372,7 @@ function snapshot() {
 }
 export const EntityOverlay = Object.freeze({
   version: ENTITY_OVERLAY_VERSION, init, destroy, open, openEntity: open, close,
-  canOpen, preload, releaseOrigin, activateOrigin, subscribe, isOriginOpen,
+  canOpen, preload, releaseOrigin, activateOrigin, subscribe, isOriginOpen, onSessionInvalidated,
   getSnapshot: snapshot, normalizeType: normalizeEntityType, normalizeId: normalizeEntityId,
 });
 export default EntityOverlay;

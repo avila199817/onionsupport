@@ -16,6 +16,7 @@ import {
   createModalLifecycle,
   restoreModalFocus,
 } from "../../features/entity-overlay/modal-lifecycle.js";
+import { createModalHost, renderModalContent } from "../../features/entity-overlay/modal-host.js";
 import {
   createCliente as createClienteRequest,
   loadClienteDetail as loadClienteDetailRequest,
@@ -234,6 +235,7 @@ export function createClientesCreateController({
   showToast = () => false,
   emitEvent = () => false,
   onCreated = null,
+  onClosed = null,
 } = {}) {
   let destroyed = false;
   let modalHost = null;
@@ -267,6 +269,7 @@ export function createClientesCreateController({
     onEscape: () => {
       if (!createModal.submitting) close();
     },
+    onDetached: () => close(),
     bodyClasses: ["clientes-modal-open", "clientes-create-open"],
   });
 
@@ -306,104 +309,38 @@ export function createClientesCreateController({
     };
   }
 
+  const modalHostHandle = createModalHost({
+    attributes: {
+      "data-clientes-create-controller": "true",
+      "data-clientes-modal-host": "true",
+      "data-clientes-create-owner": "canonical",
+    },
+    onMount(host) {
+      host.addEventListener("click", handleModalClick, true);
+      host.addEventListener("submit", handleModalSubmit, true);
+      host.addEventListener("input", handleModalInput, true);
+      host.addEventListener("change", handleModalInput, true);
+    },
+    onRemove(host) {
+      host.removeEventListener("click", handleModalClick, true);
+      host.removeEventListener("submit", handleModalSubmit, true);
+      host.removeEventListener("input", handleModalInput, true);
+      host.removeEventListener("change", handleModalInput, true);
+    },
+  });
+
   function ensureModalHost() {
     if (!isBrowser() || destroyed) return null;
-    if (modalHost?.isConnected) return modalHost;
-
-    modalHost = document.createElement("div");
-    modalHost.setAttribute("data-clientes-create-controller", "true");
-    modalHost.setAttribute("data-clientes-modal-host", "true");
-    modalHost.setAttribute("data-clientes-create-owner", "canonical");
-    modalHost.addEventListener("click", handleModalClick, true);
-    modalHost.addEventListener("submit", handleModalSubmit, true);
-    modalHost.addEventListener("input", handleModalInput, true);
-    modalHost.addEventListener("change", handleModalInput, true);
-    document.body.appendChild(modalHost);
+    modalHost = modalHostHandle.ensure();
     return modalHost;
   }
 
   function removeModalHost() {
     cancelFrame(modalFrame);
     modalFrame = 0;
-    if (!modalHost) return false;
-
-    try {
-      modalHost.removeEventListener("click", handleModalClick, true);
-      modalHost.removeEventListener("submit", handleModalSubmit, true);
-      modalHost.removeEventListener("input", handleModalInput, true);
-      modalHost.removeEventListener("change", handleModalInput, true);
-      modalHost.remove();
-    } catch {
-      // noop
-    }
+    const removed = modalHostHandle.remove();
     modalHost = null;
-    return true;
-  }
-
-  function syncModalAttributes(current, next) {
-    if (!current || !next) return false;
-    for (const attribute of Array.from(current.attributes || [])) {
-      if (!next.hasAttribute(attribute.name)) current.removeAttribute(attribute.name);
-    }
-    for (const attribute of Array.from(next.attributes || [])) {
-      current.setAttribute(attribute.name, attribute.value);
-    }
-    return true;
-  }
-
-  function patchStableModal(html = "") {
-    if (!modalHost || !isBrowser()) return false;
-    const currentRoot = modalHost.querySelector(CREATE_MODAL_ROOT_SELECTOR);
-    const currentOverlay = modalHost.querySelector(CREATE_MODAL_OVERLAY_SELECTOR);
-    const currentPanel = modalHost.querySelector(CREATE_MODAL_PANEL_SELECTOR);
-    if (!currentRoot || !currentOverlay || !currentPanel) return false;
-
-    const template = document.createElement("template");
-    template.innerHTML = html;
-    const nextRoot = template.content.querySelector(CREATE_MODAL_ROOT_SELECTOR);
-    const nextOverlay = template.content.querySelector(CREATE_MODAL_OVERLAY_SELECTOR);
-    const nextPanel = template.content.querySelector(CREATE_MODAL_PANEL_SELECTOR);
-    if (!nextRoot || !nextOverlay || !nextPanel) return false;
-
-    const active = document.activeElement;
-    const field = active && modalHost.contains(active)
-      ? cleanText(active.getAttribute?.("data-field") || active.getAttribute?.("name"), "")
-      : "";
-    const selection = field && Number.isInteger(active?.selectionStart)
-      ? [active.selectionStart, active.selectionEnd]
-      : null;
-    const body = currentPanel.querySelector(CREATE_MODAL_BODY_SELECTOR);
-    const scrollTop = Number(body?.scrollTop || 0);
-
-    syncModalAttributes(currentRoot, nextRoot);
-    syncModalAttributes(currentOverlay, nextOverlay);
-    syncModalAttributes(currentPanel, nextPanel);
-    currentPanel.replaceChildren(...Array.from(nextPanel.childNodes));
-
-    const nextBody = currentPanel.querySelector(CREATE_MODAL_BODY_SELECTOR);
-    if (nextBody) nextBody.scrollTop = scrollTop;
-
-    if (field) {
-      const target = Array.from(
-        currentPanel.querySelectorAll("[data-field], [name]")
-      ).find((node) =>
-        cleanText(
-          node.getAttribute("data-field") || node.getAttribute("name"),
-          ""
-        ) === field
-      );
-      if (target) {
-        try { target.focus({ preventScroll: true }); } catch { target.focus?.(); }
-        if (selection && typeof target.setSelectionRange === "function") {
-          const max = String(target.value || "").length;
-          target.setSelectionRange(
-            Math.min(selection[0], max),
-            Math.min(selection[1], max)
-          );
-        }
-      }
-    }
-    return true;
+    return removed;
   }
 
   function renderNow() {
@@ -422,7 +359,13 @@ export function createClientesCreateController({
       role: cleanText(getRole(), "user"),
       user: getUser(),
     });
-    if (!patchStableModal(html)) host.innerHTML = html;
+    renderModalContent(host, html, {
+      rootSelector: CREATE_MODAL_ROOT_SELECTOR,
+      overlaySelector: CREATE_MODAL_OVERLAY_SELECTOR,
+      panelSelector: CREATE_MODAL_PANEL_SELECTOR,
+      focusAttributes: ["data-field", "name"],
+      scrollSelector: CREATE_MODAL_BODY_SELECTOR,
+    });
 
     if (firstModalPaint) {
       firstModalPaint = false;
@@ -812,6 +755,7 @@ export function createClientesCreateController({
     if (target?.isConnected) {
       nextFrame(() => restoreModalFocus(target));
     }
+    try { onClosed?.(); } catch { /* noop */ }
     return true;
   }
 

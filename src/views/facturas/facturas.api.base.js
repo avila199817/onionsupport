@@ -16,7 +16,8 @@
 ========================================================= */
 
 import Http from "../../core/http.js";
-import { notifyDomainChanged } from "../../core/domain-events.js";
+import { AppCore } from "../../core/index.js";
+import { notifyDomainChanged, onDomainChanged } from "../../core/domain-events.js";
 
 export const FACTURAS_API_VERSION =
   "facturas.api.production.v9.continuous-list-snapshot";
@@ -58,7 +59,8 @@ export const FACTURA_PDF_MODES = Object.freeze({
 let loading = false;
 let lastLoadedAt = null;
 let lastError = null;
-let lastStats = null;
+let statsRevision = 0;
+onDomainChanged((domain) => { if (domain === "facturas") statsRevision += 1; });
 
 let lastList = {
   items: [],
@@ -1094,10 +1096,15 @@ export function normalizeFacturaDetailResponse(payload = null) {
 export function normalizeFacturasStatsResponse(payload = null) {
   const envelope = safeObject(unwrapEnvelope(payload), {});
   const stats = safeObject(first(namedObjectFromPayload(payload, "stats"), envelope.stats, envelope), {});
+  const countScopes = [payload, payload?.meta, payload?.pagination, envelope, envelope.meta, envelope.pagination];
 
   return {
-    ok: envelope.ok !== false,
-    stats,
+    ok: [safeObject(payload), envelope, stats].every((value) => value.ok !== false && value.success !== false && value.error !== true),
+    stats: {
+      ...stats,
+      ...(countScopes.some((value) => value?.totalKnown === false) ? { totalKnown: false } : {}),
+      ...(countScopes.some((value) => value?.totalIsLowerBound === true) ? { totalIsLowerBound: true } : {}),
+    },
     meta: metaFromPayload(payload)
   };
 }
@@ -1373,7 +1380,6 @@ export async function listFacturas(options = {}) {
         hasMore: normalized.hasMore === true
       };
 
-      if (normalized.stats && Object.keys(normalized.stats).length) lastStats = normalized.stats;
       lastLoadedAt = nowIso();
 
       return normalized;
@@ -1446,7 +1452,9 @@ export async function getFacturaById(id = "", options = {}) {
 
 export async function fetchFacturasStatsRequest(options = {}) {
   const query = safeObject(options.query || options.params || options.filters);
-  const key = `stats:${stableStringify(query)}`;
+  const sessionEpoch = AppCore.getSessionEpoch();
+  const revision = statsRevision;
+  const key = `stats:${JSON.stringify([sessionEpoch, revision, query])}`;
   const canDedupe = options.dedupe !== false && !options.signal;
 
   if (canDedupe && inflight.has(key)) return inflight.get(key);
@@ -1460,7 +1468,12 @@ export async function fetchFacturasStatsRequest(options = {}) {
     });
 
     const normalized = normalizeFacturasStatsResponse(response);
-    lastStats = normalized.stats;
+    if (sessionEpoch !== AppCore.getSessionEpoch() || revision !== statsRevision) {
+      throw Object.assign(new Error("El contexto de estadísticas de facturas ha cambiado."), { code: "FACTURAS_STATS_CONTEXT_CHANGED" });
+    }
+    if (!normalized.ok) {
+      throw Object.assign(new Error("No se pudieron cargar las estadísticas de facturas."), { code: "FACTURAS_STATS_REJECTED" });
+    }
     return normalized;
   })();
 
@@ -1842,7 +1855,7 @@ export function hydrateFacturasFromCache() {
     page: number(lastList.page, 0),
     nextPage: number(lastList.nextPage, null),
     hasMore: lastList.hasMore === true,
-    stats: lastStats || computeFacturasStats(lastList.items),
+    stats: computeFacturasStats(lastList.items),
     loadedAt: lastLoadedAt,
     hydrated: safeArray(lastList.items).length > 0
   };
@@ -1889,7 +1902,7 @@ export function clearFacturasCache() {
     nextPage: null,
     hasMore: false
   };
-  lastStats = null;
+  statsRevision += 1;
   lastLoadedAt = null;
   lastError = null;
   inflight.clear();
@@ -1915,7 +1928,7 @@ export function getFacturasApiSnapshot() {
       hasMore: lastList.hasMore === true
     },
     inflight: inflight.size,
-    stats: lastStats || computeFacturasStats(lastList.items),
+    stats: computeFacturasStats(lastList.items),
     policy: {
       apiOnly: true,
       singleHttpLayer: true,

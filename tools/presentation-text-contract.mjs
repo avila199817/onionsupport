@@ -2,6 +2,13 @@ import assert from "node:assert/strict";
 import { cleanText, escapeHtml } from "../src/core/presentation-text.js";
 import { cleanText as homeText, escapeHtml as homeEscape, attr } from "../src/views/home/home.template.foundation.js";
 import { cleanText as overlayText, renderDetailPending, safeError } from "../src/features/entity-overlay/pending-view.js";
+import { escapeHtml as correoEscape, renderComposeModal, renderMessageRows } from "../src/views/correo/correo.template.js";
+import { renderErrorState as renderServerError } from "../src/views/server/server.template.js";
+import { renderFacturasErrorState } from "../src/views/facturas/facturas.template.js";
+import { renderFacturasCreateModal } from "../src/views/facturas/facturas.template.create.js";
+import { renderFacturasDetailModal } from "../src/views/facturas/facturas.template.modal.js";
+import { renderIncidenciasCreateModal } from "../src/views/incidencias/incidencias.template.create.impl.js";
+import { renderIncidenciasDetailModal } from "../src/views/incidencias/incidencias.template.modal.js";
 
 // Literal expectations characterize the two former owners independently of
 // the candidate implementation. Escaping and whitespace normalization remain
@@ -54,6 +61,7 @@ for (const owner of [cleanText, escapeHtml, homeText, homeEscape, overlayText]) 
 assert.equal(homeText, cleanText, "Home consumers must use the canonical function, not a copied implementation");
 assert.equal(overlayText, cleanText, "Pending view consumers must use the canonical function");
 assert.equal(homeEscape, escapeHtml, "Home reexport preserves live function identity");
+assert.equal(correoEscape, escapeHtml, "Correo reexport preserves the canonical HTML authority");
 assert.equal(attr('  " A\nB &\'  '), "&quot; A B &amp;&#39;");
 const error = renderDetailPending({ type: "<cliente>", id: "unused", error: '"<img src=x> &' });
 assert.ok(error.includes('aria-label="No se pudo abrir &lt;cliente&gt;"'));
@@ -62,4 +70,54 @@ assert.equal(error.includes("<img src=x>"), false);
 assert.equal(safeError({ message: "Error /x?token=synthetic-secret&ok=yes Bearer synthetic-key" }), "Error /x?token=***&ok=yes Bearer ***");
 assert.equal(safeError({ message: "x".repeat(510) }).length, 500);
 assert.equal(safeError(null), "No se pudo cargar el detalle.");
-console.log("Presentation text contract: PASS · 15 escape/13 text fixtures · Unicode/coercion/fallback identity · one canonical owner · actual pending/error markup · redaction");
+
+// Exercise real consumers at the text/attribute boundary. A shared normalizer
+// must not collapse the compose body or introduce markup through remote text.
+const compose = renderComposeModal({
+  subject: '  Asunto\n"<img src=x> &  ',
+  body: '  Primera línea\n\n\t</textarea><img src=x> &  ',
+  messageId: '  id\n"<&  ',
+});
+assert.ok(compose.includes('value="Asunto &quot;&lt;img src=x&gt; &amp;"'));
+assert.ok(compose.includes('data-correo-message-id="id &quot;&lt;&amp;"'));
+assert.ok(compose.includes('>  Primera línea\n\n\t&lt;/textarea&gt;&lt;img src=x&gt; &amp;  </textarea>'));
+const messages = renderMessageRows([{ id: '"<id>', subject: '<img src=x>', bodyPreview: ' A\n B & ' }]);
+assert.ok(messages.includes('data-correo-message-id="&quot;&lt;id&gt;"'));
+assert.ok(messages.includes('&lt;img src=x&gt;'));
+assert.ok(messages.includes('> A\n B &amp; </span>'));
+const server = renderServerError({ error: '  Fallo\n<script> & "  ' });
+assert.ok(server.includes('Fallo &lt;script&gt; &amp; &quot;'));
+for (const markup of [compose, messages, server]) {
+  assert.equal(markup.includes('<img src=x>'), false);
+  assert.equal(markup.includes('<script>'), false);
+}
+
+// Actual invoice/ticket consumers preserve their distinction between one-line
+// labels and multiline descriptions/comments after sharing the pure helpers.
+const remoteLabel = '  Ávila\n"<img src=x> &  ';
+const labelHtml = 'Ávila &quot;&lt;img src=x&gt; &amp;';
+const remoteBody = 'Primera línea\n\n\t</textarea><img src=x> &';
+const bodyHtml = 'Primera línea\n\n\t&lt;/textarea&gt;&lt;img src=x&gt; &amp;';
+const invoiceError = renderFacturasErrorState(remoteLabel);
+const invoiceCreate = renderFacturasCreateModal({ open: true, serverError: remoteLabel });
+const invoiceDetail = renderFacturasDetailModal({ open: true,
+  detail: { facturaId: '202600017', clienteNombre: remoteLabel, total: 12 },
+  feedbackMessage: remoteLabel,
+});
+const ticketCreate = renderIncidenciasCreateModal({ open: true,
+  form: { subject: remoteLabel, description: remoteBody },
+});
+const ticketDetail = renderIncidenciasDetailModal({ open: true, detail: {
+  ticketId: 'INC-TEXT-FIXTURE', subject: remoteLabel, description: remoteBody,
+  comments: [{ commentId: 'comment-text-fixture', author: remoteLabel, body: remoteBody }],
+} });
+for (const markup of [invoiceError, invoiceCreate, invoiceDetail, ticketCreate, ticketDetail]) {
+  assert.ok(markup.includes(labelHtml), "Actual labels collapse whitespace and escape remote markup");
+  assert.equal(markup.includes('<img src=x>'), false);
+}
+assert.ok(ticketCreate.includes(`value="${labelHtml}"`), "The ticket subject remains an escaped one-line input");
+assert.ok(ticketCreate.includes(`>${bodyHtml}</textarea>`), "The description keeps its multiline content");
+assert.ok(ticketDetail.includes(bodyHtml), "Ticket detail does not flatten the description");
+assert.ok(ticketDetail.includes(`data-description-comment="true"`));
+assert.ok(ticketDetail.includes(`<p>${bodyHtml}</p>`), "Canonical follow-up keeps multiline comments escaped");
+console.log("Presentation text contract: PASS · Unicode/coercion/fallback identity · canonical reexports · actual pending, Correo, Servidor, Facturas and Incidencias markup · multiline body/comments · redaction");

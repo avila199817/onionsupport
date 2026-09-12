@@ -33,6 +33,7 @@
      y feedback de operaciones viven en index.js.
 ========================================================= */
 
+import { cleanText, escapeHtml } from "../../core/presentation-text.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 
 export const FACTURAS_MODAL_TEMPLATE_VERSION =
@@ -99,19 +100,6 @@ function hasOwnKeys(
     isObject(value) &&
     Object.keys(value).length
   );
-}
-
-function cleanText(
-  value = "",
-  fallback = ""
-) {
-  const output =
-    String(value ?? "")
-      .replace(/[\r\n\t]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-  return output || fallback;
 }
 
 function cleanMultiline(
@@ -288,17 +276,6 @@ function bool(
   }
 
   return fallback;
-}
-
-function escapeHtml(
-  value = ""
-) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 function attr(

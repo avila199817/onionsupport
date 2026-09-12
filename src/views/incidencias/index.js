@@ -19,6 +19,7 @@
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import { createModalHost } from "../../features/entity-overlay/modal-host.js";
 import * as Impl from "./index.impl.js";
 import {
   installIncidenciasCreateUserCombobox,
@@ -287,38 +288,24 @@ function createDedicatedModalHost({
 
   // A staged route owns an empty lease only. Mounting can still fail before
   // Router commits it; the currently visible owner's modal must survive.
-  const modalHost = documentLike.createElement("div");
   const ownerId = nextModalOwnerId(context);
-  const mode = isDetailOnlyContext(context)
-    ? "detail"
-    : "route";
-
-  activateModalHost(modalHost);
-
-  modalHost.setAttribute(
-    "data-incidencias-modal-owner-id",
-    ownerId
-  );
-  modalHost.setAttribute(
-    "data-incidencias-modal-context",
-    mode
-  );
-  modalHost.setAttribute(
-    "data-incidencias-modal-boundary-version",
-    INCIDENCIAS_VIEW_VERSION
-  );
-
-  if (host?.dataset?.routePath) {
-    modalHost.setAttribute(
-      "data-incidencias-modal-route",
-      cleanText(host.dataset.routePath, "")
-    );
-  }
-
-  documentLike.body.appendChild(modalHost);
+  const mode = isDetailOnlyContext(context) ? "detail" : "route";
+  const handle = createModalHost({
+    ownerDocument: documentLike,
+    attributes: {
+      "data-incidencias-modal-owner-id": ownerId,
+      "data-incidencias-modal-context": mode,
+      "data-incidencias-modal-boundary-version": INCIDENCIAS_VIEW_VERSION,
+      ...(host?.dataset?.routePath ? { "data-incidencias-modal-route": cleanText(host.dataset.routePath, "") } : {}),
+    },
+    onMount: activateModalHost,
+  });
+  const modalHost = handle.ensure();
+  if (!modalHost) return null;
 
   return {
     modalHost,
+    handle,
     ownerId,
     mode,
     supersededCount: 0,
@@ -459,6 +446,7 @@ async function mountIncidenciasOwner(host = null, context = {}) {
     const ownerContext = {
       ...context,
       modalHost: lease?.modalHost || null,
+      modalHostHandle: lease?.handle || null,
       onDetailShell(detail) {
         context.onDetailShell?.(detail);
       },
@@ -493,7 +481,7 @@ async function mountIncidenciasOwner(host = null, context = {}) {
     quarantineModalHost(
       lease?.modalHost
     );
-    lease?.modalHost?.remove?.();
+    lease?.handle.remove();
     throw error;
   }
 
@@ -502,7 +490,7 @@ async function mountIncidenciasOwner(host = null, context = {}) {
     quarantineModalHost(
       lease?.modalHost
     );
-    lease?.modalHost?.remove?.();
+    lease?.handle.remove();
     return null;
   }
 
@@ -609,9 +597,7 @@ async function mountIncidenciasOwner(host = null, context = {}) {
       Si el controller no llegó a adoptar el nodo por una excepción parcial,
       la frontera sigue siendo responsable de no dejar una capa huérfana.
     */
-    if (lease?.modalHost?.isConnected) {
-      lease.modalHost.remove();
-    }
+    lease?.handle.remove();
 
     return destroyed;
   };

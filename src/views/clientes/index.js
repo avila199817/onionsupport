@@ -464,7 +464,8 @@ function createClientesController(host = null, initialContext = {}) {
   }
 
   function refreshChangedDomain() {
-    if (detailOnly || !alive() || !domainDirty || originModalIsOpen()) return;
+    const createState = createController?.getSnapshot?.();
+    if (detailOnly || !alive() || !domainDirty || creating || createState?.open || createState?.submitting || originModalIsOpen()) return;
     domainDirty = false;
     void refresh();
   }
@@ -1436,6 +1437,7 @@ function ensureCreateController() {
     showToast,
     emitEvent,
     onCreated,
+    onClosed: refreshChangedDomain,
   });
   return createController;
 }
@@ -1456,12 +1458,13 @@ async function openCreate() {
     } finally {
       creating = false;
       scheduleRender();
+      refreshChangedDomain();
     }
   }
 
   function onCreated() {
     if (!alive()) return;
-    void refresh();
+    domainDirty = true;
   }
 
   function actionInfo(target) {
@@ -1670,7 +1673,7 @@ async function openCreate() {
     unsubscribeDomain?.();
     unsubscribeModal?.();
     unsubscribeDomain = onDomainChanged((domain) => {
-      if (domain !== "clientes" || creating || createController?.getSnapshot?.().submitting) return;
+      if (!["clientes", "usuarios"].includes(domain)) return;
       domainDirty = true;
       refreshChangedDomain();
     });

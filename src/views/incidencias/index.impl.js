@@ -27,6 +27,7 @@ import { createModalLifecycle, restoreModalFocus } from "../../features/entity-o
 
 import { AppCore } from "../../core/index.js";
 import { onDomainChanged } from "../../core/domain-events.js";
+import { exactTotal } from "../../core/statistics.js";
 
 import {
   ROUTES,
@@ -1629,8 +1630,7 @@ export function createIncidenciasController(
         unbindTarget(modalHost);
       }
 
-      modalHost.replaceChildren();
-      modalHost.remove();
+      context.modalHostHandle?.remove();
     } catch {
       // noop
     }
@@ -4611,6 +4611,8 @@ async function load(options = {}) {
 
       restoreModalReturnFocus();
       render();
+      domainRefreshPending = true;
+      flushDomainRefresh();
 
       return true;
     } catch (createError) {
@@ -6375,14 +6377,19 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
     const key = filterFacetSearchKey();
     const current = filterFacetCache.get(key);
     if (!current) return false;
-
+    const loadedStats = computeIncidenciasStats(items);
+    const loadedCounts = { all: loadedStats.total, open: loadedStats.open, closed: loadedStats.closed, urgent: loadedStats.urgent };
+    const counts = current.exact ? current.counts : loadedCounts;
     const next = Object.freeze({
       ...current,
+      counts,
+      loadedCounts,
       stats: mergeIncidenciasFacetStats(
-        computeIncidenciasStats(items),
-        current.counts
+        loadedStats,
+        counts
       ),
       aggregatePartial: Boolean(
+        !current.exact ||
         nextCursor ||
         Number(current.counts?.all || 0) > items.length
       ),
@@ -6400,6 +6407,13 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
   } = {}) {
     const key = filterFacetSearchKey();
     const cached = filterFacetCache.get(key);
+    const seq = ++filterFacetSeq;
+    try {
+      filterFacetController?.abort?.("incidencias-filter-facets-replaced");
+    } catch {
+      filterFacetController?.abort?.();
+    }
+    filterFacetController = null;
 
     const authoritativeFacet =
       activeResponse &&
@@ -6429,7 +6443,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
        intacto como fallback.
     */
     const baseItems = safeArray(baseResponse?.items);
-    const baseTotal = Number(baseResponse?.total);
+    const baseTotal = exactTotal(baseResponse);
     const baseUniverseComplete = Boolean(
       baseResponse &&
       filter === "all" &&
@@ -6520,16 +6534,6 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
     }
 
     if (cached && !force) return cached;
-
-    const seq = ++filterFacetSeq;
-
-    try {
-      filterFacetController?.abort?.(
-        "incidencias-filter-facets-replaced"
-      );
-    } catch {
-      filterFacetController?.abort?.();
-    }
 
     const requestController =
       typeof AbortController !== "undefined"
@@ -8076,7 +8080,7 @@ async function loadMore(options = {}) {
 
   function bindDomainRefresh() {
     unsubscribeDomain = onDomainChanged((domain) => {
-      if (domain !== "incidencias" || destroyed || creating) return;
+      if (!["incidencias", "usuarios"].includes(domain) || destroyed) return;
       domainRefreshPending = true;
       queueMicrotask(flushDomainRefresh);
     });

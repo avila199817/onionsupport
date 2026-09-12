@@ -24,6 +24,8 @@
 
 import { userNameFromIdentity } from "../../core/user-identity.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
+import { cleanText, escapeHtml } from "../../core/presentation-text.js";
+
 
 export const USUARIOS_TEMPLATE_VERSION =
   "usuarios.template.v28.session-order-silent-refresh";
@@ -75,13 +77,7 @@ function safeObject(value, fallback = {}) {
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return output || fallback;
-}
+
 function first(...values) {
   for (const value of values) {
     if (value === null || value === undefined) continue;
@@ -96,14 +92,7 @@ function number(value = 0, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
-function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+
 function attr(value = "") {
   return escapeHtml(cleanText(value, ""));
 }

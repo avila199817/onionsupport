@@ -140,7 +140,10 @@ export function syncFacturasFilterCounts(root = viewRoot()) {
   if (!root) return false;
 
   const counts = readFacturasFilterCounts(root);
-  if (!counts) return false;
+  if (!counts) {
+    for (const badge of root.querySelectorAll(OWN_BADGE_SELECTOR)) badge.remove();
+    return false;
+  }
 
   let synced = 0;
   for (const button of root.querySelectorAll(FILTER_SELECTOR)) {

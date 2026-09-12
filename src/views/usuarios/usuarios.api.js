@@ -30,7 +30,14 @@
 import Http from "../../core/http.js";
 import { AppCore } from "../../core/index.js";
 import { userNameFromIdentity } from "../../core/user-identity.js";
+import {
+  applyConfirmedUserProfile,
+  captureUserProfileScope,
+  mergeConfirmedUserProfile,
+  runUserProfileMutation,
+} from "../../features/user-profile/index.js";
 import { notifyDomainChanged } from "../../core/domain-events.js";
+import { exactTotal } from "../../core/statistics.js";
 
 /* =========================================================
    META / CONFIG
@@ -4922,28 +4929,6 @@ export async function createUsuarioRequest(
   return detail;
 }
 
-function selfEditContext(userId) {
-  const state = AppCore.runtimeState.read();
-  const currentId = cleanText(state.user?.userId || state.user?.id, "").toLowerCase();
-  if (!state.authenticated || !currentId || currentId !== userId.toLowerCase()) return null;
-  return { userId: currentId, epoch: AppCore.getSessionEpoch() };
-}
-
-function applyConfirmedSelfName(detail, context) {
-  if (!context) return;
-  const state = AppCore.runtimeState.read();
-  const currentId = cleanText(state.user?.userId || state.user?.id, "").toLowerCase();
-  const detailId = cleanText(detail.userId || detail.id, "").toLowerCase();
-  if (!state.authenticated || currentId !== context.userId || detailId !== context.userId ||
-      AppCore.getSessionEpoch() !== context.epoch) return;
-  const name = userNameFromIdentity(detail);
-  if (!name) return;
-
-  // Same canonical setter used by Cuenta. Only the confirmed name changes;
-  // the session owner retains token, role, permissions and routing identity.
-  try { AppCore.setUser({ ...state.user, name, displayName: name }); } catch { /* A committed write is not retried for a UI sync failure. */ }
-}
-
 export async function updateUsuarioRequest(
   id = "",
   payload = {},
@@ -4952,7 +4937,8 @@ export async function updateUsuarioRequest(
   const epoch = ensureStoreScope();
   const userId =
     normalizeUsuarioId(id);
-  const editContext = selfEditContext(userId);
+  const editContext = captureUserProfileScope();
+  const selfEdit = editContext.userId === userId.toLowerCase();
 
   const body =
     buildUpdateUsuarioBody(
@@ -5039,33 +5025,20 @@ export async function updateUsuarioRequest(
     }
 
     const previous = getUsuarioByIdStore(returnedId);
-    const merged = { ...safeObject(previous) };
-    for (const [field, value] of Object.entries(source)) {
-      if (value !== undefined) merged[field] = value;
-    }
-    // Explicit URL/flag changes govern all old aliases. Missing/undefined photo
-    // fields are partial data, not deletions; name-only PATCH keeps a real photo.
-    const photoKey = ["avatarUrl", "avatar", "photoUrl", "picture"]
-      .find((key) => hasOwn(source, key) && source[key] !== undefined);
-    if (source.hasAvatar === false || photoKey) {
-      const photo = source.hasAvatar === false ? "" : safeAvatarUrl(source[photoKey]);
-      Object.assign(merged, { avatarUrl: photo, avatar: photo, photoUrl: photo, picture: photo, hasAvatar: Boolean(photo) });
-    }
+    const merged = mergeConfirmedUserProfile(safeObject(previous), source);
     const detail = normalizeUsuarioModel(merged);
 
     // Commit before publishing. The revision also prevents a GET/list begun
     // before this write from repopulating the previous identity.
-    identityRevisions.set(userId.toLowerCase(), ++confirmedRevision);
-    detailInflight.delete(`detail:${userId.toLowerCase()}`);
-    lastLoadToken += 1;
-    setLoading(false);
-    setRefreshing(false);
-    setInflightLoad(null);
+    markProfileCommitted(userId);
     syncUsuarioDetail(detail);
-    applyConfirmedSelfName(detail, editContext);
+    if (selfEdit) applyConfirmedUserProfile(source, editContext, { owner: "usuarios" });
     notifyDomainChanged("usuarios");
     return detail;
   };
+  // Self edits enter the shared queue immediately, in the same order as Cuenta
+  // writes. Keeping the legacy per-ID queue here would defer their enqueue.
+  if (selfEdit) return runUserProfileMutation(editContext, execute);
   const predecessor = pendingUpdates.get(key);
   const task = predecessor ? predecessor.then(execute, () => {
     if (!isCurrentStoreScope(epoch)) return null;
@@ -5078,6 +5051,25 @@ export async function updateUsuarioRequest(
   pendingUpdates.set(key, task);
   try { return await task; }
   finally { if (pendingUpdates.get(key) === task) pendingUpdates.delete(key); }
+}
+
+function markProfileCommitted(userId) {
+  identityRevisions.set(userId.toLowerCase(), ++confirmedRevision);
+  detailInflight.delete(`detail:${userId.toLowerCase()}`);
+  lastLoadToken += 1;
+  setLoading(false);
+  setRefreshing(false);
+  setInflightLoad(null);
+}
+
+function reconcileConfirmedProfile(patch) {
+  ensureStoreScope();
+  const userId = cleanText(patch?.userId);
+  if (!userId) return;
+  const previous = getUsuarioByIdStore(userId);
+  markProfileCommitted(userId);
+  // Do not insert a self profile into a list/query that never loaded it.
+  if (previous) syncUsuarioDetail(mergeConfirmedUserProfile(previous, patch));
 }
 
 export async function deleteUsuarioRequest(
@@ -5441,15 +5433,7 @@ export async function fetchUsuariosStatsRequest(
   const source =
     safeObject(response);
 
-  const totalKey = ["total", "totalCount", "remoteCount", "count"]
-    .find((key) => Object.prototype.hasOwnProperty.call(source, key));
-  const totalValue = totalKey ? source[totalKey] : null;
-  const parsedTotal = typeof totalValue === "number" ||
-    (typeof totalValue === "string" && /^\d+$/.test(totalValue.trim()))
-    ? Number(totalValue)
-    : Number.NaN;
-  const total = source.totalKnown !== false && source.totalIsLowerBound !== true &&
-    Number.isSafeInteger(parsedTotal) && parsedTotal >= 0 ? parsedTotal : null;
+  const total = exactTotal(source, ["total", "totalCount", "remoteCount", "count"]);
 
   return {
     ok:
@@ -5879,6 +5863,7 @@ export function clearUsuariosCache() {
 
 AppCore.registerModule("usuarios.session", Object.freeze({
   onSessionInvalidated: clearUsuariosCache,
+  onProfileConfirmed: reconcileConfirmedProfile,
 }), { overwrite: false });
 
 /* =========================================================

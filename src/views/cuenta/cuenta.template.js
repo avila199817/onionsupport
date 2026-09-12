@@ -1,4 +1,5 @@
-import { avatarInitials as initials } from "../../features/avatar-system/identity.js";
+import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
+import { userNameFromIdentity } from "../../core/user-identity.js";
 /* =========================================================
    Onion Support - Cuenta Template
    Archivo: /src/views/cuenta/cuenta.template.js
@@ -298,7 +299,7 @@ function safeAvatarUrl(value = "") {
 }
 
 function getName(detail = {}) {
-  return safeText(first(detail.name, detail.displayName, detail.fullName, detail.username, detail.email, "Usuario Onion"), "Usuario Onion");
+  return userNameFromIdentity(detail, detail.username || detail.email || "Usuario Onion");
 }
 
 function getEmail(detail = {}) {
@@ -360,11 +361,18 @@ function renderButton({ action = "", label = "", iconName = "", variant = "", di
 
 function renderAvatar(detail = {}, size = "hero") {
   const name = getName(detail);
-  const src = safeAvatarUrl(first(detail.avatarUrl, detail.avatar, detail.picture, ""));
+  const presentation = resolveAvatarPresentation({ ...detail, name });
+  const src = detail.hasAvatar === false ? "" : safeAvatarUrl(first(detail.avatarUrl, detail.avatar, detail.picture, ""));
   return `
-    <span class="cuenta-avatar cuenta-avatar--${attr(size)}${src ? " has-image" : " is-fallback"}" role="img" aria-label="${attr(name)}">
-      ${src ? `<img class="cuenta-avatar-img" src="${attr(src)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}
-      <span class="cuenta-avatar-fallback" aria-hidden="true">${escapeHtml(initials(name))}</span>
+    <span class="cuenta-avatar cuenta-avatar--${attr(size)}${src ? " has-image" : " is-fallback"}" role="img" aria-label="${attr(name)}"
+      data-avatar-system="true" data-avatar-host="true" data-avatar-authority="global"
+      data-avatar-state="${src ? "image" : "fallback"}" data-has-avatar="${src ? "true" : "false"}"
+      data-avatar-user-id="${attr(presentation.userId)}" data-avatar-name="${attr(name)}"
+      data-avatar-email="${attr(presentation.email)}" data-avatar-username="${attr(presentation.username)}"
+      data-avatar-tone="${attr(presentation.tone)}" data-avatar-identity="${attr(presentation.fingerprint)}"
+      data-avatar-initials="${attr(presentation.initials)}">
+      ${src ? `<img class="cuenta-avatar-img" data-avatar-image="true" src="${attr(src)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}
+      <span class="cuenta-avatar-fallback" data-avatar-fallback="true" aria-hidden="true">${escapeHtml(presentation.initials)}</span>
     </span>
   `;
 }

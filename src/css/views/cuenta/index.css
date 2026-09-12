@@ -16,8 +16,6 @@
   .cuenta-view,
   [data-cuenta-scope="true"]
 ) {
-  --cuenta-avatar-hero: calc(62px * var(--ui-scale));
-  --cuenta-avatar-card: calc(58px * var(--ui-scale));
 
   inline-size: 100%;
   min-inline-size: 0;
@@ -140,55 +138,6 @@
   border-color: var(--border-error);
   background: var(--error-bg);
   color: var(--error-strong, var(--error));
-}
-
-/* =========================================================
-   AVATAR
-========================================================= */
-
-.cuenta-avatar {
-  position: relative;
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  overflow: hidden;
-  border: 1px solid var(--border-strong);
-  border-radius: 50%;
-  background: var(--avatar-bg);
-  color: var(--avatar-text);
-  box-shadow: var(--shadow-sm);
-}
-
-.cuenta-avatar--hero {
-  inline-size: var(--cuenta-avatar-hero);
-  block-size: var(--cuenta-avatar-hero);
-}
-
-.cuenta-avatar--card {
-  inline-size: var(--cuenta-avatar-card);
-  block-size: var(--cuenta-avatar-card);
-}
-
-.cuenta-avatar-img {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  inline-size: 100%;
-  block-size: 100%;
-  object-fit: cover;
-  border-radius: inherit;
-}
-
-.cuenta-avatar-fallback {
-  position: relative;
-  z-index: 1;
-  font-size: var(--font-lg);
-  font-weight: var(--weight-black);
-  line-height: 1;
-}
-
-.cuenta-avatar.has-image .cuenta-avatar-fallback {
-  visibility: hidden;
 }
 
 /* =========================================================

@@ -17,6 +17,8 @@
 import { AppCore } from "../../core/index.js";
 import { onDomainChanged } from "../../core/domain-events.js";
 import { getIncidenciaEntityId, getFacturaEntityId } from "../../core/entity-identity.js";
+import { exactCount } from "../../core/statistics.js";
+import { selectFacturasStats } from "../facturas/facturas.stats.js";
 
 import IncidenciasApi from "../incidencias/incidencias.api.js";
 import FacturasApi from "../facturas/facturas.api.js";
@@ -118,12 +120,6 @@ function number(value, fallback = 0) {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function optionalNumber(value) {
-  if (value === null || value === undefined || value === "") return null;
-  const parsed = number(value, Number.NaN);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function now() {
@@ -243,7 +239,7 @@ function currentContext() {
     admin: role === "admin",
     user,
     userId,
-    key: `${role}:${userId}`,
+    key: `${AppCore.getSessionEpoch()}:${role}:${userId}`,
   };
 }
 
@@ -263,6 +259,7 @@ function cacheMatches(key = currentContext().key) {
 }
 
 function isCacheFresh(options = {}) {
+  if (!defaultDashboardScope(options)) return false;
   if (!cacheMatches()) return false;
 
   const ttlMs = number(
@@ -336,13 +333,6 @@ function unwrapList(value = null, depth = 0) {
   return [];
 }
 
-function exactCount(value) {
-  if (typeof value !== "number" &&
-      !(typeof value === "string" && /^\d+$/.test(value.trim()))) return null;
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
-}
-
 function collectionFromResponse(response = null) {
   const object = safeObject(response);
   const totalKnown = first(
@@ -359,60 +349,6 @@ function collectionFromResponse(response = null) {
     stale: object.stale === true,
     error: object.error || null,
   };
-}
-
-function invoiceCountFromStats(stats = {}) {
-  if (stats.ok === false || stats.success === false || stats.totalKnown === false || stats.totalIsLowerBound === true) return null;
-  for (const key of ["invoiceCount", "countTotal", "totalCount", "count"]) {
-    if (Object.hasOwn(stats, key)) return exactCount(stats[key]);
-  }
-  return null;
-}
-
-function totalInvoicedFromStats(stats = {}) {
-  return optionalNumber(
-    first(
-      stats.totalAmount,
-      stats.grossAmount,
-      stats.totalFacturado,
-      stats.totalImporte,
-      stats.invoiceAmount,
-      stats.amount,
-      null
-    )
-  );
-}
-
-function paidTotalFromStats(stats = {}) {
-  return optionalNumber(
-    first(
-      stats.paidAmount,
-      stats.paidTotal,
-      stats.totalPagado,
-      stats.totalPaid,
-      stats.importePagado,
-      stats.amountPaid,
-      null
-    )
-  );
-}
-
-function outstandingFromStats(stats = {}) {
-  const direct = optionalNumber(
-    first(stats.outstandingAmount, stats.outstandingTotal, null)
-  );
-
-  if (direct !== null) return direct;
-
-  const pending = optionalNumber(
-    first(stats.pendingAmount, stats.pendingTotal, stats.totalPendiente, null)
-  );
-  const overdue = optionalNumber(
-    first(stats.overdueAmount, stats.overdueTotal, stats.totalVencido, null)
-  );
-
-  if (pending === null && overdue === null) return null;
-  return number(pending, 0) + number(overdue, 0);
 }
 
 function currencyFromStats(stats = {}, invoices = []) {
@@ -435,6 +371,11 @@ function currencyFromStats(stats = {}, invoices = []) {
 
 function forceRequested(options = {}) {
   return options.force === true || options.forceRefresh === true;
+}
+
+function defaultDashboardScope(options = {}) {
+  return ["ticketsQuery", "incidenciasQuery", "facturasOptions", "facturasStatsOptions"]
+    .every((key) => !Object.keys(safeObject(options[key])).length);
 }
 
 async function loadIncidenciasForHome(options = {}) {
@@ -508,7 +449,7 @@ async function loadFacturasForHome(options = {}) {
     stats,
     statsAvailable:
       statsResult.status === "fulfilled" &&
-      totalInvoicedFromStats(stats) !== null,
+      selectFacturasStats(stats).totalImporte !== null,
     warnings,
   };
 }
@@ -687,9 +628,10 @@ function buildDashboard({
   const facturas = safeArray(facturasResult?.items);
   const invoiceStats = safeObject(facturasResult?.stats);
 
-  const totalInvoiced = totalInvoicedFromStats(invoiceStats);
-  const paidTotal = paidTotalFromStats(invoiceStats);
-  const outstandingAmount = outstandingFromStats(invoiceStats);
+  const selectedStats = selectFacturasStats(invoiceStats);
+  const totalInvoiced = selectedStats.totalImporte;
+  const paidTotal = selectedStats.totalPagado;
+  const outstandingAmount = selectedStats.totalPendiente;
   const currency = currencyFromStats(invoiceStats, facturas);
 
   const domainWarnings = safeArray(warnings).filter(Boolean);
@@ -702,7 +644,7 @@ function buildDashboard({
     usuariosResult,
   ].some((result) => result?.stale === true);
 
-  const invoiceCount = invoiceCountFromStats(invoiceStats);
+  const invoiceCount = selectedStats.total;
   const ticketCount = exactCount(incidenciasResult?.total);
   const clientCount = context.admin ? exactCount(clientesResult?.total) : null;
   const userCount = context.admin ? exactCount(usuariosResult?.total) : null;
@@ -833,14 +775,17 @@ export async function loadHomeDashboard(options = {}) {
   const requestKey = context.key;
   const requestEpoch = cacheState.epoch;
   const force = forceRequested(options);
-  const useCache = options.cache !== false && options.noCache !== true;
+  // Custom filters are one-off reads. The existing Home snapshot and its
+  // pending request belong only to the unfiltered dashboard for this session.
+  const defaultScope = defaultDashboardScope(options);
+  const useCache = defaultScope && options.cache !== false && options.noCache !== true;
   const returnStaleOnError = options.returnStaleOnError !== false;
 
   if (!force && useCache && isCacheFresh(options)) {
     return cachedDashboard({ stale: false });
   }
 
-  if (cacheState.inFlight && cacheState.inFlightKey === requestKey) {
+  if (defaultScope && cacheState.inFlight && cacheState.inFlightKey === requestKey) {
     return cacheState.inFlight;
   }
 
@@ -860,13 +805,13 @@ export async function loadHomeDashboard(options = {}) {
         throw error;
       }
 
-      commitCache(dashboard, context);
+      if (defaultScope) commitCache(dashboard, context);
       return dashboard;
     } catch (error) {
       cacheState.lastError = normalizeError("home", error);
 
       if (
-        returnStaleOnError &&
+        defaultScope && returnStaleOnError &&
         cacheState.epoch === requestEpoch &&
         cacheMatches(requestKey)
       ) {
@@ -882,8 +827,10 @@ export async function loadHomeDashboard(options = {}) {
     }
   })();
 
-  cacheState.inFlight = task;
-  cacheState.inFlightKey = requestKey;
+  if (defaultScope) {
+    cacheState.inFlight = task;
+    cacheState.inFlightKey = requestKey;
+  }
   return task;
 }
 

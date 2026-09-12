@@ -1,4 +1,5 @@
 import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
+import { createModalHost, renderModalContent } from "../../features/entity-overlay/modal-host.js";
 /* =========================================================
    Onion Support - Usuarios Create Modal
    Archivo: /src/views/usuarios/usuarios.template.create.js
@@ -383,49 +384,20 @@ function cloneForm(form = {}) {
    ROOT / EVENTS / UI SERVICES
 ========================================================= */
 
+const createHost = createModalHost({
+  selector: `#${ROOT_ID}`,
+  attributes: { "data-usuarios-create-portal": "true" },
+  onRemove: () => unbind(),
+});
+
 function getRoot() {
-  if (!isBrowser()) return null;
-
-  const current =
-    document.getElementById(
-      ROOT_ID
-    );
-
-  if (current) {
-    state.root = current;
-    return current;
-  }
-
-  return null;
-}
-
-function removeDuplicateRoots(keep = null) {
-  if (!isBrowser()) return 0;
-
-  let removed = 0;
-
-  for (
-    const node of
-    document.querySelectorAll(
-      `#${ROOT_ID}`
-    )
-  ) {
-    if (node === keep) continue;
-
-    try {
-      node.remove();
-      removed += 1;
-    } catch {
-      // noop
-    }
-  }
-
-  return removed;
+  return state.root?.isConnected ? state.root : null;
 }
 
 const modalLifecycle = createModalLifecycle({
   getPanel: () => state.panel,
   onEscape: () => { if (!state.submitting) close(); },
+  onDetached: () => close(),
   bodyClasses: ['usuarios-modal-open', 'usuarios-create-modal-open'],
 });
 
@@ -1157,147 +1129,21 @@ function findField(name = "") {
   ) || null;
 }
 
-function captureFocus() {
-  if (!isBrowser()) return null;
-
-  const active =
-    document.activeElement;
-
-  const fieldName =
-    active?.getAttribute?.(
-      "data-usr-create-field"
-    ) || "";
-
-  return {
-    fieldName,
-
-    selectionStart:
-      typeof active?.selectionStart ===
-        "number"
-        ? active.selectionStart
-        : null,
-
-    selectionEnd:
-      typeof active?.selectionEnd ===
-        "number"
-        ? active.selectionEnd
-        : null,
-  };
-}
-
-function restoreFocus(snapshot = null) {
-  const fieldName =
-    cleanText(
-      snapshot?.fieldName,
-      ""
-    );
-
-  if (fieldName) {
-    const field =
-      findField(fieldName);
-
-    try {
-      field?.focus?.({
-        preventScroll: true,
-      });
-
-      if (
-        isFunction(
-          field?.setSelectionRange
-        ) &&
-        Number.isInteger(
-          snapshot?.selectionStart
-        ) &&
-        Number.isInteger(
-          snapshot?.selectionEnd
-        )
-      ) {
-        field.setSelectionRange(
-          snapshot.selectionStart,
-          snapshot.selectionEnd
-        );
-      }
-
-      return true;
-    } catch {
-      // panel debajo
-    }
-  }
-
-  try {
-    state.panel?.focus?.({
-      preventScroll: true,
-    });
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function render({
-  preserveFocus = true,
-} = {}) {
-  if (
-    !isBrowser() ||
-    !state.isOpen
-  ) {
-    return false;
-  }
-
-  const focusSnapshot =
-    preserveFocus
-      ? captureFocus()
-      : null;
-
-  const current =
-    getRoot();
-
-  const template =
-    document.createElement(
-      "template"
-    );
-
-  template.innerHTML =
-    renderModalHtml().trim();
-
-  const nextRoot =
-    template.content
-      .firstElementChild;
-
-  if (!nextRoot) {
-    return false;
-  }
-
-  if (current?.parentNode) {
-    current.replaceWith(
-      nextRoot
-    );
-  } else {
-    document.body.appendChild(
-      nextRoot
-    );
-  }
-
-  state.root = nextRoot;
-
-  state.panel =
-    nextRoot.querySelector(
-      "[data-usuarios-create-panel='true']"
-    );
-
-  removeDuplicateRoots(
-    nextRoot
-  );
-
+function render({ preserveFocus = true } = {}) {
+  if (!isBrowser() || !state.isOpen) return false;
+  const host = createHost.ensure();
+  if (!host) return false;
+  unbind();
+  const rendered = renderModalContent(host, renderModalHtml(), {
+    rootSelector: `#${ROOT_ID}`,
+    overlaySelector: "[data-usr-create-action='overlay']",
+    panelSelector: "[data-usuarios-create-panel='true']",
+    focusAttributes: preserveFocus ? ["data-usr-create-field"] : [],
+    scrollSelector: ".usr-create-body, .inc-create-body",
+  });
+  state.root = rendered.root;
+  state.panel = rendered.panel;
   bind();
-
-  if (focusSnapshot) {
-    restoreFocus(
-      focusSnapshot
-    );
-  }
-
   return true;
 }
 
@@ -1592,7 +1438,7 @@ export async function open(options = {}) {
     return true;
   }
 
-  removeDuplicateRoots();
+  if (!createHost.ensure()) return false;
 
   state.isOpen = true;
   state.submitting = false;
@@ -1670,16 +1516,7 @@ export function close() {
 
   unbind();
 
-  const root =
-    getRoot();
-
-  try {
-    root?.remove?.();
-  } catch {
-    // noop
-  }
-
-  removeDuplicateRoots();
+  createHost.remove();
 
   const previousFocus =
     state.lastActiveElement;

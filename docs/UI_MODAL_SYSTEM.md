@@ -2,7 +2,7 @@
 
 La apertura de detalle de Home, listas, relaciones, teclado y APIs públicas pertenece a `src/features/entity-overlay/index.js` (`entity-overlay.v5-single-detail-session`). La interacción de todos los diálogos pertenece a `modal-lifecycle.js` en ese mismo directorio. Los controladores de dominio conservan formularios, peticiones, confirmaciones y templates.
 
-Estado de publicación y evidencia de esta revisión: [entrega del 2026-09-08](releases/2026-09-08-single-modal-session.md).
+La [entrega del 2026-09-08](releases/2026-09-08-single-modal-session.md) centraliza la sesión. La [consolidación privada del 2026-09-12](releases/2026-09-12-private-centralization.md) comparte el montaje y la actualización DOM, añade confirmaciones comunes e invalida el detalle al cambiar de sesión.
 
 ## Apertura de entidades
 
@@ -44,6 +44,8 @@ El controlador expone su método de apertura (`openFactura` o `openDetail`), `cl
 
 El Router llama a `releaseOrigin(previousHost)` al confirmar la sustitución de la vista y durante su teardown. Un fallo al montar la ruta siguiente conserva el modal de la vista vigente. `activateOrigin(nextHost)` interpreta enlaces heredados con `entity` y `entityId` sólo después del commit de ese host, sin introducir otro router.
 
+La invalidación de sesión de Core fuerza el desmontaje del detalle, incluido un módulo todavía en carga. Esta frontera no consulta la guarda de borrador de una sesión que ya ha terminado ni devuelve el foco a contenido de esa cuenta. Una respuesta tardía no puede recuperar el panel.
+
 Las listas consultan `isOriginOpen(host)` y se suscriben a `subscribe(({ phase, type, id, originHost }) => ...)`, con fases `opened` y `closed`. Mientras su detalle está abierto aplazan la reconciliación; al cerrar aplican los cambios confirmados. Cada lista elimina la suscripción al desmontarse. La sesión recupera el foco mediante el ID de entidad si el nodo que abrió el modal fue reemplazado.
 
 ## Peticiones y estabilidad del panel
@@ -67,7 +69,15 @@ El lifecycle compartido controla:
 - devolución segura de foco, sin moverlo fuera de otro diálogo abierto;
 - limpieza de registros y bloqueo cuando se desmonta una vista.
 
-La resolución de un botón de retorno que se ha vuelto a renderizar, el scroll del visor de adjuntos y la selección de texto del formulario siguen siendo responsabilidades del propietario. No son motores de modal alternativos.
+La resolución de un botón de retorno que se ha vuelto a renderizar, el scroll del visor de adjuntos y los borradores siguen siendo responsabilidades del propietario. El renderer común conserva foco, selección y scroll del cuerpo cuando actualiza un panel compatible.
+
+## Montaje y actualización del DOM privado
+
+`modal-host.js` aporta `createModalHost` y `renderModalContent`. El primero crea y retira sólo el nodo de su propietario; no adopta ni elimina el portal de un controlador posterior. El segundo actualiza un panel compatible sin sustituir su root, overlay o panel conectado. Conserva atributos, foco, selección de texto y scroll del cuerpo; un cambio explícito de entidad o tipo de formulario permite un montaje nuevo.
+
+Los formularios y las peticiones permanecen en su controlador. Incidencias conserva sus slots y borradores, Correo usa el host inline de su shell y los visores mantienen la propiedad de blobs y medios. Este helper privado no se carga con el consentimiento público ni crea otra sesión o registro de teclado.
+
+`modal-confirmation.js` resuelve las confirmaciones asíncronas con el lifecycle compartido. Cancelar, retirar el origen o desmontar el diálogo resuelve la espera una sola vez. La confirmación de cobro y la de reenvío de Facturas conservan su contenido y sus acciones; una apertura desde Home no cae en `window.confirm`.
 
 ## Integraciones
 
@@ -85,6 +95,8 @@ La resolución de un botón de retorno que se ha vuelto a renderizar, el scroll 
 | Visor de adjuntos | `features/incidencias-video-preview/core.js` |
 
 Los menús desplegables, comboboxes y la navegación móvil mantienen sus interacciones semánticas. El listener compartido permite que un combobox consuma Escape antes de cerrar su diálogo.
+
+Cuenta y Servidor tienen formularios inline, no diálogos adicionales. La bienvenida de Home es una ayuda no bloqueante y no adquiere el scroll ni la pila modal.
 
 ## Uso
 

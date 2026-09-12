@@ -10,12 +10,14 @@ import {
   resolveAvatarPresentation,
 } from "../../src/features/avatar-system/identity.js";
 import {
-  INCIDENCIAS_CREATE_AVATAR_IDENTITY_VERSION,
-  getIncidenciasCreateAvatarIdentitySnapshot,
-} from "../../src/views/incidencias/incidencias.create-avatar-identity.js";
-import {
+  getCreateTemplateSnapshot,
   renderIncidenciasCreateModal,
 } from "../../src/views/incidencias/incidencias.template.create.js";
+import {
+  renderIncidenciasCreateModal as renderOriginalCreateModal,
+} from "../../src/views/incidencias/incidencias.template.create.impl.js";
+
+const snapshot = getCreateTemplateSnapshot().avatarIdentity;
 
 const css = readFileSync(
   "src/css/components/avatar-system-contexts.css",
@@ -81,7 +83,7 @@ assert.match(targetTag, /data-avatar-initials="JH"/);
 assert.match(targetTag, /data-avatar-tone="10"/);
 assert.match(
   targetTag,
-  new RegExp(`data-avatar-identity-contract="${INCIDENCIAS_CREATE_AVATAR_IDENTITY_VERSION}"`)
+  new RegExp(`data-avatar-identity-contract="${snapshot.version}"`)
 );
 
 assert.match(
@@ -110,6 +112,56 @@ assert.match(resultAvatarTag, /data-avatar-email="harandou@efcusa\.com"/);
 assert.match(resultAvatarTag, /data-avatar-user-id="ON-1770551914523"/);
 assert.match(resultAvatarTag, /data-avatar-initials="JH"/);
 assert.match(resultAvatarTag, /data-avatar-tone="10"/);
+
+// The original renderer owns the aliases as well as the visible fallback.
+// A wrapper must not reconstruct a different person from raw input or HTML.
+function assertCreateAvatar(input, identity, selected = false) {
+  const markup = renderIncidenciasCreateModal({ open: true, admin: true, ...input });
+  assert.equal(markup, renderOriginalCreateModal({ open: true, admin: true, ...input }));
+  const className = selected ? "inc-create-target-user-avatar" : "inc-create-user-avatar";
+  const tag = markup.match(new RegExp(`<span\\b(?=[^>]*class="[^"]*\\b${className}\\b[^"]*")[^>]*>`, "i"))?.[0];
+  assert.ok(tag, `${className} must render`);
+  const attrs = Object.fromEntries([...tag.matchAll(/\s(data-avatar-[\w-]+)="([^"]*)"/g)].map((match) => [match[1], match[2]]));
+  const escaped = (value = "") => String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  const presentation = resolveAvatarPresentation(identity);
+  for (const [alias, field] of [["name", "name"], ["email", "email"], ["user-id", "userId"], ["username", "username"]]) {
+    assert.equal(attrs[`data-avatar-${alias}`], escaped(identity[field] || ""), `${className}: explicit ${alias}`);
+  }
+  assert.equal(attrs["data-avatar-identity"], presentation.fingerprint);
+  assert.equal(attrs["data-avatar-tone"], String(presentation.tone));
+  assert.equal(attrs["data-avatar-initials"], presentation.initials);
+  assert.equal(attrs["data-avatar-source"], `incidencias-create-${selected ? "selected-user" : "search-result"}`);
+  return attrs;
+}
+
+const selectedUser = { userId: "ON-SELECTED", name: "Selección anterior", email: "selected@example.test", emailLower: "older@example.test", username: "selected.alias" };
+const formIdentity = { userId: "ON-FORM", name: "Ana Formulario", email: "form@example.test", username: selectedUser.username };
+assertCreateAvatar({
+  form: { targetUserId: formIdentity.userId, targetClienteId: "CLI-DISTINCT", targetUserName: formIdentity.name, targetUserEmail: formIdentity.email },
+  userSearch: { selectedUser },
+}, formIdentity, true);
+assertCreateAvatar({
+  form: { uid: formIdentity.userId, name: formIdentity.name, email: formIdentity.email },
+  userSearch: { selectedUser },
+}, formIdentity, true);
+assertCreateAvatar({ form: { targetUserId: "ON-ID-ONLY" } }, { userId: "ON-ID-ONLY", name: "ON-ID-ONLY" }, true);
+
+const nestedIdentity = { userId: "ON-NESTED", name: 'Ana "Prueba" & López', email: "nested@example.test", username: "ana.alias" };
+assertCreateAvatar({ userSearch: { results: [{ lookup: { userId: nestedIdentity.userId, email: nestedIdentity.email }, profile: { displayName: nestedIdentity.name, username: nestedIdentity.username } }] } }, nestedIdentity);
+assertCreateAvatar({ userSearch: { results: [{ name: "Ana López", username: "ana.alias" }] } }, { name: "Ana López", username: "ana.alias" });
+assertCreateAvatar({ userSearch: { results: [{ name: "Ana López" }] } }, { name: "Ana López" });
+
+const stableId = { userId: "ON-STABLE", name: "Ana López", email: "old@example.test", username: "ana.old" };
+const stable = assertCreateAvatar({ userSearch: { results: [stableId] } }, stableId);
+for (const aliases of [{ email: "new@example.test", username: "ana.new" }, { email: "", username: "" }]) {
+  const changed = { ...stableId, ...aliases };
+  const actual = assertCreateAvatar({ userSearch: { results: [changed] } }, changed);
+  assert.equal(actual["data-avatar-identity"], stable["data-avatar-identity"]);
+  assert.equal(actual["data-avatar-tone"], stable["data-avatar-tone"]);
+}
+const homonym = { ...stableId, userId: "ON-OTHER-PERSON" };
+const other = assertCreateAvatar({ userSearch: { results: [homonym] } }, homonym);
+assert.notEqual(other["data-avatar-identity"], stable["data-avatar-identity"]);
 
 for (const required of [
   ".inc-create-user-avatar",
@@ -148,7 +200,6 @@ assert.match(
   "El sizing Create debe ejecutarse en guardrails después de AvatarSystem"
 );
 
-const snapshot = getIncidenciasCreateAvatarIdentitySnapshot();
 assert.equal(snapshot.policy.globalAvatarAuthority, true);
 assert.equal(snapshot.policy.noFallbackTextAsIdentitySeed, true);
 assert.equal(snapshot.policy.noLocalPalette, true);

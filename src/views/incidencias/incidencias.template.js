@@ -795,6 +795,7 @@ const spinner = (label = "Cargando...") => `<span class="incidencias-spinner" ar
 
 function renderHeader(vm = {}) {
   const s = vm.stats;
+  const facetsLoaded = vm.statsPartial && !vm.filterFacetsExact;
   return `
     <section class="incidencias-hero" data-incidencias-hero="true">
       <div class="incidencias-hero-top">
@@ -810,28 +811,28 @@ function renderHeader(vm = {}) {
       </div>
       <div class="incidencias-hero-meta">
         <span class="incidencias-meta-pill" data-meta="total">${icon("ticket")}<span>${esc(`${formatNumber(s.total)} solicitudes registradas`)}</span></span>
-        <button type="button" class="incidencias-meta-pill incidencias-meta-pill--action${vm.sortMode === "attachments" ? " is-active" : ""}" data-meta="attachments" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="attachments" aria-pressed="${vm.sortMode === "attachments" ? "true" : "false"}" aria-label="${vm.sortLocked ? "Orden por adjuntos disponible al completar el historial" : vm.sortMode === "attachments" ? `Cambiar orden de adjuntos a ${vm.sortOrder === "desc" ? "menor a mayor" : "mayor a menor"}` : "Ordenar incidencias de más adjuntos a menos"}" title="${vm.sortLocked ? "Disponible al completar el historial" : "Ordenar por número de adjuntos"}" ${vm.sortLocked ? 'disabled aria-disabled="true"' : ""}>${icon("paperclip")}<span>${esc(`${formatNumber(s.attachments)} adjuntos`)}</span></button>
+        <button type="button" class="incidencias-meta-pill incidencias-meta-pill--action${vm.sortMode === "attachments" ? " is-active" : ""}" data-meta="attachments" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="attachments" aria-pressed="${vm.sortMode === "attachments" ? "true" : "false"}" aria-label="${vm.sortLocked ? "Orden por adjuntos disponible al completar el historial" : vm.sortMode === "attachments" ? `Cambiar orden de adjuntos a ${vm.sortOrder === "desc" ? "menor a mayor" : "mayor a menor"}` : "Ordenar incidencias de más adjuntos a menos"}" title="${vm.sortLocked ? "Disponible al completar el historial" : "Ordenar por número de adjuntos"}" ${vm.sortLocked ? 'disabled aria-disabled="true"' : ""}>${icon("paperclip")}<span>${esc(`${formatNumber(s.attachments)} adjuntos${vm.statsPartial ? " en cargadas" : ""}`)}</span></button>
       </div>
       <div class="incidencias-stats" aria-label="Accesos rápidos del historial">
-        <button type="button" class="incidencias-stat-card incidencias-stat-card--open${vm.filter === "open" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="open" aria-pressed="${vm.filter === "open" ? "true" : "false"}" aria-label="Mostrar solo incidencias abiertas">
-          <div class="incidencias-stat-label">Abiertas</div>
+        <button type="button" class="incidencias-stat-card incidencias-stat-card--open${vm.filter === "open" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="open" data-stat-scope="${facetsLoaded ? "loaded" : "complete"}" aria-pressed="${vm.filter === "open" ? "true" : "false"}" aria-label="Mostrar solo incidencias abiertas">
+          <div class="incidencias-stat-label">${facetsLoaded ? "Abiertas cargadas" : "Abiertas"}</div>
           <div class="incidencias-stat-value">${esc(formatNumber(s.open))}</div>
-          <div class="incidencias-stat-text">Solicitudes activas, pendientes o en proceso.</div>
+          <div class="incidencias-stat-text">${facetsLoaded ? "Solicitudes activas entre las incidencias ya cargadas." : "Solicitudes activas, pendientes o en proceso."}</div>
         </button>
-        <button type="button" class="incidencias-stat-card incidencias-stat-card--closed${vm.filter === "closed" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="closed" aria-pressed="${vm.filter === "closed" ? "true" : "false"}" aria-label="Mostrar solo incidencias cerradas">
-          <div class="incidencias-stat-label">Cerradas</div>
+        <button type="button" class="incidencias-stat-card incidencias-stat-card--closed${vm.filter === "closed" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="closed" data-stat-scope="${facetsLoaded ? "loaded" : "complete"}" aria-pressed="${vm.filter === "closed" ? "true" : "false"}" aria-label="Mostrar solo incidencias cerradas">
+          <div class="incidencias-stat-label">${facetsLoaded ? "Cerradas cargadas" : "Cerradas"}</div>
           <div class="incidencias-stat-value">${esc(formatNumber(s.closed))}</div>
-          <div class="incidencias-stat-text">Casos resueltos o cerrados.</div>
+          <div class="incidencias-stat-text">${facetsLoaded ? "Casos cerrados entre las incidencias ya cargadas." : "Casos resueltos o cerrados."}</div>
         </button>
-        <button type="button" class="incidencias-stat-card incidencias-stat-card--urgent${vm.filter === "urgent" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="urgent" aria-pressed="${vm.filter === "urgent" ? "true" : "false"}" aria-label="Mostrar solo incidencias urgentes o críticas">
-          <div class="incidencias-stat-label">Urgentes</div>
+        <button type="button" class="incidencias-stat-card incidencias-stat-card--urgent${vm.filter === "urgent" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="urgent" data-stat-scope="${facetsLoaded ? "loaded" : "complete"}" aria-pressed="${vm.filter === "urgent" ? "true" : "false"}" aria-label="Mostrar solo incidencias urgentes o críticas">
+          <div class="incidencias-stat-label">${facetsLoaded ? "Urgentes cargadas" : "Urgentes"}</div>
           <div class="incidencias-stat-value">${esc(formatNumber(s.urgent))}</div>
-          <div class="incidencias-stat-text">Incidencias marcadas como urgentes o críticas.</div>
+          <div class="incidencias-stat-text">${facetsLoaded ? "Prioridades altas entre las incidencias ya cargadas." : "Incidencias con prioridad alta."}</div>
         </button>
-        <button type="button" class="incidencias-stat-card incidencias-stat-card--amount${vm.sortMode === "amount" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="amount" aria-pressed="${vm.sortMode === "amount" ? "true" : "false"}" aria-label="${vm.sortLocked ? "Orden por importe disponible al completar el historial" : vm.sortMode === "amount" ? `Cambiar orden de importe a ${vm.sortOrder === "desc" ? "menor a mayor" : "mayor a menor"}` : "Ordenar incidencias por importe asociado de mayor a menor"}" title="${vm.sortLocked ? "Disponible al completar el historial" : "Ordenar por importe"}" ${vm.sortLocked ? 'disabled aria-disabled="true"' : ""}>
-          <div class="incidencias-stat-label">Importe asociado</div>
+        <button type="button" class="incidencias-stat-card incidencias-stat-card--amount${vm.sortMode === "amount" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="amount" data-stat-scope="${vm.statsPartial ? "loaded" : "complete"}" aria-pressed="${vm.sortMode === "amount" ? "true" : "false"}" aria-label="${vm.sortLocked ? "Orden por importe disponible al completar el historial" : vm.sortMode === "amount" ? `Cambiar orden de importe a ${vm.sortOrder === "desc" ? "menor a mayor" : "mayor a menor"}` : "Ordenar incidencias por importe asociado de mayor a menor"}" title="${vm.sortLocked ? "Disponible al completar el historial" : "Ordenar por importe"}" ${vm.sortLocked ? 'disabled aria-disabled="true"' : ""}>
+          <div class="incidencias-stat-label">${vm.statsPartial ? "Importe cargado" : "Importe asociado"}</div>
           <div class="incidencias-stat-value">${esc(formatMoney(s.invoiceTotal, DEFAULT_CURRENCY))}</div>
-          <div class="incidencias-stat-text">Ordenar incidencias de mayor a menor importe.</div>
+          <div class="incidencias-stat-text">${vm.statsPartial ? "Suma asociada únicamente a las incidencias ya cargadas." : "Ordenar incidencias de mayor a menor importe."}</div>
         </button>
       </div>
     </section>
@@ -1015,7 +1016,7 @@ function renderHistory(vm = {}) {
 export function renderIncidenciasLoadingState(input = {}) {
   const vm = buildVm({ ...obj(input), loading: true });
   return `
-    <section class="incidencias-view-root incidencias-view-root--loading is-loading" data-incidencias-scope="true" data-template-version="${at(INCIDENCIAS_TEMPLATE_VERSION)}" data-total="${at(String(vm.total))}" data-visible="${at(String(vm.visibleCount))}" data-filter="${at(vm.filter)}" data-server-filter-applied="${vm.serverFilterApplied ? "true" : "false"}" data-selection="${at(vm.selection)}" data-sort-order="${at(vm.sortOrder)}" data-filter-facets-exact="${vm.filterFacetsExact ? "true" : "false"}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" aria-busy="true">
+    <section class="incidencias-view-root incidencias-view-root--loading is-loading" data-incidencias-scope="true" data-template-version="${at(INCIDENCIAS_TEMPLATE_VERSION)}" data-total="${at(String(vm.total))}" data-visible="${at(String(vm.visibleCount))}" data-filter="${at(vm.filter)}" data-server-filter-applied="${vm.serverFilterApplied ? "true" : "false"}" data-selection="${at(vm.selection)}" data-sort-order="${at(vm.sortOrder)}" data-stats-scope="${vm.statsPartial ? "loaded" : "complete"}" data-filter-facets-exact="${vm.filterFacetsExact ? "true" : "false"}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" data-total-greater-than-items="${vm.diagnostics.totalGreaterThanItems ? "true" : "false"}" aria-busy="true">
       ${renderHeader(vm)}${renderHistory(vm)}
     </section>
   `;
@@ -1036,7 +1037,7 @@ export function renderIncidenciasErrorState(message = "No se pudieron cargar las
 export function renderIncidenciasTemplate(input = {}) {
   const vm = buildVm(input);
   return `
-    <section class="${cls("incidencias-view-root", vm.loading ? "is-loading" : "", vm.refreshing ? "is-refreshing" : "", vm.creating ? "is-creating" : "", vm.error ? "has-error" : "")}" data-incidencias-scope="true" data-template-version="${at(INCIDENCIAS_TEMPLATE_VERSION)}" data-route="${at(vm.route)}" data-total="${at(String(vm.total))}" data-visible="${at(String(vm.visibleCount))}" data-filter="${at(vm.filter)}" data-server-filter-applied="${vm.serverFilterApplied ? "true" : "false"}" data-selection="${at(vm.selection)}" data-search-active="${vm.search ? "true" : "false"}" data-sort-order="${at(vm.sortOrder)}" data-filter-facets-exact="${vm.filterFacetsExact ? "true" : "false"}" data-loading="${vm.loading ? "true" : "false"}" data-refreshing="${vm.refreshing ? "true" : "false"}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" data-items-extracted="${at(String(vm.items.length))}" data-total-greater-than-items="${vm.diagnostics.totalGreaterThanItems ? "true" : "false"}" aria-busy="${vm.loading || vm.refreshing || vm.loadingMore || vm.listQueryPending ? "true" : "false"}">
+    <section class="${cls("incidencias-view-root", vm.loading ? "is-loading" : "", vm.refreshing ? "is-refreshing" : "", vm.creating ? "is-creating" : "", vm.error ? "has-error" : "")}" data-incidencias-scope="true" data-template-version="${at(INCIDENCIAS_TEMPLATE_VERSION)}" data-route="${at(vm.route)}" data-total="${at(String(vm.total))}" data-visible="${at(String(vm.visibleCount))}" data-filter="${at(vm.filter)}" data-server-filter-applied="${vm.serverFilterApplied ? "true" : "false"}" data-selection="${at(vm.selection)}" data-search-active="${vm.search ? "true" : "false"}" data-sort-order="${at(vm.sortOrder)}" data-stats-scope="${vm.statsPartial ? "loaded" : "complete"}" data-filter-facets-exact="${vm.filterFacetsExact ? "true" : "false"}" data-loading="${vm.loading ? "true" : "false"}" data-refreshing="${vm.refreshing ? "true" : "false"}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" data-items-extracted="${at(String(vm.items.length))}" data-total-greater-than-items="${vm.diagnostics.totalGreaterThanItems ? "true" : "false"}" aria-busy="${vm.loading || vm.refreshing || vm.loadingMore || vm.listQueryPending ? "true" : "false"}">
       ${vm.error ? `<div class="incidencias-alert" role="alert">${icon("alert")}<span>${esc(vm.error)}</span></div>` : ""}
       ${renderHeader(vm)}${renderHistory(vm)}
     </section>

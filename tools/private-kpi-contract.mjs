@@ -7,11 +7,10 @@ import { notifyDomainChanged, onDomainChanged } from "../src/core/domain-events.
 import { exactTotal } from "../src/core/statistics.js";
 import { loadFacturasStats, clearFacturasCache, hydrateFacturasFromCache } from "../src/views/facturas/facturas.api.base.js";
 import { selectFacturasStats } from "../src/views/facturas/facturas.stats.js";
-import { renderHeader } from "../src/views/facturas/facturas.template.js";
+import { renderHeader, renderCards, renderFacturasTemplate, renderFacturasLoadingState } from "../src/views/facturas/facturas.template.js";
 import { loadHomeDashboard, clearHomeDashboardCache, hydrateHomeFromCache, hasFreshHomeDashboard } from "../src/views/home/home.api.js";
 import { clearIncidenciasCache, computeIncidenciasStats } from "../src/views/incidencias/incidencias.api.js";
 import { buildIncidenciasFilterFacetPresentation, reconcileIncidenciasFilterFacetPresentation, getIncidenciasFacetRequestQuery } from "../src/views/incidencias/incidencias.filter-facets.js";
-import { syncFacturasFilterCounts } from "../src/features/facturas-filter-counts/index.js";
 import { renderClientesTemplate } from "../src/views/clientes/clientes.template.js";
 
 // Real transport adapters, projections and templates; only HTTP is replaced.
@@ -59,9 +58,24 @@ try {
     assert.deepEqual([projected.total, projected.paidCount, projected.pendingCount, projected.overdueCount], [null, null, null, null], "uncertain snapshot counts cannot masquerade as exact status totals");
   }
   assert.match(renderHeader({ items: rows }), /Pendientes cargadas/);
-  let removed = 0;
-  syncFacturasFilterCounts({ querySelector: () => ({ querySelector: () => ({ textContent: "—" }) }), querySelectorAll: () => [{ remove: () => removed++ }] });
-  assert.equal(removed, 1, "unknown refreshed KPIs remove old filter badges");
+  const badgeCounts = (html) => Object.fromEntries(
+    [...html.matchAll(/class="facturas-filter-pill[^"]*"[^>]*data-filter="([^"]+)"[^>]*>.*?<strong data-facturas-filter-count="true">(\d+)<\/strong><\/button>/g)]
+      .map((match) => [match[1], Number(match[2])])
+  );
+  const globalCounts = { invoiceCount: 12000, pendingCount: 2000, paidCount: 9000, overdueCount: 1000 };
+  const invoiceInput = { items: rows, total: 12000, statsAuthoritative: true, stats: globalCounts };
+  for (const render of [renderFacturasTemplate, renderCards, renderFacturasLoadingState]) {
+    const known = render(invoiceInput);
+    assert.deepEqual(badgeCounts(known), { all: 12000, pending: 2000, paid: 9000, overdue: 1000 }, "badges and header use the same global projection on the first render");
+    for (const partial of [{}, { ...globalCounts, paidCount: null, countPagadas: 7 }, { ...globalCounts, totalKnown: false }, { ...globalCounts, totalIsLowerBound: true }, { ...globalCounts, pendingCount: true }]) {
+      assert.doesNotMatch(render({ ...invoiceInput, stats: partial }), /data-facturas-filter-count=/, "unknown refreshed metrics render no obsolete or invented badges");
+    }
+    assert.deepEqual(badgeCounts(render({ ...invoiceInput, stats: { invoiceCount: 0, pendingCount: 0, paidCount: 0, overdueCount: 0 } })), { all: 0, pending: 0, paid: 0, overdue: 0 });
+  }
+  assert.deepEqual(badgeCounts(renderFacturasTemplate({ ...invoiceInput, filter: "paid", search: "no loaded match" })), { all: 12000, pending: 2000, paid: 9000, overdue: 1000 }, "filtering the loaded table cannot redefine global KPI counts");
+  const loadedInvoices = renderFacturasTemplate({ items: rows, total: 12000, search: "no loaded match" });
+  assert.match(loadedInvoices, /Facturas cargadas/);
+  assert.deepEqual(badgeCounts(loadedInvoices), { all: 1, pending: 0, paid: 1, overdue: 0 }, "the loaded fallback retains its scope independently of remote totals and active search");
 
   for (const response of [{ ok: false, stats: { invoiceCount: 99 } }, { success: false, data: { stats: { invoiceCount: 99 } } }, { stats: { ok: false, invoiceCount: 99 } }]) {
     reset(); statsResponse = response;

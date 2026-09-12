@@ -11,12 +11,6 @@
    - No corregir ni borrar DOM generado por el template.
 ========================================================= */
 
-/*
-  Paridad visual con Incidencias: añade y mantiene los badges de conteo de los
-  filtros de Facturas usando los KPIs que la propia vista ya renderiza.
-*/
-import "../facturas-filter-counts/index.js";
-
 export const FACTURAS_AUTO_REFRESH_VERSION =
   "facturas.autorefresh.v4-router-view-interactions";
 

@@ -234,7 +234,6 @@ import { PUBLIC_LEGAL } from "../core/public-legal.js";
       page_location: sanitizePageLocation(),
       page_path: normalizePathname(window.location.pathname),
       page_title: safePageTitle(),
-      language: String(document.documentElement.lang || "es").slice(0, 20),
       debug_mode: isTagAssistantSession(),
     };
   }

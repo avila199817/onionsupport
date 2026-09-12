@@ -2,7 +2,7 @@ import { normalizeClienteModel } from "../clientes/clientes.model.js";
 import { patchFacturaCreateDom } from "./facturas.create-dom.js";
 import { getFacturaEntityId } from "../../core/entity-identity.js";
 import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
-import { createModalHost as createPrivateModalHost } from "../../features/entity-overlay/modal-host.js";
+import { createModalHost as createPrivateModalHost, renderModalContent } from "../../features/entity-overlay/modal-host.js";
 import { openModalConfirmation } from "../../features/entity-overlay/modal-confirmation.js";
 /* =========================================================
    Onion Support - Facturas Index
@@ -61,7 +61,6 @@ import {
 import {
   FACTURA_MODAL_ACTIONS,
   renderFacturasDetailModal,
-  renderFacturasDetailContent,
 } from "./facturas.template.modal.js";
 
 export const FACTURAS_INDEX_VERSION =
@@ -3141,73 +3140,6 @@ function createFacturasController(host = null, context = {}) {
     return detailHost.remove();
   }
 
-  function detailContentPayload() {
-    return {
-      factura: detailModal.factura,
-      loading: detailModal.detailLoading,
-      admin: isAdmin(),
-      markingPaidFacturaId: detailModal.markingPaidFacturaId,
-      sendingFacturaId: detailModal.sendingFacturaId,
-      viewingFacturaId: detailModal.viewingFacturaId,
-      downloadingFacturaId: detailModal.downloadingFacturaId,
-      feedbackMessage: detailModal.feedbackMessage,
-      feedbackType: detailModal.feedbackType,
-    };
-  }
-
-  function mountDetailShell(target = null) {
-    if (!target) return false;
-
-    target.innerHTML = renderFacturasDetailModal({
-      ...detailModal,
-      admin: isAdmin(),
-    });
-    target.setAttribute("data-detail-shell-mounted", "true");
-
-    return Boolean(
-      target.querySelector(DETAIL_MODAL_PANEL_SELECTOR)
-    );
-  }
-
-  function patchDetailContent(target = null) {
-    if (!target) return false;
-
-    const panel = target.querySelector(
-      DETAIL_MODAL_PANEL_SELECTOR
-    );
-
-    if (!panel) return false;
-
-    /*
-       FIX:
-       Sólo sustituimos el contenido interno.
-       Overlay + panel sobreviven.
-       Las animaciones de entrada no se reinician.
-    */
-    panel.innerHTML = renderFacturasDetailContent(
-      detailContentPayload()
-    );
-
-    const facturaId = getFacturaId(
-      detailModal.factura || {}
-    );
-
-    const root = target.querySelector(
-      DETAIL_MODAL_ROOT_SELECTOR
-    );
-
-    if (root) {
-      root.dataset.facturaId = facturaId;
-      root.dataset.open = "true";
-      root.dataset.detailShell = "single-mount";
-    }
-
-    panel.dataset.facturaId = facturaId;
-    panel.dataset.detailPatch = "true";
-
-    return true;
-  }
-
   function setDetailFeedback(
     message = "",
     type = "info",
@@ -3265,45 +3197,32 @@ function createFacturasController(host = null, context = {}) {
     const target = ensureDetailModalHost();
     if (!target) return false;
 
-    const existingPanel = target.querySelector(
-      DETAIL_MODAL_PANEL_SELECTOR
-    );
-
-    const state = existingPanel
-      ? captureModalDomState(
-          target,
-          DETAIL_MODAL_PANEL_SELECTOR,
-          DETAIL_MODAL_SCROLL_SELECTOR
-        )
-      : null;
-
-    const forceShell = options.forceShell === true;
-
-    let mountedShell = false;
-
-    if (!existingPanel || forceShell) {
-      mountedShell = mountDetailShell(target);
-    } else if (!patchDetailContent(target)) {
-      mountedShell = mountDetailShell(target);
-    }
+    const rendered = renderModalContent(target, renderFacturasDetailModal({
+      ...detailModal,
+      admin: isAdmin(),
+    }), {
+      rootSelector: DETAIL_MODAL_ROOT_SELECTOR,
+      overlaySelector: DETAIL_MODAL_OVERLAY_SELECTOR,
+      panelSelector: DETAIL_MODAL_PANEL_SELECTOR,
+      scrollSelector: DETAIL_MODAL_SCROLL_SELECTOR,
+      focusAttributes: ["id", "name", "data-facturas-action", "href"],
+      forceMount: options.forceShell === true,
+    });
+    if (!rendered?.panel) return false;
 
     syncModalBodyState();
 
-    restoreModalDomState(target, state, {
-      panelSelector: DETAIL_MODAL_PANEL_SELECTOR,
-      scrollSelector: DETAIL_MODAL_SCROLL_SELECTOR,
-      focusSelector: options.focusSelector || "",
-      preserveFocus:
-        mountedShell
-          ? options.preserveFocus !== false
-          : true,
-    });
+    if (options.focusSelector || !target.contains(document.activeElement)) {
+      restoreModalFocus(
+        target.querySelector(options.focusSelector || DETAIL_MODAL_PANEL_SELECTOR) || rendered.panel
+      );
+    }
 
-    if (mountedShell && isFunction(context.onDetailShell)) {
+    if (!rendered.patched && isFunction(context.onDetailShell)) {
       context.onDetailShell({
         controller,
         host: target,
-        panel: target.querySelector(DETAIL_MODAL_PANEL_SELECTOR),
+        panel: rendered.panel,
       });
     }
 

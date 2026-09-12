@@ -3,6 +3,7 @@
    Cursor pagination · server search/filter/order · race-safe
 ========================================================= */
 
+import { cleanText } from "../../core/presentation-text.js";
 import { AppCore } from "../../core/index.js";
 import { ROUTES } from "../../core/config.js";
 import { onDomainChanged } from "../../core/domain-events.js";
@@ -74,13 +75,6 @@ function number(value = 0, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function cleanText(value = "", fallback = "") {
-  const text = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return text || fallback;
-}
 
 function first(...values) {
   for (const value of values) {

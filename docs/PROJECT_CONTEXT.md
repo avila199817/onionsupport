@@ -9,6 +9,8 @@ El [refinamiento de Home, acceso y servicios](releases/2026-09-12-public-polish.
 
 ## Estado del proyecto y evidencia
 
+La [continuación incremental de PRIVATE](releases/2026-09-12-private-reduction.md) parte de #588, `7adf5035`, ya presente en main y equivalente al último árbol local anterior a la interrupción. Elimina 1.026 líneas netas de runtime mediante render directo de identidad/alcance/conteos y consumo de helpers existentes. No añade stores ni motores paralelos. La evidencia de validación conjunta y despliegue corresponde a su propia PR; los runs de las entregas anteriores conservan su alcance histórico.
+
 La [consolidación privada del 2026-09-12](releases/2026-09-12-private-centralization.md) extiende la base descrita abajo: montaje y actualización modal compartidos, reconciliación confirmada Cuenta/Usuarios sobre Core, avatar explícito de Cuenta y selectores comunes de estadísticas. Corrige respuestas de otra sesión, cachés obsoletas y totales aparentes calculados con páginas parciales. La PR de esa entrega acredita pruebas y publicación del SHA concreto; los runs históricos de esta sección conservan su revisión original y no se reutilizan como evidencia del cambio nuevo.
 
 La entrega actual centraliza la apertura de detalle en una sola sesión para Home, listas y relaciones de Incidencias, Facturas, Clientes y Usuarios. Su implementación, resultados locales y evidencia de CI del candidato de [PR #552](https://github.com/avila199817/onionsupport/pull/552) constan en [2026-09-08-single-modal-session.md](releases/2026-09-08-single-modal-session.md).

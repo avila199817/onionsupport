@@ -38,7 +38,12 @@ require(TEMPLATE, "Exportar cargadas", "Partial CSV export must say that only lo
 require(TEMPLATE, "Actualización detenida.", "Refresh failure must expose actionable copy")
 require(TEMPLATE, 'data-facturas-action="${FACTURAS_ACTIONS.REFRESH}"', "Refresh failure must expose a retry action")
 reject(TEMPLATE, "Usa Actualizar para reintentar", "Facturas must not reference the removed manual Actualizar button")
-reject(TEMPLATE, "counts[filter.key]", "Server-filter pills must not display misleading partial counts")
+# Counts now render directly from the same projection as the header. The runtime
+# private-kpi-contract checks missing/uncertain/global/loaded scopes and filtering;
+# reject a second local counter, not the legitimate projection lookup itself.
+reject(TEMPLATE, "computeFilterCounts(", "Filter pills must not recalculate counts from filtered rows")
+require(TEMPLATE, "renderFilters(data, listState, stats)", "Filter pills must receive the header statistics projection")
+require(TEMPLATE, "${renderHeader(payload, stats)}${renderCards(payload, stats)}", "Header and filters must render the same statistics snapshot")
 
 # Runtime cache and stale fallbacks must never cross a server-query boundary.
 require(API, "getFacturasListContextKey", "API must expose a canonical list context key")

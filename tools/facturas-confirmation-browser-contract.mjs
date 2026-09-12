@@ -111,7 +111,14 @@ try {
     assert.equal(await page.evaluate(() => __paymentCalls.length), 0);
   });
 
-  await scenario("double activation records one payment and retains the busy close guard", async () => {
+  await scenario("double activation preserves one payment, busy close guard and stable detail DOM", async () => {
+    await page.evaluate(() => {
+      window.__detailNodes = [
+        document.querySelector("[data-facturas-detail-root='true']"),
+        document.querySelector("[data-facturas-detail-overlay='true']"),
+        document.querySelector("[data-facturas-detail-modal='true']"),
+      ];
+    });
     await page.locator(payment).evaluate((node) => { node.click(); node.click(); });
     assert.equal(await page.locator(confirm).count(), 1);
     await page.locator(confirm).evaluate((node) => { node.click(); node.click(); });
@@ -119,9 +126,21 @@ try {
     await page.keyboard.press("Escape");
     assert.equal(await page.locator(panel).count(), 1);
     assert.deepEqual(await page.evaluate(() => __paymentCalls), [["fixture-factura-1"]]);
+    const scroll = await page.locator(panel).evaluate((node) => {
+      node.focus({ preventScroll: true });
+      const body = node.querySelector("[data-facturas-detail-body-shell='true']");
+      body.scrollTop = 80;
+      return body.scrollTop;
+    });
+    assert.ok(scroll > 0, "Real invoice content provides a scrollable detail body");
     await page.evaluate(() => __finishPayment());
     await page.getByText("Factura marcada como pagada correctamente.", { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => __paymentCalls.length), 1);
+    assert.deepEqual(await page.locator(panel).evaluate((node) => ({
+      retained: __detailNodes.every((element) => element.isConnected),
+      focused: document.activeElement === node,
+      scroll: node.querySelector("[data-facturas-detail-body-shell='true']").scrollTop,
+    })), { retained: true, focused: true, scroll });
   });
 
   await scenario("owner release cancels a pending payment decision", async () => {

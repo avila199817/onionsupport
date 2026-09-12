@@ -25,6 +25,9 @@ import {
 export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =
   "incidencias.template.create.extreme.v26.canonical-user-contact-summary";
 
+const INCIDENCIAS_CREATE_AVATAR_IDENTITY_VERSION =
+  "incidencias.create-avatar-identity.v1-global-authority";
+
 export const CREATE_ACTIONS = Object.freeze({
   CLOSE: "create-close",
   SUBMIT: "create-submit",
@@ -513,11 +516,15 @@ function renderSelect({
    ADMIN TARGET USER
 ========================================================= */
 
-function renderUserAvatar(user = {}, className = "inc-create-user-avatar") {
+function renderUserAvatar(user = {}, className = "inc-create-user-avatar", source = "incidencias-create-search-result") {
   const safeUser = normalizeUserResult(user);
   const avatar = safeImageSrc(safeUser.avatarUrl || safeUser.avatar);
   const tone = attr(String(safeUser.tone));
-  const common = `data-avatar-system="true" data-avatar-host="true" data-avatar-tone="${tone}" data-avatar-identity="${attr(safeUser.avatarIdentity)}" data-avatar-initials="${attr(safeUser.initials)}" data-has-avatar="${avatar ? "true" : "false"}"`;
+  const common = `data-avatar-system="true" data-avatar-host="true" data-avatar-tone="${tone}" data-avatar-identity="${attr(safeUser.avatarIdentity)}" data-avatar-initials="${attr(safeUser.initials)}" data-has-avatar="${avatar ? "true" : "false"}"
+    data-avatar-authority="global" data-avatar-source="${attr(source)}"
+    data-avatar-name="${attr(safeUser.name)}" data-avatar-email="${attr(safeUser.email)}"
+    data-avatar-user-id="${attr(safeUser.userId)}" data-avatar-username="${attr(safeUser.username)}"
+    data-avatar-identity-contract="${INCIDENCIAS_CREATE_AVATAR_IDENTITY_VERSION}"`;
 
   return `<span class="${attr(className)} ${avatar ? "has-image" : "is-fallback"}" ${common}>${avatar ? `<img data-avatar-image="true" src="${attr(avatar)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : ""}<span data-avatar-fallback="true">${escapeHtml(safeUser.initials)}</span></span>`;
 }
@@ -543,7 +550,7 @@ function renderSelectedUser(vm = {}) {
   return `
     <div class="inc-create-selected-user" data-create-selected-user="true">
       <div class="inc-create-selected-user-main">
-        ${renderUserAvatar(user, "inc-create-target-user-avatar")}
+        ${renderUserAvatar(user, "inc-create-target-user-avatar", "incidencias-create-selected-user")}
         <span class="inc-create-selected-user-copy">
           <strong>${escapeHtml(user.displayName || "Usuario seleccionado")}</strong>
           <span>${escapeHtml(subtitle)}</span>
@@ -1097,6 +1104,23 @@ export function validateCreateForm(form = {}) {
 export function getCreateTemplateSnapshot() {
   return {
     version: INCIDENCIAS_CREATE_TEMPLATE_VERSION,
+    avatarIdentity: {
+      version: INCIDENCIAS_CREATE_AVATAR_IDENTITY_VERSION,
+      policy: {
+        globalAvatarAuthority: true,
+        explicitNameSeed: true,
+        explicitEmailSeed: true,
+        explicitUserIdSeed: true,
+        microsoftPersonaPresentation: true,
+        noFallbackTextAsIdentitySeed: true,
+        selectedUserCovered: true,
+        searchResultsCovered: true,
+        noDom: true,
+        noHttp: true,
+        noStorage: true,
+        noLocalPalette: true,
+      },
+    },
     actions: CREATE_ACTIONS,
     fields: [
       "targetUserSearch",

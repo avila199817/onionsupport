@@ -676,15 +676,6 @@ function filterAndSortFacturas(items = [], input = {}) {
 
 const isFilterActive = (input = {}) => getActiveFilter(input) !== "all" || Boolean(getSearchQuery(input));
 
-function computeFilterCounts(items = [], input = {}) {
-  const search = getSearchQuery(input);
-  const searchable = safeArray(items).filter((item) => itemMatchesSearch(item, search));
-  return FILTERS.reduce((acc, filter) => {
-    acc[filter.key] = searchable.filter((item) => itemMatchesFilter(item, filter.key)).length;
-    return acc;
-  }, {});
-}
-
 /* =========================================================
    STATS / LIST STATE
 ========================================================= */
@@ -872,8 +863,10 @@ function renderSearch(input = {}) {
     </div>`;
 }
 
-function renderFilters(input = {}, listState = {}) {
+function renderFilters(input = {}, listState = {}, stats = {}) {
   const data = safeObject(input);
+  const counts = { all: stats.total, pending: stats.pendingCount, paid: stats.paidCount, overdue: stats.overdueCount };
+  const countsKnown = Object.values(counts).every((count) => count !== null);
   const activeFilter = normalizeFilter(listState.activeFilter || getActiveFilter(data));
   const sortMode = normalizeSort(listState.sortMode || getSortMode(data));
   const option = getSortOption(sortMode);
@@ -885,7 +878,7 @@ function renderFilters(input = {}, listState = {}) {
       <div class="facturas-filter-pills" role="group" aria-label="Filtrar facturas por estado de pago">
         ${FILTERS.map((filter) => {
           const active = filter.key === activeFilter;
-          return `<button type="button" class="facturas-filter-pill${active ? " is-active" : ""}" data-facturas-action="${FACTURAS_ACTIONS.FILTER}" data-action="${FACTURAS_ACTIONS.FILTER}" data-filter="${attr(filter.key)}" data-filter-status="${attr(filter.key)}" data-payment-filter="${attr(filter.key)}" aria-pressed="${active ? "true" : "false"}"><span>${escapeHtml(filter.label)}</span></button>`;
+          return `<button type="button" class="facturas-filter-pill${active ? " is-active" : ""}" data-facturas-action="${FACTURAS_ACTIONS.FILTER}" data-action="${FACTURAS_ACTIONS.FILTER}" data-filter="${attr(filter.key)}" data-filter-status="${attr(filter.key)}" data-payment-filter="${attr(filter.key)}" aria-pressed="${active ? "true" : "false"}"><span>${escapeHtml(filter.label)}</span>${countsKnown ? `<strong data-facturas-filter-count="true">${escapeHtml(String(counts[filter.key]))}</strong>` : ""}</button>`;
         }).join("")}
       </div>
       <div class="facturas-sort-pills" role="group" aria-label="Ordenar listado de facturas" data-current-sort="${attr(sortMode)}">
@@ -1000,11 +993,10 @@ function renderInfiniteScrollFooter(listState = {}, state = {}) {
    HEADER
 ========================================================= */
 
-export function renderHeader(input = {}) {
+export function renderHeader(input = {}, stats = resolveHeaderStats(input, getInputItems(input))) {
   const data = safeObject(input);
   const rows = sortFacturas(getInputItems(data), { sort: "date_desc" });
   const runtime = getRuntimeState(data);
-  const stats = resolveHeaderStats(data, rows);
   const canCreateFactura = isAdmin(data);
   const updatedAt = first(data.lastUpdatedAt, runtime.lastSyncAt, data.updatedAt, runtime.updatedAt, ...rows.map(getUpdatedAt));
   const remoteCount = getRemoteTotal(data, stats.total);
@@ -1044,7 +1036,8 @@ export function renderFacturasLoadingState(input = {}) {
     loading: true,
     state: { ...getRuntimeState(data), loading: true },
   };
-  return `<section class="facturas-view-root facturas-view-root--loading" data-facturas-scope="true" data-template-version="${attr(FACTURAS_TEMPLATE_VERSION)}" aria-busy="true">${renderHeader(payload)}${renderCards(payload)}</section>`;
+  const stats = resolveHeaderStats(payload, getInputItems(payload));
+  return `<section class="facturas-view-root facturas-view-root--loading" data-facturas-scope="true" data-template-version="${attr(FACTURAS_TEMPLATE_VERSION)}" aria-busy="true">${renderHeader(payload, stats)}${renderCards(payload, stats)}</section>`;
 }
 
 export function renderFacturasErrorState(message = "No se pudieron cargar las facturas.") {
@@ -1054,7 +1047,7 @@ export function renderFacturasErrorState(message = "No se pudieron cargar las fa
 export const renderLoadingState = renderFacturasLoadingState;
 export const renderErrorState = renderFacturasErrorState;
 
-export function renderCards(input = {}) {
+export function renderCards(input = {}, stats = resolveHeaderStats(input, getInputItems(input))) {
   const data = safeObject(input);
   const items = getInputItems(data);
   const runtime = getRuntimeState(data);
@@ -1082,7 +1075,7 @@ export function renderCards(input = {}) {
       : `Mostrando ${visibleLabel} de ${remoteLabel} · orden ${sortLabel}`;
 
   return `<section class="facturas-history">
-    <div class="facturas-history-head"><div class="facturas-history-copy"><h2 class="facturas-history-title">Historial de facturas</h2><p class="facturas-history-subtitle">${escapeHtml(subtitle)}</p></div>${renderFilters(data, listState)}</div>
+    <div class="facturas-history-head"><div class="facturas-history-copy"><h2 class="facturas-history-title">Historial de facturas</h2><p class="facturas-history-subtitle">${escapeHtml(subtitle)}</p></div>${renderFilters(data, listState, stats)}</div>
     ${showInitialLoading ? `<span id="facturas-list-status" class="facturas-loading-status" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">Cargando facturas...</span>${renderTableLoading(DEFAULT_SKELETON_ROWS)}` : `<div class="facturas-table-wrap${refreshing ? " is-refreshing" : ""}">${showRefreshOverlay ? renderRefreshOverlay() : ""}${listState.visibleItems.length ? `<div class="facturas-table-shell"><table class="facturas-table" role="table" aria-label="Listado de facturas"><colgroup><col class="facturas-table-col--main"><col class="facturas-table-col--status"><col class="facturas-table-col--date"><col class="facturas-table-col--amount"><col class="facturas-table-col--incidencia"><col class="facturas-table-col--actions"></colgroup><thead><tr><th scope="col">Factura / cliente</th><th scope="col">Pago</th><th scope="col">Emitida</th><th scope="col">Total</th><th scope="col">Incidencia</th><th scope="col">Acciones</th></tr></thead><tbody>${listState.visibleItems.map((item) => renderRow(item, runtime)).join("")}</tbody></table></div>${renderInfiniteScrollFooter(listState, runtime)}` : renderEmptyState({ hasError, filtering: listState.filtering, searchQuery })}</div>`}
   </section>`;
 }
@@ -1100,9 +1093,10 @@ export function renderFacturasTemplate(input = {}) {
   if (runtime.error && !items.length) return renderFacturasErrorState(runtime.error);
 
   const payload = { ...data, items, state: runtime };
+  const stats = resolveHeaderStats(payload, items);
   return `<section class="facturas-view-root" data-facturas-scope="true" data-template-version="${attr(FACTURAS_TEMPLATE_VERSION)}" data-total="${attr(String(first(data.total, data.remoteCount, items.length)))}" data-count="${attr(String(items.length))}" aria-busy="${payload.loading || runtime.loading || runtime.refreshing || runtime.loadingMore ? "true" : "false"}">
     ${cleanText(first(data.error, runtime.error), "") ? `<div class="facturas-alert facturas-alert--error" role="alert">${icon("lock")}<span>${escapeHtml(cleanText(first(data.error, runtime.error), ""))}</span></div>` : ""}
-    ${renderHeader(payload)}${renderCards(payload)}${renderFacturasCreateModal(data.createModal || {})}${renderFacturasDetailModal(data.detailModal || {})}
+    ${renderHeader(payload, stats)}${renderCards(payload, stats)}${renderFacturasCreateModal(data.createModal || {})}${renderFacturasDetailModal(data.detailModal || {})}
   </section>`;
 }
 

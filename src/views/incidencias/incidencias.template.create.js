@@ -9,28 +9,21 @@
    - Alinear la validación previa con los límites efectivos del backend.
    - Evitar submits que el backend rechazará por longitud/tamaño total.
    - Conservar el límite visual actual de 100 MB por archivo también en admin.
-   - Sellar la identidad real de los avatares del selector de usuario antes de
-     que AvatarSystem reconcilie el DOM dinámico de la SPA.
+   - Delegar la identidad explícita de los avatares al template original.
 ========================================================= */
 
 import {
   CREATE_ACTIONS,
   getCreateFormDefaults,
   getCreateTemplateSnapshot as getCreateTemplateSnapshotImpl,
-  renderIncidenciasCreateModal as renderIncidenciasCreateModalImpl,
+  renderIncidenciasCreateModal,
   renderIncidenciasCreateModalClosed,
   validateCreateForm as validateCreateFormImpl,
 } from "./incidencias.template.create.impl.js";
-import {
-  INCIDENCIAS_CREATE_AVATAR_IDENTITY_VERSION,
-  getIncidenciasCreateAvatarIdentitySnapshot,
-  sealIncidenciasCreateAvatarMarkup,
-} from "./incidencias.create-avatar-identity.js";
-
-export { CREATE_ACTIONS, getCreateFormDefaults, renderIncidenciasCreateModalClosed };
+export { CREATE_ACTIONS, getCreateFormDefaults, renderIncidenciasCreateModal, renderIncidenciasCreateModalClosed };
 
 export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =
-  "incidencias.template.create.extreme.v28.global-avatar-identity";
+  "incidencias.template.create.extreme.v29.direct-avatar-identity";
 
 const MIB = 1024 * 1024;
 
@@ -93,11 +86,6 @@ function formatBytes(bytes = 0) {
   return `${(size / 1024 / 1024 / 1024).toFixed(0)} GB`;
 }
 
-export function renderIncidenciasCreateModal(input = {}) {
-  const html = renderIncidenciasCreateModalImpl(input);
-  return sealIncidenciasCreateAvatarMarkup(html, input);
-}
-
 export function validateCreateForm(form = {}) {
   const result = validateCreateFormImpl(form);
   const current = result?.form || form || {};
@@ -152,7 +140,6 @@ export function validateCreateForm(form = {}) {
 
 export function getCreateTemplateSnapshot() {
   const snapshot = getCreateTemplateSnapshotImpl();
-  const avatarIdentity = getIncidenciasCreateAvatarIdentitySnapshot();
 
   return {
     ...snapshot,
@@ -161,10 +148,6 @@ export function getCreateTemplateSnapshot() {
       ...(snapshot?.limits || {}),
       client: INCIDENCIAS_CREATE_LIMITS.client,
       admin: INCIDENCIAS_CREATE_LIMITS.admin,
-    },
-    avatarIdentity: {
-      version: INCIDENCIAS_CREATE_AVATAR_IDENTITY_VERSION,
-      ...(avatarIdentity || {}),
     },
     policy: {
       ...(snapshot?.policy || {}),

@@ -12,6 +12,7 @@
    - No listar clientes, no paginar, no navegar y no crear un segundo ClientesView.
 ========================================================= */
 
+import { cleanText } from "../../core/presentation-text.js";
 import {
   createModalLifecycle,
   restoreModalFocus,
@@ -57,13 +58,6 @@ function safeObject(value, fallback = {}) {
   return isObject(value) ? value : fallback;
 }
 
-function cleanText(value = "", fallback = "") {
-  const text = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return text || fallback;
-}
 
 function first(...values) {
   for (const value of values) {

@@ -1,3 +1,4 @@
+import { cleanText, escapeHtml } from "../../core/presentation-text.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 /* =========================================================
    Onion Support - Clientes Create Template
@@ -191,18 +192,6 @@ function safeArray(value) {
   return [];
 }
 
-function cleanText(
-  value = "",
-  fallback = ""
-) {
-  const text =
-    String(value ?? "")
-      .replace(/[\r\n\t]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-  return text || fallback;
-}
 
 /*
   No aplanar arrays.
@@ -243,16 +232,6 @@ function first(...values) {
   return null;
 }
 
-function escapeHtml(
-  value = ""
-) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
 
 function attr(
   value = ""

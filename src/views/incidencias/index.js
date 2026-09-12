@@ -26,10 +26,6 @@ import {
   INCIDENCIAS_CREATE_USER_COMBOBOX_VERSION,
 } from "./incidencias.create-user-combobox.js";
 import {
-  installIncidenciasStatsScope,
-  INCIDENCIAS_STATS_SCOPE_VERSION,
-} from "./incidencias.stats-scope.js";
-import {
   installIncidenciasDetailAttachmentPolicy,
   INCIDENCIAS_DETAIL_ATTACHMENT_POLICY_VERSION,
 } from "./incidencias.detail-attachment-policy.js";
@@ -502,11 +498,6 @@ async function mountIncidenciasOwner(host = null, context = {}) {
     document: documentLike,
   });
 
-  const uninstallStatsScope = detailOnly ? null : installIncidenciasStatsScope({
-    host,
-    document: documentLike,
-  });
-
   const uninstallDetailAttachmentPolicy = installIncidenciasDetailAttachmentPolicy({
     document: documentLike,
     root: lease?.modalHost,
@@ -542,7 +533,6 @@ async function mountIncidenciasOwner(host = null, context = {}) {
     "__incidenciasModalCloseFailsafeInstalled",
     ...(!detailOnly ? [
       "__incidenciasCreateUserComboboxInstalled",
-      "__incidenciasStatsScopeInstalled",
       "__incidenciasHotListInstalled",
     ] : []),
   ]) {
@@ -582,7 +572,6 @@ async function mountIncidenciasOwner(host = null, context = {}) {
     uninstallModalCloseFailsafe?.();
     uninstallHotList?.();
     uninstallDetailAttachmentPolicy?.();
-    uninstallStatsScope?.();
     uninstallCombobox?.();
 
     if (routeOwnerController === controller) {
@@ -731,7 +720,6 @@ export function getIncidenciasViewBoundarySnapshot() {
     version: INCIDENCIAS_VIEW_VERSION,
     implementationVersion: Impl.INCIDENCIAS_VIEW_VERSION,
     createUserComboboxVersion: INCIDENCIAS_CREATE_USER_COMBOBOX_VERSION,
-    statsScopeVersion: INCIDENCIAS_STATS_SCOPE_VERSION,
     detailAttachmentPolicyVersion: INCIDENCIAS_DETAIL_ATTACHMENT_POLICY_VERSION,
     hotListVersion: INCIDENCIAS_HOT_LIST_VERSION,
     role: resolveBoundaryRole(),

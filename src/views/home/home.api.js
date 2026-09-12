@@ -14,6 +14,7 @@
    - Sin DOM, Router, Store, Storage ni fetch propio.
 ========================================================= */
 
+import { cleanText } from "../../core/presentation-text.js";
 import { AppCore } from "../../core/index.js";
 import { onDomainChanged } from "../../core/domain-events.js";
 import { getIncidenciaEntityId, getFacturaEntityId } from "../../core/entity-identity.js";
@@ -68,14 +69,6 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function cleanText(value = "", fallback = "") {
-  const text = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return text || fallback;
-}
 
 function first(...values) {
   for (const value of values) {

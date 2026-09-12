@@ -1,211 +1,76 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
+import { renderIncidenciasTemplate, renderIncidenciasLoadingState } from "../../src/views/incidencias/incidencias.template.js";
+import { buildIncidenciasFilterFacetPresentation } from "../../src/views/incidencias/incidencias.filter-facets.js";
 
-import {
-  getIncidenciasStatsScopePresentation,
-  getIncidenciasStatsScopeSnapshot,
-  installIncidenciasStatsScope,
-} from "../../src/views/incidencias/incidencias.stats-scope.js";
-
-const partial = getIncidenciasStatsScopePresentation({ partial: true });
-assert.equal(partial.scope, "loaded");
-assert.equal(partial.cards.open.label, "Abiertas cargadas");
-assert.equal(partial.cards.closed.label, "Cerradas cargadas");
-assert.equal(partial.cards.urgent.label, "Urgentes cargadas");
-assert.equal(partial.cards.amount.label, "Importe cargado");
-assert.equal(partial.attachmentsSuffix, " en cargadas");
-
-const partialWithExactFacets = getIncidenciasStatsScopePresentation({
-  partial: true,
-  facetsExact: true,
-});
-assert.equal(partialWithExactFacets.scope, "loaded");
-assert.equal(partialWithExactFacets.cards.open.scope, "complete");
-assert.equal(partialWithExactFacets.cards.open.label, "Abiertas");
-assert.equal(partialWithExactFacets.cards.closed.label, "Cerradas");
-assert.equal(partialWithExactFacets.cards.urgent.label, "Urgentes");
-assert.equal(partialWithExactFacets.cards.amount.scope, "loaded");
-assert.equal(partialWithExactFacets.cards.amount.label, "Importe cargado");
-assert.equal(partialWithExactFacets.attachmentsSuffix, " en cargadas");
-
-const complete = getIncidenciasStatsScopePresentation({ partial: false });
-assert.equal(complete.scope, "complete");
-assert.equal(complete.cards.open.label, "Abiertas");
-assert.equal(complete.cards.closed.label, "Cerradas");
-assert.equal(complete.cards.urgent.label, "Urgentes");
-assert.equal(complete.cards.amount.label, "Importe asociado");
-assert.equal(complete.attachmentsSuffix, "");
-
-const snapshot = getIncidenciasStatsScopeSnapshot();
-assert.equal(snapshot.policy.zeroHttp, true);
-assert.equal(snapshot.policy.zeroMetricRecalculation, true);
-assert.equal(snapshot.policy.loadedMetricsExplicitWhenPartial, true);
-assert.equal(snapshot.policy.exactFacetCountsRemainGlobal, true);
-assert.equal(snapshot.policy.attributeTransitionsObserved, true);
-assert.equal(snapshot.policy.canonicalCopyRestoredWhenComplete, true);
-assert.equal(snapshot.policy.valuesRemainControllerOwned, true);
-
-let mutationCallback = null;
-let observerOptions = null;
-let observerDisconnected = false;
-
-class FakeMutationObserver {
-  constructor(callback) {
-    mutationCallback = callback;
+// Scope belongs to the template that already receives the controller's facet
+// presentation. Inspect its first output, without a DOM repair pass.
+const items = [{ id: "INC-SCOPE-1", subject: "Fixture", status: "open", priority: "high" }];
+const stats = { total: 8, open: 1, closed: 7, urgent: 0, attachments: 16, invoiceTotal: 785.1 };
+const input = { canonical: true, items, total: 22, stats };
+const keys = ["open", "closed", "urgent", "amount"];
+const card = (html, key) => {
+  const markup = html.match(new RegExp(`data-stat="${key}"[^>]*>[\\s\\S]*?<\\/button>`))?.[0] || "";
+  assert.ok(markup, `Card ${key} is rendered`);
+  return {
+    scope: markup.match(/data-stat-scope="([^"]+)"/)?.[1],
+    label: markup.match(/class="incidencias-stat-label">([^<]*)/)?.[1],
+    value: markup.match(/class="incidencias-stat-value">([^<]*)/)?.[1],
+    text: markup.match(/class="incidencias-stat-text">([^<]*)/)?.[1],
+  };
+};
+const loadedLabels = ["Abiertas cargadas", "Cerradas cargadas", "Urgentes cargadas", "Importe cargado"];
+const completeLabels = ["Abiertas", "Cerradas", "Urgentes", "Importe asociado"];
+const loadedText = ["Solicitudes activas entre las incidencias ya cargadas.", "Casos cerrados entre las incidencias ya cargadas.", "Prioridades altas entre las incidencias ya cargadas.", "Suma asociada únicamente a las incidencias ya cargadas."];
+const completeText = ["Solicitudes activas, pendientes o en proceso.", "Casos resueltos o cerrados.", "Incidencias con prioridad alta.", "Ordenar incidencias de mayor a menor importe."];
+for (const render of [renderIncidenciasTemplate, renderIncidenciasLoadingState]) {
+  let expectedValues;
+  for (const [statsPartial, filterFacetsExact] of [[true, false], [true, true], [false, true], [false, false]]) {
+    const html = render({ ...input, statsPartial, filterFacetsExact });
+    assert.match(html, new RegExp(`data-stats-scope="${statsPartial ? "loaded" : "complete"}"`));
+    assert.match(html, new RegExp(`data-total-greater-than-items="${statsPartial}"`));
+    const cards = keys.map((key) => card(html, key));
+    const scopes = keys.map((key) => statsPartial && (key === "amount" || !filterFacetsExact) ? "loaded" : "complete");
+    assert.deepEqual(cards.map(({ scope }) => scope), scopes);
+    assert.deepEqual(cards.map(({ label }, index) => label), scopes.map((scope, index) => (scope === "loaded" ? loadedLabels : completeLabels)[index]));
+    assert.deepEqual(cards.map(({ text }, index) => text), scopes.map((scope, index) => (scope === "loaded" ? loadedText : completeText)[index]));
+    const values = cards.map(({ value }) => value);
+    expectedValues ??= values;
+    assert.deepEqual(values, expectedValues, "Copy changes never recalculate controller-owned metrics");
+    assert.deepEqual(values.slice(0, 3), ["1", "7", "0"]);
+    assert.ok(html.includes(`16 adjuntos${statsPartial ? " en cargadas" : ""}</span>`));
   }
-
-  observe(_target, options) {
-    observerOptions = options;
-  }
-
-  disconnect() {
-    observerDisconnected = true;
-  }
+  assert.match(render(input), /data-stats-scope="loaded"/, "Absent explicit scope preserves the remote-total fallback");
+  assert.match(render({ ...input, total: items.length }), /data-stats-scope="complete"/);
 }
 
-const runtimeRoot = {
-  dataset: {
-    totalGreaterThanItems: "false",
-    filterFacetsExact: "false",
-  },
-  querySelector() {
-    return null;
-  },
-};
-const runtimeHost = {
-  querySelector(selector) {
-    return selector === "[data-incidencias-scope='true']" ? runtimeRoot : null;
-  },
-};
-const runtimeDocument = {
-  defaultView: {
-    MutationObserver: FakeMutationObserver,
-  },
-  querySelector() {
-    return null;
-  },
-};
-
-const uninstallRuntimeScope = installIncidenciasStatsScope({
-  host: runtimeHost,
-  document: runtimeDocument,
+const responses = Object.fromEntries(["all", "open", "closed", "urgent"].map((key) => [key, { total: key === "all" ? 22 : 3, totalKnown: true, items: [] }]));
+const fromFacets = (facets, extra = {}) => renderIncidenciasTemplate({
+  ...input, total: 3, filter: "open", serverFilterApplied: true,
+  stats: facets.stats, filterCounts: facets.counts,
+  statsPartial: facets.aggregatePartial, filterFacetsExact: facets.exact, ...extra,
 });
+const exact = buildIncidenciasFilterFacetPresentation(responses, { universeStats: stats, universeLoaded: 8 });
+const exactHtml = fromFacets(exact);
+assert.match(exactHtml, /22 solicitudes registradas/);
+assert.equal(card(exactHtml, "closed").label, "Cerradas", "A complete selected filter does not change the aggregate universe");
+assert.equal(card(exactHtml, "amount").label, "Importe cargado");
+for (const flags of [{ totalKnown: false }, { totalIsLowerBound: true }, { total: null }, { meta: { totalKnown: false } }, { pagination: { totalIsLowerBound: true } }]) {
+  const uncertain = buildIncidenciasFilterFacetPresentation({ ...responses, open: { ...responses.open, ...flags } }, { universeStats: stats, universeLoaded: 8 });
+  const html = fromFacets(uncertain);
+  assert.equal(card(html, "open").label, "Abiertas cargadas", "Unknown/lower-bound remote facets remain loaded");
+  assert.equal(card(html, "open").value, "1", "Remote minima cannot replace the loaded count");
+}
+const zeroStats = Object.fromEntries(Object.keys(stats).map((key) => [key, 0]));
+const zero = buildIncidenciasFilterFacetPresentation(Object.fromEntries(Object.keys(responses).map((key) => [key, { total: 0, totalKnown: true, items: [] }])), { universeStats: zeroStats, universeLoaded: 0 });
+const zeroHtml = fromFacets(zero, { items: [], total: 0 });
+assert.equal(card(zeroHtml, "open").label, "Abiertas");
+assert.equal(card(zeroHtml, "open").value, "0", "An exact empty universe preserves explicit zero");
+assert.equal(card(zeroHtml, "amount").label, "Importe asociado");
 
-assert.equal(runtimeRoot.dataset.statsScope, "complete");
-assert.equal(observerOptions?.attributes, true);
-assert.deepEqual(observerOptions?.attributeFilter, [
-  "data-total-greater-than-items",
-  "data-filter-facets-exact",
-]);
-assert.equal(observerOptions?.childList, true);
-assert.equal(observerOptions?.subtree, true);
-
-runtimeRoot.dataset.totalGreaterThanItems = "true";
-mutationCallback?.([
-  {
-    type: "attributes",
-    attributeName: "data-total-greater-than-items",
-    target: runtimeRoot,
-  },
-]);
-await Promise.resolve();
-assert.equal(
-  runtimeRoot.dataset.statsScope,
-  "loaded",
-  "el cambio 8/22 debe etiquetar inmediatamente las métricas como cargadas"
-);
-
-runtimeRoot.dataset.filterFacetsExact = "true";
-mutationCallback?.([
-  {
-    type: "attributes",
-    attributeName: "data-filter-facets-exact",
-    target: runtimeRoot,
-  },
-]);
-await Promise.resolve();
-assert.equal(
-  runtimeRoot.dataset.statsScope,
-  "loaded",
-  "las facetas exactas no convierten en globales importe ni adjuntos"
-);
-
-runtimeRoot.dataset.totalGreaterThanItems = "false";
-mutationCallback?.([
-  {
-    type: "attributes",
-    attributeName: "data-total-greater-than-items",
-    target: runtimeRoot,
-  },
-]);
-await Promise.resolve();
-assert.equal(
-  runtimeRoot.dataset.statsScope,
-  "complete",
-  "el cambio 22/22 debe restaurar el copy canónico"
-);
-
-uninstallRuntimeScope();
-assert.equal(observerDisconnected, true);
-
-const scopeSource = await readFile(
-  new URL("../../src/views/incidencias/incidencias.stats-scope.js", import.meta.url),
-  "utf8"
-);
-const boundarySource = await readFile(
-  new URL("../../src/views/incidencias/index.js", import.meta.url),
-  "utf8"
-);
-const templateSource = await readFile(
-  new URL("../../src/views/incidencias/incidencias.template.js", import.meta.url),
-  "utf8"
-);
-const apiSource = await readFile(
-  new URL("../../src/views/incidencias/incidencias.api.impl.js", import.meta.url),
-  "utf8"
-);
-
-assert.match(
-  templateSource,
-  /data-total-greater-than-items="\$\{vm\.diagnostics\.totalGreaterThanItems \? "true" : "false"\}"/,
-  "la vista debe publicar una señal explícita de historial remoto incompleto"
-);
-assert.match(
-  scopeSource,
-  /root\.dataset\?\.totalGreaterThanItems === "true"/,
-  "el enhancement debe consumir la señal canónica, no inferirla del DOM visible"
-);
-assert.match(
-  templateSource,
-  /data-filter-facets-exact="\$\{vm\.filterFacetsExact \? "true" : "false"\}"/,
-  "la vista debe publicar cuándo las facetas de estado son exactas"
-);
-assert.match(
-  scopeSource,
-  /root\.dataset\?\.filterFacetsExact === "true"/,
-  "el scope debe distinguir facetas exactas de agregados todavía parciales"
-);
-assert.doesNotMatch(
-  scopeSource,
-  /(?:from\s+["'][^"']*core\/http\.js["']|\bHttp\.(?:get|post|put|patch|delete)\s*\(|\bfetch\s*\(|XMLHttpRequest|\/api\/tickets\/stats)/,
-  "el etiquetado de alcance no puede añadir una segunda consulta de stats"
-);
-assert.match(
-  apiSource,
-  /export function computeIncidenciasStats\(items = lastList\.items\)/,
-  "las métricas siguen calculándose sobre la colección cargada"
-);
-assert.match(
-  boundarySource,
-  /installIncidenciasStatsScope/,
-  "la frontera de Incidencias debe instalar el scope de métricas"
-);
-assert.match(
-  boundarySource,
-  /uninstallStatsScope\?\.\(\)/,
-  "el scope de métricas debe desmontarse junto al controller"
-);
-
-console.log(
-  "Incidencias stats scope OK · facetas exactas globales · agregados parciales etiquetados · zero HTTP"
-);
+const boundarySource = await readFile(new URL("../../src/views/incidencias/index.js", import.meta.url), "utf8");
+const templateSource = await readFile(new URL("../../src/views/incidencias/incidencias.template.js", import.meta.url), "utf8");
+assert.doesNotMatch(boundarySource, /installIncidenciasStatsScope|uninstallStatsScope|INCIDENCIAS_STATS_SCOPE_VERSION/);
+assert.doesNotMatch(templateSource, /\bMutationObserver\b|\bfetch\s*\(|\bHttp\.(?:get|post|put|patch|delete)\s*\(/);
+await assert.rejects(access(new URL("../../src/views/incidencias/incidencias.stats-scope.js", import.meta.url)), { code: "ENOENT" });
+console.log("Incidencias stats scope OK · template-owned first render · exact/loaded/zero/lower-bound · no observer or HTTP");

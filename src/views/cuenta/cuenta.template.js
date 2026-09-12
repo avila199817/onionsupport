@@ -1,3 +1,4 @@
+import { cleanText as safeText, escapeHtml } from "../../core/presentation-text.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { userNameFromIdentity } from "../../core/user-identity.js";
 /* =========================================================
@@ -199,13 +200,6 @@ function safeObject(value, fallback = {}) {
   return isObject(value) ? value : fallback;
 }
 
-function safeText(value = "", fallback = "") {
-  const text = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return text || fallback;
-}
 
 function first(...values) {
   for (const value of values) {
@@ -218,14 +212,6 @@ function first(...values) {
   return null;
 }
 
-function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
 
 const attr = escapeHtml;
 

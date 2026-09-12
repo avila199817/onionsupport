@@ -214,7 +214,7 @@ try {
   // Emails in another table cell and requester/technician pairs exposed a drift
   // that the generic data-avatar-name fixture above cannot detect.
   const consumerIdentities = await page.evaluate(async () => {
-    const [users, clients, invoices, tickets, home, invoiceCreate, invoiceDetail, ticketDetail] = await Promise.all([
+    const [users, clients, invoices, tickets, home, invoiceCreate, invoiceDetail, ticketDetail, ticketCreate] = await Promise.all([
       import("/src/views/usuarios/usuarios.template.js"),
       import("/src/views/clientes/clientes.template.js"),
       import("/src/views/facturas/facturas.template.js"),
@@ -223,6 +223,7 @@ try {
       import("/src/views/facturas/facturas.template.create.js"),
       import("/src/views/facturas/facturas.template.modal.js"),
       import("/src/views/incidencias/incidencias.template.modal.js"),
+      import("/src/views/incidencias/incidencias.template.create.js"),
     ]);
     const user = { id: "fixture-user-314", userId: "fixture-user-314", name: "Ana López", email: "ana@example.test", role: "user", status: "active" };
     const technician = { userId: "ON-TECH-271", name: "Beatriz Moreno", email: "beatriz@example.test" };
@@ -254,6 +255,10 @@ try {
       ["Facturas list without email", invoices.renderFacturasTemplate({ items: [{ ...invoice, clienteNombre: clientWithoutEmail.name, clienteEmail: "" }] }), ".facturas-avatar", clientWithoutEmail],
       ["Facturas without user identity", invoiceDetail.renderFacturasDetailModal({ open: true, factura: { id: invoice.id, clienteId: client.id, clienteNombre: clientWithoutEmail.name } }), ".facturas-detail-avatar", { name: clientWithoutEmail.name }],
       ["Incidencias requester", tickets.renderIncidenciasTemplate({ items: [ticket] }), ".incidencias-avatar", user],
+      ["Incidencias selected user", ticketCreate.renderIncidenciasCreateModal({ open: true, admin: true, form: { targetUserId: user.userId, targetClienteId: client.id, targetUserName: user.name, targetUserEmail: user.email }, userSearch: { selectedUser: user } }), ".inc-create-target-user-avatar", user],
+      ["Incidencias user search", ticketCreate.renderIncidenciasCreateModal({ open: true, admin: true, userSearch: { results: [user] } }), ".inc-create-user-avatar", user],
+      ["Incidencias selected user without aliases", ticketCreate.renderIncidenciasCreateModal({ open: true, admin: true, form: { targetUserId: user.userId, targetUserName: user.name } }), ".inc-create-target-user-avatar", { userId: user.userId, name: user.name }],
+      ["Incidencias user search username fallback", ticketCreate.renderIncidenciasCreateModal({ open: true, admin: true, userSearch: { results: [{ name: user.name, username: "ana.alias" }] } }), ".inc-create-user-avatar", { name: user.name, username: "ana.alias" }],
       ["Incidencias detail requester", ticketDetail.renderIncidenciasDetailModal({ open: true, detail: ticket }), "[data-modal-avatar-frame='true']", user],
       ["Incidencias detail technician", ticketDetail.renderIncidenciasDetailModal({ open: true, detail: ticket }), "[data-modal-technician-avatar-frame='true']", technician],
       ["Incidencias technician", tickets.renderIncidenciasTemplate({ items: [ticket] }), ".incidencias-assigned-avatar", technician],

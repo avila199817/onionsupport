@@ -195,7 +195,7 @@ function renderRequestField() {
           type="text"
           autocomplete="username"
           inputmode="email"
-          placeholder="Pon tu correo"
+          placeholder="correo@dominio.com"
           maxlength="320"
           required
           spellcheck="false"

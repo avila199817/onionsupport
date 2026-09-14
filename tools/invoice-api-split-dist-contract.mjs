@@ -16,7 +16,10 @@ const JS_ROOT = resolve(DIST, "assets/js");
 // Ceilings allow 1567 / 1040 / 2593 bytes (1.00% / 1.65% / 1.20%) for
 // bounded maintenance, not another invoice graph. Groups overlap; never add
 // them or interpret source bytes as latency. See the canonical cleanup log.
-const BUDGETS = Object.freeze({ app: 158000, auth: 64000, bootstrapPublicHome: 218000 });
+// PR 598 adds one lazy private Agenda route. Its measured bootstrap/Home union
+// is 218296 raw bytes; keep a narrow 204-byte route-metadata buffer while the
+// app/auth ceilings remain unchanged.
+const BUDGETS = Object.freeze({ app: 158000, auth: 64000, bootstrapPublicHome: 218500 });
 
 function staticImports(code, identifier) {
   // PARSE ONLY. Never link, evaluate or supply a dynamic-import callback.

@@ -61,10 +61,6 @@ export const ROUTE_PATHS = Object.freeze({
     ROUTES.incidencias ||
     "/incidencias",
 
-  AGENDA:
-    ROUTES.agenda ||
-    "/agenda",
-
   FACTURAS:
     ROUTES.facturas ||
     "/facturas",
@@ -122,7 +118,6 @@ export const ROUTE_NAMES = Object.freeze({
   PUBLIC_HOME: "public-home",
   HOME: "home",
   INCIDENCIAS: "incidencias",
-  AGENDA: "agenda",
   FACTURAS: "facturas",
   CLIENTES: "clientes",
   USUARIOS: "usuarios",
@@ -443,7 +438,6 @@ function isSingleSegmentChildPath(
     !suffix.includes("/")
   );
 }
-
 
 const PRIVATE_DETAIL_TICKET_PATTERN =
   /^INC-[A-Z0-9-]{6,120}$/i;
@@ -767,7 +761,6 @@ export function isHomePath(
 
 const VIEW_SPECS = Object.freeze({
   "public-home": Object.freeze({
-    moduleKey: "public-home",
     loadModule: () =>
       import(
         "../views/public/home/index.js"
@@ -778,7 +771,6 @@ const VIEW_SPECS = Object.freeze({
   }),
 
   home: Object.freeze({
-    moduleKey: "home",
     loadModule: () =>
       import(
         "../views/home/index.js"
@@ -789,7 +781,6 @@ const VIEW_SPECS = Object.freeze({
   }),
 
   incidencias: Object.freeze({
-    moduleKey: "incidencias",
     loadModule: () =>
       import(
         "../views/incidencias/index.js"
@@ -800,18 +791,13 @@ const VIEW_SPECS = Object.freeze({
   }),
 
   agenda: Object.freeze({
-    moduleKey: "agenda",
     loadModule: () =>
       import(
         "../views/agenda/index.js"
       ),
-    names: Object.freeze([
-      "AgendaView",
-    ]),
   }),
 
   facturas: Object.freeze({
-    moduleKey: "facturas",
     loadModule: () =>
       import(
         "../views/facturas/index.js"
@@ -822,7 +808,6 @@ const VIEW_SPECS = Object.freeze({
   }),
 
   clientes: Object.freeze({
-    moduleKey: "clientes",
     loadModule: () =>
       import(
         "../views/clientes/index.js"
@@ -833,7 +818,6 @@ const VIEW_SPECS = Object.freeze({
   }),
 
   usuarios: Object.freeze({
-    moduleKey: "usuarios",
     loadModule: () =>
       import(
         "../views/usuarios/index.js"
@@ -844,7 +828,6 @@ const VIEW_SPECS = Object.freeze({
   }),
 
   empleados: Object.freeze({
-    moduleKey: "empleados",
     loadModule: () =>
       import(
         "../views/empleados/index.js"
@@ -855,7 +838,6 @@ const VIEW_SPECS = Object.freeze({
   }),
 
   whatsapp: Object.freeze({
-    moduleKey: "whatsapp",
     loadModule: () =>
       import(
         "../views/whatsapp/index.js"
@@ -866,7 +848,6 @@ const VIEW_SPECS = Object.freeze({
   }),
 
   correo: Object.freeze({
-    moduleKey: "correo",
     loadModule: () =>
       import(
         "../views/correo/index.js"
@@ -877,7 +858,6 @@ const VIEW_SPECS = Object.freeze({
   }),
 
   servidor: Object.freeze({
-    moduleKey: "servidor",
     loadModule: () =>
       import(
         "../views/server/index.js"
@@ -889,7 +869,6 @@ const VIEW_SPECS = Object.freeze({
   }),
 
   cuenta: Object.freeze({
-    moduleKey: "cuenta",
     loadModule: () =>
       import(
         "../views/cuenta/index.js"
@@ -911,7 +890,6 @@ const VIEW_SPECS = Object.freeze({
   }),
 
   login: Object.freeze({
-    moduleKey: "login",
     loadModule: () =>
       import(
         "../views/public/login/index.js"
@@ -950,7 +928,6 @@ const VIEW_SPECS = Object.freeze({
   }),
 
   "activate-account": Object.freeze({
-    moduleKey: "activate-account",
     loadModule: () =>
       import(
         "../views/public/activate-account/index.js"
@@ -987,7 +964,10 @@ function getViewSpec(viewKey = "") {
   return VIEW_SPECS[key] || null;
 }
 
-async function loadModuleOnce(spec = null) {
+async function loadModuleOnce(
+  spec = null,
+  moduleKeyFallback = ""
+) {
   if (
     !spec ||
     !isFunction(spec.loadModule)
@@ -999,6 +979,7 @@ async function loadModuleOnce(spec = null) {
 
   const moduleKey = cleanName(
     spec.moduleKey ||
+    moduleKeyFallback ||
     "view-module"
   );
 
@@ -1053,7 +1034,7 @@ async function loadView(
 
   if (!VIEW_PROMISE_CACHE.has(key)) {
     const promise = Promise.resolve()
-      .then(() => loadModuleOnce(spec))
+      .then(() => loadModuleOnce(spec, key))
       .then((module) => {
         const view = pickView(
           module,
@@ -1527,10 +1508,8 @@ const ROUTE_DEFINITIONS = Object.freeze([
   }),
 
   createRoute({
-    path: ROUTE_PATHS.AGENDA,
-    name: ROUTE_NAMES.AGENDA,
+    path: ROUTES.agenda,
     title: "Agenda",
-    viewKey: "agenda",
     order: 25,
   }),
 

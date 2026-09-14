@@ -93,6 +93,10 @@ const STYLE_MANIFEST = Object.freeze({
     "/src/css/views/incidencias/media-preview.css",
   ]),
 
+  agenda: Object.freeze([
+    "/src/css/views/agenda/index.css",
+  ]),
+
   facturas: Object.freeze([
     "/src/css/views/facturas/index.css",
     "/src/css/views/facturas/create.css",

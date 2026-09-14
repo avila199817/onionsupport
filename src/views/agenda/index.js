@@ -288,7 +288,7 @@ function renderWorkspace(state) {
           <section class="agenda-mini" aria-label="Calendario mensual pequeño">
             <div class="agenda-mini-head">
               <strong data-agenda-mini-title>${escapeHtml(miniMonthLabel(state.visible))}</strong>
-              <span>${state.visible.getFullYear()}</span>
+              <span data-agenda-mini-year>${state.visible.getFullYear()}</span>
               <div class="agenda-mini-actions">
                 <button type="button" data-agenda-action="prev-month" aria-label="Mes anterior">${icon("chevronLeft")}</button>
                 <button type="button" data-agenda-action="next-month" aria-label="Mes siguiente">${icon("chevronRight")}</button>
@@ -301,11 +301,11 @@ function renderWorkspace(state) {
 
           <section class="agenda-calendars" aria-labelledby="agenda-calendars-title">
             <h2 id="agenda-calendars-title">Calendarios</h2>
-            <button class="agenda-calendar-row is-active" type="button" aria-pressed="true">
+            <div class="agenda-calendar-row is-active" aria-current="true">
               <span class="agenda-calendar-color" aria-hidden="true"></span>
               <span>Agenda principal</span>
               <i aria-hidden="true">${icon("check")}</i>
-            </button>
+            </div>
           </section>
 
           <div class="agenda-side-note">
@@ -362,12 +362,14 @@ function createController(host, context = {}) {
 
     const title = host.querySelector("[data-agenda-month-title]");
     const miniTitle = host.querySelector("[data-agenda-mini-title]");
+    const miniYear = host.querySelector("[data-agenda-mini-year]");
     const miniCalendar = host.querySelector("[data-agenda-mini-calendar]");
     const mainCalendar = host.querySelector("[data-agenda-main-calendar]");
     const inspector = host.querySelector("[data-agenda-inspector]");
 
     if (title) title.textContent = monthLabel(state.visible);
     if (miniTitle) miniTitle.textContent = miniMonthLabel(state.visible);
+    if (miniYear) miniYear.textContent = String(state.visible.getFullYear());
     if (miniCalendar) miniCalendar.innerHTML = renderMiniCalendar(state);
     if (mainCalendar) mainCalendar.innerHTML = renderMonthGrid(state);
     if (inspector) inspector.innerHTML = renderInspector(state);
@@ -432,21 +434,19 @@ function createController(host, context = {}) {
     }
   }
 
-  render();
-  host.addEventListener("click", onClick);
-
-  const parentSignal = context?.signal;
-  if (parentSignal && typeof parentSignal.addEventListener === "function") {
-    parentSignal.addEventListener("abort", () => {
-      destroy();
-    }, { once: true });
-  }
-
   function destroy() {
     if (destroyed) return;
     destroyed = true;
     host.removeEventListener("click", onClick);
     host.removeAttribute("data-agenda-host");
+  }
+
+  render();
+  host.addEventListener("click", onClick);
+
+  const parentSignal = context?.signal;
+  if (parentSignal && typeof parentSignal.addEventListener === "function") {
+    parentSignal.addEventListener("abort", destroy, { once: true });
   }
 
   return Object.freeze({

@@ -12,7 +12,7 @@
 import { userNameFromIdentity } from "../../core/user-identity.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { technicianIdentity } from "../../features/incidencias-comment-identity/index.js";
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v34-visible-date-minute-precision";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v35-linked-invoice-row-total";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   CREATE_OPEN: "create-open",
@@ -338,14 +338,72 @@ function getAttachmentsCount(it = {}) {
   return Math.max(files.length, num(r.attachmentsCount, 0), num(r.attachmentCount, 0), num(r.filesCount, 0), num(r.adjuntosCount, 0), num(r.meta?.attachmentsCount, 0), num(r.meta?.filesCount, 0));
 }
 
+/*
+  Importe asociado a ESTA incidencia. Para facturas compartidas el backend
+  separa `linkedTotal` (relación real) de `displayTotal` (contribución única al
+  KPI, usada para no duplicar la suma global). La fila debe enseñar siempre la
+  relación real aunque su contribución deduplicada sea cero.
+*/
 function getInvoiceTotal(it = {}) {
   const r = unwrap(it);
-  return num(first(r.invoiceTotal, r.invoicesTotal, r.facturasTotal, r.importeFacturas, r.facturaTotal, r.facturaImporte, r.importeFactura, r.totalFactura, r.invoiceAmount, r.billing?.total, r.billing?.amount, r.linkedInvoices?.total, r.linkedInvoices?.amount, r.meta?.invoiceTotal, 0), 0);
+  return num(first(
+    r.invoiceDisplay?.linkedTotal,
+    r.linkedInvoices?.linkedTotal,
+    r.billing?.linkedTotal,
+    r.invoiceSnapshot?.linkedTotal,
+    r.invoiceTotal,
+    r.invoicesTotal,
+    r.facturasTotal,
+    r.importeFacturas,
+    r.facturaTotal,
+    r.facturaImporte,
+    r.importeFactura,
+    r.totalFactura,
+    r.invoiceAmount,
+    r.billing?.total,
+    r.billing?.amount,
+    r.linkedInvoices?.total,
+    r.linkedInvoices?.amount,
+    r.meta?.invoiceTotal,
+    0
+  ), 0);
+}
+
+/*
+  Contribución contable al KPI. En una factura vinculada a varias incidencias
+  sólo una fila aporta el importe; las demás conservan linkedTotal para pintar
+  y ordenar sin inflar la suma global.
+*/
+function getInvoiceContributionTotal(it = {}) {
+  const r = unwrap(it);
+  return num(first(
+    r.invoiceDisplay?.displayTotal,
+    r.invoiceDisplay?.total,
+    r.meta?.invoiceListDisplayTotal,
+    r.invoiceSnapshot?.displayTotal,
+    r.billing?.displayTotal,
+    r.linkedInvoices?.displayTotal,
+    r.invoiceTotal,
+    r.invoicesTotal,
+    r.facturasTotal,
+    r.importeFacturas,
+    r.facturaTotal,
+    r.facturaImporte,
+    r.importeFactura,
+    r.totalFactura,
+    r.invoiceAmount,
+    r.billing?.total,
+    r.billing?.amount,
+    r.linkedInvoices?.total,
+    r.linkedInvoices?.amount,
+    r.meta?.invoiceTotal,
+    0
+  ), 0);
 }
 
 function getCurrency(it = {}) {
   const r = unwrap(it);
-  return txt(first(r.currency, r.moneda, r.facturaCurrency, r.facturaMoneda, r.billing?.currency, r.linkedInvoices?.currency, r.meta?.invoiceCurrency, DEFAULT_CURRENCY), DEFAULT_CURRENCY).toUpperCase();
+  return txt(first(r.currency, r.moneda, r.facturaCurrency, r.facturaMoneda, r.invoiceSnapshot?.currency, r.billing?.currency, r.linkedInvoices?.currency, r.meta?.invoiceCurrency, DEFAULT_CURRENCY), DEFAULT_CURRENCY).toUpperCase();
 }
 
 /* =========================================================
@@ -488,7 +546,7 @@ function statsFrom(items = []) {
     if (isClosed(it)) a.closed += 1;
     if (isUrgent(it)) a.urgent += 1;
     a.attachments += getAttachmentsCount(it);
-    a.invoiceTotal += getInvoiceTotal(it);
+    a.invoiceTotal += getInvoiceContributionTotal(it);
     a.lastUpdateTs = Math.max(a.lastUpdateTs, itemTime(it));
     return a;
   }, { total: 0, open: 0, closed: 0, urgent: 0, attachments: 0, invoiceTotal: 0, lastUpdateTs: 0 });

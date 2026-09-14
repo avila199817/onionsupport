@@ -68,9 +68,95 @@ assert.equal(card(zeroHtml, "open").label, "Abiertas");
 assert.equal(card(zeroHtml, "open").value, "0", "An exact empty universe preserves explicit zero");
 assert.equal(card(zeroHtml, "amount").label, "Importe asociado");
 
+/*
+  Shared-invoice contract:
+  - both linked rows must paint the invoice amount because both incidences are
+    genuinely associated with that invoice;
+  - only the display owner contributes to the aggregate KPI, so the card must
+    not double-count a shared invoice.
+
+  This is the production shape behind INC-20260902-286839: the backend may
+  legitimately expose invoiceTotal=0 on a secondary row while preserving the
+  real relation in invoiceDisplay.linkedTotal.
+*/
+const sharedInvoiceAmount = 127.05;
+const sharedInvoiceRows = [
+  {
+    id: "INC-INVOICE-OWNER",
+    ticketId: "INC-INVOICE-OWNER",
+    subject: "Owner",
+    status: "closed",
+    priority: "medium",
+    createdAt: "2026-09-01T10:00:00.000Z",
+    updatedAt: "2026-09-10T08:44:00.000Z",
+    invoiceTotal: sharedInvoiceAmount,
+    currency: "EUR",
+    invoiceDisplay: {
+      linkedTotal: sharedInvoiceAmount,
+      displayTotal: sharedInvoiceAmount,
+      total: sharedInvoiceAmount,
+      shared: true,
+      primaryCharge: true,
+      ownerTicketId: "INC-INVOICE-OWNER",
+    },
+    linkedInvoices: {
+      linkedTotal: sharedInvoiceAmount,
+      displayTotal: sharedInvoiceAmount,
+      total: sharedInvoiceAmount,
+      amount: sharedInvoiceAmount,
+      currency: "EUR",
+    },
+  },
+  {
+    id: "INC-20260902-286839",
+    ticketId: "INC-20260902-286839",
+    subject: "PC no enciende y portátil.",
+    status: "closed",
+    priority: "medium",
+    createdAt: "2026-09-02T06:02:00.000Z",
+    updatedAt: "2026-09-10T08:43:00.000Z",
+    invoiceTotal: 0,
+    invoicesTotal: 0,
+    facturasTotal: 0,
+    currency: "EUR",
+    invoiceDisplay: {
+      linkedTotal: sharedInvoiceAmount,
+      displayTotal: 0,
+      total: 0,
+      shared: true,
+      primaryCharge: false,
+      ownerTicketId: "INC-INVOICE-OWNER",
+    },
+    linkedInvoices: {
+      linkedTotal: sharedInvoiceAmount,
+      displayTotal: 0,
+      total: 0,
+      amount: 0,
+      currency: "EUR",
+    },
+  },
+];
+const sharedInvoiceHtml = renderIncidenciasTemplate({
+  items: sharedInvoiceRows,
+  total: sharedInvoiceRows.length,
+  visibleLimit: 20,
+});
+const normalizeMoneyText = (value = "") => String(value).replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+const rowMarkup = (html, id) => html.match(new RegExp(`<tr[^>]*data-ticket-id="${id}"[\\s\\S]*?<\\/tr>`))?.[0] || "";
+const ownerRow = rowMarkup(sharedInvoiceHtml, "INC-INVOICE-OWNER");
+const secondaryRow = rowMarkup(sharedInvoiceHtml, "INC-20260902-286839");
+assert.ok(ownerRow, "Shared invoice owner row is rendered");
+assert.ok(secondaryRow, "Shared invoice secondary row is rendered");
+assert.match(ownerRow, /data-importe-status="paid"/);
+assert.match(secondaryRow, /data-importe-status="paid"/, "A deduplicated secondary row still has a linked invoice amount");
+assert.match(normalizeMoneyText(ownerRow), /127,05\s*€/);
+assert.match(normalizeMoneyText(secondaryRow), /127,05\s*€/, "The list paints linkedTotal instead of the deduplicated scalar zero");
+assert.equal(normalizeMoneyText(card(sharedInvoiceHtml, "amount").value), "127,05 €", "The KPI uses displayTotal and counts a shared invoice once");
+assert.doesNotMatch(normalizeMoneyText(card(sharedInvoiceHtml, "amount").value), /254,10/, "Shared rows never double-count the aggregate amount");
+
 const boundarySource = await readFile(new URL("../../src/views/incidencias/index.js", import.meta.url), "utf8");
 const templateSource = await readFile(new URL("../../src/views/incidencias/incidencias.template.js", import.meta.url), "utf8");
 assert.doesNotMatch(boundarySource, /installIncidenciasStatsScope|uninstallStatsScope|INCIDENCIAS_STATS_SCOPE_VERSION/);
 assert.doesNotMatch(templateSource, /\bMutationObserver\b|\bfetch\s*\(|\bHttp\.(?:get|post|put|patch|delete)\s*\(/);
 await assert.rejects(access(new URL("../../src/views/incidencias/incidencias.stats-scope.js", import.meta.url)), { code: "ENOENT" });
-console.log("Incidencias stats scope OK · template-owned first render · exact/loaded/zero/lower-bound · no observer or HTTP");
+console.log("Incidencias stats scope OK · template-owned first render · linked row amount · shared KPI dedup · exact/loaded/zero/lower-bound · no observer or HTTP");

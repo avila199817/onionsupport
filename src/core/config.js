@@ -92,6 +92,7 @@ export const ROUTES = Object.freeze({
   activateAccount: "/activate-account",
 
   incidencias: "/incidencias",
+  agenda: "/agenda",
   facturas: "/facturas",
   clientes: "/clientes",
   usuarios: "/usuarios",
@@ -124,6 +125,7 @@ export const ADMIN_ROUTES = Object.freeze([
 export const PRIVATE_ROUTES = Object.freeze([
   ROUTES.home,
   ROUTES.incidencias,
+  ROUTES.agenda,
   ROUTES.facturas,
   ROUTES.cuenta,
   ROUTES.ajustes,

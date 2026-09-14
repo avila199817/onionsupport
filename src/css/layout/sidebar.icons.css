@@ -20,6 +20,7 @@
   --sb-icon-panel-open: var(--app-icon-panel-open);
   --sb-icon-home: var(--app-icon-home);
   --sb-icon-incidencias: var(--app-icon-incidencias);
+  --sb-icon-agenda: var(--app-icon-agenda);
   --sb-icon-facturas: var(--app-icon-facturas);
   --sb-icon-clientes: var(--app-icon-clientes);
   --sb-icon-usuarios: var(--app-icon-usuarios);
@@ -30,6 +31,10 @@
   --sb-icon-cuenta: var(--app-icon-cuenta);
   --sb-icon-logout: var(--app-icon-logout);
   --sb-icon-chevron: var(--app-icon-chevron-right);
+}
+
+.sidebar-link[data-sidebar-key="agenda"] {
+  --sb-tip: "Agenda";
 }
 
 @supports ((mask-image: linear-gradient(#000, #000)) or (-webkit-mask-image: linear-gradient(#000, #000))) {
@@ -53,6 +58,10 @@
     [data-sidebar-key="tickets"]
   ) {
     --sb-current-icon: var(--sb-icon-incidencias);
+  }
+
+  .sidebar-link[data-sidebar-key="agenda"] {
+    --sb-current-icon: var(--sb-icon-agenda);
   }
 
   .sidebar-link[data-sidebar-key="facturas"] {

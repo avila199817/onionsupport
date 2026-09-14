@@ -61,6 +61,10 @@ export const ROUTE_PATHS = Object.freeze({
     ROUTES.incidencias ||
     "/incidencias",
 
+  AGENDA:
+    ROUTES.agenda ||
+    "/agenda",
+
   FACTURAS:
     ROUTES.facturas ||
     "/facturas",
@@ -118,6 +122,7 @@ export const ROUTE_NAMES = Object.freeze({
   PUBLIC_HOME: "public-home",
   HOME: "home",
   INCIDENCIAS: "incidencias",
+  AGENDA: "agenda",
   FACTURAS: "facturas",
   CLIENTES: "clientes",
   USUARIOS: "usuarios",
@@ -791,6 +796,17 @@ const VIEW_SPECS = Object.freeze({
       ),
     names: Object.freeze([
       "IncidenciasView",
+    ]),
+  }),
+
+  agenda: Object.freeze({
+    moduleKey: "agenda",
+    loadModule: () =>
+      import(
+        "../views/agenda/index.js"
+      ),
+    names: Object.freeze([
+      "AgendaView",
     ]),
   }),
 
@@ -1508,6 +1524,14 @@ const ROUTE_DEFINITIONS = Object.freeze([
     title: "Incidencias",
     viewKey: "incidencias",
     order: 20,
+  }),
+
+  createRoute({
+    path: ROUTE_PATHS.AGENDA,
+    name: ROUTE_NAMES.AGENDA,
+    title: "Agenda",
+    viewKey: "agenda",
+    order: 25,
   }),
 
   createRoute({

@@ -12,7 +12,7 @@
 import { userNameFromIdentity } from "../../core/user-identity.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { technicianIdentity } from "../../features/incidencias-comment-identity/index.js";
-export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v35-linked-invoice-row-total";
+export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v35-visible-date-minute-precision-linked-invoice-row-total";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
   CREATE_OPEN: "create-open",

@@ -21,6 +21,8 @@
     url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJtMy41IDEwLjc1IDguNS03IDguNSA3Ii8+PHBhdGggZD0iTTUuMjUgOS41djkuMjVBMS43NSAxLjc1IDAgMCAwIDcgMjAuNWgxMGExLjc1IDEuNzUgMCAwIDAgMS43NS0xLjc1VjkuNSIvPjxwYXRoIGQ9Ik05LjI1IDIwLjV2LTZoNS41djYiLz48L3N2Zz4=");
   --app-icon-incidencias:
     url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNS4yNSA1aDEzLjVhMS43NSAxLjc1IDAgMCAxIDEuNzUgMS43NVY5YTMgMyAwIDAgMCAwIDZ2Mi4yNUExLjc1IDEuNzUgMCAwIDEgMTguNzUgMTlINS4yNWExLjc1IDEuNzUgMCAwIDEtMS43NS0xLjc1VjE1YTMgMyAwIDAgMCAwLTZWNi43NUExLjc1IDEuNzUgMCAwIDEgNS4yNSA1WiIvPjxwYXRoIGQ9Ik05IDguMjVoNk05IDEyaDZNOSAxNS43NWgzLjc1Ii8+PC9zdmc+");
+  --app-icon-agenda:
+    url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cmVjdCB4PSIzLjUiIHk9IjQuNSIgd2lkdGg9IjE3IiBoZWlnaHQ9IjE2IiByeD0iMi4yNSIvPjxwYXRoIGQ9Ik03LjUgMi43NXYzLjVNMTYuNSAyLjc1djMuNU0zLjUgOWgxN004IDEyLjVoLjAxTTEyIDEyLjVoLjAxTTE2IDEyLjVoLjAxTTggMTZoLjAxTTEyIDE2aC4wMSIvPjwvc3ZnPg==");
   --app-icon-facturas:
     url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMDAwIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNNi4yNSAzLjVoMTEuNXYxN2wtMS45LTEuMjUtMS45MyAxLjI1TDEyIDE5LjI1bC0xLjkyIDEuMjUtMS45My0xLjI1LTEuOSAxLjI1di0xN1oiLz48cGF0aCBkPSJNOSA4aDZNOSAxMS43NWg2TTkgMTUuNWg0LjI1Ii8+PC9zdmc+");
   --app-icon-clientes:
@@ -105,6 +107,11 @@
 .app-icon[data-app-icon="ticket"],
 .app-icon[data-app-icon="tickets"] {
   --app-icon-source: var(--app-icon-incidencias);
+}
+.app-icon[data-app-icon="agenda"],
+.app-icon[data-app-icon="calendar"],
+.app-icon[data-app-icon="calendario"] {
+  --app-icon-source: var(--app-icon-agenda);
 }
 .app-icon[data-app-icon="facturas"],
 .app-icon[data-app-icon="factura"],

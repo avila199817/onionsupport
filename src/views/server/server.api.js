@@ -11,6 +11,7 @@
 
 import Http from "../../core/http.js";
 import * as Base from "./server.api.base.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const SERVER_API_VERSION =
   "server.api.backend-contract.v3.health-plus-costs";
@@ -53,15 +54,6 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function safeText(value = "", fallback = "") {
-  if (value === null || value === undefined) return fallback;
-  const text = String(value)
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return text || fallback;
-}
-
 function safeNumber(value = null, fallback = null) {
   if (value === null || value === undefined || value === "") return fallback;
   const number = Number(value);
@@ -69,7 +61,7 @@ function safeNumber(value = null, fallback = null) {
 }
 
 function safeError(error = null) {
-  return safeText(
+  return cleanText(
     error?.data?.message ||
       error?.payload?.message ||
       error?.response?.message ||
@@ -145,7 +137,7 @@ function createEmptyCostSnapshot() {
 
 function normalizeDay(item = {}) {
   return {
-    date: safeText(item.date, ""),
+    date: cleanText(item.date, ""),
     day: safeNumber(item.day, null),
     cost: safeNumber(item.cost, 0),
     cumulative: safeNumber(item.cumulative, 0),
@@ -155,7 +147,7 @@ function normalizeDay(item = {}) {
 
 function normalizeBreakdownItem(item = {}, type = "service") {
   const base = {
-    name: safeText(item.name, type === "service" ? "Sin servicio" : "Sin recurso"),
+    name: cleanText(item.name, type === "service" ? "Sin servicio" : "Sin recurso"),
     total: safeNumber(item.total, 0),
     sharePct: safeNumber(item.sharePct, 0),
   };
@@ -163,9 +155,9 @@ function normalizeBreakdownItem(item = {}, type = "service") {
   if (type === "resource") {
     return {
       ...base,
-      id: safeText(item.id, ""),
-      resourceGroup: safeText(item.resourceGroup, ""),
-      serviceName: safeText(item.serviceName, ""),
+      id: cleanText(item.id, ""),
+      resourceGroup: cleanText(item.resourceGroup, ""),
+      serviceName: cleanText(item.serviceName, ""),
     };
   }
 
@@ -180,20 +172,20 @@ function normalizeCostSnapshot(payload = {}) {
   const cache = safeObject(source.cache, {});
 
   return {
-    version: safeText(source.version, ""),
+    version: cleanText(source.version, ""),
     ok: source.ok === true,
     available: source.available === true,
-    status: safeText(source.status, source.available === true ? "available" : "unavailable"),
-    code: safeText(source.code, ""),
+    status: cleanText(source.status, source.available === true ? "available" : "unavailable"),
+    code: cleanText(source.code, ""),
     setupRequired: source.setupRequired === true,
-    message: safeText(source.message, ""),
-    currency: safeText(source.currency, ""),
-    checkedAt: safeText(source.checkedAt || source.timestamp, ""),
-    costDataThrough: safeText(source.costDataThrough, ""),
+    message: cleanText(source.message, ""),
+    currency: cleanText(source.currency, ""),
+    checkedAt: cleanText(source.checkedAt || source.timestamp, ""),
+    costDataThrough: cleanText(source.costDataThrough, ""),
     currentMonth: current
       ? {
-          key: safeText(current.key, ""),
-          label: safeText(current.label, ""),
+          key: cleanText(current.key, ""),
+          label: cleanText(current.label, ""),
           total: safeNumber(current.total, 0),
           completedTotal: safeNumber(current.completedTotal, 0),
           averageDaily: safeNumber(current.averageDaily, 0),
@@ -202,19 +194,19 @@ function normalizeCostSnapshot(payload = {}) {
           daysInMonth: safeNumber(current.daysInMonth, 0),
           latestCompleteDay: isObject(current.latestCompleteDay)
             ? {
-                date: safeText(current.latestCompleteDay.date, ""),
+                date: cleanText(current.latestCompleteDay.date, ""),
                 cost: safeNumber(current.latestCompleteDay.cost, 0),
               }
             : null,
           previousCompleteDay: isObject(current.previousCompleteDay)
             ? {
-                date: safeText(current.previousCompleteDay.date, ""),
+                date: cleanText(current.previousCompleteDay.date, ""),
                 cost: safeNumber(current.previousCompleteDay.cost, 0),
               }
             : null,
           peakDay: isObject(current.peakDay)
             ? {
-                date: safeText(current.peakDay.date, ""),
+                date: cleanText(current.peakDay.date, ""),
                 cost: safeNumber(current.peakDay.cost, 0),
               }
             : null,
@@ -222,8 +214,8 @@ function normalizeCostSnapshot(payload = {}) {
       : null,
     comparison: comparison
       ? {
-          previousMonthKey: safeText(comparison.previousMonthKey, ""),
-          previousMonthLabel: safeText(comparison.previousMonthLabel, ""),
+          previousMonthKey: cleanText(comparison.previousMonthKey, ""),
+          previousMonthLabel: cleanText(comparison.previousMonthLabel, ""),
           previousMonthTotal: safeNumber(comparison.previousMonthTotal, 0),
           previousComparableTotal: safeNumber(comparison.previousComparableTotal, 0),
           deltaComparable: safeNumber(comparison.deltaComparable, 0),
@@ -240,9 +232,9 @@ function normalizeCostSnapshot(payload = {}) {
       .slice(0, 8)
       .map((item) => normalizeBreakdownItem(item, "resource")),
     trend: {
-      level: safeText(trend.level, "unknown"),
-      label: safeText(trend.label, "Sin datos"),
-      detail: safeText(trend.detail, ""),
+      level: cleanText(trend.level, "unknown"),
+      label: cleanText(trend.label, "Sin datos"),
+      detail: cleanText(trend.detail, ""),
     },
     cache: {
       stale: cache.stale === true,
@@ -252,13 +244,13 @@ function normalizeCostSnapshot(payload = {}) {
     },
     warning: isObject(source.warning)
       ? {
-          code: safeText(source.warning.code, ""),
-          message: safeText(source.warning.message, ""),
+          code: cleanText(source.warning.code, ""),
+          message: cleanText(source.warning.message, ""),
         }
       : null,
     notes: safeArray(source.notes)
       .slice(0, 6)
-      .map((item) => safeText(item, ""))
+      .map((item) => cleanText(item, ""))
       .filter(Boolean),
   };
 }
@@ -279,7 +271,7 @@ export async function fetchServerCostsRequest(options = {}) {
       timeout: safeNumber(options.timeout, SERVER_REQUEST_TIMEOUT_MS),
       query: safeObject(options.query),
       headers: safeObject(options.headers),
-      source: safeText(options.source, "views.server.api.costs"),
+      source: cleanText(options.source, "views.server.api.costs"),
       signal: options.signal || null,
     });
   } else if (typeof Http?.request === "function") {
@@ -288,7 +280,7 @@ export async function fetchServerCostsRequest(options = {}) {
       timeout: safeNumber(options.timeout, SERVER_REQUEST_TIMEOUT_MS),
       query: safeObject(options.query),
       headers: safeObject(options.headers),
-      source: safeText(options.source, "views.server.api.costs"),
+      source: cleanText(options.source, "views.server.api.costs"),
       signal: options.signal || null,
     });
   } else {
@@ -319,7 +311,7 @@ export async function loadServerCosts(options = {}) {
     try {
       const snapshot = await fetchServerCostsRequest({
         ...opts,
-        source: safeText(opts.source, "views.server.api.costs.load"),
+        source: cleanText(opts.source, "views.server.api.costs.load"),
       });
 
       costState.snapshot = snapshot;
@@ -336,7 +328,7 @@ export async function loadServerCosts(options = {}) {
             stale: true,
           },
           warning: {
-            code: safeText(error?.code, "SERVER_COST_REFRESH_FAILED"),
+            code: cleanText(error?.code, "SERVER_COST_REFRESH_FAILED"),
             message: costState.error,
           },
         };
@@ -344,7 +336,7 @@ export async function loadServerCosts(options = {}) {
 
       const unavailable = createEmptyCostSnapshot();
       unavailable.status = "unavailable";
-      unavailable.code = safeText(error?.code, "SERVER_COST_UNAVAILABLE");
+      unavailable.code = cleanText(error?.code, "SERVER_COST_UNAVAILABLE");
       unavailable.message = costState.error;
       unavailable.checkedAt = new Date().toISOString();
       return unavailable;
@@ -393,7 +385,7 @@ function composeSnapshot(health = null, costs = null) {
 
 async function resolveCostsForDashboard(options = {}) {
   return loadServerCosts({
-    source: safeText(options.source, "views.server.api.dashboard.costs"),
+    source: cleanText(options.source, "views.server.api.dashboard.costs"),
     force: options.forceCosts === true,
   });
 }

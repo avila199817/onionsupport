@@ -24,6 +24,7 @@ import { createAsyncScope } from "../../core/async-scope.js";
 import Http from "../../core/http.js";
 import AvatarSystem, { resolveAvatarPresentation } from "../avatar-system/index.js";
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 /* Trusted verifier compatibility marker: the legacy tooltip dataset is retired
    at runtime; the identity is now contained entirely by the visible card. */
@@ -60,9 +61,6 @@ let mountRoot = null;
 let installed = false;
 let destroyed = false;
 
-const text = (value = "", fallback = "") =>
-  String(value ?? "").replace(/[\r\n\t]/g, " ").replace(/\s+/g, " ").trim() || fallback;
-
 function first(...values) {
   return values.find((value) =>
     value !== undefined &&
@@ -97,7 +95,7 @@ function session() {
 function fullName(user) {
   if (!user) return "";
 
-  return text(first(
+  return cleanText(first(
     user.fullName,
     user.displayName,
     user.name,
@@ -110,11 +108,11 @@ function fullName(user) {
 }
 
 function email(user) {
-  return text(first(user?.email, user?.emailLower, user?.profile?.email, "")).toLowerCase();
+  return cleanText(first(user?.email, user?.emailLower, user?.profile?.email, "")).toLowerCase();
 }
 
 function phone(user) {
-  return text(first(user?.phone, user?.telefono, user?.mobile, user?.profile?.phone, ""));
+  return cleanText(first(user?.phone, user?.telefono, user?.mobile, user?.profile?.phone, ""));
 }
 
 function addressParts(user) {
@@ -122,24 +120,24 @@ function addressParts(user) {
 
   if (typeof value === "string") {
     return {
-      address: text(value),
+      address: cleanText(value),
       addressLine2: "",
-      postalCode: text(first(user?.cp, user?.postalCode, "")),
-      city: text(first(user?.ciudad, user?.city, "")),
-      province: text(first(user?.provincia, user?.province, "")),
-      country: text(first(user?.pais, user?.country, "España"), "España"),
+      postalCode: cleanText(first(user?.cp, user?.postalCode, "")),
+      city: cleanText(first(user?.ciudad, user?.city, "")),
+      province: cleanText(first(user?.provincia, user?.province, "")),
+      country: cleanText(first(user?.pais, user?.country, "España"), "España"),
     };
   }
 
   const current = object(value) || {};
 
   return {
-    address: text(first(current.street, current.line1, current.calle, user?.calle, "")),
-    addressLine2: text(first(current.line2, current.linea2, user?.linea2, "")),
-    postalCode: text(first(current.postalCode, current.zip, current.cp, user?.postalCode, user?.cp, "")),
-    city: text(first(current.city, current.locality, current.localidad, current.ciudad, user?.city, user?.ciudad, "")),
-    province: text(first(current.region, current.province, current.provincia, user?.province, user?.provincia, "")),
-    country: text(first(current.country, current.pais, user?.country, user?.pais, "España"), "España"),
+    address: cleanText(first(current.street, current.line1, current.calle, user?.calle, "")),
+    addressLine2: cleanText(first(current.line2, current.linea2, user?.linea2, "")),
+    postalCode: cleanText(first(current.postalCode, current.zip, current.cp, user?.postalCode, user?.cp, "")),
+    city: cleanText(first(current.city, current.locality, current.localidad, current.ciudad, user?.city, user?.ciudad, "")),
+    province: cleanText(first(current.region, current.province, current.provincia, user?.province, user?.provincia, "")),
+    country: cleanText(first(current.country, current.pais, user?.country, user?.pais, "España"), "España"),
   };
 }
 
@@ -156,7 +154,7 @@ function avatar(user) {
 }
 
 function internalPanelPath(value = "") {
-  const raw = text(value, "");
+  const raw = cleanText(value, "");
   if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "";
 
   try {
@@ -187,7 +185,7 @@ function panelHref(current, user) {
 
   if (fromState) return fromState;
 
-  const slug = text(first(
+  const slug = cleanText(first(
     current?.userSlug,
     user?.slug,
     user?.username,
@@ -206,8 +204,8 @@ function identityNode(name, src, presentation = {}) {
   const resolved = presentation && typeof presentation === "object"
     ? presentation
     : {};
-  const displayName = text(resolved.name || name, "Mi cuenta");
-  const displayEmail = text(resolved.email, "").toLowerCase();
+  const displayName = cleanText(resolved.name || name, "Mi cuenta");
+  const displayEmail = cleanText(resolved.email, "").toLowerCase();
   const wrap = document.createElement("span");
   wrap.className = "public-support-account";
   wrap.dataset.publicSupportAccountName = displayName;
@@ -551,7 +549,7 @@ function syncIntakeCta(link) {
   link.dataset.publicHomeScrollLink = "true";
   link.dataset.publicSupportIntakeLink = "true";
 
-  const context = text(link.closest(".public-home-price-card")?.querySelector("h3")?.textContent);
+  const context = cleanText(link.closest(".public-home-price-card")?.querySelector("h3")?.textContent);
   link.setAttribute(
     "aria-label",
     context ? `Abrir incidencia sobre ${context}` : "Abrir formulario de incidencia"
@@ -628,11 +626,11 @@ function prefill(root) {
 
   for (const [name, value] of Object.entries(values)) {
     const input = form.elements.namedItem(name);
-    if (input && !text(input.value) && value) input.value = value;
+    if (input && !cleanText(input.value) && value) input.value = value;
   }
 
   const storedPhone = formatNationalSpanishPhone(phone(user));
-  if (phoneInput && storedPhone && !text(phoneInput.value)) {
+  if (phoneInput && storedPhone && !cleanText(phoneInput.value)) {
     phoneInput.value = storedPhone;
   }
 }
@@ -703,7 +701,7 @@ function status(form, message = "", type = "info") {
   const node = form.querySelector("[data-public-support-status]");
   if (!node) return;
 
-  const clean = text(message);
+  const clean = cleanText(message);
   const alert = type === "warning" || type === "error";
   node.setAttribute("role", alert ? "alert" : "status");
   node.setAttribute("aria-live", alert ? "assertive" : "polite");
@@ -713,7 +711,7 @@ function status(form, message = "", type = "info") {
 }
 
 function normalizedErrorCode(error) {
-  return text(first(
+  return cleanText(first(
     error?.code,
     error?.payload?.code,
     error?.payload?.error,
@@ -740,7 +738,7 @@ function activeTicketConflict(error) {
 }
 
 function currentFormEmail(form) {
-  return text(form?.elements?.namedItem?.("email")?.value).toLowerCase();
+  return cleanText(form?.elements?.namedItem?.("email")?.value).toLowerCase();
 }
 
 function currentFormPhone(form) {
@@ -750,11 +748,11 @@ function currentFormPhone(form) {
 }
 
 function lockedEmail(form) {
-  return text(form?.dataset?.publicSupportBlockedEmail).toLowerCase();
+  return cleanText(form?.dataset?.publicSupportBlockedEmail).toLowerCase();
 }
 
 function lockedPhone(form) {
-  return text(form?.dataset?.publicSupportBlockedPhone);
+  return cleanText(form?.dataset?.publicSupportBlockedPhone);
 }
 
 function lockMatchesCurrentIdentity(form) {
@@ -770,14 +768,14 @@ function lockMatchesCurrentIdentity(form) {
 }
 
 function lockMessage(form) {
-  return text(
+  return cleanText(
     form?.dataset?.publicSupportBlockedMessage,
     "Ya hay una incidencia en curso para esta cuenta. No se abrirá otra hasta que se cierre."
   );
 }
 
 function lockStatusType(form) {
-  return text(form?.dataset?.publicSupportBlockedStatus, "info");
+  return cleanText(form?.dataset?.publicSupportBlockedStatus, "info");
 }
 
 function syncSubmitState(form) {
@@ -800,7 +798,7 @@ function syncSubmitState(form) {
     label.textContent = busy
       ? "Enviando solicitud…"
       : locked
-        ? text(form.dataset.publicSupportBlockedLabel, "Incidencia en curso")
+        ? cleanText(form.dataset.publicSupportBlockedLabel, "Incidencia en curso")
         : "Crear incidencia";
   }
 
@@ -815,7 +813,7 @@ function setSubmissionLock(
   type = "info",
   label = "Incidencia en curso"
 ) {
-  const cleanEmail = text(emailValue).toLowerCase();
+  const cleanEmail = cleanText(emailValue).toLowerCase();
   const cleanPhone = normalizeSpanishPhone(phoneValue);
   if (!form?.dataset || (!cleanEmail && !cleanPhone)) return false;
 
@@ -825,8 +823,8 @@ function setSubmissionLock(
   if (cleanPhone) form.dataset.publicSupportBlockedPhone = cleanPhone;
   else delete form.dataset.publicSupportBlockedPhone;
 
-  form.dataset.publicSupportBlockedMessage = text(message);
-  form.dataset.publicSupportBlockedStatus = text(type, "info");
+  form.dataset.publicSupportBlockedMessage = cleanText(message);
+  form.dataset.publicSupportBlockedStatus = cleanText(type, "info");
   form.dataset.publicSupportBlockedLabel = label;
   syncSubmitState(form);
   return true;
@@ -850,7 +848,7 @@ function activeTicketMessage() {
 }
 
 function hasFullName(value = "") {
-  const parts = text(value).split(" ").filter(Boolean);
+  const parts = cleanText(value).split(" ").filter(Boolean);
   return parts.length >= 2 && parts.join(" ").length >= 3;
 }
 
@@ -864,7 +862,7 @@ function validate(form) {
     city: (v) => v.length >= 2 ? "" : "Introduce la ciudad.",
     province: (v) => v.length >= 2 ? "" : "Introduce la provincia.",
     country: (v) => {
-      const normalized = text(v).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const normalized = cleanText(v).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
       return ["espana", "es", "spain"].includes(normalized) ? "" : "Este formulario solo admite direcciones de España.";
     },
     subject: (v) => v.length >= 4 ? "" : "Resume el problema en el asunto.",
@@ -876,7 +874,7 @@ function validate(form) {
   for (const [name, rule] of Object.entries(rules)) {
     const input = form.elements.namedItem(name);
     if (!input) continue;
-    const value = name === "description" ? descriptionText(input.value) : text(input.value);
+    const value = name === "description" ? descriptionText(input.value) : cleanText(input.value);
     const limit = name === "phone" ? 18 : input.maxLength;
     const message = limit > 0 && value.length > limit
       ? `Usa como máximo ${limit} caracteres.`
@@ -902,16 +900,16 @@ function descriptionText(value = "") {
 function payload(form) {
   const data = new FormData(form);
   return {
-    fullName: text(data.get("fullName")).slice(0, 120),
-    email: text(data.get("email")).toLowerCase().slice(0, 180),
+    fullName: cleanText(data.get("fullName")).slice(0, 120),
+    email: cleanText(data.get("email")).toLowerCase().slice(0, 180),
     phone: normalizeSpanishPhone(data.get("phone")),
-    address: text(data.get("address")).slice(0, 180),
-    addressLine2: text(data.get("addressLine2")).slice(0, 120),
-    postalCode: text(data.get("postalCode")).slice(0, 5),
-    city: text(data.get("city")).slice(0, 90),
-    province: text(data.get("province")).slice(0, 90),
+    address: cleanText(data.get("address")).slice(0, 180),
+    addressLine2: cleanText(data.get("addressLine2")).slice(0, 120),
+    postalCode: cleanText(data.get("postalCode")).slice(0, 5),
+    city: cleanText(data.get("city")).slice(0, 90),
+    province: cleanText(data.get("province")).slice(0, 90),
     country: "España",
-    subject: text(data.get("subject")).slice(0, 140),
+    subject: cleanText(data.get("subject")).slice(0, 140),
     description: descriptionText(data.get("description")).slice(0, 4000),
     source: "public-home",
     channel: "web",
@@ -939,7 +937,7 @@ function randomIdempotencyNonce() {
 }
 
 function idempotencyKey(form) {
-  const existing = text(form?.dataset?.publicSupportIdempotencyKey);
+  const existing = cleanText(form?.dataset?.publicSupportIdempotencyKey);
   if (existing) return existing;
 
   const key = `${utcDateSegment()}:${randomIdempotencyNonce()}`;
@@ -964,7 +962,7 @@ function submitting(form, value) {
 }
 
 function ticketId(response) {
-  return text(first(
+  return cleanText(first(
     response?.ticketId,
     response?.incidenciaId,
     response?.ticket?.ticketId,
@@ -1070,9 +1068,9 @@ function showServerFieldErrors(form, error) {
   const errors = error?.payload?.errors;
   if (!Array.isArray(errors)) return;
   for (const item of errors) {
-    const input = form.elements.namedItem(text(item?.field));
+    const input = form.elements.namedItem(cleanText(item?.field));
     if (input?.matches?.("input[name], textarea[name]") && input.name !== "website") {
-      setFieldError(form, input, text(item?.message, "Revisa este dato.").slice(0, 240));
+      setFieldError(form, input, cleanText(item?.message, "Revisa este dato.").slice(0, 240));
     }
   }
 }
@@ -1083,7 +1081,7 @@ async function send(form) {
   if (showSubmissionLock(form)) return false;
   status(form);
 
-  if (text(form.elements.namedItem("website")?.value)) {
+  if (cleanText(form.elements.namedItem("website")?.value)) {
     const message = neutralSubmissionMessage();
     status(form, message, "success");
     setSubmissionLock(

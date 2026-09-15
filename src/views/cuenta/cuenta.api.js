@@ -36,6 +36,7 @@ import {
   AUTH_PASSWORD_POLICY,
   validateAuthPassword,
 } from "../../features/auth/password-policy.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const CUENTA_API_VERSION =
   "cuenta.api.backend-contract.v5-canonical-runtime";
@@ -99,17 +100,8 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function safeText(value = "", fallback = "") {
-  if (value === null || value === undefined) return fallback;
-  const output = String(value)
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return output || fallback;
-}
-
 function safeLower(value = "", fallback = "") {
-  return safeText(value, fallback).toLowerCase();
+  return cleanText(value, fallback).toLowerCase();
 }
 
 function first(...values) {
@@ -124,7 +116,7 @@ function first(...values) {
 }
 
 function normalizeKey(value = "") {
-  return safeText(value, "")
+  return cleanText(value, "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -174,11 +166,11 @@ function normalizeStatus(source = {}) {
 function normalizeDireccion(value = {}) {
   const source = safeObject(value);
   return {
-    calle: safeText(first(source.calle, source.line1, source.street, ""), ""),
-    cp: safeText(first(source.cp, source.postalCode, source.zip, ""), ""),
-    ciudad: safeText(first(source.ciudad, source.city, ""), ""),
-    provincia: safeText(first(source.provincia, source.province, source.state, ""), ""),
-    pais: safeText(first(source.pais, source.country, ""), ""),
+    calle: cleanText(first(source.calle, source.line1, source.street, ""), ""),
+    cp: cleanText(first(source.cp, source.postalCode, source.zip, ""), ""),
+    ciudad: cleanText(first(source.ciudad, source.city, ""), ""),
+    provincia: cleanText(first(source.provincia, source.province, source.state, ""), ""),
+    pais: cleanText(first(source.pais, source.country, ""), ""),
   };
 }
 
@@ -187,7 +179,7 @@ function sanitizePermissions(value = []) {
   const output = [];
 
   for (const permission of safeArray(value)) {
-    const clean = safeText(permission, "").slice(0, 120);
+    const clean = cleanText(permission, "").slice(0, 120);
     if (!clean || seen.has(clean)) continue;
     seen.add(clean);
     output.push(clean);
@@ -217,7 +209,7 @@ function getErrorStatus(error = null) {
 }
 
 function getErrorCode(error = null) {
-  return safeText(first(
+  return cleanText(first(
     error?.code,
     error?.error,
     error?.payload?.code,
@@ -231,7 +223,7 @@ function getErrorCode(error = null) {
 }
 
 function normalizeErrorMessage(error = null, fallback = "Error de cuenta.") {
-  return safeText(first(
+  return cleanText(first(
     error?.payload?.message,
     error?.data?.message,
     error?.response?.data?.message,
@@ -346,19 +338,19 @@ export function normalizeCuentaDetail(payload = {}, fallback = {}) {
   const routing = { ...extractRouting(fallback), ...extractRouting(payload) };
   const cliente = { ...extractCliente(fallback), ...extractCliente(payload) };
 
-  const userId = safeText(first(source.userId, source.id, source.uid, source.sub, ""), "");
-  const id = safeText(first(source.id, userId, ""), "");
+  const userId = cleanText(first(source.userId, source.id, source.uid, source.sub, ""), "");
+  const id = cleanText(first(source.id, userId, ""), "");
   const email = safeLower(first(source.email, source.emailLower, ""), "");
-  const username = safeText(first(source.username, source.usernameLower, ""), "");
+  const username = cleanText(first(source.username, source.usernameLower, ""), "");
   const slug = safeLower(first(routing.slug, source.slug, username, ""), "").replace(/^@+/, "");
   const name = userNameFromIdentity(source, username || email || "Usuario Onion");
-  const phone = safeText(first(source.phone, source.telefono, ""), "");
+  const phone = cleanText(first(source.phone, source.telefono, ""), "");
   const role = AppCore.normalizeRole(first(source.role, source.rol, safeArray(source.roles)[0], DEFAULT_ROLE)) || DEFAULT_ROLE;
   const status = normalizeStatus(source);
   const active = status === "active";
   const tipo = normalizeKey(source.tipo) === "empresa" ? "empresa" : "particular";
-  const nif = safeText(first(source.nif, source.cif, ""), "").toUpperCase();
-  const clienteId = safeText(first(
+  const nif = cleanText(first(source.nif, source.cif, ""), "").toUpperCase();
+  const clienteId = cleanText(first(
     source.clienteId,
     source.clientId,
     source.customerId,
@@ -402,10 +394,10 @@ export function normalizeCuentaDetail(payload = {}, fallback = {}) {
     lang,
     language: lang,
     locale: lang,
-    timezone: safeText(first(preferences.timezone, source.timezone, "Europe/Madrid"), "Europe/Madrid"),
-    dateFormat: safeText(preferences.dateFormat, "dd/MM/yyyy"),
-    timeFormat: safeText(preferences.timeFormat, "24h"),
-    currency: safeText(preferences.currency, "EUR"),
+    timezone: cleanText(first(preferences.timezone, source.timezone, "Europe/Madrid"), "Europe/Madrid"),
+    dateFormat: cleanText(preferences.dateFormat, "dd/MM/yyyy"),
+    timeFormat: cleanText(preferences.timeFormat, "24h"),
+    currency: cleanText(preferences.currency, "EUR"),
     sidebarCollapsed: normalizeBoolean(preferences.sidebarCollapsed, false),
     compactMode: normalizeBoolean(preferences.compactMode, false),
     reducedMotion: normalizeBoolean(preferences.reducedMotion, false),
@@ -427,9 +419,9 @@ export function normalizeCuentaDetail(payload = {}, fallback = {}) {
 
   const safeCliente = Object.keys(cliente).length
     ? {
-        id: safeText(first(cliente.id, clienteId, ""), ""),
+        id: cleanText(first(cliente.id, clienteId, ""), ""),
         clienteId,
-        nombreFiscal: safeText(first(cliente.nombreFiscal, cliente.name, ""), ""),
+        nombreFiscal: cleanText(first(cliente.nombreFiscal, cliente.name, ""), ""),
         tipo: normalizeKey(cliente.tipo) === "empresa"
           ? "empresa"
           : normalizeKey(cliente.tipo) === "particular" ? "particular" : "",
@@ -519,9 +511,9 @@ export function normalizeCuentaDetail(payload = {}, fallback = {}) {
     settings: canonicalPreferences,
     routing: {
       slug,
-      homePath: safeText(first(routing.homePath, routing.publicPath, ""), ""),
-      canonicalPath: safeText(first(routing.canonicalPath, routing.publicPath, ""), ""),
-      publicPath: safeText(routing.publicPath, ""),
+      homePath: cleanText(first(routing.homePath, routing.publicPath, ""), ""),
+      canonicalPath: cleanText(first(routing.canonicalPath, routing.publicPath, ""), ""),
+      publicPath: cleanText(routing.publicPath, ""),
     },
     cliente: safeCliente,
     profile: safeProfile,
@@ -552,8 +544,8 @@ async function requestJson(method = "GET", endpoint = "", {
   timeout = CUENTA_TIMEOUT,
   source = "views.cuenta.api",
 } = {}) {
-  const verb = safeText(method, "GET").toUpperCase();
-  const path = safeText(endpoint, "");
+  const verb = cleanText(method, "GET").toUpperCase();
+  const path = cleanText(endpoint, "");
 
   if (!path) {
     throw createCuentaError({
@@ -566,7 +558,7 @@ async function requestJson(method = "GET", endpoint = "", {
   const options = {
     timeout,
     auth: true,
-    source: safeText(source, "views.cuenta.api"),
+    source: cleanText(source, "views.cuenta.api"),
   };
 
   if (verb === "GET" && isFunction(Http?.get)) return Http.get(path, options);
@@ -763,8 +755,8 @@ export async function changePassword(payload = {}, { timeout = CUENTA_TIMEOUT } 
     return {
       ok: response?.ok !== false,
       success: response?.success !== false,
-      code: safeText(response?.code, "PASSWORD_CHANGED"),
-      message: safeText(response?.message, "Contraseña actualizada correctamente."),
+      code: cleanText(response?.code, "PASSWORD_CHANGED"),
+      message: cleanText(response?.message, "Contraseña actualizada correctamente."),
       passwordChanged: response?.passwordChanged !== false,
       authRefreshRequired: versionChanged,
       item,
@@ -828,7 +820,7 @@ export async function uploadCuentaAvatar(file, { timeout = CUENTA_UPLOAD_TIMEOUT
   formData.append(
     CUENTA_AVATAR_POLICY.fieldName,
     file,
-    safeText(file?.name, "avatar")
+    cleanText(file?.name, "avatar")
   );
 
   return mutateCuentaAvatar("POST", formData, timeout);
@@ -880,8 +872,8 @@ export async function deactivateCuenta(payload = {}, { timeout = CUENTA_TIMEOUT 
     return {
       ok: response?.ok !== false,
       success: response?.success !== false,
-      code: safeText(response?.code, "ACCOUNT_DEACTIVATED"),
-      message: safeText(response?.message, "Cuenta desactivada correctamente."),
+      code: cleanText(response?.code, "ACCOUNT_DEACTIVATED"),
+      message: cleanText(response?.message, "Cuenta desactivada correctamente."),
       deactivated: response?.deactivated === true,
       alreadyDisabled: response?.alreadyDisabled === true,
       loggedOut: response?.loggedOut === true || response?.logout === true,

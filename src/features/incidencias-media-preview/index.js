@@ -14,6 +14,8 @@
    - sin mutar tickets, File, payloads, permisos ni contratos HTTP.
 ========================================================= */
 
+import { cleanText } from "../../core/presentation-text.js";
+
 export const INCIDENCIAS_MEDIA_PREVIEW_VERSION =
   "incidencias-media-preview.v5.decoded-image-cache";
 
@@ -61,12 +63,6 @@ let mountRoot = null;
 const browser = () =>
   typeof window !== "undefined" && typeof document !== "undefined";
 
-const text = (value = "", fallback = "") =>
-  String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim() || fallback;
-
 const array = (value) => {
   try {
     return value ? Array.from(value) : [];
@@ -88,27 +84,27 @@ const fileLike = (file) => Boolean(
 );
 
 const signature = (file = {}) => [
-  text(file.name, "archivo"),
+  cleanText(file.name, "archivo"),
   Number(file.size || 0),
   Number(file.lastModified || 0),
-  text(file.type).toLowerCase(),
+  cleanText(file.type).toLowerCase(),
 ].join("::");
 
 const imageFile = (file = {}) =>
-  text(file.type).toLowerCase().startsWith("image/") ||
-  IMAGE_RE.test(text(file.name));
+  cleanText(file.type).toLowerCase().startsWith("image/") ||
+  IMAGE_RE.test(cleanText(file.name));
 
 const labelFor = (file = {}) => {
   if (imageFile(file)) return "IMG";
 
-  const name = text(file.name).toLowerCase();
+  const name = cleanText(file.name).toLowerCase();
   const dot = name.lastIndexOf(".");
 
   if (dot > 0) {
     return name.slice(dot + 1).slice(0, 4).toUpperCase();
   }
 
-  return text(file.type).includes("pdf")
+  return cleanText(file.type).includes("pdf")
     ? "PDF"
     : "DOC";
 };
@@ -271,7 +267,7 @@ function localThumb(item, index) {
     const img = document.createElement("img");
     img.className = "incidencias-modal-pending-thumb-image";
     img.src = item.url;
-    img.alt = text(item.file.name, "Imagen adjunta");
+    img.alt = cleanText(item.file.name, "Imagen adjunta");
     img.loading = "eager";
     img.decoding = "async";
     img.draggable = false;
@@ -382,8 +378,8 @@ function syncSlots(root) {
 ========================================================= */
 
 const remoteKey = (ticketId, attachmentId) =>
-  text(ticketId) && text(attachmentId)
-    ? `${text(ticketId)}::${text(attachmentId)}`
+  cleanText(ticketId) && cleanText(attachmentId)
+    ? `${cleanText(ticketId)}::${cleanText(attachmentId)}`
     : "";
 
 function expiry(url) {
@@ -422,7 +418,7 @@ const api = () =>
   apiPromise ||= import("../../views/incidencias/incidencias.api.js");
 
 const viewUrl = (file = {}) =>
-  text(
+  cleanText(
     file.viewUrl ||
     file.openUrl ||
     file.signedUrl ||
@@ -505,8 +501,8 @@ function frameIdentity(frameNode = null) {
 
   return {
     root,
-    ticketId: text(root?.dataset?.ticketId, ""),
-    attachmentId: text(frameNode?.dataset?.attachmentId, ""),
+    ticketId: cleanText(root?.dataset?.ticketId, ""),
+    attachmentId: cleanText(frameNode?.dataset?.attachmentId, ""),
   };
 }
 
@@ -568,7 +564,7 @@ function rememberVisual(frameNode, img, state = "") {
         : record.state || "loading"
     );
 
-  record.url = text(img.currentSrc || img.src, record.url);
+  record.url = cleanText(img.currentSrc || img.src, record.url);
   record.expiresAt =
     record.url
       ? expiry(record.url)
@@ -771,10 +767,10 @@ function decorate(frameNode, img) {
 function installRemoteThumb(button, url) {
   if (!button?.isConnected || !url) return false;
 
-  const id = text(button.dataset.attachmentId);
+  const id = cleanText(button.dataset.attachmentId);
 
   const name =
-    text(
+    cleanText(
       button.getAttribute("aria-label"),
       "Imagen adjunta"
     )
@@ -794,7 +790,7 @@ function installRemoteThumb(button, url) {
 
   const root = button.closest(ROOT);
   const key = remoteKey(
-    text(root?.dataset?.ticketId, ""),
+    cleanText(root?.dataset?.ticketId, ""),
     id
   );
 
@@ -846,7 +842,7 @@ async function hydrateFallback(button) {
   }
 
   if (
-    text(
+    cleanText(
       button.querySelector(":scope > span")?.textContent
     ).toUpperCase() !== "IMG"
   ) {
@@ -854,8 +850,8 @@ async function hydrateFallback(button) {
   }
 
   const root = button.closest(ROOT);
-  const ticketId = text(root?.dataset?.ticketId);
-  const attachmentId = text(button.dataset.attachmentId);
+  const ticketId = cleanText(root?.dataset?.ticketId);
+  const attachmentId = cleanText(button.dataset.attachmentId);
   const key = remoteKey(ticketId, attachmentId);
 
   if (!key) return;
@@ -880,7 +876,7 @@ async function hydrateFallback(button) {
 
   if (
     !button.isConnected ||
-    text(root?.dataset?.ticketId) !== ticketId
+    cleanText(root?.dataset?.ticketId) !== ticketId
   ) {
     return;
   }
@@ -905,10 +901,10 @@ async function refreshRemoteImage(img) {
     img.closest(ROOT);
 
   const ticketId =
-    text(root?.dataset?.ticketId);
+    cleanText(root?.dataset?.ticketId);
 
   const attachmentId =
-    text(box?.dataset?.attachmentId);
+    cleanText(box?.dataset?.attachmentId);
 
   const key =
     remoteKey(ticketId, attachmentId);

@@ -4,6 +4,8 @@
  * editable name or a lookup by email/display text. No state or network.
  */
 
+import { cleanText } from "./presentation-text.js";
+
 function object(value) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
@@ -12,7 +14,7 @@ function object(value) {
 
 function text(value) {
   return typeof value === "string"
-    ? value.replace(/[\r\n\t]/g, " ").replace(/\s+/g, " ").trim()
+    ? cleanText(value)
     : "";
 }
 

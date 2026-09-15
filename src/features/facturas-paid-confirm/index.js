@@ -18,6 +18,7 @@ import {
   getFacturaById,
   markFacturaPaid,
 } from "../../views/facturas/facturas.api.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const FACTURAS_PAID_CONFIRM_VERSION =
   "facturas.paid-confirm.v2.verified-resumable";
@@ -62,15 +63,6 @@ function safeObject(value, fallback = {}) {
     : fallback;
 }
 
-function safeString(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
-  const text = String(value)
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return text || fallback;
-}
-
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
@@ -81,7 +73,7 @@ function first(...values) {
 }
 
 function normalizeKey(value = "") {
-  return safeString(value, "")
+  return cleanText(value, "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -94,7 +86,7 @@ function normalizeKey(value = "") {
 function formatMoney(value = 0, currency = "EUR") {
   const amount = Number(value);
   const safeAmount = Number.isFinite(amount) ? amount : 0;
-  const safeCurrency = safeString(currency, "EUR").toUpperCase();
+  const safeCurrency = cleanText(currency, "EUR").toUpperCase();
 
   try {
     return new Intl.NumberFormat("es-ES", {
@@ -109,7 +101,7 @@ function formatMoney(value = 0, currency = "EUR") {
 }
 
 function facturaId(factura = {}) {
-  return safeString(
+  return cleanText(
     first(
       factura?.id,
       factura?.facturaId,
@@ -122,7 +114,7 @@ function facturaId(factura = {}) {
 }
 
 function facturaNumber(factura = {}) {
-  return safeString(
+  return cleanText(
     first(
       factura?.numeroFacturaLegal,
       factura?.numeroFactura,
@@ -151,14 +143,14 @@ function facturaTotal(factura = {}) {
 }
 
 function facturaCurrency(factura = {}) {
-  return safeString(
+  return cleanText(
     first(factura?.currency, factura?.moneda, factura?.payment?.currency, "EUR"),
     "EUR"
   ).toUpperCase();
 }
 
 function facturaEmail(factura = {}) {
-  return safeString(
+  return cleanText(
     first(
       factura?.clienteSnapshot?.email,
       factura?.cliente?.email,
@@ -173,7 +165,7 @@ function facturaEmail(factura = {}) {
 }
 
 function facturaClient(factura = {}) {
-  return safeString(
+  return cleanText(
     first(
       factura?.clienteSnapshot?.razonSocial,
       factura?.cliente?.razonSocial,
@@ -191,7 +183,7 @@ function facturaClient(factura = {}) {
 }
 
 function facturaPaymentMethod(factura = {}) {
-  return safeString(
+  return cleanText(
     first(
       factura?.payment?.method,
       factura?.payment?.formaPago,
@@ -272,7 +264,7 @@ function findController() {
 }
 
 function nodeFacturaId(node = null) {
-  return safeString(
+  return cleanText(
     first(
       node?.dataset?.facturaId,
       node?.closest?.("[data-factura-id]")?.dataset?.facturaId,
@@ -284,7 +276,7 @@ function nodeFacturaId(node = null) {
 }
 
 function actionFromNode(node = null) {
-  return safeString(
+  return cleanText(
     first(node?.dataset?.facturasAction, node?.dataset?.action, ""),
     ""
   );
@@ -501,7 +493,7 @@ async function openDialog(node = null) {
   } catch (error) {
     if (!state?.open || seq !== dialogLookupSeq) return false;
     state.loading = false;
-    state.error = safeString(
+    state.error = cleanText(
       first(error?.message, error?.data?.message, "No se pudo cargar la factura."),
       "No se pudo cargar la factura."
     );
@@ -557,7 +549,7 @@ async function executePayment() {
     if (!state?.open || state.facturaId !== id) return false;
 
     state.submitting = false;
-    state.error = safeString(
+    state.error = cleanText(
       first(
         error?.message,
         error?.data?.message,
@@ -639,7 +631,7 @@ async function reconcileRetryAction() {
   if (AppCore.getState()?.role !== "admin") { detail?.querySelector("[data-fpc-retry-action='true']")?.remove(); return false; }
   if (!detail?.isConnected) return false;
 
-  const id = safeString(
+  const id = cleanText(
     first(detail.dataset?.facturaId, detail.closest?.("[data-factura-id]")?.dataset?.facturaId, ""),
     ""
   );
@@ -729,7 +721,7 @@ function onDocumentClick(event) {
   event.preventDefault();
   event.stopPropagation();
 
-  const action = safeString(local.dataset.fpcAction, "");
+  const action = cleanText(local.dataset.fpcAction, "");
   if (action === "cancel") {
     if (!state?.submitting) closeDialog();
     return;

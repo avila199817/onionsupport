@@ -6,6 +6,7 @@
 ========================================================= */
 
 import Http from "../../core/http.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const HOME_ONBOARDING_VERSION = "home.onboarding.v1.persisted-step-state";
 export const HOME_ONBOARDING_ENDPOINT = "/api/users/me/onboarding";
@@ -24,15 +25,6 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function text(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
-}
-
 function integer(value, fallback = 0) {
   const number = Number(value);
   return Number.isSafeInteger(number) && number >= 0 ? number : fallback;
@@ -47,7 +39,7 @@ function responseFailed(response = null) {
 
 function responseMessage(response = null, fallback = "No se pudo guardar la guía.") {
   if (!isObject(response)) return fallback;
-  return text(
+  return cleanText(
     response.message || response.error || response.code || fallback,
     fallback
   );
@@ -71,11 +63,11 @@ export function normalizeHomeOnboarding(value = null) {
     assignedVersion,
     completedVersion,
     completedStep,
-    completedAt: text(source.completedAt, "") || null,
-    outcome: text(source.outcome, "") || null,
-    startedAt: text(source.startedAt, "") || null,
-    firstInteractionAt: text(source.firstInteractionAt, "") || null,
-    updatedAt: text(source.updatedAt, "") || null,
+    completedAt: cleanText(source.completedAt, "") || null,
+    outcome: cleanText(source.outcome, "") || null,
+    startedAt: cleanText(source.startedAt, "") || null,
+    firstInteractionAt: cleanText(source.firstInteractionAt, "") || null,
+    updatedAt: cleanText(source.updatedAt, "") || null,
     lastInteraction: isObject(source.lastInteraction)
       ? Object.freeze({ ...source.lastInteraction })
       : null,
@@ -107,7 +99,7 @@ export async function saveHomeOnboardingChoice({
   signal,
   timeout = REQUEST_TIMEOUT_MS,
 } = {}) {
-  const cleanAction = text(action, "").toLowerCase();
+  const cleanAction = cleanText(action, "").toLowerCase();
   const cleanVersion = integer(version, 0);
   const cleanStep = integer(step, 0);
 
@@ -137,7 +129,7 @@ export async function saveHomeOnboardingChoice({
 
   if (responseFailed(response)) {
     const error = new Error(responseMessage(response));
-    error.code = text(response?.code, "HOME_ONBOARDING_SAVE_FAILED");
+    error.code = cleanText(response?.code, "HOME_ONBOARDING_SAVE_FAILED");
     throw error;
   }
 

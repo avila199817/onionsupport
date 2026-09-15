@@ -17,6 +17,8 @@
 
 "use strict";
 
+import { cleanText } from "../../core/presentation-text.js";
+
 export const INCIDENCIAS_PRIORITY_POLICY_VERSION =
   "incidencias.priority-policy.v2-three-level-canonical";
 
@@ -37,10 +39,7 @@ export const INCIDENCIAS_HIGH_PRIORITY_KEYS = Object.freeze([
 const HIGH_PRIORITY_KEYS = new Set(INCIDENCIAS_HIGH_PRIORITY_KEYS);
 
 export function normalizeIncidenciasPriorityKey(value = "") {
-  return String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
+  return cleanText(value)
     .toLocaleLowerCase("es-ES")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")

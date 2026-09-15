@@ -13,12 +13,12 @@
 "use strict";
 
 import {
-  cleanAvatarText,
   normalizeAvatarEmail,
   normalizeAvatarName,
   normalizeAvatarUserId,
   normalizeAvatarUsername,
 } from "../avatar-system/identity.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const INCIDENCIAS_COMMENT_IDENTITY_VERSION =
   "incidencias.comment-identity.v2-comment-id-user-authority";
@@ -37,7 +37,7 @@ function firstText(...values) {
   for (const value of values) {
     if (value === null || value === undefined) continue;
     if (typeof value !== "string" && typeof value !== "number") continue;
-    const text = cleanAvatarText(value, "");
+    const text = cleanText(value, "");
     if (text) return text;
   }
   return "";

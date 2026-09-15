@@ -27,6 +27,7 @@ import {
   resolveCommentProfile,
   technicianIdentity,
 } from "../incidencias-comment-identity/index.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const INCIDENCIAS_FOLLOWUP_AVATARS_VERSION =
   "incidencias.followup-avatars.v6.global-avatar-authority";
@@ -72,20 +73,13 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function text(value = "") {
-  return String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function cleanImageSrc(image = null) {
   if (!image || image.hidden === true) return "";
-  return text(image.getAttribute?.("src") || "");
+  return cleanText(image.getAttribute?.("src") || "");
 }
 
 function ticketId(modal = null) {
-  return text(modal?.dataset?.ticketId || "");
+  return cleanText(modal?.dataset?.ticketId || "");
 }
 
 function unwrapDetail(value = null) {
@@ -115,7 +109,7 @@ function unwrapDetail(value = null) {
 function requesterProfile(modal = null, detail = {}) {
   const host = modal?.querySelector?.(REQUESTER_SELECTOR) || null;
   const image = host?.querySelector?.(REQUESTER_IMAGE_SELECTOR) || null;
-  const name = text(host?.getAttribute?.("title") || "");
+  const name = cleanText(host?.getAttribute?.("title") || "");
   const identity = requesterIdentity(detail);
 
   if (!name) return null;
@@ -131,7 +125,7 @@ function requesterProfile(modal = null, detail = {}) {
 function technicianProfile(modal = null, detail = {}) {
   const host = modal?.querySelector?.(TECHNICIAN_SELECTOR) || null;
   const image = host?.querySelector?.(TECHNICIAN_IMAGE_SELECTOR) || null;
-  const name = text(
+  const name = cleanText(
     host?.querySelector?.(".incidencias-modal-technician-copy strong")?.textContent ||
       host?.querySelector?.("strong")?.textContent ||
       ""
@@ -265,14 +259,14 @@ function createAvatar(head = null, profile = null, authorText = "", identity = n
 
 function syncHead(head = null, identityIndex = new Map(), availableProfiles = []) {
   const author = directAuthor(head);
-  const authorText = text(author?.textContent || "");
+  const authorText = cleanText(author?.textContent || "");
 
   if (!authorText) {
     removeAvatar(head);
     return false;
   }
 
-  const commentId = text(head.closest?.("[data-comment-id]")?.dataset?.commentId || "");
+  const commentId = cleanText(head.closest?.("[data-comment-id]")?.dataset?.commentId || "");
   const identity = resolveCommentIdentity(authorText, identityIndex, commentId);
   const profile = resolveCommentProfile(
     authorText,
@@ -281,11 +275,11 @@ function syncHead(head = null, identityIndex = new Map(), availableProfiles = []
     commentId
   );
   const presentation = presentationForAuthor(profile, authorText, identity);
-  const expectedSrc = text(profile?.src || "");
+  const expectedSrc = cleanText(profile?.src || "");
 
   const current = head.querySelector?.(`.${AVATAR_CLASS}`) || null;
   const currentImage = current?.querySelector?.(`.${AVATAR_IMAGE_CLASS}`) || null;
-  const currentSrc = text(currentImage?.getAttribute?.("src") || "");
+  const currentSrc = cleanText(currentImage?.getAttribute?.("src") || "");
 
   if (
     current &&

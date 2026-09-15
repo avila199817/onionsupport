@@ -34,6 +34,7 @@ import {
   matchesIncidenciasPriorityQuery,
   getIncidenciasPriorityPolicySnapshot,
 } from "./incidencias.priority-policy.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export * from "./incidencias.api.impl.js";
 export {
@@ -65,13 +66,6 @@ let universeRevalidationPromise = null;
 let universeRevalidatedAt = 0;
 let universeEpoch = 0;
 
-function cleanKey(value = "") {
-  return String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function object(value = null) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
@@ -88,7 +82,7 @@ function finiteNumber(value = 0, fallback = 0) {
 }
 
 function normalizedText(value = "") {
-  return cleanKey(value)
+  return cleanText(value)
     .toLocaleLowerCase("es-ES")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -146,7 +140,7 @@ function queryFrom(options = {}) {
 
 function responseCursor(response = {}) {
   const source = object(response);
-  return cleanKey(
+  return cleanText(
     source.nextCursor ||
     source.pagination?.nextCursor ||
     source.meta?.nextCursor ||
@@ -172,10 +166,10 @@ function responseTotal(response = {}, fallback = 0) {
 function isUnfilteredFirstPageQuery(query = {}) {
   const source = object(query);
   return (
-    !cleanKey(source.cursor) &&
-    !cleanKey(source.q) &&
+    !cleanText(source.cursor) &&
+    !cleanText(source.q) &&
     !Object.prototype.hasOwnProperty.call(source, "closed") &&
-    !cleanKey(source.priority)
+    !cleanText(source.priority)
   );
 }
 
@@ -187,7 +181,7 @@ function isMainListFirstPageQuery(query = {}) {
     Math.trunc(finiteNumber(Impl.INCIDENCIAS_LIST_LIMIT, 48))
   );
 
-  return !cleanKey(source.cursor) && limit >= canonicalLimit;
+  return !cleanText(source.cursor) && limit >= canonicalLimit;
 }
 
 function isFacetCountQuery(query = {}) {
@@ -195,9 +189,9 @@ function isFacetCountQuery(query = {}) {
   const limit = Math.max(1, Math.trunc(finiteNumber(source.limit, 0)));
   const hasFacetPredicate =
     Object.prototype.hasOwnProperty.call(source, "closed") ||
-    Boolean(cleanKey(source.priority));
+    Boolean(cleanText(source.priority));
 
-  return !cleanKey(source.cursor) && limit === 1 && hasFacetPredicate;
+  return !cleanText(source.cursor) && limit === 1 && hasFacetPredicate;
 }
 
 function rememberCompleteUniverse(response = {}, query = {}) {
@@ -350,8 +344,8 @@ function projectCompleteUniverse(query = {}) {
   const source = object(query);
   const hasClosed = Object.prototype.hasOwnProperty.call(source, "closed");
   const closed = hasClosed ? source.closed === true : null;
-  const priority = cleanKey(source.priority);
-  const search = cleanKey(source.q);
+  const priority = cleanText(source.priority);
+  const search = cleanText(source.q);
 
   const projected = completeUniverse.items.filter((item) => (
     itemMatchesClosed(item, closed) &&
@@ -487,7 +481,7 @@ export function createDetailRequestCoordinator(loader) {
   const flights = new Map();
 
   function request(id = "", options = {}) {
-    const key = cleanKey(id);
+    const key = cleanText(id);
     const force = options?.force === true || options?.forceRefresh === true;
 
     if (!key || force) {
@@ -559,7 +553,7 @@ export const loadIncidenciaDetail = getIncidenciaByIdRequest;
 
 function ticketIdFromDetail(value = null) {
   const source = object(value);
-  return cleanKey(
+  return cleanText(
     source.ticketId ||
     source.incidenciaId ||
     source.id ||
@@ -582,7 +576,7 @@ function mutationTicketId(args = [], result = null, mode = "first") {
 
   if (mode === "object") {
     const source = object(args[0]);
-    return cleanKey(
+    return cleanText(
       source.ticketId ||
       source.incidenciaId ||
       source.id ||
@@ -590,7 +584,7 @@ function mutationTicketId(args = [], result = null, mode = "first") {
     );
   }
 
-  return cleanKey(args[0] || ticketIdFromDetail(result));
+  return cleanText(args[0] || ticketIdFromDetail(result));
 }
 
 async function authoritativeMutationResult(

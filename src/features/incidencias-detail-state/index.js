@@ -16,6 +16,7 @@
 
 import { synchronizeAvatars } from "../avatar-system/index.js";
 import { persistedCommentId } from "../incidencias-comment-identity/index.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const INCIDENCIAS_DETAIL_STATE_VERSION =
   "incidencias-detail-state.v6.controller-authoritative";
@@ -116,12 +117,6 @@ const browser = () =>
   typeof window !== "undefined" &&
   typeof document !== "undefined";
 
-const text = (value = "", fallback = "") =>
-  String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim() || fallback;
-
 const multiline = (value = "", fallback = "") =>
   String(value ?? "")
     .replace(/\r\n/g, "\n")
@@ -131,7 +126,7 @@ const multiline = (value = "", fallback = "") =>
     .trim() || fallback;
 
 const lower = (value = "") =>
-  text(value).toLowerCase();
+  cleanText(value).toLowerCase();
 
 const object = (value, fallback = {}) =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -195,7 +190,7 @@ function currentRoot() {
 }
 
 function ticketId(root = currentRoot()) {
-  return text(
+  return cleanText(
     first(
       root?.dataset?.ticketId,
       root?.dataset?.incidenciaId
@@ -230,7 +225,7 @@ function supportIdentity(detail = {}) {
       tecnico.id,
       meta.technicianUserId,
       meta.lastTechnicianUserId,
-    ].map(text).filter(Boolean)),
+    ].map(cleanText).filter(Boolean)),
 
     emails: new Set([
       raw.assignedToEmail,
@@ -274,7 +269,7 @@ function requesterIdentity(detail = {}) {
       owner.userId,
       owner.id,
       cliente.userId,
-    ].map(text).filter(Boolean)),
+    ].map(cleanText).filter(Boolean)),
 
     emails: new Set([
       raw.email,
@@ -313,7 +308,7 @@ function eventSide(entry = {}, detail = {}) {
   if (SUPPORT_ROLES.has(role)) return "support";
   if (USER_ROLES.has(role)) return "user";
 
-  const actorId = text(
+  const actorId = cleanText(
     raw.byUserId ||
     raw.userId ||
     raw.actorUserId ||
@@ -434,7 +429,7 @@ export function resolveConversationPolicy(detail = {}) {
       lastSupportResponseAt:
         explicit.lastSupportResponseAt || null,
       message:
-        text(explicit.message, ""),
+        cleanText(explicit.message, ""),
       source: "backend",
     };
   }
@@ -517,13 +512,13 @@ function normalizeComment(item = {}, index = 0) {
   if (!body) return null;
 
   return {
-    id: text(
+    id: cleanText(
       first(raw.id, raw.commentId, raw.eventId, `comment_${index}`),
       `comment_${index}`
     ),
     persistedCommentId: persistedCommentId(raw),
     body,
-    author: text(
+    author: cleanText(
       first(
         raw.author,
         raw.byName,
@@ -628,7 +623,7 @@ function buildCommentCard(comment = {}) {
   head.className = "incidencias-modal-description-comment-head";
 
   const author = document.createElement("strong");
-  author.textContent = text(comment.author, "Usuario");
+  author.textContent = cleanText(comment.author, "Usuario");
 
   const date = document.createElement("span");
   date.className = "incidencias-modal-description-comment-date";
@@ -709,7 +704,7 @@ function renderComments(root, detail = {}) {
 }
 
 function attachmentId(file = {}, index = 0) {
-  return text(
+  return cleanText(
     first(
       file?.id,
       file?.attachmentId,
@@ -761,7 +756,7 @@ function sortAttachments(root, detail = {}) {
   const ranked = cards.map((card, index) => ({
     card,
     index,
-    time: times.get(text(card.dataset?.attachmentId)) || 0,
+    time: times.get(cleanText(card.dataset?.attachmentId)) || 0,
   }));
 
   const desired = [...ranked].sort((a, b) =>
@@ -856,7 +851,7 @@ function ensurePendingChip(root, policy = {}) {
     });
   }
 
-  const message = text(policy?.message, PENDING_MESSAGE);
+  const message = cleanText(policy?.message, PENDING_MESSAGE);
   chip.title = message;
   chip.setAttribute(
     "aria-label",
@@ -877,7 +872,7 @@ function removePendingChip(root) {
 function syncTicketId(root) {
   const chip = root?.querySelector?.(ID_CHIP);
   const label = chip?.querySelector?.(ID_TEXT);
-  const id = text(chip?.dataset?.ticketId, "");
+  const id = cleanText(chip?.dataset?.ticketId, "");
 
   if (!chip || !label || !id) return false;
 
@@ -898,7 +893,7 @@ function syncTechnicianEye(root) {
 
   if (!card || !inline) return false;
 
-  const name = text(
+  const name = cleanText(
     inline.querySelector?.("strong")?.textContent,
     "Técnico"
   );
@@ -1108,7 +1103,7 @@ export function syncIncidenciasDetailState(payload = {}) {
   mountIncidenciasDetailState();
 
   const nextHost = payload.modalHost || null;
-  const nextId = text(payload.id || ticketId(nextHost?.querySelector?.(ROOT)), "");
+  const nextId = cleanText(payload.id || ticketId(nextHost?.querySelector?.(ROOT)), "");
   const leaseChanged = host !== nextHost || owner?.controller !== payload.controller || activeTicketId !== nextId;
 
   if (leaseChanged || !payload.open) clearActiveState();

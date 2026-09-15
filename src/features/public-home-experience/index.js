@@ -13,6 +13,7 @@
 
 import { AppCore } from "../../core/index.js";
 import { mutationsTouchSelector } from "../../core/dom-mutations.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const PUBLIC_HOME_EXPERIENCE_VERSION =
   "public-home.experience.v7-avatar-topbar-card";
@@ -43,13 +44,6 @@ let scanFrame = 0;
 let destroyed = false;
 let logoutPending = false;
 
-function text(value = "", fallback = "") {
-  return String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim() || fallback;
-}
-
 function object(value) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
@@ -73,7 +67,7 @@ function authenticated(state = {}) {
 }
 
 function safePath(value = "", fallback = "/") {
-  const raw = text(value, "");
+  const raw = cleanText(value, "");
 
   if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return fallback;
 
@@ -110,7 +104,7 @@ function panelPath(link = null, state = {}) {
   if (fromState) return fromState;
 
   const user = currentUser(state);
-  const slug = text(
+  const slug = cleanText(
     state.userSlug ||
     user?.slug ||
     user?.username ||
@@ -334,8 +328,8 @@ function ensureAccountMenu(root = null, state = {}) {
   link.setAttribute("aria-haspopup", "menu");
   link.setAttribute("aria-expanded", "false");
   const identity = link.querySelector(".public-support-account");
-  const identityName = text(identity?.dataset?.publicSupportAccountName, "");
-  const identityEmail = text(identity?.dataset?.publicSupportAccountEmail, "");
+  const identityName = cleanText(identity?.dataset?.publicSupportAccountName, "");
+  const identityEmail = cleanText(identity?.dataset?.publicSupportAccountEmail, "");
   const identityLabel = [identityName, identityEmail].filter(Boolean).join(", ");
   link.setAttribute(
     "aria-label",

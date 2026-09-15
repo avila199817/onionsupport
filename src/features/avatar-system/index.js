@@ -20,12 +20,12 @@
 import {
   AVATAR_IDENTITY_VERSION,
   avatarInitials,
-  cleanAvatarText,
   normalizeAvatarEmail,
   normalizeAvatarUserId,
   normalizeAvatarUsername,
   resolveAvatarPresentation,
 } from "./identity.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export {
   AVATAR_IDENTITY_VERSION,
@@ -39,7 +39,6 @@ export {
   avatarToneFromSeed,
   avatarUserIdFromIdentity,
   avatarUsernameFromIdentity,
-  cleanAvatarText,
   hashAvatarSeed,
   normalizeAvatarEmail,
   normalizeAvatarName,
@@ -208,11 +207,11 @@ function classTokens(value = "") {
 
   if (isElement(value)) {
     return [...(value.classList || [])]
-      .map((token) => cleanAvatarText(token, ""))
+      .map((token) => cleanText(token, ""))
       .filter(Boolean);
   }
 
-  return cleanAvatarText(value, "")
+  return cleanText(value, "")
     .split(/\s+/)
     .map((token) => token.trim())
     .filter(Boolean);
@@ -231,7 +230,7 @@ export function isAvatarFallbackClassName(value = "") {
 }
 
 export function resolveAvatarImageState(input = {}) {
-  const source = cleanAvatarText(input?.source || "", "");
+  const source = cleanText(input?.source || "", "");
   const failed = input?.failed === true;
   const hidden = input?.hidden === true;
   const complete = input?.complete === true;
@@ -333,7 +332,7 @@ function isLikelyFallbackSpan(node = null) {
   if (hasFallbackHint(node)) return true;
   if (node.children?.length) return false;
 
-  const text = cleanAvatarText(node.textContent || "", "");
+  const text = cleanText(node.textContent || "", "");
   return Boolean(text && Array.from(text).length <= 4);
 }
 
@@ -505,7 +504,7 @@ function datasetValue(node = null, keys = []) {
   if (!isElement(node)) return "";
 
   for (const key of keys) {
-    const value = cleanAvatarText(node?.dataset?.[key] || "", "");
+    const value = cleanText(node?.dataset?.[key] || "", "");
     if (value) return value;
   }
 
@@ -513,7 +512,7 @@ function datasetValue(node = null, keys = []) {
 }
 
 function emailFromText(value = "") {
-  const match = cleanAvatarText(value, "").match(EMAIL_RE);
+  const match = cleanText(value, "").match(EMAIL_RE);
   return normalizeAvatarEmail(match?.[0] || "");
 }
 
@@ -532,7 +531,7 @@ function emailFromNode(node = null) {
   );
   if (datasetEmail) return datasetEmail;
 
-  const href = cleanAvatarText(node.getAttribute?.("href") || "", "");
+  const href = cleanText(node.getAttribute?.("href") || "", "");
   if (/^mailto:/i.test(href)) {
     const mail = normalizeAvatarEmail(
       decodeURIComponent(href.replace(/^mailto:/i, "").split("?")[0] || "")
@@ -584,7 +583,7 @@ function usernameFromNode(node = null) {
 }
 
 function humanNameFromText(value = "") {
-  const raw = cleanAvatarText(value, "");
+  const raw = cleanText(value, "");
   if (!raw) return "";
 
   const withoutEmail = raw
@@ -717,7 +716,7 @@ function firstUserIdInAncestors(host = null, scope = null) {
 
 function fallbackText(host = null) {
   for (const node of avatarFallbackNodes(host)) {
-    const value = cleanAvatarText(node.textContent || "", "");
+    const value = cleanText(node.textContent || "", "");
     if (value) return value;
   }
 
@@ -857,7 +856,7 @@ function applyIdentityPresentation(host = null) {
 function imageSource(image = null) {
   if (!isImage(image)) return "";
 
-  return cleanAvatarText(
+  return cleanText(
     image.currentSrc ||
     image.getAttribute("src") ||
     image.getAttribute("srcset") ||

@@ -8,6 +8,7 @@
 
 import { AppCore } from "../../core/index.js";
 import * as Routes from "../../router/routes.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const ROUTE_INTENT_PRELOAD_VERSION =
   "route-intent-preload.v2-strong-intent-gates";
@@ -40,14 +41,6 @@ let hoverAnchor = null;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return output || fallback;
 }
 
 export function normalizeIntentPath(value = "/") {

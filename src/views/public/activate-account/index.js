@@ -39,6 +39,7 @@ import {
 } from "../../../core/config.js";
 
 import createPasswordResetTemplate from "../password-reset/template.js";
+import { cleanText } from "../../../core/presentation-text.js";
 
 export const ACTIVATE_ACCOUNT_VIEW_VERSION =
   "activate-account.view.public.v1-production";
@@ -95,15 +96,6 @@ function isObject(value) {
       typeof value === "object" &&
       !Array.isArray(value)
   );
-}
-
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
 }
 
 function normalizeCode(value = "") {

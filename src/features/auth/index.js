@@ -21,6 +21,7 @@ import {
   buildUserHomeRoute,
   normalizeUserSlug,
 } from "../../core/config.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const AUTH_VERSION = "auth.minimal.v10-logout-fail-closed";
 const ROOT_PATH = "/";
@@ -45,10 +46,6 @@ const selectorMetrics = { coreReads: 0, httpTokenFallbacks: 0, contexts: 0 };
 
 function isObject(value) { return Boolean(value && typeof value === "object" && !Array.isArray(value)); }
 function isFunction(value) { return typeof value === "function"; }
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "").replace(/[\r\n\t]/g, " ").replace(/\s+/g, " ").trim();
-  return output || fallback;
-}
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;

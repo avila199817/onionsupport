@@ -15,7 +15,8 @@
    - Las previews locales usan object URLs efímeras y se revocan al retirar/cerrar.
 ========================================================= */
 
-import { cleanText, escapeHtml } from "../../core/presentation-text.js";
+import { cleanText } from "../../core/presentation-text.js";
+import { escapeHtml } from "../../core/escape-html.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { renderModalCloseButton, renderModalShell } from "../../features/entity-overlay/modal-host.js";
 import {

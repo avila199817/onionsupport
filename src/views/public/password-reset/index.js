@@ -39,6 +39,7 @@ import {
 } from "../../../core/config.js";
 
 import createPasswordResetTemplate from "./template.js";
+import { cleanText } from "../../../core/presentation-text.js";
 
 export const PASSWORD_RESET_VIEW_VERSION =
   "password-reset.view.public.controller.v3-production";
@@ -102,15 +103,6 @@ function isObject(value) {
       typeof value === "object" &&
       !Array.isArray(value)
   );
-}
-
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
 }
 
 function clearNode(node = null) {

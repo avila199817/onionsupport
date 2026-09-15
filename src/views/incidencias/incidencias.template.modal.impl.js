@@ -28,7 +28,8 @@
      La SAS debe venir ya validada desde incidencias.api.js.
 ========================================================= */
 
-import { cleanText, escapeHtml } from "../../core/presentation-text.js";
+import { cleanText } from "../../core/presentation-text.js";
+import { escapeHtml } from "../../core/escape-html.js";
 import { userNameFromIdentity } from "../../core/user-identity.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { renderModalCloseButton, renderModalShell, renderModalState } from "../../features/entity-overlay/modal-host.js";

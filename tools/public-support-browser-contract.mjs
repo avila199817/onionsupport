@@ -10,7 +10,7 @@ const FEATURES = [
 ];
 const sourcePaths = new Set([
   ...FEATURES.map((name) => `/src/features/${name}/index.js`),
-  "/src/core/dom-mutations.js", "/src/core/async-scope.js",
+  "/src/core/dom-mutations.js", "/src/core/async-scope.js", "/src/core/presentation-text.js",
 ]);
 const mocks = new Map([
   ["/src/core/index.js", `

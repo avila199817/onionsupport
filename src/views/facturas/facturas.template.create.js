@@ -1,4 +1,5 @@
-import { cleanText, escapeHtml } from "../../core/presentation-text.js";
+import { cleanText } from "../../core/presentation-text.js";
+import { escapeHtml } from "../../core/escape-html.js";
 import { renderModalCloseButton, renderModalShell } from "../../features/entity-overlay/modal-host.js";
 import { normalizeClienteModel } from "../clientes/clientes.model.js";
 /* =========================================================

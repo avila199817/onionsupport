@@ -51,6 +51,7 @@ export const ROUTER_VERSION =
   "router.minimal.v16-private-runtime-after-guard";
 
 import { syncPageMetadata } from "./page-metadata.js";
+import { cleanText } from "../core/presentation-text.js";
 
 const PUBLIC_HOME_PATH = "/";
 
@@ -171,28 +172,6 @@ function isFunction(value) {
   return (
     typeof value ===
     "function"
-  );
-}
-
-function cleanText(
-  value = "",
-  fallback = ""
-) {
-  const output =
-    String(value ?? "")
-      .replace(
-        /[\r\n\t]/g,
-        " "
-      )
-      .replace(
-        /\s+/g,
-        " "
-      )
-      .trim();
-
-  return (
-    output ||
-    fallback
   );
 }
 

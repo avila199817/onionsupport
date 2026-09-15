@@ -16,7 +16,7 @@
      para que AvatarSystem nunca mezcle personas dentro del mismo modal.
 ========================================================= */
 
-import { escapeHtml } from "../../core/presentation-text.js";
+import { escapeHtml } from "../../core/escape-html.js";
 import { persistedCommentId, requesterIdentity, technicianIdentity } from "../../features/incidencias-comment-identity/index.js";
 
 import {

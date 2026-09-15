@@ -9,7 +9,8 @@
 ========================================================= */
 
 import * as Base from "./server.template.base.js";
-import { cleanText as safeText, escapeHtml } from "../../core/presentation-text.js";
+import { cleanText as safeText } from "../../core/presentation-text.js";
+import { escapeHtml } from "../../core/escape-html.js";
 
 
 export const SERVER_TEMPLATE_VERSION =

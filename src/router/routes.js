@@ -41,6 +41,7 @@ import {
   normalizeUserSlug,
   getUserScopedRouteInfo as configGetUserScopedRouteInfo,
 } from "../core/config.js";
+import { cleanText } from "../core/presentation-text.js";
 
 export const ROUTES_VERSION =
   "routes.minimal.v8.4-canonical-visibility";
@@ -175,18 +176,6 @@ export const ROUTE_ALIASES = Object.freeze({
 /* =========================================================
    BASICS
 ========================================================= */
-
-function cleanText(
-  value = "",
-  fallback = ""
-) {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
-}
 
 function isFunction(value) {
   return typeof value === "function";

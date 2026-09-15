@@ -4,7 +4,8 @@ import { getFacturaEntityId } from "../../core/entity-identity.js";
 import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
 import { MODAL_SHELL_SELECTORS, createModalHost as createPrivateModalHost, renderModalContent, renderModalShell } from "../../features/entity-overlay/modal-host.js";
 import { openModalConfirmation } from "../../features/entity-overlay/modal-confirmation.js";
-import { cleanText, escapeHtml } from "../../core/presentation-text.js";
+import { cleanText } from "../../core/presentation-text.js";
+import { escapeHtml } from "../../core/escape-html.js";
 /* =========================================================
    Onion Support - Facturas Index
    Archivo: /src/views/facturas/index.js

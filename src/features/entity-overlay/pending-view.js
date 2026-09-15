@@ -1,4 +1,5 @@
-import { cleanText, escapeHtml } from "../../core/presentation-text.js";
+import { cleanText } from "../../core/presentation-text.js";
+import { escapeHtml } from "../../core/escape-html.js";
 import { renderModalCloseButton, renderModalShell, renderModalState } from "./modal-host.js";
 export { cleanText };
 

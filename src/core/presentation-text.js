@@ -1,13 +1,5 @@
-// Pure text presentation only: not URL, JavaScript, CSS or rich-HTML sanitizing.
+// One-line text normalization only: collapse whitespace, trim, fallback. HTML
+// escaping lives in ./escape-html.js so the kernel loads this helper alone.
 export function cleanText(value = "", fallback = "") {
   return String(value ?? "").replace(/[\r\n\t]/g, " ").replace(/\s+/g, " ").trim() || fallback;
-}
-
-export function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }

@@ -33,7 +33,8 @@
      y feedback de operaciones viven en index.js.
 ========================================================= */
 
-import { cleanText, escapeHtml } from "../../core/presentation-text.js";
+import { cleanText } from "../../core/presentation-text.js";
+import { escapeHtml } from "../../core/escape-html.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { renderModalCloseButton, renderModalShell, renderModalState } from "../../features/entity-overlay/modal-host.js";
 

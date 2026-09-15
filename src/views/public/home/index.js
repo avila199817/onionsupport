@@ -15,6 +15,7 @@
 
 import { AppCore } from "../../../core/index.js";
 import createPublicHomeTemplate from "./template.js";
+import { cleanText } from "../../../core/presentation-text.js";
 
 export const PUBLIC_HOME_VIEW_VERSION =
   "public.home.view.controller.2026.25.cold-boot-main-content";
@@ -73,15 +74,6 @@ function isBrowser() {
 
 function isFunction(value) {
   return typeof value === "function";
-}
-
-function cleanText(value = "", fallback = "") {
-  return (
-    String(value ?? "")
-      .replace(/[\r\n\t]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim() || fallback
-  );
 }
 
 function redact(value = "") {

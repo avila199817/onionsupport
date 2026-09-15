@@ -17,6 +17,7 @@
 import { AppCore } from "../../../core/index.js";
 import { Auth as DefaultAuth } from "../../../features/auth/index.js";
 import createLoginTemplate from "./template.js";
+import { cleanText } from "../../../core/presentation-text.js";
 
 export const LOGIN_VIEW_VERSION = "login.view.public.controller.v7-document-handoff";
 
@@ -35,15 +36,6 @@ function isBrowser() {
 
 function isFunction(value) {
   return typeof value === "function";
-}
-
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
 }
 
 function redact(value = "") {

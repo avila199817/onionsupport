@@ -10,7 +10,7 @@
    keyboard, backdrop, focus-return and scroll registry. Keeping every DOM
    rendering here keeps it out of the public consent dialogs' closure and in
    one shared chunk for all private dialogs. */
-import { escapeHtml } from "../../core/presentation-text.js";
+import { escapeHtml } from "../../core/escape-html.js";
 import { restoreModalFocus } from "./modal-lifecycle.js";
 
 export const MODAL_SHELL_VERSION = "ui-modal-shell.v1";

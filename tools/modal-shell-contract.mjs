@@ -4,10 +4,10 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import shell, {
+import {
   MODAL_HEIGHTS, MODAL_SHELL_SELECTORS, MODAL_SHELL_VERSION, MODAL_SIZES, MODAL_STATES,
-  renderModalCloseButton, renderModalShell, renderModalState,
-} from "../src/features/entity-overlay/modal-shell.js";
+  renderModalCloseButton, renderModalContent, renderModalShell, renderModalState,
+} from "../src/features/entity-overlay/modal-host.js";
 import { renderDetailPending } from "../src/features/entity-overlay/pending-view.js";
 
 /* One modal system: the shell renders every private dialog, the structural
@@ -83,10 +83,15 @@ const FIXED_INVENTORY = new Map([
 /* Files still allowed to restyle structural shell classes (scoped overrides).
    They shrink with the same units; a new file is a violation. */
 const STRUCTURAL_OVERRIDE_FILES = new Map([
-  ["src/css/views/incidencias/media-preview.core.css", "incidencias-detail-shell"],
-  ["src/css/compositions/private-admin-interactions.css", "incidencias-detail-shell"],
   ["src/features/incidencias-technician-profile/style.css", "technician-profile-size-variant"],
 ]);
+
+/* Dialogs already rendered through renderModalShell. Each one imports the
+   shell and emits no root/overlay/panel or dialog ARIA of its own. */
+const SHELL_CONSUMERS = [
+  "src/features/entity-overlay/pending-view.js",
+  "src/views/incidencias/incidencias.template.modal.impl.js",
+];
 
 const STRUCTURAL_CLASS = /\.ui-detail-modal-(?:root|overlay|panel|header|body|footer|close-btn)\b/u;
 
@@ -135,9 +140,10 @@ const test = (name, fn) => tests.push({ name, fn });
 
 test("shell identity", () => {
   assert.equal(MODAL_SHELL_VERSION, "ui-modal-shell.v1");
-  assert.equal(shell.version, MODAL_SHELL_VERSION);
-  assert.equal(shell.renderModalShell, renderModalShell);
-  assert.ok(Object.isFrozen(shell) && Object.isFrozen(MODAL_SHELL_SELECTORS));
+  assert.equal(typeof renderModalShell, "function");
+  assert.equal(typeof renderModalContent, "function", "the shell and its host ship in one module");
+  assert.ok(Object.isFrozen(MODAL_SHELL_SELECTORS));
+  assert.match(read("src/features/entity-overlay/modal-host.js"), /scrollSelector = MODAL_SHELL_SELECTORS\.body,/u, "the host patches by the shell's own markers");
   assert.deepEqual(Object.keys(MODAL_SHELL_SELECTORS), ["root", "overlay", "panel", "header", "body", "footer", "close", "state"]);
   assert.deepEqual([...MODAL_SIZES], ["detail", "wide", "form", "compact", "confirm"]);
   assert.deepEqual([...MODAL_HEIGHTS], ["fixed", "auto"]);
@@ -258,6 +264,16 @@ function walk(dir, pattern, out = []) {
   return out;
 }
 
+test("migrated dialogs render through the shell and emit no structure of their own", () => {
+  for (const file of SHELL_CONSUMERS) {
+    const source = read(file);
+    assert.match(source, /import \{[^}]*\brenderModalShell\b[^}]*\} from "(?:\.\/|(?:\.\.\/)+features\/entity-overlay\/)modal-host\.js";/u, `${file} imports the shell`);
+    for (const needle of ['role="dialog"', "ui-detail-modal-overlay", "ui-detail-modal-panel", "data-modal-overlay", "data-modal-panel"]) {
+      assert.equal(source.includes(needle), false, `${file} emits ${needle} outside the shell`);
+    }
+  }
+});
+
 test("every fixed layer outside the authority is inventoried: shells to migrate or non-dialog layers", () => {
   const seen = new Map();
   for (const file of [...cssFiles("src/css"), ...cssFiles("src/features")]) {
@@ -296,4 +312,4 @@ for (const { name, fn } of tests) {
 }
 if (failed) { console.error(`modal-shell-contract: ${failed} failing check(s)`); process.exit(1); }
 const pendingShells = [...FIXED_INVENTORY.values()].filter(({ kind }) => kind === "shell").length;
-console.log(`Modal shell contract: PASS · ${tests.length} checks · ${pendingShells} historical shells pending · ${STRUCTURAL_OVERRIDE_FILES.size} scoped overrides pending (${MODAL_SHELL_VERSION})`);
+console.log(`Modal shell contract: PASS · ${tests.length} checks · ${SHELL_CONSUMERS.length} shell consumers · ${pendingShells} historical shells pending · ${STRUCTURAL_OVERRIDE_FILES.size} scoped overrides pending (${MODAL_SHELL_VERSION})`);

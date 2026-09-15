@@ -1,6 +1,6 @@
 import { escapeHtml } from "../../core/presentation-text.js";
 import { createModalLifecycle, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
-import { createModalHost, renderModalContent } from "../entity-overlay/modal-host.js";
+import { createModalHost, renderModalCloseButton, renderModalContent } from "../entity-overlay/modal-host.js";
 /* =========================================================
    Onion Support · Incidencias Technician Profile
 
@@ -660,10 +660,6 @@ function contactCard(label = "", value = "", href = "", actionLabel = "", icon =
   return `<a class="ui-detail-modal-meta-card incidencias-modal-contact-link inc-technician-contact-card" href="${attr(safeHref)}" aria-label="${attr(actionLabel || `${label}: ${safeValue}`)}" title="${attr(actionLabel || safeValue)}">${content}</a>`;
 }
 
-function closeIcon() {
-  return `<svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`;
-}
-
 function eyeIcon() {
   return `<svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>`;
 }
@@ -805,7 +801,7 @@ function renderShell({ tech = {}, body = "", summary = "" } = {}) {
                 <span id="inc-technician-summary" class="ui-detail-modal-updated">${escapeHtml(summary || "Perfil del técnico asignado")}</span>
               </div>
             </div>
-            <button type="button" class="incidencias-modal-close-btn ui-detail-modal-close-btn" data-technician-profile-action="close" aria-label="Cerrar perfil de ${attr(name)}">${closeIcon()}</button>
+            ${renderModalCloseButton({ label: `Cerrar perfil de ${name}`, attributes: { "data-technician-profile-action": "close" } })}
           </header>
           <main class="ui-detail-modal-body">${body}</main>
         </div>

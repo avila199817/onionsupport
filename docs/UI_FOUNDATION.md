@@ -52,7 +52,7 @@ Roots y elementos estructurales privados deben poder encoger (`min-inline-size: 
 
 `dialog`, `[role="dialog"]` y `[aria-modal="true"]` respetan viewport dinámico y safe areas. Un modal no puede crecer fuera de pantalla ni quedar detrás del chrome del navegador móvil.
 
-El shell estructural de todo diálogo privado vive en `src/css/components/detail-modal.css` (namespace `ui-detail-modal-*`, tokens `--ui-detail-modal-*`, variantes `data-modal-size` y `data-modal-height`) y lo emite `src/features/entity-overlay/modal-shell.js`. Se importa con el área privada; las hojas de dominio estilizan sólo su contenido interno ([sistema modal](UI_MODAL_SYSTEM.md)).
+El shell estructural de todo diálogo privado vive en `src/css/components/detail-modal.css` (namespace `ui-detail-modal-*`, tokens `--ui-detail-modal-*`, variantes `data-modal-size` y `data-modal-height`) y lo emite `src/features/entity-overlay/modal-host.js` (`renderModalShell`). Se importa con el área privada; las hojas de dominio estilizan sólo su contenido interno ([sistema modal](UI_MODAL_SYSTEM.md)).
 
 ## App Chrome
 

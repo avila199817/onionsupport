@@ -190,47 +190,11 @@
 }
 
 /* =========================================================
-   INCIDENCIAS · DETAILS · INTERACCIÓN FINAL
+   INCIDENCIAS · DETAILS · CTA FINAL
 
-   Details reutiliza exactamente el mismo lenguaje de cierre y CTA que Crear.
-   La geometría del shell sigue siendo propiedad de ui-detail-modal-*; esta
-   composición sólo gobierna interacción, jerarquía y estados finales.
+   El botón cerrar es el control del shell (ui-detail-modal-close-btn, en
+   components/detail-modal.css); esta composición sólo gobierna el CTA.
 ========================================================= */
-
-.incidencias-modal-close-btn.ui-detail-modal-close-btn {
-  inline-size: 42px;
-  block-size: 42px;
-  border: 1px solid var(--btn-secondary-border);
-  border-radius: var(--btn-radius);
-  background: var(--btn-secondary-bg);
-  color: var(--btn-secondary-text);
-  transition:
-    background var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard),
-    transform var(--duration-fast) var(--ease-standard),
-    opacity var(--duration-fast) var(--ease-standard);
-}
-
-.incidencias-modal-close-btn.ui-detail-modal-close-btn:hover:not(:disabled):not([aria-disabled="true"]) {
-  border-color: var(--border-error);
-  background: var(--error-bg);
-  color: var(--error-strong, var(--error));
-  transform: translateY(-1px);
-}
-
-.incidencias-modal-close-btn.ui-detail-modal-close-btn:active:not(:disabled):not([aria-disabled="true"]) {
-  border-color: var(--error-strong, var(--error));
-  background: var(--error-soft);
-  color: var(--error-strong, var(--error));
-  transform: scale(.97);
-}
-
-.incidencias-modal-close-btn.ui-detail-modal-close-btn:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
 
 .incidencias-modal-submit-btn.ui-detail-modal-submit-btn {
   --btn-primary-bg: #1A73E8;
@@ -857,7 +821,6 @@
     .inc-create-submit,
     .inc-create-close,
     .inc-create-selected-user-clear,
-    .incidencias-modal-close-btn,
     .incidencias-modal-submit-btn,
     .incidencias-modal-technician-card [data-technician-profile-eye="true"]
   ) {
@@ -889,7 +852,6 @@
   .inc-create-submit:hover,
   .inc-create-close:hover,
   .inc-create-selected-user-clear:hover,
-  .incidencias-modal-close-btn:hover,
   .incidencias-modal-submit-btn:hover,
   .incidencias-modal-technician-card:hover [data-technician-profile-eye="true"] {
     transform: none;
@@ -926,7 +888,6 @@
     .inc-create-submit,
     .inc-create-close,
     .inc-create-selected-user-clear,
-    .incidencias-modal-close-btn,
     .incidencias-modal-submit-btn,
     .incidencias-modal-description-section,
     .incidencias-modal-description-comment,

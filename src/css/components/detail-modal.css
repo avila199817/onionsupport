@@ -308,16 +308,28 @@ appearance: none;
     opacity var(--duration-fast) var(--ease-standard);
 }
 
-.ui-detail-modal-close-btn:hover:not(:disabled),
 .ui-detail-modal-view-btn:hover:not(:disabled) {
 background: var(--btn-secondary-bg-hover);
   border-color: var(--border-strong);
   color: var(--text-strong);
 }
 
-.ui-detail-modal-close-btn:active:not(:disabled),
 .ui-detail-modal-view-btn:active:not(:disabled) {
 transform: scale(.98);
+}
+
+.ui-detail-modal-close-btn:hover:not(:disabled) {
+border-color: var(--border-error);
+  background: var(--error-bg);
+  color: var(--error-strong, var(--error));
+  transform: translateY(-1px);
+}
+
+.ui-detail-modal-close-btn:active:not(:disabled) {
+border-color: var(--error-strong, var(--error));
+  background: var(--error-soft);
+  color: var(--error-strong, var(--error));
+  transform: scale(.97);
 }
 
 .ui-detail-modal-close-btn:focus-visible,
@@ -345,9 +357,11 @@ inline-size: 15px;
 }
 
 .ui-detail-modal-close-btn {
-inline-size: 40px;
-  min-inline-size: 40px;
+inline-size: 42px;
+  min-inline-size: 42px;
+  block-size: 42px;
   padding: 0;
+  border-radius: var(--btn-radius);
 }
 
 .ui-detail-modal-close-btn svg {
@@ -358,6 +372,8 @@ inline-size: 16px;
 .ui-detail-modal-body {
 min-inline-size: 0;
   min-block-size: 0;
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
   display: grid;
   align-content: start;
   gap: var(--ui-detail-modal-body-gap);
@@ -642,12 +658,6 @@ font-size: clamp(18px, 5.8vw, 23px);
 
 .ui-detail-modal-updated {
 white-space: normal;
-}
-
-.ui-detail-modal-close-btn {
-min-inline-size: 40px;
-    inline-size: 40px;
-    padding: 0;
 }
 
 .ui-detail-modal-body {

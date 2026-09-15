@@ -18,9 +18,9 @@
    SLOTS VACÍOS
 ======================================================= */
 
-.incidencias-modal-body.ui-detail-modal-body
+.incidencias-modal-root [data-modal-body="true"]
   > [data-modal-feedback-slot="true"][data-slot-empty="true"],
-.incidencias-modal-body.ui-detail-modal-body
+.incidencias-modal-root [data-modal-body="true"]
   > [data-modal-preview-slot="true"][data-slot-empty="true"] {
   display: none;
 }
@@ -472,10 +472,6 @@ body.incidencias-media-viewer-open {
 /* =======================================================
    LIVE SYNC SILENCIOSO
 ======================================================= */
-
-.incidencias-modal-panel[data-incidencias-modal-panel="true"] {
-  position: relative;
-}
 
 .incidencias-modal-live-sync {
   position: absolute;

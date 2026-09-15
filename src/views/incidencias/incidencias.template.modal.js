@@ -47,16 +47,12 @@ export const INCIDENCIAS_DETAIL_COMMENTS_UI_VERSION =
 export const INCIDENCIAS_DETAIL_AVATAR_UI_VERSION =
   "incidencias.detail-avatar-ui.v1-global-identity-boundary";
 
+/* Structure (root, overlay, panel, header, body) comes from the canonical
+   shell; the delegated visual contract names the shared content primitives. */
 export const INCIDENCIAS_DETAIL_SHARED_VISUAL_CONTRACT = Object.freeze([
-  "ui-detail-modal-root",
-  "ui-detail-modal-overlay",
-  "ui-detail-modal-panel",
-  "ui-detail-modal-body",
-  "incidencias-modal-root ui-detail-modal-root",
-  "incidencias-modal-overlay ui-detail-modal-overlay",
-  "incidencias-modal-panel ui-detail-modal-panel",
+  "data-modal-shell=\"ui-modal-shell.v1\"",
+  "ui-detail-modal-root incidencias-modal-root",
   "incidencias-modal-chip ui-detail-modal-chip",
-  "incidencias-modal-body ui-detail-modal-body",
   "incidencias-modal-meta-grid ui-detail-modal-meta-grid",
   "incidencias-modal-chip--${attr(safeModifier)} ui-detail-modal-chip--${attr(safeModifier)}",
 ]);

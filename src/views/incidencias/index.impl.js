@@ -126,9 +126,6 @@ const DETAIL_MODAL_PANEL_SELECTOR =
 const CREATE_MODAL_OVERLAY_SELECTOR =
   "[data-incidencias-create-modal-overlay='true']";
 
-const DETAIL_MODAL_OVERLAY_SELECTOR =
-  "[data-incidencias-modal-overlay='true']";
-
 const DETAIL_PREVIEW_SELECTOR =
   "[data-modal-preview='true']";
 
@@ -1584,6 +1581,11 @@ export function createIncidenciasController(
       if (detailModal.previewFile) return closePreview();
       return closeDetailModal();
     },
+    // A click on the shell backdrop is a close request; the draft policy of
+    // closeDetailModal decides whether it becomes a confirmation.
+    onBackdrop() {
+      return detailModal.open ? closeDetailModal() : false;
+    },
   });
 
   function syncBodyModalClass() {
@@ -2908,12 +2910,12 @@ export function createIncidenciasController(
 
       const currentBody =
         currentRoot.querySelector(
-          ".incidencias-modal-body"
+          "[data-modal-body='true']"
         );
 
       const nextBody =
         nextRoot.querySelector(
-          ".incidencias-modal-body"
+          "[data-modal-body='true']"
         );
 
       const currentComposer =
@@ -2976,8 +2978,8 @@ export function createIncidenciasController(
       // Loading, error, retry and hydration share one root, backdrop and panel.
       // Updating the content never restarts the modal lifecycle or focus trap.
       if (currentLoadState !== "ready" || nextLoadState !== "ready") {
-        const currentHeader = currentPanel?.querySelector(".incidencias-modal-header");
-        const nextHeader = nextPanel?.querySelector(".incidencias-modal-header");
+        const currentHeader = currentPanel?.querySelector("[data-modal-header='true']");
+        const nextHeader = nextPanel?.querySelector("[data-modal-header='true']");
         if (!currentHeader || !nextHeader || !currentBody || !nextBody) return false;
         syncAttributes(currentHeader, nextHeader);
         currentHeader.replaceChildren(...Array.from(nextHeader.childNodes).map((node) => node.cloneNode(true)));
@@ -3034,7 +3036,7 @@ export function createIncidenciasController(
         const selector
         of [
           ".incidencias-modal-avatar",
-          ".incidencias-modal-title",
+          ".ui-detail-modal-title",
           "[data-modal-feedback-slot='true']",
           "[data-modal-preview-slot='true']",
           "[data-modal-header-chips='true']",
@@ -7573,23 +7575,6 @@ async function loadMore(options = {}) {
       return;
     }
 
-    const detailOverlay =
-      target.closest(
-        DETAIL_MODAL_OVERLAY_SELECTOR
-      );
-
-    const detailPanel =
-      target.closest(
-        DETAIL_MODAL_PANEL_SELECTOR
-      );
-
-    if (
-      detailOverlay &&
-      !detailPanel &&
-      target === detailOverlay
-    ) {
-      closeDetailModal();
-    }
   }
 
   function onInput(event) {

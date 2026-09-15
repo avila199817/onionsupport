@@ -93,14 +93,15 @@ Reglas para un dominio:
 - El click exterior llega por `onBackdrop` del lifecycle; el dominio decide si cierra (borradores, peticiones en curso), igual que con Escape.
 - El botón cerrar del shell es hijo directo del header y ocupa su esquina superior derecha en todas las anchuras, sea cual sea la altura del contenido que tiene al lado. Sólo un header que compone su propia fila de acciones (detalle de Incidencias, con el cierre dentro de la fila) apila sus bloques por debajo de 980 px.
 - `data-modal-height="auto"` hace que el panel crezca con su contenido hasta el tope de su tamaño (las altas lo declaran: la composición retirada las dimensionaba igual); en teléfonos todo diálogo, `auto` incluido, ocupa la pantalla completa.
-- Su CSS estiliza únicamente el contenido interno. `tools/modal-shell-contract.mjs` mantiene el inventario completo de reglas `position: fixed` fuera de la autoridad: cada shell histórico lleva la unidad que lo retira y cada capa no modal (chrome, loader, toasts, landing pública) su motivo; una regla nueva o una entrada que ya no existe hacen fallar la CI.
+- Su CSS estiliza únicamente el contenido interno. `tools/modal-shell-contract.mjs` mantiene el inventario completo de reglas `position: fixed` fuera de la autoridad: cada shell histórico lleva la unidad que lo retira y cada capa no modal (chrome, loader, toasts, landing pública) su motivo; una regla nueva o una entrada que ya no existe hacen fallar la CI. También comprueba que ninguna hoja fuera de la autoridad reestiliza las clases estructurales del shell (root, overlay, panel, header, body, footer, botón cerrar): una altura o anchura propia se declara como variante o como token `--ui-detail-modal-*` en la raíz del dominio, como hacen Clientes, Correo y el perfil del técnico.
 
 Estado de la familia (se actualiza en cada unidad):
 
 | Superficie | Estado |
 | --- | --- |
 | Dispatcher de entidades (carga / error) | shell canónico |
-| Perfil del técnico, detalle de Usuarios | shell canónico (`ui-detail-modal-*`) |
+| Perfil del técnico | shell canónico (`renderModalShell`, altura `auto` con su tope de 720 px declarado como token `--ui-detail-modal-panel-height` en la raíz), botón cerrar del shell, click exterior por el lifecycle; `style.css` estiliza sólo el contenido |
+| Detalle de Usuarios | shell canónico (`ui-detail-modal-*` emitido por el dominio; pendiente de `renderModalShell`) |
 | Detalle de Incidencias | shell canónico: `renderModalShell` (carga, error y detalle), botón cerrar del shell, click exterior por el lifecycle; el dominio conserva `incidencias-modal-root` como ámbito de su contenido |
 | Alta de Incidencias | shell canónico (`renderModalShell`, variante `data-modal-size="form"`; el modo cliente ajusta la anchura por token en `inc-create-root.is-client`), botón cerrar del shell, click exterior por el lifecycle; `private-create-modal.css` conserva sólo el contenido del formulario para las cuatro altas |
 | Detalle de Facturas | shell canónico (`renderModalShell`, variante `data-modal-size="wide"`), botón cerrar del shell, estados de carga y error compartidos, click exterior por el lifecycle; el dominio conserva `facturas-detail-modal-root` como ámbito de su contenido |

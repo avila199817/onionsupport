@@ -64,12 +64,6 @@ const FIXED_INVENTORY = new Map([
   [".public-home .public-support-info-tooltip", fixedLayer("src/css/views/public/support-request.css", "public tooltip")],
 ]);
 
-/* Files still allowed to restyle structural shell classes (scoped overrides).
-   They shrink with the same units; a new file is a violation. */
-const STRUCTURAL_OVERRIDE_FILES = new Map([
-  ["src/features/incidencias-technician-profile/style.css", "technician-profile-size-variant"],
-]);
-
 /* Dialogs already rendered through renderModalShell. Each one imports the
    shell and emits no root/overlay/panel or dialog ARIA of its own. */
 const SHELL_CONSUMERS = [
@@ -84,6 +78,7 @@ const SHELL_CONSUMERS = [
   "src/views/facturas/index.js",
   "src/features/facturas-paid-confirm/index.js",
   "src/views/correo/correo.template.js",
+  "src/features/incidencias-technician-profile/index.js",
 ];
 
 const STRUCTURAL_CLASS = /\.ui-detail-modal-(?:root|overlay|panel|header|body|footer|close-btn)\b/u;
@@ -329,17 +324,13 @@ test("every fixed layer outside the authority is inventoried: shells to migrate 
   assert.deepEqual(stale, [], "an inventory entry no longer exists: remove it here and in the docs table");
 });
 
-test("structural shell classes are restyled only by the inventoried files", () => {
+test("structural shell classes are styled only by the authority", () => {
   const offenders = [];
-  const present = new Set();
   for (const file of [...cssFiles("src/css"), ...cssFiles("src/features")]) {
     if (file === AUTHORITY) continue;
-    if (!STRUCTURAL_CLASS.test(read(file).replace(/\/\*[\s\S]*?\*\//gu, ""))) continue;
-    if (STRUCTURAL_OVERRIDE_FILES.has(file)) present.add(file);
-    else offenders.push(file);
+    if (STRUCTURAL_CLASS.test(read(file).replace(/\/\*[\s\S]*?\*\//gu, ""))) offenders.push(file);
   }
-  assert.deepEqual(offenders, [], "a stylesheet outside the inventory restyles ui-detail-modal root/overlay/panel/header/body/footer/close");
-  assert.deepEqual([...STRUCTURAL_OVERRIDE_FILES.keys()].filter((file) => !present.has(file)), [], "inventory entry without overrides left: remove it");
+  assert.deepEqual(offenders, [], "a stylesheet outside the authority restyles ui-detail-modal root/overlay/panel/header/body/footer/close: declare a size variant or a --ui-detail-modal-* token on the domain root instead");
 });
 
 test("registered in validate:source", () => {
@@ -354,4 +345,4 @@ for (const { name, fn } of tests) {
 }
 if (failed) { console.error(`modal-shell-contract: ${failed} failing check(s)`); process.exit(1); }
 const pendingShells = [...FIXED_INVENTORY.values()].filter(({ kind }) => kind === "shell").length;
-console.log(`Modal shell contract: PASS · ${tests.length} checks · ${SHELL_CONSUMERS.length} shell consumers · ${pendingShells} historical shells pending · ${STRUCTURAL_OVERRIDE_FILES.size} scoped overrides pending (${MODAL_SHELL_VERSION})`);
+console.log(`Modal shell contract: PASS · ${tests.length} checks · ${SHELL_CONSUMERS.length} shell consumers · ${pendingShells} historical shells pending (${MODAL_SHELL_VERSION})`);

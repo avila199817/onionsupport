@@ -378,6 +378,39 @@ try {
   const afterTakeover = await fragmentTop();
   assert.ok(Math.abs(afterTakeover.scrollTop - takenOver.scrollTop) < 2, "once the visitor scrolls, later growth no longer moves the page");
   assert.ok(afterTakeover.top > 500, "the fragment is not chased after the visitor takes over");
+
+  // The visitor's own navigation (a smooth nav link) and the custom rail end
+  // the settle window as well: a later structural invalidation must not pull
+  // the page back to the requested fragment. Motion is not reduced here so
+  // the nav link scrolls smoothly, the path that had no alignment reference.
+  await page.emulateMedia({ colorScheme: "dark", reducedMotion: "no-preference" });
+  await page.goto(origin + "/#incidencia", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("[data-public-support-form]");
+  await page.waitForFunction(() => {
+    const host = document.querySelector(".main-content");
+    const top = document.querySelector("#incidencia").getBoundingClientRect().top;
+    return host.scrollTop > 20 && top >= 0 && top < 200;
+  });
+  await page.getByRole("link", { name: "Ver servicios", exact: true }).click();
+  await page.waitForFunction(() => new Promise((resolve) => {
+    const host = document.querySelector(".main-content");
+    let last = host.scrollTop; let stable = 0;
+    const tick = () => { const current = host.scrollTop; stable = current === last ? stable + 1 : 0; last = current; if (stable >= 6) resolve(true); else requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+  }));
+  const rail = page.locator("[data-public-home-scrollbar]");
+  if (await rail.isVisible()) {
+    const bounds = await rail.boundingBox();
+    await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+    await page.waitForFunction(() => { const host = document.querySelector(".main-content"); const progress = host.scrollTop / (host.scrollHeight - host.clientHeight); return progress > 0.35 && progress < 0.65; });
+  }
+  const beforeGrowth = await page.evaluate(() => document.querySelector(".main-content").scrollTop);
+  await growSections(400);
+  await page.waitForTimeout(400);
+  const afterNavigationGrowth = await fragmentTop();
+  assert.ok(Math.abs(afterNavigationGrowth.scrollTop - beforeGrowth) < 2, "after the visitor navigates or uses the rail, growth no longer moves the page");
+  assert.ok(afterNavigationGrowth.top < 0 || afterNavigationGrowth.top > 200, "the requested fragment is not re-aligned after the visitor's own navigation");
+  await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
   assert.deepEqual(errors, [], "frontend must not throw during metadata navigation");
   const mobilePhoto = await browser.newContext({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 2 });
   await mobilePhoto.route("**/*", (route) => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());

@@ -461,7 +461,14 @@ function scrollToHash(hash, refs, host, activeState, options = {}) {
   const didScroll = hostScrollTo(host, top, behavior);
   if (!didScroll) return false;
 
-  activeState.alignedTop = behavior === "auto" ? hostScrollTop(host) : null;
+  if (behavior === "auto") {
+    activeState.alignedTop = hostScrollTop(host);
+  } else {
+    // A smooth alignment answers the visitor's own navigation: the requested
+    // fragment no longer follows late layout growth.
+    activeState.alignedTop = null;
+    activeState.settleUntil = 0;
+  }
   setActiveHash(refs, clean, activeState);
 
   if (options.replace !== false) {
@@ -842,6 +849,7 @@ function initScrollPipeline(refs, cleanups, host, activeState) {
     let pointerId = null;
 
     function scrollFromPointer(event) {
+      activeState.settleUntil = 0;
       if (state.metricsDirty || !state.trackRect || state.trackRect.height <= 4) {
         measureGeometry();
       }

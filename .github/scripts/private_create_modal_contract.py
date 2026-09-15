@@ -64,11 +64,14 @@ for loading_class in [
 ]:
     require(COMPOSITION, loading_class, f"Create composition must standardize {loading_class}")
 
-# Incidencias remains the reference shape.
+# Incidencias remains the reference shape; its structure is the canonical shell
+# (root, overlay, panel, header, close, scroll body) and the form is content.
 for snippet, message in [
-    ('class="inc-create-header"', "Incidencias Create must keep the canonical header"),
+    ("renderModalShell(", "Incidencias Create must render through the canonical modal shell"),
+    ("renderModalCloseButton(", "Incidencias Create must use the shell's close control"),
+    ('height: "auto"', "Incidencias Create keeps the content-sized panel (auto height up to the form cap)"),
     ('class="inc-create-header-copy"', "Incidencias Create must keep the canonical title/subtitle wrapper"),
-    ('class="inc-create-body"', "Incidencias Create must keep the canonical single scroll body"),
+    ('bodyClass: "inc-create-body"', "Incidencias Create must keep the canonical form body class on the shell body"),
     ('class="inc-create-form', "Incidencias Create must keep the canonical form wrapper"),
     ('class="inc-create-actions"', "Incidencias Create must keep the canonical action row"),
     ('class="inc-create-actions-note"', "Incidencias Create must keep the canonical action note"),

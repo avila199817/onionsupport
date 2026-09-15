@@ -41,10 +41,8 @@ const FIXED_INVENTORY = new Map([
   [".clientes-modal-overlay", pendingShell("src/css/views/clientes/detail.css", "clientes-detail-shell")],
   [".cli-create-root", pendingShell("src/css/views/clientes/create.css", "create-modals-shell")],
   [".cli-create-overlay", pendingShell("src/css/views/clientes/create.css", "create-modals-shell")],
-  [".inc-create-root", pendingShell("src/css/views/incidencias/create.css", "create-modals-shell")],
-  [".inc-create-overlay", pendingShell("src/css/views/incidencias/create.css", "create-modals-shell")],
-  [":is( .inc-create-root, .cli-create-root, .fac-create-root, #usuarios-create-modal-root, .usuarios-create-modal-host )", pendingShell("src/css/compositions/private-create-modal.css", "create-modals-shell")],
-  [":is( .inc-create-overlay, .cli-create-overlay, .fac-create-overlay, .usr-create-overlay )", pendingShell("src/css/compositions/private-create-modal.css", "create-modals-shell")],
+  [":is( .cli-create-root, .fac-create-root, #usuarios-create-modal-root, .usuarios-create-modal-host )", pendingShell("src/css/compositions/private-create-modal.css", "create-modals-shell")],
+  [":is( .cli-create-overlay, .fac-create-overlay, .usr-create-overlay )", pendingShell("src/css/compositions/private-create-modal.css", "create-modals-shell")],
   [".correo-modal-backdrop", pendingShell("src/css/views/correo/index.css", "correo-shell")],
   [".correo-compose", pendingShell("src/css/views/correo/index.css", "correo-shell")],
   [".correo-confirm-overlay", pendingShell("src/css/views/correo/index.css", "correo-shell")],
@@ -92,6 +90,7 @@ const SHELL_CONSUMERS = [
   "src/features/entity-overlay/pending-view.js",
   "src/views/incidencias/incidencias.template.modal.impl.js",
   "src/views/facturas/facturas.template.modal.base.js",
+  "src/views/incidencias/incidencias.template.create.impl.js",
 ];
 
 const STRUCTURAL_CLASS = /\.ui-detail-modal-(?:root|overlay|panel|header|body|footer|close-btn)\b/u;
@@ -242,6 +241,8 @@ test("one structural stylesheet, loaded with the private area", () => {
     '.ui-detail-modal-root[data-modal-size="wide"]', '.ui-detail-modal-root[data-modal-size="form"]',
     '.ui-detail-modal-root[data-modal-size="compact"]', '.ui-detail-modal-root[data-modal-size="confirm"]',
     '.ui-detail-modal-root[data-modal-height="auto"] .ui-detail-modal-panel', ".ui-detail-modal-panel:has(> .ui-detail-modal-footer)",
+    // On phones an auto (content-sized) panel fills the screen like every other dialog.
+    '.ui-detail-modal-panel,\n.ui-detail-modal-root[data-modal-height="auto"] .ui-detail-modal-panel {\nblock-size: 100dvh;',
     ".ui-detail-modal-state--error", ".ui-detail-modal-spinner", ".entity-overlay-root:not([hidden])",
     // Narrow screens stack only a header that composes its own actions row; a
     // header whose close control is a direct child keeps it top-right.

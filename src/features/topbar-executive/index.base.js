@@ -16,6 +16,7 @@
 "use strict";
 
 import { AppCore } from "../../core/index.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const TOPBAR_EXECUTIVE_VERSION =
   "topbar.executive.v1-search-bell-notifications";
@@ -73,20 +74,15 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function cleanText(value = "", fallback = "", max = 500) {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  const finalValue = output || fallback;
+function clipText(value = "", fallback = "", max = 500) {
+  const finalValue = cleanText(value, fallback);
   return Number.isFinite(Number(max)) && Number(max) > 0
     ? finalValue.slice(0, Number(max))
     : finalValue;
 }
 
 function redactText(value = "", max = MAX_MESSAGE) {
-  return cleanText(value, "", max * 2)
+  return clipText(value, "", max * 2)
     .replace(
       /([?&#](?:access_token|accessToken|refresh_token|refreshToken|id_token|idToken|token|code|secret|session|sessionId|session_id|password|pwd|key|sig|signature|jwt|authorization|reset_token|resetToken|activation_token|activationToken)=)([^&#\s]+)/gi,
       "$1***"
@@ -100,7 +96,7 @@ function redactText(value = "", max = MAX_MESSAGE) {
 }
 
 function safeRoute(value = "") {
-  const raw = cleanText(value, "", MAX_ROUTE);
+  const raw = clipText(value, "", MAX_ROUTE);
 
   if (
     !raw ||
@@ -117,7 +113,7 @@ function safeRoute(value = "") {
 }
 
 function normalizeKind(value = "") {
-  const kind = cleanText(value, "info", 30).toLowerCase();
+  const kind = clipText(value, "info", 30).toLowerCase();
   if (["success", "warning", "error", "mail", "system", "info"].includes(kind)) {
     return kind;
   }
@@ -147,7 +143,7 @@ function getAppState() {
 function ownerIdentity() {
   const state = getAppState();
   const user = state.user || state.currentUser || AppCore?.getCurrentUser?.() || {};
-  const identity = cleanText(
+  const identity = clipText(
     user?.userId ||
       user?.id ||
       user?.uid ||
@@ -226,7 +222,7 @@ function createSvg(name = "search", className = "") {
 function sanitizeStoredItem(item = {}) {
   if (!isObject(item)) return null;
 
-  const id = cleanText(item.id, "", 120);
+  const id = clipText(item.id, "", 120);
   const title = redactText(item.title, MAX_TITLE);
   if (!id || !title) return null;
 
@@ -238,8 +234,8 @@ function sanitizeStoredItem(item = {}) {
     route: safeRoute(item.route),
     createdAt: Number(item.createdAt) || Date.now(),
     read: item.read === true,
-    source: cleanText(item.source, "app", 60),
-    dedupeKey: cleanText(item.dedupeKey, "", 180),
+    source: clipText(item.source, "app", 60),
+    dedupeKey: clipText(item.dedupeKey, "", 180),
   };
 }
 
@@ -307,13 +303,13 @@ function normalizeNotification(detail = {}, defaults = {}) {
     source.kind || source.type || source.level || fallback.kind || "info"
   );
 
-  const sourceName = cleanText(
+  const sourceName = clipText(
     source.source || fallback.source || "app",
     "app",
     60
   );
 
-  const dedupeKey = cleanText(
+  const dedupeKey = clipText(
     source.dedupeKey ||
       fallback.dedupeKey ||
       `${sourceName}:${kind}:${title}:${message}:${route}`,
@@ -365,7 +361,7 @@ function notify(detail = {}, defaults = {}) {
 }
 
 function markRead(id = "") {
-  const key = cleanText(id, "", 120);
+  const key = clipText(id, "", 120);
   if (!key) return false;
 
   let changed = false;
@@ -471,7 +467,7 @@ function handleServerError(event) {
     kind: "error",
     route: "/servidor",
     source: "servidor",
-    dedupeKey: `server:error:${cleanText(payload.code || payload.message, "status", 80)}`,
+    dedupeKey: `server:error:${clipText(payload.code || payload.message, "status", 80)}`,
   });
 }
 
@@ -483,7 +479,7 @@ function handleClientesError(event) {
     kind: "warning",
     route: "/clientes",
     source: "clientes",
-    dedupeKey: `clientes:error:${cleanText(payload.code || payload.message, "error", 80)}`,
+    dedupeKey: `clientes:error:${clipText(payload.code || payload.message, "error", 80)}`,
   });
 }
 
@@ -495,7 +491,7 @@ function handleUsuariosError(event) {
     kind: "warning",
     route: "/usuarios",
     source: "usuarios",
-    dedupeKey: `usuarios:error:${cleanText(payload.message, "error", 80)}`,
+    dedupeKey: `usuarios:error:${clipText(payload.message, "error", 80)}`,
   });
 }
 
@@ -858,7 +854,7 @@ function bindRoot(root) {
 
   const onSearchTrigger = () => {
     const open = searchIsOpen(root);
-    const inputValue = cleanText(searchRefs?.input?.value, "");
+    const inputValue = clipText(searchRefs?.input?.value, "");
 
     if (open && !inputValue) {
       setSearchOpen(root, false, { focus: false });
@@ -914,7 +910,7 @@ function bindRoot(root) {
       !contains(searchWrap, target) &&
       !contains(results, target)
     ) {
-      const inputValue = cleanText(searchRefs?.input?.value, "");
+      const inputValue = clipText(searchRefs?.input?.value, "");
       if (!inputValue) setSearchOpen(root, false, { focus: false });
     }
 
@@ -936,7 +932,7 @@ function bindRoot(root) {
     }
 
     if (searchIsOpen(root)) {
-      const inputValue = cleanText(searchRefs?.input?.value, "");
+      const inputValue = clipText(searchRefs?.input?.value, "");
       if (!inputValue) setSearchOpen(root, false, { focus: false });
     }
   };

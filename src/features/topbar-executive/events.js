@@ -11,6 +11,7 @@
 
 import { AppCore } from "../../core/index.js";
 import { TopbarNotifications } from "./index.base.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const TOPBAR_EXECUTIVE_EVENTS_VERSION =
   "topbar.executive.events.v1-appcore-bridge";
@@ -32,12 +33,8 @@ function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function cleanText(value = "", fallback = "", max = 180) {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return (output || fallback).slice(0, max);
+function clipText(value = "", fallback = "", max = 180) {
+  return cleanText(value, fallback).slice(0, max);
 }
 
 function payload(value = null) {
@@ -95,7 +92,7 @@ function adapter(name = "", value = null) {
         kind: "error",
         route: "/servidor",
         source: "servidor",
-        dedupeKey: `server:error:${cleanText(data.code || data.message, "status", 80)}`,
+        dedupeKey: `server:error:${clipText(data.code || data.message, "status", 80)}`,
       });
 
     case "clientes:error":
@@ -107,7 +104,7 @@ function adapter(name = "", value = null) {
         kind: "warning",
         route: "/clientes",
         source: "clientes",
-        dedupeKey: `clientes:error:${cleanText(data.code || data.message, "error", 80)}`,
+        dedupeKey: `clientes:error:${clipText(data.code || data.message, "error", 80)}`,
       });
 
     case "usuarios:error":
@@ -119,7 +116,7 @@ function adapter(name = "", value = null) {
         kind: "warning",
         route: "/usuarios",
         source: "usuarios",
-        dedupeKey: `usuarios:error:${cleanText(data.message, "error", 80)}`,
+        dedupeKey: `usuarios:error:${clipText(data.message, "error", 80)}`,
       });
 
     case "usuarios:created":

@@ -18,6 +18,7 @@
 import Http from "../../core/http.js";
 import { AppCore } from "../../core/index.js";
 import { notifyDomainChanged, onDomainChanged } from "../../core/domain-events.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const FACTURAS_API_VERSION =
   "facturas.api.production.v9.continuous-list-snapshot";
@@ -97,15 +98,6 @@ function safeArray(value) {
 
 function safeObject(value, fallback = {}) {
   return isObject(value) ? value : fallback;
-}
-
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
 }
 
 /*

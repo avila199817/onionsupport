@@ -38,6 +38,7 @@ import {
 } from "./cuenta.template.js";
 import { onDomainChanged } from "../../core/domain-events.js";
 import { captureUserProfileScope, isUserProfileScopeCurrent } from "../../features/user-profile/index.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const CUENTA_INDEX_VERSION =
   "cuenta.index.productivo.v8.canonical-surface";
@@ -79,14 +80,6 @@ function isDomNode(value) {
 
 function safeObject(value, fallback = {}) {
   return isObject(value) ? value : fallback;
-}
-
-function cleanText(value = "", fallback = "") {
-  const text = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return text || fallback;
 }
 
 function first(...values) {

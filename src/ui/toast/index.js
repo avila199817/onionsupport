@@ -13,6 +13,7 @@
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const TOAST_VERSION = "toast.minimal.v1";
 
@@ -57,15 +58,6 @@ function isObject(value) {
 
 function isFunction(value) {
   return typeof value === "function";
-}
-
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
 }
 
 function normalizeType(type = "info") {

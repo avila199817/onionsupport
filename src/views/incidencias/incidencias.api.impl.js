@@ -25,6 +25,7 @@
 import Http from "../../core/http.js";
 import { userNameFromIdentity } from "../../core/user-identity.js";
 import { notifyDomainChanged } from "../../core/domain-events.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const INCIDENCIAS_API_VERSION = "incidencias.api.extreme.v24.cursor-scale-safe";
 export const INCIDENCIAS_ENDPOINT = "/api/tickets";
@@ -130,15 +131,6 @@ function safeArray(value) {
 
 function safeObject(value, fallback = {}) {
   return isObject(value) ? value : fallback;
-}
-
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
 }
 
 /*

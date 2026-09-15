@@ -1,4 +1,3 @@
-import "../../css/features/entity-overlay.css";
 import { AppCore } from "../../core/index.js";
 import { createAsyncScope } from "../../core/async-scope.js";
 import { getRouteByViewKey } from "../../router/routes.js";
@@ -23,7 +22,7 @@ const OWNER_DEFINITIONS = Object.freeze({
   incidencia: Object.freeze({
     viewKey: "incidencias", load: () => import("../../views/incidencias/index.js"),
     createName: "createIncidenciaDetailController", prepareName: "prepareIncidenciaDetail", openName: "openDetail",
-    styles: Object.freeze(["/src/css/components/detail-modal.css", "/src/css/views/incidencias/detail.css", "/src/css/views/incidencias/media-preview.css"]),
+    styles: Object.freeze(["/src/css/views/incidencias/detail.css", "/src/css/views/incidencias/media-preview.css"]),
   }),
   cliente: Object.freeze({
     viewKey: "clientes", load: () => import("../../views/clientes/index.js"),
@@ -45,7 +44,8 @@ let context = {};
 let ownerSession = null;
 let sessionSequence = 0;
 const modalLifecycle = createModalLifecycle({
-  getPanel: () => root?.querySelector(PANEL_SELECTOR), onEscape: () => close(), bodyClasses: ["entity-overlay-open"],
+  getPanel: () => root?.querySelector(PANEL_SELECTOR), onEscape: () => close(), onBackdrop: () => close(),
+  bodyClasses: ["entity-overlay-open"],
 });
 
 function isBrowser() { return typeof window !== "undefined" && typeof document !== "undefined"; }
@@ -297,7 +297,7 @@ function onDocumentClick(event) {
   const target = event.target?.nodeType === 3 ? event.target.parentElement : event.target;
   if (root?.contains(target)) {
     const action = target.closest?.("[data-entity-overlay-action]")?.dataset.entityOverlayAction;
-    if (action !== "retry" && action !== "close" && !target.matches?.("[data-entity-overlay-backdrop='true']")) return;
+    if (action !== "retry" && action !== "close") return;
     event.preventDefault();
     event.stopPropagation();
     if (action === "retry" && ownerSession) {

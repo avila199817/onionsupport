@@ -23,6 +23,14 @@
 @import url("./layout/chrome.css") layer(layout);
 
 /* =========================================================
+   COMPONENTES PRIVADOS
+   El shell modal es la única fuente estructural de los diálogos privados;
+   cualquier vista puede abrir un detalle, así que viaja con el área privada.
+========================================================= */
+
+@import url("./components/detail-modal.css") layer(components);
+
+/* =========================================================
    COMPOSICIONES PRIVADAS
 ========================================================= */
 

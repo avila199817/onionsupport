@@ -1,12 +1,22 @@
 /* =========================================================
-   ONION SUPPORT — DETAIL MODAL COMPONENT
+   ONION SUPPORT — MODAL SHELL · AUTORIDAD ESTRUCTURAL ÚNICA
    Archivo: /src/css/components/detail-modal.css
 
-   UI SYSTEM V8
-   - Shell visual compartido para detalles administrativos.
-   - Sin selectores de dominio Usuarios/Incidencias.
-   - Consume tokens canónicos --ui-detail-modal-* del design system.
-   - Route-loaded: no aumenta el CSS global de la landing.
+   Única fuente del CSS estructural de todo diálogo privado:
+   root, overlay, panel, header, body, footer, cierre, estados
+   (carga / error / vacío), tamaños, altura, responsive, movimiento
+   reducido, forced-colors e impresión. Lo emite
+   src/features/entity-overlay/modal-shell.js; lo controla
+   modal-lifecycle.js. El prefijo ui-detail-modal-* es el namespace
+   histórico del sistema y se conserva para no invalidar consumidores.
+
+   - Sin selectores de dominio. El CSS de cada dominio estiliza sólo su
+     contenido interno; una diferencia legítima se expresa con un token,
+     con data-modal-size / data-modal-height o con una clase semántica
+     documentada, nunca reconstruyendo el shell.
+   - Sin !important.
+   - Se carga con el área privada (app.css / private.css, layer components):
+     cualquier vista puede abrir un detalle de otra entidad.
 ========================================================= */
 
 @layer components {
@@ -46,6 +56,51 @@ position: fixed;
 display: none;
 }
 
+/* Variantes estructurales explícitas. Los valores por defecto reproducen el
+   shell de detalle; cada tamaño es un token, no una hoja distinta. */
+.ui-detail-modal-root {
+  --ui-detail-modal-panel-width: var(--ui-detail-modal-width);
+  --ui-detail-modal-panel-height: min(92dvh, 940px);
+}
+
+.ui-detail-modal-root[data-modal-size="wide"] {
+  --ui-detail-modal-panel-width: min(1240px, calc(100vw - 48px));
+}
+
+.ui-detail-modal-root[data-modal-size="form"] {
+  --ui-detail-modal-panel-width: min(1080px, calc(100vw - 48px));
+  --ui-detail-modal-panel-height: min(92dvh, 900px);
+}
+
+.ui-detail-modal-root[data-modal-size="compact"] {
+  --ui-detail-modal-panel-width: min(720px, calc(100vw - 48px));
+}
+
+.ui-detail-modal-root[data-modal-size="confirm"] {
+  --ui-detail-modal-panel-width: min(520px, calc(100vw - 48px));
+  --ui-detail-modal-panel-height: min(92dvh, 640px);
+}
+
+/* Host del dispatcher de entidades. El shell que contiene es fixed por sí
+   mismo; el host sólo delimita la capa y nunca intercepta punteros. */
+.entity-overlay-root[hidden],
+.entity-overlay-root:empty {
+  display: none;
+}
+
+.entity-overlay-root:not([hidden]) {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  isolation: isolate;
+  pointer-events: none;
+}
+
+.entity-overlay-root [data-entity-overlay-disabled="true"] {
+  opacity: .46;
+  cursor: not-allowed;
+}
+
 
 .ui-detail-modal-overlay {
 position: fixed;
@@ -68,8 +123,8 @@ position: fixed;
 .ui-detail-modal-panel {
 position: relative;
   isolation: isolate;
-  inline-size: var(--ui-detail-modal-width);
-  block-size: min(92dvh, 940px);
+  inline-size: var(--ui-detail-modal-panel-width);
+  block-size: var(--ui-detail-modal-panel-height);
   max-inline-size: calc(100vw - 24px);
   max-block-size: calc(100dvh - 24px);
   min-inline-size: 0;
@@ -89,6 +144,15 @@ position: relative;
 
 .ui-detail-modal-panel:focus-visible {
 box-shadow: var(--ui-detail-modal-shadow), var(--focus-ring);
+}
+
+.ui-detail-modal-root[data-modal-height="auto"] .ui-detail-modal-panel {
+  block-size: auto;
+  max-block-size: min(var(--ui-detail-modal-panel-height), calc(100dvh - 24px));
+}
+
+.ui-detail-modal-panel:has(> .ui-detail-modal-footer) {
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 .ui-detail-modal-panel.is-submitting {
@@ -403,6 +467,63 @@ display: grid;
 min-inline-size: 0;
   display: flex;
   justify-content: flex-end;
+}
+
+/* Footer estructural del shell (slot footer). El footer dentro del body
+   conserva la regla anterior. */
+.ui-detail-modal-panel > .ui-detail-modal-footer {
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 12px var(--ui-detail-modal-padding);
+  border-block-start: 1px solid var(--ui-detail-modal-header-border);
+  background: var(--surface-2, var(--ui-detail-modal-bg));
+}
+
+/* Estados comunes del cuerpo: carga, error y vacío. */
+.ui-detail-modal-state {
+  min-block-size: 210px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  padding: 32px 24px;
+  text-align: center;
+  color: var(--text);
+}
+
+.ui-detail-modal-state-title {
+  color: var(--text-strong);
+  font-size: var(--font-md);
+  font-weight: var(--weight-bold);
+}
+
+.ui-detail-modal-state-message {
+  margin: 0;
+  max-inline-size: 60ch;
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.ui-detail-modal-state--error {
+  border: 1px solid var(--border-error);
+  border-radius: var(--ui-detail-modal-card-radius);
+  background: var(--error-bg);
+}
+
+.ui-detail-modal-state--error .ui-detail-modal-state-message {
+  color: var(--text);
+}
+
+.ui-detail-modal-spinner {
+  inline-size: 32px;
+  block-size: 32px;
+  border: 3px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-block-start-color: currentColor;
+  border-radius: var(--radius-pill);
+  /* La animación de carga pertenece al sistema de carga (skeleton.css). */
+  animation: var(--ui-loading-animation) var(--ui-loading-duration) linear infinite;
 }
 
 .ui-detail-modal-submit-btn {

@@ -1,4 +1,5 @@
 import { cleanText, escapeHtml } from "../../core/presentation-text.js";
+import { renderModalCloseButton, renderModalShell, renderModalState } from "./modal-shell.js";
 export { cleanText };
 
 /* The shared surface owns imports and loading failures only. Entity data
@@ -9,19 +10,25 @@ export function safeError(error) {
     .replace(/(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi, "$1***").slice(0, 500);
 }
 
+/* Pending and failed detail sessions render through the same shell as every
+   domain dialog; only the body state and the dispatcher actions are specific. */
 export function renderDetailPending({ type, id, error = "" }) {
   const title = error ? `No se pudo abrir ${type}` : "Cargando detalle…";
-  return `<div class="entity-overlay-backdrop" data-entity-overlay-backdrop="true">
-    <section class="${error ? "entity-overlay-generic-panel" : "entity-overlay-loading-panel"}"
-      data-entity-overlay-panel="true" role="dialog" aria-modal="true"
-      aria-label="${escapeHtml(title)}" tabindex="-1">
-      ${error ? `<header class="entity-overlay-generic-header"><h2>${escapeHtml(title)}</h2>
-        <button type="button" class="entity-overlay-close" data-entity-overlay-action="close" aria-label="Cerrar detalle">×</button></header>`
-        : '<span class="entity-overlay-spinner" aria-hidden="true"></span><strong>Cargando detalle…</strong>'}
-      <div class="entity-overlay-generic-body">
-        ${error ? `<p class="entity-overlay-error" role="alert">${escapeHtml(error)}</p>` : `<span>${escapeHtml(id)}</span>`}
-        <button type="button" class="entity-overlay-action-button" data-entity-overlay-action="${error ? "retry" : "close"}">${error ? "Reintentar" : "Cancelar"}</button>
-      </div>
-    </section>
-  </div>`;
+  return renderModalShell({
+    rootAttributes: { "data-entity-overlay-pending": error ? "error" : "loading" },
+    overlayAttributes: { "data-entity-overlay-backdrop": "true" },
+    panelAttributes: { "data-entity-overlay-panel": "true" },
+    label: title,
+    size: "compact",
+    height: "auto",
+    header: `<h2 class="ui-detail-modal-title" id="entity-overlay-pending-title">${escapeHtml(title)}</h2>${renderModalCloseButton({
+      label: "Cerrar detalle", attributes: { "data-entity-overlay-action": "close" },
+    })}`,
+    body: renderModalState({
+      kind: error ? "error" : "loading",
+      title: error ? "No se pudo cargar el detalle" : "Cargando detalle…",
+      message: error || id,
+      action: { label: error ? "Reintentar" : "Cancelar", attributes: { "data-entity-overlay-action": error ? "retry" : "close" } },
+    }),
+  });
 }

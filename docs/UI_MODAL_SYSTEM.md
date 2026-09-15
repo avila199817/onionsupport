@@ -58,6 +58,55 @@ En Incidencias, `src/views/incidencias/index.impl.js` posee `requestDetail` y `r
 
 Para futuras modificaciones, cambiar el dispatcher cuando cambie la apertura, el lifecycle cuando cambie la interacción o el controlador cuando cambie el dominio. No reintroducir `home-entity-modal`, `factura-modal-bridge`, `incidencia-modal-bridge`, `facturas-incidencia-modal`, adaptadores de detalle de lectura, historial modal, ramas de apertura según ruta o lecturas de detalle desde mejoras visuales. El contrato `private_domain_owner_contract.mjs` fija estas fronteras.
 
+## Shell canónico y CSS estructural
+
+Desde la [consolidación del 2026-09-15](releases/2026-09-15-modal-shell-authority.md) el sistema modal es un solo conjunto de piezas; ninguna feature reconstruye una de ellas:
+
+| Responsabilidad | Autoridad | Qué entrega |
+| --- | --- | --- |
+| Estructura DOM, ARIA, tamaños, botón cerrar, estados de carga/error/vacío | `src/features/entity-overlay/modal-shell.js` (`ui-modal-shell.v1`) | `renderModalShell`, `renderModalCloseButton`, `renderModalState`, `MODAL_SHELL_SELECTORS`, `MODAL_SIZES`, `MODAL_HEIGHTS` |
+| CSS estructural (root, overlay, panel, header, body, footer, estados, responsive, movimiento reducido, forced-colors, impresión) | `src/css/components/detail-modal.css` (namespace `ui-detail-modal-*`) | Se importa con el área privada (`app.css` y `private.css`, layer `components`); ninguna ruta ni dispatcher lo carga aparte |
+| Escape, Tab, click exterior, scroll, foco de retorno, clases de `body` | `src/features/entity-overlay/modal-lifecycle.js` | `createModalLifecycle({ getPanel, onEscape, onBackdrop, bodyClasses })` |
+| Portal y actualización del panel | `src/features/entity-overlay/modal-host.js` | `createModalHost`, `renderModalContent` |
+| Confirmaciones | `src/features/entity-overlay/modal-confirmation.js` | `openModalConfirmation` |
+| Sesión de detalle de entidad | `src/features/entity-overlay/index.js` | `EntityOverlay.open`; su superficie de carga/error usa el mismo shell |
+
+Estructura que emite el shell, la única válida para un diálogo privado:
+
+```html
+<section class="ui-detail-modal-root" data-modal-shell="ui-modal-shell.v1" data-modal-size="detail|wide|form|compact|confirm" data-modal-height="fixed|auto" data-open="true" …identidad del dominio…>
+  <div class="ui-detail-modal-overlay" data-modal-overlay="true">
+    <div class="ui-detail-modal-panel" role="dialog" aria-modal="true" aria-labelledby|aria-label tabindex="-1" data-modal-panel="true">
+      <!-- prelude: confirmaciones anidadas y velos de ocupado del dominio -->
+      <header class="ui-detail-modal-header" data-modal-header="true">…</header>
+      <main class="ui-detail-modal-body" data-modal-body="true">…</main>
+      <footer class="ui-detail-modal-footer" data-modal-footer="true">…</footer> <!-- opcional -->
+    </div>
+  </div>
+</section>
+```
+
+Reglas para un dominio:
+
+- Entrega contenido, campos, acciones, permisos, textos y sus `data-*` de identidad (`rootAttributes`, `overlayAttributes`, `panelAttributes`). No emite `role="dialog"`, backdrop, cierre ni bloqueo de scroll propios.
+- Una diferencia legítima se expresa con `data-modal-size` / `data-modal-height`, con un token `--ui-detail-modal-*` en su clase raíz o con una clase semántica del contenido; nunca con otra hoja de shell ni con `!important`.
+- El click exterior llega por `onBackdrop` del lifecycle; el dominio decide si cierra (borradores, peticiones en curso), igual que con Escape.
+- Su CSS estiliza únicamente el contenido interno. `tools/modal-shell-contract.mjs` mantiene el inventario completo de reglas `position: fixed` fuera de la autoridad: cada shell histórico lleva la unidad que lo retira y cada capa no modal (chrome, loader, toasts, landing pública) su motivo; una regla nueva o una entrada que ya no existe hacen fallar la CI.
+
+Estado de la familia (se actualiza en cada unidad):
+
+| Superficie | Estado |
+| --- | --- |
+| Dispatcher de entidades (carga / error) | shell canónico |
+| Perfil del técnico, detalle de Usuarios | shell canónico (`ui-detail-modal-*`) |
+| Detalle y alta de Incidencias | pendiente: clases estructurales propias sobre el shell y hoja de alta propia |
+| Detalle, alta, reenvío y cobro de Facturas | pendiente: shell `facturas-detail-*`, `fac-create-*`, `facturas-resend-confirm-*`, `fpc-*` |
+| Detalle y alta de Clientes | pendiente: shell `clientes-modal-*` / `cli-create-*` y préstamo de clases de Incidencias |
+| Alta de Usuarios | pendiente: préstamo de `inc-create-*` |
+| Correo (redacción, confirmación, firma) | pendiente de evaluación: host inline del propio shell |
+| Visor de adjuntos | excepción evaluable: capa de galería sobre el detalle con anclaje de scroll propio |
+| Consentimiento Google | excepción: página pública, sin CSS privado |
+
 ## Lifecycle de interacción compartido
 
 El lifecycle compartido controla:

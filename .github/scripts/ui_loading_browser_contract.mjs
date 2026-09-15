@@ -38,14 +38,14 @@ const spinners = [
   ["ui-spinner", 28], ["ui-spinner sm", 18], ["ui-spinner lg", 42],
   ["server-spinner", 18], ["topbar-search-loading-dot", 26],
   ["incidencias-modal-live-sync-spinner", 16],
-  ["entity-overlay-spinner", 32],
+  ["ui-detail-modal-spinner", 32],
   ...(!directDomainOwners ? [["incidencia-bridge-feedback-spinner", 23], ["factura-bridge-feedback-spinner", 23]] : []),
   ["fpc-spinner", 22], ["fpc-spinner fpc-spinner--button", 15],
 ];
 const styles = [
   "/src/css/app.css",
   ...["home/index", "cuenta/index", "correo/index", "servidor/index", "incidencias/create", "incidencias/detail", "incidencias/media-preview", "clientes/create", "facturas/create", "facturas/detail", "usuarios/create", "public/public-support-progress"].map((name) => `/src/css/views/${name}.css`),
-  "/src/css/auth/login.css", "/src/css/features/entity-overlay.css",
+  "/src/css/auth/login.css",
   ...[...(!directDomainOwners ? ["factura-modal-bridge", "incidencia-modal-bridge"] : []), "facturas-paid-confirm"].map((name) => `/src/features/${name}/style.css`),
 ];
 const fixture = `<!doctype html><html><head><meta charset="utf-8">${styles.map((href) => `<link rel="stylesheet" href="${href}">`).join("")}

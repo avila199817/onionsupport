@@ -13,9 +13,11 @@ const fullview = '@import url("./compositions/private-fullview-routes.css") laye
 const parity = '@import url("./compositions/private-admin-parity.css") layer(compositions);';
 const interactions = '@import url("./compositions/private-admin-interactions.css") layer(compositions);';
 const avatar = '@import url("./components/avatar-system.css") layer(guardrails);';
+// A statement no real entry carries, so the fixture holds on every candidate tree.
+const declaredImport = '@import url("./components/synthetic-private.css") layer(components);';
 
-// Independent, pre-R06 boundary: expected output is not generated from Vite's
-// candidate import list. These ten source imports already belong to private.css.
+// Independent, pre-R06 boundary: these ten source imports belong to private.css
+// and the expected public output is computed here, never by the plugin.
 const previousImports = [
   '@import url("./layout/sidebar.css") layer(layout);',
   '@import url("./layout/sidebar.executive.css") layer(layout);',
@@ -35,8 +37,10 @@ for (const statement of previousImports) {
 }
 assert.equal(priorPublicCss.split(fullview).length - 1, 1);
 
-const withoutFullview = privateCss.replace(fullview, "");
-const activated = withoutFullview.replace(parity, `${parity}\n${fullview}`);
+// Synthetic private entries: the ten, with and without the full-view
+// activation, always closed by the shared guardrails authority.
+const withoutFullview = `${previousImports.join("\n")}\n${avatar}\n`;
+const activated = `${previousImports.slice(0, 7).join("\n")}\n${fullview}\n${previousImports.slice(7).join("\n")}\n${avatar}\n`;
 
 // Evaluate the actual config/plugin, not a copied transform. Vite's identity
 // wrapper and the unrelated invoice chunk policy are isolated here; the real
@@ -108,16 +112,39 @@ assert.equal(active.plugin.transform(appCss, `${active.appPath}?direct`).code, e
 assert.equal(active.plugin.transform(appCss, active.appPath).map, null);
 assert.equal(active.plugin.transform("untouched", resolve(ROOT, "src/css/other.css")), null);
 assert.equal(appCss.includes(fullview), true, "Source-mode CSS remains complete.");
+assert.equal(expected.includes(avatar), true, "The shared guardrails authority stays in the public entry.");
 
-await assert.rejects(loadPlugin(`${activated}\n${fullview}`), /one canonical compositions import/);
-await assert.rejects(loadPlugin(activated.replace(fullview, fullview.replace("layer(compositions)", "layer(layout)"))), /one canonical compositions import/);
+// Declaring one more private stylesheet is a source-only change: the plugin
+// strips exactly that statement from an app.css that carries it, and refuses
+// an app.css that does not.
+const declared = await loadPlugin(activated.replace(parity, `${declaredImport}\n${parity}`));
+assert.equal(declared.plugin.transform(`${appCss}\n${declaredImport}\n`, declared.appPath).code, `${expected}\n\n`, "A declared private import is removed from the public entry.");
+assert.throws(() => declared.plugin.transform(appCss, declared.appPath), /Private CSS boundary drift/);
+
+// Only canonical statements over private-only layers can move CSS behind the guard.
+await assert.rejects(loadPlugin(`${activated}\n${fullview}`), /duplicated/);
+await assert.rejects(loadPlugin(activated.replace(fullview, fullview.replace("layer(compositions)", "layer(layout)"))), /layer must match its directory/);
+await assert.rejects(loadPlugin(`${activated}\n@import url("./core/core.css") layer(core);`), /not canonical/);
+await assert.rejects(loadPlugin(`${activated}\n@import url("./tokens/light.css") layer(components);`), /not canonical/);
+await assert.rejects(loadPlugin(`${activated}\n@import url("../css/layout/chrome.css") layer(layout);`), /not canonical/);
+await assert.rejects(loadPlugin(`${activated}\n@import "./layout/chrome.css" layer(layout);`), /not canonical/);
 assert.throws(() => active.plugin.transform(appCss.replace(fullview, ""), active.appPath), /Private CSS boundary drift/);
 assert.throws(() => active.plugin.transform(`${appCss}\n${fullview}`, active.appPath), /Private CSS boundary drift/);
 assert.throws(() => active.plugin.transform(appCss.replace(previousImports[0], ""), active.appPath), /Private CSS boundary drift/);
 assert.throws(() => prior.plugin.transform(`${appCss}\n${previousImports[0]}`, prior.appPath), /Private CSS boundary drift/);
 
-// Check the real candidate's ordering too, in both foundation and activation.
+// The real candidate pair: every declared private import exists once in app.css,
+// the ten remain, the order holds and the plugin output is app.css without them.
 const uncommentedPrivate = privateCss.replace(/\/\*[\s\S]*?\*\//g, "");
+const declaredImports = (uncommentedPrivate.match(/@import\b[^;]*;/g) || []).filter((statement) => !statement.endsWith("layer(guardrails);"));
+for (const statement of previousImports) assert.ok(declaredImports.includes(statement), `private.css keeps ${statement}`);
+let realPublicCss = appCss;
+for (const statement of declaredImports) {
+  assert.equal(realPublicCss.split(statement).length - 1, 1, `app.css carries ${statement} once`);
+  realPublicCss = realPublicCss.replace(statement, "");
+}
+const real = await loadPlugin(privateCss);
+assert.equal(real.plugin.transform(appCss, real.appPath).code, realPublicCss, "The public entry is app.css without the declared private imports.");
 if (uncommentedPrivate.includes("private-fullview-routes.css")) {
   assert.equal(uncommentedPrivate.split(fullview).length - 1, 1);
   assert.ok(uncommentedPrivate.indexOf(parity) < uncommentedPrivate.indexOf(fullview));
@@ -125,4 +152,4 @@ if (uncommentedPrivate.includes("private-fullview-routes.css")) {
 }
 assert.equal(uncommentedPrivate.trim().endsWith(avatar), true, "AvatarSystem remains the final private paint authority.");
 
-console.log("Private CSS split regression: PASS · absent/inactive/active · source preservation · comments/layer/duplicates/drift · order/avatar");
+console.log(`Private CSS split regression: PASS · absent/inactive/active · declared import stripped · canonical form/layer/duplicates/drift · ${declaredImports.length} declared imports · order/avatar`);

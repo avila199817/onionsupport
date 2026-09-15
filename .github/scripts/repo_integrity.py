@@ -534,10 +534,39 @@ def validate_detail_modal_v6_contract(errors: list[str]) -> None:
         errors.append("src/router/styles.js :: falta manifest CSS de Usuarios")
         return
     users_css = users_match.group("body")
-    if '"/src/css/components/detail-modal.css"' not in users_css:
-        errors.append("src/router/styles.js :: Usuarios debe cargar detail-modal.css")
     if '"/src/css/views/incidencias/detail.css"' in users_css:
         errors.append("src/router/styles.js :: Usuarios no puede cargar incidencias/detail.css")
+    validate_detail_modal_shell_loading(errors, route_styles)
+
+
+def validate_detail_modal_shell_loading(errors: list[str], route_styles: str) -> None:
+    """The structural modal shell has exactly one loading authority.
+
+    Either every route that opens a detail (Usuarios and Incidencias) lists it in
+    its manifest, or it travels with the private area: app.css keeps it for
+    source mode and private.css declares it for the build. Never both.
+    """
+    shell_import = '@import url("./components/detail-modal.css") layer(components);'
+    entries = {
+        entry: (SRC / "css" / entry).read_text(encoding="utf-8").count(shell_import)
+        for entry in ("app.css", "private.css")
+        if (SRC / "css" / entry).is_file()
+    }
+    global_shell = all(count == 1 for count in entries.values()) and len(entries) == 2
+    routed_shell = "detail-modal.css" in route_styles
+
+    if global_shell and routed_shell:
+        errors.append("src/router/styles.js :: el shell modal viaja con el área privada; ninguna ruta lo carga aparte")
+        return
+    if global_shell:
+        return
+    if any(entries.values()):
+        errors.append("src/css :: el shell modal debe importarse una vez en app.css y en private.css, o en ninguno")
+        return
+    for route in ("usuarios", "incidencias"):
+        match = re.search(route + r":\s*Object\.freeze\(\[(?P<body>.*?)\]\)", route_styles, re.DOTALL)
+        if match and '"/src/css/components/detail-modal.css"' not in match.group("body"):
+            errors.append(f"src/router/styles.js :: {route.capitalize()} debe cargar detail-modal.css")
 
 
 def validate_shared_detail_modal_v7_contract(errors: list[str]) -> None:
@@ -549,10 +578,6 @@ def validate_shared_detail_modal_v7_contract(errors: list[str]) -> None:
     inc_match = re.search(r"incidencias:\s*Object\.freeze\(\[(?P<body>.*?)\]\)", route_styles, re.DOTALL)
     if not inc_match:
         errors.append("src/router/styles.js :: falta manifest CSS de Incidencias")
-    else:
-        inc_css = inc_match.group("body")
-        if '"/src/css/components/detail-modal.css"' not in inc_css:
-            errors.append("src/router/styles.js :: Incidencias debe cargar detail-modal.css")
 
     for snippet in ("ui-detail-modal-root", "ui-detail-modal-overlay", "ui-detail-modal-panel", "ui-detail-modal-body"):
         if snippet not in inc_template:

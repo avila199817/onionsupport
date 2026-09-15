@@ -467,9 +467,9 @@ def main() -> int:
         ('sin modificar el perfil', "La UI debe declarar no-overwrite de usuario existente"),
         ('"Enviando solicitud…"', "El estado busy debe permanecer neutro"),
         ('"onion:public-support:accepted"', "El evento de aceptación debe ser semánticamente neutro"),
-        ('postalCode: text(data.get("postalCode")).slice(0, 5)', "Falta CP estructurado en payload"),
-        ('city: text(data.get("city")).slice(0, 90)', "Falta ciudad estructurada en payload"),
-        ('province: text(data.get("province")).slice(0, 90)', "Falta provincia estructurada en payload"),
+        (('postalCode: cleanText(data.get("postalCode")).slice(0, 5)', 'postalCode: text(data.get("postalCode")).slice(0, 5)'), "Falta CP estructurado en payload"),
+        (('city: cleanText(data.get("city")).slice(0, 90)', 'city: text(data.get("city")).slice(0, 90)'), "Falta ciudad estructurada en payload"),
+        (('province: cleanText(data.get("province")).slice(0, 90)', 'province: text(data.get("province")).slice(0, 90)'), "Falta provincia estructurada en payload"),
         ('country: "España"', "Falta país canónico en payload"),
         ('labelAddon: postalInfo()', "El CP debe incluir su ayuda contextual junto a la etiqueta"),
         ('aria-describedby="public-support-postal-help"', "La ayuda del CP debe ser accesible"),
@@ -481,7 +481,8 @@ def main() -> int:
         ('className = "public-support-account-copy"', "Nombre y correo deben vivir en la tarjeta única del avatar"),
         ('copy.append(strong, small)', "La tarjeta del avatar debe englobar nombre y correo"),
     ):
-        require(errors, snippet in intake, message)
+        alternatives = snippet if isinstance(snippet, tuple) else (snippet,)
+        require(errors, any(option in intake for option in alternatives), message)
 
     for stale, message in (
         ("wrap.dataset.publicSupportAccountTooltip", "La tarjeta no debe duplicarse con un tooltip flotante"),
@@ -562,7 +563,8 @@ def main() -> int:
         ('loading="lazy"', "La fotografía secundaria debe seguir siendo lazy"),
         ('fetchpriority="low"', "La fotografía secundaria no puede competir con el hero"),
     ):
-        require(errors, snippet in intake, message)
+        alternatives = snippet if isinstance(snippet, tuple) else (snippet,)
+        require(errors, any(option in intake for option in alternatives), message)
 
     for relative, maximum in (
         ("src/media/img/Cristian_Avila_Formulario_480.webp", 30_000),

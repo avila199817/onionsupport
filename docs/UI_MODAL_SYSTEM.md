@@ -74,7 +74,7 @@ Desde la [consolidación del 2026-09-15](releases/2026-09-15-modal-shell-authori
 Estructura que emite el shell, la única válida para un diálogo privado:
 
 ```html
-<section class="ui-detail-modal-root" data-modal-shell="ui-modal-shell.v1" data-modal-size="detail|wide|form|compact|confirm" data-modal-height="fixed|auto" data-open="true" …identidad del dominio…>
+<section class="ui-detail-modal-root" data-modal-shell="ui-modal-shell.v1" data-modal-size="detail|wide|form|compact|confirm|stage" data-modal-height="fixed|auto" data-open="true" …identidad del dominio…>
   <div class="ui-detail-modal-overlay" data-modal-overlay="true">
     <div class="ui-detail-modal-panel" role="dialog|alertdialog" aria-modal="true" aria-labelledby|aria-label tabindex="-1" data-modal-panel="true">
       <!-- prelude: confirmaciones anidadas y velos de ocupado del dominio -->
@@ -112,7 +112,7 @@ Estado de la familia (se actualiza en cada unidad):
 | Detalle de Clientes | shell canónico (`renderModalShell`; su anchura de 1080 px es un token `--ui-detail-modal-panel-width` en `clientes-modal-root`), botón cerrar del shell, click exterior por el lifecycle; el contenido conserva el préstamo de clases `incidencias-modal-*` hasta la unidad de contenido de los detalles |
 | Alta de Usuarios | shell canónico (`renderModalShell`, variante `data-modal-size="form"`, altura `auto`), botón cerrar del shell, click exterior por el lifecycle; `private-create-modal.css` queda como autoridad del contenido de las cuatro altas |
 | Correo (redacción, firma, confirmación) | shell canónico dentro del host inline de la ruta: redacción con geometría de ventana (840 × 650 px) y firma con su paleta (oscura por defecto, clara en tema claro) declaradas como tokens `--ui-detail-modal-*` / `--surface-2` en sus clases raíz, confirmación `alertdialog` de tamaño `confirm`; click exterior por el lifecycle |
-| Visor de adjuntos | excepción evaluable: capa de galería sobre el detalle con anclaje de scroll propio |
+| Visor de adjuntos | shell canónico (`renderModalShell`, tamaño `stage`: el panel no pinta chrome y centra la tarjeta del visor, que conserva su cabecera, su frame, la galería y el anclaje de scroll propio); backdrop más tenue que el del detalle declarado como token `--incidencias-media-viewer-overlay-bg`; Escape y click exterior por el lifecycle |
 | Consentimiento Google | excepción: página pública, sin CSS privado |
 
 ## Lifecycle de interacción compartido

@@ -1,4 +1,5 @@
 import { createModalLifecycle, modalFocusableElements, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
+import { MODAL_SHELL_SELECTORS, renderModalShell } from "../entity-overlay/modal-host.js";
 /* =========================================================
    Onion Support · Incidencias Attachment Viewer
    Archivo: /src/features/incidencias-video-preview/index.js
@@ -62,8 +63,9 @@ let epoch = 0;
 
 let activeViewer = null;
 const modalLifecycle = createModalLifecycle({
-  getPanel: () => activeViewer?.layer,
+  getPanel: () => activeViewer?.panel,
   onEscape: () => requestViewerClose(),
+  onBackdrop: () => requestViewerClose(),
   bodyClasses: ['incidencias-media-viewer-open'],
 });
 let mediaSession = null;
@@ -546,24 +548,25 @@ function clearCloseTimer() {
   return true;
 }
 
+/* The viewer is a `stage` shell: the authority provides the dialog panel,
+   the backdrop, the centering and the lifecycle; the adopted preview card
+   keeps its own chrome inside the stage. */
 function createViewerLayer(root = null) {
-  const layer = document.createElement("div");
-  layer.className = "incidencias-media-viewer";
-  layer.dataset.incidenciasMediaViewer = "true";
-  layer.dataset.viewerState = "opening";
-  layer.setAttribute("role", "dialog");
-  layer.setAttribute("aria-modal", "true");
-  layer.setAttribute("aria-label", "Visor de adjunto");
+  root.insertAdjacentHTML("beforeend", renderModalShell({
+    rootClass: "incidencias-media-viewer",
+    rootAttributes: { "data-incidencias-media-viewer": "true", "data-viewer-state": "opening" },
+    label: "Visor de adjunto",
+    size: "stage",
+    height: "auto",
+    body: '<div class="incidencias-media-viewer-stage" data-incidencias-media-viewer-stage="true"></div>',
+  }));
+  const layer = root.lastElementChild;
 
-  const stage = document.createElement("div");
-  stage.className = "incidencias-media-viewer-stage";
-  stage.dataset.incidenciasMediaViewerStage = "true";
-
-  layer.appendChild(stage);
-  root.appendChild(layer);
-
-
-  return { layer, stage };
+  return {
+    layer,
+    panel: layer.querySelector(MODAL_SHELL_SELECTORS.panel),
+    stage: layer.querySelector(VIEWER_STAGE),
+  };
 }
 
 function activateViewerLayer(layer = null) {
@@ -741,10 +744,11 @@ function adoptPreview(root = null, preview = null) {
   if (!root?.isConnected || !preview?.isConnected) return false;
 
   let layer = activeViewer?.root === root ? activeViewer.layer : null;
+  let panel = activeViewer?.root === root ? activeViewer.panel : null;
   let stage = activeViewer?.root === root ? activeViewer.stage : null;
   let createdLayer = false;
 
-  if (!layer?.isConnected || !stage?.isConnected) {
+  if (!layer?.isConnected || !panel?.isConnected || !stage?.isConnected) {
     if (activeViewer) {
       /*
          Cambio de preview dentro del mismo ticket: retiramos sólo la capa,
@@ -757,7 +761,7 @@ function adoptPreview(root = null, preview = null) {
       modalLifecycle.deactivate({ restoreFocus: false });
     }
 
-    ({ layer, stage } = createViewerLayer(root));
+    ({ layer, panel, stage } = createViewerLayer(root));
     createdLayer = true;
   }
 
@@ -783,7 +787,7 @@ function adoptPreview(root = null, preview = null) {
   preview.dataset.viewerOwned = "true";
   stage.replaceChildren(preview);
 
-  activeViewer = { root, layer, stage, preview, opener };
+  activeViewer = { root, layer, panel, stage, preview, opener };
   modalLifecycle.activate({ opener });
 
   stabilizeOpen(root, preview);
@@ -792,8 +796,8 @@ function adoptPreview(root = null, preview = null) {
   const title = preview.querySelector("#incidencias-modal-preview-title");
 
   if (title?.id) {
-    layer.setAttribute("aria-labelledby", title.id);
-    layer.removeAttribute("aria-label");
+    panel.setAttribute("aria-labelledby", title.id);
+    panel.removeAttribute("aria-label");
   }
 
   if (createdLayer) {
@@ -1490,13 +1494,9 @@ function onClickCapture(event) {
     return;
   }
 
-  if (
-    activeViewer?.layer &&
-    (
-      event.target === activeViewer.layer ||
-      event.target?.matches?.(VIEWER_STAGE)
-    )
-  ) {
+  /* The shell backdrop closes through the lifecycle; the stage around the
+     card is the viewer's own surface. */
+  if (activeViewer?.layer && event.target?.matches?.(VIEWER_STAGE)) {
     event.preventDefault();
     event.stopPropagation();
     requestViewerClose();

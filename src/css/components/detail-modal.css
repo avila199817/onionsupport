@@ -81,6 +81,18 @@ display: none;
   --ui-detail-modal-panel-height: min(92dvh, 640px);
 }
 
+/* Escenario: la superficie trae su propia tarjeta (visor de adjuntos). El
+   shell aporta diálogo, backdrop, centrado y ciclo de vida; el panel no pinta
+   chrome, el header vacío no ocupa sitio y el body centra el contenido. */
+.ui-detail-modal-root[data-modal-size="stage"] {
+  --ui-detail-modal-panel-width: fit-content;
+  --ui-detail-modal-panel-height: 100dvh;
+  --ui-detail-modal-bg: transparent;
+  --ui-detail-modal-border: transparent;
+  --ui-detail-modal-shadow: 0 0 0 0 transparent;
+  --ui-detail-modal-radius: 0;
+}
+
 /* Host del dispatcher de entidades. El shell que contiene es fixed por sí
    mismo; el host sólo delimita la capa y nunca intercepta punteros. */
 .entity-overlay-root[hidden],
@@ -149,6 +161,16 @@ box-shadow: var(--ui-detail-modal-shadow), var(--focus-ring);
 .ui-detail-modal-root[data-modal-height="auto"] .ui-detail-modal-panel {
   block-size: auto;
   max-block-size: min(var(--ui-detail-modal-panel-height), calc(100dvh - 24px));
+}
+
+.ui-detail-modal-root[data-modal-size="stage"] .ui-detail-modal-panel {
+  max-inline-size: 100%;
+  max-block-size: 100%;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.ui-detail-modal-root[data-modal-size="stage"] .ui-detail-modal-header {
+  display: none;
 }
 
 .ui-detail-modal-panel:has(> .ui-detail-modal-footer) {
@@ -390,6 +412,15 @@ min-inline-size: 0;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
   padding: var(--ui-detail-modal-padding);
+}
+
+.ui-detail-modal-root[data-modal-size="stage"] .ui-detail-modal-body {
+  place-items: center;
+  align-content: stretch;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  scrollbar-gutter: auto;
 }
 
 .ui-detail-modal-body::-webkit-scrollbar {

@@ -27,7 +27,7 @@ export const MODAL_SHELL_SELECTORS = Object.freeze({
 });
 
 /* Panel width tokens resolved by the structural stylesheet. */
-export const MODAL_SIZES = Object.freeze(["detail", "wide", "form", "compact", "confirm"]);
+export const MODAL_SIZES = Object.freeze(["detail", "wide", "form", "compact", "confirm", "stage"]);
 /* fixed: the panel keeps its viewport height and the body scrolls.
    auto: the panel grows with its content up to the viewport. */
 export const MODAL_HEIGHTS = Object.freeze(["fixed", "auto"]);

@@ -121,27 +121,23 @@ body.incidencias-media-viewer-open {
   overscroll-behavior: none;
 }
 
-.incidencias-media-viewer {
-  position: fixed;
-  inset: 0;
-  z-index: 90;
-  inline-size: 100vw;
-  block-size: 100vh;
-  block-size: 100dvh;
-  display: grid;
-  place-items: center;
-  padding: clamp(14px, 2.4vw, 30px);
-  overflow: hidden;
-  pointer-events: auto;
-  background:
+/*
+   El visor es un shell `stage` de la autoridad (root, overlay, panel, ciclo
+   de vida). Aquí quedan su fundido propio y su backdrop, más tenue que el del
+   detalle sobre el que se abre: la mezcla se declara en la raíz del detalle
+   (sin referencia circular) y el visor la adopta como token del shell.
+*/
+.incidencias-modal-root {
+  --incidencias-media-viewer-overlay-bg:
     color-mix(in srgb, var(--ui-detail-modal-overlay-bg) 90%, transparent);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+}
+
+.incidencias-media-viewer {
+  --ui-detail-modal-overlay-bg: var(--incidencias-media-viewer-overlay-bg);
+  --ui-detail-modal-overlay-blur: blur(14px);
 
   opacity: 0;
-  transition:
-    opacity 180ms ease-out,
-    background 180ms ease-out;
+  transition: opacity 180ms ease-out;
 }
 
 .incidencias-media-viewer[data-viewer-state="ready"] {
@@ -160,6 +156,7 @@ body.incidencias-media-viewer-open {
   min-block-size: 0;
   display: grid;
   place-items: center;
+  padding: clamp(14px, 2.4vw, 30px);
   overflow: hidden;
 }
 
@@ -583,7 +580,7 @@ body.incidencias-media-viewer-open {
     block-size: 52px;
   }
 
-  .incidencias-media-viewer {
+  .incidencias-media-viewer-stage {
     padding:
       max(8px, env(safe-area-inset-top))
       max(8px, env(safe-area-inset-right))

@@ -33,7 +33,6 @@ const pendingShell = (file, until) => ({ kind: "shell", file, until });
 const fixedLayer = (file, reason) => ({ kind: "layer", file, reason });
 const FIXED_INVENTORY = new Map([
   // dialog shells pending migration
-  [".incidencias-media-viewer", pendingShell("src/css/views/incidencias/media-preview.core.css", "media-viewer-review")],
   // fixed layers that are not dialogs
   [".toast", fixedLayer("src/css/components/ui.css", "toast stack")],
   [".correo-toast-stack", fixedLayer("src/css/views/correo/index.css", "toast stack of the mail workspace")],
@@ -78,6 +77,7 @@ const SHELL_CONSUMERS = [
   "src/views/correo/correo.template.js",
   "src/features/incidencias-technician-profile/index.js",
   "src/views/usuarios/usuarios.template.modal.js",
+  "src/features/incidencias-video-preview/core.js",
 ];
 
 const STRUCTURAL_CLASS = /\.ui-detail-modal-(?:root|overlay|panel|header|body|footer|close-btn)\b/u;
@@ -132,7 +132,7 @@ test("shell identity", () => {
   assert.ok(Object.isFrozen(MODAL_SHELL_SELECTORS));
   assert.match(read("src/features/entity-overlay/modal-host.js"), /scrollSelector = MODAL_SHELL_SELECTORS\.body,/u, "the host patches by the shell's own markers");
   assert.deepEqual(Object.keys(MODAL_SHELL_SELECTORS), ["root", "overlay", "panel", "header", "body", "footer", "close", "state"]);
-  assert.deepEqual([...MODAL_SIZES], ["detail", "wide", "form", "compact", "confirm"]);
+  assert.deepEqual([...MODAL_SIZES], ["detail", "wide", "form", "compact", "confirm", "stage"]);
   assert.deepEqual([...MODAL_HEIGHTS], ["fixed", "auto"]);
   assert.deepEqual([...MODAL_STATES], ["loading", "error", "empty"]);
 });

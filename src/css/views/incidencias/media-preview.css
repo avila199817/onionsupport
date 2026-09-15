@@ -15,17 +15,19 @@
 
 @layer views {
 
-.incidencias-media-viewer {
-  padding: clamp(34px, 5vw, 86px);
-  background:
+.incidencias-modal-root {
+  --incidencias-media-viewer-overlay-bg:
     color-mix(in srgb, var(--ui-detail-modal-overlay-bg) 34%, transparent);
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
+}
+
+.incidencias-media-viewer {
+  --ui-detail-modal-overlay-blur: blur(3px);
 }
 
 .incidencias-media-viewer-stage {
   position: relative;
   isolation: isolate;
+  padding: clamp(34px, 5vw, 86px);
 }
 
 .incidencias-modal-preview.incidencias-modal-preview--viewer,
@@ -195,7 +197,7 @@
 }
 
 @media (max-width: 1100px) {
-  .incidencias-media-viewer {
+  .incidencias-media-viewer-stage {
     padding: clamp(24px, 3.5vw, 44px);
   }
 
@@ -209,16 +211,21 @@
 }
 
 @media (max-width: 720px) {
+  .incidencias-modal-root {
+    --incidencias-media-viewer-overlay-bg:
+      color-mix(in srgb, var(--ui-detail-modal-overlay-bg) 46%, transparent);
+  }
+
   .incidencias-media-viewer {
+    --ui-detail-modal-overlay-blur: blur(2px);
+  }
+
+  .incidencias-media-viewer-stage {
     padding:
       max(14px, env(safe-area-inset-top))
       max(12px, env(safe-area-inset-right))
       max(14px, env(safe-area-inset-bottom))
       max(12px, env(safe-area-inset-left));
-    background:
-      color-mix(in srgb, var(--ui-detail-modal-overlay-bg) 46%, transparent);
-    backdrop-filter: blur(2px);
-    -webkit-backdrop-filter: blur(2px);
   }
 
   .incidencias-modal-preview.incidencias-modal-preview--viewer,

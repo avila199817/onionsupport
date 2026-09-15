@@ -21,7 +21,7 @@ El enlace coordinado del backend ya existe en [oniontech/docs/REPOSITORY_CLEANUP
 | R02 / A00 | P0 | Bloqueado en lectura adicional / decisión de gobierno | Ambos main devolvieron `protected:false`; frontend rulesets vacío; backend rulesets 403. No se infiere ausencia de reglas del 403 ni se cambian permisos, plan o visibilidad. Desarrollo aislado permitido continúa. |
 | R03 / A00–A01 | P1 | Desplegado y verificado | #578: techos post-A01 basados en artefacto comparable; exclusión estática de invoice-api conservada. |
 | R04 / A07 | P1 | En curso | Cuatro diagnósticos sintéticos reproducidos con assertions fallidas; corrección del contrato/consumidores aún no integrada. Ver continuación. |
-| R05 / A08 | P1 | Pendiente | Cinco capas activas de API de facturas no retiradas; empezar por contrato R04, luego transporte/adaptación/documentos/caché. |
+| R05 / A08 | P1 | En curso | Cinco capas activas de API de facturas no retiradas; empezar por contrato R04, luego transporte/adaptación/documentos/caché. 2026-09-15: retirados `PUT`/`PATCH`/`DELETE` de facturas y su transporte (sin ruta backend ni consumidor) en las cinco capas, con `tools/facturas-mutation-surface-contract.mjs`; las capas siguen siendo cinco. |
 | R06 / A14 | P1 | Desplegado y verificado | #578 prepara tooling sin cambiar bytes; #579 activa geometría WhatsApp en CSS privado. Composición conservada, matriz real de navegador y artefacto comprobados. |
 | R07 / A14 | P2 | Pendiente | Copias crudas candidatas no retiradas. Resolver consumidores/URLs y modos fuente/build antes de excluirlas. |
 | R08 / A09 | P2 | Pendiente | Patrones modales/cascada sin unificación nueva en estos lotes; mantener temas, foco y precedencia AvatarSystem. |

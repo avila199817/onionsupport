@@ -12,26 +12,6 @@
 
 @layer views {
 
-/* Contenido del header del shell: título y subtítulo. */
-.usr-create-header-copy h2 {
-  margin: 0;
-  color: var(--text-strong);
-  font-size: clamp(24px, 2.2vw, 34px);
-  font-weight: var(--weight-black);
-  line-height: 1;
-  letter-spacing: var(--letter-tight);
-  text-wrap: balance;
-}
-
-.usr-create-header-copy p {
-  max-inline-size: 74ch;
-  margin: 0;
-  color: var(--text-muted);
-  font-size: var(--font-sm);
-  font-weight: var(--weight-medium);
-  line-height: 1.4;
-}
-
 /* Body del shell: único scroll; aquí sólo el padding del formulario. */
 .usr-create-body {
   padding: clamp(18px, 1.6vw, 26px) clamp(18px, 2vw, 30px) clamp(22px, 2vw, 32px);
@@ -60,7 +40,6 @@
 }
 
 @media (max-width: 760px) {
-  .usr-create-header-copy h2 { font-size: clamp(22px, 7vw, 29px); }
   .usr-create-body { padding: 16px; }
 }
 

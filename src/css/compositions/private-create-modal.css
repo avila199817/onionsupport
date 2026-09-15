@@ -42,6 +42,36 @@
   gap: 4px;
 }
 
+/* Título y subtítulo de las cuatro altas: una sola tipografía. */
+:is(
+  .inc-create-header-copy,
+  .cli-create-header-copy,
+  .fac-create-header-copy,
+  .usr-create-header-copy
+) h2 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: clamp(24px, 2.2vw, 34px);
+  font-weight: var(--weight-black);
+  line-height: 1;
+  letter-spacing: var(--letter-tight);
+  text-wrap: balance;
+}
+
+:is(
+  .inc-create-header-copy,
+  .cli-create-header-copy,
+  .fac-create-header-copy,
+  .usr-create-header-copy
+) p {
+  max-inline-size: 74ch;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-medium);
+  line-height: 1.4;
+}
+
 /* =========================================================
    FORM
 ========================================================= */
@@ -644,6 +674,15 @@
 ========================================================= */
 
 @media (max-width: 760px) {
+  :is(
+    .inc-create-header-copy,
+    .cli-create-header-copy,
+    .fac-create-header-copy,
+    .usr-create-header-copy
+  ) h2 {
+    font-size: clamp(22px, 7vw, 29px);
+  }
+
   :is(
     .inc-create-grid--2,
     .inc-create-grid--3,

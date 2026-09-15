@@ -79,6 +79,7 @@ const SHELL_CONSUMERS = [
   "src/features/facturas-paid-confirm/index.js",
   "src/views/correo/correo.template.js",
   "src/features/incidencias-technician-profile/index.js",
+  "src/views/usuarios/usuarios.template.modal.js",
 ];
 
 const STRUCTURAL_CLASS = /\.ui-detail-modal-(?:root|overlay|panel|header|body|footer|close-btn)\b/u;

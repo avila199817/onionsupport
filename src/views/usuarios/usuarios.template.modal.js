@@ -1,6 +1,6 @@
 import { cleanText, escapeHtml } from "../../core/presentation-text.js";
 import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
-import { createModalHost, renderModalContent } from "../../features/entity-overlay/modal-host.js";
+import { createModalHost, renderModalCloseButton, renderModalContent, renderModalShell } from "../../features/entity-overlay/modal-host.js";
 /* =========================================================
    Onion Support - Usuarios Detail Modal
    Archivo: /src/views/usuarios/usuarios.template.modal.js
@@ -87,6 +87,7 @@ const modalState = {
 const modalLifecycle = createModalLifecycle({
   getPanel: () => modalState.panel,
   onEscape: () => closeUsuariosModal(),
+  onBackdrop: () => closeUsuariosModal(),
   onDetached: () => closeUsuariosModal({ restoreFocus: false }),
   bodyClasses: BODY_LOCK_CLASSES,
 });
@@ -1067,8 +1068,6 @@ function icon(name = "") {
     `aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
 
   const icons = {
-    close:
-      `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
 
     copy:
       `<svg ${common}><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`,
@@ -1970,38 +1969,27 @@ export function renderUsuariosDetailModal(input = {}) {
     data.isRefreshing ===
     true;
 
-  return `
-    <section
-      id="${MODAL_ID}"
-      class="usuarios-modal-root ui-detail-modal-root"
-      data-usuarios-modal-root="true"
-      data-ui-detail-modal-root="true"
-      data-template-version="${attr(USUARIOS_MODAL_TEMPLATE_VERSION)}"
-      data-user-id="${attr(userId)}"
-      data-status="${attr(status)}"
-      data-refreshing="${isRefreshing ? "true" : "false"}"
-      data-canonical-model="true"
-    >
-      <div
-        class="usuarios-modal-overlay ui-detail-modal-overlay"
-        data-usuarios-modal-overlay="true"
-        data-ui-detail-modal-overlay="true"
-      >
-        <div
-          id="${PANEL_ID}"
-          class="usuarios-modal-panel ui-detail-modal-panel${isRefreshing ? " is-submitting" : ""}"
-          data-usuarios-modal-panel="true"
-          data-ui-detail-modal-panel="true"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="usuarios-detail-modal-title"
-          aria-describedby="usuarios-detail-modal-summary"
-          aria-busy="${isRefreshing ? "true" : "false"}"
-          tabindex="-1"
-        >
-          <header
-            class="usuarios-modal-header ui-detail-modal-header"
-          >
+  return renderModalShell({
+    id: MODAL_ID,
+    rootClass: "usuarios-modal-root",
+    rootAttributes: {
+      "data-usuarios-modal-root": "true",
+      "data-template-version": USUARIOS_MODAL_TEMPLATE_VERSION,
+      "data-user-id": userId,
+      "data-status": status,
+      "data-refreshing": isRefreshing ? "true" : "false",
+      "data-canonical-model": "true",
+    },
+    overlayAttributes: { "data-usuarios-modal-overlay": "true" },
+    panelId: PANEL_ID,
+    panelAttributes: {
+      "data-usuarios-modal-panel": "true",
+      "aria-busy": isRefreshing ? "true" : "false",
+    },
+    labelledBy: "usuarios-detail-modal-title",
+    describedBy: "usuarios-detail-modal-summary",
+    submitting: isRefreshing,
+    header: `
             <div
               class="usuarios-modal-hero ui-detail-modal-hero"
             >
@@ -2080,19 +2068,12 @@ export function renderUsuariosDetailModal(input = {}) {
               </div>
             </div>
 
-            <button
-              type="button"
-              class="usuarios-modal-close-btn ui-detail-modal-close-btn"
-              data-usuarios-modal-action="${USUARIOS_DETAIL_ACTIONS.CLOSE}"
-              aria-label="Cerrar detalle de ${attr(name)}"
-            >
-              ${icon("close")}
-            </button>
-          </header>
-
-          <main
-            class="usuarios-modal-body ui-detail-modal-body"
-          >
+            ${renderModalCloseButton({
+              label: `Cerrar detalle de ${name}`,
+              attributes: { "data-usuarios-modal-action": USUARIOS_DETAIL_ACTIONS.CLOSE },
+            })}`,
+    bodyClass: "usuarios-modal-body",
+    body: `
             <div
               class="usuarios-modal-meta-grid ui-detail-modal-meta-grid"
             >
@@ -2162,12 +2143,8 @@ export function renderUsuariosDetailModal(input = {}) {
             ${renderFooter(
               detail,
               isRefreshing
-            )}
-          </main>
-        </div>
-      </div>
-    </section>
-  `;
+            )}`,
+  });
 }
 
 export function renderUsuariosDetailModalClosed() {
@@ -2313,18 +2290,6 @@ function onRootClick(event = null) {
     }
   }
 
-  const overlay =
-    target.closest(
-      "[data-usuarios-modal-overlay='true']"
-    );
-
-  if (
-    overlay &&
-    event.target ===
-      overlay
-  ) {
-    closeUsuariosModal();
-  }
 }
 
 function attachRootBindings() {
@@ -2396,12 +2361,8 @@ function renderMounted({ focus = false, forceMount = false } = {}) {
     ? renderUsuariosDetailModal({ detail: modalState.detail, isRefreshing: modalState.isRefreshing })
     : "";
   const rendered = renderModalContent(host, html, {
-    rootSelector: `#${MODAL_ID}`,
-    overlaySelector: "[data-usuarios-modal-overlay='true']",
-    panelSelector: "[data-usuarios-modal-panel='true']",
     identityAttribute: "data-user-id",
     focusAttributes: ["id", "data-usuarios-modal-action", "href"],
-    scrollSelector: ".usuarios-modal-body, .ui-detail-modal-body",
     forceMount,
   });
   modalState.root = rendered.root;

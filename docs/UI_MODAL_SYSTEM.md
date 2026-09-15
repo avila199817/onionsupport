@@ -101,7 +101,7 @@ Estado de la familia (se actualiza en cada unidad):
 | --- | --- |
 | Dispatcher de entidades (carga / error) | shell canónico |
 | Perfil del técnico | shell canónico (`renderModalShell`, altura `auto` con su tope de 720 px declarado como token `--ui-detail-modal-panel-height` en la raíz), botón cerrar del shell, click exterior por el lifecycle; `style.css` estiliza sólo el contenido |
-| Detalle de Usuarios | shell canónico (`ui-detail-modal-*` emitido por el dominio; pendiente de `renderModalShell`) |
+| Detalle de Usuarios | shell canónico (`renderModalShell`), botón cerrar del shell, click exterior por el lifecycle; sin CSS estructural propio (`views/usuarios/index.css` no estiliza el diálogo) |
 | Detalle de Incidencias | shell canónico: `renderModalShell` (carga, error y detalle), botón cerrar del shell, click exterior por el lifecycle; el dominio conserva `incidencias-modal-root` como ámbito de su contenido |
 | Alta de Incidencias | shell canónico (`renderModalShell`, variante `data-modal-size="form"`; el modo cliente ajusta la anchura por token en `inc-create-root.is-client`), botón cerrar del shell, click exterior por el lifecycle; `private-create-modal.css` conserva sólo el contenido del formulario para las cuatro altas |
 | Detalle de Facturas | shell canónico (`renderModalShell`, variante `data-modal-size="wide"`), botón cerrar del shell, estados de carga y error compartidos, click exterior por el lifecycle; el dominio conserva `facturas-detail-modal-root` como ámbito de su contenido |

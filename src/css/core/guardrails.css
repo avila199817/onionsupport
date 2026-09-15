@@ -428,24 +428,8 @@
 }
 
 :where(
-  .incidencias-modal,
-  .facturas-modal,
-  .clientes-modal,
-  .usuarios-modal,
-  .ui-modal,
-  .ui-drawer
-) {
-  min-inline-size: 0;
-  max-inline-size: calc(100dvw - 24px);
-  max-block-size: calc(100dvh - 24px);
-}
-
-:where(
-  .facturas-modal-body,
   .clientes-modal-body,
-  .usuarios-modal-body,
-  .ui-modal-body,
-  .ui-drawer-body
+  .usuarios-modal-body
 ) {
   min-inline-size: 0;
   min-block-size: 0;

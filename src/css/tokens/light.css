@@ -327,13 +327,6 @@ body[data-theme="light"] {
     linear-gradient(180deg, rgba(255,255,255,.99), rgba(245,245,245,.92)),
     rgba(255,255,255,.96);
 
-  --modal-bg:
-    linear-gradient(180deg, rgba(255,255,255,.99), rgba(245,245,245,.92)),
-    rgba(255,255,255,.96);
-
-  --drawer-bg:
-    linear-gradient(180deg, rgba(255,255,255,.99), rgba(245,245,245,.92)),
-    rgba(255,255,255,.96);
 
   --tooltip-bg: var(--graphite-500, #0D0D0D);
   --tooltip-text: #ffffff;
@@ -430,7 +423,6 @@ body[data-theme="light"] {
     0 14px 30px rgba(13,13,13,.080),
     0 0 0 1px rgba(255,255,255,.70) inset;
 
-  --shadow-modal: var(--glass-shadow-xl);
 
   --shadow-glow:
     0 0 0 1px rgba(255,255,255,.56),
@@ -988,15 +980,6 @@ body[data-theme="light"] {
   ======================================================= */
 
   --overlay-bg: rgba(13,13,13,.28);
-  --overlay-blur: blur(12px) saturate(1.04);
-
-  --modal-bg:
-    linear-gradient(180deg, rgba(255,255,255,.99), rgba(245,245,245,.90)),
-    rgba(255,255,255,.96);
-
-  --drawer-bg:
-    linear-gradient(180deg, rgba(255,255,255,.99), rgba(245,245,245,.90)),
-    rgba(255,255,255,.96);
 
 
   /* =======================================================
@@ -1192,8 +1175,6 @@ body[data-theme="light"] {
 
     --dropdown-bg: #ffffff;
     --popover-bg: #ffffff;
-    --modal-bg: #ffffff;
-    --drawer-bg: #ffffff;
 
     --card-bg: #ffffff;
     --card-bg-hover: #ffffff;

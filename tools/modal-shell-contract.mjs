@@ -34,8 +34,6 @@ const fixedLayer = (file, reason) => ({ kind: "layer", file, reason });
 const FIXED_INVENTORY = new Map([
   // dialog shells pending migration
   [".incidencias-media-viewer", pendingShell("src/css/views/incidencias/media-preview.core.css", "media-viewer-review")],
-  [".ui-overlay", pendingShell("src/css/components/ui.css", "ui-legacy-overlay-removal")],
-  [".ui-drawer", pendingShell("src/css/components/ui.css", "ui-legacy-overlay-removal")],
   // fixed layers that are not dialogs
   [".toast", fixedLayer("src/css/components/ui.css", "toast stack")],
   [".correo-toast-stack", fixedLayer("src/css/views/correo/index.css", "toast stack of the mail workspace")],

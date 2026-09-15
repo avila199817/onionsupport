@@ -32,7 +32,7 @@ for required in (
         errors.append(f"falta contrato de controlador: {required}")
 for required in (
     'data-correo-action="edit-draft"', 'data-correo-action="confirm-accept"',
-    'data-correo-action="confirm-cancel"', 'role="alertdialog"',
+    'data-correo-action="confirm-cancel"', 'role: "alertdialog"', 'renderModalShell(',
     'Los adjuntos existentes se conservan',
     'data-correo-action="mailbox"', 'correo-account-menu-mailboxes',
 ):
@@ -41,7 +41,7 @@ for required in (
 for required in ('export async function updateDraft(', 'updateDraft,', 'withMailboxQuery', 'mailboxEndpoint', 'mailboxes: Object.freeze'):
     if required not in api:
         errors.append(f"API de borrador incompleta: {required}")
-for required in ('.correo-confirm-overlay', '.correo-confirm-backdrop', '.correo-confirm-dialog', '.correo-btn--danger', '.correo-field', '.correo-message-line', '.correo-account-menu-mailboxes', '.correo-mailbox-option'):
+for required in ('.correo-confirm-body', '.correo-confirm-icon', '.correo-confirm-message', '.correo-btn--danger', '.correo-field', '.correo-message-line', '.correo-account-menu-mailboxes', '.correo-mailbox-option'):
     if required not in css:
         errors.append(f"falta CSS canónico de Correo: {required}")
 if css.count('@layer views {') != 1:
@@ -63,7 +63,7 @@ for required in (
     if required not in template:
         errors.append(f"falta contrato UX final de Correo: {required}")
 for required in (
-    '.correo-signature-dialog', '.correo-signature-preview', '.correo-compose-cta',
+    '.correo-signature-root', '.correo-signature-preview', '.correo-compose-cta',
     '.correo-boot-folder-stack', '.correo-boot-message-stack',
 ):
     if required not in css:

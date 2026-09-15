@@ -588,43 +588,20 @@
 .correo-move-menu button:hover { background:#3e3e3e; }
 .correo-move-menu button svg { inline-size:14px; block-size:14px; }
 
-/* ---------- Compose / Outlook window ---------- */
-.correo-modal-backdrop {
-  position:fixed;
-  inset:0;
-  z-index:9998;
-  background:rgba(0,0,0,.44);
-  backdrop-filter:blur(2px);
+/* ---------- Compose / Outlook window (shell canónico) ----------
+   La estructura la aporta components/detail-modal.css; la ventana declara su
+   geometría y su paleta (oscura por defecto, clara en tema claro) como tokens
+   del shell en su clase raíz. */
+.correo-compose-root {
+  --ui-detail-modal-panel-width: min(840px, calc(100vw - 44px));
+  --ui-detail-modal-panel-height: min(650px, calc(100dvh - 112px));
+  --ui-detail-modal-bg: #242424;
+  --ui-detail-modal-border: #555;
+  --ui-detail-modal-header-border: #424242;
+  --surface-2: #292929;
 }
-.correo-compose {
-  position:fixed;
-  z-index:9999;
-  inset-inline-start:50%;
-  inset-block-start:clamp(72px, 8vh, 94px);
-  transform:translateX(-50%);
-  inline-size:min(840px, calc(100vw - 44px));
-  block-size:min(650px, calc(100dvh - 112px));
-  min-block-size:420px;
-  display:grid;
-  grid-template-rows:46px minmax(0,1fr);
-  overflow:hidden;
-  border:1px solid #555;
-  border-radius:7px;
-  background:#242424;
-  color:#fff;
-  box-shadow:0 24px 80px rgba(0,0,0,.56);
-}
-.correo-compose-header {
-  min-inline-size:0;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:10px;
-  padding:0 9px 0 14px;
-  border-block-end:1px solid #424242;
-  background:#292929;
-}
-.correo-compose-header h2 { margin:0; color:#fff; font-size:16px; line-height:1; font-weight:650; letter-spacing:-.015em; }
+.correo-compose-title { margin:0; color:var(--correo-text, #fff); font-size:16px; line-height:1; font-weight:650; letter-spacing:-.015em; }
+.correo-compose-body { padding:0; gap:0; align-content:stretch; grid-template-rows:minmax(0,1fr); }
 .correo-compose-form {
   min-block-size:0;
   display:grid;
@@ -727,7 +704,7 @@
   .correo-reader-header { min-block-size:72px; padding-block:10px; }
   .correo-sender { min-block-size:56px; padding-block:8px; }
   .correo-reader-actions { min-block-size:50px; padding-block:7px; }
-  .correo-compose { inset-block-start:66px; block-size:calc(100dvh - 80px); }
+  .correo-compose-root { --ui-detail-modal-panel-height: calc(100dvh - 80px); }
 }
 
 /* ---------- Responsive ---------- */
@@ -751,7 +728,6 @@
   .correo-message-list { max-block-size:65vh; }
   .correo-reader-card { block-size:auto; min-block-size:520px; }
   .correo-reader-scroll { max-block-size:58vh; }
-  .correo-compose { inset:8px; transform:none; inline-size:auto; block-size:auto; min-block-size:0; }
   .correo-field--line { grid-template-columns:54px minmax(0,1fr); padding-inline:10px; }
   .correo-compose-footer { grid-template-columns:1fr; }
   .correo-compose-footer > div { justify-content:flex-end; }
@@ -810,22 +786,18 @@ html[data-theme="light"] .correo-account-card:hover,
 body[data-theme="light"] .correo-account-card:hover { background:#e9e9e9; }
 html[data-theme="light"] .correo-account-copy strong,
 body[data-theme="light"] .correo-account-copy strong { color:#242424; }
+html[data-theme="light"] .correo-compose-root,
+body[data-theme="light"] .correo-compose-root { --ui-detail-modal-bg:#fff; --ui-detail-modal-border:#c8c8c8; --ui-detail-modal-header-border:#e0e0e0; --surface-2:#f5f5f5; }
 html[data-theme="light"] .correo-account-menu,
 body[data-theme="light"] .correo-account-menu,
-html[data-theme="light"] .correo-compose,
-body[data-theme="light"] .correo-compose,
 html[data-theme="light"] .correo-compose-form,
 body[data-theme="light"] .correo-compose-form,
 html[data-theme="light"] .correo-field--body textarea,
 body[data-theme="light"] .correo-field--body textarea,
 html[data-theme="light"] .correo-compose-attachments,
 body[data-theme="light"] .correo-compose-attachments { background:#fff; color:#242424; }
-html[data-theme="light"] .correo-compose-header,
-body[data-theme="light"] .correo-compose-header,
 html[data-theme="light"] .correo-compose-footer,
 body[data-theme="light"] .correo-compose-footer { background:#f5f5f5; }
-html[data-theme="light"] .correo-compose-header h2,
-body[data-theme="light"] .correo-compose-header h2,
 html[data-theme="light"] .correo-field--line input,
 body[data-theme="light"] .correo-field--line input,
 html[data-theme="light"] .correo-field--body textarea,
@@ -837,7 +809,7 @@ body[data-theme="light"] .correo-field--body textarea { color:#242424; }
 
 @media (forced-colors: active) {
   .correo-view-root *, .correo-view-root *::before, .correo-view-root *::after { forced-color-adjust:auto; }
-  .correo-btn,.correo-icon-btn,.correo-folder,.correo-message-row,.correo-account-card,.correo-disconnect-btn,.correo-compose,.correo-search { border:1px solid CanvasText; }
+  .correo-btn,.correo-icon-btn,.correo-folder,.correo-message-row,.correo-account-card,.correo-disconnect-btn,.correo-search { border:1px solid CanvasText; }
 }
 
 @media print {
@@ -1309,50 +1281,21 @@ body[data-theme="light"] .correo-field--body textarea { color:#242424; }
   border-block-start: 1px solid #383838;
 }
 
-.correo-signature-dialog {
-  position: fixed;
-  z-index: 9999;
-  inset-inline-start: 50%;
-  inset-block-start: 50%;
-  transform: translate(-50%, -50%);
-  inline-size: min(620px, calc(100vw - 32px));
-  max-block-size: calc(100dvh - 40px);
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  overflow: hidden;
-  border: 1px solid #555;
-  border-radius: 10px;
-  outline: none;
-  background: #292929;
-  color: #fff;
-  box-shadow: 0 24px 80px rgba(0,0,0,.52);
+/* Firma (shell canónico, tamaño compact): paleta como tokens del shell. */
+.correo-signature-root {
+  --ui-detail-modal-bg: #292929;
+  --ui-detail-modal-border: #555;
+  --ui-detail-modal-header-border: #424242;
+  --surface-2: #242424;
 }
 
-.correo-signature-dialog:focus-visible {
-  box-shadow: 0 24px 80px rgba(0,0,0,.52), 0 0 0 2px var(--correo-blue, #479ef5);
-}
-
-.correo-signature-header {
-  min-block-size: 64px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 12px 14px 12px 18px;
-  border-block-end: 1px solid #424242;
-  background: #242424;
-}
-
-.correo-signature-header > div { min-inline-size: 0; display: grid; gap: 2px; }
-.correo-signature-header .correo-kicker { margin: 0; color: #9d9d9d; font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-.correo-signature-header h2 { margin: 0; color: #fff; font-size: 17px; line-height: 1.2; font-weight: 650; }
+.correo-signature-copy { min-inline-size: 0; display: grid; gap: 2px; }
+.correo-signature-copy .correo-kicker { margin: 0; color: #9d9d9d; font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.correo-signature-copy h2 { margin: 0; color: #fff; font-size: 17px; line-height: 1.2; font-weight: 650; }
 
 .correo-signature-form {
-  min-block-size: 0;
-  overflow: auto;
   display: grid;
   gap: 14px;
-  padding: 18px;
 }
 
 .correo-signature-help { margin: 0; color: #adadad; font-size: 11px; line-height: 1.5; }
@@ -1413,26 +1356,17 @@ body[data-theme="light"] .correo-field--body textarea { color:#242424; }
 }
 
 @media (max-width: 680px) {
-  .correo-signature-dialog {
-    inset: 10px;
-    transform: none;
-    inline-size: auto;
-    max-block-size: none;
-  }
-  .correo-signature-form { padding: 14px; }
   .correo-signature-meta { display: grid; }
   .correo-signature-actions { display: grid; grid-template-columns: 1fr; }
   .correo-signature-actions .correo-btn { inline-size: 100%; }
 }
 
-html[data-theme="light"] .correo-signature-dialog,
-body[data-theme="light"] .correo-signature-dialog { background: #fff; color: #242424; border-color: #c8c8c8; }
-html[data-theme="light"] .correo-signature-header,
-body[data-theme="light"] .correo-signature-header,
+html[data-theme="light"] .correo-signature-root,
+body[data-theme="light"] .correo-signature-root { --ui-detail-modal-bg:#fff; --ui-detail-modal-border:#c8c8c8; --ui-detail-modal-header-border:#d6d6d6; --surface-2:#f5f5f5; color: #242424; }
 html[data-theme="light"] .correo-signature-preview,
 body[data-theme="light"] .correo-signature-preview { background: #f5f5f5; border-color: #d6d6d6; }
-html[data-theme="light"] .correo-signature-header h2,
-body[data-theme="light"] .correo-signature-header h2,
+html[data-theme="light"] .correo-signature-copy h2,
+body[data-theme="light"] .correo-signature-copy h2,
 html[data-theme="light"] .correo-signature-field,
 body[data-theme="light"] .correo-signature-field,
 html[data-theme="light"] .correo-signature-toggle,
@@ -1477,56 +1411,22 @@ body[data-theme="light"] [data-correo-host="true"] .correo-account-menu-check {
 .correo-message-line { min-inline-size: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .correo-mini-empty { display: flex; align-items: center; gap: 8px; padding: 12px; color: var(--correo-text-3, #777); font-size: 9px; }
 
-/* ---------- Onion confirmation surface ---------- */
-.correo-confirm-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 10030;
-  display: grid;
-  place-items: center;
-  padding: 18px;
-  background: rgba(0, 0, 0, .58);
-  backdrop-filter: blur(7px);
-}
-
-.correo-confirm-backdrop { position: absolute; inset: 0; }
-
-.correo-confirm-dialog {
-  position: relative;
-  z-index: 1;
-  inline-size: min(520px, 100%);
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
-  gap: 14px;
-  padding: 20px;
-  border: 1px solid var(--correo-border, #555);
-  border-radius: 8px;
-  outline: none;
-  background: var(--correo-panel, #292929);
-  color: var(--correo-text, #fff);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, .5);
-}
-
-.correo-confirm-dialog:focus-visible { box-shadow: 0 24px 80px rgba(0, 0, 0, .5), 0 0 0 2px var(--correo-blue, #479ef5); }
+/* ---------- Onion confirmation surface (shell canónico, tamaño confirm) ---------- */
+.correo-confirm-body { grid-template-columns: 44px minmax(0, 1fr); align-items: start; }
 .correo-confirm-icon { inline-size: 44px; block-size: 44px; display: grid; place-items: center; border: 1px solid var(--correo-border, #555); border-radius: 7px; background: var(--correo-panel-soft, #333); color: var(--correo-blue, #479ef5); }
-.correo-confirm-dialog.is-danger .correo-confirm-icon { border-color: color-mix(in srgb, var(--correo-red, #d13438) 65%, var(--correo-border, #555)); background: color-mix(in srgb, var(--correo-red, #d13438) 14%, var(--correo-panel-soft, #333)); color: var(--correo-red, #d13438); }
+.correo-confirm-root.is-danger .correo-confirm-icon { border-color: color-mix(in srgb, var(--correo-red, #d13438) 65%, var(--correo-border, #555)); background: color-mix(in srgb, var(--correo-red, #d13438) 14%, var(--correo-panel-soft, #333)); color: var(--correo-red, #d13438); }
 .correo-confirm-icon svg { inline-size: 20px; block-size: 20px; }
 .correo-confirm-copy { min-inline-size: 0; display: grid; gap: 7px; }
 .correo-confirm-eyebrow { color: var(--correo-text-3, #aaa); font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
-.correo-confirm-dialog.is-danger .correo-confirm-eyebrow { color: color-mix(in srgb, var(--correo-red, #d13438) 78%, white 22%); }
+.correo-confirm-root.is-danger .correo-confirm-eyebrow { color: color-mix(in srgb, var(--correo-red, #d13438) 78%, white 22%); }
 .correo-confirm-copy h3 { margin: 0; color: var(--correo-text, #fff); font-size: 18px; line-height: 1.2; font-weight: 650; }
-.correo-confirm-copy p { margin: 0; color: var(--correo-text-3, #aaa); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
-.correo-confirm-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; margin-block-start: 4px; }
+.correo-confirm-message { margin: 0; color: var(--correo-text-3, #aaa); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
 .correo-btn--danger { border-color: color-mix(in srgb, var(--correo-red, #d13438) 70%, #555); background: color-mix(in srgb, var(--correo-red, #d13438) 18%, #333); color: #fff; }
 .correo-btn--danger:hover:not(:disabled) { border-color: var(--correo-red, #d13438); background: color-mix(in srgb, var(--correo-red, #d13438) 32%, #333); }
 
 @media (max-width: 560px) {
-  .correo-confirm-dialog { grid-template-columns: 1fr; padding: 16px; }
-  .correo-confirm-actions { display: grid; grid-template-columns: 1fr; }
-  .correo-confirm-actions .correo-btn { inline-size: 100%; }
+  .correo-confirm-body { grid-template-columns: 1fr; }
+  .correo-confirm-root .correo-btn { flex: 1 1 0; }
 }
-
-html[data-theme="light"] .correo-confirm-overlay,
-body[data-theme="light"] .correo-confirm-overlay { background: rgba(15, 23, 42, .36); }
 
 } /* @layer views */

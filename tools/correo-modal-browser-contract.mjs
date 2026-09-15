@@ -34,6 +34,7 @@ const html = `<!doctype html><html lang="es" data-theme="dark"><head><meta chars
   <style>@layer reset,tokens,base,components,views,features,utilities;</style>
   <link rel="stylesheet" href="/src/css/tokens/variables.css">
   <link rel="stylesheet" href="/src/css/tokens/light.css">
+  <link rel="stylesheet" href="/src/css/components/detail-modal.css">
   <link rel="stylesheet" href="/src/css/views/correo/index.css">
   <style>body{margin:0;font:16px sans-serif}#host{height:100vh}</style>
 </head><body><main id="host"></main><script>
@@ -201,7 +202,7 @@ try {
     await page.waitForFunction(() => document.activeElement?.dataset.correoAction === "delete-message");
     assert.equal(await page.evaluate(() => fixtureWrites.length), 0);
     await page.locator(action("delete-message")).click();
-    await page.locator(".correo-confirm-backdrop").evaluate((node) => node.click());
+    await page.locator("[data-correo-modal-root] [data-modal-overlay='true']").evaluate((node) => node.click());
     await waitClosed();
     await page.locator(action("delete-message")).click();
     await page.locator(action("confirm-accept")).evaluate((node) => { node.click(); node.click(); });

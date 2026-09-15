@@ -1,5 +1,5 @@
 import { createModalLifecycle, restoreModalFocus as restoreSharedModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
-import { renderModalContent } from "../../features/entity-overlay/modal-host.js";
+import { MODAL_SHELL_SELECTORS, renderModalContent } from "../../features/entity-overlay/modal-host.js";
 /* =========================================================
    Onion Support - Correo View
    Archivo: /src/views/correo/index.js
@@ -642,8 +642,9 @@ function createCorreoController(host, context = {}) {
   }
 
   const modalLifecycle = createModalLifecycle({
-    getPanel: () => host.querySelector('[data-correo-modal-root] [role="dialog"], [data-correo-modal-root] [role="alertdialog"]'),
+    getPanel: () => host.querySelector(`[data-correo-modal-root] ${MODAL_SHELL_SELECTORS.panel}`),
     onEscape: () => confirmResolver ? closeConfirm(false) : closeModal(),
+    onBackdrop: () => confirmResolver ? closeConfirm(false) : closeModal(),
     onDetached: () => { if (confirmResolver) closeConfirm(false); },
     bodyClasses: ['correo-modal-open'],
   });

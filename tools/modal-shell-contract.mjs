@@ -33,10 +33,6 @@ const pendingShell = (file, until) => ({ kind: "shell", file, until });
 const fixedLayer = (file, reason) => ({ kind: "layer", file, reason });
 const FIXED_INVENTORY = new Map([
   // dialog shells pending migration
-  [".correo-modal-backdrop", pendingShell("src/css/views/correo/index.css", "correo-shell")],
-  [".correo-compose", pendingShell("src/css/views/correo/index.css", "correo-shell")],
-  [".correo-confirm-overlay", pendingShell("src/css/views/correo/index.css", "correo-shell")],
-  [".correo-signature-dialog", pendingShell("src/css/views/correo/index.css", "correo-shell")],
   [".incidencias-media-viewer", pendingShell("src/css/views/incidencias/media-preview.core.css", "media-viewer-review")],
   [".ui-overlay", pendingShell("src/css/components/ui.css", "ui-legacy-overlay-removal")],
   [".ui-drawer", pendingShell("src/css/components/ui.css", "ui-legacy-overlay-removal")],
@@ -87,6 +83,7 @@ const SHELL_CONSUMERS = [
   "src/views/clientes/clientes.template.modal.js",
   "src/views/facturas/index.js",
   "src/features/facturas-paid-confirm/index.js",
+  "src/views/correo/correo.template.js",
 ];
 
 const STRUCTURAL_CLASS = /\.ui-detail-modal-(?:root|overlay|panel|header|body|footer|close-btn)\b/u;

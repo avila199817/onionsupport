@@ -1,5 +1,6 @@
 import { avatarInitials as initials, resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { cleanText, escapeHtml } from "../../core/presentation-text.js";
+import { renderModalCloseButton, renderModalShell } from "../../features/entity-overlay/modal-host.js";
 export { escapeHtml };
 
 /* =========================================================
@@ -404,13 +405,15 @@ export function renderSignatureModal(input = {}) {
   const raw = String(input.text ?? "").replace(/\r\n?/g, "\n").slice(0, 4000);
   const enabled = input.enabled !== false;
   const preview = raw.trim() || "Tu firma aparecerá aquí cuando la guardes.";
-  return `
-    <div class="correo-modal-backdrop" data-correo-action="close-modal"></div>
-    <section class="correo-signature-dialog" role="dialog" aria-modal="true" aria-labelledby="correo-signature-title" data-correo-signature-dialog tabindex="-1">
-      <header class="correo-signature-header">
-        <div><p class="correo-kicker">Personalización</p><h2 id="correo-signature-title">Firma de correo</h2></div>
-        <button class="correo-icon-btn" type="button" data-correo-action="close-modal" aria-label="Cerrar">${icon("close")}</button>
-      </header>
+  return renderModalShell({
+    rootClass: "correo-signature-root",
+    panelAttributes: { "data-correo-signature-dialog": "" },
+    labelledBy: "correo-signature-title",
+    size: "compact",
+    height: "auto",
+    header: `<div class="correo-signature-copy"><p class="correo-kicker">Personalización</p><h2 id="correo-signature-title">Firma de correo</h2></div>${renderModalCloseButton({ label: "Cerrar", attributes: { "data-correo-action": "close-modal" } })}`,
+    bodyClass: "correo-signature-body",
+    body: `
       <form class="correo-signature-form" data-correo-signature-form>
         <p class="correo-signature-help">Se guarda para este usuario de Onion Support y se inserta como texto seguro al redactar desde esta vista.</p>
         <label class="correo-signature-field"><span>Tu firma</span><textarea name="signature" maxlength="4000" rows="7" data-correo-signature-input placeholder="Nombre, cargo, empresa, teléfono…">${escapeHtml(raw)}</textarea></label>
@@ -421,7 +424,8 @@ export function renderSignatureModal(input = {}) {
         <div class="correo-signature-preview"><span>Vista previa</span><div data-correo-signature-preview>${escapeHtml(preview)}</div></div>
         <footer class="correo-signature-actions"><button class="correo-btn" type="button" data-correo-action="close-modal">Cancelar</button><button class="correo-btn correo-btn--primary" type="submit">Guardar firma</button></footer>
       </form>
-    </section>`;
+    `,
+  });
 }
 
 export function renderComposeModal(input = {}) {
@@ -441,10 +445,13 @@ export function renderComposeModal(input = {}) {
   const subject = cleanText(input.subject, "");
   const fullFields = !isReply;
   const canAttach = mode === "compose" || isDraftEdit;
-  return `
-    <div class="correo-modal-backdrop" data-correo-action="close-modal"></div>
-    <section class="correo-compose" role="dialog" aria-modal="true" aria-labelledby="correo-compose-title">
-      <header class="correo-compose-header"><h2 id="correo-compose-title">${escapeHtml(title)}</h2><button class="correo-icon-btn" type="button" data-correo-action="close-modal" aria-label="Cerrar">${icon("close")}</button></header>
+  return renderModalShell({
+    rootClass: "correo-compose-root",
+    panelAttributes: { "data-correo-compose-dialog": "" },
+    labelledBy: "correo-compose-title",
+    header: `<h2 id="correo-compose-title" class="correo-compose-title">${escapeHtml(title)}</h2>${renderModalCloseButton({ label: "Cerrar", attributes: { "data-correo-action": "close-modal" } })}`,
+    bodyClass: "correo-compose-body",
+    body: `
       <form class="correo-compose-form" data-correo-compose-form data-correo-compose-mode="${attr(mode)}" data-correo-message-id="${attr(input.messageId || "")}">
         <div class="correo-compose-fields">
           ${fullFields ? `<label class="correo-field correo-field--line"><span>Para</span><input name="to" type="text" inputmode="email" autocomplete="email" placeholder="nombre@empresa.com" value="${attr(to)}" required></label><label class="correo-field correo-field--line"><span>Cc</span><input name="cc" type="text" inputmode="email" autocomplete="off" placeholder="Opcional" value="${attr(cc)}"></label>${isForward ? "" : `<label class="correo-field correo-field--line"><span>Asunto</span><input name="subject" type="text" maxlength="998" placeholder="Agregar asunto" value="${attr(subject)}"></label>`}` : ""}
@@ -453,7 +460,8 @@ export function renderComposeModal(input = {}) {
         ${canAttach ? `<div class="correo-compose-attachments"><label class="correo-file-picker"><input type="file" name="attachments" multiple data-correo-attachments-input><span>${icon("paperclip")} Adjuntar</span></label><small data-correo-file-summary>${isDraftEdit ? "Los adjuntos existentes se conservan · añade otros si hace falta" : "Sin adjuntos"}</small></div>` : ""}
         <footer class="correo-compose-footer"><span class="correo-compose-status" data-correo-compose-status role="status" aria-live="polite"></span><div>${mode === "compose" || isDraftEdit ? `<button class="correo-btn" type="button" data-correo-action="save-draft">${isDraftEdit ? "Guardar cambios" : "Guardar borrador"}</button>` : ""}<button class="correo-btn correo-btn--primary" type="submit">${icon("send")}<span>${isReply ? "Enviar" : isForward ? "Reenviar" : isDraftEdit ? "Enviar borrador" : "Enviar"}</span></button></div></footer>
       </form>
-    </section>`;
+    `,
+  });
 }
 
 export function renderConfirmModal(input = {}) {
@@ -463,15 +471,19 @@ export function renderConfirmModal(input = {}) {
   const title = cleanText(input.title, "¿Confirmar acción?");
   const message = cleanText(input.message, "Revisa la acción antes de continuar.");
   const confirmLabel = cleanText(input.confirmLabel, danger ? "Confirmar" : "Continuar");
-  return `
-    <div class="correo-confirm-overlay">
-      <div class="correo-confirm-backdrop" data-correo-action="confirm-cancel" aria-hidden="true"></div>
-      <section class="correo-confirm-dialog${danger ? " is-danger" : ""}" role="alertdialog" aria-modal="true" aria-labelledby="correo-confirm-title" aria-describedby="correo-confirm-description" tabindex="-1" data-correo-confirm-dialog>
-        <span class="correo-confirm-icon" aria-hidden="true">${icon(iconName)}</span>
-        <div class="correo-confirm-copy"><span class="correo-confirm-eyebrow">${escapeHtml(eyebrow)}</span><h3 id="correo-confirm-title">${escapeHtml(title)}</h3><p id="correo-confirm-description">${escapeHtml(message)}</p></div>
-        <div class="correo-confirm-actions"><button class="correo-btn" type="button" data-correo-action="confirm-cancel">Cancelar</button><button class="correo-btn ${danger ? "correo-btn--danger" : "correo-btn--primary"}" type="button" data-correo-action="confirm-accept">${escapeHtml(confirmLabel)}</button></div>
-      </section>
-    </div>`;
+  return renderModalShell({
+    rootClass: `correo-confirm-root${danger ? " is-danger" : ""}`,
+    panelAttributes: { "data-correo-confirm-dialog": "" },
+    role: "alertdialog",
+    labelledBy: "correo-confirm-title",
+    describedBy: "correo-confirm-description",
+    size: "confirm",
+    height: "auto",
+    header: `<div class="correo-confirm-copy"><span class="correo-confirm-eyebrow">${escapeHtml(eyebrow)}</span><h3 id="correo-confirm-title">${escapeHtml(title)}</h3></div>`,
+    bodyClass: "correo-confirm-body",
+    body: `<span class="correo-confirm-icon" aria-hidden="true">${icon(iconName)}</span><p id="correo-confirm-description" class="correo-confirm-message">${escapeHtml(message)}</p>`,
+    footer: `<button class="correo-btn" type="button" data-correo-action="confirm-cancel">Cancelar</button><button class="correo-btn ${danger ? "correo-btn--danger" : "correo-btn--primary"}" type="button" data-correo-action="confirm-accept">${escapeHtml(confirmLabel)}</button>`,
+  });
 }
 
 export function renderMoveMenu(folders = [], currentFolderId = "") {

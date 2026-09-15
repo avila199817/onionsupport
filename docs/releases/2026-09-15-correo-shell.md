@@ -1,0 +1,17 @@
+# Correo sobre el shell canónico · 2026-09-15
+
+## Qué cambia
+
+- `src/views/correo/correo.template.js`: las tres superficies del área de correo se renderizan con `renderModalShell` dentro del host inline de la ruta (`[data-correo-modal-root]`, sin portal propio): la redacción (ventana de 840 × 650 px con título en el header y el formulario ocupando el body, cuyo textarea sigue creciendo hasta llenar la ventana), la firma (tamaño `compact`, altura `auto`, formulario en el body) y la confirmación (`role="alertdialog"`, tamaño `confirm`, altura `auto`, eyebrow y título en el header, icono y mensaje en el body, Cancelar y la acción en el slot `footer`). El botón cerrar es el del shell con la acción `close-modal`; desaparecen los `div` de backdrop clicables (`correo-modal-backdrop`, `correo-confirm-backdrop`). Identidad conservada: `data-correo-signature-dialog`, `data-correo-confirm-dialog`, ids de títulos y descripción, formularios y acciones `data-correo-action`; la redacción gana `data-correo-compose-dialog`.
+- `src/views/correo/index.js`: el lifecycle localiza el panel por `MODAL_SHELL_SELECTORS.panel` y recibe el click exterior por `onBackdrop` con la misma política que Escape (cancela la confirmación pendiente o cierra el modal).
+- CSS: `views/correo/index.css` 1532 → 1432 líneas. Fuera `correo-modal-backdrop`, `correo-compose` (ventana fija con `z-index` 9999 anclada arriba), `correo-compose-header`, `correo-signature-dialog`, `correo-signature-header`, `correo-confirm-overlay`, `correo-confirm-backdrop`, `correo-confirm-dialog`, `correo-confirm-actions` y sus variantes responsive y de tema claro. La geometría de la ventana de redacción y la paleta de redacción y firma (oscura por defecto, clara en tema claro, exactamente los mismos valores que tenían) se declaran como tokens `--ui-detail-modal-*` y `--surface-2` en las clases raíz `correo-compose-root` y `correo-signature-root`; la confirmación sigue el tema del shell como antes seguía `--correo-panel`. Normalizaciones visibles: la redacción queda centrada en lugar de anclada a 72–94 px del borde superior; la firma pasa de 620 a 720 px (tamaño `compact`); en móvil las tres ocupan la pantalla como el resto de diálogos.
+
+## Contratos
+
+- `tools/modal-shell-contract.mjs`: `correo.template.js` entra en `SHELL_CONSUMERS` (11); el inventario de shells históricos baja de 7 a 3 (unidad `correo-shell` cerrada).
+- `correo_integrity.py`: exige `renderModalShell(` y `role: "alertdialog"` en la plantilla y las clases de contenido del shell (`correo-confirm-body`, `correo-confirm-icon`, `correo-confirm-message`, `correo-signature-root`) en el CSS.
+- `tools/correo-modal-browser-contract.mjs`: el fixture carga la autoridad `components/detail-modal.css` (las superficies dependen del shell) y el cierre por click exterior se ejerce sobre el overlay del shell. Comportamiento verificado con sus 8 escenarios (host inline, ciclo de Tab, foco de retorno, respuesta/reenvío/borrador, firma, confirmaciones de borrado y desconexión, destrucción con confirmación pendiente y petición ocupada), `ui_loading_browser_contract`, `modal_authority_contract`, `repo_integrity`, `private_css_authority_contract`. Capturas sobre el fixture con el shell: redacción 840 × 650 con el textarea de 343 px llenando la ventana, firma 720 px, confirmación 520 px.
+
+## Siguiente
+
+Visor multimedia de Incidencias, capas legacy de `ui.css` y el override del perfil de técnico; después la unidad de contenido de los detalles.

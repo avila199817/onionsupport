@@ -725,6 +725,20 @@ function authErrorMessage(error = null) {
     ""
   ).toUpperCase();
 
+  if (status === 423 || code.includes("LOCKED")) {
+    const lockUntil = Number(
+      error?.payload?.lockUntil ||
+        error?.data?.lockUntil ||
+        Date.parse(error?.payload?.lockUntilIso || "") ||
+        0
+    );
+    const minutes = Math.max(1, Math.ceil((lockUntil - Date.now()) / 60000));
+    const wait = Number.isFinite(lockUntil) && lockUntil > Date.now()
+      ? ` Podrás volver a intentarlo en ${minutes} ${minutes === 1 ? "minuto" : "minutos"}.`
+      : " Espera unos minutos antes de volver a intentarlo.";
+    return `La cuenta está bloqueada temporalmente por varios intentos fallidos.${wait}`;
+  }
+
   if (
     status === 401 ||
     code.includes("INVALID") ||

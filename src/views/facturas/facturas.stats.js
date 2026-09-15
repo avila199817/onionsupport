@@ -22,6 +22,7 @@ export function selectFacturasStats(input = {}) {
   const result = { total: exactTotal(source, ["invoiceCount", "countTotal", "totalCount", "count", "total"]) };
   for (const [name, aliases] of Object.entries(fields)) result[name] = declaredMetric(source, aliases);
   for (const [name, aliases] of Object.entries(counts)) result[name] = exactTotal(source, aliases);
+  result.truncated = source.truncated === true;
   result.totalPendiente = declaredMetric(source, ["outstandingAmount", "outstandingTotal"]);
   if (!Object.hasOwn(source, "outstandingAmount") && !Object.hasOwn(source, "outstandingTotal") && result.pendingAmount !== null && result.totalVencido !== null) {
     result.totalPendiente = result.pendingAmount + result.totalVencido;

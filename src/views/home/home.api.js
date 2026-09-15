@@ -436,6 +436,13 @@ async function loadFacturasForHome(options = {}) {
   if (statsResult.status === "rejected") {
     warnings.push(normalizeError("facturas_stats", statsResult.reason));
   }
+  if (statsResult.status === "fulfilled" && stats.truncated === true) {
+    // The backend bounded its scan: the totals are real but partial.
+    warnings.push(normalizeError("facturas_stats", {
+      message: `Facturación global parcial: el backend contabilizó solo los primeros ${stats.documentsLimit || "N"} documentos.`,
+      code: "FACTURAS_STATS_TRUNCATED",
+    }));
+  }
 
   return {
     ...collection,

@@ -162,6 +162,54 @@ function writeCoreState(patch = {}) {
   return false;
 }
 function installHttp() { try { Http.install?.(AppCore); } catch {} return Http; }
+/*
+  Almacenamiento local por cuenta. Claves de cuenta (cachés, preferencias y
+  borradores por propietario) frente a claves de dispositivo (tema, idioma,
+  consentimiento), que nunca se tocan. El kernel invoca onSessionInvalidated
+  en cada cambio de ámbito de sesión (también en las limpiezas que hace
+  core/http.js): al salir o cambiar la identidad se purgan las claves de la
+  cuenta anterior. La pista de dispositivo anónimo evita llamar a
+  /auth/refresh en cada carga pública cuando ya consta que no hay sesión.
+  Código deliberadamente compacto: forma parte del cierre estático de auth
+  (techo medido en tools/invoice-api-split-dist-contract.mjs).
+*/
+export const ACCOUNT_SCOPED_PREFIXES = ["onion.support.", "onion.correo.", "onion.topbar."];
+export const ANONYMOUS_DEVICE_HINT_KEY = "onion.auth.anon-device.v1";
+function accountStorage() {
+  try { return (sessionState.accountStorage ? sessionState.accountStorage() : globalThis.window?.localStorage) || null; } catch { return null; }
+}
+function purgeAccountStorage() {
+  const storage = accountStorage();
+  if (!storage) return false;
+  try {
+    for (let index = storage.length - 1; index >= 0; index -= 1) {
+      const key = storage.key(index);
+      if (ACCOUNT_SCOPED_PREFIXES.some((prefix) => String(key ?? "").startsWith(prefix))) storage.removeItem(key);
+    }
+    return true;
+  } catch { return false; }
+}
+function anonymousDevice(action = "get") {
+  const storage = accountStorage();
+  if (!storage) return false;
+  try {
+    if (action === "set") { storage.setItem(ANONYMOUS_DEVICE_HINT_KEY, "1"); return true; }
+    if (action === "clear") { storage.removeItem(ANONYMOUS_DEVICE_HINT_KEY); return true; }
+    return storage.getItem(ANONYMOUS_DEVICE_HINT_KEY) === "1";
+  } catch { return false; }
+}
+const markAnonymousDevice = () => anonymousDevice("set");
+const isAnonymousDeviceHinted = () => anonymousDevice("get");
+let sessionOwnerId = null;
+function onSessionInvalidated() {
+  const user = runtimeUser(coreState());
+  const ownerId = user?.userId || user?.id || null;
+  if (ownerId === sessionOwnerId) return;
+  const previousOwnerId = sessionOwnerId;
+  sessionOwnerId = ownerId;
+  if (previousOwnerId) purgeAccountStorage();
+  if (ownerId) anonymousDevice("clear");
+}
 function isRefreshableAuthError(error = null) { try { return Http.isRefreshableAuthError?.(error) === true; } catch { return false; } }
 function shouldClearSessionForAuthError(error = null) { try { return Http.shouldClearSessionForAuthError?.(error) === true; } catch { return false; } }
 function isHttpAuthError(error = null) {
@@ -447,7 +495,7 @@ function getAuthModuleSnapshot() {
       lastMeAt: sessionState.lastMeAt, lastLogoutAt: sessionState.lastLogoutAt, lastError: sessionState.lastError,
     }),
     selectors: Object.freeze({ ...selectorMetrics }),
-    policy: Object.freeze({ runtimeStateZeroCopyRead: true, singleReadSelectors: true, lazyHttpTokenFallback: false, runtimeStateSingleWrite: true, publicUserIsolation: true, publicSessionIsolation: true, httpOnlyRefreshToken: true, remoteLogoutFailClosed: true, expiredAccessTokenLogoutRefreshRetry: true }),
+    policy: Object.freeze({ singleReadSelectors: true, lazyHttpTokenFallback: false }),
   });
 }
 function shouldAttemptRefresh(options = {}) {
@@ -514,7 +562,7 @@ async function refreshSession(options = {}) {
       sessionState.lastError = null; sessionState.lastRefreshAt = Date.now(); return result;
     } catch (error) {
       sessionState.lastError = safeError(error, "refresh");
-      if (flowIsCurrent(generation) && shouldClearSessionForAuthError(error)) clearSession();
+      if (flowIsCurrent(generation) && shouldClearSessionForAuthError(error)) { clearSession(); markAnonymousDevice(); }
       throw error;
     } finally { sessionState.refreshing = false; sessionState.refreshPromise = null; flow.cleanup(); }
   })();
@@ -525,6 +573,13 @@ async function restoreSession(options = {}) {
   const generation = currentGeneration(); sessionState.restoring = true;
   sessionState.restorePromise = (async () => {
     try {
+      /*
+        Cede el hilo antes de cualquier retorno síncrono: si el cuerpo resolviera
+        sin await, el finally anularía restorePromise ANTES de la asignación y
+        quedaría una promesa resuelta y obsoleta que respondería a todas las
+        restauraciones posteriores.
+      */
+      await null;
       if (isAuthenticated()) { sessionState.lastError = null; return getPublicAuthResult(); }
       if (hasValidToken()) {
         try { return await fetchMe({ ...options, noAutoRefresh: true, source: "Auth.restoreSession.me" }); }
@@ -539,6 +594,16 @@ async function restoreSession(options = {}) {
       if (!shouldAttemptRefresh(options)) {
         sessionState.lastError = null;
         return getPublicAuthResult({ ok: false, skippedRefresh: true, reason: "refresh-not-requested" });
+      }
+      /*
+        Dispositivo anónimo: un refresh anterior ya demostró que no hay sesión
+        restaurable (401 definitivo o logout). Las cargas públicas no vuelven a
+        llamar a /auth/refresh hasta que una identidad autenticada reaparezca
+        (el kernel borra la pista) o el llamante fuerce la restauración.
+      */
+      if (!hasValidToken() && options.forceRefresh !== true && options.forceRestore !== true && isAnonymousDeviceHinted()) {
+        sessionState.lastError = null;
+        return getPublicAuthResult({ ok: false, skippedRefresh: true, reason: "anonymous-device" });
       }
       try {
         const result = await refreshSession({ ...options, source: "Auth.restoreSession.refresh" });
@@ -580,6 +645,7 @@ async function logout(options = {}) {
       }
 
       clearSession({ invalidate: false });
+      markAnonymousDevice();
       sessionState.lastError = null;
       sessionState.lastLogoutAt = Date.now();
 
@@ -592,6 +658,7 @@ async function logout(options = {}) {
       */
       if (shouldClearSessionForAuthError(error)) {
         clearSession({ invalidate: false });
+        markAnonymousDevice();
         sessionState.lastError = null;
         sessionState.lastLogoutAt = Date.now();
         return true;
@@ -635,14 +702,14 @@ export const Auth = {
   init, login, logout, restoreSession, refreshSession, fetchMe, me: fetchMe,
   getUser, getCurrentUser, getProfile, getSession, getCurrentSession,
   getToken, getAccessToken, getRefreshToken, hasValidToken, hasRefreshToken, isAuthenticated,
-  getRole, getRoles, getCurrentRole: getRole, getCurrentRoles: getRoles, getPermissions,
-  isAdmin, isCurrentUserAdmin: isAdmin, hasRole, requireRole,
+  getRole, getRoles, getCurrentRole: getRole, getPermissions,
+  isAdmin, hasRole, requireRole,
   normalizeUser, normalizeAuthPayload,
   getUserSlug, buildUserHomePath, buildUserHomePathFromSlug, getDefaultHome, getPostLoginTarget,
-  applySession, clearSession, syncAuthState, getAuthHeader,
+  applySession, clearSession, syncAuthState, getAuthHeader, onSessionInvalidated,
   activateAccount, validateActivationToken, requestPasswordReset, confirmResetPassword, validateResetPasswordToken,
   getSelectorStats,
-  getAuthModuleSnapshot, getSnapshot: getAuthModuleSnapshot, getDebugSnapshot: getAuthModuleSnapshot, snapshot: getAuthModuleSnapshot,
+  getAuthModuleSnapshot, getSnapshot: getAuthModuleSnapshot,
 };
 
 export default Auth;

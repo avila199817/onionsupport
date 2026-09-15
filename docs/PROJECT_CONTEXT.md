@@ -191,16 +191,27 @@ Home privada:
 Rutas privadas principales:
 
 - `/incidencias`
+- `/agenda`
 - `/facturas`
 - `/clientes`
 - `/usuarios`
+- `/empleados`
+- `/whatsapp`
 - `/correo`
 - `/servidor`
 - `/cuenta`
 
 `/ajustes` existe sólo como alias legacy y resuelve `Cuenta`. No existe una segunda vista Ajustes.
 
-Admin-only: Clientes, Usuarios, Correo y Servidor. El sidebar controla visibilidad; el Router sigue siendo autoridad de acceso en frontend y el backend es la autoridad final.
+Admin-only: Clientes, Usuarios, Empleados, WhatsApp, Correo y Servidor. El sidebar controla visibilidad; el Router sigue siendo autoridad de acceso en frontend y el backend es la autoridad final.
+
+Tres rutas privadas tienen un respaldo distinto y se documentan explícitamente (corte 2026-09-15):
+
+| Ruta | Rol | Respaldo backend | Estado |
+| --- | --- | --- | --- |
+| `/agenda` | `admin` y `user` | Ninguno: calendario mensual local, sin HTTP ni storage (`src/views/agenda/index.js`). | Superficie preparada para citas futuras; su visibilidad para `user` es una decisión de producto pendiente del propietario. |
+| `/empleados` | `admin` | API de usuarios (`loadUsuarioDetail`, plantilla y modal canónicos de Usuarios). | Productiva; muestra el equipo interno actual (el administrador autenticado). |
+| `/whatsapp` | `admin` | `whatsapp.api.js` → API WhatsApp Cloud del backend (`oniontech/docs/WHATSAPP_CLOUD_API.md`). | Productiva; bandeja con sondeo acotado mientras la vista vive. |
 
 ## 6. App Chrome
 
@@ -385,13 +396,19 @@ No persistir:
 - credenciales Microsoft;
 - snapshots de seguridad.
 
+Ámbito de las claves (autoridad `src/features/auth/index.js`, contrato `tools/account-storage-scope-contract.mjs`, desde 2026-09-15):
+
+- **Cuenta** (`onion.support.*`, `onion.correo.*`, `onion.topbar.*`): cachés, preferencias y borradores por propietario. El módulo `auth` (registrado en el kernel) recibe `onSessionInvalidated` en cada cambio de ámbito de sesión, también en las limpiezas que hace `core/http.js`, y purga esas claves cuando la identidad autenticada abandona el dispositivo (logout, sesión revocada o expirada) o cambia de cuenta. El kernel no cambia: los cierres estáticos de arranque conservan sus techos (`tools/invoice-api-split-dist-contract.mjs`). Cualquier clave nueva por cuenta debe usar uno de esos prefijos.
+- **Dispositivo** (`onion.ui.themeMode`, `onion.ui.locale`, `onion_google_consent_v2`): preferencias de interfaz y consentimiento; nunca se purgan.
+- **Pista de dispositivo anónimo** (`onion.auth.anon-device.v1`): se fija cuando un refresh devuelve un 401 definitivo o tras un logout confirmado; mientras exista, `Auth.restoreSession` no llama a `/auth/refresh` en las cargas públicas (`reason: "anonymous-device"`). Una identidad autenticada la borra (mismo callback del kernel); `forceRefresh`/`forceRestore` la ignoran.
+
 La política objetivo es persistir únicamente preferencias justificadas y minimizar los datos privados. El código actual todavía contiene excepciones que requieren una entrega específica:
 
 | Consumidor observado | Persistencia presente | Trabajo pendiente |
 | --- | --- | --- |
 | `src/views/clientes/clientes.api.js` | Página y detalle en memoria; caché persistente de dataset deshabilitada. | Verificar aislamiento y borrado entre sesiones; no queda una segunda ruta de compatibilidad de API. |
-| `src/views/usuarios/usuarios.api.js` | Caché proyectada de usuarios con identidad, contacto y metadatos de cuenta/seguridad; no es un almacén de tokens | Aplicar la misma revisión y reducir los campos persistidos; su TTL de frescura no prueba borrado físico. |
-| `src/views/correo/index.js` | Preferencias de notificación/buzón y firma, además de caché de mensajes en memoria | Comprobar necesidad, alcance por propietario y limpieza al cambiar de cuenta. |
+| `src/views/usuarios/usuarios.api.js` | Caché proyectada de usuarios con identidad, contacto y metadatos de cuenta/seguridad; no es un almacén de tokens | Reducir los campos persistidos; el borrado físico al cerrar sesión o cambiar de cuenta lo garantiza el kernel (prefijo `onion.support.`). |
+| `src/views/correo/index.js` | Preferencias de notificación/buzón y firma, además de caché de mensajes en memoria | Comprobar necesidad y alcance por propietario; la limpieza al cerrar sesión o cambiar de cuenta la garantiza el kernel (prefijo `onion.correo.`). |
 | `src/views/cuenta/index.js` | Preferencias de tema e idioma | Mantener el contrato de preferencias y evitar que absorba datos de sesión. |
 
 Esta revisión de fuente no demuestra una fuga entre usuarios ni certifica su ausencia. La validación vertical debe comprobar los límites con cuentas de prueba y aportar evidencia antes de modificar la política.

@@ -12,6 +12,8 @@
 
 import Http from "../../core/http.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 
 export const WHATSAPP_API_VERSION =
   "whatsapp.api.v1.onion-backend-authority";
@@ -26,18 +28,6 @@ export const WHATSAPP_REQUEST_TIMEOUT_MS = 15_000;
 export const WHATSAPP_MAX_TEXT_LENGTH = 4096;
 export const WHATSAPP_CONVERSATION_LIMIT = 100;
 export const WHATSAPP_MESSAGE_LIMIT = 200;
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
 
 function cleanMessageText(value = "", fallback = "", max = 4096) {
   const text = cleanText(String(value ?? "").replace(/[\u0000-\u001f\u007f]/g, " "), fallback);

@@ -15,6 +15,8 @@ import { resolveAvatarPresentation, synchronizeAvatars } from "../../features/av
 import { renderFacturasCreateModal } from "./facturas.template.create.js";
 import { renderFacturasDetailModal } from "./facturas.template.modal.js";
 import { selectFacturasStats } from "./facturas.stats.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 
 export const FACTURAS_TEMPLATE_VERSION =
   "facturas.template.private.v7.admin-visual-parity";
@@ -62,10 +64,6 @@ const SORT_OPTIONS = Object.freeze([
 /* =========================================================
    BASICS
 ========================================================= */
-
-const isObject = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
-const safeObject = (value, fallback = {}) => (isObject(value) ? value : fallback);
-const safeArray = (value) => (Array.isArray(value) ? value : []);
 
 function first(...values) {
   for (const value of values) {

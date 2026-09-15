@@ -1,6 +1,8 @@
 
 import { cleanText as safeText } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 /* =========================================================
    Onion Support - Servidor Template
    Archivo: /src/views/server/server.template.js
@@ -63,29 +65,6 @@ const HEALTH_CONTRACT_ORDER = Object.freeze([
 /* =========================================================
    SAFE HELPERS
 ========================================================= */
-
-function isObject(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-  );
-}
-
-function safeObject(
-  value,
-  fallback = {}
-) {
-  return isObject(value)
-    ? value
-    : fallback;
-}
-
-function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
-}
 
 
 

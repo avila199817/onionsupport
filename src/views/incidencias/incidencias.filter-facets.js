@@ -14,6 +14,8 @@ import {
 } from "./incidencias.priority-policy.js";
 import { exactCount, exactTotal } from "../../core/statistics.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 
 export const INCIDENCIAS_FILTER_FACETS_VERSION =
   "incidencias.filter-facets.v2-priority-truth";
@@ -24,16 +26,6 @@ export const INCIDENCIAS_FILTER_FACET_KEYS = Object.freeze([
   "closed",
   "urgent",
 ]);
-
-function object(value = null) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : {};
-}
-
-function array(value = null) {
-  return Array.isArray(value) ? value : [];
-}
 
 function number(value = 0, fallback = 0) {
   const parsed = Number(value);
@@ -87,8 +79,8 @@ export function getIncidenciasFacetRequestQuery(
 }
 
 export function getIncidenciasFacetTotal(response = {}, fallback = 0) {
-  const source = object(response);
-  const rows = array(source.items);
+  const source = safeObject(response);
+  const rows = safeArray(source.items);
   return Math.max(rows.length, exactTotal(source) ?? exactCount(fallback) ?? rows.length);
 }
 
@@ -96,8 +88,8 @@ export function mergeIncidenciasFacetStats(
   universeStats = {},
   counts = {}
 ) {
-  const stats = object(universeStats);
-  const facets = object(counts);
+  const stats = safeObject(universeStats);
+  const facets = safeObject(counts);
 
   return Object.freeze({
     ...stats,
@@ -115,10 +107,10 @@ export function buildIncidenciasFilterFacetPresentation(
     universeLoaded = null,
   } = {}
 ) {
-  const source = object(responses);
-  const fallback = object(universeStats);
-  const allResponse = object(source.all);
-  const allItems = array(allResponse.items);
+  const source = safeObject(responses);
+  const fallback = safeObject(universeStats);
+  const allResponse = safeObject(source.all);
+  const allItems = safeArray(allResponse.items);
   const loaded = universeLoaded === null
     ? allItems.length
     : Math.max(0, Math.trunc(number(universeLoaded, allItems.length)));
@@ -153,9 +145,9 @@ export function reconcileIncidenciasFilterFacetPresentation(
   facet = "all",
   response = {}
 ) {
-  const current = object(presentation);
+  const current = safeObject(presentation);
   const key = normalizeIncidenciasFilterFacet(facet);
-  const currentCounts = object(current.counts);
+  const currentCounts = safeObject(current.counts);
   const exact = current.exact === true && exactTotal(response) !== null;
   const counts = exact ? Object.freeze({
     ...currentCounts,
@@ -163,7 +155,7 @@ export function reconcileIncidenciasFilterFacetPresentation(
       response,
       currentCounts[key]
     ),
-  }) : object(current.loadedCounts);
+  }) : safeObject(current.loadedCounts);
 
   return Object.freeze({
     ...current,

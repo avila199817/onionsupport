@@ -39,6 +39,7 @@ import {
 import { onDomainChanged } from "../../core/domain-events.js";
 import { captureUserProfileScope, isUserProfileScopeCurrent } from "../../features/user-profile/index.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject, safeObject } from "../../core/objects.js";
 
 export const CUENTA_INDEX_VERSION =
   "cuenta.index.productivo.v8.canonical-surface";
@@ -70,16 +71,8 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
 function isDomNode(value) {
   return Boolean(value && value.nodeType === 1 && typeof value.querySelector === "function");
-}
-
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
 }
 
 function first(...values) {

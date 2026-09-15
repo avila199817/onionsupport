@@ -1,5 +1,9 @@
 import { cleanText } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
+import { isObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
+
+export { isObject, safeArray };
 export { cleanText, escapeHtml };
 
 /* =========================================================
@@ -115,14 +119,6 @@ const MONEY_FORMATTERS = new Map();
 /* =========================================================
    BASICS
 ========================================================= */
-
-export function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-export function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
 
 export function first(...values) {
   for (const value of values) {

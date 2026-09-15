@@ -29,6 +29,7 @@ import {
   hideLoader,
 } from "./loader.js";
 import { cleanText } from "../core/presentation-text.js";
+import { isObject } from "../core/objects.js";
 
 export const APP_VERSION =
   "app.minimal.v9-public-session-handoff";
@@ -107,14 +108,6 @@ function isBrowser() {
   return (
     typeof window !== "undefined" &&
     typeof document !== "undefined"
-  );
-}
-
-function isObject(value) {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
   );
 }
 

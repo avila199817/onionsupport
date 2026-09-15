@@ -29,6 +29,7 @@ import {
   synchronizeAvatars,
 } from "../avatar-system/index.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { safeObject } from "../../core/objects.js";
 
 export const INCIDENCIAS_TECHNICIAN_PROFILE_VERSION =
   "incidencias-technician-profile.v9-public-metrics-rating-ready";
@@ -96,11 +97,6 @@ const modalLifecycle = createModalLifecycle({
 
 const browser = () =>
   typeof window !== "undefined" && typeof document !== "undefined";
-
-const object = (value, fallback = {}) =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : fallback;
 
 function first(...values) {
   for (const value of values) {
@@ -225,9 +221,9 @@ function ratingLabel(value = 0) {
 }
 
 function technicianFromTicket(ticket = {}) {
-  const raw = object(ticket);
-  const assignment = object(raw.assignment);
-  const nested = object(first(
+  const raw = safeObject(ticket);
+  const assignment = safeObject(raw.assignment);
+  const nested = safeObject(first(
     raw.assignedTo,
     raw.technician,
     raw.tecnico,
@@ -358,7 +354,7 @@ export function publicTechnicianProfileFor(tech = {}) {
 }
 
 function mergeTechnician(snapshot = {}, user = {}) {
-  const candidate = object(user);
+  const candidate = safeObject(user);
   const candidateId = cleanText(first(
     candidate.userId,
     candidate.usuarioId,
@@ -371,7 +367,7 @@ function mergeTechnician(snapshot = {}, user = {}) {
   const source = snapshot.userId && candidateId && normalizeAvatarUserId(snapshot.userId) !== normalizeAvatarUserId(candidateId)
     ? {}
     : candidate;
-  const raw = object(source.raw);
+  const raw = safeObject(source.raw);
   const avatar = firstDefined(
     source.avatarUrl,
     source.avatar,
@@ -466,8 +462,8 @@ function metricScopeKey(value = "") {
 }
 
 function aggregateScopeIsPublic(response = {}) {
-  const summary = object(response.summary);
-  const meta = object(response.meta);
+  const summary = safeObject(response.summary);
+  const meta = safeObject(response.meta);
   const markers = [
     summary.scope,
     summary.visibility,
@@ -491,9 +487,9 @@ function aggregateScopeIsPublic(response = {}) {
 }
 
 function resolvedCountFromSummary(response = {}) {
-  const summary = object(response.summary);
-  const meta = object(response.meta);
-  const technicianSummary = object(first(
+  const summary = safeObject(response.summary);
+  const meta = safeObject(response.meta);
+  const technicianSummary = safeObject(first(
     summary.technician,
     summary.technicianStats,
     meta.technician,
@@ -521,7 +517,7 @@ function resolvedCountFromSummary(response = {}) {
 }
 
 export function normalizePublicTechnicianMetrics(response = null) {
-  const source = object(response);
+  const source = safeObject(response);
   const publicScope = aggregateScopeIsPublic(source);
   const explicitResolved = resolvedCountFromSummary(source);
   const responseTotal = nonNegativeInteger(

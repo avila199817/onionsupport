@@ -26,6 +26,8 @@ import Http from "../../core/http.js";
 import { userNameFromIdentity } from "../../core/user-identity.js";
 import { notifyDomainChanged } from "../../core/domain-events.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { arrayFrom } from "../../core/arrays.js";
 
 export const INCIDENCIAS_API_VERSION = "incidencias.api.extreme.v24.cursor-scale-safe";
 export const INCIDENCIAS_ENDPOINT = "/api/tickets";
@@ -83,10 +85,6 @@ function pruneDetailCache() {
    BASICS
 ========================================================= */
 
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
 function isBlob(value) {
   return typeof Blob !== "undefined" && value instanceof Blob;
 }
@@ -110,34 +108,11 @@ function isFileLike(value = null) {
   );
 }
 
-function safeArray(value) {
-  if (Array.isArray(value)) return value;
-
-  if (
-    value &&
-    typeof value === "object" &&
-    typeof value.length === "number" &&
-    typeof value !== "string"
-  ) {
-    try {
-      return Array.from(value);
-    } catch {
-      return [];
-    }
-  }
-
-  return [];
-}
-
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
-}
-
 /*
   IMPORTANTE:
   No aplanar arrays aquí. El bug que dejaba la tabla en 0/18 venía de
   first(...values.flat(Infinity)): cuando el backend devolvía items: [..],
-  first(items, ...) devolvía el primer ticket, y safeArray(ticket) => [].
+  first(items, ...) devolvía el primer ticket, y arrayFrom(ticket) => [].
 */
 function first(...values) {
   for (const value of values) {
@@ -580,7 +555,7 @@ function isCacheFresh(options = {}) {
 }
 
 function cachedListResponse({ cached = true, stale = false, error = null, options = {} } = {}) {
-  const items = safeArray(lastList.items);
+  const items = arrayFrom(lastList.items);
   const total = Math.max(number(lastList.total, items.length), items.length);
   const response = safeObject(lastList.response, {});
   const responseTotal = Object.prototype.hasOwnProperty.call(response, "total")
@@ -633,7 +608,7 @@ function setListCache({ items = [], total = 0, key = "", response = {} } = {}) {
 }
 
 export function hydrateIncidenciasFromCache() {
-  const items = safeArray(lastList.items);
+  const items = arrayFrom(lastList.items);
   const response = safeObject(lastList.response, {});
   const total = Math.max(number(lastList.total, items.length), items.length);
 
@@ -1560,15 +1535,15 @@ export function normalizeIncidencia(item = {}) {
 
   const requester = normalizeRequester(raw);
   const technician = normalizeTechnician(raw);
-  const attachments = safeArray(first(raw.attachments, raw.files, raw.adjuntos, [])).map(normalizeAttachment);
+  const attachments = arrayFrom(first(raw.attachments, raw.files, raw.adjuntos, [])).map(normalizeAttachment);
 
   const attachmentsCount = countFrom(attachments.length, raw.attachmentsCount, raw.attachmentCount, raw.filesCount, raw.adjuntosCount, raw.meta?.attachmentsCount, raw.meta?.filesCount);
-  const comments = safeArray(first(raw.comments, raw.notes, raw.messages, []));
-  const history = safeArray(first(raw.history, raw.events, []));
+  const comments = arrayFrom(first(raw.comments, raw.notes, raw.messages, []));
+  const history = arrayFrom(first(raw.history, raw.events, []));
   const commentsCount = countFrom(comments.length, raw.commentsCount, raw.meta?.commentsCount);
   const historyCount = countFrom(history.length, raw.historyCount, raw.meta?.historyCount);
 
-  const invoices = safeArray(first(raw.invoices, raw.facturas, raw.linkedInvoices?.items, []));
+  const invoices = arrayFrom(first(raw.invoices, raw.facturas, raw.linkedInvoices?.items, []));
   const invoicesCount = countFrom(raw.facturasCount, raw.invoicesCount, raw.linkedInvoicesCount, raw.linkedInvoices?.count, invoices.length);
   const invoiceTotal = number(first(raw.facturasTotal, raw.invoicesTotal, raw.importeFacturas, raw.invoiceTotal, raw.facturaTotal, raw.facturaImporte, raw.importeFactura, raw.totalFactura, raw.invoiceAmount, raw.linkedInvoicesTotal, raw.linkedInvoicesAmount, raw.linkedInvoicesImporte, raw.linkedInvoices?.total, raw.linkedInvoices?.amount, raw.meta?.invoicesTotal, raw.meta?.invoiceTotal, 0), 0);
   const currency = cleanText(first(raw.currency, raw.moneda, raw.facturaCurrency, raw.facturaMoneda, raw.linkedInvoicesCurrency, raw.linkedInvoicesMoneda, raw.linkedInvoices?.currency, raw.linkedInvoices?.moneda, raw.meta?.invoiceCurrency, DEFAULT_CURRENCY), DEFAULT_CURRENCY).toUpperCase();
@@ -1666,7 +1641,7 @@ export function normalizeIncidencia(item = {}) {
     tipo: type,
     type,
     subcategory: cleanText(first(raw.subcategory, raw.subcategoria), ""),
-    tags: safeArray(raw.tags),
+    tags: arrayFrom(raw.tags),
 
     source: cleanText(first(raw.source, raw.origen), ""),
     origen: cleanText(first(raw.origen, raw.source), ""),
@@ -1758,8 +1733,8 @@ export function normalizeIncidencia(item = {}) {
 
     invoiceId: cleanText(first(raw.invoiceId, raw.facturaId, raw.linkedInvoiceId, raw.linkedFacturaId), ""),
     facturaId: cleanText(first(raw.facturaId, raw.invoiceId, raw.linkedFacturaId, raw.linkedInvoiceId), ""),
-    invoiceIds: safeArray(raw.invoiceIds),
-    facturaIds: safeArray(raw.facturaIds),
+    invoiceIds: arrayFrom(raw.invoiceIds),
+    facturaIds: arrayFrom(raw.facturaIds),
     invoices,
     facturas: invoices,
     facturasCount: invoicesCount,
@@ -1861,7 +1836,7 @@ export function normalizeIncidencia(item = {}) {
 }
 
 function normalizeList(items = []) {
-  const source = safeArray(items);
+  const source = arrayFrom(items);
   const map = new Map();
 
   for (const item of source) {
@@ -1895,7 +1870,7 @@ function upsertCachedIncidencia(item = null) {
   detailCache.set(id, { item: normalized, at: now() });
   pruneDetailCache();
 
-  const current = safeArray(lastList.items).filter((row) => getTicketId(row) !== id);
+  const current = arrayFrom(lastList.items).filter((row) => getTicketId(row) !== id);
   const next = normalizeList([normalized, ...current]);
 
   lastList = {
@@ -1938,7 +1913,7 @@ function extractFiles(payload = {}) {
 function dedupeFiles(files = []) {
   const map = new Map();
 
-  for (const file of safeArray(files)) {
+  for (const file of arrayFrom(files)) {
     if (!isFileLike(file)) continue;
     const key = [file.name || "archivo", file.size || 0, file.lastModified || 0, file.type || ""].join("::");
     if (!map.has(key)) map.set(key, file);
@@ -2754,7 +2729,7 @@ function isUrgentPriority(value = "") {
 }
 
 export function computeIncidenciasStats(items = lastList.items) {
-  const rows = safeArray(items);
+  const rows = arrayFrom(items);
 
   return rows.reduce(
     (acc, item) => {
@@ -2763,7 +2738,7 @@ export function computeIncidenciasStats(items = lastList.items) {
       if (isClosedStatus(item.status || item.estado)) acc.closed += 1;
       if (isUrgentPriority(item.priority || item.prioridad)) acc.urgent += 1;
 
-      acc.attachments += number(item.attachmentsCount, safeArray(item.attachments).length);
+      acc.attachments += number(item.attachmentsCount, arrayFrom(item.attachments).length);
       acc.invoiceTotal += number(first(item.invoiceTotal, item.invoicesTotal, item.facturasTotal), 0);
 
       return acc;
@@ -2789,7 +2764,7 @@ function normalizeError(error = null) {
 }
 
 export function getIncidenciasApiSnapshot() {
-  const items = safeArray(lastList.items);
+  const items = arrayFrom(lastList.items);
 
   return {
     version: INCIDENCIAS_API_VERSION,

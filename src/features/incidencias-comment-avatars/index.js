@@ -27,6 +27,7 @@ import {
   technicianIdentity,
 } from "../incidencias-comment-identity/index.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { safeObject } from "../../core/objects.js";
 
 export const INCIDENCIAS_COMMENT_AVATARS_VERSION =
   "incidencias.comment-avatars.v1-global-avatar-authority";
@@ -61,15 +62,9 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function safeObject(value = null) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : null;
-}
-
 function firstObject(...values) {
   for (const value of values) {
-    const object = safeObject(value);
+    const object = safeObject(value, null);
     if (object && Object.keys(object).length) return object;
   }
   return {};
@@ -81,7 +76,7 @@ function cleanImageSrc(image = null) {
 }
 
 function unwrapDetail(value = null) {
-  const root = safeObject(value) || {};
+  const root = safeObject(value, null) || {};
   return firstObject(
     root.detail,
     root.ticket,

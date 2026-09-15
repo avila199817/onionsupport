@@ -7,6 +7,7 @@
 ========================================================= */
 
 import AliasCoreDefault, * as AliasCore from "./facturas.api.alias-core.js";
+import { isObject } from "../../core/objects.js";
 
 export * from "./facturas.api.alias-core.js";
 
@@ -14,10 +15,6 @@ export const FACTURA_RAW_ALIAS_RECONCILIATION_VERSION =
   "facturas.api.raw-alias-reconciliation.v5";
 
 const TECHNICAL_PREFIX = "FACTURA_CREATE_IDEMP_";
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
 
 function text(value = "") {
   return String(value ?? "").trim();

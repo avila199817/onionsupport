@@ -53,6 +53,7 @@ import renderServerTemplate, {
   renderAccessDeniedState,
 } from "./server.template.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject, safeObject } from "../../core/objects.js";
 
 
 /* =========================================================
@@ -119,29 +120,12 @@ function isFunction(value) {
   return typeof value === "function";
 }
 
-function isObject(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-  );
-}
-
 function isNode(value) {
   return Boolean(
     value &&
       typeof value === "object" &&
       value.nodeType === 1
   );
-}
-
-function safeObject(
-  value,
-  fallback = {}
-) {
-  return isObject(value)
-    ? value
-    : fallback;
 }
 
 

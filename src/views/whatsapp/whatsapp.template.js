@@ -17,22 +17,12 @@ import {
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 import { cleanText as text } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 
 
 export const WHATSAPP_TEMPLATE_VERSION =
   "whatsapp.template.v2.correo-fullview";
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
 
 
 

@@ -30,6 +30,7 @@ import {
   filterClientes,
 } from "./clientes.model.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { safeObject } from "../../core/objects.js";
 
 export {
   CLIENTES_MODEL_VERSION,
@@ -119,12 +120,6 @@ function invalidateIdentityCache() {
   lastPageContext = null;
   lastSyncAt = 0;
   lastError = "";
-}
-
-function safeObject(value, fallback = {}) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : fallback;
 }
 
 function first(...values) {

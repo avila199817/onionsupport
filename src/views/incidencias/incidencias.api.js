@@ -35,6 +35,8 @@ import {
   getIncidenciasPriorityPolicySnapshot,
 } from "./incidencias.priority-policy.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 
 export * from "./incidencias.api.impl.js";
 export {
@@ -65,16 +67,6 @@ let completeUniverse = null;
 let universeRevalidationPromise = null;
 let universeRevalidatedAt = 0;
 let universeEpoch = 0;
-
-function object(value = null) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : {};
-}
-
-function array(value = null) {
-  return Array.isArray(value) ? value : [];
-}
 
 function finiteNumber(value = 0, fallback = 0) {
   const parsed = Number(value);
@@ -135,11 +127,11 @@ function followCallerAbort(promise, signal = null) {
 }
 
 function queryFrom(options = {}) {
-  return object(object(options).query);
+  return safeObject(safeObject(options).query);
 }
 
 function responseCursor(response = {}) {
-  const source = object(response);
+  const source = safeObject(response);
   return cleanText(
     source.nextCursor ||
     source.pagination?.nextCursor ||
@@ -149,7 +141,7 @@ function responseCursor(response = {}) {
 }
 
 function responseTotal(response = {}, fallback = 0) {
-  const source = object(response);
+  const source = safeObject(response);
   return Math.max(
     fallback,
     finiteNumber(
@@ -164,7 +156,7 @@ function responseTotal(response = {}, fallback = 0) {
 }
 
 function isUnfilteredFirstPageQuery(query = {}) {
-  const source = object(query);
+  const source = safeObject(query);
   return (
     !cleanText(source.cursor) &&
     !cleanText(source.q) &&
@@ -174,7 +166,7 @@ function isUnfilteredFirstPageQuery(query = {}) {
 }
 
 function isMainListFirstPageQuery(query = {}) {
-  const source = object(query);
+  const source = safeObject(query);
   const limit = Math.max(1, Math.trunc(finiteNumber(source.limit, 0)));
   const canonicalLimit = Math.max(
     1,
@@ -185,7 +177,7 @@ function isMainListFirstPageQuery(query = {}) {
 }
 
 function isFacetCountQuery(query = {}) {
-  const source = object(query);
+  const source = safeObject(query);
   const limit = Math.max(1, Math.trunc(finiteNumber(source.limit, 0)));
   const hasFacetPredicate =
     Object.prototype.hasOwnProperty.call(source, "closed") ||
@@ -197,8 +189,8 @@ function isFacetCountQuery(query = {}) {
 function rememberCompleteUniverse(response = {}, query = {}) {
   if (!isUnfilteredFirstPageQuery(query)) return false;
 
-  const source = object(response);
-  const items = array(source.items);
+  const source = safeObject(response);
+  const items = safeArray(source.items);
   const total = responseTotal(source, items.length);
   const cursor = responseCursor(source);
   const hasMore =
@@ -235,7 +227,7 @@ function invalidateCompleteUniverse() {
 }
 
 function itemStatus(item = {}) {
-  const source = object(item);
+  const source = safeObject(item);
   return normalizeStateKey(
     source.status ||
     source.estado ||
@@ -266,15 +258,15 @@ function itemMatchesPriority(item = {}, requested = "") {
 }
 
 function searchHaystack(item = {}) {
-  const source = object(item);
-  const client = object(
+  const source = safeObject(item);
+  const client = safeObject(
     source.client ||
     source.cliente ||
     source.customer ||
     source.requester ||
     source.user
   );
-  const assigned = object(
+  const assigned = safeObject(
     source.assignedTo ||
     source.assignee ||
     source.assigned ||
@@ -341,7 +333,7 @@ function projectCompleteUniverse(query = {}) {
     return null;
   }
 
-  const source = object(query);
+  const source = safeObject(query);
   const hasClosed = Object.prototype.hasOwnProperty.call(source, "closed");
   const closed = hasClosed ? source.closed === true : null;
   const priority = cleanText(source.priority);
@@ -363,7 +355,7 @@ function projectCompleteUniverse(query = {}) {
     )
   );
 
-  const base = object(completeUniverse.response);
+  const base = safeObject(completeUniverse.response);
   const total = projected.length;
 
   return {
@@ -379,7 +371,7 @@ function projectCompleteUniverse(query = {}) {
     localProjection: true,
     localProjectionVersion: INCIDENCIAS_HOT_LIST_QUERY_VERSION,
     pagination: {
-      ...object(base.pagination),
+      ...safeObject(base.pagination),
       total,
       count: total,
       totalCount: total,
@@ -419,7 +411,7 @@ function revalidateCompleteUniverse() {
 ========================================================= */
 
 export async function loadIncidenciasPage(options = {}) {
-  const source = object(options);
+  const source = safeObject(options);
   const signal = source.signal || null;
   if (signal?.aborted) throw abortError();
 
@@ -552,7 +544,7 @@ export function getIncidenciaByIdRequest(id = "", options = {}) {
 export const loadIncidenciaDetail = getIncidenciaByIdRequest;
 
 function ticketIdFromDetail(value = null) {
-  const source = object(value);
+  const source = safeObject(value);
   return cleanText(
     source.ticketId ||
     source.incidenciaId ||
@@ -565,7 +557,7 @@ function ticketIdFromDetail(value = null) {
 
 function mutationSignal(args = []) {
   for (let index = args.length - 1; index >= 0; index -= 1) {
-    const source = object(args[index]);
+    const source = safeObject(args[index]);
     if (source.signal) return source.signal;
   }
   return null;
@@ -575,7 +567,7 @@ function mutationTicketId(args = [], result = null, mode = "first") {
   if (mode === "create") return ticketIdFromDetail(result);
 
   if (mode === "object") {
-    const source = object(args[0]);
+    const source = safeObject(args[0]);
     return cleanText(
       source.ticketId ||
       source.incidenciaId ||

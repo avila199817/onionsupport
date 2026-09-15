@@ -74,6 +74,8 @@ import {
   fetchUsuariosCursorPage,
   mergeUsuariosCursorItems,
 } from "./usuarios.cursor.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 
 export const USUARIOS_MODULE_NAME = "usuarios";
 export const USUARIOS_VIEW_NAME = "UsuariosView";
@@ -162,15 +164,6 @@ function isBrowser() {
 }
 function isFunction(value) {
   return typeof value === "function";
-}
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
-}
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
 }
 function first(...values) {
   for (const value of values) {

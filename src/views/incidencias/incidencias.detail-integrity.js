@@ -15,22 +15,14 @@
 "use strict";
 
 import { cleanText } from "../../core/presentation-text.js";
+import { safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 
 export const INCIDENCIAS_DETAIL_INTEGRITY_VERSION =
   "incidencias.detail-integrity.authoritative.v1";
 
 export const INCIDENCIAS_DETAIL_INTEGRITY_RETRY_DELAYS_MS =
   Object.freeze([0, 180, 650, 1600]);
-
-function object(value = null) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : {};
-}
-
-function array(value = null) {
-  return Array.isArray(value) ? value : [];
-}
 
 function finite(value = null) {
   if (value === null || value === undefined || value === "") return null;
@@ -58,7 +50,7 @@ function firstArray(...values) {
 }
 
 function ticketId(detail = {}) {
-  const source = object(detail);
+  const source = safeObject(detail);
   return cleanText(
     source.ticketId ||
     source.incidenciaId ||
@@ -70,15 +62,15 @@ function ticketId(detail = {}) {
 }
 
 function timelineSplit(detail = {}) {
-  const source = object(detail);
-  const raw = object(source.raw);
+  const source = safeObject(detail);
+  const raw = safeObject(source.raw);
   const timeline = firstArray(source.timeline, raw.timeline);
 
   let comments = 0;
   let history = 0;
 
   for (const entry of timeline) {
-    const item = object(entry);
+    const item = safeObject(entry);
     const kind = cleanText(
       item.kind || item.type || item.action || item.event || ""
     ).toLocaleLowerCase("es-ES");
@@ -97,10 +89,10 @@ function collectionState({
   countAliases,
   timelineActual = 0,
 } = {}) {
-  const source = object(detail);
-  const raw = object(source.raw);
-  const meta = object(source.meta);
-  const windowMeta = object(meta[key]);
+  const source = safeObject(detail);
+  const raw = safeObject(source.raw);
+  const meta = safeObject(source.meta);
+  const windowMeta = safeObject(meta[key]);
 
   const directArrays = aliases.map((alias) => source[alias]);
   const rawArrays = aliases.map((alias) => raw[alias]);
@@ -150,7 +142,7 @@ function collectionState({
 }
 
 export function inspectIncidenciaDetailIntegrity(detail = null) {
-  const source = object(detail);
+  const source = safeObject(detail);
   const split = timelineSplit(source);
 
   const comments = collectionState({
@@ -256,8 +248,8 @@ export function createDetailIntegrityLoader(
     throw new TypeError("loader debe ser una función.");
   }
 
-  const delays = array(retryDelays).length
-    ? array(retryDelays).map((value) => Math.max(0, Number(value) || 0))
+  const delays = safeArray(retryDelays).length
+    ? safeArray(retryDelays).map((value) => Math.max(0, Number(value) || 0))
     : [0];
 
   let requests = 0;
@@ -293,7 +285,7 @@ export function createDetailIntegrityLoader(
 
       try {
         const detail = await loader(key, {
-          ...object(options),
+          ...safeObject(options),
           force: true,
           forceRefresh: true,
           cache: false,

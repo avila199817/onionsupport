@@ -27,6 +27,8 @@ import {
   renderIncidenciasDetailModalClosed,
   validateDetailUpdate,
 } from "./incidencias.template.modal.impl.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 
 export {
   DETAIL_ACTIONS,
@@ -56,18 +58,6 @@ export const INCIDENCIAS_DETAIL_SHARED_VISUAL_CONTRACT = Object.freeze([
   "incidencias-modal-meta-grid ui-detail-modal-meta-grid",
   "incidencias-modal-chip--${attr(safeModifier)} ui-detail-modal-chip--${attr(safeModifier)}",
 ]);
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function object(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
-}
-
-function array(value) {
-  return Array.isArray(value) ? value : [];
-}
 
 function text(value = "", fallback = "") {
   const normalized = String(value ?? "")
@@ -106,7 +96,7 @@ function count(value = 0, fallback = 0) {
 }
 
 function detailFromInput(input = {}) {
-  const source = object(input);
+  const source = safeObject(input);
 
   for (const candidate of [
     source.detail,
@@ -122,14 +112,14 @@ function detailFromInput(input = {}) {
 }
 
 function rawDetail(detail = {}) {
-  const source = object(detail);
-  return object(source.raw || source.data || source.item || source, source);
+  const source = safeObject(detail);
+  return safeObject(source.raw || source.data || source.item || source, source);
 }
 
 function requesterAvatarIdentity(detail = {}) {
-  const source = object(detail);
+  const source = safeObject(detail);
   const raw = rawDetail(source);
-  const requester = object(
+  const requester = safeObject(
     source.requesterSnapshot ||
     source.cliente ||
     source.receptor ||
@@ -175,10 +165,10 @@ function requesterAvatarIdentity(detail = {}) {
 }
 
 function technicianAvatarIdentity(detail = {}) {
-  const source = object(detail);
+  const source = safeObject(detail);
   const raw = rawDetail(source);
-  const assignment = object(source.assignment || raw.assignment || {});
-  const technician = object(
+  const assignment = safeObject(source.assignment || raw.assignment || {});
+  const technician = safeObject(
     source.tecnico ||
     source.assignedTo ||
     source.technician ||
@@ -222,7 +212,7 @@ function technicianAvatarIdentity(detail = {}) {
 }
 
 function avatarIdentityAttributes(identity = {}, source = "") {
-  const person = object(identity);
+  const person = safeObject(identity);
   const attrs = [
     'data-avatar-system="true"',
     'data-avatar-host="true"',
@@ -286,9 +276,9 @@ function patchAvatarIdentityBoundary(html = "", input = {}) {
 }
 
 function collectionWindow(detail = {}, name = "", countKey = "", aliases = []) {
-  const raw = object(detail);
-  const meta = object(raw.meta);
-  const window = object(meta[name]);
+  const raw = safeObject(detail);
+  const meta = safeObject(raw.meta);
+  const window = safeObject(meta[name]);
 
   let values = [];
   for (const alias of [name, ...aliases]) {
@@ -313,7 +303,7 @@ function collectionWindow(detail = {}, name = "", countKey = "", aliases = []) {
 }
 
 function commentKind(item = {}) {
-  const source = object(item);
+  const source = safeObject(item);
   return key(
     source.kind ||
     source.type ||
@@ -333,7 +323,7 @@ function timestamp(value = null) {
 }
 
 function normalizeComment(item = {}, index = 0) {
-  const source = object(item);
+  const source = safeObject(item);
   const kind = commentKind(source);
 
   if (kind && kind !== "comment" && kind !== "comentario") {
@@ -388,8 +378,8 @@ function normalizeComment(item = {}, index = 0) {
 
 export function getIncidenciasDetailComments(input = {}) {
   const detail = detailFromInput(input);
-  const raw = object(detail.raw || detail.data || detail.item || detail);
-  const timeline = array(detail.timeline?.length ? detail.timeline : raw.timeline);
+  const raw = safeObject(detail.raw || detail.data || detail.item || detail);
+  const timeline = safeArray(detail.timeline?.length ? detail.timeline : raw.timeline);
 
   let source = [];
 
@@ -401,7 +391,7 @@ export function getIncidenciasDetailComments(input = {}) {
   } else {
     for (const candidate of [detail, raw]) {
       for (const alias of ["comments", "notes", "messages"]) {
-        const values = array(candidate[alias]);
+        const values = safeArray(candidate[alias]);
         if (values.length) {
           source = values;
           break;
@@ -450,7 +440,7 @@ function formatCommentDate(value = null) {
 }
 
 function commentSignature(comments = []) {
-  return array(comments)
+  return safeArray(comments)
     .map((comment) =>
       [
         oneLine(comment.id, ""),
@@ -523,7 +513,7 @@ function patchCanonicalFollowupIntoDescription(html = "", input = {}) {
 
 export function getIncidenciasDetailWindowUiState(input = {}) {
   const detail = detailFromInput(input);
-  const meta = object(detail.meta);
+  const meta = safeObject(detail.meta);
   const hasWindowContract = Boolean(
     meta.detailWindowVersion ||
     isObject(meta.comments) ||

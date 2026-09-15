@@ -14,6 +14,8 @@
 
 import Http from "../../core/http.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 
 
 export const CORREO_API_VERSION = "correo.api.microsoft.production.v3-pure-http";
@@ -24,16 +26,6 @@ const SEND_TIMEOUT = 45000;
 const UPLOAD_TIMEOUT = 120000;
 
 
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function safeObject(value, fallback = {}) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : fallback;
-}
 
 function clamp(value, fallback, min, max) {
   const number = Number(value);

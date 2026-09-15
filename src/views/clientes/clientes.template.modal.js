@@ -3,6 +3,8 @@ import { escapeHtml } from "../../core/escape-html.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
 import { createModalHost, renderModalCloseButton, renderModalContent, renderModalShell } from "../../features/entity-overlay/modal-host.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { arrayFrom } from "../../core/arrays.js";
 /* =========================================================
    Onion Support - Clientes Detail Template
    Archivo: /src/views/clientes/clientes.template.modal.js
@@ -93,44 +95,6 @@ function isBrowser() {
     typeof window !== "undefined" &&
     typeof document !== "undefined"
   );
-}
-
-function isObject(value) {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
-}
-
-function safeObject(
-  value,
-  fallback = {}
-) {
-  return isObject(value)
-    ? value
-    : fallback;
-}
-
-function safeArray(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (
-    value &&
-    typeof value === "object" &&
-    typeof value.length === "number" &&
-    typeof value !== "string"
-  ) {
-    try {
-      return Array.from(value);
-    } catch {
-      return [];
-    }
-  }
-
-  return [];
 }
 
 
@@ -496,7 +460,7 @@ function hasAnyOwn(
   source = {},
   keys = []
 ) {
-  return safeArray(keys)
+  return arrayFrom(keys)
     .some(
       (key) =>
         hasOwn(
@@ -2319,7 +2283,7 @@ function getPermissions(
   const raw =
     getRaw(detail);
 
-  return safeArray(
+  return arrayFrom(
     first(
       detail.permissions,
       raw.permissions,
@@ -4915,7 +4879,7 @@ export function getDetailTemplateSnapshot(
     hasKeys(
       raw.visibility
     ) ||
-    safeArray(
+    arrayFrom(
       raw.permissions
     ).length > 0;
 

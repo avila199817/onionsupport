@@ -49,6 +49,7 @@ import {
   closeSidebarDropdown,
 } from "./template.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject } from "../../core/objects.js";
 
 
 export const SIDEBAR_VERSION =
@@ -100,14 +101,6 @@ function isBrowser() {
   return (
     typeof window !== "undefined" &&
     typeof document !== "undefined"
-  );
-}
-
-function isObject(value) {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
   );
 }
 

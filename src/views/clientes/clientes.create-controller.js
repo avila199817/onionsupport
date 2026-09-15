@@ -34,6 +34,7 @@ import {
   fetchUsuariosRequest,
   normalizeUsuarioModel,
 } from "../usuarios/usuarios.api.js";
+import { isObject, safeObject } from "../../core/objects.js";
 
 export const CLIENTES_CREATE_CONTROLLER_VERSION =
   "clientes.create-controller.v1.single-owner";
@@ -45,14 +46,6 @@ const CREATE_MODAL_PANEL_SELECTOR = "[data-clientes-create-modal-panel='true']";
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
 }
 
 

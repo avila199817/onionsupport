@@ -22,6 +22,7 @@ import {
   normalizeUserSlug,
 } from "../../core/config.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject } from "../../core/objects.js";
 
 export const AUTH_VERSION = "auth.minimal.v10-logout-fail-closed";
 const ROOT_PATH = "/";
@@ -44,7 +45,6 @@ const sessionState = {
 const activeFlowControllers = new Set();
 const selectorMetrics = { coreReads: 0, httpTokenFallbacks: 0, contexts: 0 };
 
-function isObject(value) { return Boolean(value && typeof value === "object" && !Array.isArray(value)); }
 function isFunction(value) { return typeof value === "function"; }
 function first(...values) {
   for (const value of values) {

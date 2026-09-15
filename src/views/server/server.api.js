@@ -12,6 +12,8 @@
 import Http from "../../core/http.js";
 import * as Base from "./server.api.base.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 
 export const SERVER_API_VERSION =
   "server.api.backend-contract.v3.health-plus-costs";
@@ -41,18 +43,6 @@ const costState = {
   lastSyncAt: 0,
   inflight: null,
 };
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
 
 function safeNumber(value = null, fallback = null) {
   if (value === null || value === undefined || value === "") return fallback;

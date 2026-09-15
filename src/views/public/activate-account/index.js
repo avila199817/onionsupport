@@ -40,6 +40,7 @@ import {
 
 import createPasswordResetTemplate from "../password-reset/template.js";
 import { cleanText } from "../../../core/presentation-text.js";
+import { isObject } from "../../../core/objects.js";
 
 export const ACTIVATE_ACCOUNT_VIEW_VERSION =
   "activate-account.view.public.v1-production";
@@ -88,14 +89,6 @@ function isBrowser() {
 
 function isFunction(value) {
   return typeof value === "function";
-}
-
-function isObject(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-  );
 }
 
 function normalizeCode(value = "") {

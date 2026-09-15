@@ -177,7 +177,7 @@ require(CREATE_TEMPLATE, 'LINE_REMOVE: "create-line-remove"', "Create invoice mu
 require(CREATE_TEMPLATE, 'data-line-field="concepto"', "Line-item editor must expose per-line concepts")
 require(CREATE_TEMPLATE, 'data-line-field="unidad"', "Line-item editor must support service/material units")
 require(INDEX, "readCreateLineItems", "Controller must read every invoice line before submit")
-require(INDEX, "safeArray(breakdown.lineas).map", "Create payload must serialize every validated invoice line")
+require(INDEX, "arrayFrom(breakdown.lineas).map", "Create payload must serialize every validated invoice line")
 require(INDEX, 'const TICKET_SEARCH_ENDPOINTS = Object.freeze([\n  "/api/search/incidencias",\n]);', "Invoice incidents must use the canonical client-scoped incidence search")
 require(INDEX, "autoSelectLatest: false", "Client incidents must remain an explicit choice instead of being auto-selected")
 require(CREATE_TEMPLATE, "resolveAvatarPresentation", "Create invoice avatars must delegate identity and tone to AvatarSystem")

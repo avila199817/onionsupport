@@ -39,6 +39,8 @@ import {
 import { notifyDomainChanged } from "../../core/domain-events.js";
 import { exactTotal } from "../../core/statistics.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { arrayFrom } from "../../core/arrays.js";
 
 /* =========================================================
    META / CONFIG
@@ -222,43 +224,8 @@ function isBrowser() {
   );
 }
 
-function isObject(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-  );
-}
-
 function isFunction(value) {
   return typeof value === "function";
-}
-
-function safeObject(value, fallback = {}) {
-  return isObject(value)
-    ? value
-    : fallback;
-}
-
-function safeArray(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (
-    value &&
-    typeof value === "object" &&
-    typeof value.length === "number" &&
-    typeof value !== "string"
-  ) {
-    try {
-      return Array.from(value);
-    } catch {
-      return [];
-    }
-  }
-
-  return [];
 }
 
 /*
@@ -2151,7 +2118,7 @@ function dedupeUsuarios(
 
   for (
     const value
-    of safeArray(items)
+    of arrayFrom(items)
   ) {
     if (!isObject(value)) {
       continue;
@@ -2245,7 +2212,7 @@ export function findUsuarioById(
   }
 
   return (
-    safeArray(items).find(
+    arrayFrom(items).find(
       (item) => {
         const normalized =
           normalizeUsuarioModel(
@@ -3205,7 +3172,7 @@ function mergeListResponses(
   responses = []
 ) {
   const pages =
-    safeArray(responses)
+    arrayFrom(responses)
       .filter(
         (page) =>
           page !== null &&
@@ -5532,7 +5499,7 @@ export function paginateUsuarios(
   } = {}
 ) {
   const rows =
-    safeArray(items);
+    arrayFrom(items);
 
   const size =
     clamp(
@@ -5596,7 +5563,7 @@ export function paginateUsuarios(
 export function computeUsuariosStats(
   items = []
 ) {
-  return safeArray(items)
+  return arrayFrom(items)
     .reduce(
       (acc, item) => {
         const current =

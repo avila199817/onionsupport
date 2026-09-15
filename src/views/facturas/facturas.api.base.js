@@ -19,6 +19,8 @@ import Http from "../../core/http.js";
 import { AppCore } from "../../core/index.js";
 import { notifyDomainChanged, onDomainChanged } from "../../core/domain-events.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 
 export const FACTURAS_API_VERSION =
   "facturas.api.production.v9.continuous-list-snapshot";
@@ -80,24 +82,12 @@ const inflight = new Map();
    BASICS
 ========================================================= */
 
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
 function isFunction(value) {
   return typeof value === "function";
 }
 
 function isBlob(value) {
   return typeof Blob !== "undefined" && value instanceof Blob;
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
 }
 
 /*

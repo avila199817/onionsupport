@@ -43,6 +43,8 @@ import {
   setTopbarSearchActiveIndex,
 } from "./template.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 
 
 export const TOPBAR_VERSION =
@@ -367,27 +369,10 @@ function isBrowser() {
   );
 }
 
-function isObject(value) {
-  return Boolean(
-    value &&
-    typeof value ===
-      "object" &&
-    !Array.isArray(value)
-  );
-}
-
 function isFunction(value) {
   return (
     typeof value ===
     "function"
-  );
-}
-
-function safeArray(value) {
-  return (
-    Array.isArray(value)
-      ? value
-      : []
   );
 }
 

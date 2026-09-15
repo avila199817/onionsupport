@@ -38,6 +38,7 @@ import {
   renderHomeTemplate,
   renderHomeErrorState,
 } from "./home.template.js";
+import { isObject, safeObject } from "../../core/objects.js";
 
 export const HOME_INDEX_VERSION = "home.index.v13-persisted-onboarding";
 export const HOME_VIEW_VERSION = HOME_INDEX_VERSION;
@@ -82,10 +83,6 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
 function isFunction(value) {
   return typeof value === "function";
 }
@@ -96,10 +93,6 @@ function isDomNode(value = null) {
       value &&
       value instanceof Node
   );
-}
-
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
 }
 
 

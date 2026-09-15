@@ -9,6 +9,7 @@
 
 import * as Base from "./facturas.api.base.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject, safeObject } from "../../core/objects.js";
 
 export * from "./facturas.api.base.js";
 
@@ -50,14 +51,6 @@ const FACTURA_TECHNICAL_TYPES = new Set([
   "factura_create_operation",
 ]);
 
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function object(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
-}
-
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
@@ -84,7 +77,7 @@ function isBlob(value) {
 }
 
 export function isFacturaTechnicalRecord(value = null) {
-  const item = object(value, null);
+  const item = safeObject(value, null);
   if (!item) return false;
 
   const id = cleanText(item.id, "");
@@ -116,10 +109,10 @@ export function isFacturaTechnicalRecord(value = null) {
 }
 
 function technicalSnapshotFactura(value = {}) {
-  const item = object(value);
-  const snapshot = object(item.responseSnapshot);
+  const item = safeObject(value);
+  const snapshot = safeObject(item.responseSnapshot);
 
-  return object(first(
+  return safeObject(first(
     snapshot.factura,
     snapshot.invoice,
     snapshot.item,
@@ -129,7 +122,7 @@ function technicalSnapshotFactura(value = {}) {
 }
 
 function promoteTechnicalFactura(value = {}) {
-  const item = object(value, null);
+  const item = safeObject(value, null);
   if (!item) return { factura: null, technicalId: "" };
   if (!isFacturaTechnicalRecord(item)) {
     return { factura: item, technicalId: "" };
@@ -157,7 +150,7 @@ function promoteTechnicalFactura(value = {}) {
       facturaId: cleanText(first(nested.facturaId, canonicalId), canonicalId),
       invoiceId: cleanText(first(nested.invoiceId, canonicalId), canonicalId),
       meta: {
-        ...object(nested.meta),
+        ...safeObject(nested.meta),
         technicalAliasRecovered: true,
         technicalAliasId: technicalId || null,
         technicalAliasGuardVersion: FACTURA_TECHNICAL_UI_GUARD_VERSION,
@@ -174,7 +167,7 @@ function sanitizeFacturaItems(items = []) {
 }
 
 function sanitizeFacturaListResponse(response = null) {
-  const source = object(response, null);
+  const source = safeObject(response, null);
   if (!source) return response;
 
   const rawItems = Array.isArray(source.items)
@@ -212,7 +205,7 @@ function sanitizeFacturaListResponse(response = null) {
       : total,
     stats: Base.computeFacturasStats(items),
     meta: {
-      ...object(source.meta),
+      ...safeObject(source.meta),
       technicalRecordsFiltered: removed,
       technicalRecordGuardVersion: FACTURA_TECHNICAL_UI_GUARD_VERSION,
     },
@@ -254,7 +247,7 @@ function cleanActionUrl(value = "") {
 }
 
 function sanitizeDocumentObject(value = {}) {
-  const source = object(value);
+  const source = safeObject(value);
   const url = cleanActionUrl(first(source.url, source.signedUrl, source.sasUrl, ""));
   const signedUrl = cleanActionUrl(first(source.signedUrl, source.sasUrl, url, ""));
   const sasUrl = cleanActionUrl(first(source.sasUrl, source.signedUrl, signedUrl, ""));
@@ -272,7 +265,7 @@ function sanitizeDocumentObject(value = {}) {
 }
 
 function documentMetadataFrom(item = {}) {
-  const source = object(item);
+  const source = safeObject(item);
   const file = sanitizeDocumentObject(first(source.file, source.pdf, source.document, {}));
   const pdf = sanitizeDocumentObject(first(source.pdf, source.file, source.document, {}));
   const document = sanitizeDocumentObject(first(source.document, source.file, source.pdf, {}));
@@ -282,23 +275,23 @@ function documentMetadataFrom(item = {}) {
 
 function canonicalizeFactura(item = {}, envelope = {}) {
   const promotion = promoteTechnicalFactura(item);
-  const source = object(promotion.factura);
+  const source = safeObject(promotion.factura);
   if (!Object.keys(source).length) return null;
 
-  const externalFile = object(envelope.file);
-  const externalPdf = object(envelope.pdf);
-  const externalDocument = object(envelope.document);
+  const externalFile = safeObject(envelope.file);
+  const externalPdf = safeObject(envelope.pdf);
+  const externalDocument = safeObject(envelope.document);
 
   const merged = {
     ...source,
     ...(Object.keys(externalFile).length
-      ? { file: { ...object(source.file), ...externalFile } }
+      ? { file: { ...safeObject(source.file), ...externalFile } }
       : {}),
     ...(Object.keys(externalPdf).length
-      ? { pdf: { ...object(source.pdf), ...externalPdf } }
+      ? { pdf: { ...safeObject(source.pdf), ...externalPdf } }
       : {}),
     ...(Object.keys(externalDocument).length
-      ? { document: { ...object(source.document), ...externalDocument } }
+      ? { document: { ...safeObject(source.document), ...externalDocument } }
       : {}),
   };
 
@@ -327,7 +320,7 @@ function canonicalizeFactura(item = {}, envelope = {}) {
       docs.document?.blobPath
     ),
     meta: {
-      ...object(merged.meta),
+      ...safeObject(merged.meta),
       ...(promotion.technicalId
         ? {
             technicalAliasRecovered: true,
@@ -342,7 +335,7 @@ function canonicalizeFactura(item = {}, envelope = {}) {
 
 function facturaId(item = {}) {
   const promotion = promoteTechnicalFactura(item);
-  const source = object(promotion.factura);
+  const source = safeObject(promotion.factura);
 
   return cleanText(first(
     source?.id,
@@ -357,7 +350,7 @@ function facturaId(item = {}) {
 
 function sanitizePdfResult(result = null) {
   if (isBlob(result)) return result;
-  const source = object(result, null);
+  const source = safeObject(result, null);
   if (!source) return result;
 
   const file = sanitizeDocumentObject(first(source.file, source.pdf, source.document, source));
@@ -386,7 +379,7 @@ function sanitizePdfResult(result = null) {
 
 function hasActionablePdf(result = null, mode = "view") {
   if (isBlob(result)) return true;
-  const source = object(result);
+  const source = safeObject(result);
   const preferred = mode === "download"
     ? first(source.downloadUrl, source.file?.downloadUrl, source.pdf?.downloadUrl, source.document?.downloadUrl)
     : first(source.viewUrl, source.file?.viewUrl, source.pdf?.viewUrl, source.document?.viewUrl);
@@ -434,7 +427,7 @@ export function normalizeFacturaDetailResponse(payload = null) {
 export function normalizeFacturaCreateResponse(payload = null) {
   const normalized = Base.normalizeFacturaCreateResponse(payload);
   const item = canonicalizeFactura(normalized?.item, {
-    ...object(payload),
+    ...safeObject(payload),
     file: first(normalized?.file, payload?.file, payload?.pdf, payload?.document, {}),
     pdf: first(payload?.pdf, normalized?.file, payload?.file, payload?.document, {}),
     document: first(payload?.document, payload?.file, payload?.pdf, {}),
@@ -490,7 +483,7 @@ export function hydrateFacturasFromCache() {
 
 export function syncFacturasListCache(snapshot = {}) {
   const sanitized = sanitizeFacturaListResponse({
-    ...object(snapshot),
+    ...safeObject(snapshot),
     items: sanitizeFacturaItems(snapshot?.items),
   });
 

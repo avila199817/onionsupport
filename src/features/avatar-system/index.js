@@ -26,6 +26,7 @@ import {
   resolveAvatarPresentation,
 } from "./identity.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject } from "../../core/objects.js";
 
 export {
   AVATAR_IDENTITY_VERSION,
@@ -187,14 +188,6 @@ function isImage(value = null) {
   return Boolean(
     isElement(value) &&
     String(value.tagName || "").toUpperCase() === "IMG"
-  );
-}
-
-function isObject(value = null) {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
   );
 }
 

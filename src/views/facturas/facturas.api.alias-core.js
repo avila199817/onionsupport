@@ -14,6 +14,7 @@
 
 import * as Boundary from "./facturas.api.boundary.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject, safeObject } from "../../core/objects.js";
 
 export * from "./facturas.api.boundary.js";
 
@@ -23,14 +24,6 @@ export const FACTURA_CANONICAL_ALIAS_VERSION =
 const TECHNICAL_PREFIX = "FACTURA_CREATE_IDEMP_";
 const aliasRegistry = new Map();
 const MAX_ALIAS_REGISTRY = 256;
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function object(value, fallback = null) {
-  return isObject(value) ? value : fallback;
-}
 
 function key(value = "") {
   return cleanText(value, "")
@@ -91,7 +84,7 @@ function isTechnicalIdentifier(value = "") {
 }
 
 function nestedObjects(value = {}) {
-  const source = object(value, {});
+  const source = safeObject(value, {});
   return [
     source.raw,
     source.raw?.raw,
@@ -101,11 +94,11 @@ function nestedObjects(value = {}) {
     source.item,
     source.factura,
     source.invoice,
-  ].map((item) => object(item)).filter(Boolean);
+  ].map((item) => safeObject(item, null)).filter(Boolean);
 }
 
 export function isFacturaTechnicalRecord(value = null) {
-  const source = object(value);
+  const source = safeObject(value, null);
   if (!source) return false;
 
   if (typeof Boundary.isFacturaTechnicalRecord === "function" &&
@@ -133,7 +126,7 @@ export function isFacturaTechnicalRecord(value = null) {
 }
 
 function technicalHosts(value = null, depth = 0, seen = new Set()) {
-  const source = object(value);
+  const source = safeObject(value, null);
   if (!source || depth > 5 || seen.has(source)) return [];
   seen.add(source);
 
@@ -148,7 +141,7 @@ function technicalHosts(value = null, depth = 0, seen = new Set()) {
 }
 
 function canonicalSnapshot(value = null, depth = 0, seen = new Set()) {
-  const source = object(value);
+  const source = safeObject(value, null);
   if (!source || depth > 5 || seen.has(source)) return null;
   seen.add(source);
 
@@ -163,7 +156,7 @@ function canonicalSnapshot(value = null, depth = 0, seen = new Set()) {
   ];
 
   for (const rawEnvelope of envelopes) {
-    const envelope = object(rawEnvelope);
+    const envelope = safeObject(rawEnvelope, null);
     if (!envelope) continue;
 
     for (const candidate of [
@@ -183,7 +176,7 @@ function canonicalSnapshot(value = null, depth = 0, seen = new Set()) {
       envelope.result?.item,
       envelope.result,
     ]) {
-      const item = object(candidate);
+      const item = safeObject(candidate, null);
       if (!item || isFacturaTechnicalRecord(item)) continue;
 
       const id = canonicalIdentifier(item);
@@ -200,7 +193,7 @@ function canonicalSnapshot(value = null, depth = 0, seen = new Set()) {
 }
 
 function canonicalIdentifier(value = null) {
-  const source = object(value);
+  const source = safeObject(value, null);
   if (!source) return "";
 
   const rootId = cleanText(source.id, "");
@@ -250,7 +243,7 @@ function registerAliases(value = null, canonicalId = "") {
 }
 
 function taxesFromLines(value = {}) {
-  const source = object(value, {});
+  const source = safeObject(value, {});
   const lines = Array.isArray(source.impuestos)
     ? source.impuestos
     : Array.isArray(source.taxes)
@@ -261,7 +254,7 @@ function taxesFromLines(value = {}) {
   let found = false;
 
   for (const raw of lines) {
-    const item = object(raw);
+    const item = safeObject(raw, null);
     if (!item) continue;
 
     const amount = numberOrNull(first(
@@ -287,7 +280,7 @@ function taxesFromLines(value = {}) {
 }
 
 function normalizeFinancialAliases(value = {}) {
-  const result = { ...object(value, {}) };
+  const result = { ...safeObject(value, {}) };
 
   let base = numberOrNull(first(
     result.baseImponible,
@@ -423,7 +416,7 @@ function normalizeFinancialAliases(value = {}) {
 }
 
 function stripTechnicalState(value = {}) {
-  const result = { ...object(value, {}) };
+  const result = { ...safeObject(value, {}) };
   delete result.responseSnapshot;
   delete result.resultSnapshot;
   delete result.snapshot;
@@ -441,7 +434,7 @@ function canonicalRaw(value = {}) {
   const raw = stripTechnicalState(value);
   delete raw.raw;
   raw.meta = {
-    ...object(raw.meta, {}),
+    ...safeObject(raw.meta, {}),
     technicalAliasRecovered:
       raw.meta?.technicalAliasRecovered === true,
     canonicalAliasVersion: FACTURA_CANONICAL_ALIAS_VERSION,
@@ -450,7 +443,7 @@ function canonicalRaw(value = {}) {
 }
 
 export function canonicalizeFacturaListItem(value = null) {
-  const outer = object(value);
+  const outer = safeObject(value, null);
   if (!outer) return null;
 
   const hosts = technicalHosts(outer);
@@ -458,7 +451,7 @@ export function canonicalizeFacturaListItem(value = null) {
 
   const snapshot = canonicalSnapshot(outer);
   const source = snapshot
-    ? object(Boundary.normalizeFactura(snapshot), snapshot)
+    ? safeObject(Boundary.normalizeFactura(snapshot), snapshot)
     : { ...outer };
 
   const canonicalId =
@@ -523,7 +516,7 @@ export function canonicalizeFacturaListItem(value = null) {
         ? cleanText(first(source.estado, source.status), "issued")
         : "issued",
     meta: {
-      ...object(source.meta, {}),
+      ...safeObject(source.meta, {}),
       technicalAliasRecovered: true,
       technicalAliasId: cleanText(first(
         hosts[0]?.id,
@@ -540,7 +533,7 @@ export function canonicalizeFacturaListItem(value = null) {
 }
 
 function canonicalPriority(value = {}) {
-  const source = object(value, {});
+  const source = safeObject(value, {});
   if (source.meta?.technicalAliasRecovered !== true &&
       !isFacturaTechnicalRecord(source)) {
     return 2;
@@ -558,8 +551,8 @@ function mergeCanonical(left = {}, right = {}) {
     ...fallback,
     ...preferred,
     meta: {
-      ...object(fallback.meta, {}),
-      ...object(preferred.meta, {}),
+      ...safeObject(fallback.meta, {}),
+      ...safeObject(preferred.meta, {}),
     },
     raw: canonicalRaw(preferred),
   };
@@ -597,7 +590,7 @@ function canonicalItems(items = []) {
 }
 
 function canonicalizeListResponse(response = null) {
-  const source = object(response);
+  const source = safeObject(response, null);
   if (!source) return response;
 
   const rawItems = Array.isArray(source.items)
@@ -637,7 +630,7 @@ function canonicalizeListResponse(response = null) {
       : total,
     stats: Boundary.computeFacturasStats(result.items),
     meta: {
-      ...object(source.meta, {}),
+      ...safeObject(source.meta, {}),
       canonicalAliasesReconciled: result.filtered,
       canonicalAliasVersion: FACTURA_CANONICAL_ALIAS_VERSION,
     },
@@ -675,7 +668,7 @@ function canonicalizeDetailItem(value = null) {
   const canonical = canonicalizeFacturaListItem(value);
   if (canonical) return canonical;
 
-  const normalized = object(Boundary.normalizeFactura(value), null);
+  const normalized = safeObject(Boundary.normalizeFactura(value), null);
   return normalized || value;
 }
 
@@ -752,7 +745,7 @@ export function hydrateFacturasFromCache() {
 
 export function syncFacturasListCache(snapshot = {}) {
   const canonical = canonicalizeListResponse({
-    ...object(snapshot, {}),
+    ...safeObject(snapshot, {}),
     items: Array.isArray(snapshot?.items) ? snapshot.items : [],
   });
 

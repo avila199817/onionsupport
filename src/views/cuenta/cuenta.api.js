@@ -37,6 +37,8 @@ import {
   validateAuthPassword,
 } from "../../features/auth/password-policy.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 
 export const CUENTA_API_VERSION =
   "cuenta.api.backend-contract.v5-canonical-runtime";
@@ -88,18 +90,6 @@ function isFunction(value) {
   return typeof value === "function";
 }
 
-function isPlainObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function safeObject(value, fallback = {}) {
-  return isPlainObject(value) ? value : fallback;
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
 function safeLower(value = "", fallback = "") {
   return cleanText(value, fallback).toLowerCase();
 }
@@ -109,7 +99,7 @@ function first(...values) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
-    if (isPlainObject(value) && Object.keys(value).length === 0) continue;
+    if (isObject(value) && Object.keys(value).length === 0) continue;
     return value;
   }
   return null;

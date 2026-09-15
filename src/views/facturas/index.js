@@ -64,6 +64,8 @@ import {
   FACTURA_MODAL_ACTIONS,
   renderFacturasDetailModal,
 } from "./facturas.template.modal.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { arrayFrom } from "../../core/arrays.js";
 
 export const FACTURAS_INDEX_VERSION =
   "facturas.index.productivo.v22.stable-create-client-relations";
@@ -125,10 +127,6 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
 function isFunction(value) {
   return typeof value === "function";
 }
@@ -139,29 +137,6 @@ function isDomNode(value = null) {
     value &&
     value instanceof Node
   );
-}
-
-function safeArray(value) {
-  if (Array.isArray(value)) return value;
-
-  if (
-    value &&
-    typeof value === "object" &&
-    typeof value.length === "number" &&
-    typeof value !== "string"
-  ) {
-    try {
-      return Array.from(value);
-    } catch {
-      return [];
-    }
-  }
-
-  return [];
-}
-
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
 }
 
 function multilineValue(value = "") {
@@ -599,8 +574,8 @@ function mergeFacturas(
     map.set(id, factura);
   };
 
-  if (append) safeArray(currentItems).forEach(push);
-  safeArray(nextItems).forEach(push);
+  if (append) arrayFrom(currentItems).forEach(push);
+  arrayFrom(nextItems).forEach(push);
 
   return [...map.values()];
 }
@@ -612,10 +587,10 @@ export function mergeFacturasFreshPageFirst(
 ) {
   const freshPage = mergeFacturas([], freshItems, { append: false });
   const freshIds = new Set(freshPage.map((item) => getFacturaId(item)));
-  const retainedTail = safeArray(currentItems)
+  const retainedTail = arrayFrom(currentItems)
     .slice(
       Math.min(
-        safeArray(currentItems).length,
+        arrayFrom(currentItems).length,
         Math.max(0, Number(replacedPageSize) || freshPage.length)
       )
     )
@@ -635,7 +610,7 @@ export function facturasFirstPageIdentityMatches(
   const size = Math.max(1, Number(pageSize) || DEFAULT_BATCH_SIZE);
   const previousPage = mergeFacturas(
     [],
-    safeArray(currentItems).slice(0, size),
+    arrayFrom(currentItems).slice(0, size),
     { append: false }
   );
   const freshPage = mergeFacturas([], freshItems, { append: false });
@@ -648,12 +623,12 @@ export function facturasFirstPageIdentityMatches(
 
 function upsertFactura(items = [], factura = null, sortMode = "date_desc") {
   const next = safeObject(factura, null);
-  if (!next) return safeArray(items);
+  if (!next) return arrayFrom(items);
 
   const id = getFacturaId(next);
-  if (!id) return safeArray(items);
+  if (!id) return arrayFrom(items);
 
-  const current = safeArray(items);
+  const current = arrayFrom(items);
   const index = current.findIndex((item) => getFacturaId(item) === id);
 
   if (index >= 0) {
@@ -845,7 +820,7 @@ function normalizeTicketCandidate(raw = {}) {
 function dedupeClients(items = []) {
   const map = new Map();
 
-  for (const item of safeArray(items)) {
+  for (const item of arrayFrom(items)) {
     const normalized = normalizeClientCandidate(item);
     if (!normalized?.id) continue;
 
@@ -863,7 +838,7 @@ function dedupeClients(items = []) {
 function selectedClienteIds(clients = []) {
   return [
     ...new Set(
-      safeArray(clients)
+      arrayFrom(clients)
         .map((item) =>
           cleanText(first(item.clienteId, item.id), "")
         )
@@ -875,7 +850,7 @@ function selectedClienteIds(clients = []) {
 function selectedUserIds(clients = []) {
   return [
     ...new Set(
-      safeArray(clients)
+      arrayFrom(clients)
         .map((item) => cleanText(item.userId, ""))
         .filter(Boolean)
     ),
@@ -890,7 +865,7 @@ function createClientSelectionKey(clients = []) {
 }
 
 function ticketBelongsToClients(ticket = {}, clients = []) {
-  const selected = safeArray(clients);
+  const selected = arrayFrom(clients);
   if (!selected.length) return false;
   const ticketClienteId = cleanText(ticket.clienteId, "");
   const ticketUserId = cleanText(ticket.userId, "");
@@ -903,7 +878,7 @@ function ticketBelongsToClients(ticket = {}, clients = []) {
 function dedupeTickets(items = [], selectedClientes = []) {
   const map = new Map();
 
-  for (const item of safeArray(items)) {
+  for (const item of arrayFrom(items)) {
     const normalized = normalizeTicketCandidate(item);
 
     if (!normalized?.id) continue;
@@ -969,7 +944,7 @@ async function searchClients(query = "") {
 
 async function searchTickets(query = "", selectedClientes = []) {
   const q = cleanText(query, "");
-  if (!isAdmin() || !safeArray(selectedClientes).length) return [];
+  if (!isAdmin() || !arrayFrom(selectedClientes).length) return [];
   // Scalar filters can be ANDed by the backend. Query each authoritative scope
   // separately, then merge; never send only the first client's id alongside CSVs.
   const scopes = [
@@ -1634,7 +1609,7 @@ function csvCell(value = "") {
 }
 
 function exportCsv(rows = []) {
-  const data = safeArray(rows);
+  const data = arrayFrom(rows);
 
   const header = [
     "Factura",
@@ -1770,7 +1745,7 @@ function createFacturasController(host = null, context = {}) {
     {}
   );
 
-  let items = safeArray(cache.items);
+  let items = arrayFrom(cache.items);
   let itemsContextKey = cleanText(cache.contextKey, "");
   let total = Math.max(
     number(cache.total, items.length),
@@ -3042,7 +3017,7 @@ function createFacturasController(host = null, context = {}) {
       totalNode.textContent = formatMoney(breakdown.totalFactura);
     }
 
-    safeArray(breakdown.lineas).forEach((linea, index) => {
+    arrayFrom(breakdown.lineas).forEach((linea, index) => {
       const node = createModalHost.querySelector(`[data-line-total="${index}"]`);
       if (node) node.textContent = formatMoney(linea.base);
     });
@@ -3496,7 +3471,7 @@ function createFacturasController(host = null, context = {}) {
         return null;
       }
 
-      const rows = safeArray(
+      const rows = arrayFrom(
         first(
           response?.items,
           response?.facturas,
@@ -3995,7 +3970,7 @@ function createFacturasController(host = null, context = {}) {
           : field.value;
 
     if (lineField && Number.isInteger(lineIndex) && lineIndex >= 0) {
-      const lineas = safeArray(createModal.form.lineas).map((linea) => ({ ...safeObject(linea) }));
+      const lineas = arrayFrom(createModal.form.lineas).map((linea) => ({ ...safeObject(linea) }));
       if (!lineas[lineIndex]) return false;
 
       lineas[lineIndex] = {
@@ -4622,7 +4597,7 @@ function createFacturasController(host = null, context = {}) {
   }
 
   function addCreateLineItem() {
-    const lineas = safeArray(createModal.form.lineas).map((linea) => ({ ...safeObject(linea) }));
+    const lineas = arrayFrom(createModal.form.lineas).map((linea) => ({ ...safeObject(linea) }));
     const id = `linea-${Date.now()}-${lineas.length + 1}`;
     lineas.push({
       id,
@@ -4648,7 +4623,7 @@ function createFacturasController(host = null, context = {}) {
   }
 
   function removeCreateLineItem(index = -1) {
-    const lineas = safeArray(createModal.form.lineas).map((linea) => ({ ...safeObject(linea) }));
+    const lineas = arrayFrom(createModal.form.lineas).map((linea) => ({ ...safeObject(linea) }));
     const targetIndex = number(index, -1);
     if (
       !Number.isInteger(targetIndex) ||
@@ -4677,7 +4652,7 @@ function createFacturasController(host = null, context = {}) {
 
   function readCreateLineItems(formNode = null) {
     if (!formNode?.querySelectorAll) {
-      return safeArray(createModal.form.lineas);
+      return arrayFrom(createModal.form.lineas);
     }
 
     return Array.from(
@@ -4689,7 +4664,7 @@ function createFacturasController(host = null, context = {}) {
       return {
         id: cleanText(
           first(
-            safeArray(createModal.form.lineas)[index]?.id,
+            arrayFrom(createModal.form.lineas)[index]?.id,
             `linea-${index + 1}`
           ),
           `linea-${index + 1}`
@@ -4846,7 +4821,7 @@ function createFacturasController(host = null, context = {}) {
       currency: "EUR",
       moneda: "EUR",
 
-      lineas: safeArray(breakdown.lineas).map((linea, index) => {
+      lineas: arrayFrom(breakdown.lineas).map((linea, index) => {
         const baseLinea = number(linea.base, 0);
         const ivaImporte = Math.round(
           (baseLinea * (breakdown.ivaRate / 100) + Number.EPSILON) * 100

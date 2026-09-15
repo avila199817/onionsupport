@@ -2,6 +2,8 @@ import { cleanText } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { renderModalCloseButton, renderModalShell } from "../../features/entity-overlay/modal-host.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { arrayFrom } from "../../core/arrays.js";
 /* =========================================================
    Onion Support - Clientes Create Template
    Archivo: /src/views/clientes/clientes.template.create.js
@@ -155,44 +157,6 @@ const DEFAULT_FORM =
 /* =========================================================
    BASICS
 ========================================================= */
-
-function isObject(value) {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
-}
-
-function safeObject(
-  value,
-  fallback = {}
-) {
-  return isObject(value)
-    ? value
-    : fallback;
-}
-
-function safeArray(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (
-    value &&
-    typeof value === "object" &&
-    typeof value.length === "number" &&
-    typeof value !== "string"
-  ) {
-    try {
-      return Array.from(value);
-    } catch {
-      return [];
-    }
-  }
-
-  return [];
-}
 
 
 /*
@@ -1492,7 +1456,7 @@ function buildVm(
     );
 
   const userResults =
-    safeArray(
+    arrayFrom(
       raw.userSearch
         ?.results
     )
@@ -1819,7 +1783,7 @@ function renderSelect({
         ${errorId ? `aria-invalid="true" aria-describedby="${attr(errorId)}"` : ""}
         ${disabledAttrs(disabled, disabled)}
       >
-        ${safeArray(options)
+        ${arrayFrom(options)
           .map(
             (option) => `
               <option

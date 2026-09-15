@@ -31,6 +31,8 @@ import { AppCore } from "../../core/index.js";
 import { normalizeUsuarioModel } from "./usuarios.api.js";
 import { userNameFromIdentity } from "../../core/user-identity.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { arrayFrom } from "../../core/arrays.js";
 
 /* =========================================================
    META / ACTIONS
@@ -105,43 +107,8 @@ function isBrowser() {
   );
 }
 
-function isObject(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-  );
-}
-
 function isFunction(value) {
   return typeof value === "function";
-}
-
-function safeObject(value, fallback = {}) {
-  return isObject(value)
-    ? value
-    : fallback;
-}
-
-function safeArray(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (
-    value &&
-    typeof value === "object" &&
-    typeof value.length === "number" &&
-    typeof value !== "string"
-  ) {
-    try {
-      return Array.from(value);
-    } catch {
-      return [];
-    }
-  }
-
-  return [];
 }
 
 
@@ -446,13 +413,13 @@ function cloneDetail(detail = null) {
     },
 
     permissions: [
-      ...safeArray(
+      ...arrayFrom(
         safeDetail.permissions
       ),
     ],
 
     roles: [
-      ...safeArray(
+      ...arrayFrom(
         safeDetail.roles
       ),
     ],
@@ -1032,7 +999,7 @@ function getPermissions(detail = {}) {
 
   for (
     const value
-    of safeArray(
+    of arrayFrom(
       detail.permissions
     )
   ) {

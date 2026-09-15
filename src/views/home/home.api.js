@@ -25,6 +25,8 @@ import IncidenciasApi from "../incidencias/incidencias.api.js";
 import FacturasApi from "../facturas/facturas.api.js";
 import { fetchClientesStatsRequest } from "../clientes/clientes.api.js";
 import { fetchUsuariosStatsRequest } from "../usuarios/usuarios.api.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 
 export const HOME_API_VERSION =
   "home.api.domain-aggregator.v13-domain-counts";
@@ -56,18 +58,6 @@ const cacheState = {
 /* =========================================================
    BASICS
 ========================================================= */
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
 
 
 function first(...values) {

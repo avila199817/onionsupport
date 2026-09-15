@@ -21,6 +21,9 @@ export const PUBLIC_HOME_VIEW_VERSION =
 
 const SOURCE = "public.home.view";
 const DEFAULT_SCROLL_OFFSET = 92;
+// Late route styles or media grow the sections above a requested fragment
+// after its first alignment; it keeps following its section this long.
+const FRAGMENT_SETTLE_MS = 8000;
 const ACTIVE_ROOT_MARGIN = "-34% 0px -54% 0px";
 const INSTANCES = new WeakMap();
 const STYLE_CACHE = new WeakMap();
@@ -466,6 +469,7 @@ function scrollToHash(hash, refs, host, activeState, options = {}) {
   const didScroll = hostScrollTo(host, top, behavior);
   if (!didScroll) return false;
 
+  activeState.alignedTop = behavior === "auto" ? hostScrollTop(host) : null;
   setActiveHash(refs, clean, activeState);
 
   if (options.replace !== false) {
@@ -690,7 +694,7 @@ function createFrameScheduler(task) {
   };
 }
 
-function initScrollPipeline(refs, cleanups, host) {
+function initScrollPipeline(refs, cleanups, host, activeState) {
   const state = {
     metricsDirty: true,
     max: 1,
@@ -811,6 +815,15 @@ function initScrollPipeline(refs, cleanups, host) {
   function invalidate() {
     state.metricsDirty = true;
     scheduler.schedule();
+    // The same structural invalidation keeps a requested fragment aligned
+    // while the layout settles, until the visitor scrolls away from it.
+    const hash = window.location.hash;
+    if (!hash || hash === "#inicio" || Date.now() > activeState.settleUntil) return;
+    if (activeState.alignedTop !== null && Math.abs(hostScrollTop(host) - activeState.alignedTop) > 2) {
+      activeState.settleUntil = 0;
+      return;
+    }
+    activeState.realign?.();
   }
 
   addEvent(cleanups, window, "resize", invalidate, { passive: true });
@@ -1288,7 +1301,12 @@ function initInitialPosition(refs, host, activeState, cleanups) {
     if (window.location.hash && window.location.hash !== "#inicio") schedule();
   });
   addEvent(cleanups, window, "hashchange", schedule);
-  cleanups.push(() => cancelFrame(frame));
+  activeState.realign = schedule;
+  activeState.settleUntil = Date.now() + FRAGMENT_SETTLE_MS;
+  cleanups.push(() => {
+    cancelFrame(frame);
+    activeState.realign = null;
+  });
   schedule();
 }
 
@@ -1316,7 +1334,7 @@ export function renderPublicHomeView(container, context = {}) {
   const cleanups = [];
   const view = mountTemplate(container);
   const refs = getRefs(view);
-  const activeState = { activeHash: "" };
+  const activeState = { activeHash: "", alignedTop: null, settleUntil: 0, realign: null };
 
   /*
     Se resuelve ANTES de cualquier medida, pero por contrato DOM, no por
@@ -1330,7 +1348,7 @@ export function renderPublicHomeView(container, context = {}) {
   const menu = initMenu(refs, cleanups);
   initAnchorScroll(refs, cleanups, host, activeState, menu);
   initCtaTracking(refs, cleanups);
-  initScrollPipeline(refs, cleanups, host);
+  initScrollPipeline(refs, cleanups, host, activeState);
   initActiveSection(refs, cleanups, host, activeState);
   initReveal(refs, cleanups, host);
   initPointerFx(refs, cleanups);

@@ -33,7 +33,6 @@ const pendingShell = (file, until) => ({ kind: "shell", file, until });
 const fixedLayer = (file, reason) => ({ kind: "layer", file, reason });
 const FIXED_INVENTORY = new Map([
   // dialog shells pending migration
-  [".fpc-overlay", pendingShell("src/features/facturas-paid-confirm/style.css", "facturas-confirm-shell")],
   [".correo-modal-backdrop", pendingShell("src/css/views/correo/index.css", "correo-shell")],
   [".correo-compose", pendingShell("src/css/views/correo/index.css", "correo-shell")],
   [".correo-confirm-overlay", pendingShell("src/css/views/correo/index.css", "correo-shell")],
@@ -87,6 +86,7 @@ const SHELL_CONSUMERS = [
   "src/views/usuarios/usuarios.template.create.js",
   "src/views/clientes/clientes.template.modal.js",
   "src/views/facturas/index.js",
+  "src/features/facturas-paid-confirm/index.js",
 ];
 
 const STRUCTURAL_CLASS = /\.ui-detail-modal-(?:root|overlay|panel|header|body|footer|close-btn)\b/u;
@@ -272,7 +272,7 @@ function walk(dir, pattern, out = []) {
 test("migrated dialogs render through the shell and emit no structure of their own", () => {
   for (const file of SHELL_CONSUMERS) {
     const source = read(file);
-    assert.match(source, /import \{[^}]*\brenderModalShell\b[^}]*\} from "(?:\.\/|(?:\.\.\/)+features\/entity-overlay\/)modal-host\.js";/u, `${file} imports the shell`);
+    assert.match(source, /import \{[^}]*\brenderModalShell\b[^}]*\} from "(?:\.\/|(?:\.\.\/)+(?:features\/)?entity-overlay\/)modal-host\.js";/u, `${file} imports the shell`);
     for (const needle of ['role="dialog"', "ui-detail-modal-overlay", "ui-detail-modal-panel", "data-modal-overlay", "data-modal-panel"]) {
       assert.equal(source.includes(needle), false, `${file} emits ${needle} outside the shell`);
     }

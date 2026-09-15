@@ -4,7 +4,7 @@ import { renderReviewPanel } from "./review-panel.js";
 import { getFacturaReviews, requestFacturaReviews } from "../../views/facturas/facturas.reviews.api.js";
 import { AppCore } from "../../core/index.js";
 import { createModalLifecycle, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
-import { createModalHost, renderModalContent } from "../entity-overlay/modal-host.js";
+import { createModalHost, renderModalCloseButton, renderModalContent, renderModalShell } from "../entity-overlay/modal-host.js";
 /* =========================================================
    Onion Support · Facturas · Paid Confirmation Experience
    Archivo: /src/features/facturas-paid-confirm/index.js
@@ -43,12 +43,11 @@ let reviewPollTimer = 0;
 const confirmationHost = createModalHost({
   id: ROOT_ID,
   attributes: { "data-fpc-root": "true" },
-  onMount: root => root.addEventListener("click", onRootClick),
-  onRemove: root => root.removeEventListener("click", onRootClick),
 });
 const modalLifecycle = createModalLifecycle({
   getPanel: () => document.querySelector(`#${ROOT_ID} [data-fpc-dialog='true']`),
   onEscape: () => { if (!state?.submitting) closeDialog(); },
+  onBackdrop: () => { if (!state?.submitting) closeDialog(); },
   onDetached: () => closeDialog({ restoreFocus: false }),
   bodyClasses: ['facturas-payment-confirm-open'],
 });
@@ -390,36 +389,40 @@ function renderDialog() {
     ? "El cobro ya consta registrado. Se completará o reparará la factura definitiva sin volver a registrar el pago."
     : "Al confirmar, se registrará el cobro completo y se generará la versión definitiva de la factura.";
 
-  return `
-    <div class="fpc-overlay" data-fpc-overlay="true">
-      <section class="fpc-dialog" role="dialog" aria-modal="true" aria-labelledby="fpc-title" aria-describedby="fpc-description" tabindex="-1" data-fpc-dialog="true">
-        <header class="fpc-header">
-          <span class="fpc-hero-icon" aria-hidden="true">${icon("check")}</span>
-          <div class="fpc-header-copy"><span class="fpc-eyebrow">Facturación · Confirmación</span><h2 id="fpc-title">${escapeHtml(title)}</h2><p id="fpc-description">${escapeHtml(intro)}</p></div>
-          <button type="button" class="fpc-close" data-fpc-action="cancel" aria-label="Cerrar confirmación" title="Cerrar" ${busy ? "disabled aria-disabled=\"true\"" : ""}>${icon("close")}</button>
-        </header>
-
-        <div class="fpc-body">
-          ${state.loading ? `<div class="fpc-loading" aria-live="polite" aria-busy="true"><span class="fpc-spinner" aria-hidden="true"></span><div><strong>Cargando factura…</strong><span>Comprobando el estado actual antes de continuar.</span></div></div>` : ""}
-          ${!state.loading && state.factura ? renderSummary(factura) : ""}
-          ${!state.loading && state.factura ? renderFlow() : ""}
-          ${!state.loading && state.factura && !facturaEmail(factura) ? `<div class="fpc-note" role="note"><span aria-hidden="true">${icon("warning")}</span><p><strong>Sin email de cliente</strong><small>El cobro y el PDF definitivo se completarán igualmente, pero no podrá hacerse la entrega automática por correo.</small></p></div>` : ""}
-          ${state.error ? `<div class="fpc-error" role="alert"><strong>No se pudo completar la acción</strong><span>${escapeHtml(state.error)}</span></div>` : ""}
-          ${state.result && state.factura
-            ? renderResult(factura)
-            : !state.loading
-              ? `<div class="fpc-actions">
-                  <button type="button" class="fpc-btn fpc-btn--secondary" data-fpc-action="cancel" ${state.submitting ? "disabled aria-disabled=\"true\"" : ""}>Cancelar</button>
-                  <button type="button" class="fpc-btn fpc-btn--primary" data-fpc-action="confirm" ${state.submitting || !state.factura ? "disabled aria-disabled=\"true\"" : ""}>
-                    ${state.submitting ? `<span class="fpc-spinner fpc-spinner--button" aria-hidden="true"></span><span>Finalizando…</span>` : `<span aria-hidden="true">${icon("check")}</span><span>${alreadyPaid ? "Finalizar y enviar" : "Marcar pagada y enviar"}</span>`}
-                  </button>
-                </div>`
-              : ""}
-          ${!state.loading && state.result && facturaIsPaid(factura) && AppCore.getState()?.role === "admin" ? renderReviewPanel({ data: state.reviews, loading: state.reviewsLoading, error: state.reviewsError, canRequest: complete }) : ""}
-        </div>
-      </section>
-    </div>
-  `;
+  return renderModalShell({
+    rootClass: "fpc-root",
+    overlayAttributes: { "data-fpc-overlay": "true" },
+    panelAttributes: { "data-fpc-dialog": "true" },
+    labelledBy: "fpc-title",
+    describedBy: "fpc-description",
+    size: "compact",
+    height: "auto",
+    submitting: Boolean(state.submitting),
+    header: `<div class="fpc-hero">
+        <span class="fpc-hero-icon" aria-hidden="true">${icon("check")}</span>
+        <div class="fpc-header-copy"><span class="fpc-eyebrow">Facturación · Confirmación</span><h2 id="fpc-title">${escapeHtml(title)}</h2><p id="fpc-description">${escapeHtml(intro)}</p></div>
+      </div>
+      ${renderModalCloseButton({ label: "Cerrar confirmación", attributes: { "data-fpc-action": "cancel", title: "Cerrar", disabled: busy, "aria-disabled": busy ? "true" : null } })}`,
+    bodyClass: "fpc-body",
+    body: `
+      ${state.loading ? `<div class="fpc-loading" aria-live="polite" aria-busy="true"><span class="fpc-spinner" aria-hidden="true"></span><div><strong>Cargando factura…</strong><span>Comprobando el estado actual antes de continuar.</span></div></div>` : ""}
+      ${!state.loading && state.factura ? renderSummary(factura) : ""}
+      ${!state.loading && state.factura ? renderFlow() : ""}
+      ${!state.loading && state.factura && !facturaEmail(factura) ? `<div class="fpc-note" role="note"><span aria-hidden="true">${icon("warning")}</span><p><strong>Sin email de cliente</strong><small>El cobro y el PDF definitivo se completarán igualmente, pero no podrá hacerse la entrega automática por correo.</small></p></div>` : ""}
+      ${state.error ? `<div class="fpc-error" role="alert"><strong>No se pudo completar la acción</strong><span>${escapeHtml(state.error)}</span></div>` : ""}
+      ${state.result && state.factura
+        ? renderResult(factura)
+        : !state.loading
+          ? `<div class="fpc-actions">
+              <button type="button" class="fpc-btn fpc-btn--secondary" data-fpc-action="cancel" ${state.submitting ? "disabled aria-disabled=\"true\"" : ""}>Cancelar</button>
+              <button type="button" class="fpc-btn fpc-btn--primary" data-fpc-action="confirm" ${state.submitting || !state.factura ? "disabled aria-disabled=\"true\"" : ""}>
+                ${state.submitting ? `<span class="fpc-spinner fpc-spinner--button" aria-hidden="true"></span><span>Finalizando…</span>` : `<span aria-hidden="true">${icon("check")}</span><span>${alreadyPaid ? "Finalizar y enviar" : "Marcar pagada y enviar"}</span>`}
+              </button>
+            </div>`
+          : ""}
+      ${!state.loading && state.result && facturaIsPaid(factura) && AppCore.getState()?.role === "admin" ? renderReviewPanel({ data: state.reviews, loading: state.reviewsLoading, error: state.reviewsError, canRequest: complete }) : ""}
+    `,
+  });
 }
 
 function focusDialog() {
@@ -445,12 +448,7 @@ function render({ focus = false } = {}) {
   const root = state?.open ? ensureRoot() : confirmationHost.get();
   if (!root) return false;
 
-  renderModalContent(root, renderDialog(), {
-    rootSelector: "[data-fpc-overlay='true']",
-    panelSelector: "[data-fpc-dialog='true']",
-    focusAttributes: ["id", "data-fpc-action"],
-    scrollSelector: ".fpc-body",
-  });
+  renderModalContent(root, renderDialog(), { focusAttributes: ["id", "data-fpc-action"] });
   if (state?.open) modalLifecycle.activate({ opener: state.opener });
   else modalLifecycle.deactivate({ restoreFocus: false });
   if (focus && state?.open) requestAnimationFrame(focusDialog);
@@ -751,13 +749,6 @@ function onDocumentClick(event) {
   if (action === "done") {
     closeDialog({ restoreFocus: false });
   }
-}
-
-function onRootClick(event) {
-  if (!state?.open || state.submitting) return;
-  const overlay = event.target?.closest?.("[data-fpc-overlay='true']");
-  const dialog = event.target?.closest?.("[data-fpc-dialog='true']");
-  if (overlay && !dialog && event.target === overlay) closeDialog();
 }
 
 export function installFacturasPaidConfirm() {

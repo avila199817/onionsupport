@@ -3,74 +3,21 @@
    Archivo: /src/features/facturas-paid-confirm/style.css
 
    SYSTEM TOKENS · RESPONSIVE · ACCESSIBLE
+
+   La estructura (root, overlay, panel, header, cierre, scroll) la aporta el
+   shell canónico (components/detail-modal.css, tamaño compact); esta hoja
+   estiliza el contenido del flujo de cobro.
 ========================================================= */
 
 @layer views {
 
-body.facturas-payment-confirm-open {
-  overflow: hidden;
-  overscroll-behavior: none;
-}
-
-#onion-facturas-paid-confirm-root,
-#onion-facturas-paid-confirm-root *,
-#onion-facturas-paid-confirm-root *::before,
-#onion-facturas-paid-confirm-root *::after {
-  box-sizing: border-box;
-}
-
-#onion-facturas-paid-confirm-root:empty {
-  display: none;
-}
-
-.fpc-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: calc(var(--z-modal, 1000) + 80);
+/* Hero del header del shell: icono y copy. */
+.fpc-hero {
+  min-inline-size: 0;
   display: grid;
-  place-items: center;
-  padding: clamp(14px, 3vw, 34px);
-  overflow: auto;
-  background: var(--backdrop-bg, rgba(0, 0, 0, .68));
-  backdrop-filter: blur(14px) saturate(.92);
-  -webkit-backdrop-filter: blur(14px) saturate(.92);
-  animation: fpc-overlay-in 150ms ease-out both;
-}
-
-.fpc-dialog {
-  --fpc-radius: var(--radius-lg, 20px);
-
-  position: relative;
-  inline-size: min(660px, 100%);
-  max-block-size: min(88dvh, 820px);
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  overflow: hidden;
-  border: 1px solid var(--panel-border, var(--border-default));
-  border-radius: var(--fpc-radius);
-  background: var(--panel-bg);
-  color: var(--text);
-  box-shadow: var(--shadow-modal, 0 30px 90px rgba(0, 0, 0, .34));
-  outline: none;
-  isolation: isolate;
-  animation: fpc-dialog-in 190ms var(--ease-standard, ease-out) both;
-}
-
-.fpc-dialog:focus-visible {
-  box-shadow: var(--shadow-modal, 0 30px 90px rgba(0, 0, 0, .34)), var(--focus-ring);
-}
-
-.fpc-header {
-  position: relative;
-  display: grid;
-  grid-template-columns: 52px minmax(0, 1fr) 38px;
+  grid-template-columns: 52px minmax(0, 1fr);
   align-items: start;
   gap: 14px;
-  padding: 22px 22px 18px;
-  border-block-end: 1px solid var(--border-soft, var(--border-default));
-  background:
-    radial-gradient(circle at 8% 0%, color-mix(in srgb, var(--success) 12%, transparent), transparent 42%),
-    var(--surface-2, var(--panel-bg));
 }
 
 .fpc-hero-icon {
@@ -89,7 +36,6 @@ body.facturas-payment-confirm-open {
 .fpc-result-icon svg,
 .fpc-flow-icon svg,
 .fpc-note svg,
-.fpc-close svg,
 .fpc-btn svg {
   inline-size: 19px;
   block-size: 19px;
@@ -115,7 +61,7 @@ body.facturas-payment-confirm-open {
   text-transform: uppercase;
 }
 
-.fpc-header h2 {
+.fpc-header-copy h2 {
   margin: 0;
   color: var(--text-strong);
   font-size: clamp(22px, 3.1vw, 30px);
@@ -125,7 +71,7 @@ body.facturas-payment-confirm-open {
   text-wrap: balance;
 }
 
-.fpc-header p {
+.fpc-header-copy p {
   max-inline-size: 530px;
   margin: 0;
   color: var(--text-muted);
@@ -133,39 +79,11 @@ body.facturas-payment-confirm-open {
   line-height: 1.55;
 }
 
-.fpc-close {
-  appearance: none;
-  inline-size: 38px;
-  block-size: 38px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 1px solid var(--btn-secondary-border, var(--border-default));
-  border-radius: var(--btn-radius, 11px);
-  background: var(--btn-secondary-bg, var(--solid-bg-1));
-  color: var(--text-muted);
-  cursor: pointer;
-  transition:
-    border-color var(--duration-fast, 120ms) var(--ease-standard, ease),
-    background var(--duration-fast, 120ms) var(--ease-standard, ease),
-    color var(--duration-fast, 120ms) var(--ease-standard, ease),
-    transform var(--duration-fast, 120ms) var(--ease-standard, ease);
-}
-
-.fpc-close:hover:not(:disabled) {
-  transform: translateY(-1px);
-  border-color: var(--border-error, var(--border-default));
-  background: var(--error-bg, var(--solid-hover));
-  color: var(--error-strong, var(--error));
-}
-
-.fpc-close:focus-visible,
 .fpc-btn:focus-visible {
   outline: 0;
   box-shadow: var(--focus-ring);
 }
 
-.fpc-close:disabled,
 .fpc-btn:disabled,
 .fpc-btn[aria-disabled="true"] {
   cursor: not-allowed;
@@ -173,27 +91,10 @@ body.facturas-payment-confirm-open {
   transform: none;
 }
 
+/* Body del shell (único scroll): separación y padding del contenido. */
 .fpc-body {
-  min-block-size: 0;
-  display: grid;
-  align-content: start;
   gap: 15px;
   padding: 20px 22px 22px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
-}
-
-.fpc-body::-webkit-scrollbar {
-  inline-size: var(--scrollbar-size, 9px);
-}
-
-.fpc-body::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: var(--radius-pill, 999px);
-  background: var(--scrollbar-thumb);
-  background-clip: padding-box;
 }
 
 .fpc-loading,
@@ -508,23 +409,9 @@ body.facturas-payment-confirm-open {
 }
 
 @media (max-width: 680px) {
-  .fpc-overlay {
-    place-items: end stretch;
-    padding: 0;
-  }
-
-  .fpc-dialog {
-    inline-size: 100%;
-    max-block-size: 94dvh;
-    border-inline: 0;
-    border-block-end: 0;
-    border-radius: 22px 22px 0 0;
-  }
-
-  .fpc-header {
-    grid-template-columns: 46px minmax(0, 1fr) 36px;
+  .fpc-hero {
+    grid-template-columns: 46px minmax(0, 1fr);
     gap: 11px;
-    padding: 18px 16px 15px;
   }
 
   .fpc-hero-icon {
@@ -564,9 +451,8 @@ body.facturas-payment-confirm-open {
 }
 
 @media (max-width: 460px) {
-  .fpc-header {
-    grid-template-columns: 42px minmax(0, 1fr) 34px;
-    padding-inline: 13px;
+  .fpc-hero {
+    grid-template-columns: 42px minmax(0, 1fr);
   }
 
   .fpc-hero-icon {
@@ -574,7 +460,7 @@ body.facturas-payment-confirm-open {
     block-size: 42px;
   }
 
-  .fpc-header h2 {
+  .fpc-header-copy h2 {
     font-size: 20px;
   }
 
@@ -597,46 +483,29 @@ body.facturas-payment-confirm-open {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .fpc-overlay,
-  .fpc-dialog,
   .fpc-spinner {
     animation: none;
   }
 
-  .fpc-close,
   .fpc-btn {
     transition: none;
   }
 
-  .fpc-close:hover:not(:disabled),
   .fpc-btn:hover:not(:disabled) {
     transform: none;
   }
 }
 
 @media (forced-colors: active) {
-  .fpc-dialog,
   .fpc-summary-item,
   .fpc-flow,
   .fpc-loading,
   .fpc-error,
   .fpc-result,
   .fpc-note,
-  .fpc-btn,
-  .fpc-close {
+  .fpc-btn {
     forced-color-adjust: auto;
   }
 }
-
-@keyframes fpc-overlay-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes fpc-dialog-in {
-  from { opacity: 0; transform: translateY(10px) scale(.987); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
-
 
 } /* @layer views */

@@ -151,13 +151,13 @@ assert.ok(cuentaError.includes(`<p>${bodyHtml}</p>`), "Direct Cuenta error retai
 // core/presentation-text.js and escapeHtml (HTML escaping) in
 // core/escape-html.js, split so the startup closures load the normalizer
 // alone. Every module imports them (directly or through a live reexport)
-// instead of carrying a copy. The two escapeHtml copies listed below leave
-// with the escapeHtml unit; the list is an upper bound that only shrinks,
-// so the trusted base tooling keeps validating the candidate that removes them.
+// instead of carrying a copy under any name: no other module may emit the
+// "&amp;" entity itself. core/public-legal.js is the one exception, because
+// the public Home integrity guard requires it to stay an import-free module.
 const SRC_ROOT = fileURLToPath(new URL("../src/", import.meta.url));
 const CLEAN_TEXT_AUTHORITY = "src/core/presentation-text.js";
 const ESCAPE_HTML_AUTHORITY = "src/core/escape-html.js";
-const ESCAPE_HTML_COPIES_PENDING = Object.freeze(["src/views/agenda/index.js", "src/views/public/index.js"]);
+const ESCAPE_FINGERPRINT_EXEMPT = Object.freeze(["src/core/public-legal.js"]);
 function sourceFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, "en")).flatMap((entry) => {
     const path = join(directory, entry.name);
@@ -167,9 +167,11 @@ function sourceFiles(directory) {
 }
 const definers = { cleanText: [], escapeHtml: [] };
 const callersWithoutBinding = [];
+const escapeFingerprints = [];
 for (const file of sourceFiles(SRC_ROOT)) {
   const code = readFileSync(file, "utf8");
   const path = `src/${relative(SRC_ROOT, file).split(sep).join("/")}`;
+  if (path !== ESCAPE_HTML_AUTHORITY && !ESCAPE_FINGERPRINT_EXEMPT.includes(path) && code.includes("&amp;")) escapeFingerprints.push(path);
   for (const name of Object.keys(definers)) {
     const defines = new RegExp(`^(?:export )?(?:async )?(?:function ${name}\\s*\\(|(?:const|let|var) ${name}\\b)`, "mu").test(code);
     const imports = new RegExp(`import\\s*\\{[^}]*\\b${name}\\b[^}]*\\}\\s*from\\s*"[^"]+"`, "u").test(code);
@@ -178,9 +180,8 @@ for (const file of sourceFiles(SRC_ROOT)) {
   }
 }
 assert.deepEqual(definers.cleanText, [CLEAN_TEXT_AUTHORITY], "cleanText is defined once, in the authority");
-const allowedEscapeDefiners = new Set([ESCAPE_HTML_AUTHORITY, ...ESCAPE_HTML_COPIES_PENDING]);
-assert.ok(definers.escapeHtml.includes(ESCAPE_HTML_AUTHORITY), "the authority defines escapeHtml");
-assert.deepEqual(definers.escapeHtml.filter((path) => !allowedEscapeDefiners.has(path)), [], "escapeHtml is defined only in the authority and the pending copies; the list only shrinks");
+assert.deepEqual(definers.escapeHtml, [ESCAPE_HTML_AUTHORITY], "escapeHtml is defined once, in the authority");
+assert.deepEqual(escapeFingerprints, [], "no module escapes HTML on its own: only the authority and the import-free legal renderer emit &amp;");
 assert.deepEqual(callersWithoutBinding, [], "every cleanText and escapeHtml caller binds its canonical helper");
 
-console.log(`Presentation text contract: PASS · Unicode/coercion/fallback identity · canonical reexports · one cleanText authority (no local copies) · one escapeHtml authority (${ESCAPE_HTML_COPIES_PENDING.length} copies pending) · actual pending, Correo, Servidor, Facturas and Incidencias markup · multiline body/comments · redaction`);
+console.log(`Presentation text contract: PASS · Unicode/coercion/fallback identity · canonical reexports · one cleanText authority (no local copies) · one escapeHtml authority (no local copies; public-legal keeps its import-free escaper) · actual pending, Correo, Servidor, Facturas and Incidencias markup · multiline body/comments · redaction`);

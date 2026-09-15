@@ -11,12 +11,12 @@
 ========================================================= */
 
 import { ROUTES } from "../../../core/config.js";
+import { escapeHtml } from "../../../core/escape-html.js";
 
 import {
   PUBLIC_AUTH_LOGO,
   PUBLIC_AUTH_LOGO_WEBP,
   escapeAttr,
-  escapeHtml,
   renderPublicShell,
   safeAssetSrc,
   safeInternalHref,

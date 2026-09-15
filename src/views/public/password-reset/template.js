@@ -10,6 +10,7 @@
 ========================================================= */
 
 import { ROUTES } from "../../../core/config.js";
+import { escapeHtml } from "../../../core/escape-html.js";
 
 import {
   AUTH_PASSWORD_POLICY,
@@ -20,7 +21,6 @@ import {
   PUBLIC_AUTH_LOGO,
   PUBLIC_AUTH_LOGO_WEBP,
   escapeAttr,
-  escapeHtml,
   renderPublicShell,
   safeAssetSrc,
   safeInternalHref,

@@ -1,5 +1,5 @@
 "use strict";
-const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+import { escapeHtml } from "../../core/escape-html.js";
 const states = {
   not_requested: "Todavía no se ha solicitado la valoración.",
   pending: "Solicitud registrada; se enviará después de verificar la factura y su correo.",
@@ -30,15 +30,15 @@ export function renderReviewPanel({ data = null, loading = false, error = "", ca
   return `<section class="fpc-review-panel" aria-label="Valoraciones de este servicio" data-review-panel>
     <div class="fpc-note"><span aria-hidden="true">★</span><div>
       <strong>Valoraciones · Google y atención del técnico</strong>
-      <p role="status">${esc(loading ? "Consultando valoraciones…" : states[status] || "Estado de valoraciones no disponible.")}</p>
-      ${reasons[summary?.reason] ? `<p>${esc(reasons[summary.reason])}</p>` : ""}
+      <p role="status">${escapeHtml(loading ? "Consultando valoraciones…" : states[status] || "Estado de valoraciones no disponible.")}</p>
+      ${reasons[summary?.reason] ? `<p>${escapeHtml(reasons[summary.reason])}</p>` : ""}
       <small>La reseña en Google es pública; las respuestas sobre el técnico son privadas. Este apartado no registra pagos ni reenvía la factura.</small>
-      ${error ? `<p role="alert">${esc(error)}</p>` : ""}
+      ${error ? `<p role="alert">${escapeHtml(error)}</p>` : ""}
     </div></div>
     ${responses.map(s => `<div class="fpc-summary"><div class="fpc-summary-item fpc-summary-item--wide">
-      <span>${esc(s.context?.serviceReference || s.serviceId)} · ${esc(s.context?.technicianDisplayName || "Técnico")}</span>
-      <strong>${esc(s.response.ratings?.overall)} / 5 · Valoración privada</strong>
-      ${s.response.comment ? `<p>${esc(s.response.comment)}</p>` : ""}
+      <span>${escapeHtml(s.context?.serviceReference || s.serviceId)} · ${escapeHtml(s.context?.technicianDisplayName || "Técnico")}</span>
+      <strong>${escapeHtml(s.response.ratings?.overall)} / 5 · Valoración privada</strong>
+      ${s.response.comment ? `<p>${escapeHtml(s.response.comment)}</p>` : ""}
       ${s.response.requestContact ? "<strong>El cliente solicita contacto.</strong>" : ""}
     </div></div>`).join("")}
     <div class="fpc-actions">

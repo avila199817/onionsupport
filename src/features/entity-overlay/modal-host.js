@@ -1,7 +1,7 @@
 /* Private dialog DOM: the canonical shell and its host.
 
    Shell: one DOM structure for every private dialog
-   (root → overlay → panel[role=dialog] → header / body / footer), its ARIA,
+   (root → overlay → panel[role=dialog|alertdialog] → header / body / footer), its ARIA,
    sizes, the close control and the loading/error/empty states. Domains
    provide content, actions and data attributes for their identity, nothing
    structural. Host: mounting, leasing and patching of that panel.
@@ -32,6 +32,8 @@ export const MODAL_SIZES = Object.freeze(["detail", "wide", "form", "compact", "
    auto: the panel grows with its content up to the viewport. */
 export const MODAL_HEIGHTS = Object.freeze(["fixed", "auto"]);
 export const MODAL_STATES = Object.freeze(["loading", "error", "empty"]);
+/* dialog by default; alertdialog for confirmations that interrupt a task. */
+export const MODAL_ROLES = Object.freeze(["dialog", "alertdialog"]);
 
 const CLOSE_ICON =
   '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
@@ -85,6 +87,7 @@ export function renderModalState({ kind = "loading", title = "", message = "", i
   overlayClass / overlayAttributes     owner markers on the backdrop layer
   panelId / panelClass / panelAttributes
   labelledBy | label                   ARIA name; describedBy optional
+  role                                 dialog (default) | alertdialog
   size, height                         explicit structural variants
   submitting                           adds is-submitting to the panel
   prelude                              markup layered over the panel (confirmations, busy veils)
@@ -95,7 +98,7 @@ export function renderModalShell({
   id = "", rootClass = "", rootAttributes = {},
   overlayClass = "", overlayAttributes = {},
   panelId = "", panelClass = "", panelAttributes = {},
-  labelledBy = "", label = "", describedBy = "",
+  labelledBy = "", label = "", describedBy = "", role = "dialog",
   size = "detail", height = "fixed", submitting = false,
   prelude = "", header = "", body = "", footer = "",
   headerClass = "", bodyClass = "", footerClass = "", bodyAttributes = {},
@@ -105,7 +108,7 @@ export function renderModalShell({
     : text(label) ? ` aria-label="${escapeHtml(label)}"` : "";
   return `<section${id ? ` id="${escapeHtml(id)}"` : ""} class="${classList("ui-detail-modal-root", rootClass)}" data-modal-shell="${MODAL_SHELL_VERSION}" data-modal-size="${oneOf(size, MODAL_SIZES, "detail")}" data-modal-height="${oneOf(height, MODAL_HEIGHTS, "fixed")}" data-open="true"${attributes(rootAttributes)}>
   <div class="${classList("ui-detail-modal-overlay", overlayClass)}" data-modal-overlay="true"${attributes(overlayAttributes)}>
-    <div${panelId ? ` id="${escapeHtml(panelId)}"` : ""} class="${classList("ui-detail-modal-panel", panelClass, submitting ? "is-submitting" : "")}" role="dialog" aria-modal="true"${ariaName}${text(describedBy) ? ` aria-describedby="${escapeHtml(describedBy)}"` : ""} tabindex="-1" data-modal-panel="true"${attributes(panelAttributes)}>
+    <div${panelId ? ` id="${escapeHtml(panelId)}"` : ""} class="${classList("ui-detail-modal-panel", panelClass, submitting ? "is-submitting" : "")}" role="${oneOf(role, MODAL_ROLES, "dialog")}" aria-modal="true"${ariaName}${text(describedBy) ? ` aria-describedby="${escapeHtml(describedBy)}"` : ""} tabindex="-1" data-modal-panel="true"${attributes(panelAttributes)}>
       ${prelude || ""}
       <header class="${classList("ui-detail-modal-header", headerClass)}" data-modal-header="true">${header || ""}</header>
       <main class="${classList("ui-detail-modal-body", bodyClass)}" data-modal-body="true"${attributes(bodyAttributes)}>${body || ""}</main>

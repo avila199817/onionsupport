@@ -97,7 +97,7 @@ try {
     await page.locator(payment).click();
     await page.locator(cancel).waitFor();
     assert.equal(await page.locator(cancel).evaluate((node) => document.activeElement === node), true);
-    assert.equal(await page.locator(".facturas-resend-confirm-overlay").evaluate((node) => getComputedStyle(node).position), "fixed");
+    assert.equal(await page.locator("[data-facturas-resend-confirm-overlay='true']").evaluate((node) => getComputedStyle(node).position), "fixed");
     assert.equal(await page.locator("[data-fpc-dialog]").count(), 0);
     await page.keyboard.press("Tab");
     assert.equal(await page.locator(confirm).evaluate((node) => document.activeElement === node), true);
@@ -189,7 +189,7 @@ try {
       await page.evaluate((kind) => {
         if (kind === "abort") __abort.abort();
         else if (kind === "detach") document.querySelector("#facturas-resend-confirm-root").remove();
-        else if (kind === "backdrop") document.querySelector(".facturas-resend-confirm-overlay").click();
+        else if (kind === "backdrop") document.querySelector("[data-facturas-resend-confirm-overlay='true']").click();
         else window.dispatchEvent(new Event(kind));
       }, dismissal);
       await page.waitForFunction(() => __resendSettles === 1);

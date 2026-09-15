@@ -529,6 +529,10 @@ def validate_detail_modal_v6_contract(errors: list[str]) -> None:
     if "incidencias-modal-" in users_template or "incidencias-detail-open" in users_template:
         errors.append("src/views/usuarios/usuarios.template.modal.js :: Usuarios no puede depender de clases de Incidencias")
 
+    clientes_template = (SRC / "views" / "clientes" / "clientes.template.modal.js").read_text(encoding="utf-8")
+    if "incidencias-modal-" in clientes_template or "incidencias-timeline-" in clientes_template:
+        errors.append("src/views/clientes/clientes.template.modal.js :: Clientes no puede depender de clases de Incidencias")
+
     users_match = re.search(r"usuarios:\s*Object\.freeze\(\[(?P<body>.*?)\]\)", route_styles, re.DOTALL)
     if not users_match:
         errors.append("src/router/styles.js :: falta manifest CSS de Usuarios")

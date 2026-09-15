@@ -9,7 +9,6 @@ checks = {
     "src/views/public/index.js": (
         "PUBLIC_SHARED_VERSION",
         "PUBLIC_AUTH_LOGO",
-        "export function escapeHtml",
         "export function escapeAttr",
         "export function renderPublicShell",
         "export function safeAssetSrc",

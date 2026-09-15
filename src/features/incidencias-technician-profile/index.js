@@ -1,6 +1,6 @@
 import { escapeHtml } from "../../core/presentation-text.js";
 import { createModalLifecycle, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
-import { createModalHost, renderModalCloseButton, renderModalContent } from "../entity-overlay/modal-host.js";
+import { createModalHost, renderModalCloseButton, renderModalContent, renderModalShell } from "../entity-overlay/modal-host.js";
 /* =========================================================
    Onion Support · Incidencias Technician Profile
 
@@ -89,6 +89,7 @@ const modalLifecycle = createModalLifecycle({
   getPanel: () => profileOrigin?.isConnected ? modalPanel() : null,
   onDetached: () => closeProfile({ restoreFocus: false }),
   onEscape: () => closeProfile(),
+  onBackdrop: () => closeProfile(),
   bodyClasses: ['ui-detail-modal-open'],
 });
 
@@ -788,11 +789,19 @@ function renderShell({ tech = {}, body = "", summary = "" } = {}) {
     "Técnico"
   ), "Técnico");
 
-  return `
-    <section id="${ROOT_ID}" class="ui-detail-modal-root" data-technician-profile-root="true" data-technician-profile-version="${INCIDENCIAS_TECHNICIAN_PROFILE_VERSION}">
-      <div class="ui-detail-modal-overlay" data-technician-profile-overlay="true">
-        <div id="${PANEL_ID}" class="ui-detail-modal-panel" data-technician-profile-panel="true" role="dialog" aria-modal="true" aria-labelledby="inc-technician-title" aria-describedby="inc-technician-summary" tabindex="-1">
-          <header class="ui-detail-modal-header">
+  return renderModalShell({
+    id: ROOT_ID,
+    rootAttributes: {
+      "data-technician-profile-root": "true",
+      "data-technician-profile-version": INCIDENCIAS_TECHNICIAN_PROFILE_VERSION,
+    },
+    overlayAttributes: { "data-technician-profile-overlay": "true" },
+    panelId: PANEL_ID,
+    panelAttributes: { "data-technician-profile-panel": "true" },
+    labelledBy: "inc-technician-title",
+    describedBy: "inc-technician-summary",
+    height: "auto",
+    header: `
             <div class="ui-detail-modal-hero">
               ${avatarMarkup(tech)}
               <div class="ui-detail-modal-hero-content">
@@ -801,12 +810,9 @@ function renderShell({ tech = {}, body = "", summary = "" } = {}) {
                 <span id="inc-technician-summary" class="ui-detail-modal-updated">${escapeHtml(summary || "Perfil del técnico asignado")}</span>
               </div>
             </div>
-            ${renderModalCloseButton({ label: `Cerrar perfil de ${name}`, attributes: { "data-technician-profile-action": "close" } })}
-          </header>
-          <main class="ui-detail-modal-body">${body}</main>
-        </div>
-      </div>
-    </section>`;
+            ${renderModalCloseButton({ label: `Cerrar perfil de ${name}`, attributes: { "data-technician-profile-action": "close" } })}`,
+    body,
+  });
 }
 
 function lockBody() {
@@ -826,8 +832,6 @@ function paint(html = "", { focus = false } = {}) {
   const host = profileHost.ensure();
   if (!host) return false;
   renderModalContent(host, html, {
-    rootSelector: `#${ROOT_ID}`,
-    panelSelector: `#${PANEL_ID}`,
     focusAttributes: ["id", "data-technician-profile-action", "href"],
   });
   lockBody();
@@ -1092,14 +1096,6 @@ function onClick(event) {
     : event.target;
 
   if (target?.closest?.("[data-technician-profile-action='close']")) {
-    event.preventDefault();
-    event.stopPropagation();
-    closeProfile();
-    return;
-  }
-
-  const overlay = target?.closest?.("[data-technician-profile-overlay='true']");
-  if (overlay && target === overlay) {
     event.preventDefault();
     event.stopPropagation();
     closeProfile();

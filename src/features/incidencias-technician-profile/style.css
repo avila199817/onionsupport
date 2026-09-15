@@ -4,14 +4,10 @@
      La superficie reutiliza exclusivamente tokens del sistema.
   ======================================================= */
 
-  [data-technician-profile-root="true"] .ui-detail-modal-panel {
-    block-size: auto;
-    min-block-size: 0;
-    max-block-size: min(92dvh, 720px);
-  }
-
-  [data-technician-profile-root="true"] .ui-detail-modal-body {
-    max-block-size: calc(92dvh - 118px);
+  /* Altura propia del perfil: el panel crece con su contenido (altura `auto`
+     del shell) hasta este tope, declarado como token de la autoridad. */
+  [data-technician-profile-root="true"] {
+    --ui-detail-modal-panel-height: min(92dvh, 720px);
   }
 
   /*
@@ -209,12 +205,8 @@
   }
 
   @media (max-width: 720px) {
-    [data-technician-profile-root="true"] .ui-detail-modal-panel {
-      max-block-size: calc(100dvh - 20px);
-    }
-
-    [data-technician-profile-root="true"] .ui-detail-modal-body {
-      max-block-size: calc(100dvh - 112px);
+    [data-technician-profile-root="true"] {
+      --ui-detail-modal-panel-height: calc(100dvh - 20px);
     }
 
     [data-technician-profile-root="true"] .inc-technician-rating-card,
@@ -235,17 +227,6 @@
     [data-technician-profile-root="true"] .ui-detail-modal-avatar-frame {
       --avatar-size: 56px;
       --avatar-font-size: 21px;
-    }
-  }
-
-  @media (max-width: 540px) {
-    [data-technician-profile-root="true"] .ui-detail-modal-panel {
-      block-size: 100dvh;
-      max-block-size: 100dvh;
-    }
-
-    [data-technician-profile-root="true"] .ui-detail-modal-body {
-      max-block-size: none;
     }
   }
 

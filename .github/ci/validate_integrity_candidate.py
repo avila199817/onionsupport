@@ -163,6 +163,14 @@ def validate_swa_provenance_contract(root: Path, errors: list[str]) -> None:
             "el gate debe exigir una PR fusionada cuyo destino sea main",
         ),
         (
+            'select(.merge_commit_sha == $revision)',
+            "el gate debe exigir que el SHA sea el merge commit exacto de esa PR",
+        ),
+        (
+            'jq --arg revision "$REVISION"',
+            "el gate debe pasar la revisión validada al predicado de procedencia",
+        ),
+        (
             "Automatic production rejected:",
             "el gate debe fallar cerrado cuando no existe PR fusionada",
         ),

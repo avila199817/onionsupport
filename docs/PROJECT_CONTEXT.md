@@ -209,7 +209,7 @@ Tres rutas privadas tienen un respaldo distinto y se documentan explícitamente 
 
 | Ruta | Rol | Respaldo backend | Estado |
 | --- | --- | --- | --- |
-| `/agenda` | `admin` y `user` | Ninguno: calendario mensual local, sin HTTP ni storage (`src/views/agenda/index.js`). | Superficie preparada para citas futuras; su visibilidad para `user` es una decisión de producto pendiente del propietario. |
+| `/agenda` | `admin` y `user` | Ninguno: calendario mensual local, sin HTTP ni storage (`src/views/agenda/index.js`). | Decisión del propietario (2026-09-15): visible para `admin` y `user`; cada rol verá su propia agenda cuando se integre en el sistema. Hoy no hay citas ni persistencia. |
 | `/empleados` | `admin` | API de usuarios (`loadUsuarioDetail`, plantilla y modal canónicos de Usuarios). | Productiva; muestra el equipo interno actual (el administrador autenticado). |
 | `/whatsapp` | `admin` | `whatsapp.api.js` → API WhatsApp Cloud del backend (`oniontech/docs/WHATSAPP_CLOUD_API.md`). | Productiva; bandeja con sondeo acotado mientras la vista vive. |
 

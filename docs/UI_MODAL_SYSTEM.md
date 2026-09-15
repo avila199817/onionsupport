@@ -115,6 +115,22 @@ Estado de la familia (se actualiza en cada unidad):
 | Visor de adjuntos | shell canónico (`renderModalShell`, tamaño `stage`: el panel no pinta chrome y centra la tarjeta del visor, que conserva su cabecera, su frame, la galería y el anclaje de scroll propio); backdrop más tenue que el del detalle declarado como token `--incidencias-media-viewer-overlay-bg`; Escape y click exterior por el lifecycle |
 | Consentimiento Google | excepción: página pública, sin CSS privado |
 
+## Mapa canónico de la familia modal (corte 2026-09-15)
+
+Una responsabilidad, una autoridad, un contrato, muchos consumidores. Ningún diálogo privado emite ya su propia estructura, backdrop, cierre o bloqueo de scroll.
+
+| Responsabilidad | Autoridad | Contrato que la protege | Consumidores |
+| --- | --- | --- | --- |
+| Sesión única de detalle de entidad (apertura, sustitución, foco de origen, invalidación) | `src/features/entity-overlay/index.js` | `private_domain_owner_contract.mjs`, `modal_authority_contract.mjs`, `private-owner-modal-browser-contract.mjs` | Home, listas, relaciones entre entidades, deep links |
+| Estructura DOM y ARIA del diálogo, tamaños (`detail`, `wide`, `form`, `compact`, `confirm`, `stage`), alturas (`fixed`, `auto`), rol (`dialog`, `alertdialog`), botón cerrar, estados de carga/error/vacío | `src/features/entity-overlay/modal-host.js` (`renderModalShell`, `ui-modal-shell.v1`) | `tools/modal-shell-contract.mjs` (14 consumidores, ningún shell histórico ni override pendiente) | Dispatcher (carga/error), detalles de Incidencias, Facturas, Clientes y Usuarios, las cuatro altas, confirmaciones de Facturas, flujo de cobro, Correo (redacción, firma, confirmación), perfil del técnico, visor de adjuntos |
+| CSS estructural del diálogo (root, overlay, panel, header, body, footer, estados, responsive, movimiento reducido, forced-colors, impresión) | `src/css/components/detail-modal.css` (`ui-detail-modal-*`, layer `components`) | `tools/modal-shell-contract.mjs` (inventario de reglas `position: fixed`; ninguna hoja fuera de la autoridad reestiliza clases estructurales), `private_css_authority_contract.py` | Todo diálogo privado; las diferencias se declaran con `data-modal-size` / `data-modal-height` o tokens `--ui-detail-modal-*` en la raíz del dominio |
+| Interacción: Escape, Tab, click exterior, bloqueo de scroll, foco de retorno, clases de `body` | `src/features/entity-overlay/modal-lifecycle.js` | `modal_lifecycle_contract.mjs` (22 escenarios en Chromium) | 13 propietarios de dominio |
+| Portal del diálogo y actualización del panel conectado | `src/features/entity-overlay/modal-host.js` (`createModalHost`, `renderModalContent`) | `private-owner-modal-browser-contract.mjs` (51 aserciones, cuatro dominios) | Detalles, altas, perfil del técnico, flujo de cobro |
+| Confirmaciones asíncronas | `src/features/entity-overlay/modal-confirmation.js` (`openModalConfirmation`) | `facturas-confirmation-browser-contract.mjs` (11 escenarios) | Reenvío y cobro de Facturas |
+| Contenido y acciones de cada diálogo | Hojas de ruta (`views/*/detail.css`, `views/*/create.css`), composición de las altas (`compositions/private-create-modal.css`) y las clases de contenido del shell (`ui-detail-modal-hero`, `-chip`, `-meta-card`, `-section-head`, …) | `private_create_modal_contract.py`, `repo_integrity.py` (ningún dominio depende de clases de otro), contratos de dominio | Controladores y templates de cada dominio |
+
+Fuera de la autoridad sólo quedan capas fijas que no son diálogos (chrome, loader, toasts, landing pública), todas inventariadas con su motivo en `tools/modal-shell-contract.mjs`. Las capas legacy de `ui.css` (`.ui-overlay`, `.ui-modal`, `.ui-drawer`) y sus tokens se retiraron el 2026-09-15.
+
 ## Lifecycle de interacción compartido
 
 El lifecycle compartido controla:

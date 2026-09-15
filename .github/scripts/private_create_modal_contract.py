@@ -147,6 +147,10 @@ reject(USR, "usr-create-close", "Usuarios Create must not keep a close control o
 # All route-level sheets remain low-priority view styles; composition owns parity.
 for name, css in CREATE_STYLES.items():
     require(css, "@layer views", f"{name} create.css must remain in @layer views")
+    reject(css, "-create-header-copy h2", f"{name} create.css must not restyle the create title: the composition owns it")
+    reject(css, "-create-header-copy p", f"{name} create.css must not restyle the create subtitle: the composition owns it")
+require(COMPOSITION, "  .usr-create-header-copy\n) h2 {", "Create composition must own the title typography of the four create dialogs")
+require(COMPOSITION, "  .usr-create-header-copy\n) p {", "Create composition must own the subtitle typography of the four create dialogs")
 
 if errors:
     for error in errors:

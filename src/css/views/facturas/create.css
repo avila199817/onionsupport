@@ -14,31 +14,6 @@
 
 @layer views {
 
-/* Header copy: content inside the shell header. */
-.fac-create-header-copy {
-  min-inline-size: 0;
-  display: grid;
-  gap: 4px;
-}
-
-.fac-create-header-copy h2 {
-  margin: 0;
-  color: var(--text-strong);
-  font-size: clamp(24px, 2.2vw, 34px);
-  font-weight: var(--weight-black);
-  line-height: 1;
-  letter-spacing: var(--letter-tight);
-}
-
-.fac-create-header-copy p {
-  max-inline-size: 74ch;
-  margin: 0;
-  color: var(--text-muted);
-  font-size: var(--font-sm);
-  font-weight: var(--weight-medium);
-  line-height: 1.42;
-}
-
 /* =========================================================
    FORM / BODY
 ========================================================= */
@@ -974,9 +949,6 @@
 }
 
 @media (max-width: 640px) {
-  .fac-create-header-copy h2 { font-size: 25px; }
-  .fac-create-header-copy p { font-size: var(--font-xs); }
-
   .fac-create-body { padding: 13px; }
   .fac-create-section { padding: 14px; }
 

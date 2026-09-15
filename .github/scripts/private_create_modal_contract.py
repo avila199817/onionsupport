@@ -107,10 +107,13 @@ for snippet, message in [
 ]:
     reject(FAC, snippet, message)
 
-# Clientes was already close to Incidencias; lock the remaining exact chrome.
+# Clientes renders on the canonical shell; lock the remaining exact chrome.
 for snippet, message in [
+    ("renderModalShell(", "Clientes Create must render through the canonical modal shell"),
+    ("renderModalCloseButton(", "Clientes Create must use the shell's close control"),
+    ('height: "auto"', "Clientes Create keeps the content-sized panel (auto height up to the form cap)"),
     ('class="cli-create-header-copy inc-create-header-copy"', "Clientes Create must use the canonical title/subtitle header wrapper"),
-    ('class="cli-create-body inc-create-body"', "Clientes Create must use the canonical single scroll body"),
+    ('bodyClass: "cli-create-body inc-create-body"', "Clientes Create must keep the canonical form body classes on the shell body"),
     ('class="cli-create-form inc-create-form"', "Clientes Create must use the canonical form wrapper"),
     ('class="cli-create-actions inc-create-actions"', "Clientes Create must use the canonical action row"),
     ('class="cli-create-actions-note inc-create-actions-note"', "Clientes Create must expose the canonical action note"),
@@ -120,6 +123,7 @@ for snippet, message in [
 ]:
     require(CLI, snippet, message)
 reject(CLI, "cli-create-title-icon", "Clientes Create must not keep a decorative header icon absent from Incidencias")
+reject(CLI, "cli-create-close", "Clientes Create must not keep a close control of its own")
 
 # Usuarios must expose the same chrome/state semantics while preserving activation flow.
 for snippet, message in [

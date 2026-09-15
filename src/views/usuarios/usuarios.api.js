@@ -3115,7 +3115,8 @@ function looksLikeUsuario(
 }
 
 /*
-  CREATE devuelve un envelope que incluye activationUrl.
+  CREATE devuelve un envelope que puede incluir activationUrl (el backend
+  solo la adjunta cuando el correo de activación no se entregó).
   Se prioriza SIEMPRE user/usuario/item/detail antes que
   el envelope superior para no contaminar el modelo.
 */
@@ -4923,7 +4924,7 @@ export async function createUsuarioRequest(
 
   /*
     Nunca devolvemos el envelope superior:
-    contiene activationUrl en el backend actual.
+    puede contener activationUrl (solo cuando el correo de activación falló).
   */
   notifyDomainChanged("usuarios");
   return detail;

@@ -1,7 +1,7 @@
 import { cleanText, escapeHtml } from "../../core/presentation-text.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
-import { createModalHost, renderModalContent } from "../../features/entity-overlay/modal-host.js";
+import { createModalHost, renderModalCloseButton, renderModalContent, renderModalShell } from "../../features/entity-overlay/modal-host.js";
 /* =========================================================
    Onion Support - Clientes Detail Template
    Archivo: /src/views/clientes/clientes.template.modal.js
@@ -775,9 +775,6 @@ function icon(
     `aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
 
   const icons = {
-    close:
-      `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
-
     copy:
       `<svg ${common}><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`,
 
@@ -3925,184 +3922,153 @@ export function renderClientesDetailModal(
       detail
     );
 
-  return `
-    <section
-      id="${MODAL_ID}"
-      class="clientes-modal-root incidencias-modal-root"
-      data-clientes-modal-root="true"
-      data-incidencias-modal-root="true"
-      data-template-version="${attr(CLIENTES_MODAL_TEMPLATE_VERSION)}"
-      data-cliente-id="${attr(clienteId)}"
-      data-open="true"
-      data-read-only="true"
-      data-backend-contract="v4-readonly"
-      data-compatible-index="v6"
-      data-compatible-api="v4"
-      data-submitting="${vm.submitting ? "true" : "false"}"
-    >
+  return renderModalShell({
+    id: MODAL_ID,
+    rootClass: "clientes-modal-root",
+    rootAttributes: {
+      "data-clientes-modal-root": "true",
+      "data-template-version": CLIENTES_MODAL_TEMPLATE_VERSION,
+      "data-cliente-id": clienteId,
+      "data-read-only": "true",
+      "data-backend-contract": "v4-readonly",
+      "data-compatible-index": "v6",
+      "data-compatible-api": "v4",
+      "data-submitting": vm.submitting ? "true" : "false",
+    },
+    overlayAttributes: { "data-clientes-modal-overlay": "true" },
+    panelId: PANEL_ID,
+    panelAttributes: { "data-clientes-modal-panel": "true" },
+    labelledBy: "clientes-modal-title",
+    describedBy: "clientes-modal-summary",
+    submitting: vm.submitting,
+    header: `
       <div
-        class="clientes-modal-overlay incidencias-modal-overlay"
-        data-clientes-modal-overlay="true"
-        data-incidencias-modal-overlay="true"
+        class="clientes-modal-hero incidencias-modal-hero"
       >
+        ${renderAvatar(detail)}
+
         <div
-          id="${PANEL_ID}"
-          class="${joinClasses(
-            "clientes-modal-panel incidencias-modal-panel",
-            vm.submitting
-              ? "is-submitting"
-              : ""
-          )}"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="clientes-modal-title"
-          aria-describedby="clientes-modal-summary"
-          tabindex="-1"
-          data-clientes-modal-panel="true"
-          data-incidencias-modal-panel="true"
+          class="clientes-modal-hero-content incidencias-modal-hero-content"
         >
-          <header
-            class="clientes-modal-header incidencias-modal-header"
+          <div
+            class="clientes-modal-hero-chips incidencias-modal-hero-chips"
           >
-            <div
-              class="clientes-modal-hero incidencias-modal-hero"
-            >
-              ${renderAvatar(detail)}
-
-              <div
-                class="clientes-modal-hero-content incidencias-modal-hero-content"
-              >
-                <div
-                  class="clientes-modal-hero-chips incidencias-modal-hero-chips"
-                >
-                  <button
-                    type="button"
-                    data-detail-action="${DETAIL_ACTIONS.COPY_ID}"
-                    data-cliente-id="${attr(clienteId)}"
-                    data-copy-value="${attr(clienteId)}"
-                    class="clientes-modal-id-chip incidencias-modal-id-chip"
-                    aria-label="Copiar ID de cliente"
-                  >
-                    ${escapeHtml(clienteId || "—")}
-                  </button>
-
-                  ${renderChip(
-                    statusLabel(status),
-                    `status-${statusClass(status)}`
-                  )}
-
-                  ${renderChip(
-                    typeLabel(type),
-                    "category"
-                  )}
-
-                  ${
-                    city
-                      ? renderChip(
-                          city,
-                          "category"
-                        )
-                      : ""
-                  }
-                </div>
-
-                <h2
-                  id="clientes-modal-title"
-                  class="clientes-modal-title incidencias-modal-title"
-                >
-                  ${escapeHtml(title)}
-                </h2>
-
-                <span
-                  id="clientes-modal-summary"
-                  class="clientes-modal-updated incidencias-modal-updated"
-                >
-                  ${escapeHtml(contactName)}
-                  ${email ? ` · ${escapeHtml(email)}` : ""}
-                  ${phone ? ` · ${escapeHtml(phone)}` : ""}
-                  · Última actualización ${escapeHtml(updatedAgo)}
-                </span>
-              </div>
-            </div>
-
             <button
               type="button"
-              data-detail-action="${DETAIL_ACTIONS.CLOSE}"
-              aria-label="Cerrar modal"
-              class="clientes-modal-close-btn"
+              data-detail-action="${DETAIL_ACTIONS.COPY_ID}"
+              data-cliente-id="${attr(clienteId)}"
+              data-copy-value="${attr(clienteId)}"
+              class="clientes-modal-id-chip incidencias-modal-id-chip"
+              aria-label="Copiar ID de cliente"
             >
-              ${icon("close")}
+              ${escapeHtml(clienteId || "—")}
             </button>
-          </header>
 
-          <main
-            class="clientes-modal-body incidencias-modal-body"
+            ${renderChip(
+              statusLabel(status),
+              `status-${statusClass(status)}`
+            )}
+
+            ${renderChip(
+              typeLabel(type),
+              "category"
+            )}
+
+            ${
+              city
+                ? renderChip(
+                    city,
+                    "category"
+                  )
+                : ""
+            }
+          </div>
+
+          <h2
+            id="clientes-modal-title"
+            class="clientes-modal-title incidencias-modal-title"
           >
-            <div
-              data-modal-feedback-slot="true"
-              aria-live="polite"
-            >
-              ${renderFeedbackBox(vm)}
-            </div>
+            ${escapeHtml(title)}
+          </h2>
 
-            <div
-              class="clientes-modal-meta-grid incidencias-modal-meta-grid"
-            >
-              ${renderMetaField(
-                "Cliente",
-                getCodigoCliente(detail) ||
-                clienteId
-              )}
-
-              ${renderMetaField(
-                "NIF/CIF",
-                getNif(detail) ||
-                "—"
-              )}
-
-              ${renderMetaField(
-                "Creado",
-                createdAt
-              )}
-
-              ${renderMetaField(
-                "Facturado",
-                formatMoney(
-                  total,
-                  currency
-                )
-              )}
-
-              ${renderMetaField(
-                "Ubicación",
-                [
-                  city,
-                  province,
-                ]
-                  .filter(Boolean)
-                  .join(" · ") ||
-                "—"
-              )}
-
-              ${renderMetaField(
-                "Nombre fiscal",
-                fiscalName
-              )}
-            </div>
-
-            ${renderFiscalBlock(detail)}
-            ${renderContactBlock(detail)}
-            ${renderAddressesBlock(detail)}
-            ${renderBillingBlock(detail)}
-            ${renderStatsBlock(detail)}
-            ${renderPrivacyBlock(detail)}
-            ${renderAuditBlock(detail)}
-            ${renderFooter(vm)}
-          </main>
+          <span
+            id="clientes-modal-summary"
+            class="clientes-modal-updated incidencias-modal-updated"
+          >
+            ${escapeHtml(contactName)}
+            ${email ? ` · ${escapeHtml(email)}` : ""}
+            ${phone ? ` · ${escapeHtml(phone)}` : ""}
+            · Última actualización ${escapeHtml(updatedAgo)}
+          </span>
         </div>
       </div>
-    </section>
-  `;
+
+      ${renderModalCloseButton({ label: "Cerrar modal", attributes: { "data-detail-action": DETAIL_ACTIONS.CLOSE } })}
+    `,
+    bodyClass: "clientes-modal-body",
+    body: `
+      <div
+        data-modal-feedback-slot="true"
+        aria-live="polite"
+      >
+        ${renderFeedbackBox(vm)}
+      </div>
+
+      <div
+        class="clientes-modal-meta-grid incidencias-modal-meta-grid"
+      >
+        ${renderMetaField(
+          "Cliente",
+          getCodigoCliente(detail) ||
+          clienteId
+        )}
+
+        ${renderMetaField(
+          "NIF/CIF",
+          getNif(detail) ||
+          "—"
+        )}
+
+        ${renderMetaField(
+          "Creado",
+          createdAt
+        )}
+
+        ${renderMetaField(
+          "Facturado",
+          formatMoney(
+            total,
+            currency
+          )
+        )}
+
+        ${renderMetaField(
+          "Ubicación",
+          [
+            city,
+            province,
+          ]
+            .filter(Boolean)
+            .join(" · ") ||
+          "—"
+        )}
+
+        ${renderMetaField(
+          "Nombre fiscal",
+          fiscalName
+        )}
+      </div>
+
+      ${renderFiscalBlock(detail)}
+      ${renderContactBlock(detail)}
+      ${renderAddressesBlock(detail)}
+      ${renderBillingBlock(detail)}
+      ${renderStatsBlock(detail)}
+      ${renderPrivacyBlock(detail)}
+      ${renderAuditBlock(detail)}
+      ${renderFooter(vm)}
+    `,
+  });
 }
 
 export function renderClientesDetailModalClosed() {
@@ -4258,6 +4224,7 @@ function ensureBridgeHost() {
 const modalLifecycle = createModalLifecycle({
   getPanel: () => bridgeHost?.querySelector("[data-clientes-modal-panel='true']"),
   onEscape: () => closeBridge(),
+  onBackdrop: () => closeBridge(),
   onDetached: () => closeBridge({ restoreFocus: false }),
   bodyClasses: ['clientes-modal-open', 'clientes-detail-open'],
 });
@@ -4284,9 +4251,6 @@ function paintBridge({
     feedbackMessage: bridgeState.feedbackMessage,
     feedbackType: bridgeState.feedbackType,
   }) : "", {
-    rootSelector: "[data-clientes-modal-root='true']",
-    overlaySelector: "[data-clientes-modal-overlay='true']",
-    panelSelector: "[data-clientes-modal-panel='true']",
     identityAttribute: "data-cliente-id",
     focusAttributes: ["id", "data-detail-action", "href"],
   });
@@ -4302,7 +4266,7 @@ function paintBridge({
     try {
       host
         .querySelector(
-          "[data-clientes-modal-panel='true'], [data-incidencias-modal-panel='true']"
+          "[data-clientes-modal-panel='true']"
         )
         ?.focus?.({
           preventScroll:
@@ -4577,7 +4541,7 @@ async function onBridgeClick(
     event
       ?.target
       ?.closest?.(
-        "[data-detail-action], [data-clientes-modal-overlay='true']"
+        "[data-detail-action]"
       );
 
   if (
@@ -4590,12 +4554,6 @@ async function onBridgeClick(
     return;
   }
 
-  const overlayClick =
-    target.matches?.(
-      "[data-clientes-modal-overlay='true']"
-    ) &&
-    event?.target ===
-      target;
 
   const action =
     cleanText(
@@ -4606,7 +4564,6 @@ async function onBridgeClick(
     );
 
   if (
-    overlayClick ||
     action ===
       DETAIL_ACTIONS.CLOSE
   ) {

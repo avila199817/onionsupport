@@ -10,6 +10,7 @@
    - Sanear campos sensibles antes de exponer raw al frontend.
    - No hacer HTTP, DOM, Router, Auth, cache ni navegación.
 ========================================================= */
+import { cleanText } from "../../core/presentation-text.js";
 
 export const CLIENTES_MODEL_VERSION =
   "clientes.model.v1.single-authority";
@@ -43,14 +44,6 @@ function safeObject(value, fallback = {}) {
 
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
-}
-
-function cleanText(value = "", fallback = "") {
-  const text = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return text || fallback;
 }
 
 function first(...values) {

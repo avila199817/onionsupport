@@ -29,6 +29,7 @@ import {
   computeClientesStats,
   filterClientes,
 } from "./clientes.model.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export {
   CLIENTES_MODEL_VERSION,
@@ -118,14 +119,6 @@ function invalidateIdentityCache() {
   lastPageContext = null;
   lastSyncAt = 0;
   lastError = "";
-}
-
-function cleanText(value = "", fallback = "") {
-  const text = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return text || fallback;
 }
 
 function safeObject(value, fallback = {}) {

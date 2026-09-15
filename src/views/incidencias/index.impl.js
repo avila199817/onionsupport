@@ -88,6 +88,7 @@ import {
   mergeIncidenciasFacetStats,
   reconcileIncidenciasFilterFacetPresentation,
 } from "./incidencias.filter-facets.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
   "incidencias.index.extreme.v45-single-detail-authority";
@@ -236,19 +237,6 @@ function safeObject(
   return isObject(value)
     ? value
     : fallback;
-}
-
-function cleanText(
-  value = "",
-  fallback = ""
-) {
-  const output =
-    String(value ?? "")
-      .replace(/[\r\n\t]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-  return output || fallback;
 }
 
 function multilineValue(

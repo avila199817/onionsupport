@@ -13,6 +13,7 @@ import { AppCore } from "../../core/index.js";
 import { renderUsuariosTableTemplate, USUARIOS_ACTIONS } from "../usuarios/usuarios.template.js";
 import UsuariosDetailModal from "../usuarios/usuarios.template.modal.js";
 import { loadUsuarioDetail, normalizeUsuarioModel } from "../usuarios/usuarios.api.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const EMPLEADOS_VIEW_VERSION = "empleados.view.v5.usuarios-parity-current-employee";
 export const EMPLEADOS_VIEW_NAME = "EmpleadosView";
@@ -24,10 +25,6 @@ const SEARCH_DEBOUNCE_MS = 160;
 const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
 const isObject = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
 const safeObject = (value, fallback = {}) => (isObject(value) ? value : fallback);
-const cleanText = (value = "", fallback = "") => {
-  const output = String(value ?? "").replace(/[\r\n\t]/g, " ").replace(/\s+/g, " ").trim();
-  return output || fallback;
-};
 const first = (...values) => {
   for (const value of values) {
     if (value === null || value === undefined) continue;

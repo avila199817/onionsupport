@@ -4,7 +4,7 @@ import { getFacturaEntityId } from "../../core/entity-identity.js";
 import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
 import { MODAL_SHELL_SELECTORS, createModalHost as createPrivateModalHost, renderModalContent, renderModalShell } from "../../features/entity-overlay/modal-host.js";
 import { openModalConfirmation } from "../../features/entity-overlay/modal-confirmation.js";
-import { escapeHtml } from "../../core/presentation-text.js";
+import { cleanText, escapeHtml } from "../../core/presentation-text.js";
 /* =========================================================
    Onion Support - Facturas Index
    Archivo: /src/views/facturas/index.js
@@ -161,15 +161,6 @@ function safeArray(value) {
 
 function safeObject(value, fallback = {}) {
   return isObject(value) ? value : fallback;
-}
-
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
 }
 
 function multilineValue(value = "") {

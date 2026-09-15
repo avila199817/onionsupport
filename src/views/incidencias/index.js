@@ -33,6 +33,7 @@ import {
   installIncidenciasHotList,
   INCIDENCIAS_HOT_LIST_VERSION,
 } from "./incidencias.hot-list.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
   `${Impl.INCIDENCIAS_INDEX_VERSION}.create-user-combobox.truthful-loaded-stats.detail-attachment-policy.hot-list.modal-host-lease.single-interactive-layer`;
@@ -64,15 +65,6 @@ function isBrowserDocument(documentLike = null) {
     typeof documentLike.createElement === "function" &&
     documentLike.body
   );
-}
-
-function cleanText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
 }
 
 function isDetailOnlyContext(context = {}) {

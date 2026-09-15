@@ -38,6 +38,7 @@ import {
 } from "../../features/user-profile/index.js";
 import { notifyDomainChanged } from "../../core/domain-events.js";
 import { exactTotal } from "../../core/statistics.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 /* =========================================================
    META / CONFIG
@@ -258,22 +259,6 @@ function safeArray(value) {
   }
 
   return [];
-}
-
-function cleanText(value = "", fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
-
-  const output = String(value)
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
 }
 
 /*

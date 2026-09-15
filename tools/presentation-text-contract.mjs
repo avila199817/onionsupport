@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { cleanText, escapeHtml } from "../src/core/presentation-text.js";
 import { cleanText as homeText, escapeHtml as homeEscape, attr } from "../src/views/home/home.template.foundation.js";
 import { cleanText as overlayText, renderDetailPending, safeError } from "../src/features/entity-overlay/pending-view.js";
@@ -142,4 +145,53 @@ for (const markup of [clientesCreate, clientesDetail, usuariosDetail, cuentaFeed
 }
 const cuentaError = renderCuentaError(remoteBody);
 assert.ok(cuentaError.includes(`<p>${bodyHtml}</p>`), "Direct Cuenta error retains multiline content");
-console.log("Presentation text contract: PASS · Unicode/coercion/fallback identity · canonical reexports · actual pending, Correo, Servidor, Facturas and Incidencias markup · multiline body/comments · redaction");
+
+// One cleanText authority. Every module outside the startup closures imports
+// the canonical helper (directly or through a live reexport) instead of
+// carrying a copy. The copies listed below stay until the unit that moves
+// the helper into the kernel chunk and measures the startup closures
+// (tools/invoice-api-split-dist-contract.mjs): the startup and kernel modules
+// themselves, and the four enhancement features whose preload lists in the
+// bootstrap chunk would otherwise gain a separate presentation-text chunk.
+// Nothing may be added to this list.
+const SRC_ROOT = fileURLToPath(new URL("../src/", import.meta.url));
+const CLEAN_TEXT_AUTHORITY = "src/core/presentation-text.js";
+const STARTUP_CLEAN_TEXT_COPIES = Object.freeze([
+  "src/app/index.js",
+  "src/app/loader.js",
+  "src/core/http.js",
+  "src/core/index.js",
+  "src/features/auth/index.js",
+  "src/router/index.js",
+  "src/router/routes.js",
+  "src/router/styles.js",
+  "src/views/public/activate-account/index.js",
+  "src/views/public/home/index.js",
+  "src/views/public/login/index.js",
+  "src/views/public/password-reset/index.js",
+  "src/features/mobile-datalist/index.js",
+  "src/features/public-support-extreme/index.js",
+  "src/features/route-intent-preload/index.js",
+  "src/features/ticket-deeplink/index.js",
+]);
+function sourceFiles(directory) {
+  return readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, "en")).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return sourceFiles(path);
+    return entry.isFile() && entry.name.endsWith(".js") ? [path] : [];
+  });
+}
+const definers = [];
+const callersWithoutBinding = [];
+for (const file of sourceFiles(SRC_ROOT)) {
+  const code = readFileSync(file, "utf8");
+  const path = `src/${relative(SRC_ROOT, file).split(sep).join("/")}`;
+  const defines = /^(?:export )?(?:async )?(?:function cleanText\s*\(|(?:const|let|var) cleanText\b)/mu.test(code);
+  const imports = /import\s*\{[^}]*\bcleanText\b[^}]*\}\s*from\s*"[^"]+"/u.test(code);
+  if (defines) definers.push(path);
+  else if (/\bcleanText\s*\(/u.test(code) && !imports) callersWithoutBinding.push(path);
+}
+assert.deepEqual(definers, [CLEAN_TEXT_AUTHORITY, ...STARTUP_CLEAN_TEXT_COPIES].sort(), "cleanText is defined once, plus the pending startup and enhancement copies only");
+assert.deepEqual(callersWithoutBinding, [], "every cleanText caller binds the canonical helper");
+
+console.log(`Presentation text contract: PASS · Unicode/coercion/fallback identity · canonical reexports · one cleanText authority (${definers.length - 1} startup and enhancement copies pending) · actual pending, Correo, Servidor, Facturas and Incidencias markup · multiline body/comments · redaction`);

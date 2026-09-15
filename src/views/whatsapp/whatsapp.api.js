@@ -11,6 +11,7 @@
 "use strict";
 
 import Http from "../../core/http.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const WHATSAPP_API_VERSION =
   "whatsapp.api.v1.onion-backend-authority";
@@ -38,13 +39,9 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function cleanText(value = "", fallback = "", max = 4096) {
-  const text = String(value ?? "")
-    .replace(/[\u0000-\u001f\u007f]/g, " ")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return (text || fallback).slice(0, Math.max(1, Number(max) || 4096));
+function cleanMessageText(value = "", fallback = "", max = 4096) {
+  const text = cleanText(String(value ?? "").replace(/[\u0000-\u001f\u007f]/g, " "), fallback);
+  return text.slice(0, Math.max(1, Number(max) || 4096));
 }
 
 function clampInt(value, fallback, min, max) {
@@ -85,7 +82,7 @@ function unwrap(payload) {
 }
 
 function requestError(error = null, fallback = "No se pudo comunicar con WhatsApp en Onion Support.") {
-  const message = cleanText(
+  const message = cleanMessageText(
     error?.data?.message ||
       error?.payload?.message ||
       error?.response?.data?.message ||
@@ -99,7 +96,7 @@ function requestError(error = null, fallback = "No se pudo comunicar con WhatsAp
 
   const output = new Error(message);
   output.name = "WhatsAppApiError";
-  output.code = cleanText(
+  output.code = cleanMessageText(
     error?.code ||
       error?.data?.code ||
       error?.payload?.code ||
@@ -119,42 +116,42 @@ function requestError(error = null, fallback = "No se pudo comunicar con WhatsAp
 
 function normalizeConversation(item = {}) {
   const source = safeObject(item);
-  const conversationId = cleanText(source.conversationId || source.id, "", 512);
+  const conversationId = cleanMessageText(source.conversationId || source.id, "", 512);
   if (!conversationId) return null;
 
   return Object.freeze({
     ...source,
     conversationId,
-    waId: cleanText(source.waId || source.phone, "", 32),
-    phone: cleanText(source.phone || source.waId, "", 32),
-    whatsappProfileName: cleanText(source.whatsappProfileName, "", 256),
-    lastMessageAt: cleanText(source.lastMessageAt, "", 80),
-    lastInboundAt: cleanText(source.lastInboundAt, "", 80),
-    lastOutboundAt: cleanText(source.lastOutboundAt, "", 80),
-    linkedEntityType: cleanText(source.linkedEntityType, "", 40).toLowerCase(),
-    linkedEntityId: cleanText(source.linkedEntityId, "", 180),
-    linkedClienteId: cleanText(source.linkedClienteId, "", 180),
-    identityMatch: cleanText(source.identityMatch, "", 40).toLowerCase(),
+    waId: cleanMessageText(source.waId || source.phone, "", 32),
+    phone: cleanMessageText(source.phone || source.waId, "", 32),
+    whatsappProfileName: cleanMessageText(source.whatsappProfileName, "", 256),
+    lastMessageAt: cleanMessageText(source.lastMessageAt, "", 80),
+    lastInboundAt: cleanMessageText(source.lastInboundAt, "", 80),
+    lastOutboundAt: cleanMessageText(source.lastOutboundAt, "", 80),
+    linkedEntityType: cleanMessageText(source.linkedEntityType, "", 40).toLowerCase(),
+    linkedEntityId: cleanMessageText(source.linkedEntityId, "", 180),
+    linkedClienteId: cleanMessageText(source.linkedClienteId, "", 180),
+    identityMatch: cleanMessageText(source.identityMatch, "", 40).toLowerCase(),
   });
 }
 
 function normalizeMessage(item = {}) {
   const source = safeObject(item);
-  const id = cleanText(source.id || source.metaMessageId, "", 512);
-  const conversationId = cleanText(source.conversationId, "", 512);
+  const id = cleanMessageText(source.id || source.metaMessageId, "", 512);
+  const conversationId = cleanMessageText(source.conversationId, "", 512);
   if (!id || !conversationId) return null;
 
   return Object.freeze({
     ...source,
     id,
     conversationId,
-    metaMessageId: cleanText(source.metaMessageId, "", 512),
-    waId: cleanText(source.waId, "", 32),
-    direction: cleanText(source.direction, "", 20).toLowerCase(),
-    type: cleanText(source.type || source.content?.type, "unknown", 40).toLowerCase(),
+    metaMessageId: cleanMessageText(source.metaMessageId, "", 512),
+    waId: cleanMessageText(source.waId, "", 32),
+    direction: cleanMessageText(source.direction, "", 20).toLowerCase(),
+    type: cleanMessageText(source.type || source.content?.type, "unknown", 40).toLowerCase(),
     content: safeObject(source.content),
-    timestamp: cleanText(source.timestamp, "", 80),
-    status: cleanText(source.status, "", 40).toLowerCase(),
+    timestamp: cleanMessageText(source.timestamp, "", 80),
+    status: cleanMessageText(source.status, "", 40).toLowerCase(),
   });
 }
 
@@ -162,7 +159,7 @@ export async function loadWhatsAppMeta(options = {}) {
   try {
     const response = await Http.get(WHATSAPP_ENDPOINTS.meta, {
       timeout: clampInt(options.timeout, WHATSAPP_REQUEST_TIMEOUT_MS, 1000, 60_000),
-      source: cleanText(options.source, "views.whatsapp.api.meta", 120),
+      source: cleanMessageText(options.source, "views.whatsapp.api.meta", 120),
       signal: options.signal,
     });
     return Object.freeze(unwrap(response));
@@ -183,7 +180,7 @@ export async function loadWhatsAppConversations(options = {}) {
     const response = unwrap(await Http.get(WHATSAPP_ENDPOINTS.conversations, {
       timeout: clampInt(options.timeout, WHATSAPP_REQUEST_TIMEOUT_MS, 1000, 60_000),
       query: { limit },
-      source: cleanText(options.source, "views.whatsapp.api.conversations", 120),
+      source: cleanMessageText(options.source, "views.whatsapp.api.conversations", 120),
       signal: options.signal,
     }));
 
@@ -202,7 +199,7 @@ export async function loadWhatsAppConversations(options = {}) {
 }
 
 export async function loadWhatsAppMessages(conversationId = "", options = {}) {
-  const id = cleanText(conversationId, "", 512);
+  const id = cleanMessageText(conversationId, "", 512);
   if (!id) {
     const error = new Error("Falta la conversación de WhatsApp.");
     error.code = "WHATSAPP_CONVERSATION_REQUIRED";
@@ -217,7 +214,7 @@ export async function loadWhatsAppMessages(conversationId = "", options = {}) {
       {
         timeout: clampInt(options.timeout, WHATSAPP_REQUEST_TIMEOUT_MS, 1000, 60_000),
         query: { limit },
-        source: cleanText(options.source, "views.whatsapp.api.messages", 120),
+        source: cleanMessageText(options.source, "views.whatsapp.api.messages", 120),
         signal: options.signal,
       }
     ));
@@ -228,7 +225,7 @@ export async function loadWhatsAppMessages(conversationId = "", options = {}) {
 
     return Object.freeze({
       ok: response.ok !== false,
-      conversationId: cleanText(response.conversationId, id, 512),
+      conversationId: cleanMessageText(response.conversationId, id, 512),
       items: Object.freeze(items),
       count: items.length,
     });
@@ -244,9 +241,9 @@ export async function sendWhatsAppText({
   signal = undefined,
   timeout = WHATSAPP_REQUEST_TIMEOUT_MS,
 } = {}) {
-  const recipient = cleanText(to, "", 32).replace(/\D/g, "");
+  const recipient = cleanMessageText(to, "", 32).replace(/\D/g, "");
   const bodyText = String(text ?? "").replace(/\r\n/g, "\n").trim();
-  const key = cleanText(idempotencyKey, "", 256);
+  const key = cleanMessageText(idempotencyKey, "", 256);
 
   if (!recipient) {
     const error = new Error("El destinatario de WhatsApp no es válido.");
@@ -293,8 +290,8 @@ export async function sendWhatsAppText({
       ok: response.ok !== false,
       success: response.success !== false,
       duplicate: response.duplicate === true,
-      conversationId: cleanText(response.conversationId, "", 512),
-      metaMessageId: cleanText(response.metaMessageId, "", 512),
+      conversationId: cleanMessageText(response.conversationId, "", 512),
+      metaMessageId: cleanMessageText(response.metaMessageId, "", 512),
     });
   } catch (error) {
     throw requestError(error, "No se pudo enviar el mensaje de WhatsApp.");

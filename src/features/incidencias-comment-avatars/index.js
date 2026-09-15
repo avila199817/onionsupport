@@ -26,6 +26,7 @@ import {
   resolveCommentProfile,
   technicianIdentity,
 } from "../incidencias-comment-identity/index.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const INCIDENCIAS_COMMENT_AVATARS_VERSION =
   "incidencias.comment-avatars.v1-global-avatar-authority";
@@ -72,13 +73,6 @@ function firstObject(...values) {
     if (object && Object.keys(object).length) return object;
   }
   return {};
-}
-
-function cleanText(value = "") {
-  return String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function cleanImageSrc(image = null) {

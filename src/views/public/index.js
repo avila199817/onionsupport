@@ -27,7 +27,7 @@ import {
   normalizeRoutePath,
   routePathFromUrlLike,
 } from "../../core/config.js";
-import { cleanText } from "../../core/presentation-text.js";
+import { cleanText, normalizeKey } from "../../core/presentation-text.js";
 
 export const PUBLIC_SHARED_VERSION = "public.shared.v1";
 
@@ -83,12 +83,6 @@ const SENSITIVE_QUERY_KEYS = new Set(
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function normalizeKey(value = "") {
-  return cleanText(value, "")
-    .replace(/[-_\s]/g, "")
-    .toLowerCase();
 }
 
 function normalizeViewKey(value = "") {

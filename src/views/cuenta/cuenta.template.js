@@ -1,8 +1,9 @@
-import { cleanText as safeText } from "../../core/presentation-text.js";
+import { cleanText } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { userNameFromIdentity } from "../../core/user-identity.js";
 import { isObject, safeObject } from "../../core/objects.js";
+import { slugKey } from "../../core/slug-key.js";
 /* =========================================================
    Onion Support - Cuenta Template
    Archivo: /src/views/cuenta/cuenta.template.js
@@ -209,25 +210,15 @@ function first(...values) {
 
 const attr = escapeHtml;
 
-function normalizeKey(value = "") {
-  return safeText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w:.]/g, "")
-    .replace(/^_+|_+$/g, "");
-}
-
 function normalizeLocale(value = "") {
-  const key = normalizeKey(value).replace(/_/g, "-");
+  const key = slugKey(value).replace(/_/g, "-");
   if (key.startsWith("ca")) return "ca";
   if (key.startsWith("en")) return "en";
   return "es";
 }
 
 function normalizeThemeMode(value = "") {
-  const key = normalizeKey(value);
+  const key = slugKey(value);
   return ["system", "light", "dark"].includes(key) ? key : "system";
 }
 
@@ -237,9 +228,9 @@ function resolveState(state = {}) {
   return {
     loading: source.loading === true,
     saving: source.saving === true,
-    savingAction: safeText(source.savingAction, ""),
-    error: safeText(source.error, ""),
-    success: safeText(first(source.success, source.view?.successMessage, ""), ""),
+    savingAction: cleanText(source.savingAction, ""),
+    error: cleanText(source.error, ""),
+    success: cleanText(first(source.success, source.view?.successMessage, ""), ""),
     deactivated: source.deactivated === true,
     preferences: {
       themeMode: normalizeThemeMode(first(preferences.themeMode, "system")),
@@ -254,12 +245,12 @@ function copyFor(state = {}) {
 }
 
 function isAzureBlobHost(hostname = "") {
-  const host = safeText(hostname, "").toLowerCase();
+  const host = cleanText(hostname, "").toLowerCase();
   return host === "blob.core.windows.net" || host.endsWith(".blob.core.windows.net");
 }
 
 function safeAvatarUrl(value = "") {
-  const raw = safeText(value, "");
+  const raw = cleanText(value, "");
   if (!raw || raw.startsWith("//") || /[\r\n\t\\]/.test(raw) || /^(javascript|data|vbscript|file):/i.test(raw)) return "";
   if (/^blob:/i.test(raw)) return raw;
   if (raw.startsWith("/")) return raw.replace(/\/{2,}/g, "/");
@@ -283,22 +274,22 @@ function getName(detail = {}) {
 }
 
 function getEmail(detail = {}) {
-  return safeText(first(detail.email, detail.emailLower, ""), "—");
+  return cleanText(first(detail.email, detail.emailLower, ""), "—");
 }
 
 function getUsername(detail = {}) {
-  return safeText(first(detail.username, detail.usernameLower, detail.slug, ""), "—");
+  return cleanText(first(detail.username, detail.usernameLower, detail.slug, ""), "—");
 }
 
 function getRole(detail = {}, state = {}) {
-  const key = normalizeKey(first(detail.role, detail.rol, "user"));
+  const key = slugKey(first(detail.role, detail.rol, "user"));
   const c = copyFor(state);
   return key === "admin" ? c.roleAdmin : c.roleUser;
 }
 
 function getStatus(detail = {}, state = {}) {
   const c = copyFor(state);
-  const key = normalizeKey(first(detail.status, detail.estado, detail.active === false ? "disabled" : "active"));
+  const key = slugKey(first(detail.status, detail.estado, detail.active === false ? "disabled" : "active"));
   if (key === "pending") return { label: c.pending, tone: "warning" };
   if (["disabled", "inactive", "blocked", "suspended"].includes(key) || detail.active === false) {
     return { label: c.disabled, tone: "danger" };

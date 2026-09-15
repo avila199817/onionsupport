@@ -15,7 +15,7 @@ import {
   resolveAvatarPresentation,
 } from "../../features/avatar-system/identity.js";
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
-import { cleanText as text } from "../../core/presentation-text.js";
+import { cleanText } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
@@ -38,11 +38,11 @@ function first(...values) {
 
 
 function attr(value = "") {
-  return escapeHtml(text(value, ""));
+  return escapeHtml(cleanText(value, ""));
 }
 
 function dateMs(value = "") {
-  const parsed = Date.parse(text(value, ""));
+  const parsed = Date.parse(cleanText(value, ""));
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
@@ -85,7 +85,7 @@ function formatConversationTime(value = "") {
 }
 
 function formatPhone(value = "") {
-  const digits = text(value, "").replace(/\D/g, "");
+  const digits = cleanText(value, "").replace(/\D/g, "");
   if (!digits) return "Sin teléfono";
 
   if (digits.startsWith("34") && digits.length === 11) {
@@ -97,16 +97,16 @@ function formatPhone(value = "") {
 }
 
 function conversationById(items = [], id = "") {
-  const target = text(id, "");
+  const target = cleanText(id, "");
   return safeArray(items).find(
-    (item) => text(item?.conversationId, "") === target
+    (item) => cleanText(item?.conversationId, "") === target
   ) || null;
 }
 
 function identityName(identity = {}) {
   const source = safeObject(identity);
   const contacto = safeObject(source.contacto);
-  return text(first(
+  return cleanText(first(
     source.displayName,
     source.fullName,
     source.name,
@@ -123,7 +123,7 @@ function identityName(identity = {}) {
 function identityEmail(identity = {}) {
   const source = safeObject(identity);
   const contacto = safeObject(source.contacto);
-  return text(first(
+  return cleanText(first(
     source.email,
     source.emailLower,
     source.mail,
@@ -136,7 +136,7 @@ function identityEmail(identity = {}) {
 function identityUserId(identity = {}, conversation = {}) {
   const source = safeObject(identity);
   const current = safeObject(conversation);
-  return text(first(
+  return cleanText(first(
     source.userId,
     source.usuarioId,
     source.uid,
@@ -147,7 +147,7 @@ function identityUserId(identity = {}, conversation = {}) {
 
 function identityUsername(identity = {}) {
   const source = safeObject(identity);
-  return text(first(source.username, source.userName, source.slug, ""), "");
+  return cleanText(first(source.username, source.userName, source.slug, ""), "");
 }
 
 function identityAvatar(identity = {}) {
@@ -164,7 +164,7 @@ function identityAvatar(identity = {}) {
 
 function displayName(conversation = {}, identity = {}) {
   return identityName(identity) ||
-    text(conversation?.whatsappProfileName, "") ||
+    cleanText(conversation?.whatsappProfileName, "") ||
     formatPhone(conversation?.waId || conversation?.phone);
 }
 
@@ -209,8 +209,8 @@ function renderAvatar(conversation = {}, identity = {}, className = "ui-avatar")
 }
 
 function identityLabel(conversation = {}) {
-  const match = text(conversation?.identityMatch, "").toLowerCase();
-  const type = text(conversation?.linkedEntityType, "").toLowerCase();
+  const match = cleanText(conversation?.identityMatch, "").toLowerCase();
+  const type = cleanText(conversation?.linkedEntityType, "").toLowerCase();
 
   if (match === "ambiguous") return "Coincidencia ambigua";
   if (type === "user") return "Usuario Onion";
@@ -219,8 +219,8 @@ function identityLabel(conversation = {}) {
 }
 
 function identityTone(conversation = {}) {
-  const match = text(conversation?.identityMatch, "").toLowerCase();
-  const type = text(conversation?.linkedEntityType, "").toLowerCase();
+  const match = cleanText(conversation?.identityMatch, "").toLowerCase();
+  const type = cleanText(conversation?.linkedEntityType, "").toLowerCase();
   if (match === "ambiguous") return "warning";
   if (type === "user" || type === "cliente") return "success";
   return "neutral";
@@ -248,11 +248,11 @@ function channelState(state = {}) {
 }
 
 function renderConversationRow(conversation = {}, state = {}) {
-  const id = text(conversation.conversationId, "");
-  const selected = id && id === text(state.selectedConversationId, "");
+  const id = cleanText(conversation.conversationId, "");
+  const selected = id && id === cleanText(state.selectedConversationId, "");
   const identity = safeObject(state.identities?.[id]);
   const name = displayName(conversation, identity);
-  const profile = text(conversation.whatsappProfileName, "");
+  const profile = cleanText(conversation.whatsappProfileName, "");
   const phone = formatPhone(conversation.waId || conversation.phone);
   const subtitle = identityName(identity)
     ? profile && profile !== name
@@ -388,12 +388,12 @@ function mediaLabel(type = "") {
     button: "Botón",
     reaction: "Reacción",
   };
-  return labels[text(type, "").toLowerCase()] || "Contenido";
+  return labels[cleanText(type, "").toLowerCase()] || "Contenido";
 }
 
 function messageContent(message = {}) {
   const content = safeObject(message.content);
-  const type = text(message.type || content.type, "unknown").toLowerCase();
+  const type = cleanText(message.type || content.type, "unknown").toLowerCase();
 
   if (type === "text") {
     return `<p class="whatsapp-message-text">${escapeHtml(String(content.text ?? ""))}</p>`;
@@ -401,8 +401,8 @@ function messageContent(message = {}) {
 
   if (["image", "audio", "video", "document"].includes(type)) {
     const media = safeObject(content.media);
-    const caption = text(media.caption, "");
-    const filename = text(media.filename, "");
+    const caption = cleanText(media.caption, "");
+    const filename = cleanText(media.filename, "");
     return `
       <div class="whatsapp-message-rich">
         <strong>${escapeHtml(mediaLabel(type))}</strong>
@@ -414,8 +414,8 @@ function messageContent(message = {}) {
 
   if (type === "location") {
     const location = safeObject(content.location);
-    const name = text(location.name, "Ubicación compartida");
-    const address = text(location.address, "");
+    const name = cleanText(location.name, "Ubicación compartida");
+    const address = cleanText(location.address, "");
     const lat = Number(location.latitude);
     const lng = Number(location.longitude);
     const coords = Number.isFinite(lat) && Number.isFinite(lng)
@@ -437,17 +437,17 @@ function messageContent(message = {}) {
 
   if (type === "interactive") {
     const item = safeObject(content.interactive);
-    return `<div class="whatsapp-message-rich"><strong>Respuesta interactiva</strong><span>${escapeHtml(text(item.title || item.description || item.id, "Respuesta registrada"))}</span></div>`;
+    return `<div class="whatsapp-message-rich"><strong>Respuesta interactiva</strong><span>${escapeHtml(cleanText(item.title || item.description || item.id, "Respuesta registrada"))}</span></div>`;
   }
 
   if (type === "button") {
     const button = safeObject(content.button);
-    return `<div class="whatsapp-message-rich"><strong>Botón</strong><span>${escapeHtml(text(button.text || button.payload, "Respuesta registrada"))}</span></div>`;
+    return `<div class="whatsapp-message-rich"><strong>Botón</strong><span>${escapeHtml(cleanText(button.text || button.payload, "Respuesta registrada"))}</span></div>`;
   }
 
   if (type === "reaction") {
     const reaction = safeObject(content.reaction);
-    return `<div class="whatsapp-message-rich"><strong>Reacción</strong><span class="whatsapp-reaction-emoji">${escapeHtml(text(reaction.emoji, "Reacción"))}</span></div>`;
+    return `<div class="whatsapp-message-rich"><strong>Reacción</strong><span class="whatsapp-reaction-emoji">${escapeHtml(cleanText(reaction.emoji, "Reacción"))}</span></div>`;
   }
 
   return `<div class="whatsapp-message-rich"><strong>${escapeHtml(mediaLabel(type))}</strong><span>Contenido no disponible en esta vista.</span></div>`;
@@ -462,13 +462,13 @@ function statusLabel(status = "") {
     failed: "Error",
     received: "Recibido",
   };
-  const key = text(status, "").toLowerCase();
-  return labels[key] || text(status, "");
+  const key = cleanText(status, "").toLowerCase();
+  return labels[key] || cleanText(status, "");
 }
 
 function renderMessage(message = {}) {
-  const outbound = text(message.direction, "").toLowerCase() === "outbound";
-  const timestamp = text(message.timestamp, "");
+  const outbound = cleanText(message.direction, "").toLowerCase() === "outbound";
+  const timestamp = cleanText(message.timestamp, "");
   const status = outbound ? statusLabel(message.status) : "";
 
   return `
@@ -617,7 +617,7 @@ function renderInfoPane(state = {}) {
 
   const identity = safeObject(state.identities?.[conversation.conversationId]);
   const canonical = identityName(identity);
-  const profile = text(conversation.whatsappProfileName, "");
+  const profile = cleanText(conversation.whatsappProfileName, "");
   const phone = formatPhone(conversation.waId || conversation.phone);
 
   return `
@@ -654,7 +654,7 @@ function renderInfoPane(state = {}) {
 
 export function renderWhatsAppInbox(input = {}) {
   const state = safeObject(input.state, input);
-  const mobilePanel = text(state.mobilePanel, "list");
+  const mobilePanel = cleanText(state.mobilePanel, "list");
 
   return `
     <section

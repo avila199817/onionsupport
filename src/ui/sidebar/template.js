@@ -24,7 +24,7 @@ import {
 } from "../../core/config.js";
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 import { avatarInitials, synchronizeAvatarHost } from "../../features/avatar-system/index.js";
-import { cleanText as text } from "../../core/presentation-text.js";
+import { cleanText } from "../../core/presentation-text.js";
 import { isObject } from "../../core/objects.js";
 
 
@@ -172,12 +172,8 @@ function isFunction(value) {
 
 
 
-function normalizeKey(value = "") {
-  return text(value).replace(/[-_\s]/g, "").toLowerCase();
-}
-
 function classNames(...values) {
-  return values.flat().map((value) => text(value)).filter(Boolean).join(" ");
+  return values.flat().map((value) => cleanText(value)).filter(Boolean).join(" ");
 }
 
 function cleanAttrs(attrs = {}) {
@@ -308,7 +304,7 @@ function hasSensitiveQuery(value = "") {
 }
 
 function normalizeInternalPath(value = "") {
-  const raw = text(value);
+  const raw = cleanText(value);
   if (
     !raw ||
     !raw.startsWith("/") ||
@@ -389,7 +385,7 @@ function safeImageSrc(value = "", fallback = "") {
 function normalizeRoleList(value = []) {
   const raw = Array.isArray(value)
     ? value.flat(Infinity)
-    : text(value).split(/[,\s|;]+/);
+    : cleanText(value).split(/[,\s|;]+/);
 
   return [
     ...new Set(
@@ -446,7 +442,7 @@ function normalizeUser(user = {}) {
     slug,
     avatarUrl,
     hasAvatar: Boolean(avatarUrl),
-    roleLabel: text(
+    roleLabel: cleanText(
       source.roleLabel,
       isAdminUser(source) ? ROLE_LABEL_ADMIN : ROLE_LABEL_STANDARD
     ),
@@ -464,7 +460,7 @@ function itemRoles(item = {}) {
 }
 
 function normalizeIconName(value = "") {
-  const icon = text(value, ICONS.home).toLowerCase();
+  const icon = cleanText(value, ICONS.home).toLowerCase();
   return ICON_PATHS[icon] ? icon : ICONS.home;
 }
 
@@ -495,15 +491,15 @@ function normalizeItem(item = {}) {
 
   return {
     href,
-    label: text(source.label || source.title || source.name, href),
+    label: cleanText(source.label || source.title || source.name, href),
     icon: normalizeIconName(
       source.icon || source.viewKey || source.name || ICONS.home
     ),
-    key: text(
+    key: cleanText(
       source.key || source.sidebarKey || source.viewKey || source.name || href,
       href
     ),
-    badge: text(source.badge),
+    badge: cleanText(source.badge),
     active: source.active === true,
     disabled: source.disabled === true,
     hidden: source.hidden === true || !href,
@@ -563,7 +559,7 @@ function getPreferredBrandLogoSrc() {
   if (!isBrowser()) return white || black || "";
 
   try {
-    const theme = text(document.documentElement?.dataset?.theme).toLowerCase();
+    const theme = cleanText(document.documentElement?.dataset?.theme).toLowerCase();
     return theme === "light" ? black || white || "" : white || black || "";
   } catch {
     return white || black || "";
@@ -664,7 +660,7 @@ function createUserAvatar(
 export function createSidebarHeader(options = {}) {
   const open = options.open !== false;
   const brandHref = safeInternalHref(options.brandHref, "/");
-  const brandLabel = text(options.brandLabel, BRAND_LABEL);
+  const brandLabel = cleanText(options.brandLabel, BRAND_LABEL);
   const toggleLabel = open ? "Cerrar barra lateral" : "Abrir barra lateral";
 
   const header = el("header", {
@@ -807,8 +803,8 @@ function createAccountMenuItem({
   danger = false,
   logout = false,
 } = {}) {
-  const finalLabel = text(label);
-  const finalAction = text(action);
+  const finalLabel = cleanText(label);
+  const finalAction = cleanText(action);
   const finalHref = href ? safeInternalHref(href, "") : "";
 
   const item = el(finalHref ? "a" : "button", {
@@ -1000,9 +996,9 @@ export function createSidebarTemplate(options = {}) {
       open ? CLASSES.open : CLASSES.collapsed
     ),
     attrs: {
-      id: text(options.id, SIDEBAR_ROOT_ID),
+      id: cleanText(options.id, SIDEBAR_ROOT_ID),
       "data-sidebar-root": "true",
-      "aria-label": text(options.ariaLabel, "Panel lateral"),
+      "aria-label": cleanText(options.ariaLabel, "Panel lateral"),
       "aria-hidden": "false",
       "data-sidebar-state": state,
       "data-open": open ? "true" : "false",
@@ -1408,7 +1404,7 @@ export function bindSidebarTemplate(root = null, options = {}) {
     }
 
     const action = target.closest?.("[data-sidebar-action]");
-    const actionType = text(action?.dataset?.sidebarAction);
+    const actionType = cleanText(action?.dataset?.sidebarAction);
 
     if (actionType === "toggle") {
       event.preventDefault();

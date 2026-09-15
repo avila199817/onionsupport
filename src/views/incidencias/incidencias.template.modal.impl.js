@@ -44,6 +44,7 @@ import {
 } from "./incidencias.options.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
+import { slugKey } from "../../core/slug-key.js";
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
   "incidencias.template.modal.extreme.v36-owned-attachment-delete-confirm";
@@ -295,19 +296,6 @@ function joinClasses(...values) {
     )
     .filter(Boolean)
     .join(" ");
-}
-
-function normalizeKey(value = "") {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(
-      /[\u0300-\u036f]/g,
-      ""
-    )
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w:.]/g, "")
-    .replace(/^_+|_+$/g, "");
 }
 
 function displayLabel(value = "", fallback = "") {
@@ -990,7 +978,7 @@ function getStatus(detail = {}) {
     getRaw(detail);
 
   const status =
-    normalizeKey(
+    slugKey(
       first(
         detail.status,
         detail.estado,
@@ -1068,7 +1056,7 @@ function statusWillReopen(
     "closed",
     "resolved",
   ].includes(
-    normalizeKey(status)
+    slugKey(status)
   );
 }
 
@@ -1912,7 +1900,7 @@ function normalizeTimelineEntry(
     safeObject(item);
 
   const rawKind =
-    normalizeKey(
+    slugKey(
       first(
         raw.kind,
         raw.type,
@@ -2136,13 +2124,13 @@ function getTimelineCount(detail = {}) {
 }
 
 function getTimelineTone(entry = {}) {
-  const kind = normalizeKey(entry.kind || "event");
-  const type = normalizeKey(entry.type || "update");
+  const kind = slugKey(entry.kind || "event");
+  const type = slugKey(entry.type || "update");
 
   if (kind === "comment") return "comment";
   if (type === "created") return "created";
 
-  const text = normalizeKey(
+  const text = slugKey(
     [
       type,
       entry.title,
@@ -2592,7 +2580,7 @@ function renderChip(
     );
 
   const safeModifier =
-    normalizeKey(
+    slugKey(
       modifier
     ) ||
     "neutral";
@@ -2907,7 +2895,7 @@ function renderFeedbackBox(
   }
 
   const type =
-    normalizeKey(
+    slugKey(
       vm.feedbackType ||
       "info"
     );

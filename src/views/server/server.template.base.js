@@ -1,8 +1,9 @@
 
-import { cleanText as safeText } from "../../core/presentation-text.js";
+import { cleanText } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
+import { slugKey } from "../../core/slug-key.js";
 /* =========================================================
    Onion Support - Servidor Template
    Archivo: /src/views/server/server.template.js
@@ -112,36 +113,11 @@ function clamp(
 
 function attr(value = "") {
   return escapeHtml(
-    safeText(
+    cleanText(
       value,
       ""
     )
   );
-}
-
-function normalizeKey(value = "") {
-  return safeText(
-    value,
-    ""
-  )
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(
-      /[\u0300-\u036f]/g,
-      ""
-    )
-    .replace(
-      /[\s-]+/g,
-      "_"
-    )
-    .replace(
-      /[^\w:.]/g,
-      ""
-    )
-    .replace(
-      /^_+|_+$/g,
-      ""
-    );
 }
 
 function toTimestamp(
@@ -178,7 +154,7 @@ function toTimestamp(
   }
 
   const raw =
-    safeText(
+    cleanText(
       value,
       ""
     );
@@ -263,7 +239,7 @@ export function normalizeStatus(
   value = ""
 ) {
   const key =
-    normalizeKey(value);
+    slugKey(value);
 
   if (
     [
@@ -407,12 +383,12 @@ function canonicalService(
 
   return {
     id:
-      normalizeKey(
+      slugKey(
         source.id
       ),
 
     label:
-      safeText(
+      cleanText(
         source.label,
         "Servicio"
       ),
@@ -420,7 +396,7 @@ function canonicalService(
     status,
 
     statusLabel:
-      safeText(
+      cleanText(
         source.statusLabel,
         getStatusLabel(status)
       ),
@@ -432,25 +408,25 @@ function canonicalService(
       ),
 
     endpoint:
-      safeText(
+      cleanText(
         source.endpoint,
         ""
       ),
 
     detail:
-      safeText(
+      cleanText(
         source.detail,
         ""
       ),
 
     value:
-      safeText(
+      cleanText(
         source.value,
         ""
       ),
 
     error:
-      safeText(
+      cleanText(
         source.error,
         ""
       ),
@@ -519,19 +495,19 @@ function canonicalSnapshot(
 
   return {
     version:
-      safeText(
+      cleanText(
         source.version,
         ""
       ),
 
     backendVersion:
-      safeText(
+      cleanText(
         source.backendVersion,
         ""
       ),
 
     service:
-      safeText(
+      cleanText(
         source.service,
         "onion-backend"
       ),
@@ -539,7 +515,7 @@ function canonicalSnapshot(
     status,
 
     statusLabel:
-      safeText(
+      cleanText(
         source.statusLabel,
         getStatusLabel(status)
       ),
@@ -548,7 +524,7 @@ function canonicalSnapshot(
       source.ok === true,
 
     checkedAt:
-      safeText(
+      cleanText(
         source.checkedAt,
         ""
       ),
@@ -560,7 +536,7 @@ function canonicalSnapshot(
       ),
 
     uptimeLabel:
-      safeText(
+      cleanText(
         source.uptimeLabel,
         "—"
       ),
@@ -572,7 +548,7 @@ function canonicalSnapshot(
       ),
 
     latencyLabel:
-      safeText(
+      cleanText(
         source.latencyLabel,
         formatMs(
           source.latencyMs
@@ -585,7 +561,7 @@ function canonicalSnapshot(
       ),
 
     dbStatusLabel:
-      safeText(
+      cleanText(
         source.dbStatusLabel,
         getStatusLabel(
           source.dbStatus
@@ -599,7 +575,7 @@ function canonicalSnapshot(
       ),
 
     dbLatencyLabel:
-      safeText(
+      cleanText(
         source.dbLatencyLabel,
         formatMs(
           source.dbLatencyMs
@@ -613,7 +589,7 @@ function canonicalSnapshot(
       ),
 
     cpuUsageLabel:
-      safeText(
+      cleanText(
         source.cpuUsageLabel,
         "—"
       ),
@@ -625,13 +601,13 @@ function canonicalSnapshot(
       ),
 
     memoryUsageLabel:
-      safeText(
+      cleanText(
         source.memoryUsageLabel,
         "—"
       ),
 
     memoryLabel:
-      safeText(
+      cleanText(
         source.memoryLabel,
         "—"
       ),
@@ -643,13 +619,13 @@ function canonicalSnapshot(
       ),
 
     diskUsageLabel:
-      safeText(
+      cleanText(
         source.diskUsageLabel,
         "—"
       ),
 
     diskLabel:
-      safeText(
+      cleanText(
         source.diskLabel,
         "—"
       ),
@@ -661,7 +637,7 @@ function canonicalSnapshot(
       ),
 
     eventLoopLagLabel:
-      safeText(
+      cleanText(
         source.eventLoopLagLabel,
         "—"
       ),
@@ -677,19 +653,19 @@ function canonicalSnapshot(
       ).map(
         (warning) => ({
           code:
-            safeText(
+            cleanText(
               warning?.code,
               ""
             ),
 
           severity:
-            safeText(
+            cleanText(
               warning?.severity,
               ""
             ),
 
           message:
-            safeText(
+            cleanText(
               warning?.message,
               ""
             ),
@@ -800,7 +776,7 @@ function getViewModel(
       ),
 
     error:
-      safeText(
+      cleanText(
         state.error,
         ""
       ),
@@ -938,7 +914,7 @@ function serviceIcon(
   service = {}
 ) {
   const id =
-    normalizeKey(
+    slugKey(
       service.id
     );
 
@@ -1068,7 +1044,7 @@ function renderSummaryCard({
 
         <strong class="server-summary-value">
           ${escapeHtml(
-            safeText(
+            cleanText(
               value,
               "—"
             )
@@ -1077,7 +1053,7 @@ function renderSummaryCard({
 
         <span class="server-summary-detail">
           ${escapeHtml(
-            safeText(
+            cleanText(
               detail,
               "Sin datos"
             )
@@ -1302,7 +1278,7 @@ function metricForService(
   snapshot = {}
 ) {
   const id =
-    normalizeKey(
+    slugKey(
       service.id
     );
 
@@ -1387,7 +1363,7 @@ export function renderServiceCard(
     );
 
   const displayValue =
-    safeText(
+    cleanText(
       metric.label,
       item.value ||
       item.statusLabel ||
@@ -1475,7 +1451,7 @@ function renderWarnings(
       snapshot.warnings
     ).filter(
       (warning) =>
-        safeText(
+        cleanText(
           warning?.message,
           ""
         )
@@ -1638,7 +1614,7 @@ function healthMode(
       status: "unknown",
       result: "No expuesto",
       detail:
-        safeText(
+        cleanText(
           endpoint.reason,
           "El backend actual no publica este health."
         ),
@@ -1649,12 +1625,12 @@ function healthMode(
     return {
       status: "critical",
       result:
-        safeText(
+        cleanText(
           endpoint.error,
           "Error"
         ),
       detail:
-        safeText(
+        cleanText(
           endpoint.error,
           "La consulta no respondió correctamente."
         ),
@@ -1758,7 +1734,7 @@ function renderHealthContract(
 
                         <code class="server-probe-endpoint">
                           ${escapeHtml(
-                            safeText(
+                            cleanText(
                               endpoint.endpoint,
                               "—"
                             )
@@ -1916,7 +1892,7 @@ function runtimeItems(
 
   return values.filter(
     (item) =>
-      safeText(
+      cleanText(
         item.value,
         ""
       )

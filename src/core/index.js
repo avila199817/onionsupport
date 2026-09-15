@@ -23,7 +23,7 @@ import {
 } from "./config.js";
 import Http from "./http.js";
 import { userNameFromIdentity } from "./user-identity.js";
-import { cleanText } from "./presentation-text.js";
+import { cleanText, normalizeKey } from "./presentation-text.js";
 import { isObject } from "./objects.js";
 
 export const CORE_VERSION = "core.minimal.v9-specialized-snapshot";
@@ -41,7 +41,6 @@ function normalizeUserEmail(value = "") {
   const email = cleanText(value, "").toLowerCase().replace(/\s+/g, "");
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : "";
 }
-function normalizeKey(value = "") { return cleanText(value, "").replace(/[-_\s]/g, "").toLowerCase(); }
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;

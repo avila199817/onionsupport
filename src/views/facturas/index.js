@@ -66,6 +66,7 @@ import {
 } from "./facturas.template.modal.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
+import { slugKey } from "../../core/slug-key.js";
 
 export const FACTURAS_INDEX_VERSION =
   "facturas.index.productivo.v22.stable-create-client-relations";
@@ -169,16 +170,6 @@ function clamp(value = 0, min = 0, max = 1) {
   return Math.min(Math.max(value, min), max);
 }
 
-function normalizeKey(value = "") {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w:.]/g, "")
-    .replace(/^_+|_+$/g, "");
-}
-
 function parseBoolean(value, fallback = false) {
   if (typeof value === "boolean") return value;
 
@@ -188,7 +179,7 @@ function parseBoolean(value, fallback = false) {
   }
 
   if (typeof value === "string") {
-    const key = normalizeKey(value);
+    const key = slugKey(value);
 
     if (["true", "1", "yes", "si", "on"].includes(key)) return true;
     if (["false", "0", "no", "off"].includes(key)) return false;
@@ -483,7 +474,7 @@ function isFacturaSent(item = {}) {
     return parseBoolean(explicit, false);
   }
 
-  const status = normalizeKey(
+  const status = slugKey(
     first(raw.estado, raw.status, raw.invoiceStatus, "")
   );
 
@@ -493,7 +484,7 @@ function isFacturaSent(item = {}) {
 function isFacturaPaidState(item = {}) {
   const raw = safeObject(item);
 
-  const status = normalizeKey(
+  const status = slugKey(
     first(
       raw.paymentStatus,
       raw.estadoPago,
@@ -637,7 +628,7 @@ function upsertFactura(items = [], factura = null, sortMode = "date_desc") {
     return copy;
   }
 
-  return normalizeKey(sortMode).endsWith("_asc")
+  return slugKey(sortMode).endsWith("_asc")
     ? [...current, next]
     : [next, ...current];
 }
@@ -652,10 +643,10 @@ export function facturasCanOptimisticallyInsertCreated({
 } = {}) {
   return Boolean(
     created &&
-    normalizeKey(filter) === "all" &&
+    slugKey(filter) === "all" &&
     !cleanText(search, "") &&
     currentQuery === true &&
-    (hasMore !== true || normalizeKey(sort) === "date_desc")
+    (hasMore !== true || slugKey(sort) === "date_desc")
   );
 }
 
@@ -2463,7 +2454,7 @@ function createFacturasController(host = null, context = {}) {
   --------------------------------------------------------- */
 
   function getSortParts() {
-    const normalized = normalizeKey(sort || "date_desc");
+    const normalized = slugKey(sort || "date_desc");
     const sortMode =
       normalized.endsWith("_asc")
         ? "date_asc"
@@ -3074,7 +3065,7 @@ function createFacturasController(host = null, context = {}) {
   ) {
     detailModal.feedbackMessage = cleanText(message, "");
 
-    const normalized = normalizeKey(type);
+    const normalized = slugKey(type);
 
     detailModal.feedbackType = [
       "success",
@@ -3820,7 +3811,7 @@ function createFacturasController(host = null, context = {}) {
   }
 
   function setFilter(value = "all") {
-    const next = normalizeKey(value || "all") || "all";
+    const next = slugKey(value || "all") || "all";
     const nextFilter = ["all", "pending", "paid", "overdue"].includes(next)
       ? next
       : "all";
@@ -3856,7 +3847,7 @@ function createFacturasController(host = null, context = {}) {
 
   function setSort(value = "date_desc") {
     const nextSort =
-      normalizeKey(value) === "date_asc"
+      slugKey(value) === "date_asc"
         ? "date_asc"
         : "date_desc";
     const hadPendingSearch = cancelListSearchTimer();

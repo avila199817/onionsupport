@@ -76,6 +76,7 @@ import {
 } from "./usuarios.cursor.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
+import { slugKey } from "../../core/slug-key.js";
 
 export const USUARIOS_MODULE_NAME = "usuarios";
 export const USUARIOS_VIEW_NAME = "UsuariosView";
@@ -179,20 +180,11 @@ function number(value = 0, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
-function normalizeKey(value = "") {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w:.]/g, "")
-    .replace(/^_+|_+$/g, "");
-}
 function normalizeAction(value = "") {
-  return ACTION_ALIASES[normalizeKey(value)] || "";
+  return ACTION_ALIASES[slugKey(value)] || "";
 }
 function normalizeSessionSortOrder(value = USUARIOS_DEFAULT_SORT_ORDER) {
-  return normalizeKey(value) === "asc" ? "asc" : "desc";
+  return slugKey(value) === "asc" ? "asc" : "desc";
 }
 function safeError(error = null, fallback = "No se pudieron cargar los usuarios.") {
   return cleanText(
@@ -254,7 +246,7 @@ function getCurrentRole(context = {}, state = getAppState()) {
   } catch {
     // fallback below
   }
-  return normalizeKey(Array.isArray(raw) ? raw[0] : raw) === "admin" ? "admin" : "user";
+  return slugKey(Array.isArray(raw) ? raw[0] : raw) === "admin" ? "admin" : "user";
 }
 function isAdminContext(context = {}) {
   return context.admin === true || getCurrentRole(context) === "admin";
@@ -1100,7 +1092,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
   function setFilter(value = "all") {
     cancelSearchDebounce();
     search = cleanText(searchDraft, "");
-    const next = normalizeKey(value);
+    const next = slugKey(value);
     filter = ["active", "pending", "blocked"].includes(next) ? next : "all";
     void loadFirstPage({ silent: true });
     return filter;
@@ -1131,7 +1123,7 @@ function createUsuariosController(rawHost = null, rawContext = {}) {
     return sortOrder;
   }
   function toggleSortOrder(value = "") {
-    const requested = normalizeKey(value);
+    const requested = slugKey(value);
     sortOrder = requested === "asc" || requested === "desc"
       ? requested
       : sortOrder === "desc"

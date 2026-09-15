@@ -42,6 +42,7 @@ import Http from "../../core/http.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
+import { slugKey } from "../../core/slug-key.js";
 
 
 /* =========================================================
@@ -203,33 +204,6 @@ function clamp(
     ),
     max
   );
-}
-
-function normalizeKey(
-  value = ""
-) {
-  return cleanText(
-    value,
-    ""
-  )
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(
-      /[\u0300-\u036f]/g,
-      ""
-    )
-    .replace(
-      /[\s-]+/g,
-      "_"
-    )
-    .replace(
-      /[^\w:.]/g,
-      ""
-    )
-    .replace(
-      /^_+|_+$/g,
-      ""
-    );
 }
 
 function nowIso() {
@@ -661,7 +635,7 @@ export function normalizeStatus(
   value = ""
 ) {
   const key =
-    normalizeKey(value);
+    slugKey(value);
 
   if (
     [
@@ -810,7 +784,7 @@ export function normalizeService({
 
   return {
     id:
-      normalizeKey(
+      slugKey(
         id ||
         label ||
         endpoint ||
@@ -1037,7 +1011,7 @@ export async function probeEndpointGroup(
   options = {}
 ) {
   const name =
-    normalizeKey(group);
+    slugKey(group);
 
   if (!name) {
     throw createContractError(
@@ -1292,7 +1266,7 @@ function normalizeDatabaseStatus(
 ) {
   if (
     db.ok === true ||
-    normalizeKey(
+    slugKey(
       db.status
     ) === "up"
   ) {
@@ -1306,7 +1280,7 @@ function normalizeDatabaseStatus(
       "error",
       "unavailable",
     ].includes(
-      normalizeKey(
+      slugKey(
         db.status
       )
     )
@@ -2584,7 +2558,7 @@ export async function fetchServerReadinessRequest(
 
     ok:
       source.ok === true &&
-      normalizeKey(
+      slugKey(
         source.status
       ) === "ready",
 
@@ -3016,7 +2990,7 @@ export function getServerServiceByIdStore(
   id = ""
 ) {
   const target =
-    normalizeKey(id);
+    slugKey(id);
 
   if (!target) {
     return null;
@@ -3026,7 +3000,7 @@ export function getServerServiceByIdStore(
     getServerServices()
       .find(
         (service) =>
-          normalizeKey(
+          slugKey(
             service.id
           ) === target
       ) ||

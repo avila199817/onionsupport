@@ -5,6 +5,7 @@ import { createModalLifecycle, restoreModalFocus } from "../../features/entity-o
 import { createModalHost, renderModalCloseButton, renderModalContent, renderModalShell } from "../../features/entity-overlay/modal-host.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
+import { slugKey } from "../../core/slug-key.js";
 /* =========================================================
    Onion Support - Clientes Detail Template
    Archivo: /src/views/clientes/clientes.template.modal.js
@@ -273,7 +274,7 @@ function parseBoolean(
     typeof value === "string"
   ) {
     const key =
-      normalizeKey(value);
+      slugKey(value);
 
     if (
       [
@@ -332,21 +333,6 @@ function joinClasses(
     )
     .filter(Boolean)
     .join(" ");
-}
-
-function normalizeKey(
-  value = ""
-) {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(
-      /[\u0300-\u036f]/g,
-      ""
-    )
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w:.]/g, "")
-    .replace(/^_+|_+$/g, "");
 }
 
 function normalizeClassModifier(
@@ -1635,7 +1621,7 @@ function getType(
     getRaw(detail);
 
   const type =
-    normalizeKey(
+    slugKey(
       first(
         detail.tipo,
         detail.type,
@@ -1683,7 +1669,7 @@ function typeLabel(
   type = ""
 ) {
   const value =
-    normalizeKey(
+    slugKey(
       type
     );
 
@@ -1714,7 +1700,7 @@ function getStatus(
     getRaw(detail);
 
   const explicit =
-    normalizeKey(
+    slugKey(
       first(
         detail.status,
         detail.estado,
@@ -1855,7 +1841,7 @@ function statusLabel(
 
   return (
     labels[
-      normalizeKey(status)
+      slugKey(status)
     ] ||
     cleanText(
       status,
@@ -1868,7 +1854,7 @@ function statusClass(
   status = ""
 ) {
   const value =
-    normalizeKey(
+    slugKey(
       status
     );
 
@@ -2472,7 +2458,7 @@ function renderFeedbackBox(
   }
 
   const type =
-    normalizeKey(
+    slugKey(
       vm.feedbackType ||
       "info"
     );

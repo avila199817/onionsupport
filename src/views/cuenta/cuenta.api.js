@@ -39,6 +39,7 @@ import {
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
+import { slugKey } from "../../core/slug-key.js";
 
 export const CUENTA_API_VERSION =
   "cuenta.api.backend-contract.v5-canonical-runtime";
@@ -105,28 +106,18 @@ function first(...values) {
   return null;
 }
 
-function normalizeKey(value = "") {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w:.]/g, "")
-    .replace(/^_+|_+$/g, "");
-}
-
 function normalizeBoolean(value, fallback = false) {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value !== 0;
 
-  const key = normalizeKey(value);
+  const key = slugKey(value);
   if (["true", "1", "yes", "y", "si", "on", "enabled", "active", "dark"].includes(key)) return true;
   if (["false", "0", "no", "n", "off", "disabled", "inactive", "light"].includes(key)) return false;
   return Boolean(fallback);
 }
 
 function normalizeLang(value = DEFAULT_LANG) {
-  const key = normalizeKey(value);
+  const key = slugKey(value);
   if (["en", "eng", "english", "en_us", "en_gb"].includes(key)) return "en";
   if (["ca", "cat", "catala", "catalan", "ca_es"].includes(key)) return "ca";
   return "es";
@@ -145,7 +136,7 @@ function normalizeStatus(source = {}) {
     return "disabled";
   }
 
-  const status = normalizeKey(first(object.status, object.estado, "active"));
+  const status = slugKey(first(object.status, object.estado, "active"));
   if (["disabled", "inactive", "blocked", "suspended", "deleted", "archived"].includes(status)) {
     return "disabled";
   }
@@ -338,7 +329,7 @@ export function normalizeCuentaDetail(payload = {}, fallback = {}) {
   const role = AppCore.normalizeRole(first(source.role, source.rol, safeArray(source.roles)[0], DEFAULT_ROLE)) || DEFAULT_ROLE;
   const status = normalizeStatus(source);
   const active = status === "active";
-  const tipo = normalizeKey(source.tipo) === "empresa" ? "empresa" : "particular";
+  const tipo = slugKey(source.tipo) === "empresa" ? "empresa" : "particular";
   const nif = cleanText(first(source.nif, source.cif, ""), "").toUpperCase();
   const clienteId = cleanText(first(
     source.clienteId,
@@ -355,7 +346,7 @@ export function normalizeCuentaDetail(payload = {}, fallback = {}) {
 
   const darkMode = normalizeBoolean(first(preferences.darkMode, source.darkMode, false), false);
   const privacyMode = normalizeBoolean(first(preferences.privacyMode, source.privacyMode, false), false);
-  const themeKey = normalizeKey(first(
+  const themeKey = slugKey(first(
     preferences.theme,
     source.theme,
     source.mode,
@@ -412,9 +403,9 @@ export function normalizeCuentaDetail(payload = {}, fallback = {}) {
         id: cleanText(first(cliente.id, clienteId, ""), ""),
         clienteId,
         nombreFiscal: cleanText(first(cliente.nombreFiscal, cliente.name, ""), ""),
-        tipo: normalizeKey(cliente.tipo) === "empresa"
+        tipo: slugKey(cliente.tipo) === "empresa"
           ? "empresa"
-          : normalizeKey(cliente.tipo) === "particular" ? "particular" : "",
+          : slugKey(cliente.tipo) === "particular" ? "particular" : "",
         active: cliente.active === true,
       }
     : null;

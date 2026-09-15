@@ -28,6 +28,7 @@ import { cleanText } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
+import { slugKey } from "../../core/slug-key.js";
 
 
 export const USUARIOS_TEMPLATE_VERSION =
@@ -89,15 +90,6 @@ function number(value = 0, fallback = 0) {
 function attr(value = "") {
   return escapeHtml(cleanText(value, ""));
 }
-function normalizeKey(value = "") {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w:.]/g, "")
-    .replace(/^_+|_+$/g, "");
-}
 function toTimestamp(value = null) {
   if (value === null || value === undefined || value === "") return 0;
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -107,7 +99,7 @@ function toTimestamp(value = null) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 function normalizeSortOrder(value = USUARIOS_DEFAULT_SORT_ORDER) {
-  const normalized = normalizeKey(value || USUARIOS_DEFAULT_SORT_ORDER);
+  const normalized = slugKey(value || USUARIOS_DEFAULT_SORT_ORDER);
   return ["asc", "ascending", "oldest", "antiguos", "antiguo"].includes(normalized)
     ? "asc"
     : "desc";
@@ -262,7 +254,7 @@ function getCity(item = {}) {
   return cleanText(first(item.city, item.ciudad, item.direccion?.ciudad, item.address?.city, item.address?.ciudad, ""), "") || "Sin ciudad";
 }
 function getStatus(item = {}) {
-  const explicit = normalizeKey(first(item.status, item.estado, item.state, ""));
+  const explicit = slugKey(first(item.status, item.estado, item.state, ""));
   if (["pending", "pendiente", "invited", "invitado", "new", "unverified", "awaiting_activation"].includes(explicit)) return "pending";
   if (["blocked", "bloqueado", "inactive", "inactivo", "disabled", "archived", "deleted", "suspended", "banned", "revoked"].includes(explicit)) return "blocked";
   if (item.blocked === true || item.disabled === true) return "blocked";
@@ -334,7 +326,7 @@ function renderSpinner(label = "") {
 function filterValue(input = {}) {
   const data = safeObject(input);
   const state = stateFrom(data);
-  const value = normalizeKey(first(data.filter, data.activeFilter, state.filter, state.activeFilter, "all"));
+  const value = slugKey(first(data.filter, data.activeFilter, state.filter, state.activeFilter, "all"));
   return ["active", "pending", "blocked"].includes(value) ? value : "all";
 }
 function searchValue(input = {}) {

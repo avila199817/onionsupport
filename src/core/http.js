@@ -32,7 +32,7 @@ import {
   isPublicApiPath as configIsPublicApiPath,
   isPrivateApiPath as configIsPrivateApiPath,
 } from "./config.js";
-import { cleanText } from "./presentation-text.js";
+import { cleanText, normalizeKey } from "./presentation-text.js";
 import { isObject } from "./objects.js";
 
 export const HTTP_VERSION =
@@ -120,20 +120,6 @@ function isBlob(value) {
     typeof Blob !== "undefined" &&
     value instanceof Blob
   );
-}
-
-function normalizeKey(
-  value = ""
-) {
-  return cleanText(
-    value,
-    ""
-  )
-    .replace(
-      /[-_\s]/g,
-      ""
-    )
-    .toLowerCase();
 }
 
 function normalizeCode(

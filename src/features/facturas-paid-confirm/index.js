@@ -20,6 +20,7 @@ import {
 } from "../../views/facturas/facturas.api.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { safeObject } from "../../core/objects.js";
+import { slugKey } from "../../core/slug-key.js";
 
 export const FACTURAS_PAID_CONFIRM_VERSION =
   "facturas.paid-confirm.v2.verified-resumable";
@@ -65,16 +66,6 @@ function first(...values) {
     return value;
   }
   return null;
-}
-
-function normalizeKey(value = "") {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w:.]/g, "")
-    .replace(/^_+|_+$/g, "");
 }
 
 
@@ -191,7 +182,7 @@ function facturaPaymentMethod(factura = {}) {
 }
 
 function facturaIsPaid(factura = {}) {
-  const status = normalizeKey(
+  const status = slugKey(
     first(
       factura?.paymentStatus,
       factura?.estadoPago,

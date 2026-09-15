@@ -48,6 +48,7 @@ import {
   USUARIOS_API_VERSION,
 } from "./usuarios.api.js";
 import { isObject, safeObject } from "../../core/objects.js";
+import { slugKey } from "../../core/slug-key.js";
 
 /* =========================================================
    META / CONSTANTS
@@ -141,16 +142,6 @@ function isFunction(value) {
 }
 
 
-function normalizeKey(value = "") {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w:.]/g, "")
-    .replace(/^_+|_+$/g, "");
-}
-
 function normalizeEmail(value = "") {
   const email =
     cleanText(value, "").toLowerCase();
@@ -177,7 +168,7 @@ function parseBoolean(value, fallback = false) {
     return false;
   }
 
-  const key = normalizeKey(value);
+  const key = slugKey(value);
 
   if (
     [
@@ -282,7 +273,7 @@ function cloneForm(form = {}) {
     ).slice(0, 40),
 
     tipo:
-      normalizeKey(
+      slugKey(
         source.tipo ??
           source.clienteTipo ??
           "particular"
@@ -522,11 +513,11 @@ export function validateCreateUsuarioForm(
 
   const tipo =
     ALLOWED_TYPES.has(
-      normalizeKey(
+      slugKey(
         current.tipo
       )
     )
-      ? normalizeKey(
+      ? slugKey(
           current.tipo
         )
       : "particular";
@@ -1149,7 +1140,7 @@ function bind() {
         );
 
       const action =
-        normalizeKey(
+        slugKey(
           actionNode?.getAttribute?.(
             "data-usr-create-action"
           ) || ""

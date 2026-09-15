@@ -15,6 +15,7 @@ import UsuariosDetailModal from "../usuarios/usuarios.template.modal.js";
 import { loadUsuarioDetail, normalizeUsuarioModel } from "../usuarios/usuarios.api.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject } from "../../core/objects.js";
+import { slugKey } from "../../core/slug-key.js";
 
 export const EMPLEADOS_VIEW_VERSION = "empleados.view.v5.usuarios-parity-current-employee";
 export const EMPLEADOS_VIEW_NAME = "EmpleadosView";
@@ -34,14 +35,6 @@ const first = (...values) => {
   }
   return null;
 };
-const normalizeKey = (value = "") => cleanText(value, "")
-  .toLowerCase()
-  .normalize("NFD")
-  .replace(/[\u0300-\u036f]/g, "")
-  .replace(/[\s-]+/g, "_")
-  .replace(/[^\w:.]/g, "")
-  .replace(/^_+|_+$/g, "");
-
 function getAppState() {
   try {
     return typeof AppCore?.runtimeState?.read === "function"
@@ -73,14 +66,14 @@ function currentRole(context = {}, user = currentUser(context)) {
   } catch {
     // fallback below
   }
-  return normalizeKey(Array.isArray(raw) ? raw[0] : raw) === "admin" ? "admin" : "user";
+  return slugKey(Array.isArray(raw) ? raw[0] : raw) === "admin" ? "admin" : "user";
 }
 
 const employeeId = (item = {}) => cleanText(first(item.userId, item.usuarioId, item.id, item.uid, item.email, ""), "");
 const isAdmin = (context = {}, user = currentUser(context)) => context.admin === true || currentRole(context, user) === "admin";
 
 function statusOf(item = {}) {
-  const status = normalizeKey(first(item.status, item.estado, item.state, ""));
+  const status = slugKey(first(item.status, item.estado, item.state, ""));
   if (["pending", "pendiente", "invited", "invitado", "new", "unverified", "awaiting_activation"].includes(status)) return "pending";
   if (["blocked", "bloqueado", "inactive", "inactivo", "disabled", "archived", "deleted", "suspended", "banned", "revoked"].includes(status)) return "blocked";
   if (item.blocked === true || item.disabled === true || item.active === false || item.enabled === false || item.isActive === false) return "blocked";
@@ -93,7 +86,7 @@ function searchBlob(item = {}) {
     item.fullName, item.displayName, item.name, item.nombre, item.username,
     item.email, item.emailLower, item.phone, item.telefono,
     item.city, item.ciudad, item.direccion?.ciudad, item.address?.city,
-  ].map(normalizeKey).filter(Boolean).join(" ");
+  ].map(slugKey).filter(Boolean).join(" ");
 }
 
 function replaceCopy(value = "") {
@@ -214,7 +207,7 @@ export function EmpleadosView(host = null, context = {}) {
 
   const visibleItems = () => {
     if (!employee) return [];
-    const query = normalizeKey(search);
+    const query = slugKey(search);
     const filterOk = filter === "all" || statusOf(employee) === filter;
     return filterOk && (!query || searchBlob(employee).includes(query)) ? [employee] : [];
   };
@@ -335,7 +328,7 @@ export function EmpleadosView(host = null, context = {}) {
       render();
       if (!ok) showToast("No se pudo exportar el empleado.", "error");
     } else if (action === ACTIONS.FILTER) {
-      filter = normalizeKey(trigger.dataset.filter) || "all";
+      filter = slugKey(trigger.dataset.filter) || "all";
       render({ focusFilter: filter });
     } else if (action === ACTIONS.CLEAR_SEARCH) {
       search = "";

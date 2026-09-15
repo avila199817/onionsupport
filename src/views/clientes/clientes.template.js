@@ -12,6 +12,7 @@ import {
   computeClientesStats,
 } from "./clientes.model.js";
 import { safeObject } from "../../core/objects.js";
+import { slugKey } from "../../core/slug-key.js";
 
 export {
   normalizeClienteModel,
@@ -70,16 +71,6 @@ function first(...values) {
 function number(value = 0, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function normalizeKey(value = "") {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w:.]/g, "")
-    .replace(/^_+|_+$/g, "");
 }
 
 
@@ -184,7 +175,7 @@ function formatRelativeDate(value = null) {
 
 function statusBucket(item = {}) {
   const current = normalizeClienteModel(item);
-  const status = normalizeKey(first(current.status, current.estado, "active"));
+  const status = slugKey(first(current.status, current.estado, "active"));
   if (["pending", "pendiente", "new", "nuevo", "invited"].includes(status)) {
     return "pending";
   }
@@ -207,7 +198,7 @@ function statusLabel(item = {}) {
 }
 
 function typeLabel(item = {}) {
-  const type = normalizeKey(first(item?.tipo, item?.type, ""));
+  const type = slugKey(first(item?.tipo, item?.type, ""));
   if (type === "empresa") return "Empresa";
   if (type === "particular") return "Particular";
   return "Cliente";
@@ -378,9 +369,9 @@ function buildVm(input = {}) {
         ? data.clientes
         : [];
   const items = sourceItems.map((item) => normalizeClienteModel(item));
-  const filterKey = normalizeKey(data.filter);
+  const filterKey = slugKey(data.filter);
   const filter = FILTERS.some((entry) => entry.key === filterKey) ? filterKey : "all";
-  const sortOrder = normalizeKey(data.sortOrder) === "asc" ? "asc" : "desc";
+  const sortOrder = slugKey(data.sortOrder) === "asc" ? "asc" : "desc";
   const loadedStats = computeClientesStats(items);
   const counts = { all: loadedStats.total, active: loadedStats.activeCount, pending: loadedStats.pendingCount, blocked: loadedStats.blockedCount };
   const amount = loadedStats.totalAmount;
@@ -396,7 +387,7 @@ function buildVm(input = {}) {
     ).replace(/[\r\n\t]/g, " "),
     sortOrder,
     nextSortOrder: sortOrder === "asc" ? "desc" : "asc",
-    admin: data.admin === true || normalizeKey(data.role) === "admin",
+    admin: data.admin === true || slugKey(data.role) === "admin",
     hasMore: data.hasMore === true && Boolean(cleanText(data.nextCursor, "")),
     nextCursor: cleanText(data.nextCursor, ""),
     loading: data.loading === true,

@@ -25,6 +25,7 @@ import {
 } from "./incidencias.options.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
+import { slugKey } from "../../core/slug-key.js";
 
 export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =
   "incidencias.template.create.extreme.v26.canonical-user-contact-summary";
@@ -116,16 +117,6 @@ function joinClasses(...values) {
     .map((value) => cleanText(value, ""))
     .filter(Boolean)
     .join(" ");
-}
-
-function normalizeKey(value = "") {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w:.]/g, "")
-    .replace(/^_+|_+$/g, "");
 }
 
 function normalizeEmail(value = "") {
@@ -340,9 +331,9 @@ function normalizeForm(form = {}) {
     targetUserAvatar: firstImageSrc(input.targetUserAvatar, input.userAvatar, input.userAvatarUrl, input.avatar, input.avatarUrl),
     subject: cleanText(first(input.subject, input.asunto, input.title), ""),
     description: cleanMultiline(first(input.description, input.descripcion, input.message, input.body), ""),
-    priority: normalizeKey(input.priority) || "medium",
-    status: normalizeKey(input.status) || "open",
-    category: normalizeKey(input.category) || "general",
+    priority: slugKey(input.priority) || "medium",
+    status: slugKey(input.status) || "open",
+    category: slugKey(input.category) || "general",
     source: cleanText(input.source, "panel_admin"),
     attachments: safeArray(input.attachments),
   };
@@ -365,7 +356,7 @@ function buildSelectedUser(form = {}, userSearch = {}) {
 function buildVm(input = {}) {
   const raw = safeObject(input);
   const form = normalizeForm(raw.form || raw.values || raw);
-  const admin = Boolean(raw.admin || raw.isAdmin || normalizeKey(raw.role) === "admin");
+  const admin = Boolean(raw.admin || raw.isAdmin || slugKey(raw.role) === "admin");
 
   const userSearch = {
     query: cleanText(raw.userSearch?.query, ""),
@@ -484,7 +475,7 @@ function renderSelect({
   disabled = false,
 } = {}) {
   const id = `incidencias-create-${name}`;
-  const current = normalizeKey(value);
+  const current = slugKey(value);
 
   return `
     <label class="inc-create-field${error ? " is-error" : ""}" data-create-field="${attr(name)}">
@@ -501,7 +492,7 @@ function renderSelect({
         >
           ${safeArray(options).map((option) => {
             const optionValue = cleanText(option.value, "");
-            const selected = normalizeKey(optionValue) === current;
+            const selected = slugKey(optionValue) === current;
             return `<option value="${attr(optionValue)}"${selected ? " selected" : ""}>${escapeHtml(option.label || optionValue)}</option>`;
           }).join("")}
         </select>
@@ -1042,7 +1033,7 @@ export function getCreateFormDefaults() {
 export function validateCreateForm(form = {}) {
   const current = normalizeForm(form);
   const errors = {};
-  const clientMode = normalizeKey(current.source) === "panel_user";
+  const clientMode = slugKey(current.source) === "panel_user";
 
   if (!current.subject) {
     errors.subject = "El título es obligatorio.";
@@ -1056,8 +1047,8 @@ export function validateCreateForm(form = {}) {
     errors.description = "Mínimo 8 caracteres.";
   }
 
-  const category = clientMode ? "general" : normalizeKey(current.category);
-  const priority = clientMode ? "medium" : normalizeKey(current.priority);
+  const category = clientMode ? "general" : slugKey(current.category);
+  const priority = clientMode ? "medium" : slugKey(current.priority);
 
   if (!CATEGORY_OPTIONS.some((item) => item.value === category)) {
     errors.category = "Selecciona una categoría válida.";

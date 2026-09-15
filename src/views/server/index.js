@@ -54,6 +54,7 @@ import renderServerTemplate, {
 } from "./server.template.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject } from "../../core/objects.js";
+import { slugKey } from "../../core/slug-key.js";
 
 
 /* =========================================================
@@ -198,33 +199,6 @@ function clamp(
     ),
     max
   );
-}
-
-function normalizeKey(
-  value = ""
-) {
-  return cleanText(
-    value,
-    ""
-  )
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(
-      /[\u0300-\u036f]/g,
-      ""
-    )
-    .replace(
-      /[\s-]+/g,
-      "_"
-    )
-    .replace(
-      /[^\w:.]/g,
-      ""
-    )
-    .replace(
-      /^_+|_+$/g,
-      ""
-    );
 }
 
 function safeError(
@@ -1669,7 +1643,7 @@ function createController(
     }
 
     const normalizedAction =
-      normalizeKey(action);
+      slugKey(action);
 
     const serviceId =
       cleanText(
@@ -1712,7 +1686,7 @@ function createController(
         ACTIONS.COPY_DETAIL,
         ACTIONS.OPEN_DETAIL,
       ]
-        .map(normalizeKey)
+        .map(slugKey)
         .includes(
           normalizedAction
         )
@@ -1727,7 +1701,7 @@ function createController(
         ACTIONS.REFRESH_HEALTH,
         ACTIONS.LOAD_HEALTH,
       ]
-        .map(normalizeKey)
+        .map(slugKey)
         .includes(
           normalizedAction
         )
@@ -1738,7 +1712,7 @@ function createController(
 
     if (
       normalizedAction ===
-      normalizeKey(
+      slugKey(
         ACTIONS.TOGGLE_LIVE
       )
     ) {
@@ -1748,7 +1722,7 @@ function createController(
 
     if (
       normalizedAction ===
-      normalizeKey(
+      slugKey(
         ACTIONS.COPY_JSON
       )
     ) {
@@ -1758,7 +1732,7 @@ function createController(
 
     if (
       normalizedAction ===
-      normalizeKey(
+      slugKey(
         ACTIONS.COPY_DETAIL
       )
     ) {
@@ -1770,7 +1744,7 @@ function createController(
 
     if (
       normalizedAction ===
-      normalizeKey(
+      slugKey(
         ACTIONS.OPEN_DETAIL
       )
     ) {

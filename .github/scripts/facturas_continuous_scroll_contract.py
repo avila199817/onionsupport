@@ -85,9 +85,9 @@ require(INDEX, "syncFacturasListCache({", "Controller cache sync must include it
 require(INDEX, "syncListCacheSnapshot();", "Successful and rolled-back list requests must persist controller state")
 reject(API, "mergeById([created, ...lastList.items])", "Create must not contaminate an unknown filtered cache context")
 require(INDEX, "const canOptimisticallyInsert", "Create must declare when an optimistic row belongs to the canonical query")
-require(INDEX, 'normalizeKey(filter) === "all"', "Create must not optimistically insert into a filtered query")
+require(INDEX, 'slugKey(filter) === "all"', "Create must not optimistically insert into a filtered query")
 require(INDEX, "facturasCanOptimisticallyInsertCreated", "Create optimism must be covered by a testable safety predicate")
-require(INDEX, '(hasMore !== true || normalizeKey(sort) === "date_desc")', "Partial ascending histories must not optimistically misorder a new invoice")
+require(INDEX, '(hasMore !== true || slugKey(sort) === "date_desc")', "Partial ascending histories must not optimistically misorder a new invoice")
 require(INDEX, "keepItems: itemsBelongToCurrentQuery()", "Create must revalidate the active server query after success")
 
 # Debounced search owns the list slot; observer and scroll fallback stay blocked.

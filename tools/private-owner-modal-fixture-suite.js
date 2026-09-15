@@ -351,6 +351,15 @@ run.addEventListener('click', async () => {
     await load(390); await open(type); await resolved(type);
     const bounds = node(config[type].panel).getBoundingClientRect();
     check(bounds.x >= -1 && bounds.y >= -1 && bounds.right <= 391 && bounds.bottom <= 901, 'panel inside 390 x 900 viewport: ' + JSON.stringify(bounds.toJSON()));
+    // A shell close control that is a direct child of the header stays in its
+    // top-right corner on narrow screens; only a header composing its own
+    // actions row stacks.
+    const header = node(config[type].panel).querySelector('[data-modal-header="true"]');
+    const closeControl = header?.querySelector(':scope > .ui-detail-modal-close-btn');
+    if (closeControl) {
+      const h = header.getBoundingClientRect(), c = closeControl.getBoundingClientRect();
+      check(c.right >= h.right - 40 && c.top <= h.top + 40, type + ': shell close control stays top-right at 390px: ' + JSON.stringify({ header: h.toJSON(), close: c.toJSON() }));
+    }
     await close(type);
   });
   status.textContent = `${failed ? 'FAIL' : 'PASS'}: ${passed} correctas, ${failed} fallidas`;

@@ -243,7 +243,12 @@ test("one structural stylesheet, loaded with the private area", () => {
     '.ui-detail-modal-root[data-modal-size="compact"]', '.ui-detail-modal-root[data-modal-size="confirm"]',
     '.ui-detail-modal-root[data-modal-height="auto"] .ui-detail-modal-panel', ".ui-detail-modal-panel:has(> .ui-detail-modal-footer)",
     ".ui-detail-modal-state--error", ".ui-detail-modal-spinner", ".entity-overlay-root:not([hidden])",
+    // Narrow screens stack only a header that composes its own actions row; a
+    // header whose close control is a direct child keeps it top-right.
+    ".ui-detail-modal-header:not(:has(> .ui-detail-modal-close-btn))",
+    ".ui-detail-modal-header > .ui-detail-modal-close-btn",
   ]) assert.ok(authority.includes(needle), needle);
+  assert.doesNotMatch(authority, /^\.ui-detail-modal-header \{\s*grid-template-columns: minmax\(0, 1fr\);/mu, "no unconditional single-column header");
   assert.equal(read("src/css/app.css").split(IMPORT).length, 2, "app.css imports the authority once");
   assert.equal(read("src/css/private.css").split(IMPORT).length, 2, "private.css imports the authority once");
   assert.doesNotMatch(read("vite.config.js"), /detail-modal/u, "the private boundary is declared by private.css, never by tooling");

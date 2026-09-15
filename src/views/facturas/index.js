@@ -94,8 +94,6 @@ const CREATE_MODAL_PANEL_SELECTOR =
   "[data-facturas-create-modal-panel='true']";
 const CREATE_MODAL_SCROLL_SELECTOR =
   "[data-facturas-create-body='true']";
-const CREATE_MODAL_OVERLAY_SELECTOR =
-  "[data-facturas-create-modal-overlay='true']";
 
 const FACTURAS_CONTROLLER_KEY =
   Symbol.for("onion.support.facturas.controller");
@@ -2049,7 +2047,7 @@ function createFacturasController(host = null, context = {}) {
     onEscape: () => detailModalIsOpen() ? closeDetailModal() : closeCreateModal(),
     // A click on the shell backdrop is a close request; closeDetailModal keeps
     // its busy guard (a payment in flight never closes).
-    onBackdrop: () => detailModalIsOpen() ? closeDetailModal() : false,
+    onBackdrop: () => createModal.open ? closeCreateModal() : detailModalIsOpen() ? closeDetailModal() : false,
   });
 
   function syncModalBodyState() {
@@ -5940,22 +5938,6 @@ function createFacturasController(host = null, context = {}) {
       return;
     }
 
-    const createOverlay = target.closest(
-      CREATE_MODAL_OVERLAY_SELECTOR
-    );
-
-    const createPanel = target.closest(
-      CREATE_MODAL_PANEL_SELECTOR
-    );
-
-    if (
-      createOverlay &&
-      !createPanel &&
-      target === createOverlay
-    ) {
-      closeCreateModal();
-      return;
-    }
 
   }
 

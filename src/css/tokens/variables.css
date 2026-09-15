@@ -137,7 +137,6 @@
   --z-overlay: 60;
   --z-tooltip: 70;
   --z-modal: 80;
-  --z-drawer: 85;
   --z-toast: 100;
   --z-loader: 2147483000;
 
@@ -480,8 +479,6 @@
   --dropdown-bg-legacy: var(--dropdown-bg);
 
   --popover-bg: var(--graphite-300);
-  --modal-bg: var(--graphite-300);
-  --drawer-bg: var(--graphite-300);
 
   --tooltip-bg: var(--graphite-400);
   --tooltip-text: #ffffff;
@@ -592,7 +589,6 @@
   --shadow-card: var(--shadow-md);
   --shadow-panel: var(--shadow-sm);
   --shadow-dropdown: var(--shadow-lg);
-  --shadow-modal: var(--shadow-xl);
 
   --shadow-glow:
     0 0 0 1px rgba(255,255,255,.030),
@@ -1237,22 +1233,6 @@
      MODAL / DRAWER / OVERLAY
   ========================================================= */
   --overlay-bg: var(--backdrop-bg);
-  --overlay-blur: blur(12px) saturate(1.02);
-  --overlay-enter-duration: var(--duration-normal);
-  --overlay-exit-duration: var(--duration-fast);
-
-  --modal-width-sm: min(420px, calc(100vw - 32px));
-  --modal-width-md: min(640px, calc(100vw - 32px));
-  --modal-width-lg: min(860px, calc(100vw - 32px));
-  --modal-width-xl: min(1120px, calc(100vw - 32px));
-
-  --modal-padding: var(--space-xl);
-  --modal-header-gap: var(--space-sm);
-  --modal-body-gap: var(--space-md);
-  --modal-footer-gap: var(--space-sm);
-
-  --drawer-width: min(420px, 92vw);
-  --drawer-width-lg: min(560px, 94vw);
 
 
   /* =========================================================
@@ -1560,9 +1540,6 @@ body[data-route-mode="app"] {
     --panel-radius: calc(16px * var(--ui-scale));
     --card-radius: calc(16px * var(--ui-scale));
 
-    --modal-width-md: min(calc(100vw - 24px), 640px);
-    --modal-width-lg: min(calc(100vw - 24px), 860px);
-    --modal-padding: var(--space-lg);
 
     --loader-card-width: min(304px, calc(100vw - 32px));
     --loader-card-padding: 24px 18px 20px;
@@ -1666,8 +1643,6 @@ body[data-route-mode="app"] {
 
     --dropdown-bg: var(--surface-2);
     --popover-bg: var(--surface-2);
-    --modal-bg: var(--surface-2);
-    --drawer-bg: var(--surface-2);
 
     --topbar-bg: var(--surface-1);
     --sidebar-bg: var(--graphite-400);

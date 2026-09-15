@@ -58,11 +58,6 @@
 .toast,
 .toast-close,
 .ui-alert,
-.ui-overlay,
-.ui-modal,
-.ui-drawer,
-.ui-modal-close,
-.ui-drawer-close,
 .error-saas .error-actions button,
 .ui-table-wrap,
 .ui-loading-overlay {
@@ -75,12 +70,6 @@
 .ui-card *,
 .ui-card *::before,
 .ui-card *::after,
-.ui-modal *,
-.ui-modal *::before,
-.ui-modal *::after,
-.ui-drawer *,
-.ui-drawer *::before,
-.ui-drawer *::after,
 .toast *,
 .toast *::before,
 .toast *::after,
@@ -100,8 +89,6 @@
 .ui-dropdown .dropdown-item,
 .ui-page-btn,
 .toast-close,
-.ui-modal-close,
-.ui-drawer-close,
 .error-saas .error-actions button,
 .ui-input-action,
 .ui-switch,
@@ -117,8 +104,6 @@
 .ui-dropdown .dropdown-item,
 .ui-page-btn,
 .toast-close,
-.ui-modal-close,
-.ui-drawer-close,
 .error-saas .error-actions button,
 .ui-input-action,
 .ui-switch,
@@ -135,8 +120,6 @@
 .ui-dropdown .dropdown-item,
 .ui-page-btn,
 .toast-close,
-.ui-modal-close,
-.ui-drawer-close,
 .error-saas .error-actions button,
 .ui-input-action {
   font-family: inherit;
@@ -156,8 +139,6 @@
 .ui-alert-icon i,
 .toast-icon svg,
 .toast-icon i,
-.ui-modal-close svg,
-.ui-drawer-close svg,
 .toast-close svg,
 .ui-input-icon svg,
 .ui-input-action svg,
@@ -173,8 +154,6 @@
 .ui-dropdown .dropdown-item svg,
 .ui-alert-icon svg,
 .toast-icon svg,
-.ui-modal-close svg,
-.ui-drawer-close svg,
 .toast-close svg,
 .ui-input-icon svg,
 .ui-input-action svg,
@@ -189,8 +168,6 @@
 .ui-dropdown .dropdown-item svg path,
 .ui-alert-icon svg path,
 .toast-icon svg path,
-.ui-modal-close svg path,
-.ui-drawer-close svg path,
 .toast-close svg path,
 .ui-input-icon svg path,
 .ui-input-action svg path,
@@ -202,8 +179,6 @@
 .ui-dropdown .dropdown-item svg circle,
 .ui-alert-icon svg circle,
 .toast-icon svg circle,
-.ui-modal-close svg circle,
-.ui-drawer-close svg circle,
 .toast-close svg circle,
 .ui-input-icon svg circle,
 .ui-input-action svg circle,
@@ -215,8 +190,6 @@
 .ui-dropdown .dropdown-item svg rect,
 .ui-alert-icon svg rect,
 .toast-icon svg rect,
-.ui-modal-close svg rect,
-.ui-drawer-close svg rect,
 .toast-close svg rect,
 .ui-input-icon svg rect,
 .ui-input-action svg rect,
@@ -228,8 +201,6 @@
 .ui-dropdown .dropdown-item svg line,
 .ui-alert-icon svg line,
 .toast-icon svg line,
-.ui-modal-close svg line,
-.ui-drawer-close svg line,
 .toast-close svg line,
 .ui-input-icon svg line,
 .ui-input-action svg line,
@@ -241,8 +212,6 @@
 .ui-dropdown .dropdown-item svg polyline,
 .ui-alert-icon svg polyline,
 .toast-icon svg polyline,
-.ui-modal-close svg polyline,
-.ui-drawer-close svg polyline,
 .toast-close svg polyline,
 .ui-input-icon svg polyline,
 .ui-input-action svg polyline,
@@ -258,8 +227,6 @@
 .ui-tab:focus-visible,
 .ui-page-btn:focus-visible,
 .toast-close:focus-visible,
-.ui-modal-close:focus-visible,
-.ui-drawer-close:focus-visible,
 .error-saas .error-actions button:focus-visible,
 .ui-dropdown .dropdown-item:focus-visible,
 .ui-input-action:focus-visible {
@@ -2116,194 +2083,6 @@
 
 
 /* =========================================================
-   MODAL / DRAWER / OVERLAY
-========================================================= */
-
-.ui-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-modal);
-
-  display: grid;
-  place-items: center;
-
-  padding: var(--space-lg);
-
-  background: var(--overlay-bg, var(--backdrop-bg));
-
-  backdrop-filter: var(--overlay-blur, blur(10px));
-  -webkit-backdrop-filter: var(--overlay-blur, blur(10px));
-}
-
-.ui-overlay[hidden],
-.ui-overlay.is-hidden,
-.ui-overlay[data-state="closed"] {
-  display: none !important;
-}
-
-.ui-modal {
-  inline-size: var(--modal-width-md);
-  max-inline-size: 100%;
-  max-block-size: min(85dvh, 900px);
-
-  overflow: auto;
-
-  border: 1px solid var(--panel-border);
-  border-radius: var(--modal-radius);
-
-  background:
-    var(--glass-shine),
-    var(--modal-bg);
-
-  box-shadow: var(--shadow-modal);
-
-  color: var(--text);
-
-  scrollbar-width: thin;
-  scrollbar-gutter: stable;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
-}
-
-.ui-modal.sm {
-  inline-size: var(--modal-width-sm);
-}
-
-.ui-modal.md {
-  inline-size: var(--modal-width-md);
-}
-
-.ui-modal.lg {
-  inline-size: var(--modal-width-lg);
-}
-
-.ui-modal.xl {
-  inline-size: var(--modal-width-xl);
-}
-
-.ui-modal::-webkit-scrollbar,
-.ui-drawer::-webkit-scrollbar {
-  inline-size: var(--scrollbar-size);
-  block-size: var(--scrollbar-size);
-}
-
-.ui-modal::-webkit-scrollbar-track,
-.ui-drawer::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.ui-modal::-webkit-scrollbar-thumb,
-.ui-drawer::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: var(--radius-pill);
-
-  background: var(--scrollbar-thumb);
-  background-clip: padding-box;
-}
-
-.ui-modal-header,
-.ui-modal-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-
-  gap: var(--space-md);
-
-  padding: 18px 20px;
-}
-
-.ui-modal-header {
-  border-block-end: 1px solid var(--border-soft);
-}
-
-.ui-modal-footer {
-  border-block-start: 1px solid var(--border-soft);
-}
-
-.ui-modal-body {
-  padding: 20px;
-}
-
-.ui-modal-title {
-  margin: 0;
-
-  color: var(--text-strong);
-
-  font-size: var(--font-xl);
-  font-weight: var(--weight-bold);
-  line-height: var(--line-snug);
-}
-
-.ui-modal-close,
-.ui-drawer-close {
-  inline-size: 36px;
-  block-size: 36px;
-
-  display: grid;
-  place-items: center;
-
-  border: 0;
-  border-radius: var(--radius-md);
-
-  background: transparent;
-  color: var(--text-dim);
-
-  cursor: pointer;
-
-  transition:
-    background var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard),
-    transform var(--duration-fast) var(--ease-out);
-}
-
-.ui-modal-close:hover,
-.ui-drawer-close:hover {
-  background: var(--surface-hover);
-  color: var(--text-strong);
-}
-
-.ui-modal-close:active,
-.ui-drawer-close:active {
-  transform: scale(.96);
-}
-
-.ui-drawer {
-  position: fixed;
-  inset-block: 0;
-  inset-inline-end: 0;
-  z-index: var(--z-drawer, var(--z-modal));
-
-  inline-size: var(--drawer-width-lg);
-  max-inline-size: 100vw;
-
-  overflow: auto;
-
-  border-inline-start: 1px solid var(--panel-border);
-
-  background:
-    var(--glass-shine),
-    var(--drawer-bg, var(--modal-bg));
-
-  box-shadow: var(--shadow-xl);
-
-  color: var(--text);
-
-  scrollbar-width: thin;
-  scrollbar-gutter: stable;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
-}
-
-.ui-drawer.sm {
-  inline-size: var(--drawer-width);
-}
-
-.ui-drawer[hidden],
-.ui-drawer.is-hidden,
-.ui-drawer[data-state="closed"] {
-  display: none !important;
-}
-
-
-/* =========================================================
    TABLE BASICS
 ========================================================= */
 
@@ -3008,30 +2787,6 @@
     max-inline-size: none;
   }
 
-  .ui-overlay {
-    padding: var(--space-sm);
-  }
-
-  .ui-modal {
-    inline-size: calc(100vw - 20px);
-    max-block-size: 88dvh;
-
-    border-radius: var(--radius-xl);
-  }
-
-  .ui-modal-header,
-  .ui-modal-footer {
-    padding: 16px;
-  }
-
-  .ui-modal-body {
-    padding: 16px;
-  }
-
-  .ui-drawer {
-    inline-size: 100vw;
-  }
-
   .ui-toolbar {
     align-items: stretch;
   }
@@ -3133,9 +2888,6 @@
   .panel-block,
   .ui-card,
   .ui-dropdown,
-  .ui-overlay,
-  .ui-modal,
-  .ui-drawer,
   .toast,
   .ui-loading-overlay {
     backdrop-filter: none;
@@ -3164,8 +2916,6 @@
   .toast.loading .toast-icon::before,
   .ui-page-btn,
   .ui-tab,
-  .ui-modal-close,
-  .ui-drawer-close,
   .toast-close,
   .ui-input-action,
   .ui-switch,
@@ -3212,8 +2962,6 @@
   .ui-tab,
   .toast,
   .ui-alert,
-  .ui-modal,
-  .ui-drawer,
   .ui-table-wrap,
   .ui-page-btn,
   .ui-table-action {
@@ -3230,8 +2978,6 @@
   .badge,
   .ui-chip,
   .ui-dropdown,
-  .ui-modal,
-  .ui-drawer,
   .ui-table-wrap,
   .ui-page-btn,
   .ui-table-action {
@@ -3246,15 +2992,12 @@
 
 @media print {
   .toast,
-  .ui-overlay,
-  .ui-drawer,
   .ui-loading-overlay {
     display: none !important;
   }
 
   .panel-block,
   .ui-card,
-  .ui-modal,
   .ui-table-wrap {
     box-shadow: none !important;
     backdrop-filter: none !important;

@@ -158,6 +158,7 @@ try {
   await scenario("draft editing preserves saved fields and blocks duplicate save and busy Escape", async () => {
     await page.locator("[data-correo-message-id='draft-1'][data-correo-action='select-message']").click();
     await page.locator(action("edit-draft")).click();
+    await page.waitForFunction(() => document.activeElement?.name === "body");
     assert.equal(await page.locator(`${composer} input[name='to']`).inputValue(), "draft@example.test");
     assert.equal(await page.locator(`${composer} input[name='cc']`).inputValue(), "copy@example.test");
     assert.equal(await page.locator(`${composer} input[name='subject']`).inputValue(), "Borrador de prueba");
@@ -179,6 +180,7 @@ try {
   await scenario("signature preview stays text and inserts the saved signature once", async () => {
     await page.locator(action("account-menu")).click();
     await page.locator(action("signature")).click();
+    await page.waitForFunction(() => document.activeElement?.matches("[data-correo-signature-input]") === true);
     const signature = "Operadora de prueba\n<script>Firma segura</script>";
     await page.locator("[data-correo-signature-input]").fill(signature);
     assert.equal(await page.locator("[data-correo-signature-preview]").innerText(), signature);
@@ -243,6 +245,7 @@ try {
   await scenario("destroy aborts a busy draft request and a late result cannot reopen or repaint", async () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator(action("compose")).click();
+    await page.waitForFunction(() => document.activeElement?.name === "to");
     await page.locator(`${composer} input[name='to']`).fill("draft@example.test");
     await page.locator(body).fill("Contenido local conservado");
     const bounds = await page.locator(modal).boundingBox();

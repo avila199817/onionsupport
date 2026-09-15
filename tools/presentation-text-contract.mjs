@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { cleanText, escapeHtml } from "../src/core/presentation-text.js";
+import { cleanText } from "../src/core/presentation-text.js";
+// escapeHtml moves to core/escape-html.js in the next source change; the
+// trusted base tooling validates that candidate before the module exists on
+// main, so resolve the authority wherever it lives.
+const { escapeHtml } = await import("../src/core/escape-html.js").catch(() => import("../src/core/presentation-text.js"));
 import { cleanText as homeText, escapeHtml as homeEscape, attr } from "../src/views/home/home.template.foundation.js";
 import { cleanText as overlayText, renderDetailPending, safeError } from "../src/features/entity-overlay/pending-view.js";
 import { escapeHtml as correoEscape, renderComposeModal, renderMessageRows } from "../src/views/correo/correo.template.js";
@@ -191,7 +195,9 @@ for (const file of sourceFiles(SRC_ROOT)) {
   if (defines) definers.push(path);
   else if (/\bcleanText\s*\(/u.test(code) && !imports) callersWithoutBinding.push(path);
 }
-assert.deepEqual(definers, [CLEAN_TEXT_AUTHORITY, ...STARTUP_CLEAN_TEXT_COPIES].sort(), "cleanText is defined once, plus the pending startup and enhancement copies only");
+const allowedDefiners = new Set([CLEAN_TEXT_AUTHORITY, ...STARTUP_CLEAN_TEXT_COPIES]);
+assert.ok(definers.includes(CLEAN_TEXT_AUTHORITY), "the authority defines cleanText");
+assert.deepEqual(definers.filter((path) => !allowedDefiners.has(path)), [], "cleanText is defined only in the authority and the pending startup copies; the list only shrinks");
 assert.deepEqual(callersWithoutBinding, [], "every cleanText caller binds the canonical helper");
 
 console.log(`Presentation text contract: PASS · Unicode/coercion/fallback identity · canonical reexports · one cleanText authority (${definers.length - 1} startup and enhancement copies pending) · actual pending, Correo, Servidor, Facturas and Incidencias markup · multiline body/comments · redaction`);

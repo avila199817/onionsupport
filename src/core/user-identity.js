@@ -5,12 +5,7 @@
  */
 
 import { cleanText } from "./presentation-text.js";
-
-function object(value) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : {};
-}
+import { safeObject } from "./objects.js";
 
 function text(value) {
   return typeof value === "string"
@@ -19,8 +14,8 @@ function text(value) {
 }
 
 export function userNameFromIdentity(value = {}, fallback = "") {
-  const source = object(value);
-  const candidates = [source, source.profile, source.user, source.raw].map(object);
+  const source = safeObject(value);
+  const candidates = [source, source.profile, source.user, source.raw].map((candidate) => safeObject(candidate));
 
   // A canonical name always wins over an older display/full-name alias.
   for (const candidate of candidates) {

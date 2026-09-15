@@ -19,19 +19,11 @@ import {
   normalizeAvatarUsername,
 } from "../avatar-system/identity.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 
 export const INCIDENCIAS_COMMENT_IDENTITY_VERSION =
   "incidencias.comment-identity.v2-comment-id-user-authority";
-
-function safeObject(value = null) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : null;
-}
-
-function safeArray(value = null) {
-  return Array.isArray(value) ? value : [];
-}
 
 function firstText(...values) {
   for (const value of values) {
@@ -45,7 +37,7 @@ function firstText(...values) {
 
 function firstObject(...values) {
   for (const value of values) {
-    const object = safeObject(value);
+    const object = safeObject(value, null);
     if (object && Object.keys(object).length) return object;
   }
   return {};
@@ -66,7 +58,7 @@ function samePerson(left = "", right = "") {
 }
 
 export function requesterIdentity(detail = {}) {
-  const raw = safeObject(detail?.raw) || {};
+  const raw = safeObject(detail?.raw, null) || {};
   const requesters = [
     detail.requesterSnapshot,
     detail.requester,
@@ -78,7 +70,7 @@ export function requesterIdentity(detail = {}) {
     raw.cliente,
     raw.receptor,
     raw.user
-  ].filter(safeObject);
+  ].filter(isObject);
 
   // A client record's id belongs to the client, not to its contact user.
   // Requester snapshots may also contain client records. Only the explicit
@@ -86,7 +78,7 @@ export function requesterIdentity(detail = {}) {
   const users = [
     detail.user,
     raw.user,
-  ].filter(safeObject);
+  ].filter(isObject);
 
   return Object.freeze({
     userId: normalizeAvatarUserId(firstText(
@@ -126,7 +118,7 @@ export function requesterIdentity(detail = {}) {
 }
 
 export function technicianIdentity(detail = {}) {
-  const raw = safeObject(detail?.raw) || {};
+  const raw = safeObject(detail?.raw, null) || {};
   const assignment = firstObject(detail.assignment, raw.assignment);
   const technician = firstObject(
     assignment.technician,
@@ -184,7 +176,7 @@ export function technicianIdentity(detail = {}) {
 }
 
 function commentEntries(detail = {}) {
-  const raw = safeObject(detail?.raw) || {};
+  const raw = safeObject(detail?.raw, null) || {};
   const entries = [];
 
   for (const value of [
@@ -195,7 +187,7 @@ function commentEntries(detail = {}) {
     ...safeArray(raw.notes),
     ...safeArray(raw.messages),
   ]) {
-    const entry = safeObject(value);
+    const entry = safeObject(value, null);
     if (entry) entries.push(entry);
   }
 
@@ -203,7 +195,7 @@ function commentEntries(detail = {}) {
     ...safeArray(detail.timeline),
     ...safeArray(raw.timeline),
   ]) {
-    const entry = safeObject(value);
+    const entry = safeObject(value, null);
     if (!entry) continue;
 
     const kind = firstText(
@@ -220,9 +212,9 @@ function commentEntries(detail = {}) {
 }
 
 export function stableCommentIdentity(entry = {}) {
-  const byObject = safeObject(entry.by) || {};
-  const createdBy = safeObject(entry.createdBy) || {};
-  const updatedBy = safeObject(entry.updatedBy) || {};
+  const byObject = safeObject(entry.by, null) || {};
+  const createdBy = safeObject(entry.createdBy, null) || {};
+  const updatedBy = safeObject(entry.updatedBy, null) || {};
 
   return Object.freeze({
     commentId: persistedCommentId(entry),
@@ -270,7 +262,7 @@ export function stableCommentIdentity(entry = {}) {
 }
 
 export function persistedCommentId(entry = {}) {
-  const source = safeObject(entry) || {};
+  const source = safeObject(entry, null) || {};
   // Normalized UI records may keep a synthetic id for ordering/signatures.
   // Its explicitly empty persisted alias must survive further projections.
   return Object.hasOwn(source, "persistedCommentId")

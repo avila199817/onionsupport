@@ -10,6 +10,8 @@ import {
   commentSignature,
 } from "../incidencias-detail-state/index.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 
 export const INCIDENCIAS_DETAIL_LIVE_SYNC_VERSION =
   "incidencias-detail-live-sync.v4.controller-signals";
@@ -48,13 +50,6 @@ let signalRefreshCount = 0;
 
 const browser = () =>
   typeof window !== "undefined" && typeof document !== "undefined";
-
-const object = (value, fallback = {}) =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : fallback;
-
-const array = (value) => Array.isArray(value) ? value : [];
 
 function first(...values) {
   for (const value of values) {
@@ -251,9 +246,9 @@ function finishIndicator(root, { changed = false, error = false } = {}) {
 }
 
 function attachmentsFromDetail(detail = {}) {
-  const raw = object(first(detail?.raw, detail));
+  const raw = safeObject(first(detail?.raw, detail));
 
-  return array(
+  return safeArray(
     first(
       detail?.attachments,
       detail?.files,
@@ -290,7 +285,7 @@ function attachmentDetailSignature(detail = {}) {
 }
 
 function detailSignature(detail = {}) {
-  const raw = object(first(detail?.raw, detail));
+  const raw = safeObject(first(detail?.raw, detail));
   const comments = commentsFromDetail(detail);
 
   return [

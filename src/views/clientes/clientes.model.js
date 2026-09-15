@@ -11,6 +11,8 @@
    - No hacer HTTP, DOM, Router, Auth, cache ni navegación.
 ========================================================= */
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 
 export const CLIENTES_MODEL_VERSION =
   "clientes.model.v1.single-authority";
@@ -33,18 +35,6 @@ const SAFE_ARRAY_LIMIT = 10_000;
 const SENSITIVE_KEY_RE =
   /^(?:access[_-]?token|refresh[_-]?token|id[_-]?token|token|password|pwd|secret|authorization|cookie|jwt|api[_-]?key|connection[_-]?string|sas|sig|signature|activation[_-]?token|reset[_-]?token|activationUrl|resetUrl|signedUrl|sasUrl)$/i;
 const PROTOTYPE_KEY_RE = /^(?:__proto__|prototype|constructor)$/i;
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
 
 function first(...values) {
   for (const value of values) {

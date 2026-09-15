@@ -42,6 +42,8 @@ import {
   normalizeIncidenciaPriority,
   normalizeIncidenciaCategory,
 } from "./incidencias.options.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { arrayFrom } from "../../core/arrays.js";
 
 export const INCIDENCIAS_MODAL_TEMPLATE_VERSION =
   "incidencias.template.modal.extreme.v36-owned-attachment-delete-confirm";
@@ -102,44 +104,6 @@ const TRUSTED_ATTACHMENT_CONTAINER_PREFIX =
 /* =========================================================
    BASICS
 ========================================================= */
-
-function isObject(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-  );
-}
-
-function safeObject(
-  value,
-  fallback = {}
-) {
-  return isObject(value)
-    ? value
-    : fallback;
-}
-
-function safeArray(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (
-    value &&
-    typeof value === "object" &&
-    typeof value.length === "number" &&
-    typeof value !== "string"
-  ) {
-    try {
-      return Array.from(value);
-    } catch {
-      return [];
-    }
-  }
-
-  return [];
-}
 
 function cleanMultiline(
   value = "",
@@ -1792,7 +1756,7 @@ function getAttachments(
   const raw =
     getRaw(detail);
 
-  return safeArray(
+  return arrayFrom(
     first(
       detail.attachments,
       detail.files,
@@ -2056,7 +2020,7 @@ function getTimeline(
     getRaw(detail);
 
   const direct =
-    safeArray(
+    arrayFrom(
       first(
         detail.timeline,
         raw.timeline,
@@ -2079,7 +2043,7 @@ function getTimeline(
   }
 
   const history =
-    safeArray(
+    arrayFrom(
       first(
         detail.history,
         detail.events,
@@ -2092,7 +2056,7 @@ function getTimeline(
     );
 
   const comments =
-    safeArray(
+    arrayFrom(
       first(
         detail.comments,
         detail.notes,
@@ -2143,10 +2107,10 @@ function getTimeline(
 
 function getTimelineCount(detail = {}) {
   const raw = getRaw(detail);
-  const direct = safeArray(first(detail.timeline, raw.timeline, []));
+  const direct = arrayFrom(first(detail.timeline, raw.timeline, []));
   if (direct.length) return direct.length;
 
-  const history = safeArray(
+  const history = arrayFrom(
     first(
       detail.history,
       detail.events,
@@ -2156,7 +2120,7 @@ function getTimelineCount(detail = {}) {
     )
   );
 
-  const comments = safeArray(
+  const comments = arrayFrom(
     first(
       detail.comments,
       detail.notes,
@@ -2261,7 +2225,7 @@ function buildVm(input = {}) {
     );
 
   const pendingFiles =
-    safeArray(
+    arrayFrom(
       data.pendingFiles
     );
 
@@ -3161,7 +3125,7 @@ function renderPendingFiles(
   vm = {}
 ) {
   const files =
-    safeArray(
+    arrayFrom(
       vm.pendingFiles
     );
 
@@ -3973,7 +3937,7 @@ name="${attr(name)}"
 data-detail-field="${attr(name)}"
 ${disabledAttrs(disabled, false)}
         >
-${safeArray(options).map((item) => `
+${arrayFrom(options).map((item) => `
   <option value="${attr(item.value)}"${item.value === value ? " selected" : ""}>${escapeHtml(item.label)}</option>
 `).join("")}
         </select>
@@ -4581,7 +4545,7 @@ export function validateDetailUpdate({
     );
 
   const files =
-    safeArray(
+    arrayFrom(
       pendingFiles
     );
 

@@ -25,6 +25,7 @@ import Http from "../../core/http.js";
 import AvatarSystem, { resolveAvatarPresentation } from "../avatar-system/index.js";
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { safeObject } from "../../core/objects.js";
 
 /* Trusted verifier compatibility marker: the legacy tooltip dataset is retired
    at runtime; the identity is now contained entirely by the visible card. */
@@ -69,21 +70,17 @@ function first(...values) {
   ) ?? null;
 }
 
-function object(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
-}
-
 function state() {
   try {
-    return object(AppCore?.getState?.()) || object(AppCore?.state) || {};
+    return safeObject(AppCore?.getState?.(), null) || safeObject(AppCore?.state, null) || {};
   } catch {
-    return object(AppCore?.state) || {};
+    return safeObject(AppCore?.state, null) || {};
   }
 }
 
 function session() {
   const current = state();
-  const user = object(current.currentUser) || object(current.user);
+  const user = safeObject(current.currentUser, null) || safeObject(current.user, null);
 
   return {
     state: current,
@@ -129,7 +126,7 @@ function addressParts(user) {
     };
   }
 
-  const current = object(value) || {};
+  const current = safeObject(value, null) || {};
 
   return {
     address: cleanText(first(current.street, current.line1, current.calle, user?.calle, "")),
@@ -996,8 +993,8 @@ function neutralAccepted(response) {
 }
 
 function acceptedResponse(response) {
-  const envelope = object(response);
-  const body = object(envelope?.data) || envelope;
+  const envelope = safeObject(response, null);
+  const body = safeObject(envelope?.data, null) || envelope;
   if (!body || [envelope, body].some((value) => (
     value.ok === false || value.success === false || value.accepted === false
   ))) return null;

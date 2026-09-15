@@ -1,4 +1,5 @@
 import { cleanText } from "../../core/presentation-text.js";
+import { safeObject } from "../../core/objects.js";
 /* =========================================================
    Onion Support - Global Entity Intent
 
@@ -108,12 +109,6 @@ function safeDecode(value = "") {
   }
 }
 
-function object(value, fallback = {}) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : fallback;
-}
-
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
@@ -201,8 +196,8 @@ function explicitId(type = "", dataset = {}, input = {}) {
   if (!entityType) return "";
 
   const source = {
-    ...object(dataset),
-    ...object(input),
+    ...safeObject(dataset),
+    ...safeObject(input),
   };
 
   for (const key of EXPLICIT_ID_KEYS[entityType] || []) {
@@ -238,8 +233,8 @@ function textId(type = "", text = "") {
 }
 
 export function inferEntityIntent(input = {}) {
-  const data = object(input);
-  const dataset = object(data.dataset);
+  const data = safeObject(input);
+  const dataset = safeObject(data.dataset);
   const route = first(
     data.route,
     data.href,

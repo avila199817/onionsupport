@@ -47,6 +47,7 @@ import {
   USUARIOS_CREATE_ENDPOINT as API_CREATE_ENDPOINT,
   USUARIOS_API_VERSION,
 } from "./usuarios.api.js";
+import { isObject, safeObject } from "../../core/objects.js";
 
 /* =========================================================
    META / CONSTANTS
@@ -135,22 +136,8 @@ function isBrowser() {
   );
 }
 
-function isObject(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-  );
-}
-
 function isFunction(value) {
   return typeof value === "function";
-}
-
-function safeObject(value, fallback = {}) {
-  return isObject(value)
-    ? value
-    : fallback;
 }
 
 

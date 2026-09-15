@@ -14,6 +14,7 @@
 import { AppCore } from "../../core/index.js";
 import { mutationsTouchSelector } from "../../core/dom-mutations.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { safeObject } from "../../core/objects.js";
 
 export const PUBLIC_HOME_EXPERIENCE_VERSION =
   "public-home.experience.v7-avatar-topbar-card";
@@ -44,22 +45,16 @@ let scanFrame = 0;
 let destroyed = false;
 let logoutPending = false;
 
-function object(value) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : null;
-}
-
 function appState() {
   try {
-    return object(AppCore?.runtimeState?.read?.()) || {};
+    return safeObject(AppCore?.runtimeState?.read?.(), null) || {};
   } catch {
     return {};
   }
 }
 
 function currentUser(state = {}) {
-  return object(state.currentUser) || object(state.user);
+  return safeObject(state.currentUser, null) || safeObject(state.user, null);
 }
 
 function authenticated(state = {}) {

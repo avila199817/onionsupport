@@ -14,6 +14,7 @@
 ========================================================= */
 
 import { cleanText } from "../../core/presentation-text.js";
+import { arrayFrom } from "../../core/arrays.js";
 
 export const INCIDENCIAS_DETAIL_ATTACHMENT_POLICY_VERSION =
   "incidencias.detail-attachment-policy.v2.observer-idempotent";
@@ -48,18 +49,6 @@ export const INCIDENCIAS_DETAIL_ATTACHMENT_LIMITS = Object.freeze({
   }),
 });
 
-function safeArray(value) {
-  if (Array.isArray(value)) return value;
-  if (value && typeof value === "object" && typeof value.length === "number") {
-    try {
-      return Array.from(value);
-    } catch {
-      return [];
-    }
-  }
-  return [];
-}
-
 function roleKey(value = "") {
   return String(value ?? "").trim().toLowerCase() === "admin"
     ? "admin"
@@ -77,7 +66,7 @@ function fileKey(file = {}, index = 0) {
 
 function dedupeFiles(files = []) {
   const map = new Map();
-  safeArray(files).forEach((file, index) => {
+  arrayFrom(files).forEach((file, index) => {
     if (!file || typeof file !== "object") return;
     const key = fileKey(file, index);
     if (!map.has(key)) map.set(key, file);
@@ -243,7 +232,7 @@ function rootFrom(node = null) {
 }
 
 function filesFromList(value = null) {
-  return safeArray(value).filter(
+  return arrayFrom(value).filter(
     (file) => file && typeof file === "object" && typeof file.size === "number"
   );
 }

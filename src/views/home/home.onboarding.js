@@ -7,6 +7,7 @@
 
 import Http from "../../core/http.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject } from "../../core/objects.js";
 
 export const HOME_ONBOARDING_VERSION = "home.onboarding.v1.persisted-step-state";
 export const HOME_ONBOARDING_ENDPOINT = "/api/users/me/onboarding";
@@ -20,10 +21,6 @@ export const HOME_ONBOARDING_ACTIONS = Object.freeze({
 
 const ALLOWED_ACTIONS = new Set(Object.values(HOME_ONBOARDING_ACTIONS));
 const REQUEST_TIMEOUT_MS = 10_000;
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
 
 function integer(value, fallback = 0) {
   const number = Number(value);

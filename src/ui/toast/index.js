@@ -14,6 +14,7 @@
 
 import { AppCore } from "../../core/index.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject } from "../../core/objects.js";
 
 export const TOAST_VERSION = "toast.minimal.v1";
 
@@ -50,10 +51,6 @@ const timers = new Map();
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function isFunction(value) {

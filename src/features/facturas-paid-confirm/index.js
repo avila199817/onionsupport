@@ -19,6 +19,7 @@ import {
   markFacturaPaid,
 } from "../../views/facturas/facturas.api.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { safeObject } from "../../core/objects.js";
 
 export const FACTURAS_PAID_CONFIRM_VERSION =
   "facturas.paid-confirm.v2.verified-resumable";
@@ -55,12 +56,6 @@ const modalLifecycle = createModalLifecycle({
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function safeObject(value, fallback = {}) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : fallback;
 }
 
 function first(...values) {

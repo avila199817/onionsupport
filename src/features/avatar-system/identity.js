@@ -17,6 +17,7 @@
 
 import { userNameFromIdentity } from "../../core/user-identity.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject } from "../../core/objects.js";
 
 export const AVATAR_IDENTITY_VERSION =
   "avatar-identity.v5-user-id-first";
@@ -47,14 +48,6 @@ export const MICROSOFT_PERSONA_COLORS = Object.freeze([
 
 export const AVATAR_TONE_COUNT = MICROSOFT_PERSONA_COLORS.length;
 export const AVATAR_COLOR_SPACE = AVATAR_TONE_COUNT;
-
-function isObject(value = null) {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
-}
 
 export function normalizeAvatarEmail(value = "") {
   const email = cleanText(value, "")

@@ -23,6 +23,8 @@ import {
   INCIDENCIA_CATEGORY_OPTIONS,
   INCIDENCIA_PRIORITY_OPTIONS,
 } from "./incidencias.options.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 
 export const INCIDENCIAS_CREATE_TEMPLATE_VERSION =
   "incidencias.template.create.extreme.v26.canonical-user-contact-summary";
@@ -80,10 +82,6 @@ const DEFAULT_FORM = Object.freeze({
 /* =========================================================
    BASICS
 ========================================================= */
-
-const isObject = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
-const safeObject = (value, fallback = {}) => (isObject(value) ? value : fallback);
-const safeArray = (value) => (Array.isArray(value) ? value : []);
 
 function cleanMultiline(value = "", fallback = "") {
   const text = String(value ?? "")

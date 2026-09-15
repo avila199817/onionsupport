@@ -9,6 +9,7 @@
 
 import { cleanText as text } from "../../core/presentation-text.js";
 import BaseDefault, * as Base from "./facturas.template.modal.base.js";
+import { isObject, safeObject } from "../../core/objects.js";
 
 export * from "./facturas.template.modal.base.js";
 
@@ -84,14 +85,6 @@ const FALLBACK_KEYS = Object.freeze([
   "sasUrl",
 ]);
 
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function object(value, fallback = null) {
-  return isObject(value) ? value : fallback;
-}
-
 function key(value = "") {
   return text(value, "")
     .toLowerCase()
@@ -157,7 +150,7 @@ function isTechnicalIdentifier(value = "") {
 }
 
 export function isFacturaModalTechnicalRecord(value = null) {
-  const source = object(value);
+  const source = safeObject(value, null);
   if (!source) return false;
 
   if ([source.id, source._id, source.operationId].some(isTechnicalIdentifier)) {
@@ -207,7 +200,7 @@ function canonicalIdentity(source = {}) {
 }
 
 function looksLikeCanonicalFactura(value = null) {
-  const source = object(value);
+  const source = safeObject(value, null);
   if (!source) return false;
 
   const rootId = text(source.id, "");
@@ -241,11 +234,11 @@ function nestedCandidates(source = {}) {
     source.item,
     source.factura,
     source.invoice,
-  ].map((value) => object(value)).filter(Boolean);
+  ].map((value) => safeObject(value, null)).filter(Boolean);
 }
 
 function findTechnicalHost(value = null, depth = 0, seen = new Set()) {
-  const source = object(value);
+  const source = safeObject(value, null);
   if (!source || depth > 4 || seen.has(source)) return null;
   seen.add(source);
 
@@ -260,7 +253,7 @@ function findTechnicalHost(value = null, depth = 0, seen = new Set()) {
 }
 
 function snapshotCandidates(envelope = null) {
-  const source = object(envelope);
+  const source = safeObject(envelope, null);
   if (!source) return [];
 
   return [
@@ -279,11 +272,11 @@ function snapshotCandidates(envelope = null) {
     source.result?.invoice,
     source.result?.item,
     source.result,
-  ].map((value) => object(value)).filter(Boolean);
+  ].map((value) => safeObject(value, null)).filter(Boolean);
 }
 
 function findCanonicalSnapshot(value = null, depth = 0, seen = new Set()) {
-  const source = object(value);
+  const source = safeObject(value, null);
   if (!source || depth > 4 || seen.has(source)) return null;
   seen.add(source);
 
@@ -329,7 +322,7 @@ function taxAmountFromLines(value = {}) {
   let total = 0;
   let found = false;
   for (const raw of lines) {
-    const item = object(raw);
+    const item = safeObject(raw, null);
     if (!item) continue;
 
     const amount = numberOrNull(first(
@@ -485,7 +478,7 @@ function canonicalRaw(value = {}) {
 }
 
 export function resolveFacturaModalCanonical(value = null) {
-  const outer = object(value);
+  const outer = safeObject(value, null);
   if (!outer) return value;
 
   const technical = findTechnicalHost(outer);
@@ -506,7 +499,7 @@ export function resolveFacturaModalCanonical(value = null) {
   const selected = rootCanonical || snapshot;
   if (!selected) return null;
 
-  const selectedRaw = object(selected.raw);
+  const selectedRaw = safeObject(selected.raw, null);
   const source =
     selectedRaw && looksLikeCanonicalFactura(selectedRaw)
       ? { ...selectedRaw, ...selected }
@@ -556,7 +549,7 @@ export function resolveFacturaModalCanonical(value = null) {
     status: text(first(canonical.status, canonical.estado, "issued"), "issued"),
     estado: text(first(canonical.estado, canonical.status, "issued"), "issued"),
     meta: {
-      ...object(canonical.meta, {}),
+      ...safeObject(canonical.meta, {}),
       technicalAliasRecovered: true,
       technicalAliasId: text(technical.id, "") || null,
       technicalAliasGuardVersion: FACTURAS_MODAL_TECHNICAL_GUARD_VERSION,
@@ -569,7 +562,7 @@ export function resolveFacturaModalCanonical(value = null) {
 }
 
 function renderState(options = {}) {
-  const source = object(options, {});
+  const source = safeObject(options, {});
   const current = first(source.factura, source.item, source.detail, null);
   const technical = Boolean(findTechnicalHost(current));
   const canonical = resolveFacturaModalCanonical(current);
@@ -623,7 +616,7 @@ export function getFacturasModalTemplateSnapshot() {
     version: FACTURAS_MODAL_TEMPLATE_VERSION,
     technicalGuardVersion: FACTURAS_MODAL_TECHNICAL_GUARD_VERSION,
     policy: {
-      ...object(snapshot?.policy, {}),
+      ...safeObject(snapshot?.policy, {}),
       technicalIdempotencySnapshotFirst: true,
       canonicalRootBeforeStaleRaw: true,
       technicalIdNeverRendered: true,

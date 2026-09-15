@@ -23,6 +23,7 @@ import {
   safeArray,
   safeImageSrc,
 } from "./home.template.foundation.js";
+import { safeObject } from "../../core/objects.js";
 
 export const HOME_ENTITY_RELATION_VERSION =
   "home.entity-relation.v2-global-avatar-authority";
@@ -92,10 +93,6 @@ const INVOICE_AVATAR_PATHS = Object.freeze([
   "customer.avatarUrl",
 ]);
 
-function object(value = null) {
-  return isObject(value) ? value : {};
-}
-
 function readPath(source = {}, path = "") {
   const parts = cleanText(path, "").split(".").filter(Boolean);
   let current = source;
@@ -109,7 +106,7 @@ function readPath(source = {}, path = "") {
 }
 
 function firstPath(source = {}, paths = []) {
-  const root = object(source);
+  const root = safeObject(source);
 
   for (const path of safeArray(paths)) {
     const value = readPath(root, path);
@@ -126,8 +123,8 @@ function firstPath(source = {}, paths = []) {
 }
 
 function firstPathAcross(source = {}, paths = []) {
-  const root = object(source);
-  const raw = object(root.raw);
+  const root = safeObject(source);
+  const raw = safeObject(root.raw);
 
   return first(
     firstPath(root, paths),
@@ -239,9 +236,9 @@ function finalizeRelation({
 }
 
 function unwrapIncidencia(source = {}) {
-  const root = object(source);
+  const root = safeObject(source);
 
-  return object(
+  return safeObject(
     first(
       root.ticket,
       root.incidencia,
@@ -258,11 +255,11 @@ function unwrapIncidencia(source = {}) {
 
 function incidenciaRelation(source = {}) {
   const root = unwrapIncidencia(source);
-  const declared = object(first(root.relation, root.entityRelation, root.requester, {}));
-  const requesterSnapshot = object(root.requesterSnapshot);
-  const cliente = object(root.cliente);
-  const receptor = object(root.receptor);
-  const user = object(root.user);
+  const declared = safeObject(first(root.relation, root.entityRelation, root.requester, {}));
+  const requesterSnapshot = safeObject(root.requesterSnapshot);
+  const cliente = safeObject(root.cliente);
+  const receptor = safeObject(root.receptor);
+  const user = safeObject(root.user);
 
   const name = userNameFromIdentity(root) || userNameFromIdentity(declared) ||
     userNameFromIdentity(requesterSnapshot) || userNameFromIdentity(cliente) ||
@@ -314,9 +311,9 @@ function incidenciaRelation(source = {}) {
 }
 
 function facturaRelation(source = {}) {
-  const root = object(source);
-  const raw = object(root.raw);
-  const declared = object(first(root.relation, root.entityRelation, root.customer, {}));
+  const root = safeObject(source);
+  const raw = safeObject(root.raw);
+  const declared = safeObject(first(root.relation, root.entityRelation, root.customer, {}));
 
   const company = cleanText(
     first(
@@ -372,8 +369,8 @@ function facturaRelation(source = {}) {
 }
 
 function genericRelation(source = {}, kind = "relacion") {
-  const root = object(source);
-  const declared = object(first(root.relation, root.entityRelation, {}));
+  const root = safeObject(source);
+  const declared = safeObject(first(root.relation, root.entityRelation, {}));
 
   const name = kind === "usuario"
     ? userNameFromIdentity(root) || userNameFromIdentity(declared)

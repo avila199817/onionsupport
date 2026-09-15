@@ -17,6 +17,8 @@ import Http from "../../core/http.js";
 import {
   normalizeUsuariosCollection,
 } from "./usuarios.api.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 
 export const USUARIOS_CURSOR_VERSION =
   "usuarios.cursor.v3.employee-directory-boundary";
@@ -47,18 +49,6 @@ const INTERNAL_EMPLOYEE_MARKERS = new Set([
   "team_member",
   "equipo",
 ]);
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
 
 
 function number(value = 0, fallback = 0) {

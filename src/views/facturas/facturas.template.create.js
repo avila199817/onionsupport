@@ -20,6 +20,8 @@ import { normalizeClienteModel } from "../clientes/clientes.model.js";
 
 
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 export const FACTURAS_CREATE_TEMPLATE_VERSION =
   "facturas.template.create.v7.multi-line-billing";
 
@@ -121,18 +123,6 @@ const DEFAULT_FORM = Object.freeze({
 /* =========================================================
    BASICS
 ========================================================= */
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
 
 function first(...values) {
   for (const value of values) {

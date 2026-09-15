@@ -33,6 +33,7 @@ import {
   isPrivateApiPath as configIsPrivateApiPath,
 } from "./config.js";
 import { cleanText } from "./presentation-text.js";
+import { isObject } from "./objects.js";
 
 export const HTTP_VERSION =
   "core.http.refresh.blob.v9-runtime-state-port";
@@ -85,14 +86,6 @@ function isBrowser() {
   return (
     typeof window !== "undefined" &&
     typeof document !== "undefined"
-  );
-}
-
-function isObject(value) {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
   );
 }
 

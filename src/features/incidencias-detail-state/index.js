@@ -17,6 +17,7 @@
 import { synchronizeAvatars } from "../avatar-system/index.js";
 import { persistedCommentId } from "../incidencias-comment-identity/index.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { safeObject } from "../../core/objects.js";
 
 export const INCIDENCIAS_DETAIL_STATE_VERSION =
   "incidencias-detail-state.v6.controller-authoritative";
@@ -128,11 +129,6 @@ const multiline = (value = "", fallback = "") =>
 const lower = (value = "") =>
   cleanText(value).toLowerCase();
 
-const object = (value, fallback = {}) =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : fallback;
-
 const array = (value) =>
   Array.isArray(value)
     ? value
@@ -167,7 +163,7 @@ function timestamp(value = null) {
 }
 
 function eventTime(entry = {}) {
-  const raw = object(entry);
+  const raw = safeObject(entry);
 
   return Math.max(
     timestamp(raw.createdAt),
@@ -204,12 +200,12 @@ function ownMutation(callback) {
 }
 
 function supportIdentity(detail = {}) {
-  const raw = object(first(detail?.raw, detail));
-  const assignment = object(raw.assignment);
-  const technician = object(assignment.technician);
-  const assignedTo = object(raw.assignedTo);
-  const tecnico = object(raw.tecnico);
-  const meta = object(raw.meta);
+  const raw = safeObject(first(detail?.raw, detail));
+  const assignment = safeObject(raw.assignment);
+  const technician = safeObject(assignment.technician);
+  const assignedTo = safeObject(raw.assignedTo);
+  const tecnico = safeObject(raw.tecnico);
+  const meta = safeObject(raw.meta);
 
   return {
     ids: new Set([
@@ -242,13 +238,13 @@ function supportIdentity(detail = {}) {
 }
 
 function requesterIdentity(detail = {}) {
-  const raw = object(first(detail?.raw, detail));
-  const createdBy = object(raw.createdBy);
-  const receptor = object(raw.receptor);
-  const requester = object(raw.requesterSnapshot);
-  const usuario = object(raw.usuario);
-  const owner = object(raw.owner);
-  const cliente = object(raw.cliente);
+  const raw = safeObject(first(detail?.raw, detail));
+  const createdBy = safeObject(raw.createdBy);
+  const receptor = safeObject(raw.receptor);
+  const requester = safeObject(raw.requesterSnapshot);
+  const usuario = safeObject(raw.usuario);
+  const owner = safeObject(raw.owner);
+  const cliente = safeObject(raw.cliente);
 
   return {
     ids: new Set([
@@ -290,7 +286,7 @@ function requesterIdentity(detail = {}) {
 }
 
 function eventSide(entry = {}, detail = {}) {
-  const raw = object(entry);
+  const raw = safeObject(entry);
   const source = lower(raw.source || raw.origin || raw.actorType);
 
   if (SUPPORT_SOURCES.has(source)) return "support";
@@ -338,11 +334,11 @@ function eventSide(entry = {}, detail = {}) {
 }
 
 function historyKinds(entry = {}) {
-  const raw = object(entry);
+  const raw = safeObject(entry);
   const kinds = new Set();
 
   for (const change of array(raw.changes)) {
-    const item = object(change);
+    const item = safeObject(change);
     const action = lower(item.action || "add");
 
     if (!["add", "create", "created", "upload", "uploaded"].includes(action)) {
@@ -396,8 +392,8 @@ function updateConversationClock(
 }
 
 export function resolveConversationPolicy(detail = {}) {
-  const raw = object(first(detail?.raw, detail));
-  const explicit = object(
+  const raw = safeObject(first(detail?.raw, detail));
+  const explicit = safeObject(
     first(
       detail?.userUpdatePolicy,
       detail?.meta?.userUpdatePolicy,
@@ -487,7 +483,7 @@ export function resolveConversationPolicy(detail = {}) {
 }
 
 function normalizeComment(item = {}, index = 0) {
-  const raw = object(item);
+  const raw = safeObject(item);
   const type = lower(
     first(raw.kind, raw.type, raw.action, raw.event, "comment")
   );
@@ -543,7 +539,7 @@ function normalizeComment(item = {}, index = 0) {
 }
 
 export function commentsFromDetail(detail = {}) {
-  const raw = object(first(detail?.raw, detail?.data, detail?.item, detail));
+  const raw = safeObject(first(detail?.raw, detail?.data, detail?.item, detail));
   const timeline = array(first(detail?.timeline, raw.timeline, []));
 
   const source = timeline.length
@@ -728,7 +724,7 @@ function sortAttachments(root, detail = {}) {
   );
   if (cards.length < 2) return true;
 
-  const raw = object(first(detail?.raw, detail));
+  const raw = safeObject(first(detail?.raw, detail));
   const files = array(
     first(
       detail?.attachments,
@@ -1035,8 +1031,8 @@ function refreshAfterBlockedError(root) {
   }
 
   const id = ticketId(root);
-  const currentDetail = object(hydration?.detail, {});
-  const currentPolicy = object(
+  const currentDetail = safeObject(hydration?.detail, {});
+  const currentPolicy = safeObject(
     first(
       currentDetail.userUpdatePolicy,
       currentDetail.meta?.userUpdatePolicy,
@@ -1058,7 +1054,7 @@ function refreshAfterBlockedError(root) {
     ...currentDetail,
     userUpdatePolicy: policy,
     meta: {
-      ...object(currentDetail.meta, {}),
+      ...safeObject(currentDetail.meta, {}),
       userUpdatePolicy: policy,
     },
   };

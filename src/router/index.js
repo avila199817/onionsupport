@@ -52,6 +52,7 @@ export const ROUTER_VERSION =
 
 import { syncPageMetadata } from "./page-metadata.js";
 import { cleanText } from "../core/presentation-text.js";
+import { isObject } from "../core/objects.js";
 
 const PUBLIC_HOME_PATH = "/";
 
@@ -157,14 +158,6 @@ function isBrowser() {
   return (
     typeof window !== "undefined" &&
     typeof document !== "undefined"
-  );
-}
-
-function isObject(value) {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
   );
 }
 

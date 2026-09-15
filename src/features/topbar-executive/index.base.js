@@ -17,6 +17,7 @@
 
 import { AppCore } from "../../core/index.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject } from "../../core/objects.js";
 
 export const TOPBAR_EXECUTIVE_VERSION =
   "topbar.executive.v1-search-bell-notifications";
@@ -68,10 +69,6 @@ let lastDedupe = new Map();
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function clipText(value = "", fallback = "", max = 500) {

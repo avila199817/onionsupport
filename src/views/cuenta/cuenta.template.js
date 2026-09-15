@@ -2,6 +2,7 @@ import { cleanText as safeText } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { userNameFromIdentity } from "../../core/user-identity.js";
+import { isObject, safeObject } from "../../core/objects.js";
 /* =========================================================
    Onion Support - Cuenta Template
    Archivo: /src/views/cuenta/cuenta.template.js
@@ -192,14 +193,6 @@ const COPY = Object.freeze({
     errorTitle: "Could not complete",
   }),
 });
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
-}
 
 
 function first(...values) {

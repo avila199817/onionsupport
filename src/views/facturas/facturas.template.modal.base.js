@@ -37,6 +37,8 @@ import { cleanText } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { renderModalCloseButton, renderModalShell, renderModalState } from "../../features/entity-overlay/modal-host.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { arrayFrom } from "../../core/arrays.js";
 
 export const FACTURAS_MODAL_TEMPLATE_VERSION =
   "facturas.template.modal.productivo.v4.admin-payment";
@@ -56,44 +58,6 @@ const DEFAULT_CURRENCY = "EUR";
 /* =========================================================
    BASICS
 ========================================================= */
-
-function isObject(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-  );
-}
-
-function safeObject(
-  value,
-  fallback = {}
-) {
-  return isObject(value)
-    ? value
-    : fallback;
-}
-
-function safeArray(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (
-    value &&
-    typeof value === "object" &&
-    typeof value.length === "number" &&
-    typeof value !== "string"
-  ) {
-    try {
-      return Array.from(value);
-    } catch {
-      return [];
-    }
-  }
-
-  return [];
-}
 
 function hasOwnKeys(
   value = {}
@@ -398,7 +362,7 @@ function uniqueObjects(
 
   for (
     const item
-    of safeArray(items)
+    of arrayFrom(items)
   ) {
     if (!isObject(item)) {
       continue;
@@ -483,11 +447,11 @@ function firstFromSources(
 ) {
   for (
     const source
-    of safeArray(sources)
+    of arrayFrom(sources)
   ) {
     for (
       const path
-      of safeArray(paths)
+      of arrayFrom(paths)
     ) {
       const value =
         readPath(
@@ -1887,7 +1851,7 @@ function pickTicketIdFromArray(
 ) {
   for (
     const item
-    of safeArray(value)
+    of arrayFrom(value)
   ) {
     if (
       typeof item === "string" ||
@@ -2168,7 +2132,7 @@ function getLineasRaw(
       ]
     );
 
-  return safeArray(value);
+  return arrayFrom(value);
 }
 
 function getLineas(
@@ -2358,7 +2322,7 @@ function getTaxLines(
       ]
     );
 
-  return safeArray(value);
+  return arrayFrom(value);
 }
 
 function normalizeTaxLine(

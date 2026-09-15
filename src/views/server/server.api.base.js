@@ -40,6 +40,8 @@
 
 import Http from "../../core/http.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 
 
 /* =========================================================
@@ -129,29 +131,6 @@ const serverState = {
 
 function isFunction(value) {
   return typeof value === "function";
-}
-
-function isObject(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-  );
-}
-
-function safeObject(
-  value,
-  fallback = {}
-) {
-  return isObject(value)
-    ? value
-    : fallback;
-}
-
-function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
 }
 
 

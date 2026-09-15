@@ -33,6 +33,8 @@ import renderWhatsAppInbox, {
   WHATSAPP_TEMPLATE_VERSION,
 } from "./whatsapp.template.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 
 
 export const WHATSAPP_VIEW_VERSION =
@@ -45,18 +47,6 @@ const SEARCH_DEBOUNCE_MS = 120;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
 }
 
 

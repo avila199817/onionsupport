@@ -30,6 +30,7 @@ import {
   closeClientesDetailModal,
 } from "./clientes.template.modal.js";
 import { createClientesCreateController } from "./clientes.create-controller.js";
+import { isObject, safeObject } from "../../core/objects.js";
 
 export const CLIENTES_MODULE_NAME = "clientes";
 export const CLIENTES_VIEW_NAME = "ClientesView";
@@ -60,14 +61,6 @@ let controllerSequence = 0;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
 }
 
 function number(value = 0, fallback = 0) {

@@ -24,6 +24,7 @@
 ========================================================= */
 
 import { userNameFromIdentity } from "../../core/user-identity.js";
+import { isObject } from "../../core/objects.js";
 
 export const TOPBAR_TEMPLATE_VERSION =
   "topbar.template.backend-search.v5-hardened";
@@ -63,14 +64,6 @@ function isBrowser() {
   return (
     typeof window !== "undefined" &&
     typeof document !== "undefined"
-  );
-}
-
-function isObject(value) {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
   );
 }
 

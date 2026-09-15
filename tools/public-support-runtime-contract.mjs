@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import { createAsyncScope } from "../src/core/async-scope.js";
 import { cleanText } from "../src/core/presentation-text.js";
+import { safeObject } from "../src/core/objects.js";
 
 // Exercise the actual intake with a small DOM/HTTP boundary; no network, Auth
 // boot or test-only exports in production. Browser coverage checks real events.
@@ -65,6 +66,7 @@ function fixture() {
   fields.postalCode.setAttribute("aria-describedby", "public-support-postal-help");
   const context = vm.createContext({
     cleanText,
+    safeObject,
     createAsyncScope,
     AppCore: { getState: () => ({}) },
     FormData: class { constructor(value) { this.form = value; } get(name) { return this.form.elements.namedItem(name)?.value || ""; } },

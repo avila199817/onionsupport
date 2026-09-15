@@ -26,6 +26,8 @@ import { userNameFromIdentity } from "../../core/user-identity.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 
 
 export const USUARIOS_TEMPLATE_VERSION =
@@ -68,16 +70,6 @@ const FILTERS = Object.freeze([
 ]);
 
 const TABLE_SCALE = "110";
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
-}
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
 
 function first(...values) {
   for (const value of values) {

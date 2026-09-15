@@ -24,6 +24,7 @@ import {
 import Http from "./http.js";
 import { userNameFromIdentity } from "./user-identity.js";
 import { cleanText } from "./presentation-text.js";
+import { isObject } from "./objects.js";
 
 export const CORE_VERSION = "core.minimal.v9-specialized-snapshot";
 const RUNTIME_STATE_VERSION = "core.runtime-state.v2-dirty-guard";
@@ -36,7 +37,6 @@ const DISABLED_STATUSES = new Set(["disabled", "desactivado", "inactive", "inact
 
 function isBrowser() { return typeof window !== "undefined" && typeof document !== "undefined"; }
 function isFunction(value) { return typeof value === "function"; }
-function isObject(value) { return Boolean(value && typeof value === "object" && !Array.isArray(value)); }
 function normalizeUserEmail(value = "") {
   const email = cleanText(value, "").toLowerCase().replace(/\s+/g, "");
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : "";

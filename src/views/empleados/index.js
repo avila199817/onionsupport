@@ -14,6 +14,7 @@ import { renderUsuariosTableTemplate, USUARIOS_ACTIONS } from "../usuarios/usuar
 import UsuariosDetailModal from "../usuarios/usuarios.template.modal.js";
 import { loadUsuarioDetail, normalizeUsuarioModel } from "../usuarios/usuarios.api.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject, safeObject } from "../../core/objects.js";
 
 export const EMPLEADOS_VIEW_VERSION = "empleados.view.v5.usuarios-parity-current-employee";
 export const EMPLEADOS_VIEW_NAME = "EmpleadosView";
@@ -23,8 +24,6 @@ const ACTIONS = USUARIOS_ACTIONS;
 const SEARCH_DEBOUNCE_MS = 160;
 
 const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
-const isObject = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
-const safeObject = (value, fallback = {}) => (isObject(value) ? value : fallback);
 const first = (...values) => {
   for (const value of values) {
     if (value === null || value === undefined) continue;

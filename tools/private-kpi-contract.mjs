@@ -5,6 +5,8 @@ import Http from "../src/core/http.js";
 import { AppCore } from "../src/core/index.js";
 import { notifyDomainChanged, onDomainChanged } from "../src/core/domain-events.js";
 import { exactTotal } from "../src/core/statistics.js";
+import { isObject, safeObject } from "../src/core/objects.js";
+import { safeArray, arrayFrom } from "../src/core/arrays.js";
 import { loadFacturasStats, clearFacturasCache, hydrateFacturasFromCache } from "../src/views/facturas/facturas.api.base.js";
 import { selectFacturasStats } from "../src/views/facturas/facturas.stats.js";
 import { renderHeader, renderCards, renderFacturasTemplate, renderFacturasLoadingState } from "../src/views/facturas/facturas.template.js";
@@ -158,7 +160,7 @@ try {
     filterFacetCache: new Map(), filterFacetSeq: 0, filterFacetController: null,
     filterFacetSearchKey: () => "", filter: "all", items: [], destroyed: false,
     mounted: false, loading: false, listQueryPending: false, serverSearch: "", INCIDENCIAS_LIST_LIMIT: 50,
-    AbortController, Date, safeArray: (value) => Array.isArray(value) ? value : [], cleanText: (value = "") => String(value ?? "").trim(),
+    AbortController, Date, isObject, safeObject, safeArray, arrayFrom, cleanText: (value = "") => String(value ?? "").trim(),
     computeIncidenciasStats, buildIncidenciasFilterFacetPresentation, reconcileIncidenciasFilterFacetPresentation, getIncidenciasFacetRequestQuery, exactTotal,
     loadIncidenciasPage: () => { facetRequests++; return delayedFacets.promise; }, renderWithFilteredItems: () => {},
   });
@@ -190,7 +192,7 @@ try {
   const invoiceContext = vm.createContext({
     destroyed: false, detailOnly: false, authoritativeStats: null, authoritativeStatsLoading: false,
     authoritativeStatsSeq: 0, authoritativeStatsDirty: false, creating: true, domainDirty: false,
-    safeObject: (value, fallback) => value && typeof value === "object" ? value : fallback,
+    isObject, safeObject, safeArray, arrayFrom,
     loadFacturasStats, onDomainChanged, render: () => {}, refreshChangedDomain: () => {},
   });
   vm.runInContext(invoiceSource.slice(refreshStart, refreshEnd) + `\nglobalThis.refresh = refreshAuthoritativeStats; globalThis.unsubscribe = onDomainChanged((domain) => {${listener[1]}\n});`, invoiceContext);

@@ -12,6 +12,7 @@
 import { AppCore } from "../../core/index.js";
 import { TopbarNotifications } from "./index.base.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject } from "../../core/objects.js";
 
 export const TOPBAR_EXECUTIVE_EVENTS_VERSION =
   "topbar.executive.events.v1-appcore-bridge";
@@ -28,10 +29,6 @@ const EVENT_NAMES = Object.freeze([
 
 const bindings = [];
 let bound = false;
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
 
 function clipText(value = "", fallback = "", max = 180) {
   return cleanText(value, fallback).slice(0, max);

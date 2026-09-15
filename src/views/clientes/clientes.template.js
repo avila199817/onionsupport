@@ -11,6 +11,7 @@ import {
   normalizeClientesCollection,
   computeClientesStats,
 } from "./clientes.model.js";
+import { safeObject } from "../../core/objects.js";
 
 export {
   normalizeClienteModel,
@@ -55,12 +56,6 @@ const FILTERS = Object.freeze([
   { key: "pending", label: "Pendientes" },
   { key: "blocked", label: "Bloqueados" },
 ]);
-
-function safeObject(value, fallback = {}) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : fallback;
-}
 
 
 function first(...values) {

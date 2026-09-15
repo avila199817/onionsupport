@@ -89,6 +89,8 @@ import {
   reconcileIncidenciasFilterFacetPresentation,
 } from "./incidencias.filter-facets.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { arrayFrom } from "../../core/arrays.js";
 
 export const INCIDENCIAS_INDEX_VERSION =
   "incidencias.index.extreme.v45-single-detail-authority";
@@ -153,14 +155,6 @@ function isBrowser() {
   );
 }
 
-function isObject(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-  );
-}
-
 function isDomNode(value = null) {
   return Boolean(
     typeof Node !== "undefined" &&
@@ -207,36 +201,6 @@ function isFileLike(value = null) {
         typeof value.slice === "function"
       )
   );
-}
-
-function safeArray(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (
-    value &&
-    typeof value === "object" &&
-    typeof value.length === "number" &&
-    typeof value !== "string"
-  ) {
-    try {
-      return Array.from(value);
-    } catch {
-      return [];
-    }
-  }
-
-  return [];
-}
-
-function safeObject(
-  value,
-  fallback = {}
-) {
-  return isObject(value)
-    ? value
-    : fallback;
 }
 
 function multilineValue(
@@ -489,21 +453,21 @@ function upsertByTicketId(
     );
 
   if (!next) {
-    return safeArray(items);
+    return arrayFrom(items);
   }
 
   const id =
     getTicketId(next);
 
   if (!id) {
-    return safeArray(items);
+    return arrayFrom(items);
   }
 
   const map =
     new Map();
 
   const existing =
-    safeArray(items)
+    arrayFrom(items)
       .find(
         (current) =>
           getTicketId(current) === id
@@ -521,7 +485,7 @@ function upsertByTicketId(
 
   for (
     const current
-    of safeArray(items)
+    of arrayFrom(items)
   ) {
     const currentId =
       getTicketId(current);
@@ -573,20 +537,20 @@ function replaceByTicketId(
     );
 
   if (!next) {
-    return safeArray(items);
+    return arrayFrom(items);
   }
 
   const id =
     getTicketId(next);
 
   if (!id) {
-    return safeArray(items);
+    return arrayFrom(items);
   }
 
   let found = false;
 
   const output =
-    safeArray(items).map((current) => {
+    arrayFrom(items).map((current) => {
       if (getTicketId(current) !== id) {
         return current;
       }
@@ -623,12 +587,12 @@ function replaceByTicketId(
 function mergeTicketPage(currentItems = [], incomingItems = []) {
   const map = new Map();
 
-  for (const current of safeArray(currentItems)) {
+  for (const current of arrayFrom(currentItems)) {
     const id = getTicketId(current);
     if (id) map.set(id, current);
   }
 
-  for (const incoming of safeArray(incomingItems)) {
+  for (const incoming of arrayFrom(incomingItems)) {
     const id = getTicketId(incoming);
     if (!id) continue;
     map.set(
@@ -953,7 +917,7 @@ function dedupeFiles(
 
   for (
     const file
-    of safeArray(files).flat()
+    of arrayFrom(files).flat()
   ) {
     if (!isFileLike(file)) {
       continue;
@@ -1084,7 +1048,7 @@ export function createIncidenciasController(
   let mounted = false;
 
   let items =
-    safeArray(cached.items);
+    arrayFrom(cached.items);
 
   let total =
     Number(
@@ -1245,7 +1209,7 @@ export function createIncidenciasController(
       multilineValue(
         detailModal.commentDraft
       ).trim() ||
-      safeArray(
+      arrayFrom(
         detailModal.pendingFiles
       ).length ||
       hasPendingAdminChanges()
@@ -3645,13 +3609,13 @@ function countNewTicketIds(
 ) {
   const currentIds =
     new Set(
-      safeArray(items)
+      arrayFrom(items)
         .map(getTicketId)
         .filter(Boolean)
     );
 
   return new Set(
-    safeArray(incomingItems)
+    arrayFrom(incomingItems)
       .map(getTicketId)
       .filter(
         (id) =>
@@ -3755,7 +3719,7 @@ async function load(options = {}) {
         return response;
       }
 
-      const responseItems = safeArray(response.items);
+      const responseItems = arrayFrom(response.items);
       const responseCursor = cleanText(response.nextCursor, "");
 
       if (
@@ -3815,7 +3779,7 @@ async function load(options = {}) {
           ["open", "closed", "urgent"].includes(filter)
             ? {
                 ...response,
-                items: safeArray(items),
+                items: arrayFrom(items),
                 total,
                 nextCursor,
               }
@@ -3824,7 +3788,7 @@ async function load(options = {}) {
           filter === "all"
             ? {
                 ...response,
-                items: safeArray(items),
+                items: arrayFrom(items),
                 total,
                 nextCursor,
               }
@@ -4065,7 +4029,7 @@ async function load(options = {}) {
 
       createModal.userSearch.loading = false;
       createModal.userSearch.results =
-        safeArray(results);
+        arrayFrom(results);
 
       createModal.userSearch.empty =
         q.length >=
@@ -4320,7 +4284,7 @@ async function load(options = {}) {
 
     createModal.form.attachments =
       dedupeFiles([
-        ...safeArray(
+        ...arrayFrom(
           createModal.form.attachments
         ),
         ...incoming,
@@ -4354,7 +4318,7 @@ async function load(options = {}) {
     }
 
     createModal.form.attachments =
-      safeArray(
+      arrayFrom(
         createModal.form.attachments
       ).filter(
         (_, currentIndex) =>
@@ -4381,7 +4345,7 @@ async function load(options = {}) {
     if (liveFiles.length) {
       createModal.form.attachments =
         dedupeFiles([
-          ...safeArray(
+          ...arrayFrom(
             createModal.form.attachments
           ),
           ...liveFiles,
@@ -4939,7 +4903,7 @@ async function load(options = {}) {
 
     const combined =
       dedupeFiles([
-        ...safeArray(
+        ...arrayFrom(
           detailModal.pendingFiles
         ),
         ...files,
@@ -5013,7 +4977,7 @@ async function load(options = {}) {
     }
 
     detailModal.pendingFiles =
-      safeArray(
+      arrayFrom(
         detailModal.pendingFiles
       ).filter(
         (_, currentIndex) =>
@@ -5524,7 +5488,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
         multilineValue(
           detailModal.commentDraft
         ).trim() ||
-        safeArray(
+        arrayFrom(
           detailModal.pendingFiles
         ).length
       );
@@ -5733,7 +5697,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
       );
 
     const attachments =
-      safeArray(
+      arrayFrom(
         first(
           detailModal.detail?.attachments,
           detailModal.detail?.files,
@@ -6432,7 +6396,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
        En cuanto el dataset supere una página, el flujo remoto histórico queda
        intacto como fallback.
     */
-    const baseItems = safeArray(baseResponse?.items);
+    const baseItems = arrayFrom(baseResponse?.items);
     const baseTotal = exactTotal(baseResponse);
     const baseUniverseComplete = Boolean(
       baseResponse &&
@@ -6448,7 +6412,7 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
       const localResponse = (total, response = {}) => ({
         ...response,
         total,
-        items: safeArray(response?.items),
+        items: arrayFrom(response?.items),
         nextCursor: "",
         hasMore: false,
         pagination: {
@@ -6577,8 +6541,8 @@ throw new Error("El backend no devolvió la incidencia actualizada.");
 
       const universeItems =
         filter === "all"
-          ? safeArray(items)
-          : safeArray(all?.items);
+          ? arrayFrom(items)
+          : arrayFrom(all?.items);
       const universeStats =
         computeIncidenciasStats(universeItems);
       const presentation =
@@ -6985,7 +6949,7 @@ async function loadMore(options = {}) {
       }
 
       const responseItems =
-        safeArray(response.items);
+        arrayFrom(response.items);
       const responseCursor = cleanText(response.nextCursor, "");
 
       if (
@@ -8379,17 +8343,17 @@ async function loadMore(options = {}) {
         },
 
         createAttachments:
-          safeArray(
+          arrayFrom(
             createModal.form.attachments
           ).length,
 
         createFilesAreReal:
-          safeArray(
+          arrayFrom(
             createModal.form.attachments
           ).every(isFileLike),
 
         detailAttachmentsPending:
-          safeArray(
+          arrayFrom(
             detailModal.pendingFiles
           ).length,
 

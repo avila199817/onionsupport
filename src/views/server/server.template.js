@@ -11,6 +11,8 @@
 import * as Base from "./server.template.base.js";
 import { cleanText as safeText } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { safeArray } from "../../core/arrays.js";
 
 
 export const SERVER_TEMPLATE_VERSION =
@@ -20,18 +22,6 @@ export const SERVIDOR_TEMPLATE_VERSION = SERVER_TEMPLATE_VERSION;
 export const DEFAULT_PAGE_SIZE = Base.DEFAULT_PAGE_SIZE;
 export const SERVER_ACTIONS = Base.SERVER_ACTIONS;
 export const SERVER_STATUS = Base.SERVER_STATUS;
-
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function safeObject(value, fallback = {}) {
-  return isObject(value) ? value : fallback;
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
 
 
 

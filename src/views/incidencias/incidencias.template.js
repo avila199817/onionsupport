@@ -14,6 +14,8 @@ import { userNameFromIdentity } from "../../core/user-identity.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { technicianIdentity } from "../../features/incidencias-comment-identity/index.js";
 import { cleanText } from "../../core/presentation-text.js";
+import { isObject, safeObject } from "../../core/objects.js";
+import { arrayFrom } from "../../core/arrays.js";
 export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v35-visible-date-minute-precision-linked-invoice-row-total";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
@@ -55,23 +57,12 @@ export const INCIDENCIAS_TABLE_COLUMNS = Object.freeze([
    HELPERS
 ========================================================= */
 
-const isObj = (v) => Boolean(v && typeof v === "object" && !Array.isArray(v));
-const obj = (v, fb = {}) => (isObj(v) ? v : fb);
-
-function arr(v) {
-  if (Array.isArray(v)) return v;
-  if (v && typeof v === "object" && typeof v.length === "number" && typeof v !== "string") {
-    try { return Array.from(v); } catch { return []; }
-  }
-  return [];
-}
-
 function first(...values) {
   for (const v of values) {
     if (v === null || v === undefined) continue;
     if (typeof v === "string" && !v.trim()) continue;
     if (Array.isArray(v) && !v.length) continue;
-    if (isObj(v) && !Object.keys(v).length) continue;
+    if (isObject(v) && !Object.keys(v).length) continue;
     return v;
   }
   return null;
@@ -103,7 +94,7 @@ const key = (v = "") => cleanText(v, "").toLowerCase().normalize("NFD").replace(
 const searchKey = (v = "") => cleanText(v, "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
 function htmlAttrs(attrs = {}) {
-  return Object.entries(obj(attrs))
+  return Object.entries(safeObject(attrs))
     .map(([k, v]) => {
       if (!k || v === false || v === null || v === undefined) return "";
       if (v === true) return escapeHtml(k);
@@ -129,7 +120,7 @@ function safeUrl(v = "") {
 function firstUrl(...values) {
   for (const v of values.flat(Infinity)) {
     if (v === null || v === undefined) continue;
-    if (isObj(v)) {
+    if (isObject(v)) {
       const nested = firstUrl(
         v.avatarUrl, v.avatar, v.picture, v.photoUrl, v.photoURL, v.imageUrl,
         v.userAvatar, v.userAvatarUrl, v.clienteAvatar, v.clienteAvatarUrl,
@@ -249,9 +240,9 @@ const dateMs = (v = "") => {
 ========================================================= */
 
 function unwrap(v = {}) {
-  const it = obj(v, {});
+  const it = safeObject(v, {});
   if (it.meta?.frontendReady === true) return it;
-  return obj(first(it.ticket, it.incidencia, it.item, it.detail, it.data?.ticket, it.data?.incidencia, it.data?.item, it.data, it), it);
+  return safeObject(first(it.ticket, it.incidencia, it.item, it.detail, it.data?.ticket, it.data?.incidencia, it.data?.item, it.data, it), it);
 }
 
 function getId(it = {}) {
@@ -287,7 +278,7 @@ function getClientName(it = {}) {
 }
 
 function getClientEmail(it = {}) {
-  const r = unwrap(it), rs = obj(r.requesterSnapshot), c = obj(r.cliente), rec = obj(r.receptor), u = obj(r.user);
+  const r = unwrap(it), rs = safeObject(r.requesterSnapshot), c = safeObject(r.cliente), rec = safeObject(r.receptor), u = safeObject(r.user);
   return cleanText(first(r.email, r.emailLower, r.userEmail, r.clienteEmail, rs.email, rs.emailLower, c.email, c.emailLower, rec.email, rec.emailLower, u.email, u.emailLower, ""), "");
 }
 
@@ -297,17 +288,17 @@ function getAvatar(it = {}) {
 }
 
 function getAssignedName(it = {}) {
-  const r = unwrap(it), a = obj(r.assignment), tec = obj(r.tecnico), asg = obj(r.assignedTo), t = obj(r.technician);
+  const r = unwrap(it), a = safeObject(r.assignment), tec = safeObject(r.tecnico), asg = safeObject(r.assignedTo), t = safeObject(r.technician);
   return cleanText(first(r.assignedToName, r.technicianName, r.tecnicoName, r.agentName, a.assignedToName, a.technician?.name, a.technician?.displayName, tec.displayName, tec.name, tec.nombre, asg.displayName, asg.name, asg.nombre, t.displayName, t.name, t.nombre, ""), "");
 }
 
 function getAssignedEmail(it = {}) {
-  const r = unwrap(it), a = obj(r.assignment), tec = obj(r.tecnico), asg = obj(r.assignedTo), t = obj(r.technician);
+  const r = unwrap(it), a = safeObject(r.assignment), tec = safeObject(r.tecnico), asg = safeObject(r.assignedTo), t = safeObject(r.technician);
   return cleanText(first(r.assignedToEmail, r.technicianEmail, r.tecnicoEmail, r.agentEmail, a.assignedToEmail, a.technician?.email, tec.email, asg.email, t.email, ""), "");
 }
 
 function getAssignedAvatar(it = {}) {
-  const r = unwrap(it), a = obj(r.assignment);
+  const r = unwrap(it), a = safeObject(r.assignment);
   return firstUrl(r.assignedToAvatarUrl, r.assignedToAvatar, r.technicianAvatarUrl, r.technicianAvatar, r.tecnicoAvatarUrl, r.tecnicoAvatar, r.agentAvatarUrl, r.agentAvatar, a.assignedToAvatarUrl, a.assignedToAvatar, a.technicianAvatarUrl, a.technicianAvatar, a.agentAvatarUrl, a.agentAvatar, a.avatarUrl, a.avatar, a.technician, r.tecnico, r.assignedTo, r.technician);
 }
 
@@ -322,7 +313,7 @@ function getUpdated(it = {}) {
 
 function getAttachmentsCount(it = {}) {
   const r = unwrap(it);
-  const files = arr(first(r.attachments, r.files, r.adjuntos, []));
+  const files = arrayFrom(first(r.attachments, r.files, r.adjuntos, []));
   return Math.max(files.length, num(r.attachmentsCount, 0), num(r.attachmentCount, 0), num(r.filesCount, 0), num(r.adjuntosCount, 0), num(r.meta?.attachmentsCount, 0), num(r.meta?.filesCount, 0));
 }
 
@@ -479,7 +470,7 @@ function sortItems(items = [], order = DEFAULT_SORT_ORDER, mode = DEFAULT_SORT_M
   const dir = normalizeSort(order) === "asc" ? 1 : -1;
   const sortMode = normalizeSortMode(mode);
 
-  return [...arr(items)].sort((a, b) => {
+  return [...arrayFrom(items)].sort((a, b) => {
     if (sortMode === "amount") {
       const amountDiff = getInvoiceTotal(a) - getInvoiceTotal(b);
       if (amountDiff) return amountDiff * dir;
@@ -516,9 +507,9 @@ function itemMatchesFilter(it = {}, filter = "all") {
 
 const ITEM_TEXT_CACHE = new WeakMap();
 function itemText(it = {}) {
-  if (isObj(it) && ITEM_TEXT_CACHE.has(it)) return ITEM_TEXT_CACHE.get(it);
+  if (isObject(it) && ITEM_TEXT_CACHE.has(it)) return ITEM_TEXT_CACHE.get(it);
   const value = searchKey([getId(it), getSubject(it), getDesc(it), getClientName(it), getClientEmail(it), getAssignedName(it), getAssignedEmail(it), getCategory(it), statusLabel(getStatusRaw(it)), priorityLabel(it)].join(" "));
-  if (isObj(it)) ITEM_TEXT_CACHE.set(it, value);
+  if (isObject(it)) ITEM_TEXT_CACHE.set(it, value);
   return value;
 }
 
@@ -528,7 +519,7 @@ function itemMatchesSearch(it = {}, q = "") {
 }
 
 function statsFrom(items = []) {
-  return arr(items).reduce((a, it) => {
+  return arrayFrom(items).reduce((a, it) => {
     a.total += 1;
     if (isOpen(it)) a.open += 1;
     if (isClosed(it)) a.closed += 1;
@@ -542,7 +533,7 @@ function statsFrom(items = []) {
 
 function mergeStats(items = [], provided = {}) {
   const local = statsFrom(items);
-  const s = obj(provided);
+  const s = safeObject(provided);
   if (local.total > 0) return local;
   return {
     total: num(first(s.total, local.total), local.total),
@@ -557,7 +548,7 @@ function mergeStats(items = [], provided = {}) {
 
 function filterCounts(items = []) {
   const counts = { all: 0, open: 0, closed: 0, urgent: 0 };
-  for (const item of arr(items)) {
+  for (const item of arrayFrom(items)) {
     counts.all += 1;
     if (isOpen(item)) counts.open += 1;
     if (isClosed(item)) counts.closed += 1;
@@ -568,7 +559,7 @@ function filterCounts(items = []) {
 
 function mergeFilterCounts(items = [], provided = null) {
   const local = filterCounts(items);
-  const counts = obj(provided);
+  const counts = safeObject(provided);
   return {
     all: Math.max(0, num(first(counts.all, local.all), local.all)),
     open: Math.max(0, num(first(counts.open, local.open), local.open)),
@@ -582,8 +573,8 @@ function mergeFilterCounts(items = [], provided = null) {
 ========================================================= */
 
 function arrayCandidates(input = {}) {
-  const d = obj(input);
-  const data = obj(d.data), payload = obj(d.payload), result = obj(d.result), response = obj(d.response), body = obj(d.body), meta = obj(d.meta);
+  const d = safeObject(input);
+  const data = safeObject(d.data), payload = safeObject(d.payload), result = safeObject(d.result), response = safeObject(d.response), body = safeObject(d.body), meta = safeObject(d.meta);
   return [
     d.items, d.visibleItems, d.filteredItems, d.rows, d.results, d.records, d.docs, d.documents, d.value, d.list, d.tickets, d.incidencias,
     Array.isArray(d.data) ? d.data : null, data.items, data.visibleItems, data.filteredItems, data.rows, data.results, data.records, data.docs, data.documents, data.value, data.list, data.tickets, data.incidencias,
@@ -596,11 +587,11 @@ function arrayCandidates(input = {}) {
 }
 
 function normalizeItems(input = {}) {
-  if (isObj(input) && input.canonical === true && Array.isArray(input.items)) return input.items;
+  if (isObject(input) && input.canonical === true && Array.isArray(input.items)) return input.items;
   const candidates = Array.isArray(input) ? [input] : arrayCandidates(input);
   const map = new Map();
   for (const candidate of candidates) {
-    for (const original of arr(candidate)) {
+    for (const original of arrayFrom(candidate)) {
       const it = unwrap(original);
       const id = getId(it);
       if (!id) continue;
@@ -612,12 +603,12 @@ function normalizeItems(input = {}) {
 }
 
 function remoteTotal(input = {}, fb = 0) {
-  const d = obj(input), data = obj(d.data), payload = obj(d.payload), result = obj(d.result), response = obj(d.response);
+  const d = safeObject(input), data = safeObject(d.data), payload = safeObject(d.payload), result = safeObject(d.result), response = safeObject(d.response);
   return Math.max(fb, num(first(d.total, d.count, d.totalCount, d.remoteCount, d.meta?.total, d.meta?.count, d.pagination?.total, d.pagination?.totalCount, data.total, data.count, data.totalCount, data.meta?.total, payload.total, payload.count, result.total, result.count, response.total, response.count, fb), fb));
 }
 
 function buildVm(input = {}) {
-  const d = obj(input);
+  const d = safeObject(input);
   const items = normalizeItems(d);
   const rawFilter = key(first(d.filter, "all"));
   const filter = normalizeFilter(d.filter);
@@ -655,7 +646,7 @@ function buildVm(input = {}) {
     cuando la API no entrega una continuación utilizable.
   */
   const remoteHasMore = Boolean(nextCursor && filtered.length);
-  const stats = d.canonical === true && isObj(d.stats) ? d.stats : mergeStats(items, d.stats);
+  const stats = d.canonical === true && isObject(d.stats) ? d.stats : mergeStats(items, d.stats);
   const statsPartial = typeof d.statsPartial === "boolean"
     ? d.statsPartial
     : total > items.length;
@@ -1060,7 +1051,7 @@ function renderHistory(vm = {}) {
 ========================================================= */
 
 export function renderIncidenciasLoadingState(input = {}) {
-  const vm = buildVm({ ...obj(input), loading: true });
+  const vm = buildVm({ ...safeObject(input), loading: true });
   return `
     <section class="incidencias-view-root incidencias-view-root--loading is-loading" data-incidencias-scope="true" data-template-version="${at(INCIDENCIAS_TEMPLATE_VERSION)}" data-total="${at(String(vm.total))}" data-visible="${at(String(vm.visibleCount))}" data-filter="${at(vm.filter)}" data-server-filter-applied="${vm.serverFilterApplied ? "true" : "false"}" data-selection="${at(vm.selection)}" data-sort-order="${at(vm.sortOrder)}" data-stats-scope="${vm.statsPartial ? "loaded" : "complete"}" data-filter-facets-exact="${vm.filterFacetsExact ? "true" : "false"}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" data-total-greater-than-items="${vm.diagnostics.totalGreaterThanItems ? "true" : "false"}" aria-busy="true">
       ${renderHeader(vm)}${renderHistory(vm)}

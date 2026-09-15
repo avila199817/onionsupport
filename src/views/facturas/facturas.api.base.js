@@ -1271,25 +1271,9 @@ async function httpRequest(method = "GET", endpoint = "", body = null, options =
     return Http.post(endpoint, body, requestOptions);
   }
 
-  if (method === "PUT" && isFunction(Http.put)) {
-    return Http.put(endpoint, body, requestOptions);
-  }
-
-  if (method === "PATCH" && isFunction(Http.patch)) {
-    return Http.patch(endpoint, body, requestOptions);
-  }
-
-  if (method === "DELETE") {
-    const fn = Http.delete || Http.del;
-    if (isFunction(fn)) return fn.call(Http, endpoint, requestOptions);
-  }
-
   if (isFunction(Http.request)) {
     return Http.request(endpoint, { ...requestOptions, method, body, data: body });
   }
-
-  if (method === "PUT") return httpRequest("PATCH", endpoint, body, options);
-  if (method === "PATCH") return httpRequest("POST", endpoint, body, options);
 
   throw new Error(`FACTURAS_HTTP_${method}_UNAVAILABLE`);
 }
@@ -1309,18 +1293,6 @@ async function confirmedWrite(method, endpoint, body, options) {
 
 async function postJson(endpoint = "", body = {}, options = {}) {
   return confirmedWrite("POST", endpoint, body, options);
-}
-
-async function putJson(endpoint = "", body = {}, options = {}) {
-  return confirmedWrite("PUT", endpoint, body, options);
-}
-
-async function patchJson(endpoint = "", body = {}, options = {}) {
-  return confirmedWrite("PATCH", endpoint, body, options);
-}
-
-async function deleteJson(endpoint = "", options = {}) {
-  return confirmedWrite("DELETE", endpoint, null, options);
 }
 
 /* =========================================================
@@ -1486,7 +1458,7 @@ export async function loadFacturasStats(options = {}) {
 }
 
 /* =========================================================
-   CREATE / UPDATE / DELETE / SEND / PAYMENT
+   CREATE / SEND / PAYMENT
 ========================================================= */
 
 export async function createFacturaRequest(payload = {}, options = {}) {
@@ -1502,77 +1474,6 @@ export async function createFacturaRequest(payload = {}, options = {}) {
 export async function createFactura(payload = {}, options = {}) {
   const response = await createFacturaRequest(payload, options);
   return response.item;
-}
-
-export async function updateFacturaRequest(id = "", payload = {}, options = {}) {
-  const response = await putJson(getFacturaEndpoint(id), normalizeFacturaPayload(payload), {
-    timeout: options.timeout || FACTURAS_TIMEOUT,
-    signal: options.signal,
-    source: "views.facturas.update"
-  });
-
-  return normalizeFacturaDetailResponse(response);
-}
-
-export async function updateFactura(id = "", payload = {}, options = {}) {
-  const response = await updateFacturaRequest(id, payload, options);
-  const updated = response.item;
-
-  if (updated) {
-    const stableId = getFacturaStableId(updated);
-    lastList = {
-      ...lastList,
-      items: lastList.items.map((item) => getFacturaStableId(item) === stableId ? normalizeFactura(updated) : item)
-    };
-  }
-
-  return updated;
-}
-
-export async function patchFacturaRequest(id = "", payload = {}, options = {}) {
-  const response = await patchJson(getFacturaEndpoint(id), normalizeFacturaPayload(payload), {
-    timeout: options.timeout || FACTURAS_TIMEOUT,
-    signal: options.signal,
-    source: "views.facturas.patch"
-  });
-
-  return normalizeFacturaDetailResponse(response);
-}
-
-export async function patchFactura(id = "", payload = {}, options = {}) {
-  const response = await patchFacturaRequest(id, payload, options);
-  const patched = response.item;
-
-  if (patched) {
-    const stableId = getFacturaStableId(patched);
-    lastList = {
-      ...lastList,
-      items: lastList.items.map((item) => getFacturaStableId(item) === stableId ? normalizeFactura(patched) : item)
-    };
-  }
-
-  return patched;
-}
-
-export async function removeFacturaRequest(id = "", options = {}) {
-  return deleteJson(getFacturaEndpoint(id), {
-    timeout: options.timeout || FACTURAS_TIMEOUT,
-    signal: options.signal,
-    source: "views.facturas.remove"
-  });
-}
-
-export async function removeFactura(id = "", options = {}) {
-  await removeFacturaRequest(id, options);
-
-  const facturaId = normalizeFacturaId(id);
-  lastList = {
-    ...lastList,
-    items: lastList.items.filter((item) => ![item.id, item.facturaId, item.invoiceId].includes(facturaId)),
-    total: Math.max(0, number(lastList.total, 0) - 1)
-  };
-
-  return true;
 }
 
 export async function sendFacturaRequest(id = "", payload = {}, options = {}) {
@@ -1956,9 +1857,6 @@ export const getFacturaByIdRequest = fetchFacturaDetailRequest;
 export const detailFactura = getFacturaById;
 
 export const createInvoice = createFactura;
-export const updateInvoice = updateFactura;
-export const patchInvoice = patchFactura;
-export const removeInvoice = removeFactura;
 export const markInvoicePaid = markFacturaPaid;
 
 export const downloadFactura = downloadFacturaPdfRequest;
@@ -2028,18 +1926,6 @@ export const FacturasApi = Object.freeze({
   createFacturaRequest,
   createFactura,
   createInvoice,
-
-  updateFacturaRequest,
-  updateFactura,
-  updateInvoice,
-
-  patchFacturaRequest,
-  patchFactura,
-  patchInvoice,
-
-  removeFacturaRequest,
-  removeFactura,
-  removeInvoice,
 
   sendFacturaRequest,
   sendFactura,

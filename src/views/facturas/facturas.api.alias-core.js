@@ -854,58 +854,6 @@ function canonicalActionId(id = "", payload = {}, options = {}) {
   });
 }
 
-export async function updateFacturaRequest(id = "", payload = {}, options = {}) {
-  return Boundary.updateFacturaRequest(
-    canonicalActionId(id, payload, options),
-    payload,
-    options
-  );
-}
-
-export async function updateFactura(id = "", payload = {}, options = {}) {
-  return canonicalizeDetailItem(await Boundary.updateFactura(
-    canonicalActionId(id, payload, options),
-    payload,
-    options
-  ));
-}
-
-export const updateInvoice = updateFactura;
-
-export async function patchFacturaRequest(id = "", payload = {}, options = {}) {
-  return Boundary.patchFacturaRequest(
-    canonicalActionId(id, payload, options),
-    payload,
-    options
-  );
-}
-
-export async function patchFactura(id = "", payload = {}, options = {}) {
-  return canonicalizeDetailItem(await Boundary.patchFactura(
-    canonicalActionId(id, payload, options),
-    payload,
-    options
-  ));
-}
-
-export const patchInvoice = patchFactura;
-
-export async function removeFacturaRequest(id = "", options = {}) {
-  return Boundary.removeFacturaRequest(
-    resolveFacturaCanonicalId(id, options),
-    options
-  );
-}
-
-export async function removeFactura(id = "", options = {}) {
-  return Boundary.removeFactura(
-    resolveFacturaCanonicalId(id, options),
-    options
-  );
-}
-
-export const removeInvoice = removeFactura;
-
 export async function sendFacturaRequest(id = "", payload = {}, options = {}) {
   return Boundary.sendFacturaRequest(
     canonicalActionId(id, payload, options),
@@ -1001,15 +949,6 @@ export const FacturasApi = Object.freeze({
   createFacturaRequest,
   createFactura,
   createInvoice,
-  updateFacturaRequest,
-  updateFactura,
-  updateInvoice,
-  patchFacturaRequest,
-  patchFactura,
-  patchInvoice,
-  removeFacturaRequest,
-  removeFactura,
-  removeInvoice,
   sendFacturaRequest,
   sendFactura,
   markFacturaPaidRequest,

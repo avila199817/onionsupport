@@ -290,30 +290,6 @@ export async function createFactura(payload = {}, options = {}) {
   return result;
 }
 
-export async function updateFacturaRequest(id = "", payload = {}, options = {}) {
-  return mutateFactura(id, () => Base.updateFacturaRequest(id, payload, options));
-}
-
-export async function updateFactura(id = "", payload = {}, options = {}) {
-  return mutateFactura(id, () => Base.updateFactura(id, payload, options));
-}
-
-export async function patchFacturaRequest(id = "", payload = {}, options = {}) {
-  return mutateFactura(id, () => Base.patchFacturaRequest(id, payload, options));
-}
-
-export async function patchFactura(id = "", payload = {}, options = {}) {
-  return mutateFactura(id, () => Base.patchFactura(id, payload, options));
-}
-
-export async function removeFacturaRequest(id = "", options = {}) {
-  return mutateFactura(id, () => Base.removeFacturaRequest(id, options));
-}
-
-export async function removeFactura(id = "", options = {}) {
-  return mutateFactura(id, () => Base.removeFactura(id, options));
-}
-
 export async function sendFacturaRequest(id = "", payload = {}, options = {}) {
   return mutateFactura(id, () => Base.sendFacturaRequest(id, payload, options));
 }
@@ -342,12 +318,6 @@ export const FacturasApi = Object.freeze({
   clearFacturaDetailPrefetchCache,
   createFacturaRequest,
   createFactura,
-  updateFacturaRequest,
-  updateFactura,
-  patchFacturaRequest,
-  patchFactura,
-  removeFacturaRequest,
-  removeFactura,
   sendFacturaRequest,
   sendFactura,
   markFacturaPaidRequest,

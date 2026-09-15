@@ -57,6 +57,10 @@ La caché estándar de Home pertenece a la sesión y al dashboard sin filtros es
 
 El login trata el bloqueo temporal por intentos fallidos (`423 ACCOUNT_TEMPORARILY_LOCKED`, con `lockUntil`) con un mensaje propio que indica los minutos de espera, en lugar del mensaje genérico de credenciales.
 
+## Superficie de mutación de facturas
+
+La API de facturas del frontend (`facturas.api.base.js` → `boundary` → `alias-core` → `canonical` → `facturas.api.js`) solo expone las mutaciones que el backend implementa como comandos `POST`: creación (`createFactura`), envío (`sendFactura`) y registro de pago (`markFacturaPaid`). `PUT`, `PATCH` y `DELETE` sobre `/api/facturas/:id` no existen en el backend (404) y se retiraron del frontend el 2026-09-15 junto con el transporte que degradaba `PUT→PATCH→POST` cuando el método no estaba disponible. `tools/facturas-mutation-surface-contract.mjs` impide que reaparezcan sin una ruta backend real y comprueba que ningún módulo de `src/` las consume.
+
 ## Errores corregidos
 
 - En Correo, cambiar de carpeta invalida el lector anterior. Una respuesta tardía de mensajes, estado o buzones no puede escribir sobre otra operación ni después de desmontar la vista, incluso cuando el transporte ignora la cancelación.

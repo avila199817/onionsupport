@@ -34,13 +34,15 @@ for (const privateImport of privateImports) {
     true,
     `app.css source debe conservar ${privateImport} para compatibilidad legacy`
   );
-
-  assert.equal(
-    viteConfig.includes(privateImport),
-    true,
-    `Vite debe declarar ${privateImport} en la frontera de split`
-  );
 }
+
+// La frontera es declarativa: private.css enumera los imports privados y el
+// tooling confiable sólo valida su forma canónica y los retira de app.css.
+assert.equal(
+  viteConfig.includes("./layout/sidebar.css"),
+  false,
+  "Vite no puede duplicar la lista privada que declara private.css"
+);
 
 assert.match(
   globalCss,
@@ -56,8 +58,14 @@ assert.match(
 
 assert.match(
   viteConfig,
-  /const PRIVATE_CSS_IMPORTS = Object\.freeze\(\[/,
-  "Vite debe declarar la lista cerrada de imports privados"
+  /const PRIVATE_CSS_IMPORT_PATTERN =\n  \/\^@import url\\\("\\\.\\\/\(layout\|components\|compositions\)\\\//,
+  "Vite debe aceptar sólo imports canónicos sobre directorios privados"
+);
+
+assert.match(
+  viteConfig,
+  /if \(layer === "guardrails"\) continue;/,
+  "los imports guardrails son autoridad compartida y no se retiran del entry público"
 );
 
 assert.match(
@@ -80,8 +88,8 @@ assert.match(
 
 assert.match(
   viteConfig,
-  /PRIVATE_CSS_IMPORTS\.map\(privateCssImportStatement\)/,
-  "el plugin debe derivar statements exactos desde la lista cerrada"
+  /const statements = privateCssImports\(\);/,
+  "el plugin debe derivar statements exactos de lo que declara private.css"
 );
 
 assert.match(

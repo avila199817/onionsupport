@@ -93,6 +93,10 @@ Sidebar es persistente/colapsable. Sidebar, Topbar, main y tablehead consumen el
 
 `chrome.css` no vuelve a declarar `@layer layout` internamente.
 
+### Frontera pública/privada
+
+`src/css/private.css` es la única declaración de lo que sólo carga el área autenticada. `app.css` conserva esos mismos imports para el modo fuente y el rollback legacy; en el build, `vite.config.js` retira de `app.css` exactamente los `@import` que `private.css` declara y `private-runtime-ui` carga `private.css` tras el guard de autenticación. Cada import privado tiene forma canónica, `@import url("./{layout|components|compositions}/….css") layer(<mismo directorio>);`, y existe una sola vez en `app.css`; los imports `layer(guardrails)` son autoridad compartida y ambos entrypoints los conservan. Mover una hoja detrás del guard es un cambio de fuente (el import en `private.css` y en `app.css`), nunca de tooling confiable. Contratos: `tools/private-css-split-regression.mjs` y `.github/scripts/private_css_entry_contract.mjs`.
+
 Las hojas de `src/css/views/**` no se importan desde `app.css`: el Router las prepara, activa y desactiva como parte del commit de cada ruta.
 
 ## Responsive como composición

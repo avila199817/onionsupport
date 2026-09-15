@@ -66,62 +66,54 @@ const COMPATIBILITY_DIRECTORIES = Object.freeze([
 /*
  * app.css stays complete in source mode so development and the immutable
  * legacy-root rollback preserve their historical CSS contract. During a
- * production build, only these exact private imports are removed from the
- * public entry. private-runtime-ui then requests the same ordered list through
- * private.css after the authentication guard.
+ * production build, exactly the imports that private.css declares are removed
+ * from the public entry; private-runtime-ui then requests that same ordered
+ * list through private.css after the authentication guard.
  *
- * The plugin is absent until candidate data adds private.css. That lets this
- * file become trusted base tooling in one PR without changing release bytes;
- * the following activation PR is then rebuilt identically by trusted tooling.
+ * private.css is declarative candidate data, never executable tooling. Each
+ * statement must have the canonical form over a private-only layer and must
+ * exist exactly once in app.css, so moving a stylesheet behind the guard is
+ * one source change rebuilt identically by this trusted tooling. Guardrails
+ * imports are shared paint authorities: both entries keep them.
+ *
+ * The plugin is absent until candidate data adds private.css.
  */
 const PRIVATE_CSS_ENTRY = resolve(ROOT, "src/css/private.css");
 
-const PRIVATE_CSS_IMPORTS = Object.freeze([
-  "./layout/sidebar.css",
-  "./layout/sidebar.executive.css",
-  "./layout/sidebar.executive.interactions.css",
-  "./layout/topbar.css",
-  "./layout/topbar.executive.css",
-  "./layout/chrome.css",
-  "./compositions/private-admin-parity.css",
-  "./compositions/private-admin-interactions.css",
-  "./compositions/private-create-modal.css",
-  "./compositions/private-amounts.css",
-]);
-
-function privateCssImportStatement(spec) {
-  const layer = spec.startsWith("./layout/")
-    ? "layout"
-    : "compositions";
-
-  return `@import url("${spec}") layer(${layer});`;
-}
+const PRIVATE_CSS_IMPORT_PATTERN =
+  /^@import url\("\.\/(layout|components|compositions)\/[a-z0-9-]+(?:\.[a-z0-9-]+)*\.css"\) layer\((layout|components|compositions|guardrails)\);$/;
 
 function privateCssSplitEnabled() {
   return existsSync(PRIVATE_CSS_ENTRY);
 }
 
+function privateCssImports() {
+  const source = readFileSync(PRIVATE_CSS_ENTRY, "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
+  const statements = [];
+
+  for (const statement of source.match(/@import\b[^;]*;/g) || []) {
+    const match = PRIVATE_CSS_IMPORT_PATTERN.exec(statement);
+    if (!match) {
+      throw new Error(`Private CSS import is not canonical: ${statement}`);
+    }
+    const [, directory, layer] = match;
+    if (layer === "guardrails") continue;
+    if (layer !== directory) {
+      throw new Error(`Private CSS import layer must match its directory: ${statement}`);
+    }
+    if (statements.includes(statement)) {
+      throw new Error(`Private CSS import is duplicated: ${statement}`);
+    }
+    statements.push(statement);
+  }
+
+  return statements;
+}
+
 function onionPrivateCssEntrySplit() {
   const appCssId = resolve(ROOT, "src/css/app.css");
-  const statements = PRIVATE_CSS_IMPORTS.map(privateCssImportStatement);
-
-  // R06: prepare trusted tooling before private.css activates the full-view
-  // composition. Candidate CSS is declarative data, never executable tooling.
-  // Keep the source-mode import and all pre-activation release bytes unchanged.
-  const fullviewStatement = privateCssImportStatement(
-    "./compositions/private-fullview-routes.css"
-  );
-  const privateSource = readFileSync(PRIVATE_CSS_ENTRY, "utf8")
-    .replace(/\/\*[\s\S]*?\*\//g, "");
-  const fullviewImports = (privateSource.match(/@import\b[^;]*;/g) || [])
-    .filter((statement) => statement.includes("private-fullview-routes.css"));
-
-  if (fullviewImports.length > 0) {
-    if (fullviewImports.length !== 1 || fullviewImports[0] !== fullviewStatement) {
-      throw new Error("Private full-view CSS must have one canonical compositions import.");
-    }
-    statements.push(fullviewStatement);
-  }
+  const statements = privateCssImports();
 
   return {
     name: "onion-private-css-entry-split",

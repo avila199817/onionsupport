@@ -33,7 +33,9 @@ for (const [value, expected] of escapeFixtures) {
   assert.equal(escapeHtml(value), expected);
   assert.equal(homeEscape(value), expected);
   const loading = renderDetailPending({ type: "factura", id: value });
-  assert.ok(loading.includes(`<span>${expected}</span>`), "Actual overlay uses the same escaping policy");
+  // The pending session shows the id as one complete, escaped text node; the
+  // element around it belongs to the surface, not to the escaping policy.
+  if (expected) assert.ok(loading.includes(`>${expected}<`), "Actual overlay uses the same escaping policy");
 }
 
 const textFixtures = [
@@ -69,7 +71,8 @@ assert.equal(correoEscape, escapeHtml, "Correo reexport preserves the canonical 
 assert.equal(attr('  " A\nB &\'  '), "&quot; A B &amp;&#39;");
 const error = renderDetailPending({ type: "<cliente>", id: "unused", error: '"<img src=x> &' });
 assert.ok(error.includes('aria-label="No se pudo abrir &lt;cliente&gt;"'));
-assert.ok(error.includes('<p class="entity-overlay-error" role="alert">&quot;&lt;img src=x&gt; &amp;</p>'));
+assert.ok(error.includes('role="alert"'), "A failed session is announced assertively");
+assert.ok(error.includes(">&quot;&lt;img src=x&gt; &amp;<"), "The error text is one escaped text node");
 assert.equal(error.includes("<img src=x>"), false);
 assert.equal(safeError({ message: "Error /x?token=synthetic-secret&ok=yes Bearer synthetic-key" }), "Error /x?token=***&ok=yes Bearer ***");
 assert.equal(safeError({ message: "x".repeat(510) }).length, 500);

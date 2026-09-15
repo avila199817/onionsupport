@@ -40,10 +40,9 @@ function panelOf(entry) {
   try { return entry.getPanel?.() || null; } catch { return null; }
 }
 
-function claimClasses(manager, entry, classes) {
-  const next = new Set(['modal-open', ...classes].filter(Boolean));
+function releaseClasses(manager, entry, keep = new Set()) {
   for (const name of entry.classes) {
-    if (next.has(name)) continue;
+    if (keep.has(name)) continue;
     const claim = manager.classes.get(name);
     claim.owners.delete(entry);
     if (!claim.owners.size) {
@@ -51,6 +50,11 @@ function claimClasses(manager, entry, classes) {
       manager.classes.delete(name);
     }
   }
+}
+
+function claimClasses(manager, entry, classes) {
+  const next = new Set(['modal-open', ...classes].filter(Boolean));
+  releaseClasses(manager, entry, next);
   for (const name of next) {
     let claim = manager.classes.get(name);
     if (!claim) {
@@ -69,17 +73,10 @@ function release(manager, entry, restoreFocus) {
   const wasTop = index === manager.entries.length - 1;
   manager.entries.splice(index, 1);
   entry.manager = null;
-  for (const name of entry.classes) {
-    const claim = manager.classes.get(name);
-    claim.owners.delete(entry);
-    if (!claim.owners.size) {
-      manager.document.body.classList.toggle(name, claim.existed);
-      manager.classes.delete(name);
-    }
-  }
+  releaseClasses(manager, entry);
   entry.classes.clear();
   if (!manager.entries.length) {
-    manager.document.removeEventListener('keydown', manager.keydown);
+    for (const type of ['keydown', 'click']) manager.document.removeEventListener(type, manager.listener);
     manager.observer?.disconnect();
     for (const [property, snapshot] of manager.styles) {
       if (snapshot.value) manager.document.body.style.setProperty(property, snapshot.value, snapshot.priority);
@@ -136,19 +133,32 @@ function keydown(manager, event) {
   }
 }
 
+function backdropClick(manager, event) {
+  if (event.defaultPrevented || event.button !== 0) return;
+  prune(manager);
+  const entry = manager.entries.at(-1);
+  const panel = entry && panelOf(entry);
+  // Only a click on the top dialog's own shell backdrop is a close request;
+  // the owner keeps its close policy, exactly as with Escape.
+  if (!panel || !entry.onBackdrop || event.target !== panel.parentElement?.closest("[data-modal-overlay='true']")) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  entry.onBackdrop(event);
+}
+
 function managerFor(document) {
   let manager = documents.get(document);
   if (manager) return manager;
-  manager = { document, entries: [], classes: new Map(), styles: new Map(), observer: null, keydown: null };
-  manager.keydown = (event) => keydown(manager, event);
+  manager = { document, entries: [], classes: new Map(), styles: new Map(), observer: null, listener: null };
+  manager.listener = (event) => (event.type === 'click' ? backdropClick(manager, event) : keydown(manager, event));
   const Observer = document.defaultView?.MutationObserver;
   if (Observer) manager.observer = new Observer(() => prune(manager));
   documents.set(document, manager);
   return manager;
 }
 
-export function createModalLifecycle({ getPanel, onEscape, bodyClasses = [], onDetached } = {}) {
-  const entry = { getPanel, onEscape, onDetached, manager: null, classes: new Set(), opener: null };
+export function createModalLifecycle({ getPanel, onEscape, onBackdrop, bodyClasses = [], onDetached } = {}) {
+  const entry = { getPanel, onEscape, onBackdrop, onDetached, manager: null, classes: new Set(), opener: null };
   return Object.freeze({
     activate({ opener, classes = bodyClasses } = {}) {
       const panel = panelOf(entry);
@@ -169,7 +179,7 @@ export function createModalLifecycle({ getPanel, onEscape, bodyClasses = [], onD
         document.body.style.setProperty('overflow', 'hidden');
         document.body.style.setProperty('overscroll-behavior', 'contain');
         // Bubble allows an owner's combobox to consume Escape first.
-        document.addEventListener('keydown', manager.keydown);
+        for (const type of ['keydown', 'click']) document.addEventListener(type, manager.listener);
         manager.observer?.observe(document.body, { childList: true, subtree: true });
       }
       entry.manager = manager;

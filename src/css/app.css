@@ -65,6 +65,7 @@
 
 @import url("./components/app-icons.css") layer(components);
 @import url("./components/ui.css") layer(components);
+@import url("./components/detail-modal.css") layer(components);
 
 /* =========================================================
    ROUTE VIEWS

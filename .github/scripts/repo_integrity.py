@@ -540,33 +540,17 @@ def validate_detail_modal_v6_contract(errors: list[str]) -> None:
 
 
 def validate_detail_modal_shell_loading(errors: list[str], route_styles: str) -> None:
-    """The structural modal shell has exactly one loading authority.
+    """The structural modal shell travels with the private area.
 
-    Either every route that opens a detail (Usuarios and Incidencias) lists it in
-    its manifest, or it travels with the private area: app.css keeps it for
-    source mode and private.css declares it for the build. Never both.
+    app.css keeps it for source mode, private.css declares it for the build and
+    no route loads it on its own.
     """
     shell_import = '@import url("./components/detail-modal.css") layer(components);'
-    entries = {
-        entry: (SRC / "css" / entry).read_text(encoding="utf-8").count(shell_import)
-        for entry in ("app.css", "private.css")
-        if (SRC / "css" / entry).is_file()
-    }
-    global_shell = all(count == 1 for count in entries.values()) and len(entries) == 2
-    routed_shell = "detail-modal.css" in route_styles
-
-    if global_shell and routed_shell:
+    for entry in ("app.css", "private.css"):
+        if (SRC / "css" / entry).read_text(encoding="utf-8").count(shell_import) != 1:
+            errors.append(f"src/css/{entry} :: debe importar una vez el shell modal (components/detail-modal.css)")
+    if "detail-modal.css" in route_styles:
         errors.append("src/router/styles.js :: el shell modal viaja con el área privada; ninguna ruta lo carga aparte")
-        return
-    if global_shell:
-        return
-    if any(entries.values()):
-        errors.append("src/css :: el shell modal debe importarse una vez en app.css y en private.css, o en ninguno")
-        return
-    for route in ("usuarios", "incidencias"):
-        match = re.search(route + r":\s*Object\.freeze\(\[(?P<body>.*?)\]\)", route_styles, re.DOTALL)
-        if match and '"/src/css/components/detail-modal.css"' not in match.group("body"):
-            errors.append(f"src/router/styles.js :: {route.capitalize()} debe cargar detail-modal.css")
 
 
 def validate_shared_detail_modal_v7_contract(errors: list[str]) -> None:

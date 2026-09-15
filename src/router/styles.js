@@ -86,7 +86,6 @@ const STYLE_MANIFEST = Object.freeze({
   ]),
 
   incidencias: Object.freeze([
-    "/src/css/components/detail-modal.css",
     "/src/css/views/incidencias/index.css",
     "/src/css/views/incidencias/create.css",
     "/src/css/views/incidencias/detail.css",
@@ -114,7 +113,6 @@ const STYLE_MANIFEST = Object.freeze({
     sin arrastrar la hoja completa de detalle de Incidencias.
   */
   usuarios: Object.freeze([
-    "/src/css/components/detail-modal.css",
     "/src/css/views/usuarios/index.css",
     "/src/css/views/usuarios/create.css",
   ]),

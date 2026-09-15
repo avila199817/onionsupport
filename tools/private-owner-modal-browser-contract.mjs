@@ -18,7 +18,6 @@ const CSS = [
   "/src/css/tokens/variables.css",
   "/src/css/tokens/light.css",
   "/src/css/components/detail-modal.css",
-  "/src/css/features/entity-overlay.css",
   "/src/css/views/facturas/detail.css",
   "/src/css/views/facturas/resend-confirm.css",
   "/src/css/views/incidencias/detail.css",
@@ -28,7 +27,6 @@ const CSS = [
   "/src/features/incidencias-followup-avatars/style.css",
 ];
 const CSS_IMPORTS = new Map([
-  ["/src/features/entity-overlay/index.js", 'import "../../css/features/entity-overlay.css";'],
   ["/src/features/incidencias-comment-avatars/index.js", 'import "./style.css";'],
   ["/src/features/incidencias-followup-avatars/index.js", 'import "./style.css";'],
 ]);

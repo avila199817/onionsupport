@@ -3,10 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cleanText } from "../src/core/presentation-text.js";
-// escapeHtml moves to core/escape-html.js in the next source change; the
-// trusted base tooling validates that candidate before the module exists on
-// main, so resolve the authority wherever it lives.
-const { escapeHtml } = await import("../src/core/escape-html.js").catch(() => import("../src/core/presentation-text.js"));
+import { escapeHtml } from "../src/core/escape-html.js";
 import { cleanText as homeText, escapeHtml as homeEscape, attr } from "../src/views/home/home.template.foundation.js";
 import { cleanText as overlayText, renderDetailPending, safeError } from "../src/features/entity-overlay/pending-view.js";
 import { escapeHtml as correoEscape, renderComposeModal, renderMessageRows } from "../src/views/correo/correo.template.js";
@@ -150,34 +147,17 @@ for (const markup of [clientesCreate, clientesDetail, usuariosDetail, cuentaFeed
 const cuentaError = renderCuentaError(remoteBody);
 assert.ok(cuentaError.includes(`<p>${bodyHtml}</p>`), "Direct Cuenta error retains multiline content");
 
-// One cleanText authority. Every module outside the startup closures imports
-// the canonical helper (directly or through a live reexport) instead of
-// carrying a copy. The copies listed below stay until the unit that moves
-// the helper into the kernel chunk and measures the startup closures
-// (tools/invoice-api-split-dist-contract.mjs): the startup and kernel modules
-// themselves, and the four enhancement features whose preload lists in the
-// bootstrap chunk would otherwise gain a separate presentation-text chunk.
-// Nothing may be added to this list.
+// One authority per policy: cleanText (one-line normalization) lives in
+// core/presentation-text.js and escapeHtml (HTML escaping) in
+// core/escape-html.js, split so the startup closures load the normalizer
+// alone. Every module imports them (directly or through a live reexport)
+// instead of carrying a copy. The two escapeHtml copies listed below leave
+// with the escapeHtml unit; the list is an upper bound that only shrinks,
+// so the trusted base tooling keeps validating the candidate that removes them.
 const SRC_ROOT = fileURLToPath(new URL("../src/", import.meta.url));
 const CLEAN_TEXT_AUTHORITY = "src/core/presentation-text.js";
-const STARTUP_CLEAN_TEXT_COPIES = Object.freeze([
-  "src/app/index.js",
-  "src/app/loader.js",
-  "src/core/http.js",
-  "src/core/index.js",
-  "src/features/auth/index.js",
-  "src/router/index.js",
-  "src/router/routes.js",
-  "src/router/styles.js",
-  "src/views/public/activate-account/index.js",
-  "src/views/public/home/index.js",
-  "src/views/public/login/index.js",
-  "src/views/public/password-reset/index.js",
-  "src/features/mobile-datalist/index.js",
-  "src/features/public-support-extreme/index.js",
-  "src/features/route-intent-preload/index.js",
-  "src/features/ticket-deeplink/index.js",
-]);
+const ESCAPE_HTML_AUTHORITY = "src/core/escape-html.js";
+const ESCAPE_HTML_COPIES_PENDING = Object.freeze(["src/views/agenda/index.js", "src/views/public/index.js"]);
 function sourceFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, "en")).flatMap((entry) => {
     const path = join(directory, entry.name);
@@ -185,19 +165,22 @@ function sourceFiles(directory) {
     return entry.isFile() && entry.name.endsWith(".js") ? [path] : [];
   });
 }
-const definers = [];
+const definers = { cleanText: [], escapeHtml: [] };
 const callersWithoutBinding = [];
 for (const file of sourceFiles(SRC_ROOT)) {
   const code = readFileSync(file, "utf8");
   const path = `src/${relative(SRC_ROOT, file).split(sep).join("/")}`;
-  const defines = /^(?:export )?(?:async )?(?:function cleanText\s*\(|(?:const|let|var) cleanText\b)/mu.test(code);
-  const imports = /import\s*\{[^}]*\bcleanText\b[^}]*\}\s*from\s*"[^"]+"/u.test(code);
-  if (defines) definers.push(path);
-  else if (/\bcleanText\s*\(/u.test(code) && !imports) callersWithoutBinding.push(path);
+  for (const name of Object.keys(definers)) {
+    const defines = new RegExp(`^(?:export )?(?:async )?(?:function ${name}\\s*\\(|(?:const|let|var) ${name}\\b)`, "mu").test(code);
+    const imports = new RegExp(`import\\s*\\{[^}]*\\b${name}\\b[^}]*\\}\\s*from\\s*"[^"]+"`, "u").test(code);
+    if (defines) definers[name].push(path);
+    else if (new RegExp(`\\b${name}\\s*\\(`, "u").test(code) && !imports) callersWithoutBinding.push(`${path} → ${name}`);
+  }
 }
-const allowedDefiners = new Set([CLEAN_TEXT_AUTHORITY, ...STARTUP_CLEAN_TEXT_COPIES]);
-assert.ok(definers.includes(CLEAN_TEXT_AUTHORITY), "the authority defines cleanText");
-assert.deepEqual(definers.filter((path) => !allowedDefiners.has(path)), [], "cleanText is defined only in the authority and the pending startup copies; the list only shrinks");
-assert.deepEqual(callersWithoutBinding, [], "every cleanText caller binds the canonical helper");
+assert.deepEqual(definers.cleanText, [CLEAN_TEXT_AUTHORITY], "cleanText is defined once, in the authority");
+const allowedEscapeDefiners = new Set([ESCAPE_HTML_AUTHORITY, ...ESCAPE_HTML_COPIES_PENDING]);
+assert.ok(definers.escapeHtml.includes(ESCAPE_HTML_AUTHORITY), "the authority defines escapeHtml");
+assert.deepEqual(definers.escapeHtml.filter((path) => !allowedEscapeDefiners.has(path)), [], "escapeHtml is defined only in the authority and the pending copies; the list only shrinks");
+assert.deepEqual(callersWithoutBinding, [], "every cleanText and escapeHtml caller binds its canonical helper");
 
-console.log(`Presentation text contract: PASS · Unicode/coercion/fallback identity · canonical reexports · one cleanText authority (${definers.length - 1} startup and enhancement copies pending) · actual pending, Correo, Servidor, Facturas and Incidencias markup · multiline body/comments · redaction`);
+console.log(`Presentation text contract: PASS · Unicode/coercion/fallback identity · canonical reexports · one cleanText authority (no local copies) · one escapeHtml authority (${ESCAPE_HTML_COPIES_PENDING.length} copies pending) · actual pending, Correo, Servidor, Facturas and Incidencias markup · multiline body/comments · redaction`);

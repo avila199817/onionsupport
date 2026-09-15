@@ -1,5 +1,6 @@
 
-import { cleanText as safeText, escapeHtml } from "../../core/presentation-text.js";
+import { cleanText as safeText } from "../../core/presentation-text.js";
+import { escapeHtml } from "../../core/escape-html.js";
 /* =========================================================
    Onion Support - Servidor Template
    Archivo: /src/views/server/server.template.js

@@ -11,6 +11,8 @@
    - Sin clicks sintéticos, sin búsqueda de filas y sin HTTP propio.
 ========================================================= */
 
+import { cleanText } from "../../core/presentation-text.js";
+
 export const TICKET_DEEPLINK_VERSION =
   "ticket-deeplink.v4-canonical-owner-modal";
 
@@ -34,13 +36,6 @@ let finished = false;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function cleanText(value = "") {
-  return String(value ?? "")
-    .replace(/[\r\n\t]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function safeDecode(value = "") {

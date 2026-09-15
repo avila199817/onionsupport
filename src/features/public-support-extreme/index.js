@@ -11,6 +11,7 @@
 ========================================================= */
 
 import "../../css/views/public/support-extreme.css";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const PUBLIC_SUPPORT_EXTREME_VERSION =
   "public-support.extreme.v2-client-facing-feedback";
@@ -46,13 +47,6 @@ let frame = 0;
 let mountRoot = null;
 let installed = false;
 let destroyed = false;
-
-function cleanText(value = "", fallback = "") {
-  return String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim() || fallback;
-}
 
 function createAuthorityIcon() {
   const namespace = "http://www.w3.org/2000/svg";

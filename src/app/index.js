@@ -28,6 +28,7 @@ import {
   showLoader,
   hideLoader,
 } from "./loader.js";
+import { cleanText } from "../core/presentation-text.js";
 
 export const APP_VERSION =
   "app.minimal.v9-public-session-handoff";
@@ -184,28 +185,6 @@ function withRuntimeModules(payload = {}) {
     Router,
     Toast,
   };
-}
-
-function cleanText(
-  value = "",
-  fallback = ""
-) {
-  const output =
-    String(value ?? "")
-      .replace(
-        /[\r\n\t]/g,
-        " "
-      )
-      .replace(
-        /\s+/g,
-        " "
-      )
-      .trim();
-
-  return (
-    output ||
-    fallback
-  );
 }
 
 /* =========================================================

@@ -1,4 +1,4 @@
-import { escapeHtml } from "../../core/presentation-text.js";
+import { escapeHtml } from "../../core/escape-html.js";
 import { createModalLifecycle, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
 import { createModalHost, renderModalCloseButton, renderModalContent, renderModalShell } from "../entity-overlay/modal-host.js";
 /* =========================================================

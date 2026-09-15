@@ -14,6 +14,8 @@
    - Sin Auth, Router, Store, fetch ni storage.
 ========================================================= */
 
+import { cleanText } from "../core/presentation-text.js";
+
 export const LOADER_VERSION =
   "app.loader.orbit-glass.v6-paint-handoff";
 
@@ -54,15 +56,6 @@ let hideGeneration = 0;
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
-}
-
-function cleanText(value = "", fallback = "") {
-  return (
-    String(value ?? "")
-      .replace(/[\r\n\t]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim() || fallback
-  );
 }
 
 function normalizeState(value = LOADER_STATES.BOOTING) {

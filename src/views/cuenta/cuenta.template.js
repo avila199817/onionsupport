@@ -1,4 +1,5 @@
-import { cleanText as safeText, escapeHtml } from "../../core/presentation-text.js";
+import { cleanText as safeText } from "../../core/presentation-text.js";
+import { escapeHtml } from "../../core/escape-html.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { userNameFromIdentity } from "../../core/user-identity.js";
 /* =========================================================

@@ -13,6 +13,8 @@
    - Usuarios carga un Detail Modal transversal y no depende del CSS de Incidencias.
 ========================================================= */
 
+import { cleanText } from "../core/presentation-text.js";
+
 export const ROUTE_STYLES_VERSION =
   "route-styles.v13-login-card-first";
 
@@ -173,19 +175,6 @@ function isBrowser() {
     typeof window !== "undefined" &&
     typeof document !== "undefined"
   );
-}
-
-function cleanText(
-  value = "",
-  fallback = ""
-) {
-  const output =
-    String(value ?? "")
-      .replace(/[\r\n\t]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-  return output || fallback;
 }
 
 function cleanViewKey(

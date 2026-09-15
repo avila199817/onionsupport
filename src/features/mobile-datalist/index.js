@@ -10,6 +10,8 @@
    - Sin API, Auth, Router, Store ni lógica de dominio.
 ========================================================= */
 
+import { cleanText } from "../../core/presentation-text.js";
+
 export const MOBILE_DATALIST_VERSION =
   "mobile-datalist.v1-semantic-table-card-composition";
 
@@ -83,13 +85,6 @@ function isBrowser() {
     typeof window !== "undefined" &&
     typeof document !== "undefined"
   );
-}
-
-function cleanText(value = "") {
-  return String(value ?? "")
-    .replace(/[\r\n\t]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function selectorMatches(node, selector = "") {

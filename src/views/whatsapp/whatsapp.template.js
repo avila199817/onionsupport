@@ -15,7 +15,8 @@ import {
   resolveAvatarPresentation,
 } from "../../features/avatar-system/identity.js";
 import { sanitizeRuntimeImageUrl } from "../../core/media.js";
-import { cleanText as text, escapeHtml } from "../../core/presentation-text.js";
+import { cleanText as text } from "../../core/presentation-text.js";
+import { escapeHtml } from "../../core/escape-html.js";
 
 
 export const WHATSAPP_TEMPLATE_VERSION =

@@ -9,7 +9,8 @@
    - Identidad visual de clientes alineada con Incidencias.
 ========================================================= */
 
-import { cleanText, escapeHtml } from "../../core/presentation-text.js";
+import { cleanText } from "../../core/presentation-text.js";
+import { escapeHtml } from "../../core/escape-html.js";
 import { resolveAvatarPresentation, synchronizeAvatars } from "../../features/avatar-system/index.js";
 import { renderFacturasCreateModal } from "./facturas.template.create.js";
 import { renderFacturasDetailModal } from "./facturas.template.modal.js";

@@ -32,6 +32,7 @@ import {
   isPublicApiPath as configIsPublicApiPath,
   isPrivateApiPath as configIsPrivateApiPath,
 } from "./config.js";
+import { cleanText } from "./presentation-text.js";
 
 export const HTTP_VERSION =
   "core.http.refresh.blob.v9-runtime-state-port";
@@ -125,28 +126,6 @@ function isBlob(value) {
   return (
     typeof Blob !== "undefined" &&
     value instanceof Blob
-  );
-}
-
-function cleanText(
-  value = "",
-  fallback = ""
-) {
-  const output =
-    String(value ?? "")
-      .replace(
-        /[\r\n\t]/g,
-        " "
-      )
-      .replace(
-        /\s+/g,
-        " "
-      )
-      .trim();
-
-  return (
-    output ||
-    fallback
   );
 }
 

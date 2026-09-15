@@ -1,4 +1,4 @@
-import { escapeHtml } from "../../core/presentation-text.js";
+import { escapeHtml } from "../../core/escape-html.js";
 import { getFinalization, reconcilePaymentResult } from "./payment-state.js";
 import { renderReviewPanel } from "./review-panel.js";
 import { getFacturaReviews, requestFacturaReviews } from "../../views/facturas/facturas.reviews.api.js";

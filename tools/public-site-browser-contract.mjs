@@ -330,6 +330,54 @@ try {
     });
     assert.equal(navigationVisible, true, `navigation must stay visible and interactive at ${hash}`);
   }
+
+  // Route styles, fonts or media can apply after the first alignment and grow
+  // every section, the fragment's own included, which native scroll anchoring
+  // does not compensate. The destination keeps following its section until the
+  // layout stays quiet, and stops as soon as the visitor takes over.
+  const growSections = (px) => page.evaluate((value) => {
+    for (const node of document.querySelectorAll(".main-content section")) node.style.paddingBlock = `${value}px`;
+  }, px);
+  const fragmentTop = () => page.evaluate(() => {
+    const host = document.querySelector(".main-content");
+    return { scrollTop: host.scrollTop, top: document.querySelector("#incidencia").getBoundingClientRect().top };
+  });
+  await page.goto(origin + "/#incidencia", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("[data-public-support-form]");
+  await page.waitForFunction(() => {
+    const host = document.querySelector(".main-content");
+    const top = document.querySelector("#incidencia").getBoundingClientRect().top;
+    return host.scrollTop > 20 && top >= 0 && top < 200;
+  });
+  const aligned = await fragmentTop();
+  await growSections(400);
+  await page.waitForFunction((previous) => {
+    const host = document.querySelector(".main-content");
+    const top = document.querySelector("#incidencia").getBoundingClientRect().top;
+    return host.scrollTop > previous + 900 && top >= 0 && top < 200;
+  }, aligned.scrollTop);
+  assert.equal(new URL(page.url()).hash, "#incidencia", "late growth above the fragment keeps the URL and the destination");
+  await page.mouse.move(700, 450);
+  await page.mouse.wheel(0, 120);
+  // The wheel scroll may animate over several frames; measure once it rests.
+  await page.waitForFunction((previous) => new Promise((resolve) => {
+    const host = document.querySelector(".main-content");
+    let last = host.scrollTop;
+    let stable = 0;
+    const tick = () => {
+      const current = host.scrollTop;
+      stable = current === last && current !== previous ? stable + 1 : 0;
+      last = current;
+      if (stable >= 6) resolve(true); else requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }), aligned.scrollTop);
+  const takenOver = await fragmentTop();
+  await growSections(800);
+  await page.waitForTimeout(400);
+  const afterTakeover = await fragmentTop();
+  assert.ok(Math.abs(afterTakeover.scrollTop - takenOver.scrollTop) < 2, "once the visitor scrolls, later growth no longer moves the page");
+  assert.ok(afterTakeover.top > 500, "the fragment is not chased after the visitor takes over");
   assert.deepEqual(errors, [], "frontend must not throw during metadata navigation");
   const mobilePhoto = await browser.newContext({ viewport: { width: 412, height: 915 }, deviceScaleFactor: 2 });
   await mobilePhoto.route("**/*", (route) => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
@@ -389,7 +437,7 @@ try {
     }
   } finally { await noScript.close(); }
   await context.close();
-  console.log("Public site browser: PASS · real Router home↔login · 10 public routes × 3 widths × 2 themes · unique visible headings · route-specific footer policy · disclosures · safe invalid tokens · intake/privacy deep links · Maps links/schema · empty boot container preserved · source/dist without JavaScript");
+  console.log("Public site browser: PASS · real Router home↔login · 10 public routes × 3 widths × 2 themes · unique visible headings · route-specific footer policy · disclosures · safe invalid tokens · intake/privacy deep links · fragment follows late layout until the visitor takes over · Maps links/schema · empty boot container preserved · source/dist without JavaScript");
 } finally {
   if (browser) await browser.close();
   await new Promise((done) => server.close(done));

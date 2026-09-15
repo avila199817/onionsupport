@@ -13,7 +13,7 @@ La portada, las cinco páginas de servicios y las cuatro vistas de acceso compar
 
 | Entrada | Resultado |
 | --- | --- |
-| `/#incidencia` | Conserva el fragmento y lleva al formulario cuando termina de montarse. |
+| `/#incidencia` | Conserva el fragmento y lleva al formulario cuando termina de montarse. Si los estilos de ruta, las fuentes o los medios se aplican después y crecen las secciones anteriores, la misma invalidación estructural (`ResizeObserver`) vuelve a alinear el destino durante los primeros 8 s, hasta que el visitante se desplaza y se aleja de esa alineación. |
 | `/#public-privacy` | Abre el desplegable de privacidad y enfoca su destino. |
 | Presupuesto o servicio | Ofrece abrir incidencia, con WhatsApp identificado como canal alternativo. |
 | Reset o activación sin token | Explicación única, controles deshabilitados y acción de recuperación/ayuda. |

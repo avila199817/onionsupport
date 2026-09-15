@@ -8,8 +8,8 @@
    - Incidencias Create es la fuente visual autoritativa del contenido de alta:
      bloques, campos, alertas, acciones, submit, loading y responsive.
    - La estructura (root, overlay, panel, header, cierre, scroll) la aporta el
-     shell canónico (components/detail-modal.css) en Incidencias, Facturas y
-     Clientes; Usuarios sigue recibiendo ese chrome desde aquí hasta su migración.
+     shell canónico (components/detail-modal.css) en las cuatro altas; esta
+     composición es la autoridad del contenido del formulario de alta.
    - Cada dominio conserva únicamente sus campos, copy y lógica de negocio.
    - Esta composición vive DESPUÉS de @layer views para impedir drift entre
      cuatro hojas de ruta independientes sin recurrir a !important.
@@ -19,105 +19,7 @@
 @layer compositions {
 
 :root {
-  --private-create-panel-width: min(1080px, calc(100vw - 48px));
   --private-create-panel-client-width: min(900px, calc(100vw - 48px));
-  --private-create-panel-max-height: min(92dvh, 900px);
-}
-
-/* =========================================================
-   ROOT / BODY LOCK
-========================================================= */
-
-:is(
-  #usuarios-create-modal-root,
-  .usuarios-create-modal-host
-),
-:is(
-  #usuarios-create-modal-root,
-  .usuarios-create-modal-host
-) *,
-:is(
-  #usuarios-create-modal-root,
-  .usuarios-create-modal-host
-) *::before,
-:is(
-  #usuarios-create-modal-root,
-  .usuarios-create-modal-host
-) *::after {
-  box-sizing: border-box;
-}
-
-:is(
-  #usuarios-create-modal-root,
-  .usuarios-create-modal-host
-) {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-modal);
-  inline-size: 100vw;
-  block-size: 100vh;
-  block-size: 100dvh;
-  margin: 0;
-  padding: 0;
-  pointer-events: none;
-  isolation: isolate;
-  color: var(--text);
-  font-family: var(--font-family);
-  line-height: var(--line-normal);
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-}
-
-body.modal-open,
-body.clientes-modal-open,
-body.clientes-create-open,
-body.usuarios-modal-open,
-body.usuarios-create-modal-open {
-  overflow: hidden;
-  overscroll-behavior: none;
-}
-
-/* =========================================================
-   OVERLAY / PANEL
-========================================================= */
-
-.usr-create-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  display: grid;
-  place-items: center;
-  inline-size: 100vw;
-  block-size: 100vh;
-  block-size: 100dvh;
-  padding: clamp(12px, 2vw, 28px);
-  overflow: hidden;
-  pointer-events: auto;
-  background: rgba(0, 0, 0, .64);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  animation: private-create-overlay-in 140ms ease-out both;
-}
-
-.usr-create-panel {
-  position: relative;
-  isolation: isolate;
-  inline-size: var(--private-create-panel-width);
-  max-inline-size: calc(100vw - 24px);
-  max-block-size: var(--private-create-panel-max-height);
-  min-inline-size: 0;
-  min-block-size: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  overflow: hidden;
-  border: 1px solid var(--panel-border);
-  border-radius: var(--modal-radius);
-  background: var(--panel-bg);
-  color: var(--text);
-  box-shadow: var(--shadow-modal, var(--panel-shadow));
-  outline: none;
-  pointer-events: auto;
-  animation: private-create-panel-in 180ms var(--ease-standard) both;
 }
 
 /* Incidencias (shell canónico): la anchura de cliente es un token del shell. */
@@ -125,26 +27,9 @@ body.usuarios-create-modal-open {
   --ui-detail-modal-panel-width: var(--private-create-panel-client-width);
 }
 
-.usr-create-panel:focus-visible {
-  box-shadow: var(--shadow-modal, var(--panel-shadow)), var(--focus-ring);
-}
-
 /* =========================================================
    HEADER
 ========================================================= */
-
-.usr-create-header {
-  position: relative;
-  z-index: 3;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-md);
-  min-inline-size: 0;
-  padding: clamp(17px, 1.5vw, 24px) clamp(18px, 2vw, 30px);
-  border-block-end: 1px solid var(--border-soft);
-  background: var(--surface-2, var(--panel-bg));
-}
 
 :is(
   .inc-create-header-copy,
@@ -157,94 +42,9 @@ body.usuarios-create-modal-open {
   gap: 4px;
 }
 
-.usr-create-header h2 {
-  margin: 0;
-  color: var(--text-strong);
-  font-size: clamp(24px, 2.2vw, 34px);
-  font-weight: var(--weight-black);
-  line-height: 1;
-  letter-spacing: var(--letter-tight);
-  text-wrap: balance;
-}
-
-.usr-create-header p {
-  max-inline-size: 74ch;
-  margin: 0;
-  color: var(--text-muted);
-  font-size: var(--font-sm);
-  font-weight: var(--weight-medium);
-  line-height: 1.4;
-}
-
-.usr-create-close {
-  appearance: none;
-  inline-size: 42px;
-  block-size: 42px;
-  display: grid;
-  place-items: center;
-  margin: 0;
-  padding: 0;
-  border: 1px solid var(--btn-secondary-border);
-  border-radius: var(--btn-radius);
-  background: var(--btn-secondary-bg);
-  color: var(--btn-secondary-text);
-  cursor: pointer;
-  font-size: inherit;
-  font-weight: inherit;
-  line-height: 1;
-  transition:
-    background var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard),
-    transform var(--duration-fast) var(--ease-standard),
-    opacity var(--duration-fast) var(--ease-standard);
-}
-
-.usr-create-close svg {
-  inline-size: 17px;
-  block-size: 17px;
-}
-
-.usr-create-close:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-.usr-create-close:disabled {
-  cursor: not-allowed;
-  opacity: .48;
-}
-
 /* =========================================================
-   BODY / FORM — SINGLE SCROLL ROOT
+   FORM
 ========================================================= */
-
-.usr-create-body {
-  min-inline-size: 0;
-  min-block-size: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
-  scrollbar-gutter: stable;
-  padding: clamp(18px, 1.6vw, 26px) clamp(18px, 2vw, 30px) clamp(22px, 2vw, 32px);
-}
-
-.usr-create-body::-webkit-scrollbar {
-  inline-size: var(--scrollbar-size, 9px);
-}
-
-.usr-create-body::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.usr-create-body::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: var(--radius-pill);
-  background: var(--scrollbar-thumb);
-  background-clip: padding-box;
-}
 
 :is(
   .inc-create-form,
@@ -770,7 +570,6 @@ body.usuarios-create-modal-open {
    LOADING — SAME PANEL OVERLAY EVERYWHERE
 ========================================================= */
 
-
 :is(
   .inc-create-loading-overlay,
   .cli-create-loading-overlay,
@@ -808,7 +607,6 @@ body.usuarios-create-modal-open {
   color: var(--text-strong);
 }
 
-
 :is(
   .inc-create-loading-copy,
   .cli-create-loading-copy,
@@ -845,34 +643,7 @@ body.usuarios-create-modal-open {
    LIGHT / RESPONSIVE
 ========================================================= */
 
-[data-theme="light"] .usr-create-overlay {
-  background: rgba(15, 23, 42, .46);
-}
-
 @media (max-width: 760px) {
-  .usr-create-overlay {
-    padding: 10px;
-  }
-
-  .usr-create-panel {
-    inline-size: 100%;
-    max-inline-size: 100%;
-    max-block-size: calc(100dvh - 20px);
-    border-radius: var(--radius-lg);
-  }
-
-  .usr-create-header {
-    padding: 15px 16px;
-  }
-
-  .usr-create-header h2 {
-    font-size: clamp(22px, 7vw, 29px);
-  }
-
-  .usr-create-body {
-    padding: 16px;
-  }
-
   :is(
     .inc-create-grid--2,
     .inc-create-grid--3,
@@ -906,25 +677,6 @@ body.usuarios-create-modal-open {
 }
 
 @media (max-width: 480px) {
-  .usr-create-overlay {
-    padding: 0;
-  }
-
-  .usr-create-panel {
-    block-size: 100dvh;
-    max-block-size: 100dvh;
-    border-inline: 0;
-    border-radius: 0;
-  }
-
-  .usr-create-header {
-    padding-inline: 14px;
-  }
-
-  .usr-create-body {
-    padding: 14px;
-  }
-
   :is(
     .inc-create-block,
     .inc-create-admin-classification,
@@ -939,25 +691,11 @@ body.usuarios-create-modal-open {
 }
 
 /* =========================================================
-   MOTION / ACCESSIBILITY / PRINT
+   MOTION / ACCESSIBILITY
 ========================================================= */
-
-@keyframes private-create-overlay-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes private-create-panel-in {
-  from { opacity: 0; transform: translateY(8px) scale(.992); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
-
 
 @media (prefers-reduced-motion: reduce) {
   :is(
-    .usr-create-overlay,
-    .usr-create-panel,
-    .usr-create-close,
     .inc-create-submit,
     .cli-create-submit,
     .fac-create-submit,
@@ -971,8 +709,6 @@ body.usuarios-create-modal-open {
 
 @media (forced-colors: active) {
   :is(
-    .usr-create-panel,
-    .usr-create-close,
     .inc-create-input,
     .cli-create-input,
     .fac-create-input,
@@ -983,15 +719,6 @@ body.usuarios-create-modal-open {
     .usr-create-submit
   ) {
     forced-color-adjust: auto;
-  }
-}
-
-@media print {
-  :is(
-    #usuarios-create-modal-root,
-    .usuarios-create-modal-host
-  ) {
-    display: none;
   }
 }
 

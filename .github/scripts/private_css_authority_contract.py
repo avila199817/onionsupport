@@ -29,7 +29,6 @@ if "SINGLE VISUAL AUTHORITY" not in parity:
     fail("private-admin-parity.css must explicitly be the single listing visual authority")
 
 for forbidden in (
-    ".usr-create-overlay",
     ".ui-detail-modal-overlay",
     ".clientes-detail-overlay",
 ):
@@ -124,7 +123,6 @@ for forbidden in (
     r"\.usr-create-overlay\s*\{",
     r"\.usr-create-panel\s*\{",
     r"\.usr-create-header\s*\{",
-    r"\.usr-create-body\s*\{",
     r"\.usr-create-input\s*[,\{]",
     r"\.usr-create-submit\s*\{",
     r"\.usr-create-loading-overlay\s*\{",

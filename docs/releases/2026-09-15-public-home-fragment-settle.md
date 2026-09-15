@@ -17,3 +17,7 @@ El chunk `home-*.js` crece 317 bytes (bootstrapPublicHome 217970 → 218293). El
 ## Comportamiento
 
 Sin cambio visual en cargas normales: la re-alineación produce el mismo destino que la primera. Cuando el layout crece tarde, el fragmento queda donde el visitante lo pidió en lugar de 1100 px arriba.
+
+## Corrección posterior (misma fecha)
+
+La primera versión sólo detectaba la toma de control por desviación respecto a una alineación instantánea; tras una alineación suave (un enlace de la propia página) no había referencia y una invalidación estructural posterior (por ejemplo, la barra de navegación al compactarse) devolvía la página al fragmento aunque el visitante hubiera usado la barra de desplazamiento propia. El contrato `public-site` lo detectó de forma intermitente en la reconstrucción de `main`. Ahora una alineación suave y la barra propia cierran la ventana de asentamiento; el contrato añade el escenario (enlace «Ver servicios», clic en la barra, crecimiento posterior sin re-alineación).

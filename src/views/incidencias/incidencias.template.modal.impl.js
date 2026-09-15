@@ -31,6 +31,7 @@
 import { cleanText, escapeHtml } from "../../core/presentation-text.js";
 import { userNameFromIdentity } from "../../core/user-identity.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
+import { renderModalCloseButton, renderModalShell, renderModalState } from "../../features/entity-overlay/modal-host.js";
 import { persistedCommentId, requesterIdentity, technicianIdentity } from "../../features/incidencias-comment-identity/index.js";
 import {
   INCIDENCIA_STATUS_OPTIONS,
@@ -2601,14 +2602,16 @@ function renderHeaderActions(vm = {}) {
           : ""
       }
 
-      <button
-        type="button"
-        data-detail-action="${DETAIL_ACTIONS.CLOSE}"
-        aria-label="Cerrar modal"
-        title="Cerrar ventana"
-        ${disabledAttrs(vm.submitting, vm.submitting)}
-        class="incidencias-modal-close-btn ui-detail-modal-close-btn"
-      >${icon("close")}</button>
+      ${renderModalCloseButton({
+        label: "Cerrar modal",
+        attributes: {
+          "data-detail-action": DETAIL_ACTIONS.CLOSE,
+          title: "Cerrar ventana",
+          disabled: Boolean(vm.submitting),
+          "aria-disabled": vm.submitting ? "true" : false,
+          "aria-busy": vm.submitting ? "true" : false,
+        },
+      })}
     </div>
   `;
 }
@@ -4370,25 +4373,33 @@ function renderTicketBody(
 function renderDetailLoadState(input = {}) {
   const failed = Boolean(input.error);
   const title = failed ? "No se pudo cargar la incidencia" : "Cargando incidencia…";
-  return `
-    <section id="${MODAL_ID}" class="incidencias-modal-root ui-detail-modal-root"
-      data-incidencias-modal-root="true" data-detail-load-state="${failed ? "error" : "loading"}"
-      data-open="true" data-submitting="false" data-ticket-id="${attr(input.loadingId || "")}">
-      <div class="incidencias-modal-overlay ui-detail-modal-overlay" data-incidencias-modal-overlay="true">
-        <div id="${PANEL_ID}" class="incidencias-modal-panel ui-detail-modal-panel"
-          role="dialog" aria-modal="true" aria-labelledby="${TITLE_ID}"
-          aria-describedby="${DESCRIPTION_ID}" tabindex="-1" data-incidencias-modal-panel="true">
-          <header class="incidencias-modal-header ui-detail-modal-header">
-            <h2 id="${TITLE_ID}" class="incidencias-modal-title ui-detail-modal-title">${title}</h2>
-            <button type="button" class="incidencias-modal-close-btn ui-detail-modal-close-btn" data-detail-action="detail-close" aria-label="Cerrar detalle">${icon("close")}</button>
-          </header>
-          <main class="incidencias-modal-body ui-detail-modal-body" data-modal-body="true" data-history-mode="ticket" aria-busy="${failed ? "false" : "true"}">
-            <p id="${DESCRIPTION_ID}" role="${failed ? "alert" : "status"}">${escapeHtml(failed ? input.error : "Preparando el detalle y sus actualizaciones.")}</p>
-            ${failed ? '<button type="button" class="incidencias-modal-confirm-btn" data-detail-action="detail-retry">Reintentar</button>' : ''}
-          </main>
-        </div>
-      </div>
-    </section>`;
+  return renderModalShell({
+    id: MODAL_ID,
+    rootClass: "incidencias-modal-root",
+    rootAttributes: {
+      "data-incidencias-modal-root": "true",
+      "data-detail-load-state": failed ? "error" : "loading",
+      "data-submitting": "false",
+      "data-ticket-id": input.loadingId || "",
+    },
+    overlayAttributes: { "data-incidencias-modal-overlay": "true" },
+    panelId: PANEL_ID,
+    panelAttributes: { "data-incidencias-modal-panel": "true" },
+    labelledBy: TITLE_ID,
+    describedBy: DESCRIPTION_ID,
+    header: `<h2 id="${TITLE_ID}" class="ui-detail-modal-title">${title}</h2>${renderModalCloseButton({
+      label: "Cerrar detalle",
+      attributes: { "data-detail-action": DETAIL_ACTIONS.CLOSE },
+    })}`,
+    bodyAttributes: { "data-history-mode": "ticket", "aria-busy": failed ? "false" : "true" },
+    body: renderModalState({
+      kind: failed ? "error" : "loading",
+      title: failed ? "No se pudo cargar el detalle" : "Cargando detalle…",
+      message: failed ? input.error : "Preparando el detalle y sus actualizaciones.",
+      id: DESCRIPTION_ID,
+      action: failed ? { label: "Reintentar", attributes: { "data-detail-action": "detail-retry" } } : null,
+    }),
+  });
 }
 
 export function renderIncidenciasDetailModal(
@@ -4442,139 +4453,97 @@ export function renderIncidenciasDetailModal(
   const attachments =
     getAttachments(detail);
 
-  return `
-    <section
-      id="${MODAL_ID}"
-      class="incidencias-modal-root ui-detail-modal-root"
-      data-incidencias-modal-root="true"
-      data-template-version="${attr(INCIDENCIAS_MODAL_TEMPLATE_VERSION)}"
-      data-ticket-id="${attr(ticketId)}"
-      data-open="true"
-      data-submitting="${vm.submitting ? "true" : "false"}"
-      data-operation="${attr(vm.operation)}"
-      data-close-confirm-open="${vm.closeConfirmOpen ? "true" : "false"}"
-      data-discard-confirm-open="${vm.discardConfirmOpen ? "true" : "false"}"
-      data-attachment-delete-confirm-open="${vm.attachmentDeleteConfirmOpen ? "true" : "false"}"
-      data-has-draft="${vm.hasDraft ? "true" : "false"}"
-      data-requires-reopen="${vm.requiresReopen ? "true" : "false"}"
-      data-attachment-view-policy="signed-view-only"
+  return renderModalShell({
+    id: MODAL_ID,
+    rootClass: "incidencias-modal-root",
+    rootAttributes: {
+      "data-incidencias-modal-root": "true",
+      "data-template-version": INCIDENCIAS_MODAL_TEMPLATE_VERSION,
+      "data-ticket-id": ticketId,
+      "data-submitting": vm.submitting ? "true" : "false",
+      "data-operation": vm.operation,
+      "data-close-confirm-open": vm.closeConfirmOpen ? "true" : "false",
+      "data-discard-confirm-open": vm.discardConfirmOpen ? "true" : "false",
+      "data-attachment-delete-confirm-open": vm.attachmentDeleteConfirmOpen ? "true" : "false",
+      "data-has-draft": vm.hasDraft ? "true" : "false",
+      "data-requires-reopen": vm.requiresReopen ? "true" : "false",
+      "data-attachment-view-policy": "signed-view-only",
+    },
+    overlayAttributes: { "data-incidencias-modal-overlay": "true" },
+    panelId: PANEL_ID,
+    panelAttributes: { "data-incidencias-modal-panel": "true" },
+    labelledBy: TITLE_ID,
+    describedBy: DESCRIPTION_ID,
+    submitting: vm.submitting,
+    prelude: `${renderDetailConfirmation(vm)}${vm.submitting
+      ? renderLoadingOverlay(
+          vm.operation === "close"
+            ? "Cerrando incidencia..."
+            : vm.operation === "delete-attachment"
+              ? "Eliminando adjunto..."
+              : "Actualizando incidencia..."
+        )
+      : ""}`,
+    header: `
+    <div
+      class="incidencias-modal-hero ui-detail-modal-hero"
+      data-modal-hero="true"
     >
-      <div
-        class="incidencias-modal-overlay ui-detail-modal-overlay"
-        data-incidencias-modal-overlay="true"
-      >
+      ${renderAvatar(detail)}
+
+      <div class="incidencias-modal-hero-content ui-detail-modal-hero-content">
         <div
-          id="${PANEL_ID}"
-          class="${joinClasses(
-            "incidencias-modal-panel ui-detail-modal-panel",
-
-            vm.submitting
-              ? "is-submitting"
-              : ""
-          )}"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="${TITLE_ID}"
-          aria-describedby="${DESCRIPTION_ID}"
-          tabindex="-1"
-          data-incidencias-modal-panel="true"
+          class="incidencias-modal-hero-chips ui-detail-modal-hero-chips"
+          data-modal-header-chips="true"
         >
-          ${renderDetailConfirmation(vm)}
+          ${renderTicketIdChip(
+            ticketId,
+            vm
+          )}
 
+          ${renderChip(
+            statusLabel(status),
+            `status-${statusClass(status)}`
+          )}
+
+          ${renderChip(
+            priorityLabel(priority),
+            `priority-${priorityClass(priority)}`
+          )}
+
+          ${renderChip(
+            displayLabel(category, "General"),
+            "category"
+          )}
+        </div>
+
+        <h2
+          id="${TITLE_ID}"
+          class="ui-detail-modal-title"
+          title="${attr(title)}"
+        >${escapeHtml(title)}</h2>
+
+        <span
+          class="incidencias-modal-updated ui-detail-modal-updated"
+          data-modal-updated="true"
+        >
+          ${escapeHtml(clientName)}
           ${
-            vm.submitting
-              ? renderLoadingOverlay(
-                  vm.operation === "close"
-                    ? "Cerrando incidencia..."
-                    : vm.operation === "delete-attachment"
-                      ? "Eliminando adjunto..."
-                      : "Actualizando incidencia..."
-                )
+            clientEmail
+              ? ` · ${escapeHtml(clientEmail)}`
               : ""
           }
-
-          <header
-            class="incidencias-modal-header ui-detail-modal-header"
-            data-modal-header="true"
-          >
-            <div
-              class="incidencias-modal-hero ui-detail-modal-hero"
-              data-modal-hero="true"
-            >
-              ${renderAvatar(detail)}
-
-              <div class="incidencias-modal-hero-content ui-detail-modal-hero-content">
-                <div
-                  class="incidencias-modal-hero-chips ui-detail-modal-hero-chips"
-                  data-modal-header-chips="true"
-                >
-                  ${renderTicketIdChip(
-                    ticketId,
-                    vm
-                  )}
-
-                  ${renderChip(
-                    statusLabel(status),
-                    `status-${statusClass(status)}`
-                  )}
-
-                  ${renderChip(
-                    priorityLabel(priority),
-                    `priority-${priorityClass(priority)}`
-                  )}
-
-                  ${renderChip(
-                    displayLabel(category, "General"),
-                    "category"
-                  )}
-                </div>
-
-                <h2
-                  id="${TITLE_ID}"
-                  class="incidencias-modal-title ui-detail-modal-title"
-                  title="${attr(title)}"
-                >${escapeHtml(title)}</h2>
-
-                <span
-                  class="incidencias-modal-updated ui-detail-modal-updated"
-                  data-modal-updated="true"
-                >
-                  ${escapeHtml(clientName)}
-                  ${
-                    clientEmail
-                      ? ` · ${escapeHtml(clientEmail)}`
-                      : ""
-                  }
-                  · Última actualización ${escapeHtml(updatedAgo)}
-                </span>
-              </div>
-            </div>
-
-            ${renderHeaderActions(vm)}
-          </header>
-
-          <main
-            class="incidencias-modal-body ui-detail-modal-body"
-            data-modal-body="true"
-            data-history-mode="${vm.historyOpen ? "history" : "ticket"}"
-          >
-            ${
-              vm.historyOpen
-                ? renderHistorySection(vm)
-                : renderTicketBody(
-                    vm,
-                    {
-                      detail,
-                      attachments,
-                      createdAt,
-                    }
-                  )
-            }
-          </main>
-        </div>
+          · Última actualización ${escapeHtml(updatedAgo)}
+        </span>
       </div>
-    </section>
-  `;
+    </div>
+    ${renderHeaderActions(vm)}
+    `,
+    bodyAttributes: { "data-history-mode": vm.historyOpen ? "history" : "ticket" },
+    body: vm.historyOpen
+      ? renderHistorySection(vm)
+      : renderTicketBody(vm, { detail, attachments, createdAt }),
+  });
 }
 
 export function renderIncidenciasDetailModalClosed() {

@@ -553,20 +553,9 @@ def validate_detail_modal_shell_loading(errors: list[str], route_styles: str) ->
         errors.append("src/router/styles.js :: el shell modal viaja con el área privada; ninguna ruta lo carga aparte")
 
 
-def incidencias_detail_on_shell() -> bool:
-    """True once the Incidencias detail renders through the canonical shell (modal-host.js)."""
-    inc_impl = (SRC / "views" / "incidencias" / "incidencias.template.modal.impl.js").read_text(encoding="utf-8")
-    return 'from "../../features/entity-overlay/modal-host.js"' in inc_impl and "renderModalShell(" in inc_impl
-
-
 def validate_shared_detail_modal_v7_contract(errors: list[str]) -> None:
-    """Incidencias and Usuarios share the transverse modal shell authority.
-
-    The Incidencias detail either carries the paired V7 markup or renders through
-    the canonical shell; on the shell it emits no structure of its own.
-    """
+    """Incidencias and Usuarios must share the same transverse modal shell authority."""
     route_styles = (SRC / "router" / "styles.js").read_text(encoding="utf-8")
-    inc_template = (SRC / "views" / "incidencias" / "incidencias.template.modal.js").read_text(encoding="utf-8")
     inc_impl = (SRC / "views" / "incidencias" / "incidencias.template.modal.impl.js").read_text(encoding="utf-8")
     inc_detail = (SRC / "css" / "views" / "incidencias" / "detail.css").read_text(encoding="utf-8")
 
@@ -574,22 +563,21 @@ def validate_shared_detail_modal_v7_contract(errors: list[str]) -> None:
     if not inc_match:
         errors.append("src/router/styles.js :: falta manifest CSS de Incidencias")
 
-    if incidencias_detail_on_shell():
-        for snippet in (
-            'role="dialog"',
-            "ui-detail-modal-overlay",
-            "ui-detail-modal-panel",
-            "incidencias-modal-overlay ",
-            "incidencias-modal-panel ",
-            "incidencias-modal-body ",
-            "incidencias-modal-close-btn",
-        ):
-            if snippet in inc_impl:
-                errors.append(f"src/views/incidencias/incidencias.template.modal.impl.js :: estructura duplicada fuera del shell: {snippet.strip()}")
-    else:
-        for snippet in ("ui-detail-modal-root", "ui-detail-modal-overlay", "ui-detail-modal-panel", "ui-detail-modal-body"):
-            if snippet not in inc_template:
-                errors.append(f"src/views/incidencias/incidencias.template.modal.js :: falta clase compartida: {snippet}")
+    # El detalle emite su estructura con el shell canónico: ninguna copia local
+    # de root/overlay/panel ni de sus atributos ARIA.
+    if 'from "../../features/entity-overlay/modal-host.js"' not in inc_impl or "renderModalShell(" not in inc_impl:
+        errors.append("src/views/incidencias/incidencias.template.modal.impl.js :: el detalle debe renderizarse con renderModalShell")
+    for snippet in (
+        'role="dialog"',
+        "ui-detail-modal-overlay",
+        "ui-detail-modal-panel",
+        "incidencias-modal-overlay ",
+        "incidencias-modal-panel ",
+        "incidencias-modal-body ",
+        "incidencias-modal-close-btn",
+    ):
+        if snippet in inc_impl:
+            errors.append(f"src/views/incidencias/incidencias.template.modal.impl.js :: estructura duplicada fuera del shell: {snippet.strip()}")
 
     for selector in (
         ".incidencias-modal-overlay {",
@@ -602,23 +590,12 @@ def validate_shared_detail_modal_v7_contract(errors: list[str]) -> None:
 
 
 def validate_detail_modal_pairing_v7_contract(errors: list[str]) -> None:
-    """Shared content primitives of the Incidencias detail carry both domain and shared classes.
-
-    Structural pairs are required only while the detail still emits its own
-    structure; on the canonical shell the structure comes from the shell.
-    """
+    """Shared content primitives of the Incidencias detail carry both domain and shared classes; the structure comes from the shell."""
     template = (SRC / "views" / "incidencias" / "incidencias.template.modal.js").read_text(encoding="utf-8")
     required_pairs = (
         "incidencias-modal-chip ui-detail-modal-chip",
         "incidencias-modal-meta-grid ui-detail-modal-meta-grid",
     )
-    if not incidencias_detail_on_shell():
-        required_pairs += (
-            "incidencias-modal-root ui-detail-modal-root",
-            "incidencias-modal-overlay ui-detail-modal-overlay",
-            "incidencias-modal-panel ui-detail-modal-panel",
-            "incidencias-modal-body ui-detail-modal-body",
-        )
     for pair in required_pairs:
         if pair not in template:
             errors.append(f"src/views/incidencias/incidencias.template.modal.js :: falta alias compartido: {pair}")

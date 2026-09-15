@@ -4029,7 +4029,7 @@ export function renderClientesDetailModal(
               type="button"
               data-detail-action="${DETAIL_ACTIONS.CLOSE}"
               aria-label="Cerrar modal"
-              class="clientes-modal-close-btn incidencias-modal-close-btn"
+              class="clientes-modal-close-btn"
             >
               ${icon("close")}
             </button>

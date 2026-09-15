@@ -310,11 +310,9 @@ assert.match(
 );
 
 for (const pair of [
-  "incidencias-modal-root ui-detail-modal-root",
-  "incidencias-modal-overlay ui-detail-modal-overlay",
-  "incidencias-modal-panel ui-detail-modal-panel",
+  'data-modal-shell="ui-modal-shell.v1"',
+  "ui-detail-modal-root incidencias-modal-root",
   "incidencias-modal-chip ui-detail-modal-chip",
-  "incidencias-modal-body ui-detail-modal-body",
   "incidencias-modal-meta-grid ui-detail-modal-meta-grid",
 ]) {
   assert.ok(
@@ -322,14 +320,34 @@ for (const pair of [
     `el render real debe conservar el alias visual compartido: ${pair}`
   );
 }
+for (const [marker, count] of [
+  ['data-modal-overlay="true"', 1],
+  ['role="dialog"', 1],
+  ['data-modal-header="true"', 1],
+  ['data-modal-body="true"', 1],
+  ['data-modal-close="true"', 1],
+]) {
+  assert.equal(
+    ticketHtml.split(marker).length - 1,
+    count,
+    `la estructura la emite el shell canónico exactamente una vez: ${marker}`
+  );
+}
 assert.match(
   ticketHtml,
   /incidencias-modal-chip--status_open ui-detail-modal-chip--status_open/,
   "el modifier dinámico de chip debe conservar la autoridad V7 en el render real"
 );
-assert.ok(
-  INCIDENCIAS_DETAIL_SHARED_VISUAL_CONTRACT.length >= 10,
-  "la frontera estable debe declarar explícitamente el contrato visual delegado"
+assert.deepEqual(
+  [...INCIDENCIAS_DETAIL_SHARED_VISUAL_CONTRACT],
+  [
+    'data-modal-shell="ui-modal-shell.v1"',
+    "ui-detail-modal-root incidencias-modal-root",
+    "incidencias-modal-chip ui-detail-modal-chip",
+    "incidencias-modal-meta-grid ui-detail-modal-meta-grid",
+    "incidencias-modal-chip--${attr(safeModifier)} ui-detail-modal-chip--${attr(safeModifier)}",
+  ],
+  "la frontera estable declara exactamente el contrato visual delegado: shell canónico más primitivas de contenido compartidas"
 );
 
 /* =========================================================

@@ -1,5 +1,5 @@
 import { cleanText, escapeHtml } from "../../core/presentation-text.js";
-import { renderModalCloseButton, renderModalShell, renderModalState } from "./modal-shell.js";
+import { renderModalCloseButton, renderModalShell, renderModalState } from "./modal-host.js";
 export { cleanText };
 
 /* The shared surface owns imports and loading failures only. Entity data

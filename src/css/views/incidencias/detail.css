@@ -1,10 +1,4 @@
 @layer views {
-body.modal-open,
-body.incidencias-detail-open {
-overflow: hidden;
-  overscroll-behavior: none;
-}
-
 .incidencias-modal-id-chip {
 appearance: none;
   min-block-size: var(--ui-detail-modal-chip-height);
@@ -1584,17 +1578,6 @@ display: grid;
 inline-size: 100%;
 }
 }
-
-@keyframes incidencias-detail-overlay-in {
-from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes incidencias-detail-panel-in {
-from { opacity: 0; transform: translateY(8px) scale(.993); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
-
 
 @media (prefers-reduced-motion: reduce) {
 .incidencias-modal-history-jump-btn,

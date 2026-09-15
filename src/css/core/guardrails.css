@@ -441,7 +441,6 @@
 }
 
 :where(
-  .incidencias-modal-body,
   .facturas-modal-body,
   .clientes-modal-body,
   .usuarios-modal-body,

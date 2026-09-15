@@ -48,8 +48,6 @@ const DETAIL_ROOT_SELECTOR =
   "[data-incidencias-modal-root='true']";
 const DETAIL_PANEL_SELECTOR =
   "[data-incidencias-modal-panel='true']";
-const DETAIL_OVERLAY_SELECTOR =
-  "[data-incidencias-modal-overlay='true']";
 const DETAIL_CLOSE_SELECTOR =
   "[data-detail-action='detail-close']";
 const ROUTER_EVENT_HANDLED_KEY =
@@ -317,10 +315,11 @@ function modalTarget(event = null) {
 }
 
 /*
-  Defensa final del cierre. El controller sigue siendo la única autoridad:
-  este listener no muta DOM ni estado, sólo invoca su API pública. Al vivir en
-  capture continúa funcionando aunque otro listener bubble se haya perdido por
-  una carrera de montaje o una extensión del navegador.
+  Defensa final del botón de cierre. El controller sigue siendo la única
+  autoridad: este listener no muta DOM ni estado, sólo invoca su API pública.
+  Al vivir en capture continúa funcionando aunque otro listener bubble se haya
+  perdido por una carrera de montaje o una extensión del navegador. El click
+  exterior no pasa por aquí: lo entrega modal-lifecycle al controller.
 */
 function installIncidenciasModalCloseFailsafe({
   modalHost = null,
@@ -353,22 +352,7 @@ function installIncidenciasModalCloseFailsafe({
       return;
     }
 
-    const explicitClose =
-      target.closest(DETAIL_CLOSE_SELECTOR);
-
-    const overlay =
-      target.closest(DETAIL_OVERLAY_SELECTOR);
-
-    const panel =
-      target.closest(DETAIL_PANEL_SELECTOR);
-
-    const backdropClose = Boolean(
-      overlay &&
-      !panel &&
-      target === overlay
-    );
-
-    if (!explicitClose && !backdropClose) {
+    if (!target.closest(DETAIL_CLOSE_SELECTOR)) {
       return;
     }
 

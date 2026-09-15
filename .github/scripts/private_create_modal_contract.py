@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 APP = (ROOT / "src/css/app.css").read_text(encoding="utf-8")
 COMPOSITION = (ROOT / "src/css/compositions/private-create-modal.css").read_text(encoding="utf-8")
+AUTHORITY = (ROOT / "src/css/components/detail-modal.css").read_text(encoding="utf-8")
 INTERACTIONS = (ROOT / "src/css/compositions/private-admin-interactions.css").read_text(encoding="utf-8")
 INC = (ROOT / "src/views/incidencias/incidencias.template.create.impl.js").read_text(encoding="utf-8")
 FAC = (ROOT / "src/views/facturas/facturas.template.create.js").read_text(encoding="utf-8")
@@ -39,8 +40,8 @@ require(
     "app.css must load the canonical private create modal composition",
 )
 require(COMPOSITION, "INCIDENCIAS CREATE AS VISUAL AUTHORITY", "Shared Create composition must name Incidencias as visual authority")
-require(COMPOSITION, "--private-create-panel-width: min(1080px, calc(100vw - 48px));", "Admin Create modals must share the Incidencias 1080px panel geometry")
-require(COMPOSITION, "grid-template-columns: minmax(0, 1fr) auto;", "Create headers must share the Incidencias title + close geometry")
+require(AUTHORITY, '.ui-detail-modal-root[data-modal-size="form"] {', "Create dialogs share the shell's form size (1080px panel, content-sized height up to the form cap)")
+require(AUTHORITY, "grid-template-columns: minmax(0, 1fr) auto;", "Create headers share the shell's title + close geometry")
 require(INTERACTIONS, ".inc-create-submit {", "Incidencias interaction CSS must remain the Create action authority")
 require(INTERACTIONS, "--btn-primary-bg: #1A73E8;", "Incidencias canonical Create blue must remain #1A73E8")
 require(INTERACTIONS, "--btn-primary-bg-hover: #1967D2;", "Incidencias canonical Create hover must remain #1967D2")
@@ -125,21 +126,23 @@ for snippet, message in [
 reject(CLI, "cli-create-title-icon", "Clientes Create must not keep a decorative header icon absent from Incidencias")
 reject(CLI, "cli-create-close", "Clientes Create must not keep a close control of its own")
 
-# Usuarios must expose the same chrome/state semantics while preserving activation flow.
+# Usuarios renders on the canonical shell and preserves its activation flow.
 for snippet, message in [
+    ("renderModalShell(", "Usuarios Create must render through the canonical modal shell"),
+    ("renderModalCloseButton(", "Usuarios Create must use the shell's close control"),
+    ('height: "auto"', "Usuarios Create keeps the content-sized panel (auto height up to the form cap)"),
     ('class="usr-create-header-copy inc-create-header-copy"', "Usuarios Create must use the canonical title/subtitle header wrapper"),
-    ('class="usr-create-close inc-create-close"', "Usuarios Create must use the canonical close control"),
-    ('class="usr-create-body inc-create-body"', "Usuarios Create must use the canonical single scroll body"),
+    ('bodyClass: "usr-create-body inc-create-body"', "Usuarios Create must keep the canonical form body classes on the shell body"),
     ('class="usr-create-form inc-create-form"', "Usuarios Create must use the canonical form wrapper"),
     ('class="usr-create-actions inc-create-actions"', "Usuarios Create must use the canonical action row"),
     ('class="usr-create-actions-note inc-create-actions-note"', "Usuarios Create must expose the canonical action note"),
     ('class="usr-create-submit inc-create-submit"', "Usuarios Create must expose the canonical submit"),
     ('class="usr-create-loading-overlay inc-create-loading-overlay"', "Usuarios Create must use the canonical loading overlay"),
     ('class="usr-create-loading-copy inc-create-loading-copy"', "Usuarios loading card must use canonical copy structure"),
-    ('data-activation-flow="true"', "Usuarios Create must preserve the activation flow contract"),
+    ('"data-activation-flow": "true"', "Usuarios Create must preserve the activation flow contract"),
 ]:
     require(USR, snippet, message)
-reject(USR, ">\n              ×\n            </button>", "Usuarios Create close control must use the same SVG icon as Incidencias")
+reject(USR, "usr-create-close", "Usuarios Create must not keep a close control of its own")
 
 # All route-level sheets remain low-priority view styles; composition owns parity.
 for name, css in CREATE_STYLES.items():

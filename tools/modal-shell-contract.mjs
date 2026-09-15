@@ -37,8 +37,6 @@ const FIXED_INVENTORY = new Map([
   [".fpc-overlay", pendingShell("src/features/facturas-paid-confirm/style.css", "facturas-confirm-shell")],
   [".clientes-modal-root", pendingShell("src/css/views/clientes/detail.css", "clientes-detail-shell")],
   [".clientes-modal-overlay", pendingShell("src/css/views/clientes/detail.css", "clientes-detail-shell")],
-  [":is( #usuarios-create-modal-root, .usuarios-create-modal-host )", pendingShell("src/css/compositions/private-create-modal.css", "create-modals-shell")],
-  [".usr-create-overlay", pendingShell("src/css/compositions/private-create-modal.css", "create-modals-shell")],
   [".correo-modal-backdrop", pendingShell("src/css/views/correo/index.css", "correo-shell")],
   [".correo-compose", pendingShell("src/css/views/correo/index.css", "correo-shell")],
   [".correo-confirm-overlay", pendingShell("src/css/views/correo/index.css", "correo-shell")],
@@ -89,6 +87,7 @@ const SHELL_CONSUMERS = [
   "src/views/incidencias/incidencias.template.create.impl.js",
   "src/views/facturas/facturas.template.create.js",
   "src/views/clientes/clientes.template.create.js",
+  "src/views/usuarios/usuarios.template.create.js",
 ];
 
 const STRUCTURAL_CLASS = /\.ui-detail-modal-(?:root|overlay|panel|header|body|footer|close-btn)\b/u;

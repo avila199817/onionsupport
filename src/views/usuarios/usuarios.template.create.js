@@ -1,6 +1,6 @@
 import { cleanText, escapeHtml } from "../../core/presentation-text.js";
 import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
-import { createModalHost, renderModalContent } from "../../features/entity-overlay/modal-host.js";
+import { createModalHost, renderModalCloseButton, renderModalContent, renderModalShell } from "../../features/entity-overlay/modal-host.js";
 /* =========================================================
    Onion Support - Usuarios Create Modal
    Archivo: /src/views/usuarios/usuarios.template.create.js
@@ -382,6 +382,7 @@ function getRoot() {
 const modalLifecycle = createModalLifecycle({
   getPanel: () => state.panel,
   onEscape: () => { if (!state.submitting) close(); },
+  onBackdrop: () => { if (!state.submitting) close(); },
   onDetached: () => close(),
   bodyClasses: ['usuarios-modal-open', 'usuarios-create-modal-open'],
 });
@@ -840,243 +841,220 @@ function renderModalHtml() {
   const disabled = state.submitting;
   const empresa = form.tipo === "empresa";
 
-  return `
-    <section
-      id="${ROOT_ID}"
-      class="usuarios-create-modal-host is-open inc-create-root"
-      data-usuarios-create-root="true"
-      data-version="${attr(USUARIOS_CREATE_MODAL_VERSION)}"
-      data-api-version="${attr(USUARIOS_API_VERSION)}"
-      data-create-endpoint="${attr(USUARIOS_CREATE_ENDPOINT)}"
-      data-activation-flow="true"
-      role="presentation"
-    >
-      <div
-        class="usr-create-overlay inc-create-overlay"
-        data-usr-create-action="overlay"
-        aria-hidden="false"
+  return renderModalShell({
+    id: ROOT_ID,
+    rootAttributes: {
+      "data-usuarios-create-root": "true",
+      "data-version": USUARIOS_CREATE_MODAL_VERSION,
+      "data-api-version": USUARIOS_API_VERSION,
+      "data-create-endpoint": USUARIOS_CREATE_ENDPOINT,
+      "data-activation-flow": "true",
+    },
+    panelId: PANEL_ID,
+    panelAttributes: { "data-usuarios-create-panel": "true" },
+    labelledBy: "usuarios-create-title",
+    describedBy: "usuarios-create-description",
+    size: "form",
+    height: "auto",
+    submitting: state.submitting,
+    prelude: renderLoadingOverlay(),
+    header: `
+      <div class="usr-create-header-copy inc-create-header-copy">
+        <h2 id="usuarios-create-title">Crear usuario</h2>
+        <p id="usuarios-create-description">Completa los datos de la cuenta. Se enviará un correo para que el usuario active su acceso.</p>
+      </div>
+      ${renderModalCloseButton({ label: "Cerrar", attributes: { "data-usr-create-action": "close", disabled } })}
+    `,
+    bodyClass: "usr-create-body inc-create-body",
+    body: `
+      ${renderAlert()}
+
+      <form
+        id="${FORM_ID}"
+        class="usr-create-form inc-create-form"
+        data-usuarios-create-form="true"
+        novalidate
       >
-        <div
-          id="${PANEL_ID}"
-          class="usr-create-panel inc-create-panel${state.submitting ? " is-submitting" : ""}"
-          data-usuarios-create-panel="true"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="usuarios-create-title"
-          aria-describedby="usuarios-create-description"
-          tabindex="-1"
-        >
-          <header class="usr-create-header inc-create-header">
-            <div class="usr-create-header-copy inc-create-header-copy">
-              <h2 id="usuarios-create-title">Crear usuario</h2>
-              <p id="usuarios-create-description">Completa los datos de la cuenta. Se enviará un correo para que el usuario active su acceso.</p>
-            </div>
+        <section class="usr-create-main inc-create-block">
+          <div class="usr-create-inline-grid inc-create-grid inc-create-grid--2">
+            ${renderField({
+              label: "Nombre completo",
+              name: "name",
+              value: form.name,
+              placeholder: "Nombre y apellidos",
+              autocomplete: "name",
+              required: true,
+              error: errors.name,
+              disabled,
+              maxLength: 140,
+            })}
 
-            <button
-              type="button"
-              class="usr-create-close inc-create-close"
-              data-usr-create-action="close"
-              aria-label="Cerrar"
-              ${disabled ? "disabled" : ""}
-            >
-              <svg aria-hidden="true" focusable="false" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-            </button>
-          </header>
-
-          <div class="usr-create-body inc-create-body">
-            ${renderAlert()}
-
-            <form
-              id="${FORM_ID}"
-              class="usr-create-form inc-create-form"
-              data-usuarios-create-form="true"
-              novalidate
-            >
-              <section class="usr-create-main inc-create-block">
-                <div class="usr-create-inline-grid inc-create-grid inc-create-grid--2">
-                  ${renderField({
-                    label: "Nombre completo",
-                    name: "name",
-                    value: form.name,
-                    placeholder: "Nombre y apellidos",
-                    autocomplete: "name",
-                    required: true,
-                    error: errors.name,
-                    disabled,
-                    maxLength: 140,
-                  })}
-
-                  ${renderField({
-                    label: "Email",
-                    name: "email",
-                    type: "email",
-                    value: form.email,
-                    placeholder: "usuario@dominio.com",
-                    autocomplete: "email",
-                    required: true,
-                    error: errors.email,
-                    disabled,
-                    maxLength: 254,
-                    hint: "Aquí recibirá el enlace de activación.",
-                  })}
-                </div>
-
-                <div class="usr-create-inline-grid usr-create-inline-grid--3 inc-create-grid inc-create-grid--3">
-                  ${renderField({
-                    label: "Teléfono",
-                    name: "phone",
-                    type: "tel",
-                    value: form.phone,
-                    placeholder: "+34 600 000 000",
-                    autocomplete: "tel",
-                    error: errors.phone,
-                    disabled,
-                    maxLength: 40,
-                  })}
-
-                  ${renderSelect({
-                    label: "Tipo",
-                    name: "tipo",
-                    value: form.tipo,
-                    error: errors.tipo,
-                    disabled,
-                    options: [
-                      { value: "particular", label: "Particular" },
-                      { value: "empresa", label: "Empresa" },
-                    ],
-                  })}
-
-                  ${renderField({
-                    label: "NIF / CIF",
-                    name: "nif",
-                    value: form.nif,
-                    placeholder: empresa ? "Obligatorio para empresa" : "Opcional",
-                    autocomplete: "off",
-                    required: empresa,
-                    error: errors.nif,
-                    disabled,
-                    maxLength: 32,
-                    hint: empresa ? "" : "Solo es obligatorio cuando el tipo es Empresa.",
-                  })}
-                </div>
-
-                <div class="usr-create-inline-grid inc-create-grid inc-create-grid--2">
-                  ${renderField({
-                    label: "Calle / dirección",
-                    name: "calle",
-                    value: form.calle,
-                    placeholder: "Calle, número, piso...",
-                    autocomplete: "street-address",
-                    error: errors.calle,
-                    disabled,
-                    maxLength: 150,
-                  })}
-
-                  ${renderField({
-                    label: "Código postal",
-                    name: "cp",
-                    value: form.cp,
-                    placeholder: "00000",
-                    autocomplete: "postal-code",
-                    error: errors.cp,
-                    disabled,
-                    maxLength: 20,
-                  })}
-                </div>
-
-                <div class="usr-create-inline-grid usr-create-inline-grid--3 inc-create-grid inc-create-grid--3">
-                  ${renderField({
-                    label: "Ciudad",
-                    name: "ciudad",
-                    value: form.ciudad,
-                    placeholder: "Ciudad",
-                    autocomplete: "address-level2",
-                    error: errors.ciudad,
-                    disabled,
-                    maxLength: 100,
-                  })}
-
-                  ${renderField({
-                    label: "Provincia",
-                    name: "provincia",
-                    value: form.provincia,
-                    placeholder: "Provincia",
-                    autocomplete: "address-level1",
-                    error: errors.provincia,
-                    disabled,
-                    maxLength: 100,
-                  })}
-
-                  ${renderField({
-                    label: "País",
-                    name: "pais",
-                    value: form.pais,
-                    placeholder: "País",
-                    autocomplete: "country-name",
-                    error: errors.pais,
-                    disabled,
-                    maxLength: 100,
-                  })}
-                </div>
-
-                <div class="usr-create-inline-grid inc-create-grid inc-create-grid--2">
-                  ${renderSelect({
-                    label: "Privacidad",
-                    name: "privacyMode",
-                    value: String(Boolean(form.privacyMode)),
-                    disabled,
-                    options: [
-                      { value: "false", label: "Modo estándar" },
-                      { value: "true", label: "Modo privacidad" },
-                    ],
-                  })}
-
-                  ${renderSelect({
-                    label: "Apariencia inicial",
-                    name: "darkMode",
-                    value: String(Boolean(form.darkMode)),
-                    disabled,
-                    options: [
-                      { value: "true", label: "Modo oscuro" },
-                      { value: "false", label: "Modo claro" },
-                    ],
-                  })}
-                </div>
-
-                <div
-                  class="usr-create-alert inc-create-alert"
-                  role="note"
-                  data-usuarios-create-activation-note="true"
-                >
-                  <span class="usr-create-alert-icon inc-create-alert-icon" aria-hidden="true">
-                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
-                  </span>
-                  <span class="usr-create-alert-copy inc-create-alert-copy">
-                    <strong>Activación por correo</strong>
-                    <span>El usuario se crea pendiente de activación. El nombre de usuario se genera automáticamente desde su email.</span>
-                  </span>
-                </div>
-              </section>
-
-              <div class="usr-create-actions inc-create-actions">
-                <span class="usr-create-actions-note inc-create-actions-note">El usuario recibirá el enlace de activación en el email indicado.</span>
-                <button
-                  type="submit"
-                  class="usr-create-submit inc-create-submit"
-                  data-usr-create-action="submit"
-                  ${disabled ? "disabled" : ""}
-                >
-                  ${state.submitting ? `<span class="usr-create-spinner inc-create-spinner" aria-hidden="true"></span><span>Creando...</span>` : `<span>Crear y enviar activación</span>`}
-                </button>
-              </div>
-            </form>
+            ${renderField({
+              label: "Email",
+              name: "email",
+              type: "email",
+              value: form.email,
+              placeholder: "usuario@dominio.com",
+              autocomplete: "email",
+              required: true,
+              error: errors.email,
+              disabled,
+              maxLength: 254,
+              hint: "Aquí recibirá el enlace de activación.",
+            })}
           </div>
 
-          ${renderLoadingOverlay()}
+          <div class="usr-create-inline-grid usr-create-inline-grid--3 inc-create-grid inc-create-grid--3">
+            ${renderField({
+              label: "Teléfono",
+              name: "phone",
+              type: "tel",
+              value: form.phone,
+              placeholder: "+34 600 000 000",
+              autocomplete: "tel",
+              error: errors.phone,
+              disabled,
+              maxLength: 40,
+            })}
+
+            ${renderSelect({
+              label: "Tipo",
+              name: "tipo",
+              value: form.tipo,
+              error: errors.tipo,
+              disabled,
+              options: [
+                { value: "particular", label: "Particular" },
+                { value: "empresa", label: "Empresa" },
+              ],
+            })}
+
+            ${renderField({
+              label: "NIF / CIF",
+              name: "nif",
+              value: form.nif,
+              placeholder: empresa ? "Obligatorio para empresa" : "Opcional",
+              autocomplete: "off",
+              required: empresa,
+              error: errors.nif,
+              disabled,
+              maxLength: 32,
+              hint: empresa ? "" : "Solo es obligatorio cuando el tipo es Empresa.",
+            })}
+          </div>
+
+          <div class="usr-create-inline-grid inc-create-grid inc-create-grid--2">
+            ${renderField({
+              label: "Calle / dirección",
+              name: "calle",
+              value: form.calle,
+              placeholder: "Calle, número, piso...",
+              autocomplete: "street-address",
+              error: errors.calle,
+              disabled,
+              maxLength: 150,
+            })}
+
+            ${renderField({
+              label: "Código postal",
+              name: "cp",
+              value: form.cp,
+              placeholder: "00000",
+              autocomplete: "postal-code",
+              error: errors.cp,
+              disabled,
+              maxLength: 20,
+            })}
+          </div>
+
+          <div class="usr-create-inline-grid usr-create-inline-grid--3 inc-create-grid inc-create-grid--3">
+            ${renderField({
+              label: "Ciudad",
+              name: "ciudad",
+              value: form.ciudad,
+              placeholder: "Ciudad",
+              autocomplete: "address-level2",
+              error: errors.ciudad,
+              disabled,
+              maxLength: 100,
+            })}
+
+            ${renderField({
+              label: "Provincia",
+              name: "provincia",
+              value: form.provincia,
+              placeholder: "Provincia",
+              autocomplete: "address-level1",
+              error: errors.provincia,
+              disabled,
+              maxLength: 100,
+            })}
+
+            ${renderField({
+              label: "País",
+              name: "pais",
+              value: form.pais,
+              placeholder: "País",
+              autocomplete: "country-name",
+              error: errors.pais,
+              disabled,
+              maxLength: 100,
+            })}
+          </div>
+
+          <div class="usr-create-inline-grid inc-create-grid inc-create-grid--2">
+            ${renderSelect({
+              label: "Privacidad",
+              name: "privacyMode",
+              value: String(Boolean(form.privacyMode)),
+              disabled,
+              options: [
+                { value: "false", label: "Modo estándar" },
+                { value: "true", label: "Modo privacidad" },
+              ],
+            })}
+
+            ${renderSelect({
+              label: "Apariencia inicial",
+              name: "darkMode",
+              value: String(Boolean(form.darkMode)),
+              disabled,
+              options: [
+                { value: "true", label: "Modo oscuro" },
+                { value: "false", label: "Modo claro" },
+              ],
+            })}
+          </div>
+
+          <div
+            class="usr-create-alert inc-create-alert"
+            role="note"
+            data-usuarios-create-activation-note="true"
+          >
+            <span class="usr-create-alert-icon inc-create-alert-icon" aria-hidden="true">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+            </span>
+            <span class="usr-create-alert-copy inc-create-alert-copy">
+              <strong>Activación por correo</strong>
+              <span>El usuario se crea pendiente de activación. El nombre de usuario se genera automáticamente desde su email.</span>
+            </span>
+          </div>
+        </section>
+
+        <div class="usr-create-actions inc-create-actions">
+          <span class="usr-create-actions-note inc-create-actions-note">El usuario recibirá el enlace de activación en el email indicado.</span>
+          <button
+            type="submit"
+            class="usr-create-submit inc-create-submit"
+            data-usr-create-action="submit"
+            ${disabled ? "disabled" : ""}
+          >
+            ${state.submitting ? `<span class="usr-create-spinner inc-create-spinner" aria-hidden="true"></span><span>Creando...</span>` : `<span>Crear y enviar activación</span>`}
+          </button>
         </div>
-      </div>
-    </section>
-  `;
+      </form>
+    `,
+  });
 }
 
 /* =========================================================
@@ -1120,11 +1098,7 @@ function render({ preserveFocus = true } = {}) {
   if (!host) return false;
   unbind();
   const rendered = renderModalContent(host, renderModalHtml(), {
-    rootSelector: `#${ROOT_ID}`,
-    overlaySelector: "[data-usr-create-action='overlay']",
-    panelSelector: "[data-usuarios-create-panel='true']",
     focusAttributes: preserveFocus ? ["data-usr-create-field"] : [],
-    scrollSelector: ".usr-create-body, .inc-create-body",
   });
   state.root = rendered.root;
   state.panel = rendered.panel;
@@ -1195,14 +1169,6 @@ function bind() {
 
       if (action === "close") {
         event.preventDefault();
-        close();
-        return;
-      }
-
-      if (
-        action === "overlay" &&
-        target === actionNode
-      ) {
         close();
       }
     };

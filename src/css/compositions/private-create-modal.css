@@ -5,10 +5,11 @@
    CANÓNICO · INCIDENCIAS CREATE AS VISUAL AUTHORITY · 2026-08-27
 
    Contrato:
-   - Incidencias Create es la fuente visual autoritativa.
-   - Facturas, Clientes y Usuarios reutilizan exactamente el mismo chrome:
-     overlay, panel, header, cierre, scroll, bloques, campos, alertas,
-     acciones, submit, loading y responsive.
+   - Incidencias Create es la fuente visual autoritativa del contenido de alta:
+     bloques, campos, alertas, acciones, submit, loading y responsive.
+   - La estructura (root, overlay, panel, header, cierre, scroll) la aporta el
+     shell canónico (components/detail-modal.css) en Incidencias, Facturas y
+     Clientes; Usuarios sigue recibiendo ese chrome desde aquí hasta su migración.
    - Cada dominio conserva únicamente sus campos, copy y lógica de negocio.
    - Esta composición vive DESPUÉS de @layer views para impedir drift entre
      cuatro hojas de ruta independientes sin recurrir a !important.
@@ -28,22 +29,18 @@
 ========================================================= */
 
 :is(
-  .cli-create-root,
   #usuarios-create-modal-root,
   .usuarios-create-modal-host
 ),
 :is(
-  .cli-create-root,
   #usuarios-create-modal-root,
   .usuarios-create-modal-host
 ) *,
 :is(
-  .cli-create-root,
   #usuarios-create-modal-root,
   .usuarios-create-modal-host
 ) *::before,
 :is(
-  .cli-create-root,
   #usuarios-create-modal-root,
   .usuarios-create-modal-host
 ) *::after {
@@ -51,7 +48,6 @@
 }
 
 :is(
-  .cli-create-root,
   #usuarios-create-modal-root,
   .usuarios-create-modal-host
 ) {
@@ -85,10 +81,7 @@ body.usuarios-create-modal-open {
    OVERLAY / PANEL
 ========================================================= */
 
-:is(
-  .cli-create-overlay,
-  .usr-create-overlay
-) {
+.usr-create-overlay {
   position: fixed;
   inset: 0;
   z-index: 0;
@@ -106,10 +99,7 @@ body.usuarios-create-modal-open {
   animation: private-create-overlay-in 140ms ease-out both;
 }
 
-:is(
-  .cli-create-panel,
-  .usr-create-panel
-) {
+.usr-create-panel {
   position: relative;
   isolation: isolate;
   inline-size: var(--private-create-panel-width);
@@ -135,10 +125,7 @@ body.usuarios-create-modal-open {
   --ui-detail-modal-panel-width: var(--private-create-panel-client-width);
 }
 
-:is(
-  .cli-create-panel,
-  .usr-create-panel
-):focus-visible {
+.usr-create-panel:focus-visible {
   box-shadow: var(--shadow-modal, var(--panel-shadow)), var(--focus-ring);
 }
 
@@ -146,10 +133,7 @@ body.usuarios-create-modal-open {
    HEADER
 ========================================================= */
 
-:is(
-  .cli-create-header,
-  .usr-create-header
-) {
+.usr-create-header {
   position: relative;
   z-index: 3;
   display: grid;
@@ -173,10 +157,7 @@ body.usuarios-create-modal-open {
   gap: 4px;
 }
 
-:is(
-  .cli-create-header,
-  .usr-create-header
-) h2 {
+.usr-create-header h2 {
   margin: 0;
   color: var(--text-strong);
   font-size: clamp(24px, 2.2vw, 34px);
@@ -186,10 +167,7 @@ body.usuarios-create-modal-open {
   text-wrap: balance;
 }
 
-:is(
-  .cli-create-header,
-  .usr-create-header
-) p {
+.usr-create-header p {
   max-inline-size: 74ch;
   margin: 0;
   color: var(--text-muted);
@@ -198,10 +176,7 @@ body.usuarios-create-modal-open {
   line-height: 1.4;
 }
 
-:is(
-  .cli-create-close,
-  .usr-create-close
-) {
+.usr-create-close {
   appearance: none;
   inline-size: 42px;
   block-size: 42px;
@@ -225,26 +200,17 @@ body.usuarios-create-modal-open {
     opacity var(--duration-fast) var(--ease-standard);
 }
 
-:is(
-  .cli-create-close,
-  .usr-create-close
-) svg {
+.usr-create-close svg {
   inline-size: 17px;
   block-size: 17px;
 }
 
-:is(
-  .cli-create-close,
-  .usr-create-close
-):focus-visible {
+.usr-create-close:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
 
-:is(
-  .cli-create-close,
-  .usr-create-close
-):disabled {
+.usr-create-close:disabled {
   cursor: not-allowed;
   opacity: .48;
 }
@@ -253,10 +219,7 @@ body.usuarios-create-modal-open {
    BODY / FORM — SINGLE SCROLL ROOT
 ========================================================= */
 
-:is(
-  .cli-create-body,
-  .usr-create-body
-) {
+.usr-create-body {
   min-inline-size: 0;
   min-block-size: 0;
   overflow-x: hidden;
@@ -268,24 +231,15 @@ body.usuarios-create-modal-open {
   padding: clamp(18px, 1.6vw, 26px) clamp(18px, 2vw, 30px) clamp(22px, 2vw, 32px);
 }
 
-:is(
-  .cli-create-body,
-  .usr-create-body
-)::-webkit-scrollbar {
+.usr-create-body::-webkit-scrollbar {
   inline-size: var(--scrollbar-size, 9px);
 }
 
-:is(
-  .cli-create-body,
-  .usr-create-body
-)::-webkit-scrollbar-track {
+.usr-create-body::-webkit-scrollbar-track {
   background: transparent;
 }
 
-:is(
-  .cli-create-body,
-  .usr-create-body
-)::-webkit-scrollbar-thumb {
+.usr-create-body::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: var(--radius-pill);
   background: var(--scrollbar-thumb);
@@ -891,34 +845,31 @@ body.usuarios-create-modal-open {
    LIGHT / RESPONSIVE
 ========================================================= */
 
-[data-theme="light"] :is(
-  .cli-create-overlay,
-  .usr-create-overlay
-) {
+[data-theme="light"] .usr-create-overlay {
   background: rgba(15, 23, 42, .46);
 }
 
 @media (max-width: 760px) {
-  :is(.cli-create-overlay, .usr-create-overlay) {
+  .usr-create-overlay {
     padding: 10px;
   }
 
-  :is(.cli-create-panel, .usr-create-panel) {
+  .usr-create-panel {
     inline-size: 100%;
     max-inline-size: 100%;
     max-block-size: calc(100dvh - 20px);
     border-radius: var(--radius-lg);
   }
 
-  :is(.cli-create-header, .usr-create-header) {
+  .usr-create-header {
     padding: 15px 16px;
   }
 
-  :is(.cli-create-header, .usr-create-header) h2 {
+  .usr-create-header h2 {
     font-size: clamp(22px, 7vw, 29px);
   }
 
-  :is(.cli-create-body, .usr-create-body) {
+  .usr-create-body {
     padding: 16px;
   }
 
@@ -955,22 +906,22 @@ body.usuarios-create-modal-open {
 }
 
 @media (max-width: 480px) {
-  :is(.cli-create-overlay, .usr-create-overlay) {
+  .usr-create-overlay {
     padding: 0;
   }
 
-  :is(.cli-create-panel, .usr-create-panel) {
+  .usr-create-panel {
     block-size: 100dvh;
     max-block-size: 100dvh;
     border-inline: 0;
     border-radius: 0;
   }
 
-  :is(.cli-create-header, .usr-create-header) {
+  .usr-create-header {
     padding-inline: 14px;
   }
 
-  :is(.cli-create-body, .usr-create-body) {
+  .usr-create-body {
     padding: 14px;
   }
 
@@ -1004,11 +955,8 @@ body.usuarios-create-modal-open {
 
 @media (prefers-reduced-motion: reduce) {
   :is(
-    .cli-create-overlay,
     .usr-create-overlay,
-    .cli-create-panel,
     .usr-create-panel,
-    .cli-create-close,
     .usr-create-close,
     .inc-create-submit,
     .cli-create-submit,
@@ -1023,9 +971,7 @@ body.usuarios-create-modal-open {
 
 @media (forced-colors: active) {
   :is(
-    .cli-create-panel,
     .usr-create-panel,
-    .cli-create-close,
     .usr-create-close,
     .inc-create-input,
     .cli-create-input,
@@ -1042,7 +988,6 @@ body.usuarios-create-modal-open {
 
 @media print {
   :is(
-    .cli-create-root,
     #usuarios-create-modal-root,
     .usuarios-create-modal-host
   ) {

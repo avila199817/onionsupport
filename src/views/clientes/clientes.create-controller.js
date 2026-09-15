@@ -41,10 +41,7 @@ export const CLIENTES_CREATE_CONTROLLER_VERSION =
 const USER_SEARCH_DEBOUNCE_MS = 220;
 const USER_SEARCH_MIN_LENGTH = 2;
 const USER_SEARCH_LIMIT = 8;
-const CREATE_MODAL_ROOT_SELECTOR = "[data-clientes-create-root='true']";
 const CREATE_MODAL_PANEL_SELECTOR = "[data-clientes-create-modal-panel='true']";
-const CREATE_MODAL_OVERLAY_SELECTOR = "[data-clientes-create-modal-overlay='true']";
-const CREATE_MODAL_BODY_SELECTOR = ".cli-create-body, .inc-create-body";
 
 function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
@@ -263,6 +260,9 @@ export function createClientesCreateController({
     onEscape: () => {
       if (!createModal.submitting) close();
     },
+    onBackdrop: () => {
+      if (!createModal.submitting) close();
+    },
     onDetached: () => close(),
     bodyClasses: ["clientes-modal-open", "clientes-create-open"],
   });
@@ -353,13 +353,7 @@ export function createClientesCreateController({
       role: cleanText(getRole(), "user"),
       user: getUser(),
     });
-    renderModalContent(host, html, {
-      rootSelector: CREATE_MODAL_ROOT_SELECTOR,
-      overlaySelector: CREATE_MODAL_OVERLAY_SELECTOR,
-      panelSelector: CREATE_MODAL_PANEL_SELECTOR,
-      focusAttributes: ["data-field", "name"],
-      scrollSelector: CREATE_MODAL_BODY_SELECTOR,
-    });
+    renderModalContent(host, html, { focusAttributes: ["data-field", "name"] });
 
     if (firstModalPaint) {
       firstModalPaint = false;
@@ -618,13 +612,6 @@ export function createClientesCreateController({
 
   function handleModalClick(event) {
     if (!modalHost?.contains(event.target)) return;
-
-    const overlay = event.target?.closest?.(CREATE_MODAL_OVERLAY_SELECTOR);
-    if (overlay && event.target === overlay && !createModal.submitting) {
-      event.preventDefault();
-      close();
-      return;
-    }
 
     const actionable = event.target?.closest?.("[data-create-action]");
     const action = cleanText(

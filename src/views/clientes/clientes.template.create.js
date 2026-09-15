@@ -1,5 +1,6 @@
 import { cleanText, escapeHtml } from "../../core/presentation-text.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
+import { renderModalCloseButton, renderModalShell } from "../../features/entity-overlay/modal-host.js";
 /* =========================================================
    Onion Support - Clientes Create Template
    Archivo: /src/views/clientes/clientes.template.create.js
@@ -647,17 +648,10 @@ function icon(
     `aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
 
   const icons = {
-    close:
-      `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
-
     client:
       `<svg ${common}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
 
-    building:
-      `<svg ${common}><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9h.01"/><path d="M9 13h.01"/><path d="M9 17h.01"/></svg>`,
 
-    user:
-      `<svg ${common}><path d="M12 11.25a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/><path d="M4.75 20.75a7.25 7.25 0 0 1 14.5 0"/></svg>`,
 
     search:
       `<svg ${common}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
@@ -2906,83 +2900,72 @@ export function renderClientesCreateModal(
   const vm = buildVm(input);
   if (!vm.open) return "";
 
-  return `
-    <section
-      id="${MODAL_ID}"
-      data-clientes-create-root="true"
-      data-clientes-modal="create"
-      data-open="true"
-      data-template-version="${attr(CLIENTES_CREATE_TEMPLATE_VERSION)}"
-      class="cli-create-root inc-create-root"
-      role="presentation"
-    >
-      <div
-        class="cli-create-overlay inc-create-overlay"
-        data-clientes-create-modal-overlay="true"
-      >
-        <div
-          id="${PANEL_ID}"
-          data-clientes-create-modal-panel="true"
-          class="cli-create-panel inc-create-panel"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="clientes-create-title"
-          aria-describedby="clientes-create-subtitle"
-          tabindex="-1"
-        >
-          <header class="cli-create-header inc-create-header">
-            <div class="cli-create-header-copy inc-create-header-copy">
-              <h2 id="clientes-create-title">Crear cliente</h2>
-              <p id="clientes-create-subtitle">Vincula un usuario real y completa los datos fiscales, de contacto y dirección del cliente.</p>
-            </div>
-
-            <button
-              type="button"
-              class="cli-create-close inc-create-close"
-              data-create-action="${CREATE_ACTIONS.CLOSE}"
-              aria-label="Cerrar"
-              ${disabledAttrs(vm.submitting, vm.submitting)}
-            >${icon("close")}</button>
-          </header>
-
-          <div class="cli-create-body inc-create-body">
-            ${vm.successMessage ? renderAlert("success", "Cliente creado.", vm.successMessage) : ""}
-            ${vm.serverError ? renderAlert("error", "No se pudo crear el cliente.", vm.serverError) : ""}
-
-            <form
-              id="${FORM_ID}"
-              data-clientes-create-form="true"
-              novalidate
-              class="cli-create-form inc-create-form"
-              autocomplete="off"
-            >
-              ${renderAdminUserSearch(vm)}
-              ${renderFiscalBlock(vm)}
-              ${renderContactBlock(vm)}
-              ${renderAddressBlock(vm)}
-
-              <div class="cli-create-actions inc-create-actions">
-                <span class="cli-create-actions-note inc-create-actions-note">El cliente quedará vinculado al usuario seleccionado y disponible en las vistas privadas.</span>
-                <button
-                  id="clientes-create-submit-btn"
-                  type="submit"
-                  data-create-action="${CREATE_ACTIONS.SUBMIT}"
-                  ${disabledAttrs(vm.submitting || !vm.admin, vm.submitting)}
-                  class="cli-create-submit inc-create-submit"
-                >
-                  <span class="cli-create-submit-inner inc-create-submit-inner">
-                    ${vm.submitting ? `<span class="cli-create-spinner inc-create-spinner" aria-hidden="true"></span>Creando...` : "Crear cliente"}
-                  </span>
-                </button>
-              </div>
-            </form>
-          </div>
-
-          ${vm.submitting ? renderLoadingOverlay("Creando cliente y sincronizando usuario...") : ""}
-        </div>
+  return renderModalShell({
+    id: MODAL_ID,
+    rootClass: "cli-create-root",
+    rootAttributes: {
+      "data-clientes-create-root": "true",
+      "data-clientes-modal": "create",
+      "data-template-version": CLIENTES_CREATE_TEMPLATE_VERSION,
+    },
+    overlayAttributes: { "data-clientes-create-modal-overlay": "true" },
+    panelId: PANEL_ID,
+    panelAttributes: { "data-clientes-create-modal-panel": "true" },
+    labelledBy: "clientes-create-title",
+    describedBy: "clientes-create-subtitle",
+    size: "form",
+    height: "auto",
+    submitting: vm.submitting,
+    prelude: vm.submitting ? renderLoadingOverlay("Creando cliente y sincronizando usuario...") : "",
+    header: `
+      <div class="cli-create-header-copy inc-create-header-copy">
+        <h2 id="clientes-create-title">Crear cliente</h2>
+        <p id="clientes-create-subtitle">Vincula un usuario real y completa los datos fiscales, de contacto y dirección del cliente.</p>
       </div>
-    </section>
-  `;
+      ${renderModalCloseButton({
+        label: "Cerrar",
+        attributes: {
+          "data-create-action": CREATE_ACTIONS.CLOSE,
+          disabled: Boolean(vm.submitting),
+          "aria-disabled": vm.submitting ? "true" : null,
+          "aria-busy": vm.submitting ? "true" : null,
+        },
+      })}
+    `,
+    bodyClass: "cli-create-body inc-create-body",
+    body: `
+      ${vm.successMessage ? renderAlert("success", "Cliente creado.", vm.successMessage) : ""}
+      ${vm.serverError ? renderAlert("error", "No se pudo crear el cliente.", vm.serverError) : ""}
+
+      <form
+        id="${FORM_ID}"
+        data-clientes-create-form="true"
+        novalidate
+        class="cli-create-form inc-create-form"
+        autocomplete="off"
+      >
+        ${renderAdminUserSearch(vm)}
+        ${renderFiscalBlock(vm)}
+        ${renderContactBlock(vm)}
+        ${renderAddressBlock(vm)}
+
+        <div class="cli-create-actions inc-create-actions">
+          <span class="cli-create-actions-note inc-create-actions-note">El cliente quedará vinculado al usuario seleccionado y disponible en las vistas privadas.</span>
+          <button
+            id="clientes-create-submit-btn"
+            type="submit"
+            data-create-action="${CREATE_ACTIONS.SUBMIT}"
+            ${disabledAttrs(vm.submitting || !vm.admin, vm.submitting)}
+            class="cli-create-submit inc-create-submit"
+          >
+            <span class="cli-create-submit-inner inc-create-submit-inner">
+              ${vm.submitting ? `<span class="cli-create-spinner inc-create-spinner" aria-hidden="true"></span>Creando...` : "Crear cliente"}
+            </span>
+          </button>
+        </div>
+      </form>
+    `,
+  });
 }
 
 export function renderClientesCreateModalClosed() {

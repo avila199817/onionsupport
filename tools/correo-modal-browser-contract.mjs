@@ -143,8 +143,9 @@ try {
     for (const [mode, method] of [["reply", "reply"], ["reply-all", "replyAll"], ["forward", "forward"]]) {
       await page.locator(action(mode)).click();
       await page.waitForFunction((expected) => document.querySelector("[data-correo-compose-form]")?.dataset.correoComposeMode === expected, mode);
+      // The controller focuses the first field one frame after mounting; fill only once that frame has landed.
+      await page.waitForFunction((field) => document.activeElement?.name === field, mode === "forward" ? "to" : "body");
       if (mode === "forward") await page.locator(`${composer} input[name='to']`).fill("FORWARD@example.test");
-      else await page.waitForFunction(() => document.activeElement?.name === "body");
       await page.locator(body).fill(`Texto ${mode}\nSegunda línea`);
       await page.locator(submit).click();
       await waitClosed();

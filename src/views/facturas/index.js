@@ -84,11 +84,9 @@ const DETAIL_MODAL_HOST_ID = "facturas-detail-root";
 const DETAIL_MODAL_HOST_SELECTOR = `#${DETAIL_MODAL_HOST_ID}`;
 const DETAIL_MODAL_ROOT_SELECTOR = "[data-facturas-detail-root='true']";
 const DETAIL_MODAL_PANEL_SELECTOR =
-  "[data-facturas-detail-modal='true'], [data-role='facturas-detail-modal']";
+  "[data-facturas-detail-modal='true']";
 const DETAIL_MODAL_SCROLL_SELECTOR =
   "[data-facturas-detail-body-shell='true']";
-const DETAIL_MODAL_OVERLAY_SELECTOR =
-  "[data-facturas-detail-overlay='true']";
 
 const CREATE_MODAL_HOST_ID = "facturas-create-modal-host";
 const CREATE_MODAL_HOST_SELECTOR = `#${CREATE_MODAL_HOST_ID}`;
@@ -2049,6 +2047,9 @@ function createFacturasController(host = null, context = {}) {
   const modalLifecycle = createModalLifecycle({
     getPanel: currentModalPanel,
     onEscape: () => detailModalIsOpen() ? closeDetailModal() : closeCreateModal(),
+    // A click on the shell backdrop is a close request; closeDetailModal keeps
+    // its busy guard (a payment in flight never closes).
+    onBackdrop: () => detailModalIsOpen() ? closeDetailModal() : false,
   });
 
   function syncModalBodyState() {
@@ -3197,14 +3198,11 @@ function createFacturasController(host = null, context = {}) {
     const target = ensureDetailModalHost();
     if (!target) return false;
 
+    // The detail is a shell consumer: the host patches by the shell's markers.
     const rendered = renderModalContent(target, renderFacturasDetailModal({
       ...detailModal,
       admin: isAdmin(),
     }), {
-      rootSelector: DETAIL_MODAL_ROOT_SELECTOR,
-      overlaySelector: DETAIL_MODAL_OVERLAY_SELECTOR,
-      panelSelector: DETAIL_MODAL_PANEL_SELECTOR,
-      scrollSelector: DETAIL_MODAL_SCROLL_SELECTOR,
       focusAttributes: ["id", "name", "data-facturas-action", "href"],
       forceMount: options.forceShell === true,
     });
@@ -5959,21 +5957,6 @@ function createFacturasController(host = null, context = {}) {
       return;
     }
 
-    const detailOverlay = target.closest(
-      DETAIL_MODAL_OVERLAY_SELECTOR
-    );
-
-    const detailPanel = target.closest(
-      DETAIL_MODAL_PANEL_SELECTOR
-    );
-
-    if (
-      detailOverlay &&
-      !detailPanel &&
-      target === detailOverlay
-    ) {
-      closeDetailModal();
-    }
   }
 
   function onInput(event) {

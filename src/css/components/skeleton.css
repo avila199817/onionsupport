@@ -67,8 +67,7 @@
   [data-correo-host="true"] .correo-workspace--boot .correo-boot-title,
   [data-correo-host="true"] .correo-message-skeleton > span,
   [data-correo-host="true"] .correo-message-skeleton i,
-  [data-correo-host="true"] .correo-reader-skeleton-block,
-  .facturas-detail-skeleton
+  [data-correo-host="true"] .correo-reader-skeleton-block
 ) {
   position: relative;
   display: block;
@@ -307,19 +306,6 @@
 }
 
 /* =========================================================
-   DETAIL / REGION SKELETON
-========================================================= */
-
-.facturas-detail-skeleton {
-  border: 1px solid var(--border-default);
-  border-radius: var(--fdm-section-radius, var(--ui-skeleton-radius-block));
-}
-
-.facturas-detail-skeleton--hero {
-  border-color: var(--border-info);
-}
-
-/* =========================================================
    ACCESSIBLE STATUS UTILITY
 ========================================================= */
 
@@ -438,7 +424,6 @@
     [data-correo-host="true"] .correo-message-skeleton > span,
     [data-correo-host="true"] .correo-message-skeleton i,
     [data-correo-host="true"] .correo-reader-skeleton-block,
-    .facturas-detail-skeleton,
     .ui-progress-spinner,
     .incidencias-spinner,
     .incidencias-inline-spinner,
@@ -484,8 +469,7 @@
     [data-correo-host="true"] .correo-workspace--boot .correo-boot-title,
     [data-correo-host="true"] .correo-message-skeleton > span,
     [data-correo-host="true"] .correo-message-skeleton i,
-    [data-correo-host="true"] .correo-reader-skeleton-block,
-    .facturas-detail-skeleton
+    [data-correo-host="true"] .correo-reader-skeleton-block
   ) {
     forced-color-adjust: none;
     background: GrayText;

@@ -35,7 +35,6 @@ for forbidden in (
     ".usr-create-overlay",
     ".ui-detail-modal-overlay",
     ".clientes-detail-overlay",
-    ".facturas-detail-overlay",
 ):
     if forbidden in parity:
         fail(f"listing foundation must not own Create/Detail selector {forbidden}")

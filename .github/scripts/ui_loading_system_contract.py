@@ -72,7 +72,6 @@ if not errors:
         ".home-skeleton,",
         ".correo-message-skeleton > span",
         ".correo-reader-skeleton-block",
-        ".facturas-detail-skeleton",
         "@keyframes ui-skeleton-shimmer",
         "@keyframes ui-loading-spin",
         "@media (prefers-reduced-motion: reduce)",
@@ -120,7 +119,7 @@ if not errors:
     skeleton_keyframes = re.compile(r"@keyframes\s+[\w-]*(?:skeleton|shimmer)[\w-]*", re.I)
     placeholder_selector = re.compile(
         r"\.(?:(?:ui|incidencias|facturas|clientes|usuarios|cuenta|home)-skeleton"
-        r"|facturas-detail-skeleton|home-panel-loading-(?:icon|title|meta|date|amount)"
+        r"|home-panel-loading-(?:icon|title|meta|date|amount)"
         r"|correo-boot-(?:account|line|title)|correo-reader-skeleton-block"
         r"|correo-message-skeleton[^,]*(?: > span| i))"
     )

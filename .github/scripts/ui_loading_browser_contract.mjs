@@ -61,7 +61,6 @@ ${spinners.map(([klass, height], i) => `<div class="sample"><span id="p${i}" dat
 <span class="correo-boot-title" data-kind="skeleton" data-height="38"></span>
 </div><div class="correo-message-skeleton"><span data-kind="skeleton" data-height="34"></span><div><i data-kind="skeleton" data-height="7"></i></div></div></div>
 <div class="sample"><span class="incidencias-skeleton incidencias-skeleton--main" data-kind="silhouette" data-height="105"></span></div>
-<div class="sample"><div class="facturas-detail-skeleton" data-kind="skeleton"></div></div>
 <div class="sample"><span class="animate-spin" data-kind="spinner"></span></div>
 <div class="sample"><svg class="correo-spin" data-kind="spinner" width="18" height="18" data-height="18" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg></div>
 <div class="sample"><span class="public-support-submit-spinner" data-kind="spinner" data-height-mobile="58" data-height="66"></span></div>

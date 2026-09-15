@@ -190,7 +190,8 @@ reject(CREATE_STYLE, ".fac-create-avatar--tone-", "Create invoice CSS must not o
 # Facturas resend UX must stay inside the product visual system, never browser chrome.
 reject(INDEX, "¿Quieres volver a enviarla?", "Resend confirmation must not use the browser-native confirm dialog")
 require(INDEX, "function confirmFacturaResend", "Resend must expose an accessible custom confirmation flow")
-require(INDEX, 'dialog.setAttribute("role", "alertdialog")', "Resend confirmation must be an alertdialog")
+require(INDEX, 'role: "alertdialog"', "Resend and payment confirmations are alert dialogs rendered through the canonical shell")
+require(INDEX, 'size: "confirm"', "Confirmations use the shell's confirm size")
 # Domain content delegates mounting/settlement to the private helper; only the
 # established lifecycle owns keyboard, focus and scroll interactions.
 CONFIRMATION = (ROOT / "src/features/entity-overlay/modal-confirmation.js").read_text(encoding="utf-8")
@@ -205,8 +206,7 @@ require(CONFIRMATION, "lifecycle.activate({ opener })", "Confirmation must regis
 require(CONFIRMATION, "lifecycle.deactivate({ restoreFocus: false })", "Cleanup must release shared interaction before restoring owner focus")
 require(CONFIRMATION, "restoreModalFocus(opener)", "Confirmation must return focus through the shared guard")
 reject(INDEX, "window.confirm(", "Payment and resend must both use the product confirmation")
-require(STYLE, ".facturas-resend-confirm-overlay", "Resend confirmation must use the Facturas themed overlay")
-require(STYLE, ".facturas-resend-confirm-dialog", "Resend confirmation must use the Facturas themed dialog")
+require(CONFIRMATION, "onBackdrop: () => settle(false)", "Confirmation backdrop must cancel through the shared lifecycle")
 require(STYLE, '.ui-datalist[data-mobile-datalist-layout="facturas"]', "Mobile Facturas identity must have a dedicated no-clipping contract")
 require(STYLE, "overflow-wrap: anywhere", "Mobile Facturas identity must wrap long values instead of clipping them")
 

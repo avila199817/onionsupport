@@ -2,8 +2,9 @@ import { normalizeClienteModel } from "../clientes/clientes.model.js";
 import { patchFacturaCreateDom } from "./facturas.create-dom.js";
 import { getFacturaEntityId } from "../../core/entity-identity.js";
 import { createModalLifecycle, restoreModalFocus } from "../../features/entity-overlay/modal-lifecycle.js";
-import { createModalHost as createPrivateModalHost, renderModalContent } from "../../features/entity-overlay/modal-host.js";
+import { MODAL_SHELL_SELECTORS, createModalHost as createPrivateModalHost, renderModalContent, renderModalShell } from "../../features/entity-overlay/modal-host.js";
 import { openModalConfirmation } from "../../features/entity-overlay/modal-confirmation.js";
+import { escapeHtml } from "../../core/presentation-text.js";
 /* =========================================================
    Onion Support - Facturas Index
    Archivo: /src/views/facturas/index.js
@@ -312,81 +313,41 @@ const FACTURAS_RESEND_CONFIRM_ROOT_ID = "facturas-resend-confirm-root";
 let activeFacturaConfirm = null;
 
 function renderFacturaConfirmation(root, { factura, recipient, kind, amount }) {
-  const overlay = document.createElement("div");
-  overlay.className = "facturas-resend-confirm-overlay";
-  overlay.dataset.facturasResendConfirmOverlay = "true";
-  overlay.dataset.facturasConfirmationKind = kind;
-
-  const dialog = document.createElement("section");
-  dialog.className = "facturas-resend-confirm-dialog";
-  dialog.dataset[kind === "payment" ? "facturasPaymentConfirmDialog" : "facturasResendConfirmDialog"] = "true";
-  dialog.setAttribute("role", "alertdialog");
-  dialog.setAttribute("aria-modal", "true");
-  dialog.setAttribute("aria-labelledby", "facturas-resend-confirm-title");
-  dialog.setAttribute("aria-describedby", "facturas-resend-confirm-description");
-  dialog.tabIndex = -1;
-
-  const iconBox = document.createElement("div");
-  iconBox.className = "facturas-resend-confirm-icon";
-  iconBox.setAttribute("aria-hidden", "true");
-  const iconMark = document.createElement("span");
-  iconMark.textContent = kind === "payment" ? "✓" : "↻";
-  iconBox.appendChild(iconMark);
-
-  const copy = document.createElement("div");
-  copy.className = "facturas-resend-confirm-copy";
-
-  const eyebrow = document.createElement("span");
-  eyebrow.className = "facturas-resend-confirm-eyebrow";
-  eyebrow.textContent = kind === "payment" ? "Registro de cobro" : "Reenvío de factura";
-
-  const title = document.createElement("h3");
-  title.id = "facturas-resend-confirm-title";
-  title.textContent = kind === "payment" ? "Confirmar cobro completo" : "Esta factura ya fue enviada";
-
-  const description = document.createElement("p");
-  description.id = "facturas-resend-confirm-description";
-  description.textContent = kind === "payment"
-    ? `¿Marcar la factura ${getFacturaLabel(factura)} como pagada por ${amount}? Se registrará el cobro completo y el pendiente quedará a 0. Esta acción no reenviará la factura ni regenerará el PDF.`
+  const payment = kind === "payment";
+  const prefix = payment ? "data-facturas-payment-confirm" : "data-facturas-resend-confirm";
+  const label = getFacturaLabel(factura);
+  const description = payment
+    ? `¿Marcar la factura ${label} como pagada por ${amount}? Se registrará el cobro completo y el pendiente quedará a 0. Esta acción no reenviará la factura ni regenerará el PDF.`
     : recipient
     ? `Ya existe un envío a ${recipient}. Confirma solo si quieres volver a enviar la misma factura.`
     : "Ya existe un envío registrado. Confirma solo si quieres volver a enviar la misma factura.";
-
-  const meta = document.createElement("div");
-  meta.className = "facturas-resend-confirm-meta";
-
-  const invoiceChip = document.createElement("span");
-  invoiceChip.textContent = getFacturaLabel(factura) || "Factura";
-  meta.appendChild(invoiceChip);
-
-  if (recipient) {
-    const recipientChip = document.createElement("span");
-    recipientChip.textContent = recipient;
-    meta.appendChild(recipientChip);
-  }
-
-  copy.append(eyebrow, title, description, meta);
-
-  const actions = document.createElement("div");
-  actions.className = "facturas-resend-confirm-actions";
-
-  const cancelButton = document.createElement("button");
-  cancelButton.type = "button";
-  cancelButton.className = "facturas-resend-confirm-btn facturas-resend-confirm-btn--cancel";
-  cancelButton.dataset[kind === "payment" ? "facturasPaymentConfirmAction" : "facturasResendConfirmAction"] = "cancel";
-  cancelButton.textContent = "Cancelar";
-
-  const confirmButton = document.createElement("button");
-  confirmButton.type = "button";
-  confirmButton.className = "facturas-resend-confirm-btn facturas-resend-confirm-btn--confirm";
-  confirmButton.dataset[kind === "payment" ? "facturasPaymentConfirmAction" : "facturasResendConfirmAction"] = "confirm";
-  confirmButton.textContent = kind === "payment" ? "Registrar cobro" : "Reenviar factura";
-
-  actions.append(cancelButton, confirmButton);
-  dialog.append(iconBox, copy, actions);
-  overlay.appendChild(dialog);
-  root.appendChild(overlay);
-  return { panel: dialog, overlay, cancel: cancelButton, confirm: confirmButton };
+  root.innerHTML = renderModalShell({
+    rootAttributes: { "data-facturas-confirmation-kind": kind },
+    overlayAttributes: { "data-facturas-resend-confirm-overlay": "true" },
+    panelAttributes: { [`${prefix}-dialog`]: "true" },
+    role: "alertdialog",
+    labelledBy: "facturas-resend-confirm-title",
+    describedBy: "facturas-resend-confirm-description",
+    size: "confirm",
+    height: "auto",
+    header: `<div class="facturas-resend-confirm-copy">
+        <span class="facturas-resend-confirm-eyebrow">${payment ? "Registro de cobro" : "Reenvío de factura"}</span>
+        <h3 id="facturas-resend-confirm-title">${payment ? "Confirmar cobro completo" : "Esta factura ya fue enviada"}</h3>
+      </div>`,
+    bodyClass: "facturas-resend-confirm-body",
+    body: `<div class="facturas-resend-confirm-icon" aria-hidden="true"><span>${payment ? "✓" : "↻"}</span></div>
+      <div class="facturas-resend-confirm-copy">
+        <p id="facturas-resend-confirm-description">${escapeHtml(description)}</p>
+        <div class="facturas-resend-confirm-meta"><span>${escapeHtml(label || "Factura")}</span>${recipient ? `<span>${escapeHtml(recipient)}</span>` : ""}</div>
+      </div>`,
+    footer: `<button type="button" class="facturas-resend-confirm-btn facturas-resend-confirm-btn--cancel" ${prefix}-action="cancel">Cancelar</button>
+      <button type="button" class="facturas-resend-confirm-btn facturas-resend-confirm-btn--confirm" ${prefix}-action="confirm">${payment ? "Registrar cobro" : "Reenviar factura"}</button>`,
+  });
+  return {
+    panel: root.querySelector(MODAL_SHELL_SELECTORS.panel),
+    cancel: root.querySelector(`[${prefix}-action='cancel']`),
+    confirm: root.querySelector(`[${prefix}-action='confirm']`),
+  };
 }
 
 function confirmFacturaAction({ factura = {}, recipient = "", signal = null, kind = "resend", amount = "" } = {}) {

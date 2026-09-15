@@ -76,7 +76,7 @@ Estructura que emite el shell, la única válida para un diálogo privado:
 ```html
 <section class="ui-detail-modal-root" data-modal-shell="ui-modal-shell.v1" data-modal-size="detail|wide|form|compact|confirm" data-modal-height="fixed|auto" data-open="true" …identidad del dominio…>
   <div class="ui-detail-modal-overlay" data-modal-overlay="true">
-    <div class="ui-detail-modal-panel" role="dialog" aria-modal="true" aria-labelledby|aria-label tabindex="-1" data-modal-panel="true">
+    <div class="ui-detail-modal-panel" role="dialog|alertdialog" aria-modal="true" aria-labelledby|aria-label tabindex="-1" data-modal-panel="true">
       <!-- prelude: confirmaciones anidadas y velos de ocupado del dominio -->
       <header class="ui-detail-modal-header" data-modal-header="true">…</header>
       <main class="ui-detail-modal-body" data-modal-body="true">…</main>
@@ -105,7 +105,8 @@ Estado de la familia (se actualiza en cada unidad):
 | Alta de Incidencias | shell canónico (`renderModalShell`, variante `data-modal-size="form"`; el modo cliente ajusta la anchura por token en `inc-create-root.is-client`), botón cerrar del shell, click exterior por el lifecycle; `private-create-modal.css` conserva sólo el contenido del formulario para las cuatro altas |
 | Detalle de Facturas | shell canónico (`renderModalShell`, variante `data-modal-size="wide"`), botón cerrar del shell, estados de carga y error compartidos, click exterior por el lifecycle; el dominio conserva `facturas-detail-modal-root` como ámbito de su contenido |
 | Alta de Facturas | shell canónico (`renderModalShell`, variante `data-modal-size="form"`), botón cerrar del shell, click exterior por el lifecycle; `create.css` estiliza sólo el formulario |
-| Reenvío y cobro de Facturas | pendiente: shell `facturas-resend-confirm-*`, `fpc-*` |
+| Confirmaciones de reenvío y de cobro de Facturas | shell canónico a través de `openModalConfirmation` (`role="alertdialog"`, tamaño `confirm`, altura `auto`, acciones en el slot `footer`); el click exterior llega por el lifecycle |
+| Registro de cobro de Facturas (flujo `fpc-*`) | pendiente: shell `fpc-*` |
 | Alta de Clientes | shell canónico (`renderModalShell`, variante `data-modal-size="form"`), botón cerrar del shell, click exterior por el lifecycle; `create.css` estiliza sólo el formulario y conserva el préstamo de clases de contenido `inc-create-*` que resuelve la composición de altas |
 | Detalle de Clientes | shell canónico (`renderModalShell`; su anchura de 1080 px es un token `--ui-detail-modal-panel-width` en `clientes-modal-root`), botón cerrar del shell, click exterior por el lifecycle; el contenido conserva el préstamo de clases `incidencias-modal-*` hasta la unidad de contenido de los detalles |
 | Alta de Usuarios | shell canónico (`renderModalShell`, variante `data-modal-size="form"`, altura `auto`), botón cerrar del shell, click exterior por el lifecycle; `private-create-modal.css` queda como autoridad del contenido de las cuatro altas |

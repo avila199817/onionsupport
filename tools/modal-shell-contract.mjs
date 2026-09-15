@@ -33,7 +33,6 @@ const pendingShell = (file, until) => ({ kind: "shell", file, until });
 const fixedLayer = (file, reason) => ({ kind: "layer", file, reason });
 const FIXED_INVENTORY = new Map([
   // dialog shells pending migration
-  [".facturas-resend-confirm-overlay", pendingShell("src/css/views/facturas/resend-confirm.css", "facturas-confirm-shell")],
   [".fpc-overlay", pendingShell("src/features/facturas-paid-confirm/style.css", "facturas-confirm-shell")],
   [".correo-modal-backdrop", pendingShell("src/css/views/correo/index.css", "correo-shell")],
   [".correo-compose", pendingShell("src/css/views/correo/index.css", "correo-shell")],
@@ -87,6 +86,7 @@ const SHELL_CONSUMERS = [
   "src/views/clientes/clientes.template.create.js",
   "src/views/usuarios/usuarios.template.create.js",
   "src/views/clientes/clientes.template.modal.js",
+  "src/views/facturas/index.js",
 ];
 
 const STRUCTURAL_CLASS = /\.ui-detail-modal-(?:root|overlay|panel|header|body|footer|close-btn)\b/u;
@@ -171,6 +171,8 @@ test("the shell emits one structure: root → overlay → panel[dialog] → head
     cursor += match.index + match[0].length;
   }
   assert.equal((html.match(/role="dialog"/gu) || []).length, 1);
+  assert.match(renderModalShell({ role: "alertdialog" }), /role="alertdialog" aria-modal="true"/u, "confirmations may declare alertdialog");
+  assert.match(renderModalShell({ role: "menu" }), /role="dialog"/u, "unknown roles fall back to dialog");
   assert.equal((html.match(/data-open="/gu) || []).length, 2, "a domain may not redefine data-open on the root (the shell sets it once, extras come after)");
 });
 

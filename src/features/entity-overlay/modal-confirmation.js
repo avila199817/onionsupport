@@ -1,8 +1,9 @@
 import { createModalHost } from "./modal-host.js";
 import { createModalLifecycle, restoreModalFocus } from "./modal-lifecycle.js";
 
-// Owners supply the content and decide what an accepted confirmation does.
-// Mounting, dismissal and settlement share the existing interaction authority.
+// Owners render the content through the shell and decide what an accepted
+// confirmation does. Mounting, dismissal (Escape, backdrop, navigation, abort)
+// and settlement share the existing interaction authority.
 export function openModalConfirmation({ host: hostOptions, render, opener, signal, bodyClasses = [] } = {}) {
   if (signal?.aborted) return Promise.resolve(false);
   const host = createModalHost(hostOptions);
@@ -19,7 +20,7 @@ export function openModalConfirmation({ host: hostOptions, render, opener, signa
       reject(error);
       return;
     }
-    const { panel, overlay, cancel, confirm } = surface || {};
+    const { panel, cancel, confirm } = surface || {};
     if (!panel?.isConnected || !cancel || !confirm) {
       host.remove();
       resolve(false);
@@ -29,17 +30,16 @@ export function openModalConfirmation({ host: hostOptions, render, opener, signa
     const lifecycle = createModalLifecycle({
       getPanel: () => panel,
       onEscape: () => settle(false),
+      onBackdrop: () => settle(false),
       onDetached: () => settle(false),
       bodyClasses,
     });
     const dismiss = () => settle(false);
     const accept = () => settle(true);
-    const onBackdrop = (event) => { if (event.target === overlay) dismiss(); };
 
     function settle(value) {
       if (settled) return;
       settled = true;
-      overlay?.removeEventListener("click", onBackdrop);
       cancel.removeEventListener("click", dismiss);
       confirm.removeEventListener("click", accept);
       for (const event of ["popstate", "hashchange", "pagehide"]) window?.removeEventListener(event, dismiss);
@@ -50,7 +50,6 @@ export function openModalConfirmation({ host: hostOptions, render, opener, signa
       resolve(Boolean(value));
     }
 
-    overlay?.addEventListener("click", onBackdrop);
     cancel.addEventListener("click", dismiss);
     confirm.addEventListener("click", accept);
     for (const event of ["popstate", "hashchange", "pagehide"]) window?.addEventListener(event, dismiss, { once: true });

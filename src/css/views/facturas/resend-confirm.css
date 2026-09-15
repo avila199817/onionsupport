@@ -4,56 +4,19 @@
    ONION SUPPORT — FACTURAS · REENVÍO CONFIRM
    DOMAIN COMPONENT · 2026-08-31
 
-   Confirmación propia de Facturas. Se mantiene fuera del CSS del listado para
-   que index.css no vuelva a convertirse en un contenedor multipropósito.
+   Contenido de la confirmación de Facturas (reenvío y registro de cobro). La
+   estructura (overlay, panel, header, body, footer) la aporta el shell
+   canónico (components/detail-modal.css, tamaño confirm) a través de
+   openModalConfirmation; se mantiene fuera del CSS del listado para que
+   index.css no vuelva a convertirse en un contenedor multipropósito.
 ========================================================= */
 
 @layer views {
 
-body.facturas-resend-confirm-open {
-  overflow: hidden;
-  overscroll-behavior: none;
-}
-
-#facturas-resend-confirm-root,
-#facturas-resend-confirm-root *,
-#facturas-resend-confirm-root *::before,
-#facturas-resend-confirm-root *::after {
-  box-sizing: border-box;
-}
-
-#facturas-resend-confirm-root:empty { display: none; }
-
-.facturas-resend-confirm-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: calc(var(--z-modal, 1000) + 90);
-  display: grid;
-  place-items: center;
-  padding: clamp(14px, 3vw, 32px);
-  overflow: auto;
-  background: color-mix(in srgb, var(--ui-detail-modal-overlay-bg) 82%, transparent);
-  backdrop-filter: blur(9px);
-  -webkit-backdrop-filter: blur(9px);
-}
-
-.facturas-resend-confirm-dialog {
-  inline-size: min(520px, 100%);
-  min-inline-size: 0;
-  display: grid;
+/* Body del shell: icono a la izquierda, copy y metadatos a la derecha. */
+.facturas-resend-confirm-body {
   grid-template-columns: 44px minmax(0, 1fr);
-  gap: var(--space-md);
-  padding: var(--space-lg);
-  border: 1px solid var(--border-warning);
-  border-radius: var(--card-radius);
-  background: var(--card-bg);
-  color: var(--text);
-  box-shadow: var(--shadow-xl);
-  outline: none;
-}
-
-.facturas-resend-confirm-dialog:focus-visible {
-  box-shadow: var(--shadow-xl), var(--focus-ring);
+  align-items: start;
 }
 
 .facturas-resend-confirm-icon {
@@ -123,13 +86,6 @@ body.facturas-resend-confirm-open {
   overflow-wrap: anywhere;
 }
 
-.facturas-resend-confirm-actions {
-  grid-column: 1 / -1;
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
 .facturas-resend-confirm-btn {
   appearance: none;
   min-block-size: var(--btn-height-sm);
@@ -179,10 +135,9 @@ body.facturas-resend-confirm-open {
 }
 
 @media (max-width: 560px) {
-  .facturas-resend-confirm-dialog {
+  .facturas-resend-confirm-body {
     grid-template-columns: 40px minmax(0, 1fr);
     gap: var(--space-sm);
-    padding: var(--space-md);
   }
 
   .facturas-resend-confirm-icon {
@@ -191,12 +146,7 @@ body.facturas-resend-confirm-open {
     font-size: 21px;
   }
 
-  .facturas-resend-confirm-actions {
-    display: grid;
-    grid-template-columns: 1fr;
-  }
-
-  .facturas-resend-confirm-btn { inline-size: 100%; }
+  .facturas-resend-confirm-btn { flex: 1 1 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -204,7 +154,6 @@ body.facturas-resend-confirm-open {
 }
 
 @media (forced-colors: active) {
-  .facturas-resend-confirm-dialog,
   .facturas-resend-confirm-icon,
   .facturas-resend-confirm-btn,
   .facturas-resend-confirm-meta > span {

@@ -91,6 +91,7 @@ Reglas para un dominio:
 - Entrega contenido, campos, acciones, permisos, textos y sus `data-*` de identidad (`rootAttributes`, `overlayAttributes`, `panelAttributes`). No emite `role="dialog"`, backdrop, cierre ni bloqueo de scroll propios.
 - Una diferencia legítima se expresa con `data-modal-size` / `data-modal-height`, con un token `--ui-detail-modal-*` en su clase raíz o con una clase semántica del contenido; nunca con otra hoja de shell ni con `!important`.
 - El click exterior llega por `onBackdrop` del lifecycle; el dominio decide si cierra (borradores, peticiones en curso), igual que con Escape.
+- El botón cerrar del shell es hijo directo del header y ocupa su esquina superior derecha en todas las anchuras, sea cual sea la altura del contenido que tiene al lado. Sólo un header que compone su propia fila de acciones (detalle de Incidencias, con el cierre dentro de la fila) apila sus bloques por debajo de 980 px.
 - Su CSS estiliza únicamente el contenido interno. `tools/modal-shell-contract.mjs` mantiene el inventario completo de reglas `position: fixed` fuera de la autoridad: cada shell histórico lleva la unidad que lo retira y cada capa no modal (chrome, loader, toasts, landing pública) su motivo; una regla nueva o una entrada que ya no existe hacen fallar la CI.
 
 Estado de la familia (se actualiza en cada unidad):

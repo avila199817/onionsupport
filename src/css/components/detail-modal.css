@@ -172,6 +172,12 @@ position: relative;
   background: var(--surface-2, var(--ui-detail-modal-bg));
 }
 
+/* The shell's close control sits in the header's top-right corner whatever
+   the height of the content beside it. */
+.ui-detail-modal-header > .ui-detail-modal-close-btn {
+  align-self: start;
+}
+
 .ui-detail-modal-hero {
 min-inline-size: 0;
   display: grid;
@@ -580,7 +586,10 @@ background: var(--btn-primary-bg-active);
 }
 
 @media (max-width: 980px) {
-.ui-detail-modal-header {
+/* A header that composes its own actions row (the close control inside it)
+   stacks its blocks on narrow screens. A header whose close control is a
+   direct child keeps it in the top-right corner at every width. */
+.ui-detail-modal-header:not(:has(> .ui-detail-modal-close-btn)) {
 grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
 }

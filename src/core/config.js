@@ -24,6 +24,8 @@
    - Sin 2FA/MFA/OTP.
 ========================================================= */
 
+import { cleanText } from "./presentation-text.js";
+
 export const CONFIG_VERSION = "core.config.production.v8-direct-api-final";
 
 /* =========================================================
@@ -216,15 +218,6 @@ function freeze(value) {
   }
 }
 
-function text(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
-}
-
 function hasOwn(object = {}, key = "") {
   return Object.prototype.hasOwnProperty.call(Object(object), key);
 }
@@ -257,7 +250,7 @@ function isAllowedBackendOrigin(origin = "") {
 }
 
 function normalizeApiBase(value = "") {
-  const raw = text(value, CANONICAL_PRODUCTION_API_BASE).replace(/\/+$/g, "");
+  const raw = cleanText(value, CANONICAL_PRODUCTION_API_BASE).replace(/\/+$/g, "");
 
   if (!/^https?:\/\//i.test(raw)) {
     return CANONICAL_PRODUCTION_API_BASE;
@@ -272,7 +265,7 @@ function normalizeApiBase(value = "") {
 }
 
 function normalizePathname(pathname = "/") {
-  let value = text(pathname, "/")
+  let value = cleanText(pathname, "/")
     .split("#")[0]
     .split("?")[0]
     .replace(/\\/g, "/");
@@ -306,12 +299,12 @@ function endpointMatches(path = "", candidate = "") {
 }
 
 function isHashRouterPath(value = "") {
-  const raw = text(value, "");
+  const raw = cleanText(value, "");
   return raw.startsWith("#/") || raw.startsWith("#!");
 }
 
 function normalizeHashRouterPath(value = "") {
-  const raw = text(value, "/");
+  const raw = cleanText(value, "/");
 
   if (raw.startsWith("#!")) {
     return raw.replace(/^#!\/?/, "/") || "/";
@@ -329,7 +322,7 @@ function normalizeHashRouterPath(value = "") {
 ========================================================= */
 
 export function routePathFromUrlLike(value = "") {
-  const raw = text(value, "");
+  const raw = cleanText(value, "");
 
   if (!raw) return "";
 
@@ -366,7 +359,7 @@ export function routePathFromUrlLike(value = "") {
 }
 
 export function endpointPathFromUrlLike(value = "") {
-  const raw = text(value, "");
+  const raw = cleanText(value, "");
 
   if (!raw) return "";
   if (raw.startsWith("//")) return "";
@@ -416,7 +409,7 @@ export function normalizeEndpointPath(path = "") {
 ========================================================= */
 
 export function normalizeUserSlug(value = "") {
-  const slug = text(value, "")
+  const slug = cleanText(value, "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/^\/+/, "")

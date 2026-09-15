@@ -13,6 +13,7 @@
 ========================================================= */
 
 import * as Boundary from "./facturas.api.boundary.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export * from "./facturas.api.boundary.js";
 
@@ -31,17 +32,8 @@ function object(value, fallback = null) {
   return isObject(value) ? value : fallback;
 }
 
-function text(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
-}
-
 function key(value = "") {
-  return text(value, "")
+  return cleanText(value, "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -95,7 +87,7 @@ function round2(value) {
 }
 
 function isTechnicalIdentifier(value = "") {
-  return text(value, "").startsWith(TECHNICAL_PREFIX);
+  return cleanText(value, "").startsWith(TECHNICAL_PREFIX);
 }
 
 function nestedObjects(value = {}) {
@@ -211,7 +203,7 @@ function canonicalIdentifier(value = null) {
   const source = object(value);
   if (!source) return "";
 
-  const rootId = text(source.id, "");
+  const rootId = cleanText(source.id, "");
   if (rootId && !isTechnicalIdentifier(rootId)) return rootId;
 
   for (const candidate of [
@@ -223,7 +215,7 @@ function canonicalIdentifier(value = null) {
     source.legalInvoiceNumber,
     source.legalNumber,
   ]) {
-    const id = text(candidate, "");
+    const id = cleanText(candidate, "");
     if (id && !isTechnicalIdentifier(id)) return id;
   }
 
@@ -231,8 +223,8 @@ function canonicalIdentifier(value = null) {
 }
 
 function rememberAlias(technicalId = "", canonicalId = "") {
-  const technical = text(technicalId, "");
-  const canonical = text(canonicalId, "");
+  const technical = cleanText(technicalId, "");
+  const canonical = cleanText(canonicalId, "");
 
   if (!isTechnicalIdentifier(technical) ||
       !canonical ||
@@ -494,10 +486,10 @@ export function canonicalizeFacturaListItem(value = null) {
     outer.numeroFacturaSistema,
     canonicalId,
   ]
-    .map((candidate) => text(candidate, ""))
+    .map((candidate) => cleanText(candidate, ""))
     .find((candidate) => candidate && !isTechnicalIdentifier(candidate)) || canonicalId;
 
-  const systemNumber = text(first(
+  const systemNumber = cleanText(first(
     source.numeroFacturaSistema,
     source.systemInvoiceNumber,
     outer.numeroFacturaSistema,
@@ -513,9 +505,9 @@ export function canonicalizeFacturaListItem(value = null) {
     ...(legalNumber
       ? {
           numeroFacturaLegal: legalNumber,
-          numeroFactura: text(first(source.numeroFactura, legalNumber), legalNumber),
-          invoiceNumber: text(first(source.invoiceNumber, legalNumber), legalNumber),
-          number: text(first(source.number, legalNumber), legalNumber),
+          numeroFactura: cleanText(first(source.numeroFactura, legalNumber), legalNumber),
+          invoiceNumber: cleanText(first(source.invoiceNumber, legalNumber), legalNumber),
+          number: cleanText(first(source.number, legalNumber), legalNumber),
         }
       : {}),
     ...(systemNumber ? { numeroFacturaSistema: systemNumber } : {}),
@@ -524,16 +516,16 @@ export function canonicalizeFacturaListItem(value = null) {
     type: "invoice",
     status: ["issued", "emitida", "sent", "enviada", "paid", "pagada", "draft", "borrador"]
       .includes(key(first(source.status, source.estado, "")))
-        ? text(first(source.status, source.estado), "issued")
+        ? cleanText(first(source.status, source.estado), "issued")
         : "issued",
     estado: ["issued", "emitida", "sent", "enviada", "paid", "pagada", "draft", "borrador"]
       .includes(key(first(source.estado, source.status, "")))
-        ? text(first(source.estado, source.status), "issued")
+        ? cleanText(first(source.estado, source.status), "issued")
         : "issued",
     meta: {
       ...object(source.meta, {}),
       technicalAliasRecovered: true,
-      technicalAliasId: text(first(
+      technicalAliasId: cleanText(first(
         hosts[0]?.id,
         hosts[0]?._id,
         hosts[0]?.operationId,
@@ -653,7 +645,7 @@ function canonicalizeListResponse(response = null) {
 }
 
 export function resolveFacturaCanonicalId(id = "", options = {}) {
-  const requested = text(id, "");
+  const requested = cleanText(id, "");
   if (!requested) return "";
 
   if (!isTechnicalIdentifier(requested)) return requested;

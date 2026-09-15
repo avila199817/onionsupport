@@ -27,6 +27,7 @@ import {
   normalizeRoutePath,
   routePathFromUrlLike,
 } from "../../core/config.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const PUBLIC_SHARED_VERSION = "public.shared.v1";
 
@@ -84,23 +85,14 @@ function isBrowser() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
-function text(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
-}
-
 function normalizeKey(value = "") {
-  return text(value, "")
+  return cleanText(value, "")
     .replace(/[-_\s]/g, "")
     .toLowerCase();
 }
 
 function normalizeViewKey(value = "") {
-  return text(value, DEFAULT_PUBLIC_VIEW)
+  return cleanText(value, DEFAULT_PUBLIC_VIEW)
     .toLowerCase()
     .replace(/[^a-z0-9._:-]/g, "-")
     .replace(/-+/g, "-")
@@ -109,7 +101,7 @@ function normalizeViewKey(value = "") {
 }
 
 function splitUrlLike(value = "") {
-  const raw = text(value, "");
+  const raw = cleanText(value, "");
 
   if (!raw) {
     return {
@@ -166,7 +158,7 @@ function splitUrlLike(value = "") {
 
 // Attribute values: one line, escaped by the authority, backtick covered too.
 export function escapeAttr(value = "") {
-  return escapeHtml(text(value, "")).replace(/`/g, "&#96;");
+  return escapeHtml(cleanText(value, "")).replace(/`/g, "&#96;");
 }
 
 /* =========================================================
@@ -210,7 +202,7 @@ function hasSensitiveQuery(value = "") {
 }
 
 function safeSearch(value = "") {
-  const raw = text(value, "");
+  const raw = cleanText(value, "");
 
   if (!raw || raw === "?") return "";
   if (!raw.startsWith("?")) return "";
@@ -234,7 +226,7 @@ function safeSearch(value = "") {
 }
 
 function safeHash(value = "") {
-  const raw = text(value, "");
+  const raw = cleanText(value, "");
 
   if (!raw || raw === "#") return "";
   if (!raw.startsWith("#")) return "";
@@ -245,7 +237,7 @@ function safeHash(value = "") {
 }
 
 function normalizeInternalPath(value = "") {
-  const raw = text(value, "");
+  const raw = cleanText(value, "");
 
   if (!raw) return "";
   if (!raw.startsWith("/") && !/^https?:\/\//i.test(raw)) return "";
@@ -295,7 +287,7 @@ export function safeInternalHref(value = "", fallback = DEFAULT_SAFE_HREF) {
 }
 
 export function safeAssetSrc(value = "", fallback = "") {
-  const src = text(value, fallback);
+  const src = cleanText(value, fallback);
 
   if (!src) return fallback;
   if (/[\r\n\t\\]/.test(src)) return fallback;
@@ -332,8 +324,8 @@ function renderPublicHeader({
   title = "",
   subtitle = "",
 } = {}) {
-  const cleanTitle = text(title, appName);
-  const cleanSubtitle = text(subtitle, "");
+  const cleanTitle = cleanText(title, appName);
+  const cleanSubtitle = cleanText(subtitle, "");
   const logoFallback = safeAssetSrc(PUBLIC_AUTH_LOGO, PUBLIC_AUTH_LOGO);
   const logoWebp = safeAssetSrc(PUBLIC_AUTH_LOGO_WEBP, PUBLIC_AUTH_LOGO_WEBP);
 
@@ -398,10 +390,10 @@ export function renderPublicShell({
   ariaLabelledBy = "",
 } = {}) {
   const viewKey = normalizeViewKey(view);
-  const cleanAppName = text(appName, APP_NAME);
+  const cleanAppName = cleanText(appName, APP_NAME);
   const cleanBody = String(body ?? "");
-  const label = text(ariaLabel, `${cleanAppName} · Acceso`);
-  const labelledBy = text(ariaLabelledBy, "");
+  const label = cleanText(ariaLabel, `${cleanAppName} · Acceso`);
+  const labelledBy = cleanText(ariaLabelledBy, "");
 
   return `
     <section

@@ -96,7 +96,7 @@ assert.ok(panelPathStart >= 0 && panelPathEnd > panelPathStart, "Falta panelPath
 
 const panelPath = experience.slice(panelPathStart, panelPathEnd);
 const stateIndex = panelPath.indexOf("const fromState = panelCandidate(");
-const slugIndex = panelPath.indexOf("const slug = text(");
+const slugIndex = panelPath.indexOf("const slug = cleanText(");
 const storedIndex = panelPath.indexOf("const stored = panelCandidate(");
 const linkIndex = panelPath.indexOf("const fromLink = panelCandidate(");
 

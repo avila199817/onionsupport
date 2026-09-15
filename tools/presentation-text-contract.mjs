@@ -151,12 +151,20 @@ assert.ok(cuentaError.includes(`<p>${bodyHtml}</p>`), "Direct Cuenta error retai
 // core/presentation-text.js and escapeHtml (HTML escaping) in
 // core/escape-html.js, split so the startup closures load the normalizer
 // alone. Every module imports them (directly or through a live reexport)
-// instead of carrying a copy under any name: no other module may emit the
-// "&amp;" entity itself. core/public-legal.js is the one exception, because
-// the public Home integrity guard requires it to stay an import-free module.
+// instead of carrying a copy under any name: no other module may carry the
+// normalizer's body (the [\r\n\t] replace) or emit the "&amp;" entity itself.
+// Listed exceptions keep a different policy on purpose: main.js redacts log
+// lines (no collapse of the whole value), core/public-site.js keeps the route
+// title's inner spacing, clientes.template.js attrExact keeps runs of spaces
+// in exact-match attributes, analytics/google-tag.js is a consent-gated leaf
+// chunk (importing the normalizer from it folds presentation-text into the
+// analytics chunk and drags 31 KB into the auth closure), and
+// core/public-legal.js must stay import-free for the public Home integrity guard.
 const SRC_ROOT = fileURLToPath(new URL("../src/", import.meta.url));
 const CLEAN_TEXT_AUTHORITY = "src/core/presentation-text.js";
 const ESCAPE_HTML_AUTHORITY = "src/core/escape-html.js";
+const CLEAN_TEXT_FINGERPRINT = 'replace(/[\\r\\n\\t]/g, " ")';
+const CLEAN_TEXT_FINGERPRINT_EXEMPT = Object.freeze(["src/analytics/google-tag.js", "src/core/public-site.js", "src/main.js", "src/views/clientes/clientes.template.js"]);
 const ESCAPE_FINGERPRINT_EXEMPT = Object.freeze(["src/core/public-legal.js"]);
 function sourceFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, "en")).flatMap((entry) => {
@@ -168,9 +176,11 @@ function sourceFiles(directory) {
 const definers = { cleanText: [], escapeHtml: [] };
 const callersWithoutBinding = [];
 const escapeFingerprints = [];
+const cleanTextFingerprints = [];
 for (const file of sourceFiles(SRC_ROOT)) {
   const code = readFileSync(file, "utf8");
   const path = `src/${relative(SRC_ROOT, file).split(sep).join("/")}`;
+  if (path !== CLEAN_TEXT_AUTHORITY && !CLEAN_TEXT_FINGERPRINT_EXEMPT.includes(path) && code.includes(CLEAN_TEXT_FINGERPRINT)) cleanTextFingerprints.push(path);
   if (path !== ESCAPE_HTML_AUTHORITY && !ESCAPE_FINGERPRINT_EXEMPT.includes(path) && code.includes("&amp;")) escapeFingerprints.push(path);
   for (const name of Object.keys(definers)) {
     const defines = new RegExp(`^(?:export )?(?:async )?(?:function ${name}\\s*\\(|(?:const|let|var) ${name}\\b)`, "mu").test(code);
@@ -180,8 +190,9 @@ for (const file of sourceFiles(SRC_ROOT)) {
   }
 }
 assert.deepEqual(definers.cleanText, [CLEAN_TEXT_AUTHORITY], "cleanText is defined once, in the authority");
+assert.deepEqual(cleanTextFingerprints, [], "no module normalizes text on its own under another name: only the authority and the listed policies carry the body");
 assert.deepEqual(definers.escapeHtml, [ESCAPE_HTML_AUTHORITY], "escapeHtml is defined once, in the authority");
 assert.deepEqual(escapeFingerprints, [], "no module escapes HTML on its own: only the authority and the import-free legal renderer emit &amp;");
 assert.deepEqual(callersWithoutBinding, [], "every cleanText and escapeHtml caller binds its canonical helper");
 
-console.log(`Presentation text contract: PASS · Unicode/coercion/fallback identity · canonical reexports · one cleanText authority (no local copies) · one escapeHtml authority (no local copies; public-legal keeps its import-free escaper) · actual pending, Correo, Servidor, Facturas and Incidencias markup · multiline body/comments · redaction`);
+console.log(`Presentation text contract: PASS · Unicode/coercion/fallback identity · canonical reexports · one cleanText authority (no local copies under any name; 4 listed policies) · one escapeHtml authority (no local copies; public-legal keeps its import-free escaper) · actual pending, Correo, Servidor, Facturas and Incidencias markup · multiline body/comments · redaction`);

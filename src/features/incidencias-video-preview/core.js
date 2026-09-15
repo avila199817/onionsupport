@@ -1,5 +1,6 @@
 import { createModalLifecycle, modalFocusableElements, restoreModalFocus } from "../entity-overlay/modal-lifecycle.js";
 import { MODAL_SHELL_SELECTORS, renderModalShell } from "../entity-overlay/modal-host.js";
+import { cleanText } from "../../core/presentation-text.js";
 /* =========================================================
    Onion Support · Incidencias Attachment Viewer
    Archivo: /src/features/incidencias-video-preview/index.js
@@ -82,12 +83,6 @@ const thumbCache = new Map();
 const browser = () =>
   typeof window !== "undefined" && typeof document !== "undefined";
 
-const text = (value = "", fallback = "") =>
-  String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim() || fallback;
-
 const api = () =>
   apiPromise ||= import("../../views/incidencias/incidencias.api.js");
 
@@ -96,18 +91,18 @@ const api = () =>
 ========================================================= */
 
 function ticketId(root = null) {
-  return text(root?.dataset?.ticketId || root?.dataset?.incidenciaId, "");
+  return cleanText(root?.dataset?.ticketId || root?.dataset?.incidenciaId, "");
 }
 
 function previewAttachmentId(preview = null) {
-  return text(preview?.dataset?.previewAttachmentId, "");
+  return cleanText(preview?.dataset?.previewAttachmentId, "");
 }
 
 function previewMeta(preview = null) {
   const copy = preview?.querySelector?.(PREVIEW_COPY);
-  const name = text(copy?.querySelector?.("strong")?.textContent, "");
-  const meta = text(copy?.querySelector?.("span")?.textContent, "");
-  const mime = text(meta.match(VIDEO_MIME_RE)?.[1], "").toLowerCase();
+  const name = cleanText(copy?.querySelector?.("strong")?.textContent, "");
+  const meta = cleanText(copy?.querySelector?.("span")?.textContent, "");
+  const mime = cleanText(meta.match(VIDEO_MIME_RE)?.[1], "").toLowerCase();
 
   return { name, meta, mime };
 }
@@ -126,8 +121,8 @@ function isVideoPreview(preview = null) {
 }
 
 function cacheKey(ticket = "", attachment = "") {
-  const safeTicket = text(ticket, "");
-  const safeAttachment = text(attachment, "");
+  const safeTicket = cleanText(ticket, "");
+  const safeAttachment = cleanText(attachment, "");
 
   return safeTicket && safeAttachment
     ? `${safeTicket}::${safeAttachment}`
@@ -157,7 +152,7 @@ function cachedUrl(key = "") {
 }
 
 function viewUrl(file = {}) {
-  return text(
+  return cleanText(
     file?.viewUrl ||
     file?.openUrl ||
     file?.signedUrl ||
@@ -326,7 +321,7 @@ function rememberOpenIntent(button = null) {
 
   mediaSession = {
     ticketId: ticketId(root),
-    attachmentId: text(button.dataset?.attachmentId, ""),
+    attachmentId: cleanText(button.dataset?.attachmentId, ""),
     opener: button,
     openerKind: button.matches?.(".incidencias-modal-view-btn")
       ? "action"
@@ -359,13 +354,13 @@ function resolveOpener(session = mediaSession, root = null) {
     return session.opener;
   }
 
-  const attachment = text(session?.attachmentId, "");
+  const attachment = cleanText(session?.attachmentId, "");
   if (!attachment || !root?.isConnected) return null;
 
   const candidates = Array.from(
     root.querySelectorAll(ACTION_OPEN)
   ).filter((node) =>
-    text(node?.dataset?.attachmentId, "") === attachment
+    cleanText(node?.dataset?.attachmentId, "") === attachment
   );
 
   if (!candidates.length) return null;
@@ -1104,17 +1099,17 @@ function attachmentCardMeta(button = null) {
   const row = button?.closest?.(ATTACHMENT_ROW);
   const copy = row?.querySelector?.(ATTACHMENT_COPY);
 
-  const name = text(
+  const name = cleanText(
     copy?.querySelector?.("strong")?.textContent,
-    text(button?.getAttribute?.("aria-label"), "")
+    cleanText(button?.getAttribute?.("aria-label"), "")
       .replace(/^Ver\s+/i, "")
       .replace(/^Ampliar\s+/i, "")
   );
 
-  const meta = text(copy?.querySelector?.("span")?.textContent, "");
-  const mime = text(meta.match(VIDEO_MIME_RE)?.[1], "").toLowerCase();
+  const meta = cleanText(copy?.querySelector?.("span")?.textContent, "");
+  const mime = cleanText(meta.match(VIDEO_MIME_RE)?.[1], "").toLowerCase();
 
-  const fallbackLabel = text(
+  const fallbackLabel = cleanText(
     button?.querySelector?.(":scope > span")?.textContent,
     ""
   ).toUpperCase();
@@ -1244,7 +1239,7 @@ function createThumbRecord({
   fallback.className = "incidencias-modal-image-thumb-fallback";
   fallback.textContent =
     fallbackLabel ||
-    text(name?.split?.(".")?.pop?.(), "VID").slice(0, 4).toUpperCase() ||
+    cleanText(name?.split?.(".")?.pop?.(), "VID").slice(0, 4).toUpperCase() ||
     "VID";
   fallback.setAttribute("aria-hidden", "true");
 
@@ -1361,7 +1356,7 @@ function fastRestoreCachedThumbnails(root = null) {
     if (!isVideoThumbCandidate(button)) continue;
 
     const ticket = ticketId(root);
-    const attachment = text(button.dataset.attachmentId, "");
+    const attachment = cleanText(button.dataset.attachmentId, "");
     const key = cacheKey(ticket, attachment);
     const record = cachedThumbRecord(key);
 
@@ -1385,7 +1380,7 @@ async function hydrateVideoThumbnail(button = null) {
 
   const root = button.closest(ROOT);
   const ticket = ticketId(root);
-  const attachment = text(button.dataset.attachmentId, "");
+  const attachment = cleanText(button.dataset.attachmentId, "");
   const key = cacheKey(ticket, attachment);
 
   if (!key) return false;
@@ -1616,11 +1611,11 @@ function sync() {
       mediaSession &&
       !mediaSession.viewerAdopted
     ) {
-      const attachment = text(mediaSession.attachmentId, "");
+      const attachment = cleanText(mediaSession.attachmentId, "");
       const stillOpening = Array.from(
         root.querySelectorAll(ACTION_OPEN)
       ).some((node) =>
-        text(node.dataset?.attachmentId, "") === attachment &&
+        cleanText(node.dataset?.attachmentId, "") === attachment &&
         (
           node.getAttribute("aria-busy") === "true" ||
           node.disabled === true
@@ -1722,7 +1717,7 @@ export function getIncidenciasVideoPreviewSnapshot() {
     version: INCIDENCIAS_VIDEO_PREVIEW_VERSION,
     mounted,
     viewerOpen: Boolean(activeViewer?.layer?.isConnected),
-    viewerState: text(
+    viewerState: cleanText(
       activeViewer?.layer?.dataset?.viewerState,
       "closed"
     ),

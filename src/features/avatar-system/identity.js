@@ -16,6 +16,7 @@
 "use strict";
 
 import { userNameFromIdentity } from "../../core/user-identity.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const AVATAR_IDENTITY_VERSION =
   "avatar-identity.v5-user-id-first";
@@ -55,17 +56,8 @@ function isObject(value = null) {
   );
 }
 
-export function cleanAvatarText(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
-}
-
 export function normalizeAvatarEmail(value = "") {
-  const email = cleanAvatarText(value, "")
+  const email = cleanText(value, "")
     .toLowerCase()
     .replace(/\s+/g, "");
 
@@ -75,11 +67,11 @@ export function normalizeAvatarEmail(value = "") {
 }
 
 export function normalizeAvatarUserId(value = "") {
-  return cleanAvatarText(value, "").toLowerCase();
+  return cleanText(value, "").toLowerCase();
 }
 
 export function normalizeAvatarUsername(value = "") {
-  return cleanAvatarText(value, "")
+  return cleanText(value, "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/^@+/, "")
@@ -89,7 +81,7 @@ export function normalizeAvatarUsername(value = "") {
 }
 
 export function normalizeAvatarName(value = "") {
-  return cleanAvatarText(value, "")
+  return cleanText(value, "")
     .toLocaleLowerCase("es-ES")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -106,7 +98,7 @@ function firstText(...values) {
       typeof value === "string" ||
       typeof value === "number"
     ) {
-      const output = cleanAvatarText(value, "");
+      const output = cleanText(value, "");
       if (output) return output;
     }
   }
@@ -124,7 +116,7 @@ function objectCandidates(input = {}) {
 }
 
 function explicitAvatarNameFromIdentity(input = {}) {
-  if (!isObject(input)) return cleanAvatarText(input, "");
+  if (!isObject(input)) return cleanText(input, "");
 
   const { source } = objectCandidates(input);
 
@@ -141,7 +133,7 @@ function explicitAvatarNameFromIdentity(input = {}) {
 
 export function avatarNameFromIdentity(input = {}) {
   if (!isObject(input)) {
-    return cleanAvatarText(input, "");
+    return cleanText(input, "");
   }
 
   const { source, profile, user, raw } = objectCandidates(input);
@@ -273,7 +265,7 @@ export function avatarSeedFromIdentity(input = {}) {
 }
 
 export function hashAvatarSeed(value = "") {
-  const seed = cleanAvatarText(value, "avatar:onion-support");
+  const seed = cleanText(value, "avatar:onion-support");
   let hash = 0x811c9dc5;
 
   for (let index = 0; index < seed.length; index += 1) {
@@ -292,7 +284,7 @@ export function hashAvatarSeed(value = "") {
 
 /* Exact Microsoft Fluent UI Persona display-name hash. */
 export function microsoftPersonaHash(displayName = "") {
-  const name = cleanAvatarText(displayName, "");
+  const name = cleanText(displayName, "");
   let hashCode = 0;
 
   for (let index = name.length - 1; index >= 0; index -= 1) {
@@ -305,7 +297,7 @@ export function microsoftPersonaHash(displayName = "") {
 }
 
 export function avatarToneFromName(displayName = "") {
-  const name = cleanAvatarText(displayName, "");
+  const name = cleanText(displayName, "");
   if (!name) return 1;
   return microsoftPersonaHash(name) % AVATAR_TONE_COUNT;
 }
@@ -316,7 +308,7 @@ export function avatarToneFromName(displayName = "") {
 */
 export function avatarToneFromSeed(value = "") {
   return avatarToneFromName(
-    cleanAvatarText(value, "avatar:onion-support")
+    cleanText(value, "avatar:onion-support")
   );
 }
 
@@ -397,7 +389,7 @@ const UNSUPPORTED_TEXT_REGEX =
   /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\u1100-\u11FF\u3130-\u318F\uA960-\uA97F\uAC00-\uD7AF\uD7B0-\uD7FF\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]|[\uD840-\uD869][\uDC00-\uDED6]/;
 
 function cleanupMicrosoftDisplayName(value = "") {
-  return cleanAvatarText(value, "")
+  return cleanText(value, "")
     .replace(UNWANTED_ENCLOSURES_REGEX, "")
     .replace(UNWANTED_CHARS_REGEX, "")
     .replace(MULTIPLE_WHITESPACES_REGEX, " ")
@@ -407,7 +399,7 @@ function cleanupMicrosoftDisplayName(value = "") {
 export function avatarInitials(value = "") {
   const rawName = isObject(value)
     ? avatarNameFromIdentity(value)
-    : cleanAvatarText(value, "");
+    : cleanText(value, "");
 
   if (!rawName) return "ON";
 
@@ -489,7 +481,7 @@ export default Object.freeze({
   toneCount: AVATAR_TONE_COUNT,
   colorSpace: AVATAR_COLOR_SPACE,
   colors: MICROSOFT_PERSONA_COLORS,
-  cleanText: cleanAvatarText,
+  cleanText,
   normalizeEmail: normalizeAvatarEmail,
   normalizeUserId: normalizeAvatarUserId,
   normalizeUsername: normalizeAvatarUsername,

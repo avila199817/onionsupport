@@ -13,6 +13,7 @@ import {
   INCIDENCIAS_URGENT_FACET_SERVER_PRIORITY,
 } from "./incidencias.priority-policy.js";
 import { exactCount, exactTotal } from "../../core/statistics.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const INCIDENCIAS_FILTER_FACETS_VERSION =
   "incidencias.filter-facets.v2-priority-truth";
@@ -34,20 +35,13 @@ function array(value = null) {
   return Array.isArray(value) ? value : [];
 }
 
-function text(value = "") {
-  return String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function number(value = 0, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 export function normalizeIncidenciasFilterFacet(value = "all") {
-  const key = text(value).toLowerCase();
+  const key = cleanText(value).toLowerCase();
   return INCIDENCIAS_FILTER_FACET_KEYS.includes(key) ? key : "all";
 }
 
@@ -87,7 +81,7 @@ export function getIncidenciasFacetRequestQuery(
     includeTotal: true,
     ...getIncidenciasFacetFilterQuery(value),
   };
-  const normalizedSearch = text(search);
+  const normalizedSearch = cleanText(search);
   if (normalizedSearch) query.q = normalizedSearch;
   return query;
 }

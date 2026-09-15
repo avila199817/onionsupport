@@ -8,6 +8,7 @@
 ========================================================= */
 
 import * as Base from "./facturas.api.base.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export * from "./facturas.api.base.js";
 
@@ -57,14 +58,6 @@ function object(value, fallback = {}) {
   return isObject(value) ? value : fallback;
 }
 
-function text(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return output || fallback;
-}
-
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
@@ -77,7 +70,7 @@ function first(...values) {
 }
 
 function recordKey(value = "") {
-  return text(value, "")
+  return cleanText(value, "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -94,7 +87,7 @@ export function isFacturaTechnicalRecord(value = null) {
   const item = object(value, null);
   if (!item) return false;
 
-  const id = text(item.id, "");
+  const id = cleanText(item.id, "");
   if (id.startsWith(FACTURA_CREATE_IDEMPOTENCY_PREFIX)) return true;
 
   for (const candidate of [
@@ -111,7 +104,7 @@ export function isFacturaTechnicalRecord(value = null) {
   return Boolean(
     recordKey(item.operation) === "factura_create" &&
     (
-      text(item.operationHash, "") ||
+      cleanText(item.operationHash, "") ||
       recordKey(first(
         item.version,
         item.idempotencyVersion,
@@ -144,11 +137,11 @@ function promoteTechnicalFactura(value = {}) {
 
   const nested = technicalSnapshotFactura(item);
   if (!nested) {
-    return { factura: item, technicalId: text(item.id, "") };
+    return { factura: item, technicalId: cleanText(item.id, "") };
   }
 
-  const technicalId = text(item.id, "");
-  const canonicalId = text(first(
+  const technicalId = cleanText(item.id, "");
+  const canonicalId = cleanText(first(
     nested.id,
     nested.facturaId,
     nested.invoiceId,
@@ -161,8 +154,8 @@ function promoteTechnicalFactura(value = {}) {
     factura: {
       ...nested,
       id: canonicalId || nested.id,
-      facturaId: text(first(nested.facturaId, canonicalId), canonicalId),
-      invoiceId: text(first(nested.invoiceId, canonicalId), canonicalId),
+      facturaId: cleanText(first(nested.facturaId, canonicalId), canonicalId),
+      invoiceId: cleanText(first(nested.invoiceId, canonicalId), canonicalId),
       meta: {
         ...object(nested.meta),
         technicalAliasRecovered: true,
@@ -227,7 +220,7 @@ function sanitizeFacturaListResponse(response = null) {
 }
 
 function isUnsignedAzureBlobUrl(value = "") {
-  const raw = text(value, "");
+  const raw = cleanText(value, "");
   if (!/^https:\/\//i.test(raw)) return false;
 
   try {
@@ -246,7 +239,7 @@ function isUnsignedAzureBlobUrl(value = "") {
 }
 
 export function isFacturaDocumentActionUrl(value = "") {
-  const raw = text(value, "");
+  const raw = cleanText(value, "");
   if (!raw) return false;
   if (/^(javascript|data|vbscript|file):/i.test(raw)) return false;
   if (/^blob:/i.test(raw)) return true;
@@ -256,7 +249,7 @@ export function isFacturaDocumentActionUrl(value = "") {
 }
 
 function cleanActionUrl(value = "") {
-  const raw = text(value, "");
+  const raw = cleanText(value, "");
   return isFacturaDocumentActionUrl(raw) ? raw : "";
 }
 
@@ -351,7 +344,7 @@ function facturaId(item = {}) {
   const promotion = promoteTechnicalFactura(item);
   const source = object(promotion.factura);
 
-  return text(first(
+  return cleanText(first(
     source?.id,
     source?.facturaId,
     source?.invoiceId,
@@ -624,7 +617,7 @@ export async function downloadFacturaPdfRequest(id = "", options = {}) {
 }
 
 export async function fetchFacturaPdfRequest(id = "", mode = Base.FACTURA_PDF_MODES.DOWNLOAD, options = {}) {
-  const key = text(mode, "download").toLowerCase();
+  const key = cleanText(mode, "download").toLowerCase();
   return ["view", "inline", "ver", "open", "preview"].includes(key)
     ? viewFacturaPdfRequest(id, options)
     : downloadFacturaPdfRequest(id, options);

@@ -28,6 +28,7 @@ import {
 import {
   synchronizeAvatars,
 } from "../avatar-system/index.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const INCIDENCIAS_TECHNICIAN_PROFILE_VERSION =
   "incidencias-technician-profile.v9-public-metrics-rating-ready";
@@ -96,12 +97,6 @@ const modalLifecycle = createModalLifecycle({
 const browser = () =>
   typeof window !== "undefined" && typeof document !== "undefined";
 
-const text = (value = "", fallback = "") =>
-  String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim() || fallback;
-
 const object = (value, fallback = {}) =>
   value && typeof value === "object" && !Array.isArray(value)
     ? value
@@ -129,10 +124,10 @@ function firstDefined(...values) {
 }
 
 
-const attr = (value = "") => escapeHtml(text(value, ""));
+const attr = (value = "") => escapeHtml(cleanText(value, ""));
 
 function normalizeKey(value = "") {
-  return text(value, "")
+  return cleanText(value, "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -142,7 +137,7 @@ function normalizeKey(value = "") {
 }
 
 function normalizeName(value = "") {
-  return text(value, "")
+  return cleanText(value, "")
     .toLocaleLowerCase("es-ES")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -152,12 +147,12 @@ function normalizeName(value = "") {
 }
 
 function normalizeEmail(value = "") {
-  const email = text(value, "").toLowerCase();
+  const email = cleanText(value, "").toLowerCase();
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : "";
 }
 
 function safeAvatarUrl(value = "") {
-  const raw = text(value, "");
+  const raw = cleanText(value, "");
   if (!raw || raw.startsWith("//") || /[\r\n\t\\]/.test(raw)) return "";
   if (/^(javascript|data|vbscript|file):/i.test(raw)) return "";
   if (/^blob:/i.test(raw)) return raw;
@@ -185,7 +180,7 @@ function safeAvatarUrl(value = "") {
 }
 
 function safeError(error = null) {
-  return text(
+  return cleanText(
     first(
       error?.message,
       error?.data?.message,
@@ -282,7 +277,7 @@ function technicianFromTicket(ticket = {}) {
   );
 
   return {
-    userId: text(first(
+    userId: cleanText(first(
       raw.assignedToUserId,
       raw.technicianUserId,
       raw.tecnicoUserId,
@@ -291,7 +286,7 @@ function technicianFromTicket(ticket = {}) {
       nested.userId,
       nested.id
     ), ""),
-    name: text(first(
+    name: cleanText(first(
       raw.assignedToName,
       raw.technicianName,
       raw.tecnicoName,
@@ -303,7 +298,7 @@ function technicianFromTicket(ticket = {}) {
       nested.nombre
     ), ""),
     email: email === undefined ? undefined : normalizeEmail(email),
-    phone: text(first(
+    phone: cleanText(first(
       raw.assignedToPhone,
       raw.technicianPhone,
       raw.tecnicoPhone,
@@ -316,15 +311,15 @@ function technicianFromTicket(ticket = {}) {
       nested.movil
     ), ""),
     avatar: hasAvatar === false ? "" : avatar === undefined ? undefined : safeAvatarUrl(avatar),
-    username: username === undefined ? undefined : text(username, ""),
-    role: text(first(
+    username: username === undefined ? undefined : cleanText(username, ""),
+    role: cleanText(first(
       nested.profile?.position,
       nested.position,
       nested.role,
       nested.rol,
       assignment.role
     ), ""),
-    status: text(first(
+    status: cleanText(first(
       nested.status,
       nested.estado,
       nested.active === false ? "inactive" : "active"
@@ -364,7 +359,7 @@ export function publicTechnicianProfileFor(tech = {}) {
 
 function mergeTechnician(snapshot = {}, user = {}) {
   const candidate = object(user);
-  const candidateId = text(first(
+  const candidateId = cleanText(first(
     candidate.userId,
     candidate.usuarioId,
     candidate.id,
@@ -390,8 +385,8 @@ function mergeTechnician(snapshot = {}, user = {}) {
   );
   const hasAvatar = firstDefined(source.hasAvatar, source.profile?.hasAvatar, raw.hasAvatar);
   const merged = {
-    lookupUserId: text(snapshot.lookupUserId, ""),
-    userId: text(first(
+    lookupUserId: cleanText(snapshot.lookupUserId, ""),
+    userId: cleanText(first(
       source.userId,
       source.usuarioId,
       source.id,
@@ -399,7 +394,7 @@ function mergeTechnician(snapshot = {}, user = {}) {
       raw.id,
       snapshot.userId
     ), ""),
-    name: text(first(
+    name: cleanText(first(
       source.displayName,
       source.fullName,
       source.name,
@@ -415,7 +410,7 @@ function mergeTechnician(snapshot = {}, user = {}) {
       raw.emailLower,
       snapshot.email
     )),
-    phone: text(first(
+    phone: cleanText(first(
       source.phone,
       source.telefono,
       source.phoneE164,
@@ -427,14 +422,14 @@ function mergeTechnician(snapshot = {}, user = {}) {
       raw.telefono,
       snapshot.phone
     ), ""),
-    username: text(firstDefined(
+    username: cleanText(firstDefined(
       source.username,
       source.userName,
       source.slug,
       raw.username,
       snapshot.username
     ), ""),
-    role: text(first(
+    role: cleanText(first(
       source.profile?.position,
       source.position,
       source.cargo,
@@ -445,7 +440,7 @@ function mergeTechnician(snapshot = {}, user = {}) {
       snapshot.role
     ), ""),
     avatar: hasAvatar === false ? "" : safeAvatarUrl(avatar === undefined ? snapshot.avatar : avatar),
-    status: text(first(
+    status: cleanText(first(
       source.status,
       source.estado,
       raw.status,
@@ -558,7 +553,7 @@ export function normalizePublicTechnicianMetrics(response = null) {
 }
 
 function metricSearchTerm(tech = {}) {
-  return text(first(
+  return cleanText(first(
     tech.lookupUserId,
     tech.email,
     tech.username,
@@ -585,8 +580,8 @@ async function requestTechnicianResolvedAggregate(api, tech = {}, publicHints = 
       summaryOnly: true,
       includeItems: false,
       publicMetrics: true,
-      technicianUserId: text(tech.lookupUserId, ""),
-      assignedToUserId: text(tech.lookupUserId, ""),
+      technicianUserId: cleanText(tech.lookupUserId, ""),
+      assignedToUserId: cleanText(tech.lookupUserId, ""),
       technicianEmail: normalizeEmail(tech.email),
     });
   }
@@ -638,7 +633,7 @@ function sectionHeader(title = "", subtitle = "") {
 }
 
 function metaCard(label = "", value = "—", hint = "", extraClass = "") {
-  const safeValue = text(value, "—");
+  const safeValue = cleanText(value, "—");
   return `<div class="ui-detail-modal-meta-card ${attr(extraClass)}"><span>${escapeHtml(label)}</span><strong title="${attr(safeValue)}">${escapeHtml(safeValue)}</strong>${hint ? `<span class="inc-technician-meta-hint">${escapeHtml(hint)}</span>` : ""}</div>`;
 }
 
@@ -651,8 +646,8 @@ function contactActionIcon(kind = "mail") {
 }
 
 function contactCard(label = "", value = "", href = "", actionLabel = "", icon = "mail") {
-  const safeValue = text(value, "No disponible");
-  const safeHref = text(href, "");
+  const safeValue = cleanText(value, "No disponible");
+  const safeHref = cleanText(href, "");
   const iconMarkup = `<span class="inc-technician-contact-icon" aria-hidden="true">${contactActionIcon(icon)}</span>`;
   const content = `${iconMarkup}<span>${escapeHtml(label)}</span><strong title="${attr(safeValue)}">${escapeHtml(safeValue)}</strong>`;
   if (!safeHref) {
@@ -745,9 +740,9 @@ function renderError(seed = {}, message = "") {
 function renderProfile(tech = {}, metrics = {}) {
   const profile = publicTechnicianProfileFor(tech);
   const email = normalizeEmail(tech.email);
-  const phone = text(tech.phone, "");
+  const phone = cleanText(tech.phone, "");
   const dialPhone = phone.replace(/[^+\d]/g, "");
-  const roleLabel = text(first(
+  const roleLabel = cleanText(first(
     tech.publicRole,
     profile?.role,
     tech.role,
@@ -780,9 +775,9 @@ function renderProfile(tech = {}, metrics = {}) {
 }
 
 function renderShell({ tech = {}, body = "", summary = "" } = {}) {
-  const name = text(tech.name, "Técnico");
+  const name = cleanText(tech.name, "Técnico");
   const profile = publicTechnicianProfileFor(tech);
-  const role = text(first(
+  const role = cleanText(first(
     tech.publicRole,
     profile?.role,
     tech.role,
@@ -859,9 +854,9 @@ function technicianTriggerAvatar(trigger = null) {
 function technicianTriggerName(trigger = null) {
   const avatar = technicianTriggerAvatar(trigger);
   if (avatar?.hasAttribute("data-avatar-name")) {
-    return text(avatar.dataset.avatarName, "Técnico");
+    return cleanText(avatar.dataset.avatarName, "Técnico");
   }
-  return text(first(
+  return cleanText(first(
     trigger?.querySelector?.(".incidencias-assigned-name")?.textContent,
     trigger?.querySelector?.(".incidencias-modal-technician-copy strong")?.textContent,
     trigger?.querySelector?.("strong")?.textContent,
@@ -882,7 +877,7 @@ function technicianTriggerEmail(trigger = null) {
 }
 
 function technicianTriggerLookupUserId(trigger = null) {
-  return text(first(
+  return cleanText(first(
     trigger?.dataset?.technicianUserId,
     trigger?.querySelector?.("[data-technician-user-id]")?.dataset?.technicianUserId
   ), "");
@@ -893,20 +888,20 @@ function technicianTriggerUserId(trigger = null) {
   if (lookupUserId) return lookupUserId;
   const avatar = technicianTriggerAvatar(trigger);
   if (avatar?.hasAttribute("data-avatar-user-id")) {
-    return text(avatar.dataset.avatarUserId, "");
+    return cleanText(avatar.dataset.avatarUserId, "");
   }
-  return text(trigger?.dataset?.userId, "");
+  return cleanText(trigger?.dataset?.userId, "");
 }
 
 function technicianTriggerUsername(trigger = null) {
   const avatar = technicianTriggerAvatar(trigger);
-  return text(avatar?.dataset?.avatarUsername, "");
+  return cleanText(avatar?.dataset?.avatarUsername, "");
 }
 
 function ticketIdFromTrigger(trigger = null) {
   const row = trigger?.closest?.(ROW);
   const detailRoot = trigger?.closest?.(DETAIL_ROOT);
-  return text(first(
+  return cleanText(first(
     trigger?.dataset?.ticketId,
     row?.dataset?.ticketId,
     row?.dataset?.incidenciaId,
@@ -941,7 +936,7 @@ function decorateDetailTechnicianCards(root = observedModalHost) {
     if (!card) continue;
 
     const name = technicianTriggerName(card);
-    const id = ticketIdFromTrigger(card) || text(
+    const id = ticketIdFromTrigger(card) || cleanText(
       inline.closest?.(DETAIL_ROOT)?.dataset?.ticketId,
       ""
     );

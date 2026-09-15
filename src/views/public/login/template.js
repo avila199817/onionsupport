@@ -21,6 +21,7 @@ import {
   safeAssetSrc,
   safeInternalHref,
 } from "../index.js";
+import { cleanText } from "../../../core/presentation-text.js";
 
 export const LOGIN_TEMPLATE_VERSION =
   "login.template.public.v8-home-logo-link-2026";
@@ -37,17 +38,8 @@ const MAX_PASSWORD_LENGTH = 1024;
    BASICS
 ========================================================= */
 
-function text(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
-}
-
 function dataFlag(name = "") {
-  const clean = text(name, "")
+  const clean = cleanText(name, "")
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, "-")
     .replace(/-+/g, "-")
@@ -59,7 +51,7 @@ function dataFlag(name = "") {
 }
 
 function homeAnchor(hash = "") {
-  const cleanHash = text(hash, "")
+  const cleanHash = cleanText(hash, "")
     .replace(/^#/, "")
     .replace(/[^a-z0-9-]/gi, "");
 

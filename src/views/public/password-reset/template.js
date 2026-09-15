@@ -25,6 +25,7 @@ import {
   safeAssetSrc,
   safeInternalHref,
 } from "../index.js";
+import { cleanText } from "../../../core/presentation-text.js";
 
 export const PASSWORD_RESET_TEMPLATE_VERSION =
   "password-reset.template.public.v4-minimal";
@@ -37,17 +38,8 @@ const PASSWORD_MIN_LENGTH = AUTH_PASSWORD_POLICY.minLength;
 const PASSWORD_MAX_LENGTH = AUTH_PASSWORD_POLICY.maxLength;
 const PASSWORD_POLICY_ID = "password-reset-policy";
 
-function text(value = "", fallback = "") {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
-}
-
 function normalizeMode(value = MODE_REQUEST) {
-  return text(value, MODE_REQUEST).toLowerCase() === MODE_CONFIRM
+  return cleanText(value, MODE_REQUEST).toLowerCase() === MODE_CONFIRM
     ? MODE_CONFIRM
     : MODE_REQUEST;
 }

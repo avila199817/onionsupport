@@ -12,6 +12,8 @@
    - observer y ciclo de vida limitados al host explícito del controller.
 ========================================================= */
 
+import { cleanText } from "../../core/presentation-text.js";
+
 export const INCIDENCIAS_MEDIA_GALLERY_VERSION =
   "incidencias-media-gallery.v2.1.observer-idempotent";
 
@@ -50,12 +52,6 @@ let navigationCount = 0;
 const browser = () =>
   typeof window !== "undefined" && typeof document !== "undefined";
 
-const text = (value = "", fallback = "") =>
-  String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim() || fallback;
-
 export function syncIncidenciasMediaGalleryText(node = null, value = "") {
   if (!node) return false;
 
@@ -79,19 +75,19 @@ function currentPreview(viewer = currentViewer()) {
 }
 
 function previewId(preview = currentPreview()) {
-  return text(preview?.dataset?.previewAttachmentId, "");
+  return cleanText(preview?.dataset?.previewAttachmentId, "");
 }
 
 function attachmentMeta(row = null, trigger = null) {
   const copy = row?.querySelector?.(ATTACHMENT_COPY);
-  const name = text(
+  const name = cleanText(
     copy?.querySelector?.("strong")?.textContent,
-    text(trigger?.getAttribute?.("aria-label"), "")
+    cleanText(trigger?.getAttribute?.("aria-label"), "")
       .replace(/^Ver\s+/i, "")
       .replace(/^Ampliar\s+/i, "")
   );
-  const meta = text(copy?.querySelector?.("span")?.textContent, "");
-  const mime = text(meta.split("·")[0], "").toLowerCase();
+  const meta = cleanText(copy?.querySelector?.("span")?.textContent, "");
+  const mime = cleanText(meta.split("·")[0], "").toLowerCase();
   return { name, mime };
 }
 
@@ -124,7 +120,7 @@ function galleryItems(root = currentRoot()) {
 
   for (const row of root.querySelectorAll(ATTACHMENT_ROW)) {
     const trigger = preferredTrigger(row);
-    const id = text(trigger?.dataset?.attachmentId, "");
+    const id = cleanText(trigger?.dataset?.attachmentId, "");
 
     if (!trigger || !id || seen.has(id) || !isGalleryMedia(row, trigger)) {
       continue;

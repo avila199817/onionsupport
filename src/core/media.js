@@ -13,6 +13,7 @@
 import {
   SENSITIVE_QUERY_PARAMS,
 } from "./config.js";
+import { cleanText } from "./presentation-text.js";
 
 export const MEDIA_URL_POLICY_VERSION =
   "core.media.runtime-url.v1";
@@ -39,22 +40,10 @@ const AZURE_SAS_ALLOWED_SENSITIVE_KEYS =
     "signature",
   ]);
 
-function text(
-  value = "",
-  fallback = ""
-) {
-  const output = String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return output || fallback;
-}
-
 function normalizeKey(
   value = ""
 ) {
-  return text(value)
+  return cleanText(value)
     .replace(/[-_\s]/g, "")
     .toLowerCase();
 }
@@ -79,7 +68,7 @@ function isSameOrigin(
 export function isAzureBlobHostname(
   hostname = ""
 ) {
-  const host = text(hostname)
+  const host = cleanText(hostname)
     .toLowerCase();
 
   return Boolean(
@@ -91,7 +80,7 @@ export function isAzureBlobHostname(
 export function isOnionMediaHostname(
   hostname = ""
 ) {
-  const host = text(hostname)
+  const host = cleanText(hostname)
     .toLowerCase();
 
   return Boolean(
@@ -191,7 +180,7 @@ export function sanitizeRuntimeImageUrl(
   } = {}
 ) {
   const raw =
-    text(value, "");
+    cleanText(value, "");
 
   if (
     !raw ||

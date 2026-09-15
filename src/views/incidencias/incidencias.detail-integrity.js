@@ -14,18 +14,13 @@
 
 "use strict";
 
+import { cleanText } from "../../core/presentation-text.js";
+
 export const INCIDENCIAS_DETAIL_INTEGRITY_VERSION =
   "incidencias.detail-integrity.authoritative.v1";
 
 export const INCIDENCIAS_DETAIL_INTEGRITY_RETRY_DELAYS_MS =
   Object.freeze([0, 180, 650, 1600]);
-
-function clean(value = "") {
-  return String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
 
 function object(value = null) {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -64,7 +59,7 @@ function firstArray(...values) {
 
 function ticketId(detail = {}) {
   const source = object(detail);
-  return clean(
+  return cleanText(
     source.ticketId ||
     source.incidenciaId ||
     source.id ||
@@ -84,7 +79,7 @@ function timelineSplit(detail = {}) {
 
   for (const entry of timeline) {
     const item = object(entry);
-    const kind = clean(
+    const kind = cleanText(
       item.kind || item.type || item.action || item.event || ""
     ).toLocaleLowerCase("es-ES");
 
@@ -272,7 +267,7 @@ export function createDetailIntegrityLoader(
   let lastIncompleteCollections = [];
 
   async function request(id = "", options = {}) {
-    const key = clean(id);
+    const key = cleanText(id);
     const signal = options?.signal || null;
     const requestedAttempts = Math.trunc(Number(options?.integrityAttempts) || delays.length);
     const attempts = Math.max(1, Math.min(8, requestedAttempts));

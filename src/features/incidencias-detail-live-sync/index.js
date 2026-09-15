@@ -9,6 +9,7 @@ import {
   commentsFromDetail,
   commentSignature,
 } from "../incidencias-detail-state/index.js";
+import { cleanText } from "../../core/presentation-text.js";
 
 export const INCIDENCIAS_DETAIL_LIVE_SYNC_VERSION =
   "incidencias-detail-live-sync.v4.controller-signals";
@@ -47,12 +48,6 @@ let signalRefreshCount = 0;
 
 const browser = () =>
   typeof window !== "undefined" && typeof document !== "undefined";
-
-const text = (value = "", fallback = "") =>
-  String(value ?? "")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim() || fallback;
 
 const object = (value, fallback = {}) =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -93,7 +88,7 @@ function currentRoot() {
 }
 
 function ticketId(root = currentRoot()) {
-  return text(root?.dataset?.ticketId || root?.dataset?.incidenciaId, "");
+  return cleanText(root?.dataset?.ticketId || root?.dataset?.incidenciaId, "");
 }
 
 function pageVisible() {
@@ -274,14 +269,14 @@ function attachmentsFromDetail(detail = {}) {
 function attachmentDetailSignature(detail = {}) {
   return attachmentsFromDetail(detail)
     .map((file, index) => [
-      text(
+      cleanText(
         file?.id ||
         file?.attachmentId ||
         file?.fileId ||
         `att_${index}`
       ),
-      text(file?.name || file?.filename || file?.fileName, ""),
-      text(
+      cleanText(file?.name || file?.filename || file?.fileName, ""),
+      cleanText(
         file?.contentType ||
         file?.type ||
         file?.mimeType ||
@@ -299,10 +294,10 @@ function detailSignature(detail = {}) {
   const comments = commentsFromDetail(detail);
 
   return [
-    text(detail?.status || detail?.estado, ""),
-    text(detail?.priority || detail?.prioridad, ""),
-    text(detail?.category || detail?.categoria || detail?.type, ""),
-    text(
+    cleanText(detail?.status || detail?.estado, ""),
+    cleanText(detail?.priority || detail?.prioridad, ""),
+    cleanText(detail?.category || detail?.categoria || detail?.type, ""),
+    cleanText(
       first(
         detail?.assignedToName,
         detail?.technicianName,
@@ -323,7 +318,7 @@ function rowForTicket(id = activeTicketId) {
   if (!mountRoot || !id) return null;
 
   for (const row of mountRoot.querySelectorAll(ROW)) {
-    const rowId = text(
+    const rowId = cleanText(
       row.dataset?.ticketId || row.dataset?.incidenciaId,
       ""
     );
@@ -340,10 +335,10 @@ function rowFingerprint(row = null) {
   const dataset = Object.entries(row.dataset || {})
     .filter(([key]) => !/loading|busy|opening/i.test(key))
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, value]) => `${key}:${text(value, "")}`)
+    .map(([key, value]) => `${key}:${cleanText(value, "")}`)
     .join("|");
 
-  const copy = text(row.textContent, "");
+  const copy = cleanText(row.textContent, "");
   return `${dataset}###${copy}`;
 }
 
@@ -444,7 +439,7 @@ export function syncIncidenciasDetailLiveSync(payload = {}) {
   if (!browser()) return false;
   mountIncidenciasDetailLiveSync();
   const nextHost = payload.modalHost || null;
-  const nextId = text(payload.id || ticketId(nextHost?.querySelector?.(ROOT)), "");
+  const nextId = cleanText(payload.id || ticketId(nextHost?.querySelector?.(ROOT)), "");
   if (host !== nextHost || owner?.controller !== payload.controller || activeTicketId !== nextId || !payload.open) {
     resetActive();
   }

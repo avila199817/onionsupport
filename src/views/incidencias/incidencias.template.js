@@ -13,6 +13,7 @@ import { escapeHtml } from "../../core/escape-html.js";
 import { userNameFromIdentity } from "../../core/user-identity.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { technicianIdentity } from "../../features/incidencias-comment-identity/index.js";
+import { cleanText } from "../../core/presentation-text.js";
 export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v35-visible-date-minute-precision-linked-invoice-row-total";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
@@ -65,11 +66,6 @@ function arr(v) {
   return [];
 }
 
-function txt(v = "", fb = "") {
-  const out = String(v ?? "").replace(/[\r\n\t]/g, " ").replace(/\s+/g, " ").trim();
-  return out || fb;
-}
-
 function first(...values) {
   for (const v of values) {
     if (v === null || v === undefined) continue;
@@ -101,10 +97,10 @@ function num(v = 0, fb = 0) {
   return Number.isFinite(parsed) ? parsed : fb;
 }
 
-const at = (v = "") => escapeHtml(txt(v, ""));
-const cls = (...v) => v.flat(Infinity).map((x) => txt(x, "")).filter(Boolean).join(" ");
-const key = (v = "") => txt(v, "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[\s-]+/g, "_").replace(/[^\w:.]/g, "").replace(/^_+|_+$/g, "");
-const searchKey = (v = "") => txt(v, "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+const at = (v = "") => escapeHtml(cleanText(v, ""));
+const cls = (...v) => v.flat(Infinity).map((x) => cleanText(x, "")).filter(Boolean).join(" ");
+const key = (v = "") => cleanText(v, "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[\s-]+/g, "_").replace(/[^\w:.]/g, "").replace(/^_+|_+$/g, "");
+const searchKey = (v = "") => cleanText(v, "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
 function htmlAttrs(attrs = {}) {
   return Object.entries(obj(attrs))
@@ -118,7 +114,7 @@ function htmlAttrs(attrs = {}) {
 }
 
 function safeUrl(v = "") {
-  const raw = txt(v, "");
+  const raw = cleanText(v, "");
   if (!raw || raw.startsWith("//") || /[\r\n\t\\]/.test(raw)) return "";
   if (/^(javascript|data|vbscript|file):/i.test(raw)) return "";
   if (/[?&#](?:access_token|refresh_token|id_token|token|code|secret|session|password|pwd|key|sig|signature|jwt|authorization|reset_token|activation_token|sas)=/i.test(raw)) return "";
@@ -151,7 +147,7 @@ function firstUrl(...values) {
 }
 
 function titleCaseLabel(v = "", fb = "General") {
-  const value = txt(v, fb).replace(/[_-]+/g, " ").toLocaleLowerCase("es-ES");
+  const value = cleanText(v, fb).replace(/[_-]+/g, " ").toLocaleLowerCase("es-ES");
   return value.replace(/(^|\s)([a-záéíóúüñ])/g, (_, prefix, letter) => `${prefix}${letter.toLocaleUpperCase("es-ES")}`);
 }
 
@@ -186,7 +182,7 @@ const TIME_FORMATTER = new Intl.DateTimeFormat("es-ES", { hour: "2-digit", minut
 const MONEY_FORMATTERS = new Map();
 function formatNumber(v = 0) { return NUMBER_FORMATTER.format(num(v, 0)); }
 function formatMoney(v = 0, currency = DEFAULT_CURRENCY) {
-  const code = txt(currency, DEFAULT_CURRENCY).toUpperCase();
+  const code = cleanText(currency, DEFAULT_CURRENCY).toUpperCase();
   let formatter = MONEY_FORMATTERS.get(code);
   if (!formatter) {
     try {
@@ -211,14 +207,14 @@ function formatDate(v = "") {
   const raw = first(v, "");
   if (!raw) return "—";
   const d = new Date(raw);
-  if (!Number.isFinite(d.getTime())) return txt(raw, "—");
+  if (!Number.isFinite(d.getTime())) return cleanText(raw, "—");
   try { return DATE_FORMATTER.format(d); } catch { return d.toISOString(); }
 }
 function formatShortDate(v = "") {
   const raw = first(v, "");
   if (!raw) return "—";
   const d = new Date(raw);
-  if (!Number.isFinite(d.getTime())) return txt(raw, "—");
+  if (!Number.isFinite(d.getTime())) return cleanText(raw, "—");
   try { return `${SHORT_DATE_FORMATTER.format(d)} · ${TIME_FORMATTER.format(d)}`; } catch { return d.toISOString().replace("T", " ").slice(0, 16); }
 }
 
@@ -227,7 +223,7 @@ function formatRelativeDate(v = "") {
   if (!raw) return "—";
   const d = new Date(raw);
   const ms = d.getTime();
-  if (!Number.isFinite(ms)) return txt(raw, "—");
+  if (!Number.isFinite(ms)) return cleanText(raw, "—");
   let exactTime = "";
   try { exactTime = TIME_FORMATTER.format(d); } catch { exactTime = d.toISOString().slice(11, 16); }
   const withTime = (label = "") => `${label} · ${exactTime}`;
@@ -260,39 +256,39 @@ function unwrap(v = {}) {
 
 function getId(it = {}) {
   const r = unwrap(it);
-  return txt(first(r.ticketId, r.incidenciaId, r.id, r.entityId, r.code, r.numero, r.ticketCode, r.reference, r.ref, ""), "");
+  return cleanText(first(r.ticketId, r.incidenciaId, r.id, r.entityId, r.code, r.numero, r.ticketCode, r.reference, r.ref, ""), "");
 }
 function getSubject(it = {}) {
   const r = unwrap(it);
-  return txt(first(r.subject, r.asunto, r.title, r.name, "Sin asunto"), "Sin asunto");
+  return cleanText(first(r.subject, r.asunto, r.title, r.name, "Sin asunto"), "Sin asunto");
 }
 function getDesc(it = {}) {
   const r = unwrap(it);
-  return txt(first(r.preview, r.description, r.descripcion, r.message, r.body, ""), "");
+  return cleanText(first(r.preview, r.description, r.descripcion, r.message, r.body, ""), "");
 }
 function getStatusRaw(it = {}) {
   const r = unwrap(it);
-  return txt(first(r.status, r.estado, r.statusKey, r.lifecycle?.status, "open"), "open");
+  return cleanText(first(r.status, r.estado, r.statusKey, r.lifecycle?.status, "open"), "open");
 }
 function getPriorityRaw(it = {}) {
   const r = unwrap(it);
-  return txt(first(r.priority, r.prioridad, r.severity, "medium"), "medium");
+  return cleanText(first(r.priority, r.prioridad, r.severity, "medium"), "medium");
 }
 function getCategory(it = {}) {
   const r = unwrap(it);
-  return txt(first(r.category, r.categoria, r.tipo, r.type, "general"), "general");
+  return cleanText(first(r.category, r.categoria, r.tipo, r.type, "general"), "general");
 }
 
 function getClientName(it = {}) {
   const r = unwrap(it);
   return userNameFromIdentity(r) || userNameFromIdentity(r.requesterSnapshot) ||
     userNameFromIdentity(r.cliente) || userNameFromIdentity(r.receptor) ||
-    txt(first(r.requesterName, r.clientName, r.clienteNombre, r.email, "Usuario"), "Usuario");
+    cleanText(first(r.requesterName, r.clientName, r.clienteNombre, r.email, "Usuario"), "Usuario");
 }
 
 function getClientEmail(it = {}) {
   const r = unwrap(it), rs = obj(r.requesterSnapshot), c = obj(r.cliente), rec = obj(r.receptor), u = obj(r.user);
-  return txt(first(r.email, r.emailLower, r.userEmail, r.clienteEmail, rs.email, rs.emailLower, c.email, c.emailLower, rec.email, rec.emailLower, u.email, u.emailLower, ""), "");
+  return cleanText(first(r.email, r.emailLower, r.userEmail, r.clienteEmail, rs.email, rs.emailLower, c.email, c.emailLower, rec.email, rec.emailLower, u.email, u.emailLower, ""), "");
 }
 
 function getAvatar(it = {}) {
@@ -302,12 +298,12 @@ function getAvatar(it = {}) {
 
 function getAssignedName(it = {}) {
   const r = unwrap(it), a = obj(r.assignment), tec = obj(r.tecnico), asg = obj(r.assignedTo), t = obj(r.technician);
-  return txt(first(r.assignedToName, r.technicianName, r.tecnicoName, r.agentName, a.assignedToName, a.technician?.name, a.technician?.displayName, tec.displayName, tec.name, tec.nombre, asg.displayName, asg.name, asg.nombre, t.displayName, t.name, t.nombre, ""), "");
+  return cleanText(first(r.assignedToName, r.technicianName, r.tecnicoName, r.agentName, a.assignedToName, a.technician?.name, a.technician?.displayName, tec.displayName, tec.name, tec.nombre, asg.displayName, asg.name, asg.nombre, t.displayName, t.name, t.nombre, ""), "");
 }
 
 function getAssignedEmail(it = {}) {
   const r = unwrap(it), a = obj(r.assignment), tec = obj(r.tecnico), asg = obj(r.assignedTo), t = obj(r.technician);
-  return txt(first(r.assignedToEmail, r.technicianEmail, r.tecnicoEmail, r.agentEmail, a.assignedToEmail, a.technician?.email, tec.email, asg.email, t.email, ""), "");
+  return cleanText(first(r.assignedToEmail, r.technicianEmail, r.tecnicoEmail, r.agentEmail, a.assignedToEmail, a.technician?.email, tec.email, asg.email, t.email, ""), "");
 }
 
 function getAssignedAvatar(it = {}) {
@@ -395,7 +391,7 @@ function getInvoiceContributionTotal(it = {}) {
 
 function getCurrency(it = {}) {
   const r = unwrap(it);
-  return txt(first(r.currency, r.moneda, r.facturaCurrency, r.facturaMoneda, r.invoiceSnapshot?.currency, r.billing?.currency, r.linkedInvoices?.currency, r.meta?.invoiceCurrency, DEFAULT_CURRENCY), DEFAULT_CURRENCY).toUpperCase();
+  return cleanText(first(r.currency, r.moneda, r.facturaCurrency, r.facturaMoneda, r.invoiceSnapshot?.currency, r.billing?.currency, r.linkedInvoices?.currency, r.meta?.invoiceCurrency, DEFAULT_CURRENCY), DEFAULT_CURRENCY).toUpperCase();
 }
 
 /* =========================================================
@@ -429,7 +425,7 @@ function statusKey(v = "") {
 }
 function statusLabel(v = "") {
   const normalized = statusKey(v);
-  return STATUS_LABELS[normalized] || txt(v, "Abierta");
+  return STATUS_LABELS[normalized] || cleanText(v, "Abierta");
 }
 function priorityKey(it = {}) {
   const k = key(getPriorityRaw(it) || "medium");
@@ -625,7 +621,7 @@ function buildVm(input = {}) {
   const items = normalizeItems(d);
   const rawFilter = key(first(d.filter, "all"));
   const filter = normalizeFilter(d.filter);
-  const search = txt(d.search, "");
+  const search = cleanText(d.search, "");
   const order = normalizeSort(first(d.sortOrder, d.order, d.sort?.order, d.sort?.direction, DEFAULT_SORT_ORDER));
   const sortMode = normalizeSortMode(first(d.sortMode, d.sort?.mode, d.sort?.field, DEFAULT_SORT_MODE));
   const selection = sortMode === "attachments"
@@ -652,7 +648,7 @@ function buildVm(input = {}) {
   );
   const visible = filtered.slice(0, visibleLimit);
   const total = remoteTotal(d, items.length);
-  const nextCursor = txt(first(d.nextCursor, d.pagination?.nextCursor, ""), "");
+  const nextCursor = cleanText(first(d.nextCursor, d.pagination?.nextCursor, ""), "");
   /*
     Una página remota sólo es accionable si existe cursor opaco. El total no
     puede activar por sí solo el feed: hacerlo dejaría un sentinel permanente
@@ -666,7 +662,7 @@ function buildVm(input = {}) {
   const filterFacetsExact = d.filterFacetsExact === true;
   return {
     data: d,
-    route: txt(first(d.route, d.routes?.incidencias, DEFAULT_ROUTE), DEFAULT_ROUTE),
+    route: cleanText(first(d.route, d.routes?.incidencias, DEFAULT_ROUTE), DEFAULT_ROUTE),
     admin: Boolean(d.admin || d.role === "admin"),
     items,
     filteredItems: filtered,
@@ -691,8 +687,8 @@ function buildVm(input = {}) {
     creating: d.creating === true,
     loadingMore: d.loadingMore === true,
     listQueryPending: d.listQueryPending === true,
-    incrementalError: txt(d.incrementalError, ""),
-    error: txt(d.error, ""),
+    incrementalError: cleanText(d.incrementalError, ""),
+    error: cleanText(d.error, ""),
     filter,
     serverFilterApplied,
     selection,
@@ -706,7 +702,7 @@ function buildVm(input = {}) {
     filterFacetsExact,
     statsPartial,
     stats,
-    openingTicketId: txt(d.openingTicketId, ""),
+    openingTicketId: cleanText(d.openingTicketId, ""),
     diagnostics: {
       totalGreaterThanItems: statsPartial,
       extractedItems: items.length,
@@ -1077,7 +1073,7 @@ export function renderIncidenciasErrorState(message = "No se pudieron cargar las
     <section class="incidencias-view-root incidencias-view-root--error has-error" data-incidencias-scope="true" data-template-version="${at(INCIDENCIAS_TEMPLATE_VERSION)}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" aria-busy="false">
       <section class="incidencias-error" data-incidencias-focus-fallback="true" tabindex="-1" role="alert" aria-live="assertive" aria-atomic="true" aria-labelledby="incidencias-fatal-error-title" aria-describedby="incidencias-fatal-error-text">
         <h3 id="incidencias-fatal-error-title" class="incidencias-error-title">No se pudieron cargar las incidencias</h3>
-        <p id="incidencias-fatal-error-text" class="incidencias-error-text">${escapeHtml(txt(message, "Error desconocido al cargar la vista."))}</p>
+        <p id="incidencias-fatal-error-text" class="incidencias-error-text">${escapeHtml(cleanText(message, "Error desconocido al cargar la vista."))}</p>
         <button type="button" class="incidencias-btn" data-incidencias-action="${INCIDENCIAS_ACTIONS.REFRESH}">${icon("refresh")}<span>Reintentar</span></button>
       </section>
     </section>

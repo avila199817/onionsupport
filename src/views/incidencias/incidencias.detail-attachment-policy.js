@@ -13,6 +13,8 @@
    de 50 MB para evitar aceptar archivos que el backend rechazará después.
 ========================================================= */
 
+import { cleanText } from "../../core/presentation-text.js";
+
 export const INCIDENCIAS_DETAIL_ATTACHMENT_POLICY_VERSION =
   "incidencias.detail-attachment-policy.v2.observer-idempotent";
 
@@ -96,10 +98,7 @@ function formatLimit(value = 0) {
 }
 
 function filename(file = {}) {
-  return String(file?.name || "seleccionado")
-    .replace(/[\r\n\t]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim() || "seleccionado";
+  return cleanText(file?.name || "seleccionado", "seleccionado");
 }
 
 export function getIncidenciasDetailAttachmentPolicy(role = "user") {

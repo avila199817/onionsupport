@@ -16,7 +16,12 @@ const JS_ROOT = resolve(DIST, "assets/js");
 // Ceilings allow 1567 / 1040 / 2593 bytes (1.00% / 1.65% / 1.20%) for
 // bounded maintenance, not another invoice graph. Groups overlap; never add
 // them or interpret source bytes as latency. See the canonical cleanup log.
-const BUDGETS = Object.freeze({ app: 158000, auth: 64000, bootstrapPublicHome: 218000 });
+// R04 (2026-09-15): the modal-family consolidation used the bootstrap/Home
+// allowance (observed 217970 on main a46a4037). The public Home fix that
+// keeps a requested fragment aligned while late route styles settle adds
+// 317 raw bytes to home-*.js (observed 218293); the ceiling moves to 218500,
+// leaving 207 bytes. app and auth keep their ceilings (157619 / 63958).
+const BUDGETS = Object.freeze({ app: 158000, auth: 64000, bootstrapPublicHome: 218500 });
 
 function staticImports(code, identifier) {
   // PARSE ONLY. Never link, evaluate or supply a dynamic-import callback.

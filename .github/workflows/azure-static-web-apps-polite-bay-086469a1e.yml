@@ -156,13 +156,16 @@ jobs:
               "https://api.github.com/repos/${REPOSITORY}/commits/${REVISION}/pulls"
           )"
 
+          # The revision must be the exact merge commit of a PR merged into main,
+          # not merely a commit associated with one.
           merged_main_count="$(
-            jq '[.[] | select(.merged_at != null and .base.ref == "main")] | length' \
+            jq --arg revision "$REVISION" \
+              '[.[] | select(.merged_at != null and .base.ref == "main") | select(.merge_commit_sha == $revision)] | length' \
               <<< "$response"
           )"
 
           if [[ "$merged_main_count" -lt 1 ]]; then
-            echo "::error title=Automatic production rejected::${REVISION} is not associated with a merged PR targeting main."
+            echo "::error title=Automatic production rejected::${REVISION} is not the merge commit of a pull request merged into main."
             echo "Use a pull request, or workflow_dispatch for an explicit emergency release."
             exit 1
           fi

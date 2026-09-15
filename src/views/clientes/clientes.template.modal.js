@@ -11,7 +11,6 @@ import { createModalHost, renderModalCloseButton, renderModalContent, renderModa
    Responsabilidad:
    - Renderizar el detalle de un cliente ya normalizado por clientes.api.js.
    - Mantener el contrato DOM/clases de /src/css/views/clientes/detail.css.
-   - Mantener compatibilidad visual con aliases incidencias-modal-*.
    - Mantener bridge open/show/render/close consumido por clientes/index.js.
    - Ser una isla SPA segura: host propio, ownership propio y teardown seguro.
    - Mantener detalle estrictamente read-only:
@@ -2393,7 +2392,7 @@ function renderChip(
     "neutral";
 
   return (
-    `<span class="clientes-modal-chip incidencias-modal-chip incidencias-modal-chip--${attr(safeModifier)} clientes-modal-chip--${attr(safeModifier)}">` +
+    `<span class="clientes-modal-chip clientes-modal-chip--${attr(safeModifier)}">` +
     `${escapeHtml(label)}` +
     `</span>`
   );
@@ -2430,15 +2429,15 @@ function renderAvatar(
 
   return `
     <div
-      class="clientes-modal-avatar incidencias-modal-avatar"
+      class="clientes-modal-avatar"
       title="${attr(name)}"
     >
       <div
         class="${joinClasses(
-          "clientes-modal-avatar-frame incidencias-modal-avatar-frame",
+          "clientes-modal-avatar-frame",
           avatarUrl
             ? ""
-            : "clientes-modal-avatar-frame--fallback incidencias-modal-avatar-frame--fallback"
+            : "clientes-modal-avatar-frame--fallback"
         )}"
         data-modal-avatar-frame="true"
         data-avatar-system="true"
@@ -2467,7 +2466,7 @@ function renderAvatar(
         }
 
         <span
-          class="clientes-modal-avatar-fallback incidencias-modal-avatar-fallback"
+          class="clientes-modal-avatar-fallback"
         >${escapeHtml(presentation.initials)}</span>
       </div>
     </div>
@@ -2481,7 +2480,7 @@ function renderMetaField(
 ) {
   const classes =
     joinClasses(
-      "clientes-modal-meta-card incidencias-modal-meta-card",
+      "clientes-modal-meta-card",
       options.className ||
       ""
     );
@@ -2534,7 +2533,7 @@ function renderFeedbackBox(
 
   return `
     <div
-      class="clientes-modal-feedback incidencias-modal-feedback incidencias-modal-feedback--${attr(safeType)} clientes-modal-feedback--${attr(safeType)}"
+      class="clientes-modal-feedback clientes-modal-feedback--${attr(safeType)}"
       role="${safeType === "error" ? "alert" : "status"}"
       aria-live="${safeType === "error" ? "assertive" : "polite"}"
       data-modal-feedback="true"
@@ -2564,12 +2563,12 @@ function renderCopyButton(
   return `
     <button
       type="button"
-      class="clientes-modal-copy-btn incidencias-modal-view-btn"
+      class="clientes-modal-copy-btn"
       data-detail-action="${attr(action)}"
       data-copy-value="${attr(clean)}"
       aria-label="${attr(label)}"
     >
-      <span class="incidencias-modal-action-icon">
+      <span class="ui-detail-modal-action-icon">
         ${icon("copy")}
       </span>
 
@@ -2597,7 +2596,7 @@ function renderLinkedValue({
 
   return `
     <div
-      class="clientes-modal-linked-field incidencias-modal-meta-card"
+      class="clientes-modal-linked-field"
     >
       <span>${escapeHtml(label)}</span>
 
@@ -2629,7 +2628,7 @@ function renderSectionHeader(
 ) {
   return `
     <div
-      class="clientes-modal-section-head incidencias-modal-section-head"
+      class="clientes-modal-section-head"
     >
       <h3>${escapeHtml(title)}</h3>
 
@@ -2686,7 +2685,7 @@ function renderAddressCard(
 
   return `
     <article
-      class="clientes-modal-address-card incidencias-modal-meta-card"
+      class="clientes-modal-address-card"
     >
       <span>${escapeHtml(title)}</span>
 
@@ -2741,7 +2740,7 @@ function renderFiscalBlock(
 
   return `
     <section
-      class="clientes-modal-section clientes-modal-fiscal-section incidencias-modal-description-section"
+      class="clientes-modal-section clientes-modal-fiscal-section"
     >
       ${renderSectionHeader(
         "Datos fiscales",
@@ -2829,7 +2828,7 @@ function renderContactBlock(
 
   return `
     <section
-      class="clientes-modal-section clientes-modal-contact-section incidencias-modal-contact-section"
+      class="clientes-modal-section clientes-modal-contact-section"
     >
       ${renderSectionHeader(
         "Contacto",
@@ -2837,7 +2836,7 @@ function renderContactBlock(
       )}
 
       <div
-        class="clientes-modal-contact-grid incidencias-modal-contact-grid"
+        class="clientes-modal-contact-grid"
       >
         ${renderLinkedValue({
           label:
@@ -3715,7 +3714,7 @@ function renderAuditBlock(
 
   return `
     <section
-      class="clientes-modal-section clientes-modal-history-section incidencias-modal-history-section"
+      class="clientes-modal-section clientes-modal-history-section"
     >
       ${renderSectionHeader(
         "Historial",
@@ -3723,36 +3722,36 @@ function renderAuditBlock(
       )}
 
       <div
-        class="clientes-timeline-list incidencias-timeline-list"
+        class="clientes-timeline-list"
       >
         ${audit
           .map(
             (entry) => `
               <article
-                class="clientes-timeline-card incidencias-timeline-card ${entry.event.includes("created") ? "is-created" : ""}"
+                class="clientes-timeline-card ${entry.event.includes("created") ? "is-created" : ""}"
                 data-audit-id="${attr(entry.id)}"
               >
                 <div
-                  class="clientes-timeline-accent incidencias-timeline-accent"
+                  class="clientes-timeline-accent"
                 ></div>
 
                 <div
-                  class="clientes-timeline-main incidencias-timeline-main"
+                  class="clientes-timeline-main"
                 >
                   <div
-                    class="clientes-timeline-title-row incidencias-timeline-title-row"
+                    class="clientes-timeline-title-row"
                   >
                     <strong
-                      class="clientes-timeline-title incidencias-timeline-title"
+                      class="clientes-timeline-title"
                     >${escapeHtml(entry.event)}</strong>
 
                     <span
-                      class="clientes-timeline-kind incidencias-timeline-kind"
+                      class="clientes-timeline-kind"
                     >${escapeHtml(entry.source)}</span>
                   </div>
 
                   <p
-                    class="clientes-timeline-body incidencias-timeline-body"
+                    class="clientes-timeline-body"
                   >
                     ${escapeHtml(
                       entry.schemaVersion
@@ -3763,7 +3762,7 @@ function renderAuditBlock(
                 </div>
 
                 <div
-                  class="clientes-timeline-meta incidencias-timeline-meta"
+                  class="clientes-timeline-meta"
                 >
                   <strong>${escapeHtml(entry.source)}</strong>
                   <span>${escapeHtml(formatDate(entry.at))}</span>
@@ -3792,13 +3791,13 @@ function renderFooter(
 
   return `
     <footer
-      class="clientes-modal-footer incidencias-modal-footer"
+      class="clientes-modal-footer"
       data-modal-footer="true"
     >
       <button
         type="button"
         data-detail-action="${DETAIL_ACTIONS.CLOSE}"
-        class="clientes-modal-submit-btn incidencias-modal-submit-btn"
+        class="clientes-modal-submit-btn"
       >
         Cerrar
       </button>
@@ -3808,7 +3807,7 @@ function renderFooter(
           email
             ? `<a
                 href="${attr(formatMailHref(email))}"
-                class="clientes-modal-footer-link incidencias-modal-view-btn"
+                class="clientes-modal-footer-link"
               >${icon("mail")} Email</a>`
             : ""
         }
@@ -3817,7 +3816,7 @@ function renderFooter(
           phone
             ? `<a
                 href="${attr(formatPhoneHref(phone))}"
-                class="clientes-modal-footer-link incidencias-modal-view-btn"
+                class="clientes-modal-footer-link"
               >${icon("phone")} Llamar</a>`
             : ""
         }
@@ -3943,22 +3942,22 @@ export function renderClientesDetailModal(
     submitting: vm.submitting,
     header: `
       <div
-        class="clientes-modal-hero incidencias-modal-hero"
+        class="clientes-modal-hero"
       >
         ${renderAvatar(detail)}
 
         <div
-          class="clientes-modal-hero-content incidencias-modal-hero-content"
+          class="clientes-modal-hero-content"
         >
           <div
-            class="clientes-modal-hero-chips incidencias-modal-hero-chips"
+            class="clientes-modal-hero-chips"
           >
             <button
               type="button"
               data-detail-action="${DETAIL_ACTIONS.COPY_ID}"
               data-cliente-id="${attr(clienteId)}"
               data-copy-value="${attr(clienteId)}"
-              class="clientes-modal-id-chip incidencias-modal-id-chip"
+              class="clientes-modal-id-chip"
               aria-label="Copiar ID de cliente"
             >
               ${escapeHtml(clienteId || "—")}
@@ -3986,14 +3985,14 @@ export function renderClientesDetailModal(
 
           <h2
             id="clientes-modal-title"
-            class="clientes-modal-title incidencias-modal-title"
+            class="clientes-modal-title"
           >
             ${escapeHtml(title)}
           </h2>
 
           <span
             id="clientes-modal-summary"
-            class="clientes-modal-updated incidencias-modal-updated"
+            class="clientes-modal-updated"
           >
             ${escapeHtml(contactName)}
             ${email ? ` · ${escapeHtml(email)}` : ""}
@@ -4015,7 +4014,7 @@ export function renderClientesDetailModal(
       </div>
 
       <div
-        class="clientes-modal-meta-grid incidencias-modal-meta-grid"
+        class="clientes-modal-meta-grid"
       >
         ${renderMetaField(
           "Cliente",
@@ -5035,8 +5034,6 @@ export function getDetailTemplateSnapshot(
       detailCss:
         true,
 
-      incidenciasAliases:
-        true,
     },
 
     policy: {
@@ -5142,8 +5139,6 @@ export function getDetailTemplateSnapshot(
       destroyBridge:
         true,
 
-      incidenciasCssCompatibility:
-        true,
     },
   };
 }

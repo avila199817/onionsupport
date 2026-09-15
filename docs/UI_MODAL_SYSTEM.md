@@ -101,7 +101,8 @@ Estado de la familia (se actualiza en cada unidad):
 | Perfil del técnico, detalle de Usuarios | shell canónico (`ui-detail-modal-*`) |
 | Detalle de Incidencias | shell canónico: `renderModalShell` (carga, error y detalle), botón cerrar del shell, click exterior por el lifecycle; el dominio conserva `incidencias-modal-root` como ámbito de su contenido |
 | Alta de Incidencias | pendiente: hoja de alta propia (`inc-create-*`) |
-| Detalle, alta, reenvío y cobro de Facturas | pendiente: shell `facturas-detail-*`, `fac-create-*`, `facturas-resend-confirm-*`, `fpc-*` |
+| Detalle de Facturas | shell canónico (`renderModalShell`, variante `data-modal-size="wide"`), botón cerrar del shell, estados de carga y error compartidos, click exterior por el lifecycle; el dominio conserva `facturas-detail-modal-root` como ámbito de su contenido |
+| Alta, reenvío y cobro de Facturas | pendiente: shell `fac-create-*`, `facturas-resend-confirm-*`, `fpc-*` |
 | Detalle y alta de Clientes | pendiente: shell `clientes-modal-*` / `cli-create-*` y préstamo de clases de Incidencias |
 | Alta de Usuarios | pendiente: préstamo de `inc-create-*` |
 | Correo (redacción, confirmación, firma) | pendiente de evaluación: host inline del propio shell |
@@ -125,7 +126,7 @@ La resolución de un botón de retorno que se ha vuelto a renderizar, el scroll 
 
 `modal-host.js` es el único módulo que renderiza DOM de diálogo: emite el shell (`renderModalShell`, `renderModalCloseButton`, `renderModalState`) y aporta `createModalHost` y `renderModalContent`; `renderModalContent` usa por defecto los marcadores del shell (`MODAL_SHELL_SELECTORS`). Un solo chunk compartido sirve a todos los diálogos privados y nada de esto entra en el cierre público del consentimiento. El primero crea y retira sólo el nodo de su propietario; no adopta ni elimina el portal de un controlador posterior. El segundo actualiza un panel compatible sin sustituir su root, overlay o panel conectado. Conserva atributos, foco, selección de texto y scroll del cuerpo; un cambio explícito de entidad o tipo de formulario permite un montaje nuevo.
 
-El detalle de Facturas usa directamente `renderModalContent` para carga, resultado, error y refresco; el callback de montaje sólo se emite al crear el shell. Su alta conserva reconciliación de controles por claves para mantener identidad y valores de entrada, dentro del mismo host y lifecycle.
+El detalle de Facturas usa directamente `renderModalContent` sin selectores propios (los marcadores del shell son el valor por defecto) para carga, resultado, error y refresco; el callback de montaje sólo se emite al crear el shell. Su alta conserva reconciliación de controles por claves para mantener identidad y valores de entrada, dentro del mismo host y lifecycle.
 
 Los formularios y las peticiones permanecen en su controlador. Incidencias conserva sus slots y borradores, Correo usa el host inline de su shell y los visores mantienen la propiedad de blobs y medios. Este helper privado no se carga con el consentimiento público ni crea otra sesión o registro de teclado.
 

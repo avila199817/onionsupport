@@ -35,6 +35,7 @@
 
 import { cleanText, escapeHtml } from "../../core/presentation-text.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
+import { renderModalCloseButton, renderModalShell, renderModalState } from "../../features/entity-overlay/modal-host.js";
 
 export const FACTURAS_MODAL_TEMPLATE_VERSION =
   "facturas.template.modal.productivo.v4.admin-payment";
@@ -3571,18 +3572,6 @@ export function renderHeaderActions({
           : ""
       }
 
-      <button
-        type="button"
-        class="facturas-detail-btn facturas-detail-btn--close"
-        data-action="${FACTURA_MODAL_ACTIONS.CLOSE}"
-        data-facturas-action="${FACTURA_MODAL_ACTIONS.CLOSE}"
-        aria-label="Cerrar detalle de factura"
-        title="Cerrar"
-        ${disabledAttrs(
-          busy,
-          false
-        )}
-      >${icon("close")}</button>
     </div>
   `;
 }
@@ -4120,7 +4109,7 @@ function renderEnvioSection(
    CONTENT
 ========================================================= */
 
-export function renderFacturasDetailContent({
+function renderFacturasDetailParts({
   factura = null,
   loading = false,
   admin = false,
@@ -4131,80 +4120,43 @@ export function renderFacturasDetailContent({
   feedbackMessage = "",
   feedbackType = "info",
 } = {}) {
-  if (loading) {
-    return `
-      <h2 id="facturas-detail-modal-title" class="sr-only">Detalle de factura</h2>
-      <button type="button" class="facturas-detail-btn facturas-detail-btn--close"
-        data-facturas-action="${FACTURA_MODAL_ACTIONS.CLOSE}"
-        aria-label="Cerrar detalle de factura">${icon("close")}</button>
-      <div
-        class="facturas-detail-loading"
-        aria-live="polite"
-        aria-busy="true"
-      >
-        <span class="sr-only">
-          Cargando detalle de factura
-        </span>
+  // The shell's close control; a busy detail keeps it disabled like before.
+  const closeControl = (disabled = false) => renderModalCloseButton({
+    label: "Cerrar detalle de factura",
+    attributes: {
+      "data-action": FACTURA_MODAL_ACTIONS.CLOSE,
+      "data-facturas-action": FACTURA_MODAL_ACTIONS.CLOSE,
+      title: "Cerrar",
+      disabled: Boolean(disabled),
+      "aria-disabled": disabled ? "true" : false,
+    },
+  });
 
-        <div class="facturas-detail-skeleton facturas-detail-skeleton--hero"></div>
-        <div class="facturas-detail-skeleton facturas-detail-skeleton--summary"></div>
-        <div class="facturas-detail-skeleton facturas-detail-skeleton--body"></div>
-      </div>
-    `;
+  if (loading) {
+    return {
+      header: `<h2 id="facturas-detail-modal-title" class="ui-detail-modal-title">Detalle de factura</h2>${closeControl()}`,
+      body: renderModalState({
+        kind: "loading",
+        title: "Cargando detalle de factura",
+        message: "Preparando la factura y sus acciones.",
+      }),
+      bodyAttributes: { "data-facturas-detail-body-shell": "true", "aria-busy": "true" },
+      panelAttributes: {},
+    };
   }
 
   if (!factura) {
-    return `
-      <div class="facturas-detail-layout facturas-detail-layout--empty">
-        <header class="facturas-detail-header">
-          <div class="facturas-detail-hero">
-            <div class="facturas-detail-identity">
-              <div class="facturas-detail-avatar" aria-hidden="true">
-                <span class="facturas-detail-avatar-fallback">
-                  ON
-                </span>
-              </div>
-
-              <div class="facturas-detail-title-stack">
-                <h2
-                  id="facturas-detail-modal-title"
-                  class="facturas-detail-title"
-                >
-                  Detalle no disponible
-                </h2>
-
-                <span class="facturas-detail-subtitle">
-                  No hemos podido cargar la factura solicitada.
-                </span>
-              </div>
-            </div>
-
-            <div class="facturas-detail-actions">
-              <button
-                type="button"
-                class="facturas-detail-btn facturas-detail-btn--close"
-                data-action="${FACTURA_MODAL_ACTIONS.CLOSE}"
-                data-facturas-action="${FACTURA_MODAL_ACTIONS.CLOSE}"
-                aria-label="Cerrar detalle de factura"
-                title="Cerrar"
-              >${icon("close")}</button>
-            </div>
-          </div>
-        </header>
-
-        <div class="facturas-detail-body-shell">
-          <main class="facturas-detail-body">
-            ${renderFeedback({ message: feedbackMessage, type: feedbackType })}
-            ${renderMiniMeta(
-              "Detalle",
-              "No disponible"
-            )}
-            <button type="button" class="facturas-detail-btn"
-              data-facturas-action="${FACTURA_MODAL_ACTIONS.RETRY}">Reintentar</button>
-          </main>
-        </div>
-      </div>
-    `;
+    return {
+      header: `<h2 id="facturas-detail-modal-title" class="ui-detail-modal-title">Detalle no disponible</h2>${closeControl()}`,
+      body: renderModalState({
+        kind: "error",
+        title: "Detalle no disponible",
+        message: cleanText(feedbackMessage, "") || "No hemos podido cargar la factura solicitada.",
+        action: { label: "Reintentar", attributes: { "data-facturas-action": FACTURA_MODAL_ACTIONS.RETRY } },
+      }),
+      bodyAttributes: { "data-facturas-detail-body-shell": "true" },
+      panelAttributes: {},
+    };
   }
 
   const facturaId =
@@ -4294,18 +4246,9 @@ export function renderFacturasDetailContent({
       downloading
     );
 
-  return `
-    <div
-      class="facturas-detail-layout"
-      data-factura-id="${attr(facturaId)}"
-      data-factura-sent="${alreadySent ? "true" : "false"}"
-      data-factura-paid="${alreadyPaid ? "true" : "false"}"
-      data-factura-busy="${busy ? "true" : "false"}"
-    >
-      <header
-        class="facturas-detail-header"
-        data-facturas-detail-header="true"
-      >
+  return {
+    header: `
+      <div class="facturas-detail-header" data-facturas-detail-header="true">
         <div class="facturas-detail-hero">
           <div class="facturas-detail-identity">
             ${renderAvatar(
@@ -4405,51 +4348,57 @@ export function renderFacturasDetailContent({
         ${renderHeroMeta(
           factura
         )}
-      </header>
-
-      <div
-        class="facturas-detail-body-shell"
-        data-facturas-detail-body-shell="true"
-      >
-        <main
-          class="facturas-detail-body"
-          data-facturas-detail-body="true"
-        >
-          <div
-            class="facturas-detail-feedback-slot"
-            data-facturas-detail-feedback-slot="true"
-          >
-            ${renderFeedback({
-              message:
-                feedbackMessage,
-              type:
-                feedbackType,
-            })}
-          </div>
-
-          ${renderResumenSection(
-            factura
-          )}
-
-          ${renderImpuestosSection(
-            factura
-          )}
-
-          ${renderDescripcionSection(
-            factura
-          )}
-
-          ${renderLineasSection(
-            factura
-          )}
-
-          ${renderEnvioSection(
-            factura
-          )}
-        </main>
       </div>
-    </div>
-  `;
+      ${closeControl(busy)}
+    `,
+    body: `
+      <div class="facturas-detail-body" data-facturas-detail-body="true">
+        <div
+          class="facturas-detail-feedback-slot"
+          data-facturas-detail-feedback-slot="true"
+        >
+          ${renderFeedback({
+            message:
+              feedbackMessage,
+            type:
+              feedbackType,
+          })}
+        </div>
+
+        ${renderResumenSection(
+          factura
+        )}
+
+        ${renderImpuestosSection(
+          factura
+        )}
+
+        ${renderDescripcionSection(
+          factura
+        )}
+
+        ${renderLineasSection(
+          factura
+        )}
+
+        ${renderEnvioSection(
+          factura
+        )}
+      </div>
+    `,
+    bodyAttributes: { "data-facturas-detail-body-shell": "true" },
+    panelAttributes: {
+      "data-factura-sent": alreadySent ? "true" : "false",
+      "data-factura-paid": alreadyPaid ? "true" : "false",
+      "data-factura-busy": busy ? "true" : "false",
+    },
+  };
+}
+
+/* Content only (header and body), for consumers that never mount a dialog. */
+export function renderFacturasDetailContent(options = {}) {
+  const parts = renderFacturasDetailParts(options);
+  return `${parts.header}${parts.body}`;
 }
 
 /* =========================================================
@@ -4494,48 +4443,37 @@ export function renderFacturasDetailModal({
       {}
     );
 
-  return `
-    <section
-      class="facturas-detail-modal-root"
-      data-facturas-detail-root="true"
-      data-template-version="${attr(FACTURAS_MODAL_TEMPLATE_VERSION)}"
-      data-factura-id="${attr(facturaId)}"
-      data-open="true"
-    >
-      <div
-        class="facturas-detail-overlay"
-        data-facturas-detail-overlay="true"
-      >
-        <div
-          class="facturas-detail-modal"
-          data-role="facturas-detail-modal"
-          data-facturas-detail-modal="true"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="facturas-detail-modal-title"
-          tabindex="-1"
-        >
-          ${renderFacturasDetailContent({
-            factura:
-              currentFactura,
+  const parts = renderFacturasDetailParts({
+    factura: currentFactura,
+    loading: loading === true || detailLoading === true,
+    admin,
+    markingPaidFacturaId,
+    sendingFacturaId,
+    viewingFacturaId,
+    downloadingFacturaId,
+    feedbackMessage,
+    feedbackType,
+  });
 
-            loading:
-              loading === true ||
-              detailLoading === true,
-
-            admin,
-            markingPaidFacturaId,
-            sendingFacturaId,
-            viewingFacturaId,
-            downloadingFacturaId,
-
-            feedbackMessage,
-            feedbackType,
-          })}
-        </div>
-      </div>
-    </section>
-  `;
+  return renderModalShell({
+    rootClass: "facturas-detail-modal-root",
+    rootAttributes: {
+      "data-facturas-detail-root": "true",
+      "data-template-version": FACTURAS_MODAL_TEMPLATE_VERSION,
+      "data-factura-id": facturaId,
+    },
+    overlayAttributes: { "data-facturas-detail-overlay": "true" },
+    panelAttributes: {
+      "data-facturas-detail-modal": "true",
+      "data-factura-id": facturaId,
+      ...parts.panelAttributes,
+    },
+    labelledBy: "facturas-detail-modal-title",
+    size: "wide",
+    header: parts.header,
+    body: parts.body,
+    bodyAttributes: parts.bodyAttributes,
+  });
 }
 
 export function renderFacturasDetailModalClosed() {

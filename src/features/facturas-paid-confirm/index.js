@@ -30,7 +30,7 @@ const VIEW_HOST_SELECTOR = "[data-view-container='true'], #view-container";
 const VIEW_ROOT_SELECTOR = ".facturas-view-root, [data-facturas-scope='true']";
 const DETAIL_ROOT_SELECTOR = "[data-facturas-detail-root='true']";
 const DETAIL_PANEL_SELECTOR =
-  "[data-facturas-detail-modal='true'], [data-role='facturas-detail-modal']";
+  "[data-facturas-detail-modal='true']";
 const ACTIONS_SELECTOR = ".facturas-detail-actions";
 let installed = false;
 let observer = null;
@@ -696,8 +696,7 @@ async function reconcileRetryAction() {
     button.setAttribute("aria-disabled", fin.processing ? "true" : "false");
     button.innerHTML = `<span class="facturas-detail-btn-icon" aria-hidden="true">${icon("check")}</span><span>${fin.completed ? "Valoraciones" : fin.processing ? "Finalizando…" : "Finalizar factura"}</span>`;
 
-    const closeButton = actions.querySelector(".facturas-detail-btn--close");
-    actions.insertBefore(button, closeButton || null);
+    actions.append(button);
     return true;
   } catch {
     return false;

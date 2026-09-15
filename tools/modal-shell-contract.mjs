@@ -9,6 +9,8 @@ import {
   renderModalCloseButton, renderModalContent, renderModalShell, renderModalState,
 } from "../src/features/entity-overlay/modal-host.js";
 import { renderDetailPending } from "../src/features/entity-overlay/pending-view.js";
+import { renderIncidenciasDetailModal } from "../src/views/incidencias/incidencias.template.modal.js";
+import { renderFacturasDetailModal } from "../src/views/facturas/facturas.template.modal.js";
 
 /* One modal system: the shell renders every private dialog, the structural
    stylesheet is the only place a dialog shell is drawn, and the lifecycle is
@@ -31,8 +33,6 @@ const pendingShell = (file, until) => ({ kind: "shell", file, until });
 const fixedLayer = (file, reason) => ({ kind: "layer", file, reason });
 const FIXED_INVENTORY = new Map([
   // dialog shells pending migration
-  [".facturas-detail-modal-root", pendingShell("src/css/views/facturas/detail.css", "facturas-detail-shell")],
-  [".facturas-detail-overlay", pendingShell("src/css/views/facturas/detail.css", "facturas-detail-shell")],
   [".fac-create-root", pendingShell("src/css/views/facturas/create.css", "create-modals-shell")],
   [".fac-create-overlay", pendingShell("src/css/views/facturas/create.css", "create-modals-shell")],
   [".facturas-resend-confirm-overlay", pendingShell("src/css/views/facturas/resend-confirm.css", "facturas-confirm-shell")],
@@ -91,6 +91,7 @@ const STRUCTURAL_OVERRIDE_FILES = new Map([
 const SHELL_CONSUMERS = [
   "src/features/entity-overlay/pending-view.js",
   "src/views/incidencias/incidencias.template.modal.impl.js",
+  "src/views/facturas/facturas.template.modal.base.js",
 ];
 
 const STRUCTURAL_CLASS = /\.ui-detail-modal-(?:root|overlay|panel|header|body|footer|close-btn)\b/u;
@@ -272,6 +273,46 @@ test("migrated dialogs render through the shell and emit no structure of their o
       assert.equal(source.includes(needle), false, `${file} emits ${needle} outside the shell`);
     }
   }
+});
+
+/* The structural skeleton of a rendered dialog: the shell's own elements and
+   markers in document order, with the domain's content and identity removed. */
+function structuralSkeleton(html) {
+  return [...html.matchAll(/<(section|div|header|main|footer)\b([^>]*)>/gu)]
+    .map(([, tag, attributes]) => {
+      const markers = [...attributes.matchAll(/\b(data-modal-[a-z]+|role|aria-modal|tabindex|data-open)="([^"]*)"/gu)]
+        .map(([, name, value]) => (name === "data-modal-size" || name === "data-modal-height") ? name : `${name}=${value}`);
+      const shellClasses = [...attributes.matchAll(/\bui-detail-modal-(?:root|overlay|panel|header|body|footer)\b/gu)].map(([match]) => match);
+      return markers.length || shellClasses.length ? `${tag}[${[...shellClasses, ...markers].join(" ")}]` : null;
+    })
+    .filter(Boolean);
+}
+
+test("Incidencias and Facturas share the shell's infrastructure and differ only in content", () => {
+  const factura = { id: "F-1", facturaId: "F-1", numeroFacturaLegal: "2026/00001", total: 121, baseImponible: 100, cliente: { razonSocial: "ACME", email: "acme@example.test" }, estado: "emitida", paymentStatus: "pending" };
+  const states = {
+    loading: [renderIncidenciasDetailModal({ open: true, loading: true, loadingId: "INC-1" }), renderFacturasDetailModal({ open: true, loading: true })],
+    error: [renderIncidenciasDetailModal({ open: true, error: "No tienes permiso", loadingId: "INC-1" }), renderFacturasDetailModal({ open: true, factura: null, feedbackMessage: "No tienes permiso" })],
+  };
+  for (const [state, [incidencias, facturas]] of Object.entries(states)) {
+    const a = structuralSkeleton(incidencias);
+    const b = structuralSkeleton(facturas);
+    const pending = structuralSkeleton(renderDetailPending({ type: "factura", id: "F-1", error: state === "error" ? "No tienes permiso" : "" }));
+    assert.deepEqual(a, b, `${state}: same structural skeleton`);
+    assert.deepEqual(a, pending, `${state}: same skeleton as the dispatcher's pending surface`);
+    assert.ok(a.some((entry) => entry.startsWith("div[ui-detail-modal-panel") && entry.includes("role=dialog") && entry.includes("aria-modal=true")), `${state}: one dialog panel`);
+    assert.equal(a.filter((entry) => entry.includes("data-modal-body")).length, 1, `${state}: one body`);
+    for (const html of [incidencias, facturas]) {
+      assert.equal(html.split('data-modal-close="true"').length - 1, 1, `${state}: one close control from the shell`);
+      assert.equal(html.split('data-modal-state="').length - 1, 1, `${state}: one shared state surface`);
+    }
+  }
+  // The ready detail keeps the same shell; only the shared state surface goes away.
+  const shellOnly = (entries) => entries.filter((entry) => !entry.includes("data-modal-state"));
+  const ready = structuralSkeleton(renderFacturasDetailModal({ open: true, factura, admin: true }));
+  assert.deepEqual(shellOnly(ready), shellOnly(structuralSkeleton(states.loading[1])), "ready: the same shell as its own loading state");
+  assert.equal(ready.some((entry) => entry.includes("data-modal-state")), false, "ready: no state surface");
+  assert.ok(renderFacturasDetailModal({ open: true, factura, admin: true }).includes('data-modal-size="wide"'), "Facturas declares its width as a shell variant");
 });
 
 test("every fixed layer outside the authority is inventoried: shells to migrate or non-dialog layers", () => {

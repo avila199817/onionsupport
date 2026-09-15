@@ -29,7 +29,6 @@ if "SINGLE VISUAL AUTHORITY" not in parity:
     fail("private-admin-parity.css must explicitly be the single listing visual authority")
 
 for forbidden in (
-    ".inc-create-overlay",
     ".cli-create-overlay",
     ".fac-create-overlay",
     ".usr-create-overlay",

@@ -639,7 +639,9 @@ grid-template-columns: 1fr;
 padding: 0;
 }
 
-.ui-detail-modal-panel {
+/* Every dialog fills a phone screen, content-sized (auto) panels included. */
+.ui-detail-modal-panel,
+.ui-detail-modal-root[data-modal-height="auto"] .ui-detail-modal-panel {
 block-size: 100dvh;
     max-block-size: 100dvh;
     border-inline: 0;

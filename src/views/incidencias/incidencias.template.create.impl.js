@@ -17,6 +17,7 @@
 
 import { cleanText, escapeHtml } from "../../core/presentation-text.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
+import { renderModalCloseButton, renderModalShell } from "../../features/entity-overlay/modal-host.js";
 import {
   INCIDENCIA_CATEGORY_OPTIONS,
   INCIDENCIA_PRIORITY_OPTIONS,
@@ -934,93 +935,91 @@ export function renderIncidenciasCreateModal(input = {}) {
     ? "Registra la solicitud, asigna el usuario y clasifica el caso para soporte."
     : "Cuéntanos qué ocurre. Soporte se encargará del resto.";
 
-  return `
-    <section
-      id="${MODAL_ID}"
-      data-incidencias-create-root="true"
-      data-incidencias-modal="create"
-      data-create-mode="${vm.mode}"
-      data-open="true"
-      class="inc-create-root is-${vm.mode}"
-      role="presentation"
-    >
-      <div class="inc-create-overlay" data-incidencias-create-modal-overlay="true">
-        <div
-          id="${PANEL_ID}"
-          data-incidencias-create-modal-panel="true"
-          data-create-mode="${vm.mode}"
-          class="inc-create-panel is-${vm.mode}"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="incidencias-create-title"
-          aria-describedby="incidencias-create-subtitle"
-          tabindex="-1"
-        >
-          <header class="inc-create-header">
-            <div class="inc-create-header-copy" data-create-title-block="true">
-              <h2 id="incidencias-create-title">Crear incidencia</h2>
-              <p id="incidencias-create-subtitle">${escapeHtml(headerSubtitle)}</p>
-            </div>
-
-            <button type="button" class="inc-create-close" data-create-action="${CREATE_ACTIONS.CLOSE}" aria-label="Cerrar" ${disabledAttrs(vm.submitting, vm.submitting)}>${icon("close")}</button>
-          </header>
-
-          <div class="inc-create-body">
-            ${vm.successMessage ? renderAlert("success", "Incidencia creada.", vm.successMessage) : ""}
-            ${vm.serverError ? renderAlert("error", "No se pudo crear la incidencia.", vm.serverError) : ""}
-
-            <form
-              id="${FORM_ID}"
-              data-incidencias-create-form="true"
-              data-create-mode="${vm.mode}"
-              novalidate
-              class="inc-create-form is-${vm.mode}"
-              enctype="multipart/form-data"
-            >
-              ${renderHidden("source", source)}
-              ${renderHidden("status", "open")}
-
-              ${renderAdminUserSearch(vm)}
-
-              ${renderInput({
-                label: titleLabel,
-                name: "subject",
-                value: vm.form.subject,
-                placeholder: titlePlaceholder,
-                required: true,
-                error: vm.errors.subject,
-                disabled: vm.submitting,
-              })}
-
-              ${renderAdminClassification(vm)}
-
-              ${renderTextarea({
-                label: vm.admin ? "Descripción" : "¿Qué ocurre?",
-                name: "description",
-                value: vm.form.description,
-                placeholder: descriptionPlaceholder,
-                required: true,
-                error: vm.errors.description,
-                rows: vm.admin ? 6 : 7,
-                disabled: vm.submitting,
-              })}
-
-              ${renderFileInput(vm)}
-
-              <div class="inc-create-actions">
-                <span class="inc-create-actions-note">${vm.admin ? "La incidencia se añadirá al historial del usuario seleccionado." : "Podrás seguir el estado y las respuestas desde Incidencias."}</span>
-                <button id="incidencias-create-submit-btn" type="submit" data-create-action="${CREATE_ACTIONS.SUBMIT}" ${disabledAttrs(vm.submitting, vm.submitting)} class="inc-create-submit">
-                  ${vm.submitting ? `<span class="inc-create-spinner" aria-hidden="true"></span><span>Creando...</span>` : `<span>Crear incidencia</span>`}
-                </button>
-              </div>
-            </form>
-          </div>
-
-          ${vm.submitting ? renderLoadingOverlay(vm) : ""}
-        </div>
+  return renderModalShell({
+    id: MODAL_ID,
+    rootClass: `inc-create-root is-${vm.mode}`,
+    rootAttributes: {
+      "data-incidencias-create-root": "true",
+      "data-incidencias-modal": "create",
+      "data-create-mode": vm.mode,
+    },
+    overlayAttributes: { "data-incidencias-create-modal-overlay": "true" },
+    panelId: PANEL_ID,
+    panelClass: `is-${vm.mode}`,
+    panelAttributes: { "data-incidencias-create-modal-panel": "true", "data-create-mode": vm.mode },
+    labelledBy: "incidencias-create-title",
+    describedBy: "incidencias-create-subtitle",
+    size: "form",
+    height: "auto",
+    submitting: vm.submitting,
+    prelude: vm.submitting ? renderLoadingOverlay(vm) : "",
+    header: `
+      <div class="inc-create-header-copy" data-create-title-block="true">
+        <h2 id="incidencias-create-title">Crear incidencia</h2>
+        <p id="incidencias-create-subtitle">${escapeHtml(headerSubtitle)}</p>
       </div>
-    </section>
-  `;
+      ${renderModalCloseButton({
+        label: "Cerrar",
+        attributes: {
+          "data-create-action": CREATE_ACTIONS.CLOSE,
+          disabled: Boolean(vm.submitting),
+          "aria-disabled": vm.submitting ? "true" : false,
+          "aria-busy": vm.submitting ? "true" : false,
+        },
+      })}
+    `,
+    bodyClass: "inc-create-body",
+    body: `
+      ${vm.successMessage ? renderAlert("success", "Incidencia creada.", vm.successMessage) : ""}
+      ${vm.serverError ? renderAlert("error", "No se pudo crear la incidencia.", vm.serverError) : ""}
+
+      <form
+        id="${FORM_ID}"
+        data-incidencias-create-form="true"
+        data-create-mode="${vm.mode}"
+        novalidate
+        class="inc-create-form is-${vm.mode}"
+        enctype="multipart/form-data"
+      >
+        ${renderHidden("source", source)}
+        ${renderHidden("status", "open")}
+
+        ${renderAdminUserSearch(vm)}
+
+        ${renderInput({
+          label: titleLabel,
+          name: "subject",
+          value: vm.form.subject,
+          placeholder: titlePlaceholder,
+          required: true,
+          error: vm.errors.subject,
+          disabled: vm.submitting,
+        })}
+
+        ${renderAdminClassification(vm)}
+
+        ${renderTextarea({
+          label: vm.admin ? "Descripción" : "¿Qué ocurre?",
+          name: "description",
+          value: vm.form.description,
+          placeholder: descriptionPlaceholder,
+          required: true,
+          error: vm.errors.description,
+          rows: vm.admin ? 6 : 7,
+          disabled: vm.submitting,
+        })}
+
+        ${renderFileInput(vm)}
+
+        <div class="inc-create-actions">
+          <span class="inc-create-actions-note">${vm.admin ? "La incidencia se añadirá al historial del usuario seleccionado." : "Podrás seguir el estado y las respuestas desde Incidencias."}</span>
+          <button id="incidencias-create-submit-btn" type="submit" data-create-action="${CREATE_ACTIONS.SUBMIT}" ${disabledAttrs(vm.submitting, vm.submitting)} class="inc-create-submit">
+            ${vm.submitting ? `<span class="inc-create-spinner" aria-hidden="true"></span><span>Creando...</span>` : `<span>Crear incidencia</span>`}
+          </button>
+        </div>
+      </form>
+    `,
+  });
 }
 
 export function renderIncidenciasCreateModalClosed() {

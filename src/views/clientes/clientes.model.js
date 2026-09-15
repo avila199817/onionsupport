@@ -13,6 +13,7 @@
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
+import { slugKey } from "../../core/slug-key.js";
 
 export const CLIENTES_MODEL_VERSION =
   "clientes.model.v1.single-authority";
@@ -76,16 +77,6 @@ function number(value = 0, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function normalizeKey(value = "") {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w:.]/g, "")
-    .replace(/^_+|_+$/g, "");
-}
-
 function normalizeEmail(value = "") {
   const email = cleanText(value, "").toLowerCase();
   if (!email || ["null", "undefined", "none", "sin email", "sin_email", "no email", "no_email"].includes(email)) {
@@ -117,7 +108,7 @@ function parseBoolean(value, fallback = null) {
   if (value === 1 || value === "1") return true;
   if (value === 0 || value === "0") return false;
 
-  const key = normalizeKey(value);
+  const key = slugKey(value);
   if (["true", "yes", "si", "on", "enabled", "active", "activo"].includes(key)) return true;
   if (["false", "no", "off", "disabled", "inactive", "inactivo"].includes(key)) return false;
   return fallback;
@@ -180,7 +171,7 @@ function safeAvatarUrl(value = "") {
 }
 
 function normalizeClienteType(value = "") {
-  const type = normalizeKey(value).slice(0, TYPE_MAX_LENGTH);
+  const type = slugKey(value).slice(0, TYPE_MAX_LENGTH);
   if (["empresa", "company", "business", "b2b", "autonomo"].includes(type)) return "empresa";
   if (["particular", "persona", "individual", "b2c"].includes(type)) return "particular";
   return type || "cliente";
@@ -188,7 +179,7 @@ function normalizeClienteType(value = "") {
 
 function normalizeStatusValue(value = "", source = {}) {
   const raw = safeObject(source);
-  const explicit = normalizeKey(first(value, raw.status, raw.estado, raw.state, ""));
+  const explicit = slugKey(first(value, raw.status, raw.estado, raw.state, ""));
 
   if (["blocked", "bloqueado", "suspended", "locked"].includes(explicit)) return "blocked";
   if (["inactive", "inactivo", "disabled", "archived", "deleted"].includes(explicit)) return "inactive";
@@ -498,7 +489,7 @@ export function computeClientesStats(items = []) {
 }
 
 export function filterClientes(items = [], { filter = "all", search = "" } = {}) {
-  const requested = normalizeKey(filter || "all");
+  const requested = slugKey(filter || "all");
   const terms = cleanText(search, "")
     .toLowerCase()
     .normalize("NFD")

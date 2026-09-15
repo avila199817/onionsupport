@@ -13,7 +13,7 @@
 import {
   SENSITIVE_QUERY_PARAMS,
 } from "./config.js";
-import { cleanText } from "./presentation-text.js";
+import { cleanText, normalizeKey } from "./presentation-text.js";
 
 export const MEDIA_URL_POLICY_VERSION =
   "core.media.runtime-url.v1";
@@ -39,14 +39,6 @@ const AZURE_SAS_ALLOWED_SENSITIVE_KEYS =
     "sig",
     "signature",
   ]);
-
-function normalizeKey(
-  value = ""
-) {
-  return cleanText(value)
-    .replace(/[-_\s]/g, "")
-    .toLowerCase();
-}
 
 function isBrowser() {
   return (

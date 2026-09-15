@@ -28,6 +28,7 @@ import { notifyDomainChanged } from "../../core/domain-events.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
+import { slugKey } from "../../core/slug-key.js";
 
 export const INCIDENCIAS_API_VERSION = "incidencias.api.extreme.v24.cursor-scale-safe";
 export const INCIDENCIAS_ENDPOINT = "/api/tickets";
@@ -167,16 +168,6 @@ function now() {
 
 function nowIso() {
   return new Date().toISOString();
-}
-
-function normalizeKey(value = "") {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w:.]/g, "")
-    .replace(/^_+|_+$/g, "");
 }
 
 function normalizeSearch(value = "") {
@@ -1114,7 +1105,7 @@ function normalizeCreateSearchUser(user = {}) {
   const email = firstEmail(raw.email, raw.emailLower, raw.userEmail, raw.clienteEmail, raw.clientEmail, raw.profile?.email, raw.lookup?.email, raw.raw?.email, raw.raw?.emailLower);
   const username = cleanText(first(raw.username, raw.usernameLower, raw.profile?.username, raw.raw?.username), "");
   const avatar = firstUrl(raw, raw.raw, raw.profile, raw.cliente, raw.client);
-  const role = normalizeKey(first(raw.role, raw.rol, raw.raw?.role, raw.raw?.rol, "user")) || "user";
+  const role = slugKey(first(raw.role, raw.rol, raw.raw?.role, raw.raw?.rol, "user")) || "user";
   const phone = cleanText(first(raw.phone, raw.telefono, raw.raw?.phone, raw.raw?.telefono), "");
 
   return {
@@ -1215,7 +1206,7 @@ function getTicketId(item = {}) {
 }
 
 function normalizeStatus(value = "") {
-  const k = normalizeKey(value || DEFAULT_STATUS);
+  const k = slugKey(value || DEFAULT_STATUS);
   const map = {
     open: "open",
     opened: "open",
@@ -1256,7 +1247,7 @@ function normalizeStatus(value = "") {
 }
 
 function normalizePriority(value = "") {
-  const k = normalizeKey(value || DEFAULT_PRIORITY);
+  const k = slugKey(value || DEFAULT_PRIORITY);
   const map = {
     baja: "low",
     low: "low",
@@ -1283,7 +1274,7 @@ function normalizePriority(value = "") {
 }
 
 function normalizeCategory(value = "") {
-  return normalizeKey(value || DEFAULT_CATEGORY) || DEFAULT_CATEGORY;
+  return slugKey(value || DEFAULT_CATEGORY) || DEFAULT_CATEGORY;
 }
 
 function normalizePerson(value = {}) {
@@ -1292,7 +1283,7 @@ function normalizePerson(value = {}) {
   const name = userNameFromIdentity(raw);
   const email = firstEmail(raw.email, raw.emailLower, raw.mail);
   const avatar = firstUrl(raw.avatarUrl, raw.avatar, raw.picture, raw.photoUrl, raw.photoURL, raw.imageUrl, raw);
-  const role = normalizeKey(first(raw.role, raw.rol, ""));
+  const role = slugKey(first(raw.role, raw.rol, ""));
 
   return {
     id: userId || null,
@@ -1375,7 +1366,7 @@ function normalizeTechnician(item = {}) {
     assignment.avatar,
     base.avatarUrl
   );
-  const role = normalizeKey(base.role || assignment.role || "");
+  const role = slugKey(base.role || assignment.role || "");
 
   return {
     id: userId || null,
@@ -1472,7 +1463,7 @@ function normalizeRequester(item = {}) {
   const username = cleanText(first(raw.username, raw.usernameLower, snap.username, snap.usernameLower), "");
   const phone = cleanText(first(raw.phone, raw.telefono, snap.phone, snap.telefono), "");
   const avatar = firstUrl(raw.avatarUrl, raw.avatar, raw.userAvatarUrl, raw.userAvatar, raw.clienteAvatarUrl, raw.clienteAvatar, snap.avatarUrl, snap.avatar, snap.picture, snap.photoUrl, snap.photoURL);
-  const role = normalizeKey(first(raw.role, raw.rol, snap.role, snap.rol, "user")) || "user";
+  const role = slugKey(first(raw.role, raw.rol, snap.role, snap.rol, "user")) || "user";
 
   return {
     id: userId || null,

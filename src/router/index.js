@@ -51,7 +51,7 @@ export const ROUTER_VERSION =
   "router.minimal.v16-private-runtime-after-guard";
 
 import { syncPageMetadata } from "./page-metadata.js";
-import { cleanText } from "../core/presentation-text.js";
+import { cleanText, normalizeKey } from "../core/presentation-text.js";
 import { isObject } from "../core/objects.js";
 
 const PUBLIC_HOME_PATH = "/";
@@ -166,20 +166,6 @@ function isFunction(value) {
     typeof value ===
     "function"
   );
-}
-
-function normalizeKey(
-  value = ""
-) {
-  return cleanText(
-    value,
-    ""
-  )
-    .replace(
-      /[-_\s]/g,
-      ""
-    )
-    .toLowerCase();
 }
 
 function redactLegacyResetToken(

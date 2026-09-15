@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { cleanText } from "../src/core/presentation-text.js";
+import { cleanText, normalizeKey } from "../src/core/presentation-text.js";
+import { slugKey } from "../src/core/slug-key.js";
 import { escapeHtml } from "../src/core/escape-html.js";
 import { cleanText as homeText, escapeHtml as homeEscape, attr } from "../src/views/home/home.template.foundation.js";
 import { cleanText as overlayText, renderDetailPending, safeError } from "../src/features/entity-overlay/pending-view.js";
@@ -147,12 +148,18 @@ for (const markup of [clientesCreate, clientesDetail, usuariosDetail, cuentaFeed
 const cuentaError = renderCuentaError(remoteBody);
 assert.ok(cuentaError.includes(`<p>${bodyHtml}</p>`), "Direct Cuenta error retains multiline content");
 
-// One authority per policy: cleanText (one-line normalization) lives in
-// core/presentation-text.js and escapeHtml (HTML escaping) in
-// core/escape-html.js, split so the startup closures load the normalizer
-// alone. Every module imports them (directly or through a live reexport)
-// instead of carrying a copy under any name: no other module may carry the
+// One authority per policy: cleanText (one-line normalization) and the
+// kernel's compact normalizeKey live in core/presentation-text.js, escapeHtml
+// (HTML escaping) in core/escape-html.js and the views' accent-free slugKey in
+// core/slug-key.js, split so the startup closures load only what the kernel
+// needs. Every module imports them (directly or through a live reexport)
+// instead of carrying a copy under any name, and binds them under their own
+// name (no "cleanText as text" aliases): no other module may carry the
 // normalizer's body (the [\r\n\t] replace) or emit the "&amp;" entity itself.
+// normalizeKey named two behaviours before this unit; the four view helpers
+// still called normalizeKey below build a slug with their own policy and are
+// an upper bound that only shrinks, like the inline slug pipelines listed for
+// the next unit.
 // Listed exceptions keep a different policy on purpose: main.js redacts log
 // lines (no collapse of the whole value), core/public-site.js keeps the route
 // title's inner spacing, clientes.template.js attrExact keeps runs of spaces
@@ -163,6 +170,10 @@ assert.ok(cuentaError.includes(`<p>${bodyHtml}</p>`), "Direct Cuenta error retai
 const SRC_ROOT = fileURLToPath(new URL("../src/", import.meta.url));
 const CLEAN_TEXT_AUTHORITY = "src/core/presentation-text.js";
 const ESCAPE_HTML_AUTHORITY = "src/core/escape-html.js";
+const SLUG_KEY_AUTHORITY = "src/core/slug-key.js";
+const NORMALIZE_KEY_VARIANTS_PENDING = Object.freeze(["src/features/incidencias-technician-profile/index.js", "src/views/facturas/facturas.template.js", "src/views/facturas/facturas.template.modal.base.js", "src/views/home/home.template.foundation.js"]);
+const SLUG_FINGERPRINT = /\.replace\(\s*\/\[\\s\.?-\]\+\/g,\s*"_"\s*\)/u;
+const SLUG_FINGERPRINT_PENDING = Object.freeze(["src/core/http.js", "src/features/incidencias-technician-profile/index.js", "src/features/public-support/index.js", "src/views/facturas/facturas.api.alias-core.js", "src/views/facturas/facturas.api.boundary.js", "src/views/facturas/facturas.api.canonical.js", "src/views/facturas/facturas.template.js", "src/views/facturas/facturas.template.modal.base.js", "src/views/facturas/facturas.template.modal.js", "src/views/home/home.template.foundation.js", "src/views/incidencias/incidencias.api.js", "src/views/incidencias/incidencias.options.js", "src/views/incidencias/incidencias.priority-policy.js", "src/views/incidencias/incidencias.template.modal.js", "src/views/public/activate-account/index.js", "src/views/usuarios/usuarios.cursor.js"]);
 const CLEAN_TEXT_FINGERPRINT = 'replace(/[\\r\\n\\t]/g, " ")';
 const CLEAN_TEXT_FINGERPRINT_EXEMPT = Object.freeze(["src/analytics/google-tag.js", "src/core/public-site.js", "src/main.js", "src/views/clientes/clientes.template.js"]);
 const ESCAPE_FINGERPRINT_EXEMPT = Object.freeze(["src/core/public-legal.js"]);
@@ -173,7 +184,9 @@ function sourceFiles(directory) {
     return entry.isFile() && entry.name.endsWith(".js") ? [path] : [];
   });
 }
-const definers = { cleanText: [], escapeHtml: [] };
+const definers = { cleanText: [], escapeHtml: [], normalizeKey: [], slugKey: [] };
+const slugFingerprints = [];
+const aliasImports = [];
 const callersWithoutBinding = [];
 const escapeFingerprints = [];
 const cleanTextFingerprints = [];
@@ -181,6 +194,8 @@ for (const file of sourceFiles(SRC_ROOT)) {
   const code = readFileSync(file, "utf8");
   const path = `src/${relative(SRC_ROOT, file).split(sep).join("/")}`;
   if (path !== CLEAN_TEXT_AUTHORITY && !CLEAN_TEXT_FINGERPRINT_EXEMPT.includes(path) && code.includes(CLEAN_TEXT_FINGERPRINT)) cleanTextFingerprints.push(path);
+  if (path !== SLUG_KEY_AUTHORITY && !SLUG_FINGERPRINT_PENDING.includes(path) && SLUG_FINGERPRINT.test(code)) slugFingerprints.push(path);
+  if (/import\s*\{[^}]*\b(?:cleanText|escapeHtml|normalizeKey|slugKey)\s+as\s+/u.test(code)) aliasImports.push(path);
   if (path !== ESCAPE_HTML_AUTHORITY && !ESCAPE_FINGERPRINT_EXEMPT.includes(path) && code.includes("&amp;")) escapeFingerprints.push(path);
   for (const name of Object.keys(definers)) {
     const defines = new RegExp(`^(?:export )?(?:async )?(?:function ${name}\\s*\\(|(?:const|let|var) ${name}\\b)`, "mu").test(code);
@@ -190,9 +205,22 @@ for (const file of sourceFiles(SRC_ROOT)) {
   }
 }
 assert.deepEqual(definers.cleanText, [CLEAN_TEXT_AUTHORITY], "cleanText is defined once, in the authority");
+assert.deepEqual(definers.normalizeKey.filter((path) => path !== CLEAN_TEXT_AUTHORITY && !NORMALIZE_KEY_VARIANTS_PENDING.includes(path)), [], "the compact normalizeKey is defined in the text authority; only the listed slug variants still carry the name");
+assert.ok(definers.normalizeKey.includes(CLEAN_TEXT_AUTHORITY), "the text authority defines normalizeKey");
+assert.deepEqual(definers.slugKey, [SLUG_KEY_AUTHORITY], "slugKey is defined once, in core/slug-key.js");
+assert.deepEqual(slugFingerprints, [], "no module builds a slug key on its own outside the authority and the pending list; the list only shrinks");
+assert.deepEqual(aliasImports, [], "authorities are imported under their own name");
+assert.equal(normalizeKey(" Content-Type "), "contenttype");
+assert.equal(normalizeKey("Área_privada"), "áreaprivada");
+assert.equal(normalizeKey(null), "");
+assert.equal(slugKey("  En Curso  "), "en_curso");
+assert.equal(slugKey("Prioridad Alta - Crítica"), "prioridad_alta_critica");
+assert.equal(slugKey("v1.2:beta!"), "v1.2:beta");
+assert.equal(slugKey("--__--"), "");
+assert.equal(slugKey(undefined), "");
 assert.deepEqual(cleanTextFingerprints, [], "no module normalizes text on its own under another name: only the authority and the listed policies carry the body");
 assert.deepEqual(definers.escapeHtml, [ESCAPE_HTML_AUTHORITY], "escapeHtml is defined once, in the authority");
 assert.deepEqual(escapeFingerprints, [], "no module escapes HTML on its own: only the authority and the import-free legal renderer emit &amp;");
 assert.deepEqual(callersWithoutBinding, [], "every cleanText and escapeHtml caller binds its canonical helper");
 
-console.log(`Presentation text contract: PASS · Unicode/coercion/fallback identity · canonical reexports · one cleanText authority (no local copies under any name; 4 listed policies) · one escapeHtml authority (no local copies; public-legal keeps its import-free escaper) · actual pending, Correo, Servidor, Facturas and Incidencias markup · multiline body/comments · redaction`);
+console.log(`Presentation text contract: PASS · Unicode/coercion/fallback identity · canonical reexports · one cleanText authority (no local copies under any name; 4 listed policies) · compact normalizeKey in the text authority (${NORMALIZE_KEY_VARIANTS_PENDING.length} slug variants pending) · one slugKey authority (${SLUG_FINGERPRINT_PENDING.length} inline slug pipelines pending) · no alias imports · one escapeHtml authority (no local copies; public-legal keeps its import-free escaper) · actual pending, Correo, Servidor, Facturas and Incidencias markup · multiline body/comments · redaction`);

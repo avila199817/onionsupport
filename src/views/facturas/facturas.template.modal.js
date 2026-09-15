@@ -7,7 +7,7 @@
    gobierne el primer paint o el detalle hidratado del modal.
 ========================================================= */
 
-import { cleanText as text } from "../../core/presentation-text.js";
+import { cleanText } from "../../core/presentation-text.js";
 import BaseDefault, * as Base from "./facturas.template.modal.base.js";
 import { isObject, safeObject } from "../../core/objects.js";
 
@@ -86,7 +86,7 @@ const FALLBACK_KEYS = Object.freeze([
 ]);
 
 function key(value = "") {
-  return text(value, "")
+  return cleanText(value, "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -146,7 +146,7 @@ function round2(value) {
 }
 
 function isTechnicalIdentifier(value = "") {
-  return text(value, "").startsWith(TECHNICAL_PREFIX);
+  return cleanText(value, "").startsWith(TECHNICAL_PREFIX);
 }
 
 export function isFacturaModalTechnicalRecord(value = null) {
@@ -171,7 +171,7 @@ export function isFacturaModalTechnicalRecord(value = null) {
   return Boolean(
     key(source.operation) === "factura_create" &&
       (
-        text(source.operationHash, "") ||
+        cleanText(source.operationHash, "") ||
         key(first(
           source.version,
           source.idempotencyVersion,
@@ -183,7 +183,7 @@ export function isFacturaModalTechnicalRecord(value = null) {
 }
 
 function canonicalIdentity(source = {}) {
-  const rootId = text(source.id, "");
+  const rootId = cleanText(source.id, "");
   if (rootId && !isTechnicalIdentifier(rootId)) return rootId;
 
   for (const candidate of [
@@ -192,7 +192,7 @@ function canonicalIdentity(source = {}) {
     source.numeroFacturaLegal,
     source.legalNumber,
   ]) {
-    const value = text(candidate, "");
+    const value = cleanText(candidate, "");
     if (value && !isTechnicalIdentifier(value)) return value;
   }
 
@@ -203,7 +203,7 @@ function looksLikeCanonicalFactura(value = null) {
   const source = safeObject(value, null);
   if (!source) return false;
 
-  const rootId = text(source.id, "");
+  const rootId = cleanText(source.id, "");
   if (isTechnicalIdentifier(rootId)) return false;
 
   const id = canonicalIdentity(source);
@@ -509,7 +509,7 @@ export function resolveFacturaModalCanonical(value = null) {
   const canonicalId = canonicalIdentity(canonical) || canonicalIdentity(outer);
   if (!canonicalId || isTechnicalIdentifier(canonicalId)) return null;
 
-  const legalNumber = text(first(
+  const legalNumber = cleanText(first(
     canonical.numeroFacturaLegal,
     canonical.legalInvoiceNumber,
     canonical.legalNumber,
@@ -520,7 +520,7 @@ export function resolveFacturaModalCanonical(value = null) {
     ""
   ), "");
 
-  const systemNumber = text(first(
+  const systemNumber = cleanText(first(
     canonical.numeroFacturaSistema,
     canonical.systemInvoiceNumber,
     canonical.systemNumber,
@@ -537,21 +537,21 @@ export function resolveFacturaModalCanonical(value = null) {
     ...(legalNumber
       ? {
           numeroFacturaLegal: legalNumber,
-          numeroFactura: text(first(canonical.numeroFactura, legalNumber), legalNumber),
-          invoiceNumber: text(first(canonical.invoiceNumber, legalNumber), legalNumber),
-          number: text(first(canonical.number, legalNumber), legalNumber),
+          numeroFactura: cleanText(first(canonical.numeroFactura, legalNumber), legalNumber),
+          invoiceNumber: cleanText(first(canonical.invoiceNumber, legalNumber), legalNumber),
+          number: cleanText(first(canonical.number, legalNumber), legalNumber),
         }
       : {}),
     ...(systemNumber ? { numeroFacturaSistema: systemNumber } : {}),
     tipoDocumento: "factura",
     entityType: "invoice",
     type: "invoice",
-    status: text(first(canonical.status, canonical.estado, "issued"), "issued"),
-    estado: text(first(canonical.estado, canonical.status, "issued"), "issued"),
+    status: cleanText(first(canonical.status, canonical.estado, "issued"), "issued"),
+    estado: cleanText(first(canonical.estado, canonical.status, "issued"), "issued"),
     meta: {
       ...safeObject(canonical.meta, {}),
       technicalAliasRecovered: true,
-      technicalAliasId: text(technical.id, "") || null,
+      technicalAliasId: cleanText(technical.id, "") || null,
       technicalAliasGuardVersion: FACTURAS_MODAL_TECHNICAL_GUARD_VERSION,
       canonicalRootPreferred: Boolean(rootCanonical),
     },
@@ -569,7 +569,7 @@ function renderState(options = {}) {
   const waitingCanonical = Boolean(
     technical &&
     !canonical &&
-    !text(source.feedbackMessage, "")
+    !cleanText(source.feedbackMessage, "")
   );
 
   return {

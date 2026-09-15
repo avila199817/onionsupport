@@ -16,6 +16,7 @@ import { technicianIdentity } from "../../features/incidencias-comment-identity/
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
+import { slugKey } from "../../core/slug-key.js";
 export const INCIDENCIAS_TEMPLATE_VERSION = "incidencias.template.extreme.v35-visible-date-minute-precision-linked-invoice-row-total";
 
 export const INCIDENCIAS_ACTIONS = Object.freeze({
@@ -90,7 +91,6 @@ function num(v = 0, fb = 0) {
 
 const at = (v = "") => escapeHtml(cleanText(v, ""));
 const cls = (...v) => v.flat(Infinity).map((x) => cleanText(x, "")).filter(Boolean).join(" ");
-const key = (v = "") => cleanText(v, "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[\s-]+/g, "_").replace(/[^\w:.]/g, "").replace(/^_+|_+$/g, "");
 const searchKey = (v = "") => cleanText(v, "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
 function htmlAttrs(attrs = {}) {
@@ -411,7 +411,7 @@ const CLOSED_STATUS_KEYS = new Set(["resolved", "closed"]);
 const URGENT_PRIORITY_KEYS = new Set(["high"]);
 
 function statusKey(v = "") {
-  const k = key(v || "open");
+  const k = slugKey(v || "open");
   return STATUS_MAP[k] || k || "open";
 }
 function statusLabel(v = "") {
@@ -419,7 +419,7 @@ function statusLabel(v = "") {
   return STATUS_LABELS[normalized] || cleanText(v, "Abierta");
 }
 function priorityKey(it = {}) {
-  const k = key(getPriorityRaw(it) || "medium");
+  const k = slugKey(getPriorityRaw(it) || "medium");
   return PRIORITY_MAP[k] || k || "medium";
 }
 function priorityLabel(it = {}) {
@@ -433,7 +433,7 @@ const amountKey = (it = {}) => (getInvoiceTotal(it) > 0 ? "paid" : "idle");
 const amountLabel = (it = {}) => (getInvoiceTotal(it) > 0 ? formatMoney(getInvoiceTotal(it), getCurrency(it)) : "—");
 
 function normalizeFilter(v = "all") {
-  const k = key(v || "all");
+  const k = slugKey(v || "all");
   if (["all", "todas", "todos"].includes(k)) return "all";
   if (["open", "abiertas", "abiertos", "active", "activas", "activos", "pending", "progress", "in_progress"].includes(k)) return "open";
   if (["closed", "cerradas", "cerrados", "resolved", "resueltas", "resueltos"].includes(k)) return "closed";
@@ -442,12 +442,12 @@ function normalizeFilter(v = "all") {
 }
 
 function normalizeSort(v = DEFAULT_SORT_ORDER) {
-  const k = key(v || DEFAULT_SORT_ORDER);
+  const k = slugKey(v || DEFAULT_SORT_ORDER);
   return ["asc", "ascending", "menor", "menor_mayor", "menor_a_mayor", "menor-a-mayor", "oldest"].includes(k) ? "asc" : "desc";
 }
 
 function normalizeSortMode(v = DEFAULT_SORT_MODE) {
-  const k = key(v || DEFAULT_SORT_MODE);
+  const k = slugKey(v || DEFAULT_SORT_MODE);
   if (["amount", "importe", "invoice", "factura", "billing"].includes(k)) return "amount";
   if (["attachments", "attachment", "adjuntos", "adjunto", "files", "archivos"].includes(k)) return "attachments";
   return "date";
@@ -610,7 +610,7 @@ function remoteTotal(input = {}, fb = 0) {
 function buildVm(input = {}) {
   const d = safeObject(input);
   const items = normalizeItems(d);
-  const rawFilter = key(first(d.filter, "all"));
+  const rawFilter = slugKey(first(d.filter, "all"));
   const filter = normalizeFilter(d.filter);
   const search = cleanText(d.search, "");
   const order = normalizeSort(first(d.sortOrder, d.order, d.sort?.order, d.sort?.direction, DEFAULT_SORT_ORDER));
@@ -746,7 +746,7 @@ function renderPriorityBadge(it = {}) {
 
 function renderAssignedBadge(it = {}) {
   const name = getAssignedName(it);
-  const norm = key(name);
+  const norm = slugKey(name);
   if (!name || norm === "no_asignado" || norm === "sin_asignar") return "";
   const avatar = getAssignedAvatar(it);
   const presentation = resolveAvatarPresentation({

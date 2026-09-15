@@ -21,6 +21,7 @@ import { notifyDomainChanged, onDomainChanged } from "../../core/domain-events.j
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
+import { slugKey } from "../../core/slug-key.js";
 
 export const FACTURAS_API_VERSION =
   "facturas.api.production.v9.continuous-list-snapshot";
@@ -154,21 +155,11 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function normalizeKey(value = "") {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w:.]/g, "")
-    .replace(/^_+|_+$/g, "");
-}
-
 function parseBooleanFlag(value, fallback = false) {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value !== 0;
 
-  const key = normalizeKey(value);
+  const key = slugKey(value);
   if (["true", "1", "yes", "si", "on"].includes(key)) return true;
   if (["false", "0", "no", "off", "none", "null"].includes(key)) return false;
   return fallback;
@@ -338,7 +329,7 @@ export function getFacturaMarkPaidEndpoint(id = "") {
 }
 
 export function getFacturaPdfEndpoint(id = "", mode = FACTURA_PDF_MODES.DOWNLOAD) {
-  const normalized = normalizeKey(mode);
+  const normalized = slugKey(mode);
   return ["view", "inline", "ver", "open", "preview"].includes(normalized)
     ? getFacturaViewEndpoint(id)
     : getFacturaDownloadEndpoint(id);
@@ -360,15 +351,15 @@ function cleanQueryValue(value) {
 }
 
 function normalizeSortMode(value = "") {
-  const key = normalizeKey(value);
+  const key = slugKey(value);
   if (["date_asc", "fecha_asc", "oldest", "oldest_first", "menor_fecha", "asc", "ascending"].includes(key)) return "date_asc";
   return "date_desc";
 }
 
 function resolveSort({ sort = "", sortBy = "", orderBy = "", sortMode = "", direction = "", sortDir = "", orderDir = "" } = {}) {
   const rawSort = cleanText(first(sortMode, sortBy, sort, orderBy, "date_desc"), "date_desc");
-  const sortKey = normalizeKey(rawSort);
-  const rawDirection = normalizeKey(first(sortDir, direction, orderDir, ""));
+  const sortKey = slugKey(rawSort);
+  const rawDirection = slugKey(first(sortDir, direction, orderDir, ""));
 
   if (["numero", "number", "invoice", "invoice_number", "factura", "numero_factura", "total", "amount", "importe", "cliente", "customer", "client", "estado_pago", "payment_status", "payment"].includes(sortKey)) {
     const finalDirection = rawDirection === "asc" ? "asc" : "desc";
@@ -784,7 +775,7 @@ function getTicketIdsFromFactura(item = {}) {
 }
 
 function normalizePaymentStatus(value = "pending") {
-  const key = normalizeKey(value || "pending");
+  const key = slugKey(value || "pending");
 
   if (["paid", "pagada", "pagado", "abonada", "cobrada", "cobrado", "completed", "complete"].includes(key)) return "paid";
   if (["partial", "parcial"].includes(key)) return "partial";
@@ -827,7 +818,7 @@ function normalizeFacturaPdfFields(raw = {}) {
       signedUrl,
       publicUrl,
       blobPath,
-      normalizeKey(contentType).includes("pdf"),
+      slugKey(contentType).includes("pdf"),
       /\.pdf$/i.test(blobPath)
     )
   );
@@ -1534,7 +1525,7 @@ export async function markFacturaPaid(
 ========================================================= */
 
 function buildPdfQuery(mode = FACTURA_PDF_MODES.VIEW, options = {}) {
-  const normalized = normalizeKey(mode);
+  const normalized = slugKey(mode);
   const disposition = ["view", "inline", "ver", "open", "preview"].includes(normalized)
     ? "inline"
     : "attachment";
@@ -1578,7 +1569,7 @@ export async function downloadFacturaPdfRequest(id = "", options = {}) {
 }
 
 export async function fetchFacturaPdfRequest(id = "", mode = FACTURA_PDF_MODES.DOWNLOAD, options = {}) {
-  const normalizedMode = normalizeKey(mode);
+  const normalizedMode = slugKey(mode);
   return ["view", "inline", "ver", "open", "preview"].includes(normalizedMode)
     ? viewFacturaPdfRequest(id, options)
     : downloadFacturaPdfRequest(id, options);

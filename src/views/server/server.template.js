@@ -9,7 +9,7 @@
 ========================================================= */
 
 import * as Base from "./server.template.base.js";
-import { cleanText as safeText } from "../../core/presentation-text.js";
+import { cleanText } from "../../core/presentation-text.js";
 import { escapeHtml } from "../../core/escape-html.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
@@ -34,15 +34,15 @@ function safeNumber(value = null, fallback = null) {
 
 
 function attr(value = "") {
-  return escapeHtml(safeText(value, ""));
+  return escapeHtml(cleanText(value, ""));
 }
 
 function formatMoney(value, currency = "EUR", options = {}) {
   const number = safeNumber(value, null);
   if (number === null) return "—";
 
-  const code = /^[A-Z]{3}$/.test(safeText(currency, "").toUpperCase())
-    ? safeText(currency).toUpperCase()
+  const code = /^[A-Z]{3}$/.test(cleanText(currency, "").toUpperCase())
+    ? cleanText(currency).toUpperCase()
     : "EUR";
 
   try {
@@ -65,7 +65,7 @@ function formatPercent(value) {
 }
 
 function formatShortDate(value = "") {
-  const raw = safeText(value, "");
+  const raw = cleanText(value, "");
   const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return raw || "—";
 
@@ -83,7 +83,7 @@ function formatShortDate(value = "") {
 }
 
 function formatDateTime(value = "") {
-  const parsed = Date.parse(safeText(value, ""));
+  const parsed = Date.parse(cleanText(value, ""));
   if (!Number.isFinite(parsed)) return "—";
 
   try {
@@ -130,7 +130,7 @@ function costSnapshot(input = {}) {
 }
 
 function costTrendClass(level = "unknown") {
-  const value = safeText(level, "unknown").toLowerCase();
+  const value = cleanText(level, "unknown").toLowerCase();
   if (["normal", "watch", "spike"].includes(value)) return value;
   return "unknown";
 }
@@ -161,7 +161,7 @@ function renderCostKpi({ label, value, detail, tone = "neutral", iconName = "eur
 
 function axisMoney(value, currency) {
   const number = safeNumber(value, 0);
-  const code = safeText(currency, "EUR").toUpperCase();
+  const code = cleanText(currency, "EUR").toUpperCase();
 
   try {
     return new Intl.NumberFormat("es-ES", {
@@ -177,8 +177,8 @@ function axisMoney(value, currency) {
 }
 
 function renderCostChart(costs = {}) {
-  const daily = safeArray(costs.daily).filter((item) => safeText(item?.date, ""));
-  const currency = safeText(costs.currency, "EUR");
+  const daily = safeArray(costs.daily).filter((item) => cleanText(item?.date, ""));
+  const currency = cleanText(costs.currency, "EUR");
 
   if (!daily.length) {
     return `
@@ -297,7 +297,7 @@ function renderBreakdownList(items = [], currency = "EUR", type = "service") {
   return list
     .map((item) => {
       const meta = type === "resource"
-        ? [safeText(item.resourceGroup, ""), safeText(item.serviceName, "")]
+        ? [cleanText(item.resourceGroup, ""), cleanText(item.serviceName, "")]
             .filter(Boolean)
             .join(" · ")
         : `${safeNumber(item.sharePct, 0).toFixed(1)}% del mes`;
@@ -307,7 +307,7 @@ function renderBreakdownList(items = [], currency = "EUR", type = "service") {
           <div class="server-cost-breakdown-head">
             <div class="server-cost-breakdown-copy">
               <strong title="${attr(item.name)}">
-                ${escapeHtml(safeText(item.name, "Sin nombre"))}
+                ${escapeHtml(cleanText(item.name, "Sin nombre"))}
               </strong>
               <span>
                 ${escapeHtml(meta || "Sin detalle")}
@@ -324,7 +324,7 @@ function renderBreakdownList(items = [], currency = "EUR", type = "service") {
             min="0"
             max="100"
             value="${attr(Math.max(0, Math.min(100, safeNumber(item.sharePct, 0))))}"
-            aria-label="${attr(`Peso de ${safeText(item.name, "elemento")} en el coste del mes`)}"
+            aria-label="${attr(`Peso de ${cleanText(item.name, "elemento")} en el coste del mes`)}"
           ></meter>
         </article>
       `;
@@ -362,14 +362,14 @@ function renderUnavailableCosts(costs = {}) {
 
           <span>
             ${escapeHtml(
-              safeText(
+              cleanText(
                 costs.message,
                 "El health técnico sigue operativo; el coste se recuperará de forma independiente."
               )
             )}
           </span>
 
-          <code>${escapeHtml(safeText(costs.code, "AZURE_COST_UNAVAILABLE"))}</code>
+          <code>${escapeHtml(cleanText(costs.code, "AZURE_COST_UNAVAILABLE"))}</code>
         </div>
       </div>
     </section>
@@ -386,7 +386,7 @@ export function renderCostObservability(input = {}) {
   const month = safeObject(costs.currentMonth);
   const comparison = safeObject(costs.comparison);
   const trend = safeObject(costs.trend);
-  const currency = safeText(costs.currency, "EUR");
+  const currency = cleanText(costs.currency, "EUR");
   const trendClass = costTrendClass(trend.level);
 
   const latest = safeObject(month.latestCompleteDay, {});
@@ -409,13 +409,13 @@ export function renderCostObservability(input = {}) {
         <div>
           <p class="server-section-kicker">FinOps</p>
           <h2 class="server-section-title">
-            Coste Azure · ${escapeHtml(safeText(month.label, "Mes actual"))}
+            Coste Azure · ${escapeHtml(cleanText(month.label, "Mes actual"))}
           </h2>
         </div>
 
         <div class="server-cost-head-meta">
           <span class="server-cost-state server-cost-state--${attr(trendClass)}">
-            ${escapeHtml(safeText(trend.label, "Patrón sin evaluar"))}
+            ${escapeHtml(cleanText(trend.label, "Patrón sin evaluar"))}
           </span>
 
           <span class="server-section-badge">
@@ -471,7 +471,7 @@ export function renderCostObservability(input = {}) {
             </div>
 
             <span class="server-cost-subnote">
-              ${escapeHtml(safeText(trend.detail, ""))}
+              ${escapeHtml(cleanText(trend.detail, ""))}
             </span>
           </div>
 
@@ -605,10 +605,10 @@ export function getServerTemplateSnapshot(input = {}) {
     version: SERVER_TEMPLATE_VERSION,
     costs: {
       available: costs.available === true,
-      status: safeText(costs.status, "pending"),
+      status: cleanText(costs.status, "pending"),
       currentMonthTotal: safeNumber(costs.currentMonth?.total, null),
-      currency: safeText(costs.currency, ""),
-      trend: safeText(costs.trend?.level, "unknown"),
+      currency: cleanText(costs.currency, ""),
+      trend: cleanText(costs.trend?.level, "unknown"),
       dailyPoints: safeArray(costs.daily).length,
     },
     architecture: {

@@ -41,6 +41,7 @@ import { exactTotal } from "../../core/statistics.js";
 import { cleanText } from "../../core/presentation-text.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
+import { slugKey } from "../../core/slug-key.js";
 
 /* =========================================================
    META / CONFIG
@@ -295,16 +296,6 @@ function clamp(value = 0, min = 0, max = 1) {
   );
 }
 
-function normalizeKey(value = "") {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w:.]/g, "")
-    .replace(/^_+|_+$/g, "");
-}
-
 function hasOwn(source = {}, key = "") {
   return (
     isObject(source) &&
@@ -391,7 +382,7 @@ function parseBoolean(
   }
 
   const normalized =
-    normalizeKey(value);
+    slugKey(value);
 
   if (
     [
@@ -444,7 +435,7 @@ function parseStrictBoolean(
   }
 
   const normalized =
-    normalizeKey(value);
+    slugKey(value);
 
   if (
     [
@@ -752,7 +743,7 @@ function isSensitiveQueryParam(
     "activation_token",
     "activationtoken",
   ].includes(
-    normalizeKey(key)
+    slugKey(key)
   );
 }
 
@@ -943,7 +934,7 @@ function isSensitiveRawKey(
   key = ""
 ) {
   const normalized =
-    normalizeKey(key)
+    slugKey(key)
       .replace(/[:.]/g, "");
 
   if (
@@ -1065,7 +1056,7 @@ function normalizeRoleValue(
   const roles =
     values
       .map((item) =>
-        normalizeKey(item)
+        slugKey(item)
       )
       .filter(Boolean);
 
@@ -1092,7 +1083,7 @@ function normalizeTypeValue(
   value = ""
 ) {
   const type =
-    normalizeKey(value);
+    slugKey(value);
 
   if (
     [
@@ -1259,7 +1250,7 @@ function normalizeStatusValue(
     safeObject(source);
 
   const explicit =
-    normalizeKey(
+    slugKey(
       first(
         value,
         raw.status,
@@ -4302,7 +4293,7 @@ function buildUpdateUsuarioBody(
     hasOwn(source, "rol")
   ) {
     const role =
-      normalizeKey(
+      slugKey(
         first(
           source.role,
           source.rol,
@@ -4341,7 +4332,7 @@ function buildUpdateUsuarioBody(
     hasOwn(source, "state")
   ) {
     const status =
-      normalizeKey(
+      slugKey(
         first(
           source.status,
           source.estado,

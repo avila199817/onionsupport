@@ -33,6 +33,7 @@ import { userNameFromIdentity } from "../../core/user-identity.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
+import { slugKey } from "../../core/slug-key.js";
 
 /* =========================================================
    META / ACTIONS
@@ -151,16 +152,6 @@ function first(...values) {
   return null;
 }
 
-function normalizeKey(value = "") {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w:.]/g, "")
-    .replace(/^_+|_+$/g, "");
-}
-
 
 function attr(value = "") {
   return escapeHtml(
@@ -241,7 +232,7 @@ function isSensitiveAppQueryParam(
     "activation_token",
     "activationtoken",
   ].includes(
-    normalizeKey(key)
+    slugKey(key)
   );
 }
 
@@ -780,7 +771,7 @@ function getPhone(detail = {}) {
 
 function getTipo(detail = {}) {
   const tipo =
-    normalizeKey(
+    slugKey(
       detail.tipo
     );
 
@@ -811,7 +802,7 @@ function tipoLabel(detail = {}) {
 }
 
 function getRole(detail = {}) {
-  return normalizeKey(
+  return slugKey(
     first(
       detail.role,
       detail.rol,
@@ -831,7 +822,7 @@ function roleLabel(detail = {}) {
 
 function getStatus(detail = {}) {
   const status =
-    normalizeKey(
+    slugKey(
       first(
         detail.status,
         detail.estado,
@@ -1074,7 +1065,7 @@ function renderChip(
   modifier = "category"
 ) {
   const safeModifier =
-    normalizeKey(modifier) ||
+    slugKey(modifier) ||
     "category";
 
   return `

@@ -31,6 +31,7 @@ import {
 } from "./clientes.template.modal.js";
 import { createClientesCreateController } from "./clientes.create-controller.js";
 import { isObject, safeObject } from "../../core/objects.js";
+import { slugKey } from "../../core/slug-key.js";
 
 export const CLIENTES_MODULE_NAME = "clientes";
 export const CLIENTES_VIEW_NAME = "ClientesView";
@@ -76,16 +77,6 @@ function first(...values) {
     return value;
   }
   return null;
-}
-
-function normalizeKey(value = "") {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w:.]/g, "")
-    .replace(/^_+|_+$/g, "");
 }
 
 function safeError(error = null, fallback = "No se pudieron cargar los clientes.") {
@@ -208,7 +199,7 @@ function getCurrentRole(context = {}) {
       ) || "user"
     );
   } catch {
-    return normalizeKey(first(context.role, state.role, user.role, "user")) === "admin"
+    return slugKey(first(context.role, state.role, user.role, "user")) === "admin"
       ? "admin"
       : "user";
   }
@@ -1203,7 +1194,7 @@ function createClientesController(host = null, initialContext = {}) {
     const pendingSearch = searchContextDirty || Boolean(searchTimer);
     clearSearchTimer();
     const searchChanged = commitSearchDraft();
-    const key = normalizeKey(value || "all");
+    const key = slugKey(value || "all");
     const next = ["all", "active", "pending", "blocked"].includes(key)
       ? key
       : "all";
@@ -1219,7 +1210,7 @@ function createClientesController(host = null, initialContext = {}) {
     clearSearchTimer();
     const searchChanged = commitSearchDraft();
     const next = ["asc", "ascending", "oldest", "antiguos"].includes(
-      normalizeKey(value)
+      slugKey(value)
     )
       ? "asc"
       : "desc";

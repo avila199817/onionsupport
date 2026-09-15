@@ -22,6 +22,7 @@ import { normalizeClienteModel } from "../clientes/clientes.model.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { safeArray } from "../../core/arrays.js";
+import { slugKey } from "../../core/slug-key.js";
 export const FACTURAS_CREATE_TEMPLATE_VERSION =
   "facturas.template.create.v7.multi-line-billing";
 
@@ -169,22 +170,12 @@ function round2(value = 0) {
   return Math.round((parsed + Number.EPSILON) * 100) / 100;
 }
 
-function normalizeKey(value = "") {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w:.]/g, "")
-    .replace(/^_+|_+$/g, "");
-}
-
 function parseBoolean(value, fallback = false) {
   if (typeof value === "boolean") return value;
   if (value === 1 || value === "1") return true;
   if (value === 0 || value === "0") return false;
 
-  const key = normalizeKey(value);
+  const key = slugKey(value);
   if (["true", "yes", "si", "on", "enabled", "active"].includes(key)) return true;
   if (["false", "no", "off", "disabled", "inactive"].includes(key)) return false;
 
@@ -277,7 +268,7 @@ function looksLikeBusinessTaxId(value = "") {
 export function getFacturaCreateTaxProfile(source = {}) {
   const raw = safeObject(source);
 
-  const type = normalizeKey(
+  const type = slugKey(
     first(
       raw.clienteTipo,
       raw.tipo,

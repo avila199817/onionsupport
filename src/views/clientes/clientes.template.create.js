@@ -4,6 +4,7 @@ import { resolveAvatarPresentation } from "../../features/avatar-system/identity
 import { renderModalCloseButton, renderModalShell } from "../../features/entity-overlay/modal-host.js";
 import { isObject, safeObject } from "../../core/objects.js";
 import { arrayFrom } from "../../core/arrays.js";
+import { slugKey } from "../../core/slug-key.js";
 /* =========================================================
    Onion Support - Clientes Create Template
    Archivo: /src/views/clientes/clientes.template.create.js
@@ -210,21 +211,6 @@ function attr(
   );
 }
 
-function normalizeKey(
-  value = ""
-) {
-  return cleanText(value, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(
-      /[\u0300-\u036f]/g,
-      ""
-    )
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^\w:.]/g, "")
-    .replace(/^_+|_+$/g, "");
-}
-
 function trimField(
   value = "",
   maxLength = 0,
@@ -349,7 +335,7 @@ function normalizeClienteType(
   value = ""
 ) {
   const key =
-    normalizeKey(
+    slugKey(
       value ||
       "empresa"
     );
@@ -1529,7 +1515,7 @@ function buildVm(
       Boolean(
         raw.admin === true ||
         raw.isAdmin === true ||
-        normalizeKey(role) ===
+        slugKey(role) ===
           "admin"
       ),
 
@@ -2775,9 +2761,9 @@ function renderAlert(
       "error",
       "warning",
     ].includes(
-      normalizeKey(type)
+      slugKey(type)
     )
-      ? normalizeKey(type)
+      ? slugKey(type)
       : "info";
 
   const safeTitle =

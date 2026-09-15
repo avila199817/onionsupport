@@ -146,6 +146,24 @@ try {
   assert.equal(dashboard.summary.totalInvoiced, null, "page amounts never replace unavailable global billing");
   scenarios++;
 
+  reset();
+  responses["/api/facturas/stats"] = { ok: true, stats: {
+    invoiceCount: 15, totalAmount: 100, paidAmount: 90, pendingAmount: 10,
+    complete: false, truncated: true, documentsLimit: 20000,
+  } };
+  dashboard = await load();
+  assert.equal(dashboard.summary.facturas, 15, "a bounded backend scan still reports the totals it computed");
+  assert.equal(dashboard.summary.totalInvoiced, 100);
+  assert.equal(dashboard.partial, true, "a truncated scan marks the dashboard as partial");
+  const truncatedWarning = dashboard.warnings.find((warning) => warning.code === "FACTURAS_STATS_TRUNCATED");
+  assert.equal(truncatedWarning?.domain, "facturas_stats");
+  assert.match(truncatedWarning?.message || "", /primeros 20000 documentos/);
+  reset();
+  dashboard = await load();
+  assert.equal(dashboard.partial, false, "a complete scan carries no truncation warning");
+  assert.equal(dashboard.warnings.length, 0);
+  scenarios++;
+
   reset("user");
   dashboard = await load();
   assert.deepEqual(values(dashboard), [26, 15, null, null]);

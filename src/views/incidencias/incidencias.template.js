@@ -9,6 +9,7 @@
 ========================================================= */
 
 
+import { escapeHtml } from "../../core/escape-html.js";
 import { userNameFromIdentity } from "../../core/user-identity.js";
 import { resolveAvatarPresentation } from "../../features/avatar-system/identity.js";
 import { technicianIdentity } from "../../features/incidencias-comment-identity/index.js";
@@ -100,16 +101,7 @@ function num(v = 0, fb = 0) {
   return Number.isFinite(parsed) ? parsed : fb;
 }
 
-function esc(v = "") {
-  return String(v ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-const at = (v = "") => esc(txt(v, ""));
+const at = (v = "") => escapeHtml(txt(v, ""));
 const cls = (...v) => v.flat(Infinity).map((x) => txt(x, "")).filter(Boolean).join(" ");
 const key = (v = "") => txt(v, "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[\s-]+/g, "_").replace(/[^\w:.]/g, "").replace(/^_+|_+$/g, "");
 const searchKey = (v = "") => txt(v, "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
@@ -118,8 +110,8 @@ function htmlAttrs(attrs = {}) {
   return Object.entries(obj(attrs))
     .map(([k, v]) => {
       if (!k || v === false || v === null || v === undefined) return "";
-      if (v === true) return esc(k);
-      return `${esc(k)}="${esc(v)}"`;
+      if (v === true) return escapeHtml(k);
+      return `${escapeHtml(k)}="${escapeHtml(v)}"`;
     })
     .filter(Boolean)
     .join(" ");
@@ -740,7 +732,7 @@ function renderAvatar(it = {}) {
   return `
     <span class="incidencias-avatar${src ? " has-image" : " is-fallback"}" data-avatar-system="true" data-avatar-host="true" data-avatar-name="${at(presentation.name)}" data-avatar-email="${at(presentation.email)}" data-avatar-user-id="${at(presentation.userId)}" data-avatar-username="${at(presentation.username)}" data-avatar-tone="${at(String(presentation.tone))}" data-avatar-identity="${at(presentation.fingerprint)}" data-avatar-initials="${at(presentation.initials)}" data-has-avatar="${src ? "true" : "false"}" title="${at(name)}" aria-hidden="true">
       ${src ? `<img class="incidencias-avatar-img" data-avatar-image="true" src="${at(src)}" alt="" width="48" height="48" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}
-      <span class="incidencias-avatar-fallback" data-avatar-fallback="true">${esc(presentation.initials)}</span>
+      <span class="incidencias-avatar-fallback" data-avatar-fallback="true">${escapeHtml(presentation.initials)}</span>
     </span>
   `;
 }
@@ -750,7 +742,7 @@ function renderStatusChip(it = {}) {
   return `
     <span class="incidencias-status-chip incidencias-status-chip--${at(k)} is-${at(k)}" data-status-chip="${at(k)}">
       <span class="incidencias-status-dot" aria-hidden="true"></span>
-      <span>${esc(statusLabel(getStatusRaw(it)))}</span>
+      <span>${escapeHtml(statusLabel(getStatusRaw(it)))}</span>
     </span>
   `;
 }
@@ -760,7 +752,7 @@ function renderPriorityBadge(it = {}) {
   return `
     <span class="incidencias-priority-badge incidencias-priority-badge--${at(k)}" data-priority-badge="${at(k)}">
       <span class="incidencias-badge-icon incidencias-priority-badge-icon" aria-hidden="true">${icon(k === "high" ? "alert" : "ticket")}</span>
-      <span>${esc(priorityLabel(it))}</span>
+      <span>${escapeHtml(priorityLabel(it))}</span>
     </span>
   `;
 }
@@ -780,9 +772,9 @@ function renderAssignedBadge(it = {}) {
     <span class="incidencias-assigned-badge" data-assigned="true" data-technician-user-id="${at(unwrap(it).assignedToUserId || "")}" title="${at(`Técnico: ${name}`)}">
       <span class="incidencias-assigned-avatar${avatar ? " has-image" : " is-fallback"}" data-avatar-system="true" data-avatar-host="true" data-avatar-name="${at(presentation.name)}" data-avatar-email="${at(presentation.email)}" data-avatar-user-id="${at(presentation.userId)}" data-avatar-username="${at(presentation.username)}" data-avatar-tone="${at(String(presentation.tone))}" data-avatar-identity="${at(presentation.fingerprint)}" data-avatar-initials="${at(presentation.initials)}" data-has-avatar="${avatar ? "true" : "false"}" aria-hidden="true">
         ${avatar ? `<img data-avatar-image="true" src="${at(avatar)}" alt="" width="20" height="20" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false">` : ""}
-        <span data-avatar-fallback="true">${esc(presentation.initials)}</span>
+        <span data-avatar-fallback="true">${escapeHtml(presentation.initials)}</span>
       </span>
-      <span class="incidencias-assigned-name">${esc(name)}</span>
+      <span class="incidencias-assigned-name">${escapeHtml(name)}</span>
     </span>
   `;
 }
@@ -792,7 +784,7 @@ function renderImporteChip(it = {}) {
   return `
     <span class="incidencias-importe-chip incidencias-importe-chip--${at(k)}" data-importe-status="${at(k)}">
       ${k !== "idle" ? icon("euro") : ""}
-      <span>${esc(amountLabel(it))}</span>
+      <span>${escapeHtml(amountLabel(it))}</span>
     </span>
   `;
 }
@@ -802,7 +794,7 @@ function renderAttachmentPill(it = {}) {
   return `
     <span class="incidencias-attachments-pill${count > 0 ? " has-attachments" : " is-empty"}" data-attachments-count="${at(String(count))}">
       ${icon("paperclip")}
-      <span>${esc(formatNumber(count))}</span>
+      <span>${escapeHtml(formatNumber(count))}</span>
     </span>
   `;
 }
@@ -820,14 +812,14 @@ function renderRow(it = {}, vm = {}) {
           ${renderAvatar(it)}
           <div class="incidencias-main-copy">
             <div class="incidencias-ticket-line">
-              <span class="incidencias-ticket-id">${esc(id || "Sin ID")}</span>
-              <span class="incidencias-category-pill">${esc(titleCaseLabel(getCategory(it), "General"))}</span>
+              <span class="incidencias-ticket-id">${escapeHtml(id || "Sin ID")}</span>
+              <span class="incidencias-category-pill">${escapeHtml(titleCaseLabel(getCategory(it), "General"))}</span>
             </div>
-            <div class="incidencias-ticket-subject">${esc(getSubject(it))}</div>
-            <div class="incidencias-ticket-description">${esc(getDesc(it) || "Sin descripción.")}</div>
+            <div class="incidencias-ticket-subject">${escapeHtml(getSubject(it))}</div>
+            <div class="incidencias-ticket-description">${escapeHtml(getDesc(it) || "Sin descripción.")}</div>
             <div class="incidencias-client-line">
-              <span class="incidencias-client-name">${esc(getClientName(it))}</span>
-              ${email ? `<span class="incidencias-client-separator">·</span><span class="incidencias-client-email">${esc(email)}</span>` : ""}
+              <span class="incidencias-client-name">${escapeHtml(getClientName(it))}</span>
+              ${email ? `<span class="incidencias-client-separator">·</span><span class="incidencias-client-email">${escapeHtml(email)}</span>` : ""}
             </div>
             <div class="incidencias-row-badges">
               ${renderPriorityBadge(it)}
@@ -837,8 +829,8 @@ function renderRow(it = {}, vm = {}) {
         </div>
       </td>
       <td class="incidencias-cell incidencias-cell--status" data-column="status">${renderStatusChip(it)}</td>
-      <td class="incidencias-cell incidencias-cell--date incidencias-cell--created" data-column="created"><span class="incidencias-date-inline" title="${at(formatDate(getCreated(it)))}">${esc(formatShortDate(getCreated(it)))}</span></td>
-      <td class="incidencias-cell incidencias-cell--date incidencias-cell--updated" data-column="updated"><span class="incidencias-date-inline" title="${at(formatDate(getUpdated(it)))}">${esc(formatRelativeDate(getUpdated(it)))}</span></td>
+      <td class="incidencias-cell incidencias-cell--date incidencias-cell--created" data-column="created"><span class="incidencias-date-inline" title="${at(formatDate(getCreated(it)))}">${escapeHtml(formatShortDate(getCreated(it)))}</span></td>
+      <td class="incidencias-cell incidencias-cell--date incidencias-cell--updated" data-column="updated"><span class="incidencias-date-inline" title="${at(formatDate(getUpdated(it)))}">${escapeHtml(formatRelativeDate(getUpdated(it)))}</span></td>
       <td class="incidencias-cell incidencias-cell--amount incidencias-cell--importe" data-column="amount">${renderImporteChip(it)}</td>
       <td class="incidencias-cell incidencias-cell--attachments" data-column="attachments">${renderAttachmentPill(it)}</td>
     </tr>
@@ -849,7 +841,7 @@ function renderRow(it = {}, vm = {}) {
    HEADER
 ========================================================= */
 
-const spinner = (label = "Cargando...") => `<span class="incidencias-spinner" aria-hidden="true"></span><span>${esc(label)}</span>`;
+const spinner = (label = "Cargando...") => `<span class="incidencias-spinner" aria-hidden="true"></span><span>${escapeHtml(label)}</span>`;
 
 function renderHeader(vm = {}) {
   const s = vm.stats;
@@ -868,28 +860,28 @@ function renderHeader(vm = {}) {
         </div>
       </div>
       <div class="incidencias-hero-meta">
-        <span class="incidencias-meta-pill" data-meta="total">${icon("ticket")}<span>${esc(`${formatNumber(s.total)} solicitudes registradas`)}</span></span>
-        <button type="button" class="incidencias-meta-pill incidencias-meta-pill--action${vm.sortMode === "attachments" ? " is-active" : ""}" data-meta="attachments" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="attachments" aria-pressed="${vm.sortMode === "attachments" ? "true" : "false"}" aria-label="${vm.sortLocked ? "Orden por adjuntos disponible al completar el historial" : vm.sortMode === "attachments" ? `Cambiar orden de adjuntos a ${vm.sortOrder === "desc" ? "menor a mayor" : "mayor a menor"}` : "Ordenar incidencias de más adjuntos a menos"}" title="${vm.sortLocked ? "Disponible al completar el historial" : "Ordenar por número de adjuntos"}" ${vm.sortLocked ? 'disabled aria-disabled="true"' : ""}>${icon("paperclip")}<span>${esc(`${formatNumber(s.attachments)} adjuntos${vm.statsPartial ? " en cargadas" : ""}`)}</span></button>
+        <span class="incidencias-meta-pill" data-meta="total">${icon("ticket")}<span>${escapeHtml(`${formatNumber(s.total)} solicitudes registradas`)}</span></span>
+        <button type="button" class="incidencias-meta-pill incidencias-meta-pill--action${vm.sortMode === "attachments" ? " is-active" : ""}" data-meta="attachments" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="attachments" aria-pressed="${vm.sortMode === "attachments" ? "true" : "false"}" aria-label="${vm.sortLocked ? "Orden por adjuntos disponible al completar el historial" : vm.sortMode === "attachments" ? `Cambiar orden de adjuntos a ${vm.sortOrder === "desc" ? "menor a mayor" : "mayor a menor"}` : "Ordenar incidencias de más adjuntos a menos"}" title="${vm.sortLocked ? "Disponible al completar el historial" : "Ordenar por número de adjuntos"}" ${vm.sortLocked ? 'disabled aria-disabled="true"' : ""}>${icon("paperclip")}<span>${escapeHtml(`${formatNumber(s.attachments)} adjuntos${vm.statsPartial ? " en cargadas" : ""}`)}</span></button>
       </div>
       <div class="incidencias-stats" aria-label="Accesos rápidos del historial">
         <button type="button" class="incidencias-stat-card incidencias-stat-card--open${vm.filter === "open" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="open" data-stat-scope="${facetsLoaded ? "loaded" : "complete"}" aria-pressed="${vm.filter === "open" ? "true" : "false"}" aria-label="Mostrar solo incidencias abiertas">
           <div class="incidencias-stat-label">${facetsLoaded ? "Abiertas cargadas" : "Abiertas"}</div>
-          <div class="incidencias-stat-value">${esc(formatNumber(s.open))}</div>
+          <div class="incidencias-stat-value">${escapeHtml(formatNumber(s.open))}</div>
           <div class="incidencias-stat-text">${facetsLoaded ? "Solicitudes activas entre las incidencias ya cargadas." : "Solicitudes activas, pendientes o en proceso."}</div>
         </button>
         <button type="button" class="incidencias-stat-card incidencias-stat-card--closed${vm.filter === "closed" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="closed" data-stat-scope="${facetsLoaded ? "loaded" : "complete"}" aria-pressed="${vm.filter === "closed" ? "true" : "false"}" aria-label="Mostrar solo incidencias cerradas">
           <div class="incidencias-stat-label">${facetsLoaded ? "Cerradas cargadas" : "Cerradas"}</div>
-          <div class="incidencias-stat-value">${esc(formatNumber(s.closed))}</div>
+          <div class="incidencias-stat-value">${escapeHtml(formatNumber(s.closed))}</div>
           <div class="incidencias-stat-text">${facetsLoaded ? "Casos cerrados entre las incidencias ya cargadas." : "Casos resueltos o cerrados."}</div>
         </button>
         <button type="button" class="incidencias-stat-card incidencias-stat-card--urgent${vm.filter === "urgent" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="urgent" data-stat-scope="${facetsLoaded ? "loaded" : "complete"}" aria-pressed="${vm.filter === "urgent" ? "true" : "false"}" aria-label="Mostrar solo incidencias urgentes o críticas">
           <div class="incidencias-stat-label">${facetsLoaded ? "Urgentes cargadas" : "Urgentes"}</div>
-          <div class="incidencias-stat-value">${esc(formatNumber(s.urgent))}</div>
+          <div class="incidencias-stat-value">${escapeHtml(formatNumber(s.urgent))}</div>
           <div class="incidencias-stat-text">${facetsLoaded ? "Prioridades altas entre las incidencias ya cargadas." : "Incidencias con prioridad alta."}</div>
         </button>
         <button type="button" class="incidencias-stat-card incidencias-stat-card--amount${vm.sortMode === "amount" ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.STAT_APPLY}" data-stat="amount" data-stat-scope="${vm.statsPartial ? "loaded" : "complete"}" aria-pressed="${vm.sortMode === "amount" ? "true" : "false"}" aria-label="${vm.sortLocked ? "Orden por importe disponible al completar el historial" : vm.sortMode === "amount" ? `Cambiar orden de importe a ${vm.sortOrder === "desc" ? "menor a mayor" : "mayor a menor"}` : "Ordenar incidencias por importe asociado de mayor a menor"}" title="${vm.sortLocked ? "Disponible al completar el historial" : "Ordenar por importe"}" ${vm.sortLocked ? 'disabled aria-disabled="true"' : ""}>
           <div class="incidencias-stat-label">${vm.statsPartial ? "Importe cargado" : "Importe asociado"}</div>
-          <div class="incidencias-stat-value">${esc(formatMoney(s.invoiceTotal, DEFAULT_CURRENCY))}</div>
+          <div class="incidencias-stat-value">${escapeHtml(formatMoney(s.invoiceTotal, DEFAULT_CURRENCY))}</div>
           <div class="incidencias-stat-text">${vm.statsPartial ? "Suma asociada únicamente a las incidencias ya cargadas." : "Ordenar incidencias de mayor a menor importe."}</div>
         </button>
       </div>
@@ -932,11 +924,11 @@ function renderFilters(vm = {}) {
           const action = f.key === "all"
             ? INCIDENCIAS_ACTIONS.CLEAR_FILTERS
             : INCIDENCIAS_ACTIONS.FILTER;
-          return `<button type="button" role="tab" class="incidencias-filter-pill${active ? " is-active" : ""}" data-incidencias-action="${action}" data-filter="${at(f.key)}" aria-selected="${active ? "true" : "false"}" aria-pressed="${active ? "true" : "false"}"><span>${esc(f.label)}</span><strong>${esc(formatNumber(vm.filterCounts?.[f.key] || 0))}</strong></button>`;
+          return `<button type="button" role="tab" class="incidencias-filter-pill${active ? " is-active" : ""}" data-incidencias-action="${action}" data-filter="${at(f.key)}" aria-selected="${active ? "true" : "false"}" aria-pressed="${active ? "true" : "false"}"><span>${escapeHtml(f.label)}</span><strong>${escapeHtml(formatNumber(vm.filterCounts?.[f.key] || 0))}</strong></button>`;
         }).join("")}
       </div>
       <div class="incidencias-sort-pills" data-incidencias-sort-pills="true">
-        <button type="button" class="incidencias-sort-pill${dateActive ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.SORT_TOGGLE}" data-sort-mode="date" data-sort-order="${at(order)}" data-next-sort-order="${at(next)}" aria-pressed="${dateActive ? "true" : "false"}" aria-label="${at(vm.sortLocked ? "El orden ascendente estará disponible al completar el historial" : dateAriaLabel)}" title="${at(vm.sortLocked ? "Disponible al completar el historial" : dateTitle)}" ${vm.sortLocked ? 'disabled aria-disabled="true"' : ""}>${icon("calendar")}<span>${esc(currentDateLabel)}</span></button>
+        <button type="button" class="incidencias-sort-pill${dateActive ? " is-active" : ""}" data-incidencias-action="${INCIDENCIAS_ACTIONS.SORT_TOGGLE}" data-sort-mode="date" data-sort-order="${at(order)}" data-next-sort-order="${at(next)}" aria-pressed="${dateActive ? "true" : "false"}" aria-label="${at(vm.sortLocked ? "El orden ascendente estará disponible al completar el historial" : dateAriaLabel)}" title="${at(vm.sortLocked ? "Disponible al completar el historial" : dateTitle)}" ${vm.sortLocked ? 'disabled aria-disabled="true"' : ""}>${icon("calendar")}<span>${escapeHtml(currentDateLabel)}</span></button>
       </div>
       ${renderSearch(vm)}
     </div>
@@ -952,7 +944,7 @@ function renderColgroup() {
 }
 
 function renderThead() {
-  return `<thead><tr>${INCIDENCIAS_TABLE_COLUMNS.map((c) => `<th class="${at(c.thClass)}" scope="col" data-column="${at(c.key)}">${esc(c.label)}</th>`).join("")}</tr></thead>`;
+  return `<thead><tr>${INCIDENCIAS_TABLE_COLUMNS.map((c) => `<th class="${at(c.thClass)}" scope="col" data-column="${at(c.key)}">${escapeHtml(c.label)}</th>`).join("")}</tr></thead>`;
 }
 
 function renderTableLoading(rows = DEFAULT_VISIBLE_ROWS) {
@@ -985,8 +977,8 @@ function renderEmpty(vm = {}) {
   return `
     <div class="incidencias-empty${mismatch ? " is-data-mismatch" : ""}" data-incidencias-empty="true" data-incidencias-focus-fallback="true" tabindex="-1">
       <div class="incidencias-empty-icon" aria-hidden="true">${hasError || mismatch ? icon("alert") : icon("ticket")}</div>
-      <h3>${esc(title)}</h3>
-      <p>${esc(text)}</p>
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(text)}</p>
       ${hasError || mismatch ? `<button type="button" class="incidencias-btn" data-incidencias-action="${INCIDENCIAS_ACTIONS.REFRESH}">${icon("refresh")}<span>Reintentar</span></button>` : filtering ? `<button type="button" class="incidencias-btn" data-incidencias-action="${INCIDENCIAS_ACTIONS.CLEAR_FILTERS}">${icon("close")}<span>Limpiar filtros</span></button>` : ""}
     </div>
   `;
@@ -1008,7 +1000,7 @@ function renderFeedFooter(vm = {}) {
       <div class="incidencias-infinite" data-incidencias-infinite="true" data-incidencias-focus-fallback="true" data-state="error" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">
         <div class="incidencias-infinite-error">
           <span class="incidencias-infinite-error-icon" aria-hidden="true">${icon("alert")}</span>
-          <span class="incidencias-infinite-error-text">${esc(vm.incrementalError)}</span>
+          <span class="incidencias-infinite-error-text">${escapeHtml(vm.incrementalError)}</span>
           <button type="button" class="incidencias-btn incidencias-infinite-retry" data-incidencias-action="${INCIDENCIAS_ACTIONS.RETRY_INCREMENTAL}">${icon("refresh")}<span>Reintentar</span></button>
         </div>
       </div>
@@ -1059,7 +1051,7 @@ function renderHistory(vm = {}) {
   return `
     <section class="incidencias-history" data-incidencias-scroll-host="true" data-incidencias-scroll-mode="infinite">
       <div class="incidencias-history-head" data-incidencias-history-head="true">
-        <div class="incidencias-history-copy"><h2 class="incidencias-history-title">Historial de incidencias</h2><p class="incidencias-history-subtitle">${esc(subtitle)}</p></div>
+        <div class="incidencias-history-copy"><h2 class="incidencias-history-title">Historial de incidencias</h2><p class="incidencias-history-subtitle">${escapeHtml(subtitle)}</p></div>
         ${renderFilters(vm)}
       </div>
       ${initialLoading ? renderTableLoading(DEFAULT_VISIBLE_ROWS) : `<div class="incidencias-table-wrap${refreshing ? " is-refreshing" : ""}" data-incidencias-table-wrap="true" data-incidencias-scroll-mode="infinite">${refreshing ? renderRefreshOverlay() : ""}${renderTable(vm)}</div>`}
@@ -1085,7 +1077,7 @@ export function renderIncidenciasErrorState(message = "No se pudieron cargar las
     <section class="incidencias-view-root incidencias-view-root--error has-error" data-incidencias-scope="true" data-template-version="${at(INCIDENCIAS_TEMPLATE_VERSION)}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" aria-busy="false">
       <section class="incidencias-error" data-incidencias-focus-fallback="true" tabindex="-1" role="alert" aria-live="assertive" aria-atomic="true" aria-labelledby="incidencias-fatal-error-title" aria-describedby="incidencias-fatal-error-text">
         <h3 id="incidencias-fatal-error-title" class="incidencias-error-title">No se pudieron cargar las incidencias</h3>
-        <p id="incidencias-fatal-error-text" class="incidencias-error-text">${esc(txt(message, "Error desconocido al cargar la vista."))}</p>
+        <p id="incidencias-fatal-error-text" class="incidencias-error-text">${escapeHtml(txt(message, "Error desconocido al cargar la vista."))}</p>
         <button type="button" class="incidencias-btn" data-incidencias-action="${INCIDENCIAS_ACTIONS.REFRESH}">${icon("refresh")}<span>Reintentar</span></button>
       </section>
     </section>
@@ -1096,7 +1088,7 @@ export function renderIncidenciasTemplate(input = {}) {
   const vm = buildVm(input);
   return `
     <section class="${cls("incidencias-view-root", vm.loading ? "is-loading" : "", vm.refreshing ? "is-refreshing" : "", vm.creating ? "is-creating" : "", vm.error ? "has-error" : "")}" data-incidencias-scope="true" data-template-version="${at(INCIDENCIAS_TEMPLATE_VERSION)}" data-route="${at(vm.route)}" data-total="${at(String(vm.total))}" data-visible="${at(String(vm.visibleCount))}" data-filter="${at(vm.filter)}" data-server-filter-applied="${vm.serverFilterApplied ? "true" : "false"}" data-selection="${at(vm.selection)}" data-search-active="${vm.search ? "true" : "false"}" data-sort-order="${at(vm.sortOrder)}" data-stats-scope="${vm.statsPartial ? "loaded" : "complete"}" data-filter-facets-exact="${vm.filterFacetsExact ? "true" : "false"}" data-loading="${vm.loading ? "true" : "false"}" data-refreshing="${vm.refreshing ? "true" : "false"}" data-table-actions="false" data-table-scale="${at(TABLE_SCALE)}" data-items-extracted="${at(String(vm.items.length))}" data-total-greater-than-items="${vm.diagnostics.totalGreaterThanItems ? "true" : "false"}" aria-busy="${vm.loading || vm.refreshing || vm.loadingMore || vm.listQueryPending ? "true" : "false"}">
-      ${vm.error ? `<div class="incidencias-alert" role="alert">${icon("alert")}<span>${esc(vm.error)}</span></div>` : ""}
+      ${vm.error ? `<div class="incidencias-alert" role="alert">${icon("alert")}<span>${escapeHtml(vm.error)}</span></div>` : ""}
       ${renderHeader(vm)}${renderHistory(vm)}
     </section>
   `;

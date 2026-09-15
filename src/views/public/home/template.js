@@ -1,12 +1,12 @@
 import { PUBLIC_SITE } from "../../../core/public-site.js";
 import { PUBLIC_SERVICES } from "../../../core/public-site.js";
 import { renderPublicLegalFooter } from "../../../core/public-legal.js";
+import { escapeHtml } from "../../../core/escape-html.js";
 
 import {
   PUBLIC_AUTH_LOGO,
   PUBLIC_AUTH_LOGO_WEBP,
   escapeAttr,
-  escapeHtml,
   renderPublicShell,
   safeAssetSrc,
   safeInternalHref,

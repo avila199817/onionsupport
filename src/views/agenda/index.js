@@ -12,6 +12,8 @@
    - Sin HTTP, sin storage y sin dependencias de backend.
 ========================================================= */
 
+import { escapeHtml } from "../../core/escape-html.js";
+
 export const AGENDA_VIEW_VERSION =
   "agenda.view.v2-correo-parity";
 
@@ -166,15 +168,6 @@ function longDateLabel(date) {
   } catch {
     return date.toLocaleDateString();
   }
-}
-
-function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
 }
 
 function icon(name = "calendar") {

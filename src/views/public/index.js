@@ -17,6 +17,7 @@
    - Sin lógica de vistas concretas.
 ========================================================= */
 
+import { escapeHtml } from "../../core/escape-html.js";
 import { renderPublicLegalFooter } from "../../core/public-legal.js";
 
 import {
@@ -163,18 +164,9 @@ function splitUrlLike(value = "") {
    ESCAPE
 ========================================================= */
 
-export function escapeHtml(value = "") {
-  return text(value, "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
+// Attribute values: one line, escaped by the authority, backtick covered too.
 export function escapeAttr(value = "") {
-  return escapeHtml(value)
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;")
-    .replace(/`/g, "&#96;");
+  return escapeHtml(text(value, "")).replace(/`/g, "&#96;");
 }
 
 /* =========================================================
@@ -482,7 +474,6 @@ export default {
   PUBLIC_AUTH_LOGO,
   PUBLIC_AUTH_LOGO_WEBP,
 
-  escapeHtml,
   escapeAttr,
 
   safeAssetSrc,
